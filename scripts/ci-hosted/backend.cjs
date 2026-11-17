@@ -3,9 +3,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { spawnSync, fork } = require('node:child_process');
+const { fork } = require('node:child_process');
 const { targetFile, git } = require('./target-policy.cjs');
-const { sanitize, environmentSecrets, failureDetails } = require('./diagnostics.cjs');
+const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, retry, stage, writeReport } = require('./process.cjs');
 
 const root = process.cwd();
@@ -237,12 +237,13 @@ async function qualify(diagnostic) {
     throw error;
   } finally {
     if (started) {
-      const stop = spawnSync(cli, ['stop', '--workdir', temp, '--no-backup'], { env: cliEnv, stdio: 'ignore', timeout: 120000 });
-      if (stop.error || stop.status !== 0) {
+      try { await timed('stack-stop', () => checked(cli, ['stop', '--workdir', temp, '--no-backup'], cliEnv, 120000)); }
+      catch (error) {
         summary.ok = false; process.exitCode = 1; console.error('Local stack teardown failed');
+        summary.teardownFailure = { message: sanitize(error.message), ...error.failure };
         if (!diagnostic.failure) {
           diagnostic.stage = 'teardown';
-          saveFailure(diagnostic, Object.assign(new Error('Local stack teardown failed'), { failure: failureDetails(stop, environmentSecrets(env)) }));
+          saveFailure(diagnostic, error, environmentSecrets(env));
         }
       }
     }
