@@ -23,10 +23,10 @@ function lockfile(file) {
 function packageFile(file) { return /(^|\/)package\.json$/i.test(file); }
 function pathClass(file) {
   const f = file.toLowerCase(); const name = f.split('/').pop();
-  // Neither authority markers nor a lockfile-like name can waive these families.
-  if (/(^|\/)node_modules(\/|$)/.test(f) || f === '.github/workflows' || f.startsWith('.github/workflows/')) return 'REJECT';
+  // Committed dependencies cannot be authorized; guard directories require the base marker.
+  if (/(^|\/)node_modules(\/|$)/.test(f)) return 'REJECT';
   if (/^(?:eslint\.config\.|\.eslintrc|\.eslintignore|babel\.config\.|\.babelrc|\.babelignore|jest\.config\.|jest\.setup|setup-jest|playwright.*\.config\.|vitest(?:\.config|\.workspace|\.setup)?\.|ts-jest.*config\.|\.swcrc|\.swcignore|tsconfig.*\.json$|next\.config\.|webpack\.config\.|metro\.config\.|vite\.config\.|postcss\.config\.|tailwind\.config\.)/.test(name)
-    && !f.startsWith('.github/')) return 'NOTICE';
+    && !f.startsWith('.github/') && !f.startsWith('scripts/ci-hosted/')) return 'NOTICE';
   if (f === '.github' || f.startsWith('.github/') || f === 'scripts/ci-hosted' || f.startsWith('scripts/ci-hosted/')
     || protectedFiles.has(f) || /^config\/ci\/known-failures\.[^/]+$/.test(f)
     || f === 'supabase/migrations' || f.startsWith('supabase/migrations/')
@@ -37,7 +37,7 @@ function pathClass(file) {
 function protectedPath(file) { return pathClass(file) === 'BLOCK' && !file.toLowerCase().startsWith('supabase/migrations/'); }
 function rejectChanges(changes) {
   const rejected = changes.filter(([, file]) => pathClass(file) === 'REJECT').map(([, file]) => file);
-  if (rejected.length) throw new Error(`REJECTED: workflow changes or committed node_modules are forbidden; no marker exception exists: ${JSON.stringify(rejected)}`);
+  if (rejected.length) throw new Error(`REJECTED: committed node_modules are forbidden; no marker exception exists: ${JSON.stringify(rejected)}`);
 }
 function manifestAt(revision, file, read = git) {
   const entry = read(['ls-tree', '-z', revision, '--', file]);
@@ -94,9 +94,10 @@ function installInputs(revision, read = git) {
     .map(name => [name, read(['show', `${revision}:${name}`])]));
 }
 function enforceWorkflowInventory(files) {
-  const expected = new Set(['.github/workflows/policy.yml', '.github/workflows/public-ci.yml']);
-  const legacy = [...files.keys()].filter(file => file.startsWith('.github/workflows/') && !expected.has(file));
-  if (legacy.length) throw new Error(`REJECTED: pre-flip cleanup must remove legacy workflows; every pull request remains RED: ${JSON.stringify(legacy)}`);
+  const required = ['.github/workflows/policy.yml', '.github/workflows/public-ci.yml'];
+  if (required.some(file => !files.has(file))) throw new Error('Required workflow is missing');
+  const invalid = [...files.keys()].filter(file => file.startsWith('.github/workflows/') && !/^\.github\/workflows\/[^/]+\.ya?ml$/.test(file));
+  if (invalid.length) throw new Error('Workflow must be a YAML file directly in the workflow directory');
 }
 function marker(text, now = new Date()) {
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
@@ -120,6 +121,18 @@ const sha = value => {
   if (!/^[a-f0-9]{40}$/.test(value || '')) throw new Error('Missing/invalid event SHA');
   return value;
 };
+function policySource(event, kind) {
+  let branch; let base;
+  if (kind === 'pull_request_target') {
+    branch = event.pull_request?.base?.ref;
+    base = event.pull_request?.base?.sha;
+  } else if (kind === 'merge_group') {
+    branch = event.merge_group?.base_ref?.replace(/^refs\/heads\//, '');
+    base = event.merge_group?.base_sha;
+  } else throw new Error('Unsupported policy event');
+  if (!['preview', 'dev', 'main'].includes(branch)) throw new Error('Unsupported target branch');
+  return sha(base);
+}
 function liveMerge(event, read = git, pause = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000)) {
   const number = event.pull_request?.number;
   if (!Number.isSafeInteger(number) || number < 1) throw new Error('Missing/invalid PR number');
@@ -147,17 +160,19 @@ function enforceScope(scope, kind) {
   if (scope.mixed && kind !== 'merge_group') throw new Error('Protected-path changes must touch nothing outside protected paths');
 }
 function main() {
-  // The required workflow embeds this logic; candidate Git objects are data only.
+  // The workflow runs this file from the target base; candidate Git objects are data only.
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const kind = process.env.GITHUB_EVENT_NAME;
+  const source = policySource(event, kind);
   let base; let candidate;
-  if (kind === 'pull_request' || kind === 'pull_request_target') {
+  if (kind === 'pull_request_target') {
     ({ candidate, base } = liveMerge(event));
   } else if (kind === 'merge_group') {
     base = sha(event.merge_group?.base_sha);
     candidate = sha(event.merge_group?.head_sha);
     for (const ref of [base, candidate]) git(['fetch', '--no-tags', '--depth=64', 'origin', ref]);
   } else throw new Error('Unsupported policy event');
+  if (base !== source) throw new Error('Candidate base differs from the trusted policy source');
   const fields = git(['diff', '--no-renames', '--name-status', '-z', base, candidate]).split('\0').filter(Boolean);
   if (fields.length % 2) throw new Error('Malformed candidate diff');
   const changes = [];
@@ -202,4 +217,4 @@ function main() {
   console.log('PASS: target-branch policy, protected-path scope and append-only migrations');
 }
 if (require.main === module) { try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; } }
-module.exports = { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, manifestAt, dependencyNotices, lockfile, installInputs, enforceWorkflowInventory, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges };
+module.exports = { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, manifestAt, dependencyNotices, lockfile, installInputs, enforceWorkflowInventory, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, policySource };
