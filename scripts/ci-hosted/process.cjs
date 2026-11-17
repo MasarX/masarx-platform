@@ -29,7 +29,7 @@ function lines(consume) {
   }, end() { if (pending) consume(pending); pending = ''; } };
 }
 
-function run(command, args, { env = process.env, timeout = 600000, quiet = false, logFile, includeStderr = false,
+function run(command, args, { env = process.env, timeout = 600000, quiet = false, logFile, logPrefix = '', includeStderr = false,
   onLine = () => false, idleMs = 0, idleMessage = () => 'No progress before deadline' } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
@@ -48,7 +48,7 @@ function run(command, args, { env = process.env, timeout = 600000, quiet = false
     const consume = line => {
       try { if (onLine(line)) touch(); } catch (error) { stop(error.message); }
       if (!quiet) {
-        const clean = sanitize(line, secrets);
+        const clean = logPrefix + sanitize(line, secrets);
         console.log(clean);
         if (logFile) fs.appendFileSync(logFile, `${clean}\n`);
       }
