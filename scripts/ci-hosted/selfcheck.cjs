@@ -3,7 +3,7 @@ let checks = 0;
 const rawAssert = require('node:assert/strict');
 const assert = new Proxy(rawAssert, { get(target, key) { const value = target[key]; return typeof value === 'function' ? (...args) => { checks++; return value(...args); } : value; } });
 const fs = require('node:fs'); const path = require('node:path'); const crypto = require('node:crypto');
-const { evaluate, identity, parseList } = require('./jest.cjs');
+const { evaluate, identity, parseList, resultDetails, relativeFile } = require('./jest.cjs');
 const { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch } = require('./backend.cjs');
 const { handleRequest, handleConnect } = require('./deny-egress.cjs');
 const { exceptions, assess, objectsAt, outOfOrder, orderFloor } = require('./migrations.cjs');
@@ -22,6 +22,12 @@ const rawDiagnostic = `stack health failed password=synthetic-password token: 's
 const cleanDiagnostic = sanitize(rawDiagnostic, [sensitive[0]]);
 for (const secret of [...sensitive, jwt, key, 'synthetic-password', 'synthetic token value', 'synthetic-db-pass', 'synthetic-http-pass', 'synthetic-signature']) assert.equal(cleanDiagnostic.includes(secret), false);
 assert.equal(cleanDiagnostic.includes('stack health failed'), true);
+const jsonDiagnostic = sanitize('({"API_KEY":"synthetic-json-key"})');
+assert.equal(sanitize(jsonDiagnostic), jsonDiagnostic);
+assert.equal(jsonDiagnostic.endsWith('})'), true);
+const cookieDiagnostic = sanitize('Cookie: sid=synthetic-cookie; session=synthetic-session');
+assert.equal(cookieDiagnostic.includes('synthetic-cookie') || cookieDiagnostic.includes('synthetic-session'), false);
+
 assert.equal(outputTail('safe\n'.repeat(200)).split('\n').length <= 80, true);
 assert.equal(outputTail('x'.repeat(20000)).length, 16384);
 assert.deepEqual(environmentSecrets({ TOKEN: 'synthetic-value', ORDINARY: 'visible' }), ['synthetic-value']);
@@ -45,6 +51,25 @@ for (const expected of [new Set(), new Set([id])]) assert.equal(evaluate({ testR
 assert.equal(evaluate({ ...report('passed'), numRuntimeErrorTestSuites: 1 }, new Set(), 0, root).ok, false);
 assert.equal(evaluate(report('failed'), new Set([id]), null, root).ok, false);
 assert.equal(evaluate({ ...report('passed'), snapshot: { unchecked: 1 } }, new Set(), 0, root).ok, false);
+assert.deepEqual(evaluate(report('passed'), new Set(), 1, root).reasons, ['EXIT_WITHOUT_FAILED_ASSERTIONS']);
+const loadReport = { numRuntimeErrorTestSuites: 1, testResults: [{ name: path.join(root, file), status: 'failed', message: 'Cannot load module; password=synthetic-load-password', assertionResults: [] }] };
+const loadVerdict = evaluate(loadReport, new Set(), 1, root);
+assert.equal(loadVerdict.reasons.includes('RUNTIME_OR_SUITE_LOAD_ERROR'), true);
+const loaded = resultDetails(loadReport, loadVerdict, { status: 1, stderr: 'load failed token=synthetic-load-token' }, root);
+assert.equal(loaded.suites[0].file, file);
+assert.equal(loaded.suites[0].suiteLoadError.includes('Cannot load module'), true);
+assert.equal(JSON.stringify(loaded).includes('synthetic-load-password'), false);
+assert.equal(JSON.stringify(loaded).includes('synthetic-load-token'), false);
+const failedReport = report('failed'); failedReport.testResults[0].assertionResults[0].failureMessages = ['Expected value; API_KEY=synthetic-assertion-key'];
+const failedDetails = resultDetails(failedReport, evaluate(failedReport, new Set(), 1, root), { status: 1 }, root);
+assert.equal(failedDetails.suites[0].tests[0].fullName, 'synthetic case');
+assert.equal(failedDetails.suites[0].tests[0].id, id);
+assert.equal(failedDetails.suites[0].tests[0].failureMessages[0].includes('synthetic-assertion-key'), false);
+const duplicateReport = report('passed'); duplicateReport.testResults.push(duplicateReport.testResults[0]);
+assert.equal(evaluate(duplicateReport, new Set(), 0, root).reasons.includes('DUPLICATE_TEST_IDENTITIES'), true);
+assert.equal(evaluate({ ...report('passed'), snapshot: { unchecked: 1 } }, new Set(), 0, root).reasons.includes('SNAPSHOT_FAILURE_OR_UNCHECKED'), true);
+assert.equal(resultDetails(null, null, { status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' } }, root).process.timeout, true);
+assert.equal(relativeFile(path.resolve(root, '..', 'external.test.js'), root), '[external]/external.test.js');
 assert.deepEqual(parseList(`# generated\nunit\t${id}\nui\t${id}\n`, 'unit'), new Set([id]));
 assert.throws(() => parseList(`unit\t${id}\nunit\t${id}\n`, 'unit'));
 assert.throws(() => parseList('unit\tmalformed\n', 'unit'));
@@ -208,7 +233,7 @@ const baseReads = [];
 const readBase = (args, encoding) => { baseReads.push(args); return args[0] === 'ls-tree' ? `100644 blob ${base}\tfile\0` : Buffer.from('reviewed base code'); };
 for (const entry of ['migrations.cjs', 'jest.cjs']) {
   const plan = guardPlan(entry, base, readBase);
-  assert.deepEqual(plan.map(row => row.name), [entry, 'target-policy.cjs']);
+  assert.deepEqual(plan.map(row => row.name), [entry, 'target-policy.cjs', ...(entry === 'jest.cjs' ? ['diagnostics.cjs'] : [])]);
   assert.equal(plan.every(row => row.content.toString() === 'reviewed base code'), true);
 }
 assert.equal(baseReads.every(args => args[0] === 'ls-tree' ? args[2] === base : args[1].startsWith(base + ':')), true);
@@ -270,4 +295,19 @@ const savedExists = fs.existsSync; const savedOutput = process.env.GITHUB_OUTPUT
 try { delete process.env.GITHUB_OUTPUT; fs.existsSync = file => file.split(path.sep).join('/').endsWith('scripts/frontend/build-landing.js'); console.log = line => detection.push(line); detect('landing'); }
 finally { fs.existsSync = savedExists; console.log = savedLog; if (savedOutput === undefined) delete process.env.GITHUB_OUTPUT; else process.env.GITHUB_OUTPUT = savedOutput; }
 assert.deepEqual(detection, ['landing: present']);
+const emptyRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hosted-result-selfcheck-'));
+try {
+  const run = require('node:child_process').spawnSync(process.execPath, [path.join(root, 'scripts/ci-hosted/jest.cjs'), 'unit'], {
+    cwd: emptyRoot, encoding: 'utf8', timeout: 10000, env: { ...process.env, JEST_SHARD: '', JEST_DIAGNOSTIC_PROPOSAL: '' },
+  });
+  assert.equal(run.status, 1);
+  const diagnostic = JSON.parse(fs.readFileSync(path.join(emptyRoot, 'ci-reports/jest-results.unit.json'), 'utf8'));
+  assert.equal(diagnostic.stage, 'configuration');
+  assert.equal(diagnostic.ok, false);
+  assert.equal(diagnostic.error.includes('Missing config/'), true);
+  assert.deepEqual(diagnostic.reasons, ['JEST_INFRASTRUCTURE_OR_CONFIGURATION_FAILURE']);
+} finally {
+  assert.equal(path.dirname(emptyRoot), require('node:os').tmpdir());
+  fs.rmSync(emptyRoot, { recursive: true, force: true });
+}
 console.log(`PASS: ${checks} synthetic helper assertions; no Git, Docker, browser, listener or product suite executed`);
