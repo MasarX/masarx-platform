@@ -5,6 +5,11 @@ are stored in Vault; each provider carries only an `invoke_secret_ref` reference
 Database write guards seal inline `invoke_secret` input before settings versions
 or caches are stored. Historical settings values are converted by migration.
 
+After this deploys to any environment that held a real value, rotate the label
+renderer invoke secret. Write the new value only through the service path
+(`upsert_label_provider_settings_v1`) and invalidate the old credential at the
+renderer. Earlier WAL, backups and exports may still contain the old value.
+
 Trusted provisioning uses `upsert_label_provider_settings_v1`. Authenticated
 settings changes retain the existing scope and capability checks in
 `request_settings_change_v1`. Its internal writer accepts an explicit replacement
@@ -12,7 +17,8 @@ credential or preserves a preview marker from the same scope. A new tenant
 override requires its own credential; it cannot copy a global or foreign reference.
 Onboarding inherits the platform configuration instead of copying it. Legacy
 tenant snapshots containing the platform credential remain pinned to the original
-renderer URL until an explicit tenant credential replaces them.
+renderer URL until an explicit tenant credential replaces them. The service
+resolver withholds a pinned credential if the configured URL changes.
 
 Scoped previews expose `REDACTED` for configured credentials. Preview markers are
 reserved and cannot become stored credential values. Existing tenant URL-only

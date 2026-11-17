@@ -1,4 +1,6 @@
 -- Keep renderer bearer credentials out of every readable settings version/cache.
+-- After this deploys to any environment that held a real value, rotate the label
+-- renderer invoke secret. Write the new value only through the service path.
 BEGIN;
 SET LOCAL lock_timeout = '10s';
 
@@ -41,8 +43,8 @@ BEGIN
       RAISE EXCEPTION 'Label provider preview markers require an authorized settings request' USING ERRCODE = '23514';
     END IF;
     IF v_invoke_secret IS NOT NULL THEN
-      IF v_invoke_secret <> 'EXAMPLE_PASSWORD' AND public.normalize_scope_type_v1(p_scope_type, FALSE) <> public.get_root_scope_type_key_v1() THEN
-        SELECT g.provider->>'invoke_url' INTO pinned_url FROM public.settings s
+      IF public.normalize_scope_type_v1(p_scope_type, FALSE) <> public.get_root_scope_type_key_v1() THEN
+        SELECT COALESCE(g.provider->>'invoke_url', '') INTO pinned_url FROM public.settings s
         CROSS JOIN LATERAL jsonb_array_elements(s.cached_value->'providers') g(provider)
         WHERE s.category = 'label_provider' AND s.scope_type = public.get_root_scope_type_key_v1() AND s.scope_id IS NULL
           AND COALESCE(NULLIF(g.provider->>'invoke_secret',''), public.resolve_label_provider_invoke_secret_v1(g.provider)) = v_invoke_secret
@@ -51,7 +53,8 @@ BEGIN
       -- Reuse the corresponding version reference when a cache repeats its value.
       SELECT s.id INTO reference FROM vault.decrypted_secrets s
       WHERE s.id = NULLIF(previous#>>'{invoke_secret_ref,id}', '')::uuid
-        AND starts_with(s.name, prefix) AND s.decrypted_secret = v_invoke_secret;
+        AND starts_with(s.name, prefix) AND s.decrypted_secret = v_invoke_secret
+        AND (pinned_url IS NULL OR s.description::jsonb->>'pinned_invoke_url' = pinned_url);
       IF reference IS NULL THEN
         reference := vault.create_secret(v_invoke_secret, prefix || gen_random_uuid(),
           jsonb_strip_nulls(jsonb_build_object('purpose','label_renderer','pinned_invoke_url',pinned_url))::text, NULL);
@@ -70,12 +73,6 @@ BEGIN
       provider := provider - 'invoke_secret';
     ELSE
       provider := provider - 'invoke_secret';
-    END IF;
-    IF reference IS NOT NULL THEN
-      SELECT s.description::jsonb->>'pinned_invoke_url' INTO pinned_url FROM vault.secrets s WHERE s.id = reference;
-      IF pinned_url IS NOT NULL AND provider->>'invoke_url' IS DISTINCT FROM pinned_url THEN
-        RAISE EXCEPTION 'Global label credential requires its configured endpoint' USING ERRCODE = '42501';
-      END IF;
     END IF;
     providers := providers || jsonb_build_array(provider);
   END LOOP;
@@ -134,7 +131,10 @@ AS $resolve$
   SELECT s.decrypted_secret FROM vault.decrypted_secrets s
   WHERE s.id = NULLIF(p_provider#>>'{invoke_secret_ref,id}', '')::uuid
     AND p_provider#>>'{invoke_secret_ref,type}' = 'SecretRef'
-    AND starts_with(s.name, 'label_provider/');
+    AND starts_with(s.name, 'label_provider/')
+    -- Apply the endpoint pin only when resolving for dispatch, so saves do not reveal a credential match.
+    AND (NOT (s.description::jsonb ? 'pinned_invoke_url')
+      OR s.description::jsonb->>'pinned_invoke_url' = NULLIF(p_provider->>'invoke_url', ''));
 $resolve$;
 
 CREATE FUNCTION public.label_provider_request_value_v1(p_value JSONB, p_scope_type TEXT, p_scope_id UUID)
@@ -208,9 +208,11 @@ BEGIN
     EXECUTE replace(definition, prior, 'v_secret := public.resolve_label_provider_invoke_secret_v1(v_provider);');
   END LOOP;
   definition := pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure);
-  prior := '(v_provider->>''invoke_secret'' IS NULL OR v_provider->>''invoke_secret'' = ''EXAMPLE_PASSWORD'')';
-  IF position(prior IN definition) = 0 THEN RAISE EXCEPTION 'Expected renderer cron credential guard'; END IF;
-  definition := replace(definition, prior, '(public.resolve_label_provider_invoke_secret_v1(v_provider) IS NULL OR public.resolve_label_provider_invoke_secret_v1(v_provider) = ''EXAMPLE_PASSWORD'')');
+  prior := 'v_provider->>''invoke_secret''';
+  IF (length(definition)-length(replace(definition,prior,'')))/length(prior) <> 2 THEN
+    RAISE EXCEPTION 'Expected two renderer cron credential reads';
+  END IF;
+  definition := replace(definition, prior, 'public.resolve_label_provider_invoke_secret_v1(v_provider)');
   definition := replace(definition, 'public.invoke_label_renderer(integer)', 'public.invoke_label_renderer(integer,jsonb)');
   EXECUTE replace(definition, 'SELECT public.invoke_label_renderer(%s);', 'SELECT public.invoke_label_renderer(%s,NULL::jsonb);');
 

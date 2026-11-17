@@ -79,6 +79,11 @@ SELECT throws_ok(format('SELECT public.request_settings_change_v1(%L,%L,%L::uuid
 SELECT lives_ok(format($q$INSERT INTO label_requests SELECT 'initial',settings_version_id,domain_event_id FROM api.request_settings_change_v1(
   'label_provider','tenant',%L::uuid,'{"version":1,"providers":[{"name":"synthetic","invoke_url":"https://renderer.example.test/functions/v1/label-renderer","invoke_secret":"synthetic-label-tenant-credential"}]}')$q$,org),
   'browser request writes a tenant secret through the authorized database boundary') FROM label_vault_fixture;
+SELECT lives_ok(format($q$SELECT api.request_settings_change_v1('label_provider','tenant',%L::uuid,
+  jsonb_build_object('version',1,'providers',jsonb_build_array(jsonb_build_object('name','synthetic',
+    'invoke_url','https://renderer.example.test/alternate','invoke_secret',%L))))$q$,org,credential),
+  'with a different endpoint the browser save has the same outcome whether the credential matches or differs')
+FROM label_vault_fixture CROSS JOIN unnest(ARRAY['synthetic-label-global-credential','synthetic-label-tenant-credential']) credential;
 RESET ROLE;
 SELECT ok((SELECT value#>>'{providers,0,invoke_secret_ref,type}' = 'SecretRef'
   AND NOT jsonb_path_exists(value,'$.**.invoke_secret') FROM public.settings_versions WHERE id = (SELECT version FROM label_requests WHERE kind = 'initial')),
@@ -122,10 +127,16 @@ SELECT public.upsert_label_provider_settings_v1('tenant',foreign_org,
 SELECT public.upsert_label_provider_settings_v1('global',NULL,
   '{"version":1,"providers":[{"name":"synthetic","invoke_url":"https://renderer.example.test/functions/v1/label-renderer","invoke_secret":"synthetic-label-next-global-credential"}]}',
   'Synthetic global credential rotation');
-SELECT throws_ok(format('SELECT public.upsert_label_provider_settings_v1(%L,%L::uuid,%L::jsonb,%L)', 'tenant',f.foreign_org,
+SELECT lives_ok(format('SELECT public.upsert_label_provider_settings_v1(%L,%L::uuid,%L::jsonb,%L)', 'tenant',f.foreign_org,
   jsonb_set(s.cached_value,'{providers,0,invoke_url}','"https://untrusted.example.test/collect"'::jsonb), 'Synthetic prohibited credential redirect'),
-  '42501','Global label credential requires its configured endpoint','legacy global credential cannot be redirected even after global rotation')
+  'endpoint change has no credential-dependent write error')
 FROM label_vault_fixture f JOIN public.settings s ON s.category = 'label_provider' AND s.scope_type = 'tenant' AND s.scope_id = f.foreign_org;
+SELECT throws_ok(format('SELECT public.resolve_label_renderer_invoke_config_v1(%L::uuid)',foreign_org), 'P0001',
+  'resolve_label_renderer_invoke_config_v1: invoke_secret missing in label_provider configuration',
+  'synchronous resolver withholds the pinned credential even after global rotation') FROM label_vault_fixture;
+SELECT throws_ok(format('SELECT public.resolve_label_renderer_invoke_request_v1(1,jsonb_build_object(%L,%L))','organization_id',foreign_org), 'P0001',
+  'resolve_label_renderer_invoke_request_v1: invoke_secret missing in label_provider configuration',
+  'asynchronous resolver withholds the pinned credential even after global rotation') FROM label_vault_fixture;
 UPDATE public.settings SET cached_value = jsonb_set(cached_value,'{providers,0,invoke_secret}',
   '"synthetic-label-cache-only-credential"'::jsonb)
 WHERE category = 'label_provider' AND scope_type = 'tenant' AND scope_id = (SELECT org FROM label_vault_fixture);
