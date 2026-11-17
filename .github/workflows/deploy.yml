@@ -21,6 +21,7 @@ defaults:
 env:
   DEPLOY_ENV: ${{ inputs.environment || github.ref_name }}
   CI: 'true'
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
   NEXT_TELEMETRY_DISABLED: '1'
 
 jobs:
@@ -63,7 +64,12 @@ jobs:
         run: |
           npm run edge:sync-shared
           npm run edge:prepare-resource-import-exceljs
-          npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --no-audit --no-fund supabase@2.116.0
+          mkdir -p "$RUNNER_TEMP/deploy-tools"
+          archive="$RUNNER_TEMP/supabase.tar.gz"
+          curl --fail --silent --show-error --location \
+            https://github.com/supabase/cli/releases/download/v2.116.0/supabase_2.116.0_linux_amd64.tar.gz --output "$archive"
+          printf '5b3031cb297d51b25be4c284e4c852254460ec722ec221d3b81b07d55acfd158  %s\n' "$archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP/deploy-tools" supabase
           python3 - <<'PY'
           import json, re
           from pathlib import Path
@@ -98,7 +104,7 @@ jobs:
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
             + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n', { mode: 0o600 });
           NODE
-          cli="$RUNNER_TEMP/deploy-tools/node_modules/.bin/supabase"
+          cli="$RUNNER_TEMP/deploy-tools/supabase"
           "$cli" link --project-ref "$SUPABASE_PROJECT_REF" --yes
           "$cli" db push --linked --yes
           "$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
@@ -142,7 +148,7 @@ jobs:
           package-manager-cache: false
       - name: Install pinned CLI
         if: steps.guard.outputs.configured == 'true'
-        run: npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --no-audit --no-fund vercel@65.17.0
+        run: npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund vercel@65.17.0
       - name: Pull, build and deploy prebuilt app
         id: deploy
         if: steps.guard.outputs.configured == 'true'
@@ -192,7 +198,7 @@ jobs:
           package-manager-cache: false
       - name: Install pinned CLI
         if: steps.guard.outputs.configured == 'true'
-        run: npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --no-audit --no-fund vercel@65.17.0
+        run: npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund vercel@65.17.0
       - name: Pull, build and deploy prebuilt app
         id: deploy
         if: steps.guard.outputs.configured == 'true'
@@ -249,7 +255,7 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT_LANDING: ${{ vars.CLOUDFLARE_PAGES_PROJECT_LANDING }}
         run: |
           LANDING_SITE_URL="https://$DEPLOY_ENV.$CLOUDFLARE_PAGES_PROJECT_LANDING.pages.dev" npm run build:landing
-          npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.164.0
+          npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund wrangler@4.164.0
       - name: Deploy landing to Pages
         id: deploy
         if: steps.guard.outputs.configured == 'true'
@@ -320,7 +326,7 @@ jobs:
           config['vars']['UPSTREAM_ORIGIN'] = 'https://' + os.environ['SUPABASE_PROJECT_REF'] + '.supabase.co'
           (root / 'deploy.json').write_text(json.dumps(config))
           PY
-          npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.164.0
+          npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund wrangler@4.164.0
       - name: Deploy ingress worker
         id: deploy
         if: steps.guard.outputs.configured == 'true'
