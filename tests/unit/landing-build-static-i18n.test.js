@@ -135,6 +135,7 @@ describe("landing build", () => {
       throw new Error(`build-landing.js failed (code=${res.status})${stderr}`);
     }
 
+    const enHtml = fs.readFileSync(path.join(outDir, "index.html"), "utf8");
     const arHtml = fs.readFileSync(path.join(outDir, "ar", "index.html"), "utf8");
     expect(arHtml).toMatch(/href="\/landing\/app\.[a-f0-9]{8}\.css"/);
     expect(arHtml).toMatch(/src="\/landing\/runtime\.[a-f0-9]{8}\.js"/);
