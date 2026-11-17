@@ -70,13 +70,14 @@ describe('Playwright artifacts configuration', () => {
     expect(normalized).toContain('MissingrequiredhostedbaseURLfortheselectedE2Eprojects');
   });
 
-  test('strict non-CI loopback mode requires governed runtime admission and suppresses local servers', () => {
+  test('strict mode rejects loopback and suppresses local servers', () => {
     const raw = fs.readFileSync(path.join(process.cwd(), 'playwright.config.ts'), 'utf8');
     const normalized = raw.replace(/\s+/g, '');
 
     expect(normalized).toContain('conststrictE2e=isCi||isTruthy(process.env.STRICT_E2E_GATE_ENV)');
     expect(normalized).toContain('isTruthy(process.env.E2E_REQUIRE_BASE_URLS)||strictE2e');
-    expect(normalized).toContain('if(requireBaseUrls&&selectedLocalSurfaces.length>0){assertGovernedLocalE2ERuntime');
+    expect(normalized).toContain('if(requireBaseUrls&&selectedLocalSurfaces.length>0){');
+    expect(raw).toContain('throw new Error("Strict E2E loopback requires the dedicated public CI configuration.")');
     expect(normalized).toContain('constshouldStartLocalServers=!requireBaseUrls');
     expect(normalized).toContain('isLoopbackHostname(newURL(origin).hostname)');
     expect(normalized).toContain('forbidOnly:strictE2e');
@@ -86,7 +87,7 @@ describe('Playwright artifacts configuration', () => {
     expect(normalized).toContain('name:"portal"');
   });
 
-  test('loads ordinary extended loopback without local servers and governs it in strict mode', () => {
+  test('loads ordinary extended loopback without local servers and rejects it in strict mode', () => {
     const cli = path.join(process.cwd(), 'node_modules', '@playwright', 'test', 'cli.js');
     const run = (strict) => {
       const env = {
@@ -112,6 +113,6 @@ describe('Playwright artifacts configuration', () => {
     expect(ordinary.stdout).toContain('[console]');
     const governed = run(true);
     expect(governed.status).not.toBe(0);
-    expect(`${governed.stdout}\n${governed.stderr}`).toContain('governed_local_e2e_identity_missing');
+    expect(`${governed.stdout}\n${governed.stderr}`).toContain('Strict E2E loopback requires the dedicated public CI configuration.');
   });
 });

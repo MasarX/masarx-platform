@@ -150,6 +150,9 @@ const selectedLocalSurfaces = [
   ...(isProjectSelected("console", "a11y", "shared") && isGovernedLoopbackOrigin(consoleBase) ? ["console"] : []),
   ...(isProjectSelected("portal") && isGovernedLoopbackOrigin(portalBase) ? ["portal"] : []),
 ];
+if (requireBaseUrls && selectedLocalSurfaces.length > 0) {
+  throw new Error("Strict E2E loopback requires the dedicated public CI configuration.");
+}
 const shouldStartLocalServers =
   !requireBaseUrls;
 const localAllowedDevOrigins = mergeAllowedDevOrigins(
