@@ -196,6 +196,14 @@ jobs:
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs unit
+      - name: Check proposed test-result capture
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.subject.outputs.present == 'true' }}
+        env:
+          JEST_DIAGNOSTIC_PROPOSAL: '1'
+        run: |
+          if ! git diff --quiet HEAD^1 HEAD -- scripts/ci-hosted/jest.cjs scripts/ci-hosted/diagnostics.cjs; then
+            node scripts/ci-hosted/jest.cjs unit
+          fi
       - name: Upload unit-summary
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
@@ -203,6 +211,7 @@ jobs:
           name: unit-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-reports/unit*.json
+            ci-reports/jest-results.unit*.json
             ci-reports/known-failures-observed.unit*.txt
           if-no-files-found: warn
           retention-days: 1
@@ -238,6 +247,14 @@ jobs:
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs ui
+      - name: Check proposed test-result capture
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.subject.outputs.present == 'true' }}
+        env:
+          JEST_DIAGNOSTIC_PROPOSAL: '1'
+        run: |
+          if ! git diff --quiet HEAD^1 HEAD -- scripts/ci-hosted/jest.cjs scripts/ci-hosted/diagnostics.cjs; then
+            node scripts/ci-hosted/jest.cjs ui
+          fi
       - name: Upload ui-summary
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
@@ -245,6 +262,7 @@ jobs:
           name: ui-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-reports/ui*.json
+            ci-reports/jest-results.ui*.json
             ci-reports/known-failures-observed.ui*.txt
           if-no-files-found: warn
           retention-days: 1
