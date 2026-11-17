@@ -8,7 +8,7 @@ const { bucketSections, migrationInventory, imagePreflight, completePins, mainSw
 const { handleRequest, handleConnect } = require('./deny-egress.cjs');
 const { exceptions, assess, objectsAt, outOfOrder, orderFloor } = require('./migrations.cjs');
 const { targetBase, targetFile } = require('./target-policy.cjs');
-const { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, dependencyNotices, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, enforceWorkflowInventory } = require('./policy.cjs');
+const { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, dependencyNotices, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, enforceWorkflowInventory, policySource } = require('./policy.cjs');
 const { guardPlan } = require('./base-guard.cjs');
 const { workflowIgnore, installCommand, checkInstallPolicy } = require('./install-policy.cjs');
 const { generate } = require('./generate-migration-exceptions.cjs');
@@ -162,7 +162,7 @@ const attackCases = [
   ['SUPERSEDED: manifest Jest config', 'package.json', 'NOTICE'],
   ['npm script-shell', 'apps/console/.npmrc', 'BLOCK'],
   ['npm node-options', '.npmrc', 'BLOCK'],
-  ['lockfile-named workflow', '.github/workflows/ci.lock.yml', 'REJECT'],
+  ['lockfile-named workflow', '.github/workflows/ci.lock.yml', 'BLOCK'],
   ['committed pg shadow', 'scripts/node_modules/pg', 'REJECT'],
   ['committed Playwright shadow', 'scripts/node_modules/@playwright/test', 'REJECT'],
   ['committed Next executable', 'apps/console/node_modules/.bin/next', 'REJECT'],
@@ -182,12 +182,12 @@ for (const [name, file, expected] of attackCases) {
     assert.equal(classify(changes).guarded.length, 0);
   }
 }
-for (const file of ['.github/workflows/x-lock.yaml', '.github/workflows/x_lockfile.yml', '.github/workflows/README',
-  'scripts/node_modules', 'scripts/ops/node_modules/pg/index.js', 'node_modules/package.json', 'a/node_modules/x.lock.yml']) {
+for (const file of ['scripts/node_modules', 'scripts/ops/node_modules/pg/index.js', 'node_modules/package.json', 'a/node_modules/x.lock.yml']) {
   for (const status of ['A', 'M', 'T', 'D']) assert.throws(() => rejectChanges([[status, file]]), /no marker exception/);
 }
 for (const file of protectedFiles) assert.equal(protectedPath(file), true);
 for (const file of ['scripts/ci-hosted/package.json', 'scripts/ci-hosted/report.lock.yml', '.github/actions/local/action.yml',
+  '.github/workflows/x-lock.yaml', '.github/workflows/x_lockfile.yml', '.github/workflows/README', 'scripts/ci-hosted/jest.config.cjs',
   'a/.npmrc', 'a/.yarnrc.yml', 'a/.pnpmfile.cjs', 'a/.gitattributes', 'config/ci/known-failures.main.txt']) assert.equal(pathClass(file), 'BLOCK');
 assert.equal(guardFiles.size, 10);
 for (const file of ['apps/shared/next-dev-origins.js', 'supabase/functions/_shared/cors.mjs', 'scripts/workers/tabular-import-worker.js',
@@ -252,7 +252,17 @@ for (const entry of ['migrations.cjs', 'jest.cjs']) {
 }
 assert.equal(baseReads.every(args => args[0] === 'ls-tree' ? args[2] === base : args[1].startsWith(base + ':')), true);
 assert.doesNotThrow(() => enforceWorkflowInventory(new Map([['.github/workflows/policy.yml', ''], ['.github/workflows/public-ci.yml', '']])));
-assert.throws(() => enforceWorkflowInventory(new Map([['.github/workflows/legacy.yml', '']])), /every pull request remains RED/);
+assert.doesNotThrow(() => enforceWorkflowInventory(new Map([['.github/workflows/policy.yml', ''], ['.github/workflows/public-ci.yml', ''], ['.github/workflows/extra.yml', '']])));
+for (const missing of ['policy.yml', 'public-ci.yml']) assert.throws(() => enforceWorkflowInventory(new Map([[`.github/workflows/${missing}`, '']])), /missing/);
+assert.throws(() => enforceWorkflowInventory(new Map([['.github/workflows/policy.yml', ''], ['.github/workflows/public-ci.yml', ''], ['.github/workflows/nested/extra.yml', '']])), /directly/);
+for (const branch of ['preview', 'dev', 'main']) {
+  const event = { pull_request: { base: { ref: branch, sha: base }, head: { sha: head } }, merge_group: { base_ref: `refs/heads/${branch}`, base_sha: base, head_sha: head } };
+  for (const kind of ['pull_request_target', 'merge_group']) assert.equal(policySource(event, kind), base);
+  assert.throws(() => policySource({ pull_request: { ...event.pull_request, base: { ref: branch } } }, 'pull_request_target'), /SHA/);
+}
+for (const kind of ['pull_request', 'push', 'unknown']) assert.throws(() => policySource({}, kind), /Unsupported policy event/);
+assert.throws(() => policySource({ pull_request: { base: { ref: 'other', sha: base } } }, 'pull_request_target'), /target branch/);
+assert.throws(() => policySource({ merge_group: { base_ref: 'refs/heads/main', head_sha: head } }, 'merge_group'), /SHA/);
 assert.throws(() => guardPlan('candidate.js', base, readBase));
 assert.throws(() => guardPlan('jest.cjs', 'HEAD', readBase));
 assert.throws(() => guardPlan('jest.cjs', base, () => `120000 blob ${base}\tfile\0`));
