@@ -576,7 +576,7 @@ SELECT is(
 -- Caller-authority regression matrix; native pgTAP remains required before admission.
 INSERT INTO public.organizations (id, name, slug, timezone, locale, billing_status)
 VALUES ('ab230000-0000-4000-8000-000000000001', 'Label foreign caller fixture', 'label-foreign-caller-fixture', 'UTC', 'en-US', 'active');
-INSERT INTO public.users (id, organization_id, email, full_name, role, status, access_scope_type, access_scope_id)
+INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type, access_scope_id)
 VALUES
   ('ab230000-0000-4000-8000-000000000002', 'aaaaaaaa-0000-4000-8000-00000000aa01', 'label-own-caller@example.test', 'Label own caller', 'ops_admin', 'active', 'tenant', NULL),
   ('ab230000-0000-4000-8000-000000000003', 'ab230000-0000-4000-8000-000000000001', 'label-foreign-caller@example.test', 'Label foreign caller', 'ops_admin', 'active', 'tenant', NULL);
