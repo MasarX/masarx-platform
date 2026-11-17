@@ -5,6 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync, fork } = require('node:child_process');
 const { targetFile, git } = require('./target-policy.cjs');
+const { sanitize, environmentSecrets, failureDetails } = require('./diagnostics.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
@@ -21,7 +22,9 @@ function checked(command, args, env, timeout = 600000) {
     const last = [...`${result.stdout || ''}\n${result.stderr || ''}`.matchAll(/Applying migration (\d+_[a-zA-Z0-9_.-]+\.sql)/g)].at(-1)?.[1];
     if (last) console.error(`First failing migration: ${last}`);
     // Do not print captured process output: it can contain disposable credentials or fixture data.
-    throw new Error(`${path.basename(command)} ${args[0]} failed${last ? ` (${last})` : ''}`);
+    const error = new Error(`${path.basename(command)} ${args[0]} failed${last ? ` (${last})` : ''}`);
+    error.failure = failureDetails(result, environmentSecrets(env));
+    throw error;
   }
   return String(result.stdout || '');
 }
@@ -54,10 +57,11 @@ function imagePreflight(text, event, now = new Date(), ref = process.env.GITHUB_
   return { qualificationOnly: true };
 }
 async function imageGuard(pins, file, env) {
+  const policyFile = `${file}.policy.json`;
   const host = env.DOCKER_HOST || 'unix:///var/run/docker.sock';
   if (!host.startsWith('unix://')) throw new Error('Digest guard requires the hosted Unix Docker socket');
   fs.writeFileSync(file, JSON.stringify(pins), { mode: 0o600 });
-  const child = fork('scripts/ci-hosted/docker-images.cjs', [file, host.slice(7)], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const child = fork('scripts/ci-hosted/docker-images.cjs', [file, host.slice(7), policyFile], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   try {
     const port = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Digest guard startup timed out')), 10000);
@@ -65,14 +69,16 @@ async function imageGuard(pins, file, env) {
       child.once('message', message => { clearTimeout(timer); resolve(message.port); });
     });
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid image guard port');
-    return { child, env: { ...env, DOCKER_HOST: `tcp://127.0.0.1:${port}`, DOCKER_TLS_VERIFY: '', DOCKER_CERT_PATH: '',
+    return { child, policyFile, env: { ...env, DOCKER_HOST: `tcp://127.0.0.1:${port}`, DOCKER_TLS_VERIFY: '', DOCKER_CERT_PATH: '',
       SUPABASE_INTERNAL_IMAGE_REGISTRY: 'public.ecr.aws' } };
   } catch (error) { child.kill(); throw error; }
 }
-async function main() {
+async function qualify(diagnostic) {
   const pins = JSON.parse(fs.readFileSync('config/ci/hosted-supabase-images.json', 'utf8'));
   const pinState = imagePreflight(completePins(pins) ? '' : mainSwitch(), process.env.GITHUB_EVENT_NAME, new Date(), process.env.GITHUB_REF, pins);
+  diagnostic.imagePolicy = { mode: pinState.qualificationOnly ? 'qualification-only' : 'digest-pinned', decision: 'not_started', allowed: 0, denied: 0, denials: [] };
   if (process.argv[2] === 'preflight') return;
+  diagnostic.stage = 'local-contracts';
   // Reuse the existing loopback, version, client-image and full-pgTAP contracts.
   const local = require('../ops/ci/cloud-pool-db-local.js');
   const { buildSupabaseCliAsset } = require('../ops/ci/supabase-cli-asset.js');
@@ -93,20 +99,24 @@ async function main() {
     integration: 'SKIPPED_BY_DESIGN: local equivalence of the integration inventory is unproved',
     serviceImagePins: pinState.qualificationOnly ? 'PIN_NEEDED' : 'resolved SHA-256 indices', imageQualificationOnly: pinState.qualificationOnly, ok: false };
   try {
+    diagnostic.stage = 'docker-preflight';
     checked('docker', ['info', '--format', '{{.ServerVersion}}'], env);
     const dockerRoot = checked('docker', ['info', '--format', '{{.DockerRootDir}}'], env).trim();
     diskFloor(dockerRoot);
     if (!pinState.qualificationOnly) {
       if (env.DOCKER_HOST && !env.DOCKER_HOST.startsWith('unix://')) throw new Error('Digest-pinned startup requires the hosted Unix Docker daemon');
+      diagnostic.stage = 'image-pull';
       for (const pin of pins) {
         diskFloor(dockerRoot);
         const reference = `public.ecr.aws/${pin.image}@${pin.digest}`;
         checked('docker', ['pull', '--platform', 'linux/amd64', reference], env, 20 * 60000);
         pin.runtimeId = checked('docker', ['image', 'inspect', '--format', '{{.Id}}', reference], env).trim();
       }
+      diagnostic.stage = 'image-guard';
       guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env);
       cliEnv = guard.env;
     }
+    diagnostic.stage = 'cli-download';
     const asset = buildSupabaseCliAsset({ version: '2.116.0', platform: 'linux', arch: 'amd64' });
     if (!/^[a-f0-9]{64}$/.test(asset.sha256 || '')) throw new Error('PIN_NEEDED: Supabase CLI archive checksum');
     const response = await fetch(asset.download_url, { signal: AbortSignal.timeout(120000) });
@@ -121,6 +131,7 @@ async function main() {
     const sb = path.join(temp, 'supabase');
     fs.mkdirSync(sb);
     fs.mkdirSync(path.join(sb, 'migrations'));
+    diagnostic.stage = 'stack-configuration';
     const originalConfig = fs.readFileSync('supabase/config.toml', 'utf8');
     const buckets = bucketSections(originalConfig);
     fs.writeFileSync(path.join(sb, 'config.toml'), [
@@ -130,14 +141,17 @@ async function main() {
       '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
       'site_url = "http://127.0.0.1:3001"', '[storage]', 'enabled = true', '', buckets,
     ].join('\n'), { mode: 0o600 });
+    diagnostic.stage = 'stack-start';
     started = true; // A partial start must also be stopped.
     checked(cli, ['start', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 20 * 60000);
+    diagnostic.stage = 'stack-status';
     const status = JSON.parse(checked(cli, ['status', '--workdir', temp, '-o', 'json'], cliEnv));
     if (!status.DB_URL) throw new Error('Local stack did not provide DB_URL');
     Object.assign(env, { DATABASE_URL: status.DB_URL, DATABASE_URL_DIRECT: status.DB_URL,
       SUPABASE_URL: status.API_URL || '', SUPABASE_ANON_KEY: status.ANON_KEY || '',
       SUPABASE_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY || '', WORKSPACE_NAME: project });
     local.assertLoopbackOnly(env, 'local stack');
+    diagnostic.stage = 'database-connect';
     const { Client } = require('pg');
     const db = new Client({ connectionString: env.DATABASE_URL });
     await db.connect();
@@ -152,16 +166,19 @@ async function main() {
       fs.symlinkSync(path.join(root, 'supabase/migrations'), path.join(sb, 'migrations'), 'dir');
       diskFloor(dockerRoot);
       // The CLI orders stamps, records history and stops on the first SQL error. No retry.
+      diagnostic.stage = 'migrations';
       checked(cli, ['migration', 'up', '--local', '--workdir', temp], cliEnv, 100 * 60000);
       const applied = await db.query('select version from supabase_migrations.schema_migrations order by version');
       if (JSON.stringify(applied.rows.map(row => row.version)) !== JSON.stringify(versions)) throw new Error('Applied migration stamps do not match the complete source inventory');
       summary.migrations = versions.length;
       console.log(`Fresh migration replay: ${versions.length} files`);
     } finally { await db.end(); }
+    diagnostic.stage = 'backend-lint';
     for (const lint of local.loadBackendLocalPreSuiteCommands()) {
       checked('npm', ['run', lint.script], { ...env, ...lint.env, ENV_FILE: os.devNull,
         ENV_FILE_APPEND: '0', ENV_FILE_OVERRIDE: '0', MIGRATION_FIXTURE_GUARD_MODE: 'full' }, lint.timeout_ms);
     }
+    diagnostic.stage = 'pgtap';
     if (fs.existsSync('supabase/tests/pgtap')) {
       const files = fs.readdirSync('supabase/tests/pgtap').filter(n => n.endsWith('.sql'));
       if (!files.length) throw new Error('Present pgTAP directory is empty');
@@ -182,10 +199,21 @@ async function main() {
     } else summary.pgtap = 'SKIPPED_BY_DESIGN: pgTAP directory absent';
     console.log(summary.integration);
     summary.ok = true;
+    diagnostic.stage = 'complete';
+  } catch (error) {
+    if (guard && fs.existsSync(guard.policyFile)) diagnostic.imagePolicy = { ...diagnostic.imagePolicy, ...JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')) };
+    saveFailure(diagnostic, error, environmentSecrets(env)); // Persist before stack teardown and temporary-file removal.
+    throw error;
   } finally {
     if (started) {
       const stop = spawnSync(cli, ['stop', '--workdir', temp, '--no-backup'], { env: cliEnv, stdio: 'ignore', timeout: 120000 });
-      if (stop.error || stop.status !== 0) { summary.ok = false; process.exitCode = 1; console.error('Local stack teardown failed'); }
+      if (stop.error || stop.status !== 0) {
+        summary.ok = false; process.exitCode = 1; console.error('Local stack teardown failed');
+        if (!diagnostic.failure) {
+          diagnostic.stage = 'teardown';
+          saveFailure(diagnostic, Object.assign(new Error('Local stack teardown failed'), { failure: failureDetails(stop, environmentSecrets(env)) }));
+        }
+      }
     }
     if (guard) {
       guard.child.kill('SIGTERM');
@@ -197,5 +225,19 @@ async function main() {
     fs.writeFileSync('ci-reports/backend.json', `${JSON.stringify(summary, null, 2)}\n`);
   }
 }
-if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
+function saveFailure(diagnostic, error, secrets) {
+  if (diagnostic.stage === 'image-preflight') diagnostic.imagePolicy = { decision: 'denied', reason: sanitize(error.message, secrets) };
+  diagnostic.failure = { message: sanitize(error.message, secrets), exitCode: null, signal: null, timeout: false, errorCode: error.code || null, ...error.failure };
+  fs.mkdirSync('ci-reports', { recursive: true });
+  fs.writeFileSync('ci-reports/backend-diagnostic.json', `${JSON.stringify(diagnostic, null, 2)}\n`);
+}
+async function main() {
+  const diagnostic = { sha: process.env.GITHUB_SHA || 'unknown', stage: 'image-preflight', imagePolicy: { decision: 'not_evaluated' } };
+  try { await qualify(diagnostic); }
+  catch (error) {
+    if (!diagnostic.failure) saveFailure(diagnostic, error);
+    throw error;
+  }
+}
+if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
 module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch };

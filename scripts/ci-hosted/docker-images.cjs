@@ -22,12 +22,27 @@ function rewrite(method, url, body, pins) {
   }
   return { url, body };
 }
-function start(pins, socketPath) {
+function policyDecision(error, method, url) {
+  const reasons = ['CLI image pulls are forbidden; images must already be pulled by digest', 'Image is outside the reviewed digest set', 'Docker request exceeds bound'];
+  return { decision: error ? 'denied' : 'allowed',
+    operation: /\/images\/create/.test(url) ? 'image-pull' : /\/images\//.test(url) ? 'image-inspect' : method === 'POST' && /\/containers\/create/.test(url) ? 'container-create' : 'request',
+    reason: error ? (reasons.includes(error.message) ? error.message : 'Malformed Docker policy request') : 'Reviewed digest policy satisfied' };
+}
+function start(pins, socketPath, policyFile) {
+  const policy = { decision: 'enforcing', allowed: 0, denied: 0, denials: [] };
+  const record = (error, method, url) => {
+    const decision = policyDecision(error, method, url);
+    policy[decision.decision]++;
+    if (error) { policy.decision = 'denied'; policy.denials.push(decision); policy.denials = policy.denials.slice(-10); }
+    if (policyFile) fs.writeFileSync(policyFile, JSON.stringify(policy), { mode: 0o600 });
+  };
+  if (policyFile) fs.writeFileSync(policyFile, JSON.stringify(policy), { mode: 0o600 });
   const server = http.createServer(async (request, response) => {
     try {
       const chunks = []; let length = 0;
       for await (const chunk of request) { length += chunk.length; if (length > 8 * 1024 * 1024) throw new Error('Docker request exceeds bound'); chunks.push(chunk); }
       const result = rewrite(request.method, request.url, Buffer.concat(chunks), pins);
+      record(null, request.method, request.url);
       const headers = { ...request.headers };
       delete headers['transfer-encoding']; headers['content-length'] = result.body.length;
       const upstream = http.request({ socketPath, method: request.method, path: result.url, headers }, incoming => {
@@ -35,7 +50,7 @@ function start(pins, socketPath) {
       });
       upstream.on('error', () => { response.writeHead(502); response.end(); });
       upstream.end(result.body);
-    } catch { response.writeHead(403); response.end('Docker image policy denied request'); }
+    } catch (error) { record(error, request.method, request.url); response.writeHead(403); response.end('Docker image policy denied request'); }
   });
   server.on('upgrade', (request, client, head) => {
     if (!/^\/v[0-9.]+\/(exec\/[^/]+\/start|containers\/[^/]+\/attach)(?:\?|$)/.test(request.url)) return client.destroy();
@@ -50,5 +65,5 @@ function start(pins, socketPath) {
   process.on('disconnect', () => process.exit(0));
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
 }
-if (require.main === module) start(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), process.argv[3]);
-module.exports = { rewrite, pinnedReference };
+if (require.main === module) start(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), process.argv[3], process.argv[4]);
+module.exports = { rewrite, pinnedReference, policyDecision };
