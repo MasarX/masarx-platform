@@ -16,6 +16,9 @@ concurrency:
   group: codeql-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
