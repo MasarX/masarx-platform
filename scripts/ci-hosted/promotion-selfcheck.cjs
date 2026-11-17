@@ -56,10 +56,20 @@ for (const [target, branch] of [['dev', 'dev'], ['dev', 'feature'], ['preview', 
   assert.equal(calls.length, 0);
 }
 assert.equal(devPromotion(event(), 'merge_group', repository, read), false);
+for (const field of ['title', 'body']) {
+  const edited = { ...event(), action: 'edited', changes: { [field]: { from: 'synthetic previous text' } } };
+  assert.equal(policySource(edited, 'pull_request_target'), base);
+  assert.equal(devPromotion(edited, 'pull_request_target', repository, read), true);
+}
+const retargeted = { ...event('main', 'feature'), action: 'edited', changes: { base: { ref: { from: 'dev' } } } };
+assert.equal(policySource(retargeted, 'pull_request_target'), base);
+assert.throws(() => devPromotion(retargeted, 'pull_request_target', repository, read), /Main accepts/);
 // Ordinary mixed protected changes still require the existing scope rule.
 assert.throws(() => enforceScope(classify([['M', '.github/workflows/public-ci.yml'], ['M', 'synthetic.txt']]), 'pull_request_target'));
 const workflow = fs.readFileSync('.github/workflows/policy.yml', 'utf8');
 assert.equal(workflow.includes('ref: ${{ steps.source.outputs.base }}'), true);
 assert.equal(workflow.includes('persist-credentials: false'), true);
 assert.equal(/secrets\.|pull_request\.head|head\.sha/.test(workflow), false);
+assert.equal(workflow.includes('types: [opened, synchronize, reopened, edited]'), true);
+assert.equal(workflow.includes('run: node scripts/ci-hosted/promotion-selfcheck.cjs'), false);
 console.log('PASS: live dev promotions, main-only promotion flow, stale/missing identities, forks and base-owned execution');
