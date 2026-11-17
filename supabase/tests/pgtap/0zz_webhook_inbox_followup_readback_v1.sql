@@ -137,7 +137,13 @@ BEGIN
       WHEN 'context_parent' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{started_by_run_id}',to_jsonb(extra_id)) WHERE id=child_id;
       WHEN 'metadata_parent' THEN UPDATE public.workflow_runs SET metadata=jsonb_build_object('started_by_run_id',extra_id) WHERE id=child_id;
       WHEN 'metadata_shape' THEN UPDATE public.workflow_runs SET metadata='[]' WHERE id=child_id;
-      WHEN 'metadata_json_null' THEN UPDATE public.workflow_runs SET metadata='null' WHERE id=child_id;
+      WHEN 'metadata_json_null' THEN
+        UPDATE public.workflow_runs SET metadata='null' WHERE id=child_id;
+        RETURN NEXT ok((SELECT metadata IS NULL FROM public.workflow_runs WHERE id=child_id),
+          'persisted JSON null metadata normalizes to SQL NULL');
+        RETURN NEXT is((SELECT followup_workflow_run_id FROM public.webhook_inbox_followup_read_v1 WHERE id=inbox_id),child_id,
+          'normalized null metadata retains the independently proven context parent');
+        UPDATE public.workflow_runs SET context=context-'started_by_run_id' WHERE id=child_id;
       WHEN 'both_parents_missing' THEN UPDATE public.workflow_runs SET context=context-'started_by_run_id',metadata='{}' WHERE id=child_id;
       WHEN 'duplicate_child' THEN
         PERFORM set_config('app.workflow_run_id',extra_id::text,TRUE);
@@ -186,7 +192,12 @@ BEGIN
   PERFORM set_config('request.jwt.claim.role','authenticated',TRUE);
   PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,TRUE);
   SET LOCAL ROLE authenticated;
-  RETURN NEXT is(api.ui_get_resource_v1('webhook_inbox',inbox_id)->>'followup_workflow_run_id',child_id::text,
+  row_result:=api.ui_get_resource_v1('webhook_inbox',inbox_id);
+  RETURN NEXT diag(jsonb_build_object('row_present',row_result IS NOT NULL,
+    'has_followup_key',COALESCE(row_result ? 'followup_workflow_run_id',FALSE),
+    'source_read_capability',public.user_has_resource_capability_v1('webhook_sources','read'),
+    'workflow_read_capability',public.user_has_capability_v1('workflow_runs.read'))::text);
+  RETURN NEXT is(row_result->>'followup_workflow_run_id',child_id::text,
     'existing authenticated API route returns canonical child');
   RETURN NEXT ok(api.ui_get_resource_v1('webhook_inbox',foreign_inbox) IS NULL,'foreign inbox remains hidden');
   RETURN NEXT throws_ok('SELECT * FROM public.webhook_inbox_followup_read_v1 LIMIT 1','42501',NULL,
