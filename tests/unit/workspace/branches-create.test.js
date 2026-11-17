@@ -57,7 +57,7 @@ describe('scripts/ops/branches/create.js', () => {
 
   test('builds a direct DSN from validated branch-owned fields', () => {
     expect(buildBranchDatabaseUrl(branchConfig(), 'abcdefghijklmnopqrst')).toBe(
-      (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'uknuhmluyhnsumhromquzsur',"@",'example.invalid',":",'6432',"/",'postgres'].join("")),
+      (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",branchConfig().db_pass,"@",branchConfig().db_host,":",'6432',"/",'postgres'].join("")),
     );
   });
 
@@ -102,7 +102,7 @@ describe('scripts/ops/branches/create.js', () => {
       jwt_secret: 'branch-jwt-secret',
       supabase_url: 'https://abcdefghijklmnopqrst.supabase.co',
       database_url:
-        (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'uknuhmluyhnsumhromquzsur',"@",'example.invalid',":",'6432',"/",'postgres'].join("")),
+        (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",branchConfig().db_pass,"@",branchConfig().db_host,":",'6432',"/",'postgres'].join("")),
     });
 
     expect(getBranchConfigFn).toHaveBeenCalledWith({

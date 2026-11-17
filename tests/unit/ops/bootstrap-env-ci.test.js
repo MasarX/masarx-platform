@@ -272,7 +272,7 @@ describe('bootstrap-env-ci', () => {
         SUPABASE_PROJECT_ID: '',
         SUPABASE_URL: '',
         DATABASE_URL_DIRECT:
-          (['postgresql',":","/","/",'postgres',":",'ixunzlzxsuhznqivpsshzgrw',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+          (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
       }),
       args: ['--target', 'stdout'],
     });

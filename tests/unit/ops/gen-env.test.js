@@ -11,7 +11,11 @@ const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const genEnvScript = path.join(repoRoot, 'scripts', 'ops', 'branches', 'gen-env.js');
 
 function runGenEnv({ outPath, payload, env = {} }) {
-  return spawnSync(process.execPath, [genEnvScript, '--file', outPath], {
+  return spawnSync(process.execPath, [
+    '-e',
+    "require('dns').promises.Resolver = class { async resolve4() { return ['192.0.2.10']; } }; require(process.argv[1]);",
+    genEnvScript, '--file', outPath,
+  ], {
     cwd: repoRoot,
     input: JSON.stringify(payload),
     encoding: 'utf8',
@@ -410,17 +414,17 @@ describe('branches/gen-env', () => {
     const outPath = path.join(tmpDir, 'env.cloud');
 
     const payload = {
-      project_ref: 'xooqygvstokpqzukjkqy',
-      supabase_url: 'https://xooqygvstokpqzukjkqy.supabase.co',
+      project_ref: 'abcdefghijklmnopqrst',
+      supabase_url: 'https://abcdefghijklmnopqrst.supabase.co',
       anon_key: 'anon-key',
       service_role_key: 'service-role-key',
-      database_url: (['postgresql',":","/","/",'postgres',":",'lmvhpwigvnziuyivjnptrmrj',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
-      preferred_database_url: (['postgresql',":","/","/",'postgres.xooqygvstokpqzukjkqy',":",'zyxmsoyihirnnhsthyhsyzsk',"@",'example.invalid',":",'6543',"/",'postgres'].join("")),
+      database_url: (['postgresql',":","/","/",'postgres',":",'pass',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
+      preferred_database_url: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'pass',"@",'192.0.2.20',":",'6543',"/",'postgres'].join("")),
       db_ready_candidate_name: 'DATABASE_URL_POOLER+ipv4host',
       db_pass: 'pass',
       pooler_host: 'aws-0-eu-west-1.pooler.supabase.com',
       pooler_port: '6543',
-      pooler_user: 'postgres.xooqygvstokpqzukjkqy',
+      pooler_user: 'postgres.abcdefghijklmnopqrst',
     };
 
     const res = runGenEnv({
@@ -436,12 +440,12 @@ describe('branches/gen-env', () => {
     expect(res.status).toBe(0);
 
     const written = fs.readFileSync(outPath, 'utf8');
-    expect(written).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.xooqygvstokpqzukjkqy',":",'zyxmsoyihirnnhsthyhsyzsk',"@",'example.invalid',":",'6543',"/",'postgres'].join("")));
-    expect(written).toContain(('DATABASE_URL_DIRECT=' + ['postgresql',":","/","/",'postgres',":",'lmvhpwigvnziuyivjnptrmrj',"@",'example.invalid',":",'5432',"/",'postgres'].join("")));
-    expect(written).toContain(('DATABASE_URL_POOLER=' + ['postgresql',":","/","/",'postgres.xooqygvstokpqzukjkqy',":",'zyxmsoyihirnnhsthyhsyzsk',"@",'example.invalid',":",'6543',"/",'postgres'].join("")));
+    expect(written).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'pass',"@",'192.0.2.20',":",'6543',"/",'postgres'].join("")));
+    expect(written).toContain(('DATABASE_URL_DIRECT=' + ['postgresql',":","/","/",'postgres',":",'pass',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")));
+    expect(written).toContain(('DATABASE_URL_POOLER=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'pass',"@",'aws-0-eu-west-1.pooler.supabase.com',":",'6543',"/",'postgres'].join("")));
     expect(written).toContain('SUPABASE_POOLER_HOST=aws-0-eu-west-1.pooler.supabase.com');
     expect(written).toContain('SUPABASE_POOLER_PORT=6543');
-    expect(written).toContain('SUPABASE_POOLER_USER=postgres.xooqygvstokpqzukjkqy');
+    expect(written).toContain('SUPABASE_POOLER_USER=postgres.abcdefghijklmnopqrst');
     expect(written).toContain('DATABASE_URL_SELECTED_DSN_NAME=DATABASE_URL_POOLER+ipv4host');
   });
 
@@ -453,7 +457,7 @@ describe('branches/gen-env', () => {
       'SUPABASE_BRANCH_PARENT_REF=uvwxyzabcdefghijklmn',
       'PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE=branch',
       'SUPABASE_DB_PASSWORD=secret',
-      ('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'qnxihjuiqizhxrzwygvlrngh',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+      ('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'stale-password',"@",'aws-1-eu-west-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")),
       '',
     ].join('\n'), 'utf8');
 
@@ -473,8 +477,8 @@ describe('branches/gen-env', () => {
 
     expect(result.status).toBe(0);
     const written = fs.readFileSync(outPath, 'utf8');
-    expect(written).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'mmgohizvlxpzmwmmuoqjmsxk',"@",'example.invalid',":",'5432',"/",'postgres'].join("")));
-    expect(written).toContain(('DATABASE_URL_POOLER=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'mmgohizvlxpzmwmmuoqjmsxk',"@",'example.invalid',":",'5432',"/",'postgres'].join("")));
+    expect(written).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'secret',"@",'aws-0-eu-west-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")));
+    expect(written).toContain(('DATABASE_URL_POOLER=' + ['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'secret',"@",'aws-0-eu-west-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")));
     expect(written).toContain('DATABASE_URL_SELECTED_DSN_NAME=DATABASE_URL_POOLER+poolerhost:aws-0');
   });
 });

@@ -149,9 +149,9 @@ describe('db-connect-smoke', () => {
 
   test('shared-lane-safe policy excludes Supabase direct candidates but keeps pooler and custom hosts', async () => {
     const env = {
-      DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
-      DATABASE_URL_POOLER: (['postgresql',":","/","/",'postgres.wk123',":",'trxsxxlslvipgphxjqyxvnww',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
-      SYNCED_DB_URL_DIRECT: (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      DATABASE_URL_POOLER: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      SYNCED_DB_URL_DIRECT: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       PG_CONN_STRING: (['postgresql',":","/","/",'postgres',":",'pw',"@",'db.internal.example',":",'5432',"/",'postgres'].join("")),
       DB_SMOKE_SELECTED_DSN_NAME: 'PG_CONN_STRING',
     };
@@ -275,25 +275,25 @@ describe('db-connect-smoke', () => {
     expect(
       isSupabaseDirectCandidate({
         name: 'DATABASE_URL',
-        dsn: (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
       }),
     ).toBe(true);
     expect(
       isSupabaseDirectCandidate({
         name: 'DATABASE_URL_POOLER',
-        dsn: (['postgresql',":","/","/",'postgres.wk123',":",'trxsxxlslvipgphxjqyxvnww',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")),
       }),
     ).toBe(false);
     expect(
       filterCandidatesByPolicy(
         [
-          { name: 'DATABASE_URL_DIRECT', dsn: (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres'].join("")) },
-          { name: 'DATABASE_URL_POOLER', dsn: (['postgresql',":","/","/",'postgres.wk123',":",'trxsxxlslvipgphxjqyxvnww',"@",'example.invalid',":",'5432',"/",'postgres'].join("")) },
+          { name: 'DATABASE_URL_DIRECT', dsn: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")) },
+          { name: 'DATABASE_URL_POOLER', dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")) },
         ],
         'shared-lane-safe',
       ),
     ).toEqual([
-      { name: 'DATABASE_URL_POOLER', dsn: (['postgresql',":","/","/",'postgres.wk123',":",'trxsxxlslvipgphxjqyxvnww',"@",'example.invalid',":",'5432',"/",'postgres'].join("")) },
+      { name: 'DATABASE_URL_POOLER', dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")) },
     ]);
   });
 

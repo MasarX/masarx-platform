@@ -97,7 +97,7 @@ describe('API caller guarded egress proxy proof', () => {
       assert.equal(prepare.canonicalizeGuardedEgressProxyUrl('https://proxy.example.test'), 'https://proxy.example.test');
       assert.equal(prepare.canonicalizeHostedCorsAllowOrigins('https://docs.example.test'), 'https://docs.example.test');
       cloud.validateCloudEnv({ env: {
-        DATABASE_URL: '` + [`postgresql`,":","/","/",`postgres`,":",`jzvzlmuxwmkggrqmrktuwjmo`,"@",`example.invalid`,":",`5432`,"/",`postgres`].join("") + `',
+        DATABASE_URL: '` + [`postgresql`,":","/","/",`postgres`,":",`fake-db-password`,"@",`db.abcdefghijklmnopqrst.supabase.co`,":",`5432`,"/",`postgres`].join("") + `',
         PREVIEW_MODE: '1', EDGE_REQUIRE_DB_JWT: '0', GITHUB_ACTIONS: 'false',
         EDGE_INTERNAL_CALLER_ROLES: 'edge_api_caller_role',
         API_CALLER_GUARDED_EGRESS_PROOF_REQUIRED: '0',
