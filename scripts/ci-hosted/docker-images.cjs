@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const http = require('node:http');
-const net = require('node:net');
+const path = require('node:path');
 const { sanitize } = require('./diagnostics.cjs');
 function pinnedReference(image, pins) {
   const normalized = String(image).replace(/^public\.ecr\.aws\//, '').split('@')[0].split(':')[0]
@@ -10,21 +10,34 @@ function pinnedReference(image, pins) {
   if (!pin || !/^sha256:[a-f0-9]{64}$/.test(pin.digest)) throw Object.assign(new Error('Image is outside the reviewed digest set'), { image: String(image) });
   return `public.ecr.aws/${pin.image}@${pin.digest}`;
 }
+function dockerPath(url) {
+  if (!url.startsWith('/') || url.startsWith('//')) throw new Error('Malformed Docker path');
+  const decoded = decodeURIComponent(url.split('?')[0]);
+  if (/[\0\\]/.test(decoded)) throw new Error('Malformed Docker path');
+  return path.posix.normalize(decoded).replace(/^\/v[0-9.]+(?=\/)/, '');
+}
 function rewrite(method, url, body, pins) {
-  if (/\/images\/create(?:\?|$)/.test(url)) throw new Error('CLI image pulls are forbidden; images must already be pulled by digest');
-  const inspect = /^(.*\/images\/)(.+)(\/json(?:\?.*)?)$/.exec(url);
-  if (method === 'GET' && inspect && !decodeURIComponent(inspect[2]).startsWith('sha256:')) {
-    url = inspect[1] + encodeURIComponent(pinnedReference(decodeURIComponent(inspect[2]), pins)) + inspect[3];
+  const route = dockerPath(url);
+  if (route === '/images/create') throw new Error('CLI image pulls are forbidden; images must already be pulled by digest');
+  if (!['GET', 'HEAD'].includes(method) && /^\/(?:build|commit|images|plugins)(?:\/|$)/.test(route)) {
+    throw new Error('Docker image-mutating endpoints are forbidden');
   }
-  if (method === 'POST' && /\/containers\/create(?:\?|$)/.test(url)) {
+  const inspect = /^\/images\/(.+)\/json$/.exec(route);
+  if (method === 'GET' && inspect && !inspect[1].startsWith('sha256:')) {
+    const prefix = /^\/v[0-9.]+(?=\/)/.exec(url)?.[0] || '';
+    url = `${prefix}/images/${encodeURIComponent(pinnedReference(inspect[1], pins))}/json${url.includes('?') ? url.slice(url.indexOf('?')) : ''}`;
+  }
+  if (method === 'POST' && route === '/containers/create') {
     const config = JSON.parse(body.toString('utf8'));
+    if (Object.keys(config).filter(key => key.toLowerCase() === 'image').length !== 1) throw new Error('Ambiguous Docker Image key');
     config.Image = pinnedReference(config.Image, pins);
     body = Buffer.from(JSON.stringify(config));
   }
   return { url, body };
 }
 function policyDecision(error, method, url) {
-  const reasons = ['CLI image pulls are forbidden; images must already be pulled by digest', 'Image is outside the reviewed digest set', 'Docker request exceeds bound'];
+  const reasons = ['CLI image pulls are forbidden; images must already be pulled by digest', 'Image is outside the reviewed digest set', 'Docker request exceeds bound',
+    'Docker image-mutating endpoints are forbidden', 'Ambiguous Docker Image key'];
   return { decision: error ? 'denied' : 'allowed',
     operation: /\/images\/create/.test(url) ? 'image-pull' : /\/images\//.test(url) ? 'image-inspect' : method === 'POST' && /\/containers\/create/.test(url) ? 'container-create' : 'request',
     reason: error ? (reasons.includes(error.message) ? error.message : 'Malformed Docker policy request') : 'Reviewed digest policy satisfied',
@@ -109,23 +122,55 @@ function createGuard(pins, socketPath, policyFile) {
     }
   });
   server.on('upgrade', (request, client, head) => {
-    if (!/^\/v[0-9.]+\/(exec\/[^/]+\/start|containers\/[^/]+\/attach)(?:\?|$)/.test(request.url)) return client.destroy();
+    let route;
+    try { route = dockerPath(request.url); } catch { return client.destroy(); }
+    if (request.method !== 'POST' || !/^\/(exec\/[^/]+\/start|containers\/[^/]+\/attach)$/.test(route)) return client.destroy();
+    const length = request.headers['content-length'] || '0';
+    if (request.headers['transfer-encoding'] || !/^\d+$/.test(length) || Number(length) > 8 * 1024 * 1024) return client.destroy();
+    client.pause();
     const trace = record(null, request.method, request.url, head);
-    const upstream = net.createConnection(socketPath, () => {
-      const headers = request.rawHeaders.reduce((text, value, index, all) => index % 2 ? text : text + `${value}: ${all[index + 1]}\r\n`, '');
-      upstream.write(`${request.method} ${request.url} HTTP/1.1\r\n${headers}\r\n`); upstream.write(head);
-      client.pipe(upstream); upstream.pipe(client);
-    });
-    let statusLine = '';
-    const inspectStatus = chunk => {
-      statusLine += chunk.toString('latin1').slice(0, 8192 - statusLine.length);
-      const match = /^HTTP\/1\.[01] (\d{3})\b/.exec(statusLine);
-      if (match) { update(trace, { status: Number(match[1]), upgraded: match[1] === '101' }); upstream.off('data', inspectStatus); }
+    const upstream = http.request({ socketPath, method: request.method, path: request.url, headers: request.headers, agent: false });
+    let tunnel; let remaining = Number(length); let pending = Buffer.alloc(0);
+    const sendHeaders = incoming => {
+      let headers = '';
+      for (let i = 0; i < incoming.rawHeaders.length; i += 2) {
+        if (!['connection', 'content-length', 'transfer-encoding'].includes(incoming.rawHeaders[i].toLowerCase())) {
+          headers += `${incoming.rawHeaders[i]}: ${incoming.rawHeaders[i + 1]}\r\n`;
+        }
+      }
+      client.write(`HTTP/1.1 ${incoming.statusCode} ${incoming.statusMessage}\r\n${headers}Connection: ${incoming.statusCode === 101 ? 'Upgrade' : 'close'}\r\n\r\n`);
+      update(trace, { status: incoming.statusCode, upgraded: incoming.statusCode === 101 });
     };
-    upstream.on('data', inspectStatus);
-    upstream.on('close', () => client.destroy());
-    client.on('close', () => { upstream.destroy(); update(trace, {}, true); });
-    upstream.on('error', () => client.destroy()); client.on('error', () => upstream.destroy());
+    const connect = socket => {
+      tunnel = socket;
+      if (pending.length) socket.write(pending);
+      client.pipe(socket); client.resume();
+      socket.on('error', () => client.destroy());
+    };
+    upstream.on('upgrade', (incoming, socket, upstreamHead) => {
+      sendHeaders(incoming);
+      if (upstreamHead.length) client.write(upstreamHead);
+      socket.pipe(client); connect(socket);
+    });
+    upstream.on('response', incoming => {
+      client.pause(); client.off('data', requestBody);
+      sendHeaders(incoming);
+      incoming.on('error', () => client.destroy());
+      incoming.pipe(client);
+      if (incoming.statusCode === 200 && /^application\/vnd\.docker\.(raw|multiplexed)-stream(?:;|$)/i.test(incoming.headers['content-type'] || '')) connect(incoming.socket);
+    });
+    client.on('close', () => { upstream.destroy(); tunnel?.destroy(); update(trace, {}, true); });
+    upstream.on('error', () => client.destroy()); client.on('error', () => { upstream.destroy(); tunnel?.destroy(); });
+    // Send only the declared HTTP body before acceptance; hold all upgraded/pipelined bytes.
+    function requestBody(chunk) {
+      const size = Math.min(remaining, chunk.length);
+      if (size) upstream.write(chunk.subarray(0, size));
+      remaining -= size;
+      if (chunk.length > size) pending = Buffer.concat([pending, chunk.subarray(size)]);
+      if (!remaining) { client.pause(); client.off('data', requestBody); upstream.end(); }
+    };
+    requestBody(head);
+    if (remaining) { client.on('data', requestBody); client.resume(); }
   });
   return server;
 }

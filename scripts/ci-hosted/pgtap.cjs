@@ -6,8 +6,8 @@ const { sanitize } = require('./diagnostics.cjs');
 function shardFiles(files, value) {
   const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value || '');
   if (!match || +match[1] > +match[2] || +match[2] > 64) throw new Error('Invalid pgTAP shard');
-  const names = files.filter(file => file.endsWith('.sql')).sort();
-  if (!names.length || new Set(names).size !== names.length || names.some(file => !/^[a-zA-Z0-9_.-]+\.sql$/.test(file))) throw new Error('Missing or malformed pgTAP inventory');
+  const names = files.filter(file => file.toLowerCase().endsWith('.sql')).sort();
+  if (!names.length || new Set(names).size !== names.length || names.some(file => !/^[a-zA-Z0-9_.-]+\.sql$/i.test(file))) throw new Error('Missing or malformed pgTAP inventory');
   const selected = names.filter((_, index) => index % +match[2] === +match[1] - 1);
   if (!selected.length) throw new Error('Empty pgTAP shard');
   return selected;

@@ -53,7 +53,8 @@ function main() {
     const selected = new Map();
     const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).filter(file => path.basename(file) === name) : [];
     for (const file of files) {
-      const artifact = file.split(path.sep)[0]; const match = /^(.*)-(\d+)$/.exec(artifact);
+      const artifact = file === name && files.length === 1 ? `${name}-0` : file.split(path.sep)[0];
+      const match = /^(.*)-(\d+)$/.exec(artifact);
       if (!match) { errors.push(`Invalid report artifact: ${artifact}`); continue; }
       const previous = selected.get(match[1]);
       if (!previous || Number(match[2]) > previous.attempt) selected.set(match[1], { file, attempt: Number(match[2]) });

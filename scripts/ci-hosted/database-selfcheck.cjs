@@ -71,6 +71,8 @@ async function main() {
   assert.deepEqual(shards.map(files => files.length), [83, 83, 83, 83, 83, 83]);
   assert.deepEqual(shards.flat().sort(), names);
   assert.equal(new Set(shards.flat()).size, names.length);
+  const mixedCase = ['a.SQL', 'b.sQl', 'c.sql', 'ignored.txt'];
+  assert.deepEqual(Array.from({ length: 3 }, (_, index) => shardFiles(mixedCase, `${index + 1}/3`)).flat().sort(), mixedCase.slice(0, 3));
   for (const invalid of ['0/6', '7/6', '1/0', '1/65', '1/6 extra']) assert.throws(() => shardFiles(names, invalid));
   assert.throws(() => shardFiles(['../escape.sql'], '1/1'));
   assert.throws(() => shardFiles(['one.sql', 'one.sql'], '1/1'));
@@ -160,12 +162,23 @@ async function main() {
       const target = path.join(aggregateDir, 'ci-reports/database-result', file);
       fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, JSON.stringify(value));
     };
-    fixture('build/backend-summary-123-1/backend.json', built);
+    fixture('build/backend.json', built);
     for (let index = 0; index < 6; index++) fixture(`shards/pgtap-summary-${index + 1}-123-1/pgtap.json`, shardReports[index]);
     const aggregateSummary = path.join(temp, 'aggregate.md');
     const aggregate = () => spawnSync(process.execPath, [path.resolve('scripts/ci-hosted/database-result.cjs')], {
       cwd: aggregateDir, env: { ...process.env, ...aggregateEnv, GITHUB_STEP_SUMMARY: aggregateSummary }, encoding: 'utf8', timeout: 5000,
     });
+    const flat = aggregate();
+    assert.equal(flat.status, 0);
+    assert.equal(flat.stdout.includes('| 2324 | 0 | 0 |'), true);
+    fixture('build/backend.json', { ...built, ok: false, lint: { ok: false, findings: [finding], ignored: 1 } });
+    const flatLint = aggregate();
+    assert.equal(flatLint.status, 1);
+    assert.equal(flatLint.stdout.includes(finding.function) && flatLint.stdout.includes(finding.message), true);
+    assert.equal(flatLint.stdout.includes('Invalid report artifact'), false);
+    fixture('build/backend-summary-123-1/backend.json', built);
+    assert.equal(aggregate().status, 1); // Mixed flat/nested reports are ambiguous.
+    fs.renameSync(path.join(aggregateDir, 'ci-reports/database-result/build/backend.json'), path.join(aggregateDir, 'ci-reports/database-result/build/backend.retired'));
     assert.equal(aggregate().status, 0);
     fixture('build/backend-summary-123-2/backend.json', { ...built, ok: false, lint: { ok: false, findings: [finding] } });
     assert.equal(aggregate().status, 1);
