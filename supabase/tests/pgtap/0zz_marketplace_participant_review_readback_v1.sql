@@ -50,7 +50,7 @@ DECLARE
   own_request UUID:=gen_random_uuid(); foreign_request UUID:=gen_random_uuid(); approved_match UUID:=gen_random_uuid();
   null_org_request UUID:=gen_random_uuid();
   tag TEXT:=replace(gen_random_uuid()::text,'-','');
-  row_result JSONB; list_result JSONB; metadata JSONB; expected JSONB;
+  row_result JSONB; list_result JSONB; v_metadata JSONB; expected JSONB;
   policy JSONB; registry JSONB; schema_version INT; test_scope_type TEXT; test_scope_id UUID;
   scenario TEXT; state TEXT; flag JSONB;
 BEGIN
@@ -64,20 +64,20 @@ BEGIN
     (platform_actor,org,platform_actor||'@example.invalid','W2 platform','ops_admin','active','platform',NULL),
     (tenant_actor,org,tenant_actor||'@example.invalid','W2 tenant','ops_admin','active','tenant',NULL),
     (denied_actor,org,denied_actor||'@example.invalid','W2 denied','driver','active','tenant',NULL);
-  metadata:=jsonb_build_object('decision','request_additional_docs','request_additional_docs',TRUE,
+  v_metadata:=jsonb_build_object('decision','request_additional_docs','request_additional_docs',TRUE,
     'requested_documents',jsonb_build_array(' license ','identity','license',NULL,17,'',jsonb_build_object('private','W2_PRIVATE'),
       jsonb_build_array('nested'),repeat('x',101),repeat('a',100)),
     'internal_reason','W2_INTERNAL_SENTINEL','credentials',jsonb_build_object('token','W2_PRIVATE_SENTINEL'));
   INSERT INTO public.marketplace_participant_requests(id,requested_participant_type_key,email,full_name,organization_name,
       requested_organization_id,approved_organization_id,reviewed_at,reviewed_by,review_reason,decision_metadata) VALUES
     (own_request,'freelancer_driver','w2-'||tag||'-own@example.invalid','W2 own','W2 own',org,NULL,
-      now(),platform_actor,'Replace expired documents',metadata),
+      now(),platform_actor,'Replace expired documents',v_metadata),
     (foreign_request,'freelancer_driver','w2-'||tag||'-foreign@example.invalid','W2 foreign','W2 foreign',foreign_org,NULL,
-      now(),platform_actor,'Foreign reason',metadata),
+      now(),platform_actor,'Foreign reason',v_metadata),
     (approved_match,'freelancer_driver','w2-'||tag||'-approved@example.invalid','W2 approved match','W2 approved match',foreign_org,org,
-      now(),platform_actor,'Approved-org reason',metadata),
+      now(),platform_actor,'Approved-org reason',v_metadata),
     (null_org_request,'freelancer_driver','w2-'||tag||'-null@example.invalid','W2 public applicant','W2 public applicant',NULL,NULL,
-      now(),platform_actor,'Public applicant reason',metadata);
+      now(),platform_actor,'Public applicant reason',v_metadata);
   expected:=jsonb_build_array('license','identity',repeat('a',100));
 
   -- Provision both owned scopes through canonical policy/settings paths, never executor membership.
@@ -123,16 +123,16 @@ BEGIN
   -- Follow the canonical flag, not historical decision text retained after same-request document return.
   FOREACH scenario IN ARRAY ARRAY['resubmitted','missing_flag','json_null_flag','invalid_flag','missing_documents',
     'object_documents','null_documents','scalar_metadata','array_metadata'] LOOP
-    UPDATE public.marketplace_participant_requests SET decision_metadata=metadata WHERE id=own_request;
+    UPDATE public.marketplace_participant_requests SET decision_metadata=v_metadata WHERE id=own_request;
     CASE scenario
-      WHEN 'resubmitted' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=metadata||
+      WHEN 'resubmitted' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=v_metadata||
         '{"request_additional_docs":false,"documents_resubmitted":true}'::jsonb WHERE id=own_request;
-      WHEN 'missing_flag' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=metadata-'request_additional_docs' WHERE id=own_request;
-      WHEN 'json_null_flag' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(metadata,'{request_additional_docs}','null') WHERE id=own_request;
-      WHEN 'invalid_flag' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(metadata,'{request_additional_docs}','"invalid"') WHERE id=own_request;
-      WHEN 'missing_documents' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=metadata-'requested_documents' WHERE id=own_request;
-      WHEN 'object_documents' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(metadata,'{requested_documents}','{"private":"W2_PRIVATE"}') WHERE id=own_request;
-      WHEN 'null_documents' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(metadata,'{requested_documents}','null') WHERE id=own_request;
+      WHEN 'missing_flag' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=v_metadata-'request_additional_docs' WHERE id=own_request;
+      WHEN 'json_null_flag' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(v_metadata,'{request_additional_docs}','null') WHERE id=own_request;
+      WHEN 'invalid_flag' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(v_metadata,'{request_additional_docs}','"invalid"') WHERE id=own_request;
+      WHEN 'missing_documents' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=v_metadata-'requested_documents' WHERE id=own_request;
+      WHEN 'object_documents' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(v_metadata,'{requested_documents}','{"private":"W2_PRIVATE"}') WHERE id=own_request;
+      WHEN 'null_documents' THEN UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(v_metadata,'{requested_documents}','null') WHERE id=own_request;
       WHEN 'scalar_metadata' THEN UPDATE public.marketplace_participant_requests SET decision_metadata='7' WHERE id=own_request;
       WHEN 'array_metadata' THEN UPDATE public.marketplace_participant_requests SET decision_metadata='[]' WHERE id=own_request;
     END CASE;
@@ -146,7 +146,7 @@ BEGIN
     RESET ROLE;
   END LOOP;
   FOREACH flag IN ARRAY ARRAY['true'::jsonb,'"TRUE"'::jsonb,'"t"'::jsonb,'1'::jsonb,'"yes"'::jsonb] LOOP
-    UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(metadata,'{request_additional_docs}',flag) WHERE id=own_request;
+    UPDATE public.marketplace_participant_requests SET decision_metadata=jsonb_set(v_metadata,'{request_additional_docs}',flag) WHERE id=own_request;
     SET LOCAL ROLE authenticated;
     RETURN NEXT is(api.ui_get_resource_v1('marketplace_participant_requests',own_request)->'requested_documents',expected,
       flag::text||' follows canonical additional-document flag semantics');
@@ -154,7 +154,7 @@ BEGIN
   END LOOP;
   FOREACH state IN ARRAY ARRAY['approved','rejected','withdrawn'] LOOP
     UPDATE public.marketplace_participant_requests SET status=state,
-      review_decision=CASE WHEN state IN ('approved','rejected') THEN state ELSE NULL END,decision_metadata=metadata WHERE id=own_request;
+      review_decision=CASE WHEN state IN ('approved','rejected') THEN state ELSE NULL END,decision_metadata=v_metadata WHERE id=own_request;
     SET LOCAL ROLE authenticated;
     row_result:=api.ui_get_resource_v1('marketplace_participant_requests',own_request);
     RETURN NEXT is(row_result->'requested_documents','[]'::jsonb,state||' hides stale requested documents');
@@ -162,7 +162,7 @@ BEGIN
       state||' preserves canonical terminal review decision');
     RESET ROLE;
   END LOOP;
-  UPDATE public.marketplace_participant_requests SET status='pending',review_decision=NULL,decision_metadata=metadata WHERE id=own_request;
+  UPDATE public.marketplace_participant_requests SET status='pending',review_decision=NULL,decision_metadata=v_metadata WHERE id=own_request;
 
   PERFORM set_config('request.jwt.claim.sub',tenant_actor::text,TRUE);
   PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',tenant_actor,'role','authenticated')::text,TRUE);

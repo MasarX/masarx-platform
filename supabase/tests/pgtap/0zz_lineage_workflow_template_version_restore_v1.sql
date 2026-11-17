@@ -22,6 +22,7 @@ DECLARE
   v_target uuid := gen_random_uuid();
   v_foreign uuid := gen_random_uuid();
   v_run uuid := gen_random_uuid();
+  v_stale_run uuid := gen_random_uuid();
   v_old_step uuid;
   v_stopped_run uuid;
   v_prior_version integer;
@@ -58,6 +59,7 @@ BEGIN
   SELECT id INTO STRICT v_old_step FROM public.workflow_template_steps
     WHERE workflow_template_id=v_target AND sequence_order=1 AND enabled;
   SELECT version INTO STRICT v_prior_version FROM public.workflow_templates WHERE id=v_target;
+  PERFORM set_config('app.workflow_run_id',v_run::text,TRUE);
   INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,
     workflow_status,current_step_id,context) VALUES
     (v_run,v_target,v_prior_version,'manual','pending',v_old_step,jsonb_build_object('organization_id',v_org,'client_id',v_client));
@@ -117,8 +119,9 @@ BEGIN
     AND EXISTS(SELECT 1 FROM public.domain_events WHERE resource_id=v_target
       AND correlation_id=(v_result->>'correlation_id')::uuid AND event_type='workflow_template.restored'),
     'restore records actor reason and correlated decision/event lineage');
-  RETURN NEXT throws_ok(format('INSERT INTO public.workflow_runs(workflow_template_id,workflow_template_version,entry_point,workflow_status) VALUES (%L::uuid,%s,%L,%L)',
-    v_target,v_prior_version,'manual','pending'),
+  PERFORM set_config('app.workflow_run_id',v_stale_run::text,TRUE);
+  RETURN NEXT throws_ok(format('INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status) VALUES (%L::uuid,%L::uuid,%s,%L,%L)',
+    v_stale_run,v_target,v_prior_version,'manual','pending'),
     '40001','Workflow template changed during start; restart the transaction','a start using the pre-restore version is rejected');
   PERFORM set_config('request.jwt.claim.sub','',TRUE);
   PERFORM set_config('request.jwt.claims','{"role":"authenticated"}',TRUE);

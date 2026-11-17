@@ -575,7 +575,7 @@ SELECT is(
 -- Caller-authority regression matrix; native pgTAP remains required before admission.
 INSERT INTO public.organizations (id, name, slug, timezone, locale, billing_status)
 VALUES ('ab230000-0000-4000-8000-000000000001', 'Label foreign caller fixture', 'label-foreign-caller-fixture', 'UTC', 'en-US', 'active');
-INSERT INTO public.users (id, organization_id, email, full_name, role, status, access_scope_type, access_scope_id)
+INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type, access_scope_id)
 VALUES
   ('ab230000-0000-4000-8000-000000000002', 'aaaaaaaa-0000-4000-8000-00000000aa01', 'label-own-caller@example.test', 'Label own caller', 'ops_admin', 'active', 'tenant', NULL),
   ('ab230000-0000-4000-8000-000000000003', 'ab230000-0000-4000-8000-000000000001', 'label-foreign-caller@example.test', 'Label foreign caller', 'ops_admin', 'active', 'tenant', NULL);
@@ -594,6 +594,7 @@ DECLARE
   v_prior_claims TEXT := current_setting('request.jwt.claims', true);
   v_prior_sub TEXT := current_setting('request.jwt.claim.sub', true);
   v_job_id UUID;
+  v_composed_job_id UUID;
   v_label_id UUID;
   v_reprint_id UUID;
 BEGIN
@@ -611,8 +612,10 @@ BEGIN
   PERFORM set_config('role', p_sql_role, true);
   IF p_compose_allowed IS NOT NULL THEN
     IF p_compose_allowed THEN
-      RETURN NEXT is((public.compose_label_payload(v_job_id) -> 'job' ->> 'id')::uuid,
-                     v_job_id, p_case || ': compose preserves exact job');
+      v_composed_job_id := (public.compose_label_payload(v_job_id) -> 'job' ->> 'id')::uuid;
+      -- Restricted product roles do not need assertion-schema privileges.
+      PERFORM set_config('role', COALESCE(v_prior_sql_role, 'none'), true);
+      RETURN NEXT is(v_composed_job_id::text, v_job_id::text, p_case || ': compose preserves exact job');
     ELSE
       RETURN NEXT throws_ok(format('SELECT public.compose_label_payload(%L::uuid)', v_job_id),
         p_error_state, CASE WHEN p_error_state = 'P0001' THEN format('Access denied for label job %s', v_job_id) END,
@@ -620,8 +623,10 @@ BEGIN
     END IF;
   END IF;
   IF p_reprint_allowed IS NOT NULL THEN
+    PERFORM set_config('role', p_sql_role, true);
     IF p_reprint_allowed THEN
       v_reprint_id := public.request_label_reprint(v_label_id, 'caller fixture', NULL, 'caller_' || p_case);
+      PERFORM set_config('role', COALESCE(v_prior_sql_role, 'none'), true);
       RETURN NEXT ok(EXISTS (
         SELECT 1 FROM public.label_jobs WHERE id = v_reprint_id
           AND label_id = v_label_id AND organization_id = 'aaaaaaaa-0000-4000-8000-00000000aa01'
@@ -663,7 +668,7 @@ SELECT result.* FROM (VALUES
   ('reset_named_admin_no_jwt', 'none', '', '{}', '', TRUE, TRUE, NULL),
   ('sql_service_no_jwt', 'service_role', '', '{}', '', TRUE, TRUE, NULL),
   ('sql_renderer_no_jwt', 'edge_label_renderer_role', '', '{}', '', TRUE, NULL, NULL),
-  ('sql_authenticated_no_jwt', 'authenticated', '', '{}', '', FALSE, NULL, '42501'),
+  ('sql_authenticated_no_jwt', 'authenticated', '', '{}', '', FALSE, NULL, 'P0001'),
   ('malformed_claims', 'none', '', '{broken', '', FALSE, FALSE, '22P02'),
   ('renderer_not_reprint_authority', 'none', '', '{"role":"edge_label_renderer_role"}', '', NULL, FALSE, 'P0001')
 ) AS cases(name, sql_role, scalar_role, claims, sub, compose_allowed, reprint_allowed, error_state)
