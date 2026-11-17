@@ -101,6 +101,9 @@ function localServerOrigin(host: string, serverPort: number) {
 
 const resolvedOrigin = new URL(resolvedBaseUrl).origin;
 const governedLocalRuntime = strictE2e && isGovernedLoopbackOrigin(resolvedOrigin);
+if (governedLocalRuntime) {
+  throw new Error("Strict E2E loopback requires the dedicated public CI configuration.");
+}
 const explicitServerBindMatches = Boolean(process.env.LANDING_HOST?.trim())
   && resolvedOrigin === localServerOrigin(localLoopbackHost, port);
 const shouldStartServer = !governedLocalRuntime

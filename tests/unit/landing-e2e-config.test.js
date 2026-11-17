@@ -15,7 +15,6 @@ describe("landing E2E config", () => {
   function evaluateConfig(env, resolvedPort = 3333) {
     const resolvePort = jest.fn(() => resolvedPort);
     const resolveCache = jest.fn(() => "/unused-test-cache");
-    const admit = jest.fn();
     const code = ts.transpileModule(fs.readFileSync(configFile, "utf8"), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
     }).outputText;
@@ -30,13 +29,10 @@ describe("landing E2E config", () => {
         if (name === "./scripts/utils/resolve-local-web-server-port.js") {
           return { resolveLocalWebServerPort: resolvePort, resolveLocalWebServerPortCachePath: resolveCache };
         }
-        if (name === "./scripts/ops/ci/branch-convergence-remote.js") {
-          return { assertGovernedLocalE2ERuntime: admit };
-        }
         throw new Error(`Unexpected config dependency: ${name}`);
       },
     });
-    return { config: exports.default, resolvePort, resolveCache, admit };
+    return { config: exports.default, resolvePort, resolveCache };
   }
 
   test.each([
@@ -45,11 +41,14 @@ describe("landing E2E config", () => {
     [{ LANDING_BASE_URL: "http://127.0.0.1:3333", STRICT_E2E_GATE_ENV: "1" }, true],
     [{ LANDING_BASE_URL: "http://127.0.0.2:3333", CI: "true" }, true],
   ])("external/governed origin avoids port/cache resolution %#", (env, governed) => {
+    if (governed) {
+      expect(() => evaluateConfig(env)).toThrow("Strict E2E loopback requires the dedicated public CI configuration.");
+      return;
+    }
     const result = evaluateConfig(env);
     expect(result.resolvePort).not.toHaveBeenCalled();
     expect(result.resolveCache).not.toHaveBeenCalled();
     expect(result.config.webServer).toBeUndefined();
-    expect(result.admit).toHaveBeenCalledTimes(governed ? 1 : 0);
   });
 
   test.each([
@@ -62,7 +61,6 @@ describe("landing E2E config", () => {
     expect(result.resolvePort).toHaveBeenCalledTimes(1);
     expect(result.resolveCache).toHaveBeenCalledTimes(1);
     expect(Boolean(result.config.webServer)).toBe(starts);
-    expect(result.admit).not.toHaveBeenCalled();
   });
 
   test("guards against accidental server reuse on a conflicting port", () => {
@@ -99,21 +97,21 @@ describe("landing E2E config", () => {
     expect(body).toContain('LANDING_ENABLE_INTAKE_MOCKS=1');
   });
 
-  test("governs strict non-CI loopback and leaves ordinary local startup unchanged", () => {
+  test("rejects strict loopback and leaves ordinary local startup unchanged", () => {
     const body = fs.readFileSync(configFile, "utf8");
     const normalized = body.replace(/\s+/g, "");
 
     expect(normalized).toContain("conststrictE2e=isCi||/^(1|true|yes)$/i.test(");
     expect(normalized).toContain("process.env.STRICT_E2E_GATE_ENV");
     expect(normalized).toContain("constgovernedLocalRuntime=strictE2e&&isGovernedLoopbackOrigin(resolvedOrigin)");
-    expect(normalized).toContain("assertGovernedLocalE2ERuntime({env:process.env,requiredSurfaces:[\"landing\"]})");
+    expect(body).toContain('throw new Error("Strict E2E loopback requires the dedicated public CI configuration.")');
     expect(normalized).toContain("constshouldStartServer=!governedLocalRuntime&&(isOrdinaryLocalServerOrigin(resolvedOrigin)||explicitServerBindMatches)");
     expect(normalized).toContain('isLoopbackHostname(newURL(origin).hostname)');
     expect(normalized).toContain('forbidOnly:strictE2e');
     expect(normalized).toContain('projects:[{name:"landing"}]');
   });
 
-  test("loads ordinary extended loopback without a server and governs it in strict mode", () => {
+  test("loads ordinary extended loopback without a server and rejects it in strict mode", () => {
     const cli = require.resolve("@playwright/test/cli");
     const run = (strict) => {
       const env = {
@@ -137,6 +135,6 @@ describe("landing E2E config", () => {
     expect(ordinary.stdout).toContain("[landing]");
     const governed = run(true);
     expect(governed.status).not.toBe(0);
-    expect(`${governed.stdout}\n${governed.stderr}`).toContain("governed_local_e2e_identity_missing");
+    expect(`${governed.stdout}\n${governed.stderr}`).toContain("Strict E2E loopback requires the dedicated public CI configuration.");
   });
 });
