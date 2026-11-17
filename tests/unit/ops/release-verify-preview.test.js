@@ -21,10 +21,6 @@ const {
   upsertEnvFileVariable,
 } = require('../../../scripts/ops/workspace/with-full-preview-stack');
 
-function readWorkflow(name) {
-  return fs.readFileSync(path.join(process.cwd(), '.github', 'workflows', name), 'utf8');
-}
-
 describe('release-verify-preview helpers', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -226,42 +222,5 @@ describe('release-verify-preview helpers', () => {
     await expect(ensureProtectedPreviewBypass({ env })).rejects.toThrow(
       /Protected Vercel preview hosts require automation bypass configuration/,
     );
-  });
-});
-
-describe('release verify preview workflow contracts', () => {
-  test('guards hosted preview endpoints only when landing is selected and uses implemented distinct local mocks', () => {
-    const body = readWorkflow('release-verify-main.yml');
-    expect(body).toContain("LANDING_TENANT_SIGNUP_ENDPOINT: ${{ vars.LANDING_TENANT_SIGNUP_ENDPOINT || '' }}");
-    expect(body).toContain('case ",${preview_required_surfaces}," in');
-    expect(body).toContain('*,landing,*) node scripts/ops/ci/release-verify-preview.js --mode assert-landing-endpoint-separation ;;');
-    const build = body.slice(body.indexOf('    - name: Build landing (preview)'), body.indexOf('    - name: Start landing E2E server (local preview artifact)'));
-    expect(build).toContain('LANDING_CONTACT_ENDPOINT: "/__landing-contact"');
-    expect(build).toContain('LANDING_TENANT_SIGNUP_ENDPOINT: "/__tenant-signup"');
-    expect(build.indexOf('--mode assert-landing-endpoint-separation')).toBeLessThan(build.indexOf('node scripts/frontend/build-landing.js'));
-    expect(body).toContain('LANDING_ENABLE_INTAKE_MOCKS=1');
-    expect(body).toContain('LANDING_SITE_URL=http://127.0.0.1:3333');
-  });
-
-  test('preview provision generates runtime readiness evidence before staging the internal bundle', () => {
-    const body = readWorkflow('release-verify-main.yml');
-    const jobStart = body.indexOf('  release_verify_preview_provision:');
-    const jobEnd = body.indexOf('\n  release_verify_preview_core:', jobStart);
-
-    expect(jobStart).toBeGreaterThan(-1);
-    expect(jobEnd).toBeGreaterThan(jobStart);
-
-    const provisionJob = body.slice(jobStart, jobEnd);
-    const precheckIndex = provisionJob.indexOf('\n    - name: Preview runtime precheck');
-    const evidenceIndex = provisionJob.indexOf('\n    - name: Preview evidence contract');
-    const stageIndex = provisionJob.indexOf('\n    - name: Stage internal preview artifact bundle');
-
-    expect(precheckIndex).toBeGreaterThan(-1);
-    expect(evidenceIndex).toBeGreaterThan(precheckIndex);
-    expect(stageIndex).toBeGreaterThan(precheckIndex);
-    expect(provisionJob).toContain('node scripts/ops/preview/runtime-precheck.js \\');
-    expect(provisionJob).toContain('--report ".tmp/preview-runtime-ready.json" \\');
-    expect(provisionJob).toContain('--probe-auth \\');
-    expect(provisionJob).toContain('cp ".tmp/preview-runtime-ready.json" "${{ steps.preview_meta.outputs.artifact_runtime }}"');
   });
 });

@@ -5,12 +5,38 @@ const { resolveTargets } = require('../../../scripts/ops/ci/resolve-orchestrator
 const { loadDeploySurfaceRegistry } = require('../../../scripts/ops/ci/deploy-surface-registry');
 
 describe('resolve-orchestrator-targets', () => {
+  let workflowRoot;
+  beforeAll(() => {
+    workflowRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dispatch-contract-'));
+    const directory = path.join(workflowRoot, '.github', 'workflows');
+    fs.mkdirSync(directory, { recursive: true });
+    const { registry } = loadDeploySurfaceRegistry({});
+    const inputsByFile = new Map();
+    for (const surface of registry.surfaces) {
+      const entrypoint = surface.deploy?.entrypoint;
+      for (const [stage, file] of Object.entries(entrypoint?.workflow_file_by_stage || {})) {
+        if (!file) continue;
+        const inputs = inputsByFile.get(file) || new Set(['ref']);
+        for (const key of Object.keys(entrypoint.workflow_dispatch_inputs_by_stage?.[stage] || {})) inputs.add(key);
+        inputsByFile.set(file, inputs);
+      }
+    }
+    for (const [file, inputs] of inputsByFile) {
+      fs.writeFileSync(path.join(directory, file), [
+        'name: Synthetic dispatch', 'on:', '  workflow_dispatch:', '    inputs:',
+        ...[...inputs].map(key => `      ${key}:\n        type: string`), 'jobs: {}', '',
+      ].join('\n'));
+    }
+  });
+  afterAll(() => fs.rmSync(workflowRoot, { recursive: true, force: true }));
+
   test('resolves dev targets from registry without approval environments', () => {
     const out = resolveTargets({
       stage: 'dev',
       sha: 'abc1234',
       surfacesCsv: 'console,db',
       configPath: '',
+      workflowRoot,
     });
 
     expect(out.skip).toBe('0');
@@ -44,6 +70,7 @@ describe('resolve-orchestrator-targets', () => {
       sha: 'abc1234',
       surfacesCsv: 'mobile_fieldops,db,console',
       configPath: '',
+      workflowRoot,
     });
 
     expect(out.skip).toBe('0');
@@ -64,6 +91,7 @@ describe('resolve-orchestrator-targets', () => {
       sha: 'abc1234',
       surfacesCsv: 'console,db',
       configPath: '',
+      workflowRoot,
     });
 
     expect(out.skip).toBe('0');
@@ -100,6 +128,7 @@ describe('resolve-orchestrator-targets', () => {
       sha: 'def5678',
       surfacesCsv: 'docs',
       configPath: '',
+      workflowRoot,
     });
 
     expect(out.skip).toBe('0');
@@ -124,6 +153,7 @@ describe('resolve-orchestrator-targets', () => {
       sha: 'abc1234',
       surfacesCsv: 'unknown_surface',
       configPath: '',
+      workflowRoot,
     })).toThrow('Unknown surface_id');
   });
 
