@@ -6,11 +6,11 @@ import {
 
 describe("mobile auth methods", () => {
   test("normalizes auth email by stripping whitespace", () => {
-    expect(normalizeAuthEmail(" ops_admin@demo. local ")).toBe("sipkxyzyxvgvtksowrxwjgpn@example.invalid");
+    expect(normalizeAuthEmail(" ops_admin@demo. local ")).toBe("ops_admin@demo.local");
   });
 
   test("normalizes auth email with hidden spaces and uppercase", () => {
-    expect(normalizeAuthEmail(" Ops_Admin@\u200BDEMO.LOCAL ")).toBe("sipkxyzyxvgvtksowrxwjgpn@example.invalid");
+    expect(normalizeAuthEmail(" Ops_Admin@\u200BDEMO.LOCAL ")).toBe("ops_admin@demo.local");
   });
 
   test("normalizes and deduplicates allowed methods", () => {

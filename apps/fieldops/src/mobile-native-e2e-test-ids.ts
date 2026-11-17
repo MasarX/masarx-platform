@@ -1,7 +1,7 @@
 export const FIELDOPS_NATIVE_E2E_TEST_IDS = {
   signInScreen: "mobile-signin-screen",
   signInEmail: "mobile-signin-email",
-  signInPassword: "EXAMPLE_PASSWORD",
+  signInPassword: "mobile-signin-password",
   signInOtp: "mobile-signin-otp",
   signInSubmit: "mobile-signin-submit",
   menuToggle: "mobile-menu-toggle",
