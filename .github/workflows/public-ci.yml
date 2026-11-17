@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -121,7 +121,7 @@ jobs:
     env:
       LOCAL_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -151,7 +151,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -184,7 +184,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -235,7 +235,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -290,7 +290,7 @@ jobs:
       matrix:
         subject: [apps/console, apps/portal, landing]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -319,7 +319,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -352,7 +352,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
