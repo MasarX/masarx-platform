@@ -18,7 +18,7 @@ CREATE TEMP TABLE readback_audit AS SELECT organization_id, table_name, pk
   FROM public.audit_table_changes WITH NO DATA;
 CREATE TEMP TABLE readback_actions AS SELECT organization_id, shipment_id
   FROM public.shipment_actions WITH NO DATA;
-CREATE TEMP TABLE readback_runs AS SELECT id, organization_id, context, triggered_by_request_id
+CREATE TEMP TABLE readback_runs AS SELECT id, context, triggered_by_request_id
   FROM public.workflow_runs WITH NO DATA;
 CREATE TEMP TABLE readback_steps AS SELECT workflow_run_id, operation_result
   FROM public.workflow_run_steps WITH NO DATA;
@@ -68,8 +68,7 @@ SELECT is(pg_temp.readback('80000000-0000-4000-8000-000000000001',
   '80000000-0000-4000-8000-000000000003', '80000000-0000-4000-8000-000000000004'),
   '{"visible":false}'::JSONB, 'caller-supplied unrelated workflow/correlation cannot confirm');
 INSERT INTO readback_runs VALUES ('80000000-0000-4000-8000-000000000003',
-  '80000000-0000-4000-8000-000000000002',
-  '{"shipment":{"id":"80000000-0000-4000-8000-000000000001"}}',
+  '{"organization_id":"80000000-0000-4000-8000-000000000002","shipment":{"id":"80000000-0000-4000-8000-000000000001"}}',
   '80000000-0000-4000-8000-000000000004');
 SELECT is(pg_temp.readback('80000000-0000-4000-8000-000000000001',
   '80000000-0000-4000-8000-000000000003', '80000000-0000-4000-8000-000000000004'),

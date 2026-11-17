@@ -5,7 +5,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(24);
+SELECT plan(29);
 
 SELECT has_function(
   'public',
@@ -150,6 +150,34 @@ SELECT is((SELECT value->'pg_temp.purge_parent'->>'deleted' FROM purge_isolation
 SELECT is((SELECT value->'pg_temp.purge_other'->>'deleted' FROM purge_isolation_result), '1', 'other targets still purge after a foreign-key failure');
 SELECT is((SELECT count(*)::integer FROM purge_parent), 1, 'foreign-key protected row remains');
 SELECT is((SELECT count(*)::integer FROM purge_other), 0, 'independent target row is deleted');
+
+CREATE TEMP TABLE purge_bounded_parent (
+  id integer PRIMARY KEY,
+  ts timestamptz NOT NULL
+);
+CREATE TEMP TABLE purge_bounded_child (
+  parent_id integer NOT NULL REFERENCES purge_bounded_parent(id)
+);
+INSERT INTO purge_bounded_parent VALUES
+  (1, now() - interval '8 days'),
+  (2, now() - interval '8 days'),
+  (3, now() - interval '8 days');
+INSERT INTO purge_bounded_child VALUES (1), (2), (3);
+CREATE TEMP TABLE purge_bounded_result AS
+SELECT public.purge_log_retention_v1(
+  '[{"rel":"pg_temp.purge_bounded_parent","ts":"ts","keep":"7 days"}]'::jsonb,
+  2
+) AS value;
+SELECT is((SELECT value->'pg_temp.purge_bounded_parent'->>'skipped_fk' FROM purge_bounded_result), '2', 'foreign-key fallback visits at most p_batch protected rows');
+SELECT is((SELECT value->'pg_temp.purge_bounded_parent'->>'deleted' FROM purge_bounded_result), '0', 'fully referenced batch makes no deletion progress');
+SELECT is((SELECT value->'pg_temp.purge_bounded_parent'->'errors' FROM purge_bounded_result), '[]'::jsonb, 'typed fallback row identifiers produce no diagnostic errors');
+SELECT is((SELECT count(*)::integer FROM purge_bounded_parent), 3, 'bounded fallback preserves every protected row');
+SELECT is(
+  public.purge_log_retention_v1('[{"rel":"pg_temp.purge_other","ts":"ts","keep":"7 days"}]'::jsonb, 2)
+    ->'pg_temp.purge_other',
+  '{"deleted":0,"skipped_fk":0,"errors":[]}'::jsonb,
+  'empty target returns zero progress without accessing an unassigned row'
+);
 
 CREATE TEMP TABLE purge_after_missing (
   id integer PRIMARY KEY,
