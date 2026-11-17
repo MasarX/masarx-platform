@@ -157,7 +157,7 @@ jobs:
       - name: Install locked CLIs
         if: steps.guard.outputs.configured == 'true'
         run: |
-          for attempt in 1 2 3; do npm ci --prefix tooling/deploy --ignore-scripts --no-audit --no-fund && break
+          for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Pull project configuration
         if: steps.guard.outputs.configured == 'true'
@@ -165,13 +165,13 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
-        run: tooling/deploy/node_modules/.bin/vercel pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
+        run: tooling/apps/deploy/node_modules/.bin/vercel pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
       - name: Build prebuilt app
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
-        run: tooling/deploy/node_modules/.bin/vercel build
+        run: tooling/apps/deploy/node_modules/.bin/vercel build
       - name: Deploy prebuilt app
         id: deploy
         if: steps.guard.outputs.configured == 'true'
@@ -181,7 +181,7 @@ jobs:
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
         run: |
           set -euo pipefail
-          url="$(tooling/deploy/node_modules/.bin/vercel deploy --prebuilt --yes)"
+          url="$(tooling/apps/deploy/node_modules/.bin/vercel deploy --prebuilt --yes)"
           [[ "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
 
@@ -222,7 +222,7 @@ jobs:
       - name: Install locked CLIs
         if: steps.guard.outputs.configured == 'true'
         run: |
-          for attempt in 1 2 3; do npm ci --prefix tooling/deploy --ignore-scripts --no-audit --no-fund && break
+          for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Pull project configuration
         if: steps.guard.outputs.configured == 'true'
@@ -230,13 +230,13 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
-        run: tooling/deploy/node_modules/.bin/vercel pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
+        run: tooling/apps/deploy/node_modules/.bin/vercel pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
       - name: Build prebuilt app
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
-        run: tooling/deploy/node_modules/.bin/vercel build
+        run: tooling/apps/deploy/node_modules/.bin/vercel build
       - name: Deploy prebuilt app
         id: deploy
         if: steps.guard.outputs.configured == 'true'
@@ -246,7 +246,7 @@ jobs:
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
         run: |
           set -euo pipefail
-          url="$(tooling/deploy/node_modules/.bin/vercel deploy --prebuilt --yes)"
+          url="$(tooling/apps/deploy/node_modules/.bin/vercel deploy --prebuilt --yes)"
           [[ "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
 
@@ -295,7 +295,7 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT_LANDING: ${{ vars.CLOUDFLARE_PAGES_PROJECT_LANDING }}
         run: |
           LANDING_SITE_URL="https://$DEPLOY_ENV.$CLOUDFLARE_PAGES_PROJECT_LANDING.pages.dev" npm run build:landing
-          for attempt in 1 2 3; do npm ci --prefix tooling/deploy --ignore-scripts --no-audit --no-fund && break
+          for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Deploy landing to Pages
         id: deploy
@@ -306,7 +306,7 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT_LANDING: ${{ vars.CLOUDFLARE_PAGES_PROJECT_LANDING }}
         run: |
           set -euo pipefail
-          tooling/deploy/node_modules/.bin/wrangler pages deploy dist/landing \
+          tooling/apps/deploy/node_modules/.bin/wrangler pages deploy dist/landing \
             --project-name "$CLOUDFLARE_PAGES_PROJECT_LANDING" --branch "$DEPLOY_ENV" --commit-dirty=true | tee "$RUNNER_TEMP/pages-deploy.log"
           python3 - <<'PY'
           import os, re
@@ -372,7 +372,7 @@ jobs:
           config['vars']['UPSTREAM_ORIGIN'] = 'https://' + os.environ['SUPABASE_PROJECT_REF'] + '.supabase.co'
           (root / 'deploy.json').write_text(json.dumps(config))
           PY
-          for attempt in 1 2 3; do npm ci --prefix tooling/deploy --ignore-scripts --no-audit --no-fund && break
+          for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Deploy ingress worker
         id: deploy
@@ -382,7 +382,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          tooling/deploy/node_modules/.bin/wrangler deploy \
+          tooling/apps/deploy/node_modules/.bin/wrangler deploy \
             --config tooling/apps/api-ingress-worker/deploy.json | tee "$RUNNER_TEMP/worker-deploy.log"
           python3 - <<'PY'
           import os, re
