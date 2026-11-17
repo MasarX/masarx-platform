@@ -35,8 +35,8 @@ function diskFloor(directory) {
   if (free < 6 * 2 ** 30) throw new Error('Less than 6 GiB free; backend qualification blocked');
 }
 function completePins(pins) {
-  const expected = { database: 'supabase/postgres', auth: 'supabase/gotrue', storage: 'supabase/storage-api', gateway: 'supabase/kong' };
-  return Array.isArray(pins) && pins.length === 4 && Object.entries(expected).every(([role, image]) =>
+  const expected = { database: 'supabase/postgres', auth: 'supabase/gotrue', storage: 'supabase/storage-api', gateway: 'supabase/kong', realtime: 'supabase/realtime' };
+  return Array.isArray(pins) && pins.length === Object.keys(expected).length && Object.entries(expected).every(([role, image]) =>
     pins.filter(pin => pin.role === role && pin.image === image && /^[a-zA-Z0-9_.-]+$/.test(pin.tag)
       && /^sha256:[a-f0-9]{64}$/.test(pin.digest)).length === 1);
 }

@@ -141,9 +141,13 @@ assert.equal(mainSwitch({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'r
 assert.equal(calls[0][4], '+refs/heads/main:refs/ci-policy/main');
 const pins = JSON.parse(fs.readFileSync(path.join(root, 'config/ci/hosted-supabase-images.json'), 'utf8'));
 assert.equal(completePins(pins), true); assert.equal(completePins(pins.slice(1)), false);
+assert.equal(completePins(pins.slice(0, 4)), false);
+assert.equal(completePins([...pins, pins[4]]), false);
 assert.equal(imagePreflight('', 'pull_request', now, 'refs/pull/1/merge', pins).qualificationOnly, false);
 const created = rewrite('POST', '/v1.51/containers/create', Buffer.from(JSON.stringify({ Image: 'public.ecr.aws/supabase/postgres:other-tag' })), pins);
 assert.equal(JSON.parse(created.body).Image, `public.ecr.aws/${pins[0].image}@${pins[0].digest}`);
+assert.equal(JSON.parse(rewrite('POST', '/containers/create', Buffer.from('{"Image":"public.ecr.aws/supabase/realtime:v2.129.3"}'), pins).body).Image,
+  `public.ecr.aws/${pins[4].image}@${pins[4].digest}`);
 assert.throws(() => rewrite('POST', '/v1.51/images/create?fromImage=anything', Buffer.alloc(0), pins));
 assert.throws(() => rewrite('POST', '/v1.51/containers/create', Buffer.from('{"Image":"unreviewed/image:latest"}'), pins));
 assert.equal(decodeURIComponent(rewrite('GET', '/v1.51/images/public.ecr.aws%2Fsupabase%2Fgotrue%3Av2/json', Buffer.alloc(0), pins).url).includes(pins[1].digest), true);
