@@ -1023,7 +1023,7 @@ async function main() {
   return runSuite(dbCandidates);
 }
 
-async function runSuite(dbCandidates, fullLocal = false, env = process.env) {
+async function runSuite(dbCandidates, fullLocal = false, env = process.env, reporter) {
   if (dbCandidates.length === 0) {
     console.error('[pgTAP] Missing DATABASE_URL/DATABASE_URL_DIRECT/DATABASE_URL_POOLER. Ensure .env.cloud is loaded.');
     exitRunner(1);
@@ -1077,7 +1077,7 @@ async function runSuite(dbCandidates, fullLocal = false, env = process.env) {
   }
 
   const qaSuiteKey = env.QA_SUITE_KEY || 'pgtap';
-  const qa = createQaLogger({ runId: env.QA_RUN_ID, disabled: !env.QA_RUN_ID,
+  const qa = reporter || createQaLogger({ runId: env.QA_RUN_ID, disabled: !env.QA_RUN_ID,
     ...(fullLocal ? { env: { ...env, DATABASE_URL: databaseUrl } } : {}),
   });
   let suiteError;

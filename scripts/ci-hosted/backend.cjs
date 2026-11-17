@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const { spawnSync, fork } = require('node:child_process');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets, failureDetails } = require('./diagnostics.cjs');
+const { run, retry, stage, writeReport } = require('./process.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
@@ -16,17 +17,19 @@ function migrationInventory(files) {
   if (new Set(versions).size !== versions.length) throw new Error('Duplicate migration stamps');
   return versions;
 }
-function checked(command, args, env, timeout = 600000) {
-  const result = spawnSync(command, args, { env, encoding: 'utf8', timeout, maxBuffer: 64 * 1024 * 1024 });
-  if (result.error || result.status !== 0) {
-    const last = [...`${result.stdout || ''}\n${result.stderr || ''}`.matchAll(/Applying migration (\d+_[a-zA-Z0-9_.-]+\.sql)/g)].at(-1)?.[1];
-    if (last) console.error(`First failing migration: ${last}`);
-    // Do not print captured process output: it can contain disposable credentials or fixture data.
-    const error = new Error(`${path.basename(command)} ${args[0]} failed${last ? ` (${last})` : ''}`);
-    error.failure = failureDetails(result, environmentSecrets(env));
-    throw error;
-  }
-  return String(result.stdout || '');
+function migrationProgress(files, summary, every = 50, now = Date.now) {
+  let index = 0;
+  const start = now();
+  summary.migrationTotal = files.length;
+  return { line(text) {
+    const file = /Applying migration (\d+_[a-zA-Z0-9_.-]+\.sql)/.exec(text)?.[1];
+    if (!file) return false;
+    if (file !== files[index]) throw new Error(`Unexpected migration order: ${file}; expected ${files[index]}`);
+    summary.currentMigration = file;
+    index++;
+    if (index === 1 || (index - 1) % every === 0) console.log(`[${new Date(now()).toISOString()}] Migrations ${index - 1}/${files.length} complete; file ${index}/${files.length}: ${file}; elapsed ${((now() - start) / 1000).toFixed(1)}s`);
+    return index > 1;
+  } };
 }
 function diskFloor(directory) {
   const stat = fs.statfsSync(directory);
@@ -95,13 +98,16 @@ async function qualify(diagnostic) {
     QA_RUN_ID: '', NX_DAEMON: 'false', PATH: `${bin}${path.delimiter}${process.env.PATH}` };
   const cli = path.join(bin, 'supabase');
   let started = false; let guard; let cliEnv = env;
-  const summary = { sha: process.env.GITHUB_SHA || 'unknown', migrations: 0, pgtap: 'NOT_RUN',
+  const summary = { stages: [], sha: process.env.GITHUB_SHA || 'unknown', migrations: 0, pgtap: 'NOT_RUN',
     integration: 'SKIPPED_BY_DESIGN: local equivalence of the integration inventory is unproved',
     serviceImagePins: pinState.qualificationOnly ? 'PIN_NEEDED' : 'resolved SHA-256 indices', imageQualificationOnly: pinState.qualificationOnly, ok: false };
+  fs.mkdirSync('ci-reports', { recursive: true });
+  const checked = (command, args, commandEnv, timeout, options = {}) => run(command, args, { env: commandEnv, timeout, logFile: 'ci-reports/backend.log', ...options });
+  const timed = (name, action) => { diagnostic.stage = name; return stage(summary, name, action); };
   try {
     diagnostic.stage = 'docker-preflight';
-    checked('docker', ['info', '--format', '{{.ServerVersion}}'], env);
-    const dockerRoot = checked('docker', ['info', '--format', '{{.DockerRootDir}}'], env).trim();
+    await checked('docker', ['info', '--format', '{{.ServerVersion}}'], env);
+    const dockerRoot = (await checked('docker', ['info', '--format', '{{.DockerRootDir}}'], env, undefined, { quiet: true })).trim();
     diskFloor(dockerRoot);
     if (!pinState.qualificationOnly) {
       if (env.DOCKER_HOST && !env.DOCKER_HOST.startsWith('unix://')) throw new Error('Digest-pinned startup requires the hosted Unix Docker daemon');
@@ -109,8 +115,8 @@ async function qualify(diagnostic) {
       for (const pin of pins) {
         diskFloor(dockerRoot);
         const reference = `public.ecr.aws/${pin.image}@${pin.digest}`;
-        checked('docker', ['pull', '--platform', 'linux/amd64', reference], env, 20 * 60000);
-        pin.runtimeId = checked('docker', ['image', 'inspect', '--format', '{{.Id}}', reference], env).trim();
+        await timed(`image-pull:${pin.role}`, () => retry(`image-pull:${pin.role}`, () => checked('docker', ['pull', '--platform', 'linux/amd64', reference], env, 20 * 60000)));
+        pin.runtimeId = (await checked('docker', ['image', 'inspect', '--format', '{{.Id}}', reference], env, undefined, { quiet: true })).trim();
       }
       diagnostic.stage = 'image-guard';
       guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env);
@@ -125,7 +131,7 @@ async function qualify(diagnostic) {
     if (crypto.createHash('sha256').update(archive).digest('hex') !== asset.sha256) throw new Error('Supabase CLI checksum mismatch');
     const archivePath = path.join(temp, 'cli.tar.gz');
     fs.writeFileSync(archivePath, archive, { mode: 0o600 });
-    checked('tar', ['-xzf', archivePath, '-C', bin, 'supabase'], env);
+    await checked('tar', ['-xzf', archivePath, '-C', bin, 'supabase'], env);
     env.SUPABASE_CLI_BIN = cli;
     // This workdir owns an empty DB. No remote profiles, seed files or cached schema are copied.
     const sb = path.join(temp, 'supabase');
@@ -143,9 +149,9 @@ async function qualify(diagnostic) {
     ].join('\n'), { mode: 0o600 });
     diagnostic.stage = 'stack-start';
     started = true; // A partial start must also be stopped.
-    checked(cli, ['start', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 20 * 60000);
+    await timed('stack-start', () => checked(cli, ['start', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 20 * 60000));
     diagnostic.stage = 'stack-status';
-    const status = JSON.parse(checked(cli, ['status', '--workdir', temp, '-o', 'json'], cliEnv));
+    const status = JSON.parse(await checked(cli, ['status', '--workdir', temp, '-o', 'json'], cliEnv, undefined, { quiet: true }));
     if (!status.DB_URL) throw new Error('Local stack did not provide DB_URL');
     Object.assign(env, { DATABASE_URL: status.DB_URL, DATABASE_URL_DIRECT: status.DB_URL,
       SUPABASE_URL: status.API_URL || '', SUPABASE_ANON_KEY: status.ANON_KEY || '',
@@ -153,7 +159,7 @@ async function qualify(diagnostic) {
     local.assertLoopbackOnly(env, 'local stack');
     diagnostic.stage = 'database-connect';
     const { Client } = require('pg');
-    const db = new Client({ connectionString: env.DATABASE_URL });
+    const db = new Client({ connectionString: env.DATABASE_URL, connectionTimeoutMillis: 15000, query_timeout: 15000 });
     await db.connect();
     try {
       const history = await db.query("select to_regclass('supabase_migrations.schema_migrations') as history");
@@ -165,38 +171,63 @@ async function qualify(diagnostic) {
       fs.rmdirSync(path.join(sb, 'migrations'));
       fs.symlinkSync(path.join(root, 'supabase/migrations'), path.join(sb, 'migrations'), 'dir');
       diskFloor(dockerRoot);
-      // The CLI orders stamps, records history and stops on the first SQL error. No retry.
-      diagnostic.stage = 'migrations';
-      checked(cli, ['migration', 'up', '--local', '--workdir', temp], cliEnv, 100 * 60000);
-      const applied = await db.query('select version from supabase_migrations.schema_migrations order by version');
-      if (JSON.stringify(applied.rows.map(row => row.version)) !== JSON.stringify(versions)) throw new Error('Applied migration stamps do not match the complete source inventory');
-      summary.migrations = versions.length;
-      console.log(`Fresh migration replay: ${versions.length} files`);
-    } finally { await db.end(); }
-    diagnostic.stage = 'backend-lint';
-    for (const lint of local.loadBackendLocalPreSuiteCommands()) {
-      checked('npm', ['run', lint.script], { ...env, ...lint.env, ENV_FILE: os.devNull,
-        ENV_FILE_APPEND: '0', ENV_FILE_OVERRIDE: '0', MIGRATION_FIXTURE_GUARD_MODE: 'full' }, lint.timeout_ms);
-    }
-    diagnostic.stage = 'pgtap';
-    if (fs.existsSync('supabase/tests/pgtap')) {
-      const files = fs.readdirSync('supabase/tests/pgtap').filter(n => n.endsWith('.sql'));
-      if (!files.length) throw new Error('Present pgTAP directory is empty');
-      const skipFile = 'supabase/tests/pgtap/.pgtap-skip.json';
-      if (fs.existsSync(skipFile)) {
-        const skip = JSON.parse(fs.readFileSync(skipFile, 'utf8'));
-        if (!Array.isArray(skip) || skip.length) throw new Error('Full pgTAP cannot use a malformed/nonempty skip list');
+      // The pinned CLI reuses one connection and batches statements per file, retaining migration history.
+      const files = fs.readdirSync('supabase/migrations').filter(name => name.endsWith('.sql')).sort();
+      const progress = migrationProgress(files, summary);
+      let migrationError;
+      try {
+        await timed('migrations', () => checked(cli, ['migration', 'up', '--local', '--workdir', temp], cliEnv, 150 * 60000, {
+          onLine: progress.line, idleMs: 10 * 60000,
+          idleMessage: () => `No migration completed for 10 minutes; in progress: ${summary.currentMigration || '(connecting)'}`,
+        }));
+      } catch (error) { migrationError = error; throw error; }
+      finally {
+        let applied;
+        try { applied = await db.query('select version from supabase_migrations.schema_migrations order by version'); }
+        catch (error) {
+          summary.migrations = 'UNKNOWN';
+          summary.firstFailingMigration = summary.currentMigration || null;
+          if (!migrationError) throw error;
+        }
+        if (applied) {
+          summary.migrations = applied.rows.length;
+          summary.migrationTotal = versions.length;
+          summary.migrationsPerMinute = Number((summary.migrations / ((summary.stages.find(s => s.name === 'migrations').durationMs || 1) / 60000)).toFixed(2));
+          summary.migrationFailed = migrationError && summary.currentMigration && summary.migrations < versions.length ? 1 : 0;
+          summary.migrationNotRun = versions.length - summary.migrations - summary.migrationFailed;
+          summary.firstFailingMigration = summary.migrationFailed ? files[summary.migrations] : null;
+          if (summary.migrationFailed) console.error(`First failing migration: ${summary.firstFailingMigration}`);
+          if (!migrationError && JSON.stringify(applied.rows.map(row => row.version)) !== JSON.stringify(versions)) throw new Error('Applied migration stamps do not match the complete source inventory');
+        }
       }
-      checked('docker', ['pull', lane.psqlClientImage], env, 10 * 60000);
-      local.writePsqlWrapper(bin, lane.psqlClientImage);
-      Object.assign(env, { PGTAP_FULL_LOCAL_QUALIFICATION: '1', PGTAP_ONLY_FILES: '', PGTAP_TEST_FILES: '',
-        PGTAP_NODE_FILE_RETRIES: '0', PGTAP_RETRY_TRANSIENT: '0', PGTAP_RETRY_DEADLOCKS: '0',
-        PGTAP_NODE_FILE_MAX_WAIT_MS: '0', PGTAP_FILES_PER_SESSION: '1',
-        DB_LOCAL_PROJECT_ID: project, DB_LOCAL_DB_PORT: String(config.dbPort) });
-      diskFloor(dockerRoot);
-      checked(process.execPath, ['scripts/ops/ci/cloud-pool-db-local-pgtap.js'], env, 40 * 60000);
-      summary.pgtap = `passed: ${files.length} files, no filters/retries`;
-    } else summary.pgtap = 'SKIPPED_BY_DESIGN: pgTAP directory absent';
+      console.log(`Fresh migration replay: ${versions.length} files`);
+      summary.currentMigration = null;
+    } finally { await db.end(); }
+    await timed('backend-lint', async () => {
+      for (const lint of local.loadBackendLocalPreSuiteCommands()) {
+        await checked('npm', ['run', lint.script], { ...env, ...lint.env, ENV_FILE: os.devNull,
+          ENV_FILE_APPEND: '0', ENV_FILE_OVERRIDE: '0', MIGRATION_FIXTURE_GUARD_MODE: 'full' }, lint.timeout_ms);
+      }
+    });
+    await timed('database-dump', async () => {
+      const container = `supabase_db_${project}`;
+      const snapshot = path.resolve('ci-reports/database-snapshot');
+      fs.mkdirSync(snapshot, { recursive: true });
+      // A new per-shard encryption key is safe only while the built database has no Vault secrets.
+      const vaultCount = (await checked('docker', ['exec', container, 'psql', '-h', '127.0.0.1', '-U', 'supabase_admin', '-d', 'postgres', '-Atc',
+        'select count(*) from vault.secrets'], env, undefined, { quiet: true })).trim();
+      if (vaultCount !== '0') throw new Error('Logical snapshot cannot preserve persisted Vault secrets without exporting encryption keys');
+      await checked('docker', ['exec', container, 'pg_dump', '-h', '127.0.0.1', '-U', 'supabase_admin', '-d', 'postgres', '-Fc', '--create', '-f', '/tmp/database.dump'], env);
+      await checked('docker', ['exec', container, 'pg_dumpall', '-h', '127.0.0.1', '-U', 'supabase_admin', '--globals-only', '--no-role-passwords', '-f', '/tmp/roles.sql'], env);
+      for (const file of ['database.dump', 'roles.sql']) await checked('docker', ['cp', `${container}:/tmp/${file}`, path.join(snapshot, file)], env);
+      const settings = await checked('docker', ['exec', container, 'psql', '-h', '127.0.0.1', '-U', 'supabase_admin', '-d', 'postgres', '-Atc',
+        "select json_object_agg(name, setting) from pg_settings where name in ('shared_preload_libraries', 'session_preload_libraries', 'cron.database_name', 'max_connections', 'max_worker_processes', 'max_replication_slots', 'max_wal_senders', 'wal_level')"], env, undefined, { quiet: true });
+      const databasePin = pins.find(pin => pin.role === 'database');
+      fs.writeFileSync(path.join(snapshot, 'manifest.json'), JSON.stringify({ sha: summary.sha, image: `public.ecr.aws/${databasePin.image}@${databasePin.digest}`,
+        settings: JSON.parse(settings), migrations: summary.migrations,
+        files: Object.fromEntries(['database.dump', 'roles.sql'].map(file => [file, crypto.createHash('sha256').update(fs.readFileSync(path.join(snapshot, file))).digest('hex')])) }, null, 2));
+      summary.pgtap = 'DEFERRED_TO_SHARDS';
+    });
     console.log(summary.integration);
     summary.ok = true;
     diagnostic.stage = 'complete';
@@ -216,13 +247,15 @@ async function qualify(diagnostic) {
       }
     }
     if (guard) {
+      summary.imagePolicy = JSON.parse(fs.readFileSync(guard.policyFile, 'utf8'));
       guard.child.kill('SIGTERM');
       await new Promise(resolve => { const timer = setTimeout(() => { guard.child.kill('SIGKILL'); resolve(); }, 3000);
         guard.child.once('exit', () => { clearTimeout(timer); resolve(); }); });
     }
     fs.rmSync(temp, { recursive: true, force: true });
     fs.mkdirSync('ci-reports', { recursive: true });
-    fs.writeFileSync('ci-reports/backend.json', `${JSON.stringify(summary, null, 2)}\n`);
+    summary.failure = diagnostic.failure;
+    writeReport('ci-reports/backend.json', summary);
   }
 }
 function saveFailure(diagnostic, error, secrets) {
@@ -240,4 +273,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor };
