@@ -1,4 +1,4 @@
-name: Public CI
+name: ci
 
 'on':
   pull_request:
@@ -472,9 +472,21 @@ jobs:
           retention-days: 1
           include-hidden-files: false
 
-  ci-result:
-    name: CI result
-    needs: [database, database-build, database-pgtap, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines]
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0 (Node24)
+        with:
+          fail-on-severity: high
+
+  ci-gate:
+    name: ci-gate
+    needs: [database, database-build, database-pgtap, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines, dependency-review]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -483,16 +495,19 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           VISUAL_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.regenerate_visual_baselines }}
+          DEPENDENCY_REVIEW_REQUESTED: ${{ github.event_name == 'pull_request' }}
         run: |
           python3 -I - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ['NEEDS_JSON'])
-          expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines'}
+          expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines', 'dependency-review'}
           good = set(needs) == expected
           for name in sorted(expected):
               result = needs.get(name, {}).get('result', 'missing')
               allowed = {'success'}
               if name == 'visual-baselines' and os.environ['VISUAL_REQUESTED'] != 'true':
+                  allowed = {'skipped'}
+              if name == 'dependency-review' and os.environ['DEPENDENCY_REVIEW_REQUESTED'] != 'true':
                   allowed = {'skipped'}
               passed = result in allowed
               print(f'{name}: {result}; {"PASS" if passed else "FAIL"}')

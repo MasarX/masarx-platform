@@ -1,0 +1,40 @@
+name: Hotfix back-merge
+
+'on':
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+concurrency:
+  group: hotfix-backmerge
+  cancel-in-progress: false
+
+jobs:
+  backmerge:
+    if: github.event.pull_request.merged && startsWith(github.event.pull_request.head.ref, 'hotfix/') && github.event.pull_request.head.repo.id == github.event.repository.id
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Open main into dev if needed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOTFIX_HEAD: ${{ github.event.pull_request.head.ref }}
+        run: |
+          [[ "$HOTFIX_HEAD" == hotfix/?* ]] || exit 0
+          existing=$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f base=dev -f "head=$GITHUB_REPOSITORY_OWNER:main" --jq '.[0].html_url // empty')
+          if [[ -z "$existing" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/pulls" \
+              -f head=main -f base=dev -f 'title=Back-merge hotfix into dev' \
+              -f 'body=Bring the merged hotfix from main into dev.' --jq '.html_url'
+          else
+            printf '%s\n' "$existing"
+          fi

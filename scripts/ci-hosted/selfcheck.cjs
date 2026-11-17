@@ -256,14 +256,19 @@ assert.doesNotThrow(() => enforceWorkflowInventory(new Map([['.github/workflows/
 assert.doesNotThrow(() => enforceWorkflowInventory(new Map([['.github/workflows/policy.yml', ''], ['.github/workflows/public-ci.yml', ''], ['.github/workflows/extra.yml', '']])));
 for (const missing of ['policy.yml', 'public-ci.yml']) assert.throws(() => enforceWorkflowInventory(new Map([[`.github/workflows/${missing}`, '']])), /missing/);
 assert.throws(() => enforceWorkflowInventory(new Map([['.github/workflows/policy.yml', ''], ['.github/workflows/public-ci.yml', ''], ['.github/workflows/nested/extra.yml', '']])), /directly/);
-for (const branch of ['preview', 'dev', 'main']) {
-  const event = { pull_request: { base: { ref: branch, sha: base }, head: { sha: head } }, merge_group: { base_ref: `refs/heads/${branch}`, base_sha: base, head_sha: head } };
-  for (const kind of ['pull_request_target', 'merge_group']) assert.equal(policySource(event, kind), base);
-  assert.throws(() => policySource({ pull_request: { ...event.pull_request, base: { ref: branch } } }, 'pull_request_target'), /SHA/);
+for (const branch of ['dev', 'main']) {
+  assert.equal(policySource({ pull_request: { base: { ref: branch, sha: base } } }, 'pull_request'), base);
+  assert.throws(() => policySource({ pull_request: { base: { ref: branch } } }, 'pull_request'), /SHA/);
 }
-for (const kind of ['pull_request', 'push', 'unknown']) assert.throws(() => policySource({}, kind), /Unsupported policy event/);
-assert.throws(() => policySource({ pull_request: { base: { ref: 'other', sha: base } } }, 'pull_request_target'), /target branch/);
-assert.throws(() => policySource({ merge_group: { base_ref: 'refs/heads/main', head_sha: head } }, 'merge_group'), /SHA/);
+for (const sha of [[base], `${base}\n`]) {
+  assert.throws(() => policySource({ pull_request: { base: { ref: 'dev', sha } } }, 'pull_request'), /SHA/);
+}
+for (const kind of ['pull_request_target', 'push', 'unknown']) assert.throws(() => policySource({}, kind), /Unsupported policy event/);
+for (const branch of ['preview', 'other']) {
+  assert.throws(() => policySource({ pull_request: { base: { ref: branch, sha: base } } }, 'pull_request'), /target branch/);
+}
+assert.throws(() => policySource({ merge_group: { base_ref: 'refs/heads/dev', head_sha: head } }, 'merge_group'), /SHA/);
+assert.throws(() => policySource({ merge_group: { base_ref: 'refs/heads/main', base_sha: base } }, 'merge_group'), /target branch/);
 assert.throws(() => guardPlan('candidate.js', base, readBase));
 assert.throws(() => guardPlan('jest.cjs', 'HEAD', readBase));
 assert.throws(() => guardPlan('jest.cjs', base, () => `120000 blob ${base}\tfile\0`));

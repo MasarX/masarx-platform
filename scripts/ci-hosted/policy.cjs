@@ -118,36 +118,42 @@ function authorizedPr(allow, head, repository) {
     && head.ref === allow.branch && head.sha === allow.sha;
 }
 const sha = value => {
-  if (!/^[a-f0-9]{40}$/.test(value || '')) throw new Error('Missing/invalid event SHA');
+  if (typeof value !== 'string' || value.length !== 40 || /[^a-f0-9]/.test(value)) throw new Error('Missing/invalid event SHA');
   return value;
 };
 function policySource(event, kind) {
   let branch; let base;
-  if (kind === 'pull_request_target') {
+  if (kind === 'pull_request') {
     branch = event.pull_request?.base?.ref;
     base = event.pull_request?.base?.sha;
+    if (branch !== 'dev' && branch !== 'main') throw new Error('Unsupported target branch');
   } else if (kind === 'merge_group') {
     branch = event.merge_group?.base_ref?.replace(/^refs\/heads\//, '');
     base = event.merge_group?.base_sha;
+    // Main admission requires PR head identity, which a queue range does not carry.
+    if (branch !== 'dev') throw new Error('Unsupported merge-group target branch');
   } else throw new Error('Unsupported policy event');
-  if (!['preview', 'dev', 'main'].includes(branch)) throw new Error('Unsupported target branch');
   return sha(base);
 }
+function validRepo(repo) {
+  return Number.isSafeInteger(repo?.id) && repo.id > 0
+    && typeof repo.full_name === 'string' && repo.full_name.length > 0
+    && typeof repo.fork === 'boolean';
+}
 function devPromotion(event, kind, repository, read = git) {
-  if (kind !== 'pull_request_target') return false;
-  const pr = event.pull_request;
-  const target = pr?.base?.ref;
-  if (target === 'main' && pr?.head?.ref !== 'dev') throw new Error('Main accepts only a current same-repository dev promotion');
-  if (!['main', 'preview'].includes(target) || pr?.head?.ref !== 'dev') return false;
-  const head = pr.head;
-  const baseRepo = pr.base.repo;
-  if (!repository || !head.repo || !baseRepo || head.repo.fork !== false
-    || !Number.isSafeInteger(baseRepo.id) || baseRepo.id < 1 || head.repo.id !== baseRepo.id
-    || baseRepo.full_name?.toLowerCase() !== repository.toLowerCase()
-    || head.repo.full_name?.toLowerCase() !== repository.toLowerCase()) {
-    throw new Error('Dev promotion requires complete same-repository identity; forks are refused');
+  if (kind !== 'pull_request') return false;
+  const { base, head } = event.pull_request;
+  if (!repository || !validRepo(base.repo) || base.repo.full_name.toLowerCase() !== repository.toLowerCase()
+    || !validRepo(head?.repo) || typeof head.ref !== 'string' || !head.ref) {
+    throw new Error('Missing/invalid PR branch or repository identity');
   }
   const headSha = sha(head.sha);
+  if (base.ref !== 'main') return false;
+  if ((head.ref !== 'dev' && !/^hotfix\/.+$/.test(head.ref))
+    || head.repo.fork || head.repo.id !== base.repo.id || head.repo.full_name.toLowerCase() !== repository.toLowerCase()) {
+    throw new Error('Main accepts only current same-repository dev promotions or same-repository hotfix/* branches');
+  }
+  if (head.ref !== 'dev') return false;
   read(['fetch', '--no-tags', '--depth=1', 'origin', '+refs/heads/dev:refs/policy/dev']);
   if (sha(read(['rev-parse', 'refs/policy/dev']).trim()) !== headSha) throw new Error('Dev promotion head is stale');
   return true;
@@ -178,58 +184,57 @@ function enforceMarker(changes, candidateText, authorized, now = new Date(), kin
 function enforceScope(scope, kind) {
   if (scope.mixed && kind !== 'merge_group') throw new Error('Protected-path changes must touch nothing outside protected paths');
 }
-function main() {
+function evaluatePolicy(event, kind, repository, read = git) {
   // The workflow runs this file from the target base; candidate Git objects are data only.
-  const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-  const kind = process.env.GITHUB_EVENT_NAME;
   const source = policySource(event, kind);
-  const promotion = devPromotion(event, kind, process.env.GITHUB_REPOSITORY);
+  const promotion = devPromotion(event, kind, repository, read);
   let base; let candidate;
-  if (kind === 'pull_request_target') {
-    ({ candidate, base } = liveMerge(event));
-  } else if (kind === 'merge_group') {
-    base = sha(event.merge_group?.base_sha);
+  if (kind === 'pull_request') {
+    ({ candidate, base } = liveMerge(event, read));
+  } else {
+    base = source;
     candidate = sha(event.merge_group?.head_sha);
-    for (const ref of [base, candidate]) git(['fetch', '--no-tags', '--depth=64', 'origin', ref]);
-  } else throw new Error('Unsupported policy event');
+    for (const ref of [base, candidate]) read(['fetch', '--no-tags', '--depth=64', 'origin', ref]);
+  }
   if (base !== source) throw new Error('Candidate base differs from the trusted policy source');
-  const fields = git(['diff', '--no-renames', '--name-status', '-z', base, candidate]).split('\0').filter(Boolean);
+  const fields = read(['diff', '--no-renames', '--name-status', '-z', base, candidate]).split('\0').filter(Boolean);
   if (fields.length % 2) throw new Error('Malformed candidate diff');
   const changes = [];
   for (let i = 0; i < fields.length; i += 2) changes.push([fields[i], fields[i + 1]]);
   rejectChanges(changes);
-  dependencyNotices(changes, base, candidate);
-  const managerChanges = packageManagerChanges(changes, base, candidate);
+  dependencyNotices(changes, base, candidate, read);
+  const managerChanges = packageManagerChanges(changes, base, candidate, read);
   inputNotices(changes, managerChanges);
-  const installFiles = installInputs(candidate);
+  const installFiles = installInputs(candidate, read);
   enforceWorkflowInventory(installFiles);
   const installErrors = checkInstallPolicy(installFiles);
   if (installErrors.length) throw new Error(`CI install policy violation: ${JSON.stringify(installErrors)}`);
-  const baseFiles = git(['ls-tree', '-r', '--name-only', '-z', base, '--', 'supabase/migrations/']).split('\0').filter(Boolean);
-  const migrations = assess(baseFiles, changes.filter(([, file]) => file.startsWith('supabase/migrations/')),
-    exceptions(targetFile('config/ci/migration-append-only-exceptions.txt', base)),
-    objectsAt(candidate, changes.filter(([, file]) => file.startsWith('supabase/migrations/'))));
+  const baseFiles = read(['ls-tree', '-r', '--name-only', '-z', base, '--', 'supabase/migrations/']).split('\0').filter(Boolean);
+  const migrationChanges = changes.filter(([, file]) => file.startsWith('supabase/migrations/'));
+  const migrations = assess(baseFiles, migrationChanges,
+    exceptions(targetFile('config/ci/migration-append-only-exceptions.txt', base, read)),
+    objectsAt(candidate, migrationChanges, read));
   for (const file of migrations.tolerated) console.log(`TOLERATED migration exception from target branch: ${file}`);
   if (migrations.failed.length) throw new Error(`Append-only violation: ${JSON.stringify(migrations.failed)}`);
   const scope = classify(changes, managerChanges);
   if (!promotion) enforceScope(scope, kind);
-  const candidateMarker = targetFile(markerFile, candidate);
+  const candidateMarker = targetFile(markerFile, candidate, read);
   enforceMarker(changes, candidateMarker, false, new Date(), kind);
   const authorityFiles = scope.guarded.filter(([, file]) => file !== markerFile || !closedMarker(candidateMarker));
   if (authorityFiles.length && !promotion) {
-    const allow = marker(targetFile(markerFile, base));
+    const allow = marker(targetFile(markerFile, base, read));
     if (!allow) throw new Error('Protected-path changes denied: target marker is closed or expired');
     if (kind === 'merge_group') {
       // Bind queue changes to the authorized same-repository branch, commit and file blobs.
-      git(['fetch', '--no-tags', '--depth=1', 'origin', `refs/heads/${allow.branch}`]);
-      if (git(['rev-parse', 'FETCH_HEAD']).trim() !== allow.sha) throw new Error('Authorized branch head changed');
-      git(['merge-base', '--is-ancestor', allow.sha, candidate]);
+      read(['fetch', '--no-tags', '--depth=1', 'origin', `refs/heads/${allow.branch}`]);
+      if (read(['rev-parse', 'FETCH_HEAD']).trim() !== allow.sha) throw new Error('Authorized branch head changed');
+      read(['merge-base', '--is-ancestor', allow.sha, candidate]);
       for (const [, file] of authorityFiles) {
-        if (git(['ls-tree', '-z', candidate, '--', file]) !== git(['ls-tree', '-z', allow.sha, '--', file])) {
+        if (read(['ls-tree', '-z', candidate, '--', file]) !== read(['ls-tree', '-z', allow.sha, '--', file])) {
           throw new Error('Queued protected-file content differs from the authorized head');
         }
       }
-    } else if (!authorizedPr(allow, event.pull_request.head, process.env.GITHUB_REPOSITORY)) {
+    } else if (!authorizedPr(allow, event.pull_request.head, repository)) {
       throw new Error('Protected-path PR does not match the target-authorized same-repository branch and head');
     }
     for (const [, file] of scope.guarded) console.log(`TOLERATED protected-only change: ${JSON.stringify(file)}`);
@@ -237,5 +242,9 @@ function main() {
   if (promotion) console.log('PASS: current same-repository dev promotion; protected paths were guarded on entry to dev');
   console.log('PASS: target-branch policy, protected-path scope and append-only migrations');
 }
+function main() {
+  const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+  evaluatePolicy(event, process.env.GITHUB_EVENT_NAME, process.env.GITHUB_REPOSITORY);
+}
 if (require.main === module) { try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; } }
-module.exports = { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, manifestAt, dependencyNotices, lockfile, installInputs, enforceWorkflowInventory, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, policySource, devPromotion };
+module.exports = { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, manifestAt, dependencyNotices, lockfile, installInputs, enforceWorkflowInventory, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, policySource, devPromotion, evaluatePolicy };

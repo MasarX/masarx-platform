@@ -2,11 +2,10 @@
 name: Required repository policy
 
 'on':
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened, edited]
-    branches: [preview, dev, main]
   merge_group:
-    branches: [preview, dev, main]
+    branches: [dev]
     types: [checks_requested]
 
 permissions:
@@ -36,19 +35,21 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const sha = value => {
-            if (!/^[a-f0-9]{40}$/.test(value || '')) throw new Error('Missing/invalid event SHA');
+            if (typeof value !== 'string' || value.length !== 40 || /[^a-f0-9]/.test(value)) throw new Error('Missing/invalid event SHA');
             return value;
           };
           function policySource(event, kind) {
             let branch; let base;
-            if (kind === 'pull_request_target') {
+            if (kind === 'pull_request') {
               branch = event.pull_request?.base?.ref;
               base = event.pull_request?.base?.sha;
+              if (branch !== 'dev' && branch !== 'main') throw new Error('Unsupported target branch');
             } else if (kind === 'merge_group') {
               branch = event.merge_group?.base_ref?.replace(/^refs\/heads\//, '');
               base = event.merge_group?.base_sha;
+              // Main admission requires PR head identity, which a queue range does not carry.
+              if (branch !== 'dev') throw new Error('Unsupported merge-group target branch');
             } else throw new Error('Unsupported policy event');
-            if (!['preview', 'dev', 'main'].includes(branch)) throw new Error('Unsupported target branch');
             return sha(base);
           }
           const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
