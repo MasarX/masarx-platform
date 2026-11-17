@@ -32,17 +32,43 @@ function evaluate(report, expected, exitCode, root) {
   return { failed, unexpected, stale, cases, skipped,
     ok: cases > 0 && !runtimeError && !unexplainedExit && !snapshotError && !unexpected.length && !stale.length };
 }
-function parseList(text, lane) {
-  const found = new Set();
-  const all = new Set();
+function parseEntries(text, lane) {
+  const found = new Map(); const all = new Set();
   for (const line of text.split(/\r?\n/)) {
     if (!line || line.startsWith('#')) continue;
-    if (!/^(unit|ui|integration)\t[a-f0-9]{64}$/.test(line) || all.has(line)) throw new Error('Malformed/duplicate known-failures entry');
-    all.add(line);
-    const [kind, id] = line.split('\t');
-    if (kind === lane) found.add(id);
+    const fields = line.split('\t');
+    const [kind] = fields; const id = fields.at(-1);
+    const file = fields.length === 3 ? fields[1] : null;
+    if (![2, 3].includes(fields.length) || !['unit', 'ui', 'integration'].includes(kind)
+      || !/^[a-f0-9]{64}$/.test(id) || all.has(`${kind}\t${id}`)
+      || (file !== null && (!file.startsWith(`tests/${kind}/`) || file.includes('\\') || file.split('/').some(p => !p || p === '.' || p === '..')))) {
+      throw new Error('Malformed/duplicate known-failures entry');
+    }
+    all.add(`${kind}\t${id}`);
+    if (kind === lane) found.set(id, file);
   }
   return found;
+}
+function parseList(text, lane) { return new Set(parseEntries(text, lane).keys()); }
+function retainedEntries(authority, proposed) {
+  return new Map([...authority].filter(([id, file]) => proposed.has(id) && proposed.get(id) === file));
+}
+function shardOption(value = '') {
+  if (!value) return null;
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value);
+  if (!match || Number(match[1]) > Number(match[2]) || Number(match[2]) > 64) throw new Error('Invalid Jest shard');
+  return value;
+}
+function expectedForFiles(entries, inventory, selected) {
+  const all = new Set(inventory); const own = new Set(selected);
+  if (!all.size || !own.size || all.size !== inventory.length || own.size !== selected.length
+    || selected.some(file => !all.has(file))) throw new Error('Invalid Jest shard inventory');
+  const expected = new Set();
+  for (const [id, file] of entries) {
+    if (!file || !all.has(file)) throw new Error('Known failure has no collected file; regenerate the baseline from a real run');
+    if (own.has(file)) expected.add(id);
+  }
+  return expected;
 }
 function main() {
   const lane = process.argv[2];
@@ -50,12 +76,15 @@ function main() {
   const root = process.cwd();
   const config = `config/tooling/jest.config${lane === 'integration' ? '' : `.${lane}`}.js`;
   if (!fs.existsSync(config)) throw new Error(`Missing ${config}`);
-  // The PR target chooses its baseline; a merge group uses its target branch as well.
-  const rawBranch = process.env.CI_BASE_BRANCH || process.env.GITHUB_REF_NAME || '';
-  const branch = rawBranch.replace(/^refs\/heads\//, '');
-  const list = ['main', 'v2'].includes(branch) ? `config/ci/known-failures.${branch}.txt` : null;
+  // One target-owned baseline for all long-lived branches.
+  const list = 'config/ci/known-failures.txt';
   const base = targetBase();
-  const expected = list ? parseList(targetFile(list, base), lane) : new Set();
+  const authority = list ? parseEntries(targetFile(list, base), lane) : new Map();
+  const proposed = fs.existsSync(list) ? parseEntries(fs.readFileSync(list, 'utf8'), lane) : new Map();
+  const entries = retainedEntries(authority, proposed);
+  let expected = new Set(entries.keys());
+  const shard = shardOption(process.env.JEST_SHARD);
+  const suffix = shard ? `.${shard.replace('/', '-of-')}` : '';
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'hosted-jest-'));
   const output = path.join(temp, 'results.json');
   try {
@@ -66,7 +95,19 @@ function main() {
       const setup = spawnSync('npm', ['run', 'pretest:unit'], { env: process.env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       if (setup.error || setup.status !== 0) throw new Error('Explicit unit preparation failed');
     }
-    const result = spawnSync('npm', ['run', script, '--', '--json', `--outputFile=${output}`, '--reporters=default'], {
+    if (shard) {
+      const collect = args => {
+        const listed = spawnSync('npm', ['run', '--silent', script, '--', '--listTests', '--json', ...args], {
+          env: process.env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 120000,
+        });
+        if (listed.error || listed.status !== 0) throw new Error('Jest inventory failed');
+        const files = JSON.parse(listed.stdout);
+        if (!Array.isArray(files) || files.some(file => typeof file !== 'string')) throw new Error('Invalid Jest inventory');
+        return files.map(file => path.relative(root, file).split(path.sep).join('/'));
+      };
+      expected = expectedForFiles(entries, collect([]), collect([`--shard=${shard}`]));
+    }
+    const result = spawnSync('npm', ['run', script, '--', ...(shard ? [`--shard=${shard}`] : []), '--json', `--outputFile=${output}`, '--reporters=default'], {
       env: { ...process.env, ENV_FILE: os.devNull, ENV_FILE_APPEND: '0', ENV_FILE_OVERRIDE: '0',
         QA_RUN_ID: '', JEST_RETRY_TIMES: '0',
         ...(lane === 'ui' ? {} : { NODE_OPTIONS: '--experimental-vm-modules' }) },
@@ -81,12 +122,15 @@ function main() {
     fs.mkdirSync('ci-reports', { recursive: true });
     // Always generated from observed assertions, never a hand-authored exemption list.
     const candidate = [`# observed ${lane}; candidate ${process.env.GITHUB_SHA || 'unknown'}; NOT automatically approved`,
-      ...[...verdict.failed].sort().map(id => `${lane}\t${id}`), ''].join('\n');
-    fs.writeFileSync(`ci-reports/known-failures-observed.${lane}.txt`, candidate);
-    const summary = { lane, baseline: list, baselineSource: base, expected: expected.size, observedFailures: verdict.failed.size,
+      ...[...verdict.failed].sort().map(id => {
+        const suite = report.testResults.find(s => s.assertionResults?.some(t => t.status === 'failed' && identity(path.relative(root, s.name).split(path.sep).join('/'), t.fullName) === id));
+        return `${lane}\t${path.relative(root, suite.name).split(path.sep).join('/')}\t${id}`;
+      }), ''].join('\n');
+    fs.writeFileSync(`ci-reports/known-failures-observed.${lane}${suffix}.txt`, candidate);
+    const summary = { lane, shard, removedAllowances: authority.size - entries.size, baseline: list, baselineSource: base, expected: expected.size, observedFailures: verdict.failed.size,
       executed: verdict.cases, skipped: verdict.skipped,
       unexpected: verdict.unexpected.length, staleOrNotFailed: verdict.stale.length, ok: verdict.ok };
-    fs.writeFileSync(`ci-reports/${lane}.json`, `${JSON.stringify(summary, null, 2)}\n`);
+    fs.writeFileSync(`ci-reports/${lane}${suffix}.json`, `${JSON.stringify(summary, null, 2)}\n`);
     console.log(JSON.stringify(summary));
     if (!verdict.ok) throw new Error('Jest gate failed: new/stale failures, empty suite, snapshots or infrastructure');
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
@@ -94,4 +138,4 @@ function main() {
 if (require.main === module) {
   try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-module.exports = { identity, evaluate, parseList };
+module.exports = { identity, evaluate, parseList, parseEntries, retainedEntries, shardOption, expectedForFiles };
