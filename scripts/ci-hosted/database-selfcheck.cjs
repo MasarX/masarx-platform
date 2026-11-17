@@ -9,6 +9,8 @@ const { retry, run, stage, lines, writeReport } = require('./process.cjs');
 const { migrationProgress, completePins, backendLint } = require('./backend.cjs');
 const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
+const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
+const { prepareImages } = require('./images.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
 const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
@@ -39,8 +41,104 @@ function checkDatabaseInputs() {
     }
   }
   for (const file of ['config/ci/cloud-pool-db-local.json', 'config/ci/deploy-cli-contract.json', 'config/ci/deploy-surfaces.json',
-    'config/ci/hosted-supabase-images.json', 'config/lint/db-lint-exceptions.json', 'supabase/config.toml']) assert.equal(fs.existsSync(file), true, file);
+    'config/ci/pgtap-accepted-failures.json', 'config/ci/hosted-supabase-images.json', 'config/lint/db-lint-exceptions.json', 'supabase/config.toml']) assert.equal(fs.existsSync(file), true, file);
   console.log(`PASS: configured database commands and ${seen.size} transitive module inputs exist`);
+}
+
+function checkExceptions(temp) {
+  const settings = { file: 'synthetic.sql', assertions: ['first assertion', 'second assertion'],
+    expires: '2026-12-01', reason: 'synthetic reason', owner: 'synthetic owner' };
+  const config = path.join(temp, 'pgtap-exceptions.json');
+  fs.writeFileSync(config, JSON.stringify([{ ...settings, assertions: ['duplicate', 'duplicate'] }]));
+  assert.throws(() => loadExceptions(config), /Malformed pgTAP exception/);
+  fs.writeFileSync(config, JSON.stringify([settings]));
+  const entries = loadExceptions(config);
+  assert.deepEqual(entries.map(row => row.assertion), settings.assertions);
+  const [entry, second] = entries;
+  const today = '2026-11-17';
+  const assess = (text, status = 0, day = today) => assessFile(entry.file, { status, combined: text }, [entry], day);
+  const failed = `1..1\n not ok 1 - ${entry.assertion}    +\n # Looks like you failed 1 test of 1`;
+  const accepted = assess(failed);
+  assert.equal(accepted.ok, true); assert.equal(accepted.accepted.length, 1);
+  assert.equal(assess(failed, 0, '2026-12-02').ok, false);
+  assert.match(assess(failed, 0, '2026-12-02').errors[0], /Expired/);
+  for (const text of [`1..1\nok 1 - ${entry.assertion}`, '1..1\nnot ok 1 - different text', '']) {
+    assert.equal(assess(text).ok, false); assert.match(assess(text).errors[0], /stale exception: remove it/);
+  }
+  for (const result of [assess(failed, 3), assess(`${failed}\nERROR: synthetic abort`), assess(failed.replace('1..1', '1..2')), assess(failed.replace('failed 1 test', 'failed 2 tests'))]) {
+    assert.equal(result.ok, false); assert.equal(result.accepted.length, 0);
+  }
+  const assessBoth = (combined, day = today) => assessFile(entry.file, { status: 0, combined }, entries, day);
+  const bothFailed = '1..2\nnot ok 1 - first assertion\nnot ok 2 - second assertion';
+  assert.equal(assessBoth(bothFailed).ok, true);
+  assert.deepEqual(assessBoth(bothFailed).accepted, entries);
+  assert.deepEqual(assessBoth(bothFailed, '2026-12-02').failures.map(row => row.assertion), settings.assertions);
+  const multiple = assessBoth('1..3\nnot ok 1 - first assertion\nnot ok 2 - second assertion\nnot ok 3 - unaccepted assertion');
+  assert.equal(multiple.ok, false);
+  assert.deepEqual(multiple.accepted, entries);
+  assert.deepEqual(multiple.failures.map(row => row.assertion), ['unaccepted assertion']);
+  for (const tap of [bothFailed.replace('not ok 2', 'ok 2'), failed]) {
+    const stale = assessBoth(tap);
+    assert.equal(stale.ok, false);
+    assert.deepEqual(stale.accepted, [entry]);
+    assert.deepEqual(stale.errors, ['stale exception: remove it: synthetic.sql: second assertion']);
+  }
+  const report = rows => [{ files: [{ file: entry.file, accepted: rows }] }];
+  const evidence = exceptionEvidence(entries, report(multiple.accepted), today);
+  assert.deepEqual(evidence.accepted.map(row => row.assertion), settings.assertions);
+  assert.deepEqual(evidence.errors, []);
+  const missing = exceptionEvidence(entries, report([entry]), today).errors;
+  assert.equal(missing.length, 1);
+  assert.ok(missing[0].endsWith(second.assertion));
+  assert.equal(exceptionEvidence(entries, report(entries), '2026-12-02').accepted.length, 0);
+  assert.equal(exceptionEvidence(entries, [], today).errors.length, 2);
+  assert.equal(exceptionEvidence(entries, [...report(entries), ...report(entries)], today).errors.length, 2);
+  console.log('PASS: assertion lists, exact matches, expiry, per-assertion staleness, SQL aborts and incomplete plans');
+  return entry;
+}
+async function checkImages(pins) {
+  const calls = []; const delays = [];
+  const summary = { stages: [] };
+  const [pin] = pins;
+  const registryOf = ref => ref.split('/', 1)[0];
+  const pullRefs = () => calls.filter(([command]) => command === 'pull').map(args => args.at(-1));
+  let failMirror = false;
+  const checked = async (_command, args) => {
+    calls.push(args);
+    const reference = args.at(-1);
+    if (args[0] === 'pull' && registryOf(reference) === 'ghcr.io' && failMirror) {
+      throw new Error('synthetic registry failure');
+    }
+    if (args[0] === 'image') return pins.find(p => reference.split('/').slice(1).join('/') === p.image + '@' + p.digest).image_id;
+    return '';
+  };
+  const options = { env: {}, checked, timed: (name, action) => stage(summary, name, action), summary, wait: async ms => delays.push(ms) };
+  await prepareImages(pins.map(p => ({ ...p })), options);
+  assert.deepEqual(pullRefs(), pins.map(p => 'ghcr.io/' + p.image + '@' + p.digest));
+  assert.deepEqual(summary.images.map(row => row.served), pins.map(() => 'ghcr.io'));
+
+  calls.length = 0;
+  failMirror = true;
+  await prepareImages([{ ...pin }], options);
+  assert.deepEqual(pullRefs().map(registryOf), ['ghcr.io', 'ghcr.io', 'ghcr.io', 'public.ecr.aws']);
+  assert.deepEqual(delays, [5000, 15000]);
+
+  const bound = pins.map(p => ({ ...p, runtimeId: p.image_id }));
+  const create = (image, rules = bound) => rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: image })), rules);
+  for (const host of ['ghcr.io', 'public.ecr.aws']) {
+    const image = host + '/' + pin.image + '@' + pin.digest;
+    assert.equal(JSON.parse(create(image).body).Image, pin.image_id);
+  }
+  for (const host of ['ghcr.io.evil.example', 'evil.example/ghcr.io']) {
+    const image = host + '/' + pin.image + '@' + pin.digest;
+    assert.throws(() => create(image), /outside the reviewed digest set/);
+    const route = '/images/' + encodeURIComponent(image) + '/json';
+    assert.throws(() => rewrite('GET', route, Buffer.alloc(0), bound), /outside the reviewed digest set/);
+    assert.equal(imageRequest('GET', route, Buffer.alloc(0), bound).reviewed, false);
+  }
+  assert.throws(() => create('ghcr.io/' + pin.image + '@sha256:' + '0'.repeat(64)));
+  assert.throws(() => create(pin.image_id, [{ ...bound[0], runtimeId: 'sha256:' + '0'.repeat(64) }]));
+  console.log('PASS: exact registry hosts, GHCR digest pulls, bounded ECR fallback and verified image IDs');
 }
 
 async function main() {
@@ -71,6 +169,8 @@ async function main() {
   assert.deepEqual(shards.map(files => files.length), [83, 83, 83, 83, 83, 83]);
   assert.deepEqual(shards.flat().sort(), names);
   assert.equal(new Set(shards.flat()).size, names.length);
+  const mixedCase = ['a.SQL', 'b.sQl', 'c.sql', 'ignored.txt'];
+  assert.deepEqual(Array.from({ length: 3 }, (_, index) => shardFiles(mixedCase, `${index + 1}/3`)).flat().sort(), mixedCase.slice(0, 3));
   for (const invalid of ['0/6', '7/6', '1/0', '1/65', '1/6 extra']) assert.throws(() => shardFiles(names, invalid));
   assert.throws(() => shardFiles(['../escape.sql'], '1/1'));
   assert.throws(() => shardFiles(['one.sql', 'one.sql'], '1/1'));
@@ -160,12 +260,25 @@ async function main() {
       const target = path.join(aggregateDir, 'ci-reports/database-result', file);
       fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, JSON.stringify(value));
     };
-    fixture('build/backend-summary-123-1/backend.json', built);
+    fs.mkdirSync(path.join(aggregateDir, 'config/ci'), { recursive: true });
+    fs.writeFileSync(path.join(aggregateDir, 'config/ci/pgtap-accepted-failures.json'), '[]');
+    fixture('build/backend.json', built);
     for (let index = 0; index < 6; index++) fixture(`shards/pgtap-summary-${index + 1}-123-1/pgtap.json`, shardReports[index]);
     const aggregateSummary = path.join(temp, 'aggregate.md');
     const aggregate = () => spawnSync(process.execPath, [path.resolve('scripts/ci-hosted/database-result.cjs')], {
       cwd: aggregateDir, env: { ...process.env, ...aggregateEnv, GITHUB_STEP_SUMMARY: aggregateSummary }, encoding: 'utf8', timeout: 5000,
     });
+    const flat = aggregate();
+    assert.equal(flat.status, 0);
+    assert.equal(flat.stdout.includes('| 2324 | 0 | 0 |'), true);
+    fixture('build/backend.json', { ...built, ok: false, lint: { ok: false, findings: [finding], ignored: 1 } });
+    const flatLint = aggregate();
+    assert.equal(flatLint.status, 1);
+    assert.equal(flatLint.stdout.includes(finding.function) && flatLint.stdout.includes(finding.message), true);
+    assert.equal(flatLint.stdout.includes('Invalid report artifact'), false);
+    fixture('build/backend-summary-123-1/backend.json', built);
+    assert.equal(aggregate().status, 1); // Mixed flat/nested reports are ambiguous.
+    fs.renameSync(path.join(aggregateDir, 'ci-reports/database-result/build/backend.json'), path.join(aggregateDir, 'ci-reports/database-result/build/backend.retired'));
     assert.equal(aggregate().status, 0);
     fixture('build/backend-summary-123-2/backend.json', { ...built, ok: false, lint: { ok: false, findings: [finding] } });
     assert.equal(aggregate().status, 1);
@@ -243,6 +356,8 @@ async function main() {
     const wrapper = fs.readFileSync(writePsqlWrapper(path.join(temp, 'client'), `public.ecr.aws/${pin.image}@${pin.digest}`), 'utf8');
     assert.equal(wrapper.includes(`public.ecr.aws/${pin.image}@${pin.digest}`), true);
     assert.equal(wrapper.includes('-v "$PWD:$PWD"'), true);
+    await checkImages(pins);
+    const exception = checkExceptions(temp);
     const Module = require('node:module');
     const originalLoad = Module._load;
     let runner;
@@ -256,6 +371,22 @@ async function main() {
         runPsqlCaptureFn: () => ({ status, combined }),
       }), error => error.message.includes(combined.split('\n')[1]));
     }
+    const acceptedOutput = `1..1\nnot ok 1 - ${exception.assertion}\n# Looks like you failed 1 test of 1`;
+    const options = { runPsqlCaptureFn: () => ({ status: 0, combined: acceptedOutput }),
+      assessResult: result => assessFile(exception.file, result, [exception], '2026-11-17') };
+    assert.equal(runner.runPsqlWithCandidateFallback([{ name: 'synthetic', dsn: testEnv.DATABASE_URL }], [], exception.file, options).assessment.accepted.length, 1);
+    assert.throws(() => runner.runPsqlWithCandidateFallback([{ name: 'synthetic', dsn: testEnv.DATABASE_URL }], [], exception.file,
+      { ...options, runPsqlCaptureFn: () => ({ status: 3, combined: `${acceptedOutput}\nERROR: synthetic abort` }) }), /ERROR: synthetic abort/);
+    const adversarial = '/images/a'.repeat(100000) + '/json';
+    const parseStart = performance.now();
+    for (let i = 0; i < 100; i++) {
+      assert.equal(imageRequest('GET', adversarial, Buffer.alloc(0), pins), null);
+      assert.throws(() => rewrite('GET', adversarial, Buffer.alloc(0), pins), /bound/);
+      assert.equal(imageRequest('GET', '/images/a'.repeat(800) + '/json', Buffer.alloc(0), pins), null);
+    }
+    const parseMs = performance.now() - parseStart;
+    assert.ok(parseMs < 1000, `Adversarial path parsing took ${parseMs}ms`);
+    console.log(`PASS: 200 long/adversarial Docker paths in ${parseMs.toFixed(1)}ms`);
     const report = { stages: [] };
     await stage(report, 'success', async () => {});
     await assert.rejects(stage(report, 'failure', async () => { throw new Error('synthetic'); }));

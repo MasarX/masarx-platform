@@ -16,6 +16,7 @@ async function checkTransport() {
   const container = `/v1.48/containers/${id}`;
   const sockets = new Set(); const requests = [];
   let waitResponse; let attached; let logResponse; let started = false;
+  const rejectedPayload = [];
   const frame = Buffer.from([1, 0, 0, 0, 0, 0, 0, 3, 65, 0, 66]);
   const upstream = http.createServer(async (request, response) => {
     const chunks = [];
@@ -38,6 +39,26 @@ async function checkTransport() {
   });
   upstream.on('upgrade', (request, socket, head) => {
     requests.push(request.url);
+    if (request.url.includes('/exec/bogus/start')) {
+      let body = head;
+      const reply = () => {
+        rejectedPayload.push(body.subarray(2));
+        const message = 'synthetic refused';
+        const status = request.url.includes('status=200') ? 200 : 404;
+        socket.write(`HTTP/1.1 ${status} Refused\r\nConnection: keep-alive\r\nContent-Type: application/json\r\nContent-Length: ${message.length}\r\n\r\n${message}`);
+        socket.on('data', data => rejectedPayload.push(data));
+      };
+      if (body.length >= 2) reply();
+      else {
+        const receive = data => {
+          body = Buffer.concat([body, data]);
+          if (body.length >= 2) { socket.off('data', receive); reply(); }
+        };
+        socket.on('data', receive);
+      }
+      return;
+    }
+    assert.equal(head.length, 0, 'Upgraded payload must wait for the response');
     attached = socket;
     const legacy = request.url.includes('legacy=1');
     socket.write(legacy ? 'HTTP/1.1 200 OK\r\nContent-Type: application/vnd.docker.raw-stream\r\n\r\n'
@@ -114,10 +135,31 @@ async function checkTransport() {
     assert.equal(denied.incoming.statusCode, 403); await denied.done;
     const pull = await request('POST', '/v1.48/images/create?fromImage=supabase/synthetic');
     assert.equal(pull.incoming.statusCode, 403); await pull.done;
+    const mutations = [
+      ['POST', '/build'], ['POST', '/build/prune'], ['POST', '/images/load'],
+      ['POST', '/images/create?fromSrc=https%3A%2F%2Fexample.invalid%2Fsynthetic.tar'], ['POST', '/commit'],
+      ['POST', '/images/synthetic/tag'], ['POST', '/images/synthetic/push'], ['POST', '/images/prune'],
+      ['DELETE', '/images/synthetic'], ['POST', '/plugins/pull'], ['POST', '/plugins/create'],
+      ['POST', '/images/%63reate?fromImage=synthetic'], ['POST', '/images/%6coad'], ['POST', '/%62uild'],
+      ['POST', '/unused/../images/load'],
+    ];
+    for (const [method, url] of mutations) {
+      const refused = await request(method, `/v1.48${url}`);
+      assert.equal(refused.incoming.statusCode, 403, url); await refused.done;
+    }
+    const ambiguous = [
+      '{"Image":"supabase/synthetic:local","image":"unreviewed/image:latest"}',
+      '{"image":"unreviewed/image:latest","Image":"supabase/synthetic:local"}',
+      '{"Image":"supabase/synthetic:local","IMAGE":"supabase/synthetic:local"}',
+    ];
+    for (const body of ambiguous) {
+      const refused = await request('POST', '/v1.48/containers/%63reate', body);
+      assert.equal(refused.incoming.statusCode, 403); await refused.done;
+    }
     assert.equal(requests.filter(url => url === '/v1.48/containers/create').length, 1);
     assert.equal(requests.some(url => url.includes('/images/create')), false);
     const policy = JSON.parse(fs.readFileSync(policyFile, 'utf8'));
-    assert.equal(policy.denied, 2);
+    assert.equal(policy.denied, 2 + mutations.length + ambiguous.length);
     assert.equal(policy.requests.every((row, index) => row.sequence === index + 1 && row.durationMs >= 0 && row.startedAt), true);
     assert.equal(JSON.stringify(policy.requests).includes(id), false);
     const lifecycle = policy.requests.filter(row => row.path.startsWith(`/v1.48/containers/${id.slice(0, 12)}/`));
@@ -125,7 +167,19 @@ async function checkTransport() {
     assert.deepEqual(lifecycle.map(row => row.status), [101, 200, 204, 200, 200]);
     assert.deepEqual(lifecycle.map(row => row.upgraded), [true, false, false, false, false]);
     assert.ok(lifecycle.find(row => row.path.endsWith('/wait')).endedAt);
-    console.log('PASS: Docker create/attach/wait/start, raw 101/200, streamed logs and digest refusal');
+    for (const status of [404, 200]) {
+      const response = await new Promise((resolve, reject) => {
+        const socket = require('node:net').createConnection({ host: '127.0.0.1', port: guard.address().port });
+        clients.add(socket); const chunks = [];
+        const timer = setTimeout(() => socket.destroy(new Error('Refused upgrade did not close')), 1500);
+        socket.on('error', reject); socket.on('data', chunk => chunks.push(chunk));
+        socket.on('close', () => { clearTimeout(timer); clients.delete(socket); resolve(Buffer.concat(chunks).toString()); });
+        socket.on('connect', () => socket.write(`POST /v1.48/exec/bogus/start?status=${status} HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 2\r\n\r\n{}POST /v1.48/images/create?fromImage=synthetic HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n`));
+      });
+      assert.equal(response.startsWith(`HTTP/1.1 ${status}`) && response.includes('synthetic refused'), true);
+    }
+    assert.equal(Buffer.concat(rejectedPayload).length, 0, 'Rejected upgrades must not relay pipelined requests');
+    console.log('PASS: Docker 101/raw-200 attach, wait headers, refused upgrades, image mutation and ambiguous Image refusal');
   } finally {
     const closed = [...sockets].map(socket => once(socket, 'close'));
     for (const client of clients) client.destroy();

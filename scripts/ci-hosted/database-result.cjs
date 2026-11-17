@@ -1,10 +1,11 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { loadExceptions, exceptionEvidence } = require('./pgtap-exceptions.cjs');
 const { sanitize } = require('./diagnostics.cjs');
 
 const cell = value => sanitize(value ?? 'UNKNOWN').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ');
-function databaseResult(build, shards, env = process.env) {
+function databaseResult(build, shards, env = process.env, entries = []) {
   let ok = env.BUILD_RESULT === 'success';
   if (env.DATABASE_PRESENT === 'false') return { ok: ok && env.PGTAP_RESULT === 'skipped', markdown: 'Database subject absent; pgTAP skipped by design.\n' };
   ok = ok && env.DATABASE_PRESENT === 'true' && env.PGTAP_RESULT === 'success'
@@ -39,6 +40,10 @@ function databaseResult(build, shards, env = process.env) {
       lines.push('', `${cell(shard.shard)} ${cell(file.file)}: ${cell(first)}`);
     }
   }
+  const evidence = exceptionEvidence(entries, shards);
+  for (const entry of evidence.accepted) lines.push('', `ACCEPTED (expires ${cell(entry.expires)}): ${cell(entry.file)}: ${cell(entry.assertion)}; ${cell(entry.reason)}; owner: ${cell(entry.owner)}`);
+  for (const error of evidence.errors) lines.push('', `Exception ERROR: ${cell(error)}`);
+  ok = ok && !evidence.errors.length;
   return { ok: Boolean(ok), markdown: `${lines.join('\n')}\n` };
 }
 
@@ -53,7 +58,8 @@ function main() {
     const selected = new Map();
     const files = fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).filter(file => path.basename(file) === name) : [];
     for (const file of files) {
-      const artifact = file.split(path.sep)[0]; const match = /^(.*)-(\d+)$/.exec(artifact);
+      const artifact = file === name && files.length === 1 ? `${name}-0` : file.split(path.sep)[0];
+      const match = /^(.*)-(\d+)$/.exec(artifact);
       if (!match) { errors.push(`Invalid report artifact: ${artifact}`); continue; }
       const previous = selected.get(match[1]);
       if (!previous || Number(match[2]) > previous.attempt) selected.set(match[1], { file, attempt: Number(match[2]) });
@@ -64,7 +70,11 @@ function main() {
   const builds = process.env.DATABASE_PRESENT === 'true' ? latest(path.join(root, 'build'), 'backend.json') : [];
   const build = builds.length === 1 ? builds[0] : undefined;
   const shards = latest(path.join(root, 'shards'), 'pgtap.json');
-  const result = databaseResult(build, shards);
+  let entries = [];
+  if (process.env.DATABASE_PRESENT === 'true') {
+    try { entries = loadExceptions(); } catch (error) { errors.push(sanitize(error.message)); }
+  }
+  const result = databaseResult(build, shards, process.env, entries);
   const markdown = result.markdown + errors.map(error => `\nReport error: ${cell(error)}\n`).join('');
   console.log(markdown);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
