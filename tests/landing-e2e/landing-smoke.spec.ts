@@ -10,37 +10,23 @@ import {
 } from "./helpers";
 
 test.describe("landing smoke", () => {
-  test("loads customer references and a real mocked logo from the marketing feed", async ({ page }) => {
-    const endpoint = "/functions/v1/marketing-lead-intake";
-    const logoUrl = "https://assets.example.test/masarx-live.svg";
+  test("omits customer references and does not request the marketing feed", async ({ page }) => {
+    const endpoint = "/functions/v1/marketing-lead-intake/clients";
     let feedHits = 0;
-    await patchRuntimeConfig(page, { clientsEndpoint: `${endpoint}/clients` });
-    await page.route(`**${endpoint}/clients?**`, async (route) => {
+    await patchRuntimeConfig(page, { clientsEndpoint: endpoint });
+    await page.route(`**${endpoint}**`, async (route) => {
       feedHits += 1;
-      expect(new URL(route.request().url()).searchParams.get("locale")).toBe("en");
       await route.fulfill({
         status: 200, contentType: "application/json",
-        body: JSON.stringify({ ok: true, clients: [
-          { name: "First Tenant Retail Client", logo_url: null },
-          { name: "MasarX Live Brand", logo_url: logoUrl },
-        ] }),
+        body: JSON.stringify({ ok: true, clients: [] }),
       });
     });
-    await page.route(logoUrl, async (route) => {
-      await route.fulfill({
-        status: 200, contentType: "image/svg+xml",
-        body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="32"><rect width="120" height="32" fill="#0b5fff"/></svg>',
-      });
-    });
-    await page.goto("/?motion=off");
-    const row = page.locator("[data-clients-row]");
-    await expect(row.locator(".client-ref")).toHaveCount(2);
-    await expect(row.locator(".client-logo-fallback")).toHaveText("First Tenant Retail Client");
-    const logo = row.locator("img.client-logo");
-    await expect(logo).toHaveAttribute("src", logoUrl);
-    await logo.scrollIntoViewIfNeeded();
-    await expect.poll(() => logo.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
-    expect(feedHits).toBe(1);
+    for (const route of ["/?motion=off", "/ar/?motion=off"]) {
+      await page.goto(route);
+      await expect(page.locator("html")).toHaveClass(/js/);
+      await expect(page.locator("[data-clients-row], .client-ref, img.client-logo")).toHaveCount(0);
+    }
+    expect(feedHits).toBe(0);
   });
 
   test("renders English and navigates to Arabic via toggle", async ({ page }) => {
