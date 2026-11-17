@@ -26,14 +26,5 @@
     "reason": "Supabase-owned default grant on cron.job_run_details (grantor supabase_admin); not revocable by project migrations",
     "owner": "repository lead",
     "expires": "2026-12-01"
-  },
-  {
-    "file": "0zz_ui_rpc_executor_role_v1.sql",
-    "assertions": [
-      "effective application and extension privileges contain no extra reads or dangerous writes"
-    ],
-    "reason": "Supabase-owned default grant on cron.job_run_details (grantor supabase_admin); not revocable by project migrations",
-    "owner": "repository lead",
-    "expires": "2026-12-01"
   }
 ]
