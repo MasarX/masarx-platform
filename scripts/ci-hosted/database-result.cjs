@@ -9,7 +9,7 @@ function databaseResult(build, shards, env = process.env) {
   if (env.DATABASE_PRESENT === 'false') return { ok: ok && env.PGTAP_RESULT === 'skipped', markdown: 'Database subject absent; pgTAP skipped by design.\n' };
   ok = ok && env.DATABASE_PRESENT === 'true' && env.PGTAP_RESULT === 'success'
     && /^[a-f0-9]{40}$/.test(env.GITHUB_SHA || '')
-    && build?.sha === env.GITHUB_SHA && build?.ok === true && build?.snapshotReady === true
+    && build?.sha === env.GITHUB_SHA && build?.ok === true
     && Number.isInteger(build?.migrations) && build.migrations > 0 && build.migrations === build.migrationTotal
     && build?.migrationFailed === 0 && build?.migrationNotRun === 0 && build?.lint?.ok === true;
   const lines = ['### Database result', '', `Build job: ${cell(env.BUILD_RESULT)}; pgTAP jobs: ${cell(env.PGTAP_RESULT)}`, '',
@@ -20,20 +20,24 @@ function databaseResult(build, shards, env = process.env) {
   for (const finding of build?.lint?.findings || []) lines.push(`| ${cell(finding.function)} | ${cell(finding.message)} |`);
   if (build?.lint?.failure) lines.push('', `Lint failure: ${cell(build.lint.failure)}`);
   for (const command of build?.lint?.commands || []) if (!command.ok) lines.push('', `${cell(command.script)}: ${cell(command.failure?.message)}`);
-  lines.push('', '| Shard | Files run | Passed | Failed | Result |', '|---|---:|---:|---:|---|');
+  lines.push('', '| Shard | Migrations applied / failed | Files run | Passed | Failed | Result |', '|---|---:|---:|---:|---:|---|');
   if (shards.length !== 6) ok = false;
   for (let index = 1; index <= 6; index++) {
     const matches = shards.filter(row => row.shard === `${index}/6`);
     const shard = matches.length === 1 ? matches[0] : undefined;
     const passed = shard?.sha === env.GITHUB_SHA && shard?.ok === true && shard?.failed === 0
+      && shard?.migrations === build?.migrationTotal && shard?.migrationFailed === 0 && shard?.migrationNotRun === 0
       && Number.isInteger(shard?.run) && shard.run > 0 && shard.run === shard.passed
       && shard.run === shard.selected?.length && shard.notRun?.length === 0;
     ok = ok && passed;
-    lines.push(`| ${index}/6 | ${cell(shard?.run)} | ${cell(shard?.passed)} | ${cell(shard?.failed)} | ${passed ? 'PASS' : 'FAIL / MISSING'} |`);
+    lines.push(`| ${index}/6 | ${cell(shard?.migrations)} / ${cell(shard?.migrationFailed)} | ${cell(shard?.run)} | ${cell(shard?.passed)} | ${cell(shard?.failed)} | ${passed ? 'PASS' : 'FAIL / MISSING'} |`);
   }
   for (const shard of shards) {
     if (shard.failure) lines.push('', `${cell(shard.shard)}: ${cell(shard.failure.message)}`);
-    for (const file of shard.files || []) if (file.status === 'failed') lines.push('', `${cell(shard.shard)} ${cell(file.file)}: ${cell(file.error)}`);
+    for (const file of shard.files || []) if (file.status === 'failed') {
+      const first = String(file.error || '').split(/\r?\n/).find(line => /ERROR:|FATAL:|\bnot ok\b|looks like you (failed|planned)/i.test(line)) || String(file.error || '').split(/\r?\n/)[0];
+      lines.push('', `${cell(shard.shard)} ${cell(file.file)}: ${cell(first)}`);
+    }
   }
   return { ok: Boolean(ok), markdown: `${lines.join('\n')}\n` };
 }

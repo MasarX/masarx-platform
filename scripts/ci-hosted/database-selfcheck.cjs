@@ -3,18 +3,17 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { isBuiltin } = require('node:module');
 const { spawnSync } = require('node:child_process');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
 const { migrationProgress, completePins, backendLint } = require('./backend.cjs');
-const { shardFiles, validateSnapshot } = require('./pgtap.cjs');
+const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
 const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
 const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
-const { loadBackendLocalPreSuiteCommands } = require('../ops/ci/cloud-pool-db-local.js');
+const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
 const { databaseResult } = require('./database-result.cjs');
 
 function checkDatabaseInputs() {
@@ -76,6 +75,18 @@ async function main() {
   assert.throws(() => shardFiles(['../escape.sql'], '1/1'));
   assert.throws(() => shardFiles(['one.sql', 'one.sql'], '1/1'));
   assert.throws(() => shardFiles(['one.sql'], '2/6'));
+  const contract = loadBackendLocalPgtapEnv();
+  const testEnv = shardEnvironment({ DATABASE_URL: 'postgresql://synthetic@127.0.0.1:54322/postgres', PATH: 'synthetic-bin' }, contract, 'synthetic', 54322, ['one.sql']);
+  for (const name of ['PGTAP_FILES_PER_SESSION', 'PGTAP_NODE_FILE_RETRIES', 'PGTAP_RETRY_TRANSIENT', 'PGTAP_RETRY_DEADLOCKS', 'PGTAP_FULL_LOCAL_QUALIFICATION']) assert.equal(testEnv[name], contract[name]);
+  assert.equal(testEnv.ENV_FILE, os.devNull);
+  assert.equal(testEnv.ENV_FILE_OVERRIDE, '0');
+  assert.equal(testEnv.PGTAP_ONLY_FILES, 'one.sql');
+  assert.equal(testEnv.DB_LOCAL_PROJECT_ID, 'synthetic');
+  assert.equal(testEnv.DATABASE_URL, 'postgresql://synthetic@127.0.0.1:54322/postgres');
+  assert.deepEqual(shardResults(['one.sql'], []).notRun, ['one.sql']);
+  assert.deepEqual(shardResults(['one.sql', 'two.sql'], [{ file: 'one.sql', status: 'failed' }]), {
+    files: [{ file: 'one.sql', status: 'failed' }], run: 1, passed: 0, failed: 1, notRun: ['two.sql'],
+  });
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'database-selfcheck-'));
   const originalSummary = process.env.GITHUB_STEP_SUMMARY;
   try {
@@ -122,16 +133,21 @@ async function main() {
     await backendLint(lintReport, [{ script: 'lint:db' }], async () => {}, lintFile);
     assert.equal(lintReport.lint.ok, true);
     const aggregateEnv = { BUILD_RESULT: 'success', DATABASE_PRESENT: 'true', PGTAP_RESULT: 'success', GITHUB_SHA: 'a'.repeat(40) };
-    const built = { sha: aggregateEnv.GITHUB_SHA, ok: true, snapshotReady: true, migrations: 2324, migrationTotal: 2324,
+    const built = { sha: aggregateEnv.GITHUB_SHA, ok: true, migrations: 2324, migrationTotal: 2324,
       migrationFailed: 0, migrationNotRun: 0, lint: { ok: true, findings: [], ignored: 0 } };
     const shardReports = Array.from({ length: 6 }, (_, index) => ({ sha: aggregateEnv.GITHUB_SHA, shard: `${index + 1}/6`,
+      migrations: 2324, migrationFailed: 0, migrationNotRun: 0,
       ok: true, run: 1, passed: 1, failed: 0, selected: [`${index}_synthetic.sql`], notRun: [], files: [] }));
     assert.equal(databaseResult(built, shardReports, aggregateEnv).ok, true);
     const lintFailed = databaseResult({ ...built, ok: false, lint: { ok: false, findings: [finding], ignored: 1 } }, shardReports, aggregateEnv);
     assert.equal(lintFailed.ok, false);
     assert.equal(lintFailed.markdown.includes(finding.function) && lintFailed.markdown.includes(finding.message), true);
-    assert.equal(lintFailed.markdown.includes('| 6/6 | 1 | 1 | 0 | PASS |'), true);
+    assert.equal(lintFailed.markdown.includes('| 6/6 | 2324 / 0 | 1 | 1 | 0 | PASS |'), true);
     assert.equal(databaseResult(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0 }, ...shardReports.slice(1)], aggregateEnv).ok, false);
+    const failedFile = databaseResult(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0,
+      files: [{ file: '0_synthetic.sql', status: 'failed', error: 'tool exit 3\nERROR: synthetic SQL error\nDETAIL: synthetic detail' }] }, ...shardReports.slice(1)], aggregateEnv);
+    assert.equal(failedFile.markdown.includes('0_synthetic.sql: ERROR: synthetic SQL error'), true);
+    assert.equal(databaseResult(built, [{ ...shardReports[0], migrations: 2323 }, ...shardReports.slice(1)], aggregateEnv).ok, false);
     assert.equal(databaseResult(built, shardReports.slice(1), aggregateEnv).ok, false);
     assert.equal(databaseResult(built, [shardReports[0], ...shardReports.slice(0, 5)], aggregateEnv).ok, false);
     assert.equal(databaseResult(built, [{ ...shardReports[0], sha: 'b'.repeat(40) }, ...shardReports.slice(1)], aggregateEnv).ok, false);
@@ -224,16 +240,22 @@ async function main() {
     ]);
     const combined = await run(process.execPath, ['-e', "console.log('synthetic stdout'); console.error('synthetic stderr')"], { quiet: true, includeStderr: true });
     assert.equal(combined.includes('synthetic stdout') && combined.includes('synthetic stderr'), true);
-    const snapshot = { sha: 'a'.repeat(40), image: `public.ecr.aws/${pin.image}@${pin.digest}`, files: {} };
-    for (const file of ['database.dump', 'roles.sql']) {
-      fs.writeFileSync(path.join(temp, file), 'synthetic');
-      snapshot.files[file] = crypto.createHash('sha256').update('synthetic').digest('hex');
+    const wrapper = fs.readFileSync(writePsqlWrapper(path.join(temp, 'client'), `public.ecr.aws/${pin.image}@${pin.digest}`), 'utf8');
+    assert.equal(wrapper.includes(`public.ecr.aws/${pin.image}@${pin.digest}`), true);
+    assert.equal(wrapper.includes('-v "$PWD:$PWD"'), true);
+    const Module = require('node:module');
+    const originalLoad = Module._load;
+    let runner;
+    try {
+      const blocked = class { constructor() { throw new Error('Database connections are forbidden in this selfcheck'); } };
+      Module._load = function (name, ...args) { return name === 'pg' ? { Client: blocked, Pool: blocked } : originalLoad.call(this, name, ...args); };
+      runner = require('../tests/run-pgtap-cloud.js');
+    } finally { Module._load = originalLoad; }
+    for (const [status, combined] of [[3, 'NOTICE: synthetic\nERROR: synthetic SQL error'], [0, '1..1\nnot ok 1 - synthetic assertion']]) {
+      assert.throws(() => runner.runPsqlWithCandidateFallback([{ name: 'synthetic', dsn: testEnv.DATABASE_URL }], [], 'one.sql', {
+        runPsqlCaptureFn: () => ({ status, combined }),
+      }), error => error.message.includes(combined.split('\n')[1]));
     }
-    assert.equal(validateSnapshot(snapshot, pins, snapshot.sha, temp), snapshot.image);
-    assert.throws(() => validateSnapshot(snapshot, pins, 'b'.repeat(40), temp), /candidate/);
-    assert.throws(() => validateSnapshot({ ...snapshot, image: 'unreviewed:tag' }, pins, snapshot.sha, temp), /image/);
-    fs.writeFileSync(path.join(temp, 'roles.sql'), 'changed');
-    assert.throws(() => validateSnapshot(snapshot, pins, snapshot.sha, temp), /checksum/);
     const report = { stages: [] };
     await stage(report, 'success', async () => {});
     await assert.rejects(stage(report, 'failure', async () => { throw new Error('synthetic'); }));
@@ -262,6 +284,6 @@ async function main() {
     if (originalSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY; else process.env.GITHUB_STEP_SUMMARY = originalSummary;
     fs.rmSync(temp, { recursive: true, force: true });
   }
-  console.log('PASS: bounded retries, complete redacted errors, migration watchdog, snapshot binding and complete deterministic shards');
+  console.log('PASS: bounded retries, complete redacted errors, migration watchdog and deterministic from-zero pgTAP shards');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

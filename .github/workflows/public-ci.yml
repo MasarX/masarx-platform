@@ -52,7 +52,6 @@ jobs:
     timeout-minutes: 180
     outputs:
       present: ${{ steps.subject.outputs.present }}
-      snapshot-id: ${{ steps.snapshot.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
@@ -76,16 +75,6 @@ jobs:
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
-      - name: Upload migrated database
-        id: snapshot
-        if: success() && steps.subject.outputs.present == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
-        with:
-          name: database-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ci-reports/database-snapshot/
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
       - name: Upload backend-summary
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
@@ -124,13 +113,8 @@ jobs:
           package-manager-cache: false
       - name: Locked dependency installation
         run: node scripts/ci-hosted/tasks.cjs install
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node24
-        with:
-          artifact-ids: ${{ needs.database-build.outputs.snapshot-id }}
-          path: ci-reports/database-snapshot
-          merge-multiple: true
-      - name: Restore database and run pgTAP shard
-        run: node scripts/ci-hosted/pgtap.cjs
+      - name: Build database from zero and run pgTAP shard
+        run: node scripts/ci-hosted/backend.cjs
       - name: Upload pgTAP summary
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
@@ -138,6 +122,7 @@ jobs:
           name: pgtap-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-reports/pgtap.json
+            ci-reports/pgtap-diagnostic.json
             ci-reports/pgtap-files.json
             ci-reports/pgtap.log
           if-no-files-found: warn

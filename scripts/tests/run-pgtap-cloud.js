@@ -903,13 +903,16 @@ function runPsqlWithCandidateFallback(candidates, buildArgs, description, option
   if (!attempt) {
     throw new Error(`[pgTAP] ${description} did not execute.`);
   }
+  const firstError = String(attempt.result.combined || '').split(/\r?\n/)
+    .find(line => /ERROR:|FATAL:|\bnot ok\b|looks like you (failed|planned)/i.test(line));
+  const detail = firstError ? `\n${firstError}` : '';
   if (attempt.result.status !== 0) {
     throw new Error(
-      `[pgTAP] ${description} exited with status ${attempt.result.status} via ${attempt.candidate?.name || 'unknown'}`,
+      `[pgTAP] ${description} exited with status ${attempt.result.status} via ${attempt.candidate?.name || 'unknown'}${detail}`,
     );
   }
   if (attempt.tapFailures) {
-    throw new Error(`[pgTAP] TAP test failures detected in ${description}`);
+    throw new Error(`[pgTAP] TAP test failures detected in ${description}${detail}`);
   }
   return attempt;
 }

@@ -8,6 +8,7 @@ const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, retry, stage, writeReport } = require('./process.cjs');
 const { collectStackDiagnostics } = require('./stack-diagnostics.cjs');
+const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
@@ -94,7 +95,7 @@ async function backendLint(summary, commands, execute, file = 'ci-reports/db-lin
         lint.findings = report.findings; lint.ignored = report.ignored;
         if (report.failure) lint.failure = report.failure;
       } catch (error) { lint.ok = false; lint.failure = sanitize(error.message); }
-      if (!lint.ok) throw new Error('Backend lint failed; preserving findings and continuing to snapshot and pgTAP');
+      if (!lint.ok) throw new Error('Backend lint failed; preserving findings while independent pgTAP shards continue');
     });
   } catch (error) { lint.ok = false; lint.failure ||= sanitize(error.message); console.error(sanitize(error.message)); }
 }
@@ -103,6 +104,13 @@ async function qualify(diagnostic) {
   const pinState = imagePreflight(completePins(pins) ? '' : mainSwitch(), process.env.GITHUB_EVENT_NAME, new Date(), process.env.GITHUB_REF, pins);
   diagnostic.imagePolicy = { mode: pinState.qualificationOnly ? 'qualification-only' : 'digest-pinned', decision: 'not_started', allowed: 0, denied: 0, denials: [] };
   if (process.argv[2] === 'preflight') return;
+  const shard = process.env.PGTAP_SHARD;
+  const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard) : undefined;
+  if (shard && fs.existsSync('supabase/tests/pgtap/.pgtap-skip.json')) {
+    const skip = JSON.parse(fs.readFileSync('supabase/tests/pgtap/.pgtap-skip.json', 'utf8'));
+    if (!Array.isArray(skip) || skip.length) throw new Error('pgTAP shards cannot use a malformed/nonempty skip list');
+  }
+  const reportName = shard ? 'pgtap' : 'backend';
   diagnostic.stage = 'local-contracts';
   // Reuse the existing loopback, version, client-image and full-pgTAP contracts.
   const local = require('../ops/ci/cloud-pool-db-local.js');
@@ -121,10 +129,11 @@ async function qualify(diagnostic) {
   const cli = path.join(bin, 'supabase');
   let started = false; let guard; let cliEnv = env; let dockerRoot;
   const summary = { stages: [], sha: process.env.GITHUB_SHA || 'unknown', migrations: 0, pgtap: 'NOT_RUN',
+    ...(shard ? { shard, selected, files: [] } : {}),
     integration: 'SKIPPED_BY_DESIGN: local equivalence of the integration inventory is unproved',
     serviceImagePins: pinState.qualificationOnly ? 'PIN_NEEDED' : 'resolved SHA-256 indices', imageQualificationOnly: pinState.qualificationOnly, ok: false };
   fs.mkdirSync('ci-reports', { recursive: true });
-  const checked = (command, args, commandEnv, timeout, options = {}) => run(command, args, { env: commandEnv, timeout, logFile: 'ci-reports/backend.log', ...options });
+  const checked = (command, args, commandEnv, timeout, options = {}) => run(command, args, { env: commandEnv, timeout, logFile: `ci-reports/${reportName}.log`, ...options });
   const timed = (name, action) => { diagnostic.stage = name; return stage(summary, name, action); };
   try {
     diagnostic.stage = 'docker-preflight';
@@ -226,40 +235,34 @@ async function qualify(diagnostic) {
       console.log(`Fresh migration replay: ${versions.length} files`);
       summary.currentMigration = null;
     } finally { await db.end(); }
-    diagnostic.stage = 'backend-lint';
-    await backendLint(summary, local.loadBackendLocalPreSuiteCommands(), lint => checked('npm', ['run', lint.script], {
-      ...env, ...lint.env, ENV_FILE: os.devNull, ENV_FILE_APPEND: '0', ENV_FILE_OVERRIDE: '0', MIGRATION_FIXTURE_GUARD_MODE: 'full',
-    }, lint.timeout_ms));
-    await timed('database-dump', async () => {
-      const container = `supabase_db_${project}`;
-      const snapshot = path.resolve('ci-reports/database-snapshot');
-      fs.mkdirSync(snapshot, { recursive: true });
-      // A new per-shard encryption key is safe only while the built database has no Vault secrets.
-      const vaultCount = (await checked('docker', ['exec', container, 'psql', '-h', '127.0.0.1', '-U', 'supabase_admin', '-d', 'postgres', '-Atc',
-        'select count(*) from vault.secrets'], env, undefined, { quiet: true })).trim();
-      if (vaultCount !== '0') throw new Error('Logical snapshot cannot preserve persisted Vault secrets without exporting encryption keys');
-      await checked('docker', ['exec', container, 'pg_dump', '-h', '127.0.0.1', '-U', 'supabase_admin', '-d', 'postgres', '-Fc', '--create', '-f', '/tmp/database.dump'], env);
-      await checked('docker', ['exec', container, 'pg_dumpall', '-h', '127.0.0.1', '-U', 'supabase_admin', '--globals-only', '--no-role-passwords', '-f', '/tmp/roles.sql'], env);
-      for (const file of ['database.dump', 'roles.sql']) await checked('docker', ['cp', `${container}:/tmp/${file}`, path.join(snapshot, file)], env);
-      const settings = await checked('docker', ['exec', container, 'psql', '-h', '127.0.0.1', '-U', 'supabase_admin', '-d', 'postgres', '-Atc',
-        "select json_object_agg(name, setting) from pg_settings where name in ('shared_preload_libraries', 'session_preload_libraries', 'cron.database_name', 'max_connections', 'max_worker_processes', 'max_replication_slots', 'max_wal_senders', 'wal_level')"], env, undefined, { quiet: true });
+    if (shard) {
       const databasePin = pins.find(pin => pin.role === 'database');
-      fs.writeFileSync(path.join(snapshot, 'manifest.json'), JSON.stringify({ sha: summary.sha, image: `public.ecr.aws/${databasePin.image}@${databasePin.digest}`,
-        settings: JSON.parse(settings), migrations: summary.migrations,
-        files: Object.fromEntries(['database.dump', 'roles.sql'].map(file => [file, crypto.createHash('sha256').update(fs.readFileSync(path.join(snapshot, file))).digest('hex')])) }, null, 2));
+      local.writePsqlWrapper(bin, `public.ecr.aws/${databasePin.image}@${databasePin.digest}`);
+      const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, config.dbPort, selected);
+      diskFloor(dockerRoot);
+      summary.pgtap = 'running';
+      await timed(`pgtap:${shard}`, () => checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], testEnv, 18 * 60000));
+      const rows = JSON.parse(fs.readFileSync('ci-reports/pgtap-files.json', 'utf8'));
+      if (JSON.stringify(rows.map(row => row.file)) !== JSON.stringify(selected) || rows.some(row => row.status !== 'passed')) throw new Error('Incomplete pgTAP shard results');
+      summary.pgtap = 'passed';
+      summary.ok = true;
+    } else {
+      diagnostic.stage = 'backend-lint';
+      await backendLint(summary, local.loadBackendLocalPreSuiteCommands(), lint => checked('npm', ['run', lint.script], {
+        ...env, ...lint.env, ENV_FILE: os.devNull, ENV_FILE_APPEND: '0', ENV_FILE_OVERRIDE: '0', MIGRATION_FIXTURE_GUARD_MODE: 'full',
+      }, lint.timeout_ms));
       summary.pgtap = 'DEFERRED_TO_SHARDS';
-      summary.snapshotReady = true;
-    });
+      summary.ok = summary.lint.ok;
+    }
     console.log(summary.integration);
-    // Snapshot production succeeds independently; the database aggregate enforces lint.
-    summary.ok = summary.lint.ok;
     diagnostic.stage = 'complete';
   } catch (error) {
+    if (summary.pgtap === 'running') summary.pgtap = 'failed';
     if (guard && fs.existsSync(guard.policyFile)) diagnostic.imagePolicy = { ...diagnostic.imagePolicy, ...JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')) };
     saveFailure(diagnostic, error, environmentSecrets(env)); // Persist before stack teardown and temporary-file removal.
     if (started && diagnostic.stage === 'stack-start') {
       diagnostic.startupDiagnostics = await stage(summary, 'stack-diagnostics', () => collectStackDiagnostics({
-        project, env, dockerRoot, imagePolicy: diagnostic.imagePolicy, logFile: 'ci-reports/backend.log',
+        project, env, dockerRoot, imagePolicy: diagnostic.imagePolicy, logFile: `ci-reports/${reportName}.log`,
       })).catch(diagnosticError => ({ error: sanitize(diagnosticError.message) }));
       saveFailure(diagnostic, error, environmentSecrets(env));
     }
@@ -285,14 +288,16 @@ async function qualify(diagnostic) {
     fs.rmSync(temp, { recursive: true, force: true });
     fs.mkdirSync('ci-reports', { recursive: true });
     summary.failure = diagnostic.failure;
-    writeReport('ci-reports/backend.json', summary);
+    if (shard) Object.assign(summary, shardResults(selected, fs.existsSync('ci-reports/pgtap-files.json')
+      ? JSON.parse(fs.readFileSync('ci-reports/pgtap-files.json', 'utf8')) : []));
+    writeReport(`ci-reports/${reportName}.json`, summary);
   }
 }
 function saveFailure(diagnostic, error, secrets) {
   if (diagnostic.stage === 'image-preflight') diagnostic.imagePolicy = { decision: 'denied', reason: sanitize(error.message, secrets) };
   diagnostic.failure = { message: sanitize(error.message, secrets), exitCode: null, signal: null, timeout: false, errorCode: error.code || null, ...error.failure };
   fs.mkdirSync('ci-reports', { recursive: true });
-  fs.writeFileSync('ci-reports/backend-diagnostic.json', `${JSON.stringify(diagnostic, null, 2)}\n`);
+  fs.writeFileSync(`ci-reports/${process.env.PGTAP_SHARD ? 'pgtap' : 'backend'}-diagnostic.json`, `${JSON.stringify(diagnostic, null, 2)}\n`);
 }
 async function main() {
   const diagnostic = { sha: process.env.GITHUB_SHA || 'unknown', stage: 'image-preflight', imagePolicy: { decision: 'not_evaluated' } };
