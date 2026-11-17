@@ -8,7 +8,7 @@ const workflow = yaml.parse(body);
 describe('public CI workflow contract', () => {
   test('validates pull requests and merge groups with read-only permissions', () => {
     expect(workflow.name).toBe('ci');
-    expect(workflow.on).toHaveProperty('pull_request');
+    expect(workflow.on.pull_request.types).toEqual(['opened', 'synchronize', 'reopened', 'edited']);
     expect(workflow.on.merge_group.types).toContain('checks_requested');
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(workflow.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}");
@@ -34,6 +34,7 @@ describe('public CI workflow contract', () => {
     expect(command).toContain("allowed = {'success'}");
     expect(command).toContain("if name == 'visual-baselines' and os.environ['VISUAL_REQUESTED'] != 'true':");
     expect(command).toContain("if name == 'dependency-review' and os.environ['DEPENDENCY_REVIEW_REQUESTED'] != 'true':");
+    expect(command).toContain("if name == 'main-admission' and os.environ['MAIN_ADMISSION_REQUESTED'] != 'true':");
     expect(command).toContain('sys.exit(0 if good else 1)');
     const downloadAction = 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333';
     const optionalTransfers = {
@@ -66,16 +67,38 @@ describe('public CI workflow contract', () => {
     expect(workflow.jobs['ci-gate'].steps[0].env.DEPENDENCY_REVIEW_REQUESTED).toBe("${{ github.event_name == 'pull_request' }}");
   });
 
-  test('opens the hotfix back-merge from a merged main PR without checking out code', () => {
+  test('requires main admission on retargets and runs the base guard with read-only access', () => {
+    const main = workflow.jobs['main-admission'];
+    expect(main.if).toBe("github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'");
+    expect(workflow.jobs['ci-gate'].steps[0].env.MAIN_ADMISSION_REQUESTED).toBe('${{ ' + main.if + ' }}');
+    expect(main.permissions).toEqual({ contents: 'read' });
+    expect(main.steps[0].env.BASE_SHA).toBe('${{ github.event.pull_request.base.sha }}');
+    expect(main.steps[0].run).toContain('[[ "$BASE_SHA" =~ ^[a-f0-9]{40}$ ]]');
+    const checkout = main.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+    expect(checkout.with).toMatchObject({
+      ref: '${{ steps.source.outputs.base }}',
+      'persist-credentials': false,
+      'sparse-checkout': 'scripts/ci-hosted',
+    });
+    expect(main.steps.at(-1).run).toBe('node scripts/ci-hosted/policy.cjs');
+  });
+
+  test('comments once on the merged hotfix with the back-merge link and title', () => {
     const backmerge = yaml.parse(fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/hotfix-backmerge.yml'), 'utf8'));
     expect(backmerge.on).toEqual({ pull_request: { types: ['closed'], branches: ['main'] } });
-    expect(backmerge.permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
+    expect(backmerge.permissions).toEqual({ 'pull-requests': 'write' });
     const job = backmerge.jobs.backmerge;
     expect(job.if).toContain('github.event.pull_request.merged');
     expect(job.if).toContain('github.event.pull_request.head.repo.id == github.event.repository.id');
     expect(job.steps).toHaveLength(1);
     expect(job.steps[0].uses).toBeUndefined();
     expect(job.steps[0].env.GH_TOKEN).toBe('${{ github.token }}');
-    expect(job.steps[0].run).toContain("-f head=main -f base=dev -f 'title=Back-merge hotfix into dev'");
+    const command = job.steps[0].run;
+    expect(command).toContain('issues/$PR_NUMBER/comments');
+    expect(command).toContain('<!-- hotfix-backmerge -->');
+    expect(command).toContain('[[ -z "$existing" ]] || exit 0');
+    expect(command).toContain('Back-merge hotfix into dev');
+    expect(command).toContain('$compare/main...dev');
+    expect(command).toContain('$compare/dev...main?expand=1');
   });
 });

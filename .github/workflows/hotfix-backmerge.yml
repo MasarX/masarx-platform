@@ -6,14 +6,13 @@ name: Hotfix back-merge
     branches: [main]
 
 permissions:
-  contents: read
   pull-requests: write
 
 env:
   NPM_CONFIG_IGNORE_SCRIPTS: 'true'
 
 concurrency:
-  group: hotfix-backmerge
+  group: hotfix-backmerge-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
@@ -22,19 +21,23 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Open main into dev if needed
+      - name: Comment with the back-merge link
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           HOTFIX_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           [[ "$HOTFIX_HEAD" == hotfix/?* ]] || exit 0
-          existing=$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
-            -f state=open -f base=dev -f "head=$GITHUB_REPOSITORY_OWNER:main" --jq '.[0].html_url // empty')
-          if [[ -z "$existing" ]]; then
-            gh api --method POST "repos/$GITHUB_REPOSITORY/pulls" \
-              -f head=main -f base=dev -f 'title=Back-merge hotfix into dev' \
-              -f 'body=Bring the merged hotfix from main into dev.' --jq '.html_url'
-          else
-            printf '%s\n' "$existing"
-          fi
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          comments="repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"
+          marker='<!-- hotfix-backmerge -->'
+          existing=$(gh api --paginate "$comments?per_page=100" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id")
+          [[ -z "$existing" ]] || exit 0
+          compare="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare"
+          body=$(printf '%s\n\n%s\n\n%s\n%s\n' "$marker" \
+            'Open a pull request titled **Back-merge hotfix into dev**. Preserve main as a parent when merging.' \
+            "[Open main into dev]($compare/dev...main?expand=1)" \
+            "[Compare main...dev]($compare/main...dev)")
+          gh api --method POST "$comments" -f "body=$body" --jq '.html_url'

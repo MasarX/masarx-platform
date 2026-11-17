@@ -14,13 +14,23 @@ const event = (target = 'main', branch = 'dev', headRepo = repo) => ({ pull_requ
   head: { ref: branch, sha: tip, repo: { ...headRepo } },
 } });
 const calls = [];
-const read = args => { calls.push(args); return args[0] === 'rev-parse' ? `${tip}\n` : ''; };
+const read = args => {
+  calls.push(args);
+  if (args[1] === '--is-shallow-repository') return 'true\n';
+  return args[0] === 'rev-parse' ? `${tip}\n` : '';
+};
 const prEvent = 'pull_request';
 assert.equal(devPromotion(event(), prEvent, repository, read), true);
 assert.deepEqual(calls, [
-  ['fetch', '--no-tags', '--depth=1', 'origin', '+refs/heads/dev:refs/policy/dev'],
+  ['rev-parse', '--is-shallow-repository'],
+  ['fetch', '--no-tags', '--filter=blob:none', '--unshallow', 'origin', '+refs/heads/dev:refs/policy/dev'],
   ['rev-parse', 'refs/policy/dev'],
+  ['merge-base', '--is-ancestor', base, tip],
 ]);
+assert.throws(() => devPromotion(event(), prEvent, repository, args => {
+  if (args[0] === 'merge-base') throw new Error('main has commits absent from dev');
+  return read(args);
+}), /main-to-dev back-merge/);
 const stale = event(); stale.pull_request.head.sha = candidate;
 assert.throws(() => devPromotion(stale, prEvent, repository, read), /stale/);
 for (const mutate of [
@@ -58,15 +68,13 @@ for (const field of ['title', 'body']) {
   assert.equal(policySource(edited, prEvent), base);
   assert.equal(devPromotion(edited, prEvent, repository, read), true);
 }
-const retargeted = { ...event('main', 'feature'), action: 'edited', changes: { base: { ref: { from: 'dev' } } } };
-assert.equal(policySource(retargeted, prEvent), base);
-assert.throws(() => evaluatePolicy(retargeted, prEvent, repository, read), /Main accepts/);
 
 const workflowFiles = ['.github/workflows/policy.yml', '.github/workflows/public-ci.yml'];
 const gitFixture = (files, gitCalls = []) => args => {
   gitCalls.push(args);
   if (args[0] === 'fetch') return '';
   if (args[0] === 'rev-parse') return ({
+    '--is-shallow-repository': 'false\n',
     'refs/policy/dev': tip, 'refs/policy/candidate': candidate,
     [`${candidate}^1`]: base, [`${candidate}^2`]: tip,
   })[args[1]];
@@ -76,8 +84,24 @@ const gitFixture = (files, gitCalls = []) => args => {
   }
   if (args[0] === 'ls-tree') return args.includes('.github/workflows') ? workflowFiles.join('\0') : '';
   if (args[0] === 'show') return "env:\n  NPM_CONFIG_IGNORE_SCRIPTS: 'true'\n";
+  if (args[0] === 'merge-base') {
+    assert.deepEqual(args, ['merge-base', '--is-ancestor', base, tip]);
+    return '';
+  }
   throw new Error(`Unexpected fixture Git operation: ${args[0]}`);
 };
+const featurePr = { ...event('dev', 'feature'), action: 'opened' };
+assert.doesNotThrow(() => evaluatePolicy(featurePr, prEvent, repository, gitFixture(['docs/example.md'])));
+const mainBase = { ...featurePr.pull_request.base, ref: 'main', sha: 'd'.repeat(40) };
+const retargeted = {
+  action: 'edited',
+  changes: { base: { ref: { from: 'dev' } } },
+  pull_request: { ...featurePr.pull_request, base: mainBase },
+};
+assert.equal(policySource(retargeted, prEvent), mainBase.sha);
+assert.throws(() => evaluatePolicy(retargeted, prEvent, repository, () => {
+  assert.fail('Retargeted feature PR must be refused before reading candidate Git objects');
+}), /Main accepts/);
 const hotfix = event('main', 'hotfix/urgent');
 assert.doesNotThrow(() => evaluatePolicy(hotfix, prEvent, repository, gitFixture(['docs/example.md'])));
 assert.throws(() => evaluatePolicy(hotfix, prEvent, repository, gitFixture([workflowFiles[1]])), /target marker is closed/);
@@ -109,4 +133,4 @@ assert.equal(/secrets\.|pull_request\.head|head\.sha/.test(workflow), false);
 assert.match(workflow, /^  pull_request:\n    types: \[opened, synchronize, reopened, edited\]$/m);
 assert.doesNotMatch(workflow, /^  pull_request_target:/m);
 assert.equal(workflow.includes('run: node scripts/ci-hosted/promotion-selfcheck.cjs'), false);
-console.log('PASS: live dev promotions, guarded hotfixes, fork PR data, queue range and generated workflow');
+console.log('PASS: dev promotions and ancestry, retarget refusal, guarded hotfixes, fork PR data, queue range and generated workflow');

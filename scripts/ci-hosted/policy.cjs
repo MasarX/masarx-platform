@@ -154,8 +154,16 @@ function devPromotion(event, kind, repository, read = git) {
     throw new Error('Main accepts only current same-repository dev promotions or same-repository hotfix/* branches');
   }
   if (head.ref !== 'dev') return false;
-  read(['fetch', '--no-tags', '--depth=1', 'origin', '+refs/heads/dev:refs/policy/dev']);
+  const mainSha = sha(base.sha);
+  const fetch = ['fetch', '--no-tags', '--filter=blob:none'];
+  if (read(['rev-parse', '--is-shallow-repository']).trim() === 'true') fetch.push('--unshallow');
+  read([...fetch, 'origin', '+refs/heads/dev:refs/policy/dev']);
   if (sha(read(['rev-parse', 'refs/policy/dev']).trim()) !== headSha) throw new Error('Dev promotion head is stale');
+  try {
+    read(['merge-base', '--is-ancestor', mainSha, headSha]);
+  } catch {
+    throw new Error('Promotion requires main to be an ancestor of dev. Merge the main-to-dev back-merge with history preserved before promoting.');
+  }
   return true;
 }
 function liveMerge(event, read = git, pause = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000)) {
