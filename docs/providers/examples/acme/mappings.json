@@ -11,7 +11,7 @@
             "event_id": "event.id",
             "event_type": "event.type",
             "tracking_number": "shipment.tracking_number",
-            "recipient_name": "Example Entity ntvplorhukthpmnmvgrstqzp",
+            "recipient_name": "shipment.recipient.name",
             "city": "shipment.address.city"
           }
         }
