@@ -9,6 +9,8 @@ REVOKE EXECUTE ON FUNCTION
   public.resolve_ingress_execution_url_v1(UUID),
   public.resolve_label_renderer_invoke_request_v1(INTEGER, JSONB),
   public.resolve_label_renderer_invoke_config_v1(UUID),
+  public.resolve_settings(TEXT, TEXT, UUID),
+  public.resolve_settings_row(TEXT, TEXT, UUID),
   public.resolve_settings_merged(TEXT, TEXT, UUID),
   api.resolve_settings_merged(TEXT, TEXT, UUID),
   public.get_job_call_spec(UUID),
@@ -28,6 +30,8 @@ GRANT EXECUTE ON FUNCTION
   public.resolve_ingress_execution_url_v1(UUID),
   public.resolve_label_renderer_invoke_request_v1(INTEGER, JSONB),
   public.resolve_label_renderer_invoke_config_v1(UUID),
+  public.resolve_settings(TEXT, TEXT, UUID),
+  public.resolve_settings_row(TEXT, TEXT, UUID),
   public.resolve_settings_merged(TEXT, TEXT, UUID),
   api.resolve_settings_merged(TEXT, TEXT, UUID),
   public.get_job_call_spec(UUID),
@@ -61,6 +65,11 @@ TO edge_label_renderer_role;
 GRANT EXECUTE ON FUNCTION public.resolve_settings_merged(TEXT, TEXT, UUID),
   api.resolve_settings_merged(TEXT, TEXT, UUID)
 TO label_renderer_role, edge_label_renderer_role;
+-- Raw settings can contain invoke secrets; browser reads use scoped UI entrypoints.
+GRANT EXECUTE ON FUNCTION public.resolve_settings(TEXT, TEXT, UUID),
+  public.resolve_settings_row(TEXT, TEXT, UUID)
+TO edge_api_caller_role, edge_api_gateway_role, edge_webhook_role,
+  edge_label_renderer_role, label_renderer_role, geocoding_worker_role, ui_rpc_executor;
 
 NOTIFY pgrst, 'reload schema';
 COMMIT;
