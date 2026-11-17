@@ -62,3 +62,4 @@ jobs:
           sparse-checkout: scripts/ci-hosted
       - name: Enforce the target-base guard without executing candidate code
         run: node scripts/ci-hosted/policy.cjs
+# Policy verification: workflow-only change.
