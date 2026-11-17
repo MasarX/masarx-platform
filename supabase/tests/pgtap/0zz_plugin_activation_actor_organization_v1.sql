@@ -2,6 +2,8 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SELECT no_plan();
+-- Rollback-only schema access isolates function ACL denial from schema denial.
+GRANT USAGE ON SCHEMA public TO anon;
 
 CREATE TEMP TABLE activation_ids(key TEXT PRIMARY KEY, id UUID DEFAULT gen_random_uuid());
 INSERT INTO activation_ids(key) SELECT unnest(ARRAY['org','foreign_org','actor','foreign_actor','platform_actor','denied_actor']);
