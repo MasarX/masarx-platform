@@ -7,7 +7,8 @@ beforeAll(async () => {
     '../../apps/console/app/api/automation-marketplace/oauth/_lib/token-transport.mjs')).href));
 });
 
-function fixture({ addresses = [{ address: '192.0.2.10', family: 4 }], chunks = ['{"access_token":"secret"}'], status = 200,
+// Public addresses below are consumed only by injected DNS and socket fakes.
+function fixture({ addresses = [{ address: '8.8.8.8', family: 4 }], chunks = ['{"access_token":"secret"}'], status = 200,
   type = 'application/json', requestError = null, noResponse = false } = {}) {
   const lookup = jest.fn(async () => addresses);
   const response = Object.assign(new EventEmitter(), { statusCode: status, headers: { 'content-type': type }, destroy: jest.fn() });
@@ -36,14 +37,14 @@ test('pins all-public DNS to the actual socket and preserves hostname TLS checks
   expect(h.request.mock.calls[0][0].hostname).toBe('identity.example.test');
   expect(h.options.headers).toMatchObject({ 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' });
   const callback = jest.fn(); h.options.lookup('identity.example.test', {}, callback);
-  expect(callback).toHaveBeenCalledWith(null, '192.0.2.10', 4);
+  expect(callback).toHaveBeenCalledWith(null, '8.8.8.8', 4);
   const all = jest.fn(); h.options.lookup('identity.example.test', { all: true }, all);
-  expect(all).toHaveBeenCalledWith(null, [{ address: '192.0.2.10', family: 4 }]);
+  expect(all).toHaveBeenCalledWith(null, [{ address: '8.8.8.8', family: 4 }]);
   expect(h.pending.end).toHaveBeenCalledWith('refresh_token=secret%26value&grant_type=refresh_token');
 });
 
 test.each([
-  [], [{ address: '127.0.0.1', family: 4 }], [{ address: '192.0.2.10', family: 4 }, { address: '192.0.2.10', family: 4 }],
+  [], [{ address: '127.0.0.1', family: 4 }], [{ address: '8.8.8.8', family: 4 }, { address: '127.0.0.1', family: 4 }],
   [{ address: '::1', family: 6 }], [{ address: '::ffff:127.0.0.1', family: 6 }], [{ address: '192.0.2.10', family: 4 }],
 ])('rejects empty/private/mixed DNS before opening a socket: %j', async (...rows) => {
   const addresses = rows.length === 1 && Array.isArray(rows[0]) ? rows[0] : rows;
@@ -80,7 +81,7 @@ test('the whole deadline includes DNS; late resolution cannot open a socket', as
     const promise = createTokenTransport({ lookup, request })('https://identity.example.test/token', {});
     const assertion = expect(promise).rejects.toThrow('OAuth token request failed');
     await Promise.resolve(); await jest.advanceTimersByTimeAsync(10_000); await assertion;
-    resolve([{ address: '192.0.2.10', family: 4 }]); await Promise.resolve(); await Promise.resolve();
+    resolve([{ address: '8.8.8.8', family: 4 }]); await Promise.resolve(); await Promise.resolve();
     expect(request).not.toHaveBeenCalled();
   } finally { jest.useRealTimers(); }
 });

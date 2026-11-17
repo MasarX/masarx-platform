@@ -8,7 +8,7 @@ const modulePath = pathToFileURL(path.resolve(
 
 const basePolicy = (overrides = {}) => ({
   transportMode: 'direct_trusted_host',
-  domainAllowlist: ['192.0.2.10'],
+  domainAllowlist: ['8.8.8.8'],
   domainDenylist: [],
   allowedMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   followRedirects: false,
@@ -17,7 +17,8 @@ const basePolicy = (overrides = {}) => ({
   ...overrides,
 });
 
-const publicDns = async (_host, type) => type === 'A' ? ['192.0.2.10'] : [];
+// Public addresses below are consumed only by injected DNS and fetch fakes.
+const publicDns = async (_host, type) => type === 'A' ? ['8.8.8.8'] : [];
 
 describe('api-caller bounded egress', () => {
   let egress;
@@ -28,8 +29,8 @@ describe('api-caller bounded egress', () => {
 
   test.each([
     '127.0.0.1',
-    '192.0.2.10',
-    '192.0.2.10',
+    '10.0.0.1',
+    '169.254.169.254',
     '192.0.2.1',
     '::1',
     'fc00::1',
@@ -111,7 +112,7 @@ describe('api-caller bounded egress', () => {
       }),
       resolveDns: async (_host, type) => {
         if (type === 'AAAA') throw new Error('resolver unavailable');
-        return ['192.0.2.10'];
+        return ['8.8.8.8'];
       },
       guardedFetch,
     })).rejects.toThrow('AAAA DNS lookup failed');
@@ -149,7 +150,7 @@ describe('api-caller bounded egress', () => {
     const requests = [];
     const fetchImpl = jest.fn(async (url, init) => {
       requests.push({ url, headers: new Headers(init.headers) });
-      if (url === 'https://192.0.2.10/start') {
+      if (url === 'https://8.8.8.8/start') {
         return new Response(null, {
           status: 302,
           headers: { location: 'https://1.1.1.1/final' },
@@ -158,7 +159,7 @@ describe('api-caller bounded egress', () => {
       return Response.json({ ok: true });
     });
     const result = await egress.executeBoundedEgress({
-      url: 'https://192.0.2.10/start',
+      url: 'https://8.8.8.8/start',
       method: 'GET',
       headers: {
         authorization: 'Bearer secret',
@@ -169,7 +170,7 @@ describe('api-caller bounded egress', () => {
       timeoutMs: 1000,
       policy: basePolicy({
         followRedirects: true,
-        domainAllowlist: ['192.0.2.10', '1.1.1.1'],
+        domainAllowlist: ['8.8.8.8', '1.1.1.1'],
       }),
       resolveDns: publicDns,
       directFetch: fetchImpl,
@@ -185,10 +186,10 @@ describe('api-caller bounded egress', () => {
   test('rejects redirect loops and responses over the configured bound', async () => {
     const loopFetch = jest.fn(async () => new Response(null, {
       status: 307,
-      headers: { location: 'https://192.0.2.10/start' },
+      headers: { location: 'https://8.8.8.8/start' },
     }));
     await expect(egress.executeBoundedEgress({
-      url: 'https://192.0.2.10/start',
+      url: 'https://8.8.8.8/start',
       method: 'GET',
       timeoutMs: 1000,
       policy: basePolicy({ followRedirects: true }),
@@ -197,7 +198,7 @@ describe('api-caller bounded egress', () => {
     })).rejects.toThrow('redirect loop');
 
     await expect(egress.executeBoundedEgress({
-      url: 'https://192.0.2.10/start',
+      url: 'https://8.8.8.8/start',
       method: 'GET',
       timeoutMs: 1000,
       policy: basePolicy({ maxResponseBytes: 3 }),
@@ -231,7 +232,7 @@ describe('api-caller bounded egress', () => {
     const directFetch = jest.fn();
     const resolveDns = jest.fn(publicDns);
     await expect(egress.executeBoundedEgress({
-      url: 'https://192.0.2.10/start', method: 'GET', timeoutMs: 1000,
+      url: 'https://8.8.8.8/start', method: 'GET', timeoutMs: 1000,
       policy: basePolicy({ allowedMethods: ['POST'] }), directFetch, resolveDns,
     })).rejects.toThrow('HTTP method GET is not allowed');
     expect(directFetch).not.toHaveBeenCalled();
@@ -246,9 +247,9 @@ describe('api-caller bounded egress', () => {
     }));
     const resolveDns = jest.fn(publicDns);
     await expect(egress.executeBoundedEgress({
-      url: transportMode === 'guarded_proxy' ? 'https://provider.example/start' : 'https://192.0.2.10/start',
+      url: transportMode === 'guarded_proxy' ? 'https://provider.example/start' : 'https://8.8.8.8/start',
       method: 'POST', body: 'payload', timeoutMs: 1000,
-      policy: basePolicy({ transportMode, followRedirects: true, allowedMethods: ['POST'], domainAllowlist: ['provider.example', '192.0.2.10'] }),
+      policy: basePolicy({ transportMode, followRedirects: true, allowedMethods: ['POST'], domainAllowlist: ['provider.example', '8.8.8.8'] }),
       resolveDns, directFetch: fetchImpl, guardedFetch: fetchImpl,
     })).rejects.toThrow('HTTP method GET is not allowed');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -264,7 +265,7 @@ describe('api-caller bounded egress', () => {
       .mockResolvedValueOnce(new Response(null, { status, headers: { location: '/final' } }))
       .mockResolvedValueOnce(new Response('ok'));
     const result = await egress.executeBoundedEgress({
-      url: 'https://192.0.2.10/start', method: 'POST', body: 'payload',
+      url: 'https://8.8.8.8/start', method: 'POST', body: 'payload',
       headers: { 'content-type': 'text/plain', 'content-length': '7' },
       timeoutMs: 1000,
       policy: basePolicy({ transportMode, followRedirects: true, allowedMethods: rewrite ? ['GET', 'POST'] : ['POST'] }),
@@ -273,7 +274,7 @@ describe('api-caller bounded egress', () => {
     expect(result).toMatchObject({ status: 200, body: 'ok' });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     const next = fetchImpl.mock.calls[1][1];
-    expect(fetchImpl.mock.calls[1][0]).toBe('https://192.0.2.10/final');
+    expect(fetchImpl.mock.calls[1][0]).toBe('https://8.8.8.8/final');
     expect(next.method).toBe(rewrite ? 'GET' : 'POST');
     expect(next.body).toBe(rewrite ? undefined : 'payload');
     expect(new Headers(next.headers).get('content-type')).toBe(rewrite ? null : 'text/plain');
@@ -290,7 +291,7 @@ describe('api-caller bounded egress', () => {
       },
     });
     await expect(egress.executeBoundedEgress({
-      url: 'https://192.0.2.10/start',
+      url: 'https://8.8.8.8/start',
       method: 'GET',
       timeoutMs: 5,
       policy: basePolicy(),
