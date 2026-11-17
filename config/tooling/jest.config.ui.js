@@ -1,7 +1,7 @@
 const path = require("path");
 const { pathsToModuleNameMapper } = require("ts-jest");
 const tsconfig = require("../../tsconfig.base.json");
-const { WORKTREE_JEST_ROOTS, WORKTREE_TEMP_IGNORE_PATTERNS, JEST_CACHE_DIRECTORY } = require("./jest.shared");
+const { WORKTREE_JEST_ROOTS, WORKTREE_TEMP_IGNORE_PATTERNS, JEST_CACHE_DIRECTORY, JEST_SCRIPT_WORKERS } = require("./jest.shared");
 
 const tsPaths =
   (tsconfig &&
@@ -14,6 +14,7 @@ const tsPaths =
 module.exports = {
   rootDir: path.join(__dirname, "..", ".."),
   ...(JEST_CACHE_DIRECTORY ? { cacheDirectory: JEST_CACHE_DIRECTORY } : {}),
+  ...JEST_SCRIPT_WORKERS,
   roots: WORKTREE_JEST_ROOTS,
   testEnvironment: "jsdom",
   testTimeout: 15000,
