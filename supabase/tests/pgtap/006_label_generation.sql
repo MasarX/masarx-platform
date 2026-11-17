@@ -668,7 +668,7 @@ SELECT result.* FROM (VALUES
   ('reset_named_admin_no_jwt', 'none', '', '{}', '', TRUE, TRUE, NULL),
   ('sql_service_no_jwt', 'service_role', '', '{}', '', TRUE, TRUE, NULL),
   ('sql_renderer_no_jwt', 'edge_label_renderer_role', '', '{}', '', TRUE, NULL, NULL),
-  ('sql_authenticated_no_jwt', 'authenticated', '', '{}', '', FALSE, NULL, '42501'),
+  ('sql_authenticated_no_jwt', 'authenticated', '', '{}', '', FALSE, NULL, 'P0001'),
   ('malformed_claims', 'none', '', '{broken', '', FALSE, FALSE, '22P02'),
   ('renderer_not_reprint_authority', 'none', '', '{"role":"edge_label_renderer_role"}', '', NULL, FALSE, 'P0001')
 ) AS cases(name, sql_role, scalar_role, claims, sub, compose_allowed, reprint_allowed, error_state)

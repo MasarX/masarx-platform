@@ -100,19 +100,34 @@ BEGIN
     'both_parents_missing','duplicate_child','duplicate_child_missing_pointer'] LOOP
     UPDATE public.workflow_runs SET context=entry_context WHERE id=entry_id;
     UPDATE public.workflow_runs SET context=child_context,metadata=child_metadata WHERE id=child_id;
+    -- Seed malformed history directly; an ingress row must retain its scope on update.
+    IF scenario IN ('entry_webhook_missing','child_webhook_missing','child_context_shape') THEN
+      PERFORM set_config('app.workflow_run_id',extra_id::text,TRUE);
+      INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
+        VALUES(extra_id,template_id,1,'webhook',CASE WHEN scenario='entry_webhook_missing' THEN 'completed' ELSE 'pending' END,
+          CASE scenario WHEN 'entry_webhook_missing' THEN entry_context-'webhook_id'
+            WHEN 'child_webhook_missing' THEN child_context-'webhook_id' ELSE '[]'::jsonb END,
+          CASE WHEN scenario='entry_webhook_missing' THEN '{}'::jsonb ELSE child_metadata END);
+      IF scenario='entry_webhook_missing' THEN
+        UPDATE public.workflow_runs SET context=jsonb_set(child_context,'{started_by_run_id}',to_jsonb(extra_id)),
+          metadata=jsonb_build_object('started_by_run_id',extra_id) WHERE id=child_id;
+        UPDATE public.webhook_inbox SET workflow_run_id=extra_id WHERE id=inbox_id;
+      ELSE
+        UPDATE public.workflow_runs SET context=child_context-'started_by_run_id',metadata='{}' WHERE id=child_id;
+        UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}',to_jsonb(extra_id)) WHERE id=entry_id;
+      END IF;
+    ELSE
     CASE scenario
       WHEN 'explicit_null' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}','null') WHERE id=entry_id;
       WHEN 'explicit_empty' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}','""') WHERE id=entry_id;
       WHEN 'explicit_wrong' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}',to_jsonb(extra_id)) WHERE id=entry_id;
       WHEN 'explicit_number' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}','1') WHERE id=entry_id;
       WHEN 'entry_webhook' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{webhook_id}',to_jsonb(extra_id)) WHERE id=entry_id;
-      WHEN 'entry_webhook_missing' THEN UPDATE public.workflow_runs SET context=context-'webhook_id' WHERE id=entry_id;
       WHEN 'entry_org' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{organization_id}',to_jsonb(other_org)) WHERE id=entry_id;
       WHEN 'entry_org_missing' THEN UPDATE public.workflow_runs SET context=context-'organization_id' WHERE id=entry_id;
       WHEN 'entry_source' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{source_identifier}','"foreign"') WHERE id=entry_id;
       WHEN 'entry_source_missing' THEN UPDATE public.workflow_runs SET context=context-'source_identifier' WHERE id=entry_id;
       WHEN 'entry_source_id' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{webhook_source_id}',to_jsonb(other_source)) WHERE id=entry_id;
-      WHEN 'child_webhook_missing' THEN UPDATE public.workflow_runs SET context=context-'webhook_id' WHERE id=child_id;
       WHEN 'child_webhook' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{webhook_id}',to_jsonb(extra_id)) WHERE id=child_id;
       WHEN 'child_org' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{organization_id}',to_jsonb(other_org)) WHERE id=child_id;
       WHEN 'child_org_missing' THEN UPDATE public.workflow_runs SET context=context-'organization_id' WHERE id=child_id;
@@ -123,7 +138,6 @@ BEGIN
       WHEN 'metadata_parent' THEN UPDATE public.workflow_runs SET metadata=jsonb_build_object('started_by_run_id',extra_id) WHERE id=child_id;
       WHEN 'metadata_shape' THEN UPDATE public.workflow_runs SET metadata='[]' WHERE id=child_id;
       WHEN 'metadata_json_null' THEN UPDATE public.workflow_runs SET metadata='null' WHERE id=child_id;
-      WHEN 'child_context_shape' THEN UPDATE public.workflow_runs SET context='[]' WHERE id=child_id;
       WHEN 'both_parents_missing' THEN UPDATE public.workflow_runs SET context=context-'started_by_run_id',metadata='{}' WHERE id=child_id;
       WHEN 'duplicate_child' THEN
         PERFORM set_config('app.workflow_run_id',extra_id::text,TRUE);
@@ -135,11 +149,16 @@ BEGIN
         INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
           VALUES(extra_id,template_id,1,'webhook','pending',child_context,child_metadata);
     END CASE;
+    END IF;
     SELECT to_jsonb(v) INTO row_result FROM public.webhook_inbox_followup_read_v1 v WHERE v.id=inbox_id;
     RETURN NEXT ok(row_result->'followup_workflow_run_id'='null'::jsonb AND row_result->'followup_workflow_status'='null'::jsonb
       AND row_result->'followup_last_error'='null'::jsonb,scenario||' refuses unproved identity');
     RETURN NEXT is(row_result->>'processing_status','pending',scenario||' does not change inbox truth');
-    IF scenario IN ('duplicate_child','duplicate_child_missing_pointer') THEN DELETE FROM public.workflow_runs WHERE id=extra_id; END IF;
+    IF scenario IN ('duplicate_child','duplicate_child_missing_pointer',
+      'entry_webhook_missing','child_webhook_missing','child_context_shape') THEN
+      UPDATE public.webhook_inbox SET workflow_run_id=entry_id WHERE id=inbox_id;
+      DELETE FROM public.workflow_runs WHERE id=extra_id;
+    END IF;
   END LOOP;
   UPDATE public.workflow_runs SET context=entry_context-'followup_workflow_run_id' WHERE id=entry_id;
   UPDATE public.workflow_runs SET context=child_context,metadata=child_metadata,last_error=NULL WHERE id=child_id;
