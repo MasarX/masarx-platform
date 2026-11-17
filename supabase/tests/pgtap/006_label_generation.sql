@@ -587,7 +587,7 @@ CREATE FUNCTION pg_temp.check_label_caller_authority(
 )
 RETURNS SETOF TEXT
 LANGUAGE plpgsql
-SET search_path TO extensions, public, pg_temp
+SET search_path TO public, pgtap, extensions, pg_temp
 AS $fixture$
 DECLARE
   v_prior_sql_role TEXT := current_setting('role', true);
