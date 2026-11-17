@@ -54,7 +54,7 @@ jobs:
       present: ${{ steps.subject.outputs.present }}
       snapshot-id: ${{ steps.snapshot.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -62,7 +62,7 @@ jobs:
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect database
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: '24.22.1'
@@ -88,7 +88,7 @@ jobs:
           compression-level: 0
       - name: Upload backend-summary
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
           name: backend-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -168,7 +168,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -200,7 +200,7 @@ jobs:
     env:
       LOCAL_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -213,7 +213,7 @@ jobs:
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect lint
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: '24.22.1'
@@ -230,7 +230,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -240,7 +240,7 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs detect "$TYPECHECK_SUBJECT"
         env:
           TYPECHECK_SUBJECT: ${{ matrix.subject }}
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: 24.22.1
@@ -263,7 +263,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -271,7 +271,7 @@ jobs:
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect unit
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: 24.22.1
@@ -292,7 +292,7 @@ jobs:
           fi
       - name: Upload unit-summary
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
           name: unit-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -314,7 +314,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -322,7 +322,7 @@ jobs:
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect ui
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: 24.22.1
@@ -343,7 +343,7 @@ jobs:
           fi
       - name: Upload ui-summary
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
           name: ui-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -369,7 +369,7 @@ jobs:
       matrix:
         subject: [apps/console, apps/portal, landing]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -379,7 +379,7 @@ jobs:
         env:
           BUILD_SUBJECT: ${{ matrix.subject }}
         run: node scripts/ci-hosted/tasks.cjs detect "$BUILD_SUBJECT"
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: '24.22.1'
@@ -398,7 +398,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -406,7 +406,7 @@ jobs:
       - name: Detect landing browser subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect landing
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: '24.22.1'
@@ -431,7 +431,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -439,7 +439,7 @@ jobs:
       - name: Enable manual subject
         id: subject
         run: printf '%s\n' 'present=true' >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: '24.22.1'
@@ -455,7 +455,7 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs visual
       - name: Upload visual-baselines
         if: success()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
           name: visual-baselines-${{ github.run_id }}-${{ github.run_attempt }}
           path: |

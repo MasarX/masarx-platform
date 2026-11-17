@@ -133,6 +133,25 @@ function policySource(event, kind) {
   if (!['preview', 'dev', 'main'].includes(branch)) throw new Error('Unsupported target branch');
   return sha(base);
 }
+function devPromotion(event, kind, repository, read = git) {
+  if (kind !== 'pull_request_target') return false;
+  const pr = event.pull_request;
+  const target = pr?.base?.ref;
+  if (target === 'main' && pr?.head?.ref !== 'dev') throw new Error('Main accepts only a current same-repository dev promotion');
+  if (!['main', 'preview'].includes(target) || pr?.head?.ref !== 'dev') return false;
+  const head = pr.head;
+  const baseRepo = pr.base.repo;
+  if (!repository || !head.repo || !baseRepo || head.repo.fork !== false
+    || !Number.isSafeInteger(baseRepo.id) || baseRepo.id < 1 || head.repo.id !== baseRepo.id
+    || baseRepo.full_name?.toLowerCase() !== repository.toLowerCase()
+    || head.repo.full_name?.toLowerCase() !== repository.toLowerCase()) {
+    throw new Error('Dev promotion requires complete same-repository identity; forks are refused');
+  }
+  const headSha = sha(head.sha);
+  read(['fetch', '--no-tags', '--depth=1', 'origin', '+refs/heads/dev:refs/policy/dev']);
+  if (sha(read(['rev-parse', 'refs/policy/dev']).trim()) !== headSha) throw new Error('Dev promotion head is stale');
+  return true;
+}
 function liveMerge(event, read = git, pause = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000)) {
   const number = event.pull_request?.number;
   if (!Number.isSafeInteger(number) || number < 1) throw new Error('Missing/invalid PR number');
@@ -164,6 +183,7 @@ function main() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const kind = process.env.GITHUB_EVENT_NAME;
   const source = policySource(event, kind);
+  const promotion = devPromotion(event, kind, process.env.GITHUB_REPOSITORY);
   let base; let candidate;
   if (kind === 'pull_request_target') {
     ({ candidate, base } = liveMerge(event));
@@ -192,11 +212,11 @@ function main() {
   for (const file of migrations.tolerated) console.log(`TOLERATED migration exception from target branch: ${file}`);
   if (migrations.failed.length) throw new Error(`Append-only violation: ${JSON.stringify(migrations.failed)}`);
   const scope = classify(changes, managerChanges);
-  enforceScope(scope, kind);
+  if (!promotion) enforceScope(scope, kind);
   const candidateMarker = targetFile(markerFile, candidate);
   enforceMarker(changes, candidateMarker, false, new Date(), kind);
   const authorityFiles = scope.guarded.filter(([, file]) => file !== markerFile || !closedMarker(candidateMarker));
-  if (authorityFiles.length) {
+  if (authorityFiles.length && !promotion) {
     const allow = marker(targetFile(markerFile, base));
     if (!allow) throw new Error('Protected-path changes denied: target marker is closed or expired');
     if (kind === 'merge_group') {
@@ -214,7 +234,8 @@ function main() {
     }
     for (const [, file] of scope.guarded) console.log(`TOLERATED protected-only change: ${JSON.stringify(file)}`);
   }
+  if (promotion) console.log('PASS: current same-repository dev promotion; protected paths were guarded on entry to dev');
   console.log('PASS: target-branch policy, protected-path scope and append-only migrations');
 }
 if (require.main === module) { try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; } }
-module.exports = { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, manifestAt, dependencyNotices, lockfile, installInputs, enforceWorkflowInventory, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, policySource };
+module.exports = { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, manifestAt, dependencyNotices, lockfile, installInputs, enforceWorkflowInventory, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, policySource, devPromotion };
