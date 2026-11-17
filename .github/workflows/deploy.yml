@@ -35,6 +35,7 @@ jobs:
     outputs:
       url: ${{ steps.deploy.outputs.url }}
       configured: ${{ steps.guard.outputs.configured }}
+      not_configured: ${{ steps.guard.outputs.configured == 'false' }}
     steps:
       - name: Guard configuration
         id: guard
@@ -42,6 +43,7 @@ jobs:
           CONFIGURED: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' && secrets.SUPABASE_DB_PASSWORD != '' && secrets.SUPABASE_JWT_SECRET != '' && vars.SUPABASE_PROJECT_REF != '' }}
         run: |
           case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
+          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::database skipped: not configured'
@@ -58,7 +60,9 @@ jobs:
           package-manager-cache: false
       - name: Install locked dependencies
         if: steps.guard.outputs.configured == 'true'
-        run: npm exec --yes --package="$(node -p 'require("./package.json").packageManager')" -- npm ci --ignore-scripts --no-audit --no-fund
+        run: |
+          for attempt in 1 2 3; do npm ci --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Prepare edge packages and pinned CLI
         if: steps.guard.outputs.configured == 'true'
         run: |
@@ -66,8 +70,8 @@ jobs:
           npm run edge:prepare-resource-import-exceljs
           mkdir -p "$RUNNER_TEMP/deploy-tools"
           archive="$RUNNER_TEMP/supabase.tar.gz"
-          curl --fail --silent --show-error --location \
-            https://github.com/supabase/cli/releases/download/v2.116.0/supabase_2.116.0_linux_amd64.tar.gz --output "$archive"
+          for attempt in 1 2 3; do curl --fail --silent --show-error --location https://github.com/supabase/cli/releases/download/v2.116.0/supabase_2.116.0_linux_amd64.tar.gz --output "$archive" && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
           printf '5b3031cb297d51b25be4c284e4c852254460ec722ec221d3b81b07d55acfd158  %s\n' "$archive" | sha256sum --check
           tar -xzf "$archive" -C "$RUNNER_TEMP/deploy-tools" supabase
           python3 - <<'PY'
@@ -100,6 +104,7 @@ jobs:
           const fs = require('node:fs');
           const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
           const bundle = buildEdgeDbJwtBundle({ secret: process.env.SUPABASE_JWT_SECRET });
+          for (const value of Object.values(bundle)) console.log('::add-mask::' + value);
           fs.writeFileSync(process.env.EDGE_SECRET_FILE, Object.entries(bundle)
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
             + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n', { mode: 0o600 });
@@ -116,6 +121,8 @@ jobs:
           printf 'url=https://%s.supabase.co\n' "$SUPABASE_PROJECT_REF" >> "$GITHUB_OUTPUT"
 
   console:
+    needs: database
+    if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment: ${{ inputs.environment || github.ref_name }}
@@ -132,6 +139,7 @@ jobs:
           CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_PROJECT_ID_CONSOLE != '' }}
         run: |
           case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
+          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::console skipped: not configured'
@@ -146,10 +154,25 @@ jobs:
         with:
           node-version: '24.22.1'
           package-manager-cache: false
-      - name: Install pinned CLI
+      - name: Install locked CLIs
         if: steps.guard.outputs.configured == 'true'
-        run: npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund vercel@65.17.0
-      - name: Pull, build and deploy prebuilt app
+        run: |
+          for attempt in 1 2 3; do npm ci --prefix tooling/deploy --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
+      - name: Pull project configuration
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
+        run: tooling/deploy/node_modules/.bin/vercel pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
+      - name: Build prebuilt app
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
+        run: tooling/deploy/node_modules/.bin/vercel build
+      - name: Deploy prebuilt app
         id: deploy
         if: steps.guard.outputs.configured == 'true'
         env:
@@ -158,14 +181,13 @@ jobs:
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_CONSOLE }}
         run: |
           set -euo pipefail
-          cli="$RUNNER_TEMP/deploy-tools/node_modules/.bin/vercel"
-          "$cli" pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
-          "$cli" build
-          url="$("$cli" deploy --prebuilt --yes)"
+          url="$(tooling/deploy/node_modules/.bin/vercel deploy --prebuilt --yes)"
           [[ "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
 
   portal:
+    needs: database
+    if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment: ${{ inputs.environment || github.ref_name }}
@@ -182,6 +204,7 @@ jobs:
           CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_PROJECT_ID_PORTAL != '' }}
         run: |
           case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
+          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::portal skipped: not configured'
@@ -196,10 +219,25 @@ jobs:
         with:
           node-version: '24.22.1'
           package-manager-cache: false
-      - name: Install pinned CLI
+      - name: Install locked CLIs
         if: steps.guard.outputs.configured == 'true'
-        run: npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund vercel@65.17.0
-      - name: Pull, build and deploy prebuilt app
+        run: |
+          for attempt in 1 2 3; do npm ci --prefix tooling/deploy --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
+      - name: Pull project configuration
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
+        run: tooling/deploy/node_modules/.bin/vercel pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
+      - name: Build prebuilt app
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
+        run: tooling/deploy/node_modules/.bin/vercel build
+      - name: Deploy prebuilt app
         id: deploy
         if: steps.guard.outputs.configured == 'true'
         env:
@@ -208,14 +246,13 @@ jobs:
           VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID_PORTAL }}
         run: |
           set -euo pipefail
-          cli="$RUNNER_TEMP/deploy-tools/node_modules/.bin/vercel"
-          "$cli" pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
-          "$cli" build
-          url="$("$cli" deploy --prebuilt --yes)"
+          url="$(tooling/deploy/node_modules/.bin/vercel deploy --prebuilt --yes)"
           [[ "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]
           printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
 
   landing:
+    needs: database
+    if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: ${{ inputs.environment || github.ref_name }}
@@ -232,6 +269,7 @@ jobs:
           CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_PAGES_PROJECT_LANDING != '' }}
         run: |
           case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
+          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::landing skipped: not configured'
@@ -248,14 +286,17 @@ jobs:
           package-manager-cache: false
       - name: Install locked dependencies
         if: steps.guard.outputs.configured == 'true'
-        run: npm exec --yes --package="$(node -p 'require("./package.json").packageManager')" -- npm ci --ignore-scripts --no-audit --no-fund
-      - name: Build landing and install pinned CLI
+        run: |
+          for attempt in 1 2 3; do npm ci --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
+      - name: Build landing and install locked CLIs
         if: steps.guard.outputs.configured == 'true'
         env:
           CLOUDFLARE_PAGES_PROJECT_LANDING: ${{ vars.CLOUDFLARE_PAGES_PROJECT_LANDING }}
         run: |
           LANDING_SITE_URL="https://$DEPLOY_ENV.$CLOUDFLARE_PAGES_PROJECT_LANDING.pages.dev" npm run build:landing
-          npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund wrangler@4.164.0
+          for attempt in 1 2 3; do npm ci --prefix tooling/deploy --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Deploy landing to Pages
         id: deploy
         if: steps.guard.outputs.configured == 'true'
@@ -265,7 +306,7 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT_LANDING: ${{ vars.CLOUDFLARE_PAGES_PROJECT_LANDING }}
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/deploy-tools/node_modules/.bin/wrangler" pages deploy dist/landing \
+          tooling/deploy/node_modules/.bin/wrangler pages deploy dist/landing \
             --project-name "$CLOUDFLARE_PAGES_PROJECT_LANDING" --branch "$DEPLOY_ENV" --commit-dirty=true | tee "$RUNNER_TEMP/pages-deploy.log"
           python3 - <<'PY'
           import os, re
@@ -277,6 +318,8 @@ jobs:
           PY
 
   ingress:
+    needs: database
+    if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: ${{ inputs.environment || github.ref_name }}
@@ -290,9 +333,10 @@ jobs:
       - name: Guard configuration
         id: guard
         env:
-          CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.SUPABASE_PROJECT_REF != '' }}
+          CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.SUPABASE_PROJECT_REF != '' && vars.CORS_ALLOW_ORIGIN != '' }}
         run: |
           case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
+          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::ingress skipped: not configured'
@@ -311,6 +355,7 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          CORS_ALLOW_ORIGIN: ${{ vars.CORS_ALLOW_ORIGIN }}
         run: |
           python3 - <<'PY'
           import json, os, tomllib
@@ -323,10 +368,12 @@ jobs:
           config['name'] += '-' + os.environ['DEPLOY_ENV']
           config['workers_dev'] = True
           config['vars'] = {**source.get('vars', {}), **source.get('env', {}).get(os.environ['DEPLOY_ENV'], {}).get('vars', {})}
+          config['vars']['CORS_ALLOW_ORIGIN'] = os.environ['CORS_ALLOW_ORIGIN']
           config['vars']['UPSTREAM_ORIGIN'] = 'https://' + os.environ['SUPABASE_PROJECT_REF'] + '.supabase.co'
           (root / 'deploy.json').write_text(json.dumps(config))
           PY
-          npm install --prefix "$RUNNER_TEMP/deploy-tools" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund wrangler@4.164.0
+          for attempt in 1 2 3; do npm ci --prefix tooling/deploy --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Deploy ingress worker
         id: deploy
         if: steps.guard.outputs.configured == 'true'
@@ -335,7 +382,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/deploy-tools/node_modules/.bin/wrangler" deploy \
+          tooling/deploy/node_modules/.bin/wrangler deploy \
             --config tooling/apps/api-ingress-worker/deploy.json | tee "$RUNNER_TEMP/worker-deploy.log"
           python3 - <<'PY'
           import os, re
@@ -352,6 +399,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Guard deployment ref
+        run: |
+          case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
+          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
       - name: Report deployment URLs and outcomes
         env:
           RESULTS: ${{ toJSON(needs) }}
