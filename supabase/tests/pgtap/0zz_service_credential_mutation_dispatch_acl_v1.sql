@@ -12,8 +12,7 @@ INSERT INTO service_acl VALUES
  ('public.send_comms_reply_core_impl(uuid,uuid,jsonb,uuid)', 'public.send_comms_reply_core_impl(NULL::uuid,NULL::uuid,NULL::jsonb,NULL::uuid)'),
  ('public.dispatch_alert_trigger(uuid)', 'public.dispatch_alert_trigger(NULL::uuid)'),
  ('public.run_alert_dispatch_worker()', 'public.run_alert_dispatch_worker()'),
- ('public.dispatch_outbound_call_inline(uuid,jsonb)', 'public.dispatch_outbound_call_inline(NULL::uuid,NULL::jsonb)'),
- ('public.dispatch_api_request_wait_v1(text,text,jsonb,jsonb,integer,integer,integer)', 'public.dispatch_api_request_wait_v1(NULL::text,NULL::text,NULL::jsonb,NULL::jsonb,NULL::integer,NULL::integer,NULL::integer)');
+ ('public.dispatch_outbound_call_inline(uuid,jsonb)', 'public.dispatch_outbound_call_inline(NULL::uuid,NULL::jsonb)');
 GRANT SELECT ON service_acl TO anon, authenticated;
 SELECT ok(NOT has_function_privilege('anon', signature, 'EXECUTE'), 'anon denied: ' || signature) FROM service_acl;
 SELECT ok(NOT has_function_privilege('authenticated', signature, 'EXECUTE'), 'authenticated denied: ' || signature) FROM service_acl;
@@ -29,9 +28,8 @@ SET LOCAL ROLE authenticated;
 SELECT throws_ok('SELECT ' || invocation, '42501', 'permission denied for function ' || split_part(split_part(signature, '.', 2), '(', 1),
   'real authenticated call denied: ' || signature) FROM service_acl;
 RESET ROLE;
-SELECT ok(has_function_privilege('edge_label_renderer_role',
-  'public.dispatch_api_request_wait_v1(text,text,jsonb,jsonb,integer,integer,integer)', 'EXECUTE'),
-  'existing edge renderer wait-dispatch contract is retained');
+SELECT is(to_regprocedure('public.dispatch_api_request_wait_v1(text,text,jsonb,jsonb,integer,integer,integer)'),
+  NULL::regprocedure, 'retired temporary wait-dispatch helper stays absent');
 
 CREATE TEMP TABLE service_fixture AS SELECT gen_random_uuid() org, gen_random_uuid() foreign_org,
   gen_random_uuid() actor, gen_random_uuid() provider, gen_random_uuid() auth_config,
