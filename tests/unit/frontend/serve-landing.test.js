@@ -97,7 +97,7 @@ describe('serve-landing', () => {
     [{ body: '[]' }, 400],
     [{ body: 'null' }, 400],
     [{ body: 'x'.repeat(64 * 1024 + 1) }, 413],
-  ])('rejects unsafe or unsupported mock requests: %s', async (input, status) => {
+  ])('rejects unsafe or unsupported mock requests: %s (case %#)', async (input, status) => {
     expect(await invokeMock(input)).toMatchObject({ handled: true, status, body: { ok: false, mock: true, error: { code: expect.any(String) } } });
   });
 });

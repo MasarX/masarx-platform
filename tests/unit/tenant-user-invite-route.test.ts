@@ -114,7 +114,7 @@ describe("tenant user invite route (fake provider only)", () => {
   });
 
   test.each([new TextEncoder().encode('{"broken":'), new Uint8Array([0xff])])(
-    "rejects malformed streamed JSON/UTF-8 without dispatch", async (bytes) => {
+    "rejects malformed streamed JSON/UTF-8 without dispatch (case %#)", async (bytes) => {
       const { req } = streamedRequest([bytes]);
       expect((await POST(req)).status).toBe(400);
       expect(userRpc).not.toHaveBeenCalled();
@@ -305,7 +305,7 @@ describe("tenant user invite route (fake provider only)", () => {
     { data: { auth_user_id: actorId, email: payload.email, acceptance_mode: "new_account" }, error: null },
     { data: { auth_user_id: targetId, email: "different@example.test", acceptance_mode: "new_account" }, error: null },
     { data: { auth_user_id: targetId, email: payload.email, acceptance_mode: "unexpected" }, error: null },
-  ])("never sends email if the service-only mailbox binding is not exact", async (issued) => {
+  ])("never sends email if the service-only mailbox binding is not exact (case %#)", async (issued) => {
     providerRpc.mockImplementation(async (name: string) => name === "tenant_user_invite_mailbox_issue_v1"
       ? issued : { error: null });
     await POST(request());

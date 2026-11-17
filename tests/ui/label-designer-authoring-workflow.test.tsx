@@ -97,7 +97,7 @@ test("property-panel moves bound legacy max dimensions while preserving their fi
 test.each([
   [{ marker: "root", blocks: [{ type: "text", x: 2, y: 3 }], templates: document.templates }, "root"],
   [{ marker: "fallback", templates: { invalid: null, shipping: document.templates.shipping } }, "fallback"],
-])("retains root-block and first-valid-template compatibility", async (initialDocument, marker) => {
+])("retains root-block and first-valid-template compatibility (case %#)", async (initialDocument, marker) => {
   render(<Editor initialDocument={initialDocument} />);
   await screen.findByTestId("selected-template");
   fireEvent.click(screen.getByText("Move selected"));

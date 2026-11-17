@@ -135,7 +135,7 @@ describe('FieldOps Android checkout admission', () => {
     expect(resolveFieldopsRepoRoot()).toBe('/physical checkout');
   });
 
-  test.each([['start', '--web'], ['start'], ['export', '--platform', 'web']])('stages web asset without Android Git admission: %j', (...argv) => {
+  test.each([['start', '--web'], ['start'], ['export', '--platform', 'web']])('stages web asset without Android Git admission: %j (case %#)', (...argv) => {
     spawnSync.mockReturnValue({ status: 0 });
     jest.spyOn(fs, 'existsSync').mockReturnValue(true);
     const prepareMapWorker = jest.fn();

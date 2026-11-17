@@ -88,7 +88,7 @@ test.each([
   [403, { message: "permission denied for table private_users" }, "You do not have permission to review this request. Contact your administrator."],
   [500, { message: "Unexpected private configuration" }, "Unable to complete the review. Try again or contact your administrator."],
   [422, { message: "A rejection reason is required." }, "A rejection reason is required."],
-])("tenant review HTTP %s uses safe contextual copy", async (status, error, message) => {
+])("tenant review HTTP %s uses safe contextual copy (case %#)", async (status, error, message) => {
   fetchReview.mockResolvedValue({ ok: false, status, json: async () => ({ ok: false, error }) });
   expect(await submitReview()).toEqual({ status: "error", message });
   const [, request] = fetchReview.mock.calls[0];

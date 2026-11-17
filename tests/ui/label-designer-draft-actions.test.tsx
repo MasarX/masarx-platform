@@ -64,7 +64,7 @@ test.each([
   { ok: true, draft: published },
   { ok: true, draft: { ...created, scope_id: "other" } },
   { ok: true, draft: { ...created, id: "published" } },
-])("create failure or invalid readback never selects/publishes an old row", async (response) => {
+])("create failure or invalid readback never selects/publishes an old row (case %#)", async (response) => {
   mockRpc.mockResolvedValue(response);
   const load = jest.fn();
   const { result } = renderHook(() => useDraftActions(state, jest.fn(), scope, load));

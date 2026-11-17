@@ -215,7 +215,7 @@ test.each([
   "Bearer private-token access_token=private-access",
   new Error("refresh_token=private-refresh eyJheader.payload.signature"),
   { secret: "private-secret", authorization: "private-auth" },
-])("redacts string, stack and structured error values", async error => {
+])("redacts string, stack and structured error values (case %#)", async error => {
   const store = createMemoryOutboxStore();
   await store.enqueue({ id: "redact", rpc: "rpc", args: {} });
   await createOutbox(store).sync(async () => { throw error; });
@@ -259,7 +259,7 @@ test.each([
   { secret: 'prefix"private-tail' },
   { password: "prefix\\private-tail" },
   { token: 'prefix\\"private-tail', safe: "visible" },
-])("redacts complete escaped JSON secrets through persistence", async error => {
+])("redacts complete escaped JSON secrets through persistence (case %#)", async error => {
   const store = createMemoryOutboxStore();
   await store.enqueue({ id: "escaped", rpc: "rpc", args: {} });
   await createOutbox(store).sync(async () => { throw error; });

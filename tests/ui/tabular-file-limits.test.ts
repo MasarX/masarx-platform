@@ -59,7 +59,7 @@ test.each([
   ["cellLength", 'x'.repeat(TABULAR_LIMITS.cellLength + 1)],
   ["cellLength", '"' + '""'.repeat(TABULAR_LIMITS.cellLength + 1) + '"'],
   ["cells", (Array(200).fill('x').join(',') + '\n').repeat(501)],
-])("rejects CSV exceeding %s during the stream", async (reason, text) => {
+])("rejects CSV exceeding %s during the stream (case %#)", async (reason, text) => {
   await expect(parseBoundedCsv(csv(text))).rejects.toThrow(reason);
 });
 test.each([0, 8])("accepts a small XLSX entry with compression method %s", async (method) => {

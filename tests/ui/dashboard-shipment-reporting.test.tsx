@@ -301,7 +301,7 @@ describe("reporting schema source qualification through the existing settings he
     { ...config, app_keys: ["console", "console"] },
     { enabled: true },
     "invalid",
-  ])("rejects malformed enabled policy %p before its mocked write", async (reporting) => {
+  ])("rejects malformed enabled policy %p before its mocked write (case %#)", async (reporting) => {
     const db = database();
     await expect(upsertSettings({
       db, category: "ui_dashboard_config", scopeType: "global",

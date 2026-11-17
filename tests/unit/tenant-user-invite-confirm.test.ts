@@ -291,7 +291,7 @@ test.each(["", "token=" + token, query + "&token=other", query + "&request_id=" 
   expect(createTenantUserInviteProviderClient).not.toHaveBeenCalled();
 });
 
-test.each(["short", "a".repeat(73), "🙂".repeat(19)])("invalid password length/UTF8 byte limit is rejected", async (value) => {
+test.each(["short", "a".repeat(73), "🙂".repeat(19)])("invalid password length/UTF8 byte limit is rejected (case %#)", async (value) => {
   expect((await POST(confirmRequest(query + "&new_password=" + encodeURIComponent(value)))).headers.get("location")).toContain("invite_confirmation_invalid");
   expect(createTenantUserInviteProviderClient).not.toHaveBeenCalled();
 });
@@ -320,7 +320,7 @@ test.each(["", "http://console.example.test", "http://127.0.0.1:5175", "http://l
   expect(createTenantUserInviteProviderClient).not.toHaveBeenCalled();
 });
 
-test.each([null, "null", "https://attacker.example.test", "https://console.example.test.attacker.test"])("untrusted Origin is rejected before body/Auth: %s", async (origin) => {
+test.each([null, "null", "https://attacker.example.test", "https://console.example.test.attacker.test"])("untrusted Origin is rejected before body/Auth: %s (case %#)", async (origin) => {
   const req = confirmRequest(body, origin);
   const read = jest.spyOn(req.body!, "getReader");
   expect((await POST(req)).status).toBe(403);

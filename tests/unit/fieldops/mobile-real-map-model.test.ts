@@ -14,7 +14,7 @@ describe("mobile real map canonical address admission", () => {
     { latitude: NaN, longitude: 46.6 }, { latitude: Infinity, longitude: 46.6 },
     { latitude: 91, longitude: 46.6 }, { latitude: 24.7, longitude: -181 },
     { latitude: "24.7", longitude: 46.6 },
-  ])("rejects incomplete or malformed same-address coordinates %j", (coordinates) => {
+  ])("rejects incomplete or malformed same-address coordinates %j (case %#)", (coordinates) => {
     expect(buildMobileRealMapModel([stop({ ...valid, coordinates })]).count).toBe(0);
   });
   it("requires usable address text or short code and preserves zero coordinates", () => {

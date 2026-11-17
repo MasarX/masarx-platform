@@ -58,7 +58,7 @@ test.each([
   [{ data: null, error: { code: "42501" } }, "blocked"],
   [{ data: null, error: { code: "XX000" } }, "error"],
   [{ data: null, error: null }, "error"],
-])("does not disguise unavailable options as ready: %p", async (result, state) => {
+])("does not disguise unavailable options as ready: %p (case %#)", async (result, state) => {
   rpc.mockResolvedValue(result);
   const html = renderToStaticMarkup(await Page({}));
   expect(html).toContain(`data-testid="console-tenant-user-invite-${state}"`);
