@@ -18,7 +18,7 @@ DECLARE
   pinned uuid:=gen_random_uuid(); projected uuid:=gen_random_uuid(); expired uuid:=gen_random_uuid();
   shared uuid:=gen_random_uuid(); corrected uuid:=gen_random_uuid(); scoped uuid:=gen_random_uuid();
   projected_geo uuid:=gen_random_uuid(); actor uuid:=gen_random_uuid();
-  version_id uuid; schema_ver integer; policy jsonb; selected_client uuid; provided boolean;
+  schema_ver integer; policy jsonb; selected_client uuid; provided boolean;
   result jsonb; before_skip text; client_policy jsonb;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub','',true);
@@ -34,15 +34,12 @@ BEGIN
   WHERE s.category='geocoding_policy' AND s.scope_type='global' LIMIT 1;
   FOR selected_client,provided IN SELECT * FROM (VALUES(client,TRUE),(no_pin_client,FALSE)) x(id,allow_pin)
   LOOP
-    version_id:=gen_random_uuid();
     client_policy:=policy||jsonb_build_object(
       'local_lookup',COALESCE(policy->'local_lookup','{}'::jsonb)||'{"min_confidence":0.8}'::jsonb,
       'coordinate_handling',COALESCE(policy->'coordinate_handling','{}'::jsonb)||
         jsonb_build_object('use_provided_coordinates',provided));
-    INSERT INTO public.settings_versions(id,category,scope_type,scope_id,version,value,schema_version,approved_at,change_reason)
-    VALUES(version_id,'geocoding_policy','client',selected_client,1,client_policy,schema_ver,now(),'Lineage projection test');
-    INSERT INTO public.settings(category,scope_type,scope_id,settings_version_id,cached_value)
-    VALUES('geocoding_policy','client',selected_client,version_id,client_policy);
+    PERFORM public.upsert_settings_value_v1('geocoding_policy','client',selected_client,
+      client_policy,schema_ver,'Lineage projection test');
   END LOOP;
   INSERT INTO public.users(id,organization_id,email,full_name,user_type,access_scope_type,access_scope_id)
   VALUES(actor,org,'lineage-geocode-'||left(actor::text,8)||'@example.com','Scoped geocode writer','client_admin','client',client);
@@ -97,8 +94,11 @@ BEGIN
   RETURN NEXT is(result->>'reason','address_ambiguous','UUID-only compatibility calls do not guess across clients');
   result:=public.project_address_from_primary_geocode_v1(pinned,no_pin_client);
   RETURN NEXT is(result->>'reason','address_missing','explicit wrong-client projection is a non-mutating result');
+  -- The composite FK is initially deferred; check it inside the negative assertion.
+  SET CONSTRAINTS geocodes_address_fk IMMEDIATE;
   RETURN NEXT throws_ok(format('INSERT INTO public.geocodes(id,address_id,client_id,provider_name,coordinates,is_primary) VALUES (gen_random_uuid(),%L::uuid,%L::uuid,%L,ST_SetSRID(ST_MakePoint(50,50),4326)::geography,TRUE)',
     pinned,no_pin_client,'canonical_lookup'),'23503',NULL,'real composite FK rejects a cross-client geocode link');
+  SET CONSTRAINTS geocodes_address_fk DEFERRED;
   RETURN NEXT is((SELECT round(ST_Y(coordinates::geometry)::numeric,4) FROM public.addresses WHERE id=pinned AND client_id=client),
     24.7136::numeric,'rejected cross-client write leaves the submitted pin unchanged');
   RETURN NEXT ok((SELECT validation_status='valid' AND ST_Y(coordinates::geometry)=9 AND correction_count=1
