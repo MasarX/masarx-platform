@@ -2,6 +2,11 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SELECT no_plan();
+-- Diagnostic only: extension-owned ACLs must be repaired by their grantor.
+SELECT diag(jsonb_build_object('object','cron.job_run_details','owner',pg_get_userbyid(c.relowner),
+  'grantor',pg_get_userbyid(a.grantor),'grantee',CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END,
+  'privilege',a.privilege_type,'grantable',a.is_grantable)::text)
+FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE c.oid = 'cron.job_run_details'::regclass;
 
 CREATE TEMP TABLE service_acl(signature TEXT, invocation TEXT);
 INSERT INTO service_acl VALUES
@@ -14,6 +19,9 @@ INSERT INTO service_acl VALUES
  ('public.run_alert_dispatch_worker()', 'public.run_alert_dispatch_worker()'),
  ('public.dispatch_outbound_call_inline(uuid,jsonb)', 'public.dispatch_outbound_call_inline(NULL::uuid,NULL::jsonb)');
 GRANT SELECT ON service_acl TO anon, authenticated;
+-- Rollback-only schema access isolates function ACL denial from schema denial.
+GRANT USAGE ON SCHEMA public TO anon;
+SELECT ok(has_schema_privilege('anon','public','USAGE'), 'anonymous refusal reaches the function ACL');
 SELECT ok(NOT has_function_privilege('anon', signature, 'EXECUTE'), 'anon denied: ' || signature) FROM service_acl;
 SELECT ok(NOT has_function_privilege('authenticated', signature, 'EXECUTE'), 'authenticated denied: ' || signature) FROM service_acl;
 SELECT ok(has_function_privilege('service_role', signature, 'EXECUTE'), 'service retained: ' || signature) FROM service_acl;

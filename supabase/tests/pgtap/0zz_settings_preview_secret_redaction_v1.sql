@@ -40,6 +40,9 @@ SELECT public.upsert_settings_value_v1('security_preview_plain', 'tenant', org,
   1, 'Synthetic ordinary preview') FROM preview_fixture;
 
 -- Reproduce inherited global label_provider fallback without a tenant override.
+-- Remove only this synthetic tenant's automatically materialized snapshot.
+DELETE FROM public.settings WHERE category = 'label_provider' AND scope_type = 'tenant'
+  AND scope_id = (SELECT org FROM preview_fixture);
 SELECT public.upsert_settings_value_v1('label_provider', public.get_root_scope_type_key_v1(), NULL::uuid,
   '{"providers":[{"invoke_url":"https://example.test/render","invoke_secret":"synthetic-platform-wide-renderer-secret"}]}',
   (SELECT max(version) FROM public.schema_registry WHERE category = 'label_provider' AND is_active),
