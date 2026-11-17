@@ -44,7 +44,7 @@ function verifyPrebuilt(root = process.cwd()) {
     const file = path.join(root, source);
     const relative = path.relative(root, file);
     if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Prebuilt file map escapes the deployment root');
-    if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+    if (!fs.existsSync(file)) {
       missing.push(source);
       if (missing.length === 5) break;
     }

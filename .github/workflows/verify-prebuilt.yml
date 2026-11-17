@@ -6,6 +6,7 @@ name: Verify prebuilt packages
       - .github/workflows/deploy.yml
       - .github/workflows/verify-prebuilt.yml
       - scripts/ops/vercel/validate-build.js
+      - tests/unit/ops/vercel-build-validation.test.js
       - tooling/apps/deploy/**
       - package.json
       - package-lock.json
@@ -94,8 +95,17 @@ jobs:
             settings(root, app);
             const build = workflow.jobs[app].steps.find(step => step.name === 'Build prebuilt app');
             run(['bash', '-e', '-o', 'pipefail', '-c', build.run]);
+            const example = record(root, app, app);
+            const map = JSON.parse(fs.readFileSync(path.join(evidence, app + '.vc-config.json'))).filePathMap;
+            const types = [...new Set(Object.values(map))].filter(source => source.includes('/.next/node_modules/')).map(source => {
+              const file = path.join(root, source);
+              const stat = fs.statSync(file, { throwIfNoEntry: false });
+              return { source, exists: !!stat, directory: !!stat?.isDirectory(), symlink: !!fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink() };
+            });
+            fs.writeFileSync(path.join(evidence, app + '-path-types.json'), JSON.stringify(types, null, 2));
+            console.log('Mapped build dependencies:', JSON.stringify(types));
             run(['node', 'scripts/ops/vercel/validate-build.js', 'prebuilt']);
-            results[app] = { ...verifyPrebuilt(root), example: record(root, app, app) };
+            results[app] = { ...verifyPrebuilt(root), example };
           }
           fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(results, null, 2));
           NODE

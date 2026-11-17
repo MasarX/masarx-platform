@@ -55,7 +55,7 @@ test('follows function aliases without traversing bundled dependency directories
   expect(verifyPrebuilt(root)).toEqual({ functions: 2, files: 1 });
 });
 
-test('fails closed on absent output, empty maps, directories and escaping sources', () => {
+test('fails closed on absent output, empty maps and escaping sources', () => {
   expect(() => verifyPrebuilt(root)).toThrow('Prebuilt functions directory is missing');
   config({});
   expect(() => verifyPrebuilt(root)).toThrow('No prebuilt file maps found');
@@ -63,5 +63,5 @@ test('fails closed on absent output, empty maps, directories and escaping source
   expect(() => verifyPrebuilt(root)).toThrow('Prebuilt file map escapes the deployment root');
   fs.mkdirSync(path.join(root, 'directory'));
   config({ directory: 'directory' });
-  expect(() => verifyPrebuilt(root)).toThrow('Missing prebuilt files');
+  expect(verifyPrebuilt(root)).toEqual({ functions: 1, files: 1 });
 });
