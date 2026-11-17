@@ -36,11 +36,13 @@ SELECT ok(
         SELECT 1
         FROM canonical_districts cd
         JOIN canonical_cities c ON c.id = cd.city_id AND c.organization_id = cd.organization_id
-        WHERE lower(c.name_canonical) = 'riyadh'
-          AND lower(cd.name_canonical) LIKE 'al amal%'
-          AND cd.centroid IS NOT NULL
+        WHERE c.name_canonical = 'Example City'
+          AND cd.name_canonical = 'Example District'
+          AND c.source_city_id = 1 AND cd.source_district_id = 1
+          AND ST_X(c.centroid::geometry) = 0 AND ST_Y(c.centroid::geometry) = 0
+          AND ST_X(cd.centroid::geometry) = 0 AND ST_Y(cd.centroid::geometry) = 0
     ),
-    'Riyadh / Al Amal district seeded with centroid'
+    'Synthetic city and district are linked with the expected centroids'
 );
 
 SELECT finish();

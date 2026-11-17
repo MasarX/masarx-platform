@@ -43,7 +43,7 @@ SELECT ok((SELECT pronargs=0
   FROM pg_proc WHERE oid='public.ui_rpc_current_user_id_v1()'::regprocedure),
   'current-user reader is zero-argument, postgres-owned, fixed-path and executor-only');
 SELECT ok((SELECT ARRAY(
-    SELECT pg_get_userbyid(role_oid) FROM (
+    SELECT pg_get_userbyid(role_oid)::text FROM (
       SELECT proowner AS role_oid
       UNION
       SELECT a.grantee FROM aclexplode(COALESCE(proacl,acldefault('f',proowner))) a
@@ -330,7 +330,7 @@ SELECT ok((SELECT jsonb_array_length(value)=6 FROM public.ui_rpc_executor_rollba
       FROM public.ui_rpc_executor_rollback_state_v1),
   'complete rollback before-images match the owner-controlled SHA-256 seal');
 CREATE FUNCTION pg_temp.ui_rpc_modified_snapshot_complete_v1(entry jsonb)
-RETURNS boolean LANGUAGE sql STABLE SET search_path TO pg_catalog, pg_temp AS $$
+RETURNS boolean LANGUAGE sql STABLE SET search_path TO pg_catalog, public, pg_temp AS $$
   SELECT COALESCE((SELECT pg_get_userbyid(p.proowner)=entry->>'owner'
     AND pg_get_functiondef(p.oid)=entry->>'after_definition'
     AND jsonb_typeof(entry->'before_definition')='string'

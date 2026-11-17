@@ -47,6 +47,21 @@ DECLARE
   v_rows TEXT:=format('%I.fc_rows',pg_my_temp_schema()::regnamespace);
   v_shared TEXT:=format('%I.fc_shared',pg_my_temp_schema()::regnamespace);
 BEGIN
+  SELECT sv.value,sv.schema_version INTO v_registry,v_schema FROM public.settings s
+    JOIN public.settings_versions sv ON sv.id=s.settings_version_id WHERE s.category='ui_read_registry'
+      AND s.scope_type='global' AND s.scope_id IS NULL;
+  v_base:=jsonb_build_object('relation',v_rows,'id_column','id','capability_read','webhooks.read',
+    'select',jsonb_build_array('id','name','amount'),
+    'filters',jsonb_build_array(jsonb_build_object('key','name','column','name','op','eq')),
+    'default_sort',jsonb_build_object('column','name','direction','asc'));
+  v_registry:=jsonb_set(v_registry,'{resources}',v_registry->'resources'||jsonb_build_array(
+    v_base||jsonb_build_object('key','qa_fc_mapped','scope_columns',
+      jsonb_build_object('tenant','organization_id','client','client_id','sender','sender_id')),
+    v_base||jsonb_build_object('key','qa_fc_client_only','scope_columns',
+      jsonb_build_object('tenant','organization_id','client','client_id')),
+    v_base||jsonb_build_object('key','qa_fc_unmapped','scope_columns',jsonb_build_object('tenant','organization_id')),
+    v_base||jsonb_build_object('key','qa_fc_shared','relation',v_shared,'scope_columns',jsonb_build_object('tenant','organization_id'))));
+  PERFORM public.upsert_settings_value_v1('ui_read_registry','global',NULL,v_registry,v_schema,'Rollback-only FC resources');
   INSERT INTO public.organizations(id,name,slug,billing_status) VALUES
     (v_org,'FC own','fc-'||v_org,'active'),(v_other,'FC foreign','fc-'||v_other,'active');
   INSERT INTO public.clients(id,organization_id,name,slug,status) VALUES
@@ -76,21 +91,6 @@ BEGIN
     'user_id',COALESCE(v_global_policy#>'{assignments,user_id}','{}')||jsonb_build_object(v_platform::text,jsonb_build_array(v_role))));
   PERFORM public.upsert_settings_value_v1('access_control_policy','global',NULL,v_global_policy,v_schema,'Rollback-only FC platform capability');
 
-  SELECT sv.value,sv.schema_version INTO v_registry,v_schema FROM public.settings s
-    JOIN public.settings_versions sv ON sv.id=s.settings_version_id WHERE s.category='ui_read_registry'
-      AND s.scope_type='global' AND s.scope_id IS NULL;
-  v_base:=jsonb_build_object('relation',v_rows,'id_column','id','capability_read','webhooks.read',
-    'select',jsonb_build_array('id','name','amount'),
-    'filters',jsonb_build_array(jsonb_build_object('key','name','column','name','op','eq')),
-    'default_sort',jsonb_build_object('column','name','direction','asc'));
-  v_registry:=jsonb_set(v_registry,'{resources}',v_registry->'resources'||jsonb_build_array(
-    v_base||jsonb_build_object('key','qa_fc_mapped','scope_columns',
-      jsonb_build_object('tenant','organization_id','client','client_id','sender','sender_id')),
-    v_base||jsonb_build_object('key','qa_fc_client_only','scope_columns',
-      jsonb_build_object('tenant','organization_id','client','client_id')),
-    v_base||jsonb_build_object('key','qa_fc_unmapped','scope_columns',jsonb_build_object('tenant','organization_id')),
-    v_base||jsonb_build_object('key','qa_fc_shared','relation',v_shared,'scope_columns',jsonb_build_object('tenant','organization_id'))));
-  PERFORM public.upsert_settings_value_v1('ui_read_registry','global',NULL,v_registry,v_schema,'Rollback-only FC resources');
   DELETE FROM public.settings_cache WHERE cache_key LIKE 'ui_read_registry:%';
   SET CONSTRAINTS ALL IMMEDIATE;
 

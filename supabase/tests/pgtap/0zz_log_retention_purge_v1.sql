@@ -76,15 +76,20 @@ SELECT is(
   'purge function proconfig is exact'
 );
 
+CREATE FUNCTION pg_temp.purge_default_arguments() RETURNS TABLE(targets jsonb, batch integer)
+LANGUAGE plpgsql AS $$
+DECLARE defaults text;
+BEGIN
+  SELECT pg_get_expr(proargdefaults, 0) INTO STRICT defaults
+  FROM pg_proc WHERE oid='public.purge_log_retention_v1(jsonb,integer)'::regprocedure;
+  RETURN QUERY EXECUTE 'SELECT ' || defaults;
+END;
+$$;
+SELECT diag('purge catalog defaults: ' || pg_get_expr(proargdefaults, 0))
+FROM pg_proc WHERE oid='public.purge_log_retention_v1(jsonb,integer)'::regprocedure;
 SELECT is(
-  ((regexp_match(
-    (SELECT pg_get_expr(p.proargdefaults, p.oid)
-     FROM pg_proc p
-     JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = 'public' AND p.proname = 'purge_log_retention_v1'),
-    $r$^'(.*)'::jsonb, 50000$r$
-  ))[1])::jsonb,
-  '[{"rel":"public.audit_table_changes","ts":"created_at","keep":"30 days"}, {"rel":"cron.job_run_details","ts":"start_time","keep":"7 days"}, {"rel":"net._http_response","ts":"created","keep":"1 day"}, {"rel":"public.request_contexts","ts":"started_at","keep":"7 days"}]'::jsonb,
+  (SELECT jsonb_build_object('targets',targets,'batch',batch) FROM pg_temp.purge_default_arguments()),
+  jsonb_build_object('targets','[{"rel":"public.audit_table_changes","ts":"created_at","keep":"30 days"}, {"rel":"cron.job_run_details","ts":"start_time","keep":"7 days"}, {"rel":"net._http_response","ts":"created","keep":"1 day"}, {"rel":"public.request_contexts","ts":"started_at","keep":"7 days"}]'::jsonb,'batch',50000),
   'purge function defaults are semantically exact'
 );
 

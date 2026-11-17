@@ -42,6 +42,8 @@ DECLARE
   source_id UUID:=gen_random_uuid(); other_source UUID:=gen_random_uuid(); template_id UUID:=gen_random_uuid();
   inbox_id UUID:=gen_random_uuid(); foreign_inbox UUID:=gen_random_uuid(); entry_id UUID:=gen_random_uuid();
   child_id UUID:=gen_random_uuid(); extra_id UUID:=gen_random_uuid(); client_id UUID:=gen_random_uuid(); sender_id UUID:=gen_random_uuid();
+  mapping_id UUID:=gen_random_uuid(); foreign_mapping_id UUID:=gen_random_uuid();
+  source_reader_role UUID;
   entry_context JSONB; child_context JSONB; child_metadata JSONB; row_result JSONB;
   action TEXT; state TEXT; scenario TEXT; policy JSONB; registry JSONB; schema_version INT;
   role_key TEXT:='followup_'||replace(gen_random_uuid()::text,'-','');
@@ -53,22 +55,37 @@ BEGIN
   INSERT INTO public.senders(id,client_id,name,status) VALUES(sender_id,client_id,'Followup sender','active');
   INSERT INTO public.users(id,organization_id,email,full_name,user_type,status,access_scope_type,access_scope_id)
     VALUES(actor,org,actor||'@example.invalid','Followup reader','ops_admin','active','tenant',NULL);
-  INSERT INTO public.webhook_sources(id,organization_id,source_identifier,name,provider_type,auth_token,sender_id,enabled)
-    VALUES(source_id,org,'followup-'||source_id,'Followup own','generic','synthetic-owned-token',sender_id,TRUE),
-      (other_source,other_org,'followup-'||other_source,'Followup foreign','generic','synthetic-foreign-token',NULL,TRUE);
+  -- Inbox RLS requires visibility of its source, which uses the tenant's agreements.read RBAC grant.
+  INSERT INTO public.rbac_roles(organization_id,key,name)
+    VALUES(org,role_key,'Followup source reader') RETURNING id INTO source_reader_role;
+  INSERT INTO public.rbac_role_permissions(organization_id,role_id,permission_id)
+    SELECT org,source_reader_role,lv.id FROM public.lookup_definitions ld
+    JOIN public.lookup_values lv ON lv.lookup_definition_id=ld.id AND lv.value='agreements.read'
+    WHERE ld.category='rbac_permission';
+  INSERT INTO public.rbac_user_role_assignments(organization_id,user_id,role_id)
+    VALUES(org,actor,source_reader_role);
+  INSERT INTO public.mapping_configs(id,organization_id,mapping_type,mapping_key,mapping_config) VALUES
+    (mapping_id,org,'webhook_inbound','followup-'||mapping_id,'{}'),
+    (foreign_mapping_id,other_org,'webhook_inbound','followup-'||foreign_mapping_id,'{}');
+  INSERT INTO public.webhook_sources(id,organization_id,source_identifier,name,provider_type,auth_token,sender_id,enabled,mapping_config_id)
+    VALUES(source_id,org,'followup-'||source_id,'Followup own','generic','synthetic-owned-token',sender_id,TRUE,mapping_id),
+      (other_source,other_org,'followup-'||other_source,'Followup foreign','generic','synthetic-foreign-token',NULL,TRUE,foreign_mapping_id);
   INSERT INTO public.workflow_templates(id,name,version,status,scope_type,scope_id)
     VALUES(template_id,'followup_readback_'||template_id,1,'active','tenant',org);
   entry_context:=jsonb_build_object('webhook_id',inbox_id,'organization_id',org,
     'source_identifier','followup-'||source_id,'webhook_source_id',source_id,'followup_workflow_run_id',child_id);
   child_context:=(entry_context-'followup_workflow_run_id')||jsonb_build_object('started_by_run_id',entry_id);
   child_metadata:=jsonb_build_object('started_by_run_id',entry_id);
+  PERFORM set_config('app.workflow_run_id',entry_id::text,TRUE);
   INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
-    VALUES(entry_id,template_id,1,'webhook','completed',entry_context,'{}'),
-      (child_id,template_id,1,'webhook','pending',child_context,child_metadata);
+    VALUES(entry_id,template_id,1,'webhook','completed',entry_context,'{}');
+  PERFORM set_config('app.workflow_run_id',child_id::text,TRUE);
+  INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
+    VALUES(child_id,template_id,1,'webhook','pending',child_context,child_metadata);
   INSERT INTO public.webhook_inbox(id,organization_id,webhook_source_id,provider_type,external_id,event_type,
-      processing_status,workflow_run_id,raw_payload,transformed_payload)
-    VALUES(inbox_id,org,source_id,'generic','followup-'||inbox_id,'shipment.delete','pending',entry_id,'{}','{}'),
-      (foreign_inbox,other_org,other_source,'generic','followup-'||foreign_inbox,'shipment.delete','pending',NULL,'{}','{}');
+      processing_status,workflow_run_id,raw_payload,transformed_payload,correlation_id)
+    VALUES(inbox_id,org,source_id,'generic','followup-'||inbox_id,'shipment.delete','pending',entry_id,'{}','{}',inbox_id),
+      (foreign_inbox,other_org,other_source,'generic','followup-'||foreign_inbox,'shipment.delete','pending',NULL,'{}','{}',foreign_inbox);
 
   FOREACH action IN ARRAY ARRAY['cancel','reschedule'] LOOP
     UPDATE public.webhook_inbox SET event_type=CASE action WHEN 'cancel' THEN 'shipment.delete' ELSE 'shipment.reschedule' END WHERE id=inbox_id;
@@ -93,19 +110,34 @@ BEGIN
     'both_parents_missing','duplicate_child','duplicate_child_missing_pointer'] LOOP
     UPDATE public.workflow_runs SET context=entry_context WHERE id=entry_id;
     UPDATE public.workflow_runs SET context=child_context,metadata=child_metadata WHERE id=child_id;
+    -- Seed malformed history directly; an ingress row must retain its scope on update.
+    IF scenario IN ('entry_webhook_missing','child_webhook_missing','child_context_shape') THEN
+      PERFORM set_config('app.workflow_run_id',extra_id::text,TRUE);
+      INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
+        VALUES(extra_id,template_id,1,'webhook',CASE WHEN scenario='entry_webhook_missing' THEN 'completed' ELSE 'pending' END,
+          CASE scenario WHEN 'entry_webhook_missing' THEN entry_context-'webhook_id'
+            WHEN 'child_webhook_missing' THEN child_context-'webhook_id' ELSE '[]'::jsonb END,
+          CASE WHEN scenario='entry_webhook_missing' THEN '{}'::jsonb ELSE child_metadata END);
+      IF scenario='entry_webhook_missing' THEN
+        UPDATE public.workflow_runs SET context=jsonb_set(child_context,'{started_by_run_id}',to_jsonb(extra_id)),
+          metadata=jsonb_build_object('started_by_run_id',extra_id) WHERE id=child_id;
+        UPDATE public.webhook_inbox SET workflow_run_id=extra_id WHERE id=inbox_id;
+      ELSE
+        UPDATE public.workflow_runs SET context=child_context-'started_by_run_id',metadata='{}' WHERE id=child_id;
+        UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}',to_jsonb(extra_id)) WHERE id=entry_id;
+      END IF;
+    ELSE
     CASE scenario
       WHEN 'explicit_null' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}','null') WHERE id=entry_id;
       WHEN 'explicit_empty' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}','""') WHERE id=entry_id;
       WHEN 'explicit_wrong' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}',to_jsonb(extra_id)) WHERE id=entry_id;
       WHEN 'explicit_number' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{followup_workflow_run_id}','1') WHERE id=entry_id;
       WHEN 'entry_webhook' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{webhook_id}',to_jsonb(extra_id)) WHERE id=entry_id;
-      WHEN 'entry_webhook_missing' THEN UPDATE public.workflow_runs SET context=context-'webhook_id' WHERE id=entry_id;
       WHEN 'entry_org' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{organization_id}',to_jsonb(other_org)) WHERE id=entry_id;
       WHEN 'entry_org_missing' THEN UPDATE public.workflow_runs SET context=context-'organization_id' WHERE id=entry_id;
       WHEN 'entry_source' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{source_identifier}','"foreign"') WHERE id=entry_id;
       WHEN 'entry_source_missing' THEN UPDATE public.workflow_runs SET context=context-'source_identifier' WHERE id=entry_id;
       WHEN 'entry_source_id' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{webhook_source_id}',to_jsonb(other_source)) WHERE id=entry_id;
-      WHEN 'child_webhook_missing' THEN UPDATE public.workflow_runs SET context=context-'webhook_id' WHERE id=child_id;
       WHEN 'child_webhook' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{webhook_id}',to_jsonb(extra_id)) WHERE id=child_id;
       WHEN 'child_org' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{organization_id}',to_jsonb(other_org)) WHERE id=child_id;
       WHEN 'child_org_missing' THEN UPDATE public.workflow_runs SET context=context-'organization_id' WHERE id=child_id;
@@ -115,21 +147,34 @@ BEGIN
       WHEN 'context_parent' THEN UPDATE public.workflow_runs SET context=jsonb_set(context,'{started_by_run_id}',to_jsonb(extra_id)) WHERE id=child_id;
       WHEN 'metadata_parent' THEN UPDATE public.workflow_runs SET metadata=jsonb_build_object('started_by_run_id',extra_id) WHERE id=child_id;
       WHEN 'metadata_shape' THEN UPDATE public.workflow_runs SET metadata='[]' WHERE id=child_id;
-      WHEN 'metadata_json_null' THEN UPDATE public.workflow_runs SET metadata='null' WHERE id=child_id;
-      WHEN 'child_context_shape' THEN UPDATE public.workflow_runs SET context='[]' WHERE id=child_id;
+      WHEN 'metadata_json_null' THEN
+        UPDATE public.workflow_runs SET metadata='null' WHERE id=child_id;
+        RETURN NEXT ok((SELECT metadata IS NULL FROM public.workflow_runs WHERE id=child_id),
+          'persisted JSON null metadata normalizes to SQL NULL');
+        RETURN NEXT is((SELECT followup_workflow_run_id FROM public.webhook_inbox_followup_read_v1 WHERE id=inbox_id),child_id,
+          'normalized null metadata retains the independently proven context parent');
+        UPDATE public.workflow_runs SET context=context-'started_by_run_id' WHERE id=child_id;
       WHEN 'both_parents_missing' THEN UPDATE public.workflow_runs SET context=context-'started_by_run_id',metadata='{}' WHERE id=child_id;
-      WHEN 'duplicate_child' THEN INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
+      WHEN 'duplicate_child' THEN
+        PERFORM set_config('app.workflow_run_id',extra_id::text,TRUE);
+        INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
         VALUES(extra_id,template_id,1,'webhook','pending',child_context,child_metadata);
       WHEN 'duplicate_child_missing_pointer' THEN
         UPDATE public.workflow_runs SET context=context-'followup_workflow_run_id' WHERE id=entry_id;
+        PERFORM set_config('app.workflow_run_id',extra_id::text,TRUE);
         INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
           VALUES(extra_id,template_id,1,'webhook','pending',child_context,child_metadata);
     END CASE;
+    END IF;
     SELECT to_jsonb(v) INTO row_result FROM public.webhook_inbox_followup_read_v1 v WHERE v.id=inbox_id;
     RETURN NEXT ok(row_result->'followup_workflow_run_id'='null'::jsonb AND row_result->'followup_workflow_status'='null'::jsonb
       AND row_result->'followup_last_error'='null'::jsonb,scenario||' refuses unproved identity');
     RETURN NEXT is(row_result->>'processing_status','pending',scenario||' does not change inbox truth');
-    IF scenario IN ('duplicate_child','duplicate_child_missing_pointer') THEN DELETE FROM public.workflow_runs WHERE id=extra_id; END IF;
+    IF scenario IN ('duplicate_child','duplicate_child_missing_pointer',
+      'entry_webhook_missing','child_webhook_missing','child_context_shape') THEN
+      UPDATE public.webhook_inbox SET workflow_run_id=entry_id WHERE id=inbox_id;
+      DELETE FROM public.workflow_runs WHERE id=extra_id;
+    END IF;
   END LOOP;
   UPDATE public.workflow_runs SET context=entry_context-'followup_workflow_run_id' WHERE id=entry_id;
   UPDATE public.workflow_runs SET context=child_context,metadata=child_metadata,last_error=NULL WHERE id=child_id;
@@ -157,7 +202,15 @@ BEGIN
   PERFORM set_config('request.jwt.claim.role','authenticated',TRUE);
   PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,TRUE);
   SET LOCAL ROLE authenticated;
-  RETURN NEXT is(api.ui_get_resource_v1('webhook_inbox',inbox_id)->>'followup_workflow_run_id',child_id::text,
+  RETURN NEXT ok(public.user_has_permission_v1('agreements.read',org),
+    'tenant fixture has the RBAC permission required by webhook source RLS');
+  row_result:=api.ui_get_resource_v1('webhook_inbox',inbox_id);
+  RETURN NEXT diag(jsonb_build_object('row_present',row_result IS NOT NULL,
+    'has_followup_key',COALESCE(row_result ? 'followup_workflow_run_id',FALSE),
+    'source_visible',EXISTS(SELECT 1 FROM public.webhook_sources WHERE id=source_id),
+    'source_read_capability',public.user_has_resource_capability_v1('webhook_sources','read'),
+    'workflow_read_capability',public.user_has_capability_v1('workflow_runs.read'))::text);
+  RETURN NEXT is(row_result->>'followup_workflow_run_id',child_id::text,
     'existing authenticated API route returns canonical child');
   RETURN NEXT ok(api.ui_get_resource_v1('webhook_inbox',foreign_inbox) IS NULL,'foreign inbox remains hidden');
   RETURN NEXT throws_ok('SELECT * FROM public.webhook_inbox_followup_read_v1 LIMIT 1','42501',NULL,
