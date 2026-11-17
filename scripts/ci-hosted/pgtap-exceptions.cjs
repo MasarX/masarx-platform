@@ -1,16 +1,20 @@
 'use strict';
 const fs = require('node:fs');
+const nonemptyText = value => typeof value === 'string' && value.length > 0 && value.trim() === value && !/[\r\n]/.test(value);
 
 function loadExceptions(file = 'config/ci/pgtap-accepted-failures.json') {
   const entries = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (!Array.isArray(entries) || entries.length > 1) throw new Error('At most one named pgTAP exception is authorized');
   for (const entry of entries) {
-    if (!entry || Object.keys(entry).sort().join(',') !== 'assertion,expires,file,owner,reason'
-      || !/^[a-zA-Z0-9_.-]+\.sql$/i.test(entry.file) || !['assertion', 'reason', 'owner'].every(key => typeof entry[key] === 'string' && entry[key].trim() === entry[key] && entry[key].length)
+    if (!entry || Object.keys(entry).sort().join(',') !== 'assertions,expires,file,owner,reason'
+      || typeof entry.file !== 'string' || !/^[a-zA-Z0-9_.-]+\.sql$/i.test(entry.file)
+      || !nonemptyText(entry.owner) || !nonemptyText(entry.reason)
+      || !Array.isArray(entry.assertions) || !entry.assertions.length || !entry.assertions.every(nonemptyText)
+      || new Set(entry.assertions).size !== entry.assertions.length
       || !/^\d{4}-\d{2}-\d{2}$/.test(entry.expires) || !Number.isFinite(Date.parse(entry.expires))
       || new Date(entry.expires).toISOString().slice(0, 10) !== entry.expires) throw new Error('Malformed pgTAP exception');
   }
-  return entries;
+  return entries.flatMap(({ assertions, ...entry }) => assertions.map(assertion => ({ ...entry, assertion })));
 }
 function assessFile(file, result, entries, today = new Date().toISOString().slice(0, 10)) {
   const assertions = []; const plans = []; const errors = []; const failureCounts = [];
@@ -31,8 +35,8 @@ function assessFile(file, result, entries, today = new Date().toISOString().slic
   const abort = result.status !== 0 || /ERROR:|FATAL:|PANIC:|Bail out!|looks like you planned|no plan|died before/i.test(output);
   const accepted = [];
   for (const entry of entries.filter(row => row.file === file)) {
-    const matches = assertions.filter(row => row.failed && row.assertion === entry.assertion);
-    if (matches.length !== 1) errors.push(`stale exception: remove it: ${entry.file}: ${entry.assertion}`);
+    const matches = assertions.filter(row => row.assertion === entry.assertion);
+    if (matches.length !== 1 || !matches[0].failed) errors.push(`stale exception: remove it: ${entry.file}: ${entry.assertion}`);
     else if (today > entry.expires) errors.push(`Expired pgTAP exception (${entry.expires}): ${entry.file}: ${entry.assertion}`);
     else if (complete && !abort) accepted.push({ ...entry });
   }

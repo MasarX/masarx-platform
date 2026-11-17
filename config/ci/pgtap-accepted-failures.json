@@ -1,8 +1,20 @@
 [
   {
     "file": "0zz_extension_public_acl_v1.sql",
-    "assertion": "pg_net queues and responses have no PUBLIC ACL",
-    "reason": "Supabase-owned extension grants cannot be changed per project; secret-bearing dispatch moves to the trusted-worker path",
+    "assertions": [
+      "pg_net queues and responses have no PUBLIC ACL",
+      "net._http_response remains outside executor access",
+      "net.http_request_queue remains outside executor access",
+      "anon does not acquire direct writes to net._http_response",
+      "authenticated does not acquire direct writes to net._http_response",
+      "service_role does not acquire direct writes to net._http_response",
+      "anon does not acquire direct writes to net.http_request_queue",
+      "authenticated does not acquire direct writes to net.http_request_queue",
+      "service_role does not acquire direct writes to net.http_request_queue",
+      "request-id sequence has no PUBLIC ACL",
+      "executor cannot advance or reset request identities"
+    ],
+    "reason": "Supabase-owned pg_net extension grants (tables and request-id sequence) cannot be changed per project; secret-bearing dispatch moves to the trusted-worker path",
     "owner": "repository lead",
     "expires": "2026-12-01"
   }

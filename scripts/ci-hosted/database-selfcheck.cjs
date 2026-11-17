@@ -45,8 +45,17 @@ function checkDatabaseInputs() {
   console.log(`PASS: configured database commands and ${seen.size} transitive module inputs exist`);
 }
 
-function checkExceptions() {
-  const entry = loadExceptions()[0]; const today = '2026-11-17';
+function checkExceptions(temp) {
+  const settings = { file: 'synthetic.sql', assertions: ['first assertion', 'second assertion'],
+    expires: '2026-12-01', reason: 'synthetic reason', owner: 'synthetic owner' };
+  const config = path.join(temp, 'pgtap-exceptions.json');
+  fs.writeFileSync(config, JSON.stringify([{ ...settings, assertions: ['duplicate', 'duplicate'] }]));
+  assert.throws(() => loadExceptions(config), /Malformed pgTAP exception/);
+  fs.writeFileSync(config, JSON.stringify([settings]));
+  const entries = loadExceptions(config);
+  assert.deepEqual(entries.map(row => row.assertion), settings.assertions);
+  const [entry, second] = entries;
+  const today = '2026-11-17';
   const assess = (text, status = 0, day = today) => assessFile(entry.file, { status, combined: text }, [entry], day);
   const failed = `1..1\n not ok 1 - ${entry.assertion}    +\n # Looks like you failed 1 test of 1`;
   const accepted = assess(failed);
@@ -59,15 +68,33 @@ function checkExceptions() {
   for (const result of [assess(failed, 3), assess(`${failed}\nERROR: synthetic abort`), assess(failed.replace('1..1', '1..2')), assess(failed.replace('failed 1 test', 'failed 2 tests'))]) {
     assert.equal(result.ok, false); assert.equal(result.accepted.length, 0);
   }
-  const multiple = assess(`1..2\nnot ok 1 - ${entry.assertion}\nnot ok 2 - unaccepted assertion\n# Looks like you failed 2 tests of 2`);
-  assert.equal(multiple.ok, false); assert.equal(multiple.accepted.length, 1);
-  assert.equal(multiple.failures[0].assertion, 'unaccepted assertion');
-  const report = [{ files: [{ file: entry.file, accepted: accepted.accepted }] }];
-  assert.equal(exceptionEvidence([entry], report, today).errors.length, 0);
-  assert.equal(exceptionEvidence([entry], report, '2026-12-02').errors.length > 0, true);
-  assert.equal(exceptionEvidence([entry], [], today).errors.length, 1);
-  assert.equal(exceptionEvidence([entry], [...report, ...report], today).errors.length, 1);
-  console.log('PASS: exact, expired, stale, changed-text, SQL-abort and incomplete-plan assertion exceptions');
+  const assessBoth = (combined, day = today) => assessFile(entry.file, { status: 0, combined }, entries, day);
+  const bothFailed = '1..2\nnot ok 1 - first assertion\nnot ok 2 - second assertion';
+  assert.equal(assessBoth(bothFailed).ok, true);
+  assert.deepEqual(assessBoth(bothFailed).accepted, entries);
+  assert.deepEqual(assessBoth(bothFailed, '2026-12-02').failures.map(row => row.assertion), settings.assertions);
+  const multiple = assessBoth('1..3\nnot ok 1 - first assertion\nnot ok 2 - second assertion\nnot ok 3 - unaccepted assertion');
+  assert.equal(multiple.ok, false);
+  assert.deepEqual(multiple.accepted, entries);
+  assert.deepEqual(multiple.failures.map(row => row.assertion), ['unaccepted assertion']);
+  for (const tap of [bothFailed.replace('not ok 2', 'ok 2'), failed]) {
+    const stale = assessBoth(tap);
+    assert.equal(stale.ok, false);
+    assert.deepEqual(stale.accepted, [entry]);
+    assert.deepEqual(stale.errors, ['stale exception: remove it: synthetic.sql: second assertion']);
+  }
+  const report = rows => [{ files: [{ file: entry.file, accepted: rows }] }];
+  const evidence = exceptionEvidence(entries, report(multiple.accepted), today);
+  assert.deepEqual(evidence.accepted.map(row => row.assertion), settings.assertions);
+  assert.deepEqual(evidence.errors, []);
+  const missing = exceptionEvidence(entries, report([entry]), today).errors;
+  assert.equal(missing.length, 1);
+  assert.ok(missing[0].endsWith(second.assertion));
+  assert.equal(exceptionEvidence(entries, report(entries), '2026-12-02').accepted.length, 0);
+  assert.equal(exceptionEvidence(entries, [], today).errors.length, 2);
+  assert.equal(exceptionEvidence(entries, [...report(entries), ...report(entries)], today).errors.length, 2);
+  console.log('PASS: assertion lists, exact matches, expiry, per-assertion staleness, SQL aborts and incomplete plans');
+  return entry;
 }
 async function checkImages(temp, pins) {
   const cwd = process.cwd();
@@ -333,7 +360,7 @@ async function main() {
     assert.equal(wrapper.includes(`public.ecr.aws/${pin.image}@${pin.digest}`), true);
     assert.equal(wrapper.includes('-v "$PWD:$PWD"'), true);
     await checkImages(temp, pins);
-    checkExceptions();
+    const exception = checkExceptions(temp);
     const Module = require('node:module');
     const originalLoad = Module._load;
     let runner;
@@ -347,7 +374,6 @@ async function main() {
         runPsqlCaptureFn: () => ({ status, combined }),
       }), error => error.message.includes(combined.split('\n')[1]));
     }
-    const exception = loadExceptions()[0];
     const acceptedOutput = `1..1\nnot ok 1 - ${exception.assertion}\n# Looks like you failed 1 test of 1`;
     const options = { runPsqlCaptureFn: () => ({ status: 0, combined: acceptedOutput }),
       assessResult: result => assessFile(exception.file, result, [exception], '2026-11-17') };
