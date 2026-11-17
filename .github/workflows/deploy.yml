@@ -162,7 +162,6 @@ jobs:
           for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Pull project configuration
-        working-directory: apps/console
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -171,7 +170,6 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
       - name: Build prebuilt app
-        working-directory: apps/console
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
@@ -180,16 +178,19 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_APP_BASE_PATH: '/'
         run: |
+          node scripts/ops/vercel/validate-build.js public-key
           node <<'NODE'
           const fs = require('node:fs');
           const file = '.vercel/project.json';
           const project = JSON.parse(fs.readFileSync(file, 'utf8'));
-          Object.assign(project.settings, { rootDirectory: null, framework: 'nextjs', buildCommand: 'npm run build', installCommand: '', outputDirectory: null });
+          Object.assign(project.settings, { rootDirectory: 'apps/console', framework: 'nextjs', buildCommand: 'npm run build', installCommand: '', outputDirectory: null });
           fs.writeFileSync(file, JSON.stringify(project));
           NODE
-          "$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" build
+          "$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" build --output .vercel/output
+      - name: Verify prebuilt files
+        if: steps.guard.outputs.configured == 'true'
+        run: node scripts/ops/vercel/validate-build.js prebuilt
       - name: Deploy prebuilt app
-        working-directory: apps/console
         id: deploy
         if: steps.guard.outputs.configured == 'true'
         env:
@@ -244,7 +245,6 @@ jobs:
           for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Pull project configuration
-        working-directory: apps/portal
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -253,7 +253,6 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" pull --yes --environment=preview --git-branch="$DEPLOY_ENV"
       - name: Build prebuilt app
-        working-directory: apps/portal
         if: steps.guard.outputs.configured == 'true'
         env:
           VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
@@ -262,16 +261,19 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_APP_BASE_PATH: '/'
         run: |
+          node scripts/ops/vercel/validate-build.js public-key
           node <<'NODE'
           const fs = require('node:fs');
           const file = '.vercel/project.json';
           const project = JSON.parse(fs.readFileSync(file, 'utf8'));
-          Object.assign(project.settings, { rootDirectory: null, framework: 'nextjs', buildCommand: 'npm run build', installCommand: '', outputDirectory: null });
+          Object.assign(project.settings, { rootDirectory: 'apps/portal', framework: 'nextjs', buildCommand: 'npm run build', installCommand: '', outputDirectory: null });
           fs.writeFileSync(file, JSON.stringify(project));
           NODE
-          "$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" build
+          "$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" build --output .vercel/output
+      - name: Verify prebuilt files
+        if: steps.guard.outputs.configured == 'true'
+        run: node scripts/ops/vercel/validate-build.js prebuilt
       - name: Deploy prebuilt app
-        working-directory: apps/portal
         id: deploy
         if: steps.guard.outputs.configured == 'true'
         env:

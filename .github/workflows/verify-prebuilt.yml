@@ -1,0 +1,109 @@
+name: Verify prebuilt packages
+
+'on':
+  pull_request:
+    paths:
+      - .github/workflows/deploy.yml
+      - .github/workflows/verify-prebuilt.yml
+      - scripts/ops/vercel/validate-build.js
+      - tooling/apps/deploy/**
+      - package.json
+      - package-lock.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prebuilt-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  NEXT_PUBLIC_SUPABASE_URL: https://synthetic-project.example.invalid
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_synthetic
+  NEXT_PUBLIC_APP_BASE_PATH: '/'
+
+jobs:
+  prebuilt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do npm ci --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
+          for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
+      - name: Reproduce map resolution and verify both packages without credentials
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const assert = require('node:assert/strict');
+          const { spawnSync } = require('node:child_process');
+          const yaml = require('yaml');
+          const { verifyPrebuilt } = require('./scripts/ops/vercel/validate-build');
+          assert(!process.env.VERCEL_TOKEN && !process.env.CLOUDFLARE_API_TOKEN);
+          const root = process.cwd();
+          const cli = path.join(root, 'tooling/apps/deploy/node_modules/vercel/dist/vc.js');
+          const workflow = yaml.parse(fs.readFileSync('.github/workflows/deploy.yml', 'utf8'));
+          const evidence = path.join(root, 'ci-reports/prebuilt');
+          fs.mkdirSync(evidence, { recursive: true });
+          function settings(directory, app) {
+            fs.mkdirSync(path.join(directory, '.vercel'), { recursive: true });
+            fs.writeFileSync(path.join(directory, '.vercel/project.json'), JSON.stringify({
+              projectId: 'prj_synthetic', orgId: 'team_synthetic', projectName: 'synthetic-' + app,
+              settings: { rootDirectory: null, framework: 'nextjs', buildCommand: 'npm run build', installCommand: '', outputDirectory: null, nodeVersion: '24.x' },
+            }));
+          }
+          function run(args, cwd = root) {
+            const result = spawnSync(args[0], args.slice(1), { cwd, env: process.env, stdio: 'inherit', timeout: 240000 });
+            assert.equal(result.status, 0, 'Prebuilt command failed');
+          }
+          function record(directory, label, app = 'console') {
+            const functions = path.join(directory, '.vercel/output/functions');
+            for (const file of fs.globSync('**/.vc-config.json', { cwd: functions })) {
+              const config = JSON.parse(fs.readFileSync(path.join(functions, file), 'utf8'));
+              const source = Object.values(config.filePathMap || {}).find(value => value.endsWith('node_modules/@swc/helpers/cjs/_interop_require_default.cjs'));
+              if (!source) continue;
+              fs.writeFileSync(path.join(evidence, label + '.vc-config.json'), JSON.stringify({ filePathMap: config.filePathMap }, null, 2));
+              return { config: file, source, existsFromApp: fs.existsSync(path.join(root, 'apps', app, source)), existsFromRepository: fs.existsSync(path.join(root, source)) };
+            }
+            throw new Error('No SWC helper entry found in generated function maps');
+          }
+          const appDirectory = path.join(root, 'apps/console');
+          settings(appDirectory, 'console');
+          run(['node', cli, 'build'], appDirectory);
+          const baseline = record(appDirectory, 'baseline-console');
+          assert(baseline.existsFromRepository, 'Hoisted helper must exist at the repository root');
+          console.log('App-directory map observation:', JSON.stringify(baseline));
+          const results = { baseline };
+          for (const app of ['console', 'portal']) {
+            settings(root, app);
+            const build = workflow.jobs[app].steps.find(step => step.name === 'Build prebuilt app');
+            run(['bash', '-e', '-o', 'pipefail', '-c', build.run]);
+            run(['node', 'scripts/ops/vercel/validate-build.js', 'prebuilt']);
+            results[app] = { ...verifyPrebuilt(root), example: record(root, app, app) };
+          }
+          fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(results, null, 2));
+          NODE
+      - name: Retain file-map evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # immutable pin
+        with:
+          name: prebuilt-file-maps
+          path: ci-reports/prebuilt/
+          if-no-files-found: warn
+          retention-days: 1
