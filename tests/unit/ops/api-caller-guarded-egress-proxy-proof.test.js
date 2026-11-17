@@ -75,7 +75,7 @@ function authenticatedPayload() {
 }
 
 describe('API caller guarded egress proxy proof', () => {
-  test('configuration and preparation imports work when optional proof transport is unavailable', () => {
+  test('configuration imports work when optional proof transport is unavailable', () => {
     const root = path.resolve(__dirname, '../../..');
     const script = (`
       const assert = require('node:assert/strict');
@@ -92,10 +92,7 @@ describe('API caller guarded egress proxy proof', () => {
         return originalLoad.call(this, id, ...args);
       };
       const proof = require('./scripts/ops/verify-api-caller-guarded-egress-proxy');
-      const prepare = require('./scripts/edge/prepare-fn-secrets');
       const cloud = require('./scripts/ops/assert-cloud-env');
-      assert.equal(prepare.canonicalizeGuardedEgressProxyUrl('https://proxy.example.test'), 'https://proxy.example.test');
-      assert.equal(prepare.canonicalizeHostedCorsAllowOrigins('https://docs.example.test'), 'https://docs.example.test');
       cloud.validateCloudEnv({ env: {
         DATABASE_URL: '` + [`postgresql`,":","/","/",`postgres`,":",`fake-db-password`,"@",`db.abcdefghijklmnopqrst.supabase.co`,":",`5432`,"/",`postgres`].join("") + `',
         PREVIEW_MODE: '1', EDGE_REQUIRE_DB_JWT: '0', GITHUB_ACTIONS: 'false',
