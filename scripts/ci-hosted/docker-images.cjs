@@ -6,7 +6,7 @@ function pinnedReference(image, pins) {
   const normalized = String(image).replace(/^public\.ecr\.aws\//, '').split('@')[0].split(':')[0]
     .replace(/^(?:docker\/)?library\/kong$/, 'supabase/kong');
   const pin = pins.find(row => row.image === normalized || row.runtimeId === image || `public.ecr.aws/${row.image}@${row.digest}` === image);
-  if (!pin || !/^sha256:[a-f0-9]{64}$/.test(pin.digest)) throw new Error('Image is outside the reviewed digest set');
+  if (!pin || !/^sha256:[a-f0-9]{64}$/.test(pin.digest)) throw Object.assign(new Error('Image is outside the reviewed digest set'), { image: String(image) });
   return `public.ecr.aws/${pin.image}@${pin.digest}`;
 }
 function rewrite(method, url, body, pins) {
@@ -26,7 +26,8 @@ function policyDecision(error, method, url) {
   const reasons = ['CLI image pulls are forbidden; images must already be pulled by digest', 'Image is outside the reviewed digest set', 'Docker request exceeds bound'];
   return { decision: error ? 'denied' : 'allowed',
     operation: /\/images\/create/.test(url) ? 'image-pull' : /\/images\//.test(url) ? 'image-inspect' : method === 'POST' && /\/containers\/create/.test(url) ? 'container-create' : 'request',
-    reason: error ? (reasons.includes(error.message) ? error.message : 'Malformed Docker policy request') : 'Reviewed digest policy satisfied' };
+    reason: error ? (reasons.includes(error.message) ? error.message : 'Malformed Docker policy request') : 'Reviewed digest policy satisfied',
+    ...(error?.message === 'Image is outside the reviewed digest set' ? { image: error.image } : {}) };
 }
 function start(pins, socketPath, policyFile) {
   const policy = { decision: 'enforcing', allowed: 0, denied: 0, denials: [] };
