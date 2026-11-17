@@ -34,15 +34,16 @@ function detect(subject) {
   console.log(`${subject}: ${result}`);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `present=${present}\n`);
 }
+async function install(checked) {
+  const manager = read('package.json').packageManager;
+  if (!/^npm@\d+\.\d+\.\d+$/.test(manager || '')) throw new Error('Exact npm packageManager required');
+  await retry('npm version installation', () => checked('npm', ['install', '--global', manager, '--ignore-scripts', '--no-audit', '--no-fund']));
+  return retry('npm ci', () => checked('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund']));
+}
 async function main() {
   const [command, subject] = process.argv.slice(2);
   if (command === 'detect') return detect(subject);
-  if (command === 'install') {
-    const manager = read('package.json').packageManager;
-    if (!/^npm@\d+\.\d+\.\d+$/.test(manager || '')) throw new Error('Exact npm packageManager required');
-    await retry('npm version installation', () => checked('npm', ['install', '--global', manager, '--ignore-scripts', '--no-audit', '--no-fund']));
-    return retry('npm ci', () => checked('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund']));
-  }
+  if (command === 'install') return install(checked);
   if (command === 'lint') {
     for (const name of ['lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
       npmScript(name);
@@ -102,4 +103,4 @@ async function main() {
   throw new Error('Unknown command');
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { nextApps, detect };
+module.exports = { nextApps, detect, install };

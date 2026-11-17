@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "pretest:unit": "npm run edge:sync-shared -- --if-present",
-    "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --config config/tooling/jest.config.unit.js --runInBand",
+    "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --config config/tooling/jest.config.unit.js",
     "test:pgtap": "node scripts/tests/run-pgtap-cloud.js",
     "test:pgtap:local": "node scripts/tests/run-pgtap-cloud.js",
     "test:pgtap:cloud": "node scripts/tests/run-pgtap-cloud.js",
@@ -121,7 +121,7 @@
     "check:bundle-budgets": "node scripts/frontend/check-bundle-budgets.js",
     "check:bundle-budgets:write": "node scripts/frontend/check-bundle-budgets.js --write",
     "analyze:frontend": "npm --prefix apps/console run build && npm --prefix apps/portal run build && npm run check:bundle-budgets",
-    "test:ui": "jest --config config/tooling/jest.config.ui.js --runInBand",
+    "test:ui": "jest --config config/tooling/jest.config.ui.js",
     "test:e2e": "playwright test",
     "test:e2e:tenant-invite": "playwright test -c playwright.tenant-invite.config.ts --project console",
     "test:e2e:fieldops": "playwright test -c playwright.fieldops.config.ts",

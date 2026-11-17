@@ -157,12 +157,18 @@ function devPromotion(event, kind, repository, read = git) {
   const mainSha = sha(base.sha);
   const fetch = ['fetch', '--no-tags', '--filter=blob:none'];
   if (read(['rev-parse', '--is-shallow-repository']).trim() === 'true') fetch.push('--unshallow');
-  read([...fetch, 'origin', '+refs/heads/dev:refs/policy/dev']);
+  read([...fetch, 'origin', mainSha, '+refs/heads/dev:refs/policy/dev']);
   if (sha(read(['rev-parse', 'refs/policy/dev']).trim()) !== headSha) throw new Error('Dev promotion head is stale');
-  try {
-    read(['merge-base', '--is-ancestor', mainSha, headSha]);
-  } catch {
-    throw new Error('Promotion requires main to be an ancestor of dev. Merge the main-to-dev back-merge with history preserved before promoting.');
+  if (read(['rev-parse', '--is-shallow-repository']).trim() !== 'false') throw new Error('Promotion requires complete main and dev history');
+  const mainOnly = `${headSha}..${mainSha}`;
+  const backmerge = 'Main has changes outside dev promotion history. Complete the main-to-dev back-merge before promoting.';
+  if (read(['rev-list', '--no-merges', mainOnly]).trim()) throw new Error(backmerge);
+  const merges = read(['rev-list', '--merges', '--parents', mainOnly]).trim().split(/\r?\n/).filter(Boolean)
+    .map(line => line.split(' '));
+  const mainOnlyMerges = new Set(merges.map(([commit]) => commit));
+  // A second parent outside this set is reachable from dev because all main-only commits are merges.
+  if (merges.some(parents => parents.length !== 3 || mainOnlyMerges.has(parents[2]))) {
+    throw new Error(backmerge);
   }
   return true;
 }

@@ -1,6 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { runInNewContext } = require('node:vm');
 const yaml = require('yaml');
+const { PGTAP_SHARD_COUNT } = require('../../../scripts/ci-hosted/database-result.cjs');
 
 const body = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/public-ci.yml'), 'utf8');
 const workflow = yaml.parse(body);
@@ -14,6 +16,26 @@ describe('public CI workflow contract', () => {
     expect(workflow.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}");
   });
 
+  test('reports the unqualified base branch for merge-group payloads', () => {
+    const expression = workflow.env.CI_BASE_BRANCH.slice(3, -2);
+    for (const baseRef of ['refs/heads/dev', 'dev']) {
+      const payload = {
+        repository: { default_branch: 'dev' },
+        merge_group: { base_ref: baseRef },
+      };
+      const github = {
+        event_name: 'merge_group',
+        event: { pull_request: { base: {} }, ...payload },
+        ref_name: 'gh-readonly-queue/dev/synthetic',
+      };
+      expect(runInNewContext(expression, {
+        github,
+        format: (template, value) => template.replace('{0}', value),
+        startsWith: (value, prefix) => value.startsWith(prefix),
+      }, { timeout: 1000 })).toBe('dev');
+    }
+  });
+
   test('keeps trusted test execution, non-cancelling shards and helper selfchecks', () => {
     for (const lane of ['unit', 'ui']) {
       expect(workflow.jobs[lane].strategy['fail-fast']).toBe(false);
@@ -22,6 +44,26 @@ describe('public CI workflow contract', () => {
     const checks = workflow.jobs['append-only'].steps.find(step => step.name === 'Check proposed helper behavior');
     expect(checks.run).toContain('node scripts/ci-hosted/selfcheck.cjs');
     expect(checks.run).toContain('node scripts/ci-hosted/shard-selfcheck.cjs');
+    expect(checks.run).toContain('node scripts/ci-hosted/database-selfcheck.cjs');
+  });
+
+  test('starts the build and all pgTAP shards independently and keeps both required', () => {
+    const build = workflow.jobs['database-build'];
+    const shards = workflow.jobs['database-pgtap'];
+    expect(PGTAP_SHARD_COUNT).toBe(12);
+    expect(shards.strategy.matrix.shard).toEqual(Array.from({ length: PGTAP_SHARD_COUNT }, (_, index) => index + 1));
+    expect(shards.strategy['fail-fast']).toBe(false);
+    expect(shards.env.PGTAP_SHARD).toBe('${{ matrix.shard }}/${{ strategy.job-total }}');
+    for (const job of [build, shards]) {
+      expect(job.needs).toBeUndefined();
+      expect(job.if).toBeUndefined();
+      expect(job['timeout-minutes']).toBe(20);
+      expect(job.steps.find(step => step.id === 'subject').run).toBe('node scripts/ci-hosted/tasks.cjs detect database');
+      expect(job.steps.find(step => step.run === 'node scripts/ci-hosted/backend.cjs').if).toBe("steps.subject.outputs.present == 'true'");
+    }
+    expect(workflow.jobs.database.needs).toEqual(['database-build', 'database-pgtap']);
+    expect(workflow.jobs.database.if).toBe('always()');
+    expect(workflow.jobs.database.steps[0].with['sparse-checkout'].split('\n')).toContain('supabase/tests/pgtap');
   });
 
   test('requires every producer and rejects unexpected skips', () => {
