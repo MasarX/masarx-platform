@@ -1,9 +1,7 @@
 version: 2
-# Move target-branch to dev when that branch exists.
 updates:
   - package-ecosystem: npm
     directory: /
-    target-branch: main
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -16,7 +14,6 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
-    target-branch: main
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
