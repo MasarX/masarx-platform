@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const yaml = require('yaml');
+const { PGTAP_SHARD_COUNT } = require('../../../scripts/ci-hosted/database-result.cjs');
 
 const body = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/public-ci.yml'), 'utf8');
 const workflow = yaml.parse(body);
@@ -21,6 +22,25 @@ describe('public CI workflow contract', () => {
     const checks = workflow.jobs['append-only'].steps.find(step => step.name === 'Check proposed helper behavior');
     expect(checks.run).toContain('node scripts/ci-hosted/selfcheck.cjs');
     expect(checks.run).toContain('node scripts/ci-hosted/shard-selfcheck.cjs');
+    expect(checks.run).toContain('node scripts/ci-hosted/database-selfcheck.cjs');
+  });
+
+  test('starts the build and all pgTAP shards independently and keeps both required', () => {
+    const build = workflow.jobs['database-build'];
+    const shards = workflow.jobs['database-pgtap'];
+    expect(PGTAP_SHARD_COUNT).toBe(12);
+    expect(shards.strategy.matrix.shard).toEqual(Array.from({ length: PGTAP_SHARD_COUNT }, (_, index) => index + 1));
+    expect(shards.strategy['fail-fast']).toBe(false);
+    expect(shards.env.PGTAP_SHARD).toBe('${{ matrix.shard }}/${{ strategy.job-total }}');
+    for (const job of [build, shards]) {
+      expect(job.needs).toBeUndefined();
+      expect(job.if).toBeUndefined();
+      expect(job['timeout-minutes']).toBe(20);
+      expect(job.steps.find(step => step.id === 'subject').run).toBe('node scripts/ci-hosted/tasks.cjs detect database');
+      expect(job.steps.find(step => step.run === 'node scripts/ci-hosted/backend.cjs').if).toBe("steps.subject.outputs.present == 'true'");
+    }
+    expect(workflow.jobs.database.needs).toEqual(['database-build', 'database-pgtap']);
+    expect(workflow.jobs.database.if).toBe('always()');
   });
 
   test('requires every producer and only permits the optional visual lane to skip', () => {

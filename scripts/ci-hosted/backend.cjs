@@ -11,6 +11,7 @@ const { collectStackDiagnostics } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
 
 const { prepareImages } = require('./images.cjs');
+const { install } = require('./tasks.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
@@ -143,10 +144,26 @@ async function qualify(diagnostic) {
     await checked('docker', ['info', '--format', '{{.ServerVersion}}'], env);
     dockerRoot = (await checked('docker', ['info', '--format', '{{.DockerRootDir}}'], env, undefined, { quiet: true })).trim();
     diskFloor(dockerRoot);
-    if (!pinState.qualificationOnly) {
-      if (env.DOCKER_HOST && !env.DOCKER_HOST.startsWith('unix://')) throw new Error('Digest-pinned startup requires the hosted Unix Docker daemon');
+    if (!pinState.qualificationOnly && env.DOCKER_HOST && !env.DOCKER_HOST.startsWith('unix://')) {
+      throw new Error('Digest-pinned startup requires the hosted Unix Docker daemon');
+    }
+    diagnostic.stage = 'prepare-inputs';
+    const [dependencies, images] = await Promise.allSettled([
+      stage(summary, 'npm-install', () => install((command, args) => checked(command, args, env, undefined, { logPrefix: '[npm] ' }))),
+      pinState.qualificationOnly ? undefined : stage(summary, 'image-pulls', () => prepareImages(pins, {
+        env, checked, timed: (name, action) => stage(summary, name, action), summary, checkDisk: () => diskFloor(dockerRoot),
+      })),
+    ]);
+    if (images.status === 'rejected') {
       diagnostic.stage = 'image-pull';
-      await prepareImages(pins, { env, checked, timed, summary, checkDisk: () => diskFloor(dockerRoot) });
+      throw images.reason;
+    }
+    if (dependencies.status === 'rejected') {
+      diagnostic.stage = 'npm-install';
+      throw dependencies.reason;
+    }
+    if (!pinState.qualificationOnly) {
+      diskFloor(dockerRoot);
       diagnostic.stage = 'image-guard';
       guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env);
       cliEnv = guard.env;
@@ -266,7 +283,10 @@ async function qualify(diagnostic) {
     }
     throw error;
   } finally {
-    if (started) {
+    // Each pgTAP job on a GitHub-hosted runner owns a disposable VM.
+    const disposableShard = shard && process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted';
+    if (started && disposableShard) console.log('Stack stop delegated to GitHub-hosted VM teardown');
+    if (started && !disposableShard) {
       try { await timed('stack-stop', () => checked(cli, ['stop', '--workdir', temp, '--no-backup'], cliEnv, 120000)); }
       catch (error) {
         summary.ok = false; process.exitCode = 1; console.error('Local stack teardown failed');

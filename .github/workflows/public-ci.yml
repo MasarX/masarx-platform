@@ -49,7 +49,7 @@ jobs:
   database-build:
     name: From-zero database build
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 20
     outputs:
       present: ${{ steps.subject.outputs.present }}
     steps:
@@ -69,9 +69,6 @@ jobs:
       - name: Fail closed until image qualification is authorized
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs preflight
-      - name: Locked dependency installation
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs install
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
@@ -90,30 +87,31 @@ jobs:
           include-hidden-files: false
 
   database-pgtap:
-    name: Database pgTAP (${{ matrix.shard }}/6)
-    needs: database-build
-    if: needs.database-build.outputs.present == 'true'
+    name: Database pgTAP (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     env:
-      PGTAP_SHARD: ${{ matrix.shard }}/6
+      PGTAP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Detect subject
+        id: subject
+        run: node scripts/ci-hosted/tasks.cjs detect database
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        if: steps.subject.outputs.present == 'true'
         with:
           node-version: '24.22.1'
           package-manager-cache: false
-      - name: Locked dependency installation
-        run: node scripts/ci-hosted/tasks.cjs install
       - name: Build database from zero and run pgTAP shard
+        if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
       - name: Upload pgTAP summary
         if: always()

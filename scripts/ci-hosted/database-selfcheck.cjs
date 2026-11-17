@@ -16,7 +16,10 @@ const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stac
 const { checkTransport } = require('./docker-selfcheck.cjs');
 const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
 const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
-const { databaseResult } = require('./database-result.cjs');
+const { databaseResult, PGTAP_SHARD_COUNT } = require('./database-result.cjs');
+
+const shardIndices = Array.from({ length: PGTAP_SHARD_COUNT }, (_, index) => index + 1);
+const shardId = index => `${index}/${PGTAP_SHARD_COUNT}`;
 
 function checkDatabaseInputs() {
   const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -113,7 +116,9 @@ async function checkImages(pins) {
     return '';
   };
   const options = { env: {}, checked, timed: (name, action) => stage(summary, name, action), summary, wait: async ms => delays.push(ms) };
-  await prepareImages(pins.map(p => ({ ...p })), options);
+  const pulling = prepareImages(pins.map(p => ({ ...p })), options);
+  assert.equal(pullRefs().length, pins.length, 'every pull starts before the first pull completes');
+  await pulling;
   assert.deepEqual(pullRefs(), pins.map(p => 'ghcr.io/' + p.image + '@' + p.digest));
   assert.deepEqual(summary.images.map(row => row.served), pins.map(() => 'ghcr.io'));
 
@@ -122,6 +127,25 @@ async function checkImages(pins) {
   await prepareImages([{ ...pin }], options);
   assert.deepEqual(pullRefs().map(registryOf), ['ghcr.io', 'ghcr.io', 'ghcr.io', 'public.ecr.aws']);
   assert.deepEqual(delays, [5000, 15000]);
+
+  failMirror = false;
+  let finishLastPull;
+  const lastPull = new Promise(resolve => { finishLastPull = resolve; });
+  const lastPin = pins.at(-1);
+  let settled = false;
+  const failedPulls = prepareImages(pins.map(p => ({ ...p })), {
+    ...options, async checked(command, args) {
+      if (args[0] === 'pull' && args.at(-1).includes(pin.image)) throw new Error('synthetic exhausted pull');
+      if (args[0] === 'pull' && args.at(-1).includes(lastPin.image)) await lastPull;
+      return checked(command, args);
+    },
+  }).catch(error => { settled = true; throw error; });
+  const rejected = assert.rejects(failedPulls, /synthetic exhausted pull/);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false, 'failed pulls still join their siblings');
+  finishLastPull();
+  await rejected;
+  assert.equal(summary.images.length, pins.length - 1);
 
   const bound = pins.map(p => ({ ...p, runtimeId: p.image_id }));
   const create = (image, rules = bound) => rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: image })), rules);
@@ -164,17 +188,19 @@ async function main() {
   assert.equal(tracker.line(`Applying migration ${files[1]}...`), true);
   assert.equal(progress.currentMigration, files[1]);
   assert.throws(() => tracker.line(`Applying migration ${files[1]}...`), /Unexpected migration order/);
-  const names = Array.from({ length: 498 }, (_, i) => `${String(i).padStart(3, '0')}_synthetic.sql`);
-  const shards = Array.from({ length: 6 }, (_, i) => shardFiles([...names].reverse(), `${i + 1}/6`));
-  assert.deepEqual(shards.map(files => files.length), [83, 83, 83, 83, 83, 83]);
+  const names = fs.readdirSync('supabase/tests/pgtap').filter(file => /\.sql$/i.test(file)).sort();
+  const shards = shardIndices.map(index => shardFiles([...names].reverse(), shardId(index)));
+  for (const [index, files] of shards.entries()) {
+    assert.deepEqual(files, names.filter((_, offset) => offset % PGTAP_SHARD_COUNT === index));
+  }
   assert.deepEqual(shards.flat().sort(), names);
   assert.equal(new Set(shards.flat()).size, names.length);
   const mixedCase = ['a.SQL', 'b.sQl', 'c.sql', 'ignored.txt'];
   assert.deepEqual(Array.from({ length: 3 }, (_, index) => shardFiles(mixedCase, `${index + 1}/3`)).flat().sort(), mixedCase.slice(0, 3));
-  for (const invalid of ['0/6', '7/6', '1/0', '1/65', '1/6 extra']) assert.throws(() => shardFiles(names, invalid));
+  for (const invalid of [shardId(0), shardId(PGTAP_SHARD_COUNT + 1), '1/0', '1/65', `${shardId(1)} extra`]) assert.throws(() => shardFiles(names, invalid));
   assert.throws(() => shardFiles(['../escape.sql'], '1/1'));
   assert.throws(() => shardFiles(['one.sql', 'one.sql'], '1/1'));
-  assert.throws(() => shardFiles(['one.sql'], '2/6'));
+  assert.throws(() => shardFiles(['one.sql'], shardId(2)));
   const contract = loadBackendLocalPgtapEnv();
   const testEnv = shardEnvironment({ DATABASE_URL: 'postgresql://synthetic@127.0.0.1:54322/postgres', PATH: 'synthetic-bin' }, contract, 'synthetic', 54322, ['one.sql']);
   for (const name of ['PGTAP_FILES_PER_SESSION', 'PGTAP_NODE_FILE_RETRIES', 'PGTAP_RETRY_TRANSIENT', 'PGTAP_RETRY_DEADLOCKS', 'PGTAP_FULL_LOCAL_QUALIFICATION']) assert.equal(testEnv[name], contract[name]);
@@ -235,26 +261,30 @@ async function main() {
     const aggregateEnv = { BUILD_RESULT: 'success', DATABASE_PRESENT: 'true', PGTAP_RESULT: 'success', GITHUB_SHA: 'a'.repeat(40) };
     const built = { sha: aggregateEnv.GITHUB_SHA, ok: true, migrations: 2324, migrationTotal: 2324,
       migrationFailed: 0, migrationNotRun: 0, lint: { ok: true, findings: [], ignored: 0 } };
-    const shardReports = Array.from({ length: 6 }, (_, index) => ({ sha: aggregateEnv.GITHUB_SHA, shard: `${index + 1}/6`,
+    const shardReports = shardIndices.map(index => ({ sha: aggregateEnv.GITHUB_SHA, shard: shardId(index),
       migrations: 2324, migrationFailed: 0, migrationNotRun: 0,
-      ok: true, run: 1, passed: 1, failed: 0, selected: [`${index}_synthetic.sql`], notRun: [], files: [] }));
+      ok: true, run: 1, passed: 1, failed: 0, selected: [`${index - 1}_synthetic.sql`], notRun: [], files: [] }));
     assert.equal(databaseResult(built, shardReports, aggregateEnv).ok, true);
     const lintFailed = databaseResult({ ...built, ok: false, lint: { ok: false, findings: [finding], ignored: 1 } }, shardReports, aggregateEnv);
     assert.equal(lintFailed.ok, false);
     assert.equal(lintFailed.markdown.includes(finding.function) && lintFailed.markdown.includes(finding.message), true);
-    assert.equal(lintFailed.markdown.includes('| 6/6 | 2324 / 0 | 1 | 1 | 0 | PASS |'), true);
+    assert.equal(lintFailed.markdown.includes(`| ${shardId(PGTAP_SHARD_COUNT)} | 2324 / 0 | 1 | 1 | 0 | PASS |`), true);
     assert.equal(databaseResult(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0 }, ...shardReports.slice(1)], aggregateEnv).ok, false);
     const failedFile = databaseResult(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0,
       files: [{ file: '0_synthetic.sql', status: 'failed', error: 'tool exit 3\nERROR: synthetic SQL error\nDETAIL: synthetic detail' }] }, ...shardReports.slice(1)], aggregateEnv);
     assert.equal(failedFile.markdown.includes('0_synthetic.sql: ERROR: synthetic SQL error'), true);
     assert.equal(databaseResult(built, [{ ...shardReports[0], migrations: 2323 }, ...shardReports.slice(1)], aggregateEnv).ok, false);
     assert.equal(databaseResult(built, shardReports.slice(1), aggregateEnv).ok, false);
-    assert.equal(databaseResult(built, [shardReports[0], ...shardReports.slice(0, 5)], aggregateEnv).ok, false);
+    assert.equal(databaseResult(built, [shardReports[0], ...shardReports.slice(0, -1)], aggregateEnv).ok, false);
     assert.equal(databaseResult(built, [{ ...shardReports[0], sha: 'b'.repeat(40) }, ...shardReports.slice(1)], aggregateEnv).ok, false);
     assert.equal(databaseResult(undefined, shardReports, aggregateEnv).ok, false);
     assert.equal(databaseResult({ ...built, migrationFailed: 1 }, shardReports, aggregateEnv).ok, false);
     assert.equal(databaseResult(built, shardReports, { ...aggregateEnv, PGTAP_RESULT: 'failure' }).ok, false);
-    assert.equal(databaseResult(undefined, [], { ...aggregateEnv, DATABASE_PRESENT: 'false', PGTAP_RESULT: 'skipped' }).ok, true);
+    const absentEnv = { ...aggregateEnv, DATABASE_PRESENT: 'false' };
+    assert.equal(databaseResult(undefined, [], absentEnv).ok, true);
+    assert.equal(databaseResult(undefined, [], { ...absentEnv, PGTAP_RESULT: 'failure' }).ok, false);
+    assert.equal(databaseResult(undefined, [], { ...absentEnv, PGTAP_RESULT: 'skipped' }).ok, false);
+    assert.equal(databaseResult(undefined, shardReports, absentEnv).ok, false);
     const aggregateDir = path.join(temp, 'aggregate');
     const fixture = (file, value) => {
       const target = path.join(aggregateDir, 'ci-reports/database-result', file);
@@ -263,13 +293,13 @@ async function main() {
     fs.mkdirSync(path.join(aggregateDir, 'config/ci'), { recursive: true });
     fs.writeFileSync(path.join(aggregateDir, 'config/ci/pgtap-accepted-failures.json'), '[]');
     fixture('build/backend.json', built);
-    for (let index = 0; index < 6; index++) fixture(`shards/pgtap-summary-${index + 1}-123-1/pgtap.json`, shardReports[index]);
+    for (const index of shardIndices) fixture(`shards/pgtap-summary-${index}-123-1/pgtap.json`, shardReports[index - 1]);
     const aggregateSummary = path.join(temp, 'aggregate.md');
     const aggregate = () => spawnSync(process.execPath, [path.resolve('scripts/ci-hosted/database-result.cjs')], {
       cwd: aggregateDir, env: { ...process.env, ...aggregateEnv, GITHUB_STEP_SUMMARY: aggregateSummary }, encoding: 'utf8', timeout: 5000,
     });
     const flat = aggregate();
-    assert.equal(flat.status, 0);
+    assert.equal(flat.status, 0, flat.error?.message || flat.stderr);
     assert.equal(flat.stdout.includes('| 2324 | 0 | 0 |'), true);
     fixture('build/backend.json', { ...built, ok: false, lint: { ok: false, findings: [finding], ignored: 1 } });
     const flatLint = aggregate();
