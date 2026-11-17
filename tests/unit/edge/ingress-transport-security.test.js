@@ -15,8 +15,8 @@ describe("public ingress transport security", () => {
 
   beforeAll(async () => {
     cors = await import(pathToFileURL(corsModulePath).href);
-    apiGatewaySource = fs.readFileSync(apiGatewayPath, "utf8");
-    webhookReceiverSource = fs.readFileSync(webhookReceiverPath, "utf8");
+    apiGatewaySource = fs.readFileSync(apiGatewayPath, "utf8").replace(/\r\n/g, "\n");
+    webhookReceiverSource = fs.readFileSync(webhookReceiverPath, "utf8").replace(/\r\n/g, "\n");
   });
 
   test("shared CORS policy allows an exact configured hosted HTTPS origin", () => {

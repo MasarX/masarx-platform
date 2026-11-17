@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const root = path.resolve(__dirname, '../../..');
-const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
+const read = (name) => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('supabase/migrations/20260906010000_workflow_run_trigger_lifecycle_v1.sql');
 function functionOf(sql, name) {
   const start = sql.indexOf('CREATE OR REPLACE FUNCTION public.' + name + '(');
