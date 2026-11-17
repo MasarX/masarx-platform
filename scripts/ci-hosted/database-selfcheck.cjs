@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { isBuiltin } = require('node:module');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
 const { migrationProgress, completePins } = require('./backend.cjs');
 const { shardFiles, validateSnapshot } = require('./pgtap.cjs');
@@ -11,8 +12,38 @@ const { checkInstallPolicy } = require('./install-policy.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
 const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
+const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
+const { loadBackendLocalPreSuiteCommands } = require('../ops/ci/cloud-pool-db-local.js');
+
+function checkDatabaseInputs() {
+  const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const pending = ['scripts/ci-hosted/backend.cjs', 'scripts/ci-hosted/pgtap.cjs',
+    'scripts/ci-hosted/docker-images.cjs', 'scripts/tests/bootstrap/seed-pgtap-fixtures.js'];
+  for (const { script } of loadBackendLocalPreSuiteCommands()) {
+    const match = /^node ([a-zA-Z0-9_./-]+)$/.exec(manifest.scripts[script] || '');
+    assert.ok(match, `Missing or unsupported database lint script: ${script}`); pending.push(match[1]);
+  }
+  const seen = new Set();
+  while (pending.length) {
+    const file = path.resolve(pending.pop());
+    if (seen.has(file)) continue;
+    seen.add(file); assert.equal(fs.existsSync(file), true, `Missing database input: ${file}`);
+    for (const [, name] of fs.readFileSync(file, 'utf8').matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+      if (name.startsWith('.')) {
+        const base = path.resolve(path.dirname(file), name);
+        const resolved = [base, `${base}.js`, `${base}.cjs`, `${base}.json`, path.join(base, 'index.js')].find(value => fs.existsSync(value) && fs.statSync(value).isFile());
+        assert.ok(resolved, `Missing database import: ${name} in ${file}`);
+        if (!resolved.endsWith('.json')) pending.push(resolved);
+      } else if (!isBuiltin(name)) assert.ok(manifest.dependencies?.[name] || manifest.devDependencies?.[name], `Undeclared database dependency: ${name}`);
+    }
+  }
+  for (const file of ['config/ci/cloud-pool-db-local.json', 'config/ci/deploy-cli-contract.json', 'config/ci/deploy-surfaces.json',
+    'config/ci/hosted-supabase-images.json', 'config/lint/db-lint-exceptions.json', 'supabase/config.toml']) assert.equal(fs.existsSync(file), true, file);
+  console.log(`PASS: configured database commands and ${seen.size} transitive module inputs exist`);
+}
 
 async function main() {
+  checkDatabaseInputs();
   await checkTransport();
   const installer = fs.readFileSync('scripts/ci-hosted/tasks.cjs', 'utf8');
   assert.equal(checkInstallPolicy(new Map([['scripts/ci-hosted/tasks.cjs', installer]])).length, 0);
@@ -46,6 +77,39 @@ async function main() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'database-selfcheck-'));
   const originalSummary = process.env.GITHUB_STEP_SUMMARY;
   try {
+    const lintEnv = { SUPABASE_CLI_BIN: 'synthetic-cli', DATABASE_URL: 'postgresql://postgres:synthetic-password@127.0.0.1:54322/postgres',
+      SYNTHETIC_TOKEN: 'synthetic-hidden', PATH: process.env.PATH };
+    const command = invocation(lintEnv);
+    assert.equal(command.command, 'synthetic-cli');
+    assert.equal(command.args.includes('--fail-on'), true);
+    assert.equal(command.args.some(value => value.includes('synthetic-password')), false);
+    assert.equal(command.env.PGPASSWORD, 'synthetic-password');
+    assert.equal(command.env.SYNTHETIC_TOKEN, undefined);
+    assert.throws(() => invocation({ ...lintEnv, SUPABASE_CLI_BIN: '' }), /verified CLI/);
+    assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: 'postgresql://postgres@unreviewed.invalid/postgres' }), /loopback/i);
+    assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: lintEnv.DATABASE_URL + '?password=other' }), /Ambiguous/);
+    const registry = [{ extension: 'synthetic_extension' }];
+    const ownership = new Map([['public.synthetic_extension_fn', 'synthetic_extension']]);
+    const ignored = { function: 'public.synthetic_extension_fn', issues: [{ level: 'error', message: 'synthetic' }] };
+    const failure = { function: 'public.synthetic_product_fn', issues: [{ level: 'error', message: 'synthetic product failure' }] };
+    assert.equal(lintResult('', 0, registry, ownership).exitCode, 0);
+    assert.equal(lintResult('', 7, registry, ownership).exitCode, 7);
+    assert.equal(lintResult(JSON.stringify([ignored]), 1, registry, ownership).exitCode, 0);
+    assert.equal(lintResult(JSON.stringify([ignored]), 1, registry, new Map()).exitCode, 1);
+    assert.equal(lintResult(JSON.stringify([ignored, failure]), 1, registry, ownership).exitCode, 1);
+    assert.equal(lintResult(JSON.stringify([failure]), 0, registry, ownership).exitCode, 1);
+    assert.throws(() => lintResult('{}', 0, registry, ownership), /Malformed/);
+    assert.throws(() => lintResult('[{"function":"synthetic","issues":[{}]}]', 0, registry, ownership), /Malformed/);
+    assert.throws(() => lintResult('[]', null, registry, ownership), /normally/);
+    const migration = path.join(temp, '20260101000000_synthetic.sql');
+    fs.writeFileSync(migration, 'select 1;');
+    assert.deepEqual(migrationIssues([migration], {}), []);
+    fs.writeFileSync(migration, 'select seed_client;');
+    assert.equal(migrationIssues([migration], {}).some(message => message.includes('Client-specific seeding')), true);
+    fs.writeFileSync(migration, "select 'test-client-synthetic';");
+    assert.equal(migrationIssues([migration], {}).some(message => message.includes('Fixture slug')), true);
+    fs.writeFileSync(migration, 'select 1;');
+    assert.equal(migrationIssues([migration, migration], {}).some(message => message.includes('duplicate')), true);
     const pins = JSON.parse(fs.readFileSync('config/ci/hosted-supabase-images.json', 'utf8'));
     assert.equal(completePins(pins), true);
     const pin = pins.find(row => row.role === 'database');
