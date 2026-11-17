@@ -29,17 +29,17 @@ describe('dependency security foundation', () => {
 
     expect(consoleManifest.dependencies).toMatchObject({
       '@swc/helpers': '0.5.23',
-      next: '16.4.2',
+      next: '16.4.5',
       'next-intl': '4.9.2',
       zod: '4.6.7',
     });
     expect(portalManifest.dependencies).toMatchObject({
       '@swc/helpers': '0.5.23',
-      next: '16.4.2',
+      next: '16.4.5',
       'next-intl': '4.9.2',
       zod: '4.6.7',
     });
-    expect(uiManifest.peerDependencies.next).toBe('^16.3.8');
+    expect(uiManifest.peerDependencies.next).toBe('^16.4.5');
     expect(uiManifest.dependencies['@hookform/resolvers']).toBe('5.2.2');
     expect(uiManifest.dependencies.zod).toBe('4.6.7');
     expect(root.devDependencies).toMatchObject({
@@ -120,7 +120,7 @@ describe('dependency security foundation', () => {
   test('materializes the exact supported dependency graph in package-lock.json', () => {
     const lock = readJson('package-lock.json');
 
-    expect(lock.packages['node_modules/next'].version).toBe('16.4.2');
+    expect(lock.packages['node_modules/next'].version).toBe('16.4.5');
     expect(lock.packages['node_modules/next-intl'].version).toBe('4.9.2');
     expect(lock.packages['node_modules/nx'].version).toBe('22.7.12');
     expect(semver.satisfies(lock.packages['node_modules/postcss'].version, '^8.5.23')).toBe(true);
