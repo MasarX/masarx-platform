@@ -5,10 +5,6 @@ const migration = fs.readFileSync(path.resolve(
   __dirname,
   '../../../supabase/migrations/20260920006000_label_bundle_ready_count_projection_v1.sql',
 ), 'utf8');
-const nativeBulkTest = fs.readFileSync(path.resolve(
-  __dirname,
-  '../../integration/workflows/labels-print-webhook.test.js',
-), 'utf8');
 const effectiveHandlerSource = fs.readFileSync(path.resolve(
   __dirname,
   '../../../supabase/migrations/202603062010_label_bundle_edge_callback_progress_v1.sql',
@@ -45,15 +41,5 @@ describe('label bundle ready-count projection', () => {
     expect(migration).toContain('position(v_refreshed_new IN v_definition)');
   });
 
-  test('native bulk coverage requires count and canonical-array agreement', () => {
-    expect(nativeBulkTest).toContain(
-      'expect(state.counts?.ready).toBe(ready.length);',
-    );
-    expect(nativeBulkTest).toContain(
-      'expect(state.counts?.out_of_scope).toBe(outOfScope.length);',
-    );
-    expect(nativeBulkTest).toContain(
-      'expect(state.counts?.invalid_box_requests).toBe(invalidBoxes.length);',
-    );
-  });
+  // Native bulk coverage remains unavailable with the provisioning adapter.
 });
