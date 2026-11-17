@@ -55,7 +55,9 @@ function start(pins, socketPath, policyFile) {
   });
   server.on('upgrade', (request, client, head) => {
     if (!/^\/v[0-9.]+\/(exec\/[^/]+\/start|containers\/[^/]+\/attach)(?:\?|$)/.test(request.url)) return client.destroy();
-    const upstream = net.createConnection(socketPath, () => {
+    // Docker closes stdin before reading exec output; keep the response half open through that EOF.
+    client.allowHalfOpen = true;
+    const upstream = net.createConnection({ path: socketPath, allowHalfOpen: true }, () => {
       const headers = request.rawHeaders.reduce((text, value, index, all) => index % 2 ? text : text + `${value}: ${all[index + 1]}\r\n`, '');
       upstream.write(`${request.method} ${request.url} HTTP/1.1\r\n${headers}\r\n`); upstream.write(head);
       client.pipe(upstream); upstream.pipe(client);
