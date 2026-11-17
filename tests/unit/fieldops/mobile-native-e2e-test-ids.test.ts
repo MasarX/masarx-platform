@@ -8,6 +8,7 @@ import {
 
 describe("FieldOps native E2E selectors", () => {
   test("keeps stable unique selector values", () => {
+    expect(FIELDOPS_NATIVE_E2E_TEST_IDS.signInPassword).toBe("mobile-signin-password");
     const selectors = Object.values(FIELDOPS_NATIVE_E2E_TEST_IDS);
     expect(new Set(selectors).size).toBe(selectors.length);
     expect(selectors.every((selector) => selector.startsWith("mobile-"))).toBe(true);
