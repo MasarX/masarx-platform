@@ -46,10 +46,12 @@ env:
   LANDING_ENABLE_INTAKE_MOCKS: '1'
 
 jobs:
-  database:
-    name: From-zero database build and pgTAP
+  database-build:
+    name: From-zero database build
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    outputs:
+      present: ${{ steps.subject.outputs.present }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
@@ -81,9 +83,93 @@ jobs:
           path: |
             ci-reports/backend.json
             ci-reports/backend-diagnostic.json
+            ci-reports/backend.log
+            ci-reports/db-lint.json
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
+
+  database-pgtap:
+    name: Database pgTAP (${{ matrix.shard }}/6)
+    needs: database-build
+    if: needs.database-build.outputs.present == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      PGTAP_SHARD: ${{ matrix.shard }}/6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Locked dependency installation
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Build database from zero and run pgTAP shard
+        run: node scripts/ci-hosted/backend.cjs
+      - name: Upload pgTAP summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: pgtap-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-reports/pgtap.json
+            ci-reports/pgtap-diagnostic.json
+            ci-reports/pgtap-files.json
+            ci-reports/pgtap.log
+          if-no-files-found: warn
+          retention-days: 1
+
+  database:
+    name: From-zero database build and pgTAP
+    needs: [database-build, database-pgtap]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/ci-hosted
+            config/ci/pgtap-accepted-failures.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Download build report
+        if: ${{ always() && needs.database-build.outputs.present == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node24
+        with:
+          pattern: backend-summary-${{ github.run_id }}-*
+          path: ci-reports/database-result/build
+          merge-multiple: false
+      - name: Download all pgTAP reports
+        if: ${{ always() && needs.database-build.outputs.present == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node24
+        with:
+          pattern: pgtap-summary-*-${{ github.run_id }}-*
+          path: ci-reports/database-result/shards
+          merge-multiple: false
+      - name: Require build and every pgTAP shard
+        if: always()
+        env:
+          BUILD_RESULT: ${{ needs.database-build.result }}
+          DATABASE_PRESENT: ${{ needs.database-build.outputs.present }}
+          PGTAP_RESULT: ${{ needs.database-pgtap.result }}
+        run: node scripts/ci-hosted/database-result.cjs
 
   append-only:
     name: Append-only migrations
@@ -113,6 +199,7 @@ jobs:
         run: |
           node scripts/ci-hosted/selfcheck.cjs
           node scripts/ci-hosted/shard-selfcheck.cjs
+          node scripts/ci-hosted/database-selfcheck.cjs
 
   lint:
     name: Lint
@@ -387,7 +474,7 @@ jobs:
 
   ci-result:
     name: CI result
-    needs: [database, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines]
+    needs: [database, database-build, database-pgtap, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -400,7 +487,7 @@ jobs:
           python3 -I - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ['NEEDS_JSON'])
-          expected = {'database', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines'}
+          expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines'}
           good = set(needs) == expected
           for name in sorted(expected):
               result = needs.get(name, {}).get('result', 'missing')

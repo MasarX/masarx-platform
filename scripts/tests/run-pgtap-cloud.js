@@ -903,14 +903,22 @@ function runPsqlWithCandidateFallback(candidates, buildArgs, description, option
   if (!attempt) {
     throw new Error(`[pgTAP] ${description} did not execute.`);
   }
-  if (attempt.result.status !== 0) {
-    throw new Error(
-      `[pgTAP] ${description} exited with status ${attempt.result.status} via ${attempt.candidate?.name || 'unknown'}`,
-    );
+  const outputLines = String(attempt.result.combined || '').split(/\r?\n/);
+  const firstError = outputLines.find(line => /ERROR:|FATAL:/i.test(line))
+    || outputLines.find(line => /\bnot ok\b|looks like you (failed|planned)/i.test(line));
+  const detail = firstError ? `\n${firstError}` : '';
+  const assessment = options.assessResult?.(attempt.result);
+  if (assessment?.ok) return { ...attempt, assessment };
+  let error;
+  if (assessment?.errors.length) {
+    error = new Error(`[pgTAP] ${description}: ${assessment.errors.join('; ')}${detail}`);
+  } else if (attempt.result.status !== 0) {
+    error = new Error(`[pgTAP] ${description} exited with status ${attempt.result.status} via ${attempt.candidate?.name || 'unknown'}${detail}`);
+  } else if (attempt.tapFailures || assessment) {
+    const firstFailure = assessment?.failures[0];
+    error = new Error(`[pgTAP] TAP test failures detected in ${description}${firstFailure ? `\nnot ok ${firstFailure.number} - ${firstFailure.assertion}` : detail}`);
   }
-  if (attempt.tapFailures) {
-    throw new Error(`[pgTAP] TAP test failures detected in ${description}`);
-  }
+  if (error) { error.assessment = assessment; throw error; }
   return attempt;
 }
 
@@ -1023,7 +1031,7 @@ async function main() {
   return runSuite(dbCandidates);
 }
 
-async function runSuite(dbCandidates, fullLocal = false, env = process.env) {
+async function runSuite(dbCandidates, fullLocal = false, env = process.env, reporter) {
   if (dbCandidates.length === 0) {
     console.error('[pgTAP] Missing DATABASE_URL/DATABASE_URL_DIRECT/DATABASE_URL_POOLER. Ensure .env.cloud is loaded.');
     exitRunner(1);
@@ -1077,7 +1085,7 @@ async function runSuite(dbCandidates, fullLocal = false, env = process.env) {
   }
 
   const qaSuiteKey = env.QA_SUITE_KEY || 'pgtap';
-  const qa = createQaLogger({ runId: env.QA_RUN_ID, disabled: !env.QA_RUN_ID,
+  const qa = reporter || createQaLogger({ runId: env.QA_RUN_ID, disabled: !env.QA_RUN_ID,
     ...(fullLocal ? { env: { ...env, DATABASE_URL: databaseUrl } } : {}),
   });
   let suiteError;
@@ -1085,6 +1093,7 @@ async function runSuite(dbCandidates, fullLocal = false, env = process.env) {
   const filesPerSession = resolveFilesPerSession(env);
   const batched = filesPerSession > 1;
   const psqlAvailable = isPsqlAvailable();
+  if (reporter?.assessResult && (batched || !psqlAvailable)) throw new Error('Assertion exceptions require the per-file psql runner');
 
   console.log('[pgTAP] Using database:', summarizeDatabaseUrl(databaseUrl));
   if (batched) {
@@ -1331,6 +1340,7 @@ async function runSuite(dbCandidates, fullLocal = false, env = process.env) {
       const startedAt = Date.now();
       let status = 'passed';
       let errorSummary = null;
+      let assessment;
       try {
         const fileAttempt = runPsqlWithCandidateFallback(
           dbCandidates,
@@ -1352,11 +1362,14 @@ async function runSuite(dbCandidates, fullLocal = false, env = process.env) {
             filePath,
           ],
           file,
-          { preferredCandidateName: activePsqlCandidate.name },
+          { preferredCandidateName: activePsqlCandidate.name,
+            assessResult: reporter?.assessResult ? result => reporter.assessResult(file, result) : undefined },
         );
+        assessment = fileAttempt.assessment;
         activePsqlCandidate = fileAttempt.candidate;
         libpqDatabaseUrl = activePsqlCandidate.dsn;
       } catch (err) {
+        assessment = err.assessment;
         status = 'failed';
         errorSummary = err.message;
       }
@@ -1368,7 +1381,7 @@ async function runSuite(dbCandidates, fullLocal = false, env = process.env) {
           started_at: new Date(startedAt).toISOString(),
           ended_at: new Date().toISOString(),
           duration_ms: Date.now() - startedAt,
-          metadata: { file, suite: qaSuiteKey },
+          metadata: { file, suite: qaSuiteKey, ...(assessment ? { assessment } : {}) },
           error_summary: errorSummary,
         },
       ]);
