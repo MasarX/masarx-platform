@@ -33,6 +33,8 @@ async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy =
   emit(`CLI image requests: ${JSON.stringify(imagePolicy.imageRequests || [])}`);
   emit(`CLI images outside reviewed pins: ${JSON.stringify(report.unreviewedImages)}`);
   emit(`Last guarded Docker request: ${JSON.stringify(imagePolicy.lastRequest || null)}`);
+  report.containerRequests = (imagePolicy.requests || []).filter(request => /\/(?:containers|exec)\//.test(request.path));
+  for (const request of report.containerRequests) emit(`Guarded container request (admission order): ${JSON.stringify(request)}`);
   report.disk = emit(await capture('df', ['-h', '/', dockerRoot]));
   report.memory = emit(await capture('free', ['-m']));
   try {
@@ -43,7 +45,7 @@ async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy =
     for (const row of rows) {
       const inspected = states.find(state => state.id === row.ID);
       const state = inspected?.state || {};
-      const container = { name: sanitize(row.Names, secrets), image: sanitize(imagePrefix(row.Image), secrets), imageId: imagePrefix(inspected?.imageId),
+      const container = { id: row.ID.slice(0, 12), name: sanitize(row.Names, secrets), image: sanitize(imagePrefix(row.Image), secrets), imageId: imagePrefix(inspected?.imageId),
         status: sanitize(row.Status, secrets), health: state.Health?.Status || 'none' };
       report.containers.push(container);
       emit(`docker ps -a: ${JSON.stringify(container)}`);

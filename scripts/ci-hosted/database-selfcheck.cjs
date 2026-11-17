@@ -10,8 +10,10 @@ const { shardFiles, validateSnapshot } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
 const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
+const { checkTransport } = require('./docker-selfcheck.cjs');
 
 async function main() {
+  await checkTransport();
   const installer = fs.readFileSync('scripts/ci-hosted/tasks.cjs', 'utf8');
   assert.equal(checkInstallPolicy(new Map([['scripts/ci-hosted/tasks.cjs', installer]])).length, 0);
   assert.equal(checkInstallPolicy(new Map([['scripts/ci-hosted/tasks.cjs', installer.replaceAll("'--ignore-scripts', ", '')]])).length > 0, true);
@@ -71,8 +73,9 @@ async function main() {
       ? { Health: { Status: 'unhealthy', Log: [{ Output: 'password=synthetic-hidden' }] } }
       : row.ID === 'job' ? { Restarting: true, Status: 'restarting' } : { Status: 'running' } }));
     const diagnosticLog = path.join(temp, 'startup.log');
+    const requestTrace = [{ sequence: 1, method: 'POST', path: '/v1.48/containers/aaaaaaaaaaaa/wait', status: 200, durationMs: 500, upgraded: false }];
     const diagnostics = await collectStackDiagnostics({ project: 'synthetic', env: process.env, dockerRoot: '/synthetic/docker',
-      imagePolicy: { decision: 'denied', denied: 1, imageRequests: [traced, missing] }, logFile: diagnosticLog,
+      imagePolicy: { decision: 'denied', denied: 1, imageRequests: [traced, missing], requests: requestTrace }, logFile: diagnosticLog,
       execute: async (command, args, options) => {
         commands.push([command, args]);
         assert.equal(options.quiet, true); assert.equal(options.timeout > 0 && options.timeout <= 10000, true);
@@ -84,6 +87,8 @@ async function main() {
         return 'service error password=synthetic-hidden';
       } });
     assert.equal(diagnostics.containers.length, 3);
+    assert.deepEqual(diagnostics.containerRequests, requestTrace);
+    assert.equal(fs.readFileSync(diagnosticLog, 'utf8').includes('Guarded container request (admission order):'), true);
     assert.deepEqual(diagnostics.logs.map(row => row.name), ['supabase_db_synthetic', 'anonymous']);
     assert.equal(diagnostics.unhealthy.length, 2);
     assert.equal(diagnostics.unreviewedImages[0].image, missing.image);
