@@ -25,6 +25,7 @@
     "test:edge-smoke": "node scripts/qa/smoke-edge.js",
     "test:edge-smoke:cloud": "node scripts/qa/smoke-edge.js",
     "verify:cloud:e2e-gate": "node scripts/ops/verify-cloud-e2e-gate.js",
+    "lint:db": "node scripts/ci-hosted/db-lint.cjs",
     "lint:db:fixtures": "node scripts/ops/ci/migration-fixture-guard.js",
     "lint:db:managed-grants": "node scripts/ops/ci/lint-supabase-managed-grants.js",
     "lint:structure": "node scripts/tooling/check-structure.js",
