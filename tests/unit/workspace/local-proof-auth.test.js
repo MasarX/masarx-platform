@@ -47,22 +47,22 @@ describe('workspace local-proof-auth', () => {
 
   test('resolvePassword prefers explicit then env then manifest values', () => {
     expect(resolvePassword({
-      args: { password: 'ExplicitPass123!' },
-      env: { DEMO_PASSWORD: 'EnvPass123!' },
-      manifest: { password: 'ManifestPass123!' },
-    })).toBe('ExplicitPass123!');
+      args: { password: 'example-fixture-password-1' },
+      env: { DEMO_PASSWORD: 'example-fixture-password-2' },
+      manifest: { password: 'example-fixture-password-3' },
+    })).toBe('example-fixture-password-1');
 
     expect(resolvePassword({
       args: {},
-      env: { DEMO_PASSWORD: 'EnvPass123!' },
-      manifest: { password: 'ManifestPass123!' },
-    })).toBe('EnvPass123!');
+      env: { DEMO_PASSWORD: 'example-fixture-password-2' },
+      manifest: { password: 'example-fixture-password-3' },
+    })).toBe('example-fixture-password-2');
 
     expect(resolvePassword({
       args: {},
       env: {},
-      manifest: { password: 'ManifestPass123!' },
-    })).toBe('ManifestPass123!');
+      manifest: { password: 'example-fixture-password-3' },
+    })).toBe('example-fixture-password-3');
   });
 
   test('classifies local password grant propagation failures as retryable', () => {
