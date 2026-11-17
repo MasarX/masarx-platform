@@ -10,10 +10,10 @@ const {
 
 describe('utils/pg-candidates', () => {
   test('builds ipv4host -> hostaddr -> raw ladder per candidate', async () => {
-    const rawDsn = (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const rawDsn = (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
     const ipv4Dsn = (['postgresql',":","/","/",'postgres',":",'pw',"@",'192.0.2.10',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
     const hostaddrDsn =
-      (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require&hostaddr=192.0.2.10'].join(""));
+      (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres',"?",'sslmode=require&hostaddr=192.0.2.10'].join(""));
 
     const candidates = await buildDbConnectionCandidates(
       [{ name: 'DATABASE_URL', dsn: rawDsn }],
@@ -31,7 +31,7 @@ describe('utils/pg-candidates', () => {
   });
 
   test('dedupes identical DSNs and keeps one canonical candidate', async () => {
-    const rawDsn = (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const rawDsn = (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
 
     const candidates = await buildDbConnectionCandidates(
       [{ name: 'DATABASE_URL', dsn: rawDsn }],
@@ -45,8 +45,8 @@ describe('utils/pg-candidates', () => {
   });
 
   test('ignores empty candidates and preserves input source order', async () => {
-    const dsn1 = (['postgresql',":","/","/",'postgres',":",'xnrtsljmozghyruopuujphhl',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
-    const dsn2 = (['postgresql',":","/","/",'postgres',":",'uhimrjyzjnthkwvnmwrtxiin',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const dsn1 = (['postgresql',":","/","/",'postgres',":",'fake-first-password',"@",'first.example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const dsn2 = (['postgresql',":","/","/",'postgres',":",'fake-second-password',"@",'second.example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
 
     const candidates = await buildDbConnectionCandidates(
       [
@@ -114,7 +114,7 @@ describe('utils/pg-candidates', () => {
 
   test('adds Supabase pooler shard-host variants after standard ladder', async () => {
     const dsn =
-      (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+      (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
     const prevProjectRef = process.env.SUPABASE_PROJECT_ID;
     delete process.env.SUPABASE_PROJECT_ID;
 
@@ -131,15 +131,15 @@ describe('utils/pg-candidates', () => {
         { name: 'DATABASE_URL', dsn },
         {
           name: 'DATABASE_URL+poolerhost:aws-0',
-          dsn: (['postgresql',":","/","/",'postgres.wk123',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+          dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-0-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
         },
         {
           name: 'DATABASE_URL+poolerhost:aws-0+poolerport:6543',
-          dsn: (['postgresql',":","/","/",'postgres.wk123',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+          dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-0-us-east-1.pooler.supabase.com',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
         },
         {
           name: 'DATABASE_URL+poolerport:6543',
-          dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+          dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
         },
       ]);
     } finally {
@@ -151,7 +151,7 @@ describe('utils/pg-candidates', () => {
   test('pooler host variant helper ignores non-supabase pooler hosts', () => {
     expect(
       buildSupabasePoolerHostVariants(
-        (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       ),
     ).toEqual([]);
   });
@@ -159,19 +159,19 @@ describe('utils/pg-candidates', () => {
   test('pooler host variant helper prefers paired shard index fallback', () => {
     expect(
       buildSupabasePoolerHostVariants(
-        (['postgresql',":","/","/",'postgres.wk123',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-0-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       ),
     ).toEqual([
       {
         nameSuffix: 'poolerhost:aws-1',
-        dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       },
     ]);
   });
 
   test('pooler host variants drop stale hostaddr and add only a freshly resolved hostaddr', async () => {
     const staleDsn =
-      (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require&hostaddr=192.0.2.10'].join(""));
+      (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require&hostaddr=192.0.2.10'].join(""));
     const candidates = await buildDbConnectionCandidates(
       [{ name: 'DATABASE_URL', dsn: staleDsn }],
       {
@@ -179,7 +179,7 @@ describe('utils/pg-candidates', () => {
         ensureHostaddrFn: jest.fn(async (value) => {
           const parsed = new URL(value);
           if (parsed.hostname !== 'aws-0-us-east-1.pooler.supabase.com') return value;
-          parsed.searchParams.set('hostaddr', '192.0.2.10');
+          parsed.searchParams.set('hostaddr', '192.0.2.20');
           return parsed.toString();
         }),
       },
@@ -193,7 +193,7 @@ describe('utils/pg-candidates', () => {
       }),
       expect.objectContaining({
         name: 'DATABASE_URL+poolerhost:aws-0+hostaddr',
-        dsn: expect.stringContaining('hostaddr=192.0.2.10'),
+        dsn: expect.stringContaining('hostaddr=192.0.2.20'),
       }),
     ]));
     expect(rewritten.some((candidate) => candidate.dsn.includes('hostaddr=192.0.2.10'))).toBe(false);
@@ -201,54 +201,54 @@ describe('utils/pg-candidates', () => {
 
   test('resolves a logical shard host from a selected ipv4 pooler candidate', () => {
     expect(resolveSelectedPoolerRoute({
-      connectionString: (['postgresql',":","/","/",'postgres.wk123',":",'pw',"@",'192.0.2.10',":",'5432',"/",'postgres'].join("")),
+      connectionString: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'pw',"@",'192.0.2.10',":",'5432',"/",'postgres'].join("")),
       candidateName: 'DATABASE_URL_POOLER+poolerhost:aws-0+ipv4host',
       fallbackHost: 'aws-1-us-east-1.pooler.supabase.com',
       fallbackPort: '5432',
-      fallbackUser: 'postgres.wk123',
+      fallbackUser: 'postgres.abcdefghijklmnopqrst',
     })).toEqual({
       candidateName: 'DATABASE_URL_POOLER+poolerhost:aws-0+ipv4host',
       host: 'aws-0-us-east-1.pooler.supabase.com',
       port: '5432',
-      user: 'postgres.wk123',
+      user: 'postgres.abcdefghijklmnopqrst',
     });
   });
 
   test('preserves canonical pooler metadata when a direct database candidate wins readiness', () => {
     expect(resolveSelectedPoolerRoute({
-      connectionString: (['postgresql',":","/","/",'postgres',":",'hhmigwyjikkyolyiwoxwizvv',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+      connectionString: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
       candidateName: 'DATABASE_URL_DIRECT',
       fallbackHost: 'aws-1-us-east-1.pooler.supabase.com',
       fallbackPort: '6543',
-      fallbackUser: 'postgres.wk123',
+      fallbackUser: 'postgres.abcdefghijklmnopqrst',
     })).toEqual({
       candidateName: 'DATABASE_URL_DIRECT',
       host: '',
       port: '6543',
-      user: 'postgres.wk123',
+      user: 'postgres.abcdefghijklmnopqrst',
     });
   });
 
   test('pooler port variant helper toggles between transaction and session ports', () => {
     expect(
       buildSupabasePoolerPortVariants(
-        (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       ),
     ).toEqual([
       {
         nameSuffix: 'poolerport:6543',
-        dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
       },
     ]);
 
     expect(
       buildSupabasePoolerPortVariants(
-        (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+        (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
       ),
     ).toEqual([
       {
         nameSuffix: 'poolerport:5432',
-        dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       },
     ]);
   });
@@ -256,21 +256,21 @@ describe('utils/pg-candidates', () => {
   test('pooler user variant helper normalizes bare postgres user for Supabase pooler hosts', () => {
     expect(
       buildSupabasePoolerUserVariant(
-        (['postgresql',":","/","/",'postgres',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
-        { projectRef: 'ymlutyyxksjojqouppww' },
+        (['postgresql',":","/","/",'postgres',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        { projectRef: 'abcdefghijklmnopqrst' },
       ),
     ).toEqual({
       nameSuffix: 'pooleruser',
-      dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
     });
   });
 
   test('prefers pooler-user-normalized ladder when project ref is known', async () => {
-    const dsn = (['postgresql',":","/","/",'postgres',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const dsn = (['postgresql',":","/","/",'postgres',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
     const candidates = await buildDbConnectionCandidates(
       [{ name: 'DATABASE_URL', dsn }],
       {
-        projectRef: 'ymlutyyxksjojqouppww',
+        projectRef: 'abcdefghijklmnopqrst',
         ensureIpv4HostnameFn: jest.fn(async (value) => value),
         ensureHostaddrFn: jest.fn(async (value) => value),
       },
@@ -278,19 +278,19 @@ describe('utils/pg-candidates', () => {
     expect(candidates).toEqual([
       {
         name: 'DATABASE_URL+pooleruser',
-        dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       },
       {
         name: 'DATABASE_URL+pooleruser+poolerhost:aws-0',
-        dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-0-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       },
       {
         name: 'DATABASE_URL+pooleruser+poolerhost:aws-0+poolerport:6543',
-        dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-0-us-east-1.pooler.supabase.com',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
       },
       {
         name: 'DATABASE_URL+pooleruser+poolerport:6543',
-        dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+        dsn: (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-pooler-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
       },
       { name: 'DATABASE_URL', dsn },
     ]);

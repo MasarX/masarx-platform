@@ -137,7 +137,7 @@ describe('load-env precedence and overrides', () => {
     );
     process.chdir(repo);
     process.env.DATABASE_URL = '';
-    process.env.DATABASE_URL_DIRECT = (['postgresql',":","/","/",'postgres',":",'wtmqrrylggtqxhwwvxmtrvrs',"@",'example.invalid',":",'5432',"/",'postgres'].join(""));
+    process.env.DATABASE_URL_DIRECT = (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join(""));
     process.env.ENV_FILE = envFile;
     process.env.ENV_FILE_OVERRIDE = '1';
     process.env.ENV_FILE_APPEND = '0';
@@ -147,7 +147,7 @@ describe('load-env precedence and overrides', () => {
     expect(process.env.DATABASE_URL).toBe(
       (['postgresql',":","/","/",'postgres',":",'postgres',"@",'127.0.0.1',":",'23197',"/",'postgres'].join("")),
     );
-    expect(process.env.DATABASE_URL_DIRECT).toContain('db.shared.supabase.co');
+    expect(process.env.DATABASE_URL_DIRECT).toContain('db.abcdefghijklmnopqrst.supabase.co');
   });
 
   test('default resolution loads .env.cloud when variable is unset', () => {
