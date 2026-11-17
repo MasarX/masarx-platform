@@ -79,14 +79,14 @@ describe('workspace/trace-log', () => {
       'Authorization: Bearer abc.def.ghi',
       'Authorization: Basic dXNlcjpzZWNyZXQ=',
       ('jwt ' + [Buffer.from("{\"alg\":\"HS256\",\"typ\":\"JWT\"}").toString("base64url"),Buffer.from("{\"sub\":\"1\"}").toString("base64url"),"signaturehere"].join(".")),
-      (['postgres',":","/","/",'user',":",'yuyjjusrxhzsqngrxyopvgnq',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+      (['postgres',":","/","/",'user',":",'fake-db-password',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
     ].join(' | ');
 
     const output = redactSensitiveString(input, '[MASKED]');
     expect(output).toContain('Bearer [MASKED]');
     expect(output).toContain('Basic [MASKED]');
-    expect(output).not.toContain('supersecret');
-    expect(output).toContain((['postgres',":","/","/",'user',":",'[MASKED]',"@",'db.example.com',":",'5432',"/",'postgres'].join("")));
+    expect(output).not.toContain('fake-db-password');
+    expect(output).toContain((['postgres',":","/","/",'user',":",'[MASKED]',"@",'example.invalid',":",'5432',"/",'postgres'].join("")));
   });
 
   test('emitTrace prevents reserved trace fields from being overridden', () => {

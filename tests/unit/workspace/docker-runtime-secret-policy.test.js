@@ -31,10 +31,10 @@ test.each(['taskCount', 'workflowStatus', 'requestId'])('ordinary diagnostic met
 
 describe('serialized exact-bound runtime metadata', () => {
   test.each([
-    ['POSIX', '/tmp/masarx-synthetic/auth-EXAMPLE_PASSWORD', value => JSON.stringify(value)],
-    ['Windows', String.raw`C:\masarx-synthetic\auth-EXAMPLE_PASSWORD`, value => JSON.stringify(value)],
-    ['escaped quote', String.raw`C:\masarx-"synthetic"\auth-EXAMPLE_PASSWORD`, value => JSON.stringify(value)],
-    ['Unicode escape', String.raw`C:\masarx-synthetic\auth-EXAMPLE_PASSWORD`, value => JSON.stringify(value).replace('C', '\\u0043')],
+    ['POSIX', '/tmp/masarx-synthetic/auth-password.txt', value => JSON.stringify(value)],
+    ['Windows', String.raw`C:\masarx-synthetic\auth-password.txt`, value => JSON.stringify(value)],
+    ['escaped quote', String.raw`C:\masarx-"synthetic"\auth-password.txt`, value => JSON.stringify(value)],
+    ['Unicode escape', String.raw`C:\masarx-synthetic\auth-password.txt`, value => JSON.stringify(value).replace('C', '\\u0043')],
   ])('admits only the canonical %s JSON string without changing its identity', (_label, value, encode) => {
     const plan = { artifacts: { auth_password_file: value } };
     const options = { expectedSafeMetadataValues: { AUTH_PASSWORD_FILE: value } };
@@ -46,10 +46,10 @@ describe('serialized exact-bound runtime metadata', () => {
     expect(buildRuntimeEvidencePayload('summary', source, plan)).toMatchObject({ text: source, findings: [] });
   });
 
-  const canonical = String.raw`C:\masarx-synthetic\auth-EXAMPLE_PASSWORD`;
+  const canonical = String.raw`C:\masarx-synthetic\auth-password.txt`;
   test.each([
     ['unbound', canonical, {}],
-    ['different path', String.raw`C:\other-synthetic\auth-EXAMPLE_PASSWORD`, { AUTH_PASSWORD_FILE: canonical }],
+    ['different path', String.raw`C:\other-synthetic\auth-password.txt`, { AUTH_PASSWORD_FILE: canonical }],
     ['slash-normalized spoof', canonical.replace(/\\/g, '/'), { AUTH_PASSWORD_FILE: canonical }],
     ['literal doubled backslashes', canonical.replace(/\\/g, '\\\\'), { AUTH_PASSWORD_FILE: canonical }],
     ['leading whitespace', ' ' + canonical, { AUTH_PASSWORD_FILE: canonical }],
@@ -69,9 +69,9 @@ describe('serialized exact-bound runtime metadata', () => {
   });
 
   test.each([
-    String.raw`"C:\masarx-synthetic\auth-EXAMPLE_PASSWORD"`,
-    String.raw`"C:\\masarx-\uZZZZ\\auth-EXAMPLE_PASSWORD"`,
-    String.raw`"C:\\masarx-synthetic\\auth-EXAMPLE_PASSWORD`,
+    String.raw`"C:\masarx-synthetic\auth-password.txt"`,
+    String.raw`"C:\\masarx-\uZZZZ\\auth-password.txt"`,
+    String.raw`"C:\\masarx-synthetic\\auth-password.txt`,
     JSON.stringify(canonical) + 'suffix',
   ])('fails closed on malformed JSON string encoding %s', encoded => {
     const source = `{"auth_password_file":${encoded}}`;
