@@ -52,7 +52,6 @@ jobs:
     timeout-minutes: 180
     outputs:
       present: ${{ steps.subject.outputs.present }}
-      images: ${{ steps.images.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
@@ -76,24 +75,6 @@ jobs:
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
-      - name: Time image upload
-        id: image-upload-start
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/images.cjs start upload
-      - name: Upload reviewed images
-        id: images
-        if: steps.subject.outputs.present == 'true'
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
-        with:
-          name: database-images-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ci-images/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-      - name: Record image upload time
-        if: ${{ always() && steps.image-upload-start.outcome == 'success' }}
-        run: node scripts/ci-hosted/images.cjs end upload
       - name: Upload backend-summary
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
@@ -104,7 +85,6 @@ jobs:
             ci-reports/backend-diagnostic.json
             ci-reports/backend.log
             ci-reports/db-lint.json
-            ci-reports/image-upload.json
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
@@ -133,19 +113,6 @@ jobs:
           package-manager-cache: false
       - name: Locked dependency installation
         run: node scripts/ci-hosted/tasks.cjs install
-      - name: Time image download
-        id: image-download-start
-        run: node scripts/ci-hosted/images.cjs start download
-      - name: Download reviewed images from this run
-        if: needs.database-build.outputs.images != ''
-        continue-on-error: true
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node24
-        with:
-          artifact-ids: ${{ needs.database-build.outputs.images }}
-          path: ci-images
-          merge-multiple: true
-      - name: Record image download time
-        run: node scripts/ci-hosted/images.cjs end download
       - name: Build database from zero and run pgTAP shard
         run: node scripts/ci-hosted/backend.cjs
       - name: Upload pgTAP summary
@@ -158,7 +125,6 @@ jobs:
             ci-reports/pgtap-diagnostic.json
             ci-reports/pgtap-files.json
             ci-reports/pgtap.log
-            ci-reports/image-download.json
           if-no-files-found: warn
           retention-days: 1
 

@@ -146,7 +146,7 @@ async function qualify(diagnostic) {
     if (!pinState.qualificationOnly) {
       if (env.DOCKER_HOST && !env.DOCKER_HOST.startsWith('unix://')) throw new Error('Digest-pinned startup requires the hosted Unix Docker daemon');
       diagnostic.stage = 'image-pull';
-      await prepareImages(pins, { env, checked, timed, summary, shard, checkDisk: () => diskFloor(dockerRoot) });
+      await prepareImages(pins, { env, checked, timed, summary, checkDisk: () => diskFloor(dockerRoot) });
       diagnostic.stage = 'image-guard';
       guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env);
       cliEnv = guard.env;

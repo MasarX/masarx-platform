@@ -10,7 +10,7 @@ const { migrationProgress, completePins, backendLint } = require('./backend.cjs'
 const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
-const { inventory, validPacket, prepareImages } = require('./images.cjs');
+const { prepareImages } = require('./images.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
 const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
@@ -96,52 +96,49 @@ function checkExceptions(temp) {
   console.log('PASS: assertion lists, exact matches, expiry, per-assertion staleness, SQL aborts and incomplete plans');
   return entry;
 }
-async function checkImages(temp, pins) {
-  const cwd = process.cwd();
-  const work = path.join(temp, 'images'); fs.mkdirSync(work); process.chdir(work);
-  try {
-    const env = { GITHUB_RUN_ID: '123', GITHUB_SHA: 'a'.repeat(40) };
-    let calls = []; const delays = []; let badAlias; let mirrorFails = false;
-    const summary = { stages: [] };
-    const checked = async (_command, args) => {
-      calls.push(args);
-      if (args[0] === 'save') fs.writeFileSync('ci-images/images.tar', 'synthetic archive');
-      if (args[0] === 'pull' && args.at(-1).startsWith('ghcr.io') && mirrorFails) throw new Error('synthetic registry quota');
-      if (args[0] === 'image') {
-        const ref = args.at(-1);
-        const pin = pins.find(pin => ref.includes(pin.image));
-        return ref === badAlias ? `sha256:${'0'.repeat(64)}` : pin.image_id;
-      }
-      return '';
-    };
-    const options = { env, checked, timed: (name, action) => stage(summary, name, action), summary, wait: async ms => delays.push(ms) };
-    await prepareImages(pins.map(pin => ({ ...pin })), options);
-    assert.equal(calls.filter(args => args[0] === 'pull').length, 5);
-    assert.equal(calls.filter(args => args[0] === 'pull').every(args => args.at(-1).startsWith('ghcr.io/') && args.at(-1).includes('@sha256:')), true);
-    assert.equal(summary.imageArchiveBytes, 17);
-    const packet = JSON.parse(fs.readFileSync('ci-images/manifest.json', 'utf8'));
-    assert.equal(validPacket(packet, pins, env), true);
-    assert.equal(validPacket(packet, pins, { ...env, GITHUB_RUN_ID: '124' }), false);
-    assert.equal(validPacket({ ...packet, images: [] }, pins, env), false);
-    calls = [];
-    await prepareImages(pins.map(pin => ({ ...pin })), { ...options, shard: '1/6' });
-    assert.equal(calls.some(args => args[0] === 'load'), true);
-    assert.equal(calls.some(args => args[0] === 'pull'), false);
-    badAlias = inventory(pins)[0].alias; mirrorFails = true; calls = [];
-    await prepareImages(pins.map(pin => ({ ...pin })), { ...options, shard: '1/6' });
-    const pulls = calls.filter(args => args[0] === 'pull');
-    assert.equal(pulls.length, 4); assert.equal(pulls.at(-1).at(-1).startsWith('public.ecr.aws/'), true);
-    assert.deepEqual(delays, [5000, 15000]);
-    calls = []; badAlias = undefined; mirrorFails = false;
-    await prepareImages(pins.map(pin => ({ ...pin })), { ...options, env: { ...env, GITHUB_RUN_ID: '124' }, shard: '1/6' });
-    assert.equal(calls.some(args => args[0] === 'load'), false);
-    assert.equal(calls.filter(args => args[0] === 'pull').length, 5);
-    const bound = pins.map(pin => ({ ...pin, runtimeId: pin.image_id }));
-    assert.equal(JSON.parse(rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: 'public.ecr.aws/supabase/postgres:other' })), bound).body).Image, pins[0].image_id);
-    assert.throws(() => rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: `ghcr.io/${pins[0].image}@sha256:${'0'.repeat(64)}` })), bound));
-    assert.throws(() => rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: pins[0].image_id })), [{ ...bound[0], runtimeId: `sha256:${'0'.repeat(64)}` }]));
-    console.log('PASS: GHCR digest pulls, bounded ECR fallback, same-run image archive and verified loaded IDs');
-  } finally { process.chdir(cwd); }
+async function checkImages(pins) {
+  const calls = []; const delays = [];
+  const summary = { stages: [] };
+  const [pin] = pins;
+  const registryOf = ref => ref.split('/', 1)[0];
+  const pullRefs = () => calls.filter(([command]) => command === 'pull').map(args => args.at(-1));
+  let failMirror = false;
+  const checked = async (_command, args) => {
+    calls.push(args);
+    const reference = args.at(-1);
+    if (args[0] === 'pull' && registryOf(reference) === 'ghcr.io' && failMirror) {
+      throw new Error('synthetic registry failure');
+    }
+    if (args[0] === 'image') return pins.find(p => reference.split('/').slice(1).join('/') === p.image + '@' + p.digest).image_id;
+    return '';
+  };
+  const options = { env: {}, checked, timed: (name, action) => stage(summary, name, action), summary, wait: async ms => delays.push(ms) };
+  await prepareImages(pins.map(p => ({ ...p })), options);
+  assert.deepEqual(pullRefs(), pins.map(p => 'ghcr.io/' + p.image + '@' + p.digest));
+  assert.deepEqual(summary.images.map(row => row.served), pins.map(() => 'ghcr.io'));
+
+  calls.length = 0;
+  failMirror = true;
+  await prepareImages([{ ...pin }], options);
+  assert.deepEqual(pullRefs().map(registryOf), ['ghcr.io', 'ghcr.io', 'ghcr.io', 'public.ecr.aws']);
+  assert.deepEqual(delays, [5000, 15000]);
+
+  const bound = pins.map(p => ({ ...p, runtimeId: p.image_id }));
+  const create = (image, rules = bound) => rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: image })), rules);
+  for (const host of ['ghcr.io', 'public.ecr.aws']) {
+    const image = host + '/' + pin.image + '@' + pin.digest;
+    assert.equal(JSON.parse(create(image).body).Image, pin.image_id);
+  }
+  for (const host of ['ghcr.io.evil.example', 'evil.example/ghcr.io']) {
+    const image = host + '/' + pin.image + '@' + pin.digest;
+    assert.throws(() => create(image), /outside the reviewed digest set/);
+    const route = '/images/' + encodeURIComponent(image) + '/json';
+    assert.throws(() => rewrite('GET', route, Buffer.alloc(0), bound), /outside the reviewed digest set/);
+    assert.equal(imageRequest('GET', route, Buffer.alloc(0), bound).reviewed, false);
+  }
+  assert.throws(() => create('ghcr.io/' + pin.image + '@sha256:' + '0'.repeat(64)));
+  assert.throws(() => create(pin.image_id, [{ ...bound[0], runtimeId: 'sha256:' + '0'.repeat(64) }]));
+  console.log('PASS: exact registry hosts, GHCR digest pulls, bounded ECR fallback and verified image IDs');
 }
 
 async function main() {
@@ -359,7 +356,7 @@ async function main() {
     const wrapper = fs.readFileSync(writePsqlWrapper(path.join(temp, 'client'), `public.ecr.aws/${pin.image}@${pin.digest}`), 'utf8');
     assert.equal(wrapper.includes(`public.ecr.aws/${pin.image}@${pin.digest}`), true);
     assert.equal(wrapper.includes('-v "$PWD:$PWD"'), true);
-    await checkImages(temp, pins);
+    await checkImages(pins);
     const exception = checkExceptions(temp);
     const Module = require('node:module');
     const originalLoad = Module._load;

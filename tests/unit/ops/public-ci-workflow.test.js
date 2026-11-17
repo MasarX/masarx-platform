@@ -32,11 +32,8 @@ describe('public CI workflow contract', () => {
     expect(command).toContain("allowed = {'success'}");
     expect(command).toContain("if name == 'visual-baselines' and os.environ['VISUAL_REQUESTED'] != 'true':");
     expect(command).toContain('sys.exit(0 if good else 1)');
-    const upload = 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9';
     const downloadAction = 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333';
     const optionalTransfers = {
-      'database-build/Upload reviewed images': upload,
-      'database-pgtap/Download reviewed images from this run': downloadAction,
       'database/Download build report': downloadAction,
       'database/Download all pgTAP reports': downloadAction,
     };
@@ -52,10 +49,6 @@ describe('public CI workflow contract', () => {
     const database = workflow.jobs.database;
     expect(database.steps.at(-1).if).toBe('always()');
     expect(database.steps.at(-1).run).toBe('node scripts/ci-hosted/database-result.cjs');
-    const download = workflow.jobs['database-pgtap'].steps.find(step => step.name === 'Download reviewed images from this run');
-    expect(download.with['artifact-ids']).toBe('${{ needs.database-build.outputs.images }}');
-    expect(download.with['run-id']).toBeUndefined();
-    expect(download.with['github-token']).toBeUndefined();
     expect(body).toContain('node scripts/ci-hosted/backend.cjs');
   });
 });

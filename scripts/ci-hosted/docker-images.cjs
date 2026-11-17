@@ -5,13 +5,16 @@ const path = require('node:path');
 const { sanitize } = require('./diagnostics.cjs');
 function pinnedReference(image, pins) {
   if (typeof image !== 'string' || image.length > 1024) throw new Error('Malformed Docker image');
-  const normalized = image.replace(/^(?:public\.ecr\.aws|ghcr\.io|docker\.io)\//, '').split('@')[0].split(':')[0]
+  const slash = image.indexOf('/');
+  const host = slash === -1 ? '' : image.slice(0, slash);
+  const name = host === 'ghcr.io' || host === 'public.ecr.aws' ? image.slice(slash + 1) : image;
+  const normalized = name.split('@')[0].split(':')[0]
     .replace(/^(?:docker\/)?library\/kong$/, 'supabase/kong');
   const pin = pins.find(row => row.image === normalized || row.runtimeId === image);
   const digest = image.includes('@') ? image.slice(image.indexOf('@') + 1) : undefined;
   if (!pin || !/^sha256:[a-f0-9]{64}$/.test(pin.digest) || (digest && digest !== pin.digest)
     || (pin.runtimeId && (!/^sha256:[a-f0-9]{64}$/.test(pin.runtimeId) || pin.runtimeId !== pin.image_id))) throw Object.assign(new Error('Image is outside the reviewed digest set'), { image });
-  // Loaded archives lose RepoDigests; the reviewed index's verified amd64 config ID binds the same content.
+  // The reviewed index's verified amd64 config ID binds both registries to the same content.
   return pin.runtimeId || `public.ecr.aws/${pin.image}@${pin.digest}`;
 }
 function dockerPath(url) {
