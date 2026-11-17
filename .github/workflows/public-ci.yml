@@ -466,7 +466,7 @@ jobs:
 
   ci-result:
     name: CI result
-    needs: [database, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines]
+    needs: [database, database-build, database-pgtap, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -479,7 +479,7 @@ jobs:
           python3 -I - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ['NEEDS_JSON'])
-          expected = {'database', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines'}
+          expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines'}
           good = set(needs) == expected
           for name in sorted(expected):
               result = needs.get(name, {}).get('result', 'missing')
