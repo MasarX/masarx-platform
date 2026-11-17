@@ -22,6 +22,12 @@ const rawDiagnostic = `stack health failed password=synthetic-password token: 's
 const cleanDiagnostic = sanitize(rawDiagnostic, [sensitive[0]]);
 for (const secret of [...sensitive, jwt, key, 'synthetic-password', 'synthetic token value', 'synthetic-db-pass', 'synthetic-http-pass', 'synthetic-signature']) assert.equal(cleanDiagnostic.includes(secret), false);
 assert.equal(cleanDiagnostic.includes('stack health failed'), true);
+const jsonDiagnostic = sanitize('({"API_KEY":"synthetic-json-key"})');
+assert.equal(sanitize(jsonDiagnostic), jsonDiagnostic);
+assert.equal(jsonDiagnostic.endsWith('})'), true);
+const cookieDiagnostic = sanitize('Cookie: sid=synthetic-cookie; session=synthetic-session');
+assert.equal(cookieDiagnostic.includes('synthetic-cookie') || cookieDiagnostic.includes('synthetic-session'), false);
+
 assert.equal(outputTail('safe\n'.repeat(200)).split('\n').length <= 80, true);
 assert.equal(outputTail('x'.repeat(20000)).length, 16384);
 assert.deepEqual(environmentSecrets({ TOKEN: 'synthetic-value', ORDINARY: 'visible' }), ['synthetic-value']);
