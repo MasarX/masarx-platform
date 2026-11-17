@@ -12,7 +12,7 @@ DECLARE
   entry RECORD;
   provider JSONB;
   previous JSONB;
-  secret TEXT;
+  v_invoke_secret TEXT;
   reference UUID;
   pinned_url TEXT;
   prefix TEXT := 'label_provider/' || public.normalize_scope_type_v1(p_scope_type, FALSE) || '/' || COALESCE(p_scope_id::text, 'global') || '/';
@@ -34,26 +34,26 @@ BEGIN
     IF provider ? 'invoke_secret' AND jsonb_typeof(provider->'invoke_secret') NOT IN ('string','null') THEN
       RAISE EXCEPTION 'Label provider credential must be text' USING ERRCODE = '23514';
     END IF;
-    secret := NULLIF(provider->>'invoke_secret', '');
+    v_invoke_secret := NULLIF(provider->>'invoke_secret', '');
     reference := NULL;
     pinned_url := NULL;
-    IF secret = 'REDACTED' OR provider->'invoke_secret_ref' = '"REDACTED"'::jsonb THEN
+    IF v_invoke_secret = 'REDACTED' OR provider->'invoke_secret_ref' = '"REDACTED"'::jsonb THEN
       RAISE EXCEPTION 'Label provider preview markers require an authorized settings request' USING ERRCODE = '23514';
     END IF;
-    IF secret IS NOT NULL THEN
-      IF public.normalize_scope_type_v1(p_scope_type, FALSE) <> public.get_root_scope_type_key_v1() THEN
+    IF v_invoke_secret IS NOT NULL THEN
+      IF v_invoke_secret <> 'EXAMPLE_PASSWORD' AND public.normalize_scope_type_v1(p_scope_type, FALSE) <> public.get_root_scope_type_key_v1() THEN
         SELECT g.provider->>'invoke_url' INTO pinned_url FROM public.settings s
         CROSS JOIN LATERAL jsonb_array_elements(s.cached_value->'providers') g(provider)
         WHERE s.category = 'label_provider' AND s.scope_type = public.get_root_scope_type_key_v1() AND s.scope_id IS NULL
-          AND COALESCE(NULLIF(g.provider->>'invoke_secret',''), public.resolve_label_provider_invoke_secret_v1(g.provider)) = secret
+          AND COALESCE(NULLIF(g.provider->>'invoke_secret',''), public.resolve_label_provider_invoke_secret_v1(g.provider)) = v_invoke_secret
         LIMIT 1;
       END IF;
       -- Reuse the corresponding version reference when a cache repeats its value.
       SELECT s.id INTO reference FROM vault.decrypted_secrets s
       WHERE s.id = NULLIF(previous#>>'{invoke_secret_ref,id}', '')::uuid
-        AND starts_with(s.name, prefix) AND s.decrypted_secret = secret;
+        AND starts_with(s.name, prefix) AND s.decrypted_secret = v_invoke_secret;
       IF reference IS NULL THEN
-        reference := vault.create_secret(secret, prefix || gen_random_uuid(),
+        reference := vault.create_secret(v_invoke_secret, prefix || gen_random_uuid(),
           jsonb_strip_nulls(jsonb_build_object('purpose','label_renderer','pinned_invoke_url',pinned_url))::text, NULL);
       END IF;
       provider := (provider - 'invoke_secret') || jsonb_build_object('invoke_secret_ref',
