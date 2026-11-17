@@ -118,12 +118,19 @@ jobs:
     name: Lint
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      LOCAL_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Fetch lint base
+        run: |
+          [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
+          git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
+          git cat-file -e "${LOCAL_GATE_BASE_SHA}^{commit}"
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect lint
