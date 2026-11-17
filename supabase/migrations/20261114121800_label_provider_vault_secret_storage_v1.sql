@@ -264,8 +264,7 @@ $bootstrap_policy$;
 
 -- Each row moves once; a reference-only replay creates no new Vault entry.
 UPDATE public.settings_versions SET value = value WHERE category = 'label_provider';
-UPDATE public.settings s SET cached_value = v.value
-FROM public.settings_versions v WHERE s.category = 'label_provider' AND v.id = s.settings_version_id;
+UPDATE public.settings SET cached_value = cached_value WHERE category = 'label_provider';
 UPDATE public.settings_cache SET resolved_value = public.settings_preview_redact_v1(resolved_value)
 WHERE starts_with(cache_key, 'label_provider:') OR settings_version_id IN
   (SELECT id FROM public.settings_versions WHERE category = 'label_provider');

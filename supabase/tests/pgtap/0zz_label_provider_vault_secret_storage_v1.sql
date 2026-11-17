@@ -126,5 +126,14 @@ SELECT throws_ok(format('SELECT public.upsert_label_provider_settings_v1(%L,%L::
   jsonb_set(s.cached_value,'{providers,0,invoke_url}','"https://untrusted.example.test/collect"'::jsonb), 'Synthetic prohibited credential redirect'),
   '42501','Global label credential requires its configured endpoint','legacy global credential cannot be redirected even after global rotation')
 FROM label_vault_fixture f JOIN public.settings s ON s.category = 'label_provider' AND s.scope_type = 'tenant' AND s.scope_id = f.foreign_org;
+UPDATE public.settings SET cached_value = jsonb_set(cached_value,'{providers,0,invoke_secret}',
+  '"synthetic-label-cache-only-credential"'::jsonb)
+WHERE category = 'label_provider' AND scope_type = 'tenant' AND scope_id = (SELECT org FROM label_vault_fixture);
+UPDATE public.settings_versions SET value = value WHERE category = 'label_provider';
+UPDATE public.settings SET cached_value = cached_value WHERE category = 'label_provider';
+SELECT is(public.resolve_label_renderer_invoke_config_v1(org)->>'invoke_secret','synthetic-label-cache-only-credential',
+  'conversion preserves an active cache credential that differs from its historical version') FROM label_vault_fixture;
+SELECT ok(NOT jsonb_path_exists(cached_value,'$.**.invoke_secret'), 'cache-only credential is sealed rather than overwritten')
+FROM public.settings WHERE category = 'label_provider' AND scope_type = 'tenant' AND scope_id = (SELECT org FROM label_vault_fixture);
 SELECT finish();
 ROLLBACK;
