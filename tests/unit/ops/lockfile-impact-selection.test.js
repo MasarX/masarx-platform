@@ -1,4 +1,6 @@
 const { execFileSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const {
   isLockfileOnlyChangeSet,
@@ -40,8 +42,25 @@ describe('lockfile-impact-selection', () => {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
-    expect(Buffer.byteLength(expected)).toBeGreaterThan(1024 * 1024);
+    expect(parseNpmLockfileV3(expected).ok).toBe(true);
     expect(readLockfileAtRef({ ref: 'HEAD', cwd: ROOT_DIR })).toBe(expected);
+  });
+
+  test('reads a synthetic lockfile larger than the default child-process buffer', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'lockfile-impact-'));
+    const options = { cwd, encoding: 'utf8', windowsHide: true };
+    const expected = lock({ 'node_modules/fixture': { version: '1.0.0', description: 'x'.repeat(1024 * 1024) } });
+    try {
+      fs.writeFileSync(path.join(cwd, 'package-lock.json'), expected);
+      execFileSync('git', ['init', '--quiet'], options);
+      execFileSync('git', ['add', 'package-lock.json'], options);
+      execFileSync('git', ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.test',
+        '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', 'commit', '--quiet', '-m', 'fixture'], options);
+      expect(Buffer.byteLength(expected)).toBeGreaterThan(1024 * 1024);
+      expect(readLockfileAtRef({ ref: 'HEAD', cwd })).toBe(expected);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   test('parses npm lockfile v3 and rejects malformed or non-v3 locks', () => {
