@@ -22,11 +22,11 @@ describe('edge-origin-probe helper', () => {
 
   test('buildAllowedOriginCandidates expands wildcard entries against canonical hosts', () => {
     const candidates = buildAllowedOriginCandidates({
-      allowlistValues: ['https://*.nzxmhryhtqlzoshjkyozkpup.example.invalid'],
-      canonicalHosts: ['https://hguxuguuvhxjwymmxhlmkwwp.example.invalid', 'https://grtgggvjriwqrxhykymmloov.example.invalid', 'https://nzxmhryhtqlzoshjkyozkpup.example.invalid'],
+      allowlistValues: ['https://*.synthetic.example.invalid'],
+      canonicalHosts: ['https://console.synthetic.example.invalid', 'https://portal.synthetic.example.invalid', 'https://synthetic.example.invalid'],
       envValues: [],
     });
-    expect(candidates).toEqual(['https://hguxuguuvhxjwymmxhlmkwwp.example.invalid', 'https://grtgggvjriwqrxhykymmloov.example.invalid', 'https://nzxmhryhtqlzoshjkyozkpup.example.invalid']);
+    expect(candidates).toEqual(['https://console.synthetic.example.invalid', 'https://portal.synthetic.example.invalid', 'https://synthetic.example.invalid']);
   });
 
   test.each([0, 302, 401, 404, 429, 500, 502, 503])('status %s cannot admit an origin', async status => {

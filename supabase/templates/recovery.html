@@ -6,7 +6,7 @@
     <h1>Your MasarX invitation</h1>
     <p>Contact your administrator or support to verify this invitation. No tenant access has been granted.</p>
     <p><a href="{{ .RedirectTo }}">Contact your administrator or support</a></p>
-    {{ else if or (eq (printf "%.57s" .RedirectTo) "https://vtgspxqkvhurpwtxnnyvhjzw.example.invalid/auth/invite-confirm?request_id=") (eq (printf "%.61s" .RedirectTo) "https://unjijvxjrwurjgsnokovrvom.example.invalid/auth/invite-confirm?request_id=") (eq (printf "%.61s" .RedirectTo) "https://vkhyghkwqoksmtxwrkgqyyxk.example.invalid/auth/invite-confirm?request_id=") }}
+    {{ else if or (eq (printf "%.80s" .RedirectTo) "https://vtgspxqkvhurpwtxnnyvhjzw.example.invalid/auth/invite-confirm?request_id=") (eq (printf "%.80s" .RedirectTo) "https://unjijvxjrwurjgsnokovrvom.example.invalid/auth/invite-confirm?request_id=") (eq (printf "%.80s" .RedirectTo) "https://vkhyghkwqoksmtxwrkgqyyxk.example.invalid/auth/invite-confirm?request_id=") }}
     <h1>Confirm your MasarX invitation</h1>
     <p>A tenant administrator invited you to MasarX. Open this link to accept. If you already belong to this tenant, sign in as the invited account first; your sign-in methods will not change.</p>
     <p>If you cannot accept, contact your administrator or support to verify your account.</p>
