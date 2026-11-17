@@ -14,7 +14,7 @@ const guardFiles = new Set([
 const protectedFiles = new Set([
   ...guardFiles, 'config/ci/migration-append-only-exceptions.txt', markerFile,
   'config/ci/hosted-db-first-qualification.txt', 'config/ci/hosted-supabase-images.json',
-  'config/ci/cloud-pool-db-local.json', 'config/ci/deploy-cli-contract.json', 'config/ci/deploy-surfaces.json',
+  'config/ci/pgtap-accepted-failures.json', 'config/ci/cloud-pool-db-local.json', 'config/ci/deploy-cli-contract.json', 'config/ci/deploy-surfaces.json',
 ]);
 function lockfile(file) {
   const name = file.split('/').pop().toLowerCase();

@@ -139,7 +139,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: scripts/ci-hosted
+          sparse-checkout: |
+            scripts/ci-hosted
+            config/ci/pgtap-accepted-failures.json
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         with:
           node-version: '24.22.1'
