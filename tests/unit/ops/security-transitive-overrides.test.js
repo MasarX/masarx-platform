@@ -101,7 +101,7 @@ describe('security transitive overrides', () => {
 
   test.each([
     ['axios', '1.20.0'], ['compression', '1.8.2'], ['follow-redirects', '1.16.2'], ['handlebars', '4.7.10'],
-    ['next', '16.4.2'], ['node-forge', '1.4.1'], ['shell-quote', '1.12.0'], ['smol-toml', '1.9.0'], ['source-map-js', '1.2.2'],
+    ['next', '16.4.5'], ['node-forge', '1.4.1'], ['shell-quote', '1.12.0'], ['smol-toml', '1.9.0'], ['source-map-js', '1.2.2'],
     ['undici', '6.29.1'], ['webpack-dev-middleware', '7.4.6'],
   ])('preserves every %s consumer at its supported patched floor', (packageName, floor) => {
     const versions = lockVersions(readJson('package-lock.json'), packageName);
