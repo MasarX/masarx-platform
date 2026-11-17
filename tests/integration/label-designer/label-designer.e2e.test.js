@@ -287,10 +287,6 @@ describe('Label designer (API E2E)', () => {
         user,
         'label-renderer',
         {
-          headers: {
-            Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
-            apikey: process.env.SUPABASE_ANON_KEY,
-          },
           body: {
             mode: 'designer_preview',
             user_jwt: accessToken,
@@ -317,16 +313,11 @@ describe('Label designer (API E2E)', () => {
 
       const pngBase64 =
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PkS9GQAAAABJRU5ErkJggg==';
-      const assetsHeaders = {
-        Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
-        apikey: process.env.SUPABASE_ANON_KEY,
-      };
 
       const { data: uploadRes, error: uploadResErr } = await invokeFunctionWithRetry(
         user,
         'label-designer-assets',
         {
-          headers: assetsHeaders,
           body: {
             mode: 'upload',
             user_jwt: accessToken,
@@ -351,7 +342,6 @@ describe('Label designer (API E2E)', () => {
         user,
         'label-designer-assets',
         {
-          headers: assetsHeaders,
           body: { mode: 'list', user_jwt: accessToken },
         },
         { purpose: `designer assets list ${orgId}` },
@@ -371,7 +361,6 @@ describe('Label designer (API E2E)', () => {
         user,
         'label-designer-assets',
         {
-          headers: assetsHeaders,
           body: { mode: 'signed_url', user_jwt: accessToken, path: uploadedPath, expires_seconds: 30 },
         },
         { purpose: `designer assets signed_url ${orgId}` },

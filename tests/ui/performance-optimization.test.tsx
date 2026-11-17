@@ -1,7 +1,10 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import React from "react";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
+import { useOptimisticMutation } from "../../packages/ui/src/optimistic";
 import {
   useResourceQuery,
+  useResourceListInvalidate,
   resourceQueryKey,
 } from "../../packages/ui/src/hooks/use-resource-query";
 import {
@@ -25,6 +28,78 @@ jest.mock("@masarx/api", () => ({
 }));
 
 describe("Performance Optimization", () => {
+
+  describe("Mutation cache refresh behavior", () => {
+    test.each(["list", "optimistic-success", "optimistic-error"] as const)(
+      "%s refetches active matching lists, invalidates inactive matches, and leaves other resources alone",
+      async (operation) => {
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } });
+        const entries = [
+          { key: resourceQueryKey("shipments", { limit: 50, offset: 0 }), active: true },
+          { key: resourceQueryKey("shipments", { limit: 50, offset: 50, filters: { status: "ready" } }), active: true },
+          { key: resourceQueryKey("shipments", { limit: 50, offset: 100 }), active: false },
+          { key: resourceQueryKey("orders", { limit: 50, offset: 0 }), active: true },
+        ].map((entry) => ({ ...entry, fetch: jest.fn(async () => ["fresh"]) }));
+        const unsubscribes: Array<() => void> = [];
+        entries.forEach((entry) => {
+          client.setQueryDefaults(entry.key, { queryFn: entry.fetch });
+          client.setQueryData(entry.key, ["before"]);
+          if (entry.active) {
+            const observer = new QueryObserver(client, { queryKey: entry.key, queryFn: entry.fetch });
+            unsubscribes.push(observer.subscribe(() => {}));
+          }
+        });
+        const onError = jest.fn();
+        const mutationFn = jest.fn(async () => {
+          if (operation === "optimistic-error") throw new Error("mutation failed");
+          return "saved";
+        });
+        const wrapper = ({ children }: { children: React.ReactNode }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        );
+        const hook = renderHook(() => ({
+          invalidate: useResourceListInvalidate("shipments"),
+          mutation: useOptimisticMutation({
+            queryKey: ["resource", "shipments"],
+            mutationFn,
+            optimisticUpdate: () => ["optimistic"],
+            onError,
+          }),
+        }), { wrapper });
+        try {
+          entries.forEach((entry) => expect(entry.fetch).not.toHaveBeenCalled());
+          await act(async () => {
+            if (operation === "list") await hook.result.current.invalidate();
+            else if (operation === "optimistic-error") {
+              await expect(hook.result.current.mutation.mutateAsync()).rejects.toThrow("mutation failed");
+            } else await hook.result.current.mutation.mutateAsync();
+          });
+          await waitFor(() => {
+            entries.slice(0, 2).forEach((entry) => {
+              expect(entry.fetch).toHaveBeenCalledTimes(1);
+              expect(client.getQueryData(entry.key)).toEqual(["fresh"]);
+              expect(client.getQueryState(entry.key)?.isInvalidated).toBe(false);
+            });
+          });
+          const inactive = entries[2]!;
+          expect(inactive.fetch).not.toHaveBeenCalled();
+          expect(client.getQueryData(inactive.key)).toEqual(["before"]);
+          expect(client.getQueryState(inactive.key)?.isInvalidated).toBe(true);
+          const unrelated = entries[3]!;
+          expect(unrelated.fetch).not.toHaveBeenCalled();
+          expect(client.getQueryData(unrelated.key)).toEqual(["before"]);
+          expect(client.getQueryState(unrelated.key)?.isInvalidated).toBe(false);
+          expect(onError).toHaveBeenCalledTimes(operation === "optimistic-error" ? 1 : 0);
+          expect(mutationFn).toHaveBeenCalledTimes(operation === "list" ? 0 : 1);
+        } finally {
+          hook.unmount();
+          unsubscribes.forEach((unsubscribe) => unsubscribe());
+          client.clear();
+        }
+      },
+    );
+  });
+
   describe("React Query Configuration", () => {
     test("resourceQueryKey includes all parameters for cache differentiation", () => {
       const key1 = resourceQueryKey("orders", {

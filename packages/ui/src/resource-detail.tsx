@@ -15,6 +15,7 @@ import { CopyFieldButton } from "./detail/copy-field-button";
 import { CollapsibleSection } from "./detail/collapsible-section";
 import { cn } from "./utils";
 import { createUiTranslator } from "./i18n";
+import { resolveTrustedExternalDataUrl } from "./url-guard";
 
 const uiDefaults = getUiDefaults();
 
@@ -126,15 +127,7 @@ function resolveDetailIdentifierKeys(key: string) {
 
 function normalizeUrl(value: unknown) {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
+  return resolveTrustedExternalDataUrl(value);
 }
 
 function resolveMediaKindHints({
@@ -411,9 +404,14 @@ export function ResourceDetail({
       className="py-2"
       data-testid={detailTestId}
     >
-      <div className="text-sm font-semibold text-ui-ink">{resolvedTitle}</div>
+      <div
+        className="text-sm font-semibold text-ui-ink"
+        data-testid="resource-detail-primary-identifier"
+      >
+        {resolvedTitle}
+      </div>
       {primaryRecordValue || showPrimaryRecordDescription || primaryInternalId ? (
-        <div className="mt-2 text-xs">
+        <div className="mt-2 text-xs" data-testid="resource-detail-primary-identifier">
           {primaryRecordValue ? (
             <div className="font-medium text-ui-ink">{primaryRecordValue}</div>
           ) : null}
@@ -439,7 +437,7 @@ export function ResourceDetail({
           >
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-medium text-ui-muted">
               <span>{section.label}</span>
-              <span className="text-[10px] text-ui-muted/70">
+              <span className="text-[10px] text-ui-muted">
                 {section.entries.length}
               </span>
             </summary>

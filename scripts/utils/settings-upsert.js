@@ -6,11 +6,15 @@ const ajv07 = new Ajv({
   strict: false,
   allErrors: true,
   allowUnionTypes: true,
+  // DB reads return fresh versioned schemas; do not register their stable $id globally.
+  addUsedSchema: false,
 });
 const ajv2020 = new Ajv2020({
   strict: false,
   allErrors: true,
   allowUnionTypes: true,
+  // DB reads return fresh versioned schemas; do not register their stable $id globally.
+  addUsedSchema: false,
 });
 addFormats(ajv07);
 addFormats(ajv2020);

@@ -49,4 +49,17 @@ describe('resolveWorkspaceName', () => {
     spawnSync.mockReturnValue({ status: 1, stdout: '' });
     expect(() => resolveWorkspaceName({ argv: [], cwd: 'C:\\tmp' })).toThrow(/worktree/i);
   });
+
+  test('fails closed instead of hanging when git worktree discovery times out', () => {
+    spawnSync.mockReturnValue({
+      status: null,
+      stdout: 'C:\\partial',
+      stderr: '',
+      error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }),
+    });
+
+    expect(() => resolveWorkspaceName({ argv: [], cwd: 'C:\\tmp' })).toThrow(
+      /git worktree probe timed out/i,
+    );
+  });
 });

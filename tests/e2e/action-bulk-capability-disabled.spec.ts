@@ -4,8 +4,10 @@ import { expectSignedIn, signInWithPassword } from "./utils/auth";
 import { getConsoleBaseUrl, getPortalBaseUrl } from "./utils/base-urls";
 import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
+import { hasCapability, resolveCapabilitySet } from "./utils/capabilities";
+import { matchesResourceCategory } from "../../packages/ui/src/resource-actions-core";
 import {
-  applyResourceLimit,
+  fetchResourceSampleId,
   resolveResourceKeysForUser,
 } from "./utils/core-resource";
 import {
@@ -94,13 +96,7 @@ function resolveCapabilityDisabledAction(params: {
   capabilities?: string[] | null;
 }) {
   const { resourceKeys, readRegistry, commandRegistry, capabilities } = params;
-  const capSet = new Set(
-    Array.isArray(capabilities)
-      ? capabilities
-          .filter((value): value is string => Boolean(value?.trim()))
-          .map((value) => value.trim())
-      : []
-  );
+  const capSet = resolveCapabilitySet(capabilities);
   const allowed = new Set(resourceKeys);
   const resources = Array.isArray(readRegistry?.resources)
     ? readRegistry?.resources
@@ -111,7 +107,7 @@ function resolveCapabilityDisabledAction(params: {
     const download = (resource as { download?: { capability?: string | null } })
       .download;
     const downloadCapability = download?.capability?.trim() ?? "";
-    if (downloadCapability && !capSet.has(downloadCapability)) {
+    if (downloadCapability && !hasCapability(capSet, downloadCapability)) {
       return {
         resourceKey: key,
         actionKey: `${key}.download.labels`,
@@ -121,11 +117,14 @@ function resolveCapabilityDisabledAction(params: {
   }
   for (const command of commandRegistry) {
     const actionKey = command.key?.trim() ?? "";
-    const resourceKey = command.schema_category?.trim() ?? "";
+    const resourceKey =
+      resourceKeys.find((key) =>
+        matchesResourceCategory(command.schema_category ?? null, key)
+      ) ?? "";
     const capability = command.capability?.trim() ?? "";
     if (!actionKey || !resourceKey || !capability) continue;
     if (!allowed.has(resourceKey)) continue;
-    if (capSet.has(capability)) continue;
+    if (hasCapability(capSet, capability)) continue;
     return { resourceKey, actionKey, capability };
   }
   return null;
@@ -165,14 +164,12 @@ for (const config of appConfigs) {
         const sections = Array.isArray(context.navigation.sections)
           ? context.navigation.sections
           : [];
-        const resourceKeys = applyResourceLimit(
-          resolveResourceKeysForUser({
-            sections,
-            readRegistry: context.readRegistry,
-            commandRegistry: context.commandRegistry,
-            capabilities: context.me?.capabilities ?? null,
-          })
-        );
+        const resourceKeys = resolveResourceKeysForUser({
+          sections,
+          readRegistry: context.readRegistry,
+          commandRegistry: context.commandRegistry,
+          capabilities: context.me?.capabilities ?? null,
+        });
         if (resourceKeys.length === 0) continue;
         const target = resolveCapabilityDisabledAction({
           resourceKeys,
@@ -181,6 +178,16 @@ for (const config of appConfigs) {
           capabilities: context.me?.capabilities ?? null,
         });
         if (target) {
+          const idColumn = context.readRegistry?.resources?.find(
+            (resource) => resource?.key === target.resourceKey,
+          )?.id_column ?? null;
+          const sample = await fetchResourceSampleId({
+            resourceKey: target.resourceKey,
+            idColumn,
+            email: user.email,
+            password: demoContext.password ?? "",
+          });
+          if (!sample.id) continue;
           candidate = { user, context, target };
           break;
         }

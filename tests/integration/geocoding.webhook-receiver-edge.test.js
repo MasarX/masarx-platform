@@ -158,8 +158,10 @@ describeIfHttp('Geocoding webhook receiver (edge) end-to-end', () => {
       );
     }
 
-    await restoreSettingsExact(client, 'geocoding_policy', 'client', source.client_id, baselineGeocodingClient);
-    if (source.sender_id) {
+    if (source?.client_id) {
+      await restoreSettingsExact(client, 'geocoding_policy', 'client', source.client_id, baselineGeocodingClient);
+    }
+    if (source?.sender_id) {
       await restoreSettingsExact(client, 'geocoding_policy', 'sender', source.sender_id, baselineGeocodingSender);
     }
 
@@ -419,6 +421,7 @@ describeIfHttp('Geocoding webhook receiver (edge) end-to-end', () => {
   test('mapping override supports alternate payload shapes (originAddress)', async () => {
     const mappingId = await seedMappingConfig(
       client,
+      source.organization_id,
       `geocoding-intake-test::edge.origin_${randomUUID()}`,
       {
         line1: 'originAddress.addressLine1',

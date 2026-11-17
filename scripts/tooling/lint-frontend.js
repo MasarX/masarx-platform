@@ -7,6 +7,7 @@ const configPath = path.join(repoRoot, 'config', 'lint', 'frontend-lint.json');
 
 const defaultConfig = {
   ignore: [],
+  playwrightConfigs: ['playwright.config.ts'],
   allow: {
     from: [],
     supabaseUrl: [],
@@ -253,16 +254,17 @@ function parsePlaywrightTestMatchPatterns(configContent) {
 }
 
 function lintPlaywrightCoverage() {
-  const configFile = path.join(repoRoot, 'playwright.config.ts');
   const e2eRoot = path.join(repoRoot, 'tests', 'e2e');
-  if (!fs.existsSync(configFile) || !fs.existsSync(e2eRoot)) return;
+  if (!fs.existsSync(e2eRoot)) return;
 
   let configContent = '';
-  try {
-    configContent = fs.readFileSync(configFile, 'utf8');
-  } catch (err) {
-    addSimpleViolation('playwrightTestMatch', 'playwright.config.ts', 'Unable to read Playwright config.');
-    return;
+  for (const configFile of config.playwrightConfigs) {
+    try {
+      configContent += `\n${fs.readFileSync(path.join(repoRoot, configFile), 'utf8')}`;
+    } catch (err) {
+      addSimpleViolation('playwrightTestMatch', configFile, 'Unable to read registered Playwright config.');
+      return;
+    }
   }
 
   const patterns = parsePlaywrightTestMatchPatterns(configContent);

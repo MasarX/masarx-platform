@@ -14,6 +14,13 @@ export async function signInWithPassword(
   password: string,
 ) {
   let effectivePassword = await resolveUsableDemoPassword({ email, password });
+  const hydratedSignIn = page.locator('[data-testid$="-sign-in"]:visible').first();
+  await expect(hydratedSignIn).toHaveAttribute("data-hydrated", "true", {
+    timeout: 20_000,
+  });
+  const hydratedEmailForm = hydratedSignIn
+    .locator('form:has(input[name="email"]):visible')
+    .first();
   const visibleAuthGateCandidate = page
     .locator('[data-testid$="-auth-required"]:visible')
     .first();
@@ -22,7 +29,7 @@ export async function signInWithPassword(
     .first();
   const formCandidate = (await gateFormCandidate.count())
     ? gateFormCandidate
-    : page.locator('form:has(input[name="email"])').first();
+    : hydratedEmailForm;
   const form = (await formCandidate.count()) ? formCandidate : page.locator("form").first();
   const authGate = (await visibleAuthGateCandidate.count())
     ? visibleAuthGateCandidate
@@ -40,17 +47,15 @@ export async function signInWithPassword(
     while (Date.now() < deadline) {
       if (await passwordInput.isVisible().catch(() => false)) return;
 
-      const passwordRadio = form.locator('input[type="radio"][value="password"]');
-      if (await passwordRadio.count()) {
-        await passwordRadio.first().click({ force: true });
+      const passwordMethodRadio = form.getByRole("radio", { name: /password/i }).first();
+      if (await passwordMethodRadio.count()) {
+        await passwordMethodRadio.check();
+        await expect(passwordMethodRadio).toBeChecked({ timeout: 5_000 });
       } else {
-        const passwordMethodRadio = form.getByRole("radio", { name: /password/i });
-        if (await passwordMethodRadio.count()) {
-          try {
-            await passwordMethodRadio.first().check();
-          } catch {
-            await passwordMethodRadio.first().click({ force: true });
-          }
+        const passwordRadio = form.locator('input[type="radio"][value="password"]').first();
+        if (await passwordRadio.count()) {
+          await passwordRadio.check();
+          await expect(passwordRadio).toBeChecked({ timeout: 5_000 });
         } else {
           const passwordMethodLabel = form.locator("label", { hasText: /password/i });
           if (await passwordMethodLabel.count()) {
@@ -228,6 +233,7 @@ export async function signInWithPassword(
     if (await recoverAuthenticatedShell()) {
       return;
     }
+    await ensurePasswordSubmissionReady();
     try {
       await signInButton.click({ timeout: 10_000 });
     } catch (error) {

@@ -4,9 +4,14 @@
     "^docs/",
     "\\.mdx?$",
     "^tests/unit/",
+    "^test-results/",
     "^\\.github/",
     "^config/ci/",
-    "^scripts/ops/ci/"
+    "^scripts/ops/ci/",
+    "^scripts/ops/security-(?:audit-inventory|scan-gate)\\.js$",
+    "^scripts/ops/remote-workflow\\.js$",
+    "^scripts/ops/pr-ready\\.js$",
+    "^scripts/ops/setup-branch-protection\\.js$"
   ],
   "defaults": {
     "approval_mode_by_stage": {
@@ -26,8 +31,1415 @@
       "pgtap",
       "integration",
       "edge_deploy",
-      "docs_lane"
+      "docs_lane",
+      "browser_e2e"
     ],
+    "remote_fanout": {
+      "pr_db": {
+        "shard_id": "db",
+        "source_shard_id": "backend_local",
+        "suite_ids": [
+          "pgtap"
+        ],
+        "label": "ci:db",
+        "trigger_include_re": [
+          "^supabase/(?:schemas?/|schema\\.sql$|seed/)",
+          "^supabase/migrations/",
+          "^supabase/tests/pgtap/",
+          "\\.sql$"
+        ],
+        "scoped_test_include_re": "^supabase/tests/pgtap/(?!00_)[a-z0-9_-]+\\.sql$"
+      },
+      "version": 1,
+      "diagnostic_profiles": {
+        "browser-full": {
+          "mode": "browser_full"
+        },
+        "ar56-browser-failure-union": {
+          "mode": "browser_only",
+          "browser_cases": [
+            {
+              "project": "console",
+              "file": "tests/e2e/console-core-flows.spec.ts",
+              "full_title": "console core resource flows › console core flows for syhzqnqjjtzgwgwilztnhuvh@example.invalid"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-core-flows.spec.ts",
+              "full_title": "console core resource flows › console core flows for mlrznqhylvnirjwnhxhsjwgm@example.invalid"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-core-flows.spec.ts",
+              "full_title": "console core resource flows › console core flows for sipkxyzyxvgvtksowrxwjgpn@example.invalid"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-core-flows.spec.ts",
+              "full_title": "console core resource flows › console core flows for lpnoiwlvqmryinlkzgwwiosw@example.invalid"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-label-provider-request.spec.ts",
+              "full_title": "provider request preserves effective configuration and stays approval-pending"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-portal-studio-test-intake.spec.ts",
+              "full_title": "profile7 exact owned reader route matrix"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-signed-in-coverage.spec.ts",
+              "full_title": "console signed-in coverage routes › console routes load when signed in"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-tracking-map.spec.ts",
+              "full_title": "F808 authenticated addresses diagnostic"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-tracking-map.spec.ts",
+              "full_title": "F808 authenticated cityless diagnostic"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-tracking-map.spec.ts",
+              "full_title": "F808 authenticated geocodes diagnostic"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-tracking-map.spec.ts",
+              "full_title": "F808 authenticated shipments diagnostic"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-ui-stability.spec.ts",
+              "full_title": "console UI stability › super admin can open table panels without runtime errors"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-vehicle-create.spec.ts",
+              "full_title": "G21/G22 tenant pickers and creation remain scoped; platform target changes invalidate prior selection"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-workflow-studio-capture.spec.ts",
+              "full_title": "console workflow studio screenshots › captures workflow templates and studio pages"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-workflow-studio-smoke.spec.ts",
+              "full_title": "console workflow studio smoke › loads workflow studio and operation library"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-workflow-template-empty-studio.spec.ts",
+              "full_title": "console workflow template studio empty state › creates a template with zero steps without runtime errors"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/console-portal-studio-test-intake.spec.ts",
+              "full_title": "profile7 exact owned reader route matrix"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-core-flows.spec.ts",
+              "full_title": "portal core resource flows › portal core flows for hznporiphzisyjwwmjyviqvm@example.invalid"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-core-flows.spec.ts",
+              "full_title": "portal core resource flows › portal core flows for unwmzjkhwhhxsuongsoswnkv@example.invalid"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-core-flows.spec.ts",
+              "full_title": "portal core resource flows › portal core flows for uwizmmwrwjmmigphkjymkjuz@example.invalid"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-core-flows.spec.ts",
+              "full_title": "portal core resource flows › portal core flows for tisruivioqoprsjwkyixtohi@example.invalid"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-navigation-links-ready.spec.ts",
+              "full_title": "portal navigation link readiness › portal nav links resolve to ready for super admin"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-recurring-shipment-template.spec.ts",
+              "full_title": "portal recurring shipment template › creates and runs a recurring shipment schedule from the canonical workflow template"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-signed-in-coverage.spec.ts",
+              "full_title": "portal signed-in coverage routes › portal routes load when signed in"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-workflow-studio-capture.spec.ts",
+              "full_title": "portal workflow studio screenshots › captures workflow templates and studio pages"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-workflow-studio-smoke.spec.ts",
+              "full_title": "portal workflow studio smoke › loads workflow studio and operation library"
+            },
+            {
+              "project": "shared",
+              "file": "tests/e2e/action-resource-detail-open-mode.spec.ts",
+              "full_title": "resource detail open mode › console toggles between side-peek and full-page detail layouts"
+            },
+            {
+              "project": "shared",
+              "file": "tests/e2e/action-resource-detail-open-mode.spec.ts",
+              "full_title": "resource detail open mode › portal toggles between side-peek and full-page detail layouts"
+            }
+          ]
+        },
+        "ar60-browser-failure-union": {
+          "mode": "browser_only",
+          "browser_cases": [
+            {
+              "project": "console",
+              "file": "tests/e2e/console-workflow-studio-capture.spec.ts",
+              "full_title": "console workflow studio screenshots › captures workflow templates and studio pages"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-workflow-studio-smoke.spec.ts",
+              "full_title": "console workflow studio smoke › loads workflow studio and operation library"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-workflow-studio-capture.spec.ts",
+              "full_title": "portal workflow studio screenshots › captures workflow templates and studio pages"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-workflow-studio-smoke.spec.ts",
+              "full_title": "portal workflow studio smoke › loads workflow studio and operation library"
+            }
+          ]
+        },
+        "workflow-studio-browser-failure-union": {
+          "mode": "browser_only",
+          "browser_cases": [
+            {
+              "project": "console",
+              "file": "tests/e2e/console-workflow-studio-capture.spec.ts",
+              "full_title": "console workflow studio screenshots › captures workflow flow and builder controls"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-workflow-studio-capture.spec.ts",
+              "full_title": "console workflow studio screenshots › captures workflow templates and studio pages"
+            },
+            {
+              "project": "console",
+              "file": "tests/e2e/console-workflow-studio-smoke.spec.ts",
+              "full_title": "console workflow studio smoke › loads workflow studio and operation library"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-workflow-studio-capture.spec.ts",
+              "full_title": "portal workflow studio screenshots › captures workflow templates and studio pages"
+            },
+            {
+              "project": "portal",
+              "file": "tests/e2e/portal-workflow-studio-smoke.spec.ts",
+              "full_title": "portal workflow studio smoke › loads workflow studio and operation library"
+            }
+          ]
+        },
+        "console-visual-failure-union": {
+          "mode": "browser_only",
+          "browser_cases": []
+        },
+        "portal-visual-failure-union": {
+          "mode": "browser_only",
+          "browser_cases": []
+        },
+        "portal-fieldops-failure-union": {
+          "mode": "fieldops_browser_union",
+          "pgtap": [
+            "0zz_fieldops_self_kyc_submission_v1.sql",
+            "0zz_financial_task_read_contract_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/fieldops/fieldops-self-kyc.test.js",
+            "tests/integration/financial-command-variants.integration.test.js"
+          ],
+          "browser_required_projects": [
+            "portal"
+          ],
+          "browser": [],
+          "fieldops_grep": "(POD photo capture persists JPEG evidence for the selected pickup task|self KYC all five categories from empty history \\((en|ar)\\)|financial workflow session and accepted evidence \\((en|ar)\\))$"
+        },
+        "attempt10-failure-union": {
+          "mode": "fieldops_browser_union",
+          "pgtap": [
+            "0zz_task_controls_read_contract_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/workflows/pickup-batch2.test.js"
+          ],
+          "browser_required_projects": [
+            "portal"
+          ],
+          "browser": [
+            "tests/e2e/portal-marketplace-product-complete.spec.ts"
+          ],
+          "fieldops_grep": "(FieldOps pickup handoff submits end to end and transitions shipment to in_transit|FieldOps pickup failure submits end to end and projects the pickup failure ledger|POD photo capture persists JPEG evidence for the selected pickup task)$"
+        },
+        "attempt19-failure-union": {
+          "mode": "fieldops_browser_union",
+          "pgtap": [
+            "0zhi_workflow_schedule_recurring_shipments.sql"
+          ],
+          "integration": [
+            "tests/integration/workflows/recurring-shipment-schedule.test.js"
+          ],
+          "browser_required_projects": [
+            "portal"
+          ],
+          "browser": [
+            "tests/e2e/portal-recurring-shipment-template.spec.ts"
+          ],
+          "fieldops_grep": "financial workflow session and accepted evidence \\((en|ar)\\)$"
+        },
+        "self-kyc-batch-completion-diagnostic": {
+          "mode": "fieldops_browser_union",
+          "pgtap": [
+            "0zz_fieldops_self_kyc_submission_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/workflows/shipment-batch-operation-ui.test.js",
+            "tests/integration/workflows/shipment-amend-cancel.test.js",
+            "tests/integration/fieldops/fieldops-self-kyc.test.js"
+          ],
+          "browser_required_projects": [
+            "console"
+          ],
+          "browser": [
+            "tests/e2e/console.spec.ts"
+          ],
+          "fieldops_grep": "self KYC all five categories from empty history \\((en|ar)\\)$"
+        },
+        "financial-outbox-drain-diagnostic": {
+          "mode": "fieldops_browser_union",
+          "pgtap": [
+            "0zz_financial_task_read_contract_v1.sql",
+            "0zz_tabular_import_runtime_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/financial-command-variants.integration.test.js",
+            "tests/integration/mapping-studio-runtime-save.test.js"
+          ],
+          "browser_required_projects": [
+            "console"
+          ],
+          "browser": [
+            "tests/e2e/console-label-provider-request.spec.ts",
+            "tests/e2e/console-resource-import-smoke.spec.ts"
+          ],
+          "fieldops_grep": "financial workflow session and accepted evidence \\((en|ar)\\)$"
+        },
+        "f255-f675-integration-affected": {
+          "mode": "integration_only",
+          "integration": [
+            "tests/integration/fieldops/fieldops-driver-go-live.test.js",
+            "tests/integration/workflows/labels-print-workflow.test.js"
+          ]
+        },
+        "attempt22-integration-failure-union": {
+          "mode": "integration_only",
+          "integration": [
+            "tests/integration/workflows/labels-print-workflow.test.js",
+            "tests/integration/workflows/labels-print-webhook.test.js",
+            "tests/integration/workflows/labels-print-webhook-edge.test.js",
+            "tests/integration/api-gateway-ingest.test.js"
+          ]
+        },
+        "attempt47-failure-union": {
+          "pgtap": [
+            "0zz_label_renderer_safe_readiness_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/workflows/labels-print-workflow.test.js"
+          ],
+          "browser_required_projects": [
+            "console"
+          ],
+          "browser": [
+            "tests/e2e/console-label-provider-request.spec.ts"
+          ],
+          "landing": [
+            "tests/landing-e2e/landing-smoke.spec.ts"
+          ]
+        },
+        "f725-f808-kyc-diagnostic": {
+          "pgtap": [
+            "0zz_public_driver_entry_routing_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/fieldops/fieldops-self-kyc.test.js",
+            "tests/integration/edge/driver-signup-intake-e2e.test.js"
+          ],
+          "browser": [
+            "tests/e2e/console-tracking-map.spec.ts",
+            "tests/e2e/portal-tracking-flow.spec.ts"
+          ],
+          "landing": [
+            "tests/landing-e2e/landing-driver-signup.spec.ts",
+            "tests/landing-e2e/landing-tracking.spec.ts"
+          ]
+        },
+        "f808-browser-diagnostic": {
+          "pgtap": [
+            "0zz_tracking_geographic_projections_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/workflows/route-run-assignment-lifecycle.test.js"
+          ],
+          "browser": [
+            "tests/e2e/console-tracking-map.spec.ts",
+            "tests/e2e/portal-tracking-flow.spec.ts"
+          ],
+          "landing": [
+            "tests/landing-e2e/landing-tracking.spec.ts"
+          ]
+        },
+        "f330-webhook-affected": {
+          "mode": "pgtap_only",
+          "pgtap": [
+            "0zz_workflow_intake_sync_followup.sql",
+            "004_webhook_intake.sql",
+            "024_webhook_intake_dynamic.sql",
+            "033_workflow_intake_intent_gating.sql",
+            "037_ack_idempotency.sql",
+            "0zz_webhook_api_hardening_v1.sql",
+            "0zz_webhook_bounded_token_rejections_v1.sql",
+            "0zz_webhook_canonical_identity_v1.sql",
+            "0zz_ingress_persisted_header_redaction_v1.sql",
+            "0zz_intake_auth_rejection_credential_lineage_v1.sql",
+            "0zz_webhook_async_typed_intent_normalization_v1.sql"
+          ]
+        },
+        "f330-webhook-engine-union": {
+          "mode": "native_only",
+          "pgtap": [
+            "0zz_workflow_intake_sync_followup.sql"
+          ],
+          "integration": [
+            "tests/integration/webhook-ingest.test.js"
+          ]
+        },
+        "shipment-native-failure-union": {
+          "mode": "native_only",
+          "pgtap": [
+            "0zz_uc224_shipment_batch_operation_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/workflows/recurring-shipment-schedule.test.js"
+          ]
+        },
+        "tracking-preservation": {
+          "mode": "native_only",
+          "pgtap": [
+            "0zz_tracking_geographic_projections_v1.sql",
+            "0zz_route_stop_window_selection_repair_v1.sql",
+            "0zd_ui_read_api.sql",
+            "0ze_ui_security_resources.sql",
+            "0zhh_ui_list_resource_total_strategy.sql",
+            "0zi_ui_resource_metrics.sql",
+            "0zj_ui_related_resources_v1.sql",
+            "0zz_task_controls_read_contract_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/workflows/route-run-assignment-lifecycle.test.js"
+          ]
+        },
+        "f330-webhook-observability": {
+          "mode": "integration_only",
+          "integration": [
+            "tests/integration/webhook-ingest.test.js"
+          ]
+        },
+        "preservation-integration-inventory": {
+          "mode": "integration_only",
+          "integration": [
+            "tests/integration/marketing/lead-duplicate-recovery.test.js",
+            "tests/integration/settings-seed-history.integration.test.js",
+            "tests/integration/workflows/shipment-amend-cancel.test.js",
+            "tests/integration/identity-contract-repairs.test.js",
+            "tests/integration/workflows/recurring-shipment-schedule.test.js"
+          ]
+        },
+        "preservation-native-map-diagnostic": {
+          "pgtap": [
+            "0zz_fieldops_mobile_v2_driver_signup_status_v1.sql",
+            "0zz_fieldops_driver_signup_status_v1.sql",
+            "0zz_geocode_requeue_readback_v1.sql",
+            "0zz_cod_reconciliation_projection_v1.sql",
+            "0zhg_workflow_run_triggers.sql",
+            "025_marketing_demo_intake.sql",
+            "0zz_console_v2_workflow_run_trigger_lifecycle_rpc_v1.sql",
+            "027_marketing_lead_intake.sql",
+            "0zz_tenant_signup_approval_onboarding_defaults_v1.sql",
+            "0zz_plugin_export_access_v1.sql",
+            "0zz_plugin_export_token_binding_v1.sql",
+            "0zz_dialog360_reply_mapping.sql",
+            "0zz_b22_geocoding_manual_review_task_projection_v1.sql",
+            "0zz_b17_command_scope_identity_guard_v1.sql",
+            "0zz_b10_uc221_shipment_identifier_search_v1.sql",
+            "051_shipment_amend_cancel_ui.sql",
+            "0zz_product_context_catalog_shipment_v1.sql",
+            "0zg_ui_command_registry.sql",
+            "0zz_geocoding_mapping_decision_scope_repair_v1.sql",
+            "zzw8_branch_zone_assign_v1.sql",
+            "0zz_webhook_source_directory_readback_v1.sql",
+            "0zz_dashboard_shipment_reporting_v1.sql",
+            "0zz_rbac_role_templates_v1.sql",
+            "0zz_vehicle_create_target_org_v1.sql",
+            "0zz_outbound_terminal_api_audit_v1.sql",
+            "0zd_ui_read_api.sql",
+            "0ze_ui_security_resources.sql",
+            "0zz_workflow_intake_sync_followup.sql",
+            "089_geocoding_policy_no_enabled_key.sql"
+          ],
+          "integration": [
+            "tests/integration/workflows/labels-print-workflow.test.js",
+            "tests/integration/label-reprint-governance.test.js",
+            "tests/integration/label-designer/label-type-metadata.test.js",
+            "tests/integration/edge/driver-application-document-return-e2e.test.js",
+            "tests/integration/edge/driver-application-status-e2e.test.js",
+            "tests/integration/f148-policy-alignment.integration.test.js",
+            "tests/integration/integrations/studio-server-native.test.js",
+            "tests/integration/fixture-geocoding-canonical-upsert.test.js"
+          ],
+          "browser": [
+            "tests/e2e/console-tracking-map.spec.ts",
+            "tests/e2e/portal-tracking-flow.spec.ts",
+            "tests/e2e/console-vehicle-create.spec.ts",
+            "tests/e2e/console-portal-studio-test-intake.spec.ts"
+          ],
+          "landing": [
+            "tests/landing-e2e/landing-tracking.spec.ts"
+          ]
+        },
+        "cp194-pgtap-discovery": {
+          "mode": "pgtap_only",
+          "pgtap": [
+            "0zz_fieldops_mobile_v2_driver_signup_status_v1.sql",
+            "0zz_fieldops_driver_signup_status_v1.sql",
+            "0zz_geocode_requeue_readback_v1.sql",
+            "0zz_webhook_async_typed_intent_normalization_v1.sql",
+            "0zz_cod_reconciliation_projection_v1.sql",
+            "0zhg_workflow_run_triggers.sql",
+            "025_marketing_demo_intake.sql",
+            "0zz_console_v2_workflow_run_trigger_lifecycle_rpc_v1.sql",
+            "027_marketing_lead_intake.sql",
+            "0zz_tenant_signup_approval_onboarding_defaults_v1.sql",
+            "0zz_plugin_export_access_v1.sql",
+            "0zz_plugin_export_token_binding_v1.sql",
+            "0zz_dialog360_reply_mapping.sql",
+            "0zz_b22_geocoding_manual_review_task_projection_v1.sql",
+            "0zz_b17_command_scope_identity_guard_v1.sql",
+            "0zz_b10_uc221_shipment_identifier_search_v1.sql",
+            "051_shipment_amend_cancel_ui.sql",
+            "0zz_product_context_catalog_shipment_v1.sql",
+            "0zg_ui_command_registry.sql",
+            "0zz_geocoding_mapping_decision_scope_repair_v1.sql",
+            "zzw8_branch_zone_assign_v1.sql",
+            "0zz_webhook_source_directory_readback_v1.sql",
+            "0zz_task_controls_read_contract_v1.sql",
+            "0zz_dashboard_shipment_reporting_v1.sql"
+          ]
+        },
+        "native-environment-readback": {
+          "mode": "integration_only",
+          "integration": [
+            "tests/integration/edge/api-caller-native-jwt.test.js",
+            "tests/integration/workspace/landing-intake-readback.test.js"
+          ]
+        },
+        "final-repair-failure-union": {
+          "pgtap": [
+            "0zhl_workflow_template_invoker_grants.sql",
+            "0zz_b4_workflow_template_scope_hierarchy_v1.sql",
+            "0zz_f619_fieldops_return_actions_route_stop_incident_v1.sql",
+            "0zz_f675_route_stop_reschedule_v1.sql",
+            "0zz_fieldops_active_role_v1.sql",
+            "0zz_fieldops_driver_wallet_request_v1.sql",
+            "0zz_fk_index_hygiene.sql",
+            "0zz_rbac_role_templates_v1.sql",
+            "0zz_uc077_route_execution_manifest_surface_v1.sql",
+            "0zz_workflow_template_status_lifecycle_v1.sql",
+            "0zz_b08_pod_identity_asset_visibility_v1.sql"
+          ],
+          "integration": [
+            "tests/integration/mapping-studio-runtime-save.test.js",
+            "tests/integration/webhook-ingest.test.js",
+            "tests/integration/identity-contract-repairs.test.js",
+            "tests/integration/workspace/landing-intake-readback.test.js"
+          ],
+          "browser_required_projects": [
+            "console",
+            "shared",
+            "portal"
+          ],
+          "browser": [
+            "tests/e2e/action-type-flows.spec.ts",
+            "tests/e2e/console-action-matrix.spec.ts",
+            "tests/e2e/console-label-provider-request.spec.ts",
+            "tests/e2e/console-marketplace-product-complete.spec.ts",
+            "tests/e2e/console-portal-studio-test-intake.spec.ts",
+            "tests/e2e/console-role-matrix.spec.ts",
+            "tests/e2e/console-shipment-pod-visibility.spec.ts",
+            "tests/e2e/console-signed-in-coverage.spec.ts",
+            "tests/e2e/console-tracking-map.spec.ts",
+            "tests/e2e/console-workflow-studio-capture.spec.ts",
+            "tests/e2e/logging-table-events.spec.ts",
+            "tests/e2e/portal-recurring-shipment-template.spec.ts"
+          ],
+          "landing": [
+            "tests/landing-e2e/landing-tracking.spec.ts"
+          ]
+        },
+        "cp193-failure-union": {
+          "pgtap": [
+            "004_webhook_intake.sql",
+            "024_webhook_intake_dynamic.sql",
+            "076_geo_coordinate_skip_reverse_local_short_code.sql",
+            "0zz_cod_settlement_driver_shift_workflow_v2.sql",
+            "0zz_command_dashboard_native_readback_v1.sql",
+            "0zz_map_policy_tenant_scope_guard_v1.sql",
+            "0zz_webhook_canonical_identity_v1.sql",
+            "0zz_workflow_control_fail_and_wait_shipment.sql",
+            "0zz_workflow_intake_sync_followup.sql"
+          ],
+          "integration": [
+            "tests/integration/geocoding.webhook-intake.test.js",
+            "tests/integration/workflows/non-creation/intent-routing.test.js",
+            "tests/integration/financial-command-variants.integration.test.js",
+            "tests/integration/edge/receiver-auth-latency.test.js",
+            "tests/integration/command-dashboard-kpi-backfill.test.js",
+            "tests/integration/workflows/recurring-shipment-template-convergence.test.js",
+            "tests/integration/f164-permission-resync.integration.test.js",
+            "tests/integration/ack/async-headers-and-provenance.test.js",
+            "tests/integration/workflows/workflow-intake.test.js",
+            "tests/integration/workspace/landing-intake-readback.test.js",
+            "tests/integration/workflows/route-run-assignment-lifecycle.test.js"
+          ],
+          "browser": [
+            "tests/e2e/console-label-provider-request.spec.ts",
+            "tests/e2e/console-superadmin-registry-ready.spec.ts"
+          ],
+          "landing": [
+            "tests/landing-e2e/landing-contact-state-capture.spec.ts",
+            "tests/landing-e2e/landing-smoke.spec.ts"
+          ]
+        },
+        "attempt75-pgtap-failure-union": {
+          "mode": "pgtap_only",
+          "pgtap": [
+            "0zz_b5_browser_context_contract_v1.sql"
+          ]
+        },
+        "attempt75-browser-failure-union": {
+          "mode": "browser_only",
+          "browser_cases": [
+            {
+              "project": "console",
+              "file": "tests/e2e/console-label-provider-request.spec.ts",
+              "full_title": "provider request preserves effective configuration and stays approval-pending"
+            }
+          ]
+        }
+      },
+      "pool_caps": {
+        "general": 2,
+        "browser": 1,
+        "heavy": 3
+      },
+      "baseline_shard_ids": [
+        "lint_ci_contracts",
+        "lint_structure",
+        "test_unit"
+      ],
+      "shards": [
+        {
+          "shard_id": "lint_ci_contracts",
+          "pool": "general",
+          "commands": [
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "lint:ci:contracts"
+              ],
+              "timeout_ms": 600000
+            },
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "lint:workflow-bindings"
+              ],
+              "timeout_ms": 600000
+            },
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "lockfile:verify"
+              ],
+              "timeout_ms": 600000
+            },
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "security:scan:gate",
+                "--",
+                "--audit-file=tmp/branch-convergence-security-scan/security-audit.json",
+                "--inventory-file=tmp/branch-convergence-security-scan/security-vulnerability-inventory.json",
+                "--matrix-file=tmp/branch-convergence-security-scan/security-priority-matrix.md",
+                "--summary-file=tmp/branch-convergence-security-scan/security-scan-summary.json"
+              ],
+              "env": {
+                "SECURITY_SCAN_BYPASS": ""
+              },
+              "timeout_ms": 600000
+            }
+          ]
+        },
+        {
+          "shard_id": "lint_structure",
+          "pool": "general",
+          "trigger_suite_ids": [
+            "lint_structure"
+          ],
+          "commands": [
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "lint:structure"
+              ],
+              "timeout_ms": 600000
+            }
+          ]
+        },
+        {
+          "shard_id": "test_unit",
+          "pool": "general",
+          "trigger_suite_ids": [
+            "test_unit"
+          ],
+          "commands": [
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "test:unit"
+              ],
+              "timeout_ms": 3600000
+            }
+          ]
+        },
+        {
+          "shard_id": "test_ui",
+          "pool": "general",
+          "trigger_suite_ids": [
+            "test_ui"
+          ],
+          "commands": [
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "test:ui"
+              ],
+              "timeout_ms": 1800000
+            }
+          ]
+        },
+        {
+          "shard_id": "lint_frontend",
+          "pool": "general",
+          "trigger_suite_ids": [
+            "lint_frontend"
+          ],
+          "trigger_surface_ids": [
+            "console",
+            "portal"
+          ],
+          "commands": [
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "lint:frontend"
+              ],
+              "timeout_ms": 1800000
+            }
+          ]
+        },
+        {
+          "shard_id": "typecheck_frontend",
+          "pool": "general",
+          "trigger_surface_ids": [
+            "console",
+            "portal"
+          ],
+          "commands": [
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "typecheck:frontend"
+              ],
+              "timeout_ms": 1200000
+            }
+          ]
+        },
+        {
+          "shard_id": "typecheck_fieldops",
+          "pool": "general",
+          "trigger_surface_ids": [
+            "mobile_fieldops"
+          ],
+          "commands": [
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "typecheck:fieldops"
+              ],
+              "timeout_ms": 1200000
+            }
+          ]
+        },
+        {
+          "shard_id": "landing_build",
+          "pool": "general",
+          "trigger_suite_ids": [
+            "landing_build"
+          ],
+          "commands": [
+            {
+              "command": "npm",
+              "args": [
+                "run",
+                "build:landing"
+              ],
+              "timeout_ms": 1200000
+            }
+          ]
+        },
+        {
+          "shard_id": "backend_local",
+          "template_only": true,
+          "pool": "heavy",
+          "execution_mode": "backend_local",
+          "trigger_suite_ids": [
+            "verify_cloud_core",
+            "pgtap",
+            "integration",
+            "edge_deploy",
+            "landing_e2e"
+          ],
+          "trigger_direct_surface_ids": [
+            "console",
+            "portal",
+            "landing",
+            "mobile_fieldops"
+          ],
+          "trigger_include_re": [
+            "^packages/api/",
+            "^supabase/migrations/",
+            "^docs/api/",
+            "^scripts/docs/generate-public-openapi\\.js$"
+          ],
+          "runtime_lease": {
+            "resource_class": "backend-supabase",
+            "phase": "branch-convergence-remote"
+          },
+          "commands": {
+            "configure": {
+              "command": "npm",
+              "args": [
+                "run",
+                "local:configure"
+              ],
+              "timeout_ms": 300000
+            },
+            "start": {
+              "command": "node",
+              "args": [],
+              "env": {
+                "WORKSPACE_LOCAL_START_FRESH_HISTORY_MIGRATION_TIMEOUT_MS": "3200000"
+              },
+              "timeout_ms": 5400000
+            },
+            "prepare": {
+              "command": "npm",
+              "args": [
+                "run",
+                "local:verify",
+                "--",
+                "--prepare-only"
+              ],
+              "timeout_ms": 900000
+            },
+            "pre_suite_commands": [
+              {
+                "command": "npm",
+                "args": [
+                  "run",
+                  "lint:db"
+                ],
+                "timeout_ms": 600000
+              },
+              {
+                "command": "npm",
+                "args": [
+                  "run",
+                  "lint:db:fixtures"
+                ],
+                "env": {
+                  "MIGRATION_FIXTURE_GUARD_MODE": "full",
+                  "MIGRATION_FIXTURE_GUARD_SKIP": ""
+                },
+                "timeout_ms": 600000
+              }
+            ],
+            "suite_commands": [
+              {
+                "suite_ids": [
+                  "verify_cloud_core",
+                  "pgtap"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:pgtap:local"
+                ],
+                "env": {
+                  "ENV_FILE": "config/env/.env.local",
+                  "ENV_FILE_OVERRIDE": "1",
+                  "PGTAP_FULL_LOCAL_QUALIFICATION": "1",
+                  "PGTAP_FILES_PER_SESSION": "1",
+                  "PGTAP_ONLY_FILES": "",
+                  "PGTAP_TEST_FILES": "",
+                  "PGTAP_NODE_FILE_RETRIES": "0",
+                  "PGTAP_RETRY_TRANSIENT": "0",
+                  "PGTAP_RETRY_DEADLOCKS": "0",
+                  "PGTAP_NODE_FILE_MAX_WAIT_MS": "0"
+                },
+                "timeout_ms": 1800000
+              },
+              {
+                "suite_ids": [
+                  "verify_cloud_core",
+                  "integration"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:integration"
+                ],
+                "env": {
+                  "ENV_FILE": "config/env/.env.local",
+                  "ENV_FILE_OVERRIDE": "1"
+                },
+                "timeout_ms": 2493000
+              },
+              {
+                "suite_ids": [
+                  "verify_cloud_core",
+                  "edge_deploy"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:edge-smoke"
+                ],
+                "env": {
+                  "ENV_FILE": "config/env/.env.local",
+                  "ENV_FILE_OVERRIDE": "1",
+                  "RUN_LOCAL_EDGE_TESTS": "true",
+                  "EDGE_SMOKE_REQUIRED": "1"
+                },
+                "timeout_ms": 600000
+              },
+              {
+                "surface_ids": [
+                  "console",
+                  "portal"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:e2e",
+                  "--",
+                  "--reporter=line,json",
+                  "--project=console"
+                ],
+                "env": {
+                  "E2E_WORKERS": "1",
+                  "E2E_PROJECTS": "console",
+                  "E2E_REQUIRE_BASE_URLS": "1",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "console",
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-console-playwright.json"
+                },
+                "timeout_ms": 5400000
+              },
+              {
+                "surface_ids": [
+                  "console",
+                  "portal"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:e2e",
+                  "--",
+                  "--reporter=line,json",
+                  "--project=a11y"
+                ],
+                "env": {
+                  "E2E_WORKERS": "1",
+                  "E2E_PROJECTS": "a11y",
+                  "E2E_REQUIRE_BASE_URLS": "1",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "a11y",
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-a11y-playwright.json"
+                },
+                "timeout_ms": 5400000
+              },
+              {
+                "surface_ids": [
+                  "console",
+                  "portal"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:e2e",
+                  "--",
+                  "--reporter=line,json",
+                  "--project=shared"
+                ],
+                "env": {
+                  "E2E_WORKERS": "1",
+                  "E2E_PROJECTS": "shared",
+                  "E2E_REQUIRE_BASE_URLS": "1",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "shared",
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-shared-playwright.json"
+                },
+                "timeout_ms": 5400000
+              },
+              {
+                "surface_ids": [
+                  "console",
+                  "portal"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:e2e",
+                  "--",
+                  "--reporter=line,json",
+                  "--project=portal"
+                ],
+                "env": {
+                  "E2E_WORKERS": "1",
+                  "E2E_PROJECTS": "portal",
+                  "E2E_REQUIRE_BASE_URLS": "1",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "portal",
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-portal-playwright.json"
+                },
+                "timeout_ms": 5400000
+              },
+              {
+                "suite_ids": [
+                  "landing_e2e"
+                ],
+                "surface_ids": [
+                  "landing"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:e2e:landing",
+                  "--",
+                  "--reporter=line,json"
+                ],
+                "env": {
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-landing-playwright.json",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "landing",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true"
+                },
+                "timeout_ms": 3600000
+              },
+              {
+                "surface_ids": [
+                  "mobile_fieldops"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "verify:mobile:fieldops"
+                ],
+                "env": {
+                  "FIELDOPS_VERIFY_SKIP_STORE_PREFLIGHT": "1",
+                  "FIELDOPS_VERIFY_SKIP_E2E": "",
+                  "FIELDOPS_STORE_PREFLIGHT_PROFILE": "convergence",
+                  "FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED": "1",
+                  "FIELDOPS_CAPTURE_NATIVE_SCREENSHOTS": "",
+                  "FIELDOPS_NATIVE_SCREENSHOT_MANIFEST_PATH": "",
+                  "MOBILE_STRICT_SUMMARY_OUT": "tmp/branch-convergence/mobile-fieldops-strict-summary.json",
+                  "MOBILE_PREFLIGHT_REPORT_PATH": "tmp/branch-convergence/mobile-fieldops-store-preflight.json",
+                  "ENV_FILE": "config/env/.env.local",
+                  "ENV_FILE_OVERRIDE": "1",
+                  "ENV_FILE_APPEND": "0",
+                  "CLOUD_DB_BOOTSTRAP_MODE": "ephemeral",
+                  "TARGET_DEPLOY_ENV": "",
+                  "DEPLOY_ENV": "",
+                  "DEPLOY_ENVIRONMENT": "",
+                  "PG_CONN_STRING": "",
+                  "SYNCED_DB_URL_POOLER": "",
+                  "DATABASE_URL_POOLER": "",
+                  "SYNCED_DB_URL": "",
+                  "SYNCED_DB_URL_DIRECT": "",
+                  "DATABASE_URL_DIRECT": "",
+                  "DB_SMOKE_SELECTED_DSN_NAME": "",
+                  "DATABASE_URL_SELECTED_DSN_NAME": "",
+                  "SHARED_LANE_DB_PROBE_SELECTED_DSN_NAME": "",
+                  "SHARED_LANE_PREFLIGHT_OK": "",
+                  "SHARED_LANE_DB_PROBE_OK": ""
+                },
+                "timeout_ms": 2700000
+              }
+            ],
+            "matched_paths": {
+              "command": "npm",
+              "args": [
+                "run",
+                "docs:openapi:check"
+              ],
+              "timeout_ms": 600000
+            },
+            "cleanup": {
+              "command": "npm",
+              "args": [
+                "run",
+                "local:stop"
+              ],
+              "timeout_ms": 240000
+            }
+          }
+        },
+        {
+          "shard_id": "backend_core",
+          "extends": "backend_local",
+          "trigger_suite_ids": [
+            "verify_cloud_core",
+            "pgtap",
+            "integration",
+            "edge_deploy",
+            "landing_e2e"
+          ],
+          "trigger_direct_surface_ids": [
+            "console",
+            "portal",
+            "landing",
+            "mobile_fieldops"
+          ],
+          "trigger_include_re": [
+            "^packages/api/",
+            "^supabase/migrations/",
+            "^docs/api/",
+            "^scripts/docs/generate-public-openapi\\.js$"
+          ],
+          "commands": {
+            "suite_commands": [
+              {
+                "suite_ids": [
+                  "verify_cloud_core",
+                  "pgtap"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:pgtap:local"
+                ],
+                "env": {
+                  "ENV_FILE": "config/env/.env.local",
+                  "ENV_FILE_OVERRIDE": "1",
+                  "PGTAP_FULL_LOCAL_QUALIFICATION": "1",
+                  "PGTAP_FILES_PER_SESSION": "1",
+                  "PGTAP_ONLY_FILES": "",
+                  "PGTAP_TEST_FILES": "",
+                  "PGTAP_NODE_FILE_RETRIES": "0",
+                  "PGTAP_RETRY_TRANSIENT": "0",
+                  "PGTAP_RETRY_DEADLOCKS": "0",
+                  "PGTAP_NODE_FILE_MAX_WAIT_MS": "0"
+                },
+                "timeout_ms": 1800000
+              },
+              {
+                "suite_ids": [
+                  "verify_cloud_core",
+                  "integration"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:integration"
+                ],
+                "env": {
+                  "ENV_FILE": "config/env/.env.local",
+                  "ENV_FILE_OVERRIDE": "1"
+                },
+                "timeout_ms": 2493000
+              },
+              {
+                "suite_ids": [
+                  "verify_cloud_core",
+                  "edge_deploy"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:edge-smoke"
+                ],
+                "env": {
+                  "ENV_FILE": "config/env/.env.local",
+                  "ENV_FILE_OVERRIDE": "1",
+                  "RUN_LOCAL_EDGE_TESTS": "true",
+                  "EDGE_SMOKE_REQUIRED": "1"
+                },
+                "timeout_ms": 600000
+              },
+              {
+                "surface_ids": [
+                  "console",
+                  "portal"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:e2e",
+                  "--",
+                  "--reporter=line,json",
+                  "--project=a11y"
+                ],
+                "env": {
+                  "E2E_WORKERS": "1",
+                  "E2E_PROJECTS": "a11y",
+                  "E2E_REQUIRE_BASE_URLS": "1",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "a11y",
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-a11y-playwright.json"
+                },
+                "timeout_ms": 5400000
+              },
+              {
+                "suite_ids": [
+                  "landing_e2e"
+                ],
+                "surface_ids": [
+                  "landing"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "test:e2e:landing",
+                  "--",
+                  "--reporter=line,json"
+                ],
+                "env": {
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-landing-playwright.json",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "landing",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true"
+                },
+                "timeout_ms": 3600000
+              },
+              {
+                "surface_ids": [
+                  "mobile_fieldops"
+                ],
+                "command": "npm",
+                "args": [
+                  "run",
+                  "verify:mobile:fieldops"
+                ],
+                "env": {
+                  "FIELDOPS_VERIFY_SKIP_STORE_PREFLIGHT": "1",
+                  "FIELDOPS_VERIFY_SKIP_E2E": "",
+                  "FIELDOPS_STORE_PREFLIGHT_PROFILE": "convergence",
+                  "FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED": "1",
+                  "FIELDOPS_CAPTURE_NATIVE_SCREENSHOTS": "",
+                  "FIELDOPS_NATIVE_SCREENSHOT_MANIFEST_PATH": "",
+                  "MOBILE_STRICT_SUMMARY_OUT": "tmp/branch-convergence/mobile-fieldops-strict-summary.json",
+                  "MOBILE_PREFLIGHT_REPORT_PATH": "tmp/branch-convergence/mobile-fieldops-store-preflight.json",
+                  "ENV_FILE": "config/env/.env.local",
+                  "ENV_FILE_OVERRIDE": "1",
+                  "ENV_FILE_APPEND": "0",
+                  "CLOUD_DB_BOOTSTRAP_MODE": "ephemeral",
+                  "TARGET_DEPLOY_ENV": "",
+                  "DEPLOY_ENV": "",
+                  "DEPLOY_ENVIRONMENT": "",
+                  "PG_CONN_STRING": "",
+                  "SYNCED_DB_URL_POOLER": "",
+                  "DATABASE_URL_POOLER": "",
+                  "SYNCED_DB_URL": "",
+                  "SYNCED_DB_URL_DIRECT": "",
+                  "DATABASE_URL_DIRECT": "",
+                  "DB_SMOKE_SELECTED_DSN_NAME": "",
+                  "DATABASE_URL_SELECTED_DSN_NAME": "",
+                  "SHARED_LANE_DB_PROBE_SELECTED_DSN_NAME": "",
+                  "SHARED_LANE_PREFLIGHT_OK": "",
+                  "SHARED_LANE_DB_PROBE_OK": ""
+                },
+                "timeout_ms": 2700000
+              }
+            ]
+          }
+        },
+        {
+          "shard_id": "backend_browser_1",
+          "extends": "backend_local",
+          "trigger_suite_ids": [
+            "browser_e2e"
+          ],
+          "trigger_direct_surface_ids": [
+            "console",
+            "portal"
+          ],
+          "trigger_include_re": [],
+          "commands": {
+            "suite_commands": [
+              {
+                "surface_ids": [
+                  "console",
+                  "portal"
+                ],
+                "command": "node",
+                "args": [
+                  "1"
+                ],
+                "env": {
+                  "E2E_WORKERS": "1",
+                  "E2E_PROJECTS": "console,portal,shared",
+                  "E2E_REQUIRE_BASE_URLS": "1",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "console,portal,shared",
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-browser-1-playwright.json"
+                },
+                "timeout_ms": 5400000,
+                "suite_ids": [
+                  "browser_e2e"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "shard_id": "backend_browser_2",
+          "extends": "backend_local",
+          "trigger_suite_ids": [
+            "browser_e2e"
+          ],
+          "trigger_direct_surface_ids": [
+            "console",
+            "portal"
+          ],
+          "trigger_include_re": [],
+          "commands": {
+            "suite_commands": [
+              {
+                "surface_ids": [
+                  "console",
+                  "portal"
+                ],
+                "command": "node",
+                "args": [
+                  "2"
+                ],
+                "env": {
+                  "E2E_WORKERS": "1",
+                  "E2E_PROJECTS": "console,portal,shared",
+                  "E2E_REQUIRE_BASE_URLS": "1",
+                  "STRICT_E2E_GATE_ENV": "true",
+                  "E2E_CAPTURE_UI": "1",
+                  "E2E_VISUAL": "1",
+                  "E2E_ALLOW_MUTATIONS": "1",
+                  "E2E_MUTATION_ENV": "dedicated",
+                  "RUN_EDGE_E2E": "true",
+                  "PLAYWRIGHT_REQUIRED_PROJECTS": "console,portal,shared",
+                  "PLAYWRIGHT_JSON_OUTPUT_FILE": "tmp/branch-convergence-browser-2-playwright.json"
+                },
+                "timeout_ms": 5400000,
+                "suite_ids": [
+                  "browser_e2e"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
     "non_surface_impacts": [
       {
         "impact_id": "docs",
@@ -55,6 +1467,21 @@
           "^\\.github/",
           "^config/ci/",
           "^scripts/ops/ci/",
+          "^scripts/ops/security-(?:audit-inventory|scan-gate)\\.js$",
+          "^security-(?:audit|scan-summary|vulnerability-inventory)\\.json$",
+          "^scripts/ops/remote-workflow\\.js$",
+          "^scripts/ops/pr-ready\\.js$",
+          "^scripts/ops/setup-branch-protection\\.js$",
+          "^scripts/ops/objectives-lint\\.js$",
+          "^scripts/utils/pg-hostaddr\\.js$",
+          "^scripts/ops/planning-os/",
+          "^config/ops/runtime-container-policy\\.json$",
+          "^scripts/ops/runtime-leases/",
+          "^scripts/ops/workspace/(?:docker-runtime|local-start|phase-runtime-bootstrap)\\.js$",
+          "^AGENTS\\.md$",
+          "^test-results/",
+          "^scripts/ops/branch-converge(?:-(?:cleanup(?:-adapters|-cli)?|decisions-generate|ignored-paths|inventory-coordinator|provider-(?:cleanup-adapters|snapshot(?:-coordinator)?)|runtime-(?:inventory|schema)|supplemental-inventory))?\\.js$",
+          "^config/ops/branch-convergence-(?:cleanup-policy|policy)\\.json$",
           "^scripts/ops/audit/auth-email-url-audit\\.js$",
           "^tests/load/",
           "^tests/unit/"
@@ -65,7 +1492,7 @@
           "^tests/unit/mobile-core/",
           "^tests/unit/integration/",
           "^tests/unit/storage-admin\\.test\\.js$",
-          "^tests/unit/ops/(ensure-storage-buckets|prega-.*|supabase-cli|cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract|preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$"
+          "^tests/unit/ops/(ensure-storage-buckets|prega-.*|supabase-cli|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract|verify-cloud-ui)\\.test\\.js$"
         ],
         "required_suites": [
           "lint_structure",
@@ -74,25 +1501,58 @@
         "propagates_to_surface_ids": []
       },
       {
+        "impact_id": "shared_client_runtime",
+        "display_name": "Shared client runtime fanout",
+        "impact_tags": [
+          "shared_client_runtime"
+        ],
+        "include_re": [
+          "^packages/(?:api|auth|config)/"
+        ],
+        "exclude_re": [],
+        "required_suites": [
+          "test_unit",
+          "integration"
+        ],
+        "propagates_to_surface_ids": [
+          "console",
+          "portal",
+          "mobile_fieldops"
+        ]
+      },
+      {
         "impact_id": "shared",
         "display_name": "Shared runtime fanout",
         "impact_tags": [
           "shared"
         ],
         "include_re": [
-          "^packages/",
+          "^\\.nvmrc$",
           "^scripts/",
           "^config/"
         ],
         "exclude_re": [
-          "^packages/mobile-core/",
-          "^packages/ui/",
           "^scripts/frontend/",
           "^scripts/ops/audit/auth-email-url-audit\\.js$",
           "^scripts/ops/ci/",
+          "^scripts/ops/security-(?:audit-inventory|scan-gate)\\.js$",
+          "^scripts/ops/remote-workflow\\.js$",
+          "^scripts/ops/setup-branch-protection\\.js$",
+          "^scripts/ops/pr-ready\\.js$",
+          "^scripts/ops/objectives-lint\\.js$",
+          "^scripts/utils/pg-hostaddr\\.js$",
+          "^scripts/ops/planning-os/",
+          "^config/ops/runtime-container-policy\\.json$",
+          "^scripts/ops/runtime-leases/",
+          "^scripts/ops/workspace/(?:docker-runtime|local-start|phase-runtime-bootstrap)\\.js$",
+          "^scripts/ops/branch-converge(?:-(?:cleanup(?:-adapters|-cli)?|decisions-generate|ignored-paths|inventory-coordinator|provider-(?:cleanup-adapters|snapshot(?:-coordinator)?)|runtime-(?:inventory|schema)|supplemental-inventory))?\\.js$",
+          "^scripts/ops/db/run-online-index-phase\\.js$",
+          "^scripts/ops/audit/shipment-identifier-(?:index-build-preflight\\.sql|lazy-lock-proof\\.js)$",
           "^scripts/ops/cloudflare/",
           "^scripts/docs/",
           "^config/ci/",
+          "^config/ops/branch-convergence-(?:cleanup-policy|policy)\\.json$",
+          "^config/ops/online-index-phases\\.json$",
           "^config/edge/"
         ],
         "required_suites": [
@@ -116,25 +1576,31 @@
       "surface_id": "db",
       "display_name": "Backend (DB + Edge)",
       "paths_include_re": [
+        "^supabase/(?:schemas?/|schema\\.sql$|seed/)",
         "^supabase/migrations/",
         "^supabase/functions/",
         "^supabase/tests/pgtap/",
         "^supabase/config\\.toml$",
+        "^deno\\.lock$",
+        "^tests/fixtures/loopback-hostname-contract\\.json$",
         "^config/edge/",
         "^scripts/ops/prega-.*\\.js$",
         "^scripts/ops/ensure-storage-buckets\\.js$",
         "^scripts/ops/provision-operator-accounts\\.js$",
+        "^scripts/ops/backfill-ingress-persisted-redaction\\.js$",
         "^scripts/ops/workspace/deploy\\.js$",
+        "^scripts/ops/db/run-online-index-phase\\.js$",
+        "^scripts/ops/audit/shipment-identifier-(?:index-build-preflight\\.sql|lazy-lock-proof\\.js)$",
         "^scripts/ops/workspace/supabase-api\\.js$",
         "^scripts/ops/auth/",
         "^scripts/ops/supabase-cli\\.js$",
         "^scripts/workers/",
         "^config/ops/auth-email-url-policy\\.(dev|stg|prod)\\.json$",
-        "^AGENTS\\.md$",
+        "^config/ops/online-index-phases\\.json$",
         "^tests/unit/ops/ensure-storage-buckets\\.test\\.js$",
         "^tests/unit/ops/prega-.*\\.test\\.js$",
         "^tests/unit/ops/supabase-cli\\.test\\.js$",
-        "^tests/unit/ops/(cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
+        "^tests/unit/ops/(provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
         "^tests/unit/workspace/deploy\\.test\\.js$",
         "^tests/unit/integration/",
         "^tests/unit/storage-admin\\.test\\.js$",
@@ -204,6 +1670,10 @@
         "SUPABASE_SERVICE_ROLE_KEY",
         "SUPABASE_JWT_SECRET",
         "SUPABASE_DB_PASSWORD",
+        "API_GATEWAY_CORS_ALLOW_ORIGINS",
+        "API_CALLER_GUARDED_EGRESS_PROXY_URL",
+        "API_CALLER_GUARDED_EGRESS_PROXY_USERNAME",
+        "API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD",
         "MARKETING_IP_HASH_SALT",
         "MARKETING_CORS_ALLOW_ORIGINS",
         "MARKETING_TURNSTILE_SECRET_KEY",
@@ -219,6 +1689,13 @@
         "SUPABASE_POOLER_PORT",
         "EDGE_INTERNAL_CALLER_ROLES",
         "EDGE_REQUIRE_DB_JWT",
+        "API_CALLER_GUARDED_EGRESS_PROXY_HEALTH_URL",
+        "API_CALLER_GUARDED_EGRESS_PROOF_SHA",
+        "API_CALLER_GUARDED_EGRESS_PUBLIC_PROBE_URL",
+        "API_CALLER_GUARDED_EGRESS_EXPECTED_PUBLIC_IP",
+        "API_CALLER_GUARDED_EGRESS_POLICY_DENIED_PROBE_URL",
+        "API_CALLER_GUARDED_EGRESS_REBINDING_PROBE_URL",
+        "API_CALLER_GUARDED_EGRESS_POLICY_DENIED_CODE",
         "PROD_DEPLOY_GUARD",
         "E2E_IDENTITY_STRATEGY",
         "E2E_EPHEMERAL_ALLOW_PRODUCTION",
@@ -239,6 +1716,7 @@
           "SUPABASE_SERVICE_ROLE_KEY",
           "SUPABASE_JWT_SECRET",
           "SUPABASE_DB_PASSWORD",
+          "API_GATEWAY_CORS_ALLOW_ORIGINS",
           "MARKETING_IP_HASH_SALT",
           "MARKETING_CORS_ALLOW_ORIGINS",
           "MARKETING_TURNSTILE_SECRET_KEY",
@@ -271,6 +1749,7 @@
         "^docs/marketing/",
         "^scripts/frontend/",
         "^tests/landing-e2e/",
+        "^playwright\\.landing\\.config\\.ts$",
         "^package\\.json$",
         "^package-lock\\.json$"
       ],
@@ -371,15 +1850,20 @@
       "display_name": "Console (Vercel)",
       "paths_include_re": [
         "^apps/console/",
-        "^packages/",
+        "^\\.storybook/",
+        "^apps/shared/",
+        "^packages/(?:api|auth|config|ui)/",
         "^scripts/ops/vercel/",
         "^scripts/ops/verify-cloud-ui\\.js$",
-        "^tests/e2e/(console-core-flows|gate/console-gate-smoke)\\.spec\\.ts$",
+        "^tests/e2e/gate/console-gate-smoke\\.spec\\.ts$",
+        "^tests/e2e/console.*\\.spec\\.ts$",
+        "^playwright\\.config\\.ts$",
+        "^tests/fixtures/loopback-hostname-contract\\.json$",
         "^tests/e2e/utils/",
         "^tests/ui/",
         "^tests/e2e/gate/",
         "^tests/unit/frontend/",
-        "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+        "^tests/unit/ops/verify-cloud-ui\\.test\\.js$",
         "^package\\.json$",
         "^package-lock\\.json$"
       ],
@@ -444,6 +1928,8 @@
         "VERCEL_PROJECT_ID_CONSOLE",
         "SUPABASE_URL",
         "SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS",
+        "NEXT_PUBLIC_UI_TRUSTED_OPERATION_DOC_ORIGINS",
         "CONSOLE_BASE_URL"
       ],
       "preview": {
@@ -471,7 +1957,7 @@
             "include_re": [
               "^scripts/ops/verify-cloud-ui\\.js$",
               "^tests/e2e/gate/",
-              "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+              "^tests/unit/ops/verify-cloud-ui\\.test\\.js$",
               "^\\.github/workflows/reviewer-gate-pr\\.yml$"
             ]
           },
@@ -479,8 +1965,12 @@
             "profile": "full",
             "include_re": [
               "^apps/console/",
-              "^packages/",
+              "^apps/shared/",
+              "^packages/(?:api|auth|config|ui)/",
               "^scripts/ops/vercel/",
+              "^playwright\\.config\\.ts$",
+              "^tests/e2e/console.*\\.spec\\.ts$",
+              "^tests/fixtures/loopback-hostname-contract\\.json$",
               "^tests/ui/",
               "^tests/unit/frontend/",
               "^package\\.json$",
@@ -499,15 +1989,20 @@
       "display_name": "Portal (Vercel)",
       "paths_include_re": [
         "^apps/portal/",
-        "^packages/",
+        "^\\.storybook/",
+        "^apps/shared/",
+        "^packages/(?:api|auth|config|ui)/",
         "^scripts/ops/vercel/",
         "^scripts/ops/verify-cloud-ui\\.js$",
-        "^tests/e2e/(portal-core-flows|gate/portal-gate-smoke)\\.spec\\.ts$",
+        "^tests/e2e/gate/portal-gate-smoke\\.spec\\.ts$",
+        "^tests/e2e/portal.*\\.spec\\.ts$",
+        "^playwright\\.config\\.ts$",
+        "^tests/fixtures/loopback-hostname-contract\\.json$",
         "^tests/e2e/utils/",
         "^tests/ui/",
         "^tests/e2e/gate/",
         "^tests/unit/frontend/",
-        "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+        "^tests/unit/ops/verify-cloud-ui\\.test\\.js$",
         "^package\\.json$",
         "^package-lock\\.json$"
       ],
@@ -572,6 +2067,8 @@
         "VERCEL_PROJECT_ID_PORTAL",
         "SUPABASE_URL",
         "SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS",
+        "NEXT_PUBLIC_UI_TRUSTED_OPERATION_DOC_ORIGINS",
         "PORTAL_BASE_URL"
       ],
       "preview": {
@@ -599,7 +2096,7 @@
             "include_re": [
               "^scripts/ops/verify-cloud-ui\\.js$",
               "^tests/e2e/gate/",
-              "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+              "^tests/unit/ops/verify-cloud-ui\\.test\\.js$",
               "^\\.github/workflows/reviewer-gate-pr\\.yml$"
             ]
           },
@@ -607,8 +2104,12 @@
             "profile": "full",
             "include_re": [
               "^apps/portal/",
-              "^packages/",
+              "^apps/shared/",
+              "^packages/(?:api|auth|config|ui)/",
               "^scripts/ops/vercel/",
+              "^playwright\\.config\\.ts$",
+              "^tests/e2e/portal.*\\.spec\\.ts$",
+              "^tests/fixtures/loopback-hostname-contract\\.json$",
               "^tests/ui/",
               "^tests/unit/frontend/",
               "^package\\.json$",
@@ -725,7 +2226,10 @@
       "display_name": "Mobile FieldOps (Expo/EAS)",
       "paths_include_re": [
         "^apps/fieldops/",
-        "^packages/mobile-core/",
+        "^scripts/ops/mobile/",
+        "^scripts/ops/fieldops-release-contract\\.js$",
+        "^config/ci/mobile-fieldops-release-env-contract\\.json$",
+        "^packages/(?:api|auth|config|mobile-core)/",
         "^tests/integration/fieldops/",
         "^tests/fieldops-e2e/",
         "^tests/unit/fieldops/",
@@ -804,7 +2308,9 @@
           "test_unit",
           "test_ui"
         ],
-        "propagates_to_surface_ids": []
+        "propagates_to_surface_ids": [
+          "console"
+        ]
       },
       "allowed_secret_keys": [
         "EXPO_TOKEN"

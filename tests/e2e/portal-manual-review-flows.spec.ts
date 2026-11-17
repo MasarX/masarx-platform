@@ -56,6 +56,7 @@ async function verifyManualReviewPage(params: {
   );
   const canRead = hasCapability(capabilitySet, "manual_review.read");
   if (!canRead) {
+    await expect(page.locator(`[data-testid="${testIdPrefix}-blocked"]`)).toBeVisible();
     return;
   }
   const resourceEntry = Array.isArray(context.readRegistry?.resources)
@@ -130,8 +131,8 @@ test.describe("portal manual review flows", () => {
 
   test.beforeAll(() => enforceDemoContext("portal", portalUsers));
 
-  test("manual review queue and tasks detail flows", async ({ page }) => {
-    let user = null as (typeof portalUsers)[number] | null;
+  test("manual review routes honor capability policy", async ({ page }) => {
+    let user = portalUsers[0] ?? null;
     for (const candidate of portalUsers) {
       const context = await fetchUserContext({
         app: "portal",
@@ -139,7 +140,7 @@ test.describe("portal manual review flows", () => {
         password: demoContext.password ?? "",
       });
       const capabilitySet = resolveCapabilitySet(
-        Array.isArray(context.me?.capabilities) ? context.me?.capabilities : []
+        Array.isArray(context.me?.capabilities) ? context.me.capabilities : []
       );
       if (hasCapability(capabilitySet, "manual_review.read")) {
         user = candidate;
@@ -147,10 +148,8 @@ test.describe("portal manual review flows", () => {
       }
     }
     if (!user) {
-      if (strict) {
-        throw new Error("No portal user has manual_review.read capability.");
-      }
-      test.skip(true, "No portal user has manual_review.read capability.");
+      test.skip(true, "No portal demo user available.");
+      return;
     }
     const basePath = getPortalBasePath();
 

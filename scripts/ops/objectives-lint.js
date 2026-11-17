@@ -13,6 +13,7 @@
 /* eslint-disable no-console */
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const root = process.cwd();
 
@@ -27,7 +28,7 @@ function shouldSkipDir(relPosix) {
   // inlined localhost/Supabase URL literals and are not source-of-truth.
   if (last === 'build' || last === 'dist' || last === '.next') return true;
   if (last === '.turbo' || last === 'coverage' || last === 'storybook-static') return true;
-  if (last === 'test-results') return true;
+  if (last === 'test-results' || last === 'playwright-report') return true;
   if (relPosix === 'docs' || relPosix.startsWith('docs/')) return true;
   if (relPosix === 'tests' || relPosix.startsWith('tests/')) return true;
   if (relPosix === 'supabase/tests' || relPosix.startsWith('supabase/tests/')) return true;
@@ -55,13 +56,52 @@ function readSafe(file) {
   try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
 }
 
+function isGeneratedSharedMirror(rel) {
+  const relPosix = rel.replace(/\\/g, '/');
+  if (!/^supabase\/functions\/[^/]+\/_shared\/.+$/.test(relPosix)) return false;
+  // Explicitly keep tracked nested sources, even if an ignore pattern also matches.
+  if (spawnSync('git', ['ls-files', '--error-unmatch', '--', relPosix], {
+    cwd: root, stdio: 'ignore',
+  }).status !== 1) return false;
+  return spawnSync('git', ['check-ignore', '-q', '--', relPosix], {
+    cwd: root, stdio: 'ignore',
+  }).status === 0;
+}
+
 let files = walk(root)
   .filter((f) => /\.(js|ts|mjs|cjs|sql)$/i.test(f))
   .filter((f) => !/^(docs|tests|supabase\/tests|config\/env|emdash)\//.test(f))
   .filter((f) => !/^supabase\/migrations\/archive\//.test(f.replace(/\\/g, '/')));
+files = files.filter((f) => !isGeneratedSharedMirror(f));
 const includeRe = process.env.OBJECTIVES_LINT_INCLUDE ? new RegExp(process.env.OBJECTIVES_LINT_INCLUDE) : null;
 if (includeRe) files = files.filter((f) => includeRe.test(f.replace(/\\/g, '/')));
 const hasIncludeFilter = Boolean(includeRe);
+
+const expectedFilesRaw = String(process.env.OBJECTIVES_LINT_EXPECTED_FILES_JSON || '').trim();
+if (expectedFilesRaw) {
+  let expectedFiles;
+  try {
+    expectedFiles = JSON.parse(expectedFilesRaw);
+  } catch {
+    console.error('[objectives-lint] Invalid OBJECTIVES_LINT_EXPECTED_FILES_JSON.');
+    process.exit(1);
+  }
+  if (!Array.isArray(expectedFiles) || expectedFiles.some((file) => typeof file !== 'string')) {
+    console.error('[objectives-lint] Expected-file coverage must be a JSON string array.');
+    process.exit(1);
+  }
+  const expected = uniqSorted(expectedFiles.map((file) => file.replace(/\\/g, '/')));
+  const scanned = uniqSorted(files.map((file) => file.replace(/\\/g, '/')));
+  if (expected.length !== expectedFiles.length || JSON.stringify(expected) !== JSON.stringify(scanned)) {
+    console.error(
+      `[objectives-lint] Coverage mismatch: selected=${expected.length} scanned=${scanned.length}.`
+    );
+    console.error(`[objectives-lint] Selected: ${expected.join(', ') || '<none>'}`);
+    console.error(`[objectives-lint] Scanned: ${scanned.join(', ') || '<none>'}`);
+    process.exit(1);
+  }
+  console.log(`[objectives-lint] Coverage verified: selected=${expected.length} scanned=${scanned.length}.`);
+}
 
 const enforceRlsMissingLegacy = String(process.env.OBJECTIVES_ENFORCE_RLS_MISSING || '0') === '1' && hasIncludeFilter;
 const enforcePolicyMissingLegacy = String(process.env.OBJECTIVES_ENFORCE_POLICY_MISSING || '0') === '1' && hasIncludeFilter;
@@ -154,16 +194,20 @@ for (const rel of files) {
   const lines = content.split(/\r?\n/);
   const createdTables = [];
   const rlsEnabledTables = new Set();
+  // The canonical helper enables RLS and creates its service_role policy together.
+  const serviceOnlyTables = new Set([...content.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ')
+    .matchAll(/^\s*(?:SELECT|PERFORM)\s+public\.enforce_service_only_rls_v1\s*\(\s*'("?[A-Za-z0-9_]+"?\."?[A-Za-z0-9_]+"?)'\s*::\s*regclass\s*\)\s*;/gmi)]
+    .map((match) => match[1].replace(/"/g, '')));
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const isSql = /\.(sql)$/i.test(rel);
 
     // DSN URL
-    if (/postgres(ql)?:\/\//i.test(line) && !isSuppressed(lines, i, 'DSN_URL')) {
+    if (/postgres(ql)?:\/\/(?!\[redacted\](?=['"`]|$))/i.test(line) && !isSuppressed(lines, i, 'DSN_URL')) {
       violations.push({ file: relPosix, line: i + 1, rule: 'DSN_URL', msg: RULES.DSN_URL.msg });
     }
     // Supabase URL
-    if (/https?:\/\/[^\s'"`]+supabase\.co/i.test(line) && !isSuppressed(lines, i, 'SUPABASE_URL')) {
+    if (/https?:\/\/[a-z0-9-]+\.supabase\.co\b/i.test(line) && !isSuppressed(lines, i, 'SUPABASE_URL')) {
       violations.push({ file: relPosix, line: i + 1, rule: 'SUPABASE_URL', msg: RULES.SUPABASE_URL.msg });
     }
     // Localhost literals (tests excluded by path filter)
@@ -218,8 +262,9 @@ for (const rel of files) {
   if (/\.(sql)$/i.test(rel) && createdTables.length) {
     for (const t of createdTables) {
       const tName = (t.schema ? `${t.schema}.` : '') + t.table;
+      const serviceOnly = serviceOnlyTables.has(tName);
       const suppressed = /objectives:allow\s+RLS_MISSING\b/i.test(content);
-      if (!suppressed && !rlsEnabledTables.has(tName) && !rlsEnabledTables.has(t.table)) {
+      if (!suppressed && !serviceOnly && !rlsEnabledTables.has(tName) && !rlsEnabledTables.has(t.table)) {
         rlsMissing.push({
           file: relPosix,
           line: 1,
@@ -233,7 +278,7 @@ for (const rel of files) {
       const supPol = /objectives:allow\s+POLICY_MISSING\b/i.test(content);
       const esc = tName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const rePolicy = new RegExp(`CREATE\\s+POLICY[\\s\\S]*?\\bON\\s+(?:ONLY\\s+)?(?:"?${esc}"?)`, 'i');
-      if (!rePolicy.test(content) && !supPol) {
+      if (!serviceOnly && !rePolicy.test(content) && !supPol) {
         const rePolAlt = new RegExp(`CREATE\\s+POLICY[\\s\\S]*?\\bON\\s+[\\"\\w.]*${t.table}\\b`, 'i');
         if (!rePolAlt.test(content)) {
           policyMissing.push({

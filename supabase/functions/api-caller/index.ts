@@ -1,5 +1,16 @@
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
-import { authorizeEdgeRequest } from "./auth.mjs";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { authorizeApiCallerOperation, authorizeEdgeRequest } from "./auth.mjs";
+import { executeBoundedEgress } from "./egress.mjs";
+import { createGuardedProxyFetch } from "./proxy.mjs";
+import {
+  buildCompactBatchResponse,
+  compactBatchJobResult,
+  InvocationValidationError,
+  MAX_BATCH_CONCURRENCY,
+  MAX_BATCH_SIZE,
+  mergeServerDispatch,
+  validateInvocationPayload,
+} from "./invocation.mjs";
 import { readEnv, normaliseHeaders, toResponseBody } from "./_shared/mod.mjs";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -41,7 +52,26 @@ type EgressPolicy = {
   maxTimeoutSeconds: number;
   followRedirects: boolean;
   headerAllowlist: string[];
+  transportMode: "direct_trusted_host" | "guarded_proxy";
+  maxRedirects: number;
+  maxResponseBytes: number;
 };
+
+type DenoNetworkRuntime = {
+  resolveDns?: (
+    hostname: string,
+    recordType: "A" | "AAAA",
+    options?: { signal?: AbortSignal },
+  ) => Promise<string[]>;
+  createHttpClient?: (options: {
+    proxy: {
+      url: string;
+      basicAuth?: { username: string; password: string };
+    };
+  }) => unknown;
+};
+
+const denoNetwork = Deno as unknown as DenoNetworkRuntime;
 
 const textEncoder = new TextEncoder();
 
@@ -55,6 +85,9 @@ if (RAW_EDGE_DB_JWT && !EDGE_DB_JWT) {
   console.warn("[api-caller] ignoring invalid API_CALLER_DB_JWT shape; expected JWT with 3 segments");
 }
 const EDGE_REQUIRE_DB_JWT = readEnv("EDGE_REQUIRE_DB_JWT", []) === "1";
+const GUARDED_EGRESS_PROXY_URL = readEnv("API_CALLER_GUARDED_EGRESS_PROXY_URL", []);
+const GUARDED_EGRESS_PROXY_USERNAME = readEnv("API_CALLER_GUARDED_EGRESS_PROXY_USERNAME", []);
+const GUARDED_EGRESS_PROXY_PASSWORD = readEnv("API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD", []);
 let supabase = null as ReturnType<typeof createClient> | null;
 if (SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT) {
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -63,7 +96,6 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT) {
     global: { headers: { Authorization: `Bearer ${EDGE_DB_JWT}` } },
   });
 }
-
 if (!supabase) {
   console.error(
     EDGE_REQUIRE_DB_JWT
@@ -72,44 +104,12 @@ if (!supabase) {
   );
 }
 
-const parseRequest = async (req: Request): Promise<CallRequest> => {
+const parseRequest = async (req: Request): Promise<unknown> => {
   const contentType = req.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
     throw new Error("Unsupported content type. Expected application/json.");
   }
   return (await req.json()) as CallRequest;
-};
-
-const encodeBase64 = (bytes: Uint8Array): string => {
-  if (!bytes.length) return "";
-
-  const chunkSize = 0x8000;
-  const parts: string[] = [];
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    parts.push(String.fromCharCode(...bytes.subarray(i, i + chunkSize)));
-  }
-  return btoa(parts.join(""));
-};
-
-const readUpstreamResponseBody = async (response: Response): Promise<unknown> => {
-  const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
-  const isJson = contentType.includes("application/json") || contentType.includes("+json");
-  const isText =
-    contentType.startsWith("text/") ||
-    contentType.includes("application/xml") ||
-    contentType.includes("application/xhtml") ||
-    contentType.includes("application/x-www-form-urlencoded") ||
-    contentType.includes("application/javascript");
-
-  if (isJson || !contentType || isText) {
-    return await toResponseBody(response);
-  }
-
-  const buffer = new Uint8Array(await response.arrayBuffer());
-  return {
-    __edge_encoding: "base64",
-    data: encodeBase64(buffer),
-  };
 };
 
 const parseBoolean = (value: unknown, fallback: boolean): boolean => {
@@ -139,6 +139,14 @@ const parseStringArray = (value: unknown): string[] => {
   return Array.from(new Set(normalized));
 };
 
+const parsePolicyStringArray = (
+  policySource: Record<string, unknown>,
+  key: string,
+  fallback: string[],
+): string[] => Object.prototype.hasOwnProperty.call(policySource, key)
+  ? parseStringArray(policySource[key])
+  : [...fallback];
+
 const defaultEgressPolicy = (): EgressPolicy => ({
   enforceHttpsOnly: true,
   blockPrivateNetworks: true,
@@ -149,6 +157,9 @@ const defaultEgressPolicy = (): EgressPolicy => ({
   maxTimeoutSeconds: 60,
   followRedirects: false,
   headerAllowlist: ["accept", "content-type", "authorization", "x-api-key", "api-key", "user-agent"],
+  transportMode: "guarded_proxy",
+  maxRedirects: 3,
+  maxResponseBytes: 1_048_576,
 });
 
 const resolveEgressPolicy = (envelope: unknown): EgressPolicy | null => {
@@ -158,75 +169,35 @@ const resolveEgressPolicy = (envelope: unknown): EgressPolicy | null => {
 
   const policySource = record.policy && typeof record.policy === "object" ? record.policy : {};
   const defaults = defaultEgressPolicy();
+  const normalizedPolicySource = policySource as Record<string, unknown>;
+
+  const requestedTransport = String((policySource as any).transport_mode ?? "").trim().toLowerCase();
+  const transportMode = String(record.managed_by ?? "").trim().toLowerCase() === "integration_plugin"
+    ? "guarded_proxy"
+    : requestedTransport === "direct_trusted_host"
+    ? "direct_trusted_host"
+    : defaults.transportMode;
 
   return {
     enforceHttpsOnly: parseBoolean((policySource as any).enforce_https_only, defaults.enforceHttpsOnly),
     blockPrivateNetworks: parseBoolean((policySource as any).block_private_networks, defaults.blockPrivateNetworks),
-    domainAllowlist: parseStringArray((policySource as any).domain_allowlist),
-    domainDenylist: parseStringArray((policySource as any).domain_denylist),
-    allowedMethods: parseStringArray((policySource as any).allowed_methods).map((method) => method.toUpperCase()),
+    domainAllowlist: parsePolicyStringArray(normalizedPolicySource, "domain_allowlist", defaults.domainAllowlist),
+    domainDenylist: parsePolicyStringArray(normalizedPolicySource, "domain_denylist", defaults.domainDenylist),
+    allowedMethods: parsePolicyStringArray(normalizedPolicySource, "allowed_methods", defaults.allowedMethods)
+      .map((method) => method.toUpperCase()),
     maxPayloadBytes: parseInteger((policySource as any).max_payload_bytes, defaults.maxPayloadBytes, 1, 20_000_000),
     maxTimeoutSeconds: parseInteger((policySource as any).max_timeout_seconds, defaults.maxTimeoutSeconds, 1, 600),
     followRedirects: parseBoolean((policySource as any).follow_redirects, defaults.followRedirects),
-    headerAllowlist: parseStringArray((policySource as any).header_allowlist),
+    headerAllowlist: parsePolicyStringArray(normalizedPolicySource, "header_allowlist", defaults.headerAllowlist),
+    transportMode,
+    maxRedirects: parseInteger((policySource as any).max_redirects, defaults.maxRedirects, 0, 10),
+    maxResponseBytes: parseInteger(
+      (policySource as any).max_response_bytes,
+      defaults.maxResponseBytes,
+      1,
+      20_000_000,
+    ),
   };
-};
-
-const isIpv4Literal = (host: string): boolean => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
-
-const toIpv4Octets = (host: string): number[] | null => {
-  if (!isIpv4Literal(host)) return null;
-  const octets = host.split(".").map((entry) => Number.parseInt(entry, 10));
-  if (octets.some((value) => !Number.isFinite(value) || value < 0 || value > 255)) return null;
-  return octets;
-};
-
-const isPrivateIpv4 = (host: string): boolean => {
-  const octets = toIpv4Octets(host);
-  if (!octets) return false;
-  const [a, b] = octets;
-
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 0) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  if (a === 198 && (b === 18 || b === 19)) return true;
-  return false;
-};
-
-const isPrivateIpv6 = (host: string): boolean => {
-  const normalized = host.trim().toLowerCase();
-  if (!normalized) return false;
-  if (normalized === "::1") return true;
-  if (normalized.startsWith("fe8") || normalized.startsWith("fe9") || normalized.startsWith("fea") ||
-      normalized.startsWith("feb")) {
-    return true;
-  }
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
-  return false;
-};
-
-const isLocalHostName = (host: string): boolean => {
-  const normalized = host.trim().toLowerCase();
-  return normalized === "localhost" || normalized.endsWith(".localhost");
-};
-
-const matchesDomainPattern = (host: string, pattern: string): boolean => {
-  const normalizedHost = host.trim().toLowerCase();
-  const normalizedPattern = pattern.trim().toLowerCase();
-  if (!normalizedHost || !normalizedPattern) return false;
-  if (normalizedPattern === "*") return true;
-
-  if (normalizedPattern.startsWith("*.")) {
-    const suffix = normalizedPattern.slice(2);
-    if (!suffix) return false;
-    return normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`);
-  }
-
-  return normalizedHost === normalizedPattern || normalizedHost.endsWith(`.${normalizedPattern}`);
 };
 
 const resolveBodyForDispatch = (
@@ -268,39 +239,7 @@ const enforceEgressPolicy = (
     throw new Error("Missing url");
   }
 
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(payload.url);
-  } catch (_err) {
-    throw new Error(`Egress policy violation: invalid URL (${payload.url})`);
-  }
-
-  const host = parsedUrl.hostname.toLowerCase();
-  if (policy.enforceHttpsOnly && parsedUrl.protocol.toLowerCase() !== "https:") {
-    throw new Error("Egress policy violation: only https:// targets are allowed");
-  }
-
-  if (policy.blockPrivateNetworks) {
-    if (isLocalHostName(host) || isPrivateIpv4(host) || isPrivateIpv6(host)) {
-      throw new Error(`Egress policy violation: private or local network target blocked (${host})`);
-    }
-  }
-
-  if (policy.domainDenylist.length > 0) {
-    const denied = policy.domainDenylist.some((pattern) => matchesDomainPattern(host, pattern));
-    if (denied) {
-      throw new Error(`Egress policy violation: domain denied by policy (${host})`);
-    }
-  }
-
-  if (policy.domainAllowlist.length > 0) {
-    const allowed = policy.domainAllowlist.some((pattern) => matchesDomainPattern(host, pattern));
-    if (!allowed) {
-      throw new Error(`Egress policy violation: domain not present in allowlist (${host})`);
-    }
-  }
-
-  if (policy.allowedMethods.length > 0 && !policy.allowedMethods.includes(method)) {
+  if (!policy.allowedMethods.includes(method)) {
     throw new Error(`Egress policy violation: HTTP method ${method} is not allowed`);
   }
 
@@ -312,7 +251,7 @@ const enforceEgressPolicy = (
     throw new Error(`Egress policy violation: payload size ${payloadBytes} exceeds limit ${policy.maxPayloadBytes}`);
   }
 
-  if (policy.headerAllowlist.length > 0 && payload.headers) {
+  if (payload.headers) {
     for (const key of Object.keys(payload.headers)) {
       const normalized = key.trim().toLowerCase();
       if (!normalized) continue;
@@ -323,53 +262,61 @@ const enforceEgressPolicy = (
   }
 };
 
+const resolveDnsForEgress = async (
+  hostname: string,
+  recordType: "A" | "AAAA",
+  options: { signal?: AbortSignal } = {},
+): Promise<string[]> => {
+  if (typeof denoNetwork.resolveDns !== "function") {
+    throw new Error("Deno.resolveDns is unavailable");
+  }
+  const resolveOptions = options.signal ? { signal: options.signal } : undefined;
+  if (recordType === "A") {
+    return await denoNetwork.resolveDns(hostname, "A", resolveOptions);
+  }
+  return await denoNetwork.resolveDns(hostname, "AAAA", resolveOptions);
+};
+
+const guardedProxyFetch = createGuardedProxyFetch({
+  url: GUARDED_EGRESS_PROXY_URL,
+  username: GUARDED_EGRESS_PROXY_USERNAME,
+  password: GUARDED_EGRESS_PROXY_PASSWORD,
+  createHttpClient: denoNetwork.createHttpClient,
+  fetchImpl: fetch as (url: string, init: RequestInit & { client?: unknown }) => Promise<Response>,
+});
+
 const runFetch = async (
   payload: CallRequest,
   egressEnvelope?: EgressPolicyEnvelope | null,
 ): Promise<CallResponse> => {
   if (!payload.url) throw new Error("Missing url");
   const method = (payload.method ?? "POST").toUpperCase() as HttpMethod;
+  const supportedMethods: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+  if (!supportedMethods.includes(method)) {
+    throw new Error(`Egress policy violation: unsupported HTTP method ${method}`);
+  }
   const timeoutSeconds = Math.max(payload.timeout_seconds ?? 30, 1);
   const timeoutMs = timeoutSeconds * 1000;
   const requestBody = resolveBodyForDispatch(method, payload.body);
   const egressPolicy = resolveEgressPolicy(egressEnvelope ?? null);
 
-  if (egressPolicy) {
-    enforceEgressPolicy(payload, method, timeoutSeconds, requestBody.payloadBytes, egressPolicy);
+  if (!egressPolicy) {
+    throw new Error("Egress policy violation: effective policy is missing or disabled");
   }
+  enforceEgressPolicy(payload, method, timeoutSeconds, requestBody.payloadBytes, egressPolicy);
 
-  const controller = new AbortController();
-  const timer = timeoutMs > 0
-    ? setTimeout(() => controller.abort(), timeoutMs)
-    : null;
-
-  const start = performance.now();
-  let response: Response | null = null;
-  try {
-    response = await fetch(payload.url, {
-      method,
-      headers: payload.headers,
-      body: requestBody.body,
-      redirect: egressPolicy?.followRedirects ? "follow" : "manual",
-      signal: controller.signal,
-    });
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-
-  const latencyMs = Math.round(performance.now() - start);
-
-  if (!response) {
-    throw new Error("Fetch failed without a response");
-  }
-
-  return {
-    status: response.status,
-    completed: true,
-    headers: normaliseHeaders(response.headers),
-    body: await readUpstreamResponseBody(response),
-    latency_ms: latencyMs,
-  };
+  return await executeBoundedEgress({
+    url: payload.url,
+    method,
+    headers: payload.headers,
+    body: requestBody.body,
+    timeoutMs,
+    policy: egressPolicy,
+    resolveDns: resolveDnsForEgress,
+    guardedFetch: GUARDED_EGRESS_PROXY_URL || GUARDED_EGRESS_PROXY_USERNAME || GUARDED_EGRESS_PROXY_PASSWORD
+      ? guardedProxyFetch
+      : undefined,
+  }) as CallResponse;
 };
 
 const ensureSupabase = () => {
@@ -395,41 +342,7 @@ const getJobConcurrencyDefault = () => {
     "API_CALLER_CONCURRENCY",
     "EDGE_API_CALLER_CONCURRENCY",
   ]);
-  return clampInt(raw, 5, 1, 25);
-};
-
-const mapWithConcurrency = async <T, R>(
-  items: T[],
-  concurrency: number,
-  handler: (item: T) => Promise<R>,
-): Promise<R[]> => {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = new Array(Math.min(concurrency, items.length)).fill(null).map(async () => {
-    while (true) {
-      const idx = cursor;
-      cursor += 1;
-      if (idx >= items.length) return;
-      results[idx] = await handler(items[idx]);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-};
-
-const mergeDispatch = (spec: any, override?: CallRequest): CallRequest => {
-  const mergedHeaders = {
-    ...(spec?.headers ?? {}),
-    ...(override?.headers ?? {}),
-  };
-
-  return {
-    url: override?.url ?? spec?.url,
-    method: ((override?.method ?? spec?.method ?? "POST") as HttpMethod),
-    headers: Object.keys(mergedHeaders).length ? mergedHeaders : undefined,
-    body: override?.body ?? spec?.body ?? {},
-    timeout_seconds: override?.timeout_seconds ?? spec?.timeout_seconds ?? 30,
-  };
+  return clampInt(raw, MAX_BATCH_CONCURRENCY, 1, MAX_BATCH_CONCURRENCY);
 };
 
 const logApiCall = async (
@@ -439,7 +352,7 @@ const logApiCall = async (
   responsePayload: CallResponse,
   errorMessage?: string | null,
 ) => {
-  await client.rpc("log_api_call_event", {
+  const { error } = await client.rpc("log_api_call_event", {
     p_job_id: jobId,
     p_request: {
       url: requestPayload.url ?? null,
@@ -456,6 +369,9 @@ const logApiCall = async (
     p_latency_ms: responsePayload.latency_ms,
     p_error: errorMessage ?? responsePayload.error ?? null,
   });
+  if (error) {
+    throw new Error(`log_api_call_event failed for job ${jobId}: ${error.message}`);
+  }
 };
 
 const resolveJobEgressPolicy = async (
@@ -477,19 +393,37 @@ const resolveJobEgressPolicy = async (
   return data as EgressPolicyEnvelope;
 };
 
+const renewClaimedLease = async (
+  client: ReturnType<typeof createClient>,
+  jobId: string,
+  leaseToken: string,
+) => {
+  const { error } = await client.rpc("renew_claimed_edge_job_lease_v1", {
+    p_job_id: jobId,
+    p_lease_token: leaseToken,
+  });
+  if (error) {
+    throw new Error(
+      `renew_claimed_edge_job_lease_v1 failed for job ${jobId}: ${error.message}`,
+    );
+  }
+};
+
 const executeClaimedJob = async (
   jobId: string,
   dispatch: CallRequest,
+  leaseToken: string,
   override?: CallRequest,
 ): Promise<{ job_id: string; result: CallResponse; success: boolean }> => {
   const client = ensureSupabase();
-  const mergedDispatch = mergeDispatch(dispatch, override);
-  const egressEnvelope = await resolveJobEgressPolicy(client, jobId);
+  const mergedDispatch = mergeServerDispatch(dispatch, override) as CallRequest;
 
   let callResult: CallResponse;
   let dispatchError: string | undefined;
 
   try {
+    const egressEnvelope = await resolveJobEgressPolicy(client, jobId);
+    await renewClaimedLease(client, jobId, leaseToken);
     callResult = await runFetch(mergedDispatch, egressEnvelope);
   } catch (err) {
     dispatchError = err instanceof Error ? err.message : "Unknown error";
@@ -503,24 +437,40 @@ const executeClaimedJob = async (
     };
   }
 
+  // Refresh again after the bounded network operation so even a near-600-second
+  // call has a full ownership window for compare-and-swap finalization.
+  await renewClaimedLease(client, jobId, leaseToken);
+
   const isSuccess = callResult.status >= 200 && callResult.status < 300;
 
   if (isSuccess) {
-    await client.rpc("mark_outbound_call_success", {
+    const { error: successError } = await client.rpc("mark_claimed_edge_job_success_v1", {
       p_job_id: jobId,
+      p_lease_token: leaseToken,
       p_status_code: callResult.status,
       p_headers: callResult.headers,
       p_body: callResult.body,
       p_latency_ms: callResult.latency_ms,
     });
+    if (successError) {
+      throw new Error(
+        `mark_claimed_edge_job_success_v1 failed for job ${jobId}: ${successError.message}`,
+      );
+    }
   } else {
-    await client.rpc("mark_outbound_call_failure", {
+    const { error: failureError } = await client.rpc("mark_claimed_edge_job_failure_v1", {
       p_job_id: jobId,
+      p_lease_token: leaseToken,
       p_status_code: callResult.status,
       p_headers: callResult.headers,
       p_body: callResult.body,
       p_error: dispatchError ?? callResult.error ?? `HTTP ${callResult.status}`,
     });
+    if (failureError) {
+      throw new Error(
+        `mark_claimed_edge_job_failure_v1 failed for job ${jobId}: ${failureError.message}`,
+      );
+    }
   }
 
   await logApiCall(client, jobId, mergedDispatch, callResult, dispatchError);
@@ -531,68 +481,114 @@ const executeClaimedJob = async (
 const executeJob = async (jobId: string, override?: CallRequest) => {
   const client = ensureSupabase();
 
-  const { error: claimError } = await client.rpc("mark_outbound_call_in_progress", { p_job_id: jobId });
+  const { data, error: claimError } = await client.rpc("claim_edge_job_by_id_v1", {
+    p_job_id: jobId,
+  });
   if (claimError) {
-    // If we cannot claim the job, treat it as a no-op to avoid duplicate sends.
+    const expectedNonclaimable =
+      claimError.code === "P0001" &&
+      /^claim_edge_job_by_id_v1: outbound call [0-9a-f-]+ is not claimable$/i.test(
+        String(claimError.message || ""),
+      );
+    if (!expectedNonclaimable) {
+      throw new Error(
+        `claim_edge_job_by_id_v1 failed: ${String(claimError.code || "unknown")}`,
+      );
+    }
     return {
       job_id: jobId,
       result: {
         status: 409,
         completed: false,
         headers: {},
-        body: { error: claimError.message, reason: "job_not_claimable" },
+        body: { reason: "job_not_claimable" },
         latency_ms: 0,
-        error: claimError.message,
+        error: "job_not_claimable",
       },
       success: false,
     };
   }
 
-  const { data: spec, error: specError } = await client.rpc("get_job_call_spec", {
-    p_job_id: jobId,
-  });
-  if (specError || !spec) {
-    throw new Error(`Failed to resolve call spec for job ${jobId}: ${specError?.message ?? "no data returned"}`);
+  const claim = (data as Array<{ job_id: string; lease_token: string }> | null)?.[0];
+  if (!claim?.job_id || claim.job_id !== jobId || !claim.lease_token) {
+    throw new Error(`claim_edge_job_by_id_v1 returned an invalid ownership envelope for job ${jobId}`);
   }
 
-  return await executeClaimedJob(jobId, spec as CallRequest, override);
+  return await executeClaimedJobById(jobId, claim.lease_token, override);
+};
+
+const executeClaimedJobById = async (
+  jobId: string,
+  leaseToken: string,
+  override?: CallRequest,
+) => {
+  const client = ensureSupabase();
+  const { data: spec, error: specError } = await client.rpc("get_claimed_edge_job_call_spec_v1", {
+    p_job_id: jobId,
+    p_lease_token: leaseToken,
+  });
+  if (specError) {
+    throw new Error(
+      `get_claimed_edge_job_call_spec_v1 failed for job ${jobId}: ${specError.message}`,
+    );
+  }
+  if (!spec) {
+    return {
+      job_id: jobId,
+      success: false,
+      result: {
+        status: 0,
+        completed: false,
+        latency_ms: 0,
+        error: "job_spec_invalid",
+      },
+    };
+  }
+  return await executeClaimedJob(jobId, spec as CallRequest, leaseToken, override);
 };
 
 const processBatch = async (batch: number, concurrency: number) => {
   const client = ensureSupabase();
-  const { data, error } = await client.rpc("claim_pending_edge_jobs", {
-    p_batch: batch,
-  });
-  if (error) {
-    throw new Error(`claim_pending_edge_jobs failed: ${error.message}`);
+  if (concurrency !== 1) {
+    throw new InvocationValidationError("Batch execution concurrency must remain one", 500);
   }
 
-  if (!data || data.length === 0) {
-    return { jobs: [] };
-  }
+  const results = [];
+  for (let index = 0; index < Math.min(batch, MAX_BATCH_SIZE); index += 1) {
+    // Claim only when the sole worker is ready to execute. This prevents a later
+    // job's lease clock from running while earlier network calls are in flight.
+    const { data, error } = await client.rpc("claim_pending_edge_job_ids_v1", {
+      p_batch: 1,
+    });
+    if (error) {
+      throw new Error(`claim_pending_edge_job_ids_v1 failed: ${error.message}`);
+    }
+    if (!data || data.length === 0) break;
 
-  const jobs = data as Array<{ job_id: string; dispatch: CallRequest }>;
-  const results = await mapWithConcurrency(jobs, concurrency, async (job) => {
+    const job = (data as Array<{ job_id: string; lease_token: string }>)[0];
+    if (!job?.job_id || !job?.lease_token) {
+      throw new Error("claim_pending_edge_job_ids_v1 returned an invalid ownership envelope");
+    }
     try {
-      return await executeClaimedJob(job.job_id, job.dispatch);
+      results.push(compactBatchJobResult(
+        await executeClaimedJobById(job.job_id, job.lease_token),
+      ));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      return {
+      results.push(compactBatchJobResult({
         job_id: job.job_id,
         success: false,
         result: {
           status: 500,
           completed: false,
-          headers: {},
-          body: { error: message, reason: "api_caller_execute_failed" },
           latency_ms: 0,
           error: message,
         },
-      };
+      }));
     }
-  });
+  }
 
-  return { jobs: results };
+  return buildCompactBatchResponse(results);
 };
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -604,7 +600,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    const auth = authorizeEdgeRequest(req);
+    const auth = await authorizeEdgeRequest(req);
     if (!auth.ok) {
       return new Response(JSON.stringify({ error: auth.message }), {
         status: auth.status,
@@ -612,18 +608,31 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    const payload = await parseRequest(req);
+    const invocation = validateInvocationPayload(await parseRequest(req));
+    const operationAuth = authorizeApiCallerOperation(auth, invocation.operation);
+    if (!operationAuth.ok) {
+      return new Response(JSON.stringify({ error: operationAuth.message }), {
+        status: operationAuth.status,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const payload = invocation.payload as CallRequest;
 
-    if (payload.batch && payload.batch > 0) {
-      const concurrency = clampInt(payload.concurrency, getJobConcurrencyDefault(), 1, 25);
-      const batchResult = await processBatch(Math.max(payload.batch, 1), concurrency);
+    if (invocation.operation === "batch" && payload.batch) {
+      const concurrency = clampInt(
+        payload.concurrency,
+        getJobConcurrencyDefault(),
+        1,
+        MAX_BATCH_CONCURRENCY,
+      );
+      const batchResult = await processBatch(Math.min(payload.batch, MAX_BATCH_SIZE), concurrency);
       return new Response(JSON.stringify(batchResult), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }
 
-    if (payload.job_id) {
+    if (invocation.operation === "job" && payload.job_id) {
       const dispatchResult = await executeJob(payload.job_id, payload);
       return new Response(JSON.stringify(dispatchResult), {
         status: dispatchResult.success ? 200 : 502,
@@ -631,13 +640,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    return new Response(JSON.stringify({
-      error: "Missing job_id or batch. Edge function processes queued jobs only.",
-    }), {
-      status: 422,
-      headers: { "content-type": "application/json" },
-    });
+    throw new InvocationValidationError("Missing job_id or batch");
   } catch (err) {
+    if (err instanceof InvocationValidationError) {
+      return new Response(JSON.stringify({ error: err.message }), {
+        status: err.status,
+        headers: { "content-type": "application/json" },
+      });
+    }
     const response: CallResponse = {
       status: 500,
       completed: false,

@@ -1,6 +1,9 @@
 import React from "react";
 import { screen } from "@testing-library/react";
 import { renderWithIntl } from "./test-utils";
+import { createUiTranslator } from "../../packages/ui/src/i18n";
+import portalEn from "../../apps/portal/messages/en.json";
+import portalAr from "../../apps/portal/messages/ar.json";
 
 jest.mock("@masarx/ui", () => ({
   __esModule: true,
@@ -48,6 +51,18 @@ describe("ObservabilityTracePage", () => {
     allowedSizes: [10, 25, 50],
     defaultPageSize: 10,
   };
+
+  it.each([
+    ["en", portalEn, "Activity timeline", "Tracking key: activity-1", "No activity events recorded for this reference."],
+    ["ar", portalAr, "الخط الزمني للنشاط", "مفتاح التتبع: activity-1", "لا توجد أحداث نشاط مسجلة لهذا المرجع."],
+  ] as const)("renders real Portal %s activity labels and tracking identity", (locale, messages, title, tracking, empty) => {
+    renderWithIntl(<ObservabilityTracePage correlationId="activity-1" trace={{}}
+      errorMessage={null} paginationSettings={paginationSettings} testIdPrefix="portal"
+      t={createUiTranslator(undefined, { locale, messages })} />);
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText(tracking)).toBeInTheDocument();
+    expect(screen.getByText(empty)).toBeInTheDocument();
+  });
 
   it("shows ready state and renders event sections when trace data is available", () => {
     renderWithIntl(

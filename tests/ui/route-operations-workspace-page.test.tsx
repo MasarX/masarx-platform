@@ -313,7 +313,7 @@ describe("RouteOperationsWorkspacePage", () => {
     const trackingWorkspaceLink = screen
       .getByText("ui.routeOperations.experience.openTracking")
       .closest("a");
-    expect(trackingWorkspaceLink).toHaveAttribute("href", "/console/tracking");
+    expect(trackingWorkspaceLink).toBeNull();
     expect(screen.getByText("ui.routeOperations.selected.emptyTitle")).toBeInTheDocument();
     expect(uiClient.dashboardMetrics).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -388,6 +388,72 @@ describe("RouteOperationsWorkspacePage", () => {
       "href",
       "/portal/commands?category=resource%3Aroutes&access=allowed"
     );
+  });
+
+  it.each([
+    { label: "prefixed Portal", base: "/portal", href: "/portal/tracking", expected: "/portal/tracking" },
+    { label: "root Portal", base: "", href: "/portal/tracking", expected: "/tracking" },
+    { label: "slash-root Portal", base: "/", href: "/tracking", expected: "/tracking" },
+    { label: "root entry on prefixed Portal", base: "/portal", href: "/tracking?tracking_number=ABC%2F123#results", expected: "/portal/tracking?tracking_number=ABC%2F123#results" },
+  ])("uses the registered tracking destination for $label", async ({ base, href, expected }) => {
+    createAuthenticatedSession();
+    const uiClient = createUiClientMock();
+    const context = await uiClient.context();
+    context.navigation.app = "portal";
+    context.navigation.sections.push({
+      id: "tracking", label: "Tracking", items: [{
+        id: "group", label: "Group", disabled_reason: "group_route_unavailable",
+        items: [{ id: "portal-tracking", label: "Tracking", href }],
+      }],
+    });
+    mockedCreateUiServerClient.mockReturnValue(uiClient);
+    const node = await RouteOperationsWorkspacePage({ appKey: "portal", appBasePath: base });
+    renderWithIntl(node as ReactElement);
+    expect(screen.getByText("ui.routeOperations.experience.openTracking").closest("a"))
+      .toHaveAttribute("href", expected);
+  });
+
+  it.each([
+    { label: "missing registration", entry: null },
+    { label: "missing href", entry: { id: "portal-tracking" } },
+    { label: "disabled tracking item", entry: { id: "portal-tracking", href: "/portal/tracking", disabled_reason: "missing_capability" } },
+    { label: "other app identity", entry: { id: "console-tracking", href: "/portal/tracking" } },
+    ...[
+      "", "   ", "javascript:alert(1)", "https://evil.invalid/tracking",
+      "//evil.invalid/tracking", "/console/tracking", "/portal/tracking-map",
+      "/portal/../tracking", "/portal/%2e%2e/tracking", "/portal\\tracking",
+      "/portal/tracking\n", "/portal/tracking?x=\u0001",
+    ].map(href => ({ label: `unsafe or unsupported href ${JSON.stringify(href)}`, entry: { id: "portal-tracking", href } })),
+  ])("keeps tracking non-clickable for $label", async ({ entry }) => {
+    createAuthenticatedSession();
+    const uiClient = createUiClientMock();
+    const context = await uiClient.context();
+    context.navigation.app = "portal";
+    context.navigation.sections.push({
+      id: "tracking", label: "Tracking",
+      items: entry ? [{ label: "Tracking", ...entry }] : [],
+    });
+    mockedCreateUiServerClient.mockReturnValue(uiClient);
+    const node = await RouteOperationsWorkspacePage({ appKey: "portal", appBasePath: "" });
+    renderWithIntl(node as ReactElement);
+    expect(screen.getByText("ui.routeOperations.experience.openTracking").closest("a")).toBeNull();
+  });
+
+  it("does not select an enabled duplicate over a disabled tracking registration", async () => {
+    createAuthenticatedSession();
+    const uiClient = createUiClientMock();
+    const context = await uiClient.context();
+    context.navigation.app = "portal";
+    context.navigation.sections.push({
+      id: "tracking", label: "Tracking", items: [
+        { id: "portal-tracking", label: "Tracking", href: "/portal/tracking" },
+        { id: "portal-tracking", label: "Tracking", href: "/portal/tracking", disabled_reason: "missing_capability" },
+      ],
+    });
+    mockedCreateUiServerClient.mockReturnValue(uiClient);
+    const node = await RouteOperationsWorkspacePage({ appKey: "portal", appBasePath: "" });
+    renderWithIntl(node as ReactElement);
+    expect(screen.getByText("ui.routeOperations.experience.openTracking").closest("a")).toBeNull();
   });
 
   it("renders fallback non-link actions when appBasePath is unsafe", async () => {

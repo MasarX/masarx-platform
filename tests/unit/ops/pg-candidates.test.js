@@ -5,6 +5,7 @@ const {
   buildSupabasePoolerHostVariants,
   buildSupabasePoolerPortVariants,
   buildSupabasePoolerUserVariant,
+  resolveSelectedPoolerRoute,
 } = require('../../../scripts/utils/pg-candidates');
 
 describe('utils/pg-candidates', () => {
@@ -166,6 +167,66 @@ describe('utils/pg-candidates', () => {
         dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
       },
     ]);
+  });
+
+  test('pooler host variants drop stale hostaddr and add only a freshly resolved hostaddr', async () => {
+    const staleDsn =
+      (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require&hostaddr=192.0.2.10'].join(""));
+    const candidates = await buildDbConnectionCandidates(
+      [{ name: 'DATABASE_URL', dsn: staleDsn }],
+      {
+        ensureIpv4HostnameFn: jest.fn(async (value) => value),
+        ensureHostaddrFn: jest.fn(async (value) => {
+          const parsed = new URL(value);
+          if (parsed.hostname !== 'aws-0-us-east-1.pooler.supabase.com') return value;
+          parsed.searchParams.set('hostaddr', '192.0.2.10');
+          return parsed.toString();
+        }),
+      },
+    );
+
+    const rewritten = candidates.filter((candidate) => candidate.name.includes('poolerhost:aws-0'));
+    expect(rewritten).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'DATABASE_URL+poolerhost:aws-0',
+        dsn: expect.stringContaining('aws-0-us-east-1.pooler.supabase.com'),
+      }),
+      expect.objectContaining({
+        name: 'DATABASE_URL+poolerhost:aws-0+hostaddr',
+        dsn: expect.stringContaining('hostaddr=192.0.2.10'),
+      }),
+    ]));
+    expect(rewritten.some((candidate) => candidate.dsn.includes('hostaddr=192.0.2.10'))).toBe(false);
+  });
+
+  test('resolves a logical shard host from a selected ipv4 pooler candidate', () => {
+    expect(resolveSelectedPoolerRoute({
+      connectionString: (['postgresql',":","/","/",'postgres.wk123',":",'pw',"@",'192.0.2.10',":",'5432',"/",'postgres'].join("")),
+      candidateName: 'DATABASE_URL_POOLER+poolerhost:aws-0+ipv4host',
+      fallbackHost: 'aws-1-us-east-1.pooler.supabase.com',
+      fallbackPort: '5432',
+      fallbackUser: 'postgres.wk123',
+    })).toEqual({
+      candidateName: 'DATABASE_URL_POOLER+poolerhost:aws-0+ipv4host',
+      host: 'aws-0-us-east-1.pooler.supabase.com',
+      port: '5432',
+      user: 'postgres.wk123',
+    });
+  });
+
+  test('preserves canonical pooler metadata when a direct database candidate wins readiness', () => {
+    expect(resolveSelectedPoolerRoute({
+      connectionString: (['postgresql',":","/","/",'postgres',":",'hhmigwyjikkyolyiwoxwizvv',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+      candidateName: 'DATABASE_URL_DIRECT',
+      fallbackHost: 'aws-1-us-east-1.pooler.supabase.com',
+      fallbackPort: '6543',
+      fallbackUser: 'postgres.wk123',
+    })).toEqual({
+      candidateName: 'DATABASE_URL_DIRECT',
+      host: '',
+      port: '6543',
+      user: 'postgres.wk123',
+    });
   });
 
   test('pooler port variant helper toggles between transaction and session ports', () => {

@@ -87,6 +87,54 @@ function isProtectedPreviewHost(raw) {
   }
 }
 
+function normalizeLandingProofEndpoint(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error('Landing intake endpoints must not use protocol-relative URLs, backslashes or control characters.');
+  }
+  const parsed = new URL(value, value.startsWith('/') ? 'https://landing-proof.invalid' : undefined);
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error('Landing intake endpoints must use HTTP(S) URLs without credentials.');
+  }
+  const pathname = parsed.pathname.replace(/\/+$/g, '') || '/';
+  return value.startsWith('/') ? pathname : `${parsed.origin}${pathname}`;
+}
+
+function isLocalSiteUrl(raw) {
+  try {
+    const { protocol, hostname } = new URL(String(raw || '').trim());
+    return ['http:', 'https:'].includes(protocol) && (
+      hostname === 'localhost' || hostname.endsWith('.localhost') ||
+      hostname === '127.0.0.1' || hostname === '[::1]'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function assertLandingEndpointSeparation({ contactEndpoint, tenantSignupEndpoint, siteUrl } = {}) {
+  const contact = normalizeLandingProofEndpoint(contactEndpoint);
+  const tenantSignup = normalizeLandingProofEndpoint(tenantSignupEndpoint);
+  if (!contact) throw new Error('LANDING_CONTACT_ENDPOINT is required for release landing proof.');
+  if (!tenantSignup) {
+    throw new Error('LANDING_TENANT_SIGNUP_ENDPOINT is required for release landing proof and must not fall back to contact.');
+  }
+  for (const [name, endpoint, intake, mock] of [
+    ['LANDING_CONTACT_ENDPOINT', contact, 'marketing-lead-intake', '/__landing-contact'],
+    ['LANDING_TENANT_SIGNUP_ENDPOINT', tenantSignup, 'tenant-signup-intake', '/__tenant-signup'],
+  ]) {
+    const pathname = new URL(endpoint, 'https://landing-proof.invalid').pathname;
+    const localMock = pathname === mock && isLocalSiteUrl(siteUrl) &&
+      (endpoint.startsWith('/') || isLocalSiteUrl(endpoint));
+    if (!pathname.endsWith(`/${intake}`) && !localMock) {
+      throw new Error(`${name} must point to ${intake}, or its approved local preview mock on a local site.`);
+    }
+  }
+  if (contact === tenantSignup) throw new Error('Landing contact and tenant signup endpoints must be distinct.');
+  return { contactEndpoint: contact, tenantSignupEndpoint: tenantSignup };
+}
+
 async function ensureProtectedPreviewBypass({
   env = process.env,
   fetchImpl = globalThis.fetch,
@@ -176,6 +224,16 @@ async function main(argv = process.argv.slice(2)) {
       return;
     }
 
+    case 'assert-landing-endpoint-separation': {
+      assertLandingEndpointSeparation({
+        contactEndpoint: process.env.LANDING_CONTACT_ENDPOINT,
+        tenantSignupEndpoint: process.env.LANDING_TENANT_SIGNUP_ENDPOINT,
+        siteUrl: process.env.LANDING_SITE_URL,
+      });
+      console.log('[release-verify] Landing proof endpoints are separated.');
+      return;
+    }
+
     default:
       throw new Error(`Unsupported --mode "${mode}".`);
   }
@@ -187,9 +245,12 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertLandingEndpointSeparation,
   buildPreviewManifestShellExports,
   ensureProtectedPreviewBypass,
   isProtectedPreviewHost,
+  isLocalSiteUrl,
+  normalizeLandingProofEndpoint,
   resolvePreviewIdentityIdFromEvent,
   serializeShellExports,
 };

@@ -37,7 +37,9 @@ const { spawn } = require('child_process');
 const path = require('path');
 const crypto = require('crypto');
 const { loadEnv } = require('../../utils/load-env');
+const { readEnvFile } = require('../../utils/env-file');
 const {
+  isCanonicalSupabaseProjectRef,
   listAuthSigningKeys,
   createAuthSigningKeyInUse,
   randomJwtSecret,
@@ -154,6 +156,125 @@ function resolveEdgeGuardSettings(secretMatches) {
   };
 }
 
+function normalizeWorkspaceMode(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  return mode === 'branch' || mode === 'project' ? mode : '';
+}
+
+function isSupabaseUrlBoundToProject(value, projectRef) {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    return (
+      parsed.protocol === 'https:' &&
+      !parsed.username &&
+      !parsed.password &&
+      !parsed.port &&
+      parsed.hostname === `${projectRef}.supabase.co` &&
+      (parsed.pathname === '' || parsed.pathname === '/') &&
+      !parsed.search &&
+      !parsed.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
+function resolveEnsureEdgeWorkspace({ env = process.env, persistedEnv = {} } = {}) {
+  const persistedModeRaw = String(
+    persistedEnv.PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE || '',
+  ).trim();
+  const processModeRaw = String(
+    env.PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE || env.WORKSPACE_MODE || '',
+  ).trim();
+  const persistedMode = normalizeWorkspaceMode(persistedModeRaw);
+  const processMode = normalizeWorkspaceMode(processModeRaw);
+  if (persistedModeRaw && !persistedMode) {
+    throw new Error(`Invalid persisted workspace mode '${persistedModeRaw}'`);
+  }
+  if (processModeRaw && !processMode) {
+    throw new Error(`Invalid process workspace mode '${processModeRaw}'`);
+  }
+  const workspaceMode = persistedMode || processMode;
+  const source = persistedMode
+    ? persistedEnv
+    : env;
+  const projectRef = String(source.SUPABASE_PROJECT_ID || '').trim();
+  const supabaseUrl = String(source.SUPABASE_URL || '').trim();
+  const branchParentRef = workspaceMode === 'branch'
+    ? String(source.SUPABASE_BRANCH_PARENT_REF || '').trim()
+    : '';
+
+  if (workspaceMode) {
+    if (!isCanonicalSupabaseProjectRef(projectRef)) {
+      throw new Error('Workspace env is missing canonical SUPABASE_PROJECT_ID');
+    }
+    if (!isSupabaseUrlBoundToProject(supabaseUrl, projectRef)) {
+      throw new Error('Workspace SUPABASE_URL does not match SUPABASE_PROJECT_ID');
+    }
+  }
+  if (workspaceMode === 'branch') {
+    if (
+      !isCanonicalSupabaseProjectRef(branchParentRef) ||
+      branchParentRef === projectRef
+    ) {
+      throw new Error('Branch env is missing canonical parent lineage');
+    }
+  }
+
+  return {
+    branchParentRef,
+    databaseSelectedDsnName: String(source.DATABASE_URL_SELECTED_DSN_NAME || '').trim(),
+    databaseUrl: String(source.DATABASE_URL || '').trim(),
+    databaseUrlDirect: String(source.DATABASE_URL_DIRECT || '').trim(),
+    databaseUrlPooler: String(source.DATABASE_URL_POOLER || '').trim(),
+    dbPass: String(source.SUPABASE_DB_PASSWORD || '').trim(),
+    jwtSecret: String(source.SUPABASE_JWT_SECRET || '').trim(),
+    poolerHost: String(source.SUPABASE_POOLER_HOST || '').trim(),
+    poolerPort: String(source.SUPABASE_POOLER_PORT || '').trim(),
+    poolerUser: String(source.SUPABASE_POOLER_USER || '').trim(),
+    projectRef,
+    region: String(source.SUPABASE_REGION || '').trim(),
+    supabaseUrl,
+    workspaceMode,
+  };
+}
+
+function buildEnvRewritePayload({
+  workspace = {},
+  anonKey,
+  serviceRoleKey,
+  jwtSecret,
+  edgeBundle = {},
+  edgeGuard = {},
+} = {}) {
+  return {
+    workspace_mode: workspace.workspaceMode || '',
+    branch_parent_ref: workspace.branchParentRef || '',
+    project_ref: workspace.projectRef || '',
+    supabase_url: workspace.supabaseUrl || '',
+    database_url: workspace.databaseUrlDirect || workspace.databaseUrl || '',
+    preferred_database_url: workspace.databaseUrl || '',
+    db_pass: workspace.dbPass || '',
+    pooler_host: workspace.poolerHost || '',
+    pooler_port: workspace.poolerPort || '',
+    pooler_user: workspace.poolerUser || '',
+    db_ready_candidate_name: workspace.databaseSelectedDsnName || '',
+    region: workspace.region || '',
+    anon_key: anonKey || '',
+    service_role_key: serviceRoleKey || '',
+    // Persist only a verified jwt secret. When absent/mismatched, clear it so
+    // future scripts do not mint invalid JWTs.
+    jwt_secret: jwtSecret || '',
+    webhook_db_jwt: edgeBundle.webhook_db_jwt || '',
+    api_caller_db_jwt: edgeBundle.api_caller_db_jwt || '',
+    api_gateway_db_jwt: edgeBundle.api_gateway_db_jwt || '',
+    label_renderer_db_jwt: edgeBundle.label_renderer_db_jwt || '',
+    edge_db_jwt: edgeBundle.api_gateway_db_jwt || '',
+    preview_mode: edgeGuard.previewMode,
+    edge_require_db_jwt: edgeGuard.edgeRequireDbJwt,
+  };
+}
+
 async function writeEnv({ envFile, payload }) {
   const script = path.join('scripts', 'ops', 'branches', 'gen-env.js');
   await new Promise((resolve, reject) => {
@@ -219,9 +340,17 @@ async function main() {
     traceparent: process.env.TRACEPARENT,
   });
 
-  const projectRef = String(process.env.SUPABASE_PROJECT_ID || '').trim();
+  const envFile = process.argv.includes('--file')
+    ? String(process.argv[process.argv.indexOf('--file') + 1] || '').trim()
+    : path.join('config', 'env', '.env.cloud');
+  const persistedEnv = readEnvFile(path.resolve(envFile)) || {};
+  const workspace = resolveEnsureEdgeWorkspace({
+    env: process.env,
+    persistedEnv,
+  });
+  const projectRef = workspace.projectRef;
   const token = String(process.env.SUPABASE_ACCESS_TOKEN || '').trim();
-  const supabaseUrl = String(process.env.SUPABASE_URL || '').trim();
+  const supabaseUrl = workspace.supabaseUrl;
   const fixJwtSecret = process.argv.includes('--fix-jwt-secret') || process.argv.includes('--rotate-jwt-secret');
   const requireLeastPrivilege = process.argv.includes('--require-least-privilege');
   const ttlSeconds = (() => {
@@ -233,10 +362,6 @@ async function main() {
   if (!projectRef) throw new Error('Missing SUPABASE_PROJECT_ID (set ENV_FILE=config/env/.env.cloud).');
   if (!token) throw new Error('Missing SUPABASE_ACCESS_TOKEN (required for Supabase Management API).');
   if (!supabaseUrl) throw new Error('Missing SUPABASE_URL (set ENV_FILE=config/env/.env.cloud).');
-
-  const envFile = process.argv.includes('--file')
-    ? String(process.argv[process.argv.indexOf('--file') + 1] || '').trim()
-    : path.join('config', 'env', '.env.cloud');
 
   emitTrace(trace, 'info', {
     step: 'start',
@@ -263,7 +388,7 @@ async function main() {
   let issuer = resolveJwtIssuer({ serviceKey: legacyService.api_key, anonKey: legacyAnon.api_key });
   let probeApiKey = legacyService.api_key;
 
-  let rawSecret = String(process.env.SUPABASE_JWT_SECRET || '').trim();
+  let rawSecret = workspace.jwtSecret;
   let effectiveSecret = null;
   let effectiveSecretLabel = '';
   let authPlaneMismatch = false;
@@ -467,22 +592,14 @@ async function main() {
 
   await writeEnv({
     envFile,
-    payload: {
-      project_ref: projectRef,
-      supabase_url: supabaseUrl,
-      anon_key: legacyAnon.api_key,
-      service_role_key: legacyService.api_key,
-      // Persist only a verified jwt secret. When absent/mismatched, clear it so
-      // future scripts do not mint invalid JWTs.
-      jwt_secret: leastPrivilegeReady ? rawSecret : '',
-      webhook_db_jwt: edgeBundle.webhook_db_jwt,
-      api_caller_db_jwt: edgeBundle.api_caller_db_jwt,
-      api_gateway_db_jwt: edgeBundle.api_gateway_db_jwt,
-      label_renderer_db_jwt: edgeBundle.label_renderer_db_jwt,
-      edge_db_jwt: edgeBundle.api_gateway_db_jwt,
-      preview_mode: edgeGuard.previewMode,
-      edge_require_db_jwt: edgeGuard.edgeRequireDbJwt,
-    },
+    payload: buildEnvRewritePayload({
+      workspace,
+      anonKey: legacyAnon.api_key,
+      serviceRoleKey: legacyService.api_key,
+      jwtSecret: leastPrivilegeReady ? rawSecret : '',
+      edgeBundle,
+      edgeGuard,
+    }),
   });
 
   console.log('[ensure-edge-role-api-keys] Updated ENV file:', envFile);
@@ -520,7 +637,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildEnvRewritePayload,
   resolveEdgeGuardSettings,
+  resolveEnsureEdgeWorkspace,
   decodeJwtHeaderAlg,
   waitForLegacyApiKeysToMatchSecret,
 };

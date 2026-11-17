@@ -154,7 +154,7 @@ describe('Webhook ACK history compatibility view', () => {
     expect(ackRow.ack_mode).toBe('accepted_async');
     expect(ackRow.ack_status_code).toBe(202);
     expect(ackRow.ack_body).toEqual(ackBody);
-    expect(ackRow.ack_headers).toEqual(ackHeaders);
+    expect(ackRow.ack_headers).toBe('REDACTED');
     expect(ackRow.ack_outcome).toBe('ack_sent');
     expect(ackRow.ack_reason).toBe('Webhook ACK emitted');
     expect(ackRow.validation_results).toEqual(validationResults);

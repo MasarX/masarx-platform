@@ -49,7 +49,7 @@ const t = (key: string, values: Record<string, string> = {}) => {
 
 const buildMe = (overrides: Partial<UiMe> = {}): UiMe => ({
   user: { id: "user-1", email: "user@example.com", user_type: "ops_admin" },
-  access_scope: { scope_type: "tenant", scope_id: "org-1" },
+  access_scope: { scope_type: "tenant", scope_id: null, scope_label: "Example Org" },
   capabilities: ["shipments.read", "settings.request"],
   settings_resolution_id: "settings-1",
   ...overrides,
@@ -92,11 +92,56 @@ test("context health reports healthy when data is present", () => {
   });
 });
 
-test("context health treats platform scope without id as global", () => {
+test("context health accepts a tenant identity label with a nullable scope id", () => {
+  const checks = buildContextHealthChecks(
+    {
+      me: buildMe(),
+      navigationCount: 4,
+      commandCount: 2,
+      resourceCount: 6,
+    },
+    t
+  );
+
+  const scope = checks.find((check) => check.id === "scope");
+  expect(scope?.status).toBe("ok");
+  expect(scope?.detail).toContain("Example Org");
+});
+
+test("context health treats platform scope without id and wildcard capability as global", () => {
   const checks = buildContextHealthChecks(
     {
       me: buildMe({
-        access_scope: { scope_type: "platform", scope_id: null, scope_label: null } as any,
+        access_scope: { scope_type: "platform", scope_id: null, scope_label: null },
+        capabilities: ["*"],
+      }),
+      navigationCount: 4,
+      commandCount: 2,
+      resourceCount: 6,
+    },
+    t
+  );
+
+  const scope = checks.find((check) => check.id === "scope");
+  const capabilities = checks.find((check) => check.id === "capabilities");
+  expect(scope?.status).toBe("ok");
+  expect(scope?.detail).toContain("global");
+  expect(capabilities?.status).toBe("ok");
+  expect(capabilities?.detail).toContain("*");
+});
+
+test.each([
+  ["client", "client-123", "Command Scope Client"],
+  ["sender", "sender-456", "Command Scope Sender"],
+])("context health preserves %s scope identity and label", (scopeType, scopeId, scopeLabel) => {
+  const checks = buildContextHealthChecks(
+    {
+      me: buildMe({
+        access_scope: {
+          scope_type: scopeType,
+          scope_id: scopeId,
+          scope_label: scopeLabel,
+        },
       }),
       navigationCount: 4,
       commandCount: 2,
@@ -107,25 +152,8 @@ test("context health treats platform scope without id as global", () => {
 
   const scope = checks.find((check) => check.id === "scope");
   expect(scope?.status).toBe("ok");
-  expect(scope?.detail).toContain("global");
-});
-
-test("context health shows wildcard capability indicator", () => {
-  const checks = buildContextHealthChecks(
-    {
-      me: buildMe({
-        capabilities: ["*"],
-      }),
-      navigationCount: 4,
-      commandCount: 2,
-      resourceCount: 6,
-    },
-    t
-  );
-
-  const capabilities = checks.find((check) => check.id === "capabilities");
-  expect(capabilities?.status).toBe("ok");
-  expect(capabilities?.detail).toContain("*");
+  expect(scope?.detail).toContain(scopeType);
+  expect(scope?.detail).toContain(scopeLabel);
 });
 
 test("context health formats UUID settings resolution as readable reference", () => {

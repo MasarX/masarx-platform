@@ -45,11 +45,17 @@
  * - selected_suites_json: json array of selected suites
  * - skipped_suites_json: json array of skipped suites
  * - impacted_surface_ids_json: json array of effective impacted deploy surface ids
+ * - focused_unit_mode: focused|full
+ * - focused_unit_reason: deterministic selector reason
+ * - focused_unit_tests_json: json array of directly changed unit tests when safely focused
+ * - root_manifest_ci_only: 1 when package.json was proven to contain CI-only script deltas
+ * - root_manifest_classification_reason: deterministic semantic classification diagnostic
  * - suite_*: deterministic suite flags for workflow conditions
  */
 /* eslint-disable no-console */
 const fs = require('fs');
 const path = require('path');
+const { isDeepStrictEqual } = require('util');
 const { spawnSync } = require('child_process');
 const {
   loadDeploySurfaceRegistry,
@@ -59,6 +65,8 @@ const {
   listImpactSurfaceIds: listImpactSurfaceIdsFromRegistry,
   listImpactSuites: listImpactSuitesFromRegistry,
 } = require('./deploy-surface-registry');
+const { resolveFocusedUnitSelection } = require('./focused-unit-selection');
+const { resolveLockfileOnlyImpact } = require('./lockfile-impact-selection');
 
 function die(msg) {
   console.error(`[pr-change-classify] ${msg}`);
@@ -85,6 +93,7 @@ const classifyConfigPath = path.isAbsolute(classifyConfigRel)
 
 const defaultClassifierConfig = {
   version: 1,
+  root_manifest_ci_script_name_re: '^(?:ci|lint|ops|test):[a-z0-9][a-z0-9:_-]*$',
   profiles: [
     {
       id: 'docs',
@@ -167,7 +176,17 @@ function compileProfiles(config) {
   return out.length ? out : compileProfiles(defaultClassifierConfig);
 }
 
-const compiledProfiles = compileProfiles(loadClassifierConfig(classifyConfigPath));
+const classifierConfig = loadClassifierConfig(classifyConfigPath);
+const compiledProfiles = compileProfiles(classifierConfig);
+const compiledRootManifestCiScriptNameRe = (() => {
+  const pattern = String(classifierConfig?.root_manifest_ci_script_name_re || '').trim();
+  if (!pattern) return null;
+  try {
+    return new RegExp(pattern);
+  } catch {
+    return null;
+  }
+})();
 const compiledImpactRegistry = compileImpactRegistry();
 
 function parseArgs() {
@@ -249,16 +268,23 @@ async function fetchCompareChangedFiles({
 
   const files = [];
   const seen = new Set();
-  const rawFiles = Array.isArray(payload?.files) ? payload.files : [];
+  const rawFiles = payload?.files;
+  if (!Array.isArray(rawFiles) || rawFiles.some((entry) =>
+    typeof entry?.filename !== 'string' || !normalizeChangedPath(entry.filename) ||
+    (entry.status === 'renamed' && (typeof entry.previous_filename !== 'string' || !normalizeChangedPath(entry.previous_filename))))) {
+    return { ok: false, files: [], truncated: false, reason: 'compare_api_invalid_inventory' };
+  }
   for (const entry of rawFiles) {
-    const name = normalizeChangedPath(entry && entry.filename ? entry.filename : '');
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    files.push(name);
+    for (const rawName of [entry?.previous_filename, entry?.filename]) {
+      const name = normalizeChangedPath(rawName);
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      files.push(name);
+    }
   }
 
   // REST compare endpoint returns at most 300 files; fail closed when ambiguous.
-  const truncated = files.length >= 300;
+  const truncated = rawFiles.length >= 300;
   return { ok: true, files, truncated, reason: truncated ? 'compare_api_truncated' : 'compare_api' };
 }
 
@@ -402,6 +428,229 @@ function classifyImpactSelection(changedFiles, {
     forceFull,
     forceReason,
   });
+}
+
+function resolveImpactSelectionForChangedFiles({
+  changedFiles,
+  impactMap = compiledImpactRegistry,
+  unknown = false,
+  forceFull = false,
+  forceReason = '',
+  baseRef = '',
+  headRef = '',
+  cwd = repoRoot,
+  lockfileImpactImpl = resolveLockfileOnlyImpact,
+} = {}) {
+  const files = Array.isArray(changedFiles) ? changedFiles.map(normalizeChangedPath).filter(Boolean) : [];
+  const lockfileImpact = lockfileImpactImpl({ changedFiles: files, baseRef, headRef, cwd });
+  const applicable = Boolean(lockfileImpact?.applicable);
+  const optimized = Boolean(lockfileImpact?.optimized);
+  const classificationFiles = optimized && Array.isArray(lockfileImpact.classificationFiles)
+    ? lockfileImpact.classificationFiles : files;
+  const lockfileForceFull = Boolean(lockfileImpact?.forceFull);
+  const impactSelection = classifyImpactSelection(classificationFiles, {
+    impactMap,
+    unknown,
+    forceFull: Boolean(forceFull || lockfileForceFull),
+    forceReason: lockfileForceFull
+      ? `lockfile_${String(lockfileImpact.reason || 'full_fallback').trim() || 'full_fallback'}`
+      : forceReason,
+  });
+  return {
+    impactSelection: {
+      ...impactSelection,
+      changedFiles: files,
+      classificationFiles,
+      lockfileSelectionMode: applicable ? (optimized ? 'optimized' : 'full_fallback') : 'not_applicable',
+      lockfileSelectionReason: applicable ? String(lockfileImpact.reason || '') : 'not_applicable',
+      lockfileOwnerWorkspaces: Array.isArray(lockfileImpact?.ownerWorkspaces) ? lockfileImpact.ownerWorkspaces : [],
+      lockfileChangedPackageKeys: Array.isArray(lockfileImpact?.changedPackageKeys) ? lockfileImpact.changedPackageKeys : [],
+      lockfileNativePackageKeys: Array.isArray(lockfileImpact?.nativePackageKeys) ? lockfileImpact.nativePackageKeys : [],
+    },
+    lockfileImpact,
+    classificationFiles,
+  };
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseSimpleNodeScriptTarget(command) {
+  const match = /^node ([A-Za-z0-9._/-]+\.js)$/.exec(String(command || ''));
+  if (!match) return '';
+  const target = normalizeChangedPath(match[1]);
+  if (!target || target.startsWith('/') || target.startsWith('./')) return '';
+  const segments = target.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return '';
+  return target;
+}
+
+function readExactGitBlob({ sha, filePath, spawnSyncImpl = spawnSync }) {
+  const objectId = String(sha || '').trim();
+  const target = normalizeChangedPath(filePath);
+  if (!/^[0-9a-f]{7,64}$/i.test(objectId) || !target || target.startsWith('/') || target.split('/').includes('..')) {
+    return { ok: false, text: '', reason: 'invalid_blob_identity' };
+  }
+  const options = {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+  };
+  const treeResult = spawnSyncImpl('git', ['ls-tree', '--full-tree', objectId, '--', target], options);
+  const treeLine = String(treeResult?.stdout || '').trim();
+  const treeMatch = /^(\d{6}) blob ([0-9a-f]+)\t/.exec(treeLine);
+  if (!treeResult || treeResult.status !== 0 || !treeMatch || !['100644', '100755'].includes(treeMatch[1])) {
+    return { ok: false, text: '', mode: treeMatch?.[1] || '', oid: treeMatch?.[2] || '', reason: 'blob_not_regular_file' };
+  }
+  const result = spawnSyncImpl('git', ['show', `${objectId}:${target}`], options);
+  if (!result || result.status !== 0) {
+    return { ok: false, text: '', mode: treeMatch[1], oid: treeMatch[2], reason: 'blob_unavailable' };
+  }
+  return { ok: true, text: String(result.stdout || ''), mode: treeMatch[1], oid: treeMatch[2], reason: '' };
+}
+
+function resolveChangedManifestScriptTargets(
+  baseManifest,
+  headManifest,
+  scriptNameRe = compiledRootManifestCiScriptNameRe,
+) {
+  if (!isPlainObject(baseManifest) || !isPlainObject(headManifest)) {
+    return { ok: false, targets: [], reason: 'manifest_not_object' };
+  }
+  const baseScripts = baseManifest.scripts;
+  const headScripts = headManifest.scripts;
+  if (!isPlainObject(baseScripts) || !isPlainObject(headScripts)) {
+    return { ok: false, targets: [], reason: 'scripts_not_object' };
+  }
+
+  const baseWithoutScripts = { ...baseManifest };
+  const headWithoutScripts = { ...headManifest };
+  delete baseWithoutScripts.scripts;
+  delete headWithoutScripts.scripts;
+  if (!isDeepStrictEqual(baseWithoutScripts, headWithoutScripts)) {
+    return { ok: false, targets: [], reason: 'manifest_non_script_delta' };
+  }
+
+  const changedNames = Array.from(new Set([
+    ...Object.keys(baseScripts),
+    ...Object.keys(headScripts),
+  ])).filter((name) => !isDeepStrictEqual(baseScripts[name], headScripts[name])).sort();
+  if (!changedNames.length) {
+    return { ok: false, targets: [], reason: 'manifest_no_script_delta' };
+  }
+
+  const targets = [];
+  for (const name of changedNames) {
+    if (!(scriptNameRe instanceof RegExp) || !scriptNameRe.test(name)) {
+      return { ok: false, targets: [], reason: 'script_name_not_ci_namespaced' };
+    }
+    const hasBase = Object.prototype.hasOwnProperty.call(baseScripts, name);
+    const hasHead = Object.prototype.hasOwnProperty.call(headScripts, name);
+    // Deletions are intentionally not optimized: the removed target cannot be
+    // proven against the candidate tree and may have represented product work.
+    if (!hasHead) return { ok: false, targets: [], reason: 'script_removed' };
+    for (const [side, manifest, present] of [
+      ['base', baseScripts, hasBase],
+      ['head', headScripts, hasHead],
+    ]) {
+      if (!present) continue;
+      const target = parseSimpleNodeScriptTarget(manifest[name]);
+      if (!target) return { ok: false, targets: [], reason: 'script_command_not_simple_node' };
+      targets.push({ side, target });
+    }
+  }
+  return { ok: true, targets, reason: '' };
+}
+
+function isCiOnlyRegistryTarget(target, impactMap = compiledImpactRegistry) {
+  const selection = classifyImpactSelection([target], { impactMap, unknown: false });
+  return selection.selectionConfidence === 'explicit'
+    && selection.fallbackToFull === false
+    && Array.isArray(selection.unmatchedFiles)
+    && selection.unmatchedFiles.length === 0
+    && Array.isArray(selection.impactSurfaces)
+    && selection.impactSurfaces.length > 0
+    && selection.impactSurfaces.every((impactId) => impactId === 'ci')
+    && Array.isArray(selection.impactedSurfaceIds)
+    && selection.impactedSurfaceIds.length === 0
+    && Array.isArray(selection.requiredPreviewSurfaceIds)
+    && selection.requiredPreviewSurfaceIds.length === 0;
+}
+
+function resolveRootManifestCiSemanticOverride({
+  changedFiles,
+  baseSha,
+  headSha,
+  readGitBlobFn = readExactGitBlob,
+  impactMap = compiledImpactRegistry,
+  scriptNameRe = compiledRootManifestCiScriptNameRe,
+} = {}) {
+  const files = Array.isArray(changedFiles) ? changedFiles.map(normalizeChangedPath).filter(Boolean) : [];
+  if (!files.includes('package.json')) {
+    return { applied: false, changedFiles: files, reason: 'package_manifest_unchanged' };
+  }
+  if (files.includes('package-lock.json')) {
+    return { applied: false, changedFiles: files, reason: 'package_lock_changed' };
+  }
+
+  const baseId = String(baseSha || '').trim();
+  const headId = String(headSha || '').trim();
+  const baseBlob = readGitBlobFn({ sha: baseId, filePath: 'package.json' });
+  const headBlob = readGitBlobFn({ sha: headId, filePath: 'package.json' });
+  if (!baseBlob?.ok || !headBlob?.ok) {
+    return { applied: false, changedFiles: files, reason: 'package_manifest_blob_unavailable' };
+  }
+  const baseLockBlob = readGitBlobFn({ sha: baseId, filePath: 'package-lock.json' });
+  const headLockBlob = readGitBlobFn({ sha: headId, filePath: 'package-lock.json' });
+  if (!baseLockBlob?.ok || !headLockBlob?.ok) {
+    return { applied: false, changedFiles: files, reason: 'package_lock_blob_unavailable' };
+  }
+  if (!baseLockBlob.oid || baseLockBlob.oid !== headLockBlob.oid) {
+    return { applied: false, changedFiles: files, reason: 'package_lock_mismatch' };
+  }
+
+  let baseManifest;
+  let headManifest;
+  try {
+    baseManifest = JSON.parse(baseBlob.text);
+    headManifest = JSON.parse(headBlob.text);
+  } catch {
+    return { applied: false, changedFiles: files, reason: 'package_manifest_parse_failed' };
+  }
+
+  const scriptDelta = resolveChangedManifestScriptTargets(baseManifest, headManifest, scriptNameRe);
+  if (!scriptDelta.ok) {
+    return { applied: false, changedFiles: files, reason: scriptDelta.reason };
+  }
+
+  const semanticTargets = [];
+  for (const entry of scriptDelta.targets) {
+    const sha = entry.side === 'base' ? baseId : headId;
+    const targetBlob = readGitBlobFn({ sha, filePath: entry.target });
+    if (!targetBlob?.ok) {
+      return { applied: false, changedFiles: files, reason: 'script_target_blob_unavailable' };
+    }
+    if (!isCiOnlyRegistryTarget(entry.target, impactMap)) {
+      return { applied: false, changedFiles: files, reason: 'script_target_not_ci_only' };
+    }
+    semanticTargets.push(entry.target);
+  }
+
+  const effective = Array.from(new Set([
+    ...files.filter((filePath) => filePath !== 'package.json'),
+    ...semanticTargets,
+  ])).sort();
+  return { applied: true, changedFiles: effective, reason: 'package_manifest_ci_scripts_only' };
+}
+
+function isSemanticLandingOnly(rawChangedFiles, semanticResult) {
+  const rawFiles = Array.isArray(rawChangedFiles) ? rawChangedFiles.map(normalizeChangedPath).filter(Boolean) : [];
+  const semantic = semanticResult && typeof semanticResult === 'object'
+    ? semanticResult
+    : { applied: false, changedFiles: rawFiles };
+  if (rawFiles.includes('package.json') && !semantic.applied) return false;
+  return isLandingOnlyChangeSet(semantic.changedFiles);
 }
 
 function isLandingSurfacePath(p) {
@@ -657,8 +906,8 @@ async function hasPriorReviewerGateSuccess({ owner, repo, sha, token, checkName 
   return false;
 }
 
-function diffNameOnly(range) {
-  const res = spawnSync('git', ['diff', '--name-only', range], { encoding: 'utf8' });
+function diffNameOnly(range, spawnSyncImpl = spawnSync) {
+  const res = spawnSyncImpl('git', ['diff', '--no-renames', '--name-only', range], { encoding: 'utf8' });
   if (res.status !== 0) {
     throw new Error(res.stderr || `git diff failed (${res.status})`);
   }
@@ -692,23 +941,55 @@ function computeFullPrDocsOnly({ baseSha, headSha, diffNameOnlyFn = diffNameOnly
   }
 }
 
-function computeFullPrLandingOnly({ baseSha, headSha, diffNameOnlyFn = diffNameOnly, mergeBaseFn = gitMergeBase }) {
+function computeFullPrLandingOnly({
+  baseSha,
+  headSha,
+  diffNameOnlyFn = diffNameOnly,
+  mergeBaseFn = gitMergeBase,
+  readGitBlobFn = readExactGitBlob,
+  impactMap = compiledImpactRegistry,
+  scriptNameRe = compiledRootManifestCiScriptNameRe,
+}) {
   const range = computeMergeBaseDiffRange(baseSha, headSha, mergeBaseFn);
   if (!range) return false;
   try {
-    return isLandingOnlyChangeSet(diffNameOnlyFn(range));
+    const files = diffNameOnlyFn(range);
+    const semantic = resolveRootManifestCiSemanticOverride({
+      changedFiles: files,
+      baseSha: range.split('..', 1)[0],
+      headSha,
+      readGitBlobFn,
+      impactMap,
+      scriptNameRe,
+    });
+    return isSemanticLandingOnly(files, semantic);
   } catch {
     return false;
   }
 }
 
-function computeFullPrSkipDecision({ baseSha, headSha, diffNameOnlyFn = diffNameOnly, mergeBaseFn = gitMergeBase, profiles = compiledProfiles }) {
+function computeFullPrSkipDecision({
+  baseSha,
+  headSha,
+  diffNameOnlyFn = diffNameOnly,
+  mergeBaseFn = gitMergeBase,
+  profiles = compiledProfiles,
+  readGitBlobFn = readExactGitBlob,
+  impactMap = compiledImpactRegistry,
+}) {
   const range = computeMergeBaseDiffRange(baseSha, headSha, mergeBaseFn);
   const base = { skipPreview: false, runFastChecks: true, reason: 'requires_preview', profileId: '' };
   if (!range) return base;
   try {
     const files = diffNameOnlyFn(range);
-    return classifyChangeSet(files, profiles);
+    const semantic = resolveRootManifestCiSemanticOverride({
+      changedFiles: files,
+      baseSha: range.split('..', 1)[0],
+      headSha,
+      readGitBlobFn,
+      impactMap,
+    });
+    return classifyChangeSet(semantic.changedFiles, profiles);
   } catch {
     return base;
   }
@@ -719,6 +1000,9 @@ function computeFullPrImpactSelection({
   headSha,
   diffNameOnlyFn = diffNameOnly,
   mergeBaseFn = gitMergeBase,
+  readGitBlobFn = readExactGitBlob,
+  impactMap = compiledImpactRegistry,
+  lockfileImpactImpl = resolveLockfileOnlyImpact,
 }) {
   const range = computeMergeBaseDiffRange(baseSha, headSha, mergeBaseFn);
   if (!range) {
@@ -730,7 +1014,20 @@ function computeFullPrImpactSelection({
   }
   try {
     const files = diffNameOnlyFn(range);
-    return classifyImpactSelection(files, { unknown: false });
+    const semantic = resolveRootManifestCiSemanticOverride({
+      changedFiles: files,
+      baseSha: range.split('..', 1)[0],
+      headSha,
+      readGitBlobFn,
+      impactMap,
+    });
+    return resolveImpactSelectionForChangedFiles({
+      changedFiles: semantic.changedFiles,
+      impactMap,
+      baseRef: baseSha,
+      headRef: headSha,
+      lockfileImpactImpl,
+    }).impactSelection;
   } catch {
     return classifyImpactSelection([], {
       unknown: true,
@@ -814,6 +1111,7 @@ async function main() {
   const to = String(descriptor?.to || '').trim();
   const preferMergeBase = Boolean(descriptor?.preferMergeBase);
   let changedFiles = [];
+  let classificationFiles = [];
   let diffRange = '';
   let changeSource = '';
   let unknown = false;
@@ -841,19 +1139,31 @@ async function main() {
     changeSource = 'missing_shas';
   }
 
+  const rangeParts = String(diffRange || '').split('..');
+  const semanticManifest = unknown || rangeParts.length !== 2
+    ? { applied: false, changedFiles, reason: unknown ? 'unknown_change_set' : 'missing_semantic_range' }
+    : resolveRootManifestCiSemanticOverride({
+      changedFiles,
+      baseSha: rangeParts[0],
+      headSha: rangeParts[1],
+    });
+  classificationFiles = semanticManifest.changedFiles;
+
   const hasMigrations = hasMigrationChanges(changedFiles);
   const hasPgtap = hasPgtapChanges(changedFiles);
   const hasDbContractChanges = hasMigrations || hasPgtap;
   const hasEdge = hasEdgeChanges(changedFiles);
   const hasLanding = hasLandingChanges(changedFiles);
-  const incrementalLandingOnly = isLandingOnlyChangeSet(changedFiles) ? !hasMigrations && !hasEdge : false;
+  const incrementalLandingOnly = isSemanticLandingOnly(changedFiles, semanticManifest)
+    ? !hasMigrations && !hasEdge
+    : false;
   let skipFullPreview = incrementalLandingOnly && action !== 'synchronize' && action !== 'merge_group';
 
   const forcePreview = isTruthy(process.env.PR_CHANGE_CLASSIFY_FORCE_PREVIEW);
 
   let decision = unknown
     ? { skip: false, runFastChecks: true, reason: 'unknown_event', profileId: '' }
-    : shouldSkipPreview(action, changedFiles);
+    : shouldSkipPreview(action, classificationFiles);
 
   // Branch sync PRs (main -> dev) should not reprovision preview projects or re-run cloud verify:
   // those commits already passed gates on `main` and we're only aligning the integration branch.
@@ -865,11 +1175,14 @@ async function main() {
   // and enable safe skipping of db push / edge deploy on incremental pushes after a known-good run.
   let priorOk = false;
   let fullPrDocsOnly = false;
-  let impactSelection = classifyImpactSelection(changedFiles, {
+  let impactSelection = resolveImpactSelectionForChangedFiles({
+    changedFiles: classificationFiles,
     unknown,
     forceFull: false,
     forceReason: '',
-  });
+    baseRef: from,
+    headRef: to,
+  }).impactSelection;
   if (!unknown && action === 'synchronize') {
     const baseSha = String(evt?.pull_request?.base?.sha || '').trim();
     const headSha = String(evt?.pull_request?.head?.sha || '').trim();
@@ -926,6 +1239,10 @@ async function main() {
 
   const selectedSuites = Array.isArray(impactSelection.selectedSuites) ? impactSelection.selectedSuites : [];
   const hasSuite = (suiteId) => selectedSuites.includes(normalizeSuiteId(suiteId)) ? '1' : '0';
+  const focusedUnitSelection = resolveFocusedUnitSelection({
+    changedFiles: impactSelection.classificationFiles || impactSelection.changedFiles,
+    impactSelection,
+  });
 
   const out = {
     skip_preview: decision.skip ? '1' : '0',
@@ -944,6 +1261,8 @@ async function main() {
     skip_edge_deploy: verifySkips.skipEdgeDeploy ? '1' : '0',
     prior_reviewer_gate_success: priorOk ? '1' : '0',
     full_pr_docs_only: fullPrDocsOnly ? '1' : '0',
+    root_manifest_ci_only: semanticManifest.applied ? '1' : '0',
+    root_manifest_classification_reason: semanticManifest.reason,
     change_source: changeSource || (unknown ? 'unknown' : 'git'),
     impact_surfaces: impactSelection.impactSurfaces.join(','),
     required_suites: impactSelection.requiredSuites.join(','),
@@ -952,10 +1271,19 @@ async function main() {
     fallback_reason: impactSelection.fallbackReason || '',
     skip_reasons: impactSelection.skipReasons.join(','),
     changed_files_json: JSON.stringify(impactSelection.changedFiles),
+    classification_files_json: JSON.stringify(impactSelection.classificationFiles || impactSelection.changedFiles),
     unmatched_files_json: JSON.stringify(impactSelection.unmatchedFiles),
     selected_suites_json: JSON.stringify(impactSelection.selectedSuites),
     skipped_suites_json: JSON.stringify(impactSelection.skippedSuites),
     impacted_surface_ids_json: JSON.stringify(impactSelection.impactedSurfaceIds || []),
+    lockfile_selection_mode: impactSelection.lockfileSelectionMode || 'not_applicable',
+    lockfile_selection_reason: impactSelection.lockfileSelectionReason || '',
+    lockfile_owner_workspaces_json: JSON.stringify(impactSelection.lockfileOwnerWorkspaces || []),
+    lockfile_changed_package_keys_json: JSON.stringify(impactSelection.lockfileChangedPackageKeys || []),
+    lockfile_native_package_keys_json: JSON.stringify(impactSelection.lockfileNativePackageKeys || []),
+    focused_unit_mode: focusedUnitSelection.mode,
+    focused_unit_reason: focusedUnitSelection.reason,
+    focused_unit_tests_json: JSON.stringify(focusedUnitSelection.testPaths),
     suite_lint_structure: hasSuite('lint_structure'),
     suite_lint_frontend: hasSuite('lint_frontend'),
     suite_test_unit: hasSuite('test_unit'),
@@ -1023,6 +1351,14 @@ module.exports = {
   matchImpactSurfacePath,
   listImpactSurfaceIds,
   listImpactSuites,
+  resolveImpactSelectionForChangedFiles,
   classifyImpactSelection,
+  parseSimpleNodeScriptTarget,
+  readExactGitBlob,
+  resolveChangedManifestScriptTargets,
+  isCiOnlyRegistryTarget,
+  resolveRootManifestCiSemanticOverride,
+  isSemanticLandingOnly,
+  diffNameOnly,
   uniqLines,
 };

@@ -57,7 +57,11 @@ test.describe("console role matrix navigation", () => {
         page,
         basePath: consoleBasePath,
         sections,
+        readRegistry: context.readRegistry,
         capabilities: context.me?.capabilities ?? null,
+        scopeType: context.me?.access_scope?.scope_type ?? null,
+        scopeId: context.me?.access_scope?.scope_id ?? null,
+        organizationId: context.me?.org?.id ?? null,
       });
     });
   }

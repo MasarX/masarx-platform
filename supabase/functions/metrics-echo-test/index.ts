@@ -1,6 +1,9 @@
-import { extractToken, getJwtRole } from "./_shared/mod.mjs";
+import { decodeJwtPayload, extractToken, getJwtRole, validateInternalEdgeClaims } from "./_shared/mod.mjs";
 
 const handler = async (req: Request): Promise<Response> => {
+  if (Deno.env.get("METRICS_ECHO_TEST_ENABLED") !== "1") {
+    return new Response(null, { status: 404 });
+  }
   const token = extractToken(req, { prefer: "authorization", allowWebhookHeader: false, allowQueryParam: false });
   const role = getJwtRole(token);
   if (!token || !role) {
@@ -13,6 +16,15 @@ const handler = async (req: Request): Promise<Response> => {
   if (role !== "service_role" && role !== "edge_api_caller_role") {
     return new Response(JSON.stringify({ error: "Unauthorized role" }), {
       status: 403,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  // Native verify_jwt owns signature verification; this is claim defense only.
+  const claimPolicy = validateInternalEdgeClaims(decodeJwtPayload(token), role);
+  if (!claimPolicy.ok) {
+    return new Response(JSON.stringify({ error: claimPolicy.message }), {
+      status: claimPolicy.status,
       headers: { "content-type": "application/json" },
     });
   }

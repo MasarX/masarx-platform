@@ -20,11 +20,14 @@ function buildChildEnv(overrides = {}) {
   return { ...env, ...overrides };
 }
 
-function runLint(includePath) {
+function runLint(includePath, env = {}) {
   return spawnSync(process.execPath, [lintScript], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: buildChildEnv({ OBJECTIVES_LINT_INCLUDE: `^${escapeForRegex(includePath)}` })
+    env: buildChildEnv({
+      OBJECTIVES_LINT_INCLUDE: `^${escapeForRegex(includePath)}`,
+      ...env,
+    })
   });
 }
 
@@ -59,6 +62,84 @@ describe('objectives-lint', () => {
     }
   });
 
+  test('ignores generated reports and still catches fixed endpoints', () => {
+    const dir = path.join(repoRoot, 'playwright-report', `lint-${process.pid}-${Date.now()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'trace.js'), 'fetch("http://localhost:5432")');
+    try {
+      expect(runLint(path.relative(repoRoot, dir)).status).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    const tmp = createTmpFile('fixed-endpoints', [
+      ('const dsn = "' + ['postgresql',":","/","/",'user',":",'password',"@",'db.example',"/",'db'].join("") + '";'),
+      'const issuer = "https://fixedref.supabase.co/auth/v1";',
+      'fetch("http://localhost:5432");',
+    ].join('\n'));
+    try {
+      const result = runLint(tmp.includePath);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/DSN_URL/);
+      expect(result.stderr).toMatch(/SUPABASE_URL/);
+      expect(result.stderr).toMatch(/LOCALHOST/);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+  test('skips only untracked ignored shared mirrors', () => {
+    const canonical = path.join(repoRoot, 'supabase', 'functions', '_shared', 'turnstile-local-test.mjs');
+    const dir = path.join(repoRoot, 'supabase', 'functions', `objectives-lint-${process.pid}-${Date.now()}`, '_shared');
+    const mirror = path.join(dir, 'turnstile-local-test.mjs');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(canonical, mirror);
+    const rel = path.relative(repoRoot, mirror).replace(/\\/g, '/');
+    try {
+      expect(runLint(rel).status).toBe(0);
+      expect(runLint(rel, { OBJECTIVES_LINT_EXPECTED_FILES_JSON: JSON.stringify([rel]) }).stderr)
+        .toMatch(/Coverage mismatch/);
+      const indexFile = path.join(dir, 'isolated-git-index');
+      const env = { ...process.env, GIT_INDEX_FILE: indexFile };
+      expect(spawnSync('git', ['add', '-f', '--', rel], { cwd: repoRoot, env }).status).toBe(0);
+      const tracked = runLint(rel, { GIT_INDEX_FILE: indexFile, OBJECTIVES_LINT_EXPECTED_FILES_JSON: JSON.stringify([rel]) });
+      expect(tracked.status).toBe(0);
+      expect(tracked.stdout).toMatch(/Coverage verified: selected=1 scanned=1/);
+      fs.appendFileSync(mirror, '\nfetch("http://localhost:5432");\n');
+      expect(runLint(rel).status).toBe(0);
+      const direct = path.join(path.dirname(dir), 'source.mjs');
+      fs.writeFileSync(direct, 'fetch("http://localhost:5432");');
+      expect(runLint(path.relative(repoRoot, direct)).stderr).toMatch(/LOCALHOST/);
+      const canonicalRel = path.relative(repoRoot, canonical).replace(/\\/g, '/');
+      const canonicalScan = runLint(canonicalRel, { OBJECTIVES_LINT_EXPECTED_FILES_JSON: JSON.stringify([canonicalRel]) });
+      expect(canonicalScan.stdout).toMatch(/Coverage verified: selected=1 scanned=1/);
+    } finally {
+      fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+    }
+  });
+
+
+  test('accepts redacted DSN and dynamic Supabase issuer', () => {
+    const tmp = createTmpFile('dynamic-endpoints', [
+      'const output = "postgresql://[redacted]";',
+      'const issuer = `https://${projectRef}.supabase.co/auth/v1`;',
+    ].join('\n'));
+    try {
+      expect(runLint(tmp.includePath).status).toBe(0);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('does not excuse a DSN with a redacted prefix and live suffix', () => {
+    const tmp = createTmpFile('redacted-prefix-live-dsn', 'const dsn = "postgresql://[redacted]@db.example/db";');
+    try {
+      const result = runLint(tmp.includePath);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/DSN_URL/);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
   test('suppression comment allows localhost with justification', () => {
     const src = [
       '// objectives:allow LOCALHOST Justification: test scaffold',
@@ -72,6 +153,37 @@ describe('objectives-lint', () => {
       expect(combined).toMatch(/RLS Missing summary: baseline=0 net_new=0/);
       expect(combined).toMatch(/Policy Missing summary: baseline=0 net_new=0/);
       expect(combined).toMatch(/no objective violations/i);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('fails closed when selected and scanned file coverage differs', () => {
+    const tmp = createTmpFile('coverage-mismatch', 'const ok = true;\n');
+    try {
+      const selected = `${tmp.includePath.replace(/\\/g, '/')}/missing.js`;
+      const res = runLint(tmp.includePath, {
+        OBJECTIVES_LINT_EXPECTED_FILES_JSON: JSON.stringify([selected]),
+      });
+      expect(res.status).not.toBe(0);
+      expect(`${res.stderr || ''}\n${res.stdout || ''}`).toMatch(/Coverage mismatch/);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('records exact selected and scanned file coverage', () => {
+    const tmp = createTmpFile('coverage-exact', 'const ok = true;\n');
+    try {
+      const selected = fs.readdirSync(tmp.dir)
+        .map((name) => `${tmp.includePath.replace(/\\/g, '/')}/${name}`);
+      const res = runLint(tmp.includePath, {
+        OBJECTIVES_LINT_EXPECTED_FILES_JSON: JSON.stringify(selected),
+      });
+      expect(res.status).toBe(0);
+      expect(`${res.stderr || ''}\n${res.stdout || ''}`).toMatch(
+        /Coverage verified: selected=1 scanned=1/,
+      );
     } finally {
       tmp.cleanup();
     }

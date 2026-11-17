@@ -71,5 +71,29 @@ describe("workflow run logs model", () => {
     expect(matchesWorkflowRunLogStep(step, "exploded")).toBe(true);
     expect(matchesWorkflowRunLogStep(step, "missing")).toBe(false);
   });
+
+  it("redacts complete cookie headers in step errors and nested log strings", () => {
+    const error = "Backend statement timeout\nCookie: session=synthetic-first; sid=synthetic-second";
+    const expected = "Backend statement timeout\nCookie: [redacted]";
+    expect(normalizeWorkflowRunLogSteps([{ id: "step-1", last_error: error }])[0]?.lastError)
+      .toBe(expected);
+    expect(redactJsonForUi({ nested: [{ error }] })).toEqual({ nested: [{ error: expected }] });
+  });
+
+  it("redacts prefixed secret fields while retaining recursive diagnosis and reference identifiers", () => {
+    const circular: Record<string, unknown> = { client_secret: "synthetic-short", secret_ref: "vault-reference" };
+    circular.self = circular;
+    expect(redactJsonForUi({
+      error: "Backend statement timeout; token=synthetic-short",
+      nested: [{ refresh_token: "synthetic-short", token_type: "Bearer", token_id: "token-reference" }],
+      circular,
+    })).toEqual({
+      error: "Backend statement timeout; token=[redacted]",
+      nested: [{ refresh_token: "[redacted]", token_type: "Bearer", token_id: "token-reference" }],
+      circular: { client_secret: "[redacted]", secret_ref: "vault-reference", self: "[circular]" },
+    });
+    expect(redactJsonForUi({ nested: { secret: "synthetic-short" } }, 1))
+      .toEqual({ nested: "[truncated]" });
+  });
 });
 

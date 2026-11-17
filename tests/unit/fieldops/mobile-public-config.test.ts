@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { getPublicConfigFromEnv } from "@masarx/config";
 
 jest.mock("expo-constants", () => ({
@@ -98,6 +101,26 @@ describe("mobile public config", () => {
     );
   });
 
+  test("keeps Expo public aliases statically inlineable by Metro", () => {
+    const source = readFileSync(
+      resolve(__dirname, "../../../apps/fieldops/src/mobile-public-config.ts"),
+      "utf8",
+    );
+
+    for (const key of [
+      "EXPO_PUBLIC_APP_NAME",
+      "EXPO_PUBLIC_SUPABASE_URL",
+      "EXPO_PUBLIC_SUPABASE_ANON_KEY",
+      "EXPO_PUBLIC_SENTRY_DSN",
+      "EXPO_PUBLIC_SENTRY_ENVIRONMENT",
+      "EXPO_PUBLIC_AUTH_METHODS",
+      "EXPO_PUBLIC_LOCALE",
+    ]) {
+      expect(source).toContain(`process.env.${key}`);
+    }
+    expect(source).not.toContain("source[EXPO_PUBLIC_ENV_ALIASES[key]]");
+  });
+
   test("resolveExpoExtra keeps explicit extra precedence over env fallback", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://env.supabase.co";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "env-anon";
@@ -110,4 +133,13 @@ describe("mobile public config", () => {
     expect(resolved.NEXT_PUBLIC_SUPABASE_URL).toBe("https://explicit.supabase.co");
     expect(resolved.NEXT_PUBLIC_SUPABASE_ANON_KEY).toBe("explicit-anon");
   });
+});
+
+ test("signup URL follows explicit Expo precedence and fails closed", () => {
+  const previous = process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL;
+  process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL = "https://env.example.test/apply";
+  try {
+    expect(getPublicConfigFromExpo({NEXT_PUBLIC_DRIVER_SIGNUP_URL:"https://configured.example.test/apply"}).driverSignupUrl).toBe("https://configured.example.test/apply");
+    expect(getPublicConfigFromExpo({NEXT_PUBLIC_DRIVER_SIGNUP_URL:"javascript:bad"}).driverSignupUrl).toBeNull();
+  } finally { if (previous === undefined) delete process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL; else process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL = previous; }
 });

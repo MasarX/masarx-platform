@@ -1,3 +1,9 @@
+const fs = require("fs");
+const path = require("path");
+
+jest.mock("@faker-js/faker", () => ({ faker: { seed: jest.fn() } }));
+jest.mock("@faker-js/faker/locale/ar", () => ({ faker: { seed: jest.fn() } }));
+
 describe("seed-test-data pool guard", () => {
   const seedScriptPath = "../../../scripts/data/seed-test-data.js";
   const originalDatabaseUrl = process.env.DATABASE_URL;
@@ -90,5 +96,33 @@ describe("seed-test-data pool guard", () => {
     const seedModule = require(seedScriptPath);
     await expect(seedModule.ensurePublicSearchPath(client)).resolves.toBeUndefined();
     expect(query).toHaveBeenCalledWith("SET search_path TO public, extensions");
+  });
+
+  test("keeps seeded settings on the one active registry schema", () => {
+    const source = fs.readFileSync(path.resolve(__dirname, seedScriptPath), "utf8");
+
+    expect(source).toMatch(
+      /SELECT version[\s\S]*FROM public\.schema_registry[\s\S]*is_active = TRUE/,
+    );
+    expect(source).toContain("activeSchemas.rowCount !== 1");
+    expect(source).toContain("schema_version = $4");
+    expect(source).toContain("[valueJson, defaultChangeReason, settingsVersionId, schemaVersion]");
+    expect(source).toContain("$4::jsonb, $5::int, $6");
+    expect(source).not.toContain("schema_version = 1");
+  });
+
+  test("routes webhook policy seeds through the canonical database upsert", () => {
+    const source = fs.readFileSync(path.resolve(__dirname, seedScriptPath), "utf8");
+    const helperStart = source.indexOf("async function upsertScopedSettings");
+    const webhookBranchStart = source.indexOf("if (category === 'webhook_ingest_policy')", helperStart);
+    const directSettingsStart = source.indexOf("const activeSchemas = await client.query", helperStart);
+    const webhookBranch = source.slice(webhookBranchStart, directSettingsStart);
+
+    expect(webhookBranchStart).toBeGreaterThan(helperStart);
+    expect(directSettingsStart).toBeGreaterThan(webhookBranchStart);
+    expect(webhookBranch).toContain("public.upsert_webhook_ingest_policy");
+    expect(webhookBranch).toContain("return current.rows[0].settings_version_id");
+    expect(webhookBranch).not.toContain("UPDATE settings_versions");
+    expect(webhookBranch).not.toContain("INSERT INTO settings_versions");
   });
 });

@@ -142,6 +142,42 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+function validateNpmAuditReport(report) {
+  const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!isRecord(report) || Object.prototype.hasOwnProperty.call(report, 'error')
+    || report.auditReportVersion !== 2 || !isRecord(report.vulnerabilities)
+    || !isRecord(report.metadata?.vulnerabilities)) {
+    throw new Error('Invalid npm audit report');
+  }
+  const counts = Object.fromEntries(Object.keys(SEVERITY_ORDER).map(severity => [severity, 0]));
+  for (const [name, vulnerability] of Object.entries(report.vulnerabilities)) {
+    if (!name || !isRecord(vulnerability)
+      || !Object.prototype.hasOwnProperty.call(counts, vulnerability.severity)) {
+      throw new Error('Invalid npm audit vulnerability severity');
+    }
+    if (!Array.isArray(vulnerability.via) || vulnerability.via.length === 0) {
+      throw new Error('Invalid npm audit vulnerability advisories');
+    }
+    for (const via of vulnerability.via) {
+      if (typeof via === 'string' && via.trim()) continue;
+      if (!isRecord(via) || !Object.prototype.hasOwnProperty.call(counts, via.severity)
+        || !Number.isSafeInteger(via.source) || via.source <= 0
+        || ['title', 'url', 'range'].some(field => typeof via[field] !== 'string' || !via[field].trim())) {
+        throw new Error('Invalid npm audit advisory');
+      }
+    }
+    counts[vulnerability.severity] += 1;
+  }
+  counts.total = Object.keys(report.vulnerabilities).length;
+  for (const [severity, count] of Object.entries(counts)) {
+    if (!Number.isSafeInteger(report.metadata.vulnerabilities[severity])
+      || report.metadata.vulnerabilities[severity] !== count) {
+      throw new Error('Invalid npm audit vulnerability counts');
+    }
+  }
+  return report;
+}
+
 function writeText(filePath, body) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, body, 'utf8');
@@ -162,21 +198,25 @@ function priorityRank(priority) {
   return PRIORITY_ORDER[String(priority || '').trim()] ?? 99;
 }
 
-function extractPackageNameFromNodePath(nodePath) {
+function normalizeLockNodePath(nodePath) {
   const value = String(nodePath || '').trim();
-  if (!value || value === '') return '';
-  const normalized = value.split(path.sep).join('/');
-  // Lockfile paths may be rooted (`node_modules/pkg`) or nested (`apps/x/node_modules/pkg`).
-  // Support both so scoped package names are extracted deterministically.
-  let suffix = '';
-  if (normalized.startsWith('node_modules/')) {
-    suffix = normalized.slice('node_modules/'.length);
-  } else {
-    const marker = '/node_modules/';
-    const idx = normalized.lastIndexOf(marker);
-    if (idx < 0) return '';
-    suffix = normalized.slice(idx + marker.length);
-  }
+  if (!value || value.includes('\0') || path.posix.isAbsolute(value) || path.win32.isAbsolute(value)) return '';
+  const normalized = value.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) return '';
+  return normalized;
+}
+
+function extractPackageNameFromNodePath(nodePath) {
+  const normalized = normalizeLockNodePath(nodePath);
+  if (!normalized) return '';
+  // Resolve the package after the last node_modules boundary so nested copies
+  // are attributed to themselves, including scoped packages.
+  const rooted = `/${normalized}`;
+  const marker = '/node_modules/';
+  const idx = rooted.lastIndexOf(marker);
+  if (idx < 0) return '';
+  const suffix = rooted.slice(idx + marker.length);
   if (!suffix) return '';
   const parts = suffix.split('/');
   if (!parts.length) return '';
@@ -187,15 +227,17 @@ function extractPackageNameFromNodePath(nodePath) {
 function buildLockIndex(lockData) {
   const index = new Map();
   const packages = lockData && typeof lockData === 'object' ? lockData.packages || {} : {};
-  for (const [nodePath, entry] of Object.entries(packages)) {
+  for (const [rawNodePath, entry] of Object.entries(packages)) {
+    const nodePath = normalizeLockNodePath(rawNodePath);
+    if (!nodePath) continue;
     const name = String(entry?.name || extractPackageNameFromNodePath(nodePath)).trim();
     if (!name) continue;
-    const hasDevFlag = entry && Object.prototype.hasOwnProperty.call(entry, 'dev');
     const hasOptionalFlag = entry && Object.prototype.hasOwnProperty.call(entry, 'optional');
     const list = index.get(name) || [];
     list.push({
       nodePath,
-      dev: hasDevFlag ? entry?.dev === true : undefined,
+      version: entry?.version ? String(entry.version) : null,
+      dev: entry?.dev === true,
       optional: hasOptionalFlag ? entry?.optional === true : undefined,
     });
     index.set(name, list);
@@ -261,6 +303,50 @@ function buildSurfaceCatalog(repoRoot) {
       }
     }
   }
+
+  manifests.sort((left, right) => left.path.localeCompare(right.path));
+
+  return {
+    manifests,
+    dependencySurfaces,
+  };
+}
+
+function buildSurfaceCatalogFromLockData(lockData) {
+  const dependencySurfaces = new Map();
+  const manifests = [];
+  const packages = lockData && typeof lockData === 'object' && lockData.packages
+    && typeof lockData.packages === 'object'
+    ? lockData.packages
+    : {};
+
+  const workspaceEntries = Object.entries(packages)
+    .filter(([packagePath]) => packagePath === '' || /^(apps|packages)\/[^/]+$/.test(packagePath))
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  for (const [packagePath, manifest] of workspaceEntries) {
+    const relativePath = packagePath ? `${packagePath}/package.json` : 'package.json';
+    const surface = inferSurfaceFromManifest(relativePath);
+    manifests.push({
+      path: relativePath,
+      surface,
+      name: String(manifest?.name || ''),
+    });
+
+    const bucketNames = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
+    for (const bucketName of bucketNames) {
+      const deps = manifest && typeof manifest === 'object' ? manifest[bucketName] || {} : {};
+      for (const dependencyName of Object.keys(deps)) {
+        addSetValue(dependencySurfaces, dependencyName, surface);
+      }
+    }
+  }
+
+  if (!manifests.some((manifest) => manifest.path === 'package.json')) {
+    throw new Error('package-lock.json is missing its root workspace manifest entry');
+  }
+
+  manifests.sort((left, right) => left.path.localeCompare(right.path));
 
   return {
     manifests,
@@ -461,12 +547,27 @@ function buildInventory({
   lockFile = '',
   signedOffBy = '',
 }) {
+  validateNpmAuditReport(auditReport);
   const lockIndex = buildLockIndex(lockData || {});
-  const surfaceCatalog = buildSurfaceCatalog(repoRoot);
+  const surfaceCatalog = buildSurfaceCatalogFromLockData(lockData || {});
   const vulnerabilities = auditReport && typeof auditReport === 'object' ? auditReport.vulnerabilities || {} : {};
 
   const findings = Object.entries(vulnerabilities).map(([packageName, vulnerability]) => {
-    const lockEntries = lockIndex.get(packageName) || [];
+    const indexedLockEntries = lockIndex.get(packageName) || [];
+    const hasAuthoritativeNodes = Array.isArray(vulnerability?.nodes);
+    const authoritativeNodes = new Set(
+      hasAuthoritativeNodes
+        ? vulnerability.nodes.map((nodePath) => normalizeLockNodePath(nodePath)).filter(Boolean)
+        : [],
+    );
+    const lockEntries = hasAuthoritativeNodes
+      ? indexedLockEntries.filter((entry) => authoritativeNodes.has(entry.nodePath))
+      : indexedLockEntries;
+    if (hasAuthoritativeNodes && (!authoritativeNodes.size
+      || vulnerability.nodes.some(nodePath => !normalizeLockNodePath(nodePath))
+      || lockEntries.length !== authoritativeNodes.size)) {
+      throw new Error(`Unresolved npm audit installed paths: ${packageName}`);
+    }
     const lockStats = collectLockStats(lockEntries);
     const severity = normalizeSeverity(vulnerability?.severity);
     const fix = normalizeFixAvailability(vulnerability?.fixAvailable);
@@ -519,6 +620,7 @@ function buildInventory({
       recommended_action: recommendedAction({ fix, complexity }),
       nodes: lockEntries.map((entry) => ({
         path: String(entry.nodePath || ''),
+        version: entry.version,
         dev: Boolean(entry.dev),
         optional: Boolean(entry.optional),
       })),
@@ -672,6 +774,7 @@ module.exports = {
   buildInventory,
   buildLockIndex,
   buildSurfaceCatalog,
+  buildSurfaceCatalogFromLockData,
   classifyComplexity,
   classifyPriority,
   classifyRuntimeExposure,
@@ -679,6 +782,7 @@ module.exports = {
   parseArgs,
   renderPriorityMatrix,
   runCli,
+  validateNpmAuditReport,
 };
 
 if (require.main === module) {

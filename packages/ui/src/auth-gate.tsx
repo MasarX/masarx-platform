@@ -3,7 +3,7 @@ import { Section } from "./section";
 import { AuthSignIn } from "./auth-sign-in";
 import { ErrorReload } from "./error-reload";
 import { buildTestId } from "./test-ids";
-import { formatUiError, sanitizeUiError } from "./utils";
+import { formatUiError, getUiErrorMessage } from "./utils";
 import { createUiTranslator } from "./i18n";
 
 type AuthGateProps = {
@@ -119,6 +119,7 @@ export function AuthGate({
   forceAuth,
 }: AuthGateProps) {
   const t = createUiTranslator("ui.auth.gate");
+  const contextMessage = getUiErrorMessage(contextError);
   const errorMessage = contextError
     ? formatUiError(contextError, t("contextError"))
     : null;
@@ -127,7 +128,7 @@ export function AuthGate({
   }
 
   const authRequired =
-    Boolean(forceAuth) || isAuthError(contextError, errorMessage);
+    Boolean(forceAuth) || isAuthError(contextError, contextMessage);
   const testId = buildTestId(
     testIdPrefix,
     authRequired ? "auth-required" : "context-unavailable"
@@ -138,9 +139,9 @@ export function AuthGate({
   const diagnosis = authRequired ? t("authRequiredDiagnosis") : t("contextUnavailableDiagnosis");
   const action = authRequired
     ? t("authRequiredAction")
-    : resolveContextHint(errorMessage, t) ??
+    : resolveContextHint(contextMessage, t) ??
       t("contextUnavailableAction");
-  const details = sanitizeUiError(errorMessage);
+  const details = errorMessage;
 
   return (
     <Section>

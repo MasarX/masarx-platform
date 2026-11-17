@@ -29,12 +29,10 @@ function shouldUseWithDeps({
       sourceEnv.PLAYWRIGHT_CHROMIUM_INSTALL_MODE ??
       'auto',
   ).trim();
+  const runnerEnvironment = String(sourceEnv.RUNNER_ENVIRONMENT || '').trim().toLowerCase();
+  if (runnerEnvironment === 'self-hosted') return false;
   if (isTruthy(mode)) return true;
   if (isFalsy(mode)) return false;
-  const runnerEnvironment = String(sourceEnv.RUNNER_ENVIRONMENT || '').trim().toLowerCase();
-  if (runnerEnvironment === 'self-hosted') {
-    return false;
-  }
   return platform === 'linux';
 }
 
@@ -127,28 +125,52 @@ function primePlaywrightBrowsersPath({
   return expected;
 }
 
-function resolveChromiumExecutablePath({ requireFn = require } = {}) {
-  let playwright;
+function resolveChromiumExecutablePath({
+  sourceEnv = process.env,
+  processEnv = process.env,
+  requireFn = require,
+} = {}) {
+  const restoreBrowsersPath = sourceEnv !== processEnv;
+  const hadBrowsersPath = Object.prototype.hasOwnProperty.call(
+    processEnv,
+    'PLAYWRIGHT_BROWSERS_PATH',
+  );
+  const previousBrowsersPath = processEnv.PLAYWRIGHT_BROWSERS_PATH;
   try {
-    playwright = requireFn('playwright');
-  } catch (error) {
-    if (error?.code === 'MODULE_NOT_FOUND') {
-      return '';
+    if (restoreBrowsersPath) {
+      const nextBrowsersPath = String(sourceEnv.PLAYWRIGHT_BROWSERS_PATH || '').trim();
+      if (nextBrowsersPath) processEnv.PLAYWRIGHT_BROWSERS_PATH = nextBrowsersPath;
+      else delete processEnv.PLAYWRIGHT_BROWSERS_PATH;
     }
-    throw error;
+    try {
+      const playwright = requireFn('playwright');
+      return String(playwright?.chromium?.executablePath?.() || '').trim();
+    } catch (error) {
+      if (error?.code === 'MODULE_NOT_FOUND') return '';
+      throw error;
+    }
+  } finally {
+    if (restoreBrowsersPath) {
+      if (hadBrowsersPath) processEnv.PLAYWRIGHT_BROWSERS_PATH = previousBrowsersPath;
+      else delete processEnv.PLAYWRIGHT_BROWSERS_PATH;
+    }
   }
-  return String(playwright?.chromium?.executablePath?.() || '').trim();
 }
 
 function detectChromiumAvailability({
   sourceEnv = process.env,
+  processEnv = process.env,
   contract = null,
   requireFn = require,
   existsSyncFn = fs.existsSync,
 } = {}) {
   primePlaywrightBrowsersPath({ sourceEnv, contract });
   const expectedBrowsersPath = resolveExpectedBrowsersPath({ sourceEnv, contract });
-  const executablePath = resolveChromiumExecutablePath({ requireFn });
+  const executablePath = resolveChromiumExecutablePath({
+    sourceEnv,
+    processEnv,
+    requireFn,
+  });
   const moduleAvailable = Boolean(executablePath);
   const executableExists = Boolean(executablePath) && existsSyncFn(executablePath);
   const normalizedExecutablePath = executablePath.replace(/\\/g, '/');
@@ -168,7 +190,7 @@ function detectChromiumLaunchability({
   sourceEnv = process.env,
   processExecPath = process.execPath,
   spawnSyncFn = spawnSync,
-  timeoutMs = 20000,
+  timeoutMs = 60000,
 } = {}) {
   const launchScript = [
     "const { chromium } = require('playwright');",
@@ -230,11 +252,8 @@ function classifyInstallMode({
   if (browserStatus.moduleAvailable === false) {
     return 'playwright-module-missing';
   }
-  if (browserStatus.available) {
+  if (browserStatus.available && launchStatus?.launchable) {
     return 'already-available';
-  }
-  if (browserStatus.available && launchStatus && !launchStatus.launchable) {
-    return isHostedRunner(sourceEnv) ? 'runtime-install' : 'browser-image-drift';
   }
   return isHostedRunner(sourceEnv) ? 'runtime-install' : 'browser-image-drift';
 }
@@ -275,13 +294,22 @@ function resolveFallbackBrowsersPath({
   return path.join(repoRootPath, 'tmp', 'playwright-browsers');
 }
 
+function appendIpv4FirstNodeOption(existing = '') {
+  const value = String(existing || '').trim();
+  if (/(?:^|\s)--dns-result-order(?:=|\s+)ipv4first(?=\s|$)/.test(value)) {
+    return value;
+  }
+  return [value, '--dns-result-order=ipv4first'].filter(Boolean).join(' ');
+}
+
 function prepareBrowserInstallEnvironment({
   sourceEnv = process.env,
   browserStatus = detectChromiumAvailability({ sourceEnv }),
+  launchStatus = null,
   repoRootPath = repoRoot,
   mkdirSyncFn = fs.mkdirSync,
 } = {}) {
-  const installMode = classifyInstallMode({ sourceEnv, browserStatus });
+  const installMode = classifyInstallMode({ sourceEnv, browserStatus, launchStatus });
   if (installMode !== 'browser-image-drift' || !shouldRepairBrowserImageDrift({ sourceEnv })) {
     return {
       installMode,
@@ -300,15 +328,18 @@ function prepareBrowserInstallEnvironment({
   };
 }
 
-function buildBrowserImageDriftMessage(browserStatus = {}) {
+function buildBrowserImageDriftMessage(browserStatus = {}, launchStatus = null) {
   return [
-    '[install-playwright-chromium] Self-hosted browser runner is missing the Playwright Chromium revision',
+    '[install-playwright-chromium] Self-hosted browser runner is missing or cannot launch the Playwright Chromium revision',
     'required by the repo contract.',
     browserStatus.expectedBrowsersPath
       ? `PLAYWRIGHT_BROWSERS_PATH=${browserStatus.expectedBrowsersPath}`
       : '',
     browserStatus.executablePath
       ? `expected_executable=${browserStatus.executablePath}`
+      : '',
+    formatLaunchFailure(launchStatus)
+      ? `launch_failure=${formatLaunchFailure(launchStatus)}`
       : '',
   ].filter(Boolean).join(' ');
 }
@@ -356,9 +387,17 @@ function ensurePlaywrightChromium({
     requireFn,
     existsSyncFn,
   });
+  const launchStatus = browserStatus.available
+    ? detectChromiumLaunchability({
+      sourceEnv,
+      processExecPath,
+      spawnSyncFn,
+    })
+    : null;
   const installContext = prepareBrowserInstallEnvironment({
     sourceEnv,
     browserStatus,
+    launchStatus,
     repoRootPath,
     mkdirSyncFn,
   });
@@ -393,13 +432,14 @@ function ensurePlaywrightChromium({
   }
 
   if (installMode === 'browser-image-drift') {
-    const message = buildBrowserImageDriftMessage(browserStatus);
+    const message = buildBrowserImageDriftMessage(browserStatus, launchStatus);
     logger.error?.('failure_class=browser-image-drift');
     logger.error?.(message);
     const error = new Error(message);
     error.failureClass = 'browser-image-drift';
     error.installMode = installMode;
     error.browserStatus = browserStatus;
+    error.launchStatus = launchStatus;
     throw error;
   }
 
@@ -414,16 +454,31 @@ function ensurePlaywrightChromium({
     throw error;
   }
 
+  const configuredInstallMode = String(
+    sourceEnv.PLAYWRIGHT_INSTALL_WITH_DEPS
+      ?? sourceEnv.PLAYWRIGHT_CHROMIUM_INSTALL_MODE
+      ?? 'auto',
+  ).trim();
+  sourceEnv.NODE_OPTIONS = appendIpv4FirstNodeOption(sourceEnv.NODE_OPTIONS);
+  const needsLinuxLaunchRepair = platform === 'linux'
+    && browserStatus.available
+    && launchStatus
+    && !launchStatus.launchable;
+  const installSourceEnv = needsLinuxLaunchRepair
+    && !isFalsy(configuredInstallMode)
+    && !shouldUseWithDeps({ platform, sourceEnv })
+    ? { ...sourceEnv, PLAYWRIGHT_INSTALL_WITH_DEPS: 'true' }
+    : sourceEnv;
   const installCommand = resolveInstallCommand({
     platform,
     processExecPath,
-    sourceEnv,
+    sourceEnv: installSourceEnv,
     existsSyncFn,
   });
   const result = spawnSyncFn(installCommand.cmd, installCommand.args, {
     stdio: 'inherit',
     shell: installCommand.shell,
-    env: sourceEnv,
+    env: installSourceEnv,
   });
   if (result.error) {
     throw result.error;
@@ -433,6 +488,26 @@ function ensurePlaywrightChromium({
       `[install-playwright-chromium] playwright install failed with exit code ${result.status || 1}`,
     );
     error.installMode = installMode;
+    throw error;
+  }
+
+  const postInstallLaunchStatus = detectChromiumLaunchability({
+    sourceEnv,
+    processExecPath,
+    spawnSyncFn,
+  });
+  if (!postInstallLaunchStatus.launchable) {
+    const message = [
+      '[install-playwright-chromium] Chromium remains unlaunchable after installation.',
+      formatLaunchFailure(postInstallLaunchStatus),
+    ].filter(Boolean).join(' ');
+    logger.error?.('failure_class=playwright-browser-unready');
+    logger.error?.(message);
+    const error = new Error(message);
+    error.failureClass = 'playwright-browser-unready';
+    error.installMode = installMode;
+    error.browserStatus = browserStatus;
+    error.launchStatus = postInstallLaunchStatus;
     throw error;
   }
 
@@ -475,6 +550,7 @@ module.exports = {
   classifyInstallMode,
   shouldRepairBrowserImageDrift,
   resolveFallbackBrowsersPath,
+  appendIpv4FirstNodeOption,
   prepareBrowserInstallEnvironment,
   buildBrowserImageDriftMessage,
   buildPlaywrightModuleMissingMessage,

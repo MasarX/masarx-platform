@@ -1,5 +1,91 @@
 import type { UiNavigation, UiNavigationItem } from "@masarx/api";
 
+/** Pure stack capability preserved from F414; no native gesture wiring is implied. */
+export type NavigationStackFrame = {
+  key: string;
+  title?: string | null;
+  params?: Record<string, unknown> | null;
+  transient?: boolean;
+};
+export type NavigationState = { stack: NavigationStackFrame[]; canGoBack: boolean };
+export type NavigationAction =
+  | { type: "PUSH" | "REPLACE"; frame: NavigationStackFrame }
+  | { type: "POP" }
+  | { type: "RESET"; stack: NavigationStackFrame[] };
+
+function copyNavigationFrame(frame: NavigationStackFrame): NavigationStackFrame {
+  return {
+    key: frame.key,
+    title: frame.title ?? null,
+    params: frame.params ? { ...frame.params } : null,
+    transient: frame.transient === true,
+  };
+}
+
+export function createNavigationState(frame: NavigationStackFrame): NavigationState {
+  return { stack: [{ ...copyNavigationFrame(frame), transient: false }], canGoBack: false };
+}
+
+export function navigationReducer(
+  state: NavigationState,
+  action: NavigationAction
+): NavigationState {
+  let stack = state.stack.map(copyNavigationFrame);
+  switch (action.type) {
+    case "PUSH":
+      stack.push(copyNavigationFrame(action.frame));
+      break;
+    case "POP":
+      if (stack.length > 1) stack.pop();
+      break;
+    case "RESET":
+      if (Array.isArray(action.stack) && action.stack.length > 0) {
+        stack = action.stack.map(copyNavigationFrame);
+        stack[0].transient = false;
+      }
+      break;
+    case "REPLACE":
+      stack[Math.max(0, stack.length - 1)] = copyNavigationFrame(action.frame);
+      break;
+  }
+  return { stack, canGoBack: stack.length > 1 };
+}
+
+export function peekActiveFrame(state: NavigationState): NavigationStackFrame | null {
+  return state.stack[state.stack.length - 1] ?? null;
+}
+
+export type GestureProgress = {
+  dx: number;
+  dy: number;
+  velocityX: number;
+  velocityY: number;
+};
+export type InterpretSwipeOptions = {
+  containerWidth: number;
+  edgeThresholdPct?: number;
+  velocityThreshold?: number;
+};
+export type GestureOutcome = "commit_back" | "cancel" | "open_drawer" | "none";
+
+/** Horizontal intent only: thresholds are configurable; callers own dispatch and animation. */
+export function interpretSwipeGesture(
+  progress: GestureProgress,
+  options: InterpretSwipeOptions
+): GestureOutcome {
+  const width = Number.isFinite(options.containerWidth) ? Math.max(0, options.containerWidth) : 0;
+  const percent = typeof options.edgeThresholdPct === "number" && Number.isFinite(options.edgeThresholdPct)
+    ? Math.max(0, Math.min(1, options.edgeThresholdPct)) : 0.35;
+  const velocityThreshold = typeof options.velocityThreshold === "number" && Number.isFinite(options.velocityThreshold)
+    ? Math.max(0, options.velocityThreshold) : 0.5;
+  const dx = Number.isFinite(progress.dx) ? progress.dx : 0;
+  const dy = Number.isFinite(progress.dy) ? progress.dy : 0;
+  const vx = Number.isFinite(progress.velocityX) ? progress.velocityX : 0;
+  if (width <= 0 || Math.abs(dx) <= Math.abs(dy)) return "none";
+  if (dx > 0) return dx > width * percent && vx > 0 ? "commit_back" : "cancel";
+  return Math.abs(dx) > width * percent && vx < -velocityThreshold ? "open_drawer" : "none";
+}
+
 export type MobileScreenId =
   | "tasks"
   | "outbox"

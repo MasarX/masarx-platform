@@ -1,6 +1,22 @@
 import { expect, type Page } from "@playwright/test";
 import { assertE2EMutationsAllowed } from "./mutations";
 import { appendMutationManifestEntry } from "./mutation-manifest";
+import enMessages from "../../../packages/config/messages/en.json";
+import arMessages from "../../../packages/config/messages/ar.json";
+
+export function workflowStepEnabledLabel() {
+  const names = [enMessages, arMessages].map((messages) => {
+    const fields = messages.ui.workflowStudio.steps.builder.add.fields;
+    return `${fields.enabled} ${fields.enabledHint}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  });
+  return new RegExp(`^(?:${names.join("|")})$`);
+}
+
+export function workflowStepEditorCloseLabel() {
+  return new RegExp(
+    `^(?:${enMessages.ui.workflowStudio.steps.builder.editor.close}|${arMessages.ui.workflowStudio.steps.builder.editor.close})$`
+  );
+}
 
 function resolveTemplateIdFromHref(href: string | null) {
   if (!href) return null;
@@ -260,6 +276,23 @@ export async function createWorkflowTemplateDraftViaUi(params: {
   return { templateId, workflowName };
 }
 
+export async function closeWorkflowTemplateFlowStepEditor(page: Page, testIdPrefix: string) {
+  const drawer = page.getByTestId(`${testIdPrefix}-workflow-template-studio-steps-flow-step-editor-drawer`);
+  if (!(await drawer.isVisible())) return;
+  const closeButton = drawer.getByRole("button", {
+    name: enMessages.ui.workflowStudio.steps.builder.editor.close,
+    exact: true,
+  }).or(drawer.getByRole("button", {
+    name: arMessages.ui.workflowStudio.steps.builder.editor.close,
+    exact: true,
+  }));
+  // Saving deliberately prevents dismissal; wait before issuing the close action in either locale.
+  await expect(closeButton).toBeVisible({ timeout: 20_000 });
+  await expect(closeButton).toBeEnabled({ timeout: 20_000 });
+  await closeButton.click({ timeout: 20_000 });
+  await expect(drawer).toBeHidden({ timeout: 20_000 });
+}
+
 export async function ensureWorkflowTemplateFlowHasStep(params: {
   page: Page;
   testIdPrefix: string;
@@ -270,14 +303,6 @@ export async function ensureWorkflowTemplateFlowHasStep(params: {
     details: "ensureWorkflowTemplateFlowHasStep() edits workflow template steps via UI.",
   });
   const flowTestIdPrefix = `${testIdPrefix}-workflow-template-studio-steps-flow`;
-  const stepEditorDrawer = page.locator(
-    `[data-testid="${flowTestIdPrefix}-step-editor-drawer"]`
-  );
-  const closeStepEditorIfOpen = async () => {
-    if (!(await stepEditorDrawer.isVisible())) return;
-    await page.keyboard.press("Escape");
-    await expect(stepEditorDrawer).toBeHidden({ timeout: 20_000 });
-  };
   const flowTab = page.locator(
     `[data-testid="${testIdPrefix}-workflow-template-studio-steps-tab-flow"]`
   );
@@ -295,7 +320,7 @@ export async function ensureWorkflowTemplateFlowHasStep(params: {
 
   if ((await connectFrom.count()) > 0) {
     if (await connectFrom.isVisible()) {
-      await closeStepEditorIfOpen();
+      await closeWorkflowTemplateFlowStepEditor(page, testIdPrefix);
       return true;
     }
   }
@@ -337,8 +362,75 @@ export async function ensureWorkflowTemplateFlowHasStep(params: {
 
   await expect(addModal).toBeHidden({ timeout: 30_000 });
   await expect(connectFrom).toBeVisible({ timeout: 30_000 });
-  await closeStepEditorIfOpen();
+  await closeWorkflowTemplateFlowStepEditor(page, testIdPrefix);
   return true;
+}
+
+export async function toggleWorkflowTemplateFlowStepEnabledAndVerifyPersistence(params: {
+  page: Page;
+  testIdPrefix: string;
+}) {
+  const { page, testIdPrefix } = params;
+  assertE2EMutationsAllowed({
+    label: `${testIdPrefix}:workflow-template-flow-persist`,
+    details:
+      "toggleWorkflowTemplateFlowStepEnabledAndVerifyPersistence() saves a step edit and verifies it persists after reload.",
+  });
+  const flowTestIdPrefix = `${testIdPrefix}-workflow-template-studio-steps-flow`;
+  const studioReady = page.locator(
+    `[data-testid="${testIdPrefix}-workflow-template-studio-ready"]`
+  );
+  const stepsReady = page.locator(
+    `[data-testid="${testIdPrefix}-workflow-template-studio-steps-ready"]`
+  );
+  const flowTab = page.locator(
+    `[data-testid="${testIdPrefix}-workflow-template-studio-steps-tab-flow"]`
+  );
+  const stepEditorDrawer = page.locator(
+    `[data-testid="${flowTestIdPrefix}-step-editor-drawer"]`
+  );
+  const firstStepCard = page
+    .locator(`[data-testid^="${flowTestIdPrefix}-step-card-"]`)
+    .first();
+  const enabledCheckbox = stepEditorDrawer.getByRole("checkbox", {
+    name: workflowStepEnabledLabel(),
+  });
+
+  if (await flowTab.isVisible()) {
+    await flowTab.click({ timeout: 20_000 });
+  }
+  await expect(firstStepCard).toBeVisible({ timeout: 30_000 });
+  await firstStepCard.click({ timeout: 20_000 });
+  await expect(stepEditorDrawer).toBeVisible({ timeout: 20_000 });
+
+  await expect(enabledCheckbox).toBeVisible({ timeout: 20_000 });
+
+  const initialEnabled = await enabledCheckbox.isChecked();
+  const expectedEnabled = !initialEnabled;
+  await enabledCheckbox.setChecked(expectedEnabled);
+
+  const saveButton = page.locator(
+    `[data-testid="${flowTestIdPrefix}-step-editor-save"]`
+  );
+  await expect(saveButton).toBeEnabled({ timeout: 20_000 });
+  await saveButton.click({ timeout: 20_000 });
+  await closeWorkflowTemplateFlowStepEditor(page, testIdPrefix);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(studioReady).toBeVisible({ timeout: 60_000 });
+  await expect(stepsReady).toBeVisible({ timeout: 30_000 });
+  if (await flowTab.isVisible()) {
+    await flowTab.click({ timeout: 20_000 });
+  }
+
+  await expect(firstStepCard).toBeVisible({ timeout: 30_000 });
+  await firstStepCard.click({ timeout: 20_000 });
+  await expect(stepEditorDrawer).toBeVisible({ timeout: 20_000 });
+  await expect(enabledCheckbox).toBeChecked({
+    checked: expectedEnabled,
+    timeout: 20_000,
+  });
+  await closeWorkflowTemplateFlowStepEditor(page, testIdPrefix);
 }
 
 export async function wheelZoomWorkflowTemplateFlowCanvas(params: {

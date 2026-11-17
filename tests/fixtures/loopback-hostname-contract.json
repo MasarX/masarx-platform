@@ -1,0 +1,25 @@
+{
+  "accepted": [
+    "localhost",
+    "localhost.",
+    "console.dev.localhost.",
+    "127.0.0.1",
+    "127.255.42.9",
+    "::1",
+    "[::1]",
+    "::ffff:127.42.8.9",
+    "::ffff:7f2a:809",
+    "[::ffff:7f2a:809]"
+  ],
+  "rejected": [
+    "localhost.evil.example",
+    "localhost..",
+    "128.0.0.1",
+    "127.999.0.1",
+    "::ffff:128.0.0.1",
+    "::ffff:8000:1",
+    "::ffff:7f00:1:2",
+    "[::1",
+    "::1]"
+  ]
+}

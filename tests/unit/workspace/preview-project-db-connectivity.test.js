@@ -59,6 +59,28 @@ describe('preview-project DB connectivity probe', () => {
     expect(res).toEqual({ ok: true });
   });
 
+  test('returns ok:false when pg rejects a malformed connection string during client construction', async () => {
+    jest.resetModules();
+    jest.doMock('pg', () => ({
+      Client: class Client {
+        constructor() {
+          throw new TypeError('Invalid URL');
+        }
+      },
+    }));
+
+    const { checkDbConnectivity } = require('../../../scripts/ops/workspace/preview-project');
+    const res = await checkDbConnectivity({
+      connectionString: 'not-a-valid-url',
+      attempts: 1,
+      intervalMs: 0,
+      connectionTimeoutMillis: 1,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(String(res.error?.message || '')).toBe('Invalid URL');
+  });
+
   test('falls back to psql when pg is unavailable during preview bootstrap', async () => {
     jest.resetModules();
     jest.doMock('pg', () => {

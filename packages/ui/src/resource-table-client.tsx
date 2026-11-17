@@ -1,13 +1,21 @@
 "use client";
 import * as React from "react";
 import type { UiResourceList } from "@masarx/api";
+import { useRouter } from "next/navigation";
 import { ResourceBulkActions, type ResourceBulkActionsProps } from "./resource-bulk-actions";
 import { ResourceTable } from "./resource-table";
-import { useResourceQuery } from "./hooks/use-resource-query";
+import { BulkActionResultReadback, type BatchResultReadback } from "./bulk-action-result-readback";
+import { stableStringify } from "./utils";
+import {
+  useResourceListInvalidate,
+  useResourceQuery,
+} from "./hooks/use-resource-query";
 import { Button } from "./button";
 import { Input } from "./input";
+import { ErrorState } from "./error-state";
 import { createUiTranslator } from "./i18n";
 import { decodeFilterTree, type SearchParams } from "./resource-query";
+import { resolvePaginationDisplay } from "./pagination-utils";
 
 const t = createUiTranslator("ui.resourcePage");
 
@@ -108,9 +116,13 @@ function ClientPaginationBar({
   const safeLimit = Math.max(1, limit);
   const safeOffset = Math.max(0, offset);
   const testId = testIdPrefix ? `${testIdPrefix}-pagination` : undefined;
+  const { start, end, total: displayTotal } = resolvePaginationDisplay({
+    total, totalIsEstimate, offset: safeOffset, itemsCount,
+  });
+  const hasExactTotal = !totalIsEstimate && displayTotal !== null;
   const totalPagesValue =
-    !totalIsEstimate && typeof total === "number"
-      ? Math.max(1, Math.ceil(total / safeLimit))
+    hasExactTotal
+      ? Math.max(1, Math.ceil(displayTotal / safeLimit))
       : null;
   const rawCurrentPage = Math.max(1, Math.floor(safeOffset / safeLimit) + 1);
   const currentPage = totalPagesValue
@@ -122,16 +134,13 @@ function ClientPaginationBar({
     setGoToPage(String(currentPage));
   }, [currentPage]);
 
-  if (!totalIsEstimate) {
-    if (typeof total !== "number") return null;
-    if (total <= safeLimit && safeOffset === 0) return null;
+  if (hasExactTotal) {
+    if (displayTotal <= safeLimit && safeOffset === 0) return null;
 
     if (totalPagesValue === null) return null;
     const totalPages = totalPagesValue;
     const prevPage = currentPage > 1 ? currentPage - 1 : null;
     const nextPage = currentPage < totalPages ? currentPage + 1 : null;
-    const start = Math.min(safeOffset + 1, total);
-    const end = Math.min(safeOffset + safeLimit, total);
 
     const handleGoTo = (e: React.FormEvent) => {
       e.preventDefault();
@@ -146,7 +155,7 @@ function ClientPaginationBar({
         data-testid={testId}
       >
         <div className="flex flex-col gap-1 text-xs text-ui-muted">
-          <span>{t("pagination.showing", { start, end, total })}</span>
+          <span>{t("pagination.showing", { start, end, total: displayTotal })}</span>
           <span>{t("pagination.page", { current: currentPage, total: totalPages })}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -205,13 +214,10 @@ function ClientPaginationBar({
     );
   }
 
-  // Estimate mode
+  // Estimates and unknown totals use observed page fullness for navigation.
   const prevPage = currentPage > 1 ? currentPage - 1 : null;
   const nextPage = itemsCount >= safeLimit ? currentPage + 1 : null;
   if (!prevPage && !nextPage) return null;
-
-  const start = itemsCount > 0 ? safeOffset + 1 : 0;
-  const end = safeOffset + itemsCount;
 
   return (
     <div
@@ -220,8 +226,8 @@ function ClientPaginationBar({
     >
       <div className="flex flex-col gap-1 text-xs text-ui-muted">
         <span>
-          {typeof total === "number"
-            ? t("pagination.showingEstimated", { start, end, total })
+          {displayTotal !== null
+            ? t("pagination.showingEstimated", { start, end, total: displayTotal })
             : t("pagination.showingUnknownTotal", { start, end })}
         </span>
         <span>{t("pagination.pageEstimated", { current: currentPage })}</span>
@@ -269,9 +275,50 @@ export function ResourceTableClient({
   serverFetch,
   ...tableProps
 }: ResourceTableClientProps) {
+  const router = useRouter();
   const tableTestIdPrefix = tableProps.testIdPrefix?.trim()
     ? `${tableProps.testIdPrefix}-table`
     : undefined;
+  const hybridEnabled = Boolean(serverFetch);
+  const batchResultOwnerKey = stableStringify({
+    resourceKey: bulkActions?.resourceKey ?? serverFetch?.resourceKey ?? tableProps.resourceKey ?? null,
+    appKey: bulkActions?.appKey ?? null,
+    appBasePath: bulkActions?.appBasePath ?? tableProps.appBasePath ?? null,
+    settingsResolutionId: bulkActions?.telemetry?.settingsResolutionId ?? null,
+    scopeType: bulkActions?.telemetry?.scopeType ?? null,
+    scopeId: bulkActions?.telemetry?.scopeId ?? null,
+    scopeValue: bulkActions?.telemetry?.scopeValue ?? null,
+  });
+  const batchResultOwner = React.useMemo(() => ({ key: batchResultOwnerKey }), [batchResultOwnerKey]);
+  const [ownedBatchResultReadback, setOwnedBatchResultReadback] = React.useState<{
+    owner: typeof batchResultOwner; result: BatchResultReadback;
+  } | null>(null);
+  const currentBatchResultOwnerRef = React.useRef(batchResultOwner);
+  React.useLayoutEffect(() => {
+    currentBatchResultOwnerRef.current = batchResultOwner;
+  }, [batchResultOwner]);
+  const handleBatchResultReadbackChange = React.useCallback((result: BatchResultReadback | null) => {
+    setOwnedBatchResultReadback((current) => currentBatchResultOwnerRef.current === batchResultOwner
+      ? result ? { owner: batchResultOwner, result } : null
+      : current);
+  }, [batchResultOwner]);
+  const batchResultReadback = ownedBatchResultReadback?.owner === batchResultOwner
+    ? ownedBatchResultReadback.result : null;
+  const invalidationResourceKey =
+    bulkActions?.resourceKey || serverFetch?.resourceKey || tableProps.resourceKey || "";
+  const invalidateResourceList = useResourceListInvalidate(invalidationResourceKey);
+  const handleBulkActionSuccess = React.useCallback(async () => {
+    if (hybridEnabled && invalidationResourceKey) {
+      await invalidateResourceList();
+      return;
+    }
+    router.refresh();
+  }, [
+    hybridEnabled,
+    invalidationResourceKey,
+    invalidateResourceList,
+    router,
+  ]);
   const renderBulkActions = React.useCallback(
     (selectedIds: string[]) =>
       bulkActions ? (
@@ -279,9 +326,12 @@ export function ResourceTableClient({
           {...bulkActions}
           selectedIds={selectedIds}
           testIdPrefix={tableTestIdPrefix}
+          onSuccess={handleBulkActionSuccess}
+          onBatchResultReadbackChange={handleBatchResultReadbackChange}
+          renderBatchResultReadback={false}
         />
       ) : null,
-    [bulkActions, tableTestIdPrefix]
+    [bulkActions, handleBulkActionSuccess, handleBatchResultReadbackChange, tableTestIdPrefix]
   );
 
   // ---------------------------------------------------------------------------
@@ -301,10 +351,9 @@ export function ResourceTableClient({
     () => serverFetch?.initialOffset ?? 0
   );
 
-  const hybridEnabled = Boolean(serverFetch);
   const resourceKey = serverFetch?.resourceKey ?? "";
 
-  const { data: queryData, isFetching } = useResourceQuery({
+  const { data: queryData, isFetching, isError, error, refetch } = useResourceQuery({
     resourceKey,
     filters: queryFilters,
     sort: querySort,
@@ -314,15 +363,17 @@ export function ResourceTableClient({
     enabled: hybridEnabled,
   });
 
-  // Resolve items: use React Query data in hybrid mode, else use prop items
+  // Rows and pagination metadata must describe the same response, including
+  // previous-page placeholder data while the next request is still loading.
+  const displayedList = queryData ?? serverFetch?.initialList;
   const resolvedItems = hybridEnabled
-    ? queryData?.items ?? serverFetch?.initialList?.items ?? tableProps.items
+    ? displayedList?.items ?? tableProps.items
     : tableProps.items;
   const resolvedTotal = hybridEnabled
-    ? queryData?.total ?? serverFetch?.initialList?.total ?? null
+    ? displayedList?.total ?? null
     : null;
   const resolvedTotalIsEstimate = hybridEnabled
-    ? queryData?.total_is_estimate ?? serverFetch?.initialTotalIsEstimate ?? false
+    ? displayedList?.total_is_estimate ?? false
     : false;
 
   // Handle server navigation: parse params, update local state, sync URL
@@ -408,6 +459,19 @@ export function ResourceTableClient({
     [serverFetch]
   );
 
+  if (hybridEnabled && isError && !queryData) {
+    return (
+      <div role="alert">
+        <ErrorState
+          error={error}
+          variant="inline"
+          onAction={() => { void refetch(); }}
+          testId={tableTestIdPrefix ? `${tableTestIdPrefix}-fetch-error` : undefined}
+        />
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="relative">
@@ -422,11 +486,17 @@ export function ResourceTableClient({
           renderBulkActions={bulkActions ? renderBulkActions : undefined}
           onServerNavigate={hybridEnabled ? handleServerNavigate : undefined}
         />
+        {batchResultReadback ? (
+          <div className="mt-3">
+            <BulkActionResultReadback result={batchResultReadback}
+              testId={tableTestIdPrefix ? `${tableTestIdPrefix}-bulk-actions-result` : "bulk-action-result"} />
+          </div>
+        ) : null}
       </div>
       {hybridEnabled && !tableProps.clientPagination ? (
         <ClientPaginationBar
-          limit={queryLimit}
-          offset={queryOffset}
+          limit={displayedList?.limit ?? queryLimit}
+          offset={displayedList?.offset ?? queryOffset}
           total={resolvedTotal ?? null}
           totalIsEstimate={resolvedTotalIsEstimate}
           itemsCount={resolvedItems.length}

@@ -50,7 +50,7 @@
           "ci",
           "--workspace",
           "@masarx/console",
-          "--include-workspace-root=false",
+          "--include-workspace-root=true",
           "--ignore-scripts",
           "--no-audit",
           "--no-fund"
@@ -127,7 +127,7 @@
           "ci",
           "--workspace",
           "@masarx/portal",
-          "--include-workspace-root=false",
+          "--include-workspace-root=true",
           "--ignore-scripts",
           "--no-audit",
           "--no-fund"

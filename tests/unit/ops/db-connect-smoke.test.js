@@ -1,5 +1,7 @@
 const path = require('path');
 const Module = require('module');
+const fs = require('fs');
+const os = require('os');
 
 const smokePath = path.join(__dirname, '..', '..', '..', 'scripts', 'ops', 'db-connect-smoke.js');
 const {
@@ -13,6 +15,7 @@ const {
   isCircuitBreakerCredentialError,
   isSupabaseDirectCandidate,
   normalizeCandidatePolicy,
+  isProjectDbPasswordSyncAllowed,
   shouldSyncTenantNotFoundOnPreviewEnv,
   shouldAttemptDbPasswordSync,
   resolveDbManagementCredentials,
@@ -109,6 +112,41 @@ describe('db-connect-smoke', () => {
     ]);
   });
 
+  test('keeps an unlabelled PG_CONN_STRING first in the fallback ladder', async () => {
+    const env = {
+      PG_CONN_STRING: (['postgresql',":","/","/",'pinned',":",'kkzusxjunipmwghvuypqwrto',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+      DATABASE_URL: (['postgresql',":","/","/",'raw',":",'qhtoiguwpkljsprogplltytz',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+    };
+
+    const candidates = await resolveDsnCandidates({
+      env,
+      ensureIpv4HostnameFn: async (dsn) => dsn,
+      ensureHostaddrFn: async (dsn) => dsn,
+    });
+
+    expect(candidates[0]).toEqual({
+      name: 'PG_CONN_STRING',
+      dsn: env.PG_CONN_STRING,
+    });
+    expect(candidates.some((candidate) => candidate.name === 'DATABASE_URL')).toBe(true);
+  });
+
+  test('omits a whitespace-only unlabelled PG_CONN_STRING from the fallback ladder', async () => {
+    const env = {
+      PG_CONN_STRING: '   ',
+      DATABASE_URL: (['postgresql',":","/","/",'raw',":",'qhtoiguwpkljsprogplltytz',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+    };
+
+    const candidates = await resolveDsnCandidates({
+      env,
+      ensureIpv4HostnameFn: async (dsn) => dsn,
+      ensureHostaddrFn: async (dsn) => dsn,
+    });
+
+    expect(candidates.some((candidate) => candidate.name === 'PG_CONN_STRING')).toBe(false);
+    expect(candidates.some((candidate) => candidate.name === 'DATABASE_URL')).toBe(true);
+  });
+
   test('shared-lane-safe policy excludes Supabase direct candidates but keeps pooler and custom hosts', async () => {
     const env = {
       DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
@@ -132,6 +170,24 @@ describe('db-connect-smoke', () => {
       ]),
     );
     expect(candidates.some((candidate) => isSupabaseDirectCandidate(candidate))).toBe(false);
+  });
+
+  test('shared-lane-safe policy keeps the governed loopback database candidate', async () => {
+    const candidates = await resolveDsnCandidates({
+      env: {
+        DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'postgres',"@",'127.0.0.1',":",'23197',"/",'postgres'].join("")),
+      },
+      candidatePolicy: 'shared-lane-safe',
+      ensureIpv4HostnameFn: async (dsn) => dsn,
+      ensureHostaddrFn: async (dsn) => dsn,
+    });
+
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        name: 'DATABASE_URL',
+        dsn: (['postgresql',":","/","/",'postgres',":",'postgres',"@",'127.0.0.1',":",'23197',"/",'postgres'].join("")),
+      }),
+    ]);
   });
 
   test('prefers a previously pinned downstream DSN ahead of stale direct or pooler hints', async () => {
@@ -305,6 +361,7 @@ describe('db-connect-smoke', () => {
       sleepFn: async (ms) => { fakeNow += ms; },
       logger: { warn: jest.fn() },
       syncProjectDbPassword,
+      buildPasswordSyncedCandidatesFn: async () => [],
       probe: async () => {
         probeCalls += 1;
         if (probeCalls === 1) {
@@ -345,7 +402,7 @@ describe('db-connect-smoke', () => {
     expect(syncProjectDbPassword).toHaveBeenCalledTimes(0);
   });
 
-  test('auto-syncs DB password on tenant/user-not-found for preview envs by default', async () => {
+  test('auto-syncs DB password on tenant/user-not-found for resolved project previews by default', async () => {
     const candidates = [{ name: 'DATABASE_URL', dsn: 'postgresql://example' }];
     let fakeNow = 0;
     let probeCalls = 0;
@@ -358,6 +415,7 @@ describe('db-connect-smoke', () => {
         SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
         SUPABASE_DB_PASSWORD: 'secret',
         PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
+        PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'project',
       },
       maxWaitMs: 10000,
       retryDelayMs: 2000,
@@ -365,6 +423,7 @@ describe('db-connect-smoke', () => {
       sleepFn: async (ms) => { fakeNow += ms; },
       logger: { warn: jest.fn() },
       syncProjectDbPassword,
+      buildPasswordSyncedCandidatesFn: async () => [],
       probe: async () => {
         probeCalls += 1;
         if (probeCalls === 1) {
@@ -375,6 +434,98 @@ describe('db-connect-smoke', () => {
 
     expect(result.attempts).toBe(2);
     expect(syncProjectDbPassword).toHaveBeenCalledTimes(1);
+  });
+
+  test('fails closed for branch and unresolved-auto preview password sync even with explicit overrides', async () => {
+    const credentials = {
+      SUPABASE_ACCESS_TOKEN: 'token',
+      SUPABASE_PROJECT_ID: '5fd7e30a-80df-483b-955c-7a633c6ba9d6',
+      SUPABASE_DB_PASSWORD: 'branch-password',
+      DB_SMOKE_SYNC_DB_PASSWORD: '1',
+      DB_SMOKE_SYNC_ON_TENANT_NOT_FOUND: '1',
+    };
+
+    expect(isProjectDbPasswordSyncAllowed({
+      ...credentials,
+      PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
+    })).toBe(false);
+    expect(isProjectDbPasswordSyncAllowed({
+      ...credentials,
+      PREVIEW_SUPABASE_WORKSPACE_MODE: 'branch',
+      PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'project',
+    })).toBe(false);
+    expect(isProjectDbPasswordSyncAllowed({
+      ...credentials,
+      PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
+      PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'project',
+    })).toBe(true);
+    expect(isProjectDbPasswordSyncAllowed({
+      ...credentials,
+      PREVIEW_SUPABASE_WORKSPACE_MODE: 'project',
+      PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'branch',
+    })).toBe(false);
+    expect(isProjectDbPasswordSyncAllowed({
+      ...credentials,
+      PREVIEW_SUPABASE_WORKSPACE_MODE: 'invalid',
+      PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'project',
+    })).toBe(false);
+    expect(isProjectDbPasswordSyncAllowed({
+      ...credentials,
+      WORKSPACE_MODE: 'branch',
+    })).toBe(false);
+    expect(isProjectDbPasswordSyncAllowed({
+      ...credentials,
+      WORKSPACE_MODE: 'auto',
+    })).toBe(false);
+    expect(isProjectDbPasswordSyncAllowed({
+      ...credentials,
+      WORKSPACE_MODE: 'project',
+    })).toBe(true);
+
+    for (const lastError of [
+      new Error('password authentication failed for user "postgres"'),
+      new Error('Tenant or user not found'),
+      new Error('Circuit breaker open: Failed to retrieve database credentials'),
+    ]) {
+      expect(shouldAttemptDbPasswordSync({
+        env: {
+          ...credentials,
+          PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
+          PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'branch',
+        },
+        lastError,
+      })).toBe(false);
+    }
+
+    // Preview detection remains available to callers that use it for safe DSN
+    // policy selection; the separate project-sync eligibility gate is decisive.
+    expect(shouldSyncTenantNotFoundOnPreviewEnv({
+      ...credentials,
+      PREVIEW_SUPABASE_WORKSPACE_MODE: 'branch',
+    })).toBe(true);
+
+    let fakeNow = 0;
+    const syncProjectDbPassword = jest.fn(async () => ({ ok: true }));
+    await expect(
+      runConnectivitySmoke({
+        candidates: [{ name: 'DATABASE_URL', dsn: 'postgresql://example' }],
+        env: {
+          ...credentials,
+          PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
+          PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'branch',
+        },
+        maxWaitMs: 1000,
+        retryDelayMs: 1000,
+        now: () => fakeNow,
+        sleepFn: async (ms) => { fakeNow += ms; },
+        logger: { warn: jest.fn() },
+        syncProjectDbPassword,
+        probe: async () => {
+          throw new Error('password authentication failed for user "postgres"');
+        },
+      }),
+    ).rejects.toThrow('password authentication failed');
+    expect(syncProjectDbPassword).not.toHaveBeenCalled();
   });
 
   test('resolves management credentials from preview-prefixed env when shared vars are absent', () => {
@@ -407,6 +558,7 @@ describe('db-connect-smoke', () => {
           PREVIEW_SUPABASE_DB_PASSWORD: 'EXAMPLE_PASSWORD',
           PREVIEW_PROJECT_REF: '46b364a4-da77-4f71-9e7b-f34b567e3dbe',
           PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
+          PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'project',
         },
         lastError: new Error('Tenant or user not found'),
         alreadyAttempted: false,
@@ -490,6 +642,7 @@ describe('db-connect-smoke', () => {
       sleepFn: async (ms) => { fakeNow += ms; },
       logger: { warn: jest.fn() },
       syncProjectDbPassword,
+      buildPasswordSyncedCandidatesFn: async () => [],
       probe: async () => {
         probeCalls += 1;
         if (probeCalls === 1) {
@@ -520,12 +673,14 @@ describe('db-connect-smoke', () => {
     expect(
       shouldSyncTenantNotFoundOnPreviewEnv({
         PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
+        PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'project',
         DB_SMOKE_SYNC_ON_TENANT_NOT_FOUND: '0',
       }),
     ).toBe(false);
     expect(
       shouldSyncTenantNotFoundOnPreviewEnv({
         PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
+        PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'project',
       }),
     ).toBe(true);
   });
@@ -717,7 +872,46 @@ describe('db-connect-smoke', () => {
     expect(writes[0][1]).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'user',":",'pass',"@",'host',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")));
     expect(writes[0][1]).toContain(('PG_CONN_STRING=' + ['postgresql',":","/","/",'user',":",'pass',"@",'host',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")));
     expect(writes[0][1]).toContain('DB_SMOKE_SELECTED_DSN_NAME=DATABASE_URL+poolerport:6543');
+    expect(writes[0][1]).toContain('DATABASE_URL_SELECTED_DSN_NAME=DATABASE_URL+poolerport:6543');
     expect(logs.some((msg) => msg.includes('Pinned downstream DATABASE_URL/PG_CONN_STRING'))).toBe(true);
+  });
+
+  test('pinSelectedDsnForDownstream persists the runner-local pin to GITHUB_ENV and ENV_FILE', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'db-smoke-pin-'));
+    const githubEnv = path.join(tempDir, 'github.env');
+    const envFile = path.join(tempDir, 'preview.env');
+    fs.writeFileSync(githubEnv, '', 'utf8');
+    fs.writeFileSync(envFile, 'DATABASE_URL=stale\nUNRELATED=keep\n', 'utf8');
+
+    const result = pinSelectedDsnForDownstream(
+      {
+        name: 'DATABASE_URL_POOLER+poolerhost:aws-0+hostaddr',
+        dsn: (['postgresql',":","/","/",'user',":",'zyxmsoyihirnnhsthyhsyzsk',"@",'example.invalid',":",'5432',"/",'postgres',"?",'hostaddr=192.0.2.10'].join("")),
+      },
+      {
+        env: {
+          GITHUB_ENV: githubEnv,
+          ENV_FILE: envFile,
+          DB_SMOKE_PERSIST_ENV_FILE: '1',
+        },
+        logger: { log: jest.fn() },
+      },
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      pinned: true,
+      reason: 'ok',
+      envFilePersisted: true,
+      candidateName: 'DATABASE_URL_POOLER+poolerhost:aws-0+hostaddr',
+    }));
+    for (const target of [githubEnv, envFile]) {
+      const body = fs.readFileSync(target, 'utf8');
+      expect(body).toContain(('DATABASE_URL=' + ['postgresql',":","/","/",'user',":",'zyxmsoyihirnnhsthyhsyzsk',"@",'example.invalid',":",'5432',"/",'postgres',"?",'hostaddr=192.0.2.10'].join("")));
+      expect(body).toContain(('PG_CONN_STRING=' + ['postgresql',":","/","/",'user',":",'zyxmsoyihirnnhsthyhsyzsk',"@",'example.invalid',":",'5432',"/",'postgres',"?",'hostaddr=192.0.2.10'].join("")));
+      expect(body).toContain('DB_SMOKE_SELECTED_DSN_NAME=DATABASE_URL_POOLER+poolerhost:aws-0+hostaddr');
+      expect(body).toContain('DATABASE_URL_SELECTED_DSN_NAME=DATABASE_URL_POOLER+poolerhost:aws-0+hostaddr');
+    }
+    expect(fs.readFileSync(envFile, 'utf8')).toContain('UNRELATED=keep');
   });
 
   test('pinSelectedDsnForDownstream no-ops without GITHUB_ENV', () => {

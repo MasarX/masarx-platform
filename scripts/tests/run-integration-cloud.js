@@ -29,23 +29,10 @@ function resolveIntegrationEdgeAuthAliases(env = process.env) {
     nextEnv.EDGE_TASK_TOKEN,
     nextEnv.API_CALLER_SHARED_SECRET,
     nextEnv.API_CALLER_DB_JWT,
-    nextEnv.LABEL_RENDERER_DB_JWT,
-    nextEnv.LABEL_RENDERER_TOKEN,
-    nextEnv.SUPABASE_SERVICE_ROLE_KEY,
-    nextEnv.SERVICE_ROLE_KEY,
-    nextEnv.SUPABASE_SERVICE_KEY,
   ]);
 
-  if (sharedEdgeToken) {
-    if (!firstNonEmpty([nextEnv.EDGE_TASK_TOKEN])) {
-      nextEnv.EDGE_TASK_TOKEN = sharedEdgeToken;
-    }
-    if (!firstNonEmpty([nextEnv.API_CALLER_DB_JWT])) {
-      nextEnv.API_CALLER_DB_JWT = sharedEdgeToken;
-    }
-    if (!firstNonEmpty([nextEnv.LABEL_RENDERER_DB_JWT])) {
-      nextEnv.LABEL_RENDERER_DB_JWT = sharedEdgeToken;
-    }
+  if (sharedEdgeToken && !firstNonEmpty([nextEnv.EDGE_TASK_TOKEN])) {
+    nextEnv.EDGE_TASK_TOKEN = sharedEdgeToken;
   }
 
   return nextEnv;
@@ -83,7 +70,7 @@ function resolveCpuCount(runtime = {}) {
 function resolveAutoMaxWorkers(runtime = {}) {
   const cpuCount = resolveCpuCount(runtime);
   if (!cpuCount) return '';
-  const workers = Math.max(2, Math.min(4, Math.floor(cpuCount * 0.75)));
+  const workers = Math.max(Math.min(2, cpuCount), Math.min(4, Math.floor(cpuCount * 0.75)));
   return String(workers);
 }
 
@@ -288,7 +275,7 @@ function main() {
   const fastFailMs = resolveIntegrationRetryFastFailMs(executionEnv);
   const maxAttempts = retryCount + 1;
 
-  const args = [jestBin, ...buildJestArgs({ configPath, env: executionEnv, argv: extraArgs })];
+  const args = ['--experimental-vm-modules', jestBin, ...buildJestArgs({ configPath, env: executionEnv, argv: extraArgs })];
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const startedAt = Date.now();
     const res = spawnSync(process.execPath, args, { stdio: 'inherit', env: executionEnv });

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { spawnSync } from "child_process";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { getSupabaseAnonKey, getSupabaseDbSchema, getSupabaseUrl, loadE2EEnv } from "./env";
 
 type DemoUser = {
@@ -189,6 +189,7 @@ async function canSignInWithPassword(email: string, password: string) {
       }
 
       const transient =
+        isAuthRetryableFetchError(error) ||
         normalizedMessage.includes("fetch failed") ||
         normalizedMessage.includes("connect timeout") ||
         normalizedMessage.includes("socket hang up") ||
@@ -209,17 +210,22 @@ async function canSignInWithPassword(email: string, password: string) {
         status >= 500;
 
       if (!transient || attempt >= attempts) {
+        const errorName = String(error?.name || "");
+        const safeName = /^(AuthApiError|AuthRetryableFetchError|AuthUnknownError|AuthSessionMissingError|AuthWeakPasswordError|AuthError)$/.test(errorName)
+          ? errorName : "unclassified";
+        const safeCode = /^(invalid_credentials|und_err_connect_timeout|econnreset|etimedout|enotfound|eai_again)$/.test(code)
+          ? code : code ? "unclassified" : "none";
         return {
           ok: false,
           reason: transient ? "transient" : "unknown",
-          message,
+          message: `${message} [class=${safeName} status=${Number.isFinite(status) ? status : "unavailable"} code=${safeCode}]`,
         } satisfies DemoPasswordCheckResult;
       }
 
       await new Promise((resolve) => setTimeout(resolve, baseDelayMs * attempt));
     } finally {
       try {
-        await client.auth.signOut();
+        await client.auth.signOut({ scope: "local" });
       } catch {
         // Best-effort cleanup only.
       }

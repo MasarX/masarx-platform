@@ -1,7 +1,14 @@
 const { Pool } = require('pg');
 const { randomUUID } = require('crypto');
 const { loadEnv } = require('../../../scripts/utils/load-env');
-const { createOrganization, createClient, createUser, createShipment } = require('../helpers/tenant-utils');
+const {
+  createOrganization,
+  createClient,
+  createUser,
+  createShipment,
+  withFixtureAdminContext,
+  setServiceContext: setCanonicalServiceContext,
+} = require('../helpers/tenant-utils');
 
 loadEnv();
 
@@ -33,33 +40,23 @@ describe('Task completion effects pipeline', () => {
   });
 
   async function setServiceContext(organizationId, userId) {
-    await client.query('SET LOCAL ROLE service_role');
-
-    const claims = {
-      role: 'service_role',
-      sub: userId,
-      organization_id: organizationId
-    };
-
-    await client.query('SELECT set_config($1, $2, true)', [
-      'request.jwt.claims',
-      JSON.stringify(claims)
-    ]);
-    await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', String(userId)]);
+    await setCanonicalServiceContext(client, userId, organizationId);
   }
 
   async function runDomainEventsWorkerOnce() {
-    await client.query(
-      `INSERT INTO cron_config (worker_name, interval_seconds, batch_size, enabled, notes)
-       VALUES ('domain_events_worker', 60, 50, true, 'integration ensure worker throttle')
-       ON CONFLICT (worker_name)
-       DO UPDATE SET enabled = true, interval_seconds = EXCLUDED.interval_seconds, batch_size = EXCLUDED.batch_size`
-    );
-    await client.query(
-      `UPDATE cron_config
-          SET last_run_at = now() - interval '5 minutes'
-        WHERE worker_name = 'domain_events_worker'`
-    );
+    await withFixtureAdminContext(client, async () => {
+      await client.query(
+        `INSERT INTO cron_config (worker_name, interval_seconds, batch_size, enabled, notes)
+         VALUES ('domain_events_worker', 60, 50, true, 'integration ensure worker throttle')
+         ON CONFLICT (worker_name)
+         DO UPDATE SET enabled = true, interval_seconds = EXCLUDED.interval_seconds, batch_size = EXCLUDED.batch_size`
+      );
+      await client.query(
+        `UPDATE cron_config
+            SET last_run_at = now() - interval '5 minutes'
+          WHERE worker_name = 'domain_events_worker'`
+      );
+    });
 
     await client.query(`SELECT run_domain_events_worker()`);
   }
@@ -67,11 +64,13 @@ describe('Task completion effects pipeline', () => {
   async function waitForDomainEventWorkflowRun(domainEventId, maxAttempts = 50) {
     for (let i = 0; i < maxAttempts; i += 1) {
       await runDomainEventsWorkerOnce();
-      const { rows } = await client.query(
-        `SELECT workflow_run_id
-           FROM domain_events
-          WHERE id = $1::uuid`,
-        [domainEventId]
+      const { rows } = await withFixtureAdminContext(client, () =>
+        client.query(
+          `SELECT workflow_run_id
+             FROM domain_events
+            WHERE id = $1::uuid`,
+          [domainEventId]
+        )
       );
       const workflowRunId = rows[0]?.workflow_run_id ?? null;
       if (workflowRunId) {
@@ -98,14 +97,16 @@ describe('Task completion effects pipeline', () => {
   async function getGlobalTaskCompletionEffectsPolicy() {
     const vScopeHash = '00000000-0000-0000-0000-000000000000';
 
-    const { rows } = await client.query(
-      `SELECT cached_value
-         FROM settings
-        WHERE category = 'task_completion_effects_policy'
-          AND scope_type = 'global'
-          AND scope_hash = $1::uuid
-        LIMIT 1`,
-      [vScopeHash]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT cached_value
+           FROM settings
+          WHERE category = 'task_completion_effects_policy'
+            AND scope_type = 'global'
+            AND scope_hash = $1::uuid
+          LIMIT 1`,
+        [vScopeHash]
+      )
     );
 
     return rows[0]?.cached_value;
@@ -190,17 +191,19 @@ describe('Task completion effects pipeline', () => {
     const taskEventId = transitionRows[0]?.task_event_id;
     expect(taskEventId).toBeTruthy();
 
-    const { rows: domainEventRows } = await client.query(
-      `SELECT id
-         FROM domain_events
-        WHERE organization_id = $1::uuid
-          AND event_type = $2
-          AND resource_type = 'shipment'
-          AND resource_id = $3::uuid
-          AND (payload->>'task_event_id') = $4
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [organizationId, `task.completed.${taskTypeKey}`, shipmentId, String(taskEventId)]
+    const { rows: domainEventRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id
+           FROM domain_events
+          WHERE organization_id = $1::uuid
+            AND event_type = $2
+            AND resource_type = 'shipment'
+            AND resource_id = $3::uuid
+            AND (payload->>'task_event_id') = $4
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [organizationId, `task.completed.${taskTypeKey}`, shipmentId, String(taskEventId)]
+      )
     );
     const domainEventId = domainEventRows[0]?.id;
     expect(domainEventId).toBeTruthy();
@@ -210,11 +213,13 @@ describe('Task completion effects pipeline', () => {
 
     const finalProgress = await progressWorkflowFully(workflowRunId);
 
-    const { rows: workflowRows } = await client.query(
-      `SELECT context #>> '{task_effects,shipment_action_id}' AS shipment_action_id
-         FROM workflow_runs
-        WHERE id = $1::uuid`,
-      [workflowRunId]
+    const { rows: workflowRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT context #>> '{task_effects,shipment_action_id}' AS shipment_action_id
+           FROM workflow_runs
+          WHERE id = $1::uuid`,
+        [workflowRunId]
+      )
     );
 
     return {
@@ -229,35 +234,39 @@ describe('Task completion effects pipeline', () => {
   }
 
   async function getShipmentStatus(shipmentId, clientId) {
-    const { rows } = await client.query(
-      `SELECT status
-         FROM shipments
-        WHERE id = $1::uuid
-          AND client_id = $2::uuid
-        LIMIT 1`,
-      [shipmentId, clientId]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT status
+           FROM shipments
+          WHERE id = $1::uuid
+            AND client_id = $2::uuid
+          LIMIT 1`,
+        [shipmentId, clientId]
+      )
     );
     return rows[0]?.status ?? null;
   }
 
   async function findShipmentActionForTaskEvent(shipmentId, taskEventId, shipmentActionId = null) {
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const { rows } = await client.query(
-        `SELECT id, action_type, action_category, canonical_status
-           FROM shipment_actions
-          WHERE shipment_id = $1::uuid
-            AND (
-              (action_data->>'task_event_id') = $2
-              OR ($3::uuid IS NOT NULL AND id = $3::uuid)
-            )
-          ORDER BY
-            CASE
-              WHEN (action_data->>'task_event_id') = $2 THEN 0
-              ELSE 1
-            END,
-            created_at DESC
-          LIMIT 1`,
-        [shipmentId, String(taskEventId), shipmentActionId]
+      const { rows } = await withFixtureAdminContext(client, () =>
+        client.query(
+          `SELECT id, action_type, action_category, canonical_status
+             FROM shipment_actions
+            WHERE shipment_id = $1::uuid
+              AND (
+                (action_data->>'task_event_id') = $2
+                OR ($3::uuid IS NOT NULL AND id = $3::uuid)
+              )
+            ORDER BY
+              CASE
+                WHEN (action_data->>'task_event_id') = $2 THEN 0
+                ELSE 1
+              END,
+              created_at DESC
+            LIMIT 1`,
+          [shipmentId, String(taskEventId), shipmentActionId]
+        )
       );
 
       if (rows[0]) {

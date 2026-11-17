@@ -5,6 +5,8 @@ const {
   applySetting,
   createUser,
   setAuthContext,
+  setFixtureAdminContext,
+  withFixtureAdminContext,
 } = require('../helpers/tenant-utils');
 
 loadEnv();
@@ -1218,9 +1220,7 @@ describe('zones + baskets workflow handlers', () => {
     expect(resortResult.items?.[0]?.basket_id).toBe(newBasketId);
     expect(resortResult.workflow_run_id).toBeTruthy();
 
-    await client.query('RESET ROLE');
-    await client.query("SELECT set_config('request.jwt.claims', '', true)");
-    await client.query("SELECT set_config('request.jwt.claim.sub', '', true)");
+    await setFixtureAdminContext(client);
 
     const {
       rows: [activeBasketRow],
@@ -1667,12 +1667,12 @@ describe('zones + baskets workflow handlers', () => {
 
     const {
       rows: [manualReviewTask],
-    } = await client.query(
+    } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT status, reason, metadata
          FROM manual_review_tasks
         WHERE id = $1::uuid`,
       [requestRow.manual_review_task_id]
-    );
+    ));
 
     expect(manualReviewTask.status).toBe('pending');
     expect(manualReviewTask.reason).toBe('Supervisor approved zone correction to Zone C');
@@ -1717,9 +1717,7 @@ describe('zones + baskets workflow handlers', () => {
     expect(overrideState?.reviewed_by).toBe(approverUserId);
     expect(overrideState?.applied_at).not.toBeNull();
 
-    await client.query('RESET ROLE');
-    await client.query("SELECT set_config('request.jwt.claims', '', true)");
-    await client.query("SELECT set_config('request.jwt.claim.sub', '', true)");
+    await setFixtureAdminContext(client);
 
     const {
       rows: [shipmentRow],

@@ -85,6 +85,43 @@ describe("WorkflowScheduleTriggersPanel", () => {
     expect(lastRunLink).toHaveAttribute("href", "/portal/workflows/runs/run-1");
   });
 
+  it("renders root-relative links when appBasePath is the app root", () => {
+    mockedCreateUiClient.mockReturnValue({
+      runWorkflowScheduleTrigger: jest.fn(),
+      createWorkflowScheduleTrigger: jest.fn(),
+      updateResource: jest.fn(),
+      rpc: jest.fn(),
+    });
+
+    renderWithIntl(
+      <WorkflowScheduleTriggersPanel
+        workflowTemplateId="template-1"
+        triggers={[
+          {
+            id: "trigger-1",
+            enabled: true,
+            schedule: { type: "interval", interval_seconds: 3600, timezone: "UTC" },
+            next_run_at: "2026-01-21T00:00:00Z",
+            last_run_id: "run-1",
+          },
+        ]}
+        triggersTotal={1}
+        appBasePath="/"
+        capabilities={["workflow_runs.write"]}
+        testIdPrefix="schedule-panel"
+      />
+    );
+
+    const fullViewLink = screen.getByRole("link", { name: "Open schedules in full view" });
+    expect(fullViewLink).toHaveAttribute(
+      "href",
+      "/resources/workflow_schedule_triggers?workflow_template_id=template-1"
+    );
+
+    const lastRunLink = screen.getByRole("link", { name: "Open last run" });
+    expect(lastRunLink).toHaveAttribute("href", "/workflows/runs/run-1");
+  });
+
   it("renders recurring shipment guidance and trigger notes when provided", () => {
     mockedCreateUiClient.mockReturnValue({
       runWorkflowScheduleTrigger: jest.fn(),
@@ -166,7 +203,82 @@ describe("WorkflowScheduleTriggersPanel", () => {
     fireEvent.click(screen.getByTestId("schedule-panel-run-trigger-1"));
 
     await waitFor(() => expect(runWorkflowScheduleTrigger).toHaveBeenCalledWith("trigger-1"));
+    const receipt = await screen.findByTestId("schedule-panel-run-readback-trigger-1");
+    expect(receipt).toHaveAttribute("role", "status");
+    expect(within(receipt).getByText("Schedule run started.")).toBeInTheDocument();
+    expect(within(receipt).getByText("run-123")).toBeInTheDocument();
+    expect(within(receipt).getByRole("link", { name: "Open last run" }))
+      .toHaveAttribute("href", "/portal/workflows/runs/run-123");
     expect(mockedNavigateTo).toHaveBeenCalledWith("/portal/workflows/runs/run-123");
+  });
+
+  it("runs a schedule trigger and navigates to the workflow run from the app root", async () => {
+    const runWorkflowScheduleTrigger = jest.fn().mockResolvedValue({
+      workflow_run_id: "run-123",
+    });
+
+    mockedCreateUiClient.mockReturnValue({
+      runWorkflowScheduleTrigger,
+      createWorkflowScheduleTrigger: jest.fn(),
+      updateResource: jest.fn(),
+      rpc: jest.fn(),
+    });
+
+    renderWithIntl(
+      <WorkflowScheduleTriggersPanel
+        workflowTemplateId="template-1"
+        triggers={[
+          {
+            id: "trigger-1",
+            enabled: true,
+            schedule: { type: "interval", interval_seconds: 3600, timezone: "UTC" },
+            next_run_at: "2026-01-21T00:00:00Z",
+          },
+        ]}
+        triggersTotal={1}
+        appBasePath="/"
+        capabilities={["workflow_runs.write"]}
+        testIdPrefix="schedule-panel"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("schedule-panel-run-trigger-1"));
+
+    await waitFor(() => expect(runWorkflowScheduleTrigger).toHaveBeenCalledWith("trigger-1"));
+    expect(mockedNavigateTo).toHaveBeenCalledWith("/workflows/runs/run-123");
+  });
+
+  it("disables run-now actions when the template is not active", () => {
+    mockedCreateUiClient.mockReturnValue({
+      runWorkflowScheduleTrigger: jest.fn(),
+      createWorkflowScheduleTrigger: jest.fn(),
+      updateResource: jest.fn(),
+      rpc: jest.fn(),
+    });
+
+    renderWithIntl(
+      <WorkflowScheduleTriggersPanel
+        workflowTemplateId="template-1"
+        templateStatus="draft"
+        triggers={[
+          {
+            id: "trigger-1",
+            enabled: true,
+            schedule: { type: "interval", interval_seconds: 3600, timezone: "UTC" },
+            next_run_at: "2026-01-21T00:00:00Z",
+          },
+        ]}
+        triggersTotal={1}
+        appBasePath="/portal"
+        capabilities={["workflow_runs.write"]}
+        testIdPrefix="schedule-panel"
+      />
+    );
+
+    expect(
+      screen.getByText("This template is not active. Enable preview mode to run drafts safely.")
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("schedule-panel-run-trigger-1")).toBeDisabled();
   });
 
   it("does not navigate when schedule run destination is unsafe", async () => {
@@ -372,6 +484,7 @@ describe("WorkflowScheduleTriggersPanel", () => {
     );
 
     await waitFor(() => expect(invalidateQueries).toHaveBeenCalled());
+    expect(screen.getByTestId("schedule-panel-row-trigger-2")).toBeInTheDocument();
   });
 
   it("creates an interval schedule trigger with unit conversion", async () => {
@@ -501,5 +614,46 @@ describe("WorkflowScheduleTriggersPanel", () => {
     );
 
     await waitFor(() => expect(invalidateQueries).toHaveBeenCalled());
+    expect(screen.queryByTestId("schedule-panel-row-trigger-1")).toBeNull();
   });
+});
+
+describe("schedule run acceptance receipt", () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    invalidateQueries.mockResolvedValue(undefined);
+  });
+  test.each(["blocked destination", "navigation failure", "RPC failure"])(
+    "preserves accepted identity without unsafe links or reruns after %s", async (scenario) => {
+      const run = scenario === "RPC failure"
+        ? jest.fn().mockRejectedValue(new Error("Run denied"))
+        : jest.fn().mockResolvedValue({ workflow_run_id: "accepted-1" });
+      mockedCreateUiClient.mockReturnValue({ runWorkflowScheduleTrigger: run });
+      if (scenario === "navigation failure") mockedNavigateTo.mockImplementation(() => { throw new Error("navigation unavailable"); });
+      renderWithIntl(<WorkflowScheduleTriggersPanel workflowTemplateId="template-1"
+        triggers={[{ id: "trigger-1", enabled: true }]}
+        appBasePath={scenario === "blocked destination" ? "javascript:alert(1)" : "/portal"}
+        capabilities={["workflow_runs.write"]} testIdPrefix="receipt" />);
+      fireEvent.click(screen.getByTestId("receipt-run-trigger-1"));
+      await waitFor(() => expect(screen.getByTestId("receipt-run-trigger-1")).toBeEnabled());
+      expect(run).toHaveBeenCalledTimes(1);
+      if (scenario === "RPC failure") {
+        expect(screen.queryByTestId("receipt-run-readback-trigger-1")).not.toBeInTheDocument();
+        expect(await screen.findByText("Run denied")).toBeInTheDocument();
+        expect(mockedNavigateTo).not.toHaveBeenCalled();
+      } else {
+        const receipt = screen.getByTestId("receipt-run-readback-trigger-1");
+        expect(within(receipt).getByText("accepted-1")).toBeInTheDocument();
+        expect(within(receipt).getByText("Schedule run started.")).toBeInTheDocument();
+        if (scenario === "blocked destination") {
+          expect(within(receipt).queryByRole("link")).not.toBeInTheDocument();
+          expect(mockedNavigateTo).not.toHaveBeenCalled();
+        } else {
+          expect(within(receipt).getByRole("link")).toHaveAttribute("href", "/portal/workflows/runs/accepted-1");
+          expect(await screen.findByText("navigation unavailable")).toBeInTheDocument();
+        }
+      }
+      expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+    }
+  );
 });

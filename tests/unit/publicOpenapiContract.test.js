@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { computeContractVersion } = require('../../scripts/docs/generate-public-openapi');
 
 const readJson = (filePath) =>
   JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
@@ -29,8 +30,28 @@ describe('Public OpenAPI contract', () => {
 
   test('uses deterministic content-derived contract version metadata', () => {
     expect(spec.info.version).toMatch(/^contract-[a-f0-9]{12}$/);
+    expect(spec.info.version).toBe(computeContractVersion(spec));
     expect(spec.info['x-versioning-policy']).toBe(
       'contract-<sha256(openapi_without_info.version)[:12]>'
+    );
+  });
+
+  test('documents supported cancellation aliases and reschedule ingress without internal emitted events', () => {
+    const eventTypes = spec.components.schemas.WebhookEnvelope.properties.event.properties.type.enum;
+    const providerEnvelope = readJson(path.join(
+      __dirname, '..', '..', 'docs', 'providers', 'schemas', 'provider.webhooks.event.schema.json',
+    ));
+    expect(new Set(eventTypes)).toEqual(new Set(providerEnvelope.properties.event.properties.type.enum));
+    expect(eventTypes).toEqual(expect.arrayContaining([
+      'shipment.canceled', 'shipment.cancelled', 'shipment.delete',
+      'shipment.rescheduled', 'shipment.reschedule',
+    ]));
+    expect(eventTypes.some((type) => type.startsWith('shipment_action.'))).toBe(false);
+    const description = spec.paths['/v1/webhook'].post.description;
+    expect(description).toContain('`delivery.requested_date` requires an explicitly configured mapping to `slot_date`');
+    expect(description).toContain('not universal intake requirements');
+    expect(spec.paths['/v1/webhook'].post.responses['202'].description).toContain(
+      'not confirmation that a shipment mutation completed',
     );
   });
 

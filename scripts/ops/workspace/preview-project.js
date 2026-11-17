@@ -19,7 +19,11 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const dns = require('dns').promises;
 const { loadEnv } = require('../../utils/load-env');
-const { buildDbConnectionCandidates } = require('../../utils/pg-candidates');
+const {
+  buildDbConnectionCandidates,
+  parseDbConnectionTarget,
+  resolveSelectedPoolerRoute,
+} = require('../../utils/pg-candidates');
 const { resolvePreviewSupabaseConfig } = require('./preview-supabase-config');
 const {
   uniqueNonEmpty,
@@ -29,9 +33,7 @@ const {
   withBranchParentFallback,
 } = require('./preview-branch-parent');
 const {
-  createBranch,
   createProject,
-  findBranchByName,
   getApiKeys,
   findProjectByName,
   listProjects,
@@ -42,6 +44,13 @@ const {
   setProjectDatabasePassword,
   deleteBranchWithRetries,
   deleteProjectWithRetries,
+  isCanonicalPostgresPort,
+  isCanonicalSupabaseProjectRef,
+  normalizeSupabasePoolerRegion,
+  resolveSupabasePoolerRegionFromHost,
+  resolveProjectPoolerHost,
+  validateBranchDatabaseConfig,
+  waitForBranchDatabaseConfig,
 } = require('./supabase-api');
 const {
   buildEdgeDbJwtBundle,
@@ -63,6 +72,7 @@ const {
   waitForStorageSchema,
 } = require('./storage-schema-ready');
 const { computeProjectName, extractPreviewWorkspaceFamilyName } = require('./preview-name');
+const { persistMaterializedOwnership } = require('./preview-ownership');
 
 function die(msg) {
   console.error(`[preview-project] ${msg}`);
@@ -104,7 +114,7 @@ function decodeJwtPayload(token) {
 }
 
 function isLikelyProjectRef(value) {
-  return /^[a-z0-9]{20}$/i.test(String(value || '').trim());
+  return isCanonicalSupabaseProjectRef(value);
 }
 
 function extractProjectRefFromIssuer(issuer) {
@@ -297,12 +307,83 @@ function extractPrNumber(evt) {
   return '';
 }
 
-function resolvePoolerHost({ configuredPoolerHost, configuredRegion, existingRegion } = {}) {
+function resolvePoolerHost({
+  configuredPoolerHost,
+  configuredRegion,
+  existingRegion,
+  allowDerivedHost = true,
+} = {}) {
   const explicitHost = String(configuredPoolerHost || '').trim();
   const effectiveRegion = String(existingRegion || configuredRegion || '').trim();
   if (explicitHost) return { poolerHost: explicitHost, effectiveRegion };
-  if (!effectiveRegion) return { poolerHost: '', effectiveRegion: '' };
+  if (!effectiveRegion || !allowDerivedHost) return { poolerHost: '', effectiveRegion };
   return { poolerHost: `aws-1-${effectiveRegion}.pooler.supabase.com`, effectiveRegion };
+}
+
+function assertBranchPoolerHost({ workspaceMode, poolerHost, poolerPort = '5432' } = {}) {
+  const mode = String(workspaceMode || '').trim().toLowerCase();
+  const host = String(poolerHost || '').trim();
+  if (mode === 'branch' && host && !resolveSupabasePoolerRegionFromHost(host)) {
+    throw new Error('branch_db_credentials_invalid:pooler_host');
+  }
+  if (host && !isCanonicalPostgresPort(poolerPort)) {
+    throw new Error('branch_db_credentials_invalid:pooler_port');
+  }
+  if (mode === 'branch' && host && String(poolerPort || '').trim() !== '5432') {
+    throw new Error('branch_db_credentials_invalid:pooler_port');
+  }
+  return host;
+}
+
+function shouldWaitForProjectReadiness(workspaceMode) {
+  return String(workspaceMode || '').trim().toLowerCase() !== 'branch';
+}
+
+function shouldProbeBranchPreviewDb({ workspaceMode, poolerHost, directDbHost, dbPass } = {}) {
+  return Boolean(
+    String(workspaceMode || '').trim().toLowerCase() === 'branch' &&
+    resolveSupabasePoolerRegionFromHost(poolerHost) &&
+    String(directDbHost || '').trim() &&
+    String(dbPass || '').trim(),
+  );
+}
+
+async function resolveBranchSupavisorRoute({
+  projectRef,
+  token,
+  branchConfig,
+  fallbackRegion = '',
+  resolveProjectPoolerHostFn = resolveProjectPoolerHost,
+} = {}) {
+  const validated = validateBranchDatabaseConfig(branchConfig, {
+    expectedProjectRef: projectRef,
+  });
+  const preferredRegion =
+    normalizeSupabasePoolerRegion(validated.region) ||
+    normalizeSupabasePoolerRegion(fallbackRegion);
+  const resolvedHost = String(await resolveProjectPoolerHostFn({
+    projectRef: validated.project_ref,
+    token: String(token || '').trim(),
+    preferredRegion,
+    fallbackHost: '',
+    allowDerivedFallback: true,
+  }) || '').trim().toLowerCase();
+
+  if (!resolvedHost) {
+    throw new Error('branch_db_route_unavailable:supavisor');
+  }
+  const resolvedRegion = resolveSupabasePoolerRegionFromHost(resolvedHost);
+  if (!resolvedRegion) {
+    throw new Error('branch_db_route_invalid:pooler_host');
+  }
+
+  return {
+    projectRef: validated.project_ref,
+    poolerHost: resolvedHost,
+    poolerPort: '5432',
+    poolerUser: `postgres.${validated.project_ref}`,
+    effectiveRegion: resolvedRegion || preferredRegion,
+  };
 }
 
 function isProjectNameAlreadyExistsError(err) {
@@ -586,6 +667,7 @@ function resolveAutoFallbackProjectRef({
 }
 
 function shouldAllowStaticApiKeyFallback({
+  workspaceMode,
   allowStaticKeys,
   staticAnon,
   staticService,
@@ -596,6 +678,7 @@ function shouldAllowStaticApiKeyFallback({
   previewJwtSeed,
   edgeRequireDbJwt,
 } = {}) {
+  if (String(workspaceMode || '').trim().toLowerCase() === 'branch') return false;
   if (!allowStaticKeys || !staticAnon || !staticService) return false;
   const normalizedStaticRef = String(staticProjectRef || '').trim().toLowerCase();
   const normalizedProjectRef = String(projectRef || '').trim().toLowerCase();
@@ -610,6 +693,7 @@ function shouldAllowStaticApiKeyFallback({
 }
 
 function shouldSyncDerivedPreviewJwtSecret({
+  workspaceMode,
   edgeRequireDbJwt,
   previewJwtSeed,
   jwtSeed,
@@ -618,6 +702,7 @@ function shouldSyncDerivedPreviewJwtSecret({
   envProjectRef,
   projectRef,
 } = {}) {
+  if (String(workspaceMode || '').trim().toLowerCase() === 'branch') return false;
   if (String(edgeRequireDbJwt || '').trim() === '1') return true;
   if (!String(previewJwtSeed || '').trim() && !String(jwtSeed || '').trim()) return false;
   if (usedMgmtApiBypassFallback) return false;
@@ -1021,7 +1106,14 @@ async function checkDbConnectivity({
 
     const resolvedTimeoutMs = Math.max(1000, Number(connectionTimeoutMillis) || 0);
     const operationTimeoutMs = Math.max(1000, resolvedTimeoutMs + 1000);
-    const client = new PgClient({ connectionString: cs, connectionTimeoutMillis });
+    let client;
+    try {
+      client = new PgClient({ connectionString: cs, connectionTimeoutMillis });
+    } catch (err) {
+      lastErr = err;
+      if (attempt < attempts) await sleep(intervalMs);
+      continue;
+    }
     // Keep a persistent listener for the full client lifecycle. Some providers
     // can emit more than one error (e.g. auth error followed by shutdown during
     // `end()`), and `once('error')` can miss late events and crash the process.
@@ -1092,57 +1184,107 @@ function isDbAuthConnectivityError(err) {
 }
 
 function buildPoolerConnectionString({ projectRef, dbPass, poolerHost, poolerPort }) {
-  const poolerUser = `postgres.${projectRef}`;
-  // objectives:allow DSN_URL Justification: construct Supabase pooler DSN dynamically from project_ref and workspace password; avoids tenant constants.
-  return ([`postgresql`,":","/","/",`${encodeURIComponent(poolerUser)}`,":",`${encodeURIComponent(dbPass)}`,"@",`${poolerHost}`,":",`${poolerPort}`,"/",`postgres`].join(""));
-}
-
-function buildDirectConnectionString({ projectRef, dbPass }) {
   const resolvedProjectRef = String(projectRef || '').trim();
   const resolvedDbPass = String(dbPass || '').trim();
-  if (!resolvedProjectRef || !resolvedDbPass) return '';
+  const resolvedPoolerHost = String(poolerHost || '').trim();
+  const resolvedPoolerPort = String(poolerPort || '').trim() || '5432';
+  if (!resolvedProjectRef || !resolvedDbPass || !resolvedPoolerHost) return '';
+  const poolerUser = `postgres.${resolvedProjectRef}`;
+  // objectives:allow DSN_URL Justification: construct Supabase pooler DSN dynamically from project_ref and workspace password; avoids tenant constants.
+  return ([`postgresql`,":","/","/",`${encodeURIComponent(poolerUser)}`,":",`${encodeURIComponent(resolvedDbPass)}`,"@",`${resolvedPoolerHost}`,":",`${resolvedPoolerPort}`,"/",`postgres`].join(""));
+}
+
+function resolveInitialPreviewJwtState({
+  workspaceMode,
+  branchJwtSecret,
+} = {}) {
+  const isBranch = String(workspaceMode || '').trim().toLowerCase() === 'branch';
+  const secret = isBranch ? String(branchJwtSecret || '').trim() : '';
+  return {
+    jwtSecret: secret,
+    jwtSource: secret ? 'branch_config' : '',
+    jwtSecretSynced: Boolean(secret),
+  };
+}
+
+function buildDirectConnectionString({
+  projectRef,
+  dbPass,
+  dbHost,
+  dbPort,
+  dbUser,
+} = {}) {
+  const resolvedProjectRef = String(projectRef || '').trim();
+  const resolvedDbPass = String(dbPass || '').trim();
+  const resolvedDbHost = String(dbHost || '').trim() || (resolvedProjectRef ? `db.${resolvedProjectRef}.supabase.co` : '');
+  const resolvedDbPort = String(dbPort || '').trim() || '5432';
+  const resolvedDbUser = String(dbUser || '').trim() || 'postgres';
+  if (!resolvedDbHost || !resolvedDbPass || !resolvedDbUser) return '';
   // objectives:allow DSN_URL Justification: construct canonical Supabase direct Postgres DSN dynamically from project_ref and workspace password; avoids tenant constants.
-  return ([`postgresql`,":","/","/",`postgres`,":",`${encodeURIComponent(resolvedDbPass)}`,"@",`db.${resolvedProjectRef}.supabase.co`,":",`5432`,"/",`postgres`].join(""));
+  return ([`postgresql`,":","/","/",`${encodeURIComponent(resolvedDbUser)}`,":",`${encodeURIComponent(resolvedDbPass)}`,"@",`${resolvedDbHost}`,":",`${resolvedDbPort}`,"/",`postgres`].join(""));
+}
+
+function resolveWorkspaceDbCredentials({
+  workspaceMode,
+  configuredDbPass,
+  branchConfig,
+  expectedProjectRef,
+} = {}) {
+  const mode = String(workspaceMode || '').trim().toLowerCase();
+  if (mode !== 'branch') {
+    return {
+      dbPass: String(configuredDbPass || '').trim(),
+      directDbHost: '',
+      directDbPort: '',
+      directDbUser: '',
+      source: 'configured',
+      shouldSyncPassword: true,
+    };
+  }
+
+  const validated = validateBranchDatabaseConfig(branchConfig, { expectedProjectRef });
+  return {
+    dbPass: validated.db_pass,
+    directDbHost: validated.db_host,
+    directDbPort: validated.db_port,
+    directDbUser: validated.db_user,
+    source: 'branch_config',
+    shouldSyncPassword: false,
+  };
+}
+
+async function waitForBranchDbCredentials({
+  token,
+  branchIdOrRef,
+  expectedProjectRef,
+  configuredDbPass,
+  maxWaitMs = 120_000,
+  retryDelayMs = 5_000,
+  getBranchConfigFn,
+  nowFn = () => Date.now(),
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  const branchConfig = await waitForBranchDatabaseConfig({
+    token,
+    branchIdOrRef,
+    expectedProjectRef,
+    maxWaitMs,
+    retryDelayMs,
+    ...(getBranchConfigFn ? { getBranchConfigFn } : {}),
+    nowFn,
+    sleepFn,
+  });
+  const credentials = resolveWorkspaceDbCredentials({
+    workspaceMode: 'branch',
+    configuredDbPass,
+    branchConfig,
+    expectedProjectRef,
+  });
+  return { branchConfig, credentials };
 }
 
 function parseConnectionTarget(connectionString) {
-  const raw = String(connectionString || '').trim();
-  if (!raw) {
-    return {
-      connectionString: '',
-      host: '',
-      port: '',
-      username: '',
-      kind: '',
-    };
-  }
-
-  try {
-    const parsed = new URL(raw);
-    const host = String(parsed.hostname || '').trim().toLowerCase();
-    const port = String(parsed.port || '').trim() || '5432';
-    const username = decodeURIComponent(String(parsed.username || '').trim());
-    const kind = /pooler\.supabase\.(com|co)$/i.test(host)
-      ? 'pooler'
-      : /^db\.[a-z0-9-]+\.supabase\.co$/i.test(host)
-        ? 'direct'
-        : '';
-    return {
-      connectionString: raw,
-      host,
-      port,
-      username,
-      kind,
-    };
-  } catch {
-    return {
-      connectionString: raw,
-      host: '',
-      port: '',
-      username: '',
-      kind: '',
-    };
-  }
+  return parseDbConnectionTarget(connectionString);
 }
 
 function buildPreviewEnvPayload({
@@ -1209,7 +1351,11 @@ async function buildPreviewPoolerDbCandidates({
   dbPass,
   poolerHost,
   poolerPort,
+  directDbHost,
+  directDbPort,
+  directDbUser,
   includeDirect = true,
+  poolerSessionOnly = false,
   buildCandidatesFn = buildDbConnectionCandidates,
 } = {}) {
   const rawCandidates = [];
@@ -1223,12 +1369,32 @@ async function buildPreviewPoolerDbCandidates({
     rawCandidates.push({ name: 'DATABASE_URL_POOLER', dsn: poolerDsn });
   }
 
-  const directDsn = includeDirect ? buildDirectConnectionString({ projectRef, dbPass }) : '';
+  const directDsn = includeDirect
+    ? buildDirectConnectionString({
+      projectRef,
+      dbPass,
+      dbHost: directDbHost,
+      dbPort: directDbPort,
+      dbUser: directDbUser,
+    })
+    : '';
   if (directDsn) {
     rawCandidates.push({ name: 'DATABASE_URL_DIRECT', dsn: directDsn });
   }
 
-  return buildCandidatesFn(rawCandidates, { projectRef });
+  const candidates = await buildCandidatesFn(rawCandidates, { projectRef });
+  if (!poolerSessionOnly) return candidates;
+
+  return (Array.isArray(candidates) ? candidates : []).filter((candidate) => {
+    const name = String(candidate?.name || '').trim();
+    if (!name.startsWith('DATABASE_URL_POOLER')) return true;
+    try {
+      const parsed = new URL(String(candidate?.dsn || '').trim());
+      return (String(parsed.port || '').trim() || '5432') === '5432';
+    } catch {
+      return false;
+    }
+  });
 }
 
 async function checkDbConnectivityCandidates({
@@ -1259,22 +1425,27 @@ async function checkDbConnectivityCandidates({
   let lastRetryableAuthCandidateName = '';
   let lastRetryableAuthCandidateDsn = '';
   for (const candidate of normalizedCandidates) {
-    const res = await probeDb({
-      connectionString: candidate.dsn,
-      attempts,
-      intervalMs,
-      connectionTimeoutMillis,
-    });
-    if (res.ok) {
+    let res;
+    try {
+      res = await probeDb({
+        connectionString: candidate.dsn,
+        attempts,
+        intervalMs,
+        connectionTimeoutMillis,
+      });
+    } catch (error) {
+      res = { ok: false, error };
+    }
+    if (res?.ok) {
       return {
         ok: true,
         candidateName: String(res.candidateName || candidate.name || '').trim(),
         connectionString: String(res.connectionString || candidate.dsn || '').trim(),
       };
     }
-    lastError = res.error;
-    lastCandidateName = String(res.candidateName || candidate.name || '').trim();
-    lastCandidateDsn = String(res.connectionString || candidate.dsn || '').trim();
+    lastError = res?.error || new Error(`DB readiness candidate '${candidate.name}' failed without an error`);
+    lastCandidateName = String(res?.candidateName || candidate.name || '').trim();
+    lastCandidateDsn = String(res?.connectionString || candidate.dsn || '').trim();
     if (isDbAuthConnectivityError(lastError)) {
       lastRetryableAuthError = lastError;
       lastRetryableAuthCandidateName = lastCandidateName;
@@ -1773,6 +1944,7 @@ async function waitForDbReadyCandidates({
 
 async function waitForDns({
   projectRef,
+  directDbHost,
   poolerHost,
   includeDirectHost = true,
   timeoutMs,
@@ -1782,7 +1954,9 @@ async function waitForDns({
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
 } = {}) {
   const targets = [];
-  if (includeDirectHost && projectRef) targets.push(`db.${projectRef}.supabase.co`);
+  if (includeDirectHost && (directDbHost || projectRef)) {
+    targets.push(String(directDbHost || `db.${projectRef}.supabase.co`).trim());
+  }
   if (poolerHost) targets.push(poolerHost);
   if (!targets.length) return;
 
@@ -1866,10 +2040,34 @@ async function main() {
   const orgId = cfg.orgId;
   const configuredRegion = cfg.region;
   const plan = cfg.plan;
-  const dbPass = cfg.dbPass;
+  let dbPass = cfg.dbPass;
   const requestedWorkspaceMode = String(cfg.workspaceMode || 'project').trim().toLowerCase();
   if (!['project', 'branch', 'auto'].includes(requestedWorkspaceMode)) {
     die(`Invalid workspace mode '${requestedWorkspaceMode}'. Expected 'project', 'branch', or 'auto'.`);
+  }
+  const expectedWorkspaceMode = readEnv('PREVIEW_EXPECTED_WORKSPACE_MODE').toLowerCase();
+  const expectedProjectRef = readEnv('PREVIEW_EXPECTED_PROJECT_REF').toLowerCase();
+  const expectedBranchParentRef = readEnv('PREVIEW_EXPECTED_BRANCH_PARENT_REF').toLowerCase();
+  const requireExistingWorkspace = isTruthyFlag(readEnv('PREVIEW_REQUIRE_EXISTING_WORKSPACE'));
+  if (expectedWorkspaceMode && !['project', 'branch'].includes(expectedWorkspaceMode)) {
+    die(`Invalid PREVIEW_EXPECTED_WORKSPACE_MODE '${expectedWorkspaceMode}'. Expected 'project' or 'branch'.`);
+  }
+  if (expectedProjectRef && !isCanonicalSupabaseProjectRef(expectedProjectRef)) {
+    die('PREVIEW_EXPECTED_PROJECT_REF must be an exact canonical Supabase project ref.');
+  }
+  if (expectedBranchParentRef && !isCanonicalSupabaseProjectRef(expectedBranchParentRef)) {
+    die('PREVIEW_EXPECTED_BRANCH_PARENT_REF must be an exact canonical Supabase project ref.');
+  }
+  if (requireExistingWorkspace && (!expectedWorkspaceMode || !expectedProjectRef)) {
+    die('PREVIEW_REQUIRE_EXISTING_WORKSPACE requires PREVIEW_EXPECTED_WORKSPACE_MODE and PREVIEW_EXPECTED_PROJECT_REF.');
+  }
+  if (expectedWorkspaceMode && requestedWorkspaceMode !== expectedWorkspaceMode) {
+    die(
+      `Pinned preview workspace mode mismatch: requested=${requestedWorkspaceMode} expected=${expectedWorkspaceMode}.`,
+    );
+  }
+  if (expectedWorkspaceMode === 'branch' && !expectedBranchParentRef) {
+    die('Pinned branch rehydrate requires PREVIEW_EXPECTED_BRANCH_PARENT_REF.');
   }
   const edgeInternalCallerRoles =
     String(process.env.EDGE_INTERNAL_CALLER_ROLES || '').trim() ||
@@ -1877,7 +2075,10 @@ async function main() {
   let edgeRequireDbJwt = String(process.env.EDGE_REQUIRE_DB_JWT || '1').trim();
 
   const envProjectName = readEnv('PREVIEW_PROJECT_NAME');
-  const envProjectRef = readEnv('PREVIEW_PROJECT_REF') || readEnv('PREVIEW_SUPABASE_PROJECT_ID');
+  const envProjectRef =
+    readEnv('PREVIEW_PROJECT_REF') ||
+    readEnv('PREVIEW_SUPABASE_PROJECT_ID') ||
+    expectedProjectRef;
   const envSupabaseUrl = readEnv('PREVIEW_SUPABASE_URL');
   const staticAnon = readEnv('PREVIEW_SUPABASE_ANON_KEY');
   const staticService = readEnv('PREVIEW_SUPABASE_SERVICE_ROLE_KEY');
@@ -1885,11 +2086,14 @@ async function main() {
     serviceKey: staticService,
     anonKey: staticAnon,
   });
-  const branchParentCandidates = resolveBranchParentCandidates({
+  const resolvedBranchParentCandidates = resolveBranchParentCandidates({
     resolvedConfig: cfg,
     env: process.env,
     extra: [envProjectRef],
   });
+  const branchParentCandidates = expectedBranchParentRef
+    ? [expectedBranchParentRef]
+    : resolvedBranchParentCandidates;
 
   const explicitName = String(args.name || '').trim() || envProjectName;
   if (!prNumber && !explicitName && !(requestedWorkspaceMode !== 'branch' && envProjectRef)) {
@@ -1900,6 +2104,9 @@ async function main() {
   const canonicalProjectName = projectName;
   const forceRecoverySibling = isTruthyFlag(process.env.PREVIEW_FORCE_RECOVERY_SIBLING);
   if (forceRecoverySibling) {
+    if (requireExistingWorkspace) {
+      die('PREVIEW_FORCE_RECOVERY_SIBLING is forbidden while an existing preview workspace identity is pinned.');
+    }
     if (envProjectName || envProjectRef) {
       die('PREVIEW_FORCE_RECOVERY_SIBLING cannot be used with PREVIEW_PROJECT_NAME/PREVIEW_PROJECT_REF pinned preview workspaces.');
     }
@@ -1938,12 +2145,40 @@ async function main() {
   let branchId = '';
   let selectedBranchParentRef = branchParentCandidates[0] || '';
   let workspaceMode = forceRecoverySibling ? 'project' : requestedWorkspaceMode;
+  let materializedOwnership = null;
+
+  function persistCurrentWorkspaceOwnership() {
+    const ownershipPath = readEnv('PREVIEW_OWNERSHIP_PATH');
+    if (!ownershipPath || !String(projectName || '').toLowerCase().startsWith('wk-')) return null;
+    const ownsDisposableWorkspace = workspaceMode === 'branch' || (
+      workspaceMode === 'project' &&
+      !usedMgmtApiBypassFallback &&
+      (projectWasCreated || Boolean(existingProject))
+    );
+    if (!ownsDisposableWorkspace) return null;
+    materializedOwnership = persistMaterializedOwnership(ownershipPath, {
+      workspace_mode: workspaceMode,
+      project_name: projectName,
+      project_ref: projectRef,
+      branch_id: workspaceMode === 'branch' ? branchId : '',
+      branch_parent_ref: workspaceMode === 'branch' ? selectedBranchParentRef : '',
+      active_family_generation: String(projectName || '').includes('-r-') ? 2 : 1,
+      run_id: process.env.GITHUB_RUN_ID || '',
+      run_attempt: process.env.GITHUB_RUN_ATTEMPT || '',
+    });
+    return materializedOwnership;
+  }
 
   async function createFreshRecoveryProject({
     recreateErr,
     rotation = false,
     extraExcludedProjectRefs = [],
   } = {}) {
+    if (requireExistingWorkspace) {
+      throw new Error(
+        `Pinned preview workspace ${expectedProjectRef} is unhealthy; replacement is forbidden during manifest rehydrate.`,
+      );
+    }
     const recoveryBaseName = canonicalProjectName || projectName;
     const recoveryProjectName = buildRecoveryProjectName(recoveryBaseName);
     const recoveryFamilyName = extractPreviewWorkspaceFamilyName(recoveryProjectName);
@@ -1984,6 +2219,7 @@ async function main() {
     selectedPoolerConnectionString = '';
     selectedPoolerCandidateName = '';
     if (!projectRef) die('Recovery project create did not return project_ref');
+    persistCurrentWorkspaceOwnership();
     ({ poolerHost, effectiveRegion } = resolvePoolerHost({
       configuredPoolerHost: cfg.poolerHost,
       configuredRegion: configuredRegion,
@@ -2011,6 +2247,11 @@ async function main() {
   }
 
   if (workspaceMode === 'branch') {
+    assertBranchPoolerHost({
+      workspaceMode,
+      poolerHost: cfg.poolerHost,
+      poolerPort: cfg.poolerPort || process.env.SUPABASE_POOLER_PORT || '5432',
+    });
     try {
       const ensuredResult = await withBranchParentFallback({
         parentRefs: branchParentCandidates,
@@ -2020,6 +2261,8 @@ async function main() {
           parentProjectRef,
           name: projectName,
           reuseExisting: true,
+          requireExisting: requireExistingWorkspace,
+          expectedProjectRef,
         }),
       });
       const ensuredBranch = ensuredResult.value;
@@ -2029,34 +2272,22 @@ async function main() {
       projectWasCreated = !ensuredBranch.reused;
       existingBranch = ensuredBranch.reused ? ensuredBranch : null;
       if (!projectRef) die('Branch create/reuse did not return project_ref');
+      if (expectedProjectRef && projectRef !== expectedProjectRef) {
+        die(`Pinned branch identity mismatch: resolved=${projectRef} expected=${expectedProjectRef}.`);
+      }
+      if (expectedBranchParentRef && selectedBranchParentRef !== expectedBranchParentRef) {
+        die(
+          `Pinned branch parent mismatch: resolved=${selectedBranchParentRef} expected=${expectedBranchParentRef}.`,
+        );
+      }
       if (projectWasCreated) {
         console.log(`[preview-project] Created branch '${projectName}' (parent_ref=${selectedBranchParentRef}, project_ref=${projectRef})`);
       } else {
         console.log(`[preview-project] Reusing branch '${projectName}' (parent_ref=${selectedBranchParentRef}, project_ref=${projectRef})`);
       }
-      if (requestedWorkspaceMode === 'auto' && dbPass) {
-        const { poolerHost: probePoolerHost } = resolvePoolerHost({
-          configuredPoolerHost: cfg.poolerHost,
-          configuredRegion: configuredRegion,
-          existingRegion: ensuredBranch?.region,
-        });
-        if (probePoolerHost) {
-          const poolerUser = `postgres.${projectRef}`;
-          // objectives:allow DSN_URL Justification: construct Supabase pooler DSN dynamically from project_ref and org-managed password for branch-mode auth probe
-          const probeDbUrl = ([`postgresql`,":","/","/",`${encodeURIComponent(poolerUser)}`,":",`${encodeURIComponent(dbPass)}`,"@",`${probePoolerHost}`,":",`${String(cfg.poolerPort || process.env.SUPABASE_POOLER_PORT || '5432').trim() || '5432'}`,"/",`postgres`].join(""));
-          const probe = await checkDbConnectivity({
-            connectionString: probeDbUrl,
-            attempts: 1,
-            intervalMs: 0,
-            connectionTimeoutMillis: 8000,
-          });
-          if (!probe.ok && isDbAuthConnectivityError(probe.error)) {
-            const fallbackErr = new Error(`Branch DB auth probe failed: ${probe.error?.message || probe.error}`);
-            fallbackErr.status = 422;
-            throw fallbackErr;
-          }
-        }
-      }
+      // Branches own isolated database credentials. Resolve those credentials
+      // from the branch-config endpoint after readiness instead of probing with
+      // the parent/project-mode password configured for project creation.
     } catch (err) {
       if (requestedWorkspaceMode !== 'auto' || !shouldFallbackToProjectMode(err)) {
         throw err;
@@ -2160,13 +2391,23 @@ async function main() {
     }
   }
 
+  // Persist exact disposable-workspace ownership before credential hydration,
+  // DNS readiness, migrations, or any other fallible provisioning work.
+  persistCurrentWorkspaceOwnership();
+
   let { poolerHost, effectiveRegion } = resolvePoolerHost({
     configuredPoolerHost: cfg.poolerHost,
     configuredRegion: configuredRegion,
     existingRegion: existingProject?.region || existingBranch?.region,
+    allowDerivedHost: workspaceMode !== 'branch',
   });
   let selectedPoolerConnectionString = '';
   let selectedPoolerCandidateName = '';
+  let directDbHost = '';
+  let directDbPort = '';
+  let directDbUser = '';
+  let branchJwtSecret = '';
+  let shouldSyncWorkspaceDbPassword = true;
   let managementApiAuthBlocked = false;
   const existingWorkspaceRegion = existingProject?.region || existingBranch?.region || '';
   if (existingWorkspaceRegion && existingWorkspaceRegion !== configuredRegion) {
@@ -2174,6 +2415,9 @@ async function main() {
     console.warn(`[preview-project] Existing ${workspaceKind.toLowerCase()} region=${existingWorkspaceRegion} differs from configured region=${configuredRegion}; using existing region for pooler.`);
   }
   let poolerPort = String(cfg.poolerPort || process.env.SUPABASE_POOLER_PORT || '5432').trim() || '5432';
+  if (workspaceMode !== 'branch') {
+    assertBranchPoolerHost({ workspaceMode, poolerHost, poolerPort });
+  }
   const dbReadyAttempts = Math.max(
     1,
     parseInt(
@@ -2259,8 +2503,98 @@ async function main() {
       10,
     ) || 10000,
   );
+  const branchCredentialTimeoutMs = Math.max(
+    10_000,
+    Math.min(
+      dbReadyTimeoutMs,
+      parseInt(
+        String(process.env.PREVIEW_SUPABASE_BRANCH_CREDENTIAL_TIMEOUT_MS || '120000'),
+        10,
+      ) || 120000,
+    ),
+  );
+  const branchCredentialRetryDelayMs = Math.max(
+    250,
+    parseInt(
+      String(process.env.PREVIEW_SUPABASE_BRANCH_CREDENTIAL_RETRY_DELAY_MS || '5000'),
+      10,
+    ) || 5000,
+  );
+
+  async function hydrateBranchOwnedDbCredentials(label = 'branch') {
+    if (workspaceMode !== 'branch') return null;
+    const resolved = await waitForBranchDbCredentials({
+      token,
+      branchIdOrRef: projectRef || branchId,
+      expectedProjectRef: projectRef,
+      configuredDbPass: cfg.dbPass,
+      maxWaitMs: branchCredentialTimeoutMs,
+      retryDelayMs: branchCredentialRetryDelayMs,
+    });
+    dbPass = resolved.credentials.dbPass;
+    directDbHost = resolved.credentials.directDbHost;
+    directDbPort = resolved.credentials.directDbPort;
+    directDbUser = resolved.credentials.directDbUser;
+    branchJwtSecret = String(resolved.branchConfig?.jwt_secret || '').trim();
+    shouldSyncWorkspaceDbPassword = resolved.credentials.shouldSyncPassword;
+    // Supabase direct database endpoints are IPv6 unless the project has the
+    // IPv4 add-on, while GitHub Actions runners are IPv4-only. Resolve the
+    // exact branch project's shared Supavisor session endpoint instead:
+    // https://supabase.com/docs/guides/database/connecting-to-postgres
+    // https://supabase.com/docs/guides/troubleshooting/supabase--your-network-ipv4-and-ipv6-compatibility-cHe3BP
+    const branchRoute = await resolveBranchSupavisorRoute({
+      projectRef,
+      token,
+      branchConfig: resolved.branchConfig,
+      fallbackRegion: existingBranch?.region || configuredRegion,
+    });
+    poolerHost = branchRoute.poolerHost;
+    poolerPort = branchRoute.poolerPort;
+    effectiveRegion = branchRoute.effectiveRegion || effectiveRegion;
+    assertBranchPoolerHost({ workspaceMode, poolerHost, poolerPort });
+    console.log(
+      `[preview-project] Resolved branch-owned DB credentials and Supavisor route (${label}) for project_ref=${projectRef}; password sync disabled for branch mode.`,
+    );
+    emitTrace(trace, 'info', {
+      step: 'branch_db_credentials',
+      status: 'ok',
+      project_ref: projectRef,
+      branch_id: branchId,
+      source: resolved.credentials.source,
+      pooler_host: poolerHost,
+      pooler_port: poolerPort,
+    });
+    return resolved;
+  }
 
   // Ensure infra is ready before writing env + running DB ops.
+  if (workspaceMode === 'branch') {
+    try {
+      assertBranchPoolerHost({ workspaceMode, poolerHost, poolerPort });
+      await hydrateBranchOwnedDbCredentials(projectWasCreated ? 'created branch' : 'reused branch');
+    } catch (error) {
+      if (projectWasCreated && branchId) {
+        try {
+          await deleteBranchWithRetries(branchId, token, { timeoutMs: 120_000 });
+          console.warn(
+            `[preview-project] Removed newly created branch_id=${branchId} after credential hydration failed.`,
+          );
+        } catch (cleanupError) {
+          console.warn(
+            `[preview-project] Could not remove newly created branch_id=${branchId} after credential hydration failed: ${cleanupError.message || cleanupError}`,
+          );
+        }
+      }
+      die(`Unable to resolve branch-owned DB credentials: ${error.message || error}`);
+    }
+  }
+
+  if (expectedWorkspaceMode && workspaceMode !== expectedWorkspaceMode) {
+    die(`Pinned preview workspace mode mismatch: resolved=${workspaceMode} expected=${expectedWorkspaceMode}.`);
+  }
+  if (expectedProjectRef && projectRef !== expectedProjectRef) {
+    die(`Pinned preview workspace identity mismatch: resolved=${projectRef || '<missing>'} expected=${expectedProjectRef}.`);
+  }
   const dnsTimeoutMs = resolvePreviewDnsTimeoutMs({
     configuredTimeoutMs: cfg.dnsTimeoutMs,
     usedMgmtApiBypassFallback,
@@ -2272,6 +2606,7 @@ async function main() {
   try {
     await waitForDns({
       projectRef,
+      directDbHost,
       poolerHost,
       includeDirectHost: !usedMgmtApiBypassFallback,
       timeoutMs: dnsTimeoutMs,
@@ -2297,15 +2632,16 @@ async function main() {
       `[preview-project] Reused preview project direct DNS is unhealthy; deferring to pooler probe + rebuild recovery (${dnsErr.message}).`,
     );
   }
-  try {
-    await waitUntilReady(projectRef, token, 20 * 60 * 1000);
-  } catch (e) {
-    if (shouldFallbackToProjectMode(e)) {
-      managementApiAuthBlocked = true;
+  if (shouldWaitForProjectReadiness(workspaceMode)) {
+    try {
+      await waitUntilReady(projectRef, token, 20 * 60 * 1000);
+    } catch (e) {
+      if (shouldFallbackToProjectMode(e)) {
+        managementApiAuthBlocked = true;
+      }
+      console.warn(`[preview-project] waitUntilReady warning (continuing): ${e.message}`);
     }
-    console.warn(`[preview-project] waitUntilReady warning (continuing): ${e.message}`);
   }
-
   // Newly created or recovered Supabase workspaces can briefly report "ready"
   // while the pooler still rejects connections (e.g., "Tenant or user not
   // found"). Prefer the pooler when it is healthy, but allow a direct DB
@@ -2325,7 +2661,11 @@ async function main() {
       dbPass,
       poolerHost,
       poolerPort,
+      directDbHost,
+      directDbPort,
+      directDbUser,
       includeDirect,
+      poolerSessionOnly: workspaceMode === 'branch',
     });
     try {
       const ready = await waitForDbReadyCandidates({
@@ -2340,12 +2680,16 @@ async function main() {
       });
       selectedPoolerConnectionString = String(ready?.connectionString || '').trim();
       selectedPoolerCandidateName = String(ready?.candidateName || '').trim();
-      const selectedTarget = parseConnectionTarget(selectedPoolerConnectionString);
-      if (selectedTarget.kind === 'pooler' && selectedTarget.host) {
-        poolerHost = selectedTarget.host;
-        if (selectedTarget.port) {
-          poolerPort = selectedTarget.port;
-        }
+      const selectedRoute = resolveSelectedPoolerRoute({
+        connectionString: selectedPoolerConnectionString,
+        candidateName: selectedPoolerCandidateName,
+        fallbackHost: poolerHost,
+        fallbackPort: poolerPort,
+        fallbackUser: `postgres.${projectRef}`,
+      });
+      if (selectedRoute.host) {
+        poolerHost = selectedRoute.host;
+        poolerPort = selectedRoute.port;
       }
       if (selectedPoolerCandidateName) {
         console.log(
@@ -2371,8 +2715,25 @@ async function main() {
     });
   }
 
+  if (shouldProbeBranchPreviewDb({
+    workspaceMode,
+    poolerHost,
+    directDbHost,
+    dbPass,
+  })) {
+    try {
+      await waitForPreferredDbUsable(
+        projectWasCreated || projectWasRecreated
+          ? 'branch DB via Supavisor'
+          : 'reused branch DB via Supavisor',
+      );
+    } catch (error) {
+      die(error.message || String(error));
+    }
+  }
+
   if ((projectWasCreated || projectWasRecreated) && projectName && poolerHost && dbPass) {
-    if (shouldSyncPreviewDbPasswordOnAuthError()) {
+    if (shouldSyncWorkspaceDbPassword && shouldSyncPreviewDbPasswordOnAuthError()) {
       await refreshProjectDbPassword({
         projectRef,
         token,
@@ -2396,6 +2757,8 @@ async function main() {
         authErrorExtraMs: dbReadyAuthExtraMs,
         previewDbPasswordSyncMaxWaitMs,
         previewDbPasswordSyncRetryDelayMs,
+        shouldSyncDbPasswordOnAuthErrorFn: () =>
+          shouldSyncWorkspaceDbPassword && shouldSyncPreviewDbPasswordOnAuthError(),
       });
     } catch (err) {
       die(err.message || String(err));
@@ -2426,7 +2789,7 @@ async function main() {
   // Self-heal reused preview workspaces that drift (e.g., stale credentials)
   // by rebuilding when DB connectivity is broken. This keeps merge_group and
   // reviewer gates deterministic without manual intervention.
-  if (!projectWasCreated && projectName && poolerHost && dbPass) {
+  if (workspaceMode !== 'branch' && !projectWasCreated && projectName && poolerHost && dbPass) {
     const probeCandidates = await buildPreviewPoolerDbCandidates({
       projectRef,
       dbPass,
@@ -2441,16 +2804,25 @@ async function main() {
     if (probe.ok) {
       selectedPoolerConnectionString = String(probe.connectionString || '').trim();
       selectedPoolerCandidateName = String(probe.candidateName || '').trim();
-      const selectedTarget = parseConnectionTarget(selectedPoolerConnectionString);
-      if (selectedTarget.kind === 'pooler' && selectedTarget.host) {
-        poolerHost = selectedTarget.host;
-        if (selectedTarget.port) {
-          poolerPort = selectedTarget.port;
-        }
+      const selectedRoute = resolveSelectedPoolerRoute({
+        connectionString: selectedPoolerConnectionString,
+        candidateName: selectedPoolerCandidateName,
+        fallbackHost: poolerHost,
+        fallbackPort: poolerPort,
+        fallbackUser: `postgres.${projectRef}`,
+      });
+      if (selectedRoute.host) {
+        poolerHost = selectedRoute.host;
+        poolerPort = selectedRoute.port;
       }
     }
 
-    if (!probe.ok && isDbAuthConnectivityError(probe.error) && shouldSyncPreviewDbPasswordOnAuthError()) {
+    if (
+      !probe.ok &&
+      isDbAuthConnectivityError(probe.error) &&
+      shouldSyncWorkspaceDbPassword &&
+      shouldSyncPreviewDbPasswordOnAuthError()
+    ) {
       console.warn(
         `[preview-project] Reused preview DB auth failed; attempting password sync via Management API (project_ref=${projectRef}).`,
       );
@@ -2510,45 +2882,17 @@ async function main() {
       } else {
         console.warn(`[preview-project] Reused preview DB not reachable; rebuilding project_ref=${projectRef}: ${probe.error?.message || probe.error}`);
         if (workspaceMode === 'branch') {
-          if (!branchId) {
-            const branchLookup = await withBranchParentFallback({
-              parentRefs: uniqueNonEmpty([selectedBranchParentRef, ...branchParentCandidates]),
-              actionLabel: 'find branch for rebuild',
-              action: async (parentProjectRef) => {
-                const existingBranchByName = await findBranchByName({ token, parentProjectRef, name: projectName });
-                const existingBranchId = String(existingBranchByName?.branch_id || '').trim();
-                if (!existingBranchId) {
-                  const notFound = new Error(`Branch '${projectName}' not found under parent_ref=${parentProjectRef}`);
-                  notFound.status = 404;
-                  throw notFound;
-                }
-                return { branchId: existingBranchId };
-              },
-            });
-            selectedBranchParentRef = branchLookup.parentProjectRef;
-            branchId = String(branchLookup.value?.branchId || '').trim();
-          }
-          if (!branchId) {
-            die(`Unable to resolve branch id for rebuild (name=${projectName}).`);
-          }
-          await deleteBranchWithRetries(branchId, token);
-          console.log(`[preview-project] Recreating branch '${projectName}' (parent_ref=${selectedBranchParentRef})`);
-          const recreatedResult = await withBranchParentFallback({
-            parentRefs: uniqueNonEmpty([selectedBranchParentRef, ...branchParentCandidates]),
-            actionLabel: 'recreate branch',
-            action: async (parentProjectRef) => createBranch({ token, parentProjectRef, name: projectName }),
-          });
-          const recreated = recreatedResult.value;
-          selectedBranchParentRef = recreatedResult.parentProjectRef;
-          projectRef = recreated.project_ref || '';
-          branchId = recreated.branch_id || '';
-          existingBranch = null;
-          if (!projectRef) die('Branch recreate did not return project_ref');
-          projectWasRecreated = true;
+          die(
+            `Reused branch DB is not reachable and automatic rebuild is forbidden without active-consumer/runtime ownership proof (project_ref=${projectRef}).`,
+          );
+        } else if (requireExistingWorkspace) {
+          die(
+            `Pinned preview project is not reachable and replacement is forbidden during manifest rehydrate (project_ref=${projectRef}).`,
+          );
         } else {
           try {
             const previousProjectRefForRecreate = String(projectRef || '').trim();
-            await deleteProjectWithRetries(projectRef, token);
+            await deleteProjectWithRetries(projectRef, token, { organizationId: orgId });
             console.log(`[preview-project] Recreating project '${projectName}' (region=${configuredRegion}, plan=${plan})`);
             const createResult = await createProjectWithNameConflictRecovery({
               token,
@@ -2574,6 +2918,7 @@ async function main() {
             projectWasCreated = !createResult.reusedExisting;
             if (!projectRef) die('Project recreate did not return project_ref');
             projectWasRecreated = true;
+            persistCurrentWorkspaceOwnership();
           } catch (recreateErr) {
             if (!shouldRecoverWithFreshProjectSibling({
               rebuildError: recreateErr,
@@ -2592,9 +2937,15 @@ async function main() {
           configuredPoolerHost: cfg.poolerHost,
           configuredRegion: configuredRegion,
           existingRegion: existingProject?.region || '',
+          allowDerivedHost: workspaceMode !== 'branch',
         }));
+        assertBranchPoolerHost({ workspaceMode, poolerHost, poolerPort });
+        if (workspaceMode === 'branch') {
+          await hydrateBranchOwnedDbCredentials('recreated branch');
+        }
         await waitForDns({
           projectRef,
+          directDbHost,
           poolerHost,
           includeDirectHost: false,
           timeoutMs: cfg.dnsTimeoutMs,
@@ -2625,7 +2976,7 @@ async function main() {
               recreatedRecoveryWaitBudget.authErrorExtraMs;
             const resolveRemainingRecoveryBudgetMs = () =>
               Math.max(0, recoveryDeadlineMs - Date.now());
-            if (shouldSyncPreviewDbPasswordOnAuthError()) {
+            if (shouldSyncWorkspaceDbPassword && shouldSyncPreviewDbPasswordOnAuthError()) {
               const remainingRecoveryBudgetMs = resolveRemainingRecoveryBudgetMs();
               if (remainingRecoveryBudgetMs < 10_000) {
                 throw new Error(
@@ -2662,6 +3013,8 @@ async function main() {
               previewDbPasswordSyncMaxWaitMs,
               previewDbPasswordSyncRetryDelayMs,
               recoveryDeadlineMs,
+              shouldSyncDbPasswordOnAuthErrorFn: () =>
+                shouldSyncWorkspaceDbPassword && shouldSyncPreviewDbPasswordOnAuthError(),
             });
           };
 
@@ -2704,10 +3057,15 @@ async function main() {
     serviceKey: staticService,
     accessToken: token,
   });
-  let jwtSecret = '';
-  let jwtSource = '';
-  let jwtSecretSynced = false;
+  const initialJwtState = resolveInitialPreviewJwtState({
+    workspaceMode,
+    branchJwtSecret,
+  });
+  let jwtSecret = initialJwtState.jwtSecret;
+  let jwtSource = initialJwtState.jwtSource;
+  let jwtSecretSynced = initialJwtState.jwtSecretSynced;
   const syncPreviewJwtSecret = shouldSyncDerivedPreviewJwtSecret({
+    workspaceMode,
     edgeRequireDbJwt,
     previewJwtSeed,
     jwtSeed,
@@ -2716,6 +3074,14 @@ async function main() {
     envProjectRef,
     projectRef,
   });
+  if (
+    workspaceMode === 'branch' &&
+    shouldFailClosedOnMissingPreviewJwtSecret({ edgeRequireDbJwt, jwtSecret })
+  ) {
+    die(
+      `Branch config did not return its auth JWT secret for project_ref=${projectRef}; branch auth rotation is forbidden during preview setup.`,
+    );
+  }
   if (syncPreviewJwtSecret) {
     const syncSeed = String(previewJwtSeed || jwtSeed || '').trim();
     if (syncSeed) {
@@ -2761,6 +3127,7 @@ async function main() {
   }
   const allowStaticKeys = Boolean(envProjectName || envProjectRef || usedMgmtApiBypassFallback);
   const allowStaticFallback = shouldAllowStaticApiKeyFallback({
+    workspaceMode,
     allowStaticKeys,
     staticAnon,
     staticService,
@@ -2828,7 +3195,12 @@ async function main() {
   const shouldWaitForStorageAuth =
     edgeRequireDbJwt === '1' &&
     jwtSecret &&
-    (jwtSource === 'explicit' || jwtSource === 'generated' || jwtSource === 'derived');
+    (
+      jwtSource === 'explicit' ||
+      jwtSource === 'generated' ||
+      jwtSource === 'derived' ||
+      jwtSource === 'branch_config'
+    );
   const runtimeWaitOptions = resolveJwtPropagationOptions(process.env, {
     timeoutKeys: [
       'PREVIEW_JWT_PROPAGATION_TIMEOUT_MS',
@@ -2900,9 +3272,26 @@ async function main() {
     ? buildEdgeDbJwtBundle({ secret: jwtSigningSecret, issuer: jwtIssuer })
     : fallbackEdgeDbJwtBundle;
   const selectedPoolerTarget = parseConnectionTarget(selectedPoolerConnectionString);
+  const selectedPoolerRoute = resolveSelectedPoolerRoute({
+    connectionString: selectedPoolerConnectionString,
+    candidateName: selectedPoolerCandidateName,
+    fallbackHost: poolerHost,
+    fallbackPort: poolerPort,
+    fallbackUser: `postgres.${projectRef}`,
+  });
+  if (selectedPoolerRoute.host) {
+    poolerHost = selectedPoolerRoute.host;
+    poolerPort = selectedPoolerRoute.port;
+  }
 
   // objectives:allow DSN_URL Justification: construct Supabase direct DSN dynamically from project_ref and org-managed password for preview environments
-  const directDbUrl = buildDirectConnectionString({ projectRef, dbPass });
+  const directDbUrl = buildDirectConnectionString({
+    projectRef,
+    dbPass,
+    dbHost: directDbHost,
+    dbPort: directDbPort,
+    dbUser: directDbUser,
+  });
 
   const payload = buildPreviewEnvPayload({
     projectRef,
@@ -2918,7 +3307,13 @@ async function main() {
     configuredRegion,
     poolerHost,
     poolerPort,
-    selectedPoolerTarget,
+    selectedPoolerTarget: {
+      ...selectedPoolerTarget,
+      host: selectedPoolerRoute.host || selectedPoolerTarget.host,
+      port: selectedPoolerRoute.port || selectedPoolerTarget.port,
+      username: selectedPoolerRoute.user || selectedPoolerTarget.username,
+      kind: selectedPoolerRoute.host ? 'pooler' : selectedPoolerTarget.kind,
+    },
     selectedPoolerCandidateName,
     orgId,
     token,
@@ -2937,7 +3332,7 @@ async function main() {
     requestedWorkspaceMode === 'auto'
   ) {
     try {
-      await deleteProjectWithRetries(supersededProjectRef, token);
+      await deleteProjectWithRetries(supersededProjectRef, token, { organizationId: orgId });
       console.log(
         `[preview-project] Deleted superseded preview sibling ${supersededProjectRef} after healthy recovery project became ready.`,
       );
@@ -2952,11 +3347,18 @@ async function main() {
     project_ref: projectRef,
     project_name: projectName || projectRef,
     workspace_mode: workspaceMode,
+    ...(workspaceMode === 'branch' && branchId ? { branch_id: branchId } : {}),
+    ...(workspaceMode === 'branch' && selectedBranchParentRef
+      ? { branch_parent_ref: selectedBranchParentRef }
+      : {}),
     supabase_url: supabaseUrl,
     env_file: envFile,
     edge_require_db_jwt: edgeRequireDbJwt,
     db_ready: runtimeReadiness.db_ready,
     db_ready_candidate_name: selectedPoolerCandidateName,
+    pooler_host: selectedPoolerRoute.host || poolerHost,
+    pooler_port: selectedPoolerRoute.port || poolerPort,
+    pooler_user: selectedPoolerRoute.user || `postgres.${projectRef}`,
     jwt_ready: runtimeReadiness.jwt_ready,
     rest_ready: runtimeReadiness.rest_ready,
     runtime_ready: runtimeReadiness.runtime_ready,
@@ -2966,6 +3368,8 @@ async function main() {
     jwt_secret_source: jwtSource,
     recovery_reason: recoveryReason,
     active_family_generation: String(projectName || '').includes('-r-') ? 2 : 1,
+    workspace_owned: Boolean(materializedOwnership?.materialized),
+    ownership_generation_token: String(materializedOwnership?.generation_token || ''),
     superseded_project_ref: supersededProjectRef,
   };
 
@@ -3015,10 +3419,15 @@ module.exports = {
   resolvePreviewSupabaseUrl,
   buildFallbackEdgeDbJwtBundle,
   resolvePoolerHost,
+  assertBranchPoolerHost,
+  shouldWaitForProjectReadiness,
+  shouldProbeBranchPreviewDb,
+  resolveBranchSupavisorRoute,
   applyAutoFallbackToProjectState,
   resolveAutoFallbackProjectRef,
   shouldAllowStaticApiKeyFallback,
   shouldSyncDerivedPreviewJwtSecret,
+  resolveInitialPreviewJwtState,
   shouldFailClosedOnMissingPreviewJwtSecret,
   resolveProjectRefForProjectMode,
   shouldRebuildProjectOnDnsFailure,
@@ -3048,6 +3457,8 @@ module.exports = {
   refreshProjectDbPassword,
   shouldSyncPreviewDbPasswordOnAuthError,
   waitForPoolerUsableWithAuthLagRecovery,
+  resolveWorkspaceDbCredentials,
+  waitForBranchDbCredentials,
   buildPreviewPoolerDbCandidates,
   buildPreviewEnvPayload,
   parseConnectionTarget,

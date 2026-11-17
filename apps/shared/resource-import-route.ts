@@ -1,16 +1,20 @@
+import { ImportLimitError, assertRequestSize, assertUploadSize } from "../../supabase/functions/resource-import-studio/upload-limits";
 import { type NextRequest } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { Workbook } from "exceljs";
+import { parseUploadInWorker } from "./resource-import-worker";
 import { getVerifiedAccessToken, validateTrustedBrowserRequest } from "@masarx/auth";
+import { createServerReachableFetch } from "@masarx/auth/server";
 import {
   buildTabularHeaderFingerprint,
-  detectWorkbookVisibleSheets,
-  matrixToTabularData,
-  parseCsvTextMatrix,
-  resolveWorkbookWorksheet,
-  worksheetToMatrix,
 } from "@masarx/api";
 import { getPublicConfig } from "@masarx/config";
+import {
+  ImportPreparationError,
+  loadImportPreparation,
+  processStartedImport,
+  validateImportFile,
+  validateImportWorkbook,
+} from "../../supabase/functions/resource-import-studio/preparation";
 import {
   getRequestIdFromHeaders,
   jsonResponseWithRequestId,
@@ -97,6 +101,7 @@ function createServiceClient() {
   const apiKeyHeader = isJwtLike(serviceKey)
     ? String(process.env.SUPABASE_ANON_KEY || "").trim() || supabaseAnonKey || serviceKey
     : serviceKey;
+  const serverFetch = createServerReachableFetch(supabaseUrl);
 
   return createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -105,6 +110,7 @@ function createServiceClient() {
       headers: {
         apikey: apiKeyHeader,
       },
+      ...(serverFetch ? { fetch: serverFetch } : {}),
     },
   });
 }
@@ -180,69 +186,18 @@ function parseJsonObject(value: FormDataEntryValue | null, fieldName: string): J
   }
 }
 
-async function resolveImportScopeContext(
-  userClient: SupabaseClient<any, any, any>,
-  resourceKey: string,
-  scopeContext: JsonRecord,
-) {
-  const { data, error } = await userClient.rpc("ui_resolve_import_scope_context_v1", {
-    p_payload: {
-      resource_key: resourceKey,
-      scope_context: scopeContext,
-    },
-  });
-  if (error) {
-    throw new Error(error.message || "Unable to resolve import scope.");
-  }
-  return asRecord(data) ?? {};
-}
-
 async function parseWorkbookFromFile(file: File, requestedSheet?: string | null) {
   const extension = file.name.split(".").pop()?.trim().toLowerCase() || "csv";
   if (extension === "xls") {
     throw new Error("Legacy .xls workbooks are not supported. Upload a CSV or XLSX file.");
   }
 
-  if (extension === "csv") {
-    const parsed = matrixToTabularData(parseCsvTextMatrix(await file.text()));
-    return {
-      headers: parsed.headers,
-      rows: parsed.rows,
-      selectedSheet: "Sheet1",
-      visibleSheets: ["Sheet1"],
-    };
-  }
-
-  if (extension !== "xlsx") {
+  if (extension !== "xlsx" && extension !== "csv") {
     throw new Error("Unsupported file format. Upload a CSV or XLSX file.");
   }
 
-  const workbook = new Workbook();
-  await workbook.xlsx.load(await file.arrayBuffer());
-  const visibleSheets = detectWorkbookVisibleSheets(workbook as never);
-  const selectedSheet =
-    (requestedSheet && visibleSheets.includes(requestedSheet) ? requestedSheet : null) ??
-    visibleSheets[0] ??
-    workbook.worksheets[0]?.name ??
-    "";
-
-  if (!selectedSheet) {
-    throw new Error("The uploaded workbook did not contain a readable worksheet.");
-  }
-
-  const sheet = resolveWorkbookWorksheet(workbook as never, selectedSheet);
-  if (!sheet) {
-    throw new Error(`Worksheet ${selectedSheet} could not be read.`);
-  }
-
-  const parsed = matrixToTabularData(worksheetToMatrix(sheet as never));
-
-  return {
-    headers: parsed.headers,
-    rows: parsed.rows,
-    selectedSheet,
-    visibleSheets,
-  };
+  const bytes = await file.arrayBuffer();
+  return parseUploadInWorker(bytes, extension, requestedSheet);
 }
 
 async function uploadSourceArtifact(params: {
@@ -292,13 +247,15 @@ async function uploadSourceArtifact(params: {
   }
 
   const artifact = firstRecord<{ artifact_id?: string | null }>(data);
+  if (!artifact?.artifact_id) throw new Error("The uploaded source artifact could not be registered.");
   return {
-    artifactId: artifact?.artifact_id ?? null,
+    artifactId: artifact.artifact_id,
     fileName: safeName,
   };
 }
 
 async function resolveAction(request: NextRequest) {
+  assertRequestSize(request.headers);
   const contentType = request.headers.get("content-type") || "";
   if (
     contentType.includes("multipart/form-data") ||
@@ -365,7 +322,7 @@ export async function handleResourceImportRequest(request: NextRequest) {
         error: error instanceof Error ? error.message : "Invalid request body.",
         requestId,
       },
-      400,
+      error instanceof ImportLimitError ? error.status : 400,
       requestId,
     );
   }
@@ -414,6 +371,8 @@ export async function handleResourceImportRequest(request: NextRequest) {
           requestId,
         );
       }
+      assertUploadSize(file);
+      validateImportFile(file);
 
       const resourceKey = asString(form.get("resource_key"));
       if (!resourceKey) {
@@ -424,11 +383,17 @@ export async function handleResourceImportRequest(request: NextRequest) {
         );
       }
 
-      const workbook = await parseWorkbookFromFile(file, asString(form.get("sheet_name")) || null);
       const scopeContext = parseJsonObject(form.get("scope_context"), "scope_context");
-      const scopeResolution = await resolveImportScopeContext(userClient, resourceKey, scopeContext);
-      const organizationId = maybeUuid(scopeResolution.organization_id);
-      const normalizedScopeContext = asRecord(scopeResolution.scope_context) ?? scopeContext;
+      const rules = parseRules(form.get("rules"));
+      const rowOverrides = parseJsonObject(form.get("row_overrides"), "row_overrides");
+      const ruleSource = asString(form.get("rule_source")) || "auto";
+      const preparation = await loadImportPreparation(userClient, resourceKey, scopeContext);
+      validateImportFile(file, preparation.maxFileBytes);
+      const workbook = await parseWorkbookFromFile(file, asString(form.get("sheet_name")) || null);
+      const headerFingerprint = buildTabularHeaderFingerprint(workbook.headers);
+      const resolvedRules = validateImportWorkbook(preparation, workbook, headerFingerprint, rules, ruleSource);
+      const organizationId = maybeUuid(preparation.organizationId);
+      const normalizedScopeContext = preparation.scopeContext;
       const { userId } = await loadCurrentUiContext(userClient);
       if (!organizationId) {
         return jsonResponseWithRequestId(
@@ -441,7 +406,6 @@ export async function handleResourceImportRequest(request: NextRequest) {
         );
       }
 
-      const headerFingerprint = buildTabularHeaderFingerprint(workbook.headers);
       const uploaded = await uploadSourceArtifact({
         serviceClient,
         organizationId,
@@ -456,7 +420,7 @@ export async function handleResourceImportRequest(request: NextRequest) {
         p_payload: {
           resource_key: resourceKey,
           write_mode: asString(form.get("write_mode")) || "create",
-          rule_source: asString(form.get("rule_source")) || "auto",
+          rule_source: ruleSource,
           source_format: file.name.split(".").pop()?.trim().toLowerCase() || "csv",
           source_file_name: uploaded.fileName,
           source_artifact_id: uploaded.artifactId,
@@ -464,8 +428,8 @@ export async function handleResourceImportRequest(request: NextRequest) {
           header_fingerprint: headerFingerprint,
           headers: workbook.headers,
           rows: workbook.rows,
-          rules: parseRules(form.get("rules")),
-          row_overrides: parseJsonObject(form.get("row_overrides"), "row_overrides"),
+          rules: resolvedRules,
+          row_overrides: rowOverrides,
           scope_context: normalizedScopeContext,
         },
       });
@@ -500,7 +464,7 @@ export async function handleResourceImportRequest(request: NextRequest) {
         );
       }
 
-      const { data, error } = await userClient.rpc("ui_start_tabular_import_run_v1", {
+      const { error } = await userClient.rpc("ui_start_tabular_import_run_v1", {
         p_run_id: runId,
         p_save_profile: asRecord(payload.body.save_profile) ?? null,
       });
@@ -508,12 +472,15 @@ export async function handleResourceImportRequest(request: NextRequest) {
         throw new Error(error.message || "Failed to start import run");
       }
 
-      const run = (await hydrateArtifacts(serviceClient, asRecord(data) ?? {})) as JsonRecord;
+      const processed = await processStartedImport(userClient, serviceClient, runId,
+        process.env.RESOURCE_IMPORT_START_PROCESS_BATCH_SIZE || process.env.TABULAR_IMPORT_START_PROCESS_BATCH_SIZE);
+      const run = (await hydrateArtifacts(serviceClient, processed.run)) as JsonRecord;
       return jsonResponseWithRequestId(
         {
           ok: true,
           run,
           report: asRecord(run.report) ?? null,
+          processing_warning: processed.processingWarning,
           correlation_id: requestId,
           requestId,
         },
@@ -551,9 +518,16 @@ export async function handleResourceImportRequest(request: NextRequest) {
         requestId,
       );
     }
+    const reason = asString(payload.body.reason);
+    if (!reason) {
+      return jsonResponseWithRequestId(
+        { error: "Cancel requires a non-empty operator reason.", code: "missing_cancel_reason", requestId }, 400, requestId,
+      );
+    }
 
     const { data, error } = await userClient.rpc("ui_cancel_tabular_import_run_v1", {
       p_run_id: runId,
+      p_cancel_reason: reason,
     });
     if (error) {
       throw new Error(error.message || "Failed to cancel import run");
@@ -574,9 +548,10 @@ export async function handleResourceImportRequest(request: NextRequest) {
     return jsonResponseWithRequestId(
       {
         error: error instanceof Error ? error.message : "Resource import request failed.",
+        ...((error instanceof ImportPreparationError || error instanceof ImportLimitError) ? { code: error.code } : {}),
         requestId,
       },
-      400,
+      (error instanceof ImportPreparationError || error instanceof ImportLimitError) ? error.status : 400,
       requestId,
     );
   }

@@ -8,6 +8,7 @@ const {
   assertLiveEvidenceMatchesDeclared,
   checkHttpReadiness,
   createTargetBackend,
+  prepareTargetProject,
   prepareSchemaArtifactForTargetRestore,
   readSourceDescriptor,
   resolveCommandOnPath,
@@ -58,6 +59,24 @@ describe('local target backend tooling', () => {
       PATHEXT: extra.PATHEXT || process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD',
     };
   }
+
+  test('carries the local invite config asset into an isolated target without overwriting an existing template', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'masarx-target-invite-template-'));
+    try {
+      const source = path.join(cwd, 'supabase', 'templates', 'invite.html');
+      fs.mkdirSync(path.dirname(source), { recursive: true });
+      fs.writeFileSync(source, '<a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=invite">Confirm invitation</a>', 'utf8');
+      fs.writeFileSync(path.join(cwd, 'supabase', 'config.toml'), '[auth.email.template.invite]\ncontent_path = "./supabase/templates/invite.html"\n', 'utf8');
+      const result = prepareTargetProject({ cwd, workspace: 'invite-target' });
+      const target = path.join(result.supabase_dir, 'templates', 'invite.html');
+      expect(fs.readFileSync(target, 'utf8')).toBe(fs.readFileSync(source, 'utf8'));
+      fs.writeFileSync(target, 'preserved target-owned template', 'utf8');
+      prepareTargetProject({ cwd, workspace: 'invite-target' });
+      expect(fs.readFileSync(target, 'utf8')).toBe('preserved target-owned template');
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
 
   test('refuses proof-data descriptors', async () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'masarx-target-proof-data-'));

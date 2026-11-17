@@ -1,11 +1,63 @@
 import {
   buildResourceSchema,
+  buildReviewMappingConfig,
   buildRuntimeMappingConfig,
   inferTabularRules,
   normalizeRulesFromMappingConfig,
 } from "../../packages/ui/src/mapping-studio/utils";
 
 describe("mapping studio utils", () => {
+  test("selected artifact overrides stale artifact metadata", () => {
+    expect(buildRuntimeMappingConfig("webhook_inbound", [], null, { artifact: "api_outbound" }).artifact).toBe("webhook_inbound");
+  });
+
+  test("clearing primary uses remaining fallback paths without an empty JSONPath", () => {
+    const rules = normalizeRulesFromMappingConfig({ field_mappings: { id: ["$.id", "$.legacy"] } });
+    rules[0] = { ...rules[0], source_path: "" };
+    expect(buildRuntimeMappingConfig("webhook_inbound", rules).field_mappings).toEqual({ id: ["$.legacy"] });
+  });
+
+  test("malformed fallback arrays fail explicitly instead of silently losing entries", () => {
+    expect(() => normalizeRulesFromMappingConfig({ field_mappings: { id: ["$.id", 7] } })).toThrow("must all be strings");
+  });
+
+  test("roundtrips ordered fallback arrays and untouched mapping configuration without mutation", () => {
+    const original = {
+      version: 7,
+      artifact: "webhook_inbound",
+      field_mappings: { status: [" $.status ", "$.payload.status"], external_id: "$.id", empty: [] },
+      transforms: { retained: { value: "$.value" } },
+      metadata: { retained: true },
+    };
+    const before = JSON.stringify(original);
+    const rules = normalizeRulesFromMappingConfig(original);
+    const review = buildReviewMappingConfig("webhook_inbound", rules);
+    expect(buildRuntimeMappingConfig("webhook_inbound", normalizeRulesFromMappingConfig(review), null, original)).toEqual(original);
+    expect(JSON.stringify(original)).toBe(before);
+  });
+
+  test("editing a primary path preserves ordered fallbacks and unrelated configuration", () => {
+    const original = { field_mappings: { status: ["$.status", "$.legacy", "$.backup"] }, metadata: { retained: true } };
+    const rules = normalizeRulesFromMappingConfig(original);
+    rules[0] = { ...rules[0], source_path: "$.new", target_field: "shipment_status" };
+    expect(buildRuntimeMappingConfig("webhook_inbound", rules, null, original)).toEqual({
+      version: 1, artifact: "webhook_inbound", metadata: { retained: true },
+      field_mappings: { shipment_status: ["$.new", "$.legacy", "$.backup"] },
+    });
+    expect(original.field_mappings.status).toEqual(["$.status", "$.legacy", "$.backup"]);
+  });
+
+  test("removing an array rule does not resurrect it from the original mapping", () => {
+    const original = { field_mappings: { status: ["$.status", "$.legacy"], id: "$.id" } };
+    const rules = normalizeRulesFromMappingConfig(original).filter(rule => rule.target_field !== "status");
+    expect(buildRuntimeMappingConfig("webhook_inbound", rules, null, original).field_mappings).toEqual({ id: "$.id" });
+  });
+
+  test("untouched transforms-only configuration does not gain an overriding empty field mapping", () => {
+    const original = { version: 1, artifact: "webhook_inbound", transforms: { shipment: { id: "$.id" } } };
+    expect(buildRuntimeMappingConfig("webhook_inbound", normalizeRulesFromMappingConfig(original), null, original)).toEqual(original);
+  });
+
   test("buildResourceSchema derives primitive types from resource columns", () => {
     const schema = buildResourceSchema({
       key: "orders",

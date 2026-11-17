@@ -1,6 +1,8 @@
 BEGIN;
 
-SELECT plan(9);
+SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
+
+SELECT plan(15);
 
 SELECT ok(
   EXISTS (
@@ -98,55 +100,89 @@ SELECT is(
   'resolve_webhook_intake_defaults reflects overridden error_status'
 );
 
-CREATE TEMP TABLE tmp_webhook_intake_source AS
-WITH org AS (
-    SELECT id FROM organizations ORDER BY created_at LIMIT 1
-),
-ids AS (
-    SELECT gen_random_uuid() AS mapping_id, gen_random_uuid() AS source_id
-),
-mc AS (
-    INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config)
-    SELECT ids.mapping_id,
-           'webhook_inbound',
-           'pgtap-webhook-' || ids.mapping_id::text,
-           '{}'::jsonb
-    FROM ids
-    RETURNING id
-),
-src AS (
-    INSERT INTO webhook_sources (
-        id,
-        organization_id,
-        source_identifier,
-        name,
-        provider_type,
-        auth_token,
-        mapping_config_id,
-        sender_id,
-        rate_limit_per_hour,
-        enabled,
-        created_at,
-        updated_at
-    )
-    SELECT
-        ids.source_id,
-        org.id,
-        'pgtap-source-' || ids.source_id::text,
-        'pgTAP Source',
-        'client',
-        'pgtap-dynamic-token',
-        ids.mapping_id,
-        NULL,
-        1000,
-        true,
-        now(),
-        now()
-    FROM org, ids
-    RETURNING id, organization_id
-)
-SELECT id AS webhook_source_id, organization_id
-FROM src;
+CREATE TEMP TABLE tmp_owned_webhook (source_id UUID, organization_id UUID, sender_id UUID, token TEXT);
+DO $fixture$
+DECLARE
+  v_root_scope_type TEXT := public.get_root_scope_type_key_v1();
+  v_org UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
+  v_mapping UUID := gen_random_uuid();
+  v_source UUID := gen_random_uuid();
+  v_token TEXT := 'pgtap-owned-' || gen_random_uuid()::text;
+  v_provider TEXT;
+BEGIN
+  -- Keep this test deterministic: disable onboarding side effects that now
+  -- auto-materialize required defaults at tenant/client/sender scopes.
+  PERFORM public.upsert_settings_value_v1(
+    'saas_onboarding_policy',
+    v_root_scope_type,
+    NULL,
+    jsonb_build_object(
+      'version', 1,
+      'enabled', FALSE,
+      'ensure_global_required_defaults', FALSE,
+      'materialize_defaults', jsonb_build_object(
+        'tenant', jsonb_build_object(
+          'use_registry_required_defaults', FALSE,
+          'strict_required_coverage', FALSE,
+          'include_categories', jsonb_build_array(),
+          'exclude_categories', jsonb_build_array()
+        ),
+        'client', jsonb_build_object(
+          'use_registry_required_defaults', FALSE,
+          'strict_required_coverage', FALSE,
+          'include_categories', jsonb_build_array(),
+          'exclude_categories', jsonb_build_array()
+        ),
+        'sender', jsonb_build_object(
+          'use_registry_required_defaults', FALSE,
+          'strict_required_coverage', FALSE,
+          'include_categories', jsonb_build_array(),
+          'exclude_categories', jsonb_build_array()
+        )
+      ),
+      'rbac', jsonb_build_object(
+        'provision_templates', FALSE,
+        'template_keys', jsonb_build_array()
+      ),
+      'client_defaults', jsonb_build_object(
+        'create_default_sender', FALSE,
+        'default_sender_name', 'Default Sender',
+        'default_sender_brand_name', NULL
+      )
+    ),
+    1,
+    'pgTAP policy ladder test isolation: disable onboarding auto-bootstrap side effects'
+  );
+
+
+  SELECT lv.value INTO STRICT v_provider
+  FROM public.lookup_definitions ld JOIN public.lookup_values lv ON lv.lookup_definition_id = ld.id
+  WHERE ld.category = 'integration_type' AND COALESCE(lv.status, 'active') = 'active'
+  ORDER BY COALESCE(lv.sort_order, 2147483647), lv.value LIMIT 1;
+  INSERT INTO public.organizations(id,name,slug,timezone,locale,billing_status,default_settings)
+  VALUES(v_org,'pgTAP Owned Webhook','pgtap-' || v_org::text,'Asia/Riyadh','en-US','active','{}');
+  INSERT INTO public.clients(id,organization_id,name,slug,sla_tier,status,settings_override)
+  VALUES(v_client,v_org,'pgTAP Client','pgtap-' || v_client::text,'standard','active','{}');
+  INSERT INTO public.senders(id,client_id,name,brand_name,auto_provisioned,auto_recreate,status,settings_override)
+  VALUES(v_sender,v_client,'pgTAP Sender','pgTAP',FALSE,TRUE,'active','{}');
+  INSERT INTO public.mapping_configs(id,organization_id,mapping_type,mapping_key,mapping_config,mapping_version,notes)
+  VALUES(v_mapping,v_org,'webhook_inbound','pgtap-' || v_mapping::text,
+    '{"external_id_path":"event.id","event_type_path":"event.type"}',1,'Owned rollback-only fixture');
+  INSERT INTO public.webhook_sources(id,organization_id,source_identifier,name,provider_type,auth_token,mapping_config_id,enabled,sender_id,rate_limit_per_hour)
+  VALUES(v_source,v_org,'pgtap-' || v_source::text,'pgTAP Source',v_provider,v_token,v_mapping,TRUE,v_sender,1000);
+  INSERT INTO tmp_owned_webhook VALUES(v_source,v_org,v_sender,v_token);
+END;
+$fixture$;
+
+DO $policy$
+BEGIN
+  PERFORM upsert_webhook_ingest_policy('source', source_id,
+    '{"version":1,"ack":{"mode":"synchronous_success"},"validation":{"idempotency":{"header":"Idempotency-Key","body_path":"event.id"}}}'::jsonb)
+  FROM tmp_owned_webhook;
+END;
+$policy$;
 
 CREATE TEMP TABLE tmp_webhook_intake_entry_template AS
 SELECT resolve_settings('webhook_intake', 'global', NULL)->>'entry_template_id' AS entry_template_id;
@@ -178,13 +214,42 @@ SET cached_value = jsonb_strip_nulls((COALESCE(s.cached_value, '{}'::jsonb) - 'e
 FROM global_scope g
 WHERE s.id = g.settings_id;
 
+-- Fail at the fixture boundary if tenant materialization shadows this global fault.
+DO $scope_check$
+DECLARE
+  v_effective JSONB;
+BEGIN
+  SELECT COALESCE(resolve_settings('webhook_intake','tenant',organization_id),
+    resolve_settings('webhook_intake','global',NULL)) INTO STRICT v_effective
+  FROM tmp_owned_webhook;
+  IF NULLIF(v_effective->>'entry_template_id','') IS NOT NULL
+     OR (v_effective#>>'{defaults,error_status}') IS DISTINCT FROM '599' THEN
+    RAISE EXCEPTION 'Owned webhook tenant does not resolve the intended missing-template/error599 fixture';
+  END IF;
+END;
+$scope_check$;
+
 SELECT is(
   (
-    SELECT (workflow_intake_webhook('pgtap-dynamic-token', '{}'::jsonb, '{}'::text, '{}'::jsonb)->>'status')::INT
+    SELECT (workflow_intake_webhook((SELECT token FROM tmp_owned_webhook), jsonb_build_object('Idempotency-Key',gen_random_uuid()::text), '{}'::text, '{}'::jsonb)->>'status')::INT
   ),
   599,
   'workflow_intake_webhook uses dynamic error_status when workflow template missing'
 );
+
+-- Configuration must not supersede source authentication or lose correlation.
+SELECT is((workflow_intake_webhook(NULL,'{}','{}','{}')->>'status')::int,401,
+ 'Missing token stays unauthorized while template configuration is absent');
+SELECT is((workflow_intake_webhook(gen_random_uuid()::text,'{}','{}','{}')->>'status')::int,401,
+ 'Unknown token cannot disclose missing template configuration');
+UPDATE webhook_sources SET enabled=FALSE WHERE id=(SELECT source_id FROM tmp_owned_webhook);
+SELECT is((workflow_intake_webhook((SELECT token FROM tmp_owned_webhook),'{}','{}','{}')->>'status')::int,401,
+ 'Disabled token cannot disclose missing template configuration');
+UPDATE webhook_sources SET enabled=TRUE WHERE id=(SELECT source_id FROM tmp_owned_webhook);
+SELECT is(workflow_intake_webhook((SELECT token FROM tmp_owned_webhook),jsonb_build_object('Idempotency-Key',gen_random_uuid()::text),'{}','{}')->>'response_reason',
+ 'missing_entry_template','Configured error identifies the missing template boundary');
+SELECT ok(NULLIF(workflow_intake_webhook((SELECT token FROM tmp_owned_webhook),jsonb_build_object('Idempotency-Key',gen_random_uuid()::text),'{}','{}')->>'correlation_id','') IS NOT NULL,
+ 'Missing-template response retains canonical correlation');
 
 WITH global_scope AS (
   SELECT s.settings_version_id, s.id AS settings_id
@@ -253,7 +318,7 @@ DO $$
 DECLARE
   v_source UUID;
 BEGIN
-  SELECT webhook_source_id INTO v_source FROM tmp_webhook_intake_source LIMIT 1;
+  SELECT source_id INTO STRICT v_source FROM tmp_owned_webhook;
   PERFORM upsert_webhook_ingest_policy(
     'source',
     v_source,
@@ -278,16 +343,21 @@ SELECT is(
   (
     SELECT (
       workflow_intake_webhook(
-        'pgtap-dynamic-token',
-        jsonb_build_object('x-signature', 'invalid'),
+        (SELECT token FROM tmp_owned_webhook),
+        jsonb_build_object('x-signature', 'invalid', 'Idempotency-Key', gen_random_uuid()::text),
         '{}'::text,
         '{}'::jsonb
       )->>'status'
     )::INT
   ),
   498,
-  'HMAC failure returns dynamic bad_request_status'
+  'Missing HMAC auth configuration returns dynamic bad_request_status'
 );
+
+SELECT is(workflow_intake_webhook((SELECT token FROM tmp_owned_webhook),
+ jsonb_build_object('x-signature','invalid','Idempotency-Key',gen_random_uuid()::text),'{}','{}')->>'response_reason',
+ 'Missing auth_config reference for HMAC validation',
+ 'HMAC assertion reaches auth-config failure rather than an earlier idempotency failure');
 
 SELECT * FROM finish();
 

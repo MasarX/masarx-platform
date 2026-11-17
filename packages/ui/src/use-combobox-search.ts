@@ -24,24 +24,23 @@ export function useComboboxSearch({
   const abortRef = React.useRef<AbortController | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const cancelPending = React.useCallback(() => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, []);
+
   const search = React.useCallback(
     (nextQuery: string) => {
       setQuery(nextQuery);
-      if (!enabled) return;
+      cancelPending();
 
-      // Clear pending timer
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-
-      // Abort pending request
-      if (abortRef.current) {
-        abortRef.current.abort();
-        abortRef.current = null;
-      }
-
-      if (!nextQuery.trim()) {
+      if (!enabled || !nextQuery.trim()) {
         setResults([]);
         setLoading(false);
         return;
@@ -49,6 +48,7 @@ export function useComboboxSearch({
 
       setLoading(true);
       timerRef.current = setTimeout(async () => {
+        timerRef.current = null;
         const controller = new AbortController();
         abortRef.current = controller;
         try {
@@ -65,15 +65,17 @@ export function useComboboxSearch({
         }
       }, debounceMs);
     },
-    [debounceMs, enabled, fetcher]
+    [cancelPending, debounceMs, enabled, fetcher]
   );
 
   React.useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, []);
+    if (!enabled) {
+      cancelPending();
+      setLoading(false);
+      setResults([]);
+    }
+    return cancelPending;
+  }, [cancelPending, enabled]);
 
   return { query, search, results, loading };
 }

@@ -517,3 +517,16 @@ describe("ExceptionInboxWorkspacePage", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+test("selected exception resource never receives a null-prefixed lane base", async () => {
+  createAuthenticatedSession();
+  mockedCreateUiServerClient.mockReturnValue(createUiClientMock(["dispatch_alerts"]));
+  const node = await RouteOperationsWorkspacePage({
+    appBasePath: "javascript:alert(1)", appKey: "console", resourceSelector: "exceptions",
+    resourceKey: "dispatch_alerts", workspacePathSegment: "exceptions",
+    i18nNamespace: "ui.exceptionInbox", testIdPrefix: "safe-lane",
+  });
+  const selected = (node as any).props.children.find((child: any) => child?.props?.resourceKey === "dispatch_alerts");
+  expect(selected).toBeTruthy();
+  expect(selected.props.baseHref).toBe("/operations/exceptions/dispatch_alerts");
+});

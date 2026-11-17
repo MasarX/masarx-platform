@@ -1,8 +1,183 @@
 {
   "ui": {
+    "investigation": {"trace": "Activity: {id}", "policy": "Policy resolution: {id}"},
+    "automationMarketplace": {
+      "activationHint": "Automations that require secret placeholders cannot activate in this release. Keep them as drafts; secret connection setup will be available in a later release. Other automations can activate after local connection checks, which do not verify the remote provider.",
+      "localCheckHint": "This local check verifies stored credentials, configuration and expiry only. It does not contact or verify the remote provider.",
+      "bindingCopyHint": "Connections are fixed when a copy is installed. Only an unchanged existing binding can be confirmed here. To use another connection, install a fresh copy with the correct bindings.",
+      "upgradeCopied": "Upgrade copied; activate the new plugin version separately.", "openStagedVersion": "Review copied plugin version", "upgradeAvailable": "Upgrade available",
+      "publishNewVersion": "Publish new version", "newVersionHint": "Create a new immutable draft version. The currently approved version stays live until this version is approved. Listing:",
+      "runtimeAuthConfig": "Runtime authentication configuration ID", "expires_at": "Current expiry",
+      "oauthReauthRequired": "Reauthorization is required. Start OAuth again to reconnect this connection.",
+      "cancel": "Cancel",
+      "startOauth": "Authorize OAuth connection", "refreshOauth": "Refresh OAuth connection", "oauthRefreshed": "OAuth refresh confirmed", "openSavedConnection": "Open saved connection",
+      "marketplace": "Automation marketplace", "navigation": "Marketplace navigation", "installs": "Installed copies", "connections": "Connections", "reviews": "Reviews",
+      "publish": "Publish to marketplace", "publishDescription": "Create a listing from a workflow template or integration plugin version.", "createListing": "Create listing", "published": "Listing published", "reviewSubmitted": "Listing submitted for review",
+      "assetKind": "Asset kind", "visibility": "Visibility", "sourceId": "Source ID", "listingTitle": "Listing title", "summary": "Summary", "notes": "Notes", "manifest": "Manifest JSON", "docs": "Documentation JSON", "publicationStatus": "Publication status", "openListing": "Open listing",
+      "installTitle": "Install marketplace asset", "installDescription": "Create an isolated local copy with installer-owned variables and connections.", "installCopy": "Install copy", "listingVersionId": "Listing version ID", "targetScopeType": "Target scope type", "targetScopeId": "Target scope ID", "variables": "Install variables JSON", "bindings": "Connection bindings JSON", "activate": "Activate after install", "installed": "Installed copy confirmed",
+      "manageInstall": "Manage installed copy", "manageInstallDescription": "Preview changes before applying an upgrade, or fork the copy to keep local changes.", "installId": "Install ID", "currentVersion": "Current listing version", "originVersion": "Installed from version", "installedResource": "Installed resource", "targetVersion": "Target listing version ID (optional)", "previewUpgrade": "Preview upgrade", "applyUpgrade": "Apply upgrade", "markForked": "Mark as forked", "previewReady": "Upgrade preview confirmed", "upgradeApplied": "Upgrade confirmed", "forked": "Forked", "hasChanges": "Has changes", "bindConnection": "Confirm existing binding", "bindingKey": "Binding key", "bindingType": "Binding type", "bindingConfig": "Binding configuration JSON", "bindingSaved": "Existing connection binding confirmed",
+      "decideReview": "Decide review", "reviewDescription": "Approve or reject a public marketplace submission.", "reviewId": "Review ID", "decision": "Decision", "decisionNotes": "Decision notes", "applyDecision": "Apply decision", "reviewStatus": "Review status", "reviewSaved": "Review decision confirmed",
+      "newConnection": "New connection", "manageConnection": "Manage connection", "connectionDescription": "Create, locally check, rotate or revoke an installer-owned connection. Local checks do not verify the remote provider.", "connectionId": "Connection ID", "ownerScopeType": "Owner scope type", "ownerScopeId": "Owner scope ID", "providerKey": "Provider key", "providerId": "Provider ID (optional)", "connectionName": "Connection name", "authType": "Authentication type", "secretStorage": "Secret storage", "expiresAt": "New expiry (ISO 8601, optional)", "config": "Replacement configuration JSON", "oauthMetadata": "Replacement OAuth metadata JSON", "metadata": "Replacement metadata JSON", "replaceJsonHint": "Leave blank to keep stored values. An entered JSON object replaces them; stored secrets are never loaded here.", "secretPayload": "New secret payload JSON", "secretInputHint": "Enter a JSON object only when setting or rotating a secret. Stored secrets are never loaded.", "generateSecret": "Generate an inbound secret instead", "saveConnection": "Save connection", "testConnection": "Run local credential/configuration check", "rotateConnection": "Rotate connection", "revokeConnection": "Revoke connection", "connectionSaved": "Connection saved and confirmed", "connectionTested": "Local credential/configuration check passed; remote provider not verified", "connectionRotated": "Connection rotation confirmed", "connectionRevoked": "Connection revocation confirmed", "oauthUnavailable": "OAuth is unavailable until an approved provider binding is configured. Contact your administrator.",
+      "shownOnce": "Generated secret — available only in this session", "showSecret": "Show secret", "hideSecret": "Hide secret", "dismissSecret": "Dismiss secret", "last_tested_at": "Last local credential/configuration check", "last_rotated_at": "Last rotated", "revoked_at": "Revoked at", "status": "Status", "unsaved": "Not saved", "unknown": "Not available", "yes": "Yes", "no": "No", "working": "Working…", "unavailable": "Marketplace unavailable", "accessDenied": "Sign in with an account authorized for this action.", "invalidJson": "Enter a valid JSON object and check the expiry value, then submit again.", "actionFailed": "The change could not be confirmed. Reload the current state before retrying.", "outcomeUnconfirmed": "The request outcome is unconfirmed. Reload the current state before retrying; do not submit it again yet.",
+      "options": { "workflow_template": "Workflow template", "integration_plugin": "Integration plugin", "private": "Private", "tenant_shared": "Shared within tenant", "marketplace_public": "Public marketplace", "tenant": "Tenant", "client": "Client", "sender": "Sender", "approved": "Approved", "rejected": "Rejected", "draft": "Draft", "submitted": "Submitted", "pending": "Pending", "installed": "Installed", "forked": "Forked", "ready": "Ready", "reauth_required": "Authorization required", "revoked": "Revoked", "api_key": "API key", "bearer_token": "Bearer token", "basic_auth": "Basic authentication", "hmac_shared_secret": "HMAC shared secret", "oauth2_authorization_code_pkce": "OAuth 2 with PKCE", "vault": "Secret vault", "hash_only": "Hash only" }
+    },
+    "tabularFile": {"fileSize": "Choose a file no larger than 10 MiB.", "rows": "The file exceeds 10,000 data rows. Split it into smaller files.", "columns": "The file exceeds 256 columns.", "cells": "The file exceeds 100,000 cells. Split it into smaller files.", "cellLength": "A cell exceeds 32,767 characters. Shorten it before importing.", "archive": "The XLSX archive is invalid or exceeds the 16 MiB expanded-data limit.", "compression": "This browser cannot safely inspect this XLSX file. Upload a CSV file instead.", "elements": "The workbook contains too many XML elements. Split it into smaller files."},
+    "mappingStudioTest": {
+      "title": "Test webhook source",
+      "help": "Save configuration and test eligibility first. Sending creates a real test intake with a new event ID; saving a mapping does not create a shipment.",
+      "source": "Source",
+      "enable": "Enable test requests for this source",
+      "send": "Send test request",
+      "refresh": "Check existing request",
+      "newTest": "Start another test",
+      "checking": "Checking saved test eligibility…",
+      "ready": "Saved source is eligible for testing.",
+      "notEnabled": "Testing is unavailable. Check your permissions, enable testing, and save the mapping.",
+      "saveRequired": "Save the mapping to apply this eligibility change.",
+      "invalidPayload": "Enter a JSON object with an event object in the source field.",
+      "sending": "Sending once…",
+      "pending": "Request is pending. Check this same request for its outcome.",
+      "unknown": "Delivery outcome is unknown. Check the existing request; do not resend it.",
+      "unavailable": "Status is unavailable. Check this same request again when access is restored.",
+      "failed": "The request failed. Review the outcome before starting another test.",
+      "succeeded": "Shipment persisted and workflow and audit evidence verified.",
+      "event": "Event ID",
+      "shipment": "Shipment",
+      "inbox": "Inbox",
+      "workflow": "Workflow",
+      "step": "Completed step",
+      "audit": "Audit events"
+    },
+    "codReconciliation": {
+      "title": "COD reconciliation",
+      "description": "Expected amounts come from the recorded payment snapshot when present, otherwise from the original shipment expectation. Shipment status does not prove collection. This is read-only; remittance is not shown.",
+      "displayedRows": "Displayed rows",
+      "totalsNote": "Totals cover only the displayed page, grouped by currency. Unknown, invalid or unsafe values make the affected total unavailable; they are never counted as zero.",
+      "unassigned": "Some displayed rows have an unknown or invalid currency and are excluded from currency groups. Complete displayed-row totals are unavailable.",
+      "tableCaption": "Order-level COD collection snapshots",
+      "order": "Order reference",
+      "tracking": "Tracking number",
+      "expected": "Expected",
+      "collected": "Collected",
+      "variance": "Variance: shortfall (+) / overcollection (−)",
+      "status": "Collection outcome",
+      "unknown": "Unavailable",
+      "empty": "No COD rows match these filters.",
+      "unavailable": "COD reconciliation is unavailable. Access, registry configuration or the read request could not be verified.",
+      "states": {
+        "unknown": "Collection unknown — no payment snapshot",
+        "invalid": "Invalid snapshot or unsupported amount precision",
+        "collected": "Collection recorded",
+        "refused": "Payment refused",
+        "shortfall": "Collection recorded — shortfall",
+        "overcollection": "Collection recorded — overcollection"
+      },
+      "filters": {
+        "id": "Shipment ID",
+        "client_id": "Client ID",
+        "sender_id": "Sender ID",
+        "tracking_number": "Tracking number"
+      },
+      "apply": "Apply filters",
+      "clear": "Clear filters",
+      "pagination": "COD pages",
+      "previous": "Previous page",
+      "next": "Next page",
+      "page": "Page {page}"
+    },
+    "onboardingReadiness": {
+      "labelDesign": {
+        "title": "Label design",
+        "readyCount": "{current}/{total} settings present",
+        "blockingCount": "Blocking: {count}",
+        "warningCount": "Warnings: {count}",
+        "status": {
+          "healthy": "Healthy",
+          "ready": "Ready",
+          "warning": "Warning",
+          "blocked": "Blocked",
+          "not_applicable": "Not applicable",
+          "unknown": "Unknown"
+        }
+      }
+    },
+    "tenantUsers": {
+      "invite": "Invite user",
+      "resend": "Resend invitation",
+      "back": "Back to users",
+      "email": "Email",
+      "fullName": "Full name",
+      "userType": "User type",
+      "role": "Tenant role",
+      "scope": "Client or sender",
+      "choose": "Select an option",
+      "authorityHint": "User type and tenant role are separate. You can grant only rights you currently hold; the server checks the selected scope and permissions.",
+      "working": "Checking…",
+      "checkOutcome": "Check this request again (does not resend)",
+      "sent": "Invitation sent. Ask the recipient to check their email or contact support. Delivery and tenant access are not confirmed here.",
+      "applied": "Membership confirmed. The provider accepted the request; inbox delivery is not verified.",
+      "reused": "Existing identity reused and membership confirmed. No new email was sent.",
+      "appliedUnknown": "Membership confirmed. The email provider outcome is unknown. Do not send another invitation until it is reconciled.",
+      "partial": "Membership is not confirmed. An external step may have completed. Keep this request ID and check this same request again; it will not resend automatically.",
+      "unknown": "The response was lost. Keep this request ID and check this same request again; do not start another invitation.",
+      "failed": "The request was refused or could not be completed. No membership success is claimed. Check the same request or contact your administrator with its ID.",
+      "forbidden": "An active tenant session with user-management permission is required.",
+      "noOptions": "No invitation choices are available. Ask your tenant administrator to configure user types and roles, then return to users.",
+      "noScopeOptions": "No clients or senders are available for this user type. Choose another user type or ask your tenant administrator to configure the required client or sender.",
+      "requestId": "Request: {id}"
+    },
+    "organizationProfile": {
+      "title": "Organization profile and branding",
+      "name": "Organization name",
+      "timezone": "Timezone",
+      "locale": "Locale",
+      "primary_color": "Primary color (optional, #RRGGBB)",
+      "secondary_color": "Secondary color (optional, #RRGGBB)",
+      "logo": "Replace logo (optional)",
+      "logoHelp": "PNG, JPEG or WebP, at most 5 MiB and 4096 × 4096 pixels. The existing logo remains until a replacement is saved.",
+      "save": "Save profile",
+      "saving": "Saving…",
+      "saved": "Saved and confirmed by backend readback.",
+      "loading": "Loading organization profile…",
+      "loadFailed": "Could not load this profile with your current permissions. Reload to try again.",
+      "saveFailed": "Could not confirm the update. Reload before trying again.",
+      "invalidFile": "Choose a PNG, JPEG or WebP file no larger than 5 MiB.",
+      "readOnly": "Organization profile editing requires Organizations write permission.",
+      "preview": "Get private logo preview",
+      "openPreview": "Open logo (private link expires after one minute)",
+      "previewFailed": "Could not authorize a private preview. Try again."
+    },
     "common": {
       "workflowFirst": "Workflow-first",
       "remove": "Remove"
+    },
+    "operationReport": {
+      "title": "Operation report",
+      "empty": "No submit report is available yet.",
+      "status": "Status",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "direct": "Direct",
+      "draft": "Draft",
+      "artifact": "Artifact",
+      "activityReference": "Activity reference",
+      "activityPending": "Activity reference pending",
+      "reportReference": "Report reference",
+      "primaryResource": "Primary resource",
+      "workflow": "Workflow",
+      "nextSteps": "Next steps",
+      "noNextSteps": "No follow-up actions were attached.",
+      "notAvailable": "Not available",
+      "pending": "Pending",
+      "copySummary": "Copy report details",
+      "copyJson": "Copy JSON",
+      "downloadJson": "Download JSON",
+      "openReport": "Open saved report",
+      "openResource": "Open primary resource",
+      "reportDetails": "Report support details (redacted)",
+      "resultDetails": "Runtime support details (redacted)",
+      "copied": "Copied to clipboard.",
+      "copyFailed": "Copy failed. Try again or download the report."
     },
     "auth": {
       "signIn": {
@@ -81,14 +256,15 @@
       "commandPaletteAria": "Open search",
       "fallbackResourcesLabel": "Registry resources",
       "disabled": {
-        "noRoute": "No route configured.",
-        "missingCapability": "Requires {capability} capability."
+        "noRoute": "This page is currently unavailable.",
+        "missingCapability": "You do not have access to this page.",
+        "unavailable": "This page is currently unavailable."
       }
     },
     "commandPalette": {
       "title": "Command palette",
       "description": "Search navigation and workflow commands.",
-      "searchPlaceholder": "Search pages, workflows, and commands",
+      "searchPlaceholder": "Search pages, workflows, commands, and backend references",
       "searchAria": "Search command palette",
       "shortcutHint": "Shortcut: {shortcut}",
       "loading": "Loading command registry...",
@@ -107,10 +283,17 @@
       "disabled": {
         "missingCapability": "Missing required capability.",
         "needsSelection": "Requires a selection context.",
-        "noTarget": "No route target available."
-      }
+        "noTarget": "No route target available.",
+        "readUnavailable": "Read registry unavailable.",
+        "readRequired": "Read permission required.",
+        "commandUnavailable": "Command registry unavailable."
+      },
+      "registryUnavailable": "Command registry unavailable",
+      "readLoading": "Loading read registry...",
+      "backendReference": "Backend reference: {value}"
     },
     "appShell": {
+      "breadcrumb": "Breadcrumb",
       "skipToContent": "Skip to content",
       "sidebarHint": "Navigation loads from capability policy and registry.",
       "layoutFullLabel": "Full width",
@@ -226,13 +409,56 @@
         "title": "Confirm {action}",
         "description": "Submit {action} for {count} records."
       },
+      "feedback": {
+        "pending": "{action} is running for {count} selected records.",
+        "selectedIds": "Selected records: {ids}",
+        "resultStatus": "Result status: {status}",
+        "workflowRunId": "Workflow run: {id}",
+        "correlationId": "Trace: {id}"
+      },
       "toast": {
         "successTitle": "{action} submitted",
         "successDescription": "Queued for {count} records.",
         "printDownloadStartedDescription": "Download started automatically.",
         "printFallbackTitle": "{action} pending",
         "printFallbackDescription": "Output is still processing. Opened workflow outputs.",
-        "errorTitle": "{action} failed"
+        "errorTitle": "{action} failed",
+        "readbackErrorDescription": "The action was written, but its canonical read-back is not visible yet. Refresh and verify before retrying."
+      },
+      "resultReadback": {
+        "freshStatus": "Fresh record status: {status}",
+        "workflowReferenceReturned": "Workflow reference returned",
+        "ariaLabel": "{action} results",
+        "status": {
+          "queued": "Queued — not yet completed",
+          "partialQueued": "Some items failed; queued work is not yet completed",
+          "completed": "Completed",
+          "partial": "Partially completed",
+          "failed": "Failed",
+          "alreadyProcessed": "Already processed",
+          "malformed": "Result could not be verified"
+        },
+        "itemStatus": {
+          "queued": "Queued — not yet completed",
+          "success": "Completed",
+          "failed": "Failed",
+          "alreadyProcessed": "Already processed"
+        },
+        "error": {
+          "shipmentNotVisible": "The shipment is no longer available.",
+          "operationFailed": "The operation could not be completed.",
+          "generic": "This record could not be processed."
+        },
+        "summary": "Total {total} · Successful {success} · Failed {failure} · Already processed {already}",
+        "summaryWithQueued": "Total {total} · Successful {success} · Failed {failure} · Already processed {already} · Queued {queued}",
+        "malformedDetail": "The server response did not include consistent per-record evidence. No success was reported.",
+        "toast": {
+          "queuedTitle": "{action}: Queued",
+          "queuedDescription": "{queued} queued, {success} completed and {already} already processed out of {total}. Queued changes are not yet confirmed completed.",
+          "failureWithQueuedDescription": "Verified {success} completed, {failure} failed, {already} already processed and {queued} queued out of {total} records.",
+          "successDescription": "Verified {success} successful and {already} already processed out of {total} records.",
+          "failureDescription": "Verified {success} successful, {failure} failed, and {already} already processed out of {total} records."
+        }
       },
       "printProgress": {
         "ariaLabel": "Print progress",
@@ -250,7 +476,7 @@
           "hide": "Hide",
           "show": "Show",
           "retry": "Try again",
-          "technicalDetails": "Technical details"
+          "technicalDetails": "Support details"
         },
         "states": {
           "preparing": "Preparing your download",
@@ -265,18 +491,45 @@
           "completed": "Download started"
         },
         "diagnostics": {
-          "title": "Technical details",
-          "runId": "Workflow run: {workflowRunId}",
+          "title": "Support details",
+          "runId": "Activity reference: {workflowRunId}",
           "target": "Download target: <= {target}ms",
           "targetHit": "Target hit at {elapsed}ms.",
           "targetMiss": "Target miss at {elapsed}ms.",
-          "timingSource": "Timing source: {value}",
-          "outputSource": "Output source: {value}",
+          "timingSource": "Timing details: {value}",
+          "outputSource": "File source: {value}",
           "artifactPersisted": "Artifact persisted: {value}",
           "jobCompletionPending": "Job completion pending: {value}",
-          "viewRun": "View run",
+          "viewRun": "View activity",
+          "sources": {
+            "workflowOutput": "Saved workflow output",
+            "workflowMetadata": "Workflow metadata",
+            "executionResult": "Execution result",
+            "stepResult": "Step result",
+            "asyncResult": "Background execution result",
+            "savedFile": "Saved file",
+            "freshDownload": "Newly generated download",
+            "freshFile": "Newly generated file",
+            "resourceRecord": "Workflow record",
+            "executionTiming": "Recorded execution timing",
+            "totalTiming": "Recorded total timing",
+            "renderTiming": "Recorded rendering timing",
+            "bundleWaitTiming": "Recorded bundle wait timing",
+            "bundleTiming": "Recorded bundle timing",
+            "notAvailable": "Not available",
+            "unknown": "Unknown source"
+          },
           "yes": "Yes",
-          "no": "No"
+          "no": "No",
+          "printAsyncRequest": "Print async request: {value}",
+          "bundleAsyncRequest": "Bundle async request: {value}",
+          "labelJob": "Label job: {value}",
+          "label": "Label: {value}",
+          "labelVersion": "Label version: {value}",
+          "activeVersion": "Active version: {value}",
+          "printMode": "Print mode: {value}",
+          "artifactKind": "Artifact kind: {value}",
+          "requestCompleted": "Completed: {value}"
         },
         "detail": {
           "preparing": "We're preparing your download.",
@@ -294,11 +547,16 @@
           "pendingCount": "{count} labels are still pending generation.",
           "readyCount": "{count} labels are ready for bundling.",
           "popupBlocked": "Popup blocked by browser. Allow popups, then retry.",
+          "downloadFailed": "Could not download the file. Please retry.",
           "terminalFailure": "Workflow finished without a downloadable output.",
           "target": "Tracking target <= {target}ms.",
           "targetHit": "Target met: {elapsed}ms.",
-          "targetMiss": "Target miss: {elapsed}ms (target {target}ms)."
-        }
+          "targetMiss": "Target miss: {elapsed}ms (target {target}ms).",
+          "jobCompletionPending": "Your file is opening now. Label job completion is still syncing.",
+          "artifactPersistencePending": "Your file is opening now. Artifact persistence is still syncing."
+        },
+        "readbackUnverified": "Download opened; backend completion unverified",
+        "readbackStopped": "Last readback: {detail} This panel is no longer checking backend completion. Open workflow outputs for current status."
       }
     },
     "resourceDownload": {
@@ -321,6 +579,12 @@
       "errors": {
         "requestFailed": "Unable to download labels.",
         "noUrls": "No download URLs were returned."
+      },
+      "status": {
+        "pending": "Preparing label download.",
+        "single": "Label download opened.",
+        "success": "Opened {count} label downloads.",
+        "partial": "Opened {count} label downloads. {failed} failed."
       }
     },
     "resourceDetail": {
@@ -369,19 +633,26 @@
       },
       "errors": {
         "load": "Unable to load command catalog.",
-        "unavailable": "Command catalog unavailable. Sign in or confirm registry access."
+        "unavailable": "Command catalog unavailable. Sign in or confirm registry access.",
+        "registryUnavailable": "Command registry readback is unavailable.",
+        "readRegistry": "Read registry readback is unavailable."
       },
       "summary": {
         "available": "Commands available: {count}",
         "filtered": "Showing {count} of {total} commands",
         "filteredEmpty": "No commands match the current filters.",
         "capabilityBlocked": "All commands require capabilities that are not available in this scope.",
-        "empty": "No commands configured for this scope."
+        "empty": "No commands configured for this scope.",
+        "blocked": "No commands are runnable in {appLabel} for the current filters. Route-target blocked: {route}; command permission blocked: {command}; read permission blocked: {read}.",
+        "readUnavailable": "No commands can be confirmed runnable in {appLabel} because read registry readback is unavailable. Route-target blocked: {route}; command permission blocked: {command}; readback blocked: {read}."
       },
       "status": {
         "allowed": "Allowed",
         "missingCapability": "Missing capability",
-        "noCapability": "No capability set"
+        "noCapability": "No capability set",
+        "readUnavailable": "Read registry unavailable",
+        "readRequired": "Read permission required",
+        "noTarget": "No route target"
       },
       "actions": {
         "openRequest": "Open request"
@@ -390,14 +661,42 @@
         "requiredCapability": "Required capability",
         "route": "Route",
         "workflow": "Workflow",
-        "schema": "Schema"
-      }
+        "schema": "Schema",
+        "backendReference": "Backend reference"
+      },
+      "statusLabel": "Command catalog status",
+      "readStatusLabel": "Command catalog read registry status",
+      "noTargetDescription": "This command is registered but has no {appLabel} request route, so it cannot be opened from this app."
     },
     "dashboard": {
+      "reporting": {
+        "title": "Shipment reporting",
+        "allTime": "All-time counts for your authorized shipment scope.",
+        "unavailable": "Unavailable",
+        "partial": "Some reporting counts are unavailable. Available counts are shown without substituting zero.",
+        "breakdown": "Shipment status breakdown",
+        "total": "Total shipments",
+        "active": "Active deliveries",
+        "exceptions": "Exceptions",
+        "rate": "Delivery rate",
+        "delivered": "Delivered",
+        "pending": "Pending",
+        "statuses": {
+          "delivered": "Delivered",
+          "in_transit": "In transit",
+          "out_for_delivery": "Out for delivery",
+          "pending": "Pending",
+          "exceptions": "Exceptions",
+          "cancelled": "Cancelled",
+          "returned": "Returned"
+        }
+      },
       "unknown": "unknown",
       "scopeLabel": "{scopeType}: {scopeLabel}",
       "errors": {
-        "loadContext": "Unable to load dashboard context."
+        "loadContext": "Unable to load dashboard context.",
+        "loadCommands": "Unable to load dashboard command registry.",
+        "loadRegistry": "Unable to load dashboard read registry."
       },
       "title": "{appLabel} overview",
       "subtitle": "Workflow-first dashboard built from UI registries.",
@@ -455,6 +754,52 @@
           "label": "Settings resolution",
           "detail": "{value}",
           "missing": "Settings resolution id missing; confirm settings ladder."
+        }
+      },
+      "commandCenter": {
+        "myDay": {
+          "title": "My Day",
+          "assigned": "{count} assigned to you",
+          "unavailable": "Your assigned-review count could not be loaded."
+        },
+        "title": "Command center",
+        "description": "Operator lanes, queue counts, command coverage, and registry readback from UI rows.",
+        "summary": {
+          "metricReadback": "Metric readback",
+          "metricReadbackValue": "{ready}/{total}",
+          "metricReadbackDetail": "Dashboard metrics returned for visible lanes.",
+          "metricReadbackPartialDetail": "Metrics returned for {ready}/{total} visible lanes.",
+          "unavailableValue": "Unavailable",
+          "workflowCommands": "Workflow commands",
+          "workflowCommandsDetail": "Registry commands backed by workflow execution.",
+          "workflowCommandsUnavailableDetail": "Command registry did not return workflow coverage.",
+          "allowedCommands": "Allowed commands",
+          "allowedCommandsValue": "{allowed}/{total}",
+          "allowedCommandsDetail": "{restricted} restricted for this session.",
+          "allowedCommandsUnavailableDetail": "Command registry did not return permission coverage.",
+          "registryReadback": "Registry readback",
+          "registryReadbackReady": "Ready",
+          "registryReadbackReview": "Review",
+          "registryReadbackDetail": "Command and read registries responded.",
+          "registryReadbackIssues": "{count} registry issue(s) need review."
+        },
+        "degraded": {
+          "authority": "Registry authority conflicts:",
+          "authorityDetail": "Conflicting registry definitions excluded: {count}.",
+          "commands": "Command registry:",
+          "resources": "Read registry:",
+          "metrics": "Metric readback:",
+          "metricsDetail": "{ready}/{total} visible lanes returned metrics."
+        },
+        "lanes": {
+          "empty": "No operator lanes are visible for this scope.",
+          "records": "{count} records",
+          "metricUnavailable": "Metric pending",
+          "commands": "{count}/{total} commands",
+          "capability": "Read capability:",
+          "openLane": "Open lane",
+          "openCommands": "Open commands",
+          "permissionRequired": "Read permission required."
         }
       },
       "quickActionsTitle": "Quick actions",
@@ -861,6 +1206,17 @@
         "openStudio": "Open workflow studio",
         "newTemplate": "New workflow",
         "overlapExplorer": "Overlap explorer",
+        "changeStatus": "Change status",
+        "statusModal": {
+          "title": "Change workflow status",
+          "description": "Record an audited lifecycle transition.",
+          "statusLabel": "Status",
+          "statuses": { "draft": "Draft", "active": "Active", "archived": "Archived" },
+          "reasonLabel": "Reason",
+          "cancel": "Cancel",
+          "save": "Save",
+          "saving": "Saving..."
+        },
         "testRun": "Run test",
         "testRunModal": {
           "title": "Run workflow test",
@@ -1538,6 +1894,10 @@
           "successTitle": "Test run started.",
           "errorTitle": "Unable to start test run.",
           "errorMissingRun": "Workflow starter did not return a run id."
+        },
+        "status": {
+          "successTitle": "Workflow status updated.",
+          "errorTitle": "Unable to update workflow status."
         }
       },
       "errors": {
@@ -1901,7 +2261,77 @@
         "removeLabel": "Remove filter {label}"
       }
     },
+    "shipmentResource": {
+      "search": {
+        "title": "Shipment search",
+        "description": "Find a shipment by shipment reference, tracking number, order reference, or phone number.",
+        "descriptionWithCorrelation": "Find a shipment by shipment reference, tracking number, order reference, phone number, or activity reference.",
+        "identifier": "Shipment reference",
+        "placeholder": "Tracking, order, phone, or shipment reference",
+        "placeholderWithCorrelation": "Tracking, order, phone, shipment reference, or activity reference",
+        "submit": "Search shipments",
+        "clear": "Clear search",
+        "empty": "Enter an identifier before searching shipments."
+      }
+    },
+    "trackingMap": {
+      "title": "Geographic tracking",
+      "map": "Geographic map",
+      "loading": "Loading map",
+      "unavailable": "Tracking is unavailable. Check access and map configuration.",
+      "empty": "No tracking locations are available.",
+      "emptyPage": "This page has no shipment locations. Other pages may contain locations.",
+      "fallback": "Shipment locations",
+      "trackingNumber": "Tracking number",
+      "status": "Status",
+      "originCity": "Origin city",
+      "destinationCity": "Destination city",
+      "serviceType": "Service type",
+      "updatedAt": "Last updated",
+      "pagination": "Tracking pages",
+      "previous": "Previous",
+      "next": "Next",
+      "pageCount": "{count} locations on this page"
+    },
+    "shipmentPresentation": {
+      "changedBy": "Changed by",
+      "category": "Category",
+      "status": "Status",
+      "investigation": "Investigation",
+      "decision": "Decision",
+      "reason": "Reason",
+      "policy": "Policy",
+      "workflow": "Workflow",
+      "processedAt": "Processed at",
+      "error": "Error",
+      "target": "Target",
+      "method": "Method",
+      "response": "Response",
+      "latency": "Latency",
+      "timelineTitle": "Shipment timeline",
+      "timelineDescription": "Shipment changes, decisions, updates, and messages.",
+      "timelineUnavailable": "Shipment timeline is unavailable right now.",
+      "timelineEmpty": "No shipment timeline events recorded yet.",
+      "openActivityHistory": "Open activity history",
+      "activityReference": " Activity reference {reference}",
+      "create": "Create shipment",
+      "searchTitle": "Shipment search",
+      "searchDescription": "Find a shipment by shipment reference, tracking number, order reference, phone number, or activity reference.",
+      "identifier": "Shipment or activity reference",
+      "searchPlaceholder": "Tracking, order, phone, shipment reference, or activity reference",
+      "search": "Search shipments",
+      "clear": "Clear search"
+    },
     "tracking": {
+      "operatorHandoff": {
+        "title": "Operator handoff",
+        "label": "Open in Console",
+        "description": "Open this shipment in the Console operator context.",
+        "reference": " Shipment {reference}",
+        "unavailable": "This shipment handoff is unavailable.",
+        "retry": "Check your access and open the shipment from tracking again."
+      },
+      "queryReadback": "Current search: {trackingNumber}.",
       "title": "Tracking",
       "description": "Search shipments by tracking number.",
       "resultsDescription": "Tracking results filtered by tracking_number.",
@@ -1924,7 +2354,8 @@
         "label": "Tracking number",
         "placeholder": "Scan or enter tracking number",
         "search": "Search",
-        "clear": "Clear"
+        "clear": "Clear",
+        "emptySearch": "Enter a tracking number before searching."
       }
     },
     "access": {
@@ -2181,6 +2612,13 @@
       }
     },
     "settingsRequest": {
+      "provider": {
+        "url": "Renderer invoke URL",
+        "secret": "New renderer invoke secret",
+        "configured": "Effective configuration is present. This is not a health check.",
+        "unconfigured": "Effective renderer configuration is not ready.",
+        "requestHint": "Submit a tenant configuration change for approval. Leave a field blank to preserve it; existing provider options are preserved. Submission does not activate the renderer."
+      },
       "labels": {
         "unknown": "unknown"
       },
@@ -2356,6 +2794,7 @@
         "labelType": "Label type",
         "draftJson": "Draft JSON",
         "createDraft": "Create draft",
+        "forkDraft": "Fork as new draft",
         "creating": "Creating…",
         "saveDraft": "Save draft",
         "saving": "Saving…",
@@ -2369,19 +2808,20 @@
       },
       "preview": {
         "title": "Preview",
-        "description": "Load sample payload and run designer preview through label-renderer edge mode=designer_preview.",
+        "description": "Choose a shipment, load its sample data, and preview the label.",
         "shipment": "Shipment",
         "selectShipment": "Select shipment",
         "shipmentBox": "Shipment box",
         "autoFirstBox": "Auto (first box)",
-        "loadSample": "Load sample payload",
+        "loadSample": "Load sample data",
         "loadingSample": "Loading…",
         "previewBtn": "Preview",
         "rendering": "Rendering…",
-        "samplePayload": "Sample payload",
-        "previewResponse": "Preview response",
-        "showDebug": "Show raw response (debug)",
-        "hideDebug": "Hide raw response",
+        "samplePayload": "Sample data",
+        "previewResponse": "Preview details",
+        "showDetails": "Show preview details",
+        "hideDetails": "Hide preview details",
+        "pdfUnavailable": "The PDF preview could not be opened. Check the preview details below.",
         "pdfEmpty": "Run preview to render PDF",
         "pdfLoading": "Loading PDF…",
         "pdfError": "PDF load failed: {error}",

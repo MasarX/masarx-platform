@@ -1,7 +1,37 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 const fs = require('fs');
-const { isWorkflowActionVersionOnlyPatch } = require('./automation-pr-policy');
+const ACTIONS_USES_RE = /^uses:\s*['"]?[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_./-]+)?@[A-Za-z0-9_./-]+['"]?$/i;
+const ACTIONS_DOCKER_USES_RE = /^uses:\s*['"]?docker:\/\/[^'"]+['"]?$/i;
+
+function isWorkflowActionVersionOnlyPatch(patch) {
+  const lines = String(patch || '').split('\n');
+  let touched = 0;
+
+  for (const rawLine of lines) {
+    const line = String(rawLine || '');
+    if (!line) continue;
+    if (line.startsWith('@@') || line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git')) continue;
+    if (!(line.startsWith('+') || line.startsWith('-'))) continue;
+
+    const value = String(line.slice(1) || '').trim();
+    if (!value) continue;
+    if (value.startsWith('#')) continue;
+
+    touched += 1;
+    const normalized = value.replace(/\s+#.*$/, '').trim();
+    if (ACTIONS_USES_RE.test(normalized) || ACTIONS_DOCKER_USES_RE.test(normalized)) continue;
+    return false;
+  }
+
+  return touched > 0;
+}
+
+const LOCK_GENERATOR_CONTRACT_PATHS = new Set([
+  '.nvmrc',
+  '.npmrc',
+  'scripts/ops/ci/package-lock-generator.js',
+]);
 
 function die(message) {
   console.error(`[dependency-fast-lane-integrity] ${message}`);
@@ -85,6 +115,18 @@ function isLockFile(fileName) {
   );
 }
 
+function normalizeRepoPath(fileName) {
+  return String(fileName || '').trim().replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function isRootPackageLock(fileName) {
+  return normalizeRepoPath(fileName) === 'package-lock.json';
+}
+
+function isLockGeneratorContractPath(fileName) {
+  return LOCK_GENERATOR_CONTRACT_PATHS.has(normalizeRepoPath(fileName));
+}
+
 function isWorkflowFile(fileName) {
   return /^\.github\/workflows\/.+\.ya?ml$/i.test(String(fileName || '').trim());
 }
@@ -117,6 +159,8 @@ function validateDependencyIntegrity(files) {
   const list = Array.isArray(files) ? files : [];
   const packageManifests = list.filter((row) => isPackageManifest(row.filename));
   const lockFiles = list.filter((row) => isLockFile(row.filename));
+  const lockGeneratorContractFiles = list.filter((row) => isLockGeneratorContractPath(row.filename));
+  const rootPackageLockChanged = list.some((row) => isRootPackageLock(row.filename));
   const workflowViolations = [];
   const unpinnedWorkflowUses = [];
 
@@ -133,8 +177,11 @@ function validateDependencyIntegrity(files) {
   }
 
   const errors = [];
-  if (packageManifests.length > 0 && lockFiles.length === 0) {
-    errors.push('package.json changed without a lockfile update.');
+  if (packageManifests.length > 0 && !rootPackageLockChanged) {
+    errors.push('package.json changed without the root package-lock.json update.');
+  }
+  if (lockGeneratorContractFiles.length > 0 && !rootPackageLockChanged) {
+    errors.push('lock generator/runtime contract changed without a root package-lock.json update.');
   }
   if (workflowViolations.length > 0) {
     errors.push(`workflow changes are not action-version-only: ${workflowViolations.join(', ')}`);
@@ -150,6 +197,7 @@ function validateDependencyIntegrity(files) {
     errors,
     package_manifest_count: packageManifests.length,
     lock_file_count: lockFiles.length,
+    lock_generator_contract_count: lockGeneratorContractFiles.length,
     workflow_file_count: list.filter((row) => isWorkflowFile(row.filename)).length,
   };
 }
@@ -195,6 +243,9 @@ module.exports = {
   validateDependencyIntegrity,
   isPackageManifest,
   isLockFile,
+  isRootPackageLock,
+  isLockGeneratorContractPath,
+  LOCK_GENERATOR_CONTRACT_PATHS,
   isWorkflowFile,
   parseChangedWorkflowUses,
   isPinnedWorkflowActionReference,

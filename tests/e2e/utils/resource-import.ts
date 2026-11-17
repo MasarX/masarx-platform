@@ -2,6 +2,18 @@ import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
 import { expect, type Page } from "@playwright/test";
+import * as en from "../../../packages/config/messages/en.json";
+import * as ar from "../../../packages/config/messages/ar.json";
+
+const reportMessages = [en.ui.operationReport, ar.ui.operationReport];
+const messagePattern = (values: string[]) => new RegExp(`^(?:${values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`);
+type ImportRunIdentity = { id: string; organization_id: string; scope_context: unknown };
+
+export function getOperationReportDetails(page: Page) {
+  return page.locator("details").filter({
+    has: page.locator("summary").filter({ hasText: messagePattern(reportMessages.map((messages) => messages.reportDetails)) }),
+  });
+}
 
 type DemoClient = {
   slug?: string;
@@ -79,16 +91,75 @@ export function runTabularImportWorkerOnce() {
   );
 }
 
+export async function approveResourceImport(page: Page) {
+  const [response] = await Promise.all([
+    page.waitForResponse((candidate) => {
+      const request = candidate.request();
+      if (request.method() !== "POST" || new URL(candidate.url()).pathname !== "/api/resource-import") return false;
+      try {
+        return request.postDataJSON()?.action === "start";
+      } catch {
+        return false;
+      }
+    }),
+    page.getByRole("button", { name: "Approve and import" }).click(),
+  ]);
+  expect(response.ok(), `Import start HTTP ${response.status()}`).toBe(true);
+  const requestedRunId = response.request().postDataJSON().run_id;
+  expect(requestedRunId).toMatch(/\S/);
+  const result = await response.json();
+  expect(result?.ok).toBe(true);
+  expect(result?.run?.id).toBe(requestedRunId);
+  expect(result?.run?.organization_id).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(["queued", "processing", "completed"]).toContain(result?.run?.status);
+  if (result.run.status !== "completed") runTabularImportWorkerOnce();
+  return { id: requestedRunId, organization_id: result.run.organization_id, scope_context: result.run.scope_context } as ImportRunIdentity;
+}
+
 export async function waitForOperationReport(
   page: Page,
-  expectedTexts: string | string[]
+  identity: ImportRunIdentity,
+  expected: { createdCount: number; relatedNodes?: string[] }
 ) {
-  await expect(page.getByText("Raw report JSON")).toBeVisible({
-    timeout: 60_000,
+  const reportDetails = getOperationReportDetails(page);
+  await expect(reportDetails.locator("summary")).toBeVisible({ timeout: 60_000 });
+  if ((await reportDetails.getAttribute("open")) === null) await reportDetails.locator("summary").click();
+  await expect(reportDetails).toHaveJSProperty("open", true);
+  await expect(reportDetails.locator("pre")).toBeVisible();
+  const resultDetails = page.locator("details").filter({
+    has: page.locator("summary").filter({ hasText: messagePattern(reportMessages.map((messages) => messages.resultDetails)) }),
   });
-  const body = page.locator("body");
-  const values = Array.isArray(expectedTexts) ? expectedTexts : [expectedTexts];
-  for (const value of values) {
-    await expect(body).toContainText(value, { timeout: 60_000 });
+  await expect(resultDetails.locator("summary")).toBeVisible({ timeout: 60_000 });
+  if ((await resultDetails.getAttribute("open")) === null) await resultDetails.locator("summary").click();
+  await expect(resultDetails).toHaveJSProperty("open", true);
+  await expect(resultDetails.locator("pre")).toBeVisible();
+  await expect(reportDetails.locator("..")).toContainText("Review the imported records in the destination table or import history.", { timeout: 60_000 });
+  for (const text of ['"id": "[redacted]"', '"organization_id": "[redacted]"', '"status": "completed"', `"created_count": ${expected.createdCount}`]) {
+    await expect(resultDetails.locator("pre")).toContainText(text, { timeout: 60_000 });
+  }
+  // Support JSON redacts identities and may truncate nested results; verify both through authorized run readback.
+  const origin = new URL(page.url()).origin;
+  const response = await page.request.post(`${origin}/api/resource-import`, {
+    headers: { origin }, data: { action: "get_run", run_id: identity.id },
+  });
+  expect(response.ok(), `Import readback HTTP ${response.status()}`).toBe(true);
+  const run = await response.json();
+  expect(run?.id).toBe(identity.id);
+  expect(run?.organization_id).toBe(identity.organization_id);
+  expect(run?.scope_context).toEqual(identity.scope_context);
+  expect(run?.status).toBe("completed");
+  expect(run?.created_count).toBe(expected.createdCount);
+  expect(run?.failed_count).toBe(0);
+  if (expected.relatedNodes?.length) {
+    expect(run.rows).toHaveLength(expected.createdCount);
+    for (const row of run.rows) {
+      expect(row.execution_status).toBe("succeeded");
+      for (const key of expected.relatedNodes) {
+        const node = row.related_nodes?.find((entry: { node_key?: string }) => entry.node_key === key);
+        expect(node?.execution_status, `Row ${row.row_number}: ${key} must execute`).toBe("succeeded");
+        expect(node?.target_record_id).toMatch(/^[0-9a-f-]{36}$/i);
+        expect(row.mapped_row?.[node.reference_field]).toBe(node.target_record_id);
+      }
+    }
   }
 }

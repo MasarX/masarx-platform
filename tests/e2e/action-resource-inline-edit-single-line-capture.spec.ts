@@ -12,6 +12,8 @@ import { assertSingleAppShellSidebar } from "./utils/layout-guards";
 import { assertNoAppErrorReload } from "./utils/error-guards";
 import { assertNavigationPerformance } from "./utils/performance";
 import { captureFullPage, isCaptureEnabled, resolveEvidencePath } from "./utils/evidence";
+import { hasCapability, resolveCapabilitySet } from "./utils/capabilities";
+import { openFirstSingleLineInlineEditor } from "./utils/table-actions";
 
 const demoContext = loadDemoContext();
 const strict = isStrictE2EEnv();
@@ -119,59 +121,6 @@ test.describe("inline edit single-line controls", () => {
         `[data-testid="${config.authTestId}"]`,
       ].join(", ");
 
-      const candidateColumnKeys = [
-        "status",
-        "service_type",
-        "tracking_number",
-        "carrier_reference_number",
-        "client_reference_number",
-      ];
-      const sanitizeKey = (value: string) =>
-        value
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "")
-          .slice(0, 48) || "column";
-
-      const tryInlineEdit = async (params: {
-        button: ReturnType<typeof page.locator>;
-        key: string;
-      }) => {
-        const { button, key } = params;
-        await button.click({ timeout: 30_000 });
-        const saveButton = page.locator('[data-testid="table-inline-edit-save"]').first();
-        await expect(saveButton).toBeVisible();
-        const editRow = saveButton.locator("xpath=ancestor::tr[1]");
-
-        const textarea = editRow.locator("textarea:not([readonly])");
-        if ((await textarea.count()) > 0) {
-          const cancel = page.locator('[data-testid="table-inline-edit-cancel"]').first();
-          if ((await cancel.count()) > 0) {
-            await cancel.click();
-          }
-          return false;
-        }
-
-        const editControl = editRow.locator(
-          'input:not([type="checkbox"]):not([type="hidden"]):not([readonly]), select'
-        );
-        await expect(editControl.first()).toBeVisible();
-
-        if (captureEnabled) {
-          await captureFullPage(
-            page,
-            evidencePath(`${config.label}-inline-edit-${sanitizeKey(key)}.png`)
-          );
-        }
-
-        const cancel = page.locator('[data-testid="table-inline-edit-cancel"]').first();
-        if ((await cancel.count()) > 0) {
-          await cancel.click();
-        }
-        return true;
-      };
-
       let captured = false;
       const triedResources: string[] = [];
       const blockedResources: string[] = [];
@@ -193,24 +142,34 @@ test.describe("inline edit single-line controls", () => {
         }
         await assertNavigationPerformance(page);
 
-        for (const key of candidateColumnKeys) {
-          const locator = page.locator(
-            `[data-testid="table-inline-edit-action"][data-column-key="${key}"]`
+        const editor = await openFirstSingleLineInlineEditor(page);
+        if (editor) {
+          await expect(editor.cell.locator("textarea")).toHaveCount(0);
+          if (captureEnabled) {
+            await captureFullPage(
+              page,
+              evidencePath(`${config.label}-inline-edit.png`),
+            );
+          }
+          await page.keyboard.press("Escape");
+          captured = true;
+        } else {
+          const editableCells = page.locator(
+            '#main-content tbody td[data-editable="true"]:visible',
           );
-          if ((await locator.count()) === 0) continue;
-          captured = await tryInlineEdit({ button: locator.first(), key });
-          if (captured) break;
-        }
-
-        if (!captured) {
-          const allButtons = page.locator('[data-testid="table-inline-edit-action"]');
-          const count = await allButtons.count();
-          for (let index = 0; index < Math.min(count, 12); index += 1) {
-            const button = allButtons.nth(index);
-            const key =
-              (await button.getAttribute("data-column-key"))?.trim() || `col-${index}`;
-            captured = await tryInlineEdit({ button, key });
-            if (captured) break;
+          if ((await editableCells.count()) === 0) {
+            const capabilitySet = resolveCapabilitySet(
+              context.me?.capabilities ?? null
+            );
+            const resource = context.readRegistry?.resources?.find(
+              (entry) => entry?.key === resourceKey
+            );
+            const writeCapability =
+              resource?.capability_write ?? resource?.capability_read ?? null;
+            if (!hasCapability(capabilitySet, writeCapability)) {
+              await expect(editableCells).toHaveCount(0);
+              captured = true;
+            }
           }
         }
 

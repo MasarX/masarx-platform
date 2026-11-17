@@ -3,12 +3,14 @@ import {
   detectWorkbookVisibleSheets,
   inferTabularFieldRules,
   matrixToTabularData,
+  matrixToTabularPreview,
   parseCsvTextMatrix,
   prepareTabularRows,
   resolveImportAcceptedFormats,
   resolveWorkbookWorksheet,
   resolveTabularRuleMode,
   worksheetToMatrix,
+  worksheetToTabularPreview,
 } from "../../packages/api/src/tabular-import";
 
 describe("tabular import utils", () => {
@@ -120,6 +122,82 @@ describe("tabular import utils", () => {
       headers: ["External ID", "Status"],
       rows: [{ "External ID": "ext-1", Status: "active" }],
     });
+  });
+
+  test("bounds worksheet preview extraction to 20 records while counting all 49 rows", () => {
+    const reads: Array<[number, number]> = [];
+    const sheet = {
+      rowCount: 50,
+      columnCount: 3,
+      getRow: (row: number) => ({
+        cellCount: 3,
+        getCell: (column: number) => {
+          reads.push([row, column]);
+          if (row > 21 && column > 1) throw new Error("A count-only row was fully converted");
+          return { text: row === 1 ? ["External ID", "Status", "Tags"][column - 1] : `${row - 1}-${column}` };
+        },
+      }),
+    };
+    const preview = worksheetToTabularPreview(sheet, 20);
+    expect(preview.totalRows).toBe(49);
+    expect(preview.rows).toHaveLength(20);
+    expect(preview.rows[19]).toEqual({ "External ID": "20-1", Status: "20-2", Tags: "20-3" });
+    expect(reads).toHaveLength(3 + 49 + 20 * 3);
+    expect(reads.filter(([row]) => row > 21)).toEqual(Array.from({ length: 29 }, (_, index) => [index + 22, 1]));
+  });
+
+  test("preview totals match full parsing across blank, unnamed, formatted and typed cells", () => {
+    const matrix = [
+      [],
+      ["External ID", "", "Status"],
+      ["one", "ignored", "active"],
+      [" ", "not an import row", "\t"],
+      [false, "", ""],
+      [0, "", ""],
+      ["", "", "inactive"],
+      [],
+      [],
+    ];
+    const sheet = {
+      rowCount: matrix.length,
+      columnCount: 3,
+      getRow: (index: number) => ({
+        getCell: (column: number) => ({ value: matrix[index - 1]?.[column - 1] }),
+      }),
+    };
+    const full = matrixToTabularData(worksheetToMatrix(sheet));
+    expect(worksheetToTabularPreview(sheet, 2)).toEqual({
+      headers: full.headers,
+      rows: full.rows.slice(0, 2),
+      totalRows: 4,
+    });
+    const csv = parseCsvTextMatrix('\uFEFFExternal ID,,Status\r\n"one,two",ignored,active\r\n ,ignored, \r\n0,,inactive\r\n');
+    expect(matrixToTabularPreview(csv, 1)).toEqual({
+      headers: ["External ID", "Status"],
+      rows: [{ "External ID": "one,two", Status: "active" }],
+      totalRows: 2,
+    });
+    expect(worksheetToTabularPreview(null, 20)).toEqual({ headers: [], rows: [], totalRows: 0 });
+    expect(worksheetToTabularPreview({ ...sheet, getRow: () => ({ getCell: () => ({ text: " " }) }) }, 20))
+      .toEqual({ headers: [], rows: [], totalRows: 0 });
+  });
+
+  test("full import conversion still includes records beyond the preview", () => {
+    const matrix = [["External ID", "Status"], ...Array.from({ length: 49 }, (_, index) => [`ext-${index + 1}`, "active"])];
+    const full = matrixToTabularData(matrix);
+    expect(matrixToTabularPreview(matrix, 20).rows).toHaveLength(20);
+    expect(full.rows).toHaveLength(49);
+    const prepared = prepareTabularRows({
+      rows: full.rows,
+      rules: [
+        { source_column: "External ID", target_field: "external_id" },
+        { source_column: "Status", target_field: "status" },
+      ],
+      resource: resource as unknown as Parameters<typeof prepareTabularRows>[0]["resource"],
+    });
+    expect(prepared).toHaveLength(49);
+    expect(prepared[34]).toMatchObject({ row_number: 35, mapped_row: { external_id: "ext-35", status: "active" } });
+    expect(prepared[48]).toMatchObject({ row_number: 49, mapped_row: { external_id: "ext-49" } });
   });
 
   test("inferTabularFieldRules matches labels and aliases and reports missing required targets", () => {

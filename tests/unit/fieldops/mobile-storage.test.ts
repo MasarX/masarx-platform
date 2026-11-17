@@ -91,4 +91,56 @@ describe("mobile storage adapter", () => {
     expect(secureStore.setItemAsync).toHaveBeenCalledWith("native-key", "x");
     expect(secureStore.deleteItemAsync).toHaveBeenCalledWith("native-key");
   });
+
+  test("works when the browser denies access to the localStorage property", async () => {
+    (globalThis as { window?: unknown }).window = Object.defineProperty({}, "localStorage", {
+      get() { throw new Error("SecurityError"); },
+    });
+    jest.doMock("react-native", () => ({ Platform: { OS: "web" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => ({}), { virtual: true });
+    const { createFieldOpsStorage } = require("../../../apps/fieldops/src/mobile-storage");
+
+    const storage = createFieldOpsStorage();
+    await storage.setItem("token", "current");
+    expect(await storage.getItem("token")).toBe("current");
+    await storage.removeItem("token");
+    expect(await storage.getItem("token")).toBeNull();
+  });
+
+  test("does not restore an old session when a refresh write exceeds storage quota", async () => {
+    const localStorage = {
+      getItem: jest.fn(() => "old-session"),
+      setItem: jest.fn(() => { throw new Error("QuotaExceededError"); }),
+      removeItem: jest.fn(),
+    };
+    (globalThis as { window?: unknown }).window = { localStorage };
+    jest.doMock("react-native", () => ({ Platform: { OS: "web" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => ({}), { virtual: true });
+    const { createFieldOpsStorage } = require("../../../apps/fieldops/src/mobile-storage");
+
+    const storage = createFieldOpsStorage();
+    expect(await storage.getItem("token")).toBe("old-session");
+    await storage.setItem("token", "refreshed-session");
+    expect(await storage.getItem("token")).toBe("refreshed-session");
+    await storage.removeItem("token");
+    expect(await storage.getItem("token")).toBeNull();
+    expect(localStorage.getItem).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not restore a signed-out session after browser removal fails", async () => {
+    const localStorage = {
+      getItem: jest.fn(() => "old-session"),
+      setItem: jest.fn(),
+      removeItem: jest.fn(() => { throw new Error("blocked"); }),
+    };
+    (globalThis as { window?: unknown }).window = { localStorage };
+    jest.doMock("react-native", () => ({ Platform: { OS: "web" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => ({}), { virtual: true });
+    const { createFieldOpsStorage } = require("../../../apps/fieldops/src/mobile-storage");
+
+    const storage = createFieldOpsStorage();
+    expect(await storage.getItem("token")).toBe("old-session");
+    await storage.removeItem("token");
+    expect(await storage.getItem("token")).toBeNull();
+  });
 });

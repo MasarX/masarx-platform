@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 async function selectFirstOption(select: ReturnType<Page["locator"]>) {
   const values = await select.locator("option").evaluateAll((options) =>
@@ -44,6 +44,19 @@ export async function applyAndClearFirstFilter(params: {
   if ((await valueInput.count()) > 0) {
     if (!filterValue) return false;
     await valueInput.first().fill(filterValue);
+  } else {
+    const combobox = builder.locator('[role="combobox"]').first();
+    if ((await combobox.count()) === 0 || !filterValue) return false;
+    await combobox.click();
+    const searchbox = combobox.getByRole("searchbox");
+    await searchbox.fill(filterValue);
+    const option = combobox.locator("..").getByRole("option", {
+      name: filterValue,
+      exact: true,
+    });
+    await expect(option).toBeVisible();
+    await option.click();
+    if (await searchbox.isVisible()) await searchbox.press("Escape");
   }
 
   const applyButton = builder.locator(
@@ -287,14 +300,23 @@ export async function ensureBulkActionVisible(params: {
   }
   let action = container.locator(`[data-action-key="${actionKey}"]`);
   if ((await action.count()) === 0) {
-    const menuTrigger = container.locator(
-      `[data-testid="${bulkActionsTestIdPrefix}-menu"]`
-    );
-    if ((await menuTrigger.count()) > 0) {
-      await menuTrigger.first().click();
-      action = page.locator(
-        `[data-testid="${bulkActionsTestIdPrefix}-menu-action-${actionKey}"], [data-action-key="${actionKey}"]`
-      );
+    action = page.getByTestId(`${bulkActionsTestIdPrefix}-menu-action-${actionKey}`);
+    if (await action.isVisible()) return action;
+    const menuTrigger = container.getByTestId(`${bulkActionsTestIdPrefix}-menu`);
+    if ((await menuTrigger.count()) === 0) return null;
+    if ((await menuTrigger.getAttribute("data-state")) !== "open") {
+      await menuTrigger.click();
+    }
+    await expect(menuTrigger).toHaveAttribute("data-state", "open");
+    await expect(menuTrigger).toHaveAttribute("aria-controls", /.+/);
+    const menuId = await menuTrigger.getAttribute("aria-controls");
+    await expect(page.locator(`[id="${menuId}"][role="menu"]`)).toBeVisible();
+  } else {
+    const menuTrigger = container.getByTestId(`${bulkActionsTestIdPrefix}-menu`);
+    if ((await menuTrigger.count()) > 0 &&
+        (await menuTrigger.getAttribute("data-state")) === "open") {
+      await page.keyboard.press("Escape");
+      await expect(menuTrigger).toHaveAttribute("data-state", "closed");
     }
   }
   if ((await action.count()) === 0) return null;
@@ -308,17 +330,34 @@ export const resolveBulkActionsTestIdPrefix = (tableTestIdPrefix: string) => {
   return `${trimmed}-bulk-actions`;
 };
 
+export async function openFirstSingleLineInlineEditor(
+  page: Page,
+): Promise<{ cell: Locator; control: Locator } | null> {
+  const cells = page.locator(
+    '#main-content tbody td[data-editable="true"]:not(:has(a)):visible',
+  );
+  const count = Math.min(await cells.count(), 12);
+  for (let index = 0; index < count; index += 1) {
+    const cell = cells.nth(index);
+    await cell.dblclick();
+    const control = cell.locator(
+      'input:not([type="checkbox"]):not([type="hidden"]):not([readonly]), select',
+    ).first();
+    try {
+      await expect(control).toBeVisible({ timeout: 3_000 });
+      return { cell, control };
+    } catch {
+      await page.keyboard.press("Escape");
+    }
+  }
+  return null;
+}
+
 export async function attemptInlineEdit(page: Page) {
-  const editButton = page.locator('[data-testid="table-inline-edit-action"]');
-  if ((await editButton.count()) === 0) return false;
-  await editButton.first().click();
-  const saveButton = page.locator('[data-testid="table-inline-edit-save"]');
-  const cancelButton = page.locator('[data-testid="table-inline-edit-cancel"]');
-  if ((await cancelButton.count()) === 0) return false;
-  await expect(saveButton.first()).toBeVisible();
-  await expect(cancelButton.first()).toBeVisible();
-  await cancelButton.first().click();
-  await expect(cancelButton).toHaveCount(0);
+  const editor = await openFirstSingleLineInlineEditor(page);
+  if (!editor) return false;
+  await page.keyboard.press("Escape");
+  await expect(editor.control).toHaveCount(0);
   return true;
 }
 

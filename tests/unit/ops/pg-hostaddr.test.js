@@ -1,10 +1,12 @@
+const mockResolve4 = jest.fn();
+const mockResolver = jest.fn(() => ({ resolve4: mockResolve4 }));
+
 jest.mock('dns', () => ({
   promises: {
-    lookup: jest.fn(),
+    Resolver: mockResolver,
   },
 }));
 
-const dns = require('dns');
 const {
   ensureHostaddr,
   ensureIpv4Hostname,
@@ -14,15 +16,17 @@ const {
 
 describe('utils/pg-hostaddr', () => {
   beforeEach(() => {
-    dns.promises.lookup.mockReset();
+    mockResolve4.mockReset();
+    mockResolver.mockClear();
   });
 
   test('ensureHostaddr appends hostaddr for supabase host', async () => {
-    dns.promises.lookup.mockResolvedValue({ address: '192.0.2.10' });
+    mockResolve4.mockResolvedValue(['192.0.2.10']);
 
     const dsn = (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
     const actual = await ensureHostaddr(dsn);
 
+    expect(mockResolver).toHaveBeenCalledWith({ timeout: 1000, tries: 1 });
     expect(actual).toBe(
       (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require&hostaddr=192.0.2.10'].join(""))
     );
@@ -34,11 +38,11 @@ describe('utils/pg-hostaddr', () => {
     const actual = await ensureHostaddr(dsn);
 
     expect(actual).toBe(dsn);
-    expect(dns.promises.lookup).not.toHaveBeenCalled();
+    expect(mockResolve4).not.toHaveBeenCalled();
   });
 
   test('ensureIpv4Hostname rewrites supabase host to ipv4 literal', async () => {
-    dns.promises.lookup.mockResolvedValue({ address: '192.0.2.10' });
+    mockResolve4.mockResolvedValue(['192.0.2.10']);
 
     const dsn = (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
     const actual = await ensureIpv4Hostname(dsn);
@@ -52,11 +56,11 @@ describe('utils/pg-hostaddr', () => {
     const actual = await ensureIpv4Hostname(dsn);
 
     expect(actual).toBe(dsn);
-    expect(dns.promises.lookup).not.toHaveBeenCalled();
+    expect(mockResolve4).not.toHaveBeenCalled();
   });
 
   test('ensureIpv4Hostname keeps original DSN when lookup fails', async () => {
-    dns.promises.lookup.mockRejectedValue(new Error('lookup failed'));
+    mockResolve4.mockRejectedValue(new Error('lookup failed'));
 
     const dsn = (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
     const actual = await ensureIpv4Hostname(dsn);

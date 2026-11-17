@@ -1,7 +1,13 @@
 const { Pool } = require('pg');
 const { randomUUID } = require('crypto');
 const { loadEnv } = require('../../../scripts/utils/load-env');
-const { createOrganization, createUser, setAuthContext } = require('../helpers/tenant-utils');
+const {
+  createOrganization,
+  createUser,
+  setAuthContext,
+  withFixtureAdminContext,
+  setServiceContext: setCanonicalServiceContext,
+} = require('../helpers/tenant-utils');
 
 loadEnv();
 
@@ -33,19 +39,7 @@ describe('COD driver shift settlement workflow', () => {
   });
 
   async function setServiceContext(organizationId, userId) {
-    await client.query('SET LOCAL ROLE service_role');
-
-    const claims = {
-      role: 'service_role',
-      sub: userId,
-      organization_id: organizationId
-    };
-
-    await client.query('SELECT set_config($1, $2, true)', [
-      'request.jwt.claims',
-      JSON.stringify(claims)
-    ]);
-    await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', String(userId)]);
+    await setCanonicalServiceContext(client, userId, organizationId);
   }
 
   async function progressWorkflowFully(workflowRunId, options = {}) {
@@ -65,40 +59,46 @@ describe('COD driver shift settlement workflow', () => {
   }
 
   async function getWorkflowTemplateIdByName(name) {
-    const { rows } = await client.query(
-      `SELECT id
-         FROM workflow_templates
-        WHERE name = $1
-        LIMIT 1`,
-      [name]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id
+           FROM workflow_templates
+          WHERE name = $1
+          LIMIT 1`,
+        [name]
+      )
     );
     return rows[0]?.id ?? null;
   }
 
   async function getWorkflowContext(workflowRunId) {
-    const { rows } = await client.query(
-      `SELECT context
-         FROM workflow_runs
-        WHERE id = $1::uuid
-        LIMIT 1`,
-      [workflowRunId]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT context
+           FROM workflow_runs
+          WHERE id = $1::uuid
+          LIMIT 1`,
+        [workflowRunId]
+      )
     );
     return rows[0]?.context ?? null;
   }
 
   async function getTaskIdForSettlementBatch(organizationId, settlementBatchId, taskTypeKey) {
-    const { rows } = await client.query(
-      `SELECT t.id AS task_id
-         FROM tasks t
-         JOIN task_types tt
-           ON tt.id = t.task_type_id
-        WHERE t.organization_id = $1::uuid
-          AND t.resource_type = 'settlement_batch'
-          AND t.resource_id = $2::uuid
-          AND tt.key = $3
-        ORDER BY t.created_at DESC
-        LIMIT 1`,
-      [organizationId, settlementBatchId, taskTypeKey]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT t.id AS task_id
+           FROM tasks t
+           JOIN task_types tt
+             ON tt.id = t.task_type_id
+          WHERE t.organization_id = $1::uuid
+            AND t.resource_type = 'settlement_batch'
+            AND t.resource_id = $2::uuid
+            AND tt.key = $3
+          ORDER BY t.created_at DESC
+          LIMIT 1`,
+        [organizationId, settlementBatchId, taskTypeKey]
+      )
     );
     return rows[0]?.task_id ?? null;
   }
@@ -127,6 +127,41 @@ describe('COD driver shift settlement workflow', () => {
     return rows[0]?.ops_session_id ?? null;
   }
 
+  async function createBranch(organizationId) {
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `INSERT INTO branches (organization_id, code, name, branch_type, metadata)
+         VALUES ($1::uuid, $2, $3, $4, '{}'::jsonb)
+         RETURNING id`,
+        [organizationId, `b-${randomUUID().slice(0, 8)}`, 'Main Branch', 'hub']
+      )
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  async function readSettlementBatch(settlementBatchId, organizationId, columns) {
+    const allowedColumns = new Set([
+      'metadata',
+      'status',
+      'status, branch_id, subject_type, subject_id',
+    ]);
+    if (!allowedColumns.has(columns)) {
+      throw new Error(`Unsupported settlement batch read projection: ${columns}`);
+    }
+
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT ${columns}
+           FROM settlement_batches
+          WHERE id = $1::uuid
+            AND organization_id = $2::uuid
+          LIMIT 1`,
+        [settlementBatchId, organizationId]
+      )
+    );
+    return rows[0] ?? null;
+  }
+
   async function seedCanonicalCodPaymentCollection({
     organizationId,
     branchId,
@@ -142,33 +177,34 @@ describe('COD driver shift settlement workflow', () => {
     const vehicleId = randomUUID();
     const shipmentId = randomUUID();
 
-    await client.query(
-      `INSERT INTO public.clients (id, organization_id, name, slug, status)
-       VALUES ($1::uuid, $2::uuid, $3, $4, 'active')`,
-      [
-        clientId,
-        organizationId,
-        `COD Settlement Client ${clientId.slice(0, 8)}`,
-        `cod-settlement-client-${clientId.slice(0, 8)}`,
-      ]
-    );
-    await client.query(
-      `INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
-       VALUES ($1::uuid, $2::uuid, $3, $4, true, 'active')`,
-      [
-        senderId,
-        clientId,
-        `COD Settlement Sender ${senderId.slice(0, 8)}`,
-        `COD Settlement Sender ${senderId.slice(0, 8)}`,
-      ]
-    );
-    await client.query(
-      `INSERT INTO public.vehicles (id, organization_id, status, is_active)
-       VALUES ($1::uuid, $2::uuid, 'active', true)`,
-      [vehicleId, organizationId]
-    );
-    await client.query(
-      `INSERT INTO public.shipments (
+    await withFixtureAdminContext(client, async () => {
+      await client.query(
+        `INSERT INTO public.clients (id, organization_id, name, slug, status)
+         VALUES ($1::uuid, $2::uuid, $3, $4, 'active')`,
+        [
+          clientId,
+          organizationId,
+          `COD Settlement Client ${clientId.slice(0, 8)}`,
+          `cod-settlement-client-${clientId.slice(0, 8)}`,
+        ]
+      );
+      await client.query(
+        `INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+         VALUES ($1::uuid, $2::uuid, $3, $4, true, 'active')`,
+        [
+          senderId,
+          clientId,
+          `COD Settlement Sender ${senderId.slice(0, 8)}`,
+          `COD Settlement Sender ${senderId.slice(0, 8)}`,
+        ]
+      );
+      await client.query(
+        `INSERT INTO public.vehicles (id, organization_id, status, is_active)
+         VALUES ($1::uuid, $2::uuid, 'active', true)`,
+        [vehicleId, organizationId]
+      );
+      await client.query(
+        `INSERT INTO public.shipments (
          id,
          organization_id,
          client_id,
@@ -209,8 +245,9 @@ describe('COD driver shift settlement workflow', () => {
           cod_amount: codAmount,
           cod_currency: currency,
         }),
-      ]
-    );
+        ]
+      );
+    });
 
     const { rows: routeRows } = await client.query(
       `SELECT route_run_id, stop_ids
@@ -251,8 +288,9 @@ describe('COD driver shift settlement workflow', () => {
     const allowedMethods =
       paymentMethod && paymentOutcome !== 'refused' ? [paymentMethod] : ['cash'];
 
-    const { rows: actionRows } = await client.query(
-      `INSERT INTO public.shipment_actions (
+    const { rows: actionRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `INSERT INTO public.shipment_actions (
          organization_id,
          client_id,
          shipment_id,
@@ -299,7 +337,8 @@ describe('COD driver shift settlement workflow', () => {
             },
           },
         }),
-      ]
+        ]
+      )
     );
 
     return {
@@ -328,13 +367,7 @@ describe('COD driver shift settlement workflow', () => {
 
     await setServiceContext(organizationId, opsUserId);
 
-    const { rows: branchRows } = await client.query(
-      `INSERT INTO branches (organization_id, code, name, branch_type, metadata)
-       VALUES ($1::uuid, $2, $3, $4, '{}'::jsonb)
-       RETURNING id`,
-      [organizationId, `b-${randomUUID().slice(0, 8)}`, 'Main Branch', 'hub']
-    );
-    const branchId = branchRows[0]?.id;
+    const branchId = await createBranch(organizationId);
     expect(branchId).toBeTruthy();
 
     await seedCanonicalCodPaymentCollection({
@@ -385,17 +418,10 @@ describe('COD driver shift settlement workflow', () => {
     expect(Number(ctxAfterCreate?.settlement?.variance_amount || 0)).toBe(0);
     expect(Number(ctxAfterCreate?.settlement?.payment_collection_summary?.stop_count || 0)).toBe(1);
 
-    const { rows: createSummaryRows } = await client.query(
-      `SELECT metadata
-         FROM settlement_batches
-        WHERE id = $1::uuid
-          AND organization_id = $2::uuid
-        LIMIT 1`,
-      [settlementBatchId, organizationId]
-    );
-    expect(Number(createSummaryRows[0]?.metadata?.expected_amount || 0)).toBe(100);
-    expect(Number(createSummaryRows[0]?.metadata?.collected_amount || 0)).toBe(100);
-    expect(Number(createSummaryRows[0]?.metadata?.variance_amount || 0)).toBe(0);
+    const createSummary = await readSettlementBatch(settlementBatchId, organizationId, 'metadata');
+    expect(Number(createSummary?.metadata?.expected_amount || 0)).toBe(100);
+    expect(Number(createSummary?.metadata?.collected_amount || 0)).toBe(100);
+    expect(Number(createSummary?.metadata?.variance_amount || 0)).toBe(0);
 
     const handoverTaskId = await getTaskIdForSettlementBatch(
       organizationId,
@@ -447,13 +473,7 @@ describe('COD driver shift settlement workflow', () => {
 
     await setServiceContext(organizationId, opsUserId);
 
-    const { rows: branchRows } = await client.query(
-      `INSERT INTO branches (organization_id, code, name, branch_type, metadata)
-       VALUES ($1::uuid, $2, $3, $4, '{}'::jsonb)
-       RETURNING id`,
-      [organizationId, `b-${randomUUID().slice(0, 8)}`, 'Main Branch', 'hub']
-    );
-    const branchId = branchRows[0]?.id;
+    const branchId = await createBranch(organizationId);
     expect(branchId).toBeTruthy();
 
     await seedCanonicalCodPaymentCollection({
@@ -567,15 +587,11 @@ describe('COD driver shift settlement workflow', () => {
     // Steps 7..11: finance transfer, lock, optional manager approval skip, approve
     await progressWorkflowFully(workflowRunId);
 
-    const { rows: batchRows } = await client.query(
-      `SELECT status, branch_id, subject_type, subject_id
-         FROM settlement_batches
-        WHERE id = $1::uuid
-          AND organization_id = $2::uuid
-        LIMIT 1`,
-      [settlementBatchId, organizationId]
+    const batch = await readSettlementBatch(
+      settlementBatchId,
+      organizationId,
+      'status, branch_id, subject_type, subject_id'
     );
-    const batch = batchRows[0];
     expect(batch?.status).toBe('approved');
     expect(batch?.branch_id).toBe(branchId);
     expect(String(batch?.subject_type || '').toLowerCase()).toBe('driver');
@@ -602,15 +618,17 @@ describe('COD driver shift settlement workflow', () => {
     const expectedCurrency = codPolicyRows[0]?.value?.currency;
     expect(expectedCurrency).toBeTruthy();
 
-    const { rows: financeRows } = await client.query(
-      `SELECT direction, amount, currency, account_type, account_id
-         FROM finance_events
-        WHERE organization_id = $1::uuid
-          AND event_type = 'cod_handover'
-          AND subject_type = 'settlement_batch'
-          AND subject_id = $2::uuid
-        ORDER BY direction ASC`,
-      [organizationId, settlementBatchId]
+    const { rows: financeRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT direction, amount, currency, account_type, account_id
+           FROM finance_events
+          WHERE organization_id = $1::uuid
+            AND event_type = 'cod_handover'
+            AND subject_type = 'settlement_batch'
+            AND subject_id = $2::uuid
+          ORDER BY direction ASC`,
+        [organizationId, settlementBatchId]
+      )
     );
 
     expect(financeRows.length).toBe(2);
@@ -629,12 +647,14 @@ describe('COD driver shift settlement workflow', () => {
       account_id: driverUserId
     });
 
-    const { rows: membershipRows } = await client.query(
-      `SELECT COUNT(*)::int AS count
-         FROM settlement_batch_finance_events
-        WHERE organization_id = $1::uuid
-          AND settlement_batch_id = $2::uuid`,
-      [organizationId, settlementBatchId]
+    const { rows: membershipRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT COUNT(*)::int AS count
+           FROM settlement_batch_finance_events
+          WHERE organization_id = $1::uuid
+            AND settlement_batch_id = $2::uuid`,
+        [organizationId, settlementBatchId]
+      )
     );
     expect(membershipRows[0]?.count).toBe(2);
   });
@@ -668,13 +688,7 @@ describe('COD driver shift settlement workflow', () => {
 
     await setServiceContext(organizationId, opsUserId);
 
-    const { rows: branchRows } = await client.query(
-      `INSERT INTO branches (organization_id, code, name, branch_type, metadata)
-       VALUES ($1::uuid, $2, $3, $4, '{}'::jsonb)
-       RETURNING id`,
-      [organizationId, `b-${randomUUID().slice(0, 8)}`, 'Main Branch', 'hub']
-    );
-    const branchId = branchRows[0]?.id;
+    const branchId = await createBranch(organizationId);
     expect(branchId).toBeTruthy();
 
     const templateId = await getWorkflowTemplateIdByName('cod_driver_shift_settlement_v2');
@@ -790,15 +804,8 @@ describe('COD driver shift settlement workflow', () => {
     );
     expect(managerTaskId).toBeTruthy();
 
-    const { rows: lockedRows } = await client.query(
-      `SELECT status
-         FROM settlement_batches
-        WHERE id = $1::uuid
-          AND organization_id = $2::uuid
-        LIMIT 1`,
-      [settlementBatchId, organizationId]
-    );
-    expect(lockedRows[0]?.status).toBe('locked');
+    const lockedBatch = await readSettlementBatch(settlementBatchId, organizationId, 'status');
+    expect(lockedBatch?.status).toBe('locked');
 
     await setAuthContext(client, managerUserId);
     await transitionTaskCompleted(managerTaskId, `cod-manager-approve-${randomUUID()}`, { approved: true });
@@ -814,14 +821,7 @@ describe('COD driver shift settlement workflow', () => {
       }
     });
 
-    const { rows: batchRows } = await client.query(
-      `SELECT status
-         FROM settlement_batches
-        WHERE id = $1::uuid
-          AND organization_id = $2::uuid
-        LIMIT 1`,
-      [settlementBatchId, organizationId]
-    );
-    expect(batchRows[0]?.status).toBe('approved');
+    const batch = await readSettlementBatch(settlementBatchId, organizationId, 'status');
+    expect(batch?.status).toBe('approved');
   });
 });

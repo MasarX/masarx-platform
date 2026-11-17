@@ -7,6 +7,7 @@ const {
   createOrganization,
   createSender,
   createUser,
+  withFixtureAdminContext,
   setAuthContext,
 } = require('../helpers/tenant-utils');
 
@@ -204,12 +205,109 @@ async function callShipmentAmendCancelOptions(client, shipmentId, options = {}) 
   return rows[0]?.result;
 }
 
+async function readWorkflowOutcome(client, workflowRunId) {
+  const { rows } = await client.query(
+    `
+      SELECT
+        wr.workflow_status,
+        wr.workflow_template_id,
+        wrs.handler_key,
+        wrs.step_status,
+        wrs.operation_result,
+        COALESCE(
+          NULLIF(wrs.operation_result->>'shipment_action_id', '')::uuid,
+          NULLIF(wrs.operation_result #>> '{reserve_result,action_id}', '')::uuid
+        ) AS shipment_action_id
+      FROM workflow_runs wr
+      LEFT JOIN LATERAL (
+        SELECT handler_key, step_status, operation_result, sequence_order, updated_at
+        FROM workflow_run_steps
+        WHERE workflow_run_id = wr.id
+        ORDER BY sequence_order DESC, updated_at DESC
+        LIMIT 1
+      ) wrs ON TRUE
+      WHERE wr.id = $1::uuid
+    `,
+    [workflowRunId],
+  );
+  return rows[0] || null;
+}
+
+async function driveWorkflowToTerminal(client, workflowRunId, maxAttempts = 8) {
+  let outcome = await readWorkflowOutcome(client, workflowRunId);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (['completed', 'failed', 'blocked', 'cancelled'].includes(outcome?.workflow_status)) {
+      return outcome;
+    }
+    await client.query(
+      'SELECT public.progress_workflow_run($1::uuid) AS progress',
+      [workflowRunId],
+    );
+    outcome = await readWorkflowOutcome(client, workflowRunId);
+  }
+  return outcome;
+}
+
 describe('shipment amend/cancel workflow engine contract', () => {
   afterAll(async () => {
     await pool.end();
   });
 
-  test('modify starts and completes through a real workflow run', async () => {
+  test('address capture persists code and coordinates and verifies already-processed readback', async () => {
+    await withTransaction(async (client) => {
+      const fixture = await seedTenantFixture(client);
+      const input = { shipment_id: fixture.shipmentId, operation: 'address', surface: 'console',
+        address: { line1: 'King Road', city: 'Riyadh', country: 'SA',
+          shortNationalAddress: 'rrrd2929', coordinates: { latitude: 24.7136, longitude: 46.6753 } } };
+      const result = await callShipmentAmendCancel(client, input, { schema: 'api' });
+      expect(result.ok).toBe(true);
+      expect(result.workflow_status).toBe('completed');
+      expect(result.destination_address_capture).toMatchObject({
+        status: 'verified', sa_short_code: 'RRRD2929',
+        coordinates: { latitude: 24.7136, longitude: 46.6753 },
+      });
+      const replay = await callShipmentAmendCancel(client, input, { schema: 'api' });
+      expect(replay.already_processed).toBe(true);
+      expect(replay.destination_address_capture).toEqual(result.destination_address_capture);
+      // Only this transaction's real workflow is changed to exercise replay lifecycle states.
+      await withFixtureAdminContext(client, () => client.query("UPDATE public.workflow_runs SET workflow_status='pending' WHERE id=$1::uuid", [result.workflow_run_id]));
+      const pending = await callShipmentAmendCancel(client, input, { schema: 'api' });
+      expect(pending.workflow_status).toBe('pending');
+      expect(pending.destination_address_capture).toEqual({ status: 'pending' });
+      await withFixtureAdminContext(client, () => client.query("UPDATE public.workflow_runs SET workflow_status='failed' WHERE id=$1::uuid", [result.workflow_run_id]));
+      const failed = await callShipmentAmendCancel(client, input, { schema: 'api' });
+      expect(failed.ok).toBe(false);
+      expect(failed.workflow_status).toBe('failed');
+      expect(failed.destination_address_capture).toBeUndefined();
+    });
+  });
+
+  test.each([
+    { latitude: 24 }, { longitude: 46 },
+    { latitude: 'NaN', longitude: 46 }, { latitude: 'Infinity', longitude: 46 },
+    { latitude: 91, longitude: 46 }, { latitude: 24, longitude: 181 },
+  ])('address mutation rejects malformed coordinate pair %#', async (coordinates) => {
+    await withTransaction(async (client) => {
+      const fixture = await seedTenantFixture(client);
+      await expect(callShipmentAmendCancel(client, {
+        shipment_id: fixture.shipmentId, operation: 'address', surface: 'console',
+        address: { line1: 'King Road', city: 'Riyadh', country: 'SA', coordinates },
+      }, { schema: 'api' })).rejects.toThrow(/address coordinates/);
+    });
+  });
+
+  test('address capture rejects cross-tenant mutation', async () => {
+    await withTransaction(async (client) => {
+      const foreign = await seedTenantFixture(client, { authenticate: false });
+      await seedTenantFixture(client);
+      await expect(callShipmentAmendCancel(client, {
+        shipment_id: foreign.shipmentId, operation: 'address', surface: 'console',
+        address: { line1: 'Foreign', city: 'Riyadh', country: 'SA', sa_short_code: 'RRRD2929' },
+      }, { schema: 'api' })).rejects.toThrow();
+    });
+  });
+
+  test.each(['public', 'api'])('modify starts and completes through a real workflow run (%s)', async (schema) => {
     await withTransaction(async (client) => {
       const fixture = await seedTenantFixture(client);
 
@@ -221,7 +319,9 @@ describe('shipment amend/cancel workflow engine contract', () => {
           service_level: 'express',
           special_instructions: 'Workflow-engine modify test',
         },
-      });
+      }, { schema });
+
+      await client.query('RESET ROLE');
 
       expect(result?.ok).toBe(true);
       expect(result?.workflow_run_id).toBeTruthy();
@@ -251,6 +351,8 @@ describe('shipment amend/cancel workflow engine contract', () => {
         surface: 'console',
         reason: 'Customer requested cancellation',
       });
+
+      await client.query('RESET ROLE');
 
       expect(result?.ok).toBe(true);
       expect(result?.workflow_status).toBe('completed');
@@ -329,12 +431,46 @@ describe('shipment amend/cancel workflow engine contract', () => {
       );
 
       expect(result?.ok).toBe(true);
-      expect(result?.workflow_status).toBe('completed');
-      expect(result?.shipment_action_id).toBeTruthy();
+      expect(result?.workflow_run_id).toBeTruthy();
+      expect(['pending', 'in_progress', 'completed']).toContain(result?.workflow_status);
+
+      await client.query('RESET ROLE');
+
+      const outcome = result?.workflow_status === 'completed'
+        ? await readWorkflowOutcome(client, result.workflow_run_id)
+        : await driveWorkflowToTerminal(client, result.workflow_run_id);
+      const shipmentActionId = result?.shipment_action_id || outcome?.shipment_action_id;
+
+      expect(outcome?.workflow_status).toBe('completed');
+      expect(outcome?.workflow_template_id).toBe(fixture.workflowTemplateIds.shipment_delete_v1);
+      expect(outcome?.handler_key).toBe('shipment_delete');
+      expect(outcome?.step_status).toBe('completed');
+      expect(shipmentActionId).toBeTruthy();
+
+      const { rows: shipmentRows } = await client.query(
+        'SELECT status FROM shipments WHERE id = $1::uuid',
+        [fixture.shipmentId],
+      );
+      expect(shipmentRows[0]?.status).toBe('cancelled');
+
+      const { rows: actionRows } = await client.query(
+        `
+          SELECT
+            performed_by_system,
+            action_data #>> '{audit_actor,source}' AS audit_actor_source,
+            action_data #>> '{audit_actor,surface}' AS audit_actor_surface
+          FROM shipment_actions
+          WHERE id = $1::uuid
+        `,
+        [shipmentActionId],
+      );
+      expect(actionRows[0]?.performed_by_system).toBe('portal.shipment_amend_cancel');
+      expect(actionRows[0]?.audit_actor_source).toBe('portal.shipment_amend_cancel');
+      expect(actionRows[0]?.audit_actor_surface).toBe('portal');
     });
   });
 
-  test('duplicate soft-cancel retries return already_processed with the same action id', async () => {
+  test.each(['public', 'api'])('duplicate soft-cancel retries return already_processed with the same action id (%s)', async (schema) => {
     await withTransaction(async (client) => {
       const fixture = await seedTenantFixture(client);
       const idempotencyKey = `uc030-idem-${Date.now()}`;
@@ -345,14 +481,14 @@ describe('shipment amend/cancel workflow engine contract', () => {
         surface: 'console',
         reason: 'Duplicate retry test',
         idempotency_key: idempotencyKey,
-      });
+      }, { schema });
       const second = await callShipmentAmendCancel(client, {
         shipment_id: fixture.shipmentId,
         operation: 'cancel',
         surface: 'console',
         reason: 'Duplicate retry test',
         idempotency_key: idempotencyKey,
-      });
+      }, { schema });
 
       expect(first?.ok).toBe(true);
       expect(first?.shipment_action_id).toBeTruthy();
@@ -362,7 +498,7 @@ describe('shipment amend/cancel workflow engine contract', () => {
     });
   });
 
-  test('soft-cancel fails closed when the delete window is expired', async () => {
+  test.each(['public', 'api'])('soft-cancel fails closed when the delete window is expired (%s)', async (schema) => {
     await withTransaction(async (client) => {
       const fixture = await seedTenantFixture(client, {
         deleteWindowHours: 1,
@@ -374,7 +510,7 @@ describe('shipment amend/cancel workflow engine contract', () => {
         operation: 'cancel',
         surface: 'console',
         reason: 'Window expiry test',
-      });
+      }, { schema });
 
       expect(result?.ok).toBe(false);
       expect(result?.error?.code).toBe('shipment_delete_window_expired');
@@ -382,7 +518,7 @@ describe('shipment amend/cancel workflow engine contract', () => {
     });
   });
 
-  test('unauthenticated calls are rejected before any workflow starts', async () => {
+  test.each(['public', 'api'])('unauthenticated calls are rejected before any workflow starts (%s)', async (schema) => {
     await withTransaction(async (client) => {
       const fixture = await seedTenantFixture(client, { authenticate: false });
 
@@ -391,7 +527,7 @@ describe('shipment amend/cancel workflow engine contract', () => {
           shipment_id: fixture.shipmentId,
           operation: 'cancel',
           surface: 'console',
-        }),
+        }, { schema }),
       ).rejects.toThrow('shipment amend/cancel requires authenticated user');
     });
   });

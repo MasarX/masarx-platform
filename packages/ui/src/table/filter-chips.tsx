@@ -21,7 +21,7 @@ const chipTypeColor: Record<ChipItem["type"], string> = {
   filter:
     "bg-ui-accent-soft/30 text-ui-accent hover:bg-ui-accent-soft/50",
   sort:
-    "bg-[rgb(var(--ui-info)/0.10)] text-[rgb(var(--ui-info))] hover:bg-[rgb(var(--ui-info)/0.18)]",
+    "bg-[rgb(var(--ui-info)/0.10)] text-ui-ink hover:bg-[rgb(var(--ui-info)/0.18)]",
   group:
     "bg-[rgb(var(--ui-success)/0.10)] text-[rgb(var(--ui-success))] hover:bg-[rgb(var(--ui-success)/0.18)]",
 };
@@ -41,7 +41,7 @@ export function FilterChips({ t, chips, onRemove, onClearAll }: FilterChipsProps
           <span className="max-w-[160px] truncate">
             {chip.label}
             {chip.detail ? (
-              <span className="opacity-70"> {chip.detail}</span>
+              <span> {chip.detail}</span>
             ) : null}
           </span>
           <button

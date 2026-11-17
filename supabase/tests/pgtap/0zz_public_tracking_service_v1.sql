@@ -4,7 +4,7 @@
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(79);
+SELECT plan(82);
 
 SELECT ok(to_regclass('public.public_tracking_access_events') IS NOT NULL, 'public_tracking_access_events table exists');
 SELECT ok((SELECT rowsecurity FROM pg_tables WHERE schemaname='public' AND tablename='public_tracking_access_events'), 'RLS enabled on public_tracking_access_events');
@@ -143,6 +143,10 @@ DECLARE
   v_sender UUID := '2a100000-0000-0000-0000-000000000301'::uuid;
   v_other_org UUID := '2a100000-0000-0000-0000-000000000111'::uuid;
   v_other_user UUID := '2a100000-0000-0000-0000-000000000112'::uuid;
+  v_sibling_client UUID := '2a100000-0000-0000-0000-000000000211'::uuid;
+  v_sibling_sender UUID := '2a100000-0000-0000-0000-000000000311'::uuid;
+  v_client_user UUID := '2a100000-0000-0000-0000-000000000113'::uuid;
+  v_sender_user UUID := '2a100000-0000-0000-0000-000000000114'::uuid;
   v_recipient_one UUID := '2a100000-0000-0000-0000-000000000401'::uuid;
   v_recipient_two UUID := '2a100000-0000-0000-0000-000000000402'::uuid;
   v_address UUID := '2a100000-0000-0000-0000-000000000451'::uuid;
@@ -161,6 +165,8 @@ DECLARE
   v_request_review JSONB;
   v_request_reject JSONB;
   v_cross_tenant_result JSONB;
+  v_sibling_client_result JSONB;
+  v_sibling_sender_result JSONB;
   v_review_result JSONB;
   v_reject_result JSONB;
   v_session_token TEXT;
@@ -177,11 +183,15 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.clients (id, organization_id, name, slug, status)
-  VALUES (v_client, v_org, 'Public Tracking Client', 'public-tracking-client', 'active')
+  VALUES
+    (v_client, v_org, 'Public Tracking Client', 'public-tracking-client', 'active'),
+    (v_sibling_client, v_org, 'Sibling Tracking Client', 'sibling-tracking-client', 'active')
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.senders (id, client_id, name, status)
-  VALUES (v_sender, v_client, 'Public Tracking Sender', 'active')
+  VALUES
+    (v_sender, v_client, 'Public Tracking Sender', 'active'),
+    (v_sibling_sender, v_client, 'Sibling Tracking Sender', 'active')
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.users (
@@ -204,6 +214,20 @@ BEGIN
     NULL,
     'active'
   )
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.users (
+    id, organization_id, email, full_name, user_type,
+    access_scope_type, access_scope_id, status
+  ) VALUES
+    (
+      v_client_user, v_org, 'sibling-client-reviewer@example.com', 'Sibling Client Reviewer',
+      'ops_admin', 'client', v_sibling_client, 'active'
+    ),
+    (
+      v_sender_user, v_org, 'sibling-sender-reviewer@example.com', 'Sibling Sender Reviewer',
+      'ops_admin', 'sender', v_sibling_sender, 'active'
+    )
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.recipients (id, organization_id, client_id, name, phone_number, email)
@@ -662,7 +686,47 @@ BEGIN
       AND oc.body->>'stage' = 'received'
   ), 'pending review request enqueues requester received notification');
 
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claim.sub', v_client_user::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_client_user::text, 'role', 'authenticated')::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  SELECT public.public_tracking_review_request_v1(jsonb_build_object(
+    'support_case_id', (v_request_review->>'support_case_id')::uuid,
+    'decision', 'approved',
+    'reason', 'Sibling client review attempt'
+  )) INTO v_sibling_client_result;
+  EXECUTE 'RESET ROLE';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claims', '{}', true);
+  RETURN NEXT is(
+    v_sibling_client_result #>> '{error,code}',
+    'request_not_found',
+    'client reviewer receives generic absence for a sibling client shipment change'
+  );
+
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claim.sub', v_sender_user::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_sender_user::text, 'role', 'authenticated')::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  SELECT public.public_tracking_review_request_v1(jsonb_build_object(
+    'support_case_id', (v_request_review->>'support_case_id')::uuid,
+    'decision', 'approved',
+    'reason', 'Sibling sender review attempt'
+  )) INTO v_sibling_sender_result;
+  EXECUTE 'RESET ROLE';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claims', '{}', true);
+  RETURN NEXT is(
+    v_sibling_sender_result #>> '{error,code}',
+    'request_not_found',
+    'sender reviewer receives generic absence for a sibling sender shipment change'
+  );
+
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   PERFORM set_config('request.jwt.claim.sub', v_other_user::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_other_user::text, 'role', 'authenticated')::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
   SELECT public.public_tracking_review_request_v1(jsonb_build_object(
     'support_case_id', (v_request_review->>'support_case_id')::uuid,
@@ -672,14 +736,17 @@ BEGIN
   INTO v_cross_tenant_result;
   EXECUTE 'RESET ROLE';
   PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claims', '{}', true);
 
   RETURN NEXT is(
     v_cross_tenant_result #>> '{error,code}',
-    'forbidden',
-    'tenant reviewer from another organization cannot review a different tenant shipment change'
+    'request_not_found',
+    'tenant reviewer receives generic absence for a different tenant shipment change'
   );
 
   PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
 
   SELECT public.public_tracking_review_request_v1(jsonb_build_object(
     'support_case_id', (v_request_review->>'support_case_id')::uuid,
@@ -705,6 +772,21 @@ BEGIN
       AND oc.context->>'support_case_id' = v_request_review->>'support_case_id'
       AND oc.body->>'stage' = 'applied'
   ), 'review approval enqueues requester applied notification');
+
+  SELECT public.public_tracking_review_request_v1(jsonb_build_object(
+    'support_case_id', (v_request_review->>'support_case_id')::uuid,
+    'decision', 'approved',
+    'reason', 'Idempotent review readback'
+  ))
+  INTO v_review_result;
+
+  RETURN NEXT ok(
+    COALESCE((v_review_result->>'ok')::BOOLEAN, FALSE)
+      AND COALESCE((v_review_result->>'already_processed')::BOOLEAN, FALSE)
+      AND jsonb_typeof(v_review_result->'current_snapshot') = 'object'
+      AND v_review_result->'current_snapshot' <> '{}'::jsonb,
+    'already-processed review returns the matching canonical current snapshot'
+  );
 
   SELECT public.public_tracking_submit_request_v2(jsonb_build_object(
     'session_token', v_review_session_token,
@@ -752,4 +834,3 @@ $$;
 SELECT * FROM pg_temp.run_public_tracking_service_checks();
 SELECT finish();
 ROLLBACK;
-

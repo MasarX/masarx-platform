@@ -4,7 +4,7 @@ import { LoadingState, WorkflowRunPage as UiWorkflowRunPage } from "@masarx/ui";
 type WorkflowRunPageProps = Parameters<typeof UiWorkflowRunPage>[0];
 const WorkflowRunPageInner = UiWorkflowRunPage as unknown as (
   props: WorkflowRunPageProps
-) => JSX.Element;
+) => React.JSX.Element;
 
 export function WorkflowRunPage(props: WorkflowRunPageProps) {
   return (

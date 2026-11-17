@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, isAuthRetryableFetchError, type SupabaseClient } from "@supabase/supabase-js";
 import { createBrowserClient as createSupabaseBrowserClient } from "@supabase/ssr";
 import { getSupabaseAnonKey, getSupabaseDbSchema, getSupabaseUrl } from "./env";
 import { resolveUsableDemoPassword } from "./demo-accounts";
@@ -27,6 +27,10 @@ function getErrorCode(error: unknown): string | null {
 }
 
 function isTransientNetworkError(error: unknown) {
+  const cause = error && typeof error === "object"
+    ? (error as { cause?: unknown }).cause
+    : undefined;
+  if (isAuthRetryableFetchError(error) || isAuthRetryableFetchError(cause)) return true;
   const message = getErrorMessage(error).toLowerCase();
   if (message.includes("fetch failed")) return true;
   if (message.includes("connect timeout")) return true;
@@ -248,7 +252,7 @@ export async function signOutSupabaseClient(
   try {
     await withRetry(
       async () => {
-        const result = await supabase.auth.signOut();
+        const result = await supabase.auth.signOut({ scope: "local" });
         if (result?.error && isTransientNetworkError(result.error)) {
           const wrapped = new Error(`${label}: ${getErrorMessage(result.error)}`);
           (wrapped as any).cause = result.error;

@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(27);
+SELECT plan(30);
 
 -- Ensure time partitions exist for decision_log/settings_resolution_log inserts (handler uses decision logging).
 SELECT public.create_next_partitions();
@@ -471,7 +471,7 @@ BEGIN
         'cityId', 5,
         'villageId', 180,
         'regionId', 1,
-        'nationalAddress', 'NAT-ORIGIN-050'
+        'nationalAddress', 'ORGN0050'
       ),
       'destinationAddress', jsonb_build_object(
         'addressLine1', 'Test Destination 050',
@@ -481,7 +481,7 @@ BEGIN
         'cityId', 1,
         'villageId', 38,
         'regionId', 1,
-        'nationalAddress', 'NAT-DEST-050'
+        'nationalAddress', 'DEST0050'
       )
     ),
     now(),
@@ -523,7 +523,10 @@ BEGIN
     1,
     now(),
     '77770000-0000-0000-0000-000000000050',
-    jsonb_build_object('api_gateway_request_id', '99990000-0000-0000-0000-000000000050'),
+    jsonb_build_object(
+      'api_gateway_request_id', '99990000-0000-0000-0000-000000000050',
+      'api_gateway_route_id', v_route_id
+    ),
     now(),
     '05000000-0000-0000-0000-000000000054'
   )
@@ -664,8 +667,46 @@ SELECT is(
     FROM public.addresses
     WHERE id = (SELECT (result->'postprocess'->>'destination_address_id')::uuid FROM tmp_gateway_postprocess)
   ),
-  'NAT-DEST-050',
+  'DEST0050',
   'address materializer preserves destinationAddress raw object in raw_input'   
+);
+
+SELECT is(
+  (
+    SELECT sa_short_code
+    FROM public.addresses
+    WHERE id = (SELECT (result->'postprocess'->>'destination_address_id')::uuid FROM tmp_gateway_postprocess)
+  ),
+  'DEST0050',
+  'address materializer stores destination national address as canonical sa_short_code'
+);
+
+SELECT is(
+  (
+    SELECT sa.action_data->>'api_gateway_request_id'
+    FROM public.shipment_actions sa
+    WHERE sa.shipment_id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+      AND sa.action_type = 'api_gateway_materialized'
+    ORDER BY sa.created_at DESC
+    LIMIT 1
+  ),
+  '99990000-0000-0000-0000-000000000050',
+  'postprocess emits shipment-scoped API Gateway materialization action for Console drawer audit'
+);
+
+SELECT is(
+  (
+    SELECT dl.decision_outcome
+    FROM public.decision_log dl
+    WHERE dl.resource_type = 'shipment'
+      AND dl.resource_id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+      AND dl.decision_point = 'api_gateway_materialization'
+      AND dl.decision_inputs->>'api_gateway_request_id' = '99990000-0000-0000-0000-000000000050'
+    ORDER BY dl.timestamp DESC
+    LIMIT 1
+  ),
+  'materialized',
+  'postprocess emits shipment-scoped API Gateway materialization decision for Console drawer decisions'
 );
 
 -- ----------------------------------------------------------------------------
@@ -784,7 +825,10 @@ BEGIN
     1,
     now(),
     '77770000-0000-0000-0000-000000000051',
-    jsonb_build_object('api_gateway_request_id', '99990000-0000-0000-0000-000000000051'),
+    jsonb_build_object(
+      'api_gateway_request_id', '99990000-0000-0000-0000-000000000051',
+      'api_gateway_route_id', v_route_id
+    ),
     now(),
     '05000000-0000-0000-0000-000000000054'
   )

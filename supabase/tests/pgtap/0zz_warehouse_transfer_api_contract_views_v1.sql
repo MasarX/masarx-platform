@@ -6,7 +6,7 @@ SELECT plan(42);
 
 SELECT ok(has_schema_privilege('authenticated', 'api', 'USAGE'), 'authenticated has USAGE on api schema');
 SELECT ok(has_schema_privilege('service_role', 'api', 'USAGE'), 'service_role has USAGE on api schema');
-SELECT ok(NOT has_schema_privilege('anon', 'api', 'USAGE'), 'anon does not have USAGE on api schema');
+SELECT ok(has_schema_privilege('anon', 'api', 'USAGE'), 'anon retains api schema USAGE for the whitelisted public tracking facade');
 
 SELECT has_view('api', 'handling_units', 'api.handling_units view exists');
 SELECT ok(has_table_privilege('authenticated', 'api.handling_units', 'SELECT'), 'authenticated can SELECT api.handling_units');

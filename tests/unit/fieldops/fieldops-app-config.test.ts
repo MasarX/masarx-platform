@@ -1,4 +1,6 @@
 const loadPublicEnvMock = jest.fn();
+const { spawnSync } = require("child_process");
+const path = require("path");
 
 async function loadBuildConfig() {
   jest.doMock("../../../scripts/utils/load-public-env", () => ({
@@ -22,10 +24,43 @@ describe("fieldops app config", () => {
     delete process.env.NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS;
     delete process.env.NEXT_PUBLIC_LOCATION_ALWAYS_PERMISSION_FIELDOPS;
     delete process.env.NEXT_PUBLIC_APP_NAME;
+    delete process.env.NEXT_PUBLIC_APP_BASE_PATH;
   });
 
   afterAll(() => {
     process.env = originalEnv;
+  });
+
+  test.each([
+    [],
+    ["@maplibre/maplibre-react-native"],
+    [["@maplibre/maplibre-react-native", { existingOption: "preserved" }]],
+  ].map((plugins) => [plugins]))("adds the native map plugin once and preserves existing options: %j", async (plugins) => {
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({ config: { name: "Fieldops", slug: "fieldops", version: "1.0.0", plugins } } as any);
+    const matches = (output.plugins as any[]).filter((entry) => (typeof entry === "string" ? entry : entry[0]) === "@maplibre/maplibre-react-native");
+    expect(matches).toHaveLength(1);
+    const existing = plugins.find((entry) => Array.isArray(entry));
+    if (existing) expect(matches[0]).toEqual(existing);
+  });
+
+  test.each([undefined, "/", "/fieldops/", "/dev/fieldops"])("exports web resources under %s without changing native identifiers", async (basePath) => {
+    if (basePath !== undefined) process.env.NEXT_PUBLIC_APP_BASE_PATH = basePath;
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({ config: {
+      name: "Fieldops", slug: "fieldops", experiments: { tsconfigPaths: true },
+      ios: { bundleIdentifier: "existing.ios" }, android: { package: "existing.android" },
+    } } as Parameters<typeof buildConfig>[0]);
+    expect(output.experiments).toEqual({ tsconfigPaths: true, baseUrl: basePath?.replace(/\/+$/g, "") ?? "" });
+    expect(output.ios?.bundleIdentifier).toBe("existing.ios");
+    expect(output.android?.package).toBe("existing.android");
+  });
+
+  test.each(["fieldops", "//external", "/../console", "/fieldops?token=value"])("rejects non-path web prefix %s", async (basePath) => {
+    process.env.NEXT_PUBLIC_APP_BASE_PATH = basePath;
+    const buildConfig = await loadBuildConfig();
+    expect(() => buildConfig({ config: { name: "Fieldops", slug: "fieldops" } } as Parameters<typeof buildConfig>[0]))
+      .toThrow("NEXT_PUBLIC_APP_BASE_PATH must be an absolute path");
   });
 
   test("injects location plugin + ios background mode when missing", async () => {
@@ -54,6 +89,43 @@ describe("fieldops app config", () => {
       })
     );
     expect((output.ios?.infoPlist as any)?.UIBackgroundModes).toContain("location");
+  });
+
+  test("omits SDK 55 removed architecture and edge-to-edge flags", async () => {
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: {
+        name: "Fieldops",
+        slug: "fieldops",
+        version: "1.0.0",
+        plugins: [],
+        android: {},
+      },
+    } as any);
+
+    expect(output).not.toHaveProperty("newArchEnabled");
+    expect(output.android).not.toHaveProperty("edgeToEdgeEnabled");
+  });
+
+  test("keeps React Native transitive modules reachable with hierarchical lookup disabled", () => {
+    const repoRoot = path.resolve(__dirname, "../../..");
+    const script = [
+      "const path = require('path');",
+      "const config = require(path.resolve('apps/fieldops/metro.config.js'));",
+      "const projectRoot = path.resolve('apps/fieldops');",
+      "const reactNativeDir = path.dirname(require.resolve('react-native/package.json', { paths: [projectRoot] }));",
+      "const nestedNodeModules = path.resolve(reactNativeDir, 'node_modules');",
+      "if (!config.resolver.disableHierarchicalLookup) throw new Error('hierarchical lookup must stay disabled');",
+      "if (!config.resolver.nodeModulesPaths.includes(nestedNodeModules)) throw new Error('missing selected React Native nested node_modules');",
+    ].join("\n");
+
+    const result = spawnSync(process.execPath, ["-e", script], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
   });
 
   test("upgrades existing expo-location string plugin to configured tuple", async () => {
@@ -234,6 +306,21 @@ describe("fieldops app config", () => {
       "location",
       "remote-notification",
     ]);
+  });
+
+  test("consumes the container public key without privileged fallback credentials", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:58457";
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "container-public-anon-key";
+    process.env.SUPABASE_ANON_KEY = "";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "";
+    process.env.VITE_SUPABASE_ANON_KEY = "legacy-vite-key-not-consumed";
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: { name: "Fieldops", slug: "fieldops", version: "1.0.0", plugins: [], extra: {} },
+    } as any);
+    expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_URL).toBe("http://127.0.0.1:58457");
+    expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_ANON_KEY).toBe("container-public-anon-key");
+    expect(JSON.stringify(output.extra)).not.toContain("legacy-vite-key-not-consumed");
   });
 
   test("prefers SUPABASE fallback values when NEXT_PUBLIC values are placeholders", async () => {

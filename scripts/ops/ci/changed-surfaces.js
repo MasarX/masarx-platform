@@ -18,6 +18,7 @@ const fs = require('fs');
 const {
   computeMergeBaseDiffRange,
   resolveChangedFilesForRange,
+  resolveImpactSelectionForChangedFiles,
 } = require('./pr-change-classify');
 
 const {
@@ -181,6 +182,8 @@ async function main() {
   let diffRange = '';
   let unknown = false;
   let source = '';
+  let impactBaseRef = '';
+  let impactHeadRef = '';
 
   if (args.paths && args.paths.length) {
     changedFiles = args.paths;
@@ -197,6 +200,8 @@ async function main() {
       to: args.to,
       preferMergeBase: args.preferMergeBase,
     }) || extractDiffDescriptor({ eventName: process.env.GITHUB_EVENT_NAME || '', eventPayload: evt });
+    impactBaseRef = String(args.from || descriptor?.from || '').trim();
+    impactHeadRef = String(args.to || descriptor?.to || '').trim();
     const resolved = await resolveChangedFiles({ descriptor, explicitFrom: args.from, explicitTo: args.to });
     changedFiles = resolved.changedFiles;
     diffRange = resolved.diffRange;
@@ -204,17 +209,40 @@ async function main() {
     source = String(resolved.source || '') || (unknown ? 'unknown' : 'git');
   }
 
-  const impactPayload = resolveImpactPayloadForPaths(compiled, changedFiles, {
+  const impactPayload = resolveImpactSelectionForChangedFiles({
+    changedFiles,
+    impactMap: compiled,
     unknown,
-    failClosed,
-    stage: args.stage,
-  });
-  const classificationUnknown = Boolean(impactPayload.unknown);
-  const surfaceIds = Array.isArray(impactPayload.surfaceIds) ? impactPayload.surfaceIds : allSurfaceIds;
-  const requiredPreviewSurfaceIds = Array.isArray(impactPayload.requiredPreviewSurfaceIds)
-    ? impactPayload.requiredPreviewSurfaceIds
+    baseRef: impactBaseRef || args.from,
+    headRef: impactHeadRef || args.to,
+  }).impactSelection;
+  const stagedImpactPayload = args.stage
+    ? resolveImpactPayloadForPaths(compiled, impactPayload.classificationFiles || changedFiles, {
+        unknown: Boolean(impactPayload.unknown),
+        failClosed,
+        stage: args.stage,
+        forceFull: Boolean(impactPayload.fallbackToFull),
+        forceReason: impactPayload.fallbackReason || '',
+      })
+    : impactPayload;
+  const finalImpactPayload = args.stage
+    ? {
+        ...stagedImpactPayload,
+        changedFiles,
+        classificationFiles: impactPayload.classificationFiles || changedFiles,
+        lockfileSelectionMode: impactPayload.lockfileSelectionMode,
+        lockfileSelectionReason: impactPayload.lockfileSelectionReason,
+        lockfileOwnerWorkspaces: impactPayload.lockfileOwnerWorkspaces,
+        lockfileChangedPackageKeys: impactPayload.lockfileChangedPackageKeys,
+        lockfileNativePackageKeys: impactPayload.lockfileNativePackageKeys,
+      }
+    : impactPayload;
+  const classificationUnknown = Boolean(finalImpactPayload.unknown);
+  const surfaceIds = Array.isArray(finalImpactPayload.surfaceIds) ? finalImpactPayload.surfaceIds : allSurfaceIds;
+  const requiredPreviewSurfaceIds = Array.isArray(finalImpactPayload.requiredPreviewSurfaceIds)
+    ? finalImpactPayload.requiredPreviewSurfaceIds
     : resolveRequiredPreviewSurfaceIds({ compiled, surfaceIds });
-  const unmatched = Array.isArray(impactPayload.unmatchedFiles) ? impactPayload.unmatchedFiles : [];
+  const unmatched = Array.isArray(finalImpactPayload.unmatchedFiles) ? finalImpactPayload.unmatchedFiles : [];
 
   const out = {
     surface_ids: surfaceIds.join(','),
@@ -227,15 +255,21 @@ async function main() {
     unknown: classificationUnknown ? '1' : '0',
     change_source: source || (classificationUnknown ? 'unknown' : 'git'),
     unmatched_count: String(unmatched.length),
-    impact_surfaces: impactPayload.impactSurfaces.join(','),
-    required_suites: impactPayload.requiredSuites.join(','),
-    selection_confidence: impactPayload.selectionConfidence,
-    fallback_to_full: impactPayload.fallbackToFull ? '1' : '0',
-    fallback_reason: impactPayload.fallbackReason || '',
-    selected_suites_json: JSON.stringify(impactPayload.selectedSuites || []),
-    skipped_suites_json: JSON.stringify(impactPayload.skippedSuites || []),
-    unmatched_files_json: JSON.stringify(impactPayload.unmatchedFiles || []),
-    impacted_surface_ids_json: JSON.stringify(impactPayload.impactedSurfaceIds || []),
+    impact_surfaces: finalImpactPayload.impactSurfaces.join(','),
+    required_suites: finalImpactPayload.requiredSuites.join(','),
+    selection_confidence: finalImpactPayload.selectionConfidence,
+    fallback_to_full: finalImpactPayload.fallbackToFull ? '1' : '0',
+    fallback_reason: finalImpactPayload.fallbackReason || '',
+    selected_suites_json: JSON.stringify(finalImpactPayload.selectedSuites || []),
+    skipped_suites_json: JSON.stringify(finalImpactPayload.skippedSuites || []),
+    unmatched_files_json: JSON.stringify(finalImpactPayload.unmatchedFiles || []),
+    impacted_surface_ids_json: JSON.stringify(finalImpactPayload.impactedSurfaceIds || []),
+    classification_files_json: JSON.stringify(finalImpactPayload.classificationFiles || changedFiles),
+    lockfile_selection_mode: finalImpactPayload.lockfileSelectionMode || 'not_applicable',
+    lockfile_selection_reason: finalImpactPayload.lockfileSelectionReason || '',
+    lockfile_owner_workspaces_json: JSON.stringify(finalImpactPayload.lockfileOwnerWorkspaces || []),
+    lockfile_changed_package_keys_json: JSON.stringify(finalImpactPayload.lockfileChangedPackageKeys || []),
+    lockfile_native_package_keys_json: JSON.stringify(finalImpactPayload.lockfileNativePackageKeys || []),
   };
 
   if (fmt === 'github-output') writeGithubOutput(out);

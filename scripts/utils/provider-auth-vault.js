@@ -111,6 +111,7 @@ async function upsertProviderAuthCredentialsVault(
         FROM public.provider_auth_configs
         WHERE provider_id = $1::uuid
           AND auth_type = $2::text
+          AND NOT marketplace_explicit_only
         ORDER BY created_at DESC
         LIMIT 1
       `,

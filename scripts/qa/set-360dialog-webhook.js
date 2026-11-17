@@ -92,6 +92,7 @@ async function getDialog360Config(client, organizationId) {
      JOIN provider_auth_configs pac ON pac.provider_id = p.id
      WHERE p.organization_id = $1::uuid
        AND p.name = 'dialog360_whatsapp'
+       AND NOT pac.marketplace_explicit_only
      ORDER BY pac.created_at DESC
      LIMIT 1`,
     [organizationId]

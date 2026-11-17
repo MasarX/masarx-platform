@@ -1,15 +1,564 @@
 {
-  "generatedAt": "2026-02-16T21:56:25.367Z",
+  "generatedAt": "2026-10-17T20:06:43.692Z",
+  "measurement": "uncompressed-route-referenced-js-css",
+  "description": "Deduplicated raw bytes of route-referenced JS/CSS and shared runtime, including deferred references; not compressed transfer bytes or actual first-load requests. Modern App Router graphs exclude nomodule-only polyfills.",
   "apps": {
     "console": {
       "root": "apps/console",
-      "defaultMaxBytes": 0,
-      "routes": []
+      "defaultMaxBytes": 3097722,
+      "routes": [
+        {
+          "route": "/",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/access",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/access-policy",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/access-policy/request",
+          "maxBytes": 1828500,
+          "currentBytes": 1662272
+        },
+        {
+          "route": "/catalog/service-offerings",
+          "maxBytes": 1824470,
+          "currentBytes": 1658609
+        },
+        {
+          "route": "/commands",
+          "maxBytes": 1821128,
+          "currentBytes": 1655570
+        },
+        {
+          "route": "/commands/shipments.create",
+          "maxBytes": 1828632,
+          "currentBytes": 1662392
+        },
+        {
+          "route": "/imports/new",
+          "maxBytes": 2814656,
+          "currentBytes": 2558778
+        },
+        {
+          "route": "/integrations/mappings/new",
+          "maxBytes": 2814656,
+          "currentBytes": 2558778
+        },
+        {
+          "route": "/integrations/plugins",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/integrations/plugins/[plugin_id]",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/integrations/plugins/[plugin_id]/versions/[version]",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/integrations/plugins/new",
+          "maxBytes": 2814656,
+          "currentBytes": 2558778
+        },
+        {
+          "route": "/integrations/provider-auth",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/labels/designer",
+          "maxBytes": 1862405,
+          "currentBytes": 1693095
+        },
+        {
+          "route": "/marketplace/contracts",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/marketplace/contracts/[id]",
+          "maxBytes": 1819989,
+          "currentBytes": 1654535
+        },
+        {
+          "route": "/marketplace/disputes",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/marketplace/participants",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/marketplace/reviews",
+          "maxBytes": 2083146,
+          "currentBytes": 1893769
+        },
+        {
+          "route": "/marketplace/settlements",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/observability/domain-events",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/observability/domain-events/[event_id]",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/observability/trace/[correlation_id]",
+          "maxBytes": 1991546,
+          "currentBytes": 1810496
+        },
+        {
+          "route": "/observability/workflow-runs",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/observability/workflow-runs/[run_id]",
+          "maxBytes": 2028117,
+          "currentBytes": 1843742
+        },
+        {
+          "route": "/onboarding/readiness",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/operations/customer-shipment-changes",
+          "maxBytes": 2084758,
+          "currentBytes": 1895234
+        },
+        {
+          "route": "/operations/exceptions",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/operations/exceptions/[resource]",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/operations/pickups/failures",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/operations/pickups/requests",
+          "maxBytes": 1820405,
+          "currentBytes": 1654913
+        },
+        {
+          "route": "/operations/pickups/waves",
+          "maxBytes": 1820405,
+          "currentBytes": 1654913
+        },
+        {
+          "route": "/operations/public-tracking-requests",
+          "maxBytes": 2084758,
+          "currentBytes": 1895234
+        },
+        {
+          "route": "/operations/routes",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/operations/routes/[resource]",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/operations/shipment-amend-cancel",
+          "maxBytes": 1830874,
+          "currentBytes": 1664430
+        },
+        {
+          "route": "/organizations/readiness",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/organizations/requests",
+          "maxBytes": 2083806,
+          "currentBytes": 1894369
+        },
+        {
+          "route": "/resources/[resource]",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/resources/shipments",
+          "maxBytes": 2081946,
+          "currentBytes": 1892678
+        },
+        {
+          "route": "/resources/shipments/new",
+          "maxBytes": 1828632,
+          "currentBytes": 1662392
+        },
+        {
+          "route": "/resources/warehouse_transfers",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/resources/warehouse_transfers/new",
+          "maxBytes": 1827285,
+          "currentBytes": 1661168
+        },
+        {
+          "route": "/security/audit-logs",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/security/token-rotation",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/settings/request",
+          "maxBytes": 1827580,
+          "currentBytes": 1661436
+        },
+        {
+          "route": "/signin",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/workflows/bindings",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/workflows/overlaps",
+          "maxBytes": 1817436,
+          "currentBytes": 1652214
+        },
+        {
+          "route": "/workflows/queue",
+          "maxBytes": 2083387,
+          "currentBytes": 1893988
+        },
+        {
+          "route": "/workflows/queue/[task_id]",
+          "maxBytes": 2083387,
+          "currentBytes": 1893988
+        },
+        {
+          "route": "/workflows/requests",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/workflows/runs/[run_id]",
+          "maxBytes": 2029571,
+          "currentBytes": 1845064
+        },
+        {
+          "route": "/workflows/tasks",
+          "maxBytes": 2083387,
+          "currentBytes": 1893988
+        },
+        {
+          "route": "/workflows/templates",
+          "maxBytes": 2080165,
+          "currentBytes": 1891059
+        },
+        {
+          "route": "/workflows/templates/[template_id]",
+          "maxBytes": 2816110,
+          "currentBytes": 2560100
+        },
+        {
+          "route": "/workflows/templates/new",
+          "maxBytes": 1823859,
+          "currentBytes": 1658053
+        }
+      ]
     },
     "portal": {
       "root": "apps/portal",
-      "defaultMaxBytes": 0,
-      "routes": []
+      "defaultMaxBytes": 3097967,
+      "routes": [
+        {
+          "route": "/",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/access",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/access-policy",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/access-policy/request",
+          "maxBytes": 1828722,
+          "currentBytes": 1662474
+        },
+        {
+          "route": "/commands",
+          "maxBytes": 1821350,
+          "currentBytes": 1655772
+        },
+        {
+          "route": "/commands/shipments.create",
+          "maxBytes": 1828854,
+          "currentBytes": 1662594
+        },
+        {
+          "route": "/help",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/imports/new",
+          "maxBytes": 2814878,
+          "currentBytes": 2558980
+        },
+        {
+          "route": "/integrations/mappings",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/integrations/mappings/new",
+          "maxBytes": 2814878,
+          "currentBytes": 2558980
+        },
+        {
+          "route": "/labels/designer",
+          "maxBytes": 1862627,
+          "currentBytes": 1693297
+        },
+        {
+          "route": "/marketplace/contracts",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/marketplace/contracts/[id]",
+          "maxBytes": 1820211,
+          "currentBytes": 1654737
+        },
+        {
+          "route": "/marketplace/network",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/marketplace/private-pools",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/marketplace/provider",
+          "maxBytes": 1820211,
+          "currentBytes": 1654737
+        },
+        {
+          "route": "/marketplace/requests",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/marketplace/requests/[id]",
+          "maxBytes": 1820211,
+          "currentBytes": 1654737
+        },
+        {
+          "route": "/marketplace/requests/new",
+          "maxBytes": 1831546,
+          "currentBytes": 1665041
+        },
+        {
+          "route": "/marketplace/settlements",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/marketplace/work-packages",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/observability/trace/[correlation_id]",
+          "maxBytes": 1991771,
+          "currentBytes": 1810700
+        },
+        {
+          "route": "/onboarding/readiness",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/operations/customer-shipment-changes",
+          "maxBytes": 2084980,
+          "currentBytes": 1895436
+        },
+        {
+          "route": "/operations/exceptions",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/operations/exceptions/[resource]",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/operations/pickups/failures",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/operations/pickups/requests",
+          "maxBytes": 1820627,
+          "currentBytes": 1655115
+        },
+        {
+          "route": "/operations/pickups/waves",
+          "maxBytes": 1820627,
+          "currentBytes": 1655115
+        },
+        {
+          "route": "/operations/public-tracking-requests",
+          "maxBytes": 2084980,
+          "currentBytes": 1895436
+        },
+        {
+          "route": "/operations/routes",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/operations/routes/[resource]",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/operations/shipment-amend-cancel",
+          "maxBytes": 1831096,
+          "currentBytes": 1664632
+        },
+        {
+          "route": "/resources/[resource]",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/resources/shipments",
+          "maxBytes": 2082169,
+          "currentBytes": 1892880
+        },
+        {
+          "route": "/resources/shipments/new",
+          "maxBytes": 1828854,
+          "currentBytes": 1662594
+        },
+        {
+          "route": "/resources/warehouse_transfers",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/resources/warehouse_transfers/new",
+          "maxBytes": 1827508,
+          "currentBytes": 1661370
+        },
+        {
+          "route": "/settings/readiness",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/settings/request",
+          "maxBytes": 1827802,
+          "currentBytes": 1661638
+        },
+        {
+          "route": "/signin",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/tracking",
+          "maxBytes": 2082169,
+          "currentBytes": 1892880
+        },
+        {
+          "route": "/workflows/bindings",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/workflows/overlaps",
+          "maxBytes": 1817658,
+          "currentBytes": 1652416
+        },
+        {
+          "route": "/workflows/queue",
+          "maxBytes": 2083610,
+          "currentBytes": 1894190
+        },
+        {
+          "route": "/workflows/queue/[task_id]",
+          "maxBytes": 2083610,
+          "currentBytes": 1894190
+        },
+        {
+          "route": "/workflows/runs/[run_id]",
+          "maxBytes": 2029793,
+          "currentBytes": 1845266
+        },
+        {
+          "route": "/workflows/tasks",
+          "maxBytes": 2083610,
+          "currentBytes": 1894190
+        },
+        {
+          "route": "/workflows/templates",
+          "maxBytes": 2080388,
+          "currentBytes": 1891261
+        },
+        {
+          "route": "/workflows/templates/[template_id]",
+          "maxBytes": 2816333,
+          "currentBytes": 2560302
+        },
+        {
+          "route": "/workflows/templates/new",
+          "maxBytes": 1824081,
+          "currentBytes": 1658255
+        }
+      ]
     }
   }
 }

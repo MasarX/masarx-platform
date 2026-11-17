@@ -108,7 +108,7 @@ function buildSupabaseCliAsset({
     downloadUrl = `https://github.com/supabase/cli/releases/download/v${normalizedVersion}/${assetName}`;
   }
 
-  return {
+  const asset = {
     version: normalizedVersion,
     platform: normalizedPlatform,
     arch: normalizedArch,
@@ -116,6 +116,11 @@ function buildSupabaseCliAsset({
     binary_name: binaryName,
     download_url: downloadUrl,
   };
+  if (normalizedVersion === '2.116.0' && normalizedPlatform === 'linux' && normalizedArch === 'amd64') {
+    asset.mirror_url = 'http://192.0.2.1:8080/github.com/supabase/cli/releases/download/v2.116.0/supabase_linux_amd64.tar.gz';
+    asset.sha256 = '5b3031cb297d51b25be4c284e4c852254460ec722ec221d3b81b07d55acfd158';
+  }
+  return asset;
 }
 
 function writeGithubOutput(values) {

@@ -8,6 +8,7 @@ import { EmptyState } from "./empty-state";
 import { PageContainer } from "./page-container";
 import { PageHeader } from "./page-header";
 import { Section } from "./section";
+import { loadPickupLookups } from "./pickup-lookups";
 import { PickupMutationForm } from "./pickup-operations-form";
 import type { PickupMutationFormState } from "./pickup-operations-form";
 import {
@@ -26,6 +27,8 @@ import {
   recordValue,
   resolvePickupScopeFilters,
   renderFieldPairs,
+  loadPickupAssignmentOptions,
+  pickupRelationshipLabel,
 } from "./pickup-page-shared";
 import { buildTestId } from "./test-ids";
 import { extractCapabilityDeniedKey, formatUiError } from "./utils";
@@ -72,6 +75,16 @@ export async function PickupWavesPage({
   });
   const capabilities = Array.isArray(me?.capabilities) ? me.capabilities : [];
   const canWrite = hasCapability(resolveCapabilitySet(capabilities), "fleet.write");
+  const [assignmentChoices, lookups] = canWrite
+    ? await Promise.all([
+        loadPickupAssignmentOptions(stringValue(me?.org?.id) ?? ""),
+        loadPickupLookups(me, "wave"),
+      ])
+    : [
+        { options: { branches: [], drivers: [], vehicles: [], partners: [] }, error: null },
+        { options: { branches: [], drivers: [], vehicles: [], shipments: [] }, error: null },
+      ];
+  const shipmentOptions = lookups.options.shipments;
   const activePath = `${appBasePath}/operations/pickups/waves`;
 
   async function submitPickupWave(
@@ -80,7 +93,7 @@ export async function PickupWavesPage({
   ): Promise<PickupMutationFormState> {
     "use server";
     const ui = createUiServerClient();
-    const shipmentIds = parsePickupIdList(String(formData.get("shipment_ids") ?? ""));
+    const shipmentIds = parsePickupIdList(formData.getAll("shipment_ids").map(String).join(","));
     if (shipmentIds.length === 0) {
       return { status: "error", message: "Provide at least one shipment id." };
     }
@@ -174,10 +187,18 @@ export async function PickupWavesPage({
       return { status: "error", message: metadataResult.message };
     }
 
+    const selectedPartnerId = String(formData.get("partner_id") ?? "").trim();
+    const selectedPartner = String(formData.get("organization_id") ?? "").trim() === stringValue(me?.org?.id)
+      ? assignmentChoices.options.partners.find((option) => option.value === selectedPartnerId) : undefined;
     const payload = {
       route_run_id: String(formData.get("route_run_id") ?? "").trim(),
       organization_id: String(formData.get("organization_id") ?? "").trim(),
-      partner: normalizeObject(partnerResult.value) ?? {},
+      partner: selectedPartnerId
+        ? { ...(normalizeObject(partnerResult.value) ?? {}), partner_id: selectedPartnerId,
+            ...(selectedPartner ? { partner_name: selectedPartner.label } : {}) }
+        : normalizeObject(partnerResult.value) ?? {},
+      reassignment_reason:
+        String(formData.get("reassignment_reason") ?? "").trim() || null,
       idempotency_key: String(formData.get("idempotency_key") ?? "").trim() || null,
       metadata: {
         source: `${appKey}.operations.pickups.waves.assign.partner`,
@@ -236,6 +257,10 @@ export async function PickupWavesPage({
       />
 
       <Section title="Create pickup wave" collapsible={false}>
+        {assignmentChoices.error || lookups.error ? (
+          <ContextNotice title="Pickup choices unavailable" action="Reload to retry; existing assignments are unchanged."
+            detail={assignmentChoices.error || lookups.error || ""} testId={`${testIdPrefix}-lookup-error`} />
+        ) : null}
         {!canWrite ? (
           <ContextNotice
             title="Pickup wave creation is blocked"
@@ -260,19 +285,19 @@ export async function PickupWavesPage({
                 defaultValue: stringValue(me?.org?.id) ?? "",
                 required: true,
               },
-              { name: "branch_id", label: "Branch ID", kind: "text" },
+              { name: "branch_id", label: "Branch", kind: "relation", options: lookups.options.branches.length ? lookups.options.branches : assignmentChoices.options.branches },
               { name: "planned_date", label: "Planned date", kind: "date" },
               { name: "planned_start_at", label: "Planned start", kind: "datetime-local" },
               { name: "planned_end_at", label: "Planned end", kind: "datetime-local" },
               {
                 name: "shipment_ids",
-                label: "Shipment IDs",
-                kind: "textarea",
+                label: "Pickup shipments",
+                kind: "relation",
+                mode: "multi",
+                options: shipmentOptions,
                 layout: "full",
-                rows: 4,
                 required: true,
-                placeholder: "UUID-1, UUID-2",
-                helpText: "Comma, newline, or JSON array input is accepted.",
+                placeholder: "Search tracking number or reference",
               },
               { name: "idempotency_key", label: "Idempotency key", kind: "text", placeholder: "Optional retry key" },
               {
@@ -302,9 +327,14 @@ export async function PickupWavesPage({
         ) : (
           <div className="grid gap-4">
             {wavesResult.rows.map((row) => {
+              const rowChoices = stringValue(row.organization_id) === stringValue(me?.org?.id)
+                ? assignmentChoices.options : { branches: [], drivers: [], vehicles: [], partners: [] };
               const routeRunId = stringValue(row.route_run_id) ?? "route-run";
               const shipments = Array.isArray(row.shipments) ? row.shipments : [];
               const pickupAssignment = recordValue(row.pickup_assignment);
+              const pickupAssignmentMode = stringValue(pickupAssignment?.assignment_mode);
+              const hasPickupOwnership =
+                pickupAssignmentMode === "internal_driver" || pickupAssignmentMode === "partner";
               return (
                 <article
                   key={routeRunId}
@@ -333,8 +363,9 @@ export async function PickupWavesPage({
                   </div>
                   <div className="mt-3">
                     {renderFieldPairs([
-                      ["Driver", stringValue(row.driver_user_id)],
-                      ["Vehicle", stringValue(row.vehicle_id)],
+                      ["Branch", stringValue(row.branch_label)],
+                      ["Driver", stringValue(row.driver_label) ?? pickupRelationshipLabel(assignmentChoices.options.drivers, row.driver_user_id)],
+                      ["Vehicle", stringValue(row.vehicle_label) ?? pickupRelationshipLabel(assignmentChoices.options.vehicles, row.vehicle_id)],
                       ["Pickup stops", row.pickup_stop_count],
                       ["Total boxes", row.total_box_count],
                     ])}
@@ -381,15 +412,17 @@ export async function PickupWavesPage({
                         },
                         {
                           name: "driver_user_id",
-                          label: "Driver user ID",
-                          kind: "text",
-                          placeholder: "UUID",
+                          label: "Driver",
+                          kind: "relation",
+                          options: lookups.options.drivers.length ? lookups.options.drivers : rowChoices.drivers,
+                          defaultValue: stringValue(row.driver_user_id) ?? "",
                         },
                         {
                           name: "vehicle_id",
-                          label: "Vehicle ID",
-                          kind: "text",
-                          placeholder: "UUID",
+                          label: "Vehicle",
+                          kind: "relation",
+                          options: lookups.options.vehicles.length ? lookups.options.vehicles : rowChoices.vehicles,
+                          defaultValue: stringValue(row.vehicle_id) ?? "",
                         },
                         { name: "idempotency_key", label: "Idempotency key", kind: "text" },
                         {
@@ -407,13 +440,25 @@ export async function PickupWavesPage({
                       submitLabel="Assign partner"
                       pendingLabel="Assigning..."
                       testIdPrefix={`${testIdPrefix}-assign-partner-${routeRunId}`}
-                      helperText="Partner assignment accepts a dynamic partner object with partner_id or partner_name."
+                      helperText="Partner assignment accepts a dynamic partner object. Replacing existing ownership requires a reason and uses the governed route handoff."
                       fields={[
                         { name: "route_run_id", kind: "hidden", defaultValue: routeRunId },
                         {
                           name: "organization_id",
                           kind: "hidden",
                           defaultValue: stringValue(row.organization_id) ?? "",
+                        },
+                        {
+                          name: "partner_id", label: "Known private-pool partner", kind: "relation",
+                          options: [
+                            ...rowChoices.partners,
+                            ...(stringValue(recordValue(pickupAssignment?.partner)?.partner_id) &&
+                              !rowChoices.partners.some((option) => option.value === stringValue(recordValue(pickupAssignment?.partner)?.partner_id))
+                              ? [{ value: stringValue(recordValue(pickupAssignment?.partner)?.partner_id)!,
+                                  label: stringValue(recordValue(pickupAssignment?.partner)?.partner_name) || stringValue(recordValue(pickupAssignment?.partner)?.partner_id)! }]
+                              : []),
+                          ],
+                          helpText: "Optional: select an approved partner, or keep using the dynamic partner details below.",
                         },
                         {
                           name: "partner_json",
@@ -430,6 +475,17 @@ export async function PickupWavesPage({
                             null,
                             2,
                           ),
+                        },
+                        {
+                          name: "reassignment_reason",
+                          label: "Reassignment reason",
+                          kind: "textarea",
+                          layout: "full",
+                          rows: 2,
+                          required: hasPickupOwnership,
+                          helpText: hasPickupOwnership
+                            ? "Required to replace the current driver or partner assignment."
+                            : "Optional for the first assignment.",
                         },
                         { name: "idempotency_key", label: "Idempotency key", kind: "text" },
                         {

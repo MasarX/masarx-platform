@@ -3,26 +3,28 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "next dev --webpack -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "@masarx/api": "0.1.0",
     "@masarx/auth": "0.1.0",
     "@masarx/config": "0.1.0",
     "@masarx/ui": "0.1.0",
+    "@next/env": "16.4.2",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.98.0",
+    "@swc/helpers": "0.5.23",
     "@tanstack/react-query": "^5.90.21",
-    "next": "^16.2.3",
-    "next-intl": "^4.8.3",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "next": "16.4.2",
+    "next-intl": "4.9.2",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "react-hook-form": "^7.51.4",
-    "zod": "^3.23.8"
+    "zod": "4.6.7"
   },
   "engines": {
     "node": ">=20.19.0 <21 || >=22"

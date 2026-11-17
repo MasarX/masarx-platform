@@ -1,45 +1,43 @@
 import { type Page } from "@playwright/test";
+import { buildNavigationStorageKey } from "../../../packages/ui/src/navigation-preferences";
+import { findSupabaseSessionIdentity } from "./auth-session";
 
 type NavigationStateSnapshot = {
   key: string;
   value: unknown;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
-}
-
 export async function waitForCollapsedSectionPersisted(params: {
   page: Page;
   appKey: string;
+  email: string;
   collapseKey: string;
   timeoutMs?: number;
 }) {
-  const { page, appKey, collapseKey, timeoutMs = 10_000 } = params;
-  const prefix = `masarx:navigation:v2:${appKey}:`;
+  const { page, appKey, email, collapseKey, timeoutMs = 10_000 } = params;
+  const identity = findSupabaseSessionIdentity(await page.context().cookies(), email);
+  if (!identity?.userId) {
+    throw new Error("Expected authenticated navigation preference user is missing.");
+  }
+  const storageKey = buildNavigationStorageKey(appKey, identity.userId);
   await page.waitForFunction(
-    ({ prefix: prefixArg, collapseKey: collapseKeyArg }) => {
-      const keys = Object.keys(window.localStorage).filter((key) =>
-        key.startsWith(prefixArg)
-      );
-      return keys.some((key) => {
-        const raw = window.localStorage.getItem(key);
-        if (!raw) return false;
-        try {
-          const parsed = JSON.parse(raw) as unknown;
-          if (!parsed || typeof parsed !== "object") return false;
-          const value = parsed as Record<string, unknown>;
-          const collapsedSections = value.collapsedSections;
-          return (
-            Array.isArray(collapsedSections) &&
-            collapsedSections.includes(collapseKeyArg)
-          );
-        } catch {
-          return false;
-        }
-      });
+    ({ storageKey: storageKeyArg, collapseKey: collapseKeyArg }) => {
+      const raw = window.localStorage.getItem(storageKeyArg);
+      if (!raw) return false;
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!parsed || typeof parsed !== "object") return false;
+        const value = parsed as Record<string, unknown>;
+        const collapsedSections = value.collapsedSections;
+        return (
+          Array.isArray(collapsedSections) &&
+          collapsedSections.includes(collapseKeyArg)
+        );
+      } catch {
+        return false;
+      }
     },
-    { prefix: prefix, collapseKey },
+    { storageKey, collapseKey },
     { timeout: timeoutMs }
   );
 }

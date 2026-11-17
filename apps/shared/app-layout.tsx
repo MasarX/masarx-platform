@@ -11,6 +11,7 @@ import {
   PageContainer,
   hasCapability,
   resolveCapabilitySet,
+  localizeNavigation,
 } from "@masarx/ui";
 import {
   ErrorBoundary,
@@ -74,6 +75,10 @@ export type DefaultPageProps = {
   searchParams?: unknown;
 };
 
+type DynamicPageProps<P> = {
+  [K in keyof P]: K extends "params" | "searchParams" ? Promise<P[K]> : P[K];
+};
+
 export type AppContextWithConfig = AppContext & {
   config: NonNullable<AppContext["config"]>;
 };
@@ -100,12 +105,12 @@ function isThenable<T = unknown>(value: unknown): value is Promise<T> {
   return typeof (value as { then?: unknown }).then === "function";
 }
 
-async function unwrapDynamicPageProps<P>(props: P) {
-  if (!props || typeof props !== "object") return props;
+async function unwrapDynamicPageProps<P>(props: DynamicPageProps<P>): Promise<P> {
+  if (!props || typeof props !== "object") return props as P;
   const candidate = props as DefaultPageProps;
   const shouldUnwrapParams = isThenable(candidate.params);
   const shouldUnwrapSearchParams = isThenable(candidate.searchParams);
-  if (!shouldUnwrapParams && !shouldUnwrapSearchParams) return props;
+  if (!shouldUnwrapParams && !shouldUnwrapSearchParams) return props as P;
 
   const resolvedParams = shouldUnwrapParams ? await candidate.params : candidate.params;
   const resolvedSearchParams = shouldUnwrapSearchParams
@@ -133,7 +138,7 @@ export function createConfigGuardedPage<P = DefaultPageProps>({
   authMode?: AppAuthMode;
   testIdPrefix?: string;
 }) {
-  return async function ConfigGuardedPage(props: P) {
+  return async function ConfigGuardedPage(props: DynamicPageProps<P>) {
     const context = await loadContext();
     if (!context.config) {
       return null;
@@ -154,7 +159,7 @@ export function createConfigGuardedPage<P = DefaultPageProps>({
             authMethods={context.config.authMethods}
             callbackPath={callbackPath}
             appBasePath={safeBasePath ?? undefined}
-            forceAuth
+            forceAuth={!viewContext.contextError}
           >
             <></>
           </AuthGate>
@@ -218,9 +223,16 @@ export async function createAppMetadata({
     appBasePath,
     loadMessages,
   });
+  const safeBasePath = resolveSafeAppBasePath(appBasePath);
+  const iconHref = safeBasePath ? `${safeBasePath}/icon.svg` : "/icon.svg";
   return {
     title: appName,
     description: t("app.subtitle"),
+    icons: {
+      icon: [{ url: iconHref, type: "image/svg+xml" }],
+      shortcut: [{ url: iconHref, type: "image/svg+xml" }],
+      apple: [{ url: iconHref, type: "image/svg+xml" }],
+    },
   };
 }
 
@@ -256,15 +268,23 @@ export async function createAppViewContext({
   let sessionUserId: string | null = null;
 
   try {
-    const { user, accessToken: verifiedAccessToken } =
+    const { user, accessToken: verifiedAccessToken, error } =
       await getVerifiedAccessToken({ allowCookieSet: false });
     hasSession = Boolean(user && verifiedAccessToken);
     accessToken = verifiedAccessToken ?? null;
     sessionUserId = decodeJwtSubject(accessToken);
-  } catch (_error) {
+    contextError =
+      !user &&
+      !verifiedAccessToken &&
+      error instanceof Error &&
+      error.message === "verified_access_token_required"
+        ? null
+        : error;
+  } catch (error) {
     hasSession = false;
     accessToken = null;
     sessionUserId = null;
+    contextError = error;
   }
 
   if (hasSession) {
@@ -277,7 +297,7 @@ export async function createAppViewContext({
           })
         : await ui.context(appKey);
       me = context.me;
-      navigation = normalizeNavigation(context.navigation);
+      navigation = localizeNavigation(normalizeNavigation(context.navigation), baseContext.locale);
     } catch (error) {
       contextError = error;
     }
@@ -465,11 +485,14 @@ export function createRootLayout({
                         >
                           <div className="space-y-4">
                             <NavigationNext
+                              organizationId={viewContext.me?.org?.id ?? null}
                               appKey={appKey}
                               basePath={navBasePath}
                               userId={viewContext.me?.user?.id ?? viewContext.sessionUserId ?? null}
                               sections={viewContext.navigation.sections}
                               capabilities={viewContext.me?.capabilities ?? null}
+                              scopeType={viewContext.me?.access_scope?.scope_type ?? null}
+                              scopeId={viewContext.me?.access_scope?.scope_id ?? null}
                             />
                             <ThemeToggle />
                           </div>
@@ -478,6 +501,8 @@ export function createRootLayout({
                     >
                       <PageContainer>
                         <ContextStrip
+                          organizationId={viewContext.me?.org?.id ?? null}
+                          userId={viewContext.me?.user?.id ?? viewContext.sessionUserId ?? null}
                           userLabel={viewContext.me?.user?.email ?? viewContext.me?.user?.id ?? null}
                           orgLabel={viewContext.me?.org?.name ?? viewContext.me?.org?.id ?? null}
                           scopeLabel={normalizedScopeDisplay}
@@ -510,7 +535,11 @@ export function createRootLayout({
                             : "/auth/callback"
                         }
                         appBasePath={viewContext.safeBasePath ?? undefined}
-                        forceAuth={authMode === "required" && !viewContext.hasSession}
+                        forceAuth={
+                          authMode === "required" &&
+                          !viewContext.hasSession &&
+                          !viewContext.contextError
+                        }
                       >
                         <ErrorBoundary
                           fallback={

@@ -16,6 +16,8 @@ type LoadOptions = {
   hasStartedThrows?: boolean;
   taskDefined?: boolean;
   taskManagerAvailable?: boolean;
+  foregroundCanAskAgain?: boolean;
+  backgroundCanAskAgain?: boolean;
   foregroundStatus?: "granted" | "denied";
   foregroundRequestStatus?: "granted" | "denied";
   backgroundStatus?: "granted" | "denied";
@@ -152,9 +154,9 @@ function loadBackgroundModule(options: LoadOptions = {}) {
     }),
     stopLocationUpdatesAsync: jest.fn(async () => undefined),
     startLocationUpdatesAsync: jest.fn(async () => undefined),
-    getForegroundPermissionsAsync: jest.fn(async () => ({ status: foregroundStatus })),
+    getForegroundPermissionsAsync: jest.fn(async () => ({ status: foregroundStatus, canAskAgain: options.foregroundCanAskAgain })),
     requestForegroundPermissionsAsync: jest.fn(async () => ({ status: foregroundRequestStatus })),
-    getBackgroundPermissionsAsync: jest.fn(async () => ({ status: backgroundStatus })),
+    getBackgroundPermissionsAsync: jest.fn(async () => ({ status: backgroundStatus, canAskAgain: options.backgroundCanAskAgain })),
     requestBackgroundPermissionsAsync: jest.fn(async () => ({ status: backgroundRequestStatus })),
   };
 
@@ -166,6 +168,14 @@ function loadBackgroundModule(options: LoadOptions = {}) {
     isAvailableAsync: jest.fn(async () => taskManagerAvailable),
   };
 
+  const readbackValues = new Map<string, unknown>();
+  const readbackStore = {
+    init: async () => {},
+    get: async (key: string) => readbackValues.get(key) ?? null,
+    set: async (key: string, value: unknown) => { readbackValues.set(key, value); },
+    remove: async (key: string) => { readbackValues.delete(key); },
+    clear: async () => { const count = readbackValues.size; readbackValues.clear(); return count; },
+  };
   const outboxStoreMock = {
     countPending: jest.fn(async () => pendingCount),
   };
@@ -186,7 +196,14 @@ function loadBackgroundModule(options: LoadOptions = {}) {
   const clientMock = {
     auth: {
       getSession: getSessionMock,
+      getUser: jest.fn(async () => ({data:{user:{id:"u-1"}},error:null})),
     },
+    schema: jest.fn(() => ({
+      rpc: jest.fn(() => ({
+        abortSignal: () => Promise.resolve({data:{user:{id:"u-1"},org:{id:"tenant"},
+          access_scope:{scope_type:"tenant",scope_id:"tenant"}},error:null}),
+      })),
+    })),
   };
 
   const createMobileClientMock = jest.fn((config: any) => {
@@ -200,6 +217,7 @@ function loadBackgroundModule(options: LoadOptions = {}) {
 
   const addMobileNetworkFailureBreadcrumbMock = jest.fn();
   const logDebugFailureMock = jest.fn();
+  const logMobileRequestTraceMock = jest.fn();
   const resolveJwtRoleMock = jest.fn(() => (privilegedRole ? "service_role" : "authenticated"));
   const isJwtPrivilegedRoleMock = jest.fn(() => privilegedRole);
   const resolveExpoExtraMock = jest.fn((value: unknown) => (value as Record<string, unknown>) || {});
@@ -239,6 +257,7 @@ function loadBackgroundModule(options: LoadOptions = {}) {
   }), { virtual: true });
   jest.doMock("@masarx/mobile-core/sqlite", () => ({
     createSqliteOutboxStore: jest.fn(() => outboxStoreMock),
+    createSqliteKeyValueStore: jest.fn(() => readbackStore),
   }), { virtual: true });
   jest.doMock("@masarx/mobile-core", () => ({
     createOutbox: jest.fn(() => outboxMock),
@@ -253,6 +272,7 @@ function loadBackgroundModule(options: LoadOptions = {}) {
   }));
   jest.doMock("../../../apps/fieldops/src/mobile-debug", () => ({
     logDebugFailure: logDebugFailureMock,
+    logMobileRequestTrace: logMobileRequestTraceMock,
   }));
   jest.doMock("../../../apps/fieldops/src/mobile-jwt", () => ({
     resolveJwtRole: resolveJwtRoleMock,
@@ -280,9 +300,11 @@ function loadBackgroundModule(options: LoadOptions = {}) {
     outboxMock,
     outboxStoreMock,
     getTaskHandler: () => taskHandler,
+    readbackStore,
     createMobileClientMock,
     addMobileNetworkFailureBreadcrumbMock,
     logDebugFailureMock,
+    logMobileRequestTraceMock,
     isRetriableNetworkErrorMock,
     isRetriableSupabaseErrorMock,
     releaseSyncGate: () => {
@@ -292,6 +314,37 @@ function loadBackgroundModule(options: LoadOptions = {}) {
 }
 
 describe("mobile background location", () => {
+  test("actual background drainer refuses unbound departure intents", async () => {
+    const loaded = loadBackgroundModule({ taskDefined: false, sessionSequence: [true], pendingCount: 1 });
+    seedTrackingEnabledState(loaded.secureState);
+    await loaded.getTaskHandler()?.({ data: { locations: [makeLocation()] } });
+    const calls = loaded.outboxMock.sync.mock.calls as unknown as Array<[(rpc: string, args: unknown) => Promise<unknown>]>;
+    expect(calls).toHaveLength(1);
+    await expect(calls[0][0]("ui_confirm_route_run_departure_v1", { p_input: {} }))
+      .rejects.toThrow("Invalid departure request fields");
+  });
+  test("actual background task wires canonical completion success observation", async () => {
+    const loaded = loadBackgroundModule({ taskDefined: false, sessionSequence: [true], pendingCount: 1 });
+    const evidence = require("../../../apps/fieldops/src/mobile-completion-readback-storage");
+    // Durable receipt left by an earlier process; this module is genuinely pristine/cold.
+    await loaded.readbackStore.set("fieldops:completion-readback:completion", {
+      version: 1, queueId: "completion", actor: "u-1", scope: JSON.stringify(["tenant", "tenant", "tenant"]),
+      taskId: "task", actionKey: "tasks.complete",
+      expected: { action: "tasks.complete", taskId: "task", routeStopId: "stop", completionKind: "full" },
+    });
+    await loaded.readbackStore.set("fieldops:completion-readback-target:" + JSON.stringify(["u-1", JSON.stringify(["tenant", "tenant", "tenant"]), "task"]), "completion");
+    seedTrackingEnabledState(loaded.secureState);
+    await loaded.getTaskHandler()?.({ data: { locations: [makeLocation()] } });
+    const calls = loaded.outboxMock.sync.mock.calls as unknown as Array<[unknown, { onSucceeded: (entry: unknown, result: unknown) => Promise<void> }]>;
+    expect(calls).toHaveLength(1);
+    expect(typeof calls[0][1].onSucceeded).toBe("function");
+    await calls[0][1].onSucceeded({ id: "completion", args: { p_action_key: "tasks.complete" } }, {
+      status: "task_transitioned", action_key: "tasks.complete", resource_key: "tasks",
+      items: [{ task_id: "task", task_event_id: "event", to_status: "completed", status_reason: null }],
+    });
+    expect((await evidence.latestCompletionReadback(loaded.readbackStore, "u-1", JSON.stringify(["tenant", "tenant", "tenant"]), "task")).accepted.taskEventId).toBe("event");
+    await evidence.invalidateCompletionReadbacks();
+  });
   afterEach(() => {
     resetBackgroundLocationLocalMocks();
   });
@@ -575,6 +628,7 @@ describe("mobile background location", () => {
     expect(loaded.isRetriableNetworkErrorMock).toHaveBeenCalled();
     expect(loaded.isRetriableSupabaseErrorMock).not.toHaveBeenCalled();
 
+    expect(loaded.createMobileClientMock.lastConfig?.onRequestTrace).toBe(loaded.logMobileRequestTraceMock);
     const onRequestFailure = loaded.createMobileClientMock.lastConfig?.onRequestFailure as ((value: Record<string, unknown>) => void);
     onRequestFailure?.({
       method: "GET",
@@ -750,5 +804,70 @@ describe("mobile background location", () => {
       error: null,
     });
     expect(noPending.outboxMock.sync).not.toHaveBeenCalled();
+  });
+});
+
+describe("permanently denied background permissions", () => {
+  afterEach(resetBackgroundLocationLocalMocks);
+  test.each(["foreground", "background"] as const)("does not request %s again", async (kind) => {
+    const { mod, locationMock } = loadBackgroundModule({
+      [`${kind}Status`]: "denied",
+      [`${kind}CanAskAgain`]: false,
+    });
+    expect(await mod.syncBackgroundLocationTracking({ deviceId: "device-1", policy: createPolicy() }))
+      .toEqual({ running: false, reason: `${kind}_permission_denied` });
+    expect(locationMock.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+    expect(locationMock.requestBackgroundPermissionsAsync).not.toHaveBeenCalled();
+    expect(locationMock.startLocationUpdatesAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe("background lifecycle ordering", () => {
+  afterEach(resetBackgroundLocationLocalMocks);
+
+  test.each(["policy-disable", "device-change"] as const)("new %s wins over deferred permission", async (change) => {
+    const { mod, locationMock, secureState } = loadBackgroundModule({ running: true });
+    let release!: (value: { status: "granted" }) => void;
+    let entered!: () => void;
+    const pending = new Promise<{ status: "granted" }>(resolve => { release = resolve; });
+    const requested = new Promise<void>(resolve => { entered = resolve; });
+    locationMock.getForegroundPermissionsAsync
+      .mockResolvedValueOnce({ status: "denied", canAskAgain: true })
+      .mockResolvedValue({ status: "granted", canAskAgain: true });
+    locationMock.requestForegroundPermissionsAsync.mockImplementationOnce(() => { entered(); return pending; });
+    const old = mod.syncBackgroundLocationTracking({ deviceId: "old-device", policy: createPolicy() });
+    await requested;
+
+    const latestDevice = change === "device-change" ? "new-device" : "old-device";
+    await mod.syncBackgroundLocationTracking({
+      deviceId: latestDevice,
+      policy: createPolicy({ enabled: change !== "policy-disable" }),
+    });
+    const startsBeforeOldSettles = locationMock.startLocationUpdatesAsync.mock.calls.length;
+    expect(locationMock.stopLocationUpdatesAsync).toHaveBeenCalled();
+    release({ status: "granted" });
+    await old;
+
+    expect(locationMock.startLocationUpdatesAsync).toHaveBeenCalledTimes(startsBeforeOldSettles);
+    expect(JSON.parse(secureState.get(BACKGROUND_STATE_KEY)!)).toMatchObject({
+      deviceId: latestDevice,
+      trackingEnabled: change !== "policy-disable",
+    });
+  });
+
+  test("disable serializes after an already in-flight native start", async () => {
+    const { mod, locationMock, secureState } = loadBackgroundModule({ runningSequence: [false, true] });
+    let release!: () => void;
+    let entered!: () => void;
+    const pending = new Promise<undefined>(resolve => { release = () => resolve(undefined); });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    locationMock.startLocationUpdatesAsync.mockImplementationOnce(() => { entered(); return pending; });
+    const old = mod.syncBackgroundLocationTracking({ deviceId: "device-1", policy: createPolicy() });
+    await started;
+    const disabled = mod.syncBackgroundLocationTracking({ deviceId: "device-1", policy: createPolicy({ enabled: false }) });
+    release();
+    await Promise.all([old, disabled]);
+    expect(locationMock.stopLocationUpdatesAsync).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(secureState.get(BACKGROUND_STATE_KEY)!)).toMatchObject({ trackingEnabled: false });
   });
 });

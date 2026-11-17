@@ -1,7 +1,7 @@
 const path = require("path");
 const { pathsToModuleNameMapper } = require("ts-jest");
 const tsconfig = require("../../tsconfig.base.json");
-const { WORKTREE_JEST_ROOTS, WORKTREE_TEMP_IGNORE_PATTERNS } = require("./jest.shared");
+const { WORKTREE_JEST_ROOTS, WORKTREE_TEMP_IGNORE_PATTERNS, JEST_CACHE_DIRECTORY } = require("./jest.shared");
 
 const tsPaths =
   (tsconfig &&
@@ -13,6 +13,7 @@ const tsPaths =
 
 module.exports = {
   rootDir: path.join(__dirname, "..", ".."),
+  ...(JEST_CACHE_DIRECTORY ? { cacheDirectory: JEST_CACHE_DIRECTORY } : {}),
   roots: WORKTREE_JEST_ROOTS,
   testEnvironment: "jsdom",
   testTimeout: 15000,
@@ -23,11 +24,19 @@ module.exports = {
   transform: {
     "^.+\\.(ts|tsx)$": [
       "ts-jest",
-      { tsconfig: "<rootDir>/tsconfig.jest.json" }
+      {
+        tsconfig: "<rootDir>/tsconfig.jest.json",
+        astTransformers: { before: ["<rootDir>/config/tooling/jest.worker-url-transformer.js"] }
+      }
     ]
   },
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],
   moduleNameMapper: {
+    // DOM-rendered workspace components must share the renderer's React instance.
+    "^react$": "<rootDir>/node_modules/react",
+    "^react/(.*)$": "<rootDir>/node_modules/react/$1",
+    "^react-dom$": "<rootDir>/node_modules/react-dom",
+    "^react-dom/(.*)$": "<rootDir>/node_modules/react-dom/$1",
     "\\.(css|less|scss|sass)$": "<rootDir>/tests/ui/__mocks__/style.ts",
     "^next/cache$": "<rootDir>/tests/ui/__mocks__/next-cache.ts",
     "^next-intl$": "<rootDir>/tests/ui/__mocks__/next-intl.tsx",

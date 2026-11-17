@@ -1,13 +1,18 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 const { spawnSync } = require('child_process');
+const {
+  assertCommandDidNotTimeOut,
+  runBoundedSyncCommand,
+} = require('./bounded-sync-command');
 
 function main() {
   // Best-effort GC: attempt to stop any Compose projects that match masarx-wk-
   // Since Supabase CLI manages the compose project internally, we rely on docker commands.
   // This is intentionally conservative to avoid disrupting non-MasarX projects.
-  const ps = spawnSync('docker', ['ps', '--format', '{{.Names}}'], { encoding: 'utf8' });
-  if (ps.status !== 0) {
+  const ps = runBoundedSyncCommand('docker', ['ps', '--format', '{{.Names}}']);
+  assertCommandDidNotTimeOut(ps, '[workspace/local-gc] Docker inventory probe');
+  if (!ps.ok) {
     console.warn('[workspace/local-gc] docker ps failed; skipping');
     return;
   }

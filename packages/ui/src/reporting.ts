@@ -1,5 +1,6 @@
 "use client";
-import { formatUiError, sanitizeUiError } from "./utils";
+import { sanitizeUiError } from "./utils";
+import { isUuidValue } from "./resource-utils";
 
 type RequestId = string;
 
@@ -55,7 +56,7 @@ const sanitizeMetaValue = (value: unknown): string | number | boolean | null => 
     return value;
   }
   if (typeof value === "string") {
-    return sanitizeUiError(value) ?? value;
+    return isUuidValue(value) ? value : sanitizeUiError(value) ?? value;
   }
   return "[redacted]";
 };
@@ -209,7 +210,7 @@ export function reportClientError(
   error: Error,
   options?: { context?: string; digest?: string; requestId?: string }
 ) {
-  const safeMessage = formatUiError(error, "Unexpected error");
+  const safeMessage = sanitizeUiError(error.message) ?? "Unexpected error";
   reportUiEvent({
     type: "ui.error",
     timestamp: new Date().toISOString(),

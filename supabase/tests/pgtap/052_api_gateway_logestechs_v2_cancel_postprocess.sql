@@ -388,7 +388,10 @@ BEGIN
     1,
     now(),
     '77770000-0000-0000-0000-000000000052',
-    jsonb_build_object('api_gateway_request_id', v_create_request_id),
+    jsonb_build_object(
+      'api_gateway_request_id', v_create_request_id,
+      'api_gateway_route_id', v_create_route_id
+    ),
     now(),
     v_step_id
   )
@@ -487,6 +490,7 @@ BEGIN
     '77770000-0000-0000-0000-000000000053',
     jsonb_strip_nulls(jsonb_build_object(
       'api_gateway_request_id', v_cancel_request_id,
+      'api_gateway_route_id', v_cancel_route_id,
       'api_gateway_path_params', jsonb_build_object(
         'companyId', '362',
         'shipmentId', '12345652'

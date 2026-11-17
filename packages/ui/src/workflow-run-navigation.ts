@@ -80,9 +80,9 @@ export function resolveWorkflowRunDestination(args: {
   const record = getObject(args.result);
   const runId = extractWorkflowRunId(record);
   if (!runId) return null;
+  if (args.appBasePath !== "" && !args.appBasePath.trim()) return null;
   const base = resolveSafeAppBasePath(args.appBasePath);
   if (base === null) return null;
-  if (!base) return null;
   const correlationId = extractWorkflowRunCorrelation(record);
   const runHref = `${base}/workflows/runs/${encodeURIComponent(runId)}`;
   if (!correlationId) return runHref;

@@ -1,7 +1,7 @@
 -- Test Suite: Settings approval workflow wiring (manual review + apply)
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(6);
+SELECT plan(7);
 SET search_path TO public, pgtap, extensions;
 
 SELECT ok((SELECT EXISTS(SELECT 1 FROM operation_handlers WHERE handler_key = 'manual_review_wait' AND is_active = TRUE)),
@@ -33,6 +33,11 @@ SELECT ok((SELECT EXISTS(
      AND handler_key = 'settings_apply'
 )), 'settings_change_approval_v1 has settings_apply step');
 
+SELECT is(public.resolve_domain_event_policy(NULL,'settings_change.requested'),
+  (SELECT CASE WHEN value ? 'events' THEN value->'events'->'settings_change.requested'
+    ELSE value->'settings_change.requested' END FROM
+    (SELECT public.resolve_settings('domain_event_policy','tenant',NULL) AS value) p),
+  'effective routing respects configured nested or flat policy without overriding upgrade choices');
 SELECT * FROM finish();
 
 ROLLBACK;

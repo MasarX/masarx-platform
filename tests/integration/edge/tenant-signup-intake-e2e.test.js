@@ -23,6 +23,7 @@ function buildFnUrl(fnName) {
 function resolveAllowedOriginCandidate() {
   return buildAllowedOriginCandidates({
     allowlistValues: [
+      process.env.PUBLIC_EDGE_LOCAL_CORS_ALLOW_ORIGINS,
       process.env.TENANT_SIGNUP_CORS_ALLOW_ORIGINS,
       process.env.MARKETING_CORS_ALLOW_ORIGINS,
       process.env.LANDING_CORS_ALLOW_ORIGINS,
@@ -114,9 +115,7 @@ runIfEdge('tenant-signup-intake edge (E2E)', () => {
         }),
     );
     if (!allowedOrigin) {
-      expect(attempts.length).toBeGreaterThan(0);
-      expect(attempts.every((attempt) => attempt.status === 403)).toBe(true);
-      return;
+      throw new Error('No allowed configured origin was positively exercised: ' + JSON.stringify(attempts));
     }
 
     const { status, body } = await postSignup({

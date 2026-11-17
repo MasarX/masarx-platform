@@ -56,20 +56,20 @@ test.describe("console observability flows", () => {
     test.skip(!user, "No console demo user available.");
     const consoleBasePath = getConsoleBasePath();
 
-    await ensureSignedIn({
+    await test.step("Authenticate Console", () => ensureSignedIn({
       page,
       basePath: consoleBasePath,
       authTestId: "console-auth-required",
       email: user.email,
       password: demoContext.password ?? "",
       scopeType: user.scope_type ?? null,
-    });
+    }));
 
-    const context = await fetchUserContext({
+    const context = await test.step("Read observability role context", () => fetchUserContext({
       app: "console",
       email: user.email,
       password: demoContext.password ?? "",
-    });
+    }));
     const resources = Array.isArray(context.readRegistry?.resources)
       ? context.readRegistry?.resources
       : [];
@@ -77,19 +77,19 @@ test.describe("console observability flows", () => {
     const domainResource = resources.find((entry) => entry?.key === "domain_events") ?? null;
 
     if (workflowResource) {
-      const sample = await fetchResourceSampleId({
+      const sample = await test.step("Read workflow-run sample", () => fetchResourceSampleId({
         resourceKey: "workflow_runs",
         idColumn: workflowResource.id_column ?? null,
         email: user.email,
         password: demoContext.password ?? "",
-      });
+      }));
       if (sample.id) {
-        await openConsoleObservabilityRoute({
+        await test.step("Open workflow-run detail", () => openConsoleObservabilityRoute({
           page,
           url: `${consoleBasePath}/observability/workflow-runs/${encodeURIComponent(sample.id)}`,
           email: user.email,
           password: demoContext.password ?? "",
-        });
+        }));
         await expect(
           page.locator(
             '[data-testid="console-workflow-run-ready"], [data-testid="console-workflow-run-error"], [data-testid="console-auth-required"]'
@@ -105,19 +105,19 @@ test.describe("console observability flows", () => {
     }
 
     if (domainResource) {
-      const eventSample = await fetchResourceSampleId({
+      const eventSample = await test.step("Read domain-event sample", () => fetchResourceSampleId({
         resourceKey: "domain_events",
         idColumn: domainResource.id_column ?? null,
         email: user.email,
         password: demoContext.password ?? "",
-      });
+      }));
       if (eventSample.id) {
-        await openConsoleObservabilityRoute({
+        await test.step("Open domain-event detail", () => openConsoleObservabilityRoute({
           page,
           url: `${consoleBasePath}/observability/domain-events/${encodeURIComponent(eventSample.id)}`,
           email: user.email,
           password: demoContext.password ?? "",
-        });
+        }));
         await expect(
           page.locator(
             '[data-testid="console-domain-event-ready"], [data-testid="console-domain-event-error"], [data-testid="console-auth-required"]'
@@ -126,19 +126,19 @@ test.describe("console observability flows", () => {
         await assertNavigationPerformance(page);
       }
 
-      const correlation = await fetchResourceSampleField({
+      const correlation = await test.step("Read trace correlation sample", () => fetchResourceSampleField({
         resourceKey: "domain_events",
         fieldCandidates: ["correlation_id", "triggered_by_request_id", "request_id"],
         email: user.email,
         password: demoContext.password ?? "",
-      });
+      }));
       if (correlation.value) {
-        await openConsoleObservabilityRoute({
+        await test.step("Open trace detail", () => openConsoleObservabilityRoute({
           page,
           url: `${consoleBasePath}/observability/trace/${encodeURIComponent(correlation.value)}`,
           email: user.email,
           password: demoContext.password ?? "",
-        });
+        }));
         await expect(
           page.locator(
             '[data-testid="console-trace-ready"], [data-testid="console-trace-error"], [data-testid="console-auth-required"]'

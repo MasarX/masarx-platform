@@ -2,6 +2,17 @@ const fs = require('fs');
 const path = require('path');
 
 describe('verify-cloud-core', () => {
+  test('keeps code checks without plan paperwork', () => {
+    const file = path.join(__dirname, '..', '..', '..', 'scripts', 'ops', 'verify-cloud-core.js');
+    const body = fs.readFileSync(file, 'utf8');
+
+    expect(body).not.toMatch(/plan-lint|lint:plans|PLAN_LINT/);
+    expect(body).toContain("label: 'lint:objectives'");
+    expect(body).toContain("label: 'typecheck:fieldops'");
+    expect(body).toContain("label: 'test:unit'");
+    expect(body).toContain('...plannedCloudTestSteps');
+  });
+
   test('runs db:push before validate:configs (fresh preview projects)', () => {
     const file = path.join(__dirname, '..', '..', '..', 'scripts', 'ops', 'verify-cloud-core.js');
     const body = fs.readFileSync(file, 'utf8');

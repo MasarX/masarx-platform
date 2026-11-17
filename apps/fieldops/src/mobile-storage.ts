@@ -6,39 +6,50 @@ import type { MobileStorageAdapter } from "@masarx/auth/mobile";
 export function createFieldOpsStorage(): MobileStorageAdapter {
   if (Platform.OS === "web") {
     const memory = new Map<string, string>();
-    const hasLocalStorage =
-      typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+    let memoryOnly = typeof window === "undefined";
+
+    function browserStorage(): Storage | null {
+      if (memoryOnly) return null;
+      try {
+        return window.localStorage ?? null;
+      } catch {
+        memoryOnly = true;
+        return null;
+      }
+    }
 
     return {
       getItem: async (key) => {
         try {
-          if (hasLocalStorage) return window.localStorage.getItem(key);
+          const storage = browserStorage();
+          if (storage) {
+            const value = storage.getItem(key);
+            if (value === null) memory.delete(key);
+            else memory.set(key, value);
+            return value;
+          }
         } catch {
-          // Fall back to in-memory storage.
+          memoryOnly = true;
         }
         return memory.get(key) ?? null;
       },
       setItem: async (key, value) => {
-        try {
-          if (hasLocalStorage) {
-            window.localStorage.setItem(key, value);
-            return;
-          }
-        } catch {
-          // Fall back to in-memory storage.
-        }
         memory.set(key, value);
+        try {
+          browserStorage()?.setItem(key, value);
+        } catch {
+          // Keep this adapter in memory mode so stale persisted tokens cannot
+          // replace a refreshed session after a failed write.
+          memoryOnly = true;
+        }
       },
       removeItem: async (key) => {
-        try {
-          if (hasLocalStorage) {
-            window.localStorage.removeItem(key);
-            return;
-          }
-        } catch {
-          // Fall back to in-memory storage.
-        }
         memory.delete(key);
+        try {
+          browserStorage()?.removeItem(key);
+        } catch {
+          memoryOnly = true;
+        }
       },
     };
   }

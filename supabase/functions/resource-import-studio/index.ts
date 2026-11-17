@@ -1,6 +1,14 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
-import * as xlsx from "npm:xlsx@^0.18.5";
+import JSZip from "npm:jszip@3.10.1";
+import { ImportLimitError, matrixToTabularData, assertMatrixDimensions, assertRequestSize, assertUploadSize, assertXlsxExpansionLimits, parseBoundedCsv } from "./upload-limits.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { Workbook, type Worksheet } from "./_vendor/exceljs.mjs";
+import {
+  ImportPreparationError,
+  loadImportPreparation,
+  processStartedImport,
+  validateImportFile,
+  validateImportWorkbook,
+} from "./preparation.ts";
 import {
   buildErrorEnvelope,
   extractToken,
@@ -71,7 +79,6 @@ const resolveUploadMimeType = (fileName: string, rawMimeType: string | null | un
   if (explicit) return explicit;
   const extension = fileName.split(".").pop()?.trim().toLowerCase() || "";
   if (extension === "csv") return "text/csv";
-  if (extension === "xls") return "application/vnd.ms-excel";
   if (extension === "xlsx") {
     return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   }
@@ -88,18 +95,54 @@ const normalizeHeader = (value: unknown) =>
 const buildHeaderFingerprint = (headers: string[]) =>
   headers.map(normalizeHeader).filter(Boolean).sort().join("|");
 
-const detectVisibleSheets = (workbook: {
-  SheetNames?: string[];
-  Workbook?: { Sheets?: Array<{ Hidden?: number }> };
-}) => {
-  const sheetNames = Array.isArray(workbook?.SheetNames) ? workbook.SheetNames : [];
-  const visibility = Array.isArray(workbook?.Workbook?.Sheets) ? workbook.Workbook.Sheets : [];
-  const visible = sheetNames.filter((name, index) => {
-    const state = visibility[index];
-    return !state || state.Hidden !== 1;
-  });
+const normalizeTabularCellValue = (value: unknown) => {
+  if (value == null) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  return String(value);
+};
+
+const detectVisibleSheets = (workbook: Workbook) => {
+  const sheetNames = workbook.worksheets
+    .map((sheet) => String(sheet?.name ?? "").trim())
+    .filter(Boolean);
+  const visible = workbook.worksheets
+    .filter((sheet) => String(sheet?.state || "visible") === "visible")
+    .map((sheet) => String(sheet?.name ?? "").trim())
+    .filter(Boolean);
   return visible.length > 0 ? visible : sheetNames;
 };
+
+const worksheetToMatrix = (worksheet: Worksheet | null | undefined) => {
+  const matrix: Array<Array<unknown>> = [];
+  if (!worksheet) return matrix;
+
+  const rowCount = Math.max(0, Number(worksheet.rowCount || 0));
+  const worksheetColumnCount = Math.max(0, Number(worksheet.columnCount || 0));
+  assertMatrixDimensions(rowCount, worksheetColumnCount);
+  for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
+    const row = worksheet.getRow(rowIndex);
+    const columnCount = Math.max(
+      worksheetColumnCount,
+      Number(row?.actualCellCount || 0),
+      Number(row?.cellCount || 0),
+    );
+    assertMatrixDimensions(rowCount, columnCount);
+    const values: Array<unknown> = [];
+    for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
+      const cell = row.getCell(columnIndex);
+      values.push(cell.text || normalizeTabularCellValue(cell.value));
+    }
+    while (values.length > 0 && normalizeTabularCellValue(values[values.length - 1]) === "") {
+      values.pop();
+    }
+    if (values.length > 0) matrix.push(values);
+  }
+  return matrix;
+};
+
 
 const firstRecord = <T extends JsonRecord = JsonRecord>(value: unknown): T | null => {
   if (Array.isArray(value)) {
@@ -220,6 +263,7 @@ const createServiceClient = (req: Request) => {
 const resolveAction = async (
   req: Request,
 ): Promise<{ action: ResourceImportAction | null; body: JsonRecord; form: FormData | null }> => {
+  assertRequestSize(req.headers);
   const contentType = req.headers.get("content-type") || "";
   if (contentType.includes("multipart/form-data") || contentType.includes("application/x-www-form-urlencoded")) {
     const form = await req.formData();
@@ -257,23 +301,6 @@ const loadCurrentUiContext = async (userClient: ReturnType<typeof createClient>)
     organizationId: maybeUuid(org?.id) ?? null,
     userId: maybeUuid(user?.id) ?? null,
   };
-};
-
-const resolveImportScopeContext = async (
-  userClient: ReturnType<typeof createClient>,
-  resourceKey: string,
-  scopeContext: JsonRecord,
-) => {
-  const { data, error } = await userClient.rpc("ui_resolve_import_scope_context_v1", {
-    p_payload: {
-      resource_key: resourceKey,
-      scope_context: scopeContext,
-    },
-  });
-  if (error) {
-    throw new Error(error.message || "Unable to resolve import scope.");
-  }
-  return asRecord(data) ?? {};
 };
 
 const hydrateArtifacts = async (
@@ -332,41 +359,51 @@ const parseJsonObject = (value: FormDataEntryValue | null, fieldName: string): J
 };
 
 const parseWorkbookFromFile = async (file: File, requestedSheet?: string | null) => {
+  assertUploadSize(file);
+  const extension = file.name.split(".").pop()?.trim().toLowerCase() || "csv";
+  if (extension === "xls") {
+    throw new Error("Legacy .xls workbooks are not supported. Upload a CSV or XLSX file.");
+  }
+
+  if (extension === "csv") {
+    const parsed = matrixToTabularData(await parseBoundedCsv(file));
+    return {
+      headers: parsed.headers,
+      rows: parsed.rows,
+      selectedSheet: "Sheet1",
+      visibleSheets: ["Sheet1"],
+    };
+  }
+
+  if (extension !== "xlsx") {
+    throw new Error("Unsupported file format. Upload a CSV or XLSX file.");
+  }
+
   const bytes = await file.arrayBuffer();
-  const workbook = xlsx.read(bytes, { type: "array", raw: false, cellDates: true });
+  await assertXlsxExpansionLimits(bytes, JSZip);
+  const workbook = new Workbook();
+  await workbook.xlsx.load(bytes);
   const visibleSheets = detectVisibleSheets(workbook);
   const selectedSheet =
     (requestedSheet && visibleSheets.includes(requestedSheet) ? requestedSheet : null) ??
     visibleSheets[0] ??
-    workbook.SheetNames?.[0] ??
+    workbook.worksheets[0]?.name ??
     "";
 
   if (!selectedSheet) {
     throw new Error("The uploaded workbook did not contain a readable worksheet.");
   }
 
-  const sheet = workbook.Sheets[selectedSheet];
+  const sheet = workbook.getWorksheet(selectedSheet);
   if (!sheet) {
     throw new Error(`Worksheet ${selectedSheet} could not be read.`);
   }
 
-  const matrix = xlsx.utils.sheet_to_json<Array<unknown>>(sheet, {
-    header: 1,
-    defval: "",
-    blankrows: false,
-  });
-  const headerRow = Array.isArray(matrix[0]) ? matrix[0] : [];
-  const headers = headerRow
-    .map((entry) => String(entry ?? "").trim())
-    .filter((entry) => entry.length > 0);
-  const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: "",
-    raw: false,
-  });
+  const parsed = matrixToTabularData(worksheetToMatrix(sheet));
 
   return {
-    headers,
-    rows,
+    headers: parsed.headers,
+    rows: parsed.rows,
     selectedSheet,
     visibleSheets,
   };
@@ -420,14 +457,15 @@ const uploadSourceArtifact = async (params: {
   }
 
   const artifact = firstRecord<{ artifact_id?: string | null }>(data);
+  if (!artifact?.artifact_id) throw new Error("The uploaded source artifact could not be registered.");
   return {
-    artifactId: artifact?.artifact_id ?? null,
+    artifactId: artifact.artifact_id,
     storageKey,
     fileName: safeName,
   };
 };
 
-serve(async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const origin = req.headers.get("origin");
   const correlationId = resolveCorrelationId(req);
   const trace = resolveTraceContext(req, correlationId);
@@ -457,7 +495,7 @@ serve(async (req: Request): Promise<Response> => {
     actionPayload = await resolveAction(req);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid request body";
-    return errorResponse(400, "invalid_body", message, origin, correlationId, trace);
+    return errorResponse(error instanceof ImportLimitError ? error.status : 400, error instanceof ImportLimitError ? error.code : "invalid_body", message, origin, correlationId, trace);
   }
 
   if (!actionPayload.action) {
@@ -483,8 +521,10 @@ serve(async (req: Request): Promise<Response> => {
 
       const file = form.get("file");
       if (!(file instanceof File)) {
-        return errorResponse(400, "missing_file", "Prepare requires a CSV/XLS/XLSX file.", origin, correlationId, trace);
+        return errorResponse(400, "missing_file", "Prepare requires a CSV or XLSX file.", origin, correlationId, trace);
       }
+      assertUploadSize(file);
+      validateImportFile(file);
 
       const resourceKey = asString(form.get("resource_key"));
       if (!resourceKey) {
@@ -497,12 +537,13 @@ serve(async (req: Request): Promise<Response> => {
       const rules = parseRules(form.get("rules"));
       const rowOverrides = parseJsonObject(form.get("row_overrides"), "row_overrides");
       const scopeContext = parseJsonObject(form.get("scope_context"), "scope_context");
+      const preparation = await loadImportPreparation(userClient, resourceKey, scopeContext);
+      validateImportFile(file, preparation.maxFileBytes);
       const workbook = await parseWorkbookFromFile(file, requestedSheet);
       const headerFingerprint = buildHeaderFingerprint(workbook.headers);
-
-      const scopeResolution = await resolveImportScopeContext(userClient, resourceKey, scopeContext);
-      const organizationId = maybeUuid(scopeResolution.organization_id);
-      const normalizedScopeContext = asRecord(scopeResolution.scope_context) ?? scopeContext;
+      const resolvedRules = validateImportWorkbook(preparation, workbook, headerFingerprint, rules, ruleSource);
+      const organizationId = maybeUuid(preparation.organizationId);
+      const normalizedScopeContext = preparation.scopeContext;
       const { userId } = await loadCurrentUiContext(userClient);
       if (!organizationId) {
         return errorResponse(
@@ -538,7 +579,7 @@ serve(async (req: Request): Promise<Response> => {
           header_fingerprint: headerFingerprint,
           headers: workbook.headers,
           rows: workbook.rows,
-          rules,
+          rules: resolvedRules,
           row_overrides: rowOverrides,
           scope_context: normalizedScopeContext,
         },
@@ -571,7 +612,7 @@ serve(async (req: Request): Promise<Response> => {
         return errorResponse(400, "invalid_run_id", "Start requires a valid run_id.", origin, correlationId, trace);
       }
 
-      const { data, error } = await userClient.rpc("ui_start_tabular_import_run_v1", {
+      const { error } = await userClient.rpc("ui_start_tabular_import_run_v1", {
         p_run_id: runId,
         p_save_profile: asRecord(actionPayload.body.save_profile) ?? null,
       });
@@ -579,13 +620,16 @@ serve(async (req: Request): Promise<Response> => {
         throw new Error(error.message || "Failed to start import run");
       }
 
-      const run = await hydrateArtifacts(serviceClient, asRecord(data) ?? {});
+      const processed = await processStartedImport(userClient, serviceClient, runId,
+        readEnv("RESOURCE_IMPORT_START_PROCESS_BATCH_SIZE", ["TABULAR_IMPORT_START_PROCESS_BATCH_SIZE"]));
+      const run = await hydrateArtifacts(serviceClient, processed.run);
       return jsonResponse(
         200,
         {
           ok: true,
           run,
           report: asRecord(run.report) ?? null,
+          processing_warning: processed.processingWarning,
           correlation_id: correlationId,
         },
         origin,
@@ -615,9 +659,14 @@ serve(async (req: Request): Promise<Response> => {
     if (!runId) {
       return errorResponse(400, "invalid_run_id", "Cancel requires a valid run_id.", origin, correlationId, trace);
     }
+    const reason = asString(actionPayload.body.reason);
+    if (!reason) {
+      return errorResponse(400, "missing_cancel_reason", "Cancel requires a non-empty operator reason.", origin, correlationId, trace);
+    }
 
     const { data, error } = await userClient.rpc("ui_cancel_tabular_import_run_v1", {
       p_run_id: runId,
+      p_cancel_reason: reason,
     });
     if (error) {
       throw new Error(error.message || "Failed to cancel import run");
@@ -644,6 +693,10 @@ serve(async (req: Request): Promise<Response> => {
       action: actionPayload.action,
       error: message,
     });
-    return errorResponse(400, "resource_import_failed", message, origin, correlationId, trace);
+    return errorResponse(
+      (error instanceof ImportPreparationError || error instanceof ImportLimitError) ? error.status : 400,
+      (error instanceof ImportPreparationError || error instanceof ImportLimitError) ? error.code : "resource_import_failed",
+      message, origin, correlationId, trace,
+    );
   }
 });

@@ -59,7 +59,12 @@ test.describe("portal action stats matrix", () => {
             : [];
           const navResourceKeys = collectAccessibleResourceKeys({
             sections,
+            readRegistry: context.readRegistry,
             capabilities: context.me?.capabilities ?? null,
+            scopeType: context.me?.access_scope?.scope_type ?? null,
+            scopeId: context.me?.access_scope?.scope_id ?? null,
+            organizationId:
+              (context.me as { org?: { id?: string | null } | null } | null)?.org?.id ?? null,
           });
           const enforceReadyForResources = navResourceKeys.length > 0;
           let resourceKeys = navResourceKeys;

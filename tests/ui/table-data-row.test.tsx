@@ -124,6 +124,29 @@ describe("TableDataRow", () => {
     expect(screen.queryByRole("button", { name: "Edit ID" })).not.toBeInTheDocument();
   });
 
+  it("keeps editable-cell clicks in the table when rows link to details", () => {
+    const onNavigate = jest.fn();
+    const startInlineEdit = jest.fn();
+    renderRow({
+      baseHref: "/console/resources/shipments",
+      editConfigByKey: new Map([
+        ["tracking_number", { editType: "text", options: [] }],
+      ]),
+      onNavigate,
+      startInlineEdit,
+    });
+
+    const cell = screen.getByText("TESTB-62836344").closest("td");
+    expect(cell).not.toBeNull();
+    expect(cell).toHaveAttribute("data-editable", "true");
+
+    fireEvent.click(cell!);
+    fireEvent.doubleClick(cell!);
+
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(startInlineEdit).toHaveBeenCalledTimes(1);
+  });
+
   it("opens linked detail panels instead of inline expand when row href exists", () => {
     const onNavigate = jest.fn();
     const toggleRowExpanded = jest.fn();

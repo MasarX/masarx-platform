@@ -1,4 +1,4 @@
-import { type Route, expect, test } from "@playwright/test";
+import { type Locator, type Route, expect, test } from "@playwright/test";
 
 import {
   captureFullPage,
@@ -15,22 +15,24 @@ import {
 
 const captureEnabled = isCaptureEnabled();
 const evidenceGroup = "landing-contact-interaction-states";
-const evidencePath = (...segments: string[]) => resolveEvidencePath(evidenceGroup, ...segments);
-
 type ContactResponse = (route: Route) => Promise<void>;
 
-async function setContactInputs(page) {
-  await page.locator('input[name="email"]').fill("lhwmilsokgrmgptsihhuoljt@example.invalid");
-  await page.locator('input[name="company"]').fill("MasarX");
-  await page.locator('input[name="role"]').fill("Ops");
-  await page.locator('textarea[name="notes"]').fill("Test lead.");
+async function setContactInputs(form: Locator) {
+  await form.locator('input[name="full_name"]').fill("Landing Reviewer");
+  await form.locator('input[name="email"]').fill("lhwmilsokgrmgptsihhuoljt@example.invalid");
+  await form.locator('input[name="organization_name"]').fill("MasarX");
+  await form.locator('input[name="role"]').fill("Ops");
+  await form.locator('textarea[name="notes"]').fill("Test lead.");
 }
 
 test.describe("landing contact interaction capture", () => {
   test.skip(!captureEnabled, "Set E2E_CAPTURE_UI=1 to enable screenshot capture.");
 
   test("captures validating, submitting, success, error, and dedupe states", async ({ page }) => {
-    await patchRuntimeConfig(page, { contactEndpoint: LANDING_CONTACT_ENDPOINT_MOCK });
+    await patchRuntimeConfig(page, {
+      contactEndpoint: LANDING_CONTACT_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
 
     let activeContactResponse: ContactResponse = routePayload({ ok: true });
 
@@ -54,46 +56,48 @@ test.describe("landing contact interaction capture", () => {
     // Validating/mapped client error state.
     activeContactResponse = routePayload({ ok: false, error: { code: "invalid_email" } }, 400);
     await goTo();
-    await setContactInputs(page);
+    await setContactInputs(formLocator);
     await submitButton.click();
     await expect(statusLocator).toContainText("Please enter a valid email.");
-    await captureFullPage(page, evidencePath("landing-contact-validation.png"));
+    await captureFullPage(page, resolveEvidencePath(evidenceGroup, "landing-contact-validation.png"));
 
     // Submitting/in-flight state.
     activeContactResponse = routePayloadWithDelay({ ok: true }, 200, 650);
     await goTo();
-    await setContactInputs(page);
+    await setContactInputs(formLocator);
 
     const submitResponse = page.waitForResponse((response) =>
       response.url().includes(LANDING_CONTACT_ENDPOINT_MOCK)
     );
     await submitButton.click();
     await expect(statusLocator).toContainText("Sending...");
-    await captureFullPage(page, evidencePath("landing-contact-submitting.png"));
+    await captureFullPage(page, resolveEvidencePath(evidenceGroup, "landing-contact-submitting.png"));
     await submitResponse;
 
     // Success state.
     activeContactResponse = routePayload({ ok: true }, 200);
     await goTo();
-    await setContactInputs(page);
+    await setContactInputs(formLocator);
     await submitButton.click();
-    await expect(statusLocator).toContainText("Thanks");
-    await captureFullPage(page, evidencePath("landing-contact-success.png"));
+    await expect(statusLocator).toHaveText("Your request is under review.");
+    await captureFullPage(page, resolveEvidencePath(evidenceGroup, "landing-contact-success.png"));
 
     // Generic error state.
     activeContactResponse = routePayload({ ok: false }, 500);
     await goTo();
-    await setContactInputs(page);
+    await setContactInputs(formLocator);
     await submitButton.click();
     await expect(statusLocator).toContainText("Something went wrong");
-    await captureFullPage(page, evidencePath("landing-contact-error.png"));
+    await captureFullPage(page, resolveEvidencePath(evidenceGroup, "landing-contact-error.png"));
 
     // Deduped success message.
     activeContactResponse = routePayload({ ok: true, deduped: true }, 200);
     await goTo();
-    await setContactInputs(page);
+    await setContactInputs(formLocator);
     await submitButton.click();
-    await expect(statusLocator).toContainText("Already received");
-    await captureFullPage(page, evidencePath("landing-contact-deduped.png"));
+    await expect(statusLocator).toHaveText(
+      "Your request was already received.",
+    );
+    await captureFullPage(page, resolveEvidencePath(evidenceGroup, "landing-contact-deduped.png"));
   });
 });

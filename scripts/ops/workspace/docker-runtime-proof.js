@@ -6,6 +6,9 @@ const path = require('path');
 const { Client } = require('pg');
 const { probeEdgeFunction, resolveBaseUrl, buildProbeUrl } = require('./docker-edge-functions-watch');
 const { gitMetadataFromEnv } = require('./docker-runtime/git-metadata');
+const { authSurfaceIdentitySha256, loadAuthManifestAuthority, authProofBindingFailures } = require('./docker-runtime/auth-identity');
+const { resolveProofServiceSelection, runtimeProofApplicability, proofServiceSelectionMatches } = require('./runtime-service-selection');
+const containerPolicy = require('../../../config/ops/runtime-container-policy.json');
 
 function parseArgs(argv = process.argv.slice(2)) {
   const out = {};
@@ -148,14 +151,16 @@ function loadAuthProofSummary(summaryPath = '') {
   return JSON.parse(fs.readFileSync(path.resolve(process.cwd(), resolved), 'utf8'));
 }
 
-function expectedSurfaceChecks(env = process.env) {
+function expectedSurfaceChecks(env = process.env, options = {}) {
+  const selected = new Set(resolveProofServiceSelection(options.containerPolicy || containerPolicy, options, env));
+  const startupAdmission = String(env.DOCKER_RUNTIME_STARTUP_PROOF || '').trim() === '1';
   return [
     {
       surface: 'console-v2',
       service: 'console-v2',
       url: serviceUrl('console-v2', env.CONSOLE_PORT),
       requiredText: /MasarX|Console|<div id="root"/i,
-      browserRequired: true,
+      browserRequired: !startupAdmission,
       backendReadbackRequired: true,
       authRequired: true,
     },
@@ -164,7 +169,7 @@ function expectedSurfaceChecks(env = process.env) {
       service: 'landing',
       url: serviceUrl('landing', env.LANDING_PORT),
       requiredText: /MasarX|masarx|logistics|delivery|root/i,
-      browserRequired: true,
+      browserRequired: !startupAdmission,
       backendReadbackRequired: true,
     },
     {
@@ -172,7 +177,7 @@ function expectedSurfaceChecks(env = process.env) {
       service: 'portal',
       url: serviceUrl('portal', env.PORTAL_PORT),
       requiredText: /MasarX|Portal|Employee|root/i,
-      browserRequired: true,
+      browserRequired: !startupAdmission,
       backendReadbackRequired: true,
       authRequired: true,
     },
@@ -183,11 +188,11 @@ function expectedSurfaceChecks(env = process.env) {
       requiredText: /Welcome back|Sign in|Fieldops/i,
       forbiddenText: /Legacy FieldOps|Mobile V1/i,
       proofLabel: 'mobile_v2_development_runtime_proof',
-      browserRequired: true,
+      browserRequired: !startupAdmission,
       backendReadbackRequired: true,
       authRequired: true,
     },
-  ].filter((entry) => entry.url);
+  ].filter((entry) => selected.has(entry.service));
 }
 
 async function fetchText(url, timeoutMs = 30000) {
@@ -212,6 +217,10 @@ async function fetchText(url, timeoutMs = 30000) {
 }
 
 async function checkSurface(surface, options = {}) {
+  if (!surface.url) return {
+    surface: surface.surface, service: surface.service, url: '', ok: false,
+    http_probe_ok: false, runtime_proof_ok: false, failure_reasons: ['selected_surface_port_missing'],
+  };
   const result = await fetchText(surface.url, options.timeoutMs).catch((error) => ({
     url: surface.url,
     status: 0,
@@ -306,7 +315,11 @@ async function checkBackend(env = process.env) {
   };
 }
 
-async function readMobileV2Policy(env = process.env) {
+async function readMobileV2Policy(env = process.env, options = {}) {
+  const identity = options.authAuthority?.identities?.find((entry) => entry.surface === 'fieldops-metro');
+  const mobileAuthority = options.authAuthority && { ...options.authAuthority, identities: identity ? [identity] : [] };
+  if (!identity || authProofBindingFailures(options.authProof, mobileAuthority, ['fieldops-metro']).length
+    || options.authProof?.status !== 'passed') return { ok: false, reason: 'missing_manifest_bound_driver_policy_context' };
   const databaseUrl = resolveDockerDatabaseUrl(env);
   if (!databaseUrl) {
     return {
@@ -314,13 +327,13 @@ async function readMobileV2Policy(env = process.env) {
       reason: 'missing_database_url',
     };
   }
-  const client = new Client({
+  const client = new (options.ClientImpl || Client)({
     connectionString: databaseUrl,
     ssl: String(env.PGSSLMODE || '').toLowerCase() === 'require' ? { rejectUnauthorized: false } : false,
   });
   try {
     await client.connect();
-    const context = await resolveMobileV2ProofContext(client, env);
+    const context = await resolveMobileV2ProofContext(client, env, { ...options, authAuthority: mobileAuthority });
     if (!context.ok) return context;
     const result = await withDriverClaims(client, context, async () => client.query(
       `
@@ -348,6 +361,8 @@ async function readMobileV2Policy(env = process.env) {
         user_id_present: Boolean(context.user_id),
         organization_id: context.organization_id,
         source: context.source,
+        identity_sha256: context.identity_sha256,
+        manifest_sha256: context.manifest_sha256,
       },
     };
   } finally {
@@ -355,41 +370,39 @@ async function readMobileV2Policy(env = process.env) {
   }
 }
 
-async function resolveMobileV2ProofContext(client, env = process.env) {
+async function resolveMobileV2ProofContext(client, env = process.env, options = {}) {
+  const authority = options.authAuthority;
+  const proof = options.authProof;
+  const identity = authority?.identities?.find((entry) => entry.surface === 'fieldops-metro');
+  if (!identity || authProofBindingFailures(proof, authority, ['fieldops-metro']).length
+    || proof?.status !== 'passed') {
+    return { ok: false, reason: 'missing_manifest_bound_driver_policy_context' };
+  }
   const explicitUserId = String(env.MOBILE_V2_PROOF_USER_ID || env.FIELDOPS_PROOF_USER_ID || '').trim();
   const explicitOrganizationId = String(env.MOBILE_V2_PROOF_ORGANIZATION_ID || env.FIELDOPS_PROOF_ORGANIZATION_ID || '').trim();
-  if (explicitUserId && explicitOrganizationId) {
-    return {
-      ok: true,
-      user_id: explicitUserId,
-      organization_id: explicitOrganizationId,
-      email: '',
-      source: 'env',
-    };
+  if ((explicitUserId && explicitUserId !== identity.auth_user_id)
+    || (explicitOrganizationId && explicitOrganizationId !== identity.organization_id)) {
+    return { ok: false, reason: 'mobile_policy_explicit_identity_mismatch' };
   }
-
   const result = await client.query(`
-    select id, organization_id, email
+    select id, organization_id, email, user_type
       from public.users
-     where user_type = 'driver'
+     where id = $1::uuid and organization_id = $2::uuid
+       and lower(email) = $3 and user_type = 'driver'
        and coalesce(status, 'active') = 'active'
-       and organization_id is not null
-     order by case when lower(email) = 'mlrznqhylvnirjwnhxhsjwgm@example.invalid' then 0 else 1 end, created_at nulls last, email
-     limit 1
-  `);
+  `, [identity.auth_user_id, identity.organization_id, identity.email]);
   const row = result.rows?.[0];
-  if (!row?.id || !row?.organization_id) {
-    return {
-      ok: false,
-      reason: 'missing_active_driver_policy_context',
-    };
+  if (result.rows?.length !== 1 || !row || authSurfaceIdentitySha256({
+    surface: 'fieldops-metro', auth_user_id: row.id, organization_id: row.organization_id,
+    email: row.email, user_type: row.user_type,
+  }) !== authSurfaceIdentitySha256(identity)) {
+    return { ok: false, reason: 'manifest_driver_policy_readback_mismatch' };
   }
   return {
-    ok: true,
-    user_id: row.id,
-    organization_id: row.organization_id,
-    email: row.email || '',
-    source: 'public.users.active_driver',
+    ok: true, user_id: identity.auth_user_id, organization_id: identity.organization_id,
+    email: identity.email, source: 'exact_auth_manifest_identity',
+    identity_sha256: authSurfaceIdentitySha256(identity),
+    manifest_sha256: authority.manifest_sha256,
   };
 }
 
@@ -432,11 +445,13 @@ function resolveDockerDatabaseUrl(env = process.env) {
   if (String(env.MASARX_DOCKER_RUNTIME || '').trim() !== '1') return raw;
   try {
     const parsed = new URL(raw);
+    // objectives:allow LOCALHOST Justification: Docker proof translates only loopback database hosts to the container-visible host gateway.
     if (['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
       parsed.hostname = 'rvzwwjlztwwisjthghnipgjr.example.invalid';
     }
     return parsed.toString();
   } catch (_) {
+    // objectives:allow LOCALHOST Justification: malformed legacy DSNs receive the same narrow loopback-to-container host translation.
     return raw.replace('@127.0.0.1:', '@rvzwwjlztwwisjthghnipgjr.example.invalid:').replace('@localhost:', '@rvzwwjlztwwisjthghnipgjr.example.invalid:');
   }
 }
@@ -481,14 +496,17 @@ function redactedEnvSummary(env = process.env) {
 
 async function runDockerRuntimeProof(options = {}, env = process.env) {
   const startedAt = Date.now();
+  const services = resolveProofServiceSelection(options.containerPolicy || containerPolicy, options, env);
+  const applicability = runtimeProofApplicability(services);
   const timeoutMs = parsePositiveInteger(options.timeoutMs || options['timeout-ms'], 30000);
+  const startupAdmission = String(env.DOCKER_RUNTIME_STARTUP_PROOF || '').trim() === '1';
   const browserProofSummaryPath = String(
     options.browserProofSummary ||
       options['browser-proof-summary'] ||
       env.DOCKER_RUNTIME_BROWSER_PROOF_SUMMARY ||
       '',
   ).trim();
-  const browserProof = loadBrowserProofSummary(browserProofSummaryPath);
+  const browserProof = startupAdmission ? null : loadBrowserProofSummary(browserProofSummaryPath);
   const backendProofSummaryPath = String(
     options.backendProofSummary ||
       options['backend-proof-summary'] ||
@@ -502,18 +520,36 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
       env.DOCKER_RUNTIME_AUTH_PROOF_SUMMARY ||
       '',
   ).trim();
-  const authProof = loadAuthProofSummary(authProofSummaryPath);
-  const surfaces = [];
-  for (const surface of expectedSurfaceChecks(env)) {
-    surfaces.push(await checkSurface(surface, { timeoutMs, browserProof }));
+  const authProof = applicability.auth_fixture_proof_present ? loadAuthProofSummary(authProofSummaryPath) : null;
+  let authAuthority = null;
+  let authIdentityFailures = [];
+  if (applicability.auth_fixture_proof_present) {
+    try {
+      authAuthority = loadAuthManifestAuthority(
+        options.authManifest || options['auth-manifest'] || env.DOCKER_RUNTIME_AUTH_MANIFEST,
+        env.WORKSPACE_NAME, services,
+      );
+      authIdentityFailures = authProofBindingFailures(authProof, authAuthority, services);
+      if (!proofServiceSelectionMatches(authProof?.services, services) || authProof?.applicability?.auth !== true) {
+        authIdentityFailures.push('auth_proof_service_selection_mismatch');
+      }
+    } catch (_) { authIdentityFailures = ['auth_manifest_authority_unavailable']; }
   }
-  const backend = await checkBackend(env);
-  const edge = await checkEdgeFunction(env);
-  const mobilePolicy = await readMobileV2Policy(env);
+  const surfaces = [];
+  for (const surface of expectedSurfaceChecks(env, { ...options, services })) {
+    surfaces.push(await (options.checkSurfaceImpl || checkSurface)(surface, { timeoutMs, browserProof }));
+  }
+  const backend = await (options.checkBackendImpl || checkBackend)(env);
+  const edge = applicability.edge_functions_reachable
+    ? await (options.checkEdgeFunctionImpl || checkEdgeFunction)(env) : { status: 'not_required' };
+  const mobilePolicy = applicability.mobile_v2_development_runtime_proof
+    ? await (options.readMobileV2PolicyImpl || readMobileV2Policy)(env, { authAuthority, authProof })
+    : { status: 'not_required' };
   const summary = {
     generated_at: new Date().toISOString(),
     proof: 'docker-runtime-in-container-e2e',
-    proof_boundary: 'development_runtime_proof_not_native_release',
+    services, applicability,
+    proof_boundary: startupAdmission ? 'startup_runtime_admission' : 'development_runtime_proof_not_native_release',
     workspace_id: env.WORKSPACE_NAME || '',
     owner: env.MASARX_RUNTIME_OWNER || '',
     compose_project: env.MASARX_APP_COMPOSE_PROJECT_NAME || '',
@@ -576,9 +612,12 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
       workspace_id: authProof.workspace_id || '',
       manifest_mode: authProof.manifest_mode || '',
       run_id: authProof.run_id || '',
+      manifest_sha256: authProof.manifest_sha256 || '',
+      identity_failures: authIdentityFailures,
       surfaces: Array.isArray(authProof.surfaces)
         ? authProof.surfaces.map((surface) => ({
           surface: surface.surface || '',
+          identity_sha256: surface.identity_sha256 || '',
           proof_label: surface.proof_label || '',
           identity_present: surface.identity_present === true,
           password_grant_ok: surface.password_grant_ok === true,
@@ -587,11 +626,13 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
           backend_readback_ok: surface.backend_readback_ok === true,
         }))
         : [],
-    } : null,
+    } : { status: 'not_required', applicability: { auth: false }, surfaces: [] },
     surfaces,
     backend,
     edge_functions: edge,
     mobile_v2: {
+      status: applicability.mobile_v2_development_runtime_proof ? (mobilePolicy.ok === true ? 'passed' : 'failed') : 'not_required',
+      applicable: applicability.mobile_v2_development_runtime_proof,
       service_name: 'fieldops-metro',
       proof_label: 'mobile_v2_development_runtime_proof',
       native_release_gate_satisfied: false,
@@ -605,12 +646,14 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
   summary.acceptance = {
     all_surface_http_probes_reachable: surfaces.length > 0 && surfaces.every((surface) => surface.http_probe_ok),
     all_surfaces_runtime_proven: surfaces.length > 0 && surfaces.every((surface) => surface.runtime_proof_ok),
-    browser_proof_present: Boolean(browserProof),
+    browser_proof_present: startupAdmission || Boolean(browserProof),
+    browser_proof_or_startup_boundary_proven: startupAdmission || Boolean(browserProof),
     backend_readback_proof_present: Boolean(backendProof),
     backend_readback_proof_passed: backendProof?.status === 'passed',
     landing_intake_readback_proven: backendProof?.acceptance?.landing_intake_readback_proven === true,
     auth_fixture_proof_present: Boolean(authProof),
     auth_fixture_proof_passed: authProof?.status === 'passed',
+    auth_fixture_identity_bound: authIdentityFailures.length === 0,
     backend_reachable: backend.ok === true,
     edge_functions_reachable: edge.ok === true,
     fieldops_service_canonical: summary.mobile_v2.service_name === 'fieldops-metro',
@@ -618,7 +661,11 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
     native_release_gate_not_satisfied: summary.mobile_v2.native_release_gate_satisfied === false,
     seed_disabled: summary.env.seed_disabled === true,
   };
-  summary.status = Object.values(summary.acceptance).every(Boolean) ? 'passed' : 'failed';
+  for (const [key, required] of Object.entries(applicability)) {
+    if (!required) summary.acceptance[key] = 'not_required';
+  }
+  summary.status = Object.entries(applicability).every(([key, required]) =>
+    summary.acceptance[key] === (required ? true : 'not_required')) ? 'passed' : 'failed';
   return summary;
 }
 

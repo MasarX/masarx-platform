@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "./button";
 import { Input } from "./input";
 import { Select } from "./select";
@@ -41,7 +42,12 @@ export function MarketplaceActionForm({
   testIdPrefix,
   fields,
 }: MarketplaceActionFormProps) {
+  const router = useRouter();
   const [state, formAction, isPending] = React.useActionState(action, initialState);
+
+  React.useEffect(() => {
+    if (state.status === "success") router.refresh();
+  }, [router, state.status]);
 
   return (
     <form action={formAction} className="space-y-3" data-testid={`${testIdPrefix}-form`}>

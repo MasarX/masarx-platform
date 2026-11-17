@@ -114,6 +114,7 @@ The main Playwright config defines four projects, each matching specs by filenam
 | `CONSOLE_BASE_URL` | Override console origin (required in CI) |
 | `PORTAL_BASE_URL` | Override portal origin (required in CI) |
 | `E2E_WORKERS` | Local worker count (default 4) |
+| `LANDING_E2E_WORKERS` | Landing E2E worker count; integer `1` through `4` (default `1`) |
 | `E2E_FORCE_CLEAN` | Clear `.next` cache before starting dev servers |
 | `E2E_WEB_SERVER_TIMEOUT_MS` | Dev server startup timeout (default 180 s) |
 
@@ -133,7 +134,7 @@ Key helpers available to E2E specs:
 
 ### Landing E2E
 
-Uses a separate config (`playwright.landing.config.ts`) pointing at `tests/landing-e2e/`. Defaults to `http://127.0.0.1:3333` and auto-starts `dev:landing` locally. Override with `LANDING_BASE_URL` or `LANDING_E2E_PORT`.
+Uses a separate config (`playwright.landing.config.ts`) pointing at `tests/landing-e2e/`. Defaults to `http://127.0.0.1:3333`, one worker, and auto-starts `dev:landing` locally. Override the URL with `LANDING_BASE_URL` or `LANDING_E2E_PORT`; set `LANDING_E2E_WORKERS` to an integer from `1` through `4` when bounded parallelism is appropriate.
 
 ### Console / Portal Local E2E
 

@@ -5,10 +5,12 @@ import { Button } from "./button";
 import { Input } from "./input";
 import { Section } from "./section";
 import { Textarea } from "./textarea";
+import { getShipmentModifyAllowedFields } from "./shipment-amend-cancel-policy";
 
 export type ShipmentAmendCancelState = {
   status: "idle" | "error" | "success";
   message?: string;
+  locked?: boolean;
 };
 
 type OperationState = {
@@ -77,7 +79,8 @@ function blockedMessage(
   state: OperationState | null | undefined,
   options: ShipmentAmendCancelOptions,
 ) {
-  if (!state || state.allowed) return null;
+  if (!state) return `Blocked by shipment_operation_policy: ${operation} availability was not returned by the backend.`;
+  if (state.allowed === true) return null;
   if (state.reason === "shipment_delete_window_expired") {
     const hours = state.window_hours ?? options.policy?.delete_window_hours ?? null;
     return hours
@@ -100,7 +103,9 @@ export function ShipmentAmendCancelForm({
   testIdPrefix,
 }: ShipmentAmendCancelFormProps) {
   const [state, formAction, isPending] = React.useActionState(action, initialState);
+  const submissionLocked = isPending || state.locked === true;
   const modifyState = options.operations?.modify ?? null;
+  const modifyAllowedFields = getShipmentModifyAllowedFields(options);
   const rescheduleState = options.operations?.reschedule ?? null;
   const addressState = options.operations?.address ?? null;
   const cancelState = options.operations?.cancel ?? null;
@@ -131,7 +136,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="service_type"
                   defaultValue={currentValues.serviceType ?? ""}
-                  disabled={isPending || !modifyState?.allowed}
+                  disabled={submissionLocked || modifyState?.allowed !== true || !modifyAllowedFields.has("service_type")}
                   data-testid={`${testIdPrefix}-modify-service-type`}
                 />
               </label>
@@ -140,7 +145,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="service_level"
                   defaultValue={currentValues.serviceLevel ?? ""}
-                  disabled={isPending || !modifyState?.allowed}
+                  disabled={submissionLocked || modifyState?.allowed !== true || !modifyAllowedFields.has("service_level")}
                   data-testid={`${testIdPrefix}-modify-service-level`}
                 />
               </label>
@@ -149,7 +154,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="client_reference_number"
                   defaultValue={currentValues.clientReferenceNumber ?? ""}
-                  disabled={isPending || !modifyState?.allowed}
+                  disabled={submissionLocked || modifyState?.allowed !== true || !modifyAllowedFields.has("client_reference_number")}
                   data-testid={`${testIdPrefix}-modify-client-reference`}
                 />
               </label>
@@ -158,7 +163,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="carrier_reference_number"
                   defaultValue={currentValues.carrierReferenceNumber ?? ""}
-                  disabled={isPending || !modifyState?.allowed}
+                  disabled={submissionLocked || modifyState?.allowed !== true || !modifyAllowedFields.has("carrier_reference_number")}
                   data-testid={`${testIdPrefix}-modify-carrier-reference`}
                 />
               </label>
@@ -168,7 +173,7 @@ export function ShipmentAmendCancelForm({
                   name="special_instructions"
                   rows={3}
                   defaultValue={currentValues.specialInstructions ?? ""}
-                  disabled={isPending || !modifyState?.allowed}
+                  disabled={submissionLocked || modifyState?.allowed !== true || !modifyAllowedFields.has("special_instructions")}
                   data-testid={`${testIdPrefix}-modify-special-instructions`}
                 />
               </label>
@@ -177,7 +182,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="cod_amount"
                   defaultValue={currentValues.codAmount ?? ""}
-                  disabled={isPending || !modifyState?.allowed}
+                  disabled={submissionLocked || modifyState?.allowed !== true || !modifyAllowedFields.has("cod_amount")}
                   data-testid={`${testIdPrefix}-modify-cod-amount`}
                 />
               </label>
@@ -187,7 +192,7 @@ export function ShipmentAmendCancelForm({
                   name="metadata_json"
                   rows={4}
                   placeholder='{"priority":"vip"}'
-                  disabled={isPending || !modifyState?.allowed}
+                  disabled={submissionLocked || modifyState?.allowed !== true || !modifyAllowedFields.has("metadata")}
                   data-testid={`${testIdPrefix}-modify-metadata`}
                 />
               </label>
@@ -197,7 +202,7 @@ export function ShipmentAmendCancelForm({
                   name="references_json"
                   rows={4}
                   placeholder='{"logistics_reference_number":["REF-001"]}'
-                  disabled={isPending || !modifyState?.allowed}
+                  disabled={submissionLocked || modifyState?.allowed !== true || !modifyAllowedFields.has("references")}
                   data-testid={`${testIdPrefix}-modify-references`}
                 />
               </label>
@@ -205,7 +210,7 @@ export function ShipmentAmendCancelForm({
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="submit"
-                disabled={isPending || !modifyState?.allowed}
+                disabled={submissionLocked || modifyState?.allowed !== true || modifyAllowedFields.size === 0}
                 data-testid={`${testIdPrefix}-modify-submit`}
               >
                 {isPending ? "Saving..." : "Apply modify"}
@@ -231,14 +236,14 @@ export function ShipmentAmendCancelForm({
                 type="date"
                 name="slot_date"
                 defaultValue={currentValues.promisedDeliveryDate ?? ""}
-                disabled={isPending || !rescheduleState?.allowed}
+                disabled={submissionLocked || rescheduleState?.allowed !== true}
                 data-testid={`${testIdPrefix}-reschedule-slot-date`}
               />
             </label>
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="submit"
-                disabled={isPending || !rescheduleState?.allowed}
+                disabled={submissionLocked || rescheduleState?.allowed !== true}
                 data-testid={`${testIdPrefix}-reschedule-submit`}
               >
                 {isPending ? "Saving..." : "Reserve slot"}
@@ -259,13 +264,31 @@ export function ShipmentAmendCancelForm({
             <input type="hidden" name="operation" value="address" />
             <div className="text-sm font-semibold text-ui-ink">Update address</div>
             <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1 text-sm text-ui-ink">
+                <span className="text-xs uppercase tracking-wide text-ui-muted">Saudi short address (optional)</span>
+                <Input name="sa_short_code"
+                  disabled={submissionLocked || addressState?.allowed !== true}
+                  data-testid={`${testIdPrefix}-address-short-code`} />
+              </label>
+              <label className="space-y-1 text-sm text-ui-ink">
+                <span className="text-xs uppercase tracking-wide text-ui-muted">Latitude (optional)</span>
+                <Input name="latitude" inputMode="decimal"
+                  disabled={submissionLocked || addressState?.allowed !== true}
+                  data-testid={`${testIdPrefix}-address-latitude`} />
+              </label>
+              <label className="space-y-1 text-sm text-ui-ink">
+                <span className="text-xs uppercase tracking-wide text-ui-muted">Longitude (optional)</span>
+                <Input name="longitude" inputMode="decimal"
+                  disabled={submissionLocked || addressState?.allowed !== true}
+                  data-testid={`${testIdPrefix}-address-longitude`} />
+              </label>
               <label className="space-y-1 text-sm text-ui-ink md:col-span-2">
                 <span className="text-xs uppercase tracking-wide text-ui-muted">Address line 1</span>
                 <Textarea
                   name="line1"
                   rows={2}
                   defaultValue={currentValues.addressLine1 ?? ""}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-line1`}
                 />
               </label>
@@ -274,7 +297,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="line2"
                   defaultValue={currentValues.addressLine2 ?? ""}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-line2`}
                 />
               </label>
@@ -283,7 +306,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="city"
                   defaultValue={currentValues.addressCity ?? ""}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-city`}
                 />
               </label>
@@ -292,7 +315,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="province"
                   defaultValue={currentValues.addressProvince ?? ""}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-province`}
                 />
               </label>
@@ -303,7 +326,7 @@ export function ShipmentAmendCancelForm({
                   defaultValue={
                     currentValues.addressCountry ?? options.policy?.address_default_country_code ?? ""
                   }
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-country`}
                 />
               </label>
@@ -312,7 +335,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="postal_code"
                   defaultValue={currentValues.addressPostalCode ?? ""}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-postal-code`}
                 />
               </label>
@@ -321,7 +344,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="district"
                   defaultValue={currentValues.addressDistrict ?? ""}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-district`}
                 />
               </label>
@@ -330,7 +353,7 @@ export function ShipmentAmendCancelForm({
                 <Input
                   name="building_number"
                   defaultValue={currentValues.addressBuildingNumber ?? ""}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-building-number`}
                 />
               </label>
@@ -339,7 +362,7 @@ export function ShipmentAmendCancelForm({
                 <Textarea
                   name="raw_input"
                   rows={3}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-raw-input`}
                 />
               </label>
@@ -349,7 +372,7 @@ export function ShipmentAmendCancelForm({
                   name="additional_directions"
                   rows={3}
                   defaultValue={currentValues.addressAdditionalDirections ?? ""}
-                  disabled={isPending || !addressState?.allowed}
+                  disabled={submissionLocked || addressState?.allowed !== true}
                   data-testid={`${testIdPrefix}-address-directions`}
                 />
               </label>
@@ -357,7 +380,7 @@ export function ShipmentAmendCancelForm({
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="submit"
-                disabled={isPending || !addressState?.allowed}
+                disabled={submissionLocked || addressState?.allowed !== true}
                 data-testid={`${testIdPrefix}-address-submit`}
               >
                 {isPending ? "Saving..." : "Apply address change"}
@@ -382,7 +405,7 @@ export function ShipmentAmendCancelForm({
               <Textarea
                 name="cancel_reason"
                 rows={3}
-                disabled={isPending || !cancelState?.allowed}
+                disabled={submissionLocked || cancelState?.allowed !== true}
                 data-testid={`${testIdPrefix}-cancel-reason`}
               />
             </label>
@@ -390,7 +413,7 @@ export function ShipmentAmendCancelForm({
               <Button
                 type="submit"
                 variant="soft"
-                disabled={isPending || !cancelState?.allowed}
+                disabled={submissionLocked || cancelState?.allowed !== true}
                 data-testid={`${testIdPrefix}-cancel-submit`}
               >
                 {isPending ? "Saving..." : "Soft-cancel"}

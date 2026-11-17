@@ -13,15 +13,10 @@ const parseJsonSafe = async (response) => {
 const expectSchemaDenied = async (response, schema) => {
   const body = await parseJsonSafe(response);
   if (response.status === 401 && body?.code === 'PGRST301') {
-    // Preview/auth-drift mode: JWT/key mismatch blocks profile checks before schema evaluation.
-    // Treat as non-actionable for this boundary test; hardening is validated in harden-data-api.
-    // eslint-disable-next-line no-console
-    console.warn('[api-schema-boundary] skipped strict schema assertion due to auth mismatch', {
-      status: response.status,
-      code: body?.code,
-      schema,
-    });
-    return;
+    const error = new Error('prerequisite_blocked: api_schema_auth_mismatch');
+    error.code = 'INTEGRATION_PREREQUISITE_BLOCKED';
+    error.prerequisite = 'api_schema_auth_mismatch';
+    throw error;
   }
 
   expect(response.status).toBe(406);

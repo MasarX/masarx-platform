@@ -1,4 +1,3 @@
-export declare const sharedTextEncoder: TextEncoder;
 export declare function readEnv(primary: string, fallbacks?: string[]): string;
 export declare function normaliseHeaders(headers: Headers): Record<string, string>;
 export declare function toResponseBody(response: Response): Promise<unknown>;
@@ -26,11 +25,9 @@ export declare function extractToken(
   }
 ): string | null;
 export declare function parseRequestBody(req: Request): Promise<{ raw: string; json: Record<string, unknown> }>;
-export declare function resolveObjectPath(target: unknown, path: string): unknown;
-export declare function renderTemplate(template: unknown, context: Record<string, unknown>): unknown;
-export declare function computeHmac(
-  algorithm: "HMAC-SHA256" | "HMAC-SHA512",
-  secret: string,
-  message: string,
-  encoding?: "hex" | "base64"
-): Promise<string>;
+/** Non-cryptographic defense after native JWT admission. */
+export declare function validateInternalEdgeClaims(
+  claims: Record<string, unknown>,
+  role: string,
+  options?: { nowSeconds?: number }
+): { ok: true } | { ok: false; status: number; message: string };

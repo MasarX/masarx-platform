@@ -1,6 +1,7 @@
 const { Pool } = require('pg');
 const { loadEnv } = require('../../../scripts/utils/load-env');
 const { buildPayload, callWorkflowIntake } = require('../utils/workflow-intake');
+const { getIntegrationFixtureProfile } = require('../helpers/integration-fixtures');
 
 loadEnv();
 
@@ -10,7 +11,7 @@ const pool = new Pool({
 
 jest.setTimeout(60000);
 
-const CLIENT_A_TOKEN = 'client-a-ack-token';
+const CLIENT_A_TOKEN = getIntegrationFixtureProfile().webhook.clientAckA.token;
 
 describe('Webhook acknowledgement idempotency', () => {
   afterAll(async () => {

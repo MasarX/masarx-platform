@@ -2,8 +2,10 @@ import { expect, test } from "@playwright/test";
 import {
   LANDING_TRACKING_ENDPOINT_MOCK,
   mockTrackingEndpoint,
+  mockTurnstile,
   patchRuntimeConfig,
   routePayload,
+  routePayloadWithDelay,
 } from "./helpers";
 
 const trackingPayload = {
@@ -134,6 +136,71 @@ test.describe("landing tracking", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "ar");
   });
 
+  test("guards lookup submission while the tracking request is in flight", async ({ page }) => {
+    let lookupCalls = 0;
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/lookup")) {
+        lookupCalls += 1;
+        await routePayloadWithDelay({ ok: true, step: "verify", verification: { phone_digits: 3 } }, 200, 200)(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator("[data-track-lookup-form]").evaluate((form) => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    await expect(page.locator('[data-track-lookup-form] button[type="submit"]')).toBeDisabled();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+    await expect(page.locator('[data-track-lookup-form] button[type="submit"]')).toBeEnabled();
+    expect(lookupCalls).toBe(1);
+  });
+
+  test("guards verification submission while the tracking request is in flight", async ({ page }) => {
+    let verifyCalls = 0;
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        verifyCalls += 1;
+        await routePayloadWithDelay({ ...trackingPayload, session_token: "sess-demo-verify-guard" }, 200, 200)(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
+    await page.locator("[data-track-verify-form]").evaluate((form) => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    await expect(page.locator('[data-track-verify-form] button[type="submit"]')).toBeDisabled();
+    await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
+    await expect(page.locator('[data-track-verify-form] button[type="submit"]')).toBeEnabled();
+    expect(verifyCalls).toBe(1);
+  });
+
   test("lookup, verify, rehydrate, and submit requests against mocked tracking endpoint", async ({ page }) => {
     let requestCalls = 0;
     await patchRuntimeConfig(page, {
@@ -215,7 +282,20 @@ test.describe("landing tracking", () => {
     await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
 
     await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
-    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    const verifyForm = page.locator('[data-track-verify-form]');
+    expect(await verifyForm.evaluate((form: HTMLFormElement) => form.checkValidity())).toBe(true);
+    const [verifyResponse] = await Promise.all([
+      page.waitForResponse((response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `${LANDING_TRACKING_ENDPOINT_MOCK}/verify`,
+      { timeout: 10_000 }),
+      verifyForm.locator('button[type="submit"]').click(),
+    ]);
+    expect(verifyResponse.status()).toBe(200);
+    expect(await verifyResponse.json()).toMatchObject({
+      ok: true,
+      session_token: "sess-demo-123",
+    });
 
     await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
     await expect(page.locator('[data-track-shipment-reference]')).toContainText("ORD-10088");
@@ -269,6 +349,674 @@ test.describe("landing tracking", () => {
     await expect(page.locator('[data-track-request-banner-badge]')).toContainText("Sent for review");
     await expect(page.locator('[data-track-request-banner-text]')).toContainText("queued for operator review");
     expect(requestCalls).toBe(2);
+  });
+
+  test("guards verified-session request submission while the mutation is in flight", async ({ page }) => {
+    let mutationCalls = 0;
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        await routePayload({ ...trackingPayload, session_token: "sess-demo-mutation-guard" })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/request")) {
+        mutationCalls += 1;
+        expect(body.session_token).toBe("sess-demo-mutation-guard");
+        expect(body.request_type).toBe("reschedule_date");
+        await routePayloadWithDelay(
+          {
+            ok: true,
+            submitted: true,
+            outcome: "applied",
+            support_case_id: "11111111-1111-1111-1111-111111111111",
+            tracking: trackingPayload.tracking,
+          },
+          200,
+          200,
+        )(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+
+    await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
+    await page.locator("[data-track-date-select]").selectOption("2026-03-08");
+    await page.locator("[data-track-reschedule-form]").evaluate((form) => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    await expect(page.locator('[data-track-reschedule-form] button[type="submit"]')).toBeDisabled();
+    await expect(page.locator("[data-track-reschedule-status]")).toContainText("Change applied");
+    await expect(page.locator('[data-track-reschedule-form] button[type="submit"]')).toBeEnabled();
+    expect(mutationCalls).toBe(1);
+  });
+
+  test("guards location-change submission while the mutation is in flight", async ({ page }) => {
+    let mutationCalls = 0;
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        await routePayload({ ...trackingPayload, session_token: "sess-demo-location-guard" })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/request")) {
+        mutationCalls += 1;
+        expect(body.session_token).toBe("sess-demo-location-guard");
+        expect(body.request_type).toBe("location_change");
+        expect(body.payload?.map_pin?.lat).toEqual(expect.any(Number));
+        expect(body.payload?.map_pin?.lng).toEqual(expect.any(Number));
+        await routePayloadWithDelay(
+          {
+            ok: true,
+            submitted: true,
+            outcome: "pending_review",
+            support_case_id: "11111111-1111-1111-1111-111111111111",
+          },
+          200,
+          200,
+        )(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
+
+    await page.locator('[data-track-map-center]').first().click();
+    await expect(page.locator('[data-track-map-status]')).toContainText("Confirm location");
+    await page.locator('[data-track-map-confirm]').first().click();
+    await page.locator('[data-track-location-form] textarea[name="address_text"]').fill(
+      "Tower 4, gate B, service road",
+    );
+    await page.locator('[data-track-location-form] input[name="short_national_address"]').fill("RAHA1234");
+
+    await page.locator("[data-track-location-form]").evaluate((form) => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    await expect(page.locator('[data-track-location-form] button[type="submit"]')).toBeDisabled();
+    await expect(page.locator('[data-track-location-status]')).toContainText("sent for review");
+    await expect(page.locator('[data-track-location-form] button[type="submit"]')).toBeEnabled();
+    expect(mutationCalls).toBe(1);
+  });
+
+  test("aborts a timed-out tracking lookup and allows a clean retry", async ({ page }) => {
+    let lookupCalls = 0;
+    let releaseTimedOutRoute: (() => void) | null = null;
+    await page.clock.install();
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+      publicRequestTimeoutMs: 1_000,
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const url = new URL(route.request().url());
+      if (!url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+        return;
+      }
+
+      lookupCalls += 1;
+      if (lookupCalls === 1) {
+        await new Promise<void>((resolve) => {
+          releaseTimedOutRoute = resolve;
+        });
+        try {
+          await route.abort("timedout");
+        } catch {
+          // The browser-side AbortController may already have closed the route.
+        }
+        return;
+      }
+
+      await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    const lookupForm = page.locator("[data-track-lookup-form]");
+    await lookupForm.locator('input[name="reference"]').fill("TRK-2026-0001");
+    await lookupForm.locator('button[type="submit"]').click();
+    await expect(lookupForm.locator('button[type="submit"]')).toBeDisabled();
+    await expect.poll(() => Boolean(releaseTimedOutRoute)).toBe(true);
+
+    await page.clock.fastForward(1_000);
+    await expect(page.locator("[data-track-lookup-status]")).toContainText("Something went wrong");
+    await expect(lookupForm.locator('button[type="submit"]')).toBeEnabled();
+    expect(lookupCalls).toBe(1);
+
+    releaseTimedOutRoute?.();
+    await lookupForm.locator('button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+    expect(lookupCalls).toBe(2);
+  });
+
+  test("renews the submitted lookup Turnstile token before a failed-request retry", async ({ page }) => {
+    const lookupTokens: string[] = [];
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "1x00000000000000000000AA",
+    });
+    await mockTurnstile(page);
+    await mockTrackingEndpoint(page, async (route) => {
+      const url = new URL(route.request().url());
+      if (!url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+        return;
+      }
+      lookupTokens.push(String(route.request().postDataJSON().turnstile_token || ""));
+      await routePayload(
+        lookupTokens.length === 1
+          ? { ok: false, error: { code: "rate_limited" } }
+          : { ok: true, step: "verify", verification: { phone_digits: 3 } },
+        lookupTokens.length === 1 ? 429 : 200,
+      )(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    const form = page.locator("[data-track-lookup-form]");
+    await form.locator('input[name="reference"]').fill("TRK-2026-0001");
+    const turnstileInput = page.locator('[data-turnstile] input[name="cf-turnstile-response"]');
+    await expect(turnstileInput).toHaveValue(/^TURNSTILE-TEST-TOKEN-\d+$/);
+    const initialToken = await turnstileInput.inputValue();
+
+    await form.locator('button[type="submit"]').click();
+    await expect(page.locator("[data-track-lookup-status]")).toContainText(
+      "Too many attempts. Wait a little, then try again.",
+    );
+    await expect(turnstileInput).not.toHaveValue(initialToken);
+    await expect(turnstileInput).toHaveValue(/^TURNSTILE-TEST-TOKEN-\d+$/);
+    const retryToken = await turnstileInput.inputValue();
+
+    await form.locator('button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+    expect(retryToken).not.toBe(initialToken);
+    expect(lookupTokens).toEqual([initialToken, retryToken]);
+  });
+
+  test("renews the submitted verify Turnstile token before a failed-request retry", async ({ page }) => {
+    const verifyTokens: string[] = [];
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "1x00000000000000000000AA",
+    });
+    await mockTurnstile(page);
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        verifyTokens.push(String(body.turnstile_token || ""));
+        await routePayload(
+          verifyTokens.length === 1
+            ? { ok: false, error: { code: "verification_failed" } }
+            : { ...trackingPayload, session_token: "sess-turnstile-retry" },
+          verifyTokens.length === 1 ? 401 : 200,
+        )(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+    const turnstileInput = page.locator('[data-turnstile] input[name="cf-turnstile-response"]');
+    await expect(turnstileInput).toHaveValue(/^TURNSTILE-TEST-TOKEN-\d+$/);
+    const initialVerifyToken = await turnstileInput.inputValue();
+
+    const verifyForm = page.locator("[data-track-verify-form]");
+    await verifyForm.locator('input[name="phone_last3"]').fill("123");
+    await verifyForm.locator('button[type="submit"]').click();
+    await expect(page.locator("[data-track-verify-status]")).toContainText(
+      "Verification failed. Check the reference and the last 3 mobile digits, then try again.",
+    );
+    await expect(turnstileInput).not.toHaveValue(initialVerifyToken);
+    await expect(turnstileInput).toHaveValue(/^TURNSTILE-TEST-TOKEN-\d+$/);
+    const retryVerifyToken = await turnstileInput.inputValue();
+
+    await verifyForm.locator('button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
+    expect(retryVerifyToken).not.toBe(initialVerifyToken);
+    expect(verifyTokens).toEqual([initialVerifyToken, retryVerifyToken]);
+  });
+
+  test("ignores a delayed lookup completion after newer reference input", async ({ page }) => {
+    let firstLookupStarted = false;
+    let releaseFirstLookup: (() => void) | null = null;
+    const firstLookupGate = new Promise<void>((resolve) => {
+      releaseFirstLookup = resolve;
+    });
+
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/lookup")) {
+        if (body.reference === "TRK-2026-0001") {
+          firstLookupStarted = true;
+          await firstLookupGate;
+          try {
+            await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+          } catch {
+            // The newer input aborts this superseded browser request.
+          }
+          return;
+        }
+        expect(body.reference).toBe("TRK-2026-0002");
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        expect(body.reference).toBe("TRK-2026-0002");
+        await routePayload({ ...secondTrackingPayload, session_token: "sess-new-reference" })(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    const lookupForm = page.locator("[data-track-lookup-form]");
+    const referenceInput = lookupForm.locator('input[name="reference"]');
+    await referenceInput.fill("TRK-2026-0001");
+    await lookupForm.locator('button[type="submit"]').click();
+    await expect.poll(() => firstLookupStarted).toBe(true);
+    await expect(page.locator("[data-track-lookup-status]")).toContainText("Working on your request");
+
+    await referenceInput.fill("TRK-2026-0002");
+    await expect(page.locator("[data-track-lookup-status]")).toBeEmpty();
+    await expect(lookupForm.locator('button[type="submit"]')).toBeEnabled();
+    await lookupForm.locator('button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+
+    releaseFirstLookup?.();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("456");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-shipment-tracking]')).toHaveText("TRK-2026-0002");
+  });
+
+  test("ignores a delayed verify completion after newer verification input", async ({ page }) => {
+    let firstVerifyStarted = false;
+    let releaseFirstVerify: (() => void) | null = null;
+    let secondVerifyStarted = false;
+    let releaseSecondVerify: (() => void) | null = null;
+    const firstVerifyGate = new Promise<void>((resolve) => {
+      releaseFirstVerify = resolve;
+    });
+    const secondVerifyGate = new Promise<void>((resolve) => {
+      releaseSecondVerify = resolve;
+    });
+
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        if (body.phone_last3 === "123") {
+          firstVerifyStarted = true;
+          await firstVerifyGate;
+          try {
+            await routePayload({ ...trackingPayload, session_token: "sess-stale-verify" })(route);
+          } catch {
+            // The newer input aborts this superseded browser request.
+          }
+          return;
+        }
+        expect(body.phone_last3).toBe("456");
+        secondVerifyStarted = true;
+        await secondVerifyGate;
+        await routePayload({ ...secondTrackingPayload, session_token: "sess-current-verify" })(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0002");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    const verifyForm = page.locator("[data-track-verify-form]");
+    const digitsInput = verifyForm.locator('input[name="phone_last3"]');
+    await digitsInput.fill("123");
+    await verifyForm.locator('button[type="submit"]').click();
+    await expect.poll(() => firstVerifyStarted).toBe(true);
+    await expect(page.locator("[data-track-verify-status]")).toContainText("Working on your request");
+
+    await digitsInput.fill("456");
+    await expect(page.locator("[data-track-verify-status]")).toBeEmpty();
+    await expect(verifyForm.locator('button[type="submit"]')).toBeEnabled();
+    await verifyForm.locator('button[type="submit"]').click();
+    await expect.poll(() => secondVerifyStarted).toBe(true);
+    await expect(page.locator("[data-track-verify-status]")).toContainText("Working on your request");
+
+    releaseFirstVerify?.();
+    await expect(page.locator("[data-track-verify-status]")).toContainText("Working on your request");
+    releaseSecondVerify?.();
+    await expect(page.locator('[data-track-shipment-tracking]')).toHaveText("TRK-2026-0002");
+    await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("masarx_tracking_session_v1"))).toBe(
+      "sess-current-verify",
+    );
+    await expect(page.locator('[data-track-shipment-tracking]')).toHaveText("TRK-2026-0002");
+  });
+
+  test("serializes tracking mutations while a reschedule request is in flight", async ({ page }) => {
+    let rescheduleStarted = false;
+    let releaseReschedule: (() => void) | null = null;
+    let locationCalls = 0;
+    const rescheduleGate = new Promise<void>((resolve) => {
+      releaseReschedule = resolve;
+    });
+
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        await routePayload({ ...trackingPayload, session_token: "sess-mutation-order" })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/request") && body.request_type === "reschedule_date") {
+        rescheduleStarted = true;
+        await rescheduleGate;
+        await routePayload({
+          ok: true,
+          outcome: "applied",
+          tracking: trackingPayload.tracking,
+        })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/request") && body.request_type === "location_change") {
+        locationCalls += 1;
+        await routePayload({ ok: false, error: { code: "invalid_request" } }, 409)(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    await page.locator("[data-track-date-select]").selectOption("2026-03-08");
+    await page.locator('[data-track-reschedule-form] button[type="submit"]').click();
+    await expect.poll(() => rescheduleStarted).toBe(true);
+    await expect(page.locator("[data-track-reschedule-status]")).toContainText("Working on your request");
+    await expect(page.locator("[data-track-reschedule-status]")).toHaveAttribute("aria-live", "polite");
+    await expect(page.locator("[data-track-reschedule-form]")).not.toHaveAttribute("inert", "");
+    await expect(page.locator("[data-track-location-form]")).not.toHaveAttribute("inert", "");
+    await expect(page.locator('[data-track-reschedule-form] select[name="requested_date"]')).toBeDisabled();
+    await expect(page.locator('[data-track-reschedule-form] textarea[name="notes"]')).toBeDisabled();
+    await expect(page.locator('[data-track-location-form] textarea[name="address_text"]')).toBeDisabled();
+
+    await expect(page.locator("[data-lang-toggle]")).toBeDisabled();
+    await page.locator("[data-lang-toggle]").evaluate((button) => {
+      button.dispatchEvent(new Event("click", { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.locator('[data-track-reschedule-form] select[name="requested_date"]')).toBeDisabled();
+    await expect(page.locator('[data-track-reschedule-form] textarea[name="notes"]')).toBeDisabled();
+    await expect(page.locator('[data-track-reschedule-form] button[type="submit"]')).toBeDisabled();
+    await expect(page.locator('[data-track-location-form] textarea[name="address_text"]')).toBeDisabled();
+    await expect(page.locator("[data-track-reschedule-status]")).toHaveAttribute("aria-live", "polite");
+    await expect(page.locator("[data-track-reschedule-status]")).not.toBeEmpty();
+
+    await page.locator("[data-track-location-form]").evaluate((form) => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator("[data-track-reschedule-status]")).toContainText("Working on your request");
+    await expect(page.locator('[data-track-reschedule-form] button[type="submit"]')).toBeDisabled();
+    await expect(page.locator('[data-track-location-form] button[type="submit"]')).toBeDisabled();
+    expect(locationCalls).toBe(0);
+
+    releaseReschedule?.();
+    await expect(page.locator("[data-track-reschedule-status]")).toContainText("Change applied");
+    await expect(page.locator('[data-track-reschedule-form] select[name="requested_date"]')).toBeEnabled();
+    await expect(page.locator('[data-track-location-form] textarea[name="address_text"]')).toBeEnabled();
+    await expect(page.locator("[data-lang-toggle]")).toBeEnabled();
+    expect(locationCalls).toBe(0);
+  });
+
+  test("keeps lookup active when Back invalidates a delayed verification", async ({ page }) => {
+    let verifyStarted = false;
+    let releaseVerify: (() => void) | null = null;
+    const verifyGate = new Promise<void>((resolve) => {
+      releaseVerify = resolve;
+    });
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        if (body.phone_last3 === "456") {
+          await routePayload({ ...secondTrackingPayload, session_token: "sess-current-after-back" })(route);
+          return;
+        }
+        verifyStarted = true;
+        await verifyGate;
+        try {
+          await routePayload({ ...trackingPayload, session_token: "sess-superseded-by-back" })(route);
+        } catch {
+          // Back aborts this superseded browser request.
+        }
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    await expect.poll(() => verifyStarted).toBe(true);
+    await expect(page.locator("[data-track-verify-status]")).toContainText("Working on your request");
+
+    await page.locator("[data-track-back]").click();
+    await expect(page.locator('[data-track-stage="lookup"]')).toBeVisible();
+    await expect(page.locator("[data-track-verify-status]")).toBeEmpty();
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0002");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("456");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-shipment-tracking]')).toHaveText("TRK-2026-0002");
+    await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("masarx_tracking_session_v1"))).toBe(
+      "sess-current-after-back",
+    );
+
+    releaseVerify?.();
+    await expect(page.locator('[data-track-shipment-tracking]')).toHaveText("TRK-2026-0002");
+    await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("masarx_tracking_session_v1"))).toBe(
+      "sess-current-after-back",
+    );
+  });
+
+  test("keeps reset blocked until an active mutation settles", async ({ page }) => {
+    let mutationStarted = false;
+    let releaseMutation: (() => void) | null = null;
+    const mutationGate = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        await routePayload(
+          body.reference === "TRK-2026-0002"
+            ? { ...secondTrackingPayload, session_token: "sess-current-after-reset" }
+            : { ...trackingPayload, session_token: "sess-reset" },
+        )(route);
+        return;
+      }
+      if (url.pathname.endsWith("/request")) {
+        expect(body.request_type).toBe("reschedule_date");
+        mutationStarted = true;
+        await mutationGate;
+        await routePayload({ ok: true, outcome: "applied", tracking: trackingPayload.tracking })(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    await page.locator("[data-track-date-select]").selectOption("2026-03-08");
+    await page.locator('[data-track-reschedule-form] button[type="submit"]').click();
+    await expect.poll(() => mutationStarted).toBe(true);
+    await expect(page.locator("[data-track-reschedule-status]")).toContainText("Working on your request");
+
+    await page.locator("[data-track-reset]").last().click();
+    await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
+    await expect(page.locator("[data-track-reschedule-status]")).toContainText("Working on your request");
+
+    releaseMutation?.();
+    await expect(page.locator("[data-track-reschedule-status]")).toContainText("Change applied");
+
+    await page.locator("[data-track-reset]").last().click();
+    await expect(page.locator('[data-track-stage="lookup"]')).toBeVisible();
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0002");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("456");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-shipment-tracking]')).toHaveText("TRK-2026-0002");
+    await expect.poll(() => page.evaluate(() => window.sessionStorage.getItem("masarx_tracking_session_v1"))).toBe(
+      "sess-current-after-reset",
+    );
+
+  });
+
+  test("keeps reschedule disabled when the mutation readback removes availability", async ({ page }) => {
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/verify")) {
+        await routePayload({ ...trackingPayload, session_token: "sess-demo-policy-restore" })(route);
+        return;
+      }
+      if (url.pathname.endsWith("/request")) {
+        expect(body.request_type).toBe("reschedule_date");
+        await routePayloadWithDelay(
+          {
+            ok: true,
+            submitted: true,
+            outcome: "applied",
+            support_case_id: "11111111-1111-1111-1111-111111111111",
+            tracking: {
+              ...trackingPayload.tracking,
+              actions: {
+                ...trackingPayload.tracking.actions,
+                reschedule: {
+                  enabled: true,
+                  available_dates: [],
+                },
+              },
+            },
+          },
+          200,
+          200,
+        )(route);
+        return;
+      }
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
+
+    const rescheduleForm = page.locator("[data-track-reschedule-form]");
+    await rescheduleForm.locator('select[name="requested_date"]').selectOption("2026-03-08");
+    await rescheduleForm.locator('button[type="submit"]').click();
+
+    await expect(page.locator("[data-track-reschedule-status]")).toContainText("Change applied");
+    await expect(rescheduleForm.locator('select[name="requested_date"]')).toBeDisabled();
+    await expect(rescheduleForm.locator('textarea[name="notes"]')).toBeDisabled();
+    await expect(rescheduleForm.locator('button[type="submit"]')).toBeDisabled();
   });
 
   test("uses hidden turnstile response input as a token fallback", async ({ page }) => {
@@ -501,6 +1249,7 @@ test.describe("landing tracking", () => {
     await page.goto("/track/?motion=off");
     await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
     await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
     await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
     await page.locator('[data-track-verify-form] button[type="submit"]').click();
 
@@ -574,6 +1323,7 @@ test.describe("landing tracking", () => {
 
     await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0002");
     await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
     await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("456");
     await page.locator('[data-track-verify-form] button[type="submit"]').click();
 

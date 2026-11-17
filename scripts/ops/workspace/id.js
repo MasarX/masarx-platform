@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 const crypto = require('crypto');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const {
+  assertCommandDidNotTimeOut,
+  runBoundedSyncCommand,
+} = require('./bounded-sync-command');
 
-function shell(cmd, args) {
-  const res = spawnSync(cmd, args, { encoding: 'utf8' });
-  return res.status === 0 ? res.stdout.trim() : '';
+function shell(cmd, args, options = {}) {
+  const result = runBoundedSyncCommand(cmd, args, options);
+  assertCommandDidNotTimeOut(result, `[workspace/id] ${cmd} identity probe`);
+  return result.ok ? result.stdout.trim() : '';
 }
 
 function slugify(s) {
@@ -16,14 +20,15 @@ function slugify(s) {
     .slice(0, 32);
 }
 
-function computeWorkspaceId() {
-  const explicit = String(process.env.WORKSPACE_NAME || '').trim();
+function computeWorkspaceId(options = {}) {
+  const env = options.env || process.env;
+  const explicit = String(env.WORKSPACE_NAME || '').trim();
   if (explicit) return explicit;
-  const user = process.env.CI
-    ? (process.env.GITHUB_ACTOR || 'ci')
-    : (shell('git', ['config', 'user.name']) || process.env.USER || 'local');
+  const user = env.CI
+    ? (env.GITHUB_ACTOR || 'ci')
+    : (shell('git', ['config', 'user.name'], { ...options, env }) || env.USER || 'local');
   const owner = slugify(user) || 'user';
-  const root = shell('git', ['rev-parse', '--show-toplevel']) || process.cwd();
+  const root = shell('git', ['rev-parse', '--show-toplevel'], { ...options, env }) || options.cwd || process.cwd();
   const cwd = path.resolve(root);
   const suffix = crypto.createHash('sha1').update(cwd).digest('hex').slice(0, 8);
   return `wk-${owner}-${suffix}`;
@@ -33,4 +38,4 @@ if (require.main === module) {
   console.log(computeWorkspaceId());
 }
 
-module.exports = { computeWorkspaceId };
+module.exports = { computeWorkspaceId, shell };

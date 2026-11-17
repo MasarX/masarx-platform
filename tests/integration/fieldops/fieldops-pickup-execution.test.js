@@ -7,6 +7,8 @@ const {
   createUser,
   createSender,
   setAuthContext,
+  withFixtureAdminContext,
+  setServiceContext: setCanonicalServiceContext,
 } = require('../helpers/tenant-utils');
 const {
   createPickupRequest,
@@ -43,33 +45,23 @@ describe('FieldOps pickup execution contract', () => {
   });
 
   async function setServiceContext(organizationId, userId) {
-    await client.query('SET LOCAL ROLE service_role');
-
-    const claims = {
-      role: 'service_role',
-      sub: userId,
-      organization_id: organizationId,
-    };
-
-    await client.query('SELECT set_config($1, $2, true)', [
-      'request.jwt.claims',
-      JSON.stringify(claims),
-    ]);
-    await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', String(userId)]);
+    await setCanonicalServiceContext(client, userId, organizationId);
   }
 
   async function runDomainEventsWorkerOnce() {
-    await client.query(
-      `INSERT INTO cron_config (worker_name, interval_seconds, batch_size, enabled, notes)
-       VALUES ('domain_events_worker', 60, 50, true, 'integration ensure worker throttle')
-       ON CONFLICT (worker_name)
-       DO UPDATE SET enabled = true, interval_seconds = EXCLUDED.interval_seconds, batch_size = EXCLUDED.batch_size`
-    );
-    await client.query(
-      `UPDATE cron_config
-          SET last_run_at = now() - interval '5 minutes'
-        WHERE worker_name = 'domain_events_worker'`
-    );
+    await withFixtureAdminContext(client, async () => {
+      await client.query(
+        `INSERT INTO cron_config (worker_name, interval_seconds, batch_size, enabled, notes)
+         VALUES ('domain_events_worker', 60, 50, true, 'integration ensure worker throttle')
+         ON CONFLICT (worker_name)
+         DO UPDATE SET enabled = true, interval_seconds = EXCLUDED.interval_seconds, batch_size = EXCLUDED.batch_size`
+      );
+      await client.query(
+        `UPDATE cron_config
+            SET last_run_at = now() - interval '5 minutes'
+          WHERE worker_name = 'domain_events_worker'`
+      );
+    });
 
     await client.query(`SELECT run_domain_events_worker()`);
   }
@@ -77,11 +69,13 @@ describe('FieldOps pickup execution contract', () => {
   async function waitForDomainEventWorkflowRun(domainEventId, maxAttempts = 50) {
     for (let i = 0; i < maxAttempts; i += 1) {
       await runDomainEventsWorkerOnce();
-      const { rows } = await client.query(
-        `SELECT workflow_run_id
-           FROM domain_events
-          WHERE id = $1::uuid`,
-        [domainEventId]
+      const { rows } = await withFixtureAdminContext(client, () =>
+        client.query(
+          `SELECT workflow_run_id
+             FROM domain_events
+            WHERE id = $1::uuid`,
+          [domainEventId]
+        )
       );
       const workflowRunId = rows[0]?.workflow_run_id ?? null;
       if (workflowRunId) {
@@ -92,14 +86,30 @@ describe('FieldOps pickup execution contract', () => {
   }
 
   async function progressWorkflowFully(workflowRunId) {
+    let result;
     for (let i = 0; i < 50; i += 1) {
       const { rows } = await client.query(`SELECT progress_workflow_run($1::uuid) AS result`, [
         workflowRunId,
       ]);
-      const result = rows[0]?.result;
+      result = rows[0]?.result;
       if (!result?.step_id) break;
-      if (result.status === 'failed') break;
+      if (['failed', 'cancelled', 'blocked', 'waiting', 'pending', 'in_progress'].includes(result.status)) break;
     }
+    const { rows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
+      `SELECT wr.workflow_status AS status, wr.context,
+              (SELECT jsonb_agg(to_jsonb(step) ORDER BY step.sequence_order)
+                 FROM workflow_run_steps step
+                WHERE step.workflow_run_id = wr.id) AS steps
+         FROM workflow_runs wr
+        WHERE wr.id = $1::uuid`,
+      [workflowRunId]
+    ));
+    const workflow = rows[0];
+    if (workflow?.status !== 'completed'
+      || ['failed', 'cancelled', 'blocked', 'waiting', 'pending', 'in_progress'].includes(result?.status)) {
+      throw new Error(`Pickup fixture workflow did not settle: ${JSON.stringify({ workflowRunId, result, workflow })}`);
+    }
+    return workflow;
   }
 
   async function seedPickupRouteStopTask() {
@@ -138,6 +148,18 @@ describe('FieldOps pickup execution contract', () => {
       }
     );
 
+    // Exercise the supported route-created / task-fanout-pending boundary deterministically.
+    await withFixtureAdminContext(client, (adminClient) => adminClient.query(
+      `SELECT public.upsert_settings_value_v1(
+         'pickup_policy', 'tenant', $1::uuid,
+         jsonb_set((SELECT value FROM public.resolve_pickup_policy(
+           jsonb_build_object('organization_id', $1::uuid)
+         ) LIMIT 1), '{wave,inline_max_steps}', '1'::jsonb, true),
+         1, 'integration one-step pickup wave fixture'
+       )`,
+      [organizationId]
+    ));
+
     const wave = await createPickupWave(
       client,
       {
@@ -152,21 +174,31 @@ describe('FieldOps pickup execution contract', () => {
     const shipmentId = pickupRequest.shipment_id;
     const routeStopId = wave.stop_ids[0];
     expect(routeStopId).toBeTruthy();
+    expect(wave.workflow_run_id).toBeTruthy();
 
-    const { rows: taskRows } = await client.query(
-      `SELECT t.id AS task_id
-         FROM tasks t
-         JOIN task_types tt
-           ON tt.id = t.task_type_id
-        WHERE t.organization_id = $1::uuid
-          AND t.resource_type = 'route_stop'
-          AND t.resource_id = $2::uuid
-          AND tt.key = 'route_stop_execute'
-        LIMIT 1`,
-      [organizationId, routeStopId]
+    const workflow = await progressWorkflowFully(wave.workflow_run_id);
+    expect(workflow.context?.dispatch_tasks?.count).toBe(1);
+    expect(workflow.context?.dispatch_tasks?.task_ids).toHaveLength(1);
+    await progressWorkflowFully(wave.workflow_run_id);
+
+    const { rows: taskRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT t.id AS task_id, t.metadata->>'parent_workflow_run_id' AS parent_workflow_run_id
+           FROM tasks t
+           JOIN task_types tt
+             ON tt.id = t.task_type_id
+          WHERE t.organization_id = $1::uuid
+            AND t.resource_type = 'route_stop'
+            AND t.resource_id = $2::uuid
+            AND tt.key = 'route_stop_execute'`,
+        [organizationId, routeStopId]
+      )
     );
+    expect(taskRows).toHaveLength(1);
     const routeStopTaskId = taskRows[0]?.task_id;
     expect(routeStopTaskId).toBeTruthy();
+    expect(routeStopTaskId).toBe(workflow.context.dispatch_tasks.task_ids[0]);
+    expect(taskRows[0].parent_workflow_run_id).toBe(wave.workflow_run_id);
 
     return {
       organizationId,
@@ -197,39 +229,62 @@ describe('FieldOps pickup execution contract', () => {
   }
 
   async function getTaskRow(taskId) {
-    const { rows } = await client.query(
-      `SELECT id, status, status_reason, completed_at
-         FROM tasks
-        WHERE id = $1::uuid
-        LIMIT 1`,
-      [taskId]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id, status, status_reason, completed_at
+           FROM tasks
+          WHERE id = $1::uuid
+          LIMIT 1`,
+        [taskId]
+      )
     );
     return rows[0] ?? null;
   }
 
   async function getLatestTaskEvent(taskId) {
-    const { rows } = await client.query(
-      `SELECT payload
-         FROM task_events
-        WHERE task_id = $1::uuid
-          AND event_type = 'status_changed'
-        ORDER BY task_version DESC, created_at DESC, id DESC
-        LIMIT 1`,
-      [taskId]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT payload
+           FROM task_events
+          WHERE task_id = $1::uuid
+            AND event_type = 'status_changed'
+          ORDER BY task_version DESC, created_at DESC, id DESC
+          LIMIT 1`,
+        [taskId]
+      )
     );
     return rows[0]?.payload ?? null;
   }
 
   async function getShipmentStatus(shipmentId, clientId) {
-    const { rows } = await client.query(
-      `SELECT status
-         FROM shipments
-        WHERE id = $1::uuid
-          AND client_id = $2::uuid
-        LIMIT 1`,
-      [shipmentId, clientId]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT status
+           FROM shipments
+          WHERE id = $1::uuid
+            AND client_id = $2::uuid
+          LIMIT 1`,
+        [shipmentId, clientId]
+      )
     );
     return rows[0]?.status ?? null;
+  }
+
+  async function getLatestRouteStopCompletionEventId(seed) {
+    const { rows } = await withFixtureAdminContext(client, (adminClient) =>
+      adminClient.query(
+        `SELECT id
+           FROM domain_events
+          WHERE organization_id = $1::uuid
+            AND event_type = 'task.completed.route_stop_execute'
+            AND resource_type = 'route_stop'
+            AND resource_id = $2::uuid
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [seed.organizationId, seed.routeStopId]
+      )
+    );
+    return rows[0]?.id ?? null;
   }
 
   test('pickup completion captures quantity and handover payload then finalizes the stop', async () => {
@@ -261,18 +316,7 @@ describe('FieldOps pickup execution contract', () => {
     expect(taskEventPayload?.handover_notes).toContain('front desk');
     expect(taskEventPayload?.receipt_context).toContain('Dock 7');
 
-    const { rows: domainEventRows } = await client.query(
-      `SELECT id
-         FROM domain_events
-        WHERE organization_id = $1::uuid
-          AND event_type = 'task.completed.route_stop_execute'
-          AND resource_type = 'route_stop'
-          AND resource_id = $2::uuid
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [seed.organizationId, seed.routeStopId]
-    );
-    const domainEventId = domainEventRows[0]?.id;
+    const domainEventId = await getLatestRouteStopCompletionEventId(seed);
     expect(domainEventId).toBeTruthy();
 
     await setServiceContext(seed.organizationId, seed.dispatcherUserId);
@@ -310,18 +354,7 @@ describe('FieldOps pickup execution contract', () => {
     expect(taskEventPayload?.exception_reason).toBe('pickup_not_ready');
     expect(taskEventPayload?.status_reason).toBe('pickup_not_ready');
 
-    const { rows: domainEventRows } = await client.query(
-      `SELECT id
-         FROM domain_events
-        WHERE organization_id = $1::uuid
-          AND event_type = 'task.completed.route_stop_execute'
-          AND resource_type = 'route_stop'
-          AND resource_id = $2::uuid
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [seed.organizationId, seed.routeStopId]
-    );
-    const domainEventId = domainEventRows[0]?.id;
+    const domainEventId = await getLatestRouteStopCompletionEventId(seed);
     expect(domainEventId).toBeTruthy();
 
     await setServiceContext(seed.organizationId, seed.dispatcherUserId);

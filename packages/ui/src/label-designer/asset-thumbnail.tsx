@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import type { AssetItem } from "./types";
+import { resolveTrustedExternalDataUrl } from "../url-guard";
 
 type AssetThumbnailProps = {
   asset: AssetItem;
@@ -20,6 +21,9 @@ export function AssetThumbnail({
   const [imgError, setImgError] = React.useState(false);
 
   const isImage = /\.(png|jpg|jpeg|gif|svg|webp)$/i.test(asset.name);
+  const trustedSignedUrl = signedUrl
+    ? resolveTrustedExternalDataUrl(signedUrl)
+    : null;
 
   return (
     <button
@@ -29,9 +33,9 @@ export function AssetThumbnail({
       title={asset.name}
       data-testid={`${prefix}-${asset.name}`}
     >
-      {signedUrl && isImage && !imgError ? (
+      {trustedSignedUrl && isImage && !imgError ? (
         <img
-          src={signedUrl}
+          src={trustedSignedUrl}
           alt={asset.name}
           className="h-full w-full object-contain"
           loading="lazy"

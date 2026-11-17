@@ -6,6 +6,7 @@ const { removeStoragePaths } = require('../../../scripts/utils/supabase-storage'
 const { verifySignedUrl } = require('../workflows/helpers/label-print-helpers');
 const { ensureStorageBucket, uploadStorageObject, resolveStorageAdminKey } = require('../helpers/storage-admin');
 const { fetchJsonWithRetry, truncateText } = require('../helpers/http');
+const { applySetting } = require('../helpers/tenant-utils');
 
 loadEnv();
 
@@ -96,7 +97,6 @@ if (
       const labelBucket =
         process.env.LABEL_RENDER_BUCKET || process.env.LABEL_RENDERER_BUCKET || 'labels';
 
-      const settingsVersionId = randomUUID();
       const storageFiles = [];
       let bundlePath = null;
 
@@ -168,24 +168,18 @@ if (
           ...(globalPolicy && typeof globalPolicy === 'object' ? globalPolicy : {}),
           bundle_download_concurrency: 25,
           bundle_chunk_size: 1,
+          print_sync_bundle_return_mode: 'signed_url',
         };
 
-        await client.query(
-          `INSERT INTO settings_versions (
-             id, category, scope_type, scope_id, version, value, schema_version,
-             change_reason, approved_at, effective_from
-           )
-           VALUES (
-             $1::uuid, 'label_print_policy', 'tenant', $2::uuid, 1, $3::jsonb, 1,
-             'test: bundle order concurrency/chunking', now(), now()
-           )`,
-          [settingsVersionId, orgId, JSON.stringify(tenantPolicy)],
-        );
-        await client.query(
-          `INSERT INTO settings (category, scope_type, scope_id, settings_version_id, cached_value, last_updated)
-           VALUES ('label_print_policy', 'tenant', $1::uuid, $2::uuid, $3::jsonb, now())`,
-          [orgId, settingsVersionId, JSON.stringify(tenantPolicy)],
-        );
+        // Organization onboarding already seeds an active tenant policy.
+        await applySetting(client, {
+          category: 'label_print_policy',
+          scopeType: 'tenant',
+          scopeId: orgId,
+          value: tenantPolicy,
+          approvedAt: new Date().toISOString(),
+          changeReason: 'test: bundle order concurrency/chunking',
+        });
 
         // Upload three PDFs with distinct page sizes so we can assert order without text extraction.
         const files = [
@@ -311,8 +305,8 @@ if (
             [orgId],
           );
           await client.query(
-            `DELETE FROM settings_versions WHERE id = $1::uuid AND scope_id = $2::uuid`,
-            [settingsVersionId, orgId],
+            `DELETE FROM settings_versions WHERE category = 'label_print_policy' AND scope_type = 'tenant' AND scope_id = $1::uuid`,
+            [orgId],
           );
 
           await deleteDecisionLogs(orgId);

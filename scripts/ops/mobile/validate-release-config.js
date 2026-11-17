@@ -116,13 +116,76 @@ function buildValidationPlan({
   };
 }
 
-function runStep({ step, cwd, env, spawnSyncImpl = spawnSync }) {
-  const result = spawnSyncImpl(step.cmd, step.args, {
+function resolveNpmCliScript({
+  command,
+  fsExistsSync = fs.existsSync,
+  nodeExecPath = process.execPath,
+} = {}) {
+  const normalizedCommand = normalizeString(command).toLowerCase();
+  if (!/^(npm|npx)$/.test(normalizedCommand)) return '';
+  const scriptName = normalizedCommand === 'npm' ? 'npm-cli.js' : 'npx-cli.js';
+  const candidate = path.join(path.dirname(nodeExecPath), 'node_modules', 'npm', 'bin', scriptName);
+  return fsExistsSync(candidate) ? candidate : '';
+}
+
+function resolveSpawnInvocation({
+  args = [],
+  command,
+  fsExistsSync = fs.existsSync,
+  nodeExecPath = process.execPath,
+  platform = process.platform,
+} = {}) {
+  const normalizedCommand = normalizeString(command);
+  const isWindows = platform.startsWith('win');
+  if (isWindows && /^(npm|npx)$/i.test(normalizedCommand)) {
+    const npmCliScript = resolveNpmCliScript({
+      command: normalizedCommand,
+      fsExistsSync,
+      nodeExecPath,
+    });
+    if (npmCliScript) {
+      return {
+        args: [npmCliScript, ...args],
+        cmd: nodeExecPath,
+        shell: false,
+        windowsHide: true,
+      };
+    }
+    throw new Error(
+      `[mobile-validate-release-config] Unable to resolve a shell-free Windows ${normalizedCommand} CLI from ${nodeExecPath}.`,
+    );
+  }
+  return {
+    args,
+    cmd: normalizedCommand,
+    shell: false,
+    windowsHide: isWindows,
+  };
+}
+
+function runStep({
+  step,
+  cwd,
+  env,
+  fsExistsSync = fs.existsSync,
+  nodeExecPath = process.execPath,
+  platform = process.platform,
+  spawnSyncImpl = spawnSync,
+}) {
+  const invocation = resolveSpawnInvocation({
+    args: step.args,
+    command: step.cmd,
+    fsExistsSync,
+    nodeExecPath,
+    platform,
+  });
+  const result = spawnSyncImpl(invocation.cmd, invocation.args, {
     cwd,
     env,
     encoding: 'utf8',
     stdio: 'inherit',
-    shell: process.platform.startsWith('win') && step.cmd.toLowerCase() === 'npm',
+    shell: invocation.shell,
+    windowsHide: invocation.windowsHide,
   });
   if (result?.error) {
     throw new Error(`[mobile-validate-release-config] ${step.label} failed: ${result.error.message}`);
@@ -141,6 +204,9 @@ function runValidation(options = {}) {
       step,
       cwd: plan.appDir,
       env: plan.env,
+      fsExistsSync: options.fsExistsSync || fs.existsSync,
+      nodeExecPath: options.nodeExecPath || process.execPath,
+      platform: options.processPlatform || process.platform,
       spawnSyncImpl: options.spawnSyncImpl || spawnSync,
     });
   }
@@ -175,6 +241,8 @@ module.exports = {
   buildValidationPlan,
   loadEasProfileEnv,
   parseArgs,
+  resolveNpmCliScript,
+  resolveSpawnInvocation,
   resolveAppDir,
   runStep,
   runValidation,

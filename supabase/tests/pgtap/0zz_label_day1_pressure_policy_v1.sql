@@ -1,0 +1,11 @@
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap;
+SET LOCAL search_path TO public,pgtap,extensions,pg_temp;
+SELECT plan(5);
+SELECT ok(EXISTS(SELECT 1 FROM public.schema_registry WHERE category='label_print_policy' AND is_active),'active label print schema exists');
+SELECT is((SELECT count(*) FROM public.schema_registry WHERE category='label_print_policy' AND is_active AND jsonb_typeof(schema#>'{properties,day1_onboarding_pressure}')='object'),(SELECT count(*) FROM public.schema_registry WHERE category='label_print_policy' AND is_active),'all active label print schemas expose the optional load profile');
+SELECT ok(NOT EXISTS(SELECT 1 FROM public.schema_registry WHERE category='label_print_policy' AND is_active AND (schema#>'{properties,day1_onboarding_pressure,required}') IS NOT NULL),'load profile introduces no required policy values');
+SELECT ok(NOT EXISTS(SELECT 1 FROM public.schema_registry WHERE category='label_print_policy' AND is_active AND schema#>'{properties,day1_onboarding_pressure,properties,label_http_retry_attempts}' IS DISTINCT FROM '{"type":"integer","minimum":1,"maximum":10}'::jsonb),'attempt counts use whole numbers from one through ten');
+SELECT ok(NOT EXISTS(SELECT 1 FROM public.schema_registry WHERE category='label_print_policy' AND is_active AND schema#>'{properties,day1_onboarding_pressure,properties,label_http_retry_jitter_ms}' IS DISTINCT FROM '{"type":"integer","minimum":0}'::jsonb),'zero jitter remains valid');
+SELECT * FROM finish();
+ROLLBACK;

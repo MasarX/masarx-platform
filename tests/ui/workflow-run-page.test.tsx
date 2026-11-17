@@ -20,6 +20,7 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("../../packages/ui/src/i18n", () => ({
+  ...jest.requireActual("../../packages/ui/src/i18n"),
   createUiTranslator: () => (key: string) => {
     if (key === "actions.testRun") return "Run test";
     if (key === "actions.testRunModal.title") return "Run workflow";
@@ -47,10 +48,23 @@ import { createUiServerClient } from "@masarx/api/server";
 import { renderWithIntl } from "./test-utils";
 
 const mockedCreateUiServerClient = createUiServerClient as unknown as jest.Mock;
+const originalTrustedExternalDataOrigins =
+  process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS;
 
 describe("WorkflowRunPage", () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS =
+      "https://example.com";
+  });
+
+  afterEach(() => {
+    if (originalTrustedExternalDataOrigins === undefined) {
+      delete process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS;
+    } else {
+      process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS =
+        originalTrustedExternalDataOrigins;
+    }
   });
 
   it("surfaces output links found in workflow run context and metadata", async () => {
@@ -69,7 +83,10 @@ describe("WorkflowRunPage", () => {
           },
         },
         metadata: {
-          results: [{ url: "https://example.com/extra" }],
+          results: [
+            { url: "https://example.com/extra" },
+            { url: "https://example.com.evil.test/phish" },
+          ],
         },
       }),
       listResource: jest.fn().mockResolvedValue({
@@ -101,6 +118,18 @@ describe("WorkflowRunPage", () => {
         (link) => link.getAttribute("href") === "https://example.com/labels.pdf"
       )
     ).toBe(true);
+    expect(
+      screen.getByText("https://example.com.evil.test/phish")
+    ).toBeInTheDocument();
+    expect(
+      openLinks.some(
+        (link) =>
+          link.getAttribute("href") === "https://example.com.evil.test/phish"
+      )
+    ).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Copy metadata.results[1].url" })
+    ).toBeInTheDocument();
   });
 
   it("renders replay action and template shortcut when workflow template id is available", async () => {

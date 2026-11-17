@@ -193,16 +193,27 @@ const uploadErrorExport = async ({ run, rows, pgClient }) => {
   };
 };
 
-const createOperationReport = async ({ run, errorExport, failedRows }) => {
-  if (run.report_id) return run.report_id;
+const createOperationReport = async ({ run, errorExport, failedRows, pgClient }) => {
 
   const status = String(run.status || '').toLowerCase() === 'failed' ? 'failed' : 'succeeded';
-  const nextSteps = [];
-  if ((run.failed_count || 0) > 0 || (run.skipped_count || 0) > 0 || (run.blocked_count || 0) > 0) {
-    nextSteps.push('Download the annotated error export and correct the blocked or skipped rows before retrying.');
-  }
-  if ((run.created_count || 0) > 0 || (run.updated_count || 0) > 0) {
-    nextSteps.push('Review the imported records in the destination table or import history.');
+  const nextStepsResult = await pgClient.query(
+    `select public.tabular_import_execution_next_steps_v1($1::int, $2::int, $3::int, $4::int, $5::int) as next_steps`,
+    [run.created_count, run.updated_count, run.skipped_count, run.failed_count, run.blocked_count],
+  );
+  const nextSteps = nextStepsResult.rows[0].next_steps;
+  if (run.report_id) {
+    if (nextSteps.length > 0) {
+      await pgClient.query(
+        `update public.mapping_operation_reports
+            set next_steps = $2::jsonb,
+                updated_at = now()
+          where id = $1
+            and organization_id = $3
+            and next_steps = '[]'::jsonb`,
+        [run.report_id, JSON.stringify(nextSteps), run.organization_id],
+      );
+    }
+    return run.report_id;
   }
 
   const report = await rpc('ui_create_mapping_operation_report_v1', {
@@ -254,49 +265,71 @@ const createOperationReport = async ({ run, errorExport, failedRows }) => {
 };
 
 const finalizeRun = async ({ runId, pgClient }) => {
-  const runResult = await pgClient.query(
-    `select *
-       from public.tabular_import_runs
-      where id = $1`,
-    [runId],
-  );
-  const run = runResult.rows[0];
-  if (!run) return null;
-
-  const failedRowsResult = await pgClient.query(
-    `select row_number, action, execution_status, original_row, reason_codes, reason_messages
-       from public.tabular_import_run_rows
-      where run_id = $1
-        and (
-          action in ('skip', 'block', 'failed')
-          or execution_status in ('skipped', 'blocked', 'failed')
-        )
-      order by row_number asc`,
-    [runId],
-  );
-  const failedRows = failedRowsResult.rows;
-
-  let errorExport = null;
-  if (failedRows.length > 0 && !run.error_artifact_id) {
-    errorExport = await uploadErrorExport({ run, rows: failedRows, pgClient });
-  }
-
-  const reportId = await createOperationReport({ run, errorExport, failedRows });
-  if (reportId || errorExport?.artifactId) {
-    await pgClient.query(
-      `update public.tabular_import_runs
-          set report_id = coalesce($2::uuid, report_id),
-              error_artifact_id = coalesce($3::uuid, error_artifact_id),
-              updated_at = now()
-        where id = $1`,
-      [runId, reportId, errorExport?.artifactId || null],
+  await pgClient.query('BEGIN');
+  try {
+    const runResult = await pgClient.query(
+      `select r.*
+         from public.tabular_import_runs r
+        where r.status in ('completed', 'completed_with_errors', 'failed')
+          and (
+            r.id = $1::uuid
+            or ($1::uuid is null and r.error_artifact_id is null and exists (
+              select 1 from public.tabular_import_run_rows rr
+               where rr.run_id = r.id
+                 and (rr.action in ('skip', 'block', 'failed')
+                   or rr.execution_status in ('skipped', 'blocked', 'failed'))
+            ))
+          )
+        order by r.completed_at asc nulls last, r.id
+        limit 1
+        for update of r skip locked`,
+      [runId || null],
     );
-  }
+    const run = runResult.rows[0];
+    if (!run) {
+      await pgClient.query('COMMIT');
+      return null;
+    }
 
-  return {
-    reportId,
-    errorArtifactId: errorExport?.artifactId || run.error_artifact_id || null,
-  };
+    const failedRowsResult = await pgClient.query(
+      `select row_number, action, execution_status, original_row, reason_codes, reason_messages
+         from public.tabular_import_run_rows
+        where run_id = $1
+          and (
+            action in ('skip', 'block', 'failed')
+            or execution_status in ('skipped', 'blocked', 'failed')
+          )
+        order by row_number asc`,
+      [run.id],
+    );
+    const failedRows = failedRowsResult.rows;
+
+    let errorExport = null;
+    if (failedRows.length > 0 && !run.error_artifact_id) {
+      errorExport = await uploadErrorExport({ run, rows: failedRows, pgClient });
+    }
+
+    const reportId = await createOperationReport({ run, errorExport, failedRows, pgClient });
+    if (reportId || errorExport?.artifactId) {
+      await pgClient.query(
+        `update public.tabular_import_runs
+            set report_id = coalesce($2::uuid, report_id),
+                error_artifact_id = coalesce($3::uuid, error_artifact_id),
+                updated_at = now()
+          where id = $1`,
+        [run.id, reportId, errorExport?.artifactId || null],
+      );
+    }
+
+    await pgClient.query('COMMIT');
+    return {
+      reportId,
+      errorArtifactId: errorExport?.artifactId || run.error_artifact_id || null,
+    };
+  } catch (error) {
+    await pgClient.query('ROLLBACK');
+    throw error;
+  }
 };
 
 const processClaim = async (claim, pgClient) => {
@@ -308,12 +341,19 @@ const processClaim = async (claim, pgClient) => {
   });
 
   let result = null;
+  let processedCount = -1;
   do {
     result = toRecord(await rpc('process_tabular_import_run_v1', {
       p_run_id: claim.run_id,
       p_batch_size: batchSize,
     })) || {};
-  } while ((result.status === 'processing' || result.status === 'queued') && Number(result.remaining || 0) > 0);
+    if (result.status !== 'processing' && result.status !== 'queued') break;
+    const nextProcessedCount = Number(result.created_count) + Number(result.updated_count) + Number(result.failed_count);
+    if (!Number.isSafeInteger(nextProcessedCount) || nextProcessedCount <= processedCount) {
+      throw new Error(`Tabular import ${claim.run_id} made no processing progress.`);
+    }
+    processedCount = nextProcessedCount;
+  } while (true);
 
   if (String(result.status || '').toLowerCase() !== 'processing') {
     await finalizeRun({ runId: claim.run_id, pgClient });
@@ -338,6 +378,18 @@ const main = async () => {
       }));
 
       if (!claim) {
+        // Kickoff can finish a run before its worker claims the task.
+        let finalized = null;
+        try {
+          finalized = await finalizeRun({ pgClient });
+        } catch (error) {
+          emitTraceWithContext(ctx, 'error', {
+            event: 'tabular_import.finalize_failed',
+            worker_id: workerId,
+            error_message: error instanceof Error ? error.message : String(error),
+          });
+        }
+        if (finalized && !once) continue;
         if (once) break;
         await sleep(pollMs);
         continue;

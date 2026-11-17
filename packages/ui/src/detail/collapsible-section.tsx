@@ -54,7 +54,7 @@ export function CollapsibleSection({
   }, [defaultOpen, storageKey]);
 
   const handleToggle = React.useCallback(
-    (event: React.SyntheticEvent<HTMLDetailsElement>) => {
+    (event: React.ToggleEvent<HTMLDetailsElement>) => {
       const nextOpen = event.currentTarget.open;
       setOpen(nextOpen);
       persistCollapsed(storageKey, !nextOpen);

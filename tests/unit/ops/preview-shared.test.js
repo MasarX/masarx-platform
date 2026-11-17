@@ -10,6 +10,7 @@ const {
   evaluateManifestReuseHealth,
   evaluateManifestRuntimeReadiness,
   normalizeSurfaceUrlValue,
+  parseLastJsonFromText,
   parseRequiredSurfaceIds,
   resolveSurfaceUrl,
   resolveTopologyIdentity,
@@ -17,6 +18,16 @@ const {
 } = require('../../../scripts/ops/preview/shared');
 
 describe('preview/shared', () => {
+  test('parses the final nested JSON object after provider log output', () => {
+    const payload = {
+      ok: true,
+      deployment_id: 'dpl_console123',
+      preview_identity: { topology: 'pr', id: '3270', surface: 'console' },
+    };
+    expect(parseLastJsonFromText(`provider log\n${JSON.stringify(payload, null, 2)}\n`)).toEqual(payload);
+    expect(parseLastJsonFromText('provider log without JSON')).toBeNull();
+  });
+
   test('resolveTopologyIdentity builds deterministic topology keys', () => {
     const identity = resolveTopologyIdentity({
       args: {

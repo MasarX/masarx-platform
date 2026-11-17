@@ -55,6 +55,12 @@ describe('workspace/preview-branch-parent', () => {
     expect(shouldFallbackToProjectMode({ status: 400, message: 'Resource has been removed' })).toBe(true);
     expect(shouldFallbackToProjectMode({ status: 401, message: 'unauthorized' })).toBe(false);
     expect(shouldFallbackToProjectMode({ status: 400, message: 'validation failed' })).toBe(false);
+    const ambiguous = Object.assign(new Error('create response lost'), {
+      status: 503,
+      code: 'branch_create_outcome_ambiguous',
+    });
+    expect(shouldFallbackToProjectMode(ambiguous)).toBe(false);
+    expect(shouldTryAlternateBranchParent(ambiguous)).toBe(false);
   });
 
   test('isRemovedBranchParentError matches removed branch parent responses', () => {

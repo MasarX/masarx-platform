@@ -12,6 +12,7 @@ import type { AssetItem, DraftRow } from "./types";
 import type { TemplateBlock, PageConfig } from "./canvas/canvas-types";
 import { isDraftStatus, shortId } from "./utils";
 import { useUndoRedo } from "./use-undo-redo";
+import { fitBlockToPage, placeAddedBlock } from "./canvas/block-geometry";
 
 const t = createUiTranslator("ui.labelDesigner.draft");
 
@@ -46,7 +47,7 @@ type DraftWorkflowProps = {
   selectedDraftId: string;
   draftName: string;
   labelType: string;
-  labelTypeOptions: string[];
+  labelTypeOptions: (string | { value: string; label: string })[];
   draftEditor: string;
   draftEditorError: string | null;
   fieldCatalogJson?: string;
@@ -62,7 +63,12 @@ type DraftWorkflowProps = {
   onPublishDraft: () => void;
 };
 
-function parseBlocks(json: string): { blocks: TemplateBlock[]; page: Partial<PageConfig> } {
+function templateKeyFor(templates: Record<string, unknown>, preferred: string) {
+  const valid = (key: string) => templates[key] && typeof templates[key] === "object" && !Array.isArray(templates[key]);
+  return valid(preferred) ? preferred : Object.keys(templates).find(valid);
+}
+
+function parseBlocks(json: string, labelType: string): { blocks: TemplateBlock[]; page: Partial<PageConfig> } {
   try {
     const parsed = JSON.parse(json);
     if (!parsed || typeof parsed !== "object") return { blocks: [], page: {} };
@@ -70,8 +76,7 @@ function parseBlocks(json: string): { blocks: TemplateBlock[]; page: Partial<Pag
       return { blocks: parsed.blocks, page: parsed.page || {} };
     }
     if (parsed.templates && typeof parsed.templates === "object") {
-      const keys = Object.keys(parsed.templates);
-      const first = keys[0];
+      const first = templateKeyFor(parsed.templates, labelType);
       if (first && parsed.templates[first]) {
         const template = parsed.templates[first];
         return {
@@ -86,7 +91,7 @@ function parseBlocks(json: string): { blocks: TemplateBlock[]; page: Partial<Pag
   }
 }
 
-function updateBlocksInJson(json: string, newBlocks: TemplateBlock[]): string {
+function updateBlocksInJson(json: string, newBlocks: TemplateBlock[], labelType: string): string {
   try {
     const parsed = JSON.parse(json);
     if (!parsed || typeof parsed !== "object") return json;
@@ -94,8 +99,7 @@ function updateBlocksInJson(json: string, newBlocks: TemplateBlock[]): string {
       return JSON.stringify({ ...parsed, blocks: newBlocks }, null, 2);
     }
     if (parsed.templates && typeof parsed.templates === "object") {
-      const keys = Object.keys(parsed.templates);
-      const first = keys[0];
+      const first = templateKeyFor(parsed.templates, labelType);
       if (first && parsed.templates[first]) {
         const updated = {
           ...parsed,
@@ -125,13 +129,13 @@ function parseFieldCatalog(json: string): FieldCatalogItem[] {
       .map((item: unknown) => {
         if (!item || typeof item !== "object") return null;
         const record = item as Record<string, unknown>;
-        const path = typeof record.path === "string" ? record.path : typeof record.key === "string" ? record.key : "";
+        const path = typeof record.path === "string" ? record.path : typeof record.value_path === "string" ? record.value_path : typeof record.key === "string" ? record.key : "";
         if (!path) return null;
         return {
           path,
-          label: typeof record.label === "string" ? record.label : undefined,
+          label: typeof record.label === "string" ? record.label : typeof record.label_en === "string" ? record.label_en : undefined,
           label_ar: typeof record.label_ar === "string" ? record.label_ar : undefined,
-          type: typeof record.type === "string" ? record.type : undefined,
+          type: typeof record.type === "string" ? record.type : typeof record.data_type === "string" ? record.data_type : undefined,
         };
       })
       .filter(Boolean) as FieldCatalogItem[];
@@ -165,37 +169,40 @@ export function DraftWorkflow({
   onPublishDraft,
 }: DraftWorkflowProps) {
   const selectedDraft = drafts.find((d) => d.id === selectedDraftId) || null;
+  const readOnly = !canWrite || isBusy;
   const [editorMode, setEditorMode] = React.useState<"visual" | "code">("visual");
   const [selectedBlockIndex, setSelectedBlockIndex] = React.useState<number | null>(null);
 
-  const { blocks, page } = React.useMemo(() => parseBlocks(draftEditor), [draftEditor]);
+  const { blocks, page } = React.useMemo(() => parseBlocks(draftEditor, labelType), [draftEditor, labelType]);
   const fieldCatalog = React.useMemo(() => parseFieldCatalog(fieldCatalogJson || "{}"), [fieldCatalogJson]);
 
   // Undo/Redo integration
-  const { undo, redo, canUndo, canRedo } = useUndoRedo(draftEditor, onDraftEditorChange);
+  const { undo, redo, canUndo, canRedo } = useUndoRedo(draftEditor, onDraftEditorChange, !readOnly, `${selectedScope?.scopeType}:${selectedScope?.scopeId}:${selectedDraftId}`);
 
   const handleBlocksChange = React.useCallback(
     (newBlocks: TemplateBlock[]) => {
-      const updated = updateBlocksInJson(draftEditor, newBlocks);
+      if (readOnly) return;
+      const updated = updateBlocksInJson(draftEditor, newBlocks, labelType);
       onDraftEditorChange(updated);
     },
-    [draftEditor, onDraftEditorChange],
+    [draftEditor, labelType, onDraftEditorChange, readOnly],
   );
 
   const handleBlockUpdate = React.useCallback(
     (index: number, updates: Partial<TemplateBlock>) => {
-      const updated = blocks.map((b, i) => (i === index ? { ...b, ...updates } : b));
+      const updated = blocks.map((b, i) => (i === index ? fitBlockToPage({ ...b, ...updates }, page, b) : b));
       handleBlocksChange(updated);
     },
-    [blocks, handleBlocksChange],
+    [blocks, handleBlocksChange, page],
   );
 
   const handleAddBlock = React.useCallback(
     (block: TemplateBlock) => {
-      handleBlocksChange([...blocks, block]);
+      if (readOnly) return;
+      handleBlocksChange([...blocks, placeAddedBlock(block, blocks, page)]);
       setSelectedBlockIndex(blocks.length);
     },
-    [blocks, handleBlocksChange],
+    [blocks, handleBlocksChange, page, readOnly],
   );
 
   // Multi-select support: derive selected indices from selectedBlockIndex
@@ -214,16 +221,16 @@ export function DraftWorkflow({
             type="button"
             size="sm"
             variant="soft"
-            onClick={onCreateDraft}
+            onClick={() => { if (!readOnly && selectedScope) onCreateDraft(); }}
             disabled={!canWrite || isBusy || !selectedScope}
             data-testid={`${prefix}-create-draft`}
           >
-            {busyAction === "create-draft" ? t("creating") : t("createDraft")}
+            {busyAction === "create-draft" ? t("creating") : selectedDraft && !isDraftStatus(selectedDraft.status) ? t("forkDraft") : t("createDraft")}
           </Button>
           <Button
             type="button"
             size="sm"
-            onClick={onSaveDraft}
+            onClick={() => { if (!readOnly && selectedDraft && isDraftStatus(selectedDraft.status)) onSaveDraft(); }}
             disabled={
               !canWrite ||
               isBusy ||
@@ -248,7 +255,7 @@ export function DraftWorkflow({
             type="button"
             size="sm"
             variant="ghost"
-            onClick={onPublishDraft}
+            onClick={() => { if (!readOnly && selectedDraft && isDraftStatus(selectedDraft.status)) onPublishDraft(); }}
             disabled={
               !canWrite ||
               isBusy ||
@@ -275,6 +282,7 @@ export function DraftWorkflow({
               id={`${prefix}-draft-select`}
               value={selectedDraftId}
               onChange={(event) => onDraftSelection(event.target.value)}
+              disabled={isBusy}
               data-testid={`${prefix}-draft-select`}
             >
               <option value="">{t("selectDraft")}</option>
@@ -300,7 +308,8 @@ export function DraftWorkflow({
             <Input
               id={`${prefix}-draft-name`}
               value={draftName}
-              onChange={(event) => onDraftNameChange(event.target.value)}
+              onChange={(event) => { if (!readOnly) onDraftNameChange(event.target.value); }}
+              disabled={readOnly}
               placeholder={t("draftNamePlaceholder")}
               data-testid={`${prefix}-draft-name`}
             />
@@ -315,14 +324,15 @@ export function DraftWorkflow({
             <Select
               id={`${prefix}-label-type`}
               value={labelType}
-              onChange={(event) => onLabelTypeChange(event.target.value)}
+              onChange={(event) => { if (!readOnly) onLabelTypeChange(event.target.value); }}
+              disabled={readOnly}
               data-testid={`${prefix}-label-type`}
             >
-              {labelTypeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
+              {labelTypeOptions.map((option) => {
+                const value = typeof option === "string" ? option : option.value;
+                const label = typeof option === "string" ? option : option.label;
+                return <option key={value} value={value}>{label}</option>;
+              })}
             </Select>
           </div>
         </div>
@@ -376,7 +386,7 @@ export function DraftWorkflow({
                   <LazyLabelCanvas
                     blocks={blocks}
                     page={page}
-                    readOnly={!canWrite}
+                    readOnly={readOnly}
                     testIdPrefix={`${prefix}-canvas`}
                     onBlocksChange={handleBlocksChange}
                     onSelectBlock={setSelectedBlockIndex}
@@ -392,12 +402,14 @@ export function DraftWorkflow({
                     fieldCatalog={fieldCatalog}
                     assets={assets || []}
                     testIdPrefix={`${prefix}-catalog`}
+                    readOnly={readOnly}
                     onAddBlock={handleAddBlock}
                   />
                   {/* Layers panel */}
                   <LazyCanvasLayersPanel
                     blocks={blocks}
                     selectedIndices={selectedIndices}
+                    readOnly={readOnly}
                     onSelect={(i) => setSelectedBlockIndex(i)}
                     onBlocksChange={handleBlocksChange}
                   />
@@ -406,6 +418,7 @@ export function DraftWorkflow({
                       block={blocks[selectedBlockIndex]}
                       blockIndex={selectedBlockIndex}
                       testIdPrefix={`${prefix}-block-props`}
+                      readOnly={readOnly}
                       onUpdate={handleBlockUpdate}
                     />
                   ) : null}
@@ -424,7 +437,8 @@ export function DraftWorkflow({
               <Textarea
                 id={`${prefix}-draft-json`}
                 value={draftEditor}
-                onChange={(event) => onDraftEditorChange(event.target.value)}
+                onChange={(event) => { if (!readOnly) onDraftEditorChange(event.target.value); }}
+                disabled={readOnly}
                 rows={22}
                 className="font-mono text-xs"
                 data-testid={`${prefix}-draft-json`}

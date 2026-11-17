@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(16);
+SELECT plan(18);
 
 SELECT has_table('public', 'mapping_operation_reports', 'mapping_operation_reports table exists');
 SELECT ok(
@@ -19,6 +19,14 @@ SELECT ok(
 SELECT has_function('public', 'ui_upsert_mapping_artifact_v1', ARRAY['jsonb'], 'ui_upsert_mapping_artifact_v1 exists');
 SELECT has_function('public', 'ui_create_mapping_operation_report_v1', ARRAY['jsonb'], 'ui_create_mapping_operation_report_v1 exists');
 SELECT has_function('api', 'ui_upsert_mapping_artifact_v1', ARRAY['jsonb'], 'api.ui_upsert_mapping_artifact_v1 exists');
+SELECT ok(
+  NOT has_function_privilege('anon', 'public.ui_upsert_mapping_artifact_v1(jsonb)', 'EXECUTE'),
+  'anon cannot execute public.ui_upsert_mapping_artifact_v1'
+);
+SELECT ok(
+  NOT has_function_privilege('anon', 'api.ui_upsert_mapping_artifact_v1(jsonb)', 'EXECUTE'),
+  'anon cannot execute api.ui_upsert_mapping_artifact_v1'
+);
 SELECT has_function('api', 'ui_create_mapping_operation_report_v1', ARRAY['jsonb'], 'api.ui_create_mapping_operation_report_v1 exists');
 SELECT has_function('api', 'assert_capability_v1', ARRAY['text', 'text', 'uuid'], 'api.assert_capability_v1 exists');
 

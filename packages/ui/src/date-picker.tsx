@@ -69,6 +69,8 @@ export function DatePicker({
 }: DatePickerProps) {
   const t = useTranslations("ui.datePicker");
   const locale = useLocale();
+  const generatedId = React.useId();
+  const triggerId = id ?? generatedId;
   const calendarLocale = React.useMemo(() => resolveDateLocale(locale), [locale]);
   const stringValue = value ? formatISO(value, { representation: "date" }) : "";
   const displayValue = value ? format(value, "PP", { locale: calendarLocale }) : "";
@@ -83,8 +85,9 @@ export function DatePicker({
       <DropdownTrigger asChild>
         <button
           type="button"
-          id={id}
+          id={triggerId}
           aria-label={ariaLabel ?? t("ariaLabel")}
+          aria-haspopup="dialog"
           className={cn(
             formFieldClasses,
             "text-left",
@@ -96,10 +99,18 @@ export function DatePicker({
           {buttonLabel}
         </button>
       </DropdownTrigger>
-      <DropdownContent align="start" className="w-auto p-3">
+      <DropdownContent
+        align="start"
+        className="w-auto p-3"
+        role="dialog"
+        aria-orientation={undefined}
+        aria-labelledby={triggerId}
+      >
         <DayPicker
           mode="single"
           selected={value}
+          defaultMonth={value}
+          autoFocus
           onSelect={(next) => {
             onChange?.(next ?? undefined);
           }}
@@ -108,7 +119,7 @@ export function DatePicker({
           weekStartsOn={1}
         />
       </DropdownContent>
-      {name ? <input type="hidden" name={name} value={stringValue} /> : null}
+      {name ? <input type="hidden" name={name} value={stringValue} disabled={disabled} /> : null}
     </Dropdown>
   );
 }
@@ -221,9 +232,16 @@ export function DateTimePicker({
 
   const handleTimeChange = React.useCallback(
     (nextTime: string) => {
+      if (!nextTime) {
+        onChange?.(undefined);
+        return;
+      }
       const [hours, minutes] = nextTime.split(":").map(Number);
+      if (hours === undefined || minutes === undefined ||
+        !Number.isInteger(hours) || !Number.isInteger(minutes) ||
+        hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return;
       const base = value ? new Date(value) : new Date();
-      base.setHours(hours ?? 0, minutes ?? 0, 0, 0);
+      base.setHours(hours, minutes, 0, 0);
       onChange?.(base);
     },
     [onChange, value]
@@ -233,7 +251,6 @@ export function DateTimePicker({
     <div className={cn("flex flex-col gap-2 sm:flex-row", className)}>
       <DatePicker
         id={id}
-        name={name}
         value={value}
         disabled={disabled}
         minDate={minDate}
@@ -248,6 +265,7 @@ export function DateTimePicker({
         disabled={disabled}
         ariaLabel="Select time"
       />
+      {name ? <input type="hidden" name={name} value={value?.toISOString() ?? ""} disabled={disabled} /> : null}
     </div>
   );
 }

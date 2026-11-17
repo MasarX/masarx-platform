@@ -11,6 +11,7 @@
 const { Client } = require('pg');
 const { randomUUID } = require('crypto');
 const { loadEnv } = require('../../utils/load-env');
+const { resolveDatabaseUrlWithFallback } = require('../../utils/resolve-db-url');
 const {
   isRetryableDbConnectError,
   parsePositiveInt,
@@ -148,13 +149,30 @@ async function runWorkflowIntakeSmokeOnce(options = {}) {
 
 async function runWorkflowIntakeSmokeWithRetry(options = {}) {
   const env = options.env || process.env;
-  const connectionString = String(options.connectionString || resolveDatabaseUrl(env)).trim();
   const logger = options.logger || console;
   const sleepFn = typeof options.sleepFn === 'function' ? options.sleepFn : sleep;
   const { maxWaitMs, retryDelayMs } = resolveRetryConfig(env);
-  const deadlineAt = Date.now() + maxWaitMs;
+  const nowFn = typeof options.nowFn === 'function' ? options.nowFn : Date.now;
+  const startedAt = nowFn();
+  const explicitConnectionString = String(options.connectionString || '').trim();
+  const resolver = options.resolveDatabaseUrlWithFallbackFn || resolveDatabaseUrlWithFallback;
+  const selected = explicitConnectionString
+    ? { dsn: explicitConnectionString, candidateName: 'explicit' }
+    : await resolver({
+      env: {
+        ...env,
+        DB_SMOKE_SYNC_DB_PASSWORD: '0',
+        DB_SMOKE_SYNC_ON_TENANT_NOT_FOUND: '0',
+      },
+      logger,
+      candidatePolicy: env.DB_CONNECT_CANDIDATE_POLICY,
+      maxWaitMs,
+      retryDelayMs,
+    });
+  const connectionString = String(selected?.dsn || '').trim();
+  if (!connectionString) throw new Error('Shared DB candidate ladder returned no selected DSN');
+  const deadlineAt = startedAt + maxWaitMs;
   let attempts = 0;
-  let lastError = null;
 
   while (true) {
     attempts += 1;
@@ -164,10 +182,12 @@ async function runWorkflowIntakeSmokeWithRetry(options = {}) {
         connectionString,
         logger,
       });
-      return { attempts };
+      return {
+        attempts,
+        candidateName: String(selected?.candidateName || '').trim(),
+      };
     } catch (error) {
-      lastError = error;
-      const remainingMs = Math.max(0, deadlineAt - Date.now());
+      const remainingMs = Math.max(0, deadlineAt - nowFn());
       if (!isRetryableDbConnectError(error) || remainingMs <= 0) {
         if (remainingMs <= 0 && isRetryableDbConnectError(error)) {
           throw new Error(
@@ -187,7 +207,6 @@ async function runWorkflowIntakeSmokeWithRetry(options = {}) {
 async function main() {
   await runWorkflowIntakeSmokeWithRetry({
     env: process.env,
-    connectionString: resolveDatabaseUrl(process.env),
     logger: console,
   });
 }

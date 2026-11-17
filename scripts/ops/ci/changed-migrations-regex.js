@@ -8,8 +8,9 @@
  * Primary use: GitHub Actions `objectives_lint_changed / run` inside PR Governance Gate.
  *
  * Behavior:
- * - Prefer diffing merge commits via HEAD^1..HEAD (PR merge ref).
- * - Fallback to comparing against origin/$GITHUB_BASE_REF when HEAD^1 is unavailable.
+ * - Prefer an exact local-gate base SHA when one is provided.
+ * - Diff proven GitHub synthetic PR/merge-group refs via HEAD^1..HEAD.
+ * - Otherwise compare against origin/$GITHUB_BASE_REF.
  *
  * Output:
  * - Default: prints the regex to stdout (empty when no changed migrations).
@@ -43,6 +44,35 @@ function buildRegexPattern(files) {
   if (!unique.length) return '';
   const escaped = unique.map(escapeRegex);
   return `^(?:${escaped.join('|')})$`;
+}
+
+function isMigrationPath(file) {
+  const value = String(file || '').trim().replace(/\\/g, '/');
+  return value.startsWith('supabase/migrations/') && value.toLowerCase().endsWith('.sql');
+}
+
+function parseNameStatusZ(output) {
+  const tokens = String(output || '').split('\0');
+  if (tokens[tokens.length - 1] === '') tokens.pop();
+  const changes = [];
+  for (let index = 0; index < tokens.length;) {
+    const status = String(tokens[index++] || '').trim();
+    if (!status) throw new Error('git diff returned an empty change status');
+    const kind = status.charAt(0);
+    if (kind === 'R' || kind === 'C') {
+      const oldPath = tokens[index++];
+      const newPath = tokens[index++];
+      if (!oldPath || !newPath) {
+        throw new Error(`git diff returned an incomplete ${status} record`);
+      }
+      changes.push({ status, oldPath, newPath });
+      continue;
+    }
+    const file = tokens[index++];
+    if (!file) throw new Error(`git diff returned an incomplete ${status} record`);
+    changes.push({ status, oldPath: kind === 'D' ? file : '', newPath: kind === 'D' ? '' : file });
+  }
+  return changes;
 }
 
 function parseArgs(argvIn) {
@@ -82,32 +112,63 @@ function ensureOriginRef(branch) {
   git(['fetch', 'origin', b, '--no-tags'], { stdio: 'inherit' });
 }
 
+function isGitHubSyntheticMergeRef(env = process.env) {
+  if (String(env.GITHUB_ACTIONS || '').trim().toLowerCase() !== 'true') return false;
+  const eventName = String(env.GITHUB_EVENT_NAME || '').trim();
+  const ref = String(env.GITHUB_REF || '').trim();
+  if (eventName === 'pull_request') {
+    return /^refs\/pull\/[1-9]\d*\/merge$/.test(ref);
+  }
+  if (eventName === 'merge_group') {
+    return /^refs\/heads\/gh-readonly-queue\/(?:dev|main)\/.+$/i.test(ref);
+  }
+  return false;
+}
+
 function resolveBaseRef({ baseArg }) {
   const explicit = String(baseArg || '').trim();
   if (explicit) return explicit;
-  if (hasRef('HEAD^1')) return 'HEAD^1';
 
-  const baseBranch = String(process.env.GITHUB_BASE_REF || '').trim() || 'main';
+  const localGateBaseSha = String(process.env.LOCAL_GATE_BASE_SHA || '').trim();
+  if (localGateBaseSha) {
+    return /^[0-9a-f]{40}$/i.test(localGateBaseSha) && hasRef(localGateBaseSha)
+      ? localGateBaseSha
+      : '';
+  }
+
+  if (isGitHubSyntheticMergeRef() && hasRef('HEAD^2')) return 'HEAD^1';
+
+  const baseBranch = String(process.env.GITHUB_BASE_REF || '').trim();
+  if (!baseBranch) return '';
   const originRef = `origin/${baseBranch}`;
   if (!hasRef(originRef)) ensureOriginRef(baseBranch);
   if (hasRef(originRef)) return originRef;
 
-  if (hasRef('HEAD~1')) return 'HEAD~1';
   return '';
 }
 
-function listChangedMigrations({ baseRef, headRef }) {
+function listChangedMigrationChanges({ baseRef, headRef }) {
   const base = String(baseRef || '').trim();
   const head = String(headRef || '').trim() || 'HEAD';
-  const res = git(['diff', '--name-only', base, head, '--', 'supabase/migrations'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const res = git(
+    ['diff', '--name-status', '-z', '--find-renames', base, head, '--', 'supabase/migrations'],
+    { stdio: ['ignore', 'pipe', 'pipe'] }
+  );
   if (!res.ok) {
     throw new Error((res.err || '').trim() || `git diff failed (${res.code})`);
   }
-  const lines = res.out
-    .split(/\r?\n/)
-    .map((l) => l.trim())
+  return parseNameStatusZ(res.out)
+    .filter((change) => isMigrationPath(change.oldPath) || isMigrationPath(change.newPath))
+    .map((change) => ({
+      ...change,
+      scanPath: isMigrationPath(change.newPath) ? change.newPath.replace(/\\/g, '/') : '',
+    }));
+}
+
+function listChangedMigrations({ baseRef, headRef }) {
+  return listChangedMigrationChanges({ baseRef, headRef })
+    .map((change) => change.scanPath)
     .filter(Boolean);
-  return lines.filter((f) => f.toLowerCase().endsWith('.sql'));
 }
 
 function parseFilesArgs(filesArgs) {
@@ -166,8 +227,12 @@ if (require.main === module) {
 module.exports = {
   buildRegexPattern,
   escapeRegex,
+  isGitHubSyntheticMergeRef,
+  isMigrationPath,
+  listChangedMigrationChanges,
   listChangedMigrations,
   parseFilesArgs,
+  parseNameStatusZ,
   resolveBaseRef,
 };
 

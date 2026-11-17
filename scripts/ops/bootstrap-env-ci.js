@@ -32,8 +32,11 @@ const {
   isJwtSignedWithSecret,
 } = require('./workspace/edge-db-jwt');
 const {
+  EDGE_DB_JWT_REQUIREMENTS,
   buildSupabaseApiBearerCandidates,
+  inspectEdgeDbJwtClaims,
   selectAuthPlaneCandidateOnce,
+  validateEdgeDbJwtBundle,
   waitForAuthPlaneCandidate,
 } = require('./workspace/jwt-rest-auth');
 const { resolveJwtPropagationOptions } = require('./workspace/supabase-runtime');
@@ -44,13 +47,6 @@ const {
   isSupabaseSecretKey,
   splitSupabaseApiKeys,
 } = require('./workspace/supabase-admin-keys');
-
-const EDGE_DB_JWT_REQUIREMENTS = Object.freeze({
-  WEBHOOK_DB_JWT: 'edge_webhook_role',
-  API_CALLER_DB_JWT: 'edge_api_caller_role',
-  API_GATEWAY_DB_JWT: 'edge_api_gateway_role',
-  LABEL_RENDERER_DB_JWT: 'edge_label_renderer_role',
-});
 
 function requireEnv(name) {
   const v = (process.env[name] || '').trim();
@@ -73,6 +69,8 @@ function requireAnyEnv(names) {
 
 function parseArgs(argv = process.argv.slice(2)) {
   const out = {
+    filePath: '',
+    filePathProvided: false,
     target: '',
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -88,6 +86,20 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
     if (token.startsWith('--target=')) {
       out.target = String(token.slice('--target='.length) || '').trim();
+      continue;
+    }
+    if (token === '--file-path') {
+      out.filePathProvided = true;
+      const value = String(argv[i + 1] || '').trim();
+      if (value && !value.startsWith('--')) {
+        out.filePath = value;
+        i += 1;
+      }
+      continue;
+    }
+    if (token.startsWith('--file-path=')) {
+      out.filePathProvided = true;
+      out.filePath = String(token.slice('--file-path='.length) || '').trim();
     }
   }
   return out;
@@ -104,7 +116,46 @@ function resolveOutputTarget(cliTargetRaw) {
   return 'file';
 }
 
-function writeOutput({ lines, target, targetPath }) {
+function resolveSecureExplicitFilePath(targetPath, env = process.env) {
+  const runnerTempRaw = String(env.RUNNER_TEMP || '').trim();
+  if (!runnerTempRaw) {
+    throw new Error('--file-path requires RUNNER_TEMP to be set.');
+  }
+
+  const runnerTemp = fs.realpathSync(path.resolve(runnerTempRaw));
+  const resolvedTarget = path.resolve(targetPath);
+  const targetParent = fs.realpathSync(path.dirname(resolvedTarget));
+  if (targetParent !== runnerTemp) {
+    throw new Error('--file-path must be a direct child of RUNNER_TEMP.');
+  }
+  const secureTarget = path.join(runnerTemp, path.basename(resolvedTarget));
+  if (fs.existsSync(resolvedTarget)) {
+    throw new Error('--file-path target must not already exist.');
+  }
+  return secureTarget;
+}
+
+function writeSecureExplicitFile(targetPath, content) {
+  let fd;
+  let created = false;
+  try {
+    fd = fs.openSync(targetPath, 'wx', 0o600);
+    created = true;
+    fs.writeFileSync(fd, content, 'utf8');
+    fs.fchmodSync(fd, 0o600);
+  } catch (error) {
+    if (fd != null) {
+      try { fs.closeSync(fd); } catch {}
+      fd = undefined;
+    }
+    if (created) fs.rmSync(targetPath, { force: true });
+    throw error;
+  } finally {
+    if (fd != null) fs.closeSync(fd);
+  }
+}
+
+function writeOutput({ lines, target, targetPath, secureExplicitFile = false }) {
   const content = `${lines.join('\n')}\n`;
   if (target === 'stdout') {
     process.stdout.write(content);
@@ -123,7 +174,8 @@ function writeOutput({ lines, target, targetPath }) {
   }
 
   if (target === 'file') {
-    fs.writeFileSync(targetPath, content, 'utf8');
+    if (secureExplicitFile) writeSecureExplicitFile(targetPath, content);
+    else fs.writeFileSync(targetPath, content, 'utf8');
     console.log(`[bootstrap-env-ci] Wrote ${targetPath} with core cloud configuration`);
     return;
   }
@@ -540,12 +592,23 @@ async function resolveProjectRef({
 async function main() {
   const args = parseArgs();
   const target = resolveOutputTarget(args.target);
+  if (args.filePathProvided && !args.filePath) {
+    throw new Error('--file-path requires a non-empty path.');
+  }
+  if (args.filePath && target !== 'file') {
+    throw new Error('--file-path is valid only with --target file.');
+  }
   const repoRoot = process.cwd();
-  const envDir = path.join(repoRoot, 'config', 'env');
-  const targetPath = path.join(envDir, '.env.cloud');
+  const requestedTargetPath = args.filePath
+    ? path.resolve(repoRoot, args.filePath)
+    : path.join(repoRoot, 'config', 'env', '.env.cloud');
+  const targetPath = args.filePath
+    ? resolveSecureExplicitFilePath(requestedTargetPath)
+    : requestedTargetPath;
+  const targetDir = path.dirname(targetPath);
 
-  if (!fs.existsSync(envDir)) {
-    fs.mkdirSync(envDir, { recursive: true });
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
   }
 
   // Core required variables for cloud tests (project/url/anon are dynamically resolvable)
@@ -844,16 +907,14 @@ async function main() {
     }
   }
 
-  const callerRoles = edgeInternalCallerRoles
-    .split(',')
-    .map((role) => role.trim())
-    .filter(Boolean);
   const fallbackServiceRoleKey = isServiceRoleJwtToken(supabaseServiceRoleKey)
     ? supabaseServiceRoleKey
     : '';
   const fallbackAnonJwtKey = isLikelyJwtToken(supabaseAnonKey) ? supabaseAnonKey : '';
-  const allowServiceRoleDbJwtFallback =
-    callerRoles.includes('service_role') && Boolean(fallbackServiceRoleKey);
+  const expectedJwtIssuer = resolveJwtIssuer({
+    serviceKey: fallbackServiceRoleKey || supabaseServiceRoleKey,
+    anonKey: fallbackAnonJwtKey || supabaseAnonKey,
+  });
 
   const dbJwtEnv = {
     WEBHOOK_DB_JWT: (process.env.WEBHOOK_DB_JWT || '').trim(),
@@ -867,13 +928,17 @@ async function main() {
     for (const [key, expectedRole] of Object.entries(EDGE_DB_JWT_REQUIREMENTS)) {
       const value = dbJwtEnv[key];
       if (!value) continue;
-      const roleValid = isValidDbJwtForRole(value, expectedRole, {
-        allowServiceRoleFallback: allowServiceRoleDbJwtFallback,
+      const claims = inspectEdgeDbJwtClaims({
+        name: key,
+        token: value,
+        expectedRole,
+        expectedIssuer: expectedJwtIssuer,
+        projectRef: supabaseProjectId,
       });
       const signatureValid = jwtSigningSecretTrusted
         ? isDbJwtSignatureValid(value, jwtSigningSecretForValidation)
         : true;
-      if (!roleValid || !signatureValid) {
+      if (!claims.valid || !signatureValid) {
         invalidDbJwtKeys.push(key);
         dbJwtEnv[key] = '';
       }
@@ -937,7 +1002,7 @@ async function main() {
         const classification = String(selected?.evaluation?.classification || '').trim();
         if (classification) {
           console.warn(
-            `[bootstrap-env-ci] JWT secret auth-plane probe rejected (${classification}); preserving provided DB JWTs and skipping remint unless fallback is allowed.`,
+          `[bootstrap-env-ci] JWT secret auth-plane probe rejected (${classification}); preserving only independently validated scoped DB JWTs.`,
           );
         }
       }
@@ -945,29 +1010,12 @@ async function main() {
   }
 
   if (shouldMintDbJwts) {
-    const applyServiceRoleDbJwtFallback = (reason) => {
-      if (!allowServiceRoleDbJwtFallback) {
-        return false;
-      }
-      for (const key of missingDbJwtKeys) {
-        if (!dbJwtEnv[key]) {
-          dbJwtEnv[key] = fallbackServiceRoleKey;
-        }
-      }
-      console.warn(
-        `[bootstrap-env-ci] ${reason}; using SUPABASE_SERVICE_ROLE_KEY fallback for (${missingDbJwtKeys.join(', ')}).`,
-      );
-      return true;
-    };
-
     const jwtSecret = jwtSigningSecretTrusted ? jwtSigningSecretForValidation : '';
     if (!jwtSecret) {
-      if (!applyServiceRoleDbJwtFallback('Missing SUPABASE_JWT_SECRET; cannot mint DB JWTs')) {
-        console.error(
-          `[bootstrap-env-ci] Missing SUPABASE_JWT_SECRET; cannot mint DB JWTs (${missingDbJwtKeys.join(', ')}).`,
-        );
-        process.exit(1);
-      }
+      console.error(
+        `[bootstrap-env-ci] Missing or untrusted SUPABASE_JWT_SECRET; cannot mint DB JWTs (${missingDbJwtKeys.join(', ')}).`,
+      );
+      process.exit(1);
     } else {
       const jwtIssuer = resolveJwtIssuer({
         serviceKey: fallbackServiceRoleKey || supabaseServiceRoleKey,
@@ -980,22 +1028,18 @@ async function main() {
       });
 
       if (!jwtSigningSecret) {
-        if (!applyServiceRoleDbJwtFallback('Invalid JWT signing secret; cannot mint DB JWTs')) {
-          console.error('[bootstrap-env-ci] Invalid JWT signing secret; cannot mint DB JWTs.');
-          process.exit(1);
-        }
+        console.error('[bootstrap-env-ci] Invalid JWT signing secret; cannot mint DB JWTs.');
+        process.exit(1);
       } else {
         const bundle = buildEdgeDbJwtBundle({
           secret: jwtSigningSecret,
-          issuer: jwtIssuer,
+          issuer: `${supabaseUrl.replace(/\/$/, '')}/auth/v1`,
           ttlSec: edgeDbJwtTtlSeconds,
         });
 
         if (!bundle) {
-          if (!applyServiceRoleDbJwtFallback('Failed to build edge DB JWT bundle')) {
-            console.error('[bootstrap-env-ci] Failed to build edge DB JWT bundle.');
-            process.exit(1);
-          }
+          console.error('[bootstrap-env-ci] Failed to build edge DB JWT bundle.');
+          process.exit(1);
         } else {
           dbJwtEnv.WEBHOOK_DB_JWT = dbJwtEnv.WEBHOOK_DB_JWT || bundle.webhook_db_jwt || '';
           dbJwtEnv.API_CALLER_DB_JWT = dbJwtEnv.API_CALLER_DB_JWT || bundle.api_caller_db_jwt || '';
@@ -1010,9 +1054,31 @@ async function main() {
     }
   }
 
+  if (edgeRequireDbJwt === '1') {
+    const validation = await validateEdgeDbJwtBundle({
+      env: dbJwtEnv,
+      supabaseUrl,
+      apiKey: fallbackAnonJwtKey || supabaseAnonKey,
+      expectedIssuer: expectedJwtIssuer,
+      projectRef: supabaseProjectId,
+      signingSecret: jwtSigningSecretTrusted ? jwtSigningSecretForValidation : '',
+      probeTimeoutMs: Number(process.env.EDGE_DB_JWT_VALIDATION_TIMEOUT_MS || 15_000),
+      probeAttempts: Number(process.env.EDGE_DB_JWT_VALIDATION_ATTEMPTS || 3),
+      probeRetryDelayMs: Number(process.env.EDGE_DB_JWT_VALIDATION_RETRY_DELAY_MS || 1_000),
+    });
+    console.log(
+      `[bootstrap-env-ci] Validated 4/4 scoped edge DB JWTs (${validation.validation}); no service-role substitution.`,
+    );
+  }
+
   for (const [k, v] of Object.entries(dbJwtEnv)) {
     if (v) lines.push(`${k}=${v}`);
   }
+
+  // Optional narrow marketing read credential: never mint it, require it, or
+  // substitute a service-role mutation credential when it is absent.
+  const marketingReadJwt = (process.env.MARKETING_DB_JWT || '').trim();
+  if (marketingReadJwt) lines.push(`MARKETING_DB_JWT=${marketingReadJwt}`);
 
   // Propagate any explicit test flags / load tuning set in the CI env
   for (const name of flagNames) {
@@ -1022,7 +1088,7 @@ async function main() {
     }
   }
 
-  writeOutput({ lines, target, targetPath });
+  writeOutput({ lines, target, targetPath, secureExplicitFile: Boolean(args.filePath) });
 }
 
 main().catch((err) => {

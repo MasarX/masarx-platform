@@ -29,3 +29,17 @@ describe("pickup operations utils", () => {
     expect(parseJsonValue("{", {})).toMatchObject({ ok: false });
   });
 });
+
+describe("pickup page API-loader source contract", () => {
+  it("retains all three canonical RPC loaders without an exported raw-view fallback", () => {
+    const source = require("fs").readFileSync(
+      require("path").resolve(__dirname, "../../packages/ui/src/pickup-page-shared.tsx"),
+      "utf8",
+    );
+    for (const rpc of ["pickup_requests_list_v1", "pickup_waves_list_v1", "pickup_failures_list_v1"]) {
+      expect(source).toContain(`client.rpc("${rpc}", {`);
+    }
+    expect(source).not.toMatch(/\.from\s*\(/);
+    expect(source).not.toContain("loadPublicViewRows");
+  });
+});

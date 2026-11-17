@@ -1,10 +1,12 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToString } from "react-dom/server";
 import type { UiCommandDefinition } from "@masarx/api";
 import {
   BulkActions,
   type BulkActionDefinition,
 } from "../../packages/ui/src/bulk-actions";
+import { ResourceTableClient } from "../../packages/ui/src/resource-table-client";
 import { setUiReporter } from "../../packages/ui/src/reporting";
 import {
   matchesResourceCategory,
@@ -13,6 +15,12 @@ import {
 } from "../../packages/ui/src/resource-actions-core";
 import { createUiTranslator } from "../../packages/ui/src/i18n";
 import { renderWithIntl } from "./test-utils";
+import { downloadTrustedFile } from "../../packages/ui/src/file-download";
+import { ToastHost } from "../../packages/ui/src/use-toast";
+
+jest.mock("../../packages/ui/src/file-download", () => ({
+  downloadTrustedFile: jest.fn(),
+}));
 
 const rpcMock = jest.fn();
 const getResourceMock = jest.fn();
@@ -21,13 +29,44 @@ const progressWorkflowRunUntilWaitMock = jest.fn();
 const requestUiWorkflowRunOutputDownloadMock = jest.fn();
 const getSessionMock = jest.fn();
 const navigateToMock = jest.fn();
+const mockInvalidateQueries = jest.fn();
+const mockQueryClient = { invalidateQueries: mockInvalidateQueries };
+let mockUseRealQueryClient = false;
+let mockUseOutputStatus = true;
+
+jest.mock("@tanstack/react-query", () => {
+  const actual = jest.requireActual<typeof import("@tanstack/react-query")>(
+    "@tanstack/react-query"
+  );
+  return {
+    ...actual,
+    useQueryClient: (...args: Parameters<typeof actual.useQueryClient>) =>
+      mockUseRealQueryClient ? actual.useQueryClient(...args) : mockQueryClient,
+  };
+});
+
+const listResourceMock = jest.fn();
+const routerRefreshMock = jest.fn();
+const routerReplaceMock = jest.fn();
+const routerPushMock = jest.fn();
+
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({
+    refresh: routerRefreshMock,
+    replace: routerReplaceMock,
+    push: routerPushMock,
+  }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/portal/operations/exceptions/dispatch_exception_review",
+}));
 
 jest.mock("@masarx/api", () => ({
   ...jest.requireActual("@masarx/api"),
   createUiClient: () => ({
     rpc: rpcMock,
+    listResource: listResourceMock,
     getResource: getResourceMock,
-    getWorkflowRunOutputStatus: getWorkflowRunOutputStatusMock,
+    getWorkflowRunOutputStatus: mockUseOutputStatus ? getWorkflowRunOutputStatusMock : undefined,
     progressWorkflowRunUntilWait: progressWorkflowRunUntilWaitMock,
   }),
   requestUiWorkflowRunOutputDownload: (...args: unknown[]) =>
@@ -47,6 +86,8 @@ jest.mock("../../packages/ui/src/navigate", () => ({
 }));
 
 beforeEach(() => {
+  (downloadTrustedFile as jest.Mock).mockReset().mockResolvedValue(true);
+  process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS = "https://files.example.com";
   rpcMock.mockReset();
   getResourceMock.mockReset();
   getWorkflowRunOutputStatusMock.mockReset();
@@ -54,6 +95,14 @@ beforeEach(() => {
   requestUiWorkflowRunOutputDownloadMock.mockReset();
   getSessionMock.mockReset();
   navigateToMock.mockReset();
+  mockInvalidateQueries.mockReset();
+  mockInvalidateQueries.mockResolvedValue(undefined);
+  mockUseRealQueryClient = false;
+  mockUseOutputStatus = true;
+  listResourceMock.mockReset();
+  routerRefreshMock.mockReset();
+  routerReplaceMock.mockReset();
+  routerPushMock.mockReset();
   getSessionMock.mockResolvedValue({
     data: { session: { access_token: "token-123" } },
     error: null,
@@ -62,6 +111,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS;
   setUiReporter(null);
   jest.restoreAllMocks();
 });
@@ -158,6 +208,93 @@ test("bulk actions expose overflow actions with stable action keys", async () =>
   expect(
     await screen.findByTestId("ops-bulk-actions-menu-action-shipments.edit")
   ).toHaveAttribute("data-action-key", "shipments.edit");
+});
+
+test("server-rendered actions wait for hydration before the first confirmation click", async () => {
+  const reporter = jest.fn();
+  setUiReporter(reporter);
+  const mutationActions: BulkActionDefinition[] = Array.from({ length: 5 }, (_, index) => ({
+    key: `shipments.action_${index}`,
+    label: `Shipment action ${index}`,
+    resourceKey: "shipments",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  }));
+  const downloadAction: BulkActionDefinition = {
+    key: "shipments.download",
+    label: "Download labels",
+    resourceKey: "shipments",
+    execution: { type: "download" },
+    download: { resourceKey: "shipments", downloadBasePath: "/api/download" },
+  };
+  const ui = (
+    <ToastHost>
+      <BulkActions
+        actions={[...mutationActions, downloadAction]}
+        selectedIds={["shipment-1"]}
+        testIdPrefix="hydration"
+      />
+    </ToastHost>
+  );
+  const container = document.createElement("div");
+  container.innerHTML = renderToString(ui);
+  document.body.appendChild(container);
+  const serverControls = Array.from(container.querySelectorAll("button"));
+  expect(serverControls.length).toBeGreaterThanOrEqual(3);
+  expect(serverControls.every((control) => control.disabled)).toBe(true);
+  expect(container.querySelector('[data-testid="hydration-bulk-actions-menu"]')).toBeDisabled();
+
+  render(ui, { container, hydrate: true });
+  const firstAction = screen.getByTestId("hydration-bulk-actions-action-shipments.action_0");
+  await waitFor(() => expect(firstAction).toBeEnabled());
+  expect(screen.getByTestId("hydration-bulk-actions-menu")).toBeEnabled();
+  await userEvent.setup().click(firstAction);
+  expect(await screen.findByTestId("hydration-bulk-actions-confirm-dialog")).toBeVisible();
+  expect(reporter.mock.calls.filter(([event]) => event.type === "ui.bulk_action.confirm.open")).toHaveLength(1);
+  expect(rpcMock).not.toHaveBeenCalled();
+});
+
+test.each(["inline", "overflow"] as const)("%s confirmation reports one open and cancel without executing", async (placement) => {
+  const reporter = jest.fn();
+  setUiReporter(reporter);
+  const action: BulkActionDefinition = {
+    key: "shipments.cancel",
+    label: "Cancel shipment",
+    resourceKey: "shipments",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  };
+  const fillers: BulkActionDefinition[] = placement === "overflow"
+    ? Array.from({ length: 4 }, (_, index) => ({
+        key: `shipments.navigate_${index}`,
+        label: `Navigate ${index}`,
+        href: "/resources/shipments",
+        execution: { type: "navigate" },
+      }))
+    : [];
+  renderWithIntl(
+    <BulkActions
+      actions={[...fillers, action]}
+      selectedIds={["shipment-1"]}
+      testIdPrefix="confirmation"
+    />,
+  );
+  const user = userEvent.setup();
+  if (placement === "overflow") {
+    await user.click(screen.getByTestId("confirmation-bulk-actions-menu"));
+    await user.click(await screen.findByTestId("confirmation-bulk-actions-menu-action-shipments.cancel"));
+  } else {
+    await user.click(screen.getByTestId("confirmation-bulk-actions-action-shipments.cancel"));
+  }
+  expect(await screen.findByTestId("confirmation-bulk-actions-confirm-dialog")).toBeVisible();
+  await user.click(screen.getByTestId("confirmation-bulk-actions-confirm-cancel"));
+  await waitFor(() => expect(screen.queryByTestId("confirmation-bulk-actions-confirm-dialog")).not.toBeInTheDocument());
+  const confirmations = reporter.mock.calls
+    .map(([event]) => event)
+    .filter((event) => event.type.startsWith("ui.bulk_action.confirm."));
+  expect(confirmations).toEqual([
+    expect.objectContaining({ type: "ui.bulk_action.confirm.open", context: "shipments", name: action.key }),
+    expect.objectContaining({ type: "ui.bulk_action.confirm.cancel", context: "shipments", name: action.key }),
+  ]);
+  expect(rpcMock).not.toHaveBeenCalled();
 });
 
 test("bulk actions report structured telemetry", async () => {
@@ -539,7 +676,7 @@ test("bulk actions render lookup confirm fields, validate required input, and su
   });
   const mutationActions: BulkActionDefinition[] = [
     {
-      key: "dispatch_exception_review.resolve",
+      key: "dispatch_exception_review.complete",
       label: "Resolve exception",
       resourceKey: "dispatch_exception_review",
       execution: {
@@ -549,7 +686,7 @@ test("bulk actions render lookup confirm fields, validate required input, and su
           version: 1,
           fields: [
             {
-              key: "ndr_action",
+              key: "resolution_action",
               label: "Resolution action",
               type: "lookup",
               lookup_category: "ndr_action",
@@ -596,17 +733,198 @@ test("bulk actions render lookup confirm fields, validate required input, and su
     expect(rpcMock).toHaveBeenCalledWith(
       "ui_execute_dispatch_exception_resolution_v1",
       expect.objectContaining({
-        p_action_key: "dispatch_exception_review.resolve",
+        p_action_key: "dispatch_exception_review.complete",
         p_resource_key: "dispatch_exception_review",
         p_selection_ids: ["task-1"],
         p_selection_id: "task-1",
         p_selection_count: 1,
         p_params: {
-          ndr_action: "reattempt",
+          resolution_action: "reattempt",
         },
       })
     )
   );
+});
+
+test("portal exception row selection exposes the canonical action and removes a completed task after read refresh", async () => {
+  mockUseRealQueryClient = true;
+  const user = userEvent.setup();
+  const completedResponse = {
+    status: "completed",
+    completed_count: 1,
+    items: [{ task_id: "task-1", status: "completed" }],
+  };
+  rpcMock.mockImplementation(async (rpcName: string, args?: Record<string, unknown>) => {
+    if (rpcName === "list_lookup_values_v1") {
+      expect(args).toEqual({ p_category: "ndr_action" });
+      return [
+        { value: "reattempt", label: "Reattempt" },
+        { value: "hold_at_branch", label: "Hold at branch" },
+      ];
+    }
+    if (rpcName === "ui_execute_dispatch_exception_resolution_v1") {
+      return completedResponse;
+    }
+    throw new Error(`Unexpected RPC ${rpcName}`);
+  });
+  listResourceMock.mockResolvedValue({
+    items: [],
+    total: 0,
+    total_is_estimate: false,
+  });
+
+  const command: UiCommandDefinition = {
+    key: "dispatch_exception_review.complete",
+    label: "Resolve exception",
+    capability: "tasks.complete",
+    schema_category: "resource:dispatch_exception_review",
+    selection: { mode: "single", min_count: 1, max_count: 1 },
+    execution: {
+      type: "rpc",
+      rpc: "ui_execute_dispatch_exception_resolution_v1",
+      input_schema: {
+        version: 1,
+        fields: [
+          {
+            key: "resolution_action",
+            label: "Resolution action",
+            type: "lookup",
+            lookup_category: "ndr_action",
+            required: true,
+          },
+        ],
+      },
+    },
+  };
+
+  const renderActionTable = () =>
+    renderWithIntl(
+      <ResourceTableClient
+        columns={[
+          { key: "id", label: "ID" },
+          { key: "reference", label: "Reference" },
+        ]}
+        items={[{ id: "task-1", reference: "REF-08C44B9E" }]}
+        idKey="id"
+        resourceKey="dispatch_exception_review"
+        baseHref="/portal/operations/exceptions/dispatch_exception_review"
+        capabilities={["tasks.complete"]}
+        testIdPrefix="portal-exception-inbox"
+        bulkActions={{
+          resourceKey: "dispatch_exception_review",
+          commands: [command],
+          appKey: "portal",
+          appBasePath: "/portal",
+          downloadBasePath: "/portal/downloads",
+          userCapabilities: ["tasks.complete"],
+        }}
+        serverFetch={{
+          resourceKey: "dispatch_exception_review",
+          baseHref: "/portal/operations/exceptions/dispatch_exception_review",
+          initialList: {
+            items: [{ id: "task-1", reference: "REF-08C44B9E" }],
+            total: 1,
+            total_is_estimate: false,
+          },
+          initialLimit: 50,
+          initialOffset: 0,
+          initialSort: null,
+          initialFilters: null,
+          initialTotalIsEstimate: false,
+          searchParams: {},
+        }}
+      />
+    );
+
+  const successfulRender = renderActionTable();
+
+  const checkbox = await screen.findByRole("checkbox", {
+    name: "Select row REF-08C44B9E",
+  });
+  expect(checkbox).toBeEnabled();
+  const row = checkbox.closest("tr");
+  expect(row).not.toBeNull();
+
+  await user.click(checkbox);
+  expect(row).toHaveAttribute("aria-selected", "true");
+  expect(
+    screen.getByTestId("portal-exception-inbox-table-selection-bar")
+  ).toBeVisible();
+
+  await user.click(screen.getByRole("button", { name: "Resolve exception" }));
+  const actionLookup = await screen.findByRole("combobox", {
+    name: "Resolution action",
+  });
+  await user.selectOptions(actionLookup, "hold_at_branch");
+  await user.click(
+    screen.getByTestId(
+      "portal-exception-inbox-table-bulk-actions-confirm-submit"
+    )
+  );
+
+  await waitFor(() =>
+    expect(rpcMock).toHaveBeenCalledWith(
+      "ui_execute_dispatch_exception_resolution_v1",
+      expect.objectContaining({
+        p_action_key: "dispatch_exception_review.complete",
+        p_resource_key: "dispatch_exception_review",
+        p_selection_ids: ["task-1"],
+        p_selection_id: "task-1",
+        p_selection_count: 1,
+        p_params: {
+          resolution_action: "hold_at_branch",
+        },
+      })
+    )
+  );
+  await waitFor(() =>
+    expect(listResourceMock).toHaveBeenCalledWith(
+      "dispatch_exception_review",
+      {},
+      50,
+      0,
+      null
+    )
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("checkbox", { name: "Select row REF-08C44B9E" })
+    ).not.toBeInTheDocument()
+  );
+  expect(routerRefreshMock).not.toHaveBeenCalled();
+
+  successfulRender.unmount();
+  rpcMock.mockClear();
+  listResourceMock.mockReset();
+  listResourceMock.mockRejectedValue(new Error("fresh queue read failed"));
+  renderActionTable();
+
+  const staleCheckbox = await screen.findByRole("checkbox", {
+    name: "Select row REF-08C44B9E",
+  });
+  await user.click(staleCheckbox);
+  await user.click(screen.getByRole("button", { name: "Resolve exception" }));
+  const staleLookup = await screen.findByRole("combobox", {
+    name: "Resolution action",
+  });
+  await user.selectOptions(staleLookup, "reattempt");
+  await user.click(
+    screen.getByTestId(
+      "portal-exception-inbox-table-bulk-actions-confirm-submit"
+    )
+  );
+
+  expect(
+    await screen.findByText(
+      "fresh queue read failed",
+      {},
+      { timeout: 3_000 }
+    )
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("checkbox", { name: "Select row REF-08C44B9E" })
+  ).toBeInTheDocument();
+  expect(screen.queryByText("Resolve exception submitted")).not.toBeInTheDocument();
 });
 
 test("bulk actions collect route closeout inputs for the shared ui_execute_command_v1 contract", async () => {
@@ -823,6 +1141,165 @@ test("bulk actions call the dedicated route assignment RPC with the standard pay
       },
     })
   );
+});
+
+test("route assignment waits for its configured canonical event readback before reporting success", async () => {
+  const user = userEvent.setup();
+  const assignmentResult = {
+    status: "assigned",
+    count: 1,
+    items: [
+      {
+        route_run_id: "route-run-1",
+        route_run_assignment_id: "assignment-1",
+        assignment_version: 3,
+      },
+    ],
+  };
+  rpcMock.mockImplementation(async (rpcName: string) => {
+    if (rpcName === "ui_execute_route_run_assign_v1") return assignmentResult;
+    if (rpcName === "ui_route_run_assignment_readback_v1") {
+      const readbackCalls = rpcMock.mock.calls.filter(
+        ([name]) => name === "ui_route_run_assignment_readback_v1"
+      ).length;
+      return { visible: readbackCalls > 1 };
+    }
+    throw new Error(`Unexpected RPC ${rpcName}`);
+  });
+  const mutationActions: BulkActionDefinition[] = [
+    {
+      key: "routes.assign",
+      label: "Assign route",
+      resourceKey: "routes",
+      execution: {
+        type: "rpc",
+        rpc: "ui_execute_route_run_assign_v1",
+        readback: {
+          rpc: "ui_route_run_assignment_readback_v1",
+          params: {
+            p_route_run_id: { source: "result", path: "items.0.route_run_id" },
+            p_route_run_assignment_id: {
+              source: "result",
+              path: "items.0.route_run_assignment_id",
+            },
+            p_assignment_version: {
+              source: "result",
+              path: "items.0.assignment_version",
+            },
+          },
+          success_path: "visible",
+          max_attempts: 3,
+          delay_ms: 1,
+        },
+      },
+      selection: { mode: "single", min_count: 1, max_count: 1 },
+    },
+  ];
+
+  renderWithIntl(
+    <BulkActions
+      actions={mutationActions}
+      selectedIds={["route-run-1"]}
+      testIdPrefix="test"
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "Assign route" }));
+  await user.click(screen.getByTestId("test-bulk-actions-confirm-submit"));
+
+  await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(3));
+  expect(rpcMock.mock.calls[1]).toEqual([
+    "ui_route_run_assignment_readback_v1",
+    {
+      p_route_run_id: "route-run-1",
+      p_route_run_assignment_id: "assignment-1",
+      p_assignment_version: 3,
+    },
+  ]);
+  expect(rpcMock.mock.calls[2]).toEqual(rpcMock.mock.calls[1]);
+  expect(mockInvalidateQueries).toHaveBeenNthCalledWith(1, {
+    queryKey: ["resource", "routes"],
+    refetchType: "active",
+  });
+  expect(mockInvalidateQueries).toHaveBeenNthCalledWith(2, {
+    queryKey: ["resource-detail", "routes"],
+    refetchType: "active",
+  });
+  expect(await screen.findByText("Assign route submitted")).toBeInTheDocument();
+});
+
+test("route assignment fails closed when its configured event readback stays absent", async () => {
+  const reporter = jest.fn();
+  setUiReporter(reporter);
+  const user = userEvent.setup();
+  rpcMock
+    .mockResolvedValueOnce({
+      status: "assigned",
+      count: 1,
+      items: [
+        {
+          route_run_id: "route-run-2",
+          route_run_assignment_id: "assignment-2",
+          assignment_version: 1,
+        },
+      ],
+    })
+    .mockResolvedValue({ visible: false });
+  const mutationActions: BulkActionDefinition[] = [
+    {
+      key: "routes.assign",
+      label: "Assign route",
+      resourceKey: "routes",
+      execution: {
+        type: "rpc",
+        rpc: "ui_execute_route_run_assign_v1",
+        readback: {
+          rpc: "ui_route_run_assignment_readback_v1",
+          params: {
+            p_route_run_id: { source: "result", path: "items.0.route_run_id" },
+            p_route_run_assignment_id: {
+              source: "result",
+              path: "items.0.route_run_assignment_id",
+            },
+            p_assignment_version: {
+              source: "result",
+              path: "items.0.assignment_version",
+            },
+          },
+          max_attempts: 2,
+          delay_ms: 1,
+        },
+      },
+      selection: { mode: "single", min_count: 1, max_count: 1 },
+    },
+  ];
+
+  renderWithIntl(
+    <BulkActions
+      actions={mutationActions}
+      selectedIds={["route-run-2"]}
+      testIdPrefix="test"
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "Assign route" }));
+  await user.click(screen.getByTestId("test-bulk-actions-confirm-submit"));
+
+  await waitFor(() => expect(document.querySelector('[data-tone="error"]'))
+    .toHaveTextContent("Assign route failed"));
+  expect(reporter).toHaveBeenCalledWith(expect.objectContaining({
+    type: "ui.bulk_action.error",
+    message: "The action was written, but its canonical read-back is not visible yet. Refresh and verify before retrying.",
+  }));
+  expect(document.querySelector('[data-tone="error"]')).not.toHaveTextContent("canonical read-back");
+  expect(rpcMock).toHaveBeenCalledTimes(3);
+  expect(mockInvalidateQueries).not.toHaveBeenCalled();
+  expect(screen.queryByText("Assign route submitted")).not.toBeInTheDocument();
+  const feedback = await screen.findByTestId("test-bulk-actions-feedback");
+  expect(feedback).toHaveAttribute("data-phase", "warning");
+  expect(feedback).toHaveTextContent("canonical read-back is not visible yet");
+  expect(feedback).toHaveTextContent("Result status: assigned");
+  expect(feedback).not.toHaveTextContent("Queued");
 });
 
 test("bulk actions call the dedicated route-stop reassignment RPC with the standard payload contract", async () => {
@@ -1644,6 +2121,14 @@ test("print bulk actions auto-download when workflow output URL is available", a
   getWorkflowRunOutputStatusMock.mockResolvedValue({
     workflow_run_id: "run-321",
     phase: "downloading",
+    print_async_request_id: 10,
+    print_async_completed: true,
+    bundle_async_request_id: 20,
+    bundle_async_completed: false,
+    print_mode: "fresh",
+    artifact_kind: "pdf",
+    artifact_persisted: false,
+    job_completion_pending: true,
     output_ready: true,
     output_url: "https://files.example.com/labels-1.pdf",
   });
@@ -1677,15 +2162,88 @@ test("print bulk actions auto-download when workflow output URL is available", a
     expect(getWorkflowRunOutputStatusMock).toHaveBeenCalledWith("run-321", [
       "context.generated_labels[0].download_url",
     ]);
-    expect(openMock).toHaveBeenCalledWith(
-      "https://files.example.com/labels-1.pdf",
-      "_blank",
-      "noopener,noreferrer"
-    );
+    expect(downloadTrustedFile).toHaveBeenCalledWith("https://files.example.com/labels-1.pdf");
+    expect(openMock).not.toHaveBeenCalled();
     expect(navigateToMock).not.toHaveBeenCalled();
   });
 
+  await user.click(screen.getByRole("button", { name: "Support details" }));
+  expect(screen.getByText("Print async request: 10 (Completed: Yes)")).toBeInTheDocument();
+  expect(screen.getByText("Bundle async request: 20 (Completed: No)")).toBeInTheDocument();
+  expect(screen.getByText("Print mode: fresh")).toBeInTheDocument();
+  expect(screen.getByText("Artifact kind: pdf")).toBeInTheDocument();
+  expect(screen.queryByText(/^Label job:/)).not.toBeInTheDocument();
   openMock.mockRestore();
+});
+
+test.each([
+  ["persisted", { artifact_persisted: true, job_completion_pending: false }, false],
+  ["partial", { artifact_persisted: true, job_completion_pending: false, fresh_expected_count: 2, fresh_ready_count: 1 }, true],
+  ["pending", { artifact_persisted: false, job_completion_pending: true }, true],
+  ["unknown", {}, true],
+] as const)("print bulk actions keep %s settlement honest after auto-minimizing", async (_name, settlement, unverified) => {
+  jest.useFakeTimers();
+  const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+  const openMock = jest.spyOn(window, "open").mockReturnValue({} as any);
+  try {
+    rpcMock.mockResolvedValue({ status: "workflow_started", workflow_run_id: "run-observed" });
+    getWorkflowRunOutputStatusMock.mockResolvedValue({
+      workflow_run_id: "run-observed",
+      phase: "downloading",
+      output_ready: true,
+      output_url: "https://files.example.com/observed.pdf",
+      ...settlement,
+    });
+    renderWithIntl(<BulkActions actions={[{
+      key: "shipments.print_labels",
+      label: "Print labels",
+      resourceKey: "shipments",
+      execution: { type: "print", rpc: "ui_execute_command_v1", params: buildPrintActionParams() },
+    }]} selectedIds={["1", "2"]} appBasePath="/portal" />);
+    await user.click(screen.getByRole("button", { name: "Print labels" }));
+    await submitBulkActionConfirm(user);
+    await waitFor(() => expect(downloadTrustedFile).toHaveBeenCalledWith("https://files.example.com/observed.pdf"));
+    expect(openMock).not.toHaveBeenCalled();
+    // Opening the URL precedes the async action's React commit and dialog teardown.
+    // Observe the terminal UI before measuring its four-second minimize lifecycle.
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      const terminalWidget = screen.getByTestId("bulk-actions-print-progress");
+      expect(terminalWidget).not.toHaveAttribute("aria-busy");
+      expect(within(terminalWidget).getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    });
+    const widget = screen.getByTestId("bulk-actions-print-progress");
+    expect(widget).not.toHaveAttribute("aria-busy");
+    expect(within(widget).getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    if (unverified) expect(widget).toHaveTextContent("Download opened; backend completion unverified");
+    if (unverified) {
+      expect(widget.querySelector(".animate-spin, .animate-pulse")).toBeNull();
+      expect(widget).not.toHaveTextContent("100%");
+      expect(widget).not.toHaveTextContent("Updating live");
+      if (_name === "partial") {
+        expect(within(widget).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
+        expect(widget).toHaveTextContent("50%");
+      } else {
+        expect(within(widget).queryByRole("progressbar")).not.toBeInTheDocument();
+      }
+    }
+    const observedCalls = getWorkflowRunOutputStatusMock.mock.calls.length;
+    await act(async () => { jest.advanceTimersByTime(4000); });
+    const minimized = screen.getByTestId("bulk-actions-print-progress-minimized");
+    expect(minimized).toHaveTextContent(unverified
+      ? "Download opened; backend completion unverified" : "Download started");
+    expect(getWorkflowRunOutputStatusMock).toHaveBeenCalledTimes(observedCalls);
+    if (unverified) expect(minimized.querySelector(".animate-spin, .animate-pulse")).toBeNull();
+    await user.click(minimized);
+    const expanded = screen.getByTestId("bulk-actions-print-progress");
+    expect(expanded).not.toHaveAttribute("aria-busy");
+    if (unverified) expect(expanded).toHaveTextContent("This panel is no longer checking backend completion.");
+    await user.click(within(expanded).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("bulk-actions-print-progress")).not.toBeInTheDocument();
+  } finally {
+    openMock.mockRestore();
+    jest.useRealTimers();
+  }
 });
 
 test("print bulk actions sign fresh workflow output paths without redirecting", async () => {
@@ -1741,11 +2299,8 @@ test("print bulk actions sign fresh workflow output paths without redirecting", 
       workflowRunId: "run-file-path",
       outputUrlPaths: ["context.generated_labels[0].download_url"],
     });
-    expect(openMock).toHaveBeenCalledWith(
-      "https://files.example.com/fresh-file.pdf",
-      "_blank",
-      "noopener,noreferrer"
-    );
+    expect(downloadTrustedFile).toHaveBeenCalledWith("https://files.example.com/fresh-file.pdf");
+    expect(openMock).not.toHaveBeenCalled();
     expect(navigateToMock).not.toHaveBeenCalled();
   });
 
@@ -1808,17 +2363,26 @@ test("print bulk actions skip client-side workflow nudges when status RPC manage
   await waitFor(() => {
     expect(progressWorkflowRunUntilWaitMock).not.toHaveBeenCalled();
     expect(getWorkflowRunOutputStatusMock).toHaveBeenCalledTimes(2);
-    expect(openMock).toHaveBeenCalledWith(
-      "https://files.example.com/labels-managed.pdf",
-      "_blank",
-      "noopener,noreferrer"
-    );
+    expect(downloadTrustedFile).toHaveBeenCalledWith("https://files.example.com/labels-managed.pdf");
+    expect(openMock).not.toHaveBeenCalled();
   });
 
   openMock.mockRestore();
 });
 
-test("print bulk actions keep progress in-page and never redirect on delayed output", async () => {
+test.each([
+  ['status', 'failed', 'none', 'failed'],
+  ['status', 'failed', 'url', 'downloading'],
+  ['status', 'cancelled', 'url', 'downloading'],
+  ['status', 'failed', 'path', 'downloading'],
+  ['status', 'cancelled', 'path', 'downloading'],
+  ['status', 'running', 'url', 'failed'],
+  ['fallback', 'failed', 'url', 'downloading'],
+  ['fallback', 'cancelled', 'url', 'downloading'],
+])("print failure stays in-page without download (%s %s %s %s)", async (source, workflowStatus, output, phase) => {
+  mockUseOutputStatus = source === 'status';
+  const residualUrl = 'https://files.example.com/residual.pdf';
+  process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS = 'https://files.example.com';
   const user = userEvent.setup();
   const openMock = jest.spyOn(window, "open").mockReturnValue({} as any);
   rpcMock.mockResolvedValue({
@@ -1840,11 +2404,18 @@ test("print bulk actions keep progress in-page and never redirect on delayed out
     })
     .mockResolvedValueOnce({
       workflow_run_id: "run-987",
-      phase: "failed",
-      workflow_status: "failed",
-      output_ready: false,
-      terminal: true,
+      phase,
+      workflow_status: workflowStatus,
+      output_url: output === 'url' ? residualUrl : null,
+      output_file_path: output === 'path' ? 'labels/residual.pdf' : null,
+      output_ready: output !== 'none',
+      terminal: output === 'none',
       failure_reason: "renderer timeout",
+    });
+  getResourceMock.mockResolvedValueOnce({ workflow_status: 'pending' })
+    .mockResolvedValueOnce({
+      workflow_status: workflowStatus, failure_reason: 'renderer timeout',
+      context: { generated_labels: [{ download_url: residualUrl }] },
     });
 
   const workflowActions: BulkActionDefinition[] = [
@@ -1874,13 +2445,81 @@ test("print bulk actions keep progress in-page and never redirect on delayed out
   await submitBulkActionConfirm(user);
 
   await waitFor(() => {
-    expect(progressWorkflowRunUntilWaitMock).toHaveBeenCalled();
-    expect(getWorkflowRunOutputStatusMock).toHaveBeenCalled();
+    expect(progressWorkflowRunUntilWaitMock).toHaveBeenCalledWith("run-987", {
+      budgetMs: 250,
+      maxSteps: 3,
+    });
+    if (source === 'status') expect(getWorkflowRunOutputStatusMock).toHaveBeenCalled();
+    else expect(getResourceMock).toHaveBeenCalledWith('workflow_runs', 'run-987');
     expect(screen.getByTestId("bulk-actions-print-progress")).toBeInTheDocument();
     expect(screen.getByText("renderer timeout")).toBeInTheDocument();
     expect(screen.getByText("Couldn't prepare download")).toBeInTheDocument();
     expect(navigateToMock).not.toHaveBeenCalled();
   });
+  expect(openMock).not.toHaveBeenCalled();
+  expect(requestUiWorkflowRunOutputDownloadMock).not.toHaveBeenCalled();
+  const failedProgress = screen.getByTestId("bulk-actions-print-progress");
+  expect(failedProgress).toHaveAttribute("role", "alert");
+  expect(failedProgress).toHaveAttribute("aria-live", "assertive");
+  expect(failedProgress).not.toHaveAttribute("aria-busy");
+  await user.click(within(failedProgress).getByRole("button", { name: "Dismiss" }));
+  expect(screen.queryByTestId("bulk-actions-print-progress")).not.toBeInTheDocument();
+
+  openMock.mockRestore();
+});
+
+test("print bulk actions surface SQL authorization failures without retrying", async () => {
+  const user = userEvent.setup();
+  const openMock = jest.spyOn(window, "open").mockReturnValue({} as any);
+  rpcMock.mockResolvedValue({
+    status: "workflow_started",
+    workflow_run_id: "run-denied",
+  });
+  getWorkflowRunOutputStatusMock.mockResolvedValue({
+    workflow_run_id: "run-denied",
+    phase: "checking",
+    output_ready: false,
+    terminal: false,
+  });
+  progressWorkflowRunUntilWaitMock.mockRejectedValue({
+    code: "42501",
+    message: "Capability denied: workflow_runs.read",
+  });
+
+  const workflowActions: BulkActionDefinition[] = [
+    {
+      key: "shipments.print_labels",
+      label: "Print labels",
+      resourceKey: "shipments",
+      execution: {
+        type: "print",
+        rpc: "ui_execute_command_v1",
+        params: buildPrintActionParams({
+          poll_timeout_ms: 5000,
+          poll_schedule_ms: [1000],
+        }),
+      },
+    },
+  ];
+
+  renderWithIntl(
+    <BulkActions
+      actions={workflowActions}
+      selectedIds={["1"]}
+      appBasePath="/portal"
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "Print labels" }));
+  await submitBulkActionConfirm(user);
+
+  await waitFor(() => {
+    expect(
+      screen.getByText("Capability denied: workflow_runs.read")
+    ).toBeInTheDocument();
+  });
+  expect(progressWorkflowRunUntilWaitMock).toHaveBeenCalledTimes(1);
+  expect(getWorkflowRunOutputStatusMock).toHaveBeenCalledTimes(1);
   expect(openMock).not.toHaveBeenCalled();
 
   openMock.mockRestore();
@@ -1943,12 +2582,12 @@ test("print bulk actions expose technical details in the widget without redirect
   await submitBulkActionConfirm(user);
 
   await screen.findByText("Couldn't prepare download");
-  await user.click(screen.getByRole("button", { name: "Technical details" }));
+  await user.click(screen.getByRole("button", { name: "Support details" }));
 
   await waitFor(() => {
-    expect(screen.getByText("Workflow run: run-details")).toBeInTheDocument();
-    expect(screen.getByText("Timing source: stage_execute_ms")).toBeInTheDocument();
-    expect(screen.getByText("Output source: context")).toBeInTheDocument();
+    expect(screen.getByText("Activity reference: run-details")).toBeInTheDocument();
+    expect(screen.getByText("Timing details: Recorded execution timing")).toBeInTheDocument();
+    expect(screen.getByText("File source: Saved workflow output")).toBeInTheDocument();
     expect(navigateToMock).not.toHaveBeenCalled();
   });
 
@@ -2107,11 +2746,8 @@ test("print bulk actions emit structured KPI telemetry meta", async () => {
   await submitBulkActionConfirm(user);
 
   await waitFor(() => {
-    expect(openMock).toHaveBeenCalledWith(
-      "https://files.example.com/labels-kpi.pdf",
-      "_blank",
-      "noopener,noreferrer"
-    );
+    expect(downloadTrustedFile).toHaveBeenCalledWith("https://files.example.com/labels-kpi.pdf");
+    expect(openMock).not.toHaveBeenCalled();
   });
 
   const events = reporter.mock.calls.map((call) => call[0]);
@@ -2253,6 +2889,7 @@ test("bulk actions redact errors and emit telemetry on failure", async () => {
       actions={actionsWithFailure}
       selectedIds={["1"]}
       telemetry={telemetry}
+      testIdPrefix="ops"
     />
   );
 
@@ -2261,7 +2898,13 @@ test("bulk actions redact errors and emit telemetry on failure", async () => {
   );
   await submitBulkActionConfirm(user);
 
-  expect(await screen.findByText(/\[redacted\]/)).toBeInTheDocument();
+  const feedback = await screen.findByTestId("ops-bulk-actions-feedback");
+  expect(feedback).toHaveAttribute("data-action-key", "shipments.fail");
+  expect(feedback).toHaveAttribute("data-phase", "error");
+  expect(feedback).toHaveTextContent("Fail shipments:");
+  expect(feedback).toHaveTextContent("[redacted]");
+  expect(feedback).toHaveTextContent("Selected records: 1");
+  expect(feedback).not.toHaveTextContent("payload.signature");
   const events = reporter.mock.calls.map((call) => call[0]);
   const errorEvent = events.find(
     (event) => event.type === "ui.bulk_action.error"
@@ -2280,6 +2923,29 @@ test("bulk actions redact errors and emit telemetry on failure", async () => {
       },
     })
   );
+});
+
+test("bulk actions keep redacted technical diagnosis in telemetry and friendly text in the toast", async () => {
+  const reporter = jest.fn();
+  setUiReporter(reporter);
+  const user = userEvent.setup();
+  rpcMock.mockRejectedValue(new Error("Backend statement timeout\nCookie: session=synthetic-first; sid=synthetic-second"));
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.fail", label: "Fail shipments", resourceKey: "shipments",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  }]} selectedIds={["1"]} />);
+
+  await user.click(screen.getByRole("button", { name: "Fail shipments" }));
+  await submitBulkActionConfirm(user);
+
+  await waitFor(() => expect(reporter).toHaveBeenCalledWith(expect.objectContaining({
+    type: "ui.bulk_action.error",
+    message: "Backend statement timeout\nCookie: [redacted]",
+  })));
+  expect(document.querySelector('[data-tone="error"]')).toHaveTextContent("Fail shipments");
+  expect(document.body).not.toHaveTextContent("Backend");
+  expect(document.body).not.toHaveTextContent("synthetic-");
+  expect(JSON.stringify(reporter.mock.calls)).not.toContain("synthetic-");
 });
 
 test("bulk actions show disabled reason when permission is missing", () => {    
@@ -2303,6 +2969,7 @@ test("bulk actions show disabled reason when permission is missing", () => {
     "title",
     "Requires settings.request capability."
   );
+  expect(button).toHaveAccessibleDescription("Requires settings.request capability.");
 });
 
 test("bulk actions enable workflow actions with rpc", () => {
@@ -2607,4 +3274,242 @@ test("resolveResourceBulkActions supports full shipment action set", () => {
       "shipments.download.labels",
     ])
   );
+});
+
+test("readback callback rejection does not turn a completed mutation into failure", async () => {
+  const user = userEvent.setup();
+  const reporter = jest.fn();
+  setUiReporter(reporter);
+  rpcMock.mockResolvedValue({ ok: true });
+  const onSuccess = jest.fn().mockRejectedValue(new Error("refresh offline"));
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.update", label: "Refresh result",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  }]} selectedIds={["shipment-1"]} onSuccess={onSuccess} />);
+  await user.click(screen.getByRole("button", { name: "Refresh result" }));
+  await submitBulkActionConfirm(user);
+  await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(reporter.mock.calls.map(([event]) => event.type)).toContain("ui.bulk_action.success"));
+  expect(reporter.mock.calls.map(([event]) => event.type)).not.toContain("ui.bulk_action.error");
+  expect(await screen.findByText("refresh offline")).toBeInTheDocument();
+  expect(screen.queryByText("Refresh result submitted")).not.toBeInTheDocument();
+  expect(rpcMock).toHaveBeenCalledTimes(1);
+});
+
+test.each(["workflow", "workflow_binding"] as const)(
+  "%s acceptance refreshes readback before its navigation return",
+  async (type) => {
+    const user = userEvent.setup();
+    rpcMock.mockResolvedValue({ workflow_run_id: "run-1" });
+    const onSuccess = jest.fn();
+    renderWithIntl(<BulkActions actions={[{
+      key: "shipments.update", label: "Refresh workflow",
+      execution: { type, rpc: "ui_execute_command_v1" },
+    }]} selectedIds={["shipment-1"]} appBasePath="/console" onSuccess={onSuccess} />);
+    await user.click(screen.getByRole("button", { name: "Refresh workflow" }));
+    if (type === "workflow") await submitBulkActionConfirm(user);
+    await waitFor(() => expect(navigateToMock).toHaveBeenCalled());
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(onSuccess).toHaveBeenCalledWith(expect.objectContaining({ selectedIds: ["shipment-1"] }));
+    expect(onSuccess.mock.invocationCallOrder[0]).toBeLessThan(navigateToMock.mock.invocationCallOrder[0]);
+  }
+);
+
+
+test("cohort keeps committed outcomes while selected-record and list readback settle", async () => {
+  const user = userEvent.setup();
+  let finishReadback!: (value: unknown) => void;
+  let finishList!: () => void;
+  rpcMock.mockResolvedValueOnce({
+    status: "cancelled", count: 1, success_count: 1, failure_count: 0,
+    already_processed_count: 0,
+    items: [{ selection_id: "shipment-1", status: "cancelled", ok: true,
+      workflow_run_id: "00000000-0000-4000-8000-000000000001" }],
+  }).mockImplementationOnce(() => new Promise((resolve) => { finishReadback = resolve; }));
+  const onSuccess = jest.fn(() => new Promise<void>((resolve) => { finishList = resolve; }));
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.delete", label: "Cancel cohort", resourceKey: "shipments",
+    execution: { type: "rpc", rpc: "ui_execute_shipment_batch_operation_v1",
+      result_contract: "batch_items_v1", params: { operation: "cancel" },
+      readback: { rpc: "ui_shipment_selection_readback_v1",
+        params: { p_selection_ids: { source: "selection", path: "ids" } },
+        success_path: "visible", max_attempts: 1 } },
+  }]} selectedIds={["shipment-1"]} onSuccess={onSuccess} testIdPrefix="cohort" />);
+  await user.click(screen.getByRole("button", { name: "Cancel cohort" }));
+  await submitBulkActionConfirm(user);
+  await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(2));
+  expect(screen.getByTestId("cohort-bulk-actions-result")).toHaveTextContent("Successful 1");
+  expect(screen.queryByTestId("cohort-bulk-actions-result-fresh-shipment-1")).not.toBeInTheDocument();
+  expect(onSuccess).not.toHaveBeenCalled();
+  await act(async () => { finishReadback({ visible: true, count: 1,
+    items: [{ selection_id: "shipment-1", status: "cancelled" }] }); });
+  await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  expect(screen.getByTestId("cohort-bulk-actions-result-fresh-shipment-1"))
+    .toHaveTextContent("Fresh record status: cancelled");
+  await act(async () => { finishList(); });
+  expect(await screen.findByTestId("cohort-bulk-actions-result-fresh-shipment-1"))
+    .toHaveTextContent("Fresh record status: cancelled");
+  expect(screen.getByTestId("cohort-bulk-actions-result")).toHaveTextContent("Workflow reference returned");
+  expect(screen.getByTestId("cohort-bulk-actions-result")).not.toHaveTextContent("00000000-0000-4000-8000-000000000001");
+  expect(rpcMock.mock.calls.filter(([name]) => name === "ui_execute_shipment_batch_operation_v1")).toHaveLength(1);
+});
+
+test.each(["missing", "foreign", "duplicate", "failed"])(
+  "cohort %s readback retains the committed result without retrying mutation", async (kind) => {
+    const user = userEvent.setup();
+    const reporter = jest.fn();
+    setUiReporter(reporter);
+    rpcMock.mockResolvedValueOnce({
+      status: "cancelled", count: 1, success_count: 1, failure_count: 0,
+      already_processed_count: 0, items: [{ selection_id: "shipment-1", status: "cancelled", ok: true }],
+    });
+    if (kind === "failed") rpcMock.mockRejectedValueOnce(new Error("readback unavailable"));
+    else rpcMock.mockResolvedValueOnce({ visible: true, count: 1,
+      items: kind === "missing" ? [] : kind === "foreign"
+        ? [{ selection_id: "foreign", status: "cancelled" }]
+        : [{ selection_id: "shipment-1", status: "cancelled" }, { selection_id: "shipment-1", status: "cancelled" }],
+    });
+    renderWithIntl(<BulkActions actions={[{
+      key: "shipments.delete", label: "Cancel cohort", resourceKey: "shipments",
+      execution: { type: "rpc", rpc: "ui_execute_shipment_batch_operation_v1",
+        result_contract: "batch_items_v1", params: { operation: "cancel" },
+        readback: { rpc: "ui_shipment_selection_readback_v1",
+          params: { p_selection_ids: { source: "selection", path: "ids" } },
+          success_path: "visible", max_attempts: 1 } },
+    }]} selectedIds={["shipment-1"]} onSuccess={jest.fn()} testIdPrefix="cohort" />);
+    await user.click(screen.getByRole("button", { name: "Cancel cohort" }));
+    await submitBulkActionConfirm(user);
+    expect(await screen.findByTestId("cohort-bulk-actions-result")).toHaveTextContent("Successful 1");
+    expect(screen.queryByTestId("cohort-bulk-actions-result-fresh-shipment-1")).not.toBeInTheDocument();
+    expect(reporter.mock.calls.map(([event]) => event.type)).toContain("ui.bulk_action.readback.refresh_error");
+    expect(reporter.mock.calls.map(([event]) => event.type)).not.toContain("ui.bulk_action.error");
+    expect(rpcMock.mock.calls.filter(([name]) => name === "ui_execute_shipment_batch_operation_v1")).toHaveLength(1);
+  }
+);
+
+test("verified batch success refreshes readback before its result return", async () => {
+  const user = userEvent.setup();
+  rpcMock.mockResolvedValue({
+    status: "cancelled", count: 1, success_count: 1, failure_count: 0,
+    already_processed_count: 0, items: [{ selection_id: "shipment-1", status: "cancelled", ok: true }],
+  });
+  const onSuccess = jest.fn();
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.delete", label: "Delete shipments", resourceKey: "shipments",
+    execution: { type: "rpc", rpc: "ui_execute_shipment_batch_operation_v1", result_contract: "batch_items_v1", params: { operation: "cancel" } },
+  }]} selectedIds={["shipment-1"]} onSuccess={onSuccess} testIdPrefix="f370" />);
+  await user.click(screen.getByRole("button", { name: "Delete shipments" }));
+  await submitBulkActionConfirm(user);
+  await screen.findByTestId("f370-bulk-actions-result");
+  expect(onSuccess).toHaveBeenCalledTimes(1);
+});
+
+test("rejected backend mutation never calls its readback-success hook", async () => {
+  const user = userEvent.setup();
+  rpcMock.mockRejectedValue(new Error("mutation denied"));
+  const onSuccess = jest.fn();
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.update", label: "Denied mutation",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  }]} selectedIds={["shipment-1"]} onSuccess={onSuccess} />);
+  await user.click(screen.getByRole("button", { name: "Denied mutation" }));
+  await submitBulkActionConfirm(user);
+  expect(await screen.findByText("mutation denied")).toBeInTheDocument();
+  expect(rpcMock).toHaveBeenCalledTimes(1);
+  expect(onSuccess).not.toHaveBeenCalled();
+});
+
+test("bulk actions announce and retain the invocation selection snapshot", async () => {
+  const user = userEvent.setup();
+  let settle!: (value: Record<string, unknown>) => void;
+  rpcMock.mockReturnValue(new Promise<Record<string, unknown>>((resolve) => { settle = resolve; }));
+  const ids = ["1", "2"];
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.archive", label: "Archive shipment", resourceKey: "shipments",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  }]} selectedIds={ids} testIdPrefix="receipt" />);
+  await user.click(screen.getByRole("button", { name: "Archive shipment" }));
+  await user.click(await screen.findByTestId("receipt-bulk-actions-confirm-submit"));
+  const pending = await screen.findByTestId("receipt-bulk-actions-confirm-status");
+  expect(pending).toHaveAttribute("role", "status");
+  expect(pending).toHaveAttribute("aria-live", "polite");
+  expect(pending).toHaveTextContent("Archive shipment is running for 2 selected records.");
+  ids.splice(0, ids.length, "later-selection");
+  await act(async () => { settle({}); });
+  const feedback = await screen.findByTestId("receipt-bulk-actions-feedback");
+  expect(feedback).toHaveAttribute("data-action-key", "shipments.archive");
+  expect(feedback).toHaveAttribute("data-phase", "submitted");
+  expect(feedback).toHaveTextContent("Archive shipment: Queued for 2 records.");
+  expect(feedback).toHaveTextContent("Selected records: 1, 2");
+  expect(feedback).not.toHaveTextContent("later-selection");
+  expect(screen.queryByTestId("receipt-bulk-actions-confirm-status")).not.toBeInTheDocument();
+  expect(rpcMock).toHaveBeenCalledTimes(1);
+});
+
+test("generic command receipt projects backend identity without raw output", async () => {
+  const user = userEvent.setup();
+  rpcMock.mockResolvedValue({
+    status: "completed",
+    workflow_run_id: "e71650d1-5caa-4c56-bba8-fccf7f5867b1",
+    correlation_id: "b8f4f88e-8caa-4e4c-99af-6f1e3a2c9d11",
+    secret_payload: "NEVER_RENDER_THIS_RAW_RESULT",
+  });
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.archive", label: "Archive shipment",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  }]} selectedIds={["1", "2"]} testIdPrefix="receipt" />);
+  await user.click(screen.getByRole("button", { name: "Archive shipment" }));
+  await submitBulkActionConfirm(user);
+  const feedback = await screen.findByTestId("receipt-bulk-actions-feedback");
+  expect(feedback).toHaveTextContent("Result status: completed");
+  expect(feedback).toHaveTextContent("Workflow run: e71650d1-5caa-4c56-bba8-fccf7f5867b1");
+  expect(feedback).toHaveTextContent("Trace: b8f4f88e-8caa-4e4c-99af-6f1e3a2c9d11");
+  expect(feedback).toHaveTextContent("Selected records: 1, 2");
+  expect(screen.queryByText("NEVER_RENDER_THIS_RAW_RESULT")).not.toBeInTheDocument();
+});
+
+test.each([
+  "token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature",
+  "00000000-0000-4000-0000-000000000000",
+])("generic receipt redacts invalid identity %s and bounds scalar metadata", async (correlationId) => {
+  const user = userEvent.setup();
+  rpcMock.mockResolvedValue({
+    status: "visible ".repeat(128),
+    workflow_run_id: { secret: "NEVER_STRINGIFY" },
+    correlation_id: correlationId,
+  });
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.archive", label: "Archive shipment",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  }]} selectedIds={["1"]} testIdPrefix="receipt" />);
+  await user.click(screen.getByRole("button", { name: "Archive shipment" }));
+  await submitBulkActionConfirm(user);
+  const feedback = await screen.findByTestId("receipt-bulk-actions-feedback");
+  expect(within(feedback).getByText(/^Result status:/).textContent).toBe(
+    "Result status: " + "visible ".repeat(128).trim().slice(0, 512)
+  );
+  expect(feedback).toHaveTextContent("[redacted]");
+  expect(feedback).not.toHaveTextContent(correlationId);
+  expect(feedback).not.toHaveTextContent("payload.signature");
+  expect(feedback).not.toHaveTextContent("Workflow run:");
+  expect(feedback).not.toHaveTextContent("NEVER_STRINGIFY");
+});
+
+test("generic receipt preserves readback warning instead of queued success", async () => {
+  const user = userEvent.setup();
+  rpcMock.mockResolvedValue({ workflow_run_id: "written-run", status: "accepted" });
+  const onSuccess = jest.fn().mockRejectedValue(new Error("refresh offline"));
+  renderWithIntl(<BulkActions actions={[{
+    key: "shipments.archive", label: "Archive shipment",
+    execution: { type: "rpc", rpc: "ui_execute_command_v1" },
+  }]} selectedIds={["1"]} onSuccess={onSuccess} testIdPrefix="receipt" />);
+  await user.click(screen.getByRole("button", { name: "Archive shipment" }));
+  await submitBulkActionConfirm(user);
+  const feedback = await screen.findByTestId("receipt-bulk-actions-feedback");
+  expect(feedback).toHaveAttribute("data-phase", "warning");
+  expect(feedback).toHaveTextContent("canonical read-back is not visible yet");
+  expect(feedback).toHaveTextContent("Workflow run: written-run");
+  expect(feedback).not.toHaveTextContent("Queued");
+  expect(rpcMock).toHaveBeenCalledTimes(1);
+  expect(onSuccess).toHaveBeenCalledTimes(1);
 });

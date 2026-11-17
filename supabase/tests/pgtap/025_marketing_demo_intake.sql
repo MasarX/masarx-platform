@@ -50,14 +50,14 @@ SELECT has_function(
   'api.marketing_demo_request_create_v1 exists'
 );
 
--- 6) edge_api_gateway_role can execute api wrapper (least privilege; called by edge function via PostgREST)
+-- 6) service-only mutation is not executable by edge_api_gateway_role
 SELECT ok(
-  has_function_privilege(
+  NOT has_function_privilege(
     'edge_api_gateway_role',
     'api.marketing_demo_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)',
     'EXECUTE'
   ),
-  'edge_api_gateway_role can EXECUTE api.marketing_demo_request_create_v1'
+  'edge_api_gateway_role cannot EXECUTE api.marketing_demo_request_create_v1'
 );
 
 -- 7) anon cannot execute api wrapper
@@ -80,14 +80,14 @@ SELECT ok(
   'authenticated cannot EXECUTE api.marketing_demo_request_create_v1'
 );
 
--- 9) edge_api_gateway_role can execute public function (implementation; SECURITY DEFINER)
+-- 9) service-only implementation is not executable by edge_api_gateway_role
 SELECT ok(
-  has_function_privilege(
+  NOT has_function_privilege(
     'edge_api_gateway_role',
     'public.marketing_demo_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)',
     'EXECUTE'
   ),
-  'edge_api_gateway_role can EXECUTE marketing_demo_request_create_v1'
+  'edge_api_gateway_role cannot EXECUTE marketing_demo_request_create_v1'
 );
 
 -- 10) anon cannot execute public function

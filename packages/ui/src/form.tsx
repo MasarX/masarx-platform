@@ -155,11 +155,11 @@ export function FormField<
 /**
  * Convenience hook for zod-backed react-hook-form instances.
  */
-export function useZodForm<TSchema extends z.ZodTypeAny>(
-  schema: TSchema,
-  options?: UseFormProps<z.infer<TSchema>>
+export function useZodForm<TValues extends FieldValues>(
+  schema: z.ZodType<TValues, TValues>,
+  options?: UseFormProps<TValues>
 ) {
-  return useForm<z.infer<TSchema>>({
+  return useForm<TValues>({
     resolver: zodResolver(schema),
     ...options,
   });

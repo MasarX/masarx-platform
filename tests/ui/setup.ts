@@ -25,6 +25,30 @@ if (!("TextEncoder" in globalThis)) {
   }).TextDecoder = TextDecoder;
 }
 
+if (!("MessageChannel" in globalThis)) {
+  const { MessageChannel: NodeMessageChannel } =
+    require("node:worker_threads") as typeof import("node:worker_threads");
+  const messageChannels = new Set<InstanceType<typeof NodeMessageChannel>>();
+
+  class TestMessageChannel extends NodeMessageChannel {
+    constructor() {
+      super();
+      messageChannels.add(this);
+    }
+  }
+
+  (globalThis as typeof globalThis & {
+    MessageChannel?: typeof TestMessageChannel;
+  }).MessageChannel = TestMessageChannel;
+  afterAll(() => {
+    messageChannels.forEach(({ port1, port2 }) => {
+      port1.close();
+      port2.close();
+    });
+    messageChannels.clear();
+  });
+}
+
 if (!("ResizeObserver" in globalThis)) {
   class ResizeObserver {
     private callback: ResizeObserverCallback;

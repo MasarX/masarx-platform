@@ -138,6 +138,97 @@ function closeServer(server) {
 }
 
 describe('bootstrap-env-ci', () => {
+  test('writes file-mode credentials only to the explicit temporary path', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-explicit-file-'));
+    const runnerTemp = path.join(tmp, 'runner-temp');
+    const outputPath = path.join(runnerTemp, 'mobile-backend.env');
+    fs.mkdirSync(runnerTemp, { recursive: true });
+
+    try {
+      const res = await runScript({
+        cwd: tmp,
+        env: baseEnv({ RUNNER_TEMP: runnerTemp }),
+        args: ['--target', 'file', '--file-path', outputPath],
+      });
+
+      expect(res.status).toBe(0);
+      expect(fs.existsSync(outputPath)).toBe(true);
+      expect(fs.readFileSync(outputPath, 'utf8')).toContain('SUPABASE_URL=https://abcdefghijklmnopqrst.supabase.co');
+      expect(fs.existsSync(path.join(tmp, 'config', 'env', '.env.cloud'))).toBe(false);
+      if (process.platform !== 'win32') {
+        expect(fs.statSync(outputPath).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects explicit credential files outside RUNNER_TEMP', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-outside-temp-'));
+    const runnerTemp = path.join(tmp, 'runner-temp');
+    fs.mkdirSync(runnerTemp, { recursive: true });
+    try {
+      const res = await runScript({
+        cwd: tmp,
+        env: baseEnv({ RUNNER_TEMP: runnerTemp }),
+        args: ['--target', 'file', '--file-path', path.join(tmp, 'outside.env')],
+      });
+      expect(res.status).not.toBe(0);
+      expect(`${res.stdout}\n${res.stderr}`).toContain('direct child of RUNNER_TEMP');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses to overwrite an existing explicit credential file', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-existing-file-'));
+    const runnerTemp = path.join(tmp, 'runner-temp');
+    const outputPath = path.join(runnerTemp, 'mobile-backend.env');
+    fs.mkdirSync(runnerTemp, { recursive: true });
+    fs.writeFileSync(outputPath, 'sentinel=keep\n', 'utf8');
+    try {
+      const res = await runScript({
+        cwd: tmp,
+        env: baseEnv({ RUNNER_TEMP: runnerTemp }),
+        args: ['--target', 'file', '--file-path', outputPath],
+      });
+      expect(res.status).not.toBe(0);
+      expect(`${res.stdout}\n${res.stderr}`).toContain('must not already exist');
+      expect(fs.readFileSync(outputPath, 'utf8')).toBe('sentinel=keep\n');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['separate option', ['--target', 'file', '--file-path']],
+    ['equals option', ['--target', 'file', '--file-path=']],
+  ])('rejects an empty explicit credential path: %s', async (_label, args) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-empty-file-'));
+    try {
+      const res = await runScript({ cwd: tmp, env: baseEnv(), args });
+      expect(res.status).not.toBe(0);
+      expect(`${res.stdout}\n${res.stderr}`).toContain('--file-path requires a non-empty path');
+      expect(fs.existsSync(path.join(tmp, 'config', 'env', '.env.cloud'))).toBe(false);
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+
+  test('rejects an explicit file path for non-file output modes', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-invalid-file-'));
+    try {
+      const res = await runScript({
+        cwd: tmp,
+        env: baseEnv(),
+        args: ['--target', 'stdout', '--file-path', path.join(tmp, 'unexpected.env')],
+      });
+      expect(res.status).not.toBe(0);
+      expect(`${res.stdout}\n${res.stderr}`).toContain('--file-path is valid only with --target file');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+
   // This file spawns subprocesses and temporary HTTP servers; the default Jest
   // timeout is too tight for full-suite CI contention on self-hosted runners.
   jest.setTimeout(30_000);
@@ -648,7 +739,7 @@ describe('bootstrap-env-ci', () => {
     }
   });
 
-  test('falls back to service-role DB JWTs when EDGE_REQUIRE_DB_JWT=1 and JWT secret is missing', async () => {
+  test('does not treat EDGE_INTERNAL_CALLER_ROLES as permission to substitute service_role', async () => {
     const serviceRoleFallbackKey = makeUnsignedRoleJwt('service_role');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-dbjwt-fallback-'));
     const res = await runScript({
@@ -662,30 +753,10 @@ describe('bootstrap-env-ci', () => {
       args: ['--target', 'stdout'],
     });
 
-    expect(res.status).toBe(0);
-    expect(String(res.stdout || '')).toContain(`WEBHOOK_DB_JWT=${serviceRoleFallbackKey}`);
-    expect(String(res.stdout || '')).toContain(`API_CALLER_DB_JWT=${serviceRoleFallbackKey}`);
-    expect(String(res.stdout || '')).toContain(`API_GATEWAY_DB_JWT=${serviceRoleFallbackKey}`);
-    expect(String(res.stdout || '')).toContain(`LABEL_RENDERER_DB_JWT=${serviceRoleFallbackKey}`);
-  });
-
-  test('supports SUPABASE_SECRET_KEY-only input and exports both admin key vars', async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-secret-key-'));
-    const res = await runScript({
-      cwd: tmp,
-      env: baseEnv({
-        SUPABASE_SERVICE_ROLE_KEY: '',
-        SUPABASE_SECRET_KEY: 'sb_secret_test_abcdefghijklmnopqrstuv',
-        EDGE_REQUIRE_DB_JWT: '0',
-      }),
-      args: ['--target', 'stdout'],
-    });
-
-    expect(res.status).toBe(0);
-    expect(String(res.stdout || '')).toContain(
-      'SUPABASE_SERVICE_ROLE_KEY=sb_secret_test_abcdefghijklmnopqrstuv',
-    );
-    expect(String(res.stdout || '')).toContain('SUPABASE_SECRET_KEY=sb_secret_test_abcdefghijklmnopqrstuv');
+    expect(res.status).not.toBe(0);
+    const output = `${String(res.stdout || '')}\n${String(res.stderr || '')}`;
+    expect(output).toContain('Missing or untrusted SUPABASE_JWT_SECRET; cannot mint DB JWTs');
+    expect(output).not.toContain(`WEBHOOK_DB_JWT=${serviceRoleFallbackKey}`);
   });
 
   test('keeps fail-closed behavior when service_role fallback is not allowed', async () => {
@@ -702,7 +773,7 @@ describe('bootstrap-env-ci', () => {
 
     expect(res.status).not.toBe(0);
     const output = `${String(res.stdout || '')}\n${String(res.stderr || '')}`;
-    expect(output).toContain('Missing SUPABASE_JWT_SECRET; cannot mint DB JWTs');
+    expect(output).toContain('Missing or untrusted SUPABASE_JWT_SECRET; cannot mint DB JWTs');
   });
 
   test('treats malformed provided DB JWT inputs as missing and remints role-scoped tokens', async () => {
@@ -771,32 +842,24 @@ describe('bootstrap-env-ci', () => {
     expect(getJwtRole(apiGatewayJwt)).toBe('edge_api_gateway_role');
   });
 
-  test('preserves provided role DB JWTs when JWT secret cannot be locally trusted', async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-dbjwt-preserve-untrusted-secret-'));
+  test('rejects claims-shaped DB JWTs when neither signature nor hosted auth is trusted', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-env-ci-dbjwt-untrusted-'));
     const provided = {
       WEBHOOK_DB_JWT: makeUnsignedRoleJwt('edge_webhook_role'),
       API_CALLER_DB_JWT: makeUnsignedRoleJwt('edge_api_caller_role'),
       API_GATEWAY_DB_JWT: makeUnsignedRoleJwt('edge_api_gateway_role'),
       LABEL_RENDERER_DB_JWT: makeUnsignedRoleJwt('edge_label_renderer_role'),
     };
-
-    const res = await runScript({
-      cwd: tmp,
-      env: baseEnv({
-        EDGE_REQUIRE_DB_JWT: '1',
-        SUPABASE_JWT_SECRET: 'opaque-jwt-secret-not-locally-verifiable',
-        SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_modern_non_jwt_key',
-        SUPABASE_ANON_KEY: 'sb_publishable_modern_non_jwt_key',
-        ...provided,
-      }),
-      args: ['--target', 'stdout'],
-    });
-
-    expect(res.status).toBe(0);
-    expect(getOutputVar(res.stdout, 'WEBHOOK_DB_JWT')).toBe(provided.WEBHOOK_DB_JWT);
-    expect(getOutputVar(res.stdout, 'API_CALLER_DB_JWT')).toBe(provided.API_CALLER_DB_JWT);
-    expect(getOutputVar(res.stdout, 'API_GATEWAY_DB_JWT')).toBe(provided.API_GATEWAY_DB_JWT);
-    expect(getOutputVar(res.stdout, 'LABEL_RENDERER_DB_JWT')).toBe(provided.LABEL_RENDERER_DB_JWT);
+    const res = await runScript({ cwd: tmp, env: baseEnv({
+      EDGE_REQUIRE_DB_JWT: '1', SUPABASE_JWT_SECRET: '',
+      SUPABASE_SERVICE_ROLE_KEY: 'sb_secret_modern_non_jwt_key',
+      SUPABASE_ANON_KEY: 'sb_publishable_modern_non_jwt_key', ...provided,
+      EDGE_DB_JWT_VALIDATION_TIMEOUT_MS: '50', EDGE_DB_JWT_VALIDATION_ATTEMPTS: '1',
+    }), args: ['--target', 'stdout'] });
+    expect(res.status).not.toBe(0);
+    const output = `${res.stdout}\n${res.stderr}`;
+    expect(output).toMatch(/claim validation failed|Missing or untrusted/);
+    expect(output).not.toContain(`WEBHOOK_DB_JWT=${provided.WEBHOOK_DB_JWT}`);
   });
 
   test('rebuilds service-role JWT from a verified project JWT secret while preserving modern secret key', async () => {
@@ -825,3 +888,21 @@ describe('bootstrap-env-ci', () => {
     expect(getOutputVar(res.stdout, 'SUPABASE_SECRET_KEY')).toBe('sb_secret_runtime_admin');
   });
 });
+
+test.each(['optional-marketing-read-jwt', ''])(
+  'bootstrap passes optional marketing read JWT without requiring or replacing it: %s',
+  async (token) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-marketing-'));
+    try {
+      const result = await runScript({
+        cwd: tmp,
+        env: baseEnv({ MARKETING_DB_JWT: token }),
+      });
+      expect(result.status).toBe(0);
+      if (token) expect(getOutputVar(result.stdout, 'MARKETING_DB_JWT')).toBe(token);
+      else expect(result.stdout).not.toContain('MARKETING_DB_JWT=');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  },
+);

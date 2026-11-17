@@ -5,8 +5,7 @@ import { getConsoleBaseUrl, getPortalBaseUrl } from "./utils/base-urls";
 import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
 import {
-  applyResourceLimit,
-  resolveResourceActionTarget,
+  resolveResourceActionTargetWithSample,
   resolveResourceKeysForUser,
 } from "./utils/core-resource";
 import { assertNavigationPerformance } from "./utils/performance";
@@ -19,6 +18,7 @@ import { captureFullPage, isCaptureEnabled, resolveEvidencePath } from "./utils/
 import {
   captureUiEvents,
   captureUiEventRequests,
+  waitForUiEvent,
 } from "./utils/ui-events";
 import {
   matchesResourceCategory,
@@ -82,14 +82,6 @@ function enforceDemoContext(scopeLabel: string, users: Array<{ email: string }>)
   }
 }
 
-async function waitForEvent<T>(
-  find: () => T | undefined,
-  options?: { timeout?: number }
-) {
-  await expect.poll(() => find() ?? null, options).not.toBeNull();
-  return find();
-}
-
 for (const config of appConfigs) {
   test.describe(`${config.label} bulk action error handling`, () => {
     test.skip(
@@ -103,9 +95,6 @@ for (const config of appConfigs) {
 
     test.beforeAll(() => enforceDemoContext(config.label, scopedUsers));
 
-    const user = scopedUsers[0];
-    if (!user) return;
-
     test(`${config.label} bulk action failure redacts errors`, async ({
       page,
     }) => {
@@ -114,41 +103,64 @@ for (const config of appConfigs) {
       const downloadBasePath = `${baseUrl}/api/resource-download`;
       const events = captureUiEvents(page);
       const requestEvents = captureUiEventRequests(page);
-      const context = await fetchUserContext({
-        app: config.app,
-        email: user.email,
-        password: demoContext.password ?? "",
-      });
-      const sections = Array.isArray(context.navigation.sections)
-        ? context.navigation.sections
-        : [];
-      const resourceKeys = applyResourceLimit(
-        resolveResourceKeysForUser({
+      const candidateUsers = (() => {
+        const preferred = demoContext.users.filter((user) =>
+          config.scopeTypes.includes(user.scope_type ?? "")
+        );
+        const preferredEmails = new Set(preferred.map((user) => user.email));
+        const fallback = demoContext.users.filter(
+          (user) => !preferredEmails.has(user.email)
+        );
+        return [...preferred, ...fallback];
+      })();
+      let candidate:
+        | {
+            user: (typeof scopedUsers)[number];
+            context: Awaited<ReturnType<typeof fetchUserContext>>;
+            target: { resourceKey: string; actionKey: string };
+          }
+        | null = null;
+
+      for (const user of candidateUsers) {
+        const context = await fetchUserContext({
+          app: config.app,
+          email: user.email,
+          password: demoContext.password ?? "",
+        });
+        const sections = Array.isArray(context.navigation.sections)
+          ? context.navigation.sections
+          : [];
+        const resourceKeys = resolveResourceKeysForUser({
           sections,
           readRegistry: context.readRegistry,
           commandRegistry: context.commandRegistry,
           capabilities: context.me?.capabilities ?? null,
-        })
-      );
-      if (resourceKeys.length === 0) {
-        throw new Error(`No resources available for ${user.email}.`);
+        });
+        if (resourceKeys.length === 0) continue;
+        const target = await resolveResourceActionTargetWithSample({
+          resourceKeys,
+          readRegistry: context.readRegistry,
+          commandRegistry: context.commandRegistry,
+          capabilities: context.me?.capabilities ?? null,
+          appBasePath: baseUrl,
+          downloadBasePath,
+          actionType: "rpc",
+          email: user.email,
+          password: demoContext.password ?? "",
+        });
+        if (target) {
+          candidate = { user, context, target };
+          break;
+        }
       }
 
-      const target = resolveResourceActionTarget({
-        resourceKeys,
-        readRegistry: context.readRegistry,
-        commandRegistry: context.commandRegistry,
-        capabilities: context.me?.capabilities ?? null,
-        appBasePath: baseUrl,
-        downloadBasePath,
-        actionType: "rpc",
-      });
-      if (!target) {
+      if (!candidate) {
         if (strict) {
           throw new Error(`No rpc actions available for ${config.label}.`);
         }
         return;
       }
+      const { user, context, target } = candidate;
 
       const resource =
         context.readRegistry?.resources?.find(
@@ -252,42 +264,55 @@ for (const config of appConfigs) {
       };
       await page.route(`**/rest/v1/rpc/${rpcName}`, rpcRoute);
 
-      if (action.execution?.confirm) {
-        await actionButton.click();
-        const confirmDialog = page.locator(
-          `[data-testid="${bulkActionsTestIdPrefix}-confirm-dialog"]`
+      await actionButton.click();
+      const confirmDialog = page.locator(
+        `[data-testid="${bulkActionsTestIdPrefix}-confirm-dialog"]`
+      );
+      await expect(confirmDialog).toBeVisible();
+      const fields = Array.isArray(action.execution?.input_schema?.fields)
+        ? action.execution.input_schema.fields
+        : [];
+      for (const field of fields) {
+        const key = field.key?.trim() ?? "";
+        if (!field.required || !key) continue;
+        const input = confirmDialog.locator(
+          `[data-testid="${bulkActionsTestIdPrefix}-confirm-field-${key}"]`
         );
-        await expect(confirmDialog).toBeVisible();
-        await page
-          .locator(
-            `[data-testid="${bulkActionsTestIdPrefix}-confirm-submit"]`
-          )
-          .click();
-      } else {
-        await actionButton.click();
+        await expect(input).toBeVisible();
+        if ((await input.inputValue()).trim()) continue;
+        if (field.type === "lookup") {
+          await expect(input).toBeEnabled();
+          const option = input.locator('option:not([value=""])').first();
+          await expect(option).toBeAttached({ timeout: 30_000 });
+          const value = await option.getAttribute("value");
+          if (!value) throw new Error(`No lookup value available for ${key}.`);
+          await input.selectOption(value);
+        } else {
+          await input.fill("E2E required input");
+        }
       }
+      await confirmDialog
+        .locator(`[data-testid="${bulkActionsTestIdPrefix}-confirm-submit"]`)
+        .click();
+      await expect.poll(() => injected).toBe(true);
 
       await expect(page.getByText("[redacted]").first()).toBeVisible();
 
-      const errorEvent = await waitForEvent(
-        () =>
-          events.find(
-            (entry) =>
-              entry.type === "ui.bulk_action.error" &&
-              entry.context === target.resourceKey &&
-              entry.name === action.key
-          ),
+      const errorEvent = await waitForUiEvent(
+        [events, requestEvents],
+        (entry) =>
+          entry.type === "ui.bulk_action.error" &&
+          entry.context === target.resourceKey &&
+          entry.name === action.key,
         { timeout: 10_000 }
       );
       expect(errorEvent?.message ?? "").toContain("[redacted]");
-      const errorNetworkEvent = await waitForEvent(
-        () =>
-          requestEvents.find(
-            (entry) =>
-              entry.type === "ui.bulk_action.error" &&
-              entry.context === target.resourceKey &&
-              entry.name === action.key
-          ),
+      const errorNetworkEvent = await waitForUiEvent(
+        requestEvents,
+        (entry) =>
+          entry.type === "ui.bulk_action.error" &&
+          entry.context === target.resourceKey &&
+          entry.name === action.key,
         { timeout: 10_000 }
       );
       expect(errorNetworkEvent?.message ?? "").toContain("[redacted]");

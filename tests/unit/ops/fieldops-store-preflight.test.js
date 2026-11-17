@@ -18,9 +18,11 @@ const {
   NATIVE_SCREENSHOT_SUBDIR,
   REQUIRED_SELFTEST_CONTRACT_STEP_PREFIXES,
   SAMPLE_SCREENSHOT_SUBDIR,
+  evaluateNativeScreenshotManifest,
   evaluateScreenshotManifest,
   isExpoVersionStable,
   loadEnvContract,
+  parseArgs,
   resolveLatestNativeRuntimeManifest,
   resolveLatestScreenshotManifest,
   runFieldopsStorePreflight,
@@ -74,7 +76,7 @@ function writeEnvContract(repoRoot) {
 }
 
 function createRepoFixture({
-  expoVersion = '~54.0.33',
+  expoVersion = '~55.0.28',
   manifest = null,
   nativeManifest = null,
   sampleManifest = null,
@@ -103,7 +105,9 @@ function createRepoFixture({
       {
         build: {
           development: {
+            developmentClient: true,
             env: { NEXT_PUBLIC_FIELDOPS_APP_ID_SUFFIX: '.dev' },
+            ios: { simulator: true },
           },
           stg: {
             env: { NEXT_PUBLIC_FIELDOPS_APP_ID_SUFFIX: '.stg' },
@@ -189,7 +193,8 @@ function setRequiredEnv() {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-key';
 }
 
-function createPassingScreenshotManifest() {
+// Synthetic matrix/transport fixture, NOT an authentic native-app execution receipt.
+function createStructurallyValidScreenshotManifest() {
   const scenarios = [
     ...createFieldopsScenarioSet('android'),
     ...createFieldopsScenarioSet('ios'),
@@ -217,6 +222,7 @@ describe('fieldops-store-preflight', () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
     delete process.env.FIELDOPS_STORE_PREFLIGHT_PROFILE;
+    delete process.env.FIELDOPS_NATIVE_SCREENSHOT_MANIFEST_PATH;
     delete process.env.FIELDOPS_SCREENSHOT_MAX_AGE_HOURS;
     loadEnv.mockReset();
     loadPublicEnv.mockReset();
@@ -230,9 +236,123 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('detects stable vs non-stable expo versions', () => {
-    expect(isExpoVersionStable('~54.0.33')).toBe(true);
+    expect(isExpoVersionStable('~55.0.28')).toBe(true);
     expect(isExpoVersionStable('~55.0.0-beta.0')).toBe(false);
     expect(isExpoVersionStable('')).toBe(false);
+  });
+
+  test('shared native manifest admission rejects missing, malformed, and prototype evidence', () => {
+    const missingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fieldops-native-missing-'));
+    tempDirs.push(missingRoot);
+    expect(evaluateNativeScreenshotManifest({ repoRoot: missingRoot }).summary.pass).toBe(false);
+
+    const malformedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fieldops-native-malformed-'));
+    tempDirs.push(malformedRoot);
+    const malformedPath = path.join(malformedRoot, 'manifest.json');
+    fs.writeFileSync(malformedPath, '{');
+    expect(() => evaluateNativeScreenshotManifest({
+      repoRoot: malformedRoot,
+      manifestPath: malformedPath,
+    })).toThrow();
+
+    const prototypeRoot = createRepoFixture({
+      nativeManifest: {
+        ...createStructurallyValidScreenshotManifest(),
+        capture_mode: 'device_browser_prototype',
+      },
+    });
+    tempDirs.push(prototypeRoot);
+    const prototype = evaluateNativeScreenshotManifest({ repoRoot: prototypeRoot, profile: 'ci' });
+    expect(prototype.summary.pass).toBe(false);
+    expect(prototype.checks).toContainEqual(expect.objectContaining({
+      name: 'screenshots.native.manifest.not_known_prototype',
+      pass: false,
+      required: true,
+    }));
+  });
+
+  test('shared native manifest admission keeps CI freshness advisory and release freshness strict', () => {
+    const repoRoot = createRepoFixture({
+      nativeManifest: {
+        ...createStructurallyValidScreenshotManifest(),
+        captured_at: '2026-01-01T00:00:00.000Z',
+      },
+    });
+    tempDirs.push(repoRoot);
+    const ci = evaluateNativeScreenshotManifest({ repoRoot, profile: 'ci' });
+    const release = evaluateNativeScreenshotManifest({ repoRoot, profile: 'release' });
+    expect(ci.summary.pass).toBe(true);
+    expect(ci.checks).toContainEqual(expect.objectContaining({
+      name: 'screenshots.native.manifest.freshness', pass: false, required: false,
+    }));
+    expect(release.summary.pass).toBe(false);
+    expect(release.checks).toContainEqual(expect.objectContaining({
+      name: 'screenshots.native.manifest.freshness', pass: false, required: true,
+    }));
+  });
+
+  test('convergence profile defers native evidence without making it release eligible', () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fieldops-native-deferred-'));
+    tempDirs.push(repoRoot);
+    const result = evaluateNativeScreenshotManifest({
+      repoRoot, profile: 'convergence', env: { FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED: '1' },
+    });
+    expect(result).toMatchObject({
+      profile: 'convergence',
+      native_evidence_status: 'deferred',
+      native_release_eligible: false,
+      summary: { pass: true, failed_required: 0, failed_advisory: 1 },
+    });
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      name: 'screenshots.native.acceptance', pass: false, required: false,
+    }));
+    expect(parseArgs(['--profile', 'convergence']).profile).toBe('convergence');
+  });
+
+  test('convergence profile requires the explicit capability and rejects deploy environments', () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fieldops-native-scope-'));
+    tempDirs.push(repoRoot);
+    expect(() => evaluateNativeScreenshotManifest({
+      repoRoot, profile: 'convergence', env: { GITHUB_ACTIONS: 'true' },
+    })).toThrow('FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED=1');
+    expect(() => evaluateNativeScreenshotManifest({
+      repoRoot, profile: 'convergence', env: {
+        FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED: '1', TARGET_DEPLOY_ENV: 'prod',
+      },
+    })).toThrow('cannot be used by deploy environments');
+    expect(evaluateNativeScreenshotManifest({
+      repoRoot, profile: 'convergence', env: {
+        FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED: '1', GITHUB_ACTIONS: 'true',
+      },
+    }).native_evidence_status).toBe('deferred');
+  });
+
+  test('non-strict reports cannot claim native release eligibility', () => {
+    const repoRoot = createRepoFixture({
+      nativeManifest: createStructurallyValidScreenshotManifest(),
+    });
+    tempDirs.push(repoRoot);
+    const report = runFieldopsStorePreflight({ repoRoot, profile: 'release', strict: false });
+    expect(report.native_release_eligible).toBe(false);
+  });
+
+  test('convergence defers only native acceptance and keeps non-native checks required', () => {
+    const repoRoot = createRepoFixture();
+    tempDirs.push(repoRoot);
+    for (const entry of loadEnvContract(repoRoot, []).buildKeys) {
+      for (const key of [entry.key, ...entry.aliases]) {
+        delete process.env[key];
+      }
+    }
+    process.env.FIELDOPS_STORE_PREFLIGHT_PROFILE = 'convergence';
+    process.env.FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED = '1';
+    const report = runFieldopsStorePreflight({ repoRoot, profile: 'convergence' });
+    expect(report.native_evidence_status).toBe('deferred');
+    expect(report.summary.pass).toBe(false);
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'screenshots.native.acceptance', pass: false, required: false }),
+      expect.objectContaining({ name: 'fieldops.build.required_env', pass: false, required: true }),
+    ]));
   });
 
   test('resolveLatestScreenshotManifest picks newest evidence date', () => {
@@ -365,7 +485,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight passes in strict mode when fixture is valid', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
     setRequiredEnv();
@@ -402,8 +522,24 @@ describe('fieldops-store-preflight', () => {
     );
   });
 
+  test('canonical EAS development profile is a simulator development client', () => {
+    const easConfig = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, '../../../apps/fieldops/eas.json'), 'utf8'),
+    );
+    const fieldopsManifest = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, '../../../apps/fieldops/package.json'), 'utf8'),
+    );
+
+    expect(easConfig.build.development).toMatchObject({
+      developmentClient: true,
+      distribution: 'internal',
+      ios: { simulator: true },
+    });
+    expect(fieldopsManifest.dependencies['expo-dev-client']).toBe('~55.0.37');
+  });
+
   test('runFieldopsStorePreflight fails strict mode when the legacy preview profile returns', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
     setRequiredEnv();
@@ -447,7 +583,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight accepts runtime alias keys defined by env contract', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
     setRequiredEnv();
@@ -468,7 +604,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight fails strict mode when env contract file is missing', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
     setRequiredEnv();
@@ -489,7 +625,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight fails strict mode for synthetic iOS notch overlay styles', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     const repoRoot = createRepoFixture({
       manifest,
       iosCss: [
@@ -519,7 +655,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight fails strict mode when native screenshot matrix is incomplete', () => {
-    const incompleteManifest = createPassingScreenshotManifest();
+    const incompleteManifest = createStructurallyValidScreenshotManifest();
     incompleteManifest.scenarios = incompleteManifest.scenarios.filter(
       (entry) => entry.name !== 'C-ios-route-overview',
     );
@@ -541,8 +677,23 @@ describe('fieldops-store-preflight', () => {
     ).toBe(false);
   });
 
+  test.each(['mode', 'selftest', 'scenario', 'encoded'])('rejects known prototype evidence despite native transport: %s', marker => {
+    const manifest = createStructurallyValidScreenshotManifest();
+    if (marker === 'mode') manifest.capture_mode = 'device_browser_prototype';
+    else if (marker === 'selftest') manifest.selftests[0].url = 'http://127.0.0.1/version-c.html?selftest=true';
+    else manifest.scenarios[0].url = marker === 'encoded'
+      ? 'http://127.0.0.1/version-c%2ehtml?capture=true' : 'http://127.0.0.1/version-c.html?capture=true';
+    const repoRoot = createRepoFixture({ manifest });
+    tempDirs.push(repoRoot); setRequiredEnv();
+    const report = runFieldopsStorePreflight({ repoRoot, strict: true });
+    expect(report.summary.pass).toBe(false);
+    expect(report.checks.find(check => check.name === 'screenshots.native.manifest.not_known_prototype')?.pass).toBe(false);
+    expect(report.checks.find(check => check.name === 'screenshots.native.scenarios.coverage.ios')).toBeDefined();
+    expect(report.checks.find(check => check.name === 'screenshots.native.scenarios.coverage.android')).toBeDefined();
+  });
+
   test('runFieldopsStorePreflight fails strict mode when native manifest capture_mode is invalid', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     manifest.capture_mode = 'sample_static';
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
@@ -560,7 +711,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight fails strict mode when expected native screenshot file is missing', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
     setRequiredEnv();
@@ -589,7 +740,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight fails strict mode when native screenshot evidence is stale', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     manifest.captured_at = '2020-01-01T00:00:00.000Z';
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
@@ -627,7 +778,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight keeps native screenshot freshness advisory in ci profile', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     manifest.captured_at = '2020-01-01T00:00:00.000Z';
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
@@ -650,7 +801,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight resolves profile from env when explicit profile is absent', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     manifest.captured_at = '2020-01-01T00:00:00.000Z';
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
@@ -671,7 +822,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight honors ci profile loaded from ENV_FILE before freshness evaluation', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     manifest.captured_at = '2020-01-01T00:00:00.000Z';
     const repoRoot = createRepoFixture({ manifest });
     tempDirs.push(repoRoot);
@@ -695,7 +846,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('runFieldopsStorePreflight fails strict mode when native manifest is missing', () => {
-    const manifest = createPassingScreenshotManifest();
+    const manifest = createStructurallyValidScreenshotManifest();
     const repoRoot = createRepoFixture({ sampleManifest: manifest, nativeManifest: null });
     tempDirs.push(repoRoot);
     setRequiredEnv();
@@ -715,7 +866,7 @@ describe('fieldops-store-preflight', () => {
   });
 
   test('sample screenshot evidence is advisory only', () => {
-    const nativeManifest = createPassingScreenshotManifest();
+    const nativeManifest = createStructurallyValidScreenshotManifest();
     const repoRoot = createRepoFixture({ nativeManifest, sampleManifest: null });
     tempDirs.push(repoRoot);
     setRequiredEnv();

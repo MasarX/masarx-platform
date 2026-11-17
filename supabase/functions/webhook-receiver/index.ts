@@ -1,6 +1,5 @@
 import {
   buildErrorEnvelope,
-  buildRpcAuthAttempts,
   deriveChildTraceparent,
   extractToken,
   invokeSupabaseRpcWithAuthFallback,
@@ -8,12 +7,34 @@ import {
   normalizeHeaderKey,
   parseRequestBody,
   readEnv,
+  redactIngressForwardedHeaders,
+  redactIngressSecretText,
+  resolveIngressDbAuth,
   resolveCorrelationId,
   resolveTraceContext,
 } from "./_shared/mod.mjs";
+import { applyCorsHeaders, resolveCorsPolicy } from "./_shared/cors.mjs";
+import { assertApiCallerAccepted } from "./api-caller-response.mjs";
 
 type JsonRecord = Record<string, unknown>;
 const SERVICE_NAME = "webhook-receiver";
+const WEBHOOK_CORS_METHODS = ["POST", "OPTIONS"];
+const WEBHOOK_CORS_HEADERS = [
+  "accept",
+  "authorization",
+  "apikey",
+  "content-type",
+  "idempotency-key",
+  "traceparent",
+  "tracestate",
+  "x-client-info",
+  "x-correlation-id",
+  "x-request-id",
+  "x-webhook-token",
+];
+const PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS = readEnv(
+  "PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS",
+);
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
 const EDGE_SUPABASE_SECRET_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", ["SUPABASE_SECRET_KEY"]);
@@ -33,11 +54,23 @@ if (RAW_EDGE_DB_JWT && !EDGE_DB_JWT) {
     reason: "expected_jwt_with_three_segments",
   });
 }
-// For webhook-receiver (external entrypoint), DB JWT is optional by default.
-// When WEBHOOK_REQUIRE_DB_JWT=1 (or EDGE_REQUIRE_DB_JWT=1) is set explicitly, a DB JWT becomes mandatory.
-const EDGE_REQUIRE_DB_JWT = readEnv("WEBHOOK_REQUIRE_DB_JWT", ["EDGE_REQUIRE_DB_JWT"]) === "1";
-const EDGE_ALLOW_SERVICE_ROLE_FALLBACK = readEnv("EDGE_ALLOW_SERVICE_ROLE_FALLBACK") === "1";
-const INTERNAL_JWT = EDGE_DB_JWT || (EDGE_ALLOW_SERVICE_ROLE_FALLBACK ? (SUPABASE_SERVICE_KEY || "") : "");
+const EDGE_REQUIRE_DB_JWT_RAW = readEnv("WEBHOOK_REQUIRE_DB_JWT", ["EDGE_REQUIRE_DB_JWT"]);
+const EDGE_ALLOW_SERVICE_ROLE_FALLBACK_RAW = readEnv("EDGE_ALLOW_SERVICE_ROLE_FALLBACK");
+const INGRESS_DB_AUTH = resolveIngressDbAuth({
+  dbJwt: EDGE_DB_JWT, secretKey: EDGE_SUPABASE_SECRET_KEY, serviceRoleKey: SUPABASE_SERVICE_KEY,
+  requireDbJwt: EDGE_REQUIRE_DB_JWT_RAW,
+  allowServiceRoleFallback: EDGE_ALLOW_SERVICE_ROLE_FALLBACK_RAW,
+});
+const EDGE_REQUIRE_DB_JWT = INGRESS_DB_AUTH.dbJwtRequired;
+const INTERNAL_JWT = INGRESS_DB_AUTH.internalJwt;
+const WEBHOOK_RPC_TIMEOUT_MS_RAW = Number.parseInt(
+  readEnv("WEBHOOK_RPC_TIMEOUT_MS", ["EDGE_RPC_TIMEOUT_MS"]) || "10000",
+  10,
+);
+const WEBHOOK_RPC_TIMEOUT_MS =
+  Number.isFinite(WEBHOOK_RPC_TIMEOUT_MS_RAW) && WEBHOOK_RPC_TIMEOUT_MS_RAW > 0
+    ? WEBHOOK_RPC_TIMEOUT_MS_RAW
+    : 10000;
 
 if (!SUPABASE_URL) {
   logStructured("error", "edge.config.missing_env", {
@@ -66,8 +99,9 @@ const addStandardHeaders = (
   headers: HeadersInit,
   correlationId: string,
   trace: { traceparent?: string; tracestate?: string | null } | null,
+  corsHeaders: HeadersInit,
 ): Headers => {
-  const out = new Headers(headers);
+  const out = applyCorsHeaders(headers, corsHeaders);
   out.set("x-correlation-id", correlationId);
   if (trace?.traceparent) out.set("traceparent", trace.traceparent);
   if (trace?.tracestate) out.set("tracestate", trace.tracestate);
@@ -128,7 +162,7 @@ const invokeApiCaller = async (
   if (!INTERNAL_JWT) return;
 
   try {
-    await fetch(`${SUPABASE_URL}/functions/v1/api-caller`, {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/api-caller`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -142,6 +176,7 @@ const invokeApiCaller = async (
         ...(typeof timeoutSeconds === "number" ? { timeout_seconds: timeoutSeconds } : {}),
       }),
     });
+    await assertApiCallerAccepted(response);
   } catch (error) {
     logStructured("warn", "edge.dispatch.invoke_failed", {
       service: SERVICE_NAME,
@@ -156,6 +191,13 @@ const invokeApiCaller = async (
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const correlationId = resolveCorrelationId(req);
+  const corsPolicy = resolveCorsPolicy(req, {
+    hostedAllowedOrigins: "",
+    localAllowedOrigins: PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS,
+    allowedMethods: WEBHOOK_CORS_METHODS,
+    allowedHeaders: WEBHOOK_CORS_HEADERS,
+  });
+  const corsHeaders = corsPolicy.headers;
   const requestId = req.headers.get("x-request-id")?.trim() || null;
   const trace = resolveTraceContext(req, correlationId);
   const apiCallerTraceparent = deriveChildTraceparent(trace.traceparent) || trace.traceparent;
@@ -224,9 +266,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
     return new Response(JSON.stringify(responseBody), {
       status,
-      headers: addStandardHeaders({ "content-type": "application/json" }, correlationId, trace),
+      headers: addStandardHeaders({ "content-type": "application/json" }, correlationId, trace, corsHeaders),
     });
   };
+
+  if (req.method === "OPTIONS") {
+    logStructured("info", "edge.cors.preflight", {
+      service: SERVICE_NAME,
+      correlation_id: correlationId,
+      request_id: requestId,
+      trace_id: trace.trace_id,
+      span_id: trace.span_id,
+      method: req.method,
+    });
+    if (!corsPolicy.allowed) {
+      return jsonResponse(
+        403,
+        { code: "cors_request_denied", message: "CORS request denied" },
+        "edge.cors.denied",
+        "warn",
+        { reason: corsPolicy.reason },
+      );
+    }
+    return new Response(null, {
+      status: 204,
+      headers: addStandardHeaders({}, correlationId, trace, corsHeaders),
+    });
+  }
+
+  if (corsPolicy.isCorsRequest && !corsPolicy.allowed) {
+    return jsonResponse(
+      403,
+      { code: "cors_request_denied", message: "CORS request denied" },
+      "edge.cors.denied",
+      "warn",
+      { reason: corsPolicy.reason },
+    );
+  }
 
   const smokeAllow = Deno.env.get("EDGE_SMOKE_ALLOW");
   const smokeHeader = req.headers.get("x-smoke-test");
@@ -248,10 +324,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse(401, { error: "Missing Authorization bearer token" }, "edge.auth.missing_token", "warn");
     }
 
-    const { raw: rawBody, json: payload } = await parseRequestBody(req);
-    const normalizedHeaders: Record<string, string> = {};
+    const requestHeaders: Record<string, string> = {};
     for (const [key, value] of req.headers.entries()) {
-      normalizedHeaders[normalizeHeaderKey(key)] = value;
+      requestHeaders[normalizeHeaderKey(key)] = value;
+    }
+    const normalizedHeaders = requestHeaders;
+    let rawBody = "";
+    let payload: JsonRecord = {};
+    try {
+      const parsedBody = await parseRequestBody(req);
+      rawBody = parsedBody.raw;
+      payload = parsedBody.json as JsonRecord;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid JSON payload";
+      if (!message.startsWith("Invalid JSON payload")) throw error;
+      return jsonResponse(
+        400,
+        { error: "Invalid JSON payload", code: "invalid_json_payload" },
+        "edge.request.invalid_json",
+        "warn",
+        { path: redactIngressSecretText(req.url), headers: redactIngressForwardedHeaders(normalizedHeaders) },
+      );
     }
     if (!normalizedHeaders["x-correlation-id"]) {
       normalizedHeaders["x-correlation-id"] = correlationId;
@@ -261,11 +354,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       normalizedHeaders.tracestate = trace.tracestate;
     }
 
-    const rpcAuthAttempts = buildRpcAuthAttempts({
-      dbJwt: EDGE_DB_JWT,
-      secretKey: EDGE_SUPABASE_SECRET_KEY,
-      serviceRoleKey: EDGE_ALLOW_SERVICE_ROLE_FALLBACK ? SUPABASE_SERVICE_KEY : "",
-    });
+    const rpcAuthAttempts = INGRESS_DB_AUTH.authAttempts;
 
     if (!rpcAuthAttempts.length) {
       return jsonResponse(
@@ -290,6 +379,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         p_payload: payload,
       },
       authAttempts: rpcAuthAttempts,
+      timeoutMs: WEBHOOK_RPC_TIMEOUT_MS,
     });
 
     if (!rpcResult.ok || !rpcResult.body) {
@@ -301,14 +391,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         {
           error: "Failed to process webhook intake",
           rpc_status: rpcResult.response?.status ?? 500,
-          rpc_message: message ?? rpcResult.response?.statusText ?? "Request failed",
-          rpc_body: debug ?? null,
         },
         "edge.rpc.intake_failed",
         "error",
         {
           rpc_status: rpcResult.response?.status ?? 500,
-          rpc_message: message ?? rpcResult.response?.statusText ?? "Request failed",
+          rpc_error: debug ?? message ?? null,
         },
       );
     }
@@ -326,13 +414,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
         responseHeaders.set(key, String(value));
       }
     }
+    const corsResponseHeaders = applyCorsHeaders(responseHeaders, corsHeaders);
 
-    if (!responseHeaders.has("content-type")) {
-      responseHeaders.set("content-type", "application/json");
+    if (!corsResponseHeaders.has("content-type")) {
+      corsResponseHeaders.set("content-type", "application/json");
     }
-    responseHeaders.set("x-correlation-id", responseCorrelationId);
-    responseHeaders.set("traceparent", trace.traceparent);
-    if (trace.tracestate) responseHeaders.set("tracestate", trace.tracestate);
+    corsResponseHeaders.set("x-correlation-id", responseCorrelationId);
+    corsResponseHeaders.set("traceparent", trace.traceparent);
+    if (trace.tracestate) corsResponseHeaders.set("tracestate", trace.tracestate);
 
     const bodyValue = data?.body ?? {};
     const normalizedBody = status >= 400
@@ -400,6 +489,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         response_mode: data.response_mode ?? null,
         response_reason: data.response_reason ?? null,
         response_status: status,
+        rejection_log_status: data?.auth_rejection_logging?.status ?? null,
+        rejection_log_reason: data?.auth_rejection_logging?.reason ?? null,
         webhook_id: data.webhook_id ?? null,
         workflow_run_id: data.workflow_run_id ?? null,
         followup_workflow_run_id: data.followup_workflow_run_id ?? null,
@@ -409,12 +500,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     return new Response(responseBody, {
       status,
-      headers: responseHeaders,
+      headers: corsResponseHeaders,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse(500, { error: message }, "edge.request.exception", "error", {
+    return jsonResponse(500, { error: "Internal server error" }, "edge.request.exception", "error", {
       error,
+      path: redactIngressSecretText(req.url),
     });
   }
 });

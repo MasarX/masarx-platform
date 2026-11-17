@@ -2,8 +2,11 @@
 /* eslint-disable no-console */
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 const { computeWorkspaceId } = require('./id');
+const {
+  assertCommandDidNotTimeOut,
+  runBoundedSyncCommand,
+} = require('./bounded-sync-command');
 
 function die(msg) {
   console.error(`[workspace/local-sync-env] ${msg}`);
@@ -16,11 +19,12 @@ function runStatusJson() {
     ? ['/c', 'npx', '-y', 'supabase@2', 'status', '--output', 'json']
     : ['npx', '-y', 'supabase@2', 'status', '--output', 'json'];
   const cmd = isWin ? 'cmd.exe' : args.shift();
-  const res = spawnSync(cmd, args, { encoding: 'utf8' });
-  if (res.status !== 0) {
-    throw new Error(`supabase status exited with ${res.status}: ${res.stderr || res.stdout || 'no output'}`);
+  const result = runBoundedSyncCommand(cmd, args, { timeoutMs: 60_000 });
+  assertCommandDidNotTimeOut(result, '[workspace/local-sync-env] Supabase status probe');
+  if (!result.ok) {
+    throw new Error(`supabase status exited with ${result.status}: ${result.stderr || result.stdout || 'no output'}`);
   }
-  const out = res.stdout || '';
+  const out = result.stdout || '';
   const start = out.indexOf('{');
   if (start === -1) throw new Error('supabase status output did not contain JSON');
   const trimmed = out.slice(start).trim();
@@ -70,7 +74,8 @@ function rewriteEnvDatabaseUrl(envPath, host, port) {
   try {
     status = runStatusJson();
   } catch (e) {
-    console.warn(`[workspace/local-sync-env] Skipping port sync: ${e.message}`);
+    console.error(`[workspace/local-sync-env] Port sync failed: ${e.message}`);
+    process.exitCode = 1;
     return;
   }
   const db = status && status.services && status.services.db;

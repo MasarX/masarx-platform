@@ -9,6 +9,7 @@ const {
   resolveDatabaseUrlWithFallback,
 } = require('../../../utils/resolve-db-url');
 const { isTransientDbTerminationError } = require('../../../utils/pg-pool-guard');
+const { withOrganizationOnboardingSource, flushOrganizationOnboarding } = require('../../../utils/organization-onboarding');
 const {
   assertMutationAllowed,
   isProductionTarget,
@@ -65,12 +66,12 @@ function buildFixtureProfile(env = process.env) {
       },
       clientAckA: {
         sourceIdentifier: 'test-client-a-ack',
-        token: 'client-a-ack-token',
+        token: prefix === 'test' ? 'client-a-ack-token' : mk('client-a-ack-token'),
         mappingKey: `${prefix}::webhook::ack-a`,
       },
       clientAckB: {
         sourceIdentifier: 'test-client-b-ack',
-        token: 'EXAMPLE_PASSWORD',
+        token: prefix === 'test' ? 'EXAMPLE_PASSWORD' : mk('EXAMPLE_PASSWORD'),
         mappingKey: `${prefix}::webhook::ack-b`,
       },
     },
@@ -261,6 +262,7 @@ async function ensureProviderAuthConfig(client, params) {
       FROM public.provider_auth_configs
       WHERE provider_id = $1::uuid
         AND auth_type = $2::text
+        AND NOT marketplace_explicit_only
         AND (expires_at IS NULL OR expires_at > now())
       ORDER BY created_at DESC
       LIMIT 1
@@ -692,32 +694,6 @@ async function upsertSettingValue(client, params) {
     ],
   );
 
-  if (params.category === 'geocoding_policy') {
-    await client.query(
-      `
-        UPDATE public.settings_versions
-        SET value = value - 'enabled'
-        WHERE category = 'geocoding_policy'
-          AND scope_type = $1::text
-          AND scope_id IS NOT DISTINCT FROM $2::uuid
-          AND effective_until IS NULL
-          AND (value ? 'enabled')
-      `,
-      [params.scopeType, params.scopeId || null],
-    );
-
-    await client.query(
-      `
-        UPDATE public.settings
-        SET cached_value = cached_value - 'enabled'
-        WHERE category = 'geocoding_policy'
-          AND scope_type = $1::text
-          AND scope_id IS NOT DISTINCT FROM $2::uuid
-          AND (cached_value ? 'enabled')
-      `,
-      [params.scopeType, params.scopeId || null],
-    );
-  }
 }
 
 function buildWebhookInboundMapping(kind) {
@@ -743,7 +719,7 @@ function buildWebhookInboundMapping(kind) {
 function buildAckMapping(kind) {
   if (kind === 'A') {
     return {
-      status_code: 200,
+      status_code: 202,
       headers: { 'content-type': 'application/json', 'x-client-ack': 'logestechs' },
       body: {
         status: 'accepted',
@@ -754,7 +730,7 @@ function buildAckMapping(kind) {
     };
   }
   return {
-    status_code: 200,
+    status_code: 202,
     headers: { 'content-type': 'application/json', 'x-client-ack': 'jarad' },
     body: {
       status: 'accepted',
@@ -838,6 +814,28 @@ function buildDialogReplyWebhookPolicy(templateId) {
   };
 }
 
+function buildShipmentWebhookPolicy() {
+  return {
+    version: 3,
+    ack: {
+      mode: 'synchronous_success',
+      status_code: 200,
+      default_headers: { 'content-type': 'application/json' },
+    },
+    validation: {
+      idempotency: { body_path: 'event.id', header: 'Idempotency-Key' },
+    },
+    workflow: {
+      intent: 'shipment.create',
+      templates_by_intent: {
+        'shipment.create': { template_name: 'webhook_shipment_create_v1' },
+        'shipment.delete': { template_name: 'shipment_delete_v1' },
+        'shipment.reschedule': { template_name: 'shipment_reschedule_v1' },
+      },
+    },
+  };
+}
+
 async function ensureProviderDefaultRecipient(client, params) {
   const base = await resolveSettingsValue(client, 'provider_defaults', 'resource', params.providerId);
   const next = {
@@ -882,19 +880,6 @@ function buildDialog360OperationTemplateDefaults(baseUrl) {
 }
 
 async function ensureOperationTemplateForProvider(client, params) {
-  const existing = await queryOne(
-    client,
-    `
-      SELECT id
-      FROM public.operation_templates
-      WHERE provider_id = $1::uuid
-        AND operation_name = $2::text
-      LIMIT 1
-    `,
-    [params.providerId, params.operationName],
-  );
-  if (existing?.id) return existing.id;
-
   const source = await queryOne(
     client,
     `
@@ -909,16 +894,19 @@ async function ensureOperationTemplateForProvider(client, params) {
         request_mappings,
         mapping_config_id,
         timeout_seconds,
-        idempotency_key_template
+        idempotency_key_template,
+        metadata
       FROM public.operation_templates
       WHERE operation_name = $1::text
+        AND provider_id <> $2::uuid
       ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
       LIMIT 1
     `,
-    [params.operationName],
+    [params.operationName, params.providerId],
   );
 
   const defaults = buildDialog360OperationTemplateDefaults(params.baseUrl);
+  const jsonParam = (value) => (value == null ? null : JSON.stringify(value));
   const mappingConfigId = source?.mapping_config_id || params.fallbackMappingConfigId || null;
   if (!mappingConfigId) {
     throw new Error(
@@ -942,7 +930,8 @@ async function ensureOperationTemplateForProvider(client, params) {
         request_mappings,
         mapping_config_id,
         timeout_seconds,
-        idempotency_key_template
+        idempotency_key_template,
+        metadata
       )
       VALUES (
         $1::uuid,
@@ -957,7 +946,8 @@ async function ensureOperationTemplateForProvider(client, params) {
         $10::jsonb,
         $11::uuid,
         $12::int,
-        $13::text
+        $13::text,
+        $14::jsonb
       )
       ON CONFLICT (provider_id, operation_name)
       DO UPDATE SET
@@ -972,6 +962,7 @@ async function ensureOperationTemplateForProvider(client, params) {
         mapping_config_id = EXCLUDED.mapping_config_id,
         timeout_seconds = EXCLUDED.timeout_seconds,
         idempotency_key_template = EXCLUDED.idempotency_key_template,
+        metadata = EXCLUDED.metadata,
         updated_at = now()
       RETURNING id
     `,
@@ -983,28 +974,33 @@ async function ensureOperationTemplateForProvider(client, params) {
       source?.call_type || defaults.callType,
       source?.method || defaults.method,
       source?.url_template || defaults.urlTemplate,
-      JSON.stringify(source?.headers_template || defaults.headersTemplate),
-      JSON.stringify(source?.body_template || defaults.bodyTemplate),
-      JSON.stringify(source?.request_mappings || defaults.requestMappings),
+      jsonParam(source ? source.headers_template : defaults.headersTemplate),
+      jsonParam(source ? source.body_template : defaults.bodyTemplate),
+      jsonParam(source ? source.request_mappings : defaults.requestMappings),
       mappingConfigId,
       Number.isFinite(Number(source?.timeout_seconds)) ? Number(source.timeout_seconds) : defaults.timeoutSeconds,
       source?.idempotency_key_template || defaults.idempotencyKeyTemplate,
+      JSON.stringify(source?.metadata || {}),
     ],
   );
 
   return row?.id || null;
 }
 
-async function ensureRecurringShipmentWorkflowTemplate(client) {
+async function ensureRecurringShipmentWorkflowTemplate(client, templateName = 'recurring_shipment_create_v1') {
+  if (typeof templateName !== 'string' || templateName.trim() === '' || templateName !== templateName.trim()) {
+    throw new Error('Recurring template name must be a nonblank unpadded string.');
+  }
   const existing = await queryOne(
     client,
     `
       SELECT id
       FROM public.workflow_templates
-      WHERE name = 'recurring_shipment_create_v1'
+      WHERE name = $1::text
       ORDER BY version DESC NULLS LAST, created_at DESC NULLS LAST
       LIMIT 1
     `,
+    [templateName],
   );
 
   let row = existing;
@@ -1014,7 +1010,6 @@ async function ensureRecurringShipmentWorkflowTemplate(client) {
       `
         UPDATE public.workflow_templates
         SET description = 'Recurring shipment create workflow backed by the canonical workflow-engine shipment create contract.',
-            version = 1,
             status = 'active',
             scope_type = 'global',
             scope_id = NULL,
@@ -1041,7 +1036,7 @@ async function ensureRecurringShipmentWorkflowTemplate(client) {
           updated_at
         )
         VALUES (
-          'recurring_shipment_create_v1',
+          $1::text,
           'Recurring shipment create workflow backed by the canonical workflow-engine shipment create contract.',
           1,
           'active',
@@ -1053,6 +1048,7 @@ async function ensureRecurringShipmentWorkflowTemplate(client) {
         )
         RETURNING id
       `,
+      [templateName],
     );
   }
 
@@ -1070,7 +1066,7 @@ async function ensureRecurringShipmentWorkflowTemplate(client) {
       nextOperationPriority: 85,
       metadata: {
         handler_key: 'reserve_shipment_identifiers',
-        template_name: 'recurring_shipment_create_v1',
+        template_name: templateName,
       },
       handlerKey: 'reserve_shipment_identifiers',
       handlerVersion: 'v1',
@@ -1085,7 +1081,7 @@ async function ensureRecurringShipmentWorkflowTemplate(client) {
       nextOperationPriority: null,
       metadata: {
         handler_key: 'shipment_create',
-        template_name: 'recurring_shipment_create_v1',
+        template_name: templateName,
       },
       handlerKey: 'shipment_create',
       handlerVersion: 'v1',
@@ -1132,6 +1128,11 @@ async function ensureRecurringShipmentWorkflowTemplate(client) {
             handler_key = $8::text,
             handler_version = $9::text
           WHERE id = $1::uuid
+            AND ROW(operation_name,operation_settings_category,transition_condition,
+              condition_jsonlogic,next_operation_name,next_operation_priority,next_operation_delay_seconds,
+              manual_action_required,metadata,enabled,handler_key,handler_version)
+              IS DISTINCT FROM ROW($2::text,$3::text,$4::text,NULL::jsonb,$5::text,$6::int,NULL::int,
+                FALSE,$7::jsonb,TRUE,$8::text,$9::text)
         `,
         [
           existingStep.id,
@@ -1216,6 +1217,7 @@ async function ensureRecurringShipmentWorkflowTemplate(client) {
         SET enabled = FALSE,
             updated_at = now()
         WHERE id = $1::uuid
+          AND enabled IS DISTINCT FROM FALSE
       `,
       [existingStep.id],
     );
@@ -1275,7 +1277,8 @@ async function ensureIntegrationFixtures(options = {}) {
     try {
       await client.query('BEGIN');
 
-    const org = await ensureOrganization(client, profile.organizations.alpha);
+    const org = await withOrganizationOnboardingSource(client, () =>
+      ensureOrganization(client, profile.organizations.alpha));
     const client11 = await ensureClient(client, org.id, profile.clients.oneOne);
     const client12 = await ensureClient(client, org.id, profile.clients.oneTwo);
     const client13 = await ensureClient(client, org.id, profile.clients.oneThree);
@@ -1285,6 +1288,8 @@ async function ensureIntegrationFixtures(options = {}) {
     const sender12 = await ensureSender(client, client12.id, profile.senders.oneTwo.name);
     const sender13 = await ensureSender(client, client13.id, profile.senders.oneThree.name);
     const sender21 = await ensureSender(client, client21.id, profile.senders.twoOne.name);
+
+    await flushOrganizationOnboarding(client);
 
     const providerHere = await ensureProvider(client, {
       organizationId: org.id,
@@ -1301,7 +1306,7 @@ async function ensureIntegrationFixtures(options = {}) {
       credentials: { api_key: 'EXAMPLE_PASSWORD' },
       secretDescription: 'integration fixture here api_key',
     });
-    await ensureProvider(client, {
+    const providerGoogle = await ensureProvider(client, {
       organizationId: org.id,
       name: 'google_maps',
       providerType: 'geocoding',
@@ -1429,6 +1434,22 @@ async function ensureIntegrationFixtures(options = {}) {
     });
 
     await ensureOperationTemplateForProvider(client, {
+      providerId: providerHere.id,
+      operationName: 'geocoding_here_forward_v1',
+      fallbackMappingConfigId: mappingGeocodingIntake,
+    });
+    await ensureOperationTemplateForProvider(client, {
+      providerId: providerHere.id,
+      operationName: 'geocoding_here_reverse_v1',
+      fallbackMappingConfigId: mappingGeocodingIntake,
+    });
+    await ensureOperationTemplateForProvider(client, {
+      providerId: providerGoogle.id,
+      operationName: 'geocoding_google_forward_v1',
+      fallbackMappingConfigId: mappingGeocodingIntake,
+    });
+
+    await ensureOperationTemplateForProvider(client, {
       providerId: providerDialog.id,
       operationName: 'dialog360_send_whatsapp_status_v1',
       baseUrl: 'https://waba-v2.360dialog.io/messages',
@@ -1537,23 +1558,13 @@ async function ensureIntegrationFixtures(options = {}) {
 
     await ensureRecurringShipmentWorkflowTemplate(client);
 
-    const sourcePolicy = {
-      version: 1,
-      ack: {
-        mode: 'synchronous_success',
-        status_code: 200,
-        default_headers: { 'content-type': 'application/json' },
-      },
-      validation: {
-        idempotency: { body_path: 'event.id', header: 'Idempotency-Key' },
-      },
-      workflow: { intent: 'shipment_create' },
-    };
+    const sourcePolicy = buildShipmentWebhookPolicy();
     await upsertSettingValue(client, {
       category: 'webhook_ingest_policy',
       scopeType: 'source',
       scopeId: sourceBasic.id,
       value: sourcePolicy,
+      schemaVersion: 3,
       changeReason,
     });
     await upsertSettingValue(client, {
@@ -1561,6 +1572,7 @@ async function ensureIntegrationFixtures(options = {}) {
       scopeType: 'source',
       scopeId: sourceHmac.id,
       value: sourcePolicy,
+      schemaVersion: 3,
       changeReason,
     });
     await upsertSettingValue(client, {
@@ -1571,6 +1583,7 @@ async function ensureIntegrationFixtures(options = {}) {
         ...sourcePolicy,
         ack: { ...sourcePolicy.ack, mode: 'accepted_async', status_code: 202 },
       },
+      schemaVersion: 3,
       changeReason,
     });
     await upsertSettingValue(client, {
@@ -1578,17 +1591,14 @@ async function ensureIntegrationFixtures(options = {}) {
       scopeType: 'source',
       scopeId: sourceAckA.id,
       value: {
-        version: 1,
+        ...buildShipmentWebhookPolicy(),
         ack: {
-          mode: 'synchronous_success',
-          status_code: 200,
+          mode: 'accepted_async',
+          status_code: 202,
           response_mapping_id: mappingAckA,
         },
-        validation: {
-          idempotency: { body_path: 'event.id' },
-        },
-        workflow: { intent: 'shipment_create' },
       },
+      schemaVersion: 3,
       changeReason,
     });
     await upsertSettingValue(client, {
@@ -1596,17 +1606,14 @@ async function ensureIntegrationFixtures(options = {}) {
       scopeType: 'source',
       scopeId: sourceAckB.id,
       value: {
-        version: 1,
+        ...buildShipmentWebhookPolicy(),
         ack: {
-          mode: 'synchronous_success',
-          status_code: 200,
+          mode: 'accepted_async',
+          status_code: 202,
           response_mapping_id: mappingAckB,
         },
-        validation: {
-          idempotency: { body_path: 'event.id' },
-        },
-        workflow: { intent: 'shipment_create' },
       },
+      schemaVersion: 3,
       changeReason,
     });
     await upsertSettingValue(client, {
@@ -1632,17 +1639,14 @@ async function ensureIntegrationFixtures(options = {}) {
       scopeType: 'client',
       scopeId: client11.id,
       value: {
-        version: 1,
+        ...buildShipmentWebhookPolicy(),
         ack: {
-          mode: 'synchronous_success',
-          status_code: 200,
+          mode: 'accepted_async',
+          status_code: 202,
           response_mapping_id: mappingAckA,
         },
-        validation: {
-          idempotency: { body_path: 'event.id', header: 'Idempotency-Key' },
-        },
-        workflow: { intent: 'shipment_create' },
       },
+      schemaVersion: 3,
       changeReason,
     });
 
@@ -1651,17 +1655,14 @@ async function ensureIntegrationFixtures(options = {}) {
       scopeType: 'client',
       scopeId: client12.id,
       value: {
-        version: 1,
+        ...buildShipmentWebhookPolicy(),
         ack: {
-          mode: 'synchronous_success',
-          status_code: 200,
+          mode: 'accepted_async',
+          status_code: 202,
           response_mapping_id: mappingAckB,
         },
-        validation: {
-          idempotency: { body_path: 'event.id', header: 'Idempotency-Key' },
-        },
-        workflow: { intent: 'shipment_create' },
       },
+      schemaVersion: 3,
       changeReason,
     });
 
@@ -1997,6 +1998,7 @@ async function runCli(options = {}) {
 
 module.exports = {
   buildFixtureProfile,
+  buildShipmentWebhookPolicy,
   ensureIntegrationFixtures,
   ensureRecurringShipmentWorkflowTemplate,
   isRetryableFixtureBootstrapConcurrencyError,
@@ -2007,4 +2009,5 @@ module.exports = {
   resolveFixtureBootstrapRetryConfig,
   runCli,
   withFixtureBootstrapRetry,
+  upsertSettingValue,
 };

@@ -2,8 +2,11 @@
 /* eslint-disable no-console */
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('crypto');
 const { spawnSync } = require('child_process');
-const { buildInventory, renderPriorityMatrix } = require('./security-audit-inventory');
+const { buildInventory, renderPriorityMatrix, validateNpmAuditReport } = require('./security-audit-inventory');
+const { redactRuntimeOutput } = require('./workspace/docker-runtime/redaction');
+const { isSensitiveCredentialKey } = require('./workspace/docker-runtime/secret-policy');
 
 const DEFAULT_THRESHOLD_SEVERITIES = Object.freeze(['high', 'critical']);
 
@@ -15,12 +18,12 @@ function resolveNpmAuditInvocation() {
   if (process.platform === 'win32') {
     return {
       command: 'cmd.exe',
-      args: ['/d', '/s', '/c', 'npm audit --json'],
+      args: ['/d', '/s', '/c', 'npm audit --json --package-lock-only --ignore-scripts --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=120000'],
     };
   }
   return {
     command: resolveNpmCommand(),
-    args: ['audit', '--json'],
+    args: ['audit', '--json', '--package-lock-only', '--ignore-scripts', '--registry=https://registry.npmjs.org', '--fetch-retries=0', '--fetch-timeout=120000'],
   };
 }
 
@@ -92,46 +95,178 @@ function parseJsonFromNpmAuditOutput(rawText) {
   }
 }
 
-function runNpmAudit({ repoRoot }) {
-  const invocation = resolveNpmAuditInvocation();
-  const result = spawnSync(invocation.command, invocation.args, {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 1024 * 1024 * 128,
-    env: process.env,
-  });
-  if (result.error) {
-    throw new Error(`npm audit failed to execute: ${result.error.message}`);
-  }
-
-  const stdout = String(result.stdout || '');
-  const stderr = String(result.stderr || '');
-  const combined = stdout.trim() ? stdout : stderr;
-  const payload = parseJsonFromNpmAuditOutput(combined);
-
-  // npm audit exits non-zero when vulnerabilities exist; this is expected.
-  if (result.status !== 0 && !payload) {
-    throw new Error(`npm audit exited with status ${result.status}`);
-  }
-
-  return payload;
+function redactAuditOutput(value, repoRoot) {
+  const privateValues = Object.entries(process.env)
+    .filter(([key]) => isSensitiveCredentialKey(key) || /AUTH|COOKIE|PROXY/i.test(key))
+    .map(([, secret]) => secret).filter(Boolean);
+  privateValues.push(repoRoot, process.env.HOME, process.env.USERPROFILE);
+  const forms = privateValues.filter(Boolean).flatMap(secret => [secret, encodeURIComponent(secret), JSON.stringify(secret).slice(1, -1)]);
+  const secrets = [...new Set(forms)].sort((left, right) => right.length - left.length);
+  const redactText = input => {
+    // Remove credential structures before short environment values can break their delimiters.
+    let text = redactRuntimeOutput(input
+      .replace(/\bhttps?:\/\/[^\s"'<>]+/giu, '[redacted-url]')
+      .replace(/\b(?:Basic|Bearer)\s+[A-Za-z0-9._~+/=-]+/giu, '[redacted-authorization]')
+      .replace(/(["']?(?:(?:proxy-)?authorization|(?:set-)?cookie)["']?\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]+)/giu, '$1[redacted]'));
+    for (const secret of secrets) text = text.split(secret).join('[redacted]');
+    return text;
+  };
+  const sanitize = (input, depth = 0) => {
+    if ((input === null || ['string', 'number', 'boolean'].includes(typeof input))
+      && privateValues.includes(String(input))) return '[redacted]';
+    if (depth >= 8) return '[redacted-depth-limit]';
+    if (typeof input === 'string') {
+      let decoded;
+      try {
+        decoded = parseJsonFromNpmAuditOutput(input);
+      } catch {
+        // Undecodable structured/escaped data must never fall back to raw output.
+        if (['{', '[', '"'].includes(input.trimStart().charAt(0)) || /[\\{}]/u.test(input)) {
+          return '[redacted-invalid-json]';
+        }
+        return redactText(input);
+      }
+      return sanitize(decoded, depth + 1);
+    }
+    if (Array.isArray(input)) return input.map(item => sanitize(item, depth + 1));
+    if (input && typeof input === 'object') {
+      return Object.fromEntries(Object.entries(input).map(([key, item]) => [
+        redactText(key),
+        isSensitiveCredentialKey(key) || /AUTH|COOKIE|PROXY/i.test(key) ? '[redacted]' : sanitize(item, depth + 1),
+      ]));
+    }
+    return input;
+  };
+  const redacted = sanitize(String(value || ''));
+  return typeof redacted === 'string' ? redacted : JSON.stringify(redacted);
 }
 
-function findingSignature(finding) {
-  const packageName = String(finding?.package_name || '').trim();
-  const severity = normalizeSeverity(finding?.severity || '');
-  if (!packageName || !severity) return '';
-  return `${packageName}|${severity}`;
+function runNpmAudit({ repoRoot, auditFile }) {
+  const invocation = resolveNpmAuditInvocation();
+  const attemptsFile = auditFile ? `${auditFile}.attempts.log` : null;
+  // A new acquisition replaces stale diagnostics; recovery keeps its failed attempts.
+  if (attemptsFile) fs.rmSync(attemptsFile, { force: true });
+  const cacheDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'masarx-npm-audit-'));
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (/^npm_config_(cache|prefer_online|prefer_offline|offline)$/i.test(key)) delete env[key];
+  }
+  Object.assign(env, {
+    npm_config_cache: cacheDir,
+    npm_config_prefer_online: 'true',
+    npm_config_prefer_offline: 'false',
+    npm_config_offline: 'false',
+  });
+  try {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const result = spawnSync(invocation.command, invocation.args, {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024 * 128,
+        windowsHide: true,
+        env,
+      });
+      const stdout = String(result.stdout || '');
+      const stderr = String(result.stderr || '');
+      let report;
+      const status = Number.isInteger(result.status) ? result.status : null;
+      const diagnostics = () => {
+        const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+        const code = result.error?.code || report?.error?.code;
+        const allowedCodes = ['ENOAUDIT', 'EAUDITNOLOCK', 'ENOLOCK', 'ENOPACKAGELOCK', 'ENOENT', 'EACCES', 'EPERM',
+          'ENOBUFS', 'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EPROXYAUTH',
+          'E401', 'E403', 'E404', 'E500', 'E502', 'E503', 'E504', 'EUSAGE', 'ERESOLVE', 'EINTEGRITY'];
+        const allowedSignals = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGABRT', 'SIGSEGV', 'SIGHUP', 'SIGQUIT'];
+        return JSON.stringify({ status, signal: allowedSignals.includes(result.signal) ? result.signal : null,
+          error_code: allowedCodes.includes(code) ? code : null,
+          stdout_bytes: Buffer.byteLength(stdout), stderr_bytes: Buffer.byteLength(stderr),
+          schema: { record: isRecord(report), has_error: isRecord(report) && Object.hasOwn(report, 'error'),
+            audit_report_version: Number.isSafeInteger(report?.auditReportVersion) ? report.auditReportVersion : null,
+            vulnerabilities_record: isRecord(report?.vulnerabilities),
+            metadata_vulnerabilities_record: isRecord(report?.metadata?.vulnerabilities) },
+        });
+      };
+      let failure;
+      if (result.error) failure = 'npm audit failed to execute';
+      else if (result.signal || ![0, 1].includes(result.status)) failure = `npm audit exited with status ${status}`;
+      else {
+        try {
+          report = parseJsonFromNpmAuditOutput(stdout.trim() ? stdout : stderr);
+          return validateNpmAuditReport(report);
+        } catch {
+          failure = 'Invalid npm audit report';
+        }
+      }
+      if (attemptsFile) {
+        ensureDir(attemptsFile);
+        fs.appendFileSync(attemptsFile, `${JSON.stringify({ attempt, diagnostics: JSON.parse(diagnostics()),
+          stdout: redactAuditOutput(stdout, repoRoot), stderr: redactAuditOutput(stderr, repoRoot) })}\n`,
+          { encoding: 'utf8', mode: 0o600 });
+      }
+      const errorShaped = report !== null && typeof report === 'object' && !Array.isArray(report)
+        && Object.hasOwn(report, 'error');
+      if (result.error || result.signal || ![0, 1].includes(result.status) || !errorShaped || attempt === 3) {
+        throw new Error(`${failure}; diagnostics=${diagnostics()}`);
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 1000);
+    }
+  } finally {
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  }
+}
+
+function findingIdentity(finding) {
+  const nonempty = value => typeof value === 'string' && value.trim().length > 0;
+  if (!nonempty(finding?.package_name) || finding.package_name.includes('|')
+    || !['info', 'low', 'moderate', 'high', 'critical'].includes(normalizeSeverity(finding.severity))
+    || !nonempty(finding.vulnerable_range) || !nonempty(finding.runtime_exposure)
+    || !Array.isArray(finding.advisory_dependencies) || !finding.advisory_dependencies.every(nonempty)
+    || !Array.isArray(finding.advisories) || !Array.isArray(finding.nodes) || !finding.nodes.length
+    || !finding.advisories.length && !finding.advisory_dependencies.length) {
+    throw new Error('Invalid exact security finding identity');
+  }
+  const advisories = finding.advisories.map(advisory => {
+    if (!Number.isSafeInteger(advisory.source) || advisory.source <= 0
+      || !nonempty(advisory.url) || !nonempty(advisory.range)
+      || !['info', 'low', 'moderate', 'high', 'critical'].includes(advisory.severity)) {
+      throw new Error('Invalid exact security advisory identity');
+    }
+    return [advisory.source, advisory.url, advisory.range, advisory.severity, advisory.dependency];
+  });
+  const nodes = finding.nodes.map(node => {
+    if (!nonempty(node.path) || !nonempty(node.version)
+      || typeof node.dev !== 'boolean' || typeof node.optional !== 'boolean') {
+      throw new Error('Invalid exact security installed-node identity');
+    }
+    return [node.path, node.version, node.dev, node.optional];
+  });
+  const sorted = values => values.map(value => JSON.stringify(value)).sort().map(value => JSON.parse(value));
+  // Derived meta-ranges describe other releases; installed nodes and inherited advisories bind this risk.
+  const derivedOnly = !advisories.length && finding.advisory_dependencies.length > 0;
+  return [finding.package_name, normalizeSeverity(finding.severity), derivedOnly ? null : finding.vulnerable_range,
+    finding.runtime_exposure, [...finding.advisory_dependencies].sort(), sorted(advisories), sorted(nodes)];
+}
+
+function findingSignature(finding, findings = [finding]) {
+  const byPackage = new Map(findings.map(value => [value.package_name, value]));
+  const closure = new Map();
+  function visit(value) {
+    if (!value) throw new Error('Missing inherited security advisory finding');
+    if (closure.has(value.package_name)) return;
+    closure.set(value.package_name, findingIdentity(value));
+    for (const dependency of value.advisory_dependencies) visit(byPackage.get(dependency));
+  }
+  visit(finding);
+  const identity = [...closure.keys()].sort().map(key => closure.get(key));
+  return `${finding.package_name}|${normalizeSeverity(finding.severity)}|sha256:${createHash('sha256').update(JSON.stringify(identity)).digest('hex')}`;
 }
 
 function canonicalizeSignature(rawSignature) {
-  const text = String(rawSignature || '').trim();
-  if (!text) return '';
-  const [rawPackageName = '', rawSeverity = ''] = text.split('|');
-  const packageName = String(rawPackageName || '').trim();
-  const severity = normalizeSeverity(rawSeverity);
-  if (!packageName || !severity) return '';
-  return `${packageName}|${severity}`;
+  if (typeof rawSignature !== 'string'
+    || !/^[^|\s]+\|(info|low|moderate|high|critical)\|sha256:[a-f0-9]{64}$/.test(rawSignature)) {
+    throw new Error('Invalid exact security baseline signature; legacy package-only exceptions must be rebound');
+  }
+  return rawSignature;
 }
 
 function toSignatureRecords(findings, thresholdSeverities) {
@@ -140,7 +275,7 @@ function toSignatureRecords(findings, thresholdSeverities) {
   for (const finding of findings || []) {
     const severity = normalizeSeverity(finding?.severity);
     if (!allowed.has(severity)) continue;
-    const signature = findingSignature(finding);
+    const signature = findingSignature(finding, findings);
     if (signature) {
       records.set(signature, {
         signature,
@@ -160,7 +295,17 @@ function loadBaseline(baselineFile) {
     throw new Error(`Baseline file not found: ${baselineFile}`);
   }
   const baseline = readJson(baselineFile);
-  const list = Array.isArray(baseline?.allowed_signatures) ? baseline.allowed_signatures : [];
+  if (Object.prototype.hasOwnProperty.call(baseline, 'expires_at')) {
+    const expiry = baseline.expires_at;
+    const timestamp = typeof expiry === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(expiry)
+      ? Date.parse(`${expiry}T00:00:00.000Z`) : NaN;
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== expiry) {
+      throw new Error('Invalid accepted-risk baseline expiry');
+    }
+    if (new Date().toISOString().slice(0, 10) > expiry) throw new Error('Accepted-risk baseline expired');
+  }
+  if (!Array.isArray(baseline?.allowed_signatures)) throw new Error('Invalid security baseline signatures');
+  const list = baseline.allowed_signatures;
   const signatures = [...new Set(list.map((value) => canonicalizeSignature(value)).filter(Boolean))].sort();
   return { baseline, signatures, signatureSet: new Set(signatures) };
 }
@@ -306,10 +451,39 @@ function parseArgs(argv = process.argv.slice(2)) {
   return options;
 }
 
+function createStageReporter() {
+  let startedAt;
+  const stageStarts = new Map();
+  return (stage, phase, source) => {
+    try {
+      const now = process.hrtime.bigint();
+      if (startedAt === undefined) startedAt = now;
+      const milliseconds = since => Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Number((now - since) / 1000000n)));
+      if (phase === 'begin') stageStarts.set(stage, now);
+      const record = {
+        version: 1, stage, phase, elapsed_ms: milliseconds(startedAt),
+        ...(phase === 'complete' ? { duration_ms: milliseconds(stageStarts.get(stage)) } : {}),
+        ...(stage === 'audit' ? { source } : {}),
+      };
+      // Synchronous output survives an outer timeout while npm audit blocks this process.
+      // Only fixed stage names and timing fields enter this diagnostic channel.
+      fs.writeSync(1, `[security-scan-stage] ${JSON.stringify(record)}\n`);
+    } catch {
+      // Diagnostics must not change the gate result or replace its original error.
+    }
+  };
+}
+
 function runCli(options = parseArgs()) {
-  const auditReport = options.useExistingAuditFile && fs.existsSync(options.auditFile)
+  const reportStage = createStageReporter();
+  const useExistingAuditFile = options.useExistingAuditFile && fs.existsSync(options.auditFile);
+  const auditSource = useExistingAuditFile ? 'existing' : 'live';
+  reportStage('audit', 'begin', auditSource);
+  const auditReport = useExistingAuditFile
     ? readJson(options.auditFile)
-    : runNpmAudit({ repoRoot: options.repoRoot });
+    : runNpmAudit({ repoRoot: options.repoRoot, auditFile: options.auditFile });
+  reportStage('audit', 'complete', auditSource);
+  reportStage('inventory', 'begin');
   writeJson(options.auditFile, auditReport);
 
   const lockData = readJson(options.lockFile);
@@ -323,10 +497,14 @@ function runCli(options = parseArgs()) {
     signedOffBy: options.signedOffBy,
   });
   const matrix = renderPriorityMatrix(inventory);
+  reportStage('inventory', 'complete');
 
+  reportStage('write_inventory', 'begin');
   writeJson(options.inventoryFile, inventory);
   writeText(options.matrixFile, matrix);
+  reportStage('write_inventory', 'complete');
 
+  reportStage('evaluate', 'begin');
   const baselineState = loadBaseline(options.baselineFile);
   const evaluation = evaluateAgainstBaseline({
     findings: inventory.findings || [],
@@ -351,7 +529,10 @@ function runCli(options = parseArgs()) {
     unexpected_signatures: evaluation.unexpected_signatures,
     resolved_signatures: evaluation.resolved_signatures,
   };
+  reportStage('evaluate', 'complete');
+  reportStage('write_summary', 'begin');
   writeJson(options.summaryFile, summary);
+  reportStage('write_summary', 'complete');
 
   console.log(
     `[security-scan-gate] threshold=${summary.threshold_severities.join(',')} current=${summary.counts.current_threshold_findings} baseline=${summary.counts.baseline_threshold_findings} unexpected=${summary.counts.unexpected_threshold_findings} resolved=${summary.counts.resolved_threshold_findings}`,
@@ -364,6 +545,12 @@ function runCli(options = parseArgs()) {
   }
   if (summary.bypass_applied && summary.unexpected_signatures.length) {
     console.warn('[security-scan-gate] Bypass enabled; allowing unexpected high/critical findings.');
+  }
+
+  if (summary.resolved_signatures.length) {
+    throw new Error(
+      `Detected ${summary.resolved_signatures.length} resolved high/critical baseline signatures; prune stale entries from ${summary.baseline_file}`,
+    );
   }
 
   if (summary.unexpected_signatures.length && !summary.bypass_applied) {
@@ -395,5 +582,6 @@ module.exports = {
   resolveNpmAuditInvocation,
   resolveNpmCommand,
   runCli,
+  runNpmAudit,
   toSignatureRecords,
 };

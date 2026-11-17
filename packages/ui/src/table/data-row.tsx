@@ -24,6 +24,8 @@ import {
   resolveRenderType,
 } from "./cell-renderers";
 import { renderTypedCell } from "./cell-renderer-dispatch";
+import { conditionalStyleToCss, evaluateConditionalFormatting } from "./conditional-formatting";
+import type { ConditionalFormattingRule } from "./view-types";
 
 type DataRow = Extract<DisplayRow, { type: "row" }>;
 
@@ -36,12 +38,14 @@ type TableDataRowProps = {
   baseHref?: string | null;
   resolveRowHref?: (rowId: string) => string | null;
   selectionEnabled: boolean;
+  selectionReady?: boolean;
   selectedIds: Set<string>;
   cellPadding: string;
   displayColumns: ResourceColumn[];
   pinnedOffsets: Record<string, number | undefined>;
   columnWidths: Record<string, number>;
   pinnedCellClass: string;
+  conditionalFormatting?: ConditionalFormattingRule[] | null;
   numericColumnSet: Set<string>;
   hasGrouping: boolean;
   editConfigByKey: Map<string, EditConfig>;
@@ -68,12 +72,14 @@ export function TableDataRow({
   baseHref,
   resolveRowHref,
   selectionEnabled,
+  selectionReady = true,
   selectedIds,
   cellPadding,
   displayColumns,
   pinnedOffsets,
   columnWidths,
   pinnedCellClass,
+  conditionalFormatting,
   numericColumnSet,
   hasGrouping,
   editConfigByKey,
@@ -130,6 +136,10 @@ export function TableDataRow({
       ? t("detail.collapseLabel")
       : t("detail.expandLabel");
   const rowSelected = rowId ? selectedIds.has(rowId) : false;
+  const conditionalStyles = evaluateConditionalFormatting(item, conditionalFormatting);
+  const rowStyle = conditionalStyleToCss(conditionalStyles.row);
+  // Keep the selection background visible while retaining conditional foreground styles.
+  const selectionStyle = rowSelected ? { backgroundColor: undefined } : undefined;
   const rowHighlightClass = rowSelected ? "bg-ui-accent/5" : null;
   const rowClickable = Boolean(rowHref);
   const rowSurfaceClass = rowSelected
@@ -141,7 +151,7 @@ export function TableDataRow({
     const target = event.target;
     if (
       target instanceof HTMLElement &&
-      target.closest("button,a,input,select,textarea,[role='button'],[role='link']")
+      target.closest("button,a,input,select,textarea,[role='button'],[role='link'],[data-editable='true']")
     ) {
       return;
     }
@@ -154,7 +164,7 @@ export function TableDataRow({
     const target = event.target;
     if (
       target instanceof HTMLElement &&
-      target.closest("button,a,input,select,textarea,[role='button'],[role='link']")
+      target.closest("button,a,input,select,textarea,[role='button'],[role='link'],[data-editable='true']")
     ) {
       return;
     }
@@ -205,7 +215,11 @@ export function TableDataRow({
           "cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ui-accent/20 focus-visible:ring-offset-0",
         rowSelected && "bg-ui-accent/5"
       )}
-      style={{ borderBottom: "1px solid var(--table-row-separator)" }}
+      style={{
+        borderBottom: "1px solid var(--table-row-separator)",
+        ...rowStyle,
+        ...selectionStyle,
+      }}
       aria-selected={rowSelected}
       onClick={rowClickable ? handleRowClick : undefined}
       onKeyDown={rowClickable ? handleRowKeyDown : undefined}
@@ -222,6 +236,7 @@ export function TableDataRow({
               id: rowFriendlyIdentifier ?? String(idValue ?? rowIndex),
             })}
             checked={rowSelected}
+            disabled={!selectionReady}
             className={cn(
               "h-3.5 w-3.5 rounded-[3px]",
               "transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
@@ -229,6 +244,7 @@ export function TableDataRow({
             )}
             readOnly
             onClick={(event) => {
+              if (!selectionReady) return;
               if (idValue === null || idValue === undefined) return;
               onSelectRow(rowIndex, String(idValue), event.shiftKey);
             }}
@@ -263,11 +279,18 @@ export function TableDataRow({
         const editLabel = resolveColumnLabel(column);
         const cellDisplay = resolveCellDisplay(item, column);
         const rawValue = item[column.key];
-        const cellBody = renderTypedCell(column, rawValue, cellDisplay, isPrimaryColumn);
+        const conditionalStyle = {
+          ...rowStyle,
+          ...conditionalStyleToCss(conditionalStyles.cells[column.key]),
+        };
+        const cellBody = renderTypedCell(
+          column, rawValue, cellDisplay, isPrimaryColumn, conditionalStyle.color
+        );
         const linkBody =
           rowHref && isPrimaryColumn ? (
             <a
               className="text-ui-ink hover:underline"
+              style={conditionalStyle.color ? { color: conditionalStyle.color } : undefined}
               href={rowHref}
               onClick={(event) => {
                 if (event.defaultPrevented) return;
@@ -345,6 +368,11 @@ export function TableDataRow({
         return (
           <td
             key={`${column.key}-${row.id}`}
+            data-column-key={column.key}
+            data-testid={
+              isPrimaryIdentifierColumn ? "resource-table-primary-identifier" : undefined
+            }
+            data-editable={isEditable ? "true" : "false"}
             data-pinned={isPinned ? "true" : undefined}
             onDoubleClick={handleCellDoubleClick}
             className={cn(
@@ -358,6 +386,8 @@ export function TableDataRow({
             style={{
               ...(isPinned ? { left: pinnedOffset } : null),
               ...(columnWidths[column.key] ? { width: columnWidths[column.key] } : null),
+              ...conditionalStyle,
+              ...selectionStyle,
             }}
           >
             {content}

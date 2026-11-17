@@ -1,7 +1,26 @@
+import { getUiDefaults } from "@masarx/config";
+
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const RESOURCE_DOWNLOAD_DECISION_CATEGORY = "resource_download_failed";
 export const RESOURCE_DOWNLOAD_DECISION_POINT = "api_resource_download";
+export const MAX_RESOURCE_DOWNLOAD_BATCH = getUiDefaults().table.maxDownloadBatch;
+const RESOURCE_DOWNLOAD_CONCURRENCY = 4;
+
+async function mapDownloads<T, R>(values: T[], run: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  await Promise.all(Array.from(
+    { length: Math.min(RESOURCE_DOWNLOAD_CONCURRENCY, values.length) },
+    async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex++;
+        results[index] = await run(values[index]!);
+      }
+    }
+  ));
+  return results;
+}
 
 type DecisionLogRpcResult = {
   data?: unknown;
@@ -42,6 +61,7 @@ type ResourceDownloadRequest = {
   resource: string;
   id: string;
   app: "console" | "portal";
+  extraParams?: Record<string, string | null | undefined>;
 };
 
 const toUuid = (value: string | null | undefined): string | null => {
@@ -94,36 +114,34 @@ export async function logResourceDownloadPartialFailures(params: {
 
   const correlationId = toDecisionCorrelation(requestId);
 
-  await Promise.allSettled(
-    failures.map(async (failure) => {
-      const resourceId = toUuid(failure.id);
-      if (!resourceId) return;
+  await mapDownloads(failures, async (failure) => {
+    const resourceId = toUuid(failure.id);
+    if (!resourceId) return;
 
-      const decisionInputs = {
-        app,
-        resource,
-        requestId,
-        error: failure.error,
-      };
+    const decisionInputs = {
+      app,
+      resource,
+      requestId,
+      error: failure.error,
+    };
 
-      try {
-        await supabase.rpc("log_decision", {
-          p_organization_id: organizationId,
-          p_decision_category: RESOURCE_DOWNLOAD_DECISION_CATEGORY,
-          p_resource_type: resource,
-          p_resource_id: resourceId,
-          p_decision_point: RESOURCE_DOWNLOAD_DECISION_POINT,
-          p_decision_outcome: "failed",
-          p_performed_by_system: `${app}:resource-download`,
-          ...(correlationId ? { p_correlation_id: correlationId } : {}),
-          p_decision_inputs: decisionInputs,
-          p_decision_reason: "partial_failure",
-        });
-      } catch (_error) {
-        // best-effort telemetry only
-      }
-    })
-  );
+    try {
+      await supabase.rpc("log_decision", {
+        p_organization_id: organizationId,
+        p_decision_category: RESOURCE_DOWNLOAD_DECISION_CATEGORY,
+        p_resource_type: resource,
+        p_resource_id: resourceId,
+        p_decision_point: RESOURCE_DOWNLOAD_DECISION_POINT,
+        p_decision_outcome: "failed",
+        p_performed_by_system: `${app}:resource-download`,
+        ...(correlationId ? { p_correlation_id: correlationId } : {}),
+        p_decision_inputs: decisionInputs,
+        p_decision_reason: "partial_failure",
+      });
+    } catch (_error) {
+      // best-effort telemetry only
+    }
+  });
 }
 
 export async function downloadResourceBatch(params: {
@@ -132,7 +150,9 @@ export async function downloadResourceBatch(params: {
   app: "console" | "portal";
   resource: string;
   ids: string[];
+  shipmentId?: string | null;
   accessToken: string;
+  extraParams?: ResourceDownloadRequest["extraParams"];
   requestResourceDownload: (
     request: ResourceDownloadRequest
   ) => Promise<ResourceDownloadResponse>;
@@ -149,44 +169,47 @@ export async function downloadResourceBatch(params: {
     app,
     resource,
     ids,
+    shipmentId,
     accessToken,
+    extraParams,
     requestResourceDownload,
   } = params;
 
-  const attempts = await Promise.all(
-    ids.map(async (itemId) => {
-      try {
-        const result = await requestResourceDownload({
-          accessToken,
-          resource,
-          id: itemId,
-          app,
-        });
+  const attempts = await mapDownloads(ids, async (itemId) => {
+    try {
+      const result = await requestResourceDownload({
+        accessToken,
+        resource,
+        id: itemId,
+        app,
+        ...((shipmentId || extraParams) ? {
+          extraParams: { ...(extraParams ?? {}), ...(shipmentId ? { shipment_id: shipmentId } : {}) },
+        } : {}),
+      });
 
-        if (!result.ok) {
-          return {
-            id: itemId,
-            error: result.error ?? "Download request failed.",
-          } as ResourceDownloadErrorResult;
-        }
-
-        if (!result.url) {
-          return {
-            id: itemId,
-            error: "Download request returned no url.",
-          } as ResourceDownloadErrorResult;
-        }
-
-        return { id: itemId, url: result.url } as ResourceDownloadSuccessResult;
-      } catch (error) {
+      if (!result.ok) {
         return {
           id: itemId,
-          error:
-            error instanceof Error ? error.message : "Download request failed.",
+          error: result.error ?? "Download request failed.",
         } as ResourceDownloadErrorResult;
       }
-    })
-  );
+
+      if (!result.url) {
+        return {
+          id: itemId,
+          error: "Download request returned no url.",
+        } as ResourceDownloadErrorResult;
+      }
+
+      return { id: itemId, url: result.url } as ResourceDownloadSuccessResult;
+    } catch (error) {
+      return {
+        id: itemId,
+        error:
+          error instanceof Error ? error.message : "Download request failed.",
+      } as ResourceDownloadErrorResult;
+    }
+  });
 
   const urls = attempts.flatMap((item) =>
     "url" in item && item.url ? [item.url] : []

@@ -11,7 +11,7 @@ type TenantSignupRequestsPageProps = Parameters<
 const TenantSignupRequestsPageInner =
   UiTenantSignupRequestsPage as unknown as (
     props: TenantSignupRequestsPageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function TenantSignupRequestsPage(props: TenantSignupRequestsPageProps) {
   return (

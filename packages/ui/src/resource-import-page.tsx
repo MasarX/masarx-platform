@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import {
   createUiClient,
@@ -38,10 +39,14 @@ import { LoadingState } from "./loading-state";
 import { PageHeader } from "./page-header";
 import { Section } from "./section";
 import { Select } from "./select";
-import { TABULAR_FILE_ACCEPT, parseTabularFile, type ParsedTabularFile } from "./tabular-file";
+import { TABULAR_FILE_ACCEPT, type ParsedTabularFile } from "./tabular-file";
+import { isTabularLimitError } from "./resource-import/tabular-file-limits";
+import { parseTabularFileWithWorker } from "./resource-import/tabular-file-parser-worker-client";
 import { buildHref } from "./url";
+import { resolveSafeHref, resolveTrustedExternalDataUrl } from "./url-guard";
 import { useToast } from "./use-toast";
 import type { ComboboxOption } from "./use-combobox";
+import { buildResourceImportRecordHref, deriveResourceImportHandoffRows } from "./resource-import-handoff";
 
 const SpreadsheetPreview = React.lazy(() =>
   import("./mapping-studio/spreadsheet-preview").then((mod) => ({ default: mod.SpreadsheetPreview }))
@@ -59,6 +64,7 @@ type ResourceImportPageProps = {
   testIdPrefix?: string | null;
   presentation?: "page" | "drawer";
   onReportReady?: (report: ResourceImportRun["report"], run: ResourceImportRun | null) => void;
+  onOpenImportedRecord?: (resource: string, id: string) => void;
 };
 
 type ImportStep = "upload" | "mapping" | "review" | "running" | "report";
@@ -530,7 +536,7 @@ function deriveStep(params: {
 }) : ImportStep {
   if (params.reportReady) return "report";
   const status = params.run?.status?.trim().toLowerCase();
-  if (status === "queued" || status === "processing") return "running";
+  if (["queued", "processing", "completed", "completed_with_errors", "failed", "canceled", "cancelled"].includes(status ?? "")) return "running";
   if (params.dryRun) {
     const unresolved = params.dryRun.unresolved_targets?.length ?? 0;
     return unresolved > 0 ? "mapping" : "review";
@@ -587,7 +593,9 @@ export function ResourceImportPage({
   testIdPrefix,
   presentation = "page",
   onReportReady,
+  onOpenImportedRecord,
 }: ResourceImportPageProps) {
+  const t = useTranslations("ui.tabularFile");
   const ui = React.useMemo(() => createUiClient(), []);
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -637,10 +645,12 @@ export function ResourceImportPage({
   const [rowOverridesDirty, setRowOverridesDirty] = React.useState(false);
   const [manualRelatedNodeKeys, setManualRelatedNodeKeys] = React.useState<string[]>([]);
   const [referenceOptionCache, setReferenceOptionCache] = React.useState<Record<string, ReferenceOptionState>>({});
+  const admittedReferenceOptionKeysRef = React.useRef(new Set<string>());
   const [dryRun, setDryRun] = React.useState<ResourceImportDryRunSummary | null>(null);
   const [availableProfiles, setAvailableProfiles] = React.useState<ResourceImportProfileSummary[]>([]);
   const [matchedProfile, setMatchedProfile] = React.useState<ResourceImportProfileSummary | null>(null);
   const [run, setRun] = React.useState<ResourceImportRun | null>(null);
+  const [cancelReason, setCancelReason] = React.useState("");
   const [report, setReport] = React.useState<ResourceImportRun["report"] | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [saveProfileMode, setSaveProfileMode] = React.useState<"none" | "update" | "new">(
@@ -650,7 +660,15 @@ export function ResourceImportPage({
   const [relatedNodePickerValue, setRelatedNodePickerValue] = React.useState("");
   const routeResourceKeyRef = React.useRef(requestedResourceKey);
   const draftRevisionRef = React.useRef(0);
+  const parsingRef = React.useRef<AbortController | null>(null);
   const latestPrepareRequestRef = React.useRef(0);
+  React.useEffect(() => () => {
+    parsingRef.current?.abort();
+    latestPrepareRequestRef.current += 1;
+    draftRevisionRef.current += 1;
+  }, []);
+  const failedPrepareRevisionRef = React.useRef<number | null>(null);
+  const runRequestRef = React.useRef(0);
   const effectiveResourceKey = resourceKey.trim() || requestedResourceKey;
 
   React.useEffect(() => {
@@ -800,6 +818,12 @@ export function ResourceImportPage({
   }, [selectedResource]);
 
   React.useEffect(() => {
+    parsingRef.current?.abort();
+    parsingRef.current = null;
+    latestPrepareRequestRef.current += 1;
+    draftRevisionRef.current += 1;
+    runRequestRef.current += 1;
+    setBusy(null);
     setSelectedFile(null);
     setParsedFile(null);
     setRules([]);
@@ -811,14 +835,18 @@ export function ResourceImportPage({
     setManualRelatedNodeKeys([]);
     setRelatedNodePickerValue("");
     setReferenceOptionCache({});
+    admittedReferenceOptionKeysRef.current.clear();
+    failedPrepareRevisionRef.current = null;
     setDryRun(null);
     setAvailableProfiles([]);
     setMatchedProfile(null);
     setRun(null);
+    setCancelReason("");
     setReport(null);
     setSheetName(requestedSheetName);
     setSaveProfileMode(requestedProfileName ? "new" : "none");
     setProfileName(requestedProfileName);
+    return () => { runRequestRef.current += 1; };
   }, [effectiveResourceKey, requestedProfileName, requestedSheetName]);
 
   React.useEffect(() => {
@@ -845,6 +873,8 @@ export function ResourceImportPage({
     selectedResource?.scope_columns,
   ]);
 
+  const mappingControlsRef = React.useRef<HTMLDivElement | null>(null);
+  const automaticPrepareRef = React.useRef(false);
   const reviewSectionRef = React.useRef<HTMLDivElement | null>(null);
   const runningSectionRef = React.useRef<HTMLDivElement | null>(null);
   const reportSectionRef = React.useRef<HTMLDivElement | null>(null);
@@ -870,7 +900,12 @@ export function ResourceImportPage({
             : null;
     if (!target) return;
 
+    const preserveMappingFocus = previousStep === "mapping" && step === "review" && automaticPrepareRef.current;
     const frame = window.requestAnimationFrame(() => {
+      // Background reviews must not interrupt an active mapping control or picker.
+      if (preserveMappingFocus && mappingControlsRef.current?.contains(document.activeElement)) {
+        return;
+      }
       target.scrollIntoView({
         behavior: "smooth",
         block: "start",
@@ -881,16 +916,28 @@ export function ResourceImportPage({
     return () => window.cancelAnimationFrame(frame);
   }, [step]);
 
+  const canonicalResourceTableHref = React.useMemo(
+    () =>
+      resolveSafeHref(
+        appBasePath,
+        `/resources/${encodeURIComponent(effectiveResourceKey || "")}`,
+      ) ?? "/resources",
+    [appBasePath, effectiveResourceKey],
+  );
+  const returnHref = React.useMemo(
+    () =>
+      resolveTrustedExternalDataUrl(requestedReturnTo, new Set<string>()) ??
+      canonicalResourceTableHref,
+    [canonicalResourceTableHref, requestedReturnTo],
+  );
+
   const advancedStudioHref = React.useMemo(() => {
     return buildHref(`${appBasePath}/integrations/mappings/new`, {
       artifact: "tabular_import",
       resource: effectiveResourceKey || undefined,
-      return_to: requestedReturnTo || undefined,
+      return_to: returnHref,
     });
-  }, [appBasePath, effectiveResourceKey, requestedReturnTo]);
-
-  const returnHref =
-    requestedReturnTo || `${appBasePath}/resources/${encodeURIComponent(effectiveResourceKey || "")}`;
+  }, [appBasePath, effectiveResourceKey, returnHref]);
 
   const ensureReferenceOptions = React.useCallback(
     (column: UiReadColumn, filters: Record<string, string> = {}) => {
@@ -900,6 +947,8 @@ export function ResourceImportPage({
       if (!targetResource) return;
       const normalizedFilters = normalizeReferenceFilters(filters);
       const cacheKey = buildReferenceOptionCacheKey(reference.resource, normalizedFilters);
+      if (admittedReferenceOptionKeysRef.current.has(cacheKey)) return;
+      admittedReferenceOptionKeysRef.current.add(cacheKey);
       setReferenceOptionCache((current) => {
         const existing = current[cacheKey];
         if (existing?.loading || existing?.loaded) {
@@ -982,8 +1031,33 @@ export function ResourceImportPage({
     [selectedResource?.columns],
   );
   const effectiveScopeContext = React.useMemo(
-    () => buildScopeContextPayload(scopeContextSelections),
-    [scopeContextSelections],
+    () => {
+      const values: ScopeContextMap = { ...scopeContextSelections };
+      const scopeColumns = selectedResource?.scope_columns;
+      const tenantKey = typeof scopeColumns?.tenant === "string" ? scopeColumns.tenant.trim() : "";
+      const clientKey = typeof scopeColumns?.client === "string" ? scopeColumns.client.trim() : "";
+      const senderKey = typeof scopeColumns?.sender === "string" ? scopeColumns.sender.trim() : "";
+      const accessScopeId = String(me?.access_scope?.scope_id ?? "").trim();
+
+      if (currentAccessScopeType !== "platform" && tenantKey && me?.org?.id) {
+        values.tenant = String(me.org.id).trim();
+      }
+      if (currentAccessScopeType === "client" && clientKey && accessScopeId) {
+        values.client = accessScopeId;
+      }
+      if (currentAccessScopeType === "sender" && senderKey && accessScopeId) {
+        values.sender = accessScopeId;
+      }
+
+      return buildScopeContextPayload(values);
+    },
+    [
+      currentAccessScopeType,
+      me?.access_scope?.scope_id,
+      me?.org?.id,
+      scopeContextSelections,
+      selectedResource?.scope_columns,
+    ],
   );
   const primaryScopeProvidedState = React.useMemo(
     () =>
@@ -1134,6 +1208,7 @@ export function ResourceImportPage({
       parsed?: ParsedTabularFile | null;
       overrideRules?: TabularImportFieldRule[];
       overrideSheet?: string | null;
+      automatic?: boolean;
     }) => {
       const file = params?.file ?? selectedFile;
       const parsed = params?.parsed ?? parsedFile;
@@ -1162,17 +1237,20 @@ export function ResourceImportPage({
         if (requestId !== latestPrepareRequestRef.current) {
           return false;
         }
+        automaticPrepareRef.current = params?.automatic ?? false;
         setDryRun(response.dry_run ?? null);
         setAvailableProfiles(response.available_profiles ?? []);
         setMatchedProfile(response.profile_match ?? null);
         if (!rulesDirty && Array.isArray(response.resolved_rules) && response.resolved_rules.length > 0) {
           setRules(dedupeRules(response.resolved_rules));
         }
+        failedPrepareRevisionRef.current = null;
         return draftRevision;
       } catch (error) {
         if (requestId !== latestPrepareRequestRef.current) {
           return false;
         }
+        failedPrepareRevisionRef.current = draftRevision;
         toast({
           title: "Dry-run failed",
           description: error instanceof Error ? error.message : "Unable to prepare the import.",
@@ -1214,8 +1292,12 @@ export function ResourceImportPage({
         return;
       }
       setBusy("parse");
+      parsingRef.current?.abort();
+      const parsing = new AbortController();
+      parsingRef.current = parsing;
       try {
-        const parsed = await parseTabularFile(file, sheetName || requestedSheetName || null);
+        const parsed = await parseTabularFileWithWorker(file, sheetName || requestedSheetName || null, parsing.signal);
+        if (parsing.signal.aborted) return;
         const acceptedFormats = resolveImportAcceptedFormats(selectedResource);
         if (!acceptedFormats.includes(parsed.format)) {
           throw new Error(
@@ -1232,26 +1314,37 @@ export function ResourceImportPage({
         setReport(null);
         setDryRun(null);
         applyLocalInference(parsed, selectedResource);
-        await prepareImport({
+        const preparedRevision = await prepareImport({
           file,
           parsed,
           overrideRules: inferred.rules,
           overrideSheet: parsed.selectedSheet,
         });
+        if (preparedRevision !== false && preparedRevision === draftRevisionRef.current) {
+          setRulesDirty(false);
+          setRowOverridesDirty(false);
+          setScopeContextDirty(false);
+        }
       } catch (error) {
+        if (parsing.signal.aborted) return;
         toast({
           title: "File parse failed",
-          description: error instanceof Error ? error.message : "Unable to inspect the uploaded file.",
+          description: error instanceof Error ? (isTabularLimitError(error.message) ? t(error.message) : error.message) : "Unable to inspect the uploaded file.",
           tone: "error",
         });
       } finally {
-        setBusy(null);
+        if (parsingRef.current === parsing) {
+          parsingRef.current = null;
+          setBusy(null);
+        }
       }
     },
     [
       applyLocalInference,
       requestedSheetName,
       prepareImport,
+      registry,
+      t,
       selectedResource,
       selectedResourceAccess?.allowed,
       sheetName,
@@ -1263,31 +1356,44 @@ export function ResourceImportPage({
     async (value: string) => {
       if (!selectedFile) return;
       setBusy("parse");
+      parsingRef.current?.abort();
+      const parsing = new AbortController();
+      parsingRef.current = parsing;
       try {
-        const parsed = await parseTabularFile(selectedFile, value);
+        const parsed = await parseTabularFileWithWorker(selectedFile, value, parsing.signal);
+        if (parsing.signal.aborted) return;
         const inferred = inferTabularFieldRules(parsed.headers, selectedResource, registry);
         setParsedFile(parsed);
         setSheetName(parsed.selectedSheet);
         setRowOverrides({});
         setRowOverridesDirty(false);
         applyLocalInference(parsed, selectedResource);
-        await prepareImport({
+        const preparedRevision = await prepareImport({
           file: selectedFile,
           parsed,
           overrideRules: inferred.rules,
           overrideSheet: parsed.selectedSheet,
         });
+        if (preparedRevision !== false && preparedRevision === draftRevisionRef.current) {
+          setRulesDirty(false);
+          setRowOverridesDirty(false);
+          setScopeContextDirty(false);
+        }
       } catch (error) {
+        if (parsing.signal.aborted) return;
         toast({
           title: "Worksheet parse failed",
-          description: error instanceof Error ? error.message : "Unable to read the selected worksheet.",
+          description: error instanceof Error ? (isTabularLimitError(error.message) ? t(error.message) : error.message) : "Unable to read the selected worksheet.",
           tone: "error",
         });
       } finally {
-        setBusy(null);
+        if (parsingRef.current === parsing) {
+          parsingRef.current = null;
+          setBusy(null);
+        }
       }
     },
-    [applyLocalInference, prepareImport, selectedFile, selectedResource, toast],
+    [applyLocalInference, prepareImport, registry, selectedFile, selectedResource, toast, t],
   );
 
   const updateRuleForTarget = React.useCallback(
@@ -1474,10 +1580,12 @@ export function ResourceImportPage({
   React.useEffect(() => {
     if (!parsedFile || !selectedFile || !selectedResource || busy === "prepare") return;
     if (!rulesDirty && !rowOverridesDirty && !scopeContextDirty) return;
+    if (failedPrepareRevisionRef.current === draftRevisionRef.current) return;
     const timer = window.setTimeout(() => {
       void prepareImport({
         overrideRules: rules,
         overrideSheet: sheetName || parsedFile.selectedSheet || null,
+        automatic: true,
       }).then((preparedRevision) => {
         if (preparedRevision !== false && preparedRevision === draftRevisionRef.current) {
           setRulesDirty(false);
@@ -1501,7 +1609,9 @@ export function ResourceImportPage({
   ]);
 
   const handleStartImport = React.useCallback(async () => {
-    if (!dryRun?.run_id) return;
+    if (!dryRun?.run_id || busy) return;
+    const requestId = ++runRequestRef.current;
+    setCancelReason("");
     setBusy("start");
     try {
       const payload: Record<string, unknown> = {
@@ -1518,90 +1628,111 @@ export function ResourceImportPage({
         };
       }
       const response = await ui.resourceImports.start(payload);
+      if (requestId !== runRequestRef.current) return;
+      if (!response.run || response.run.id !== dryRun.run_id) {
+        throw new Error("The server did not confirm the requested import run. Refresh its status before trying again.");
+      }
       setRun(response.run ?? null);
       setReport(response.report ?? response.run?.report ?? null);
-      if (!response.report && response.run?.status && ["queued", "processing"].includes(response.run.status)) {
+      if (response.processing_warning) {
+        toast({ title: "Import queued; processing delayed", description: response.processing_warning, tone: "warning" });
+      } else if (!response.report && response.run?.status && ["queued", "processing"].includes(response.run.status)) {
         toast({
           title: "Import queued",
           description: "The run is now being tracked below. It will refresh automatically until the worker completes it and writes the final report.",
         });
       }
     } catch (error) {
+      if (requestId !== runRequestRef.current) return;
       toast({
         title: "Import start failed",
         description: error instanceof Error ? error.message : "Unable to start the import run.",
         tone: "error",
       });
     } finally {
-      setBusy(null);
+      if (requestId === runRequestRef.current) setBusy(null);
     }
   }, [
-    dryRun?.run_id,
-    matchedProfile?.id,
-    matchedProfile?.profile_name,
+    busy,
+    dryRun,
+    matchedProfile,
     profileName,
     effectiveResourceKey,
     saveProfileMode,
-    selectedResource?.label,
+    selectedResource,
     toast,
     ui,
   ]);
 
   const handleCancelImport = React.useCallback(async () => {
-    if (!run?.id) return;
+    const reason = cancelReason.trim();
+    if (!run?.id || busy || !reason || !["queued", "processing"].includes(normalizeRunStatus(run.status))) return;
+    const requestId = ++runRequestRef.current;
     setBusy("cancel");
     try {
-      const response = await ui.resourceImports.cancel({ runId: run.id });
-      setRun(response.run ?? null);
-      setReport(response.run?.report ?? report ?? null);
+      const response = await ui.resourceImports.cancel({ runId: run.id, reason });
+      if (requestId !== runRequestRef.current) return;
+      if (!response.run || response.run.id !== run.id || !response.run.status?.trim()) {
+        throw new Error("The server did not confirm the requested import run. Refresh its status before trying again.");
+      }
+      setRun(response.run);
+      setReport(response.run.report ?? null);
+      const canceled = ["canceled", "cancelled"].includes(normalizeRunStatus(response.run.status));
       toast({
-        title: "Import canceled",
-        description: "The import run was canceled and the staged rows remain available for review.",
+        title: canceled ? "Import canceled" : "Import status refreshed",
+        description: canceled
+          ? "The server confirmed cancellation. The staged rows remain available for review."
+          : `The server reports this run as ${humanizeRunStatus(response.run.status).toLowerCase()}; it was not canceled by this request.`,
+        tone: canceled ? "warning" : "info",
       });
     } catch (error) {
+      if (requestId !== runRequestRef.current) return;
       toast({
         title: "Cancel failed",
         description: error instanceof Error ? error.message : "Unable to cancel the import run.",
         tone: "error",
       });
     } finally {
-      setBusy(null);
+      if (requestId === runRequestRef.current) setBusy(null);
     }
-  }, [report, run?.id, toast, ui]);
+  }, [busy, cancelReason, run, toast, ui]);
 
   const handleRefreshRun = React.useCallback(async () => {
-    if (!run?.id) return;
+    if (!run?.id || busy) return;
+    const requestId = ++runRequestRef.current;
     setBusy("refresh-run");
     try {
       const nextRun = await ui.resourceImports.getRun({ runId: run.id });
+      if (requestId !== runRequestRef.current) return;
+      if (nextRun.id !== run.id) throw new Error("The server returned a different import run.");
       setRun(nextRun);
-      if (nextRun.report) {
-        setReport(nextRun.report);
-      }
+      setReport(nextRun.report ?? null);
     } catch (error) {
+      if (requestId !== runRequestRef.current) return;
       toast({
         title: "Refresh failed",
         description: error instanceof Error ? error.message : "Unable to refresh the import status.",
         tone: "error",
       });
     } finally {
-      setBusy(null);
+      if (requestId === runRequestRef.current) setBusy(null);
     }
-  }, [run?.id, toast, ui]);
+  }, [busy, run, toast, ui]);
 
   React.useEffect(() => {
-    if (!run?.id) return;
+    if (!run?.id || busy) return;
     const normalizedStatus = run.status?.trim().toLowerCase();
     if (!normalizedStatus || !["queued", "processing"].includes(normalizedStatus)) return;
     let cancelled = false;
+    const requestId = runRequestRef.current;
     const interval = window.setInterval(() => {
+      if (cancelled || requestId !== runRequestRef.current) return;
       void ui.resourceImports.getRun({ runId: run.id! })
         .then((nextRun) => {
-          if (cancelled) return;
+          if (cancelled || requestId !== runRequestRef.current) return;
+          if (nextRun.id !== run.id) throw new Error("The server returned a different import run.");
           setRun(nextRun);
-          if (nextRun.report) {
-            setReport(nextRun.report);
-          }
+          setReport(nextRun.report ?? null);
           const nextStatus = nextRun.status?.trim().toLowerCase();
           if (nextStatus && !["queued", "processing"].includes(nextStatus)) {
             window.clearInterval(interval);
@@ -1617,7 +1748,7 @@ export function ResourceImportPage({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [run?.id, run?.status, ui]);
+  }, [busy, run?.id, run?.status, ui]);
 
   const reportReadyRef = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -1625,24 +1756,29 @@ export function ResourceImportPage({
     if (!reportId || reportReadyRef.current === reportId) return;
     reportReadyRef.current = reportId;
     const normalizedRunStatus = normalizeRunStatus(run?.status);
+    const canceled = ["canceled", "cancelled"].includes(normalizedRunStatus);
     const completedWithIssues =
       (run?.failed_count ?? 0) > 0 ||
       (run?.skipped_count ?? 0) > 0 ||
       (run?.blocked_count ?? 0) > 0;
     toast({
       title:
-        normalizedRunStatus === "failed"
+        canceled
+          ? "Import canceled"
+          : normalizedRunStatus === "failed"
           ? "Import failed"
           : completedWithIssues
             ? "Import completed with issues"
             : "Import completed",
       description:
-        normalizedRunStatus === "failed"
+        canceled
+          ? "Open the persisted report to review any rows written before cancellation."
+          : normalizedRunStatus === "failed"
           ? "Open the final report to review the failure details and any generated error export."
           : completedWithIssues
             ? "The final report is ready. Some rows were skipped or blocked, so review the report and error export."
             : "The final report is ready and the imported rows were written successfully.",
-      tone: normalizedRunStatus === "failed" ? "error" : completedWithIssues ? "warning" : "success",
+      tone: normalizedRunStatus === "failed" ? "error" : canceled || completedWithIssues ? "warning" : "success",
     });
     onReportReady?.(report, run);
   }, [onReportReady, report, run, toast]);
@@ -1793,7 +1929,7 @@ export function ResourceImportPage({
             .filter((descriptor): descriptor is TargetFieldDescriptor => Boolean(descriptor));
           return {
             row,
-            originalRow: parsedRowsByNumber.get(row.row_number) ?? null,
+            originalRow: row.original_row ?? parsedRowsByNumber.get(row.row_number) ?? null,
             fixableFields,
           };
         })
@@ -1814,6 +1950,14 @@ export function ResourceImportPage({
     rowOverridesDirty ||
     scopeContextDirty;
   const normalizedRunStatus = normalizeRunStatus(run?.status);
+  const runCancelable = ["queued", "processing"].includes(normalizedRunStatus);
+  const runSummary = run?.summary && typeof run.summary === "object" && !Array.isArray(run.summary)
+    ? run.summary as Record<string, unknown> : null;
+  const cancellation = runSummary?.cancellation && typeof runSummary.cancellation === "object" && !Array.isArray(runSummary.cancellation)
+    ? runSummary.cancellation as Record<string, unknown> : null;
+  const canonicalCancelReason = typeof cancellation?.reason === "string" ? cancellation.reason
+    : typeof runSummary?.cancel_reason === "string" ? runSummary.cancel_reason : null;
+  const importedRecords = React.useMemo(() => deriveResourceImportHandoffRows(run, registry), [run, registry]);
   const runStatusLabel = humanizeRunStatus(run?.status);
   const runStatusTone = resolveRunStatusTone(run?.status);
   const runProcessedCount =
@@ -2062,7 +2206,7 @@ export function ResourceImportPage({
 
       <Section
         title="Import source"
-        description="Choose a table, upload a CSV/XLS/XLSX file, and the dry-run review will be built automatically before the final approval step."
+        description="Choose a table, upload a CSV/XLSX file, and the dry-run review will be built automatically before the final approval step."
       >
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
           <div className="space-y-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
@@ -2185,7 +2329,7 @@ export function ResourceImportPage({
             <div className="flex flex-wrap items-center gap-2 text-xs text-ui-muted">
               {selectedFile ? <Badge tone="info">{selectedFile.name}</Badge> : <Badge tone="neutral">No file selected</Badge>}
               {parsedFile?.headers?.length ? <Badge tone="neutral">{parsedFile.headers.length} headers</Badge> : null}
-              {parsedFile?.rows?.length ? <Badge tone="neutral">{parsedFile.rows.length} rows</Badge> : null}
+              {parsedFile?.totalRows ? <Badge tone="neutral">{parsedFile.totalRows} rows</Badge> : null}
               {parsedFile?.headers?.length ? (
                 <Badge tone="neutral">{buildTabularHeaderFingerprint(parsedFile.headers)}</Badge>
               ) : null}
@@ -2304,7 +2448,7 @@ export function ResourceImportPage({
           title="Schema mapping"
           description="Required fields are highlighted first. Optional fields can stay empty, or you can set one value for all rows when the file does not include that column."
         >
-          <div className="space-y-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
+          <div ref={mappingControlsRef} className="space-y-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
             <div className="grid gap-3 lg:grid-cols-3">
               <div className="rounded-2xl border border-[rgb(var(--ui-warning)/0.28)] bg-[rgb(var(--ui-warning)/0.08)] p-4">
                 <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ui-ink">Mandatory fields</div>
@@ -2802,11 +2946,11 @@ export function ResourceImportPage({
         </div>
       ) : null}
 
-      {step === "running" ? (
+      {run ? (
         <div ref={runningSectionRef} tabIndex={-1} className="outline-none">
           <Section
-            title="Import in progress"
-            description="The import run is now executing in the background. This view polls the canonical run row and report until it completes."
+            title={runCancelable ? "Import in progress" : "Import status"}
+            description="This view shows the canonical import run and any persisted report. Active runs refresh automatically."
           >
           <div className="space-y-4">
             <div className="rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
@@ -2831,17 +2975,26 @@ export function ResourceImportPage({
                   >
                     {busy === "refresh-run" ? "Refreshing..." : "Refresh status"}
                   </Button>
-                  <Button
+                  {runCancelable ? <Button
                     type="button"
                     variant="ghost"
                     onClick={() => void handleCancelImport()}
-                    disabled={Boolean(busy) || !run?.id}
+                    disabled={Boolean(busy) || !run?.id || !cancelReason.trim()}
                     data-testid={`${prefix}-cancel-import`}
                   >
                     {busy === "cancel" ? "Canceling..." : "Cancel import"}
-                  </Button>
+                  </Button> : null}
                 </div>
               </div>
+              {runCancelable ? (
+                <div className="mt-4 max-w-2xl space-y-2">
+                  <label htmlFor={`${prefix}-cancel-reason`} className="text-sm font-medium text-ui-ink">Cancellation reason (required)</label>
+                  <Input id={`${prefix}-cancel-reason`} required value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} disabled={Boolean(busy)} aria-describedby={`${prefix}-cancel-reason-hint`} />
+                  <p id={`${prefix}-cancel-reason-hint`} className="text-sm text-ui-muted">The reason is saved with the server-confirmed cancellation for audit.</p>
+                </div>
+              ) : null}
+              {canonicalCancelReason ? <p className="mt-4 break-words text-sm text-ui-ink">Cancellation reason: {canonicalCancelReason}</p> : null}
+              {run?.canceled_at ? <p className="mt-2 text-sm text-ui-muted">Canceled at: <time dateTime={run.canceled_at}>{run.canceled_at}</time></p> : null}
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-ui-paper/80">
                 <div
                   className="h-full rounded-full bg-[rgb(var(--ui-info))] transition-[width] duration-300"
@@ -2884,12 +3037,13 @@ export function ResourceImportPage({
               </div>
             </div>
           </div>
-          {Array.isArray(run?.artifacts) && run.artifacts.length > 0 ? (
+          {!report && Array.isArray(run?.artifacts) && run.artifacts.length > 0 ? (
             <div className="mt-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
               <div className="text-sm font-semibold text-ui-ink">Run artifacts</div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {run.artifacts.map((artifact) => {
-                  const href = artifact.signed_url?.trim() || "";
+                  const rawUrl = artifact.signed_url?.trim() || "";
+                  const href = resolveTrustedExternalDataUrl(rawUrl);
                   const label = resolveArtifactLabel(artifact.relation_type, artifact.file_name);
                   return href ? (
                     <Button key={`${artifact.artifact_id ?? label}-${artifact.relation_type ?? "artifact"}`} asChild size="sm" variant="ghost">
@@ -2910,9 +3064,30 @@ export function ResourceImportPage({
         </div>
       ) : null}
 
+      {importedRecords.length > 0 ? (
+        <Section title="Imported records" description="Open records confirmed by the persisted import run.">
+          <div className="flex flex-wrap gap-2">
+            {importedRecords.map((record) => {
+              const href = buildResourceImportRecordHref(appBasePath, record.resource, record.id, requestedReturnTo);
+              return href ? (
+                <Button key={record.key} asChild size="sm" variant="ghost" className="h-auto max-w-full whitespace-normal break-all text-start">
+                  <a href={href} onClick={onOpenImportedRecord ? (event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    onOpenImportedRecord(record.resource, record.id);
+                  } : undefined}>
+                    Open {record.label} {record.id}
+                  </a>
+                </Button>
+              ) : null;
+            })}
+          </div>
+        </Section>
+      ) : null}
+
       {report ? (
-        <React.Suspense fallback={<LoadingState variant="section" />}>
-          <div ref={reportSectionRef} tabIndex={-1} className="outline-none">
+        <div ref={reportSectionRef} tabIndex={-1} className="outline-none">
+          <React.Suspense fallback={<LoadingState variant="section" />}>
             <Section
               title="Operation report"
               description="Every import writes a persisted report that can be reopened later from the normal resource surfaces."
@@ -2920,7 +3095,8 @@ export function ResourceImportPage({
             {Array.isArray(run?.artifacts) && run.artifacts.length > 0 ? (
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 {run.artifacts.map((artifact) => {
-                  const href = artifact.signed_url?.trim() || "";
+                  const rawUrl = artifact.signed_url?.trim() || "";
+                  const href = resolveTrustedExternalDataUrl(rawUrl);
                   const label = resolveArtifactLabel(artifact.relation_type, artifact.file_name);
                   return href ? (
                     <Button key={`${artifact.artifact_id ?? label}-${artifact.relation_type ?? "artifact"}-report`} asChild size="sm" variant="ghost">
@@ -2938,8 +3114,8 @@ export function ResourceImportPage({
             ) : null}
             <OperationReportViewer report={report} result={run ?? dryRun} appBasePath={appBasePath} />
             </Section>
-          </div>
-        </React.Suspense>
+          </React.Suspense>
+        </div>
       ) : null}
     </div>
   );

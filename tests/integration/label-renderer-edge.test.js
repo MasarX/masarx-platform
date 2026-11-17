@@ -36,6 +36,7 @@ if (isLocalEnv && !localEdgeEnabled) {
 
 // Token requirement (any-of)
 const SERVICE_TOKEN =
+  process.env.LABEL_RENDERER_DB_JWT ||
   process.env.LABEL_RENDERER_TOKEN ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SERVICE_ROLE_KEY ||
@@ -153,11 +154,6 @@ describe('Label renderer edge function', () => {
               fallback: 'NO-RECIPIENT',
             },
           ],
-          barcode: {
-            type: 'CODE128',
-            value_path: 'shipment.tracking_number',
-            human_readable: 'shipment.tracking_number',
-          },
           max_attempts: 4,
           retry_backoff_seconds: [45, 180, 600],
         },
@@ -172,12 +168,6 @@ describe('Label renderer edge function', () => {
         `INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
          VALUES ($1::uuid, 'Edge Label Org', $2, 'Asia/Riyadh', 'en-US', 'active')`,
         [orgId, `edge-label-org-${orgId.slice(0, 8)}`]
-      );
-
-      await adminClient.query(
-        `INSERT INTO clients (id, organization_id, name, slug, sla_tier, status)
-         VALUES ($1::uuid, $2::uuid, 'Edge Label Client', $3, 'standard', 'active')`,
-        [clientId, orgId, `edge-label-client-${clientId.slice(0, 8)}`]
       );
 
       await upsertSettings(
@@ -205,6 +195,13 @@ describe('Label renderer edge function', () => {
           [designRows[0].settings_version_id]
         );
       }
+
+      // Child onboarding materializes the currently effective tenant label design.
+      await adminClient.query(
+        `INSERT INTO clients (id, organization_id, name, slug, sla_tier, status)
+         VALUES ($1::uuid, $2::uuid, 'Edge Label Client', $3, 'standard', 'active')`,
+        [clientId, orgId, `edge-label-client-${clientId.slice(0, 8)}`]
+      );
 
       await adminClient.query(
         `INSERT INTO addresses (
@@ -290,6 +287,18 @@ describe('Label renderer edge function', () => {
       );
 
       jobId = jobRows[0].job_id;
+
+      const { rows: snapshotRows } = await adminClient.query(
+        `SELECT template_snapshot
+           FROM label_jobs
+          WHERE id = $1::uuid`,
+        [jobId]
+      );
+      expect(snapshotRows).toHaveLength(1);
+      expect(snapshotRows[0].template_snapshot.template_key).toBe('edge_integration_template');
+      expect(
+        snapshotRows[0].template_snapshot.renderer_config.blocks.filter((block) => block.type === 'barcode')
+      ).toHaveLength(1);
 
       const { resp, bodyText, json, jsonError } = await fetchJsonWithRetry(
         `${SUPABASE_URL}/functions/v1/label-renderer`,

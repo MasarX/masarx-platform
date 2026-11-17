@@ -10,6 +10,8 @@ SELECT plan(6);
 CREATE TEMP TABLE tmp_sla_promise_calendar_events_v2 (
   event_id UUID,
   promised_delivery_date DATE,
+  promised_window_start_at TIMESTAMPTZ,
+  promised_window_end_at TIMESTAMPTZ,
   debug JSONB
 ) ON COMMIT DROP;
 
@@ -103,8 +105,9 @@ BEGIN
     )
    LIMIT 1;
 
-  INSERT INTO tmp_sla_promise_calendar_events_v2 (event_id, promised_delivery_date, debug)
-  VALUES (v_event, v_res.promised_delivery_date, v_res.debug);
+  INSERT INTO tmp_sla_promise_calendar_events_v2
+    (event_id, promised_delivery_date, promised_window_start_at, promised_window_end_at, debug)
+  VALUES (v_event, v_res.promised_delivery_date, v_res.promised_window_start_at, v_res.promised_window_end_at, v_res.debug);
 END $$;
 
 SELECT is(
@@ -125,6 +128,18 @@ SELECT ok(
     FROM tmp_sla_promise_calendar_events_v2
   ),
   'Debug includes calendar_event_ids containing the blackout event id'
+);
+
+SELECT is(
+  (SELECT promised_window_start_at FROM tmp_sla_promise_calendar_events_v2),
+  '2026-01-23T09:00:00Z'::timestamptz,
+  'Calendar shift moves the delivery window start to the promised date'
+);
+
+SELECT is(
+  (SELECT promised_window_end_at FROM tmp_sla_promise_calendar_events_v2),
+  '2026-01-23T18:00:00Z'::timestamptz,
+  'Calendar shift moves the delivery window end to the promised date'
 );
 
 -- When calendar is disabled, baseline promise should not shift.
@@ -157,4 +172,5 @@ SELECT is(
   'Baseline promise does not shift when calendar_enabled=false'
 );
 
+SELECT * FROM finish();
 ROLLBACK;

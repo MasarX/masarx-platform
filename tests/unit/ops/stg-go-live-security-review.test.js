@@ -100,7 +100,8 @@ describe('stg-go-live-security-review', () => {
     const findingIds = findings.map((entry) => entry.id).sort();
 
     expect(findingIds).toEqual([
-      'public-intake-service-role',
+      'public-intake-marketing-lead-intake-coverage',
+      'public-intake-tenant-signup-intake-coverage',
       'server-auth-getsession',
       'web-csp-unsafe-inline',
       'web-download-get-csrf',
@@ -146,4 +147,104 @@ describe('stg-go-live-security-review', () => {
     expect(decision.counts.P0).toBe(1);
     expect(decision.rationale).toContain('P0 findings open: 1');
   });
+});
+
+describe('public intake source-call contract independence', () => {
+  const root = process.cwd();
+  const marketing = `
+    const invokeRpcWithAuthFallback = () => {};
+    invokeRpcWithAuthFallback("marketing_landing_clients_list_v1", {});
+    invokeRpcWithAuthFallback("marketing_lead_request_create_v1", {}, { serviceOnly: true });
+  `;
+  const tenant = 'serviceClient.rpc("tenant_signup_request_create_v1", {});';
+  const findingsFor = (m = marketing, t = tenant) => buildStaticFindings({
+    repoRoot: root,
+    fileMap: Object.fromEntries([
+      ['marketing-lead-intake', m], ['tenant-signup-intake', t],
+    ].filter(([, content]) => content !== null).map(([endpoint, content]) => {
+      const relative = `supabase/functions/${endpoint}/index.ts`;
+      return [relative, { filePath: path.join(root, relative), content }];
+    })),
+  }).filter((finding) => finding.id.startsWith('public-intake-'));
+
+  test.each([
+    [false, false, []],
+    [true, false, ['public-intake-marketing-lead-intake-contract']],
+    [false, true, ['public-intake-tenant-signup-intake-contract']],
+    [true, true, ['public-intake-marketing-lead-intake-contract', 'public-intake-tenant-signup-intake-contract']],
+  ])('independent violation matrix marketing=%s tenant=%s', (badM, badT, expected) => {
+    const m = badM ? marketing.replace('serviceOnly: true', 'serviceOnly: false') : marketing;
+    const t = badT ? tenant + ' serviceClient.from("other_table");' : tenant;
+    expect(findingsFor(m, t).map((finding) => finding.id)).toEqual(expected);
+  });
+
+  test.each(['sb_secret_fixture', 'header.payload.signature'])(
+    'approved credential shape alone is not a violation: %s', (credential) => {
+      const declaration = `const serviceKey = "${credential}";\n`;
+      expect(findingsFor(declaration + marketing, declaration + tenant)).toEqual([]);
+    },
+  );
+
+  test.each([
+    ['missing marketing', null, tenant, 'marketing-lead-intake'],
+    ['missing tenant', marketing, null, 'tenant-signup-intake'],
+    ['parse failure', 'const =', tenant, 'marketing-lead-intake'],
+    ['dynamic mutation', marketing.replace('"marketing_lead_request_create_v1"', 'rpcName'), tenant, 'marketing-lead-intake'],
+    ['helper alias', marketing + ' const alias = invokeRpcWithAuthFallback;', tenant, 'marketing-lead-intake'],
+    ['computed call', marketing, tenant + ' serviceClient[method]("x");', 'tenant-signup-intake'],
+    ['unknown auth options', marketing.replace('{ serviceOnly: true }', 'options'), tenant, 'marketing-lead-intake'],
+  ])('%s stays explicit incomplete coverage', (_label, m, t, endpoint) => {
+    const result = findingsFor(m, t);
+    expect(result.some((finding) => finding.id === `public-intake-${endpoint}-coverage`
+      && finding.status === 'unverified')).toBe(true);
+    expect(deriveDecision({ findings: result, workflowResults: [], commandResults: [] })
+      .recommendation).toBe('GO WITH EXCEPTIONS');
+  });
+
+  test('missing endpoint never hides a violation in the other endpoint', () => {
+    expect(findingsFor(null, tenant + ' serviceClient.from("other");')
+      .map((finding) => finding.id)).toEqual([
+      'public-intake-marketing-lead-intake-coverage',
+      'public-intake-tenant-signup-intake-contract',
+    ]);
+  });
+
+  test('comments and string contents are not executable RPC calls', () => {
+    expect(findingsFor(marketing + '\n// client.from("other");\nconst text = "client.rpc(name)";', tenant)).toEqual([]);
+  });
+
+  test('unexpected literal RPC is a contract finding even when approved calls remain', () => {
+    expect(findingsFor(marketing, tenant + ' serviceClient.rpc("other_mutation", {});')
+      .map((finding) => finding.id)).toEqual(['public-intake-tenant-signup-intake-contract']);
+  });
+  test('Array.from is not a database operation; unknown receivers are coverage only', () => {
+    expect(findingsFor(marketing + ' Array.from(bytes);', tenant)).toEqual([]);
+    const result = findingsFor(marketing, tenant + ' unknownClient.from("rows");');
+    expect(result.map((finding) => finding.id)).toEqual(['public-intake-tenant-signup-intake-coverage']);
+  });
+
+  test('actual current endpoint sources retain supported source-call coverage', () => {
+    const fs = require('fs');
+    const currentMarketing = fs.readFileSync(path.join(root, 'supabase/functions/marketing-lead-intake/index.ts'), 'utf8');
+    const currentTenant = fs.readFileSync(path.join(root, 'supabase/functions/tenant-signup-intake/index.ts'), 'utf8');
+    expect(findingsFor(currentMarketing, currentTenant)).toEqual([]);
+    expect(findingsFor(currentMarketing.replace('{ serviceOnly: true }', '{ serviceOnly: false }'), currentTenant)
+      .some((finding) => finding.id === 'public-intake-marketing-lead-intake-contract')).toBe(true);
+  });
+
+  test('missing parser reports both endpoint coverage gaps without installation', () => {
+    jest.isolateModules(() => {
+      jest.doMock('typescript', () => { throw new Error('parser unavailable'); });
+      try {
+        const isolated = require('../../../scripts/ops/audit/stg-go-live-security-review');
+        const result = isolated.buildStaticFindings({ repoRoot: root, fileMap: {} });
+        const coverage = result.filter((finding) => finding.id.startsWith('public-intake-'));
+        expect(coverage).toHaveLength(2);
+        expect(coverage.every((finding) => finding.evidence.some((reason) => reason.includes('parser is unavailable')))).toBe(true);
+      } finally {
+        jest.dontMock('typescript');
+      }
+    });
+  });
+
 });

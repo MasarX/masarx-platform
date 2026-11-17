@@ -118,6 +118,25 @@ test("reportClientError redacts sensitive strings", () => {
   );
 });
 
+test("reportClientError retains sanitized technical diagnosis rather than the presentation fallback", () => {
+  const reporter = jest.fn();
+  setUiReporter(reporter);
+  reportClientError(new Error("Backend statement timeout; token=synthetic-short"));
+  expect(reporter).toHaveBeenCalledWith(expect.objectContaining({
+    message: "Backend statement timeout; token=[redacted]",
+  }));
+});
+
+test("reportClientError redacts every cookie in a header while retaining diagnosis", () => {
+  const reporter = jest.fn();
+  setUiReporter(reporter);
+  reportClientError(new Error("Backend statement timeout\nCookie: session=synthetic-first; sid=synthetic-second"));
+  expect(reporter).toHaveBeenCalledWith(expect.objectContaining({
+    message: "Backend statement timeout\nCookie: [redacted]",
+  }));
+  expect(JSON.stringify(reporter.mock.calls)).not.toContain("synthetic-");
+});
+
 test("reportUiEvent logs safe metadata in non-production mode", () => {
   const infoSpy = jest.spyOn(console, "info").mockImplementation(() => undefined);
   reportUiEvent({
@@ -187,5 +206,37 @@ test("reportUiEvent redacts sensitive metadata before active reporter receives i
   expect(payload.message).toEqual(expect.stringContaining("[redacted]"));
   expect(JSON.stringify(payload)).not.toContain(
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+  );
+});
+
+test("reportUiEvent preserves canonical UUID metadata while redacting secrets", () => {
+  const reporter = jest.fn();
+  const uuid = "e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c";
+  setUiReporter(reporter);
+  setRequestId(uuid);
+
+  reportUiEvent({
+    type: "ui.test",
+    timestamp: "2026-01-15T00:00:00.000Z",
+    name: "uuid-flow",
+    digest: uuid,
+    meta: {
+      settingsResolutionId: uuid,
+      scopeId: uuid,
+      token: uuid,
+    },
+  });
+
+  expect(reporter).toHaveBeenCalledWith(
+    expect.objectContaining({
+      digest: uuid,
+      requestId: uuid,
+      meta: expect.objectContaining({
+        requestId: uuid,
+        settingsResolutionId: uuid,
+        scopeId: uuid,
+        token: "[redacted]",
+      }),
+    }),
   );
 });

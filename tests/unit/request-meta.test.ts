@@ -77,6 +77,26 @@ describe("request-meta helpers", () => {
     expect(getRequestIdFromHeaders(request)).toBe("test-req-123");
   });
 
+  test("query correlation values cannot inject invalid response header characters", async () => {
+    const request = new NextRequest(
+      "https://example.test/api/ui-event?request_id=req%0D%0AInjected%3A%20value%20%D8%B4"
+    );
+    const requestId = getRequestIdFromHeaders(request);
+    const response = jsonResponseWithRequestId({ ok: true }, 200, requestId);
+
+    expect(requestId).toBe("reqInjectedvalue");
+    expect(response.headers.get("x-request-id")).toBe(requestId);
+    expect(response.headers.has("Injected")).toBe(false);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  test("caps reflected correlation values and replaces entirely invalid IDs", () => {
+    const request = new NextRequest(`https://example.test/path?request_id=${"a".repeat(1000)}`);
+    expect(getRequestIdFromHeaders(request)).toHaveLength(128);
+    const headers = new Headers(addRequestIdHeader(undefined, "\r\nش"));
+    expect(headers.get("x-request-id")).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}/);
+  });
+
   test("addRequestIdHeader preserves request-id if provided", () => {
     const headers = addRequestIdHeader(
       { "x-feature": "enabled", "x-request-id": "old" },

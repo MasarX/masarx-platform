@@ -1,0 +1,81 @@
+{
+  "schema_version": "local-gate-unit-cohorts.v1",
+  "cohorts": [
+    {
+      "id": "ci_admission_and_migration_range",
+      "required_impact_surfaces": [
+        "ci"
+      ],
+      "allowed_changed_path_re": [
+        "^AGENTS\\.md$",
+        "^scripts/ops/ci/changed-migrations-regex\\.js$",
+        "^tests/unit/ops/(?:changed-migrations-regex|local-gate|migration-fixture-guard|migration-guards|native-objectives-lint|native-pr-admission-workflow|pr-change-classify)\\.test\\.js$"
+      ],
+      "test_paths": [
+        "tests/unit/ops/changed-migrations-regex.test.js",
+        "tests/unit/ops/local-gate.test.js",
+        "tests/unit/ops/native-objectives-lint.test.js",
+        "tests/unit/ops/native-pr-admission-workflow.test.js"
+      ]
+    },
+    {
+      "id": "runner_routing_control_plane",
+      "required_impact_surfaces": [
+        "ci"
+      ],
+      "allowed_changed_path_re": [
+        "^AGENTS\\.md$",
+        "^\\.github/workflows/(?:cloud-preflight|cloud-run|deploy-(?:dev|prod|stg)-orchestrator|labeler|node-run|preview-run|release-verify-main|reviewer-gate-pr)\\.yml$",
+        "^config/ci/(?:runner-(?:classes|policy)|workflow-lint-toolchain)\\.json$",
+        "^scripts/ops/ci/(?:actionlint-current-schema|install-workflow-lint-toolchain|resolve-runner-config|runner-routing|sync-runner-vars)\\.js$",
+        "^tests/unit/ops/(?:actionlint-current-schema|ci-contracts-workflow|cloud-run-workflow-env-mode|deploy-orchestrators-workflow|focused-unit-selection|labeler-workflow|node-run-workflow|pr-admission-runner-contract|release-verify-main-workflow|runner-routing|sync-runner-vars|workflow-lint-toolchain)\\.test\\.js$"
+      ],
+      "test_paths": [
+        "tests/unit/ops/actionlint-current-schema.test.js",
+        "tests/unit/ops/bootstrap-restore-workflows.test.js",
+        "tests/unit/ops/ci-contracts-workflow.test.js",
+        "tests/unit/ops/cloud-reusable-workflow-contract.test.js",
+        "tests/unit/ops/dependency-fast-lane-integrity.test.js",
+        "tests/unit/ops/deploy-orchestrators-workflow.test.js",
+        "tests/unit/ops/deploy-promotion-env-mapping.test.js",
+        "tests/unit/ops/deploy-surface-registry.test.js",
+        "tests/unit/ops/deploy-vercel-surface-workflow.test.js",
+        "tests/unit/ops/fileless-cloud-env-workflows.test.js",
+        "tests/unit/ops/focused-unit-selection.test.js",
+        "tests/unit/ops/hosted-usage-report.test.js",
+        "tests/unit/ops/local-gate.test.js",
+        "tests/unit/ops/merge-queue-concurrency-workflows.test.js",
+        "tests/unit/ops/merge-queue-required-checks-contract.test.js",
+        "tests/unit/ops/pr-admission-runner-contract.test.js",
+        "tests/unit/ops/pr-changed-files.test.js",
+        "tests/unit/ops/project-native-pr-paths.test.js",
+        "tests/unit/ops/release-verify-preview.test.js",
+        "tests/unit/ops/review-cache-policy.test.js",
+        "tests/unit/ops/reviewer-gate-pr-workflow.test.js",
+        "tests/unit/ops/workflow-lint-toolchain.test.js"
+      ]
+    },
+    {
+      "id": "landing",
+      "required_direct_surface_ids": [
+        "landing"
+      ],
+      "allowed_changed_path_re": [
+        "^AGENTS\\.md$",
+        "^docs/marketing/landing-v2/(?:app|content)\\.js$",
+        "^scripts/frontend/(?:build-landing|serve-landing)\\.js$",
+        "^playwright\\.landing\\.config\\.ts$",
+        "^tests/landing-e2e/",
+        "^tests/unit/landing-[^/]+\\.test\\.(?:js|ts)$",
+        "^tests/unit/frontend/serve-landing\\.test\\.js$"
+      ],
+      "test_paths": [
+        "tests/unit/landing-app-path-lang.test.js",
+        "tests/unit/landing-build-static-i18n.test.js",
+        "tests/unit/landing-e2e-config.test.js",
+        "tests/unit/landing-runtime-patching.test.ts",
+        "tests/unit/frontend/serve-landing.test.js"
+      ]
+    }
+  ]
+}

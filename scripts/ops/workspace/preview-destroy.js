@@ -45,6 +45,15 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (a.startsWith('--name=')) out.name = a.split('=').slice(1).join('=');
     else if (a === '--delete-family') out['delete-family'] = argv[++i] || '1';
     else if (a.startsWith('--delete-family=')) out['delete-family'] = a.split('=').slice(1).join('=');
+    else if (a === '--dry-run') out['dry-run'] = '1';
+    else if (a === '--workspace-mode') out['workspace-mode'] = argv[++i] || '';
+    else if (a.startsWith('--workspace-mode=')) out['workspace-mode'] = a.split('=').slice(1).join('=');
+    else if (a === '--af38b526-f5c1-468d-88fb-86677fbe872a') out['af38b526-f5c1-468d-88fb-86677fbe872a'] = argv[++i] || '';
+    else if (a.startsWith('--af38b526-f5c1-468d-88fb-86677fbe872a=')) out['af38b526-f5c1-468d-88fb-86677fbe872a'] = a.split('=').slice(1).join('=');
+    else if (a === '--branch-id') out['branch-id'] = argv[++i] || '';
+    else if (a.startsWith('--branch-id=')) out['branch-id'] = a.split('=').slice(1).join('=');
+    else if (a === '--parent-ref') out['parent-ref'] = argv[++i] || '';
+    else if (a.startsWith('--parent-ref=')) out['parent-ref'] = a.split('=').slice(1).join('=');
   }
   return out;
 }
@@ -76,12 +85,36 @@ function parseEnabled(value, fallback = false) {
   return fallback;
 }
 
-function resolveProjectDeleteTargets({ projects, workspaceName, deleteFamily }) {
+function resolveProjectDeleteTargets({ projects, workspaceName, deleteFamily, expectedProjectRef = '' }) {
   const items = Array.isArray(projects) ? projects : [];
   const exactName = String(workspaceName || '').trim();
   const normalizedExactName = exactName.toLowerCase();
   const familyName = deleteFamily ? extractPreviewWorkspaceFamilyName(exactName) : '';
   const matches = [];
+  const exactExpectedRef = String(expectedProjectRef || '').trim().toLowerCase();
+
+  if (exactExpectedRef) {
+    const expected = items.find((project) =>
+      String(project?.ref || project?.project_ref || project?.id || '').trim().toLowerCase() === exactExpectedRef,
+    );
+    if (!expected) return { familyName: '', matches: [] };
+    const observedName = String(expected?.name || '').trim();
+    if (observedName.toLowerCase() !== normalizedExactName) {
+      return {
+        familyName: '',
+        matches: [],
+        identityMismatch: `project_name:${observedName || '<missing>'}:${exactName}`,
+      };
+    }
+    return {
+      familyName: '',
+      matches: [{
+        name: observedName,
+        ref: String(expected?.ref || expected?.project_ref || expected?.id || '').trim(),
+        createdAt: String(expected?.created_at || expected?.inserted_at || expected?.insertedAt || '').trim(),
+      }],
+    };
+  }
 
   for (const project of items) {
     const name = String(project?.name || '').trim();
@@ -106,6 +139,21 @@ function resolveProjectDeleteTargets({ projects, workspaceName, deleteFamily }) 
   };
 }
 
+function assertExactBranchIdentity({ branch, expectedBranchId = '', expectedProjectRef = '' }) {
+  const branchId = String(branch?.branch_id || '').trim();
+  const branchProjectRef = String(branch?.project_ref || '').trim().toLowerCase();
+  const exactBranchId = String(expectedBranchId || '').trim();
+  const exactProjectRef = String(expectedProjectRef || '').trim().toLowerCase();
+  if (!branchId) throw new Error('branch_identity_missing:branch_id');
+  if (exactBranchId && branchId !== exactBranchId) {
+    throw new Error(`branch_identity_mismatch:branch_id:${branchId}:${exactBranchId}`);
+  }
+  if (exactProjectRef && branchProjectRef !== exactProjectRef) {
+    throw new Error(`branch_identity_mismatch:project_ref:${branchProjectRef || '<missing>'}:${exactProjectRef}`);
+  }
+  return { branchId, branchProjectRef };
+}
+
 async function main() {
   loadEnv();
   const args = parseArgs();
@@ -121,11 +169,14 @@ async function main() {
 
   const token = cfg.token;
   const orgId = cfg.orgId;
-  const requestedWorkspaceMode = String(cfg.workspaceMode || 'project').trim().toLowerCase();
+  const requestedWorkspaceMode = String(args['workspace-mode'] || cfg.workspaceMode || 'project').trim().toLowerCase();
   if (!['project', 'branch', 'auto'].includes(requestedWorkspaceMode)) {
     die(`Invalid workspace mode '${requestedWorkspaceMode}'. Expected 'project', 'branch', or 'auto'.`);
   }
-  const branchParentCandidates = resolveBranchParentCandidates({
+  const expectedParentRef = String(args['parent-ref'] || '').trim().toLowerCase();
+  const expectedBranchId = String(args['branch-id'] || '').trim();
+  const expectedProjectRef = String(args['af38b526-f5c1-468d-88fb-86677fbe872a'] || '').trim().toLowerCase();
+  const branchParentCandidates = expectedParentRef ? [expectedParentRef] : resolveBranchParentCandidates({
     resolvedConfig: cfg,
     env: process.env,
   });
@@ -136,6 +187,7 @@ async function main() {
     args['delete-family'],
     Boolean(prNumber),
   );
+  const dryRun = parseEnabled(args['dry-run'], false);
   if (!workspaceName.startsWith('wk-')) die(`Refusing to delete non-preview workspace name: ${workspaceName}`);
 
   const timeoutMs = parseInt(process.env.PREVIEW_DELETE_TIMEOUT_MS || '900000', 10) || 900000;
@@ -163,7 +215,7 @@ async function main() {
             notFound.status = 404;
             throw notFound;
           }
-          return { branchId };
+          return assertExactBranchIdentity({ branch, expectedBranchId, expectedProjectRef });
         },
       });
     } catch (err) {
@@ -178,15 +230,21 @@ async function main() {
       throw err;
     }
     const branchId = String(lookup?.value?.branchId || '').trim();
+    const branchProjectRef = String(lookup?.value?.branchProjectRef || '').trim();
     const branchParentRef = String(lookup?.parentProjectRef || '').trim();
     if (!branchId) {
       return { deleted: false, found: false };
     }
 
+    if (dryRun) {
+      console.log(`[preview-destroy] (dry-run) would delete branch '${workspaceName}' (branch_id=${branchId}, parent_ref=${branchParentRef})`);
+      return { deleted: false, found: true, dry_run: true, branch_id: branchId, project_ref: branchProjectRef, parent_ref: branchParentRef };
+    }
+
     console.log(`[preview-destroy] Deleting branch '${workspaceName}' (branch_id=${branchId}, parent_ref=${branchParentRef})`);
     await deleteBranchWithRetries(branchId, token, { timeoutMs, intervalMs });
     console.log('[preview-destroy] Deleted');
-    return { deleted: true, found: true };
+    return { deleted: true, found: true, branch_id: branchId, project_ref: branchProjectRef, parent_ref: branchParentRef };
   }
 
   if (requestedWorkspaceMode === 'branch') {
@@ -194,12 +252,16 @@ async function main() {
     if (!branchResult.found) {
       console.log(`[preview-destroy] No branch found for '${workspaceName}' across candidate parent refs (already deleted).`);
     }
+    console.log(JSON.stringify({ ok: true, mode: 'branch', workspace_name: workspaceName, ...branchResult }, null, 2));
     return;
   }
 
   if (requestedWorkspaceMode === 'auto') {
     const branchResult = await attemptBranchDelete({ strict: false });
-    if (branchResult.deleted) return;
+    if (branchResult.deleted || (dryRun && branchResult.found)) {
+      console.log(JSON.stringify({ ok: true, mode: 'branch', workspace_name: workspaceName, ...branchResult }, null, 2));
+      return;
+    }
     if (branchResult.found === false) {
       console.log(`[preview-destroy] Auto mode: no branch found for '${workspaceName}', checking project teardown path.`);
     }
@@ -210,10 +272,28 @@ async function main() {
     projects,
     workspaceName,
     deleteFamily,
+    expectedProjectRef,
   });
+  if (deleteTargets.identityMismatch) {
+    die(`project_identity_mismatch:${deleteTargets.identityMismatch}`);
+  }
 
   if (deleteTargets.matches.length === 0) {
     console.log(`[preview-destroy] No project found for '${workspaceName}'${deleteTargets.familyName ? ` family=${deleteTargets.familyName}` : ''} (already deleted).`);
+    console.log(JSON.stringify({ ok: true, mode: 'project', workspace_name: workspaceName, found: false, deleted: false, dry_run: dryRun, targets: [] }, null, 2));
+    return;
+  }
+
+  if (dryRun) {
+    console.log(JSON.stringify({
+      ok: true,
+      mode: 'project',
+      workspace_name: workspaceName,
+      found: true,
+      deleted: false,
+      dry_run: true,
+      targets: deleteTargets.matches,
+    }, null, 2));
     return;
   }
 
@@ -221,9 +301,22 @@ async function main() {
     console.log(
       `[preview-destroy] Deleting project '${target.name}' (project_ref=${target.ref})${deleteTargets.familyName ? ` family=${deleteTargets.familyName}` : ''}`,
     );
-    await deleteProjectWithRetries(target.ref, token, { timeoutMs, intervalMs });
+    await deleteProjectWithRetries(target.ref, token, {
+      organizationId: orgId,
+      timeoutMs,
+      intervalMs,
+    });
   }
   console.log(`[preview-destroy] Deleted ${deleteTargets.matches.length} project(s).`);
+  console.log(JSON.stringify({
+    ok: true,
+    mode: 'project',
+    workspace_name: workspaceName,
+    found: true,
+    deleted: true,
+    dry_run: false,
+    targets: deleteTargets.matches,
+  }, null, 2));
 }
 
 if (require.main === module) {
@@ -234,6 +327,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertExactBranchIdentity,
+  main,
   parseArgs,
   parseEnabled,
   resolveProjectDeleteTargets,

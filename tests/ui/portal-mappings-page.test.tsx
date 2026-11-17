@@ -9,7 +9,7 @@ jest.mock("@masarx/ui", () => ({
 }));
 
 import { render, screen } from "@testing-library/react";
-import { PortalMappingsPage } from "../../apps/portal/app/integrations/mappings/page";
+import { PortalMappingsPage } from "../../apps/portal/app/integrations/mappings/mappings-page";
 
 describe("PortalMappingsPage", () => {
   test("links to the guided studio and report index from the portal entrypoint", () => {

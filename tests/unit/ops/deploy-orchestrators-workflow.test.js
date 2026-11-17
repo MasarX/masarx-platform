@@ -7,6 +7,11 @@ function readWorkflow(name) {
     .replace(/\r\n/g, '\n');
 }
 
+function extractTopLevelConcurrency(body) {
+  const match = body.match(/^concurrency:\n(?: {2}.*\n?)+/m);
+  return match ? match[0] : '';
+}
+
 describe('deploy orchestrator workflows', () => {
   test('dev orchestrator dispatches stage-filtered targets for pushes to dev', () => {
     const body = readWorkflow('deploy-dev-orchestrator.yml');
@@ -31,14 +36,12 @@ describe('deploy orchestrator workflows', () => {
     expect(body).toContain('orchestrator-wait-children.js');
     expect(body).toContain('dev-orchestrator-child-runs');
     expect(body).toContain('dev-orchestrator-dependent-child-runs');
-    expect(body).toContain('RUNNER_RUNS_ON_PR_ADMISSION_LOCAL_JSON');
-    expect(body).toContain('RUNNER_LABELS_CI_PR_ADMISSION_JSON');
-    expect(body).not.toContain('RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
+    expect(body).toContain('RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
+    expect(body).not.toContain('RUNNER_RUNS_ON_PR_ADMISSION_LOCAL_JSON');
     expect(body).toContain('continue-on-error: true');
     const waitChildrenBlock = body.split('wait_children:')[1];
     expect(waitChildrenBlock).toBeTruthy();
-    expect(waitChildrenBlock).toContain('RUNNER_RUNS_ON_PR_ADMISSION_LOCAL_JSON');
-    expect(waitChildrenBlock).not.toContain('RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
+    expect(waitChildrenBlock).toContain('RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
     expect(waitChildrenBlock).toContain('- name: Checkout');
     expect(waitChildrenBlock).toContain('uses: actions/checkout@');
     expect(waitChildrenBlock).toContain('fetch-depth: 1');
@@ -54,10 +57,19 @@ describe('deploy orchestrator workflows', () => {
     expect(body).not.toContain('environment: ${{ matrix.target.approval_env_surface }}');
   });
 
-  test('stg orchestrator keys concurrency by target ref for manual runs', () => {
-    const body = readWorkflow('deploy-stg-orchestrator.yml');
-    expect(body).toContain('group: deploy-stg-orchestrator-${{ github.event_name == \'workflow_dispatch\'');
-    expect(body).toContain('inputs.ref');
+  test('orchestrators serialize by deployment stage without canceling active runs', () => {
+    const cases = [
+      ['deploy-dev-orchestrator.yml', 'group: deploy-orchestrator-dev'],
+      ['deploy-stg-orchestrator.yml', 'group: deploy-orchestrator-stg'],
+      ['deploy-prod-orchestrator.yml', 'group: deploy-orchestrator-prod'],
+    ];
+
+    for (const [workflow, expectedGroup] of cases) {
+      const concurrency = extractTopLevelConcurrency(readWorkflow(workflow));
+      expect(concurrency).toContain(expectedGroup);
+      expect(concurrency).toContain('cancel-in-progress: false');
+      expect(concurrency).not.toMatch(/github\.sha|inputs\.ref|github\.event\.inputs\.ref|github\.run_id/);
+    }
   });
 
   test('stg orchestrator filters to stage-supported surfaces and dispatches targets without approval wait jobs', () => {
@@ -65,9 +77,8 @@ describe('deploy orchestrator workflows', () => {
     expect(body).toContain('changed-surfaces.js --stage stg --format github-output');
     expect(body).toContain('resolve-orchestrator-targets.js');
     expect(body).toContain('--stage stg');
-    expect(body).toContain('RUNNER_RUNS_ON_PR_ADMISSION_LOCAL_JSON');
-    expect(body).toContain('RUNNER_LABELS_CI_PR_ADMISSION_JSON');
-    expect(body).not.toContain('RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
+    expect(body).toContain('RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
+    expect(body).not.toContain('RUNNER_RUNS_ON_PR_ADMISSION_LOCAL_JSON');
     expect(body).not.toContain('runs-on: ubuntu-latest');
     expect(body).toContain('retries: 3');
     expect(body).toContain('retry-exempt-status-codes: 400,401,403,404,422');
@@ -96,9 +107,8 @@ describe('deploy orchestrator workflows', () => {
     expect(body).toContain('node scripts/ops/ci/resolve-prod-surfaces.js');
     expect(body).toContain('resolve-orchestrator-targets.js');
     expect(body).toContain('--stage prod');
-    expect(body).toContain('RUNNER_RUNS_ON_PR_ADMISSION_LOCAL_JSON');
-    expect(body).toContain('RUNNER_LABELS_CI_PR_ADMISSION_JSON');
-    expect(body).not.toContain('RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
+    expect(body).toContain('RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
+    expect(body).not.toContain('RUNNER_RUNS_ON_PR_ADMISSION_LOCAL_JSON');
     expect(body).toContain('retries: 3');
     expect(body).toContain('retry-exempt-status-codes: 400,401,403,404,422');
     expect(body).toContain('Require successful stg deploy(s) for SHA (surface-aware)');

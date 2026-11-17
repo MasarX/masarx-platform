@@ -7,7 +7,7 @@ updates:
       day: "monday"
       time: "04:00"
       timezone: "UTC"
-    open-pull-requests-limit: 4
+    open-pull-requests-limit: 0
     rebase-strategy: "disabled"
     labels:
       - "dependencies"
@@ -24,7 +24,7 @@ updates:
       day: "monday"
       time: "04:15"
       timezone: "UTC"
-    open-pull-requests-limit: 4
+    open-pull-requests-limit: 0
     rebase-strategy: "disabled"
     labels:
       - "dependencies"

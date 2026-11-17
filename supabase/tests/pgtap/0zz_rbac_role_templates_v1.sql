@@ -6,7 +6,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(19);
+SELECT plan(21);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_rbac_role_templates_v1()
 RETURNS SETOF TEXT
@@ -112,6 +112,27 @@ BEGIN
     (SELECT COUNT(*)::INT FROM public.rbac_role_templates WHERE key = 'driver'),
     1,
     'rbac_role_templates includes driver'
+  );
+
+  RETURN NEXT is(
+    (SELECT COUNT(*)::INT FROM public.rbac_role_templates WHERE key = 'super_admin'),
+    1,
+    'rbac_role_templates includes super_admin'
+  );
+
+  RETURN NEXT ok(
+    NOT EXISTS (
+      SELECT lv.id
+      FROM public.lookup_values lv
+      JOIN public.lookup_definitions ld ON ld.id = lv.lookup_definition_id
+      WHERE ld.category = 'rbac_permission' AND lv.status = 'active'
+      EXCEPT
+      SELECT rtp.permission_id
+      FROM public.rbac_role_template_permissions rtp
+      JOIN public.rbac_role_templates rt ON rt.id = rtp.role_template_id
+      WHERE rt.key = 'super_admin'
+    ),
+    'super_admin template covers every active RBAC permission'
   );
 
   -- Provision roles for the org (service-only).

@@ -33,6 +33,7 @@ type SettingsRequestFormProps = {
   selectedScopeType: string;
   selectedScopeId: string;
   defaultSettingsJson: string;
+  providerConfigured?: boolean | null;
   previewResolutionId?: string | null;
   previewScopeType?: string | null;
   previewScopeId?: string | null;
@@ -51,6 +52,7 @@ export function SettingsRequestForm({
   selectedScopeType,
   selectedScopeId,
   defaultSettingsJson,
+  providerConfigured = null,
   previewResolutionId,
   previewScopeType,
   previewScopeId,
@@ -64,6 +66,15 @@ export function SettingsRequestForm({
   const [category, setCategory] = React.useState(selectedCategory);
   const [scopeType, setScopeType] = React.useState(selectedScopeType);
   const [scopeId, setScopeId] = React.useState(selectedScopeId);
+  const isLabelProvider = selectedCategory === "label_provider";
+  const [invokeUrl, setInvokeUrl] = React.useState("");
+  const [invokeSecret, setInvokeSecret] = React.useState("");
+  React.useEffect(() => {
+    if (state.status === "success") { setInvokeSecret(""); setInvokeUrl(""); }
+  }, [state]);
+  React.useEffect(() => {
+    setInvokeSecret(""); setInvokeUrl("");
+  }, [category, scopeType, scopeId]);
   const [jsonValue, setJsonValue] = React.useState(defaultSettingsJson);
   const [changeReason, setChangeReason] = React.useState("");
   const [effectiveFrom, setEffectiveFrom] = React.useState("");
@@ -107,12 +118,12 @@ export function SettingsRequestForm({
     scopeType !== selectedScopeType ||
     scopeId !== selectedScopeId;
   const hasChanges =
-    selectionDirty ||
+    selectionDirty || invokeUrl.length > 0 || invokeSecret.length > 0 ||
     jsonValue !== defaultSettingsJson ||
     changeReason.length > 0 ||
     effectiveFrom.length > 0;
-  const previewReady = defaultSettingsJson.trim().length > 0 && !previewError;
-  const jsonReady = jsonValue.trim().length > 0;
+  const previewReady = (isLabelProvider ? providerConfigured !== null : defaultSettingsJson.trim().length > 0) && !previewError;
+  const jsonReady = isLabelProvider ? Boolean(invokeUrl.trim() || invokeSecret.trim()) : jsonValue.trim().length > 0;
 
   useUnsavedChangesGuard({
     enabled: true,
@@ -253,6 +264,8 @@ export function SettingsRequestForm({
               </div>
               <div className="mt-1 text-xs text-ui-muted">{previewError}</div>
             </div>
+          ) : isLabelProvider && providerConfigured !== null ? (
+            <p>{t(providerConfigured ? "provider.configured" : "provider.unconfigured")}</p>
           ) : previewReady ? (
             <pre className="max-h-80 overflow-auto rounded-xl border border-ui-border bg-ui-surface/80 p-4 text-xs text-ui-ink">
               {defaultSettingsJson}
@@ -332,7 +345,17 @@ export function SettingsRequestForm({
               />
             </label>
           </div>
-          <label className="space-y-2 text-sm text-ui-ink">
+          {isLabelProvider ? (
+            <div className="space-y-3">
+              <label className="block">{t("provider.url")}
+                <Input name="invoke_url" type="url" value={invokeUrl} onChange={(e) => setInvokeUrl(e.target.value)} disabled={isPending} />
+              </label>
+              <label className="block">{t("provider.secret")}
+                <Input name="invoke_secret" type="password" autoComplete="off" value={invokeSecret} onChange={(e) => setInvokeSecret(e.target.value)} disabled={isPending} />
+              </label>
+              <p>{t("provider.requestHint")}</p>
+            </div>
+          ) : <label className="space-y-2 text-sm text-ui-ink">
             <span className="text-xs uppercase tracking-wide text-ui-muted">
               {t("request.settingsJsonLabel")}
             </span>
@@ -345,7 +368,7 @@ export function SettingsRequestForm({
               className="font-mono text-xs"
               data-testid={`${testIdPrefix}-request-json`}
             />
-          </label>
+          </label>}
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="submit"

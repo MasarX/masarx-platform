@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(15);
+SELECT plan(17);
 
 SELECT has_function(
   'public',
@@ -182,6 +182,28 @@ SELECT ok(
        )
   ),
   'inline destination_address contracts include live required targets for preview blocking'
+);
+
+SELECT is(
+  public.tabular_import_resolve_resource_v1('recipients'),
+  (
+    SELECT value
+      FROM jsonb_array_elements(public.ui_read_registry_v1()->'resources') AS value
+     WHERE value->>'key' = 'recipients'
+     LIMIT 1
+  ),
+  'targeted recipient resolution matches the canonical full registry resource'
+);
+
+SELECT is(
+  public.tabular_import_resolve_resource_v1('shipments'),
+  (
+    SELECT value
+      FROM jsonb_array_elements(public.ui_read_registry_v1()->'resources') AS value
+     WHERE value->>'key' = 'shipments'
+     LIMIT 1
+  ),
+  'targeted shipment resolution preserves canonical import and runtime reference patches'
 );
 
 SELECT is(

@@ -27,14 +27,23 @@ describe('CI contract workflows', () => {
     expect(body).toContain('release_verify_required_context');
     expect(body).toContain('needs: [release_verify]');
     expect(body).toContain('name: release_verify / run');
-    expect(body).toContain('FIELDOPS_STORE_PREFLIGHT_PROFILE: ci');
+    expect(body).toContain('FIELDOPS_STORE_PREFLIGHT_PROFILE: convergence');
+    expect(body).toContain('FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED: "1"');
     expect(body).toContain('FIELDOPS_VERIFY_SKIP_STORE_PREFLIGHT: "1"');
   });
 
-  test('pr governance gate enforces CI naming/test-selection contracts', () => {
-    const body = readWorkflow('pr-governance-gate.yml');
-    expect(body).toContain('validate-deploy-env-vars.js');
-    expect(body).toContain('validate-env-name-standard.js');
-    expect(body).toContain('validate-test-selection-contract.js');
+  test('CI checks enforce CI naming/test-selection contracts', () => {
+    const body = readWorkflow('native-pr-admission.yml');
+    expect(body).toContain('npm run lint:ci:contracts');
+    const scripts = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', 'package.json'), 'utf8')).scripts;
+    for (const [alias, script] of [
+      ['lint:ci:action-pins', 'lint-action-pins.js'],
+      ['lint:ci:deploy-env-vars', 'validate-deploy-env-vars.js'],
+      ['lint:ci:env-names', 'validate-env-name-standard.js'],
+      ['lint:ci:test-selection', 'validate-test-selection-contract.js'],
+    ]) {
+      expect(scripts['lint:ci:contracts']).toContain(`npm run ${alias}`);
+      expect(scripts[alias]).toContain(script);
+    }
   });
 });

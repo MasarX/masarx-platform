@@ -11,7 +11,7 @@ type MarketplacePrivatePoolsPageProps = Parameters<
 const MarketplacePrivatePoolsPageInner =
   UiMarketplacePrivatePoolsPage as unknown as (
     props: MarketplacePrivatePoolsPageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function MarketplacePrivatePoolsPage(
   props: MarketplacePrivatePoolsPageProps,

@@ -194,6 +194,62 @@ const progressWorkflowRun = async (client, runId) => {
   return rows[0]?.result || null;
 };
 
+const withAuthenticatedUser = async (
+  client,
+  userId,
+  fn,
+  { deadlineAt = null } = {},
+) => {
+  const normalizedUserId = String(userId || '').trim();
+  if (!normalizedUserId) {
+    throw new Error('withAuthenticatedUser requires userId');
+  }
+
+  const requestedDeadlineAt = Number(deadlineAt);
+  const hasDeadline = Number.isFinite(requestedDeadlineAt) && requestedDeadlineAt > 0;
+  const applyRemainingStatementTimeout = async () => {
+    if (!hasDeadline) return;
+    const remainingMs = Math.floor(requestedDeadlineAt - Date.now());
+    if (remainingMs <= 0) {
+      throw new Error('label_authenticated_query_deadline_exceeded');
+    }
+    await client.query(
+      `SELECT set_config('statement_timeout', $1::text, true)`,
+      [`${remainingMs}ms`],
+    );
+  };
+
+  if (hasDeadline && requestedDeadlineAt - Date.now() <= 0) {
+    throw new Error('label_authenticated_query_deadline_exceeded');
+  }
+
+  await client.query('BEGIN');
+  try {
+    await applyRemainingStatementTimeout();
+    await client.query('SET LOCAL ROLE authenticated');
+    await client.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+    await client.query(`SELECT set_config('request.jwt.claim.sub', $1::text, true)`, [normalizedUserId]);
+    await client.query(`SELECT set_config('request.jwt.claims', $1::text, true)`, [
+      JSON.stringify({
+        role: 'authenticated',
+        sub: normalizedUserId,
+      }),
+    ]);
+    const deadlineClient = {
+      query: async (...args) => {
+        await applyRemainingStatementTimeout();
+        return client.query(...args);
+      },
+    };
+    const output = await fn(deadlineClient);
+    await client.query('COMMIT');
+    return output;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  }
+};
+
 const completeBundleAsync = async (client, runId, requestId, options = {}) => {
   const {
     maxAttempts = 12,
@@ -201,9 +257,17 @@ const completeBundleAsync = async (client, runId, requestId, options = {}) => {
     batchSize = 10,
     progressRunOnComplete = true,
     dispatchApiCallerBatchEnabled = true,
+    deadlineAt = Number.POSITIVE_INFINITY,
+    returnPendingAtDeadline = false,
   } = options;
 
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+  let lastResponse = { completed: false };
+
+  for (
+    let attempt = 0;
+    attempt < maxAttempts && Date.now() < deadlineAt;
+    attempt += 1
+  ) {
     await runOutboundWorker(client);
     if (dispatchApiCallerBatchEnabled) {
       await dispatchApiCallerBatch(client, batchSize);
@@ -214,6 +278,7 @@ const completeBundleAsync = async (client, runId, requestId, options = {}) => {
       [requestId],
     );
     const response = rows[0]?.response || {};
+    lastResponse = response;
     if (response.completed) {
       if (progressRunOnComplete) {
         await progressWorkflowRun(client, runId);
@@ -221,14 +286,213 @@ const completeBundleAsync = async (client, runId, requestId, options = {}) => {
       return response;
     }
 
-    if (sleepMs > 0) {
-      await sleep(sleepMs);
+    const remainingSleepMs = Math.max(0, deadlineAt - Date.now());
+    if (sleepMs > 0 && remainingSleepMs > 0) {
+      await sleep(Math.min(sleepMs, remainingSleepMs));
     }
+  }
+
+  if (returnPendingAtDeadline) {
+    return lastResponse;
   }
 
   throw new Error(
     `Async bundle request ${requestId} did not complete after ${maxAttempts} attempts`,
   );
+};
+
+const summarizeAsyncReceipt = (kind, response = {}) => {
+  const status = Number(response?.status || 0);
+  const completed = response?.completed === true;
+  const timedOut = response?.body?.timed_out === true;
+  const hasError = Boolean(response?.body?.error);
+  return {
+    kind,
+    completed,
+    status,
+    error_class: timedOut
+      ? 'timed_out'
+      : hasError
+        ? 'provider_error'
+        : completed && (status < 200 || status >= 300)
+          ? 'http_error'
+          : null,
+  };
+};
+
+const readLabelPrintRun = async (client, workflowRunId) => {
+  const { rows } = await client.query(
+    `SELECT workflow_status, context, failure_reason, last_error
+       FROM workflow_runs
+      WHERE id = $1::uuid`,
+    [workflowRunId],
+  );
+  const runRow = rows[0] || null;
+  const labelPrintContext = runRow?.context?.label_print || {};
+  return {
+    runRow,
+    workflowStatus: runRow?.workflow_status || null,
+    labelPrintContext,
+    bundleResp: labelPrintContext.bundle_response || null,
+  };
+};
+
+const readBundleStepFallback = async (client, workflowRunId, handlerKey) => {
+  const { rows } = await client.query(
+    `SELECT operation_result
+       FROM workflow_run_steps
+      WHERE workflow_run_id = $1::uuid
+        AND handler_key = $2
+      ORDER BY sequence_order DESC
+      LIMIT 1`,
+    [workflowRunId, handlerKey],
+  );
+  const operationResult = rows[0]?.operation_result || {};
+  return operationResult.bundle || operationResult || null;
+};
+
+const hasBundleArtifact = (bundle) => Boolean(
+  bundle?.bundle_id && (bundle?.file_path || bundle?.file_url || bundle?.output_path),
+);
+
+const waitForCompletedBundleRun = async ({
+  client,
+  workflowRunId,
+  progressBudgetMs = 1200,
+  maxAttempts = 50,
+  settleAttempts = 20,
+  sleepMs = 500,
+  deadlineMs = null,
+  deadlineAt = null,
+  drivePending = null,
+  dispatchApiCallerBatchEnabled = true,
+}) => {
+  const cycleBudget = Math.max(1, maxAttempts + settleAttempts);
+  const compatibilityDeadlineMs = cycleBudget * (
+    Math.max(1, progressBudgetMs) + Math.max(0, sleepMs) + 1000
+  );
+  const relativeDeadlineAt = Date.now() + Math.max(
+    1,
+    Number(deadlineMs || compatibilityDeadlineMs),
+  );
+  const requestedDeadlineAt = Number(deadlineAt);
+  const effectiveDeadlineAt = Number.isFinite(requestedDeadlineAt) && requestedDeadlineAt > 0
+    ? Math.min(relativeDeadlineAt, requestedDeadlineAt)
+    : relativeDeadlineAt;
+
+  let snapshot = {
+    runRow: null,
+    workflowStatus: null,
+    labelPrintContext: {},
+    bundleResp: null,
+  };
+  let asyncReceipt = null;
+  let lastProgress = null;
+
+  for (
+    let cycle = 0;
+    cycle < cycleBudget && Date.now() < effectiveDeadlineAt;
+    cycle += 1
+  ) {
+    const remainingProgressMs = Math.max(
+      0,
+      Math.floor(effectiveDeadlineAt - Date.now()),
+    );
+    if (remainingProgressMs <= 0) break;
+    const { rows: progressRows } = await client.query(
+      `SELECT public.progress_workflow_run_until_wait_v1($1::uuid, '{}'::jsonb, $2::int, 1) AS progress`,
+      [
+        workflowRunId,
+        Math.min(progressBudgetMs, remainingProgressMs, 25),
+      ],
+    );
+    const progress = progressRows[0]?.progress;
+    lastProgress = progress;
+    if (progress?.status === 'failed') {
+      // Never echo SQL/provider error text: it can contain credentials or payloads.
+      throw new Error('label_workflow_progress_failed');
+    }
+
+    if (drivePending) {
+      await drivePending({ workflowRunId, cycle });
+    }
+
+    snapshot = await readLabelPrintRun(client, workflowRunId);
+    if (snapshot.workflowStatus === 'failed') {
+      return { ...snapshot, settlement: 'failed', asyncReceipt };
+    }
+    if (snapshot.workflowStatus === 'completed' && hasBundleArtifact(snapshot.bundleResp)) {
+      return { ...snapshot, settlement: 'completed', asyncReceipt };
+    }
+
+    const executeRequestId = Number(snapshot.labelPrintContext.execute_async?.request_id);
+    const bundleRequestId = Number(snapshot.labelPrintContext.bundle_async?.request_id);
+    if (Number.isFinite(bundleRequestId) && bundleRequestId > 0) {
+      const response = await completeBundleAsync(
+        client,
+        workflowRunId,
+        bundleRequestId,
+        {
+          maxAttempts: 1,
+          sleepMs: 0,
+          progressRunOnComplete: false,
+          dispatchApiCallerBatchEnabled,
+          deadlineAt: effectiveDeadlineAt,
+          returnPendingAtDeadline: true,
+        },
+      );
+      asyncReceipt = summarizeAsyncReceipt('bundle_async', response);
+    } else if (Number.isFinite(executeRequestId) && executeRequestId > 0) {
+      const { rows } = await client.query(
+        'SELECT public.check_async_response($1::bigint) AS response',
+        [executeRequestId],
+      );
+      asyncReceipt = summarizeAsyncReceipt(
+        'execute_async',
+        rows[0]?.response || {},
+      );
+    }
+
+    const remainingSleepMs = Math.max(0, effectiveDeadlineAt - Date.now());
+    if (sleepMs > 0 && remainingSleepMs > 0) {
+      await client.query(
+        'SELECT pg_sleep($1::double precision)',
+        [Math.min(sleepMs, remainingSleepMs) / 1000],
+      );
+    }
+  }
+
+  snapshot = await readLabelPrintRun(client, workflowRunId);
+  let bundleResp = snapshot.bundleResp;
+  if (!hasBundleArtifact(bundleResp)) {
+    bundleResp = await readBundleStepFallback(client, workflowRunId, 'label_bundle');
+  }
+  if (!hasBundleArtifact(bundleResp)) {
+    bundleResp = await readBundleStepFallback(client, workflowRunId, 'label_print_finalize');
+  }
+
+  const settlement = snapshot.workflowStatus === 'failed'
+    ? 'failed'
+    : snapshot.workflowStatus === 'completed' && hasBundleArtifact(bundleResp)
+      ? 'completed'
+      : 'pending_deadline';
+
+  if (settlement === 'pending_deadline') {
+    console.warn('label_workflow_pending_state', {
+      progress_waiting: ['waiting', 'pending'].includes(lastProgress?.status),
+      progress_in_progress: lastProgress?.status === 'in_progress',
+      progress_has_step: Boolean(lastProgress?.step_id),
+      progress_has_next_run: Boolean(lastProgress?.next_run_at),
+      run_completed: snapshot.workflowStatus === 'completed',
+      has_execute_request: Boolean(snapshot.labelPrintContext.execute_async?.request_id),
+      has_bundle_request: Boolean(snapshot.labelPrintContext.bundle_async?.request_id),
+      async_completed: asyncReceipt?.completed === true,
+      async_http_status: Number.isFinite(asyncReceipt?.status) ? asyncReceipt.status : null,
+      async_error: Boolean(asyncReceipt?.error_class),
+      has_bundle_artifact: hasBundleArtifact(bundleResp),
+    });
+  }
+  return { ...snapshot, bundleResp, settlement, asyncReceipt };
 };
 
 const ensureLabelPdf = async (storagePath) => {
@@ -286,7 +550,7 @@ const ensureLabelPdf = async (storagePath) => {
   });
 
   if (!response.resp.ok) {
-    const text = await response.resp.text().catch(() => '');
+    const text = response.bodyText;
     throw new Error(`Failed to seed storage object ${storagePath} (${response.resp.status}): ${text}`);
   }
 };
@@ -323,7 +587,8 @@ const generateSignedUrl = async (filePath, expiresSeconds = 600) => {
     },
   });
 
-  const body = await response.resp.text().catch(() => '');
+  // The shared HTTP helper consumes the response once and retains its text.
+  const body = response.bodyText;
   let parsed;
   try {
     parsed = body ? JSON.parse(body) : null;
@@ -411,7 +676,99 @@ const waitForMetricRow = async (
   return null;
 };
 
+const cleanupLabelPrintWorkflowRows = async (
+  client,
+  { workflowRunIds = [], shipmentIds = [], shipmentBoxIds = [] },
+) => {
+  if (!workflowRunIds.length && !shipmentIds.length && !shipmentBoxIds.length) return;
+
+  try {
+    await client.query('BEGIN');
+
+    if (workflowRunIds.length) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(
+           hashtext('label_jobs_workflow_step_nudge'),
+           hashtext(step.id::text)
+         )
+         FROM (
+           SELECT id
+           FROM workflow_run_steps
+           WHERE workflow_run_id = ANY($1::uuid[])
+           ORDER BY id
+         ) step`,
+        [workflowRunIds],
+      );
+    }
+    if (workflowRunIds.length) {
+      await client.query(
+        'SELECT id FROM workflow_runs WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE',
+        [workflowRunIds],
+      );
+    }
+    if (shipmentIds.length) {
+      await client.query(
+        'SELECT id FROM shipments WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE',
+        [shipmentIds],
+      );
+    }
+
+    const { rows: jobItemTable } = await client.query(
+      "SELECT to_regclass('public.label_job_items') IS NOT NULL AS exists",
+    );
+    if (jobItemTable[0]?.exists) {
+      await client.query(
+        `DELETE FROM label_job_items
+          WHERE label_job_id IN (
+            SELECT lj.id
+            FROM label_jobs lj
+            LEFT JOIN workflow_run_steps wrs ON wrs.id = lj.workflow_run_step_id
+            WHERE wrs.workflow_run_id = ANY($1::uuid[])
+               OR lj.shipment_id = ANY($2::uuid[])
+          )`,
+        [workflowRunIds, shipmentIds],
+      );
+    }
+    await client.query(
+      `DELETE FROM label_jobs
+        WHERE shipment_id = ANY($2::uuid[])
+           OR workflow_run_step_id IN (
+             SELECT id
+             FROM workflow_run_steps
+             WHERE workflow_run_id = ANY($1::uuid[])
+           )`,
+      [workflowRunIds, shipmentIds],
+    );
+    await client.query(
+      'DELETE FROM workflow_run_steps WHERE workflow_run_id = ANY($1::uuid[])',
+      [workflowRunIds],
+    );
+    await client.query('DELETE FROM workflow_runs WHERE id = ANY($1::uuid[])', [workflowRunIds]);
+    await client.query(
+      'DELETE FROM shipment_actions WHERE shipment_id = ANY($1::uuid[])',
+      [shipmentIds],
+    );
+    await client.query('DELETE FROM labels WHERE shipment_id = ANY($1::uuid[])', [shipmentIds]);
+    await client.query(
+      `DELETE FROM shipment_boxes
+        WHERE id = ANY($1::uuid[])
+           OR shipment_id = ANY($2::uuid[])`,
+      [shipmentBoxIds, shipmentIds],
+    );
+    await client.query('DELETE FROM shipments WHERE id = ANY($1::uuid[])', [shipmentIds]);
+    await client.query('COMMIT');
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_rollbackError) {
+      // Preserve the cleanup failure that triggered rollback.
+    }
+    throw error;
+  }
+};
+
 module.exports = {
+  cleanupLabelPrintWorkflowRows,
   resolveApiCallerAuthToken,
   resolveApiCallerAuthTokenCandidates,
   resolveLabelProviderSecret,
@@ -419,7 +776,10 @@ module.exports = {
   runOutboundWorker,
   dispatchApiCallerBatch,
   progressWorkflowRun,
+  withAuthenticatedUser,
   completeBundleAsync,
+  summarizeAsyncReceipt,
+  waitForCompletedBundleRun,
   fetchWithRetry,
   ensureLabelPdf,
   generateSignedUrl,

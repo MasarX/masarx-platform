@@ -1,5 +1,3 @@
-const textEncoder = new TextEncoder();
-
 const SECRETISH_ENV_KEY_PATTERN = /(token|jwt|key|password|secret)/i;
 
 const sanitizeEnvValue = (key, value) => {
@@ -38,6 +36,16 @@ const LOG_SENSITIVE_KEY_PATTERN =
   /(authorization|cookie|set-cookie|x-api-key|api[_-]?key|password|secret|token|signature|private[_-]?key)/i;
 const LOG_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
 const LOG_BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._-]+\b/gi;
+const INGRESS_SECRET_QUERY_PATTERN =
+  /(^|[?&])(token|auth_token|api_key|apikey|secret|signature|hmac|x_signature|x-signature|x-hub-signature|x-hub-signature-256|key|password|credential)=([^&#\s]*)/gi;
+const INGRESS_FORWARDED_PATH_HEADERS = new Set([
+  "x-forwarded-path",
+  "x-forwarded-url",
+  "x-original-uri",
+  "x-rewrite-url",
+  "x-envoy-original-path",
+  "referer",
+]);
 const UUID_CANONICAL_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UUID_HEX_PATTERN = /^[0-9a-f]{32}$/i;
 const TRACEPARENT_VERSION_PATTERN = /^[0-9a-f]{2}$/i;
@@ -51,9 +59,27 @@ const trimToNull = (value) => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const redactStringForLog = (value) => {
+export const redactIngressSecretText = (value) => {
   if (typeof value !== "string") return value;
   return value
+    .replace(/(\/api-gateway\/t\/)[^/?#\s]+/gi, "$1[redacted]")
+    .replace(/(\/api-gateway\/)(?!t(?:\/|$))[^/?#\s]+/gi, "$1[redacted]")
+    .replace(INGRESS_SECRET_QUERY_PATTERN, "$1$2=[redacted]");
+};
+
+export const redactIngressForwardedHeaders = (headers = {}) => {
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) return {};
+  const redacted = { ...headers };
+  for (const [key, value] of Object.entries(redacted)) {
+    if (!INGRESS_FORWARDED_PATH_HEADERS.has(String(key).toLowerCase())) continue;
+    if (typeof value === "string") redacted[key] = redactIngressSecretText(value);
+  }
+  return redacted;
+};
+
+const redactStringForLog = (value) => {
+  if (typeof value !== "string") return value;
+  return redactIngressSecretText(value)
     .replace(LOG_BEARER_PATTERN, "Bearer [redacted]")
     .replace(LOG_JWT_PATTERN, "[redacted_jwt]");
 };
@@ -591,28 +617,13 @@ const formatRpcAuthAttempt = ({ apiKey, authorization, label }) => {
   };
 };
 
-const stringifyRpcAuthBody = (body) => {
-  if (body == null) return "";
-  if (typeof body === "string") return body.toLowerCase();
-  try {
-    return JSON.stringify(body).toLowerCase();
-  } catch (_err) {
-    return String(body).toLowerCase();
-  }
-};
-
 export const isRetryableRpcAuthError = (status, body) => {
   const code = Number(status || 0);
+  // PostgREST documents 401; retain the existing 403 transport compatibility.
   if (code !== 401 && code !== 403) return false;
-  const text = stringifyRpcAuthBody(body);
-  return (
-    text.includes("pgrst301") ||
-    text.includes("no suitable key or wrong key type") ||
-    text.includes("none of the keys was able to decode the jwt") ||
-    text.includes("invalid jwt") ||
-    text.includes("jwt") ||
-    text.includes("authorization")
-  );
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  // Never promote permission/business errors based on words in their diagnostics.
+  return ["PGRST301", "PGRST302", "PGRST303"].includes(body.code);
 };
 
 export const buildRpcAuthAttempts = ({
@@ -667,14 +678,43 @@ export const buildRpcAuthAttempts = ({
   return attempts;
 };
 
+const parseBooleanPolicyValue = (value) => {
+  const normalized = trimToEmpty(value).toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return null;
+};
+
+export const resolveIngressDbAuth = ({
+  dbJwt = "", secretKey = "", serviceRoleKey = "",
+  requireDbJwt = "", allowServiceRoleFallback = "",
+} = {}) => {
+  const requirePolicy = parseBooleanPolicyValue(requireDbJwt);
+  const dbJwtRequired = requirePolicy === null ? true : requirePolicy;
+  const breakglassRequested = parseBooleanPolicyValue(allowServiceRoleFallback) === true;
+  const serviceRoleFallbackAllowed = !dbJwtRequired && breakglassRequested;
+  const authAttempts = buildRpcAuthAttempts({
+    dbJwt,
+    secretKey: dbJwtRequired ? "" : secretKey,
+    serviceRoleKey: serviceRoleFallbackAllowed ? serviceRoleKey : "",
+  });
+  return {
+    dbJwtRequired, serviceRoleFallbackAllowed, authAttempts,
+    internalJwt: trimToEmpty(dbJwt) || (serviceRoleFallbackAllowed ? trimToEmpty(serviceRoleKey) : ""),
+  };
+};
+
 export const invokeSupabaseRpcWithAuthFallback = async ({
   url,
   body,
   authAttempts = [],
   fetchInit = {},
+  schema = "api",
+  timeoutMs = 0,
 } = {}) => {
   const rpcUrl = trimToEmpty(url);
   const attempts = Array.isArray(authAttempts) ? authAttempts.filter(Boolean) : [];
+  const rpcSchema = trimToEmpty(schema);
   if (!rpcUrl) {
     throw new Error("invokeSupabaseRpcWithAuthFallback requires a url");
   }
@@ -685,18 +725,53 @@ export const invokeSupabaseRpcWithAuthFallback = async ({
   let lastResult = null;
   for (const attempt of attempts) {
     const headers = new Headers(fetchInit.headers || {});
+    if (rpcSchema) {
+      headers.set("accept-profile", rpcSchema);
+      headers.set("content-profile", rpcSchema);
+    }
     for (const [key, value] of Object.entries(attempt.headers || {})) {
       if (value !== undefined && value !== null && String(value).length > 0) {
         headers.set(key, String(value));
       }
     }
 
-    const response = await fetch(rpcUrl, {
-      ...fetchInit,
-      method: "POST",
-      headers,
-      body: JSON.stringify(body ?? {}),
-    });
+    const numericTimeoutMs = Number(timeoutMs || 0);
+    const shouldTimeout = Number.isFinite(numericTimeoutMs) && numericTimeoutMs > 0 && !fetchInit.signal;
+    const controller = shouldTimeout ? new AbortController() : null;
+    const timer = controller
+      ? setTimeout(() => controller.abort(), numericTimeoutMs)
+      : null;
+    let response;
+    try {
+      response = await fetch(rpcUrl, {
+        ...fetchInit,
+        ...(controller ? { signal: controller.signal } : {}),
+        method: "POST",
+        headers,
+        body: JSON.stringify(body ?? {}),
+      });
+    } catch (error) {
+      if (timer) clearTimeout(timer);
+      const isAbort =
+        controller?.signal?.aborted ||
+        error?.name === "AbortError" ||
+        /abort/i.test(String(error?.message ?? ""));
+      if (isAbort) {
+        return {
+          ok: false,
+          attempted: attempt,
+          response: null,
+          body: {
+            code: "edge_rpc_timeout",
+            message: `RPC request timed out after ${numericTimeoutMs}ms`,
+          },
+          authRetry: false,
+          timedOut: true,
+        };
+      }
+      throw error;
+    }
+    if (timer) clearTimeout(timer);
     const responseBody = await toResponseBody(response);
     lastResult = { attempt, response, body: responseBody };
     if (response.ok) {
@@ -745,94 +820,46 @@ export const parseRequestBody = async (req) => {
   }
 };
 
-export const resolveObjectPath = (target, path) => {
-  if (!path) return undefined;
-  const segments = path.split(".").map((segment) => segment.trim()).filter(Boolean);
-  let current = target;
-  for (const segment of segments) {
-    if (current === null || current === undefined) {
-      return undefined;
-    }
-    if (Array.isArray(current)) {
-      const index = Number(segment);
-      if (Number.isNaN(index) || index < 0 || index >= current.length) {
-        return undefined;
-      }
-      current = current[index];
-      continue;
-    }
-    if (typeof current === "object") {
-      current = current[segment];
-      continue;
-    }
-    return undefined;
-  }
-  return current;
+const normalizeAudience = (value) => {
+  if (typeof value === "string") return [value.trim().toLowerCase()].filter(Boolean);
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean);
 };
 
-export const renderTemplate = (template, context) => {
-  if (template === null || template === undefined) return template;
-
-  if (Array.isArray(template)) {
-    return template.map((item) => renderTemplate(item, context));
+// Claim defense only: the native Supabase verify_jwt gate owns signature verification.
+export const validateInternalEdgeClaims = (claims, role, options = {}) => {
+  const nowSeconds = Number.isFinite(options.nowSeconds)
+    ? Number(options.nowSeconds)
+    : Math.floor(Date.now() / 1000);
+  const expiresAt = Number(claims.exp);
+  if (!Number.isFinite(expiresAt) || expiresAt <= nowSeconds) {
+    return { ok: false, status: 401, message: "Expired Authorization token" };
   }
 
-  if (typeof template === "object") {
-    const result = {};
-    for (const [key, value] of Object.entries(template)) {
-      result[key] = renderTemplate(value, context);
+  if (claims.nbf !== undefined && claims.nbf !== null) {
+    const notBefore = Number(claims.nbf);
+    if (!Number.isFinite(notBefore) || notBefore > nowSeconds) {
+      return { ok: false, status: 401, message: "Authorization token not active" };
     }
-    return result;
   }
 
-  if (typeof template !== "string") {
-    return template;
-  }
-
-  if (!template.includes("{{")) {
-    return template;
-  }
-
-  const MUSTACHE_REGEX = /{{\s*([^}]+)\s*}}/g;
-  return template.replace(MUSTACHE_REGEX, (_match, token) => {
-    const resolved = resolveObjectPath(context, token);
-    if (resolved === undefined || resolved === null) {
-      return "";
+  const audiences = normalizeAudience(claims.aud);
+  const subject = String(claims.sub || "").trim().toLowerCase();
+  if (role === "service_role") {
+    if (audiences.length > 0 && !audiences.includes("authenticated")) {
+      return { ok: false, status: 403, message: "Invalid audience claim" };
     }
-    return typeof resolved === "object" ? JSON.stringify(resolved) : String(resolved);
-  });
-};
-
-const bufferToHex = (buffer) => Array.from(new Uint8Array(buffer)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
-
-export const computeHmac = async (algorithm, secret, message, encoding = "hex") => {
-  const algo = algorithm === "HMAC-SHA512" ? "SHA-512" : "SHA-256";
-  const key = await crypto.subtle.importKey(
-    "raw",
-    textEncoder.encode(secret),
-    { name: "HMAC", hash: { name: algo } },
-    false,
-    ["sign"]
-  );
-
-  const signatureBuffer = await crypto.subtle.sign("HMAC", key, textEncoder.encode(message));
-  if (encoding === "base64") {
-    return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
+    if (subject && subject !== "edge-function") {
+      return { ok: false, status: 403, message: "Invalid subject claim" };
+    }
+  } else {
+    if (!audiences.includes("authenticated")) {
+      return { ok: false, status: 403, message: "Invalid audience claim" };
+    }
+    if (subject !== "edge-function") {
+      return { ok: false, status: 403, message: "Invalid subject claim" };
+    }
   }
-  return bufferToHex(signatureBuffer);
+
+  return { ok: true };
 };
-
-const toBase64Url = (value) =>
-  String(value || "").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-
-export const verifyJwtHs256 = async (token, secret) => {
-  if (!token || !secret) return false;
-  const parts = String(token).split(".");
-  if (parts.length !== 3) return false;
-  const signingInput = `${parts[0]}.${parts[1]}`;
-  const expectedBase64 = await computeHmac("HMAC-SHA256", secret, signingInput, "base64");
-  const expected = toBase64Url(expectedBase64);
-  return expected === parts[2];
-};
-
-export const sharedTextEncoder = textEncoder;

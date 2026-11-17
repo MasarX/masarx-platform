@@ -175,7 +175,7 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
   );
   const [del, setDel] = React.useState<DeleteState>(() => buildInitialDelete());
   const safeHref = React.useCallback(
-    (path: string) => (safeBasePath ? resolveSafeHref(safeBasePath, path) : null),
+    (path: string) => (safeBasePath !== null ? resolveSafeHref(safeBasePath, path) : null),
     [safeBasePath]
   );
 
@@ -775,6 +775,41 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
     });
   }
 
+  function upsertWorkflowRunRow(
+    direction: TriggerDirection,
+    triggerId: string,
+    row: Record<string, unknown>
+  ) {
+    const withId = { ...row, id: normalizeText(row.id) ?? triggerId };
+    if (direction === "incoming") {
+      setIncomingRows((current) => {
+        const filtered = current.filter((entry) => normalizeText(entry.id) !== triggerId);
+        return [...filtered, withId];
+      });
+      setOutgoingRows((current) =>
+        current.filter((entry) => normalizeText(entry.id) !== triggerId)
+      );
+      return;
+    }
+
+    setOutgoingRows((current) => {
+      const filtered = current.filter((entry) => normalizeText(entry.id) !== triggerId);
+      return [...filtered, withId];
+    });
+    setIncomingRows((current) =>
+      current.filter((entry) => normalizeText(entry.id) !== triggerId)
+    );
+  }
+
+  function removeWorkflowRunRow(triggerId: string) {
+    setIncomingRows((current) =>
+      current.filter((entry) => normalizeText(entry.id) !== triggerId)
+    );
+    setOutgoingRows((current) =>
+      current.filter((entry) => normalizeText(entry.id) !== triggerId)
+    );
+  }
+
   async function handleToggleEnabled(row: Record<string, unknown>) {
     if (!canWrite || busyId || editor.pending || del.pending) return;
     const triggerId = normalizeText(row.id);
@@ -783,15 +818,14 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
     setBusyId(triggerId);
     try {
       const ui = createUiClient();
-      const updated = await ui.updateResource({
-        resource: "workflow_run_triggers",
-        id: triggerId,
-        patch: { enabled: nextEnabled },
+      const updated = await ui.updateWorkflowRunTrigger({
+        workflowRunTriggerId: triggerId,
+        enabled: nextEnabled,
       });
-      const updatedRow =
-        updated && typeof updated === "object"
-          ? (updated as Record<string, unknown>)
-          : { ...row, enabled: nextEnabled };
+      if (updated?.workflow_run_trigger_id !== triggerId) {
+        throw new Error(t("triggers.workflowRuns.toast.updateErrorTitle"));
+      }
+      const updatedRow = { ...row, ...updated, id: triggerId };
 
       setIncomingRows((current) =>
         current.map((entry) => (normalizeText(entry.id) === triggerId ? updatedRow : entry))
@@ -862,20 +896,42 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
           });
           return;
         }
+        const createdRow =
+          created && typeof created === "object" ? (created as Record<string, unknown>) : {};
+        const nextRow: Record<string, unknown> = {
+          source_workflow_template_id: sourceTemplateId,
+          target_workflow_template_id: targetTemplateId,
+          source_statuses: statuses,
+          enabled: editor.enabled,
+          notes: editor.notes.trim() || null,
+          context_patch: contextPatch,
+          ...createdRow,
+          id: triggerId,
+        };
+        const direction: TriggerDirection =
+          targetTemplateId === workflowTemplateId ? "incoming" : "outgoing";
+        upsertWorkflowRunRow(direction, triggerId, nextRow);
         toast({ tone: "success", title: t("triggers.workflowRuns.toast.created") });
       } else if (editor.triggerId) {
-        await ui.updateResource({
-          resource: "workflow_run_triggers",
-          id: editor.triggerId,
-          patch: {
-            source_workflow_template_id: sourceTemplateId,
-            target_workflow_template_id: targetTemplateId,
-            source_statuses: statuses,
-            context_patch: contextPatch,
-            enabled: editor.enabled,
-            notes: editor.notes.trim() || null,
-          },
+        const updated = await ui.updateWorkflowRunTrigger({
+          workflowRunTriggerId: editor.triggerId,
+          sourceWorkflowTemplateId: sourceTemplateId,
+          targetWorkflowTemplateId: targetTemplateId,
+          sourceStatuses: statuses,
+          contextPatch,
+          enabled: editor.enabled,
+          notes: editor.notes.trim(),
         });
+        if (updated?.workflow_run_trigger_id !== editor.triggerId) {
+          throw new Error(t("triggers.workflowRuns.toast.updateErrorTitle"));
+        }
+        const previous = [...incomingRows, ...outgoingRows].find(
+          (row) => normalizeText(row.id) === editor.triggerId
+        );
+        const nextRow = { ...previous, ...updated, id: editor.triggerId };
+        const direction: TriggerDirection =
+          targetTemplateId === workflowTemplateId ? "incoming" : "outgoing";
+        upsertWorkflowRunRow(direction, editor.triggerId, nextRow);
         toast({ tone: "success", title: t("triggers.workflowRuns.toast.updated") });
       }
 
@@ -901,11 +957,12 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
     setDel((current) => ({ ...current, pending: true }));
     try {
       const ui = createUiClient();
-      await ui.rpc("ui_delete_resource_v1", {
-        p_resource: "workflow_run_triggers",
-        p_id: del.triggerId,
-      });
+      const deleted = await ui.deleteWorkflowRunTrigger(del.triggerId);
+      if (deleted?.workflow_run_trigger_id !== del.triggerId) {
+        throw new Error(t("triggers.workflowRuns.toast.deleteErrorTitle"));
+      }
       toast({ tone: "success", title: t("triggers.workflowRuns.toast.deleted") });
+      removeWorkflowRunRow(del.triggerId);
       setDel(buildInitialDelete());
       queryClient.invalidateQueries({ queryKey: ["resource"] });
     } catch (error) {

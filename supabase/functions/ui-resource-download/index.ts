@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { extractToken, parseRequestBody, readEnv } from "../_shared/mod.mjs";
 import { buildCorsHeaders, withCorsJson } from "../_shared/cors.mjs";
 
@@ -56,13 +55,14 @@ const normalizeStoragePath = (
     try {
       const url = new URL(trimmed);
       const patterns = [
-        "/storage/v1/object/",
         "/storage/v1/object/public/",
         "/storage/v1/object/sign/",
+        "/storage/v1/object/authenticated/",
+        "/storage/v1/object/",
       ];
-      const matched = patterns.find((pattern) => url.pathname.includes(pattern));
+      const matched = patterns.find((pattern) => url.pathname.startsWith(pattern));
       if (matched) {
-        const rest = url.pathname.split(matched)[1] ?? "";
+        const rest = decodeURIComponent(url.pathname.slice(matched.length));
         const parts = rest.split("/").filter(Boolean);
         const bucket = parts.shift();
         const path = parts.join("/");
@@ -71,8 +71,9 @@ const normalizeStoragePath = (
         }
       }
     } catch (_err) {
-      // ignore malformed urls
+      // Malformed URLs and percent encodings are not storage keys.
     }
+    return null;
   }
 
   const normalized = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
@@ -104,7 +105,7 @@ const asRecord = (value: unknown): JsonRecord | null => {
 const getString = (value: unknown): string =>
   typeof value === "string" ? value.trim() : "";
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   const corsHeaders = buildCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });

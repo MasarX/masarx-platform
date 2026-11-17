@@ -24,6 +24,79 @@ function loadTelemetryModule(): TelemetryModule {
   return require("../../../apps/fieldops/src/mobile-telemetry") as TelemetryModule;
 }
 
+describe("mobile telemetry serialized operations", () => {
+  const event = (name: string) => ({ event_type: name, captured_at: "2026-09-10T00:00:00.000Z", metadata: {} });
+  function setup() {
+    jest.resetModules();
+    const previous = (globalThis as any).window;
+    installWebLocalStorage();
+    return { telemetry: loadTelemetryModule(), restore: () => { (globalThis as any).window = previous; } };
+  }
+  test("concurrent request start and terminal events are retained in submission order", async () => {
+    const { telemetry, restore } = setup();
+    try {
+      const names = ["a.start", "b.start", "a.end", "b.error"];
+      await Promise.all(names.map(name => telemetry.bufferMobileTelemetryEvent(event(name))));
+      const enqueue = jest.fn(async (_events: any[]) => undefined);
+      expect(await telemetry.flushMobileTelemetryEvents({ enqueue })).toBe(4);
+      expect(enqueue.mock.calls[0][0].map((e: any) => e.event_type)).toEqual(names);
+    } finally { restore(); }
+  });
+  test("an event submitted during flush survives for the next flush", async () => {
+    const { telemetry, restore } = setup();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let flushing: Promise<number> | undefined, late: Promise<void> | undefined;
+    try {
+      await telemetry.bufferMobileTelemetryEvent(event("first"));
+      flushing = telemetry.flushMobileTelemetryEvents({ enqueue: async () => { entered(); await gate; } });
+      await started;
+      late = telemetry.bufferMobileTelemetryEvent(event("late"));
+      release();
+      expect(await flushing).toBe(1);
+      await late;
+      const enqueue = jest.fn(async (_events: any[]) => undefined);
+      expect(await telemetry.flushMobileTelemetryEvents({ enqueue })).toBe(1);
+      expect(enqueue.mock.calls[0][0][0].event_type).toBe("late");
+    } finally { release(); await flushing?.catch(() => undefined); await late; restore(); }
+  });
+  test("rejected enqueue retains events and does not poison later operations", async () => {
+    const { telemetry, restore } = setup();
+    try {
+      await telemetry.bufferMobileTelemetryEvent(event("first"));
+      const failure = new Error("enqueue rejected");
+      await expect(telemetry.flushMobileTelemetryEvents({ enqueue: async () => { throw failure; } })).rejects.toBe(failure);
+      await telemetry.bufferMobileTelemetryEvent(event("second"));
+      const enqueue = jest.fn(async (_events: any[]) => undefined);
+      expect(await telemetry.flushMobileTelemetryEvents({ enqueue })).toBe(2);
+      expect(enqueue.mock.calls[0][0].map((e: any) => e.event_type)).toEqual(["first", "second"]);
+    } finally { restore(); }
+  });
+  test("simultaneous flushes enqueue the snapshot once", async () => {
+    const { telemetry, restore } = setup();
+    try {
+      await telemetry.bufferMobileTelemetryEvent(event("once"));
+      const enqueue = jest.fn(async (_events: any[]) => undefined);
+      expect(await Promise.all([
+        telemetry.flushMobileTelemetryEvents({ enqueue }),
+        telemetry.flushMobileTelemetryEvents({ enqueue }),
+      ])).toEqual([1, 0]);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+    } finally { restore(); }
+  });
+  test("concurrent overflow retains the newest fifty events in submission order", async () => {
+    const { telemetry, restore } = setup();
+    try {
+      const names = Array.from({ length: 60 }, (_, i) => "event-" + i);
+      await Promise.all(names.map(name => telemetry.bufferMobileTelemetryEvent(event(name))));
+      const enqueue = jest.fn(async (_events: any[]) => undefined);
+      expect(await telemetry.flushMobileTelemetryEvents({ enqueue })).toBe(50);
+      expect(enqueue.mock.calls[0][0].map((e: any) => e.event_type)).toEqual(names.slice(-50));
+    } finally { restore(); }
+  });
+});
+
 describe("mobile telemetry storage", () => {
   const originalNodeEnv = process.env.NODE_ENV;
   const originalWorkerId = process.env.JEST_WORKER_ID;

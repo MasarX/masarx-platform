@@ -194,6 +194,91 @@ describe('gh-helpers', () => {
       expect(comment?.body).toContain('new');
     });
 
+    test('findCommentByMarker author path ignores newer foreign and narrative marker comments', async () => {
+      const { findCommentByMarker } = require('../../../.github/scripts/gh-helpers');
+      const marker = '<!-- masarx-local-gate -->';
+      const github = {
+        paginate: jest.fn().mockResolvedValue([
+          {
+            id: 10,
+            updated_at: '2026-03-19T16:00:00Z',
+            body: `${marker}\nvalid`,
+            user: { login: 'Alice', type: 'User' },
+          },
+          {
+            id: 11,
+            updated_at: '2026-03-19T16:30:00Z',
+            body: `${marker}\nforeign`,
+            user: { login: 'mallory', type: 'User' },
+          },
+          {
+            id: 12,
+            updated_at: '2026-03-19T17:00:00Z',
+            body: `quoted ${marker} narrative`,
+            user: { login: 'alice', type: 'User' },
+          },
+          {
+            id: 13,
+            updated_at: '2026-03-19T17:30:00Z',
+            body: `${marker}\nbot`,
+            user: { login: 'alice', type: 'Bot' },
+          },
+        ]),
+        rest: { issues: { listComments: jest.fn() } },
+      };
+
+      const comment = await findCommentByMarker({
+        github,
+        owner: 'MasarX',
+        repo: 'MasarX',
+        issueNumber: 1773,
+        marker,
+        expectedAuthorLogin: 'alice',
+      });
+
+      expect(comment?.id).toBe(10);
+    });
+
+    test('findCommentByMarker accepts only the explicitly trusted bot login and author type', async () => {
+      const { findCommentByMarker } = require('../../../.github/scripts/gh-helpers');
+      const marker = '<!-- masarx-ready-pr-automerge -->';
+      const github = {
+        paginate: jest.fn().mockResolvedValue([
+          {
+            id: 20,
+            updated_at: '2026-03-19T16:00:00Z',
+            body: `${marker}\ntrusted bot state`,
+            user: { login: 'github-actions[bot]', type: 'Bot' },
+          },
+          {
+            id: 21,
+            updated_at: '2026-03-19T16:30:00Z',
+            body: `${marker}\nuntrusted bot state`,
+            user: { login: 'dependabot[bot]', type: 'Bot' },
+          },
+          {
+            id: 22,
+            updated_at: '2026-03-19T17:00:00Z',
+            body: `${marker}\nspoofed human state`,
+            user: { login: 'github-actions[bot]', type: 'User' },
+          },
+        ]),
+        rest: { issues: { listComments: jest.fn() } },
+      };
+
+      const comment = await findCommentByMarker({
+        github,
+        owner: 'MasarX',
+        repo: 'MasarX',
+        issueNumber: 1773,
+        marker,
+        expectedAuthorLogin: 'github-actions[bot]',
+        expectedAuthorType: 'Bot',
+      });
+
+      expect(comment?.id).toBe(20);
+    });
+
     test('upsertComment skips API writes when the marker comment body is unchanged', async () => {
       const { upsertComment } = require('../../../.github/scripts/gh-helpers');
       const body = '<!-- marker -->\nunchanged';
@@ -415,6 +500,40 @@ describe('gh-helpers', () => {
   });
 
   describe('merge queue helpers', () => {
+    test('enqueuePullRequest requires and transmits an exact head SHA', async () => {
+      const { enqueuePullRequest } = require('../../../.github/scripts/gh-helpers');
+      const github = {
+        graphql: jest.fn().mockResolvedValue({
+          enqueuePullRequest: {
+            mergeQueueEntry: { id: 'MQE_456', position: 1, state: 'QUEUED' },
+          },
+        }),
+      };
+      const expectedHeadOid = 'A'.repeat(40);
+
+      const out = await enqueuePullRequest({ github, pullRequestId: 'PR_ID', expectedHeadOid });
+
+      expect(out.ok).toBe(true);
+      const [query, vars] = github.graphql.mock.calls[0];
+      expect(String(query)).toContain('$expectedHeadOid: GitObjectID!');
+      expect(vars).toEqual({ prId: 'PR_ID', expectedHeadOid: 'a'.repeat(40) });
+    });
+
+    test.each(['', 'abc123', 'g'.repeat(40)])(
+      'enqueuePullRequest rejects missing or malformed expectedHeadOid %p before mutation',
+      async (expectedHeadOid) => {
+        const { enqueuePullRequest } = require('../../../.github/scripts/gh-helpers');
+        const github = { graphql: jest.fn() };
+
+        await expect(enqueuePullRequest({
+          github,
+          pullRequestId: 'PR_ID',
+          expectedHeadOid,
+        })).rejects.toThrow('expectedHeadOid must be an exact 40-hex commit SHA');
+        expect(github.graphql).not.toHaveBeenCalled();
+      },
+    );
+
     test('dequeuePullRequest removes a PR from the merge queue through GraphQL', async () => {
       const { dequeuePullRequest } = require('../../../.github/scripts/gh-helpers');
       const github = {

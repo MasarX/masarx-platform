@@ -29,11 +29,18 @@ import type {
   UiTableViews,
   MappingStudioResponse,
   UiTrackingRegistry,
+  UiAutomationMarketplaceListingResult,
+  UiAutomationMarketplaceInstallResult,
+  UiAutomationMarketplaceUpgradePreview,
+  UiIntegrationConnectionResult,
+  UiIntegrationConnectionBindingResult,
   UiTrace,
   UiWorkflowRunProgress,
   UiWorkflowRunOutputStatus,
   UiStartWorkflowRunResult,
   UiCreateShipmentResult,
+  UiCreateServiceLevelResult,
+  UiCreateServiceOfferingResult,
   UiCreateWarehouseTransferManifestResult,
   UiExecuteWarehouseTransferCheckpointResult,
   UiExecuteWarehouseTransferDispatchResult,
@@ -41,11 +48,15 @@ import type {
   UiCreateWorkflowTemplateStepResult,
   UiCreateWorkflowScheduleTriggerResult,
   UiCreateWorkflowRunTriggerResult,
+  UiUpdateWorkflowRunTriggerResult,
+  UiDeleteWorkflowRunTriggerResult,
   UiRunWorkflowScheduleTriggerResult,
   ResourceImportPrepareResponse,
   ResourceImportRun,
   ResourceImportStartResponse,
   ResourceImportCancelResponse,
+  OrganizationProfileResult,
+  OrganizationProfilePatch,
 } from "./index";
 import { getPublicConfig } from "@masarx/config";
 
@@ -53,6 +64,8 @@ export function createUiClientFromSupabase(
   client: SupabaseClient<any, any, any, any, any>
 ) {
   const rpc = createRpc(client);
+  const mutationRpc = <T,>(fn: string, args?: Record<string, unknown>) =>
+    rpc<T>(fn, args, { retries: 0, reportUnconfirmed: true });
   const marketplace = attachMarketplaceClient(rpc);
   const invokeEdgeJson = async <T = Record<string, unknown>>(params: {
     functionName: string;
@@ -89,11 +102,37 @@ export function createUiClientFromSupabase(
           }),
       }
     );
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok && (!data || typeof data !== "object")) {
-      throw new Error(`${params.functionName} ${params.action} failed with status ${response.status}`);
+    const data: unknown = await response.json().catch(() => null);
+    const record =
+      data && typeof data === "object" && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : null;
+    // Blocked mapping saves include a review/report that the studio displays.
+    // Transport failures and standard error envelopes must reject the request.
+    const blockedSave =
+      params.functionName === "integration-plugin-studio" &&
+      params.action === "save" &&
+      (response.status === 400 || response.status === 403) &&
+      record?.ok === false &&
+      record.review &&
+      typeof record.review === "object" &&
+      !Array.isArray(record.review) &&
+      "report" in record;
+    if (!response.ok && !blockedSave) {
+      const error = record?.error;
+      const message =
+        typeof error === "string"
+          ? error
+          : error && typeof error === "object" &&
+              typeof (error as { message?: unknown }).message === "string"
+            ? (error as { message: string }).message
+            : `${params.functionName} ${params.action} failed with status ${response.status}`;
+      throw new Error(message);
     }
-    return (data ?? {}) as T;
+    if (!record) {
+      throw new Error(`${params.functionName} ${params.action} returned an invalid JSON response.`);
+    }
+    return record as T;
   };
   const invokeMappingStudio = async (
     action: "parse" | "infer" | "preview" | "save",
@@ -155,6 +194,19 @@ export function createUiClientFromSupabase(
       infer: (payload: Record<string, unknown>) => invokeMappingStudio("infer", payload),
       preview: (payload: Record<string, unknown>) => invokeMappingStudio("preview", payload),
       save: (payload: Record<string, unknown>) => invokeMappingStudio("save", payload),
+      testRequest: (payload: Record<string, unknown>) => invokeEdgeJson<import("./index").StudioTestSubmission>({ functionName: "integration-plugin-studio", action: "test_request", payload }),
+      testStatus: (payload: Record<string, unknown>) => invokeEdgeJson<import("./index").StudioTestStatus>({ functionName: "integration-plugin-studio", action: "test_status", payload }),
+    },
+    organizationProfile: {
+      read: (organizationId: string) => invokeEdgeJson<OrganizationProfileResult>({
+        functionName: "organization-profile", action: "read", payload: { organization_id: organizationId },
+      }),
+      save: (payload: OrganizationProfilePatch) => invokeEdgeJson<OrganizationProfileResult>({
+        functionName: "organization-profile", action: "save", payload,
+      }),
+      signedUrl: (organizationId: string) => invokeEdgeJson<{ ok: true; signed_url: string }>({
+        functionName: "organization-profile", action: "signed_url", payload: { organization_id: organizationId },
+      }),
     },
     resourceImports: {
       prepare: (payload: Record<string, unknown> | FormData) =>
@@ -181,11 +233,12 @@ export function createUiClientFromSupabase(
             run_id: payload.runId,
           },
         }),
-      cancel: (payload: { runId: string }) =>
+      cancel: (payload: { runId: string; reason: string }) =>
         invokeResourceImport<ResourceImportCancelResponse>({
           action: "cancel",
           payload: {
             run_id: payload.runId,
+            reason: payload.reason.trim(),
           },
         }),
     },
@@ -314,6 +367,16 @@ export function createUiClientFromSupabase(
         p_payload: params.payload ?? {},
         p_require_active: params.requireActive ?? true,
       }),
+    setWorkflowTemplateStatus: (params: {
+      workflowTemplateId: string;
+      status: "draft" | "active" | "archived";
+      reason: string;
+    }) =>
+      rpc<UiResourceDetail>("ui_set_workflow_template_status_v1", {
+        p_workflow_template_id: params.workflowTemplateId,
+        p_status: params.status,
+        p_reason: params.reason,
+      }),
     createWorkflowTemplate: (params: {
       name: string;
       description?: string | null;
@@ -333,8 +396,14 @@ export function createUiClientFromSupabase(
       carrierReferenceNumber?: string | null;
       status?: string | null;
       metadata?: Record<string, unknown> | null;
-    }) =>
-      rpc<UiCreateShipmentResult>("ui_create_shipment_v1", {
+      serviceOfferingId?: string | null;
+      destinationAddress?: import("./index").UiShipmentDestinationAddress;
+    }) => {
+      if (params.destinationAddress !== undefined &&
+        Object.prototype.hasOwnProperty.call(params.metadata ?? {}, "destination_address")) {
+        throw new Error("Pass destinationAddress only once, outside metadata.");
+      }
+      return rpc<UiCreateShipmentResult>("ui_create_shipment_v1", {
         p_client_id: params.clientId ?? null,
         p_sender_id: params.senderId ?? null,
         p_service_type: params.serviceType ?? null,
@@ -342,7 +411,53 @@ export function createUiClientFromSupabase(
         p_client_reference_number: params.clientReferenceNumber ?? null,
         p_carrier_reference_number: params.carrierReferenceNumber ?? null,
         p_status: params.status ?? null,
-        p_metadata: params.metadata ?? {},
+        p_metadata: {
+          ...(params.metadata ?? {}),
+          ...(params.destinationAddress === undefined
+            ? {} : { destination_address: params.destinationAddress }),
+          ...(params.serviceOfferingId
+            ? { service_offering_id: params.serviceOfferingId }
+            : {}),
+        },
+      }, { retries: 0 });
+    },
+    createServiceLevel: (params: {
+      organizationId?: string | null;
+      key: string;
+      name: string;
+      description?: string | null;
+      metadata?: Record<string, unknown> | null;
+    }) =>
+      rpc<UiCreateServiceLevelResult>("service_level_create_v1", {
+        p_args: {
+          organization_id: params.organizationId ?? null,
+          key: params.key,
+          name: params.name,
+          description: params.description ?? null,
+          metadata: params.metadata ?? {},
+        },
+      }),
+    createServiceOffering: (params: {
+      organizationId?: string | null;
+      serviceLevelId: string;
+      branchId: string;
+      zoneId?: string | null;
+      priority?: number | null;
+      effectiveFrom?: string | null;
+      effectiveTo?: string | null;
+      metadata?: Record<string, unknown> | null;
+    }) =>
+      rpc<UiCreateServiceOfferingResult>("service_offering_create_v1", {
+        p_args: {
+          organization_id: params.organizationId ?? null,
+          service_level_id: params.serviceLevelId,
+          branch_id: params.branchId,
+          zone_id: params.zoneId ?? null,
+          priority: params.priority ?? 0,
+          effective_from: params.effectiveFrom ?? null,
+          effective_to: params.effectiveTo ?? null,
+          metadata: params.metadata ?? {},
+        },
       }),
     createWarehouseTransferManifest: (params: {
       organizationId?: string | null;
@@ -479,6 +594,7 @@ export function createUiClientFromSupabase(
       contextPatch?: Record<string, unknown> | null;
       enabled?: boolean | null;
       notes?: string | null;
+      scopeId?: string | null;
     }) =>
       rpc<UiCreateWorkflowRunTriggerResult>("ui_create_workflow_run_trigger_v1", {
         p_source_workflow_template_id: params.sourceWorkflowTemplateId,
@@ -487,12 +603,195 @@ export function createUiClientFromSupabase(
         p_context_patch: params.contextPatch ?? null,
         p_enabled: params.enabled ?? null,
         p_notes: params.notes ?? null,
+        ...(params.scopeId === undefined ? {} : { p_scope_id: params.scopeId }),
+      }),
+    updateWorkflowRunTrigger: (params: {
+      workflowRunTriggerId: string;
+      sourceWorkflowTemplateId?: string | null;
+      targetWorkflowTemplateId?: string | null;
+      sourceStatuses?: string[] | null;
+      contextPatch?: Record<string, unknown> | null;
+      enabled?: boolean | null;
+      notes?: string | null;
+      scopeId?: string | null;
+    }) =>
+      rpc<UiUpdateWorkflowRunTriggerResult>("ui_update_workflow_run_trigger_v1", {
+        p_workflow_run_trigger_id: params.workflowRunTriggerId,
+        p_source_workflow_template_id: params.sourceWorkflowTemplateId ?? null,
+        p_target_workflow_template_id: params.targetWorkflowTemplateId ?? null,
+        p_source_statuses: params.sourceStatuses ?? null,
+        p_context_patch: params.contextPatch ?? null,
+        p_enabled: params.enabled ?? null,
+        p_notes: params.notes ?? null,
+        p_scope_id: params.scopeId ?? null,
+      }),
+    deleteWorkflowRunTrigger: (workflowRunTriggerId: string, scopeId?: string | null) =>
+      rpc<UiDeleteWorkflowRunTriggerResult>("ui_delete_workflow_run_trigger_v1", {
+        p_workflow_run_trigger_id: workflowRunTriggerId,
+        p_scope_id: scopeId ?? null,
       }),
     runWorkflowScheduleTrigger: (workflowScheduleTriggerId: string) =>
       rpc<UiRunWorkflowScheduleTriggerResult>(
         "ui_run_workflow_schedule_trigger_v1",
         { p_workflow_schedule_trigger_id: workflowScheduleTriggerId }
       ),
+    createAutomationAssetListing: (params: {
+      listingId?: string | null;
+      assetKind: string;
+      sourceId: string;
+      title?: string | null;
+      summary?: string | null;
+      visibility?: string | null;
+      manifest?: Record<string, unknown> | null;
+      docs?: Record<string, unknown> | null;
+      metadata?: Record<string, unknown> | null;
+      notes?: string | null;
+    }) =>
+      mutationRpc<UiAutomationMarketplaceListingResult>("automation_asset_create_listing_v1", {
+        p_listing_id: params.listingId ?? null,
+        p_asset_kind: params.assetKind,
+        p_source_id: params.sourceId,
+        p_title: params.title ?? null,
+        p_summary: params.summary ?? null,
+        p_visibility: params.visibility ?? "private",
+        p_manifest: params.manifest ?? {},
+        p_docs: params.docs ?? {},
+        p_metadata: params.metadata ?? {},
+        p_notes: params.notes ?? null,
+      }),
+    publishAutomationAssetVersion: (params: {
+      listingVersionId: string;
+      visibility?: string | null;
+    }) =>
+      mutationRpc<UiAutomationMarketplaceListingResult>("automation_asset_publish_version_v1", {
+        p_listing_version_id: params.listingVersionId,
+        p_visibility: params.visibility ?? "private",
+      }),
+    submitAutomationAssetReview: (params: {
+      listingVersionId: string;
+      submissionNotes?: string | null;
+    }) =>
+      mutationRpc<UiAutomationMarketplaceListingResult>("automation_asset_submit_review_v1", {
+        p_listing_version_id: params.listingVersionId,
+        p_submission_notes: params.submissionNotes ?? null,
+      }),
+    decideAutomationAssetReview: (params: {
+      reviewId: string;
+      decision: string;
+      decisionNotes?: string | null;
+    }) =>
+      mutationRpc<UiAutomationMarketplaceListingResult>("automation_asset_review_decide_v1", {
+        p_review_id: params.reviewId,
+        p_decision: params.decision,
+        p_decision_notes: params.decisionNotes ?? null,
+      }),
+    installAutomationAsset: (params: {
+      listingVersionId: string;
+      targetScopeType: string;
+      targetScopeId: string;
+      variableValues?: Record<string, unknown> | null;
+      connectionBindings?: Record<string, unknown> | null;
+      activate?: boolean | null;
+    }) =>
+      mutationRpc<UiAutomationMarketplaceInstallResult>("automation_asset_install_v1", {
+        p_listing_version_id: params.listingVersionId,
+        p_target_scope_type: params.targetScopeType,
+        p_target_scope_id: params.targetScopeId,
+        p_variable_values: params.variableValues ?? {},
+        p_connection_bindings: params.connectionBindings ?? {},
+        p_activate: params.activate ?? false,
+      }),
+    previewAutomationAssetUpgrade: (params: {
+      installId: string;
+      targetListingVersionId?: string | null;
+    }) =>
+      rpc<UiAutomationMarketplaceUpgradePreview>("automation_asset_upgrade_preview_v1", {
+        p_install_id: params.installId,
+        p_target_listing_version_id: params.targetListingVersionId ?? null,
+      }),
+    applyAutomationAssetUpgrade: (params: {
+      installId: string;
+      targetListingVersionId?: string | null;
+    }) =>
+      mutationRpc<UiAutomationMarketplaceInstallResult>("automation_asset_upgrade_apply_v1", {
+        p_install_id: params.installId,
+        p_target_listing_version_id: params.targetListingVersionId ?? null,
+      }),
+    forkAutomationAssetInstall: (params: { installId: string; reason?: string | null }) =>
+      mutationRpc<UiAutomationMarketplaceInstallResult>("automation_asset_fork_v1", {
+        p_install_id: params.installId,
+        p_reason: params.reason ?? null,
+      }),
+    upsertIntegrationConnection: (params: {
+      connectionId?: string | null;
+      ownerScopeType?: string | null;
+      ownerScopeId?: string | null;
+      providerId?: string | null;
+      providerKey?: string | null;
+      name?: string | null;
+      authType?: string | null;
+      config?: Record<string, unknown> | null;
+      oauthMetadata?: Record<string, unknown> | null;
+      metadata?: Record<string, unknown> | null;
+      secretPayload?: Record<string, unknown> | null;
+      secretStorageMode?: string | null;
+      generateSecret?: boolean | null;
+      expiresAt?: string | null;
+    }) =>
+      mutationRpc<UiIntegrationConnectionResult>("integration_connection_upsert_v1", {
+        p_connection_id: params.connectionId ?? null,
+        p_owner_scope_type: normalizeUiScopeType(params.ownerScopeType),
+        p_owner_scope_id: params.ownerScopeId ?? null,
+        p_provider_id: params.providerId ?? null,
+        p_provider_key: params.providerKey ?? null,
+        p_name: params.name ?? null,
+        p_auth_type: params.authType ?? null,
+        p_config: params.config ?? null,
+        p_oauth_metadata: params.oauthMetadata ?? null,
+        p_metadata: params.metadata ?? null,
+        p_secret_payload: params.secretPayload ?? null,
+        p_secret_storage_mode: params.secretStorageMode ?? null,
+        p_generate_secret: params.generateSecret ?? false,
+        p_expires_at: params.expiresAt ?? null,
+      }),
+    testIntegrationConnection: (connectionId: string) =>
+      mutationRpc<UiIntegrationConnectionResult>("integration_connection_test_v1", {
+        p_connection_id: connectionId,
+      }),
+    rotateIntegrationConnection: (params: {
+      connectionId: string;
+      secretPayload?: Record<string, unknown> | null;
+      generateSecret?: boolean | null;
+      expiresAt?: string | null;
+    }) =>
+      mutationRpc<UiIntegrationConnectionResult>("integration_connection_rotate_v1", {
+        p_connection_id: params.connectionId,
+        p_secret_payload: params.secretPayload ?? null,
+        p_generate_secret: params.generateSecret ?? false,
+        p_expires_at: params.expiresAt ?? null,
+      }),
+    revokeIntegrationConnection: (params: {
+      connectionId: string;
+      notes?: string | null;
+    }) =>
+      mutationRpc<UiIntegrationConnectionResult>("integration_connection_revoke_v1", {
+        p_connection_id: params.connectionId,
+        p_notes: params.notes ?? null,
+      }),
+    bindIntegrationConnectionInstall: (params: {
+      installId: string;
+      bindingKey: string;
+      connectionId: string;
+      bindingType?: string | null;
+      config?: Record<string, unknown> | null;
+    }) =>
+      mutationRpc<UiIntegrationConnectionBindingResult>("integration_connection_bind_install_v1", {
+        p_install_id: params.installId,
+        p_binding_key: params.bindingKey,
+        p_connection_id: params.connectionId,
+        p_binding_type: params.bindingType ?? "connection",
+        p_config: params.config ?? {},
+      }),
     getResource: (resource: string, id: string) =>
       rpc<UiResourceDetail>("ui_get_resource_v1", { p_resource: resource, p_id: id }),
     getWorkflowRunOutputStatus: (

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>You have been invited</title></head>
+  <body>
+    <h1>You have been invited</h1>
+    <p>A tenant administrator invited you to MasarX. Confirm your invitation to sign in.</p>
+    {{ if and .RedirectTo (eq (printf "%v" .Data.tenant_user_invite_confirm_url) .RedirectTo) }}
+    <p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=invite">Confirm your MasarX invitation</a></p>
+    {{ else }}
+    <p><a href="{{ .ConfirmationURL }}">Confirm your MasarX invitation</a></p>
+    {{ end }}
+    <p>If you did not expect this invitation, you can ignore this message.</p>
+  </body>
+</html>

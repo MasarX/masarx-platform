@@ -51,8 +51,75 @@ test("navigation renders disabled reasons for unavailable items", () => {
   );
 
   expect(
-    screen.getByText("Requires shipments.read capability.")
+    screen.getByText("You do not have access to this page.")
   ).toBeInTheDocument();
+});
+
+test("navigation presents a known machine reason without changing access gating", () => {
+  render(
+    <Navigation sections={[{
+      id: "ops",
+      label: "Operations",
+      items: [{
+        id: "shipments",
+        label: "Shipments",
+        href: "/resources/shipments",
+        capability: "shipments.read",
+        disabled_reason: "missing_capability",
+      }],
+    }]} />
+  );
+  expect(screen.getByText("You do not have access to this page.")).toBeInTheDocument();
+  expect(screen.queryByText("missing_capability")).not.toBeInTheDocument();
+  expect(screen.getByTestId("navigation-item-shipments")).toHaveAttribute("aria-disabled", "true");
+  expect(screen.queryByRole("link", { name: "Shipments" })).not.toBeInTheDocument();
+});
+
+test.each([
+  ["missing_capability", "You do not have access to this page."],
+  ["explicit_deny", "You do not have access to this page."],
+  ["no_roles", "You do not have access to this page."],
+  ["no_policy", "You do not have access to this page."],
+  ["no_capabilities", "You do not have access to this page."],
+  ["future_denial_code", "This page is currently unavailable."],
+  ["future/denial", "This page is currently unavailable."],
+  ["no_route", "This page is currently unavailable."],
+  ["   ", "This page is currently unavailable."],
+  ["Awaiting enrollment approval.", "Awaiting enrollment approval."],
+])("navigation presents readable reasons for %j and keeps nested links disabled", (reason, copy) => {
+  const onNavigate = jest.fn();
+  const onToggleFavorite = jest.fn();
+  render(<Navigation sections={[{ id: "ops", label: "Operations", items: [{
+    id: "parent", label: "Parent", href: "/parent", items: [{
+      id: "denied", label: "Denied page", href: "/denied", disabled_reason: reason,
+    }],
+  }] }]} onNavigate={onNavigate} onToggleFavorite={onToggleFavorite} />);
+  const row = screen.getByTestId("navigation-item-denied");
+  expect(row).toHaveAttribute("aria-disabled", "true");
+  expect(row).toHaveAttribute("title", copy);
+  expect(row).toHaveTextContent(copy);
+  expect(row.querySelector("a, button, [tabindex]")).toBeNull();
+  fireEvent.click(row);
+  fireEvent.keyDown(row, { key: "Enter" });
+  expect(onNavigate).not.toHaveBeenCalled();
+  expect(onToggleFavorite).not.toHaveBeenCalled();
+});
+
+test("navigation localizes access reasons in Arabic", () => {
+  const previousLocale = process.env.NEXT_PUBLIC_LOCALE;
+  process.env.NEXT_PUBLIC_LOCALE = "ar";
+  try {
+    render(<Navigation sections={[{ id: "ops", label: "Operations", items: [{
+      id: "denied", label: "Denied page", href: "/denied", disabled_reason: "missing_capability",
+    }] }]} />);
+    expect(screen.getByTestId("navigation-item-denied")).toHaveAttribute(
+      "title", "ليست لديك صلاحية الوصول إلى هذه الصفحة."
+    );
+    expect(screen.queryByText("missing_capability")).toBeNull();
+  } finally {
+    if (previousLocale === undefined) delete process.env.NEXT_PUBLIC_LOCALE;
+    else process.env.NEXT_PUBLIC_LOCALE = previousLocale;
+  }
 });
 
 test("navigation collapses sections when configured", () => {

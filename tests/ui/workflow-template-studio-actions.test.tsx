@@ -28,6 +28,17 @@ jest.mock("../../packages/ui/src/i18n", () => ({
   createUiTranslator: () => (key: string) => {
     const table: Record<string, string> = {
       "actions.testRun": "Run test",
+      "actions.changeStatus": "Change status",
+      "actions.statusModal.title": "Change workflow status",
+      "actions.statusModal.description": "Record an audited lifecycle transition.",
+      "actions.statusModal.statusLabel": "Status",
+      "actions.statusModal.statuses.draft": "Draft",
+      "actions.statusModal.statuses.active": "Active",
+      "actions.statusModal.statuses.archived": "Archived",
+      "actions.statusModal.reasonLabel": "Reason",
+      "actions.statusModal.cancel": "Cancel",
+      "actions.statusModal.save": "Save",
+      "actions.statusModal.saving": "Saving...",
       "actions.testRunModal.title": "Run workflow",
       "actions.testRunModal.description": "Execute workflow run",
       "actions.testRunModal.templateNotActive": "Template is not active.",
@@ -43,6 +54,8 @@ jest.mock("../../packages/ui/src/i18n", () => ({
       "toast.testRun.errorTitle": "Run failed",
       "toast.testRun.errorMissingRun": "Missing workflow run id.",
       "toast.testRun.successTitle": "Run started",
+      "toast.status.successTitle": "Workflow status updated",
+      "toast.status.errorTitle": "Unable to update workflow status",
     };
     return table[key] ?? key;
   },
@@ -58,6 +71,14 @@ const mockedCreateUiClient = createUiClient as unknown as jest.Mock;
 const mockedNavigateTo = navigateTo as unknown as jest.Mock;
 
 describe("WorkflowTemplateStudioActions", () => {
+  it("offers the marketplace publication link only with capability and a safe app route", () => {
+    const { rerender } = renderWithIntl(<WorkflowTemplateStudioActions templateId="template/1" capabilities={["automation_marketplace.publish"]} appBasePath="/console" />);
+    expect(screen.getByRole("link", { name: "publish" })).toHaveAttribute("href", "/console/automation/marketplace/publish?asset_kind=workflow_template&source_id=template%2F1");
+    rerender(<WorkflowTemplateStudioActions templateId="template/1" capabilities={[]} appBasePath="/console" />);
+    expect(screen.queryByRole("link", { name: "publish" })).not.toBeInTheDocument();
+    rerender(<WorkflowTemplateStudioActions templateId="template/1" capabilities={["automation_marketplace.publish"]} appBasePath="//untrusted.example" />);
+    expect(screen.queryByRole("link", { name: "publish" })).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     jest.resetAllMocks();
   });
@@ -77,6 +98,30 @@ describe("WorkflowTemplateStudioActions", () => {
     );
 
     expect(screen.getByRole("button", { name: "Run test" })).toBeDisabled();
+  });
+
+  it("requires a reason and uses the dedicated status lifecycle method", async () => {
+    const setWorkflowTemplateStatus = jest.fn().mockResolvedValue({
+      status: "ok", changed: true, workflow_template_id: "template-1", next_status: "archived",
+    });
+    mockedCreateUiClient.mockReturnValue({ startWorkflowRun: jest.fn(), setWorkflowTemplateStatus });
+    renderWithIntl(
+      <WorkflowTemplateStudioActions templateId="template-1" templateStatus="draft"
+        capabilities={["workflow_runs.write"]} appBasePath="/console"
+        testIdPrefix="workflow-template-actions" />
+    );
+    fireEvent.click(screen.getByTestId("workflow-template-actions-status"));
+    fireEvent.change(screen.getByTestId("workflow-template-actions-status-select"), {
+      target: { value: "archived" },
+    });
+    expect(screen.getByTestId("workflow-template-actions-status-submit")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("workflow-template-actions-status-reason"), {
+      target: { value: "Retire obsolete workflow" },
+    });
+    fireEvent.click(screen.getByTestId("workflow-template-actions-status-submit"));
+    await waitFor(() => expect(setWorkflowTemplateStatus).toHaveBeenCalledWith({
+      workflowTemplateId: "template-1", status: "archived", reason: "Retire obsolete workflow",
+    }));
   });
 
   it("starts an active workflow run and navigates to run page", async () => {

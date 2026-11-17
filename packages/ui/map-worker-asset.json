@@ -1,0 +1,4 @@
+{
+  "filename": "maplibre-gl-worker.mjs",
+  "companions": ["maplibre-gl-shared.mjs"]
+}

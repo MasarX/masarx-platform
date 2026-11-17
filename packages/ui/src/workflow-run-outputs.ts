@@ -1,11 +1,15 @@
+import { resolveTrustedExternalDataUrl } from "./url-guard";
+
 export type WorkflowRunOutputLink = {
   label: string;
   fullLabel: string;
   url: string;
+  trustedUrl: string | null;
 };
 
-function isHttpUrl(value: string) {
-  return /^https?:\/\//i.test(value.trim());
+function isOutputUrlCandidate(value: string) {
+  const trimmed = value.trim();
+  return /^https?:\/\//i.test(trimmed) || /^\/(?!\/)/.test(trimmed);
 }
 
 function shortenPathLabel(path: string) {
@@ -20,22 +24,27 @@ function collectUrls(
   value: unknown,
   path: string,
   out: Map<string, WorkflowRunOutputLink>,
-  depth: number
+  depth: number,
+  allowedOrigins?: ReadonlySet<string>
 ) {
   if (depth > 6) return;
 
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (!trimmed || !isHttpUrl(trimmed)) return;
+    if (!trimmed || !isOutputUrlCandidate(trimmed)) return;
     if (out.has(trimmed)) return;
     const meta = shortenPathLabel(path);
-    out.set(trimmed, { ...meta, url: trimmed });
+    out.set(trimmed, {
+      ...meta,
+      url: trimmed,
+      trustedUrl: resolveTrustedExternalDataUrl(trimmed, allowedOrigins),
+    });
     return;
   }
 
   if (Array.isArray(value)) {
     value.slice(0, 25).forEach((entry, index) => {
-      collectUrls(entry, `${path}[${index}]`, out, depth + 1);
+      collectUrls(entry, `${path}[${index}]`, out, depth + 1, allowedOrigins);
     });
     return;
   }
@@ -44,15 +53,18 @@ function collectUrls(
 
   Object.entries(value as Record<string, unknown>).forEach(([key, entry]) => {
     const nextPath = path ? `${path}.${key}` : key;
-    collectUrls(entry, nextPath, out, depth + 1);
+    collectUrls(entry, nextPath, out, depth + 1, allowedOrigins);
   });
 }
 
-export function extractWorkflowRunOutputs(detail: Record<string, unknown> | null) {
+export function extractWorkflowRunOutputs(
+  detail: Record<string, unknown> | null,
+  allowedOrigins?: ReadonlySet<string>
+) {
   if (!detail) return [] as WorkflowRunOutputLink[];
   const out = new Map<string, WorkflowRunOutputLink>();
-  collectUrls(detail.context, "context", out, 0);
-  collectUrls(detail.metadata, "metadata", out, 0);
+  collectUrls(detail.context, "context", out, 0, allowedOrigins);
+  collectUrls(detail.metadata, "metadata", out, 0, allowedOrigins);
   return [...out.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
@@ -86,7 +98,8 @@ function getPathValue(source: unknown, pathValue: string) {
 
 export function extractWorkflowRunOutputUrlsByPaths(
   detail: Record<string, unknown> | null,
-  outputPaths: string[]
+  outputPaths: string[],
+  allowedOrigins?: ReadonlySet<string>
 ) {
   if (!detail || !Array.isArray(outputPaths) || outputPaths.length === 0) {
     return [] as string[];
@@ -98,8 +111,9 @@ export function extractWorkflowRunOutputUrlsByPaths(
     const value = getPathValue(detail, pathValue);
     if (typeof value !== "string") continue;
     const trimmed = value.trim();
-    if (!trimmed || !isHttpUrl(trimmed)) continue;
-    unique.add(trimmed);
+    const trustedUrl = resolveTrustedExternalDataUrl(trimmed, allowedOrigins);
+    if (!trustedUrl) continue;
+    unique.add(trustedUrl);
   }
   return [...unique];
 }

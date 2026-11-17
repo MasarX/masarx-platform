@@ -203,14 +203,16 @@ BEGIN
       FROM pg_proc p
       WHERE p.pronamespace = 'workflow_handlers'::regnamespace
         AND p.proname = 'record_shipment_action_v1'
-        AND p.oid::regprocedure::text = 'workflow_handlers.record_shipment_action_v1(uuid,text,text,jsonb,text,text,text,uuid,timestamp with time zone)'
+        AND oidvectortypes(p.proargtypes)
+              = 'uuid, text, text, jsonb, text, text, text, uuid, timestamp with time zone'
     )
     AND NOT EXISTS (
       SELECT 1
       FROM pg_proc p
       WHERE p.pronamespace = 'workflow_handlers'::regnamespace
         AND p.proname = 'record_shipment_action_v1'
-        AND p.oid::regprocedure::text = 'workflow_handlers.record_shipment_action_v1(uuid,text,text,jsonb,text,text,text,uuid)'
+        AND oidvectortypes(p.proargtypes)
+              = 'uuid, text, text, jsonb, text, text, text, uuid'
     ),
     'shipment action recording keeps a single canonical signature to avoid overload ambiguity'
   );

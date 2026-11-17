@@ -34,6 +34,7 @@ describe('Async ACK headers and decision provenance', () => {
     const organizationId = randomUUID();
     const mappingId = randomUUID();
     const sourceId = randomUUID();
+    const clientId = randomUUID();
     const token = `tok-${randomUUID()}`;
 
     await client.query(
@@ -61,6 +62,14 @@ describe('Async ACK headers and decision provenance', () => {
     );
 
     // Resolve the async ack mapping id dynamically by key
+    await client.query(`INSERT INTO clients(id,organization_id,name,slug,sla_tier,status)
+      VALUES($1::uuid,$2::uuid,'Async ACK fixture client',$3,'standard','active')`,
+      [clientId,organizationId,`async-ack-client-${clientId}`]);
+    await client.query(`WITH owned_sender AS (
+      INSERT INTO senders(client_id,name,status) VALUES($1::uuid,'ACK fixture sender','active') RETURNING id
+    ) UPDATE webhook_sources SET sender_id=(SELECT id FROM owned_sender) WHERE id=$2::uuid`, [clientId,sourceId]);
+    const { rows: templates } = await client.query("SELECT id FROM workflow_templates WHERE name='webhook_shipment_create_v1' AND status='active' ORDER BY version DESC,updated_at DESC LIMIT 1");
+    expect(templates).toHaveLength(1);
     const { rows: mapRows } = await client.query(
       `SELECT id FROM mapping_configs
         WHERE mapping_type = 'webhook_response'
@@ -73,6 +82,7 @@ describe('Async ACK headers and decision provenance', () => {
     // Upsert source-scoped policy: accepted_async with explicit response mapping
     await upsertWebhookPolicy('source', sourceId, {
       version: 2,
+      workflow: { template_id:templates[0].id, intent:'shipment.create' },
       ack: {
         mode: 'accepted_async',
         status_code: 202,

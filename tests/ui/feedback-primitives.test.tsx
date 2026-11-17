@@ -32,6 +32,7 @@ test("drawer renders content when open", () => {
   );
   expect(screen.getByText("Drawer title")).toBeInTheDocument();
   expect(screen.getByText("Drawer body")).toBeInTheDocument();
+  expect(screen.getByRole("dialog")).toHaveClass("overflow-y-auto");
 });
 
 test("dropdown renders menu items", () => {

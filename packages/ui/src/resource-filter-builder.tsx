@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { reportUiEvent } from "./reporting";
 import { createUiClient, type UiReadFilter } from "@masarx/api";
 import { Button } from "./button";
@@ -10,6 +10,7 @@ import { Combobox } from "./combobox";
 import { Input } from "./input";
 import { Select } from "./select";
 import { useComboboxSearch } from "./use-combobox-search";
+import { resolveRowDisplayText } from "./i18n";
 import {
   buildFilterTreeFromFlat,
   decodeFilterTree,
@@ -587,6 +588,7 @@ export function ResourceFilterBuilder({
     [onNavigate, router]
   );
   const params = useSearchParams();
+  const locale = useLocale();
   const t = useTranslations("ui.resourceFilter");
   const ui = React.useMemo(() => createUiClient(), []);
   const filterDefs = React.useMemo(
@@ -602,15 +604,16 @@ export function ResourceFilterBuilder({
   const filterOptions = React.useMemo(() => {
     const entries = new Map<string, { label: string; ops: string[] }>();
     filterDefs.forEach((filter) => {
-      const label =
+      const english =
         typeof filter.label === "string" && filter.label.trim()
           ? filter.label.trim()
           : labelFromKey(filter.key);
+      const label = resolveRowDisplayText(english, filter.label_ar, locale);
       const ops = resolveFilterOps(filter, fallbackOps);
       entries.set(filter.key, { label, ops });
     });
     return entries;
-  }, [filterDefs, fallbackOps]);
+  }, [filterDefs, fallbackOps, locale]);
   const rawFilterParam = params.get("filters") ?? undefined;
   const decodedTree = React.useMemo(
     () => decodeFilterTree(rawFilterParam),

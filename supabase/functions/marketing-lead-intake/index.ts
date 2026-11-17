@@ -1,4 +1,10 @@
+import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
 import { parseRequestBody, readEnv, toResponseBody } from "./_shared/mod.mjs";
+import { selectRpcAuthAttempts } from "./rpc-auth.mjs";
+import {
+  LOCAL_MARKETING_TURNSTILE_TEST_SECRET,
+  verifyMarketingTurnstile,
+} from "./_shared/turnstile-local-test.mjs";
 
 type JsonRecord = Record<string, unknown>;
 type LandingClientRow = {
@@ -36,71 +42,7 @@ const MARKETING_CORS_ALLOW_ORIGINS = readEnv("MARKETING_CORS_ALLOW_ORIGINS", [
 ]);
 
 const MARKETING_IP_HASH_SALT = readEnv("MARKETING_IP_HASH_SALT");
-const LOCAL_MARKETING_TURNSTILE_SECRET_KEY = "EXAMPLE_PASSWORD";
 const LOCAL_MARKETING_IP_HASH_SALT = "local-marketing-intake";
-const LOCAL_MARKETING_ORIGINS = new Set([
-  // objectives:allow LOCALHOST Justification: local browser QA for the marketing intake facade requires explicit loopback origins when no shared allowlist is configured.
-  "http://127.0.0.1:3333", "http://localhost:3333", "http://127.0.0.1:3000", "http://localhost:3000",
-]);
-
-const isLocalHostname = (value: string): boolean => {
-  const normalized = String(value || "").trim().toLowerCase();
-  // objectives:allow LOCALHOST Justification: local-runtime detection must explicitly recognize loopback hosts for fail-closed dev fallback behavior.
-  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "rvzwwjlztwwisjthghnipgjr.example.invalid";
-};
-
-const isLocalRequest = (req: Request): boolean => {
-  const hostHeader = String(req.headers.get("x-forwarded-host") || req.headers.get("host") || "")
-    .trim()
-    .split(":")[0]
-    .toLowerCase();
-  if (isLocalHostname(hostHeader)) return true;
-  try {
-    return isLocalHostname(new URL(req.url).hostname);
-  } catch {
-    return false;
-  }
-};
-
-const normalizeOrigin = (value: string): string => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-    return parsed.origin;
-  } catch {
-    return "";
-  }
-};
-
-const parseOriginAllowlist = (
-  raw: string,
-): { origins: Set<string>; invalid: string[] } => {
-  const invalid: string[] = [];
-  const origins = new Set<string>();
-  const parts = String(raw || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  for (const part of parts) {
-    const normalized = normalizeOrigin(part);
-    if (!normalized) invalid.push(part);
-    else origins.add(normalized);
-  }
-
-  return { origins, invalid };
-};
-
-const CORS_ALLOW_ORIGINS_RAW = String(MARKETING_CORS_ALLOW_ORIGINS || "").trim();
-const CORS_ALLOWLIST = parseOriginAllowlist(CORS_ALLOW_ORIGINS_RAW);
-const ALLOWED_ORIGINS = CORS_ALLOWLIST.origins;
-const CORS_ALLOWLIST_CONFIGURED =
-  CORS_ALLOW_ORIGINS_RAW.length > 0 &&
-  ALLOWED_ORIGINS.size > 0 &&
-  CORS_ALLOWLIST.invalid.length === 0;
-
 if (!SUPABASE_URL) console.error("[marketing-lead-intake] Missing SUPABASE_URL");
 if (!SUPABASE_ANON_KEY) console.error("[marketing-lead-intake] Missing SUPABASE_ANON_KEY");
 
@@ -193,8 +135,9 @@ const buildRpcAuthAttempts = (): RpcAttempt[] => {
 const invokeRpcWithAuthFallback = async (
   rpcName: string,
   payload: JsonRecord,
+  options: { serviceOnly?: boolean } = {},
 ): Promise<{ response: Response; body: unknown }> => {
-  const attempts = buildRpcAuthAttempts();
+  const attempts = selectRpcAuthAttempts(buildRpcAuthAttempts(), options.serviceOnly === true);
   if (!attempts.length) {
     throw new Error("missing_supabase_credentials");
   }
@@ -207,6 +150,8 @@ const invokeRpcWithAuthFallback = async (
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "accept-profile": "api",
+        "content-profile": "api",
         prefer: "tx=commit",
         ...attempt.headers,
       },
@@ -252,93 +197,12 @@ const mapRpcErrorToStatus = (code: string): number => {
   }
 };
 
-type CorsResult =
-  | { ok: true; origin: string; headers: HeadersInit; localContext: boolean }
-  | {
-    ok: false;
-    origin: string;
-    status: number;
-    body: JsonRecord;
-    headers: HeadersInit;
-    localContext: boolean;
-  };
-
-const buildCorsHeaders = (req: Request): CorsResult => {
-  const originRaw = req.headers.get("origin")?.trim() ?? "";
-  const origin = normalizeOrigin(originRaw);
-  const localContext =
-    isLocalRequest(req) ||
-    Boolean(origin && LOCAL_MARKETING_ORIGINS.has(origin));
-  const effectiveOrigins = CORS_ALLOWLIST_CONFIGURED
-    ? ALLOWED_ORIGINS
-    : (localContext ? LOCAL_MARKETING_ORIGINS : new Set<string>());
-  const effectiveConfigured = effectiveOrigins.size > 0;
-
-  const baseHeaders = {
-    "Access-Control-Allow-Headers": "accept, content-type, authorization, apikey, x-client-info",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Max-Age": "600",
-    Vary: "Origin",
-  };
-
-  if (!effectiveConfigured) {
-    return {
-      ok: false,
-      origin: "",
-      status: 500,
-      body: {
-        ok: false,
-        error: {
-          code: "server_misconfigured",
-          message: CORS_ALLOWLIST.invalid.length ? "cors_allowlist_invalid" : "cors_allowlist_missing",
-        },
-      },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  if (!origin) {
-    return {
-      ok: false,
-      origin: "",
-      status: 403,
-      body: { ok: false, error: { code: "origin_required" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  if (!effectiveOrigins.has(origin)) {
-    return {
-      ok: false,
-      origin,
-      status: 403,
-      body: { ok: false, error: { code: "origin_not_allowed" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  return {
-    ok: true,
-    origin,
-    headers: {
-      ...baseHeaders,
-      "Access-Control-Allow-Origin": origin,
-    },
-    localContext,
-  };
-};
+const buildCorsHeaders = (req: Request) => resolveBrowserCorsPolicy(req, {
+  hostedAllowedOrigins: MARKETING_CORS_ALLOW_ORIGINS,
+  localAllowedOrigins: readEnv("PUBLIC_EDGE_LOCAL_CORS_ALLOW_ORIGINS"),
+  localQaEnabled: readEnv("PUBLIC_EDGE_LOCAL_QA_ENABLED") === "1",
+  allowedMethods: "GET, POST, OPTIONS",
+});
 
 const decodeHex = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
@@ -366,33 +230,6 @@ const readClientIp = (req: Request): string => {
   }
 
   return "";
-};
-
-const verifyTurnstile = async (
-  token: string,
-  secret: string,
-  clientIp?: string,
-): Promise<{ success: boolean; hostname: string; errorCodes: unknown }> => {
-  if (!secret) {
-    return { success: false, hostname: "", errorCodes: ["missing_turnstile_secret"] };
-  }
-
-  const body = new URLSearchParams();
-  body.set("secret", secret);
-  body.set("response", token);
-  if (clientIp) body.set("remoteip", clientIp);
-
-  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-
-  const data = await response.json().catch(() => null);
-  const success = Boolean(data && typeof data === "object" && (data as any).success === true);
-  const hostname = data && typeof data === "object" ? String((data as any).hostname || "").trim() : "";
-  const errorCodes = data && typeof data === "object" ? (data as any)["error-codes"] ?? null : null;
-  return { success, hostname, errorCodes };
 };
 
 const asOptionalUrl = (value: unknown): string | null => {
@@ -423,6 +260,8 @@ const mapLandingClients = (rows: unknown): Array<{ name: string; logo_url: strin
 
 type IntakePayload = {
   email?: unknown;
+  full_name?: unknown;
+  website_url?: unknown;
   company?: unknown;
   organization_name?: unknown;
   organizationName?: unknown;
@@ -536,14 +375,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let turnstileHostname = "";
   let turnstileErrorCodes: unknown = null;
   const effectiveTurnstileSecret =
-    TURNSTILE_SECRET_KEY || (cors.localContext ? LOCAL_MARKETING_TURNSTILE_SECRET_KEY : "");
+    TURNSTILE_SECRET_KEY || (cors.localContext ? LOCAL_MARKETING_TURNSTILE_TEST_SECRET : "");
 
   if (turnstileToken) {
     if (!effectiveTurnstileSecret) {
       return json(500, { ok: false, error: { code: "turnstile_secret_missing" } }, cors.headers);
     }
     try {
-      const res = await verifyTurnstile(turnstileToken, effectiveTurnstileSecret, clientIp);
+      const res = await verifyMarketingTurnstile({
+        token: turnstileToken,
+        secret: effectiveTurnstileSecret,
+        localContext: cors.localContext,
+        requestHostname: requestUrl.hostname,
+        clientIp,
+      });
       turnstileVerified = res.success;
       turnstileHostname = res.hostname;
       turnstileErrorCodes = res.errorCodes;
@@ -583,10 +428,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       p_page_url: pageUrl || null,
       p_referrer: referrer || null,
       p_origin: origin || null,
-      p_marketing: marketing,
+      p_marketing: {
+        ...marketing,
+        ...(asString(payload?.full_name) ? { full_name: asString(payload.full_name) } : {}),
+        ...(asString(payload?.website_url) ? { website_url: asString(payload.website_url) } : {}),
+      },
       p_ip_hash: ipHash || null,
       p_turnstile_verified: turnstileVerified,
-    });
+    }, { serviceOnly: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);

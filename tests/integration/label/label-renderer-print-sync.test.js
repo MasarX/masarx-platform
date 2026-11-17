@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const { PDFDocument } = require('pdf-lib');
 const { loadEnv } = require('../../../scripts/utils/load-env');
 const { removeStoragePaths } = require('../../../scripts/utils/supabase-storage');
+const { upsertSettings } = require('../../utils/policies');
 const { verifySignedUrl } = require('../workflows/helpers/label-print-helpers');
 const { ensureStorageBucket, resolveStorageAdminKey } = require('../helpers/storage-admin');
 const { fetchJsonWithRetry, truncateText } = require('../helpers/http');
@@ -86,6 +87,14 @@ if (
            VALUES ($1::uuid, $2::uuid, 'Print Sync Client', $3, 'standard', 'active')`,
           [clientId, orgId, `print-sync-client-${clientId.slice(0, 8)}`],
         );
+        await upsertSettings(
+          'label_print_policy',
+          'tenant',
+          orgId,
+          { print_sync_bundle_return_mode: 'signed_url' },
+          'test: print sync signed URL return',
+          client,
+        );
         await client.query(
           `INSERT INTO addresses (
              id, organization_id, client_id, raw_input, city, province, country, validation_status
@@ -154,6 +163,7 @@ if (
             body: JSON.stringify({
               mode: 'print',
               organization_id: orgId,
+              job_purpose: 'manual',
               shipments: [{ shipment_id: shipmentId, box_ids: boxIds }],
               output_name: 'print_sync_waybill185_100.pdf',
               expires_seconds: 600,
@@ -169,6 +179,8 @@ if (
 
         expect(payload.status).toBe('ok');
         expect(payload.mode).toBe('print_sync');
+        expect(payload.job_purpose).toBe('manual');
+        expect(payload.steps.find((step) => step.step === 'enqueue_label_jobs').job_purpose).toBe('manual');
         expect(payload.bundle?.status).toBe('ok');
         expect(payload.bundle?.signed_url).toBeTruthy();
 
@@ -200,7 +212,7 @@ if (
         });
 
         const { rows: jobRows } = await client.query(
-          `SELECT status, renderer_metadata
+          `SELECT status, job_purpose, renderer_metadata
              FROM label_jobs
             WHERE shipment_id = $1::uuid
             ORDER BY created_at`,
@@ -209,6 +221,7 @@ if (
         expect(jobRows.length).toBe(100);
         jobRows.forEach((row) => {
           expect(row.status).toBe('succeeded');
+          expect(row.job_purpose).toBe('manual');
         });
         const meta = jobRows[0]?.renderer_metadata || {};
         expect(meta.barcode_mode || meta.barcodeMode).toBe('code128b_vector');
@@ -242,6 +255,14 @@ if (
           await client.query(`DELETE FROM shipment_boxes WHERE shipment_id = $1::uuid`, [shipmentId]);
           await client.query(`DELETE FROM shipments WHERE id = $1::uuid`, [shipmentId]);
           // Address versions are append-only; avoid deleting addresses and parent rows.
+          await client.query(
+            `DELETE FROM settings WHERE category = 'label_print_policy' AND scope_type = 'tenant' AND scope_id = $1::uuid`,
+            [orgId],
+          );
+          await client.query(
+            `DELETE FROM settings_versions WHERE category = 'label_print_policy' AND scope_type = 'tenant' AND scope_id = $1::uuid`,
+            [orgId],
+          );
           await deleteDecisionLogs(orgId);
           await deleteSettingsResolutionLogs(orgId);
           // Keep org/client rows to avoid cascades into address_versions.

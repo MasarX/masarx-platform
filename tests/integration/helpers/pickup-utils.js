@@ -62,6 +62,8 @@ async function assignPickupWave(client, seed, routeRunId, overrides = {}) {
     driver_user_id: overrides.driver_user_id || null,
     vehicle_id: overrides.vehicle_id || null,
     partner: overrides.partner || null,
+    reassignment_reason: overrides.reassignment_reason || null,
+    notes: overrides.notes || null,
     metadata: overrides.metadata || { source: 'integration-test' },
     idempotency_key: overrides.idempotency_key || `pickup-assign-${randomUUID()}`,
   };

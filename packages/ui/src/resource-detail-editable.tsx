@@ -119,7 +119,7 @@ export function ResourceDetailEditable({
           >
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-medium text-ui-muted">
               <span>{section.label}</span>
-              <span className="text-[10px] text-ui-muted/70">
+              <span className="text-[10px] text-ui-muted">
                 {section.entries.length}
               </span>
             </summary>

@@ -46,6 +46,23 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { ToastHost } from "../../packages/ui/src/use-toast";
 import { ResourceDetail } from "../../packages/ui/src/resource-detail";
 
+const originalTrustedExternalDataOrigins =
+  process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS;
+
+beforeEach(() => {
+  process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS =
+    "https://cdn.example.com";
+});
+
+afterEach(() => {
+  if (originalTrustedExternalDataOrigins === undefined) {
+    delete process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS;
+  } else {
+    process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS =
+      originalTrustedExternalDataOrigins;
+  }
+});
+
 function renderDetail(ui: React.ReactElement) {
   return render(<ToastHost>{ui}</ToastHost>);
 }
@@ -217,6 +234,7 @@ test("resource detail renders proof-of-delivery media links and image preview", 
           { signed_url: "https://cdn.example.com/photo-1.jpg" },
           { signed_url: "https://cdn.example.com/photo-2.jpg" },
         ],
+        untrusted_image_url: "https://cdn.example.com.evil.test/tracker.png",
       }}
       columns={[
         {
@@ -230,6 +248,12 @@ test("resource detail renders proof-of-delivery media links and image preview", 
           label: "Evidence",
           detailSection: "Proof of delivery",
           renderType: "media",
+        },
+        {
+          key: "untrusted_image_url",
+          label: "Untrusted image",
+          detailSection: "Proof of delivery",
+          renderType: "image",
         },
       ]}
     />
@@ -249,6 +273,19 @@ test("resource detail renders proof-of-delivery media links and image preview", 
   expect(
     screen.getByRole("img", { name: "Signature preview 1" })
   ).toBeInTheDocument();
+  expect(
+    screen.getByText("https://cdn.example.com.evil.test/tracker.png")
+  ).toBeInTheDocument();
+  expect(mediaLinks).not.toContain(
+    "https://cdn.example.com.evil.test/tracker.png"
+  );
+  expect(
+    Array.from(document.querySelectorAll("img")).some(
+      (image) =>
+        image.getAttribute("src") ===
+        "https://cdn.example.com.evil.test/tracker.png"
+    )
+  ).toBe(false);
 });
 
 test("resource detail renders delivery handover visibility fields", () => {

@@ -25,23 +25,23 @@
   },
   "observability": {
     "trace": {
-      "title": "Trace timeline",
-      "description": "Unified observability view for domain events and workflow runs.",
-      "unavailable": "Trace data unavailable.",
-      "correlationLabel": "Correlation id: {id}",
+      "title": "الخط الزمني للنشاط",
+      "description": "عرض موحّد للأحداث التشغيلية وعمليات تشغيل سير العمل.",
+      "unavailable": "سجل النشاط غير متاح.",
+      "correlationLabel": "مفتاح التتبع: {id}",
       "errors": {
-        "load": "Unable to load trace data."
+        "load": "تعذّر تحميل سجل النشاط."
       },
       "sections": {
-        "summary": "Trace summary",
-        "observability": "Observability events",
+        "summary": "ملخص النشاط",
+        "observability": "أحداث النشاط",
         "domain": "Domain events",
         "workflowRuns": "Workflow runs"
       },
       "empty": {
-        "observability": "No observability events recorded for this trace.",
-        "domain": "No domain events recorded for this trace.",
-        "workflowRuns": "No workflow runs recorded for this trace."
+        "observability": "لا توجد أحداث نشاط مسجلة لهذا المرجع.",
+        "domain": "لا توجد أحداث نطاق مسجلة لهذا المرجع.",
+        "workflowRuns": "لا توجد عمليات تشغيل سير عمل مسجلة لهذا المرجع."
       }
     },
     "workflowRun": {
@@ -50,8 +50,8 @@
       "description": "Execution detail and step timeline for a single workflow run.",
       "unavailable": "Workflow run detail unavailable.",
       "notFound": "Workflow run not found.",
-      "viewTrace": "View trace timeline",
-      "noCorrelation": "No correlation id found for this workflow run.",
+      "viewTrace": "عرض الخط الزمني للنشاط",
+      "noCorrelation": "لا يوجد مفتاح تتبع لعملية تشغيل سير العمل هذه.",
       "openTemplate": "Open workflow template",
       "summary": {
         "duration": "المدة",
@@ -74,17 +74,17 @@
           "unknown": "غير معروف"
         },
         "fields": {
-          "runId": "معرّف التشغيل",
-          "correlationId": "معرّف الارتباط",
+          "runId": "مرجع النشاط",
+          "correlationId": "مفتاح التتبع",
           "requestedBy": "تم الطلب بواسطة",
-          "requestContextId": "معرّف سياق الطلب",
-          "scheduleTriggerId": "معرّف مشغّل الجدولة",
-          "runTriggerId": "معرّف مشغّل تشغيل سير العمل",
-          "triggerFireId": "معرّف تنفيذ المشغّل",
-          "sourceRunId": "معرّف التشغيل المصدر",
-          "sourceStatus": "حالة المصدر",
-          "sourceCompletedAt": "وقت اكتمال المصدر",
-          "idempotencyKey": "مفتاح عدم التكرار",
+          "requestContextId": "سياق الطلب",
+          "scheduleTriggerId": "مرجع الجدولة",
+          "runTriggerId": "قاعدة تشغيل مرتبطة",
+          "triggerFireId": "حدث الجدولة",
+          "sourceRunId": "النشاط السابق",
+          "sourceStatus": "حالة النشاط السابق",
+          "sourceCompletedAt": "وقت اكتمال النشاط السابق",
+          "idempotencyKey": "مفتاح منع التكرار",
           "scope": "النطاق"
         },
         "actions": {
@@ -92,7 +92,7 @@
           "openSchedule": "فتح الجدولة",
           "openTrigger": "فتح المشغّل",
           "openFire": "فتح التنفيذ",
-          "showRaw": "عرض السياق الخام",
+          "showRaw": "عرض تفاصيل الطلب",
           "copy": "نسخ",
           "copySuccessTitle": "تم النسخ إلى الحافظة.",
           "copyFailedTitle": "فشل النسخ."

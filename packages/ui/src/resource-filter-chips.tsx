@@ -8,7 +8,7 @@ import {
   resolveFilterKeys,
   type SearchParams,
 } from "./resource-query";
-import { createUiTranslator } from "./i18n";
+import { createUiTranslator, resolveRowDisplayText } from "./i18n";
 import { buildHref } from "./url";
 
 const t = createUiTranslator("ui.resourceFilter");
@@ -28,6 +28,7 @@ type ResourceFilterChipsProps = {
   testIdPrefix?: string;
   canRemove?: boolean;
   opLabels?: Record<string, string>;
+  locale?: string;
 };
 
 function buildFilterHref(
@@ -49,11 +50,9 @@ function buildFilterHref(
   return buildHref(actionHref, params);
 }
 
-function resolveFilterLabel(filter: UiReadFilter | null | undefined, key: string) {
-  if (filter?.label && String(filter.label).trim()) {
-    return String(filter.label).trim();
-  }
-  return labelFromKey(filter?.key ?? key);
+function resolveFilterLabel(filter: UiReadFilter | null | undefined, key: string, locale?: string) {
+  const english = filter?.label?.trim() || labelFromKey(filter?.key ?? key);
+  return resolveRowDisplayText(english, filter?.label_ar, locale);
 }
 
 function resolveFilterOp(definition: UiReadFilter | null | undefined, op?: string | null) {
@@ -81,14 +80,15 @@ export function ResourceFilterChips({
   testIdPrefix,
   canRemove = true,
   opLabels,
+  locale,
 }: ResourceFilterChipsProps) {
   if (!appliedFilters || appliedFilters.length === 0) return null;
 
   const filterKeys = resolveFilterKeys(filters);
   const filterMap = new Map((filters ?? []).map((filter) => [filter.key, filter]));
   const ordered = [...appliedFilters].sort((a, b) => {
-    const labelA = resolveFilterLabel(filterMap.get(a.key), a.key);
-    const labelB = resolveFilterLabel(filterMap.get(b.key), b.key);
+    const labelA = resolveFilterLabel(filterMap.get(a.key), a.key, locale);
+    const labelB = resolveFilterLabel(filterMap.get(b.key), b.key, locale);
     return labelA.localeCompare(labelB);
   });
   const hasQueryFilters = ordered.some((filter) => filter.source === "query");
@@ -119,7 +119,7 @@ export function ResourceFilterChips({
       <div className="flex flex-wrap gap-2">
         {ordered.map((filter) => {
           const definition = filterMap.get(filter.key);
-          const label = resolveFilterLabel(definition, filter.key);
+          const label = resolveFilterLabel(definition, filter.key, locale);
           const opLabel =
             formatFilterOp(resolveFilterOp(definition, filter.op), opLabels) ??
             t("chips.equals");

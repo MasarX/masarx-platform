@@ -43,6 +43,60 @@ function applyPinnedDbSelectionPreference(candidates, env = process.env) {
   return [list[preferredIndex], ...list.slice(0, preferredIndex), ...list.slice(preferredIndex + 1)];
 }
 
+function parseDbConnectionTarget(connectionString) {
+  const raw = String(connectionString || '').trim();
+  if (!raw) {
+    return { connectionString: '', host: '', port: '', username: '', kind: '' };
+  }
+  try {
+    const parsed = new URL(raw);
+    const host = String(parsed.hostname || '').trim().toLowerCase();
+    return {
+      connectionString: raw,
+      host,
+      port: String(parsed.port || '').trim() || '5432',
+      username: decodeURIComponent(String(parsed.username || '').trim()),
+      kind: isSupabasePoolerHost(host)
+        ? 'pooler'
+        : /^db\.[a-z0-9-]+\.supabase\.co$/i.test(host)
+          ? 'direct'
+          : '',
+    };
+  } catch {
+    return { connectionString: raw, host: '', port: '', username: '', kind: '' };
+  }
+}
+
+function resolveSelectedPoolerRoute({
+  connectionString,
+  candidateName,
+  fallbackHost,
+  fallbackPort = '5432',
+  fallbackUser,
+} = {}) {
+  const target = parseDbConnectionTarget(connectionString);
+  const selectedName = String(candidateName || '').trim();
+  const normalizedFallbackHost = String(fallbackHost || '').trim().toLowerCase();
+  const selectedTargetIsPooler = target.kind === 'pooler';
+  let host = selectedTargetIsPooler ? target.host : '';
+  const shardMatch = selectedName.match(/(?:^|\+)poolerhost:aws-(\d+)(?:\+|$)/i);
+  const fallbackMatch = normalizedFallbackHost.match(
+    /^aws-\d+-([a-z0-9-]+)\.pooler\.supabase\.com$/i,
+  );
+  if (shardMatch && fallbackMatch) {
+    host = `aws-${shardMatch[1]}-${fallbackMatch[1]}.pooler.supabase.com`;
+  }
+  if (!host && /pooler/i.test(selectedName)) {
+    host = normalizedFallbackHost;
+  }
+  return {
+    candidateName: selectedName,
+    host,
+    port: String((selectedTargetIsPooler ? target.port : '') || fallbackPort || '5432').trim() || '5432',
+    user: String((selectedTargetIsPooler ? target.username : '') || fallbackUser || '').trim(),
+  };
+}
+
 function buildSupabasePoolerHostVariants(dsn) {
   const raw = String(dsn || '').trim();
   if (!raw) return [];
@@ -73,6 +127,9 @@ function buildSupabasePoolerHostVariants(dsn) {
     const variantHost = `aws-${idx}-${region}.pooler.supabase.com`;
     const next = new URL(raw);
     next.hostname = variantHost;
+    // A hostaddr belongs to the hostname that was resolved. Never carry an IP
+    // pin across a shard-host rewrite.
+    next.searchParams.delete('hostaddr');
     variants.push({
       nameSuffix: `poolerhost:aws-${idx}`,
       dsn: next.toString(),
@@ -205,6 +262,17 @@ async function buildDbConnectionCandidates(rawCandidates, options = {}) {
     // primary path and shard/port probing is best-effort only.
     for (const variant of poolerVariants) {
       addCandidate(`${baseName}+${variant.nameSuffix}`, variant.dsn);
+      try {
+        const variantHostaddrDsn = (await ensureHostaddrFn(variant.dsn)) || variant.dsn;
+        if (variantHostaddrDsn !== variant.dsn) {
+          addCandidate(
+            `${baseName}+${variant.nameSuffix}+hostaddr`,
+            variantHostaddrDsn,
+          );
+        }
+      } catch {
+        // The hostname-only shard candidate remains valid when IPv4 lookup is unavailable.
+      }
       const variantPorts = buildSupabasePoolerPortVariants(variant.dsn);
       for (const variantPort of variantPorts) {
         addCandidate(
@@ -238,6 +306,8 @@ module.exports = {
   applyPinnedDbSelectionPreference,
   buildDbConnectionCandidates,
   buildPinnedDbSelectionCandidate,
+  parseDbConnectionTarget,
+  resolveSelectedPoolerRoute,
   resolvePinnedDbSelectionName,
   buildSupabasePoolerHostVariants,
   buildSupabasePoolerPortVariants,

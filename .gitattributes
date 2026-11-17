@@ -1,3 +1,8 @@
 # Ensure deterministic line endings across platforms (prevents CI churn).
 *.sh text eol=lf
 supabase/migrations/**/*.sql text eol=lf
+# These files are SHA-256 inputs or outputs of the vendored ExcelJS artifact.
+package-lock.json text eol=lf
+scripts/edge/prepare-resource-import-exceljs.js text eol=lf
+scripts/edge/vendor-notices/saxes-5.0.1-LICENSE text eol=lf
+supabase/functions/resource-import-studio/_vendor/** text eol=lf

@@ -1,17 +1,23 @@
 import { defineConfig } from "@playwright/test";
 import { isTruthy, loadE2EEnv } from "./tests/e2e/utils/env";
 import { resolveVercelBypassHeaders } from "./tests/e2e/utils/vercel-bypass";
+import { mergeAllowedDevOrigins } from "./apps/shared/next-dev-origins";
+import securityHeaders from "./apps/shared/security-headers.js";
+
+const { isLoopbackHostname } = securityHeaders;
 
 loadE2EEnv();
 
 const isCi = Boolean(process.env.CI);
+const strictE2e = isCi || isTruthy(process.env.STRICT_E2E_GATE_ENV);
 const requireBaseUrls =
-  isTruthy(process.env.E2E_REQUIRE_BASE_URLS) || isCi;
+  isTruthy(process.env.E2E_REQUIRE_BASE_URLS) || strictE2e;
 const shouldForceClean = /^(1|true|yes)$/i.test(
   String(process.env.E2E_FORCE_CLEAN ?? "").trim()
 );
 const localWorkersRaw = Number.parseInt(process.env.E2E_WORKERS ?? "", 10);
-const localWorkers = Number.isFinite(localWorkersRaw) && localWorkersRaw > 0 ? localWorkersRaw : 4;
+const localWorkers =
+  Number.isFinite(localWorkersRaw) && localWorkersRaw > 0 ? localWorkersRaw : isCi ? 1 : 4;
 const webServerTimeoutRaw = Number.parseInt(
   process.env.E2E_WEB_SERVER_TIMEOUT_MS ?? "",
   10
@@ -128,16 +134,36 @@ if (
 const consoleBase = (consoleResolved ?? { origin: DEFAULT_ORIGINS.console }).origin; // objectives:allow LOCALHOST Justification: Playwright uses localhost baseURL for local E2E runs.
 const portalBase = (portalResolved ?? { origin: DEFAULT_ORIGINS.portal }).origin; // objectives:allow LOCALHOST Justification: Playwright uses localhost baseURL for local E2E runs.
 
-function isLocalhostOrigin(origin: string) {
+function isGovernedLoopbackOrigin(origin: string) {
+  try {
+    return isLoopbackHostname(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isOrdinaryLocalServerOrigin(origin: string) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 }
 
+const selectedLocalSurfaces = [
+  ...(isProjectSelected("console", "a11y", "shared") && isGovernedLoopbackOrigin(consoleBase) ? ["console"] : []),
+  ...(isProjectSelected("portal") && isGovernedLoopbackOrigin(portalBase) ? ["portal"] : []),
+];
 const shouldStartLocalServers =
-  !requireBaseUrls && [consoleBase, portalBase].every(isLocalhostOrigin);
+  !requireBaseUrls;
+const localAllowedDevOrigins = mergeAllowedDevOrigins(
+  process.env.NEXT_ALLOWED_DEV_ORIGINS,
+  [consoleBase, portalBase],
+).join(",");
+const localWebServerEnv = {
+  ...process.env,
+  NEXT_ALLOWED_DEV_ORIGINS: localAllowedDevOrigins,
+};
 
 const localWebServers = shouldStartLocalServers
   ? [
-      ...(isProjectSelected("console", "a11y", "shared")
+      ...(isProjectSelected("console", "a11y", "shared") && isOrdinaryLocalServerOrigin(consoleBase)
         ? [
             {
               command: shouldForceClean
@@ -146,10 +172,11 @@ const localWebServers = shouldStartLocalServers
               url: `${consoleResolved.origin}${consoleResolved.path}`,
               reuseExistingServer: !shouldForceClean,
               timeout: webServerTimeoutMs,
+              env: localWebServerEnv,
             },
           ]
         : []),
-      ...(isProjectSelected("portal")
+      ...(isProjectSelected("portal") && isOrdinaryLocalServerOrigin(portalBase)
         ? [
             {
               command: shouldForceClean
@@ -158,6 +185,7 @@ const localWebServers = shouldStartLocalServers
               url: `${portalResolved.origin}${portalResolved.path}`,
               reuseExistingServer: !shouldForceClean,
               timeout: webServerTimeoutMs,
+              env: localWebServerEnv,
             },
           ]
         : []),
@@ -166,21 +194,22 @@ const localWebServers = shouldStartLocalServers
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  forbidOnly: strictE2e,
   timeout: testTimeoutMs,
   expect: {
     timeout: expectTimeoutMs
   },
-  workers: isCi ? undefined : localWorkers,
-  retries: isCi ? 2 : 0,
+  workers: localWorkers,
+  retries: 0,
   reporter: isCi
     ? [
         ["list"],
-        ["html", { outputFolder: "playwright-report", open: "never" }],
+        ["html", { outputFolder: process.env.PLAYWRIGHT_HTML_OUTPUT_DIR || "playwright-report", open: "never" }],
       ]
     : [["list"]],
-  outputDir: "test-results",
+  outputDir: process.env.PLAYWRIGHT_TEST_OUTPUT_DIR?.trim() || "test-results",
   use: {
-    trace: isCi ? "on-first-retry" : "retain-on-failure",
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
     ...(vercelBypassHeaders

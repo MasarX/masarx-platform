@@ -55,9 +55,12 @@ function isAuthSignatureModeError(value) {
 }
 
 function logAuthSignatureModeSkip(scope, value) {
-  const context = formatAuthSignatureContext(value);
-  // eslint-disable-next-line no-console
-  console.warn(`[${scope}] skipped due to auth signature mode`, context || 'auth signature verification mismatch');
+  // Retain the shared call seam, but never report an unexecuted assertion as passed.
+  // Do not include response/error context: it can contain credentials or provider data.
+  const error = new Error(`[${scope}] prerequisite_blocked: auth_signature_mismatch`);
+  error.code = 'INTEGRATION_PREREQUISITE_BLOCKED';
+  error.prerequisite = 'auth_signature_mismatch';
+  throw error;
 }
 
 module.exports = {

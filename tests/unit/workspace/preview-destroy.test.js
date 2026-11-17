@@ -1,4 +1,5 @@
 const {
+  assertExactBranchIdentity,
   parseArgs,
   parseEnabled,
   resolveProjectDeleteTargets,
@@ -66,5 +67,108 @@ describe('workspace/preview-destroy helpers', () => {
     expect(result.matches).toEqual([
       { name: 'wk-masarx-pr-1807', ref: 'ref-base', createdAt: '2026-03-08T01:00:00Z' },
     ]);
+  });
+
+  test('exact branch deletion rejects a replacement generation with the same name', () => {
+    expect(() => assertExactBranchIdentity({
+      branch: { branch_id: 'replacement-id', project_ref: 'bcdefghijklmnopqrstu' },
+      expectedBranchId: 'owned-id',
+      expectedProjectRef: 'abcdefghijklmnopqrst',
+    })).toThrow('branch_identity_mismatch:branch_id:replacement-id:owned-id');
+    expect(() => assertExactBranchIdentity({
+      branch: { branch_id: 'owned-id', project_ref: 'bcdefghijklmnopqrstu' },
+      expectedBranchId: 'owned-id',
+      expectedProjectRef: 'abcdefghijklmnopqrst',
+    })).toThrow('branch_identity_mismatch:project_ref:bcdefghijklmnopqrstu:abcdefghijklmnopqrst');
+  });
+
+  test('exact af38b526-f5c1-468d-88fb-86677fbe872a deletion does not select a replacement with the same name', () => {
+    expect(resolveProjectDeleteTargets({
+      projects: [
+        { name: 'wk-masarx-pr-1807', ref: 'replacement-ref' },
+      ],
+      workspaceName: 'wk-masarx-pr-1807',
+      deleteFamily: false,
+      expectedProjectRef: 'deleted-generation-ref',
+    })).toEqual({ familyName: '', matches: [] });
+  });
+
+  test('exact af38b526-f5c1-468d-88fb-86677fbe872a deletion fails closed when the ref has been renamed', () => {
+    expect(resolveProjectDeleteTargets({
+      projects: [{ name: 'wk-masarx-pr-1808', ref: 'expected-ref' }],
+      workspaceName: 'wk-masarx-pr-1807',
+      deleteFamily: false,
+      expectedProjectRef: 'expected-ref',
+    })).toEqual(expect.objectContaining({
+      matches: [],
+      identityMismatch: 'project_name:wk-masarx-pr-1808:wk-masarx-pr-1807',
+    }));
+  });
+
+  test('project teardown passes the same resolved preview organization and token into deletion proof', async () => {
+    const originalArgv = process.argv;
+    const originalGithubActions = process.env.GITHUB_ACTIONS;
+    const originalGithubRepository = process.env.GITHUB_REPOSITORY;
+    const listProjects = jest.fn().mockResolvedValue([{
+      name: 'wk-wire-test',
+      ref: 'abcdefghijklmnopqrst',
+      organization_id: 'exact-org-id',
+    }]);
+    const deleteProjectWithRetries = jest.fn().mockResolvedValue(undefined);
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    jest.resetModules();
+    jest.doMock('../../../scripts/ops/workspace/preview-supabase-config', () => ({
+      resolvePreviewSupabaseConfig: () => ({
+        token: 'EXAMPLE_PASSWORD',
+        orgId: 'exact-org-id',
+        workspaceMode: 'project',
+        missing: [],
+      }),
+    }));
+    jest.doMock('../../../scripts/ops/workspace/supabase-api', () => ({
+      deleteBranchWithRetries: jest.fn(),
+      deleteProjectWithRetries,
+      findBranchByName: jest.fn(),
+      listProjects,
+    }));
+
+    try {
+      process.argv = [
+        process.execPath,
+        'preview-destroy.js',
+        '--name',
+        'wk-wire-test',
+        '--workspace-mode',
+        'project',
+        '--delete-family',
+        '0',
+      ];
+      process.env.GITHUB_ACTIONS = 'true';
+      process.env.GITHUB_REPOSITORY = 'MasarX/MasarX';
+      const { main } = require('../../../scripts/ops/workspace/preview-destroy');
+
+      await main();
+
+      expect(listProjects).toHaveBeenCalledWith({
+        token: 'EXAMPLE_PASSWORD',
+        organizationId: 'exact-org-id',
+      });
+      expect(deleteProjectWithRetries).toHaveBeenCalledWith(
+        'abcdefghijklmnopqrst',
+        'EXAMPLE_PASSWORD',
+        expect.objectContaining({ organizationId: 'exact-org-id' }),
+      );
+    } finally {
+      process.argv = originalArgv;
+      if (originalGithubActions == null) delete process.env.GITHUB_ACTIONS;
+      else process.env.GITHUB_ACTIONS = originalGithubActions;
+      if (originalGithubRepository == null) delete process.env.GITHUB_REPOSITORY;
+      else process.env.GITHUB_REPOSITORY = originalGithubRepository;
+      logSpy.mockRestore();
+      jest.dontMock('../../../scripts/ops/workspace/preview-supabase-config');
+      jest.dontMock('../../../scripts/ops/workspace/supabase-api');
+      jest.resetModules();
+    }
   });
 });

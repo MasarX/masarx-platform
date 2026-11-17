@@ -1,15 +1,15 @@
 # Frontend Route Inventory
 
 Generated: 2026-02-15
-Updated: 2026-04-10 (Added B04 route-workspace zone visibility, shipment re-sort, route assignment, route-stop split reassignment, route-stop manifest visibility, route-plan publish execution-pack notes, and the portal mapping hub route)
+Updated: 2026-08-16 (Added the canonical Console service-offering catalog route)
 
 ## Summary
 
 | App     | Route Count |
 |---------|-------------|
-| Console | 38          |
+| Console | 39          |
 | Portal  | 37          |
-| **Total** | **75**    |
+| **Total** | **76**    |
 
 All page routes use the `withConsoleConfig` or `withPortalConfig` HOC pattern. Most pages delegate rendering to shared `@masarx/ui` server components that handle their own data fetching, error handling, and state management.
 
@@ -33,6 +33,7 @@ All page routes use the `withConsoleConfig` or `withPortalConfig` HOC pattern. M
 | `/access-policy` | `AccessPolicyPage` (local wrapper) | `ui.me`, `ui.accessPolicy` | Y | Y | Y | Y | Suspense fallback via local wrapper. Handles capability-denied as separate blocked state. |
 | `/access-policy/request` | `AccessPolicyRequestPage` | `ui.me`, `ui.accessPolicy`, `ui.requestAccessPolicyChange` (server action) | Y | Y | X | Y | Suspense wrapper via local `_components/` module. Denied state handled. No explicit empty state. |
 | `/commands` | `CommandCatalogPage` | `fetchCommandRegistry`, `ui.me` | Y | Y | Y | Y | Empty state for filtered and unfiltered views. |
+| `/catalog/service-offerings` | `ServiceCatalogPage` | `ui.me`, `ui.readRegistry`, `ui.listResource("service_level_directory")`, `ui.listResource("service_offering_directory")`, active `branches`, `zones` | Y | Y | Y | Y | Canonical service-level and offering catalog; writes are limited to active lookup-backed levels and active branches. |
 
 ### Integrations
 
@@ -128,7 +129,7 @@ All page routes use the `withConsoleConfig` or `withPortalConfig` HOC pattern. M
 | Route Path | Component | RPCs Called | Loading | Error | Empty | Success | Notes |
 |---|---|---|---|---|---|---|---|
 | `/operations/exceptions` | `RouteOperationsWorkspacePage` | `auth.getSession`, `ui.context`, `ui.readRegistry`, `fetchCommandRegistry`, `ui.dashboardMetrics` / `ui.listResource` | Y | Y | Y | Y | Same component as console. Warehouse intake holds, the B04 wrong-zone alias lane `wrong_zone_exceptions`, scan-review lanes, and UC114 NDR owner/SLA queues resolve here from the shared registry contract. |
-| `/operations/exceptions/[resource]` | `RouteOperationsWorkspacePage` | Same as above + `ResourcePage` delegation | Y | Y | Y | Y | Dynamic resource key. Includes `wrong_zone_exceptions`, `dispatch_exception_review`, `dispatch_exception_review_mine`, `unassigned_exceptions`, and `sla_deadline_alerts`. |
+| `/operations/exceptions/[resource]` | `RouteOperationsWorkspacePage` | Same as above + `ResourcePage` delegation | Y | Y | Y | Y | Dynamic resource key. Includes `wrong_zone_exceptions`, `dispatch_exception_review`, `dispatch_exception_review_mine`, `unassigned_exceptions`, and `sla_deadline_alerts`; tenant resolution stays on this shared shell and submits canonical `resolution_action` selected from the `ndr_action` lookup category through `ui_execute_dispatch_exception_resolution_v1`. |
 | `/operations/shipment-amend-cancel` | `ShipmentAmendCancelPage` | `ui.rpc("shipment_amend_cancel_options_v1")`, `ui.rpc("shipment_amend_cancel_v1")` (server action) | Y | Y | Y | Y | Authenticated single-shipment amend/cancel workspace. Address defaults come from current shipment data or `shipment_operation_policy.address.default_country_code`. |
 | `/operations/pickups/requests` | `PickupRequestsPage` | `ui.me`, direct read of `public.pickup_requests`, `ui.rpc("create_pickup_request_v1")` (server action) | Y | Y | Y | Y | Custom hosted pickup request list/create page. Uses direct public-view reads because `ui_list_resource_v1` cannot target views. |
 | `/operations/pickups/waves` | `PickupWavesPage` | `ui.me`, direct read of `public.pickup_waves`, `ui.rpc("create_pickup_wave_v1")`, `ui.rpc("assign_pickup_wave_v1")` (server actions) | Y | Y | Y | Y | Custom hosted pickup wave list/create/assign page. Uses direct public-view reads because `ui_list_resource_v1` cannot target views. |

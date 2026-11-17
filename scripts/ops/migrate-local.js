@@ -49,32 +49,23 @@ function nameFromFile(file) {
     .replace(/\.sql$/i, '');
 }
 
-async function recordMigration(client, file) {
+async function recordMigration(client, file, sourceSql) {
   const version = versionFromFile(file);
   const name = nameFromFile(file);
   if (!version) {
     return;
   }
 
-  try {
-    await client.query(
-      `INSERT INTO supabase_migrations.schema_migrations(version, statements, name)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (version) DO UPDATE SET name = EXCLUDED.name`,
-      [version, [], name],
-    );
-  } catch (error) {
-    const message = String(error && error.message ? error.message : error);
-    if (/supabase_migrations\.schema_migrations/i.test(message) && /does not exist/i.test(message)) {
-      console.warn('[migrate-local] schema_migrations history table is missing; continuing without recording history.');
-      return;
-    }
-    throw error;
-  }
+  await client.query(
+    `INSERT INTO supabase_migrations.schema_migrations(version, statements, name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (version) DO UPDATE SET name = EXCLUDED.name`,
+    [version, [String(sourceSql || '')], name],
+  );
 }
 
 async function main() {
-  console.log('[migrate-local] Using DATABASE_URL:', dbUrl);
+  console.log('[migrate-local] Using configured database connection.');
 
   const client = new Client({
     connectionString: dbUrl,
@@ -83,17 +74,8 @@ async function main() {
 
   await client.connect();
   try {
-    let applied = new Set();
-    try {
-      const rows = await client.query('select version from supabase_migrations.schema_migrations order by version');
-      applied = new Set(rows.rows.map((row) => String(row.version || '').trim()).filter(Boolean));
-    } catch (error) {
-      const message = String(error && error.message ? error.message : error);
-      if (!/does not exist/i.test(message)) {
-        throw error;
-      }
-      console.warn('[migrate-local] schema_migrations table missing; applying all migrations without history tracking.');
-    }
+    const rows = await client.query('select version from supabase_migrations.schema_migrations order by version');
+    const applied = new Set(rows.rows.map((row) => String(row.version || '').trim()).filter(Boolean));
 
     const pending = files.filter((file) => !applied.has(versionFromFile(file)));
     if (!pending.length) {
@@ -107,9 +89,9 @@ async function main() {
       const sql = fs.readFileSync(fullPath, 'utf8');
       try {
         await client.query(sql);
-        await recordMigration(client, file);
       } catch (error) {
         if (softFailFiles.has(file)) {
+          await client.query('ROLLBACK');
           console.warn(
             `[migrate-local] Migration ${file} failed in local-only mode (soft-fail allowed); continuing.`,
           );
@@ -117,6 +99,7 @@ async function main() {
         }
         throw error;
       }
+      await recordMigration(client, file, sql);
     }
 
     console.log('[migrate-local] All migrations applied successfully.');

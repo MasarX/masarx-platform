@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { loadDemoContext } from "./utils/demo-accounts";
 import { expectSignedIn, signInWithPassword } from "./utils/auth";
 import { getConsoleBaseUrl, getPortalBaseUrl } from "./utils/base-urls";
@@ -6,7 +7,7 @@ import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
 import {
   applyResourceLimit,
-  resolveResourceActionTarget,
+  resolveResourceActionTargetWithSample,
   resolveResourceKeysForUser,
 } from "./utils/core-resource";
 import {
@@ -109,7 +110,7 @@ for (const config of appConfigs) {
         );
         if (resourceKeys.length === 0) continue;
 
-        const workflowTarget = resolveResourceActionTarget({
+        const workflowTarget = await resolveResourceActionTargetWithSample({
           resourceKeys,
           readRegistry: context.readRegistry,
           commandRegistry: context.commandRegistry,
@@ -118,8 +119,10 @@ for (const config of appConfigs) {
           downloadBasePath,
           actionType: "workflow",
           requireConfirm: true,
+          email: candidate.email,
+          password: demoContext.password ?? "",
         });
-        const rpcTarget = resolveResourceActionTarget({
+        const rpcTarget = await resolveResourceActionTargetWithSample({
           resourceKeys,
           readRegistry: context.readRegistry,
           commandRegistry: context.commandRegistry,
@@ -128,6 +131,8 @@ for (const config of appConfigs) {
           downloadBasePath,
           actionType: "rpc",
           requireConfirm: true,
+          email: candidate.email,
+          password: demoContext.password ?? "",
         });
 
         const resolvedTarget = workflowTarget ?? rpcTarget ?? null;
@@ -213,6 +218,10 @@ for (const config of appConfigs) {
         `[data-testid="${bulkActionsTestIdPrefix}-confirm-dialog"]`
       );
       await expect(confirmDialog).toBeVisible();
+      const a11y = await new AxeBuilder({ page })
+        .include(`[data-testid="${bulkActionsTestIdPrefix}-confirm-dialog"]`)
+        .analyze();
+      expect(a11y.violations).toEqual([]);
       await page
         .locator(`[data-testid="${bulkActionsTestIdPrefix}-confirm-cancel"]`)
         .click();

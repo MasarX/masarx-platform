@@ -17,7 +17,12 @@
     },
     {
       "name": "label-designer-assets",
-      "auth_mode": "supabase_jwt",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
+      "name": "organization-profile",
+      "auth_mode": "public_no_jwt",
       "enabled": true
     },
     {
@@ -41,6 +46,26 @@
       "enabled": true
     },
     {
+      "name": "driver-signup-intake",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
+      "name": "driver-application-documents",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
+      "name": "driver-application-status",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
+      "name": "marketplace-participant-review",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
       "name": "public-shipment-tracking",
       "auth_mode": "public_no_jwt",
       "enabled": true
@@ -57,7 +82,12 @@
     },
     {
       "name": "tenant-signup-review",
-      "auth_mode": "supabase_jwt",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
+      "name": "fieldops-reassignment-request",
+      "auth_mode": "public_no_jwt",
       "enabled": true
     }
   ]

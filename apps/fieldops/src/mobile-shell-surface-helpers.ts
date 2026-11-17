@@ -6,6 +6,12 @@ import type {
 
 type JsonRecord = Record<string, unknown>;
 
+export function formatMoneyLabel(amount: number | null, currency: string | null | undefined) {
+  if (amount == null || !Number.isFinite(amount)) return null;
+  const rounded = Math.round(amount * 100) / 100;
+  return `${currency ?? "SAR"} ${rounded}`;
+}
+
 export type SurfaceCoordinates = {
   latitude: number;
   longitude: number;
@@ -28,6 +34,8 @@ export type SettlementSnapshot = {
   expected: number | null;
   counted: number | null;
   variance: number | null;
+  windowStartAt: string | null;
+  windowEndAt: string | null;
 };
 
 export type RouteCardSnapshot = {
@@ -78,6 +86,15 @@ export type OperationalStopSnapshot = {
   expectedAmount: number | null;
   currency: string | null;
   collectionRequired: boolean | null;
+  collectionOutcome: string | null;
+  collectedAmount: number | null;
+  varianceAmount: number | null;
+  discrepancyKind: string | null;
+  hasDiscrepancy: boolean | null;
+  receiptContext: string | null;
+  proofArtifactCount: number | null;
+  signatureArtifactId: string | null;
+  proofArtifactIds: string[];
   paymentModeLabel: string | null;
   allowedMethods: string[];
   recipientMissing: boolean;
@@ -114,6 +131,19 @@ export type ScanContextSnapshot = {
   customerName: string | null;
 };
 
+export type FieldOpsActiveRoleOption = {
+  roleId: string;
+  roleKey: string;
+  label: string;
+  branchIds: string[];
+};
+
+export type FieldOpsActiveRoleSnapshot = {
+  deviceId: string | null;
+  selectionState: "selected" | "single_eligible" | "absent";
+  selectedRole: FieldOpsActiveRoleOption | null;
+  eligibleRoles: FieldOpsActiveRoleOption[];
+};
 function asRecord(value: unknown): JsonRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as JsonRecord;
@@ -174,6 +204,50 @@ function toTextArray(value: unknown): string[] {
   return text ? [text] : [];
 }
 
+export function extractFieldOpsActiveRoleSnapshot(
+  value: unknown
+): FieldOpsActiveRoleSnapshot {
+  const record = asRecord(value);
+  const eligibleRoles = (Array.isArray(record.eligible_roles)
+    ? record.eligible_roles
+    : []
+  ).flatMap((entry): FieldOpsActiveRoleOption[] => {
+    const role = asRecord(entry);
+    const roleId = toText(role.role_id);
+    const roleKey = toText(role.role_key);
+    if (!roleId || !roleKey) return [];
+    const branchIds = Array.from(
+      new Set(
+        (Array.isArray(role.branch_ids) ? role.branch_ids : [])
+          .map((branchId) => toText(branchId))
+          .filter((branchId): branchId is string => Boolean(branchId))
+      )
+    );
+    return [{
+      roleId,
+      roleKey,
+      label: toText(role.label) ?? roleKey,
+      branchIds,
+    }];
+  });
+  const selectedRoleId = toText(record.selected_role_id);
+  const selectedRole = selectedRoleId
+    ? eligibleRoles.find((role) => role.roleId === selectedRoleId) ?? null
+    : null;
+  const reportedState = toText(record.selection_state);
+  const selectionState =
+    selectedRole
+      ? "selected"
+      : reportedState === "single_eligible" && eligibleRoles.length === 1
+        ? "single_eligible"
+        : "absent";
+  return {
+    deviceId: toText(record.device_id),
+    selectionState,
+    selectedRole,
+    eligibleRoles,
+  };
+}
 function formatIntegerCount(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     const rounded = Math.round(value);
@@ -389,6 +463,53 @@ function candidateRecords(detail: JsonRecord): JsonRecord[] {
   ];
 }
 
+function paymentCollectionRecords(detail: JsonRecord): JsonRecord[] {
+  const metadata = asRecord(detail.metadata);
+  const payload = asRecord(detail.payload);
+  const routeStop = asRecord(detail.route_stop);
+  const metadataRouteStop = asRecord(metadata.route_stop);
+  const payloadRouteStop = asRecord(payload.route_stop);
+  const deliveryCompletion = asRecord(detail.delivery_completion);
+  const metadataDeliveryCompletion = asRecord(metadata.delivery_completion);
+  const payloadDeliveryCompletion = asRecord(payload.delivery_completion);
+  const routeStopDeliveryCompletion = asRecord(routeStop.delivery_completion);
+  const metadataRouteStopDeliveryCompletion = asRecord(metadataRouteStop.delivery_completion);
+  const payloadRouteStopDeliveryCompletion = asRecord(payloadRouteStop.delivery_completion);
+  const actionData = asRecord(detail.action_data);
+  const actionDataDeliveryCompletion = asRecord(actionData.delivery_completion);
+  const actionDataTaskEventPayload = asRecord(actionData.task_event_payload);
+  const actionDataTaskDeliveryCompletion = asRecord(actionDataTaskEventPayload.delivery_completion);
+  const shipmentAction = asRecord(detail.shipment_action);
+  const shipmentActionData = asRecord(shipmentAction.action_data);
+  const shipmentActionDeliveryCompletion = asRecord(shipmentActionData.delivery_completion);
+  const shipmentActionTaskEventPayload = asRecord(shipmentActionData.task_event_payload);
+  const shipmentActionTaskDeliveryCompletion = asRecord(
+    shipmentActionTaskEventPayload.delivery_completion
+  );
+
+  return [
+    asRecord(detail.payment_collection),
+    asRecord(routeStopDeliveryCompletion.payment_collection),
+    asRecord(metadataRouteStopDeliveryCompletion.payment_collection),
+    asRecord(payloadRouteStopDeliveryCompletion.payment_collection),
+    asRecord(deliveryCompletion.payment_collection),
+    asRecord(metadataDeliveryCompletion.payment_collection),
+    asRecord(payloadDeliveryCompletion.payment_collection),
+    asRecord(actionData.payment_collection),
+    asRecord(actionDataDeliveryCompletion.payment_collection),
+    asRecord(actionDataTaskEventPayload.payment_collection),
+    asRecord(actionDataTaskDeliveryCompletion.payment_collection),
+    asRecord(shipmentActionData.payment_collection),
+    asRecord(shipmentActionDeliveryCompletion.payment_collection),
+    asRecord(shipmentActionTaskEventPayload.payment_collection),
+    asRecord(shipmentActionTaskDeliveryCompletion.payment_collection),
+  ];
+}
+
+function paymentProjectionRecords(detail: JsonRecord): JsonRecord[] {
+  return [detail, asRecord(detail.shipment_action)];
+}
+
 function formatAddressLine(parts: Array<string | null | undefined>): string | null {
   const filtered = parts
     .map((part) => (typeof part === "string" ? part.trim() : ""))
@@ -403,6 +524,19 @@ function formatShortPlace(parts: Array<string | null | undefined>): string | nul
   return filtered.length ? filtered.join(" - ") : null;
 }
 
+const SAUDI_SHORT_ADDRESS_KEYS = [
+  "short_address",
+  "shortAddress",
+  "address_short",
+  "sa_short_code",
+  "short_national_address",
+  "shortNationalAddress",
+  "national_short_address",
+  "nationalShortAddress",
+  "short_code",
+  "shortCode",
+];
+
 function formatAddressRecord(record: JsonRecord): string | null {
   const street = pickAnyText(record, ["street", "address_line_1", "line1", "street_name"]);
   const building = pickAnyText(record, [
@@ -415,7 +549,7 @@ function formatAddressRecord(record: JsonRecord): string | null {
   const district = pickAnyText(record, ["district", "neighborhood", "area"]);
   const city = pickAnyText(record, ["city", "destination_city"]);
   const postalCode = pickAnyText(record, ["postal_code", "postcode", "zip", "zip_code"]);
-  const shortAddress = pickAnyText(record, ["short_address", "shortAddress", "address_short"]);
+  const shortAddress = pickAnyText(record, SAUDI_SHORT_ADDRESS_KEYS);
 
   const streetLine =
     street && building ? `${street} ${building}` : street ?? (building ? `Building ${building}` : null);
@@ -434,7 +568,7 @@ function extractAddressSummaryFromRecords(records: JsonRecord[]): {
     const locality = formatShortPlace([
       pickAnyText(record, ["district", "neighborhood", "area"]),
       pickAnyText(record, ["city", "destination_city"]),
-      pickAnyText(record, ["short_address", "shortAddress", "address_short"]),
+      pickAnyText(record, SAUDI_SHORT_ADDRESS_KEYS),
     ]);
     const fullAddress = formatAddressRecord(record);
     if (locality || fullAddress) {
@@ -529,7 +663,17 @@ export function extractSettlementSnapshot(
   fallbackId: string
 ): SettlementSnapshot {
   const detail = asRecord(detailValue);
-  const records = candidateRecords(detail);
+  const metadata = asRecord(detail.metadata);
+  const payload = asRecord(detail.payload);
+  const settlement = asRecord(detail.settlement);
+  const paymentSummaryRecords = [
+    asRecord(settlement.payment_collection_summary),
+    asRecord(metadata.payment_collection_summary),
+    asRecord(payload.payment_collection_summary),
+  ];
+  const hasPaymentSummary = paymentSummaryRecords.some((record) => Object.keys(record).length > 0);
+  const genericRecords = candidateRecords(detail);
+  const records = [...paymentSummaryRecords, ...genericRecords];
   const expected = pickAnyNumberFromRecords(records, [
     "expected",
     "expected_amount",
@@ -543,15 +687,19 @@ export function extractSettlementSnapshot(
     "counted_sar",
     "cash_counted",
     "total_counted",
+    "collected_amount",
+    "total_collected",
   ]);
-  const explicitVariance = pickAnyNumberFromRecords(records, [
+  const explicitVariance = pickAnyNumberFromRecords(hasPaymentSummary ? genericRecords : records, [
     "variance",
     "variance_amount",
     "difference",
   ]);
 
   const variance =
-    explicitVariance != null
+    hasPaymentSummary && expected != null && counted != null
+      ? counted - expected
+      : explicitVariance != null
       ? explicitVariance
       : expected != null && counted != null
         ? counted - expected
@@ -572,12 +720,21 @@ export function extractSettlementSnapshot(
     expected,
     counted,
     variance,
+    windowStartAt: typeof detail.window_start_at === "string" ? detail.window_start_at.trim() || null : null,
+    windowEndAt: typeof detail.window_end_at === "string" ? detail.window_end_at.trim() || null : null,
   };
 }
 
 export function extractOperationalStopSnapshot(detailValue: unknown): OperationalStopSnapshot {
   const detail = asRecord(detailValue);
   const records = candidateRecords(detail);
+  const paymentRecords = paymentCollectionRecords(detail);
+  const paymentProjection = paymentProjectionRecords(detail);
+  const paymentFallbackRecords = [
+    asRecord(asRecord(detail.metadata).payment_collection),
+    asRecord(asRecord(detail.payload).payment_collection),
+  ];
+  const paymentRecordsWithFallback = [...paymentRecords, ...paymentFallbackRecords];
   const addressSummary = extractAddressSummaryFromRecords(records);
   const customerName =
     pickAnyTextFromRecords(records, ["customer_name", "name", "customer"]) ?? null;
@@ -640,32 +797,86 @@ export function extractOperationalStopSnapshot(detailValue: unknown): Operationa
     "packages",
     "parcels",
   ]);
-  const codAmount = pickAnyNumberFromRecords(records, [
-    "cod_amount",
-    "expected_amount",
-    "cash_on_delivery_amount",
-    "amount_due",
-    "amount_to_collect",
-    "collection_amount",
-  ]);
-  const expectedAmount = pickAnyNumberFromRecords(records, [
-    "expected_amount",
-    "cod_amount",
-    "cash_on_delivery_amount",
-    "amount_due",
-    "amount_to_collect",
-    "collection_amount",
-  ]);
-  const currency = pickAnyTextFromRecords(records, [
-    "currency",
-    "currency_code",
-    "cod_currency",
-  ]);
+  const paymentExpectedAmount =
+    pickAnyNumberFromRecords(paymentRecords, ["expected_amount"]) ??
+    pickAnyNumberFromRecords(paymentProjection, ["payment_expected_amount"]);
+  const codAmount =
+    paymentExpectedAmount ??
+    pickAnyNumberFromRecords(records, [
+      "cod_amount",
+      "expected_amount",
+      "cash_on_delivery_amount",
+      "amount_due",
+      "amount_to_collect",
+      "collection_amount",
+    ]) ??
+    pickAnyNumberFromRecords(paymentFallbackRecords, ["expected_amount"]);
+  const expectedAmount =
+    paymentExpectedAmount ??
+    pickAnyNumberFromRecords(records, [
+      "expected_amount",
+      "cod_amount",
+      "cash_on_delivery_amount",
+      "amount_due",
+      "amount_to_collect",
+      "collection_amount",
+    ]) ??
+    pickAnyNumberFromRecords(paymentFallbackRecords, ["expected_amount"]);
+  const collectedAmount =
+    pickAnyNumberFromRecords(paymentRecords, ["collected_amount"]) ??
+    pickAnyNumberFromRecords(paymentProjection, ["payment_collected_amount"]) ??
+    pickAnyNumberFromRecords(paymentFallbackRecords, ["collected_amount"]) ??
+    pickAnyNumberFromRecords(paymentRecordsWithFallback, ["cash_collected", "amount_collected"]);
+  const varianceAmount =
+    pickAnyNumberFromRecords(paymentRecords, ["variance_amount"]) ??
+    pickAnyNumberFromRecords(paymentProjection, ["payment_variance_amount"]) ??
+    pickAnyNumberFromRecords(paymentFallbackRecords, ["variance_amount"]);
+  const currency =
+    pickAnyTextFromRecords(paymentRecords, ["currency"]) ??
+    pickAnyTextFromRecords(paymentProjection, ["payment_currency"]) ??
+    pickAnyTextFromRecords(records, ["currency", "currency_code", "cod_currency"]) ??
+    pickAnyTextFromRecords(paymentFallbackRecords, ["currency"]);
   const collectionRequired =
     pickAnyBooleanFromRecords(records, ["collection_required"]) ??
     (expectedAmount != null ? expectedAmount > 0 : codAmount != null ? codAmount > 0 : null);
-  const paymentModeLabel = pickAnyTextFromRecords(records, ["payment_mode_label"]);
-  const allowedMethods = pickAnyTextArrayFromRecords(records, ["allowed_methods"]);
+  const collectionOutcome =
+    pickAnyTextFromRecords(paymentRecords, ["outcome"]) ??
+    pickAnyTextFromRecords(paymentProjection, ["payment_collection_outcome"]) ??
+    pickAnyTextFromRecords(paymentFallbackRecords, ["outcome"]);
+  const discrepancyKind =
+    pickAnyTextFromRecords(paymentRecords, ["discrepancy_kind"]) ??
+    pickAnyTextFromRecords(paymentProjection, ["payment_discrepancy_kind"]) ??
+    pickAnyTextFromRecords(paymentFallbackRecords, ["discrepancy_kind"]);
+  const hasDiscrepancy =
+    pickAnyBooleanFromRecords(paymentRecords, ["has_discrepancy"]) ??
+    pickAnyBooleanFromRecords(paymentProjection, ["payment_has_discrepancy"]) ??
+    pickAnyBooleanFromRecords(paymentFallbackRecords, ["has_discrepancy"]);
+  const receiptContext =
+    pickAnyTextFromRecords(paymentRecords, ["receipt_context"]) ??
+    pickAnyTextFromRecords(paymentProjection, ["payment_receipt_context"]) ??
+    pickAnyTextFromRecords(paymentFallbackRecords, ["receipt_context"]) ??
+    pickAnyTextFromRecords(paymentRecordsWithFallback, ["receipt_number"]);
+  const proofArtifactIds = pickAnyTextArrayFromRecords(paymentRecordsWithFallback, [
+    "proof_artifact_ids",
+    "artifact_ids",
+  ]);
+  const proofArtifactCount =
+    pickAnyCountFromRecords(paymentRecordsWithFallback, ["proof_artifact_count"]) ??
+    (proofArtifactIds.length ? proofArtifactIds.length : null);
+  const signatureArtifactId = pickAnyTextFromRecords(paymentRecordsWithFallback, ["signature_artifact_id"]);
+  const paymentModeLabel =
+    pickAnyTextFromRecords(paymentRecords, ["payment_mode_label", "method"]) ??
+    pickAnyTextFromRecords(paymentProjection, ["payment_collection_method"]) ??
+    pickAnyTextFromRecords(records, ["payment_mode_label"]) ??
+    pickAnyTextFromRecords(paymentFallbackRecords, ["payment_mode_label", "method"]) ??
+    pickAnyTextFromRecords(paymentRecordsWithFallback, ["payment_method"]);
+  const canonicalAllowedMethods = pickAnyTextArrayFromRecords(
+    [...paymentRecords, ...records, ...paymentFallbackRecords],
+    ["allowed_methods"]
+  );
+  const allowedMethods = canonicalAllowedMethods.length
+    ? canonicalAllowedMethods
+    : pickAnyTextArrayFromRecords(paymentRecordsWithFallback, ["allowed_payment_methods"]);
 
   return {
     title,
@@ -688,6 +899,15 @@ export function extractOperationalStopSnapshot(detailValue: unknown): Operationa
     expectedAmount,
     currency,
     collectionRequired,
+    collectionOutcome,
+    collectedAmount,
+    varianceAmount,
+    discrepancyKind,
+    hasDiscrepancy,
+    receiptContext,
+    proofArtifactCount,
+    signatureArtifactId,
+    proofArtifactIds,
     paymentModeLabel,
     allowedMethods,
     recipientMissing: !customerName,
@@ -806,6 +1026,7 @@ export function extractScanContext(
 
 export function extractRouteCardSnapshot(detailValue: unknown): RouteCardSnapshot {
   const stop = extractOperationalStopSnapshot(detailValue);
+  const codLabel = formatMoneyLabel(stop.codAmount, stop.currency);
 
   return {
     title: stop.title,
@@ -818,15 +1039,13 @@ export function extractRouteCardSnapshot(detailValue: unknown): RouteCardSnapsho
     status: stop.status,
     statusReason: stop.statusReason,
     packageCount: stop.packageCount,
-    codBadge:
-      stop.codAmount != null
-        ? `${stop.currency ?? "SAR"} ${Math.round(stop.codAmount)} COD`
-        : null,
+    codBadge: codLabel != null ? `${codLabel} COD` : null,
   };
 }
 
 export function extractTaskCardSnapshot(detailValue: unknown): TaskCardSnapshot {
   const stop = extractOperationalStopSnapshot(detailValue);
+  const codLabel = formatMoneyLabel(stop.codAmount, stop.currency);
 
   return {
     title: stop.title,
@@ -838,10 +1057,7 @@ export function extractTaskCardSnapshot(detailValue: unknown): TaskCardSnapshot 
     priority: stop.priority,
     due: stop.due,
     packageCount: stop.packageCount,
-    codBadge:
-      stop.codAmount != null
-        ? `${stop.currency ?? "SAR"} ${Math.round(stop.codAmount)} COD`
-        : null,
+    codBadge: codLabel != null ? `${codLabel} COD` : null,
   };
 }
 
@@ -888,4 +1104,251 @@ export function buildChannelUrl(params: {
   const message = params.message?.trim() ?? "";
   if (!message) return `https://wa.me/${waPhone}`;
   return `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`;
+}
+
+export type FieldOpsLiveState = "absent" | "empty" | "ready" | "error";
+export type FieldOpsLiveResourceKey =
+  | "routes"
+  | "route_stops"
+  | "tasks"
+  | "baskets"
+  | "basket_items"
+  | "return_to_branch_shipments";
+export type FieldOpsLiveRpcKey = "pickup_failures_list_v1";
+
+export type FieldOpsLiveResourceQuery = {
+  id: string;
+  resource: FieldOpsLiveResourceKey;
+  filters: Record<string, unknown>;
+};
+
+export type FieldOpsLiveRpcQuery = {
+  id: string;
+  rpc: FieldOpsLiveRpcKey;
+};
+
+export type FieldOpsLiveSourceSelection = {
+  roleKey: "loader" | "rider" | "supervisor" | null;
+  state: "absent" | "ready";
+  rpcQueries: FieldOpsLiveRpcQuery[];
+  resourceQueries: FieldOpsLiveResourceQuery[];
+  missingResourceKeys: FieldOpsLiveResourceKey[];
+};
+
+export type FieldOpsLiveSourceResult = {
+  state: FieldOpsLiveState;
+  rows: JsonRecord[];
+  complete: boolean;
+};
+
+export type FieldOpsLiveOperationsSnapshot = {
+  state: FieldOpsLiveState;
+  work: {
+    state: FieldOpsLiveState;
+    visibleCount: number | null;
+  };
+  pickup: {
+    state: FieldOpsLiveState;
+    id: string | null;
+    windowStartAt: string | null;
+    windowEndAt: string | null;
+    seal: string | null;
+    expectedCount: number | null;
+    pickedCount: number | null;
+    failureCount: number | null;
+  };
+  trip: {
+    state: FieldOpsLiveState;
+    id: string | null;
+    origin: string | null;
+    destination: string | null;
+    stage: string | null;
+    plannedStartAt: string | null;
+    plannedEndAt: string | null;
+    startedAt: string | null;
+    endedAt: string | null;
+    eta: string | null;
+    driverId: string | null;
+    vehicleId: string | null;
+    count: number | null;
+    seal: string | null;
+    manifest: unknown | null;
+    context: JsonRecord | null;
+  };
+  sortation: {
+    state: FieldOpsLiveState;
+    bays: number | null;
+    recent: number | null;
+    inducted: number | null;
+    throughput: number | null;
+    minutes: number | null;
+  };
+};
+
+const ROLE_KEY_MAP: Record<string, "loader" | "rider" | "supervisor"> = {
+  driver: "rider",
+  warehouse_operator: "loader",
+  fleet_manager: "supervisor",
+  rider: "rider",
+  loader: "loader",
+  supervisor: "supervisor",
+};
+
+const ROLE_QUERIES: Record<"loader" | "rider" | "supervisor", {
+  rpcQueries: FieldOpsLiveRpcQuery[];
+  resourceQueries: FieldOpsLiveResourceQuery[];
+}> = {
+  rider: {
+    rpcQueries: [],
+    resourceQueries: [
+      { id: "routes", resource: "routes", filters: {} },
+      { id: "routeStops", resource: "route_stops", filters: { stop_kind: "pickup" } },
+    ],
+  },
+  loader: {
+    rpcQueries: [],
+    resourceQueries: [
+      { id: "warehouseSortTasks", resource: "tasks", filters: { task_type_key: "warehouse_sort" } },
+      { id: "baskets", resource: "baskets", filters: {} },
+      { id: "basketItems", resource: "basket_items", filters: {} },
+      { id: "returns", resource: "return_to_branch_shipments", filters: {} },
+    ],
+  },
+  supervisor: {
+    rpcQueries: [{ id: "pickupFailures", rpc: "pickup_failures_list_v1" }],
+    resourceQueries: [
+      { id: "warehouseSupervisorTasks", resource: "tasks", filters: { task_type_key: "warehouse_supervisor_approval" } },
+      { id: "warehouseScanSupervisorTasks", resource: "tasks", filters: { task_type_key: "warehouse_scan_supervisor_approval" } },
+      { id: "dispatchExceptionTasks", resource: "tasks", filters: { task_type_key: "dispatch_exception_review" } },
+    ],
+  },
+};
+
+export function selectFieldOpsLiveSources(
+  roleValue: unknown,
+  registryValue: unknown
+): FieldOpsLiveSourceSelection {
+  const normalizedRole = toText(roleValue)?.toLowerCase() ?? "";
+  const roleKey = ROLE_KEY_MAP[normalizedRole] ?? null;
+  if (!roleKey) {
+    return { roleKey: null, state: "absent", rpcQueries: [], resourceQueries: [], missingResourceKeys: [] };
+  }
+  const configured = new Set(
+    (Array.isArray(asRecord(registryValue).resources) ? asRecord(registryValue).resources as unknown[] : [])
+      .map((entry) => toText(asRecord(entry).key))
+      .filter((key): key is string => Boolean(key))
+  );
+  const plan = ROLE_QUERIES[roleKey];
+  return {
+    roleKey,
+    state: "ready",
+    rpcQueries: plan.rpcQueries,
+    resourceQueries: plan.resourceQueries.filter((query) => configured.has(query.resource)),
+    missingResourceKeys: Array.from(new Set(plan.resourceQueries
+      .filter((query) => !configured.has(query.resource))
+      .map((query) => query.resource))),
+  };
+}
+
+export function fieldOpsLiveSourceResult(
+  value: unknown,
+  options: { error?: boolean; complete?: boolean } = {}
+): FieldOpsLiveSourceResult {
+  if (options.error) return { state: "error", rows: [], complete: false };
+  if (value == null) return { state: "absent", rows: [], complete: false };
+  const rows = (Array.isArray(value) ? value : [])
+    .map(asRecord)
+    .filter((row) => Object.keys(row).length > 0);
+  return { state: rows.length ? "ready" : "empty", rows, complete: options.complete ?? true };
+}
+
+function liveFirst(records: JsonRecord[], keys: string[]): unknown {
+  for (const record of records) {
+    const candidates = [record, asRecord(record.metadata), asRecord(record.pickup_request),
+      asRecord(record.pickup_wave), asRecord(record.route_execution_manifest)];
+    for (const candidate of candidates) {
+      for (const key of keys) if (candidate[key] !== null && candidate[key] !== undefined) return candidate[key];
+    }
+  }
+  return null;
+}
+
+function liveState(sources: FieldOpsLiveSourceResult[]): FieldOpsLiveState {
+  if (!sources.length || sources.every((source) => source.state === "absent")) return "absent";
+  if (sources.some((source) => source.state === "error")) return "error";
+  if (sources.every((source) => source.state === "empty" || source.state === "absent")) return "empty";
+  return "ready";
+}
+
+export function projectFieldOpsLiveOperations(
+  sources: Record<string, FieldOpsLiveSourceResult>
+): FieldOpsLiveOperationsSnapshot {
+  const pickupSources = [sources.routeStops].filter(Boolean) as FieldOpsLiveSourceResult[];
+  const tripSources = [sources.routes].filter(Boolean) as FieldOpsLiveSourceResult[];
+  const sortationSources = [sources.warehouseSortTasks, sources.baskets, sources.basketItems, sources.returns]
+    .filter(Boolean) as FieldOpsLiveSourceResult[];
+  const workSources = [sources.warehouseSortTasks, sources.warehouseSupervisorTasks,
+    sources.warehouseScanSupervisorTasks, sources.dispatchExceptionTasks]
+    .filter(Boolean) as FieldOpsLiveSourceResult[];
+  const pickupRow = sources.routeStops?.rows.find((row) => toText(row.route_stop_id ?? row.id)) ?? null;
+  const pickupRows = pickupRow ? [pickupRow] : [];
+  const failureRows = sources.pickupFailures?.rows ?? [];
+  const tripRow = sources.routes?.rows.find((row) => toText(row.route_run_id ?? row.id)) ?? null;
+  const tripRows = tripRow ? [tripRow] : [];
+  const plannedEndAt = toText(liveFirst(tripRows, ["planned_end_at"]));
+  const pickupShipmentId = toText(liveFirst(pickupRows, ["shipment_id"]));
+  const allSources = Object.values(sources);
+  return {
+    state: liveState(allSources),
+    work: {
+      state: liveState(workSources),
+      visibleCount: workSources.length
+        ? workSources.reduce((total, source) => total + source.rows.length, 0)
+        : null,
+    },
+    pickup: {
+      state: liveState(pickupSources),
+      id: toText(liveFirst(pickupRows, ["route_stop_id", "id", "route_run_id"])),
+      windowStartAt: toText(liveFirst(pickupRows, ["planned_window_start_at", "route_planned_start_at",
+        "planned_start_at", "requested_window_start_at", "window_start_at"])),
+      windowEndAt: toText(liveFirst(pickupRows, ["planned_window_end_at", "route_planned_end_at",
+        "planned_end_at", "requested_window_end_at", "window_end_at"])),
+      seal: toText(liveFirst(pickupRows, ["seal_number", "seal_id", "seal"])),
+      expectedCount: toNumber(liveFirst(pickupRows, ["box_count", "package_count", "shipment_count", "expected_count", "expected_quantity"])),
+      pickedCount: toNumber(liveFirst(pickupRows, ["picked_box_count", "picked_count", "confirmed_quantity"])),
+      failureCount: pickupShipmentId && sources.pickupFailures?.complete
+        ? failureRows.filter((row) => row.shipment_id === pickupShipmentId).length : null,
+    },
+    trip: {
+      state: liveState(tripSources),
+      id: toText(liveFirst(tripRows, ["route_run_id", "id"])),
+      origin: toText(liveFirst(tripRows, ["origin", "origin_name", "origin_address"])),
+      destination: toText(liveFirst(tripRows, ["destination", "destination_name", "destination_address"])),
+      stage: toText(liveFirst(tripRows, ["status", "stage"])),
+      plannedStartAt: toText(liveFirst(tripRows, ["planned_start_at"])),
+      plannedEndAt,
+      startedAt: toText(liveFirst(tripRows, ["started_at"])),
+      endedAt: toText(liveFirst(tripRows, ["ended_at"])),
+      eta: toText(liveFirst(tripRows, ["eta", "eta_at", "estimated_arrival_at"])),
+      driverId: toText(liveFirst(tripRows, ["driver_user_id", "driver_id"])),
+      vehicleId: toText(liveFirst(tripRows, ["vehicle_id"])),
+      count: toNumber(liveFirst(tripRows, ["pickup_stop_count", "stop_count", "total_box_count"])),
+      seal: toText(liveFirst(tripRows, ["seal_number", "seal_id", "seal"])),
+      manifest: liveFirst(tripRows, ["shipments", "route_execution_manifest", "manifest"]),
+      context: (() => {
+        const value = liveFirst(tripRows, ["pickup_assignment", "route_assignment", "metadata"]);
+        const record = asRecord(value);
+        return Object.keys(record).length ? record : null;
+      })(),
+    },
+    sortation: {
+      state: liveState(sortationSources),
+      // ponytail: no scoped sortation aggregate yet; use its canonical projection when available.
+      bays: null,
+      recent: null,
+      inducted: null,
+      throughput: null,
+      minutes: null,
+    },
+  };
 }

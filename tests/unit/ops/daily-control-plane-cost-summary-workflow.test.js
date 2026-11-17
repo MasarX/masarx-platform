@@ -6,7 +6,7 @@ function readWorkflow(name) {
 }
 
 describe('daily control-plane cost summary workflow', () => {
-  test('runs daily plus manual dispatch on the control-plane runner class', () => {
+  test('runs daily plus manual dispatch on the self-hosted general controller', () => {
     const body = readWorkflow('daily-control-plane-cost-summary.yml');
 
     expect(body).toContain('schedule:');
@@ -20,8 +20,10 @@ describe('daily control-plane cost summary workflow', () => {
     expect(body).toContain('statuses: read');
     expect(body).toContain("group: daily-control-plane-cost-summary-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.days || 'daily' }}");
     expect(body).not.toContain('resolve_control_plane_runner:');
-    expect(body).toContain('runs-on: ${{ fromJSON(((vars.RUNNER_RUNS_ON_LINUX_LOCAL_JSON != \'\'');
-    expect(body).toContain('vars.RUNNER_RUNS_ON_LINUX_LOCAL_JSON');
+    expect(body).toContain('runs-on: ${{ fromJSON(vars.RUNNER_RUNS_ON_LINUX_LOCAL_JSON) }}');
+    expect(body).not.toContain('RUNNER_LABELS_LINUX_GITHUB_JSON');
+    expect(body).not.toContain('LINUX_RUNNER_POLICY');
+    expect(body).not.toContain('LOCAL_RUNNER_PLATFORM_STATE');
   });
 
   test('reuses ci-slo-report with a control-plane workflow filter and publishes dedicated artifacts', () => {
@@ -31,7 +33,8 @@ describe('daily control-plane cost summary workflow', () => {
     expect(body).toContain('READ_GITHUB_TOKEN: ${{ steps.token.outputs.token || github.token }}');
     expect(body).toContain('STATUS_GITHUB_TOKEN: ${{ github.token }}');
     expect(body).toContain("vars.CONTROL_PLANE_COST_SUMMARY_LOOKBACK_DAYS || '1'");
-    expect(body).toContain("vars.CONTROL_PLANE_COST_SUMMARY_WORKFLOWS || 'PR Governance Gate,Control Plane Review Gate,PR Admission Refresh,Ready PR Auto-Enqueue,CI SLO Report,Control Plane Drift Audit,CI Control Plane Canary'");
+    expect(body).toContain("vars.CONTROL_PLANE_COST_SUMMARY_WORKFLOWS || 'CI checks,Branch Convergence Remote Proof,Release Verify (main),CI SLO Report,Control Plane Drift Audit'");
+    expect(body).not.toContain('PR Gate (Preview + Verify)');
     expect(body).toContain('node scripts/ops/ci/ci-slo-report.js');
     expect(body).toContain('--workflows "$WORKFLOW_NAMES"');
     expect(body).toContain('control-plane-cost-summary.json');

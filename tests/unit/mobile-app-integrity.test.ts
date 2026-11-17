@@ -27,7 +27,7 @@ describe("mobile-app-integrity", () => {
     const mockAssertion = jest
       .fn<Promise<string>, [string, string]>()
       .mockResolvedValue("assertion");
-    const mockPrepare = jest.fn<Promise<void>, [number]>().mockResolvedValue();
+    const mockPrepare = jest.fn<Promise<void>, [string]>().mockResolvedValue();
     const mockRequest = jest.fn<Promise<string>, [string]>().mockResolvedValue("token");
 
     jest.doMock(
@@ -53,12 +53,12 @@ describe("mobile-app-integrity", () => {
     await expect(integrity.attestIosKeyAsync("kid", "challenge")).resolves.toBe("attest");
     await expect(integrity.generateIosAssertionAsync("kid", "challenge")).resolves.toBe("assertion");
     await expect(integrity.requestAndroidIntegrityCheckAsync("abc")).resolves.toBe("token");
-    await expect(integrity.prepareAndroidIntegrityTokenProviderAsync(123456)).resolves.toBeUndefined();
+    await expect(integrity.prepareAndroidIntegrityTokenProviderAsync("123456")).resolves.toBeUndefined();
 
     expect(mockGenerateKey).toHaveBeenCalledTimes(1);
     expect(mockAttest).toHaveBeenCalledWith("kid", "challenge");
     expect(mockAssertion).toHaveBeenCalledWith("kid", "challenge");
-    expect(mockPrepare).toHaveBeenCalledWith(123456);
+    expect(mockPrepare).toHaveBeenCalledWith("123456");
     expect(mockRequest).toHaveBeenCalledWith("abc");
   });
 });

@@ -42,6 +42,8 @@ jest.mock('pg', () => ({
 const {
   ensureCloudDbBootstrap,
   getLatestRepoMigrationVersion,
+  hasTable,
+  hasSchemaMigrationVersion,
   resolveBootstrapMode,
 } = require('../../../scripts/ops/cloud-db-bootstrap');
 
@@ -58,6 +60,20 @@ describe('cloud-db-bootstrap', () => {
     mockRunConnectivitySmoke.mockReset();
     mockClientInstances.length = 0;
     queryResponses = [];
+  });
+
+  test('empty metadata checks need no client and real query failure still closes it', async () => {
+    expect(await hasTable({ qualifiedName: '' })).toBe(false);
+    expect(await hasSchemaMigrationVersion({ version: '' })).toBe(true);
+    expect(mockClientInstances).toHaveLength(0);
+    queryResponses = [new Error('synthetic query failure')];
+    await expect(hasTable({ connectionString: 'postgres://fixture', qualifiedName: 'public.fixture',
+      env: { DB_SMOKE_TIMEOUT_MS: '1234' } })).rejects.toThrow('synthetic query failure');
+    expect(mockClientInstances).toHaveLength(1);
+    expect(mockClientInstances[0].config).toEqual({
+      connectionString: 'postgres://fixture', connectionTimeoutMillis: 1234, ssl: undefined,
+    });
+    expect(mockClientInstances[0].end).toHaveBeenCalledTimes(1);
   });
 
   test('getLatestRepoMigrationVersion returns the latest timestamped migration', () => {

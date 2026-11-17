@@ -1,4 +1,4 @@
-import postgres from "npm:postgres@^3.4.5";
+import postgres from "npm:postgres@3.4.9";
 import { readEnv } from "./mod.mjs";
 
 export type HotpathMode = "rest_rpc" | "direct_pooler";

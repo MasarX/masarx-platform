@@ -21,6 +21,7 @@ type TableViewportProps = {
   rowDensity: RowDensity;
   showRowNumbers?: boolean;
   selectionEnabled: boolean;
+  selectionReady?: boolean;
   selectHeaderRef: React.RefObject<HTMLTableHeaderCellElement | null>;
   selectAllRef: React.RefObject<HTMLInputElement | null>;
   allSelected: boolean;
@@ -69,6 +70,7 @@ export const TableViewport = React.memo(function TableViewport({
   rowDensity,
   showRowNumbers,
   selectionEnabled,
+  selectionReady = true,
   selectHeaderRef,
   selectAllRef,
   allSelected,
@@ -124,6 +126,7 @@ export const TableViewport = React.memo(function TableViewport({
             t={t}
             showRowNumbers={showRowNumbers}
             selectionEnabled={selectionEnabled}
+            selectionReady={selectionReady}
             selectHeaderRef={selectHeaderRef}
             selectAllRef={selectAllRef}
             allSelected={allSelected}

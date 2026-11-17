@@ -1,0 +1,63 @@
+BEGIN;
+SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
+CREATE EXTENSION IF NOT EXISTS pgtap;
+SELECT plan(28);
+
+SELECT ok((SELECT prosecdef FROM pg_proc WHERE oid = 'public.tenant_signup_review_apply_v1(uuid,text,uuid,text,uuid,boolean,text,jsonb)'::regprocedure), 'public facade remains security definer');
+SELECT ok(NOT (SELECT prosecdef FROM pg_proc WHERE oid = 'api.tenant_signup_review_apply_v1(uuid,text,uuid,text,uuid,boolean,text,jsonb)'::regprocedure), 'API facade remains security invoker');
+SELECT ok(NOT has_function_privilege('anon', 'public.tenant_signup_review_apply_v1(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'anon cannot execute public facade');
+SELECT ok(NOT has_function_privilege('authenticated', 'public.tenant_signup_review_apply_v1(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'authenticated cannot execute public facade');
+SELECT ok(has_function_privilege('service_role', 'public.tenant_signup_review_apply_v1(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'service role can execute public facade');
+SELECT ok(NOT has_function_privilege('anon', 'api.tenant_signup_review_apply_v1(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'anon cannot execute API facade');
+SELECT ok(NOT has_function_privilege('authenticated', 'api.tenant_signup_review_apply_v1(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'authenticated cannot execute API facade');
+SELECT ok(has_function_privilege('service_role', 'api.tenant_signup_review_apply_v1(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'service role can execute API facade');
+SELECT ok(NOT has_function_privilege('anon', 'public.tenant_signup_review_apply_v1_impl_202605031930(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'anon cannot execute private body');
+SELECT ok(NOT has_function_privilege('authenticated', 'public.tenant_signup_review_apply_v1_impl_202605031930(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'authenticated cannot execute private body');
+SELECT ok(NOT has_function_privilege('service_role', 'public.tenant_signup_review_apply_v1_impl_202605031930(uuid,text,uuid,text,uuid,boolean,text,jsonb)', 'EXECUTE'), 'service role must use checked facade');
+
+RESET ROLE;
+SELECT set_config('request.jwt.claim.role', '', true);
+SELECT set_config('request.jwt.claims', '{}', true);
+SELECT is(public.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'service_role_required', 'session user without service claim is refused');
+SELECT set_config('request.jwt.claims', '{', true);
+SELECT is(public.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'service_role_required', 'malformed claims fail closed');
+SELECT set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+SELECT is(public.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'service_role_required', 'nonservice JSON claim is refused');
+
+SET LOCAL ROLE service_role;
+SELECT set_config('request.jwt.claim.role', '', true);
+SELECT set_config('request.jwt.claims', '{"sub":"33333333-3333-4333-8333-333333333333"}', true);
+SELECT is(public.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'request_id_required', 'database service role reaches validation without JWT role');
+SELECT is(api.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'request_id_required', 'service API facade reaches validation');
+SELECT is(current_setting('request.jwt.claims', true)::jsonb->>'sub', '33333333-3333-4333-8333-333333333333', 'service call preserves actor claim');
+RESET ROLE;
+SELECT set_config('request.jwt.claim.role', 'service_role', true);
+SELECT set_config('request.jwt.claims', '{}', true);
+SELECT is(public.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'request_id_required', 'standalone service JWT claim reaches validation');
+SELECT set_config('request.jwt.claim.role', '', true);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+SELECT is(public.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'request_id_required', 'JSON service JWT claim reaches validation');
+SELECT set_config('request.jwt.claim.role', '', true);
+SELECT set_config('request.jwt.claims', '[]', true);
+SELECT is(public.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'service_role_required', 'nonobject claims do not grant service access');
+SELECT set_config('request.jwt.claim.role', ' Service_Role ', true);
+SELECT is(public.tenant_signup_review_apply_v1(NULL, 'approved')->'error'->>'code', 'request_id_required', 'normalized standalone service claim reaches validation');
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.role', 'service_role', true);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+SELECT throws_ok($$SELECT public.tenant_signup_review_apply_v1(NULL, 'approved')$$, '42501', NULL, 'authenticated public call is denied even with forged service metadata');
+SELECT throws_ok($$SELECT api.tenant_signup_review_apply_v1(NULL, 'approved')$$, '42501', NULL, 'authenticated API call is denied');
+SELECT throws_ok($$SELECT public.tenant_signup_review_apply_v1_impl_202605031930(NULL, 'approved')$$, '42501', NULL, 'authenticated private call is denied');
+RESET ROLE;
+SET LOCAL ROLE service_role;
+SELECT throws_ok($$SELECT public.tenant_signup_review_apply_v1_impl_202605031930(NULL, 'approved')$$, '42501', NULL, 'service private call is denied');
+RESET ROLE;
+SET LOCAL ROLE anon;
+SELECT throws_ok($$SELECT public.tenant_signup_review_apply_v1(NULL, 'approved')$$, '42501', NULL, 'anon public call is denied');
+SELECT throws_ok($$SELECT api.tenant_signup_review_apply_v1(NULL, 'approved')$$, '42501', NULL, 'anon API call is denied');
+SELECT throws_ok($$SELECT public.tenant_signup_review_apply_v1_impl_202605031930(NULL, 'approved')$$, '42501', NULL, 'anon private call is denied');
+RESET ROLE;
+
+SELECT * FROM finish();
+ROLLBACK;

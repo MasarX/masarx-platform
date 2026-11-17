@@ -1,4 +1,6 @@
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { DOMParser } from "npm:@xmldom/xmldom@0.9.12";
+import { isPngContainer, isJpegContainer } from "./_shared/raster-images.mjs";
 import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
 type JsonRecord = Record<string, unknown>;
@@ -40,6 +42,40 @@ const decodeBase64 = (raw: string): Uint8Array => {
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
   return bytes;
+};
+
+
+const imageContentTypeFromBytes = (bytes: Uint8Array, contentType: string): string | null => {
+  if (isPngContainer(bytes)) return "image/png";
+  if (isJpegContainer(bytes)) return "image/jpeg";
+  try {
+    // RFC 7303: BOM > MIME charset > XML declaration/default. Hints choose decoding, never XML validity.
+    const bom = bytes[0] === 0xff && bytes[1] === 0xfe ? "utf-16le"
+      : bytes[0] === 0xfe && bytes[1] === 0xff ? "utf-16be"
+      : bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? "utf-8" : null;
+    let charset: string | undefined;
+    for (const parameter of contentType.matchAll(/;\s*([^=;\s]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;\s]*))/g)) {
+      if (parameter[1].toLowerCase() === "charset") {
+        charset = (parameter[2] ?? parameter[3]).replace(/\\(.)/g, "$1");
+        break;
+      }
+    }
+    let declaredEncoding: string | undefined;
+    if (!bom && charset === undefined && String.fromCharCode(...bytes.subarray(0, 5)) === "<?xml") {
+      // Scan only the leading declaration, bounded by the already-enforced 5 MiB input limit.
+      const end = bytes.findIndex((value, index) => value === 0x3f && bytes[index + 1] === 0x3e);
+      const declaration = new TextDecoder("windows-1252").decode(bytes.subarray(0, end < 0 ? 0 : end + 2));
+      declaredEncoding = /[\t\n\r ]encoding[\t\n\r ]*=[\t\n\r ]*(["'])([^"']*)\1/.exec(declaration)?.[2];
+    }
+    const decoder = new TextDecoder(bom ?? charset ?? declaredEncoding ?? "utf-8", { fatal: true });
+    const source = decoder.decode(bytes);
+    const doc = new DOMParser({ onError: () => { throw new Error("Invalid SVG XML"); } })
+      .parseFromString(source, "application/xml");
+    return doc.documentElement?.localName === "svg" && doc.documentElement.namespaceURI === "http://www.w3.org/2000/svg"
+      ? `image/svg+xml${!bom && charset !== undefined ? `; charset=${decoder.encoding}` : ""}` : null;
+  } catch {
+    return null;
+  }
 };
 
 const sanitizeFileName = (raw: string) => {
@@ -103,10 +139,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json(405, { ok: false, error: { code: "method_not_allowed" } }, corsHeaders);
 
-  // `verify_jwt` is enabled for this function.
-  // Some Supabase setups mint user JWTs with an asymmetric algorithm that the
-  // edge gateway cannot verify yet; the browser can call this function using the
-  // anon key for gateway verification and pass a user JWT in the body for RLS.
+  // Gateway JWT verification is disabled for browser compatibility with the
+  // current key plane. This handler validates the signed-in user's JWT through
+  // the canonical API/RLS path before performing any asset operation.
   const headerToken = extractToken(req, { prefer: "authorization", allowWebhookHeader: false, allowQueryParam: false });
 
   let payload: unknown;
@@ -198,17 +233,29 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (typed.mode === "upload") {
       const fileNameRaw = asString((typed as any).file_name);
       const fileBase64 = asString((typed as any).file_base64);
-      const contentType = asString((typed as any).content_type) || "application/octet-stream";
+      let contentType = asString((typed as any).content_type) || "application/octet-stream";
       if (!fileNameRaw) return json(400, { ok: false, error: { code: "file_name_required" } }, corsHeaders);
       if (!fileBase64) return json(400, { ok: false, error: { code: "file_base64_required" } }, corsHeaders);
 
       const safeName = sanitizeFileName(fileNameRaw);
       if (!safeName) return json(400, { ok: false, error: { code: "invalid_file_name" } }, corsHeaders);
 
-      const bytes = decodeBase64(fileBase64);
+      let bytes: Uint8Array;
+      try {
+        bytes = decodeBase64(fileBase64);
+      } catch {
+        return json(400, { ok: false, error: { code: "invalid_file_base64" } }, corsHeaders);
+      }
       if (bytes.length === 0) return json(400, { ok: false, error: { code: "empty_file" } }, corsHeaders);
       if (bytes.length > 5 * 1024 * 1024) {
         return json(413, { ok: false, error: { code: "file_too_large", message: "Max 5MB" } }, corsHeaders);
+      }
+      const declaredMime = contentType.split(";", 1)[0].trim().toLowerCase();
+      if (declaredMime.startsWith("image/")) {
+        const detectedType = imageContentTypeFromBytes(bytes, contentType);
+        if (!detectedType) return json(400, { ok: false, error: { code: "invalid_image" } }, corsHeaders);
+        if (detectedType.split(";", 1)[0] !== declaredMime) return json(400, { ok: false, error: { code: "image_mime_mismatch" } }, corsHeaders);
+        contentType = detectedType;
       }
 
       const path = `${orgId}/${DESIGNER_DIR}/${safeName}`;

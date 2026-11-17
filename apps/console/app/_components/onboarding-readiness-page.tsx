@@ -4,7 +4,7 @@ import { LoadingState, OnboardingReadinessPage as UiOnboardingReadinessPage } fr
 type OnboardingReadinessPageProps = Parameters<typeof UiOnboardingReadinessPage>[0];
 
 const OnboardingReadinessPageInner =
-  UiOnboardingReadinessPage as unknown as (props: OnboardingReadinessPageProps) => JSX.Element;
+  UiOnboardingReadinessPage as unknown as (props: OnboardingReadinessPageProps) => React.JSX.Element;
 
 export function OnboardingReadinessPage(props: OnboardingReadinessPageProps) {
   return (

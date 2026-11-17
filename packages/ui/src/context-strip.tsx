@@ -25,6 +25,8 @@ import { isTrustedUrl, resolveBaseOrigin } from "./url-guard";
 import { reportUiEvent } from "./reporting";
 
 type ContextStripProps = {
+  organizationId?: string | null;
+  userId?: string | null;
   userLabel?: string | null;
   orgLabel?: string | null;
   scopeLabel?: string | null;
@@ -152,6 +154,8 @@ const normalizeScopeOptions = (options?: UiScopeOption[] | null) => {
  * Context strip showing user/org/scope metadata with optional sign-out link.
  */
 export function ContextStrip({
+  organizationId,
+  userId,
   userLabel,
   orgLabel,
   scopeLabel,
@@ -177,6 +181,8 @@ export function ContextStrip({
   const settingsValue = toText(settingsResolutionId);
   const shouldFetchScopeOptions = !scopeOptions && Boolean(userValue);
   const { data: readRegistry } = useReadRegistry({
+    userId, scopeType, scopeId,
+    organizationId,
     enabled: shouldFetchScopeOptions,
     staleTime: 60_000,
   });

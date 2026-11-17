@@ -24,3 +24,48 @@ export async function waitForAppShellHydrated(page: Page, appKey: string) {
     await expect(sidebar.locator(":scope > .opacity-0")).toHaveCount(0);
   }
 }
+
+export async function waitForDashboardHealthReady(
+  page: Page,
+  appKey: "console" | "portal",
+  email: string,
+) {
+  const stateHandle = await page.waitForFunction(
+    (app) => {
+      for (const testId of [
+        `${app}-dashboard-error`,
+        `${app}-context-unavailable`,
+        `${app}-auth-required`,
+        `${app}-missing-env`,
+      ]) {
+        if (document.querySelector(`[data-testid="${testId}"]`)) {
+          return `error:${testId}`;
+        }
+      }
+      return document.querySelector(`[data-testid="${app}-dashboard-ready"]`) &&
+        document.querySelector(`[data-testid="${app}-dashboard-health"]`)
+        ? "ready"
+        : false;
+    },
+    appKey,
+    { timeout: 20_000 },
+  );
+  try {
+    const state = await stateHandle.jsonValue();
+    if (state !== "ready") {
+      throw new Error(`Dashboard readiness failed (${state}).`);
+    }
+  } finally {
+    await stateHandle.dispose();
+  }
+
+  const dashboard = page.locator(`[data-testid="${appKey}-dashboard-ready"]`);
+  await expect(dashboard).toHaveCount(1, { timeout: 10_000 });
+  await expect(dashboard.getByText(email, { exact: true })).toHaveCount(1, {
+    timeout: 10_000,
+  });
+  await expect(
+    page.locator(`[data-testid="${appKey}-dashboard-health"]`),
+  ).toHaveCount(1, { timeout: 10_000 });
+  await waitForAppShellHydrated(page, appKey);
+}

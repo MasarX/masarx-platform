@@ -2,6 +2,7 @@ const PR_CONTEXT_QUERY = `query($owner: String!, $repo: String!, $number: Int!) 
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       number
+      state
       title
       body
       baseRefName
@@ -22,13 +23,6 @@ function normalizeString(value) {
 
 function normalizeRefName(value) {
   return normalizeString(value).replace(/^refs\/heads\//, '');
-}
-
-function parsePrNumberFromHeadRef(ref) {
-  const raw = normalizeString(ref);
-  if (!raw) return 0;
-  const match = raw.match(/pr-(\d+)-/i) || raw.match(/pr-(\d+)\b/i);
-  return match ? Number.parseInt(match[1], 10) || 0 : 0;
 }
 
 function normalizeLabels(labels) {
@@ -62,6 +56,7 @@ function buildContextPayload({
   sameRepo,
   authorLogin,
   isDraft = false,
+  state,
   source,
 }) {
   return {
@@ -75,6 +70,7 @@ function buildContextPayload({
     sameRepo: sameRepo ? '1' : '0',
     authorLogin: normalizeString(authorLogin).toLowerCase(),
     isDraft: Boolean(isDraft),
+    state: normalizeString(state).toLowerCase(),
     source: normalizeString(source),
   };
 }
@@ -95,6 +91,7 @@ function fromGraphql(node, repositoryFullName) {
     ),
     authorLogin: node?.author?.login,
     isDraft: node?.isDraft,
+    state: node?.state,
     source: 'graphql',
   });
 }
@@ -111,6 +108,7 @@ function fromRest(pr, repositoryFullName) {
     sameRepo: isSameRepository(pr?.head?.repo?.full_name, repositoryFullName),
     authorLogin: pr?.user?.login,
     isDraft: pr?.draft,
+    state: pr?.merged || pr?.merged_at ? 'closed' : pr?.state,
     source: 'rest',
   });
 }
@@ -125,52 +123,60 @@ function normalizeAssociatedPullRequest(item) {
 }
 
 async function listAssociatedPrsByCommit({ github, owner, repo, commitSha }) {
-  if (!commitSha) return [];
-  const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-    owner,
-    repo,
-    commit_sha: commitSha,
-    per_page: 20,
-    mediaType: { previews: ['groot'] },
-  });
-  const rows = Array.isArray(response?.data) ? response.data : [];
-  return rows
-    .map(normalizeAssociatedPullRequest)
-    .filter((item) => Number.isFinite(item.number) && item.number > 0);
+  const rows = [];
+  for (let page = 1; ; page += 1) {
+    if (page > 100) throw new Error('Incomplete associated PR inventory.');
+    const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+      owner, repo, commit_sha: exactSha(commitSha), per_page: 100, page,
+      mediaType: { previews: ['groot'] },
+    });
+    if (!Array.isArray(response?.data)) throw new Error('Invalid associated PR inventory.');
+    rows.push(...response.data);
+    if (response.data.length < 100) break;
+  }
+  const normalized = rows.map(normalizeAssociatedPullRequest);
+  if (normalized.some((item) => !Number.isSafeInteger(item.number) || item.number < 1)) {
+    throw new Error('Invalid associated PR identity inventory.');
+  }
+  return normalized;
 }
 
-function selectMergeGroupPullRequest({
-  associated,
-  baseRef,
-  headRef,
-  explicitPrNumber = 0,
-}) {
-  const candidates = (Array.isArray(associated) ? associated : [])
-    .map(normalizeAssociatedPullRequest)
-    .filter((item) => Number.isFinite(item.number) && item.number > 0);
-  const normalizedBaseRef = normalizeRefName(baseRef);
-  const normalizedHeadRef = normalizeRefName(headRef);
+function exactSha(value) {
+  const sha = normalizeString(value);
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('Missing or invalid full candidate SHA.');
+  return sha;
+}
 
-  if (explicitPrNumber) {
-    const exact = candidates.find((item) => item.number === explicitPrNumber);
-    return {
-      candidates: exact ? [exact] : [{ number: explicitPrNumber, baseRef: normalizedBaseRef, headRef: '', headSha: '' }],
-      source: 'head_ref',
-    };
+function requireCurrentPullRequest(pr, { number, baseRef, sourceHeadSha, repositoryFullName }) {
+  if (pr.number !== number || pr.state !== 'open' || pr.source === 'issue_event_fallback' ||
+      pr.sameRepo !== '1' || pr.baseRef !== baseRef || pr.headSha !== exactSha(sourceHeadSha)) {
+    throw new Error(`Unverified or obsolete PR #${number} in ${repositoryFullName}.`);
   }
+}
 
-  const baseScoped = normalizedBaseRef
-    ? candidates.filter((item) => item.baseRef === normalizedBaseRef)
-    : candidates;
-  const scoped = baseScoped.length ? baseScoped : candidates;
-  const branchScoped = normalizedHeadRef && !normalizedHeadRef.startsWith('gh-readonly-queue/')
-    ? scoped.filter((item) => item.headRef === normalizedHeadRef)
-    : scoped;
-
-  if (branchScoped.length) {
-    return { candidates: branchScoped, source: 'associated_commit_branch' };
+async function getMergeParents({ github, owner, repo, sha }) {
+  const response = await github.rest.repos.getCommit({ owner, repo, ref: exactSha(sha) });
+  const commit = response?.data;
+  if (commit?.sha !== sha || !Array.isArray(commit.parents) || commit.parents.length !== 2) {
+    throw new Error('Unverified tested merge commit topology.');
   }
-  return { candidates: scoped, source: 'associated_commit' };
+  return commit.parents.map((parent) => exactSha(parent?.sha));
+}
+
+async function resolvePullRequestTestedContext({ github, owner, repo, mergeSha, eventPullRequest, repositoryFullName }) {
+  const testedSha = exactSha(mergeSha);
+  const baseSha = exactSha(eventPullRequest?.base?.sha);
+  const sourceHeadSha = exactSha(eventPullRequest?.head?.sha);
+  const prNumber = Number(eventPullRequest?.number);
+  const baseRef = normalizeRefName(eventPullRequest?.base?.ref);
+  if (!prNumber || baseRef !== 'dev') throw new Error('Invalid native PR candidate context.');
+  const pr = await resolvePullRequestContext({ github, owner, repo, prNumber, repositoryFullName, eventPullRequest });
+  requireCurrentPullRequest(pr, { number: prNumber, baseRef, sourceHeadSha, repositoryFullName });
+  const parents = await getMergeParents({ github, owner, repo, sha: testedSha });
+  if (parents[0] !== baseSha || parents[1] !== sourceHeadSha) {
+    throw new Error('Tested PR merge does not contain the exact event base and source head.');
+  }
+  return { ...pr, mergeSha: testedSha, baseSha, sourceHeadSha, candidates: [{ number: prNumber, headSha: sourceHeadSha }] };
 }
 
 async function resolveMergeGroupPullRequestContext({
@@ -184,75 +190,54 @@ async function resolveMergeGroupPullRequestContext({
   headSha,
   repositoryFullName,
 }) {
-  const normalizedMergeSha = normalizeString(mergeSha);
-  if (!normalizedMergeSha) {
-    throw new Error('Missing merge group SHA while resolving PR context.');
-  }
-
+  const normalizedMergeSha = exactSha(mergeSha);
   const normalizedBaseRef = normalizeRefName(baseRef);
-  const normalizedBaseSha = normalizeString(baseSha);
-  const normalizedHeadRef = normalizeString(headRef);
-  const testedHeadSha = normalizeString(headSha) || normalizedMergeSha;
-  const explicitPrNumber = parsePrNumberFromHeadRef(normalizedHeadRef);
-
-  let associated = [];
-  try {
-    associated = await listAssociatedPrsByCommit({
-      github,
-      owner,
-      repo,
-      commitSha: normalizedMergeSha,
-    });
-  } catch (error) {
-    associated = [];
+  const normalizedBaseSha = exactSha(baseSha);
+  const queueRef = normalizeRefName(headRef);
+  const queueMatch = queueRef.match(/^gh-readonly-queue\/dev\/pr-([1-9]\d*)-([a-f0-9]{40})$/);
+  if (normalizedBaseRef !== 'dev' || !queueMatch || exactSha(headSha) !== normalizedMergeSha) {
+    throw new Error('Invalid native merge-group candidate context.');
   }
-
-  const selection = selectMergeGroupPullRequest({
-    associated,
-    baseRef: normalizedBaseRef,
-    headRef: normalizedHeadRef,
-    explicitPrNumber,
-  });
-  const candidates = selection.candidates || [];
-
-  if (!candidates.length) {
-    throw new Error(
-      `Unable to resolve PR number for merge_group commit '${normalizedMergeSha}'. ` +
-      `head_ref='${normalizedHeadRef || '<missing-head_ref>'}' base_ref='${normalizedBaseRef || '<missing-base_ref>'}'.`,
-    );
+  const candidates = [];
+  const seen = new Set();
+  let current = normalizedMergeSha;
+  // Bound malformed/unavailable graphs; never turn incomplete proof into an empty group.
+  while (current !== normalizedBaseSha) {
+    if (seen.has(current) || seen.size >= 100) throw new Error('Incomplete merge-group topology.');
+    seen.add(current);
+    const [parent, sourceHeadSha] = await getMergeParents({ github, owner, repo, sha: current });
+    const associated = await listAssociatedPrsByCommit({ github, owner, repo, commitSha: sourceHeadSha });
+    const matches = [];
+    for (const item of associated.filter((item) => item.baseRef === normalizedBaseRef && item.headSha === sourceHeadSha)) {
+      const pr = await resolvePullRequestContext({ github, owner, repo, prNumber: item.number, repositoryFullName });
+      if (pr.state !== 'open') continue;
+      requireCurrentPullRequest(pr, { number: item.number, baseRef: normalizedBaseRef, sourceHeadSha, repositoryFullName });
+      if (pr.isDraft) throw new Error('Merge-group member is now a draft.');
+      matches.push(pr);
+    }
+    if (matches.length !== 1 || candidates.some((item) => item.number === matches[0].number)) {
+      throw new Error('Unverified or ambiguous merge-group PR membership.');
+    }
+    candidates.unshift(matches[0]);
+    current = parent;
   }
-
-  if (candidates.length > 1) {
-    return {
-      multiPrGroup: true,
-      mergeSha: normalizedMergeSha,
-      headSha: '',
-      baseRef: normalizedBaseRef,
-      baseSha: normalizedBaseSha,
-      candidates,
-    };
+  if (!candidates.length || !candidates.some((item) => item.number === Number(queueMatch[1]))) {
+    throw new Error('Queue ref does not identify a tested merge-group member.');
   }
-
-  const prNumber = candidates[0].number;
-  const pr = await resolvePullRequestContext({
-    github,
-    owner,
-    repo,
-    prNumber,
-    repositoryFullName,
-  });
-
+  const pr = candidates.length === 1 ? candidates[0] : {};
   return {
     ...pr,
-    number: prNumber,
-    // Merge-group validation must publish artifacts for the exact tree GitHub tests.
-    headSha: testedHeadSha,
-    sourceHeadSha: pr?.headSha || candidates[0]?.headSha || '',
+    number: pr.number || 0,
+    headSha: normalizedMergeSha,
+    sourceHeadSha: pr.headSha || '',
     mergeSha: normalizedMergeSha,
-    baseRef: pr?.baseRef || normalizedBaseRef,
+    baseRef: normalizedBaseRef,
     baseSha: normalizedBaseSha,
-    multiPrGroup: false,
-    source: selection.source,
+    sameRepo: '1',
+    isDraft: candidates.some((item) => item.isDraft),
+    multiPrGroup: candidates.length > 1,
+    candidates: candidates.map((item) => ({ number: item.number, headSha: item.headSha })),
+    source: 'verified_merge_graph',
   };
 }
 
@@ -267,6 +252,7 @@ function fromIssueFallback(issue, eventPullRequest, repositoryFullName) {
     headSha: eventPullRequest?.head?.sha,
     sameRepo: isSameRepository(eventPullRequest?.head?.repo?.full_name, repositoryFullName),
     authorLogin: issue?.user?.login,
+    state: issue?.state,
     source: 'issue_event_fallback',
   });
 }
@@ -320,6 +306,7 @@ async function resolvePullRequestContext({
 module.exports = {
   PR_CONTEXT_QUERY,
   buildContextPayload,
+  exactSha,
   isSameRepository,
   isTooManyFilesChangedError,
   listAssociatedPrsByCommit,
@@ -327,8 +314,7 @@ module.exports = {
   normalizeAssociatedPullRequest,
   normalizeRefName,
   normalizeString,
-  parsePrNumberFromHeadRef,
   resolveMergeGroupPullRequestContext,
   resolvePullRequestContext,
-  selectMergeGroupPullRequest,
+  resolvePullRequestTestedContext,
 };

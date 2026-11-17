@@ -6,10 +6,13 @@ jest.mock('../../../scripts/ops/workspace/with-full-preview-stack', () => ({
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('node:child_process');
 const {
+  assertLandingEndpointSeparation,
   buildPreviewManifestShellExports,
   ensureProtectedPreviewBypass,
   isProtectedPreviewHost,
+  normalizeLandingProofEndpoint,
   resolvePreviewIdentityIdFromEvent,
   serializeShellExports,
 } = require('../../../scripts/ops/ci/release-verify-preview');
@@ -111,6 +114,63 @@ describe('release-verify-preview helpers', () => {
     expect(isProtectedPreviewHost('')).toBe(false);
   });
 
+  test('normalizes endpoint query, fragment, casing and trailing slash aliases', () => {
+    expect(normalizeLandingProofEndpoint('/__tenant-signup///?x=1#contact')).toBe('/__tenant-signup');
+    expect(normalizeLandingProofEndpoint('https://EXAMPLE.com:443/functions/v1/marketing-lead-intake/?x=1'))
+      .toBe('https://example.com/functions/v1/marketing-lead-intake');
+  });
+
+  test.each([
+    ['https://example.com', '/functions/v1/marketing-lead-intake', '/functions/v1/tenant-signup-intake'],
+    ['http://127.0.0.1:3333', '/__landing-contact/?source=test', '/__tenant-signup/'],
+    ['http://landing-ci.localhost:3333', '/__landing-contact', '/__tenant-signup'],
+    ['http://[::1]:3333', 'http://[::1]:3333/__landing-contact', '/__tenant-signup'],
+  ])('allows distinct role-bound endpoints on %s', (siteUrl, contactEndpoint, tenantSignupEndpoint) => {
+    expect(assertLandingEndpointSeparation({ siteUrl, contactEndpoint, tenantSignupEndpoint })).toEqual({
+      contactEndpoint: normalizeLandingProofEndpoint(contactEndpoint),
+      tenantSignupEndpoint: normalizeLandingProofEndpoint(tenantSignupEndpoint),
+    });
+  });
+
+  test.each([
+    ['', '/functions/v1/tenant-signup-intake'],
+    ['/functions/v1/marketing-lead-intake', ''],
+    ['/functions/v1/marketing-lead-intake/?x=1', '/functions/v1/marketing-lead-intake/'],
+    ['/functions/v1/tenant-signup-intake', '/functions/v1/marketing-lead-intake'],
+    ['/__landing-contact?x=1', '/__landing-contact///#alias'],
+    ['/__tenant-signup', '/__landing-contact'],
+    ['/api/contact', '/functions/v1/tenant-signup-intake'],
+  ])('rejects missing, reused or crossed roles: %s -> %s', (contactEndpoint, tenantSignupEndpoint) => {
+    expect(() => assertLandingEndpointSeparation({ siteUrl: 'http://localhost:3333', contactEndpoint, tenantSignupEndpoint }))
+      .toThrow(/ENDPOINT/);
+  });
+
+  test.each(['', 'https://landing.example.com', 'https://localhost.example.com', 'file://localhost/'])
+    ('rejects local mocks for a nonlocal site: %s', (siteUrl) => {
+      expect(() => assertLandingEndpointSeparation({ siteUrl, contactEndpoint: '/__landing-contact', tenantSignupEndpoint: '/__tenant-signup' }))
+        .toThrow(/LANDING_CONTACT_ENDPOINT/);
+    });
+
+  test.each(['//example.com/__landing-contact', '/\\example.com/__landing-contact', 'javascript:marketing-lead-intake', (['https',":","/","/",'user',":",'password',"@",'example.com',"/",'marketing-lead-intake'].join(""))])
+    ('rejects an invalid endpoint before proof: %s', (contactEndpoint) => {
+      expect(() => assertLandingEndpointSeparation({ siteUrl: 'http://localhost', contactEndpoint, tenantSignupEndpoint: '/__tenant-signup' })).toThrow();
+    });
+
+  test('rejects a remote mock URL even when the landing site is local', () => {
+    expect(() => assertLandingEndpointSeparation({ siteUrl: 'http://localhost', contactEndpoint: 'https://remote.example.com/__landing-contact', tenantSignupEndpoint: '/__tenant-signup' }))
+      .toThrow(/LANDING_CONTACT_ENDPOINT/);
+  });
+
+  test('the actual release guard CLI accepts distinct endpoints and rejects a reused alias', () => {
+    const script = path.join(process.cwd(), 'scripts/ops/ci/release-verify-preview.js');
+    const env = { ...process.env, LANDING_SITE_URL: 'http://localhost:3333', LANDING_CONTACT_ENDPOINT: '/__landing-contact', LANDING_TENANT_SIGNUP_ENDPOINT: '/__tenant-signup' };
+    const valid = spawnSync(process.execPath, [script, '--mode', 'assert-landing-endpoint-separation'], { env, encoding: 'utf8' });
+    expect(valid.status).toBe(0);
+    const reused = spawnSync(process.execPath, [script, '--mode', 'assert-landing-endpoint-separation'], { env: { ...env, LANDING_TENANT_SIGNUP_ENDPOINT: '/__landing-contact/?source=alias' }, encoding: 'utf8' });
+    expect(reused.status).not.toBe(0);
+    expect(reused.stderr).toContain('LANDING_TENANT_SIGNUP_ENDPOINT');
+  });
+
   test('ensureProtectedPreviewBypass skips when no protected preview host is present', async () => {
     const env = {
       CONSOLE_URL: 'https://unjijvxjrwurjgsnokovrvom.example.invalid',
@@ -170,6 +230,19 @@ describe('release-verify-preview helpers', () => {
 });
 
 describe('release verify preview workflow contracts', () => {
+  test('guards hosted preview endpoints only when landing is selected and uses implemented distinct local mocks', () => {
+    const body = readWorkflow('release-verify-main.yml');
+    expect(body).toContain("LANDING_TENANT_SIGNUP_ENDPOINT: ${{ vars.LANDING_TENANT_SIGNUP_ENDPOINT || '' }}");
+    expect(body).toContain('case ",${preview_required_surfaces}," in');
+    expect(body).toContain('*,landing,*) node scripts/ops/ci/release-verify-preview.js --mode assert-landing-endpoint-separation ;;');
+    const build = body.slice(body.indexOf('    - name: Build landing (preview)'), body.indexOf('    - name: Start landing E2E server (local preview artifact)'));
+    expect(build).toContain('LANDING_CONTACT_ENDPOINT: "/__landing-contact"');
+    expect(build).toContain('LANDING_TENANT_SIGNUP_ENDPOINT: "/__tenant-signup"');
+    expect(build.indexOf('--mode assert-landing-endpoint-separation')).toBeLessThan(build.indexOf('node scripts/frontend/build-landing.js'));
+    expect(body).toContain('LANDING_ENABLE_INTAKE_MOCKS=1');
+    expect(body).toContain('LANDING_SITE_URL=http://127.0.0.1:3333');
+  });
+
   test('preview provision generates runtime readiness evidence before staging the internal bundle', () => {
     const body = readWorkflow('release-verify-main.yml');
     const jobStart = body.indexOf('  release_verify_preview_provision:');

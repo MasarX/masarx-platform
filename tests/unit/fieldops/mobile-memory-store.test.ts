@@ -1,6 +1,17 @@
 import { createMemoryKeyValueStore, createMemoryOutboxStore } from "../../../apps/fieldops/src/mobile-memory-store";
 
 describe("mobile memory stores", () => {
+  test("restores and snapshots complete entries without aliasing mutable fields", async () => {
+    const original = createMemoryOutboxStore();
+    await original.enqueue({ id: "saved", rpc: "depart", args: { route: "one" } });
+    const snapshot = original.snapshot();
+    const restored = createMemoryOutboxStore(snapshot);
+    snapshot[0].args.route = "changed";
+    restored.snapshot()[0].args.route = "also changed";
+    expect((await restored.get("saved"))?.args).toEqual({ route: "one" });
+    expect((await restored.get("saved"))?.created_at).toBe((await original.get("saved"))?.created_at);
+  });
+
   test("memory outbox supports enqueue, claim, update, and clear", async () => {
     const store = createMemoryOutboxStore();
     await store.init();
@@ -178,4 +189,52 @@ describe("mobile memory stores", () => {
     await store.set("nullable", null);
     expect(await store.get("nullable")).toBeNull();
   });
+});
+
+test("memory store retains Edge transport and actor across claim and recovery", async () => {
+  const store = createMemoryOutboxStore();
+  const args = { p_expected_actor_user_id: "actor-a", p_idempotency_key: "edge-key" };
+  await store.enqueue({ id: "edge", rpc: "fieldops-reassignment-request", transport: "edge", args });
+  expect((await store.claimPending({ limit: 1 }))[0]).toMatchObject({ transport: "edge", args });
+  await store.update("edge", { updated_at: "2000-01-01T00:00:00.000Z" });
+  await store.recoverStaleInFlight({ olderThanMs: 1000 });
+  expect((await store.claimPending({ limit: 1 }))[0]).toMatchObject({ transport: "edge", args });
+});
+
+test("memory query bounds and explicit force retain scheduled work without claiming dead or in-flight", async () => {
+  const store = createMemoryOutboxStore();
+  for (const id of ["ready", "future", "dead", "flight"]) await store.enqueue({ id, rpc: "rpc", args: {} });
+  await store.update("future", { status: "failed", next_attempt_at: new Date(Date.now() + 60000).toISOString() });
+  await store.update("dead", { status: "dead" });
+  await store.update("flight", { status: "in_flight" });
+  expect(await store.countPending()).toBe(1);
+  expect(await store.listPending({ limit: -1 })).toEqual([]);
+  expect(await store.listPending({ limit: Infinity })).toHaveLength(1);
+  expect(await store.list({ limit: 1.9 })).toHaveLength(1);
+  expect((await store.listPending({ force: true })).map(entry => entry.id).sort()).toEqual(["future", "ready"]);
+  expect((await store.claimPending({ force: true })).map(entry => entry.id).sort()).toEqual(["future", "ready"]);
+  expect((await store.get("dead"))?.status).toBe("dead");
+  expect((await store.get("flight"))?.status).toBe("in_flight");
+});
+
+test("memory recovery normalizes nonfinite duration to selected fallback", async () => {
+  const store = createMemoryOutboxStore();
+  await store.enqueue({ id: "old", rpc: "rpc", args: {} });
+  await store.update("old", { status: "in_flight", updated_at: new Date(Date.now() - 60000).toISOString() });
+  expect(await store.recoverStaleInFlight?.({ olderThanMs: NaN })).toBe(1);
+});
+
+test("memory display labels are normalized, cloned and first-write-wins", async () => {
+  const store = createMemoryOutboxStore();
+  const display = { actionLabel: " Complete ", targetLabel: " Shipment A ", ignored: "drop" };
+  const first = await store.enqueue({ id: "display", rpc: "rpc", args: {}, display });
+  display.actionLabel = "caller mutation";
+  first.display!.targetLabel = "returned mutation";
+  const duplicate = await store.enqueue({ id: "display", rpc: "different", args: {}, display: { actionLabel: "replacement" } });
+  expect(duplicate.display).toEqual({ actionLabel: "Complete", targetLabel: "Shipment A" });
+  duplicate.display!.actionLabel = "duplicate mutation";
+  const claimed = await store.claimPending({ limit: 1 });
+  expect(claimed[0].display).toEqual({ actionLabel: "Complete", targetLabel: "Shipment A" });
+  claimed[0].display!.actionLabel = "claim mutation";
+  expect((await store.get("display"))?.display).toEqual({ actionLabel: "Complete", targetLabel: "Shipment A" });
 });

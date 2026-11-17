@@ -32,7 +32,7 @@ export function RelatedSectionInline({
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-medium text-ui-muted">
         <span>{label}</span>
         {count != null ? (
-          <span className="text-[10px] text-ui-muted/70">{count}</span>
+          <span className="text-[10px] text-ui-muted">{count}</span>
         ) : null}
       </summary>
       <div className="mt-3">{children}</div>

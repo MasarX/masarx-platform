@@ -129,6 +129,7 @@
     "supabase/migrations/202511031615_create_next_partitions_idempotent.sql|PARTITION",
     "supabase/migrations/202511130011_geocoding_attempts_table.sql|geocoding_attempts",
     "supabase/migrations/202511201750_generic_http_response_layer.sql|webhook_response_history",
-    "supabase/migrations/202511231410_archive_schema_and_history.sql|public.archiving_history"
+    "supabase/migrations/202511231410_archive_schema_and_history.sql|public.archiving_history",
+    "supabase/migrations/202609060200_fieldops_reassignment_request_workflow_v1.sql|public.fieldops_reassignment_requests"
   ]
 }

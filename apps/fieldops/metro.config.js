@@ -17,7 +17,7 @@ try {
 }
 
 // Monorepo-safe Metro config:
-// - Keep React/ReactDOM pinned to FieldOps versions (RN 0.81 uses React 19).
+// - Keep React/ReactDOM pinned to FieldOps versions (RN 0.83 uses React 19.2).
 // - Avoid accidentally resolving the web bundle against the Next.js workspaces (React 18),
 //   which breaks rendering due to React 19 elements using `react.transitional.element`.
 function resolveExistingRealPath(targetPath) {
@@ -56,6 +56,9 @@ const workspaceAppsRootRealPath =
 const workspacePackageRoots = ["api", "auth", "config", "mobile-core", "ui"]
   .map((packageName) => path.resolve(workspaceRoot, "packages", packageName))
   .filter((packagePath) => resolveExistingRealPath(packagePath));
+const nestedWorktreeRoots = fs.readdirSync(workspaceRoot, { withFileTypes: true })
+  .filter(entry => entry.isDirectory() && entry.name.startsWith("."))
+  .map(entry => path.resolve(workspaceRoot, entry.name, "worktrees"));
 const watchFolders = new Set([...(config.watchFolders || []), ...workspacePackageRoots]);
 for (const nodeModulesPath of [
   path.resolve(projectRoot, "node_modules"),
@@ -95,6 +98,16 @@ const reactNativeDir =
   resolvePackageDir(projectRoot, "react-native") ??
   resolvePackageDir(workspaceRoot, "react-native") ??
   path.resolve(projectRoot, "node_modules", "react-native");
+const expoDir =
+  resolvePackageDir(projectRoot, "expo") ??
+  path.resolve(projectRoot, "node_modules", "expo");
+config.resolver.nodeModulesPaths = Array.from(
+  new Set([
+    ...config.resolver.nodeModulesPaths,
+    path.resolve(reactNativeDir, "node_modules"),
+    path.resolve(expoDir, "node_modules"),
+  ])
+);
 const blockedRuntimeDirs = [
   path.resolve(workspaceRoot, "node_modules", "react"),
   path.resolve(workspaceRoot, "node_modules", "react-dom"),
@@ -113,6 +126,7 @@ config.resolver.blockList = [
       ? [config.resolver.blockList]
       : []),
   /(^|[\\/])node_modules[\\/]\.package-lock\.json$/,
+  ...nestedWorktreeRoots.map(pathBlockPattern),
   ...blockedRuntimeDirs.map(pathBlockPattern),
 ];
 

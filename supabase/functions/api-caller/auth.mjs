@@ -18,7 +18,14 @@ const loadShared = async () => {
   }
 };
 
-const { extractToken, getJwtRole } = await loadShared();
+const { decodeJwtPayload, extractToken, validateInternalEdgeClaims } = await loadShared();
+
+const ROLE_OPERATIONS = Object.freeze({
+  edge_api_caller_role: Object.freeze(["job", "batch"]),
+  edge_api_gateway_role: Object.freeze(["job"]),
+  edge_webhook_role: Object.freeze(["job"]),
+  service_role: Object.freeze(["job", "batch"]),
+});
 
 export const extractAuthToken = (req) => {
   if (!req || typeof req.headers?.get !== "function") {
@@ -64,7 +71,13 @@ const parseAllowedRoles = () => {
     .filter((role) => role.length > 0);
 };
 
-export const authorizeEdgeRequest = (req) => {
+const normalizeVerifiedClaims = (value) => {
+  if (!value || typeof value !== "object") return null;
+  if (value.claims && typeof value.claims === "object") return value.claims;
+  return value;
+};
+
+export const authorizeEdgeRequest = async (req, options = {}) => {
   const allowedRoles = parseAllowedRoles();
   if (!allowedRoles.length) {
     return { ok: false, status: 500, message: "Server missing EDGE_INTERNAL_CALLER_ROLES" };
@@ -75,13 +88,45 @@ export const authorizeEdgeRequest = (req) => {
     return { ok: false, status: 401, message: "Missing Authorization token" };
   }
 
-  const role = String(getJwtRole(provided) || "").trim().toLowerCase();
+  // Supabase's native verify_jwt gate validates the signature before this
+  // handler runs. Decoding here is only for narrower claim-policy checks.
+  const claims = normalizeVerifiedClaims(
+    Object.prototype.hasOwnProperty.call(options, "claims")
+      ? options.claims
+      : decodeJwtPayload(provided),
+  );
+  if (!claims) {
+    return { ok: false, status: 401, message: "Invalid Authorization token" };
+  }
+
+  const role = String(claims.role || "").trim().toLowerCase();
   if (!role) {
     return { ok: false, status: 403, message: "Missing role claim" };
   }
 
   if (!allowedRoles.includes(role)) {
     return { ok: false, status: 403, message: "Unauthorized role" };
+  }
+
+  const claimPolicy = validateInternalEdgeClaims(claims, role, options);
+  if (!claimPolicy.ok) return claimPolicy;
+
+  const allowedOperations = ROLE_OPERATIONS[role] || [];
+  if (!allowedOperations.length) {
+    return { ok: false, status: 403, message: "Role is not authorized for api-caller" };
+  }
+
+  return { ok: true, role, claims, allowedOperations };
+};
+
+export const authorizeApiCallerOperation = (authorization, operation) => {
+  if (!authorization?.ok) {
+    return { ok: false, status: 401, message: "Unauthorized request" };
+  }
+
+  const normalized = String(operation || "").trim().toLowerCase();
+  if (!authorization.allowedOperations?.includes(normalized)) {
+    return { ok: false, status: 403, message: `Caller role cannot execute ${normalized || "unknown"} operations` };
   }
 
   return { ok: true };

@@ -2,6 +2,31 @@ const unitConfig = require('../../../config/tooling/jest.config.unit');
 const uiConfig = require('../../../config/tooling/jest.config.ui');
 const integrationConfig = require('../../../config/tooling/jest.config');
 
+describe('shared DOM renderer module resolution', () => {
+  function mappedModule(name) {
+    const entry = Object.entries(uiConfig.moduleNameMapper)
+      .find(([pattern]) => new RegExp(pattern).test(name));
+    return entry ? name.replace(new RegExp(entry[0]), entry[1]) : name;
+  }
+
+  test.each([
+    ['react', '<rootDir>/node_modules/react'],
+    ['react/jsx-runtime', '<rootDir>/node_modules/react/jsx-runtime'],
+    ['react/jsx-dev-runtime', '<rootDir>/node_modules/react/jsx-dev-runtime'],
+    ['react-dom', '<rootDir>/node_modules/react-dom'],
+    ['react-dom/client', '<rootDir>/node_modules/react-dom/client'],
+    ['react-dom/test-utils', '<rootDir>/node_modules/react-dom/test-utils'],
+  ])('binds %s to the shared DOM renderer dependency tree', (name, expected) => {
+    expect(mappedModule(name)).toBe(expected);
+  });
+
+  test.each(['react-native', 'react-native-web', 'react-is'])(
+    'does not redirect unrelated package %s', (name) => {
+      expect(mappedModule(name)).toBe(name);
+    }
+  );
+});
+
 const EXPECTED_PATTERN = '<rootDir>/.tmp/';
 const EXPECTED_ROOTS = [
   '<rootDir>/tests',

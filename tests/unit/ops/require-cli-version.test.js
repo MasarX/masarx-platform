@@ -1,3 +1,15 @@
+test('local intake code contracts bind only supported versioned runtime code', () => {
+  const tool = require('../../../config/ci/deploy-cli-contract.json').tools.find(t => t.tool_id === 'supabase');
+  for (const [version, code] of Object.entries(tool.local_intake_bootstrap_by_version)) {
+    expect(tool.local_runtime_images_by_version[version].edge_runtime).toMatch(/@sha256:[a-f0-9]{64}$/);
+    expect(Object.keys(code).sort()).toEqual(['edge', 'gateway']);
+    for (const entry of Object.values(code)) {
+      expect(Object.keys(entry).sort()).toEqual(['path', 'sha256']);
+      expect(entry.path).toMatch(/^\/(root\/index\.ts|usr\/local\/share\/lua\/5\.1\/kong\/runloop\/handler\.lua)$/);
+      expect(entry.sha256).toMatch(/^[a-f0-9]{64}$/);
+    }
+  }
+});
 const path = require('path');
 
 const {

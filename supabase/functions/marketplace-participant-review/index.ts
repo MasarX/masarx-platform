@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import {
   approveMarketplaceParticipantRequest,
@@ -39,10 +38,13 @@ const uuidRegex =
 
 const isJwtLike = (value: string): boolean => String(value || "").trim().split(".").length === 3;
 
-const normalizeDecision = (value: string): "approved" | "rejected" | "" => {
+const normalizeDecision = (value: string): "approved" | "rejected" | "request_additional_docs" | "" => {
   const normalized = value.trim().toLowerCase();
   if (normalized === "approve" || normalized === "approved") return "approved";
   if (normalized === "reject" || normalized === "rejected") return "rejected";
+  if (["request_additional_docs", "request-docs", "request_docs", "additional_docs"].includes(normalized)) {
+    return "request_additional_docs";
+  }
   return "";
 };
 
@@ -88,7 +90,7 @@ const createServiceClient = () => {
   });
 };
 
-serve(async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") {
     return json(405, { ok: false, error: { code: "method_not_allowed" } });
   }
@@ -125,6 +127,15 @@ serve(async (req: Request): Promise<Response> => {
 
   if (!decision) {
     return json(400, { ok: false, error: { code: "invalid_decision" } });
+  }
+
+  const requestedDocuments = metadata.requested_documents;
+  if (decision === "request_additional_docs" && requestedDocuments !== undefined && (
+    !Array.isArray(requestedDocuments) || requestedDocuments.some(
+      (value: unknown) => typeof value !== "string" || !value.trim() || value.trim().length > 100,
+    )
+  )) {
+    return json(400, { ok: false, error: { code: "invalid_requested_documents" } });
   }
 
   let userClient;
@@ -202,7 +213,7 @@ serve(async (req: Request): Promise<Response> => {
     "marketplace_participant_request_review_apply_v1",
     {
       p_request_id: requestId,
-      p_decision: "rejected",
+      p_decision: decision,
       p_reviewer_user_id: reviewerUserId,
       p_invited_auth_user_id: null,
       p_invite_email_sent: false,
@@ -211,26 +222,33 @@ serve(async (req: Request): Promise<Response> => {
       p_approved_user_id: null,
       p_decision_metadata: {
         ...metadata,
-        reason: reason || null,
+        reason: reason || (decision === "request_additional_docs" ? asString(metadata.note) : "") || null,
         reviewed_via: "marketplace-participant-review",
         approval_mode: approvalMode,
+        ...(decision === "request_additional_docs" ? {
+          request_additional_docs: true,
+          ...(Array.isArray(requestedDocuments) ? {
+            requested_documents: [...new Set(requestedDocuments.map((value: string) => value.trim()))],
+          } : {}),
+        } : {}),
       },
     },
   );
 
-  if (rejectError) {
+  const reviewResult = rejectData && typeof rejectData === "object" ? (rejectData as JsonRecord) : {};
+  if (rejectError || reviewResult.ok !== true) {
     return json(400, {
       ok: false,
       error: {
-        code: "rejection_failed",
-        message: rejectError.message,
+        code: decision === "request_additional_docs" ? "request_additional_docs_failed" : "rejection_failed",
+        message: rejectError?.message || asString((reviewResult.error as JsonRecord | undefined)?.code) || "review_failed",
       },
     });
   }
 
   return json(200, {
     ok: true,
-    decision: "rejected",
-    result: rejectData && typeof rejectData === "object" ? (rejectData as JsonRecord) : {},
+    decision,
+    result: reviewResult,
   });
 });

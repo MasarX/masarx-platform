@@ -4,7 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { computeWorkspaceId } = require('./id');
-const { computePorts } = require('./local-config');
+const {
+  assertCommandDidNotTimeOut,
+  runBoundedSyncCommand,
+} = require('./bounded-sync-command');
 
 function getWorkspaceId() {
   return process.env.WORKSPACE_NAME || computeWorkspaceId();
@@ -30,8 +33,9 @@ function waitForPostgres(port, timeoutSeconds = 60) {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const res = spawnSync('psql', [dsn, '-c', 'select 1'], { stdio: 'ignore' });
-    if (res.status === 0) return;
+    const result = runBoundedSyncCommand('psql', [dsn, '-c', 'select 1'], { timeoutMs: 3_000 });
+    assertCommandDidNotTimeOut(result, '[workspace/local-db-start] Postgres readiness probe');
+    if (result.ok) return;
     if (Date.now() - start > timeoutMs) {
       die(`Postgres did not become ready on port ${port} within ${timeoutSeconds}s`);
     }
@@ -42,7 +46,16 @@ function waitForPostgres(port, timeoutSeconds = 60) {
 
 (function main() {
   const wk = getWorkspaceId();
-  const ports = computePorts(wk);
+  const receiptPath = String(process.env.WORKSPACE_BACKEND_ALLOCATION_RECEIPT || '').trim();
+  if (!receiptPath) die('backend_allocation_receipt_required');
+  let receipt;
+  try { receipt = JSON.parse(fs.readFileSync(path.resolve(receiptPath), 'utf8')); } catch (error) {
+    die(`backend_allocation_receipt_unreadable: ${error?.message || error}`);
+  }
+  if (receipt.workspace_id !== wk || !Number.isInteger(Number(receipt.ports?.db))) {
+    die('backend_allocation_receipt_identity_mismatch');
+  }
+  const assignedDbPort = Number(receipt.ports.db);
   const containerName = `masarx_db_${wk}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
   // Always ensure we have a fresh container; let Docker choose an available
   // host port and record it for env sync.
@@ -55,16 +68,20 @@ function waitForPostgres(port, timeoutSeconds = 60) {
     containerName,
     '-e',
     'POSTGRES_PASSWORD=postgres',
-    '-P',
+    '-p',
+    // objectives:allow LOCALHOST Justification: binds workspace DB to its allocated local port.
+    `127.0.0.1:${assignedDbPort}:5432`,
     'public.ecr.aws/supabase/postgres:17.6.1.014',
   ]);
 
-  const portInfo = spawnSync('docker', ['port', containerName, '5432/tcp'], { encoding: 'utf8' });
-  if (portInfo.status !== 0) die(`docker port inspection failed for ${containerName}`);
+  const portInfo = runBoundedSyncCommand('docker', ['port', containerName, '5432/tcp']);
+  assertCommandDidNotTimeOut(portInfo, '[workspace/local-db-start] Docker port probe');
+  if (!portInfo.ok) die(`docker port inspection failed for ${containerName}`);
   const line = (portInfo.stdout || '').trim();
   const m = line.match(/:(\d+)\s*$/);
   if (!m) die(`Could not parse host port from: ${line}`);
   const hostPort = parseInt(m[1], 10);
+  if (hostPort !== assignedDbPort) die('backend_allocation_published_port_mismatch');
 
   const metaPath = path.join('supabase', '.temp', `local_db_${wk}.json`);
   fs.mkdirSync(path.dirname(metaPath), { recursive: true });

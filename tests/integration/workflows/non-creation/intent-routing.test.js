@@ -13,7 +13,7 @@ describe('Non-creation workflow intake intent routing', () => {
   const canonicalIntentMatrix = [
     {
       intent: 'shipment.create',
-      templateCandidates: ['async_provider_dispatch_v1', 'shipment_create_v1'],
+      templateCandidates: ['webhook_shipment_create_v1'],
       allowsPlanning: true,
     },
     {
@@ -169,6 +169,12 @@ describe('Non-creation workflow intake intent routing', () => {
     );
 
     const templateCandidates = Array.isArray(templateRef) ? templateRef : [templateRef];
+    // Bind the owned fixture client; shipment creation requires canonical client lineage.
+    if (intent === 'shipment.create') {
+      await client.query(`WITH owned_sender AS (
+        INSERT INTO senders(client_id,name,status) VALUES($1::uuid,'Intake fixture sender','active') RETURNING id
+      ) UPDATE webhook_sources SET sender_id=(SELECT id FROM owned_sender) WHERE id=$2::uuid`, [clientId, sourceId]);
+    }
     const templateByName = await resolveTemplateIds(templateCandidates);
     const matchedTemplate = templateCandidates.find((name) => templateByName.has(String(name))) || '';
     if (!matchedTemplate) {
@@ -607,6 +613,8 @@ describe('Non-creation workflow intake intent routing', () => {
 
     expect(first.status).toBeGreaterThanOrEqual(200);
     expect(second.status).toBeGreaterThanOrEqual(200);
+    expect(first.status).toBeLessThan(400);
+    expect(second.status).toBeLessThan(400);
     if (second.workflow_run_id) {
       expect(second.workflow_run_id).toBe(first.workflow_run_id);
     }

@@ -6,6 +6,7 @@ import type { ResizeHandle, TemplateBlock } from "./canvas-types";
 type CanvasSelectionProps = {
   block: TemplateBlock;
   scale: number;
+  testIdPrefix?: string;
   onResizeStart: (handle: ResizeHandle, e: React.MouseEvent) => void;
 };
 
@@ -25,6 +26,7 @@ const HANDLES: { key: ResizeHandle; xFrac: number; yFrac: number; cursor: string
 export function CanvasSelection({
   block,
   scale,
+  testIdPrefix,
   onResizeStart,
 }: CanvasSelectionProps) {
   const x = block.x * scale;
@@ -34,7 +36,7 @@ export function CanvasSelection({
   const half = HANDLE_SIZE / 2;
 
   return (
-    <g style={{ pointerEvents: "all" }}>
+    <g style={{ pointerEvents: "all" }} data-testid={testIdPrefix ? `${testIdPrefix}-selection` : undefined}>
       {/* Selection border */}
       <rect
         x={x}
@@ -62,6 +64,7 @@ export function CanvasSelection({
             stroke="#2563eb"
             strokeWidth={1.5}
             rx={1}
+            data-testid={testIdPrefix ? `${testIdPrefix}-resize-${handle.key}` : undefined}
             style={{ cursor: handle.cursor }}
             onMouseDown={(e) => {
               e.stopPropagation();

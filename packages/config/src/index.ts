@@ -596,3 +596,6 @@ export function getPublicConfigFromEnv(env: PublicEnvInput): PublicConfig {
 }
 
 export * from "./messages";
+
+export { normalizeOpenMapTilePolicy, resolveOpenMapConfiguration } from "./open-map-policy";
+export type { OpenMapCamera, OpenMapConfiguration, OpenMapPolicy, OpenMapTilePolicy, OpenRasterMapStyle } from "./open-map-policy";

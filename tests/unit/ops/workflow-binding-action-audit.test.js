@@ -336,4 +336,43 @@ $$;
     expect(result.changed_findings).toHaveLength(1);
     expect(result.changed_findings[0].covered).toBe(true);
   });
+  test('append-only seed override qualifies its entry without changing global evidence for siblings', () => {
+    const repoRoot = createFixtureRepo(); tempDirs.push(repoRoot);
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot,'config/ops/workflow-binding-audit.json'),'utf8'));
+    const seed = 'supabase/migrations/202609060200_new_binding.sql';
+    writeFile(path.join(repoRoot,seed),"INSERT INTO public.workflow_binding_registry(binding_key) VALUES ('new_binding');");
+    config.inventory.push({key:'new_binding',binding_key:'new_binding',file:seed,registry_seed_file:seed});
+    const result=evaluateInventory(config,repoRoot);
+    expect(result.issues).toEqual([]);
+    expect(result.findings).toHaveLength(6);
+    delete config.inventory[5].registry_seed_file;
+    expect(evaluateInventory(config,repoRoot).issues).toEqual([
+      expect.stringContaining('Binding key new_binding is not seeded in '+config.registry_seed_file),
+    ]);
+  });
+
+  test.each(['missing','empty_file','empty_override','absent_key'])('named seed %s fails closed without global fallback', (mode) => {
+    const repoRoot=createFixtureRepo(); tempDirs.push(repoRoot);
+    const config=JSON.parse(fs.readFileSync(path.join(repoRoot,'config/ops/workflow-binding-audit.json'),'utf8'));
+    const seed='supabase/migrations/202609060200_override.sql';
+    config.inventory[0].registry_seed_file=mode==='empty_override'?' ':seed;
+    if(mode==='empty_file') writeFile(path.join(repoRoot,seed),' \n');
+    if(mode==='absent_key') writeFile(path.join(repoRoot,seed),"SELECT 'different_binding';");
+    const issues=evaluateInventory(config,repoRoot).issues;
+    expect(issues).toEqual(expect.arrayContaining([expect.stringContaining(
+      mode==='absent_key'?'Binding key customer_shipment_change is not seeded':'Missing or empty registry seed',
+    )]));
+  });
+
+  test.each(['missing','empty','unset'])('default seed %s cannot silently waive binding verification', (mode) => {
+    const repoRoot=createFixtureRepo(); tempDirs.push(repoRoot);
+    const config=JSON.parse(fs.readFileSync(path.join(repoRoot,'config/ops/workflow-binding-audit.json'),'utf8'));
+    if(mode==='missing') config.registry_seed_file='supabase/migrations/missing.sql';
+    if(mode==='empty') { config.registry_seed_file='supabase/migrations/empty.sql'; writeFile(path.join(repoRoot,config.registry_seed_file),''); }
+    if(mode==='unset') delete config.registry_seed_file;
+    expect(evaluateInventory(config,repoRoot).issues).toEqual(expect.arrayContaining([
+      expect.stringContaining('Missing or empty registry seed for customer_shipment_change'),
+    ]));
+  });
+
 });

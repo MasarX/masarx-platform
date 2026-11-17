@@ -29,6 +29,20 @@ describe('edge-origin-probe helper', () => {
     expect(candidates).toEqual(['https://hguxuguuvhxjwymmxhlmkwwp.example.invalid', 'https://grtgggvjriwqrxhykymmloov.example.invalid', 'https://nzxmhryhtqlzoshjkyozkpup.example.invalid']);
   });
 
+  test.each([0, 302, 401, 404, 429, 500, 502, 503])('status %s cannot admit an origin', async status => {
+    const result = await probeAllowedOrigin(['https://a.test'], async () => ({
+      status, body: { error: { code: 'server_misconfigured' } },
+    }));
+    expect(result.origin).toBe('');
+    expect(result.attempts).toEqual([{ origin: 'https://a.test', status, code: 'server_misconfigured' }]);
+  });
+  test('configuration failure remains rejected even with a client status', async () => {
+    const result = await probeAllowedOrigin(['https://a.test'], async () => ({
+      status: 400, body: { error: { code: 'server_misconfigured' } },
+    }));
+    expect(result.origin).toBe('');
+  });
+
   test('probeAllowedOrigin skips all 403 responses and returns first acceptable origin', async () => {
     const candidates = ['https://a.test', 'https://b.test', 'https://c.test'];
     const calls = [];

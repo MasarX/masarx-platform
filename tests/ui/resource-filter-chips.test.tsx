@@ -68,3 +68,9 @@ test("resource filter chips prefer allowed ops when op is missing", () => {
 
   expect(screen.getByText("contains")).toBeInTheDocument();
 });
+
+test("Arabic filter labels use registry presentation without changing keys", () => {
+  render(<ResourceFilterChips filters={[{ key: "resource_id", column: "resource_id", op: "eq", label: "Resource ID", label_ar: "معرّف المورد" }]} appliedFilters={[{ key: "resource_id", value: "abc", source: "query" }]} searchParams={{ resource_id: "abc" }} actionHref="/console/resources/shipments" opLabels={{ eq: "يساوي" }} locale="ar" />);
+  expect(screen.getByText("معرّف المورد")).toBeInTheDocument();
+  expect(screen.getByText("يساوي")).toBeInTheDocument();
+});

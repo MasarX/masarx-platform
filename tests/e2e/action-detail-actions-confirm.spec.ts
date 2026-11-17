@@ -5,7 +5,6 @@ import { getConsoleBaseUrl, getPortalBaseUrl } from "./utils/base-urls";
 import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
 import {
-  applyResourceLimit,
   resolveConfirmableActions,
   resolveResourceKeysForUser,
   fetchResourceSampleId,
@@ -15,7 +14,7 @@ import {
   ensureBulkActionVisible,
 } from "./utils/table-actions";
 import { assertNavigationPerformance } from "./utils/performance";
-import { captureUiEventRequests, captureUiEvents } from "./utils/ui-events";
+import { captureUiEventRequests, captureUiEvents, waitForUiEvent } from "./utils/ui-events";
 import { hasCapability, resolveCapabilitySet } from "./utils/capabilities";
 import { matchesResourceCategory } from "../../packages/ui/src/resource-actions-core";
 
@@ -87,60 +86,68 @@ for (const config of appConfigs) {
       const sections = Array.isArray(context.navigation.sections)
         ? context.navigation.sections
         : [];
-      const resourceKeys = applyResourceLimit(
-        resolveResourceKeysForUser({
-          sections,
-          readRegistry: context.readRegistry,
-          commandRegistry: context.commandRegistry,
-          capabilities: context.me?.capabilities ?? null,
-        })
-      );
+      const resourceKeys = resolveResourceKeysForUser({
+        sections,
+        readRegistry: context.readRegistry,
+        commandRegistry: context.commandRegistry,
+        capabilities: context.me?.capabilities ?? null,
+      });
       if (resourceKeys.length === 0) {
         throw new Error(`No resources available for ${user.email}.`);
       }
 
       let targetResourceKey: string | null = null;
       let targetActionKey: string | null = null;
+      let targetSampleId: string | null = null;
+      let emptyAllowedCandidate: { resourceKey: string; actionKey: string } | null = null;
       for (const resourceKey of resourceKeys) {
-        const confirmable = resolveConfirmableActions({
+        const actionKey = resolveConfirmableActions({
           resourceKey,
           commandRegistry: context.commandRegistry,
           capabilities: context.me?.capabilities ?? null,
+        })[0];
+        if (!actionKey) continue;
+        emptyAllowedCandidate ??= { resourceKey, actionKey };
+        const resourceEntry =
+          context.readRegistry?.resources?.find((entry) => entry?.key === resourceKey) ?? null;
+        const sample = await fetchResourceSampleId({
+          resourceKey,
+          idColumn: resourceEntry?.id_column ?? null,
+          email: user.email,
+          password: demoContext.password ?? "",
         });
-        if (confirmable.length > 0) {
-          targetResourceKey = resourceKey;
-          targetActionKey = confirmable[0] ?? null;
-          break;
-        }
+        if (!sample.id) continue;
+        targetResourceKey = resourceKey;
+        targetActionKey = actionKey;
+        targetSampleId = sample.id;
+        break;
       }
 
-      let expectConfirmTelemetry = Boolean(targetResourceKey && targetActionKey);
+      let expectConfirmTelemetry = Boolean(targetSampleId);
       if (!targetResourceKey || !targetActionKey) {
         const capabilitySet = resolveCapabilitySet(context.me?.capabilities ?? null);
-        const blockedCandidates = resourceKeys.flatMap((resourceKey) => {
-          const confirmable = context.commandRegistry
+        const blockedCandidate = resourceKeys.flatMap((resourceKey) =>
+          context.commandRegistry
             .filter((command) =>
               matchesResourceCategory(command?.schema_category ?? null, resourceKey)
             )
             .filter((command) => Boolean(command?.execution?.confirm))
             .filter((command) => {
               const capability = command?.capability?.trim() ?? "";
-              if (!capability) return false;
-              return !hasCapability(capabilitySet, capability);
+              return Boolean(capability) && !hasCapability(capabilitySet, capability);
             })
             .map((command) => ({
               resourceKey,
               actionKey: command?.key?.trim() ?? "",
             }))
-            .filter((entry) => Boolean(entry.actionKey));
-          return confirmable;
-        });
-
-        const fallback = blockedCandidates[0] ?? null;
-        if (!fallback?.resourceKey || !fallback.actionKey) {
+            .filter((entry) => Boolean(entry.actionKey))
+        )[0] ?? null;
+        const fallback = emptyAllowedCandidate ?? blockedCandidate;
+        if (!fallback) {
           if (strict) {
             throw new Error(`No confirmable actions found for ${config.label}.`);
           }
+          test.skip(true, `No confirmable actions available for ${config.label}.`);
           return;
         }
         targetResourceKey = fallback.resourceKey;
@@ -148,22 +155,7 @@ for (const config of appConfigs) {
         expectConfirmTelemetry = false;
       }
 
-      const resourceEntry =
-        context.readRegistry?.resources?.find(
-          (entry) => entry?.key === targetResourceKey
-        ) ?? null;
-      const sample = await fetchResourceSampleId({
-        resourceKey: targetResourceKey,
-        idColumn: resourceEntry?.id_column ?? null,
-        email: user.email,
-        password: demoContext.password ?? "",
-      });
-      const hasSample = Boolean(sample.id);
-      if (!sample.id) {
-        if (strict && expectConfirmTelemetry) {
-          throw new Error(`No sample data for ${targetResourceKey}.`);
-        }
-      }
+      const hasSample = Boolean(targetSampleId);
 
       await page.goto(baseUrl);
       const authGate = page.locator(`[data-testid="${config.authTestId}"]`);
@@ -203,7 +195,7 @@ for (const config of appConfigs) {
       }
 
       await page.goto(
-        `${baseUrl}/resources/${targetResourceKey}?id=${encodeURIComponent(sample.id)}`,
+        `${baseUrl}/resources/${targetResourceKey}?id=${encodeURIComponent(targetSampleId!)}`,
         { waitUntil: "domcontentloaded", timeout: 60_000 }
       );
       await expect(
@@ -233,6 +225,9 @@ for (const config of appConfigs) {
         return;
       }
 
+      if (expectConfirmTelemetry) {
+        await expect(actionButton).toBeEnabled();
+      }
       if (await actionButton.isDisabled()) {
         await expect(actionButton).toHaveAttribute("title", /.+/);
         if (strict && expectConfirmTelemetry) {
@@ -256,68 +251,40 @@ for (const config of appConfigs) {
       }
       await expect(confirmDialog).toBeVisible();
 
-      await expect
-        .poll(
-          () =>
-            Boolean(
-              events.find(
-                (entry) =>
-                  entry.type === "ui.bulk_action.confirm.open" &&
-                  entry.context === targetResourceKey &&
-                  entry.name === targetActionKey
-              )
-            ),
-          { timeout: 5_000 }
-        )
-        .toBeTruthy();
-      await expect
-        .poll(
-          () =>
-            Boolean(
-              requestEvents.find(
-                (entry) =>
-                  entry.type === "ui.bulk_action.confirm.open" &&
-                  entry.context === targetResourceKey &&
-                  entry.name === targetActionKey
-              )
-            ),
-          { timeout: 5_000 }
-        )
-        .toBeTruthy();
+      await waitForUiEvent(
+        [events, requestEvents],
+        (entry) =>
+          entry.type === "ui.bulk_action.confirm.open" &&
+          entry.context === targetResourceKey &&
+          entry.name === targetActionKey
+      );
+      await waitForUiEvent(
+        requestEvents,
+        (entry) =>
+          entry.type === "ui.bulk_action.confirm.open" &&
+          entry.context === targetResourceKey &&
+          entry.name === targetActionKey
+      );
 
       await page
         .locator(`[data-testid="${bulkActionsTestIdPrefix}-confirm-cancel"]`)
         .click();
       await expect(confirmDialog).toHaveCount(0);
 
-      await expect
-        .poll(
-          () =>
-            Boolean(
-              events.find(
-                (entry) =>
-                  entry.type === "ui.bulk_action.confirm.cancel" &&
-                  entry.context === targetResourceKey &&
-                  entry.name === targetActionKey
-              )
-            ),
-          { timeout: 5_000 }
-        )
-        .toBeTruthy();
-      await expect
-        .poll(
-          () =>
-            Boolean(
-              requestEvents.find(
-                (entry) =>
-                  entry.type === "ui.bulk_action.confirm.cancel" &&
-                  entry.context === targetResourceKey &&
-                  entry.name === targetActionKey
-              )
-            ),
-          { timeout: 5_000 }
-        )
-        .toBeTruthy();
+      await waitForUiEvent(
+        [events, requestEvents],
+        (entry) =>
+          entry.type === "ui.bulk_action.confirm.cancel" &&
+          entry.context === targetResourceKey &&
+          entry.name === targetActionKey
+      );
+      await waitForUiEvent(
+        requestEvents,
+        (entry) =>
+          entry.type === "ui.bulk_action.confirm.cancel" &&
+          entry.context === targetResourceKey &&
+          entry.name === targetActionKey
+      );
     });
   });
 }

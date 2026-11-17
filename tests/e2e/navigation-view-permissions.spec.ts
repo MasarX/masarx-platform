@@ -6,6 +6,8 @@ import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
 import { applyResourceLimit, resolveResourceKeysForUser } from "./utils/core-resource";
 import { hasCapability, resolveCapabilitySet } from "./utils/capabilities";
+import enMessages from "../../packages/config/messages/en.json";
+import arMessages from "../../packages/config/messages/ar.json";
 
 type DemoUser = {
   email: string;
@@ -191,9 +193,12 @@ for (const config of appConfigs) {
       );
       if ((await panel.count()) === 0) return;
       await expect(panel).toBeVisible();
-      await expect(panel).toContainText(
-        "View management is disabled for your access scope."
-      );
+      const locale = process.env.STUDIO_BROWSER_EXPECTED_LOCALE;
+      if (locale !== "en" && locale !== "ar") {
+        throw new Error("Explicit owned app locale proof selection required");
+      }
+      const messages = locale === "ar" ? arMessages : enMessages;
+      await expect(panel).toContainText(messages.ui.resourceTable.views.disabled);
       const saveToggle = page.locator(
         `[data-testid="${config.tableTestIdPrefix}-view-save-toggle"]`
       );

@@ -71,7 +71,7 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
       await pool.end();
     });
 
-    const makeOrgClientSender = async (client, slugPrefix) => {
+    const makeOrgClientSender = async (client, slugPrefix, labelDesign) => {
       const orgId = randomUUID();
       const clientId = randomUUID();
       const addressId = randomUUID();
@@ -82,6 +82,16 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
         `INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
          VALUES ($1::uuid, $2, $3, 'Asia/Riyadh', 'en-US', 'active')`,
         [orgId, `Org ${slugPrefix}`, slugOrg],
+      );
+
+      // Child onboarding materializes the currently effective tenant label design.
+      await upsertSettings(
+        'label_design',
+        'tenant',
+        orgId,
+        labelDesign,
+        `e2e design ${slugPrefix}`,
+        client,
       );
 
       await client.query(
@@ -167,10 +177,6 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
       const workflowRuns = [];
       const jobIds = [];
       try {
-        // Seed two tenants/clients/senders
-        const a = await makeOrgClientSender(client, 'e2e-a');
-        const b = await makeOrgClientSender(client, 'e2e-b');
-
         const design = {
           version: '2025-11-24',
           templates: {
@@ -187,6 +193,11 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
             },
           },
         };
+
+        // Seed two tenants/clients/senders after their effective designs exist.
+        const a = await makeOrgClientSender(client, 'e2e-a', design);
+        const b = await makeOrgClientSender(client, 'e2e-b', design);
+
         const labelPrintPolicy = {
           version: 1,
           max_labels_per_bundle: 10,
@@ -194,8 +205,6 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
           max_failed_labels: 5,
         };
 
-        await upsertSettings('label_design', 'tenant', a.orgId, design, 'e2e design A', client);
-        await upsertSettings('label_design', 'tenant', b.orgId, design, 'e2e design B', client);
         await upsertSettings(
           'label_print_policy',
           'global',
@@ -223,6 +232,19 @@ if (!SUPABASE_URL || !DATABASE_URL || !SUPABASE_ANON_KEY || !LABEL_RENDERER_JWT 
         const jobA = await triggerRenderViaWorkflow(shipmentA, boxA, 'e2e_internal_shipping', a.orgId, a.clientId, workflowRuns);
         const jobB = await triggerRenderViaWorkflow(shipmentB, boxB, 'e2e_internal_shipping', b.orgId, b.clientId, workflowRuns);
         jobIds.push(jobA, jobB);
+
+        const { rows: snapshotRows } = await client.query(
+          `SELECT template_snapshot
+             FROM label_jobs
+            WHERE id IN ($1::uuid, $2::uuid)
+            ORDER BY id`,
+          [jobA, jobB],
+        );
+        expect(snapshotRows).toHaveLength(2);
+        for (const row of snapshotRows) {
+          expect(row.template_snapshot.template_key).toBe('e2e_internal_shipping');
+          expect(row.template_snapshot.renderer_config.blocks).toEqual(design.templates.shipping.blocks);
+        }
 
         await client.query(
           `UPDATE label_jobs

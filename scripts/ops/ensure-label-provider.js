@@ -46,9 +46,27 @@ async function resolveDbCandidate(options = {}) {
   return result.candidate;
 }
 
+function resolveLabelProviderInvokeUrl(env = process.env) {
+  const key = [
+    'LABEL_PROVIDER_INVOKE_URL',
+    'LABEL_RENDERER_INVOKE_URL',
+    'EDGE_SUPABASE_URL',
+    'SUPABASE_URL',
+  ].find((name) => String(env[name] || '').trim());
+  if (!key) return '';
+
+  const value = String(env[key]).trim().replace(/\/+$/, '');
+  const url = URL.parse(value);
+  if (!url || !/^https?:\/\//i.test(value) || !url.hostname
+    || url.username || url.password || /[\s\\?#]/.test(value)) {
+    throw new Error(`${key} must be an absolute HTTP(S) URL without credentials, query, or fragment`);
+  }
+  return key.startsWith('LABEL_') ? value : `${value}/functions/v1/label-renderer`;
+}
+
 async function main() {
   loadEnv();
-  const { DATABASE_URL, SUPABASE_URL } = process.env;
+  const { DATABASE_URL } = process.env;
   const SECRET =
     process.env.LABEL_PROVIDER_INVOKE_SECRET ||
     process.env.LABEL_RENDERER_BENCHMARK_AUTH_JWT ||
@@ -59,9 +77,10 @@ async function main() {
     process.env.SERVICE_ROLE_KEY;
 
   if (!DATABASE_URL) throw new Error('DATABASE_URL is required');
-  if (!SUPABASE_URL || !SECRET) {
+  const invokeUrl = resolveLabelProviderInvokeUrl(process.env);
+  if (!invokeUrl || !SECRET) {
     throw new Error(
-      'SUPABASE_URL and LABEL_RENDERER_TOKEN/SERVICE_ROLE required',
+      'LABEL_PROVIDER_INVOKE_URL/LABEL_RENDERER_INVOKE_URL/EDGE_SUPABASE_URL/SUPABASE_URL and LABEL_RENDERER_TOKEN/SERVICE_ROLE required',
     );
   }
 
@@ -71,7 +90,7 @@ async function main() {
       {
         name: 'internal_renderer',
         mode: 'internal',
-        invoke_url: `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`,
+        invoke_url: invokeUrl,
         invoke_secret: SECRET,
         timeout_ms: 20000,
       },
@@ -116,4 +135,5 @@ if (require.main === module) {
 module.exports = {
   resolveDbCandidate,
   resolveDbCandidatePolicy,
+  resolveLabelProviderInvokeUrl,
 };

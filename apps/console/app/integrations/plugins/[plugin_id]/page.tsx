@@ -1,5 +1,6 @@
 import { ResourcePage } from "../../../_components/resource-page";
 import { withConsoleConfig } from "../../../app-context";
+import { MarketplacePublishLink } from "../../../automation/marketplace/_components/marketplace-page";
 
 type PageProps = {
   params: { plugin_id: string };
@@ -42,6 +43,7 @@ export default withConsoleConfig<PageProps>(({ appKey, appBasePath }, { params, 
                 Open Active Version
               </a>
             ) : null}
+            {activeVersionId ? <MarketplacePublishLink appBasePath={appBasePath} assetKind="integration_plugin" sourceId={activeVersionId} /> : null}
           </div>
         );
       }}

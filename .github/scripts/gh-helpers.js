@@ -227,11 +227,21 @@ async function normalizeAssignmentToDone({
   };
 }
 
-async function findCommentByMarker({ github, owner, repo, issueNumber, marker }) {
+async function findCommentByMarker({
+  github,
+  owner,
+  repo,
+  issueNumber,
+  marker,
+  expectedAuthorLogin = '',
+  expectedAuthorType = 'User',
+}) {
   const num = parseInt(String(issueNumber || '').trim(), 10);
   if (!num) throw new Error(`findCommentByMarker: invalid issueNumber: ${issueNumber || '<empty>'}`);
   const m = norm(marker);
   if (!m) throw new Error('findCommentByMarker: missing marker');
+  const expectedLogin = norm(expectedAuthorLogin).toLowerCase();
+  const expectedType = norm(expectedAuthorType || 'User').toLowerCase();
 
   const comments = await github.paginate(github.rest.issues.listComments, {
     owner,
@@ -240,7 +250,15 @@ async function findCommentByMarker({ github, owner, repo, issueNumber, marker })
     per_page: 100,
   });
   return (Array.isArray(comments) ? comments : [])
-    .filter((comment) => String(comment?.body || '').includes(m))
+    .filter((comment) => {
+      if (!expectedLogin) return String(comment?.body || '').includes(m);
+      const hasExactMarkerLine = String(comment?.body || '')
+        .split(/\r?\n/)
+        .some((line) => line.trim() === m);
+      const authorLogin = norm(comment?.user?.login).toLowerCase();
+      const authorType = norm(comment?.user?.type).toLowerCase();
+      return hasExactMarkerLine && authorLogin === expectedLogin && authorType === expectedType;
+    })
     .sort((left, right) => commentRecencyKey(right) - commentRecencyKey(left))[0] || null;
 }
 
@@ -260,7 +278,16 @@ async function ensureLabel({ github, owner, repo, name, color, description }) {
   }
 }
 
-async function upsertComment({ github, owner, repo, issueNumber, marker, body }) {
+async function upsertComment({
+  github,
+  owner,
+  repo,
+  issueNumber,
+  marker,
+  body,
+  expectedAuthorLogin = '',
+  expectedAuthorType = 'User',
+}) {
   const num = parseInt(String(issueNumber || '').trim(), 10);
   if (!num) throw new Error(`upsertComment: invalid issueNumber: ${issueNumber || '<empty>'}`);
 
@@ -276,6 +303,8 @@ async function upsertComment({ github, owner, repo, issueNumber, marker, body })
     repo,
     issueNumber: num,
     marker: m,
+    expectedAuthorLogin,
+    expectedAuthorType,
   });
   if (existing?.id) {
     if (norm(existing.body) === text) {
@@ -445,11 +474,14 @@ async function enqueuePullRequest({ github, pullRequestId, expectedHeadOid = '' 
   const prId = norm(pullRequestId);
   if (!prId) throw new Error('enqueuePullRequest: missing pullRequestId');
 
-  const oid = norm(expectedHeadOid);
+  const oid = norm(expectedHeadOid).toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(oid)) {
+    throw new Error('enqueuePullRequest: expectedHeadOid must be an exact 40-hex commit SHA');
+  }
 
   try {
     const result = await github.graphql(
-      `mutation($prId: ID!, $expectedHeadOid: GitObjectID) {
+      `mutation($prId: ID!, $expectedHeadOid: GitObjectID!) {
         enqueuePullRequest(input: { pullRequestId: $prId, expectedHeadOid: $expectedHeadOid }) {
           mergeQueueEntry {
             id
@@ -460,7 +492,7 @@ async function enqueuePullRequest({ github, pullRequestId, expectedHeadOid = '' 
       }`,
       {
         prId,
-        expectedHeadOid: oid || null,
+        expectedHeadOid: oid,
       }
     );
     return {

@@ -1022,50 +1022,100 @@ function buildStaticFindings({ repoRoot, fileMap }) {
     });
   }
 
-  const marketingFile = fileMap['supabase/functions/marketing-lead-intake/index.ts'];
-  const tenantSignupFile = fileMap['supabase/functions/tenant-signup-intake/index.ts'];
-  if (
-    marketingFile &&
-    tenantSignupFile &&
-    marketingFile.content.includes('} else if (SUPABASE_SERVICE_KEY) {') &&
-    tenantSignupFile.content.includes('return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {')
-  ) {
-    findings.push({
-      id: 'public-intake-service-role',
-      title: 'Public intake edge functions are not fail-closed on least-privilege DB credentials',
-      severity: 'P1',
-      status: 'confirmed',
-      surface: 'api',
-      exploit_path:
-        'The browser-facing lead-intake and tenant-signup edge functions still fall back to broad service-role credentials rather than enforcing a dedicated limited DB JWT. Any parser, validation, or business-logic flaw in these public entrypoints therefore executes with a wider blast radius than intended.',
-      evidence: [
-        'Marketing lead intake falls back from `MARKETING_DB_JWT` to `SUPABASE_SERVICE_ROLE_KEY` when the dedicated JWT is absent.',
-        'Tenant signup intake creates its Supabase client directly with the service-role key and has no least-privilege JWT gate.',
-      ],
-      standards: [
-        'OWASP ASVS 5.0.0 / architecture and access control',
-        'OWASP API Security Top 10 2023 / security misconfiguration',
-        'NIST CSF 2.0 / least privilege',
-      ],
-      affected_files: [
-        buildFileRef(
-          repoRoot,
-          marketingFile.filePath,
-          lineNumber(marketingFile.content, '} else if (SUPABASE_SERVICE_KEY) {') || 244,
-        ),
-        buildFileRef(
-          repoRoot,
-          tenantSignupFile.filePath,
-          lineNumber(tenantSignupFile.content, 'return createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {') || 202,
-        ),
-      ],
-      remediation:
-        'Add dedicated limited database roles and JWT env contracts for the public intake facades, then fail closed when those least-privilege credentials are missing instead of falling back to the service-role key.',
-      retest_criteria:
-        'Both public intake functions reject startup or requests when their dedicated DB JWT is absent, and the cloud environment guard covers the new credential contract.',
-      launch_impact:
-        'Public browser entrypoints retain unnecessary privilege and therefore increase the impact of any future edge-function bug.',
-    });
+  // This is bounded source-call coverage, not runtime credential/schema proof.
+  let ts;
+  try { ts = require('typescript'); } catch { /* Report unavailable parser per endpoint below. */ }
+  for (const [endpoint, mutation, read] of [
+    ['marketing-lead-intake', 'marketing_lead_request_create_v1', 'marketing_landing_clients_list_v1'],
+    ['tenant-signup-intake', 'tenant_signup_request_create_v1', null],
+  ]) {
+    const relativePath = `supabase/functions/${endpoint}/index.ts`;
+    const entry = fileMap[relativePath];
+    const violations = [];
+    const unknown = [];
+    const seen = new Set();
+    const source = typeof entry?.content === 'string' ? entry.content : '';
+    if (!source.trim()) unknown.push('Required endpoint source is missing or empty.');
+    const tree = ts ? ts.createSourceFile(relativePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS) : null;
+    if (!tree) unknown.push('TypeScript parser is unavailable in this audit runtime.');
+    else if (tree.parseDiagnostics.length) unknown.push('Endpoint source could not be parsed.');
+    const literal = (node) => node && ts.isStringLiteralLike(node) ? node.text : null;
+    const isName = (node, name) => node && ts.isIdentifier(node) && node.text === name;
+    const property = (node, name) => {
+      if (!node || !ts.isObjectLiteralExpression(node)) return null;
+      if (node.properties.some((item) => !ts.isPropertyAssignment(item))) return null;
+      const matches = node.properties.filter((item) => item.name.getText(tree) === name);
+      return matches.length === 1 ? matches[0].initializer : null;
+    };
+    const visit = (node) => {
+      if (ts.isIdentifier(node) && node.text === 'invokeRpcWithAuthFallback') {
+        const parent = node.parent;
+        const declaration = ts.isVariableDeclaration(parent) && parent.name === node;
+        const directCall = ts.isCallExpression(parent) && parent.expression === node;
+        if (!declaration && !directCall) unknown.push('Unsupported alias/reference to marketing RPC helper.');
+      }
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const helperCall = endpoint === 'marketing-lead-intake' && isName(callee, 'invokeRpcWithAuthFallback');
+        const rpcCall = ts.isPropertyAccessExpression(callee) && callee.name.text === 'rpc';
+        const tableCall = ts.isPropertyAccessExpression(callee) && callee.name.text === 'from';
+        if (tableCall) {
+          if (isName(callee.expression, 'serviceClient'))
+            violations.push('Generic service-client table access is outside the fixed public-intake RPC contract.');
+          else if (!isName(callee.expression, 'Array'))
+            unknown.push('Unrecognized from() receiver requires explicit DB-call review.');
+        }
+        if (ts.isElementAccessExpression(callee)) unknown.push('Computed call requires explicit endpoint review.');
+        if (helperCall || rpcCall) {
+          const rpc = literal(node.arguments[0]);
+          if (!rpc) {
+            unknown.push('Dynamic RPC target cannot be qualified by this bounded audit.');
+          } else if (rpc !== mutation && rpc !== read) {
+            violations.push(`RPC ${rpc} is outside the endpoint fixed-RPC contract.`);
+          } else {
+            seen.add(rpc);
+            if (endpoint === 'marketing-lead-intake') {
+              if (!helperCall) unknown.push('Marketing RPC bypasses its supported auth-selection helper.');
+              else if (rpc === mutation) {
+                const serviceOnly = property(node.arguments[2], 'serviceOnly');
+                if (!serviceOnly) unknown.push('Marketing mutation auth mode is not statically explicit.');
+                else if (serviceOnly.kind !== ts.SyntaxKind.TrueKeyword)
+                  violations.push('Marketing mutation does not request service-only authentication.');
+              } else if (node.arguments[2]) {
+                unknown.push('Marketing read auth options require explicit review.');
+              }
+            } else if (!rpcCall || !isName(callee.expression, 'serviceClient')) {
+              unknown.push('Tenant mutation does not use the supported service-client seam.');
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    if (tree && !tree.parseDiagnostics.length) visit(tree);
+    if (!seen.has(mutation)) unknown.push('Required fixed mutation call is not established.');
+    if (read && !seen.has(read)) unknown.push('Required narrow-read call is not established.');
+    // Do not claim helper internals, resolved credentials/schema, grants, or deployment
+    // are qualified here. Those remain separate source/native qualification gates.
+    for (const [kind, reasons] of [['contract', violations], ['coverage', unknown]]) {
+      if (!reasons.length) continue;
+      findings.push({
+        id: `public-intake-${endpoint}-${kind}`,
+        title: `${endpoint}: ${kind === 'contract' ? 'fixed-RPC contract violation' : 'incomplete source-call coverage'}`,
+        severity: 'P1',
+        status: kind === 'contract' ? 'confirmed' : 'unverified',
+        surface: 'api',
+        exploit_path: kind === 'contract'
+          ? 'The inspected endpoint call exceeds its current approved fixed-RPC boundary; live exploitability is not established.'
+          : 'The bounded source audit cannot establish the endpoint call contract; this is missing evidence, not a proven vulnerability.',
+        evidence: [...new Set(reasons)],
+        standards: ['OWASP ASVS 5.0.0 / architecture and access control'],
+        affected_files: [buildFileRef(repoRoot, entry?.filePath || path.join(repoRoot, relativePath), 1)],
+        remediation: 'Preserve the current service-only fixed mutation and supported read contracts; resolve only the reported call or coverage gap. Do not restore obsolete Edge mutation grants.',
+        retest_criteria: 'Qualify each endpoint independently, then verify auth helper, API schema, DB grants and runtime evidence separately.',
+        launch_impact: 'An endpoint-specific contract or evidence gap remains; existing severity/decision policy is unchanged.',
+      });
+    }
   }
 
   const signOutFiles = [

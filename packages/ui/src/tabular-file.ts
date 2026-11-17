@@ -2,11 +2,12 @@
 
 import {
   detectWorkbookVisibleSheets,
-  matrixToTabularData,
-  parseCsvTextMatrix,
+  matrixToTabularPreview,
   resolveWorkbookWorksheet,
-  worksheetToMatrix,
-} from "@masarx/api";
+  worksheetToTabularPreview,
+} from "../../api/src/tabular-import";
+
+import { TABULAR_LIMITS, parseBoundedCsv, assertXlsxExpansionLimits } from "./resource-import/tabular-file-limits";
 
 const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const DEFAULT_SHEET_NAME = "Sheet1";
@@ -31,10 +32,13 @@ export type ParsedTabularFile = {
   workbookSheets: string[];
   selectedSheet: string;
   headers: string[];
+  // Preview records only; the original file remains the source for full import.
   rows: Array<Record<string, unknown>>;
+  totalRows: number;
 };
 
 export const TABULAR_FILE_ACCEPT = ".csv,.xlsx";
+const PREVIEW_ROW_LIMIT = 20;
 export const LEGACY_XLS_UNSUPPORTED_MESSAGE = "Legacy .xls workbooks are not supported. Upload a CSV or XLSX file.";
 
 function resolveExcelWorkbookRuntime(moduleValue: unknown): ExcelWorkbookRuntime {
@@ -51,6 +55,15 @@ function resolveExcelWorkbookRuntime(moduleValue: unknown): ExcelWorkbookRuntime
 
 function resolveTabularFileExtension(fileName: string) {
   return fileName.split(".").pop()?.trim().toLowerCase() || "csv";
+}
+
+function validateTabularFileFormat(fileName: string) {
+  const format = resolveTabularFileExtension(fileName);
+  if (format === "xls") throw new Error(LEGACY_XLS_UNSUPPORTED_MESSAGE);
+  if (format !== "csv" && format !== "xlsx") {
+    throw new Error("Unsupported file format. Upload a CSV or XLSX file.");
+  }
+  return format;
 }
 
 async function loadExcelWorkbook(arrayBuffer: ArrayBuffer) {
@@ -73,26 +86,47 @@ export async function parseTabularFile(
   file: File,
   preferredSheet?: string | null,
 ): Promise<ParsedTabularFile> {
-  const format = resolveTabularFileExtension(file.name);
-  if (format === "xls") {
-    throw new Error(LEGACY_XLS_UNSUPPORTED_MESSAGE);
-  }
-  if (format === "csv") {
-    const parsed = matrixToTabularData(parseCsvTextMatrix(await file.text()));
+  validateTabularFileFormat(file.name);
+  if (file.size > TABULAR_LIMITS.fileBytes) throw new Error("fileSize");
+  if (resolveTabularFileExtension(file.name) === "csv") {
+    const parsed = matrixToTabularPreview(await parseBoundedCsv(file), PREVIEW_ROW_LIMIT);
     return {
-      format,
+      format: "csv",
       fileName: file.name,
       workbookSheets: [DEFAULT_SHEET_NAME],
       selectedSheet: DEFAULT_SHEET_NAME,
       headers: parsed.headers,
       rows: parsed.rows,
+      totalRows: parsed.totalRows,
     };
   }
-  if (format !== "xlsx") {
-    throw new Error("Unsupported file format. Upload a CSV or XLSX file.");
-  }
+  return parseTabularFileBuffer(await file.arrayBuffer(), file.name, preferredSheet);
+}
 
-  const workbook = await loadExcelWorkbook(await file.arrayBuffer());
+export async function parseTabularFileBuffer(
+  buffer: ArrayBuffer,
+  fileName: string,
+  preferredSheet?: string | null,
+): Promise<ParsedTabularFile> {
+  const format = validateTabularFileFormat(fileName);
+  if (format === "csv") {
+    const parsed = matrixToTabularPreview(
+      await parseBoundedCsv(buffer),
+      PREVIEW_ROW_LIMIT,
+    );
+    return {
+      format,
+      fileName,
+      workbookSheets: [DEFAULT_SHEET_NAME],
+      selectedSheet: DEFAULT_SHEET_NAME,
+      headers: parsed.headers,
+      rows: parsed.rows,
+      totalRows: parsed.totalRows,
+    };
+  }
+  await assertXlsxExpansionLimits(buffer);
+  const workbook = await loadExcelWorkbook(buffer);
+  const worksheetLimit = TABULAR_LIMITS.rows + 1;
   const visibleSheets = detectWorkbookVisibleSheets(workbook as never);
   const selectedSheet =
     (preferredSheet && visibleSheets.includes(preferredSheet) ? preferredSheet : null)
@@ -102,14 +136,21 @@ export async function parseTabularFile(
   if (!sheet) {
     throw new Error("The uploaded file did not contain a readable worksheet.");
   }
-  const parsed = matrixToTabularData(worksheetToMatrix(sheet as never));
+  const worksheet = sheet as { rowCount?: number; columnCount?: number; eachRow?: (visit: (row: { eachCell?: (visitCell: (cell: { text?: string }) => void) => void }) => void) => void };
+  if ((worksheet.rowCount ?? 0) > worksheetLimit) throw new Error("rows");
+  if ((worksheet.columnCount ?? 0) > TABULAR_LIMITS.columns) throw new Error("columns");
+  worksheet.eachRow?.((row) => row.eachCell?.((cell) => {
+    if ((cell.text ?? "").length > TABULAR_LIMITS.cellLength) throw new Error("cellLength");
+  }));
+  const parsed = worksheetToTabularPreview(sheet as never, PREVIEW_ROW_LIMIT);
   return {
     format,
-    fileName: file.name,
+    fileName,
     workbookSheets: visibleSheets.length > 0 ? visibleSheets : [selectedSheet],
     selectedSheet,
     headers: parsed.headers,
     rows: parsed.rows,
+    totalRows: parsed.totalRows,
   };
 }
 

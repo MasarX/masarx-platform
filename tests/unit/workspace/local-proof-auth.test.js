@@ -7,6 +7,7 @@ const {
   isRetryablePasswordGrantError,
   resolveManifestOperator,
   resolvePassword,
+  resolveSessionAccessToken,
   runProvisionDemoAccounts,
   verifyPasswordGrant,
 } = require('../../../scripts/ops/workspace/local-proof-auth');
@@ -86,10 +87,11 @@ describe('workspace local-proof-auth', () => {
         },
       })
       .mockResolvedValueOnce({
-        data: { session: { access_token: 'token' } },
+        data: { session: { access_token: 'header.payload.signature' } },
         error: null,
       });
     const signOut = jest.fn().mockResolvedValue({ error: null });
+    const onAccessToken = jest.fn();
 
     const result = await verifyPasswordGrant({
       client: { auth: { signInWithPassword, signOut } },
@@ -100,11 +102,58 @@ describe('workspace local-proof-auth', () => {
         DEMO_ACCOUNTS_SIGN_IN_RETRY_DELAY_MS: '1',
       },
       logger: { warn: jest.fn() },
+      onAccessToken,
     });
 
     expect(result).toEqual({ attempts: 2, retried: true });
     expect(signInWithPassword).toHaveBeenCalledTimes(2);
     expect(signOut).toHaveBeenCalledTimes(2);
+    expect(onAccessToken).toHaveBeenCalledWith('header.payload.signature');
+    expect(JSON.stringify(result)).not.toContain('header.payload.signature');
+  });
+
+  test('fails closed before the access-token consumer when the password grant token is missing or invalid', async () => {
+    const signOut = jest.fn().mockResolvedValue({ error: null });
+    const onAccessToken = jest.fn();
+
+    await expect(verifyPasswordGrant({
+      client: {
+        auth: {
+          signInWithPassword: jest.fn().mockResolvedValue({
+            data: { session: { access_token: '' } },
+            error: null,
+          }),
+          signOut,
+        },
+      },
+      email: 'sipkxyzyxvgvtksowrxwjgpn@example.invalid',
+      password: 'EXAMPLE_PASSWORD',
+      onAccessToken,
+    })).rejects.toThrow('missing or invalid access token');
+
+    expect(onAccessToken).not.toHaveBeenCalled();
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(() => resolveSessionAccessToken({ access_token: 'opaque-token' }))
+      .toThrow('missing or invalid access token');
+  });
+
+  test('keeps session cleanup fail-safe when the in-memory access-token consumer fails', async () => {
+    const signOut = jest.fn().mockResolvedValue({ error: null });
+    await expect(verifyPasswordGrant({
+      client: {
+        auth: {
+          signInWithPassword: jest.fn().mockResolvedValue({
+            data: { session: { access_token: 'header.payload.signature' } },
+            error: null,
+          }),
+          signOut,
+        },
+      },
+      email: 'sipkxyzyxvgvtksowrxwjgpn@example.invalid',
+      password: 'EXAMPLE_PASSWORD',
+      onAccessToken: async () => { throw new Error('probe failed'); },
+    })).rejects.toThrow('probe failed');
+    expect(signOut).toHaveBeenCalledTimes(1);
   });
 
   test('runProvisionDemoAccounts invokes the guarded local demo bootstrap with a relative manifest path', () => {
@@ -127,13 +176,11 @@ describe('workspace local-proof-auth', () => {
     });
     expect(spawnSyncImpl).toHaveBeenCalledWith(
       process.execPath || 'node',
-      expect.arrayContaining([
+      [
         path.join('scripts', 'ops', 'provision-demo-accounts.js'),
         '--out',
         path.join('tmp', 'demo-accounts.json'),
-        '--password',
-        'EXAMPLE_PASSWORD',
-      ]),
+      ],
       expect.objectContaining({
         cwd,
         env: expect.objectContaining({
@@ -142,5 +189,8 @@ describe('workspace local-proof-auth', () => {
         }),
       }),
     );
+    const childArgs = spawnSyncImpl.mock.calls[0][1];
+    expect(childArgs).not.toContain('--password');
+    expect(childArgs).not.toContain('EXAMPLE_PASSWORD');
   });
 });

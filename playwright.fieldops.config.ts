@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 
 import { loadEnv } from "./scripts/utils/load-env.js";
@@ -34,13 +34,25 @@ function resolveBaseUrl(value: string) {
 }
 
 const resolvedBaseUrl = resolveBaseUrl(baseUrl);
+// Expo serves the HTML before its web entry bundle has finished compiling.
+// Gate test startup on the same bundle requested by that HTML.
+const bundleReadyUrl = new URL(
+  "/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable",
+  resolvedBaseUrl
+).toString();
 const fieldopsWebDir = path.resolve(__dirname, "apps/fieldops");
+const runPwaSmoke = /^(1|true)$/i.test(process.env.FIELDOPS_PWA_SMOKE ?? "");
+const exportedWebDir = process.env.FIELDOPS_WEB_EXPORT_DIR?.trim();
+const proxyServer = process.env.FIELDOPS_E2E_PROXY_SERVER?.trim();
 
 function isLocalhostOrigin(origin: string) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 }
 
 const shouldStartServer = isLocalhostOrigin(new URL(resolvedBaseUrl).origin);
+if (runPwaSmoke && shouldStartServer && !exportedWebDir) {
+  throw new Error("FieldOps PWA smoke requires FIELDOPS_WEB_EXPORT_DIR: test the exported artifact, not Metro.");
+}
 
 const supabaseUrl =
   (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "").trim();
@@ -60,22 +72,36 @@ if (!process.env.NEXT_PUBLIC_AUTH_METHODS) {
 
 export default defineConfig({
   testDir: "./tests/fieldops-e2e",
+  projects: runPwaSmoke ? [
+    { name: "fieldops-android-web", testMatch: /pwa\.spec\.ts/, use: { ...devices["Pixel 7"] } },
+    { name: "fieldops-iphone-web", testMatch: /pwa\.spec\.ts/, use: { ...devices["iPhone 13"] } },
+  ] : [{ name: "fieldops", testIgnore: /pwa\.spec\.ts/, use: { browserName: "chromium" } }],
   timeout: 90_000,
   expect: {
     timeout: 15_000
   },
-  retries: isCi ? 2 : 0,
+  retries: 0,
   reporter: isCi
     ? [["html", { outputFolder: "playwright-report/fieldops", open: "never" }]]
     : [["html", { outputFolder: "playwright-report/fieldops", open: "on-failure" }]],
   outputDir: "test-results/fieldops",
   use: {
-    baseURL: resolvedBaseUrl,
-    trace: isCi ? "on-first-retry" : "retain-on-failure",
+    baseURL: `${resolvedBaseUrl}/`,
+    ...(proxyServer ? { proxy: { server: proxyServer, bypass: "localhost,127.0.0.1" } } : {}),
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure"
   },
-  webServer: shouldStartServer
+  webServer: shouldStartServer && runPwaSmoke
+    ? {
+        command: `node scripts/frontend/serve-landing.js --skip-build --out ${JSON.stringify(path.resolve(exportedWebDir!))} --port ${port} --base-path ${JSON.stringify(new URL(`${resolvedBaseUrl}/`).pathname)}`,
+        cwd: __dirname,
+        env: { ...process.env, LANDING_HOST: "127.0.0.1", LANDING_PORT: String(port) },
+        url: `${resolvedBaseUrl}/`,
+        reuseExistingServer,
+        timeout: 30_000,
+      }
+    : shouldStartServer
     ? {
         command: `npm run web -- --port ${port} --clear`,
         cwd: fieldopsWebDir,
@@ -83,6 +109,7 @@ export default defineConfig({
           ...process.env,
           CI: "1",
           EXPO_NO_TELEMETRY: "1",
+          EXPO_NO_DEPENDENCY_VALIDATION: "1",
           EXPO_NO_METRO_WORKSPACE_ROOT: "1",
           // Do not let apps/fieldops/.env placeholders override test-provided values.
           EXPO_NO_DOTENV: "1",
@@ -93,7 +120,7 @@ export default defineConfig({
           EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || supabaseAnonKey,
           EXPO_PUBLIC_AUTH_METHODS: process.env.NEXT_PUBLIC_AUTH_METHODS || authMethods,
         },
-        url: resolvedBaseUrl,
+        url: bundleReadyUrl,
         reuseExistingServer,
         timeout: 240_000,
       }

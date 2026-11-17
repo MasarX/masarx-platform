@@ -149,7 +149,7 @@ describe('Label reprint governance', () => {
       [shipmentBoxId, shipmentId, organizationId, clientId]
     );
 
-    await createWorkflowContext(client, {
+    const workflowContext = await createWorkflowContext(client, {
       templateName: 'sys_label_generation_v1',
       context: { organization_id: organizationId, client_id: clientId },
       local: true,
@@ -219,6 +219,19 @@ describe('Label reprint governance', () => {
     expect(reprintJob.reprint_reason).toBe(reprintReason);
     expect(reprintJob.source_label_version_id).toBe(initialLabel.active_version_id);
 
+    // Requesting a reprint alone must not publish a new active label/version.
+    const { rows: [pendingLabel] } = await client.query(
+      `SELECT id, shipment_id, active_version_id, active_version_number, file_url
+         FROM labels WHERE id = $1::uuid`,
+      [initialLabel.id]
+    );
+    expect(pendingLabel).toEqual(initialLabel);
+    const { rows: [pendingVersions] } = await client.query(
+      'SELECT count(*)::int AS count FROM label_versions WHERE label_id = $1::uuid',
+      [initialLabel.id]
+    );
+    expect(pendingVersions.count).toBe(1);
+
     await client.query(
       `SELECT complete_label_job(
          $1::uuid,
@@ -287,5 +300,47 @@ describe('Label reprint governance', () => {
     expect(actionRow.action_data.reprint_reason).toBe(reprintReason);
     expect(actionRow.action_data.label_version_number).toBe(2);
     expect(actionRow.action_data.label_version_id).toBe(versionRows[1].id);
+
+    // Existing enqueue wrappers must preserve purpose in both insert and reuse paths.
+    for (const withStep of [false, true]) {
+      const jobsByPurpose = [];
+      for (const purpose of ['primary', 'reprint', 'manual']) {
+        const enqueue = () => withStep
+          ? client.query(
+            `SELECT public.request_label_generation_bulk_compact_for_step_v1(
+               $1::uuid, $2::jsonb, 'shipping', NULL, 'purpose_contract', $3::text
+             ) AS result`,
+            [workflowContext.stepId, JSON.stringify([{ shipment_id: shipmentId, box_ids: [shipmentBoxId] }]), purpose],
+          )
+          : client.query(
+            `SELECT public.request_label_generation_bulk_compact_v1(
+               $1::jsonb, 'shipping', NULL, 'purpose_contract', $2::text
+             ) AS result`,
+            [JSON.stringify([{ shipment_id: shipmentId, box_ids: [shipmentBoxId] }]), purpose],
+          );
+        const first = (await enqueue()).rows[0].result;
+        const reused = (await enqueue()).rows[0].result;
+        expect(first.job_ids).toHaveLength(1);
+        expect(reused.job_ids).toEqual(first.job_ids);
+        expect(reused.inserted_count).toBe(0);
+        expect(reused.reused_count).toBe(1);
+        jobsByPurpose.push(first.job_ids[0]);
+
+        const { rows: persisted } = await client.query(
+          'SELECT job_purpose FROM public.label_jobs WHERE id = $1::uuid', [first.job_ids[0]],
+        );
+        expect(persisted).toEqual([{ job_purpose: purpose }]);
+        const { rows: decisions } = await client.query(
+          `SELECT decision_inputs->>'job_purpose' AS job_purpose
+             FROM public.decision_log
+            WHERE resource_id = $1::uuid AND decision_category = 'label_job'
+              AND decision_point = 'request_label_generation'`,
+          [first.job_ids[0]],
+        );
+        expect(decisions.length).toBeGreaterThan(0);
+        expect(decisions.every((row) => row.job_purpose === purpose)).toBe(true);
+      }
+      expect(new Set(jobsByPurpose).size).toBe(3);
+    }
   });
 });

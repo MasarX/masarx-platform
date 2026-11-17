@@ -270,7 +270,7 @@ async function uploadStorageObject({
   });
 
   if (!response.resp.ok) {
-    const text = await response.resp.text().catch(() => '');
+    const text = response.bodyText;
     const err = new Error(
       `Failed to upload storage object ${bucket}/${storagePath}: ${response.resp.status} ${text}`,
     );

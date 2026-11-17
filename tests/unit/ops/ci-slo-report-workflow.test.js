@@ -21,6 +21,10 @@ describe('ci-slo-report workflow', () => {
 
   test('generates report artifacts and refreshes the tracked CI health issue', () => {
     const body = readWorkflow('ci-slo-report.yml');
+    expect(body).toContain('runs-on: ${{ fromJSON(vars.RUNNER_RUNS_ON_LINUX_LOCAL_JSON) }}');
+    expect(body).not.toContain('RUNNER_LABELS_LINUX_GITHUB_JSON');
+    expect(body).not.toContain('LINUX_RUNNER_POLICY');
+    expect(body).not.toContain('LOCAL_RUNNER_PLATFORM_STATE');
     expect(body).toContain('actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd');
     expect(body).toContain("EXAMPLE_PASSWORD: ${{ secrets.PLAN_AUTOMATION_PR_TOKEN || github.token }}");
     expect(body).toContain('probe-url: https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=1');

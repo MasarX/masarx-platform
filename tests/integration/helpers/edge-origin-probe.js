@@ -108,6 +108,9 @@ async function probeAllowedOrigin(candidates, requestFn) {
       const errorCode = String(result?.body?.error?.code || '').trim();
       attempts.push({ origin, status, code: errorCode });
       if (status === 403) continue;
+      // A server/auth/routing failure is not proof that CORS admitted this origin.
+      if (!((status >= 200 && status < 300) ||
+          (status === 400 && errorCode && errorCode !== 'server_misconfigured'))) continue;
       return { origin, attempts };
     } catch (error) {
       attempts.push({

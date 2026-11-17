@@ -1,10 +1,11 @@
-import type { UiCommandDefinition } from "@masarx/api";
+import { matchesResourceCategory, type UiCommandDefinition, type UiReadRegistry } from "@masarx/api";
+import { commandResourceReadAllowed } from "./dashboard-utils";
 import {
   normalizeAppHref,
   normalizeBasePath,
   stripBasePath,
 } from "./navigation-paths";
-import { resolveSafeAppBasePath } from "./url-guard";
+import { resolveBaseOrigin, resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
 
 type CommandHrefLike = {
   href?: unknown;
@@ -18,30 +19,31 @@ type CommandRouteTarget = {
 type CommandRouteTargets = Record<string, CommandRouteTarget | null> | null | undefined;
 
 const normalizeCommandHref = (rawHref: string, basePath: string) => {
+  const safePath = resolveSafeHref("", rawHref);
+  if (!safePath) return null;
   const trimmed = rawHref.trim();
   if (!trimmed) return null;
-  if (/^https?:\/\//i.test(trimmed)) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null;
   const safeBase = resolveSafeAppBasePath(basePath);
   const normalizedBase = safeBase === null ? "" : normalizeBasePath(safeBase);
-  let path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
-  if (safeBase !== null && normalizedBase && !path.startsWith(normalizedBase)) {
+  let path = safePath;
+  if (safeBase !== null && normalizedBase &&
+      path !== normalizedBase && !path.startsWith(`${normalizedBase}/`) &&
+      !path.startsWith(`${normalizedBase}?`) && !path.startsWith(`${normalizedBase}#`)) {
     path = `${normalizedBase}${path}`;
   }
   const normalized = normalizeAppHref(path, safeBase ?? undefined);
-  return normalized || path;
+  return resolveSafeHref("", normalized || path);
 };
 
 function appendParams(path: string, params: Record<string, unknown>) {
-  const [base, rawQuery] = path.split("?");
-  const search = new URLSearchParams(rawQuery ?? "");
+  const url = new URL(path, resolveBaseOrigin());
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null) return;
     const str = String(value).trim();
-    if (!str) return;
-    search.set(key, str);
+    if (str) url.searchParams.set(key, str);
   });
-  const query = search.toString();
-  return query ? `${base}?${query}` : base;
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function resolveRouteTarget(
@@ -73,6 +75,7 @@ export function resolveCommandHref(
 ) {
   const routeHref = resolveRouteTarget(command, appBasePath, appKey);
   if (routeHref) return routeHref;
+  if (command.route_targets != null) return null;
   const candidate = (command as CommandHrefLike).href;
   if (typeof candidate !== "string") return null;
   return normalizeCommandHref(candidate, appBasePath);
@@ -86,4 +89,28 @@ export function resolveCommandHrefForRouter(
   const href = resolveCommandHref(command, appBasePath, appKey);
   const safeBase = resolveSafeAppBasePath(appBasePath);
   return href ? stripBasePath(href, safeBase ?? undefined) : null;
+}
+
+export function formatCommandBackendReference(command: UiCommandDefinition) {
+  return [
+    command.workflow_key?.trim() ? `workflow:${command.workflow_key.trim()}` : null,
+    command.binding_key?.trim()
+      ? `binding:${command.binding_key.trim()}${command.stage_key?.trim() ? `/${command.stage_key.trim()}` : ""}`
+      : null,
+    command.execution?.rpc?.trim() ? `rpc:${command.execution.rpc.trim()}` : null,
+  ].filter(Boolean).join(" | ");
+}
+
+export function resolveCommandReadState(
+  command: UiCommandDefinition,
+  registry: UiReadRegistry | null | undefined,
+  capabilities: Set<string>,
+): "allowed" | "denied" | "unavailable" {
+  const category = command.schema_category?.trim();
+  if (!category) return "allowed";
+  if (!Array.isArray(registry?.resources)) return "unavailable";
+  const resourceCommand = /^resource[:/.]/i.test(category) ||
+    registry.resources.some((resource) => matchesResourceCategory(category, resource.key));
+  if (!resourceCommand) return "allowed";
+  return commandResourceReadAllowed(command, registry, capabilities) ? "allowed" : "denied";
 }

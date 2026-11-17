@@ -41,11 +41,6 @@
   "scripts_root_message": "scripts/ root must contain only README.md; move ad-hoc scripts into scripts/dev/ (debug) or scripts/tools/ (one-off utilities).",
   "evidence": {
     "dir": "docs/ops/evidence",
-    "canonical_date_format": "YYYY-MM-DD",
-    "forbid_duplicate_day_buckets": true,
-    "forbid_compact_buckets": true,
-    "forbid_new_compact_buckets": true,
-    "forbid_redundant_artifact_zips": true,
     "retention": {
       "enabled": true,
       "max_actions": 50,

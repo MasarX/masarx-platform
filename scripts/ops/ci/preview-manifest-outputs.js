@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { parseFlagArgs } = require('../../utils/cli-args');
 const { resolveSurfaceUrl } = require('../preview/shared');
+const { buildMaterializedOwnership } = require('../workspace/preview-ownership');
 
 function die(message) {
   console.error(`[preview-manifest-outputs] ${message}`);
@@ -34,10 +35,17 @@ function buildPreviewManifestOutputs(manifest) {
   const db = manifest?.surfaces?.db && typeof manifest.surfaces.db === 'object'
     ? manifest.surfaces.db
     : {};
+  const ownership = manifest?.workspace_ownership && typeof manifest.workspace_ownership === 'object'
+    ? buildMaterializedOwnership(manifest.workspace_ownership)
+    : null;
   return {
+    materialized_ownership: ownership?.materialized ? '1' : '0',
     project_ref: normalizeString(db.project_ref),
     project_name: normalizeString(db.project_name),
     workspace_mode: normalizeString(db.workspace_mode),
+    branch_id: normalizeString(db.branch_id),
+    branch_parent_ref: normalizeString(db.branch_parent_ref),
+    ownership_generation_token: normalizeString(ownership?.generation_token),
     supabase_url: normalizeString(db.supabase_url),
     env_file: normalizeString(db.env_file || manifest?.env_file),
     runtime_ready: resolveBooleanOutput(db.runtime_ready),

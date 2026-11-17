@@ -1,7 +1,9 @@
 const path = require('path');
+const { createHash } = require('crypto');
 const { Pool } = require('pg');
 const { loadEnv } = require('../../scripts/utils/load-env');
 const { shouldDisableOnConnectivityError, shouldDisableOnError } = require('../../scripts/qa/qa-log');
+const { redactRuntimeOutput } = require('../../scripts/ops/workspace/docker-runtime/redaction');
 
 class QaReporter {
   constructor() {
@@ -76,7 +78,35 @@ class QaReporter {
     await this.recordCaseResults(results);
   }
 
-  async onRunComplete() {
+  async onRunComplete(_contexts, results) {
+    // Emit only case accounting, never Jest failure bodies or captured console output.
+    // Keep one case per line so the existing bounded runtime redactor remains effective.
+    if (process.env.MASARX_JEST_CASE_EVIDENCE === '1') {
+      for (const suite of results?.testResults || []) {
+        const rawFile = path.relative(process.cwd(), suite.testFilePath).split(path.sep).join('/');
+        const file = redactRuntimeOutput(rawFile) === rawFile ? rawFile : '[redacted-case-identity]';
+        for (const testCase of suite.testResults || []) {
+          const rawName = String(testCase.fullName || '');
+          const fullName = redactRuntimeOutput(rawName) === rawName ? rawName : '[redacted-case-identity]';
+          const caseId = createHash('sha256').update(JSON.stringify([rawFile, rawName])).digest('hex');
+          const record = {
+            kind: 'jest-case',
+            case_id: caseId,
+            file,
+            fullName,
+            status: testCase.status,
+            duration_ms: Number.isFinite(testCase.duration) ? testCase.duration : null,
+          };
+          let line = JSON.stringify(record);
+          // An empty secret marker can consume JSON delimiters in the downstream redactor.
+          if (redactRuntimeOutput(line) !== line) {
+            record.fullName = '[redacted-case-identity]';
+            line = JSON.stringify(record);
+          }
+          process.stdout.write(`${line}\n`);
+        }
+      }
+    }
     if (this.pool) {
       try {
         await this.pool.end();

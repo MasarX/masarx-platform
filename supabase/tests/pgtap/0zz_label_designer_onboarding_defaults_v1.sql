@@ -32,12 +32,15 @@ BEGIN
   RETURN NEXT ok(
     EXISTS (
       SELECT 1
-      FROM public.schema_registry
-      WHERE category = 'saas_onboarding_policy'
-        AND version = 1
-        AND is_active = TRUE
+      FROM public.settings s
+      JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+      JOIN public.schema_registry sr ON sr.category = s.category AND sr.version = sv.schema_version
+      WHERE s.category = 'saas_onboarding_policy'
+        AND s.scope_type = 'global'
+        AND s.scope_id IS NULL
+        AND sr.is_active = TRUE
     ),
-    'saas_onboarding_policy schema v1 is active'
+    'saas_onboarding_policy current global default uses its active schema'
   );
 
   RETURN NEXT ok(

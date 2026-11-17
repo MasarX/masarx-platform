@@ -15,6 +15,19 @@ function isTruthy(value) {
   return /^(1|true|yes|on)$/i.test(String(value || '').trim());
 }
 
+function resolvePreviewEasProfile({ appCwd, requestedProfile = '' }) {
+  const easConfigPath = path.join(appCwd, 'eas.json');
+  const easConfig = JSON.parse(fs.readFileSync(easConfigPath, 'utf8').replace(/^\uFEFF/, ''));
+  const profile = String(requestedProfile || 'development').trim();
+  if (profile !== 'development') {
+    throw new Error(`FieldOps preview prewarm permits only the 'development' EAS profile; got '${profile || '<empty>'}'.`);
+  }
+  if (!profile || !easConfig?.build || !Object.prototype.hasOwnProperty.call(easConfig.build, profile)) {
+    throw new Error(`Unknown FieldOps EAS build profile '${profile || '<empty>'}' in ${easConfigPath}.`);
+  }
+  return profile;
+}
+
 function readManifest(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return null;
   try {
@@ -75,6 +88,11 @@ function main() {
     return;
   }
 
+  const appCwd = path.resolve(process.cwd(), 'apps/fieldops');
+  const profile = resolvePreviewEasProfile({
+    appCwd,
+    requestedProfile: args.profile || process.env.PREVIEW_MOBILE_EAS_PROFILE,
+  });
   const expoToken = String(process.env.EXPO_TOKEN || '').trim();
   if (!expoToken) {
     setSurfaceState(manifest, {
@@ -93,20 +111,19 @@ function main() {
     return;
   }
 
-  const appCwd = path.resolve(process.cwd(), 'apps/fieldops');
   const easPkg = `eas-cli@${String(process.env.EAS_CLI_VERSION || '18.0.1').trim()}`;
   const executeBuild = isTruthy(args['execute-build'] || process.env.PREVIEW_MOBILE_EXECUTE || '0');
 
   runCommand({
     cmd: 'npx',
-    args: [easPkg, 'config', '--profile', 'preview', '--platform', 'android', '--non-interactive'],
+    args: [easPkg, 'config', '--profile', profile, '--platform', 'android', '--non-interactive'],
     cwd: appCwd,
     env: process.env,
     label: 'eas config android',
   });
   runCommand({
     cmd: 'npx',
-    args: [easPkg, 'config', '--profile', 'preview', '--platform', 'ios', '--non-interactive'],
+    args: [easPkg, 'config', '--profile', profile, '--platform', 'ios', '--non-interactive'],
     cwd: appCwd,
     env: process.env,
     label: 'eas config ios',
@@ -115,17 +132,17 @@ function main() {
   if (executeBuild) {
     runCommand({
       cmd: 'npx',
-      args: [easPkg, 'build', '--profile', 'preview', '--platform', 'all', '--non-interactive'],
+      args: [easPkg, 'build', '--profile', profile, '--platform', 'all', '--non-interactive'],
       cwd: appCwd,
       env: process.env,
-      label: 'eas build preview',
+      label: `eas build ${profile}`,
     });
   }
 
   setSurfaceState(manifest, {
     status: executeBuild ? 'deployed' : 'prewarmed',
     provider: 'expo',
-    profile: 'preview',
+    profile,
     execute_build: executeBuild,
     updated_at: new Date().toISOString(),
   });
@@ -134,7 +151,7 @@ function main() {
   console.log(JSON.stringify({
     ok: true,
     action,
-    profile: 'preview',
+    profile,
     execute_build: executeBuild,
     manifest_path: manifestPath || '',
   }, null, 2));
@@ -150,5 +167,6 @@ if (require.main === module) {
 
 module.exports = {
   isTruthy,
+  resolvePreviewEasProfile,
 };
 

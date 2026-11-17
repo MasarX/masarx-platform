@@ -7,7 +7,9 @@ const {
   createUser,
   createShipment,
   setAuthContext,
-  applySetting
+  applySetting,
+  withFixtureAdminContext,
+  setServiceContext: setCanonicalServiceContext,
 } = require('../helpers/tenant-utils');
 
 loadEnv();
@@ -40,19 +42,7 @@ describe('Dispatch stop exceptions pipeline', () => {
   });
 
   async function setServiceContext(organizationId, userId) {
-    await client.query('SET LOCAL ROLE service_role');
-
-    const claims = {
-      role: 'service_role',
-      sub: userId,
-      organization_id: organizationId
-    };
-
-    await client.query('SELECT set_config($1, $2, true)', [
-      'request.jwt.claims',
-      JSON.stringify(claims)
-    ]);
-    await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', String(userId)]);
+    await setCanonicalServiceContext(client, userId, organizationId);
   }
 
   async function seedDeliveryStopTask() {
@@ -147,17 +137,17 @@ describe('Dispatch stop exceptions pipeline', () => {
   }
 
   async function runDomainEventsWorkerOnce() {
-    await client.query(
+    await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `INSERT INTO cron_config (worker_name, interval_seconds, batch_size, enabled, notes)
        VALUES ('domain_events_worker', 60, 50, true, 'integration ensure worker throttle')
        ON CONFLICT (worker_name)
        DO UPDATE SET enabled = true, interval_seconds = EXCLUDED.interval_seconds, batch_size = EXCLUDED.batch_size`
-    );
-    await client.query(
+    ));
+    await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `UPDATE cron_config
           SET last_run_at = now() - interval '5 minutes'
         WHERE worker_name = 'domain_events_worker'`
-    );
+    ));
 
     await client.query(`SELECT run_domain_events_worker()`);
   }
@@ -165,12 +155,12 @@ describe('Dispatch stop exceptions pipeline', () => {
   async function waitForDomainEventWorkflowRun(domainEventId, maxAttempts = 50) {
     for (let i = 0; i < maxAttempts; i += 1) {
       await runDomainEventsWorkerOnce();
-      const { rows } = await client.query(
+      const { rows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
         `SELECT workflow_run_id
            FROM domain_events
           WHERE id = $1::uuid`,
         [domainEventId]
-      );
+      ));
       const workflowRunId = rows[0]?.workflow_run_id ?? null;
       if (workflowRunId) {
         return workflowRunId;
@@ -191,14 +181,14 @@ describe('Dispatch stop exceptions pipeline', () => {
   }
 
   async function forceWorkflowStepDue(workflowRunId) {
-    await client.query(
+    await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `UPDATE workflow_run_steps
           SET run_at = now() - interval '1 second',
               updated_at = now()
         WHERE workflow_run_id = $1::uuid
           AND step_status = 'pending'`,
       [workflowRunId]
-    );
+    ));
   }
 
   async function getGlobalDispatchStopPolicy() {
@@ -318,13 +308,13 @@ describe('Dispatch stop exceptions pipeline', () => {
   }
 
   async function getManualReviewTaskRow(manualReviewTaskId) {
-    const { rows } = await client.query(
+    const { rows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT id, status, reason, metadata, resolution_outcome, resolution_notes, resolved_by
          FROM manual_review_tasks
         WHERE id = $1::uuid
         LIMIT 1`,
       [manualReviewTaskId]
-    );
+    ));
     return rows[0] ?? null;
   }
 
@@ -526,7 +516,7 @@ describe('Dispatch stop exceptions pipeline', () => {
       [stopTaskId, outcomeReason, JSON.stringify(taskPayload || {}), idempotencyKey]
     );
 
-    const { rows: domainEventRows } = await client.query(
+    const { rows: domainEventRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT id
          FROM domain_events
         WHERE organization_id = $1::uuid
@@ -536,7 +526,7 @@ describe('Dispatch stop exceptions pipeline', () => {
         ORDER BY created_at DESC
         LIMIT 1`,
       [organizationId, routeStopId]
-    );
+    ));
     const domainEventId = domainEventRows[0]?.id;
     expect(domainEventId).toBeTruthy();
 
@@ -549,14 +539,14 @@ describe('Dispatch stop exceptions pipeline', () => {
   }
 
   async function getShipmentStatus(shipmentId, clientId) {
-    const { rows } = await client.query(
+    const { rows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT status
          FROM shipments
         WHERE id = $1::uuid
           AND client_id = $2::uuid
         LIMIT 1`,
       [shipmentId, clientId]
-    );
+    ));
     return rows[0]?.status ?? null;
   }
 
@@ -909,24 +899,24 @@ describe('Dispatch stop exceptions pipeline', () => {
     expect(scheduledReviewTask?.metadata?.resolution_workflow_run_id).toBe(scheduledResult.items[0].workflow_run_id);
     expect(scheduledReviewTask?.metadata?.resolution_scheduled_for).toBeTruthy();
 
-    const { rows: workflowRunRows } = await client.query(
+    const { rows: workflowRunRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT workflow_status, context
          FROM workflow_runs
         WHERE id = $1::uuid
         LIMIT 1`,
       [scheduledResult.items[0].workflow_run_id]
-    );
+    ));
     expect(workflowRunRows[0]?.workflow_status).toBe('pending');
     expect(workflowRunRows[0]?.context?.scheduled_for).toBeTruthy();
 
-    const { rows: workflowStepRows } = await client.query(
+    const { rows: workflowStepRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT step_status, run_at, metadata
          FROM workflow_run_steps
         WHERE workflow_run_id = $1::uuid
         ORDER BY sequence_order
         LIMIT 1`,
       [scheduledResult.items[0].workflow_run_id]
-    );
+    ));
     expect(workflowStepRows[0]?.step_status).toBe('pending');
     expect(new Date(workflowStepRows[0].run_at).getTime()).toBeGreaterThan(
       new Date(followup.created_at).getTime()
@@ -1029,13 +1019,13 @@ describe('Dispatch stop exceptions pipeline', () => {
     );
     expect(verificationFollowup?.task_id).toBeTruthy();
 
-    await client.query(
+    await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `UPDATE shipments
           SET metadata = jsonb_strip_nulls(COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('verification_failed', TRUE)),
               updated_at = now()
         WHERE id = $1::uuid`,
       [verificationSeed.shipmentId]
-    );
+    ));
 
     const { rows: verificationPreviewRows } = await client.query(
       `SELECT public.preview_dispatch_exception_resolution_v1($1::uuid, $2::text, $3::jsonb) AS preview`,
@@ -1240,7 +1230,7 @@ describe('Dispatch stop exceptions pipeline', () => {
       [stopTaskId, 'customer_refused', idem]
     );
 
-    const { rows: eventCountRows } = await client.query(
+    const { rows: eventCountRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT COUNT(*)::int AS count
          FROM domain_events
         WHERE organization_id = $1::uuid
@@ -1248,10 +1238,10 @@ describe('Dispatch stop exceptions pipeline', () => {
           AND resource_type = 'route_stop'
           AND resource_id = $2::uuid`,
       [organizationId, routeStopId]
-    );
+    ));
     expect(eventCountRows[0]?.count).toBe(1);
 
-    const { rows: eventRows } = await client.query(
+    const { rows: eventRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT id
          FROM domain_events
         WHERE organization_id = $1::uuid
@@ -1261,7 +1251,7 @@ describe('Dispatch stop exceptions pipeline', () => {
         ORDER BY created_at DESC
         LIMIT 1`,
       [organizationId, routeStopId]
-    );
+    ));
     const finalizeWorkflowId = await waitForDomainEventWorkflowRun(eventRows[0]?.id ?? null);
     expect(finalizeWorkflowId).toBeTruthy();
 
@@ -1331,7 +1321,7 @@ describe('Dispatch stop exceptions pipeline', () => {
       [followupTaskId, `dispatch-reschedule-idem-${randomUUID()}`]
     );
 
-    const { rows: followupDomainEventRows } = await client.query(
+    const { rows: followupDomainEventRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT id
          FROM domain_events
         WHERE organization_id = $1::uuid
@@ -1341,7 +1331,7 @@ describe('Dispatch stop exceptions pipeline', () => {
         ORDER BY created_at DESC
         LIMIT 1`,
       [seed.organizationId, followupRef.resourceType, followupRef.resourceId]
-    );
+    ));
     const followupDomainEventId = followupDomainEventRows[0]?.id;
     expect(followupDomainEventId).toBeTruthy();
 
@@ -1420,6 +1410,44 @@ describe('Dispatch stop exceptions pipeline', () => {
     expect(latestAssignedEvent?.actor_user_id).toBe(claimantUserId);
   });
 
+  test('dispatch SLA API projection preserves service authenticated and anon boundaries across tenants', async () => {
+    const fixtures = [];
+    for (const suffix of ['a', 'b']) {
+      const seed = await seedDeliveryStopTask();
+      await completeStopAndFinalize(seed, 'no_answer', `projection-${suffix}-${randomUUID()}`);
+      const followup = await getTaskSnapshotForResource(seed.organizationId, 'shipment', seed.shipmentId, 'dispatch_exception_review');
+      expect(followup?.task_id).toBeTruthy();
+      await withFixtureAdminContext(client, adminClient => adminClient.query(
+        `UPDATE public.tasks SET sla_due_at = now() - interval '5 minutes', sla_breached_at = now()
+          WHERE id = $1::uuid AND organization_id = $2::uuid`,
+        [followup.task_id, seed.organizationId]));
+      fixtures.push({ ...seed, taskId: followup.task_id });
+    }
+    expect(fixtures[0].organizationId).not.toBe(fixtures[1].organizationId);
+    const readIds = async role => {
+      expect((await client.query('SELECT current_user AS role')).rows[0].role).toBe(role);
+      return (await client.query('SELECT id FROM api.dispatch_exception_review_sla_breaches_v')).rows.map(row => row.id);
+    };
+    await setServiceContext(fixtures[0].organizationId, fixtures[0].opsOwnerId);
+    expect(await readIds('service_role')).toEqual(expect.arrayContaining(fixtures.map(f => f.taskId)));
+    for (const [index, fixture] of fixtures.entries()) {
+      await setAuthContext(client, fixture.opsOwnerId, { organization_id: fixture.organizationId });
+      const ids = await readIds('authenticated');
+      expect(ids).toContain(fixture.taskId);
+      expect(ids).not.toContain(fixtures[1 - index].taskId);
+    }
+    await client.query('SAVEPOINT projection_anon');
+    try {
+      await client.query('SET LOCAL ROLE anon');
+      await client.query("SELECT set_config('request.jwt.claims', '{\"role\":\"anon\"}', true), set_config('request.jwt.claim.sub', '', true), set_config('request.jwt.claim.role', 'anon', true)");
+      expect((await client.query('SELECT current_user AS role')).rows[0].role).toBe('anon');
+      await expect(client.query('SELECT id FROM api.dispatch_exception_review_sla_breaches_v')).rejects.toMatchObject({ code: '42501' });
+    } finally {
+      await client.query('ROLLBACK TO SAVEPOINT projection_anon');
+      await client.query('RELEASE SAVEPOINT projection_anon');
+    }
+  });
+
   test('dispatch exception SLA sweeper stamps breach evidence once', async () => {
     const seed = await seedDeliveryStopTask();
 
@@ -1464,7 +1492,7 @@ describe('Dispatch stop exceptions pipeline', () => {
 
     const { rows: breachViewRows } = await client.query(
       `SELECT dispatch_exception_reason
-         FROM public.dispatch_exception_review_sla_breaches_v
+         FROM api.dispatch_exception_review_sla_breaches_v
         WHERE id = $1::uuid
         LIMIT 1`,
       [followup.task_id]
@@ -1474,13 +1502,13 @@ describe('Dispatch stop exceptions pipeline', () => {
     const breachEvent = await getLatestTaskEvent(followup.task_id, 'sla_breached');
     expect(breachEvent?.decision_log_id).toBeTruthy();
 
-    const { rows: decisionRows } = await client.query(
+    const { rows: decisionRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `SELECT decision_point, decision_outcome
          FROM decision_log
         WHERE id = $1::uuid
         LIMIT 1`,
       [breachEvent.decision_log_id]
-    );
+    ));
     expect(decisionRows[0]?.decision_point).toBe('sla_breach');
     expect(decisionRows[0]?.decision_outcome).toBe('breached');
     expect(await countTaskEvents(followup.task_id, 'sla_breached')).toBe(1);

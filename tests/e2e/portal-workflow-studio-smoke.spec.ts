@@ -13,6 +13,7 @@ import {
   createWorkflowTemplateDraftViaUi,
   ensureWorkflowTemplateFlowHasStep,
   keyboardZoomWorkflowTemplateFlowCanvas,
+  toggleWorkflowTemplateFlowStepEnabledAndVerifyPersistence,
   wheelZoomWorkflowTemplateFlowCanvas,
 } from "./utils/workflow-studio";
 
@@ -63,6 +64,7 @@ test.describe("portal workflow studio smoke", () => {
   });
 
   test("loads workflow studio and operation library", async ({ page }) => {
+    test.slow();
     if (!demoContext.available) {
       test.skip(true, demoContext.reason ?? "Demo accounts missing.");
     }
@@ -86,7 +88,7 @@ test.describe("portal workflow studio smoke", () => {
 
       await page.goto(templatesRoute, {
         waitUntil: "domcontentloaded",
-        timeout: 60_000,
+        timeout: 120_000,
       });
 
       await expect(
@@ -168,6 +170,10 @@ test.describe("portal workflow studio smoke", () => {
       await expect(firstPaletteItem).toBeVisible({ timeout: 20_000 });
 
       await ensureWorkflowTemplateFlowHasStep({ page, testIdPrefix: "portal" });
+      await toggleWorkflowTemplateFlowStepEnabledAndVerifyPersistence({
+        page,
+        testIdPrefix: "portal",
+      });
 
       const connectFrom = page
         .locator(

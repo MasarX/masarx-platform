@@ -12,7 +12,7 @@ import { Input } from "./input";
 import { normalizeAppHref, normalizeBasePath, stripBasePath } from "./navigation-paths";
 import { RadioGroup, RadioGroupItem } from "./radio-group";
 import { buildHref } from "./url";
-import { formatUiError } from "./utils";
+import { formatUiError, getUiErrorMessage } from "./utils";
 import {
   createRequestId,
   reportClientError,
@@ -149,9 +149,12 @@ export function AuthSignIn({
     status !== "loading" &&
     hasEmail &&
     (method !== "password" || hasPassword);
-  const isMountedRef = React.useRef(true);
+  const isMountedRef = React.useRef(false);
+  const signInRootRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
+    isMountedRef.current = true;
+    signInRootRef.current?.setAttribute("data-hydrated", "true");
     return () => {
       isMountedRef.current = false;
     };
@@ -187,7 +190,7 @@ export function AuthSignIn({
       nextStatus = "error";
       nextMessage = formatUiError(error, t("errors.signInFailed"));
       reportClientError(
-        error instanceof Error ? error : new Error(nextMessage ?? t("errors.signInFailed")),
+        error instanceof Error ? error : new Error(getUiErrorMessage(error) ?? t("errors.signInFailed")),
         {
           context: "AuthSignIn",
           digest: appLabel,
@@ -294,7 +297,11 @@ export function AuthSignIn({
   };
 
   return (
-    <div className="space-y-6" data-testid={`${testIdPrefix}-sign-in`}>
+    <div
+      ref={signInRootRef}
+      className="space-y-6"
+      data-testid={`${testIdPrefix}-sign-in`}
+    >
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="text-sm uppercase tracking-[0.25em] text-ui-muted">

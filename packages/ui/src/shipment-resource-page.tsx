@@ -6,9 +6,12 @@ import type {
   UiShipmentTimelineEvent,
 } from "@masarx/api";
 import { createUiServerClient } from "@masarx/api/server";
+import { getPublicConfig } from "@masarx/config";
 import { Badge } from "./badge";
+import { ContextNotice } from "./context-notice";
 import { Button } from "./button";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { createUiTranslator } from "./i18n";
 import { formatDateTime } from "./pickup-operations-utils";
 import { ResourcePage } from "./resource-page";
 import { Section } from "./section";
@@ -16,12 +19,15 @@ import { TrackingSearchForm } from "./tracking-search-form";
 import { findRegistryResource } from "./ui-registry-utils";
 import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
 import { formatUiError } from "./utils";
+import { resolveShipmentOperatorHandoffHref, resolveTrackingOperatorHandoff, type TrackingOperatorHandoff } from "./tracking-config";
 
 type ShipmentResourcePageProps = {
   appKey: "console" | "portal";
   appBasePath: string;
   searchParams: Record<string, string | string[] | undefined>;
   testIdPrefix: string;
+  operatorHandoff?: TrackingOperatorHandoff | null;
+  operatorHandoffDestination?: boolean;
 };
 
 type TimelineTone = "neutral" | "accent" | "success" | "warning" | "danger" | "info";
@@ -95,7 +101,7 @@ function resolveTimelineTone(status: string | null): TimelineTone {
   return "info";
 }
 
-function buildTimelineFacts(event: UiShipmentTimelineEvent) {
+function buildTimelineFacts(event: UiShipmentTimelineEvent, t: ReturnType<typeof createUiTranslator>) {
   const facts: Array<{ label: string; value: string }> = [];
   const metadata = recordValue(event.metadata);
 
@@ -105,29 +111,29 @@ function buildTimelineFacts(event: UiShipmentTimelineEvent) {
     facts.push({ label, value: resolved });
   };
 
-  appendFact("Actor", event.actor);
+  appendFact(t("changedBy"), event.actor);
 
   switch (event.event_source) {
     case "shipment_action":
-      appendFact("Category", metadata?.action_category);
-      appendFact("Status", metadata?.canonical_status);
-      appendFact("Investigation", metadata?.investigation_status);
+      appendFact(t("category"), metadata?.action_category);
+      appendFact(t("status"), metadata?.canonical_status);
+      appendFact(t("investigation"), metadata?.investigation_status);
       break;
     case "decision_log":
-      appendFact("Decision point", metadata?.decision_point);
-      appendFact("Reason", metadata?.decision_reason);
-      appendFact("Settings resolution", metadata?.settings_resolution_id);
+      appendFact(t("decision"), metadata?.decision_point);
+      appendFact(t("reason"), metadata?.decision_reason);
+      appendFact(t("policy"), metadata?.settings_resolution_id);
       break;
     case "domain_event":
-      appendFact("Workflow run", metadata?.workflow_run_id);
-      appendFact("Processed at", metadata?.processed_at);
-      appendFact("Error", metadata?.error_reason);
+      appendFact(t("workflow"), metadata?.workflow_run_id);
+      appendFact(t("processedAt"), metadata?.processed_at);
+      appendFact(t("error"), metadata?.error_reason);
       break;
     case "outbound_communication":
-      appendFact("Target", metadata?.target_type);
-      appendFact("Method", metadata?.method);
-      appendFact("Response", metadata?.response_status_code);
-      appendFact("Latency", metadata?.latency_ms);
+      appendFact(t("target"), metadata?.target_type);
+      appendFact(t("method"), metadata?.method);
+      appendFact(t("response"), metadata?.response_status_code);
+      appendFact(t("latency"), metadata?.latency_ms);
       break;
     default:
       break;
@@ -144,26 +150,28 @@ function renderShipmentTimelineSection(params: {
   timelineError: string | null;
   timeZone?: string | null;
   testIdPrefix: string;
+  selected?: boolean;
 }) {
   const { appBasePath, canViewTrace, locale, timeline, timelineError, timeZone, testIdPrefix } =
     params;
+  const t = createUiTranslator("ui.shipmentPresentation");
   const events = Array.isArray(timeline?.timeline_events) ? timeline.timeline_events : [];
 
   return (
     <Section
-      title="Shipment timeline"
-      description="Canonical shipment actions, decisions, domain events, and outbound communications."
-      collapsible
+      title={t("timelineTitle")}
+      description={t("timelineDescription")}
+      collapsible={!params.selected}
       collapseKey="shipments.timeline"
       testId={`${testIdPrefix}-shipment-timeline`}
     >
       {timelineError ? (
         <div className="space-y-2 text-sm text-ui-muted">
-          <p>Shipment timeline is unavailable right now.</p>
+          <p>{t("timelineUnavailable")}</p>
           <p className="text-xs text-ui-muted/70">{timelineError}</p>
         </div>
       ) : events.length === 0 ? (
-        <p className="text-sm text-ui-muted">No shipment timeline events recorded yet.</p>
+        <p className="text-sm text-ui-muted">{t("timelineEmpty")}</p>
       ) : (
         <ol className="space-y-3">
           {events.map((event, index) => {
@@ -172,7 +180,7 @@ function renderShipmentTimelineSection(params: {
             const traceHref = correlationId
               ? `${appBasePath}/observability/trace/${encodeURIComponent(correlationId)}`
               : null;
-            const facts = buildTimelineFacts(event);
+            const facts = buildTimelineFacts(event, t);
             const summary = stringValue(event.summary);
             const eventType = humanizeLabel(stringValue(event.event_type));
             const eventTimeLabel =
@@ -213,13 +221,14 @@ function renderShipmentTimelineSection(params: {
                   </div>
                   <div className="space-y-2 text-right text-xs text-ui-muted">
                     {eventTimeLabel ? <div>{eventTimeLabel}</div> : null}
-                    {canViewTrace && traceHref ? (
+                    {canViewTrace && correlationId && traceHref ? (
                       <a
-                        className="inline-flex text-ui-ink underline underline-offset-4"
+                        className="inline-flex min-h-6 items-center text-ui-ink underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-accent"
                         href={traceHref}
                         data-testid={`${testIdPrefix}-shipment-timeline-trace-${index}`}
                       >
-                        Open trace
+                        {t("openActivityHistory")}
+                        <span className="sr-only">{t("activityReference", { reference: correlationId })}</span>
                       </a>
                     ) : null}
                   </div>
@@ -339,16 +348,62 @@ export async function ShipmentResourcePage({
   appBasePath,
   searchParams,
   testIdPrefix,
+  operatorHandoff,
+  operatorHandoffDestination = false,
 }: ShipmentResourcePageProps) {
   const ui = createUiServerClient();
+  let timelineSelected = false;
+  if (operatorHandoffDestination) {
+    const me = await ui.me().catch(() => null);
+    const t = createUiTranslator("ui.tracking.operatorHandoff");
+    const unavailable = () => (
+      <div data-testid={`${testIdPrefix}-blocked`}>
+        <ContextNotice title={t("unavailable")} action={t("retry")}
+          testId={`${testIdPrefix}-handoff-unavailable`} />
+      </div>
+    );
+    if (appKey !== "console" || !me?.user?.id) return unavailable();
+    try {
+      const registry = await ui.readRegistry();
+      const resource = findRegistryResource(registry, "shipments");
+      if (!resource?.capability_read ||
+          !hasCapability(resolveCapabilitySet(me.capabilities ?? []), resource.capability_read)) return unavailable();
+      const config = await ui.trackingRegistry();
+      const handoff = resolveTrackingOperatorHandoff(config.operator_handoff);
+      if (config.resource_key !== "shipments" || !handoff) return unavailable();
+      const focus = searchParams[handoff.identifierParam];
+      const tab = handoff.tabParam ? searchParams[handoff.tabParam] : undefined;
+      if (typeof focus !== "string" || !focus.trim() ||
+          (tab !== undefined && tab !== handoff.tab)) return unavailable();
+      const sourceFilter = resource.filters?.find((filter) =>
+        filter.column === handoff.identifierSource && !filter.resolver?.trim());
+      if (!sourceFilter && (handoff.identifierSource === "rules" ||
+          resource.filters?.some((filter) => filter.key === handoff.identifierSource))) return unavailable();
+      const filters = sourceFilter
+        ? { op: "and", rules: [{ key: sourceFilter.key, op: "eq", value: focus.trim() }] }
+        : { [handoff.identifierSource]: focus.trim() };
+      const result = await ui.listResource("shipments", filters, 2);
+      const row = result.items?.[0];
+      if (result.items?.length !== 1 || (result.total ?? 0) > 1 || !row ||
+          !stringValue(row.id) || row[handoff.identifierSource] !== focus.trim()) return unavailable();
+      searchParams = { id: String(row.id), detail_open: "1", identifier: focus.trim() };
+      timelineSelected = tab === "timeline";
+    } catch {
+      return unavailable();
+    }
+  }
   const detailId = firstValue(searchParams.id);
+  const detailOpen = Boolean(detailId && firstValue(searchParams.detail_open) !== "0");
   const [meResult, registryResult, timelineResult, podAssetsResult] = await Promise.allSettled([
     ui.me(),
     ui.readRegistry(),
-    detailId ? ui.getShipmentTimeline(detailId) : Promise.resolve(null),
-    detailId ? ui.getShipmentPodAssets(detailId) : Promise.resolve([]),
+    detailOpen && detailId ? ui.getShipmentTimeline(detailId) : Promise.resolve(null),
+    detailOpen && detailId ? ui.getShipmentPodAssets(detailId) : Promise.resolve([]),
   ]);
   const me = meResult.status === "fulfilled" ? meResult.value : null;
+  const handoffT = createUiTranslator("ui.tracking.operatorHandoff");
+  const tSearch = createUiTranslator("ui.shipmentResource.search");
+  const t = createUiTranslator("ui.shipmentPresentation");
   const registry = registryResult.status === "fulfilled" ? registryResult.value : null;
   const timeline = timelineResult.status === "fulfilled" ? timelineResult.value : null;
   const podAssets = podAssetsResult.status === "fulfilled" ? podAssetsResult.value : [];
@@ -356,7 +411,7 @@ export async function ShipmentResourcePage({
     detailId && timelineResult.status === "rejected"
       ? formatUiError(
           timelineResult.reason,
-          "Shipment timeline could not be loaded."
+          t("timelineUnavailable")
         )
       : null;
   const podAssetsError =
@@ -373,6 +428,7 @@ export async function ShipmentResourcePage({
     Boolean(shipmentsResource?.capability_write) &&
     hasCapability(capabilitySet, shipmentsResource?.capability_write ?? null);
   const canViewTrace = hasCapability(capabilitySet, "audit_log.read");
+  const canSearchCorrelation = canViewTrace || hasCapability(capabilitySet, "requests.read");
   const identifier = stringValue(firstValue(searchParams.identifier));
   const safeBasePath = resolveSafeAppBasePath(appBasePath);
   const resourceBaseHref =
@@ -387,7 +443,7 @@ export async function ShipmentResourcePage({
         href={`${resourceBaseHref}/new?return_to=${encodeURIComponent(resourceBaseHref)}`}
         data-testid={`${testIdPrefix}-create-action`}
       >
-        Create shipment
+        {t("create")}
       </a>
     </Button>
   ) : null;
@@ -395,8 +451,10 @@ export async function ShipmentResourcePage({
   return (
     <div className="space-y-6">
       <Section
-        title="Shipment search"
-        description="Find a shipment by shipment ID, tracking number, order reference, phone number, or correlation ID."
+        title={tSearch("title")}
+        description={canSearchCorrelation
+          ? tSearch("descriptionWithCorrelation")
+          : tSearch("description")}
         collapsible
         collapseKey="shipments.search"
         testId={`${testIdPrefix}-shipment-search`}
@@ -405,10 +463,13 @@ export async function ShipmentResourcePage({
           actionHref={searchActionHref}
           defaultValue={identifier}
           paramKey="identifier"
-          label="Identifier"
-          placeholder="Tracking, order, phone, shipment ID, or correlation ID"
-          searchLabel="Search shipments"
-          clearLabel="Clear search"
+          label={canSearchCorrelation ? t("identifier") : tSearch("identifier")}
+          placeholder={canSearchCorrelation
+            ? tSearch("placeholderWithCorrelation")
+            : tSearch("placeholder")}
+          searchLabel={tSearch("submit")}
+          clearLabel={tSearch("clear")}
+          emptySearchMessage={tSearch("empty")}
           resourceKey="shipments"
           filterKey="identifier"
           testIdPrefix={`${testIdPrefix}-shipment-search`}
@@ -422,20 +483,35 @@ export async function ShipmentResourcePage({
         testIdPrefix={testIdPrefix}
         headerActions={headerActions}
         renderDetailFooter={({ detail, detailError }) => {
-          if (!detail || detailError || !detailId) return null;
+          if (!detail || detailError || !detailId || !detailOpen) return null;
+          const handoffHref = appKey === "portal" && me?.user?.id && detail.id === detailId && operatorHandoff
+            ? resolveShipmentOperatorHandoffHref(operatorHandoff, detail,
+                process.env.CONSOLE_BASE_URL?.trim() || process.env.WORKSPACE_CONSOLE_BASE_URL?.trim() || process.env.VITE_CONSOLE_BASE_URL)
+            : null;
+          const arabic = getPublicConfig().locale.toLowerCase().startsWith("ar");
           return (
             <>
+              {handoffHref && operatorHandoff ? (
+                <Section title={handoffT("title")} description={(arabic ? operatorHandoff.descriptionAr : operatorHandoff.description) ?? handoffT("description")} testId={`${testIdPrefix}-operator-handoff`}>
+                  <a href={handoffHref} className="inline-flex min-h-11 items-center gap-2 break-all rounded-md px-3 py-2 text-sm text-ui-ink underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-accent"
+                    data-testid={`${testIdPrefix}-operator-handoff-link`}>
+                    {(arabic ? operatorHandoff.labelAr : operatorHandoff.label) ?? handoffT("label")}
+                    <span className="sr-only">{handoffT("reference", { reference: String(detail[operatorHandoff.identifierSource]) })}</span>
+                  </a>
+                </Section>
+              ) : null}
               {renderShipmentTimelineSection({
-                appBasePath,
+                appBasePath: safeBasePath ?? "",
                 canViewTrace,
                 locale: me?.locale ?? null,
                 timeline,
                 timelineError,
                 timeZone: me?.timezone ?? null,
                 testIdPrefix,
+                selected: timelineSelected,
               })}
               {renderShipmentPodAssetSection({
-                appBasePath,
+                appBasePath: safeBasePath ?? "",
                 assets: Array.isArray(podAssets) ? podAssets : [],
                 assetsError: podAssetsError,
                 locale: me?.locale ?? null,

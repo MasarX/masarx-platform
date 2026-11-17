@@ -30,13 +30,13 @@ jest.mock("../../packages/ui/src/resource-table", () => ({
         data-testid="mock-table"
         data-items={JSON.stringify(props.items?.length)}
         data-has-server-navigate={String(typeof props.onServerNavigate === "function")}
-      />
+      >{props.items?.length ? props.renderBulkActions?.(["1"]) : null}</div>
     );
   }),
 }));
 
 jest.mock("../../packages/ui/src/resource-bulk-actions", () => ({
-  ResourceBulkActions: () => null,
+  ResourceBulkActions: jest.fn(() => null),
 }));
 
 jest.mock("../../packages/ui/src/hooks/use-resource-query", () => ({
@@ -100,6 +100,52 @@ test("renders table with items", () => {
   const table = screen.getByTestId("mock-table");
   expect(table).toBeInTheDocument();
   expect(table.getAttribute("data-items")).toBe("2");
+});
+
+const committedBatch = {
+  actionKey: "cancel", actionLabel: "Cancel shipments", status: "cancelled",
+  total: 1, success: 1, failure: 0, alreadyProcessed: 0,
+  items: [{ id: "1", statusCode: "cancelled", outcome: "success" as const, errorCode: null }],
+  malformedReason: null,
+};
+const batchActions = {
+  resourceKey: "shipments", commands: [], appKey: "console" as const,
+  appBasePath: "/console", downloadBasePath: "/console/download", userCapabilities: [],
+};
+function currentBatchCallback() {
+  const tableProps = ResourceTableMock.mock.calls[ResourceTableMock.mock.calls.length - 1][0];
+  const toolbar = tableProps.renderBulkActions(["1"]);
+  expect(toolbar.props.renderBatchResultReadback).toBe(false);
+  return toolbar.props.onBatchResultReadbackChange;
+}
+
+test("committed batch readback remains outside the selection toolbar after refresh", () => {
+  const view = renderWithIntl(<ResourceTableClient columns={defaultColumns} items={defaultItems}
+    resourceKey="shipments" bulkActions={batchActions} />);
+  const callback = currentBatchCallback();
+  act(() => callback(committedBatch));
+  // Removing the toolbar must not remove evidence of the completed mutation.
+  view.rerender(<ResourceTableClient columns={defaultColumns} items={[]} resourceKey="shipments" bulkActions={batchActions} />);
+  expect(screen.getByTestId("bulk-action-result")).toHaveTextContent("Cancel shipments");
+  expect(screen.getByTestId("bulk-action-result-item-1")).toHaveAttribute("data-outcome", "success");
+});
+
+test.each(["resource", "scope"])("rejects late readbacks after %s owner changes, including A-B-A", (change) => {
+  const original = { ...batchActions, telemetry: { scopeType: "branch" as const, scopeId: "branch-a" } };
+  const other = change === "resource" ? { ...original, resourceKey: "orders" }
+    : { ...original, telemetry: { scopeType: "branch", scopeId: "branch-b" } };
+  const view = renderWithIntl(<ResourceTableClient columns={defaultColumns} items={defaultItems} bulkActions={original} />);
+  const oldCallback = currentBatchCallback();
+  act(() => oldCallback(committedBatch));
+  view.rerender(<ResourceTableClient columns={defaultColumns} items={defaultItems} bulkActions={other} />);
+  expect(screen.queryByTestId("bulk-action-result")).toBeNull();
+  act(() => oldCallback(committedBatch));
+  expect(screen.queryByTestId("bulk-action-result")).toBeNull();
+  view.rerender(<ResourceTableClient columns={defaultColumns} items={defaultItems} bulkActions={original} />);
+  act(() => oldCallback(committedBatch));
+  expect(screen.queryByTestId("bulk-action-result")).toBeNull();
+  act(() => currentBatchCallback()(committedBatch));
+  expect(screen.getByTestId("bulk-action-result")).toBeInTheDocument();
 });
 
 test("handleServerNavigate updates query state from href", () => {
@@ -255,4 +301,101 @@ test("without serverFetch, onServerNavigate is not passed to ResourceTable", () 
   const lastCall = ResourceTableMock.mock.calls[ResourceTableMock.mock.calls.length - 1][0];
   expect(lastCall.onServerNavigate).toBeUndefined();
   expect(screen.getByTestId("mock-table").getAttribute("data-has-server-navigate")).toBe("false");
+});
+
+test("failed page requests show a retry action instead of the initial page rows", () => {
+  const refetch = jest.fn().mockResolvedValue({});
+  useResourceQueryMock.mockReturnValue({
+    data: null,
+    isFetching: false,
+    isError: true,
+    error: new Error("Request failed"),
+    refetch,
+  });
+
+  renderWithIntl(
+    <ResourceTableClient
+      columns={defaultColumns}
+      items={defaultItems}
+      serverFetch={makeServerFetch()}
+    />
+  );
+
+  expect(screen.getByRole("alert")).toBeVisible();
+  expect(screen.queryByTestId("mock-table")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+  expect(refetch).toHaveBeenCalledTimes(1);
+});
+
+test("failed refreshes retain valid data already cached for the current query", () => {
+  useResourceQueryMock.mockReturnValue({
+    data: { items: defaultItems, total: 2 },
+    isFetching: false,
+    isError: true,
+    error: new Error("Refresh failed"),
+    refetch: jest.fn(),
+  });
+
+  renderWithIntl(
+    <ResourceTableClient
+      columns={defaultColumns}
+      items={defaultItems}
+      serverFetch={makeServerFetch()}
+    />
+  );
+
+  expect(screen.getByTestId("mock-table")).toHaveAttribute("data-items", "2");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test("estimated totals never understate the rows visible on a later page", () => {
+  useResourceQueryMock.mockReturnValue({
+    data: { items: defaultItems, total: 1, total_is_estimate: true, limit: 2, offset: 2 },
+    isFetching: false,
+  });
+  renderWithIntl(<ResourceTableClient columns={defaultColumns} items={defaultItems} serverFetch={makeServerFetch()} />);
+
+  expect(screen.getByText("Showing 3-4 of ~4")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+});
+
+test("a new response with an unknown total does not reuse the initial response total", () => {
+  useResourceQueryMock.mockReturnValue({
+    data: { items: defaultItems, total: null, total_is_estimate: false, limit: 2, offset: 2 },
+    isFetching: false,
+  });
+  renderWithIntl(<ResourceTableClient columns={defaultColumns} items={defaultItems} serverFetch={makeServerFetch({
+    initialList: { items: defaultItems, total: 100, total_is_estimate: false, limit: 2, offset: 0 },
+  })} />);
+
+  expect(screen.getByText("Showing 3-4")).toBeInTheDocument();
+  expect(screen.queryByText(/of 100/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Last" })).not.toBeInTheDocument();
+});
+
+test("empty out-of-range responses show an empty range without increasing the estimate", () => {
+  useResourceQueryMock.mockReturnValue({
+    data: { items: [], total: 1, total_is_estimate: true, limit: 25, offset: 50 },
+    isFetching: false,
+  });
+  renderWithIntl(<ResourceTableClient columns={defaultColumns} items={defaultItems} serverFetch={makeServerFetch()} />);
+
+  expect(screen.getByText("Showing 0-0 of ~1")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Prev" })).toBeEnabled();
+});
+
+test("pending pagination keeps the response range and page size until new rows arrive", () => {
+  useResourceQueryMock.mockReturnValue({
+    data: { items: defaultItems, total: 1, total_is_estimate: true, limit: 2, offset: 0 },
+    isFetching: true,
+  });
+  renderWithIntl(<ResourceTableClient columns={defaultColumns} items={defaultItems} serverFetch={makeServerFetch({ initialLimit: 25 })} />);
+
+  expect(screen.getByText("Showing 1-2 of ~2")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(useResourceQueryMock.mock.calls.at(-1)?.[0].offset).toBe(2);
+  expect(screen.getByText("Showing 1-2 of ~2")).toBeInTheDocument();
+  expect(screen.getByText("Page 1")).toBeInTheDocument();
+  expect(screen.queryByText("Showing 3-4 of ~4")).not.toBeInTheDocument();
 });

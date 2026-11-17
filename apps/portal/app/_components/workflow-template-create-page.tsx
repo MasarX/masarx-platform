@@ -10,7 +10,7 @@ type WorkflowTemplateCreatePageProps = Parameters<
 const WorkflowTemplateCreatePageInner =
   UiWorkflowTemplateCreatePage as unknown as (
     props: WorkflowTemplateCreatePageProps
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function WorkflowTemplateCreatePage(
   props: WorkflowTemplateCreatePageProps

@@ -23,29 +23,7 @@ jest.setTimeout(150000);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const describeIfHttp = httpEnabled ? describe : describe.skip;
 
-const isTransientFetchError = (error) => {
-  if (!error) return false;
-  const message = String(error.message || '').toLowerCase();
-  const causeName = String(error.cause?.name || '');
-  const causeCode = String(error.cause?.code || '').toLowerCase();
-
-  return (
-    message.includes('fetch failed') ||
-    message.includes('timeout') ||
-    causeName.includes('Timeout') ||
-    causeCode.includes('timeout')
-  );
-};
-
 async function insertGatewayFixture(client, fixture) {
-  await client.query(
-    `DELETE FROM api_routes
-      WHERE method = 'POST'
-        AND path_template = '/api/ship/request/by-email'
-        AND scope_type = 'global'
-        AND scope_id IS NULL`,
-  );
-
   await client.query(
     `INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
      VALUES ($1::uuid, 'UC026 API Gateway Org', $2, 'Asia/Riyadh', 'en-US', 'active')`,
@@ -176,7 +154,7 @@ async function insertGatewayFixture(client, fixture) {
         'uc026_api_gateway_create',
         true,
         'POST',
-        '/api/ship/request/by-email',
+        $5,
         'global',
         NULL,
         $3::uuid,
@@ -184,7 +162,7 @@ async function insertGatewayFixture(client, fixture) {
         '/provider/ship/request/by-email',
         $4::jsonb
       )`,
-    [fixture.routeId, fixture.packId, fixture.providerId, JSON.stringify(policy)],
+    [fixture.routeId, fixture.packId, fixture.providerId, JSON.stringify(policy), fixture.routePath],
   );
 }
 
@@ -198,6 +176,17 @@ async function cleanupGatewayArtifacts(fixture) {
   const requestIds = requestRows.rows.map((row) => row.id).filter(Boolean);
   const outboundIds = requestRows.rows.map((row) => row.outbound_call_id).filter(Boolean);
   const correlationIds = requestRows.rows.map((row) => row.correlation_id).filter(Boolean);
+
+  await pool.query(
+    `DELETE FROM shipment_actions
+      WHERE client_id = $1::uuid
+        AND shipment_id IN (
+          SELECT id
+            FROM shipments
+           WHERE client_id = $1::uuid
+        )`,
+    [fixture.clientId],
+  );
 
   await pool.query(
     `DELETE FROM shipment_reference_numbers
@@ -251,14 +240,6 @@ async function cleanupGatewayFixture(fixture) {
   await cleanupGatewayArtifacts(fixture);
 
   await pool.query(
-    `DELETE FROM api_routes
-      WHERE method = 'POST'
-        AND path_template = '/api/ship/request/by-email'
-        AND scope_type = 'global'
-        AND scope_id IS NULL`,
-  );
-
-  await pool.query(
     `DELETE FROM decision_log
       WHERE organization_id = $1::uuid`,
     [fixture.organizationId],
@@ -279,11 +260,12 @@ async function cleanupGatewayFixture(fixture) {
 
 async function executeGatewayFetch(token, payload, options = {}) {
   const {
-    upstreamPath = '/api/ship/request/by-email',
+    upstreamPath,
     usePathToken = true,
     includeFunctionAuthorization = true,
   } = options;
 
+  if (!upstreamPath) throw new Error('Owned gateway fixture path required');
   const normalizedPath = upstreamPath.startsWith('/') ? upstreamPath : `/${upstreamPath}`;
   const routePath = usePathToken
     ? `/functions/v1/api-gateway/t/${token}${normalizedPath}`
@@ -299,23 +281,14 @@ async function executeGatewayFetch(token, payload, options = {}) {
     headers.authorization = `Bearer ${OUTER_AUTH_VALUE || token}`;
   }
 
-  let response;
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
-      break;
-    } catch (error) {
-      if (!isTransientFetchError(error) || attempt >= 5) {
-        throw error;
-      }
-      await sleep(1000 * attempt);
-    }
-  }
-
+  const signal = AbortSignal.timeout(30000);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (response.status === 503) throw new Error('Gateway runtime unavailable: HTTP 503');
   const text = await response.text();
   let body;
   try {
@@ -327,7 +300,7 @@ async function executeGatewayFetch(token, payload, options = {}) {
   return { response, body };
 }
 
-async function waitForGatewayRequest(fixture, clientReferenceNumber, timeoutMs = 15000) {
+async function waitForGatewayRequest(fixture, clientReferenceNumber, timeoutMs = 15000, excludedRequestId = null) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const { rows } = await pool.query(
@@ -335,6 +308,7 @@ async function waitForGatewayRequest(fixture, clientReferenceNumber, timeoutMs =
               client_id,
               sender_id,
               outbound_call_id,
+              workflow_run_id,
               correlation_id,
               method,
               path,
@@ -343,14 +317,136 @@ async function waitForGatewayRequest(fixture, clientReferenceNumber, timeoutMs =
          FROM api_gateway_requests
         WHERE source_id = $1::uuid
           AND request_body #>> '{client_reference_number}' = $2
+          AND ($3::uuid IS NULL OR id <> $3::uuid)
         ORDER BY created_at DESC
         LIMIT 1`,
-      [fixture.sourceId, clientReferenceNumber],
+      [fixture.sourceId, clientReferenceNumber, excludedRequestId],
     );
     if (rows[0]) return rows[0];
     await sleep(200);
   }
   return null;
+}
+
+const GATEWAY_DISPATCH_SETUP_OPERATIONS = new Set([
+  'materialize_addresses',
+  'dispatch_create',
+]);
+
+function gatewayDispatchFailure(code, receipt = {}, worker = {}) {
+  const error = new Error(code);
+  error.receipt = {
+    code,
+    request_id: receipt.request_id ?? null,
+    workflow_run_id: receipt.workflow_run_id ?? null,
+    workflow_status: receipt.workflow_status ?? null,
+    operation_name: receipt.operation_name ?? null,
+    step_status: receipt.step_status ?? null,
+    step_ready: receipt.step_ready ?? null,
+    worker_status: worker.status ?? null,
+    worker_items_processed: Number.isInteger(worker.items_processed) ? worker.items_processed : null,
+    worker_progress_status: worker.progress?.status ?? null,
+    worker_has_step: Boolean(worker.progress?.step_id),
+  };
+  console.warn('gateway_dispatch_state', {
+    workflow_failed: receipt.workflow_status === 'failed',
+    step_ready: receipt.step_ready === true,
+    setup_operation: GATEWAY_DISPATCH_SETUP_OPERATIONS.has(receipt.operation_name),
+    worker_idle: worker.status === 'idle',
+    worker_error: worker.status === 'error',
+    worker_items_processed: Number.isInteger(worker.items_processed) ? worker.items_processed : null,
+    worker_progress_failed: worker.progress?.status === 'failed',
+    worker_has_step: Boolean(worker.progress?.step_id),
+  });
+  return error;
+}
+
+async function readGatewayDispatchReceipt(fixture, requestId) {
+  const { rows } = await pool.query(
+    `SELECT request.id AS request_id,
+            request.workflow_run_id,
+            request.outbound_call_id,
+            run.workflow_status,
+            pending.operation_name,
+            pending.step_status,
+            pending.run_at,
+            COALESCE(pending.run_at <= now(), FALSE) AS step_ready
+       FROM api_gateway_requests request
+       LEFT JOIN workflow_runs run ON run.id = request.workflow_run_id
+       LEFT JOIN LATERAL (
+         SELECT step.operation_name, step.step_status, step.run_at
+           FROM workflow_run_steps step
+          WHERE step.workflow_run_id = request.workflow_run_id
+            AND step.step_status = 'pending'
+          ORDER BY step.sequence_order
+          LIMIT 1
+       ) pending ON TRUE
+      WHERE request.id = $1::uuid
+        AND request.source_id = $2::uuid`,
+    [requestId, fixture.sourceId],
+  );
+  return rows[0] || null;
+}
+
+async function completeGatewayDispatch(fixture, requestRow) {
+  // The production cron calls run_workflow_engine_worker_batch_v1 every minute.
+  // This fixture advances only its own accepted-async workflow and only through
+  // the two setup steps that can precede outbound_call_id attachment.
+  let progressedSteps = 0;
+  let contentionRetryUsed = false;
+  while (progressedSteps <= GATEWAY_DISPATCH_SETUP_OPERATIONS.size) {
+    const receipt = await readGatewayDispatchReceipt(fixture, requestRow.id);
+    if (!receipt) throw gatewayDispatchFailure('gateway_request_missing_after_accept', { request_id: requestRow.id });
+    if (receipt.outbound_call_id) return { ...requestRow, ...receipt };
+    if (!receipt.workflow_run_id) throw gatewayDispatchFailure('gateway_dispatch_authority_missing', receipt);
+    if (receipt.workflow_status === 'failed') throw gatewayDispatchFailure('gateway_workflow_failed', receipt);
+    if (receipt.step_ready === false) {
+      throw gatewayDispatchFailure('gateway_workflow_not_ready', receipt);
+    }
+    if (!receipt.operation_name || !GATEWAY_DISPATCH_SETUP_OPERATIONS.has(receipt.operation_name)) {
+      throw gatewayDispatchFailure('gateway_workflow_no_dispatch_progress', receipt);
+    }
+    if (progressedSteps === GATEWAY_DISPATCH_SETUP_OPERATIONS.size) {
+      throw gatewayDispatchFailure('gateway_workflow_setup_budget_exhausted', receipt);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT public.run_workflow_engine_worker_step_v1($1::uuid) AS result`,
+      [receipt.workflow_run_id],
+    );
+    const worker = rows[0]?.result || {};
+    const progress = worker.progress || {};
+    if (worker.error_occurred === true || worker.status === 'error' || progress.status === 'failed') {
+      throw gatewayDispatchFailure('gateway_workflow_progress_failed', receipt, worker);
+    }
+    if (worker.status === 'idle' || worker.items_processed !== 1 || !progress.step_id) {
+      const concurrentReceipt = await readGatewayDispatchReceipt(fixture, requestRow.id);
+      if (concurrentReceipt?.outbound_call_id) return { ...requestRow, ...concurrentReceipt };
+      const current = concurrentReceipt || receipt;
+      if (current.workflow_status === 'failed') {
+        throw gatewayDispatchFailure('gateway_workflow_failed', current, worker);
+      }
+      if (current.step_ready === false) {
+        throw gatewayDispatchFailure('gateway_workflow_not_ready', current, worker);
+      }
+      if (!current.operation_name || !GATEWAY_DISPATCH_SETUP_OPERATIONS.has(current.operation_name)) {
+        throw gatewayDispatchFailure('gateway_workflow_no_dispatch_progress', current, worker);
+      }
+      if (!contentionRetryUsed) {
+        // The canonical worker uses FOR UPDATE SKIP LOCKED. One bounded retry
+        // admits a concurrently owned exact run without hiding stable no-progress.
+        contentionRetryUsed = true;
+        await sleep(100);
+        continue;
+      }
+      throw gatewayDispatchFailure('gateway_workflow_no_dispatch_progress', current, worker);
+    }
+    progressedSteps += 1;
+  }
+  throw gatewayDispatchFailure('gateway_workflow_setup_budget_exhausted', {
+    request_id: requestRow.id,
+    workflow_run_id: requestRow.workflow_run_id,
+  });
 }
 
 async function materializeGatewayResponse(outboundCallId, providerResponse) {
@@ -395,6 +491,8 @@ describeIfHttp('API gateway shipment create ingress', () => {
     routeId: randomUUID(),
   };
 
+  fixture.routePath = `/api/ship/request/by-email/${fixture.routeId}`;
+
   beforeAll(async () => {
     await cleanupGatewayFixture(fixture);
     await insertGatewayFixture(pool, fixture);
@@ -424,11 +522,7 @@ describeIfHttp('API gateway shipment create ingress', () => {
       destination: { line1: 'Destination', city: 'Jeddah', province: 'Makkah', country: 'SA' },
     };
 
-    const { response, body } = await executeGatewayFetch(fixture.sourceToken, payload);
-    if (response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
+    const { response, body } = await executeGatewayFetch(fixture.sourceToken, payload, { upstreamPath: fixture.routePath });
 
     expect(response.status).toBe(202);
     expect(body).toMatchObject({
@@ -436,13 +530,14 @@ describeIfHttp('API gateway shipment create ingress', () => {
       correlation_id: expect.any(String),
     });
 
-    const requestRow = await waitForGatewayRequest(fixture, clientReferenceNumber);
+    let requestRow = await waitForGatewayRequest(fixture, clientReferenceNumber);
     expect(requestRow).toBeTruthy();
-    expect(requestRow.path).toBe('/api/ship/request/by-email');
+    expect(requestRow.path).toBe(fixture.routePath);
     expect(requestRow.method).toBe('POST');
     expect(requestRow.client_id).toBe(fixture.clientId);
     expect(requestRow.sender_id).toBe(fixture.senderId);
     expect(requestRow.correlation_id).toBe(body.correlation_id);
+    requestRow = await completeGatewayDispatch(fixture, requestRow);
     expect(requestRow.outbound_call_id).toEqual(expect.any(String));
 
     const { rows: observabilityRows } = await pool.query(
@@ -452,6 +547,7 @@ describeIfHttp('API gateway shipment create ingress', () => {
           AND event_type = 'settings_resolution'
           AND resource_type = 'api_gateway_request'
           AND resource_id = $1::uuid
+          AND metadata->>'decision_point' = 'api_gateway_workflow_enqueued'
         ORDER BY event_time DESC
         LIMIT 1`,
       [requestRow.id],
@@ -461,10 +557,11 @@ describeIfHttp('API gateway shipment create ingress', () => {
     expect(observabilityRows[0].event_type).toBe('settings_resolution');
     expect(observabilityRows[0].resource_type).toBe('api_gateway_request');
     expect(observabilityRows[0].resource_id).toBe(requestRow.id);
-    expect(observabilityRows[0].status).toBe('resolved');
+    expect(observabilityRows[0].status).toBe('enqueued');
     expect(observabilityRows[0].correlation_id).toBe(requestRow.correlation_id);
-    expect(observabilityRows[0].metadata?.decision_point).toBe('api_gateway_route_resolved');
-    expect(observabilityRows[0].metadata?.decision_inputs?.outbound_call_id).toBe(requestRow.outbound_call_id);
+    expect(observabilityRows[0].metadata?.decision_point).toBe('api_gateway_workflow_enqueued');
+    expect(observabilityRows[0].metadata?.decision_inputs?.workflow_run_id).toBe(requestRow.workflow_run_id);
+    expect(observabilityRows[0].metadata?.decision_inputs?.path).toBe(fixture.routePath);
 
     const postprocessResult = await materializeGatewayResponse(requestRow.outbound_call_id, {
       id: `PROV-${clientReferenceNumber}`,
@@ -492,15 +589,12 @@ describeIfHttp('API gateway shipment create ingress', () => {
       destination: { line1: `Destination ${label}`, city: 'Dammam', province: 'Eastern', country: 'SA' },
     });
 
-    const first = await executeGatewayFetch(fixture.sourceToken, buildPayload('A'));
-    if (first.response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
+    const first = await executeGatewayFetch(fixture.sourceToken, buildPayload('A'), { upstreamPath: fixture.routePath });
     expect(first.response.status).toBe(202);
 
-    const firstRequest = await waitForGatewayRequest(fixture, clientReferenceNumber);
+    let firstRequest = await waitForGatewayRequest(fixture, clientReferenceNumber);
     expect(firstRequest).toBeTruthy();
+    firstRequest = await completeGatewayDispatch(fixture, firstRequest);
     const firstResult = await materializeGatewayResponse(firstRequest.outbound_call_id, {
       id: `PROV-A-${clientReferenceNumber}`,
       barcode: `TRACK-A-${Date.now()}`,
@@ -510,21 +604,13 @@ describeIfHttp('API gateway shipment create ingress', () => {
     const shipmentId = firstResult?.postprocess?.shipment_id;
     expect(shipmentId).toBeTruthy();
 
-    const second = await executeGatewayFetch(fixture.sourceToken, buildPayload('B'));
-    if (second.response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
+    const second = await executeGatewayFetch(fixture.sourceToken, buildPayload('B'), { upstreamPath: fixture.routePath });
     expect(second.response.status).toBe(202);
 
-    let secondRequest = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      secondRequest = await waitForGatewayRequest(fixture, clientReferenceNumber);
-      if (secondRequest && secondRequest.id !== firstRequest.id) break;
-      await sleep(200);
-    }
+    let secondRequest = await waitForGatewayRequest(fixture, clientReferenceNumber, 15000, firstRequest.id);
     expect(secondRequest).toBeTruthy();
     expect(secondRequest.id).not.toBe(firstRequest.id);
+    secondRequest = await completeGatewayDispatch(fixture, secondRequest);
 
     const secondResult = await materializeGatewayResponse(secondRequest.outbound_call_id, {
       id: `PROV-B-${clientReferenceNumber}`,
@@ -556,11 +642,7 @@ describeIfHttp('API gateway shipment create ingress', () => {
       destination: { line1: 'Destination', city: 'Riyadh', province: 'Riyadh', country: 'SA' },
     };
 
-    const { response, body } = await executeGatewayFetch('uc026-invalid-token', payload);
-    if (response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
+    const { response, body } = await executeGatewayFetch('uc026-invalid-token', payload, { upstreamPath: fixture.routePath });
 
     expect(response.status).toBe(401);
     if (body && typeof body === 'object') {

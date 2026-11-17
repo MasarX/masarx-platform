@@ -5,8 +5,7 @@ import { getConsoleBaseUrl, getPortalBaseUrl } from "./utils/base-urls";
 import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
 import {
-  applyResourceLimit,
-  resolveResourceActionTarget,
+  resolveResourceActionTargetWithSample,
   resolveResourceKeysForUser,
 } from "./utils/core-resource";
 import { ensureBulkActionVisible, selectFirstTableRow } from "./utils/table-actions";
@@ -91,19 +90,17 @@ for (const config of appConfigs) {
         const sections = Array.isArray(context.navigation.sections)
           ? context.navigation.sections
           : [];
-        const resourceKeys = applyResourceLimit(
-          resolveResourceKeysForUser({
-            sections,
-            readRegistry: context.readRegistry,
-            commandRegistry: context.commandRegistry,
-            capabilities: context.me?.capabilities ?? null,
-          })
-        );
+        const resourceKeys = resolveResourceKeysForUser({
+          sections,
+          readRegistry: context.readRegistry,
+          commandRegistry: context.commandRegistry,
+          capabilities: context.me?.capabilities ?? null,
+        });
         if (resourceKeys.length === 0) {
           throw new Error(`No resources available for ${user.email}.`);
         }
 
-        const target = resolveResourceActionTarget({
+        const targetParams = {
           resourceKeys,
           readRegistry: context.readRegistry,
           commandRegistry: context.commandRegistry,
@@ -111,15 +108,16 @@ for (const config of appConfigs) {
           appBasePath: baseUrl,
           downloadBasePath,
           actionType: "navigate",
-        });
-        if (!target) {
-          if (strict) {
-            throw new Error(
-              `No navigate actions available for ${user.email} in ${config.label}.`
-            );
-          }
-          return;
-        }
+          email: user.email,
+          password: demoContext.password ?? "",
+        };
+        const target =
+          (await resolveResourceActionTargetWithSample(targetParams)) ??
+          (await resolveResourceActionTargetWithSample({
+            ...targetParams,
+            includeDisabled: true,
+          }));
+        if (!target) return;
 
         await page.goto(baseUrl);
         const authGate = page.locator(`[data-testid="${config.authTestId}"]`);
@@ -164,8 +162,11 @@ for (const config of appConfigs) {
         }
         await expect(action).toBeVisible();
         const disabled = await isActionDisabled(action);
+        expect(disabled).toBe(Boolean(target.disabledReason));
         if (disabled) {
           await expect(action).toHaveAttribute("title", /.+/);
+        } else {
+          await expect(action).toBeEnabled();
         }
       });
     }

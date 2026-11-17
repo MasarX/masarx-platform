@@ -1,6 +1,7 @@
 const { Pool } = require('pg');
 const crypto = require('crypto');
 const { loadEnv } = require('../../../scripts/utils/load-env');
+const { getIntegrationFixtureProfile } = require('../helpers/integration-fixtures');
 
 loadEnv();
 
@@ -17,8 +18,9 @@ const pool = new Pool({
 
 jest.setTimeout(60000);
 
-const CLIENT_A_TOKEN = 'client-a-ack-token';
-const CLIENT_B_TOKEN = 'EXAMPLE_PASSWORD';
+const fixtureProfile = getIntegrationFixtureProfile();
+const CLIENT_A_TOKEN = fixtureProfile.webhook.clientAckA.token;
+const CLIENT_B_TOKEN = fixtureProfile.webhook.clientAckB.token;
 
 const cloneJson = (value) => JSON.parse(JSON.stringify(value ?? {}));
 
@@ -31,7 +33,7 @@ describe('ACK mapping behavior', () => {
     const payload = buildPayload();
     const response = await callWorkflowIntake(pool, CLIENT_A_TOKEN, payload);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(response.headers?.['x-client-ack']).toBe('logestechs');
     expect(response.body?.resource_id).toEqual(expect.any(String));
     expect(response.body?.tracking_number).toEqual(expect.any(String));
@@ -42,7 +44,7 @@ describe('ACK mapping behavior', () => {
     const payload = buildPayload();
     const response = await callWorkflowIntake(pool, CLIENT_B_TOKEN, payload);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(response.body?.status).toBe('accepted');
     expect(response.body?.correlation_id).toEqual(expect.any(String));
     expect(response.body?.tracking_summary).toEqual(expect.any(String));

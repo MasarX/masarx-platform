@@ -5,7 +5,7 @@ import { createUiTranslator } from "../i18n";
 import { Input } from "../input";
 import { Select } from "../select";
 import type { TemplateBlock } from "./canvas/canvas-types";
-import { BARCODE_REGISTRY, validateBarcodeData } from "./canvas/barcode-types";
+import { BARCODE_REGISTRY, normalizeBarcodeType, validateBarcodeData } from "./canvas/barcode-types";
 import { assessBarcodeQuality } from "./canvas/barcode-quality";
 import { ColorPickerInput } from "./color-picker-input";
 import { FontSelector } from "./font-selector";
@@ -17,6 +17,7 @@ type BlockPropertyPanelProps = {
   blockIndex: number;
   testIdPrefix?: string;
   dpi?: number;
+  readOnly?: boolean;
   onUpdate: (index: number, updates: Partial<TemplateBlock>) => void;
 };
 
@@ -103,6 +104,7 @@ export function BlockPropertyPanel({
   blockIndex,
   testIdPrefix,
   dpi = 203,
+  readOnly = false,
   onUpdate,
 }: BlockPropertyPanelProps) {
   const prefix = testIdPrefix || "block-props";
@@ -110,17 +112,17 @@ export function BlockPropertyPanel({
   const [showAdvanced, setShowAdvanced] = React.useState(false);
 
   const set = React.useCallback(
-    (updates: Partial<TemplateBlock>) => onUpdate(blockIndex, updates),
-    [blockIndex, onUpdate],
+    (updates: Partial<TemplateBlock>) => { if (!readOnly) onUpdate(blockIndex, updates); },
+    [blockIndex, onUpdate, readOnly],
   );
 
-  const barcodeType = block.barcode_type || "code128";
+  const barcodeType = normalizeBarcodeType(block.barcode_type || "code128");
   const barcodeData = block.fallback || block.value_path || "";
   const dataValid = block.type === "barcode" ? validateBarcodeData(barcodeType, barcodeData) : true;
   const quality = block.type === "barcode" ? assessBarcodeQuality(block.width || 80, barcodeType, dpi) : null;
 
   return (
-    <div className="space-y-3 rounded-lg border border-ui-border/50 bg-ui-paper/50 p-3" data-testid={`${prefix}-panel`}>
+    <fieldset disabled={readOnly} className="min-w-0 space-y-3 rounded-lg border border-ui-border/50 bg-ui-paper/50 p-3" data-testid={`${prefix}-panel`}>
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-ui-ink capitalize">
           {block.type === "text" ? t("textBlock") : block.type === "barcode" ? t("barcodeBlock") : block.type === "image" ? t("imageBlock") : block.type === "line" ? t("lineBlock") : t("rectBlock")}
@@ -170,6 +172,7 @@ export function BlockPropertyPanel({
               onChange={(v) => set({ font: v })}
               id={id("font")}
               label={t("font")}
+              disabled={readOnly}
             />
           </div>
           <ColorPickerInput
@@ -177,6 +180,7 @@ export function BlockPropertyPanel({
             onChange={(v) => set({ color: v })}
             id={id("color")}
             label={t("color")}
+            disabled={readOnly}
           />
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-0.5">
@@ -243,6 +247,7 @@ export function BlockPropertyPanel({
               onChange={(e) => set({ barcode_type: e.target.value })}
               className="h-7 text-xs"
             >
+              {!BARCODE_REGISTRY[barcodeType] ? <option value={barcodeType}>{block.barcode_type}</option> : null}
               {Object.entries(BARCODE_REGISTRY).map(([key, config]) => (
                 <option key={key} value={key}>
                   {config.label}
@@ -313,6 +318,7 @@ export function BlockPropertyPanel({
             onChange={(v) => set({ color: v })}
             id={id("color")}
             label={t("color")}
+            disabled={readOnly}
           />
           {numField(t("stroke"), block.stroke_width, (v) => set({ stroke_width: v }), id("stroke_width"))}
           {block.type === "rect" ? (
@@ -321,10 +327,11 @@ export function BlockPropertyPanel({
               onChange={(v) => set({ fill_color: v })}
               id={id("fill_color")}
               label={t("fill")}
+              disabled={readOnly}
             />
           ) : null}
         </div>
       ) : null}
-    </div>
+    </fieldset>
   );
 }

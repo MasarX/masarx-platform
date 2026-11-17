@@ -120,6 +120,7 @@ INSERT INTO settings_versions (
             'default_headers', jsonb_build_object('cache-control', 'no-store')
         ),
         'workflow', jsonb_build_object(
+            'intent', 'pgtap.followup',
             'template_id', 'ffff1000-0000-0000-0000-000000000004'
         )
     ),
@@ -158,6 +159,7 @@ INSERT INTO settings (
             'default_headers', jsonb_build_object('cache-control', 'no-store')
         ),
         'workflow', jsonb_build_object(
+            'intent', 'pgtap.followup',
             'template_id', 'ffff1000-0000-0000-0000-000000000004'
         )
     ),
@@ -178,12 +180,12 @@ CREATE TEMP TABLE tmp_webhook_response AS
 SELECT workflow_intake_webhook(
     'token-webhook-test',
     jsonb_build_object('content-type', 'application/json'),
-    '{"event":{"id":"evt-pgtap-004-webhook-intake","type":"shipment.create"},"example":"value"}',
+    '{"event":{"id":"evt-pgtap-004-webhook-intake","type":"pgtap.followup"},"example":"value"}',
     jsonb_build_object(
         'event',
         jsonb_build_object(
             'id', 'evt-pgtap-004-webhook-intake',
-            'type', 'shipment.create'
+            'type', 'pgtap.followup'
         ),
         'example', 'value'
     )

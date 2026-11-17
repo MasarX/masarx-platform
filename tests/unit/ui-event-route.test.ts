@@ -1,10 +1,14 @@
 const rpc = jest.fn();
 const getVerifiedAccessToken = jest.fn();
 const validateTrustedBrowserRequest = jest.fn();
+const mockCreateServerClient = jest.fn(() => {
+  throw new Error("telemetry must reuse the verified API-schema client");
+});
 
 jest.mock("@masarx/auth", () => ({
   getVerifiedAccessToken,
   validateTrustedBrowserRequest,
+  createServerClient: mockCreateServerClient,
 }));
 import {
   enrichWithRequestId,
@@ -12,6 +16,7 @@ import {
   normalizeUiEvent,
   sanitizeEventMetadata,
   handleUiEventRequest,
+  MAX_UI_EVENT_PAYLOAD_BYTES,
 } from "../../apps/shared/ui-event-route";
 import { POST as consolePost } from "../../apps/console/app/api/ui-event/route";
 import { POST as portalPost } from "../../apps/portal/app/api/ui-event/route";
@@ -21,9 +26,50 @@ describe("ui-event route handler", () => {
     rpc.mockReset();
     getVerifiedAccessToken.mockReset();
     validateTrustedBrowserRequest.mockReset();
+    mockCreateServerClient.mockClear();
     rpc.mockResolvedValue({ error: null });
     validateTrustedBrowserRequest.mockReturnValue({ ok: true });
   });
+
+  test.each(["console", "portal"] as const)(
+    "%s telemetry uses the same verified API-schema client without creating another client",
+    async (app) => {
+      const verifiedClient = { rpc };
+      getVerifiedAccessToken.mockResolvedValue({
+        client: verifiedClient,
+        user: { id: "user-1" },
+        accessToken: "verified-token",
+        error: null,
+      });
+
+      const response = await handleUiEventRequest(
+        app,
+        new Request(`https://example.test/${app}/api/ui-event`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "verified-client-request",
+          },
+          body: JSON.stringify({ event: { type: "ui.click" } }),
+        }),
+      );
+
+      expect(getVerifiedAccessToken).toHaveBeenCalledTimes(1);
+      expect(getVerifiedAccessToken).toHaveBeenCalledWith({ allowCookieSet: false });
+      expect(mockCreateServerClient).not.toHaveBeenCalled();
+      expect(rpc).toHaveBeenCalledTimes(1);
+      expect(rpc.mock.contexts[0]).toBe(verifiedClient);
+      expect(rpc).toHaveBeenCalledWith("ui_log_events_v1", {
+        p_app: app,
+        p_events: [expect.objectContaining({
+          type: "ui.click",
+          requestId: "verified-client-request",
+        })],
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-request-id")).toBe("verified-client-request");
+    },
+  );
 
   test("returns a response with correlation header when request-id header is provided", async () => {
     getVerifiedAccessToken.mockResolvedValue({
@@ -161,6 +207,59 @@ describe("ui-event route handler", () => {
     const payload = (await response.json()) as { error: string };
     expect(payload.error).toBe("Too many events.");
     expect(rpc).not.toHaveBeenCalledWith("ui_log_events_v1", expect.anything());
+  });
+
+  test.each([undefined, "1"])("bounds actual UTF-8 body bytes with content-length %s", async (contentLength) => {
+    getVerifiedAccessToken.mockResolvedValue({
+      client: { rpc },
+      accessToken: "token",
+      error: null,
+    });
+    const response = await handleUiEventRequest(
+      "console",
+      new Request("https://example.test/api/ui-event", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(contentLength ? { "content-length": contentLength } : {}),
+        },
+        body: JSON.stringify({ event: { type: "ui.click", message: "ش".repeat(MAX_UI_EVENT_PAYLOAD_BYTES / 2) } }),
+      })
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: "Request payload too large." });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  test("stops reading and cancels streamed payloads once the byte limit is exceeded", async () => {
+    getVerifiedAccessToken.mockResolvedValue({
+      client: { rpc },
+      accessToken: "token",
+      error: null,
+    });
+    const cancel = jest.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_UI_EVENT_PAYLOAD_BYTES));
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel,
+    });
+
+    const response = await handleUiEventRequest(
+      "portal",
+      new Request("https://example.test/api/ui-event", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        duplex: "half",
+      } as RequestInit)
+    );
+
+    expect(response.status).toBe(413);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   test("propagates generated request correlation when request-id is missing", async () => {
@@ -347,6 +446,31 @@ describe("ui-event route helpers", () => {
     expect(normalizeUiEvent("bad")).toBe(null);
     expect(normalizeUiEvent(null)).toBe(null);
     expect(normalizeUiEvent(["bad"])).toBe(null);
+  });
+
+  test("redacts JWT values in event fields before truncation and storage", () => {
+    const token = "eyJhbGciOiJIUzI1NiJ9.payload.signature";
+    const event = normalizeUiEvent({
+      type: "ui.error",
+      message: `Request failed: ${token}`,
+      context: `Bearer ${token}`,
+      meta: {
+        client_secret: "private-client-secret",
+        supabase_service_role_key: "private-service-role",
+        detail: `Bearer ${token}`,
+      },
+    });
+
+    expect(event).toMatchObject({
+      message: "Request failed: [redacted]",
+      context: "Bearer [redacted]",
+      meta: {
+        client_secret: "[redacted]",
+        supabase_service_role_key: "[redacted]",
+        detail: "Bearer [redacted]",
+      },
+    });
+    expect(JSON.stringify(event)).not.toContain(token);
   });
 
   test("parseEventPayload + normalizeUiEvent drops invalid event rows", () => {

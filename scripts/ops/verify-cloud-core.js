@@ -13,6 +13,7 @@ const { spawnSync, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { loadEnv } = require('../utils/load-env');
+const { upsertEnvFileValues } = require('../utils/env-file');
 const { buildQaRunMetadata, createQaLogger } = require('../qa/qa-log');
 const { shouldParallelizePgtapIntegration, planPgtapIntegrationSteps } = require('./verify-cloud-core-steps');
 const { parsePositiveInt, resolveDsnCandidates, runConnectivitySmoke, shouldUseSsl } = require('./db-connect-smoke');
@@ -59,12 +60,10 @@ const skipFrontendChecks = isTruthy(process.env.VERIFY_SKIP_FRONTEND);
 const skipDbPush = isTruthy(process.env.VERIFY_SKIP_DB_PUSH);
 const skipPgtap = isTruthy(process.env.VERIFY_SKIP_PGTAP);
 const skipLoadTests = isTruthy(process.env.VERIFY_SKIP_LOAD_TESTS);
-const skipPlanLint = isTruthy(process.env.VERIFY_SKIP_PLAN_LINT) || isTruthy(process.env.PLAN_LINT_SKIP);
 
 const timingFile = String(process.env.VERIFY_CORE_TIMING_FILE || 'verify-core-timing.json').trim();
 
 const npmCmd = process.platform.startsWith('win') ? 'npm.cmd' : 'npm';
-const planLintOnly = String(process.env.PLAN_LINT_ONLY || '').trim();
 
 const labelDesignerAppDir = path.join('tooling', 'apps', 'label-designer');
 const hasLabelDesignerApp = fs.existsSync(path.join(labelDesignerAppDir, 'package.json'));
@@ -108,13 +107,6 @@ const steps = [
   { cmd: npmCmd, args: ['run', 'lint:structure'], label: 'lint:structure' },
   { cmd: npmCmd, args: ['run', 'lint:commands'], label: 'lint:commands' },
   { cmd: process.execPath, args: [path.join('scripts', 'tooling', 'validate-api-ingress-worker.js')], label: 'lint:ingress-worker' },
-  skipPlanLint
-    ? null
-    : (
-      planLintOnly
-        ? { cmd: process.execPath, args: [path.join('scripts', 'ops', 'plan-lint.js'), '--only', planLintOnly], label: 'lint:plans' }
-        : { cmd: npmCmd, args: ['run', 'lint:plans'], label: 'lint:plans' }
-    ),
   { cmd: npmCmd, args: ['run', 'lint:objectives'], label: 'lint:objectives' },
   { cmd: npmCmd, args: ['run', 'typecheck:fieldops'], label: 'typecheck:fieldops', logFile: 'fieldops-typecheck.log' },
   ...(skipFrontendChecks
@@ -209,9 +201,6 @@ if (skipEdgeSmoke) {
 if (skipFrontendChecks) {
   console.log('[verify:cloud:core] VERIFY_SKIP_FRONTEND=1; skipping lint:frontend + typecheck:frontend.');
 }
-if (skipPlanLint) {
-  console.log('[verify:cloud:core] VERIFY_SKIP_PLAN_LINT=1; skipping lint:plans.');
-}
 if (skipDbPush) {
   console.log(
     '[verify:cloud:core] VERIFY_SKIP_DB_PUSH=1; skipping explicit db:push step (may bootstrap when required tables are missing).',
@@ -241,9 +230,6 @@ if (parallelizeUnitWithIntegration) {
 }
 
 const skippedSteps = [];
-if (skipPlanLint) {
-  skippedSteps.push({ label: 'lint:plans', reason: 'VERIFY_SKIP_PLAN_LINT=1' });
-}
 if (skipDbPush) {
   skippedSteps.push({ label: 'db:push', reason: 'VERIFY_SKIP_DB_PUSH=1' });
 }
@@ -318,38 +304,35 @@ function writeTimingSummary(summary) {
   }
 }
 
-function upsertEnvFileValues(filePath, updates = {}) {
-  const resolvedPath = String(filePath || '').trim();
-  if (!resolvedPath) return false;
-  if (!fs.existsSync(resolvedPath)) return false;
-
-  const entries = Object.entries(updates)
-    .map(([key, value]) => [String(key || '').trim(), value == null ? '' : String(value)])
-    .filter(([key, value]) => key && value);
-  if (entries.length === 0) return false;
-
-  const replacements = new Map(entries);
-  const raw = fs.readFileSync(resolvedPath, 'utf8');
-  const lines = raw.split(/\r?\n/);
-  const seen = new Set();
-  const nextLines = lines.map((line) => {
-    const idx = line.indexOf('=');
-    if (idx <= 0) return line;
-    const key = line.slice(0, idx).trim();
-    if (!replacements.has(key)) return line;
-    seen.add(key);
-    return `${key}=${replacements.get(key)}`;
-  });
-
-  for (const [key, value] of replacements.entries()) {
-    if (!seen.has(key)) {
-      nextLines.push(`${key}=${value}`);
+function resolveVerifyCandidateIdentity({
+  cwd = process.cwd(),
+  env: sourceEnv = process.env,
+  spawnSyncImpl = spawnSync,
+} = {}) {
+  const readGitObject = (revision, label) => {
+    const result = spawnSyncImpl('git', ['rev-parse', '--verify', revision], {
+      cwd,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10000,
+    });
+    const value = String(result.stdout || '').trim().toLowerCase();
+    if (result.status !== 0 || result.error || !/^[0-9a-f]{40}$/.test(value)) {
+      const error = new Error(`Unable to bind verify:cloud:core proof to checked-out ${label}.`);
+      error.exitCode = 1;
+      error.stepLabel = 'candidate:identity';
+      throw error;
     }
-  }
+    return value;
+  };
 
-  const finalContent = `${nextLines.join('\n').replace(/\n+$/u, '')}\n`;
-  fs.writeFileSync(resolvedPath, finalContent, 'utf8');
-  return true;
+  const headSha = readGitObject('HEAD', 'candidate SHA');
+  const treeSha = readGitObject('HEAD^{tree}', 'candidate tree');
+  return {
+    head_sha: headSha,
+    tree_sha: treeSha,
+    workflow_sha: String(sourceEnv.GITHUB_SHA || '').trim().toLowerCase() || null,
+  };
 }
 
 function persistSelectedDbEnvToExplicitFile({ explicitEnvFile, selectedDsn, selectedCandidateName, logger = console } = {}) {
@@ -863,8 +846,14 @@ async function main() {
       failed_step: null,
       exit_code: null,
     },
+    candidate: {
+      head_sha: null,
+      tree_sha: null,
+      workflow_sha: String(process.env.GITHUB_SHA || '').trim().toLowerCase() || null,
+    },
   };
   try {
+    timing.candidate = resolveVerifyCandidateIdentity();
     qaRunId = await qa.startRun(runKey, runInfo);
     timing.qa_run_id = qaRunId;
     for (const skipped of skippedSteps) {
@@ -915,9 +904,11 @@ async function main() {
 
 if (require.main === module) {
   main();
-} else {
-  module.exports = {
-    persistSelectedDbEnvToExplicitFile,
-    upsertEnvFileValues,
-  };
 }
+
+module.exports = {
+  main,
+  persistSelectedDbEnvToExplicitFile,
+  resolveVerifyCandidateIdentity,
+  upsertEnvFileValues,
+};

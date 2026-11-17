@@ -17,6 +17,7 @@ import { snapToGrid, DEFAULT_GRID_SIZE } from "./canvas-snap";
 import { bringForward, sendBackward, bringToFront, sendToBack } from "./canvas-utils";
 import { useAlignmentGuides } from "./use-alignment-guides";
 import { CanvasContextMenu } from "./canvas-context-menu";
+import { fitBlockToPage, prepareAddedBlock } from "./block-geometry";
 
 const t = createUiTranslator("ui.labelDesigner.canvas");
 
@@ -51,7 +52,7 @@ export function LabelCanvas({
   page: pageOverrides,
   readOnly = false,
   testIdPrefix,
-  onBlocksChange,
+  onBlocksChange: onBlocksChangeProp,
   onSelectBlock,
   selectedBlockIndex: externalSelectedIndex,
   canUndo,
@@ -65,6 +66,9 @@ export function LabelCanvas({
     () => ({ ...DEFAULT_PAGE, ...pageOverrides }),
     [pageOverrides],
   );
+  const onBlocksChange = React.useMemo(() => onBlocksChangeProp ? (next: TemplateBlock[]) => {
+    if (!readOnly) onBlocksChangeProp(next.map((block, index) => blocks.includes(block) ? block : fitBlockToPage(block, page, blocks[index])));
+  } : undefined, [blocks, onBlocksChangeProp, page, readOnly]);
 
   const [canvasScale, setCanvasScale] = React.useState(1);
   const [showGrid, setShowGrid] = React.useState(true);
@@ -123,7 +127,7 @@ export function LabelCanvas({
 
   const updateBlock = React.useCallback(
     (index: number, updates: Partial<TemplateBlock>) => {
-      if (readOnly || !onBlocksChange) return;
+      if (readOnly || !onBlocksChange || blocks[index]?.locked) return;
       const next = blocks.map((b, i) => (i === index ? { ...b, ...updates } : b));
       onBlocksChange(next);
     },
@@ -139,6 +143,7 @@ export function LabelCanvas({
 
   const handleBlockSelect = React.useCallback(
     (index: number, e?: React.MouseEvent) => {
+      if (e && e.button !== 0) return;
       if (readOnly) {
         setSelectedIndex(index);
         return;
@@ -164,8 +169,9 @@ export function LabelCanvas({
 
       if (block.locked) return;
 
-      const mousePos = lastMouseDownRef.current;
+      const mousePos = e ? { x: e.clientX, y: e.clientY } : lastMouseDownRef.current;
       if (!mousePos) return;
+      lastMouseDownRef.current = mousePos;
       setDragState({
         blockIndex: index,
         startX: mousePos.x,
@@ -181,7 +187,7 @@ export function LabelCanvas({
     (index: number) => {
       if (readOnly) return;
       const block = blocks[index];
-      if (!block || block.type !== "text") return;
+      if (!block || block.locked || block.type !== "text") return;
       setEditingBlockIndex(index);
     },
     [blocks, readOnly],
@@ -189,6 +195,7 @@ export function LabelCanvas({
 
   const handleSvgMouseDown = React.useCallback(
     (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
       lastMouseDownRef.current = { x: e.clientX, y: e.clientY };
 
       // Space+drag = pan
@@ -224,7 +231,7 @@ export function LabelCanvas({
 
   const handleResizeStart = React.useCallback(
     (handle: ResizeHandle, e: React.MouseEvent) => {
-      if (readOnly || primarySelectedIndex == null) return;
+      if (e.button !== 0 || readOnly || primarySelectedIndex == null) return;
       const block = blocks[primarySelectedIndex];
       if (!block || block.locked) return;
       setResizeState({
@@ -346,9 +353,11 @@ export function LabelCanvas({
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("blur", handleMouseUp);
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("blur", handleMouseUp);
     };
   }, [blocks, canvasScale, dragState, isPanning, onSelectBlock, resizeState, rubberBand, snapEnabled, updateBlock]);
 
@@ -536,12 +545,13 @@ export function LabelCanvas({
 
       try {
         const block: TemplateBlock = JSON.parse(json);
+        if (!block || !["text", "barcode", "image", "line", "rect"].includes(block.type)) return;
         const svg = svgRef.current;
         if (!svg) return;
         const rect = svg.getBoundingClientRect();
         const dropX = Math.max(0, Math.round((e.clientX - rect.left) / canvasScale));
         const dropY = Math.max(0, Math.round((e.clientY - rect.top) / canvasScale));
-        const newBlock = { ...block, x: dropX, y: dropY };
+        const newBlock = prepareAddedBlock({ ...block, x: dropX, y: dropY }, page);
         const next = [...blocks, newBlock];
         onBlocksChange(next);
         const newIdx = next.length - 1;
@@ -551,7 +561,7 @@ export function LabelCanvas({
         // Invalid JSON, ignore
       }
     },
-    [blocks, canvasScale, onBlocksChange, onSelectBlock, readOnly],
+    [blocks, canvasScale, onBlocksChange, onSelectBlock, page, readOnly],
   );
 
   // --- Inline editor commit ---
@@ -677,8 +687,8 @@ export function LabelCanvas({
                 type="button"
                 size="sm"
                 variant="ghost"
-                onClick={onUndo}
-                disabled={!canUndo}
+                onClick={() => { if (!readOnly) onUndo?.(); }}
+                disabled={readOnly || !canUndo}
                 title={t("undo")}
                 data-testid={`${prefix}-undo`}
               >
@@ -688,8 +698,8 @@ export function LabelCanvas({
                 type="button"
                 size="sm"
                 variant="ghost"
-                onClick={onRedo}
-                disabled={!canRedo}
+                onClick={() => { if (!readOnly) onRedo?.(); }}
+                disabled={readOnly || !canRedo}
                 title={t("redo")}
                 data-testid={`${prefix}-redo`}
               >
@@ -784,6 +794,7 @@ export function LabelCanvas({
               <CanvasSelection
                 block={selectedBlock}
                 scale={canvasScale}
+                testIdPrefix={prefix}
                 onResizeStart={handleResizeStart}
               />
             ) : null}

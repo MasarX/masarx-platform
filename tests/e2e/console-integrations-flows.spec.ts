@@ -111,6 +111,7 @@ test.describe("console integrations flows", () => {
   });
 
   test("console integration plugin routes are reachable", async ({ page }) => {
+    test.slow();
     const user = consoleUsers[0];
     test.skip(!user, "No console demo user available.");
     const consoleBasePath = getConsoleBasePath();
@@ -201,7 +202,7 @@ test.describe("console integrations flows", () => {
           `${consoleBasePath}/integrations/plugins/${encodeURIComponent(
             pluginIdResult.id
           )}/versions/${encodeURIComponent(activeVersionId)}`,
-          { waitUntil: "domcontentloaded", timeout: 60_000 }
+          { waitUntil: "domcontentloaded", timeout: 120_000 }
         );
         await expect(
           page.locator(

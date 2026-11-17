@@ -1,24 +1,30 @@
 import type { KeyValueStore, OutboxEntry, OutboxEntryStatus, OutboxStore } from "@masarx/mobile-core";
-import { createOutboxId, createOutboxNow } from "@masarx/mobile-core";
+import { normalizeOutboxDisplay, createOutboxId, createOutboxNow, normalizeOutboxLimit, normalizeOutboxDuration } from "@masarx/mobile-core";
 
 function cloneOutboxEntry(entry: OutboxEntry): OutboxEntry {
   return {
     ...entry,
     args: { ...(entry.args || {}) },
+    display: normalizeOutboxDisplay(entry.display),
   };
 }
 
-function isPendingEntry(entry: OutboxEntry, nowIso: string) {
+function isPendingEntry(entry: OutboxEntry, nowIso: string, force = false) {
   if (!(entry.status === "queued" || entry.status === "failed")) return false;
-  if (!entry.next_attempt_at) return true;
+  if (force || !entry.next_attempt_at) return true;
   return entry.next_attempt_at <= nowIso;
 }
 
-export function createMemoryOutboxStore(): OutboxStore {
-  const entries = new Map<string, OutboxEntry>();
+export function createMemoryOutboxStore(initialEntries: readonly OutboxEntry[] = []): OutboxStore & {
+  snapshot: () => OutboxEntry[];
+  listPending: (params?: { limit?: number; force?: boolean }) => Promise<OutboxEntry[]>;
+  claimPending: (params?: { limit?: number; force?: boolean }) => Promise<OutboxEntry[]>;
+} {
+  const entries = new Map<string, OutboxEntry>(initialEntries.map((entry) => [entry.id, cloneOutboxEntry(entry)]));
 
   return {
     init: async () => {},
+    snapshot: () => [...entries.values()].map(cloneOutboxEntry),
     enqueue: async (input) => {
       const id = input.id ?? createOutboxId();
       if (entries.has(id)) {
@@ -28,7 +34,9 @@ export function createMemoryOutboxStore(): OutboxStore {
       const entry: OutboxEntry = {
         id,
         rpc: input.rpc,
+        transport: input.transport ?? "rpc",
         args: { ...(input.args || {}) },
+        display: normalizeOutboxDisplay(input.display),
         status: "queued",
         created_at: now,
         updated_at: now,
@@ -45,7 +53,7 @@ export function createMemoryOutboxStore(): OutboxStore {
     },
     list: async (params = {}) => {
       const statuses = Array.isArray(params.status) ? new Set(params.status) : null;
-      const limit = typeof params.limit === "number" ? Math.max(0, params.limit) : 200;
+      const limit = normalizeOutboxLimit(params.limit, 200);
       const out = [...entries.values()]
         .filter((entry) => (statuses ? statuses.has(entry.status) : true))
         .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
@@ -53,20 +61,20 @@ export function createMemoryOutboxStore(): OutboxStore {
         .map(cloneOutboxEntry);
       return out;
     },
-    listPending: async (params = {}) => {
-      const limit = typeof params.limit === "number" ? Math.max(0, params.limit) : 50;
+    listPending: async (params: { limit?: number; force?: boolean } = {}) => {
+      const limit = normalizeOutboxLimit(params.limit, 50);
       const now = createOutboxNow();
       return [...entries.values()]
-        .filter((entry) => isPendingEntry(entry, now))
+        .filter((entry) => isPendingEntry(entry, now, params.force === true))
         .sort((a, b) => (a.created_at > b.created_at ? 1 : -1))
         .slice(0, limit)
         .map(cloneOutboxEntry);
     },
-    claimPending: async (params = {}) => {
-      const limit = typeof params.limit === "number" ? Math.max(0, params.limit) : 50;
+    claimPending: async (params: { limit?: number; force?: boolean } = {}) => {
+      const limit = normalizeOutboxLimit(params.limit, 50);
       const now = createOutboxNow();
       const claimed = [...entries.values()]
-        .filter((entry) => isPendingEntry(entry, now))
+        .filter((entry) => isPendingEntry(entry, now, params.force === true))
         .sort((a, b) => (a.created_at > b.created_at ? 1 : -1))
         .slice(0, limit);
 
@@ -101,6 +109,7 @@ export function createMemoryOutboxStore(): OutboxStore {
       const next: OutboxEntry = {
         ...existing,
         ...(patch.rpc ? { rpc: patch.rpc } : {}),
+        ...("transport" in patch ? { transport: patch.transport ?? "rpc" } : {}),
         ...(patch.args ? { args: { ...patch.args } } : {}),
         ...(patch.status ? { status: patch.status as OutboxEntryStatus } : {}),
         ...(typeof patch.attempt_count === "number"
@@ -135,7 +144,7 @@ export function createMemoryOutboxStore(): OutboxStore {
       return deleted;
     },
     recoverStaleInFlight: async ({ olderThanMs }) => {
-      const thresholdMs = Date.now() - Math.max(0, olderThanMs);
+      const thresholdMs = Date.now() - normalizeOutboxDuration(olderThanMs, 30_000);
       const now = createOutboxNow();
       let recovered = 0;
       for (const [id, entry] of entries.entries()) {

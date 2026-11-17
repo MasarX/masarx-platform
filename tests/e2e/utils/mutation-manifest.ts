@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 
 export type MutationManifestEntry = {
-  kind: "shipment" | "workflow_template" | "unknown";
+  kind: "settings_view" | "shipment" | "task" | "workflow_template" | "unknown";
   id: string;
   label: string;
   metadata?: Record<string, unknown> | null;

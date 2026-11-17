@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { ShipmentAmendCancelForm } from "../../packages/ui/src/shipment-amend-cancel-form";
 
-let formState = { status: "idle" as const, message: undefined as string | undefined };
+let formState = { status: "idle" as const, message: undefined as string | undefined, locked: false };
 
 jest.mock("react", () => {
   const actual = jest.requireActual("react");
@@ -15,7 +15,7 @@ describe("ShipmentAmendCancelForm", () => {
   const action = jest.fn(async () => ({ status: "success" as const }));
 
   beforeEach(() => {
-    formState = { status: "idle", message: undefined };
+    formState = { status: "idle", message: undefined, locked: false };
     action.mockClear();
   });
 
@@ -48,6 +48,9 @@ describe("ShipmentAmendCancelForm", () => {
     expect(screen.getByTestId("shipment-amend-cancel-address-country")).toBeInTheDocument();
     expect(screen.getByTestId("shipment-amend-cancel-address-directions")).toBeInTheDocument();
     expect(screen.getByTestId("shipment-amend-cancel-address-country")).toHaveValue("AE");
+    expect(screen.getByLabelText("Saudi short address (optional)")).toHaveAttribute("name", "sa_short_code");
+    expect(screen.getByLabelText("Latitude (optional)")).toHaveAttribute("name", "latitude");
+    expect(screen.getByLabelText("Longitude (optional)")).toHaveAttribute("name", "longitude");
   });
 
   it("shows shipment_operation_policy block messaging when cancel is not allowed", () => {
@@ -198,7 +201,7 @@ describe("ShipmentAmendCancelForm", () => {
       />,
     );
 
-    formState = { status: "success", message: "Shipment soft-cancel completed." };
+    formState = { status: "success", message: "Shipment soft-cancel completed.", locked: false };
     view.rerender(
       <ShipmentAmendCancelForm
         action={action}
@@ -224,4 +227,47 @@ describe("ShipmentAmendCancelForm", () => {
       "Shipment soft-cancel completed.",
     );
   });
+
+  it("locks all amendment operations after an accepted or uncertain submission", () => {
+    formState = { status: "idle", message: undefined, locked: true };
+    render(<ShipmentAmendCancelForm action={action} shipmentId="4d1fbd36-6b6e-4c35-acc4-5e3ad9043830"
+      options={{ operations: { modify: { allowed: true }, address: { allowed: true }, cancel: { allowed: true },
+        reschedule: { allowed: true } } }} currentValues={{}} testIdPrefix="locked" />);
+    expect(screen.getByTestId("locked-address-submit")).toBeDisabled();
+    expect(screen.getByTestId("locked-modify-submit")).toBeDisabled();
+    expect(screen.getByTestId("locked-cancel-submit")).toBeDisabled();
+    expect(screen.getByTestId("locked-reschedule-submit")).toBeDisabled();
+    expect(screen.getByTestId("locked-address-short-code")).toBeDisabled();
+  });
+  it.each([
+    ["restricted", ["service_type"], true],
+    ["empty", [], false],
+    ["absent", undefined, false],
+    ["null", null, false],
+    ["scalar", "service_type", false],
+    ["object", { service_type: true }, false],
+    ["untrimmed", [" service_type "], false],
+  ] as Array<[string, unknown, boolean]>)("honors %s modify field policy without broadening it", (_name, fields, serviceAllowed) => {
+    render(<ShipmentAmendCancelForm action={action} shipmentId="4d1fbd36-6b6e-4c35-acc4-5e3ad9043830"
+      options={{ operations: { modify: { allowed: true } }, policy: { modify_allowed_fields: fields as string[] } }}
+      currentValues={{}} testIdPrefix="policy" />);
+    const service = screen.getByTestId("policy-modify-service-type");
+    if (serviceAllowed) expect(service).toBeEnabled();
+    else expect(service).toBeDisabled();
+    for (const field of ["service-level", "client-reference", "carrier-reference", "special-instructions", "cod-amount", "metadata", "references"]) {
+      expect(screen.getByTestId(`policy-modify-${field}`)).toBeDisabled();
+    }
+  });
+
+  it("explains missing operation availability and preserves the submission lock", () => {
+    formState = { status: "idle", message: undefined, locked: true };
+    render(<ShipmentAmendCancelForm action={action} shipmentId="4d1fbd36-6b6e-4c35-acc4-5e3ad9043830"
+      options={{ operations: { modify: { allowed: true } }, policy: { modify_allowed_fields: ["service_type"] } }}
+      currentValues={{}} testIdPrefix="policy" />);
+    expect(screen.getByTestId("policy-modify-service-type")).toBeDisabled();
+    expect(screen.getByTestId("policy-modify-submit")).toBeDisabled();
+    expect(screen.getByText(/address availability was not returned by the backend/)).toBeInTheDocument();
+    expect(screen.getByTestId("policy-address-submit")).toBeDisabled();
+  });
+
 });

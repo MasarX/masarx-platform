@@ -1,13 +1,15 @@
-import { openDatabaseAsync } from "expo-sqlite";
+import { openDatabaseAsync, type SQLiteBindValue } from "expo-sqlite";
 
-import type { OutboxEntry, OutboxEntryStatus, OutboxStore } from "./outbox";
-import { createOutboxId, createOutboxNow } from "./outbox";
+import type { OutboxEnqueueInput, OutboxEntry, OutboxEntryStatus, OutboxStore } from "./outbox";
+import { normalizeOutboxDisplay, createOutboxId, createOutboxNow, normalizeOutboxLimit, normalizeOutboxDuration, DEFAULT_OUTBOX_STALE_IN_FLIGHT_MS } from "./outbox";
 import type { KeyValueStore } from "./kv";
 
 type SqliteRow = {
   id: string;
   rpc: string;
+  transport?: string;
   args_json: string;
+  display_json?: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -17,20 +19,29 @@ type SqliteRow = {
 };
 
 function parseRow(row: SqliteRow): OutboxEntry {
-  let args: Record<string, unknown> = {};
-  try {
-    args = JSON.parse(row.args_json || "{}") as Record<string, unknown>;
-  } catch {
-    args = {};
+  let args: unknown;
+  try { args = JSON.parse(row.args_json); }
+  catch { throw new Error("Invalid persisted outbox arguments."); }
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("Invalid persisted outbox arguments.");
   }
+  if (!["queued", "in_flight", "succeeded", "failed", "dead"].includes(row.status)) {
+    throw new Error("Invalid persisted outbox status.");
+  }
+  let display: unknown;
+  try { display = row.display_json ? JSON.parse(row.display_json) : undefined; }
+  catch { display = undefined; }
   return {
     id: row.id,
+    display: normalizeOutboxDisplay(display),
     rpc: row.rpc,
-    args,
-    status: (row.status as OutboxEntryStatus) || "queued",
+    transport: (row.transport === undefined ? "rpc" : row.transport) as OutboxEntry["transport"],
+    args: args as Record<string, unknown>,
+    status: row.status as OutboxEntryStatus,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    attempt_count: row.attempt_count ?? 0,
+    attempt_count: Number.isSafeInteger(row.attempt_count) && row.attempt_count >= 0
+      ? row.attempt_count : 0,
     next_attempt_at: row.next_attempt_at ?? null,
     last_error: row.last_error ?? null,
   };
@@ -48,6 +59,19 @@ function normalizeTableName(name?: string) {
     throw new Error(`Invalid outbox table name: ${trimmed}`);
   }
   return trimmed;
+}
+
+function toSqliteBindValue(value: unknown): SQLiteBindValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value instanceof Uint8Array
+  ) {
+    return value;
+  }
+  throw new TypeError(`Unsupported SQLite bind value type: ${typeof value}`);
 }
 
 export function createSqliteOutboxStore(params: {
@@ -83,19 +107,37 @@ export function createSqliteOutboxStore(params: {
         `CREATE INDEX IF NOT EXISTS ${tableName}_status_next_idx ON ${tableName} (status, next_attempt_at);`,
       ].join("\n")
     );
+    // Additive upgrade: old queued rows remain RPCs. Serialize schema inspection
+    // with upgrades from another store instance sharing this database.
+    await db.execAsync("BEGIN IMMEDIATE");
+    try {
+      const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
+      if (!columns.some((column) => column.name === "transport")) {
+        await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN transport TEXT NOT NULL DEFAULT 'rpc'`);
+      }
+      if (!columns.some((column) => column.name === "display_json")) {
+        await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN display_json TEXT NULL`);
+      }
+      await db.execAsync("COMMIT");
+    } catch (error) {
+      await db.execAsync("ROLLBACK");
+      throw error;
+    }
   }
 
-  async function enqueue(input: { rpc: string; args: Record<string, unknown>; id?: string }) {
+  async function enqueue(input: OutboxEnqueueInput) {
     const db = await getDb();
     const now = createOutboxNow();
     const id = input.id ?? createOutboxId();
     await db.runAsync(
-      `INSERT INTO ${tableName} (id, rpc, args_json, status, created_at, updated_at, attempt_count, next_attempt_at, last_error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO ${tableName} (id, rpc, transport, args_json, display_json, status, created_at, updated_at, attempt_count, next_attempt_at, last_error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO NOTHING`,
       id,
       input.rpc,
+      input.transport ?? "rpc",
       JSON.stringify(input.args ?? {}),
+      JSON.stringify(normalizeOutboxDisplay(input.display)) ?? null,
       "queued",
       now,
       now,
@@ -123,9 +165,9 @@ export function createSqliteOutboxStore(params: {
 
   async function list(params: { status?: OutboxEntryStatus[]; limit?: number } = {}) {
     const db = await getDb();
-    const limit = params.limit ?? 200;
+    const limit = normalizeOutboxLimit(params.limit, 200);
     const statuses = Array.isArray(params.status) ? params.status.filter(Boolean) : [];
-    const values: unknown[] = [];
+    const values: SQLiteBindValue[] = [];
     let where = "";
 
     if (statuses.length) {
@@ -138,7 +180,7 @@ export function createSqliteOutboxStore(params: {
        ${where}
        ORDER BY created_at DESC
        LIMIT ?`,
-      ...(values as any[]),
+      ...values,
       limit
     );
     return rows.map(parseRow);
@@ -146,7 +188,7 @@ export function createSqliteOutboxStore(params: {
 
   async function listPending(params: { limit?: number } = {}) {
     const db = await getDb();
-    const limit = params.limit ?? 50;
+    const limit = normalizeOutboxLimit(params.limit, 50);
     const now = createOutboxNow();
     const rows = await db.getAllAsync<SqliteRow>(
       `SELECT * FROM ${tableName}
@@ -162,7 +204,7 @@ export function createSqliteOutboxStore(params: {
 
   async function claimPending(params: { limit?: number } = {}) {
     const db = await getDb();
-    const limit = params.limit ?? 50;
+    const limit = normalizeOutboxLimit(params.limit, 50);
     const now = createOutboxNow();
 
     await db.execAsync("BEGIN IMMEDIATE");
@@ -177,7 +219,9 @@ export function createSqliteOutboxStore(params: {
         limit
       );
 
-      const ids = rows.map((row) => row.id).filter(Boolean);
+      // Validate before claiming or committing; malformed commands must never replay.
+      const entries = rows.map(parseRow);
+      const ids = entries.map((entry) => entry.id).filter(Boolean);
         if (ids.length) {
           const placeholders = ids.map(() => "?").join(",");
           await db.runAsync(
@@ -187,14 +231,14 @@ export function createSqliteOutboxStore(params: {
            WHERE id IN (${placeholders})
              AND status IN ('queued','failed')`,
             now,
-            ...(ids as any[])
+            ...ids
           );
         }
 
       await db.execAsync("COMMIT");
 
-      return rows.map((row) => ({
-        ...parseRow(row),
+      return entries.map((entry) => ({
+        ...entry,
         status: "in_flight" as const,
         updated_at: now,
       }));
@@ -211,7 +255,9 @@ export function createSqliteOutboxStore(params: {
   async function countPending() {
     const db = await getDb();
     const rows = await db.getAllAsync<{ count: number }>(
-      `SELECT COUNT(1) AS count FROM ${tableName} WHERE status IN ('queued','failed')`
+      `SELECT COUNT(1) AS count FROM ${tableName} WHERE status IN ('queued','failed')
+       AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`,
+      createOutboxNow()
     );
     return Number(rows[0]?.count ?? 0);
   }
@@ -219,11 +265,15 @@ export function createSqliteOutboxStore(params: {
   async function update(id: string, patch: Partial<OutboxEntry>) {
     const db = await getDb();
     const fields: string[] = [];
-    const values: unknown[] = [];
+    const values: SQLiteBindValue[] = [];
 
     if (patch.rpc) {
       fields.push("rpc = ?");
       values.push(patch.rpc);
+    }
+    if ("transport" in patch) {
+      fields.push("transport = ?");
+      values.push(patch.transport ?? "rpc");
     }
     if (patch.args) {
       fields.push("args_json = ?");
@@ -255,7 +305,7 @@ export function createSqliteOutboxStore(params: {
 
     await db.runAsync(
       `UPDATE ${tableName} SET ${fields.join(", ")} WHERE id = ?`,
-      ...(values as any[])
+      ...values
     );
   }
 
@@ -267,7 +317,7 @@ export function createSqliteOutboxStore(params: {
   async function clear(params: { status?: OutboxEntryStatus[] } = {}) {
     const db = await getDb();
     const statuses = Array.isArray(params.status) ? params.status.filter(Boolean) : [];
-    const values: unknown[] = [];
+    const values: SQLiteBindValue[] = [];
     let where = "";
 
     if (statuses.length) {
@@ -275,8 +325,8 @@ export function createSqliteOutboxStore(params: {
       values.push(...statuses);
     }
 
-    const res = await db.runAsync(`DELETE FROM ${tableName}${where}`, ...(values as any[]));
-    return Number((res as any)?.changes ?? 0);
+    const res = await db.runAsync(`DELETE FROM ${tableName}${where}`, ...values);
+    return res.changes;
   }
 
   return {
@@ -293,7 +343,7 @@ export function createSqliteOutboxStore(params: {
     recoverStaleInFlight: async ({ olderThanMs }) => {
       const db = await getDb();
       const now = createOutboxNow();
-      const threshold = new Date(Date.now() - Math.max(0, olderThanMs)).toISOString();
+      const threshold = new Date(Date.now() - normalizeOutboxDuration(olderThanMs, DEFAULT_OUTBOX_STALE_IN_FLIGHT_MS)).toISOString();
       const res = await db.runAsync(
         `UPDATE ${tableName}
          SET status = 'failed',
@@ -307,7 +357,7 @@ export function createSqliteOutboxStore(params: {
         now,
         threshold
       );
-      return Number((res as any)?.changes ?? 0);
+      return res.changes;
     },
   };
 }
@@ -376,7 +426,7 @@ export function createSqliteKeyValueStore(params: {
   async function clear() {
     const db = await getDb();
     const res = await db.runAsync(`DELETE FROM ${tableName}`);
-    return Number((res as any)?.changes ?? 0);
+    return res.changes;
   }
 
   return { init, get, set, remove, clear };

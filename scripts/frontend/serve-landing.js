@@ -6,6 +6,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { parseFlagArgs } = require("../utils/cli-args");
 const { loadEnv } = require("../utils/load-env");
+const { isLocalSiteUrl } = require("../ops/ci/release-verify-preview");
 
 loadEnv();
 
@@ -15,6 +16,8 @@ const MIME = {
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".json": "application/json",
+  ".wasm": "application/wasm",
   ".txt": "text/plain; charset=utf-8",
   ".xml": "application/xml; charset=utf-8",
 };
@@ -25,6 +28,10 @@ function isTruthy(value) {
 
 function contentType(filePath) {
   return MIME[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+}
+
+function stripMountPrefix(urlPath, basePath = "/") {
+  return urlPath.startsWith(basePath) ? urlPath.slice(basePath.length - 1) : null;
 }
 
 function safeJoin(rootDir, urlPath) {
@@ -64,20 +71,68 @@ function build(outDir) {
   if (code !== 0) process.exit(code);
 }
 
+async function handleLocalIntakeMock(req, res, { enabled = false, siteUrl = "" } = {}) {
+  if (!enabled) return false;
+  const pathname = new URL(req.url || "/", "http://localhost").pathname.replace(/\/+$/g, "");
+  if (!["/__landing-contact", "/__tenant-signup"].includes(pathname)) return false;
+  const reply = (status, body) => {
+    res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+  const reject = (status, code) => reply(status, { ok: false, mock: true, error: { code } });
+  if (!isLocalSiteUrl(siteUrl) || !isLocalSiteUrl(`http://${req.headers.host || ""}`)) {
+    reject(403, "local_mock_only");
+  } else if (req.method !== "POST") {
+    reject(405, "method_not_allowed");
+  } else if (!String(req.headers["content-type"] || "").toLowerCase().includes("application/json")) {
+    reject(415, "unsupported_content_type");
+  } else {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+      size += Buffer.byteLength(chunk);
+      if (size <= 64 * 1024) chunks.push(Buffer.from(chunk));
+    }
+    if (size > 64 * 1024) {
+      reject(413, "body_too_large");
+      return true;
+    }
+    let payload;
+    try { payload = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { /* rejected below */ }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      reject(400, "invalid_json");
+    } else {
+      const tenant = pathname === "/__tenant-signup";
+      const id = tenant ? "00000000-0000-4000-8000-000000000002" : "00000000-0000-4000-8000-000000000001";
+      reply(200, { ok: true, mock: true, status: "under_review", ...(tenant ? { request_id: id } : { id }) });
+    }
+  }
+  return true;
+}
+
 function main() {
   const args = parseFlagArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
   const port = Number.parseInt(process.env.LANDING_PORT || String(args.port || "3333"), 10);
-  const host = String(process.env.LANDING_HOST || "").trim();
+  const intakeMocks = isTruthy(process.env.LANDING_ENABLE_INTAKE_MOCKS);
+  const host = String(process.env.LANDING_HOST || "").trim() || (intakeMocks ? "127.0.0.1" : "");
+  if (intakeMocks && !["localhost", "127.0.0.1", "::1"].includes(host.toLowerCase())) {
+    throw new Error("LANDING_ENABLE_INTAKE_MOCKS requires LANDING_HOST to be localhost, 127.0.0.1 or ::1.");
+  }
   const outDir = path.resolve(repoRoot, String(args.out || "dist/landing"));
+  const basePath = `${String(args["base-path"] || "/").replace(/\/+$/g, "")}/`;
 
-  if (!process.env.LANDING_SITE_URL && host) process.env.LANDING_SITE_URL = `http://${host}:${port}`;
+  if (!process.env.LANDING_SITE_URL && host) process.env.LANDING_SITE_URL = `http://${host === "::1" ? "[::1]" : host}:${port}`;
+  if (intakeMocks && !isLocalSiteUrl(process.env.LANDING_SITE_URL)) {
+    throw new Error("LANDING_ENABLE_INTAKE_MOCKS requires a local LANDING_SITE_URL.");
+  }
 
   const skipBuild = isTruthy(args["skip-build"]) || isTruthy(process.env.LANDING_SKIP_BUILD);
   if (!skipBuild) build(outDir);
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
+      if (await handleLocalIntakeMock(req, res, { enabled: intakeMocks, siteUrl: process.env.LANDING_SITE_URL })) return;
       const method = String(req.method || "GET").toUpperCase();
       if (method !== "GET" && method !== "HEAD") {
         res.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
@@ -85,7 +140,12 @@ function main() {
         return;
       }
 
-      const urlPath = String(req.url || "/");
+      const urlPath = stripMountPrefix(String(req.url || "/"), basePath);
+      if (urlPath === null) {
+        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+        res.end("Not found");
+        return;
+      }
       const target = safeJoin(outDir, urlPath === "/" ? "/index.html" : urlPath);
       if (!target) {
         res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
@@ -156,5 +216,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  handleLocalIntakeMock,
   isTruthy,
+  main,
+  stripMountPrefix,
 };

@@ -2,7 +2,10 @@ import "server-only";
 
 import { createUiServerClient } from "@masarx/api/server";
 import { UiMe } from "@masarx/api";
-import { getVerifiedAccessToken } from "@masarx/auth/server";
+import {
+  createServerReachableFetch,
+  getVerifiedAccessToken,
+} from "@masarx/auth/server";
 import { getPublicConfig } from "@masarx/config";
 import { revalidatePath } from "next/cache";
 import { Badge } from "./badge";
@@ -12,6 +15,10 @@ import {
   TenantSignupReviewForm,
   TenantSignupReviewState,
 } from "./tenant-signup-review-form";
+import {
+  TenantSignupRequestCreateForm,
+  type TenantSignupRequestCreateState,
+} from "./tenant-signup-request-create-form";
 import { formatUiError } from "./utils";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 
@@ -114,6 +121,7 @@ export async function TenantSignupRequestsPage({
     resolveCapabilitySet(me?.capabilities ?? null),
     "tenant_signup_requests.review",
   );
+  const canCreate = canReview && me?.access_scope?.scope_type === "platform";
 
   const reviewTelemetry = me
     ? {
@@ -160,11 +168,11 @@ export async function TenantSignupRequestsPage({
     try {
       supabaseUrl = getPublicConfig().supabaseUrl;
     } catch {
-      return { status: "error", message: "Supabase runtime configuration is unavailable." };
+      return { status: "error", message: "Review service is unavailable. Try again later." };
     }
 
     if (!supabaseUrl) {
-      return { status: "error", message: "Supabase runtime URL is missing." };
+      return { status: "error", message: "Review service is unavailable. Try again later." };
     }
 
     const { accessToken, error: sessionError } =
@@ -173,15 +181,16 @@ export async function TenantSignupRequestsPage({
     if (sessionError || !accessToken) {
       return {
         status: "error",
-        message: "Authenticated reviewer session is required.",
+        message: "Sign in again before reviewing this request.",
       };
     }
 
     const endpoint = `${supabaseUrl.replace(/\/+$/g, "")}/functions/v1/tenant-signup-review`;
+    const serverFetch = createServerReachableFetch(supabaseUrl) ?? fetch;
 
     let response: Response;
     try {
-      response = await fetch(endpoint, {
+      response = await serverFetch(endpoint, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -201,7 +210,7 @@ export async function TenantSignupRequestsPage({
     } catch (error) {
       return {
         status: "error",
-        message: formatUiError(error, "Review request failed before reaching the API."),
+        message: formatUiError(error, "Unable to send the review. Check your connection and try again."),
       };
     }
 
@@ -214,10 +223,14 @@ export async function TenantSignupRequestsPage({
       const err = payloadRecord?.error && typeof payloadRecord.error === "object"
         ? (payloadRecord.error as Record<string, unknown>)
         : null;
-      const message =
-        (typeof err?.message === "string" && err.message.trim()) ||
-        (typeof err?.code === "string" && err.code.trim()) ||
-        `Review request failed with status ${response.status}.`;
+      const fallback = response.status === 401
+        ? "Sign in again before reviewing this request."
+        : response.status === 403
+          ? "You do not have permission to review this request. Contact your administrator."
+          : "Unable to complete the review. Try again or contact your administrator.";
+      const message = response.status >= 500 || response.status === 401 || response.status === 403
+        ? fallback
+        : formatUiError(err?.message, fallback);
       return { status: "error", message };
     }
 
@@ -230,8 +243,69 @@ export async function TenantSignupRequestsPage({
     };
   }
 
+  async function submitCreate(
+    _prevState: TenantSignupRequestCreateState,
+    formData: FormData,
+  ): Promise<TenantSignupRequestCreateState> {
+    "use server";
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const fullName = String(formData.get("full_name") ?? "").trim();
+    const organizationName = String(formData.get("organization_name") ?? "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !fullName || !organizationName) {
+      return { status: "error", message: "Enter a valid email, full name, and organization name." };
+    }
+    const { accessToken, error } = await getVerifiedAccessToken({ allowCookieSet: false });
+    if (error || !accessToken) {
+      return { status: "error", message: "Authenticated reviewer session is required." };
+    }
+    try {
+      // The RPC reasserts the current platform reviewer; no actor or tenant scope comes from the form.
+      const result = await createUiServerClient().rpc<Record<string, unknown>>(
+        "tenant_signup_request_create_reviewer_v1",
+        {
+          p_input: {
+            email,
+            full_name: fullName,
+            organization_name: organizationName,
+            organization_slug: String(formData.get("organization_slug") ?? "").trim() || null,
+            website_url: String(formData.get("website_url") ?? "").trim() || null,
+            phone: String(formData.get("phone") ?? "").trim() || null,
+            notes: String(formData.get("notes") ?? "").trim() || null,
+            locale: String(formData.get("locale") ?? "").trim() || null,
+          },
+        },
+      );
+      const requestId = typeof result?.id === "string" ? result.id : "";
+      const status = typeof result?.status === "string" ? result.status : "";
+      if (result?.ok !== true || !uuidRegex.test(requestId) || !["pending", "approved", "rejected"].includes(status)
+        || (status !== "pending" && result.deduped !== true)) {
+        const failure = result?.error && typeof result.error === "object"
+          ? (result.error as Record<string, unknown>)
+          : null;
+        return { status: "error", message: typeof failure?.code === "string" ? failure.code : "Unable to queue organization request." };
+      }
+      revalidatePath(baseHref);
+      const params = new URLSearchParams({ id: requestId, status });
+      return {
+        status: "success",
+        message: result.deduped === true
+          ? `Existing organization request reused (${status}).`
+          : "Organization request queued for review.",
+        requestHref: `${baseHref}?${params.toString()}`,
+      };
+    } catch (error) {
+      return { status: "error", message: formatUiError(error, "Organization request creation failed.") };
+    }
+  }
+
   return (
-    <ResourcePage
+    <div className="space-y-6">
+      {canCreate ? (
+        <Section title="Queue organization request" description="Create a pending request for the platform review queue; no account is activated.">
+          <TenantSignupRequestCreateForm action={submitCreate} testIdPrefix={`${testIdPrefix}-create`} />
+        </Section>
+      ) : null}
+      <ResourcePage
       appKey={appKey}
       resourceKey="tenant_signup_requests"
       searchParams={effectiveSearchParams}
@@ -263,7 +337,7 @@ export async function TenantSignupRequestsPage({
         if (!canReview) {
           blockedMessage = meError
             ? `Reviewer context unavailable: ${meError}`
-            : "Your account is missing tenant_signup_requests.review capability.";
+            : "You do not have permission to review organization requests. Contact your administrator.";
         } else if (!isPending) {
           blockedMessage = "Only pending requests can be reviewed.";
         }
@@ -293,8 +367,7 @@ export async function TenantSignupRequestsPage({
 
               {lastErrorCode || lastErrorMessage ? (
                 <div className="rounded-xl border border-ui-border bg-ui-surface/80 p-3 text-xs text-ui-muted">
-                  Last error{lastErrorCode ? ` (${lastErrorCode})` : ""}
-                  {lastErrorMessage ? `: ${lastErrorMessage}` : "."}
+                  Last review attempt: {formatUiError(lastErrorMessage, "Unable to complete the review. Contact your administrator.")}
                 </div>
               ) : null}
 
@@ -311,6 +384,7 @@ export async function TenantSignupRequestsPage({
           </Section>
         );
       }}
-    />
+      />
+    </div>
   );
 }

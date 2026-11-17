@@ -203,7 +203,8 @@ SELECT
     'sender_id', t.sender_id,
     'source_id', t.source_id,
     'api_gateway', jsonb_build_object(
-      'api_gateway_request_id', t.request_id
+      'api_gateway_request_id', t.request_id,
+      'route_id', t.route_id
     )
   )),
   '{}'::jsonb,
@@ -272,7 +273,8 @@ SELECT
     'sender_id', t.sender_id,
     'source_id', t.source_id,
     'api_gateway', jsonb_build_object(
-      'api_gateway_request_id', t.request_id
+      'api_gateway_request_id', t.request_id,
+      'route_id', t.route_id
     )
   )),
   '{}'::jsonb,

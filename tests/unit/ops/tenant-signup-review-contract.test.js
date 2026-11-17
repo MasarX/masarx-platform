@@ -14,7 +14,7 @@ describe('tenant-signup-review hosted redirect contract', () => {
 
     expect(body).toContain('normalizeHostedRedirectUrl');
     expect(body).toContain('invalid_invite_redirect_to');
-    expect(body).toContain('invite_redirect_to must be a hosted non-localhost http/https URL');
+    expect(body).toContain('invite_redirect_to must be a hosted non-localhost HTTPS URL');
   });
 
   test('shared tenant signup helper enforces redirect requirement for invite email flow', () => {
@@ -27,10 +27,10 @@ describe('tenant-signup-review hosted redirect contract', () => {
     );
     const body = fs.readFileSync(file, 'utf8');
 
-    expect(body).toContain('normalized === "localhost"');
+    expect(body).toContain('isLoopbackHostname(normalized)');
     expect(body).toContain('normalized.endsWith(".local")');
     expect(body).toContain('throw new Error("invite_redirect_required")');
-    expect(body).toContain('Invite redirect must be a hosted non-localhost http/https URL.');
+    expect(body).toContain('Invite redirect must be a hosted non-localhost HTTPS URL.');
   });
 });
 

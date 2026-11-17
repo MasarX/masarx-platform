@@ -7,10 +7,12 @@ import { Platform } from "react-native";
 import { isRetriableNetworkError, isRetriableSupabaseError } from "@masarx/api";
 import { createMobileClient, createSupabaseExecutor } from "@masarx/auth/mobile";
 import { createOutbox, createOutboxId } from "@masarx/mobile-core";
-import { createSqliteOutboxStore } from "@masarx/mobile-core/sqlite";
+import { createSqliteOutboxStore, createSqliteKeyValueStore } from "@masarx/mobile-core/sqlite";
+import { syncCompletionOutbox, resolveVerifiedCompletionScope } from "./mobile-completion-readback-storage";
+import { createRouteDepartureExecutor } from "./mobile-route-departure";
 
 import { addMobileNetworkFailureBreadcrumb } from "./mobile-crash-reporting";
-import { logDebugFailure } from "./mobile-debug";
+import { logDebugFailure, logMobileRequestTrace } from "./mobile-debug";
 import { isJwtPrivilegedRole, resolveJwtRole } from "./mobile-jwt";
 import { getPublicConfigFromExpo, resolveExpoExtra, type ExpoExtra } from "./mobile-public-config";
 import type { MobileLocationAccuracy, MobileLocationTrackingPolicy } from "./mobile-location-policy";
@@ -91,6 +93,7 @@ const backgroundOutboxStore = createSqliteOutboxStore({
   tableName: "outbox",
 });
 const backgroundOutbox = createOutbox(backgroundOutboxStore);
+const backgroundReadbackStore = createSqliteKeyValueStore({ databaseName: "fieldops.db", tableName: "kv_store" });
 let outboxInitPromise: Promise<void> | null = null;
 
 function ensureOutboxInit() {
@@ -137,6 +140,7 @@ function ensureBackgroundClient() {
     supabaseUrl: publicConfig.supabaseUrl,
     supabaseAnonKey: publicConfig.supabaseAnonKey,
     storage: backgroundStorage,
+    onRequestTrace: logMobileRequestTrace,
     onRequestFailure: (context) => {
       addMobileNetworkFailureBreadcrumb(context);
       const { method, url, status, statusText, correlationId, traceparent, error } = context;
@@ -150,7 +154,7 @@ function ensureBackgroundClient() {
       );
     },
   });
-  backgroundExecutor = createSupabaseExecutor(backgroundClient);
+  backgroundExecutor = createRouteDepartureExecutor(backgroundClient, createSupabaseExecutor(backgroundClient));
   return { client: backgroundClient, executor: backgroundExecutor };
 }
 
@@ -174,7 +178,7 @@ async function syncOutboxInBackground() {
     const pending = await backgroundOutboxStore.countPending();
     if (pending <= 0) return;
 
-    await backgroundOutbox.sync(deps.executor, {
+    await syncCompletionOutbox(backgroundOutbox, deps.executor, backgroundReadbackStore, () => resolveVerifiedCompletionScope(deps.client), {
       limit: Math.min(BACKGROUND_SYNC_LIMIT, pending),
       shouldRetry: (error) => isRetriableNetworkError(error) || isRetriableSupabaseError(error),
     });
@@ -263,7 +267,7 @@ export async function getBackgroundLocationTrackingState() {
   return { running, state };
 }
 
-export async function stopBackgroundLocationTracking() {
+async function stopTrackingAndClearState() {
   try {
     const running = await Location.hasStartedLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
     if (running) {
@@ -279,45 +283,58 @@ export async function stopBackgroundLocationTracking() {
   });
 }
 
+let backgroundLifecycleGeneration = 0;
+let backgroundLifecycleTail: Promise<unknown> = Promise.resolve();
+
+function serializeBackgroundLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+  const result = backgroundLifecycleTail.then(operation, operation);
+  backgroundLifecycleTail = result.catch(() => undefined);
+  return result;
+}
+
+export function stopBackgroundLocationTracking() {
+  backgroundLifecycleGeneration += 1;
+  return serializeBackgroundLifecycle(stopTrackingAndClearState);
+}
+
 export async function syncBackgroundLocationTracking(params: {
   deviceId: string | null;
   policy: MobileLocationTrackingPolicy;
 }): Promise<BackgroundTrackingSyncResult> {
+  const generation = ++backgroundLifecycleGeneration;
+  const isCurrent = () => generation === backgroundLifecycleGeneration;
+  const superseded: BackgroundTrackingSyncResult = { running: false, reason: "disabled_by_policy_or_device" };
   const shouldRun = Boolean(params.deviceId && params.policy.enabled && params.policy.backgroundEnabled);
 
   if (!shouldRun) {
-    await writeBackgroundState({
-      deviceId: params.deviceId,
-      trackingEnabled: false,
-      maxAccuracyM: params.policy.maxAccuracyM,
+    return serializeBackgroundLifecycle<BackgroundTrackingSyncResult>(async () => {
+      if (!isCurrent()) return superseded;
+      await writeBackgroundState({ deviceId: params.deviceId, trackingEnabled: false, maxAccuracyM: params.policy.maxAccuracyM });
+      if (!isCurrent()) return superseded;
+      const wasRunning = await Location.hasStartedLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
+      if (wasRunning && isCurrent()) await Location.stopLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
+      return superseded;
     });
-    const wasRunning = await Location.hasStartedLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
-    if (wasRunning) {
-      await Location.stopLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
-    }
-    return { running: false, reason: "disabled_by_policy_or_device" };
   }
 
   const taskManagerAvailable = await TaskManager.isAvailableAsync();
+  if (!isCurrent()) return superseded;
   if (!taskManagerAvailable) {
-    await writeBackgroundState({
-      deviceId: params.deviceId,
-      trackingEnabled: false,
-      maxAccuracyM: params.policy.maxAccuracyM,
+    await serializeBackgroundLifecycle(async () => {
+      if (isCurrent()) await writeBackgroundState({ deviceId: params.deviceId, trackingEnabled: false, maxAccuracyM: params.policy.maxAccuracyM });
     });
-    return { running: false, reason: "disabled_by_policy_or_device" };
+    return superseded;
   }
 
-  await writeBackgroundState({
-    deviceId: params.deviceId,
-    trackingEnabled: false,
-    maxAccuracyM: params.policy.maxAccuracyM,
+  await serializeBackgroundLifecycle(async () => {
+    if (isCurrent()) await writeBackgroundState({ deviceId: params.deviceId, trackingEnabled: false, maxAccuracyM: params.policy.maxAccuracyM });
   });
+  if (!isCurrent()) return superseded;
 
   const stopIfRunning = async () => {
     try {
       const running = await Location.hasStartedLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
-      if (running) {
+      if (running && isCurrent()) {
         await Location.stopLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
       }
     } catch (error) {
@@ -326,51 +343,61 @@ export async function syncBackgroundLocationTracking(params: {
   };
 
   let foregroundPermission = await Location.getForegroundPermissionsAsync();
-  if (foregroundPermission.status !== "granted") {
+  if (!isCurrent()) return superseded;
+  if (foregroundPermission.status !== "granted" && foregroundPermission.canAskAgain !== false) {
     foregroundPermission = await Location.requestForegroundPermissionsAsync();
+    if (!isCurrent()) return superseded;
   }
   if (foregroundPermission.status !== "granted") {
-    await stopIfRunning();
+    await serializeBackgroundLifecycle(async () => { if (isCurrent()) await stopIfRunning(); });
     return { running: false, reason: "foreground_permission_denied" };
   }
 
   let backgroundPermission = await Location.getBackgroundPermissionsAsync();
-  if (backgroundPermission.status !== "granted" && params.policy.requestBackgroundPermission) {
+  if (!isCurrent()) return superseded;
+  if (backgroundPermission.status !== "granted" && backgroundPermission.canAskAgain !== false && params.policy.requestBackgroundPermission) {
     backgroundPermission = await Location.requestBackgroundPermissionsAsync();
+    if (!isCurrent()) return superseded;
   }
   if (backgroundPermission.status !== "granted") {
-    await stopIfRunning();
+    await serializeBackgroundLifecycle(async () => { if (isCurrent()) await stopIfRunning(); });
     return { running: false, reason: "background_permission_denied" };
   }
 
-  const wasRunning = await Location.hasStartedLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
-  if (wasRunning) {
-    await Location.stopLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
-  }
+  return serializeBackgroundLifecycle<BackgroundTrackingSyncResult>(async () => {
+    if (!isCurrent()) return superseded;
+    const wasRunning = await Location.hasStartedLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
+    if (!isCurrent()) return superseded;
+    if (wasRunning) {
+      await Location.stopLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK);
+    }
 
-  const options: Location.LocationTaskOptions = {
-    accuracy: resolveLocationAccuracy(params.policy.backgroundAccuracy),
-    distanceInterval: params.policy.backgroundDistanceIntervalM,
-    showsBackgroundLocationIndicator: params.policy.backgroundShowsIndicator,
-    pausesUpdatesAutomatically: params.policy.backgroundPausesUpdatesAutomatically,
-  };
-
-  if (Platform.OS === "android") {
-    options.timeInterval = params.policy.backgroundTimeIntervalMs;
-    options.foregroundService = {
-      notificationTitle: params.policy.backgroundNotificationTitle,
-      notificationBody: params.policy.backgroundNotificationBody,
+    const options: Location.LocationTaskOptions = {
+      accuracy: resolveLocationAccuracy(params.policy.backgroundAccuracy),
+      distanceInterval: params.policy.backgroundDistanceIntervalM,
+      showsBackgroundLocationIndicator: params.policy.backgroundShowsIndicator,
+      pausesUpdatesAutomatically: params.policy.backgroundPausesUpdatesAutomatically,
     };
-  } else if (Platform.OS === "ios") {
-    options.deferredUpdatesInterval = params.policy.backgroundDeferredUpdatesIntervalMs;
-  }
 
-  await Location.startLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK, options);
-  await writeBackgroundState({
-    deviceId: params.deviceId,
-    trackingEnabled: true,
-    maxAccuracyM: params.policy.maxAccuracyM,
+    if (Platform.OS === "android") {
+      options.timeInterval = params.policy.backgroundTimeIntervalMs;
+      options.foregroundService = {
+        notificationTitle: params.policy.backgroundNotificationTitle,
+        notificationBody: params.policy.backgroundNotificationBody,
+      };
+    } else if (Platform.OS === "ios") {
+      options.deferredUpdatesInterval = params.policy.backgroundDeferredUpdatesIntervalMs;
+    }
+
+    if (!isCurrent()) return superseded;
+    await Location.startLocationUpdatesAsync(FIELDOPS_BACKGROUND_LOCATION_TASK, options);
+    if (!isCurrent()) return superseded;
+    await writeBackgroundState({
+      deviceId: params.deviceId,
+      trackingEnabled: true,
+      maxAccuracyM: params.policy.maxAccuracyM,
+    });
+
+    return { running: true, reason: wasRunning ? "updated" : "started" };
   });
-
-  return { running: true, reason: wasRunning ? "updated" : "started" };
 }

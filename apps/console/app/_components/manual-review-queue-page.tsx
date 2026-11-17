@@ -9,7 +9,7 @@ type ManualReviewQueuePageProps = Parameters<
 >[0];
 const ManualReviewQueuePageInner = UiManualReviewQueuePage as unknown as (
   props: ManualReviewQueuePageProps
-) => JSX.Element;
+) => React.JSX.Element;
 
 export function ManualReviewQueuePage(props: ManualReviewQueuePageProps) {
   return (

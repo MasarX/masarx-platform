@@ -3,7 +3,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(13);
+SELECT plan(14);
 
 SELECT public.create_next_partitions();
 
@@ -397,65 +397,73 @@ SELECT is(
 
 SELECT is(
   (SELECT result->>'action' FROM tmp_uc178_update_intake),
-  'proxy',
-  'workflow_intake_api_gateway_v1 dispatches canonical update route in proxy mode'
+  'accepted_async',
+  'workflow_intake_api_gateway_v1 dispatches canonical update route asynchronously'
+);
+
+SELECT ok(
+  NULLIF((SELECT result->>'workflow_run_id' FROM tmp_uc178_update_intake), '') IS NOT NULL,
+  'canonical update intake starts a workflow run'
+);
+
+SELECT ok(
+  NOT ((SELECT result FROM tmp_uc178_update_intake) ? 'outbound_call_id'),
+  'canonical update intake does not proxy directly'
 );
 
 SELECT is(
   (
-    SELECT method
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
+    SELECT wt.name
+    FROM public.workflow_runs wr
+    JOIN public.workflow_templates wt ON wt.id = wr.workflow_template_id
+    WHERE wr.id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
   ),
-  'PUT',
-  'canonical update intake enqueues PUT outbound call'
+  'api_gateway_shipment_mutation_default_v1',
+  'canonical update intake uses the typed API gateway mutation workflow template'
 );
 
 SELECT is(
   (
-    SELECT url
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
+    SELECT context#>>'{api_gateway,route_id}'
+    FROM public.workflow_runs
+    WHERE id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
   ),
-  'https://apisv2.logestechs.com/api/guests/362/packages/SHIP055',
-  'canonical update intake renders provider update URL'
+  (SELECT result->>'route_id' FROM tmp_uc178_update_resolve),
+  'canonical update workflow preserves the resolved route'
 );
 
 SELECT is(
   (
-    SELECT headers->>'company-id'
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
-  ),
-  '362',
-  'canonical update intake applies provider company-id header override'
-);
-
-SELECT is(
-  (
-    SELECT context->'api_gateway_path_params'->>'shipmentId'
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
+    SELECT context#>>'{api_gateway,path_params,shipmentId}'
+    FROM public.workflow_runs
+    WHERE id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
   ),
   'SHIP055',
-  'canonical update intake preserves shipmentId in outbound context'
+  'canonical update workflow preserves shipmentId context'
 );
 
-SELECT is(
-  (
-    SELECT context->>'provider_account_category'
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
-  ),
-  'logestechs_v2_account',
-  'canonical update intake resolves provider account category'
+SELECT public.progress_workflow_run(
+  (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+);
+
+CREATE TEMP TABLE tmp_uc178_update_outbound AS
+SELECT request.outbound_call_id
+  FROM public.api_gateway_requests request
+ WHERE request.id = (
+   SELECT (result->>'api_gateway_request_id')::uuid
+     FROM tmp_uc178_update_intake
+ );
+
+SELECT ok(
+  (SELECT outbound_call_id IS NOT NULL FROM tmp_uc178_update_outbound),
+  'canonical update workflow materializes the provider outbound call'
 );
 
 SELECT ok(
   NOT EXISTS (
     SELECT 1
       FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
+     WHERE oc.id = (SELECT outbound_call_id FROM tmp_uc178_update_outbound)
        AND (oc.body ? 'email' OR oc.body ? 'password')
   ),
   'canonical update intake strips auth body fields from persisted outbound payload'

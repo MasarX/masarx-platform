@@ -7,6 +7,7 @@ import { PageHeader } from "./page-header";
 import { Section } from "./section";
 import { MarketplaceActionForm, MarketplaceActionFormState } from "./marketplace-action-form";
 import { normalizeArray, normalizeObject, stringValue } from "./marketplace-page-utils";
+import { formatReferenceValue } from "./resource-utils";
 import { formatUiError } from "./utils";
 
 type MarketplaceContractRoomPageProps = {
@@ -67,7 +68,6 @@ export async function MarketplaceContractRoomPage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Dispute creation failed.") };
     }
-    revalidatePath(`${appBasePath}/marketplace/contracts/${contractId}`);
     return { status: "success", message: "Dispute opened." };
   }
 
@@ -92,7 +92,6 @@ export async function MarketplaceContractRoomPage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Settlement finalization failed.") };
     }
-    revalidatePath(`${appBasePath}/marketplace/contracts/${contractId}`);
     revalidatePath(contractsHref);
     return { status: "success", message: "Settlement finalized." };
   }
@@ -118,7 +117,6 @@ export async function MarketplaceContractRoomPage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Settlement reversal failed.") };
     }
-    revalidatePath(`${appBasePath}/marketplace/contracts/${contractId}`);
     return { status: "success", message: "Settlement reversal recorded." };
   }
 
@@ -256,7 +254,12 @@ export async function MarketplaceContractRoomPage({
                     <Badge>{stringValue(settlement.status) ?? "posted"}</Badge>
                     {stringValue(settlement.kind) ? <Badge>{stringValue(settlement.kind)}</Badge> : null}
                   </div>
-                  <div className="mt-3">{stringValue(settlement.organization_id) ?? ""}</div>
+                  <div className="mt-3">
+                    {stringValue(settlement.organization_name) ??
+                      (stringValue(settlement.organization_id)
+                        ? formatReferenceValue(stringValue(settlement.organization_id)!)
+                        : "")}
+                  </div>
                 </div>
               ))
             )}

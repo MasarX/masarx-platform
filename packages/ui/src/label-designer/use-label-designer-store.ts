@@ -18,6 +18,7 @@ export type LabelDesignerState = {
   fieldCatalogJson: string;
   mediaCatalogJson: string;
 
+  labelTypeOptions: { value: string; label: string }[];
   drafts: DraftRow[];
   selectedDraftId: string;
   draftName: string;
@@ -56,6 +57,7 @@ export const initialState: LabelDesignerState = {
   fieldCatalogJson: "{}",
   mediaCatalogJson: "{}",
 
+  labelTypeOptions: [],
   drafts: [],
   selectedDraftId: "",
   draftName: "",
@@ -78,6 +80,7 @@ export const initialState: LabelDesignerState = {
 };
 
 export type LabelDesignerAction =
+  | { type: "CLEAR_LABEL_TYPE_OPTIONS" }
   | { type: "SET_BOOT_LOADING"; payload: boolean }
   | { type: "SET_SCOPE_LOADING"; payload: boolean }
   | { type: "SET_PAGE_ERROR"; payload: string | null }
@@ -96,6 +99,7 @@ export type LabelDesignerAction =
       effectivePrintProfileJson: string;
       fieldCatalogJson: string;
       mediaCatalogJson: string;
+      labelTypeOptions?: { value: string; label: string }[];
       drafts: DraftRow[];
       selectedDraftId: string;
       draftName: string;
@@ -128,16 +132,19 @@ export function labelDesignerReducer(
   action: LabelDesignerAction,
 ): LabelDesignerState {
   switch (action.type) {
+    case "CLEAR_LABEL_TYPE_OPTIONS":
+      return { ...state, labelTypeOptions: [] };
     case "SET_BOOT_LOADING":
       return { ...state, bootLoading: action.payload };
     case "SET_SCOPE_LOADING":
-      return { ...state, scopeLoading: action.payload };
+      return { ...state, scopeLoading: action.payload, labelTypeOptions: action.payload ? [] : state.labelTypeOptions };
     case "SET_PAGE_ERROR":
       return { ...state, pageError: action.payload };
     case "SET_BOOTSTRAP":
       return {
         ...state,
         bootLoading: false,
+        labelTypeOptions: [],
         organizationId: action.payload.organizationId,
         capabilities: action.payload.capabilities,
         scopeOptions: action.payload.scopeOptions,
@@ -146,7 +153,7 @@ export function labelDesignerReducer(
         selectedShipmentId: action.payload.selectedShipmentId,
       };
     case "SET_SELECTED_SCOPE_KEY":
-      return { ...state, selectedScopeKey: action.payload };
+      return { ...state, selectedScopeKey: action.payload, labelTypeOptions: [] };
     case "SET_SCOPE_DATA":
       return {
         ...state,
@@ -156,6 +163,7 @@ export function labelDesignerReducer(
         effectivePrintProfileJson: action.payload.effectivePrintProfileJson,
         fieldCatalogJson: action.payload.fieldCatalogJson,
         mediaCatalogJson: action.payload.mediaCatalogJson,
+        labelTypeOptions: action.payload.labelTypeOptions ?? [],
         drafts: action.payload.drafts,
         selectedDraftId: action.payload.selectedDraftId,
         draftName: action.payload.draftName,

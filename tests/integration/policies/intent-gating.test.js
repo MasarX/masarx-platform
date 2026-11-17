@@ -3,6 +3,7 @@ const { loadEnv } = require('../../../scripts/utils/load-env');
 
 loadEnv();
 
+const { getIntegrationFixtureProfile } = require('../helpers/integration-fixtures');
 const { upsertWebhookPolicy } = require('../../utils/policies');
 const {
   buildPayload,
@@ -16,7 +17,7 @@ const pool = new Pool({
 
 jest.setTimeout(60000);
 
-const CLIENT_A_TOKEN = 'client-a-ack-token';
+const CLIENT_A_TOKEN = getIntegrationFixtureProfile().webhook.clientAckA.token;
 
 const cloneJson = (value) => JSON.parse(JSON.stringify(value ?? {}));
 
@@ -29,7 +30,7 @@ describe('Intent gating policies', () => {
     const payload = buildPayload();
     const response = await callWorkflowIntake(pool, CLIENT_A_TOKEN, payload);
     expect(response).toBeTruthy();
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(response.body?.resource_id).toEqual(expect.any(String));
     expect(response.body?.tracking_number).toEqual(expect.any(String));
   });

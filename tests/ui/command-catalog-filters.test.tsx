@@ -1,5 +1,6 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { renderToStaticMarkup } from "react-dom/server";
 import { renderWithIntl } from "./test-utils";
 import { CommandCatalogFilters } from "../../packages/ui/src/command-catalog-filters";
 
@@ -30,6 +31,26 @@ beforeEach(() => {
 afterEach(() => {
   window.history.replaceState = originalReplaceState;
   jest.useRealTimers();
+});
+
+test("command catalog controls are disabled before hydration", () => {
+  const markup = renderToStaticMarkup(
+    <CommandCatalogFilters
+      query=""
+      category=""
+      capability=""
+      access=""
+      categories={categories}
+      capabilities={capabilities}
+    />
+  );
+  const document = new DOMParser().parseFromString(markup, "text/html");
+  const controls = Array.from(document.querySelectorAll("input, select"));
+
+  expect(controls).toHaveLength(4);
+  expect(controls.every((control) => control.hasAttribute("disabled"))).toBe(
+    true
+  );
 });
 
 test("command catalog search updates query", async () => {

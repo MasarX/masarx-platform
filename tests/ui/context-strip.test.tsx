@@ -1,4 +1,6 @@
+import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { ContextStrip } from "../../packages/ui/src/context-strip";
 import { setUiReporter } from "../../packages/ui/src/reporting";
 
@@ -70,6 +72,20 @@ beforeEach(() => {
 
 afterEach(() => {
   setUiReporter(null);
+});
+
+test("server render does not inject request ids when they are not provided", () => {
+  const html = renderToString(
+    <ContextStrip
+      userLabel="user@example.com"
+      signOutHref="/auth/sign-out"
+      scopeRequestHref="/access-policy/request"
+    />
+  );
+
+  expect(html).toContain('href="/auth/sign-out"');
+  expect(html).toContain('href="/access-policy/request"');
+  expect(html).not.toContain("request_id=");
 });
 
 test("scope switcher navigates to scope href", () => {

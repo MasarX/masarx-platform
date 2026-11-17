@@ -10,7 +10,7 @@ type AccessPolicyRequestPageProps = Parameters<
 const AccessPolicyRequestPageInner =
   UiAccessPolicyRequestPage as unknown as (
     props: AccessPolicyRequestPageProps
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function AccessPolicyRequestPage(props: AccessPolicyRequestPageProps) {
   return (

@@ -16,6 +16,8 @@ const REQUIRED_SELFTEST_CONTRACT_STEP_PREFIXES = Object.freeze([
   'OK - Header contract',
   'OK - Drawer contract',
 ]);
+const CAPTURE_MODE = 'device_browser_prototype';
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 const DEFAULT_SOURCE_DIR = path.join('docs', 'product', 'examples', 'mobile-field-ops-ui');
 // objectives:allow LOCALHOST Justification: native screenshot capture is a local-only harness; env/CLI can override the bind host while the safe default stays loopback.
@@ -110,7 +112,7 @@ function createStaticServer({ rootDir, host, port }) {
 
 function runCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {
-    encoding: options.encoding || 'utf8',
+    encoding: Object.prototype.hasOwnProperty.call(options, 'encoding') ? options.encoding : 'utf8',
     stdio: options.stdio || 'pipe',
     maxBuffer: options.maxBuffer || 10 * 1024 * 1024,
     cwd: options.cwd,
@@ -134,6 +136,12 @@ function runCommand(command, args, options = {}) {
 
 function normalizeAdbPngBuffer(buffer) {
   if (!Buffer.isBuffer(buffer)) return Buffer.from(buffer || '');
+  if (
+    buffer.length >= PNG_SIGNATURE.length &&
+    buffer.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)
+  ) {
+    return buffer;
+  }
   const marker = Buffer.from('\r\n', 'binary');
   if (!buffer.includes(marker)) return buffer;
   return Buffer.from(buffer.toString('binary').replace(/\r\n/g, '\n'), 'binary');
@@ -141,8 +149,7 @@ function normalizeAdbPngBuffer(buffer) {
 
 function readPngDimensions(filePath) {
   const bytes = fs.readFileSync(filePath);
-  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  if (bytes.length < 24 || !bytes.subarray(0, 8).equals(signature)) {
+  if (bytes.length < 24 || !bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
     return { width: 0, height: 0 };
   }
   return {
@@ -238,9 +245,8 @@ function captureIosScreenshot({ udid, filePath }) {
 
 function buildSelftest(platform, scenarioCount, errors = [], url = '') {
   const steps = [
-    `${REQUIRED_SELFTEST_CONTRACT_STEP_PREFIXES[0]} (native-runtime evidence)`,
-    `${REQUIRED_SELFTEST_CONTRACT_STEP_PREFIXES[1]} (native-runtime evidence)`,
-    `OK - Captured ${scenarioCount} native-runtime screenshots`,
+    `Captured ${scenarioCount} device-browser prototype screenshots`,
+    'Native FieldOps application and Header/Drawer contracts were not verified',
   ];
   const status = errors.length === 0 ? 'pass' : 'fail';
   return {
@@ -348,6 +354,9 @@ async function capturePlatformScenarios({
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (Object.prototype.hasOwnProperty.call(args, 'require-native-app')) {
+    throw new Error('[native-runtime-capture] Actual FieldOps native-app capture is unavailable: this producer captures a browser prototype only.');
+  }
   const requestedPlatforms =
     args.platforms ||
     process.env.FIELDOPS_NATIVE_SCREENSHOT_PLATFORMS ||
@@ -445,7 +454,7 @@ async function main() {
 
     const manifest = {
       captured_at: new Date().toISOString(),
-      capture_mode: 'native_runtime',
+      capture_mode: CAPTURE_MODE,
       source_dir: sourceDir,
       output_dir: outputDir,
       server_url: baseUrl,
@@ -480,6 +489,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  CAPTURE_MODE,
   DEFAULT_HOST,
   DEFAULT_LAUNCH_WAIT_MS,
   DEFAULT_PORT,

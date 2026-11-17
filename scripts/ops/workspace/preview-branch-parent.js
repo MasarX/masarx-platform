@@ -40,11 +40,13 @@ function isRemovedBranchParentError(err) {
 }
 
 function shouldTryAlternateBranchParent(err) {
+  if (String(err?.code || '') === 'branch_create_outcome_ambiguous') return false;
   const status = Number(err?.status || 0);
   return status === 403 || status === 404 || isRemovedBranchParentError(err);
 }
 
 function shouldFallbackToProjectMode(err) {
+  if (String(err?.code || '') === 'branch_create_outcome_ambiguous') return false;
   const status = Number(err?.status || 0);
   const details = String(err?.body?.message || err?.body?.error || '').toLowerCase();
   const message = `${String(err?.message || '').toLowerCase()} ${details}`;

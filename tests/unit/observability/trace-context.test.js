@@ -35,14 +35,21 @@ describe('scripts/utils/trace-context', () => {
   });
 
   test('resolveExecutionContext uses uuid-derived trace id by default', () => {
-    const ctx = resolveExecutionContext({
-      operation: 'unit.test',
-      correlationId: '99990000-0000-0000-0000-000000000049',
-    });
-    expect(ctx.correlationId).toBe('99990000-0000-0000-0000-000000000049');
-    expect(ctx.traceId).toBe('99990000000000000000000000000049');
-    expect(ctx.spanId).toMatch(/^[0-9a-f]{16}$/);
-    expect(ctx.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
+    const previous = process.env.TRACEPARENT;
+    delete process.env.TRACEPARENT;
+    try {
+      const ctx = resolveExecutionContext({
+        operation: 'unit.test',
+        correlationId: '99990000-0000-0000-0000-000000000049',
+      });
+      expect(ctx.correlationId).toBe('99990000-0000-0000-0000-000000000049');
+      expect(ctx.traceId).toBe('99990000000000000000000000000049');
+      expect(ctx.spanId).toMatch(/^[0-9a-f]{16}$/);
+      expect(ctx.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
+    } finally {
+      if (previous === undefined) delete process.env.TRACEPARENT;
+      else process.env.TRACEPARENT = previous;
+    }
   });
 
   test('buildTraceHeaders includes x-correlation-id and traceparent', () => {

@@ -71,7 +71,6 @@ export async function MarketplaceRequestWorkspacePage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Release failed.") };
     }
-    revalidatePath(`${appBasePath}/marketplace/requests/${requestId}`);
     revalidatePath(requestsHref);
     return { status: "success", message: `Release updated to ${releaseState}.` };
   }
@@ -104,7 +103,6 @@ export async function MarketplaceRequestWorkspacePage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Counter offer failed.") };
     }
-    revalidatePath(`${appBasePath}/marketplace/requests/${requestId}`);
     return { status: "success", message: "Counter offer submitted." };
   }
 
@@ -133,7 +131,6 @@ export async function MarketplaceRequestWorkspacePage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Award failed.") };
     }
-    revalidatePath(`${appBasePath}/marketplace/requests/${requestId}`);
     revalidatePath(`${appBasePath}/marketplace/contracts`);
     return { status: "success", message: "Offer awarded." };
   }

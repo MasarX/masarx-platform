@@ -1,5 +1,8 @@
 {
-  "ignore": [],
+  "ignore": [
+    "^apps/(?:console|portal|fieldops)/public/maplibre-gl-(?:worker|shared)\\.mjs$"
+  ],
+  "playwrightConfigs": ["playwright.config.ts", "playwright.tenant-invite.config.ts"],
   "allow": {
     "from": [
       "^packages/ui/src/workflow-bindings-page\\.tsx$",
@@ -7,7 +10,9 @@
     ],
     "supabaseUrl": [],
     "serviceRole": [
-      "^apps/shared/resource-import-route\\.ts$"
+      "^apps/shared/resource-import-route\\.ts$",
+      "^apps/console/app/api/automation-marketplace/oauth/_lib/service-client\\.ts$",
+      "^apps/shared/tenant-user-invite-provider\\.ts$"
     ]
   },
   "allowFromReceivers": [

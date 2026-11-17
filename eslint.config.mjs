@@ -6,7 +6,15 @@ export default defineConfig([
   ...nextVitals,
   ...nextTypescript,
   {
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
     files: ['apps/**/*.{js,jsx,ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'error',
+    },
     settings: {
       next: {
         rootDir: ['apps/console/', 'apps/portal/'],
@@ -21,6 +29,7 @@ export default defineConfig([
     '**/build/**',
     '**/out/**',
     '**/next-env.d.ts',
+    'supabase/functions/resource-import-studio/_vendor/exceljs*',
     'apps/*/next.config.js',
     'apps/*/tailwind.config.js',
     'apps/*/postcss.config.js',

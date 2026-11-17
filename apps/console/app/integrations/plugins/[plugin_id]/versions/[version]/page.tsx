@@ -1,5 +1,7 @@
+import { createUiServerClient } from "@masarx/api/server";
 import { ResourcePage } from "../../../../../_components/resource-page";
 import { withConsoleConfig } from "../../../../../app-context";
+import { MarketplacePublishLink } from "../../../../../automation/marketplace/_components/marketplace-page";
 
 type PageProps = {
   params: { plugin_id: string; version: string };
@@ -9,16 +11,55 @@ type PageProps = {
 const isUuid = (value: string): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
-export default withConsoleConfig<PageProps>(({ appKey, appBasePath }, { params, searchParams }) => {
+const MISSING_DETAIL_ID = "00000000-0000-4000-8000-000000000000";
+
+const isVersionNumber = (value: string): boolean => /^\d+$/.test(value.trim());
+
+const firstSearchParam = (value: string | string[] | undefined): string | undefined => {
+  if (Array.isArray(value)) return value[0];
+  return value;
+};
+
+async function resolveVersionDetailId(pluginId: string, versionToken: string): Promise<string> {
+  if (isUuid(versionToken)) {
+    return versionToken;
+  }
+
+  if (!isVersionNumber(versionToken)) {
+    return MISSING_DETAIL_ID;
+  }
+
+  try {
+    const ui = createUiServerClient();
+    const list = await ui.listResource(
+      "integration_plugin_versions",
+      {
+        plugin_id: pluginId,
+        version_no: Number(versionToken),
+      },
+      2,
+      0,
+      null,
+    );
+    const items = Array.isArray(list?.items) ? list.items : [];
+    const match = items.find((entry) => entry && typeof entry.id === "string");
+    return typeof match?.id === "string" ? match.id : MISSING_DETAIL_ID;
+  } catch {
+    return MISSING_DETAIL_ID;
+  }
+}
+
+export default withConsoleConfig<PageProps>(async ({ appKey, appBasePath }, { params, searchParams }) => {
   const versionToken = params.version;
+  const detailId = await resolveVersionDetailId(params.plugin_id, versionToken);
   const mergedSearchParams: Record<string, string | string[] | undefined> = {
     ...searchParams,
     plugin_id: params.plugin_id,
+    id: detailId,
+    detail_open: firstSearchParam(searchParams.detail_open) ?? "1",
   };
 
-  if (isUuid(versionToken)) {
-    mergedSearchParams.id = versionToken;
-  } else {
+  if (!isUuid(versionToken) && isVersionNumber(versionToken)) {
     mergedSearchParams.version_no = versionToken;
   }
 
@@ -48,6 +89,7 @@ export default withConsoleConfig<PageProps>(({ appKey, appBasePath }, { params, 
             >
               Open Approval Events
             </a>
+            <MarketplacePublishLink appBasePath={appBasePath} assetKind="integration_plugin" sourceId={detailId} />
           </div>
         );
       }}

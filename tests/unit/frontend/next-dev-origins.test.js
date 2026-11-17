@@ -1,4 +1,5 @@
 const {
+  mergeAllowedDevOrigins,
   parseOriginList,
   resolveAllowedDevOrigins,
 } = require('../../../apps/shared/next-dev-origins');
@@ -9,6 +10,13 @@ describe('apps/shared/next-dev-origins', () => {
       '127.0.0.1',
       'local.masarx.test',
     ]);
+  });
+
+  test('merges selected local Playwright hosts with existing allowed origins', () => {
+    expect(mergeAllowedDevOrigins(
+      'console.local.test',
+      ['http://127.0.0.1:3001', 'http://localhost:3002'],
+    )).toEqual(['console.local.test', '127.0.0.1', 'localhost']);
   });
 
   test('resolves the non-public env override before the public local template value', () => {

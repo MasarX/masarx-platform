@@ -1,0 +1,9 @@
+name: Rejected deployment without concurrency
+on: merge_group
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - run: echo deploy

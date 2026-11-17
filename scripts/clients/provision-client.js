@@ -245,6 +245,7 @@ async function main() {
     const providerAuthRes = await client.query(
       `SELECT credentials FROM provider_auth_configs
        WHERE provider_id = $1
+         AND NOT marketplace_explicit_only
        ORDER BY created_at DESC
        LIMIT 1`,
       [providerId]

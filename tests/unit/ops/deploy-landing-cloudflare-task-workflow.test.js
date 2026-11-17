@@ -22,8 +22,9 @@ describe('deploy-landing-cloudflare-task workflow guards', () => {
     expect(body).toContain('LANDING_CONTACT_ENDPOINT');
     expect(body).toContain('LANDING_TENANT_SIGNUP_ENDPOINT: ${{ vars.LANDING_TENANT_SIGNUP_ENDPOINT }}');
     expect(body).toContain('LANDING_LEGACY_DOMAINS: ${{ vars.LANDING_LEGACY_DOMAINS }}');
-    expect(body).toContain('RUNNER_LABELS_CI_PLAYWRIGHT_JSON');
-    expect(body).toContain('RUNNER_LABELS_CI_PRIVILEGED_PROD_JSON');
+    expect(body).toContain('RUNNER_RUNS_ON_BROWSER_LOCAL_JSON');
+    expect(body).not.toContain('RUNNER_RUNS_ON_PRIV_NONPROD_LOCAL_JSON');
+    expect(body).toContain('RUNNER_RUNS_ON_PRIV_PROD_LOCAL_JSON');
     expect(body).not.toContain("contains(inputs.environment, '-prod') && 'ci_privileged_prod' || 'ci_deploy_shared'");
     expect(body).not.toContain('LANDING_DEMO_ENDPOINT');
     expect(body).toContain('Guard - landing pages deploy enabled');
@@ -72,5 +73,21 @@ describe('deploy-landing-cloudflare-task workflow guards', () => {
     expect(body).toContain('continue-on-error: true');
     expect(body.indexOf(buildCmd)).toBe(body.lastIndexOf(buildCmd));
     expect(body).not.toContain('Rebuild landing (deploy artifact)');
+  });
+
+  test('guards real endpoints before provider actions and keeps Example Person endpoints separate', () => {
+    const body = fs.readFileSync(workflowFile, 'utf8');
+    const guard = body.indexOf('    - name: Guard - landing intake endpoint separation');
+    expect(guard).toBeGreaterThan(body.indexOf('    - name: Setup exact Node + dependencies'));
+    expect(guard).toBeLessThan(body.indexOf('    - name: Ensure Turnstile widget'));
+    expect(body.slice(guard, body.indexOf('    - name: Ensure Turnstile widget')))
+      .toContain('node scripts/ops/ci/release-verify-preview.js --mode assert-landing-endpoint-separation');
+    expect(body).toContain('LANDING_TENANT_SIGNUP_ENDPOINT: "/__tenant-signup"');
+    expect(body).not.toContain('LANDING_TENANT_SIGNUP_ENDPOINT: "/__landing-contact"');
+    expect(body).toContain('LANDING_ENABLE_INTAKE_MOCKS=1');
+    expect(body).toContain('LANDING_SITE_URL=http://landing-ci.localhost:3333');
+    const proof = body.slice(body.indexOf('    - name: Run landing E2E tests'), body.indexOf('    - name: Stop landing E2E server'));
+    expect(proof).toContain('LANDING_SITE_URL: "http://landing-ci.localhost:3333"');
+    expect(proof.indexOf('--mode assert-landing-endpoint-separation')).toBeLessThan(proof.indexOf('npx playwright test'));
   });
 });

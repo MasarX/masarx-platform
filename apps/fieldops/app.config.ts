@@ -66,6 +66,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const buildProfile = readEnvString(process.env.FIELDOPS_BUILD_PROFILE);
   const isEasBuild = readEnvString(process.env.EAS_BUILD) === "true";
   const requireNativeIds = isEasBuild || Boolean(buildProfile);
+  const webBasePath = (readEnvString(process.env.NEXT_PUBLIC_APP_BASE_PATH) ?? "").replace(/\/+$/g, "");
+  if (webBasePath && !/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(webBasePath)) {
+    throw new Error("[fieldops-config] NEXT_PUBLIC_APP_BASE_PATH must be an absolute path such as /fieldops.");
+  }
 
   const appIdSuffix = readEnvString(process.env.NEXT_PUBLIC_FIELDOPS_APP_ID_SUFFIX) ?? "";
   const iosBundleBase = readEnvString(process.env.NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS);
@@ -140,6 +144,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   if (!hasSentryPlugin) {
     basePlugins.push("@sentry/react-native/expo");
   }
+  if (!basePlugins.some((entry) => (typeof entry === "string" ? entry : entry[0]) === "@maplibre/maplibre-react-native")) {
+    basePlugins.push("@maplibre/maplibre-react-native");
+  }
   let hasLocationPlugin = false;
   const nextPlugins: PluginEntry[] = basePlugins.map((entry) => {
     if (typeof entry === "string" && entry === "expo-location") {
@@ -172,11 +179,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     slug: fieldopsAppSlug,
     version: readPackageVersion(),
     runtimeVersion: { policy: "appVersion" },
+    experiments: { ...config.experiments, baseUrl: webBasePath },
     ...(updates ? { updates } : {}),
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
-    newArchEnabled: true,
     splash: {
       image: "./assets/splash-icon.png",
       resizeMode: "contain",
@@ -203,7 +210,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#ffffff",
       },
-      edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
     },
     web: {
@@ -220,6 +226,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
       NEXT_PUBLIC_SENTRY_ENVIRONMENT: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
       NEXT_PUBLIC_AUTH_METHODS: process.env.NEXT_PUBLIC_AUTH_METHODS,
+      NEXT_PUBLIC_DRIVER_SIGNUP_URL: process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL ?? process.env.NEXT_PUBLIC_DRIVER_SIGNUP_URL,
       NEXT_PUBLIC_LOCALE: process.env.NEXT_PUBLIC_LOCALE,
     },
   };

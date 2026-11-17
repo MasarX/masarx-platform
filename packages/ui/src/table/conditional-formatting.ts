@@ -86,6 +86,6 @@ export function conditionalStyleToCss(
   const css: React.CSSProperties = {};
   if (style.bgColor) css.backgroundColor = style.bgColor;
   if (style.textColor) css.color = style.textColor;
-  if (style.bold) css.fontWeight = "bold";
+  if (typeof style.bold === "boolean") css.fontWeight = style.bold ? "bold" : "normal";
   return Object.keys(css).length > 0 ? css : undefined;
 }

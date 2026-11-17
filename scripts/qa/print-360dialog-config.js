@@ -24,6 +24,7 @@ async function main() {
       `SELECT public.get_provider_auth_credential(pac.id, 'api_key') AS api_key
        FROM provider_auth_configs pac
        WHERE pac.provider_id = $1 AND pac.auth_type = 'api_key'
+         AND NOT pac.marketplace_explicit_only
        ORDER BY created_at DESC LIMIT 1`,
       [providerId]
     );

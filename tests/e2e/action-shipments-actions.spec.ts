@@ -230,14 +230,10 @@ for (const config of appConfigs) {
         const rowCheckboxes = page.locator("tbody input[type='checkbox']");
         let selectionCount = 1;
         if ((await rowCheckboxes.count()) > 1) {
-          try {
-            await rowCheckboxes.nth(1).check({ force: true });
-            await expect(rowCheckboxes.nth(1)).toBeChecked();
-            await expect(selectionBar).toContainText("Selected 2");
-            selectionCount = 2;
-          } catch {
-            selectionCount = 1;
-          }
+          await rowCheckboxes.nth(1).check();
+          await expect(rowCheckboxes.nth(1)).toBeChecked();
+          await expect(selectionBar).toContainText("Selected 2");
+          selectionCount = 2;
         }
         const bulkActionsTestIdPrefix = resolveBulkActionsTestIdPrefix(
           config.tableTestIdPrefix

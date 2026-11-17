@@ -25,6 +25,24 @@ function baseEnv(overrides = {}) {
   };
 }
 
+function guardedEgressProofEnv(overrides = {}) {
+  return {
+    API_CALLER_GUARDED_EGRESS_PROOF_REQUIRED: '1',
+    API_CALLER_GUARDED_EGRESS_PROOF_LANE: 'db-dev',
+    API_CALLER_GUARDED_EGRESS_PROOF_SHA: '0123456789abcdef0123456789abcdef01234567',
+    API_CALLER_GUARDED_EGRESS_PROXY_URL: 'https://proxy.example.test',
+    API_CALLER_GUARDED_EGRESS_PROXY_USERNAME: 'api-caller',
+    API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD: 'proxy-password',
+    API_CALLER_GUARDED_EGRESS_PROXY_HEALTH_URL: 'https://proxy.example.test/healthz',
+    API_CALLER_GUARDED_EGRESS_PUBLIC_PROBE_URL: 'https://probe.example.test/egress-ip',
+    API_CALLER_GUARDED_EGRESS_EXPECTED_PUBLIC_IP: '8.8.8.8',
+    API_CALLER_GUARDED_EGRESS_POLICY_DENIED_PROBE_URL: 'https://192.0.2.10',
+    API_CALLER_GUARDED_EGRESS_REBINDING_PROBE_URL: 'https://rebinding-probe.example.test',
+    API_CALLER_GUARDED_EGRESS_POLICY_DENIED_CODE: 'NON_PUBLIC_DESTINATION_DENIED',
+    ...overrides,
+  };
+}
+
 describe('assert-cloud-env', () => {
   test('non-preview requires EDGE_REQUIRE_DB_JWT=1', () => {
     expect(() => validateCloudEnv({ env: baseEnv() })).toThrow(/EDGE_REQUIRE_DB_JWT must be set to 1/i);
@@ -42,6 +60,33 @@ describe('assert-cloud-env', () => {
         }),
       }),
     ).not.toThrow();
+  });
+
+  test('guarded egress proof requirement fails closed on missing lane configuration', () => {
+    expect(() => validateCloudEnv({
+      env: baseEnv({
+        EDGE_REQUIRE_DB_JWT: '1',
+        API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
+        WEBHOOK_DB_JWT: makeJwt({ role: 'edge_webhook_role' }),
+        API_CALLER_DB_JWT: makeJwt({ role: 'edge_api_caller_role' }),
+        LABEL_RENDERER_DB_JWT: makeJwt({ role: 'edge_label_renderer_role' }),
+        API_CALLER_GUARDED_EGRESS_PROOF_REQUIRED: '1',
+        API_CALLER_GUARDED_EGRESS_PROOF_LANE: 'db-dev',
+      }),
+    })).toThrow(/API_CALLER_GUARDED_EGRESS_(?:PROOF_SHA|PROXY_URL)/);
+  });
+
+  test('guarded egress proof requirement accepts the complete exact lane configuration', () => {
+    expect(() => validateCloudEnv({
+      env: baseEnv({
+        EDGE_REQUIRE_DB_JWT: '1',
+        API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
+        WEBHOOK_DB_JWT: makeJwt({ role: 'edge_webhook_role' }),
+        API_CALLER_DB_JWT: makeJwt({ role: 'edge_api_caller_role' }),
+        LABEL_RENDERER_DB_JWT: makeJwt({ role: 'edge_label_renderer_role' }),
+        ...guardedEgressProofEnv(),
+      }),
+    })).not.toThrow();
   });
 
   test('non-preview rejects service_role DB JWTs for gateway/webhook/api-caller', () => {

@@ -1,6 +1,5 @@
 (() => {
   const CLIENT_FETCH_TIMEOUT_MS = 10_000;
-  const CONTACT_SUBMIT_TIMEOUT_MS = 15_000;
   const DRIVER_STATUS_TOKEN_STORAGE_KEY = 'masarx_driver_status_token_v1';
 
   const cfg = window.MASARX_LANDING;
@@ -11,7 +10,25 @@
   const i18n = cfg.i18n;
   const runtime = window.MASARX_RUNTIME || {};
 
+  function resolveRuntimeDurationMs(value, policy) {
+    const fallback = Number(policy?.default);
+    const min = Number(policy?.min);
+    const max = Number(policy?.max);
+    if (![fallback, min, max].every(Number.isFinite) || min <= 0 || min > fallback || fallback > max) {
+      throw new Error('invalid_landing_runtime_duration_policy');
+    }
+    const requested = value == null || String(value).trim() === '' ? fallback : Number(value);
+    const normalized = Number.isFinite(requested) ? Math.round(requested) : fallback;
+    return Math.max(min, Math.min(max, normalized));
+  }
+
+  const PUBLIC_REQUEST_TIMEOUT_MS = resolveRuntimeDurationMs(
+    runtime.publicRequestTimeoutMs,
+    cfg.runtimePolicy?.publicRequestTimeoutMs
+  );
+
   function navigateTo(href) {
+    invalidateTrackingRequests();
     if (typeof runtime.navigate === 'function') {
       runtime.navigate(href);
       return;
@@ -171,6 +188,8 @@
   const clientsRow = document.querySelector('[data-clients-row]');
   const contactForm = document.querySelector('[data-contact-form]');
   const contactStatus = document.querySelector('[data-contact-status]');
+  const tenantSignupStatus = document.querySelector('[data-tenant-signup-status]');
+  const tenantSignupBtn = contactForm?.querySelector('[data-tenant-signup-submit]');
   const turnstileHost = document.querySelector('[data-turnstile]');
   const contactSubmitBtn = contactForm ? contactForm.querySelector('button[type="submit"]') : null;
   const driverForm = document.querySelector('[data-driver-form]');
@@ -179,6 +198,7 @@
   const driverSubmitBtn = driverForm ? driverForm.querySelector('button[type="submit"]') : null;
   const driverStatusForm = document.querySelector('[data-driver-status-form]');
   const driverStatusLookup = document.querySelector('[data-driver-status-lookup]');
+  const driverReviewNote = document.querySelector('[data-driver-review-note]');
   const driverStatusTokenNote = document.querySelector('[data-driver-status-token-note]');
   const driverStatusSubmitBtn = driverStatusForm ? driverStatusForm.querySelector('button[type="submit"]') : null;
   const trackingPage = document.querySelector('[data-public-tracking-page]');
@@ -189,14 +209,18 @@
   const trackVerifyForm = document.querySelector('[data-track-verify-form]');
   const trackRescheduleForm = document.querySelector('[data-track-reschedule-form]');
   const trackLocationForm = document.querySelector('[data-track-location-form]');
+  const trackLookupSubmitBtn = trackLookupForm ? trackLookupForm.querySelector('button[type="submit"]') : null;
+  const trackVerifySubmitBtn = trackVerifyForm ? trackVerifyForm.querySelector('button[type="submit"]') : null;
   const trackLookupStatus = document.querySelector('[data-track-lookup-status]');
   const trackVerifyStatus = document.querySelector('[data-track-verify-status]');
   const trackRescheduleStatus = document.querySelector('[data-track-reschedule-status]');
   const trackLocationStatus = document.querySelector('[data-track-location-status]');
   const trackBackBtn = document.querySelector('[data-track-back]');
   const trackResetEls = [...document.querySelectorAll('[data-track-reset]')];
+  const trackRequestsLinks = [...document.querySelectorAll('[data-track-requests-link]')];
   const trackDateSelect = document.querySelector('[data-track-date-select]');
   const trackRescheduleSubmitBtn = trackRescheduleForm ? trackRescheduleForm.querySelector('button[type="submit"]') : null;
+  const trackLocationSubmitBtn = trackLocationForm ? trackLocationForm.querySelector('button[type="submit"]') : null;
   const trackTimeline = document.querySelector('[data-track-timeline]');
   const trackShipmentReference = document.querySelector('[data-track-shipment-reference]');
   const trackShipmentTracking = document.querySelector('[data-track-shipment-tracking]');
@@ -215,6 +239,7 @@
   const trackRequestBanner = document.querySelector('[data-track-request-banner]');
   const trackRequestBannerBadge = document.querySelector('[data-track-request-banner-badge]');
   const trackRequestBannerText = document.querySelector('[data-track-request-banner-text]');
+  const trackRequestBannerCase = document.querySelector('[data-track-request-banner-case]');
   const trackMapPicker = document.querySelector('[data-track-map-picker]');
   const trackMapDialogPicker = document.querySelector('[data-track-map-picker-expanded]');
   const trackMapValue = document.querySelector('[data-track-map-value]');
@@ -228,6 +253,7 @@
   const trackMapCloseEls = [...document.querySelectorAll('[data-track-map-close]')];
 
   const intakeForms = {
+    tenant: { form: contactForm, status: tenantSignupStatus, submitBtn: tenantSignupBtn },
     contact: {
       form: contactForm,
       status: contactStatus,
@@ -262,9 +288,30 @@
     },
     latestClients: [],
     clientsStateKey: '',
+    contactInFlight: false,
+    driverSignupInFlight: false,
+    driverStatusLookupInFlight: false,
+    driverReceiptReference: '',
+    driverStatusLookupGeneration: 0,
+    driverReviewNote: '',
+    trackingStage: 'lookup',
     trackingReference: '',
     trackingSessionToken: '',
     trackingPayload: null,
+    trackingLookupInFlight: false,
+    trackingVerifyInFlight: false,
+    trackingRequestInFlight: {
+      reschedule_date: false,
+      location_change: false,
+    },
+    trackingRequestSequence: 0,
+    trackingRequestSlots: {
+      session: null,
+      lookup: null,
+      verify: null,
+      reschedule_date: null,
+      location_change: null,
+    },
     mapPin: null,
     mapPinConfirmed: false,
     mapOverlayTrigger: null,
@@ -290,6 +337,128 @@
     return state.turnstile[formKey] || null;
   }
 
+  function releaseTrackingRequest(request) {
+    if (!request || request.released) return;
+    request.released = true;
+    if (typeof request.release === 'function') request.release();
+  }
+
+  function finalizeTrackingRequestTurnstile(request) {
+    if (!request || request.turnstileFinalized) return;
+    request.turnstileFinalized = true;
+    if (request.turnstileKey && request.turnstileToken) {
+      finalizeTurnstileSubmission(request.turnstileKey, request.turnstileToken);
+    }
+  }
+
+  function clearTrackingRequestLoadingStatus(request) {
+    const statusEl = request?.statusEl;
+    if (!statusEl || statusEl.dataset.trackingRequestOwner !== request.id) return;
+    delete statusEl.dataset.trackingRequestOwner;
+    setTrackingStatus(statusEl, '');
+  }
+
+  function claimTrackingRequestLoadingStatus(request) {
+    if (!isCurrentTrackingRequest(request) || !request.statusEl) return;
+    request.statusEl.dataset.trackingRequestOwner = request.id;
+    setTrackingStatus(request.statusEl, 'track_status_loading');
+  }
+
+  function setOwnedTrackingRequestStatus(request, key, tone) {
+    if (!isCurrentTrackingRequest(request) || !request.statusEl) return;
+    if (request.statusEl.dataset.trackingRequestOwner === request.id) {
+      delete request.statusEl.dataset.trackingRequestOwner;
+    }
+    setTrackingStatus(request.statusEl, key, tone);
+  }
+
+  function invalidateTrackingRequests(requestKeys = Object.keys(state.trackingRequestSlots)) {
+    const keys = Array.isArray(requestKeys) ? requestKeys : [requestKeys];
+    keys.forEach((requestKey) => {
+      const request = state.trackingRequestSlots[requestKey];
+      if (!request) return;
+      state.trackingRequestSlots[requestKey] = null;
+      clearTrackingRequestLoadingStatus(request);
+      try {
+        request.controller.abort();
+      } catch {
+        // ignore
+      }
+      finalizeTrackingRequestTurnstile(request);
+      releaseTrackingRequest(request);
+    });
+  }
+
+  function beginTrackingRequest(requestKey, {
+    release,
+    statusEl,
+    supersedeKeys = [requestKey],
+    turnstileKey = '',
+    turnstileToken = '',
+  } = {}) {
+    invalidateTrackingRequests(supersedeKeys);
+    state.trackingRequestSequence += 1;
+    const request = {
+      controller: new AbortController(),
+      id: `${state.trackingRequestSequence}:${requestKey}`,
+      key: requestKey,
+      release,
+      released: false,
+      statusEl,
+      turnstileFinalized: false,
+      turnstileKey,
+      turnstileToken,
+    };
+    state.trackingRequestSlots[requestKey] = request;
+    return request;
+  }
+
+  function isCurrentTrackingRequest(request) {
+    return Boolean(
+      request
+      && state.trackingRequestSlots[request.key] === request
+    );
+  }
+
+  function hasTrackingMutationInFlight() {
+    return Object.values(state.trackingRequestInFlight).some(Boolean);
+  }
+
+  function lockMutableControls(forms) {
+    const controls = Array.from(new Set(
+      forms
+        .filter(Boolean)
+        .flatMap((form) => [...form.querySelectorAll(
+          'input:not([type="hidden"]):not([type="submit"]), select, textarea, button[type="button"]'
+        )])
+    )).map((control) => ({
+      control,
+      wasDisabled: Boolean(control.disabled),
+    }));
+
+    controls.forEach(({ control }) => {
+      control.disabled = true;
+    });
+
+    return () => {
+      controls.forEach(({ control, wasDisabled }) => {
+        control.disabled = wasDisabled;
+      });
+    };
+  }
+
+  function finishTrackingRequest(request) {
+    if (!request) return false;
+    const isCurrent = isCurrentTrackingRequest(request);
+    if (state.trackingRequestSlots[request.key] === request) {
+      state.trackingRequestSlots[request.key] = null;
+    }
+    finalizeTrackingRequestTurnstile(request);
+    clearTrackingRequestLoadingStatus(request);
+    releaseTrackingRequest(request);
+    return isCurrent;
+  }
+
   function isMotionOn() {
     return root.dataset.motion !== 'off';
   }
@@ -304,10 +473,21 @@
     return entry[lang] ?? entry.en ?? '';
   }
 
+  function readStorageValue(kind, key) {
+    try { return String(window[kind]?.getItem(key) || '').trim(); } catch { return ''; }
+  }
+
+  function writeStorageValue(kind, key, value) {
+    try {
+      if (value) window[kind]?.setItem(key, value);
+      else window[kind]?.removeItem(key);
+    } catch { /* Storage can be unavailable; keep the current in-memory state. */ }
+  }
+
   function setTheme(theme) {
     const next = knownThemes.has(theme) ? theme : (prefersDarkTheme ? 'dark' : 'light');
     root.dataset.theme = next;
-    window.localStorage.setItem('masarx_theme', next);
+    writeStorageValue('localStorage', 'masarx_theme', next);
 
     const lang = root.lang || 'en';
     if (themeToggle) {
@@ -322,7 +502,7 @@
   function setMotion(mode) {
     const next = knownMotions.has(mode) ? mode : (prefersReducedMotion ? 'off' : 'on');
     root.dataset.motion = next;
-    window.localStorage.setItem('masarx_motion', next);
+    writeStorageValue('localStorage', 'masarx_motion', next);
 
     if (next === 'off') {
       document.querySelectorAll('[data-reveal]').forEach((el) => el.classList.add('is-inview'));
@@ -445,10 +625,11 @@
     clientsRow.appendChild(pill);
   }
 
-  function buildClientCard(client) {
+  function buildClientCard(client, hidden = false) {
     const card = document.createElement('article');
     card.className = 'client-ref';
     card.setAttribute('title', client.name);
+    if (hidden) card.setAttribute('aria-hidden', 'true');
 
     if (client.logoUrl) {
       const img = document.createElement('img');
@@ -492,7 +673,7 @@
 
       // Duplicate cards for seamless loop
       for (let copy = 0; copy < 2; copy++) {
-        clients.forEach((client) => track.appendChild(buildClientCard(client)));
+        clients.forEach((client) => track.appendChild(buildClientCard(client, copy > 0)));
       }
 
       marquee.appendChild(track);
@@ -522,7 +703,10 @@
     const contactEndpoint = resolveContactEndpoint();
     if (!contactEndpoint) return '';
 
-    if (contactEndpoint.startsWith('/')) return `${contactEndpoint.replace(/\/+$/g, '')}/clients`;
+    if (contactEndpoint.startsWith('/')) {
+      const pathname = contactEndpoint.split(/[?#]/, 1)[0];
+      return `${pathname.replace(/\/+$/g, '')}/clients`;
+    }
     try {
       const url = new URL(contactEndpoint);
       url.pathname = `${url.pathname.replace(/\/+$/g, '')}/clients`;
@@ -670,12 +854,177 @@
   }
 
   function resolveContactEndpoint() {
-    const explicit = typeof runtime.contactEndpoint === 'string' ? runtime.contactEndpoint.trim() : '';
-    if (explicit) return explicit;
-    const tenantSignup = typeof runtime.tenantSignupEndpoint === 'string'
-      ? runtime.tenantSignupEndpoint.trim()
-      : '';
-    return tenantSignup;
+    return typeof runtime.contactEndpoint === 'string' ? runtime.contactEndpoint.trim() : '';
+  }
+
+  function resolveIntakeReceiptReference(data) {
+    for (const entry of [data, data?.result]) {
+      for (const key of ['request_id', 'id', 'reference', 'request_reference', 'public_reference']) {
+        if (typeof entry?.[key] === 'string' && entry[key].trim()) return entry[key].trim();
+      }
+    }
+    return '';
+  }
+
+  function appendBackendReference(element, reference) {
+    if (!element || !reference) return;
+    const label = getText('intake_receipt_reference', root.lang || 'en');
+    element.textContent += ' ' + label.replace('{reference}', reference);
+  }
+
+  function contactReceiptStatus(data, deduped) {
+    const value = (key) => data?.[key] ?? data?.result?.[key];
+    const status = String(value('queue_status') || value('status') || '').trim().toLowerCase();
+    if (status === 'rejected' || status === 'declined') return 'form_status_rejected';
+    if (value('auto_approve_applied') === true) return 'form_status_auto_approve_applied';
+    if (status === 'provisioning') return 'form_status_provisioning';
+    if (status === 'approved') return 'form_status_approved';
+    return deduped ? 'form_status_deduped' : 'form_status_under_review';
+  }
+
+
+  const driverDocumentsForm = document.querySelector('[data-driver-documents-form]');
+  const driverDocumentsFields = document.querySelector('[data-driver-documents-fields]');
+  const driverDocumentsStatus = document.querySelector('[data-driver-documents-status]');
+  let driverDocumentsToken = '';
+  let driverDocumentsReview = '';
+  let driverDocumentsEpoch = 0;
+  let driverDocumentsRetry = '';
+  let driverDocumentsPending = false;
+  let driverDocumentsPayload = null;
+  let driverDocumentsInFlight = false;
+
+  function setDriverDocumentsStatus(key) {
+    if (driverDocumentsStatus) driverDocumentsStatus.textContent = getText(key, root.lang || 'en') || '';
+  }
+  function lockDriverDocumentPayload() {
+    const abandon = driverDocumentsForm?.querySelector('[data-driver-documents-abandon]');
+    if (abandon) abandon.hidden = !driverDocumentsPending;
+    for (const input of driverDocumentsForm?.querySelectorAll('input, textarea') || []) {
+      input.disabled = driverDocumentsPending || Boolean(driverDocumentsPayload);
+    }
+  }
+  function clearDriverDocuments() {
+    driverDocumentsEpoch += 1;
+    driverDocumentsToken = '';
+    driverDocumentsReview = '';
+    driverDocumentsRetry = '';
+    driverDocumentsPending = false;
+    driverDocumentsPayload = null;
+    if (driverDocumentsForm) { driverDocumentsForm.hidden = true; driverDocumentsForm.reset(); }
+    if (driverDocumentsFields) driverDocumentsFields.replaceChildren();
+    setDriverDocumentsStatus('');
+  }
+  function showDriverDocuments(data, token) {
+    if (!driverDocumentsForm || !driverDocumentsFields) return;
+    if (data.application_state !== 'additional_documents_requested') { clearDriverDocuments(); return; }
+    const types = [...new Set(Array.isArray(data.requested_documents) ? data.requested_documents : [])]
+      .filter(type => typeof type === 'string' && type.trim());
+    const review = JSON.stringify([data.document_review_revision, data.reviewed_at, types]);
+    if (driverDocumentsToken === token && driverDocumentsReview === review) return;
+    clearDriverDocuments();
+    driverDocumentsToken = token;
+    driverDocumentsReview = review;
+    driverDocumentsForm.hidden = false;
+    const addFile = (type, index) => {
+      const label = document.createElement('label');
+      const title = document.createElement('span');
+      title.textContent = type || getText('driver_documents_file', root.lang || 'en');
+      const input = document.createElement('input');
+      input.type = 'file'; input.name = 'document_file_' + index; input.id = 'driver-return-file-' + index;
+      input.required = true; input.dataset.documentType = type;
+      input.accept = 'image/jpeg,image/png,application/pdf,application/json';
+      label.htmlFor = input.id; label.append(title, input); driverDocumentsFields.append(label);
+    };
+    types.forEach(addFile);
+    if (!types.length) {
+      const label = document.createElement('label');
+      const title = document.createElement('span');
+      title.textContent = getText('driver_documents_type', root.lang || 'en');
+      const input = document.createElement('input');
+      input.name = 'document_type'; input.id = 'driver-return-type'; input.required = true; input.maxLength = 100;
+      label.htmlFor = input.id; label.append(title, input); driverDocumentsFields.append(label);
+      addFile('', 0);
+    }
+    // The token-authorized status response recovers a durable attempt after page reload.
+    if (data.document_return_attempt?.state === 'reserved' && typeof data.document_return_attempt.retry_key === 'string') {
+      driverDocumentsRetry = data.document_return_attempt.retry_key;
+      driverDocumentsPending = true;
+      setDriverDocumentsStatus('driver_documents_pending');
+    }
+    lockDriverDocumentPayload();
+  }
+  async function submitDriverDocuments(mode = 'submit') {
+    if (!driverDocumentsForm || driverDocumentsInFlight || state.driverSignupInFlight || state.driverStatusLookupInFlight || !driverDocumentsToken) return;
+    if (mode === 'abandon' && !driverDocumentsPending) return;
+    const endpoint = typeof runtime.driverApplicationDocumentsEndpoint === 'string' ? runtime.driverApplicationDocumentsEndpoint.trim() : '';
+    if (!endpoint) { setDriverDocumentsStatus('driver_status_missing_endpoint'); return; }
+    if (!driverDocumentsPending && !driverDocumentsPayload && !driverDocumentsForm.reportValidity()) return;
+    const submittedToken = driverDocumentsToken;
+    const submittedEpoch = driverDocumentsEpoch;
+    const stillCurrent = () => submittedToken === driverDocumentsToken && submittedEpoch === driverDocumentsEpoch;
+    // Snapshot all mutable form data before the first asynchronous file read.
+    const files = [...driverDocumentsForm.querySelectorAll('input[type="file"]')].map(input => ({
+      file: input.files?.[0],
+      type: input.dataset.documentType || driverDocumentsForm.elements.document_type?.value?.trim(),
+    }));
+    const note = driverDocumentsForm.elements.note?.value?.trim() || null;
+    driverDocumentsInFlight = true;
+    const release = lockMutableControls([driverDocumentsForm, driverStatusForm]);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), PUBLIC_REQUEST_TIMEOUT_MS);
+    setDriverDocumentsStatus('driver_documents_sending');
+    try {
+      if (!driverDocumentsPending && !driverDocumentsPayload) {
+        if (files.length > 12 || files.some(({ file }) => !file || file.size > 10 * 1024 * 1024)) {
+          setDriverDocumentsStatus('driver_documents_limits'); return;
+        }
+        const documents = [];
+        for (const { file, type } of files) {
+          const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+            reader.onerror = reject; reader.readAsDataURL(file);
+          });
+          if (!stillCurrent() || controller.signal.aborted) return;
+          documents.push({ type, file_name: file.name, content_type: file.type || 'application/octet-stream', base64 });
+        }
+        driverDocumentsRetry = crypto.randomUUID();
+        driverDocumentsPayload = { documents, note };
+      }
+      if (!stillCurrent()) return;
+      const body = JSON.stringify({ token: submittedToken, retry_key: driverDocumentsRetry,
+        mode: mode === 'abandon' ? 'abandon' : driverDocumentsPending ? 'readback' : 'submit',
+        ...(driverDocumentsPending ? {} : driverDocumentsPayload) });
+      if (new TextEncoder().encode(body).byteLength > 16 * 1024 * 1024) {
+        driverDocumentsRetry = ''; driverDocumentsPayload = null;
+        setDriverDocumentsStatus('driver_documents_limits'); return;
+      }
+      driverDocumentsPending = true;
+      const response = await fetch(endpoint, { method: 'POST', mode: 'cors', credentials: 'omit',
+        headers: { accept: 'application/json', 'content-type': 'application/json' }, body, signal: controller.signal });
+      const data = await readJsonSafe(response);
+      if (!stillCurrent()) return;
+      if (response.ok && data?.ok === true && data.application_state === 'documents_resubmitted') {
+        clearDriverDocuments();
+        setDriverStatusLookup('driver_documents_submitted', 'success');
+      } else if (response.status === 404 && data?.state === 'not_found') {
+        driverDocumentsPending = false;
+        if (!driverDocumentsPayload) driverDocumentsRetry = '';
+        setDriverDocumentsStatus('driver_documents_retry');
+      } else if (response.status === 202 || response.status >= 500 || response.ok) {
+        // A malformed HTTP 200 is not success or proof that application did not commit.
+        setDriverDocumentsStatus('driver_documents_pending');
+      } else {
+        // Definite rejection: editable corrections must create a new payload, not replay old bytes.
+        driverDocumentsPending = false; driverDocumentsRetry = ''; driverDocumentsPayload = null;
+        setDriverDocumentsStatus('driver_documents_failed');
+      }
+    } catch {
+      if (stillCurrent()) setDriverDocumentsStatus(driverDocumentsPending ? 'driver_documents_pending' : 'driver_documents_failed');
+    } finally {
+      window.clearTimeout(timeout); release(); driverDocumentsInFlight = false; lockDriverDocumentPayload();
+    }
   }
 
   function resolveDriverSignupEndpoint() {
@@ -700,11 +1049,20 @@
     driverStatusLookup.classList.toggle('is-error', tone === 'error');
   }
 
+  function setDriverReviewNote(note) {
+    state.driverReviewNote = typeof note === 'string' ? note.trim() : '';
+    if (!driverReviewNote) return;
+    driverReviewNote.hidden = !state.driverReviewNote;
+    driverReviewNote.textContent = state.driverReviewNote
+      ? `${getText('driver_status_review_note', root.lang || 'en')}: ${state.driverReviewNote}`
+      : '';
+  }
+
   function persistDriverStatusToken(token) {
     const normalized = String(token || '').trim();
     if (!normalized) return;
     try {
-      window.localStorage.setItem(DRIVER_STATUS_TOKEN_STORAGE_KEY, normalized);
+      writeStorageValue('localStorage', DRIVER_STATUS_TOKEN_STORAGE_KEY, normalized);
     } catch {
       // ignore
     }
@@ -720,7 +1078,7 @@
 
   function hydrateDriverStatusToken() {
     try {
-      const saved = window.localStorage.getItem(DRIVER_STATUS_TOKEN_STORAGE_KEY);
+      const saved = readStorageValue('localStorage', DRIVER_STATUS_TOKEN_STORAGE_KEY);
       if (!saved || !driverStatusForm) return;
       const input = driverStatusForm.querySelector('input[name="status_token"]');
       if (input && !input.value) input.value = saved;
@@ -730,7 +1088,11 @@
   }
 
   function resolveDriverStatusKey(data) {
-    const status = typeof data?.status === 'string' ? data.status.trim() : '';
+    const status = typeof data?.application_state === 'string' ? data.application_state.trim() : (typeof data?.status === 'string' ? data.status.trim() : '');
+    if (status === 'additional_documents_requested') return 'driver_documents_requested';
+    if (status === 'documents_resubmitted') return 'driver_documents_submitted';
+    if (status === 'compliance_denied') return 'driver_status_compliance_denied';
+    if (status === 'pending_review') return 'driver_status_pending';
     if (status === 'pending') return 'driver_status_pending';
     if (status === 'approved') return 'driver_status_approved';
     if (status === 'rejected') return 'driver_status_rejected';
@@ -799,6 +1161,7 @@
     if (turnstileState) turnstileState.token = '';
     const input = getTurnstileResponseInput(formKey);
     if (input && typeof input.value === 'string') input.value = '';
+    input?.removeAttribute('value');
   }
 
   function getTurnstileToken(formKey = resolveDefaultTurnstileKey()) {
@@ -806,7 +1169,8 @@
     const token = typeof turnstileState?.token === 'string' ? turnstileState.token.trim() : '';
     if (token) return token;
     const input = getTurnstileResponseInput(formKey);
-    return input && typeof input.value === 'string' ? input.value.trim() : '';
+    const inputValue = input && typeof input.value === 'string' ? input.value.trim() : '';
+    return inputValue || String(input?.getAttribute('value') || '').trim();
   }
 
   function setTurnstileVisibility(formKey = resolveDefaultTurnstileKey()) {
@@ -864,6 +1228,10 @@
       Object.keys(turnstileConfigs).forEach((formKey) => renderTurnstile(formKey));
       return;
     }
+    if (document.readyState !== 'complete') {
+      window.addEventListener('load', ensureTurnstile, { once: true });
+      return;
+    }
     if (document.querySelector('script[data-turnstile-api]')) return;
 
     const script = document.createElement('script');
@@ -889,6 +1257,14 @@
     }
   }
 
+  function finalizeTurnstileSubmission(formKey, submittedToken) {
+    const consumedToken = String(submittedToken || '').trim();
+    if (!hasTurnstile(formKey) || !consumedToken) return;
+    const currentToken = getTurnstileToken(formKey);
+    if (currentToken && currentToken !== consumedToken) return;
+    resetTurnstile(formKey);
+  }
+
   function refreshTurnstileTheme() {
     if (!Object.keys(turnstileConfigs).some((formKey) => hasTurnstile(formKey))) return;
     if (!window.turnstile || typeof window.turnstile.render !== 'function') return;
@@ -902,13 +1278,15 @@
       .filter(Boolean);
   }
 
-  async function submitContactRequest() {
-    const config = getIntakeConfig('contact');
+  async function submitContactRequest(action = 'contact') {
+    const config = getIntakeConfig(action);
     if (!config || !config.form) return;
+    if (state.contactInFlight) return;
 
-    const contactEndpoint = resolveContactEndpoint();
+    const contactEndpoint = action === 'tenant'
+      ? String(runtime.tenantSignupEndpoint || '').trim() : resolveContactEndpoint();
     if (!contactEndpoint) {
-      setIntakeStatus('contact', 'form_status_missing_endpoint', 'error');
+      setIntakeStatus(action, action === 'tenant' ? 'tenant_form_status_missing_endpoint' : 'form_status_missing_endpoint', 'error');
       return;
     }
 
@@ -919,13 +1297,14 @@
 
     const turnstileToken = getTurnstileToken('contact');
     if (hasTurnstile('contact') && !turnstileToken) {
-      setIntakeStatus('contact', 'form_status_turnstile_required', 'error');
+      setIntakeStatus(action, 'form_status_turnstile_required', 'error');
       return;
     }
 
     const fd = new FormData(config.form);
     const volume = String(fd.get('volume') || '').trim();
     const role = String(fd.get('role') || '').trim();
+    const requestContext = String(fd.get('request_context') || '').trim();
     const organizationName = String(fd.get('organization_name') || '').trim();
     const marketingParams = getMarketingParams();
     const payload = {
@@ -944,15 +1323,19 @@
         ...marketingParams,
         ...(volume ? { monthly_volume: volume } : {}),
         ...(role ? { role } : {}),
+        ...(requestContext ? { request_context: requestContext } : {}),
       },
       turnstile_token: hasTurnstile('contact') ? turnstileToken : undefined,
     };
 
+    state.contactInFlight = true;
+    const wasSubmitDisabled = Boolean(config.submitBtn?.disabled);
+    const releaseMutableControlLock = lockMutableControls([config.form]);
     if (config.submitBtn) config.submitBtn.disabled = true;
-    setIntakeStatus('contact', 'form_status_sending');
+    setIntakeStatus(action, 'form_status_sending');
 
     const ctrl = new AbortController();
-    const timeoutId = window.setTimeout(() => ctrl.abort(), CONTACT_SUBMIT_TIMEOUT_MS);
+    const timeoutId = window.setTimeout(() => ctrl.abort(), PUBLIC_REQUEST_TIMEOUT_MS);
 
     try {
       const res = await fetch(contactEndpoint, {
@@ -971,37 +1354,49 @@
 
       if (!res.ok) {
         const code = data && typeof data === 'object' ? data?.error?.code : '';
-        setIntakeStatus('contact', resolveContactErrorKey(code), 'error');
+        setIntakeStatus(action, resolveContactErrorKey(code), 'error');
         return;
       }
 
-      if (data && typeof data === 'object' && data.ok === false) {
-        setIntakeStatus('contact', resolveContactErrorKey(data?.error?.code), 'error');
+      if (!data || typeof data !== 'object' || data.ok !== true) {
+        setIntakeStatus(action, resolveContactErrorKey(data?.error?.code), 'error');
+        return;
+      }
+
+      const reference = resolveIntakeReceiptReference(data);
+      // Tenant signup is only accepted with a backend reference; keep the form for a retry.
+      if (action === 'tenant' && !reference) {
+        setIntakeStatus(action, resolveContactErrorKey(''), 'error');
         return;
       }
 
       const deduped = Boolean(data && typeof data === 'object' && data.deduped === true);
       setIntakeStatus(
-        'contact',
-        deduped ? 'form_status_deduped' : 'form_status_under_review',
+        action,
+        contactReceiptStatus(data, deduped),
         'success'
       );
+      appendBackendReference(config.status, reference);
       config.form.reset();
-      resetTurnstile('contact');
-    } catch {
-      setIntakeStatus('contact', 'form_status_error', 'error');
+    } catch (error) {
+      setIntakeStatus(action, error?.name === 'AbortError' ? 'form_status_timeout' : 'form_status_error', 'error');
     } finally {
+      state.contactInFlight = false;
       window.clearTimeout(timeoutId);
-      if (config.submitBtn) config.submitBtn.disabled = false;
+      finalizeTurnstileSubmission('contact', turnstileToken);
+      releaseMutableControlLock();
+      if (config.submitBtn) config.submitBtn.disabled = wasSubmitDisabled;
     }
   }
 
   async function submitDriverRequest() {
     const config = getIntakeConfig('driver');
     if (!config || !config.form) return;
+    if (state.driverSignupInFlight || state.driverStatusLookupInFlight || driverDocumentsInFlight) return;
 
     const driverEndpoint = resolveDriverSignupEndpoint();
-    if (!driverEndpoint) {
+    const entryKey = typeof runtime.driverSignupEntryKey === 'string' ? runtime.driverSignupEntryKey.trim() : '';
+    if (!driverEndpoint || !entryKey) {
       setIntakeStatus('driver', 'driver_form_status_missing_endpoint', 'error');
       return;
     }
@@ -1011,8 +1406,8 @@
       return;
     }
 
-    const turnstileState = getTurnstileState('driver');
-    if (hasTurnstile('driver') && !turnstileState?.token) {
+    const turnstileToken = getTurnstileToken('driver');
+    if (hasTurnstile('driver') && !turnstileToken) {
       setIntakeStatus('driver', 'driver_form_status_turnstile_required', 'error');
       return;
     }
@@ -1023,11 +1418,13 @@
     const languages = parseCsvList(fd.get('languages'));
     const capabilities = parseCsvList(fd.get('capabilities'));
     const payload = {
+      entry_key: entryKey,
       email: String(fd.get('email') || '').trim(),
       full_name: String(fd.get('full_name') || '').trim(),
       organization_name: String(fd.get('organization_name') || '').trim(),
       phone: String(fd.get('phone') || '').trim(),
       locale: root.lang || 'en',
+      page_url: window.location.href,
       referrer: document.referrer || '',
       experience_summary: String(fd.get('experience_summary') || '').trim(),
       capabilities_requested: capabilities,
@@ -1038,14 +1435,17 @@
         ...(vehicleType ? { vehicle_type: vehicleType } : {}),
         ...(languages.length ? { languages } : {}),
       },
-      turnstile_token: hasTurnstile('driver') ? turnstileState?.token : undefined,
+      turnstile_token: hasTurnstile('driver') ? turnstileToken : undefined,
     };
 
+    state.driverSignupInFlight = true;
+    const wasSubmitDisabled = Boolean(config.submitBtn?.disabled);
+    const releaseMutableControlLock = lockMutableControls([config.form]);
     if (config.submitBtn) config.submitBtn.disabled = true;
     setIntakeStatus('driver', 'driver_form_status_sending');
 
     const ctrl = new AbortController();
-    const timeoutId = window.setTimeout(() => ctrl.abort(), CONTACT_SUBMIT_TIMEOUT_MS);
+    const timeoutId = window.setTimeout(() => ctrl.abort(), PUBLIC_REQUEST_TIMEOUT_MS);
 
     try {
       const res = await fetch(driverEndpoint, {
@@ -1068,11 +1468,13 @@
         return;
       }
 
-      if (data && typeof data === 'object' && data.ok === false) {
+      if (!data || typeof data !== 'object' || data.ok !== true) {
         setIntakeStatus('driver', resolveIntakeErrorKey(data?.error?.code, 'driver_form'), 'error');
         return;
       }
 
+      clearDriverDocuments();
+      state.driverReceiptReference = resolveIntakeReceiptReference(data);
       const deduped = Boolean(data && typeof data === 'object' && data.deduped === true);
       const statusToken = data && typeof data === 'object'
         ? String(data.application_status_token || '').trim()
@@ -1082,22 +1484,29 @@
         deduped ? 'driver_form_status_deduped' : 'driver_form_status_under_review',
         'success'
       );
+      appendBackendReference(config.status, state.driverReceiptReference);
       if (statusToken) {
         persistDriverStatusToken(statusToken);
         setDriverStatusLookup('driver_status_token_saved', 'success');
+        if (resolveDriverStatusEndpoint()) await submitDriverStatusLookup({ fromSignup: true, receiptReference: state.driverReceiptReference });
       }
       config.form.reset();
-      resetTurnstile('driver');
-    } catch {
-      setIntakeStatus('driver', 'driver_form_status_error', 'error');
+    } catch (error) {
+      setIntakeStatus('driver', error?.name === 'AbortError' ? 'driver_form_status_timeout' : 'driver_form_status_error', 'error');
     } finally {
+      state.driverSignupInFlight = false;
       window.clearTimeout(timeoutId);
-      if (config.submitBtn) config.submitBtn.disabled = false;
+      finalizeTurnstileSubmission('driver', turnstileToken);
+      releaseMutableControlLock();
+      if (config.submitBtn) config.submitBtn.disabled = wasSubmitDisabled;
     }
   }
 
-  async function submitDriverStatusLookup() {
+  async function submitDriverStatusLookup(options = {}) {
     if (!driverStatusForm) return;
+    // Only the owning signup may continue into its immediate status refresh.
+    if (state.driverStatusLookupInFlight || driverDocumentsInFlight || (state.driverSignupInFlight && options.fromSignup !== true)) return;
+    setDriverReviewNote('');
 
     const statusEndpoint = resolveDriverStatusEndpoint();
     if (!statusEndpoint) {
@@ -1117,11 +1526,17 @@
       return;
     }
 
+    const generation = ++state.driverStatusLookupGeneration;
+    const isCurrentLookup = () => generation === state.driverStatusLookupGeneration
+      && String(getDriverStatusInput()?.value || '').trim() === token;
+    state.driverStatusLookupInFlight = true;
+    const wasSubmitDisabled = Boolean(driverStatusSubmitBtn?.disabled);
+    const releaseMutableControlLock = lockMutableControls([driverStatusForm]);
     if (driverStatusSubmitBtn) driverStatusSubmitBtn.disabled = true;
     setDriverStatusLookup('driver_status_status_lookup');
 
     const ctrl = new AbortController();
-    const timeoutId = window.setTimeout(() => ctrl.abort(), CONTACT_SUBMIT_TIMEOUT_MS);
+    const timeoutId = window.setTimeout(() => ctrl.abort(), PUBLIC_REQUEST_TIMEOUT_MS);
 
     try {
       const res = await fetch(statusEndpoint, {
@@ -1137,26 +1552,39 @@
       });
 
       const data = await readJsonSafe(res);
+      if (!isCurrentLookup()) return;
 
       if (!res.ok) {
         const code = data && typeof data === 'object' ? data?.error?.code : '';
-        setDriverStatusLookup(code === 'not_found' ? 'driver_status_not_found' : 'driver_status_error', 'error');
+        clearDriverDocuments();
+        setDriverStatusLookup(code === 'not_found' || code === 'request_not_found' ? 'driver_status_not_found' : 'driver_status_error', 'error');
         return;
       }
 
-      if (data && typeof data === 'object' && data.ok === false) {
+      if (!data || typeof data !== 'object' || data.ok !== true) {
         const code = data?.error?.code;
+        clearDriverDocuments();
         setDriverStatusLookup(code === 'not_found' ? 'driver_status_not_found' : 'driver_status_error', 'error');
         return;
       }
 
       persistDriverStatusToken(token);
+      showDriverDocuments(data, token);
+      setDriverReviewNote(data?.review_reason);
       setDriverStatusLookup(resolveDriverStatusKey(data), 'success');
-    } catch {
-      setDriverStatusLookup('driver_status_error', 'error');
+      if (options.receiptReference && options.receiptReference === state.driverReceiptReference) {
+        setIntakeStatus('driver', resolveDriverStatusKey(data), 'success');
+        appendBackendReference(driverStatus, options.receiptReference);
+      }
+    } catch (error) {
+      if (!isCurrentLookup()) return;
+      clearDriverDocuments();
+      setDriverStatusLookup(error?.name === 'AbortError' ? 'driver_status_timeout' : 'driver_status_error', 'error');
     } finally {
+      state.driverStatusLookupInFlight = false;
       window.clearTimeout(timeoutId);
-      if (driverStatusSubmitBtn) driverStatusSubmitBtn.disabled = false;
+      releaseMutableControlLock();
+      if (driverStatusSubmitBtn) driverStatusSubmitBtn.disabled = wasSubmitDisabled;
     }
   }
 
@@ -1184,14 +1612,26 @@
   }
 
   function setTrackingStage(stage) {
+    state.trackingStage = stage;
     if (lookupStage) lookupStage.hidden = stage !== 'lookup';
     if (verifyStage) verifyStage.hidden = stage !== 'verify';
     if (resultsStage) resultsStage.hidden = stage !== 'results';
+    refreshTrackingRequestsLinks();
     if (stage === 'results') {
       ensureTrackingMap('inline');
       invalidateMap(mapControllers.inline);
       if (state.mapPin) focusMapOnPin(mapControllers.inline, mapControllers.inline.map?.getZoom() || mapRuntime.defaultZoom);
     }
+  }
+
+  function refreshTrackingRequestsLinks() {
+    const hasResults = state.trackingStage === 'results';
+    const key = hasResults ? 'track_nav_actions' : 'track_nav_lookup';
+    trackRequestsLinks.forEach((link) => {
+      link.setAttribute('href', hasResults ? '#actions' : '#lookup');
+      link.dataset.i18n = key;
+      link.textContent = getText(key, root.lang || 'en');
+    });
   }
 
   function focusTrackingReferenceInput() {
@@ -1204,6 +1644,8 @@
   }
 
   function resetTrackingFlow({ clearReference = true, scroll = false } = {}) {
+    if (hasTrackingMutationInFlight()) return false;
+    invalidateTrackingRequests();
     saveTrackingSession('');
     state.trackingReference = '';
     state.trackingPayload = null;
@@ -1236,6 +1678,7 @@
       lookupStage.scrollIntoView({ behavior: isMotionOn() ? 'smooth' : 'auto', block: 'start' });
     }
     focusTrackingReferenceInput();
+    return true;
   }
 
   function setTrackingStatus(el, key, tone) {
@@ -1271,9 +1714,10 @@
     delete trackRequestBanner.dataset.tone;
     if (trackRequestBannerBadge) trackRequestBannerBadge.textContent = '';
     if (trackRequestBannerText) trackRequestBannerText.textContent = '';
+    if (trackRequestBannerCase) { trackRequestBannerCase.textContent = ''; trackRequestBannerCase.hidden = true; }
   }
 
-  function setTrackingRequestBanner(outcome) {
+  function setTrackingRequestBanner(outcome, data) {
     if (!trackRequestBanner || !trackRequestBannerBadge || !trackRequestBannerText) return;
     const normalized = typeof outcome === 'string' ? outcome.trim().toLowerCase() : '';
     const tone = normalized === 'applied' ? 'success' : normalized === 'rejected' ? 'danger' : 'warning';
@@ -1291,6 +1735,12 @@
     trackRequestBanner.dataset.tone = tone;
     trackRequestBannerBadge.textContent = getText(badgeKey, root.lang || 'en') || '';
     trackRequestBannerText.textContent = getText(textKey, root.lang || 'en') || '';
+    if (trackRequestBannerCase) {
+      const reference = typeof data?.support_case_id === 'string' ? data.support_case_id.trim() : '';
+      trackRequestBannerCase.textContent = '';
+      trackRequestBannerCase.hidden = !reference;
+      appendBackendReference(trackRequestBannerCase, reference);
+    }
     trackRequestBanner.hidden = false;
   }
 
@@ -1356,37 +1806,49 @@
 
   function saveTrackingSession(token) {
     state.trackingSessionToken = token || '';
-    if (!window.sessionStorage) return;
-    if (token) window.sessionStorage.setItem(TRACKING_SESSION_KEY, token);
-    else window.sessionStorage.removeItem(TRACKING_SESSION_KEY);
+    writeStorageValue('sessionStorage', TRACKING_SESSION_KEY, token);
   }
 
   function loadTrackingSession() {
-    if (!window.sessionStorage) return '';
-    return String(window.sessionStorage.getItem(TRACKING_SESSION_KEY) || '').trim();
+    return readStorageValue('sessionStorage', TRACKING_SESSION_KEY);
   }
 
-  function setRescheduleAvailability(dates, enabled) {
+  function setRescheduleAvailability(dates, enabled, { preserveStatus = false } = {}) {
     if (!trackRescheduleForm || !trackDateSelect) return;
 
     const availableDates = Array.isArray(dates) ? dates.filter(Boolean) : [];
     const isAvailable = enabled !== false && availableDates.length > 0;
-    trackDateSelect.disabled = !isAvailable;
+    const mutationLocked = hasTrackingMutationInFlight();
+    const preserveCurrentStatus = preserveStatus || mutationLocked;
+    trackDateSelect.disabled = !isAvailable || mutationLocked;
     if (!isAvailable) trackDateSelect.value = '';
 
     const notesField = trackRescheduleForm.querySelector('textarea[name="notes"]');
-    if (notesField) notesField.disabled = !isAvailable;
-    if (trackRescheduleSubmitBtn) trackRescheduleSubmitBtn.disabled = !isAvailable;
+    if (notesField) notesField.disabled = !isAvailable || mutationLocked;
+    if (trackRescheduleSubmitBtn) trackRescheduleSubmitBtn.disabled = !isAvailable || mutationLocked;
     trackRescheduleForm.dataset.available = isAvailable ? '1' : '0';
 
     if (!isAvailable) {
-      setTrackingStatus(trackRescheduleStatus, 'track_reschedule_unavailable');
+      if (!preserveCurrentStatus) setTrackingStatus(trackRescheduleStatus, 'track_reschedule_unavailable');
       return;
     }
 
-    if (!trackRescheduleStatus?.classList.contains('is-success')) {
+    if (!preserveCurrentStatus && !trackRescheduleStatus?.classList.contains('is-success')) {
       setTrackingStatus(trackRescheduleStatus, '');
     }
+  }
+
+  function reapplyTrackingMutationPolicy() {
+    const tracking = state.trackingPayload && typeof state.trackingPayload === 'object'
+      ? state.trackingPayload.tracking || state.trackingPayload
+      : null;
+    if (!tracking) return;
+    const reschedule = tracking.actions?.reschedule || {};
+    setRescheduleAvailability(
+      reschedule.available_dates,
+      reschedule.enabled,
+      { preserveStatus: true }
+    );
   }
 
   function renderTrackingDates(rescheduleAction) {
@@ -1528,21 +1990,40 @@
     }
   }
 
-  async function postTracking(action, body) {
+  async function postTracking(action, body, controller = new AbortController()) {
     const url = resolveTrackingUrl(action);
     if (!url) throw new Error('missing_tracking_endpoint');
-    const response = await fetch(url, {
-      method: 'POST',
-      mode: 'cors',
-      credentials: 'omit',
-      headers: withPublicEdgeHeaders({
-        accept: 'application/json',
-        'content-type': 'application/json',
-      }),
-      body: JSON.stringify(body),
-    });
-    const data = await readJsonSafe(response);
-    return { response, data };
+    const timeoutId = window.setTimeout(() => controller.abort(), PUBLIC_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        headers: withPublicEdgeHeaders({
+          accept: 'application/json',
+          'content-type': 'application/json',
+        }),
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const data = await readJsonSafe(response);
+      return { response, data };
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }
+
+  function restoreTrackingRequestSubmitButton(kind, button, wasDisabled) {
+    if (!button) return;
+    if (wasDisabled) {
+      button.disabled = true;
+      return;
+    }
+    if (kind === 'reschedule_date' && trackRescheduleForm?.dataset.available !== '1') {
+      button.disabled = true;
+      return;
+    }
+    button.disabled = false;
   }
 
   function asFiniteNumber(value, fallback) {
@@ -1674,6 +2155,7 @@
     map.attributionControl.setPrefix(false);
     map.setView([mapRuntime.defaultLat, mapRuntime.defaultLng], mapRuntime.defaultZoom);
     map.on('click', (event) => {
+      if (state.trackingRequestInFlight.location_change) return;
       setMapPin(event.latlng.lat, event.latlng.lng, { centerActiveMap: false });
       setMapStatus('track_location_map_pending_confirm', 'info');
     });
@@ -1792,6 +2274,7 @@
       const key = pickerEl === trackMapDialogPicker ? 'expanded' : 'inline';
       const controller = mapControllers[key];
       if (controller?.map) return;
+      if (state.trackingRequestInFlight.location_change) return;
       const rect = pickerEl.getBoundingClientRect();
       const xRatio = rect.width > 0 ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) : 0.5;
       const yRatio = rect.height > 0 ? Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)) : 0.5;
@@ -1803,6 +2286,7 @@
     pickerEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
+        if (state.trackingRequestInFlight.location_change) return;
         const key = pickerEl === trackMapDialogPicker ? 'expanded' : 'inline';
         setMapPinAtCenter(mapControllers[key]);
         return;
@@ -1919,11 +2403,13 @@
     if (!trackingPage) return;
     const token = loadTrackingSession();
     if (!token) return;
+    const request = beginTrackingRequest('session');
 
     try {
       const { response, data } = await postTracking('session', {
         session_token: token,
-      });
+      }, request.controller);
+      if (!isCurrentTrackingRequest(request)) return;
       if (!response.ok || !data || data.ok === false) {
         saveTrackingSession('');
         setTrackingStage('lookup');
@@ -1936,12 +2422,16 @@
       renderTrackingPayload(data);
       setTrackingStage('results');
     } catch {
+      if (!isCurrentTrackingRequest(request)) return;
       saveTrackingSession('');
+    } finally {
+      finishTrackingRequest(request);
     }
   }
 
   async function submitTrackingLookup() {
     if (!trackLookupForm) return;
+    if (state.trackingLookupInFlight) return;
     if (typeof trackLookupForm.checkValidity === 'function' && !trackLookupForm.checkValidity()) {
       if (typeof trackLookupForm.reportValidity === 'function') trackLookupForm.reportValidity();
       return;
@@ -1954,36 +2444,53 @@
 
     const fd = new FormData(trackLookupForm);
     state.trackingReference = String(fd.get('reference') || '').trim();
-    setTrackingStatus(trackLookupStatus, 'track_status_loading');
+    const wasSubmitDisabled = Boolean(trackLookupSubmitBtn?.disabled);
+    const request = beginTrackingRequest('lookup', {
+      supersedeKeys: ['session', 'lookup', 'verify'],
+      release: () => {
+        state.trackingLookupInFlight = false;
+        if (trackLookupSubmitBtn) trackLookupSubmitBtn.disabled = wasSubmitDisabled;
+      },
+      statusEl: trackLookupStatus,
+      turnstileKey: 'tracking',
+      turnstileToken,
+    });
+    state.trackingLookupInFlight = true;
+    if (trackLookupSubmitBtn) trackLookupSubmitBtn.disabled = true;
+    claimTrackingRequestLoadingStatus(request);
 
     try {
       const { response, data } = await postTracking('lookup', {
         reference: state.trackingReference,
         turnstile_token: turnstileToken,
-      });
+      }, request.controller);
+      if (!isCurrentTrackingRequest(request)) return;
       if (!response.ok || !data || data.ok === false) {
-        setTrackingStatus(trackLookupStatus, resolveTrackingErrorKey(data?.error?.code), 'error');
+        setOwnedTrackingRequestStatus(request, resolveTrackingErrorKey(data?.error?.code), 'error');
         return;
       }
       setTrackingStage('verify');
-      setTrackingStatus(trackLookupStatus, '');
+      setOwnedTrackingRequestStatus(request, '');
       setTrackingStatus(trackVerifyStatus, '');
-      resetTurnstile();
       const input = trackVerifyForm && trackVerifyForm.querySelector('input[name="phone_last3"]');
       if (input) input.focus();
     } catch (error) {
-      setTrackingStatus(
-        trackLookupStatus,
+      if (!isCurrentTrackingRequest(request)) return;
+      setOwnedTrackingRequestStatus(
+        request,
         error instanceof Error && error.message === 'missing_tracking_endpoint'
           ? 'track_status_missing_endpoint'
           : 'track_status_error',
         'error'
       );
+    } finally {
+      finishTrackingRequest(request);
     }
   }
 
   async function submitTrackingVerify() {
     if (!trackVerifyForm) return;
+    if (state.trackingVerifyInFlight) return;
     if (typeof trackVerifyForm.checkValidity === 'function' && !trackVerifyForm.checkValidity()) {
       if (typeof trackVerifyForm.reportValidity === 'function') trackVerifyForm.reportValidity();
       return;
@@ -1995,16 +2502,29 @@
     }
 
     const fd = new FormData(trackVerifyForm);
-    setTrackingStatus(trackVerifyStatus, 'track_status_loading');
+    const wasSubmitDisabled = Boolean(trackVerifySubmitBtn?.disabled);
+    const request = beginTrackingRequest('verify', {
+      release: () => {
+        state.trackingVerifyInFlight = false;
+        if (trackVerifySubmitBtn) trackVerifySubmitBtn.disabled = wasSubmitDisabled;
+      },
+      statusEl: trackVerifyStatus,
+      turnstileKey: 'tracking',
+      turnstileToken,
+    });
+    state.trackingVerifyInFlight = true;
+    if (trackVerifySubmitBtn) trackVerifySubmitBtn.disabled = true;
+    claimTrackingRequestLoadingStatus(request);
 
     try {
       const { response, data } = await postTracking('verify', {
         reference: state.trackingReference,
         phone_last3: String(fd.get('phone_last3') || '').trim(),
         turnstile_token: turnstileToken,
-      });
+      }, request.controller);
+      if (!isCurrentTrackingRequest(request)) return;
       if (!response.ok || !data || data.ok === false) {
-        setTrackingStatus(trackVerifyStatus, resolveTrackingErrorKey(data?.error?.code), 'error');
+        setOwnedTrackingRequestStatus(request, resolveTrackingErrorKey(data?.error?.code), 'error');
         return;
       }
 
@@ -2012,16 +2532,18 @@
       clearTrackingRequestBanner();
       renderTrackingPayload(data);
       setTrackingStage('results');
-      setTrackingStatus(trackVerifyStatus, '');
-      resetTurnstile();
+      setOwnedTrackingRequestStatus(request, '');
     } catch (error) {
-      setTrackingStatus(
-        trackVerifyStatus,
+      if (!isCurrentTrackingRequest(request)) return;
+      setOwnedTrackingRequestStatus(
+        request,
         error instanceof Error && error.message === 'missing_tracking_endpoint'
           ? 'track_status_missing_endpoint'
           : 'track_status_error',
         'error'
       );
+    } finally {
+      finishTrackingRequest(request);
     }
   }
 
@@ -2029,6 +2551,7 @@
     const form = kind === 'reschedule_date' ? trackRescheduleForm : trackLocationForm;
     const statusEl = kind === 'reschedule_date' ? trackRescheduleStatus : trackLocationStatus;
     if (!form) return;
+    if (hasTrackingMutationInFlight()) return;
     if (typeof form.checkValidity === 'function' && !form.checkValidity()) {
       if (typeof form.reportValidity === 'function') form.reportValidity();
       return;
@@ -2069,24 +2592,61 @@
         };
 
     clearTrackingRequestBanner();
-    setTrackingStatus(statusEl, 'track_status_loading');
+    const mutationButtons = [
+      {
+        kind: 'reschedule_date',
+        button: trackRescheduleSubmitBtn,
+        wasDisabled: Boolean(trackRescheduleSubmitBtn?.disabled),
+      },
+      {
+        kind: 'location_change',
+        button: trackLocationSubmitBtn,
+        wasDisabled: Boolean(trackLocationSubmitBtn?.disabled),
+      },
+    ];
+    const wasLangToggleDisabled = Boolean(langToggle?.disabled);
+    const releaseMutableControlLock = lockMutableControls([
+      trackRescheduleForm,
+      trackLocationForm,
+    ]);
+    const request = beginTrackingRequest(kind, {
+      release: () => {
+        state.trackingRequestInFlight[kind] = false;
+        mutationButtons.forEach(({ kind: buttonKind, button, wasDisabled }) => {
+          restoreTrackingRequestSubmitButton(buttonKind, button, wasDisabled);
+        });
+        releaseMutableControlLock();
+        reapplyTrackingMutationPolicy();
+        if (langToggle) langToggle.disabled = wasLangToggleDisabled;
+      },
+      statusEl,
+      turnstileKey: 'tracking',
+      turnstileToken,
+    });
+    state.trackingRequestInFlight[kind] = true;
+    mutationButtons.forEach(({ button }) => {
+      if (button) button.disabled = true;
+    });
+    if (langToggle) langToggle.disabled = true;
+    claimTrackingRequestLoadingStatus(request);
     try {
       const { response, data } = await postTracking('request', {
         session_token: state.trackingSessionToken,
         request_type: kind,
         payload,
         ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
-      });
+      }, request.controller);
+      if (!isCurrentTrackingRequest(request)) return;
       if (!response.ok || !data || data.ok === false) {
-        setTrackingStatus(statusEl, resolveTrackingErrorKey(data?.error?.code), 'error');
+        setOwnedTrackingRequestStatus(request, resolveTrackingErrorKey(data?.error?.code), 'error');
         return;
       }
       const outcome = typeof data.outcome === 'string' ? data.outcome.trim().toLowerCase() : 'pending_review';
       if (data.tracking) renderTrackingPayload(data);
       if (outcome === 'rejected') restoreTrackingRequestDraft(kind, draft);
-      setTrackingRequestBanner(outcome);
-      setTrackingStatus(
-        statusEl,
+      setTrackingRequestBanner(outcome, data);
+      setOwnedTrackingRequestStatus(
+        request,
         resolveTrackingRequestStatusKey(outcome),
         outcome === 'rejected' ? 'error' : 'success'
       );
@@ -2098,13 +2658,16 @@
         }
       }
     } catch (error) {
-      setTrackingStatus(
-        statusEl,
+      if (!isCurrentTrackingRequest(request)) return;
+      setOwnedTrackingRequestStatus(
+        request,
         error instanceof Error && error.message === 'missing_tracking_endpoint'
           ? 'track_status_missing_endpoint'
           : 'track_status_error',
         'error'
       );
+    } finally {
+      finishTrackingRequest(request);
     }
   }
 
@@ -2114,7 +2677,7 @@
     const next = knownLangs.has(lang) ? lang : 'en';
     root.lang = next;
     root.dir = next === 'ar' ? 'rtl' : 'ltr';
-    window.localStorage.setItem('masarx_lang', next);
+    writeStorageValue('localStorage', 'masarx_lang', next);
 
     if (langToggle) {
       langToggle.textContent = next === 'ar' ? 'EN' : 'AR';
@@ -2150,6 +2713,8 @@
     applyHomeLinks();
     refreshClientsUiForLang();
     refreshTrackingUiForLang();
+    refreshTrackingRequestsLinks();
+    setDriverReviewNote(state.driverReviewNote);
 
     if (isMotionOn()) applyWordReveal();
   }
@@ -2234,6 +2799,7 @@
 
   if (langToggle) {
     langToggle.addEventListener('click', () => {
+      if (hasTrackingMutationInFlight()) return;
       const next = root.lang === 'ar' ? 'en' : 'ar';
       navigateTo(buildLangHref(next));
     });
@@ -2247,13 +2813,13 @@
 
   const initialMotion =
     (query.get('motion') && knownMotions.has(query.get('motion')) && query.get('motion'))
-    || window.localStorage.getItem('masarx_motion')
+    || readStorageValue('localStorage', 'masarx_motion')
     || root.dataset.motion
     || (prefersReducedMotion ? 'off' : 'on');
 
   const initialTheme =
     (query.get('theme') && knownThemes.has(query.get('theme')) && query.get('theme'))
-    || window.localStorage.getItem('masarx_theme')
+    || readStorageValue('localStorage', 'masarx_theme')
     || root.dataset.theme
     || (prefersDarkTheme ? 'dark' : 'light');
 
@@ -2285,7 +2851,11 @@
       submitContactRequest();
     });
 
-    contactForm.addEventListener('input', () => setIntakeStatus('contact', ''));
+    tenantSignupBtn?.addEventListener('click', () => submitContactRequest('tenant'));
+    contactForm.addEventListener('input', () => {
+      setIntakeStatus('contact', '');
+      setIntakeStatus('tenant', '');
+    });
   }
 
   if (driverForm) {
@@ -2302,7 +2872,19 @@
       e.preventDefault();
       submitDriverStatusLookup();
     });
-    driverStatusForm.addEventListener('input', () => setDriverStatusLookup(''));
+    const clearDriverStatusResult = () => {
+      state.driverStatusLookupGeneration += 1;
+      clearDriverDocuments();
+      setDriverStatusLookup('');
+      setDriverReviewNote('');
+    };
+    driverStatusForm.addEventListener('input', clearDriverStatusResult);
+    driverStatusForm.addEventListener('reset', clearDriverStatusResult);
+  }
+
+  if (driverDocumentsForm) {
+    driverDocumentsForm.addEventListener('submit', (event) => { event.preventDefault(); submitDriverDocuments(); });
+    driverDocumentsForm.querySelector('[data-driver-documents-abandon]')?.addEventListener('click', () => submitDriverDocuments('abandon'));
   }
 
   hydrateDriverStatusToken();
@@ -2316,7 +2898,12 @@
         e.preventDefault();
         submitTrackingLookup();
       });
-      trackLookupForm.addEventListener('input', () => setTrackingStatus(trackLookupStatus, ''));
+      trackLookupForm.addEventListener('input', () => {
+        invalidateTrackingRequests(['session', 'lookup', 'verify']);
+        state.trackingReference = '';
+        saveTrackingSession('');
+        setTrackingStatus(trackLookupStatus, '');
+      });
     }
 
     if (trackVerifyForm) {
@@ -2324,11 +2911,15 @@
         e.preventDefault();
         submitTrackingVerify();
       });
-      trackVerifyForm.addEventListener('input', () => setTrackingStatus(trackVerifyStatus, ''));
+      trackVerifyForm.addEventListener('input', () => {
+        invalidateTrackingRequests('verify');
+        setTrackingStatus(trackVerifyStatus, '');
+      });
     }
 
     if (trackBackBtn) {
       trackBackBtn.addEventListener('click', () => {
+        invalidateTrackingRequests(['session', 'lookup', 'verify']);
         setTrackingStage('lookup');
         setTrackingStatus(trackVerifyStatus, '');
         resetTurnstile();
@@ -2342,13 +2933,22 @@
         resetTrackingFlow({ clearReference: true, scroll: true });
       });
     });
+    trackRequestsLinks.forEach((link) => {
+      link.addEventListener('click', (event) => {
+        if (state.trackingStage !== 'results' && !resetTrackingFlow({ clearReference: false })) {
+          event.preventDefault();
+        }
+      });
+    });
 
     if (trackRescheduleForm) {
       trackRescheduleForm.addEventListener('submit', (e) => {
         e.preventDefault();
         submitTrackingRequest('reschedule_date');
       });
-      trackRescheduleForm.addEventListener('input', () => setTrackingStatus(trackRescheduleStatus, ''));
+      trackRescheduleForm.addEventListener('input', () => {
+        if (!state.trackingRequestInFlight.reschedule_date) setTrackingStatus(trackRescheduleStatus, '');
+      });
     }
 
     if (trackLocationForm) {
@@ -2356,7 +2956,9 @@
         e.preventDefault();
         submitTrackingRequest('location_change');
       });
-      trackLocationForm.addEventListener('input', () => setTrackingStatus(trackLocationStatus, ''));
+      trackLocationForm.addEventListener('input', () => {
+        if (!state.trackingRequestInFlight.location_change) setTrackingStatus(trackLocationStatus, '');
+      });
     }
 
     bindMapPicker(trackMapPicker);
@@ -2366,16 +2968,26 @@
       btn.addEventListener('click', () => openMapOverlay(btn));
     });
     trackMapConfirmEls.forEach((btn) => {
-      btn.addEventListener('click', () => confirmMapPin());
+      btn.addEventListener('click', () => {
+        if (state.trackingRequestInFlight.location_change) return;
+        confirmMapPin();
+      });
     });
     trackMapCenterEls.forEach((btn) => {
-      btn.addEventListener('click', () => setMapPinAtCenter());
+      btn.addEventListener('click', () => {
+        if (state.trackingRequestInFlight.location_change) return;
+        setMapPinAtCenter();
+      });
     });
     trackMapLocateEls.forEach((btn) => {
-      btn.addEventListener('click', () => locateUserOnMap());
+      btn.addEventListener('click', () => {
+        if (state.trackingRequestInFlight.location_change) return;
+        locateUserOnMap();
+      });
     });
     trackMapClearEls.forEach((btn) => {
       btn.addEventListener('click', () => {
+        if (state.trackingRequestInFlight.location_change) return;
         resetMapPin();
         if (trackMapOverlay && !trackMapOverlay.hidden && trackMapDialogPicker) {
           trackMapDialogPicker.focus();
@@ -2391,6 +3003,7 @@
       });
     }
 
+    window.addEventListener('pagehide', () => invalidateTrackingRequests());
     hydrateTrackingSession();
     syncMapPinUi();
   }
@@ -2447,7 +3060,18 @@
 
   // --- Smooth scroll with header offset ---
 
+  const pageHeader = document.querySelector('.header');
+  if (pageHeader) {
+    const updateScrollOffset = () => {
+      root.style.setProperty('--scroll-offset', `${pageHeader.offsetHeight + 16}px`);
+    };
+    updateScrollOffset();
+    window.addEventListener('resize', updateScrollOffset, { passive: true });
+    if ('ResizeObserver' in window) new ResizeObserver(updateScrollOffset).observe(pageHeader);
+  }
+
   document.addEventListener('click', (e) => {
+    if (e.defaultPrevented) return;
     const link = e.target.closest('a[href^="#"]');
     if (!link) return;
     const id = link.getAttribute('href').slice(1);
@@ -2752,26 +3376,6 @@
         cardObs.observe(s);
       }
     });
-  }
-
-  // --- Quote card entrance ---
-
-  if ('IntersectionObserver' in window) {
-    const quoteCard = document.querySelector('.quote-card');
-    if (quoteCard) {
-      if (!isMotionOn()) {
-        quoteCard.classList.add('is-inview');
-      } else {
-        const quoteObs = new IntersectionObserver((entries) => {
-          entries.forEach((e) => {
-            if (!e.isIntersecting) return;
-            e.target.classList.add('is-inview');
-            quoteObs.unobserve(e.target);
-          });
-        }, { threshold: 0.3 });
-        quoteObs.observe(quoteCard);
-      }
-    }
   }
 
   // --- Floating CTA on scroll ---

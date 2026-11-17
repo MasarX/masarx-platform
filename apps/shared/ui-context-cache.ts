@@ -9,6 +9,7 @@ type UiContext = { me: UiMe; navigation: UiNavigation };
 type CacheEntry = {
   value: UiContext;
   expiresAt: number;
+  staleUntil: number;
 };
 
 const DEFAULT_TTL_MS = 20_000;
@@ -49,7 +50,7 @@ function hashToken(token: string) {
 
 function pruneExpired(now: number) {
   for (const [key, entry] of contextCache.entries()) {
-    if (entry.expiresAt <= now) {
+    if (entry.staleUntil <= now) {
       contextCache.delete(key);
     }
   }
@@ -84,8 +85,8 @@ export async function loadUiContextCached(params: {
   const cachedStale =
     cached &&
     staleIfErrorMs > 0 &&
-    cached.expiresAt + staleIfErrorMs > now
-      ? cached.value
+    cached.staleUntil > now
+      ? cached
       : null;
 
   const inflight = contextInflight.get(cacheKey);
@@ -97,19 +98,25 @@ export async function loadUiContextCached(params: {
     .load()
     .then((value) => {
       const expiresAt = Date.now() + ttlMs;
-      contextCache.set(cacheKey, { value, expiresAt });
+      contextCache.set(cacheKey, {
+        value,
+        expiresAt,
+        staleUntil: expiresAt + staleIfErrorMs,
+      });
       pruneExpired(Date.now());
       return value;
     })
     .catch((error) => {
       if (
         cachedStale &&
+        cachedStale.staleUntil > Date.now() &&
         (isRetriableNetworkError(error) || isRetriableSupabaseError(error))
       ) {
-        const expiresAt = Date.now() + ttlMs;
-        contextCache.set(cacheKey, { value: cachedStale, expiresAt });
+        // Throttle retries without extending the last successful load's stale window.
+        const expiresAt = Math.min(Date.now() + ttlMs, cachedStale.staleUntil);
+        contextCache.set(cacheKey, { ...cachedStale, expiresAt });
         pruneExpired(Date.now());
-        return cachedStale;
+        return cachedStale.value;
       }
       throw error;
     })

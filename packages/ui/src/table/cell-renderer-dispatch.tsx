@@ -145,6 +145,7 @@ export function renderTypedCell(
   rawValue: unknown,
   cellDisplay: CellDisplay,
   isPrimary: boolean,
+  textColor?: React.CSSProperties["color"],
 ): React.ReactNode {
   const renderType = resolveRenderType(column);
 
@@ -200,12 +201,17 @@ export function renderTypedCell(
   // Fallback: default text display
   return (
     <span className={cn("block max-w-xs", !isPrimary && "text-ui-muted")}>
-      <span className="block truncate" title={cellDisplay.primaryTitle}>
+      <span
+        className="block truncate"
+        style={textColor ? { color: textColor } : undefined}
+        title={cellDisplay.primaryTitle}
+      >
         {cellDisplay.primary}
       </span>
       {cellDisplay.secondary ? (
         <span
           className="block truncate text-[10px] text-ui-muted"
+          style={textColor ? { color: textColor } : undefined}
           title={cellDisplay.secondaryTitle}
         >
           {cellDisplay.secondary}

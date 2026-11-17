@@ -24,6 +24,16 @@ export type PrintProgressWidgetStatusSnapshot = {
   timingSource?: string | null;
   artifactPersisted?: boolean | null;
   jobCompletionPending?: boolean | null;
+  printAsyncRequestId?: string | number | null;
+  printAsyncCompleted?: boolean | null;
+  bundleAsyncRequestId?: string | number | null;
+  bundleAsyncCompleted?: boolean | null;
+  labelJobId?: string | number | null;
+  labelId?: string | number | null;
+  labelVersionId?: string | number | null;
+  activeVersionId?: string | number | null;
+  printMode?: string | null;
+  artifactKind?: string | null;
 };
 
 export type PrintProgressWidgetProps = {
@@ -38,6 +48,7 @@ export type PrintProgressWidgetProps = {
   technicalDetailsOpen?: boolean;
   runOutputsHref?: string | null;
   statusSnapshot?: PrintProgressWidgetStatusSnapshot | null;
+  readbackStopped?: boolean;
   onExpand: () => void;
   onHide: () => void;
   onDismiss: () => void;
@@ -48,7 +59,25 @@ export type PrintProgressWidgetProps = {
 
 type Tone = "info" | "success" | "danger";
 
-const t = createUiTranslator("ui.resourceActions");
+const printSourceLabels: Record<string, string> = {
+  context: "workflowOutput",
+  metadata: "workflowMetadata",
+  execute_result: "executionResult",
+  step_result: "stepResult",
+  execute_async_response: "asyncResult",
+  async_response: "asyncResult",
+  file_path: "savedFile",
+  fresh_ready_url: "freshDownload",
+  fresh_ready_file: "freshFile",
+  workflow_output_download: "workflowOutput",
+  resource_detail: "resourceRecord",
+  stage_execute_ms: "executionTiming",
+  function_total_ms: "totalTiming",
+  stage_render_ms: "renderTiming",
+  stage_bundle_wait_ms: "bundleWaitTiming",
+  stage_bundle_ms: "bundleTiming",
+  missing: "notAvailable",
+};
 
 function SpinnerIcon({ className }: { className?: string }) {
   return (
@@ -113,6 +142,7 @@ export function resolvePrintProgressWidgetStateLabel(
   status: PrintProgressVisualStatus,
   selectionCount: number
 ) {
+  const t = createUiTranslator("ui.resourceActions");
   if (status === "queued" || status === "checking") {
     return t("printProgress.states.preparing");
   }
@@ -134,6 +164,7 @@ export function resolvePrintProgressWidgetStateLabel(
 }
 
 export function resolvePrintProgressWidgetTitle(selectionCount: number) {
+  const t = createUiTranslator("ui.resourceActions");
   if (selectionCount === 1) return t("printProgress.titleSingle");
   return t("printProgress.titleMulti", { count: selectionCount });
 }
@@ -144,13 +175,43 @@ export function resolvePrintProgressWidgetHelperText(params: {
   failureReason?: string | null;
   freshExpectedCount?: number | null;
   freshReadyCount?: number | null;
+  artifactPersisted?: boolean | null;
+  jobCompletionPending?: boolean | null;
 }) {
-  const { status, selectionCount, failureReason, freshExpectedCount, freshReadyCount } =
-    params;
+  const t = createUiTranslator("ui.resourceActions");
+  const {
+    status,
+    selectionCount,
+    failureReason,
+    freshExpectedCount,
+    freshReadyCount,
+    artifactPersisted,
+    jobCompletionPending,
+  } = params;
   if (status === "failed") {
     return failureReason?.trim() || t("printProgress.detail.failed");
   }
   if (status === "downloading" || status === "completed") {
+    if (
+      selectionCount > 1 &&
+      typeof freshExpectedCount === "number" &&
+      Number.isFinite(freshExpectedCount) &&
+      freshExpectedCount > 0 &&
+      typeof freshReadyCount === "number" &&
+      Number.isFinite(freshReadyCount) &&
+      freshReadyCount < freshExpectedCount
+    ) {
+      return t("printProgress.detail.readyProgress", {
+        ready: Math.max(0, freshReadyCount),
+        expected: Math.max(0, freshExpectedCount),
+      });
+    }
+    if (jobCompletionPending === true) {
+      return t("printProgress.detail.jobCompletionPending");
+    }
+    if (artifactPersisted === false) {
+      return t("printProgress.detail.artifactPersistencePending");
+    }
     return t("printProgress.detail.downloading");
   }
   if (
@@ -184,9 +245,6 @@ export function resolvePrintProgressWidgetProgress(params: {
   freshReadyCount?: number | null;
 }) {
   const { selectionCount, status, freshExpectedCount, freshReadyCount } = params;
-  if (status === "completed") {
-    return { determinate: true, percent: 100 };
-  }
   if (
     selectionCount > 1 &&
     typeof freshExpectedCount === "number" &&
@@ -201,10 +259,14 @@ export function resolvePrintProgressWidgetProgress(params: {
       percent: Math.max(0, Math.min(100, Math.round((ready / freshExpectedCount) * 100))),
     };
   }
+  if (status === "completed") {
+    return { determinate: true, percent: 100 };
+  }
   return { determinate: false, percent: null };
 }
 
-function ProgressIcon({ status }: { status: PrintProgressVisualStatus }) {
+function ProgressIcon({ status, stopped }: { status: PrintProgressVisualStatus; stopped?: boolean }) {
+  if (stopped) return <AlertCircleIcon className="text-[rgb(var(--ui-info))]" />;
   if (status === "completed") {
     return <CheckCircleIcon className="text-[rgb(var(--ui-success))]" />;
   }
@@ -212,6 +274,20 @@ function ProgressIcon({ status }: { status: PrintProgressVisualStatus }) {
     return <AlertCircleIcon className="text-[rgb(var(--ui-danger))]" />;
   }
   return <SpinnerIcon className="text-[rgb(var(--ui-info))]" />;
+}
+
+function formatBackendRequestState(
+  requestId: string | number | null | undefined,
+  completed: boolean | null | undefined
+) {
+  const t = createUiTranslator("ui.resourceActions");
+  if (requestId === null || requestId === undefined || requestId === "") {
+    return null;
+  }
+  if (typeof completed === "boolean") {
+    return `${requestId} (${t("printProgress.diagnostics.requestCompleted", { value: t(completed ? "printProgress.diagnostics.yes" : "printProgress.diagnostics.no") })})`;
+  }
+  return String(requestId);
 }
 
 function ProgressBar({
@@ -264,6 +340,7 @@ export function PrintProgressWidget({
   technicalDetailsOpen = false,
   runOutputsHref,
   statusSnapshot,
+  readbackStopped = false,
   onExpand,
   onHide,
   onDismiss,
@@ -271,28 +348,71 @@ export function PrintProgressWidget({
   onToggleTechnicalDetails,
   onOpenRun,
 }: PrintProgressWidgetProps) {
-  const tone = resolvePrintProgressWidgetTone(status);
-  const stateLabel = resolvePrintProgressWidgetStateLabel(status, selectionCount);
+  const t = createUiTranslator("ui.resourceActions");
+  const sourceLabel = (value: string) => t(
+    `printProgress.diagnostics.sources.${Object.hasOwn(printSourceLabels, value) ? printSourceLabels[value] : "unknown"}`
+  );
   const title = resolvePrintProgressWidgetTitle(selectionCount);
-  const helperText = resolvePrintProgressWidgetHelperText({
+  const observedHelperText = resolvePrintProgressWidgetHelperText({
     status,
     selectionCount,
     failureReason: statusSnapshot?.failureReason,
     freshExpectedCount: statusSnapshot?.freshExpectedCount,
     freshReadyCount: statusSnapshot?.freshReadyCount,
+    artifactPersisted: statusSnapshot?.artifactPersisted,
+    jobCompletionPending: statusSnapshot?.jobCompletionPending,
   });
+  const backendReadbackPending =
+    status !== "failed" &&
+    (statusSnapshot?.jobCompletionPending === true ||
+      statusSnapshot?.artifactPersisted === false ||
+      (selectionCount > 1 &&
+        typeof statusSnapshot?.freshExpectedCount === "number" &&
+        Number.isFinite(statusSnapshot.freshExpectedCount) &&
+        statusSnapshot.freshExpectedCount > 0 &&
+        typeof statusSnapshot?.freshReadyCount === "number" &&
+        Number.isFinite(statusSnapshot.freshReadyCount) &&
+        statusSnapshot.freshReadyCount < statusSnapshot.freshExpectedCount));
+  const readbackUnverified = readbackStopped && status === "completed" &&
+    (backendReadbackPending || statusSnapshot?.artifactPersisted !== true);
+  const visualStatus = readbackUnverified ? "checking" : status;
   const progress = resolvePrintProgressWidgetProgress({
     selectionCount,
-    status,
+    status: visualStatus,
     freshExpectedCount: statusSnapshot?.freshExpectedCount,
     freshReadyCount: statusSnapshot?.freshReadyCount,
   });
-  const isTerminal = status === "completed" || status === "failed";
+  const showProgress = !readbackUnverified || progress.determinate;
+  const tone = resolvePrintProgressWidgetTone(visualStatus);
+  const stateLabel = readbackUnverified
+    ? t("printProgress.readbackUnverified")
+    : resolvePrintProgressWidgetStateLabel(status, selectionCount);
+  const helperText = readbackUnverified
+    ? t("printProgress.readbackStopped", { detail: observedHelperText })
+    : observedHelperText;
+  const isTerminal =
+    (status === "completed" || status === "failed") && (!backendReadbackPending || readbackStopped);
   const detailsAvailable = Boolean(
     workflowRunId ||
       runOutputsHref ||
       statusSnapshot?.timingSource ||
-      statusSnapshot?.outputSource
+      statusSnapshot?.outputSource ||
+      statusSnapshot?.printAsyncRequestId ||
+      statusSnapshot?.bundleAsyncRequestId ||
+      statusSnapshot?.labelJobId ||
+      statusSnapshot?.labelId ||
+      statusSnapshot?.labelVersionId ||
+      statusSnapshot?.activeVersionId ||
+      statusSnapshot?.printMode ||
+      statusSnapshot?.artifactKind
+  );
+  const printAsyncState = formatBackendRequestState(
+    statusSnapshot?.printAsyncRequestId,
+    statusSnapshot?.printAsyncCompleted
+  );
+  const bundleAsyncState = formatBackendRequestState(
+    statusSnapshot?.bundleAsyncRequestId,
+    statusSnapshot?.bundleAsyncCompleted
   );
   const pillToneClass =
     tone === "success"
@@ -310,9 +430,9 @@ export function PrintProgressWidget({
         onClick={onExpand}
       >
         <span className="flex items-center gap-2">
-          <ProgressIcon status={status} />
+          <ProgressIcon status={visualStatus} stopped={readbackUnverified} />
           <span className="text-sm font-medium text-ui-ink">
-            {status === "completed"
+            {status === "completed" && !readbackUnverified
               ? t("printProgress.minimized.completed")
               : stateLabel}
           </span>
@@ -325,8 +445,9 @@ export function PrintProgressWidget({
   return (
     <section
       className="fixed inset-x-3 bottom-3 z-40 rounded-2xl border border-ui-border bg-ui-paper/95 p-4 shadow-2xl backdrop-blur md:inset-x-auto md:right-4 md:bottom-4 md:w-[360px]"
-      role="status"
-      aria-live="polite"
+      role={status === "failed" ? "alert" : "status"}
+      aria-live={status === "failed" ? "assertive" : "polite"}
+      aria-atomic="true"
       aria-busy={isTerminal ? undefined : "true"}
       data-testid={testId}
     >
@@ -334,7 +455,7 @@ export function PrintProgressWidget({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <div className="flex items-center gap-2">
-              <ProgressIcon status={status} />
+              <ProgressIcon status={visualStatus} stopped={readbackUnverified} />
               <p className="text-sm font-semibold text-ui-ink">{title}</p>
             </div>
             <p className="text-sm text-ui-muted">{helperText}</p>
@@ -347,7 +468,7 @@ export function PrintProgressWidget({
           </Badge>
         </div>
 
-        <div className="space-y-2">
+        {showProgress ? <div className="space-y-2">
           <ProgressBar
             label={stateLabel}
             determinate={progress.determinate}
@@ -362,7 +483,7 @@ export function PrintProgressWidget({
               <span>{t("printProgress.progressLive")}</span>
             )}
           </div>
-        </div>
+        </div> : null}
 
         {technicalDetailsOpen && detailsAvailable ? (
           <div
@@ -392,14 +513,14 @@ export function PrintProgressWidget({
               {statusSnapshot?.timingSource ? (
                 <div>
                   {t("printProgress.diagnostics.timingSource", {
-                    value: statusSnapshot.timingSource,
+                    value: sourceLabel(statusSnapshot.timingSource),
                   })}
                 </div>
               ) : null}
               {statusSnapshot?.outputSource ? (
                 <div>
                   {t("printProgress.diagnostics.outputSource", {
-                    value: statusSnapshot.outputSource,
+                    value: sourceLabel(statusSnapshot.outputSource),
                   })}
                 </div>
               ) : null}
@@ -418,6 +539,62 @@ export function PrintProgressWidget({
                     value: statusSnapshot.jobCompletionPending
                       ? t("printProgress.diagnostics.yes")
                       : t("printProgress.diagnostics.no"),
+                  })}
+                </div>
+              ) : null}
+              {printAsyncState ? (
+                <div>
+                  {t("printProgress.diagnostics.printAsyncRequest", {
+                    value: printAsyncState,
+                  })}
+                </div>
+              ) : null}
+              {bundleAsyncState ? (
+                <div>
+                  {t("printProgress.diagnostics.bundleAsyncRequest", {
+                    value: bundleAsyncState,
+                  })}
+                </div>
+              ) : null}
+              {statusSnapshot?.labelJobId ? (
+                <div>
+                  {t("printProgress.diagnostics.labelJob", {
+                    value: statusSnapshot.labelJobId,
+                  })}
+                </div>
+              ) : null}
+              {statusSnapshot?.labelId ? (
+                <div>
+                  {t("printProgress.diagnostics.label", {
+                    value: statusSnapshot.labelId,
+                  })}
+                </div>
+              ) : null}
+              {statusSnapshot?.labelVersionId ? (
+                <div>
+                  {t("printProgress.diagnostics.labelVersion", {
+                    value: statusSnapshot.labelVersionId,
+                  })}
+                </div>
+              ) : null}
+              {statusSnapshot?.activeVersionId ? (
+                <div>
+                  {t("printProgress.diagnostics.activeVersion", {
+                    value: statusSnapshot.activeVersionId,
+                  })}
+                </div>
+              ) : null}
+              {statusSnapshot?.printMode ? (
+                <div>
+                  {t("printProgress.diagnostics.printMode", {
+                    value: statusSnapshot.printMode,
+                  })}
+                </div>
+              ) : null}
+              {statusSnapshot?.artifactKind ? (
+                <div>
+                  {t("printProgress.diagnostics.artifactKind", {
+                    value: statusSnapshot.artifactKind,
                   })}
                 </div>
               ) : null}

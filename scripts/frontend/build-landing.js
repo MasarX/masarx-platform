@@ -310,6 +310,7 @@ function buildHeaders({
   tenantSignupEndpoint,
   driverSignupEndpoint,
   driverApplicationStatusEndpoint,
+  driverApplicationDocumentsEndpoint,
   clientsEndpoint,
   trackingEndpoint,
   cspReportUri,
@@ -321,6 +322,7 @@ function buildHeaders({
     tenantSignupEndpoint,
     driverSignupEndpoint,
     driverApplicationStatusEndpoint,
+    driverApplicationDocumentsEndpoint,
     clientsEndpoint,
     trackingEndpoint,
   ];
@@ -496,8 +498,9 @@ function main() {
   const appUrl = normalizeAbsoluteUrl(process.env.LANDING_APP_URL);
   const contactEndpoint = normalizeContactEndpoint(process.env.LANDING_CONTACT_ENDPOINT);
   const tenantSignupEndpoint = normalizeContactEndpoint(
-    process.env.LANDING_TENANT_SIGNUP_ENDPOINT || contactEndpoint
+    process.env.LANDING_TENANT_SIGNUP_ENDPOINT
   );
+  const driverSignupEntryKey = String(process.env.LANDING_DRIVER_SIGNUP_ENTRY_ID || "").trim();
   const driverSignupEndpoint = normalizeContactEndpoint(
     process.env.LANDING_DRIVER_SIGNUP_ENDPOINT
   );
@@ -505,6 +508,7 @@ function main() {
     process.env.LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT ||
       process.env.LANDING_DRIVER_STATUS_ENDPOINT
   );
+  const driverApplicationDocumentsEndpoint = normalizeContactEndpoint(process.env.LANDING_DRIVER_APPLICATION_DOCUMENTS_ENDPOINT);
   const trackingEndpoint = normalizeContactEndpoint(process.env.LANDING_TRACKING_ENDPOINT);
   const clientsEndpoint = normalizePathOrAbsoluteUrl(process.env.LANDING_CLIENTS_ENDPOINT);
   const turnstileSiteKey = String(process.env.LANDING_TURNSTILE_SITE_KEY || "").trim();
@@ -556,7 +560,9 @@ function main() {
       contactEndpoint,
       tenantSignupEndpoint,
       driverSignupEndpoint,
+      driverSignupEntryKey,
       driverApplicationStatusEndpoint,
+      driverApplicationDocumentsEndpoint,
       trackingEndpoint,
       trackingEndpoint,
       clientsEndpoint,
@@ -689,6 +695,7 @@ function main() {
       tenantSignupEndpoint,
       driverSignupEndpoint,
       driverApplicationStatusEndpoint,
+      driverApplicationDocumentsEndpoint,
       trackingEndpoint,
       clientsEndpoint,
       cspReportUri,

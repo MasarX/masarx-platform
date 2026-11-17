@@ -365,6 +365,7 @@ BEGIN
     400,
     jsonb_strip_nulls(jsonb_build_object(
       'api_gateway_request_id', v_request_id,
+      'api_gateway_route_id', v_cancel_route_id,
       'api_gateway_path_params', jsonb_build_object(
         'companyId', '362',
         'shipmentId', 'CANCEL-053'

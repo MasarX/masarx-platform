@@ -32,6 +32,82 @@ function makeDataTransfer(data: string) {
 }
 
 describe("LabelCanvas drag-drop from catalog", () => {
+  it("dragging a legacy right anchor uses max dimensions without adding explicit dimensions", () => {
+    const legacy = { type: "text" as const, x: 270, y: 100, max_width: 100, max_height: 30, align: "right" as const, fallback: "Text" };
+    const changed = jest.fn();
+    const { container } = render(<LabelCanvas blocks={[legacy]} onBlocksChange={changed} />);
+    fireEvent.mouseDown(container.querySelector("[data-block-index='0']")!, { clientX: 270, clientY: 100, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 10, clientY: 430 });
+    fireEvent.mouseUp(window);
+    expect(changed.mock.calls.at(-1)![0]).toEqual([{ ...legacy, x: 100, y: 402 }]);
+  });
+
+  it("keeps untouched legacy block identity and geometry after delete and reorder", () => {
+    const first: TemplateBlock = { type: "text", x: 0, y: 0, fallback: "first" };
+    const legacy: TemplateBlock = { type: "text", x: 270, y: 100, align: "right", fallback: "sender_phone" };
+    const changed = jest.fn();
+    const { rerender } = render(<LabelCanvas blocks={[first, legacy]} selectedBlockIndex={0} onBlocksChange={changed} />);
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(changed.mock.calls.at(-1)![0]).toEqual([legacy]);
+    expect(changed.mock.calls.at(-1)![0][0]).toBe(legacy);
+    rerender(<LabelCanvas blocks={[first, legacy]} selectedBlockIndex={1} onBlocksChange={changed} />);
+    fireEvent.keyDown(window, { key: "[", ctrlKey: true });
+    expect(changed.mock.calls.at(-1)![0]).toEqual([legacy, first]);
+    expect(changed.mock.calls.at(-1)![0][0]).toBe(legacy);
+    expect(changed.mock.calls.at(-1)![0][1]).toBe(first);
+  });
+
+  it("inline text edits preserve legacy right anchors and absent dimensions", () => {
+    const legacy: TemplateBlock = { type: "text", x: 270, y: 100, align: "right", fallback: "sender_phone" };
+    const changed = jest.fn();
+    const { container, getByTestId } = render(<LabelCanvas blocks={[legacy]} onBlocksChange={changed} />);
+    fireEvent.doubleClick(container.querySelector("[data-block-index='0']")!);
+    fireEvent.change(getByTestId("canvas-inline-editor"), { target: { value: "Updated phone" } });
+    fireEvent.keyDown(getByTestId("canvas-inline-editor"), { key: "Enter" });
+    expect(changed.mock.calls.at(-1)![0][0]).toEqual({ ...legacy, fallback: "Updated phone" });
+  });
+
+  it("starts a direct block drag from the initiating event and wires resize to persisted blocks", () => {
+    const initial: TemplateBlock = { type: "text", x: 10, y: 20, width: 100, height: 40 };
+    const changed = jest.fn();
+    function Editor() {
+      const [blocks, setBlocks] = React.useState([initial]);
+      return <LabelCanvas blocks={blocks} onBlocksChange={(next) => { changed(next); setBlocks(next); }} />;
+    }
+    const { container, getByTestId } = render(<Editor />);
+    const block = container.querySelector("[data-block-index='0']")!;
+    fireEvent.mouseDown(block, { clientX: 45, clientY: 75, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 65, clientY: 105 });
+    fireEvent.mouseUp(window);
+    expect(changed.mock.calls.at(-1)![0][0]).toMatchObject({ x: 30, y: 50 });
+    fireEvent.mouseDown(getByTestId("label-canvas-resize-se"), { clientX: 130, clientY: 90, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 150, clientY: 110 });
+    fireEvent.mouseUp(window);
+    expect(changed.mock.calls.at(-1)![0][0]).toMatchObject({ x: 30, y: 50, width: 120, height: 60 });
+  });
+
+  it.each([{ readOnly: true }, { locked: true }])("locked/readonly initiation does not mutate: %p", ({ readOnly, locked }) => {
+    const changed = jest.fn();
+    const { container } = render(<LabelCanvas readOnly={readOnly} blocks={[{ type: "text", x: 10, y: 10, width: 80, height: 20, locked }]} onBlocksChange={changed} />);
+    fireEvent.mouseDown(container.querySelector("[data-block-index='0']")!, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 50 });
+    fireEvent.mouseUp(window);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it("ignores secondary-button drags and ends a gesture on window blur", () => {
+    const changed = jest.fn();
+    const { container } = render(<LabelCanvas blocks={[{ type: "text", x: 10, y: 10, width: 80, height: 20 }]} onBlocksChange={changed} />);
+    const block = container.querySelector("[data-block-index='0']")!;
+    fireEvent.mouseDown(block, { clientX: 10, clientY: 10, button: 2 });
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 50 });
+    expect(changed).not.toHaveBeenCalled();
+    fireEvent.mouseDown(block, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.blur(window);
+    fireEvent.mouseMove(window, { clientX: 50, clientY: 50 });
+    expect(changed).not.toHaveBeenCalled();
+  });
+
   it("accepts a drop with valid JSON and adds a block", () => {
     const blocks: TemplateBlock[] = [];
     const onBlocksChange = jest.fn();

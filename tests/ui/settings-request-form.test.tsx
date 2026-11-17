@@ -115,3 +115,38 @@ describe("SettingsRequestForm", () => {
     confirmSpy.mockRestore();
   });
 });
+
+
+describe("label provider credential handling", () => {
+  beforeEach(() => { state = { status: "idle" as const, message: undefined }; isPending = false; });
+it("provider form masks and clears secret after successful submission", () => {
+  const props = { action: async () => ({ status: "success" as const }), categories: [{ category: "label_provider", allowedScopes: ["tenant"] }],
+    selectedCategory: "label_provider", selectedScopeType: "tenant", selectedScopeId: "tenant",
+    defaultSettingsJson: "", providerConfigured: false, testIdPrefix: "provider", previewHref: "/settings/request" };
+  const view = renderWithIntl(<SettingsRequestForm {...props} />);
+  const secret = screen.getByLabelText("provider.secret");
+  expect(secret).toHaveAttribute("type", "password"); expect(secret).toHaveValue("");
+  expect(screen.queryByTestId("provider-request-json")).not.toBeInTheDocument();
+  fireEvent.change(secret, { target: { value: "entered-sentinel" } });
+  state = { status: "success" as never, message: undefined };
+  view.rerender(<SettingsRequestForm {...props} />);
+  expect(secret).toHaveValue("");
+});
+
+it.each(["category", "scope-type", "scope-id"])("clears entered provider credentials when %s changes", (selection) => {
+  state = { status: "idle" as const, message: undefined };
+  const props = { action: async () => ({ status: "success" as const }),
+    categories: [{ category: "label_provider", allowedScopes: ["tenant", "global"] }, { category: "other", allowedScopes: ["tenant"] }],
+    selectedCategory: "label_provider", selectedScopeType: "tenant", selectedScopeId: "tenant",
+    defaultSettingsJson: "", providerConfigured: false, testIdPrefix: "clear-provider", previewHref: "/settings/request" };
+  renderWithIntl(<SettingsRequestForm {...props} />);
+  const secret = screen.getByLabelText("provider.secret");
+  const url = screen.getByLabelText("provider.url");
+  fireEvent.change(secret, { target: { value: "entered-sentinel" } });
+  fireEvent.change(url, { target: { value: "https://renderer.example.test" } });
+  fireEvent.change(screen.getByTestId("clear-provider-preview-" + selection), {
+    target: { value: selection === "category" ? "other" : selection === "scope-type" ? "global" : "another-tenant" },
+  });
+  expect(secret).toHaveValue(""); expect(url).toHaveValue("");
+});
+});

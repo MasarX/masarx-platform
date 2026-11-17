@@ -1,4 +1,5 @@
 export { AppShell } from "./app-shell";
+export { VehicleCreatePage } from "./vehicle-create-page";
 export { PageContainer } from "./page-container";
 export { AccessPage } from "./access-page";
 export { DashboardPage } from "./dashboard-page";
@@ -6,6 +7,7 @@ export { AccessPolicyPage } from "./access-policy-page";
 export { AccessPolicyRequestPage } from "./access-policy-request-page";
 export { SettingsRequestPage } from "./settings-request-page";
 export { OnboardingReadinessPage } from "./onboarding-readiness-page";
+export { OrganizationProfileEditor } from "./organization-profile-editor";
 export { CommandCatalogPage } from "./command-catalog-page";
 export { AuthGate } from "./auth-gate";
 export { AuthSignIn } from "./auth-sign-in";
@@ -110,7 +112,7 @@ export { ResourceDetailModal } from "./resource-detail-modal";
 export { RelatedSectionInline } from "./detail/related-section-inline";
 export { ResourceDownloadAction } from "./resource-download-action";
 export { buildTestId } from "./test-ids";
-export { createUiTranslator } from "./i18n";
+export { createUiTranslator, localizeNavigation } from "./i18n";
 export {
   reportClientError,
   reportUiEvent,
@@ -147,6 +149,13 @@ export { CustomerShipmentChangesPage } from "./customer-shipment-changes-page";
 export { CustomerShipmentChangeReviewForm } from "./customer-shipment-change-review-form";
 export { ShipmentManualCreateForm } from "./shipment-manual-create-form";
 export { ShipmentManualCreatePage } from "./shipment-manual-create-page";
+export { ServiceCatalogForm } from "./service-catalog-form";
+export type {
+  ServiceCatalogLevel,
+  ServiceCatalogOffering,
+  ServiceCatalogLocation,
+} from "./service-catalog-form";
+export { ServiceCatalogPage } from "./service-catalog-page";
 export { ShipmentResourcePage } from "./shipment-resource-page";
 export { WarehouseTransferManifestCreateForm } from "./warehouse-transfer-manifest-create-form";
 export { WarehouseTransferManifestCreatePage } from "./warehouse-transfer-manifest-create-page";
@@ -199,8 +208,10 @@ export type { WorkflowRunLogStep } from "./workflow-run-logs-model";
 export { WorkflowTemplateStudioPage } from "./workflow-template-studio-page";
 export { WorkflowTemplateCreatePage } from "./workflow-template-create-page";
 export { WorkflowOverlapExplorerPage } from "./workflow-overlap-explorer-page";
+export { CodReconciliationPage } from "./cod-reconciliation-page";
 export { resolvePaginationSettings } from "./pagination-utils";
 export { labelFromKey } from "./resource-query";
 export { buildHref } from "./url";
+export { resolveSafeHref } from "./url-guard";
 export { useOptimisticMutation } from "./optimistic";
 export { cn, formatUiError } from "./utils";

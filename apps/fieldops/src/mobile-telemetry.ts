@@ -175,24 +175,38 @@ async function clearStoredEvents() {
   }
 }
 
-export async function clearMobileTelemetryEvents() {
-  await clearStoredEvents();
+// ponytail: Serialize this JS runtime only; SecureStore is not a cross-process
+// transaction or an audit ledger. The existing bounded diagnostic cap still applies.
+let telemetryOperation: Promise<void> = Promise.resolve();
+
+function serializeTelemetry<T>(operation: () => Promise<T>): Promise<T> {
+  const result = telemetryOperation.then(operation);
+  telemetryOperation = result.then(() => undefined, () => undefined);
+  return result;
 }
 
-export async function bufferMobileTelemetryEvent(event: MobileTelemetryEvent) {
+export function clearMobileTelemetryEvents(): Promise<void> {
+  return serializeTelemetry(clearStoredEvents);
+}
+
+export function bufferMobileTelemetryEvent(event: MobileTelemetryEvent): Promise<void> {
   const normalized = normalizeEvent(event);
-  if (!normalized) return;
-  const existing = await readStoredEvents();
-  existing.push(normalized);
-  await writeStoredEvents(existing);
+  if (!normalized) return Promise.resolve();
+  return serializeTelemetry(async () => {
+    const existing = await readStoredEvents();
+    existing.push(normalized);
+    await writeStoredEvents(existing);
+  });
 }
 
-export async function flushMobileTelemetryEvents(params: {
+export function flushMobileTelemetryEvents(params: {
   enqueue: (events: MobileTelemetryEvent[]) => Promise<void>;
 }): Promise<number> {
-  const existing = await readStoredEvents();
-  if (existing.length === 0) return 0;
-  await params.enqueue(existing);
-  await clearStoredEvents();
-  return existing.length;
+  return serializeTelemetry(async () => {
+    const existing = await readStoredEvents();
+    if (existing.length === 0) return 0;
+    await params.enqueue(existing);
+    await clearStoredEvents();
+    return existing.length;
+  });
 }

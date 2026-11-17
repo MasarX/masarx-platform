@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import { loadDemoContext } from "./utils/demo-accounts";
@@ -30,12 +28,6 @@ type FixtureSummary = {
 
 const demoContext = loadDemoContext();
 const strict = isStrictE2EEnv();
-const fixturePath = path.resolve(
-  process.cwd(),
-  "tmp",
-  "customer-shipment-change-review-fixtures.json",
-);
-
 function provisionFixtures(): FixtureSummary {
   const result = spawnSync(
     process.execPath,
@@ -58,11 +50,7 @@ function provisionFixtures(): FixtureSummary {
     );
   }
 
-  if (!fs.existsSync(fixturePath)) {
-    throw new Error(`fixture summary missing: ${fixturePath}`);
-  }
-
-  return JSON.parse(fs.readFileSync(fixturePath, "utf8")) as FixtureSummary;
+  return JSON.parse(result.stdout.trim()) as FixtureSummary;
 }
 
 function normalizeTexts(values: string[]) {
@@ -121,6 +109,7 @@ test.describe("console customer shipment changes", () => {
     await expect(page.locator("tbody")).toContainText(
       fixtures.support_cases.applied_location_change.change_summary,
     );
+    await expect(page.locator("tbody")).toContainText("pending_review");
 
     const headers = normalizeTexts(await page.locator("thead th").allTextContents());
     expect(headers).toEqual([
@@ -164,7 +153,9 @@ test.describe("console customer shipment changes", () => {
     await expect(
       page.locator('[data-testid="console-customer-shipment-changes-review-blocked"]'),
     ).toContainText("already resolved");
-    await expect(page.getByText("Current / Applied")).toBeVisible();
+    await expect(
+      page.locator('[data-testid$="-review-success"]'),
+    ).toContainText("Backend readback:");
     await page.screenshot({
       path: testInfo.outputPath("customer-shipment-changes-detail-applied.png"),
       fullPage: true,
@@ -197,7 +188,11 @@ test.describe("console customer shipment changes", () => {
         timeout: 60_000,
       },
     );
-    await expect(page.getByText(/Last apply error/i)).toContainText("invalid_window");
+    await expect(page.getByText("Current / Applied")).toBeVisible();
+    await expect(
+      page.getByText(fixtures.support_cases.timing_change.change_summary).first(),
+    ).toBeVisible();
+    await expect(page.getByText(/Last apply error/i)).toHaveCount(0);
 
     await page.goto(`${basePath}/operations/public-tracking-requests`, {
       waitUntil: "domcontentloaded",
@@ -207,7 +202,12 @@ test.describe("console customer shipment changes", () => {
     await expect(
       page.locator('[data-testid="console-public-tracking-requests-ready"]').first(),
     ).toBeVisible();
-    await expect(reviewTableBody).toContainText("pending_review");
+    await expect(reviewTableBody).not.toContainText(
+      fixtures.support_cases.pending_review_primary.change_summary,
+    );
+    await expect(reviewTableBody).not.toContainText(
+      fixtures.support_cases.pending_review_secondary.change_summary,
+    );
 
     await page.getByRole("link", { name: "Applied" }).click();
     await expect(reviewTableBody).toContainText(

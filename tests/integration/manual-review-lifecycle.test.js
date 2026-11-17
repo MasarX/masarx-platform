@@ -100,8 +100,8 @@ describe('Manual Review Lifecycle via Engine', () => {
           organization_id: shipment.organization_id,
           client_id: shipment.client_id,
           shipment_id: shipment.id,
-          resource_type: 'manual_review_test',
-          resource_id: idempotencyKey,
+          resource_type: 'shipment',
+          resource_id: shipment.id,
           idempotency_key: idempotencyKey,
           payload: {
             organization_id: shipment.organization_id,

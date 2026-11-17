@@ -115,7 +115,7 @@ allowed_mime_types = ["application/pdf", "image/png", "image/jpeg"]
 [storage.buckets."label-render-assets"]
 public = false
 file_size_limit = "10MiB"
-allowed_mime_types = ["image/png", "image/jpeg", "image/svg+xml", "application/pdf", "font/ttf", "font/otf", "font/woff", "font/woff2"]
+allowed_mime_types = ["image/png", "image/jpeg", "image/webp", "image/svg+xml", "application/pdf", "font/ttf", "font/otf", "font/woff", "font/woff2"]
 
 [storage.buckets."fieldops-evidence"]
 public = false
@@ -210,10 +210,13 @@ otp_expiry = 3600
 # admin_email = "nmnjvxnqxwyqlkktzhnqysmo@example.invalid"
 # sender_name = "Admin"
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+# Repository-local Auth only. Hosted templates/allow-lists require an owner-managed change.
+[auth.email.template.invite]
+subject = "You have been invited"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.recovery]
+content_path = "./supabase/templates/recovery.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.

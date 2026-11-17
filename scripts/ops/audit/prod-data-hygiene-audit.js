@@ -2,6 +2,7 @@
 /* eslint-disable no-console */
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('crypto');
 const { Client } = require('pg');
 const { loadEnv } = require('../../utils/load-env');
 const {
@@ -20,6 +21,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     baseline: DEFAULT_BASELINE_PATH,
     environment: '',
     json: false,
+    checkF164PermissionResync: false,
     help: false,
   };
 
@@ -29,6 +31,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
     if (token === '--help' || token === '-h') out.help = true;
     else if (token === '--json') out.json = true;
+    else if (token === '--check-f164-permission-resync') out.checkF164PermissionResync = true;
     else if (token === '--environment') out.environment = String(argv[i + 1] || '').trim(), i += 1;
     else if (token.startsWith('--environment=')) out.environment = token.split('=').slice(1).join('=').trim();
     else if (token === '--profile') out.profile = String(argv[i + 1] || '').trim(), i += 1;
@@ -237,7 +240,8 @@ async function scanForbiddenMarkers(client, baseline = {}) {
           findings.push({
             table,
             column,
-            value,
+            value_sha256: createHash('sha256').update(value).digest('hex'),
+            value_length: value.length,
             row_count: Number(row.row_count || 0),
             pattern: pattern.source,
           });
@@ -317,6 +321,112 @@ async function evaluateRequiredAuditEnabledTables(client, baseline = {}) {
   return issues;
 }
 
+async function evaluateF164PermissionResync(client) {
+  await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+  try {
+    await client.query("SET LOCAL statement_timeout = '30s'");
+    await client.query('SET LOCAL row_security = off');
+    const { rows: columns } = await client.query(`
+      SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'supabase_migrations'
+        AND table_name IN ('schema_migrations', 'applied_migrations')
+      ORDER BY table_name, ordinal_position`);
+    const tables = ['schema_migrations', 'applied_migrations']
+      .filter((name) => columns.some((column) => column.table_name === name));
+    if (!tables.length) throw new Error('F164 migration history unavailable');
+    const stores = [];
+    for (const table of tables) {
+      const names = new Set(columns.filter((column) => column.table_name === table).map((column) => column.column_name));
+      if (!names.has('version')) throw new Error('F164 migration history lacks version');
+      const digestColumn = ['checksum', 'sha256', 'hash'].find((name) => names.has(name));
+      const fields = ['version', ...(names.has('name') ? ['name'] : []), ...(digestColumn ? [digestColumn] : [])];
+      const { rows: history } = await client.query(
+        `SELECT ${fields.map(quoteIdent).join(', ')} FROM supabase_migrations.${quoteIdent(table)} WHERE version::text = $1`,
+        ['202608161250'],
+      );
+      stores.push({ table, names, digestColumn, history });
+    }
+    if (stores.reduce((count, store) => count + store.history.length, 0) > 1) {
+      throw new Error('F164 migration history is ambiguous across recorded authorities');
+    }
+    const { table, names, digestColumn, history } = stores.find((store) => store.history.length) || stores[0];
+    const recordedName = names.has('name') ? history[0]?.name : null;
+    const authorityKnown = history.length === 0 || Boolean(recordedName);
+    if (recordedName != null && !/^(?:202608161250_)?b3_access_policy_kyc_permission_resync_v1(?:\.sql)?$/.test(String(recordedName))) {
+      throw new Error('F164 migration name does not match expected authority');
+    }
+    const recordedDigest = digestColumn ? history[0]?.[digestColumn] : null;
+    if (recordedDigest != null && !/^[a-f0-9]{32,128}$/i.test(String(recordedDigest))) {
+      throw new Error('F164 recorded migration digest has unsupported format');
+    }
+    const { rows: definitions } = await client.query(
+      "SELECT COUNT(*)::int AS total FROM public.lookup_definitions WHERE category = 'rbac_permission'",
+    );
+    if (Number(definitions[0]?.total) !== 1) throw new Error('F164 requires exactly one rbac_permission definition');
+    const { rows: wildcards } = await client.query(`
+      SELECT
+        (lv.metadata->>'source' = 'access_policy_kyc_permission_resync_v1') IS TRUE AS affected,
+        (lv.metadata->>'settings_category' = 'access_control_policy') IS TRUE AS policy_category,
+        (btrim(lv.metadata->>'capability_key') = '*') IS TRUE AS wildcard_capability,
+        (lv.status = 'active') IS TRUE AS active,
+        COUNT(*)::int AS total
+      FROM public.lookup_values lv
+      JOIN public.lookup_definitions ld ON ld.id = lv.lookup_definition_id
+      WHERE ld.category = 'rbac_permission' AND btrim(lv.value) = '*'
+      GROUP BY 1, 2, 3, 4`);
+    const affectedCount = wildcards.filter((row) => row.affected).reduce((sum, row) => sum + Number(row.total), 0);
+    const references = [];
+    if (affectedCount) {
+      const { rows: foreignKeys } = await client.query(`
+        SELECT ns.nspname AS schema_name, rel.relname AS table_name, attr.attname AS column_name,
+          cardinality(c.conkey) AS source_columns, cardinality(c.confkey) AS target_columns,
+          target.attname AS target_column
+        FROM pg_constraint c
+        JOIN pg_class rel ON rel.oid = c.conrelid
+        JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+        JOIN pg_attribute attr ON attr.attrelid = c.conrelid AND attr.attnum = c.conkey[1]
+        JOIN pg_attribute target ON target.attrelid = c.confrelid AND target.attnum = c.confkey[1]
+        WHERE c.contype = 'f' AND c.confrelid = 'public.lookup_values'::regclass
+        ORDER BY ns.nspname, rel.relname, attr.attname`);
+      for (const fk of foreignKeys) {
+        if (Number(fk.source_columns) !== 1 || Number(fk.target_columns) !== 1 || fk.target_column !== 'id') {
+          throw new Error('F164 reference accounting requires review of a non-ID or composite foreign key');
+        }
+        const schema = assertIdentifier(fk.schema_name, 'schema');
+        const relation = assertIdentifier(fk.table_name, 'table');
+        const column = assertIdentifier(fk.column_name, 'column');
+        const { rows } = await client.query(`
+          SELECT COUNT(*)::bigint AS total FROM ${quoteIdent(schema)}.${quoteIdent(relation)} ref
+          JOIN public.lookup_values lv ON lv.id = ref.${quoteIdent(column)}
+          JOIN public.lookup_definitions ld ON ld.id = lv.lookup_definition_id
+          WHERE ld.category = 'rbac_permission' AND btrim(lv.value) = '*'
+            AND lv.metadata->>'source' = 'access_policy_kyc_permission_resync_v1'`);
+        references.push({ schema, table: relation, column, count: Number(rows[0]?.total) });
+      }
+    }
+    const unrelatedCount = wildcards.filter((row) => !row.affected).reduce((sum, row) => sum + Number(row.total), 0);
+    return {
+      version: '202608161250',
+      history_table: `supabase_migrations.${table}`,
+      migration_recorded: history.length === 1,
+      recorded_name: recordedName == null ? null : String(recordedName),
+      recorded_digest_column: digestColumn || null,
+      recorded_digest: recordedDigest == null ? null : String(recordedDigest),
+      affected_wildcards: affectedCount,
+      unrelated_wildcards: unrelatedCount,
+      provenance_counts: wildcards,
+      references,
+      reference_scope: 'declared single-column foreign keys to lookup_values.id only; not deletion authority',
+      status: !authorityKnown ? 'unknown-migration-authority-review'
+        : affectedCount ? 'affected-preserve-review' : unrelatedCount ? 'unattributed-wildcards-review'
+        : history.length ? 'clean-existing-state' : 'compatible-pending-corrected-migration',
+      ok: authorityKnown && affectedCount === 0 && unrelatedCount === 0,
+    };
+  } finally {
+    await client.query('ROLLBACK');
+  }
+}
+
 async function runAudit(client, options = {}) {
   const profile = String(options.profile || DEFAULT_PROFILE).trim();
   const baseline = options.baseline || {};
@@ -353,7 +463,7 @@ async function runAudit(client, options = {}) {
 
   for (const finding of markerFindings) {
     issues.push(
-      `${finding.table}.${finding.column} contains forbidden value "${finding.value}" (pattern ${finding.pattern}, rows=${finding.row_count})`,
+      `${finding.table}.${finding.column} contains a forbidden value (sha256=${finding.value_sha256}, length=${finding.value_length}, pattern ${finding.pattern}, rows=${finding.row_count})`,
     );
   }
   if (missingRequiredDefaults.length) {
@@ -367,7 +477,11 @@ async function runAudit(client, options = {}) {
     );
   }
 
+  const f164 = options.checkF164PermissionResync ? await evaluateF164PermissionResync(client) : null;
+  if (f164 && !f164.ok) issues.push('F164 wildcard provenance requires preservation review; no rows changed');
+
   return {
+    ...(f164 ? { f164_permission_resync: f164 } : {}),
     profile,
     environment,
     counts: countCheck.counts,
@@ -389,6 +503,7 @@ function printUsage() {
   console.log(`  --profile <name>            Audit profile (default: ${DEFAULT_PROFILE}; supported: pre-live, dev-shared)`);
   console.log(`  --baseline <path>           Baseline file path (default: ${DEFAULT_BASELINE_PATH})`);
   console.log('  --environment <dev|stg|prod> Optional target environment for operator account assertions');
+  console.log('  --check-f164-permission-resync Read-only existing-state F164 audit');
   console.log('  --json                      Print JSON summary');
   console.log('  --help, -h                  Show usage');
 }
@@ -421,6 +536,7 @@ async function main() {
         baseline: baselineResult.parsed,
         environment: args.environment,
         env: process.env,
+        checkF164PermissionResync: args.checkF164PermissionResync,
       });
 
     if (args.json) {
@@ -449,7 +565,8 @@ async function main() {
       for (const issue of result.issues) {
         console.error(`- ${issue}`);
       }
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     console.log('[prod-data-hygiene-audit] OK');
@@ -468,6 +585,7 @@ if (require.main === module) {
 module.exports = {
   compilePatterns,
   evaluateCountLimit,
+  evaluateF164PermissionResync,
   evaluateRequiredAuditEnabledTables,
   parseArgs,
   runAudit,

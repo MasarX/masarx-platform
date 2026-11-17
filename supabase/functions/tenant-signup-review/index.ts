@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import {
   approveTenantSignupRequest,
@@ -90,7 +89,7 @@ const createServiceClient = () => {
   });
 };
 
-serve(async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") {
     return json(405, { ok: false, error: { code: "method_not_allowed" } });
   }
@@ -137,7 +136,7 @@ serve(async (req: Request): Promise<Response> => {
       ok: false,
       error: {
         code: "invalid_invite_redirect_to",
-        message: "invite_redirect_to must be a hosted non-localhost http/https URL.",
+        message: "invite_redirect_to must be a hosted non-localhost HTTPS URL.",
       },
     });
   }

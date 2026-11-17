@@ -14,7 +14,9 @@ import {
 } from "./shipment-amend-cancel-form";
 import { Button } from "./button";
 import { formatUiError } from "./utils";
+import { getShipmentModifyAllowedFields } from "./shipment-amend-cancel-policy";
 import { resolveSafeHref } from "./url-guard";
+import { normalizeShipmentAddressCapture, assertShipmentAddressCapture } from "./shipment-address-capture";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -108,7 +110,13 @@ function buildChanges(formData: FormData) {
 }
 
 function buildAddress(formData: FormData) {
-  const address: Record<string, unknown> = {};
+  const address: Record<string, unknown> = {
+    ...normalizeShipmentAddressCapture(
+      String(formData.get("sa_short_code") ?? ""),
+      String(formData.get("latitude") ?? ""),
+      String(formData.get("longitude") ?? ""),
+    ),
+  };
   const line1 = trimOrNull(formData.get("line1"));
   const line2 = trimOrNull(formData.get("line2"));
   const city = trimOrNull(formData.get("city"));
@@ -139,8 +147,8 @@ function createShipmentAmendCancelClient() {
 }
 
 function messageForOperation(operation: string, payload: Record<string, unknown> | null) {
-  if (payload?.already_processed === true) return "Shipment change was already processed.";
   const workflowStatus = stringValue(payload?.workflow_status);
+  if (payload?.already_processed === true && workflowStatus === "completed") return "Shipment change was already processed.";
   const workflowRunId = stringValue(payload?.workflow_run_id);
   if (workflowStatus === "completed") {
     if (operation === "modify") return "Shipment modify completed.";
@@ -177,8 +185,21 @@ export async function ShipmentAmendCancelPage({
       return { status: "error", message: "Choose a valid shipment." };
     }
 
+    let requestStarted = false;
     try {
       const client = createShipmentAmendCancelClient();
+      const { data: optionsData, error: optionsError } = await client.rpc("shipment_amend_cancel_options_v1", {
+        p_shipment_id: actionShipmentId,
+      });
+      if (optionsError) return { status: "error", message: formatUiError(optionsError, "Shipment operation policy is unavailable.") };
+      const actionOptions = normalizeOptions(recordValue(optionsData));
+      const operationState = actionOptions.operations?.[operation as keyof NonNullable<ShipmentAmendCancelOptions["operations"]>];
+      if (operationState?.allowed !== true) {
+        return {
+          status: "error",
+          message: `Blocked by shipment_operation_policy: ${operationState?.reason ?? `${operation} availability was not returned as allowed by the backend.`}`,
+        };
+      }
       const input: Record<string, unknown> = {
         shipment_id: actionShipmentId,
         operation,
@@ -189,6 +210,11 @@ export async function ShipmentAmendCancelPage({
         const changes = buildChanges(formData);
         if (Object.keys(changes).length === 0) {
           return { status: "error", message: "Enter at least one field to modify." };
+        }
+        const allowedFields = getShipmentModifyAllowedFields(actionOptions);
+        const forbidden = Object.keys(changes).filter((field) => !allowedFields.has(field));
+        if (forbidden.length) {
+          return { status: "error", message: `Blocked by shipment_operation_policy: modify fields not allowed: ${forbidden.join(", ")}.` };
         }
         input.changes = changes;
       } else if (operation === "reschedule") {
@@ -212,6 +238,7 @@ export async function ShipmentAmendCancelPage({
         return { status: "error", message: "Choose a valid shipment operation." };
       }
 
+      requestStarted = true;
       const { data, error } = await client.rpc("shipment_amend_cancel_v1", {
         p_input: input,
       });
@@ -220,6 +247,7 @@ export async function ShipmentAmendCancelPage({
         return {
           status: "error",
           message: formatUiError(error, "Shipment amend/cancel failed."),
+          locked: true,
         };
       }
 
@@ -235,22 +263,48 @@ export async function ShipmentAmendCancelPage({
         };
       }
 
+      const workflowStatus = stringValue(payload?.workflow_status)?.toLowerCase() ?? "";
+      const resultStatus = stringValue(payload?.status)?.toLowerCase() ?? "";
+      if ([workflowStatus, resultStatus].some((status) => ["failed", "error", "blocked", "cancelled", "canceled"].includes(status))) {
+        return { status: "error", message: "Shipment change did not complete successfully.", locked: true };
+      }
+      if (operation === "address" && workflowStatus === "completed") {
+        assertShipmentAddressCapture(
+          normalizeShipmentAddressCapture(
+            String(formData.get("sa_short_code") ?? ""),
+            String(formData.get("latitude") ?? ""),
+            String(formData.get("longitude") ?? ""),
+          ),
+          payload?.destination_address_capture,
+        );
+      }
+      const completed = workflowStatus === "completed";
+      if (!completed && !stringValue(payload?.workflow_run_id)) {
+        return { status: "error", locked: true, message: "Shipment outcome is unknown. Check the shipment before trying again." };
+      }
       revalidatePath(baseHref);
       return {
         status: "success",
         message: messageForOperation(operation, payload),
+        ...(!completed ? { locked: true } : {}),
       };
     } catch (error) {
       return {
         status: "error",
-        message: formatUiError(error, "Shipment amend/cancel failed."),
+        message: requestStarted
+          ? `${formatUiError(error, "Shipment amend/cancel failed.")} Check the shipment before trying again; do not resubmit.`
+          : formatUiError(error, "Shipment amend/cancel failed."),
+        ...(requestStarted ? { locked: true } : {}),
       };
     }
   }
 
   if (!uuidRegex.test(shipmentId)) {
     return (
-      <PageContainer className="space-y-6">
+      <PageContainer
+        className="space-y-6"
+        data-testid={`${testIdPrefix}-blocked`}
+      >
         <PageHeader
           title="Shipment amend / cancel"
           description="Select a shipment first, then run one authenticated amend or soft-cancel operation through the workflow engine."

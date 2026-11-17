@@ -2,7 +2,10 @@
 
 import * as React from "react";
 import type { TemplateBlock } from "./canvas-types";
-import { getBarcodeConfig } from "./barcode-types";
+import { getBarcodeConfig, normalizeBarcodeType } from "./barcode-types";
+import { createUiTranslator } from "../../i18n";
+
+const t = createUiTranslator("ui.labelDesigner.blockProps");
 
 type CanvasBarcodeBlockProps = {
   block: TemplateBlock;
@@ -38,16 +41,17 @@ export function CanvasBarcodeBlock({
   const [svgContent, setSvgContent] = React.useState<string | null>(null);
   const [error, setError] = React.useState(false);
 
-  const barcodeType = (block.barcode_type || "code128").toLowerCase();
+  const barcodeType = normalizeBarcodeType(block.barcode_type || "code128");
   const config = getBarcodeConfig(barcodeType);
   const data = block.fallback || block.value_path || (config?.is2D ? "SAMPLE" : "12345678");
 
   // Logical (unscaled) dimensions for the cache key
   const logicalW = block.width || 80;
   const logicalH = block.height || 20;
-  const cacheKey = `${barcodeType}:${data}:${logicalW}:${logicalH}:${block.module_width || ""}:${block.quiet_zone_modules || ""}:${block.error_correction || ""}`;
+  const cacheKey = `${barcodeType}:${data}:${logicalW}:${logicalH}:${block.module_width ?? ""}:${block.quiet_zone_modules ?? ""}:${block.error_correction || ""}:${block.human_readable !== false}`;
 
   React.useEffect(() => {
+    if (!config) return;
     if (svgCache.has(cacheKey)) {
       setSvgContent(svgCache.get(cacheKey)!);
       setError(false);
@@ -60,7 +64,7 @@ export function CanvasBarcodeBlock({
       .then((bwip) => {
         if (cancelled) return;
 
-        const encoder = config?.encoder || "code128";
+        const encoder = config.encoder;
         const options: Record<string, unknown> = {
           bcid: encoder,
           text: data,
@@ -100,7 +104,7 @@ export function CanvasBarcodeBlock({
     };
   }, [cacheKey, config, data, barcodeType, block.human_readable, block.module_width, block.quiet_zone_modules, block.error_correction]);
 
-  if (error || !svgContent) {
+  if (!config || error || !svgContent) {
     // Fallback placeholder
     return (
       <g>
@@ -113,14 +117,14 @@ export function CanvasBarcodeBlock({
           textAnchor="middle"
           style={{ pointerEvents: "none", userSelect: "none" }}
         >
-          {error ? "Invalid" : "Loading..."}
+          {error || !config ? "Invalid" : "Loading..."}
         </text>
       </g>
     );
   }
 
   return (
-    <g>
+    <g role="img" aria-label={`${t("barcodeBlock")}: ${config?.label ?? barcodeType}`}>
       <foreignObject x={x} y={y} width={width} height={height}>
         <div
           // eslint-disable-next-line react/no-danger

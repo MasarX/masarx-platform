@@ -172,7 +172,12 @@ function readState(
   if (typeof window === "undefined") {
     return defaults;
   }
-  const raw = window.localStorage.getItem(storageKey);
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(storageKey);
+  } catch {
+    return defaults;
+  }
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -184,7 +189,12 @@ function readState(
     }
   }
   if (legacyStorageKey) {
-    const legacyRaw = window.localStorage.getItem(legacyStorageKey);
+    let legacyRaw: string | null;
+    try {
+      legacyRaw = window.localStorage.getItem(legacyStorageKey);
+    } catch {
+      return defaults;
+    }
     if (!legacyRaw) return defaults;
     try {
       const parsed = JSON.parse(legacyRaw) as Record<string, unknown>;
@@ -206,7 +216,11 @@ function writeState(storageKey: string, state: NavigationState) {
     version: NAVIGATION_STATE_VERSION,
     ...state,
   };
-  window.localStorage.setItem(storageKey, JSON.stringify(payload));
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(payload));
+  } catch {
+    // Preferences remain usable in memory when storage is blocked or full.
+  }
 }
 
 export function buildLegacyNavigationStorageKey(

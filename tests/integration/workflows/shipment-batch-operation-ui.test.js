@@ -8,6 +8,7 @@ const {
   createSender,
   createUser,
   setAuthContext,
+  setFixtureUserPolicyCapabilities,
 } = require('../helpers/tenant-utils');
 
 loadEnv();
@@ -340,6 +341,81 @@ async function callShipmentBatchOperation(client, actionKey, shipmentIds, params
   return rows[0]?.result ?? null;
 }
 
+async function completeOwnedBatchRuns(client, result, fixture, operation, slotDate = null) {
+  const expectedStatus = operation === 'cancel' ? 'cancelled' : 'rescheduled';
+  const accepted = result.items.filter((item) => item.ok && !item.already_processed);
+  expect(result.success_count).toBe(accepted.filter((item) => item.status === expectedStatus).length);
+  expect(result.queued_count).toBe(accepted.filter((item) => item.status === 'queued').length);
+  expect(result.success_count + result.queued_count).toBe(accepted.length);
+  await client.query('RESET ROLE');
+  for (const item of accepted) {
+    expect(['queued', expectedStatus]).toContain(item.status);
+    expect(item.shipment_id).toBe(item.selection_id);
+    expect(fixture.shipmentIds.map(String)).toContain(item.selection_id);
+    const { rows } = await client.query(`
+      SELECT wr.id, wr.workflow_status
+      FROM public.workflow_runs wr
+      JOIN public.workflow_templates wt ON wt.id = wr.workflow_template_id
+      WHERE wr.id = $1::uuid AND wt.name = $2
+        AND wr.context->>'shipment_id' = $3
+        AND wr.context->>'organization_id' = $4
+        AND wr.context->>'client_id' = $5
+        AND wr.context->>'sender_id' = $6
+        AND wr.context->>'requested_by' = $7
+    `, [item.workflow_run_id, operation === 'cancel' ? 'shipment_delete_v1' : 'shipment_reschedule_v1',
+      item.selection_id, String(fixture.organizationId), String(fixture.clientId),
+      String(fixture.senderId), String(fixture.userId)]);
+    expect(rows).toHaveLength(1);
+    if (item.status === expectedStatus) {
+      expect(rows[0].workflow_status).toBe('completed');
+      const { rows: immediate } = await client.query(
+        'SELECT status, promised_delivery_date::text AS slot_date FROM public.shipments WHERE id = $1::uuid',
+        [item.shipment_id]
+      );
+      if (operation === 'cancel') expect(immediate[0].status).toBe('cancelled');
+      else expect(immediate[0].slot_date).toBe(slotDate);
+    } else {
+      expect(['pending', 'in_progress', 'running', 'waiting']).toContain(item.workflow_status);
+      expect(result.success_count).toBeLessThan(accepted.length);
+      let status = rows[0].workflow_status;
+      for (let attempt = 0; attempt < 50 && !['completed', 'failed', 'cancelled', 'blocked', 'waiting'].includes(status); attempt += 1) {
+        await client.query('SELECT public.progress_workflow_run($1::uuid)', [item.workflow_run_id]);
+        const current = await client.query('SELECT workflow_status FROM public.workflow_runs WHERE id = $1::uuid', [item.workflow_run_id]);
+        status = current.rows[0]?.workflow_status;
+      }
+      expect(status).toBe('completed');
+    }
+    const { rows: output } = await client.query(`
+      SELECT operation_result FROM public.workflow_run_steps
+      WHERE workflow_run_id = $1::uuid ORDER BY sequence_order DESC, updated_at DESC LIMIT 1
+    `, [item.workflow_run_id]);
+    const mutation = output[0]?.operation_result;
+    expect(mutation?.shipment_id).toBe(item.shipment_id);
+    if (operation === 'cancel') expect(mutation?.status).toBe('cancelled');
+    else expect(mutation?.slot_date).toBe(slotDate);
+    const { rows: audit } = await client.query(`
+      SELECT sa.id, sa.canonical_status FROM public.shipment_actions sa
+      WHERE sa.id = $1::uuid AND sa.shipment_id = $2::uuid AND sa.action_type = $3
+    `, [mutation?.shipment_action_id, item.shipment_id,
+      operation === 'cancel' ? 'delete' : 'delivery_slot_reserved']);
+    expect(audit).toHaveLength(1);
+    if (operation === 'cancel') expect(audit[0].canonical_status).toBe('cancelled');
+  }
+}
+
+async function stubInnerShipmentResults(client, responses) {
+  // Transaction-local dependency seam; the real batch authorization/visibility stays active.
+  await client.query('RESET ROLE');
+  await client.query("SELECT set_config('test.uc224_inner_results', $1, true)", [JSON.stringify(responses)]);
+  await client.query(`
+    CREATE OR REPLACE FUNCTION public.shipment_amend_cancel_v1(p_input jsonb)
+    RETURNS jsonb LANGUAGE sql SECURITY DEFINER
+    SET search_path TO public, extensions, pg_temp AS $fixture$
+      SELECT current_setting('test.uc224_inner_results')::jsonb -> (p_input->>'shipment_id');
+    $fixture$;
+  `);
+}
+
 async function findAvailableSlotDate(client, shipmentId, clientId, startDate = new Date()) {
   const slotStartDate = startDate.toISOString().slice(0, 10);
   const { rows } = await client.query(
@@ -367,6 +443,161 @@ describe('shipment batch operation UI contract', () => {
     await pool.end();
   });
 
+const readSelection = async (client, ids) => {
+  const { rows } = await client.query(
+    'SELECT api.ui_shipment_selection_readback_v1($1, $2::uuid[]) AS result',
+    ['shipments.delete', ids],
+  );
+  return rows[0].result;
+};
+
+test('API readback returns every selected current status in selection order', async () => {
+  await withTransaction(async (client) => {
+    const fixture = await seedTenantFixture(client, { shipmentCount: 2, trackingPrefix: 'F329-READ' });
+    const ids = [...fixture.shipmentIds].reverse();
+    expect(await readSelection(client, ids)).toEqual({
+      visible: true, count: 2,
+      items: ids.map((selection_id) => ({ selection_id, status: 'pending' })),
+    });
+  });
+});
+
+test('API readback does not expose foreign selected shipment data', async () => {
+  await withTransaction(async (client) => {
+    const own = await seedTenantFixture(client, { trackingPrefix: 'F329-OWN' });
+    await client.query('RESET ROLE');
+    const foreign = await seedTenantFixture(client, { trackingPrefix: 'F329-OTHER', authenticate: false });
+    await setAuthContext(client, own.userId);
+    expect(await readSelection(client, [own.shipmentIds[0], foreign.shipmentIds[0]]))
+      .toEqual({ visible: false, items: [] });
+  });
+});
+
+test('API readback cannot confirm a missing selected shipment', async () => {
+  await withTransaction(async (client) => {
+    const own = await seedTenantFixture(client, { trackingPrefix: 'F329-MISSING' });
+    expect(await readSelection(client, [own.shipmentIds[0], randomUUID()]))
+      .toEqual({ visible: false, items: [] });
+  });
+});
+
+test('API readback requires the command capability', async () => {
+  await withTransaction(async (client) => {
+    const fixture = await seedTenantFixture(client, {
+      trackingPrefix: 'F329-DENIED', provisionRbac: false,
+    });
+    await setFixtureUserPolicyCapabilities(client, fixture.organizationId, fixture.userId, []);
+    await expect(readSelection(client, fixture.shipmentIds)).rejects.toMatchObject({ code: '42501' });
+  });
+});
+
+test('anonymous callers cannot execute selected shipment readback', async () => {
+  await withTransaction(async (client) => {
+    await client.query('SET LOCAL ROLE anon');
+    await expect(readSelection(client, [randomUUID()])).rejects.toMatchObject({ code: '42501' });
+  });
+});
+
+test.each(['empty', 'duplicate', 'null'])('API readback rejects %s selections', async (kind) => {
+  await withTransaction(async (client) => {
+    const fixture = await seedTenantFixture(client, { trackingPrefix: `F329-${kind}` });
+    const id = fixture.shipmentIds[0];
+    const ids = kind === 'empty' ? [] : kind === 'duplicate' ? [id, id] : [id, null];
+    await expect(readSelection(client, ids)).rejects.toMatchObject({ code: '23514' });
+  });
+});
+
+test('cohort command registry binds exact selected-record readback', async () => {
+  const { rows } = await pool.query(`
+    SELECT command->>'key' AS key, command#>'{execution,readback}' AS readback
+    FROM public.settings s JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+    CROSS JOIN LATERAL jsonb_array_elements(sv.value->'commands') command
+    WHERE s.category = 'ui_command_registry' AND sv.effective_until IS NULL
+      AND command->>'key' IN ('shipments.delete', 'shipments.reschedule')
+  `);
+  expect(rows.length).toBeGreaterThanOrEqual(2);
+  for (const row of rows) expect(row.readback).toMatchObject({
+    rpc: 'ui_shipment_selection_readback_v1',
+    params: { p_action_key: { source: 'static', value: row.key },
+      p_selection_ids: { source: 'selection', path: 'ids' } },
+    success_path: 'visible',
+  });
+});
+
+
+  test('registry declares structured batch results for both actions across every persisted scope', async () => {
+    const { rows } = await pool.query(`
+      SELECT
+        s.scope_type,
+        s.scope_id,
+        s.cached_value = sv.value AS cache_matches_version,
+        COUNT(*) FILTER (WHERE command->>'key' = 'shipments.delete')::int AS delete_count,
+        COUNT(*) FILTER (WHERE command->>'key' = 'shipments.reschedule')::int AS reschedule_count,
+        BOOL_AND(
+          command #>> '{execution,result_contract}' = 'batch_items_v1'
+        ) FILTER (
+          WHERE command->>'key' IN ('shipments.delete', 'shipments.reschedule')
+        ) AS result_contracts_match,
+        BOOL_AND(
+          CASE command->>'key'
+            WHEN 'shipments.delete' THEN
+              command #>> '{execution,rpc}' = 'ui_execute_shipment_batch_operation_v1'
+              AND command #>> '{execution,params,operation}' = 'cancel'
+              AND command #>> '{execution,confirm,tone}' = 'danger'
+            WHEN 'shipments.reschedule' THEN
+              command #>> '{execution,rpc}' = 'ui_execute_shipment_batch_operation_v1'
+              AND command #>> '{execution,params,operation}' = 'reschedule'
+              AND EXISTS (
+                SELECT 1
+                  FROM jsonb_array_elements(
+                    COALESCE(command #> '{execution,input_schema,fields}', '[]'::jsonb)
+                  ) AS fields(field)
+                 WHERE field->>'key' = 'slot_date'
+                   AND COALESCE((field->>'required')::boolean, false) = true
+              )
+            ELSE true
+          END
+        ) FILTER (
+          WHERE command->>'key' IN ('shipments.delete', 'shipments.reschedule')
+        ) AS canonical_metadata_preserved
+      FROM public.settings s
+      JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+      LEFT JOIN LATERAL jsonb_array_elements(COALESCE(sv.value->'commands', '[]'::jsonb)) AS commands(command)
+        ON true
+      WHERE s.category = 'ui_command_registry'
+      GROUP BY s.id, s.scope_type, s.scope_id, s.cached_value, sv.value
+      ORDER BY s.scope_type, s.scope_id NULLS FIRST
+    `);
+
+    expect(rows.length).toBeGreaterThan(0);
+    rows.forEach((row) => {
+      expect(row.cache_matches_version).toBe(true);
+      expect(row.delete_count).toBe(1);
+      expect(row.reschedule_count).toBe(1);
+      expect(row.result_contracts_match).toBe(true);
+      expect(row.canonical_metadata_preserved).toBe(true);
+    });
+  });
+
+  test('active ui_command_registry schemas allow the batch_items_v1 discriminator', async () => {
+    const { rows } = await pool.query(`
+      SELECT
+        version,
+        schema #>> '{properties,commands,items,properties,execution,properties,result_contract,type}' AS result_contract_type,
+        schema #> '{properties,commands,items,properties,execution,properties,result_contract,enum}' AS result_contract_values
+      FROM public.schema_registry
+      WHERE category = 'ui_command_registry'
+        AND is_active = true
+      ORDER BY version
+    `);
+
+    expect(rows.length).toBeGreaterThan(0);
+    rows.forEach((row) => {
+      expect(row.result_contract_type).toBe('string');
+      expect(row.result_contract_values).toContain('batch_items_v1');
+    });
+  });
+
   test('batch shipment delete soft-cancels every visible shipment through shipment_amend_cancel_v1', async () => {
     await withTransaction(async (client) => {
       const fixture = await seedTenantFixture(client, {
@@ -380,12 +611,26 @@ describe('shipment batch operation UI contract', () => {
         fixture.shipmentIds
       );
 
-      expect(result?.status).toBe('cancelled');
-      expect(result?.success_count).toBe(2);
+      expect(result?.status).toBe(result.queued_count > 0 ? 'queued' : 'cancelled');
+      expect(result?.count).toBe(2);
+      expect(result?.success_count + result?.queued_count).toBe(2);
       expect(result?.failure_count).toBe(0);
+      expect(result?.already_processed_count).toBe(0);
       expect(result?.items).toHaveLength(2);
+      expect(result?.items).toEqual(
+        expect.arrayContaining(
+          fixture.shipmentIds.map((shipmentId) =>
+            expect.objectContaining({
+              shipment_id: String(shipmentId),
+              selection_id: String(shipmentId),
+              status: expect.stringMatching(/^(cancelled|queued)$/),
+              ok: true,
+            })
+          )
+        )
+      );
 
-      await client.query('RESET ROLE');
+      await completeOwnedBatchRuns(client, result, fixture, 'cancel');
 
       const { rows: shipmentRows } = await client.query(
         `
@@ -401,6 +646,26 @@ describe('shipment batch operation UI contract', () => {
         expect(row.status).toBe('cancelled');
       });
 
+      const workflowRunIds = result.items.map((item) => item.workflow_run_id);
+      expect(workflowRunIds.every(Boolean)).toBe(true);
+      expect(new Set(workflowRunIds).size).toBe(2);
+      // Inline command progress is bounded; the uncommitted fixture needs same-client completion.
+      for (const workflowRunId of workflowRunIds) {
+        const readStatus = async () => {
+          const { rows } = await client.query(
+            'SELECT workflow_status FROM public.workflow_runs WHERE id = $1::uuid',
+            [workflowRunId]
+          );
+          return rows[0]?.workflow_status;
+        };
+        let status = await readStatus();
+        for (let attempt = 0; attempt < 8 && !['completed', 'failed', 'blocked', 'cancelled'].includes(status); attempt += 1) {
+          await client.query('SELECT public.progress_workflow_run($1::uuid)', [workflowRunId]);
+          status = await readStatus();
+        }
+        expect(status).toBe('completed');
+      }
+
       const { rows: workflowRows } = await client.query(
         `
           SELECT COUNT(*)::int AS completed_count
@@ -409,8 +674,9 @@ describe('shipment batch operation UI contract', () => {
           WHERE wt.name = 'shipment_delete_v1'
             AND wr.workflow_status = 'completed'
             AND wr.context->>'shipment_id' = ANY($1::text[])
+            AND wr.id = ANY($2::uuid[])
         `,
-        [fixture.shipmentIds.map((id) => String(id))]
+        [fixture.shipmentIds.map((id) => String(id)), workflowRunIds]
       );
       expect(workflowRows[0]?.completed_count).toBe(2);
     });
@@ -438,13 +704,37 @@ describe('shipment batch operation UI contract', () => {
       );
 
       expect(result?.status).toBe('partial');
-      expect(result?.success_count).toBe(1);
+      expect(result?.count).toBe(2);
+      expect(result?.success_count + result?.queued_count).toBe(1);
       expect(result?.failure_count).toBe(1);
+      expect(result?.already_processed_count).toBe(0);
       expect(result?.items).toHaveLength(2);
-      expect(result?.items?.find((item) => item.shipment_id === String(foreignFixture.shipmentIds[0]))?.error?.code)
-        .toBe('shipment_not_visible');
+      expect(
+        result?.items?.find(
+          (item) => item.selection_id === String(fixture.shipmentIds[0])
+        )
+      ).toEqual(
+        expect.objectContaining({
+          shipment_id: String(fixture.shipmentIds[0]),
+          selection_id: String(fixture.shipmentIds[0]),
+          status: expect.stringMatching(/^(cancelled|queued)$/),
+          ok: true,
+        })
+      );
+      expect(
+        result?.items?.find(
+          (item) => item.selection_id === String(foreignFixture.shipmentIds[0])
+        )
+      ).toEqual(
+        expect.objectContaining({
+          shipment_id: String(foreignFixture.shipmentIds[0]),
+          selection_id: String(foreignFixture.shipmentIds[0]),
+          status: 'blocked',
+          error: expect.objectContaining({ code: 'shipment_not_visible' }),
+        })
+      );
 
-      await client.query('RESET ROLE');
+      await completeOwnedBatchRuns(client, result, fixture, 'cancel');
 
       const { rows: visibleShipmentRows } = await client.query(
         'SELECT status FROM public.shipments WHERE id = $1::uuid',
@@ -483,12 +773,26 @@ describe('shipment batch operation UI contract', () => {
         { slot_date: slotDate }
       );
 
-      expect(result?.status).toBe('rescheduled');
-      expect(result?.success_count).toBe(2);
+      expect(result?.status).toBe(result.queued_count > 0 ? 'queued' : 'rescheduled');
+      expect(result?.count).toBe(2);
+      expect(result?.success_count + result?.queued_count).toBe(2);
       expect(result?.failure_count).toBe(0);
+      expect(result?.already_processed_count).toBe(0);
       expect(result?.items).toHaveLength(2);
+      expect(result?.items).toEqual(
+        expect.arrayContaining(
+          fixture.shipmentIds.map((shipmentId) =>
+            expect.objectContaining({
+              shipment_id: String(shipmentId),
+              selection_id: String(shipmentId),
+              status: expect.stringMatching(/^(rescheduled|queued)$/),
+              ok: true,
+            })
+          )
+        )
+      );
 
-      await client.query('RESET ROLE');
+      await completeOwnedBatchRuns(client, result, fixture, 'reschedule', slotDate);
 
       const { rows: shipmentRows } = await client.query(
         `
@@ -516,4 +820,118 @@ describe('shipment batch operation UI contract', () => {
       expect(actionRows[0]?.reserved_count).toBe(2);
     });
   });
+
+  test('duplicate idempotent batch operation returns exact already-processed readback evidence', async () => {
+    await withTransaction(async (client) => {
+      const fixture = await seedTenantFixture(client, {
+        shipmentCount: 1,
+        trackingPrefix: 'UC224-IDEMPOTENT',
+      });
+      const idempotencyKey = `uc224-idempotent-${randomUUID()}`;
+
+      const firstResult = await callShipmentBatchOperation(
+        client,
+        'shipments.delete',
+        fixture.shipmentIds,
+        { idempotency_key: idempotencyKey }
+      );
+      expect(firstResult?.status).toBe(firstResult.queued_count > 0 ? 'queued' : 'cancelled');
+      await completeOwnedBatchRuns(client, firstResult, fixture, 'cancel');
+      await setAuthContext(client, fixture.userId);
+
+      const duplicateResult = await callShipmentBatchOperation(
+        client,
+        'shipments.delete',
+        fixture.shipmentIds,
+        { idempotency_key: idempotencyKey }
+      );
+
+      expect(duplicateResult).toEqual(
+        expect.objectContaining({
+          status: 'already_processed',
+          count: 1,
+          success_count: 0,
+          failure_count: 0,
+          already_processed_count: 1,
+          items: [
+            expect.objectContaining({
+              shipment_id: String(fixture.shipmentIds[0]),
+              selection_id: String(fixture.shipmentIds[0]),
+              status: 'already_processed',
+              ok: true,
+              already_processed: true,
+            }),
+          ],
+        })
+      );
+    });
+  });
+
+  test.each(['pending', 'in_progress', 'waiting'])('accepted %s work is never reported as completed', async (workflowStatus) => {
+    await withTransaction(async (client) => {
+      const fixture = await seedTenantFixture(client, { shipmentCount: 2, trackingPrefix: 'UC224-QUEUED' });
+      const responses = Object.fromEntries(fixture.shipmentIds.map((id) => [id, {
+        ok: true, workflow_run_id: randomUUID(), workflow_status: workflowStatus, operation_result: {},
+      }]));
+      await stubInnerShipmentResults(client, responses);
+      await setAuthContext(client, fixture.userId);
+      const result = await callShipmentBatchOperation(client, 'shipments.delete', fixture.shipmentIds);
+      expect(result).toMatchObject({ status: 'queued', success_count: 0, queued_count: 2, failure_count: 0 });
+      expect(result.items).toHaveLength(2);
+      result.items.forEach((item) => expect(item).toMatchObject({ status: 'queued', ok: true, workflow_status: workflowStatus }));
+      await client.query('RESET ROLE');
+      const { rows } = await client.query('SELECT status FROM public.shipments WHERE id = ANY($1::uuid[])', [fixture.shipmentIds]);
+      expect(rows).toHaveLength(2);
+      rows.forEach((row) => expect(row.status).toBe('pending'));
+    });
+  });
+
+  test('completed, queued and failed inner results remain disjoint without invented cancellation', async () => {
+    await withTransaction(async (client) => {
+      const fixture = await seedTenantFixture(client, { shipmentCount: 3, trackingPrefix: 'UC224-MIXED' });
+      const [completed, queued, failed] = fixture.shipmentIds;
+      await stubInnerShipmentResults(client, {
+        [completed]: { ok: true, workflow_run_id: randomUUID(), workflow_status: 'completed', operation_result: { status: 'cancelled' } },
+        [queued]: { ok: true, workflow_run_id: randomUUID(), workflow_status: 'pending', operation_result: {} },
+        [failed]: { ok: false, workflow_run_id: randomUUID(), workflow_status: 'failed', error: { code: 'shipment_mutation_failed' } },
+      });
+      await setAuthContext(client, fixture.userId);
+      const result = await callShipmentBatchOperation(client, 'shipments.delete', fixture.shipmentIds);
+      expect(result).toMatchObject({ status: 'partial', success_count: 1, queued_count: 1, failure_count: 1 });
+      expect(result.items.map((item) => item.status)).toEqual(['cancelled', 'queued', 'shipment_mutation_failed']);
+    });
+  });
+
+  test('completed workflow without canonical mutation output does not fabricate cancellation', async () => {
+    await withTransaction(async (client) => {
+      const fixture = await seedTenantFixture(client, { shipmentCount: 1, trackingPrefix: 'UC224-NO-OUTPUT' });
+      await stubInnerShipmentResults(client, {
+        [fixture.shipmentIds[0]]: { ok: true, workflow_run_id: randomUUID(), workflow_status: 'completed', operation_result: {} },
+      });
+      await setAuthContext(client, fixture.userId);
+      const result = await callShipmentBatchOperation(client, 'shipments.delete', fixture.shipmentIds);
+      expect(result).toMatchObject({ status: 'failed', success_count: 0, queued_count: 0, failure_count: 1 });
+      expect(result.items[0].status).not.toBe('cancelled');
+      expect(result.items[0].ok).not.toBe(true);
+    });
+  });
+
+  test.each(['rescheduled', 'reschedule_no_change'])(
+    'completed %s output remains supported without a fabricated status field', async (operation) => {
+      await withTransaction(async (client) => {
+        const fixture = await seedTenantFixture(client, { shipmentCount: 1, trackingPrefix: 'UC224-SLOT-OUTPUT' });
+        const slotDate = '2026-11-01';
+        await stubInnerShipmentResults(client, {
+          [fixture.shipmentIds[0]]: {
+            ok: true, workflow_run_id: randomUUID(), workflow_status: 'completed',
+            operation_result: { operation, slot_date: slotDate },
+          },
+        });
+        await setAuthContext(client, fixture.userId);
+        const result = await callShipmentBatchOperation(client, 'shipments.reschedule', fixture.shipmentIds, { slot_date: slotDate });
+        expect(result).toMatchObject({ status: 'rescheduled', success_count: 1, queued_count: 0, failure_count: 0 });
+        expect(result.items[0]).toMatchObject({ status: 'rescheduled', ok: true, workflow_status: 'completed' });
+      });
+    }
+  );
 });

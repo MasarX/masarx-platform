@@ -76,6 +76,36 @@ function configEnvFile(filePath, { override = false, env = process.env } = {}) {
   applyParsedEnv(parsed, { override, env });
 }
 
+function upsertEnvFileValues(filePath, updates = {}) {
+  const resolvedPath = String(filePath || '').trim();
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) return false;
+
+  const entries = Object.entries(updates)
+    .map(([key, value]) => [String(key || '').trim(), value == null ? '' : String(value)])
+    .filter(([key, value]) => key && value);
+  if (entries.length === 0) return false;
+
+  const replacements = new Map(entries);
+  const raw = fs.readFileSync(resolvedPath, 'utf8');
+  const lines = raw.split(/\r?\n/);
+  const seen = new Set();
+  const nextLines = lines.map((line) => {
+    const idx = line.indexOf('=');
+    if (idx <= 0) return line;
+    const key = line.slice(0, idx).trim();
+    if (!replacements.has(key)) return line;
+    seen.add(key);
+    return `${key}=${replacements.get(key)}`;
+  });
+
+  for (const [key, value] of replacements.entries()) {
+    if (!seen.has(key)) nextLines.push(`${key}=${value}`);
+  }
+
+  fs.writeFileSync(resolvedPath, `${nextLines.join('\n').replace(/\n+$/u, '')}\n`, 'utf8');
+  return true;
+}
+
 module.exports = {
   applyParsedEnv,
   configEnvFile,
@@ -83,4 +113,5 @@ module.exports = {
   parseEnvText,
   readEnvFile,
   resolveDotenvModule,
+  upsertEnvFileValues,
 };

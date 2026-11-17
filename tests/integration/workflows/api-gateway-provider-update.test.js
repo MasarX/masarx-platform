@@ -46,6 +46,23 @@ async function resolveCanonicalUpdateRoute(client) {
   return rows[0];
 }
 
+async function materializeAcceptedAsyncOutbound(client, intakeResult) {
+  expect(intakeResult).toMatchObject({ action: 'accepted_async' });
+  expect(intakeResult.workflow_run_id).toBeTruthy();
+  await client.query(
+    'SELECT public.progress_workflow_run($1::uuid) AS result',
+    [intakeResult.workflow_run_id],
+  );
+  const { rows } = await client.query(
+    `SELECT outbound_call_id
+       FROM public.api_gateway_requests
+       WHERE id = $1::uuid`,
+    [intakeResult.api_gateway_request_id],
+  );
+  expect(rows[0]?.outbound_call_id).toBeTruthy();
+  return rows[0].outbound_call_id;
+}
+
 async function seedGatewaySource(client, { orgId, clientId, senderId, sourceId, sourceToken, providerId }) {
   const mappingConfigId = randomUUID();
   const providerAuthConfigId = randomUUID();
@@ -424,12 +441,7 @@ describe('API gateway provider update postprocess', () => {
       },
     });
 
-    expect(intakeResult).toMatchObject({
-      action: 'proxy',
-    });
-
-    const outboundCallId = intakeResult.outbound_call_id;
-    expect(outboundCallId).toBeTruthy();
+    const outboundCallId = await materializeAcceptedAsyncOutbound(client, intakeResult);
 
     const { rows: requestRows } = await client.query(
       `SELECT route_id
@@ -574,8 +586,7 @@ describe('API gateway provider update postprocess', () => {
       },
     });
 
-    const outboundCallId = intakeResult.outbound_call_id;
-    expect(outboundCallId).toBeTruthy();
+    const outboundCallId = await materializeAcceptedAsyncOutbound(client, intakeResult);
 
     await client.query(
       `UPDATE public.outbound_calls

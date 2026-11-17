@@ -2,6 +2,8 @@ import "server-only";
 
 import Link from "next/link";
 import { createServerClient } from "@masarx/auth/server";
+import { createUiServerClient } from "@masarx/api/server";
+import type { PickupLookupOption } from "./pickup-operations-form";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { formatUiError } from "./utils";
@@ -23,50 +25,68 @@ export type PickupScopeContext = {
 
 const ROW_LIMIT = 25;
 
+export type PickupAssignmentOptions = Record<"branches" | "drivers" | "vehicles" | "partners", PickupLookupOption[]>;
+
+export async function loadPickupAssignmentOptions(organizationId: string): Promise<{
+  options: PickupAssignmentOptions; error: string | null;
+}> {
+  try {
+    const options = await createUiServerClient().rpc<PickupAssignmentOptions>("pickup_assignment_options_v1", {
+      p_organization_id: organizationId, p_limit: 250,
+    });
+    return { options, error: null };
+  } catch (error) {
+    return { options: { branches: [], drivers: [], vehicles: [], partners: [] },
+      error: formatUiError(error, "Pickup assignment choices could not be loaded. Reload to retry.") };
+  }
+}
+
+export async function loadPickupRelationshipOptions(resource: "clients" | "senders" | "service_branch_directory", clientId?: string) {
+  const ui = createUiServerClient();
+  try {
+    const result = await ui.listResource(resource, clientId ? { client_id: clientId } : {}, 200, 0);
+    const options = result.items.map((row) => ({
+      value: String(row.id), label: String(row.name || row.brand_name || row.slug || row.code || row.id),
+      groupValue: typeof row.client_id === "string" ? row.client_id : typeof row.organization_id === "string" ? row.organization_id : null,
+    }));
+    return { options, error: null };
+  } catch (error) {
+    return { options: [] as PickupLookupOption[],
+      error: formatUiError(error, `Pickup ${resource} could not be loaded. Reload to retry.`) };
+  }
+}
+
+export function pickupRelationshipLabel(options: PickupLookupOption[], value: unknown) {
+  const id = stringValue(value);
+  return options.find((option) => option.value === id)?.label ?? id;
+}
+
+export function buildPickupRequestOptions(rows: Record<string, unknown>[]): PickupLookupOption[] {
+  return rows.flatMap((row) => {
+    const value = stringValue(row.shipment_id);
+    if (!value) return [];
+    return [{ value, label: stringValue(row.tracking_number) || stringValue(row.client_reference_number) || value,
+      searchText: [row.tracking_number, row.client_reference_number, row.carrier_reference_number].filter(Boolean).join(" ") }];
+  });
+}
+
+async function withPickupLabels<T extends Record<string, unknown>>(rows: T[], kind: "shipment" | "route", error: unknown): Promise<PickupViewResult<T>> {
+  if (error || rows.length === 0) return { rows, error: pickupListError(error, "Unable to load pickups.") };
+  const key = kind === "shipment" ? "shipment_id" : "route_run_id";
+  try {
+    const labels = await createUiServerClient().rpc<Record<string, Record<string, string>>>("pickup_relationship_labels_v1", {
+      p_shipment_ids: kind === "shipment" ? rows.map((row) => row[key]) : [],
+      p_route_run_ids: kind === "route" ? rows.map((row) => row[key]) : [],
+    });
+    return { rows: rows.map((row) => ({ ...row, ...labels[`${kind}:${row[key]}`] })), error: null };
+  } catch (labelError) {
+    return { rows, error: formatUiError(labelError, "Pickup display labels could not be loaded. Reload to retry.") };
+  }
+}
+
 function firstValue(value: string | string[] | undefined | null) {
   if (Array.isArray(value)) return value[0];
   return value;
-}
-
-export async function loadPublicViewRows<T extends Record<string, unknown>>(
-  viewName: string,
-  queryOptions: {
-    orderBy: string;
-    descending?: boolean;
-    filters?: Array<[string, string | string[] | undefined]>;
-  },
-): Promise<PickupViewResult<T>> {
-  const client = createServerClient({ allowCookieSet: false });
-  let query = client.from(viewName).select("*");
-
-  queryOptions.filters?.forEach(([key, value]) => {
-    const raw = firstValue(value);
-    const trimmed = raw?.trim();
-    if (!trimmed) return;
-    if (trimmed.includes(",")) {
-      const values = trimmed
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-      if (values.length > 0) {
-        query = query.in(key, values);
-      }
-      return;
-    }
-    query = query.eq(key, trimmed);
-  });
-
-  const { data, error } = await query
-    .order(queryOptions.orderBy, {
-      ascending: queryOptions.descending ? false : true,
-      nullsFirst: false,
-    })
-    .limit(ROW_LIMIT);
-
-  return {
-    rows: Array.isArray(data) ? (data as T[]) : [],
-    error: error ? formatUiError(error, `Unable to load ${viewName}.`) : null,
-  };
 }
 
 export function resolvePickupScopeFilters(
@@ -102,10 +122,7 @@ export async function loadPickupRequestRows<T extends Record<string, unknown>>(p
     p_status: firstValue(params.status)?.trim() || null,
     p_limit: params.limit ?? ROW_LIMIT,
   });
-  return {
-    rows: Array.isArray(data) ? (data as T[]) : [],
-    error: pickupListError(error, "Unable to load pickup_requests."),
-  };
+  return withPickupLabels(Array.isArray(data) ? (data as T[]) : [], "shipment", error);
 }
 
 export async function loadPickupWaveRows<T extends Record<string, unknown>>(params: {
@@ -123,10 +140,7 @@ export async function loadPickupWaveRows<T extends Record<string, unknown>>(para
     p_status: firstValue(params.status)?.trim() || null,
     p_limit: params.limit ?? ROW_LIMIT,
   });
-  return {
-    rows: Array.isArray(data) ? (data as T[]) : [],
-    error: pickupListError(error, "Unable to load pickup_waves."),
-  };
+  return withPickupLabels(Array.isArray(data) ? (data as T[]) : [], "route", error);
 }
 
 export async function loadPickupFailureRows<T extends Record<string, unknown>>(params: {
@@ -148,10 +162,7 @@ export async function loadPickupFailureRows<T extends Record<string, unknown>>(p
     p_status: firstValue(params.status)?.trim() || null,
     p_limit: params.limit ?? ROW_LIMIT,
   });
-  return {
-    rows: Array.isArray(data) ? (data as T[]) : [],
-    error: pickupListError(error, "Unable to load pickup_failures."),
-  };
+  return withPickupLabels(Array.isArray(data) ? (data as T[]) : [], "shipment", error);
 }
 
 export function PickupPageNavigation({

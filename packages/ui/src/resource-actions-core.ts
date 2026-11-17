@@ -9,6 +9,7 @@ import { resolveCommandHref } from "./command-utils";
 import type { BulkActionDefinition } from "./bulk-actions";
 import type { TranslateFn } from "./table/types";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { resolveRowDisplayText } from "./i18n";
 
 const uiDefaults = getUiDefaults();
 
@@ -22,6 +23,7 @@ type ResourceActionsInput = {
   downloadBasePath: string;
   userCapabilities: string[];
   maxDownloadBatch?: number;
+  locale?: string;
 };
 
 type ResourceActionStatsInput = {
@@ -46,8 +48,8 @@ const resolveDownloadAllowed = (
   capabilitySet: Set<string>
 ) => hasCapability(capabilitySet, downloadCapability);
 
-const resolveLabel = (command: UiCommandDefinition) =>
-  command.label?.trim() || command.key;
+const resolveLabel = (command: UiCommandDefinition, locale?: string) =>
+  resolveRowDisplayText(command.label?.trim() || command.key, command.label_ar, locale);
 
 const resolveExecutionType = (
   command: UiCommandDefinition,
@@ -101,6 +103,7 @@ export const resolveResourceBulkActions = ({
   appBasePath,
   downloadBasePath,
   userCapabilities,
+  locale,
   maxDownloadBatch,
 }: ResourceActionsInput): BulkActionDefinition[] => {
   const output: BulkActionDefinition[] = [];
@@ -167,7 +170,7 @@ export const resolveResourceBulkActions = ({
           capability: capability ?? "",
         })
       : baseDisabledReason;
-    const label = resolveLabel(command);
+    const label = resolveLabel(command, locale);
     commandActions.push({
       key: command.key,
       label,

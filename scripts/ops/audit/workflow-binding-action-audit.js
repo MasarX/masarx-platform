@@ -148,12 +148,7 @@ function evaluateInventory(config, repoRoot) {
   const issues = [];
   const findings = [];
   const coveredFiles = new Set();
-  const registrySeedFile = String(config.registry_seed_file || '').trim();
-  const registrySeedPath = registrySeedFile
-    ? path.join(repoRoot, registrySeedFile)
-    : null;
-  const registrySeedContent =
-    registrySeedPath && fs.existsSync(registrySeedPath) ? readText(registrySeedPath) : '';
+  const defaultRegistrySeedFile = String(config.registry_seed_file || '').trim();
 
   for (const entry of Array.isArray(config.inventory) ? config.inventory : []) {
     const entryFiles = resolveInventoryFiles(entry);
@@ -183,7 +178,20 @@ function evaluateInventory(config, repoRoot) {
     });
 
     const bindingKey = String(entry.binding_key || '').trim();
-    if (bindingKey && registrySeedContent) {
+    if (bindingKey) {
+      // Append-only adopters may name their actual seed; an explicit empty override
+      // is invalid evidence, not permission to fall back to the historical seed.
+      const registrySeedFile = Object.prototype.hasOwnProperty.call(entry, 'registry_seed_file')
+        ? String(entry.registry_seed_file || '').trim()
+        : defaultRegistrySeedFile;
+      const registrySeedPath = registrySeedFile ? path.join(repoRoot, registrySeedFile) : null;
+      const registrySeedContent = registrySeedPath && fs.existsSync(registrySeedPath)
+        ? readText(registrySeedPath) : '';
+      if (!registrySeedContent.trim()) {
+        issues.push(
+          `[workflow-binding-audit] Missing or empty registry seed for ${bindingKey}: ${toPosix(registrySeedFile) || '<unset>'}`,
+        );
+      }
       const bindingPattern = new RegExp(`'${escapeRegExp(bindingKey)}'`, 'm');
       if (!bindingPattern.test(registrySeedContent)) {
         issues.push(

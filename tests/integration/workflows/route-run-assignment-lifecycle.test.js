@@ -6,8 +6,12 @@ const {
   createOrganization,
   createClient,
   createShipment,
+  createSender,
   createUser,
+  setFixtureUserPolicyCapabilities,
   setAuthContext,
+  withFixtureAdminContext,
+  setServiceContext: setCanonicalServiceContext,
 } = require('../helpers/tenant-utils');
 
 const pool = new Pool({ connectionString: DATABASE_URL });
@@ -16,16 +20,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
   let client;
 
   async function setServiceContext(userId, organizationId) {
-    await client.query('SET LOCAL ROLE service_role');
-    await client.query(`SELECT set_config('request.jwt.claims', $1, true)`, [
-      JSON.stringify({
-        sub: String(userId),
-        role: 'service_role',
-        organization_id: String(organizationId),
-      }),
-    ]);
-    await client.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [String(userId)]);
-    await client.query(`SELECT set_config('request.jwt.claim.role', 'service_role', true)`);
+    await setCanonicalServiceContext(client, userId, organizationId);
   }
 
   async function seedRouteRun() {
@@ -345,13 +340,13 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     return rows[0]?.payload ?? null;
   }
 
-  async function attachShipmentContactData(seed) {
+  async function attachShipmentContactData(adminClient, seed) {
     for (const [index, shipment] of seed.shipments.entries()) {
       const recipientId = randomUUID();
       const addressId = randomUUID();
       const phoneNumber = `+96650000${String(index + 1).padStart(4, '0')}`;
 
-      await client.query(
+      await adminClient.query(
         `INSERT INTO public.recipients (
            id,
            organization_id,
@@ -379,7 +374,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
         ]
       );
 
-      await client.query(
+      await adminClient.query(
         `INSERT INTO public.addresses (
            id,
            organization_id,
@@ -423,7 +418,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
         ]
       );
 
-      await client.query(
+      await adminClient.query(
         `UPDATE public.shipments
             SET recipient_id = $2::uuid,
                 destination_address_id = $3::uuid,
@@ -445,6 +440,237 @@ describe('UC076 route run assignment lifecycle foundation', () => {
       );
     }
   }
+
+  // R11 uses the real authenticated API and UC078 event producer. The enclosing
+  // transaction owns every fixture and rolls back; this is not mocked Edge proof.
+  async function seedReassignmentRequest() {
+    const seed = await seedRouteRun();
+    await withFixtureAdminContext(client, async (db) => {
+      await db.query(`INSERT INTO public.driver_profiles (organization_id,user_id,status,metadata)
+        VALUES ($1,$2,'active','{}'),($1,$3,'active',
+          '{"capacity_left":7,"reassign_eta_min":12,"reassign_distance_km":3.5}')
+        ON CONFLICT (organization_id,user_id) DO UPDATE SET status='active',metadata=EXCLUDED.metadata`,
+        [seed.organizationId,seed.driverId,seed.secondaryDriverId]);
+    });
+    await assignReassignmentDriver(seed,seed.driverId,seed.vehicleId);
+    await setServiceContext(seed.operatorId,seed.organizationId);
+    await client.query("UPDATE public.route_runs SET status='in_progress' WHERE id=$1",[seed.routeRunId]);
+    const stops = await client.query('SELECT id FROM public.route_stops WHERE route_run_id=$1 ORDER BY sequence_order,id',[seed.routeRunId]);
+    expect(stops.rows).toHaveLength(2);
+    return { ...seed, stopId:stops.rows[1].id, requestKey:'r11-'+randomUUID() };
+  }
+  async function assignReassignmentDriver(seed,driver,vehicle) {
+    await setAuthContext(client,seed.operatorId);
+    return client.query(`SELECT api.ui_execute_route_run_assign_v1('routes.assign','routes',$1::text[],$2,1,$3::jsonb)`,
+      [[seed.routeRunId],seed.routeRunId,JSON.stringify({driver_user_id:driver,vehicle_id:vehicle,idempotency_key:randomUUID()})]);
+  }
+  async function prepareReassignment(seed,expectedActor=seed.driverId,key=seed.requestKey,reason='Capacity review') {
+    const result = await client.query('SELECT api.prepare_fieldops_reassignment_v1($1,$2,$3,$4,$5) AS result',
+      [seed.stopId,seed.secondaryDriverId,reason,key,expectedActor]);
+    return result.rows[0].result;
+  }
+  async function submitReassignment(seed,requestId) {
+    await setServiceContext(seed.operatorId,seed.organizationId);
+    return (await client.query('SELECT api.submit_fieldops_reassignment_v1($1) AS result',[requestId])).rows[0].result;
+  }
+  async function moveRequestedStop(seed,key='r11-move-'+randomUUID()) {
+    return (await client.query(`SELECT api.ui_execute_route_stop_reassign_v1(
+      'route_stops.reassign','route_stops',$1::text[],NULL,1,$2::jsonb) AS result`,
+      [[seed.stopId],JSON.stringify({driver_user_id:seed.secondaryDriverId,vehicle_id:seed.secondaryVehicleId,
+        reassignment_reason:'Capacity review',idempotency_key:key})])).rows[0].result;
+  }
+  async function rejectedReassignment(operation,code) {
+    await client.query('SAVEPOINT r11_expected_rejection');
+    try { await expect(operation()).rejects.toMatchObject({code}); }
+    finally { await client.query('ROLLBACK TO SAVEPOINT r11_expected_rejection'); await client.query('RELEASE SAVEPOINT r11_expected_rejection'); }
+  }
+  async function requestSnapshot(requestId) {
+    return withFixtureAdminContext(client,async (db) => (await db.query(
+      'SELECT * FROM public.fieldops_reassignment_requests WHERE id=$1',[requestId])).rows[0]);
+  }
+
+  it('R11 driver intent creates one exact workflow task and real UC078 closes it without changing operator JWT', async () => {
+    const seed = await seedReassignmentRequest();
+    await setAuthContext(client,seed.driverId);
+    const candidates = (await client.query('SELECT * FROM api.fieldops_reassignment_candidates_v1($1)',[seed.stopId])).rows;
+    const target = candidates.find((row)=>row.value===seed.secondaryDriverId);
+    expect(target).toMatchObject({metadata:{capacity_left:7,eta_min:12,distance_km:3.5}});
+    expect(candidates.some((row)=>row.value===seed.driverId)).toBe(false);
+    const prepared = await prepareReassignment(seed);
+    expect(await prepareReassignment(seed)).toEqual(prepared);
+    const submitted = await submitReassignment(seed,prepared.request_id);
+    expect(submitted.ok).toBe(true);
+    for (const key of ['dispatch_task_id','workflow_run_id','dispatch_id','decision_log_id']) expect(submitted[key]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await submitReassignment(seed,prepared.request_id)).toEqual(submitted);
+    const before = await requestSnapshot(prepared.request_id);
+    expect(before.actor_user_id).toBe(seed.driverId);
+    expect(before.source_assignment_version).toBeGreaterThan(0);
+    const task = await withFixtureAdminContext(client,async(db)=>(await db.query(
+      'SELECT metadata,idempotency_key FROM public.tasks WHERE id=$1',[submitted.dispatch_task_id])).rows[0]);
+    expect(task.metadata.correlation_id).toBe(prepared.request_id);
+    expect(task.metadata.parent_workflow_run_id).toBe(submitted.workflow_run_id);
+    expect(task.idempotency_key).toBe('fieldops-reassignment:'+prepared.request_id);
+    await setAuthContext(client,seed.operatorId);
+    const operatorCorrelation=randomUUID();
+    await client.query("SELECT set_config('request.correlation_id',$1,true)",[operatorCorrelation]);
+    const claims=(await client.query("SELECT current_setting('request.jwt.claims') AS claims")).rows[0].claims;
+    const moveKey=randomUUID();
+    const moved=await moveRequestedStop(seed,moveKey);
+    expect(moved.items[0].target_route_run_id).not.toBe(seed.routeRunId);
+    expect((await client.query("SELECT current_setting('request.jwt.claims') AS claims")).rows[0].claims).toBe(claims);
+    await moveRequestedStop(seed,moveKey);
+    const after=await requestSnapshot(prepared.request_id);
+    expect(after.completed_event_id).toBeTruthy();
+    await withFixtureAdminContext(client,async(db)=>{
+      const rows=(await db.query(`SELECT status,completed_at FROM public.tasks WHERE id=$1`,[submitted.dispatch_task_id])).rows;
+      expect(rows[0].status).toBe('completed'); expect(rows[0].completed_at).toBeTruthy();
+      const events=(await db.query(`SELECT payload FROM public.task_events WHERE task_id=$1
+        AND to_status='completed' AND actor_system='fieldops-reassignment-event'`,[submitted.dispatch_task_id])).rows;
+      expect(events).toHaveLength(1);
+      expect(events[0].payload).toMatchObject({request_id:prepared.request_id,
+        route_stop_reassignment_event_id:after.completed_event_id,request_correlation_id:prepared.request_id,
+        operator_correlation_id:operatorCorrelation});
+      const dispatches=(await db.query('SELECT id FROM public.workflow_binding_dispatches WHERE idempotency_key=$1',
+        ['fieldops-reassignment:'+prepared.request_id])).rows;
+      expect(dispatches.map(r=>r.id)).toEqual([submitted.dispatch_id]);
+    });
+  });
+
+  it('R11 rejects direct privileged calls and old-account queued or prepared intent after ownership changes',async()=>{
+    const seed=await seedReassignmentRequest();
+    await setAuthContext(client,seed.driverId);
+    const prepared=await prepareReassignment(seed);
+    await rejectedReassignment(()=>client.query('SELECT api.submit_fieldops_reassignment_v1($1)',[prepared.request_id]),'42501');
+    await rejectedReassignment(()=>client.query('SELECT public.fieldops_reassignment_source_v1($1)',[seed.stopId]),'42501');
+    await rejectedReassignment(()=>client.query('SELECT public.complete_fieldops_reassignment_request_v1()'),'42501');
+    await rejectedReassignment(()=>client.query('SELECT public.transition_task_system_v1($1,$2,NULL,$3,NULL,NULL)',
+      [randomUUID(),'completed','{}']),'42501');
+    await rejectedReassignment(()=>prepareReassignment(seed,seed.driverId,seed.requestKey,'Changed reason'),'23505');
+    await assignReassignmentDriver(seed,seed.secondaryDriverId,seed.secondaryVehicleId);
+    await setAuthContext(client,seed.secondaryDriverId);
+    await rejectedReassignment(()=>prepareReassignment(seed,seed.driverId),'42501');
+    await rejectedReassignment(()=>prepareReassignment(seed,seed.driverId,'never-sent-'+randomUUID()),'42501');
+    expect((await requestSnapshot(prepared.request_id)).dispatch_task_id).toBeNull();
+  });
+
+  it('R11 rejects a newer assignment generation even when the row ID and driver return to the original values',async()=>{
+    const seed=await seedReassignmentRequest();
+    await setAuthContext(client,seed.driverId);
+    const prepared=await prepareReassignment(seed);
+    const before=await requestSnapshot(prepared.request_id);
+    await assignReassignmentDriver(seed,seed.secondaryDriverId,seed.secondaryVehicleId);
+    await assignReassignmentDriver(seed,seed.driverId,seed.vehicleId);
+    await setServiceContext(seed.operatorId,seed.organizationId);
+    const assignment=(await client.query('SELECT id,assignment_version FROM public.route_run_assignments WHERE route_run_id=$1',[seed.routeRunId])).rows[0];
+    expect(assignment.id).toBe(before.source_assignment_id);
+    expect(assignment.assignment_version).toBeGreaterThan(before.source_assignment_version);
+    await rejectedReassignment(()=>submitReassignment(seed,prepared.request_id),'55000');
+    expect((await requestSnapshot(prepared.request_id)).dispatch_task_id).toBeNull();
+  });
+
+  it.each(['completed','foreign','shipment_action'])('R11 latest task and stop marker eligibility rejects %s before prepare and new dispatch',async(mode)=>{
+    const seed=await seedReassignmentRequest();
+    await setAuthContext(client,seed.driverId);
+    const prepared=await prepareReassignment(seed);
+    await withFixtureAdminContext(client,async(db)=>{
+      if(mode==='shipment_action') {
+        await db.query("UPDATE public.route_stops SET metadata=metadata||'{\"shipment_action\":\"completed\"}'::jsonb WHERE id=$1",[seed.stopId]);
+      } else {
+        const inserted=await db.query(`INSERT INTO public.tasks
+          (organization_id,task_type_id,resource_type,resource_id,status,priority,assigned_to,created_at)
+          SELECT t.organization_id,t.task_type_id,t.resource_type,t.resource_id,$2,t.priority,$3,clock_timestamp()+interval '1 second'
+          FROM public.tasks t JOIN public.task_types tt ON tt.id=t.task_type_id
+          WHERE t.resource_id=$1 AND tt.key='route_stop_execute' ORDER BY t.created_at DESC,t.id DESC LIMIT 1 RETURNING id`,
+          [seed.stopId,mode==='completed'?'completed':'open',mode==='foreign'?seed.secondaryDriverId:seed.driverId]);
+        expect(inserted.rows).toHaveLength(1);
+      }
+    });
+    await setAuthContext(client,seed.driverId);
+    await rejectedReassignment(()=>prepareReassignment(seed,seed.driverId,randomUUID()),'42501');
+    await rejectedReassignment(()=>client.query('SELECT * FROM api.fieldops_reassignment_candidates_v1($1)',[seed.stopId]),'42501');
+    await setServiceContext(seed.operatorId,seed.organizationId);
+    await rejectedReassignment(()=>submitReassignment(seed,prepared.request_id),'55000');
+    expect((await requestSnapshot(prepared.request_id)).dispatch_task_id).toBeNull();
+  });
+
+  it('R11 real operator reassignment rolls back completely when canonical review-task transition fails',async()=>{
+    const seed=await seedReassignmentRequest();
+    await setAuthContext(client,seed.driverId);
+    const prepared=await prepareReassignment(seed);
+    const submitted=await submitReassignment(seed,prepared.request_id);
+    await withFixtureAdminContext(client,async(db)=>{
+      await db.query(`CREATE FUNCTION pg_temp.r11_reject_transition() RETURNS trigger LANGUAGE plpgsql AS $r11$
+        BEGIN IF NEW.id=TG_ARGV[0]::uuid AND NEW.status='completed' THEN
+          RAISE EXCEPTION 'r11_owned_transition_failure' USING ERRCODE='23514'; END IF; RETURN NEW; END;
+        $r11$`);
+      // UUID is generated by the owned fixture and validated above, not caller SQL.
+      expect(submitted.dispatch_task_id).toMatch(/^[0-9a-f-]{36}$/);
+      await db.query(`CREATE TRIGGER r11_owned_transition_failure BEFORE UPDATE ON public.tasks
+        FOR EACH ROW EXECUTE FUNCTION pg_temp.r11_reject_transition('${submitted.dispatch_task_id}')`);
+    });
+    await setAuthContext(client,seed.operatorId);
+    await rejectedReassignment(()=>moveRequestedStop(seed),'23514');
+    await withFixtureAdminContext(client,async(db)=>{
+      expect((await db.query('SELECT route_run_id FROM public.route_stops WHERE id=$1',[seed.stopId])).rows[0].route_run_id).toBe(seed.routeRunId);
+      expect((await db.query('SELECT id FROM public.route_stop_reassignment_events WHERE route_stop_id=$1',[seed.stopId])).rows).toHaveLength(0);
+      expect((await db.query('SELECT completed_at FROM public.tasks WHERE id=$1',[submitted.dispatch_task_id])).rows[0].completed_at).toBeNull();
+    });
+    expect((await requestSnapshot(prepared.request_id)).completed_event_id).toBeNull();
+  });
+
+  it.each(['inactive','no_capability'])('R11 current actor %s cannot prepare or replay',async(mode)=>{
+    const seed=await seedReassignmentRequest();
+    await setAuthContext(client,seed.driverId);
+    const prepared=await prepareReassignment(seed);
+    await withFixtureAdminContext(client,async(db)=>{
+      if(mode==='inactive') await db.query("UPDATE public.users SET status='suspended' WHERE id=$1::uuid",[seed.driverId]);
+      else {
+        const { rows } = await db.query(`SELECT
+          public.resolve_settings_merged('access_control_policy','tenant',$1::uuid) AS policy,
+          (SELECT version FROM public.schema_registry WHERE category='access_control_policy'
+            AND is_active ORDER BY version DESC LIMIT 1) AS schema_version`,[seed.organizationId]);
+        const current=rows[0];
+        expect(current.policy && typeof current.policy === 'object' && !Array.isArray(current.policy)).toBe(true);
+        expect(Number.isInteger(current.schema_version)).toBe(true);
+        const denies=current.policy.denies || [];
+        expect(Array.isArray(denies)).toBe(true);
+        const policy={...current.policy,denies:[...denies,{
+          capability_key:'routes.read',scope_type:'tenant',scope_id:seed.organizationId,
+        }]};
+        await db.query(`SELECT public.upsert_settings_value_v1('access_control_policy','tenant',$1::uuid,
+          $2::jsonb,$3::integer,'R11 owned capability revocation')`,
+          [seed.organizationId,JSON.stringify(policy),current.schema_version]);
+      }
+    });
+    await setAuthContext(client,seed.driverId);
+    if(mode==='no_capability') {
+      const capability=(await client.query("SELECT public.user_has_resource_capability_v1('routes','read',public.current_user_scope_type(),COALESCE(public.current_user_scope_id(),public.current_user_org_id())) AS allowed")).rows[0].allowed;
+      expect(capability).toBe(false); // The fixture must really remove authority, not merely change labels.
+    }
+    await rejectedReassignment(()=>prepareReassignment(seed),'42501');
+    await rejectedReassignment(()=>prepareReassignment(seed,seed.driverId,randomUUID()),'42501');
+    await rejectedReassignment(()=>client.query('SELECT * FROM api.fieldops_reassignment_candidates_v1($1)',[seed.stopId]),'42501');
+    await setServiceContext(seed.operatorId,seed.organizationId);
+    await rejectedReassignment(()=>submitReassignment(seed,prepared.request_id),'42501');
+    expect((await requestSnapshot(prepared.request_id)).dispatch_task_id).toBeNull();
+  });
+
+  it('R11 candidates and request targets exclude inactive and cross-organization drivers',async()=>{
+    const seed=await seedReassignmentRequest();
+    const foreignOrg=await createOrganization(client,'R11 foreign target');
+    const foreign=await createUser(client,foreignOrg.id,'r11-foreign-'+randomUUID()+'@example.com',{accessScopeType:'tenant',userType:'driver'});
+    await withFixtureAdminContext(client,async(db)=>{
+      await db.query("INSERT INTO public.driver_profiles(organization_id,user_id,status) VALUES($1,$2,'active')",[foreignOrg.id,foreign]);
+      await db.query("UPDATE public.driver_profiles SET status='inactive' WHERE organization_id=$1 AND user_id=$2",[seed.organizationId,seed.secondaryDriverId]);
+    });
+    await setAuthContext(client,seed.driverId);
+    const values=(await client.query('SELECT value FROM api.fieldops_reassignment_candidates_v1($1)',[seed.stopId])).rows.map(r=>r.value);
+    expect(values).not.toContain(foreign); expect(values).not.toContain(seed.secondaryDriverId);
+    await rejectedReassignment(()=>prepareReassignment({...seed,secondaryDriverId:foreign}),'22023');
+    await rejectedReassignment(()=>prepareReassignment(seed),'22023');
+    await setAuthContext(client,foreign);
+    await rejectedReassignment(()=>client.query('SELECT * FROM api.fieldops_reassignment_candidates_v1($1)',[seed.stopId]),'42501');
+  });
 
   beforeAll(async () => {
     const connection = await pool.connect();
@@ -468,9 +694,108 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     client = null;
   });
 
+  it.each(['missing', 'unassigned_driver'])('E47 rejects SQL-identity authority for all route entrypoints with %s JWT', async (mode) => {
+    const seed = await seedRouteRun();
+    await setAuthContext(client, seed.operatorId);
+    await client.query('SELECT * FROM public.assign_route_run_v1($1::jsonb)', [JSON.stringify({
+      route_run_id: seed.routeRunId, driver_user_id: seed.driverId, vehicle_id: seed.vehicleId,
+    })]);
+    await setServiceContext(seed.operatorId, seed.organizationId);
+    await client.query("UPDATE public.route_runs SET status='in_progress' WHERE id=$1", [seed.routeRunId]);
+    const { rows: stops } = await client.query('SELECT id FROM public.route_stops WHERE route_run_id=$1 ORDER BY sequence_order', [seed.routeRunId]);
+    expect(stops).toHaveLength(2);
+    const stopId = stops[1].id;
+    const operations = [
+      ['assign', 'SELECT * FROM public.assign_route_run_v1($1::jsonb)', [JSON.stringify({
+        route_run_id: seed.routeRunId, driver_user_id: seed.secondaryDriverId, vehicle_id: seed.secondaryVehicleId,
+      })]],
+      ['handoff', 'SELECT * FROM public.route_run_prepare_partner_handoff_v1($1::uuid,$2::uuid[],NULL,NULL)', [seed.routeRunId,[stopId]]],
+      ['reassign', 'SELECT * FROM public.reassign_route_stops_v1($1::jsonb)', [JSON.stringify({
+        route_stop_ids: [stopId], driver_user_id: seed.secondaryDriverId, vehicle_id: seed.secondaryVehicleId,
+        reassignment_reason: 'E47 rollback authority regression',
+      })]],
+      ['respond', 'SELECT * FROM public.respond_route_run_assignment_v1($1::jsonb)', [JSON.stringify({
+        route_run_id: seed.routeRunId, action_key: 'route_runs.acknowledge_assignment', response_status: 'acknowledged',
+      })]],
+    ];
+    async function setDeniedContext() {
+      await client.query('SET LOCAL ROLE postgres');
+      const claims = mode === 'missing' ? {} : { sub: seed.secondaryDriverId, role: 'authenticated' };
+      await client.query("SELECT set_config('request.jwt.claims',$1,true),set_config('request.jwt.claim.role',$2,true),set_config('request.jwt.claim.sub',$3,true)",
+        [JSON.stringify(claims), claims.role || '', claims.sub || '']);
+    }
+    await setDeniedContext();
+    const { rows: reader } = await client.query(
+      'SELECT public.route_run_actor_can_read_v1($1,$2,$3) AS allowed',
+      [seed.organizationId,seed.routeRunId,seed.driverId]);
+    expect(reader[0].allowed).toBe(false);
+    for (const [name,sql,params] of operations) {
+      await setDeniedContext();
+      await client.query('SAVEPOINT e47_denied');
+      let failure;
+      try { await client.query(sql,params); } catch (error) { failure=error; }
+      finally { await client.query('ROLLBACK TO SAVEPOINT e47_denied'); await client.query('RELEASE SAVEPOINT e47_denied'); }
+      expect({ operation:name, code:failure?.code }).toEqual({ operation:name,code:'42501' });
+    }
+    // Each supported service control uses the same input and an independent rollback.
+    await setServiceContext(seed.operatorId,seed.organizationId);
+    expect((await client.query('SELECT public.route_run_actor_can_read_v1($1,$2,$3) AS allowed',
+      [seed.organizationId,seed.routeRunId,seed.driverId])).rows[0].allowed).toBe(true);
+    for (const [name,sql,params] of operations) {
+      await setServiceContext(seed.operatorId,seed.organizationId);
+      await client.query('SAVEPOINT e47_control');
+      try {
+        const result=await client.query(sql,params);
+        expect({operation:name,rows:result.rows.length}).toEqual({operation:name,rows:1});
+        if(name==='assign') expect(result.rows[0].driver_user_id).toBe(seed.secondaryDriverId);
+        if(name==='handoff') expect(Number(result.rows[0].unassigned_task_count)).toBe(1);
+        if(name==='reassign') expect(result.rows[0].target_route_run_id).not.toBe(seed.routeRunId);
+        if(name==='respond') expect(result.rows[0].assignment_status).toBe('acknowledged');
+      } finally {
+        await client.query('ROLLBACK TO SAVEPOINT e47_control');
+        await client.query('RELEASE SAVEPOINT e47_control');
+      }
+    }
+  });
+
+  it('E47 service-only scan telemetry denies raw reads while scoped manifest projection remains readable', async () => {
+    const seed=await seedRouteRun();
+    const foreign=await seedRouteRun();
+    await setServiceContext(seed.operatorId,seed.organizationId);
+    const {rows:stops}=await client.query('SELECT id,shipment_id FROM public.route_stops WHERE route_run_id=$1 ORDER BY sequence_order',[seed.routeRunId]);
+    expect(stops).toHaveLength(2);
+    const ids=[randomUUID(),randomUUID(),randomUUID()];
+    // Admitted native DB must have its normal current scan partition; never skip or create infrastructure here.
+    for(const [index,org,actor,route,stop] of [
+      [0,seed.organizationId,seed.operatorId,seed.routeRunId,stops[0].id],
+      [1,seed.organizationId,seed.driverId,seed.routeRunId,stops[1].id],
+      [2,foreign.organizationId,foreign.operatorId,foreign.routeRunId,null],
+    ]) {
+      await client.query('INSERT INTO public.scan_events(id,organization_id,actor_user_id,route_run_id,route_stop_id,scan_type,barcode,captured_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())',
+        [ids[index],org,actor,route,stop,'load','E47-'+ids[index]]);
+    }
+    await setAuthContext(client,seed.operatorId);
+    // 202601251090_telemetry_partitioning_config_restore_v1 deliberately supersedes
+    // the earlier authenticated scan grant with service-only telemetry. Executor
+    // reads remain through the scoped manifest below; never regrant raw telemetry.
+    await client.query('SAVEPOINT e47_raw_scan_denial');
+    try {
+      await expect(client.query('SELECT id FROM public.scan_events WHERE id=ANY($1::uuid[]) ORDER BY id',[ids]))
+        .rejects.toMatchObject({ code: '42501' });
+    } finally {
+      await client.query('ROLLBACK TO SAVEPOINT e47_raw_scan_denial');
+      await client.query('RELEASE SAVEPOINT e47_raw_scan_denial');
+    }
+    const {rows:visibleStops}=await client.query('SELECT id FROM api.route_stops WHERE route_run_id=$1 ORDER BY id',[seed.routeRunId]);
+    expect(visibleStops.map(row=>row.id).sort()).toEqual(stops.map(row=>row.id).sort());
+    expect((await client.query('SELECT id FROM api.route_stops WHERE route_run_id=$1',[foreign.routeRunId])).rows).toHaveLength(0);
+  });
+
   it('assigns a route run to an internal driver and syncs route_stop tasks', async () => {
     const seed = await seedRouteRun();
-    await attachShipmentContactData(seed);
+    await withFixtureAdminContext(client, (adminClient) =>
+      attachShipmentContactData(adminClient, seed)
+    );
     const supportContacts = [
       {
         id: 'dispatcher-desk',
@@ -875,7 +1200,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     );
   });
 
-  it('splits selected in-progress route stops into a new route run and reassigns the moved cohort', async () => {
+  it.each(['driver', 'partner'])('splits selected in-progress route stops into a new route run and reassigns the moved cohort to %s', async (assignmentMode) => {
     const seed = await seedRouteRun();
 
     await setAuthContext(client, seed.operatorId);
@@ -921,8 +1246,10 @@ describe('UC076 route run assignment lifecycle foundation', () => {
         [movedStopId],
         1,
         JSON.stringify({
-          driver_user_id: seed.secondaryDriverId,
-          vehicle_id: seed.secondaryVehicleId,
+          ...(assignmentMode === 'partner'
+            ? { partner_id: 'partner-1', partner_name: 'Partner Fleet' }
+            : { driver_user_id: seed.secondaryDriverId,
+                vehicle_id: seed.secondaryVehicleId }),
           reassignment_reason: 'Capacity rebalance',
           idempotency_key: `uc078-stop-reassign-${randomUUID()}`,
         }),
@@ -934,7 +1261,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     expect(stopPayload?.count).toBe(1);
     expect(targetRouteRunId).toBeTruthy();
     expect(targetRouteRunId).not.toBe(seed.routeRunId);
-    expect(stopPayload?.items?.[0]?.driver_user_id).toBe(seed.secondaryDriverId);
+    expect(stopPayload?.items?.[0]?.driver_user_id).toBe(assignmentMode === 'partner' ? undefined : seed.secondaryDriverId);
 
     await setServiceContext(seed.operatorId, seed.organizationId);
     const { rows: sourceStops } = await client.query(
@@ -993,7 +1320,18 @@ describe('UC076 route run assignment lifecycle foundation', () => {
       [seed.organizationId, targetRouteRunId]
     );
     expect(targetTaskRows).toHaveLength(1);
-    expect(targetTaskRows[0].assigned_to).toBe(seed.secondaryDriverId);
+    expect(targetTaskRows[0].assigned_to).toBe(assignmentMode === 'partner' ? null : seed.secondaryDriverId);
+    if (assignmentMode === 'partner') {
+      const targetAssignments = await client.query(
+        `SELECT assignment_mode,driver_user_id,vehicle_id,partner
+           FROM public.route_run_assignments WHERE route_run_id=$1::uuid`,
+        [targetRouteRunId]);
+      expect(targetAssignments.rows).toHaveLength(1);
+      expect(targetAssignments.rows[0]).toMatchObject({
+        assignment_mode: 'partner_fleet', driver_user_id: null, vehicle_id: null,
+        partner: { partner_id: 'partner-1', partner_name: 'Partner Fleet' },
+      });
+    }
 
     const { rows: eventRows } = await client.query(
       `SELECT route_stop_id, source_route_run_id, target_route_run_id, payload
@@ -1007,8 +1345,14 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     expect(eventRows[0].payload?.reassignment_reason).toBe('Capacity rebalance');
     expect(eventRows[0].payload?.source_assignment?.driver_user_id).toBe(seed.driverId);
     expect(eventRows[0].payload?.target_assignment?.driver_user_id).toBe(
-      seed.secondaryDriverId
+      assignmentMode === 'partner' ? undefined : seed.secondaryDriverId
     );
+    if (assignmentMode === 'partner') {
+      expect(eventRows[0].payload.target_assignment).toMatchObject({
+        assignment_mode: 'partner_fleet',
+        partner: { partner_id: 'partner-1', partner_name: 'Partner Fleet' },
+      });
+    }
 
     await setAuthContext(client, seed.operatorId);
     const { rows: targetManifestRows } = await client.query(
@@ -1016,10 +1360,100 @@ describe('UC076 route run assignment lifecycle foundation', () => {
       [targetRouteRunId]
     );
     expect(targetManifestRows[0]?.manifest?.route_assignment?.driver_user_id).toBe(
-      seed.secondaryDriverId
+      assignmentMode === 'partner' ? undefined : seed.secondaryDriverId
     );
+    if (assignmentMode === 'partner') {
+      expect(targetManifestRows[0].manifest.route_assignment).toMatchObject({
+        assignment_mode: 'partner_fleet',
+        partner: { partner_id: 'partner-1', partner_name: 'Partner Fleet' },
+      });
+    }
     expect(targetManifestRows[0]?.manifest?.stop_count).toBe(1);
     expect(targetManifestRows[0]?.manifest?.stops?.[0]?.route_stop_id).toBe(movedStopId);
+    const resource = 'route_stop_reassignment_events';
+    const eventId = (await withFixtureAdminContext(client, db => db.query(
+      'SELECT id FROM public.route_stop_reassignment_events WHERE route_stop_id=$1::uuid', [movedStopId]))).rows[0].id;
+    const reads = [
+      ['SELECT public.ui_list_resource_v1($1,$2::jsonb,25,0,NULL) AS result', [resource, '{}']],
+      ['SELECT public.ui_get_resource_v1($1,$2::uuid) AS result', [resource, eventId]],
+      ['SELECT public.ui_resource_metrics_v1($1,$2::jsonb,NULL) AS result', [resource, '{}']],
+      ['SELECT public.ui_filter_distinct_values_v1($1,$2,NULL,25) AS result', [resource, 'route_stop_id']],
+    ];
+    const own = [];
+    for (const [sql, params] of reads) own.push((await client.query(sql, params)).rows[0].result);
+    expect(own[0].items).toHaveLength(1);
+    expect(own[0].items[0]).toMatchObject({ id: eventId, route_stop_id: movedStopId,
+      source_route_run_id: seed.routeRunId, target_route_run_id: targetRouteRunId });
+    expect(own[0].items[0].payload).toEqual(eventRows[0].payload);
+    expect(own[1]).toMatchObject({ id: eventId, payload: eventRows[0].payload });
+    const expectedColumns = ['id','organization_id','route_stop_id','shipment_id',
+      'source_route_run_id','target_route_run_id','event_type','actor_user_id','notes','payload','created_at'].sort();
+    expect(Object.keys(own[0].items[0]).sort()).toEqual(expectedColumns);
+    expect(Object.keys(own[1]).sort()).toEqual(expectedColumns);
+    expect(own[2].total).toBe(1);
+    expect(own[3]).toEqual([movedStopId]);
+    const foreign = await createOrganization(client, 'E49 isolated organization');
+    const foreignOperator = await createUser(client, foreign.id, `e49-foreign-${randomUUID()}@example.test`,
+      { accessScopeType: 'tenant', userType: 'ops_admin' });
+    await setAuthContext(client, foreignOperator);
+    const hidden = [];
+    for (const [sql, params] of reads) hidden.push((await client.query(sql, params)).rows[0].result);
+    expect(hidden[0].items).toEqual([]);
+    expect(hidden[1]).toBeNull();
+    expect(hidden[2].total).toBe(0);
+    expect(hidden[3]).toEqual([]);
+    const unprivileged = await createUser(client, seed.organizationId, `e49-denied-${randomUUID()}@example.test`,
+      { accessScopeType: 'tenant', userType: 'driver', provisionRbac: false });
+    // No relational RBAC assignment does not disable user-type policy inheritance.
+    // Bind this negative-test actor explicitly to an empty-capability fixture role.
+    await setFixtureUserPolicyCapabilities(client, seed.organizationId, unprivileged, []);
+    await setAuthContext(client, unprivileged);
+    expect((await client.query("SELECT public.user_has_resource_capability_v1('routes','read','tenant',$1::uuid) AS allowed",
+      [seed.organizationId])).rows[0].allowed).toBe(false);
+    for (const [sql, params] of reads) {
+      await client.query('SAVEPOINT e49_denial');
+      try {
+        await expect(client.query(sql, params)).rejects.toMatchObject({ code: '42501' });
+      } finally {
+        await client.query('ROLLBACK TO SAVEPOINT e49_denial');
+        await client.query('RELEASE SAVEPOINT e49_denial');
+      }
+    }
+    await setAuthContext(client, seed.operatorId);
+    const scopeClient = await createClient(client, seed.organizationId, 'E49 scoped client');
+    const scopeSender = await createSender(client, scopeClient.id, 'E49 scoped sender');
+    for (const [scope, scopeId, userType] of [
+      ['client', scopeClient.id, 'client_admin'],
+      ['sender', scopeSender, 'sender_user'],
+      ['platform', null, 'ops_admin'],
+    ]) {
+      const scopedUser = await createUser(client, seed.organizationId, `e49-${scope}-${randomUUID()}@example.test`,
+        { accessScopeType: scope, accessScopeId: scopeId, provisionRbac: false, userType });
+      await setAuthContext(client, scopedUser);
+      expect((await client.query('SELECT public.current_user_scope_type() AS scope')).rows[0].scope).toBe(scope);
+      for (const [sql, params] of reads) {
+        await client.query('SAVEPOINT e49_scope_denial');
+        try {
+          await expect(client.query(sql, params)).rejects.toMatchObject({
+            code: '42501', message: 'Resource read scope denied',
+          });
+        } finally {
+          await client.query('ROLLBACK TO SAVEPOINT e49_scope_denial');
+          await client.query('RELEASE SAVEPOINT e49_scope_denial');
+        }
+      }
+    }
+    await setAuthContext(client, seed.operatorId);
+    // Global is not a valid user fixture; this is shared-guard proof only.
+    await client.query('SAVEPOINT e49_global_guard');
+    try {
+      await expect(client.query(`SELECT public.ui_assert_resource_read_scope_v1(
+        '{"read_scope_types":["tenant"],"scope_columns":{"tenant":"organization_id"}}'::jsonb,'global',NULL)`))
+        .rejects.toMatchObject({ code:'42501',message:'Resource read scope denied' });
+    } finally {
+      await client.query('ROLLBACK TO SAVEPOINT e49_global_guard');
+      await client.query('RELEASE SAVEPOINT e49_global_guard');
+    }
   });
 
   it('assigns an express route run through the alternate capacity pool path and exposes it through the browser-safe route API', async () => {

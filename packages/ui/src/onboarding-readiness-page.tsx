@@ -8,6 +8,7 @@ import { PageHeader } from "./page-header";
 import { Section } from "./section";
 import { formatUiError } from "./utils";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { createUiTranslator } from "./i18n";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -50,8 +51,8 @@ function booleanValue(value: unknown) {
 }
 
 function toneForStatus(value: string | null) {
-  if (value === "healthy") return "success" as const;
-  if (value === "pending_credentials") return "warning" as const;
+  if (value === "healthy" || value === "ready") return "success" as const;
+  if (value === "pending_credentials" || value === "warning") return "warning" as const;
   if (value === "blocked") return "danger" as const;
   return "neutral" as const;
 }
@@ -111,6 +112,14 @@ export async function OnboardingReadinessPage({
   const settings = recordValue(readiness?.settings_defaults ?? null);
   const workflows = recordValue(readiness?.workflow_bindings ?? null);
   const plugins = recordValue(readiness?.integration_plugins ?? null);
+  const labelDesign = readiness?.label_design;
+  const labelPresent = numberValue(labelDesign?.present_count ?? labelDesign?.healthy_count);
+  const labelRequired = numberValue(labelDesign?.required_count ?? labelPresent);
+  const labelStatus = stringValue(labelDesign?.status);
+  const labelStatusKey = ["healthy", "ready", "warning", "blocked", "not_applicable"].includes(labelStatus ?? "")
+    ? labelStatus
+    : "unknown";
+  const tLabel = createUiTranslator("ui.onboardingReadiness.labelDesign");
   const pluginItems = arrayValue<JsonRecord>(plugins?.items);
   const blockingFindings = arrayValue<JsonRecord>(readiness?.blocking_findings);
   const overallStatus = stringValue(readiness?.overall_status) ?? null;
@@ -301,6 +310,28 @@ export async function OnboardingReadinessPage({
                   </Badge>
                 </div>
               </div>
+              {labelDesign ? (
+                <div
+                  className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4"
+                  data-testid={`${testIdPrefix}-label-design`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-wide text-ui-muted">{tLabel("title")}</div>
+                      <div className="mt-1 text-sm text-ui-muted">
+                        {tLabel("readyCount", { current: labelPresent, total: labelRequired })}
+                      </div>
+                    </div>
+                    <Badge tone={toneForStatus(labelStatus)} data-testid={`${testIdPrefix}-label-design-status`}>
+                      {tLabel(`status.${labelStatusKey}`)}
+                    </Badge>
+                  </div>
+                  <div className="mt-2 text-sm text-ui-muted">
+                    <div>{tLabel("blockingCount", { count: numberValue(labelDesign.blocking_count) })}</div>
+                    <div>{tLabel("warningCount", { count: numberValue(labelDesign.warning_count) })}</div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         )}

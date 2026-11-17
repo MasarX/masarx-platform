@@ -9,6 +9,7 @@ import {
   applyResourceLimit,
   resolveResourceKeysForUser,
 } from "./utils/core-resource";
+import { openFirstSingleLineInlineEditor } from "./utils/table-actions";
 
 const demoContext = loadDemoContext();
 const strict = isStrictE2EEnv();
@@ -147,26 +148,32 @@ for (const config of appConfigs) {
     }) => {
       test.setTimeout(600_000);
       const baseUrl = config.baseUrl();
+      const inlineEditUser =
+        config.label === "portal"
+          ? demoContext.users.find((candidate) => candidate.user_type === "ops_admin") ?? user
+          : user;
       const context = await fetchUserContext({
         app: config.app,
-        email: user.email,
+        email: inlineEditUser.email,
         password: demoContext.password ?? "",
       });
       const sections = Array.isArray(context.navigation.sections)
         ? context.navigation.sections
         : [];
-      const resourceKeys = applyResourceLimit(
-        resolveResourceKeysForUser({
-          sections,
-          readRegistry: context.readRegistry,
-          commandRegistry: context.commandRegistry,
-          capabilities: context.me?.capabilities ?? null,
-        })
-      );
-      if (resourceKeys.length === 0) {
-        throw new Error(`No resources available for ${user.email}.`);
+      const resourceKeys = resolveResourceKeysForUser({
+        sections: config.label === "portal" ? [] : sections,
+        readRegistry: context.readRegistry,
+        commandRegistry: context.commandRegistry,
+        capabilities: context.me?.capabilities ?? null,
+      });
+      const resourceKey = resourceKeys.find((key) => key === "workflow_template_steps");
+      if (!resourceKey) {
+        if (strict) {
+          throw new Error(`${config.label} inline-edit resource workflow_template_steps is unavailable.`);
+        }
+        test.skip(true, `No inline-edit resource available for ${config.label}.`);
+        return;
       }
-      const resourceKey = resourceKeys[0];
       const redactedToken =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature";
       let injected = false;
@@ -196,9 +203,9 @@ for (const config of appConfigs) {
       await page.goto(baseUrl);
       const authGate = page.locator(`[data-testid="${config.authTestId}"]`);
       if (await authGate.isVisible()) {
-        await signInWithPassword(page, user.email, demoContext.password || "");
+        await signInWithPassword(page, inlineEditUser.email, demoContext.password || "");
       }
-      await expectSignedIn(page, user.email, user.scope_type);
+      await expectSignedIn(page, inlineEditUser.email, inlineEditUser.scope_type);
 
       await page.goto(`${baseUrl}/resources/${resourceKey}`, {
         waitUntil: "domcontentloaded",
@@ -214,46 +221,26 @@ for (const config of appConfigs) {
       if (!(await ready.isVisible())) return;
       await assertNavigationPerformance(page);
 
-      const editAction = page.locator('[data-testid="table-inline-edit-action"]');
-      if ((await editAction.count()) === 0) {
-        if (strict) {
-          throw new Error(`Inline edit not available for ${config.label}.`);
-        }
+      const editor = await openFirstSingleLineInlineEditor(page);
+      if (!editor) {
+        if (strict) throw new Error(`Inline edit not available for ${config.label}.`);
         return;
       }
-      await editAction.first().click();
-      const editRow = page
-        .locator('[data-testid="table-inline-edit-save"]')
-        .first()
-        .locator("xpath=ancestor::tr[1]");
-      const editInput = editRow.locator(
-        'input:not([type="checkbox"]):not([type="hidden"]):not([readonly]), textarea:not([readonly]), select'
-      );
-      if ((await editInput.count()) === 0) {
-        if (strict) {
-          throw new Error(`Inline edit input missing for ${config.label}.`);
-        }
-        return;
-      }
-      const inputHandle = editInput.first();
-      const tag = await inputHandle.evaluate((node) => node.tagName.toLowerCase());
+      const tag = await editor.control.evaluate((node) => node.tagName.toLowerCase());
       if (tag === "select") {
-        const options = inputHandle.locator("option");
+        const options = editor.control.locator("option");
         if ((await options.count()) > 1) {
           const optionValue = await options.nth(1).getAttribute("value");
-          if (optionValue) {
-            await inputHandle.selectOption(optionValue);
-          }
+          if (optionValue) await editor.control.selectOption(optionValue);
         }
       } else {
-        await inputHandle.fill(`e2e-${Date.now()}`);
+        await editor.control.fill(`e2e-${Date.now()}`);
       }
-      const saveButton = page.locator('[data-testid="table-inline-edit-save"]');
-      await saveButton.first().click();
-      if (strict && !injected) {
-        throw new Error("Inline edit update route was not intercepted.");
-      }
-      const redactedInline = editRow.getByText("[redacted]").first();
+      await editor.control.press("Enter");
+      await expect
+        .poll(() => injected)
+        .toBe(true);
+      const redactedInline = editor.cell.getByText("[redacted]").first();
       const redactedToast = page.locator(".ui-toast").filter({ hasText: "[redacted]" }).first();
       await expect
         .poll(async () => {

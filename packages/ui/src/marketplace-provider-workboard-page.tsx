@@ -62,7 +62,6 @@ export async function MarketplaceProviderWorkboardPage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Availability update failed.") };
     }
-    revalidatePath(baseHref);
     return { status: "success", message: "Availability window saved." };
   }
 
@@ -94,7 +93,6 @@ export async function MarketplaceProviderWorkboardPage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Offer failed.") };
     }
-    revalidatePath(baseHref);
     return { status: "success", message: "Offer submitted." };
   }
 
@@ -119,7 +117,6 @@ export async function MarketplaceProviderWorkboardPage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Award response failed.") };
     }
-    revalidatePath(baseHref);
     revalidatePath(`${appBasePath}/marketplace/contracts`);
     return { status: "success", message: "Award response recorded." };
   }
@@ -147,7 +144,6 @@ export async function MarketplaceProviderWorkboardPage({
     } catch (error) {
       return { status: "error", message: formatUiError(error, "Completion failed.") };
     }
-    revalidatePath(baseHref);
     return { status: "success", message: "Work package completion recorded." };
   }
 
