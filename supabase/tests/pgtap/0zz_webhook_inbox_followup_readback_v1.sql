@@ -43,6 +43,7 @@ DECLARE
   inbox_id UUID:=gen_random_uuid(); foreign_inbox UUID:=gen_random_uuid(); entry_id UUID:=gen_random_uuid();
   child_id UUID:=gen_random_uuid(); extra_id UUID:=gen_random_uuid(); client_id UUID:=gen_random_uuid(); sender_id UUID:=gen_random_uuid();
   mapping_id UUID:=gen_random_uuid(); foreign_mapping_id UUID:=gen_random_uuid();
+  source_reader_role UUID;
   entry_context JSONB; child_context JSONB; child_metadata JSONB; row_result JSONB;
   action TEXT; state TEXT; scenario TEXT; policy JSONB; registry JSONB; schema_version INT;
   role_key TEXT:='followup_'||replace(gen_random_uuid()::text,'-','');
@@ -54,6 +55,15 @@ BEGIN
   INSERT INTO public.senders(id,client_id,name,status) VALUES(sender_id,client_id,'Followup sender','active');
   INSERT INTO public.users(id,organization_id,email,full_name,user_type,status,access_scope_type,access_scope_id)
     VALUES(actor,org,actor||'@example.invalid','Followup reader','ops_admin','active','tenant',NULL);
+  -- Inbox RLS requires visibility of its source, which uses the tenant's agreements.read RBAC grant.
+  INSERT INTO public.rbac_roles(organization_id,key,name)
+    VALUES(org,role_key,'Followup source reader') RETURNING id INTO source_reader_role;
+  INSERT INTO public.rbac_role_permissions(organization_id,role_id,permission_id)
+    SELECT org,source_reader_role,lv.id FROM public.lookup_definitions ld
+    JOIN public.lookup_values lv ON lv.lookup_definition_id=ld.id AND lv.value='agreements.read'
+    WHERE ld.category='rbac_permission';
+  INSERT INTO public.rbac_user_role_assignments(organization_id,user_id,role_id)
+    VALUES(org,actor,source_reader_role);
   INSERT INTO public.mapping_configs(id,organization_id,mapping_type,mapping_key,mapping_config) VALUES
     (mapping_id,org,'webhook_inbound','followup-'||mapping_id,'{}'),
     (foreign_mapping_id,other_org,'webhook_inbound','followup-'||foreign_mapping_id,'{}');
@@ -192,9 +202,12 @@ BEGIN
   PERFORM set_config('request.jwt.claim.role','authenticated',TRUE);
   PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',actor,'role','authenticated')::text,TRUE);
   SET LOCAL ROLE authenticated;
+  RETURN NEXT ok(public.user_has_permission_v1('agreements.read',org),
+    'tenant fixture has the RBAC permission required by webhook source RLS');
   row_result:=api.ui_get_resource_v1('webhook_inbox',inbox_id);
   RETURN NEXT diag(jsonb_build_object('row_present',row_result IS NOT NULL,
     'has_followup_key',COALESCE(row_result ? 'followup_workflow_run_id',FALSE),
+    'source_visible',EXISTS(SELECT 1 FROM public.webhook_sources WHERE id=source_id),
     'source_read_capability',public.user_has_resource_capability_v1('webhook_sources','read'),
     'workflow_read_capability',public.user_has_capability_v1('workflow_runs.read'))::text);
   RETURN NEXT is(row_result->>'followup_workflow_run_id',child_id::text,
