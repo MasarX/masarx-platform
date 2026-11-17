@@ -555,7 +555,7 @@ const buildWebhookShipmentTransforms = (paths: string[]): JsonRecord => {
       external_id: pick(["recipient.external_id", "recipient_id", "customer_id"],
         ["shipment.recipient.external_id", "recipient.external_id", "customer.external_id"]),
       name: pick(["recipient.name", "customer.name", "customer_name", "name"],
-        ["Example Entity ntvplorhukthpmnmvgrstqzp", "recipient.name", "customer.name", "customer_name"]),
+        ["shipment.recipient.name", "recipient.name", "customer.name", "customer_name"]),
       phone: pick(["recipient.phone", "customer.phone", "phone_number", "phone", "mobile", "msisdn"],
         ["shipment.recipient.phone", "recipient.phone", "customer.phone", "phone", "mobile"]),
       email: pick(["recipient.email", "customer.email", "email"],

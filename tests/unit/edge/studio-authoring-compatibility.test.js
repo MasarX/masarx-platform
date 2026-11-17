@@ -257,7 +257,7 @@ describe('Studio mapping normalization', () => {
       metadata: { canonical_intent: 'shipment.create', mapping_profile: 'plugin_studio_webhook_shipment_create_v1' } });
     expect(mapping.fields).toContainEqual(expect.objectContaining({ target_field: 'tracking_number', source_path: '$.awb' }));
     expect(mapping.transforms.shipment.tracking_number).toEqual(['awb', 'shipment.tracking_number', 'tracking_number', 'waybill', 'barcode']);
-    expect(mapping.transforms.recipient.name).toEqual(['customer.name', 'Example Entity ntvplorhukthpmnmvgrstqzp', 'recipient.name', 'customer_name']);
+    expect(mapping.transforms.recipient.name).toEqual(['customer.name', 'shipment.recipient.name', 'recipient.name', 'customer_name']);
     expect(Object.keys(mapping.transforms.shipment)).toEqual(['tracking_number', 'external_id', 'reference_number',
       'service_type', 'service_level', 'cod_amount', 'currency']);
     expect(Object.keys(mapping.transforms.recipient)).toEqual(['external_id', 'name', 'phone', 'email']);

@@ -240,7 +240,7 @@ describeIfDb("mapping studio runtime save", () => {
       metadata: { canonical_intent: "shipment.create", mapping_profile: "plugin_studio_webhook_shipment_create_v1" },
       transforms: {
         shipment: { tracking_number: ["shipment.tracking_number", "tracking_number", "awb"] },
-        recipient: { name: ["Example Entity ntvplorhukthpmnmvgrstqzp", "recipient.name", "customer.name"] },
+        recipient: { name: ["shipment.recipient.name", "recipient.name", "customer.name"] },
         address: { city: ["shipment.destination.city", "destination.city", "address.city"] },
       },
     };
