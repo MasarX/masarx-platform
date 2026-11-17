@@ -58,6 +58,7 @@ BEGIN
   SELECT id INTO STRICT v_old_step FROM public.workflow_template_steps
     WHERE workflow_template_id=v_target AND sequence_order=1 AND enabled;
   SELECT version INTO STRICT v_prior_version FROM public.workflow_templates WHERE id=v_target;
+  PERFORM set_config('app.workflow_run_id',v_run::text,TRUE);
   INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,
     workflow_status,current_step_id,context) VALUES
     (v_run,v_target,v_prior_version,'manual','pending',v_old_step,jsonb_build_object('organization_id',v_org,'client_id',v_client));

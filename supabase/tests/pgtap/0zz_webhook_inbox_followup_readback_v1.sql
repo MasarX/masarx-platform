@@ -42,6 +42,7 @@ DECLARE
   source_id UUID:=gen_random_uuid(); other_source UUID:=gen_random_uuid(); template_id UUID:=gen_random_uuid();
   inbox_id UUID:=gen_random_uuid(); foreign_inbox UUID:=gen_random_uuid(); entry_id UUID:=gen_random_uuid();
   child_id UUID:=gen_random_uuid(); extra_id UUID:=gen_random_uuid(); client_id UUID:=gen_random_uuid(); sender_id UUID:=gen_random_uuid();
+  mapping_id UUID:=gen_random_uuid(); foreign_mapping_id UUID:=gen_random_uuid();
   entry_context JSONB; child_context JSONB; child_metadata JSONB; row_result JSONB;
   action TEXT; state TEXT; scenario TEXT; policy JSONB; registry JSONB; schema_version INT;
   role_key TEXT:='followup_'||replace(gen_random_uuid()::text,'-','');
@@ -53,18 +54,24 @@ BEGIN
   INSERT INTO public.senders(id,client_id,name,status) VALUES(sender_id,client_id,'Followup sender','active');
   INSERT INTO public.users(id,organization_id,email,full_name,user_type,status,access_scope_type,access_scope_id)
     VALUES(actor,org,actor||'@example.invalid','Followup reader','ops_admin','active','tenant',NULL);
-  INSERT INTO public.webhook_sources(id,organization_id,source_identifier,name,provider_type,auth_token,sender_id,enabled)
-    VALUES(source_id,org,'followup-'||source_id,'Followup own','generic','synthetic-owned-token',sender_id,TRUE),
-      (other_source,other_org,'followup-'||other_source,'Followup foreign','generic','synthetic-foreign-token',NULL,TRUE);
+  INSERT INTO public.mapping_configs(id,organization_id,mapping_type,mapping_key,mapping_config) VALUES
+    (mapping_id,org,'webhook_inbound','followup-'||mapping_id,'{}'),
+    (foreign_mapping_id,other_org,'webhook_inbound','followup-'||foreign_mapping_id,'{}');
+  INSERT INTO public.webhook_sources(id,organization_id,source_identifier,name,provider_type,auth_token,sender_id,enabled,mapping_config_id)
+    VALUES(source_id,org,'followup-'||source_id,'Followup own','generic','synthetic-owned-token',sender_id,TRUE,mapping_id),
+      (other_source,other_org,'followup-'||other_source,'Followup foreign','generic','synthetic-foreign-token',NULL,TRUE,foreign_mapping_id);
   INSERT INTO public.workflow_templates(id,name,version,status,scope_type,scope_id)
     VALUES(template_id,'followup_readback_'||template_id,1,'active','tenant',org);
   entry_context:=jsonb_build_object('webhook_id',inbox_id,'organization_id',org,
     'source_identifier','followup-'||source_id,'webhook_source_id',source_id,'followup_workflow_run_id',child_id);
   child_context:=(entry_context-'followup_workflow_run_id')||jsonb_build_object('started_by_run_id',entry_id);
   child_metadata:=jsonb_build_object('started_by_run_id',entry_id);
+  PERFORM set_config('app.workflow_run_id',entry_id::text,TRUE);
   INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
-    VALUES(entry_id,template_id,1,'webhook','completed',entry_context,'{}'),
-      (child_id,template_id,1,'webhook','pending',child_context,child_metadata);
+    VALUES(entry_id,template_id,1,'webhook','completed',entry_context,'{}');
+  PERFORM set_config('app.workflow_run_id',child_id::text,TRUE);
+  INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
+    VALUES(child_id,template_id,1,'webhook','pending',child_context,child_metadata);
   INSERT INTO public.webhook_inbox(id,organization_id,webhook_source_id,provider_type,external_id,event_type,
       processing_status,workflow_run_id,raw_payload,transformed_payload)
     VALUES(inbox_id,org,source_id,'generic','followup-'||inbox_id,'shipment.delete','pending',entry_id,'{}','{}'),
@@ -118,10 +125,13 @@ BEGIN
       WHEN 'metadata_json_null' THEN UPDATE public.workflow_runs SET metadata='null' WHERE id=child_id;
       WHEN 'child_context_shape' THEN UPDATE public.workflow_runs SET context='[]' WHERE id=child_id;
       WHEN 'both_parents_missing' THEN UPDATE public.workflow_runs SET context=context-'started_by_run_id',metadata='{}' WHERE id=child_id;
-      WHEN 'duplicate_child' THEN INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
+      WHEN 'duplicate_child' THEN
+        PERFORM set_config('app.workflow_run_id',extra_id::text,TRUE);
+        INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
         VALUES(extra_id,template_id,1,'webhook','pending',child_context,child_metadata);
       WHEN 'duplicate_child_missing_pointer' THEN
         UPDATE public.workflow_runs SET context=context-'followup_workflow_run_id' WHERE id=entry_id;
+        PERFORM set_config('app.workflow_run_id',extra_id::text,TRUE);
         INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
           VALUES(extra_id,template_id,1,'webhook','pending',child_context,child_metadata);
     END CASE;

@@ -43,7 +43,7 @@ SELECT ok((SELECT pronargs=0
   FROM pg_proc WHERE oid='public.ui_rpc_current_user_id_v1()'::regprocedure),
   'current-user reader is zero-argument, postgres-owned, fixed-path and executor-only');
 SELECT ok((SELECT ARRAY(
-    SELECT pg_get_userbyid(role_oid) FROM (
+    SELECT pg_get_userbyid(role_oid)::text FROM (
       SELECT proowner AS role_oid
       UNION
       SELECT a.grantee FROM aclexplode(COALESCE(proacl,acldefault('f',proowner))) a

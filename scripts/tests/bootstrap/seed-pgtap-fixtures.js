@@ -2,6 +2,7 @@
 /* eslint-disable no-console */
 const { runCli, buildFixtureProfile } = require('./lib/integration-fixtures');
 const { loadEnv } = require('../../utils/load-env');
+const { seedOnlineIndexFixtures } = require('./online-index-fixtures');
 
 async function runPgtapFixtureProfiles(env = process.env) {
   // Preserve the configured profile; the existing SQL suite additionally requires
@@ -10,6 +11,7 @@ async function runPgtapFixtureProfiles(env = process.env) {
   for (const prefix of prefixes) {
     await runCli({ env: { ...env, INTEGRATION_FIXTURE_PREFIX: prefix } });
   }
+  if (env.PGTAP_FULL_LOCAL_QUALIFICATION === '1') await seedOnlineIndexFixtures(env);
 }
 
 if (require.main === module) {
