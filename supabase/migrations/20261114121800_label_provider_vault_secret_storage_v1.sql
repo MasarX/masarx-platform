@@ -14,6 +14,7 @@ DECLARE
   previous JSONB;
   secret TEXT;
   reference UUID;
+  pinned_url TEXT;
   prefix TEXT := 'label_provider/' || public.normalize_scope_type_v1(p_scope_type, FALSE) || '/' || COALESCE(p_scope_id::text, 'global') || '/';
 BEGIN
   IF p_value IS NULL THEN RETURN p_value; END IF;
@@ -35,16 +36,25 @@ BEGIN
     END IF;
     secret := NULLIF(provider->>'invoke_secret', '');
     reference := NULL;
+    pinned_url := NULL;
     IF secret = 'REDACTED' OR provider->'invoke_secret_ref' = '"REDACTED"'::jsonb THEN
       RAISE EXCEPTION 'Label provider preview markers require an authorized settings request' USING ERRCODE = '23514';
     END IF;
     IF secret IS NOT NULL THEN
+      IF public.normalize_scope_type_v1(p_scope_type, FALSE) <> public.get_root_scope_type_key_v1() THEN
+        SELECT g.provider->>'invoke_url' INTO pinned_url FROM public.settings s
+        CROSS JOIN LATERAL jsonb_array_elements(s.cached_value->'providers') g(provider)
+        WHERE s.category = 'label_provider' AND s.scope_type = public.get_root_scope_type_key_v1() AND s.scope_id IS NULL
+          AND COALESCE(NULLIF(g.provider->>'invoke_secret',''), public.resolve_label_provider_invoke_secret_v1(g.provider)) = secret
+        LIMIT 1;
+      END IF;
       -- Reuse the corresponding version reference when a cache repeats its value.
       SELECT s.id INTO reference FROM vault.decrypted_secrets s
       WHERE s.id = NULLIF(previous#>>'{invoke_secret_ref,id}', '')::uuid
         AND starts_with(s.name, prefix) AND s.decrypted_secret = secret;
       IF reference IS NULL THEN
-        reference := vault.create_secret(secret, prefix || gen_random_uuid(), 'Label renderer invoke credential', NULL);
+        reference := vault.create_secret(secret, prefix || gen_random_uuid(),
+          jsonb_strip_nulls(jsonb_build_object('purpose','label_renderer','pinned_invoke_url',pinned_url))::text, NULL);
       END IF;
       provider := (provider - 'invoke_secret') || jsonb_build_object('invoke_secret_ref',
         jsonb_build_object('type','SecretRef','id',reference));
@@ -61,6 +71,12 @@ BEGIN
     ELSE
       provider := provider - 'invoke_secret';
     END IF;
+    IF reference IS NOT NULL THEN
+      SELECT s.description::jsonb->>'pinned_invoke_url' INTO pinned_url FROM vault.secrets s WHERE s.id = reference;
+      IF pinned_url IS NOT NULL AND provider->>'invoke_url' IS DISTINCT FROM pinned_url THEN
+        RAISE EXCEPTION 'Global label credential requires its configured endpoint' USING ERRCODE = '42501';
+      END IF;
+    END IF;
     providers := providers || jsonb_build_array(provider);
   END LOOP;
   p_value := jsonb_set(p_value, '{providers}', providers);
@@ -73,25 +89,26 @@ CREATE FUNCTION public.label_provider_seal_settings_write_v1()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO public, extensions, pg_temp
 AS $write$
-DECLARE previous JSONB;
+DECLARE previous JSONB; row_value JSONB := to_jsonb(NEW); value_key TEXT := TG_ARGV[0];
 BEGIN
-  IF NEW.category <> 'label_provider' THEN RETURN NEW; END IF;
-  IF TG_TABLE_NAME = 'settings_versions' THEN
-    IF TG_OP = 'UPDATE' THEN previous := OLD.value; END IF;
-    NEW.value := public.label_provider_seal_value_v1(NEW.value, NEW.scope_type, NEW.scope_id, previous);
+  IF row_value->>'category' <> 'label_provider' THEN RETURN NEW; END IF;
+  IF value_key NOT IN ('value','cached_value') THEN RAISE EXCEPTION 'Invalid label provider write trigger'; END IF;
+  IF value_key = 'value' THEN
+    IF TG_OP = 'UPDATE' THEN previous := to_jsonb(OLD)->'value'; END IF;
   ELSE
-    SELECT v.value INTO previous FROM public.settings_versions v WHERE v.id = NEW.settings_version_id;
-    NEW.cached_value := public.label_provider_seal_value_v1(NEW.cached_value, NEW.scope_type, NEW.scope_id, previous);
+    SELECT v.value INTO previous FROM public.settings_versions v WHERE v.id = (row_value->>'settings_version_id')::uuid;
   END IF;
+  NEW := jsonb_populate_record(NEW, jsonb_build_object(value_key, public.label_provider_seal_value_v1(
+    row_value->value_key, row_value->>'scope_type', (row_value->>'scope_id')::uuid, previous)));
   RETURN NEW;
 END;
 $write$;
 CREATE TRIGGER a00_label_provider_seal_value
 BEFORE INSERT OR UPDATE OF value ON public.settings_versions
-FOR EACH ROW EXECUTE FUNCTION public.label_provider_seal_settings_write_v1();
+FOR EACH ROW EXECUTE FUNCTION public.label_provider_seal_settings_write_v1('value');
 CREATE TRIGGER a00_label_provider_seal_cache
 BEFORE INSERT OR UPDATE OF cached_value ON public.settings
-FOR EACH ROW EXECUTE FUNCTION public.label_provider_seal_settings_write_v1();
+FOR EACH ROW EXECUTE FUNCTION public.label_provider_seal_settings_write_v1('cached_value');
 
 CREATE FUNCTION public.label_provider_redact_legacy_cache_v1()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER
@@ -222,6 +239,28 @@ $prepare$ || prior);
 $audit$ || prior);
 END;
 $contracts$;
+
+-- Bootstrap inherits platform renderer configuration through the scope ladder;
+-- it must not materialize a platform credential into a tenant-controlled row.
+DO $bootstrap_policy$
+DECLARE policy JSONB; scope_key TEXT; excluded JSONB; schema_version INT; changed BOOLEAN := FALSE;
+BEGIN
+  SELECT s.cached_value,v.schema_version INTO STRICT policy,schema_version FROM public.settings s
+  JOIN public.settings_versions v ON v.id = s.settings_version_id
+  WHERE s.category = 'saas_onboarding_policy' AND s.scope_type = public.get_root_scope_type_key_v1() AND s.scope_id IS NULL;
+  FOR scope_key IN SELECT key FROM jsonb_each(policy->'materialize_defaults') LOOP
+    excluded := COALESCE(policy#>ARRAY['materialize_defaults',scope_key,'exclude_categories'],'[]'::jsonb);
+    IF NOT excluded ? 'label_provider' THEN
+      policy := jsonb_set(policy,ARRAY['materialize_defaults',scope_key,'exclude_categories'],excluded || '"label_provider"'::jsonb);
+      changed := TRUE;
+    END IF;
+  END LOOP;
+  IF changed THEN
+    PERFORM public.upsert_settings_value_v1('saas_onboarding_policy',public.get_root_scope_type_key_v1(),NULL::uuid,
+      policy,schema_version,'Inherit platform renderer settings without credential materialization');
+  END IF;
+END;
+$bootstrap_policy$;
 
 -- Each row moves once; a reference-only replay creates no new Vault entry.
 UPDATE public.settings_versions SET value = value WHERE category = 'label_provider';

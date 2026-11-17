@@ -10,6 +10,9 @@ settings changes retain the existing scope and capability checks in
 `request_settings_change_v1`. Its internal writer accepts an explicit replacement
 credential or preserves a preview marker from the same scope. A new tenant
 override requires its own credential; it cannot copy a global or foreign reference.
+Onboarding inherits the platform configuration instead of copying it. Legacy
+tenant snapshots containing the platform credential remain pinned to the original
+renderer URL until an explicit tenant credential replaces them.
 
 Scoped previews expose `REDACTED` for configured credentials. Preview markers are
 reserved and cannot become stored credential values. Existing tenant URL-only

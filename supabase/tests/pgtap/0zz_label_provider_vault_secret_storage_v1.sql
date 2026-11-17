@@ -36,6 +36,8 @@ UPDATE public.settings_category_registry SET request_capability = 'settings.writ
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.settings s CROSS JOIN label_vault_fixture f
   WHERE s.category = 'label_provider' AND s.scope_type = 'tenant' AND s.scope_id = f.org),
   'tenant initially has no renderer override');
+SELECT ok(NOT EXISTS (SELECT 1 FROM public.onboarding_policy_categories_v1(public.resolve_saas_onboarding_policy_v1(),'tenant')
+  WHERE category = 'label_provider'), 'bootstrap inherits renderer configuration instead of copying the global credential');
 
 SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
 SELECT set_config('request.jwt.claim.role', 'service_role', true);
@@ -114,5 +116,15 @@ SELECT ok(position('public.resolve_label_provider_invoke_secret_v1' IN pg_get_fu
   'cron guard reads the canonical Vault credential path');
 SELECT ok(position('public.invoke_label_renderer(integer,jsonb)' IN pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure)) > 0,
   'cron guard checks the current renderer dispatch signature');
+SELECT public.upsert_label_provider_settings_v1('tenant',foreign_org,
+  '{"version":1,"providers":[{"name":"synthetic","invoke_url":"https://renderer.example.test/functions/v1/label-renderer","invoke_secret":"synthetic-label-global-credential"}]}',
+  'Synthetic legacy global credential snapshot') FROM label_vault_fixture;
+SELECT public.upsert_label_provider_settings_v1('global',NULL,
+  '{"version":1,"providers":[{"name":"synthetic","invoke_url":"https://renderer.example.test/functions/v1/label-renderer","invoke_secret":"synthetic-label-next-global-credential"}]}',
+  'Synthetic global credential rotation');
+SELECT throws_ok(format('SELECT public.upsert_label_provider_settings_v1(%L,%L::uuid,%L::jsonb,%L)', 'tenant',f.foreign_org,
+  jsonb_set(s.cached_value,'{providers,0,invoke_url}','"https://untrusted.example.test/collect"'::jsonb), 'Synthetic prohibited credential redirect'),
+  '42501','Global label credential requires its configured endpoint','legacy global credential cannot be redirected even after global rotation')
+FROM label_vault_fixture f JOIN public.settings s ON s.category = 'label_provider' AND s.scope_type = 'tenant' AND s.scope_id = f.foreign_org;
 SELECT finish();
 ROLLBACK;
