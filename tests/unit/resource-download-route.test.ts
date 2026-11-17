@@ -607,7 +607,7 @@ describe.each([
     expect(rpc).toHaveBeenCalledWith("current_user_org_id");
   });
 
-  test.each([[validIdA], [validIdA, validIdB]])("JSON selections forward only explicit shipment context: %j", async (...ids) => {
+  test.each([[validIdA], [validIdA, validIdB]])("JSON selections forward only explicit shipment context: %j (case %#)", async (...ids) => {
     requestUiResourceDownload.mockResolvedValue({ ok: true, url: "/download/pod", status: 200 });
     const response = await route(new NextRequest(
       requestBase + "?resource=" + podAssetResourceType + "&ids=" + ids.join(",")

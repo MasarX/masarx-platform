@@ -104,7 +104,7 @@ test.each([
   { pull_request: { base: { sha: 'a'.repeat(40) } } },
   { merge_group: { base_sha: 'a'.repeat(40) } },
   { inputs: { base_sha: 'a'.repeat(40) } },
-])('uses exact PR, merge-group and manual event bases without requiring origin refs', event => {
+])('uses exact PR, merge-group and manual event bases without requiring origin refs (case %#)', event => {
   expect(eventBaseSha(event)).toBe('a'.repeat(40));
 });
 

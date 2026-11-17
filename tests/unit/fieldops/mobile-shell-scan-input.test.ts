@@ -60,7 +60,7 @@ describe("mobile shell scan input helpers", () => {
     { scan_input_modes: ["camera", "hardware"] },
     { scan_input_modes: ["scanner", "scanner"] },
     { scan_input_modes: null },
-  ])("invalid or missing policy mode list fails closed", (policyValue) => {
+  ])("invalid or missing policy mode list fails closed (case %#)", (policyValue) => {
     const allowedModes = resolveAllowedScanInputModes({ policyValue, platform: "scanner" });
     expect(allowedModes).toEqual([]);
     expect(resolveEffectiveScanInputMode({

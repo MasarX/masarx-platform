@@ -3,9 +3,11 @@ const path = require('path');
 const Ajv2020 = require('ajv/dist/2020');
 const addFormats = require('ajv-formats');
 
-const schemaDir = path.join(__dirname, '..', '..', 'docs', 'providers', 'schemas');
+const schemaDir = path.join(__dirname, '..', 'fixtures', 'providers');
 const readSchema = (file) => JSON.parse(fs.readFileSync(path.join(schemaDir, file), 'utf8'));
-const envelope = readSchema('provider.webhooks.event.schema.json');
+const envelope = JSON.parse(fs.readFileSync(path.join(
+  __dirname, '..', '..', 'docs', 'providers', 'schemas', 'provider.webhooks.event.schema.json',
+), 'utf8'));
 const canceled = readSchema('provider.webhooks.shipment.canceled.schema.json');
 const mappedCanceled = readSchema('provider.webhooks.shipment.canceled.mapped-profile.schema.json');
 const mappedRescheduled = readSchema('provider.webhooks.shipment.rescheduled.mapped-profile.schema.json');

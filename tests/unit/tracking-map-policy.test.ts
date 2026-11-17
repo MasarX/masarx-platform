@@ -19,7 +19,7 @@ test.each(["default_viewport","zoom_padding"] as const)("explicit %s is mandator
   const value:Record<string,unknown> = configured(); delete value[key];
   expect(resolveTrackingMapConfiguration(value)).toEqual({ok:false,reason:"unconfigured"});
 });
-test.each([undefined,null,0,-1,Infinity,120001,"1000"])("invalid or missing timeout %j fails closed", timeout => {
+test.each([undefined,null,0,-1,Infinity,120001,"1000"])("invalid or missing timeout %j fails closed (case %#)", timeout => {
   const value = configured();
   (value.tile_provider as Record<string,unknown>).load_timeout_ms=timeout;
   expect(resolveTrackingMapConfiguration(value)).toEqual({ok:false,reason:"unconfigured"});

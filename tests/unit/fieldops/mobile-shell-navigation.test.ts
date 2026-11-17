@@ -85,7 +85,7 @@ describe("preserved pure stack and swipe capability", () => {
     [400, 0, 1, { edgeThresholdPct: 2 }, "cancel"],
     [200, 0, 1, { edgeThresholdPct: Number.NaN }, "commit_back"],
   ] as Array<[number, number, number, Partial<InterpretSwipeOptions>, GestureOutcome]>)(
-    "interprets dx=%s dy=%s vx=%s options=%j as %s",
+    "interprets dx=%s dy=%s vx=%s options=%j as %s (case %#)",
     (dx, dy, velocityX, options, outcome) => {
       expect(interpretSwipeGesture(
         { dx, dy, velocityX, velocityY: 999 },

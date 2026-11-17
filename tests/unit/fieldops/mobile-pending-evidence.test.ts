@@ -63,7 +63,7 @@ describe("composer pending evidence lifecycle", () => {
     expect((await reopened.list(scope))[0].artifactId).toBe("artifact");
   });
 
-  test.each([{ status: 403 }, { code: "42501" }])("permanent registration failure stops without automatic retry", async error => {
+  test.each([{ status: 403 }, { code: "42501" }])("permanent registration failure stops without automatic retry (case %#)", async error => {
     const { evidence, transport } = await fixture();
     await evidence.stage(scope, record(), 2);
     transport.register.mockRejectedValue(error);
@@ -81,7 +81,7 @@ describe("composer pending evidence lifecycle", () => {
     expect((await evidence.list(scope))[0].artifactId).toBeUndefined();
   });
 
-  test.each([{ status: 409 }, { status: 503 }, new TypeError("network")])("ambiguous upload never overwrites or assumes conflict success", async error => {
+  test.each([{ status: 409 }, { status: 503 }, new TypeError("network")])("ambiguous upload never overwrites or assumes conflict success (case %#)", async error => {
     const { evidence, transport, store } = await fixture();
     await evidence.stage(scope, record(), 2);
     transport.upload.mockRejectedValue(error);

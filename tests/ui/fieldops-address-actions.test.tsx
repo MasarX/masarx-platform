@@ -30,7 +30,7 @@ describe("FieldOps address controls", () => {
   });
 
   test.each([EN_STRINGS.addressActions, AR_STRINGS.addressActions])(
-    "uses localized controls and waits for clipboard completion before confirming",
+    "uses localized controls and waits for clipboard completion before confirming (case %#)",
     async (strings) => {
       let finish!: () => void;
       copy.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));

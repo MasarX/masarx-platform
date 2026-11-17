@@ -160,7 +160,7 @@ describe('driver status sanitized failure diagnostics', () => {
     [true, { email: 'PRIVATE_customer_contact' }, ''],
     [false, 'email', ''],
     ['true', 'email', ''],
-  ])('driver intake returns only canonical deduplication classifications (%s,%s)', async (deduped, reason, expected) => {
+  ])('driver intake returns only canonical deduplication classifications (%s,%s) (case %#)', async (deduped, reason, expected) => {
     const app = loadHandler('driver-signup-intake', { env: {
       DRIVER_SIGNUP_CORS_ALLOW_ORIGINS: HOSTED,
       DRIVER_SIGNUP_IP_HASH_SALT: 'fixture-driver-salt',
@@ -192,7 +192,7 @@ describe('driver status sanitized failure diagnostics', () => {
     [{data:[],error:null},400,'result_contract','unclassified','array',false,false],
     [{data:{ok:true,status:'PRIVATE'},error:null},400,'result_contract','unclassified','object',true,false],
     [{data:{ok:false,error:{code:'request_not_found'}},error:null},404,'result_contract','unclassified','object',false,false],
-  ])('classifies failure without disclosing RPC data', async (rpcResult,status,category,code,shape,ok,allowed) => {
+  ])('classifies failure without disclosing RPC data (case %#)', async (rpcResult,status,category,code,shape,ok,allowed) => {
     const app=loadHandler('driver-application-status');
     app.serviceClient.rpc=async()=>rpcResult;
     const response=await app.handler(request('driver-application-status'));
@@ -351,7 +351,7 @@ describe('metrics handler explicit enablement (native JWT gate not simulated)', 
     ['edge_api_caller_role', { aud: ['other', 'authenticated'], nbf: 0 }],
     ['service_role', { aud: undefined, sub: undefined }],
     ['service_role', { aud: 'authenticated', sub: 'edge-function' }],
-  ])('preserves valid current shared-policy claims for %s', async (role, claims) => {
+  ])('preserves valid current shared-policy claims for %s (case %#)', async (role, claims) => {
     const app = loadHandler('metrics-echo-test', { env: { METRICS_ECHO_TEST_ENABLED: '1' } });
     const response = await app.handler(request('metrics-echo-test', {
       method: 'GET', headers: { authorization: 'Bearer ' + token(role, claims) },

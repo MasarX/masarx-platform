@@ -124,7 +124,7 @@ describe("saved-view failure diagnostics", () => {
     expect(diagnostic().rpc[0].error_detail_unavailable).toBe(true);
   });
 
-  it.each(["https://private.invalid/?token=secret", { toString: () => "42501" }])("redacts arbitrary error codes", async (code) => {
+  it.each(["https://private.invalid/?token=secret", { toString: () => "42501" }])("redacts arbitrary error codes (case %#)", async (code) => {
     const h = harness();
     const observer = captureViewSaveDiagnostics(h.page, h.events, h.requestEvents, "resource");
     const { request, response } = h.rpc({ status: 400, body: { code } });

@@ -44,7 +44,7 @@ describe("UI edge client response handling", () => {
   test.each([
     { error: "Authenticated session is required." },
     { error: { code: "unauthorized", message: "Authenticated session is required." } },
-  ])("surfaces structured HTTP error messages", async (body) => {
+  ])("surfaces structured HTTP error messages (case %#)", async (body) => {
     jest.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify(body), { status: 401 }));
 
     await expect(createClient().mappingStudio.parse({})).rejects.toThrow("Authenticated session is required.");

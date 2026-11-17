@@ -48,7 +48,7 @@ test("retains all four server-confirmed states, notes and honest unknown measure
 });
 
 test.each([null, {}, { parcels: null }, { parcels: [{}] }, { parcels: [{ barcode: "x", status: "pending" }] },
-  { parcels: [parcel("x", "a", 1, false), parcel("x", "a", 1, false)] }])("fails closed on unavailable or ambiguous readback: %p", (input) => {
+  { parcels: [parcel("x", "a", 1, false), parcel("x", "a", 1, false)] }])("fails closed on unavailable or ambiguous readback: %p (case %#)", (input) => {
   expect(parseRouteLoadManifest(input)).toBeNull();
 });
 

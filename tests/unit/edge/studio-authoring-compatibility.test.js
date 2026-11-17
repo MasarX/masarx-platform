@@ -125,7 +125,7 @@ test('exact allowlist does not admit subdomains and wildcard deny includes its r
     .toContain('egress_domain_denied');
 });
 test.each(['localhost', 'app.localhost', 'host.local', '127.1', '192.0.2.10', '172.31.0.1',
-  '192.168.0.1', '192.0.2.10', '0.0.0.0', '[::1]', '[fc00::1]', '[::ffff:127.0.0.1]'])
+  '192.168.0.1', '0.0.0.0', '[::1]', '[fc00::1]', '[::ffff:127.0.0.1]'])
 ('authoring rejects literal local/non-public host %s without doing DNS or network I/O', async (host) => {
   const f = fixture({ value: { ...policy, domain_allowlist: ['*'] } });
   expect(codes(await f.review({ request_config: { url_template: `https://${host}` } })))

@@ -37,7 +37,7 @@ function createLocator(options?: {
 }
 
 describe("print action progress helpers", () => {
-  test.each([en, ar])("uses current locale controls for active and terminal progress", async (messages) => {
+  test.each([en, ar])("uses current locale controls for active and terminal progress (case %#)", async (messages) => {
     const names = messages.ui.resourceActions.printProgress;
     const page = { waitForTimeout: jest.fn(async () => undefined) };
     const progressWidget = createLocator({ isVisibleSequence: [true], roles: {

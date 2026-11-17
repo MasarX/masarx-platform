@@ -326,7 +326,7 @@ describe('designer image uploads validate bytes before storage', () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  test.each([[png,'image/jpeg'],[jpeg,'image/svg+xml'],[Buffer.from(svg),'image/png']])('rejects a valid image with mismatched MIME', async (bytes, mime) => {
+  test.each([[png,'image/jpeg'],[jpeg,'image/svg+xml'],[Buffer.from(svg),'image/png']])('rejects a valid image with mismatched MIME (case %#)', async (bytes, mime) => {
     const { handler, upload } = uploads();
     const response = await handler(request(bytes,mime));
     expect(response.status).toBe(400);

@@ -303,7 +303,7 @@ describe('webhook full entrypoint canonical identity', () => {
     [{ correlation_id: BODY_ID }, BODY_ID],
     [{ webhook: { correlation_id: BODY_ID } }, BODY_ID],
     [{ status: 'accepted' }, REQUEST_ID],
-  ])('retains older-response fallback without querying tables', async (body, expected) => {
+  ])('retains older-response fallback without querying tables (case %#)', async (body, expected) => {
     const app = loadHandler({ result: { status: 202, body } });
     const response = await app.handler(request());
     await app.drain();
@@ -493,7 +493,7 @@ describe('webhook full entrypoint canonical identity', () => {
   test.each([
     [{ rpcStatus: 503, result: { message: 'unavailable' } }],
     [{ rpcError: new Error('offline') }],
-  ])('RPC transport failure retains request identity and does not dispatch', async options => {
+  ])('RPC transport failure retains request identity and does not dispatch (case %#)', async options => {
     const app = loadHandler(options);
     const response = await app.handler(request());
     await app.drain();

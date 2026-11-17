@@ -182,7 +182,7 @@ describe("ResourcePage unavailable suggestions", () => {
     ["registry", new Error("Backend statement timeout; token=synthetic-short")],
     ["list", new Error("Backend statement timeout; token=synthetic-short")],
     ["list", { message: "Backend resource list failed", code: "57014" }],
-  ])("keeps timeout recovery for a %s failure without displaying diagnosis", async (source, error) => {
+  ])("keeps timeout recovery for a %s failure without displaying diagnosis (case %#)", async (source, error) => {
     mockedCreateUiServerClient.mockReturnValue({
       readRegistry: source === "registry"
         ? jest.fn().mockRejectedValue(error)

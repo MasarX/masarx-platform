@@ -10,7 +10,7 @@ beforeEach(() => mockPush.mockReset());
 test.each([
   [undefined, "Enter a tracking number before searching."],
   ["Enter an identifier before searching shipments.", "Enter an identifier before searching shipments."],
-])("announces blank search with the selected context message", (message, expected) => {
+])("announces blank search with the selected context message (case %#)", (message, expected) => {
   renderWithIntl(<TrackingSearchForm actionHref="/console/track" paramKey="identifier"
     emptySearchMessage={message} testIdPrefix="search" />);
   fireEvent.change(screen.getByTestId("search-input"), { target: { value: "   " } });

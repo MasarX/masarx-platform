@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docs/providers/schemas/provider.webhooks.shipment.rescheduled.mapped-profile.schema.json",
+  "title": "Strict mapped provider reschedule profile (v1)",
+  "description": "Opt-in provider mapping contract, not a universal intake requirement or an installed runtime policy. Requires an explicit source mapping from delivery.requested_date to workflow context slot_date before the workflow-backed shipment.reschedule handler runs. requested_date is not a native handler alias. An async ACK confirms intake, not reschedule completion.",
+  "allOf": [
+    { "$ref": "./provider.webhooks.event.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "event": { "properties": { "type": { "const": "shipment.rescheduled" } } },
+        "shipment": {
+          "type": "object",
+          "required": ["tracking_number"],
+          "properties": {
+            "tracking_number": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": true
+        },
+        "delivery": {
+          "type": "object",
+          "required": ["requested_date"],
+          "properties": {
+            "requested_date": { "type": "string", "format": "date" },
+            "window_start": { "type": "string" },
+            "window_end": { "type": "string" },
+            "timezone": { "type": "string", "default": "Asia/Riyadh" },
+            "reason": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "required": ["delivery"]
+    }
+  ]
+}

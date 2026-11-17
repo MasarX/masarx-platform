@@ -264,7 +264,7 @@ describe('operator-access audit core', () => {
     [{ user: { user_type: 'ops_admin' } }, 'has user_type "ops_admin"'],
     [{ user: { access_scope_id: 'unexpected-scope' } }, 'must have NULL access_scope_id'],
     [{ missingPolicy: true }, 'access control policy missing'],
-  ])('retains existing account and policy guards: %s', async (options, issue) => {
+  ])('retains existing account and policy guards: %s (case %#)', async (options, issue) => {
     const result = await evaluateOperatorAccounts(mockAuditClient(options), { requiredAccounts: [requiredAdmin] });
     expect(result.ok).toBe(false);
     expect(result.issues.some((entry) => entry.includes(issue))).toBe(true);
