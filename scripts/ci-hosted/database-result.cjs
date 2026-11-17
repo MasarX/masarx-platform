@@ -4,10 +4,11 @@ const path = require('node:path');
 const { loadExceptions, exceptionEvidence } = require('./pgtap-exceptions.cjs');
 const { sanitize } = require('./diagnostics.cjs');
 
+const PGTAP_SHARD_COUNT = 12;
 const cell = value => sanitize(value ?? 'UNKNOWN').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ');
 function databaseResult(build, shards, env = process.env, entries = []) {
   let ok = env.BUILD_RESULT === 'success';
-  if (env.DATABASE_PRESENT === 'false') return { ok: ok && env.PGTAP_RESULT === 'skipped', markdown: 'Database subject absent; pgTAP skipped by design.\n' };
+  if (env.DATABASE_PRESENT === 'false') return { ok: ok && env.PGTAP_RESULT === 'success' && shards.length === 0, markdown: 'Database subject absent; pgTAP skipped by design.\n' };
   ok = ok && env.DATABASE_PRESENT === 'true' && env.PGTAP_RESULT === 'success'
     && /^[a-f0-9]{40}$/.test(env.GITHUB_SHA || '')
     && build?.sha === env.GITHUB_SHA && build?.ok === true
@@ -22,16 +23,17 @@ function databaseResult(build, shards, env = process.env, entries = []) {
   if (build?.lint?.failure) lines.push('', `Lint failure: ${cell(build.lint.failure)}`);
   for (const command of build?.lint?.commands || []) if (!command.ok) lines.push('', `${cell(command.script)}: ${cell(command.failure?.message)}`);
   lines.push('', '| Shard | Migrations applied / failed | Files run | Passed | Failed | Result |', '|---|---:|---:|---:|---:|---|');
-  if (shards.length !== 6) ok = false;
-  for (let index = 1; index <= 6; index++) {
-    const matches = shards.filter(row => row.shard === `${index}/6`);
+  if (shards.length !== PGTAP_SHARD_COUNT) ok = false;
+  for (let index = 1; index <= PGTAP_SHARD_COUNT; index++) {
+    const key = `${index}/${PGTAP_SHARD_COUNT}`;
+    const matches = shards.filter(row => row.shard === key);
     const shard = matches.length === 1 ? matches[0] : undefined;
     const passed = shard?.sha === env.GITHUB_SHA && shard?.ok === true && shard?.failed === 0
       && shard?.migrations === build?.migrationTotal && shard?.migrationFailed === 0 && shard?.migrationNotRun === 0
       && Number.isInteger(shard?.run) && shard.run > 0 && shard.run === shard.passed
       && shard.run === shard.selected?.length && shard.notRun?.length === 0;
     ok = ok && passed;
-    lines.push(`| ${index}/6 | ${cell(shard?.migrations)} / ${cell(shard?.migrationFailed)} | ${cell(shard?.run)} | ${cell(shard?.passed)} | ${cell(shard?.failed)} | ${passed ? 'PASS' : 'FAIL / MISSING'} |`);
+    lines.push(`| ${key} | ${cell(shard?.migrations)} / ${cell(shard?.migrationFailed)} | ${cell(shard?.run)} | ${cell(shard?.passed)} | ${cell(shard?.failed)} | ${passed ? 'PASS' : 'FAIL / MISSING'} |`);
   }
   for (const shard of shards) {
     if (shard.failure) lines.push('', `${cell(shard.shard)}: ${cell(shard.failure.message)}`);
@@ -81,4 +83,4 @@ function main() {
   if (!result.ok || errors.length) process.exitCode = 1;
 }
 if (require.main === module) main();
-module.exports = { databaseResult };
+module.exports = { databaseResult, PGTAP_SHARD_COUNT };
