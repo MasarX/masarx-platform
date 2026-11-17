@@ -54,7 +54,7 @@ SELECT set_config('request.jwt.claim.sub', actor::text, true) FROM preview_fixtu
 SELECT set_config('request.jwt.claim.role', 'authenticated', true);
 SET LOCAL ROLE authenticated;
 SELECT ok(public.user_has_capability_v1('settings.read', 'tenant', org), 'fixture really has settings.read') FROM preview_fixture;
-SELECT is(api.ui_settings_preview_v1('label_provider', 'tenant', org)#>>'{value,providers,0,invoke_secret}',
+SELECT is(api.ui_settings_preview_v1('label_provider', 'tenant', org)#>>'{value,providers,0,invoke_secret_ref}',
   'REDACTED', 'tenant fallback never exposes the platform-wide renderer secret') FROM preview_fixture;
 SELECT is(api.ui_settings_preview_v1('label_provider', 'tenant', org)->>'scope_type',
   root_scope, 'redacted renderer preview still identifies the global winning scope') FROM preview_fixture;
@@ -73,7 +73,7 @@ SELECT throws_ok(format('SELECT public.request_settings_change_v1(%L,%L,%L::uuid
   '23514', 'Settings preview markers cannot be saved; submit explicit values', 'nested preview marker cannot be persisted') FROM preview_fixture;
 SELECT throws_ok(format('SELECT public.request_settings_change_v1(%L,%L,%L::uuid,(api.ui_settings_preview_v1(%L,%L,%L::uuid)->%L))',
   'label_provider', 'tenant', org, 'label_provider', 'tenant', org, 'value'),
-  '23514', 'Settings preview markers cannot be saved; submit explicit values', 'label provider baseline cannot round-trip its marker') FROM preview_fixture;
+  '23514', 'Label provider credential must be set for this scope', 'global label provider credential cannot be copied into a tenant override') FROM preview_fixture;
 RESET ROLE;
 SELECT is((SELECT count(*) FROM public.settings_versions), (SELECT n FROM preview_before),
   'rejected round trips create no settings versions');

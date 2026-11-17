@@ -451,7 +451,8 @@ SELECT ok(
         (
             SELECT
                 (cached_value->'providers'->0 ? 'invoke_url')
-                AND (cached_value->'providers'->0 ? 'invoke_secret')
+                AND (cached_value->'providers'->0 ? 'invoke_secret_ref')
+                AND NOT (cached_value->'providers'->0 ? 'invoke_secret')
             FROM settings
             WHERE category = 'label_provider'
               AND scope_type = 'global'
@@ -460,7 +461,7 @@ SELECT ok(
         ),
         FALSE
     ),
-    'label_provider cached value includes invoke_url and invoke_secret'
+    'label_provider cached value includes invoke_url and only a credential reference'
 );
 
 SELECT ok(TRUE, 'label_provider invoke metadata rotation status recorded');
@@ -469,7 +470,7 @@ SELECT diag(
     CASE
         WHEN (
             SELECT
-                (cached_value->'providers'->0->>'invoke_secret') = 'EXAMPLE_PASSWORD'
+                public.resolve_label_provider_invoke_secret_v1(cached_value->'providers'->0) = 'EXAMPLE_PASSWORD'
                 OR cached_value->'providers'->0->>'invoke_url' = 'https://example.supabase.co/functions/v1/label-renderer'
             FROM settings
             WHERE category = 'label_provider'
