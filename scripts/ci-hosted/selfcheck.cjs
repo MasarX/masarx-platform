@@ -37,6 +37,16 @@ assert.equal(failure.outputTail.includes(jwt), false);
 assert.equal(policyDecision(new Error('CLI image pulls are forbidden; images must already be pulled by digest'), 'POST', '/images/create').operation, 'image-pull');
 assert.equal(policyDecision(new Error('password=synthetic'), 'POST', '/containers/create').reason, 'Malformed Docker policy request');
 assert.equal(policyDecision(null, 'GET', '/images/synthetic/json').decision, 'allowed');
+for (const image of ['public.ecr.aws/synthetic/unreviewed:v1', `public.ecr.aws/synthetic/unreviewed:v1@sha256:${'a'.repeat(64)}`]) {
+  for (const [method, url, body] of [['GET', `/v1.51/images/${encodeURIComponent(image)}/json`, Buffer.alloc(0)],
+    ['POST', '/containers/create', Buffer.from(JSON.stringify({ Image: image }))]]) {
+    assert.throws(() => rewrite(method, url, body, []), error => {
+      assert.deepEqual(policyDecision(error, method, url), { decision: 'denied',
+        operation: method === 'GET' ? 'image-inspect' : 'container-create', reason: 'Image is outside the reviewed digest set', image });
+      return true;
+    });
+  }
+}
 const root = path.resolve(__dirname, '../..'); const now = new Date('2026-11-16T12:00:00Z');
 const base = 'a'.repeat(40); const head = 'b'.repeat(40); const candidate = 'c'.repeat(40);
 const hash = data => crypto.createHash('sha256').update(data).digest('hex');
