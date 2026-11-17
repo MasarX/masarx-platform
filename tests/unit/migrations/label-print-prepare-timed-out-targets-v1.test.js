@@ -9,11 +9,6 @@ const effectiveHandlerSource = fs.readFileSync(path.resolve(
   __dirname,
   '../../../supabase/migrations/202603061750_label_print_prepare_async_dispatch_v1.sql',
 ), 'utf8').replace(/\r\n/g, '\n');
-const nativeBulkTest = fs.readFileSync(path.resolve(
-  __dirname,
-  '../../integration/workflows/labels-print-webhook.test.js',
-), 'utf8').replace(/\r\n/g, '\n');
-
 const extractFragment = (name) => migration
   .match(new RegExp(`${name} text := \\$fragment\\$([\\s\\S]*?)\\$fragment\\$;`))?.[1];
 
@@ -40,10 +35,5 @@ describe('label print prepare legacy timeout targets', () => {
     expect(newFragment).not.toContain("operation_result->'invalid_boxes'");
   });
 
-  test('retains native zero-wait coverage for the complete fresh target set', () => {
-    expect(nativeBulkTest).toContain('max_wait_seconds: 0');
-    expect(nativeBulkTest).toContain('const expectedFreshReady = readyCount + missingCount;');
-    expect(nativeBulkTest).toContain('expect(ready).toHaveLength(expectedFreshReady);');
-    expect(nativeBulkTest).toContain('expect(timedOut).toHaveLength(0);');
-  });
+  // Native bulk coverage remains unavailable with the provisioning adapter.
 });

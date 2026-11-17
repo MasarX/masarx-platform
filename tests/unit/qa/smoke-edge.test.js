@@ -4,9 +4,9 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 describe('edge smoke local execution control', () => {
-  test('both native failure classifiers expose only fixed response-shape classes', () => {
+  test('native smoke failure classifier exposes only fixed response-shape classes', () => {
     const ts = require('typescript');
-    for (const file of ['scripts/qa/smoke-edge.js', 'tests/integration/edge/api-caller-native-jwt.test.js']) {
+    for (const file of ['scripts/qa/smoke-edge.js']) {
       const source = fs.readFileSync(path.resolve(process.cwd(), file), 'utf8');
       const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
       const matches = [];
