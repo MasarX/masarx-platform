@@ -4,7 +4,7 @@ const nonemptyText = value => typeof value === 'string' && value.length > 0 && v
 
 function loadExceptions(file = 'config/ci/pgtap-accepted-failures.json') {
   const entries = JSON.parse(fs.readFileSync(file, 'utf8'));
-  if (!Array.isArray(entries) || entries.length > 1) throw new Error('At most one named pgTAP exception is authorized');
+  if (!Array.isArray(entries)) throw new Error('pgTAP exceptions must be an array');
   for (const entry of entries) {
     if (!entry || Object.keys(entry).sort().join(',') !== 'assertions,expires,file,owner,reason'
       || typeof entry.file !== 'string' || !/^[a-zA-Z0-9_.-]+\.sql$/i.test(entry.file)
@@ -14,7 +14,10 @@ function loadExceptions(file = 'config/ci/pgtap-accepted-failures.json') {
       || !/^\d{4}-\d{2}-\d{2}$/.test(entry.expires) || !Number.isFinite(Date.parse(entry.expires))
       || new Date(entry.expires).toISOString().slice(0, 10) !== entry.expires) throw new Error('Malformed pgTAP exception');
   }
-  return entries.flatMap(({ assertions, ...entry }) => assertions.map(assertion => ({ ...entry, assertion })));
+  const assertions = entries.flatMap(({ assertions, ...entry }) => assertions.map(assertion => ({ ...entry, assertion })));
+  const identities = assertions.map(({ file, assertion }) => JSON.stringify([file, assertion]));
+  if (new Set(identities).size !== identities.length) throw new Error('Duplicate pgTAP file/assertion exception');
+  return assertions;
 }
 function assessFile(file, result, entries, today = new Date().toISOString().slice(0, 10)) {
   const assertions = []; const plans = []; const errors = []; const failureCounts = [];
@@ -59,3 +62,35 @@ function exceptionEvidence(entries, shards, today = new Date().toISOString().sli
   return { errors, accepted };
 }
 module.exports = { loadExceptions, assessFile, exceptionEvidence };
+
+if (require.main === module) {
+  const assert = require('node:assert/strict');
+  const os = require('node:os');
+  const path = require('node:path');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pgtap-exceptions-'));
+  const config = path.join(directory, 'exceptions.json');
+  try {
+    const entries = ['first', 'second'].map(name => ({ file: `${name}.sql`, assertions: [`${name} assertion`],
+      expires: name === 'first' ? '2026-12-01' : '2026-11-19', reason: 'synthetic reason', owner: 'synthetic owner' }));
+    fs.writeFileSync(config, JSON.stringify(entries));
+    const loaded = loadExceptions(config);
+    assert.equal(loaded.length, 2);
+    for (const entry of loaded) {
+      const result = { status: 0, combined: `1..1\nnot ok 1 - ${entry.assertion}` };
+      assert.equal(assessFile(entry.file, result, loaded, '2026-11-18').ok, true);
+      assert.deepEqual(assessFile(entry.file, result, loaded, '2026-11-18').accepted, [entry]);
+      assert.equal(assessFile(entry.file, result, loaded, '2026-11-20').ok, entry.file === 'first.sql');
+      assert.equal(assessFile('other.sql', result, loaded, '2026-11-18').ok, false);
+      assert.equal(assessFile(entry.file, result, loaded, '2026-12-02').ok, false);
+      assert.match(assessFile(entry.file, { ...result, combined: `1..1\nok 1 - ${entry.assertion}` },
+        loaded, '2026-11-18').errors[0], /stale exception/);
+      assert.equal(assessFile(entry.file, { ...result, status: 1, combined: `${result.combined}\nERROR: synthetic abort` },
+        loaded, '2026-11-18').accepted.length, 0);
+    }
+    fs.writeFileSync(config, JSON.stringify([entries[0], entries[0]]));
+    assert.throws(() => loadExceptions(config), /Duplicate/);
+    console.log('PASS: two entries retain exact file/assertion matching, expiry, staleness and SQL-abort refusal; duplicates rejected');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
