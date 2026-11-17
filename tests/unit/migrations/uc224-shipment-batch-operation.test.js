@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const root = path.resolve(__dirname, '../../..');
-const read = name => fs.readFileSync(path.join(root, name), 'utf8');
+const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
 
 describe('UC224 shipment batch operation asynchronous completion contract (not DB execution)', () => {
   test('UC224 binds both returned owned runs before bounded asynchronous completion', () => {

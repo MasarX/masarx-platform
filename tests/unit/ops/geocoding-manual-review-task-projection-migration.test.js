@@ -122,7 +122,7 @@ describe('current geocoding sync wrapper NULL contract (source only)', () => {
   });
 
   test('emits two top-level pgTAP regressions with verified absence and rollback', () => {
-    const pgtap = fs.readFileSync(pgtapPath, 'utf8');
+    const pgtap = fs.readFileSync(pgtapPath, 'utf8').replace(/\r\n/g, '\n');
     expect(pgtap).toContain('SELECT plan(37);');
     expect(pgtap.match(/(?:SELECT|RETURN NEXT) (?:has_function|ok|is|throws_ok)\(/g)).toHaveLength(37);
     expect(pgtap).toContain("'SELECT public.geocoding_manual_review_queue_task_sync_v1(NULL::uuid)'");
