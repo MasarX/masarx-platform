@@ -60,5 +60,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 2
           sparse-checkout: scripts/ci-hosted
+      - name: Check the base-owned promotion policy
+        run: node scripts/ci-hosted/promotion-selfcheck.cjs
       - name: Enforce the target-base guard without executing candidate code
         run: node scripts/ci-hosted/policy.cjs
