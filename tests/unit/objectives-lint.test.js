@@ -1,10 +1,12 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
-const repoRoot = path.resolve(__dirname, '..', '..');
-const lintScript = path.join(repoRoot, 'scripts', 'ops', 'objectives-lint.js');
-const tmpRoot = path.join(repoRoot, 'scripts', 'tmp', 'tests', 'objectives-lint');
+const sourceRoot = path.resolve(__dirname, '..', '..');
+const lintScript = path.join(sourceRoot, 'scripts', 'ops', 'objectives-lint.js');
+let repoRoot;
+let tmpRoot;
 
 function escapeForRegex(input) {
   return String(input || '').replace(/\\/g, '/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -47,8 +49,21 @@ function createTmpFile(label, body) {
 }
 
 describe('objectives-lint', () => {
+  beforeAll(() => {
+    // Other suites discover live repository writers; keep all transient fixtures outside that tree.
+    repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'objectives-lint-'));
+    tmpRoot = path.join(repoRoot, 'scripts', 'tmp', 'tests', 'objectives-lint');
+    for (const file of ['.gitignore', 'config/ci/objectives-lint-baseline.json',
+      'supabase/functions/_shared/turnstile-local-test.mjs']) {
+      const destination = path.join(repoRoot, file);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.join(sourceRoot, file), destination);
+    }
+    expect(spawnSync('git', ['init', '--quiet'], { cwd: repoRoot }).status).toBe(0);
+  });
+
   afterAll(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    if (repoRoot) fs.rmSync(repoRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   test('detects localhost literals', () => {
