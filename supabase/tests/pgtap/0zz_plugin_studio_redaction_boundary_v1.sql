@@ -683,7 +683,7 @@ BEGIN
  RETURN NEXT is(result#>>'{request_summary,token}','REDACTED','report RPC returns stored redacted readback');
  RETURN NEXT is(result#>>'{result_payload,nested,0,password}','REDACTED','nested report result data is redacted');
  RETURN NEXT is(result#>>'{next_steps,0}','Rotate token=REDACTED','report next-step text is redacted');
- UPDATE public.mapping_operation_reports SET result_payload=('{"first_url":"https' || '://user:synthetic-private@host.example/x","second_url":"https://synthetic-private@host.example/x","plain_url":"https://token.example:8443/x"}') WHERE id=report_id;
+ UPDATE public.mapping_operation_reports SET result_payload=('{"first_url":"https' || '://user:synthetic-private@host.example/x","second_url":"https://synthetic-private@host.example/x","plain_url":"https://token.example:8443/x"}')::jsonb WHERE id=report_id;
  RETURN NEXT is((SELECT result_payload FROM public.mapping_operation_reports WHERE id=report_id),
   '{"first_url":"https://REDACTED@host.example/x","second_url":"https://REDACTED@host.example/x","plain_url":"https://token.example:8443/x"}'::jsonb,
   'direct report trigger redacts password and token userinfo while preserving plain port URLs');

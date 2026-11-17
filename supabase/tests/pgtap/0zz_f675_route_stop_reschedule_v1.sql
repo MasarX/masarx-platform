@@ -26,6 +26,10 @@ SELECT ok(NOT has_function_privilege('authenticated',
   'public.transition_task_system_v1(uuid,text,text,jsonb,text,text)','EXECUTE'),
   'system completion helper remains private');
 
+INSERT INTO public.workflow_templates(id,name,version,status,scope_type,scope_id)
+VALUES('f6750000-0000-4000-8000-000000000001','pgtap_f675_reschedule',1,'active',
+  public.get_root_scope_type_key_v1(),NULL);
+
 -- Replace only the canonical reschedule dependency inside this rolled-back test
 -- so wrapper authorization, locking, rollback, replay and evidence joins are deterministic.
 CREATE OR REPLACE FUNCTION public.shipment_amend_cancel_v1(p_input JSONB)
@@ -44,14 +48,15 @@ BEGIN
   SELECT organization_id,client_id INTO STRICT v_organization,v_client
   FROM public.shipments WHERE id=v_shipment;
   SELECT id,version INTO STRICT v_template,v_version
-  FROM public.workflow_templates WHERE status='active'
-  ORDER BY version DESC,id LIMIT 1;
+  FROM public.workflow_templates
+  WHERE id='f6750000-0000-4000-8000-000000000001' AND status='active';
   PERFORM set_config('app.workflow_run_id', v_run::text, true);
   INSERT INTO public.workflow_runs(
     id,workflow_template_id,workflow_template_version,entry_point,
     workflow_status,context,completed_at)
   VALUES(v_run,v_template,v_version,'manual','completed',
-    jsonb_build_object('shipment_id',v_shipment),now());
+    jsonb_build_object('shipment_id',v_shipment,'organization_id',v_organization,
+      'client_id',v_client,'slot_date',p_input->>'slot_date'),now());
   IF current_setting('pgtap.f675_amend_mode',true)='fail' THEN
     RETURN jsonb_build_object('ok',FALSE,'error',jsonb_build_object('code','fixture_rejected'));
   END IF;
