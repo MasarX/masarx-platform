@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { fork } = require('node:child_process');
+const { setTimeout: delay } = require('node:timers/promises');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
@@ -15,6 +16,16 @@ const { install } = require('./tasks.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
+async function waitForCronPause(db, wait = delay) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const result = await db.query("SELECT setting, context FROM pg_settings WHERE name = 'cron.launch_active_jobs'");
+    const setting = result.rows[0];
+    if (setting?.context !== 'sighup') throw new Error('Missing reloadable pg_cron launch control');
+    if (setting.setting === 'off') return;
+    if (attempt < 19) await wait(250);
+  }
+  throw new Error('pg_cron did not acknowledge the launch pause');
+}
 async function recordMigrationDeadlock(error, db, readLogs, diagnostic) {
   const output = error.failure?.output || '';
   if (!output.includes('(SQLSTATE 40P01)')) return;
@@ -233,6 +244,16 @@ async function qualify(diagnostic) {
         const before = await db.query('select count(*)::int as n from supabase_migrations.schema_migrations');
         if (before.rows[0].n !== 0) throw new Error('Database is not empty of application migrations');
       }
+      // The disposable fixture uses the registered schedules without launching background jobs.
+      const cronAdmin = (...commands) => checked('docker', ['exec', `supabase_db_${project}`, 'sh', '-ec',
+        'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"', 'sh', '--host=127.0.0.1', '--username=supabase_admin',
+        '--dbname=postgres', '--no-psqlrc', '--no-password', '--quiet', '--tuples-only', '--no-align', '--set=ON_ERROR_STOP=1',
+        ...commands.flatMap(command => ['-c', command])], env, 15000, { quiet: true });
+      await timed('cron-pause', async () => {
+        const reloaded = await cronAdmin("ALTER SYSTEM SET cron.launch_active_jobs = 'off'", 'SELECT pg_reload_conf()');
+        if (reloaded.trim() !== 't') throw new Error('Could not reload the pg_cron launch control');
+        await waitForCronPause(db);
+      });
       const versions = migrationInventory(fs.readdirSync('supabase/migrations'));
       fs.rmdirSync(path.join(sb, 'migrations'));
       fs.symlinkSync(path.join(root, 'supabase/migrations'), path.join(sb, 'migrations'), 'dir');
@@ -273,6 +294,15 @@ async function qualify(diagnostic) {
       }
       console.log(`Fresh migration replay: ${versions.length} files`);
       summary.currentMigration = null;
+      diagnostic.stage = 'cron-pause-proof';
+      summary.cron = JSON.parse(await cronAdmin(`SELECT json_build_object(
+        'launch', current_setting('cron.launch_active_jobs'), 'logRun', current_setting('cron.log_run'),
+        'active', (SELECT count(*) FROM cron.job WHERE active AND database = current_database()),
+        'runs', (SELECT count(*) FROM cron.job_run_details WHERE database = current_database()))`));
+      if (summary.cron.launch !== 'off' || summary.cron.logRun !== 'on' || summary.cron.runs !== 0) {
+        throw new Error('pg_cron launch isolation failed during migration replay');
+      }
+      console.log(`Migration cron isolation: ${JSON.stringify(summary.cron)}`);
     } finally { await db.end(); }
     if (shard) {
       const databasePin = pins.find(pin => pin.role === 'database');
@@ -350,4 +380,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause };
