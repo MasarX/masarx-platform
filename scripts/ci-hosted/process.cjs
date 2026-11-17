@@ -29,12 +29,12 @@ function lines(consume) {
   }, end() { if (pending) consume(pending); pending = ''; } };
 }
 
-function run(command, args, { env = process.env, timeout = 600000, quiet = false, logFile,
+function run(command, args, { env = process.env, timeout = 600000, quiet = false, logFile, includeStderr = false,
   onLine = () => false, idleMs = 0, idleMessage = () => 'No progress before deadline' } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     const secrets = environmentSecrets(env);
-    let stdout = ''; let stderr = ''; let stopped; let idle; let killTimer;
+    let stdout = ''; let stderr = ''; let combined = ''; let stopped; let idle; let killTimer;
     const stop = reason => {
       if (stopped) return;
       stopped = reason;
@@ -55,8 +55,8 @@ function run(command, args, { env = process.env, timeout = 600000, quiet = false
     };
     const out = lines(consume); const err = lines(consume);
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
-    child.stdout.on('data', text => { stdout += text; out.push(text); });
-    child.stderr.on('data', text => { stderr += text; err.push(text); });
+    child.stdout.on('data', text => { stdout += text; if (includeStderr) combined += text; out.push(text); });
+    child.stderr.on('data', text => { stderr += text; if (includeStderr) combined += text; err.push(text); });
     const timer = setTimeout(() => stop(`Process exceeded ${timeout}ms`), timeout);
     touch();
     let launchError;
@@ -70,7 +70,7 @@ function run(command, args, { env = process.env, timeout = 600000, quiet = false
         // Quiet machine-readable output is still available, redacted and complete, on failure.
         if (quiet) console.error(error.failure.output);
         reject(error);
-      } else resolve(stdout);
+      } else resolve(includeStderr ? combined : stdout);
     });
   });
 }

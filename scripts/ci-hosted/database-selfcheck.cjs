@@ -8,6 +8,8 @@ const { retry, run, stage, lines, writeReport } = require('./process.cjs');
 const { migrationProgress, completePins } = require('./backend.cjs');
 const { shardFiles, validateSnapshot } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
+const { imageRequest, rewrite } = require('./docker-images.cjs');
+const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
 
 async function main() {
   const installer = fs.readFileSync('scripts/ci-hosted/tasks.cjs', 'utf8');
@@ -45,6 +47,54 @@ async function main() {
     const pins = JSON.parse(fs.readFileSync('config/ci/hosted-supabase-images.json', 'utf8'));
     assert.equal(completePins(pins), true);
     const pin = pins.find(row => row.role === 'database');
+    const traced = imageRequest('GET', '/v1.51/images/public.ecr.aws%2Fsupabase%2Fpostgres%3Aother/json', Buffer.alloc(0), pins);
+    assert.equal(traced.reviewed, true);
+    assert.equal(traced.reference, `public.ecr.aws/${pin.image}@${pin.digest.slice(0, 19)}`);
+    const missing = imageRequest('POST', '/v1.51/images/create?fromImage=public.ecr.aws%2Fsupabase%2Funreviewed&tag=latest', Buffer.alloc(0), pins);
+    assert.equal(missing.image, 'public.ecr.aws/supabase/unreviewed:latest');
+    assert.equal(missing.reviewed, false);
+    assert.equal(imageRequest('GET', '/images/%bad/json', Buffer.alloc(0), pins), null);
+    assert.equal(imageRequest('POST', '/containers/create', Buffer.from('{bad'), pins), null);
+    assert.equal(imageRequest('POST', '/containers/create', Buffer.from('{"Image":"unreviewed/image:v1"}'), pins).reviewed, false);
+    assert.throws(() => rewrite('POST', '/images/create?fromImage=anything', Buffer.alloc(0), pins));
+    assert.throws(() => rewrite('POST', '/containers/create', Buffer.from('{"Image":"unreviewed/image:v1"}'), pins));
+    assert.equal(imagePrefix(`supabase/postgres@sha256:${'a'.repeat(64)}`), `supabase/postgres@sha256:${'a'.repeat(12)}`);
+    assert.equal(belongsToStack({ Names: 'anonymous', Labels: 'com.supabase.cli.project=synthetic' }, 'synthetic'), true);
+    assert.equal(belongsToStack({ Names: 'supabase_db_synthetic-other' }, 'synthetic'), false);
+    const commands = [];
+    const rows = [
+      { ID: 'db', Names: 'supabase_db_synthetic', Image: `supabase/postgres@${pin.digest}`, Status: 'Up (unhealthy)' },
+      { ID: 'job', Names: 'anonymous', Image: 'supabase/realtime:synthetic', Labels: 'com.supabase.cli.project=synthetic', Status: 'Restarting' },
+      { ID: 'other', Names: 'unrelated', Image: 'synthetic/other:v1', Status: 'Up' },
+    ];
+    const details = rows.map(row => ({ id: row.ID, imageId: `sha256:${'b'.repeat(64)}`, state: row.ID === 'db'
+      ? { Health: { Status: 'unhealthy', Log: [{ Output: 'password=synthetic-hidden' }] } }
+      : row.ID === 'job' ? { Restarting: true, Status: 'restarting' } : { Status: 'running' } }));
+    const diagnosticLog = path.join(temp, 'startup.log');
+    const diagnostics = await collectStackDiagnostics({ project: 'synthetic', env: process.env, dockerRoot: '/synthetic/docker',
+      imagePolicy: { decision: 'denied', denied: 1, imageRequests: [traced, missing] }, logFile: diagnosticLog,
+      execute: async (command, args, options) => {
+        commands.push([command, args]);
+        assert.equal(options.quiet, true); assert.equal(options.timeout > 0 && options.timeout <= 10000, true);
+        if (command === 'docker' && args[0] === 'logs') assert.equal(options.includeStderr, true);
+        if (command === 'free') throw new Error('synthetic memory command failure');
+        if (command === 'df') return 'synthetic disk free';
+        if (args[0] === 'ps') return rows.map(row => JSON.stringify(row)).join('\n');
+        if (args[0] === 'inspect') return details.map(row => JSON.stringify(row)).join('\n');
+        return 'service error password=synthetic-hidden';
+      } });
+    assert.equal(diagnostics.containers.length, 3);
+    assert.deepEqual(diagnostics.logs.map(row => row.name), ['supabase_db_synthetic', 'anonymous']);
+    assert.equal(diagnostics.unhealthy.length, 2);
+    assert.equal(diagnostics.unreviewedImages[0].image, missing.image);
+    assert.equal(diagnostics.errors.length, 1);
+    assert.equal(JSON.stringify(diagnostics).includes('synthetic-hidden'), false);
+    assert.equal(fs.readFileSync(diagnosticLog, 'utf8').includes('synthetic-hidden'), false);
+    assert.deepEqual(commands.filter(([, args]) => args[0] === 'logs').map(([, args]) => args.slice(1)), [
+      ['--tail', '60', '--timestamps', 'db'], ['--tail', '60', '--timestamps', 'job'],
+    ]);
+    const combined = await run(process.execPath, ['-e', "console.log('synthetic stdout'); console.error('synthetic stderr')"], { quiet: true, includeStderr: true });
+    assert.equal(combined.includes('synthetic stdout') && combined.includes('synthetic stderr'), true);
     const snapshot = { sha: 'a'.repeat(40), image: `public.ecr.aws/${pin.image}@${pin.digest}`, files: {} };
     for (const file of ['database.dump', 'roles.sql']) {
       fs.writeFileSync(path.join(temp, file), 'synthetic');

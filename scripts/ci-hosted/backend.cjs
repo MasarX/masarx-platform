@@ -7,6 +7,7 @@ const { fork } = require('node:child_process');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, retry, stage, writeReport } = require('./process.cjs');
+const { collectStackDiagnostics } = require('./stack-diagnostics.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
@@ -97,7 +98,7 @@ async function qualify(diagnostic) {
   const env = { ...process.env, ENV_FILE: os.devNull, ENV_FILE_OVERRIDE: '0', ENV_FILE_APPEND: '0',
     QA_RUN_ID: '', NX_DAEMON: 'false', PATH: `${bin}${path.delimiter}${process.env.PATH}` };
   const cli = path.join(bin, 'supabase');
-  let started = false; let guard; let cliEnv = env;
+  let started = false; let guard; let cliEnv = env; let dockerRoot;
   const summary = { stages: [], sha: process.env.GITHUB_SHA || 'unknown', migrations: 0, pgtap: 'NOT_RUN',
     integration: 'SKIPPED_BY_DESIGN: local equivalence of the integration inventory is unproved',
     serviceImagePins: pinState.qualificationOnly ? 'PIN_NEEDED' : 'resolved SHA-256 indices', imageQualificationOnly: pinState.qualificationOnly, ok: false };
@@ -107,7 +108,7 @@ async function qualify(diagnostic) {
   try {
     diagnostic.stage = 'docker-preflight';
     await checked('docker', ['info', '--format', '{{.ServerVersion}}'], env);
-    const dockerRoot = (await checked('docker', ['info', '--format', '{{.DockerRootDir}}'], env, undefined, { quiet: true })).trim();
+    dockerRoot = (await checked('docker', ['info', '--format', '{{.DockerRootDir}}'], env, undefined, { quiet: true })).trim();
     diskFloor(dockerRoot);
     if (!pinState.qualificationOnly) {
       if (env.DOCKER_HOST && !env.DOCKER_HOST.startsWith('unix://')) throw new Error('Digest-pinned startup requires the hosted Unix Docker daemon');
@@ -149,7 +150,8 @@ async function qualify(diagnostic) {
     ].join('\n'), { mode: 0o600 });
     diagnostic.stage = 'stack-start';
     started = true; // A partial start must also be stopped.
-    await timed('stack-start', () => checked(cli, ['start', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 20 * 60000));
+    console.log(`Stack service exclusions: ${lane.exclude.join(',')}`);
+    await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 6 * 60000));
     diagnostic.stage = 'stack-status';
     const status = JSON.parse(await checked(cli, ['status', '--workdir', temp, '-o', 'json'], cliEnv, undefined, { quiet: true }));
     if (!status.DB_URL) throw new Error('Local stack did not provide DB_URL');
@@ -234,6 +236,12 @@ async function qualify(diagnostic) {
   } catch (error) {
     if (guard && fs.existsSync(guard.policyFile)) diagnostic.imagePolicy = { ...diagnostic.imagePolicy, ...JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')) };
     saveFailure(diagnostic, error, environmentSecrets(env)); // Persist before stack teardown and temporary-file removal.
+    if (started && diagnostic.stage === 'stack-start') {
+      diagnostic.startupDiagnostics = await stage(summary, 'stack-diagnostics', () => collectStackDiagnostics({
+        project, env, dockerRoot, imagePolicy: diagnostic.imagePolicy, logFile: 'ci-reports/backend.log',
+      })).catch(diagnosticError => ({ error: sanitize(diagnosticError.message) }));
+      saveFailure(diagnostic, error, environmentSecrets(env));
+    }
     throw error;
   } finally {
     if (started) {
