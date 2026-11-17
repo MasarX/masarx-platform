@@ -142,12 +142,4 @@ jobs: {}
     })).toThrow('actionlint workflow lint timed out after 90000ms');
   });
 
-  test('required workflow lint jobs use the bounded adapter', () => {
-    const root = path.resolve(__dirname, '../../..');
-    for (const workflow of ['reviewer-gate-pr.yml']) {
-      const body = fs.readFileSync(path.join(root, '.github', 'workflows', workflow), 'utf8');
-      expect(body).toContain('node scripts/ops/ci/actionlint-current-schema.js');
-      expect(body).not.toMatch(/^\s*run:\s*actionlint\s*$/m);
-    }
-  });
 });

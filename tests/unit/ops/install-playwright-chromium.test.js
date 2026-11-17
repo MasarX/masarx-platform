@@ -24,6 +24,7 @@ function normalizePath(value) {
 }
 
 describe('install-playwright-chromium', () => {
+  const contract = { profiles: { browser: { playwright_browsers_path: '/ms-playwright' } } };
   test('appends IPv4-first DNS without discarding or duplicating Node options', () => {
     expect(appendIpv4FirstNodeOption('')).toBe('--dns-result-order=ipv4first');
     expect(appendIpv4FirstNodeOption('--max-old-space-size=2048'))
@@ -405,6 +406,7 @@ describe('install-playwright-chromium', () => {
     const spawnSyncFn = jest.fn(() => ({ status: 0 }));
 
     const result = ensurePlaywrightChromium({
+      contract,
       sourceEnv,
       platform: 'linux',
       logger,
@@ -470,6 +472,7 @@ describe('install-playwright-chromium', () => {
       .mockReturnValueOnce({ status: 0 });
 
     const result = ensurePlaywrightChromium({
+      contract,
       sourceEnv,
       platform: 'linux',
       logger,
@@ -537,6 +540,7 @@ describe('install-playwright-chromium', () => {
       .mockReturnValueOnce({ status: 0 });
 
     const result = ensurePlaywrightChromium({
+      contract,
       sourceEnv,
       platform: 'linux',
       logger: { log: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -586,6 +590,7 @@ describe('install-playwright-chromium', () => {
 
     try {
       ensurePlaywrightChromium({
+        contract,
         sourceEnv,
         platform: 'linux',
         logger,
@@ -683,6 +688,7 @@ describe('install-playwright-chromium', () => {
 
     expect(() =>
       ensurePlaywrightChromium({
+        contract,
         sourceEnv: { RUNNER_ENVIRONMENT: 'self-hosted' },
         logger,
         requireFn: () => {
