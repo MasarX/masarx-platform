@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const os = require('node:os');
+const { loadExceptions, assessFile } = require('./pgtap-exceptions.cjs');
 const { sanitize } = require('./diagnostics.cjs');
 
 function shardFiles(files, value) {
@@ -28,11 +29,21 @@ function shardResults(selected, files) {
 async function tests() {
   const runner = require('../tests/run-pgtap-cloud.js');
   const local = require('../ops/ci/cloud-pool-db-local-pgtap.js');
+  const entries = loadExceptions();
+  const inventory = fs.readdirSync('supabase/tests/pgtap');
+  for (const entry of entries) if (!inventory.includes(entry.file)) throw new Error(`stale exception: remove it: missing ${entry.file}`);
   const rows = [];
   await local.runFullPgtap({ projectId: process.env.DB_LOCAL_PROJECT_ID, dbPort: process.env.DB_LOCAL_DB_PORT,
     runSuite: (candidates, full, env) => runner.runSuite(candidates, full, env, {
+      assessResult: (file, result) => assessFile(file, result, entries),
       async recordCaseResults(_suite, results) {
-        rows.push(...results.map(row => ({ file: row.case_key, status: row.status, durationMs: row.duration_ms, error: sanitize(row.error_summary) })));
+        rows.push(...results.map(row => ({ file: row.case_key, status: row.status, durationMs: row.duration_ms, error: sanitize(row.error_summary),
+          accepted: row.metadata?.assessment?.accepted || [], assertionFailures: row.metadata?.assessment?.failures || [], exceptionErrors: row.metadata?.assessment?.errors || [] })));
+        for (const row of rows.slice(-results.length)) for (const entry of row.accepted) {
+          const message = `ACCEPTED (expires ${entry.expires}): ${row.file}: ${entry.assertion}; ${entry.reason}; owner: ${entry.owner}`;
+          console.log(message);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${message}\n`);
+        }
         fs.writeFileSync('ci-reports/pgtap-files.json', JSON.stringify(rows, null, 2));
       }, async close() {},
     }),

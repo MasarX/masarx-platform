@@ -9,6 +9,8 @@ const { retry, run, stage, lines, writeReport } = require('./process.cjs');
 const { migrationProgress, completePins, backendLint } = require('./backend.cjs');
 const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
+const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
+const { inventory, validPacket, prepareImages } = require('./images.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
 const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
@@ -39,8 +41,80 @@ function checkDatabaseInputs() {
     }
   }
   for (const file of ['config/ci/cloud-pool-db-local.json', 'config/ci/deploy-cli-contract.json', 'config/ci/deploy-surfaces.json',
-    'config/ci/hosted-supabase-images.json', 'config/lint/db-lint-exceptions.json', 'supabase/config.toml']) assert.equal(fs.existsSync(file), true, file);
+    'config/ci/pgtap-accepted-failures.json', 'config/ci/hosted-supabase-images.json', 'config/lint/db-lint-exceptions.json', 'supabase/config.toml']) assert.equal(fs.existsSync(file), true, file);
   console.log(`PASS: configured database commands and ${seen.size} transitive module inputs exist`);
+}
+
+function checkExceptions() {
+  const entry = loadExceptions()[0]; const today = '2026-11-17';
+  const assess = (text, status = 0, day = today) => assessFile(entry.file, { status, combined: text }, [entry], day);
+  const failed = `1..1\n not ok 1 - ${entry.assertion}    +\n # Looks like you failed 1 test of 1`;
+  const accepted = assess(failed);
+  assert.equal(accepted.ok, true); assert.equal(accepted.accepted.length, 1);
+  assert.equal(assess(failed, 0, '2026-12-02').ok, false);
+  assert.match(assess(failed, 0, '2026-12-02').errors[0], /Expired/);
+  for (const text of [`1..1\nok 1 - ${entry.assertion}`, '1..1\nnot ok 1 - different text', '']) {
+    assert.equal(assess(text).ok, false); assert.match(assess(text).errors[0], /stale exception: remove it/);
+  }
+  for (const result of [assess(failed, 3), assess(`${failed}\nERROR: synthetic abort`), assess(failed.replace('1..1', '1..2')), assess(failed.replace('failed 1 test', 'failed 2 tests'))]) {
+    assert.equal(result.ok, false); assert.equal(result.accepted.length, 0);
+  }
+  const multiple = assess(`1..2\nnot ok 1 - ${entry.assertion}\nnot ok 2 - unaccepted assertion\n# Looks like you failed 2 tests of 2`);
+  assert.equal(multiple.ok, false); assert.equal(multiple.accepted.length, 1);
+  assert.equal(multiple.failures[0].assertion, 'unaccepted assertion');
+  const report = [{ files: [{ file: entry.file, accepted: accepted.accepted }] }];
+  assert.equal(exceptionEvidence([entry], report, today).errors.length, 0);
+  assert.equal(exceptionEvidence([entry], report, '2026-12-02').errors.length > 0, true);
+  assert.equal(exceptionEvidence([entry], [], today).errors.length, 1);
+  assert.equal(exceptionEvidence([entry], [...report, ...report], today).errors.length, 1);
+  console.log('PASS: exact, expired, stale, changed-text, SQL-abort and incomplete-plan assertion exceptions');
+}
+async function checkImages(temp, pins) {
+  const cwd = process.cwd();
+  const work = path.join(temp, 'images'); fs.mkdirSync(work); process.chdir(work);
+  try {
+    const env = { GITHUB_RUN_ID: '123', GITHUB_SHA: 'a'.repeat(40) };
+    let calls = []; const delays = []; let badAlias; let mirrorFails = false;
+    const summary = { stages: [] };
+    const checked = async (_command, args) => {
+      calls.push(args);
+      if (args[0] === 'save') fs.writeFileSync('ci-images/images.tar', 'synthetic archive');
+      if (args[0] === 'pull' && args.at(-1).startsWith('ghcr.io') && mirrorFails) throw new Error('synthetic registry quota');
+      if (args[0] === 'image') {
+        const ref = args.at(-1);
+        const pin = pins.find(pin => ref.includes(pin.image));
+        return ref === badAlias ? `sha256:${'0'.repeat(64)}` : pin.image_id;
+      }
+      return '';
+    };
+    const options = { env, checked, timed: (name, action) => stage(summary, name, action), summary, wait: async ms => delays.push(ms) };
+    await prepareImages(pins.map(pin => ({ ...pin })), options);
+    assert.equal(calls.filter(args => args[0] === 'pull').length, 5);
+    assert.equal(calls.filter(args => args[0] === 'pull').every(args => args.at(-1).startsWith('ghcr.io/') && args.at(-1).includes('@sha256:')), true);
+    assert.equal(summary.imageArchiveBytes, 17);
+    const packet = JSON.parse(fs.readFileSync('ci-images/manifest.json', 'utf8'));
+    assert.equal(validPacket(packet, pins, env), true);
+    assert.equal(validPacket(packet, pins, { ...env, GITHUB_RUN_ID: '124' }), false);
+    assert.equal(validPacket({ ...packet, images: [] }, pins, env), false);
+    calls = [];
+    await prepareImages(pins.map(pin => ({ ...pin })), { ...options, shard: '1/6' });
+    assert.equal(calls.some(args => args[0] === 'load'), true);
+    assert.equal(calls.some(args => args[0] === 'pull'), false);
+    badAlias = inventory(pins)[0].alias; mirrorFails = true; calls = [];
+    await prepareImages(pins.map(pin => ({ ...pin })), { ...options, shard: '1/6' });
+    const pulls = calls.filter(args => args[0] === 'pull');
+    assert.equal(pulls.length, 4); assert.equal(pulls.at(-1).at(-1).startsWith('public.ecr.aws/'), true);
+    assert.deepEqual(delays, [5000, 15000]);
+    calls = []; badAlias = undefined; mirrorFails = false;
+    await prepareImages(pins.map(pin => ({ ...pin })), { ...options, env: { ...env, GITHUB_RUN_ID: '124' }, shard: '1/6' });
+    assert.equal(calls.some(args => args[0] === 'load'), false);
+    assert.equal(calls.filter(args => args[0] === 'pull').length, 5);
+    const bound = pins.map(pin => ({ ...pin, runtimeId: pin.image_id }));
+    assert.equal(JSON.parse(rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: 'public.ecr.aws/supabase/postgres:other' })), bound).body).Image, pins[0].image_id);
+    assert.throws(() => rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: `ghcr.io/${pins[0].image}@sha256:${'0'.repeat(64)}` })), bound));
+    assert.throws(() => rewrite('POST', '/containers/create', Buffer.from(JSON.stringify({ Image: pins[0].image_id })), [{ ...bound[0], runtimeId: `sha256:${'0'.repeat(64)}` }]));
+    console.log('PASS: GHCR digest pulls, bounded ECR fallback, same-run image archive and verified loaded IDs');
+  } finally { process.chdir(cwd); }
 }
 
 async function main() {
@@ -162,6 +236,8 @@ async function main() {
       const target = path.join(aggregateDir, 'ci-reports/database-result', file);
       fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, JSON.stringify(value));
     };
+    fs.mkdirSync(path.join(aggregateDir, 'config/ci'), { recursive: true });
+    fs.writeFileSync(path.join(aggregateDir, 'config/ci/pgtap-accepted-failures.json'), '[]');
     fixture('build/backend.json', built);
     for (let index = 0; index < 6; index++) fixture(`shards/pgtap-summary-${index + 1}-123-1/pgtap.json`, shardReports[index]);
     const aggregateSummary = path.join(temp, 'aggregate.md');
@@ -256,6 +332,8 @@ async function main() {
     const wrapper = fs.readFileSync(writePsqlWrapper(path.join(temp, 'client'), `public.ecr.aws/${pin.image}@${pin.digest}`), 'utf8');
     assert.equal(wrapper.includes(`public.ecr.aws/${pin.image}@${pin.digest}`), true);
     assert.equal(wrapper.includes('-v "$PWD:$PWD"'), true);
+    await checkImages(temp, pins);
+    checkExceptions();
     const Module = require('node:module');
     const originalLoad = Module._load;
     let runner;
@@ -269,6 +347,23 @@ async function main() {
         runPsqlCaptureFn: () => ({ status, combined }),
       }), error => error.message.includes(combined.split('\n')[1]));
     }
+    const exception = loadExceptions()[0];
+    const acceptedOutput = `1..1\nnot ok 1 - ${exception.assertion}\n# Looks like you failed 1 test of 1`;
+    const options = { runPsqlCaptureFn: () => ({ status: 0, combined: acceptedOutput }),
+      assessResult: result => assessFile(exception.file, result, [exception], '2026-11-17') };
+    assert.equal(runner.runPsqlWithCandidateFallback([{ name: 'synthetic', dsn: testEnv.DATABASE_URL }], [], exception.file, options).assessment.accepted.length, 1);
+    assert.throws(() => runner.runPsqlWithCandidateFallback([{ name: 'synthetic', dsn: testEnv.DATABASE_URL }], [], exception.file,
+      { ...options, runPsqlCaptureFn: () => ({ status: 3, combined: `${acceptedOutput}\nERROR: synthetic abort` }) }), /ERROR: synthetic abort/);
+    const adversarial = '/images/a'.repeat(100000) + '/json';
+    const parseStart = performance.now();
+    for (let i = 0; i < 100; i++) {
+      assert.equal(imageRequest('GET', adversarial, Buffer.alloc(0), pins), null);
+      assert.throws(() => rewrite('GET', adversarial, Buffer.alloc(0), pins), /bound/);
+      assert.equal(imageRequest('GET', '/images/a'.repeat(800) + '/json', Buffer.alloc(0), pins), null);
+    }
+    const parseMs = performance.now() - parseStart;
+    assert.ok(parseMs < 1000, `Adversarial path parsing took ${parseMs}ms`);
+    console.log(`PASS: 200 long/adversarial Docker paths in ${parseMs.toFixed(1)}ms`);
     const report = { stages: [] };
     await stage(report, 'success', async () => {});
     await assert.rejects(stage(report, 'failure', async () => { throw new Error('synthetic'); }));

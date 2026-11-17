@@ -4,17 +4,26 @@ const http = require('node:http');
 const path = require('node:path');
 const { sanitize } = require('./diagnostics.cjs');
 function pinnedReference(image, pins) {
-  const normalized = String(image).replace(/^public\.ecr\.aws\//, '').split('@')[0].split(':')[0]
+  if (typeof image !== 'string' || image.length > 1024) throw new Error('Malformed Docker image');
+  const normalized = image.replace(/^(?:public\.ecr\.aws|ghcr\.io|docker\.io)\//, '').split('@')[0].split(':')[0]
     .replace(/^(?:docker\/)?library\/kong$/, 'supabase/kong');
-  const pin = pins.find(row => row.image === normalized || row.runtimeId === image || `public.ecr.aws/${row.image}@${row.digest}` === image);
-  if (!pin || !/^sha256:[a-f0-9]{64}$/.test(pin.digest)) throw Object.assign(new Error('Image is outside the reviewed digest set'), { image: String(image) });
-  return `public.ecr.aws/${pin.image}@${pin.digest}`;
+  const pin = pins.find(row => row.image === normalized || row.runtimeId === image);
+  const digest = image.includes('@') ? image.slice(image.indexOf('@') + 1) : undefined;
+  if (!pin || !/^sha256:[a-f0-9]{64}$/.test(pin.digest) || (digest && digest !== pin.digest)
+    || (pin.runtimeId && (!/^sha256:[a-f0-9]{64}$/.test(pin.runtimeId) || pin.runtimeId !== pin.image_id))) throw Object.assign(new Error('Image is outside the reviewed digest set'), { image });
+  // Loaded archives lose RepoDigests; the reviewed index's verified amd64 config ID binds the same content.
+  return pin.runtimeId || `public.ecr.aws/${pin.image}@${pin.digest}`;
 }
 function dockerPath(url) {
+  if (typeof url !== 'string' || url.length > 8192) throw new Error('Docker request exceeds bound');
   if (!url.startsWith('/') || url.startsWith('//')) throw new Error('Malformed Docker path');
   const decoded = decodeURIComponent(url.split('?')[0]);
   if (/[\0\\]/.test(decoded)) throw new Error('Malformed Docker path');
   return path.posix.normalize(decoded).replace(/^\/v[0-9.]+(?=\/)/, '');
+}
+function inspectedImage(route) {
+  const parts = route.split('/');
+  return parts[1] === 'images' && parts.length > 3 && parts.at(-1) === 'json' ? parts.slice(2, -1).join('/') : null;
 }
 function rewrite(method, url, body, pins) {
   const route = dockerPath(url);
@@ -22,10 +31,10 @@ function rewrite(method, url, body, pins) {
   if (!['GET', 'HEAD'].includes(method) && /^\/(?:build|commit|images|plugins)(?:\/|$)/.test(route)) {
     throw new Error('Docker image-mutating endpoints are forbidden');
   }
-  const inspect = /^\/images\/(.+)\/json$/.exec(route);
-  if (method === 'GET' && inspect && !inspect[1].startsWith('sha256:')) {
+  const inspect = inspectedImage(route);
+  if (method === 'GET' && inspect && !inspect.startsWith('sha256:')) {
     const prefix = /^\/v[0-9.]+(?=\/)/.exec(url)?.[0] || '';
-    url = `${prefix}/images/${encodeURIComponent(pinnedReference(inspect[1], pins))}/json${url.includes('?') ? url.slice(url.indexOf('?')) : ''}`;
+    url = `${prefix}/images/${encodeURIComponent(pinnedReference(inspect, pins))}/json${url.includes('?') ? url.slice(url.indexOf('?')) : ''}`;
   }
   if (method === 'POST' && route === '/containers/create') {
     const config = JSON.parse(body.toString('utf8'));
@@ -46,19 +55,20 @@ function policyDecision(error, method, url) {
 function imageRequest(method, url, body, pins) {
   try {
     let image; let operation;
-    const inspect = /\/images\/(.+)\/json(?:\?|$)/.exec(url);
-    if (/\/images\/create(?:\?|$)/.test(url)) {
+    const route = dockerPath(url);
+    const inspect = inspectedImage(route);
+    if (route === '/images/create') {
       const query = new URL(url, 'http://localhost').searchParams;
       image = query.get('fromImage') || '';
       const tag = query.get('tag');
       if (tag) image += `${tag.startsWith('sha256:') ? '@' : ':'}${tag}`;
       operation = 'image-pull';
-    } else if (method === 'GET' && inspect) { image = decodeURIComponent(inspect[1]); operation = 'image-inspect'; }
-    else if (method === 'POST' && /\/containers\/create(?:\?|$)/.test(url)) {
+    } else if (method === 'GET' && inspect) { image = inspect; operation = 'image-inspect'; }
+    else if (method === 'POST' && route === '/containers/create') {
       try { image = JSON.parse(body.toString('utf8')).Image; } catch { return null; }
       operation = 'container-create';
     } else return null;
-    if (typeof image !== 'string') return null;
+    if (typeof image !== 'string' || image.length > 1024) return null;
     let reference;
     try { reference = pinnedReference(image, pins); } catch {}
     return { operation, image: sanitize(image.replace(/(sha256:[a-f0-9]{12})[a-f0-9]+/g, '$1')),
@@ -90,7 +100,7 @@ function createGuard(pins, socketPath, policyFile) {
       else policy.imageRequests.push({ ...image, count: 1, denied: Number(Boolean(error)) });
     }
     const trace = { sequence: policy.requests.length + 1, method,
-      path: sanitize(url.split('?')[0].replace(/(\/(?:containers|exec)\/)([a-f0-9]{13,64})(?=\/|$)/g, (_, prefix, id) => prefix + id.slice(0, 12))),
+      path: sanitize(url.split('?')[0].slice(0, 1024).replace(/(\/(?:containers|exec)\/)([a-f0-9]{13,64})(?=\/|$)/g, (_, prefix, id) => prefix + id.slice(0, 12))),
       startedAt: new Date().toISOString(), status: null, durationMs: 0, upgraded: false };
     policy.requests.push(trace); policy.lastRequest = trace; persist();
     return trace;

@@ -1,0 +1,9 @@
+[
+  {
+    "file": "0zz_extension_public_acl_v1.sql",
+    "assertion": "pg_net queues and responses have no PUBLIC ACL",
+    "reason": "Supabase-owned extension grants cannot be changed per project; secret-bearing dispatch moves to the trusted-worker path",
+    "owner": "repository lead",
+    "expires": "2026-12-01"
+  }
+]

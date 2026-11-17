@@ -6,9 +6,11 @@ const crypto = require('node:crypto');
 const { fork } = require('node:child_process');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
-const { run, retry, stage, writeReport } = require('./process.cjs');
+const { run, stage, writeReport } = require('./process.cjs');
 const { collectStackDiagnostics } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
+
+const { prepareImages } = require('./images.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
@@ -43,7 +45,8 @@ function completePins(pins) {
   const expected = { database: 'supabase/postgres', auth: 'supabase/gotrue', storage: 'supabase/storage-api', gateway: 'supabase/kong', realtime: 'supabase/realtime' };
   return Array.isArray(pins) && pins.length === Object.keys(expected).length && Object.entries(expected).every(([role, image]) =>
     pins.filter(pin => pin.role === role && pin.image === image && /^[a-zA-Z0-9_.-]+$/.test(pin.tag)
-      && /^sha256:[a-f0-9]{64}$/.test(pin.digest)).length === 1);
+      && /^sha256:[a-f0-9]{64}$/.test(pin.digest) && /^sha256:[a-f0-9]{64}$/.test(pin.image_id)
+      && pin.mirror === 'ghcr.io' && /^[a-zA-Z0-9_.-]+$/.test(pin.cli_tag)).length === 1);
 }
 function mainSwitch(env = process.env, read = git, file = targetFile) {
   if (env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_REF !== 'refs/heads/main') return '';
@@ -143,12 +146,7 @@ async function qualify(diagnostic) {
     if (!pinState.qualificationOnly) {
       if (env.DOCKER_HOST && !env.DOCKER_HOST.startsWith('unix://')) throw new Error('Digest-pinned startup requires the hosted Unix Docker daemon');
       diagnostic.stage = 'image-pull';
-      for (const pin of pins) {
-        diskFloor(dockerRoot);
-        const reference = `public.ecr.aws/${pin.image}@${pin.digest}`;
-        await timed(`image-pull:${pin.role}`, () => retry(`image-pull:${pin.role}`, () => checked('docker', ['pull', '--platform', 'linux/amd64', reference], env, 20 * 60000)));
-        pin.runtimeId = (await checked('docker', ['image', 'inspect', '--format', '{{.Id}}', reference], env, undefined, { quiet: true })).trim();
-      }
+      await prepareImages(pins, { env, checked, timed, summary, shard, checkDisk: () => diskFloor(dockerRoot) });
       diagnostic.stage = 'image-guard';
       guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env);
       cliEnv = guard.env;
@@ -237,7 +235,7 @@ async function qualify(diagnostic) {
     } finally { await db.end(); }
     if (shard) {
       const databasePin = pins.find(pin => pin.role === 'database');
-      local.writePsqlWrapper(bin, `public.ecr.aws/${databasePin.image}@${databasePin.digest}`);
+      local.writePsqlWrapper(bin, databasePin.runtimeId);
       const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, config.dbPort, selected);
       diskFloor(dockerRoot);
       summary.pgtap = 'running';
