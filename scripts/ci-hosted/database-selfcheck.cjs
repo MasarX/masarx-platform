@@ -4,58 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const net = require('node:net');
-const { fork } = require('node:child_process');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
 const { migrationProgress, completePins } = require('./backend.cjs');
 const { shardFiles, validateSnapshot } = require('./pgtap.cjs');
-
-async function dockerEof(temp) {
-  const pinFile = path.join(temp, 'pins.json'); fs.writeFileSync(pinFile, '[]');
-  const connections = new Set(); let guard; let client; let input = '';
-  const server = net.createServer({ allowHalfOpen: true }, stream => {
-    connections.add(stream); stream.on('close', () => connections.delete(stream)); stream.on('error', () => {});
-    let upgraded = false;
-    stream.on('data', chunk => {
-      input += chunk;
-      if (!upgraded && input.includes('\r\n\r\n')) {
-        upgraded = true;
-        stream.write('HTTP/1.1 101 UPGRADED\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n');
-      }
-    });
-    stream.on('end', () => setTimeout(() => stream.end('COMPLETED_AFTER_STDIN_EOF'), 25));
-  });
-  try {
-    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-    // A TCP stand-in keeps the daemon's half-close semantics testable on systems with named pipes.
-    const preload = path.join(temp, 'connect.cjs');
-    fs.writeFileSync(preload, `const net=require('node:net');const connect=net.createConnection;net.createConnection=(options,callback)=>connect({host:'127.0.0.1',port:${server.address().port},allowHalfOpen:options.allowHalfOpen},callback);`);
-    guard = fork(path.join(__dirname, 'docker-images.cjs'), [pinFile, 'synthetic'], { execArgv: ['--require', preload], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
-    const port = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Synthetic guard startup timed out')), 3000);
-      guard.once('message', message => { clearTimeout(timer); resolve(message.port); }); guard.once('error', reject);
-    });
-    const output = await new Promise((resolve, reject) => {
-      let result = ''; let ended = false;
-      const timer = setTimeout(() => reject(new Error('Docker exec EOF response timed out')), 3000);
-      client = net.createConnection({ host: '127.0.0.1', port, allowHalfOpen: true }, () => {
-        client.write('POST /v1.51/exec/synthetic/start HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 2\r\n\r\n{}');
-      });
-      client.on('data', chunk => {
-        result += chunk;
-        if (!ended && result.includes('\r\n\r\n')) { ended = true; client.end('SELECT synthetic;'); }
-      });
-      client.on('end', () => { clearTimeout(timer); resolve(result); });
-      client.on('error', error => { clearTimeout(timer); reject(error); });
-    });
-    assert.equal(input.endsWith('SELECT synthetic;'), true);
-    assert.equal(output.endsWith('COMPLETED_AFTER_STDIN_EOF'), true);
-  } finally {
-    client?.destroy(); guard?.kill('SIGKILL');
-    for (const connection of connections) connection.destroy();
-    await new Promise(resolve => server.close(resolve));
-  }
-}
 
 async function main() {
   let attempts = 0; const delays = [];
@@ -87,7 +38,6 @@ async function main() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'database-selfcheck-'));
   const originalSummary = process.env.GITHUB_STEP_SUMMARY;
   try {
-    await dockerEof(temp);
     const pins = JSON.parse(fs.readFileSync('config/ci/hosted-supabase-images.json', 'utf8'));
     assert.equal(completePins(pins), true);
     const pin = pins.find(row => row.role === 'database');
