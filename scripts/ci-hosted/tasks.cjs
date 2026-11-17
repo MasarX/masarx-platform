@@ -54,7 +54,10 @@ async function main() {
     return;
   }
   if (command === 'typecheck') {
-    for (const app of nextApps()) {
+    if (!subject) throw new Error('Typecheck app is required');
+    if (subject === 'apps/fieldops') return npmScript('typecheck:fieldops');
+    if (!nextApps().some(app => `apps/${app}` === subject)) throw new Error('Typecheck subject must be a Next app');
+    for (const app of nextApps().filter(app => `apps/${app}` === subject)) {
       const dir = `apps/${app}`;
       if (!exists(`${dir}/tsconfig.json`)) throw new Error(`Missing ${dir}/tsconfig.json`);
       // Resolve each app's Next/TS installation, including nested workspace versions.
@@ -65,8 +68,6 @@ async function main() {
         if (result.error || result.status !== 0) throw new Error(`Typecheck failed: ${dir}`);
       }
     }
-    if (exists('apps/fieldops/tsconfig.json')) npmScript('typecheck:fieldops');
-    else console.log('fieldops: skipped-by-design: subject absent');
     return;
   }
   if (command === 'build') {

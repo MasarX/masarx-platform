@@ -108,6 +108,10 @@ jobs:
             *) printf '%s\n' 'Skipped by design: append-only diff runs on pull_request and merge_group.'; exit 0 ;;
           esac
           node scripts/ci-hosted/base-guard.cjs migrations.cjs "$base"
+      - name: Check proposed helper behavior
+        run: |
+          node scripts/ci-hosted/selfcheck.cjs
+          node scripts/ci-hosted/shard-selfcheck.cjs
 
   lint:
     name: Lint
@@ -135,9 +139,9 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs lint
 
   typecheck:
-    name: Typecheck all present apps
+    name: Typecheck (${{ matrix.subject }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
@@ -146,23 +150,31 @@ jobs:
           fetch-depth: 1
       - name: Detect subject
         id: subject
-        run: node scripts/ci-hosted/tasks.cjs detect typecheck
+        run: node scripts/ci-hosted/tasks.cjs detect "$TYPECHECK_SUBJECT"
+        env:
+          TYPECHECK_SUBJECT: ${{ matrix.subject }}
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
-          node-version: '24.22.1'
+          node-version: 24.22.1
           package-manager-cache: false
       - name: Locked dependency installation
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs install
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs typecheck
+        run: node scripts/ci-hosted/tasks.cjs typecheck "$TYPECHECK_SUBJECT"
+        env:
+          TYPECHECK_SUBJECT: ${{ matrix.subject }}
+    strategy:
+      fail-fast: false
+      matrix:
+        subject: [apps/console, apps/portal, apps/fieldops]
 
   unit:
-    name: Unit tests (Jest)
+    name: Unit Jest (${{ matrix.shard }}/8)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
@@ -175,7 +187,7 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
-          node-version: '24.22.1'
+          node-version: 24.22.1
           package-manager-cache: false
       - name: Locked dependency installation
         if: steps.subject.outputs.present == 'true'
@@ -187,18 +199,24 @@ jobs:
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
         with:
-          name: unit-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          name: unit-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ci-reports/unit.json
-            ci-reports/known-failures-observed.unit.txt
+            ci-reports/unit*.json
+            ci-reports/known-failures-observed.unit*.txt
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      JEST_SHARD: ${{ matrix.shard }}/8
 
   ui:
-    name: UI tests (Jest and jsdom)
+    name: Ui Jest (${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
@@ -211,7 +229,7 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
-          node-version: '24.22.1'
+          node-version: 24.22.1
           package-manager-cache: false
       - name: Locked dependency installation
         if: steps.subject.outputs.present == 'true'
@@ -223,13 +241,19 @@ jobs:
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
         with:
-          name: ui-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ui-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ci-reports/ui.json
-            ci-reports/known-failures-observed.ui.txt
+            ci-reports/ui*.json
+            ci-reports/known-failures-observed.ui*.txt
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      JEST_SHARD: ${{ matrix.shard }}/4
 
   build:
     name: Build (${{ matrix.subject }})
@@ -237,9 +261,8 @@ jobs:
     timeout-minutes: 35
     strategy:
       fail-fast: false
-      max-parallel: 2
       matrix:
-        subject: [apps/console, apps/portal, apps/console-v2, landing]
+        subject: [apps/console, apps/portal, landing]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
         with:
@@ -348,7 +371,7 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
           VISUAL_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.regenerate_visual_baselines }}
         run: |
-          python3 - <<'PY'
+          python3 -I - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ['NEEDS_JSON'])
           expected = {'database', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines'}
