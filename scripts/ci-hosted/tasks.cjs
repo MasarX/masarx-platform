@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
+const { run: checked, retry } = require('./process.cjs');
 
 const root = process.cwd();
 const exists = file => fs.existsSync(path.join(root, file));
@@ -39,8 +40,8 @@ async function main() {
   if (command === 'install') {
     const manager = read('package.json').packageManager;
     if (!/^npm@\d+\.\d+\.\d+$/.test(manager || '')) throw new Error('Exact npm packageManager required');
-    run('npm', ['install', '--global', manager, '--ignore-scripts', '--no-audit', '--no-fund']);
-    return run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund']);
+    await retry('npm version installation', () => checked('npm', ['install', '--global', manager, '--ignore-scripts', '--no-audit', '--no-fund']));
+    return retry('npm ci', () => checked('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund']));
   }
   if (command === 'lint') {
     for (const name of ['lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
