@@ -1,36 +1,25 @@
 version: 2
 updates:
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: npm
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "04:00"
-      timezone: "UTC"
-    open-pull-requests-limit: 0
-    rebase-strategy: "disabled"
-    labels:
-      - "dependencies"
-      - "ci/cd"
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: Deps
     groups:
-      github-actions:
-        patterns:
-          - "*"
+      npm-minor-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
 
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "04:15"
-      timezone: "UTC"
-    open-pull-requests-limit: 0
-    rebase-strategy: "disabled"
-    labels:
-      - "dependencies"
-      - "npm"
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: Deps
     groups:
-      prod-dependencies:
-        dependency-type: "production"
-      dev-dependencies:
-        dependency-type: "development"
+      actions-minor-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
