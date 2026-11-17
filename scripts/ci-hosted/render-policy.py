@@ -15,6 +15,7 @@ name: Required repository policy
 
 'on':
   pull_request_target:
+    types: [opened, synchronize, reopened, edited]
     branches: [preview, dev, main]
   merge_group:
     branches: [preview, dev, main]
@@ -36,7 +37,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         with:
           node-version: '24.22.1'
           package-manager-cache: false
@@ -47,7 +48,7 @@ jobs:
           node <<'NODE'
 """
     footer = """          NODE
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ steps.source.outputs.base }}
           persist-credentials: false
