@@ -196,9 +196,8 @@ Sources:
 
 | Surface element | Coverage state | Contract/source |
 | --- | --- | --- |
-| Primary sections (`#product`, `#integration`, `#solutions`, `#how`, `#capabilities`, `#who`, `#enterprise`, `#faq`, `#contact`) | implemented | `docs/marketing/landing-v2/index.html` + `app.js` |
+| Primary sections (`#product`, `#integration`, `#how`, `#capabilities`, `#who`, `#enterprise`, `#faq`, `#contact`) | implemented | `docs/marketing/landing-v2/index.html` + `app.js` |
 | Contact intake form | implemented (runtime endpoint + validation + turnstile) | `docs/marketing/landing-v2/app.js` + `LANDING_CONTACT_ENDPOINT` |
-| Client logo rail | dynamic from policy endpoint | `runtime.clientsEndpoint` fallback logic in `docs/marketing/landing-v2/app.js` |
 | SEO/meta + social tags | implemented | `docs/marketing/landing-v2/index.html` |
 | Dark mode + language toggles | implemented client-side | `docs/marketing/landing-v2/app.js` + runtime config |
 

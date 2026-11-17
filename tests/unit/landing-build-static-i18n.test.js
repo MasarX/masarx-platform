@@ -87,6 +87,7 @@ describe("landing build", () => {
     expect(enHtml).toContain('src="/brand/masarx-mark-a.svg"');
     expect(arHtml).toContain('src="/brand/masarx-mark-a.svg"');
     expect(enHtml).not.toContain('data-clients-row');
+    expect(arHtml).not.toContain('data-clients-row');
     expect(arHtml).not.toContain('href="./app.');
     expect(arHtml).not.toContain('src="./app.');
     expect(arHtml).not.toContain('src="./runtime.');
@@ -134,11 +135,13 @@ describe("landing build", () => {
       throw new Error(`build-landing.js failed (code=${res.status})${stderr}`);
     }
 
+    const enHtml = fs.readFileSync(path.join(outDir, "index.html"), "utf8");
     const arHtml = fs.readFileSync(path.join(outDir, "ar", "index.html"), "utf8");
     expect(arHtml).toMatch(/href="\/landing\/app\.[a-f0-9]{8}\.css"/);
     expect(arHtml).toMatch(/src="\/landing\/runtime\.[a-f0-9]{8}\.js"/);
     expect(arHtml).toContain('src="/landing/brand/masarx-mark-a.svg"');
-    expect(arHtml).toContain("data-clients-row");
+    expect(enHtml).not.toContain("data-clients-row");
+    expect(arHtml).not.toContain("data-clients-row");
   });
 
   test("leaves runtime contactEndpoint empty when env is unset", () => {
