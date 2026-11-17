@@ -7,8 +7,12 @@ const crypto = require('node:crypto');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
 const { migrationProgress, completePins } = require('./backend.cjs');
 const { shardFiles, validateSnapshot } = require('./pgtap.cjs');
+const { checkInstallPolicy } = require('./install-policy.cjs');
 
 async function main() {
+  const installer = fs.readFileSync('scripts/ci-hosted/tasks.cjs', 'utf8');
+  assert.equal(checkInstallPolicy(new Map([['scripts/ci-hosted/tasks.cjs', installer]])).length, 0);
+  assert.equal(checkInstallPolicy(new Map([['scripts/ci-hosted/tasks.cjs', installer.replaceAll("'--ignore-scripts', ", '')]])).length > 0, true);
   let attempts = 0; const delays = [];
   assert.equal(await retry('synthetic reset', async () => { if (++attempts < 3) throw new Error('ECONNRESET'); return 'ok'; }, async ms => delays.push(ms)), 'ok');
   assert.equal(attempts, 3); assert.deepEqual(delays, [5000, 15000]);
