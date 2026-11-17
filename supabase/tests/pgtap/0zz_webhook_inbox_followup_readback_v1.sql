@@ -73,9 +73,9 @@ BEGIN
   INSERT INTO public.workflow_runs(id,workflow_template_id,workflow_template_version,entry_point,workflow_status,context,metadata)
     VALUES(child_id,template_id,1,'webhook','pending',child_context,child_metadata);
   INSERT INTO public.webhook_inbox(id,organization_id,webhook_source_id,provider_type,external_id,event_type,
-      processing_status,workflow_run_id,raw_payload,transformed_payload)
-    VALUES(inbox_id,org,source_id,'generic','followup-'||inbox_id,'shipment.delete','pending',entry_id,'{}','{}'),
-      (foreign_inbox,other_org,other_source,'generic','followup-'||foreign_inbox,'shipment.delete','pending',NULL,'{}','{}');
+      processing_status,workflow_run_id,raw_payload,transformed_payload,correlation_id)
+    VALUES(inbox_id,org,source_id,'generic','followup-'||inbox_id,'shipment.delete','pending',entry_id,'{}','{}',inbox_id),
+      (foreign_inbox,other_org,other_source,'generic','followup-'||foreign_inbox,'shipment.delete','pending',NULL,'{}','{}',foreign_inbox);
 
   FOREACH action IN ARRAY ARRAY['cancel','reschedule'] LOOP
     UPDATE public.webhook_inbox SET event_type=CASE action WHEN 'cancel' THEN 'shipment.delete' ELSE 'shipment.reschedule' END WHERE id=inbox_id;

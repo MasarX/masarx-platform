@@ -594,6 +594,7 @@ DECLARE
   v_prior_claims TEXT := current_setting('request.jwt.claims', true);
   v_prior_sub TEXT := current_setting('request.jwt.claim.sub', true);
   v_job_id UUID;
+  v_composed_job_id UUID;
   v_label_id UUID;
   v_reprint_id UUID;
 BEGIN
@@ -611,8 +612,10 @@ BEGIN
   PERFORM set_config('role', p_sql_role, true);
   IF p_compose_allowed IS NOT NULL THEN
     IF p_compose_allowed THEN
-      RETURN NEXT is((public.compose_label_payload(v_job_id) -> 'job' ->> 'id')::uuid,
-                     v_job_id, p_case || ': compose preserves exact job');
+      v_composed_job_id := (public.compose_label_payload(v_job_id) -> 'job' ->> 'id')::uuid;
+      -- Restricted product roles do not need assertion-schema privileges.
+      PERFORM set_config('role', COALESCE(v_prior_sql_role, 'none'), true);
+      RETURN NEXT is(v_composed_job_id::text, v_job_id::text, p_case || ': compose preserves exact job');
     ELSE
       RETURN NEXT throws_ok(format('SELECT public.compose_label_payload(%L::uuid)', v_job_id),
         p_error_state, CASE WHEN p_error_state = 'P0001' THEN format('Access denied for label job %s', v_job_id) END,
@@ -620,8 +623,10 @@ BEGIN
     END IF;
   END IF;
   IF p_reprint_allowed IS NOT NULL THEN
+    PERFORM set_config('role', p_sql_role, true);
     IF p_reprint_allowed THEN
       v_reprint_id := public.request_label_reprint(v_label_id, 'caller fixture', NULL, 'caller_' || p_case);
+      PERFORM set_config('role', COALESCE(v_prior_sql_role, 'none'), true);
       RETURN NEXT ok(EXISTS (
         SELECT 1 FROM public.label_jobs WHERE id = v_reprint_id
           AND label_id = v_label_id AND organization_id = 'aaaaaaaa-0000-4000-8000-00000000aa01'

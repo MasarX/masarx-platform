@@ -94,8 +94,11 @@ BEGIN
   RETURN NEXT is(result->>'reason','address_ambiguous','UUID-only compatibility calls do not guess across clients');
   result:=public.project_address_from_primary_geocode_v1(pinned,no_pin_client);
   RETURN NEXT is(result->>'reason','address_missing','explicit wrong-client projection is a non-mutating result');
+  -- The composite FK is initially deferred; check it inside the negative assertion.
+  SET CONSTRAINTS geocodes_address_fk IMMEDIATE;
   RETURN NEXT throws_ok(format('INSERT INTO public.geocodes(id,address_id,client_id,provider_name,coordinates,is_primary) VALUES (gen_random_uuid(),%L::uuid,%L::uuid,%L,ST_SetSRID(ST_MakePoint(50,50),4326)::geography,TRUE)',
     pinned,no_pin_client,'canonical_lookup'),'23503',NULL,'real composite FK rejects a cross-client geocode link');
+  SET CONSTRAINTS geocodes_address_fk DEFERRED;
   RETURN NEXT is((SELECT round(ST_Y(coordinates::geometry)::numeric,4) FROM public.addresses WHERE id=pinned AND client_id=client),
     24.7136::numeric,'rejected cross-client write leaves the submitted pin unchanged');
   RETURN NEXT ok((SELECT validation_status='valid' AND ST_Y(coordinates::geometry)=9 AND correction_count=1
