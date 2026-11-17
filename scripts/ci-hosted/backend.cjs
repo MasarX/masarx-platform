@@ -15,6 +15,25 @@ const { install } = require('./tasks.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
+async function recordMigrationDeadlock(error, db, readLogs, diagnostic) {
+  const output = error.failure?.output || '';
+  if (!output.includes('(SQLSTATE 40P01)')) return;
+  const pids = [...output.matchAll(/Process (\d+) waits for/g)].map(match => Number(match[1]));
+  const attribution = diagnostic.migrationDeadlock = { pids };
+  try {
+    const activity = await db.query('SELECT pid, backend_type, application_name FROM pg_stat_activity WHERE pid = ANY($1::int[])', [pids]);
+    attribution.activity = activity.rows;
+    const cron = await db.query(`SELECT d.job_pid AS pid, j.jobname, d.status
+      FROM cron.job_run_details d LEFT JOIN cron.job j USING (jobid)
+      WHERE d.job_pid = ANY($1::int[]) ORDER BY d.runid`, [pids]);
+    attribution.cron = cron.rows;
+  } catch (readError) { attribution.activityError = sanitize(readError.message); }
+  try {
+    const logs = await readLogs();
+    attribution.postgres = sanitize(logs.split(/\r?\n/).filter(line => pids.some(pid => line.includes(`Process ${pid}:`))).join('\n')).slice(0, 4000);
+  } catch (readError) { attribution.logsError = sanitize(readError.message); }
+  console.log(`Migration deadlock attribution: ${sanitize(JSON.stringify(attribution))}`);
+}
 function migrationInventory(files) {
   const names = files.filter(name => name.endsWith('.sql')).sort();
   if (!names.length || names.some(name => !/^\d+_[a-zA-Z0-9_.-]+\.sql$/.test(name))) throw new Error('Missing or malformed migrations');
@@ -227,7 +246,12 @@ async function qualify(diagnostic) {
           onLine: progress.line, idleMs: 10 * 60000,
           idleMessage: () => `No migration completed for 10 minutes; in progress: ${summary.currentMigration || '(connecting)'}`,
         }));
-      } catch (error) { migrationError = error; throw error; }
+      } catch (error) {
+        migrationError = error;
+        await recordMigrationDeadlock(error, db, () => checked('docker', ['logs', '--tail', '300', `supabase_db_${project}`], env, 10000,
+          { quiet: true, includeStderr: true }), diagnostic);
+        throw error;
+      }
       finally {
         let applied;
         try { applied = await db.query('select version from supabase_migrations.schema_migrations order by version'); }
