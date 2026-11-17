@@ -1,0 +1,150 @@
+{
+  "registry_seed_file": "supabase/migrations/202603091331_workflow_binding_policy_substrate_v1.sql",
+  "inventory": [
+    {
+      "key": "workflow_binding_substrate",
+      "label": "Workflow binding substrate",
+      "classification": "workflow_native",
+      "configurability": "workflow_configurable",
+      "binding_key": "customer_shipment_change",
+      "file": "supabase/migrations/202603091331_workflow_binding_policy_substrate_v1.sql",
+      "related_files": [
+        "supabase/migrations/202603101000_workflow_binding_policy_defaults_repair_v1.sql",
+        "supabase/migrations/202603101010_workflow_binding_stage_set_fix_v1.sql",
+        "supabase/migrations/202603101020_workflow_binding_entry_point_fix_v1.sql",
+        "supabase/migrations/202603101031_workflow_binding_scope_context_fix_v1.sql",
+        "supabase/migrations/202603101040_lookup_decision_category_workflow_binding_v1.sql",
+        "supabase/migrations/202603101070_api_workflow_binding_contract_wrappers_v1.sql"
+      ],
+      "required_patterns": [
+        "CREATE TABLE IF NOT EXISTS public\\.workflow_binding_registry",
+        "CREATE TABLE IF NOT EXISTS public\\.workflow_binding_stage_registry",
+        "CREATE TABLE IF NOT EXISTS public\\.workflow_binding_dispatches",
+        "CREATE OR REPLACE FUNCTION public\\.resolve_workflow_binding_v1\\s*\\(",
+        "CREATE OR REPLACE FUNCTION public\\.run_workflow_binding_stage_v1\\s*\\(",
+        "CREATE OR REPLACE FUNCTION public\\.bootstrap_workflow_binding_defaults_v1\\s*\\(",
+        "FROM public\\.resolve_scope_from_context\\('workflow_binding_policy'",
+        "FROM public\\.resolve_settings_row\\('workflow_binding_policy'",
+        "CREATE OR REPLACE VIEW public\\.workflow_business_action_inventory_v1 AS"
+      ],
+      "forbidden_patterns": [
+        "resolve_settings_row_from_policy_context_v1\\('workflow_binding_policy'"
+      ]
+    },
+    {
+      "key": "customer_shipment_change_followups",
+      "label": "Customer shipment change follow-ups",
+      "classification": "hybrid_task_backed",
+      "configurability": "workflow_configurable",
+      "binding_key": "customer_shipment_change",
+      "file": "supabase/migrations/202603091341_workflow_binding_hybrid_followups_v1.sql",
+      "related_files": [
+        "supabase/migrations/202603101050_create_task_system_service_claim_fix_v1.sql",
+        "supabase/migrations/202603101060_workflow_binding_notification_source_fix_v1.sql"
+      ],
+      "required_patterns": [
+        "CREATE OR REPLACE FUNCTION public\\.public_tracking_enqueue_recipient_notification_v1\\s*\\(",
+        "CREATE OR REPLACE FUNCTION public\\.public_tracking_create_reviewer_task_v1\\s*\\(",
+        "run_workflow_binding_stage_v1\\s*\\(",
+        "'binding_key', 'customer_shipment_change'",
+        "'stage_key', 'review_requested'"
+      ]
+    },
+    {
+      "key": "marketing_lead_review_request",
+      "label": "Marketing lead review request",
+      "classification": "hybrid_task_backed",
+      "configurability": "workflow_configurable",
+      "binding_key": "marketing_lead",
+      "file": "supabase/migrations/202603091341_workflow_binding_hybrid_followups_v1.sql",
+      "required_patterns": [
+        "CREATE OR REPLACE FUNCTION public\\.marketing_lead_request_create_v1\\s*\\(",
+        "'binding_key', 'marketing_lead'",
+        "'stage_key', 'review_requested'"
+      ]
+    },
+    {
+      "key": "tenant_signup_review_request",
+      "label": "Tenant signup review request",
+      "classification": "hybrid_task_backed",
+      "configurability": "workflow_configurable",
+      "binding_key": "tenant_signup",
+      "file": "supabase/migrations/202603091351_tenant_signup_workflow_binding_adoption_v1.sql",
+      "required_patterns": [
+        "CREATE OR REPLACE FUNCTION public\\.tenant_signup_request_create_v1\\s*\\(",
+        "run_workflow_binding_stage_v1\\s*\\(",
+        "'binding_key', 'tenant_signup'",
+        "'stage_key', 'review_requested'"
+      ]
+    },
+    {
+      "key": "ui_command_workflow_binding_awareness",
+      "label": "UI command binding awareness",
+      "classification": "workflow_native",
+      "configurability": "workflow_configurable",
+      "file": "supabase/migrations/202603091361_ui_command_workflow_binding_awareness_v1.sql",
+      "required_patterns": [
+        "CREATE OR REPLACE FUNCTION public\\.ui_execute_command_v1\\s*\\(",
+        "workflow binding requires binding_key and stage_key",
+        "public\\.run_workflow_binding_stage_v1\\s*\\(",
+        "'status', 'workflow_binding_started'"
+      ]
+    },
+    {
+      "key": "onboarding_readiness_plugin_baseline",
+      "label": "Onboarding readiness plugin baseline",
+      "classification": "hybrid_task_backed",
+      "configurability": "workflow_configurable",
+      "file": "supabase/migrations/202604161915_onboarding_readiness_plugin_baseline_v1.sql",
+      "required_patterns": [
+        "CREATE OR REPLACE FUNCTION public\\.bootstrap_workflow_binding_defaults_v1\\s*\\(",
+        "CREATE OR REPLACE FUNCTION public\\.bootstrap_integration_plugin_defaults_v1\\s*\\(",
+        "CREATE OR REPLACE FUNCTION public\\.onboarding_readiness_snapshot_v1\\s*\\(",
+        "CREATE OR REPLACE FUNCTION public\\.ui_get_onboarding_readiness_v1\\s*\\(",
+        "public\\.create_task_system_v1\\s*\\(",
+        "workflow_binding_policy",
+        "baseline_profile"
+      ]
+    }
+  ],
+  "guardrail": {
+    "watch_files": [
+      "^supabase/migrations/.*\\.sql$",
+      "^supabase/functions/.+\\.(ts|js)$",
+      "^scripts/.+\\.(js|ts)$",
+      "^packages/ui/src/.+\\.(ts|tsx)$",
+      "^packages/api/src/.+\\.(ts|tsx)$",
+      "^apps/(console|portal|fieldops)/.+\\.(ts|tsx)$"
+    ],
+    "business_action_markers": [
+      "create_task_system_v1\\s*\\(",
+      "run_workflow_binding_stage_v1\\s*\\(",
+      "start_workflow_run\\s*\\(",
+      "public_tracking_review_request_v1\\s*\\(",
+      "tenant_signup_request_create_v1\\s*\\(",
+      "marketing_lead_request_create_v1\\s*\\(",
+      "public_tracking_create_reviewer_task_v1\\s*\\(",
+      "public_tracking_enqueue_recipient_notification_v1\\s*\\(",
+      "ui_execute_command_v1\\s*\\(",
+      "INSERT\\s+INTO\\s+public\\.outbound_calls\\b"
+    ],
+    "direct_action_markers": [
+      "create_task_system_v1\\s*\\(",
+      "INSERT\\s+INTO\\s+public\\.outbound_calls\\b"
+    ],
+    "workflow_binding_markers": [
+      "run_workflow_binding_stage_v1\\s*\\(",
+      "workflow_binding_policy",
+      "workflow_binding_registry",
+      "workflow_binding_started",
+      "binding_key",
+      "stage_key"
+    ],
+    "ignore_files": [
+      "^supabase/migrations/202603091331_workflow_binding_policy_substrate_v1\\.sql$",
+      "^tests/",
+      "^docs/",
+      "^config/"
+    ]
+  }
+}

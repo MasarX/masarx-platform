@@ -1,0 +1,38 @@
+{
+  "intents": [
+    {
+      "intent": "shipment.created",
+      "mapping_config": {
+        "description": "ACME explicit mapping (created)",
+        "external_id_path": "event.id",
+        "event_type_path": "event.type",
+        "transforms": {
+          "default": {
+            "event_id": "event.id",
+            "event_type": "event.type",
+            "tracking_number": "shipment.tracking_number",
+            "recipient_name": "Example Entity ntvplorhukthpmnmvgrstqzp",
+            "city": "shipment.address.city"
+          }
+        }
+      }
+    },
+    {
+      "intent": "shipment.updated",
+      "mapping_config": {
+        "description": "ACME explicit mapping (updated)",
+        "external_id_path": "event.id",
+        "event_type_path": "event.type",
+        "transforms": {
+          "default": {
+            "event_id": "event.id",
+            "event_type": "event.type",
+            "tracking_number": "shipment.tracking_number",
+            "status": "shipment.status"
+          }
+        }
+      }
+    }
+  ]
+}
+

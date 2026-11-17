@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "default_retention_hours": 72,
+  "default_delete_batch_size": 2000,
+  "rules": [
+    {
+      "name": "heavy_preview_and_ui_logs",
+      "pattern": "^(pr-gate-|reviewer-gate-preview-|preview-test-logs-|dev-ui-gate-logs|stg-ui-gate-logs|vercel-ui-verify-)",
+      "max_age_hours": 72
+    },
+    {
+      "name": "shared_deploy_phase_logs",
+      "pattern": "^(dev-shared-lane-preflight|stg-shared-lane-preflight|dev-critical-verify-logs|stg-core-verify-logs|dev-deploy-phase-logs|stg-deploy-phase-logs|dev-orchestrator-child-runs)",
+      "max_age_hours": 72
+    },
+    {
+      "name": "done_audit_outputs",
+      "pattern": "^(done-audit-|done-audit-sweep-)",
+      "max_age_hours": 72
+    },
+    {
+      "name": "transient_preview_and_release_logs",
+      "pattern": "^(release-verify-|reviewer-gate-preview-|preview-manifest-|frontend-a2z-ops-preview-live-|preview-prewarm-|preview-test-logs-|cloud-provision-output|demo-accounts-|dev-orchestrator-child-runs|stg-orchestrator-child-runs|prod-orchestrator-child-runs)",
+      "max_age_hours": 72
+    },
+    {
+      "name": "proof_and_ops_summaries",
+      "pattern": "^(dev-deploy-evidence|stg-deploy-evidence|prod-deploy-evidence|landing-dev-deploy-evidence|landing-stg-deploy-evidence|landing-prod-deploy-evidence|api-ingress-deploy-evidence|mobile-fieldops-evidence|reviewer-gate-admission-summary|nightly-dev-heavy-summary-|ci-slo-report-|control-plane-drift-audit-|control-plane-cost-summary-|ci-control-plane-canary-|security-scan-|stg-ui-verify-logs|verify-core-logs|load-summary)",
+      "max_age_hours": 168
+    }
+  ]
+}

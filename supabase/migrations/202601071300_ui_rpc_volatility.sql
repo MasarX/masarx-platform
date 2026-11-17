@@ -1,0 +1,134 @@
+-- Migration: Make UI RPCs VOLATILE to allow settings resolution logging
+BEGIN;
+SELECT pg_advisory_lock(hashtext('202601071300_ui_rpc_volatility'));
+SET search_path TO public, extensions, pg_temp;
+SET LOCAL lock_timeout = '30s';
+
+CREATE OR REPLACE FUNCTION public.ui_me_v1()
+RETURNS JSONB
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+SET row_security = on
+AS $$
+DECLARE
+  v_user_id UUID;
+  v_user RECORD;
+  v_org RECORD;
+  v_scope_type TEXT;
+  v_scope_id UUID;
+  v_scope_label TEXT;
+  v_policy JSONB;
+  v_resolution_id UUID;
+  v_roles TEXT[];
+  v_caps TEXT[];
+BEGIN
+  SELECT auth.uid() INTO v_user_id;
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'ui_me_v1 requires authenticated user';
+  END IF;
+
+  SELECT * INTO v_user FROM public.users WHERE id = v_user_id;
+  SELECT * INTO v_org FROM public.organizations WHERE id = v_user.organization_id;
+
+  v_scope_type := public.current_user_scope_type();
+  v_scope_id := public.current_user_scope_id();
+
+  SELECT policy, settings_resolution_id
+    INTO v_policy, v_resolution_id
+    FROM public.resolve_access_control_policy_v1(v_scope_type, v_scope_id, TRUE)
+    LIMIT 1;
+
+  v_roles := public.resolve_role_keys_v1(v_policy, v_user_id, v_user.user_type);
+  v_caps := public.resolve_capabilities_v1(v_policy, v_roles);
+
+  IF v_scope_type = 'tenant' THEN
+    v_scope_label := v_org.name;
+  ELSIF v_scope_type = 'client' THEN
+    SELECT name INTO v_scope_label FROM public.clients WHERE id = v_scope_id;
+  ELSIF v_scope_type = 'sender' THEN
+    SELECT name INTO v_scope_label FROM public.senders WHERE id = v_scope_id;
+  ELSE
+    v_scope_label := NULL;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'user', jsonb_build_object(
+      'id', v_user.id,
+      'email', v_user.email,
+      'name', v_user.full_name,
+      'user_type', v_user.user_type
+    ),
+    'org', jsonb_build_object(
+      'id', v_org.id,
+      'name', v_org.name
+    ),
+    'access_scope', jsonb_build_object(
+      'scope_type', v_scope_type,
+      'scope_id', v_scope_id,
+      'scope_label', v_scope_label
+    ),
+    'locale', COALESCE(v_org.locale, 'en-US'),
+    'timezone', COALESCE(v_org.timezone, 'UTC'),
+    'capabilities', COALESCE(v_caps, ARRAY[]::text[]),
+    'settings_resolution_id', v_resolution_id
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.ui_access_policy_v1(
+  p_scope_type TEXT DEFAULT NULL,
+  p_scope_id UUID DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+SET row_security = on
+AS $$
+DECLARE
+  v_scope_type TEXT := lower(COALESCE(NULLIF(p_scope_type, ''), public.current_user_scope_type(), 'global'));
+  v_scope_id UUID := COALESCE(p_scope_id, public.current_user_scope_id());
+  v_policy JSONB;
+  v_settings_id UUID;
+  v_settings_version_id UUID;
+  v_scope_path JSONB;
+  v_resolution_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'ui_access_policy_v1 requires authenticated user';
+  END IF;
+
+  SELECT policy, settings_id, settings_version_id, scope_path, settings_resolution_id, scope_type, scope_id
+    INTO v_policy, v_settings_id, v_settings_version_id, v_scope_path, v_resolution_id, v_scope_type, v_scope_id
+    FROM public.resolve_access_control_policy_v1(v_scope_type, v_scope_id, TRUE)
+    LIMIT 1;
+
+  IF v_policy IS NULL THEN
+    RAISE EXCEPTION 'ui_access_policy_v1 policy not found';
+  END IF;
+
+  PERFORM public.assert_capability_v1('access_policy.read', v_scope_type, v_scope_id);
+
+  RETURN jsonb_build_object(
+    'policy', v_policy,
+    'settings_resolution_id', v_resolution_id,
+    'settings_id', v_settings_id,
+    'settings_version_id', v_settings_version_id,
+    'scope_type', v_scope_type,
+    'scope_id', v_scope_id,
+    'scope_path', v_scope_path
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.ui_me_v1() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.ui_me_v1() TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.ui_access_policy_v1(TEXT, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.ui_access_policy_v1(TEXT, UUID) TO authenticated, service_role;
+
+SELECT pg_advisory_unlock(hashtext('202601071300_ui_rpc_volatility'));
+COMMIT;

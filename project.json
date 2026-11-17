@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/nx/schemas/project-schema.json",
+  "name": "masarx-delivery-platform",
+  "root": ".",
+  "targets": {
+    "lint:structure": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run lint:structure"
+      }
+    },
+    "test:unit": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run test:unit"
+      }
+    },
+    "test:ui": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run test:ui"
+      }
+    },
+    "build:landing": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run build:landing"
+      }
+    },
+    "docs:openapi:check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run docs:openapi:check"
+      }
+    },
+    "lint:docs:ssot": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run lint:docs:ssot"
+      }
+    }
+  }
+}

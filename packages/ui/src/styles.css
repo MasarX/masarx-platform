@@ -1,0 +1,211 @@
+@import "react-day-picker/src/style.css";
+
+:root {
+  color-scheme: light;
+  --app-font-sans: "Inter";
+  --app-font-sans-arabic: "Noto Sans Arabic";
+  --app-font-mono: "IBM Plex Mono";
+  --app-font-display: "Inter";
+  --ui-paper: 250 251 254;
+  --ui-surface: 255 255 255;
+  --ui-highlight: 238 241 250;
+  --ui-ink: 15 23 42;
+  --ui-muted: 71 85 105;
+  --ui-border: 226 232 240;
+  --ui-accent: 79 70 229;
+  --ui-accent-hover: 67 56 202;
+  --ui-accent-ink: 255 255 255;
+  --ui-accent-soft: 224 231 255;
+  --ui-success: 34 139 89;
+  --ui-warning: 194 120 0;
+  --ui-danger: 204 43 43;
+  --ui-danger-ink: 255 255 255;
+  --ui-info: 59 130 246;
+  --ui-shadow-rgb: 15 23 42;
+  --ui-shadow-pinned: rgb(var(--ui-shadow-rgb) / 0.12);
+  --ui-shadow-soft: 0 1px 2px rgb(var(--ui-shadow-rgb) / 0.06), 0 10px 24px -20px rgb(var(--ui-shadow-rgb) / 0.14);
+  --ui-glow-accent: rgb(var(--ui-accent) / 0.18);
+  --ui-layout-max-width: 100%;
+  --font-sans: var(--app-font-sans, "Inter"), var(--app-font-sans-arabic, "Noto Sans Arabic"), system-ui, sans-serif;
+  --font-display: var(--app-font-display, var(--app-font-sans, "Inter")), var(--app-font-sans-arabic, "Noto Sans Arabic"), system-ui, sans-serif;
+  --font-mono: var(--app-font-mono, "IBM Plex Mono"), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ui-paper: 11 17 33;
+  --ui-surface: 17 24 42;
+  --ui-highlight: 30 41 66;
+  --ui-ink: 241 245 249;
+  --ui-muted: 148 163 184;
+  --ui-border: 45 55 80;
+  --ui-accent: 129 140 248;
+  --ui-accent-hover: 165 180 252;
+  --ui-accent-ink: 11 17 33;
+  --ui-accent-soft: 30 27 75;
+  --ui-success: 54 158 107;
+  --ui-warning: 221 139 76;
+  --ui-danger: 231 78 78;
+  --ui-danger-ink: 255 255 255;
+  --ui-info: 96 165 250;
+  --ui-shadow-rgb: 0 0 0;
+  --ui-shadow-pinned: rgb(var(--ui-shadow-rgb) / 0.35);
+  --ui-shadow-soft: 0 1px 2px rgb(var(--ui-shadow-rgb) / 0.38), 0 14px 36px -26px rgb(var(--ui-shadow-rgb) / 0.48);
+  --ui-glow-accent: rgb(var(--ui-accent) / 0.25);
+}
+
+[dir="rtl"] {
+  letter-spacing: 0;
+  direction: rtl;
+}
+
+.ui-toast[data-tone="success"] {
+  border-color: rgb(var(--ui-success));
+}
+
+.ui-toast[data-tone="warning"] {
+  border-color: rgb(var(--ui-warning));
+}
+
+.ui-toast[data-tone="error"] {
+  border-color: rgb(var(--ui-danger));
+}
+
+.ui-toast[data-tone="info"] {
+  border-color: rgb(var(--ui-info));
+}
+
+/* ── Table layer tokens ── */
+:root {
+  --table-row-separator: rgb(var(--ui-border) / 0.15);
+  --table-header-bg: rgb(var(--ui-highlight) / 0.40);
+  --table-hover-bg: rgb(var(--ui-ink) / 0.03);
+  --table-selected-bg: rgb(var(--ui-accent) / 0.05);
+  --table-transition-fast: 100ms;
+  --table-transition-normal: 200ms;
+
+  /* Tag pastel palette (Notion-inspired) */
+  --tag-gray-bg: #f1f1ef;
+  --tag-gray-text: #787774;
+  --tag-brown-bg: #f4eeee;
+  --tag-brown-text: #976d57;
+  --tag-orange-bg: #fbecdd;
+  --tag-orange-text: #d9730d;
+  --tag-yellow-bg: #fbf3db;
+  --tag-yellow-text: #cb912f;
+  --tag-green-bg: #e6f5e4;
+  --tag-green-text: #448361;
+  --tag-blue-bg: #e1eefa;
+  --tag-blue-text: #527cca;
+  --tag-purple-bg: #eee5f8;
+  --tag-purple-text: #9065b0;
+  --tag-pink-bg: #f9e4ee;
+  --tag-pink-text: #c14c8a;
+  --tag-red-bg: #fce4e4;
+  --tag-red-text: #c4554d;
+}
+
+:root[data-theme="dark"] {
+  --table-row-separator: rgb(var(--ui-border) / 0.20);
+  --table-header-bg: rgb(var(--ui-highlight) / 0.50);
+  --table-hover-bg: rgb(var(--ui-ink) / 0.04);
+  --table-selected-bg: rgb(var(--ui-accent) / 0.08);
+
+  --tag-gray-bg: #373737;
+  --tag-gray-text: #b0afac;
+  --tag-brown-bg: #3e2f2a;
+  --tag-brown-text: #c49a82;
+  --tag-orange-bg: #46300e;
+  --tag-orange-text: #e8944a;
+  --tag-yellow-bg: #3d3415;
+  --tag-yellow-text: #ddb561;
+  --tag-green-bg: #1e3a28;
+  --tag-green-text: #6db48a;
+  --tag-blue-bg: #1d2d44;
+  --tag-blue-text: #7da3e0;
+  --tag-purple-bg: #302440;
+  --tag-purple-text: #b28fd0;
+  --tag-pink-bg: #3e1e30;
+  --tag-pink-text: #d97aad;
+  --tag-red-bg: #3e1e1e;
+  --tag-red-text: #df8079;
+}
+
+/* ── Table keyframe animations ── */
+@keyframes table-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes table-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes table-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Table animation utilities ── */
+.table-animate-slide-down {
+  animation: table-slide-down var(--table-transition-normal) ease-out;
+}
+
+.table-animate-fade-in {
+  animation: table-fade-in var(--table-transition-normal) ease-out;
+}
+
+.table-animate-slide-up {
+  animation: table-slide-up var(--table-transition-normal) ease-out;
+}
+
+/* ── Custom scrollbar for table viewports ── */
+.table-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.table-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.table-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(var(--ui-border) / 0.50);
+  border-radius: 3px;
+}
+
+.table-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--ui-border) / 0.80);
+}
+
+.table-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--ui-border) / 0.50) transparent;
+  scrollbar-gutter: stable;
+}
+
+@layer base {
+  body {
+    @apply bg-ui-paper text-ui-ink antialiased;
+    font-family: var(--font-sans);
+  }
+
+  input,
+  select,
+  textarea {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-ui-paper;
+  }
+}

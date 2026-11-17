@@ -1,0 +1,15 @@
+{
+  "event": {
+    "id": "evt-hmac-001",
+    "type": "shipment.created"
+  },
+  "shipment": {
+    "tracking_number": "HMAC-TRACK-001",
+    "status": "created",
+    "delivered_at": null,
+    "customer": {
+      "name": "HMAC Customer",
+      "phone": "+12025550123"
+    }
+  }
+}

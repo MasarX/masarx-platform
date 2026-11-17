@@ -1,0 +1,117 @@
+%% MasarX Delivery Platform - Subsystems Data Flow (Tables + Grouped Operations)
+%% - Boxes = tables only. Arrows = data written/moved.
+%% - Subgraph titles name the operation calls that drive the flow.
+%% - Paste into https://mermaid.live or render via mmdc.
+
+graph LR
+
+  %% ===================== Webhook Intake =====================
+  subgraph Webhook_Intake
+    HDR_WH[Webhook Intake<br/>Calls: webhook_receiver_edge + workflow_intake_webhook_fn]
+    WS[webhook_sources]
+    SV[settings_versions]
+    ST[settings]
+    PAC[provider_auth_configs]
+    WI[webhook_inbox]
+    DL[decision_log]
+  end
+
+  %% Trigger (example)
+  T_WH[Trigger:<br/>POST /functions/v1/webhook-receiver<br/>Bearer token]
+
+  %% Data movement
+  SV -->|publish -> cached| ST
+  T_WH -->|intake writes| WI
+  ST -->|policy ids copied| WI
+  WS -. read/validate .- WI
+  PAC -. read for HMAC .- WI
+  WI -->|HTTP response decision| DL
+
+  %% ===================== Workflow Engine =====================
+  subgraph Workflow_Engine
+    HDR_WE[Workflow Engine<br/>Calls: start_workflow_run + progress_workflow_run + run_webhook_processor_worker]
+    WR[workflow_runs]
+    WRS[workflow_run_steps]
+  end
+
+  WI -->|link workflow_run_id| WR
+  WR -->|materialize steps| WRS
+  WRS -->|emit decisions| DL
+
+  %% ===================== Outbound API Calls =====================
+  subgraph Outbound_API_Calls
+    HDR_OC[Outbound API Calls<br/>Calls: run_outbound_worker + api_caller_edge + claim/mark/log RPCs]
+    OC[outbound_calls]
+    ACL[api_call_log]
+  end
+
+  %% Trigger (example)
+  T_OC[Trigger:<br/>workflow step -> enqueue provider call]
+
+  WRS -->|enqueue HTTP job| OC
+  T_OC -->|enqueue HTTP job| OC
+  OC -->|success/error decision| DL
+  OC -->|request/response snapshot| ACL
+
+  %% ===================== Label Rendering =====================
+  subgraph Label_Rendering
+    HDR_LR[Label Rendering<br/>Calls: label_renderer_edge + lease_label_job + compose_label_payload + complete_label_job]
+    LJ[label_jobs]
+    LB[labels]
+    SA[shipment_actions]
+  end
+
+  %% Trigger (example)
+  T_LJ[Trigger:<br/>workflow step -> request label]
+
+  WRS -->|enqueue label job| LJ
+  T_LJ -->|enqueue label job| LJ
+  LJ -->|on success -> upsert| LB
+  LB -->|label_generated action| SA
+
+  %% ===================== Geocoding =====================
+  subgraph Geocoding
+    HDR_GEO[Geocoding<br/>Calls: execute_geocoding_v1 handler via workflow + outbound HTTP]
+    ADR[addresses]
+    GAT[geocoding_attempts]
+    GEO[geocodes]
+  end
+
+  %% Trigger (example)
+  T_GEO[Trigger:<br/>workflow step -> geocode address]
+
+  ADR -. address_id referenced .- GAT
+  WRS -->|invoke handler -> record attempt| GAT
+  T_GEO -->|record attempt| GAT
+  GAT -->|result cached| GEO
+
+  %% ===================== Communications (WhatsApp/SMS) =====================
+  subgraph Communications
+    HDR_COM[Communications<br/>Calls: enqueue_notification handler + outbound pipeline]
+    OCC[outbound_calls (comms)]
+  end
+
+  %% Trigger (example)
+  T_COM((Trigger:
+workflow step -> enqueue notification))
+
+  WRS -->|enqueue comms job| OCC
+  T_COM -->|enqueue comms job| OCC
+  OCC -->|success/error decision| DL
+
+  %% ===================== Alerts =====================
+  subgraph Ops_Alerts
+    HDR_ALERTS[Ops & Alerts<br/>Calls: create_ops_alert_for_webhook policy flow]
+    AR[alert_rules]
+    AT[alert_triggers]
+  end
+
+  DL -->|non-ok outcomes -> trigger| AT
+
+  %% ====== Styling (optional; Mermaid may ignore in some renderers) ======
+  classDef table fill:#ffffff,stroke:#111,stroke-width:1px,color:#111;
+  classDef trigger fill:#EEF2FF,stroke:#6366F1,color:#111;
+  classDef header fill:#F3F4F6,stroke:#9CA3AF,color:#111;
+  class WS,SV,ST,PAC,WI,DL,WR,WRS,OC,ACL,LJ,LB,SA,ADR,GAT,GEO,OCC,AR,AT table;
+  class T_WH,T_OC,T_LJ,T_GEO,T_COM trigger;
+  class HDR_WH,HDR_WE,HDR_OC,HDR_LR,HDR_GEO,HDR_COM,HDR_ALERTS header;

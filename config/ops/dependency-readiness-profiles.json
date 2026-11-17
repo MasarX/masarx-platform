@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "lock_dir": ".tmp/dependency-readiness/install.lock",
+  "profiles": {
+    "root-unit": {
+      "package_dir": ".",
+      "package_json": "package.json",
+      "modules": [
+        { "name": "cross-env", "when": { "dependency": "cross-env", "script": "test:unit" } },
+        { "name": "jest", "when": { "dependency": "jest", "script": "test:unit" } },
+        { "name": "jest-environment-jsdom", "when": { "dependency": "jest-environment-jsdom" } },
+        { "name": "ts-jest", "when": { "dependency": "ts-jest" } },
+        { "name": "typescript", "when": { "dependency": "typescript" } },
+        { "name": "ajv", "when": { "dependency": "ajv" } },
+        { "name": "ajv-formats", "when": { "dependency": "ajv-formats" } },
+        "@testing-library/dom"
+      ],
+      "bins": [
+        { "name": "cross-env", "when": { "dependency": "cross-env" } },
+        { "name": "jest", "when": { "dependency": "jest" } },
+        { "name": "tsc", "when": { "dependency": "typescript" } }
+      ],
+      "install": {
+        "strategy": "root-lock",
+        "lockfile": "package-lock.json",
+        "args": ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+      },
+      "notes": ["Root unit, ops tests, and local backend-start helpers resolve these packages from the worktree root."]
+    },
+    "console-v2": {
+      "package_dir": "apps/console",
+      "package_json": "apps/console/package.json",
+      "modules": [
+        "next",
+        "react",
+        "react-dom",
+        "typescript",
+        "@testing-library/dom",
+        { "name": "@testing-library/react", "when": { "dependency": "@testing-library/react" } },
+        { "name": "@playwright/test", "when": { "dependency": "@playwright/test" } }
+      ],
+      "bins": ["next", "tsc"],
+      "install": {
+        "strategy": "prefer-app-lock-then-workspace",
+        "app_lockfile": "apps/console/package-lock.json",
+        "app_args": ["ci", "--no-audit", "--no-fund"],
+        "workspace_name": "@masarx/console",
+        "workspace_lockfile": "package-lock.json",
+        "workspace_args": [
+          "ci",
+          "--workspace",
+          "@masarx/console",
+          "--include-workspace-root=false",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund"
+        ]
+      },
+      "notes": [
+        "Console V2 keeps the stable runtime label, but the implementation is the current Next app under apps/console."
+      ]
+    },
+    "landing": {
+      "package_dir": ".",
+      "package_json": "package.json",
+      "modules": [
+        "esbuild",
+        "leaflet",
+        "lottie-web"
+      ],
+      "bins": [],
+      "install": {
+        "strategy": "root-lock",
+        "lockfile": "package-lock.json",
+        "args": ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+      },
+      "notes": [
+        "Landing build/serve uses the root scripts and needs locked asset/runtime dependencies for minified assets, maps, and animations."
+      ]
+    },
+    "fieldops": {
+      "package_dir": "apps/fieldops",
+      "package_json": "apps/fieldops/package.json",
+      "modules": [
+        "expo",
+        "react-native",
+        "react-native-url-polyfill",
+        "react-native-web",
+        "babel-preset-expo",
+        "typescript"
+      ],
+      "bins": ["expo", "tsc"],
+      "install": {
+        "strategy": "workspace-lock",
+        "workspace_name": "@masarx/fieldops",
+        "lockfile": "package-lock.json",
+        "args": [
+          "ci",
+          "--workspace",
+          "@masarx/fieldops",
+          "--include-workspace-root=false",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund"
+        ]
+      },
+      "notes": [
+        "Dependency setup only; Metro, emulator, adb reverse, and native Mobile V2 proof remain owned by mobile lanes."
+      ]
+    },
+    "portal": {
+      "package_dir": "apps/portal",
+      "package_json": "apps/portal/package.json",
+      "modules": [
+        "next",
+        "react",
+        "@supabase/supabase-js",
+        "@supabase/ssr",
+        "typescript"
+      ],
+      "bins": ["next", "tsc"],
+      "install": {
+        "strategy": "workspace-lock",
+        "workspace_name": "@masarx/portal",
+        "lockfile": "package-lock.json",
+        "args": [
+          "ci",
+          "--workspace",
+          "@masarx/portal",
+          "--include-workspace-root=false",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund"
+        ]
+      },
+      "notes": [
+        "Portal runtime participates in Dockerized multi-worktree proof lanes with server/internal Supabase URL support."
+      ]
+    },
+    "edge-functions": {
+      "package_dir": ".",
+      "package_json": "package.json",
+      "modules": [],
+      "bins": [],
+      "install": {
+        "strategy": "root-lock",
+        "lockfile": "package-lock.json",
+        "args": ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+      },
+      "notes": [
+        "Edge function runtime proof is Supabase CLI-owned for v1; Docker dependency proof validates function source/env wiring rather than rebuilding Deno dependencies."
+      ]
+    },
+    "playwright-proof": {
+      "package_dir": ".",
+      "package_json": "package.json",
+      "modules": [
+        "@playwright/test"
+      ],
+      "bins": [
+        "playwright"
+      ],
+      "install": {
+        "strategy": "root-lock",
+        "lockfile": "package-lock.json",
+        "args": ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+      },
+      "notes": [
+        "Docker runtime proof runner needs Playwright/Chromium support for isolated browser-context evidence."
+      ]
+    },
+    "backend-readback": {
+      "package_dir": ".",
+      "package_json": "package.json",
+      "modules": ["pg"],
+      "bins": [],
+      "install": {
+        "strategy": "root-lock",
+        "lockfile": "package-lock.json",
+        "args": ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+      },
+      "notes": ["Backend/API/RPC readback helpers need the locked root pg package."]
+    }
+  }
+}

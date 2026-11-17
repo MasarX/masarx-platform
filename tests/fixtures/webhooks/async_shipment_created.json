@@ -1,0 +1,26 @@
+{
+  "event": {
+    "id": "evt-async-001",
+    "type": "shipment.created",
+    "source": "test-async-source"
+  },
+  "shipment": {
+    "tracking_number": "ASYNC-TRACK-001",
+    "status": "created",
+    "requested_services": [
+      "geocoding",
+      "customer_notification"
+    ],
+    "customer": {
+      "name": "Async Provider Customer",
+      "phone": "+12025550123",
+      "email": "async.customer@example.com"
+    },
+    "address": {
+      "line1": "Async Street 123",
+      "district": "Al Rawdah",
+      "city": "Riyadh",
+      "country_code": "SA"
+    }
+  }
+}

@@ -1,0 +1,237 @@
+const {
+  applyPinnedDbSelectionPreference,
+  buildDbConnectionCandidates,
+  buildPinnedDbSelectionCandidate,
+  buildSupabasePoolerHostVariants,
+  buildSupabasePoolerPortVariants,
+  buildSupabasePoolerUserVariant,
+} = require('../../../scripts/utils/pg-candidates');
+
+describe('utils/pg-candidates', () => {
+  test('builds ipv4host -> hostaddr -> raw ladder per candidate', async () => {
+    const rawDsn = (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const ipv4Dsn = (['postgresql',":","/","/",'postgres',":",'pw',"@",'192.0.2.10',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const hostaddrDsn =
+      (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require&hostaddr=192.0.2.10'].join(""));
+
+    const candidates = await buildDbConnectionCandidates(
+      [{ name: 'DATABASE_URL', dsn: rawDsn }],
+      {
+        ensureIpv4HostnameFn: jest.fn(async () => ipv4Dsn),
+        ensureHostaddrFn: jest.fn(async () => hostaddrDsn),
+      }
+    );
+
+    expect(candidates).toEqual([
+      { name: 'DATABASE_URL+ipv4host', dsn: ipv4Dsn },
+      { name: 'DATABASE_URL+hostaddr', dsn: hostaddrDsn },
+      { name: 'DATABASE_URL', dsn: rawDsn },
+    ]);
+  });
+
+  test('dedupes identical DSNs and keeps one canonical candidate', async () => {
+    const rawDsn = (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+
+    const candidates = await buildDbConnectionCandidates(
+      [{ name: 'DATABASE_URL', dsn: rawDsn }],
+      {
+        ensureIpv4HostnameFn: jest.fn(async () => rawDsn),
+        ensureHostaddrFn: jest.fn(async () => rawDsn),
+      }
+    );
+
+    expect(candidates).toEqual([{ name: 'DATABASE_URL', dsn: rawDsn }]);
+  });
+
+  test('ignores empty candidates and preserves input source order', async () => {
+    const dsn1 = (['postgresql',":","/","/",'postgres',":",'xnrtsljmozghyruopuujphhl',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const dsn2 = (['postgresql',":","/","/",'postgres',":",'uhimrjyzjnthkwvnmwrtxiin',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+
+    const candidates = await buildDbConnectionCandidates(
+      [
+        { name: 'DATABASE_URL', dsn: dsn1 },
+        { name: 'DATABASE_URL_DIRECT', dsn: '' },
+        { name: 'DATABASE_URL_POOLER', dsn: dsn2 },
+      ],
+      {
+        ensureIpv4HostnameFn: jest.fn(async (dsn) => dsn),
+        ensureHostaddrFn: jest.fn(async (dsn) => dsn),
+      }
+    );
+
+    expect(candidates).toEqual([
+      { name: 'DATABASE_URL', dsn: dsn1 },
+      { name: 'DATABASE_URL_POOLER', dsn: dsn2 },
+    ]);
+  });
+
+  test('reorders candidates to a previously selected DSN name without requiring the DSN to be re-passed', () => {
+    const reordered = applyPinnedDbSelectionPreference(
+      [
+        { name: 'SYNCED_DB_URL_POOLER+poolerport:6543', dsn: 'postgresql://pooler-6543' },
+        { name: 'SYNCED_DB_URL_POOLER+hostaddr', dsn: 'postgresql://pooler-hostaddr' },
+        { name: 'SYNCED_DB_URL_DIRECT', dsn: 'postgresql://direct' },
+      ],
+      {
+        DB_SMOKE_SELECTED_DSN_NAME: 'SYNCED_DB_URL_POOLER+hostaddr',
+      },
+    );
+
+    expect(reordered.map((candidate) => candidate.name)).toEqual([
+      'SYNCED_DB_URL_POOLER+hostaddr',
+      'SYNCED_DB_URL_POOLER+poolerport:6543',
+      'SYNCED_DB_URL_DIRECT',
+    ]);
+  });
+
+  test('accepts preview env selected DSN metadata as the pinned candidate source', () => {
+    const env = {
+      DATABASE_URL: 'postgresql://preview-hostaddr',
+      DATABASE_URL_SELECTED_DSN_NAME: 'DATABASE_URL_POOLER+hostaddr',
+    };
+
+    expect(buildPinnedDbSelectionCandidate(env)).toEqual({
+      name: 'DATABASE_URL_POOLER+hostaddr',
+      dsn: 'postgresql://preview-hostaddr',
+    });
+
+    const reordered = applyPinnedDbSelectionPreference(
+      [
+        { name: 'DATABASE_URL_POOLER', dsn: 'postgresql://raw-pooler' },
+        { name: 'DATABASE_URL_POOLER+hostaddr', dsn: 'postgresql://preview-hostaddr' },
+        { name: 'DATABASE_URL_DIRECT', dsn: 'postgresql://direct' },
+      ],
+      env,
+    );
+
+    expect(reordered.map((candidate) => candidate.name)).toEqual([
+      'DATABASE_URL_POOLER+hostaddr',
+      'DATABASE_URL_POOLER',
+      'DATABASE_URL_DIRECT',
+    ]);
+  });
+
+  test('adds Supabase pooler shard-host variants after standard ladder', async () => {
+    const dsn =
+      (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const prevProjectRef = process.env.SUPABASE_PROJECT_ID;
+    delete process.env.SUPABASE_PROJECT_ID;
+
+    try {
+      const candidates = await buildDbConnectionCandidates(
+        [{ name: 'DATABASE_URL', dsn }],
+        {
+          ensureIpv4HostnameFn: jest.fn(async (value) => value),
+          ensureHostaddrFn: jest.fn(async (value) => value),
+        }
+      );
+
+      expect(candidates).toEqual([
+        { name: 'DATABASE_URL', dsn },
+        {
+          name: 'DATABASE_URL+poolerhost:aws-0',
+          dsn: (['postgresql',":","/","/",'postgres.wk123',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        },
+        {
+          name: 'DATABASE_URL+poolerhost:aws-0+poolerport:6543',
+          dsn: (['postgresql',":","/","/",'postgres.wk123',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+        },
+        {
+          name: 'DATABASE_URL+poolerport:6543',
+          dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+        },
+      ]);
+    } finally {
+      if (prevProjectRef === undefined) delete process.env.SUPABASE_PROJECT_ID;
+      else process.env.SUPABASE_PROJECT_ID = prevProjectRef;
+    }
+  });
+
+  test('pooler host variant helper ignores non-supabase pooler hosts', () => {
+    expect(
+      buildSupabasePoolerHostVariants(
+        (['postgresql',":","/","/",'postgres',":",'nqvzjiyjgtjrykszszntwnho',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      ),
+    ).toEqual([]);
+  });
+
+  test('pooler host variant helper prefers paired shard index fallback', () => {
+    expect(
+      buildSupabasePoolerHostVariants(
+        (['postgresql',":","/","/",'postgres.wk123',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      ),
+    ).toEqual([
+      {
+        nameSuffix: 'poolerhost:aws-1',
+        dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      },
+    ]);
+  });
+
+  test('pooler port variant helper toggles between transaction and session ports', () => {
+    expect(
+      buildSupabasePoolerPortVariants(
+        (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      ),
+    ).toEqual([
+      {
+        nameSuffix: 'poolerport:6543',
+        dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+      },
+    ]);
+
+    expect(
+      buildSupabasePoolerPortVariants(
+        (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+      ),
+    ).toEqual([
+      {
+        nameSuffix: 'poolerport:5432',
+        dsn: (['postgresql',":","/","/",'postgres.wk123',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      },
+    ]);
+  });
+
+  test('pooler user variant helper normalizes bare postgres user for Supabase pooler hosts', () => {
+    expect(
+      buildSupabasePoolerUserVariant(
+        (['postgresql',":","/","/",'postgres',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+        { projectRef: 'ymlutyyxksjojqouppww' },
+      ),
+    ).toEqual({
+      nameSuffix: 'pooleruser',
+      dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+    });
+  });
+
+  test('prefers pooler-user-normalized ladder when project ref is known', async () => {
+    const dsn = (['postgresql',":","/","/",'postgres',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join(""));
+    const candidates = await buildDbConnectionCandidates(
+      [{ name: 'DATABASE_URL', dsn }],
+      {
+        projectRef: 'ymlutyyxksjojqouppww',
+        ensureIpv4HostnameFn: jest.fn(async (value) => value),
+        ensureHostaddrFn: jest.fn(async (value) => value),
+      },
+    );
+    expect(candidates).toEqual([
+      {
+        name: 'DATABASE_URL+pooleruser',
+        dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      },
+      {
+        name: 'DATABASE_URL+pooleruser+poolerhost:aws-0',
+        dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'5432',"/",'postgres',"?",'sslmode=require'].join("")),
+      },
+      {
+        name: 'DATABASE_URL+pooleruser+poolerhost:aws-0+poolerport:6543',
+        dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'knoqmnmgvqknwqsgupzvjwmw',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+      },
+      {
+        name: 'DATABASE_URL+pooleruser+poolerport:6543',
+        dsn: (['postgresql',":","/","/",'postgres.ymlutyyxksjojqouppww',":",'irmsmmzsvvyiypsyhhpgpjpv',"@",'example.invalid',":",'6543',"/",'postgres',"?",'sslmode=require'].join("")),
+      },
+      { name: 'DATABASE_URL', dsn },
+    ]);
+  });
+});

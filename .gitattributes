@@ -1,0 +1,3 @@
+# Ensure deterministic line endings across platforms (prevents CI churn).
+*.sh text eol=lf
+supabase/migrations/**/*.sql text eol=lf

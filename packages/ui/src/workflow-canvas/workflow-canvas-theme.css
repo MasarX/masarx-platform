@@ -1,0 +1,153 @@
+/* ---------------------------------------------------------------------------
+ * React Flow CSS overrides for the design system.
+ *
+ * Maps React Flow's CSS variables to the app's design tokens (--ui-*).
+ * Supports dark mode via .dark class and RTL via [dir="rtl"].
+ * -------------------------------------------------------------------------*/
+
+.workflow-canvas .react-flow {
+  --xy-background-color: transparent;
+  --xy-node-border-radius: 1rem;
+  --xy-edge-stroke: #94a3b8;
+  --xy-edge-stroke-selected: #3b82f6;
+  --xy-edge-stroke-width: 2;
+  --xy-connectionline-stroke: #3b82f6;
+  --xy-connectionline-stroke-width: 2;
+  --xy-minimap-background: #ffffff;
+  --xy-minimap-mask-background: rgba(255, 255, 255, 0.85);
+  --xy-minimap-node-background: #e2e8f0;
+  --xy-controls-button-background: #ffffff;
+  --xy-controls-button-border-color: #e2e8f0;
+  --xy-controls-button-color: #475569;
+}
+
+/* Background grid (subtle dot pattern). */
+.workflow-canvas .react-flow__background {
+  --xy-background-pattern-dots-color: rgba(148, 163, 184, 0.25);
+}
+
+/* Edge path styling. */
+.workflow-canvas .react-flow__edge-path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Animated edges (trigger connections). */
+.workflow-canvas .react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 8 4;
+  animation: workflow-edge-flow 0.8s linear infinite;
+}
+
+@keyframes workflow-edge-flow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* Dark mode adjustments. */
+.dark .workflow-canvas .react-flow {
+  --xy-edge-stroke: #475569;
+  --xy-edge-stroke-selected: #60a5fa;
+  --xy-minimap-background: #0f172a;
+  --xy-minimap-mask-background: rgba(15, 23, 42, 0.85);
+  --xy-minimap-node-background: #1e293b;
+  --xy-controls-button-background: #1e293b;
+  --xy-controls-button-border-color: #334155;
+  --xy-controls-button-color: #94a3b8;
+}
+
+.dark .workflow-canvas .react-flow__background {
+  --xy-background-pattern-dots-color: rgba(71, 85, 105, 0.25);
+}
+
+/* RTL: flip minimap to bottom-left. */
+[dir="rtl"] .workflow-canvas .react-flow__minimap {
+  left: 10px;
+  right: auto;
+}
+
+/* Attribution removal (React Flow Pro not needed — open source). */
+.workflow-canvas .react-flow__attribution {
+  display: none;
+}
+
+/* Controls styling. */
+.workflow-canvas .react-flow__controls {
+  bottom: 16px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.dark .workflow-canvas .react-flow__controls {
+  border-color: #334155;
+}
+
+.workflow-canvas .react-flow__controls-button {
+  width: 34px;
+  height: 34px;
+}
+
+.workflow-canvas .react-flow__controls-button:hover {
+  background: #f1f5f9;
+}
+
+.dark .workflow-canvas .react-flow__controls-button:hover {
+  background: #334155;
+}
+
+[dir="rtl"] .workflow-canvas .react-flow__controls {
+  left: 16px;
+  right: auto;
+}
+
+/* Minimap styling. */
+.workflow-canvas .react-flow__minimap {
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.dark .workflow-canvas .react-flow__minimap {
+  border-color: #334155;
+}
+
+/* Node selection outline override (handled by Tailwind in node components). */
+.workflow-canvas .react-flow__node.selected {
+  box-shadow: none;
+}
+
+/* Card depth — multi-layer shadows for node elevation. */
+.workflow-canvas [data-flow-node] {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.workflow-canvas [data-flow-node]:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.dark .workflow-canvas [data-flow-node] {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.dark .workflow-canvas [data-flow-node]:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Edge hover glow. */
+.workflow-canvas .workflow-edge-hovered {
+  filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.3));
+}
+
+/* Reduced-motion: disable edge animations and pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .workflow-canvas .react-flow__edge-path {
+    animation: none !important;
+  }
+
+  .workflow-canvas .animate-pulse-dot {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,59 @@
+name = "masarx-api-ingress"
+main = "src/index.mjs"
+compatibility_date = "2025-12-30"
+
+# Routes are part of the external contract. Environment-specific upstream config
+# (Supabase origin/JWTs) MUST be injected via Cloudflare env/CI, not hardcoded.
+routes = [
+  { pattern = "vomhkplympywspxymnstltsw.example.invalid/*", zone_name = "nzxmhryhtqlzoshjkyozkpup.example.invalid" },
+]
+
+[vars]
+# Auth/token controls (secure-by-default)
+TOKEN_PATH_SEGMENT = "t"
+ALLOW_QUERY_TOKEN = "1"
+ALLOW_BASIC_TOKEN = "0"
+ALLOW_API_KEY_HEADER = "1"
+PRESERVE_AUTHORIZATION_HEADER = "0"
+PRESERVE_COOKIE_HEADERS = "0"
+
+# CORS (applied to preflight + actual responses). Comma-separated allowlist, or "*".
+CORS_ALLOW_ORIGIN = "https://rzyxrumpgwjnwngjrgkiqkkt.example.invalid"
+CORS_EXPOSE_HEADERS = "x-correlation-id,deprecation,x-masarx-deprecated-auth"
+
+# Canonical rewrite rules (no endpoint hardcoding in code; behavior is config-driven).
+REWRITE_RULES_JSON = """[
+  { "from": "/v1/webhook", "to": "/functions/v1/webhook-receiver", "match": "exact", "requireToken": true },
+  { "from": "/v1/api-gateway", "to": "/functions/v1/api-gateway", "match": "prefix", "requireToken": true },
+  { "from": "/api/", "to": "/functions/v1/api-gateway/api/", "match": "prefix", "requireToken": true }
+]"""
+
+[env.stg]
+routes = [
+  { pattern = "imhhoxsrwptitgpnuruogxsn.example.invalid/*", zone_name = "nzxmhryhtqlzoshjkyozkpup.example.invalid" },
+]
+
+[env.stg.vars]
+ALLOW_QUERY_TOKEN = "1"
+CORS_ALLOW_ORIGIN = "https://rzyxrumpgwjnwngjrgkiqkkt.example.invalid"
+CORS_EXPOSE_HEADERS = "x-correlation-id,deprecation,x-masarx-deprecated-auth"
+REWRITE_RULES_JSON = """[
+  { "from": "/v1/webhook", "to": "/functions/v1/webhook-receiver", "match": "exact", "requireToken": true },
+  { "from": "/v1/api-gateway", "to": "/functions/v1/api-gateway", "match": "prefix", "requireToken": true },
+  { "from": "/api/", "to": "/functions/v1/api-gateway/api/", "match": "prefix", "requireToken": true }
+]"""
+
+[env.dev]
+routes = [
+  { pattern = "mhlyknztjgkogsgxxzuignzk.example.invalid/*", zone_name = "nzxmhryhtqlzoshjkyozkpup.example.invalid" },
+]
+
+[env.dev.vars]
+ALLOW_QUERY_TOKEN = "1"
+CORS_ALLOW_ORIGIN = "https://rzyxrumpgwjnwngjrgkiqkkt.example.invalid"
+CORS_EXPOSE_HEADERS = "x-correlation-id,deprecation,x-masarx-deprecated-auth"
+REWRITE_RULES_JSON = """[
+  { "from": "/v1/webhook", "to": "/functions/v1/webhook-receiver", "match": "exact", "requireToken": true },
+  { "from": "/v1/api-gateway", "to": "/functions/v1/api-gateway", "match": "prefix", "requireToken": true },
+  { "from": "/api/", "to": "/functions/v1/api-gateway/api/", "match": "prefix", "requireToken": true }
+]"""

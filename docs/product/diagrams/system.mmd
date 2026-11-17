@@ -1,0 +1,137 @@
+%% MasarX Delivery Platform - System Diagram (comprehensive)
+%% Usage: paste into Mermaid Live (https://mermaid.live) or render via mmdc.
+
+graph TD
+  %% Layout direction
+  %% direction: TD
+
+  subgraph Edge Functions
+    A[webhook-receiver<br/>edge function]
+    B[api-caller<br/>edge function]
+    C[label-renderer<br/>edge function]
+  end
+
+  subgraph Functions
+    D[workflow_intake_webhook<br/>function]
+    E[get_webhook_source_by_token<br/>function]
+    F[resolve_webhook_ingest_policy<br/>function]
+    G[insert_webhook_inbox_record<br/>function]
+    H[start_workflow_run<br/>function]
+    I[progress_workflow_run<br/>function]
+    J[run_webhook_processor_worker<br/>function]
+    K[apply_request_mappings<br/>function]
+    L[request_label_generation<br/>function]
+    M[lease_label_job<br/>function]
+    N[compose_label_payload<br/>function]
+    O[complete_label_job<br/>function]
+    P[reclaim_stale_label_jobs<br/>function+cron]
+
+    R1[render_http_response_v1<br/>handler]
+    R2[persist_http_response_v1<br/>handler]
+
+    S1[mark_outbound_call_success<br/>function]
+    S2[mark_outbound_call_failure<br/>function]
+    S3[claim_pending_edge_jobs<br/>function]
+    S4[get_job_call_spec<br/>function]
+    S5[log_api_call_event<br/>function]
+
+    G1[execute_geocoding_v1<br/>handler]
+  end
+
+  subgraph Tables
+    Q[webhook_sources<br/>table]
+    R[provider_auth_configs<br/>table]
+    S[webhook_inbox<br/>table]
+    T[decision_log<br/>table]
+    U[workflow_runs<br/>table]
+    V[workflow_run_steps<br/>table]
+    W[outbound_calls<br/>table]
+    X[label_jobs<br/>table]
+    Y[labels<br/>table]
+    Z[geocodes<br/>table]
+    O1[operation_templates<br/>table]
+    M1[mapping_configs<br/>table]
+    A1[api_call_log<br/>table]
+  end
+
+  subgraph Views
+    AA[webhook_response_events<br/>view]
+    AB[webhook_response_latest<br/>view]
+    AC[observability_events_v<br/>view]
+  end
+
+  subgraph Settings
+    AD[settings + settings_versions<br/>settings]
+    AE[renderer_defaults<br/>settings]
+  end
+
+  subgraph Storage
+    SA[label-render-assets<br/>bucket]
+    SB[labels<br/>bucket]
+  end
+
+  %% Inbound intake
+  A -->|RPC| D
+  D -->|SELECT| E
+  E -->|match token| Q
+  D -->|SELECT policy| F
+  F -->|resolve ladder| AD
+  D -->|SELECT creds| R
+  D -->|SELECT latest for replay| AB
+  D -->|INSERT via G| S
+  D -->|START| H
+  H -->|INSERT run| U
+  U -->|materialize steps| V
+
+  %% Intake workflow response
+  V -->|compute| R1
+  R1 -->|persist event| R2
+  R2 -->|DECISION| T
+  R2 -->|UPDATE link| S
+
+  %% Idempotency / Observability projections
+  T --> AA
+  T --> AB
+  T --> AC
+
+  %% Workflow engine to outbound
+  J -->|loop| I
+  I -->|request mappings| K
+  I -->|read| O1
+  I -->|read| M1
+  I -->|INSERT job| W
+
+  %% Edge outbound execution
+  W -->|edge dispatch| B
+  B -->|claim| S3
+  S3 --> W
+  B -->|spec| S4
+  B -->|on 2xx| S1
+  B -->|on error| S2
+  S1 -->|DECISION| T
+  S2 -->|DECISION| T
+  B -->|audit| S5
+  S5 -->|INSERT| A1
+
+  %% Label generation
+  I -->|enqueue label| L
+  L -->|INSERT job| X
+  C -->|lease| M
+  M --> X
+  C -->|compose| N
+  C -->|fallback defaults| AE
+  C -->|download asset| SA
+  C -->|upload PDF| SB
+  C -->|complete| O
+  O -->|UPSERT| Y
+
+  %% Label maintenance
+  P -->|reclaim stale| X
+
+  %% Optional geocoding handler
+  I -->|handler| G1
+  G1 -->|UPSERT| Z
+
+  %% Observability sources
+  A1 --> AC
+  W --> AC

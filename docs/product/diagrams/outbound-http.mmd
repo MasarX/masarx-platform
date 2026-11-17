@@ -1,0 +1,17 @@
+%% Outbound HTTP Execution (focused)
+
+graph TD
+  I[progress_workflow_run<br/>fn] -->|read| O1[operation_templates<br/>tbl]
+  I -->|read| M1[mapping_configs<br/>tbl]
+  I -->|apply| K[apply_request_mappings<br/>fn]
+  I -->|INSERT| W[outbound_calls<br/>tbl]
+  W -->|edge dispatch| B[api-caller<br/>edge]
+  B -->|claim| S3[claim_pending_edge_jobs<br/>fn] --> W
+  B -->|spec| S4[get_job_call_spec<br/>fn]
+  B -->|HTTP fetch| EXT[(Provider API)]
+  B -->|success| S1[mark_outbound_call_success<br/>fn] --> T[decision_log<br/>tbl]
+  B -->|failure| S2[mark_outbound_call_failure<br/>fn] --> T
+  B -->|audit| S5[log_api_call_event<br/>fn] --> A1[api_call_log<br/>tbl]
+  T --> AC[observability_events_v<br/>view]
+  A1 --> AC
+  W --> AC

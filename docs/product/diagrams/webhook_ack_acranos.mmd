@@ -1,0 +1,21 @@
+﻿sequenceDiagram
+    autonumber
+    participant C as Client (Webhook Sender)
+    participant E as Edge (webhook-receiver)
+    participant DB as DB RPC (workflow_intake_webhook)
+    participant W as Workflow Engine
+    participant O as Observability
+
+    C->>E: HTTP POST /webhook-receiver (JSON + headers)
+    Note right of E: parse body, normalize headers
+    E->>DB: workflow_intake_webhook(token, headers, raw, payload)
+    DB->>DB: Token/HMAC policy check (settings)
+    DB->>DB: JSON schema validation (mapping_configs)
+    DB->>DB: Idempotency (replay detection)
+    DB->>W: start_workflow_run(...) (idempotent)
+    DB-->>E: { status: 202, body: accepted_async, outcome: response_sent }
+    E->>O: log response event + processing_time_ms
+    E-->>C: 202 Accepted { status: "accepted_async" }
+    Note over W: Background processing continues
+    W->>W: Steps: transform → provider dispatch → decisions
+    W->>O: decision_log entries

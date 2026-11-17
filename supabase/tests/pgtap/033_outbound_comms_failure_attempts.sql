@@ -1,0 +1,192 @@
+BEGIN;
+
+CREATE EXTENSION IF NOT EXISTS pgtap;
+
+SELECT plan(3);
+
+-- Seed minimal org + provider for comms_whatsapp outbound_calls targeting.
+INSERT INTO public.organizations (id, name, slug)
+VALUES ('cccccccc-0000-0000-0000-000000000001', 'Comms Retry Org', 'comms-retry-org')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.providers (id, organization_id, name, provider_type, enabled, metadata)
+VALUES (
+  'cccccccc-0000-0000-0000-000000000002',
+  'cccccccc-0000-0000-0000-000000000001',
+  'Comms Retry Provider',
+  'http',
+  TRUE,
+  '{}'::jsonb
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed workflow context so outbound_calls inserts satisfy engine guards.
+SELECT set_config('app.workflow_run_id', 'dddd0330-0000-0000-0000-000000000033', true);
+INSERT INTO workflow_templates (
+  id,
+  name,
+  description,
+  version,
+  status,
+  scope_type
+)
+VALUES (
+  'bbbb0330-0000-0000-0000-000000000033',
+  'pgtap_outbound_comms_failure_attempts',
+  'Fixture workflow for comms failure attempt tests',
+  1,
+  'active',
+  'global'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO workflow_template_steps (
+  id,
+  workflow_template_id,
+  sequence_order,
+  operation_name,
+  transition_condition,
+  handler_key,
+  handler_version,
+  enabled
+)
+VALUES (
+  'cccc0330-0000-0000-0000-000000000033',
+  'bbbb0330-0000-0000-0000-000000000033',
+  1,
+  'workflow_control',
+  'always',
+  'workflow_control',
+  'v1',
+  TRUE
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO workflow_runs (
+  id,
+  workflow_template_id,
+  workflow_template_version,
+  entry_point,
+  workflow_status,
+  context
+)
+VALUES (
+  'dddd0330-0000-0000-0000-000000000033',
+  'bbbb0330-0000-0000-0000-000000000033',
+  1,
+  'test',
+  'pending',
+  '{}'::jsonb
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO workflow_run_steps (
+  id,
+  workflow_run_id,
+  workflow_template_step_id,
+  sequence_order,
+  step_status,
+  operation_name,
+  handler_key,
+  handler_version,
+  max_retries,
+  enqueued_at,
+  created_at,
+  updated_at
+)
+VALUES (
+  'eeee0330-0000-0000-0000-000000000033',
+  'dddd0330-0000-0000-0000-000000000033',
+  'cccc0330-0000-0000-0000-000000000033',
+  1,
+  'pending',
+  'workflow_control',
+  'workflow_control',
+  'v1',
+  1,
+  now(),
+  now(),
+  now()
+)
+ON CONFLICT (id) DO NOTHING;
+
+SELECT set_config('app.workflow_run_step_id', 'eeee0330-0000-0000-0000-000000000033', true);
+SELECT set_config('platform.workflow_engine', '1', true);
+SELECT set_config('platform.workflow_run_step_id', 'eeee0330-0000-0000-0000-000000000033', true);
+
+INSERT INTO public.outbound_calls (
+  id, call_type, target_type, target_id,
+  method, url, headers, body,
+  status, priority, retry_count, max_retries,
+  scheduled_at, created_at, context, workflow_run_step_id
+)
+VALUES (
+  'cccccccc-0000-0000-0000-000000000010',
+  'comms_whatsapp',
+  'provider',
+  'cccccccc-0000-0000-0000-000000000002',
+  'POST',
+  'https://example.test/comms',
+  '{}'::jsonb,
+  '{}'::jsonb,
+  'in_progress_edge',
+  100,
+  0,
+  3,
+  now(),
+  now(),
+  jsonb_build_object('organization_id', 'cccccccc-0000-0000-0000-000000000001'),
+  'eeee0330-0000-0000-0000-000000000033'
+)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+  PERFORM public.mark_outbound_call_failure(
+    'cccccccc-0000-0000-0000-000000000010',
+    429,
+    jsonb_build_object('retry-after', '10'),
+    jsonb_build_object('error', 'rate_limited'),
+    'HTTP 429'
+  );
+END;
+$$;
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.comms_attempts ca
+    WHERE ca.outbound_call_id = 'cccccccc-0000-0000-0000-000000000010'
+      AND ca.attempt_number = 1
+      AND ca.status = 'failed'
+  ),
+  'mark_outbound_call_failure writes a comms_attempts row for comms_whatsapp failures'
+);
+
+SELECT is(
+  (
+    SELECT ca.error_code
+    FROM public.comms_attempts ca
+    WHERE ca.outbound_call_id = 'cccccccc-0000-0000-0000-000000000010'
+      AND ca.attempt_number = 1
+    LIMIT 1
+  ),
+  'retry_scheduled',
+  'failure comms_attempts.error_code stores retry_reason (retry_scheduled)'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.decision_log dl
+    WHERE dl.resource_type = 'outbound_call'
+      AND dl.resource_id = 'cccccccc-0000-0000-0000-000000000010'
+      AND dl.decision_category = 'outbound_call'
+      AND dl.settings_resolution_id IS NOT NULL
+  ),
+  'mark_outbound_call_failure decision links settings_resolution_id for retry policy audit'
+);
+
+SELECT finish();
+
+ROLLBACK;

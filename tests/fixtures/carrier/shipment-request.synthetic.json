@@ -1,0 +1,28 @@
+{
+  "event": {
+    "type": "shipment.created"
+  },
+  "originAddress": {
+    "addressLine1": "Example Street",
+    "city": "Example City",
+    "region": "Example Region",
+    "country": "EX",
+    "latitude": 0,
+    "longitude": 0
+  },
+  "destinationAddress": {
+    "addressLine1": "Example Street",
+    "city": "Example City",
+    "country": "EX"
+  },
+  "pkg": {
+    "description": "Synthetic test parcel",
+    "quantity": 1,
+    "weight": 1,
+    "paymentType": "prepaid",
+    "senderName": "Example Sender",
+    "receiverName": "Example Recipient",
+    "senderPhone": "+12025550123",
+    "receiverPhone": "+12025550123"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docs/providers/schemas/provider.webhooks.event.schema.json",
+  "title": "Provider Webhook Event (Envelope)",
+  "type": "object",
+  "required": ["event", "shipment"],
+  "additionalProperties": true,
+  "properties": {
+    "event": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": {
+          "enum": [
+            "shipment.created",
+            "shipment.updated",
+            "shipment.canceled",
+            "shipment.swap",
+            "shipment.return",
+            "shipment.modify",
+            "shipment.delete",
+            "update.status",
+            "update.geocode",
+            "update.address",
+            "update.driver",
+            "update.action",
+            "update.attachment"
+          ]
+        },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "shipment": { "type": "object", "additionalProperties": true }
+  }
+}
+

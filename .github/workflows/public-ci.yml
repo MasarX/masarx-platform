@@ -1,0 +1,365 @@
+name: Public CI
+
+'on':
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main, v2]
+  workflow_dispatch:
+    inputs:
+      regenerate_visual_baselines:
+        description: Regenerate restored visual specs using the audited local visual config
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+  CI: 'true'
+  ENV_FILE: /dev/null
+  ENV_FILE_APPEND: '0'
+  ENV_FILE_OVERRIDE: '0'
+  NX_DAEMON: 'false'
+  NX_SKIP_NX_CACHE: 'true'
+  NX_NO_CLOUD: 'true'
+  NEXT_TELEMETRY_DISABLED: '1'
+  JEST_RETRY_TIMES: '0'
+  GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+  CI_BASE_BRANCH: ${{ github.event.pull_request.base.ref || github.event.merge_group.base_ref || github.ref_name }}
+  NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+  LANDING_SITE_URL: http://127.0.0.1:3333
+  LANDING_APP_URL: http://127.0.0.1:3001
+  LANDING_CONTACT_ENDPOINT: /__landing-contact
+  LANDING_TENANT_SIGNUP_ENDPOINT: /__tenant-signup
+  LANDING_ENABLE_INTAKE_MOCKS: '1'
+
+jobs:
+  database:
+    name: From-zero database build and pgTAP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Detect subject
+        id: subject
+        run: node scripts/ci-hosted/tasks.cjs detect database
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+        if: steps.subject.outputs.present == 'true'
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Fail closed until image qualification is authorized
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/backend.cjs preflight
+      - name: Locked dependency installation
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Run subject
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/backend.cjs
+      - name: Upload backend-summary
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
+        with:
+          name: backend-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-reports/backend.json
+          if-no-files-found: warn
+          retention-days: 1
+          include-hidden-files: false
+
+  append-only:
+    name: Append-only migrations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Migrations are append-only
+        env:
+          EVENT: ${{ github.event_name }}
+          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        run: |
+          case "$EVENT" in
+            pull_request) base="$(git rev-parse HEAD^1)" ;;
+            merge_group)
+              [[ "$GROUP_BASE" =~ ^[a-f0-9]{40}$ ]] || exit 1
+              git fetch --no-tags --depth=1 origin "$GROUP_BASE"
+              base="$GROUP_BASE" ;;
+            *) printf '%s\n' 'Skipped by design: append-only diff runs on pull_request and merge_group.'; exit 0 ;;
+          esac
+          node scripts/ci-hosted/base-guard.cjs migrations.cjs "$base"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Detect subject
+        id: subject
+        run: node scripts/ci-hosted/tasks.cjs detect lint
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+        if: steps.subject.outputs.present == 'true'
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Locked dependency installation
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Run subject
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs lint
+
+  typecheck:
+    name: Typecheck all present apps
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Detect subject
+        id: subject
+        run: node scripts/ci-hosted/tasks.cjs detect typecheck
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+        if: steps.subject.outputs.present == 'true'
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Locked dependency installation
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Run subject
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs typecheck
+
+  unit:
+    name: Unit tests (Jest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Detect subject
+        id: subject
+        run: node scripts/ci-hosted/tasks.cjs detect unit
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+        if: steps.subject.outputs.present == 'true'
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Locked dependency installation
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Run subject
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/base-guard.cjs jest.cjs unit
+      - name: Upload unit-summary
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
+        with:
+          name: unit-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-reports/unit.json
+            ci-reports/known-failures-observed.unit.txt
+          if-no-files-found: warn
+          retention-days: 1
+          include-hidden-files: false
+
+  ui:
+    name: UI tests (Jest and jsdom)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Detect subject
+        id: subject
+        run: node scripts/ci-hosted/tasks.cjs detect ui
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+        if: steps.subject.outputs.present == 'true'
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Locked dependency installation
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Run subject
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/base-guard.cjs jest.cjs ui
+      - name: Upload ui-summary
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
+        with:
+          name: ui-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-reports/ui.json
+            ci-reports/known-failures-observed.ui.txt
+          if-no-files-found: warn
+          retention-days: 1
+          include-hidden-files: false
+
+  build:
+    name: Build (${{ matrix.subject }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        subject: [apps/console, apps/portal, apps/console-v2, landing]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Detect build subject
+        id: subject
+        env:
+          BUILD_SUBJECT: ${{ matrix.subject }}
+        run: node scripts/ci-hosted/tasks.cjs detect "$BUILD_SUBJECT"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+        if: steps.subject.outputs.present == 'true'
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Locked dependency installation
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Build present app
+        if: steps.subject.outputs.present == 'true'
+        env:
+          BUILD_SUBJECT: ${{ matrix.subject }}
+        run: node scripts/ci-hosted/tasks.cjs build "$BUILD_SUBJECT"
+
+  e2e:
+    name: Landing E2E (full-app E2E excluded)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Detect landing browser subject
+        id: subject
+        run: node scripts/ci-hosted/tasks.cjs detect landing
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+        if: steps.subject.outputs.present == 'true'
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Locked dependency installation
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Install lockfile-selected Chromium
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs browser-install
+      - name: Run synthetic local landing suite
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs landing-e2e
+      - name: Explain full-app browser exclusion
+        run: |
+          printf '%s\n' 'SKIPPED_BY_DESIGN: full Console/Portal/FieldOps E2E has no proven secret-free local fixture/auth contract.'
+          printf '%s\n' 'Landing live edge intake remains excluded by its existing opt-in test flag; synthetic intake is the covered contract.'
+
+  visual-baselines:
+    name: Visual baselines (manual, prerequisites required)
+    if: github.event_name == 'workflow_dispatch' && inputs.regenerate_visual_baselines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # frozen version: de0fac2e4500dabe0009e67214ff5f5447ce83dd (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Enable manual subject
+        id: subject
+        run: printf '%s\n' 'present=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # frozen version: 53b83947a5a98c8d113130e565377fae1a50d02f (Node24)
+        if: steps.subject.outputs.present == 'true'
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Check visual prerequisites before installation
+        run: node scripts/ci-hosted/tasks.cjs visual-preflight
+      - name: Locked dependency installation
+        if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Install lockfile-selected Chromium
+        run: node scripts/ci-hosted/tasks.cjs browser-install
+      - name: Regenerate visual baselines
+        run: node scripts/ci-hosted/tasks.cjs visual
+      - name: Upload visual-baselines
+        if: success()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # frozen version: bbbca2ddaa5d8feaa63e36b76fdaad77386f024f (Node24)
+        with:
+          name: visual-baselines-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            tests/e2e/**/*-snapshots/*.png
+          if-no-files-found: error
+          retention-days: 1
+          include-hidden-files: false
+
+  ci-result:
+    name: CI result
+    needs: [database, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the complete producer set
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          VISUAL_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.regenerate_visual_baselines }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ['NEEDS_JSON'])
+          expected = {'database', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines'}
+          good = set(needs) == expected
+          for name in sorted(expected):
+              result = needs.get(name, {}).get('result', 'missing')
+              allowed = {'success'}
+              if name == 'visual-baselines' and os.environ['VISUAL_REQUESTED'] != 'true':
+                  allowed = {'skipped'}
+              passed = result in allowed
+              print(f'{name}: {result}; {"PASS" if passed else "FAIL"}')
+              good = good and passed
+          sys.exit(0 if good else 1)
+          PY

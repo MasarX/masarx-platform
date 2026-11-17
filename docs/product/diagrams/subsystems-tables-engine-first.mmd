@@ -1,0 +1,72 @@
+%% MasarX Delivery Platform - Engine-Centric Tables-Only Flows
+%% Goal: Every subsystem first consults the workflow engine (tables), then executes.
+%% Paste into https://mermaid.live
+
+graph LR
+
+  %% ===== Central Workflow Engine (tables only) =====
+  subgraph Workflow_Engine
+    WR[workflow_runs]
+    WRS[workflow_run_steps]
+    DL[decision_log]
+  end
+  WR -->|materialize| WRS
+  WRS -->|decisions| DL
+
+  %% ===== Webhook Intake lane =====
+  subgraph Webhook_Intake
+    WI1[webhook_inbox]
+  end
+  WI1 -->|consult engine| WR
+  WI1 -->|http_response_event| DL
+  %% Example downstream writes from engine steps
+  WRS -->|create/update| SH1[shipments]
+  SH1 -->|address needed| ADR1[addresses]
+  WRS -->|enqueue outbound| OC1[outbound_calls]
+  WRS -->|enqueue label| LJ1[label_jobs]
+  OC1 -->|api audit| ACL1[api_call_log]
+  OC1 -->|http outcome| DL
+  LJ1 -->|upsert label| LB1[labels]
+  LB1 -->|append action| SA1[shipment_actions]
+
+  %% ===== Communications (Inbound message via webhook) lane =====
+  subgraph Communications_Inbound
+    WI2[webhook_inbox]
+  end
+  WI2 -->|consult engine| WR
+  WI2 -->|http_response_event| DL
+  WRS -->|enqueue reply| OC2[outbound_calls]
+  OC2 -->|api audit| ACL1
+  OC2 -->|send outcome| DL
+
+  %% ===== Shipment Status Change lane (internal event) =====
+  subgraph Shipment_Status_Change
+    SA0[shipment_actions]
+  end
+  SA0 -->|consult engine| WR
+  %% Engine may branch to multiple actions
+  WRS -->|geocode required| GAT1[geocoding_attempts]
+  GAT1 -->|cache result| GEO1[geocodes]
+  WRS -->|provider update| OC3[outbound_calls]
+  OC3 -->|api audit| ACL1
+  OC3 -->|send outcome| DL
+  WRS -->|label reprint| LJ2[label_jobs]
+  LJ2 -->|upsert label| LB2[labels]
+  LB2 -->|append action| SA2[shipment_actions]
+
+  %% ===== Label Request lane (manual/external trigger) =====
+  subgraph Label_Request
+    LJ0[label_jobs]
+  end
+  LJ0 -->|consult engine| WR
+  WRS -->|render/confirm| LB3[labels]
+  LB3 -->|append action| SA3[shipment_actions]
+
+  %% ===== Geocoding lane (address change trigger) =====
+  subgraph Address_Change
+    ADR0[addresses]
+  end
+  ADR0 -->|consult engine| WR
+  WRS -->|geocode required| GAT2[geocoding_attempts]
+  GAT2 -->|cache result| GEO2[geocodes]
+

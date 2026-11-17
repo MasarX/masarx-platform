@@ -1,0 +1,272 @@
+{
+  "version": 1,
+  "derived_from": "config/ci/deploy-surfaces.json",
+  "full_relevant_suites": [
+    "lint_structure",
+    "test_unit",
+    "test_ui",
+    "lint_frontend",
+    "landing_build",
+    "landing_e2e",
+    "verify_cloud_core",
+    "pgtap",
+    "integration",
+    "edge_deploy",
+    "docs_lane"
+  ],
+  "surfaces": [
+    {
+      "id": "api-ingress",
+      "include_re": [
+        "^tooling/apps/api-ingress-worker/",
+        "^scripts/ops/cloudflare/",
+        "^scripts/tooling/validate-api-ingress-worker\\.js$",
+        "^tests/integration/edge/",
+        "^tests/unit/edge/"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "test_unit",
+        "verify_cloud_core"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "ci",
+      "include_re": [
+        "^\\.github/",
+        "^config/ci/",
+        "^scripts/ops/ci/",
+        "^scripts/ops/audit/auth-email-url-audit\\.js$",
+        "^tests/load/",
+        "^tests/unit/"
+      ],
+      "exclude_re": [
+        "^tests/unit/frontend/",
+        "^tests/unit/fieldops/",
+        "^tests/unit/mobile-core/",
+        "^tests/unit/integration/",
+        "^tests/unit/storage-admin\\.test\\.js$",
+        "^tests/unit/ops/(ensure-storage-buckets|prega-.*|supabase-cli|cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract|preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$"
+      ],
+      "required_suites": [
+        "lint_structure",
+        "test_unit"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "console",
+      "include_re": [
+        "^apps/console/",
+        "^packages/",
+        "^scripts/ops/vercel/",
+        "^scripts/ops/verify-cloud-ui\\.js$",
+        "^tests/e2e/(console-core-flows|gate/console-gate-smoke)\\.spec\\.ts$",
+        "^tests/e2e/utils/",
+        "^tests/ui/",
+        "^tests/e2e/gate/",
+        "^tests/unit/frontend/",
+        "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+        "^package\\.json$",
+        "^package-lock\\.json$"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "test_ui",
+        "test_unit"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "db",
+      "include_re": [
+        "^supabase/migrations/",
+        "^supabase/functions/",
+        "^supabase/tests/pgtap/",
+        "^supabase/config\\.toml$",
+        "^config/edge/",
+        "^scripts/ops/prega-.*\\.js$",
+        "^scripts/ops/ensure-storage-buckets\\.js$",
+        "^scripts/ops/provision-operator-accounts\\.js$",
+        "^scripts/ops/workspace/deploy\\.js$",
+        "^scripts/ops/workspace/supabase-api\\.js$",
+        "^scripts/ops/auth/",
+        "^scripts/ops/supabase-cli\\.js$",
+        "^scripts/workers/",
+        "^config/ops/auth-email-url-policy\\.(dev|stg|prod)\\.json$",
+        "^AGENTS\\.md$",
+        "^tests/unit/ops/ensure-storage-buckets\\.test\\.js$",
+        "^tests/unit/ops/prega-.*\\.test\\.js$",
+        "^tests/unit/ops/supabase-cli\\.test\\.js$",
+        "^tests/unit/ops/(cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
+        "^tests/unit/workspace/deploy\\.test\\.js$",
+        "^tests/unit/integration/",
+        "^tests/unit/storage-admin\\.test\\.js$",
+        "^tests/integration/(ack|alerting|geocoding|helpers|label|label-designer|multitenant|observability|policies|providers|security|tasks|utils|workflows)/",
+        "^tests/integration/[^/]+\\.test\\.js$",
+        "^docs/ops/runbooks/PRE_GA_DATA_REBASELINE_RESET\\.md$",
+        "^docs/ops/runbooks/(auth-email-url-governance|operator-accounts-and-breakglass|tenant-signup-approval-onboarding)\\.md$",
+        "^docs/ops/plans/PLAN-202603-auth-email-hosted-redirect-governance\\.md$"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "edge_deploy",
+        "integration",
+        "pgtap",
+        "verify_cloud_core"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "docs",
+      "include_re": [
+        "^docs/",
+        "\\.mdx?$",
+        "^docs/api/",
+        "^scripts/docs/",
+        "^scripts/utils/load-env\\.js$",
+        "^package\\.json$",
+        "^package-lock\\.json$",
+        "^\\.github/workflows/publish-public-docs\\.yml$"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "docs_lane"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "edge",
+      "include_re": [
+        "^supabase/migrations/",
+        "^supabase/functions/",
+        "^supabase/tests/pgtap/",
+        "^supabase/config\\.toml$",
+        "^config/edge/",
+        "^scripts/ops/prega-.*\\.js$",
+        "^scripts/ops/ensure-storage-buckets\\.js$",
+        "^scripts/ops/provision-operator-accounts\\.js$",
+        "^scripts/ops/workspace/deploy\\.js$",
+        "^scripts/ops/workspace/supabase-api\\.js$",
+        "^scripts/ops/auth/",
+        "^scripts/ops/supabase-cli\\.js$",
+        "^scripts/workers/",
+        "^config/ops/auth-email-url-policy\\.(dev|stg|prod)\\.json$",
+        "^AGENTS\\.md$",
+        "^tests/unit/ops/ensure-storage-buckets\\.test\\.js$",
+        "^tests/unit/ops/prega-.*\\.test\\.js$",
+        "^tests/unit/ops/supabase-cli\\.test\\.js$",
+        "^tests/unit/ops/(cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
+        "^tests/unit/workspace/deploy\\.test\\.js$",
+        "^tests/unit/integration/",
+        "^tests/unit/storage-admin\\.test\\.js$",
+        "^tests/integration/(ack|alerting|geocoding|helpers|label|label-designer|multitenant|observability|policies|providers|security|tasks|utils|workflows)/",
+        "^tests/integration/[^/]+\\.test\\.js$",
+        "^docs/ops/runbooks/PRE_GA_DATA_REBASELINE_RESET\\.md$",
+        "^docs/ops/runbooks/(auth-email-url-governance|operator-accounts-and-breakglass|tenant-signup-approval-onboarding)\\.md$",
+        "^docs/ops/plans/PLAN-202603-auth-email-hosted-redirect-governance\\.md$"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "edge_deploy",
+        "integration",
+        "pgtap",
+        "verify_cloud_core"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "landing",
+      "include_re": [
+        "^docs/marketing/",
+        "^scripts/frontend/",
+        "^tests/landing-e2e/",
+        "^package\\.json$",
+        "^package-lock\\.json$"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "landing_build",
+        "landing_e2e",
+        "lint_frontend"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "mobile",
+      "include_re": [
+        "^apps/fieldops/",
+        "^packages/mobile-core/",
+        "^tests/integration/fieldops/",
+        "^tests/fieldops-e2e/",
+        "^tests/unit/fieldops/",
+        "^tests/unit/mobile-core/",
+        "^package\\.json$",
+        "^package-lock\\.json$"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "test_ui",
+        "test_unit"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "portal",
+      "include_re": [
+        "^apps/portal/",
+        "^packages/",
+        "^scripts/ops/vercel/",
+        "^scripts/ops/verify-cloud-ui\\.js$",
+        "^tests/e2e/(portal-core-flows|gate/portal-gate-smoke)\\.spec\\.ts$",
+        "^tests/e2e/utils/",
+        "^tests/ui/",
+        "^tests/e2e/gate/",
+        "^tests/unit/frontend/",
+        "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+        "^package\\.json$",
+        "^package-lock\\.json$"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "test_ui",
+        "test_unit"
+      ],
+      "propagates_to": []
+    },
+    {
+      "id": "shared",
+      "include_re": [
+        "^packages/",
+        "^scripts/",
+        "^config/"
+      ],
+      "exclude_re": [
+        "^packages/mobile-core/",
+        "^packages/ui/",
+        "^scripts/frontend/",
+        "^scripts/ops/audit/auth-email-url-audit\\.js$",
+        "^scripts/ops/ci/",
+        "^scripts/ops/cloudflare/",
+        "^scripts/docs/",
+        "^config/ci/",
+        "^config/edge/"
+      ],
+      "required_suites": [
+        "integration",
+        "test_unit"
+      ],
+      "propagates_to": [
+        "api-ingress",
+        "console",
+        "db",
+        "docs",
+        "edge",
+        "landing",
+        "mobile",
+        "portal"
+      ]
+    }
+  ]
+}

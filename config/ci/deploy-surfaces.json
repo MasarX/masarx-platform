@@ -1,0 +1,919 @@
+{
+  "version": 1,
+  "ignored_paths_include_re": [
+    "^docs/",
+    "\\.mdx?$",
+    "^tests/unit/",
+    "^\\.github/",
+    "^config/ci/",
+    "^scripts/ops/ci/"
+  ],
+  "defaults": {
+    "approval_mode_by_stage": {
+      "stg": "none",
+      "prod": "surface"
+    }
+  },
+  "ci": {
+    "full_relevant_suites": [
+      "lint_structure",
+      "test_unit",
+      "test_ui",
+      "lint_frontend",
+      "landing_build",
+      "landing_e2e",
+      "verify_cloud_core",
+      "pgtap",
+      "integration",
+      "edge_deploy",
+      "docs_lane"
+    ],
+    "non_surface_impacts": [
+      {
+        "impact_id": "docs",
+        "display_name": "Docs fast lane",
+        "impact_tags": [
+          "docs"
+        ],
+        "include_re": [
+          "^docs/",
+          "\\.mdx?$"
+        ],
+        "exclude_re": [],
+        "required_suites": [
+          "docs_lane"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      {
+        "impact_id": "ci",
+        "display_name": "CI fast lane",
+        "impact_tags": [
+          "ci"
+        ],
+        "include_re": [
+          "^\\.github/",
+          "^config/ci/",
+          "^scripts/ops/ci/",
+          "^scripts/ops/audit/auth-email-url-audit\\.js$",
+          "^tests/load/",
+          "^tests/unit/"
+        ],
+        "exclude_re": [
+          "^tests/unit/frontend/",
+          "^tests/unit/fieldops/",
+          "^tests/unit/mobile-core/",
+          "^tests/unit/integration/",
+          "^tests/unit/storage-admin\\.test\\.js$",
+          "^tests/unit/ops/(ensure-storage-buckets|prega-.*|supabase-cli|cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract|preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$"
+        ],
+        "required_suites": [
+          "lint_structure",
+          "test_unit"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      {
+        "impact_id": "shared",
+        "display_name": "Shared runtime fanout",
+        "impact_tags": [
+          "shared"
+        ],
+        "include_re": [
+          "^packages/",
+          "^scripts/",
+          "^config/"
+        ],
+        "exclude_re": [
+          "^packages/mobile-core/",
+          "^packages/ui/",
+          "^scripts/frontend/",
+          "^scripts/ops/audit/auth-email-url-audit\\.js$",
+          "^scripts/ops/ci/",
+          "^scripts/ops/cloudflare/",
+          "^scripts/docs/",
+          "^config/ci/",
+          "^config/edge/"
+        ],
+        "required_suites": [
+          "test_unit",
+          "integration"
+        ],
+        "propagates_to_surface_ids": [
+          "db",
+          "landing",
+          "console",
+          "portal",
+          "api_ingress",
+          "mobile_fieldops",
+          "docs"
+        ]
+      }
+    ]
+  },
+  "surfaces": [
+    {
+      "surface_id": "db",
+      "display_name": "Backend (DB + Edge)",
+      "paths_include_re": [
+        "^supabase/migrations/",
+        "^supabase/functions/",
+        "^supabase/tests/pgtap/",
+        "^supabase/config\\.toml$",
+        "^config/edge/",
+        "^scripts/ops/prega-.*\\.js$",
+        "^scripts/ops/ensure-storage-buckets\\.js$",
+        "^scripts/ops/provision-operator-accounts\\.js$",
+        "^scripts/ops/workspace/deploy\\.js$",
+        "^scripts/ops/workspace/supabase-api\\.js$",
+        "^scripts/ops/auth/",
+        "^scripts/ops/supabase-cli\\.js$",
+        "^scripts/workers/",
+        "^config/ops/auth-email-url-policy\\.(dev|stg|prod)\\.json$",
+        "^AGENTS\\.md$",
+        "^tests/unit/ops/ensure-storage-buckets\\.test\\.js$",
+        "^tests/unit/ops/prega-.*\\.test\\.js$",
+        "^tests/unit/ops/supabase-cli\\.test\\.js$",
+        "^tests/unit/ops/(cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
+        "^tests/unit/workspace/deploy\\.test\\.js$",
+        "^tests/unit/integration/",
+        "^tests/unit/storage-admin\\.test\\.js$",
+        "^tests/integration/(ack|alerting|geocoding|helpers|label|label-designer|multitenant|observability|policies|providers|security|tasks|utils|workflows)/",
+        "^tests/integration/[^/]+\\.test\\.js$",
+        "^docs/ops/runbooks/PRE_GA_DATA_REBASELINE_RESET\\.md$",
+        "^docs/ops/runbooks/(auth-email-url-governance|operator-accounts-and-breakglass|tenant-signup-approval-onboarding)\\.md$",
+        "^docs/ops/plans/PLAN-202603-auth-email-hosted-redirect-governance\\.md$"
+      ],
+      "paths_exclude_re": [],
+      "deploy": {
+        "stages": [
+          "dev",
+          "stg",
+          "prod"
+        ],
+        "entrypoint": {
+          "type": "workflow",
+          "workflow_file_by_stage": {
+            "dev": "deploy-dev.yml",
+            "stg": "deploy-stg-promote.yml",
+            "prod": "deploy-prod.yml"
+          },
+          "workflow_dispatch_inputs_by_stage": {
+            "dev": {},
+            "stg": {},
+            "prod": {
+              "approval_issue_number": "",
+              "skip_approval": "true"
+            }
+          },
+          "workflow_file": "cloud-task.yml",
+          "notes": "Uses scripts/ops/workspace/deploy.js via existing deploy workflows."
+        }
+      },
+      "env": {
+        "deploy_env_name_by_stage": {
+          "dev": "db-dev",
+          "stg": "db-stg",
+          "prod": "db-prod"
+        },
+        "checks_env_name_by_stage": {
+          "stg": "db-stg-checks"
+        },
+        "approval_env_commit_by_stage": {
+          "prod": "prod-approval"
+        },
+        "approval_env_surface_by_stage": {
+          "prod": "prod-approval-db"
+        }
+      },
+      "ci": {
+        "impact_tags": [
+          "db",
+          "edge"
+        ],
+        "required_suites": [
+          "verify_cloud_core",
+          "pgtap",
+          "integration",
+          "edge_deploy"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      "allowed_secret_keys": [
+        "SUPABASE_ACCESS_TOKEN",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_JWT_SECRET",
+        "SUPABASE_DB_PASSWORD",
+        "MARKETING_IP_HASH_SALT",
+        "MARKETING_CORS_ALLOW_ORIGINS",
+        "MARKETING_TURNSTILE_SECRET_KEY",
+        "re:.*_DB_JWT$"
+      ],
+      "allowed_var_keys": [
+        "SUPABASE_ORG_ID",
+        "SUPABASE_REGION",
+        "SUPABASE_PROJECT_ID",
+        "SUPABASE_URL",
+        "SUPABASE_ANON_KEY",
+        "SUPABASE_POOLER_HOST",
+        "SUPABASE_POOLER_PORT",
+        "EDGE_INTERNAL_CALLER_ROLES",
+        "EDGE_REQUIRE_DB_JWT",
+        "PROD_DEPLOY_GUARD",
+        "E2E_IDENTITY_STRATEGY",
+        "E2E_EPHEMERAL_ALLOW_PRODUCTION",
+        "DEMO_ACCOUNTS_PROVISION_GUARD",
+        "DEMO_ACCOUNTS_ALLOW_PRODUCTION"
+      ],
+      "preview": {
+        "topologies_supported": [
+          "pr",
+          "worktree"
+        ],
+        "provider": "supabase",
+        "provision_phase": "runtime",
+        "prewarm_supported": true,
+        "full_deploy_required_on_pr_full_mode": true,
+        "required_preview_secret_keys": [
+          "SUPABASE_ACCESS_TOKEN",
+          "SUPABASE_SERVICE_ROLE_KEY",
+          "SUPABASE_JWT_SECRET",
+          "SUPABASE_DB_PASSWORD",
+          "MARKETING_IP_HASH_SALT",
+          "MARKETING_CORS_ALLOW_ORIGINS",
+          "MARKETING_TURNSTILE_SECRET_KEY",
+          "re:.*_DB_JWT$"
+        ],
+        "required_preview_var_keys": [
+          "SUPABASE_ORG_ID",
+          "SUPABASE_REGION",
+          "SUPABASE_PROJECT_ID",
+          "SUPABASE_URL",
+          "SUPABASE_ANON_KEY",
+          "SUPABASE_POOLER_HOST",
+          "SUPABASE_POOLER_PORT",
+          "EDGE_INTERNAL_CALLER_ROLES",
+          "EDGE_REQUIRE_DB_JWT",
+          "PROD_DEPLOY_GUARD",
+          "E2E_IDENTITY_STRATEGY",
+          "E2E_EPHEMERAL_ALLOW_PRODUCTION",
+          "DEMO_ACCOUNTS_PROVISION_GUARD",
+          "DEMO_ACCOUNTS_ALLOW_PRODUCTION"
+        ],
+        "smoke_check_profile": "backend_core",
+        "teardown_strategy": "manifest-driven"
+      }
+    },
+    {
+      "surface_id": "landing",
+      "display_name": "Landing (Cloudflare Pages)",
+      "paths_include_re": [
+        "^docs/marketing/",
+        "^scripts/frontend/",
+        "^tests/landing-e2e/",
+        "^package\\.json$",
+        "^package-lock\\.json$"
+      ],
+      "paths_exclude_re": [],
+      "deploy": {
+        "stages": [
+          "dev",
+          "stg",
+          "prod"
+        ],
+        "entrypoint": {
+          "type": "workflow",
+          "workflow_file": "deploy-landing-cloudflare-task.yml",
+          "workflow_file_by_stage": {
+            "dev": "deploy-landing-dev.yml",
+            "stg": "deploy-landing-stg.yml",
+            "prod": "deploy-landing-prod.yml"
+          },
+          "workflow_dispatch_inputs_by_stage": {
+            "dev": {},
+            "stg": {},
+            "prod": {
+              "skip_approval": "true"
+            }
+          }
+        }
+      },
+      "env": {
+        "deploy_env_name_by_stage": {
+          "dev": "landing-dev",
+          "stg": "landing-stg",
+          "prod": "landing-prod"
+        },
+        "approval_env_commit_by_stage": {
+          "prod": "prod-approval"
+        },
+        "approval_env_surface_by_stage": {
+          "prod": "prod-approval-landing"
+        }
+      },
+      "ci": {
+        "impact_tags": [
+          "landing"
+        ],
+        "required_suites": [
+          "lint_frontend",
+          "landing_build",
+          "landing_e2e"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      "allowed_secret_keys": [
+        "CLOUDFLARE_API_TOKEN"
+      ],
+      "allowed_var_keys": [
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_PAGES_PROJECT_LANDING",
+        "LANDING_SITE_URL",
+        "LANDING_CUSTOM_DOMAINS",
+        "LANDING_CONTACT_ENDPOINT",
+        "LANDING_CLIENTS_ENDPOINT",
+        "LANDING_TENANT_SIGNUP_ENDPOINT",
+        "LANDING_PAGES_DEPLOY_GUARD",
+        "LANDING_TURNSTILE_SITE_KEY",
+        "LANDING_APP_URL",
+        "LANDING_DOCS_URL"
+      ],
+      "preview": {
+        "topologies_supported": [
+          "pr",
+          "worktree"
+        ],
+        "provider": "cloudflare",
+        "provision_phase": "hosted",
+        "prewarm_supported": true,
+        "full_deploy_required_on_pr_full_mode": false,
+        "required_preview_secret_keys": [
+          "CLOUDFLARE_API_TOKEN"
+        ],
+        "required_preview_var_keys": [
+          "CLOUDFLARE_ACCOUNT_ID",
+          "CLOUDFLARE_PAGES_PROJECT_LANDING",
+          "LANDING_SITE_URL",
+          "LANDING_CUSTOM_DOMAINS",
+          "LANDING_CONTACT_ENDPOINT",
+          "LANDING_CLIENTS_ENDPOINT",
+          "LANDING_PAGES_DEPLOY_GUARD",
+          "LANDING_TURNSTILE_SITE_KEY",
+          "LANDING_APP_URL",
+          "LANDING_DOCS_URL"
+        ],
+        "smoke_check_profile": "landing",
+        "teardown_strategy": "manifest-driven"
+      }
+    },
+    {
+      "surface_id": "console",
+      "display_name": "Console (Vercel)",
+      "paths_include_re": [
+        "^apps/console/",
+        "^packages/",
+        "^scripts/ops/vercel/",
+        "^scripts/ops/verify-cloud-ui\\.js$",
+        "^tests/e2e/(console-core-flows|gate/console-gate-smoke)\\.spec\\.ts$",
+        "^tests/e2e/utils/",
+        "^tests/ui/",
+        "^tests/e2e/gate/",
+        "^tests/unit/frontend/",
+        "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+        "^package\\.json$",
+        "^package-lock\\.json$"
+      ],
+      "paths_exclude_re": [],
+      "deploy": {
+        "stages": [
+          "dev",
+          "stg",
+          "prod"
+        ],
+        "entrypoint": {
+          "type": "workflow",
+          "workflow_file": "deploy-console.yml",
+          "workflow_file_by_stage": {
+            "dev": "deploy-console.yml",
+            "stg": "deploy-console.yml",
+            "prod": "deploy-console.yml"
+          },
+          "workflow_dispatch_inputs_by_stage": {
+            "dev": {
+              "environment": "dev"
+            },
+            "stg": {
+              "environment": "stg",
+              "skip_approval": "true"
+            },
+            "prod": {
+              "environment": "prod",
+              "skip_approval": "true"
+            }
+          }
+        }
+      },
+      "env": {
+        "deploy_env_name_by_stage": {
+          "dev": "console-dev",
+          "stg": "console-stg",
+          "prod": "console-prod"
+        },
+        "approval_env_commit_by_stage": {
+          "prod": "prod-approval"
+        },
+        "approval_env_surface_by_stage": {
+          "prod": "prod-approval-console"
+        }
+      },
+      "ci": {
+        "impact_tags": [
+          "console"
+        ],
+        "required_suites": [
+          "test_unit",
+          "test_ui"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      "allowed_secret_keys": [
+        "VERCEL_TOKEN"
+      ],
+      "allowed_var_keys": [
+        "VERCEL_ORG_ID",
+        "VERCEL_PROJECT_ID_CONSOLE",
+        "SUPABASE_URL",
+        "SUPABASE_ANON_KEY",
+        "CONSOLE_BASE_URL"
+      ],
+      "preview": {
+        "topologies_supported": [
+          "pr",
+          "worktree"
+        ],
+        "provider": "vercel",
+        "provision_phase": "hosted",
+        "prewarm_supported": true,
+        "full_deploy_required_on_pr_full_mode": true,
+        "required_preview_secret_keys": [
+          "VERCEL_TOKEN"
+        ],
+        "required_preview_var_keys": [
+          "VERCEL_ORG_ID",
+          "VERCEL_PROJECT_ID_CONSOLE",
+          "SUPABASE_URL",
+          "SUPABASE_ANON_KEY",
+          "CONSOLE_BASE_URL"
+        ],
+        "ui_e2e_profile_rules": [
+          {
+            "profile": "gate",
+            "include_re": [
+              "^scripts/ops/verify-cloud-ui\\.js$",
+              "^tests/e2e/gate/",
+              "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+              "^\\.github/workflows/reviewer-gate-pr\\.yml$"
+            ]
+          },
+          {
+            "profile": "full",
+            "include_re": [
+              "^apps/console/",
+              "^packages/",
+              "^scripts/ops/vercel/",
+              "^tests/ui/",
+              "^tests/unit/frontend/",
+              "^package\\.json$",
+              "^package-lock\\.json$",
+              "^\\.github/workflows/deploy-vercel-surface\\.yml$",
+              "^\\.github/workflows/deploy-console\\.yml$"
+            ]
+          }
+        ],
+        "smoke_check_profile": "console",
+        "teardown_strategy": "manifest-driven"
+      }
+    },
+    {
+      "surface_id": "portal",
+      "display_name": "Portal (Vercel)",
+      "paths_include_re": [
+        "^apps/portal/",
+        "^packages/",
+        "^scripts/ops/vercel/",
+        "^scripts/ops/verify-cloud-ui\\.js$",
+        "^tests/e2e/(portal-core-flows|gate/portal-gate-smoke)\\.spec\\.ts$",
+        "^tests/e2e/utils/",
+        "^tests/ui/",
+        "^tests/e2e/gate/",
+        "^tests/unit/frontend/",
+        "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+        "^package\\.json$",
+        "^package-lock\\.json$"
+      ],
+      "paths_exclude_re": [],
+      "deploy": {
+        "stages": [
+          "dev",
+          "stg",
+          "prod"
+        ],
+        "entrypoint": {
+          "type": "workflow",
+          "workflow_file": "deploy-portal.yml",
+          "workflow_file_by_stage": {
+            "dev": "deploy-portal.yml",
+            "stg": "deploy-portal.yml",
+            "prod": "deploy-portal.yml"
+          },
+          "workflow_dispatch_inputs_by_stage": {
+            "dev": {
+              "environment": "dev"
+            },
+            "stg": {
+              "environment": "stg",
+              "skip_approval": "true"
+            },
+            "prod": {
+              "environment": "prod",
+              "skip_approval": "true"
+            }
+          }
+        }
+      },
+      "env": {
+        "deploy_env_name_by_stage": {
+          "dev": "portal-dev",
+          "stg": "portal-stg",
+          "prod": "portal-prod"
+        },
+        "approval_env_commit_by_stage": {
+          "prod": "prod-approval"
+        },
+        "approval_env_surface_by_stage": {
+          "prod": "prod-approval-portal"
+        }
+      },
+      "ci": {
+        "impact_tags": [
+          "portal"
+        ],
+        "required_suites": [
+          "test_unit",
+          "test_ui"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      "allowed_secret_keys": [
+        "VERCEL_TOKEN"
+      ],
+      "allowed_var_keys": [
+        "VERCEL_ORG_ID",
+        "VERCEL_PROJECT_ID_PORTAL",
+        "SUPABASE_URL",
+        "SUPABASE_ANON_KEY",
+        "PORTAL_BASE_URL"
+      ],
+      "preview": {
+        "topologies_supported": [
+          "pr",
+          "worktree"
+        ],
+        "provider": "vercel",
+        "provision_phase": "hosted",
+        "prewarm_supported": true,
+        "full_deploy_required_on_pr_full_mode": true,
+        "required_preview_secret_keys": [
+          "VERCEL_TOKEN"
+        ],
+        "required_preview_var_keys": [
+          "VERCEL_ORG_ID",
+          "VERCEL_PROJECT_ID_PORTAL",
+          "SUPABASE_URL",
+          "SUPABASE_ANON_KEY",
+          "PORTAL_BASE_URL"
+        ],
+        "ui_e2e_profile_rules": [
+          {
+            "profile": "gate",
+            "include_re": [
+              "^scripts/ops/verify-cloud-ui\\.js$",
+              "^tests/e2e/gate/",
+              "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+              "^\\.github/workflows/reviewer-gate-pr\\.yml$"
+            ]
+          },
+          {
+            "profile": "full",
+            "include_re": [
+              "^apps/portal/",
+              "^packages/",
+              "^scripts/ops/vercel/",
+              "^tests/ui/",
+              "^tests/unit/frontend/",
+              "^package\\.json$",
+              "^package-lock\\.json$",
+              "^\\.github/workflows/deploy-vercel-surface\\.yml$",
+              "^\\.github/workflows/deploy-portal\\.yml$"
+            ]
+          }
+        ],
+        "smoke_check_profile": "portal",
+        "teardown_strategy": "manifest-driven"
+      }
+    },
+    {
+      "surface_id": "api_ingress",
+      "display_name": "API Ingress (Cloudflare Worker)",
+      "paths_include_re": [
+        "^tooling/apps/api-ingress-worker/",
+        "^scripts/ops/cloudflare/",
+        "^scripts/tooling/validate-api-ingress-worker\\.js$",
+        "^tests/integration/edge/",
+        "^tests/unit/edge/"
+      ],
+      "paths_exclude_re": [],
+      "deploy": {
+        "stages": [
+          "dev",
+          "stg",
+          "prod"
+        ],
+        "entrypoint": {
+          "type": "workflow",
+          "workflow_file": "deploy-api-ingress-worker.yml",
+          "workflow_file_by_stage": {
+            "dev": "deploy-api-ingress-worker.yml",
+            "stg": "deploy-api-ingress-worker.yml",
+            "prod": "deploy-api-ingress-worker.yml"
+          },
+          "workflow_dispatch_inputs_by_stage": {
+            "dev": {
+              "environment": "dev"
+            },
+            "stg": {
+              "environment": "stg",
+              "skip_approval": "true"
+            },
+            "prod": {
+              "environment": "prod",
+              "skip_approval": "true"
+            }
+          }
+        }
+      },
+      "env": {
+        "deploy_env_name_by_stage": {
+          "dev": "api-ingress-dev",
+          "stg": "api-ingress-stg",
+          "prod": "api-ingress-prod"
+        },
+        "approval_env_commit_by_stage": {
+          "prod": "prod-approval"
+        },
+        "approval_env_surface_by_stage": {
+          "prod": "prod-approval-api-ingress"
+        }
+      },
+      "ci": {
+        "impact_tags": [
+          "api-ingress"
+        ],
+        "required_suites": [
+          "test_unit",
+          "verify_cloud_core"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      "allowed_secret_keys": [
+        "CLOUDFLARE_API_TOKEN"
+      ],
+      "allowed_var_keys": [
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_ZONE_NAME",
+        "SUPABASE_URL",
+        "API_INGRESS_DEPLOY_GUARD",
+        "API_INGRESS_UPSTREAM_ORIGIN",
+        "API_INGRESS_PUBLIC_HOST"
+      ],
+      "preview": {
+        "topologies_supported": [
+          "pr",
+          "worktree"
+        ],
+        "provider": "cloudflare",
+        "provision_phase": "runtime",
+        "prewarm_supported": true,
+        "full_deploy_required_on_pr_full_mode": false,
+        "required_preview_secret_keys": [
+          "CLOUDFLARE_API_TOKEN"
+        ],
+        "required_preview_var_keys": [
+          "CLOUDFLARE_ACCOUNT_ID",
+          "CLOUDFLARE_ZONE_NAME",
+          "SUPABASE_URL",
+          "API_INGRESS_DEPLOY_GUARD",
+          "API_INGRESS_UPSTREAM_ORIGIN",
+          "API_INGRESS_PUBLIC_HOST"
+        ],
+        "smoke_check_profile": "api_ingress",
+        "teardown_strategy": "manifest-driven"
+      }
+    },
+    {
+      "surface_id": "mobile_fieldops",
+      "display_name": "Mobile FieldOps (Expo/EAS)",
+      "paths_include_re": [
+        "^apps/fieldops/",
+        "^packages/mobile-core/",
+        "^tests/integration/fieldops/",
+        "^tests/fieldops-e2e/",
+        "^tests/unit/fieldops/",
+        "^tests/unit/mobile-core/",
+        "^package\\.json$",
+        "^package-lock\\.json$"
+      ],
+      "paths_exclude_re": [],
+      "deploy": {
+        "stages": [
+          "dev",
+          "stg",
+          "prod"
+        ],
+        "depends_on_surface_ids_by_stage": {
+          "dev": [
+            "db"
+          ],
+          "stg": [
+            "db"
+          ]
+        },
+        "entrypoint": {
+          "type": "workflow",
+          "workflow_file": "deploy-mobile-fieldops.yml",
+          "workflow_file_by_stage": {
+            "dev": "deploy-mobile-fieldops.yml",
+            "stg": "deploy-mobile-fieldops.yml",
+            "prod": "deploy-mobile-fieldops.yml"
+          },
+          "workflow_dispatch_inputs_by_stage": {
+            "dev": {
+              "environment": "dev",
+              "profile": "development",
+              "platform": "all",
+              "submit": "false",
+              "execute_release": "false"
+            },
+            "stg": {
+              "environment": "stg",
+              "profile": "stg",
+              "platform": "all",
+              "submit": "false",
+              "execute_release": "false",
+              "skip_approval": "true"
+            },
+            "prod": {
+              "environment": "prod",
+              "profile": "production",
+              "platform": "all",
+              "submit": "false",
+              "execute_release": "false",
+              "skip_approval": "true"
+            }
+          }
+        }
+      },
+      "env": {
+        "deploy_env_name_by_stage": {
+          "dev": "mobile-dev",
+          "stg": "mobile-stg",
+          "prod": "mobile-prod"
+        },
+        "approval_env_commit_by_stage": {
+          "prod": "prod-approval"
+        },
+        "approval_env_surface_by_stage": {
+          "prod": "prod-approval-mobile"
+        }
+      },
+      "ci": {
+        "impact_tags": [
+          "mobile"
+        ],
+        "required_suites": [
+          "test_unit",
+          "test_ui"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      "allowed_secret_keys": [
+        "EXPO_TOKEN"
+      ],
+      "allowed_var_keys": [
+        "MOBILE_RELEASE_GUARD",
+        "EAS_CLI_VERSION",
+        "NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS",
+        "NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS",
+        "NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS",
+        "SUPABASE_URL",
+        "SUPABASE_ANON_KEY"
+      ],
+      "preview": {
+        "topologies_supported": [
+          "pr",
+          "worktree"
+        ],
+        "provider": "expo",
+        "provision_phase": "hosted",
+        "prewarm_supported": true,
+        "full_deploy_required_on_pr_full_mode": false,
+        "required_preview_secret_keys": [
+          "EXPO_TOKEN"
+        ],
+        "required_preview_var_keys": [
+          "MOBILE_RELEASE_GUARD",
+          "EAS_CLI_VERSION",
+          "NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS",
+          "NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS",
+          "NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS",
+          "SUPABASE_URL",
+          "SUPABASE_ANON_KEY"
+        ],
+        "smoke_check_profile": "mobile_fieldops",
+        "teardown_strategy": "manifest-driven"
+      }
+    },
+    {
+      "surface_id": "docs",
+      "display_name": "Public Docs (GitHub Pages)",
+      "paths_include_re": [
+        "^docs/api/",
+        "^scripts/docs/",
+        "^scripts/utils/load-env\\.js$",
+        "^package\\.json$",
+        "^package-lock\\.json$",
+        "^\\.github/workflows/publish-public-docs\\.yml$"
+      ],
+      "paths_exclude_re": [],
+      "deploy": {
+        "stages": [
+          "prod"
+        ],
+        "entrypoint": {
+          "type": "workflow",
+          "workflow_file": "publish-public-docs.yml",
+          "workflow_file_by_stage": {
+            "prod": "publish-public-docs.yml"
+          },
+          "workflow_dispatch_inputs_by_stage": {
+            "prod": {
+              "skip_approval": "true"
+            }
+          }
+        }
+      },
+      "env": {
+        "deploy_env_name_by_stage": {
+          "prod": "docs-prod"
+        },
+        "approval_env_commit_by_stage": {
+          "prod": "prod-approval"
+        },
+        "approval_env_surface_by_stage": {
+          "prod": "prod-approval-docs"
+        }
+      },
+      "ci": {
+        "impact_tags": [
+          "docs"
+        ],
+        "required_suites": [
+          "docs_lane"
+        ],
+        "propagates_to_surface_ids": []
+      },
+      "allowed_secret_keys": [],
+      "allowed_var_keys": [
+        "DOCS_PUBLISH_GUARD",
+        "PUBLIC_OPENAPI_PACKS"
+      ],
+      "preview": {
+        "topologies_supported": [
+          "pr",
+          "worktree"
+        ],
+        "provider": "pages",
+        "provision_phase": "hosted",
+        "prewarm_supported": true,
+        "full_deploy_required_on_pr_full_mode": false,
+        "required_preview_secret_keys": [],
+        "required_preview_var_keys": [
+          "DOCS_PUBLISH_GUARD",
+          "PUBLIC_OPENAPI_PACKS"
+        ],
+        "smoke_check_profile": "docs",
+        "teardown_strategy": "manifest-driven"
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MasarX API Reference</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      #app {
+        height: 100vh;
+        width: 100vw;
+      }
+    </style>
+  </head>
+
+  <body>
+    <script>
+      (function () {
+        const canonicalHost = 'rzyxrumpgwjnwngjrgkiqkkt.example.invalid';
+        const isHttp = location.protocol === 'http:' || location.protocol === 'https:';
+        if (isHttp && location.hostname && location.hostname !== canonicalHost) {
+          location.replace(
+            `https://${canonicalHost}${location.pathname}${location.search}${location.hash}`
+          );
+        }
+      })();
+    </script>
+
+    <div id="app">Loading MasarX API docs...</div>
+
+    <!-- Load Scalar from CDN -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.40.9"
+      integrity="sha384-6LlcX9CxufIFIdnAkPQQj6TkzUsl4chh1ao4w9XXZHVWhpFv8a1LTnazqK568Uvf"
+      crossorigin="anonymous"
+    ></script>
+
+    <!-- Initialize Scalar -->
+    <script>
+      Scalar.createApiReference('#app', {
+        // Our OpenAPI file on the same origin
+        url: './openapi.json'
+      });
+    </script>
+  </body>
+</html>

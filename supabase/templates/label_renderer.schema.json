@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Label Renderer Template",
+  "type": "object",
+  "required": ["templates"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string" },
+    "templates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shipping": { "$ref": "#/definitions/template" }
+      }
+    }
+  },
+  "definitions": {
+    "template": {
+      "type": "object",
+      "required": ["template_key", "label_type", "version", "page", "blocks"],
+      "additionalProperties": false,
+      "properties": {
+        "template_key": { "type": "string", "minLength": 1 },
+        "label_type": { "type": "string", "minLength": 1 },
+        "version": { "type": ["string", "number"] },
+        "page": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width_inch", "height_inch"],
+          "properties": {
+            "width_inch": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+            "height_inch": { "type": "number", "exclusiveMinimum": 0, "maximum": 12 },
+            "margin_inch": { "type": "number", "minimum": 0, "maximum": 1 },
+            "dpi": { "type": "integer", "minimum": 72, "maximum": 600 },
+            "orientation": { "type": "string", "enum": ["portrait", "landscape"] }
+          }
+        },
+        "assets": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/asset" }
+        },
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 300,
+          "items": { "$ref": "#/definitions/block" }
+        },
+        "barcode": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "value_path": { "type": "string" },
+            "human_readable": { "type": ["string", "boolean", "null"] }
+          },
+          "additionalProperties": true
+        },
+        "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "retry_backoff_seconds": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "metadata": { "type": "object" }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string", "minLength": 1 },
+        "content_type": { "type": "string" }
+      }
+    },
+    "block": {
+      "type": "object",
+      "required": ["type", "x", "y"],
+      "properties": {
+        "type": { "type": "string", "enum": ["text", "barcode", "image", "line", "rect"] },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 },
+        "font": { "type": "string" },
+        "font_size": { "type": "number", "minimum": 6, "maximum": 72 },
+        "module_width": { "type": "number", "minimum": 0.35, "maximum": 3 },
+        "human_readable": { "type": "boolean" },
+        "color": { "$ref": "#/definitions/color" },
+        "border_color": { "$ref": "#/definitions/color" },
+        "fill_color": { "$ref": "#/definitions/color" },
+        "value_path": { "type": "string" },
+        "asset_ref": { "type": "string" },
+        "fallback": { "type": "string" },
+        "align": { "type": "string", "enum": ["left", "center", "right"] },
+        "rotation": { "type": "number" },
+        "stroke_width": { "type": "number", "minimum": 0 },
+        "max_width": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "barcode" } }, "required": ["type"] },
+          "then": {
+            "required": ["value_path"],
+            "properties": {
+              "height": { "type": "number", "minimum": 8, "maximum": 200 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "image" } }, "required": ["type"] },
+          "then": { "required": ["asset_ref"] }
+        }
+      ]
+    },
+    "color": {
+      "type": "object",
+      "properties": {
+        "r": { "type": "number", "minimum": 0, "maximum": 1 },
+        "g": { "type": "number", "minimum": 0, "maximum": 1 },
+        "b": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

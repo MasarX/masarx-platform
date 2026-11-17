@@ -1,0 +1,14 @@
+%% Webhook Intake + HTTP Response (focused)
+
+graph TD
+  A[webhook-receiver<br/>edge] -->|RPC| D[workflow_intake_webhook<br/>fn]
+  D -->|token| E[get_webhook_source_by_token<br/>fn] --> Q[webhook_sources<br/>tbl]
+  D -->|policy| F[resolve_webhook_ingest_policy<br/>fn] --> AD[settings+versions<br/>settings]
+  D -->|idempotency check| AB[webhook_response_latest<br/>view]
+  D -->|INSERT| S[webhook_inbox<br/>tbl]
+  D -->|start| H[start_workflow_run<br/>fn] --> U[workflow_runs<br/>tbl] --> V[workflow_run_steps<br/>tbl]
+  V --> R1[render_http_response_v1<br/>handler] --> R2[persist_http_response_v1<br/>handler]
+  R2 -->|DECISION| T[decision_log<br/>tbl]
+  R2 -->|UPDATE link| S
+  T --> AA[webhook_response_events<br/>view]
+  T --> AB

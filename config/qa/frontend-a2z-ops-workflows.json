@@ -1,0 +1,587 @@
+{
+  "version": 1,
+  "title": "Frontend A-Z Deep QA with Ops Workflows + Isolation",
+  "matrix_columns": [
+    "ops_workflow_area",
+    "mutation_cleanup_status",
+    "isolation_assertion",
+    "coverage_status",
+    "route_screen",
+    "workflow",
+    "role",
+    "expected_states",
+    "backend_interactions",
+    "suite_file",
+    "evidence"
+  ],
+  "command_contracts": {
+    "shipments.print_labels": {
+      "execution_type": "print",
+      "rpc": "ui_execute_command_v1",
+      "params": {
+        "auto_download": true,
+        "output_url_paths": [
+          "context.generated_labels[0].download_url",
+          "context.generated_labels[0].url",
+          "context.outputs[0].download_url",
+          "context.outputs[0].url",
+          "context.output.url",
+          "metadata.generated_labels[0].download_url",
+          "metadata.generated_labels[0].url",
+          "metadata.outputs[0].download_url",
+          "metadata.outputs[0].url",
+          "metadata.output.url"
+        ],
+        "poll_interval_ms": 1500,
+        "poll_timeout_ms": 45000,
+        "poll_schedule_ms": [100, 150, 250, 400, 650, 1000, 1500, 2000],
+        "target_download_ms": 100,
+        "fallback_mode": "none"
+      }
+    }
+  },
+  "suite_groups": [
+    {
+      "key": "shipment_lifecycle",
+      "label": "Shipment lifecycle",
+      "ops_workflow_area": "shipment",
+      "requires_mutation": true,
+      "playwright_config": "playwright.config.ts",
+      "suite_files": [
+        "tests/e2e/action-shipments-actions.spec.ts",
+        "tests/e2e/console-shipments-manual-create.spec.ts",
+        "tests/e2e/console-shipment-amend-cancel.spec.ts",
+        "tests/e2e/action-resource-detail-open-mode.spec.ts",
+        "tests/e2e/action-resource-related-panels.spec.ts",
+        "tests/e2e/action-resource-inline-edit-single-line-capture.spec.ts",
+        "tests/e2e/console-resource-import-smoke.spec.ts",
+        "tests/e2e/portal-shipment-amend-cancel.spec.ts",
+        "tests/e2e/portal-resource-import-smoke.spec.ts"
+      ],
+      "route_screen": "/console/resources/:resource; /portal/resources/:resource",
+      "workflow": "Add shipment, fill details, update status, verify list/detail parity",
+      "roles": ["super_admin", "ops_admin", "client_admin", "sender_user"],
+      "expected_states": ["ready", "error", "blocked", "auth-required"]
+    },
+    {
+      "key": "label_lifecycle",
+      "label": "Label lifecycle",
+      "ops_workflow_area": "label",
+      "requires_mutation": true,
+      "playwright_config": "playwright.config.ts",
+      "suite_files": [
+        "tests/e2e/action-shipments-print-labels.spec.ts",
+        "tests/e2e/labels-flows.spec.ts",
+        "tests/e2e/console-wildcard-surfaces.spec.ts",
+        "tests/e2e/portal-wildcard-surfaces.spec.ts"
+      ],
+      "route_screen": "/console/labels/designer; /portal/labels/designer; /resources/:resource",
+      "workflow": "Download/print labels, verify bulk actions, update label design",
+      "roles": ["super_admin", "ops_admin", "client_admin", "sender_user"],
+      "expected_states": ["ready", "error", "blocked", "auth-required"]
+    },
+    {
+      "key": "workflow_admin_lifecycle",
+      "label": "Workflow admin lifecycle",
+      "ops_workflow_area": "workflow_admin",
+      "requires_mutation": true,
+      "playwright_config": "playwright.config.ts",
+      "suite_files": [
+        "tests/e2e/console-workflow-studio-smoke.spec.ts",
+        "tests/e2e/portal-workflow-studio-smoke.spec.ts",
+        "tests/e2e/portal-recurring-shipment-template.spec.ts",
+        "tests/e2e/console-workflow-request-flows.spec.ts"
+      ],
+      "route_screen": "/console/workflows/templates*; /portal/workflows/templates*; /console/workflows/requests",
+      "workflow": "Create/edit/remove workflow templates and validate request/run linkage",
+      "roles": ["super_admin", "ops_admin", "client_admin"],
+      "expected_states": ["ready", "error", "blocked", "auth-required"]
+    },
+    {
+      "key": "profile_settings",
+      "label": "Profile/settings and persistence",
+      "ops_workflow_area": "profile_settings",
+      "requires_mutation": true,
+      "playwright_config": "playwright.config.ts",
+      "suite_files": [
+        "tests/e2e/navigation-preferences.spec.ts",
+        "tests/e2e/navigation-preferences-isolation.spec.ts",
+        "tests/e2e/console-navigation-preferences.spec.ts",
+        "tests/e2e/portal-navigation-preferences.spec.ts",
+        "tests/e2e/console-section-preferences.spec.ts",
+        "tests/e2e/portal-section-preferences.spec.ts",
+        "tests/e2e/console-request-flows.spec.ts",
+        "tests/e2e/portal-request-flows.spec.ts"
+      ],
+      "route_screen": "/console/settings/request; /portal/settings/request; navigation shell",
+      "workflow": "Persist per-user preferences and settings/access request submission",
+      "roles": ["super_admin", "ops_admin", "client_admin", "sender_user"],
+      "expected_states": ["ready", "error", "blocked", "auth-required"]
+    },
+    {
+      "key": "tenant_isolation",
+      "label": "Tenant isolation",
+      "ops_workflow_area": "tenant_isolation",
+      "requires_mutation": false,
+      "playwright_config": "playwright.config.ts",
+      "suite_files": [
+        "tests/e2e/console-role-matrix.spec.ts",
+        "tests/e2e/portal-role-matrix.spec.ts",
+        "tests/e2e/navigation-access-overview-flows.spec.ts"
+      ],
+      "route_screen": "/console/access*; /portal/access*; navigation",
+      "workflow": "Scope-aware data visibility and cross-tenant isolation checks",
+      "roles": ["super_admin", "ops_admin", "client_admin", "sender_user"],
+      "expected_states": ["ready", "denied", "blocked", "not-found"]
+    },
+    {
+      "key": "permission_isolation",
+      "label": "Permission isolation",
+      "ops_workflow_area": "permission_isolation",
+      "requires_mutation": false,
+      "playwright_config": "playwright.config.ts",
+      "suite_files": [
+        "tests/e2e/navigation-view-permissions.spec.ts",
+        "tests/e2e/navigation-access-policy-flows.spec.ts"
+      ],
+      "route_screen": "/console/access-policy*; /portal/access-policy*; view management",
+      "workflow": "Capability-gated UI controls and denied action safety",
+      "roles": ["super_admin", "ops_admin", "client_admin", "sender_user"],
+      "expected_states": ["ready", "denied", "blocked", "auth-required"]
+    }
+  ],
+  "release_gate": {
+    "required_groups": [
+      "shipment_lifecycle",
+      "label_lifecycle",
+      "workflow_admin_lifecycle",
+      "profile_settings",
+      "tenant_isolation",
+      "permission_isolation"
+    ],
+    "required_flake_budget": 0
+  },
+  "scenario_groups": [
+    {
+      "title": "Operations Team: Shipments",
+      "scenarios": [
+        {
+          "id": "SHIP-01",
+          "title": "Create shipment and persist required details",
+          "preconditions": [
+            "Ephemeral demo identities provisioned",
+            "User has shipment write capability"
+          ],
+          "steps": [
+            "Open shipment resource workflow entry",
+            "Create shipment with tagged reference prefix E2E-AZ-<runId>",
+            "Populate required operational fields and save",
+            "Reload route and open detail drawer/page"
+          ],
+          "expected_results": [
+            "Record exists after refresh",
+            "List row and detail view show consistent values",
+            "No duplicate submission on rapid-click"
+          ],
+          "expected_backend_calls": [
+            "ui_read_registry_v1",
+            "ui_list_resource_v1",
+            "ui_update_resource_v1 or command RPC"
+          ],
+          "ui_state_verification": [
+            "ready",
+            "error mapping for invalid fields",
+            "blocked for missing capability"
+          ]
+        },
+        {
+          "id": "SHIP-02",
+          "title": "Status transitions and failure recovery",
+          "preconditions": [
+            "Seeded or newly created shipment exists"
+          ],
+          "steps": [
+            "Attempt allowed status transition",
+            "Attempt denied/invalid transition",
+            "Trigger retry path after simulated transient failure"
+          ],
+          "expected_results": [
+            "Allowed transition reflected in list and detail",
+            "Denied transition surfaces actionable message",
+            "Retry is idempotent and does not duplicate mutation"
+          ],
+          "expected_backend_calls": [
+            "workflow/manual-review commands",
+            "resource update endpoints"
+          ],
+          "ui_state_verification": [
+            "ready",
+            "error",
+            "blocked"
+          ]
+        },
+        {
+          "id": "SHIP-03",
+          "title": "Authenticated amend/cancel workflow stays policy-backed and engine-backed",
+          "preconditions": [
+            "Ephemeral demo identities provisioned",
+            "Shipment amend/cancel operation routes reachable for console and portal",
+            "Seeded shipment exists both inside and outside the configured cancel window"
+          ],
+          "steps": [
+            "Open shipment amend/cancel route with an allowed shipment_id",
+            "Submit one soft-cancel mutation through the authenticated operation form",
+            "Open shipment amend/cancel route with a blocked shipment_id"
+          ],
+          "expected_results": [
+            "Allowed shipment completes one soft-cancel path without duplicate submission",
+            "Blocked shipment stays disabled with a policy-derived reason",
+            "Console and portal surfaces both render the same workflow-backed contract"
+          ],
+          "expected_backend_calls": [
+            "shipment_amend_cancel_options_v1",
+            "shipment_amend_cancel_v1",
+            "canonical shipment workflow templates via start_workflow_run/progress_workflow_run"
+          ],
+          "ui_state_verification": [
+            "ready",
+            "success",
+            "blocked",
+            "auth-required"
+          ]
+        },
+        {
+          "id": "SHIP-CONC-01",
+          "title": "Concurrent shipment edits across sessions",
+          "preconditions": [
+            "Same shipment opened in two sessions",
+            "Both sessions have update capability"
+          ],
+          "steps": [
+            "Session A updates shipment details and saves",
+            "Session B attempts conflicting update or status transition",
+            "Use retry/refresh control from Session B conflict response"
+          ],
+          "expected_results": [
+            "Conflict error is deterministic and actionable",
+            "No silent overwrite of Session A changes",
+            "Refresh/retry path restores backend truth in list and detail"
+          ],
+          "expected_backend_calls": [
+            "ui_update_resource_v1",
+            "ui_get_resource_v1",
+            "ui_list_resource_v1"
+          ],
+          "ui_state_verification": [
+            "conflict message visible",
+            "retry available",
+            "post-retry state matches backend"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Operations Team: Labels",
+      "scenarios": [
+        {
+          "id": "LBL-ONECLICK-01",
+          "title": "One-click print from shipment row triggers workflow and auto-download",
+          "preconditions": [
+            "Shipment row selected",
+            "User has shipments.print_labels capability",
+            "Command params include auto_download=true"
+          ],
+          "steps": [
+            "Click Print labels once from shipments list selection bar",
+            "Observe workflow request trigger response",
+            "Wait for auto-download to start without manual workflow run navigation"
+          ],
+          "expected_results": [
+            "Workflow run starts via ui_execute_command_v1",
+            "Signed output URL is discovered and trusted before opening",
+            "Download starts automatically from row context"
+          ],
+          "expected_backend_calls": [
+            "ui_execute_command_v1",
+            "ui_get_resource_v1(workflow_runs)",
+            "signed output URL fetch"
+          ],
+          "ui_state_verification": [
+            "loading indicator on print action",
+            "success toast for download start",
+            "no manual run-page dependency"
+          ]
+        },
+        {
+          "id": "LBL-ONECLICK-02",
+          "title": "One-click print from shipment detail uses the same execution path",
+          "preconditions": [
+            "Shipment detail view opened from list row",
+            "User has shipments.print_labels capability"
+          ],
+          "steps": [
+            "Invoke print action from shipment detail action panel",
+            "Observe workflow trigger and auto-download behavior"
+          ],
+          "expected_results": [
+            "Detail action triggers same command/RPC path as row action",
+            "Auto-download behavior matches row context",
+            "No duplicate workflow run for a single click"
+          ],
+          "expected_backend_calls": [
+            "ui_execute_command_v1",
+            "ui_get_resource_v1(workflow_runs)"
+          ],
+          "ui_state_verification": [
+            "single-submit prevention active",
+            "success or fallback messaging visible"
+          ]
+        },
+        {
+          "id": "LBL-ONECLICK-03",
+          "title": "Bulk one-click print produces workflow output for selected shipments",
+          "preconditions": [
+            "Multiple shipments selected in table",
+            "Bulk print capability available"
+          ],
+          "steps": [
+            "Click Print labels once with multi-row selection",
+            "Verify workflow payload includes selected IDs",
+            "Observe bundle/parallel downloads when outputs are ready"
+          ],
+          "expected_results": [
+            "Single workflow run includes complete selection set",
+            "Bulk print respects selection constraints and permissions",
+            "Output availability reflected without manual run lookup"
+          ],
+          "expected_backend_calls": [
+            "ui_execute_command_v1",
+            "ui_get_resource_v1(workflow_runs)"
+          ],
+          "ui_state_verification": [
+            "selection count reflected in feedback",
+            "download success feedback",
+            "blocked state when selection invalid"
+          ]
+        },
+        {
+          "id": "LBL-ONECLICK-04",
+          "title": "One-click print timeout falls back to run outputs page",
+          "preconditions": [
+            "Workflow output generation delayed past poll timeout"
+          ],
+          "steps": [
+            "Click Print labels once",
+            "Allow polling window to expire without output URL"
+          ],
+          "expected_results": [
+            "App navigates automatically to workflow run outputs route",
+            "Toast/message explains fallback and next action",
+            "No false success state is shown"
+          ],
+          "expected_backend_calls": [
+            "ui_execute_command_v1",
+            "ui_get_resource_v1(workflow_runs)"
+          ],
+          "ui_state_verification": [
+            "fallback navigation path includes #outputs",
+            "warning/fallback feedback shown"
+          ]
+        },
+        {
+          "id": "LBL-02",
+          "title": "Update label design and verify downstream availability",
+          "preconditions": [
+            "Label designer route accessible"
+          ],
+          "steps": [
+            "Open label designer",
+            "Apply design changes and submit",
+            "Verify updated label behavior in shipment workflow"
+          ],
+          "expected_results": [
+            "Design change request/workflow recorded",
+            "Downstream label actions remain functional",
+            "Permission-denied users cannot mutate design"
+          ],
+          "expected_backend_calls": [
+            "label designer RPC/commands",
+            "settings/request workflow endpoints"
+          ],
+          "ui_state_verification": [
+            "ready",
+            "blocked",
+            "error"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Operations Team: Workflow Admin",
+      "scenarios": [
+        {
+          "id": "WF-01",
+          "title": "Create/edit/remove workflow template",
+          "preconditions": [
+            "Workflow admin capability available"
+          ],
+          "steps": [
+            "Create new workflow template draft",
+            "Edit steps/triggers",
+            "Archive/remove template",
+            "Check requests/runs screens"
+          ],
+          "expected_results": [
+            "Template lifecycle actions persist correctly",
+            "Removed/archived templates are no longer action-ready",
+            "Workflow requests/runs reflect lifecycle changes"
+          ],
+          "expected_backend_calls": [
+            "workflow template create/update endpoints",
+            "workflow request/list endpoints"
+          ],
+          "ui_state_verification": [
+            "ready",
+            "error",
+            "blocked"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Profile/Settings",
+      "scenarios": [
+        {
+          "id": "PRF-01",
+          "title": "Preference persistence and user isolation",
+          "preconditions": [
+            "Two users with same app access available"
+          ],
+          "steps": [
+            "User A changes sidebar/section preferences",
+            "Sign out and sign in as User B",
+            "Validate User B does not inherit User A preferences",
+            "Return to User A and validate persistence"
+          ],
+          "expected_results": [
+            "Preferences persist per user",
+            "No cross-user preference bleed"
+          ],
+          "expected_backend_calls": [
+            "settings request/view persistence endpoints"
+          ],
+          "ui_state_verification": [
+            "ready",
+            "error"
+          ]
+        },
+        {
+          "id": "PRF-02",
+          "title": "Settings/access request submission visibility",
+          "preconditions": [
+            "At least one requester-capable user and one non-requester user"
+          ],
+          "steps": [
+            "Submit settings request with requester user",
+            "Open same flow with non-requester user"
+          ],
+          "expected_results": [
+            "Requester sees submission success path",
+            "Non-requester sees blocked/denied state with rationale"
+          ],
+          "expected_backend_calls": [
+            "request_settings_change_v1",
+            "ui_request_access_policy_change_v1"
+          ],
+          "ui_state_verification": [
+            "submitted",
+            "blocked",
+            "error"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Tenant + Permission Isolation",
+      "scenarios": [
+        {
+          "id": "ISO-01",
+          "title": "Tenant data isolation across roles/scopes",
+          "preconditions": [
+            "Users provisioned for platform, tenant, client, sender scopes"
+          ],
+          "steps": [
+            "Run equivalent navigation/resource flows with each scoped user",
+            "Attempt direct URL to foreign scope data"
+          ],
+          "expected_results": [
+            "Scope-resolved data visibility only",
+            "Foreign-scope direct URL denied/blocked/not-found-safe",
+            "No sensitive data leakage in UI state"
+          ],
+          "expected_backend_calls": [
+            "ui_me_v1",
+            "ui_navigation_v1",
+            "ui_read_registry_v1"
+          ],
+          "ui_state_verification": [
+            "ready",
+            "blocked",
+            "not-found"
+          ]
+        },
+        {
+          "id": "ISO-TENANT-URL-01",
+          "title": "Cross-tenant direct URL attempt is denied safely",
+          "preconditions": [
+            "Two users in distinct tenants/scopes",
+            "Known resource ID from tenant A"
+          ],
+          "steps": [
+            "Authenticate as tenant B user",
+            "Open direct URL to tenant A resource route",
+            "Attempt action invocation if route renders shell"
+          ],
+          "expected_results": [
+            "Denied/blocked/not-found-safe response only",
+            "No tenant A data values rendered",
+            "Unauthorized action call does not succeed"
+          ],
+          "expected_backend_calls": [
+            "ui_navigation_v1",
+            "ui_get_resource_v1",
+            "capability-guarded action endpoint"
+          ],
+          "ui_state_verification": [
+            "safe denied state",
+            "no cross-tenant data leakage"
+          ]
+        },
+        {
+          "id": "ISO-02",
+          "title": "Capability isolation on view/action controls",
+          "preconditions": [
+            "Users with and without settings/access capabilities"
+          ],
+          "steps": [
+            "Open view management/access policy surfaces with both user types",
+            "Attempt privileged actions"
+          ],
+          "expected_results": [
+            "Privileged controls visible only for authorized users",
+            "Unauthorized actions blocked and clearly messaged"
+          ],
+          "expected_backend_calls": [
+            "ui_navigation_v1",
+            "view/settings action endpoints"
+          ],
+          "ui_state_verification": [
+            "ready",
+            "blocked",
+            "denied"
+          ]
+        }
+      ]
+    }
+  ]
+}

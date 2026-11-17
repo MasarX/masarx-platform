@@ -1,0 +1,15 @@
+{
+  "event": {
+    "id": "evt-basic-001",
+    "type": "shipment.created"
+  },
+  "shipment": {
+    "tracking_number": "BASIC-TRACK-001",
+    "status": "created",
+    "delivered_at": null,
+    "customer": {
+      "name": "Integration Test Customer",
+      "phone": "+12025550123"
+    }
+  }
+}

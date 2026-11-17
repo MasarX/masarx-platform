@@ -1,0 +1,89 @@
+{
+  "contract_version": "2026-02-19",
+  "app": {
+    "description": "Canonical Expo/EAS identity for the FieldOps app shell.",
+    "slug": "fieldops-eas"
+  },
+  "sections": {
+    "fieldops.build": {
+      "description": "Required native build identifiers for FieldOps release.",
+      "keys": [
+        {
+          "key": "NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS",
+          "aliases": [],
+          "sources": [
+            "GitHub environment variable NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS",
+            "EAS environment variable NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS",
+            "Local ENV_FILE key NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS"
+          ]
+        },
+        {
+          "key": "NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS",
+          "aliases": [],
+          "sources": [
+            "GitHub environment variable NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS",
+            "EAS environment variable NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS",
+            "Local ENV_FILE key NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS"
+          ]
+        },
+        {
+          "key": "NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS",
+          "aliases": [],
+          "sources": [
+            "GitHub environment variable NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS",
+            "EAS environment variable NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS",
+            "Local ENV_FILE key NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS"
+          ]
+        }
+      ]
+    },
+    "fieldops.runtime": {
+      "description": "Required public runtime keys consumed by the app shell and Expo runtime.",
+      "keys": [
+        {
+          "key": "NEXT_PUBLIC_SUPABASE_URL",
+          "aliases": [
+            "SUPABASE_URL"
+          ],
+          "sources": [
+            "GitHub environment variable SUPABASE_URL",
+            "GitHub environment variable NEXT_PUBLIC_SUPABASE_URL",
+            "EAS environment variable NEXT_PUBLIC_SUPABASE_URL",
+            "Local ENV_FILE key NEXT_PUBLIC_SUPABASE_URL"
+          ]
+        },
+        {
+          "key": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+          "aliases": [
+            "SUPABASE_ANON_KEY"
+          ],
+          "sources": [
+            "GitHub environment variable SUPABASE_ANON_KEY",
+            "GitHub environment variable NEXT_PUBLIC_SUPABASE_ANON_KEY",
+            "EAS environment variable NEXT_PUBLIC_SUPABASE_ANON_KEY",
+            "Local ENV_FILE key NEXT_PUBLIC_SUPABASE_ANON_KEY"
+          ]
+        }
+      ]
+    },
+    "fieldops.release_execute": {
+      "description": "Workflow-only release gate requirements for execute_release=true.",
+      "keys": [
+        {
+          "key": "MOBILE_RELEASE_GUARD",
+          "aliases": [],
+          "sources": [
+            "GitHub environment variable MOBILE_RELEASE_GUARD"
+          ]
+        },
+        {
+          "key": "EXPO_TOKEN",
+          "aliases": [],
+          "sources": [
+            "GitHub environment secret EXPO_TOKEN"
+          ]
+        }
+      ]
+    }
+  }
+}

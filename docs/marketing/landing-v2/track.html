@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-variant="ai" data-theme="light" data-motion="on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" data-i18n-meta="track_meta_description" content="Track your shipment, verify securely, and send reschedule or location-change requests to the MasarX operations team." />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MasarX" />
+    <meta property="og:title" data-i18n-meta="track_meta_title" content="MasarX - Public shipment tracking" />
+    <meta property="og:description" data-i18n-meta="track_meta_description" content="Track your shipment, verify securely, and send reschedule or location-change requests to the MasarX operations team." />
+    <meta property="og:image" content="../brand/masarx-mark-a.svg" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" data-i18n-meta="track_meta_title" content="MasarX - Public shipment tracking" />
+    <meta name="twitter:description" data-i18n-meta="track_meta_description" content="Track your shipment, verify securely, and send reschedule or location-change requests to the MasarX operations team." />
+    <meta name="twitter:image" content="../brand/masarx-mark-a.svg" />
+
+    <title data-i18n="track_meta_title">MasarX - Public shipment tracking</title>
+    <link rel="icon" href="../brand/masarx-favicon.svg" />
+    <script>
+      document.documentElement.classList.add('js');
+    </script>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+
+    <header class="header">
+      <div class="container">
+        <div class="header-row">
+          <a class="brand" href="/" data-home-href aria-label="MasarX">
+            <img class="brand-mark" src="../brand/masarx-mark-a.svg" alt="" fetchpriority="high" />
+            <span class="brand-name">MasarX</span>
+          </a>
+
+          <button class="btn btn-ghost nav-toggle" type="button" aria-expanded="false" aria-controls="nav-primary" aria-label="Menu">
+            <span class="nav-toggle-icon" aria-hidden="true"></span>
+          </button>
+
+          <nav class="nav" id="nav-primary" aria-label="Primary">
+            <a href="/" data-home-href data-i18n="track_nav_home">Home</a>
+            <a href="/track/" data-track-href aria-current="true" data-i18n="nav_track">Track shipment</a>
+            <a href="#lookup" data-i18n="track_nav_lookup">Lookup</a>
+            <a href="#actions" data-i18n="track_nav_actions">Requests</a>
+            <a href="#faq" data-i18n="nav_faq">FAQ</a>
+          </nav>
+
+          <div class="header-actions">
+            <button class="btn btn-ghost btn-theme" type="button" data-theme-toggle aria-pressed="false">Dark</button>
+            <button class="btn btn-ghost" type="button" data-lang-toggle aria-pressed="false">AR</button>
+            <a class="btn btn-secondary" href="/" data-home-href data-i18n="track_nav_home">Home</a>
+            <a class="btn btn-primary" href="#lookup" data-track-reset data-i18n="track_cta_primary">Track now</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" data-public-tracking-page>
+      <section class="track-hero" data-reveal>
+        <div class="container track-hero-grid">
+          <div class="track-copy">
+            <div class="eyebrow" data-i18n="track_eyebrow">Public shipment tracking</div>
+            <h1 data-i18n="track_title">Find your shipment without exposing private details</h1>
+            <p class="track-lead" data-i18n="track_subtitle">
+              Enter your tracking or order reference, verify with the last 3 digits of the receiver mobile number, and review the latest shipment timeline.
+            </p>
+            <div class="badge-row" role="group" aria-label="Tracking highlights">
+              <span class="badge" data-i18n="track_badge_masked">Masked customer data</span>
+              <span class="badge" data-i18n="track_badge_verified">Last-3 mobile verification</span>
+              <span class="badge" data-i18n="track_badge_requests">Reschedule and location requests</span>
+            </div>
+          </div>
+
+          <aside class="card card-pad track-overview" data-tilt>
+            <div class="track-overview-top">
+              <strong data-i18n="track_overview_title">What you can do here</strong>
+              <span class="track-overview-pill" data-i18n="track_overview_pill">Public</span>
+            </div>
+            <ul class="list track-overview-list">
+              <li><span class="check"></span><span data-i18n="track_overview_item_1">Track the latest shipment status and timeline</span></li>
+              <li><span class="check"></span><span data-i18n="track_overview_item_2">View masked recipient and address details only</span></li>
+              <li><span class="check"></span><span data-i18n="track_overview_item_3">Choose from available reschedule dates</span></li>
+              <li><span class="check"></span><span data-i18n="track_overview_item_4">Submit a location-change request for ops review</span></li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section track-shell" id="lookup">
+        <div class="container track-layout">
+          <div class="track-main">
+            <article class="card card-pad track-step" data-track-stage="lookup">
+              <div class="track-step-head">
+                <span class="track-step-index">01</span>
+                <div>
+                  <h2 data-i18n="track_lookup_title">Find your shipment</h2>
+                  <p class="lead" data-i18n="track_lookup_subtitle">Enter your tracking number or business reference to continue.</p>
+                </div>
+              </div>
+              <form class="track-form" data-track-lookup-form>
+                <label class="field">
+                  <span data-i18n="track_lookup_label">Tracking or order reference</span>
+                  <input
+                    type="search"
+                    name="reference"
+                    data-i18n-placeholder="track_lookup_placeholder"
+                    placeholder="TRK-2026-0001"
+                    autocomplete="off"
+                    required
+                  />
+                </label>
+                <div class="track-turnstile" data-turnstile></div>
+                <button class="btn btn-primary" type="submit" data-i18n="track_lookup_submit">Continue</button>
+                <p class="form-status" data-track-lookup-status aria-live="polite"></p>
+              </form>
+            </article>
+
+            <article class="card card-pad track-step" data-track-stage="verify" hidden>
+              <div class="track-step-head">
+                <span class="track-step-index">02</span>
+                <div>
+                  <h2 data-i18n="track_verify_title">Verify the recipient mobile</h2>
+                  <p class="lead" data-i18n="track_verify_subtitle">Use the last 3 digits of the receiver mobile number to open the shipment view.</p>
+                </div>
+              </div>
+              <form class="track-form" data-track-verify-form>
+                <label class="field">
+                  <span data-i18n="track_verify_label">Last 3 mobile digits</span>
+                  <input
+                    type="text"
+                    name="phone_last3"
+                    inputmode="numeric"
+                    maxlength="3"
+                    minlength="3"
+                    pattern="[0-9]{3}"
+                    data-i18n-placeholder="track_verify_placeholder"
+                    placeholder="123"
+                    required
+                  />
+                </label>
+                <div class="track-form-actions">
+                  <button class="btn btn-secondary" type="button" data-track-back data-i18n="track_verify_back">Back</button>
+                  <button class="btn btn-primary" type="submit" data-i18n="track_verify_submit">Open tracking</button>
+                </div>
+                <p class="form-status" data-track-verify-status aria-live="polite"></p>
+              </form>
+            </article>
+
+            <section class="track-results" data-track-stage="results" hidden>
+              <article class="card card-pad track-summary">
+                <div class="track-summary-head">
+                  <div>
+                    <p class="eyebrow" data-i18n="track_summary_eyebrow">Verified shipment</p>
+                    <h2 data-track-shipment-reference>TRK-2026-0001</h2>
+                  </div>
+                  <span class="track-status-pill" data-track-shipment-status>In transit</span>
+                </div>
+                <div class="track-summary-grid">
+                  <dl class="track-definition">
+                    <dt data-i18n="track_summary_tracking">Tracking number</dt>
+                    <dd data-track-shipment-tracking>TRK-2026-0001</dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_summary_client_ref">Client reference</dt>
+                    <dd data-track-shipment-client-ref>ORD-10088</dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_summary_carrier_ref">Carrier reference</dt>
+                    <dd data-track-shipment-carrier-ref>CR-77421</dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_summary_service">Service</dt>
+                    <dd data-track-shipment-service>Delivery</dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_summary_eta">Promised window</dt>
+                    <dd data-track-shipment-promise>2026-03-07</dd>
+                  </dl>
+                  <dl class="track-definition">
+                    <dt data-i18n="track_summary_created">Created</dt>
+                    <dd data-track-shipment-created>2026-03-06</dd>
+                  </dl>
+                </div>
+                <div class="track-summary-actions">
+                  <button class="btn btn-secondary" type="button" data-track-reset data-i18n="track_cta_reset">Track another shipment</button>
+                </div>
+              </article>
+
+              <div class="track-request-banner" data-track-request-banner hidden>
+                <span class="track-request-banner-badge" data-track-request-banner-badge></span>
+                <p class="track-request-banner-text" data-track-request-banner-text></p>
+              </div>
+
+              <div class="track-card-grid">
+                <article class="card card-pad">
+                  <div class="track-panel-head">
+                    <h3 data-i18n="track_masked_title">Masked shipment details</h3>
+                    <span class="track-lock" data-i18n="track_masked_pill">Protected</span>
+                  </div>
+                  <div class="track-mask-grid">
+                    <dl class="track-definition">
+                      <dt data-i18n="track_masked_name">Recipient</dt>
+                      <dd data-track-recipient-name>J******</dd>
+                    </dl>
+                    <dl class="track-definition">
+                      <dt data-i18n="track_masked_phone">Mobile</dt>
+                      <dd data-track-recipient-phone>******123</dd>
+                    </dl>
+                    <dl class="track-definition">
+                      <dt data-i18n="track_masked_email">Email</dt>
+                      <dd data-track-recipient-email>j***@e******.com</dd>
+                    </dl>
+                    <dl class="track-definition">
+                      <dt data-i18n="track_masked_city">City</dt>
+                      <dd data-track-address-city>Riyadh</dd>
+                    </dl>
+                    <dl class="track-definition">
+                      <dt data-i18n="track_masked_district">District</dt>
+                      <dd data-track-address-district>Al Olaya</dd>
+                    </dl>
+                    <dl class="track-definition">
+                      <dt data-i18n="track_masked_short_address">Short national address</dt>
+                      <dd data-track-address-short>******1234</dd>
+                    </dl>
+                  </div>
+                </article>
+
+                <article class="card card-pad">
+                  <div class="track-panel-head">
+                    <h3 data-i18n="track_timeline_title">Shipment timeline</h3>
+                    <span class="track-lock" data-i18n="track_timeline_pill">Latest updates</span>
+                  </div>
+                  <ol class="track-timeline" data-track-timeline></ol>
+                </article>
+              </div>
+
+              <section class="track-actions" id="actions">
+                <div class="track-actions-head">
+                  <div>
+                    <h2 data-i18n="track_actions_title">Request help from operations</h2>
+                    <p class="lead" data-i18n="track_actions_subtitle">Depending on the tenant policy, shipment changes are applied instantly or routed to operations for review.</p>
+                  </div>
+                </div>
+                <div class="track-action-grid">
+                  <article class="card card-pad track-action-card">
+                    <div class="track-panel-head">
+                      <h3 data-i18n="track_reschedule_title">Request a new delivery date</h3>
+                      <span class="track-lock" data-i18n="track_reschedule_pill">Available dates only</span>
+                    </div>
+                    <form class="track-form" data-track-reschedule-form>
+                      <label class="field">
+                        <span data-i18n="track_reschedule_label">Available dates</span>
+                        <select name="requested_date" data-track-date-select required>
+                          <option value="" data-i18n="track_reschedule_placeholder">Select a date</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span data-i18n="track_reschedule_notes_label">Notes for operations</span>
+                        <textarea name="notes" rows="4" data-i18n-placeholder="track_reschedule_notes_placeholder" placeholder="Need delivery on a different day."></textarea>
+                      </label>
+                      <button class="btn btn-primary" type="submit" data-i18n="track_reschedule_submit">Send reschedule request</button>
+                      <p class="form-status" data-track-reschedule-status aria-live="polite"></p>
+                    </form>
+                  </article>
+
+                  <article class="card card-pad track-action-card">
+                    <div class="track-panel-head">
+                      <h3 data-i18n="track_location_title">Request a location change</h3>
+                      <span class="track-lock" data-i18n="track_location_pill">Pin + short address required</span>
+                    </div>
+                    <form class="track-form" data-track-location-form>
+                      <label class="field">
+                        <span data-i18n="track_location_address_label">Updated address details</span>
+                        <textarea name="address_text" rows="4" data-i18n-placeholder="track_location_address_placeholder" placeholder="Building, street, district, city" required></textarea>
+                      </label>
+                      <label class="field">
+                        <span data-i18n="track_location_short_address_label">Short national address</span>
+                        <input type="text" name="short_national_address" data-i18n-placeholder="track_location_short_address_placeholder" placeholder="RAHA1234" required />
+                      </label>
+                      <label class="field">
+                        <span data-i18n="track_location_landmark_label">Landmark</span>
+                        <input type="text" name="landmark" data-i18n-placeholder="track_location_landmark_placeholder" placeholder="Near the red tower" />
+                      </label>
+                      <label class="field">
+                        <span data-i18n="track_location_drop_point_label">Drop-point details</span>
+                        <textarea name="drop_point" rows="3" data-i18n-placeholder="track_location_drop_point_placeholder" placeholder="Reception, gate, loading bay, or other handoff point"></textarea>
+                      </label>
+                      <div class="field">
+                        <span data-i18n="track_location_map_label">Approximate map pin</span>
+                        <div class="track-map-toolbar">
+                          <p class="track-map-hint" id="track-map-hint" data-i18n="track_location_map_hint">Tap to place the pin, drag to move the map, zoom in for precision, or use your current location.</p>
+                          <div class="track-map-actions">
+                            <button class="btn" type="button" data-track-map-center data-i18n="track_location_map_center">Place pin at center</button>
+                            <button class="btn" type="button" data-track-map-locate data-i18n="track_location_map_locate">Use my location</button>
+                            <button class="btn" type="button" data-track-map-clear data-i18n="track_location_map_clear" disabled>Clear pin</button>
+                          </div>
+                        </div>
+                        <div class="track-map-shell">
+                          <div
+                            class="track-map-picker"
+                            data-track-map-picker
+                            tabindex="0"
+                            aria-label="Shipment location map"
+                            aria-describedby="track-map-hint"
+                          ></div>
+                          <button class="track-map-confirm" type="button" data-track-map-confirm data-i18n="track_location_map_confirm" disabled hidden>Confirm location</button>
+                          <button class="track-map-toggle" type="button" data-track-map-expand data-i18n="track_location_map_expand">Maximize map</button>
+                        </div>
+                        <div class="track-map-meta">
+                          <span data-track-map-value data-i18n="track_location_map_empty">Place a pin to help the ops team review the new location.</span>
+                          <span class="track-map-status" data-track-map-status aria-live="polite" hidden></span>
+                        </div>
+                      </div>
+                      <label class="field">
+                        <span data-i18n="track_location_notes_label">Notes for operations</span>
+                        <textarea name="notes" rows="4" data-i18n-placeholder="track_location_notes_placeholder" placeholder="Landmark, gate, or arrival instructions"></textarea>
+                      </label>
+                      <button class="btn btn-primary" type="submit" data-i18n="track_location_submit">Send location request</button>
+                      <p class="form-status" data-track-location-status aria-live="polite"></p>
+                    </form>
+                  </article>
+                </div>
+              </section>
+            </section>
+          </div>
+
+          <aside class="track-side">
+            <article class="card card-pad">
+              <h3 data-i18n="track_help_title">Security first</h3>
+              <ul class="list track-help-list">
+                <li><span class="check"></span><span data-i18n="track_help_item_1">No full phone number or full delivery line is exposed on the public page.</span></li>
+                <li><span class="check"></span><span data-i18n="track_help_item_2">Verification uses the last 3 mobile digits before results are shown.</span></li>
+                <li><span class="check"></span><span data-i18n="track_help_item_3">Reschedule and location changes are requests, not direct shipment edits.</span></li>
+              </ul>
+            </article>
+
+            <article class="card card-pad" id="faq">
+              <h3 data-i18n="track_faq_title">Tracking FAQ</h3>
+              <div class="faq">
+                <details>
+                  <summary data-i18n="track_faq_q1">Why do I need the last 3 mobile digits?</summary>
+                  <div class="faq-body"><p data-i18n="track_faq_a1">This extra step keeps public tracking useful without exposing private shipment details to anyone who only has a reference number.</p></div>
+                </details>
+                <details>
+                  <summary data-i18n="track_faq_q2">Will my request change the shipment immediately?</summary>
+                  <div class="faq-body"><p data-i18n="track_faq_a2">No. Reschedule and location updates are routed to the operations team for review before any shipment change is applied.</p></div>
+                </details>
+                <details>
+                  <summary data-i18n="track_faq_q3">What if I cannot verify the shipment?</summary>
+                  <div class="faq-body"><p data-i18n="track_faq_a3">Double-check the reference and the last 3 digits of the receiver mobile number. If it still fails, contact the delivery team directly.</p></div>
+                </details>
+              </div>
+            </article>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div class="track-map-overlay" data-track-map-overlay hidden>
+      <div class="track-map-modal card card-pad" role="dialog" aria-modal="true" aria-labelledby="track-map-modal-title">
+        <div class="track-map-modal-head">
+          <div>
+            <h3 id="track-map-modal-title" data-i18n="track_location_map_modal_title">Choose the pin location</h3>
+            <p class="lead track-map-modal-copy" data-i18n="track_location_map_modal_subtitle">Tap or drag on the larger picker, then close it when the pin is in the right place.</p>
+          </div>
+        </div>
+        <div class="track-map-shell track-map-shell-expanded">
+          <div
+            class="track-map-picker track-map-picker-expanded"
+            data-track-map-picker-expanded
+            tabindex="0"
+            aria-label="Expanded shipment location map"
+            aria-describedby="track-map-modal-title"
+          ></div>
+          <button class="track-map-confirm" type="button" data-track-map-confirm data-i18n="track_location_map_confirm" disabled hidden>Confirm location</button>
+          <button class="track-map-toggle" type="button" data-track-map-close data-i18n="track_location_map_collapse">Minimize map</button>
+        </div>
+        <div class="track-map-actions track-map-actions-modal">
+          <button class="btn" type="button" data-track-map-center data-i18n="track_location_map_center">Place pin at center</button>
+          <button class="btn" type="button" data-track-map-locate data-i18n="track_location_map_locate">Use my location</button>
+          <button class="btn" type="button" data-track-map-clear data-i18n="track_location_map_clear" disabled>Clear pin</button>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-grid">
+          <div>
+            <strong>MasarX</strong>
+            <p class="footer-tagline" data-i18n="footer_tagline">Zero-friction integration for last-mile delivery operations.</p>
+          </div>
+          <div class="footer-links-grid">
+            <div class="footer-col">
+              <strong data-i18n="footer_product">Product</strong>
+              <a href="/" data-home-href data-i18n="track_nav_home">Home</a>
+              <a href="/track/" data-track-href data-i18n="nav_track">Track shipment</a>
+              <a href="#actions" data-i18n="track_nav_actions">Requests</a>
+            </div>
+            <div class="footer-col">
+              <strong data-i18n="footer_company">Company</strong>
+              <a href="../../README.md" data-i18n="footer_docs">Docs</a>
+              <a href="#faq" data-i18n="nav_faq">FAQ</a>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <span data-i18n="footer_copyright">MasarX. All rights reserved.</span>
+          <span data-i18n="footer_built_with">Built for operations teams.</span>
+        </div>
+      </div>
+    </footer>
+
+    <script src="./content.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

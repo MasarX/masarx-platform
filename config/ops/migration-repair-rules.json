@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "version": "202512162010",
+      "mode": "history_only_mark_applied",
+      "probe_handler": "dialog360_reply_webhook_policy_present",
+      "description": "Mark workflow intake followup as applied when the canonical dialog360 webhook policy rows already exist."
+    },
+    {
+      "version": "202601211519",
+      "mode": "pre_push_apply_sql",
+      "probe_handler": "label_template_orphan_org_references_present",
+      "sql_path": "supabase/migrations/202601211518_labels_orphan_org_layout_template_guard.sql",
+      "description": "Apply the orphan-org guard before label template backfill touches live referenced template rows."
+    },
+    {
+      "version": "202603062500",
+      "mode": "pre_push_apply_sql",
+      "probe_handler": "labels_print_workflow_v2_referenced_steps_present",
+      "sql_path": "scripts/ops/sql/202603062500_labels_print_workflow_v2_history_detach_guard.sql",
+      "description": "Detach referenced labels_print_workflow_v2 template steps into an archive template so the hybrid execute migration can run without breaking workflow history."
+    },
+    {
+      "version": "202603071110",
+      "mode": "history_only_mark_applied",
+      "probe_handler": "marketplace_network_registry_rls_present",
+      "description": "Mark marketplace network registry RLS as applied when the canonical marketplace helper functions, RLS flags, and authenticated read policies already exist on the shared target."
+    }
+  ]
+}

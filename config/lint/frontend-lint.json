@@ -1,0 +1,21 @@
+{
+  "ignore": [],
+  "allow": {
+    "from": [
+      "^packages/ui/src/workflow-bindings-page\\.tsx$",
+      "^packages/ui/src/pickup-page-shared\\.tsx$"
+    ],
+    "supabaseUrl": [],
+    "serviceRole": [
+      "^apps/shared/resource-import-route\\.ts$"
+    ]
+  },
+  "allowFromReceivers": [
+    "Array",
+    "Object",
+    "String",
+    "Buffer",
+    "URLSearchParams",
+    "storage"
+  ]
+}

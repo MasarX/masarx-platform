@@ -1,0 +1,115 @@
+[
+  {
+    "role": "database",
+    "image": "supabase/postgres",
+    "tag": "17.6.1.014",
+    "source": "scripts/ops/workspace/local-db-start.js:74",
+    "registry_endpoint": "https://public.ecr.aws/v2/supabase/postgres/manifests/17.6.1.014",
+    "digest": "sha256:863be22a9fa8afdf9d50f50711e8a1ad09e277a1acaa05fec0b357f03a16b6e1",
+    "time_utc": "2026-11-16T14:12:11.078737+00:00",
+    "attempts": [],
+    "media_type": "application/vnd.oci.image.index.v1+json",
+    "architectures": [
+      {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown"
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux"
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown"
+      }
+    ],
+    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC"
+  },
+  {
+    "role": "auth",
+    "image": "supabase/gotrue",
+    "tag": "v2.196.0",
+    "source": "tests/fixtures/ci/supabase-services-2.116.0.json:1",
+    "registry_endpoint": "https://public.ecr.aws/v2/supabase/gotrue/manifests/v2.196.0",
+    "digest": "sha256:c0c25187a6b835e65a6f6e6c6b39d090e832d40e6de5186f2c038e0411944232",
+    "time_utc": "2026-11-16T14:12:11.079824+00:00",
+    "attempts": [],
+    "media_type": "application/vnd.oci.image.index.v1+json",
+    "architectures": [
+      {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux"
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown"
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown"
+      }
+    ],
+    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC"
+  },
+  {
+    "role": "storage",
+    "image": "supabase/storage-api",
+    "tag": "v1.70.3",
+    "source": "tests/fixtures/ci/supabase-services-2.116.0.json:1",
+    "registry_endpoint": "https://public.ecr.aws/v2/supabase/storage-api/manifests/v1.70.3",
+    "digest": "sha256:528ec49c3c32561908b07ee91bced7f8456f3b688164e341eaa422441767a0bd",
+    "time_utc": "2026-11-16T14:12:11.080509+00:00",
+    "attempts": [],
+    "media_type": "application/vnd.oci.image.index.v1+json",
+    "architectures": [
+      {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux"
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown"
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown"
+      }
+    ],
+    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC"
+  },
+  {
+    "role": "gateway",
+    "image": "supabase/kong",
+    "tag": "2.8.1",
+    "source": "tests/unit/ops/cloud-pool-db-local.test.js:548",
+    "registry_endpoint": "https://public.ecr.aws/v2/supabase/kong/manifests/2.8.1",
+    "digest": "sha256:1b53405d8680a09d6f44494b7990bf7da2ea43f84a258c59717d4539abf09f6d",
+    "time_utc": "2026-11-16T14:12:11.081175+00:00",
+    "attempts": [],
+    "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+    "architectures": [
+      {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux",
+        "variant": "v8"
+      }
+    ],
+    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC"
+  }
+]

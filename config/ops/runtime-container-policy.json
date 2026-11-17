@@ -1,0 +1,314 @@
+{
+  "version": 1,
+  "backend": {
+    "v1_owner": "supabase-cli-local-runtime",
+    "compose_owned_backend": false,
+    "skip_host_functions_env": "WORKSPACE_LOCAL_START_SKIP_FUNCTIONS_RUNTIME",
+    "v2_option": "generated-compose-owned-supabase-backend-after-v1-acceptance"
+  },
+  "docker": {
+    "default_image": "node:24-bookworm-slim",
+    "compose_project_prefix": "masarx-app",
+    "artifact_root": ".tmp/docker-runtime",
+    "resource_limits": {
+      "default": {
+        "cpus": "1.50",
+        "memory": "1536m",
+        "pids": 512
+      },
+      "services": {
+        "workspace-deps": {
+          "cpus": "2.00",
+          "memory": "3072m",
+          "pids": 1024
+        },
+        "console-v2": {
+          "cpus": "1.50",
+          "memory": "2048m",
+          "pids": 768
+        },
+        "fieldops-metro": {
+          "cpus": "1.50",
+          "memory": "2048m",
+          "pids": 768
+        },
+        "test-runner": {
+          "cpus": "2.00",
+          "memory": "3072m",
+          "pids": 1024
+        }
+      }
+    }
+  },
+  "dependency_readiness": {
+    "profile_config": "config/ops/dependency-readiness-profiles.json",
+    "summary_file": "dependency-proof-summary.json",
+    "stamp_paths": [
+      "node_modules/.masarx-install-stamp",
+      "node_modules/.masarx-package-lock.stamp"
+    ]
+  },
+  "browser_proof": {
+    "parallel_resource_class": "playwright-browser-context",
+    "visible_resource_class": "browser-session",
+    "real_chrome_resource_class": "chrome-session",
+    "parallel_engine": "chromium",
+    "default_chrome_profile_allowed": false,
+    "default_timeout_ms": 30000,
+    "surface_timeout_ms": {
+      "fieldops-metro": 120000
+    }
+  },
+  "fieldops": {
+    "service_name": "fieldops-metro",
+    "app_path": "apps/fieldops",
+    "root_script": "dev:fieldops",
+    "e2e_script": "test:e2e:fieldops",
+    "base_url_env": "FIELDOPS_BASE_URL",
+    "lease_resource": "fieldops-metro",
+    "runtime_command": "npm --prefix apps/fieldops run start -- --port ${port} --localhost --clear",
+    "docker_web_command": "npm --prefix apps/fieldops run web -- --port ${port} --clear",
+    "mobile_v2_parallel_proof_label": "mobile_v2_development_runtime_proof",
+    "forbidden_service_names": [
+      "fieldops-mobile-v2",
+      "mobile-v2-runtime",
+      "mobile-v2"
+    ]
+  },
+  "services": {
+    "console-v2": {
+      "resource_class": "console-v2",
+      "profile": "console",
+      "app_path": "apps/console",
+      "dependency_profiles": [
+        "console-v2"
+      ],
+      "required_paths": [
+        "apps/console/package.json",
+        "apps/console/app",
+        "apps/console/next.config.js"
+      ],
+      "required_env": [
+        "CONSOLE_PORT",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "SUPABASE_INTERNAL_URL",
+        "NEXT_PUBLIC_USE_SEED"
+      ],
+      "forbidden_env_values": [
+        {
+          "key": "NEXT_PUBLIC_USE_SEED",
+          "pattern": "^(?!false$).+"
+        }
+      ],
+      "port_env": "CONSOLE_PORT",
+      "base_url_env": "CONSOLE_BASE_URL",
+      "command": "cd apps/console && npm exec -- next dev -H 0.0.0.0 -p ${port}",
+      "health_path": "/",
+      "cache_mounts": [
+        {
+          "target": "/workspace/apps/console/.next"
+        }
+      ]
+    },
+    "landing": {
+      "resource_class": "landing",
+      "profile": "landing",
+      "dependency_profiles": [
+        "landing"
+      ],
+      "required_paths": [
+        "scripts/frontend/build-landing.js",
+        "scripts/frontend/serve-landing.js",
+        "docs/marketing/landing-v2/index.html",
+        "docs/marketing/landing-v2/app.js",
+        "docs/marketing/landing-v2/app.css"
+      ],
+      "required_env": [
+        "LANDING_PORT",
+        "LANDING_SITE_URL",
+        "LANDING_CONTACT_ENDPOINT",
+        "LANDING_TENANT_SIGNUP_ENDPOINT",
+        "SUPABASE_FUNCTIONS_INTERNAL_URL"
+      ],
+      "port_env": "LANDING_PORT",
+      "base_url_env": "LANDING_BASE_URL",
+      "command": "npm run build:landing -- --out $${LANDING_DOCKER_OUT_DIR} && npm run dev:landing -- --host 0.0.0.0 --port ${port} --out $${LANDING_DOCKER_OUT_DIR}",
+      "health_path": "/"
+    },
+    "portal": {
+      "resource_class": "portal",
+      "profile": "portal",
+      "app_path": "apps/portal",
+      "dependency_profiles": [
+        "portal"
+      ],
+      "required_paths": [
+        "apps/portal/package.json",
+        "apps/portal/app",
+        "apps/portal/next.config.js"
+      ],
+      "required_env": [
+        "PORTAL_PORT",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "SUPABASE_INTERNAL_URL",
+        "NEXT_PUBLIC_USE_SEED"
+      ],
+      "forbidden_env_values": [
+        {
+          "key": "NEXT_PUBLIC_USE_SEED",
+          "pattern": "^(?!false$).+"
+        }
+      ],
+      "port_env": "PORTAL_PORT",
+      "base_url_env": "PORTAL_BASE_URL",
+      "command": "npm --prefix apps/portal run dev -- -H 0.0.0.0 -p ${port}",
+      "health_path": "/",
+      "cache_mounts": [
+        {
+          "target": "/workspace/apps/portal/.next"
+        }
+      ]
+    },
+    "edge-functions": {
+      "resource_class": "edge-functions",
+      "profile": "edge-functions",
+      "dependency_profiles": [
+        "edge-functions"
+      ],
+      "edge_function_registry": "config/edge/functions.json",
+      "coverage_contract": "configured_policy_proof_functions_v1",
+      "exhaustive_all_repo_functions": false,
+      "proof_functions": [
+        {
+          "name": "metrics-echo-test",
+          "auth_mode": "supabase_jwt",
+          "unauthenticated": {
+            "method": "GET",
+            "expected_status": 401
+          },
+          "authenticated": {
+            "method": "POST",
+            "expected_status": 200,
+            "body": {
+              "marker": "{{marker}}"
+            },
+            "expected_json": {
+              "ok": true,
+              "received": {
+                "marker": "{{marker}}"
+              }
+            }
+          },
+          "allow_service_role_fallback": false
+        },
+        {
+          "name": "marketing-lead-intake",
+          "auth_mode": "public_no_jwt",
+          "public": {
+            "method": "POST",
+            "header_mode": "public_anon",
+            "expected_status": 200,
+            "body": {
+              "email": "runtime-proof+{{marker}}@example.test",
+              "company": "Runtime Proof {{marker}}",
+              "volume": "runtime-proof",
+              "role": "runtime-proof",
+              "notes": "docker runtime configured edge proof {{marker}}",
+              "locale": "en",
+              "page_url": "{{origin}}/runtime-proof",
+              "referrer": "{{origin}}/runtime-proof-referrer",
+              "marketing": {
+                "runtime_proof_marker": "{{marker}}",
+                "workspace_id": "{{workspace_id}}",
+                "owner": "{{owner}}"
+              },
+              "turnstile_token": "EXAMPLE_PASSWORD"
+            },
+            "expected_json": {
+              "ok": true
+            }
+          }
+        }
+      ],
+      "required_paths": [
+        "scripts/ops/workspace/docker-edge-functions-watch.js",
+        "supabase/functions/metrics-echo-test/index.ts",
+        "supabase/functions/metrics-echo-test/_shared/mod.mjs"
+      ],
+      "required_env": [
+        "SUPABASE_FUNCTIONS_INTERNAL_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "API_CALLER_DB_JWT",
+        "EDGE_DB_JWT"
+      ],
+      "command": "node scripts/ops/workspace/docker-edge-functions-watch.js --function metrics-echo-test --startup-timeout-ms 300000",
+      "restart": "on-failure",
+      "health_path": ""
+    },
+    "fieldops-metro": {
+      "resource_class": "fieldops-metro",
+      "profile": "fieldops",
+      "app_path": "apps/fieldops",
+      "dependency_profiles": [
+        "fieldops"
+      ],
+      "required_paths": [
+        "apps/fieldops/package.json",
+        "apps/fieldops/index.ts",
+        "scripts/ops/mobile/start-fieldops-metro.js"
+      ],
+      "required_env": [
+        "FIELDOPS_E2E_PORT",
+        "FIELDOPS_BASE_URL",
+        "SUPABASE_URL",
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_ANON_KEY",
+        "VITE_USE_SEED"
+      ],
+      "forbidden_env_values": [
+        {
+          "key": "VITE_USE_SEED",
+          "pattern": "^(?!false$).+"
+        }
+      ],
+      "port_env": "FIELDOPS_E2E_PORT",
+      "base_url_env": "FIELDOPS_BASE_URL",
+      "command": "npm --prefix apps/fieldops run web -- --port ${port} --clear",
+      "health_path": "/",
+      "cache_mounts": [
+        {
+          "target": "/workspace/apps/fieldops/.expo"
+        },
+        {
+          "target": "/workspace/apps/fieldops/.metro"
+        }
+      ]
+    },
+    "test-runner": {
+      "resource_class": "test-runner",
+      "profile": "test",
+      "dependency_profiles": [
+        "root-unit",
+        "backend-readback",
+        "playwright-proof"
+      ],
+      "required_paths": [
+        "scripts/ops/workspace/docker-runtime-proof.js"
+      ],
+      "required_env": [
+        "DATABASE_URL",
+        "SUPABASE_INTERNAL_URL",
+        "DOCKER_RUNTIME_BACKEND_PROOF_SUMMARY",
+        "DOCKER_RUNTIME_AUTH_PROOF_SUMMARY",
+        "DOCKER_RUNTIME_AUTH_MANIFEST",
+        "DOCKER_RUNTIME_AUTH_PASSWORD_FILE",
+        "DOCKER_RUNTIME_PROOF_SUMMARY_OUT",
+        "DOCKER_RUNTIME_BROWSER_PROOF_SUMMARY"
+      ],
+      "command": "node scripts/ops/workspace/docker-runtime-auth-proof.js --summary-out $${DOCKER_RUNTIME_AUTH_PROOF_SUMMARY} && node scripts/ops/workspace/docker-runtime-backend-proof.js --summary-out $${DOCKER_RUNTIME_BACKEND_PROOF_SUMMARY} --peer-database-urls \"$${DOCKER_RUNTIME_PEER_DATABASE_URLS}\" && node scripts/ops/workspace/docker-runtime-proof.js",
+      "health_path": ""
+    }
+  }
+}

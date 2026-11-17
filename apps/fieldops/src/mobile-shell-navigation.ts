@@ -1,0 +1,206 @@
+import type { UiNavigation, UiNavigationItem } from "@masarx/api";
+
+export type MobileScreenId =
+  | "tasks"
+  | "outbox"
+  | "scan"
+  | "location"
+  | "diagnostics"
+  | "more"
+  | "route"
+  | "settlements";
+
+export type MobileRoute =
+  | { kind: "home" }
+  | { kind: "resource"; resource: string }
+  | { kind: "screen"; screen: MobileScreenId }
+  | { kind: "unknown"; href: string };
+
+export type MobileResourceSurface =
+  | { kind: "resource"; resource: string }
+  | { kind: "route"; resource: "tasks" }
+  | { kind: "settlements"; resource: "settlements" };
+
+export function findFirstEnabledNavItem(
+  items: UiNavigationItem[] | null | undefined
+): UiNavigationItem | null {
+  if (!Array.isArray(items)) return null;
+  for (const item of items) {
+    if (item.disabled_reason) continue;
+    const route = resolveNavigationRouteFromItem(item);
+    if (route.kind !== "home" && route.kind !== "unknown") return item;
+    const nested = findFirstEnabledNavItem(item.items);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+export function findNavItemById(
+  items: UiNavigationItem[] | null | undefined,
+  id: string | null
+): UiNavigationItem | null {
+  if (!id || !Array.isArray(items)) return null;
+  for (const item of items) {
+    if (item.id === id) return item;
+    const nested = findNavItemById(item.items, id);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+export function resolveInitialSelectedNavItemId(
+  sections: UiNavigation["sections"] | null | undefined,
+  selectedId: string | null,
+  preferredHref?: string | null
+): string | null {
+  if (!Array.isArray(sections) || sections.length === 0) return null;
+
+  if (selectedId) {
+    for (const section of sections) {
+      const existing = findNavItemById(section.items, selectedId);
+      if (existing) return selectedId;
+    }
+  }
+
+  const preferredRoute =
+    typeof preferredHref === "string" && preferredHref.trim()
+      ? parseMobileRouteFromHref(preferredHref)
+      : null;
+  if (preferredRoute) {
+    for (const section of sections) {
+      const preferredItem = findFirstEnabledNavItemByRoute(section.items, preferredRoute);
+      if (preferredItem?.id) return preferredItem.id;
+    }
+  }
+
+  for (const section of sections) {
+    const candidate = findFirstEnabledNavItem(section.items);
+    if (candidate?.id) return candidate.id;
+  }
+
+  return null;
+}
+
+function isMobileScreenId(value: string): value is MobileScreenId {
+  return (
+    value === "tasks" ||
+    value === "outbox" ||
+    value === "scan" ||
+    value === "location" ||
+    value === "diagnostics" ||
+    value === "more" ||
+    value === "route" ||
+    value === "settlements"
+  );
+}
+
+function parsePathToMobileRoute(path: string): MobileRoute | null {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  const resourceMatch = normalizedPath.match(/(?:^|\/)resources\/([^/]+)\/?$/i);
+  if (resourceMatch) {
+    const resource = decodeURIComponent(resourceMatch[1] ?? "").trim();
+    return resource ? { kind: "resource", resource } : null;
+  }
+
+  const mobileMatch = normalizedPath.match(/(?:^|\/)mobile\/([^/]+)\/?$/i);
+  if (mobileMatch) {
+    const screen = decodeURIComponent(mobileMatch[1] ?? "").trim().toLowerCase();
+    if (!isMobileScreenId(screen)) return null;
+    return { kind: "screen", screen };
+  }
+
+  const directScreenMatch = normalizedPath.match(
+    /(?:^|\/)(tasks|outbox|scan|location|diagnostics|more|route|settlements)\/?$/i
+  );
+  if (!directScreenMatch) return null;
+
+  const screen = decodeURIComponent(directScreenMatch[1] ?? "").trim().toLowerCase();
+  if (!isMobileScreenId(screen)) return null;
+  return { kind: "screen", screen };
+}
+
+function findFirstEnabledNavItemByRoute(
+  items: UiNavigationItem[] | null | undefined,
+  route: MobileRoute
+): UiNavigationItem | null {
+  if (!Array.isArray(items)) return null;
+  for (const item of items) {
+    if (!item.disabled_reason) {
+      const itemRoute = resolveNavigationRouteFromItem(item);
+      if (routesMatch(itemRoute, route)) return item;
+    }
+    const nested = findFirstEnabledNavItemByRoute(item.items, route);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function routesMatch(left: MobileRoute, right: MobileRoute) {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "screen" && right.kind === "screen") {
+    return left.screen === right.screen;
+  }
+  if (left.kind === "resource" && right.kind === "resource") {
+    return left.resource.trim().toLowerCase() === right.resource.trim().toLowerCase();
+  }
+  return false;
+}
+
+function resolveNavigationRouteFromItem(item: UiNavigationItem | null): MobileRoute {
+  if (!item) return { kind: "home" };
+  const resource =
+    typeof item.resource === "string" && item.resource.trim()
+      ? item.resource.trim()
+      : null;
+  if (resource) return { kind: "resource", resource };
+  const href = typeof item.href === "string" && item.href.trim() ? item.href.trim() : null;
+  if (!href) return { kind: "home" };
+  return parseMobileRouteFromHref(href) ?? { kind: "unknown", href };
+}
+
+export function parseMobileRouteFromHref(href: string): MobileRoute | null {
+  const trimmed = href.trim();
+  if (!trimmed) return null;
+
+  const [noHash] = trimmed.split("#");
+  const [maybePath] = noHash.split("?");
+  if (maybePath) {
+    const parsedPath = parsePathToMobileRoute(maybePath);
+    if (parsedPath) return parsedPath;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      const parsedPath = parsePathToMobileRoute(url.pathname || "/");
+      if (parsedPath) return parsedPath;
+    } catch {
+      // Ignore malformed URLs and continue to other route formats.
+    }
+  }
+
+  const schemeMatch = trimmed.match(/^mobile:([^/]+)$/i);
+  if (!schemeMatch) return null;
+  const screen = decodeURIComponent(schemeMatch[1] ?? "").trim().toLowerCase();
+  if (!isMobileScreenId(screen)) return null;
+  return { kind: "screen", screen };
+}
+
+export function resolveMobileResourceSurface(
+  route: MobileRoute
+): MobileResourceSurface | null {
+  if (route.kind === "resource") {
+    return { kind: "resource", resource: route.resource };
+  }
+  if (route.kind === "screen" && route.screen === "tasks") {
+    return { kind: "resource", resource: "tasks" };
+  }
+  if (route.kind === "screen" && route.screen === "route") {
+    return { kind: "route", resource: "tasks" };
+  }
+  if (route.kind === "screen" && route.screen === "settlements") {
+    return { kind: "settlements", resource: "settlements" };
+  }
+  return null;
+}

@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "id": "docs",
+      "reason": "docs_only",
+      "skip_preview": true,
+      "run_fast_checks": false,
+      "include_re": [
+        "^docs/",
+        "\\.mdx?$"
+      ]
+    },
+    {
+      "id": "ci",
+      "reason": "ci_only",
+      "skip_preview": true,
+      "run_fast_checks": true,
+      "include_re": [
+        "^\\.github/",
+        "^config/ci/",
+        "^scripts/ops/audit/",
+        "^scripts/ops/ci/",
+        "^docs/",
+        "^tests/load/",
+        "^tests/unit/",
+        "\\.mdx?$"
+      ]
+    },
+    {
+      "id": "ui",
+      "reason": "ui_only",
+      "skip_preview": true,
+      "run_fast_checks": true,
+      "include_re": [
+        "^apps/",
+        "^packages/ui/",
+        "^packages/mobile-core/",
+        "^\\.storybook/",
+        "^assets/"
+      ],
+      "exclude_re": [
+        "^packages/api/",
+        "^packages/auth/",
+        "^packages/config/"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 4
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "ci/cd"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:15"
+      timezone: "UTC"
+    open-pull-requests-limit: 4
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      prod-dependencies:
+        dependency-type: "production"
+      dev-dependencies:
+        dependency-type: "development"

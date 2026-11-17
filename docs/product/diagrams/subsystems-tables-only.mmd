@@ -1,0 +1,71 @@
+%% MasarX Delivery Platform - Tables-Only Subsystem Flows
+%% Boxes are tables only; arrows show where data is written next.
+%% Paste into https://mermaid.live
+
+flowchart TD
+
+  %% ===================== Webhook Integration (tables only) =====================
+  subgraph Webhook_Integration
+    WS[webhook_sources]
+    SV[settings_versions]
+    ST[settings]
+    PAC[provider_auth_configs]
+    WI[webhook_inbox]
+    DL[decision_log]
+  end
+
+  SV -->|publish version| ST
+  WS -->|intake links source_id| WI
+  ST -->|policy_settings_id + scope + version| WI
+  WI -->|HTTP response decision event| DL
+
+  %% ===================== Workflow Engine (tables only) =====================
+  subgraph Workflow_Engine
+    WR[workflow_runs]
+    WRS[workflow_run_steps]
+  end
+
+  WI -->|workflow_run_id link| WR
+  WR -->|materialize steps| WRS
+
+  %% ===================== Outbound HTTP (tables only) =====================
+  subgraph Outbound_HTTP
+    OC[outbound_calls]
+    ACL[api_call_log]
+  end
+
+  WRS -->|enqueue outbound job| OC
+  OC -->|outcome decision| DL
+  OC -->|request/response snapshot| ACL
+
+  %% ===================== Label Rendering (tables only) =====================
+  subgraph Label_Rendering
+    LJ[label_jobs]
+    LB[labels]
+    SA[shipment_actions]
+  end
+
+  WRS -->|enqueue label job| LJ
+  LJ -->|succeeded -> upsert label| LB
+  LB -->|label_generated action| SA
+
+  %% ===================== Domain Data (tables only) =====================
+  subgraph Domain_Data
+    SH[shipments]
+    SBX[shipment_boxes]
+    ADR[addresses]
+    GEO[geocodes]
+  end
+
+  ADR -->|enrichment result| GEO
+  LB -. references .-> SH
+  LB -. references .-> SBX
+
+  %% ===================== Ops & Alerts (tables only) =====================
+  subgraph Ops_Alerts
+    AR[alert_rules]
+    AT[alert_triggers]
+  end
+
+  DL -->|non-ok outcomes -> trigger| AT
+

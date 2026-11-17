@@ -1,0 +1,38 @@
+[
+  {
+    "pattern": "public.st_findextent",
+    "reason": "PostGIS extension-owned function uses dynamic SQL and returns unassigned record; cannot override without owning extension."
+  },
+  {
+    "pattern": "SQL expression \"myrec.extent\"",
+    "reason": "Context for PostGIS st_findextent error (extension owned)."
+  },
+  {
+    "pattern": "FOR over EXECUTE statement",
+    "reason": "Dynamic SQL warning emitted by PostGIS st_findextent."
+  },
+  {
+    "extension": "postgis",
+    "reason": "PostGIS-managed function; upstream lint false positives are out of project control."
+  },
+  {
+    "extension": "pgtap",
+    "reason": "pgTAP extension helper functions are installed only for testing and lint produces false positives."
+  },
+  {
+    "function": "public.create_ops_alert_for_webhook",
+    "reason": "Alert helper function depends on alert_rules table in public schema; plpgsql static analysis reports 42P01 even when table exists."
+  },
+  {
+    "function": "public.store_response",
+    "reason": "Workflow response persistence function depends on workflow_run_steps table; lint reports missing relation despite schema being present."
+  },
+  {
+    "function": "public.request_label_reprint",
+    "reason": "Label reprint helper relies on labels and shipments tables; plpgsql lint emits false-positive 42P01 for labels in this environment."
+  },
+  {
+    "function": "public.ui_upsert_mapping_artifact_v1",
+    "reason": "Mapping studio runtime save helper references public.webhook_rules through dynamic SQL; preview db-lint still reports a false-positive 42P01 even though the canonical schema provides the table."
+  }
+]

@@ -1,0 +1,102 @@
+{
+  "organization": {
+    "name": "Demo Organization",
+    "slug": "demo-org",
+    "timezone": "Asia/Riyadh",
+    "locale": "en-US"
+  },
+  "clients": [
+    {
+      "name": "Demo Client A",
+      "slug": "demo-client-a",
+      "senders": [
+        {
+          "name": "Demo Sender A",
+          "brand_name": "Demo A"
+        }
+      ]
+    },
+    {
+      "name": "Demo Client B",
+      "slug": "demo-client-b",
+      "senders": [
+        {
+          "name": "Demo Sender B",
+          "brand_name": "Demo B"
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "email": "lpnoiwlvqmryinlkzgwwiosw@example.invalid",
+      "full_name": "Example Person",
+      "user_type": "super_admin",
+      "scope": {
+        "type": "platform"
+      }
+    },
+    {
+      "email": "sipkxyzyxvgvtksowrxwjgpn@example.invalid",
+      "full_name": "Example Person",
+      "user_type": "ops_admin",
+      "scope": {
+        "type": "tenant"
+      }
+    },
+    {
+      "email": "mlrznqhylvnirjwnhxhsjwgm@example.invalid",
+      "full_name": "Example Person",
+      "user_type": "driver",
+      "scope": {
+        "type": "tenant"
+      }
+    },
+    {
+      "email": "syhzqnqjjtzgwgwilztnhuvh@example.invalid",
+      "full_name": "Example Person",
+      "user_type": "account_manager",
+      "scope": {
+        "type": "tenant"
+      }
+    },
+    {
+      "email": "hznporiphzisyjwwmjyviqvm@example.invalid",
+      "full_name": "Example Person",
+      "user_type": "client_admin",
+      "scope": {
+        "type": "client",
+        "client_slug": "demo-client-a"
+      }
+    },
+    {
+      "email": "uwizmmwrwjmmigphkjymkjuz@example.invalid",
+      "full_name": "Example Person",
+      "user_type": "sender_user",
+      "scope": {
+        "type": "sender",
+        "client_slug": "demo-client-a",
+        "sender_name": "Demo Sender A"
+      }
+    },
+    {
+      "email": "unwmzjkhwhhxsuongsoswnkv@example.invalid",
+      "full_name": "Example Person",
+      "user_type": "client_admin",
+      "scope": {
+        "type": "client",
+        "client_slug": "demo-client-b"
+      }
+    },
+    {
+      "email": "tisruivioqoprsjwkyixtohi@example.invalid",
+      "full_name": "Example Person",
+      "user_type": "sender_user",
+      "scope": {
+        "type": "sender",
+        "client_slug": "demo-client-b",
+        "sender_name": "Demo Sender B"
+      }
+    }
+  ]
+}

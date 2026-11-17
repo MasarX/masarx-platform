@@ -1,0 +1,56 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "defaultBase": "dev",
+  "workspaceLayout": {
+    "appsDir": "apps",
+    "libsDir": "packages"
+  },
+  "namedInputs": {
+    "default": [
+      "{projectRoot}/**/*",
+      "sharedGlobals"
+    ],
+    "sharedGlobals": [
+      "{workspaceRoot}/package.json",
+      "{workspaceRoot}/package-lock.json",
+      "{workspaceRoot}/tsconfig.base.json",
+      "{workspaceRoot}/tsconfig.json",
+      "{workspaceRoot}/config/tooling/**/*",
+      "{workspaceRoot}/config/lint/**/*",
+      "{workspaceRoot}/scripts/ops/ci/**/*",
+      "{workspaceRoot}/scripts/frontend/**/*"
+    ]
+  },
+  "targetDefaults": {
+    "build": {
+      "cache": true
+    },
+    "lint": {
+      "cache": true
+    },
+    "typecheck": {
+      "cache": true
+    },
+    "test": {
+      "cache": true
+    },
+    "lint:structure": {
+      "cache": true
+    },
+    "test:unit": {
+      "cache": true
+    },
+    "test:ui": {
+      "cache": true
+    },
+    "build:landing": {
+      "cache": true
+    },
+    "docs:openapi:check": {
+      "cache": true
+    },
+    "lint:docs:ssot": {
+      "cache": true
+    }
+  }
+}

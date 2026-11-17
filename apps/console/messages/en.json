@@ -1,0 +1,190 @@
+{
+  "app": {
+    "title": "MasarX Console",
+    "subtitle": "Workflow-first admin console",
+    "loading": "Loading console context.",
+    "notFound": {
+      "title": "Page not found",
+      "description": "This console route does not exist or is not available for your scope.",
+      "hint": "Check the URL or return to the main console overview.",
+      "action": "Go to {appLabel}"
+    },
+    "configMissing": {
+      "title": "Console config missing",
+      "description": "Set the required public env values and restart the dev server.",
+      "required": "Required: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and NEXT_PUBLIC_APP_NAME (or NEXT_PUBLIC_APP_NAME_CONSOLE/PORTAL).",
+      "optional": "Optional: NEXT_PUBLIC_AUTH_METHODS, NEXT_PUBLIC_LOCALE.",
+      "errorLabel": "Error: {error}",
+      "errorFallback": "Missing required public configuration."
+    }
+  },
+  "observability": {
+    "domainEvent": {
+      "description": "Domain event detail with trace context.",
+      "relatedTitle": "Related links",
+      "viewTrace": "View trace",
+      "viewWorkflowRun": "View workflow run"
+    },
+    "trace": {
+      "title": "Trace timeline",
+      "description": "Unified observability view for domain events and workflow runs.",
+      "unavailable": "Trace data unavailable.",
+      "correlationLabel": "Correlation id: {id}",
+      "errors": {
+        "load": "Unable to load trace data."
+      },
+      "sections": {
+        "summary": "Trace summary",
+        "observability": "Observability events",
+        "domain": "Domain events",
+        "workflowRuns": "Workflow runs"
+      },
+      "empty": {
+        "observability": "No observability events recorded for this trace.",
+        "domain": "No domain events recorded for this trace.",
+        "workflowRuns": "No workflow runs recorded for this trace."
+      }
+    },
+    "workflowRun": {
+      "title": "Workflow run",
+      "detailTitle": "Run detail",
+      "description": "Execution detail and step timeline for a single workflow run.",
+      "unavailable": "Workflow run detail unavailable.",
+      "notFound": "Workflow run not found.",
+      "viewTrace": "View trace timeline",
+      "noCorrelation": "No correlation id found for this workflow run.",
+      "openTemplate": "Open workflow template",
+      "summary": {
+        "duration": "Duration",
+        "steps": "Steps",
+        "issues": "Issues",
+        "createdAt": "Created",
+        "startedAt": "Started",
+        "completedAt": "Completed"
+      },
+      "provenance": {
+        "title": "Provenance",
+        "description": "Understand what triggered this run and follow its source.",
+        "triggeredVia": "Triggered via",
+        "sources": {
+          "manual": "Manual",
+          "webhook": "Webhook",
+          "schedule": "Schedule",
+          "scheduleManual": "Schedule (manual)",
+          "workflowRunTrigger": "Workflow run trigger",
+          "unknown": "Unknown"
+        },
+        "fields": {
+          "runId": "Run id",
+          "correlationId": "Correlation id",
+          "requestedBy": "Requested by",
+          "requestContextId": "Request context id",
+          "scheduleTriggerId": "Schedule trigger id",
+          "runTriggerId": "Workflow run trigger id",
+          "triggerFireId": "Trigger fire id",
+          "sourceRunId": "Source run id",
+          "sourceStatus": "Source status",
+          "sourceCompletedAt": "Source completed at",
+          "idempotencyKey": "Idempotency key",
+          "scope": "Scope"
+        },
+        "actions": {
+          "openRun": "Open run",
+          "openSchedule": "Open schedule",
+          "openTrigger": "Open trigger",
+          "openFire": "Open fire",
+          "showRaw": "Show raw context",
+          "copy": "Copy",
+          "copySuccessTitle": "Copied to clipboard.",
+          "copyFailedTitle": "Copy failed."
+        }
+      },
+      "outputs": {
+        "title": "Outputs",
+        "unavailable": "Workflow run outputs unavailable.",
+        "empty": "No output links detected yet.",
+        "open": "Open"
+      },
+      "logs": {
+        "title": "Run logs",
+        "description": "Zapier-style run summary with redacted step payloads.",
+        "unavailable": "Workflow run logs unavailable.",
+        "summary": {
+          "stepsLabel": "Steps",
+          "issuesLabel": "Issues"
+        },
+        "controls": {
+          "issuesOnly": "Issues only",
+          "replayLabel": "Replay presets",
+          "replayLatestIssue": "Replay latest issue",
+          "replayFirstIssue": "Replay first issue",
+          "replayAllIssues": "Replay all issues",
+          "replayModalTitle": "Replay workflow run",
+          "replayModalDescription": "Start a new run and attach replay provenance for selected issue steps."
+        },
+        "tabs": {
+          "simple": "Simple",
+          "advanced": "Advanced"
+        },
+        "filters": {
+          "searchPlaceholder": "Search steps",
+          "statusLabel": "Status",
+          "statusAll": "All"
+        },
+        "actions": {
+          "copyJson": "Copy JSON",
+          "downloadJson": "Download JSON",
+          "copySuccessTitle": "Copied JSON to clipboard.",
+          "copyFailedTitle": "Copy failed.",
+          "downloadFailedTitle": "Download failed."
+        },
+        "empty": {
+          "title": "No steps yet",
+          "description": "This run has not recorded any step activity."
+        },
+        "emptyNoMatches": {
+          "title": "No matches",
+          "description": "No steps match the current filters."
+        },
+        "emptyNoIssues": {
+          "title": "No issues recorded",
+          "description": "This run has not recorded any step issues."
+        },
+        "emptyStepFilter": {
+          "title": "No logs for this step yet",
+          "description": "This run has not recorded any activity for the selected workflow step."
+        },
+        "step": {
+          "statusLabel": "Status",
+          "durationLabel": "Duration",
+          "attemptLabel": "Attempt",
+          "decisionLogLabel": "Decision log",
+          "openDecisionLog": "Open decision log",
+          "resultLabel": "Result (redacted)",
+          "metadataLabel": "Metadata (redacted)",
+          "errorLabel": "Error",
+          "notesLabel": "Notes",
+          "timestampsLabel": "Timestamps",
+          "enqueuedAtLabel": "Enqueued",
+          "startedAtLabel": "Started",
+          "completedAtLabel": "Completed",
+          "replayFromStep": "Replay from step",
+          "replayModalTitle": "Replay workflow from failed step",
+          "replayModalDescription": "Start a new run using this run payload and mark replay provenance for the selected failed step."
+        }
+      },
+      "errors": {
+        "loadDetail": "Unable to load workflow run detail.",
+        "loadSteps": "Unable to load workflow run steps."
+      },
+      "steps": {
+        "title": "Run steps",
+        "unavailable": "Workflow run steps unavailable.",
+        "count": "Steps loaded: {count}",
+        "countWithTotal": "Steps loaded: {count} of {total}",
+        "empty": "No workflow run steps were recorded.",
+        "openFullView": "Open steps in full view"
+      }
+    }
+  }
+}

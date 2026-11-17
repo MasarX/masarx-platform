@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <title>MasarX Mark C</title>
+  <path
+    d="M14 34V16C14 13.7909 15.7909 12 18 12H30C32.2091 12 34 13.7909 34 16V34"
+    stroke="currentColor"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M14 22H34"
+    stroke="currentColor"
+    stroke-width="4"
+    stroke-linecap="round"
+  />
+  <path
+    d="M18 34L24 28L30 34"
+    stroke="currentColor"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="24" cy="22" r="3" fill="currentColor" />
+</svg>
+

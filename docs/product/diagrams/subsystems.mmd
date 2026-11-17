@@ -1,0 +1,161 @@
+%% MasarX Delivery Platform - Subsystems End-to-End Flows
+%% Paste this into https://mermaid.live or render via mmdc
+
+flowchart TD
+
+  %% ===================== Webhook Integration =====================
+  subgraph Webhook_Integration
+    A[webhook-receiver<br/>edge]
+    D[workflow_intake_webhook<br/>fn]
+    E[get_webhook_source_by_token<br/>fn]
+    Q[webhook_sources<br/>table]
+    F[resolve_webhook_ingest_policy<br/>fn]
+    AD[settings and settings_versions<br/>settings]
+    R[provider_auth_configs<br/>table]
+    AB[webhook_response_latest<br/>view]
+    G[insert_webhook_inbox_record<br/>fn]
+    S[webhook_inbox<br/>table]
+    H[start_workflow_run<br/>fn]
+    U[workflow_runs<br/>table]
+    V[workflow_run_steps<br/>table]
+    R1[render_http_response_v1<br/>handler]
+    R2[persist_http_response_v1<br/>handler]
+    T[decision_log<br/>table]
+    AA[webhook_response_events<br/>view]
+  end
+
+  A -->|RPC| D
+  D -->|token| E --> Q
+  D -->|policy| F --> AD
+  D -->|hmac creds| R
+  D -->|idempotency check| AB
+  D -->|INSERT| S
+  D -->|start| H --> U --> V
+  V --> R1 --> R2 --> T
+  R2 -->|update link| S
+  T --> AA
+  T --> AB
+
+  %% ===================== Workflow Engine =====================
+  subgraph Workflow_Engine
+    J[run_webhook_processor_worker<br/>fn]
+    I[progress_workflow_run<br/>fn]
+    O1[operation_templates<br/>table]
+    M1[mapping_configs<br/>table]
+    K[apply_request_mappings<br/>fn]
+    W[outbound_calls<br/>table]
+    L[request_label_generation<br/>fn]
+  end
+
+  J -->|loop| I
+  I -->|read| O1
+  I -->|read| M1
+  I -->|apply| K
+  I -->|enqueue outbound| W
+  I -->|enqueue label| L
+
+  %% ===================== Outbound HTTP =====================
+  subgraph Outbound_HTTP
+    B[api-caller<br/>edge]
+    S3[claim_pending_edge_jobs<br/>fn]
+    S4[get_job_call_spec<br/>fn]
+    S1[mark_outbound_call_success<br/>fn]
+    S2[mark_outbound_call_failure<br/>fn]
+    A1[api_call_log<br/>table]
+    AC[observability_events_v<br/>view]
+    EXT[(Provider API)]
+  end
+
+  W -->|edge dispatch| B
+  B -->|claim| S3 --> W
+  B -->|spec| S4
+  B -->|HTTP fetch| EXT
+  B -->|success| S1 --> T
+  B -->|failure| S2 --> T
+  B -->|audit| A1
+  T --> AC
+  W --> AC
+  A1 --> AC
+
+  %% ===================== Label Rendering =====================
+  subgraph Label_Rendering
+    C[label-renderer<br/>edge]
+    M[lease_label_job<br/>fn]
+    X[label_jobs<br/>table]
+    N[compose_label_payload<br/>fn]
+    AE[renderer_defaults<br/>settings]
+    SA[label-render-assets<br/>bucket]
+    SB[labels<br/>bucket]
+    O[complete_label_job<br/>fn]
+    Y[labels<br/>table]
+    P[reclaim_stale_label_jobs<br/>fn cron]
+  end
+
+  L -->|INSERT| X
+  C -->|lease| M --> X
+  C -->|compose| N
+  C -->|fallback defaults| AE
+  C -->|download asset| SA
+  C -->|upload pdf| SB
+  C -->|complete| O --> Y
+  P -->|reclaim| X
+
+  %% ===================== Geocoding =====================
+  subgraph Geocoding
+    G1[execute_geocoding_v1<br/>handler]
+    Z[geocodes<br/>table]
+  end
+  I -->|handler| G1 -->|upsert| Z
+
+  %% ===================== Communications =====================
+  subgraph Communications
+    C1[enqueue_notification_v1<br/>handler]
+  end
+  I -->|notify| C1 -->|enqueue| W
+
+  %% ===================== Configuration and Mapping =====================
+  subgraph Configuration_and_Mapping
+    AD2[settings and versions
+settings]
+    O12[operation_templates
+table]
+    M12[mapping_configs
+table]
+  end
+  AD2 --- AD
+  O12 --- O1
+  M12 --- M1
+
+  %% ===================== Observability and Replay =====================
+  subgraph Observability_and_Replay
+    T2[decision_log
+table]
+    AA2[webhook_response_events
+view]
+    AB2[webhook_response_latest
+view]
+    A12[api_call_log
+table]
+    AC2[observability_events_v
+view]
+  end
+  T2 --- T
+  AA2 --- AA
+  AB2 --- AB
+  A12 --- A1
+  AC2 --- AC
+
+  %% ===================== Infra and Security =====================
+  subgraph Infra_and_Security
+    ER1[edge_webhook_role]
+    ER2[edge_api_caller_role]
+    ER3[edge_label_renderer_role]
+    RLS[Row Level Security]
+  end
+  ER1 -.-> D
+  ER2 -.-> S3
+  ER3 -.-> M
+  RLS -. protects .- S
+  RLS -. protects .- W
+  RLS -. protects .- X
+  RLS -. protects .- Y

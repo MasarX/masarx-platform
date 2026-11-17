@@ -1,0 +1,445 @@
+-- Migration: hybrid label print execute external-result normalization
+-- Purpose:
+--   - Accept generic external step results where execute metadata and bundle payload may arrive at the top level.
+--   - Keep the hybrid execute handler fail-closed while tolerating canonical progress_workflow_run_step_result_v1 payload variants.
+
+BEGIN;
+SELECT pg_advisory_lock(hashtext('202603062700_label_print_execute_external_result_normalize_v1'));
+SET search_path TO public, workflow_handlers, extensions, pg_temp;
+SET LOCAL lock_timeout = '30s';
+
+CREATE OR REPLACE FUNCTION workflow_handlers.execute_label_print_execute_v1(
+  p_step public.workflow_run_steps,
+  p_run public.workflow_runs,
+  p_operation_result jsonb DEFAULT '{}'::jsonb
+)
+RETURNS public.workflow_handler_response
+LANGUAGE plpgsql
+SET search_path TO public, workflow_handlers, extensions, pg_temp
+AS $function$
+DECLARE
+  v_response public.workflow_handler_response;
+  v_context jsonb := COALESCE(p_run.context, '{}'::jsonb);
+  v_payload jsonb := COALESCE(v_context->'payload', '{}'::jsonb);
+  v_label_state jsonb := COALESCE(v_context->'label_print', '{}'::jsonb);
+  v_policy jsonb := '{}'::jsonb;
+  v_org_id uuid := NULL;
+  v_requested_by uuid := NULL;
+  v_shipments jsonb := '[]'::jsonb;
+  v_options jsonb := '{}'::jsonb;
+  v_target_state jsonb := '{}'::jsonb;
+  v_targets jsonb := '[]'::jsonb;
+  v_grouped_shipments jsonb := '[]'::jsonb;
+  v_out_of_scope jsonb := '[]'::jsonb;
+  v_invalid_boxes jsonb := '[]'::jsonb;
+  v_counts jsonb := '{}'::jsonb;
+  v_counts_patch jsonb := '{}'::jsonb;
+  v_fresh_state jsonb := '{}'::jsonb;
+  v_ready jsonb := '[]'::jsonb;
+  v_pending jsonb := '[]'::jsonb;
+  v_failed jsonb := '[]'::jsonb;
+  v_label_job_ids jsonb := '[]'::jsonb;
+  v_execute_async jsonb := COALESCE(v_label_state->'execute_async', '{}'::jsonb);
+  v_execute_request_id bigint := NULL;
+  v_execute_request_id_text text := '';
+  v_execute_response jsonb := COALESCE(v_label_state->'execute_response', '{}'::jsonb);
+  v_result jsonb := '{}'::jsonb;
+  v_result_status text := '';
+  v_bundle_response jsonb := '{}'::jsonb;
+  v_bundle_status text := '';
+  v_last_error text := NULL;
+  v_expected_count int := 0;
+  v_ready_count int := 0;
+  v_pending_count int := 0;
+  v_failed_count int := 0;
+  v_poll_seconds int := 1;
+  v_workflow_progress_budget_ms int := 1200;
+  v_workflow_progress_max_steps int := 10;
+  v_requested_source text := format('workflow.labels_print_execute:%s', p_step.id);
+  v_print_payload jsonb := '{}'::jsonb;
+  v_http_response jsonb := '{}'::jsonb;
+  v_http_body jsonb := '{}'::jsonb;
+  v_http_completed boolean := false;
+  v_client_id text := NULL;
+  v_sender_id text := NULL;
+  v_label_type text := 'shipping';
+  v_output_name text := NULL;
+  v_expires_seconds int := NULL;
+  v_print_mode text := 'print_sync';
+  v_artifact_kind text := NULL;
+BEGIN
+  v_org_id := COALESCE(
+    NULLIF(v_label_state->>'organization_id', '')::uuid,
+    NULLIF(v_context->>'organization_id', '')::uuid,
+    NULLIF(v_payload->>'organization_id', '')::uuid
+  );
+  IF v_org_id IS NULL THEN
+    RAISE EXCEPTION 'execute_label_print_execute_v1: organization_id missing from workflow context';
+  END IF;
+
+  v_policy := COALESCE(
+    v_label_state->'policy',
+    public.resolve_settings('label_print_policy', 'tenant', v_org_id),
+    public.resolve_settings('label_print_policy', 'global', NULL),
+    '{}'::jsonb
+  );
+
+  v_requested_by := COALESCE(
+    NULLIF(v_context->>'requested_by', '')::uuid,
+    NULLIF(v_payload->>'requested_by', '')::uuid,
+    NULLIF(v_context->'payload'->>'requested_by', '')::uuid,
+    NULLIF(p_run.metadata->>'requested_by', '')::uuid
+  );
+  v_shipments := COALESCE(v_label_state->'shipments', v_payload->'shipments', '[]'::jsonb);
+  v_options := COALESCE(v_label_state->'options', v_payload->'options', '{}'::jsonb);
+  v_client_id := NULLIF(COALESCE(v_label_state->>'client_id', v_payload->>'client_id'), '');
+  v_sender_id := NULLIF(COALESCE(v_label_state->>'sender_id', v_payload->>'sender_id'), '');
+  v_label_type := lower(COALESCE(NULLIF(v_options->>'label_type', ''), NULLIF(v_payload->>'label_type', ''), 'shipping'));
+  v_output_name := NULLIF(COALESCE(v_options->>'output_name', v_payload->>'output_name'), '');
+  IF COALESCE(v_options->>'expires_seconds', '') ~ '^\d+$' THEN
+    v_expires_seconds := GREATEST((v_options->>'expires_seconds')::int, 60);
+  ELSIF COALESCE(v_payload->>'expires_seconds', '') ~ '^\d+$' THEN
+    v_expires_seconds := GREATEST((v_payload->>'expires_seconds')::int, 60);
+  END IF;
+
+  v_targets := COALESCE(v_label_state->'targets', '[]'::jsonb);
+  v_grouped_shipments := COALESCE(v_label_state->'grouped_shipments', '[]'::jsonb);
+  v_out_of_scope := COALESCE(v_label_state->'out_of_scope', '[]'::jsonb);
+  v_invalid_boxes := COALESCE(v_label_state->'invalid_boxes', '[]'::jsonb);
+  v_counts := COALESCE(v_label_state->'counts', '{}'::jsonb);
+
+  IF jsonb_typeof(v_targets) IS DISTINCT FROM 'array' OR jsonb_array_length(v_targets) = 0 THEN
+    v_target_state := public.resolve_label_print_targets_v1(v_org_id, v_shipments);
+    v_targets := COALESCE(v_target_state->'targets', '[]'::jsonb);
+    v_grouped_shipments := COALESCE(v_target_state->'grouped_shipments', '[]'::jsonb);
+    v_out_of_scope := COALESCE(v_target_state->'out_of_scope', '[]'::jsonb);
+    v_invalid_boxes := COALESCE(v_target_state->'invalid_boxes', '[]'::jsonb);
+    v_counts := COALESCE(v_target_state->'counts', '{}'::jsonb);
+  END IF;
+
+  v_expected_count := COALESCE(jsonb_array_length(v_targets), 0);
+  v_counts_patch := jsonb_strip_nulls(jsonb_build_object(
+    'requested', COALESCE(NULLIF(v_counts->>'requested', '')::int, 0),
+    'in_scope', COALESCE(NULLIF(v_counts->>'in_scope', '')::int, 0),
+    'expected', v_expected_count,
+    'out_of_scope', COALESCE(jsonb_array_length(v_out_of_scope), 0),
+    'invalid_box_requests', COALESCE(jsonb_array_length(v_invalid_boxes), 0)
+  ));
+  v_counts := COALESCE(v_counts, '{}'::jsonb) || v_counts_patch;
+
+  IF COALESCE(v_policy->>'poll_interval_seconds', '') ~ '^\d+$' THEN
+    v_poll_seconds := LEAST(GREATEST((v_policy->>'poll_interval_seconds')::int, 1), 300);
+  END IF;
+  IF COALESCE(v_policy->>'bundle_inline_progress_budget_ms', '') ~ '^\d+$' THEN
+    v_workflow_progress_budget_ms := LEAST(GREATEST((v_policy->>'bundle_inline_progress_budget_ms')::int, 25), 5000);
+  END IF;
+  IF COALESCE(v_policy->>'bundle_inline_progress_max_steps', '') ~ '^\d+$' THEN
+    v_workflow_progress_max_steps := LEAST(GREATEST((v_policy->>'bundle_inline_progress_max_steps')::int, 1), 50);
+  END IF;
+
+  IF v_expected_count = 0 THEN
+    v_response.status := 'failed';
+    v_response.workflow_status := 'failed';
+    v_response.last_error := 'no_printable_label_targets';
+    v_response.operation_result := jsonb_strip_nulls(jsonb_build_object(
+      'status', 'failed',
+      'error', 'no_printable_label_targets',
+      'counts', v_counts,
+      'out_of_scope', v_out_of_scope,
+      'invalid_boxes', v_invalid_boxes
+    ));
+    v_response.context_patch := jsonb_build_object(
+      'label_print', jsonb_strip_nulls(jsonb_build_object(
+        'organization_id', v_org_id,
+        'requested_by', v_requested_by,
+        'shipments', v_grouped_shipments,
+        'targets', v_targets,
+        'grouped_shipments', v_grouped_shipments,
+        'out_of_scope', v_out_of_scope,
+        'invalid_boxes', v_invalid_boxes,
+        'counts', v_counts,
+        'options', v_options,
+        'policy', v_policy,
+        'fresh_generation_required', true,
+        'fresh_resolve_mode', 'workflow_scope_only',
+        'fresh_request_scope_key', p_step.id::text,
+        'requested_source', v_requested_source
+      ))
+    );
+    RETURN v_response;
+  END IF;
+
+  IF lower(COALESCE(NULLIF(p_operation_result->>'external_step_result', ''), 'false')) IN ('1', 't', 'true', 'y', 'yes', 'on') THEN
+    v_result := COALESCE(p_operation_result->'execute', p_operation_result->'body', p_operation_result);
+    IF jsonb_typeof(v_result) IS DISTINCT FROM 'object' THEN
+      v_result := '{}'::jsonb;
+    END IF;
+    IF jsonb_typeof(p_operation_result->'bundle') = 'object'
+       AND COALESCE(jsonb_typeof(v_result->'bundle'), '') IS DISTINCT FROM 'object' THEN
+      v_result := v_result || jsonb_build_object('bundle', p_operation_result->'bundle');
+    END IF;
+    IF NULLIF(v_result->>'status', '') IS NULL AND NULLIF(p_operation_result->>'status', '') IS NOT NULL THEN
+      v_result := v_result || jsonb_build_object('status', p_operation_result->>'status');
+    END IF;
+    IF NULLIF(v_result->>'mode', '') IS NULL
+       AND COALESCE(NULLIF(p_operation_result->>'print_mode', ''), NULLIF(p_operation_result->>'mode', '')) IS NOT NULL THEN
+      v_result := v_result || jsonb_build_object('mode', COALESCE(NULLIF(p_operation_result->>'print_mode', ''), NULLIF(p_operation_result->>'mode', '')));
+    END IF;
+    IF NULLIF(v_result->>'artifact_kind', '') IS NULL AND NULLIF(p_operation_result->>'artifact_kind', '') IS NOT NULL THEN
+      v_result := v_result || jsonb_build_object('artifact_kind', p_operation_result->>'artifact_kind');
+    END IF;
+    IF NULLIF(v_result->>'source', '') IS NULL AND NULLIF(p_operation_result->>'source', '') IS NOT NULL THEN
+      v_result := v_result || jsonb_build_object('source', p_operation_result->>'source');
+    END IF;
+  ELSE
+    v_execute_request_id_text := COALESCE(
+      NULLIF(v_execute_async->>'request_id', ''),
+      NULLIF(v_execute_response->>'request_id', '')
+    );
+    IF v_execute_request_id_text ~ '^[0-9]+$' THEN
+      v_execute_request_id := v_execute_request_id_text::bigint;
+    END IF;
+
+    IF v_execute_request_id IS NULL THEN
+      v_print_payload := jsonb_strip_nulls(jsonb_build_object(
+        'organization_id', v_org_id,
+        'client_id', v_client_id,
+        'sender_id', v_sender_id,
+        'label_type', v_label_type,
+        'shipments', v_grouped_shipments,
+        'output_name', v_output_name,
+        'expires_seconds', v_expires_seconds,
+        'workflow_progress_enabled', true,
+        'workflow_progress_budget_ms', v_workflow_progress_budget_ms,
+        'workflow_progress_max_steps', v_workflow_progress_max_steps,
+        'metadata', jsonb_strip_nulls(
+          public.jsonb_deep_merge(
+            COALESCE(v_options->'metadata', '{}'::jsonb),
+            jsonb_build_object(
+              'correlation_id', NULLIF(v_context->>'correlation_id', ''),
+              'fresh_generation_required', true,
+              'fresh_request_scope_key', p_step.id::text,
+              'requested_source', v_requested_source
+            )
+          )
+        )
+      ));
+
+      v_execute_response := public.invoke_label_renderer_print_sync_v1(
+        p_run.id,
+        p_step.id,
+        v_print_payload
+      );
+      v_execute_request_id_text := NULLIF(v_execute_response->>'request_id', '');
+      IF v_execute_request_id_text ~ '^[0-9]+$' THEN
+        v_execute_request_id := v_execute_request_id_text::bigint;
+      END IF;
+
+      v_response.status := 'pending';
+      v_response.next_run_at := now() + make_interval(secs => v_poll_seconds);
+      v_response.retry_attempt := LEAST(p_step.retry_attempt + 1, p_step.max_retries);
+      v_response.max_retries := p_step.max_retries;
+      v_response.operation_result := jsonb_strip_nulls(jsonb_build_object(
+        'status', 'pending',
+        'request_id', v_execute_request_id,
+        'counts', v_counts,
+        'ready', '[]'::jsonb,
+        'pending', v_targets,
+        'failed', '[]'::jsonb
+      ));
+      v_response.context_patch := jsonb_build_object(
+        'label_print', jsonb_strip_nulls(jsonb_build_object(
+          'organization_id', v_org_id,
+          'requested_by', v_requested_by,
+          'shipments', v_grouped_shipments,
+          'targets', v_targets,
+          'grouped_shipments', v_grouped_shipments,
+          'out_of_scope', v_out_of_scope,
+          'invalid_boxes', v_invalid_boxes,
+          'counts', v_counts,
+          'options', v_options,
+          'policy', v_policy,
+          'ready', '[]'::jsonb,
+          'pending', v_targets,
+          'failed', '[]'::jsonb,
+          'fresh_generation_required', true,
+          'fresh_resolve_mode', 'workflow_scope_only',
+          'fresh_request_scope_key', p_step.id::text,
+          'requested_source', v_requested_source,
+          'execute_async', jsonb_strip_nulls(jsonb_build_object(
+            'request_id', v_execute_request_id,
+            'requested_at', now(),
+            'request_payload', v_execute_response->'request_payload',
+            'provider_name', v_execute_response->>'provider_name',
+            'completed', false
+          ))
+        ))
+      );
+      RETURN v_response;
+    END IF;
+
+    BEGIN
+      v_http_response := COALESCE(public.check_async_response(v_execute_request_id), '{}'::jsonb);
+      v_http_completed := COALESCE((v_http_response->>'completed')::boolean, false);
+      IF jsonb_typeof(v_http_response->'body') = 'object' THEN
+        v_http_body := v_http_response->'body';
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_http_response := '{}'::jsonb;
+      v_http_body := '{}'::jsonb;
+      v_http_completed := false;
+    END;
+
+    IF NOT v_http_completed THEN
+      v_response.status := 'pending';
+      v_response.next_run_at := now() + make_interval(secs => v_poll_seconds);
+      v_response.retry_attempt := LEAST(p_step.retry_attempt + 1, p_step.max_retries);
+      v_response.max_retries := p_step.max_retries;
+      v_response.operation_result := jsonb_strip_nulls(jsonb_build_object(
+        'status', 'pending',
+        'request_id', v_execute_request_id,
+        'counts', v_counts,
+        'ready', COALESCE(v_label_state->'ready', '[]'::jsonb),
+        'pending', COALESCE(v_label_state->'pending', v_targets),
+        'failed', COALESCE(v_label_state->'failed', '[]'::jsonb)
+      ));
+      v_response.context_patch := jsonb_build_object(
+        'label_print', jsonb_strip_nulls(jsonb_build_object(
+          'organization_id', v_org_id,
+          'requested_by', v_requested_by,
+          'shipments', v_grouped_shipments,
+          'targets', v_targets,
+          'grouped_shipments', v_grouped_shipments,
+          'out_of_scope', v_out_of_scope,
+          'invalid_boxes', v_invalid_boxes,
+          'counts', v_counts,
+          'options', v_options,
+          'policy', v_policy,
+          'ready', COALESCE(v_label_state->'ready', '[]'::jsonb),
+          'pending', COALESCE(v_label_state->'pending', v_targets),
+          'failed', COALESCE(v_label_state->'failed', '[]'::jsonb),
+          'fresh_generation_required', true,
+          'fresh_resolve_mode', 'workflow_scope_only',
+          'fresh_request_scope_key', p_step.id::text,
+          'requested_source', v_requested_source,
+          'execute_async', jsonb_strip_nulls(jsonb_build_object(
+            'request_id', v_execute_request_id,
+            'requested_at', COALESCE(v_execute_async->>'requested_at', now()::text),
+            'request_payload', COALESCE(v_execute_async->'request_payload', v_execute_response->'request_payload'),
+            'provider_name', COALESCE(v_execute_async->>'provider_name', v_execute_response->>'provider_name'),
+            'completed', false
+          ))
+        ))
+      );
+      RETURN v_response;
+    END IF;
+
+    v_result := COALESCE(v_http_body, '{}'::jsonb);
+  END IF;
+
+  v_result_status := lower(COALESCE(NULLIF(v_result->>'status', ''), 'ok'));
+  v_bundle_response := COALESCE(v_result->'bundle', '{}'::jsonb);
+  v_bundle_status := lower(COALESCE(NULLIF(v_bundle_response->>'status', ''), v_result_status, 'ok'));
+  v_print_mode := COALESCE(NULLIF(v_result->>'mode', ''), 'print_sync');
+  v_artifact_kind := COALESCE(NULLIF(v_result->>'artifact_kind', ''), NULLIF(v_bundle_response->>'artifact_kind', ''));
+
+  v_fresh_state := public.resolve_label_print_fresh_scope_v1(p_step.id, v_targets);
+  v_ready := COALESCE(v_fresh_state->'ready', '[]'::jsonb);
+  v_pending := COALESCE(v_fresh_state->'pending', '[]'::jsonb);
+  v_failed := COALESCE(v_fresh_state->'failed', '[]'::jsonb);
+  v_label_job_ids := COALESCE(v_fresh_state->'label_job_ids', '[]'::jsonb);
+  v_ready_count := COALESCE(NULLIF(v_fresh_state->>'ready_count', '')::int, 0);
+  v_pending_count := COALESCE(NULLIF(v_fresh_state->>'pending_count', '')::int, 0);
+  v_failed_count := COALESCE(NULLIF(v_fresh_state->>'failed_count', '')::int, 0);
+
+  v_counts := COALESCE(v_counts, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(
+    'ready', v_ready_count,
+    'pending', v_pending_count,
+    'failed', v_failed_count,
+    'expected', v_expected_count,
+    'bundled', CASE
+      WHEN COALESCE(v_bundle_response #>> '{counts,bundled}', '') ~ '^\d+$' THEN (v_bundle_response #>> '{counts,bundled}')::int
+      ELSE NULL
+    END
+  ));
+
+  IF v_result_status IN ('failed', 'error') OR v_bundle_status IN ('failed', 'error') OR NULLIF(v_result->>'error', '') IS NOT NULL THEN
+    v_response.status := 'failed';
+    v_response.workflow_status := 'failed';
+    v_last_error := COALESCE(NULLIF(v_result->>'error', ''), NULLIF(v_bundle_response->>'error', ''), 'label_print_execute_failed');
+    v_response.last_error := v_last_error;
+  ELSIF v_pending_count > 0 THEN
+    v_response.status := 'pending';
+    v_response.next_run_at := now() + make_interval(secs => v_poll_seconds);
+    v_response.retry_attempt := LEAST(p_step.retry_attempt + 1, p_step.max_retries);
+    v_response.max_retries := p_step.max_retries;
+  ELSIF COALESCE(NULLIF(v_bundle_response->>'file_path', ''), NULLIF(v_bundle_response->>'file_url', ''), NULLIF(v_bundle_response->>'signed_url', '')) IS NULL THEN
+    v_response.status := 'pending';
+    v_response.next_run_at := now() + make_interval(secs => v_poll_seconds);
+    v_response.retry_attempt := LEAST(p_step.retry_attempt + 1, p_step.max_retries);
+    v_response.max_retries := p_step.max_retries;
+  ELSE
+    v_response.status := 'completed';
+  END IF;
+
+  v_response.operation_result := jsonb_strip_nulls(jsonb_build_object(
+    'status', CASE
+      WHEN v_response.status = 'completed' THEN 'ok'
+      ELSE v_response.status
+    END,
+    'execute', v_result,
+    'bundle', CASE WHEN jsonb_typeof(v_bundle_response) = 'object' THEN v_bundle_response ELSE NULL END,
+    'counts', v_counts,
+    'ready', v_ready,
+    'pending', v_pending,
+    'failed', v_failed,
+    'artifact_kind', v_artifact_kind,
+    'print_mode', v_print_mode,
+    'request_id', v_execute_request_id,
+    'error', CASE WHEN v_response.status = 'failed' THEN v_last_error ELSE NULL END
+  ));
+
+  v_response.context_patch := jsonb_build_object(
+    'label_print', jsonb_strip_nulls(jsonb_build_object(
+      'organization_id', v_org_id,
+      'requested_by', v_requested_by,
+      'shipments', v_grouped_shipments,
+      'targets', v_targets,
+      'grouped_shipments', v_grouped_shipments,
+      'out_of_scope', v_out_of_scope,
+      'invalid_boxes', v_invalid_boxes,
+      'counts', v_counts,
+      'options', v_options,
+      'policy', v_policy,
+      'ready', v_ready,
+      'pending', v_pending,
+      'failed', v_failed,
+      'label_job_ids', v_label_job_ids,
+      'fresh_generation_required', true,
+      'fresh_resolve_mode', 'workflow_scope_only',
+      'fresh_request_scope_key', p_step.id::text,
+      'requested_source', v_requested_source,
+      'execute_async', jsonb_strip_nulls(jsonb_build_object(
+        'request_id', v_execute_request_id,
+        'requested_at', COALESCE(v_execute_async->>'requested_at', now()::text),
+        'request_payload', COALESCE(v_execute_async->'request_payload', v_execute_response->'request_payload'),
+        'provider_name', COALESCE(v_execute_async->>'provider_name', v_execute_response->>'provider_name'),
+        'completed', CASE WHEN v_response.status = 'completed' THEN true ELSE NULL END
+      )),
+      'execute_response', v_result,
+      'bundle_response', CASE WHEN jsonb_typeof(v_bundle_response) = 'object' THEN v_bundle_response ELSE NULL END,
+      'artifact_kind', v_artifact_kind,
+      'print_mode', v_print_mode
+    ))
+  );
+
+  RETURN v_response;
+END;
+$function$;
+
+COMMENT ON FUNCTION workflow_handlers.execute_label_print_execute_v1(public.workflow_run_steps, public.workflow_runs, jsonb)
+  IS 'Hybrid print workflow execute step that asynchronously dispatches print_sync, reconciles completion, and patches canonical bundle/audit context.';
+
+
+SELECT pg_advisory_unlock(hashtext('202603062700_label_print_execute_external_result_normalize_v1'));
+COMMIT;

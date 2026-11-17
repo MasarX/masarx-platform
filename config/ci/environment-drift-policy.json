@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "description": "Policy for unmanaged GitHub environments and temporary key-level drift allowances outside deploy-surfaces SSOT.",
+  "allow_unmanaged_environment_names": [
+    "Preview",
+    "github-pages"
+  ],
+  "allow_unmanaged_environment_name_patterns": [],
+  "allow_legacy_environment_alias_names": [
+    "db-staging"
+  ],
+  "allow_extra_keys_by_environment": {
+    "portal-dev": {
+      "secrets": [
+        "PREVIEW_SUPABASE_ACCESS_TOKEN"
+      ],
+      "vars": []
+    }
+  },
+  "allow_extra_keys_by_environment_patterns": [
+    {
+      "env_name_pattern": "^api-ingress-(dev|stg|prod)$",
+      "secrets": [],
+      "vars": [
+        "SUPABASE_ANON_KEY",
+        "SUPABASE_ORG_ID"
+      ]
+    },
+    {
+      "env_name_pattern": "^console-(dev|stg|prod)$",
+      "secrets": [],
+      "vars": [
+        "SUPABASE_ORG_ID"
+      ]
+    },
+    {
+      "env_name_pattern": "^mobile-(dev|stg|prod)$",
+      "secrets": [],
+      "vars": [
+        "SUPABASE_ORG_ID"
+      ]
+    },
+    {
+      "env_name_pattern": "^portal-(dev|stg|prod)$",
+      "secrets": [],
+      "vars": [
+        "SUPABASE_ORG_ID"
+      ]
+    },
+    {
+      "env_name_pattern": "^db-(dev|stg|prod|stg-checks)$",
+      "secrets": [
+        "SUPABASE_ANON_KEY",
+        "SUPABASE_SECRET_KEY"
+      ],
+      "vars": [
+        "SUPABASE_PREFER_MANAGEMENT_API_KEYS"
+      ]
+    },
+    {
+      "env_name_pattern": "^db-dev$",
+      "secrets": [],
+      "vars": [
+        "CONSOLE_BASE_URL",
+        "INTEGRATION_JEST_FORCE_EXIT",
+        "PORTAL_BASE_URL",
+        "RUN_EDGE_E2E",
+        "RUN_MATRIX_E2E",
+        "RUN_RLS_INTEGRATION_TESTS",
+        "VERIFY_CORE_ALLOW_EXTENDED_SUITES"
+      ]
+    },
+    {
+      "env_name_pattern": "^db-stg$",
+      "secrets": [],
+      "vars": [
+        "SUPABASE_AUTO_REPAIR_JWT_SIGNING_KEY"
+      ]
+    },
+    {
+      "env_name_pattern": "^landing-(dev|stg|prod)$",
+      "secrets": [],
+      "vars": [
+        "CLOUDFLARE_ZONE_NAME"
+      ]
+    },
+    {
+      "env_name_pattern": "^landing-stg$",
+      "secrets": [],
+      "vars": [
+        "LANDING_LEGACY_DOMAINS",
+        "SUPABASE_ANON_KEY"
+      ]
+    }
+  ]
+}

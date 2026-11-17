@@ -1,0 +1,80 @@
+{
+  "version": "2025-12-15",
+  "templates": {
+    "shipping": {
+      "version": "1.5.1",
+      "template_key": "waybill_v1",
+      "label_type": "shipping",
+      "page": {
+        "width_inch": 4,
+        "height_inch": 6,
+        "margin_inch": 0.12,
+        "dpi": 203,
+        "orientation": "portrait"
+      },
+      "assets": [
+        {
+          "name": "logo",
+          "path": "brand/logo.png",
+          "content_type": "image/png"
+        }
+      ],
+      "blocks": [
+        { "type": "rect", "x": 10, "y": 388, "width": 268, "height": 42, "stroke_width": 1 },
+        { "type": "image", "asset_ref": "logo", "x": 16, "y": 398, "width": 24, "height": 14 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 18, "x": 270, "y": 408, "align": "right", "value_path": "payment_term_label", "fallback": "Prepaid", "max_width": 120 },
+        { "type": "text", "font": "Helvetica", "font_size": 10, "x": 270, "y": 394, "align": "right", "value_path": "created_at_local", "fallback": "", "max_width": 120 },
+
+        { "type": "rect", "x": 10, "y": 246, "width": 268, "height": 136, "stroke_width": 1 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 16, "x": 144, "y": 366, "align": "center", "value_path": "service_level_label", "fallback": "delivery", "max_width": 200 },
+        { "type": "barcode", "x": 144, "y": 280, "height": 56, "module_width": 0.75, "max_width": 200, "align": "center", "value_path": "barcode_value", "fallback": "TRACKING", "human_readable": false },
+        { "type": "text", "font": "Helvetica", "font_size": 12, "x": 144, "y": 252, "align": "center", "value_path": "tracking_number", "fallback": "", "max_width": 232 },
+
+        { "type": "rect", "x": 10, "y": 188, "width": 268, "height": 52, "stroke_width": 1 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 16, "y": 228, "fallback": "Sender" },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 270, "y": 228, "align": "right", "value_path": "sender_phone", "fallback": "", "max_width": 100 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 12, "x": 16, "y": 214, "value_path": "sender_name", "fallback": "", "max_width": 200 },
+        { "type": "text", "font": "Helvetica", "font_size": 10.5, "x": 16, "y": 200, "value_path": "origin_line1", "fallback": "", "max_width": 220 },
+        { "type": "text", "font": "Helvetica", "font_size": 10, "x": 16, "y": 188, "value_path": "origin_summary", "fallback": "", "max_width": 220 },
+
+        { "type": "rect", "x": 10, "y": 118, "width": 268, "height": 64, "stroke_width": 1 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 16, "y": 168, "fallback": "Receiver" },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 270, "y": 168, "align": "right", "value_path": "recipient_phone", "fallback": "", "max_width": 100 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 12, "x": 16, "y": 154, "value_path": "recipient_name", "fallback": "", "max_width": 190 },
+        { "type": "text", "font": "Helvetica", "font_size": 10.5, "x": 16, "y": 140, "value_path": "destination_line1", "fallback": "", "max_width": 190 },
+        { "type": "text", "font": "Helvetica", "font_size": 10, "x": 16, "y": 126, "value_path": "destination_summary", "fallback": "", "max_width": 190 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 30, "x": 268, "y": 136, "align": "right", "value_path": "destination_city_code", "fallback": "---", "max_width": 70 },
+
+        { "type": "rect", "x": 10, "y": 52, "width": 268, "height": 60, "stroke_width": 1 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 16, "y": 100, "fallback": "Weight" },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 144, "y": 100, "align": "center", "fallback": "Reference Number" },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 268, "y": 100, "align": "right", "fallback": "COD" },
+        { "type": "text", "font": "Helvetica", "font_size": 11, "x": 16, "y": 86, "value_path": "weight_label", "fallback": "--", "max_width": 80 },
+        { "type": "text", "font": "Helvetica", "font_size": 11, "x": 268, "y": 86, "align": "right", "value_path": "cod_label", "fallback": "0 SAR", "max_width": 80 },
+        { "type": "barcode", "x": 144, "y": 76, "height": 18, "module_width": 0.6, "max_width": 140, "align": "center", "value_path": "reference_number", "fallback": "", "human_readable": false },
+        { "type": "text", "font": "Helvetica", "font_size": 9, "x": 144, "y": 58, "align": "center", "value_path": "reference_number", "fallback": "", "max_width": 120 },
+
+        { "type": "rect", "x": 10, "y": 10, "width": 268, "height": 36, "stroke_width": 1 },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 16, "y": 32, "fallback": "Bundle" },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 144, "y": 32, "align": "center", "fallback": "Item List" },
+        { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "x": 268, "y": 32, "align": "right", "fallback": "Notes" },
+        { "type": "text", "font": "Helvetica", "font_size": 10, "x": 16, "y": 18, "value_path": "bundle_label", "fallback": "1", "max_width": 50 },
+        { "type": "text", "font": "Helvetica", "font_size": 10, "x": 144, "y": 18, "align": "center", "value_path": "shipment_metadata", "fallback": "", "max_width": 110 },
+        { "type": "text", "font": "Helvetica", "font_size": 10, "x": 268, "y": 18, "align": "right", "value_path": "special_instructions", "fallback": "", "max_width": 70 }
+      ],
+      "barcode": {
+        "type": "CODE128",
+        "value_path": "barcode_value",
+        "human_readable": "tracking_number"
+      },
+      "max_attempts": 5,
+      "retry_backoff_seconds": [45, 180, 600],
+      "metadata": {
+        "brand_name": "MasarX",
+        "primary_color": "#2D3F90",
+        "fallback_title": "MasarX Waybill",
+        "description": "MasarX 4x6 waybill v1.5.1 with guarded spacing, storage-hosted logo, and ref barcode isolation"
+      }
+    }
+  }
+}

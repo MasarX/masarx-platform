@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "defaults": { "max_retention_days": 7, "debug_retention_days": 3, "release_retention_days": 30 },
+  "classes": {
+    "cross_job": { "max_retention_days": 7 },
+    "debug": { "max_retention_days": 3, "require_failure_or_manual_debug": true },
+    "routine_ci": { "max_retention_days": 14 },
+    "staging_deploy": { "max_retention_days": 14 },
+    "prod_release": { "max_retention_days": 30 },
+    "large_binary": { "max_retention_days": 1 }
+  },
+  "rules": [
+    { "class": "prod_release", "pattern": "(release-verify-aggregate|prod-deploy-evidence|client-go-live|mobile-fieldops|FieldOps|prod|production|go-live|provision|prega-reset|operator-accounts|prod-data-hygiene)" },
+    { "class": "staging_deploy", "pattern": "(dev-deploy-evidence|stg-deploy-evidence|landing-.*deploy-evidence|api-ingress-deploy-evidence)" },
+    { "class": "cross_job", "pattern": "(Upload (internal |hosted )?preview manifest artifact|Upload prewarm manifest artifact|child-runs|preview-prewarm|cloud-provision-output|preview-manifest-pr|preview-manifest-release)" },
+    { "class": "debug", "pattern": "(release-verify-preview|reviewer-gate-preview|release-verify-fast|vercel-ui-verify|playwright|test-results|trace|flake|browser-e2e|runtime-a11y|frontend-a2z|security-scan)" },
+    { "class": "staging_deploy", "pattern": "(deploy|stg|dev|landing|api-ingress|vercel)" },
+    { "class": "routine_ci", "pattern": "(cloud-run|node-run|preview-run|reviewer-gate-evidence|dynamic-gating|summary|audit|scan|slo|health|canary|drift|cost|planning|done-audit|demo-accounts|index-templates|auth-email-url|db-password-sync|shipments-print-download)" }
+  ],
+  "forbidden_path_patterns": ["(^|/)\\.env(\\.|$|/)", "\\.json\\.env($|\\b)", "preview\\.env", "vercel-access\\.json", "secret", "token", "credential", "identity", "artifact_manifest_env", "artifact_env_file"],
+  "heavy_path_patterns": ["playwright-report", "test-results", "(^|/)screenshots?(/|$)", "visual", "(^|/)traces?(/|$)", "bundle", "\\.tar\\.gz"],
+  "allowed_forbidden_path_patterns": ["preview-manifest"]
+}

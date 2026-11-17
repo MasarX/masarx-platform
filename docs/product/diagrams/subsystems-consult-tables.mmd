@@ -1,0 +1,89 @@
+%% MasarX Delivery Platform - Tables-Only Consult Paths per Subsystem
+%% Boxes are tables only. Edge labels describe triggers and consults.
+%% Paste into https://mermaid.live
+
+graph LR
+
+  %% ===== Central Workflow Engine (tables) =====
+  subgraph Workflow_Engine
+    WT[workflow_templates]
+    WTS[workflow_template_steps]
+    WR[workflow_runs]
+    WRS[workflow_run_steps]
+    OH[operation_handlers]
+    DL[decision_log]
+  end
+
+  WT -->|defines sequence| WTS
+  WR -->|materialize| WRS
+  WRS -->|decisions| DL
+  OH -. referenced by steps .- WRS
+
+  %% ===== Shared Configuration (tables) =====
+  subgraph Shared_Config
+    SV[settings_versions]
+    ST[settings]
+    MC[mapping_configs]
+    OT[operation_templates]
+    MT[message_templates]
+  end
+  SV -->|publish| ST
+
+  %% ===== Webhooks (tables only) =====
+  subgraph Webhooks
+    WI[webhook_inbox]
+  end
+  WI -->|trigger: inbound webhook accepted| WR
+  WI -->|http_response_event| DL
+  WRS -. consults policy via .- ST
+  WRS -. consults response mapping via .- MC
+
+  %% ===== API Calls (tables only) =====
+  subgraph API_Calls
+    OC[outbound_calls]
+    ACL[api_call_log]
+  end
+  WRS -->|trigger: provider API call| OC
+  WRS -. consults request mapping via .- MC
+  WRS -. consults operation template via .- OT
+  OC -->|request/response audit| ACL
+  OC -->|http_execution_outcome| DL
+
+  %% ===== Label Rendering (tables only) =====
+  subgraph Labels
+    LJ[label_jobs]
+    LB[labels]
+    SA[shipment_actions]
+  end
+  WRS -->|trigger: label requested| LJ
+  WRS -. consults renderer defaults via .- ST
+  LJ -->|upsert_label| LB
+  LB -->|append_action| SA
+  LB -->|audit| DL
+
+  %% ===== Geocoding (tables only) =====
+  subgraph Geocoding
+    ADR[addresses]
+    GAT[geocoding_attempts]
+    GEO[geocodes]
+  end
+  %% Example: shipment creation introduces address to be geocoded
+  SH[shipments]
+  WRS -->|trigger: create shipment| SH
+  SH -->|needs routing address| ADR
+  WRS -->|trigger: geocode required| GAT
+  WRS -. consults geocode policy via .- ST
+  WRS -. consults provider templates via .- OT
+  GAT -->|cache_result| GEO
+  GEO -->|audit| DL
+
+  %% ===== Communications (tables only) =====
+  subgraph Communications
+    OCC[outbound_calls]
+  end
+  WRS -->|trigger: notification requested| OCC
+  WRS -. consults message template via .- MT
+  WRS -. consults request mapping via .- MC
+  WRS -. consults operation template via .- OT
+  OCC -->|send_outcome| DL
+

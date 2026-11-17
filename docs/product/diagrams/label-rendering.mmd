@@ -1,0 +1,10 @@
+%% Label Rendering (focused)
+
+graph TD
+  I[progress_workflow_run<br/>fn] -->|enqueue| L[request_label_generation<br/>fn] --> X[label_jobs<br/>tbl]
+  C[label-renderer<br/>edge] -->|lease| M[lease_label_job<br/>fn] --> X
+  C -->|compose| N[compose_label_payload<br/>fn]
+  C -->|fallback defaults| AE[renderer_defaults<br/>settings]
+  C -->|download asset| SA[label-render-assets<br/>bucket]
+  C -->|upload pdf| SB[labels<br/>bucket]
+  C -->|complete| O[complete_label_job<br/>fn] --> Y[labels<br/>tbl]

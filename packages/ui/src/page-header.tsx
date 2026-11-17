@@ -1,0 +1,42 @@
+import * as React from "react";
+
+type PageHeaderProps = {
+  title: string;
+  description?: string;
+  actions?: React.ReactNode;
+  eyebrow?: React.ReactNode;
+};
+
+/**
+ * Page header with title, description, and optional actions.
+ */
+export function PageHeader({
+  title,
+  description,
+  actions,
+  eyebrow,
+}: PageHeaderProps) {
+  return (
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-4 border-b border-ui-accent/15 pb-4">
+      <div className="min-w-0">
+        {eyebrow ? (
+          <div className="text-[11px] font-medium text-ui-accent/70">{eyebrow}</div>
+        ) : null}
+        <h1
+          className={[
+            "text-2xl font-semibold tracking-tight text-ui-ink",
+            eyebrow ? "mt-1" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {title}
+        </h1>
+        {description ? (
+          <p className="mt-2 max-w-prose text-sm text-ui-muted">{description}</p>
+        ) : null}
+      </div>
+      {actions ? <div className="flex items-center gap-3">{actions}</div> : null}
+    </div>
+  );
+}

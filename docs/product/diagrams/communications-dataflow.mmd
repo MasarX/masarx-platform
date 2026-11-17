@@ -1,0 +1,85 @@
+%% Communications Subsystem — Tables‑Only Data Flow (paste into https://mermaid.live)
+
+flowchart TB
+
+  %% ============ Configuration ============ 
+  subgraph Config["Configuration Tables"]
+    ST[settings]
+    SV[settings_versions]
+    OT[operation_templates]
+    MC[mapping_configs]
+    MT[message_templates]
+    PR[providers]
+    PAC[provider_auth_configs]
+  end
+
+  %% ============ Inbound Webhooks ============
+  subgraph Inbound["Inbound Webhooks"]
+    WS[webhook_sources]
+    WI[webhook_inbox]
+  end
+
+  %% ============ Engine ============
+  subgraph Engine["Workflow Engine"]
+    WR[workflow_runs]
+    WRS[workflow_run_steps]
+  end
+
+  %% ============ Outbound Execution ============
+  subgraph Outbound["Outbound Execution"]
+    OC[outbound_calls]
+    ACL[api_call_log]
+  end
+
+  %% ============ Observability ============
+  subgraph Observability["Audit & Decisions"]
+    DL[decision_log]
+  end
+
+  %% ============ Autonomy ============
+  subgraph Autonomy["Worker & Schedule"]
+    WRK[worker_registry]
+    CRON[cron_config]
+  end
+
+  %% ============ Preferences (Optional) ============
+  subgraph Preferences["Preferences (Optional)"]
+    RP[recipient_preferences]
+  end
+
+  %% ============ Inbound → Engine ============
+  WS -->|authorized by token| WI
+  WI -->|start workflow| WR
+  WI -->|http ack logged| DL
+
+  %% ============ Engine ============
+  WR -->|materialize steps| WRS
+  WRS -->|enqueue notification| OC
+  WRS -->|step decisions| DL
+
+  %% ============ Config Consults ============
+  WRS -. consults .-> ST
+  WRS -. consults .-> OT
+  WRS -. consults .-> MC
+  WRS -. consults .-> MT
+  WRS -. personalization .-> RP
+
+  OC -. consults .-> OT
+  OC -. consults .-> MC
+  OC -. consults .-> PR
+  OC -. credentials .-> PAC
+  OC -. provider defaults .-> ST
+
+  %% ============ Outbound Execution ============
+  OC -->|request/response audit| ACL
+  OC -->|send outcome| DL
+
+  %% ============ Autonomy (Always-On) ============
+  WRK -. worker catalog .- CRON
+  CRON -. "prepare jobs (pending → pending_edge)" .- OC
+  CRON -. "edge batch (pending_edge → executed)" .- OC
+
+  %% ============ Styling ============
+  classDef table fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:1px;
+  class WS,WI,WR,WRS,OC,ACL,DL,PR,PAC,ST,SV,OT,MC,MT,RP,WRK,CRON table;
+

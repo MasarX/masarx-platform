@@ -1,0 +1,11 @@
+BEGIN;
+
+CREATE OR REPLACE FUNCTION count_organizations()
+RETURNS BIGINT
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+    SELECT COUNT(*) FROM organizations;
+$$;
+
+COMMIT;

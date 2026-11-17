@@ -1,0 +1,319 @@
+{
+  "template_key": "waybill_v1",
+  "version": 185,
+  "label_type": "shipping",
+  "page": { "width_inch": 4, "height_inch": 6, "margin_inch": 0.12, "dpi": 203, "orientation": "portrait" },
+  "assets": [{ "name": "logo", "path": "brand/logo.png", "content_type": "image/png" }],
+  "sections": ["header", "barcode_band", "sender", "receiver", "refs_cod", "bottom_table"],
+  "auto_section_rects": false,
+  "update_defaults": true,
+  "defaults_change_reason": "Waybill v1.8.5 (header branding toggle; header bounds-safe max widths)",
+  "default_text_valign": "top",
+  "default_text_min_font_size": 6,
+  "default_text_overflow": "shrink",
+  "geometry_transforms": [
+    {
+      "type": "table_columns",
+      "section_key": "refs_cod",
+      "ratios": [1, 2, 1],
+      "columns": [
+        { "box_field_key": "weight_box", "field_keys": ["weight_label"] },
+        { "box_field_key": "reference_box", "field_keys": ["reference_label", "reference_barcode", "reference_number"] },
+        { "box_field_key": "cod_box", "field_keys": ["cod_label", "cod_value"] }
+      ]
+    },
+    {
+      "type": "table_columns",
+      "section_key": "bottom_table",
+      "ratios": [1, 2, 1],
+      "columns": [
+        { "box_field_key": "bundle_box", "field_keys": ["bundle_label", "bundle_value"] },
+        { "box_field_key": "item_list_box", "field_keys": ["item_list_label", "item_list_header", "item_list_content"] },
+        { "box_field_key": "notes_box", "field_keys": ["notes_label"] }
+      ]
+    }
+  ],
+  "section_separator_lines": [
+    { "between": ["header", "barcode_band"], "stroke_width": 1.5, "color": "#000000" },
+    { "between": ["barcode_band", "sender"], "stroke_width": 1.5, "color": "#000000" },
+    { "between": ["sender", "receiver"], "stroke_width": 1.5, "color": "#000000" },
+    { "at_top_of": "refs_cod", "stroke_width": 1.5, "color": "#000000" },
+    { "at_top_of": "bottom_table", "stroke_width": 1, "color": "#000000" },
+    { "at_bottom_of": "bottom_table", "stroke_width": 1, "color": "#000000" }
+  ],
+  "static_blocks": [
+    { "type": "line", "x_from_field": "reference_box", "stroke_width": 1, "color": "#000000", "section_key": "refs_cod" },
+    { "type": "line", "x_from_field": "cod_box", "stroke_width": 1, "color": "#000000", "section_key": "refs_cod" },
+    { "type": "line", "x_from_field": "item_list_box", "stroke_width": 1, "color": "#000000", "section_key": "bottom_table" },
+    { "type": "line", "x_from_field": "notes_box", "stroke_width": 1, "color": "#000000", "section_key": "bottom_table" }
+  ],
+  "tokens": [
+    { "token_key": "min_font_size", "token_type": "font_size", "value": 9 },
+    { "token_key": "font_size_xs", "token_type": "font_size", "value": 9 },
+    { "token_key": "font_size_sm", "token_type": "font_size", "value": 10 },
+    { "token_key": "font_size_md", "token_type": "font_size", "value": 11 },
+    { "token_key": "font_size_lg", "token_type": "font_size", "value": 12 },
+    { "token_key": "font_size_xl", "token_type": "font_size", "value": 18 },
+    { "token_key": "font_size_city", "token_type": "font_size", "value": 32 },
+    { "token_key": "pad_xs", "token_type": "spacing", "value": 4 },
+    { "token_key": "pad_sm", "token_type": "spacing", "value": 6 },
+    { "token_key": "pad_md", "token_type": "spacing", "value": 8 },
+    { "token_key": "pad_lg", "token_type": "spacing", "value": 10 },
+    { "token_key": "band_height_barcode", "token_type": "band_height", "value": 92 },
+    { "token_key": "header_height", "token_type": "band_height", "value": 52 },
+    { "token_key": "table_row_height", "token_type": "spacing", "value": 18 },
+    { "token_key": "column_divider_x1", "token_type": "spacing", "value": 88 },
+    { "token_key": "column_divider_x2", "token_type": "spacing", "value": 176 },
+    { "token_key": "barcode_min_height", "token_type": "barcode_min_height", "value": 34 },
+    { "token_key": "barcode_min_module_width", "token_type": "barcode_min_width", "value": 0.9 },
+    { "token_key": "barcode_min_height_ref", "token_type": "barcode_min_height", "value": 22 },
+    { "token_key": "barcode_min_module_width_ref", "token_type": "barcode_min_width", "value": 0.5 },
+    { "token_key": "logo_height", "token_type": "spacing", "value": 16 },
+    { "token_key": "city_code_max_width", "token_type": "spacing", "value": 80 },
+    { "token_key": "barcode_band_width", "token_type": "spacing", "value": 232 }
+  ],
+  "metadata": {
+    "brand_name": "MasarX",
+    "primary_color": "#2D3F90",
+    "fallback_title": "MasarX Waybill",
+    "description": "MasarX 4x6 waybill v1.8.5 tuned from Figma SSOT geometry"
+  },
+  "fields": {
+    "logo_mark": { "ignore": true },
+    "brand_text": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 18,
+      "value_path": "sender_brand_name",
+      "fallback": "MasarX",
+      "color": "#2D3F90",
+      "max_width_from_field": "payment_block",
+      "max_width_padding_pt": 6,
+      "render_if": { "path": "shipment_metadata.header_brand_mode", "equals": "text" }
+    },
+    "logo_block": {
+      "type": "image",
+      "asset_ref": "logo",
+      "height": 22.77,
+      "y_offset": -3.61,
+      "render_if": { "path": "shipment_metadata.header_brand_mode", "not_equals": "text" }
+    },
+    "payment_term": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 18,
+      "align": "right",
+      "value_path": "payment_term_label",
+      "fallback": "Prepaid"
+    },
+    "created_at": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 10,
+      "align": "right",
+      "value_path": "created_at_local",
+      "fallback": "",
+      "valign": "bottom"
+    },
+
+    "service_level": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 18,
+      "align": "right",
+      "value_path": "service_level_label",
+      "fallback": "Standard"
+    },
+    "tracking_barcode": {
+      "type": "barcode",
+      "value_path": "barcode_value",
+      "fallback": "TRACKING",
+      "human_readable": false,
+      "module_width": 0.9,
+      "max_scale": 5,
+      "reserve_bottom_from_field": "tracking_number",
+      "reserve_bottom_padding_pt": 4
+    },
+    "tracking_number": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 11,
+      "align": "center",
+      "value_path": "tracking_number",
+      "fallback": "",
+      "max_width_from_field_width": "tracking_barcode",
+      "max_width_from_field_width_padding_pt": 2
+    },
+
+    "sender_title": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 11,
+      "fallback": "Sender",
+      "max_width_from_field": "sender_city_code",
+      "max_width_padding_pt": 8
+    },
+    "sender_phone": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 11,
+      "align": "right",
+      "value_path": "sender_phone",
+      "fallback": ""
+    },
+    "sender_name": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 12,
+      "value_path": "sender_name",
+      "fallback": "",
+      "max_width_from_field": "sender_city_code",
+      "max_width_padding_pt": 8
+    },
+    "sender_address_1": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 10.5,
+      "value_path": "origin_line1",
+      "fallback": "",
+      "max_width_from_field": "sender_city_code",
+      "max_width_padding_pt": 8
+    },
+    "sender_address_2": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 10,
+      "value_path": "origin_summary",
+      "fallback": "",
+      "max_width_from_field": "sender_city_code",
+      "max_width_padding_pt": 8
+    },
+    "sender_city_code": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 32,
+      "align": "right",
+      "valign": "middle",
+      "value_path": "destination_city_code",
+      "fallback": "RIY"
+    },
+
+    "receiver_title": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 11,
+      "fallback": "Receiver",
+      "max_width_from_field": "receiver_city_code",
+      "max_width_padding_pt": 8
+    },
+    "receiver_phone": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 11,
+      "align": "right",
+      "value_path": "recipient_phone",
+      "fallback": ""
+    },
+    "receiver_name": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 12,
+      "value_path": "recipient_name",
+      "fallback": "",
+      "max_width_from_field": "receiver_city_code",
+      "max_width_padding_pt": 8
+    },
+    "receiver_address_1": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 10.5,
+      "value_path": "destination_line1",
+      "fallback": "",
+      "max_width_from_field": "receiver_city_code",
+      "max_width_padding_pt": 8
+    },
+    "receiver_address_2": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 10,
+      "value_path": "destination_summary",
+      "fallback": "",
+      "max_width_from_field": "receiver_city_code",
+      "max_width_padding_pt": 8
+    },
+    "receiver_city_code": {
+      "type": "text",
+      "font": "Helvetica-Bold",
+      "font_size": 32,
+      "align": "right",
+      "valign": "middle",
+      "value_path": "destination_city_code",
+      "fallback": "RIY"
+    },
+
+    "weight_label": { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "fallback": "Weight" },
+    "reference_label": { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "align": "center", "fallback": "Reference Number" },
+    "cod_label": { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "align": "right", "fallback": "COD" },
+    "cod_value": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 11,
+      "align": "right",
+      "value_path": "cod_label",
+      "fallback": "0 SAR"
+    },
+    "reference_barcode": {
+      "type": "barcode",
+      "align": "center",
+      "value_path": "reference_number",
+      "fallback": "",
+      "human_readable": false,
+      "module_width": 0.6,
+      "max_scale": 5,
+      "reserve_bottom_from_field": "reference_number",
+      "reserve_bottom_padding_pt": 2
+    },
+    "reference_number": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 9,
+      "align": "center",
+      "value_path": "reference_number",
+      "fallback": "",
+      "max_width_from_field_width": "reference_number",
+      "max_width_from_field_width_padding_pt": 2
+    },
+
+    "bundle_label": { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "fallback": "Bundle" },
+    "item_list_label": { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "align": "center", "fallback": "Item List" },
+    "notes_label": { "type": "text", "font": "Helvetica-Bold", "font_size": 11, "align": "right", "fallback": "Notes" },
+    "bundle_value": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 10,
+      "value_path": "bundle_label",
+      "fallback": "1"
+    },
+    "item_list_header": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 10,
+      "align": "center",
+      "fallback": ":Content",
+      "max_width_from_field_width": "item_list_header",
+      "max_width_from_field_width_padding_pt": 2
+    },
+    "item_list_content": {
+      "type": "text",
+      "font": "Helvetica",
+      "font_size": 10,
+      "align": "center",
+      "wrap": true,
+      "line_height_factor": 1.12,
+      "value_path": "shipment_metadata.notes",
+      "fallback": "",
+      "max_width_from_field_width": "item_list_content",
+      "max_width_from_field_width_padding_pt": 2
+    }
+  }
+}

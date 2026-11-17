@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-variant="ai" data-theme="light" data-motion="on">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" data-i18n-meta="meta_description" content="One API to run your entire last-mile operation. MasarX plugs into your existing systems — send delivery data however you already send it. We map, process, and automate everything." />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MasarX" />
+    <meta property="og:title" data-i18n-meta="meta_title" content="MasarX - Zero-friction last-mile delivery integration" />
+    <meta property="og:description" data-i18n-meta="meta_description" content="One API to run your entire last-mile operation. MasarX plugs into your existing systems — send delivery data however you already send it. We map, process, and automate everything." />
+    <meta property="og:image" content="../brand/masarx-mark-a.svg" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" data-i18n-meta="meta_title" content="MasarX - Zero-friction last-mile delivery integration" />
+    <meta name="twitter:description" data-i18n-meta="meta_description" content="One API to run your entire last-mile operation. MasarX plugs into your existing systems — send delivery data however you already send it. We map, process, and automate everything." />
+    <meta name="twitter:image" content="../brand/masarx-mark-a.svg" />
+
+    <title data-i18n="meta_title">MasarX - Zero-friction last-mile delivery integration</title>
+    <link rel="icon" href="../brand/masarx-favicon.svg" />
+    <script>
+      document.documentElement.classList.add('js');
+    </script>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+
+    <header class="header">
+      <div class="container">
+        <div class="header-row">
+          <a class="brand" href="#" aria-label="MasarX">
+            <img class="brand-mark" src="../brand/masarx-mark-a.svg" alt="" fetchpriority="high" />
+            <span class="brand-name">MasarX</span>
+          </a>
+
+          <button class="btn btn-ghost nav-toggle" type="button" aria-expanded="false" aria-controls="nav-primary" aria-label="Menu">
+            <span class="nav-toggle-icon" aria-hidden="true"></span>
+          </button>
+
+          <nav class="nav" id="nav-primary" aria-label="Primary">
+            <a href="#product" data-i18n="nav_product">Product</a>
+            <a href="#how" data-i18n="nav_how">How it works</a>
+            <a href="#who" data-i18n="nav_who">Who it's for</a>
+            <a href="#drivers" data-i18n="nav_drivers">Drivers</a>
+            <a href="#enterprise" data-i18n="nav_enterprise">Enterprise</a>
+            <a href="/track/" data-track-href data-i18n="nav_track">Track shipment</a>
+            <a href="#faq" data-i18n="nav_faq">FAQ</a>
+            <a href="#contact" data-i18n="nav_contact_sales">Contact sales</a>
+          </nav>
+
+          <div class="header-actions">
+            <button class="btn btn-ghost btn-theme" type="button" data-theme-toggle aria-pressed="false">Dark</button>
+            <button class="btn btn-ghost" type="button" data-lang-toggle aria-pressed="false">AR</button>
+            <a class="btn btn-secondary btn-track-top" href="/track/" data-track-href data-i18n="nav_track">Track shipment</a>
+            <a class="btn btn-secondary" href="#" data-runtime-href="appUrl" data-runtime-hide-empty="1" hidden data-i18n="cta_login">Log in</a>
+            <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales">Contact sales</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero reveal" id="product" data-reveal>
+        <div class="container hero-grid">
+          <div class="lottie-hero" data-lottie="hero-flow" aria-hidden="true"></div>
+          <div class="hero-copy">
+            <div class="eyebrow" data-i18n="hero_eyebrow">Zero-code last-mile integration</div>
+            <h1 data-i18n="hero_h1">Go live in minutes — no client-side integration needed</h1>
+            <p data-i18n="hero_sub">Connect your systems to MasarX and start managing deliveries immediately. No waiting for carriers or partners to integrate — we handle the last mile from your side.</p>
+
+            <div class="hero-ctas">
+              <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales">Contact sales</a>
+              <a class="btn btn-secondary" href="#how" data-i18n="cta_explore">See how it works</a>
+            </div>
+
+            <div class="badge-row" role="group" aria-label="Key highlights">
+              <span class="badge" data-i18n="badge_zero_code">Zero-code integration</span>
+              <span class="badge" data-i18n="badge_minutes">Go live in minutes</span>
+              <span class="badge" data-i18n="badge_adapts">Adapts to your systems</span>
+              <span class="badge" data-i18n="badge_plugins">AI plugins anywhere</span>
+            </div>
+          </div>
+
+          <div class="card hero-visual" data-tilt>
+            <div class="lifecycle-feed" aria-label="Order lifecycle preview">
+              <div class="lifecycle-header">
+                <strong data-i18n="lifecycle_title">Order ORD-4821</strong>
+                <span class="lifecycle-live" data-i18n="lifecycle_live">Processing</span>
+              </div>
+              <div class="lifecycle-steps">
+                <div class="lifecycle-step" data-lifecycle-step="0">
+                  <span class="lifecycle-dot done"></span>
+                  <div class="lifecycle-content">
+                    <svg class="lc-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="14" cy="10" r="5" stroke="currentColor" stroke-width="1.5" class="draw"/><path d="M2 10h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="slide-in"/></svg>
+                    <strong data-i18n="lc_1_title">Webhook received</strong>
+                    <span class="lifecycle-meta" data-i18n="lc_1_meta">POST /ingest — 2ms</span>
+                  </div>
+                </div>
+                <div class="lifecycle-step" data-lifecycle-step="1">
+                  <span class="lifecycle-dot done"></span>
+                  <div class="lifecycle-content">
+                    <svg class="lc-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="4" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5" class="draw"/><circle cx="16" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5" class="draw"/><path d="M6.5 10h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw"/></svg>
+                    <strong data-i18n="lc_2_title">Auto-mapped</strong>
+                    <span class="lifecycle-meta" data-i18n="lc_2_meta">mapping_config applied — format detected</span>
+                  </div>
+                </div>
+                <div class="lifecycle-step" data-lifecycle-step="2">
+                  <span class="lifecycle-dot done"></span>
+                  <div class="lifecycle-content">
+                    <svg class="lc-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2l6 3.5v5.5c0 3.5-6 7-6 7s-6-3.5-6-7V5.5L10 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" class="draw"/><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="draw"/></svg>
+                    <strong data-i18n="lc_3_title">Policy applied</strong>
+                    <span class="lifecycle-meta" data-i18n="lc_3_meta">SLA rule: priority_express → same-day</span>
+                  </div>
+                </div>
+                <div class="lifecycle-step" data-lifecycle-step="3">
+                  <span class="lifecycle-dot done"></span>
+                  <div class="lifecycle-content">
+                    <svg class="lc-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="8" width="12" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5" class="drift"/><circle cx="6" cy="16" r="2" stroke="currentColor" stroke-width="1.5" class="drift"/><circle cx="12" cy="16" r="2" stroke="currentColor" stroke-width="1.5" class="drift"/><path d="M14 10h3l2 3v3h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drift"/></svg>
+                    <strong data-i18n="lc_4_title">Carrier assigned</strong>
+                    <span class="lifecycle-meta" data-i18n="lc_4_meta">FastFleet → auto-selected by zone + SLA</span>
+                  </div>
+                </div>
+                <div class="lifecycle-step" data-lifecycle-step="4">
+                  <span class="lifecycle-dot done"></span>
+                  <div class="lifecycle-content">
+                    <svg class="lc-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2a4 4 0 014 4c0 2-4 6-4 6s-4-4-4-6a4 4 0 014-4z" stroke="currentColor" stroke-width="1.5" class="rock"/><path d="M7 15h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw"/><path d="M8 17h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw"/></svg>
+                    <strong data-i18n="lc_5_title">Customer notified</strong>
+                    <span class="lifecycle-meta" data-i18n="lc_5_meta">WhatsApp AR — tracking link sent</span>
+                  </div>
+                </div>
+                <div class="lifecycle-step" data-lifecycle-step="5">
+                  <span class="lifecycle-dot active"></span>
+                  <div class="lifecycle-content">
+                    <svg class="lc-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5" class="draw"/><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="draw"/></svg>
+                    <strong data-i18n="lc_6_title">Delivered</strong>
+                    <span class="lifecycle-meta" data-i18n="lc_6_meta">SLA met — 47 min ahead of deadline</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof-bar reveal" data-reveal>
+        <div class="container">
+          <div class="proof-grid">
+            <div class="proof-metric">
+              <strong class="proof-val" data-count-to="200" data-count-suffix="k+">200k+</strong>
+              <span data-i18n="proof_1">Deliveries managed monthly</span>
+            </div>
+            <div class="proof-metric">
+              <strong class="proof-val" data-count-to="15" data-count-suffix="+">15+</strong>
+              <span data-i18n="proof_2">Carrier integrations</span>
+            </div>
+            <div class="proof-metric">
+              <strong class="proof-val" data-count-to="98" data-count-suffix="%">98%</strong>
+              <span data-i18n="proof_3">SLA on-time rate</span>
+            </div>
+            <div class="proof-metric">
+              <strong class="proof-val" data-count-to="35" data-count-prefix="<" data-count-suffix="min">&lt;35min</strong>
+              <span data-i18n="proof_4">Avg exception resolution</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="integration" data-reveal>
+        <div class="container">
+          <h2 data-i18n="int_title">Last-mile integration is broken</h2>
+          <p class="lead" data-i18n="int_sub">Most platforms force you to rebuild around them. MasarX adapts to you.</p>
+          <div class="lottie-compare" data-lottie="compare-transform" aria-hidden="true"></div>
+          <div class="compare">
+            <article class="compare-card compare-old card card-pad">
+              <h3 data-i18n="int_old_title">The old way</h3>
+              <ul class="list compare-list">
+                <li><span class="x-mark"></span><span data-i18n="int_old_1">Months of custom integration per carrier</span></li>
+                <li><span class="x-mark"></span><span data-i18n="int_old_2">Dedicated dev team for each connection</span></li>
+                <li><span class="x-mark"></span><span data-i18n="int_old_3">Hard-coded logic that breaks when carriers change</span></li>
+                <li><span class="x-mark"></span><span data-i18n="int_old_4">No visibility until something goes wrong</span></li>
+              </ul>
+            </article>
+            <article class="compare-card compare-new card card-pad">
+              <h3 data-i18n="int_new_title">With MasarX</h3>
+              <ul class="list compare-list">
+                <li><span class="check"></span><span data-i18n="int_new_1">One webhook URL — send data however you already send it</span></li>
+                <li><span class="check"></span><span data-i18n="int_new_2">Configuration, not code — no dev team needed</span></li>
+                <li><span class="check"></span><span data-i18n="int_new_3">Mapping rules adapt when formats change</span></li>
+                <li><span class="check"></span><span data-i18n="int_new_4">Real-time visibility from moment one</span></li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      
+
+      <section class="section reveal" id="how" data-reveal>
+        <div class="container">
+          <h2 data-i18n="how_title">Go live in three steps</h2>
+          <p class="lead" data-i18n="how_sub">No SDK. No custom code. No dedicated integration team.</p>
+
+          <div class="steps-three" aria-label="How it works">
+            <div class="step-card card card-pad" data-reveal-step>
+              <div class="lottie-step" data-lottie="step-connect" aria-hidden="true"></div>
+              <span class="step-num">1</span>
+              <strong data-i18n="how_1_title">Connect</strong>
+              <p data-i18n="how_1_desc">Point your system at our webhook URL. We accept any format — JSON, XML, CSV, form-data. One endpoint for all your delivery events.</p>
+            </div>
+            <div class="step-connector" aria-hidden="true"></div>
+            <div class="step-card card card-pad" data-reveal-step>
+              <div class="lottie-step" data-lottie="step-configure" aria-hidden="true"></div>
+              <span class="step-num">2</span>
+              <strong data-i18n="how_2_title">Configure</strong>
+              <p data-i18n="how_2_desc">Map your data fields to MasarX events. Set SLA rules, routing policies, and escalation playbooks. All through configuration — zero code.</p>
+            </div>
+            <div class="step-connector" aria-hidden="true"></div>
+            <div class="step-card card card-pad" data-reveal-step>
+              <div class="lottie-step" data-lottie="step-golive" aria-hidden="true"></div>
+              <span class="step-num">3</span>
+              <strong data-i18n="how_3_title">Go live</strong>
+              <p data-i18n="how_3_desc">Real-time processing starts immediately. Exceptions handled automatically. SLAs protected. Customer notifications sent. Full audit trail from day one.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="capabilities" data-reveal>
+        <div class="container">
+          <h2 data-i18n="cap_title">What happens after you plug in</h2>
+          <p class="lead" data-i18n="cap_sub">Every delivery event processed, every exception handled, every decision logged.</p>
+          <div class="cap-grid">
+            <details class="cap-card card">
+              <summary><svg class="cap-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="4" cy="12" r="2.5" stroke="currentColor" stroke-width="1.5" class="pulse-node" style="--node-i:0"/><circle cx="20" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5" class="pulse-node" style="--node-i:1"/><circle cx="20" cy="18" r="2.5" stroke="currentColor" stroke-width="1.5" class="pulse-node" style="--node-i:2"/><path d="M6.5 11l11-4M6.5 13l11 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" class="draw-line" style="--node-i:0"/></svg><strong data-i18n="cap_1_title">Smart event mapping</strong></summary>
+              <div class="cap-body"><p data-i18n="cap_1_desc">Auto-detect formats, normalize events from any source. Mapping configs adapt per client, sender, and source — no code forks.</p></div>
+            </details>
+            <details class="cap-card card">
+              <summary><svg class="cap-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5"/><path d="M12 8v4l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="spin"/></svg><strong data-i18n="cap_2_title">Policy engine</strong></summary>
+              <div class="cap-body"><p data-i18n="cap_2_desc">SLA rules, routing, retry logic, escalation — all configurable. Define once, apply everywhere.</p></div>
+            </details>
+            <details class="cap-card card">
+              <summary><svg class="cap-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4a8 8 0 11-5.3 14l-1.4 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="spin"/><path d="M5.3 18l-2 .5.5-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong data-i18n="cap_3_title">Exception automation</strong></summary>
+              <div class="cap-body"><p data-i18n="cap_3_desc">Auto-retry with circuit breaker, failover between carriers, customer updates — all without human intervention.</p></div>
+            </details>
+            <details class="cap-card card">
+              <summary><svg class="cap-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="3" stroke="currentColor" stroke-width="1.5" class="stagger-up" style="--node-i:0"/><rect x="8" y="10" width="14" height="10" rx="3" stroke="currentColor" stroke-width="1.5" class="stagger-up" style="--node-i:1"/></svg><strong data-i18n="cap_4_title">Multi-channel notifications</strong></summary>
+              <div class="cap-body"><p data-i18n="cap_4_desc">WhatsApp, SMS, email in AR/EN. Quiet hours, opt-out, and tracking links — all configured per scope.</p></div>
+            </details>
+            <details class="cap-card card">
+              <summary><svg class="cap-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="6" width="16" height="4" rx="1.5" stroke="currentColor" stroke-width="1.5" class="layer-apart" style="--node-i:0;--layer-d:-2px"/><rect x="4" y="12" width="16" height="4" rx="1.5" stroke="currentColor" stroke-width="1.5" class="layer-apart" style="--node-i:1;--layer-d:2px"/><rect x="4" y="18" width="16" height="4" rx="1.5" stroke="currentColor" stroke-width="1.5" class="layer-apart" style="--node-i:2;--layer-d:4px"/></svg><strong data-i18n="cap_5_title">Scope-level control</strong></summary>
+              <div class="cap-body"><p data-i18n="cap_5_desc">Tune behavior per org, client, sender, and source. No code forks needed — just configuration.</p></div>
+            </details>
+            <details class="cap-card card">
+              <summary><svg class="cap-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw-line" style="--node-i:0"/><path d="M8 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw-line" style="--node-i:1"/><path d="M8 16h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw-line" style="--node-i:2"/></svg><strong data-i18n="cap_6_title">Decision logging</strong></summary>
+              <div class="cap-body"><p data-i18n="cap_6_desc">Every automated decision logged with full context. Debug any issue in under 10 minutes.</p></div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="who" data-reveal>
+        <div class="container">
+          <h2 data-i18n="who_title">Who MasarX is for</h2>
+          <p class="lead" data-i18n="who_sub">For last-mile delivery businesses that need fast client onboarding, automated exceptions, and SLA protection at scale.</p>
+
+          <div class="grid-2">
+            <article class="card card-pad">
+              <h3 class="card-title" data-i18n="who_ops_title">3PLs & delivery operators</h3>
+              <ul class="list">
+                <li><span class="check"></span><span data-i18n="who_ops_1_title">Onboard new clients in minutes, not months</span></li>
+                <li><span class="check"></span><span data-i18n="who_ops_2_title">Automate exceptions and carrier handoffs</span></li>
+              </ul>
+            </article>
+            <article class="card card-pad">
+              <h3 class="card-title" data-i18n="who_biz_title">Last-mile platforms</h3>
+              <ul class="list">
+                <li><span class="check"></span><span data-i18n="who_biz_1_title">Protect SLA performance and customer experience</span></li>
+                <li><span class="check"></span><span data-i18n="who_biz_2_title">Scale volume without rebuilding integrations</span></li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="proof" data-reveal>
+        <div class="container">
+          <blockquote class="quote-card card card-pad" data-tilt>
+            <p class="quote-text" data-i18n="quote_text">"We pointed our webhook at MasarX and were processing orders the same day. No SDK, no dev sprint, no migration project."</p>
+            <footer class="quote-footer">
+              <strong data-i18n="quote_author">Head of Operations</strong>
+              <span data-i18n="quote_role">Regional 3PL, 60k+ monthly deliveries</span>
+            </footer>
+          </blockquote>
+        </div>
+      </section>
+
+      <section class="section reveal" id="enterprise" data-reveal>
+        <div class="container">
+          <h2 data-i18n="ent_title">Enterprise-ready operations foundation</h2>
+          <p class="lead" data-i18n="ent_sub">Security, reliability, and scale for enterprise last-mile organizations.</p>
+
+          <div class="grid-2">
+            <article class="card card-pad">
+              <h3 class="card-title" data-i18n="footer_security">Security</h3>
+              <ul class="list">
+                <li><span class="check"></span><span data-i18n="ent_b1">Tenant-isolated data boundaries</span></li>
+                <li><span class="check"></span><span data-i18n="ent_b4">End-to-end audit trails</span></li>
+              </ul>
+            </article>
+            <article class="card card-pad">
+              <h3 class="card-title" data-i18n="nav_enterprise">Enterprise</h3>
+              <ul class="list">
+                <li><span class="check"></span><span data-i18n="ent_b2">Reliable event ingestion and replay</span></li>
+                <li><span class="check"></span><span data-i18n="ent_b3">Scales with volume</span></li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="faq" data-reveal>
+        <div class="container">
+          <h2 data-i18n="faq_title">Frequently asked questions</h2>
+          <p class="lead" data-i18n="faq_sub">Common questions about integration, onboarding, and operations.</p>
+          <div class="faq">
+            <details>
+              <summary data-i18n="faq_q1">How long does integration take?</summary>
+              <div class="faq-body"><p data-i18n="faq_a1">Most clients go live within minutes. Point your webhook at our endpoint, configure your mapping, and start processing. No SDK installation or custom development needed.</p></div>
+            </details>
+            <details>
+              <summary data-i18n="faq_q2">What data formats do you accept?</summary>
+              <div class="faq-body"><p data-i18n="faq_a2">JSON, XML, CSV, and form-data. Our mapping engine auto-detects formats and normalizes events. If your system can send an HTTP request, it can integrate with MasarX.</p></div>
+            </details>
+            <details>
+              <summary data-i18n="faq_q3">How does pricing work?</summary>
+              <div class="faq-body"><p data-i18n="faq_a3">Pricing is based on monthly delivery volume and the number of connected providers. Contact sales and we will share a tailored proposal for your operation.</p></div>
+            </details>
+            <details>
+              <summary data-i18n="faq_q4">Do I need a dev team to get started?</summary>
+              <div class="faq-body"><p data-i18n="faq_a4">No. MasarX is configured, not coded. Operations teams can set up mapping rules, SLA policies, and routing logic through the platform. Developers are only needed if you want custom AI plugins.</p></div>
+            </details>
+            <details>
+              <summary data-i18n="faq_q5">What happens when a carrier changes their API?</summary>
+              <div class="faq-body"><p data-i18n="faq_a5">Mapping rules adapt automatically. When a carrier changes their payload format, update the mapping config — no code changes, no deployment, no downtime.</p></div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="contact" data-reveal>
+        <div class="container">
+          <h2 data-i18n="contact_title">Contact sales</h2>
+          <p class="lead" data-i18n="contact_sub">
+            Share your current setup and integration needs. We will reply with a tailored onboarding plan.
+          </p>
+
+          <div class="contact-wrap">
+            <div class="card card-pad">
+              <h3 class="card-title" data-i18n="contact_see_title">What happens next</h3>
+              <ul class="list">
+                <li><span class="check"></span><span data-i18n="contact_see_1">We review your systems, volume, and routing requirements</span></li>
+                <li><span class="check"></span><span data-i18n="contact_see_2">We outline an onboarding plan for your webhooks and mapping</span></li>
+                <li><span class="check"></span><span data-i18n="contact_see_3">We share pricing aligned to your delivery volume</span></li>
+              </ul>
+            </div>
+
+            <form class="card card-pad" data-contact-form>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="form_full_name">Full name</span>
+                  <input type="text" name="full_name" autocomplete="name" required data-i18n-placeholder="form_full_name_ph" placeholder="Jane Doe" />
+                </label>
+                <label>
+                  <span data-i18n="form_email">Work email</span>
+                  <input type="email" name="email" autocomplete="email" required inputmode="email" data-i18n-placeholder="form_email_ph" placeholder="lhwmilsokgrmgptsihhuoljt@example.invalid" />
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="form_company">Company</span>
+                  <input type="text" name="organization_name" autocomplete="organization" required data-i18n-placeholder="form_company_ph" placeholder="Company name" />
+                </label>
+                <label>
+                  <span data-i18n="form_website">Website</span>
+                  <input type="url" name="website_url" autocomplete="url" inputmode="url" data-i18n-placeholder="form_website_ph" placeholder="https://company.com" />
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="form_volume">Monthly deliveries</span>
+                  <select name="volume">
+                    <option value="" disabled selected data-i18n="form_volume_opt_choose">Select monthly volume</option>
+                    <option value="0-10k" data-i18n="form_volume_opt_1">0-10k deliveries</option>
+                    <option value="10k-60k" data-i18n="form_volume_opt_2">10k-60k deliveries</option>
+                    <option value="60k+" data-i18n="form_volume_opt_3">60k+ deliveries</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n="form_role">Role</span>
+                  <input type="text" name="role" autocomplete="organization-title" data-i18n-placeholder="form_role_ph" placeholder="Ops / Tech / Product" />
+                </label>
+              </div>
+              <label>
+                <span data-i18n="form_notes">Operational priorities</span>
+                <textarea name="notes" inputmode="text" data-i18n-placeholder="form_notes_ph" placeholder="Current setup, integration needs, SLA goals..."></textarea>
+              </label>
+              <div class="turnstile" data-turnstile></div>
+              <button class="btn btn-primary" type="submit" data-i18n="form_submit">Submit request</button>
+              <p class="form-status" data-contact-status aria-live="polite"></p>
+              <p class="form-note" data-i18n="form_privacy_note">We only use this information to respond to your request. No spam.</p>
+              <p class="form-note" data-i18n="form_response_time">We typically respond within one business day.</p>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="drivers" data-reveal>
+        <div class="container">
+          <h2 data-i18n="drivers_title">Join the driver network</h2>
+          <p class="lead" data-i18n="drivers_sub">
+            Apply as a vetted marketplace driver. We review identity, operating readiness, and service fit before activating work access.
+          </p>
+
+          <div class="contact-wrap">
+            <div class="card card-pad">
+              <h3 class="card-title" data-i18n="drivers_see_title">How onboarding works</h3>
+              <ul class="list">
+                <li><span class="check"></span><span data-i18n="drivers_see_1">Share your operating details, service area, and vehicle profile</span></li>
+                <li><span class="check"></span><span data-i18n="drivers_see_2">We review identity, compliance, and capability requirements</span></li>
+                <li><span class="check"></span><span data-i18n="drivers_see_3">Approved drivers unlock eligible marketplace work in FieldOps</span></li>
+              </ul>
+            </div>
+
+            <form class="card card-pad" data-driver-form>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="driver_form_full_name">Full name</span>
+                  <input type="text" name="full_name" autocomplete="name" required data-i18n-placeholder="driver_form_full_name_ph" placeholder="Ahmed Ali" />
+                </label>
+                <label>
+                  <span data-i18n="driver_form_email">Email</span>
+                  <input type="email" name="email" autocomplete="email" required inputmode="email" data-i18n-placeholder="driver_form_email_ph" placeholder="driver@example.com" />
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="driver_form_phone">Phone</span>
+                  <input type="tel" name="phone" autocomplete="tel" required inputmode="tel" data-i18n-placeholder="driver_form_phone_ph" placeholder="+9665XXXXXXXX" />
+                </label>
+                <label>
+                  <span data-i18n="driver_form_operating_name">Operating name</span>
+                  <input type="text" name="organization_name" autocomplete="organization" required data-i18n-placeholder="driver_form_operating_name_ph" placeholder="Ahmed Delivery Services" />
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="driver_form_city">Primary city</span>
+                  <input type="text" name="city" autocomplete="address-level2" data-i18n-placeholder="driver_form_city_ph" placeholder="Riyadh" />
+                </label>
+                <label>
+                  <span data-i18n="driver_form_vehicle_type">Vehicle type</span>
+                  <select name="vehicle_type">
+                    <option value="" disabled selected data-i18n="driver_form_vehicle_opt_choose">Select vehicle type</option>
+                    <option value="motorcycle" data-i18n="driver_form_vehicle_opt_motorcycle">Motorcycle</option>
+                    <option value="car" data-i18n="driver_form_vehicle_opt_car">Car</option>
+                    <option value="van" data-i18n="driver_form_vehicle_opt_van">Van</option>
+                    <option value="truck" data-i18n="driver_form_vehicle_opt_truck">Truck</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="driver_form_languages">Languages</span>
+                  <input type="text" name="languages" data-i18n-placeholder="driver_form_languages_ph" placeholder="Arabic, English" />
+                </label>
+                <label>
+                  <span data-i18n="driver_form_capabilities">Capabilities</span>
+                  <input type="text" name="capabilities" data-i18n-placeholder="driver_form_capabilities_ph" placeholder="Cold chain, fragile, cash handling" />
+                </label>
+              </div>
+              <label>
+                <span data-i18n="driver_form_notes">Experience summary</span>
+                <textarea name="experience_summary" inputmode="text" data-i18n-placeholder="driver_form_notes_ph" placeholder="Years of driving, service zones, special handling experience..."></textarea>
+              </label>
+              <div class="turnstile" data-driver-turnstile></div>
+              <button class="btn btn-primary" type="submit" data-i18n="driver_form_submit">Apply now</button>
+              <p class="form-status" data-driver-status aria-live="polite"></p>
+              <p class="form-note" data-i18n="driver_form_privacy_note">We only use this information to review your driver application.</p>
+              <p class="form-note" data-i18n="driver_form_response_time">Approved drivers receive the next-step invite by email.</p>
+            </form>
+
+            <form class="card card-pad" data-driver-status-form>
+              <h3 class="card-title" data-i18n="driver_status_title">Check application status</h3>
+              <p class="form-note" data-i18n="driver_status_sub">
+                Use the status token from your application receipt to check the latest review state.
+              </p>
+              <label>
+                <span data-i18n="driver_status_token">Status token</span>
+                <input type="text" name="status_token" autocomplete="off" required data-i18n-placeholder="driver_status_token_ph" placeholder="Paste your token" />
+              </label>
+              <button class="btn btn-secondary" type="submit" data-i18n="driver_status_submit">Check status</button>
+              <p class="form-status" data-driver-status-lookup aria-live="polite"></p>
+              <p class="form-note" data-driver-status-token-note data-i18n="driver_status_help">
+                Keep your token. It is the browser-safe reference for future status checks.
+              </p>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="float-cta" data-float-cta aria-hidden="true">
+      <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales" tabindex="-1">Contact sales</a>
+    </div>
+
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-grid">
+          <div>
+            <strong>MasarX</strong>
+            <p class="footer-tagline" data-i18n="footer_tagline">Zero-friction integration for last-mile delivery operations.</p>
+          </div>
+          <div class="footer-links-grid">
+            <div class="footer-col">
+              <strong data-i18n="footer_product">Product</strong>
+              <a href="#how" data-i18n="how_title">Go live in three steps</a>
+              <a href="#capabilities" data-i18n="cap_title">What happens after you plug in</a>
+              <a href="/track/" data-track-href data-i18n="nav_track">Track shipment</a>
+              <a href="#faq" data-i18n="nav_faq">FAQ</a>
+            </div>
+            <div class="footer-col">
+              <strong data-i18n="footer_company">Company</strong>
+              <a href="../../README.md" data-i18n="footer_docs">Docs</a>
+              <a href="#enterprise" data-i18n="footer_security">Security</a>
+              <a href="#contact" data-i18n="nav_contact_sales">Contact sales</a>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <span data-i18n="footer_copyright">MasarX. All rights reserved.</span>
+          <span data-i18n="footer_built_with">Built for operations teams.</span>
+        </div>
+      </div>
+    </footer>
+
+    <script src="./content.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

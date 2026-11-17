@@ -1,0 +1,1021 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MasarX Delivery Platform Edge API",
+    "version": "contract-6d2b49490535",
+    "x-versioning-policy": "contract-<sha256(openapi_without_info.version)[:12]>",
+    "description": "Public endpoints for MasarX partners and clients.\n\nProduction base:\n- https://vomhkplympywspxymnstltsw.example.invalid\n\nAsync event intake:\n- POST /v1/webhook\n\nCompatibility ingress (provider mirroring only):\n- /api/... (DB-driven route packs)\n\nLegacy URL-token compatibility:\n- https://vomhkplympywspxymnstltsw.example.invalid/t/<token>/...\n- https://vomhkplympywspxymnstltsw.example.invalid/v1/webhook?token=<token> (migration-only, deprecated)\n\nNote:\n- /v1/webhook is not the synchronous shipment command API. If MasarX exposes partner shipment writes, those use explicit shipment resources/actions while still normalizing into the same workflow engine.",
+    "contact": {
+      "name": "MasarX Platform Team",
+      "email": "llmklsgzrvuhskrplnnrnnio@example.invalid"
+    },
+    "license": {
+      "name": "Proprietary",
+      "url": "https://nzxmhryhtqlzoshjkyozkpup.example.invalid/legal"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://vomhkplympywspxymnstltsw.example.invalid",
+      "description": "Production base URL (core: /v1, compat: /api)."
+    },
+    {
+      "url": "https://vomhkplympywspxymnstltsw.example.invalid/t/{token}",
+      "description": "Token in base path (URL-only onboarding).",
+      "variables": {
+        "token": {
+          "default": "YOUR_TOKEN",
+          "description": "Webhook source token issued by MasarX."
+        }
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "Webhook Intake",
+      "description": "Submit webhook payloads that MasarX processes asynchronously with per-tenant policies. This surface is for inbound events, not synchronous shipment commands."
+    },
+    {
+      "name": "API Gateway",
+      "description": "Provider API mirroring via DB-driven routing (Logestechs V2 compatible endpoints)."
+    }
+  ],
+  "paths": {
+    "/v1/webhook": {
+      "post": {
+        "tags": [
+          "Webhook Intake"
+        ],
+        "operationId": "postWebhook",
+        "summary": "Primary webhook ingress",
+        "description": "Submit webhook payloads signed with your assigned token. The API validates idempotency and returns either an immediate acknowledgement (200) or an async receipt (202) once the event is queued. Generic `shipment.updated` is compatibility-only: the payload must resolve to one typed update intent or the request is rejected.",
+        "security": [
+          {
+            "WebhookBearer": []
+          },
+          {
+            "WebhookHeader": []
+          },
+          {
+            "WebhookQueryToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CorrelationIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/TraceparentHeader"
+          },
+          {
+            "$ref": "#/components/parameters/TracestateHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEnvelope"
+              },
+              "examples": {
+                "shipmentCreated": {
+                  "summary": "Shipment created",
+                  "value": {
+                    "event": {
+                      "id": "evt_9ac4f2dd",
+                      "type": "shipment.created",
+                      "occurred_at": "2025-11-13T10:00:00Z",
+                      "source": "logestechs"
+                    },
+                    "shipment": {
+                      "id": "SHP-102938",
+                      "tracking_number": "DLX123456789SA",
+                      "status": "created",
+                      "service_type": "delivery",
+                      "recipient": {
+                        "name": "Aisha Farouk",
+                        "phone": "+12025550123",
+                        "address": {
+                          "line1": "King Fahd Rd 123",
+                          "city": "Riyadh",
+                          "state": "Riyadh Province",
+                          "country": "SA",
+                          "postal_code": "12271"
+                        }
+                      },
+                      "destination": {
+                        "city": "Riyadh",
+                        "country": "SA"
+                      },
+                      "items": [
+                        {
+                          "sku": "SKU-100",
+                          "description": "Documents",
+                          "quantity": 1
+                        }
+                      ]
+                    },
+                    "metadata": {
+                      "provider": "Logestechs",
+                      "version": "1.0"
+                    }
+                  }
+                },
+                "shipmentUpdated": {
+                  "summary": "Shipment status update",
+                  "value": {
+                    "event": {
+                      "id": "evt_f07a732a",
+                      "type": "shipment.updated",
+                      "occurred_at": "2025-11-14T09:15:00Z"
+                    },
+                    "shipment": {
+                      "tracking_number": "DLX123456789SA",
+                      "status": "in_transit",
+                      "estimated_delivery": "2025-11-15T18:00:00Z"
+                    },
+                    "changes": [
+                      {
+                        "field": "status",
+                        "previous": "created",
+                        "current": "in_transit",
+                        "changed_at": "2025-11-14T09:15:00Z"
+                      },
+                      {
+                        "field": "estimated_delivery",
+                        "previous": "2025-11-16T00:00:00Z",
+                        "current": "2025-11-15T18:00:00Z"
+                      }
+                    ]
+                  }
+                },
+                "shipmentCancelled": {
+                  "summary": "Shipment cancelled",
+                  "value": {
+                    "event": {
+                      "id": "evt_1a2b3c4d",
+                      "type": "shipment.cancelled",
+                      "occurred_at": "2025-11-15T07:30:00Z"
+                    },
+                    "shipment": {
+                      "tracking_number": "DLX123456789SA",
+                      "status": "cancelled"
+                    },
+                    "cancellation": {
+                      "reason": "customer_request",
+                      "note": "Recipient asked to stop delivery",
+                      "requested_by": "support-agent-19"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Synchronous acknowledgement returned when the webhook can be processed immediately.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAckBody"
+                },
+                "examples": {
+                  "synchronousAck": {
+                    "value": {
+                      "status": "accepted",
+                      "workflow_run_id": "3eec1a4f-a12b-43ac-a5af-af1c83e6a1df",
+                      "followup_workflow_run_id": null,
+                      "resource": {
+                        "type": "shipment",
+                        "id": "8c06699e-1d20-4c0e-9a77-8eb7806f5f2a",
+                        "tracking_number": "DLX123456789SA"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Asynchronous acknowledgement sent while downstream processing continues.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAckBody"
+                },
+                "examples": {
+                  "asyncAck": {
+                    "value": {
+                      "status": "accepted_async",
+                      "correlation_id": "c35b438a-5420-4c7b-a7ed-894d613a71c1",
+                      "workflow_run_id": "0dcd8d28-43a1-4b2c-b8cb-2c2d99710bcb",
+                      "followup_workflow_run_id": "4d9ff0f2-fb47-420e-8d3a-70333544687d"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failure (for example missing idempotency key or invalid signature).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "hmacFailure": {
+                    "value": {
+                      "code": "edge.rpc.intake_failed",
+                      "message": "Missing signature header x-signature",
+                      "error": "Missing signature header x-signature",
+                      "status": 400,
+                      "correlation_id": "c35b438a-5420-4c7b-a7ed-894d613a71c1",
+                      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unknown or disabled webhook token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "unauthorized": {
+                    "value": {
+                      "code": "edge.auth.missing_token",
+                      "message": "Missing Authorization bearer token",
+                      "error": "Missing Authorization bearer token",
+                      "status": 401,
+                      "correlation_id": "9f1f20f8-c2bc-4d9c-9116-2b0f318bd4ef",
+                      "trace_id": "99990000000000000000000000000049"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "WebhookEnvelope": {
+        "type": "object",
+        "description": "Webhook payload delivered by the provider. The raw payload is stored as received; a canonicalized transformed payload may be derived internally for routing and downstream workflows.",
+        "required": [
+          "event"
+        ],
+        "properties": {
+          "event": {
+            "type": "object",
+            "required": [
+              "id",
+              "type",
+              "occurred_at"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique identifier supplied by the provider."
+              },
+              "type": {
+                "type": "string",
+                "description": "Webhook event type. Prefer explicit typed shipment update events (`update.status`, `update.address`, `update.driver`, `update.action`, `update.attachment`) over generic `shipment.updated`.",
+                "enum": [
+                  "shipment.created",
+                  "shipment.updated",
+                  "shipment.cancelled",
+                  "shipment.modify",
+                  "shipment.delete",
+                  "shipment.swap",
+                  "shipment.return",
+                  "update.status",
+                  "update.geocode",
+                  "update.address",
+                  "update.driver",
+                  "update.action",
+                  "update.attachment"
+                ]
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Timestamp when the event happened."
+              },
+              "source": {
+                "type": "string",
+                "description": "Optional provider/source identifier."
+              }
+            }
+          },
+          "shipment": {
+            "type": "object",
+            "description": "Shipment snapshot attached to the event.",
+            "required": [
+              "tracking_number"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tracking_number": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "description": "Current status reported by the provider."
+              },
+              "service_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "client_reference": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "recipient": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "email": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address": {
+                    "type": "object",
+                    "properties": {
+                      "line1": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "line2": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "city": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "state": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "country": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "postal_code": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": true
+              },
+              "origin": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "destination": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sku": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "quantity": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true
+          },
+          "changes": {
+            "type": "array",
+            "description": "Set of field-level diffs for update events.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "previous": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "current": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "changed_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "cancellation": {
+            "type": "object",
+            "description": "Cancellation metadata for shipment.cancelled events.",
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requested_by": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Provider-specific metadata or passthrough fields.",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "WebhookAckBody": {
+        "type": "object",
+        "description": "Standard acknowledgement body configured per webhook source.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "`accepted`, `accepted_async`, or `error` style strings derived from policy ack.mode."
+          },
+          "error": {
+            "type": "string",
+            "description": "Present when ack_outcome=ack_failed."
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Correlation identifier you can reference in support requests."
+          },
+          "resource": {
+            "type": "object",
+            "description": "When the webhook reserves shipment identifiers, the response includes the resource snapshot.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "example": "shipment"
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "tracking_number": {
+                "type": "string"
+              }
+            }
+          },
+          "workflow_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier for the workflow run started by this webhook."
+          },
+          "followup_workflow_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier for a follow-up workflow run when configured."
+          }
+        },
+        "additionalProperties": true
+      },
+      "LabelLeaseRequest": {
+        "type": "object",
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Limits leasing to a tenant. When omitted, MasarX leases from all available organizations you are authorized to access."
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Render this specific job id (bypasses leasing)."
+          },
+          "lease_seconds": {
+            "type": "integer",
+            "minimum": 30,
+            "description": "How long the job should stay leased before other workers can retry. Default 120 seconds."
+          }
+        }
+      },
+      "LabelBundleRequest": {
+        "type": "object",
+        "required": [
+          "organization_id"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "file_urls": {
+            "type": "array",
+            "description": "Direct storage paths to include. When provided label_ids/shipments are ignored.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "label_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "shipments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "shipment_id"
+              ],
+              "properties": {
+                "shipment_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "box_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          },
+          "output_name": {
+            "type": "string",
+            "description": "Optional human readable filename. Invalid characters are replaced with dashes."
+          },
+          "expires_seconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "description": "Signed URL TTL. Defaults to 900 seconds."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Arbitrary metadata stored alongside the bundle result."
+          }
+        }
+      },
+      "LabelRendererRequest": {
+        "description": "Payload accepted by label-renderer. When mode=bundle or bundle object is present, bundle flow runs; otherwise job leasing is attempted.",
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LabelLeaseRequest"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "lease",
+                      "render"
+                    ],
+                    "description": "Explicitly force leasing mode."
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "bundle"
+                ]
+              },
+              "bundle": {
+                "$ref": "#/components/schemas/LabelBundleRequest"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/LabelBundleRequest"
+          }
+        ]
+      },
+      "LabelRenderMetadata": {
+        "type": "object",
+        "description": "Renderer metadata persisted via complete_label_job.",
+        "properties": {
+          "renderer": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "template_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "template_version": {
+            "type": "integer"
+          },
+          "schema_version": {
+            "type": "integer"
+          },
+          "rendered_blocks": {
+            "type": "integer"
+          },
+          "page_count": {
+            "type": "integer"
+          },
+          "attempts": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "LabelLeaseResponse": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed"
+            ]
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "file_url": {
+            "type": "string",
+            "description": "Storage path for the generated label within MasarX-managed object storage."
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/LabelRenderMetadata"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Failure reason when status=failed."
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "LabelBundleCounts": {
+        "type": "object",
+        "properties": {
+          "requested": {
+            "type": "integer"
+          },
+          "bundled": {
+            "type": "integer"
+          },
+          "placeholders": {
+            "type": "integer"
+          }
+        }
+      },
+      "LabelBundleTarget": {
+        "type": "object",
+        "properties": {
+          "labelId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "shipmentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "shipmentBoxId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "fileUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "boxNumber": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "LabelBundleResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "organization_id",
+          "bundle_id",
+          "counts"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bundle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "file_path": {
+            "type": "string"
+          },
+          "file_url": {
+            "type": "string",
+            "description": "Storage path (same as file_path)."
+          },
+          "signed_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "expires_seconds": {
+            "type": "integer"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/LabelBundleCounts"
+          },
+          "bundled_labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabelBundleTarget"
+            }
+          },
+          "placeholder_labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabelBundleTarget"
+            }
+          },
+          "metadata": {
+            "type": "object"
+          }
+        }
+      },
+      "LabelRendererResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/LabelLeaseResponse"
+          },
+          {
+            "$ref": "#/components/schemas/LabelBundleResponse"
+          }
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "status",
+          "correlation_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable error code emitted by MasarX."
+          },
+          "error": {
+            "type": "string",
+            "description": "Backward-compatible alias of `message` (deprecated; use `message`)."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error summary suitable for logs and UI surfaces."
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599,
+            "description": "HTTP status associated with this response."
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Request correlation identifier propagated across MasarX logs and downstream calls."
+          },
+          "trace_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "W3C trace-id (32 lowercase hex chars) when tracing context is available."
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Caller-provided request identifier when available."
+          },
+          "details": {
+            "type": "object",
+            "description": "Optional structured diagnostics for machine parsing (non-breaking extension point).",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "parameters": {
+      "CorrelationIdHeader": {
+        "name": "x-correlation-id",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Optional correlation ID for tracing (UUID). When provided (or derived from traceparent/x-request-id), MasarX preserves it across logs and outbound calls."
+      },
+      "TraceparentHeader": {
+        "name": "traceparent",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Optional W3C Trace Context header. When provided, MasarX continues the trace and echoes traceparent on responses."
+      },
+      "TracestateHeader": {
+        "name": "tracestate",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Optional W3C Trace Context tracestate header. MasarX passes it through when provided."
+      },
+      "CompanyIdHeader": {
+        "name": "company-id",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Logestechs compatibility header. For the Logestechs V2 mirror pack, MasarX resolves company-id via ladder settings (logestechs_v2_account.company_id) and applies it for outbound calls."
+      }
+    },
+    "securitySchemes": {
+      "WebhookBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "webhook_source_token",
+        "description": "Token issued per webhook source. Pass it as Authorization: Bearer <token>. URL-only token forms are documented in the OpenAPI `servers` list."
+      },
+      "WebhookHeader": {
+        "type": "apiKey",
+        "name": "x-webhook-token",
+        "in": "header",
+        "description": "Token issued per webhook source. Pass it using the x-webhook-token header. URL-only token forms are documented in the OpenAPI `servers` list."
+      },
+      "WebhookQueryToken": {
+        "type": "apiKey",
+        "name": "token",
+        "in": "query",
+        "description": "Deprecated migration-only form. Pass ?token=<token> for systems that cannot send headers or include the token in the base path. Prefer Authorization: Bearer <token> or https://vomhkplympywspxymnstltsw.example.invalid/t/<token>/... ."
+      }
+    }
+  }
+}

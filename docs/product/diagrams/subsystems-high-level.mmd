@@ -1,0 +1,120 @@
+%% MasarX Platform – Updated High-Level Subsystem Data Flow (Tables Only)
+%% Paste into https://mermaid.live
+
+flowchart TB
+  %% ============ Configuration Layer ============
+  subgraph Config["Configuration Tables"]
+    ST[settings]
+    SV[settings_versions]
+    OT[operation_templates]
+    OH[operation_handlers]
+    MC[mapping_configs]
+    MT[message_templates]
+    LTS[label_template_specs]
+  end
+
+  %% ============ Intake & Triggers ============
+  subgraph Intake["External Intake"]
+    WS[webhook_sources]
+    WI[webhook_inbox]
+    WRE[webhook_response_events]
+  end
+
+  subgraph Internal["Internal Signals"]
+    SA[shipment_actions]
+    ADR[addresses]
+    DE[domain_events]
+  end
+
+  %% ============ Workflow Engine ============
+  subgraph Engine["Workflow Engine"]
+    WR[workflow_runs]
+    WRS[workflow_run_steps]
+    RC[request_contexts]
+  end
+
+  %% ============ Execution Lanes ============
+  subgraph API["Provider API Lane"]
+    OC[outbound_calls]
+    ACL[api_call_log]
+  end
+
+  subgraph Comms["Communications Lane"]
+    CA[comms_attempts]
+    RP[recipient_preferences]
+  end
+
+  subgraph Labels["Labeling Lane"]
+    LJ[label_jobs]
+    LB[labels]
+    SB[shipment_boxes]
+  end
+
+  subgraph Geo["Geocoding Lane"]
+    GAT[geocoding_attempts]
+    GEO[geocodes]
+  end
+
+  subgraph MR["Manual Review Lane"]
+    MRT[manual_review_tasks]
+  end
+
+  %% ============ Observability ============
+  subgraph Observability["Audit & Observability"]
+    DL[decision_log]
+    OBS[observability_events_v]
+  end
+
+  %% ============ Data Flows ============
+  WS --> WI
+  WI -->|starts workflow| WR
+  WRE -->|captures HTTP ack| DL
+
+  ADR -->|address update| DE
+  SA -->|status change| DE
+  DE -->|dispatch template| WR
+  DE -->|domain event outcome| DL
+
+  WR -->|materialise steps| WRS
+  WRS --> RC
+  WRS -->|consult config| ST
+  SV --> ST
+  WRS --> OT
+  WRS --> OH
+  WRS --> MC
+  WRS --> MT
+  WRS --> LTS
+
+  %% API lane
+  WRS -->|queue call| OC
+  OC --> ACL
+  OC -->|call outcome| DL
+
+  %% Communications lane
+  WRS -->|schedule notification| CA
+  CA -->|delivery result| DL
+  RP -. personalization .- CA
+
+  %% Label lane
+  WRS -->|enqueue label job| LJ
+  LJ -->|rendered output| LB
+  LB -->|shipment event| SA
+  LJ -->|job outcome| DL
+  SB -. packaging context .- LJ
+
+  %% Geocoding lane
+  WRS -->|request geocode| GAT
+  GAT --> GEO
+  GAT -->|confidence decision| DL
+
+  %% Manual review lane
+  WRS -->|enqueue/assign/resolve| MRT
+  MRT -->|task decisions| DL
+
+  %% Engine observability
+  WRS -->|step outcome| DL
+  DL --> OBS
+
+  %% Layout styling
+  classDef table fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:1px;
+  class WS,WI,WRE,SA,ADR,DE,WR,WRS,RC,ST,SV,OT,OH,MC,MT,LTS,OC,ACL,CA,RP,LJ,LB,SB,GAT,GEO,MRT,DL,OBS table;

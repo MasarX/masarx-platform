@@ -1,0 +1,42 @@
+%% Medium-Level Mermaid Flowchart: Labels Printing (Single/Multiple Orders)
+
+flowchart TD
+  Client[Client / Partner] --> Webhook[Edge: webhook-receiver]
+  Webhook --> Workflow[Workflow Engine\nlabels_print_workflow]
+
+  subgraph DB[Database]
+    Settings[(settings)]
+    Shipments[(shipments)]
+    Labels[(labels)]
+    LabelJobs[(label_jobs)]
+    Decision[(decision_log)]
+    Actions[(shipment_actions)]
+  end
+
+  subgraph FNS[Major Functions]
+    RLG[request_label_generation]
+    LJL[lease_label_job]
+    CLP[compose_label_payload]
+    CLJ[complete_label_job]
+    ILR[invoke_label_renderer]
+    LOGF[log_decision]
+  end
+
+  subgraph EDGE[Edge]
+    LR[functions/v1/label-renderer\nrender + bundle single PDF]
+  end
+
+  %% Workflow: ensure labels exist, then bundle
+  Workflow -->|check existing| Labels
+  Workflow -->|missing labels?| RLG --> LabelJobs
+  ILR -. triggers .-> LR
+  LR -->|reads/writes| Labels
+  LR --> Storage[(storage labels bucket; signed URL)]
+  Storage --> Workflow
+  Workflow -->|record print| Actions
+  Workflow -->|decisions| Decision
+  Workflow --> Webhook --> Client
+
+  %% Generation (context)
+  LJL --> CLP --> LR --> CLJ
+  RLG --> LabelJobs

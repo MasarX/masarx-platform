@@ -1,0 +1,7 @@
+@import "@masarx/ui/styles.css";
+@import "@xyflow/react/dist/style.css";
+@import "../packages/ui/src/workflow-canvas/workflow-canvas-theme.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

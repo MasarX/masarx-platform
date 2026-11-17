@@ -1,0 +1,34 @@
+{
+  "enabled": true,
+  "stale_after_days": 30,
+  "close_after_days": 14,
+  "max_issues_per_run": 200,
+  "max_actions_per_run": 50,
+  "skip_if_open_pr_reference": true,
+  "skip_if_assigned": false,
+  "stale_label": {
+    "name": "status:stale",
+    "color": "fef2c0",
+    "description": "Issue has had no recent activity and needs triage."
+  },
+  "exempt_labels": [
+    "kind:worker-plan",
+    "kind:execution-card",
+    "planning:execution-record",
+    "kind:audit-remediation",
+    "kind:control-plane-remediation",
+    "dispatch:ready",
+    "dispatch:in_progress",
+    "dispatch:review",
+    "dispatch:blocked",
+    "dispatch:sync-needed"
+  ],
+  "never_close_labels": [
+    "ops",
+    "supabase",
+    "priority:p0",
+    "priority:p1"
+  ],
+  "stale_comment": "This issue has had no activity for {stale_after_days} days and was marked `{stale_label}`. If this work is still required, post an update (or remove `{stale_label}`) to keep it active.",
+  "close_comment": "Closing due to inactivity after {close_after_days} days while marked `{stale_label}`. Reopen with updated context/evidence if this still needs action."
+}

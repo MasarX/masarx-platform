@@ -1,0 +1,64 @@
+%% MasarX Delivery Platform - Tables-Only Data Flow (no functions)
+%% Paste into https://mermaid.live
+
+graph LR
+
+  %% ========== Central Workflow Engine (tables only) ==========
+  subgraph Workflow_Engine
+    WR[workflow_runs] -->|steps_materialized| WRS[workflow_run_steps]
+    WRS -->|decisions| DL[decision_log]
+  end
+
+  %% ========== Webhook Intake (tables only) ==========
+  subgraph Webhook_Intake
+    WI[webhook_inbox]
+  end
+
+  WI -->|trigger: inbound webhook accepted| WR
+  WI -->|http_response_event| DL
+
+  %% ========== API Calls (tables only) ==========
+  subgraph API_Calls
+    OC1[outbound_calls]
+    ACL[api_call_log]
+  end
+
+  WRS -->|trigger: provider API call| OC1
+  OC1 -->|request/response audit| ACL
+  OC1 -->|http_execution_outcome| DL
+
+  %% ========== Label Rendering (tables only) ==========
+  subgraph Label_Rendering
+    LJ[label_jobs]
+    LB[labels]
+    SA[shipment_actions]
+  end
+
+  WRS -->|trigger: label requested| LJ
+  LJ -->|upsert_label| LB
+  LB -->|append_action| SA
+
+  %% ========== Geocoding (tables only) ==========
+  subgraph Geocoding
+    ADR[addresses]
+    GAT[geocoding_attempts]
+    GEO[geocodes]
+  end
+
+  %% Shipment creation and address linkage
+  SH[shipments]
+  WRS -->|trigger: create shipment| SH
+  SH -->|needs routing address| ADR
+
+  WRS -->|trigger: geocode required| GAT
+  ADR -->|source_address| GAT
+  GAT -->|cache_result| GEO
+
+  %% ========== Communications (tables only) ==========
+  subgraph Communications
+    OC2[outbound_calls]
+  end
+
+  WRS -->|trigger: notification requested| OC2
+  OC2 -->|request/response audit| ACL
+  OC2 -->|send_outcome| DL

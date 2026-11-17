@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "stale_after_hours": 48,
+  "idle_after_hours": 24,
+  "max_prs_per_run": 100,
+  "max_actions_per_run": 20,
+  "preserve_label": {
+    "name": "bot:preserve",
+    "color": "5319e7",
+    "description": "Prevent stale bot PR governance from auto-closing this PR."
+  },
+  "close_comment": "Closing stale bot PR after {stale_after_hours}h age and {idle_after_hours}h idle time while state was `{merge_state}` and failing checks were `{failing_checks}`. Remove `{preserve_label}` only when you want this automation to manage the PR again; the originating bot/workflow will regenerate the PR if it is still relevant."
+}

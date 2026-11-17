@@ -1,0 +1,94 @@
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+config/env/.env
+config/env/.env.local
+config/env/.env.*.local
+config/env/.env.cloud
+config/env/.env.cloud.*
+
+# Misc secret dumps
+secrets
+
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+yarn.lock
+
+
+# Next.js
+.next/
+out/
+dist/
+.vercel/
+*.tsbuildinfo
+
+# Landing build outputs (generated; do not commit)
+dist/
+
+# TypeScript package outputs (generated; do not commit)
+packages/*/dist/
+dist/
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
+
+# Playwright
+playwright-report/
+test-results/
+coverage/
+.nx/
+
+# Supabase
+.supabase/
+supabase/.temp/
+supabase/.branches/
+supabase/functions/*/_shared/
+
+# Cloudflare Wrangler
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Build output
+dist/
+
+# Temporary files
+tmp/
+tmp-*
+temp/
+temp-*
+*.tmp
+*.bak
+*.old
+*.orig
+*.rej
+*_bak.*
+emdash/
+trace-console-command-catalog.json
+verify-core-timing.json
+.artifacts/ops-use-case-ssot/
+
+# Plan test fixtures (generated dynamically by unit tests)
+docs/ops/plans/PLAN-2099*/
+docs/ops/plans/review/PLAN-2099*/
+!packages/ui/src/maplibre-css.d.ts

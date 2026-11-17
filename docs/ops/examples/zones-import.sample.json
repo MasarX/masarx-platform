@@ -1,0 +1,19 @@
+{
+  "zones": [
+    {
+      "slug": "z-north",
+      "name": "North",
+      "description": "Example zone (replace with real ops definitions).",
+      "sort_order": 10,
+      "is_active": true,
+      "metadata": {
+        "notes": "Optional free-form metadata."
+      },
+      "districts": [
+        { "canonical_district_name": "Al Olaya" },
+        { "canonical_district_name": "Al Malaz" }
+      ]
+    }
+  ]
+}
+

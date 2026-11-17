@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docs/ops/schemas/webhook_ingest_policy.schema.json",
+  "title": "webhook_ingest_policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "ack"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "wait_for_ack": { "type": "boolean", "default": false },
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "registry": { "type": "string" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idempotency": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "header": { "type": "string", "minLength": 1 },
+            "body_path": { "type": "string", "minLength": 1 },
+            "dedupe_window_seconds": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "hmac": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "algorithm": { "enum": ["HMAC-SHA256", "HMAC-SHA512"] },
+            "header": { "type": "string", "minLength": 1 },
+            "auth_config_id": { "type": "string", "format": "uuid" },
+            "timestamp_header": { "type": "string" },
+            "tolerance_seconds": { "type": "integer", "minimum": 0 },
+            "signature_encoding": { "enum": ["hex", "base64"] }
+          }
+        },
+        "replay_protection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "nonce_header": { "type": "string", "minLength": 1 },
+            "nonce_path": { "type": "string", "minLength": 1 },
+            "timestamp_header": { "type": "string", "minLength": 1 },
+            "timestamp_path": { "type": "string", "minLength": 1 },
+            "tolerance_seconds": { "type": "integer", "minimum": 0 },
+            "dedupe_window_seconds": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "json_schema_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["synchronous_success", "accepted_async", "policy_error"] },
+        "status_code": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "default_headers": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "number", "boolean"] }
+        },
+        "default_outcome": { "type": "string" },
+        "reason_template": { "type": "string" },
+        "response_mapping_id": { "type": ["string", "null"], "format": "uuid" }
+      }
+    },
+    "workflow": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "template_id": { "type": "string", "format": "uuid" },
+        "template_name": { "type": "string", "minLength": 1 },
+        "templates_by_intent": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "template_id": { "type": "string", "format": "uuid" },
+                  "template_name": { "type": "string", "minLength": 1 }
+                }
+              }
+            ]
+          }
+        },
+        "context_patch": { "type": ["object", "null"] },
+        "intent": { "type": "string" },
+        "notes": { "type": "string" },
+        "launch_mode": { "enum": ["in_background", "sync_only"] }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "decision_point": { "type": "string" },
+        "include_payload": { "type": "boolean" },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "tool_id": "supabase",
+      "display_name": "Supabase CLI",
+      "package_name": "supabase",
+      "repo_var": "SUPABASE_CLI_VERSION",
+      "required": true,
+      "exact_semver_required": true
+    },
+    {
+      "tool_id": "vercel",
+      "display_name": "Vercel CLI",
+      "package_name": "vercel",
+      "repo_var": "VERCEL_CLI_VERSION",
+      "required": true,
+      "exact_semver_required": true
+    },
+    {
+      "tool_id": "wrangler",
+      "display_name": "Wrangler CLI",
+      "package_name": "wrangler",
+      "repo_var": "WRANGLER_CLI_VERSION",
+      "required": true,
+      "exact_semver_required": true
+    }
+  ]
+}

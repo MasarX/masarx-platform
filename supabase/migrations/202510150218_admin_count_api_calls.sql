@@ -1,0 +1,11 @@
+BEGIN;
+
+CREATE OR REPLACE FUNCTION count_api_call_log()
+RETURNS BIGINT
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+    SELECT COUNT(*) FROM api_call_log;
+$$;
+
+COMMIT;

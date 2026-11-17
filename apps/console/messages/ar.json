@@ -1,0 +1,184 @@
+{
+  "app": {
+    "title": "‏MasarX Console",
+    "subtitle": "‏Workflow-first admin console",
+    "loading": "‏Loading console context.",
+    "notFound": {
+      "title": "‏Page not found",
+      "description": "‏This console route does not exist or is not available for your scope.",
+      "hint": "‏Check the URL or return to the main console overview.",
+      "action": "‏Go to {appLabel}"
+    },
+    "configMissing": {
+      "title": "‏Console config missing",
+      "description": "‏Set the required public env values and restart the dev server.",
+      "required": "‏Required: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and NEXT_PUBLIC_APP_NAME (or NEXT_PUBLIC_APP_NAME_CONSOLE/PORTAL).",
+      "optional": "‏Optional: NEXT_PUBLIC_AUTH_METHODS, NEXT_PUBLIC_LOCALE.",
+      "errorLabel": "‏Error: {error}",
+      "errorFallback": "‏Missing required public configuration."
+    }
+  },
+  "observability": {
+    "domainEvent": {
+      "description": "‏Domain event detail with trace context.",
+      "relatedTitle": "‏روابط ذات صلة",
+      "viewTrace": "‏View trace",
+      "viewWorkflowRun": "‏View workflow run"
+    },
+    "trace": {
+      "title": "‏Trace timeline",
+      "description": "‏Unified observability view for domain events and workflow runs.",
+      "unavailable": "‏Trace data unavailable.",
+      "correlationLabel": "‏Correlation id: {id}",
+      "errors": {
+        "load": "‏Unable to load trace data."
+      },
+      "sections": {
+        "summary": "‏ملخص التتبع",
+        "observability": "‏Observability events",
+        "domain": "‏Domain events",
+        "workflowRuns": "‏Workflow runs"
+      },
+      "empty": {
+        "observability": "‏No observability events recorded for this trace.",
+        "domain": "‏No domain events recorded for this trace.",
+        "workflowRuns": "‏No workflow runs recorded for this trace."
+      }
+    },
+    "workflowRun": {
+      "title": "‏Workflow run",
+      "detailTitle": "‏تفاصيل التشغيل",
+      "description": "‏Execution detail and step timeline for a single workflow run.",
+      "unavailable": "‏Workflow run detail unavailable.",
+      "notFound": "‏Workflow run not found.",
+      "viewTrace": "‏View trace timeline",
+      "noCorrelation": "‏No correlation id found for this workflow run.",
+      "openTemplate": "‏Open workflow template",
+      "summary": {
+        "duration": "المدة",
+        "steps": "الخطوات",
+        "issues": "المشكلات",
+        "createdAt": "وقت الإنشاء",
+        "startedAt": "وقت البدء",
+        "completedAt": "وقت الاكتمال"
+      },
+      "provenance": {
+        "title": "منشأ التشغيل",
+        "description": "اعرف ما الذي شغّل هذا التشغيل وتتبع مصدره.",
+        "triggeredVia": "تم التشغيل عبر",
+        "sources": {
+          "manual": "يدوي",
+          "webhook": "Webhook",
+          "schedule": "جدولة",
+          "scheduleManual": "جدولة (يدوي)",
+          "workflowRunTrigger": "مشغّل تشغيل سير عمل",
+          "unknown": "غير معروف"
+        },
+        "fields": {
+          "runId": "معرّف التشغيل",
+          "correlationId": "معرّف الارتباط",
+          "requestedBy": "تم الطلب بواسطة",
+          "requestContextId": "معرّف سياق الطلب",
+          "scheduleTriggerId": "معرّف مشغّل الجدولة",
+          "runTriggerId": "معرّف مشغّل تشغيل سير العمل",
+          "triggerFireId": "معرّف تنفيذ المشغّل",
+          "sourceRunId": "معرّف التشغيل المصدر",
+          "sourceStatus": "حالة المصدر",
+          "sourceCompletedAt": "وقت اكتمال المصدر",
+          "idempotencyKey": "مفتاح عدم التكرار",
+          "scope": "النطاق"
+        },
+        "actions": {
+          "openRun": "فتح التشغيل",
+          "openSchedule": "فتح الجدولة",
+          "openTrigger": "فتح المشغّل",
+          "openFire": "فتح التنفيذ",
+          "showRaw": "عرض السياق الخام",
+          "copy": "نسخ",
+          "copySuccessTitle": "تم النسخ إلى الحافظة.",
+          "copyFailedTitle": "فشل النسخ."
+        }
+      },
+      "outputs": {
+        "title": "‏المخرجات",
+        "unavailable": "‏مخرجات تشغيل سير العمل غير متاحة.",
+        "empty": "‏لا توجد روابط مخرجات حتى الآن.",
+        "open": "‏فتح"
+      },
+      "logs": {
+        "title": "‏سجل التشغيل",
+        "description": "‏ملخص تشغيل على نمط Zapier مع حمولة خطوات منقحة.",
+        "unavailable": "‏سجل تشغيل سير العمل غير متاح.",
+        "summary": {
+          "stepsLabel": "‏الخطوات",
+          "issuesLabel": "‏الأخطاء"
+        },
+        "controls": {
+          "issuesOnly": "‏الأخطاء فقط"
+        },
+        "tabs": {
+          "simple": "‏بسيط",
+          "advanced": "‏متقدم"
+        },
+        "filters": {
+          "searchPlaceholder": "‏ابحث في الخطوات",
+          "statusLabel": "‏الحالة",
+          "statusAll": "‏الكل"
+        },
+        "actions": {
+          "copyJson": "‏نسخ JSON",
+          "downloadJson": "‏تنزيل JSON",
+          "copySuccessTitle": "‏تم نسخ JSON إلى الحافظة.",
+          "copyFailedTitle": "‏فشل النسخ.",
+          "downloadFailedTitle": "‏فشل التنزيل."
+        },
+        "empty": {
+          "title": "‏لا توجد خطوات بعد",
+          "description": "‏لم يتم تسجيل أي نشاط للخطوات لهذا التشغيل."
+        },
+        "emptyNoMatches": {
+          "title": "‏لا توجد نتائج",
+          "description": "‏لا توجد خطوات مطابقة للفلاتر الحالية."
+        },
+        "emptyNoIssues": {
+          "title": "‏لا توجد أخطاء",
+          "description": "‏لم يتم تسجيل أي أخطاء للخطوات في هذا التشغيل."
+        },
+        "emptyStepFilter": {
+          "title": "‏لا توجد سجلات لهذه الخطوة",
+          "description": "‏لم يتم تسجيل أي نشاط للخطوة المحددة في هذا التشغيل."
+        },
+        "step": {
+          "statusLabel": "‏الحالة",
+          "durationLabel": "‏المدة",
+          "attemptLabel": "‏المحاولة",
+          "decisionLogLabel": "‏سجل القرار",
+          "openDecisionLog": "‏فتح سجل القرار",
+          "resultLabel": "‏النتيجة (منقحة)",
+          "metadataLabel": "‏البيانات الوصفية (منقحة)",
+          "errorLabel": "‏خطأ",
+          "notesLabel": "‏ملاحظات",
+          "timestampsLabel": "‏الطوابع الزمنية",
+          "enqueuedAtLabel": "‏تمت إضافته",
+          "startedAtLabel": "‏بدأ",
+          "completedAtLabel": "‏اكتمل",
+          "replayFromStep": "‏إعادة التشغيل من هذه الخطوة",
+          "replayModalTitle": "‏إعادة تشغيل سير العمل من خطوة فاشلة",
+          "replayModalDescription": "‏ابدأ تشغيلًا جديدًا باستخدام حمولة التشغيل الحالية مع تسجيل سياق الإعادة للخطوة الفاشلة المحددة."
+        }
+      },
+      "errors": {
+        "loadDetail": "‏Unable to load workflow run detail.",
+        "loadSteps": "‏Unable to load workflow run steps."
+      },
+      "steps": {
+        "title": "‏Run steps",
+        "unavailable": "‏Workflow run steps unavailable.",
+        "count": "‏Steps loaded: {count}",
+        "countWithTotal": "‏Steps loaded: {count} of {total}",
+        "empty": "‏No workflow run steps were recorded.",
+        "openFullView": "‏Open steps in full view"
+      }
+    }
+  }
+}
