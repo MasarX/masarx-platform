@@ -1,4 +1,5 @@
 'use strict';
+require('./promotion-selfcheck.cjs');
 let checks = 0;
 const rawAssert = require('node:assert/strict');
 const assert = new Proxy(rawAssert, { get(target, key) { const value = target[key]; return typeof value === 'function' ? (...args) => { checks++; return value(...args); } : value; } });
