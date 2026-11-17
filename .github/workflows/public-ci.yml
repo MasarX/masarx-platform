@@ -95,6 +95,7 @@ jobs:
             ci-reports/backend.json
             ci-reports/backend-diagnostic.json
             ci-reports/backend.log
+            ci-reports/db-lint.json
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
@@ -149,19 +150,38 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci-hosted
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Download build report
+        if: ${{ always() && needs.database-build.outputs.present == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node24
+        with:
+          pattern: backend-summary-${{ github.run_id }}-*
+          path: ci-reports/database-result/build
+          merge-multiple: false
+      - name: Download all pgTAP reports
+        if: ${{ always() && needs.database-build.outputs.present == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2, Node24
+        with:
+          pattern: pgtap-summary-*-${{ github.run_id }}-*
+          path: ci-reports/database-result/shards
+          merge-multiple: false
       - name: Require build and every pgTAP shard
+        if: always()
         env:
           BUILD_RESULT: ${{ needs.database-build.result }}
           DATABASE_PRESENT: ${{ needs.database-build.outputs.present }}
           PGTAP_RESULT: ${{ needs.database-pgtap.result }}
-        run: |
-          echo "database-build: $BUILD_RESULT; database-pgtap: $PGTAP_RESULT"
-          test "$BUILD_RESULT" = success
-          if [ "$DATABASE_PRESENT" = true ]; then
-            test "$PGTAP_RESULT" = success
-          else
-            test "$DATABASE_PRESENT" = false && test "$PGTAP_RESULT" = skipped
-          fi
+        run: node scripts/ci-hosted/database-result.cjs
 
   append-only:
     name: Append-only migrations

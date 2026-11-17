@@ -5,8 +5,9 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { isBuiltin } = require('node:module');
+const { spawnSync } = require('node:child_process');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
-const { migrationProgress, completePins } = require('./backend.cjs');
+const { migrationProgress, completePins, backendLint } = require('./backend.cjs');
 const { shardFiles, validateSnapshot } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
@@ -14,11 +15,12 @@ const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stac
 const { checkTransport } = require('./docker-selfcheck.cjs');
 const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
 const { loadBackendLocalPreSuiteCommands } = require('../ops/ci/cloud-pool-db-local.js');
+const { databaseResult } = require('./database-result.cjs');
 
 function checkDatabaseInputs() {
   const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   const pending = ['scripts/ci-hosted/backend.cjs', 'scripts/ci-hosted/pgtap.cjs',
-    'scripts/ci-hosted/docker-images.cjs', 'scripts/tests/bootstrap/seed-pgtap-fixtures.js'];
+    'scripts/ci-hosted/docker-images.cjs', 'scripts/ci-hosted/database-result.cjs', 'scripts/tests/bootstrap/seed-pgtap-fixtures.js'];
   for (const { script } of loadBackendLocalPreSuiteCommands()) {
     const match = /^node ([a-zA-Z0-9_./-]+)$/.exec(manifest.scripts[script] || '');
     assert.ok(match, `Missing or unsupported database lint script: ${script}`); pending.push(match[1]);
@@ -101,6 +103,64 @@ async function main() {
     assert.throws(() => lintResult('{}', 0, registry, ownership), /Malformed/);
     assert.throws(() => lintResult('[{"function":"synthetic","issues":[{}]}]', 0, registry, ownership), /Malformed/);
     assert.throws(() => lintResult('[]', null, registry, ownership), /normally/);
+    const lintFile = path.join(temp, 'db-lint.json');
+    const finding = { function: 'public.synthetic_product_fn', message: 'synthetic product finding' };
+    fs.writeFileSync(lintFile, JSON.stringify({ ok: false, findings: [finding], ignored: 1 }));
+    const lintReport = { stages: [] }; const lintCommands = [];
+    await backendLint(lintReport, [{ script: 'lint:db' }, { script: 'lint:db:fixtures' }], async command => {
+      lintCommands.push(command.script);
+      if (command.script === 'lint:db') throw new Error('synthetic lint failure');
+    }, lintFile);
+    assert.deepEqual(lintCommands, ['lint:db', 'lint:db:fixtures']);
+    assert.equal(lintReport.lint.ok, false);
+    assert.equal(lintReport.stages[0].status, 'failed');
+    assert.deepEqual(lintReport.lint.findings, [finding]);
+    fs.writeFileSync(lintFile, '{bad');
+    await backendLint(lintReport, [{ script: 'lint:db' }], async () => {}, lintFile);
+    assert.equal(lintReport.lint.ok, false);
+    fs.writeFileSync(lintFile, JSON.stringify({ ok: true, findings: [], ignored: 0 }));
+    await backendLint(lintReport, [{ script: 'lint:db' }], async () => {}, lintFile);
+    assert.equal(lintReport.lint.ok, true);
+    const aggregateEnv = { BUILD_RESULT: 'success', DATABASE_PRESENT: 'true', PGTAP_RESULT: 'success', GITHUB_SHA: 'a'.repeat(40) };
+    const built = { sha: aggregateEnv.GITHUB_SHA, ok: true, snapshotReady: true, migrations: 2324, migrationTotal: 2324,
+      migrationFailed: 0, migrationNotRun: 0, lint: { ok: true, findings: [], ignored: 0 } };
+    const shardReports = Array.from({ length: 6 }, (_, index) => ({ sha: aggregateEnv.GITHUB_SHA, shard: `${index + 1}/6`,
+      ok: true, run: 1, passed: 1, failed: 0, selected: [`${index}_synthetic.sql`], notRun: [], files: [] }));
+    assert.equal(databaseResult(built, shardReports, aggregateEnv).ok, true);
+    const lintFailed = databaseResult({ ...built, ok: false, lint: { ok: false, findings: [finding], ignored: 1 } }, shardReports, aggregateEnv);
+    assert.equal(lintFailed.ok, false);
+    assert.equal(lintFailed.markdown.includes(finding.function) && lintFailed.markdown.includes(finding.message), true);
+    assert.equal(lintFailed.markdown.includes('| 6/6 | 1 | 1 | 0 | PASS |'), true);
+    assert.equal(databaseResult(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0 }, ...shardReports.slice(1)], aggregateEnv).ok, false);
+    assert.equal(databaseResult(built, shardReports.slice(1), aggregateEnv).ok, false);
+    assert.equal(databaseResult(built, [shardReports[0], ...shardReports.slice(0, 5)], aggregateEnv).ok, false);
+    assert.equal(databaseResult(built, [{ ...shardReports[0], sha: 'b'.repeat(40) }, ...shardReports.slice(1)], aggregateEnv).ok, false);
+    assert.equal(databaseResult(undefined, shardReports, aggregateEnv).ok, false);
+    assert.equal(databaseResult({ ...built, migrationFailed: 1 }, shardReports, aggregateEnv).ok, false);
+    assert.equal(databaseResult(built, shardReports, { ...aggregateEnv, PGTAP_RESULT: 'failure' }).ok, false);
+    assert.equal(databaseResult(undefined, [], { ...aggregateEnv, DATABASE_PRESENT: 'false', PGTAP_RESULT: 'skipped' }).ok, true);
+    const aggregateDir = path.join(temp, 'aggregate');
+    const fixture = (file, value) => {
+      const target = path.join(aggregateDir, 'ci-reports/database-result', file);
+      fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, JSON.stringify(value));
+    };
+    fixture('build/backend-summary-123-1/backend.json', built);
+    for (let index = 0; index < 6; index++) fixture(`shards/pgtap-summary-${index + 1}-123-1/pgtap.json`, shardReports[index]);
+    const aggregateSummary = path.join(temp, 'aggregate.md');
+    const aggregate = () => spawnSync(process.execPath, [path.resolve('scripts/ci-hosted/database-result.cjs')], {
+      cwd: aggregateDir, env: { ...process.env, ...aggregateEnv, GITHUB_STEP_SUMMARY: aggregateSummary }, encoding: 'utf8', timeout: 5000,
+    });
+    assert.equal(aggregate().status, 0);
+    fixture('build/backend-summary-123-2/backend.json', { ...built, ok: false, lint: { ok: false, findings: [finding] } });
+    assert.equal(aggregate().status, 1);
+    assert.equal(fs.readFileSync(aggregateSummary, 'utf8').includes(finding.message), true);
+    fixture('build/backend-summary-123-3/backend.json', built);
+    fixture('shards/pgtap-summary-1-123-2/pgtap.json', { ...shardReports[0], ok: false, failed: 1, passed: 0 });
+    assert.equal(aggregate().status, 1);
+    fixture('shards/pgtap-summary-1-123-3/pgtap.json', shardReports[0]);
+    assert.equal(aggregate().status, 0);
+    fs.writeFileSync(path.join(aggregateDir, 'ci-reports/database-result/shards/pgtap-summary-1-123-3/pgtap.json'), '{bad');
+    assert.equal(aggregate().status, 1);
     const migration = path.join(temp, '20260101000000_synthetic.sql');
     fs.writeFileSync(migration, 'select 1;');
     assert.deepEqual(migrationIssues([migration], {}), []);

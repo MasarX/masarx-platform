@@ -77,6 +77,27 @@ async function imageGuard(pins, file, env) {
       SUPABASE_INTERNAL_IMAGE_REGISTRY: 'public.ecr.aws' } };
   } catch (error) { child.kill(); throw error; }
 }
+async function backendLint(summary, commands, execute, file = 'ci-reports/db-lint.json') {
+  const lint = summary.lint = { ok: true, commands: [], findings: [] };
+  try {
+    await stage(summary, 'backend-lint', async () => {
+      for (const command of commands) {
+        const result = { script: command.script, ok: true };
+        try { await execute(command); }
+        catch (error) { result.ok = false; result.failure = { message: sanitize(error.message), ...error.failure }; lint.ok = false; }
+        lint.commands.push(result);
+      }
+      try {
+        const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (typeof report.ok !== 'boolean' || !Array.isArray(report.findings)) throw new Error('Malformed lint report');
+        lint.ok = lint.ok && report.ok;
+        lint.findings = report.findings; lint.ignored = report.ignored;
+        if (report.failure) lint.failure = report.failure;
+      } catch (error) { lint.ok = false; lint.failure = sanitize(error.message); }
+      if (!lint.ok) throw new Error('Backend lint failed; preserving findings and continuing to snapshot and pgTAP');
+    });
+  } catch (error) { lint.ok = false; lint.failure ||= sanitize(error.message); console.error(sanitize(error.message)); }
+}
 async function qualify(diagnostic) {
   const pins = JSON.parse(fs.readFileSync('config/ci/hosted-supabase-images.json', 'utf8'));
   const pinState = imagePreflight(completePins(pins) ? '' : mainSwitch(), process.env.GITHUB_EVENT_NAME, new Date(), process.env.GITHUB_REF, pins);
@@ -205,12 +226,10 @@ async function qualify(diagnostic) {
       console.log(`Fresh migration replay: ${versions.length} files`);
       summary.currentMigration = null;
     } finally { await db.end(); }
-    await timed('backend-lint', async () => {
-      for (const lint of local.loadBackendLocalPreSuiteCommands()) {
-        await checked('npm', ['run', lint.script], { ...env, ...lint.env, ENV_FILE: os.devNull,
-          ENV_FILE_APPEND: '0', ENV_FILE_OVERRIDE: '0', MIGRATION_FIXTURE_GUARD_MODE: 'full' }, lint.timeout_ms);
-      }
-    });
+    diagnostic.stage = 'backend-lint';
+    await backendLint(summary, local.loadBackendLocalPreSuiteCommands(), lint => checked('npm', ['run', lint.script], {
+      ...env, ...lint.env, ENV_FILE: os.devNull, ENV_FILE_APPEND: '0', ENV_FILE_OVERRIDE: '0', MIGRATION_FIXTURE_GUARD_MODE: 'full',
+    }, lint.timeout_ms));
     await timed('database-dump', async () => {
       const container = `supabase_db_${project}`;
       const snapshot = path.resolve('ci-reports/database-snapshot');
@@ -229,9 +248,11 @@ async function qualify(diagnostic) {
         settings: JSON.parse(settings), migrations: summary.migrations,
         files: Object.fromEntries(['database.dump', 'roles.sql'].map(file => [file, crypto.createHash('sha256').update(fs.readFileSync(path.join(snapshot, file))).digest('hex')])) }, null, 2));
       summary.pgtap = 'DEFERRED_TO_SHARDS';
+      summary.snapshotReady = true;
     });
     console.log(summary.integration);
-    summary.ok = true;
+    // Snapshot production succeeds independently; the database aggregate enforces lint.
+    summary.ok = summary.lint.ok;
     diagnostic.stage = 'complete';
   } catch (error) {
     if (guard && fs.existsSync(guard.policyFile)) diagnostic.imagePolicy = { ...diagnostic.imagePolicy, ...JSON.parse(fs.readFileSync(guard.policyFile, 'utf8')) };
@@ -282,4 +303,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint };

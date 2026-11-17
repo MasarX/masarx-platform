@@ -70,7 +70,7 @@ function lintResult(stdout, exitCode, exceptions, ownership) {
     : triggering.length && triggering.every(entry => ignored.includes(entry)) ? 0 : exitCode };
 }
 
-async function main() {
+async function runLint(report) {
   const issues = migrationIssues(listAllActiveMigrations());
   if (issues.length) throw new Error(`Migration lint failed:\n${issues.join('\n')}`);
   const spec = invocation(process.env);
@@ -95,7 +95,20 @@ async function main() {
   catch (error) { console.error(sanitize(result.stdout)); throw error; }
   if (outcome.kept.length) console.log(sanitize(JSON.stringify(outcome.kept, null, 2)));
   console.log(`[db-lint] ${outcome.kept.length} retained findings; ${outcome.ignored.length} existing exceptions; exit ${outcome.exitCode}`);
+  Object.assign(report, { ok: outcome.exitCode === 0, exitCode: outcome.exitCode, ignored: outcome.ignored.length,
+    findings: outcome.kept.flatMap(entry => entry.issues.map(issue => ({ function: sanitize(entry.function),
+      message: sanitize(issue.message || ''), level: sanitize(issue.level), sqlState: issue.sqlState || null }))) });
   process.exitCode = outcome.exitCode;
+}
+
+async function main() {
+  const report = { ok: false, findings: [] };
+  try { await runLint(report); }
+  catch (error) { report.failure = sanitize(error.message); throw error; }
+  finally {
+    fs.mkdirSync('ci-reports', { recursive: true });
+    fs.writeFileSync('ci-reports/db-lint.json', JSON.stringify(report, null, 2));
+  }
 }
 
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 2; });
