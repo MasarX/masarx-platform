@@ -1,0 +1,8 @@
+{
+  "name": "deployment-tools",
+  "private": true,
+  "dependencies": {
+    "vercel": "65.17.0",
+    "wrangler": "4.164.0"
+  }
+}
