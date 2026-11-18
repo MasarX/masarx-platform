@@ -7,6 +7,7 @@ BEGIN;
 SELECT pg_advisory_lock(hashtext('202605251930_console_v2_label_printer_certification_contract_v1'));
 SET search_path TO public, extensions, pg_temp;
 SET LOCAL lock_timeout = '30s';
+LOCK TABLE public.schema_registry IN SHARE ROW EXCLUSIVE MODE;
 
 WITH profile_schema AS (
   SELECT $$
@@ -85,29 +86,37 @@ WITH profile_schema AS (
       }
     }
   ]$$::jsonb AS examples
+),
+registered AS (
+  INSERT INTO public.schema_registry (id, category, version, schema, description, examples, is_active, created_at)
+  SELECT
+    'cccc0000-0000-0000-0000-000000001112'::uuid,
+    'label_print_profile',
+    2,
+    profile_schema.schema_doc,
+    'Printer capability profile with optional schema-valid printer certification evidence.',
+    profile_schema.examples,
+    TRUE,
+    workflow_now()
+  FROM profile_schema
+  WHERE EXISTS (
+    SELECT 1
+    FROM public.schema_registry
+    WHERE category = 'label_print_profile' AND version = 1 AND is_active
+      AND schema = (profile_schema.schema_doc #- '{properties,printer_certification}')
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM public.schema_registry
+    WHERE category = 'label_print_profile' AND version <> 1 AND is_active
+  )
+  ON CONFLICT (category, version) DO NOTHING
+  RETURNING version
 )
-INSERT INTO schema_registry (id, category, version, schema, description, examples, is_active, created_at)
-SELECT
-  'cccc0000-0000-0000-0000-000000001112'::uuid,
-  'label_print_profile',
-  2,
-  profile_schema.schema_doc,
-  'Printer capability profile with optional schema-valid printer certification evidence.',
-  profile_schema.examples,
-  TRUE,
-  workflow_now()
-FROM profile_schema
-ON CONFLICT (category, version) DO UPDATE
-SET schema = EXCLUDED.schema,
-    description = EXCLUDED.description,
-    examples = EXCLUDED.examples,
-    is_active = TRUE,
-    created_at = workflow_now();
-
-UPDATE schema_registry
+UPDATE public.schema_registry
    SET is_active = FALSE
- WHERE category = 'label_print_profile'
-   AND version <> 2;
+ WHERE category = 'label_print_profile' AND version = 1
+   AND EXISTS (SELECT 1 FROM registered);
 
 CREATE OR REPLACE FUNCTION public.ui_record_label_printer_certification_v1(
   p_scope_type TEXT,
@@ -158,12 +167,22 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  IF NULLIF(BTRIM(p_certification->>'evidence_reference'), '') IS NULL THEN
+  IF p_certification - ARRAY[
+    'certification_id', 'certified_at', 'evidence_reference', 'printer_model',
+    'printer_serial', 'printer_dpi', 'media', 'test_artifact_ref', 'result'
+  ] <> '{}'::jsonb THEN
+    RAISE EXCEPTION 'ui_record_label_printer_certification_v1 received unknown evidence fields'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF jsonb_typeof(p_certification->'evidence_reference') IS DISTINCT FROM 'string'
+     OR NULLIF(BTRIM(p_certification->>'evidence_reference'), '') IS NULL THEN
     RAISE EXCEPTION 'ui_record_label_printer_certification_v1 requires evidence_reference'
       USING ERRCODE = '22023';
   END IF;
 
-  IF NULLIF(BTRIM(p_certification->>'printer_model'), '') IS NULL THEN
+  IF jsonb_typeof(p_certification->'printer_model') IS DISTINCT FROM 'string'
+     OR NULLIF(BTRIM(p_certification->>'printer_model'), '') IS NULL THEN
     RAISE EXCEPTION 'ui_record_label_printer_certification_v1 requires printer_model'
       USING ERRCODE = '22023';
   END IF;
@@ -193,6 +212,23 @@ BEGIN
 
   IF v_certification->>'result' NOT IN ('passed', 'failed', 'conditional') THEN
     RAISE EXCEPTION 'ui_record_label_printer_certification_v1 result must be passed, failed, or conditional'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF NOT (v_certification ?& ARRAY[
+       'certification_id', 'certified_at', 'evidence_reference', 'printer_model',
+       'printer_dpi', 'media', 'result'
+     ])
+     OR char_length(v_certification->>'certification_id') > 128
+     OR char_length(v_certification->>'certified_at') NOT BETWEEN 10 AND 64
+     OR char_length(v_certification->>'evidence_reference') > 256
+     OR char_length(v_certification->>'printer_model') > 128
+     OR char_length(v_certification->>'printer_serial') > 128
+     OR char_length(v_certification->>'profile_key') > 64
+     OR char_length(v_certification->>'test_artifact_ref') > 512
+     OR (v_certification->>'printer_dpi')::INT NOT BETWEEN 72 AND 600
+     OR jsonb_typeof(v_certification->'media') IS DISTINCT FROM 'object' THEN
+    RAISE EXCEPTION 'ui_record_label_printer_certification_v1 evidence does not match the printer certification contract'
       USING ERRCODE = '22023';
   END IF;
 

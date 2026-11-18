@@ -1,12 +1,12 @@
 -- pgTAP: Console V2 label printer certification contract
--- Verifies label_print_profile v2 evidence schema, browser-safe RPC, and
+-- Verifies the active shared schema, strict evidence RPC, and
 -- readiness reconciliation after certification evidence is recorded.
 
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(14);
+SELECT plan(17);
 
 CREATE TEMP TABLE _label_printer_certification_result (
   result JSONB NOT NULL
@@ -93,12 +93,11 @@ SELECT ok(
     SELECT 1
       FROM public.schema_registry
      WHERE category = 'label_print_profile'
-       AND version = 2
+       AND version > 1
        AND is_active
-       AND schema ? 'properties'
-       AND schema #> '{properties,printer_certification,required}' ? 'evidence_reference'
+       AND schema #> '{properties,printer_certification,anyOf}' IS NOT NULL
   ),
-  'label_print_profile v2 schema includes active printer_certification evidence contract'
+  'active label_print_profile schema accepts the canonical certification aliases'
 );
 
 SELECT ok(
@@ -158,10 +157,13 @@ SELECT ok(
      WHERE sv.category = 'label_print_profile'
        AND sv.scope_type = 'tenant'
        AND sv.scope_id = '775c6100-254b-4f2d-b9f6-1262f52b06b1'::uuid
-       AND sv.schema_version = 2
+       AND sv.schema_version = (
+         SELECT sr.version FROM public.schema_registry sr
+          WHERE sr.category = 'label_print_profile' AND sr.is_active
+       )
        AND sv.value #>> '{printer_certification,evidence_reference}' = 'BrowserPrinterCertProof-pgtap'
   ),
-  'certification evidence is versioned with schema v2'
+  'certification evidence is versioned with the active shared schema'
 );
 
 SELECT throws_ok(
@@ -176,6 +178,41 @@ SELECT throws_ok(
   '22023',
   'ui_record_label_printer_certification_v1 requires evidence_reference',
   'missing evidence reference fails closed'
+);
+
+SELECT throws_ok(
+  $$
+    SELECT api.ui_record_label_printer_certification_v1(
+      'tenant', '775c6100-254b-4f2d-b9f6-1262f52b06b1'::uuid,
+      '{"evidence_reference":"test-proof","printer_model":"Test Printer","extra":true}'::jsonb
+    )
+  $$,
+  '22023',
+  'ui_record_label_printer_certification_v1 received unknown evidence fields',
+  'extra evidence fields are rejected before writing'
+);
+
+SELECT throws_ok(
+  $$
+    SELECT api.ui_record_label_printer_certification_v1(
+      'tenant', '775c6100-254b-4f2d-b9f6-1262f52b06b1'::uuid,
+      '{"evidence_reference":"test-proof","printer_model":"Test Printer","printer_dpi":601}'::jsonb
+    )
+  $$,
+  '22023',
+  'ui_record_label_printer_certification_v1 evidence does not match the printer certification contract',
+  'evidence outside the printer DPI range is rejected'
+);
+
+SELECT is(
+  api.ui_record_label_printer_certification_v1(
+    'tenant', '775c6100-254b-4f2d-b9f6-1262f52b06b1'::uuid,
+    '{"certification_id":"test-cert","certified_at":"2026-01-01T00:00:00Z",
+      "evidence_reference":"test-proof","printer_model":"Test Printer","printer_dpi":203,
+      "media":{"kind":"thermal"},"result":"conditional"}'::jsonb
+  )->>'ok',
+  'true',
+  'complete seven-field certification evidence is accepted'
 );
 
 SELECT * FROM finish();
