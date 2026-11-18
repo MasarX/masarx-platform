@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(17);
+SELECT plan(18);
 
 SELECT ok(
   EXISTS (
@@ -171,14 +171,22 @@ SELECT ok(
 
 SELECT ok(
   pg_get_functiondef('public.integration_plugin_activate_core_v1(uuid,text,uuid,text)'::regprocedure)
-    LIKE '%jsonb_build_object(%workflow%delivery%',
-  'API plugin activation initializes route policy workflow/delivery parents before jsonb_set child writes'
+    LIKE '%v_route_policy := jsonb_set(v_route_policy, ''{workflow}''%v_route_policy := jsonb_set(v_route_policy, ''{delivery}''%',
+  'API plugin activation preserves the shared workflow and delivery parent writes'
 );
 
 SELECT ok(
   pg_get_functiondef('public.integration_plugin_activate_core_v1(uuid,text,uuid,text)'::regprocedure)
-    LIKE '%handler_key%outbound_http%handler_version%v1%',
+    LIKE '%handler_key,%handler_version,%''outbound_http'',%''v1'',%',
   'API plugin activation writes outbound operation_templates with workflow handler metadata'
+);
+
+SELECT ok(
+  pg_get_functiondef('public.integration_plugin_activate_core_v1(uuid,text,uuid,text)'::regprocedure)
+    LIKE '%integration_plugin_default_route_policy_v1(%{workflow,intent}%'
+  AND pg_get_functiondef('public.integration_plugin_activate_core_v1(uuid,text,uuid,text)'::regprocedure)
+    LIKE '%''base_url'', v_provider_base_url%',
+  'Console V2 activation retains route defaults, workflow intent and provider base URL'
 );
 
 SELECT * FROM finish();
