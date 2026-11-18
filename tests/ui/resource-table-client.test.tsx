@@ -1,15 +1,17 @@
 import { screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { ResourceTableClient } from "../../packages/ui/src/resource-table-client";
 import { ResourceTable } from "../../packages/ui/src/resource-table";
-import { useResourceQuery } from "../../packages/ui/src/hooks/use-resource-query";
+import { useResourceListInvalidate, useResourceQuery } from "../../packages/ui/src/hooks/use-resource-query";
 import { renderWithIntl } from "./test-utils";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockRouterRefresh = jest.fn();
+
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: jest.fn(), push: jest.fn(), refresh: jest.fn() }),
+  useRouter: () => ({ replace: jest.fn(), push: jest.fn(), refresh: mockRouterRefresh }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/test",
 }));
@@ -118,6 +120,32 @@ function currentBatchCallback() {
   expect(toolbar.props.renderBatchResultReadback).toBe(false);
   return toolbar.props.onBatchResultReadbackChange;
 }
+
+test("bulk action success refreshes the active resource without reloading the route", async () => {
+  const invalidate = jest.fn().mockResolvedValue(undefined);
+  const invalidateHook = jest.mocked(useResourceListInvalidate);
+  invalidateHook.mockReturnValueOnce(invalidate);
+  mockRouterRefresh.mockClear();
+
+  renderWithIntl(
+    <ResourceTableClient
+      columns={defaultColumns}
+      items={defaultItems}
+      bulkActions={batchActions}
+      serverFetch={makeServerFetch()}
+    />
+  );
+
+  const tableProps = ResourceTableMock.mock.calls[ResourceTableMock.mock.calls.length - 1][0];
+  const toolbar = tableProps.renderBulkActions(["1"]);
+  await act(async () => {
+    await toolbar.props.onSuccess();
+  });
+
+  expect(invalidateHook).toHaveBeenLastCalledWith("shipments");
+  expect(invalidate).toHaveBeenCalledTimes(1);
+  expect(mockRouterRefresh).not.toHaveBeenCalled();
+});
 
 test("committed batch readback remains outside the selection toolbar after refresh", () => {
   const view = renderWithIntl(<ResourceTableClient columns={defaultColumns} items={defaultItems}
