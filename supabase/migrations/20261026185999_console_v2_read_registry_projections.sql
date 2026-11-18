@@ -201,6 +201,29 @@ DECLARE
     }
   }'::jsonb;
   v_source REGCLASS;
+  v_source_name TEXT;
+  v_view_config JSONB;
+  v_scoped_views CONSTANT JSONB := '{
+    "service_offering_directory": {
+      "api.service_offering_directory": {
+        "sql": "CREATE VIEW public.console_service_offering_api_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+        "name": "public.console_service_offering_api_read_v1",
+        "revoke": "REVOKE ALL ON public.console_service_offering_api_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+      }
+    },
+    "route_runs": {
+      "api.route_runs": {
+        "sql": "CREATE VIEW public.console_route_runs_api_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+        "name": "public.console_route_runs_api_read_v1",
+        "revoke": "REVOKE ALL ON public.console_route_runs_api_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+      },
+      "public.command_route_runs_dashboard_v1": {
+        "sql": "CREATE VIEW public.console_route_runs_dashboard_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+        "name": "public.console_route_runs_dashboard_read_v1",
+        "revoke": "REVOKE ALL ON public.console_route_runs_dashboard_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+      }
+    }
+  }'::jsonb;
   v_view_name TEXT;
   v_view_sources JSONB := '{}'::jsonb;
   v_shape JSONB;
@@ -352,16 +375,25 @@ BEGIN
 
         -- Keep the mutation relation and apply the same scope predicates through an invoker read view.
         IF v_shape IS NOT NULL THEN
-          v_view_name := v_shaped_json #>> ARRAY[v_key, 'name'];
           v_source := to_regclass(COALESCE(NULLIF(v_resource->>'read_relation', ''), v_resource->>'relation'));
-          IF v_source IS NULL OR NOT EXISTS (
-            SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE c.oid = v_source AND n.nspname = 'public' AND c.relkind IN ('p','r','v')
-          ) THEN
+          SELECT n.nspname || '.' || c.relname INTO v_source_name
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.oid = v_source AND (
+            (n.nspname = 'public' AND c.relkind IN ('p','r','v'))
+            OR (n.nspname = 'api' AND c.relkind = 'v'
+                AND COALESCE(v_scoped_views->v_key ? (n.nspname || '.' || c.relname), FALSE)
+                AND EXISTS (
+                  SELECT 1 FROM pg_options_to_table(c.reloptions) opt
+                  WHERE opt.option_name = 'security_invoker' AND opt.option_value::boolean
+                ))
+          );
+          IF v_source_name IS NULL THEN
             RAISE EXCEPTION 'Console V2 read projection has an unsupported source for %', v_key;
           END IF;
-          IF v_view_sources ? v_key THEN
-            IF v_view_sources->>v_key <> v_source::oid::text THEN
+          v_view_config := COALESCE(v_scoped_views #> ARRAY[v_key, v_source_name], v_shaped_json->v_key);
+          v_view_name := v_view_config->>'name';
+          IF v_view_sources ? v_view_name THEN
+            IF v_view_sources->>v_view_name <> v_source::oid::text THEN
               RAISE EXCEPTION 'Console V2 read projection has different scope sources for %', v_key;
             END IF;
           ELSE
@@ -373,9 +405,9 @@ BEGIN
             ) INTO v_view_columns
             FROM pg_attribute a
             WHERE a.attrelid = v_source AND a.attnum > 0 AND NOT a.attisdropped;
-            EXECUTE format(v_shaped_json #>> ARRAY[v_key, 'sql'], v_view_columns, v_source);
-            EXECUTE v_shaped_json #>> ARRAY[v_key, 'revoke'];
-            v_view_sources := jsonb_set(v_view_sources, ARRAY[v_key], to_jsonb(v_source::oid::text));
+            EXECUTE format(v_view_config->>'sql', v_view_columns, v_source);
+            EXECUTE v_view_config->>'revoke';
+            v_view_sources := jsonb_set(v_view_sources, ARRAY[v_view_name], to_jsonb(v_source::oid::text));
           END IF;
           v_resource := jsonb_set(v_resource, '{read_relation}', to_jsonb(v_view_name));
         END IF;
