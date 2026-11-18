@@ -27,11 +27,9 @@ dist/
 *.tsbuildinfo
 
 # Landing build outputs (generated; do not commit)
-dist/
 
 # TypeScript package outputs (generated; do not commit)
 packages/*/dist/
-dist/
 packages/*/src/**/*.js
 packages/*/src/**/*.js.map
 packages/*/src/**/*.d.ts
@@ -70,7 +68,6 @@ logs/
 *.log
 
 # Build output
-dist/
 
 # Temporary files
 tmp/
@@ -91,4 +88,25 @@ verify-core-timing.json
 # Plan test fixtures (generated dynamically by unit tests)
 docs/ops/plans/PLAN-2099*/
 docs/ops/plans/review/PLAN-2099*/
+
+
+
+
+
+
+
+
+
+.playwright-cli/
+output/
+apps/console-v2/.vitest/
+
+
+
+
+
+
+
+.tmp/
+.tmp-*
 !packages/ui/src/maplibre-css.d.ts

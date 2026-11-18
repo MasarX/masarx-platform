@@ -32,7 +32,7 @@ describe("OperationReportViewer", () => {
     expect(screen.getByText("Operation report")).toBeInTheDocument();
     expect(screen.getByText("webhook_inbound")).toBeInTheDocument();
     expect(screen.getByText("direct")).toBeInTheDocument();
-    expect(screen.getByText(/Correlation: corr-123/)).toBeInTheDocument();
+    expect(screen.getByText(/Activity reference: corr-123/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open saved report" })).toHaveAttribute(
       "href",
       "/console/resources/mapping_operation_reports?id=report-1",
@@ -55,8 +55,10 @@ describe("OperationReportViewer", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy JSON" }));
-    expect(navigator.clipboard.writeText).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Copy report details" }));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining("Status: failed")
+    );
   });
 
   test("shows the no-report fallback when the studio has not produced a report yet", () => {

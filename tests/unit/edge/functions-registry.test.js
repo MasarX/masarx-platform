@@ -11,7 +11,7 @@ function writeTempRegistry(data) {
 }
 
 describe('edge/functions-registry', () => {
-  test('default registry includes tenant signup functions with expected auth modes', () => {
+  test('default registry includes browser-invoked lifecycle functions with expected auth modes', () => {
     const entries = loadRegistry(DEFAULT_REGISTRY_PATH);
     const byName = new Map(entries.map((entry) => [entry.name, entry]));
 
@@ -20,9 +20,39 @@ describe('edge/functions-registry', () => {
       authMode: 'public_no_jwt',
       enabled: true,
     });
+    expect(byName.get('driver-signup-intake')).toMatchObject({
+      name: 'driver-signup-intake',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
+    expect(byName.get('driver-application-status')).toMatchObject({
+      name: 'driver-application-status',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
     expect(byName.get('tenant-signup-review')).toMatchObject({
       name: 'tenant-signup-review',
-      authMode: 'supabase_jwt',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
+    expect(byName.get('marketplace-participant-review')).toMatchObject({
+      name: 'marketplace-participant-review',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
+    expect(byName.get('tenant-signup-console-request')).toMatchObject({
+      name: 'tenant-signup-console-request',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
+    expect(byName.get('organization-profile')).toMatchObject({
+      name: 'organization-profile',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
+    expect(byName.get('tenant-user-invite')).toMatchObject({
+      name: 'tenant-user-invite',
+      authMode: 'public_no_jwt',
       enabled: true,
     });
   });

@@ -11,6 +11,38 @@ INSERT INTO public.organizations (id, name, slug)
 VALUES ('aaaa1000-0000-0000-0000-000000000099', 'Sync Followup Org', 'sync-followup-org')
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+VALUES (
+  'cccc2000-0000-0000-0000-000000000099',
+  'aaaa1000-0000-0000-0000-000000000099',
+  'Sync Followup Client',
+  'sync-followup-client',
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status;
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+  'dddd2000-0000-0000-0000-000000000099',
+  'cccc2000-0000-0000-0000-000000000099',
+  'Sync Followup Sender',
+  'Sync Followup Sender',
+  TRUE,
+  TRUE,
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    auto_provisioned = EXCLUDED.auto_provisioned,
+    auto_recreate = EXCLUDED.auto_recreate,
+    status = EXCLUDED.status;
+
 INSERT INTO public.mapping_configs (
   id,
   mapping_type,
@@ -71,7 +103,7 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO public.webhook_sources (
-  id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled
+  id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled, sender_id
 )
 VALUES (
   'bbbb1000-0000-0000-0000-000000000099',
@@ -81,9 +113,18 @@ VALUES (
   'provider',
   'token-pgtap-sync-followup',
   'cccc1000-0000-0000-0000-000000000099',
-  TRUE
+  TRUE,
+  'dddd2000-0000-0000-0000-000000000099'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    source_identifier = EXCLUDED.source_identifier,
+    name = EXCLUDED.name,
+    provider_type = EXCLUDED.provider_type,
+    auth_token = EXCLUDED.auth_token,
+    mapping_config_id = EXCLUDED.mapping_config_id,
+    enabled = EXCLUDED.enabled,
+    sender_id = EXCLUDED.sender_id;
 
 INSERT INTO public.settings_versions (
   id,

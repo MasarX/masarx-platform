@@ -49,6 +49,8 @@ describe("AccessPolicyRequestForm", () => {
     const submitButton = screen.getByTestId("access-policy-request-submit");
     expect(submitButton).toBeDisabled();
     expect(screen.getByText("actions.updateHint")).toBeInTheDocument();
+    expect(screen.queryByText('{"capabilities":[]}')).not.toBeInTheDocument();
+    expect(screen.getByText("editor.advancedHidden")).toBeInTheDocument();
   });
 
   it("shows submitting state while pending", () => {

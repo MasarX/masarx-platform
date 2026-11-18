@@ -27,6 +27,19 @@ export function ResourceImportLauncher({
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [refreshOnClose, setRefreshOnClose] = React.useState(false);
+  const openImportedRecord = React.useCallback(
+    (resource: string, id: string) => {
+      const normalizedResource = resource.trim();
+      const normalizedId = id.trim();
+      if (!normalizedResource || !normalizedId) return;
+      const resourceBase = `${appBasePath}/resources/${encodeURIComponent(normalizedResource)}`;
+      const base = returnTo?.includes(`/resources/${normalizedResource}`) ? returnTo : resourceBase;
+      setOpen(false);
+      setRefreshOnClose(false);
+      router.push(buildHref(base, { id: normalizedId }));
+    },
+    [appBasePath, returnTo, router],
+  );
   const standaloneHref = React.useMemo(
     () =>
       buildHref(`${appBasePath}/imports/new`, {
@@ -108,6 +121,7 @@ export function ResourceImportLauncher({
               presentation="drawer"
               testIdPrefix={testIdPrefix}
               onReportReady={() => setRefreshOnClose(true)}
+              onOpenImportedRecord={openImportedRecord}
             />
           </div>
         </DrawerContent>

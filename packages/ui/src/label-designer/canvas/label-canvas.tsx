@@ -164,8 +164,11 @@ export function LabelCanvas({
 
       if (block.locked) return;
 
-      const mousePos = lastMouseDownRef.current;
+      const mousePos = e
+        ? { x: e.clientX, y: e.clientY }
+        : lastMouseDownRef.current;
       if (!mousePos) return;
+      lastMouseDownRef.current = mousePos;
       setDragState({
         blockIndex: index,
         startX: mousePos.x,
@@ -784,6 +787,7 @@ export function LabelCanvas({
               <CanvasSelection
                 block={selectedBlock}
                 scale={canvasScale}
+                testIdPrefix={prefix}
                 onResizeStart={handleResizeStart}
               />
             ) : null}

@@ -9,7 +9,7 @@ type LandingClientRow = {
   source?: unknown;
 };
 
-const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
+const SUPABASE_URL = readEnv("SUPABASE_URL", ["EDGE_SUPABASE_URL", "API_URL"]);
 const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
 const SUPABASE_SERVICE_KEY = readEnv("EDGE_SUPABASE_SERVICE_ROLE_KEY", [
   "SUPABASE_SERVICE_ROLE_KEY",
@@ -37,6 +37,9 @@ const MARKETING_CORS_ALLOW_ORIGINS = readEnv("MARKETING_CORS_ALLOW_ORIGINS", [
 
 const MARKETING_IP_HASH_SALT = readEnv("MARKETING_IP_HASH_SALT");
 const LOCAL_MARKETING_TURNSTILE_SECRET_KEY = "EXAMPLE_PASSWORD";
+const LOCAL_MARKETING_TURNSTILE_DUMMY_TOKEN = "EXAMPLE_PASSWORD";
+const LEGACY_LOCAL_MARKETING_TURNSTILE_SECRET_KEY = "local-dev-turnstile-secret";
+const LOCAL_TURNSTILE_TEST_HOSTNAME = "example.com";
 const LOCAL_MARKETING_IP_HASH_SALT = "local-marketing-intake";
 const LOCAL_MARKETING_ORIGINS = new Set([
   // objectives:allow LOCALHOST Justification: local browser QA for the marketing intake facade requires explicit loopback origins when no shared allowlist is configured.
@@ -107,6 +110,48 @@ if (!SUPABASE_ANON_KEY) console.error("[marketing-lead-intake] Missing SUPABASE_
 const asString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 const isJwtLike = (value: string): boolean => String(value || "").trim().split(".").length === 3;
 
+const normalizeSupabaseBaseUrl = (value: string): string => String(value || "").trim().replace(/\/+$/g, "");
+
+const resolveRpcBaseUrls = (): string[] => {
+  const candidates = [
+    SUPABASE_URL,
+    readEnv("SUPABASE_URL", ["API_URL"]),
+  ];
+
+  try {
+    const parsed = new URL(SUPABASE_URL);
+    if (isLocalHostname(parsed.hostname)) {
+      candidates.push(`${parsed.protocol}//127.0.0.1:${parsed.port || "8000"}`);
+      candidates.push("http://kong:8000");
+    }
+  } catch {
+    // malformed URLs are rejected by fetch below; keep the error path explicit there.
+  }
+
+  const seen = new Set<string>();
+  return candidates
+    .map(normalizeSupabaseBaseUrl)
+    .filter((value) => {
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+};
+
+const fetchWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs = 6000,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 const extractRpcMessage = (body: unknown): string => {
   if (!body) return "";
   if (typeof body === "string") return body.trim();
@@ -126,6 +171,7 @@ const isRetryableAuthError = (status: number, body: unknown): boolean => {
     message.includes("no suitable key") ||
     message.includes("wrong key type") ||
     message.includes("no api key") ||
+    message.includes("permission denied for function") ||
     message.includes("invalid signature") ||
     message.includes("jwt")
   );
@@ -201,31 +247,51 @@ const invokeRpcWithAuthFallback = async (
 
   let lastResponse: Response | null = null;
   let lastBody: unknown = null;
+  let lastFetchError: Error | null = null;
+  const rpcBaseUrls = resolveRpcBaseUrls();
+
   for (let index = 0; index < attempts.length; index += 1) {
     const attempt = attempts[index];
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${rpcName}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        prefer: "tx=commit",
-        ...attempt.headers,
-      },
-      body: JSON.stringify(payload),
-    });
-    const body = await toResponseBody(response);
-    lastResponse = response;
-    lastBody = body;
+    for (let urlIndex = 0; urlIndex < rpcBaseUrls.length; urlIndex += 1) {
+      const baseUrl = rpcBaseUrls[urlIndex];
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(`${baseUrl}/rest/v1/rpc/${rpcName}`, {
+          method: "POST",
+          headers: {
+            "accept-profile": "api",
+            "content-profile": "api",
+            "content-type": "application/json",
+            prefer: "tx=commit",
+            ...attempt.headers,
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (error) {
+        lastFetchError = error instanceof Error ? error : new Error("rpc_fetch_failed");
+        if (urlIndex < rpcBaseUrls.length - 1) continue;
+        break;
+      }
 
-    if (response.ok) {
+      const body = await toResponseBody(response);
+      lastResponse = response;
+      lastBody = body;
+
+      if (response.ok) {
+        return { response, body };
+      }
+
+      const hasMoreAuthAttempts = index < attempts.length - 1;
+      if (hasMoreAuthAttempts && isRetryableAuthError(response.status, body)) {
+        break;
+      }
+
       return { response, body };
     }
+  }
 
-    const hasMoreAttempts = index < attempts.length - 1;
-    if (hasMoreAttempts && isRetryableAuthError(response.status, body)) {
-      continue;
-    }
-
-    return { response, body };
+  if (!lastResponse && lastFetchError) {
+    throw new Error(`rpc_fetch_failed:${lastFetchError.message || "unknown"}`);
   }
 
   return { response: lastResponse as Response, body: lastBody };
@@ -375,6 +441,9 @@ const verifyTurnstile = async (
 ): Promise<{ success: boolean; hostname: string; errorCodes: unknown }> => {
   if (!secret) {
     return { success: false, hostname: "", errorCodes: ["missing_turnstile_secret"] };
+  }
+  if (secret === LEGACY_LOCAL_MARKETING_TURNSTILE_SECRET_KEY && token === LOCAL_MARKETING_TURNSTILE_DUMMY_TOKEN) {
+    return { success: true, hostname: "", errorCodes: null };
   }
 
   const body = new URLSearchParams();
@@ -543,7 +612,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(500, { ok: false, error: { code: "turnstile_secret_missing" } }, cors.headers);
     }
     try {
-      const res = await verifyTurnstile(turnstileToken, effectiveTurnstileSecret, clientIp);
+      const res = cors.localContext && turnstileToken === LOCAL_MARKETING_TURNSTILE_DUMMY_TOKEN
+        ? { success: true, hostname: "", errorCodes: [] }
+        : await verifyTurnstile(turnstileToken, effectiveTurnstileSecret, clientIp);
       turnstileVerified = res.success;
       turnstileHostname = res.hostname;
       turnstileErrorCodes = res.errorCodes;
@@ -556,7 +627,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
           }
         })();
         const actualHost = turnstileHostname.toLowerCase();
-        if (expectedHost && actualHost && expectedHost !== actualHost) {
+        const localTestHostname = cors.localContext &&
+          effectiveTurnstileSecret === LOCAL_MARKETING_TURNSTILE_SECRET_KEY &&
+          actualHost === LOCAL_TURNSTILE_TEST_HOSTNAME;
+        if (expectedHost && actualHost && expectedHost !== actualHost && !localTestHostname) {
           return json(
             400,
             { ok: false, error: { code: "turnstile_invalid" }, turnstile_error_codes: turnstileErrorCodes },

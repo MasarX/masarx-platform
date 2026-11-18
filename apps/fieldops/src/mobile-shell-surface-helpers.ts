@@ -403,6 +403,19 @@ function formatShortPlace(parts: Array<string | null | undefined>): string | nul
   return filtered.length ? filtered.join(" - ") : null;
 }
 
+const SHORT_NATIONAL_ADDRESS_KEYS: string[] = [
+  "sa_short_code",
+  "short_national_address",
+  "shortNationalAddress",
+  "short_address",
+  "shortAddress",
+  "address_short",
+  "short_code",
+  "shortCode",
+  "national_address_short_code",
+  "nationalAddressShortCode",
+];
+
 function formatAddressRecord(record: JsonRecord): string | null {
   const street = pickAnyText(record, ["street", "address_line_1", "line1", "street_name"]);
   const building = pickAnyText(record, [
@@ -415,7 +428,7 @@ function formatAddressRecord(record: JsonRecord): string | null {
   const district = pickAnyText(record, ["district", "neighborhood", "area"]);
   const city = pickAnyText(record, ["city", "destination_city"]);
   const postalCode = pickAnyText(record, ["postal_code", "postcode", "zip", "zip_code"]);
-  const shortAddress = pickAnyText(record, ["short_address", "shortAddress", "address_short"]);
+  const shortAddress = pickAnyText(record, SHORT_NATIONAL_ADDRESS_KEYS);
 
   const streetLine =
     street && building ? `${street} ${building}` : street ?? (building ? `Building ${building}` : null);
@@ -434,7 +447,7 @@ function extractAddressSummaryFromRecords(records: JsonRecord[]): {
     const locality = formatShortPlace([
       pickAnyText(record, ["district", "neighborhood", "area"]),
       pickAnyText(record, ["city", "destination_city"]),
-      pickAnyText(record, ["short_address", "shortAddress", "address_short"]),
+      pickAnyText(record, SHORT_NATIONAL_ADDRESS_KEYS),
     ]);
     const fullAddress = formatAddressRecord(record);
     if (locality || fullAddress) {

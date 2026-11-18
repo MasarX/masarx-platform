@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(20);
+SELECT plan(22);
 
 SELECT ok(
   EXISTS (
@@ -51,15 +51,21 @@ SELECT ok(
 );
 
 SELECT matches(
-  pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure),
-  'start_workflow_run',
-  'shipment_amend_cancel_v1 starts a real workflow run'
+  pg_get_functiondef('public.shipment_amend_cancel_execute_v1(jsonb)'::regprocedure),
+  'shipment_amend_cancel_execute_base_v1',
+  'shipment_amend_cancel_execute_v1 delegates to the canonical workflow executor base'
 );
 
-SELECT matches(
-  pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure),
-  'progress_workflow_run',
-  'shipment_amend_cancel_v1 progresses the canonical workflow run entrypoint'
+SELECT ok(
+  strpos(
+    lower(pg_get_functiondef('public.shipment_amend_cancel_execute_base_v1(jsonb)'::regprocedure)),
+    'start_workflow_run'
+  ) > 0
+  AND strpos(
+    lower(pg_get_functiondef('public.shipment_amend_cancel_execute_base_v1(jsonb)'::regprocedure)),
+    'progress_workflow_run'
+  ) > 0,
+  'shipment_amend_cancel_execute_base_v1 starts and progresses the canonical workflow run entrypoint'
 );
 
 SELECT matches(
@@ -69,13 +75,36 @@ SELECT matches(
 );
 
 SELECT ok(
+  strpos(
+    lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
+    'dry_run'
+  ) > 0
+  AND strpos(
+    lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
+    'shipment_amend_cancel_execute_v1'
+  ) > 0,
+  'shipment_amend_cancel_v1 keeps dry-run previews outside the canonical executor'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    WHERE p.pronamespace = 'public'::regnamespace
+      AND p.proname = 'shipment_amend_cancel_execute_v1'
+      AND p.oid::regprocedure::text = 'shipment_amend_cancel_execute_v1(jsonb)'
+  ),
+  'shipment_amend_cancel_execute_v1 internal executor exists'
+);
+
+SELECT ok(
   NOT (
     strpos(
-      lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
+      lower(pg_get_functiondef('public.shipment_amend_cancel_execute_v1(jsonb)'::regprocedure)),
       'jsonb_populate_record'
     ) > 0
   ),
-  'shipment_amend_cancel_v1 does not fabricate workflow_runs in memory'
+  'shipment_amend_cancel_execute_v1 does not fabricate workflow_runs in memory'
 );
 
 SELECT ok(
@@ -84,7 +113,7 @@ SELECT ok(
       replace(
         replace(
           replace(
-            lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
+            lower(pg_get_functiondef('public.shipment_amend_cancel_execute_v1(jsonb)'::regprocedure)),
             E'\n',
             ''
           ),
@@ -97,25 +126,25 @@ SELECT ok(
       'jsonb_populate_record(null::public.workflow_run_steps'
     ) > 0
   ),
-  'shipment_amend_cancel_v1 does not fabricate workflow_run_steps in memory'
+  'shipment_amend_cancel_execute_v1 does not fabricate workflow_run_steps in memory'
 );
 
 SELECT ok(
   NOT (
     strpos(
-      lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
+      lower(pg_get_functiondef('public.shipment_amend_cancel_execute_v1(jsonb)'::regprocedure)),
       'execute_shipment_modify_v1'
     ) > 0
     OR strpos(
-      lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
+      lower(pg_get_functiondef('public.shipment_amend_cancel_execute_v1(jsonb)'::regprocedure)),
       'execute_shipment_update_address_v1'
     ) > 0
     OR strpos(
-      lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
+      lower(pg_get_functiondef('public.shipment_amend_cancel_execute_v1(jsonb)'::regprocedure)),
       'execute_shipment_delete_v1'
     ) > 0
   ),
-  'shipment_amend_cancel_v1 does not invoke shipment handlers directly'
+  'shipment_amend_cancel_execute_v1 does not invoke shipment handlers directly'
 );
 
 SELECT ok(

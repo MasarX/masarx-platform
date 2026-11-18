@@ -369,7 +369,7 @@ html[data-motion="off"] [data-tilt] { transform: none; }
 }
 
 /* --- Sections --- */
-.section { padding: clamp(72px, 8vw, 140px) 0; content-visibility: auto; contain-intrinsic-size: auto 600px; }
+.section { padding: clamp(72px, 8vw, 140px) 0; scroll-margin-top: calc(var(--header-h, 72px) + 16px); }
 .section h2 { margin: 0; font-size: clamp(26px, 2.5vw, 36px); letter-spacing: -0.03em; }
 .lead { margin: 12px 0 0; color: var(--muted); max-width: 72ch; line-height: 1.6; font-size: 17px; }
 
@@ -1303,6 +1303,17 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 /* --- Responsive --- */
 @media (max-width: 768px) {
   .btn.nav-toggle { display: inline-flex; }
+  .header-row { flex-wrap: wrap; align-items: flex-start; }
+  .brand { flex: 0 0 auto; }
+  .header-actions {
+    flex: 1 1 360px;
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .header-actions .btn { white-space: nowrap; }
 
   .nav {
     display: none;
@@ -1343,7 +1354,6 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
 }
 
 @media (max-width: 560px) {
-  .header-row { flex-wrap: wrap; }
   .header-actions { width: 100%; flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
   .header-actions a.btn-primary { display: none; }
   .header-actions .btn-track-top { order: -1; }

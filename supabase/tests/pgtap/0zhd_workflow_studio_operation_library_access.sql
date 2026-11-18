@@ -10,15 +10,35 @@ DO $$
 DECLARE
   v_org UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO organizations (id, name, slug)
   VALUES (v_org, 'Workflow Studio Ops Org', 'workflow-studio-ops-org-' || left(v_org::text, 8));
 
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
   INSERT INTO clients (id, organization_id, name, slug, status)
   VALUES (v_client, v_org, 'Workflow Studio Ops Client', 'workflow-studio-ops-client-' || left(v_client::text, 8), 'active');
+
+  INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES (
+    v_sender,
+    v_client,
+    'Workflow Studio Ops Sender',
+    'Workflow Studio Ops Sender',
+    TRUE,
+    'active'
+  );
+
+  PERFORM bootstrap_tenant_onboarding_v1(
+    v_org,
+    'pgtap:workflow-studio-operation-library-access-fixture-bootstrap'
+  );
 
   INSERT INTO users (id, organization_id, email, full_name, user_type, access_scope_type, access_scope_id)
   VALUES (

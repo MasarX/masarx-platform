@@ -348,13 +348,14 @@ const ensureClientAckMappings = async () => {
     return rows[0].id;
   };
 
-  const configureClientPolicy = async (clientId, mappingId) => {
+  const configureClientPolicy = async (clientId, sourceId, mappingId) => {
     const policy = {
       ack: { mode: 'accepted_async', status_code: 202, response_mapping_id: mappingId },
       validation: { idempotency: { body_path: 'event.id' } },
       workflow: { intent: 'shipment_create' },
     };
     await upsertSettings('webhook_ingest_policy', 'client', clientId, policy, 'per-client ack mapping');
+    await upsertWebhookPolicy('source', sourceId, policy);
   };
 
   // Client A
@@ -372,7 +373,7 @@ const ensureClientAckMappings = async () => {
     },
   });
   const sourceA = await ensureSource(orgA, senderA, ACK_A_SOURCE_IDENTIFIER, CLIENT_A_ACK_TOKEN, mappingAId);
-  await configureClientPolicy(clientA, mappingAId);
+  await configureClientPolicy(clientA, sourceA, mappingAId);
 
 
   // Client B
@@ -390,7 +391,7 @@ const ensureClientAckMappings = async () => {
     },
   });
   const sourceB = await ensureSource(orgB, senderB, ACK_B_SOURCE_IDENTIFIER, CLIENT_B_ACK_TOKEN, mappingBId);
-  await configureClientPolicy(clientB, mappingBId);
+  await configureClientPolicy(clientB, sourceB, mappingBId);
 
 };
 
@@ -467,6 +468,16 @@ const getAckHistory = async (webhookId) => {
     [webhookId]
   );
   return rows;
+};
+
+const getInboxAckBody = async (webhookId) => {
+  const { rows } = await pool.query(
+    `SELECT ack_body
+       FROM webhook_inbox
+      WHERE id = $1`,
+    [webhookId],
+  );
+  return rows[0]?.ack_body || null;
 };
 
 const parseJsonObject = (value) => {
@@ -731,9 +742,10 @@ describeIfWebhook('Webhook ingestion workflow', () => {
     const syncStatus = Number(basicDefaults?.synchronous_success_status ?? 200);
     expect(response.status).toBe(syncStatus);
     expect(body?.status).toBe('accepted');
-    expect(body?.resource?.type).toBe('shipment');
-    expect(typeof body?.resource?.id).toBe('string');
-    expect(typeof body?.resource?.tracking_number).toBe('string');
+    expect(body?.resource).toBeUndefined();
+    expect(body?.planned_resource?.type).toBe('shipment');
+    expect(typeof body?.planned_resource?.id).toBe('string');
+    expect(typeof body?.planned_resource?.tracking_number).toBe('string');
     expect(typeof body?.workflow_run_id).toBe('string');
 
     const sourceId = await getSourceId(BASIC_SOURCE_IDENTIFIER);
@@ -756,9 +768,8 @@ describeIfWebhook('Webhook ingestion workflow', () => {
     const sentAcks = ackRecords.filter((record) => record.ack_outcome === 'ack_sent');
     expect(sentAcks.length).toBeGreaterThan(0);
     expect(sentAcks.some((record) => Number(record.ack_status_code) === syncStatus)).toBe(true);
-    expect(
-      sentAcks.some((record) => record.ack_body?.resource?.tracking_number === body.resource.tracking_number),
-    ).toBe(true);
+    const inboxAckBody = await getInboxAckBody(inbox.id);
+    expect(inboxAckBody?.planned_resource?.tracking_number).toBe(body.planned_resource.tracking_number);
     expect(correlationHeader).toBe(inbox.correlation_id);
 
     const responseHistory = await getResponseHistory(inbox.id);
@@ -815,9 +826,10 @@ describeIfWebhook('Webhook ingestion workflow', () => {
     const syncStatus = Number(basicDefaults?.synchronous_success_status ?? 200);
     expect(second.response.status).toBe(syncStatus);
     expect(second.body?.status).toBe('accepted');
-    expect(second.body?.resource?.type).toBe('shipment');
-    expect(typeof second.body?.resource?.id).toBe('string');
-    expect(typeof second.body?.resource?.tracking_number).toBe('string');
+    expect(second.body?.resource).toBeUndefined();
+    expect(second.body?.planned_resource?.type).toBe('shipment');
+    expect(typeof second.body?.planned_resource?.id).toBe('string');
+    expect(typeof second.body?.planned_resource?.tracking_number).toBe('string');
     expect(typeof second.body?.workflow_run_id).toBe('string');
 
     const sourceId = await getSourceId(BASIC_SOURCE_IDENTIFIER);
@@ -957,11 +969,8 @@ describeIfWebhook('Webhook ingestion workflow', () => {
     expect(bodyA).toMatchObject({
       status: 'accepted',
       correlation_id: expect.any(String),
-      resource: {
-        type: 'shipment',
-        id: expect.any(String),
-        tracking_number: expect.any(String),
-      },
+      resource_id: expect.any(String),
+      tracking_number: expect.any(String),
       workflow_run_id: expect.any(String),
     });
 
@@ -1020,7 +1029,8 @@ describeIfWebhook('Webhook ingestion workflow', () => {
 
       const expectedStatus = Number(basicDefaults?.synchronous_success_status ?? 200);
       expect(response.status).toBe(expectedStatus);
-      expect(body.resource).toMatchObject({
+      expect(body.resource).toBeUndefined();
+      expect(body.planned_resource).toMatchObject({
         type: 'shipment',
         id: expect.any(String),
         tracking_number: expect.any(String),
@@ -1163,14 +1173,14 @@ describeIfWebhook('Webhook ingestion workflow', () => {
     }
     expect(body).toMatchObject({ status: 'accepted_async' });
     expect(typeof body.correlation_id).toBe('string');
-    expect(body?.resource?.type).toBe('shipment');
-    expect(typeof body?.resource?.id).toBe('string');
-    expect(typeof body?.resource?.tracking_number).toBe('string');
+    expect(body?.resource).toBeUndefined();
+    expect(body?.planned_resource?.type).toBe('shipment');
+    expect(typeof body?.planned_resource?.id).toBe('string');
+    expect(typeof body?.planned_resource?.tracking_number).toBe('string');
     expect(typeof body?.workflow_run_id).toBe('string');
     expect(typeof body?.followup_workflow_run_id).toBe('string');
 
-    const plannedId = body?.resource?.id;
-    const plannedTracking = body?.resource?.tracking_number;
+    const plannedTracking = body?.planned_resource?.tracking_number;
 
     const sourceId = await getSourceId(ASYNC_SOURCE_IDENTIFIER);
     const inbox = await waitForInboxRecord(sourceId, payload.event.id);
@@ -1202,6 +1212,8 @@ describeIfWebhook('Webhook ingestion workflow', () => {
     );
     expect(ackDecisionRows).toHaveLength(1);
     expect(ackDecisionRows[0].decision_inputs?.status).toBe(asyncStatus);
+    expect(ackDecisionRows[0].decision_inputs?.body?.resource).toBeUndefined();
+    expect(ackDecisionRows[0].decision_inputs?.body?.planned_resource?.tracking_number).toBe(plannedTracking);
     const processingMs = ackDecisionRows[0].decision_inputs?.processing_ms;
     if (processingMs !== undefined && processingMs !== null) {
       expect(typeof processingMs).toBe('number');

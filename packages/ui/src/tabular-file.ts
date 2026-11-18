@@ -25,6 +25,32 @@ type ExcelWorkbookRuntime = {
   };
 };
 
+type SheetJsWorksheet = unknown;
+
+type SheetJsWorkbook = {
+  SheetNames?: string[];
+  Sheets?: Record<string, SheetJsWorksheet>;
+  Workbook?: {
+    Sheets?: Array<{
+      name?: string;
+      Hidden?: number;
+    }>;
+  };
+};
+
+type SheetJsRuntime = {
+  read: (
+    buffer: ArrayBuffer,
+    options: { type: "array"; raw: false; cellDates: true },
+  ) => SheetJsWorkbook;
+  utils: {
+    sheet_to_json: <T>(
+      sheet: SheetJsWorksheet,
+      options: { header?: 1; defval: string; blankrows?: false; raw?: false },
+    ) => T[];
+  };
+};
+
 export type ParsedTabularFile = {
   format: string;
   fileName: string;
@@ -34,8 +60,7 @@ export type ParsedTabularFile = {
   rows: Array<Record<string, unknown>>;
 };
 
-export const TABULAR_FILE_ACCEPT = ".csv,.xlsx";
-export const LEGACY_XLS_UNSUPPORTED_MESSAGE = "Legacy .xls workbooks are not supported. Upload a CSV or XLSX file.";
+export const TABULAR_FILE_ACCEPT = ".csv,.xls,.xlsx";
 
 function resolveExcelWorkbookRuntime(moduleValue: unknown): ExcelWorkbookRuntime {
   const candidate = (moduleValue as { Workbook?: unknown })?.Workbook
@@ -60,6 +85,68 @@ async function loadExcelWorkbook(arrayBuffer: ArrayBuffer) {
   return workbook;
 }
 
+function resolveSheetJsRuntime(moduleValue: unknown): SheetJsRuntime {
+  const candidate = (moduleValue as { read?: unknown })?.read
+    ? moduleValue
+    : (moduleValue as { default?: unknown })?.default
+      ?? (moduleValue as { "module.exports"?: unknown })?.["module.exports"]
+      ?? {};
+  if (
+    typeof (candidate as { read?: unknown }).read !== "function"
+    || typeof (candidate as { utils?: { sheet_to_json?: unknown } }).utils?.sheet_to_json !== "function"
+  ) {
+    throw new Error("Workbook runtime is unavailable.");
+  }
+  return candidate as SheetJsRuntime;
+}
+
+function detectSheetJsVisibleSheets(workbook: SheetJsWorkbook): string[] {
+  const sheetNames = workbook.SheetNames ?? [];
+  const sheetMetadata = workbook.Workbook?.Sheets ?? [];
+  if (sheetMetadata.length === 0) return sheetNames;
+  return sheetMetadata
+    .filter((sheet) => Number(sheet.Hidden ?? 0) === 0)
+    .map((sheet) => String(sheet.name ?? "").trim())
+    .filter((name) => name.length > 0 && sheetNames.includes(name));
+}
+
+async function parseSheetJsWorkbook(
+  file: File,
+  format: string,
+  preferredSheet?: string | null,
+): Promise<ParsedTabularFile> {
+  const runtime = resolveSheetJsRuntime(await import("xlsx"));
+  const workbook = runtime.read(await file.arrayBuffer(), {
+    type: "array",
+    raw: false,
+    cellDates: true,
+  });
+  const visibleSheets = detectSheetJsVisibleSheets(workbook);
+  const selectedSheet =
+    (preferredSheet && visibleSheets.includes(preferredSheet) ? preferredSheet : null)
+    ?? visibleSheets[0]
+    ?? workbook.SheetNames?.[0]
+    ?? DEFAULT_SHEET_NAME;
+  const sheet = workbook.Sheets?.[selectedSheet];
+  if (!sheet) {
+    throw new Error("The uploaded file did not contain a readable worksheet.");
+  }
+  const matrix = runtime.utils.sheet_to_json<Array<unknown>>(sheet, {
+    header: 1,
+    defval: "",
+    blankrows: false,
+  });
+  const parsed = matrixToTabularData(matrix);
+  return {
+    format,
+    fileName: file.name,
+    workbookSheets: visibleSheets.length > 0 ? visibleSheets : [selectedSheet],
+    selectedSheet,
+    headers: parsed.headers,
+    rows: parsed.rows,
+  };
+}
+
 function toBlobArrayBuffer(buffer: ExcelWorkbookBuffer): ArrayBuffer {
   if (buffer instanceof ArrayBuffer) {
     return buffer;
@@ -74,9 +161,6 @@ export async function parseTabularFile(
   preferredSheet?: string | null,
 ): Promise<ParsedTabularFile> {
   const format = resolveTabularFileExtension(file.name);
-  if (format === "xls") {
-    throw new Error(LEGACY_XLS_UNSUPPORTED_MESSAGE);
-  }
   if (format === "csv") {
     const parsed = matrixToTabularData(parseCsvTextMatrix(await file.text()));
     return {
@@ -88,8 +172,11 @@ export async function parseTabularFile(
       rows: parsed.rows,
     };
   }
+  if (format === "xls") {
+    return parseSheetJsWorkbook(file, format, preferredSheet);
+  }
   if (format !== "xlsx") {
-    throw new Error("Unsupported file format. Upload a CSV or XLSX file.");
+    throw new Error("Unsupported file format. Upload a CSV, XLS, or XLSX file.");
   }
 
   const workbook = await loadExcelWorkbook(await file.arrayBuffer());

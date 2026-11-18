@@ -4,6 +4,7 @@ const VIRTUAL_MAP_WIDTH_PX = 320;
 const VIRTUAL_MAP_HEIGHT_PX = 220;
 const MAP_PADDING_X_PCT = 8;
 const MAP_PADDING_Y_PCT = 10;
+const MIN_COORDINATE_SPAN = 0.00001;
 
 export type RouteStatusTone = "active" | "done" | "issue" | "neutral";
 
@@ -119,8 +120,15 @@ export function buildRouteMapModel(
     if (point.longitude < minLng) minLng = point.longitude;
     if (point.longitude > maxLng) maxLng = point.longitude;
   }
-  const latSpan = Math.max(maxLat - minLat, 0.00001);
-  const lngSpan = Math.max(maxLng - minLng, 0.00001);
+  const rawLatSpan = maxLat - minLat;
+  const rawLngSpan = maxLng - minLng;
+  const latSpan = Math.max(rawLatSpan, MIN_COORDINATE_SPAN);
+  const lngSpan = Math.max(rawLngSpan, MIN_COORDINATE_SPAN);
+  const latOffset = rawLatSpan < MIN_COORDINATE_SPAN ? (MIN_COORDINATE_SPAN - rawLatSpan) / 2 : 0;
+  const lngOffset = rawLngSpan < MIN_COORDINATE_SPAN ? (MIN_COORDINATE_SPAN - rawLngSpan) / 2 : 0;
+  minLat -= latOffset;
+  maxLat += latOffset;
+  minLng -= lngOffset;
 
   const normalized = mappable.map((point) => {
     const xNormalized = (point.longitude - minLng) / lngSpan;

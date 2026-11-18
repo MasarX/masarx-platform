@@ -4,10 +4,53 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SELECT plan(3);
 
--- Seed minimal org + provider for comms_whatsapp outbound_calls targeting.
+-- Seed minimal org + client + sender + provider for comms_whatsapp outbound_calls targeting.
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender context exists.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('cccccccc-0000-0000-0000-000000000001', 'Comms Retry Org', 'comms-retry-org')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    updated_at = now();
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+VALUES (
+  'cccccccc-0000-0000-0000-000000000003',
+  'cccccccc-0000-0000-0000-000000000001',
+  'Comms Retry Client',
+  'comms-retry-client',
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+  'cccccccc-0000-0000-0000-000000000004',
+  'cccccccc-0000-0000-0000-000000000003',
+  'Comms Retry Sender',
+  'Comms Retry Sender',
+  false,
+  true,
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  'cccccccc-0000-0000-0000-000000000001',
+  'pgtap:outbound-comms-failure-attempts-fixture-bootstrap'
+);
 
 INSERT INTO public.providers (id, organization_id, name, provider_type, enabled, metadata)
 VALUES (

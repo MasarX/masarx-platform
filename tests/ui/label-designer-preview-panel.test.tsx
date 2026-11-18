@@ -58,10 +58,10 @@ describe("PreviewPanel", () => {
     expect(btn.textContent).toMatch(/Loading|تحميل/i);
   });
 
-  it("toggles debug JSON view", () => {
+  it("toggles preview details view", () => {
     render(<PreviewPanel {...defaultProps} />);
     expect(screen.queryByTestId("ld-preview-response")).not.toBeInTheDocument();
-    const toggle = screen.getByTestId("ld-toggle-debug");
+    const toggle = screen.getByTestId("ld-toggle-preview-details");
     fireEvent.click(toggle);
     expect(screen.getByTestId("ld-preview-response")).toBeInTheDocument();
   });

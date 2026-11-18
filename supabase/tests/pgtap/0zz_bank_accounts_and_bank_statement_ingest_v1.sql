@@ -17,6 +17,11 @@ DECLARE
   v_org UUID := gen_random_uuid();
   v_org2 UUID := gen_random_uuid();
 
+  v_client UUID := gen_random_uuid();
+  v_client2 UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
+  v_sender2 UUID := gen_random_uuid();
+
   v_user UUID := gen_random_uuid();
   v_user2 UUID := gen_random_uuid();
 
@@ -108,10 +113,26 @@ BEGIN
     'authenticated cannot execute record_bank_statement_event_v1'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES
     (v_org, 'Bank Accounts Org', 'bank-accounts-' || left(v_org::text, 8)),
     (v_org2, 'Bank Accounts Org2', 'bank-accounts-' || left(v_org2::text, 8));
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES
+    (v_client, v_org, 'Bank Accounts Client', 'bank-accounts-client-' || left(v_client::text, 8), 'active'),
+    (v_client2, v_org2, 'Bank Accounts Client2', 'bank-accounts-client-' || left(v_client2::text, 8), 'active');
+
+  INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES
+    (v_sender, v_client, 'Bank Accounts Sender', 'Bank Accounts Sender', TRUE, 'active'),
+    (v_sender2, v_client2, 'Bank Accounts Sender2', 'Bank Accounts Sender2', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:bank-accounts-fixture-bootstrap-org1');
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org2, 'pgtap:bank-accounts-fixture-bootstrap-org2');
 
   INSERT INTO public.users (id, organization_id, email, full_name, access_scope_type)
   VALUES

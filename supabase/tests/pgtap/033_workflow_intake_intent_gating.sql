@@ -37,6 +37,8 @@ BEGIN
 
   v_provider_type := COALESCE(v_provider_type, 'provider');
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug, timezone, locale, billing_status, default_settings)
   VALUES (
     v_org_id,
@@ -47,6 +49,8 @@ BEGIN
     'active',
     '{}'::jsonb
   );
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO public.clients (id, organization_id, name, slug, sla_tier, status, settings_override)
   VALUES (
@@ -69,6 +73,11 @@ BEGIN
     TRUE,
     'active',
     '{}'::jsonb
+  );
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(
+    v_org_id,
+    'pgtap:workflow-intake-intent-gating-fixture-bootstrap'
   );
 
   INSERT INTO public.mapping_configs (
@@ -152,8 +161,8 @@ BEGIN
   );
 
   PERFORM ok(
-    v_result->'body' ? 'resource',
-    'Shipment create intent includes resource in ACK body'
+    v_result->'body' ? 'planned_resource',
+    'Shipment create intent includes planned_resource in async ACK body'
   );
 
   PERFORM public.upsert_settings_value_v1(
@@ -183,8 +192,9 @@ BEGIN
   );
 
   PERFORM ok(
-    NOT (v_result->'body' ? 'resource'),
-    'Non-creation intent omits resource from ACK body'
+    NOT (v_result->'body' ? 'resource')
+      AND NOT (v_result->'body' ? 'planned_resource'),
+    'Non-creation intent omits resource metadata from ACK body'
   );
 END;
 $$;

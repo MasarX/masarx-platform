@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(26);
+SELECT plan(70);
 
 -- Ensure time partitions exist for decision_log/settings_resolution_log inserts.
 SELECT public.create_next_partitions();
@@ -19,13 +19,67 @@ SELECT is(
   'redact_sensitive_headers redacts x-webhook-token'
 );
 
+SELECT ok(
+  NOT public.api_gateway_sanitize_outbound_headers_v1(
+    '{"apikey":"anon","x-api-key":"client","x-client-info":"console","idempotency-key":"idem","x-idempotency-key":"xidem","x-webhook-token":"secret","company-id":"362","x-correlation-id":"corr","content-type":"application/json"}'::jsonb
+  ) ?| ARRAY['apikey','x-api-key','x-client-info','idempotency-key','x-idempotency-key','x-webhook-token'],
+  'api_gateway_sanitize_outbound_headers_v1 strips gateway/runtime headers'
+);
+
+SELECT ok(
+  NOT public.api_gateway_sanitize_outbound_headers_v1(
+    '{"origin":"http://127.0.0.1:5175","referer":"http://127.0.0.1:5175/","sec-ch-ua":"Chromium","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"Windows","accept":"*/*","accept-language":"en-US","company-id":"362","x-correlation-id":"corr","content-type":"application/json"}'::jsonb
+  ) ?| ARRAY['origin','referer','sec-ch-ua','sec-ch-ua-mobile','sec-ch-ua-platform','accept','accept-language'],
+  'api_gateway_sanitize_outbound_headers_v1 strips browser-origin headers from Console tester calls'
+);
+
+SELECT is(
+  public.api_gateway_sanitize_outbound_headers_v1(
+    '{"apikey":"anon","company-id":"362","x-correlation-id":"corr","content-type":"application/json"}'::jsonb
+  )->>'company-id',
+  '362',
+  'api_gateway_sanitize_outbound_headers_v1 preserves provider company-id'
+);
+
+SELECT ok(
+  NOT public.api_gateway_sanitize_outbound_headers_v1(
+    '{"apikey":"anon","company-id":"362","x-correlation-id":"corr","content-type":"application/json"}'::jsonb
+  ) ? 'x-correlation-id',
+  'api_gateway_sanitize_outbound_headers_v1 strips gateway correlation header before provider dispatch'
+);
+
+SELECT ok(
+  NOT public.api_gateway_sanitize_outbound_headers_v1(
+    '{"baggage":"sentry-environment=production","sentry-trace":"trace","traceparent":"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01","content-type":"application/json"}'::jsonb
+  ) ?| ARRAY['baggage','sentry-trace'],
+  'api_gateway_sanitize_outbound_headers_v1 strips Sentry propagation headers'
+);
+
+SELECT ok(
+  NOT public.api_gateway_sanitize_outbound_headers_v1(
+    '{"baggage":"sentry-environment=production","sentry-trace":"trace","traceparent":"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01","content-type":"application/json"}'::jsonb
+  ) ? 'traceparent',
+  'api_gateway_sanitize_outbound_headers_v1 strips traceparent before provider dispatch'
+);
+
+SELECT ok(
+  NOT public.api_gateway_sanitize_outbound_headers_v1(
+    '{"x-masarx-replay-of":"req-api-gateway-original","company-id":"362","content-type":"application/json"}'::jsonb
+  ) ? 'x-masarx-replay-of',
+  'api_gateway_sanitize_outbound_headers_v1 strips internal replay lineage before provider dispatch'
+);
+
 -- ----------------------------------------------------------------------------
 -- Setup minimal entities for API gateway intake
 -- ----------------------------------------------------------------------------
 
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO organizations (id, name, slug)
 VALUES ('aaaa0000-0000-0000-0000-000000000049', 'API Gateway Org', 'pgtap-api-gateway-org-049')
 ON CONFLICT (id) DO NOTHING;
+
+SELECT set_config('app.organization_onboarding_source', '', true);
 
 INSERT INTO clients (id, organization_id, name, slug)
 VALUES (
@@ -46,6 +100,11 @@ VALUES (
   'active'
 )
 ON CONFLICT (id) DO NOTHING;
+
+SELECT bootstrap_tenant_onboarding_v1(
+  'aaaa0000-0000-0000-0000-000000000049',
+  'pgtap:api-gateway-core-fixture-bootstrap'
+);
 
 INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
 VALUES (
@@ -597,6 +656,220 @@ SELECT set_config('app.workflow_run_step_id', 'dddd0490-0000-0000-0000-000000000
 SELECT set_config('platform.workflow_engine', '1', true);
 SELECT set_config('platform.workflow_run_step_id', 'dddd0490-0000-0000-0000-000000000049', true);
 
+INSERT INTO webhook_sources (
+  id,
+  organization_id,
+  source_identifier,
+  name,
+  provider_type,
+  auth_token,
+  mapping_config_id,
+  rate_limit_per_hour,
+  enabled,
+  sender_id
+)
+VALUES (
+  'eeee0000-0000-0000-0000-000000000052',
+  'aaaa0000-0000-0000-0000-000000000049',
+  'pgtap-api-gateway-source-052',
+  'API Gateway Source 052 Missing Sender',
+  'api_gateway',
+  'token-api-gateway-052',
+  'dddd0000-0000-0000-0000-000000000049',
+  1000,
+  TRUE,
+  NULL
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO api_routes (
+  id,
+  pack_id,
+  route_name,
+  enabled,
+  method,
+  path_template,
+  scope_type,
+  scope_id,
+  provider_id,
+  upstream_method,
+  upstream_path_template,
+  policy
+)
+VALUES (
+  '55552000-0000-0000-0000-000000000049',
+  '22220000-0000-0000-0000-000000000049',
+  'create_shipment_by_email_missing_sender_guard',
+  TRUE,
+  'POST',
+  '/api/ship/request/by-email',
+  'source',
+  'eeee0000-0000-0000-0000-000000000052',
+  'ffff0000-0000-0000-0000-000000000049',
+  'POST',
+  '/api/ship/request/by-email',
+  jsonb_build_object(
+    'delivery', jsonb_build_object('mode', 'accepted_async', 'status_code', 202),
+    'workflow', jsonb_build_object(
+      'enabled', TRUE,
+      'template_name', 'pgtap_api_gateway_core',
+      'intent', 'shipment.create'
+    ),
+    'provider_account', jsonb_build_object('required', FALSE)
+  )
+)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TEMP TABLE tmp_api_gateway_missing_sender AS
+SELECT public.workflow_intake_api_gateway_v1(
+  'token-api-gateway-052',
+  'POST',
+  '/api/ship/request/by-email',
+  '',
+  jsonb_build_object('content-type', 'application/json'),
+  jsonb_build_object(
+    'pkg', jsonb_build_object('receiverName', 'QA Receiver 052', 'receiverPhone', '+12025550123')
+  )
+) AS result;
+
+SELECT is(
+  (SELECT result->>'action' FROM tmp_api_gateway_missing_sender),
+  'error',
+  'workflow_intake_api_gateway_v1 rejects shipment-create source missing sender/client'
+);
+
+SELECT is(
+  (SELECT result->'body'->>'error' FROM tmp_api_gateway_missing_sender),
+  'api_gateway_source_missing_sender_client',
+  'workflow_intake_api_gateway_v1 returns api_gateway_source_missing_sender_client'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM public.api_gateway_requests
+     WHERE source_id = 'eeee0000-0000-0000-0000-000000000052'
+       AND id::text = (SELECT result->'body'->>'api_gateway_request_id' FROM tmp_api_gateway_missing_sender)
+       AND outbound_call_id IS NULL
+       AND workflow_run_id IS NULL
+  ),
+  'missing sender/client guard persists a redacted request row before rejecting'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM public.outbound_calls oc
+     WHERE oc.context->>'source_id' = 'eeee0000-0000-0000-0000-000000000052'
+  ),
+  'missing sender/client guard rejects before outbound enqueue'
+);
+
+INSERT INTO webhook_sources (
+  id,
+  organization_id,
+  source_identifier,
+  name,
+  provider_type,
+  auth_token,
+  mapping_config_id,
+  rate_limit_per_hour,
+  enabled,
+  sender_id
+)
+VALUES (
+  'eeee0000-0000-0000-0000-000000000053',
+  'aaaa0000-0000-0000-0000-000000000049',
+  'pgtap-api-gateway-source-053',
+  'API Gateway Source 053 Missing Sender Postprocess Mode',
+  'api_gateway',
+  'token-api-gateway-053',
+  'dddd0000-0000-0000-0000-000000000049',
+  1000,
+  TRUE,
+  NULL
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO api_routes (
+  id,
+  pack_id,
+  route_name,
+  enabled,
+  method,
+  path_template,
+  scope_type,
+  scope_id,
+  provider_id,
+  upstream_method,
+  upstream_path_template,
+  policy
+)
+VALUES (
+  '55553000-0000-0000-0000-000000000049',
+  '22220000-0000-0000-0000-000000000049',
+  'create_shipment_by_email_missing_sender_postprocess_mode_guard',
+  TRUE,
+  'POST',
+  '/api/ship/request/by-email',
+  'source',
+  'eeee0000-0000-0000-0000-000000000053',
+  'ffff0000-0000-0000-0000-000000000049',
+  'POST',
+  '/api/ship/request/by-email',
+  jsonb_build_object(
+    'delivery', jsonb_build_object('mode', 'accepted_async', 'status_code', 202),
+    'postprocess', jsonb_build_object('enabled', TRUE, 'mode', 'shipment_create_v1'),
+    'provider_account', jsonb_build_object('required', FALSE)
+  )
+)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TEMP TABLE tmp_api_gateway_missing_sender_postprocess_mode AS
+SELECT public.workflow_intake_api_gateway_v1(
+  'token-api-gateway-053',
+  'POST',
+  '/api/ship/request/by-email',
+  '',
+  jsonb_build_object('content-type', 'application/json'),
+  jsonb_build_object(
+    'pkg', jsonb_build_object('receiverName', 'QA Receiver 053', 'receiverPhone', '0500000053')
+  )
+) AS result;
+
+SELECT is(
+  (SELECT result->>'action' FROM tmp_api_gateway_missing_sender_postprocess_mode),
+  'error',
+  'workflow_intake_api_gateway_v1 rejects postprocess-mode shipment-create source missing sender/client'
+);
+
+SELECT is(
+  (SELECT result->'body'->>'error' FROM tmp_api_gateway_missing_sender_postprocess_mode),
+  'api_gateway_source_missing_sender_client',
+  'postprocess-mode shipment-create guard returns api_gateway_source_missing_sender_client'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM public.api_gateway_requests
+     WHERE source_id = 'eeee0000-0000-0000-0000-000000000053'
+       AND id::text = (SELECT result->'body'->>'api_gateway_request_id' FROM tmp_api_gateway_missing_sender_postprocess_mode)
+       AND outbound_call_id IS NULL
+       AND workflow_run_id IS NULL
+  ),
+  'postprocess-mode missing sender/client guard persists a redacted request row before rejecting'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM public.outbound_calls oc
+     WHERE oc.context->>'source_id' = 'eeee0000-0000-0000-0000-000000000053'
+  ),
+  'postprocess-mode missing sender/client guard rejects before outbound enqueue'
+);
+
 CREATE TEMP TABLE tmp_api_gateway_intake AS
 SELECT public.workflow_intake_api_gateway_v1(
   'token-api-gateway-049',
@@ -606,8 +879,21 @@ SELECT public.workflow_intake_api_gateway_v1(
   jsonb_build_object(
     'content-type', 'application/json',
     'authorization', 'Bearer client-token',
+    'apikey', 'supabase-anon-should-not-forward',
+    'x-api-key', 'browser-api-key-should-not-forward',
+    'x-client-info', 'console-v2-direct-powershell',
+    'idempotency-key', 'gateway-idempotency-should-not-forward',
+    'x-idempotency-key', 'gateway-x-idempotency-should-not-forward',
     'x-correlation-id', '99990000-0000-0000-0000-000000000049',
-    'x-webhook-token', 'token-api-gateway-049'
+    'x-webhook-token', 'token-api-gateway-049',
+    'accept', '*/*',
+    'accept-language', 'en-US',
+    'origin', 'http://127.0.0.1:5175',
+    'referer', 'http://127.0.0.1:5175/insights/api-gateway',
+    'sec-ch-ua', '"Chromium";v="136", "Not A Brand";v="99"',
+    'sec-ch-ua-mobile', '?0',
+    'sec-ch-ua-platform', '"Windows"',
+    'x-forwarded-path', '/functions/v1/api-gateway/t/token-api-gateway-049/api/ship/request/by-email'
   ),
   jsonb_build_object(
     'email', 'client@example.test',
@@ -694,6 +980,126 @@ SELECT ok(
   'api_gateway_requests does not persist x-webhook-token'
 );
 
+SELECT ok(
+  (
+    SELECT request_headers->>'x-forwarded-path'
+    FROM public.api_gateway_requests
+    WHERE id = (SELECT (result->>'api_gateway_request_id')::uuid FROM tmp_api_gateway_intake)
+  ) NOT LIKE '%token-api-gateway-049%',
+  'api_gateway_requests redacts path-token material from forwarded path headers'
+);
+
+SELECT ok(
+  (
+    SELECT COALESCE(headers->>'x-forwarded-path', '')
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake)
+  ) NOT LIKE '%token-api-gateway-049%',
+  'outbound_calls redacts path-token material from forwarded path headers'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM public.outbound_calls oc,
+           jsonb_object_keys(COALESCE(oc.headers, '{}'::jsonb)) AS header_name
+     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake)
+       AND lower(header_name) IN (
+         'host',
+         'connection',
+         'content-length',
+         'accept',
+         'accept-encoding',
+         'accept-language',
+         'origin',
+         'referer',
+         'sec-ch-ua',
+         'sec-ch-ua-mobile',
+         'sec-ch-ua-platform',
+         'sec-fetch-mode',
+         'x-forwarded-for',
+         'x-forwarded-host',
+         'x-forwarded-path',
+         'x-forwarded-port',
+         'x-forwarded-prefix',
+         'x-forwarded-proto',
+         'x-real-ip',
+         'apikey',
+         'x-api-key',
+         'x-client-info',
+         'idempotency-key',
+         'x-idempotency-key'
+       )
+  ),
+  'outbound_calls strips gateway/runtime, hop-by-hop, browser-only, and edge-forwarded headers before provider dispatch'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM jsonb_object_keys(COALESCE(
+        public.get_job_call_spec((SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake))->'headers',
+        '{}'::jsonb
+      )) AS header_name
+     WHERE lower(header_name) IN (
+       'origin',
+       'referer',
+       'sec-ch-ua',
+       'sec-ch-ua-mobile',
+       'sec-ch-ua-platform',
+       'accept',
+       'accept-language'
+     )
+  ),
+  'get_job_call_spec returns provider-safe headers without browser-origin request headers'
+);
+
+SELECT ok(
+  (
+    SELECT COALESCE(public.get_job_call_spec(oc.id)->'headers'->>'x-forwarded-path', '')
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake)
+  ) NOT LIKE '%token-api-gateway-049%',
+  'get_job_call_spec does not return forwarded path-token material'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM jsonb_object_keys(COALESCE(
+        public.get_job_call_spec((SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake))->'headers',
+        '{}'::jsonb
+      )) AS header_name
+     WHERE lower(header_name) IN (
+       'host',
+       'connection',
+       'content-length',
+       'accept',
+       'accept-encoding',
+       'accept-language',
+       'origin',
+       'referer',
+       'sec-ch-ua',
+       'sec-ch-ua-mobile',
+       'sec-ch-ua-platform',
+       'sec-fetch-mode',
+       'x-forwarded-for',
+       'x-forwarded-host',
+       'x-forwarded-path',
+       'x-forwarded-port',
+       'x-forwarded-prefix',
+       'x-forwarded-proto',
+       'x-real-ip',
+       'apikey',
+       'x-api-key',
+       'x-client-info',
+       'idempotency-key',
+       'x-idempotency-key'
+     )
+  ),
+  'get_job_call_spec returns a provider-safe header set without gateway/runtime headers'
+);
+
 SELECT is(
   (
     SELECT headers->>'company-id'
@@ -702,6 +1108,29 @@ SELECT is(
   ),
   '362',
   'workflow_intake_api_gateway_v1 applies policy header overrides (company-id)'
+);
+
+SELECT ok(
+  to_regprocedure('api.resolve_effective_outbound_egress_policy_v1(uuid)') IS NOT NULL,
+  'api schema exposes resolve_effective_outbound_egress_policy_v1 for edge api-caller'
+);
+
+SELECT ok(
+  (
+    api.resolve_effective_outbound_egress_policy_v1(
+      (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake)
+    ) #> '{policy,header_allowlist}'
+  ) ? 'company-id',
+  'effective outbound egress policy allows provider company-id header'
+);
+
+SELECT ok(
+  (
+    api.resolve_effective_outbound_egress_policy_v1(
+      (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake)
+    ) #> '{policy,header_allowlist}'
+  ) ? 'traceparent',
+  'effective outbound egress policy allows trace propagation header'
 );
 
 SELECT is(
@@ -753,6 +1182,216 @@ SELECT is(
   'https://example.test/api/ship/request/by-email?a=1&b=2',
   'outbound URL composed from provider base_url + path + query'
 );
+
+UPDATE public.provider_auth_configs
+   SET expires_at = now() - INTERVAL '1 minute'
+ WHERE id = '11110000-0000-0000-0000-000000000049'::uuid;
+
+SELECT is(
+  public.get_provider_auth_credentials('11110000-0000-0000-0000-000000000049'::uuid),
+  NULL::jsonb,
+  'expired provider_auth_configs do not resolve dispatch credentials'
+);
+
+SELECT throws_ok(
+  format(
+    'SELECT public.get_job_call_spec(%L::uuid)',
+    (SELECT result->>'outbound_call_id' FROM tmp_api_gateway_intake)
+  ),
+  'get_job_call_spec: credentials_missing (auth_config_id=11110000-0000-0000-0000-000000000049 job_id=' || (SELECT result->>'outbound_call_id' FROM tmp_api_gateway_intake) || ')',
+  'API Gateway dispatch fails closed when the bound provider credential is expired'
+);
+
+CREATE TEMP TABLE tmp_api_gateway_intake_expired_provider_credential AS
+SELECT public.workflow_intake_api_gateway_v1(
+  'token-api-gateway-049',
+  'POST',
+  '/api/ship/request/by-email',
+  '',
+  jsonb_build_object('content-type', 'application/json'),
+  jsonb_build_object(
+    'pkg', jsonb_build_object('receiverName', 'Expired Credential Receiver', 'receiverPhone', '0500000149'),
+    'destinationAddress', jsonb_build_object('addressLine1', 'Expired credential test', 'city', 'Riyadh')
+  )
+) AS result;
+
+SELECT is(
+  (SELECT result->>'action' FROM tmp_api_gateway_intake_expired_provider_credential),
+  'error',
+  'workflow_intake_api_gateway_v1 fails closed before provider dispatch when bound provider credential is expired'
+);
+
+SELECT is(
+  (SELECT (result->>'status')::int FROM tmp_api_gateway_intake_expired_provider_credential),
+  424,
+  'workflow_intake_api_gateway_v1 returns 424 for unavailable provider credential'
+);
+
+SELECT is(
+  (SELECT result->'body'->>'error' FROM tmp_api_gateway_intake_expired_provider_credential),
+  'provider_auth_config_unavailable',
+  'workflow_intake_api_gateway_v1 returns provider_auth_config_unavailable'
+);
+
+SELECT is(
+  (
+    SELECT oc.status
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_expired_provider_credential)
+  ),
+  'permanently_failed',
+  'unavailable provider credential creates terminal outbound readback, not pending provider dispatch'
+);
+
+SELECT is(
+  (
+    SELECT oc.response_status_code
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_expired_provider_credential)
+  ),
+  424,
+  'unavailable provider credential outbound readback records 424'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.decision_log dl
+    WHERE dl.resource_type = 'api_gateway_request'
+      AND dl.resource_id = (SELECT (result->>'api_gateway_request_id')::uuid FROM tmp_api_gateway_intake_expired_provider_credential)
+      AND dl.decision_point = 'api_gateway_provider_account_credential_available'
+      AND dl.decision_outcome = 'rejected'
+  ),
+  'unavailable provider credential writes canonical credential-availability decision'
+);
+
+UPDATE public.provider_auth_configs
+   SET expires_at = now() + INTERVAL '30 days'
+ WHERE id = '11110000-0000-0000-0000-000000000049'::uuid;
+
+INSERT INTO public.provider_auth_configs (id, provider_id, auth_type, credentials, expires_at)
+VALUES (
+  '11110000-0000-0000-0000-000000000051'::uuid,
+  'ffff0000-0000-0000-0000-000000000049'::uuid,
+  'basic_auth',
+  jsonb_build_object('revoked', true, 'username', 'revoked@example.test', 'password', 'do-not-use'),
+  now() + INTERVAL '30 days'
+)
+ON CONFLICT (id) DO UPDATE
+   SET provider_id = EXCLUDED.provider_id,
+       auth_type = EXCLUDED.auth_type,
+       credentials = EXCLUDED.credentials,
+       credentials_vault_id = NULL,
+       expires_at = EXCLUDED.expires_at;
+
+SELECT is(
+  public.get_provider_auth_credentials('11110000-0000-0000-0000-000000000051'::uuid),
+  NULL::jsonb,
+  'revoked provider_auth_configs tombstones do not resolve dispatch credentials'
+);
+
+UPDATE public.settings_versions_p0
+   SET value = jsonb_build_object(
+       'auth_config_id', '11110000-0000-0000-0000-000000000051',
+       'company_id', '362',
+       'enabled', TRUE
+     )
+ WHERE id = '77770000-0000-0000-0000-000000000049'
+   AND scope_hash = 'eeee0000-0000-0000-0000-000000000049';
+
+UPDATE public.settings
+   SET cached_value = jsonb_build_object(
+       'auth_config_id', '11110000-0000-0000-0000-000000000051',
+       'company_id', '362',
+       'enabled', TRUE
+     ),
+       last_updated = now()
+ WHERE category = 'logestechs_v2_account'
+   AND scope_type = 'source'
+   AND scope_hash = 'eeee0000-0000-0000-0000-000000000049';
+
+CREATE TEMP TABLE tmp_api_gateway_intake_revoked_provider_credential AS
+SELECT public.workflow_intake_api_gateway_v1(
+  'token-api-gateway-049',
+  'POST',
+  '/api/ship/request/by-email',
+  '',
+  jsonb_build_object('content-type', 'application/json'),
+  jsonb_build_object(
+    'pkg', jsonb_build_object('receiverName', 'Revoked Credential Receiver', 'receiverPhone', '0500000249'),
+    'destinationAddress', jsonb_build_object('addressLine1', 'Revoked credential test', 'city', 'Riyadh')
+  )
+) AS result;
+
+SELECT is(
+  (SELECT result->>'action' FROM tmp_api_gateway_intake_revoked_provider_credential),
+  'error',
+  'workflow_intake_api_gateway_v1 fails closed before provider dispatch when bound provider credential is revoked'
+);
+
+SELECT is(
+  (SELECT (result->>'status')::int FROM tmp_api_gateway_intake_revoked_provider_credential),
+  424,
+  'workflow_intake_api_gateway_v1 returns 424 for revoked provider credential'
+);
+
+SELECT is(
+  (SELECT result->'body'->>'error' FROM tmp_api_gateway_intake_revoked_provider_credential),
+  'provider_auth_config_unavailable',
+  'workflow_intake_api_gateway_v1 returns provider_auth_config_unavailable for revoked credential'
+);
+
+SELECT is(
+  (
+    SELECT oc.status
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_revoked_provider_credential)
+  ),
+  'permanently_failed',
+  'revoked provider credential creates terminal outbound readback, not pending provider dispatch'
+);
+
+SELECT is(
+  (
+    SELECT oc.response_status_code
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_revoked_provider_credential)
+  ),
+  424,
+  'revoked provider credential outbound readback records 424'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.decision_log dl
+    WHERE dl.resource_type = 'api_gateway_request'
+      AND dl.resource_id = (SELECT (result->>'api_gateway_request_id')::uuid FROM tmp_api_gateway_intake_revoked_provider_credential)
+      AND dl.decision_point = 'api_gateway_provider_account_credential_available'
+      AND dl.decision_outcome = 'rejected'
+  ),
+  'revoked provider credential writes canonical credential-availability decision'
+);
+
+UPDATE public.settings_versions_p0
+   SET value = jsonb_build_object(
+       'auth_config_id', '11110000-0000-0000-0000-000000000049',
+       'company_id', '362',
+       'enabled', TRUE
+     )
+ WHERE id = '77770000-0000-0000-0000-000000000049'
+   AND scope_hash = 'eeee0000-0000-0000-0000-000000000049';
+
+UPDATE public.settings
+   SET cached_value = jsonb_build_object(
+       'auth_config_id', '11110000-0000-0000-0000-000000000049',
+       'company_id', '362',
+       'enabled', TRUE
+     ),
+       last_updated = now()
+ WHERE category = 'logestechs_v2_account'
+   AND scope_type = 'source'
+   AND scope_hash = 'eeee0000-0000-0000-0000-000000000049';
 
 -- Query string should also work when provided without a leading '?' (no unintended trimming).
 CREATE TEMP TABLE tmp_api_gateway_intake_query_no_qmark AS
@@ -925,6 +1564,234 @@ SELECT is(
   (SELECT result->'body'->>'error' FROM tmp_api_gateway_intake_ambiguous),
   'provider_auth_config_ambiguous',
   'workflow_intake_api_gateway_v1 returns provider_auth_config_ambiguous'
+);
+
+-- ----------------------------------------------------------------------------
+-- Merged provider-account safety: Console V2 may bind provider credentials at
+-- tenant scope while sender/source settings carry operational account fields
+-- such as company_id. Dispatch must use the merged row-driven value.
+-- ----------------------------------------------------------------------------
+
+DELETE FROM public.settings
+ WHERE category = 'logestechs_v2_account'
+   AND scope_type = 'tenant'
+   AND scope_hash = 'aaaa0000-0000-0000-0000-000000000049';
+
+DELETE FROM public.settings_versions_p0
+ WHERE category = 'logestechs_v2_account'
+   AND scope_type = 'tenant'
+   AND scope_hash = 'aaaa0000-0000-0000-0000-000000000049';
+
+DELETE FROM public.settings
+ WHERE category = 'logestechs_v2_account'
+   AND scope_type = 'sender'
+   AND scope_hash = 'cccc0000-0000-0000-0000-000000000049';
+
+DELETE FROM public.settings_versions_p0
+ WHERE category = 'logestechs_v2_account'
+   AND scope_type = 'sender'
+   AND scope_hash = 'cccc0000-0000-0000-0000-000000000049';
+
+INSERT INTO webhook_sources (
+  id,
+  organization_id,
+  source_identifier,
+  name,
+  provider_type,
+  auth_token,
+  mapping_config_id,
+  rate_limit_per_hour,
+  enabled,
+  sender_id
+)
+VALUES (
+  'eeee0000-0000-0000-0000-000000000051',
+  'aaaa0000-0000-0000-0000-000000000049',
+  'pgtap-api-gateway-source-051',
+  'API Gateway Source 051',
+  'api_gateway',
+  'token-api-gateway-051',
+  'dddd0000-0000-0000-0000-000000000049',
+  1000,
+  TRUE,
+  'cccc0000-0000-0000-0000-000000000049'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO settings_versions_p0 (
+  id,
+  category,
+  scope_type,
+  scope_id,
+  scope_hash,
+  version,
+  value,
+  schema_version,
+  change_reason,
+  approved_at,
+  effective_from
+)
+VALUES (
+  '77770000-0000-0000-0000-000000000051',
+  'logestechs_v2_account',
+  'tenant',
+  'aaaa0000-0000-0000-0000-000000000049',
+  'aaaa0000-0000-0000-0000-000000000049',
+  1,
+  jsonb_build_object(
+    'auth_config_id', '11110000-0000-0000-0000-000000000049',
+    'enabled', TRUE
+  ),
+  1,
+  'pgTAP seed tenant auth_config_id for merged provider account',
+  now(),
+  now()
+)
+ON CONFLICT (id, scope_hash) DO NOTHING;
+
+INSERT INTO settings (
+  category,
+  scope_type,
+  scope_id,
+  scope_hash,
+  settings_version_id,
+  cached_value,
+  last_updated
+)
+VALUES (
+  'logestechs_v2_account',
+  'tenant',
+  'aaaa0000-0000-0000-0000-000000000049',
+  'aaaa0000-0000-0000-0000-000000000049',
+  '77770000-0000-0000-0000-000000000051',
+  jsonb_build_object(
+    'auth_config_id', '11110000-0000-0000-0000-000000000049',
+    'enabled', TRUE
+  ),
+  now()
+)
+ON CONFLICT (category, scope_type, scope_hash) DO UPDATE
+SET settings_version_id = EXCLUDED.settings_version_id,
+    cached_value = EXCLUDED.cached_value,
+    last_updated = EXCLUDED.last_updated;
+
+INSERT INTO settings_versions_p0 (
+  id,
+  category,
+  scope_type,
+  scope_id,
+  scope_hash,
+  version,
+  value,
+  schema_version,
+  change_reason,
+  approved_at,
+  effective_from
+)
+VALUES (
+  '77771000-0000-0000-0000-000000000051',
+  'logestechs_v2_account',
+  'sender',
+  'cccc0000-0000-0000-0000-000000000049',
+  'cccc0000-0000-0000-0000-000000000049',
+  1,
+  jsonb_build_object(
+    'company_id', '362',
+    'enabled', TRUE
+  ),
+  1,
+  'pgTAP seed sender company_id for merged provider account',
+  now(),
+  now()
+)
+ON CONFLICT (id, scope_hash) DO NOTHING;
+
+INSERT INTO settings (
+  category,
+  scope_type,
+  scope_id,
+  scope_hash,
+  settings_version_id,
+  cached_value,
+  last_updated
+)
+VALUES (
+  'logestechs_v2_account',
+  'sender',
+  'cccc0000-0000-0000-0000-000000000049',
+  'cccc0000-0000-0000-0000-000000000049',
+  '77771000-0000-0000-0000-000000000051',
+  jsonb_build_object(
+    'company_id', '362',
+    'enabled', TRUE
+  ),
+  now()
+)
+ON CONFLICT (category, scope_type, scope_hash) DO UPDATE
+SET settings_version_id = EXCLUDED.settings_version_id,
+    cached_value = EXCLUDED.cached_value,
+    last_updated = EXCLUDED.last_updated;
+
+CREATE TEMP TABLE tmp_api_gateway_intake_merged_provider_account AS
+SELECT public.workflow_intake_api_gateway_v1(
+  'token-api-gateway-051',
+  'POST',
+  '/api/ship/request/by-email',
+  '',
+  jsonb_build_object('content-type', 'application/json'),
+  jsonb_build_object(
+    'pkg', jsonb_build_object(
+      'receiverName', 'QA Receiver 051',
+      'receiverPhone', '0500000051'
+    ),
+    'destinationAddress', jsonb_build_object('addressLine1', 'Test', 'city', 'Riyadh')
+  )
+) AS result;
+
+SELECT is(
+  (SELECT result->>'action' FROM tmp_api_gateway_intake_merged_provider_account),
+  'proxy',
+  'workflow_intake_api_gateway_v1 accepts merged tenant-auth plus sender-company provider account'
+);
+
+SELECT is(
+  (
+    SELECT headers->>'company-id'
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_merged_provider_account)
+  ),
+  '362',
+  'merged provider account keeps sender-scoped company-id for dispatch'
+);
+
+SELECT is(
+  (
+    SELECT context->'auth'->>'auth_config_id'
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_merged_provider_account)
+  ),
+  '11110000-0000-0000-0000-000000000049',
+  'merged provider account inherits tenant-scoped auth_config_id for dispatch'
+);
+
+SELECT is(
+  (
+    public.get_job_call_spec(
+      (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_merged_provider_account)
+    )->'body'->>'email'
+  ),
+  'user049@example.test',
+  'dispatch-time auth injection resolves credentials from inherited tenant auth_config_id'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+    FROM public.outbound_calls oc
+    WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_merged_provider_account)
+      AND (oc.body ? 'email' OR oc.body ? 'password')
+  ),
+  'merged provider-account outbound payload still strips credential fields at rest'
 );
 
 SELECT * FROM finish();

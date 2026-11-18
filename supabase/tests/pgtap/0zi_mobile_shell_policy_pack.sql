@@ -212,8 +212,15 @@ SELECT ok(
   'navigation_policy global default exists'
 );
 SELECT ok(
-  EXISTS (SELECT 1 FROM public.settings_versions WHERE category = 'map_policy' AND scope_type = 'global' AND scope_id IS NULL AND version = 1),
-  'map_policy global default exists'
+  EXISTS (
+    SELECT 1
+    FROM public.settings_versions
+    WHERE category = 'map_policy'
+      AND scope_type = 'global'
+      AND scope_id IS NULL
+      AND effective_until IS NULL
+  ),
+  'map_policy active global default exists'
 );
 SELECT ok(
   EXISTS (SELECT 1 FROM public.settings_versions WHERE category = 'communication_policy' AND scope_type = 'global' AND scope_id IS NULL),

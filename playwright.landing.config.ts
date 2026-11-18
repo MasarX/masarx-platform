@@ -32,6 +32,8 @@ const baseUrl =
   || `http://${localLoopbackHost}:${port}`;
 const landingContactEndpoint =
   process.env.LANDING_CONTACT_ENDPOINT?.trim() || "/__landing-contact";
+const landingTenantSignupEndpoint =
+  process.env.LANDING_TENANT_SIGNUP_ENDPOINT?.trim() || "/__tenant-signup";
 
 function trimTrailingSlash(value: string) {
   return value.length > 1 ? value.replace(/\/+$/g, "") : value;
@@ -77,6 +79,7 @@ export default defineConfig({
           `LANDING_SITE_URL=${resolvedBaseUrl} ` +
           `LANDING_APP_URL=https://app.example.com/login ` +
           `LANDING_CONTACT_ENDPOINT=${landingContactEndpoint} ` +
+          `LANDING_TENANT_SIGNUP_ENDPOINT=${landingTenantSignupEndpoint} ` +
           `LANDING_TURNSTILE_SITE_KEY= ` +
           `npm run dev:landing`,
         url: resolvedBaseUrl,

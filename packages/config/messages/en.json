@@ -39,7 +39,7 @@
         "details": "Details: {details}",
         "contextHints": {
           "profile": "Ensure the signed-in user has a public.users profile row and an access scope.",
-          "registry": "Confirm UI registry/navigation settings are seeded and readable.",
+          "registry": "Confirm UI registry/navigation settings are available and readable.",
           "network": "Confirm the Supabase URL/anon key are set for this workspace and the project is reachable."
         }
       }
@@ -243,14 +243,14 @@
         "openRun": "Open run",
         "elapsed": "Elapsed: {elapsed}ms",
         "target": "Target: <= {target}ms",
-        "runId": "Run: {workflowRunId}",
+        "runId": "Activity reference: {workflowRunId}",
         "percent": "{percent}%",
         "progressLive": "Updating live",
         "actions": {
           "hide": "Hide",
           "show": "Show",
           "retry": "Try again",
-          "technicalDetails": "Technical details"
+          "technicalDetails": "Support details"
         },
         "states": {
           "preparing": "Preparing your download",
@@ -265,16 +265,23 @@
           "completed": "Download started"
         },
         "diagnostics": {
-          "title": "Technical details",
-          "runId": "Workflow run: {workflowRunId}",
+          "title": "Support details",
+          "runId": "Activity reference: {workflowRunId}",
           "target": "Download target: <= {target}ms",
           "targetHit": "Target hit at {elapsed}ms.",
           "targetMiss": "Target miss at {elapsed}ms.",
-          "timingSource": "Timing source: {value}",
-          "outputSource": "Output source: {value}",
+          "timingSource": "Timing details: {value}",
+          "outputSource": "File source: {value}",
           "artifactPersisted": "Artifact persisted: {value}",
           "jobCompletionPending": "Job completion pending: {value}",
-          "viewRun": "View run",
+          "viewRun": "View activity",
+          "notAvailable": "Not available",
+          "sources": {
+            "workflowOutput": "Saved workflow output",
+            "stageTiming": "Recorded stage timing",
+            "artifact": "Saved file record",
+            "recorded": "Recorded support detail"
+          },
           "yes": "Yes",
           "no": "No"
         },
@@ -733,7 +740,7 @@
           "settingsResolution": "Settings resolution",
           "view": "View",
           "requiredCapability": "Required capability",
-          "rawError": "Raw error"
+          "rawError": "Support details"
         }
       },
       "sort": {
@@ -864,7 +871,7 @@
         "testRun": "Run test",
         "testRunModal": {
           "title": "Run workflow test",
-          "description": "Start a workflow run with a custom payload for validation and debugging.",
+          "description": "Start a workflow run with a custom payload for validation and review.",
           "templateNotActive": "This template is not active. Enable preview mode to run drafts safely.",
           "payloadLabel": "Payload (JSON)",
           "payloadPlaceholder": "Example: \"shipment_id\": \"...\"",
@@ -1033,7 +1040,7 @@
             "disabled": "Workflow trigger disabled.",
             "updateErrorTitle": "Update workflow trigger",
             "createErrorTitle": "Create workflow trigger",
-            "createErrorMissingId": "Workflow trigger creator did not return a trigger id.",
+            "createErrorMissingId": "Workflow trigger could not be confirmed. Try again.",
             "deleteErrorTitle": "Delete workflow trigger",
             "missingTemplate": "Select a workflow template.",
             "sameTemplate": "Source and target workflow must be different.",
@@ -1129,11 +1136,11 @@
             "invalidInterval": "Interval must be a positive number.",
             "invalidContextPatch": "Context patch must be a JSON object.",
             "createErrorTitle": "Create schedule",
-            "createErrorMissingId": "Scheduler did not return a trigger id.",
+            "createErrorMissingId": "Schedule could not be confirmed. Try again.",
             "updateErrorTitle": "Update schedule",
             "deleteErrorTitle": "Delete schedule",
             "runErrorTitle": "Run schedule",
-            "runErrorMissingRun": "Schedule runner did not return a run id.",
+            "runErrorMissingRun": "Schedule run could not be confirmed. Try again.",
             "created": "Schedule trigger created.",
             "updated": "Schedule trigger updated.",
             "deleted": "Schedule trigger deleted.",
@@ -1253,17 +1260,17 @@
                 "unknown": "Unknown"
               },
               "fields": {
-                "runId": "Run id",
-                "correlationId": "Correlation id",
+                "runId": "Activity reference",
+                "correlationId": "Tracking key",
                 "requestedBy": "Requested by",
-                "requestContextId": "Request context id",
-                "scheduleTriggerId": "Schedule trigger id",
-                "runTriggerId": "Workflow run trigger id",
-                "triggerFireId": "Trigger fire id",
-                "sourceRunId": "Source run id",
-                "sourceStatus": "Source status",
-                "sourceCompletedAt": "Source completed at",
-                "idempotencyKey": "Idempotency key",
+                "requestContextId": "Request context",
+                "scheduleTriggerId": "Schedule reference",
+                "runTriggerId": "Linked run rule",
+                "triggerFireId": "Schedule occurrence",
+                "sourceRunId": "Previous activity",
+                "sourceStatus": "Previous activity status",
+                "sourceCompletedAt": "Previous activity completed",
+                "idempotencyKey": "Duplicate check key",
                 "scope": "Scope"
               },
               "actions": {
@@ -1271,7 +1278,7 @@
                 "openSchedule": "Open schedule",
                 "openTrigger": "Open trigger",
                 "openFire": "Open fire",
-                "showRaw": "Show raw context",
+                "showRaw": "Show request details",
                 "copy": "Copy",
                 "copySuccessTitle": "Copied to clipboard.",
                 "copyFailedTitle": "Copy failed."
@@ -1537,7 +1544,7 @@
           "invalidJsonDescription": "Payload must be valid JSON.",
           "successTitle": "Test run started.",
           "errorTitle": "Unable to start test run.",
-          "errorMissingRun": "Workflow starter did not return a run id."
+          "errorMissingRun": "Workflow test run could not be confirmed. Try again."
         }
       },
       "errors": {
@@ -1557,8 +1564,8 @@
         "openNewTab": "Open in new tab",
         "edit": "Edit",
         "duplicate": "Duplicate",
-        "copyId": "Copy ID",
-        "copyRowJson": "Copy row as JSON",
+        "copyId": "Copy activity reference",
+        "copyRowJson": "Copy support details",
         "delete": "Delete"
       },
       "rowNumbers": {
@@ -1933,7 +1940,7 @@
       "description": "Current identity and capability context.",
       "errors": {
         "loadContext": "Unable to load access context.",
-        "unavailable": "Access context unavailable. Sign in or confirm RLS/RPC availability."
+        "unavailable": "Access context unavailable. Sign in again or confirm this workspace is reachable."
       },
       "scopeLabel": "{scopeType}: {scopeLabel}",
       "labels": {
@@ -2122,10 +2129,11 @@
       },
       "editor": {
         "title": "Policy editor",
-        "hideRaw": "Hide raw JSON",
-        "showRaw": "Show raw JSON",
+        "hideRaw": "Hide advanced editor",
+        "showRaw": "Show advanced editor",
         "unavailable": "Policy editor unavailable for invalid JSON.",
-        "rawLabel": "Raw policy JSON"
+        "rawLabel": "Policy details",
+        "advancedHidden": "Use the policy controls above for normal edits. Open the advanced editor only when support asks for exact policy details."
       },
       "summary": {
         "title": "Change summary",
@@ -2195,7 +2203,7 @@
       "blocked": {
         "previewSelection": "Preview the updated selection before submitting.",
         "previewFailed": "Preview failed. Update the selection and try again.",
-        "previewSeed": "Preview current settings to seed the JSON editor.",
+        "previewSeed": "Preview current settings to populate the JSON editor.",
         "jsonRequired": "Settings JSON is required."
       },
       "preview": {
@@ -2369,7 +2377,7 @@
       },
       "preview": {
         "title": "Preview",
-        "description": "Load sample payload and run designer preview through label-renderer edge mode=designer_preview.",
+        "description": "Load a sample shipment and preview the label design before printing.",
         "shipment": "Shipment",
         "selectShipment": "Select shipment",
         "shipmentBox": "Shipment box",
@@ -2380,8 +2388,8 @@
         "rendering": "Rendering…",
         "samplePayload": "Sample payload",
         "previewResponse": "Preview response",
-        "showDebug": "Show raw response (debug)",
-        "hideDebug": "Hide raw response",
+        "showDetails": "Show preview details",
+        "hideDetails": "Hide preview details",
         "pdfEmpty": "Run preview to render PDF",
         "pdfLoading": "Loading PDF…",
         "pdfError": "PDF load failed: {error}",

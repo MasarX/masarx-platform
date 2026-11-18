@@ -18,6 +18,9 @@ const MATRIX_CONSOLE_SECTION = "## Console route matrix";
 const MATRIX_PORTAL_SECTION = "## Portal route matrix";
 const ROUTE_FILE_NAMES = new Set(["page.tsx", "route.ts"]);
 const LANDING_HTML_PATH = path.join(REPO_ROOT, "docs/marketing/landing-v2/index.html");
+const MATRIX_ROUTE_ALIASES = new Map<string, string>([
+  ["/console/labels/designer", "/console/platform/labels"],
+]);
 
 const normalizeRoutePath = (route: string) =>
   route.trim().replace(/\/+$/, "") || "/";
@@ -198,9 +201,10 @@ describe("frontend route inventory and phase-0 matrix parity", () => {
       collectAppRoutes(appDef)
     );
 
-    const missingRoutes = Array.from(new Set(implementedRoutes)).filter(
-      (route) => !matrixRoutes.has(route)
-    );
+    const missingRoutes = Array.from(new Set(implementedRoutes)).filter((route) => {
+      const canonicalRoute = MATRIX_ROUTE_ALIASES.get(route);
+      return !matrixRoutes.has(route) && !(canonicalRoute && matrixRoutes.has(canonicalRoute));
+    });
 
     expect(missingRoutes).toEqual([]);
   });
@@ -212,9 +216,15 @@ describe("frontend route inventory and phase-0 matrix parity", () => {
         collectAppRoutes(appDef)
       )
     );
-    const missingAppRoutes = Array.from(matrixRoutes).filter(
-      (route) => !implementedRoutes.has(route)
-    );
+    const missingAppRoutes = Array.from(matrixRoutes).filter((route) => {
+      if (implementedRoutes.has(route)) {
+        return false;
+      }
+      return !Array.from(MATRIX_ROUTE_ALIASES.entries()).some(
+        ([aliasRoute, canonicalRoute]) =>
+          canonicalRoute === route && implementedRoutes.has(aliasRoute)
+      );
+    });
 
     expect(missingAppRoutes).toEqual([]);
   });

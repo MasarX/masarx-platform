@@ -4,7 +4,6 @@ import * as React from "react";
 import type { MappingOperationReport } from "@masarx/api";
 import { Badge } from "../badge";
 import { Button } from "../button";
-import { buildDownloadBlob, buildReportFilename, stringifyPretty } from "./utils";
 
 type OperationReportViewerProps = {
   report: MappingOperationReport | null;
@@ -14,18 +13,26 @@ type OperationReportViewerProps = {
 
 export function OperationReportViewer({
   report,
-  result,
   appBasePath,
 }: OperationReportViewerProps) {
-  const onCopy = React.useCallback(async () => {
-    if (!report) return;
-    await navigator.clipboard.writeText(stringifyPretty(report, "null"));
+  const reportSummary = React.useMemo(() => {
+    if (!report) return "";
+    const lines = [
+      `Status: ${report.status?.trim() || "succeeded"}`,
+      `Artifact: ${report.artifact_type || "Not available"}`,
+      `Activity reference: ${report.correlation_id || report.id || "Not available"}`,
+      `Primary resource: ${report.primary_resource_type || "Not available"}`,
+    ];
+    if (Array.isArray(report.next_steps) && report.next_steps.length > 0) {
+      lines.push(`Next steps: ${report.next_steps.join("; ")}`);
+    }
+    return lines.join("\n");
   }, [report]);
 
-  const onDownload = React.useCallback(() => {
+  const onCopy = React.useCallback(async () => {
     if (!report) return;
-    buildDownloadBlob(buildReportFilename(report), report);
-  }, [report]);
+    await navigator.clipboard.writeText(reportSummary);
+  }, [report, reportSummary]);
 
   if (!report) {
     return <p className="text-sm text-ui-muted">No submit report is available yet.</p>;
@@ -46,7 +53,7 @@ export function OperationReportViewer({
         <div>
           <div className="text-lg font-semibold text-ui-ink">Operation report</div>
           <div className="mt-1 text-sm text-ui-muted">
-            {report.correlation_id ? `Correlation: ${report.correlation_id}` : "Correlation pending"}
+            {report.correlation_id ? `Activity reference: ${report.correlation_id}` : "Activity reference pending"}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -57,10 +64,10 @@ export function OperationReportViewer({
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2 rounded-xl border border-ui-border/40 bg-ui-paper/70 p-4 text-sm text-ui-muted">
-          <div><span className="font-medium text-ui-ink">Artifact:</span> {report.artifact_type || "unknown"}</div>
-          <div><span className="font-medium text-ui-ink">Report ID:</span> {report.id || "pending"}</div>
+          <div><span className="font-medium text-ui-ink">Artifact:</span> {report.artifact_type || "Not available"}</div>
+          <div><span className="font-medium text-ui-ink">Report reference:</span> {report.id || "Pending"}</div>
           <div><span className="font-medium text-ui-ink">Primary resource:</span> {primaryType || "n/a"} {primaryId ? `(${primaryId})` : ""}</div>
-          <div><span className="font-medium text-ui-ink">Workflow:</span> {report.workflow_template_id || "none"}</div>
+          <div><span className="font-medium text-ui-ink">Activity history:</span> {report.workflow_template_id || "Not available"}</div>
         </div>
         <div className="space-y-2 rounded-xl border border-ui-border/40 bg-ui-paper/70 p-4 text-sm text-ui-muted">
           <div><span className="font-medium text-ui-ink">Next steps:</span></div>
@@ -77,8 +84,7 @@ export function OperationReportViewer({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" size="sm" onClick={onCopy}>Copy JSON</Button>
-        <Button type="button" size="sm" variant="ghost" onClick={onDownload}>Download JSON</Button>
+        <Button type="button" size="sm" onClick={onCopy}>Copy report details</Button>
         {reportHref ? (
           <Button asChild type="button" size="sm" variant="ghost">
             <a href={reportHref}>Open saved report</a>
@@ -90,17 +96,6 @@ export function OperationReportViewer({
           </Button>
         ) : null}
       </div>
-
-      <details className="rounded-xl border border-ui-border/40 bg-ui-paper/70 p-4">
-        <summary className="cursor-pointer text-sm font-medium text-ui-ink">Raw report JSON</summary>
-        <pre className="mt-3 max-h-96 overflow-auto text-xs text-ui-ink">{stringifyPretty(report, "null")}</pre>
-      </details>
-      {result ? (
-        <details className="rounded-xl border border-ui-border/40 bg-ui-paper/70 p-4">
-          <summary className="cursor-pointer text-sm font-medium text-ui-ink">Runtime result payload</summary>
-          <pre className="mt-3 max-h-96 overflow-auto text-xs text-ui-ink">{stringifyPretty(result, "null")}</pre>
-        </details>
-      ) : null}
     </div>
   );
 }

@@ -16,6 +16,11 @@ const HIGH_RISK_SURFACE_IDS = new Set(['db', 'api_ingress', 'mobile_fieldops']);
 const HIGH_RISK_IMPACT_IDS = new Set(['shared']);
 const DEFAULT_LOCAL_GATE_REMOTE_VERIFY_TIMEOUT_MINUTES = 360;
 const DEFAULT_LOCAL_GATE_REMOTE_VERIFY_POLL_SECONDS = 15;
+const LOCAL_GATE_LANDING_BUILD_ENV = {
+  LANDING_SITE_URL: 'http://127.0.0.1:3333',
+  LANDING_CONTACT_ENDPOINT: '/__landing-contact',
+  LANDING_TENANT_SIGNUP_ENDPOINT: '/__tenant-signup',
+};
 const CONTROL_PLANE_PATTERNS = [
   /^\.github\//,
   /^config\/ci\//,
@@ -998,6 +1003,7 @@ function buildExecutionPlan(selection, options = {}) {
         projects: [ROOT_NX_PROJECT],
         fallbackArgs: ['run', 'build:landing'],
       }),
+      env: LOCAL_GATE_LANDING_BUILD_ENV,
     });
   }
   if (selectedSuites.has('landing_e2e')) {

@@ -197,7 +197,7 @@ describe("ShipmentResourcePage", () => {
     expect(
       screen.getByTestId("console-resource-shipment-timeline")
     ).toBeInTheDocument();
-    expect(screen.getByText("Decision")).toBeInTheDocument();
+    expect(screen.getAllByText("Decision").length).toBeGreaterThan(0);
     expect(screen.getByText("Shipment Create")).toBeInTheDocument();
     expect(screen.getByText("Created through shipment_create")).toBeInTheDocument();
     expect(

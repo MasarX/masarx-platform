@@ -6,4 +6,5 @@
 - **Test Behavior, Not Implementation**: Focus tests on what the code does, not how it does it, to reduce brittleness
 - **Clear Test Names**: Use descriptive names that explain what's being tested and the expected outcome
 - **Mock External Dependencies**: Isolate units by mocking databases, APIs, file systems, and other external services
+- **Readiness Exception**: For Landing + Console V2 production-readiness, mocks are unit-test tools only. Completion requires backend-backed real API/RPC/data proof plus Browser/Chrome clicked-navigation evidence; Playwright, pgTAP, screenshots, seed/demo data, in-memory adapters, and toast-only successes cannot close a readiness area.
 - **Fast Execution**: Keep unit tests fast (milliseconds) so developers run them frequently during development

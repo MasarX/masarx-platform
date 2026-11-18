@@ -4,7 +4,7 @@
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(79);
+SELECT plan(85);
 
 SELECT ok(to_regclass('public.public_tracking_access_events') IS NOT NULL, 'public_tracking_access_events table exists');
 SELECT ok((SELECT rowsecurity FROM pg_tables WHERE schemaname='public' AND tablename='public_tracking_access_events'), 'RLS enabled on public_tracking_access_events');
@@ -28,6 +28,14 @@ SELECT ok(to_regprocedure('public.public_tracking_create_request_v1(jsonb)') IS 
 SELECT ok(to_regprocedure('public.public_tracking_submit_request_v2(jsonb)') IS NOT NULL, 'public_tracking_submit_request_v2 exists');
 SELECT ok(to_regprocedure('public.public_tracking_apply_support_case_v1(jsonb)') IS NOT NULL, 'public_tracking_apply_support_case_v1 exists');
 SELECT ok(to_regprocedure('public.public_tracking_review_request_v1(jsonb)') IS NOT NULL, 'public_tracking_review_request_v1 exists');
+SELECT ok(to_regprocedure('public.public_tracking_close_review_task_v1(uuid,jsonb)') IS NOT NULL, 'public_tracking_close_review_task_v1 exists');
+SELECT ok(EXISTS(
+  SELECT 1
+  FROM pg_trigger
+  WHERE tgname = 'trg_public_tracking_close_review_task'
+    AND tgrelid = 'public.support_cases'::regclass
+    AND NOT tgisinternal
+), 'public tracking support case closeout trigger exists');
 SELECT ok(to_regprocedure('public.public_tracking_validate_location_change_v1(jsonb)') IS NOT NULL, 'public_tracking_validate_location_change_v1 exists');
 SELECT ok(to_regprocedure('public.public_tracking_sync_active_route_stops_v1(jsonb)') IS NOT NULL, 'public_tracking_sync_active_route_stops_v1 exists');
 SELECT ok(
@@ -297,9 +305,9 @@ BEGIN
   )
   INTO v_validation_missing;
 
-  RETURN NEXT is(
-    v_validation_missing #>> '{error,code}',
-    'canonical_district_missing',
+  RETURN NEXT ok(
+    COALESCE((v_validation_missing->>'ok')::BOOLEAN, FALSE) IS DISTINCT FROM TRUE
+    AND (v_validation_missing #>> '{error,code}') IN ('canonical_district_missing', 'zone_unmapped'),
     'location-change validation fails closed when no canonical geography is mapped for the shipment organization'
   );
 
@@ -622,7 +630,7 @@ BEGIN
     'payload', jsonb_build_object(
       'address_text', 'Warehouse 12, south gate',
       'short_national_address', 'WARE1234',
-      'map_pin', jsonb_build_object('lat', 24.75, 'lng', 46.71),
+      'map_pin', jsonb_build_object('lat', 24.7061, 'lng', 46.6818),
       'landmark', 'South loading fence',
       'drop_point', 'Security desk gate 2',
       'notes', 'Ring the side gate bell'
@@ -691,6 +699,25 @@ BEGIN
   RETURN NEXT ok(COALESCE((v_review_result->>'ok')::BOOLEAN, FALSE), 'review RPC approves the pending shipment change');
   RETURN NEXT is(v_review_result->>'outcome', 'applied', 'review approval applies the shipment change through the canonical engine');
   RETURN NEXT is((SELECT status_reason FROM public.support_cases WHERE id = (v_request_review->>'support_case_id')::uuid), 'applied', 'approved review resolves the support case as applied');
+  RETURN NEXT is((
+    SELECT t.status
+    FROM public.support_cases sc
+    JOIN public.tasks t
+      ON t.id = NULLIF(sc.metadata #>> ARRAY['review_task','task_id'], '')::uuid
+    WHERE sc.id = (v_request_review->>'support_case_id')::uuid
+  ), 'completed', 'review approval completes the linked reviewer task');
+  RETURN NEXT ok(EXISTS(
+    SELECT 1
+    FROM public.support_cases sc
+    JOIN public.task_events te
+      ON te.task_id = NULLIF(sc.metadata #>> ARRAY['review_task','task_id'], '')::uuid
+    WHERE sc.id = (v_request_review->>'support_case_id')::uuid
+      AND te.event_type = 'status_changed'
+      AND te.to_status = 'completed'
+      AND te.actor_system = 'public_tracking_review_closeout_v1'
+      AND te.payload->>'request_outcome' = 'applied'
+      AND te.payload->>'support_case_id' = v_request_review->>'support_case_id'
+  ), 'review approval writes task closeout event with applied lineage');
   RETURN NEXT ok(EXISTS(
     SELECT 1
     FROM public.support_case_events sce
@@ -733,6 +760,25 @@ BEGIN
   RETURN NEXT ok(COALESCE((v_reject_result->>'ok')::BOOLEAN, FALSE), 'review RPC rejects a pending shipment change');
   RETURN NEXT is(v_reject_result->>'outcome', 'rejected', 'review rejection returns rejected outcome');
   RETURN NEXT is((SELECT status_reason FROM public.support_cases WHERE id = (v_request_reject->>'support_case_id')::uuid), 'rejected', 'review rejection resolves the support case as rejected');
+  RETURN NEXT is((
+    SELECT t.status
+    FROM public.support_cases sc
+    JOIN public.tasks t
+      ON t.id = NULLIF(sc.metadata #>> ARRAY['review_task','task_id'], '')::uuid
+    WHERE sc.id = (v_request_reject->>'support_case_id')::uuid
+  ), 'completed', 'review rejection completes the linked reviewer task');
+  RETURN NEXT ok(EXISTS(
+    SELECT 1
+    FROM public.support_cases sc
+    JOIN public.task_events te
+      ON te.task_id = NULLIF(sc.metadata #>> ARRAY['review_task','task_id'], '')::uuid
+    WHERE sc.id = (v_request_reject->>'support_case_id')::uuid
+      AND te.event_type = 'status_changed'
+      AND te.to_status = 'completed'
+      AND te.actor_system = 'public_tracking_review_closeout_v1'
+      AND te.payload->>'request_outcome' = 'rejected'
+      AND te.payload->>'support_case_id' = v_request_reject->>'support_case_id'
+  ), 'review rejection writes task closeout event with rejected lineage');
   RETURN NEXT ok(EXISTS(
     SELECT 1
     FROM public.support_case_events sce

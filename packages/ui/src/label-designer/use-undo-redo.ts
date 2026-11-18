@@ -13,6 +13,7 @@ export function useUndoRedo(
 ) {
   const historyRef = React.useRef<UndoRedoState>({ past: [], future: [] });
   const lastPushedRef = React.useRef<string>(currentValue);
+  const [, refreshHistoryState] = React.useReducer((value: number) => value + 1, 0);
 
   const pushSnapshot = React.useCallback(
     (value: string) => {
@@ -21,6 +22,7 @@ export function useUndoRedo(
       const nextPast = [...past, lastPushedRef.current].slice(-MAX_HISTORY);
       historyRef.current = { past: nextPast, future: [] };
       lastPushedRef.current = value;
+      refreshHistoryState();
     },
     [],
   );
@@ -34,6 +36,7 @@ export function useUndoRedo(
       future: [lastPushedRef.current, ...future].slice(0, MAX_HISTORY),
     };
     lastPushedRef.current = previous;
+    refreshHistoryState();
     onChange(previous);
   }, [onChange]);
 
@@ -46,6 +49,7 @@ export function useUndoRedo(
       future: future.slice(1),
     };
     lastPushedRef.current = next;
+    refreshHistoryState();
     onChange(next);
   }, [onChange]);
 

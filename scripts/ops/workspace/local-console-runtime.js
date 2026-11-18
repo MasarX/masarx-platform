@@ -23,10 +23,10 @@ function ensureDir(target) {
 }
 
 function getConsoleRuntimePaths(cwd = process.cwd(), port = 5175) {
-  const runtimeDir = path.join(cwd, 'tmp', 'local-console');
+  const runtimeDir = path.join(cwd, 'tmp', 'local-console-v2');
   return {
     runtimeDir,
-    appDir: path.join(cwd, 'apps', 'console'),
+    appDir: path.join(cwd, 'apps', 'console-v2'),
     envPath: path.join(cwd, 'config', 'env', '.env.local'),
     pidPath: path.join(runtimeDir, `console-v2-${port}.pid`),
     outLogPath: path.join(runtimeDir, `console-v2-${port}.out.log`),
@@ -104,14 +104,14 @@ function buildConsoleDevCommand({ appDir, port, host = '127.0.0.1', platform = p
   const args = [
     '--prefix',
     appDir,
-    'exec',
-    '--',
-    'next',
+    'run',
     'dev',
-    '-H',
+    '--',
+    '--host',
     host,
-    '-p',
+    '--port',
     String(port),
+    '--strictPort',
   ];
   if (platform === 'win32') {
     return { command: 'cmd.exe', args: ['/c', 'npm', ...args] };
@@ -128,7 +128,6 @@ function resolveConsoleEnv({ cwd = process.cwd(), env = process.env, envPath } =
   return {
     ...env,
     ...parsed,
-    NEXT_PUBLIC_USE_SEED: 'false',
     VITE_USE_SEED: 'false',
   };
 }
@@ -187,9 +186,9 @@ function stopOrphanedConsoleRuntime(options = {}) {
     `$port = ${port}`,
     '$matches = Get-CimInstance Win32_Process | Where-Object {',
     '  $cmd = [string]$_.CommandLine',
-    '  ($cmd -match "npm(\\.cmd)?\\s+--prefix" -or $cmd -match "next\\s+dev") -and',
+    '  ($cmd -match "npm(\\.cmd)?\\s+--prefix" -or $cmd -match "vite") -and',
     '    ($needles | Where-Object { $cmd.Contains($_) }) -and',
-    '    ($cmd -match ("(-p|--port)\\s+" + $port))',
+    '    ($cmd -match ("--port\\s+" + $port))',
     '}',
     '$ids = @($matches | Select-Object -ExpandProperty ProcessId -Unique)',
     'foreach ($id in $ids) { & taskkill /PID $id /T /F | Out-Null }',

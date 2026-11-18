@@ -2,6 +2,8 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@^2.45.4";
 
 export type JsonRecord = Record<string, unknown>;
 
+type EdgeRpcClient = SupabaseClient<any, any, any, any, any>;
+
 export type TenantSignupRequestRow = {
   id: string;
   status: string;
@@ -67,6 +69,17 @@ const isDisallowedRedirectHost = (host: string): boolean => {
   );
 };
 
+const isLocalRedirectHost = (host: string): boolean => {
+  const normalized = String(host || "").trim().toLowerCase();
+  // objectives:allow LOCALHOST Justification: local invite proof must explicitly recognize loopback callback hosts while production remains hosted-only.
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]"
+  );
+};
+
 export const normalizeHostedRedirectUrl = (value: string): string => {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -80,6 +93,41 @@ export const normalizeHostedRedirectUrl = (value: string): string => {
   } catch {
     return "";
   }
+};
+
+export const normalizeLocalInviteRedirectUrl = (
+  value: string,
+  allowedOrigins: string[] = [],
+): string => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    if (protocol !== "http:" && protocol !== "https:") return "";
+    if (!isLocalRedirectHost(parsed.hostname)) return "";
+    if (parsed.pathname !== "/auth/callback") return "";
+    const allowed = new Set(
+      allowedOrigins
+        .map((origin) => normalizeOrigin(origin))
+        .filter(Boolean),
+    );
+    if (allowed.size === 0 || !allowed.has(parsed.origin)) return "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+};
+
+export const normalizeInviteRedirectUrl = (
+  value: string,
+  options: { allowLocalInviteRedirect?: boolean; localInviteRedirectOrigins?: string[] } = {},
+): string => {
+  const hosted = normalizeHostedRedirectUrl(value);
+  if (hosted) return hosted;
+  if (!options.allowLocalInviteRedirect) return "";
+  return normalizeLocalInviteRedirectUrl(value, options.localInviteRedirectOrigins || []);
 };
 
 export const parseOriginAllowlist = (
@@ -142,7 +190,7 @@ export const policyString = (
 };
 
 export const loadTenantSignupPolicy = async (
-  serviceClient: SupabaseClient,
+  serviceClient: EdgeRpcClient,
 ): Promise<JsonRecord> => {
   const { data, error } = await serviceClient.rpc("tenant_signup_policy_v1");
   if (error) {
@@ -152,7 +200,7 @@ export const loadTenantSignupPolicy = async (
 };
 
 export const getTenantSignupRequest = async (
-  serviceClient: SupabaseClient,
+  serviceClient: EdgeRpcClient,
   requestId: string,
 ): Promise<TenantSignupRequestRow | null> => {
   const { data, error } = await serviceClient
@@ -194,18 +242,24 @@ const isUserAlreadyRegisteredError = (message: string): boolean => {
 };
 
 const findAuthUserIdByEmail = async (
-  serviceClient: SupabaseClient,
+  serviceClient: EdgeRpcClient,
   email: string,
 ): Promise<string> => {
   const target = email.trim().toLowerCase();
   if (!target) return "";
 
+  const { data: rpcData, error: rpcError } = await serviceClient.rpc(
+    "tenant_signup_find_auth_user_id_by_email_v1",
+    { p_email: target },
+  );
+  if (!rpcError) {
+    const rpcMatch = asString(rpcData);
+    if (rpcMatch) return rpcMatch;
+  }
+
   const perPage = 200;
   for (let page = 1; page <= 10; page += 1) {
-    const { data, error } = await serviceClient.auth.admin.listUsers({
-      page,
-      perPage,
-    });
+    const { data, error } = await serviceClient.auth.admin.listUsers({ page, perPage });
 
     if (error) return "";
 
@@ -227,7 +281,7 @@ const findAuthUserIdByEmail = async (
 };
 
 const ensureAuthUserForApproval = async (
-  serviceClient: SupabaseClient,
+  serviceClient: EdgeRpcClient,
   params: {
     email: string;
     fullName: string;
@@ -299,12 +353,15 @@ const ensureAuthUserForApproval = async (
 };
 
 type ApprovalParams = {
-  serviceClient: SupabaseClient;
+  serviceClient: EdgeRpcClient;
+  reviewClient?: EdgeRpcClient;
   requestId: string;
   reviewerUserId: string | null;
   decisionReason?: string | null;
   decisionMetadata?: JsonRecord;
   inviteRedirectOverride?: string | null;
+  allowLocalInviteRedirect?: boolean;
+  localInviteRedirectOrigins?: string[];
 };
 
 export const approveTenantSignupRequest = async (
@@ -326,9 +383,13 @@ export const approveTenantSignupRequest = async (
 
   const policy = await loadTenantSignupPolicy(params.serviceClient);
   const sendInviteEmail = policyBool(policy, ["notifications", "requester_approved_email"], true);
-  const inviteRedirect = normalizeHostedRedirectUrl(
+  const inviteRedirect = normalizeInviteRedirectUrl(
     asString(params.inviteRedirectOverride) ||
       policyString(policy, ["onboarding", "invite_redirect_to"]),
+    {
+      allowLocalInviteRedirect: params.allowLocalInviteRedirect === true,
+      localInviteRedirectOrigins: params.localInviteRedirectOrigins || [],
+    },
   );
 
   if (sendInviteEmail && !inviteRedirect) {
@@ -356,7 +417,8 @@ export const approveTenantSignupRequest = async (
     invite_error: inviteResult.inviteError,
   };
 
-  const { data, error } = await params.serviceClient.rpc("tenant_signup_review_apply_v1", {
+  const reviewClient = params.reviewClient || params.serviceClient;
+  const { data, error } = await reviewClient.rpc("tenant_signup_review_apply_v1", {
     p_request_id: request.id,
     p_decision: "approved",
     p_reviewer_user_id: params.reviewerUserId,
@@ -368,16 +430,20 @@ export const approveTenantSignupRequest = async (
   });
 
   if (error) {
-    await params.serviceClient.rpc("tenant_signup_request_record_error_v1", {
-      p_request_id: request.id,
-      p_error_code: "review_apply_failed",
-      p_error_message: error.message || "review_apply_failed",
-      p_error_context: {
-        stage: "approve",
-        invite_email_requested: sendInviteEmail,
-        invite_email_sent: inviteResult.inviteEmailSent,
-      },
-    }).catch(() => undefined);
+    try {
+      await reviewClient.rpc("tenant_signup_request_record_error_v1", {
+        p_request_id: request.id,
+        p_error_code: "review_apply_failed",
+        p_error_message: error.message || "review_apply_failed",
+        p_error_context: {
+          stage: "approve",
+          invite_email_requested: sendInviteEmail,
+          invite_email_sent: inviteResult.inviteEmailSent,
+        },
+      });
+    } catch {
+      // Preserve the original review failure.
+    }
 
     return {
       ok: false,

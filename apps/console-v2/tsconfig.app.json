@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": false,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@masarx/config": ["../../packages/config/src/index.ts"],
+      "@masarx/config/*": ["../../packages/config/src/*"],
+      "@masarx/ui": ["../../packages/ui/src/index.ts"],
+      "@masarx/ui/label-designer/canvas-types": ["../../packages/ui/src/label-designer/canvas/canvas-types.ts"],
+      "@masarx/ui/*": ["../../packages/ui/src/*"]
+    },
+    "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom", "node"]
+  },
+  "include": ["src"]
+}

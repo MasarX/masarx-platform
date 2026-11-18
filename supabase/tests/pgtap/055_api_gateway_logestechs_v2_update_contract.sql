@@ -77,9 +77,13 @@ BEGIN
     RAISE EXCEPTION 'Canonical Logestechs update route missing provider';
   END IF;
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'API Gateway Org 055', 'pgtap-api-gateway-org-055')
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO public.clients (id, organization_id, name, slug, status)
   VALUES (v_client, v_org, 'API Gateway Client 055', 'pgtap-api-gateway-client-055', 'active')
@@ -88,6 +92,8 @@ BEGIN
   INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
   VALUES (v_sender, v_client, 'API Gateway Sender 055', 'API Gateway Sender 055', TRUE, 'active')
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM bootstrap_tenant_onboarding_v1(v_org, 'pgtap:api-gateway-logestechs-v2-update-contract-fixture-bootstrap');
 
   INSERT INTO public.mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
   VALUES (
@@ -397,68 +403,69 @@ SELECT is(
 
 SELECT is(
   (SELECT result->>'action' FROM tmp_uc178_update_intake),
-  'proxy',
-  'workflow_intake_api_gateway_v1 dispatches canonical update route in proxy mode'
+  'accepted_async',
+  'workflow_intake_api_gateway_v1 accepts canonical update route asynchronously'
 );
 
 SELECT is(
-  (
-    SELECT method
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
-  ),
-  'PUT',
-  'canonical update intake enqueues PUT outbound call'
-);
-
-SELECT is(
-  (
-    SELECT url
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
-  ),
-  'https://apisv2.logestechs.com/api/guests/362/packages/SHIP055',
-  'canonical update intake renders provider update URL'
-);
-
-SELECT is(
-  (
-    SELECT headers->>'company-id'
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
-  ),
-  '362',
-  'canonical update intake applies provider company-id header override'
-);
-
-SELECT is(
-  (
-    SELECT context->'api_gateway_path_params'->>'shipmentId'
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
-  ),
-  'SHIP055',
-  'canonical update intake preserves shipmentId in outbound context'
-);
-
-SELECT is(
-  (
-    SELECT context->>'provider_account_category'
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
-  ),
-  'logestechs_v2_account',
-  'canonical update intake resolves provider account category'
+  (SELECT (result->>'status')::INT FROM tmp_uc178_update_intake),
+  202,
+  'canonical update intake returns accepted status'
 );
 
 SELECT ok(
-  NOT EXISTS (
-    SELECT 1
-      FROM public.outbound_calls oc
-     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_uc178_update_intake)
-       AND (oc.body ? 'email' OR oc.body ? 'password')
+  (SELECT public.mapping_studio_try_uuid_v1(result->>'api_gateway_request_id') IS NOT NULL
+     AND public.mapping_studio_try_uuid_v1(result->>'workflow_run_id') IS NOT NULL
+     AND result->'body'->>'api_gateway_request_id' = result->>'api_gateway_request_id'
+     AND result->'body'->>'workflow_run_id' = result->>'workflow_run_id'
+   FROM tmp_uc178_update_intake),
+  'canonical update intake returns request and workflow lineage'
+);
+
+SELECT is(
+  (
+    SELECT wr.workflow_status
+      FROM public.workflow_runs wr
+     WHERE wr.id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
   ),
-  'canonical update intake strips auth body fields from persisted outbound payload'
+  'pending',
+  'canonical update intake starts pending workflow run'
+);
+
+SELECT ok(
+  (
+    SELECT wr.context #>> '{api_gateway,upstream_method}' = 'PUT'
+       AND wr.context #>> '{api_gateway,upstream_url}' = 'https://apisv2.logestechs.com/api/guests/362/packages/SHIP055'
+       AND wr.context #>> '{api_gateway,outbound_headers,company-id}' = '362'
+       AND wr.context #>> '{api_gateway,path_params,shipmentId}' = 'SHIP055'
+       AND wr.context #>> '{api_gateway,provider_account_category}' = 'logestechs_v2_account'
+      FROM public.workflow_runs wr
+     WHERE wr.id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+  ),
+  'canonical update intake preserves provider dispatch context on workflow run'
+);
+
+SELECT ok(
+  (
+    SELECT wrs.operation_name = 'dispatch_update'
+       AND wrs.handler_key = 'api_gateway_dispatch_outbound'
+       AND wrs.step_status = 'pending'
+      FROM public.workflow_run_steps wrs
+     WHERE wrs.workflow_run_id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+     ORDER BY wrs.sequence_order
+     LIMIT 1
+  ),
+  'canonical update intake queues workflow dispatch step'
+);
+
+SELECT ok(
+  (
+    SELECT NOT (wr.context #> '{api_gateway,request_body}' ? 'email')
+       AND NOT (wr.context #> '{api_gateway,request_body}' ? 'password')
+      FROM public.workflow_runs wr
+     WHERE wr.id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+  ),
+  'canonical update intake strips auth body fields from workflow dispatch payload'
 );
 
 SELECT * FROM finish();

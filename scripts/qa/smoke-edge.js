@@ -136,6 +136,44 @@ const run = async () => {
 
   // webhook-receiver: missing auth should 4xx; allow smoke bypass when enabled 
   {
+    // Console V2 Webhook tester invokes the receiver from the browser, so the
+    // receiver must answer preflight for token, idempotency, and signature
+    // headers before any production-readiness proof can count.
+    const testerOrigin = process.env.CONSOLE_WEBHOOK_TESTER_ORIGIN || 'https://unjijvxjrwurjgsnokovrvom.example.invalid';
+    const preflight = await fetchWithRetries(`${functionsBase}/webhook-receiver`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: testerOrigin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization, apikey, content-type, x-client-info, x-webhook-token, idempotency-key, x-signature, x-correlation-id',
+      },
+    });
+    assertStatus(preflight.status, [200, 204], 'webhook-receiver cors preflight');
+
+    const allowOrigin = String(preflight.headers.get('access-control-allow-origin') || '').trim();
+    const allowHeaders = String(preflight.headers.get('access-control-allow-headers') || '').trim().toLowerCase();
+    const allowMethods = String(preflight.headers.get('access-control-allow-methods') || '').trim().toLowerCase();
+
+    if (!allowOrigin) {
+      throw new Error('webhook-receiver cors preflight missing access-control-allow-origin');
+    }
+    for (const required of ['authorization', 'content-type', 'x-webhook-token', 'idempotency-key', 'x-signature']) {
+      if (!allowHeaders.includes(required)) {
+        throw new Error(`webhook-receiver cors preflight missing required allow-header ${required}: ${allowHeaders || '<empty>'}`);
+      }
+    }
+    if (!allowMethods.includes('post')) {
+      throw new Error(`webhook-receiver cors preflight missing allow-methods POST: ${allowMethods || '<empty>'}`);
+    }
+
+    results.push({
+      name: 'webhook-receiver-cors',
+      status: preflight.status,
+      body: { allowOrigin, allowHeaders, allowMethods },
+    });
+  }
+
+  {
     const res = await fetchWithRetries(`${functionsBase}/webhook-receiver`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-smoke-test': 'edge-allow' },

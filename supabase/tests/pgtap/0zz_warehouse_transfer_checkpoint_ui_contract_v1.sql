@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(12);
+SELECT plan(15);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_warehouse_transfer_checkpoint_ui_contract_v1()
 RETURNS SETOF TEXT
@@ -77,6 +77,27 @@ BEGIN
       'EXECUTE'
     ),
     'anon cannot EXECUTE api.ui_execute_warehouse_transfer_checkpoint_v1'
+  );
+  RETURN NEXT ok(
+    position(
+      'console-v2-browser-scanner'
+      IN pg_get_functiondef('api.ui_execute_warehouse_transfer_checkpoint_v1(text, text, text[], text, integer, jsonb)'::regprocedure)
+    ) > 0,
+    'api.ui_execute_warehouse_transfer_checkpoint_v1 provisions the managed Console browser scanner device when device_id is omitted'
+  );
+  RETURN NEXT ok(
+    position(
+      'warehouse_transfer_sequence'
+      IN pg_get_functiondef('public.record_scan_event_v1(jsonb)'::regprocedure)
+    ) > 0,
+    'record_scan_event_v1 resolves transfer-scoped warehouse checkpoint sequence from scan_policy'
+  );
+  RETURN NEXT ok(
+    position(
+      '''role'', ''service_role'''
+      IN pg_get_functiondef('public.ui_execute_warehouse_transfer_checkpoint_v1(text, text, text[], text, integer, jsonb)'::regprocedure)
+    ) > 0,
+    'public.ui_execute_warehouse_transfer_checkpoint_v1 wakes service-only workflow transitions with a guarded service claim'
   );
   RETURN NEXT ok(
     EXISTS (

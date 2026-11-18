@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(20);
+SELECT plan(21);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_b07_delivery_attempt_contract_v1()
 RETURNS SETOF TEXT
@@ -79,6 +79,8 @@ BEGIN
   RETURN NEXT col_type_is('api', 'route_stops', 'route_stop_outcome', 'text', 'api.route_stops exposes route_stop_outcome');
   RETURN NEXT col_type_is('api', 'route_stops', 'delivery_attempt_reason', 'text', 'api.route_stops exposes delivery_attempt_reason');
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'B07 Attempt Contract Org', 'b07-attempt-' || left(v_org::text, 8));
 
@@ -101,6 +103,9 @@ BEGIN
 
   INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
   VALUES (v_sender, v_client, 'B07 Attempt Sender', 'B07 Attempt Sender', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:b07-attempt-contract-fixture-bootstrap');
 
   INSERT INTO public.vehicles (id, organization_id, status, is_active)
   VALUES (v_vehicle, v_org, 'active', TRUE);
@@ -185,6 +190,51 @@ BEGIN
     '23514',
     'access_restricted delivery attempts require notes, proof artifacts, or a geostamp',
     'access_restricted task_events fail closed without evidence'
+  );
+
+  SELECT COALESCE(MAX(te.task_version), 0) + 1
+    INTO v_next_task_version
+    FROM public.task_events te
+   WHERE te.task_id = v_task_id;
+
+  RETURN NEXT lives_ok(
+    format(
+      $sql$
+        INSERT INTO public.task_events (
+          task_id,
+          organization_id,
+          event_type,
+          from_status,
+          to_status,
+          actor_system,
+          payload,
+          task_version
+        ) VALUES (
+          '%1$s'::uuid,
+          '%2$s'::uuid,
+          'status_changed',
+          'assigned',
+          'completed',
+          'pgtap',
+          jsonb_build_object(
+            'status_reason', 'access_restricted',
+            'pod', jsonb_build_object(
+              'evidence', jsonb_build_object(
+                'failed_delivery', jsonb_build_object(
+                  'reason_code', 'access_restricted',
+                  'note', 'Security denied access at the gate'
+                )
+              )
+            )
+          ),
+          %3$s
+        )
+      $sql$,
+      v_task_id,
+      v_org,
+      v_next_task_version
+    ),
+    'access_restricted task_events accept nested Mobile V2 POD note evidence'
   );
 
   INSERT INTO public.shipment_actions (

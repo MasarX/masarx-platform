@@ -104,14 +104,46 @@ CREATE TEMP TABLE pgtap_alert_dispatch_ctx (
   result JSONB
 );
 
-WITH org AS (
+WITH onboarding_source AS (
+  SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true)
+), org AS (
   INSERT INTO organizations (id, name, slug)
-  VALUES (
+  SELECT
     gen_random_uuid(),
     'pgTAP Alert Dispatch Org',
     'pgtap-alert-dispatch-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12)
-  )
+  FROM onboarding_source
   RETURNING id
+), clear_onboarding_source AS (
+  SELECT set_config('app.organization_onboarding_source', '', true)
+  FROM org
+), client AS (
+  INSERT INTO clients (id, organization_id, name, slug, status)
+  SELECT
+    gen_random_uuid(),
+    org.id,
+    'pgTAP Alert Dispatch Client',
+    'pgtap-alert-dispatch-client-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12),
+    'active'
+  FROM org, clear_onboarding_source
+  RETURNING id, organization_id
+), sender AS (
+  INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+  SELECT
+    gen_random_uuid(),
+    client.id,
+    'pgTAP Alert Dispatch Sender',
+    'pgTAP Alert Sender',
+    TRUE,
+    'active'
+  FROM client
+  RETURNING id, client_id
+), tenant_bootstrap AS (
+  SELECT public.bootstrap_tenant_onboarding_v1(
+    org.id,
+    'pgtap:alert-dispatch-workers-fixture-bootstrap'
+  )
+  FROM org, sender
 ), prov AS (
   INSERT INTO providers (organization_id, name, provider_type, enabled, metadata)
   SELECT
@@ -120,7 +152,7 @@ WITH org AS (
     'comms',
     TRUE,
     jsonb_build_object('base_url', 'https://example.whatsapp.test')
-  FROM org
+  FROM org, tenant_bootstrap
   ON CONFLICT (organization_id, name, provider_type) DO UPDATE
     SET enabled = EXCLUDED.enabled,
         metadata = EXCLUDED.metadata,
@@ -142,7 +174,7 @@ WITH org AS (
     1,
     'pgtap alert_dispatch_workers tenant compliance fixture'
   ) AS settings_id
-  FROM org
+  FROM org, tenant_bootstrap
 ), provider_defaults_payload AS (
   SELECT jsonb_build_object(
     'messaging_product', 'whatsapp',

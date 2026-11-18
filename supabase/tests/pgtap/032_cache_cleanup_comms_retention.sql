@@ -11,10 +11,16 @@ SELECT ok(
   'maintenance_cleanup_policy global setting is present'
 );
 
--- Seed minimal org + client for comms_reply_sessions row.
+-- Seed minimal org + client + sender for comms_reply_sessions row.
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender context exists.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('dddddddd-0000-0000-0000-000000000032', 'Cleanup Org', 'cleanup-org')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    updated_at = now();
+SELECT set_config('app.organization_onboarding_source', '', true);
 
 INSERT INTO public.clients (id, organization_id, name, slug, status)
 VALUES (
@@ -24,7 +30,34 @@ VALUES (
   'cleanup-client',
   'active'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+  'dddddddd-0000-0000-0000-000000000132',
+  'dddddddd-0000-0000-0000-000000000033',
+  'Cleanup Sender',
+  'Cleanup Sender',
+  false,
+  true,
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  'dddddddd-0000-0000-0000-000000000032',
+  'pgtap:cache-cleanup-comms-retention-fixture-bootstrap'
+);
 
 -- Insert an expired comms_reply_session older than the default retention window (7 days).
 INSERT INTO public.comms_reply_sessions (

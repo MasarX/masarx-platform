@@ -58,7 +58,7 @@
     {
       "id": "console",
       "include_re": [
-        "^apps/console/",
+        "^apps/console-v2/",
         "^packages/",
         "^scripts/ops/vercel/",
         "^scripts/ops/verify-cloud-ui\\.js$",

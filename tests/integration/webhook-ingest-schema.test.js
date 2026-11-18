@@ -23,6 +23,8 @@ describe('Webhook JSON Schema toggle', () => {
     try {
       // Self-contained seed: org + mapping + source
       const orgId = randomUUID();
+      const clientId = randomUUID();
+      const senderId = randomUUID();
       const mappingId = randomUUID();
       const sourceId = randomUUID();
       const token = `tok-${randomUUID()}`;
@@ -33,6 +35,18 @@ describe('Webhook JSON Schema toggle', () => {
       );
 
       await client.query(
+        `INSERT INTO clients (id, organization_id, name, slug, sla_tier, status)
+         VALUES ($1::uuid, $2::uuid, 'Schema Client', $3, 'standard', 'active')`,
+        [clientId, orgId, `schema-client-${clientId.toString().slice(0,8)}`]
+      );
+
+      await client.query(
+        `INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+         VALUES ($1::uuid, $2::uuid, 'Schema Sender', 'Schema Sender', FALSE, 'active')`,
+        [senderId, clientId]
+      );
+
+      await client.query(
         `INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version)
          VALUES ($1::uuid, 'webhook_inbound', $2, '{}'::jsonb, 1)`,
         [mappingId, `schema-${Date.now()}`]
@@ -40,11 +54,11 @@ describe('Webhook JSON Schema toggle', () => {
 
       await client.query(
         `INSERT INTO webhook_sources (
-           id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled
+           id, organization_id, sender_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled
          ) VALUES (
-           $1::uuid, $2::uuid, $3, 'Schema Source', 'provider', $4, $5::uuid, TRUE
+           $1::uuid, $2::uuid, $3::uuid, $4, 'Schema Source', 'provider', $5, $6::uuid, TRUE
          )`,
-        [sourceId, orgId, `schema-${sourceId.toString().slice(0,8)}`, token, mappingId]
+        [sourceId, orgId, senderId, `schema-${sourceId.toString().slice(0,8)}`, token, mappingId]
       );
 
       const jsonSchemaId = 'providers/webhooks/shipment.created@v1';

@@ -1,6 +1,7 @@
 const {
   resolveDbCandidate,
   resolveDbCandidatePolicy,
+  resolveLabelProviderInvokeUrl,
 } = require('../../../scripts/ops/ensure-label-provider');
 
 describe('ensure-label-provider', () => {
@@ -67,5 +68,24 @@ describe('ensure-label-provider', () => {
       candidatePolicy: 'shared-lane-safe',
     });
     expect(result).toEqual({ name: 'DATABASE_URL_POOLER', dsn: 'postgresql://pooler' });
+  });
+
+  test('prefers container-reachable edge URL for provider invocation', () => {
+    expect(
+      resolveLabelProviderInvokeUrl({
+        SUPABASE_URL: 'http://127.0.0.1:57429',
+        EDGE_SUPABASE_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429',
+      }),
+    ).toBe('http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429/functions/v1/label-renderer');
+  });
+
+  test('allows an explicit full provider invoke URL override', () => {
+    expect(
+      resolveLabelProviderInvokeUrl({
+        SUPABASE_URL: 'https://project.supabase.co',
+        EDGE_SUPABASE_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429',
+        LABEL_PROVIDER_INVOKE_URL: 'https://edge.example.test/functions/v1/label-renderer/',
+      }),
+    ).toBe('https://edge.example.test/functions/v1/label-renderer');
   });
 });

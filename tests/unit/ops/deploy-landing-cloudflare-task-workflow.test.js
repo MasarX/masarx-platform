@@ -21,6 +21,9 @@ describe('deploy-landing-cloudflare-task workflow guards', () => {
     expect(body).toContain('LANDING_PAGES_DEPLOY_GUARD');
     expect(body).toContain('LANDING_CONTACT_ENDPOINT');
     expect(body).toContain('LANDING_TENANT_SIGNUP_ENDPOINT: ${{ vars.LANDING_TENANT_SIGNUP_ENDPOINT }}');
+    expect(body).toContain('LANDING_DRIVER_SIGNUP_ENDPOINT: ${{ vars.LANDING_DRIVER_SIGNUP_ENDPOINT }}');
+    expect(body).toContain('LANDING_DRIVER_STATUS_ENDPOINT: ${{ vars.LANDING_DRIVER_STATUS_ENDPOINT }}');
+    expect(body).toContain('LANDING_CLIENTS_ENDPOINT: ${{ vars.LANDING_CLIENTS_ENDPOINT }}');
     expect(body).toContain('LANDING_LEGACY_DOMAINS: ${{ vars.LANDING_LEGACY_DOMAINS }}');
     expect(body).toContain('RUNNER_LABELS_CI_PLAYWRIGHT_JSON');
     expect(body).toContain('RUNNER_LABELS_CI_PRIVILEGED_PROD_JSON');
@@ -31,6 +34,13 @@ describe('deploy-landing-cloudflare-task workflow guards', () => {
     expect(body).toContain('Missing environment variable CLOUDFLARE_ACCOUNT_ID');
     expect(body).toContain('Missing environment variable CLOUDFLARE_ZONE_NAME');
     expect(body).toContain('Missing environment variable CLOUDFLARE_PAGES_PROJECT_LANDING');
+    expect(body).toContain('Missing environment variable LANDING_DRIVER_SIGNUP_ENDPOINT');
+    expect(body).toContain('Missing environment variable LANDING_DRIVER_STATUS_ENDPOINT');
+    expect(body).toContain('LANDING_DRIVER_SIGNUP_ENDPOINT must point to the driver signup intake endpoint');
+    expect(body).toContain('LANDING_DRIVER_STATUS_ENDPOINT must point to the driver application status endpoint');
+    expect(body).toContain('Missing environment variable LANDING_CLIENTS_ENDPOINT');
+    expect(body).toContain('LANDING_CLIENTS_ENDPOINT must point to the marketing-lead-intake clients feed');
+    expect(body).toContain('*/marketing-lead-intake/clients');
   });
 
   test('builds and deploys landing using dynamic env-driven project + branch inputs', () => {
@@ -44,6 +54,8 @@ describe('deploy-landing-cloudflare-task workflow guards', () => {
     expect(body).toContain('Start landing E2E server (prebuilt artifact)');
     expect(body).toContain('LANDING_SKIP_BUILD=1');
     expect(body).toContain('LANDING_BASE_URL: "http://landing-ci.localhost:3333"');
+    expect(body).toContain('LANDING_TENANT_SIGNUP_ENDPOINT: "/__tenant-signup"');
+    expect(body).toContain('LANDING_CLIENTS_ENDPOINT: "/__marketing-lead-intake/clients"');
     expect(body).toContain('node scripts/ops/ci/install-playwright-chromium.js');
     expect(body).not.toContain('npx playwright install chromium');
     expect(body).toContain('Stop landing E2E server');

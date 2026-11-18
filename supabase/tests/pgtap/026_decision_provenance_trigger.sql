@@ -12,24 +12,64 @@ SELECT plan(2);
 DO $$
 DECLARE
   v_org UUID := 'aaaa6666-0000-0000-0000-000000006601';
+  v_client UUID := 'aaaa6666-0000-0000-0000-000000006611';
+  v_sender UUID := 'aaaa6666-0000-0000-0000-000000006621';
   v_map UUID := 'bbbb6666-0000-0000-0000-000000006601';
   v_src UUID := 'cccc6666-0000-0000-0000-000000006601';
   v_inbox UUID := 'dddd6666-0000-0000-0000-000000006601';
   v_corr UUID := 'eeee6666-0000-0000-0000-000000006601';
 BEGIN
+  -- This fixture owns source-binding setup. Defer organization bootstrap until
+  -- the sender/client context exists, then run canonical onboarding explicitly.
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
   INSERT INTO organizations (id, name, slug)
   VALUES (v_org, 'Provenance Org', 'provenance-org')
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT (id) DO UPDATE
+  SET name = EXCLUDED.name,
+      slug = EXCLUDED.slug,
+      updated_at = now();
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
+  INSERT INTO clients (id, organization_id, name, slug, status)
+  VALUES (v_client, v_org, 'Provenance Client', 'provenance-client', 'active')
+  ON CONFLICT (id) DO UPDATE
+  SET organization_id = EXCLUDED.organization_id,
+      name = EXCLUDED.name,
+      slug = EXCLUDED.slug,
+      status = EXCLUDED.status,
+      updated_at = now();
+
+  INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+  VALUES (v_sender, v_client, 'Provenance Sender', 'Provenance Sender', false, true, 'active')
+  ON CONFLICT (id) DO UPDATE
+  SET client_id = EXCLUDED.client_id,
+      name = EXCLUDED.name,
+      brand_name = EXCLUDED.brand_name,
+      status = EXCLUDED.status,
+      updated_at = now();
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(
+    v_org,
+    'pgtap:decision-provenance-fixture-bootstrap'
+  );
 
   INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
   VALUES (v_map, 'webhook_inbound', 'pgtap::provenance', '{}'::jsonb, 1, 'pgtap provenance test')
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO webhook_sources (
-    id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled
+    id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, sender_id, enabled
   ) VALUES (
-    v_src, v_org, 'pgtap-provenance', 'PGTAP Provenance Source', 'provider', 'pgtap-token', v_map, TRUE
-  ) ON CONFLICT (id) DO NOTHING;
+    v_src, v_org, 'pgtap-provenance', 'PGTAP Provenance Source', 'provider', 'pgtap-token', v_map, v_sender, TRUE
+  ) ON CONFLICT (id) DO UPDATE
+  SET organization_id = EXCLUDED.organization_id,
+      source_identifier = EXCLUDED.source_identifier,
+      name = EXCLUDED.name,
+      provider_type = EXCLUDED.provider_type,
+      mapping_config_id = EXCLUDED.mapping_config_id,
+      sender_id = EXCLUDED.sender_id,
+      enabled = EXCLUDED.enabled,
+      updated_at = now();
 
   -- Minimal inbox row with policy metadata for provenance trigger
   INSERT INTO webhook_inbox (

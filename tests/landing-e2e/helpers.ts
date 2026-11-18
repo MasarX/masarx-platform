@@ -2,6 +2,8 @@ import type { Page, Route } from "@playwright/test";
 
 export const LANDING_CONTACT_ENDPOINT_MOCK = "/__landing-contact";
 export const LANDING_CONTACT_ROUTE = `**${LANDING_CONTACT_ENDPOINT_MOCK}`;
+export const LANDING_TENANT_SIGNUP_ENDPOINT_MOCK = "/__tenant-signup";
+export const LANDING_TENANT_SIGNUP_ROUTE = `**${LANDING_TENANT_SIGNUP_ENDPOINT_MOCK}`;
 export const LANDING_DRIVER_SIGNUP_ENDPOINT_MOCK = "/__driver-signup";
 export const LANDING_DRIVER_SIGNUP_ROUTE = `**${LANDING_DRIVER_SIGNUP_ENDPOINT_MOCK}`;
 export const LANDING_DRIVER_STATUS_ENDPOINT_MOCK = "/__driver-status";
@@ -11,6 +13,7 @@ export const LANDING_TRACKING_ROUTE = `**${LANDING_TRACKING_ENDPOINT_MOCK}/**`;
 
 type RuntimePatchOptions = {
   appUrl?: string;
+  clientsEndpoint?: string;
   contactEndpoint?: string;
   tenantSignupEndpoint?: string;
   driverSignupEndpoint?: string;
@@ -23,6 +26,7 @@ type RuntimePatchMap = Record<string, string>;
 
 function buildRuntimePatch({
   appUrl,
+  clientsEndpoint,
   contactEndpoint,
   tenantSignupEndpoint,
   driverSignupEndpoint,
@@ -33,16 +37,11 @@ function buildRuntimePatch({
   const runtimePatch: RuntimePatchMap = {};
 
   if (typeof appUrl === "string") runtimePatch.appUrl = appUrl;
+  if (typeof clientsEndpoint === "string") runtimePatch.clientsEndpoint = clientsEndpoint;
   if (typeof contactEndpoint === "string") runtimePatch.contactEndpoint = contactEndpoint;
 
-  const resolvedTenantSignupEndpoint =
-    typeof tenantSignupEndpoint === "string"
-      ? tenantSignupEndpoint
-      : typeof contactEndpoint === "string"
-        ? contactEndpoint
-        : null;
-  if (typeof resolvedTenantSignupEndpoint === "string") {
-    runtimePatch.tenantSignupEndpoint = resolvedTenantSignupEndpoint;
+  if (typeof tenantSignupEndpoint === "string") {
+    runtimePatch.tenantSignupEndpoint = tenantSignupEndpoint;
   }
 
   const resolvedDriverSignupEndpoint =
@@ -83,6 +82,7 @@ export function mergeRuntimeConfig(
 
 export async function patchRuntimeConfig(page: Page, {
   appUrl,
+  clientsEndpoint,
   contactEndpoint,
   tenantSignupEndpoint,
   driverSignupEndpoint,
@@ -92,6 +92,7 @@ export async function patchRuntimeConfig(page: Page, {
 }: RuntimePatchOptions = {}): Promise<void> {
   const runtimePatch = buildRuntimePatch({
     appUrl,
+    clientsEndpoint,
     contactEndpoint,
     tenantSignupEndpoint,
     driverSignupEndpoint,
@@ -160,6 +161,20 @@ export async function mockContactEndpoint(
   responseFn: (route: Route) => Promise<void>,
 ): Promise<void> {
   await page.route(LANDING_CONTACT_ROUTE, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+
+    await responseFn(route);
+  });
+}
+
+export async function mockTenantSignupEndpoint(
+  page: Page,
+  responseFn: (route: Route) => Promise<void>,
+): Promise<void> {
+  await page.route(LANDING_TENANT_SIGNUP_ROUTE, async (route) => {
     if (route.request().method() !== "POST") {
       await route.continue();
       return;

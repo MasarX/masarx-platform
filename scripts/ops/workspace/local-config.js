@@ -66,7 +66,11 @@ function escapeRegExp(value) {
 }
 
 function normalizeSupabaseProjectId(projectId) {
-  return String(projectId || '').trim().slice(0, SUPABASE_LOCAL_PROJECT_ID_MAX_LENGTH);
+  const normalized = String(projectId || '')
+    .trim()
+    .slice(0, SUPABASE_LOCAL_PROJECT_ID_MAX_LENGTH)
+    .replace(/[-_]+$/u, '');
+  return normalized || 'masarx-local';
 }
 
 function resolveWorkspaceProjectId(workspaceId) {

@@ -15,6 +15,8 @@ AS $function$
 DECLARE
   v_navigation JSONB := NULL;
   v_org UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
   v_registry JSONB := NULL;
   v_console_navigation JSONB := NULL;
@@ -30,19 +32,29 @@ BEGIN
    LIMIT 1;
 
   RETURN NEXT ok(
-    v_navigation#>'{apps,console,sections}' @> jsonb_build_array(
-      jsonb_build_object(
-        'id', 'operations',
-        'items', jsonb_build_array(
-          jsonb_build_object('id', 'console-zones', 'href', '/console/resources/zones', 'resource', 'zones'),
-          jsonb_build_object('id', 'console-zone-districts', 'href', '/console/resources/zone_districts', 'resource', 'zone_districts'),
-          jsonb_build_object('id', 'console-baskets', 'href', '/console/resources/baskets', 'resource', 'baskets'),
-          jsonb_build_object('id', 'console-basket-items', 'href', '/console/resources/basket_items', 'resource', 'basket_items'),
-          jsonb_build_object('id', 'console-basket-transitions', 'href', '/console/resources/basket_transitions', 'resource', 'basket_transitions')
+    COALESCE((
+      SELECT bool_or(
+        COALESCE(item.value->>'route', item.value->>'href', '') = '/operate/baskets'
+        AND item.value->>'label' = 'Basket policy'
+        AND item.value->>'resource' = 'baskets'
+        AND item.value->>'capability' = 'baskets.read'
+      )
+      FROM jsonb_array_elements(COALESCE(v_navigation#>'{apps,console,sections}', '[]'::jsonb)) AS section(value)
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(section.value->'items', '[]'::jsonb)) AS item(value)
+    ), false)
+    AND NOT COALESCE((
+      SELECT bool_or(
+        COALESCE(item.value->>'resource', '') IN ('basket_items', 'basket_transitions')
+        OR COALESCE(item.value->>'route', item.value->>'href', '') IN (
+          '/console/resources/baskets',
+          '/console/resources/basket_items',
+          '/console/resources/basket_transitions'
         )
       )
-    ),
-    'ui_navigation global console settings include B04 zone and basket routes'
+      FROM jsonb_array_elements(COALESCE(v_navigation#>'{apps,console,sections}', '[]'::jsonb)) AS section(value)
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(section.value->'items', '[]'::jsonb)) AS item(value)
+    ), false),
+    'ui_navigation global console settings expose the Basket policy workbench without raw basket table routes'
   );
 
   RETURN NEXT ok(
@@ -67,22 +79,30 @@ BEGIN
       FROM public.settings
       WHERE category = 'ui_navigation'
         AND COALESCE(cached_value#>'{apps,console,sections}', '[]'::jsonb) <> '[]'::jsonb
-        AND NOT (
-          cached_value#>'{apps,console,sections}' @> jsonb_build_array(
-            jsonb_build_object(
-              'id', 'operations',
-              'items', jsonb_build_array(
-                jsonb_build_object('id', 'console-zones', 'href', '/console/resources/zones', 'resource', 'zones'),
-                jsonb_build_object('id', 'console-zone-districts', 'href', '/console/resources/zone_districts', 'resource', 'zone_districts'),
-                jsonb_build_object('id', 'console-baskets', 'href', '/console/resources/baskets', 'resource', 'baskets'),
-                jsonb_build_object('id', 'console-basket-items', 'href', '/console/resources/basket_items', 'resource', 'basket_items'),
-                jsonb_build_object('id', 'console-basket-transitions', 'href', '/console/resources/basket_transitions', 'resource', 'basket_transitions')
+        AND (
+          NOT EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(COALESCE(cached_value#>'{apps,console,sections}', '[]'::jsonb)) AS section(value)
+            CROSS JOIN LATERAL jsonb_array_elements(COALESCE(section.value->'items', '[]'::jsonb)) AS item(value)
+            WHERE COALESCE(item.value->>'route', item.value->>'href', '') = '/operate/baskets'
+              AND item.value->>'label' = 'Basket policy'
+              AND item.value->>'resource' = 'baskets'
+              AND item.value->>'capability' = 'baskets.read'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(COALESCE(cached_value#>'{apps,console,sections}', '[]'::jsonb)) AS section(value)
+            CROSS JOIN LATERAL jsonb_array_elements(COALESCE(section.value->'items', '[]'::jsonb)) AS item(value)
+            WHERE COALESCE(item.value->>'resource', '') IN ('basket_items', 'basket_transitions')
+              OR COALESCE(item.value->>'route', item.value->>'href', '') IN (
+                '/console/resources/baskets',
+                '/console/resources/basket_items',
+                '/console/resources/basket_transitions'
               )
-            )
           )
         )
     ),
-    'all scoped console ui_navigation rows include B04 zone and basket routes'
+    'all scoped console ui_navigation rows expose the Basket policy workbench without raw basket table routes'
   );
 
   RETURN NEXT ok(
@@ -109,8 +129,25 @@ BEGIN
     'all scoped portal ui_navigation rows include B04 zone and basket routes'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'B04 Discoverability Org', 'b04-discoverability-' || left(v_org::text, 8));
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES (
+    v_client,
+    v_org,
+    'B04 Discoverability Client',
+    'b04-discoverability-client-' || left(v_client::text, 8),
+    'active'
+  );
+
+  INSERT INTO public.senders (id, client_id, name, status)
+  VALUES (v_sender, v_client, 'B04 Discoverability Sender', 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:b04-discoverability-fixture-bootstrap');
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type)
   VALUES (
@@ -174,18 +211,22 @@ BEGIN
       SELECT 1
       FROM jsonb_array_elements(COALESCE(v_console_navigation->'sections', '[]'::jsonb)) AS section(value)
       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(section.value->'items', '[]'::jsonb)) AS item(value)
-      WHERE section.value->>'id' = 'operations'
-        AND item.value->>'resource' IN (
-          'zones',
-          'zone_districts',
-          'baskets',
-          'basket_items',
-          'basket_transitions'
+      WHERE COALESCE(item.value->>'route', item.value->>'href', '') = '/operate/baskets'
+        AND item.value->>'label' = 'Basket policy'
+        AND item.value->>'resource' = 'baskets'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(COALESCE(v_console_navigation->'sections', '[]'::jsonb)) AS section(value)
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(section.value->'items', '[]'::jsonb)) AS item(value)
+      WHERE COALESCE(item.value->>'resource', '') IN ('basket_items', 'basket_transitions')
+        OR COALESCE(item.value->>'route', item.value->>'href', '') IN (
+          '/console/resources/baskets',
+          '/console/resources/basket_items',
+          '/console/resources/basket_transitions'
         )
-      GROUP BY section.value->>'id'
-      HAVING COUNT(DISTINCT item.value->>'resource') = 5
     ),
-    'ui_navigation_v1(console) returns all B04 zone and basket routes to an authenticated tenant user'
+    'ui_navigation_v1(console) returns the Basket policy workbench and hides raw basket table routes'
   );
 
   v_portal_navigation := public.ui_navigation_v1('portal');

@@ -7,13 +7,33 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(6);
 
 -- Fixtures --------------------------------------------------------------------
+-- This fixture owns client/sender setup. Defer organization bootstrap until
+-- the source-binding context exists, then run canonical onboarding explicitly.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO organizations (id, name, slug)
 VALUES ('aaaa0000-0000-0000-0000-000000000002', 'Function Org', 'function-org')
 ON CONFLICT (id) DO NOTHING;
+SELECT set_config('app.organization_onboarding_source', '', true);
 
-INSERT INTO clients (id, organization_id, name, slug)
-VALUES ('bbbb0000-0000-0000-0000-000000000002', 'aaaa0000-0000-0000-0000-000000000002', 'Function Client', 'function-client')
+INSERT INTO clients (id, organization_id, name, slug, status)
+VALUES ('bbbb0000-0000-0000-0000-000000000002', 'aaaa0000-0000-0000-0000-000000000002', 'Function Client', 'function-client', 'active')
 ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+    'bbbb0000-0000-0000-0000-000000000102',
+    'bbbb0000-0000-0000-0000-000000000002',
+    'Function Sender',
+    'Function Sender',
+    FALSE,
+    TRUE,
+    'active'
+) ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+    'aaaa0000-0000-0000-0000-000000000002',
+    'pgtap:db-functions-fixture-bootstrap'
+);
 
 INSERT INTO providers (id, organization_id, name, provider_type)
 VALUES ('cccc0000-0000-0000-0000-000000000002', 'aaaa0000-0000-0000-0000-000000000002', 'Function Provider', 'http')

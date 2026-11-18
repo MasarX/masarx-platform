@@ -551,9 +551,18 @@ export async function handleResourceImportRequest(request: NextRequest) {
         requestId,
       );
     }
+    const reason = asString(payload.body.reason);
+    if (!reason) {
+      return jsonResponseWithRequestId(
+        { error: "Cancel requires a non-empty operator reason.", requestId },
+        400,
+        requestId,
+      );
+    }
 
     const { data, error } = await userClient.rpc("ui_cancel_tabular_import_run_v1", {
       p_run_id: runId,
+      p_cancel_reason: reason,
     });
     if (error) {
       throw new Error(error.message || "Failed to cancel import run");

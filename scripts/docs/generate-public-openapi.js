@@ -156,7 +156,11 @@ function buildCompatOperation(route) {
     tags: ['API Gateway'],
     operationId: operationId || undefined,
     summary: summaryParts.join(' - '),
-    description: 'Mirrored upstream endpoint. Request and response are passed through unchanged.',
+    description: [
+      'Mirrored upstream endpoint. Request and response shape are route-policy driven.',
+      'Routes with `delivery.mode=proxy` return the upstream response unchanged.',
+      'Shipment-creating routes default to `delivery.mode=accepted_async` and run through the API Gateway shipment-create workflow: materialize request context, dispatch the provider call, wait for canonical shipment readback, and expose workflow/request/shipment lineage in Console.',
+    ].join(' '),
     security: [
       { WebhookBearer: [] },
       { WebhookHeader: [] },

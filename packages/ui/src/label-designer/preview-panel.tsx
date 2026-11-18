@@ -64,11 +64,12 @@ export function PreviewPanel({
   onLoadSamplePayload,
   onPreviewDraft,
 }: PreviewPanelProps) {
-  const [showDebugJson, setShowDebugJson] = React.useState(false);
+  const [showPreviewDetails, setShowPreviewDetails] = React.useState(false);
   const pdfBase64 = React.useMemo(
     () => extractPdfBase64(previewResponseJson),
     [previewResponseJson],
   );
+  const supportsPdfPreview = typeof window !== "undefined" && typeof window.DOMMatrix === "function";
 
   return (
     <Section
@@ -144,28 +145,37 @@ export function PreviewPanel({
       </div>
 
       {/* PDF Preview */}
-      <ErrorBoundary
-        fallback={
-          <div className="flex items-center justify-center rounded-lg border border-ui-danger/30 bg-ui-danger/5 p-4 text-sm text-ui-danger">
-            PDF viewer failed to load. Check the raw response below for preview data.
-          </div>
-        }
-      >
-        <React.Suspense
+      {supportsPdfPreview ? (
+        <ErrorBoundary
           fallback={
-            <div className="flex items-center justify-center rounded-lg border border-dashed border-ui-border/50 bg-ui-paper/30 p-8 text-sm text-ui-muted">
-              {t("pdfLoading")}
+            <div className="flex items-center justify-center rounded-lg border border-ui-danger/30 bg-ui-danger/5 p-4 text-sm text-ui-danger">
+              PDF viewer failed to load. Check the preview response details below.
             </div>
           }
         >
-          <LazyPdfPreview
-            pdfBase64={pdfBase64}
-            testIdPrefix={`${prefix}-pdf`}
-          />
-        </React.Suspense>
-      </ErrorBoundary>
+          <React.Suspense
+            fallback={
+              <div className="flex items-center justify-center rounded-lg border border-dashed border-ui-border/50 bg-ui-paper/30 p-8 text-sm text-ui-muted">
+                {t("pdfLoading")}
+              </div>
+            }
+          >
+            <LazyPdfPreview
+              pdfBase64={pdfBase64}
+              testIdPrefix={`${prefix}-pdf`}
+            />
+          </React.Suspense>
+        </ErrorBoundary>
+      ) : (
+        <div
+          className="flex items-center justify-center rounded-lg border border-dashed border-ui-border/50 bg-ui-paper/30 p-8 text-sm text-ui-muted"
+          data-testid={`${prefix}-pdf-unavailable`}
+        >
+          {pdfBase64 ? "PDF preview is available in the browser; preview response details are retained below." : t("pdfEmpty")}
+        </div>
+      )}
 
-      {/* Sample payload + debug JSON */}
+      {/* Sample payload + preview response details */}
       <div className="space-y-2">
         <div className="space-y-1">
           <label className="text-xs font-medium text-ui-muted">
@@ -184,12 +194,12 @@ export function PreviewPanel({
           <button
             type="button"
             className="text-xs font-medium text-ui-muted underline decoration-dotted hover:text-ui-ink"
-            onClick={() => setShowDebugJson((v) => !v)}
-            data-testid={`${prefix}-toggle-debug`}
+            onClick={() => setShowPreviewDetails((v) => !v)}
+            data-testid={`${prefix}-toggle-preview-details`}
           >
-            {showDebugJson ? t("hideDebug") : t("showDebug")}
+            {showPreviewDetails ? t("hideDetails") : t("showDetails")}
           </button>
-          {showDebugJson ? (
+          {showPreviewDetails ? (
             <Textarea
               value={previewResponseJson || "{}"}
               readOnly

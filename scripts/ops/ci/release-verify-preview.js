@@ -87,6 +87,115 @@ function isProtectedPreviewHost(raw) {
   }
 }
 
+function normalizeLandingProofEndpoint(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  try {
+    const parsed = value.startsWith('/')
+      ? new URL(value, 'https://landing-proof.local')
+      : new URL(value);
+    parsed.search = '';
+    parsed.hash = '';
+    const pathname = (parsed.pathname || '/').replace(/\/+$/g, '') || '/';
+    return value.startsWith('/')
+      ? pathname
+      : `${parsed.protocol.toLowerCase()}//${parsed.hostname.toLowerCase()}${parsed.port ? `:${parsed.port}` : ''}${pathname}`;
+  } catch {
+    return value
+      .replace(/[?#].*$/g, '')
+      .replace(/\/+$/g, '');
+  }
+}
+
+function landingProofEndpointPathname(raw) {
+  const endpoint = normalizeLandingProofEndpoint(raw);
+  if (!endpoint) return '';
+  if (endpoint.startsWith('/')) return endpoint;
+  try {
+    return new URL(endpoint).pathname.replace(/\/+$/g, '') || '/';
+  } catch {
+    return endpoint.replace(/[?#].*$/g, '').replace(/\/+$/g, '');
+  }
+}
+
+function isMarketingLeadIntakeEndpoint(raw) {
+  return /(^|\/)marketing-lead-intake$/.test(landingProofEndpointPathname(raw));
+}
+
+function isTenantSignupIntakeEndpoint(raw) {
+  return /(^|\/)tenant-signup-intake$/.test(landingProofEndpointPathname(raw));
+}
+
+function isLocalLandingContactEndpoint(raw) {
+  return landingProofEndpointPathname(raw) === '/__landing-contact';
+}
+
+function isLocalTenantSignupEndpoint(raw) {
+  return landingProofEndpointPathname(raw) === '/__tenant-signup';
+}
+
+function isLocalSiteUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  try {
+    const hostname = new URL(raw).hostname.toLowerCase();
+    return (
+      hostname === 'localhost' ||
+      hostname.endsWith('.localhost') ||
+      hostname === '127.0.0.1' ||
+      hostname === '[::1]' ||
+      hostname === '::1'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function assertLandingEndpointSeparation({
+  contactEndpoint,
+  siteUrl,
+  tenantSignupEndpoint,
+} = {}) {
+  const contact = normalizeLandingProofEndpoint(contactEndpoint);
+  const tenantSignup = normalizeLandingProofEndpoint(tenantSignupEndpoint);
+  const allowLocalPreviewMocks = isLocalSiteUrl(siteUrl);
+
+  if (!contact) {
+    throw new Error('LANDING_CONTACT_ENDPOINT is required for release landing proof.');
+  }
+  if (!tenantSignup) {
+    throw new Error(
+      'LANDING_TENANT_SIGNUP_ENDPOINT is required for release landing proof and must not fall back to the contact endpoint.',
+    );
+  }
+  if (
+    !isMarketingLeadIntakeEndpoint(contact) &&
+    !(allowLocalPreviewMocks && isLocalLandingContactEndpoint(contact))
+  ) {
+    throw new Error(
+      'LANDING_CONTACT_ENDPOINT must point to the marketing-lead-intake intake endpoint, or the approved local preview contact endpoint.',
+    );
+  }
+  if (
+    !isTenantSignupIntakeEndpoint(tenantSignup) &&
+    !(allowLocalPreviewMocks && isLocalTenantSignupEndpoint(tenantSignup))
+  ) {
+    throw new Error(
+      'LANDING_TENANT_SIGNUP_ENDPOINT must point to the tenant-signup-intake intake endpoint, or the approved local preview signup endpoint.',
+    );
+  }
+  if (contact === tenantSignup) {
+    throw new Error(
+      'LANDING_TENANT_SIGNUP_ENDPOINT must point to tenant-signup-intake and must not reuse LANDING_CONTACT_ENDPOINT.',
+    );
+  }
+
+  return {
+    contactEndpoint: contact,
+    tenantSignupEndpoint: tenantSignup,
+  };
+}
+
 async function ensureProtectedPreviewBypass({
   env = process.env,
   fetchImpl = globalThis.fetch,
@@ -176,6 +285,16 @@ async function main(argv = process.argv.slice(2)) {
       return;
     }
 
+    case 'assert-landing-endpoint-separation': {
+      assertLandingEndpointSeparation({
+        contactEndpoint: process.env.LANDING_CONTACT_ENDPOINT,
+        siteUrl: process.env.LANDING_SITE_URL,
+        tenantSignupEndpoint: process.env.LANDING_TENANT_SIGNUP_ENDPOINT,
+      });
+      console.log('[release-verify] Landing proof endpoints are separated.');
+      return;
+    }
+
     default:
       throw new Error(`Unsupported --mode "${mode}".`);
   }
@@ -187,9 +306,11 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertLandingEndpointSeparation,
   buildPreviewManifestShellExports,
   ensureProtectedPreviewBypass,
   isProtectedPreviewHost,
+  normalizeLandingProofEndpoint,
   resolvePreviewIdentityIdFromEvent,
   serializeShellExports,
 };

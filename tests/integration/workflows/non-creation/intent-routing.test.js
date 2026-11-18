@@ -119,6 +119,7 @@ describe('Non-creation workflow intake intent routing', () => {
   async function seedSourceWithPolicy(intent, templateRef, workflowOverrides = {}) {
     const organizationId = randomUUID();
     const clientId = randomUUID();
+    const senderId = randomUUID();
     const mappingId = randomUUID();
     const sourceId = randomUUID();
     const token = `tok-${randomUUID()}`;
@@ -139,6 +140,12 @@ describe('Non-creation workflow intake intent routing', () => {
     );
 
     await client.query(
+      `INSERT INTO senders (id, client_id, name, brand_name, status)
+       VALUES ($1::uuid, $2::uuid, $3::text, $3::text, 'active')`,
+      [senderId, clientId, `NonCreation Sender ${intent}`]
+    );
+
+    await client.query(
       `INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
        VALUES ($1::uuid, 'webhook_inbound', $2::text, '{}'::jsonb, 1, 'non-creation test mapping')`,
       [mappingId, `non-create-${intent}-${Date.now()}`]
@@ -153,6 +160,7 @@ describe('Non-creation workflow intake intent routing', () => {
          provider_type,
          auth_token,
          mapping_config_id,
+         sender_id,
          enabled
        )
        VALUES (
@@ -163,9 +171,10 @@ describe('Non-creation workflow intake intent routing', () => {
          'provider',
          $5::text,
          $6::uuid,
+         $7::uuid,
          TRUE
        )`,
-      [sourceId, organizationId, sourceSlug, `Non-Creation Source ${intent}`, token, mappingId]
+      [sourceId, organizationId, sourceSlug, `Non-Creation Source ${intent}`, token, mappingId, senderId]
     );
 
     const templateCandidates = Array.isArray(templateRef) ? templateRef : [templateRef];
@@ -197,6 +206,7 @@ describe('Non-creation workflow intake intent routing', () => {
     return {
       organizationId,
       clientId,
+      senderId,
       sourceId,
       token,
       templateId

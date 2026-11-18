@@ -105,7 +105,7 @@ function buildTimelineFacts(event: UiShipmentTimelineEvent) {
     facts.push({ label, value: resolved });
   };
 
-  appendFact("Actor", event.actor);
+  appendFact("Changed by", event.actor);
 
   switch (event.event_source) {
     case "shipment_action":
@@ -114,12 +114,12 @@ function buildTimelineFacts(event: UiShipmentTimelineEvent) {
       appendFact("Investigation", metadata?.investigation_status);
       break;
     case "decision_log":
-      appendFact("Decision point", metadata?.decision_point);
+      appendFact("Decision", metadata?.decision_point);
       appendFact("Reason", metadata?.decision_reason);
-      appendFact("Settings resolution", metadata?.settings_resolution_id);
+      appendFact("Policy", metadata?.settings_resolution_id ? "Recorded" : null);
       break;
     case "domain_event":
-      appendFact("Workflow run", metadata?.workflow_run_id);
+      appendFact("Workflow", metadata?.workflow_run_id ? "Recorded" : null);
       appendFact("Processed at", metadata?.processed_at);
       appendFact("Error", metadata?.error_reason);
       break;
@@ -219,7 +219,7 @@ function renderShipmentTimelineSection(params: {
                         href={traceHref}
                         data-testid={`${testIdPrefix}-shipment-timeline-trace-${index}`}
                       >
-                        Open trace
+                        Open activity history
                       </a>
                     ) : null}
                   </div>
@@ -396,7 +396,7 @@ export async function ShipmentResourcePage({
     <div className="space-y-6">
       <Section
         title="Shipment search"
-        description="Find a shipment by shipment ID, tracking number, order reference, phone number, or correlation ID."
+        description="Find a shipment by shipment reference, tracking number, order reference, phone number, or activity reference."
         collapsible
         collapseKey="shipments.search"
         testId={`${testIdPrefix}-shipment-search`}
@@ -406,7 +406,7 @@ export async function ShipmentResourcePage({
           defaultValue={identifier}
           paramKey="identifier"
           label="Identifier"
-          placeholder="Tracking, order, phone, shipment ID, or correlation ID"
+          placeholder="Tracking, order, phone, shipment reference, or activity reference"
           searchLabel="Search shipments"
           clearLabel="Clear search"
           resourceKey="shipments"

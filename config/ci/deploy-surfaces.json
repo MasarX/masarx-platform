@@ -333,6 +333,8 @@
         "LANDING_CONTACT_ENDPOINT",
         "LANDING_CLIENTS_ENDPOINT",
         "LANDING_TENANT_SIGNUP_ENDPOINT",
+        "LANDING_DRIVER_SIGNUP_ENDPOINT",
+        "LANDING_DRIVER_STATUS_ENDPOINT",
         "LANDING_PAGES_DEPLOY_GUARD",
         "LANDING_TURNSTILE_SITE_KEY",
         "LANDING_APP_URL",
@@ -370,7 +372,7 @@
       "surface_id": "console",
       "display_name": "Console (Vercel)",
       "paths_include_re": [
-        "^apps/console/",
+        "^apps/console-v2/",
         "^packages/",
         "^scripts/ops/vercel/",
         "^scripts/ops/verify-cloud-ui\\.js$",
@@ -478,7 +480,7 @@
           {
             "profile": "full",
             "include_re": [
-              "^apps/console/",
+              "^apps/console-v2/",
               "^packages/",
               "^scripts/ops/vercel/",
               "^tests/ui/",

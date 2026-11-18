@@ -32,6 +32,27 @@ const seedData = async (client) => {
     )
     ON CONFLICT (id) DO NOTHING;
 
+    INSERT INTO clients (id, organization_id, name, slug, sla_tier, status)
+    VALUES (
+      'dddd1000-0000-0000-0000-000000000004',
+      'aaaa1000-0000-0000-0000-000000000004',
+      'Webhook Client',
+      'webhook-client',
+      'standard',
+      'active'
+    )
+    ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO senders (id, client_id, name, brand_name, status)
+    VALUES (
+      'eeee1000-0000-0000-0000-000000000004',
+      'dddd1000-0000-0000-0000-000000000004',
+      'Webhook Sender',
+      'Webhook Sender',
+      'active'
+    )
+    ON CONFLICT (id) DO NOTHING;
+
     INSERT INTO workflow_templates (
       id, name, description, version, status, scope_type, scope_id
     ) VALUES (
@@ -46,7 +67,7 @@ const seedData = async (client) => {
     ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO webhook_sources (
-      id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled
+      id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, sender_id, enabled
     ) VALUES (
       'bbbb1000-0000-0000-0000-000000000004',
       'aaaa1000-0000-0000-0000-000000000004',
@@ -55,9 +76,13 @@ const seedData = async (client) => {
       'provider',
       'token-webhook-test',
       'cccc1000-0000-0000-0000-000000000004',
+      'eeee1000-0000-0000-0000-000000000004',
       TRUE
     )
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE
+      SET sender_id = EXCLUDED.sender_id,
+          mapping_config_id = EXCLUDED.mapping_config_id,
+          enabled = EXCLUDED.enabled;
 
   `);
 

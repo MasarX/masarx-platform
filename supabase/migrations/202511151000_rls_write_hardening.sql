@@ -22,7 +22,7 @@ BEGIN
             'addresses_rls_policy'
         )
     LOOP
-        EXECUTE format('DROP POLICY %I ON %I.%I', r.policyname, r.schemaname, r.tablename);
+        EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', r.policyname, r.schemaname, r.tablename);
     END LOOP;
 END;
 $$;

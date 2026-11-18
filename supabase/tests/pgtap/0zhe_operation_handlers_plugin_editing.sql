@@ -4,7 +4,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(5);
+SELECT plan(6);
 
 CREATE TEMP TABLE pgtap_operation_handlers_plugin_edit_ctx (
   org_id UUID NOT NULL,
@@ -18,6 +18,8 @@ VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid
 
 SET LOCAL ROLE postgres;
 
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO organizations (id, name, slug)
 SELECT
   org_id,
@@ -25,6 +27,8 @@ SELECT
   'plugin-ops-org-' || left(org_id::text, 8)
 FROM pgtap_operation_handlers_plugin_edit_ctx
 LIMIT 1;
+
+SELECT set_config('app.organization_onboarding_source', '', true);
 
 INSERT INTO clients (id, organization_id, name, slug, status)
 SELECT
@@ -35,6 +39,22 @@ SELECT
   'active'
 FROM pgtap_operation_handlers_plugin_edit_ctx
 LIMIT 1;
+
+INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+SELECT
+  gen_random_uuid(),
+  client_id,
+  'Plugin Ops Sender',
+  'Plugin Ops Sender',
+  TRUE,
+  'active'
+FROM pgtap_operation_handlers_plugin_edit_ctx
+LIMIT 1;
+
+SELECT bootstrap_tenant_onboarding_v1(
+  (SELECT org_id FROM pgtap_operation_handlers_plugin_edit_ctx LIMIT 1),
+  'pgtap:operation-handlers-plugin-editing-fixture-bootstrap'
+);
 
 INSERT INTO users (id, organization_id, email, full_name, user_type, access_scope_type, access_scope_id)
 SELECT
@@ -120,6 +140,17 @@ SELECT is(
   ),
   'operation_handlers.write',
   'ui_read_registry operation_handlers capability_write is operation_handlers.write'
+);
+
+SELECT is(
+  (
+    SELECT value->>'write_relation'
+    FROM jsonb_array_elements(public.ui_read_registry_v1()->'resources') AS value
+    WHERE value->>'key' = 'operation_handlers'
+    LIMIT 1
+  ),
+  'public.operation_handlers',
+  'ui_read_registry operation_handlers write_relation is canonical handler table'
 );
 
 SELECT * FROM finish();

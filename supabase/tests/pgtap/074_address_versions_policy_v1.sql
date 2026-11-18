@@ -3,14 +3,36 @@
 BEGIN;
 SELECT plan(11);
 
--- Fixtures (minimal) - mirror patterns used across the suite
+-- Fixtures (minimal) - mirror patterns used across the suite.
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender
+-- context exists and fail-closed plugin activation has truthful binding inputs.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('00000000-0000-0000-0000-000000000074', 'pgtap-org-074', 'pgtap-org-074')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.clients (id, organization_id, name, slug)
-VALUES ('00000000-0000-0000-0000-000000000174', '00000000-0000-0000-0000-000000000074', 'pgtap-client-074', 'pgtap-client-074')
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+VALUES ('00000000-0000-0000-0000-000000000174', '00000000-0000-0000-0000-000000000074', 'pgtap-client-074', 'pgtap-client-074', 'active')
 ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+VALUES (
+  '00000000-0000-0000-0000-000000000374',
+  '00000000-0000-0000-0000-000000000174',
+  'pgtap-sender-074',
+  'pgtap-sender-074',
+  TRUE,
+  'active'
+)
+ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  '00000000-0000-0000-0000-000000000074',
+  'pgtap:address-versions-policy-fixture-bootstrap'
+);
 
 -- Override policy at client scope to make test deterministic
 INSERT INTO public.settings_versions (category, scope_type, scope_id, version, value, approved_at)

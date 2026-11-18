@@ -46,9 +46,24 @@ async function resolveDbCandidate(options = {}) {
   return result.candidate;
 }
 
+function stripTrailingSlash(value) {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+
+function resolveLabelProviderInvokeUrl(env = process.env) {
+  const explicitUrl = stripTrailingSlash(
+    env.LABEL_PROVIDER_INVOKE_URL || env.LABEL_RENDERER_INVOKE_URL,
+  );
+  if (explicitUrl) return explicitUrl;
+
+  const baseUrl = stripTrailingSlash(env.EDGE_SUPABASE_URL || env.SUPABASE_URL);
+  if (!baseUrl) return '';
+  return `${baseUrl}/functions/v1/label-renderer`;
+}
+
 async function main() {
   loadEnv();
-  const { DATABASE_URL, SUPABASE_URL } = process.env;
+  const { DATABASE_URL } = process.env;
   const SECRET =
     process.env.LABEL_PROVIDER_INVOKE_SECRET ||
     process.env.LABEL_RENDERER_BENCHMARK_AUTH_JWT ||
@@ -59,9 +74,10 @@ async function main() {
     process.env.SERVICE_ROLE_KEY;
 
   if (!DATABASE_URL) throw new Error('DATABASE_URL is required');
-  if (!SUPABASE_URL || !SECRET) {
+  const invokeUrl = resolveLabelProviderInvokeUrl(process.env);
+  if (!invokeUrl || !SECRET) {
     throw new Error(
-      'SUPABASE_URL and LABEL_RENDERER_TOKEN/SERVICE_ROLE required',
+      'EDGE_SUPABASE_URL/SUPABASE_URL/LABEL_PROVIDER_INVOKE_URL and LABEL_RENDERER_TOKEN/SERVICE_ROLE required',
     );
   }
 
@@ -71,7 +87,7 @@ async function main() {
       {
         name: 'internal_renderer',
         mode: 'internal',
-        invoke_url: `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/label-renderer`,
+        invoke_url: invokeUrl,
         invoke_secret: SECRET,
         timeout_ms: 20000,
       },
@@ -116,4 +132,5 @@ if (require.main === module) {
 module.exports = {
   resolveDbCandidate,
   resolveDbCandidatePolicy,
+  resolveLabelProviderInvokeUrl,
 };

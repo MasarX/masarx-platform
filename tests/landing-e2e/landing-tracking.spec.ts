@@ -134,6 +134,62 @@ test.describe("landing tracking", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "ar");
   });
 
+  test("keeps request navigation visible before lookup and switches to request forms after verification", async ({ page }) => {
+    let requestCalls = 0;
+    await patchRuntimeConfig(page, {
+      trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockTrackingEndpoint(page, async (route) => {
+      const body = route.request().postDataJSON();
+      const url = new URL(route.request().url());
+
+      if (url.pathname.endsWith("/lookup")) {
+        await routePayload({ ok: true, step: "verify", verification: { phone_digits: 3 } })(route);
+        return;
+      }
+
+      if (url.pathname.endsWith("/verify")) {
+        expect(body.reference).toBe("TRK-2026-0001");
+        expect(body.phone_last3).toBe("123");
+        await routePayload({ ...trackingPayload, session_token: "sess-demo-nav" })(route);
+        return;
+      }
+
+      if (url.pathname.endsWith("/request")) {
+        requestCalls += 1;
+        await routePayload({ ok: false, error: { code: "invalid_request" } }, 400)(route);
+        return;
+      }
+
+      await routePayload({ ok: false, error: { code: "not_found" } }, 404)(route);
+    });
+
+    await page.goto("/track/?motion=off");
+
+    const requestNav = page.locator("#nav-primary").getByRole("link", { name: "Lookup requests" });
+    await expect(requestNav).toHaveAttribute("href", "#lookup");
+    await requestNav.click();
+    await expect(page).toHaveURL(/#lookup$/);
+    await expect(page.locator('[data-track-stage="lookup"]')).toBeVisible();
+    await expect(page.locator("#actions")).toBeHidden();
+    expect(requestCalls).toBe(0);
+
+    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
+    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
+    await page.locator('[data-track-verify-form] button[type="submit"]').click();
+
+    await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
+    const verifiedRequestNav = page.locator("#nav-primary").getByRole("link", { name: "Requests" });
+    await expect(verifiedRequestNav).toHaveAttribute("href", "#actions");
+    await verifiedRequestNav.click();
+    await expect(page).toHaveURL(/#actions$/);
+    await expect(page.locator("#actions")).toBeVisible();
+    await expect(page.locator("#actions").getByRole("heading", { name: "Request help from operations" })).toBeVisible();
+    expect(requestCalls).toBe(0);
+  });
+
   test("lookup, verify, rehydrate, and submit requests against mocked tracking endpoint", async ({ page }) => {
     let requestCalls = 0;
     await patchRuntimeConfig(page, {
@@ -274,7 +330,7 @@ test.describe("landing tracking", () => {
   test("uses hidden turnstile response input as a token fallback", async ({ page }) => {
     await patchRuntimeConfig(page, {
       trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
-      turnstileSiteKey: "1x00000000000000000000AA",
+      turnstileSiteKey: "test-turnstile-site-key",
     });
     await page.route("https://challenges.cloudflare.com/turnstile/**", async (route) => {
       await route.fulfill({
@@ -324,7 +380,7 @@ test.describe("landing tracking", () => {
   test("submits verified-session requests even when a fresh turnstile token is not present", async ({ page }) => {
     await patchRuntimeConfig(page, {
       trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK,
-      turnstileSiteKey: "1x00000000000000000000AA",
+      turnstileSiteKey: "test-turnstile-site-key",
     });
     await page.route("https://challenges.cloudflare.com/turnstile/**", async (route) => {
       await route.fulfill({

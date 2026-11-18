@@ -18,6 +18,8 @@ DECLARE
   v_commands JSONB := NULL;
   v_navigation JSONB := NULL;
   v_org UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_owner UUID := gen_random_uuid();
   v_operator UUID := gen_random_uuid();
   v_device RECORD;
@@ -127,8 +129,25 @@ BEGIN
     'portal operations navigation includes user_devices'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'Device Governance UI Org', 'device-governance-ui-' || left(v_org::text, 8));
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES (
+    v_client,
+    v_org,
+    'Device Governance UI Client',
+    'device-governance-ui-client-' || left(v_client::text, 8),
+    'active'
+  );
+
+  INSERT INTO public.senders (id, client_id, name, status)
+  VALUES (v_sender, v_client, 'Device Governance UI Sender', 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:device-governance-ui-fixture-bootstrap');
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type)
   VALUES

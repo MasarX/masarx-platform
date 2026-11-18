@@ -62,98 +62,104 @@ async function grantSelectRecursive(client, tableName) {
 
 async function createOrganization(client, name, options = {}) {
   const slug = options.slug || randomSlug('org');
-  const { rows } = await client.query(
-    `INSERT INTO organizations (
+  const { rows } = await withFixtureSetupRole(client, () =>
+    client.query(
+      `INSERT INTO organizations (
+          name,
+          slug,
+          timezone,
+          locale,
+          billing_status,
+          default_settings
+        )
+        VALUES (
+          $1,
+          $2,
+          COALESCE($3, 'Asia/Riyadh'),
+          COALESCE($4, 'ar-SA'),
+          COALESCE($5, 'active'),
+          COALESCE($6::jsonb, '{}'::jsonb)
+        )
+        RETURNING id`,
+      [
         name,
         slug,
-        timezone,
-        locale,
-        billing_status,
-        default_settings
-      )
-      VALUES (
-        $1,
-        $2,
-        COALESCE($3, 'Asia/Riyadh'),
-        COALESCE($4, 'ar-SA'),
-        COALESCE($5, 'active'),
-        COALESCE($6::jsonb, '{}'::jsonb)
-      )
-      RETURNING id`,
-    [
-      name,
-      slug,
-      options.timezone,
-      options.locale,
-      options.billingStatus,
-      options.defaultSettings ? JSON.stringify(options.defaultSettings) : null
-    ]
+        options.timezone,
+        options.locale,
+        options.billingStatus,
+        options.defaultSettings ? JSON.stringify(options.defaultSettings) : null
+      ]
+    )
   );
   return { id: rows[0].id, slug };
 }
 
 async function createClient(client, organizationId, name, options = {}) {
   const slug = options.slug || randomSlug('client');
-  const { rows } = await client.query(
-    `INSERT INTO clients (
-        organization_id,
+  const { rows } = await withFixtureSetupRole(client, () =>
+    client.query(
+      `INSERT INTO clients (
+          organization_id,
+          name,
+          slug,
+          sla_tier,
+          status,
+          settings_override
+        )
+        VALUES (
+          $1::uuid,
+          $2,
+          $3,
+          COALESCE($4, 'standard'),
+          COALESCE($5, 'active'),
+          COALESCE($6::jsonb, '{}'::jsonb)
+        )
+        RETURNING id`,
+      [
+        organizationId,
         name,
         slug,
-        sla_tier,
-        status,
-        settings_override
-      )
-      VALUES (
-        $1::uuid,
-        $2,
-        $3,
-        COALESCE($4, 'standard'),
-        COALESCE($5, 'active'),
-        COALESCE($6::jsonb, '{}'::jsonb)
-      )
-      RETURNING id`,
-    [
-      organizationId,
-      name,
-      slug,
-      options.slaTier,
-      options.status,
-      options.settingsOverride ? JSON.stringify(options.settingsOverride) : null
-    ]
+        options.slaTier,
+        options.status,
+        options.settingsOverride ? JSON.stringify(options.settingsOverride) : null
+      ]
+    )
   );
   return { id: rows[0].id, slug };
 }
 
 async function createSender(client, clientId, name, options = {}) {
-  const { rows } = await client.query(
-    `INSERT INTO senders (
-        client_id,
+  const { rows } = await withFixtureSetupRole(client, () =>
+    client.query(
+      `INSERT INTO senders (
+          client_id,
+          name,
+          brand_name,
+          auto_provisioned,
+          auto_recreate,
+          status,
+          settings_override
+        )
+        VALUES (
+          $1::uuid,
+          $2,
+          $3,
+          COALESCE($4, false),
+          COALESCE($5, true),
+          COALESCE($6, 'active'),
+          COALESCE($7::jsonb, '{}'::jsonb)
+        )
+        RETURNING id`,
+      [
+        clientId,
         name,
-        brand_name,
-        auto_provisioned,
-        auto_recreate,
-        status,
-        settings_override
-      )
-      VALUES (
-        $1::uuid,
-        $2,
-        $3,
-        COALESCE($4, false),
-        COALESCE($5, true),
-        COALESCE($6, 'active'),
-        COALESCE($7::jsonb, '{}'::jsonb)
-      )
-      RETURNING id`,
-    [
-      clientId,
-      name,
-      options.brandName || null,
-      options.autoProvisioned,
-      options.autoRecreate,
-      options.status,
-      options.settingsOverride ? JSON.stringify(options.settingsOverride) : null
-    ]
+        options.brandName || null,
+        options.autoProvisioned,
+        options.autoRecreate,
+        options.status,
+        options.settingsOverride ? JSON.stringify(options.settingsOverride) : null
+      ]
+    )
   );
   return rows[0].id;
 }
@@ -164,43 +170,51 @@ async function createUser(client, organizationId, email, options = {}) {
   const accessScopeId = options.accessScopeId || null;
   const effectiveUserType = options.userType || 'ops_admin';
   const effectiveAccessScopeType = accessScopeType || 'tenant';
-  await client.query(
-    `INSERT INTO users (
-        id,
-        organization_id,
+  await withFixtureSetupRole(client, async () => {
+    await client.query(
+      `INSERT INTO users (
+          id,
+          organization_id,
+          email,
+          full_name,
+          user_type,
+          status,
+          access_scope_type,
+          access_scope_id
+        )
+        VALUES (
+          $1::uuid,
+          $2::uuid,
+          $3,
+          $4,
+          COALESCE($5, 'ops_admin'),
+          COALESCE($6, 'active'),
+          COALESCE($7, 'tenant'),
+          $8::uuid
+        )`,
+      [
+        userId,
+        organizationId,
         email,
-        full_name,
-        user_type,
-        status,
-        access_scope_type,
-        access_scope_id
-      )
-      VALUES (
-        $1::uuid,
-        $2::uuid,
-        $3,
-        $4,
-        COALESCE($5, 'ops_admin'),
-        COALESCE($6, 'active'),
-        COALESCE($7, 'tenant'),
-        $8::uuid
-      )`,
-    [
-      userId,
-      organizationId,
-      email,
-      options.fullName || `Test User ${email}`,
-      options.userType,
-      options.status,
-      accessScopeType,
-      accessScopeId
-    ]
-  );
+        options.fullName || `Test User ${email}`,
+        options.userType,
+        options.status,
+        accessScopeType,
+        accessScopeId
+      ]
+    );
 
-  if (effectiveAccessScopeType === 'tenant' && options.provisionRbac !== false) {
-    const templateKey = String(options.rbacTemplateKey || effectiveUserType || '').trim().toLowerCase();
-    await provisionRbacTemplateAssignment(client, organizationId, userId, templateKey, options.assignedByUserId || userId);
-  }
+    if (effectiveAccessScopeType === 'tenant' && options.provisionRbac !== false) {
+      const templateKey = String(options.rbacTemplateKey || effectiveUserType || '').trim().toLowerCase();
+      await provisionRbacTemplateAssignment(
+        client,
+        organizationId,
+        userId,
+        templateKey,
+        options.assignedByUserId || userId
+      );
+    }
+  });
 
   return userId;
 }
@@ -320,6 +334,29 @@ async function createRequestContext(client, options = {}) {
   return rows[0].id;
 }
 
+async function withFixtureSetupRole(client, operation) {
+  const { rows } = await client.query('SELECT current_role, session_user');
+  const previousRole = rows[0]?.current_role;
+  const sessionUser = rows[0]?.session_user;
+  const shouldRestoreRole = previousRole && sessionUser && previousRole !== sessionUser;
+
+  if (shouldRestoreRole && !IDENTIFIER_REGEX.test(previousRole)) {
+    throw new Error(`Invalid current role name: ${previousRole}`);
+  }
+
+  if (shouldRestoreRole) {
+    await client.query('RESET ROLE');
+  }
+
+  try {
+    return await operation();
+  } finally {
+    if (shouldRestoreRole) {
+      await client.query(`SET LOCAL ROLE ${previousRole}`);
+    }
+  }
+}
+
 async function createShipment(client, params) {
   const {
     organizationId,
@@ -334,35 +371,37 @@ async function createShipment(client, params) {
   const tracking =
     trackingNumber || `SHIP-${randomSlug('trk').replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
 
-  const { rows } = await client.query(
-    `INSERT INTO shipments (
-        organization_id,
-        client_id,
-        service_type,
-        tracking_number,
+  const { rows } = await withFixtureSetupRole(client, () =>
+    client.query(
+      `INSERT INTO shipments (
+          organization_id,
+          client_id,
+          service_type,
+          tracking_number,
+          status,
+          shipment_settings_override,
+          metadata
+        )
+        VALUES (
+          $1::uuid,
+          $2::uuid,
+          $3,
+          $4,
+          $5,
+          COALESCE($6::jsonb, '{}'::jsonb),
+          COALESCE($7::jsonb, '{}'::jsonb)
+        )
+        RETURNING id, tracking_number`,
+      [
+        organizationId,
+        clientId,
+        serviceType,
+        tracking,
         status,
-        shipment_settings_override,
-        metadata
-      )
-      VALUES (
-        $1::uuid,
-        $2::uuid,
-        $3,
-        $4,
-        $5,
-        COALESCE($6::jsonb, '{}'::jsonb),
-        COALESCE($7::jsonb, '{}'::jsonb)
-      )
-      RETURNING id, tracking_number`,
-    [
-      organizationId,
-      clientId,
-      serviceType,
-      tracking,
-      status,
-      shipmentSettingsOverride ? JSON.stringify(shipmentSettingsOverride) : null,
-      metadata ? JSON.stringify(metadata) : null
-    ]
+        shipmentSettingsOverride ? JSON.stringify(shipmentSettingsOverride) : null,
+        metadata ? JSON.stringify(metadata) : null
+      ]
+    )
   );
   return { id: rows[0].id, trackingNumber: rows[0].tracking_number };
 }
@@ -896,6 +935,76 @@ async function cleanupAutoOnboardingArtifacts(client, organizationId) {
         AND managed_by = 'integration_plugin'`,
     [organizationId]
   );
+
+  const { rows: providerRows } = await client.query(
+    `SELECT COALESCE(array_agg(id), ARRAY[]::uuid[]) AS provider_ids
+       FROM public.providers
+      WHERE organization_id = $1::uuid`,
+    [organizationId]
+  );
+  const providerIds = providerRows[0]?.provider_ids || [];
+  if (providerIds.length) {
+    const { rows: routeRows } = await client.query(
+      `SELECT COALESCE(array_agg(id), ARRAY[]::uuid[]) AS route_ids
+         FROM public.api_routes
+        WHERE provider_id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+    const routeIds = routeRows[0]?.route_ids || [];
+
+    if (routeIds.length) {
+      await client.query(
+        `DELETE FROM public.api_gateway_requests
+          WHERE route_id = ANY($1::uuid[])`,
+        [routeIds]
+      );
+    }
+
+    await client.query(
+      `DELETE FROM public.settings
+        WHERE category = 'provider_defaults'
+          AND scope_type IN ('provider', 'resource')
+          AND scope_id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+    await client.query(
+      `DELETE FROM public.settings_versions
+        WHERE category = 'provider_defaults'
+          AND scope_type IN ('provider', 'resource')
+          AND scope_id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+    await client.query(
+      `DELETE FROM public.api_routes
+        WHERE provider_id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+    await client.query(
+      `DELETE FROM public.comms_attempts
+        WHERE provider_id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+    await client.query(
+      `DELETE FROM public.provider_usage_tracking
+        WHERE provider_id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+    await client.query(
+      `DELETE FROM public.circuit_breaker_state
+        WHERE provider_id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+    await client.query(
+      `DELETE FROM public.provider_auth_configs
+        WHERE provider_id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+    await client.query(
+      `DELETE FROM public.providers
+        WHERE id = ANY($1::uuid[])`,
+      [providerIds]
+    );
+  }
 }
 
 async function createWorkflowContext(client, params = {}) {
@@ -1270,6 +1379,7 @@ module.exports = {
   createSender,
   createUser,
   setAuthContext,
+  withFixtureSetupRole,
   createRequestContext,
   createShipment,
   createLabel,

@@ -7,6 +7,7 @@ const {
   createUser,
   createShipment,
   setAuthContext,
+  withFixtureSetupRole,
   applySetting
 } = require('../helpers/tenant-utils');
 
@@ -191,13 +192,15 @@ describe('Dispatch stop exceptions pipeline', () => {
   }
 
   async function forceWorkflowStepDue(workflowRunId) {
-    await client.query(
-      `UPDATE workflow_run_steps
-          SET run_at = now() - interval '1 second',
-              updated_at = now()
-        WHERE workflow_run_id = $1::uuid
-          AND step_status = 'pending'`,
-      [workflowRunId]
+    await withFixtureSetupRole(client, () =>
+      client.query(
+        `UPDATE workflow_run_steps
+            SET run_at = now() - interval '1 second',
+                updated_at = now()
+          WHERE workflow_run_id = $1::uuid
+            AND step_status = 'pending'`,
+        [workflowRunId]
+      )
     );
   }
 
@@ -318,12 +321,14 @@ describe('Dispatch stop exceptions pipeline', () => {
   }
 
   async function getManualReviewTaskRow(manualReviewTaskId) {
-    const { rows } = await client.query(
-      `SELECT id, status, reason, metadata, resolution_outcome, resolution_notes, resolved_by
-         FROM manual_review_tasks
-        WHERE id = $1::uuid
-        LIMIT 1`,
-      [manualReviewTaskId]
+    const { rows } = await withFixtureSetupRole(client, () =>
+      client.query(
+        `SELECT id, status, reason, metadata, resolution_outcome, resolution_notes, resolved_by
+           FROM manual_review_tasks
+          WHERE id = $1::uuid
+          LIMIT 1`,
+        [manualReviewTaskId]
+      )
     );
     return rows[0] ?? null;
   }
@@ -549,13 +554,15 @@ describe('Dispatch stop exceptions pipeline', () => {
   }
 
   async function getShipmentStatus(shipmentId, clientId) {
-    const { rows } = await client.query(
-      `SELECT status
-         FROM shipments
-        WHERE id = $1::uuid
-          AND client_id = $2::uuid
-        LIMIT 1`,
-      [shipmentId, clientId]
+    const { rows } = await withFixtureSetupRole(client, () =>
+      client.query(
+        `SELECT status
+           FROM shipments
+          WHERE id = $1::uuid
+            AND client_id = $2::uuid
+          LIMIT 1`,
+        [shipmentId, clientId]
+      )
     );
     return rows[0]?.status ?? null;
   }
@@ -740,9 +747,9 @@ describe('Dispatch stop exceptions pipeline', () => {
     expect(result?.items?.[0]?.completion_effects?.workflow_run_id).toBeTruthy();
     expect(result?.items?.[0]?.completion_effects?.operation_result).toBeTruthy();
     expect(result?.items?.[0]?.completion_effects?.operation_result?.shipment_resort?.status).toBe(
-      'blocked'
+      'resorted'
     );
-    expect(result?.items?.[0]?.completion_effects?.operation_result?.shipment_resort?.reason).toBeTruthy();
+    expect(result?.items?.[0]?.completion_effects?.operation_result?.shipment_resort?.workflow_run_id).toBeTruthy();
 
     await setServiceContext(seed.organizationId, seed.userId);
     const reattemptTask = await getTaskSnapshotForResource(
@@ -909,23 +916,27 @@ describe('Dispatch stop exceptions pipeline', () => {
     expect(scheduledReviewTask?.metadata?.resolution_workflow_run_id).toBe(scheduledResult.items[0].workflow_run_id);
     expect(scheduledReviewTask?.metadata?.resolution_scheduled_for).toBeTruthy();
 
-    const { rows: workflowRunRows } = await client.query(
-      `SELECT workflow_status, context
-         FROM workflow_runs
-        WHERE id = $1::uuid
-        LIMIT 1`,
-      [scheduledResult.items[0].workflow_run_id]
+    const { rows: workflowRunRows } = await withFixtureSetupRole(client, () =>
+      client.query(
+        `SELECT workflow_status, context
+           FROM workflow_runs
+          WHERE id = $1::uuid
+          LIMIT 1`,
+        [scheduledResult.items[0].workflow_run_id]
+      )
     );
     expect(workflowRunRows[0]?.workflow_status).toBe('pending');
     expect(workflowRunRows[0]?.context?.scheduled_for).toBeTruthy();
 
-    const { rows: workflowStepRows } = await client.query(
-      `SELECT step_status, run_at, metadata
-         FROM workflow_run_steps
-        WHERE workflow_run_id = $1::uuid
-        ORDER BY sequence_order
-        LIMIT 1`,
-      [scheduledResult.items[0].workflow_run_id]
+    const { rows: workflowStepRows } = await withFixtureSetupRole(client, () =>
+      client.query(
+        `SELECT step_status, run_at, metadata
+           FROM workflow_run_steps
+          WHERE workflow_run_id = $1::uuid
+          ORDER BY sequence_order
+          LIMIT 1`,
+        [scheduledResult.items[0].workflow_run_id]
+      )
     );
     expect(workflowStepRows[0]?.step_status).toBe('pending');
     expect(new Date(workflowStepRows[0].run_at).getTime()).toBeGreaterThan(
@@ -976,12 +987,14 @@ describe('Dispatch stop exceptions pipeline', () => {
     );
     expect(riskFollowup?.task_id).toBeTruthy();
 
-    await client.query(
-      `UPDATE tasks
-          SET metadata = jsonb_strip_nulls(COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('risk_hold', TRUE)),
-              updated_at = now()
-        WHERE id = $1::uuid`,
-      [riskFollowup.task_id]
+    await withFixtureSetupRole(client, () =>
+      client.query(
+        `UPDATE tasks
+            SET metadata = jsonb_strip_nulls(COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('risk_hold', TRUE)),
+                updated_at = now()
+          WHERE id = $1::uuid`,
+        [riskFollowup.task_id]
+      )
     );
 
     const { rows: riskPreviewRows } = await client.query(
@@ -1029,12 +1042,14 @@ describe('Dispatch stop exceptions pipeline', () => {
     );
     expect(verificationFollowup?.task_id).toBeTruthy();
 
-    await client.query(
-      `UPDATE shipments
-          SET metadata = jsonb_strip_nulls(COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('verification_failed', TRUE)),
-              updated_at = now()
-        WHERE id = $1::uuid`,
-      [verificationSeed.shipmentId]
+    await withFixtureSetupRole(client, () =>
+      client.query(
+        `UPDATE shipments
+            SET metadata = jsonb_strip_nulls(COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('verification_failed', TRUE)),
+                updated_at = now()
+          WHERE id = $1::uuid`,
+        [verificationSeed.shipmentId]
+      )
     );
 
     const { rows: verificationPreviewRows } = await client.query(
@@ -1345,6 +1360,7 @@ describe('Dispatch stop exceptions pipeline', () => {
     const followupDomainEventId = followupDomainEventRows[0]?.id;
     expect(followupDomainEventId).toBeTruthy();
 
+    await setServiceContext(seed.organizationId, seed.userId);
     const followupWorkflowId = await waitForDomainEventWorkflowRun(followupDomainEventId);
     expect(followupWorkflowId).toBeTruthy();
 
@@ -1462,24 +1478,28 @@ describe('Dispatch stop exceptions pipeline', () => {
     expect(breachedTask?.status_reason).toBe('no_answer');
     expect(breachedTask?.metadata?.dispatch_exception_reason).toBe('no_answer');
 
-    const { rows: breachViewRows } = await client.query(
-      `SELECT dispatch_exception_reason
-         FROM public.dispatch_exception_review_sla_breaches_v
-        WHERE id = $1::uuid
-        LIMIT 1`,
-      [followup.task_id]
+    const { rows: breachViewRows } = await withFixtureSetupRole(client, () =>
+      client.query(
+        `SELECT dispatch_exception_reason
+           FROM public.dispatch_exception_review_sla_breaches_v
+          WHERE id = $1::uuid
+          LIMIT 1`,
+        [followup.task_id]
+      )
     );
     expect(breachViewRows[0]?.dispatch_exception_reason).toBe('no_answer');
 
     const breachEvent = await getLatestTaskEvent(followup.task_id, 'sla_breached');
     expect(breachEvent?.decision_log_id).toBeTruthy();
 
-    const { rows: decisionRows } = await client.query(
-      `SELECT decision_point, decision_outcome
-         FROM decision_log
-        WHERE id = $1::uuid
-        LIMIT 1`,
-      [breachEvent.decision_log_id]
+    const { rows: decisionRows } = await withFixtureSetupRole(client, () =>
+      client.query(
+        `SELECT decision_point, decision_outcome
+           FROM decision_log
+          WHERE id = $1::uuid
+          LIMIT 1`,
+        [breachEvent.decision_log_id]
+      )
     );
     expect(decisionRows[0]?.decision_point).toBe('sla_breach');
     expect(decisionRows[0]?.decision_outcome).toBe('breached');

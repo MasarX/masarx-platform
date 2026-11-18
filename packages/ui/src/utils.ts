@@ -31,10 +31,10 @@ export function stableStringify(value: unknown): string {
 export function formatUiError(error: unknown, fallback: string) {
   if (!error) return fallback;
   if (typeof error === "string") {
-    return sanitizeUiError(error) ?? error;
+    return sanitizeUiError(error) ?? fallback;
   }
   if (error instanceof Error && error.message) {
-    return sanitizeUiError(error.message) ?? error.message;
+    return sanitizeUiError(error.message) ?? fallback;
   }
   if (typeof error === "object") {
     const typed = error as {
@@ -53,9 +53,23 @@ export function formatUiError(error: unknown, fallback: string) {
       typed.error ||
       typed.code ||
       fallback;
-    return sanitizeUiError(resolved) ?? resolved;
+    return sanitizeUiError(resolved) ?? fallback;
   }
   return fallback;
+}
+
+const TECHNICAL_UI_ERROR_PATTERNS: RegExp[] = [
+  /\bbackend\b/i,
+  /\bread[-_\s]?back\b/i,
+  /\bevent[-_\s]?read[-_\s]?back\b/i,
+  /\bcorrelation(?:[_\s-]?id)?\b/i,
+  /\bdebug\b/i,
+  /\bdiagnostic\b/i,
+  /\braw[-_\s]?(?:backend|json|payload|response|table)\b/i,
+];
+
+function isTechnicalUiErrorMessage(message: string): boolean {
+  return TECHNICAL_UI_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 export function isSchemaCacheFunctionUnavailableError(
@@ -151,5 +165,7 @@ export function sanitizeUiError(message: string | null) {
     }
   );
   sanitized = sanitized.replace(/[A-Za-z0-9+/=_-]{32,}/g, "[redacted]");
-  return sanitized;
+  const trimmed = sanitized.trim();
+  if (!trimmed || isTechnicalUiErrorMessage(trimmed)) return null;
+  return trimmed;
 }

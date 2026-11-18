@@ -1,10 +1,10 @@
 -- Plan: PLAN-202601-workflow-studio-dnd / Step: S04
--- pgTAP: workflow_schedule_triggers are row-driven and gated by workflow_runs.write.
+-- pgTAP: workflow_schedule_triggers are row-driven and gated by workflows.write.
 SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(6);
+SELECT plan(10);
 
 DO $$
 DECLARE
@@ -18,14 +18,23 @@ DECLARE
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO organizations (id, name, slug)
   VALUES (v_org, 'Schedule Triggers Org', 'schedule-triggers-org-' || left(v_org::text, 8));
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO clients (id, organization_id, name, slug, status)
   VALUES (v_client, v_org, 'Schedule Triggers Client', 'schedule-triggers-client-' || left(v_client::text, 8), 'active');
 
   INSERT INTO senders (id, client_id, name, status)
   VALUES (v_sender, v_client, 'Schedule Triggers Sender', 'active');
+
+  PERFORM bootstrap_tenant_onboarding_v1(
+    v_org,
+    'pgtap:workflow-schedule-triggers-fixture-bootstrap'
+  );
 
   INSERT INTO workflow_templates (id, name, description, version, status, scope_type, scope_id, notes)
   VALUES (
@@ -62,6 +71,77 @@ BEGIN
   );
 
   EXECUTE 'RESET ROLE';
+
+  PERFORM ok(
+    EXISTS (
+      SELECT 1
+      FROM public.lookup_definitions d
+      JOIN public.lookup_values v
+        ON v.lookup_definition_id = d.id
+      WHERE d.category = 'workflow_schedule_type'
+        AND v.value = 'interval'
+        AND v.status = 'active'
+        AND v.metadata->>'summary_template' = 'every'
+        AND (v.metadata #>> '{thresholds,hour_seconds}')::integer = 3600
+        AND (v.metadata #>> '{thresholds,minute_seconds}')::integer = 60
+    ),
+    'workflow_schedule_type lookup rows are seeded for Console authoring'
+  );
+
+  PERFORM ok(
+    pg_get_functiondef('public.ui_create_workflow_schedule_trigger_v1(uuid,jsonb,jsonb,boolean,text)'::regprocedure)
+      LIKE '%assert_capability_v1(''workflows.write''%'
+    AND pg_get_functiondef('public.ui_create_workflow_schedule_trigger_v1(uuid,jsonb,jsonb,boolean,text)'::regprocedure)
+      NOT LIKE '%assert_capability_v1(''workflow_runs.write''%',
+    'schedule create RPC gates on workflows.write only'
+  );
+
+  PERFORM ok(
+    NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = 'workflow_schedule_triggers'
+        AND policyname IN (
+          'workflow_schedule_triggers_authenticated_insert',
+          'workflow_schedule_triggers_authenticated_update',
+          'workflow_schedule_triggers_authenticated_delete'
+        )
+        AND COALESCE(qual, '') || COALESCE(with_check, '') LIKE '%workflow_runs.write%'
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = 'workflow_schedule_triggers'
+        AND policyname IN (
+          'workflow_schedule_triggers_authenticated_insert',
+          'workflow_schedule_triggers_authenticated_update',
+          'workflow_schedule_triggers_authenticated_delete'
+        )
+        AND COALESCE(qual, '') || COALESCE(with_check, '') NOT LIKE '%workflows.write%'
+    ),
+    'workflow_schedule_triggers write policies align with workflows.write'
+  );
+
+  PERFORM ok(
+    EXISTS (
+      SELECT 1
+      FROM public.settings s
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.cached_value->'resources', '[]'::jsonb)) AS resource(value)
+      WHERE s.category = 'ui_read_registry'
+        AND s.scope_type = 'global'
+        AND s.scope_id IS NULL
+        AND resource.value->>'key' = 'workflow_schedule_triggers'
+        AND resource.value->>'capability_write' = 'workflows.write'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(resource.value->'columns', '[]'::jsonb)) AS column_row(column_value)
+          WHERE column_value->>'edit_permission' = 'workflow_runs.write'
+        )
+    ),
+    'workflow_schedule_triggers registry write capability aligns with workflows.write'
+  );
 
   PERFORM set_config('request.jwt.claim.sub', v_user_client_admin::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
@@ -114,7 +194,7 @@ BEGIN
       v_workflow_template
     ),
     '42501',
-    'Capability denied: workflow_runs.write'
+    'Capability denied: workflows.write'
   );
 
   EXECUTE 'RESET ROLE';

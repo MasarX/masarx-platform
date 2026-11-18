@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(10);
+SELECT plan(11);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_warehouse_transfer_dispatch_ui_contract_v1()
 RETURNS SETOF TEXT
@@ -14,10 +14,14 @@ LANGUAGE plpgsql
 AS $function$
 DECLARE
   v_command_settings JSONB := NULL;
+  v_dispatch_fn TEXT := NULL;
   v_user UUID := gen_random_uuid();
   v_org UUID := gen_random_uuid();
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
+
+  SELECT pg_get_functiondef('public.ui_execute_warehouse_transfer_dispatch_v1(text, text, text[], text, integer, jsonb)'::regprocedure)
+    INTO v_dispatch_fn;
 
   SELECT cached_value
     INTO v_command_settings
@@ -88,6 +92,12 @@ BEGIN
         AND item.value#>>'{execution,type}' = 'workflow'
     ),
     'ui_command_registry cached settings expose warehouse_transfers.dispatch through the dedicated workflow RPC'
+  );
+  RETURN NEXT ok(
+    v_dispatch_fn LIKE '%set_config(''request.jwt.claims''%'
+      AND v_dispatch_fn LIKE '%''role'', ''service_role''%'
+      AND v_dispatch_fn LIKE '%public.progress_workflow_run%',
+    'dispatch UI wrapper elevates JWT claims only around canonical workflow progress'
   );
 
   INSERT INTO public.organizations (id, name, slug)

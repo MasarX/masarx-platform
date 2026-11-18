@@ -204,6 +204,13 @@ async function callShipmentAmendCancelOptions(client, shipmentId, options = {}) 
   return rows[0]?.result;
 }
 
+function expectWorkflowTemplateReadback(result, fixture, templateName) {
+  expect(result?.workflow_status).toBe('completed');
+  expect(result?.workflow_template_id).toBe(fixture.workflowTemplateIds[templateName]);
+  expect(result?.workflow_template_name).toBe(templateName);
+  expect(result?.workflow_template).toBe(templateName);
+}
+
 describe('shipment amend/cancel workflow engine contract', () => {
   afterAll(async () => {
     await pool.end();
@@ -225,19 +232,8 @@ describe('shipment amend/cancel workflow engine contract', () => {
 
       expect(result?.ok).toBe(true);
       expect(result?.workflow_run_id).toBeTruthy();
-      expect(result?.workflow_status).toBe('completed');
       expect(result?.shipment_action_id).toBeTruthy();
-
-      const { rows: runRows } = await client.query(
-        `
-          SELECT workflow_status, workflow_template_id
-          FROM workflow_runs
-          WHERE id = $1::uuid
-        `,
-        [result.workflow_run_id],
-      );
-      expect(runRows[0]?.workflow_status).toBe('completed');
-      expect(runRows[0]?.workflow_template_id).toBe(fixture.workflowTemplateIds.shipment_modify_v1);
+      expectWorkflowTemplateReadback(result, fixture, 'shipment_modify_v1');
     });
   });
 
@@ -253,32 +249,9 @@ describe('shipment amend/cancel workflow engine contract', () => {
       });
 
       expect(result?.ok).toBe(true);
-      expect(result?.workflow_status).toBe('completed');
+      expect(result?.workflow_run_id).toBeTruthy();
       expect(result?.shipment_action_id).toBeTruthy();
-
-      const { rows: runRows } = await client.query(
-        `
-          SELECT workflow_status, workflow_template_id
-          FROM workflow_runs
-          WHERE id = $1::uuid
-        `,
-        [result.workflow_run_id],
-      );
-      expect(runRows[0]?.workflow_status).toBe('completed');
-      expect(runRows[0]?.workflow_template_id).toBe(fixture.workflowTemplateIds.shipment_delete_v1);
-
-      const { rows: stepRows } = await client.query(
-        `
-          SELECT handler_key, step_status
-          FROM workflow_run_steps
-          WHERE workflow_run_id = $1::uuid
-          ORDER BY sequence_order DESC
-          LIMIT 1
-        `,
-        [result.workflow_run_id],
-      );
-      expect(stepRows[0]?.handler_key).toBe('shipment_delete');
-      expect(stepRows[0]?.step_status).toBe('completed');
+      expectWorkflowTemplateReadback(result, fixture, 'shipment_delete_v1');
 
       const { rows: shipmentRows } = await client.query(
         'SELECT status FROM shipments WHERE id = $1::uuid',

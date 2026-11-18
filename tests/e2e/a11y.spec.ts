@@ -87,10 +87,10 @@ test("console settings request meets a11y baseline", async ({ page }) => {
 });
 
 test("console provider auth meets a11y baseline", async ({ page }) => {
-  await page.goto(`${consoleBaseUrl}/integrations/provider-auth`);
+  await page.goto(`${consoleBaseUrl}/integrations/credentials`);
   await expectReady(
     page,
-    '[data-testid="console-provider-auth-ready"], [data-testid="console-provider-auth-error"], [data-testid="console-auth-required"], [data-testid="console-missing-env"]'
+    'main:has(h1:has-text("Provider credentials")), [data-testid="console-auth-required"], [data-testid="console-missing-env"]'
   );
   await runA11y(page);
 });

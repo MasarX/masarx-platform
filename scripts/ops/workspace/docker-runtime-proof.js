@@ -85,18 +85,24 @@ function normalizeBrowserProofSurface(surface = {}) {
   const consoleErrors = Array.isArray(surface.console_errors) ? surface.console_errors : [];
   const pageErrors = Array.isArray(surface.page_errors) ? surface.page_errors : [];
   const failureTextMatches = Array.isArray(surface.failure_text_matches) ? surface.failure_text_matches : [];
+  const sourceFreshness = surface.source_freshness || {};
+  const sourceFreshnessOk = sourceFreshness.ok !== false && Number(sourceFreshness.stale_count || 0) === 0;
   const authSessionOk = surface.auth_session_ok === true || surface.auth_session_proven === true || surface.authenticated === true;
   return {
     ...surface,
     surface: name,
     passed_status: ['passed', 'ok', 'success'].includes(status) || surface.ok === true,
     browser_rendered: surface.browser_rendered === true || surface.rendered_non_blank === true || surface.nonblank === true,
-    no_runtime_errors: surface.no_runtime_errors === true || (
-      consoleErrors.length === 0 &&
-      pageErrors.length === 0 &&
-      failureTextMatches.length === 0 &&
-      surface.has_framework_overlay !== true
+    no_runtime_errors: sourceFreshnessOk && (
+      surface.no_runtime_errors === true || (
+        consoleErrors.length === 0 &&
+        pageErrors.length === 0 &&
+        failureTextMatches.length === 0 &&
+        surface.has_framework_overlay !== true
+      )
     ),
+    source_freshness_ok: sourceFreshnessOk,
+    source_freshness: sourceFreshness,
     expected_visible_state: surface.expected_visible_state === true || surface.required_text_matched === true || surface.visible_runtime === true,
     forbidden_text_absent: surface.forbidden_text_absent !== false && failureTextMatches.length === 0,
     backend_wiring_ok: surface.backend_wiring_ok === true || surface.correct_backend === true || surface.assigned_backend_used === true,
@@ -238,6 +244,7 @@ async function checkSurface(surface, options = {}) {
     backend_wiring_ok: surface.backendReadbackRequired ? Boolean(browserEvidence?.backend_wiring_ok) : true,
     auth_session_ok: surface.authRequired ? Boolean(browserEvidence?.auth_session_ok) : true,
     seed_disabled: browserEvidence ? browserEvidence.seed_disabled !== false : true,
+    source_freshness_ok: browserEvidence ? browserEvidence.source_freshness_ok !== false : true,
   };
   const browserProofOk = !surface.browserRequired || Object.values(browserChecks).every(Boolean);
   const blankHttpRenderAllowedByBrowser = surface.browserRequired &&
@@ -251,6 +258,7 @@ async function checkSurface(surface, options = {}) {
   if (surface.browserRequired && !browserChecks.browser_evidence_present) failureReasons.push('missing_browser_render_evidence');
   if (surface.browserRequired && browserChecks.browser_evidence_present && !browserChecks.browser_rendered) failureReasons.push('browser_render_not_proven');
   if (surface.browserRequired && browserChecks.browser_evidence_present && !browserChecks.no_runtime_errors) failureReasons.push('browser_runtime_errors_present');
+  if (surface.browserRequired && browserChecks.browser_evidence_present && !browserChecks.source_freshness_ok) failureReasons.push('served_source_stale');
   if (surface.browserRequired && browserChecks.browser_evidence_present && !browserChecks.expected_visible_state) failureReasons.push('browser_expected_state_missing');
   if (surface.browserRequired && browserChecks.browser_evidence_present && !browserChecks.forbidden_text_absent) failureReasons.push('browser_forbidden_text_present');
   if (surface.backendReadbackRequired && browserChecks.browser_evidence_present && !browserChecks.backend_wiring_ok) failureReasons.push('assigned_backend_wiring_not_proven');
@@ -509,7 +517,10 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
   }
   const backend = await checkBackend(env);
   const edge = await checkEdgeFunction(env);
-  const mobilePolicy = await readMobileV2Policy(env);
+  const mobileV2ProofRequired = surfaces.some((surface) => surface.surface === 'fieldops-metro');
+  const mobilePolicy = mobileV2ProofRequired
+    ? await readMobileV2Policy(env)
+    : { ok: true, skipped: true, reason: 'fieldops_metro_not_requested' };
   const summary = {
     generated_at: new Date().toISOString(),
     proof: 'docker-runtime-in-container-e2e',
@@ -594,6 +605,7 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
     mobile_v2: {
       service_name: 'fieldops-metro',
       proof_label: 'mobile_v2_development_runtime_proof',
+      development_runtime_proof_required: mobileV2ProofRequired,
       native_release_gate_satisfied: false,
       visible_runtime: surfaces.some((surface) => (
         surface.surface === 'fieldops-metro' &&
@@ -614,7 +626,8 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
     backend_reachable: backend.ok === true,
     edge_functions_reachable: edge.ok === true,
     fieldops_service_canonical: summary.mobile_v2.service_name === 'fieldops-metro',
-    mobile_v2_development_runtime_proof: summary.mobile_v2.visible_runtime === true && mobilePolicy.ok === true,
+    mobile_v2_development_runtime_proof: !mobileV2ProofRequired ||
+      (summary.mobile_v2.visible_runtime === true && mobilePolicy.ok === true),
     native_release_gate_not_satisfied: summary.mobile_v2.native_release_gate_satisfied === false,
     seed_disabled: summary.env.seed_disabled === true,
   };

@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(19);
+SELECT plan(21);
 
 -- ---------------------------------------------------------------------------
 -- label_field_catalog (settings category)
@@ -207,6 +207,28 @@ SELECT ok(
       AND policyname = 'label_designer_assets_insert'
   ),
   'storage.objects has label_designer_assets_insert policy'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'storage'
+      AND tablename = 'objects'
+      AND policyname = 'label_designer_assets_update'
+  ),
+  'storage.objects has label_designer_assets_update policy'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'storage'
+      AND tablename = 'objects'
+      AND policyname = 'label_designer_assets_delete'
+  ),
+  'storage.objects has label_designer_assets_delete policy'
 );
 
 SELECT ok(

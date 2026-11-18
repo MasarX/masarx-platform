@@ -25,9 +25,41 @@ SELECT is(
 );
 
 -- Set up a pending outbound call (HTTP may fail or remain pending depending on pg_net/network availability)
+-- This fixture owns client/sender setup itself. Defer the organization insert
+-- bootstrap until that source-binding context exists, then run the canonical
+-- onboarding bootstrap explicitly.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO organizations (id, name, slug)
 VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Outbound Org', 'outbound-org')
 ON CONFLICT (id) DO NOTHING;
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO clients (id, organization_id, name, slug, status)
+VALUES (
+  'ffffffff-0000-0000-0000-000000000020',
+  'aaaaaaaa-0000-0000-0000-000000000001',
+  'Outbound Worker Fixture Client',
+  'outbound-worker-fixture-client',
+  'active'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+  'ffffffff-0000-0000-0000-000000000021',
+  'ffffffff-0000-0000-0000-000000000020',
+  'Outbound Worker Fixture Sender',
+  'Outbound Worker Fixture Sender',
+  false,
+  true,
+  'active'
+)
+ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  'aaaaaaaa-0000-0000-0000-000000000001',
+  'pgtap:outbound-worker-fixture-bootstrap'
+);
 
 INSERT INTO providers (id, organization_id, name, provider_type)
 VALUES (

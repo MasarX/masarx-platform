@@ -47,7 +47,8 @@
             <a href="#enterprise" data-i18n="nav_enterprise">Enterprise</a>
             <a href="/track/" data-track-href data-i18n="nav_track">Track shipment</a>
             <a href="#faq" data-i18n="nav_faq">FAQ</a>
-            <a href="#contact" data-i18n="nav_contact_sales">Contact sales</a>
+            <a href="#contact-sales" data-i18n="nav_contact_marketing">Contact sales</a>
+            <a href="#contact" data-i18n="nav_contact_sales">Sign up</a>
           </nav>
 
           <div class="header-actions">
@@ -55,7 +56,7 @@
             <button class="btn btn-ghost" type="button" data-lang-toggle aria-pressed="false">AR</button>
             <a class="btn btn-secondary btn-track-top" href="/track/" data-track-href data-i18n="nav_track">Track shipment</a>
             <a class="btn btn-secondary" href="#" data-runtime-href="appUrl" data-runtime-hide-empty="1" hidden data-i18n="cta_login">Log in</a>
-            <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales">Contact sales</a>
+            <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales">Start signup</a>
           </div>
         </div>
       </div>
@@ -71,8 +72,8 @@
             <p data-i18n="hero_sub">Connect your systems to MasarX and start managing deliveries immediately. No waiting for carriers or partners to integrate — we handle the last mile from your side.</p>
 
             <div class="hero-ctas">
-              <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales">Contact sales</a>
-              <a class="btn btn-secondary" href="#how" data-i18n="cta_explore">See how it works</a>
+              <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales">Start signup</a>
+              <a class="btn btn-secondary" href="#contact-sales" data-i18n="cta_contact_marketing">Contact sales</a>
             </div>
 
             <div class="badge-row" role="group" aria-label="Key highlights">
@@ -103,7 +104,7 @@
                   <div class="lifecycle-content">
                     <svg class="lc-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="4" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5" class="draw"/><circle cx="16" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5" class="draw"/><path d="M6.5 10h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw"/></svg>
                     <strong data-i18n="lc_2_title">Auto-mapped</strong>
-                    <span class="lifecycle-meta" data-i18n="lc_2_meta">mapping_config applied — format detected</span>
+                    <span class="lifecycle-meta" data-i18n="lc_2_meta">Mapping profile applied — format detected</span>
                   </div>
                 </div>
                 <div class="lifecycle-step" data-lifecycle-step="2">
@@ -111,7 +112,7 @@
                   <div class="lifecycle-content">
                     <svg class="lc-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2l6 3.5v5.5c0 3.5-6 7-6 7s-6-3.5-6-7V5.5L10 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" class="draw"/><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="draw"/></svg>
                     <strong data-i18n="lc_3_title">Policy applied</strong>
-                    <span class="lifecycle-meta" data-i18n="lc_3_meta">SLA rule: priority_express → same-day</span>
+                    <span class="lifecycle-meta" data-i18n="lc_3_meta">Priority express rule → same-day</span>
                   </div>
                 </div>
                 <div class="lifecycle-step" data-lifecycle-step="3">
@@ -254,7 +255,7 @@
             </details>
             <details class="cap-card card">
               <summary><svg class="cap-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 8h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw-line" style="--node-i:0"/><path d="M8 12h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw-line" style="--node-i:1"/><path d="M8 16h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="draw-line" style="--node-i:2"/></svg><strong data-i18n="cap_6_title">Decision logging</strong></summary>
-              <div class="cap-body"><p data-i18n="cap_6_desc">Every automated decision logged with full context. Debug any issue in under 10 minutes.</p></div>
+              <div class="cap-body"><p data-i18n="cap_6_desc">Every automated decision logged with full context. Resolve issues with full decision history.</p></div>
             </details>
           </div>
         </div>
@@ -335,7 +336,7 @@
             </details>
             <details>
               <summary data-i18n="faq_q3">How does pricing work?</summary>
-              <div class="faq-body"><p data-i18n="faq_a3">Pricing is based on monthly delivery volume and the number of connected providers. Contact sales and we will share a tailored proposal for your operation.</p></div>
+              <div class="faq-body"><p data-i18n="faq_a3">Pricing is based on monthly delivery volume and the number of connected providers. Submit a signup request and we will share a tailored proposal for your operation.</p></div>
             </details>
             <details>
               <summary data-i18n="faq_q4">Do I need a dev team to get started?</summary>
@@ -349,20 +350,85 @@
         </div>
       </section>
 
-      <section class="section reveal" id="contact" data-reveal>
+      <section class="section reveal" id="contact-sales" data-reveal>
         <div class="container">
-          <h2 data-i18n="contact_title">Contact sales</h2>
-          <p class="lead" data-i18n="contact_sub">
-            Share your current setup and integration needs. We will reply with a tailored onboarding plan.
+          <h2 data-i18n="lead_title">Contact sales</h2>
+          <p class="lead" data-i18n="lead_sub">
+            Tell us about your operation and we will route the request to the right follow-up queue.
           </p>
 
           <div class="contact-wrap">
             <div class="card card-pad">
-              <h3 class="card-title" data-i18n="contact_see_title">What happens next</h3>
+              <h3 class="card-title" data-i18n="lead_see_title">What the team reviews</h3>
               <ul class="list">
-                <li><span class="check"></span><span data-i18n="contact_see_1">We review your systems, volume, and routing requirements</span></li>
-                <li><span class="check"></span><span data-i18n="contact_see_2">We outline an onboarding plan for your webhooks and mapping</span></li>
-                <li><span class="check"></span><span data-i18n="contact_see_3">We share pricing aligned to your delivery volume</span></li>
+                <li><span class="check"></span><span data-i18n="lead_see_1">Operating model, volume, and integration needs</span></li>
+                <li><span class="check"></span><span data-i18n="lead_see_2">Relevant workflow, plugin, and API handoff options</span></li>
+                <li><span class="check"></span><span data-i18n="lead_see_3">Next best action for a sales or solution follow-up</span></li>
+              </ul>
+            </div>
+
+            <form class="card card-pad" data-marketing-lead-form>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="form_full_name">Full name</span>
+                  <input type="text" name="full_name" autocomplete="name" required data-i18n-placeholder="form_full_name_ph" placeholder="Jane Doe" />
+                </label>
+                <label>
+                  <span data-i18n="form_email">Work email</span>
+                  <input type="text" name="email" autocomplete="email" required inputmode="email" data-i18n-placeholder="form_email_ph" placeholder="lhwmilsokgrmgptsihhuoljt@example.invalid" />
+                </label>
+              </div>
+              <label>
+                <span data-i18n="form_company">Company</span>
+                <input type="text" name="organization_name" autocomplete="organization" required data-i18n-placeholder="form_company_ph" placeholder="Company name" />
+              </label>
+              <div class="form-row">
+                <label>
+                  <span data-i18n="form_volume">Monthly deliveries</span>
+                  <select name="volume">
+                    <option value="" data-i18n="form_volume_opt_choose">Select monthly volume</option>
+                    <option value="0-10k" data-i18n="form_volume_opt_1">0-10k deliveries</option>
+                    <option value="10k-60k" data-i18n="form_volume_opt_2">10k-60k deliveries</option>
+                    <option value="60k+" data-i18n="form_volume_opt_3">60k+ deliveries</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n="form_role">Role</span>
+                  <input type="text" name="role" autocomplete="organization-title" data-i18n-placeholder="form_role_ph" placeholder="Ops / Tech / Product" />
+                </label>
+              </div>
+              <label>
+                <span data-i18n="form_notes">Operational priorities</span>
+                <textarea name="notes" inputmode="text" data-i18n-placeholder="form_notes_ph" placeholder="Current setup, integration needs, SLA goals..."></textarea>
+              </label>
+              <div class="turnstile" data-marketing-turnstile></div>
+              <button class="btn btn-primary" type="submit" data-i18n="lead_form_submit">Send contact request</button>
+              <p class="form-status" data-marketing-lead-status aria-live="polite"></p>
+              <p class="form-note" data-marketing-lead-request-reference hidden>
+                <span data-i18n="lead_request_reference_label">Lead reference</span>:
+                <strong data-marketing-lead-request-reference-value></strong>
+              </p>
+              <p class="form-note" data-i18n="lead_privacy_note">We only use this information to follow up on your operations request.</p>
+              <p class="form-note" data-i18n="form_response_time">We typically respond within one business day.</p>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section class="section reveal" id="contact" data-reveal>
+        <div class="container">
+          <h2 data-i18n="contact_title">Request tenant signup</h2>
+          <p class="lead" data-i18n="contact_sub">
+            Share your organization details to start tenant intake. We review every signup before activation.
+          </p>
+
+          <div class="contact-wrap">
+            <div class="card card-pad">
+              <h3 class="card-title" data-i18n="contact_see_title">What happens after signup</h3>
+              <ul class="list">
+                <li><span class="check"></span><span data-i18n="contact_see_1">We review your organization, volume, and routing requirements</span></li>
+                <li><span class="check"></span><span data-i18n="contact_see_2">We prepare tenant setup, webhook mapping, and access steps</span></li>
+                <li><span class="check"></span><span data-i18n="contact_see_3">Approved tenants receive onboarding and activation guidance</span></li>
               </ul>
             </div>
 
@@ -374,7 +440,7 @@
                 </label>
                 <label>
                   <span data-i18n="form_email">Work email</span>
-                  <input type="email" name="email" autocomplete="email" required inputmode="email" data-i18n-placeholder="form_email_ph" placeholder="lhwmilsokgrmgptsihhuoljt@example.invalid" />
+                  <input type="text" name="email" autocomplete="email" required inputmode="email" data-i18n-placeholder="form_email_ph" placeholder="lhwmilsokgrmgptsihhuoljt@example.invalid" />
                 </label>
               </div>
               <div class="form-row">
@@ -407,9 +473,13 @@
                 <textarea name="notes" inputmode="text" data-i18n-placeholder="form_notes_ph" placeholder="Current setup, integration needs, SLA goals..."></textarea>
               </label>
               <div class="turnstile" data-turnstile></div>
-              <button class="btn btn-primary" type="submit" data-i18n="form_submit">Submit request</button>
+              <button class="btn btn-primary" type="submit" data-i18n="form_submit">Submit signup request</button>
               <p class="form-status" data-contact-status aria-live="polite"></p>
-              <p class="form-note" data-i18n="form_privacy_note">We only use this information to respond to your request. No spam.</p>
+              <p class="form-note" data-contact-request-reference hidden>
+                <span data-i18n="form_request_reference_label">Request reference</span>:
+                <strong data-contact-request-reference-value></strong>
+              </p>
+              <p class="form-note" data-i18n="form_privacy_note">We only use this information to review your signup request. No spam.</p>
               <p class="form-note" data-i18n="form_response_time">We typically respond within one business day.</p>
             </form>
           </div>
@@ -441,7 +511,7 @@
                 </label>
                 <label>
                   <span data-i18n="driver_form_email">Email</span>
-                  <input type="email" name="email" autocomplete="email" required inputmode="email" data-i18n-placeholder="driver_form_email_ph" placeholder="driver@example.com" />
+                  <input type="text" name="email" autocomplete="email" required inputmode="email" data-i18n-placeholder="driver_form_email_ph" placeholder="driver@example.com" />
                 </label>
               </div>
               <div class="form-row">
@@ -512,7 +582,7 @@
     </main>
 
     <div class="float-cta" data-float-cta aria-hidden="true">
-      <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales" tabindex="-1">Contact sales</a>
+      <a class="btn btn-primary" href="#contact" data-i18n="cta_contact_sales" tabindex="-1">Start signup</a>
     </div>
 
     <footer class="footer">
@@ -534,7 +604,7 @@
               <strong data-i18n="footer_company">Company</strong>
               <a href="../../README.md" data-i18n="footer_docs">Docs</a>
               <a href="#enterprise" data-i18n="footer_security">Security</a>
-              <a href="#contact" data-i18n="nav_contact_sales">Contact sales</a>
+              <a href="#contact" data-i18n="nav_contact_sales">Sign up</a>
             </div>
           </div>
         </div>

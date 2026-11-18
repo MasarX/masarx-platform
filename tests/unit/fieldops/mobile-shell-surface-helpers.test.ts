@@ -430,6 +430,24 @@ describe("mobile shell surface helpers", () => {
     });
   });
 
+  test("extractOperationalStopSnapshot accepts Saudi short national address aliases", () => {
+    const stop = extractOperationalStopSnapshot({
+      id: "task-sa-short-code",
+      status: "open",
+      metadata: {
+        address: {
+          district: "Al Olaya",
+          city: "Riyadh",
+          sa_short_code: "RNQA7082",
+        },
+      },
+    });
+
+    expect(stop.place).toBe("Al Olaya - Riyadh - RNQA7082");
+    expect(stop.addressSummary).toBe("Al Olaya - Riyadh - RNQA7082");
+    expect(stop.fullAddress).toBe("Al Olaya, Riyadh, RNQA7082");
+  });
+
   test("extractScanContext binds task and shipment linkage when present", () => {
     const context = extractScanContext(
       {

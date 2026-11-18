@@ -52,9 +52,53 @@ if (!process.env.DATABASE_URL) {
   throw new Error('[seed-test-data] DATABASE_URL is required. Export it or set ENV_FILE.');
 }
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const SEED_DATA_ONBOARDING_SOURCE = 'provision_demo_accounts_v1';
+const SEED_DATA_POST_PROVISION_BOOTSTRAP_SOURCE = 'seed-test-data:post-provision';
 
 async function ensurePublicSearchPath(client) {
   await client.query('SET search_path TO public, extensions');
+}
+
+async function getOrganizationOnboardingSource(client) {
+  const result = await client.query(
+    "SELECT current_setting('app.organization_onboarding_source', true) AS source"
+  );
+  return result.rows?.[0]?.source ?? '';
+}
+
+async function setOrganizationOnboardingSource(client, source) {
+  await client.query(
+    "SELECT set_config('app.organization_onboarding_source', $1, false)",
+    [source ?? '']
+  );
+}
+
+async function withOrganizationOnboardingSource(client, source, action) {
+  const previousSource = await getOrganizationOnboardingSource(client);
+  await setOrganizationOnboardingSource(client, source);
+  try {
+    return await action();
+  } finally {
+    await setOrganizationOnboardingSource(client, previousSource);
+  }
+}
+
+async function runSeedTenantOnboardingBootstrap(client, orgIds) {
+  const results = [];
+  for (const orgId of orgIds) {
+    const result = await client.query(
+      `
+        SELECT public.bootstrap_tenant_onboarding_v1($1::uuid, $2::text) AS result
+      `,
+      [orgId, SEED_DATA_POST_PROVISION_BOOTSTRAP_SOURCE]
+    );
+    const payload = result.rows?.[0]?.result;
+    if (payload && typeof payload === 'object' && payload.ok === false) {
+      throw new Error(`Tenant onboarding bootstrap failed for seed organization ${orgId}: ${JSON.stringify(payload)}`);
+    }
+    results.push(payload);
+  }
+  return results;
 }
 
 function normalizeSeedSettingsValue(category, value) {
@@ -731,12 +775,16 @@ async function seedOrganizations(client) {
   const orgIds = [];
 
   for (const org of organizations) {
-    const result = await client.query(`
-      INSERT INTO organizations (name, slug, timezone, locale, billing_status)
-      VALUES ($1, $2, 'Asia/Riyadh', 'ar-SA', 'active')
-      ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
-      RETURNING id
-    `, [org.name, org.slug]);
+    const result = await withOrganizationOnboardingSource(
+      client,
+      SEED_DATA_ONBOARDING_SOURCE,
+      () => client.query(`
+        INSERT INTO organizations (name, slug, timezone, locale, billing_status)
+        VALUES ($1, $2, 'Asia/Riyadh', 'ar-SA', 'active')
+        ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+        RETURNING id
+      `, [org.name, org.slug])
+    );
 
     orgIds.push(result.rows[0].id);
   }
@@ -2046,6 +2094,8 @@ async function seedWorkflowOrchestration(client) {
                 'operation_name', 'logestechs_create_shipment_v1',
                 'payload_path', '$.transformed_payload',
                 'expects_provider_defaults', TRUE,
+                'disabled_reason', 'operation_template_unavailable',
+                'requires_provider_operation', TRUE,
                 'priority', 70,
                 'max_retries', 3
             ),
@@ -2248,6 +2298,7 @@ async function main() {
     const orgIds = await seedOrganizations(client);
     const clientIds = await seedClients(client, orgIds);
     const senderIds = await seedSenders(client, clientIds);
+    await runSeedTenantOnboardingBootstrap(client, orgIds);
     const poolState = await seedRecipientAndAddressPools(client, clientIds, volume);
     const shipmentStatuses = await loadSeedShipmentStatuses(client);
     const serviceTypes = await loadSeedServiceTypes(client);
@@ -2364,9 +2415,15 @@ if (require.main === module) {
 
 module.exports = {
   ensurePublicSearchPath,
+  SEED_DATA_ONBOARDING_SOURCE,
+  SEED_DATA_POST_PROVISION_BOOTSTRAP_SOURCE,
+  getOrganizationOnboardingSource,
   main,
+  runSeedTenantOnboardingBootstrap,
   seedShipments,
   seedShipmentsLegacy,
+  setOrganizationOnboardingSource,
+  withOrganizationOnboardingSource,
 };
 
 

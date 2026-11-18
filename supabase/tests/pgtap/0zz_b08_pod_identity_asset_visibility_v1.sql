@@ -94,11 +94,12 @@ BEGIN
       SELECT 1
       FROM public.operation_handlers
       WHERE handler_key = 'route_stop_finalize'
-        AND handler_name = 'execute_route_stop_finalize_v9'
-        AND handler_version = 'v9'
+        AND handler_schema = 'workflow_handlers'
+        AND handler_name = 'execute_route_stop_finalize_' || handler_version
+        AND substring(handler_version from '^v([0-9]+)$')::INT >= 9
         AND is_active IS TRUE
     ),
-    'route_stop_finalize handler upgraded to v9'
+    'route_stop_finalize handler is active at v9 or newer'
   );
   RETURN NEXT has_function(
     'api',
@@ -112,6 +113,8 @@ BEGIN
     ARRAY['uuid', 'uuid'],
     'api.ui_get_shipment_pod_asset_download_v1(uuid, uuid) exists'
   );
+
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'B08 POD Identity Org', 'b08-pod-identity-' || left(v_org::text, 8));
@@ -155,6 +158,9 @@ BEGIN
 
   INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
   VALUES (v_sender, v_client, 'B08 POD Identity Sender', 'B08 POD Identity Sender', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:b08-pod-identity-fixture-bootstrap');
 
   INSERT INTO public.shipments (id, organization_id, client_id, sender_id, service_type, tracking_number, status)
   VALUES (v_shipment, v_org, v_client, v_sender, 'delivery', 'B08PODID' || upper(left(v_shipment::text, 8)), 'out_for_delivery');

@@ -9,8 +9,8 @@ import { createUiTranslator } from "../i18n";
 
 const t = createUiTranslator("ui.labelDesigner.preview");
 
-if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+if (typeof window !== "undefined") {
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 }
 
 type PdfPreviewProps = {

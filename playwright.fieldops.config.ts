@@ -61,8 +61,22 @@ if (!process.env.NEXT_PUBLIC_AUTH_METHODS) {
 export default defineConfig({
   testDir: "./tests/fieldops-e2e",
   timeout: 90_000,
+  // Same-renderer visual baselines (mobile-v2-visual-baseline.spec.ts) live
+  // under __screenshots__/ with a flat, platform-agnostic name so each is a
+  // single committed reference PNG.
+  snapshotPathTemplate:
+    "{testDir}/__screenshots__/mobile-v2-visual-baseline/{arg}{ext}",
   expect: {
-    timeout: 15_000
+    timeout: 15_000,
+    // Per-screen visual-parity gate: a screen must stay >95% pixel-
+    // identical to its committed same-renderer baseline (≤5% of pixels
+    // may drift). `threshold` is the per-pixel YIQ tolerance that absorbs
+    // sub-pixel anti-aliasing without hiding real change.
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.05,
+      threshold: 0.2,
+      animations: "disabled",
+    },
   },
   retries: isCi ? 2 : 0,
   reporter: isCi

@@ -23,5 +23,26 @@ describe('marketing-lead-intake payload compatibility', () => {
     expect(source).toContain('addAttempt(`service-jwt+apikey:${apiKey === anonKey ? "anon" : "service"}`, {');
     expect(source).toContain('addAttempt("service-secret-bearer+apikey", {');
     expect(source).toContain('message.includes("no api key")');
+    expect(source).toContain('message.includes("permission denied for function")');
+  });
+
+  test('pins PostgREST RPC calls to the exposed api schema', () => {
+    expect(source).toContain('"accept-profile": "api"');
+    expect(source).toContain('"content-profile": "api"');
+    expect(source).toContain('fetchWithTimeout(`${baseUrl}/rest/v1/rpc/${rpcName}`');
+  });
+
+  test('bounds local RPC fetches and falls back across local Supabase URL planes', () => {
+    expect(source).toContain('const SUPABASE_URL = readEnv("SUPABASE_URL", ["EDGE_SUPABASE_URL", "API_URL"]);');
+    expect(source).toContain('const resolveRpcBaseUrls = (): string[] => {');
+    expect(source).toContain('candidates.push("http://kong:8000");');
+    expect(source).toContain('controller.abort()');
+    expect(source).toContain('throw new Error(`rpc_fetch_failed:${lastFetchError.message || "unknown"}`);');
+  });
+
+  test('uses the local Turnstile dummy token shortcut for loopback browser proof', () => {
+    expect(source).toContain('const LOCAL_MARKETING_TURNSTILE_DUMMY_TOKEN = "EXAMPLE_PASSWORD";');
+    expect(source).toContain('cors.localContext && turnstileToken === LOCAL_MARKETING_TURNSTILE_DUMMY_TOKEN');
+    expect(source).toContain('? { success: true, hostname: "", errorCodes: [] }');
   });
 });

@@ -71,6 +71,8 @@ BEGIN
     'ui_resource_metrics_v1 uses shared flat-filter compilation'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'UC221 Search Org', 'uc221-search-' || left(v_org::text, 8));
 
@@ -79,6 +81,9 @@ BEGIN
 
   INSERT INTO public.senders (id, client_id, name, status)
   VALUES (v_sender, v_client, 'UC221 Search Sender', 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:uc221-search-fixture-bootstrap');
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type)
   VALUES (

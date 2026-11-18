@@ -113,6 +113,57 @@ describe('workspace docker runtime proof', () => {
     });
   });
 
+  test('surface proof fails when browser proof reports stale served source', async () => {
+    global.fetch = jest.fn(async () => ({
+      status: 200,
+      text: async () => '<main>MasarX Console Dashboard Operations</main>',
+    }));
+
+    await expect(checkSurface({
+      surface: 'console-v2',
+      service: 'console-v2',
+      url: 'http://console-v2:5192',
+      requiredText: /MasarX|Console/i,
+      browserRequired: true,
+      backendReadbackRequired: true,
+      authRequired: true,
+    }, {
+      browserProof: {
+        proof_tier: 'playwright-browser-context',
+        surfaces: [{
+          surface: 'console-v2',
+          status: 'failed',
+          browser_rendered: true,
+          no_runtime_errors: true,
+          expected_visible_state: true,
+          forbidden_text_absent: true,
+          backend_wiring_ok: true,
+          auth_session_ok: true,
+          seed_disabled: true,
+          source_freshness: {
+            ok: false,
+            stale_count: 1,
+            stale_sources: [{
+              url: 'http://127.0.0.1:5192/src/lib/hosted-redirect.ts',
+              high_signal_missing_tokens_sample: ['DEFAULT_HOSTED_CONSOLE_ORIGIN'],
+            }],
+          },
+        }],
+      },
+    })).resolves.toMatchObject({
+      ok: false,
+      browser_proof: {
+        browser_evidence_present: true,
+        no_runtime_errors: false,
+        source_freshness_ok: false,
+      },
+      failure_reasons: expect.arrayContaining([
+        'browser_runtime_errors_present',
+        'served_source_stale',
+      ]),
+    });
+  });
+
   test('surface proof rejects protected surfaces without lane-local auth evidence', async () => {
     global.fetch = jest.fn(async () => ({
       status: 200,
@@ -485,5 +536,80 @@ describe('workspace docker runtime proof', () => {
     });
     expect(summary.acceptance.all_surfaces_runtime_proven).toBe(false);
     expect(summary.surfaces[0].failure_reasons).toContain('missing_browser_render_evidence');
+  });
+
+  test('console-only runtime proof does not require Mobile V2 development proof', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), '5ff747db-04ff-40d0-b8de-39cf5a08edf9-console-only-proof-'));
+    const browserSummaryPath = path.join(tmpDir, 'browser-proof-summary.json');
+    const backendSummaryPath = path.join(tmpDir, 'backend-proof-summary.json');
+    const authSummaryPath = path.join(tmpDir, 'auth-proof-summary.json');
+    fs.writeFileSync(browserSummaryPath, `${JSON.stringify({
+      status: 'passed',
+      surfaces: [{
+        surface: 'console-v2',
+        status: 'passed',
+        browser_rendered: true,
+        no_runtime_errors: true,
+        expected_visible_state: true,
+        forbidden_text_absent: true,
+        backend_wiring_ok: true,
+        auth_session_ok: true,
+        seed_disabled: true,
+        source_freshness: { ok: true, stale_count: 0 },
+      }],
+    }, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(backendSummaryPath, `${JSON.stringify({
+      status: 'passed',
+      acceptance: {
+        landing_intake_readback_proven: true,
+      },
+    }, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(authSummaryPath, `${JSON.stringify({
+      status: 'passed',
+      acceptance: {
+        required_surface_identities_present: true,
+        password_grants_succeeded: true,
+        app_user_backend_readback_succeeded: true,
+      },
+    }, null, 2)}\n`, 'utf8');
+    global.fetch = jest.fn(async (url) => ({
+      status: String(url).includes('/auth/v1/health') ? 200 : 200,
+      text: async () => (
+        String(url).includes('/auth/v1/health')
+          ? '{"name":"GoTrue"}'
+          : '<main>MasarX Console Dashboard Operations</main>'
+      ),
+    }));
+
+    const summary = await runDockerRuntimeProof({
+      timeoutMs: 1000,
+      browserProofSummary: browserSummaryPath,
+      backendProofSummary: backendSummaryPath,
+      authProofSummary: authSummaryPath,
+    }, {
+      WORKSPACE_NAME: 'wk-console-only-proof',
+      MASARX_RUNTIME_DRIVER: 'docker',
+      MASARX_APP_COMPOSE_PROJECT_NAME: 'masarx-app-wk-console-only-proof',
+      SUPABASE_COMPOSE_PROJECT_NAME: 'masarx-wk-console-only-proof',
+      CONSOLE_PORT: '5187',
+      SUPABASE_INTERNAL_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:55445',
+      SUPABASE_FUNCTIONS_INTERNAL_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:55445/functions/v1',
+      VITE_USE_SEED: 'false',
+      NEXT_PUBLIC_USE_SEED: 'false',
+      DATABASE_URL: '',
+    });
+
+    expect(summary.status).toBe('passed');
+    expect(summary.surfaces.map((surface) => surface.surface)).toEqual(['console-v2']);
+    expect(summary.mobile_v2).toMatchObject({
+      development_runtime_proof_required: false,
+      visible_runtime: false,
+      backend_readback: {
+        skipped: true,
+        reason: 'fieldops_metro_not_requested',
+      },
+    });
+    expect(summary.acceptance.mobile_v2_development_runtime_proof).toBe(true);
+    expect(summary.acceptance.all_surfaces_runtime_proven).toBe(true);
   });
 });

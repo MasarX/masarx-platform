@@ -1,4 +1,4 @@
-import { openDatabaseAsync } from "expo-sqlite";
+import { defaultDatabaseDirectory, openDatabaseAsync } from "expo-sqlite";
 
 import type { OutboxEntry, OutboxEntryStatus, OutboxStore } from "./outbox";
 import { createOutboxId, createOutboxNow } from "./outbox";
@@ -41,6 +41,33 @@ function normalizeDatabaseName(name?: string) {
   return trimmed ? trimmed : "app.db";
 }
 
+function normalizeFallbackDirectory(directory?: string | null) {
+  const trimmed = String(directory || "").trim().replace(/[\\/]+$/, "");
+  return trimmed ? `${trimmed}_masarx` : null;
+}
+
+function isBlockedDefaultDirectoryError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return (
+    message.includes("Could not open database") &&
+    message.includes("SQLite") &&
+    (message.includes("Path already points to a non-normal file") ||
+      message.includes("points to a file, but must point to a directory"))
+  );
+}
+
+async function openDatabaseWithFallback(databaseName: string) {
+  try {
+    return await openDatabaseAsync(databaseName);
+  } catch (error) {
+    const fallbackDirectory = normalizeFallbackDirectory(defaultDatabaseDirectory);
+    if (!fallbackDirectory || !isBlockedDefaultDirectoryError(error)) {
+      throw error;
+    }
+    return openDatabaseAsync(databaseName, undefined, fallbackDirectory);
+  }
+}
+
 function normalizeTableName(name?: string) {
   const trimmed = String(name || "").trim();
   if (!trimmed) return "outbox";
@@ -60,7 +87,7 @@ export function createSqliteOutboxStore(params: {
 
   function getDb() {
     if (!dbPromise) {
-      dbPromise = openDatabaseAsync(databaseName);
+      dbPromise = openDatabaseWithFallback(databaseName);
     }
     return dbPromise;
   }
@@ -144,37 +171,39 @@ export function createSqliteOutboxStore(params: {
     return rows.map(parseRow);
   }
 
-  async function listPending(params: { limit?: number } = {}) {
+  async function listPending(params: { limit?: number; force?: boolean } = {}) {
     const db = await getDb();
     const limit = params.limit ?? 50;
     const now = createOutboxNow();
+    const retryGate = params.force === true ? "" : "AND (next_attempt_at IS NULL OR next_attempt_at <= ?)";
+    const values = params.force === true ? [limit] : [now, limit];
     const rows = await db.getAllAsync<SqliteRow>(
       `SELECT * FROM ${tableName}
        WHERE status IN ('queued','failed')
-         AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+         ${retryGate}
        ORDER BY created_at ASC
        LIMIT ?`,
-      now,
-      limit
+      ...(values as any[])
     );
     return rows.map(parseRow);
   }
 
-  async function claimPending(params: { limit?: number } = {}) {
+  async function claimPending(params: { limit?: number; force?: boolean } = {}) {
     const db = await getDb();
     const limit = params.limit ?? 50;
     const now = createOutboxNow();
+    const retryGate = params.force === true ? "" : "AND (next_attempt_at IS NULL OR next_attempt_at <= ?)";
+    const values = params.force === true ? [limit] : [now, limit];
 
     await db.execAsync("BEGIN IMMEDIATE");
     try {
       const rows = await db.getAllAsync<SqliteRow>(
         `SELECT * FROM ${tableName}
          WHERE status IN ('queued','failed')
-           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+           ${retryGate}
          ORDER BY created_at ASC
          LIMIT ?`,
-        now,
-        limit
+        ...(values as any[])
       );
 
       const ids = rows.map((row) => row.id).filter(Boolean);
@@ -322,7 +351,7 @@ export function createSqliteKeyValueStore(params: {
 
   function getDb() {
     if (!dbPromise) {
-      dbPromise = openDatabaseAsync(databaseName);
+      dbPromise = openDatabaseWithFallback(databaseName);
     }
     return dbPromise;
   }

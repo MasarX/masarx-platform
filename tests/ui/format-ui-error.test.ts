@@ -31,6 +31,26 @@ test("formatUiError falls back when empty", () => {
   expect(formatUiError(null, "fallback")).toBe("fallback");
 });
 
+test("formatUiError falls back for technical guard messages", () => {
+  const fallback = "Action failed.";
+
+  expect(
+    formatUiError(
+      new Error("ui_update_resource_v1 backend readback missing shipments:ship_1"),
+      fallback
+    )
+  ).toBe(fallback);
+  expect(formatUiError("Workflow task event readback was not found", fallback)).toBe(fallback);
+  expect(formatUiError("Trace failed for correlation id abc123", fallback)).toBe(fallback);
+  expect(formatUiError("Raw JSON payload unavailable", fallback)).toBe(fallback);
+  expect(formatUiError("Debug details are unavailable", fallback)).toBe(fallback);
+});
+
+test("sanitizeUiError returns null for technical guard messages", () => {
+  expect(sanitizeUiError("backend readback missing workflow_runs")).toBeNull();
+  expect(sanitizeUiError("Open debug trace failed")).toBeNull();
+});
+
 test("isStatementTimeoutUiError detects statement timeout messages", () => {
   expect(isStatementTimeoutUiError("canceling statement due to statement timeout")).toBe(true);
   expect(isStatementTimeoutUiError({ details: "canceling statement due to statement timeout" })).toBe(true);

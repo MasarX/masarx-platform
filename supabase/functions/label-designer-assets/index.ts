@@ -53,6 +53,48 @@ const sanitizeFileName = (raw: string) => {
   return cleaned.slice(0, 120);
 };
 
+const normalizeImageContentType = (raw: string) => {
+  const normalized = raw.trim().toLowerCase().split(";")[0].trim();
+  return normalized === "image/jpg" ? "image/jpeg" : normalized;
+};
+
+const isSupportedImageContentType = (contentType: string) => ["image/png", "image/jpeg", "image/webp"].includes(contentType);
+
+const isUnspecifiedContentType = (contentType: string) => !contentType || contentType === "application/octet-stream";
+
+const detectImageContentType = (bytes: Uint8Array) => {
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return null;
+};
+
 const assertOrgPath = (orgId: string, path: string) => {
   const prefix = `${orgId}/${DESIGNER_DIR}/`;
   return path.startsWith(prefix);
@@ -198,9 +240,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (typed.mode === "upload") {
       const fileNameRaw = asString((typed as any).file_name);
       const fileBase64 = asString((typed as any).file_base64);
-      const contentType = asString((typed as any).content_type) || "application/octet-stream";
+      const requestedContentType = normalizeImageContentType(asString((typed as any).content_type) || "");
       if (!fileNameRaw) return json(400, { ok: false, error: { code: "file_name_required" } }, corsHeaders);
       if (!fileBase64) return json(400, { ok: false, error: { code: "file_base64_required" } }, corsHeaders);
+      if (!isUnspecifiedContentType(requestedContentType) && !isSupportedImageContentType(requestedContentType)) {
+        return json(
+          415,
+          {
+            ok: false,
+            error: {
+              code: "unsupported_asset_type",
+              message: "Label designer assets must be PNG, JPEG, or WebP images",
+            },
+          },
+          corsHeaders,
+        );
+      }
 
       const safeName = sanitizeFileName(fileNameRaw);
       if (!safeName) return json(400, { ok: false, error: { code: "invalid_file_name" } }, corsHeaders);
@@ -210,10 +265,37 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (bytes.length > 5 * 1024 * 1024) {
         return json(413, { ok: false, error: { code: "file_too_large", message: "Max 5MB" } }, corsHeaders);
       }
+      const detectedContentType = detectImageContentType(bytes);
+      if (!detectedContentType) {
+        return json(
+          415,
+          {
+            ok: false,
+            error: {
+              code: "unsupported_asset_bytes",
+              message: "Label designer assets must contain PNG, JPEG, or WebP image bytes",
+            },
+          },
+          corsHeaders,
+        );
+      }
+      if (!isUnspecifiedContentType(requestedContentType) && detectedContentType !== requestedContentType) {
+        return json(
+          415,
+          {
+            ok: false,
+            error: {
+              code: "asset_type_mismatch",
+              message: "Uploaded asset bytes do not match the declared image type",
+            },
+          },
+          corsHeaders,
+        );
+      }
 
       const path = `${orgId}/${DESIGNER_DIR}/${safeName}`;
-      const { error } = await storageClient.storage.from(ASSET_BUCKET).upload(path, new Blob([bytes], { type: contentType }), {
-        contentType,
+      const { error } = await storageClient.storage.from(ASSET_BUCKET).upload(path, new Blob([bytes], { type: detectedContentType }), {
+        contentType: detectedContentType,
         upsert: true,
       });
       if (error) return json(400, { ok: false, error: { code: "upload_failed", message: error.message } }, corsHeaders);

@@ -68,6 +68,20 @@ describe("DraftWorkflow", () => {
     expect(defaultProps.onDraftNameChange).toHaveBeenCalledWith("New Name");
   });
 
+  it("keeps draft name and JSON editor read-only without write capability", () => {
+    render(<DraftWorkflow {...defaultProps} canWrite={false} />);
+    const input = screen.getByTestId("ld-draft-name");
+    expect(input).toBeDisabled();
+    fireEvent.change(input, { target: { value: "Blocked Name" } });
+    expect(defaultProps.onDraftNameChange).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("ld-tab-code"));
+    const editor = screen.getByTestId("ld-draft-json");
+    expect(editor).toBeDisabled();
+    fireEvent.change(editor, { target: { value: "{\"blocks\":[{\"type\":\"text\"}]}" } });
+    expect(defaultProps.onDraftEditorChange).not.toHaveBeenCalled();
+  });
+
   it("calls onCreateDraft when create button clicked", () => {
     render(<DraftWorkflow {...defaultProps} />);
     const btn = screen.getByTestId("ld-create-draft");
@@ -81,13 +95,15 @@ describe("DraftWorkflow", () => {
     expect(btn.textContent).toMatch(/Saving|حفظ/i);
   });
 
-  it("disables save when not a draft status", () => {
+  it("keeps save available for published drafts so operators can fork the next draft", () => {
     const publishedDraft = { ...mockDraft, status: "published" };
     render(
       <DraftWorkflow {...defaultProps} drafts={[publishedDraft]} />,
     );
     const btn = screen.getByTestId("ld-save-draft");
-    expect(btn).toBeDisabled();
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    expect(defaultProps.onSaveDraft).toHaveBeenCalled();
   });
 
   it("switches between visual and code tabs", () => {

@@ -672,9 +672,11 @@ export const invokeSupabaseRpcWithAuthFallback = async ({
   body,
   authAttempts = [],
   fetchInit = {},
+  schema = "api",
 } = {}) => {
   const rpcUrl = trimToEmpty(url);
   const attempts = Array.isArray(authAttempts) ? authAttempts.filter(Boolean) : [];
+  const rpcSchema = trimToEmpty(schema);
   if (!rpcUrl) {
     throw new Error("invokeSupabaseRpcWithAuthFallback requires a url");
   }
@@ -685,6 +687,10 @@ export const invokeSupabaseRpcWithAuthFallback = async ({
   let lastResult = null;
   for (const attempt of attempts) {
     const headers = new Headers(fetchInit.headers || {});
+    if (rpcSchema) {
+      headers.set("accept-profile", rpcSchema);
+      headers.set("content-profile", rpcSchema);
+    }
     for (const [key, value] of Object.entries(attempt.headers || {})) {
       if (value !== undefined && value !== null && String(value).length > 0) {
         headers.set(key, String(value));

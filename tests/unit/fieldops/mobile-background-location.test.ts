@@ -28,6 +28,7 @@ type LoadOptions = {
   syncHold?: boolean;
   retriableNetwork?: boolean;
   retriableSupabase?: boolean;
+  secureState?: Map<string, string>;
 };
 
 function createPolicy(overrides: Partial<MobileLocationTrackingPolicy> = {}): MobileLocationTrackingPolicy {
@@ -110,11 +111,12 @@ function loadBackgroundModule(options: LoadOptions = {}) {
     syncHold = false,
     retriableNetwork = false,
     retriableSupabase = false,
+    secureState: providedSecureState,
   } = options;
 
   jest.resetModules();
 
-  const secureState = new Map<string, string>();
+  const secureState = providedSecureState ?? new Map<string, string>();
   let taskHandler: ((payload: { data?: unknown; error?: unknown }) => Promise<void>) | null = null;
   let nextOutboxId = 0;
   const sessionPlan = sessionSequence.slice();
@@ -264,9 +266,13 @@ function loadBackgroundModule(options: LoadOptions = {}) {
   }));
   jest.doMock("../../../apps/fieldops/src/mobile-storage", () => ({
     createFieldOpsStorage: jest.fn(() => ({
-      getItem: async () => null,
-      setItem: async () => undefined,
-      removeItem: async () => undefined,
+      getItem: async (key: string) => secureState.get(key) ?? null,
+      setItem: async (key: string, value: string) => {
+        secureState.set(key, value);
+      },
+      removeItem: async (key: string) => {
+        secureState.delete(key);
+      },
     })),
   }));
 
@@ -485,6 +491,34 @@ describe("mobile background location", () => {
     });
     const stored = JSON.parse(String(secureState.get(BACKGROUND_STATE_KEY) || "{}"));
     expect(stored.maxAccuracyM).toBeNull();
+  });
+
+  test("persists background state across module reload when SecureStore succeeds", async () => {
+    const sharedState = new Map<string, string>();
+    const firstLoad = loadBackgroundModule({
+      secureState: sharedState,
+      running: false,
+    });
+
+    await firstLoad.mod.syncBackgroundLocationTracking({
+      deviceId: "device-42",
+      policy: createPolicy({
+        maxAccuracyM: 25,
+      }),
+    });
+
+    resetBackgroundLocationLocalMocks();
+
+    const secondLoad = loadBackgroundModule({
+      secureState: sharedState,
+      running: true,
+    });
+    const restored = await secondLoad.mod.getBackgroundLocationTrackingState();
+    expect(restored.state).toEqual({
+      deviceId: "device-42",
+      trackingEnabled: true,
+      maxAccuracyM: 25,
+    });
   });
 
   test("get state handles hasStarted failures gracefully", async () => {

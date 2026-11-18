@@ -50,6 +50,129 @@ function normalizeContactEndpoint(value) {
   return normalizePathOrAbsoluteUrl(value);
 }
 
+function endpointPathname(value) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = trimmed.startsWith("/")
+      ? new URL(trimmed, "https://landing.local")
+      : new URL(trimmed);
+    return parsed.pathname.replace(/\/+$/g, "");
+  } catch {
+    return trimmed.split(/[?#]/)[0].replace(/\/+$/g, "");
+  }
+}
+
+function isMarketingLeadIntakeEndpoint(value) {
+  return /(^|\/)marketing-lead-intake$/.test(endpointPathname(value));
+}
+
+function isTenantSignupIntakeEndpoint(value) {
+  return /(^|\/)tenant-signup-intake$/.test(endpointPathname(value));
+}
+
+function isMarketingLeadClientsEndpoint(value) {
+  return /(^|\/)marketing-lead-intake\/clients$/.test(endpointPathname(value));
+}
+
+function isLocalSiteUrl(value) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return false;
+  try {
+    const hostname = new URL(trimmed).hostname.toLowerCase();
+    return (
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]" ||
+      hostname === "::1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLocalLandingContactEndpoint(value) {
+  return endpointPathname(value) === "/__landing-contact";
+}
+
+function isLocalTenantSignupEndpoint(value) {
+  return endpointPathname(value) === "/__tenant-signup";
+}
+
+function validateLandingRuntimeEndpoints({
+  siteUrl,
+  contactEndpoint,
+  tenantSignupEndpoint,
+}) {
+  const allowLocalPreviewMocks = isLocalSiteUrl(siteUrl);
+
+  if (!contactEndpoint) {
+    throw new Error(
+      "LANDING_CONTACT_ENDPOINT is required for landing builds and must point to the marketing-lead-intake intake endpoint (.../marketing-lead-intake)."
+    );
+  }
+
+  if (!tenantSignupEndpoint) {
+    throw new Error(
+      "LANDING_TENANT_SIGNUP_ENDPOINT is required for landing builds and must point to the tenant-signup-intake intake endpoint (.../tenant-signup-intake)."
+    );
+  }
+
+  if (
+    !isMarketingLeadIntakeEndpoint(contactEndpoint) &&
+    !(allowLocalPreviewMocks && isLocalLandingContactEndpoint(contactEndpoint))
+  ) {
+    throw new Error(
+      "LANDING_CONTACT_ENDPOINT must point to the marketing-lead-intake intake endpoint (.../marketing-lead-intake)."
+    );
+  }
+
+  if (
+    !isTenantSignupIntakeEndpoint(tenantSignupEndpoint) &&
+    !(allowLocalPreviewMocks && isLocalTenantSignupEndpoint(tenantSignupEndpoint))
+  ) {
+    throw new Error(
+      "LANDING_TENANT_SIGNUP_ENDPOINT must point to the tenant-signup-intake intake endpoint (.../tenant-signup-intake)."
+    );
+  }
+
+  if (contactEndpoint === tenantSignupEndpoint) {
+    throw new Error(
+      "LANDING_TENANT_SIGNUP_ENDPOINT must point to tenant-signup-intake and must not reuse LANDING_CONTACT_ENDPOINT."
+    );
+  }
+}
+
+function appendEndpointPath(value, segment) {
+  const trimmed = String(value ?? "").trim();
+  const leaf = String(segment || "").replace(/^\/+/, "");
+  if (!trimmed || !leaf) return "";
+  if (trimmed.startsWith("/")) {
+    return `${trimmed.split(/[?#]/)[0].replace(/\/+$/g, "")}/${leaf}`;
+  }
+  const parsed = new URL(trimmed);
+  parsed.pathname = `${parsed.pathname.replace(/\/+$/g, "")}/${leaf}`;
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+
+function resolveLandingClientsEndpoint(rawClientsEndpoint, contactEndpoint) {
+  const explicit = normalizePathOrAbsoluteUrl(rawClientsEndpoint);
+  if (explicit) {
+    if (!isMarketingLeadClientsEndpoint(explicit)) {
+      throw new Error(
+        "LANDING_CLIENTS_ENDPOINT must point to the marketing-lead-intake clients feed (.../marketing-lead-intake/clients)."
+      );
+    }
+    return explicit;
+  }
+
+  if (!isMarketingLeadIntakeEndpoint(contactEndpoint)) return "";
+  return appendEndpointPath(contactEndpoint, "clients");
+}
+
 function normalizeBasePath(value) {
   const trimmed = String(value ?? "").trim();
   if (!trimmed || trimmed === "/") return "/";
@@ -496,7 +619,7 @@ function main() {
   const appUrl = normalizeAbsoluteUrl(process.env.LANDING_APP_URL);
   const contactEndpoint = normalizeContactEndpoint(process.env.LANDING_CONTACT_ENDPOINT);
   const tenantSignupEndpoint = normalizeContactEndpoint(
-    process.env.LANDING_TENANT_SIGNUP_ENDPOINT || contactEndpoint
+    process.env.LANDING_TENANT_SIGNUP_ENDPOINT
   );
   const driverSignupEndpoint = normalizeContactEndpoint(
     process.env.LANDING_DRIVER_SIGNUP_ENDPOINT
@@ -506,7 +629,15 @@ function main() {
       process.env.LANDING_DRIVER_STATUS_ENDPOINT
   );
   const trackingEndpoint = normalizeContactEndpoint(process.env.LANDING_TRACKING_ENDPOINT);
-  const clientsEndpoint = normalizePathOrAbsoluteUrl(process.env.LANDING_CLIENTS_ENDPOINT);
+  const clientsEndpoint = resolveLandingClientsEndpoint(
+    process.env.LANDING_CLIENTS_ENDPOINT,
+    contactEndpoint
+  );
+  validateLandingRuntimeEndpoints({
+    siteUrl,
+    contactEndpoint,
+    tenantSignupEndpoint,
+  });
   const turnstileSiteKey = String(process.env.LANDING_TURNSTILE_SITE_KEY || "").trim();
   const supabaseAnonKey = String(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "",

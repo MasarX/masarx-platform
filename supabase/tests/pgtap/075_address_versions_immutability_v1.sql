@@ -3,13 +3,35 @@
 BEGIN;
 SELECT plan(4);
 
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender
+-- context exists and fail-closed plugin activation has truthful binding inputs.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('00000000-0000-0000-0000-000000000075', 'pgtap-org-075', 'pgtap-org-075')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.clients (id, organization_id, name, slug)
-VALUES ('00000000-0000-0000-0000-000000000175', '00000000-0000-0000-0000-000000000075', 'pgtap-client-075', 'pgtap-client-075')
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+VALUES ('00000000-0000-0000-0000-000000000175', '00000000-0000-0000-0000-000000000075', 'pgtap-client-075', 'pgtap-client-075', 'active')
 ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+VALUES (
+  '00000000-0000-0000-0000-000000000375',
+  '00000000-0000-0000-0000-000000000175',
+  'pgtap-sender-075',
+  'pgtap-sender-075',
+  TRUE,
+  'active'
+)
+ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  '00000000-0000-0000-0000-000000000075',
+  'pgtap:address-versions-immutability-fixture-bootstrap'
+);
 
 -- Create an address (will append first version)
 SELECT set_config('app.address_version_source', 'test_input', true);

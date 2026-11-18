@@ -19,6 +19,12 @@ const MIME = {
   ".xml": "application/xml; charset=utf-8",
 };
 
+const PREVIEW_INTAKE_ENDPOINTS = new Set([
+  "/__landing-contact",
+  "/__tenant-signup",
+  "/__driver-signup",
+]);
+
 function isTruthy(value) {
   return /^(1|true|yes|on)$/i.test(String(value || "").trim());
 }
@@ -55,6 +61,119 @@ function resolveRouteRewrite(rootDir, urlPath) {
   return safeJoin(rootDir, match.target);
 }
 
+function jsonResponse(res, status, payload) {
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "content-type, x-masarx-public-edge-client, x-turnstile-token",
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function collectRequestJson(req, maxBytes = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    let body = "";
+
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error("request_body_too_large"));
+        req.destroy();
+        return;
+      }
+      body += chunk.toString("utf8");
+    });
+
+    req.on("end", () => {
+      if (!body.trim()) {
+        resolve({});
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error("invalid_json"));
+      }
+    });
+
+    req.on("error", reject);
+  });
+}
+
+function createPreviewIntakePayload(pathname, body) {
+  const now = new Date().toISOString();
+  const email = typeof body.email === "string" ? body.email.trim() : "";
+  const organizationName =
+    typeof body.organization_name === "string"
+      ? body.organization_name.trim()
+      : typeof body.company === "string"
+        ? body.company.trim()
+        : "";
+
+  if (pathname === "/__tenant-signup") {
+    return {
+      ok: true,
+      request_id: `tsr_local_${Date.now()}`,
+      status: "pending",
+      email,
+      organization_name: organizationName,
+      received_at: now,
+    };
+  }
+
+  if (pathname === "/__driver-signup") {
+    return {
+      ok: true,
+      application_id: `drv_local_${Date.now()}`,
+      status: "submitted",
+      status_token: `dst_local_${Date.now()}`,
+      email,
+      received_at: now,
+    };
+  }
+
+  return {
+    ok: true,
+    lead_id: `lead_local_${Date.now()}`,
+    status: "received",
+    email,
+    company: organizationName,
+    received_at: now,
+  };
+}
+
+async function maybeHandlePreviewIntake(req, res, urlPath) {
+  const pathname = String(urlPath || "/").split("?")[0].split("#")[0].replace(/\/+$/g, "") || "/";
+  if (!PREVIEW_INTAKE_ENDPOINTS.has(pathname)) return false;
+
+  const method = String(req.method || "GET").toUpperCase();
+  if (method === "OPTIONS") {
+    jsonResponse(res, 204, {});
+    return true;
+  }
+
+  if (method !== "POST") {
+    jsonResponse(res, 405, { ok: false, error: { code: "method_not_allowed" } });
+    return true;
+  }
+
+  try {
+    const body = await collectRequestJson(req);
+    jsonResponse(res, 200, createPreviewIntakePayload(pathname, body));
+  } catch (error) {
+    const code = error instanceof Error && error.message ? error.message : "invalid_request";
+    jsonResponse(res, code === "request_body_too_large" ? 413 : 400, {
+      ok: false,
+      error: { code },
+    });
+  }
+
+  return true;
+}
+
 function build(outDir) {
   const res = spawnSync(process.execPath, [path.join("scripts", "frontend", "build-landing.js"), "--out", outDir], {
     stdio: "inherit",
@@ -76,16 +195,21 @@ function main() {
   const skipBuild = isTruthy(args["skip-build"]) || isTruthy(process.env.LANDING_SKIP_BUILD);
   if (!skipBuild) build(outDir);
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
       const method = String(req.method || "GET").toUpperCase();
+      const urlPath = String(req.url || "/");
+
+      if (await maybeHandlePreviewIntake(req, res, urlPath)) {
+        return;
+      }
+
       if (method !== "GET" && method !== "HEAD") {
         res.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
         res.end("Method not allowed");
         return;
       }
 
-      const urlPath = String(req.url || "/");
       const target = safeJoin(outDir, urlPath === "/" ? "/index.html" : urlPath);
       if (!target) {
         res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
@@ -156,5 +280,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  createPreviewIntakePayload,
   isTruthy,
+  maybeHandlePreviewIntake,
 };

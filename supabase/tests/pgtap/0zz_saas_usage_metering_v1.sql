@@ -156,7 +156,7 @@ BEGIN
   RETURN NEXT throws_ok(
     format($$ SELECT count(*) FROM public.list_usage_events_v1('%s'::uuid) $$, v_org1::text),
     '42501',
-    'list_usage_events_v1 requires usage.read'
+    'list_usage_events_v1 requires usage.read or billing.read'
   );
 
   -- Grant usage.read to user1 via RBAC role

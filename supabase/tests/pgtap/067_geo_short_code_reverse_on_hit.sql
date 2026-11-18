@@ -10,27 +10,41 @@ SET search_path TO public, pgtap, extensions;
 -- -----------------------------------------------------------------------------
 -- Fixture data
 -- -----------------------------------------------------------------------------
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender
+-- context exists and fail-closed plugin activation has truthful binding inputs.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('06700000-0000-0000-0000-000000000001', 'PGTAP Geo Org 067', 'pgtap-geo-067')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.clients (id, organization_id, name, slug)
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
 VALUES (
   '06700000-0000-0000-0000-000000000002',
   '06700000-0000-0000-0000-000000000001',
   'PGTAP Geo Client 067',
-  'pgtap-geo-client-067'
+  'pgtap-geo-client-067',
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.senders (id, client_id, name, brand_name)
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
 VALUES (
   '06700000-0000-0000-0000-000000000003',
   '06700000-0000-0000-0000-000000000002',
   'PGTAP Geo Sender 067',
-  'PGTAP Geo Sender 067'
+  'PGTAP Geo Sender 067',
+  TRUE,
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  '06700000-0000-0000-0000-000000000001',
+  'pgtap:geo-short-code-reverse-fixture-bootstrap'
+);
 
 INSERT INTO public.addresses (
   id,

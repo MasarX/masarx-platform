@@ -52,6 +52,10 @@ DO $$
 DECLARE
   v_org1 UUID := '0c510000-0000-0000-0000-000000000001'::uuid;
   v_org2 UUID := '0c510000-0000-0000-0000-000000000002'::uuid;
+  v_client1 UUID := '0c510000-0000-0000-0000-000000000401'::uuid;
+  v_client2 UUID := '0c510000-0000-0000-0000-000000000402'::uuid;
+  v_sender1 UUID := '0c510000-0000-0000-0000-000000000501'::uuid;
+  v_sender2 UUID := '0c510000-0000-0000-0000-000000000502'::uuid;
   v_zone1 UUID := '0c510000-0000-0000-0000-000000000101'::uuid;
   v_branch1 UUID := '0c510000-0000-0000-0000-000000000201'::uuid;
   v_branch2 UUID := '0c510000-0000-0000-0000-000000000202'::uuid;
@@ -60,11 +64,30 @@ DECLARE
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES
     (v_org1, 'B04 Sort Org 1', 'b04-sort-org-1'),
     (v_org2, 'B04 Sort Org 2', 'b04-sort-org-2')
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES
+    (v_client1, v_org1, 'B04 Sort Client 1', 'b04-sort-client-1', 'active'),
+    (v_client2, v_org2, 'B04 Sort Client 2', 'b04-sort-client-2', 'active')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES
+    (v_sender1, v_client1, 'B04 Sort Sender 1', 'B04 Sort Sender 1', TRUE, 'active'),
+    (v_sender2, v_client2, 'B04 Sort Sender 2', 'B04 Sort Sender 2', TRUE, 'active')
+  ON CONFLICT (id) DO NOTHING;
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org1, 'pgtap:b04-sort-org1-fixture-bootstrap');
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org2, 'pgtap:b04-sort-org2-fixture-bootstrap');
 
   INSERT INTO public.zones (id, organization_id, name, slug, is_active)
   VALUES (v_zone1, v_org1, 'Sort Zone 1', 'sort-zone-1', TRUE)

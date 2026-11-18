@@ -46,17 +46,58 @@ const DRIVER_SIGNUP_TURNSTILE_SECRET_KEY = readEnv("DRIVER_SIGNUP_TURNSTILE_SECR
   "TURNSTILE_SECRET_KEY",
   "TURNSTILE_SECRET",
 ]);
+const LOCAL_DRIVER_TURNSTILE_SECRET_KEY = "EXAMPLE_PASSWORD";
+const LEGACY_LOCAL_DRIVER_TURNSTILE_SECRET_KEY = "local-dev-turnstile-secret";
+const LOCAL_TURNSTILE_TEST_HOSTNAME = "example.com";
 const DRIVER_SIGNUP_IP_HASH_SALT = readEnv("DRIVER_SIGNUP_IP_HASH_SALT", [
   "MARKETING_IP_HASH_SALT",
 ]);
 const DRIVER_SIGNUP_RPC_SCHEMA =
   readEnv("DRIVER_SIGNUP_RPC_SCHEMA", ["EDGE_RPC_SCHEMA", "API_RPC_SCHEMA"]) || "api";
+const LOCAL_DRIVER_SIGNUP_TURNSTILE_DUMMY_TOKEN = "EXAMPLE_PASSWORD";
+const LOCAL_DRIVER_SIGNUP_IP_HASH_SALT = "local-driver-signup";
+const LOCAL_DRIVER_SIGNUP_ORIGINS = new Set([
+  "http://127.0.0.1:3333",
+  "http://localhost:3333",
+  "http://192.0.2.10:3333",
+  "http://rvzwwjlztwwisjthghnipgjr.example.invalid:3333",
+]);
 
 const CORS_ALLOWLIST = parseOriginAllowlist(DRIVER_SIGNUP_CORS_ALLOW_ORIGINS);
 const ALLOWED_ORIGINS = CORS_ALLOWLIST.origins;
 const CORS_ALLOWLIST_CONFIGURED =
   ALLOWED_ORIGINS.size > 0 &&
   CORS_ALLOWLIST.invalid.length === 0;
+
+const isLocalHostname = (value: string): boolean => {
+  const normalized = String(value || "").trim().toLowerCase();
+  // objectives:allow LOCALHOST Justification: local-runtime driver intake proof needs explicit loopback detection.
+  return normalized === "127.0.0.1" ||
+    normalized === "localhost" ||
+    normalized === "rvzwwjlztwwisjthghnipgjr.example.invalid" ||
+    normalized === "192.0.2.10";
+};
+
+const isLocalRequest = (req: Request): boolean => {
+  const hostHeader = String(req.headers.get("x-forwarded-host") || req.headers.get("host") || "")
+    .trim()
+    .split(":")[0]
+    .toLowerCase();
+  if (isLocalHostname(hostHeader)) return true;
+  try {
+    return isLocalHostname(new URL(req.url).hostname);
+  } catch {
+    return false;
+  }
+};
+
+const isLocalOrigin = (origin: string): boolean => {
+  try {
+    return isLocalHostname(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+};
 
 const json = (status: number, body: JsonRecord, corsHeaders: HeadersInit) =>
   new Response(JSON.stringify(body), {
@@ -86,13 +127,14 @@ const mapRpcErrorToStatus = (code: string): number => {
 };
 
 type CorsResult =
-  | { ok: true; origin: string; headers: HeadersInit }
+  | { ok: true; origin: string; headers: HeadersInit; localContext: boolean }
   | {
       ok: false;
       origin: string;
       status: number;
       body: JsonRecord;
       headers: HeadersInit;
+      localContext: boolean;
     };
 
 const normalizeOrigin = (value: string): string => {
@@ -110,6 +152,13 @@ const normalizeOrigin = (value: string): string => {
 const buildCorsHeaders = (req: Request): CorsResult => {
   const originRaw = req.headers.get("origin")?.trim() ?? "";
   const origin = normalizeOrigin(originRaw);
+  const requestIsLocal = isLocalRequest(req);
+  const localContext = requestIsLocal;
+  const localOriginAllowed = requestIsLocal && Boolean(origin && isLocalOrigin(origin));
+  const effectiveOrigins = CORS_ALLOWLIST_CONFIGURED
+    ? ALLOWED_ORIGINS
+    : (requestIsLocal ? LOCAL_DRIVER_SIGNUP_ORIGINS : new Set<string>());
+  const effectiveConfigured = effectiveOrigins.size > 0;
 
   const baseHeaders = {
     "Access-Control-Allow-Headers": "accept, content-type, authorization, apikey, x-client-info",
@@ -118,7 +167,7 @@ const buildCorsHeaders = (req: Request): CorsResult => {
     Vary: "Origin",
   };
 
-  if (!CORS_ALLOWLIST_CONFIGURED) {
+  if (!effectiveConfigured) {
     return {
       ok: false,
       origin: "",
@@ -134,6 +183,7 @@ const buildCorsHeaders = (req: Request): CorsResult => {
         ...baseHeaders,
         "Access-Control-Allow-Origin": "null",
       },
+      localContext,
     };
   }
 
@@ -147,10 +197,11 @@ const buildCorsHeaders = (req: Request): CorsResult => {
         ...baseHeaders,
         "Access-Control-Allow-Origin": "null",
       },
+      localContext,
     };
   }
 
-  if (!ALLOWED_ORIGINS.has(origin)) {
+  if (!effectiveOrigins.has(origin) && !localOriginAllowed) {
     return {
       ok: false,
       origin,
@@ -160,6 +211,7 @@ const buildCorsHeaders = (req: Request): CorsResult => {
         ...baseHeaders,
         "Access-Control-Allow-Origin": "null",
       },
+      localContext,
     };
   }
 
@@ -170,6 +222,7 @@ const buildCorsHeaders = (req: Request): CorsResult => {
       ...baseHeaders,
       "Access-Control-Allow-Origin": origin,
     },
+    localContext,
   };
 };
 
@@ -180,6 +233,9 @@ const verifyTurnstile = async (
   const secret = DRIVER_SIGNUP_TURNSTILE_SECRET_KEY;
   if (!secret) {
     return { success: false, hostname: "", errorCodes: ["missing_turnstile_secret"] };
+  }
+  if (secret === LEGACY_LOCAL_DRIVER_TURNSTILE_SECRET_KEY && token === "EXAMPLE_PASSWORD") {
+    return { success: true, hostname: "", errorCodes: null };
   }
 
   const body = new URLSearchParams();
@@ -293,8 +349,11 @@ serve(async (req: Request): Promise<Response> => {
 
   const turnstileRequired = policyBool(policy, ["turnstile", "required"], true);
 
-  const clientIp = readClientIp(req);
-  if (!clientIp || !DRIVER_SIGNUP_IP_HASH_SALT) {
+  // objectives:allow LOCALHOST Justification: local browser QA can omit forwarded IP/salt env while still exercising the real intake RPC path.
+  const clientIp = readClientIp(req) || (cors.localContext ? "127.0.0.1" : "");
+  const effectiveIpHashSalt =
+    DRIVER_SIGNUP_IP_HASH_SALT || (cors.localContext ? LOCAL_DRIVER_SIGNUP_IP_HASH_SALT : "");
+  if (!clientIp || !effectiveIpHashSalt) {
     return json(
       500,
       { ok: false, error: { code: "server_misconfigured", message: "ip_hash_prerequisites_missing" } },
@@ -302,14 +361,16 @@ serve(async (req: Request): Promise<Response> => {
     );
   }
 
-  const ipHash = await sha256Hex(`${DRIVER_SIGNUP_IP_HASH_SALT}:${clientIp}`);
+  const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
 
   let turnstileVerified = false;
   let turnstileErrorCodes: unknown = null;
 
   if (turnstileToken) {
     try {
-      const turnstileResult = await verifyTurnstile(turnstileToken, clientIp);
+      const turnstileResult = cors.localContext && turnstileToken === LOCAL_DRIVER_SIGNUP_TURNSTILE_DUMMY_TOKEN
+        ? { success: true, hostname: "", errorCodes: [] }
+        : await verifyTurnstile(turnstileToken, clientIp);
       turnstileVerified = turnstileResult.success;
       turnstileErrorCodes = turnstileResult.errorCodes;
 
@@ -322,7 +383,11 @@ serve(async (req: Request): Promise<Response> => {
           }
         })();
         const actualHost = turnstileResult.hostname.toLowerCase();
-        if (expectedHost && actualHost && expectedHost !== actualHost) {
+        const localTestHostname =
+          DRIVER_SIGNUP_TURNSTILE_SECRET_KEY === LOCAL_DRIVER_TURNSTILE_SECRET_KEY &&
+          actualHost === LOCAL_TURNSTILE_TEST_HOSTNAME &&
+          (expectedHost === "127.0.0.1" || expectedHost === "localhost");
+        if (expectedHost && actualHost && expectedHost !== actualHost && !localTestHostname) {
           return json(
             400,
             {
@@ -418,6 +483,7 @@ serve(async (req: Request): Promise<Response> => {
       id: asString(result.id),
       status: asString(result.status) || "pending",
       deduped: Boolean(result.deduped),
+      dedupe_reason: asString(result.dedupe_reason),
       application_status_token: asString(result.application_status_token),
     },
     cors.headers,

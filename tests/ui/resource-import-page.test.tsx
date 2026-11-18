@@ -13,7 +13,7 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("../../packages/ui/src/tabular-file", () => ({
-  TABULAR_FILE_ACCEPT: ".csv,.xlsx",
+  TABULAR_FILE_ACCEPT: ".csv,.xls,.xlsx",
   parseTabularFile: (...args: unknown[]) => parseTabularFileMock(...args),
 }));
 
@@ -239,6 +239,162 @@ describe("ResourceImportPage", () => {
     );
   });
 
+  test("shows backend-imported shipment handoff without reload and opens the shipment in context", async () => {
+    const onOpenImportedRecord = jest.fn();
+    uiClient.readRegistry.mockResolvedValueOnce({
+      resources: [
+        {
+          key: "shipments",
+          label: "Shipments",
+          relation: "public.shipments",
+          capability_write: "shipments.write",
+          import: {
+            enabled: true,
+            capability: "shipments.write",
+            default_write_mode: "create",
+            allow_upsert: false,
+            identity_columns: ["tracking_number"],
+            accepted_formats: ["csv", "xls", "xlsx"],
+          },
+          columns: [
+            {
+              key: "tracking_number",
+              label: "Tracking Number",
+              edit_type: "text",
+              import: { enabled: true, required: true, aliases: ["Tracking"] },
+            },
+          ],
+        },
+      ],
+    });
+    uiClient.me.mockResolvedValueOnce({
+      user: { id: "user-1" },
+      org: { id: "org-1", name: "Test Org" },
+      capabilities: ["shipments.write"],
+    });
+    parseTabularFileMock.mockResolvedValueOnce(
+      buildParsedFile({
+        headers: ["Tracking Number"],
+        rows: [{ "Tracking Number": "MX-IMPORT-1" }],
+        fileName: "shipments.csv",
+      }),
+    );
+    uiClient.resourceImports.prepare.mockResolvedValue({
+      ok: true,
+      dry_run: {
+        run_id: "run-shipment-1",
+        resource: "shipments",
+        write_mode: "create",
+        source_format: "csv",
+        source_file_name: "shipments.csv",
+        sheet_name: "Sheet1",
+        total_rows: 1,
+        will_create: 1,
+        will_update: 0,
+        will_skip: 0,
+        blocked_count: 0,
+        warning_count: 0,
+        unresolved_targets: [],
+        unmatched_headers: [],
+        rows: [{ row_number: 1, action: "create", execution_status: "queued" }],
+      },
+      available_profiles: [],
+      resolved_rules: [
+        {
+          source_column: "Tracking Number",
+          target_field: "tracking_number",
+          confidence: 0.98,
+          source: "label",
+          enabled: true,
+        },
+      ],
+    });
+    uiClient.resourceImports.start.mockResolvedValue({
+      ok: true,
+      run: {
+        id: "run-shipment-1",
+        status: "completed",
+        resource_key: "shipments",
+        created_count: 1,
+        updated_count: 0,
+        skipped_count: 0,
+        failed_count: 0,
+        rows: [
+          {
+            row_number: 1,
+            action: "create",
+            execution_status: "created",
+            target_record_id: "shp_shared_import_1",
+            related_nodes: [
+              {
+                node_key: "recipient",
+                node_label: "Recipient",
+                target_resource: "recipients",
+                target_record_id: "rcp_shared_import_1",
+                execution_status: "created",
+              },
+              {
+                node_key: "address",
+                node_label: "Address",
+                target_resource: "addresses",
+                target_record_id: "addr_shared_import_1",
+                execution_status: "created",
+              },
+            ],
+          },
+        ],
+        report: {
+          id: "report-shipment-1",
+          artifact_type: "tabular_import",
+          operation_kind: "tabular_import_execution",
+          save_mode: "direct",
+          status: "succeeded",
+          primary_resource_type: "tabular_import_runs",
+          primary_resource_id: "run-shipment-1",
+          next_steps: ["Open the created shipment from this import run."],
+        },
+      },
+      report: {
+        id: "report-shipment-1",
+        artifact_type: "tabular_import",
+        operation_kind: "tabular_import_execution",
+        save_mode: "direct",
+        status: "succeeded",
+        primary_resource_type: "tabular_import_runs",
+        primary_resource_id: "run-shipment-1",
+        next_steps: ["Open the created shipment from this import run."],
+      },
+    });
+
+    renderPage({ initialResourceKey: "shipments", onOpenImportedRecord });
+
+    await screen.findByText("Universal import");
+    const file = new File(["tracking_number\nMX-IMPORT-1\n"], "shipments.csv", { type: "text/csv" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new ArrayBuffer(16),
+    });
+
+    fireEvent.change(screen.getByTestId("resource-import-file-input"), {
+      target: { files: [file] },
+    });
+    await waitFor(() => expect(uiClient.resourceImports.prepare).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Approve and import" }));
+    await waitFor(() => expect(uiClient.resourceImports.start).toHaveBeenCalledTimes(1));
+
+    const handoff = await screen.findByTestId("resource-import-imported-records");
+    expect(within(handoff).getByText("Imported records")).toBeInTheDocument();
+    expect(within(handoff).getByText("shp_shared_import_1")).toBeInTheDocument();
+    expect(within(handoff).getByText("rcp_shared_import_1")).toBeInTheDocument();
+    expect(within(handoff).getByText("addr_shared_import_1")).toBeInTheDocument();
+
+    fireEvent.click(
+      within(handoff).getByRole("button", {
+        name: "Open imported shipment shp_shared_import_1",
+      }),
+    );
+    expect(onOpenImportedRecord).toHaveBeenCalledWith("shipments", "shp_shared_import_1");
+  });
+
   test("shows shipment capability denial on the shared import page when shipments.write is missing", async () => {
     uiClient.readRegistry.mockResolvedValueOnce({
       resources: [
@@ -360,6 +516,113 @@ describe("ResourceImportPage", () => {
     expect(screen.getByText("0% complete")).toBeInTheDocument();
     expect(screen.getByText("Processed 0 of 2 staged row(s)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh status" })).toBeInTheDocument();
+  });
+
+  test("requires a cancellation reason and keeps canceled run readback visible without reload", async () => {
+    uiClient.resourceImports.prepare.mockResolvedValue({
+      ok: true,
+      dry_run: {
+        run_id: "run-cancel-1",
+        resource: "recipients",
+        write_mode: "create",
+        source_format: "xlsx",
+        source_file_name: "recipients.xlsx",
+        sheet_name: "Sheet1",
+        total_rows: 2,
+        will_create: 2,
+        will_update: 0,
+        will_skip: 0,
+        blocked_count: 0,
+        warning_count: 0,
+        unresolved_targets: [],
+        unmatched_headers: [],
+        rows: [
+          { row_number: 1, action: "create", execution_status: "queued" },
+          { row_number: 2, action: "create", execution_status: "queued" },
+        ],
+      },
+      available_profiles: [],
+      resolved_rules: [
+        { source_column: "External ID", target_field: "external_id", confidence: 0.98, source: "label", enabled: true },
+        { source_column: "Status", target_field: "status", confidence: 0.98, source: "label", enabled: true },
+      ],
+    });
+    uiClient.resourceImports.start.mockResolvedValue({
+      ok: true,
+      run: {
+        id: "run-cancel-1",
+        status: "queued",
+        resource_key: "recipients",
+        total_rows: 2,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        failed_count: 0,
+        blocked_count: 0,
+      },
+    });
+    uiClient.resourceImports.cancel.mockResolvedValue({
+      ok: true,
+      run: {
+        id: "run-cancel-1",
+        status: "canceled",
+        resource_key: "recipients",
+        total_rows: 2,
+        created_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        failed_count: 0,
+        blocked_count: 0,
+        summary: {
+          cancellation: {
+            reason: "operator confirmed duplicate file run",
+            canceled_at: "2026-05-13T07:30:00.000Z",
+          },
+          cancel_reason: "operator confirmed duplicate file run",
+        },
+      },
+      correlation_id: "cor_resource_import_cancel",
+    });
+
+    renderPage();
+
+    await screen.findByText("Universal import");
+
+    const file = new File(["xlsx"], "recipients.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new ArrayBuffer(16),
+    });
+
+    fireEvent.change(screen.getByTestId("resource-import-file-input"), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => expect(uiClient.resourceImports.prepare).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Approve and import" }));
+    await waitFor(() => expect(uiClient.resourceImports.start).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Import in progress")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("resource-import-cancel-import"));
+    const panel = await screen.findByTestId("resource-import-cancel-reason-panel");
+    expect(within(panel).getByRole("button", { name: "Confirm cancellation" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Cancellation reason"), {
+      target: { value: "operator confirmed duplicate file run" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: "Confirm cancellation" }));
+
+    await waitFor(() =>
+      expect(uiClient.resourceImports.cancel).toHaveBeenCalledWith({
+        runId: "run-cancel-1",
+        reason: "operator confirmed duplicate file run",
+      }),
+    );
+    expect(await screen.findByText("Canceled")).toBeInTheDocument();
+    expect(screen.getByTestId("resource-import-cancel-readback")).toHaveTextContent(
+      "Cancellation reason: operator confirmed duplicate file run",
+    );
   });
 
   test("keeps approval disabled when the dry-run still has blocked issues", async () => {

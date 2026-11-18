@@ -33,6 +33,7 @@ type EgressPolicyEnvelope = {
 
 type EgressPolicy = {
   enforceHttpsOnly: boolean;
+  httpAllowedHosts: string[];
   blockPrivateNetworks: boolean;
   domainAllowlist: string[];
   domainDenylist: string[];
@@ -45,7 +46,7 @@ type EgressPolicy = {
 
 const textEncoder = new TextEncoder();
 
-const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
+const SUPABASE_URL = readEnv("SUPABASE_URL", ["EDGE_SUPABASE_URL", "API_URL"]);
 const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
 const RAW_EDGE_DB_JWT = readEnv("API_CALLER_DB_JWT", []);
 const EDGE_DB_JWT = RAW_EDGE_DB_JWT && RAW_EDGE_DB_JWT.split(".").length === 3
@@ -141,6 +142,7 @@ const parseStringArray = (value: unknown): string[] => {
 
 const defaultEgressPolicy = (): EgressPolicy => ({
   enforceHttpsOnly: true,
+  httpAllowedHosts: [],
   blockPrivateNetworks: true,
   domainAllowlist: [],
   domainDenylist: [],
@@ -161,6 +163,7 @@ const resolveEgressPolicy = (envelope: unknown): EgressPolicy | null => {
 
   return {
     enforceHttpsOnly: parseBoolean((policySource as any).enforce_https_only, defaults.enforceHttpsOnly),
+    httpAllowedHosts: parseStringArray((policySource as any).http_allowed_hosts),
     blockPrivateNetworks: parseBoolean((policySource as any).block_private_networks, defaults.blockPrivateNetworks),
     domainAllowlist: parseStringArray((policySource as any).domain_allowlist),
     domainDenylist: parseStringArray((policySource as any).domain_denylist),
@@ -276,12 +279,13 @@ const enforceEgressPolicy = (
   }
 
   const host = parsedUrl.hostname.toLowerCase();
-  if (policy.enforceHttpsOnly && parsedUrl.protocol.toLowerCase() !== "https:") {
+  const httpHostAllowed = policy.httpAllowedHosts.some((pattern) => matchesDomainPattern(host, pattern));
+  if (policy.enforceHttpsOnly && parsedUrl.protocol.toLowerCase() !== "https:" && !httpHostAllowed) {
     throw new Error("Egress policy violation: only https:// targets are allowed");
   }
 
   if (policy.blockPrivateNetworks) {
-    if (isLocalHostName(host) || isPrivateIpv4(host) || isPrivateIpv6(host)) {
+    if (!httpHostAllowed && (isLocalHostName(host) || isPrivateIpv4(host) || isPrivateIpv6(host))) {
       throw new Error(`Egress policy violation: private or local network target blocked (${host})`);
     }
   }
@@ -477,13 +481,36 @@ const resolveJobEgressPolicy = async (
   return data as EgressPolicyEnvelope;
 };
 
+const resolveJobEdgeTimeoutSeconds = async (
+  client: ReturnType<typeof createClient>,
+  jobId: string,
+): Promise<number | null> => {
+  const { data, error } = await client.rpc("get_outbound_edge_dispatch_timeout_v1", {
+    p_job_id: jobId,
+  });
+
+  if (error) {
+    console.warn(`[api-caller] get_outbound_edge_dispatch_timeout_v1 failed for ${jobId}: ${error.message}`);
+    return null;
+  }
+
+  const timeoutSeconds = typeof data === "number" ? data : Number.parseInt(String(data ?? ""), 10);
+  return Number.isFinite(timeoutSeconds) && timeoutSeconds > 0 ? timeoutSeconds : null;
+};
+
 const executeClaimedJob = async (
   jobId: string,
   dispatch: CallRequest,
   override?: CallRequest,
 ): Promise<{ job_id: string; result: CallResponse; success: boolean }> => {
   const client = ensureSupabase();
-  const mergedDispatch = mergeDispatch(dispatch, override);
+  const edgeTimeoutSeconds = override?.timeout_seconds === undefined
+    ? await resolveJobEdgeTimeoutSeconds(client, jobId)
+    : null;
+  const effectiveOverride = edgeTimeoutSeconds
+    ? { ...(override ?? {}), timeout_seconds: edgeTimeoutSeconds }
+    : override;
+  const mergedDispatch = mergeDispatch(dispatch, effectiveOverride);
   const egressEnvelope = await resolveJobEgressPolicy(client, jobId);
 
   let callResult: CallResponse;
@@ -528,6 +555,34 @@ const executeClaimedJob = async (
   return { job_id: jobId, result: callResult, success: isSuccess };
 };
 
+const markCallSpecResolutionFailure = async (
+  client: ReturnType<typeof ensureSupabase>,
+  jobId: string,
+  message: string,
+): Promise<{ job_id: string; result: CallResponse; success: boolean }> => {
+  const callResult: CallResponse = {
+    status: 424,
+    completed: false,
+    headers: {},
+    body: {
+      error: message,
+      reason: "call_spec_resolution_failed",
+    },
+    latency_ms: 0,
+    error: message,
+  };
+
+  await client.rpc("mark_outbound_call_failure", {
+    p_job_id: jobId,
+    p_status_code: callResult.status,
+    p_headers: callResult.headers,
+    p_body: callResult.body,
+    p_error: message,
+  });
+
+  return { job_id: jobId, result: callResult, success: false };
+};
+
 const executeJob = async (jobId: string, override?: CallRequest) => {
   const client = ensureSupabase();
 
@@ -552,7 +607,11 @@ const executeJob = async (jobId: string, override?: CallRequest) => {
     p_job_id: jobId,
   });
   if (specError || !spec) {
-    throw new Error(`Failed to resolve call spec for job ${jobId}: ${specError?.message ?? "no data returned"}`);
+    return await markCallSpecResolutionFailure(
+      client,
+      jobId,
+      `Failed to resolve call spec for job ${jobId}: ${specError?.message ?? "no data returned"}`,
+    );
   }
 
   return await executeClaimedJob(jobId, spec as CallRequest, override);

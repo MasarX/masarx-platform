@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import {
   createAuthedSupabaseBrowserCookies,
+  createAuthedSupabaseClient,
   type BrowserAuthCookie,
 } from "./supabase";
 
@@ -70,5 +71,38 @@ export async function createBrowserAuthStorageState(params: {
   return {
     cookies: cookies.map((cookie) => toPlaywrightCookie(surfaceOrigin, cookie)),
     origins: [],
+  };
+}
+
+export async function createConsoleV2AuthStorageState(params: {
+  surfaceOrigin: string;
+  email: string;
+  password: string;
+  label?: string;
+}) {
+  const { surfaceOrigin, email, password, label } = params;
+  const supabase = await createAuthedSupabaseClient({ email, password, label });
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data?.session) {
+    throw new Error(
+      `Console V2 auth storage state failed for ${label ?? email}: ${
+        error?.message ?? "no session"
+      }`
+    );
+  }
+
+  return {
+    cookies: [],
+    origins: [
+      {
+        origin: new URL(surfaceOrigin).origin,
+        localStorage: [
+          {
+            name: "masarx-console-v2-auth",
+            value: JSON.stringify(data.session),
+          },
+        ],
+      },
+    ],
   };
 }

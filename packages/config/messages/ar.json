@@ -218,14 +218,14 @@
         "openRun": "Open run",
         "elapsed": "Elapsed: {elapsed}ms",
         "target": "Target: <= {target}ms",
-        "runId": "Run: {workflowRunId}",
+        "runId": "Activity reference: {workflowRunId}",
         "percent": "{percent}%",
         "progressLive": "Updating live",
         "actions": {
           "hide": "Hide",
           "show": "Show",
           "retry": "Try again",
-          "technicalDetails": "Technical details"
+          "technicalDetails": "Support details"
         },
         "states": {
           "preparing": "Preparing your download",
@@ -240,8 +240,8 @@
           "completed": "Download started"
         },
         "diagnostics": {
-          "title": "Technical details",
-          "runId": "Workflow run: {workflowRunId}",
+          "title": "Support details",
+          "runId": "Activity reference: {workflowRunId}",
           "target": "Download target: <= {target}ms",
           "targetHit": "Target hit at {elapsed}ms.",
           "targetMiss": "Target miss at {elapsed}ms.",
@@ -690,7 +690,7 @@
           "settingsResolution": "‏Settings resolution",
           "view": "‏View",
           "requiredCapability": "‏Required capability",
-          "rawError": "‏Raw error"
+          "rawError": "‏Support details"
         }
       },
       "blocked": {
@@ -1226,17 +1226,17 @@
                 "unknown": "غير معروف"
               },
               "fields": {
-                "runId": "معرّف التشغيل",
-                "correlationId": "معرّف الارتباط",
+                "runId": "مرجع النشاط",
+                "correlationId": "مفتاح التتبع",
                 "requestedBy": "تم الطلب بواسطة",
-                "requestContextId": "معرّف سياق الطلب",
-                "scheduleTriggerId": "معرّف مشغّل الجدولة",
-                "runTriggerId": "معرّف مشغّل تشغيل سير العمل",
-                "triggerFireId": "معرّف تنفيذ المشغّل",
-                "sourceRunId": "معرّف التشغيل المصدر",
-                "sourceStatus": "حالة المصدر",
-                "sourceCompletedAt": "وقت اكتمال المصدر",
-                "idempotencyKey": "مفتاح عدم التكرار",
+                "requestContextId": "سياق الطلب",
+                "scheduleTriggerId": "مرجع الجدولة",
+                "runTriggerId": "قاعدة تشغيل مرتبطة",
+                "triggerFireId": "حدث الجدولة",
+                "sourceRunId": "النشاط السابق",
+                "sourceStatus": "حالة النشاط السابق",
+                "sourceCompletedAt": "وقت اكتمال النشاط السابق",
+                "idempotencyKey": "مفتاح منع التكرار",
                 "scope": "النطاق"
               },
               "actions": {
@@ -1244,7 +1244,7 @@
                 "openSchedule": "فتح الجدولة",
                 "openTrigger": "فتح المشغّل",
                 "openFire": "فتح التنفيذ",
-                "showRaw": "عرض السياق الخام",
+                "showRaw": "عرض تفاصيل الطلب",
                 "copy": "نسخ",
                 "copySuccessTitle": "تم النسخ إلى الحافظة.",
                 "copyFailedTitle": "فشل النسخ."
@@ -2075,10 +2075,10 @@
       },
       "editor": {
         "title": "‏Policy editor",
-        "hideRaw": "‏Hide raw JSON",
-        "showRaw": "‏Show raw JSON",
-        "unavailable": "‏Policy editor unavailable for invalid JSON.",
-        "rawLabel": "‏Raw policy JSON"
+        "hideRaw": "‏Hide advanced editor",
+        "showRaw": "‏Show advanced editor",
+        "unavailable": "‏Policy editor unavailable for invalid details.",
+        "rawLabel": "‏Policy details"
       },
       "summary": {
         "title": "‏Change summary",
@@ -2321,7 +2321,7 @@
       },
       "preview": {
         "title": "‏المعاينة",
-        "description": "‏تحميل حمولة العينة وتشغيل معاينة المصمم عبر label-renderer.",
+        "description": "‏حمّل عينة الشحنة وشغّل معاينة التصميم قبل الطباعة.",
         "shipment": "‏الشحنة",
         "selectShipment": "‏اختر شحنة",
         "shipmentBox": "‏صندوق الشحنة",
@@ -2332,8 +2332,8 @@
         "rendering": "‏جارٍ العرض…",
         "samplePayload": "‏حمولة العينة",
         "previewResponse": "‏استجابة المعاينة",
-        "showDebug": "‏إظهار الاستجابة الخام (تصحيح)",
-        "hideDebug": "‏إخفاء الاستجابة الخام",
+        "showDetails": "‏إظهار تفاصيل المعاينة",
+        "hideDetails": "‏إخفاء تفاصيل المعاينة",
         "pdfEmpty": "‏شغّل المعاينة لعرض PDF",
         "pdfLoading": "‏جارٍ تحميل PDF…",
         "pdfError": "‏فشل تحميل PDF: {error}",

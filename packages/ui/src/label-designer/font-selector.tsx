@@ -22,9 +22,10 @@ type FontSelectorProps = {
   onChange: (font: string) => void;
   id?: string;
   label?: string;
+  disabled?: boolean;
 };
 
-export function FontSelector({ value, onChange, id, label }: FontSelectorProps) {
+export function FontSelector({ value, onChange, id, label, disabled = false }: FontSelectorProps) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
   const current = FONT_OPTIONS.find((f) => f.value === value) || FONT_OPTIONS[0]!;
@@ -52,7 +53,10 @@ export function FontSelector({ value, onChange, id, label }: FontSelectorProps) 
           id={id}
           type="button"
           className="flex h-7 w-full items-center rounded border border-ui-border/50 bg-ui-paper/50 px-2 text-xs text-ui-ink hover:bg-blue-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            if (!disabled) setOpen(!open);
+          }}
+          disabled={disabled}
           data-testid={id || "font-selector"}
         >
           <span style={{ fontFamily: current.family, fontWeight: current.weight }}>

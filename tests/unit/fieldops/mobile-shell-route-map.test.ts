@@ -67,4 +67,36 @@ describe("mobile shell route map helpers", () => {
     expect(model.clusters).toEqual([]);
     expect(model.pins).toHaveLength(4);
   });
+
+  test("buildRouteMapModel centers a single Saudi stop instead of pinning it to the map edge", () => {
+    const model = buildRouteMapModel(
+      [{ id: "riyadh-stop", latitude: 24.7136, longitude: 46.6753, status: "open" }],
+      buildPolicy({
+        clusteringEnabled: false,
+      })
+    );
+
+    expect(model.mappableCount).toBe(1);
+    expect(model.pins).toEqual([
+      expect.objectContaining({ id: "riyadh-stop", xPct: 50, yPct: 50, tone: "active" }),
+    ]);
+  });
+
+  test("buildRouteMapModel projects pins from Saudi coordinates, not fixed anchors", () => {
+    const model = buildRouteMapModel(
+      [
+        { id: "south", latitude: 24.7, longitude: 46.6, status: "open" },
+        { id: "north-east", latitude: 24.8, longitude: 46.8, status: "in_progress" },
+      ],
+      buildPolicy({
+        clusteringEnabled: false,
+      })
+    );
+
+    expect(model.mappableCount).toBe(2);
+    expect(model.pins).toEqual([
+      expect.objectContaining({ id: "south", xPct: 8, yPct: 90, tone: "active" }),
+      expect.objectContaining({ id: "north-east", xPct: 92, yPct: 10, tone: "active" }),
+    ]);
+  });
 });

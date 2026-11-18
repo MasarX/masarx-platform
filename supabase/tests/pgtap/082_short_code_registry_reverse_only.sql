@@ -5,27 +5,41 @@ SELECT plan(2);
 SET search_path TO public, pgtap, extensions;
 
 -- Fixture: org/client/sender/address
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender
+-- context exists and fail-closed plugin activation has truthful binding inputs.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('08200000-0000-0000-0000-000000000001', 'PGTAP Geo Org 082', 'pgtap-geo-082')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.clients (id, organization_id, name, slug)
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
 VALUES (
   '08200000-0000-0000-0000-000000000002',
   '08200000-0000-0000-0000-000000000001',
   'PGTAP Geo Client 082',
-  'pgtap-geo-client-082'
+  'pgtap-geo-client-082',
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.senders (id, client_id, name, brand_name)
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
 VALUES (
   '08200000-0000-0000-0000-000000000003',
   '08200000-0000-0000-0000-000000000002',
   'PGTAP Geo Sender 082',
-  'PGTAP Geo Sender 082'
+  'PGTAP Geo Sender 082',
+  TRUE,
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  '08200000-0000-0000-0000-000000000001',
+  'pgtap:short-code-registry-reverse-only-fixture-bootstrap'
+);
 
 INSERT INTO public.workflow_templates (
   id,

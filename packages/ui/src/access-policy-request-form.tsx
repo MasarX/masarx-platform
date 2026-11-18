@@ -222,9 +222,7 @@ export function AccessPolicyRequestForm({
           </label>
         ) : (
           <div className="rounded-xl border border-ui-border bg-ui-surface/80 p-3 text-xs text-ui-muted">
-            <pre className="max-h-64 overflow-auto text-xs text-ui-ink">
-              {policyJson}
-            </pre>
+            {t("editor.advancedHidden")}
           </div>
         )}
         {rawError ? (

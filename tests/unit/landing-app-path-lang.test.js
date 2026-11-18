@@ -159,7 +159,7 @@ describe('landing app language routing', () => {
     loadLandingApp({
       url: 'http://localhost/',
       htmlLang: 'en',
-      runtime: { clientsEndpoint: '/api/clients' },
+      runtime: { clientsEndpoint: '/functions/v1/marketing-lead-intake/clients' },
       fetchImpl: fetchMock,
       extraHtml: '<div data-clients-row></div>',
     });
@@ -168,9 +168,60 @@ describe('landing app language routing', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/functions/v1/marketing-lead-intake/clients?locale=en');
     expect(document.querySelectorAll('.client-ref').length).toBe(2);
     expect(document.querySelector('img.client-logo')?.getAttribute('src')).toBe('https://cdn.example/masarx.svg');
     expect(document.querySelector('.client-logo-fallback')?.textContent).toBe('No Logo Client');
+  });
+
+  test('derives client references only from marketing lead intake when explicit endpoint is absent', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        clients: [{ name: 'MasarX', logo_url: null }],
+      }),
+    });
+
+    loadLandingApp({
+      url: 'http://localhost/',
+      htmlLang: 'en',
+      runtime: {
+        contactEndpoint: '/functions/v1/marketing-lead-intake',
+        tenantSignupEndpoint: '/functions/v1/tenant-signup-intake',
+      },
+      fetchImpl: fetchMock,
+      extraHtml: '<div data-clients-row></div>',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/functions/v1/marketing-lead-intake/clients?locale=en');
+    expect(document.querySelectorAll('.client-ref').length).toBe(1);
+  });
+
+  test('fails closed instead of deriving client references from tenant signup endpoint', async () => {
+    const fetchMock = jest.fn();
+
+    loadLandingApp({
+      url: 'http://localhost/',
+      htmlLang: 'en',
+      runtime: {
+        tenantSignupEndpoint: '/functions/v1/tenant-signup-intake',
+      },
+      fetchImpl: fetchMock,
+      extraHtml: '<div data-clients-row></div>',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(document.querySelector('.logos-state')?.textContent).toBe(
+      'Client references are available on request while account-level visibility policy is applied.'
+    );
   });
 
   test('contact form blocks submit when runtime endpoint is unset', async () => {
@@ -198,10 +249,43 @@ describe('landing app language routing', () => {
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-contact-status]').textContent).toBe('Contact endpoint is not configured.');
+    expect(document.querySelector('[data-contact-status]').textContent).toBe(
+      'Signup is temporarily unavailable. Please try again later.',
+    );
   });
 
-  test('prefers contact endpoint over tenant signup endpoint for contact form submit', async () => {
+  test('organization signup does not fall back to generic contact endpoint', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ ok: true }),
+    });
+
+    loadLandingApp({
+      url: 'http://localhost/',
+      htmlLang: 'en',
+      runtime: { contactEndpoint: '/contact-intake' },
+      fetchImpl: fetchMock,
+      extraHtml: [
+        '<form data-contact-form>',
+        '  <input type="text" name="full_name" value="Landing Reviewer" required />',
+        '  <input type="email" name="email" value="lhwmilsokgrmgptsihhuoljt@example.invalid" required />',
+        '  <input type="text" name="organization_name" value="MasarX" required />',
+        '  <button type="submit">Submit</button>',
+        '</form>',
+        '<p data-contact-status></p>',
+      ].join(''),
+    });
+
+    const form = document.querySelector('[data-contact-form]');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-contact-status]').textContent).toBe(
+      'Signup is temporarily unavailable. Please try again later.',
+    );
+  });
+
+  test('prefers tenant signup endpoint over contact endpoint for organization signup submit', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       text: async () => JSON.stringify({ ok: true }),
@@ -231,10 +315,10 @@ describe('landing app language routing', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('/contact-intake');
+    expect(fetchMock.mock.calls[0][0]).toBe('/tenant-signup-intake');
   });
 
-  test('includes company payload derived from organization_name for contact intake compatibility', async () => {
+  test('includes company payload derived from organization_name for tenant signup intake compatibility', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       text: async () => JSON.stringify({ ok: true }),
@@ -243,7 +327,7 @@ describe('landing app language routing', () => {
     loadLandingApp({
       url: 'http://localhost/',
       htmlLang: 'en',
-      runtime: { contactEndpoint: '/contact-intake' },
+      runtime: { tenantSignupEndpoint: '/tenant-signup-intake' },
       fetchImpl: fetchMock,
       extraHtml: [
         '<form data-contact-form>',
@@ -261,9 +345,195 @@ describe('landing app language routing', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/tenant-signup-intake');
     const payload = JSON.parse(String(fetchMock.mock.calls[0][1].body || '{}'));
     expect(payload.company).toBe('MasarX Logistics');
     expect(payload.organization_name).toBe('MasarX Logistics');
+  });
+
+  test('submits driver application to the configured driver intake endpoint', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ ok: true, application_status_token: 'driver-token-123' }),
+    });
+
+    loadLandingApp({
+      url: 'http://localhost/drivers?motion=off',
+      htmlLang: 'en',
+      runtime: {
+        driverSignupEndpoint: '/driver-signup-intake',
+        supabaseAnonKey: 'anon-key',
+      },
+      fetchImpl: fetchMock,
+      extraHtml: [
+        '<form data-driver-form>',
+        '  <input type="text" name="full_name" value="Driver Reviewer" required />',
+        '  <input type="email" name="email" value="driver@example.com" required />',
+        '  <input type="tel" name="phone" value="+12025550123" required />',
+        '  <input type="text" name="organization_name" value="Driver Ops" required />',
+        '  <input type="text" name="city" value="Riyadh" />',
+        '  <select name="vehicle_type"><option value="car" selected>Car</option></select>',
+        '  <input type="text" name="languages" value="Arabic, English" />',
+        '  <input type="text" name="capabilities" value="cold_chain, fragile" />',
+        '  <textarea name="experience_summary">Five years in Riyadh same-day delivery.</textarea>',
+        '  <button type="submit">Submit</button>',
+        '</form>',
+        '<p data-driver-status></p>',
+        '<form data-driver-status-form>',
+        '  <input type="text" name="status_token" />',
+        '</form>',
+        '<p data-driver-status-lookup></p>',
+        '<p data-driver-status-token-note></p>',
+      ].join(''),
+    });
+
+    const form = document.querySelector('[data-driver-form]');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/driver-signup-intake');
+    expect(fetchMock.mock.calls[0][1].headers.apikey).toBe('anon-key');
+    expect(fetchMock.mock.calls[0][1].headers.authorization).toBe('Bearer anon-key');
+    expect(document.querySelector('[data-driver-status]').textContent).toBe('Your driver application is under review.');
+    expect(document.querySelector('[data-driver-status-form] input[name="status_token"]').value).toBe('driver-token-123');
+  });
+
+  test('primes local turnstile tokens for every landing intake form', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ ok: true, application_status_token: 'driver-token-123' }),
+    });
+
+    loadLandingApp({
+      url: 'http://localhost/drivers?motion=off',
+      htmlLang: 'en',
+      runtime: {
+        driverSignupEndpoint: '/driver-signup-intake',
+        supabaseAnonKey: 'anon-key',
+        turnstileSiteKey: '1x00000000000000000000AA',
+      },
+      fetchImpl: fetchMock,
+      extraHtml: [
+        '<form data-contact-form>',
+        '  <input type="text" name="full_name" value="Landing Reviewer" required />',
+        '  <input type="email" name="email" value="lhwmilsokgrmgptsihhuoljt@example.invalid" required />',
+        '  <input type="text" name="organization_name" value="MasarX" required />',
+        '  <div data-turnstile></div>',
+        '  <button type="submit">Submit</button>',
+        '</form>',
+        '<p data-contact-status></p>',
+        '<form data-driver-form>',
+        '  <input type="text" name="full_name" value="Driver Reviewer" required />',
+        '  <input type="email" name="email" value="driver@example.com" required />',
+        '  <input type="tel" name="phone" value="+12025550123" required />',
+        '  <input type="text" name="organization_name" value="Driver Ops" required />',
+        '  <input type="text" name="city" value="Riyadh" />',
+        '  <select name="vehicle_type"><option value="car" selected>Car</option></select>',
+        '  <input type="text" name="languages" value="Arabic, English" />',
+        '  <input type="text" name="capabilities" value="cold_chain, fragile" />',
+        '  <textarea name="experience_summary">Five years in Riyadh same-day delivery.</textarea>',
+        '  <div data-driver-turnstile></div>',
+        '  <button type="submit">Submit</button>',
+        '</form>',
+        '<p data-driver-status></p>',
+        '<form data-driver-status-form>',
+        '  <input type="text" name="status_token" />',
+        '</form>',
+        '<p data-driver-status-lookup></p>',
+        '<p data-driver-status-token-note></p>',
+      ].join(''),
+    });
+
+    const contactToken = document.querySelector('[data-turnstile] input[name="cf-turnstile-response"]');
+    const driverToken = document.querySelector('[data-driver-turnstile] input[name="cf-turnstile-response"]');
+    expect(contactToken.value).toBe('EXAMPLE_PASSWORD');
+    expect(driverToken.value).toBe('EXAMPLE_PASSWORD');
+
+    const form = document.querySelector('[data-driver-form]');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body || '{}')).turnstile_token).toBe(
+      'EXAMPLE_PASSWORD',
+    );
+    expect(document.querySelector('[data-driver-status]').textContent).toBe('Your driver application is under review.');
+  });
+
+  test('checks driver application status through the configured status endpoint', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ ok: true, status: 'approved' }),
+    });
+
+    loadLandingApp({
+      url: 'http://localhost/drivers?motion=off',
+      htmlLang: 'en',
+      runtime: {
+        driverApplicationStatusEndpoint: '/driver-application-status',
+        supabaseAnonKey: 'anon-key',
+      },
+      fetchImpl: fetchMock,
+      extraHtml: [
+        '<form data-driver-status-form>',
+        '  <input type="text" name="status_token" value="driver-token-123" required />',
+        '  <button type="submit">Check</button>',
+        '</form>',
+        '<p data-driver-status-lookup></p>',
+      ].join(''),
+    });
+
+    const form = document.querySelector('[data-driver-status-form]');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/driver-application-status');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ token: 'driver-token-123' });
+    expect(fetchMock.mock.calls[0][1].headers.apikey).toBe('anon-key');
+    expect(document.querySelector('[data-driver-status-lookup]').textContent).toBe('Application approved. Watch for the invite email.');
+  });
+
+  test('shows driver application requested document readback from the status endpoint', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        status: 'pending',
+        application_state: 'additional_documents_requested',
+        requested_documents: ['driver_license', 'vehicle_registration'],
+        review_reason: 'Upload clear front and back photos.',
+      }),
+    });
+
+    loadLandingApp({
+      url: 'http://localhost/drivers?motion=off',
+      htmlLang: 'en',
+      runtime: {
+        driverApplicationStatusEndpoint: '/driver-application-status',
+        supabaseAnonKey: 'anon-key',
+      },
+      fetchImpl: fetchMock,
+      extraHtml: [
+        '<form data-driver-status-form>',
+        '  <input type="text" name="status_token" value="driver-token-docs" required />',
+        '  <button type="submit">Check</button>',
+        '</form>',
+        '<p data-driver-status-lookup></p>',
+      ].join(''),
+    });
+
+    const form = document.querySelector('[data-driver-status-form]');
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const text = document.querySelector('[data-driver-status-lookup]').textContent;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ token: 'driver-token-docs' });
+    expect(text).toContain('More documents are required before review can continue.');
+    expect(text).toContain('Requested documents: driver_license, vehicle_registration.');
+    expect(text).toContain('Reviewer note: Upload clear front and back photos.');
   });
 
   test('blocks submit when turnstile is required but missing token', () => {
@@ -272,7 +542,7 @@ describe('landing app language routing', () => {
     loadLandingApp({
       url: 'http://localhost/',
       htmlLang: 'en',
-      runtime: { contactEndpoint: LANDING_CONTACT_ENDPOINT_MOCK, turnstileSiteKey: '0x4AAAAAAA' },
+      runtime: { tenantSignupEndpoint: LANDING_CONTACT_ENDPOINT_MOCK, turnstileSiteKey: '0x4AAAAAAA' },
       fetchImpl: fetchMock,
       extraHtml: [
         '<form data-contact-form>',

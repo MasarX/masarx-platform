@@ -1,4 +1,3 @@
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
 import {
   buildErrorEnvelope,
   extractToken,
@@ -7,9 +6,21 @@ import {
   readEnv,
   resolveCorrelationId,
   resolveTraceContext,
-} from "./_shared/mod.mjs";
+  toResponseBody,
+} from "../_shared/mod.mjs";
 
 type JsonRecord = Record<string, unknown>;
+type EdgeRpcError = {
+  message?: string | null;
+  code?: string | null;
+  details?: unknown;
+  hint?: string | null;
+  status?: number | null;
+};
+type EdgeRpcResult = { data: unknown | null; error: EdgeRpcError | null };
+type EdgeSupabaseClient = {
+  rpc: (fn: string, args?: JsonRecord) => PromiseLike<EdgeRpcResult>;
+};
 type StudioEndpoint = "parse" | "infer" | "preview" | "save";
 type MappingArtifact = "tabular_import" | "webhook_inbound" | "api_outbound" | "integration_plugin";
 type MappingDiagnosticLevel = "error" | "warning" | "info";
@@ -58,7 +69,7 @@ type NormalizedContract = {
 };
 
 const SERVICE_NAME = "integration-plugin-studio";
-const LOCAL_EDGE_SUPABASE_HOSTS = new Set(["kong", "rvzwwjlztwwisjthghnipgjr.example.invalid"]);
+const LOCAL_EDGE_SUPABASE_HOSTS = new Set(["kong"]);
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
 const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
@@ -97,6 +108,37 @@ const parseBoolean = (value: unknown, fallback = false): boolean => {
   }
   return fallback;
 };
+
+const SENSITIVE_KEY_PATTERN =
+  /(?:authorization|api[_-]?key|apikey|credential|password|private[_-]?key|secret|signature|token)/i;
+
+const redactSensitiveText = (value: string): string => {
+  return value
+    .replace(/("[^"]*(?:authorization|x-api-key|api[_-]?key|apikey|credential|password|private[_-]?key|secret|signature|token)[^"]*"\s*:\s*")[^"]*(")/gi, "$1REDACTED$2")
+    .replace(/(bearer\s+)[^\s"',;]+/gi, "$1REDACTED")
+    .replace(/(basic\s+)[^\s"',;]+/gi, "$1REDACTED")
+    .replace(/((?:authorization|x-api-key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password|signature)\s*[:=]\s*)[^&\r\n"',;}]+/gi, "$1REDACTED")
+    .replace(/([?&](?:api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|signature|password)=)[^&\s"']+/gi, "$1REDACTED");
+};
+
+const redactSensitiveValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map((entry) => redactSensitiveValue(entry));
+  const record = asRecord(value);
+  if (record) {
+    const redacted: JsonRecord = {};
+    for (const [key, entry] of Object.entries(record)) {
+      redacted[key] = SENSITIVE_KEY_PATTERN.test(key) ? "REDACTED" : redactSensitiveValue(entry);
+    }
+    return redacted;
+  }
+  if (typeof value === "string") return redactSensitiveText(value);
+  return value;
+};
+
+const redactRecord = (value: unknown): JsonRecord => asRecord(redactSensitiveValue(value)) ?? {};
+
+const redactNormalizedContract = (value: NormalizedContract): NormalizedContract =>
+  redactSensitiveValue(value) as NormalizedContract;
 
 const corsHeaders = (
   origin: string | null,
@@ -171,6 +213,66 @@ const resolveSupabaseUrl = (req: Request) => {
   } catch {
     return rawUrl.replace(/\/+$/g, "");
   }
+};
+
+const rpcErrorFromResponse = (status: number, body: unknown): EdgeRpcError => {
+  const record = asRecord(body);
+  const message =
+    asString(record?.message) ||
+    asString(record?.error) ||
+    asString(record?.msg) ||
+    (typeof body === "string" ? body : "") ||
+    `RPC request failed with HTTP ${status}`;
+
+  return {
+    message,
+    code: asString(record?.code) || null,
+    details: record?.details ?? null,
+    hint: asString(record?.hint) || null,
+    status,
+  };
+};
+
+const createEdgeSupabaseClient = (
+  supabaseUrl: string,
+  supabaseAnonKey: string,
+  token: string,
+): EdgeSupabaseClient => {
+  const baseUrl = supabaseUrl.replace(/\/+$/g, "");
+
+  return {
+    rpc: async (fn: string, args: JsonRecord = {}): Promise<EdgeRpcResult> => {
+      try {
+        const response = await fetch(`${baseUrl}/rest/v1/rpc/${encodeURIComponent(fn)}`, {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            "accept-profile": "api",
+            apikey: supabaseAnonKey,
+            authorization: `Bearer ${token}`,
+            "content-profile": "api",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(args ?? {}),
+        });
+        const data = await toResponseBody(response);
+        if (!response.ok) {
+          return { data: null, error: rpcErrorFromResponse(response.status, data) };
+        }
+        return { data, error: null };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "RPC request failed";
+        return {
+          data: null,
+          error: {
+            message,
+            code: "edge.rpc.fetch_failed",
+            status: null,
+          },
+        };
+      }
+    },
+  };
 };
 
 const resolveEndpoint = (req: Request, body: JsonRecord): StudioEndpoint | null => {
@@ -277,13 +379,13 @@ const parseCurlContract = (rawCommand: string): NormalizedContract => {
       path_template: parsed.pathname || "/",
       upstream_method: routeMethod,
       upstream_path_template: parsed.pathname || "/",
-      headers,
-      body_sample: body,
+      headers: redactRecord(headers) as Record<string, string>,
+      body_sample: redactSensitiveValue(body),
     },
-    sample_schema: inferSchemaShape(body),
+    sample_schema: inferSchemaShape(redactSensitiveValue(body)),
     metadata: {
       source_url: `${parsed.protocol}//${parsed.host}`,
-      query_string: parsed.searchParams.toString(),
+      query_string: redactSensitiveText(parsed.searchParams.toString()),
     },
   };
 };
@@ -336,9 +438,9 @@ const parseOpenApiContract = (value: unknown): NormalizedContract => {
       upstream_method: selectedMethod,
       upstream_path_template: selectedPath,
     },
-    sample_schema: inferSchemaShape(document),
+    sample_schema: inferSchemaShape(redactSensitiveValue(document)),
     metadata: {
-      server_url: serverUrl || null,
+      server_url: serverUrl ? redactSensitiveText(serverUrl) : null,
       document_kind: asString(document.openapi || document.swagger) || "openapi",
     },
   };
@@ -408,6 +510,94 @@ const pickPathByKeywords = (paths: string[], keywords: string[]): string | null 
   return null;
 };
 
+const normalizeMappingPath = (path: string | null): string | null => {
+  if (!path) return null;
+  return path.replace(/^\$\./, "").replace(/^\$/, "");
+};
+
+const buildWebhookShipmentTransforms = (paths: string[]): JsonRecord => {
+  const pick = (keywords: string[]) => normalizeMappingPath(pickPathByKeywords(paths, keywords));
+  const pickWithFallback = (keywords: string[], fallback: string | string[]) => {
+    const selected = pick(keywords);
+    const fallbacks = Array.isArray(fallback) ? fallback : [fallback];
+    if (!selected) return fallback;
+    return [selected, ...fallbacks.filter((candidate) => candidate !== selected)];
+  };
+
+  return {
+    shipment: {
+      tracking_number: pickWithFallback(
+        ["tracking_number", "tracking", "waybill", "awb", "barcode"],
+        ["shipment.tracking_number", "tracking_number", "awb", "waybill", "barcode"],
+      ),
+      external_id: pickWithFallback(
+        ["shipment.external_id", "external_id", "shipment.reference", "reference", "ref"],
+        ["shipment.external_id", "shipment.reference", "external_id", "id", "reference"],
+      ),
+      reference_number: pickWithFallback(
+        ["shipment.reference_number", "reference_number", "shipment.reference", "reference", "ref"],
+        ["shipment.reference_number", "shipment.reference", "reference_number", "reference"],
+      ),
+      service_type: pickWithFallback(["service_type", "shipment_type"], ["shipment.service_type", "service_type"]),
+      service_level: pickWithFallback(["service_level", "shipping_service"], ["shipment.service_level", "service_level"]),
+      cod_amount: pickWithFallback(["cod_amount", "cash_on_delivery_amount", "amount"], ["shipment.cod_amount", "cod_amount"]),
+      currency: pickWithFallback(["cod_currency", "currency"], ["shipment.cod_currency", "currency"]),
+    },
+    recipient: {
+      external_id: pickWithFallback(
+        ["recipient.external_id", "recipient_id", "customer_id"],
+        ["shipment.recipient.external_id", "recipient.external_id", "customer.external_id"],
+      ),
+      name: pickWithFallback(
+        ["recipient.name", "customer.name", "customer_name", "name"],
+        ["Example Entity ntvplorhukthpmnmvgrstqzp", "recipient.name", "customer.name", "customer_name"],
+      ),
+      phone: pickWithFallback(
+        ["recipient.phone", "customer.phone", "phone_number", "phone", "mobile", "msisdn"],
+        ["shipment.recipient.phone", "recipient.phone", "customer.phone", "phone", "mobile"],
+      ),
+      email: pickWithFallback(
+        ["recipient.email", "customer.email", "email"],
+        ["shipment.recipient.email", "recipient.email", "customer.email", "email"],
+      ),
+    },
+    address: {
+      line1: pickWithFallback(
+        ["destination.line1", "address.line1", "line1", "address_line_1"],
+        ["shipment.destination.line1", "destination.line1", "address.line1", "line1", "address_line_1"],
+      ),
+      line2: pickWithFallback(
+        ["destination.line2", "address.line2", "line2", "address_line_2"],
+        ["shipment.destination.line2", "destination.line2", "address.line2", "line2", "address_line_2"],
+      ),
+      district: pickWithFallback(
+        ["destination.district", "address.district", "district"],
+        ["shipment.destination.district", "destination.district", "address.district", "district"],
+      ),
+      city: pickWithFallback(
+        ["destination.city", "address.city", "city"],
+        ["shipment.destination.city", "destination.city", "address.city", "city"],
+      ),
+      province: pickWithFallback(
+        ["destination.province", "address.province", "province", "region"],
+        ["shipment.destination.province", "destination.province", "address.province", "province", "region"],
+      ),
+      country_code: pickWithFallback(
+        ["country_code", "destination.country", "address.country", "country"],
+        ["shipment.destination.country", "destination.country", "address.country", "country_code", "country"],
+      ),
+      lat: pickWithFallback(
+        ["destination.lat", "address.lat", "latitude", "lat"],
+        ["shipment.destination.lat", "destination.lat", "address.lat", "latitude", "lat"],
+      ),
+      lng: pickWithFallback(
+        ["destination.lng", "address.lng", "longitude", "lng"],
+        ["shipment.destination.lng", "destination.lng", "address.lng", "longitude", "lng"],
+      ),
+    },
+  };
+};
+
 const buildDeterministicMapping = (contract: NormalizedContract): JsonRecord => {
   const payloadSample = contract.plugin_kind === "api"
     ? contract.route?.body_sample
@@ -416,6 +606,7 @@ const buildDeterministicMapping = (contract: NormalizedContract): JsonRecord => 
   const paths = collectLeafPaths(sample);
 
   const mapRules = [
+    { target: "tracking_number", keywords: ["tracking_number", "tracking", "waybill", "awb", "barcode"] },
     { target: "external_id", keywords: ["id", "external", "reference", "ref"] },
     { target: "event_type", keywords: ["event", "type", "action"] },
     { target: "status", keywords: ["status", "state"] },
@@ -435,12 +626,24 @@ const buildDeterministicMapping = (contract: NormalizedContract): JsonRecord => 
     });
   }
 
-  return {
+  const mapping: JsonRecord = {
     version: 1,
     mode: "deterministic",
     plugin_kind: contract.plugin_kind,
     fields,
   };
+
+  if (contract.plugin_kind === "webhook") {
+    mapping.target = "shipments.create";
+    mapping.enabled = true;
+    mapping.transforms = buildWebhookShipmentTransforms(paths);
+    mapping.metadata = {
+      canonical_intent: "shipment.create",
+      mapping_profile: "plugin_studio_webhook_shipment_create_v1",
+    };
+  }
+
+  return mapping;
 };
 
 const normalizeContract = (body: JsonRecord): NormalizedContract => {
@@ -458,9 +661,11 @@ const normalizeContract = (body: JsonRecord): NormalizedContract => {
   }
 
   if (sourceType === "openapi") {
-    const openapiPayload = asRecord(sourcePayload)
-      ? (sourcePayload as JsonRecord).openapi ?? sourcePayload
-      : sourcePayload;
+    const sourceRecord = asRecord(sourcePayload);
+    const openapiPayload =
+      sourceRecord && !asRecord(sourceRecord.paths)
+        ? asRecord(sourceRecord.openapi) ?? sourcePayload
+        : sourcePayload;
     const parsed = parseOpenApiContract(openapiPayload);
     if (explicitKind === "webhook") parsed.plugin_kind = "webhook";
     return parsed;
@@ -477,11 +682,11 @@ const normalizeContract = (body: JsonRecord): NormalizedContract => {
       source_type: sourceType,
       plugin_kind: explicitKind === "api" ? "api" : "webhook",
       webhook: {
-        sample_payload: samplePayload,
+        sample_payload: redactSensitiveValue(samplePayload),
         source_identifier: record ? asString(record.source_identifier) || undefined : undefined,
         name: record ? asString(record.name) || undefined : undefined,
       },
-      sample_schema: inferSchemaShape(samplePayload),
+      sample_schema: inferSchemaShape(redactSensitiveValue(samplePayload)),
       metadata: {},
     };
   }
@@ -500,10 +705,10 @@ const normalizeContract = (body: JsonRecord): NormalizedContract => {
           path_template: asString(route.path_template) || "/",
           upstream_method: asString(route.upstream_method).toUpperCase() || asString(route.method).toUpperCase() || "POST",
           upstream_path_template: asString(route.upstream_path_template) || asString(route.path_template) || "/",
-          headers: asRecord(route.headers) as Record<string, string> | undefined,
-          body_sample: route.body_sample ?? {},
+          headers: asRecord(redactSensitiveValue(route.headers)) as Record<string, string> | undefined,
+          body_sample: redactSensitiveValue(route.body_sample ?? {}),
         },
-        sample_schema: inferSchemaShape(route.body_sample ?? {}),
+        sample_schema: inferSchemaShape(redactSensitiveValue(route.body_sample ?? {})),
         metadata: {},
       };
     }
@@ -512,11 +717,11 @@ const normalizeContract = (body: JsonRecord): NormalizedContract => {
       source_type: sourceType,
       plugin_kind: explicitKind === "api" ? "api" : "webhook",
       webhook: {
-        sample_payload: webhook?.sample_payload ?? {},
+        sample_payload: redactSensitiveValue(webhook?.sample_payload ?? {}),
         source_identifier: asString(webhook?.source_identifier) || undefined,
         name: asString(webhook?.name) || undefined,
       },
-      sample_schema: inferSchemaShape(webhook?.sample_payload ?? {}),
+      sample_schema: inferSchemaShape(redactSensitiveValue(webhook?.sample_payload ?? {})),
       metadata: {},
     };
   }
@@ -526,12 +731,14 @@ const normalizeContract = (body: JsonRecord): NormalizedContract => {
 
 const buildInboundConfigFromContract = (contract: NormalizedContract): JsonRecord => {
   if (contract.plugin_kind === "api") {
+    const upstreamBaseUrl = resolveProviderBaseUrl(contract);
     return {
       route: {
         method: contract.route?.method || "POST",
         path_template: contract.route?.path_template || "/",
         upstream_method: contract.route?.upstream_method || contract.route?.method || "POST",
         upstream_path_template: contract.route?.upstream_path_template || contract.route?.path_template || "/",
+        ...(upstreamBaseUrl ? { upstream_base_url: upstreamBaseUrl } : {}),
       },
     };
   }
@@ -545,14 +752,41 @@ const buildInboundConfigFromContract = (contract: NormalizedContract): JsonRecor
   };
 };
 
+const resolveProviderBaseUrl = (contract: NormalizedContract): string => {
+  const candidates = [
+    asString(contract.metadata?.source_url),
+    asString(contract.metadata?.server_url),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        return parsed.origin.replace(/\/+$/g, "");
+      }
+    } catch (_err) {
+      continue;
+    }
+  }
+
+  return "";
+};
+
 const buildOutboundSuggestions = (contract: NormalizedContract): JsonRecord[] => {
   if (contract.plugin_kind !== "api") return [];
+  const providerBaseUrl = resolveProviderBaseUrl(contract);
+  const upstreamPath = contract.route?.upstream_path_template || contract.route?.path_template || "/";
+  const normalizedPath = upstreamPath.startsWith("/") ? upstreamPath : `/${upstreamPath}`;
+  const urlTemplate = providerBaseUrl
+    ? `${providerBaseUrl}${normalizedPath}`
+    : "https://example-provider.invalid{{path}}".replace("{{path}}", contract.route?.path_template || "/");
 
   return [
     {
       operation_name: "forward_event",
       method: contract.route?.method || "POST",
-      url_template: "https://example-provider.invalid{{path}}".replace("{{path}}", contract.route?.path_template || "/"),
+      url_template: urlTemplate,
       headers_template: {
         "content-type": "application/json",
       },
@@ -905,6 +1139,32 @@ const isPrivateOrLocalHost = (host: string): boolean => {
   return false;
 };
 
+const jsonTextArray = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+
+const hostMatchesPattern = (host: string, pattern: string): boolean => {
+  const loweredHost = host.toLowerCase();
+  const loweredPattern = pattern.trim().toLowerCase();
+  if (!loweredPattern) return false;
+  if (loweredPattern.startsWith("*.")) {
+    const suffix = loweredPattern.slice(1);
+    return loweredHost.endsWith(suffix) && loweredHost.length > suffix.length;
+  }
+  if (loweredPattern.startsWith(".")) {
+    return loweredHost.endsWith(loweredPattern) || loweredHost === loweredPattern.slice(1);
+  }
+  return loweredHost === loweredPattern;
+};
+
+const hostMatchesAnyPattern = (host: string, patterns: readonly string[]): boolean =>
+  patterns.some((pattern) => hostMatchesPattern(host, pattern));
+
+const reviewSummaryOf = (review: JsonRecord | null | undefined): JsonRecord => {
+  return asRecord(review?.review_summary) ?? {};
+};
+
 const pushDiagnostic = (
   diagnostics: MappingDiagnostic[],
   diagnostic: MappingDiagnostic,
@@ -913,7 +1173,7 @@ const pushDiagnostic = (
 };
 
 const buildStudioReview = async (
-  userClient: ReturnType<typeof createClient>,
+  userClient: EdgeSupabaseClient,
   body: JsonRecord,
   artifact: MappingArtifact,
   organizationId: string | null,
@@ -939,20 +1199,25 @@ const buildStudioReview = async (
       : normalizedContract?.webhook?.sample_payload ?? {};
 
   let egressPreview: JsonRecord | null = null;
-  if (organizationId) {
-    try {
-      const { data } = await userClient.rpc("ui_settings_preview_v1", {
-        p_category: "integration_plugin_egress_policy",
-        p_scope_type: "tenant",
-        p_scope_id: organizationId,
-      });
+  try {
+    const { data, error } = await userClient.rpc("integration_plugin_egress_policy_preview_v1", {
+      p_organization_id: organizationId,
+    });
+    if (!error) {
       egressPreview = asRecord(data);
-    } catch (_error) {
-      egressPreview = null;
     }
+  } catch (_error) {
+    egressPreview = null;
   }
   const egressPolicy = asRecord((egressPreview as JsonRecord | null)?.value);
   const egressResolutionId = asString((egressPreview as JsonRecord | null)?.settings_resolution_id) || null;
+  const domainDenylist = jsonTextArray(egressPolicy?.domain_denylist);
+  const domainAllowlist = jsonTextArray(egressPolicy?.domain_allowlist);
+  const headersAllowlist = Array.isArray(egressPolicy?.headers_allowlist)
+    ? egressPolicy?.headers_allowlist.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.toLowerCase())
+    : Array.isArray(egressPolicy?.header_allowlist)
+      ? egressPolicy?.header_allowlist.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.toLowerCase())
+      : [];
 
   collectSecretDiagnostics(sampleSource, "sample", diagnostics);
   collectSecretDiagnostics(requestConfig, "request_config", diagnostics);
@@ -1037,8 +1302,57 @@ const buildStudioReview = async (
     }
   }
 
+  const outboundRequestConfigs: Array<{ config: JsonRecord; fieldPrefix: string }> = [];
   if (artifact === "api_outbound") {
-    const urlTemplate = asString(requestConfig.url_template ?? body.url_template);
+    outboundRequestConfigs.push({
+      config: {
+        ...requestConfig,
+        url_template: requestConfig.url_template ?? body.url_template,
+      },
+      fieldPrefix: "request_config",
+    });
+  }
+  if (artifact === "integration_plugin" && normalizedContract?.plugin_kind === "api") {
+    const operationRows = Array.isArray(body.outbound_operations)
+      ? body.outbound_operations.map((entry) => asRecord(entry)).filter((entry): entry is JsonRecord => Boolean(entry))
+      : buildOutboundSuggestions(normalizedContract);
+    if (operationRows.length === 0) {
+      pushDiagnostic(diagnostics, {
+        level: "error",
+        blocking: true,
+        code: "outbound_operation_required",
+        fieldPath: "outbound_operations",
+        message: "API plugins require at least one outbound operation.",
+        why: "Activated API plugins need a concrete provider request target.",
+        recommended_fix: "Add a provider outbound operation before saving the plugin.",
+        source_policy: "integration_plugin_egress_policy",
+        settings_resolution_id: egressResolutionId,
+      });
+    }
+    operationRows.forEach((operation, index) => {
+      outboundRequestConfigs.push({
+        config: operation,
+        fieldPrefix: `outbound_operations[${index}]`,
+      });
+    });
+  }
+
+  if (outboundRequestConfigs.length > 0 && !egressPolicy) {
+    pushDiagnostic(diagnostics, {
+      level: "error",
+      blocking: true,
+      code: "egress_policy_unavailable",
+      fieldPath: "integration_plugin_egress_policy",
+      message: "Outbound egress policy could not be resolved.",
+      why: "API plugin authoring must be governed by tenant egress policy before save or activation.",
+      recommended_fix: "Configure integration_plugin_egress_policy for this tenant and retry preview.",
+      source_policy: "integration_plugin_egress_policy",
+      settings_resolution_id: egressResolutionId,
+    });
+  }
+
+  for (const outbound of outboundRequestConfigs) {
+    const urlTemplate = asString(outbound.config.url_template);
     if (urlTemplate) {
       try {
         const parsed = new URL(urlTemplate);
@@ -1047,7 +1361,7 @@ const buildStudioReview = async (
             level: "error",
             blocking: true,
             code: "egress_requires_https",
-            fieldPath: "request_config.url_template",
+            fieldPath: `${outbound.fieldPrefix}.url_template`,
             message: "Only https:// targets are allowed for outbound requests.",
             why: "Outbound policy blocks non-HTTPS traffic.",
             recommended_fix: "Change the target URL to HTTPS.",
@@ -1060,10 +1374,36 @@ const buildStudioReview = async (
             level: "error",
             blocking: true,
             code: "egress_private_network_blocked",
-            fieldPath: "request_config.url_template",
+            fieldPath: `${outbound.fieldPrefix}.url_template`,
             message: `Private or local network target is blocked (${parsed.hostname}).`,
             why: "Outbound policy blocks localhost and private-network destinations.",
             recommended_fix: "Use a public HTTPS hostname that is allowed by policy.",
+            source_policy: "integration_plugin_egress_policy",
+            settings_resolution_id: egressResolutionId,
+          });
+        }
+        if (hostMatchesAnyPattern(parsed.hostname, domainDenylist)) {
+          pushDiagnostic(diagnostics, {
+            level: "error",
+            blocking: true,
+            code: "egress_placeholder_host_blocked",
+            fieldPath: `${outbound.fieldPrefix}.url_template`,
+            message: `Placeholder or reserved provider host is blocked (${parsed.hostname}).`,
+            why: "Plugin Studio samples must be replaced before an API plugin can be saved or activated.",
+            recommended_fix: "Replace the sample URL with the provider's real HTTPS endpoint.",
+            source_policy: "integration_plugin_egress_policy",
+            settings_resolution_id: egressResolutionId,
+          });
+        }
+        if (domainAllowlist.length > 0 && !hostMatchesAnyPattern(parsed.hostname, domainAllowlist)) {
+          pushDiagnostic(diagnostics, {
+            level: "error",
+            blocking: true,
+            code: "egress_domain_not_allowlisted",
+            fieldPath: `${outbound.fieldPrefix}.url_template`,
+            message: `Provider host is not in the egress allowlist (${parsed.hostname}).`,
+            why: "The tenant egress policy restricts outbound plugin traffic to approved hosts.",
+            recommended_fix: "Choose an approved provider host or update the egress policy through governance.",
             source_policy: "integration_plugin_egress_policy",
             settings_resolution_id: egressResolutionId,
           });
@@ -1073,7 +1413,7 @@ const buildStudioReview = async (
           level: "error",
           blocking: true,
           code: "egress_invalid_url",
-          fieldPath: "request_config.url_template",
+          fieldPath: `${outbound.fieldPrefix}.url_template`,
           message: "Outbound URL template is not a valid absolute URL.",
           why: "The request target cannot be validated or executed safely.",
           recommended_fix: "Provide a full absolute HTTPS URL.",
@@ -1083,10 +1423,7 @@ const buildStudioReview = async (
       }
     }
 
-    const headersAllowlist = Array.isArray(egressPolicy?.headers_allowlist)
-      ? egressPolicy?.headers_allowlist.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.toLowerCase())
-      : [];
-    const headersTemplate = asRecord(requestConfig.headers_template);
+    const headersTemplate = asRecord(outbound.config.headers_template);
     if (headersTemplate && headersAllowlist.length > 0) {
       for (const key of Object.keys(headersTemplate)) {
         if (!headersAllowlist.includes(key.toLowerCase())) {
@@ -1094,7 +1431,7 @@ const buildStudioReview = async (
             level: "error",
             blocking: true,
             code: "header_not_allowlisted",
-            fieldPath: `request_config.headers_template.${key}`,
+            fieldPath: `${outbound.fieldPrefix}.headers_template.${key}`,
             message: `Header ${key} is not in the outbound allowlist.`,
             why: "The egress policy allows only a bounded header set.",
             recommended_fix: "Remove the header or update the allowlist via policy review.",
@@ -1160,7 +1497,7 @@ const buildStudioReview = async (
 };
 
 const canCapability = async (
-  userClient: ReturnType<typeof createClient>,
+  userClient: EdgeSupabaseClient,
   capabilityKey: string,
   organizationId: string | null,
 ) => {
@@ -1173,7 +1510,7 @@ const canCapability = async (
 };
 
 const assertAnyCapability = async (
-  userClient: ReturnType<typeof createClient>,
+  userClient: EdgeSupabaseClient,
   capabilityKeys: string[],
   organizationId: string | null,
 ) => {
@@ -1193,11 +1530,11 @@ const resolveDirectCapability = (artifact: MappingArtifact): string | null => {
 };
 
 const persistOperationReport = async (
-  userClient: ReturnType<typeof createClient>,
+  userClient: EdgeSupabaseClient,
   report: JsonRecord,
 ) => {
   const { data, error } = await userClient.rpc("ui_create_mapping_operation_report_v1", {
-    p_report: report,
+    p_report: redactRecord(report),
   });
   if (error) {
     throw new Error(error.message || "Failed to persist mapping operation report");
@@ -1206,7 +1543,7 @@ const persistOperationReport = async (
 };
 
 const assertCapability = async (
-  userClient: ReturnType<typeof createClient>,
+  userClient: EdgeSupabaseClient,
   capabilityKey: string,
   organizationId: string | null,
 ) => {
@@ -1222,37 +1559,42 @@ const assertCapability = async (
 };
 
 const maybeCreateDraft = async (
-  userClient: ReturnType<typeof createClient>,
+  userClient: EdgeSupabaseClient,
   body: JsonRecord,
   normalizedContract: NormalizedContract,
   mappingSuggestion: JsonRecord,
+  correlationId: string,
 ): Promise<JsonRecord | null> => {
   if (!parseBoolean(body.persist_draft, false)) return null;
 
   const pluginName = asString(body.plugin_name) || `Integration Plugin ${new Date().toISOString()}`;
-  const pluginKind = normalizedContract.plugin_kind;
+  const safeNormalizedContract = redactNormalizedContract(normalizedContract);
+  const safeMappingSuggestion = redactRecord(mappingSuggestion);
+  const pluginKind = safeNormalizedContract.plugin_kind;
   const organizationId = maybeUuid(body.organization_id);
 
   const { data, error } = await userClient.rpc("integration_plugin_generate_draft_v1", {
     p_plugin_name: pluginName,
     p_plugin_kind: pluginKind,
-    p_source_type: normalizedContract.source_type,
-    p_source_payload: asRecord(body.source_payload) ?? body.source_payload ?? {},
-    p_inbound_config: asRecord(body.inbound_config) ?? buildInboundConfigFromContract(normalizedContract),
-    p_mapping_config: asRecord(body.mapping_config) ?? mappingSuggestion,
+    p_source_type: safeNormalizedContract.source_type,
+    p_source_payload: redactSensitiveValue(asRecord(body.source_payload) ?? body.source_payload ?? {}),
+    p_inbound_config: redactRecord(asRecord(body.inbound_config) ?? buildInboundConfigFromContract(safeNormalizedContract)),
+    p_mapping_config: redactRecord(asRecord(body.mapping_config) ?? safeMappingSuggestion),
     p_workflow_binding: asRecord(body.workflow_binding) ?? {},
     p_outbound_operations: Array.isArray(body.outbound_operations)
-      ? body.outbound_operations
-      : buildOutboundSuggestions(normalizedContract),
+      ? redactSensitiveValue(body.outbound_operations)
+      : redactSensitiveValue(buildOutboundSuggestions(safeNormalizedContract)),
     p_plugin_id: maybeUuid(body.plugin_id),
     p_plugin_key: asString(body.plugin_key) || null,
     p_description: asString(body.description) || null,
     p_organization_id: organizationId,
-    p_metadata: {
+    p_metadata: redactRecord({
       managed_by: "integration_plugin_studio_edge",
       endpoint: "integration-plugin-studio",
       created_at: new Date().toISOString(),
-    },
+      correlation_id: correlationId,
+      normalized_contract: safeNormalizedContract,
+    }),
   });
 
   if (error) {
@@ -1278,9 +1620,12 @@ const buildOperationReportPayload = (params: {
   normalizedContract?: NormalizedContract | null;
   errorMessage?: string | null;
 }): JsonRecord => {
+  const reviewSummary = reviewSummaryOf(params.review);
+  const reviewCoercions = Array.isArray(params.review?.coercions) ? params.review.coercions : [];
+  const reviewDiagnostics = Array.isArray(params.review?.diagnostics) ? params.review.diagnostics : [];
   const nextSteps =
-    Array.isArray(params.review?.review_summary?.next_steps)
-      ? params.review?.review_summary?.next_steps
+    Array.isArray(reviewSummary.next_steps)
+      ? reviewSummary.next_steps
       : [];
   const primaryResourceType = asString(params.result?.primary_resource_type) || null;
   const primaryResourceId =
@@ -1293,7 +1638,7 @@ const buildOperationReportPayload = (params: {
     maybeUuid(params.result?.workflow_binding_outcome && asRecord(params.result.workflow_binding_outcome)?.workflow_template_id) ||
     null;
 
-  return {
+  const payload: JsonRecord = {
     organization_id: params.organizationId,
     artifact_type: params.artifact,
     save_mode: params.saveMode,
@@ -1308,17 +1653,17 @@ const buildOperationReportPayload = (params: {
       source_type: params.normalizedContract?.source_type ?? null,
       plugin_kind: params.normalizedContract?.plugin_kind ?? null,
     },
-    conversion_summary: params.review?.review_summary
+    conversion_summary: Object.keys(reviewSummary).length > 0
       ? {
-          coercion_count: params.review.review_summary.coercion_count ?? 0,
-          coercions: params.review.coercions ?? [],
+          coercion_count: reviewSummary.coercion_count ?? 0,
+          coercions: reviewCoercions,
         }
       : {},
     diagnostics_summary: params.review
       ? {
-          blocking_count: params.review.review_summary?.blocking_count ?? 0,
-          warning_count: params.review.review_summary?.warning_count ?? 0,
-          diagnostics: params.review.diagnostics ?? [],
+          blocking_count: reviewSummary.blocking_count ?? 0,
+          warning_count: reviewSummary.warning_count ?? 0,
+          diagnostics: reviewDiagnostics,
           error_message: params.errorMessage ?? null,
         }
       : {
@@ -1331,10 +1676,12 @@ const buildOperationReportPayload = (params: {
     },
     decision_refs: {
       correlation_id: params.correlationId,
-      egress_policy_resolution_id: params.review?.review_summary?.egress_policy_resolution_id ?? null,
+      egress_policy_resolution_id: reviewSummary.egress_policy_resolution_id ?? null,
     },
     next_steps: nextSteps,
   };
+
+  return redactRecord(payload);
 };
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -1419,11 +1766,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const supabaseUrl = resolveSupabaseUrl(req);
-  const userClient = createClient(supabaseUrl, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false },
-    db: { schema: "api" },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
+  const userClient = await createEdgeSupabaseClient(supabaseUrl, SUPABASE_ANON_KEY, token);
 
   const organizationId = maybeUuid(body.organization_id);
 
@@ -1435,9 +1778,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
         organizationId,
       );
 
-      const normalizedContract = normalizeContract(body);
-      const mappingSuggestion = buildDeterministicMapping(normalizedContract);
-      const draftResult = await maybeCreateDraft(userClient, body, normalizedContract, mappingSuggestion);
+      const normalizedContract = redactNormalizedContract(normalizeContract(body));
+      const mappingSuggestion = redactRecord(buildDeterministicMapping(normalizedContract));
+      const draftResult = await maybeCreateDraft(userClient, body, normalizedContract, mappingSuggestion, correlationId);
 
       return jsonResponse(
         200,
@@ -1462,12 +1805,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         organizationId,
       );
 
-      const normalizedContract = asRecord(body.normalized_contract)
+      const normalizedContract = redactNormalizedContract(asRecord(body.normalized_contract)
         ? (body.normalized_contract as NormalizedContract)
-        : normalizeContract(body);
-      const mappingSuggestion = buildDeterministicMapping(normalizedContract);
-      const outboundSuggestions = buildOutboundSuggestions(normalizedContract);
-      const draftResult = await maybeCreateDraft(userClient, body, normalizedContract, mappingSuggestion);
+        : normalizeContract(body));
+      const mappingSuggestion = redactRecord(buildDeterministicMapping(normalizedContract));
+      const outboundSuggestions = redactSensitiveValue(buildOutboundSuggestions(normalizedContract)) as JsonRecord[];
+      const draftResult = await maybeCreateDraft(userClient, body, normalizedContract, mappingSuggestion, correlationId);
 
       return jsonResponse(
         200,
@@ -1490,20 +1833,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (artifact) {
       const normalizedContract = artifact === "tabular_import"
         ? null
-        : (asRecord(body.normalized_contract)
+        : redactNormalizedContract(asRecord(body.normalized_contract)
           ? (body.normalized_contract as NormalizedContract)
           : normalizeContract(body));
       const mappingSuggestion = artifact === "tabular_import"
-        ? (asRecord(body.mapping_config) ?? { fields: [] })
-        : buildDeterministicMapping(normalizedContract as NormalizedContract);
-      const review = await buildStudioReview(
+        ? redactRecord(asRecord(body.mapping_config) ?? { fields: [] })
+        : redactRecord(buildDeterministicMapping(normalizedContract as NormalizedContract));
+      const review = redactRecord(await buildStudioReview(
         userClient,
         body,
         artifact,
         organizationId,
         normalizedContract,
         mappingSuggestion,
-      );
+      ));
 
       const directCapability = resolveDirectCapability(artifact);
       const directAllowed = directCapability
@@ -1677,12 +2020,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       let saveResult: JsonRecord | null = null;
       if (recommendedSaveMode === "direct") {
         const { data, error } = await userClient.rpc("ui_upsert_mapping_artifact_v1", {
-          p_artifact: {
+          p_artifact: redactRecord({
             ...body,
             artifact,
             organization_id: organizationId,
             mapping_config: (review as JsonRecord).mapping_config ?? mappingSuggestion,
-          },
+          }),
         });
         if (error) {
           throw new Error(error.message || "Direct mapping artifact save failed");
@@ -1702,6 +2045,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           },
           normalizedContract,
           mappingSuggestion,
+          correlationId,
         );
       }
 
@@ -1744,10 +2088,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     let draftResult: JsonRecord | null = null;
 
     if (!pluginVersionId) {
-      const normalizedContract = asRecord(body.normalized_contract)
+      const normalizedContract = redactNormalizedContract(asRecord(body.normalized_contract)
         ? (body.normalized_contract as NormalizedContract)
-        : normalizeContract(body);
-      const mappingSuggestion = buildDeterministicMapping(normalizedContract);
+        : normalizeContract(body));
+      const mappingSuggestion = redactRecord(buildDeterministicMapping(normalizedContract));
       draftResult = await maybeCreateDraft(
         userClient,
         {
@@ -1756,6 +2100,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         },
         normalizedContract,
         mappingSuggestion,
+        correlationId,
       );
 
       pluginVersionId = maybeUuid(draftResult?.plugin_version_id ?? draftResult?.version_id);
@@ -1781,7 +2126,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         ok: true,
         endpoint,
         plugin_version_id: pluginVersionId,
-        validation: validationResult,
+        validation: redactSensitiveValue(validationResult),
         draft: draftResult,
         correlation_id: correlationId,
       },
@@ -1804,20 +2149,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
       try {
         const normalizedContract = artifact === "tabular_import"
           ? null
-          : (asRecord(body.normalized_contract)
+          : redactNormalizedContract(asRecord(body.normalized_contract)
             ? (body.normalized_contract as NormalizedContract)
             : normalizeContract(body));
         const mappingSuggestion = artifact === "tabular_import"
-          ? (asRecord(body.mapping_config) ?? { fields: [] })
-          : buildDeterministicMapping(normalizedContract as NormalizedContract);
-        const review = await buildStudioReview(
+          ? redactRecord(asRecord(body.mapping_config) ?? { fields: [] })
+          : redactRecord(buildDeterministicMapping(normalizedContract as NormalizedContract));
+        const review = redactRecord(await buildStudioReview(
           userClient,
           body,
           artifact,
           organizationId,
           normalizedContract,
           mappingSuggestion,
-        );
+        ));
         await persistOperationReport(
           userClient,
           buildOperationReportPayload({

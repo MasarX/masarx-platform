@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
-import * as xlsx from "npm:xlsx@^0.18.5";
+import * as xlsx from "./vendor/sheetjs-xlsx-0.20.3/xlsx.mjs";
+import * as cpexcel from "./vendor/sheetjs-xlsx-0.20.3/cpexcel.full.mjs";
 import {
   buildErrorEnvelope,
   extractToken,
@@ -17,6 +18,8 @@ type ResourceImportAction = "prepare" | "start" | "get_run" | "cancel";
 const SERVICE_NAME = "resource-import-studio";
 const IMPORT_BUCKET = "tabular-imports";
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+xlsx.set_cptable(cpexcel);
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
 const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
@@ -54,7 +57,7 @@ const maybeUuid = (value: unknown): string | null => {
 };
 
 const isJwtLike = (value: string): boolean => String(value || "").trim().split(".").length === 3;
-const LOCAL_EDGE_SUPABASE_HOSTS = new Set(["kong", "rvzwwjlztwwisjthghnipgjr.example.invalid"]);
+const LOCAL_EDGE_SUPABASE_HOSTS = new Set(["kong"]);
 
 const sanitizeFileName = (value: string, fallback = "import.csv") => {
   const normalized = value
@@ -87,6 +90,217 @@ const normalizeHeader = (value: unknown) =>
 
 const buildHeaderFingerprint = (headers: string[]) =>
   headers.map(normalizeHeader).filter(Boolean).sort().join("|");
+
+const normalizeMappingToken = (value: unknown) => normalizeHeader(value);
+
+const jsonArray = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+
+const stringArray = (value: unknown): string[] =>
+  jsonArray(value)
+    .map((entry) => asString(entry))
+    .filter(Boolean);
+
+const positiveInteger = (value: unknown): number | null => {
+  const numeric = typeof value === "number" ? value : Number(asString(value));
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return Math.floor(numeric);
+};
+
+const columnImportConfig = (column: JsonRecord): JsonRecord =>
+  asRecord(column.import) ?? {};
+
+const columnImportEnabled = (column: JsonRecord): boolean => {
+  const config = columnImportConfig(column);
+  return config.enabled === true;
+};
+
+const columnMappingTokens = (column: JsonRecord): string[] => {
+  const config = columnImportConfig(column);
+  return Array.from(
+    new Set(
+      [
+        asString(column.key),
+        asString(column.label),
+        ...stringArray(config.aliases),
+      ]
+        .map(normalizeMappingToken)
+        .filter(Boolean),
+    ),
+  );
+};
+
+const columnDefaultValue = (column: JsonRecord): unknown => {
+  const config = columnImportConfig(column);
+  if (Object.prototype.hasOwnProperty.call(config, "default_value")) return config.default_value;
+  const lookup = asRecord(config.lookup) ?? {};
+  const options = jsonArray(lookup.options).map((entry) => asRecord(entry)).filter(Boolean) as JsonRecord[];
+  const defaultOption = options.find((option) => option.is_default === true);
+  return defaultOption && Object.prototype.hasOwnProperty.call(defaultOption, "value")
+    ? defaultOption.value
+    : undefined;
+};
+
+const registryResources = (registry: JsonRecord): JsonRecord[] =>
+  jsonArray(registry.resources).map((entry) => asRecord(entry)).filter(Boolean) as JsonRecord[];
+
+const findRegistryResource = (registry: JsonRecord, key: string): JsonRecord | null =>
+  registryResources(registry).find((entry) => asString(entry.key) === key) ?? null;
+
+const importPolicyLimit = (
+  registry: JsonRecord,
+  resourceKey: string,
+  key: "max_file_bytes" | "max_rows",
+): number | null => {
+  const resource = findRegistryResource(registry, resourceKey);
+  const importPolicy = asRecord(resource?.import) ?? {};
+  return positiveInteger(importPolicy[key]);
+};
+
+const prefixedTokens = (prefixes: string[], tokens: string[]) => {
+  const out = new Set<string>();
+  for (const prefix of prefixes) {
+    const normalizedPrefix = normalizeMappingToken(prefix);
+    if (!normalizedPrefix) continue;
+    for (const token of tokens) {
+      if (!token) continue;
+      out.add(normalizeMappingToken(`${normalizedPrefix}_${token}`));
+    }
+  }
+  return out;
+};
+
+const inferHeaderRulesFromRegistry = (
+  registry: JsonRecord,
+  resourceKey: string,
+  headers: string[],
+): JsonRecord[] => {
+  const resource = findRegistryResource(registry, resourceKey);
+  const primaryColumns = jsonArray(resource?.columns).map((entry) => asRecord(entry)).filter(Boolean) as JsonRecord[];
+  const normalizedHeaders = headers
+    .map((header) => ({ source: header, normalized: normalizeMappingToken(header) }))
+    .filter((entry) => entry.normalized);
+  const rules: JsonRecord[] = [];
+  const seenTargets = new Set<string>();
+
+  const addRule = (source: string, target: string) => {
+    const sourceText = asString(source);
+    const targetText = asString(target);
+    if (!sourceText || !targetText || seenTargets.has(targetText)) return;
+    seenTargets.add(targetText);
+    rules.push({
+      source_column: sourceText,
+      target_field: targetText,
+      enabled: true,
+    });
+  };
+  const addDefaultRule = (target: string, fixedValue: unknown) => {
+    const targetText = asString(target);
+    if (!targetText || fixedValue === undefined || seenTargets.has(targetText)) return;
+    seenTargets.add(targetText);
+    rules.push({
+      source_column: `__default__${targetText.replace(/[^a-z0-9_.-]+/gi, "_")}`,
+      target_field: targetText,
+      enabled: true,
+      value_mode: "fixed",
+      fixed_value: fixedValue,
+    });
+  };
+
+  for (const header of normalizedHeaders) {
+    for (const column of primaryColumns) {
+      if (!columnImportEnabled(column)) continue;
+      const key = asString(column.key);
+      if (!key) continue;
+      if (columnMappingTokens(column).includes(header.normalized)) {
+        addRule(header.source, key);
+      }
+    }
+  }
+
+  for (const column of primaryColumns) {
+    if (!columnImportEnabled(column)) continue;
+    const key = asString(column.key);
+    if (!key) continue;
+    if (columnImportConfig(column).required === true) addDefaultRule(key, columnDefaultValue(column));
+  }
+
+  const inlineRefs = primaryColumns
+    .map((column) => ({
+      key: asString(column.key),
+      reference: asRecord(columnImportConfig(column).reference) ?? {},
+    }))
+    .filter((entry) => entry.reference.allow_inline_node === true);
+  const targetResourceCounts = inlineRefs.reduce<Record<string, number>>((acc, entry) => {
+    const targetResource = asString(entry.reference.resource);
+    if (targetResource) acc[targetResource] = (acc[targetResource] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  for (const ref of inlineRefs) {
+    const nodeKey = asString(ref.reference.inline_node_key) || ref.key.replace(/_id$/i, "");
+    const targetResource = asString(ref.reference.resource);
+    const relatedResource = targetResource ? findRegistryResource(registry, targetResource) : null;
+    const relatedColumns = jsonArray(relatedResource?.columns)
+      .map((entry) => asRecord(entry))
+      .filter(Boolean) as JsonRecord[];
+    const prefixes = stringArray(ref.reference.mapping_prefixes);
+    const allowDirectRelatedMatch =
+      (targetResourceCounts[targetResource] ?? 0) <= 1 || nodeKey === "destination_address";
+
+    for (const header of normalizedHeaders) {
+      for (const column of relatedColumns) {
+        if (!columnImportEnabled(column)) continue;
+        const key = asString(column.key);
+        if (!key) continue;
+        const tokens = columnMappingTokens(column);
+        const prefixed = prefixedTokens(prefixes, tokens);
+        if (prefixed.has(header.normalized) || (allowDirectRelatedMatch && tokens.includes(header.normalized))) {
+          addRule(header.source, `${nodeKey}.${key}`);
+        }
+      }
+    }
+
+    const hasNodeRule = rules.some((rule) => asString(rule.target_field).startsWith(`${nodeKey}.`));
+    if (hasNodeRule) {
+      for (const column of relatedColumns) {
+        if (!columnImportEnabled(column)) continue;
+        const key = asString(column.key);
+        if (!key) continue;
+        if (columnImportConfig(column).required === true) {
+          addDefaultRule(`${nodeKey}.${key}`, columnDefaultValue(column));
+        }
+      }
+    }
+  }
+
+  return rules;
+};
+
+const loadImportRegistry = async (userClient: ReturnType<typeof createClient>) => {
+  const { data, error } = await userClient.rpc("ui_read_registry_v1");
+  if (error) {
+    throw new Error(error.message || "Unable to load import registry.");
+  }
+  return asRecord(data) ?? {};
+};
+
+const loadMatchingImportProfile = async (
+  userClient: ReturnType<typeof createClient>,
+  resourceKey: string,
+  scopeContext: JsonRecord,
+  headerFingerprint: string,
+) => {
+  if (!headerFingerprint) return null;
+  const { data, error } = await userClient.rpc("ui_match_tabular_import_profile_v1", {
+    p_resource: resourceKey,
+    p_scope_context: scopeContext,
+    p_header_fingerprint: headerFingerprint,
+  });
+  if (error) {
+    throw new Error(error.message || "Unable to load matching import mapping profile.");
+  }
+  return asRecord(data);
+};
 
 const detectVisibleSheets = (workbook: {
   SheetNames?: string[];
@@ -485,10 +699,38 @@ serve(async (req: Request): Promise<Response> => {
       if (!(file instanceof File)) {
         return errorResponse(400, "missing_file", "Prepare requires a CSV/XLS/XLSX file.", origin, correlationId, trace);
       }
+      if (file.size <= 0) {
+        return errorResponse(
+          400,
+          "empty_import_file",
+          "The selected import file is empty. Add a header row and at least one data row before preparing it.",
+          origin,
+          correlationId,
+          trace,
+        );
+      }
 
       const resourceKey = asString(form.get("resource_key"));
       if (!resourceKey) {
         return errorResponse(400, "missing_resource_key", "Prepare requires resource_key.", origin, correlationId, trace);
+      }
+      const registry = await loadImportRegistry(userClient);
+      const maxFileBytes = importPolicyLimit(registry, resourceKey, "max_file_bytes");
+      if (maxFileBytes !== null && file.size > maxFileBytes) {
+        return errorResponse(
+          413,
+          "import_file_too_large",
+          `The selected import file is larger than the configured ${maxFileBytes} byte limit for ${resourceKey}. Split the file and try again.`,
+          origin,
+          correlationId,
+          trace,
+          {
+            resource_key: resourceKey,
+            source_file_name: file.name,
+            size_bytes: file.size,
+            max_file_bytes: maxFileBytes,
+          },
+        );
       }
 
       const writeMode = asString(form.get("write_mode")) || "create";
@@ -498,11 +740,80 @@ serve(async (req: Request): Promise<Response> => {
       const rowOverrides = parseJsonObject(form.get("row_overrides"), "row_overrides");
       const scopeContext = parseJsonObject(form.get("scope_context"), "scope_context");
       const workbook = await parseWorkbookFromFile(file, requestedSheet);
+      if (workbook.headers.length === 0) {
+        return errorResponse(
+          422,
+          "no_readable_column_headers",
+          "No readable column headers were found. Add a header row or choose a file with mapped import columns.",
+          origin,
+          correlationId,
+          trace,
+          {
+            resource_key: resourceKey,
+            source_file_name: file.name,
+            sheet_name: workbook.selectedSheet,
+            visible_sheets: workbook.visibleSheets,
+          },
+        );
+      }
+      const maxRows = importPolicyLimit(registry, resourceKey, "max_rows");
+      if (maxRows !== null && workbook.rows.length > maxRows) {
+        return errorResponse(
+          413,
+          "import_row_limit_exceeded",
+          `The selected import file has ${workbook.rows.length} rows, which is larger than the configured ${maxRows} row limit for ${resourceKey}. Split the file and try again.`,
+          origin,
+          correlationId,
+          trace,
+          {
+            resource_key: resourceKey,
+            source_file_name: file.name,
+            sheet_name: workbook.selectedSheet,
+            row_count: workbook.rows.length,
+            max_rows: maxRows,
+          },
+        );
+      }
       const headerFingerprint = buildHeaderFingerprint(workbook.headers);
+      let resolvedRules = rules;
+      let resolvedRuleSource = ruleSource;
 
       const scopeResolution = await resolveImportScopeContext(userClient, resourceKey, scopeContext);
       const organizationId = maybeUuid(scopeResolution.organization_id);
       const normalizedScopeContext = asRecord(scopeResolution.scope_context) ?? scopeContext;
+
+      if (resolvedRules.length === 0) {
+        resolvedRules = inferHeaderRulesFromRegistry(registry, resourceKey, workbook.headers);
+        if (resolvedRules.length > 0) {
+          resolvedRuleSource = "manual";
+        }
+      }
+
+      if (resolvedRules.length === 0) {
+        const profileMatch = await loadMatchingImportProfile(
+          userClient,
+          resourceKey,
+          normalizedScopeContext,
+          headerFingerprint,
+        );
+        if (!profileMatch) {
+          return errorResponse(
+            422,
+            "unmapped_import_headers",
+            "No import columns matched this file. Check the file headers or create a mapping profile before preparing it.",
+            origin,
+            correlationId,
+            trace,
+            {
+              resource_key: resourceKey,
+              source_file_name: file.name,
+              header_fingerprint: headerFingerprint,
+              headers: workbook.headers,
+            },
+          );
+        }
+      }
+
       const { userId } = await loadCurrentUiContext(userClient);
       if (!organizationId) {
         return errorResponse(
@@ -530,7 +841,7 @@ serve(async (req: Request): Promise<Response> => {
         p_payload: {
           resource_key: resourceKey,
           write_mode: writeMode,
-          rule_source: ruleSource,
+          rule_source: resolvedRuleSource,
           source_format: file.name.split(".").pop()?.trim().toLowerCase() || "csv",
           source_file_name: uploaded.fileName,
           source_artifact_id: uploaded.artifactId,
@@ -538,7 +849,7 @@ serve(async (req: Request): Promise<Response> => {
           header_fingerprint: headerFingerprint,
           headers: workbook.headers,
           rows: workbook.rows,
-          rules,
+          rules: resolvedRules,
           row_overrides: rowOverrides,
           scope_context: normalizedScopeContext,
         },
@@ -579,7 +890,21 @@ serve(async (req: Request): Promise<Response> => {
         throw new Error(error.message || "Failed to start import run");
       }
 
-      const run = await hydrateArtifacts(serviceClient, asRecord(data) ?? {});
+      const processBatchSize = positiveInteger(
+        readEnv("RESOURCE_IMPORT_START_PROCESS_BATCH_SIZE", ["TABULAR_IMPORT_START_PROCESS_BATCH_SIZE"]),
+      ) ?? 100;
+      const { data: processedData, error: processError } = await serviceClient.rpc(
+        "process_tabular_import_run_v1",
+        {
+          p_run_id: runId,
+          p_batch_size: processBatchSize,
+        },
+      );
+      if (processError) {
+        throw new Error(processError.message || "Failed to process started import run");
+      }
+
+      const run = await hydrateArtifacts(serviceClient, asRecord(processedData) ?? asRecord(data) ?? {});
       return jsonResponse(
         200,
         {
@@ -615,9 +940,14 @@ serve(async (req: Request): Promise<Response> => {
     if (!runId) {
       return errorResponse(400, "invalid_run_id", "Cancel requires a valid run_id.", origin, correlationId, trace);
     }
+    const reason = asString(actionPayload.body.reason);
+    if (!reason) {
+      return errorResponse(400, "missing_cancel_reason", "Cancel requires a non-empty operator reason.", origin, correlationId, trace);
+    }
 
     const { data, error } = await userClient.rpc("ui_cancel_tabular_import_run_v1", {
       p_run_id: runId,
+      p_cancel_reason: reason,
     });
     if (error) {
       throw new Error(error.message || "Failed to cancel import run");

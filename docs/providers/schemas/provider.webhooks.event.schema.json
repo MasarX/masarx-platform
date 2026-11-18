@@ -17,6 +17,7 @@
             "shipment.created",
             "shipment.updated",
             "shipment.canceled",
+            "shipment.rescheduled",
             "shipment.swap",
             "shipment.return",
             "shipment.modify",

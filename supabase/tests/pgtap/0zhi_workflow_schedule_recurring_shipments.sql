@@ -61,8 +61,12 @@ BEGIN
    WHERE name = 'recurring_shipment_create_v1'
    LIMIT 1;
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'Recurring Shipment Org', 'recurring-shipment-org-' || left(v_org::text, 8));
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO public.clients (id, organization_id, name, slug, status)
   VALUES (
@@ -75,6 +79,11 @@ BEGIN
 
   INSERT INTO public.senders (id, client_id, name, status)
   VALUES (v_sender, v_client, 'Recurring Shipment Sender', 'active');
+
+  PERFORM bootstrap_tenant_onboarding_v1(
+    v_org,
+    'pgtap:workflow-schedule-recurring-shipments-fixture-bootstrap'
+  );
 
   INSERT INTO public.users (
     id,
@@ -211,7 +220,7 @@ BEGIN
       v_client_trigger
     ),
     '42501',
-    'Capability denied: workflow_runs.write'
+    'Capability denied: workflows.write'
   );
 
   EXECUTE 'RESET ROLE';

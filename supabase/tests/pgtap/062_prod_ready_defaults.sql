@@ -44,21 +44,57 @@ SELECT has_column('public', 'shipment_label_payload_v', 'weight_label', 'shipmen
 SELECT has_column('public', 'shipment_label_payload_v', 'destination_city_code', 'shipment_label_payload_v exposes destination_city_code');
 
 -- resolve_label_template requires organization context; use a fresh org with no tenant overrides
--- to validate global fallback behaviour deterministically.
-WITH org_seed AS (
+-- to validate global fallback behaviour deterministically. Seed the minimal sender/client context
+-- before onboarding so fail-closed plugin activation has a truthful source binding.
+DO $$
+DECLARE
+  v_org_id UUID := gen_random_uuid();
+  v_client_id UUID := gen_random_uuid();
+  v_sender_id UUID := gen_random_uuid();
+BEGIN
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
   VALUES (
-    gen_random_uuid(),
+    v_org_id,
     'Prod Ready Defaults Org',
-    format('prod-defaults-%s', substr(gen_random_uuid()::text, 1, 8)),
+    format('prod-defaults-%s', substr(v_org_id::text, 1, 8)),
     'Asia/Riyadh',
     'en-US',
     'active'
   )
-  RETURNING id
-)
-SELECT set_config('pgtap.label_defaults_org_id', org_seed.id::text, true)
-FROM org_seed;
+  ON CONFLICT (id) DO NOTHING;
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
+  INSERT INTO clients (id, organization_id, name, slug, status)
+  VALUES (
+    v_client_id,
+    v_org_id,
+    'Prod Ready Defaults Client',
+    format('prod-defaults-client-%s', substr(v_client_id::text, 1, 8)),
+    'active'
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES (
+    v_sender_id,
+    v_client_id,
+    'Prod Ready Defaults Sender',
+    'Prod Ready Defaults Sender',
+    TRUE,
+    'active'
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  PERFORM bootstrap_tenant_onboarding_v1(
+    v_org_id,
+    'pgtap:prod-ready-defaults-fixture-bootstrap'
+  );
+
+  PERFORM set_config('pgtap.label_defaults_org_id', v_org_id::text, true);
+END $$;
 
 -- Label default wiring
 SELECT is(

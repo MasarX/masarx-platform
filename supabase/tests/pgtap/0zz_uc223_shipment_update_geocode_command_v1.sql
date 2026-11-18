@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(13);
+SELECT plan(20);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_uc223_shipment_update_geocode_command_v1()
 RETURNS SETOF TEXT
@@ -22,7 +22,12 @@ DECLARE
   v_shipment UUID := gen_random_uuid();
   v_result JSONB := NULL;
   v_workflow_run_id UUID := NULL;
+  v_geocode_template_id UUID := NULL;
+  v_old_geocode_run_id UUID := NULL;
+  v_new_geocode_run_id UUID := NULL;
   v_shipment_action_id UUID := NULL;
+  v_expected_outer_key TEXT := NULL;
+  v_expected_nested_key TEXT := NULL;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -189,6 +194,28 @@ BEGIN
     now()
   );
 
+  SELECT wt.id
+    INTO v_geocode_template_id
+    FROM public.workflow_templates wt
+   WHERE wt.name = 'workflow_geocoding_standard'
+     AND wt.status = 'active'
+   ORDER BY wt.version DESC, wt.updated_at DESC NULLS LAST
+   LIMIT 1;
+
+  v_old_geocode_run_id := public.start_workflow_run(
+    v_geocode_template_id,
+    jsonb_build_object(
+      'organization_id', v_org,
+      'client_id', v_client,
+      'sender_id', v_sender,
+      'shipment_id', v_shipment,
+      'destination_address_id', v_address,
+      'address_id', v_address
+    )
+  );
+
+  v_expected_outer_key := 'uc223-shipment-update-geocode-' || v_shipment::text;
+
   PERFORM set_config('request.jwt.claim.sub', v_operator::text, true);
   PERFORM set_config(
     'request.jwt.claims',
@@ -206,7 +233,7 @@ BEGIN
     ARRAY[v_shipment::text],
     v_shipment::text,
     1,
-    '{}'::jsonb
+    jsonb_build_object('idempotency_key', v_expected_outer_key)
   );
 
   BEGIN
@@ -217,6 +244,15 @@ BEGIN
   END;
 
   BEGIN
+    v_new_geocode_run_id := NULLIF(v_result#>>'{items,0,geocode_workflow_run_id}', '')::UUID;
+  EXCEPTION
+    WHEN others THEN
+      v_new_geocode_run_id := NULL;
+  END;
+
+  v_expected_nested_key := format('shipment-update-geocode:nested:%s:%s', v_workflow_run_id, v_address);
+
+  BEGIN
     v_shipment_action_id := NULLIF(v_result#>>'{items,0,shipment_action_id}', '')::UUID;
   EXCEPTION
     WHEN others THEN
@@ -225,6 +261,10 @@ BEGIN
 
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  RETURN NEXT ok(
+    v_old_geocode_run_id IS NOT NULL,
+    'baseline shipment-scoped geocode run is created for the dedupe regression'
+  );
   RETURN NEXT is(v_result->>'status', 'completed', 'api.ui_execute_shipment_update_geocode_v1 reports completed status');
   RETURN NEXT ok(
     EXISTS (
@@ -237,6 +277,40 @@ BEGIN
     ),
     'shipment_update_geocode_v1 workflow run completes for the selected shipment'
   );
+  RETURN NEXT ok(
+    v_new_geocode_run_id IS NOT NULL
+    AND v_old_geocode_run_id IS NOT NULL
+    AND v_new_geocode_run_id <> v_old_geocode_run_id,
+    'shipment update geocode starts a fresh nested geocode run instead of reusing the old shipment-scoped run'
+  );
+  RETURN NEXT is(
+    (
+      SELECT wt.name
+      FROM public.workflow_runs wr
+      JOIN public.workflow_templates wt ON wt.id = wr.workflow_template_id
+      WHERE wr.id = v_new_geocode_run_id
+    ),
+    'workflow_geocoding_standard',
+    'fresh nested geocode run uses workflow_geocoding_standard'
+  );
+  RETURN NEXT is(
+    (
+      SELECT wr.idempotency_key
+      FROM public.workflow_runs wr
+      WHERE wr.id = v_workflow_run_id
+    ),
+    v_expected_outer_key,
+    'outer shipment refresh workflow honors the per-click idempotency key'
+  );
+  RETURN NEXT is(
+    (
+      SELECT wr.idempotency_key
+      FROM public.workflow_runs wr
+      WHERE wr.id = v_new_geocode_run_id
+    ),
+    v_expected_nested_key,
+    'fresh nested geocode run uses the outer-run scoped idempotency key'
+  );
   RETURN NEXT is(
     (
       SELECT sa.action_type
@@ -245,6 +319,20 @@ BEGIN
     ),
     'geocode_request',
     'shipment update geocode records a geocode_request shipment action'
+  );
+  RETURN NEXT is(
+    (
+      SELECT sa.action_data->>'nested_idempotency_key'
+      FROM public.shipment_actions sa
+      WHERE sa.id = v_shipment_action_id
+    ),
+    v_expected_nested_key,
+    'geocode_request action records the nested geocode idempotency key'
+  );
+  RETURN NEXT is(
+    v_result#>>'{items,0,geocode_workflow_status}',
+    'completed',
+    'api.ui_execute_shipment_update_geocode_v1 requires completed nested geocode workflow status'
   );
 END;
 $function$;

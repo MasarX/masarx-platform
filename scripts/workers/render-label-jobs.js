@@ -16,6 +16,24 @@ const { shouldRenderBlock } = require('../render/block-conditions');
 const { hasArabic, toBidiVisualOrder } = require('../render/text-shape');
 const { resolveExecutionContext, buildTraceHeaders, emitTraceWithContext } = require('../utils/trace-context');
 
+const args = process.argv.slice(2);
+const USAGE = [
+  'Usage: ENV_FILE=config/env/.env.local node scripts/workers/render-label-jobs.js [options]',
+  '',
+  'Options:',
+  '  --job-id <uuid>          Render only one label job.',
+  '  --org-id <uuid>          Restrict leasing to one organization.',
+  '  --limit <number>         Maximum jobs to render. Default: 5.',
+  '  --concurrency <number>   Parallel render workers. Default: 1.',
+  '  --correlation-id <id>    Attach an explicit correlation id to logs.',
+  '  --help, -h               Show this message without processing jobs.',
+].join('\n');
+
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
 loadEnv();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -53,7 +71,6 @@ if (!SUPABASE_URL || !STORAGE_ADMIN_KEY || !DATABASE_URL) {
 
 const STAGE_LOGS = process.env.LABEL_WORKER_STAGE_LOG === '1';
 
-const args = process.argv.slice(2);
 const limitIdx = args.indexOf('--limit');
 const limit = limitIdx !== -1 && args[limitIdx + 1] ? Number(args[limitIdx + 1]) : 5;
 const orgIdx = args.indexOf('--org-id');

@@ -93,6 +93,8 @@ BEGIN
     'ui_command_registry exposes shipments.resort'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'UC054 Resort Org', 'uc054-resort-' || left(v_org::text, 8));
 
@@ -101,6 +103,9 @@ BEGIN
 
   INSERT INTO public.senders (id, client_id, name, status)
   VALUES (v_sender, v_client, 'UC054 Sender', 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:uc054-resort-fixture-bootstrap');
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type)
   VALUES (
@@ -292,6 +297,22 @@ BEGIN
 
   INSERT INTO public.senders (id, client_id, name, status)
   VALUES (v_sender_no_policy, v_client, 'UC054 Sender No Policy', 'active');
+
+  PERFORM public.upsert_settings_value_v1(
+    'basket_policy',
+    'sender',
+    v_sender_no_policy,
+    jsonb_build_object(
+      'version', 1,
+      'enabled', false,
+      'basket_type', null,
+      'open_states', jsonb_build_array('forming'),
+      'create_if_missing', false,
+      'require_zone', true
+    ),
+    1,
+    'pgTAP fixture: UC054 explicit sender policy disablement'
+  );
 
   INSERT INTO public.shipments (
     id,

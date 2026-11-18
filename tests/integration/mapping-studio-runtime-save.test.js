@@ -284,11 +284,12 @@ describeIfDb("mapping studio runtime save", () => {
     );
 
     const cancelResult = await client.query(
-      `SELECT public.ui_cancel_tabular_import_run_v1($1::uuid) AS run`,
-      [runId],
+      `SELECT public.ui_cancel_tabular_import_run_v1($1::uuid, $2::text) AS run`,
+      [runId, "operator confirmed duplicate file run"],
     );
 
     expect(cancelResult.rows[0].run.status).toBe("canceled");
+    expect(cancelResult.rows[0].run.summary.cancellation.reason).toBe("operator confirmed duplicate file run");
     expect(cancelResult.rows[0].run.rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

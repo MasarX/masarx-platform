@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(18);
+SELECT plan(22);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_plan_wave_builder_v1()
 RETURNS SETOF TEXT
@@ -19,8 +19,12 @@ DECLARE
   v_client UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
   v_zone UUID := gen_random_uuid();
+  v_lineage_branch UUID := gen_random_uuid();
+  v_lineage_zone UUID := gen_random_uuid();
   v_standard_level UUID := gen_random_uuid();
   v_express_level UUID := gen_random_uuid();
+  v_lineage_level UUID := gen_random_uuid();
+  v_lineage_offering UUID := gen_random_uuid();
   v_run UUID := gen_random_uuid();
   v_ship_high UUID := gen_random_uuid();
   v_ship_low UUID := gen_random_uuid();
@@ -28,9 +32,13 @@ DECLARE
   v_ship_other_branch UUID := gen_random_uuid();
   v_ship_express UUID := gen_random_uuid();
   v_ship_planned UUID := gen_random_uuid();
+  v_ship_lineage UUID := gen_random_uuid();
+  v_lineage_key TEXT := 'a2z_standard_service_level_20260615';
   v_candidate_count INT := 0;
+  v_lineage_candidate_count INT := 0;
   v_candidate_ids UUID[] := '{}'::uuid[];
   v_first_source TEXT := NULL;
+  v_lineage_stop_payload JSONB := NULL;
   v_build1 RECORD;
   v_build2 RECORD;
 BEGIN
@@ -49,7 +57,8 @@ BEGIN
   INSERT INTO public.branches (id, organization_id, code, name, timezone)
   VALUES
     (v_branch, v_org, 'wave-' || lower(left(v_branch::text, 6)), 'Wave Branch', 'Asia/Riyadh'),
-    (v_other_branch, v_org, 'wave-' || lower(left(v_other_branch::text, 6)), 'Other Wave Branch', 'Asia/Riyadh');
+    (v_other_branch, v_org, 'wave-' || lower(left(v_other_branch::text, 6)), 'Other Wave Branch', 'Asia/Riyadh'),
+    (v_lineage_branch, v_org, 'wave-' || lower(left(v_lineage_branch::text, 6)), 'Lineage Wave Branch', 'Asia/Riyadh');
 
   INSERT INTO public.clients (id, organization_id, name, slug, status)
   VALUES (v_client, v_org, 'Route Wave Client', 'route-wave-client-' || left(v_client::text, 8), 'active');
@@ -63,15 +72,40 @@ BEGIN
   INSERT INTO public.branch_zones (branch_id, zone_id, priority)
   VALUES (v_branch, v_zone, 10);
 
+  INSERT INTO public.zones (id, organization_id, name, slug)
+  VALUES (v_lineage_zone, v_org, 'Lineage Wave Zone', 'lineage-wave-zone-' || left(v_lineage_zone::text, 8));
+
+  INSERT INTO public.branch_zones (branch_id, zone_id, priority)
+  VALUES (v_lineage_branch, v_lineage_zone, 10);
+
   INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
-  VALUES
-    (v_standard_level, v_org, 'standard', 'Standard', TRUE),
-    (v_express_level, v_org, 'express', 'Express', TRUE);
+  VALUES (v_standard_level, v_org, 'standard', 'Standard', TRUE)
+  ON CONFLICT (organization_id, key) DO UPDATE
+    SET name = EXCLUDED.name,
+        is_active = EXCLUDED.is_active
+  RETURNING id INTO v_standard_level;
+
+  INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
+  VALUES (v_express_level, v_org, 'express', 'Express', TRUE)
+  ON CONFLICT (organization_id, key) DO UPDATE
+    SET name = EXCLUDED.name,
+        is_active = EXCLUDED.is_active
+  RETURNING id INTO v_express_level;
+
+  INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
+  VALUES (v_lineage_level, v_org, v_lineage_key, 'A2Z Standard Service Level', TRUE)
+  ON CONFLICT (organization_id, key) DO UPDATE
+    SET name = EXCLUDED.name,
+        is_active = EXCLUDED.is_active
+  RETURNING id INTO v_lineage_level;
 
   INSERT INTO public.service_offerings (service_level_id, branch_id, zone_id, effective_from, is_active, priority)
   VALUES
     (v_standard_level, v_branch, v_zone, '2026-01-01T00:00:00Z', TRUE, 10),
     (v_express_level, v_branch, v_zone, '2026-01-01T00:00:00Z', TRUE, 10);
+
+  INSERT INTO public.service_offerings (id, service_level_id, branch_id, zone_id, effective_from, is_active, priority)
+  VALUES (v_lineage_offering, v_lineage_level, v_lineage_branch, v_lineage_zone, '2026-01-01T00:00:00Z', TRUE, 10);
 
   INSERT INTO public.branch_capacity_windows (
     branch_id,
@@ -86,6 +120,25 @@ BEGIN
     v_branch,
     v_zone,
     v_standard_level,
+    '2026-01-01T00:00:00Z',
+    jsonb_build_object('max_stops', 250),
+    TRUE,
+    10
+  );
+
+  INSERT INTO public.branch_capacity_windows (
+    branch_id,
+    zone_id,
+    service_level_id,
+    effective_from,
+    capacity,
+    is_active,
+    priority
+  )
+  VALUES (
+    v_lineage_branch,
+    v_lineage_zone,
+    v_lineage_level,
     '2026-01-01T00:00:00Z',
     jsonb_build_object('max_stops', 250),
     TRUE,
@@ -235,6 +288,49 @@ BEGIN
     '{}'::jsonb
   );
 
+  INSERT INTO public.shipments (
+    id,
+    organization_id,
+    client_id,
+    tracking_number,
+    status,
+    service_type,
+    service_level,
+    zone_id,
+    branch_id,
+    promised_delivery_date,
+    promised_window_start_at,
+    promised_window_end_at,
+    priority_score,
+    metadata,
+    created_at,
+    updated_at
+  )
+  VALUES (
+    v_ship_lineage,
+    v_org,
+    v_client,
+    'WAVE-LIN-' || upper(left(v_ship_lineage::text, 8)),
+    'created',
+    'delivery',
+    'standard',
+    NULL,
+    NULL,
+    DATE '2026-04-04',
+    '2026-04-04T07:45:00Z',
+    '2026-04-04T08:45:00Z',
+    80,
+    jsonb_build_object(
+      'service_offering_id', v_lineage_offering::text,
+      'service_level_id', v_lineage_level::text,
+      'service_level_key', v_lineage_key,
+      'service_offering_branch_id', v_lineage_branch::text,
+      'service_offering_zone_id', v_lineage_zone::text
+    ),
+    '2026-04-03T07:00:00Z',
+    '2026-04-03T07:00:00Z'
+  );
+
   SELECT COUNT(*)::int
     INTO v_candidate_count
   FROM public.route_plan_delivery_wave_candidates_v1(
@@ -314,6 +410,34 @@ BEGIN
     1,
     'delivery_wave_built event is logged once across idempotent retries'
   );
+
+  SELECT COUNT(*)::int
+    INTO v_lineage_candidate_count
+  FROM public.route_plan_delivery_wave_candidates_v1(
+    jsonb_build_object(
+      'organization_id', v_org,
+      'branch_id', v_lineage_branch,
+      'planned_date', '2026-04-04'
+    )
+  ) AS c
+  WHERE c.shipment_id = v_ship_lineage;
+
+  SELECT c.stop_payload
+    INTO v_lineage_stop_payload
+  FROM public.route_plan_delivery_wave_candidates_v1(
+    jsonb_build_object(
+      'organization_id', v_org,
+      'branch_id', v_lineage_branch,
+      'planned_date', '2026-04-04'
+    )
+  ) AS c
+  WHERE c.shipment_id = v_ship_lineage
+  LIMIT 1;
+
+  RETURN NEXT is(v_lineage_candidate_count, 1, 'candidate selection resolves tenant service-level lineage when shipments.service_level stores governed tier');
+  RETURN NEXT is(v_lineage_stop_payload #>> '{metadata,service_level}', 'standard', 'candidate stop payload preserves governed shipment service tier');
+  RETURN NEXT is(v_lineage_stop_payload #>> '{metadata,service_level_key}', v_lineage_key, 'candidate stop payload carries catalog service-level key lineage');
+  RETURN NEXT is(v_lineage_stop_payload #>> '{metadata,service_offering_id}', v_lineage_offering::text, 'candidate stop payload carries selected service-offering lineage');
 
   RETURN;
 END;

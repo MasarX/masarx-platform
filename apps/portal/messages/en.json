@@ -25,23 +25,23 @@
   },
   "observability": {
     "trace": {
-      "title": "Trace timeline",
-      "description": "Unified observability view for domain events and workflow runs.",
-      "unavailable": "Trace data unavailable.",
-      "correlationLabel": "Correlation id: {id}",
+      "title": "Activity timeline",
+      "description": "Unified activity view for operational events and workflow runs.",
+      "unavailable": "Activity history unavailable.",
+      "correlationLabel": "Tracking key: {id}",
       "errors": {
-        "load": "Unable to load trace data."
+        "load": "Unable to load activity history."
       },
       "sections": {
-        "summary": "Trace summary",
-        "observability": "Observability events",
+        "summary": "Activity summary",
+        "observability": "Activity events",
         "domain": "Domain events",
         "workflowRuns": "Workflow runs"
       },
       "empty": {
-        "observability": "No observability events recorded for this trace.",
-        "domain": "No domain events recorded for this trace.",
-        "workflowRuns": "No workflow runs recorded for this trace."
+        "observability": "No activity events recorded for this reference.",
+        "domain": "No domain events recorded for this reference.",
+        "workflowRuns": "No workflow runs recorded for this reference."
       }
     },
     "workflowRun": {
@@ -50,8 +50,8 @@
       "description": "Execution detail and step timeline for a single workflow run.",
       "unavailable": "Workflow run detail unavailable.",
       "notFound": "Workflow run not found.",
-      "viewTrace": "View trace timeline",
-      "noCorrelation": "No correlation id found for this workflow run.",
+      "viewTrace": "View activity timeline",
+      "noCorrelation": "No tracking key found for this workflow run.",
       "openTemplate": "Open workflow template",
       "summary": {
         "duration": "Duration",
@@ -74,17 +74,17 @@
           "unknown": "Unknown"
         },
         "fields": {
-          "runId": "Run id",
-          "correlationId": "Correlation id",
+          "runId": "Activity reference",
+          "correlationId": "Tracking key",
           "requestedBy": "Requested by",
-          "requestContextId": "Request context id",
-          "scheduleTriggerId": "Schedule trigger id",
-          "runTriggerId": "Workflow run trigger id",
-          "triggerFireId": "Trigger fire id",
-          "sourceRunId": "Source run id",
-          "sourceStatus": "Source status",
-          "sourceCompletedAt": "Source completed at",
-          "idempotencyKey": "Idempotency key",
+          "requestContextId": "Request context",
+          "scheduleTriggerId": "Schedule reference",
+          "runTriggerId": "Linked run rule",
+          "triggerFireId": "Schedule occurrence",
+          "sourceRunId": "Previous activity",
+          "sourceStatus": "Previous activity status",
+          "sourceCompletedAt": "Previous activity completed",
+          "idempotencyKey": "Duplicate check key",
           "scope": "Scope"
         },
         "actions": {
@@ -92,7 +92,7 @@
           "openSchedule": "Open schedule",
           "openTrigger": "Open trigger",
           "openFire": "Open fire",
-          "showRaw": "Show raw context",
+          "showRaw": "Show request details",
           "copy": "Copy",
           "copySuccessTitle": "Copied to clipboard.",
           "copyFailedTitle": "Copy failed."

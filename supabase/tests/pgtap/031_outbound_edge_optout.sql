@@ -18,10 +18,16 @@ UPDATE public.outbound_calls
    AND (lease_expires_at IS NULL OR lease_expires_at < now())
    AND (status <> 'failed' OR retry_count < max_retries);
 
--- Seed minimal org + client + recipient with WhatsApp opt-out.
+-- Seed minimal org + client + sender + recipient with WhatsApp opt-out.
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender context exists.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('cccccccc-0000-0000-0000-000000000031', 'Edge OptOut Org', 'edge-optout-org')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    updated_at = now();
+SELECT set_config('app.organization_onboarding_source', '', true);
 
 INSERT INTO public.clients (id, organization_id, name, slug, status)
 VALUES (
@@ -31,7 +37,34 @@ VALUES (
   'edge-optout-client',
   'active'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+  'cccccccc-0000-0000-0000-000000000132',
+  'cccccccc-0000-0000-0000-000000000032',
+  'Edge OptOut Sender',
+  'Edge OptOut Sender',
+  false,
+  true,
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  'cccccccc-0000-0000-0000-000000000031',
+  'pgtap:outbound-edge-optout-fixture-bootstrap'
+);
 
 INSERT INTO public.recipients (id, organization_id, client_id, name, phone_number, preferred_language)
 VALUES (
@@ -39,7 +72,7 @@ VALUES (
   'cccccccc-0000-0000-0000-000000000031',
   'cccccccc-0000-0000-0000-000000000032',
   'Opted Out Recipient',
-  '966500000031',
+  '+966500000031',
   'en'
 )
 ON CONFLICT (id) DO NOTHING;

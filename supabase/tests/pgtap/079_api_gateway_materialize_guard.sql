@@ -102,18 +102,41 @@ UPDATE tmp_api_gateway_materialize_guard t
 SET source_id = ins_webhook_source.id
 FROM ins_webhook_source;
 
+-- Defer tenant bootstrap until the fixture has truthful client/sender context
+-- so fail-closed plugin activation can resolve an active source binding.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('07900000-0000-0000-0000-000000000001', 'PGTAP Materialize Guard Org', 'pgtap-mat-guard')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.clients (id, organization_id, name, slug)
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
 VALUES (
   '07900000-0000-0000-0000-000000000002',
   '07900000-0000-0000-0000-000000000001',
   'PGTAP Materialize Guard Client',
-  'pgtap-mat-guard-client'
+  'pgtap-mat-guard-client',
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+VALUES (
+  '07900000-0000-0000-0000-000000000003',
+  '07900000-0000-0000-0000-000000000002',
+  'PGTAP Materialize Guard Sender',
+  'PGTAP Materialize Guard Sender',
+  TRUE,
+  'active'
+)
+ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  '07900000-0000-0000-0000-000000000001',
+  'pgtap:api-gateway-materialize-guard-fixture-bootstrap'
+);
 
 UPDATE tmp_api_gateway_materialize_guard
 SET mismatch_org_id = '07900000-0000-0000-0000-000000000001',

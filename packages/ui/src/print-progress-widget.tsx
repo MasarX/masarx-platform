@@ -101,6 +101,19 @@ function AlertCircleIcon({ className }: { className?: string }) {
   );
 }
 
+function formatPrintProgressSource(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return t("printProgress.diagnostics.notAvailable");
+  if (normalized === "context") return t("printProgress.diagnostics.sources.workflowOutput");
+  if (normalized === "stage_execute_ms") return t("printProgress.diagnostics.sources.stageTiming");
+  if (normalized.includes("artifact")) return t("printProgress.diagnostics.sources.artifact");
+  if (normalized.includes("output")) return t("printProgress.diagnostics.sources.workflowOutput");
+  if (normalized.includes("timer") || normalized.includes("timing")) {
+    return t("printProgress.diagnostics.sources.stageTiming");
+  }
+  return t("printProgress.diagnostics.sources.recorded");
+}
+
 export function resolvePrintProgressWidgetTone(
   status: PrintProgressVisualStatus
 ): Tone {
@@ -392,14 +405,14 @@ export function PrintProgressWidget({
               {statusSnapshot?.timingSource ? (
                 <div>
                   {t("printProgress.diagnostics.timingSource", {
-                    value: statusSnapshot.timingSource,
+                    value: formatPrintProgressSource(statusSnapshot.timingSource),
                   })}
                 </div>
               ) : null}
               {statusSnapshot?.outputSource ? (
                 <div>
                   {t("printProgress.diagnostics.outputSource", {
-                    value: statusSnapshot.outputSource,
+                    value: formatPrintProgressSource(statusSnapshot.outputSource),
                   })}
                 </div>
               ) : null}

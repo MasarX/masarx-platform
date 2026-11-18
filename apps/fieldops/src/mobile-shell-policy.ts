@@ -2,6 +2,38 @@ export type MobileVisibilityMode = "assigned_only" | "branch" | "zone" | "organi
 export type MobileRouteViewMode = "list" | "orders_map";
 export type MobilePlatform = "android" | "ios" | "scanner";
 
+export type MobileMapTileProvider = {
+  engine: string;
+  provider: string;
+  dataProvider: string;
+  urlTemplate: string;
+  attributionLabel: string;
+  attributionUrl: string | null;
+  license: string;
+  usageTier: string;
+  cacheRequired: boolean;
+  allowedHosts: string[];
+};
+
+export type MobileMapLogisticsStack = {
+  spatialSourceOfTruth: string;
+  routingEngine: string;
+  optimizationEngine: string;
+};
+
+export type MobileMapViewport = {
+  latitude: number;
+  longitude: number;
+  zoom: number;
+};
+
+export type MobileMapZoomPadding = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
 export type MobileVisibilityPolicy = {
   enabled: boolean;
   defaultVisibility: MobileVisibilityMode;
@@ -16,6 +48,10 @@ export type MobileMapPolicy = {
   clusteringGridPx: number;
   clusteringMinCount: number;
   showLegend: boolean;
+  tileProvider: MobileMapTileProvider;
+  logisticsStack: MobileMapLogisticsStack;
+  defaultViewport: MobileMapViewport;
+  zoomPadding: MobileMapZoomPadding;
 };
 
 export type MobileDriverSafetyPolicy = {
@@ -95,6 +131,34 @@ export const DEFAULT_MOBILE_MAP_POLICY: MobileMapPolicy = {
   clusteringGridPx: 120,
   clusteringMinCount: 2,
   showLegend: true,
+  tileProvider: {
+    engine: "maplibre",
+    provider: "openstreetmap",
+    dataProvider: "openstreetmap",
+    urlTemplate: "/map-tiles/openstreetmap/{z}/{x}/{y}.png",
+    attributionLabel: "OpenStreetMap contributors",
+    attributionUrl: "https://www.openstreetmap.org/copyright",
+    license: "ODbL-1.0",
+    usageTier: "production_cached",
+    cacheRequired: true,
+    allowedHosts: ["same-origin"],
+  },
+  logisticsStack: {
+    spatialSourceOfTruth: "postgis",
+    routingEngine: "valhalla",
+    optimizationEngine: "vroom",
+  },
+  defaultViewport: {
+    latitude: 24.7136,
+    longitude: 46.6753,
+    zoom: 11,
+  },
+  zoomPadding: {
+    top: 80,
+    right: 48,
+    bottom: 220,
+    left: 48,
+  },
 };
 
 export const DEFAULT_MOBILE_DRIVER_SAFETY_POLICY: MobileDriverSafetyPolicy = {
@@ -159,6 +223,15 @@ function readPositiveInt(value: unknown, fallback: number): number {
   return next;
 }
 
+function readFiniteNumber(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 function readString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -211,6 +284,51 @@ function normalizeUniqueStrings(value: unknown): string[] {
     .filter((entry): entry is string => Boolean(entry))
     .map((entry) => entry.toLowerCase());
   return Array.from(new Set(out));
+}
+
+function readStringWithFallback(value: unknown, fallback: string): string {
+  return readString(value) ?? fallback;
+}
+
+function readStringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return fallback;
+  const next = value
+    .map((entry) => readString(entry))
+    .filter((entry): entry is string => Boolean(entry));
+  return next.length > 0 ? Array.from(new Set(next)) : fallback;
+}
+
+function requirePolicyRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} is required`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requirePolicyString(value: unknown, label: string): string {
+  const next = readString(value);
+  if (!next) throw new Error(`${label} is required`);
+  return next;
+}
+
+function requirePolicyBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new Error(`${label} is required`);
+  return value;
+}
+
+function requirePolicyPositiveNumber(value: unknown, label: string): number {
+  const next = readFiniteNumber(value, Number.NaN);
+  if (!Number.isFinite(next) || next <= 0) throw new Error(`${label} is required`);
+  return next;
+}
+
+function requirePolicyStringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} is required`);
+  const next = value
+    .map((entry) => readString(entry))
+    .filter((entry): entry is string => Boolean(entry));
+  if (!next.length) throw new Error(`${label} is required`);
+  return next;
 }
 
 function normalizeUniqueModes<T>(input: unknown[], normalizer: (value: unknown) => T | null): T[] {
@@ -271,12 +389,111 @@ export function normalizeMobileMapPolicy(value: unknown): MobileMapPolicy {
     routeViews: resolvedRouteViews,
     defaultRouteView,
     clusteringEnabled: readBoolean(clustering.enabled, DEFAULT_MOBILE_MAP_POLICY.clusteringEnabled),
-    clusteringGridPx: readPositiveInt(clustering.grid_px, DEFAULT_MOBILE_MAP_POLICY.clusteringGridPx),
+    clusteringGridPx: readPositiveInt(clustering.grid_px ?? clustering.grid, DEFAULT_MOBILE_MAP_POLICY.clusteringGridPx),
     clusteringMinCount: readPositiveInt(
       clustering.min_count,
       DEFAULT_MOBILE_MAP_POLICY.clusteringMinCount
     ),
     showLegend: readBoolean(input.show_legend, DEFAULT_MOBILE_MAP_POLICY.showLegend),
+    tileProvider: normalizeMobileMapTileProvider(input.tile_provider),
+    logisticsStack: normalizeMobileMapLogisticsStack(input.logistics_stack),
+    defaultViewport: normalizeMobileMapViewport(input.default_viewport),
+    zoomPadding: normalizeMobileMapZoomPadding(input.zoom_padding),
+  };
+}
+
+export function normalizeResolvedMobileMapPolicy(value: unknown): MobileMapPolicy {
+  const input = requirePolicyRecord(value, "map_policy");
+  const clustering = requirePolicyRecord(input.clustering, "map_policy.clustering");
+  requirePolicyPositiveNumber(clustering.grid_px ?? clustering.grid, "map_policy.clustering.grid_px");
+  requirePolicyPositiveNumber(clustering.min_count, "map_policy.clustering.min_count");
+
+  const tileProvider = requirePolicyRecord(input.tile_provider, "map_policy.tile_provider");
+  requirePolicyString(tileProvider.engine, "map_policy.tile_provider.engine");
+  requirePolicyString(tileProvider.provider, "map_policy.tile_provider.provider");
+  requirePolicyString(tileProvider.data_provider ?? tileProvider.dataProvider, "map_policy.tile_provider.data_provider");
+  requirePolicyString(tileProvider.url_template ?? tileProvider.urlTemplate, "map_policy.tile_provider.url_template");
+  requirePolicyString(tileProvider.attribution_label ?? tileProvider.attributionLabel, "map_policy.tile_provider.attribution_label");
+  requirePolicyString(tileProvider.attribution_url ?? tileProvider.attributionUrl, "map_policy.tile_provider.attribution_url");
+  requirePolicyString(tileProvider.license, "map_policy.tile_provider.license");
+  requirePolicyString(tileProvider.usage_tier ?? tileProvider.usageTier, "map_policy.tile_provider.usage_tier");
+  requirePolicyBoolean(tileProvider.cache_required ?? tileProvider.cacheRequired, "map_policy.tile_provider.cache_required");
+  requirePolicyStringArray(tileProvider.allowed_hosts ?? tileProvider.allowedHosts, "map_policy.tile_provider.allowed_hosts");
+
+  const logisticsStack = requirePolicyRecord(input.logistics_stack, "map_policy.logistics_stack");
+  requirePolicyString(
+    logisticsStack.spatial_source_of_truth ?? logisticsStack.spatialSourceOfTruth,
+    "map_policy.logistics_stack.spatial_source_of_truth",
+  );
+  requirePolicyString(
+    logisticsStack.routing_engine ?? logisticsStack.routingEngine,
+    "map_policy.logistics_stack.routing_engine",
+  );
+  requirePolicyString(
+    logisticsStack.optimization_engine ?? logisticsStack.optimizationEngine,
+    "map_policy.logistics_stack.optimization_engine",
+  );
+
+  return normalizeMobileMapPolicy(input);
+}
+
+function normalizeMobileMapTileProvider(value: unknown): MobileMapTileProvider {
+  const input = asRecord(value);
+  const fallback = DEFAULT_MOBILE_MAP_POLICY.tileProvider;
+  return {
+    engine: readStringWithFallback(input.engine, fallback.engine),
+    provider: readStringWithFallback(input.provider, fallback.provider),
+    dataProvider: readStringWithFallback(input.data_provider ?? input.dataProvider, fallback.dataProvider),
+    urlTemplate: readStringWithFallback(input.url_template ?? input.urlTemplate, fallback.urlTemplate),
+    attributionLabel: readStringWithFallback(
+      input.attribution_label ?? input.attributionLabel,
+      fallback.attributionLabel
+    ),
+    attributionUrl: readString(input.attribution_url ?? input.attributionUrl) ?? fallback.attributionUrl,
+    license: readStringWithFallback(input.license, fallback.license),
+    usageTier: readStringWithFallback(input.usage_tier ?? input.usageTier, fallback.usageTier),
+    cacheRequired: readBoolean(input.cache_required ?? input.cacheRequired, fallback.cacheRequired),
+    allowedHosts: readStringArray(input.allowed_hosts ?? input.allowedHosts, fallback.allowedHosts),
+  };
+}
+
+function normalizeMobileMapLogisticsStack(value: unknown): MobileMapLogisticsStack {
+  const input = asRecord(value);
+  const fallback = DEFAULT_MOBILE_MAP_POLICY.logisticsStack;
+  return {
+    spatialSourceOfTruth: readStringWithFallback(
+      input.spatial_source_of_truth ?? input.spatialSourceOfTruth,
+      fallback.spatialSourceOfTruth
+    ),
+    routingEngine: readStringWithFallback(input.routing_engine ?? input.routingEngine, fallback.routingEngine),
+    optimizationEngine: readStringWithFallback(
+      input.optimization_engine ?? input.optimizationEngine,
+      fallback.optimizationEngine
+    ),
+  };
+}
+
+function normalizeMobileMapViewport(value: unknown): MobileMapViewport {
+  const input = asRecord(value);
+  const fallback = DEFAULT_MOBILE_MAP_POLICY.defaultViewport;
+  return {
+    latitude: readFiniteNumber(input.latitude ?? input.lat, fallback.latitude),
+    longitude: readFiniteNumber(input.longitude ?? input.lng ?? input.lon, fallback.longitude),
+    zoom: readFiniteNumber(input.zoom, fallback.zoom),
+  };
+}
+
+function normalizeMobileMapZoomPadding(value: unknown): MobileMapZoomPadding {
+  const input = asRecord(value);
+  const fallback = DEFAULT_MOBILE_MAP_POLICY.zoomPadding;
+  const all = input.all ?? input.value;
+  const allPadding =
+    typeof all === "number" || typeof all === "string" ? readFiniteNumber(all, fallback.top) : null;
+  return {
+    top: readFiniteNumber(input.top, allPadding ?? fallback.top),
+    right: readFiniteNumber(input.right, allPadding ?? fallback.right),
+    bottom: readFiniteNumber(input.bottom, allPadding ?? fallback.bottom),
+    left: readFiniteNumber(input.left, allPadding ?? fallback.left),
   };
 }
 

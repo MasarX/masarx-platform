@@ -36,7 +36,6 @@ describe("landing runtime patching", () => {
     expect(runtimePatch).toEqual({
       appUrl: "https://app.example.com/login",
       contactEndpoint: "/__landing-contact",
-      tenantSignupEndpoint: "/__landing-contact",
       driverSignupEndpoint: "/__landing-contact",
     });
 
@@ -57,7 +56,6 @@ describe("landing runtime patching", () => {
       expect(globalWindow.window?.MASARX_RUNTIME).toEqual({
         appUrl: "https://app.example.com/login",
         contactEndpoint: "/__landing-contact",
-        tenantSignupEndpoint: "/__landing-contact",
         driverSignupEndpoint: "/__landing-contact",
         turnstileSiteKey: "site-key",
         untouched: true,
@@ -71,7 +69,6 @@ describe("landing runtime patching", () => {
       expect(globalWindow.window?.MASARX_RUNTIME).toEqual({
         appUrl: "https://app.example.com/login",
         contactEndpoint: "/__landing-contact",
-        tenantSignupEndpoint: "/__landing-contact",
         driverSignupEndpoint: "/__landing-contact",
         trackingEndpoint: "/__landing-tracking",
         turnstileSiteKey: "site-key",
@@ -91,5 +88,25 @@ describe("landing runtime patching", () => {
     await patchRuntimeConfig(fakePage);
 
     expect(addInitScript).not.toHaveBeenCalled();
+  });
+
+  test("patchRuntimeConfig keeps tenant signup endpoint explicit and separate from contact", async () => {
+    const addInitScript = jest.fn(async () => undefined);
+    const fakePage = {
+      addInitScript,
+    } as unknown as Page;
+
+    await patchRuntimeConfig(fakePage, {
+      contactEndpoint: "/__landing-contact",
+      tenantSignupEndpoint: "/__tenant-signup",
+    });
+
+    expect(addInitScript).toHaveBeenCalledTimes(1);
+    const [, runtimePatch] = addInitScript.mock.calls[0] || [];
+    expect(runtimePatch).toEqual({
+      contactEndpoint: "/__landing-contact",
+      tenantSignupEndpoint: "/__tenant-signup",
+      driverSignupEndpoint: "/__landing-contact",
+    });
   });
 });

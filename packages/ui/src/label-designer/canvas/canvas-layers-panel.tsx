@@ -9,6 +9,7 @@ const t = createUiTranslator("ui.labelDesigner.canvas");
 type CanvasLayersPanelProps = {
   blocks: TemplateBlock[];
   selectedIndices: number[];
+  readOnly?: boolean;
   onSelect: (index: number) => void;
   onBlocksChange: (blocks: TemplateBlock[]) => void;
 };
@@ -16,29 +17,32 @@ type CanvasLayersPanelProps = {
 export function CanvasLayersPanel({
   blocks,
   selectedIndices,
+  readOnly = false,
   onSelect,
   onBlocksChange,
 }: CanvasLayersPanelProps) {
   const toggleVisibility = React.useCallback(
     (index: number, e: React.MouseEvent) => {
       e.stopPropagation();
+      if (readOnly) return;
       const next = blocks.map((b, i) =>
         i === index ? { ...b, visible: b.visible === false ? true : false } : b,
       );
       onBlocksChange(next);
     },
-    [blocks, onBlocksChange],
+    [blocks, onBlocksChange, readOnly],
   );
 
   const toggleLock = React.useCallback(
     (index: number, e: React.MouseEvent) => {
       e.stopPropagation();
+      if (readOnly) return;
       const next = blocks.map((b, i) =>
         i === index ? { ...b, locked: !b.locked } : b,
       );
       onBlocksChange(next);
     },
-    [blocks, onBlocksChange],
+    [blocks, onBlocksChange, readOnly],
   );
 
   return (
@@ -67,6 +71,7 @@ export function CanvasLayersPanel({
               <button
                 type="button"
                 className="h-4 w-4 shrink-0 text-[10px]"
+                disabled={readOnly}
                 onClick={(e) => toggleVisibility(index, e)}
                 title={isHidden ? t("hidden") : t("visible")}
                 data-testid={`layer-${index}-visibility`}
@@ -80,6 +85,7 @@ export function CanvasLayersPanel({
               <button
                 type="button"
                 className="h-4 w-4 shrink-0 text-[10px]"
+                disabled={readOnly}
                 onClick={(e) => toggleLock(index, e)}
                 title={isLocked ? t("locked") : t("unlocked")}
                 data-testid={`layer-${index}-lock`}

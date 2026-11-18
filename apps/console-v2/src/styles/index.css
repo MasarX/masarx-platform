@@ -1,0 +1,9 @@
+/* index.css — single CSS entry. Imports preserve cascade order from the original demo. */
+@import './tokens.css';
+@import './base.css';
+@import './shell.css';
+@import './components.css';
+@import './modules.css';
+@import './primitives.css';
+@import './rtl.css';
+@import './label-designer-shared.css';

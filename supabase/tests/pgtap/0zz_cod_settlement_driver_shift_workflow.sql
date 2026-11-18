@@ -21,6 +21,8 @@ DECLARE
   v_branch UUID := gen_random_uuid();
   v_driver UUID := gen_random_uuid();
   v_task_type UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
 
   v_progress JSONB;
   v_ctx JSONB;
@@ -81,8 +83,19 @@ BEGIN
     'step 4 handler_key = settlement_batch'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', TRUE);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'COD Settlement Workflow Org', 'cod-settle-' || left(v_org::text, 8));
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES (v_client, v_org, 'COD Settlement Workflow Client', 'cod-settle-client-' || left(v_client::text, 8), 'active');
+
+  INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES (v_sender, v_client, 'COD Settlement Workflow Sender', 'COD Settlement Workflow Sender', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', TRUE);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:cod-settlement-driver-shift-v1-fixture-bootstrap');
 
   INSERT INTO public.branches (id, organization_id, code, name, is_active)
   VALUES (v_branch, v_org, 'b-' || left(v_branch::text, 8), 'Branch ' || left(v_branch::text, 8), TRUE);

@@ -28,8 +28,10 @@ const MUTATING_COMMANDS = new Set([
 
 const PRESSURE_COMMANDS = new Set([
   'build',
+  'cleanup',
   'test',
   'dev',
+  'proof',
   'serve',
   'start',
   'watch',
@@ -52,6 +54,49 @@ const PRESSURE_TOOLS = new Set([
   'expo',
   'metro',
 ]);
+
+const NODE_EXECUTABLES = new Set(['node', 'nodejs']);
+
+const FRAMEWORK_SERVER_COMMANDS = new Map([
+  ['next', new Set(['dev', 'start'])],
+  ['vite', new Set(['dev', 'preview', 'serve'])],
+  ['webpack', new Set(['serve'])],
+  ['storybook', new Set(['dev'])],
+  ['expo', new Set(['start'])],
+  ['metro', new Set(['start'])],
+]);
+
+const FRAMEWORK_IMPLICIT_SERVER_TOOLS = new Set(['vite', 'metro']);
+const IMPLICIT_SERVER_OPTIONS = new Map([
+  ['vite', new Map([
+    ['--base', 'value'],
+    ['--config', 'value'],
+    ['--cors', 'flag'],
+    ['--force', 'flag'],
+    ['--host', 'optional_value'],
+    ['--loglevel', 'value'],
+    ['--mode', 'value'],
+    ['--open', 'optional_value'],
+    ['--port', 'value'],
+    ['--profile', 'flag'],
+    ['--strictport', 'flag'],
+  ])],
+  ['metro', new Map([
+    ['--host', 'value'],
+    ['--max-workers', 'value'],
+    ['--port', 'value'],
+    ['--projectroot', 'value'],
+    ['--reset-cache', 'flag'],
+    ['--resetcache', 'flag'],
+    ['--secure', 'flag'],
+    ['--watchfolders', 'value'],
+  ])],
+]);
+const FRAMEWORK_COMMAND_WORDS = new Set([
+  ...PRESSURE_COMMANDS,
+  'preview',
+]);
+const EXECUTION_PATH_PATTERN = /(?:^|[\\/_.-])(build|cleanup|local-start|local-stop|proof|test)(?:[\\/_.-]|$)/u;
 
 function redactCommandLine(value) {
   return String(value || '')
@@ -125,6 +170,94 @@ function packageManagerIndex(tokens) {
   return tokens.findIndex((token) => PACKAGE_MANAGERS.has(token.normalized));
 }
 
+function tokenContainsPathSegment(token, segment) {
+  const normalized = String(token?.value || '').replace(/\\/g, '/');
+  return normalized === segment || normalized.includes(`/${segment}/`);
+}
+
+function actualCommandIndex(tokens) {
+  if (tokens.length === 0) return -1;
+  if (!NODE_EXECUTABLES.has(tokens[0].normalized)) return 0;
+  const script = tokens[1];
+  if (!script || String(script.raw || '').startsWith('-')) return -1;
+  return 1;
+}
+
+function toolIndex(tokens, tool) {
+  const index = actualCommandIndex(tokens);
+  return index >= 0 && tokens[index].normalized === tool ? index : -1;
+}
+
+function toolSubcommand(tokens, index) {
+  const token = tokens[index + 1];
+  if (!token || String(token.raw || '').startsWith('-')) return '';
+  return token.normalized;
+}
+
+function isConflictingFrameworkRole(value) {
+  return FRAMEWORK_COMMAND_WORDS.has(normalizeToken(value));
+}
+
+function hasSafeImplicitServerArguments(tokens, index, tool) {
+  const options = IMPLICIT_SERVER_OPTIONS.get(tool);
+  if (!options) return false;
+  for (let cursor = index + 1; cursor < tokens.length; cursor += 1) {
+    const raw = String(tokens[cursor].raw || '');
+    if (!raw.startsWith('-')) return false;
+    const [rawName, inlineValue = ''] = raw.split(/=(.*)/su, 2);
+    const name = rawName.toLowerCase();
+    const arity = options.get(name);
+    if (!arity || (inlineValue && arity === 'flag') || isConflictingFrameworkRole(inlineValue)) return false;
+    if (inlineValue || arity === 'flag') continue;
+    const next = tokens[cursor + 1];
+    if (arity === 'value') {
+      if (!next || String(next.raw || '').startsWith('-') || isConflictingFrameworkRole(next.raw)) return false;
+      cursor += 1;
+    } else if (arity === 'optional_value' && next && !String(next.raw || '').startsWith('-')) {
+      if (isConflictingFrameworkRole(next.raw)) return false;
+      cursor += 1;
+    }
+  }
+  return true;
+}
+
+function isExactInternalFrameworkScript(tokens, relativePath) {
+  const index = actualCommandIndex(tokens);
+  if (index < 0) return false;
+  const commandPath = String(tokens[index].value || '').replace(/\\/g, '/');
+  return commandPath === relativePath || commandPath.endsWith(`/${relativePath}`);
+}
+
+function stableApplicationServerRole(tokens) {
+  if (isExactInternalFrameworkScript(
+    tokens,
+    'node_modules/next/dist/compiled/jest-worker/processchild.js',
+  )) {
+    return 'framework_worker';
+  }
+  if (isExactInternalFrameworkScript(
+    tokens,
+    'node_modules/next/dist/server/lib/start-server.js',
+  )) {
+    return 'framework_server_child';
+  }
+  for (const [tool, allowedCommands] of FRAMEWORK_SERVER_COMMANDS) {
+    const index = toolIndex(tokens, tool);
+    if (index < 0) continue;
+    const subcommand = toolSubcommand(tokens, index);
+    if (allowedCommands.has(subcommand)) return 'framework_application_server';
+    if (!subcommand && FRAMEWORK_IMPLICIT_SERVER_TOOLS.has(tool)
+      && hasSafeImplicitServerArguments(tokens, index, tool)) return 'framework_application_server';
+  }
+  return '';
+}
+
+function hasPressureTool(tokens, tool) {
+  return tokens.some((token) => (
+    token.normalized === tool || tokenContainsPathSegment(token, tool)
+  ));
+}
+
 function classifyDependencyProcess(entry = {}) {
   const pid = Number(entry.pid || entry.ProcessId || 0);
   const command = redactCommandLine(entry.command || entry.CommandLine || '');
@@ -134,24 +267,40 @@ function classifyDependencyProcess(entry = {}) {
   const materializeScript = hasDependencyMaterializeScript(tokens);
   const packageManager = pmIndex >= 0 ? tokens[pmIndex].normalized : '';
   const subcommand = pmIndex >= 0 ? firstCommandAfter(tokens, pmIndex).token : '';
+  const applicationServerRole = packageManager ? '' : stableApplicationServerRole(tokens);
   const mutatesDependencies = Boolean(materializeScript ||
     (packageManager && MUTATING_COMMANDS.has(subcommand)));
   const pressureByCommand = pmIndex >= 0 && (
     PRESSURE_COMMANDS.has(subcommand) ||
     (subcommand === 'run' && tokens.slice(pmIndex + 1).some((token) => PRESSURE_COMMANDS.has(token.normalized)))
   );
-  const pressureByTool = [...PRESSURE_TOOLS].some((tool) => tokenValues.has(tool));
+  const pressureByTool = [...PRESSURE_TOOLS].some((tool) => (
+    tokenValues.has(tool) || hasPressureTool(tokens, tool)
+  ));
+  const commandIndex = actualCommandIndex(tokens);
+  const commandPath = commandIndex >= 0
+    ? tokens[commandIndex].value.replace(/\\/g, '/')
+    : '';
+  const ambiguousExecution = !applicationServerRole && EXECUTION_PATH_PATTERN.test(commandPath);
   const category = mutatesDependencies
     ? 'dependency_mutation'
-    : (pressureByCommand || pressureByTool ? 'build_test_runtime' : 'other_dependency_related');
+    : (applicationServerRole
+      ? 'stable_application_server'
+      : (pressureByCommand || pressureByTool || ambiguousExecution
+        ? (ambiguousExecution && !pressureByCommand && !pressureByTool ? 'ambiguous_execution' : 'build_test_runtime')
+        : 'other_dependency_related'));
   const owner = optionValue(tokens, 'owner');
   const cwd = optionValue(tokens, 'cwd') || optionValue(tokens, 'prefix');
   return {
     pid,
     command,
     category,
+    process_role: applicationServerRole || (ambiguousExecution ? 'ambiguous_execution' : ''),
     dependency_mutation: mutatesDependencies,
-    host_pressure_signal: !mutatesDependencies && category !== 'other_dependency_related',
+    host_pressure_signal: !mutatesDependencies && !new Set([
+      'other_dependency_related',
+      'stable_application_server',
+    ]).has(category),
     dependency_owner: owner || '',
     dependency_cwd: cwd || '',
     evidence_source: 'process_scan',

@@ -17,6 +17,7 @@ DECLARE
     v_box_id UUID := gen_random_uuid();
     v_template_id UUID := gen_random_uuid();
     v_label_id UUID := gen_random_uuid();
+    v_sender_id UUID := gen_random_uuid();
     v_job_id UUID := NULL;
     v_initial_version_id UUID := NULL;
     v_active_version_id UUID := NULL;
@@ -26,13 +27,35 @@ DECLARE
     v_active_count BIGINT := 0;
     v_reason TEXT := 'damaged_barcode';
 BEGIN
+    PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
     INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
     VALUES (v_org_id, 'pgTAP UC184 Org', 'pgtap-uc184-org', 'UTC', 'en-US', 'active')
     ON CONFLICT (id) DO NOTHING;
 
+    PERFORM set_config('app.organization_onboarding_source', '', true);
+
     INSERT INTO clients (id, organization_id, name, slug, sla_tier, status)
     VALUES (v_client_id, v_org_id, 'pgTAP UC184 Client', 'pgtap-uc184-client', 'standard', 'active')
     ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status, settings_override)
+    VALUES (
+        v_sender_id,
+        v_client_id,
+        'pgTAP UC184 Sender',
+        'pgTAP UC184 Sender',
+        FALSE,
+        TRUE,
+        'active',
+        '{}'::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING;
+
+    PERFORM bootstrap_tenant_onboarding_v1(
+        v_org_id,
+        'pgtap:label-reprint-governance-fixture-bootstrap'
+    );
 
     INSERT INTO addresses (
         id, organization_id, client_id, raw_input, city, province, country, validation_status

@@ -1,12 +1,5 @@
 const fs = require("fs");
 const path = require("path");
-
-const projectRoot = __dirname;
-const workspaceRoot = path.resolve(projectRoot, "../..");
-
-process.env.FIELDOPS_EXPO_PROJECT_ROOT ||= projectRoot;
-require(path.join(workspaceRoot, "scripts", "ops", "mobile", "fieldops-expo-peer-resolver.cjs"));
-
 const { getDefaultConfig } = require("expo/metro-config");
 
 let getSentryExpoConfig = null;
@@ -20,6 +13,9 @@ try {
 // - Keep React/ReactDOM pinned to FieldOps versions (RN 0.81 uses React 19).
 // - Avoid accidentally resolving the web bundle against the Next.js workspaces (React 18),
 //   which breaks rendering due to React 19 elements using `react.transitional.element`.
+const projectRoot = __dirname;
+const workspaceRoot = path.resolve(projectRoot, "../..");
+
 function resolveExistingRealPath(targetPath) {
   try {
     if (!fs.existsSync(targetPath)) {
@@ -41,6 +37,16 @@ function pathBlockPattern(targetPath) {
   const separator = "[\\\\/]";
   const pattern = normalizedSegments.map(escapeRegExp).join(separator);
   return new RegExp(`^${pattern}(?:${separator}.*)?$`);
+}
+
+function resolvePackageDir(fromDir, pkgName) {
+  try {
+    // Resolve against explicit roots to avoid accidental dependency drift.
+    const pkgJson = require.resolve(`${pkgName}/package.json`, { paths: [fromDir] });
+    return path.dirname(pkgJson);
+  } catch {
+    return null;
+  }
 }
 
 const config =
@@ -122,16 +128,6 @@ config.resolver.assetExts = Array.from(
   new Set([...(config.resolver.assetExts || []), "wasm"])
 );
 
-function resolvePackageDir(fromDir, pkgName) {
-  try {
-    // Resolve against explicit roots to avoid accidental dependency drift.
-    const pkgJson = require.resolve(`${pkgName}/package.json`, { paths: [fromDir] });
-    return path.dirname(pkgJson);
-  } catch {
-    return null;
-  }
-}
-
 const reactNativeWebDir =
   resolvePackageDir(projectRoot, "react-native-web") ??
   resolvePackageDir(workspaceRoot, "react-native-web") ??
@@ -181,6 +177,19 @@ const priorEnhanceMiddleware = config.server.enhanceMiddleware;
 config.server.enhanceMiddleware = (middleware, server) => {
   const next = priorEnhanceMiddleware ? priorEnhanceMiddleware(middleware, server) : middleware;
   return (req, res, nextMiddleware) => {
+    if (
+      process.env.FIELDOPS_ANDROID_METRO_PLAIN_BUNDLE === "1" &&
+      typeof req.url === "string" &&
+      req.url.includes(".bundle") &&
+      typeof req.headers.accept === "string" &&
+      req.headers.accept.includes("multipart/mixed")
+    ) {
+      req.headers.accept = req.headers.accept
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value && value !== "multipart/mixed")
+        .join(",") || "*/*";
+    }
     res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     return next(req, res, nextMiddleware);

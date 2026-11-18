@@ -2,6 +2,8 @@
   const CLIENT_FETCH_TIMEOUT_MS = 10_000;
   const CONTACT_SUBMIT_TIMEOUT_MS = 15_000;
   const DRIVER_STATUS_TOKEN_STORAGE_KEY = 'masarx_driver_status_token_v1';
+  const TURNSTILE_ALWAYS_PASS_TEST_SITE_KEY = '1x00000000000000000000AA';
+  const TURNSTILE_DUMMY_TOKEN = 'EXAMPLE_PASSWORD';
 
   const cfg = window.MASARX_LANDING;
   if (!cfg || !cfg.i18n) return;
@@ -10,6 +12,21 @@
   root.classList.add('js');
   const i18n = cfg.i18n;
   const runtime = window.MASARX_RUNTIME || {};
+
+  function isLoopbackHost(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return (
+      normalized === 'localhost' ||
+      normalized === '127.0.0.1' ||
+      normalized === '[::1]' ||
+      normalized === '::1'
+    );
+  }
+
+  function canUseLocalTurnstileDummyToken() {
+    const siteKey = typeof runtime.turnstileSiteKey === 'string' ? runtime.turnstileSiteKey.trim() : '';
+    return siteKey === TURNSTILE_ALWAYS_PASS_TEST_SITE_KEY && isLoopbackHost(window.location.hostname);
+  }
 
   function navigateTo(href) {
     if (typeof runtime.navigate === 'function') {
@@ -165,12 +182,21 @@
   const navToggle = document.querySelector('.nav-toggle');
   const navEl = document.querySelector('#nav-primary');
   const navLinks = [...document.querySelectorAll('.nav a[href^="#"]')];
+  const trackActionsNavLinks = [...document.querySelectorAll('[data-track-actions-link]')];
   const runtimeHrefEls = [...document.querySelectorAll('[data-runtime-href]')];
   const trackHrefEls = [...document.querySelectorAll('[data-track-href]')];
   const homeHrefEls = [...document.querySelectorAll('[data-home-href]')];
   const clientsRow = document.querySelector('[data-clients-row]');
+  const marketingLeadForm = document.querySelector('[data-marketing-lead-form]');
+  const marketingLeadStatus = document.querySelector('[data-marketing-lead-status]');
+  const marketingLeadRequestReference = document.querySelector('[data-marketing-lead-request-reference]');
+  const marketingLeadRequestReferenceValue = document.querySelector('[data-marketing-lead-request-reference-value]');
+  const marketingLeadTurnstileHost = document.querySelector('[data-marketing-turnstile]');
+  const marketingLeadSubmitBtn = marketingLeadForm ? marketingLeadForm.querySelector('button[type="submit"]') : null;
   const contactForm = document.querySelector('[data-contact-form]');
   const contactStatus = document.querySelector('[data-contact-status]');
+  const contactRequestReference = document.querySelector('[data-contact-request-reference]');
+  const contactRequestReferenceValue = document.querySelector('[data-contact-request-reference-value]');
   const turnstileHost = document.querySelector('[data-turnstile]');
   const contactSubmitBtn = contactForm ? contactForm.querySelector('button[type="submit"]') : null;
   const driverForm = document.querySelector('[data-driver-form]');
@@ -228,6 +254,12 @@
   const trackMapCloseEls = [...document.querySelectorAll('[data-track-map-close]')];
 
   const intakeForms = {
+    lead: {
+      form: marketingLeadForm,
+      status: marketingLeadStatus,
+      turnstileHost: marketingLeadForm ? marketingLeadTurnstileHost : null,
+      submitBtn: marketingLeadSubmitBtn,
+    },
     contact: {
       form: contactForm,
       status: contactStatus,
@@ -243,6 +275,9 @@
   };
 
   const turnstileConfigs = {
+    lead: {
+      turnstileHost: marketingLeadForm ? marketingLeadTurnstileHost : null,
+    },
     contact: {
       turnstileHost: contactForm ? turnstileHost : null,
     },
@@ -256,6 +291,7 @@
 
   const state = {
     turnstile: {
+      lead: { widgetId: null, token: '' },
       contact: { widgetId: null, token: '' },
       driver: { widgetId: null, token: '' },
       tracking: { widgetId: null, token: '' },
@@ -515,21 +551,47 @@
     if (state.clientsStateKey) renderClientsState(state.clientsStateKey);
   }
 
-  function resolveClientsEndpoint() {
-    const explicit = typeof runtime.clientsEndpoint === 'string' ? runtime.clientsEndpoint.trim() : '';
-    if (explicit) return explicit;
-
-    const contactEndpoint = resolveContactEndpoint();
-    if (!contactEndpoint) return '';
-
-    if (contactEndpoint.startsWith('/')) return `${contactEndpoint.replace(/\/+$/g, '')}/clients`;
+  function resolveEndpointPathname(endpoint) {
+    const raw = typeof endpoint === 'string' ? endpoint.trim() : '';
+    if (!raw) return '';
     try {
-      const url = new URL(contactEndpoint);
+      const url = raw.startsWith('http')
+        ? new URL(raw)
+        : new URL(raw, window.location.origin);
+      return url.pathname.replace(/\/+$/g, '');
+    } catch {
+      return raw.split(/[?#]/)[0].replace(/\/+$/g, '');
+    }
+  }
+
+  function isMarketingLeadIntakeEndpoint(endpoint) {
+    return /(^|\/)marketing-lead-intake$/.test(resolveEndpointPathname(endpoint));
+  }
+
+  function appendClientsFeedPath(endpoint) {
+    const raw = typeof endpoint === 'string' ? endpoint.trim() : '';
+    if (!raw) return '';
+    if (raw.startsWith('/')) return `${raw.split(/[?#]/)[0].replace(/\/+$/g, '')}/clients`;
+    try {
+      const url = new URL(raw);
       url.pathname = `${url.pathname.replace(/\/+$/g, '')}/clients`;
+      url.search = '';
+      url.hash = '';
       return url.toString();
     } catch {
       return '';
     }
+  }
+
+  function resolveClientsEndpoint() {
+    const explicit = typeof runtime.clientsEndpoint === 'string' ? runtime.clientsEndpoint.trim() : '';
+    if (explicit) return explicit;
+
+    const marketingLeadEndpoint = typeof runtime.contactEndpoint === 'string'
+      ? runtime.contactEndpoint.trim()
+      : '';
+    if (!isMarketingLeadIntakeEndpoint(marketingLeadEndpoint)) return '';
+    return appendClientsFeedPath(marketingLeadEndpoint);
   }
 
   function resolveClientsRequestUrl(endpoint, lang) {
@@ -635,6 +697,60 @@
     return params;
   }
 
+  function resolveTenantSignupRequestReference(data) {
+    if (!data || typeof data !== 'object') return '';
+    const candidates = [
+      data.tenant_signup_request_id,
+      data.request_id,
+      data.request_reference,
+    ];
+    for (const candidate of candidates) {
+      const value = typeof candidate === 'string' ? candidate.trim() : '';
+      if (value) return value;
+    }
+    return '';
+  }
+
+  function resolveMarketingLeadRequestReference(data) {
+    if (!data || typeof data !== 'object') return '';
+    const candidates = [
+      data.lead_id,
+      data.marketing_lead_request_id,
+      data.request_id,
+      data.request_reference,
+      data.id,
+    ];
+    for (const candidate of candidates) {
+      const value = typeof candidate === 'string' ? candidate.trim() : '';
+      if (value) return value;
+    }
+    return '';
+  }
+
+  function setContactRequestReference(reference) {
+    const value = typeof reference === 'string' ? reference.trim() : '';
+    if (!contactRequestReference || !contactRequestReferenceValue) return;
+    contactRequestReference.hidden = !value;
+    contactRequestReferenceValue.textContent = value;
+    if (value) {
+      contactRequestReference.dataset.requestReference = value;
+    } else {
+      delete contactRequestReference.dataset.requestReference;
+    }
+  }
+
+  function setMarketingLeadRequestReference(reference) {
+    const value = typeof reference === 'string' ? reference.trim() : '';
+    if (!marketingLeadRequestReference || !marketingLeadRequestReferenceValue) return;
+    marketingLeadRequestReference.hidden = !value;
+    marketingLeadRequestReferenceValue.textContent = value;
+    if (value) {
+      marketingLeadRequestReference.dataset.requestReference = value;
+    } else {
+      delete marketingLeadRequestReference.dataset.requestReference;
+    }
+  }
+
   function setIntakeStatus(formKey, key, tone) {
     const config = getIntakeConfig(formKey);
     if (!config || !config.status) return;
@@ -669,9 +785,31 @@
     return resolveIntakeErrorKey(code, 'form');
   }
 
+  function isValidEmailAddress(value) {
+    const text = String(value || '').trim();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+  }
+
+  function resolveContactSuccessKey(data, deduped) {
+    if (!deduped || !data || typeof data !== 'object') return 'form_status_under_review';
+    const queueStatus = String(data.queue_status || data.status || '').trim().toLowerCase();
+    if (queueStatus === 'approved') return 'form_status_deduped_approved';
+    if (queueStatus === 'rejected') return 'form_status_deduped_rejected';
+    return 'form_status_deduped';
+  }
+
+  function resolveMarketingLeadSuccessKey(deduped) {
+    return deduped ? 'lead_status_deduped' : 'lead_status_success';
+  }
+
+  function resolveMarketingLeadEndpoint() {
+    const explicit = typeof runtime.contactEndpoint === 'string'
+      ? runtime.contactEndpoint.trim()
+      : '';
+    return explicit;
+  }
+
   function resolveContactEndpoint() {
-    const explicit = typeof runtime.contactEndpoint === 'string' ? runtime.contactEndpoint.trim() : '';
-    if (explicit) return explicit;
     const tenantSignup = typeof runtime.tenantSignupEndpoint === 'string'
       ? runtime.tenantSignupEndpoint.trim()
       : '';
@@ -696,6 +834,13 @@
     if (!driverStatusLookup) return;
     const lang = root.lang || 'en';
     driverStatusLookup.textContent = key ? (getText(key, lang) || '') : '';
+    driverStatusLookup.classList.toggle('is-success', tone === 'success');
+    driverStatusLookup.classList.toggle('is-error', tone === 'error');
+  }
+
+  function setDriverStatusLookupMessage(message, tone) {
+    if (!driverStatusLookup) return;
+    driverStatusLookup.textContent = String(message || '').trim();
     driverStatusLookup.classList.toggle('is-success', tone === 'success');
     driverStatusLookup.classList.toggle('is-error', tone === 'error');
   }
@@ -731,11 +876,41 @@
 
   function resolveDriverStatusKey(data) {
     const status = typeof data?.status === 'string' ? data.status.trim() : '';
+    const applicationState = typeof data?.application_state === 'string'
+      ? data.application_state.trim()
+      : '';
+    if (applicationState === 'additional_documents_requested') {
+      return 'driver_status_additional_documents_requested';
+    }
     if (status === 'pending') return 'driver_status_pending';
     if (status === 'approved') return 'driver_status_approved';
     if (status === 'rejected') return 'driver_status_rejected';
     if (status === 'reverification_required') return 'driver_status_reverification';
     return 'driver_status_unknown';
+  }
+
+  function readStringArray(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+  }
+
+  function formatDriverStatusLookupMessage(data) {
+    const lang = root.lang || 'en';
+    const key = resolveDriverStatusKey(data);
+    const parts = [getText(key, lang) || 'Application status received.'];
+    const requestedDocuments = readStringArray(data?.requested_documents);
+    if (requestedDocuments.length) {
+      const label = getText('driver_status_requested_documents', lang) || 'Requested documents';
+      parts.push(`${label}: ${requestedDocuments.join(', ')}.`);
+    }
+    const reviewReason = String(data?.review_reason || '').trim();
+    if (reviewReason) {
+      const label = getText('driver_status_review_note', lang) || 'Reviewer note';
+      parts.push(`${label}: ${reviewReason}`);
+    }
+    return parts.join(' ');
   }
 
   function getDriverStatusInput() {
@@ -794,11 +969,30 @@
     return config.turnstileHost.querySelector('input[name="cf-turnstile-response"]');
   }
 
+  function primeLocalTurnstileDummyToken(formKey = resolveDefaultTurnstileKey()) {
+    if (!canUseLocalTurnstileDummyToken()) return false;
+    const config = getTurnstileConfig(formKey);
+    const turnstileState = getTurnstileState(formKey);
+    if (!config || !config.turnstileHost || !turnstileState) return false;
+
+    let input = getTurnstileResponseInput(formKey);
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'cf-turnstile-response';
+      config.turnstileHost.appendChild(input);
+    }
+    input.value = TURNSTILE_DUMMY_TOKEN;
+    turnstileState.token = TURNSTILE_DUMMY_TOKEN;
+    return true;
+  }
+
   function clearTurnstileToken(formKey = resolveDefaultTurnstileKey()) {
     const turnstileState = getTurnstileState(formKey);
     if (turnstileState) turnstileState.token = '';
     const input = getTurnstileResponseInput(formKey);
     if (input && typeof input.value === 'string') input.value = '';
+    primeLocalTurnstileDummyToken(formKey);
   }
 
   function getTurnstileToken(formKey = resolveDefaultTurnstileKey()) {
@@ -817,6 +1011,7 @@
 
   function renderTurnstile(formKey = resolveDefaultTurnstileKey()) {
     if (!hasTurnstile(formKey)) return;
+    if (primeLocalTurnstileDummyToken(formKey)) return;
     const api = window.turnstile;
     if (!api || typeof api.render !== 'function') return;
     const config = getTurnstileConfig(formKey);
@@ -860,6 +1055,10 @@
   function ensureTurnstile() {
     Object.keys(turnstileConfigs).forEach((formKey) => setTurnstileVisibility(formKey));
     if (!Object.keys(turnstileConfigs).some((formKey) => hasTurnstile(formKey))) return;
+    const primedLocalTokens = Object.keys(turnstileConfigs)
+      .map((formKey) => primeLocalTurnstileDummyToken(formKey))
+      .some(Boolean);
+    if (primedLocalTokens) return;
     if (window.turnstile && typeof window.turnstile.render === 'function') {
       Object.keys(turnstileConfigs).forEach((formKey) => renderTurnstile(formKey));
       return;
@@ -902,6 +1101,108 @@
       .filter(Boolean);
   }
 
+  async function submitMarketingLeadRequest() {
+    const config = getIntakeConfig('lead');
+    if (!config || !config.form) return;
+
+    const leadEndpoint = resolveMarketingLeadEndpoint();
+    if (!leadEndpoint) {
+      setIntakeStatus('lead', 'lead_status_missing_endpoint', 'error');
+      return;
+    }
+
+    if (typeof config.form.checkValidity === 'function' && !config.form.checkValidity()) {
+      if (typeof config.form.reportValidity === 'function') config.form.reportValidity();
+      return;
+    }
+
+    const turnstileToken = getTurnstileToken('lead');
+    if (hasTurnstile('lead') && !turnstileToken) {
+      setIntakeStatus('lead', 'lead_status_turnstile_required', 'error');
+      return;
+    }
+
+    const fd = new FormData(config.form);
+    const volume = String(fd.get('volume') || '').trim();
+    const role = String(fd.get('role') || '').trim();
+    const organizationName = String(fd.get('organization_name') || '').trim();
+    const email = String(fd.get('email') || '').trim();
+    const fullName = String(fd.get('full_name') || '').trim();
+    if (!isValidEmailAddress(email)) {
+      setIntakeStatus('lead', 'lead_status_invalid_email', 'error');
+      return;
+    }
+
+    const payload = {
+      email,
+      company: organizationName,
+      organization_name: organizationName,
+      volume,
+      role,
+      notes: String(fd.get('notes') || '').trim(),
+      locale: root.lang || 'en',
+      page_url: window.location.href,
+      referrer: document.referrer || '',
+      marketing: {
+        ...getMarketingParams(),
+        ...(fullName ? { full_name: fullName } : {}),
+        ...(volume ? { monthly_volume: volume } : {}),
+        ...(role ? { role } : {}),
+      },
+      turnstile_token: hasTurnstile('lead') ? turnstileToken : undefined,
+    };
+
+    if (config.submitBtn) config.submitBtn.disabled = true;
+    setMarketingLeadRequestReference('');
+    setIntakeStatus('lead', 'lead_status_sending');
+
+    const ctrl = new AbortController();
+    const timeoutId = window.setTimeout(() => ctrl.abort(), CONTACT_SUBMIT_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(leadEndpoint, {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        headers: withPublicEdgeHeaders({
+          accept: 'application/json',
+          'content-type': 'application/json',
+        }),
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      });
+
+      const data = await readJsonSafe(res);
+
+      if (!res.ok) {
+        const code = data && typeof data === 'object' ? data?.error?.code : '';
+        setIntakeStatus('lead', resolveIntakeErrorKey(code, 'lead'), 'error');
+        return;
+      }
+
+      if (data && typeof data === 'object' && data.ok === false) {
+        setIntakeStatus('lead', resolveIntakeErrorKey(data?.error?.code, 'lead'), 'error');
+        return;
+      }
+
+      const deduped = Boolean(data && typeof data === 'object' && data.deduped === true);
+      const requestReference = resolveMarketingLeadRequestReference(data);
+      if (!requestReference) {
+        setIntakeStatus('lead', 'lead_status_missing_reference', 'error');
+        return;
+      }
+      setMarketingLeadRequestReference(requestReference);
+      setIntakeStatus('lead', resolveMarketingLeadSuccessKey(deduped), 'success');
+      config.form.reset();
+      resetTurnstile('lead');
+    } catch {
+      setIntakeStatus('lead', 'lead_status_error', 'error');
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (config.submitBtn) config.submitBtn.disabled = false;
+    }
+  }
+
   async function submitContactRequest() {
     const config = getIntakeConfig('contact');
     if (!config || !config.form) return;
@@ -927,9 +1228,14 @@
     const volume = String(fd.get('volume') || '').trim();
     const role = String(fd.get('role') || '').trim();
     const organizationName = String(fd.get('organization_name') || '').trim();
+    const email = String(fd.get('email') || '').trim();
+    if (!isValidEmailAddress(email)) {
+      setIntakeStatus('contact', 'form_status_invalid_email', 'error');
+      return;
+    }
     const marketingParams = getMarketingParams();
     const payload = {
-      email: String(fd.get('email') || '').trim(),
+      email,
       full_name: String(fd.get('full_name') || '').trim(),
       organization_name: organizationName,
       company: organizationName,
@@ -949,6 +1255,7 @@
     };
 
     if (config.submitBtn) config.submitBtn.disabled = true;
+    setContactRequestReference('');
     setIntakeStatus('contact', 'form_status_sending');
 
     const ctrl = new AbortController();
@@ -981,9 +1288,15 @@
       }
 
       const deduped = Boolean(data && typeof data === 'object' && data.deduped === true);
+      const requestReference = resolveTenantSignupRequestReference(data);
+      if (!requestReference) {
+        setIntakeStatus('contact', 'form_status_missing_request_reference', 'error');
+        return;
+      }
+      setContactRequestReference(requestReference);
       setIntakeStatus(
         'contact',
-        deduped ? 'form_status_deduped' : 'form_status_under_review',
+        resolveContactSuccessKey(data, deduped),
         'success'
       );
       config.form.reset();
@@ -1011,8 +1324,8 @@
       return;
     }
 
-    const turnstileState = getTurnstileState('driver');
-    if (hasTurnstile('driver') && !turnstileState?.token) {
+    const turnstileToken = getTurnstileToken('driver');
+    if (hasTurnstile('driver') && !turnstileToken) {
       setIntakeStatus('driver', 'driver_form_status_turnstile_required', 'error');
       return;
     }
@@ -1022,8 +1335,13 @@
     const vehicleType = String(fd.get('vehicle_type') || '').trim();
     const languages = parseCsvList(fd.get('languages'));
     const capabilities = parseCsvList(fd.get('capabilities'));
+    const email = String(fd.get('email') || '').trim();
+    if (!isValidEmailAddress(email)) {
+      setIntakeStatus('driver', 'driver_form_status_invalid_email', 'error');
+      return;
+    }
     const payload = {
-      email: String(fd.get('email') || '').trim(),
+      email,
       full_name: String(fd.get('full_name') || '').trim(),
       organization_name: String(fd.get('organization_name') || '').trim(),
       phone: String(fd.get('phone') || '').trim(),
@@ -1038,7 +1356,7 @@
         ...(vehicleType ? { vehicle_type: vehicleType } : {}),
         ...(languages.length ? { languages } : {}),
       },
-      turnstile_token: hasTurnstile('driver') ? turnstileState?.token : undefined,
+      turnstile_token: hasTurnstile('driver') ? turnstileToken : undefined,
     };
 
     if (config.submitBtn) config.submitBtn.disabled = true;
@@ -1052,10 +1370,10 @@
         method: 'POST',
         mode: 'cors',
         credentials: 'omit',
-        headers: {
+        headers: withPublicEdgeHeaders({
           accept: 'application/json',
           'content-type': 'application/json',
-        },
+        }),
         body: JSON.stringify(payload),
         signal: ctrl.signal,
       });
@@ -1128,10 +1446,10 @@
         method: 'POST',
         mode: 'cors',
         credentials: 'omit',
-        headers: {
+        headers: withPublicEdgeHeaders({
           accept: 'application/json',
           'content-type': 'application/json',
-        },
+        }),
         body: JSON.stringify({ token }),
         signal: ctrl.signal,
       });
@@ -1151,7 +1469,7 @@
       }
 
       persistDriverStatusToken(token);
-      setDriverStatusLookup(resolveDriverStatusKey(data), 'success');
+      setDriverStatusLookupMessage(formatDriverStatusLookupMessage(data), 'success');
     } catch {
       setDriverStatusLookup('driver_status_error', 'error');
     } finally {
@@ -1187,11 +1505,25 @@
     if (lookupStage) lookupStage.hidden = stage !== 'lookup';
     if (verifyStage) verifyStage.hidden = stage !== 'verify';
     if (resultsStage) resultsStage.hidden = stage !== 'results';
+    syncTrackingRequestNav();
     if (stage === 'results') {
       ensureTrackingMap('inline');
       invalidateMap(mapControllers.inline);
       if (state.mapPin) focusMapOnPin(mapControllers.inline, mapControllers.inline.map?.getZoom() || mapRuntime.defaultZoom);
     }
+  }
+
+  function syncTrackingRequestNav() {
+    if (!trackActionsNavLinks.length) return;
+    const lang = root.lang || 'en';
+    const canOpenRequests = Boolean(state.trackingPayload && resultsStage && !resultsStage.hidden);
+    const key = canOpenRequests ? 'track_nav_actions' : 'track_nav_lookup_requests';
+    const href = canOpenRequests ? '#actions' : '#lookup';
+    trackActionsNavLinks.forEach((link) => {
+      link.setAttribute('href', href);
+      link.dataset.i18n = key;
+      link.textContent = getText(key, lang) || '';
+    });
   }
 
   function focusTrackingReferenceInput() {
@@ -1896,6 +2228,7 @@
       trackMapDialogPicker.setAttribute('aria-label', getText('track_location_map_aria_expanded', lang) || 'Expanded shipment location map');
     }
     if (state.trackingPayload) renderTrackingPayload(state.trackingPayload);
+    syncTrackingRequestNav();
     syncMapPinUi();
   }
 
@@ -2279,13 +2612,28 @@
   loadClients();
   ensureTurnstile();
 
+  if (marketingLeadForm) {
+    marketingLeadForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitMarketingLeadRequest();
+    });
+
+    marketingLeadForm.addEventListener('input', () => {
+      setMarketingLeadRequestReference('');
+      setIntakeStatus('lead', '');
+    });
+  }
+
   if (contactForm) {
     contactForm.addEventListener('submit', (e) => {
       e.preventDefault();
       submitContactRequest();
     });
 
-    contactForm.addEventListener('input', () => setIntakeStatus('contact', ''));
+    contactForm.addEventListener('input', () => {
+      setContactRequestReference('');
+      setIntakeStatus('contact', '');
+    });
   }
 
   if (driverForm) {

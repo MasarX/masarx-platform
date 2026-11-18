@@ -7,6 +7,17 @@ async function loadBuildConfig() {
   return (await import("../../../apps/fieldops/app.config")).default;
 }
 
+function canResolveFieldopsConfigPlugin(pluginName: string): boolean {
+  try {
+    require.resolve(pluginName, {
+      paths: [require("path").resolve(__dirname, "../../../apps/fieldops")],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe("fieldops app config", () => {
   const originalEnv = process.env;
 
@@ -22,6 +33,17 @@ describe("fieldops app config", () => {
     delete process.env.NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS;
     delete process.env.NEXT_PUBLIC_LOCATION_ALWAYS_PERMISSION_FIELDOPS;
     delete process.env.NEXT_PUBLIC_APP_NAME;
+    delete process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL;
+    delete process.env.FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL;
+    delete process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT;
+    delete process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT;
+    delete process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN;
+    delete process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES;
+    delete process.env.LANDING_DRIVER_SIGNUP_ENDPOINT;
+    delete process.env.LANDING_DRIVER_STATUS_ENDPOINT;
+    delete process.env.LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT;
+    delete process.env.LANDING_SITE_URL;
+    delete process.env.FIELDOPS_ANDROID_NATIVE_BUILD_ROOT;
   });
 
   afterAll(() => {
@@ -184,7 +206,7 @@ describe("fieldops app config", () => {
     expect((output.extra as any)?.eas?.projectId).toBe("7f2e4d62-0a46-40ac-8f74-c98c3e8630f7");
   });
 
-  test("injects expo-notifications when missing", async () => {
+  test("injects expo-notifications only when the config plugin is resolvable", async () => {
     const buildConfig = await loadBuildConfig();
     const output = buildConfig({
       config: {
@@ -196,10 +218,14 @@ describe("fieldops app config", () => {
       },
     } as any);
 
-    expect(output.plugins).toEqual(expect.arrayContaining(["expo-notifications"]));
+    if (canResolveFieldopsConfigPlugin("expo-notifications")) {
+      expect(output.plugins).toEqual(expect.arrayContaining(["expo-notifications"]));
+    } else {
+      expect(output.plugins).not.toEqual(expect.arrayContaining(["expo-notifications"]));
+    }
   });
 
-  test("injects sentry expo plugin when missing", async () => {
+  test("injects sentry expo plugin only when resolvable", async () => {
     const buildConfig = await loadBuildConfig();
     const output = buildConfig({
       config: {
@@ -207,11 +233,62 @@ describe("fieldops app config", () => {
         slug: "fieldops",
         version: "1.0.0",
         plugins: [],
+        ios: {},
+      },
+    } as any);
+
+    if (canResolveFieldopsConfigPlugin("@sentry/react-native/expo")) {
+      expect(output.plugins).toEqual(expect.arrayContaining(["@sentry/react-native/expo"]));
+    } else {
+      expect(output.plugins).not.toEqual(expect.arrayContaining(["@sentry/react-native/expo"]));
+    }
+  });
+
+  test("preserves sentry expo plugin when explicitly configured", async () => {
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: {
+        name: "Fieldops",
+        slug: "fieldops",
+        version: "1.0.0",
+        plugins: ["@sentry/react-native/expo"],
         ios: {},
       },
     } as any);
 
     expect(output.plugins).toEqual(expect.arrayContaining(["@sentry/react-native/expo"]));
+  });
+
+  test("injects FieldOps Android cleartext config plugin when missing", async () => {
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: {
+        name: "Fieldops",
+        slug: "fieldops",
+        version: "1.0.0",
+        plugins: [],
+        android: {},
+      },
+    } as any);
+
+    expect(output.plugins).toEqual(
+      expect.arrayContaining(["./plugins/with-fieldops-android-cleartext"])
+    );
+  });
+
+  test("uses stable local Android package so prebuild does not mutate dynamic config", async () => {
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: {
+        name: "Fieldops",
+        slug: "fieldops",
+        version: "1.0.0",
+        plugins: [],
+        android: {},
+      },
+    } as any);
+
+    expect(output.android?.package).toBe("co.masarx.fieldops.dev");
   });
 
   test("keeps existing ios background modes and adds location once", async () => {
@@ -255,5 +332,150 @@ describe("fieldops app config", () => {
 
     expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_URL).toBe("http://127.0.0.1:54321");
     expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_ANON_KEY).toBe("real-anon-key");
+  });
+
+  test("exposes FieldOps Mobile V2 driver signup runtime config from the public landing intake env", async () => {
+    process.env.LANDING_DRIVER_SIGNUP_ENDPOINT = "http://127.0.0.1:57429/functions/v1/driver-signup-intake";
+    process.env.LANDING_DRIVER_STATUS_ENDPOINT = "http://127.0.0.1:57429/functions/v1/driver-application-status";
+    process.env.LANDING_SITE_URL = "http://127.0.0.1:3333";
+    process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL = "http://127.0.0.1:57429/functions/v1";
+    process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES = JSON.stringify({
+      roles: [{ id: "last_mile_driver", icon: "truck", label: "Last-mile driver", sub: "Route delivery" }],
+    });
+
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: {
+        name: "Fieldops",
+        slug: "fieldops",
+        version: "1.0.0",
+        plugins: [],
+        extra: {},
+      },
+    } as any);
+
+    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT).toBe(
+      "http://127.0.0.1:57429/functions/v1/driver-signup-intake",
+    );
+    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT).toBe(
+      "http://127.0.0.1:57429/functions/v1/driver-application-status",
+    );
+    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN).toBe("http://127.0.0.1:3333");
+    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES).toContain("last_mile_driver");
+    expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL).toBe("http://127.0.0.1:57429/functions/v1");
+  });
+
+  test("uses explicit local Android emulator Supabase URL for local builds", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:58429";
+    process.env.FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL = "http://192.0.2.10:58429";
+    process.env.LANDING_DRIVER_SIGNUP_ENDPOINT = "http://127.0.0.1:55321/functions/v1/driver-signup-intake";
+    process.env.LANDING_DRIVER_STATUS_ENDPOINT = "http://127.0.0.1:55321/functions/v1/driver-application-status";
+    process.env.LANDING_SITE_URL = "http://127.0.0.1:3333";
+
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: {
+        name: "Fieldops",
+        slug: "fieldops",
+        version: "1.0.0",
+        plugins: [],
+        android: {},
+        extra: {},
+      },
+    } as any);
+
+    expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_URL).toBe("http://192.0.2.10:58429");
+    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT).toBe(
+      "http://192.0.2.10:58429/functions/v1/driver-signup-intake",
+    );
+    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT).toBe(
+      "http://192.0.2.10:58429/functions/v1/driver-application-status",
+    );
+    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN).toBe("http://127.0.0.1:58429");
+    expect(output.android?.usesCleartextTraffic).toBe(true);
+  });
+
+  test("rejects Android emulator Supabase URL outside local builds", async () => {
+    process.env.FIELDOPS_BUILD_PROFILE = "production";
+    process.env.FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL = "http://192.0.2.10:58429";
+    process.env.NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS = "com.masarx.fieldops";
+    process.env.NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS = "com.masarx.fieldops";
+    process.env.NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS = "7f2e4d62-0a46-40ac-8f74-c98c3e8630f7";
+
+    const buildConfig = await loadBuildConfig();
+
+    expect(() =>
+      buildConfig({
+        config: {
+          name: "Fieldops",
+          slug: "fieldops",
+          version: "1.0.0",
+          plugins: [],
+          android: {},
+          ios: {},
+          extra: {},
+        },
+      } as any)
+    ).toThrow("FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL is local-only");
+  });
+
+  test("rejects non-local Android emulator Supabase URL overrides", async () => {
+    process.env.FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL = "https://project.supabase.co";
+
+    const buildConfig = await loadBuildConfig();
+
+    expect(() =>
+      buildConfig({
+        config: {
+          name: "Fieldops",
+          slug: "fieldops",
+          version: "1.0.0",
+          plugins: [],
+          android: {},
+          extra: {},
+        },
+      } as any)
+    ).toThrow("FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL must be a local http URL");
+  });
+
+  test("allows cleartext traffic only for local development Supabase URLs", async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:54321";
+
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: {
+        name: "Fieldops",
+        slug: "fieldops",
+        version: "1.0.0",
+        plugins: [],
+        android: {},
+        extra: {},
+      },
+    } as any);
+
+    expect(output.android?.usesCleartextTraffic).toBe(true);
+  });
+
+  test("keeps production Supabase builds off cleartext traffic", async () => {
+    process.env.FIELDOPS_BUILD_PROFILE = "production";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co";
+    process.env.NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS = "com.masarx.fieldops";
+    process.env.NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS = "com.masarx.fieldops";
+    process.env.NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS = "7f2e4d62-0a46-40ac-8f74-c98c3e8630f7";
+
+    const buildConfig = await loadBuildConfig();
+    const output = buildConfig({
+      config: {
+        name: "Fieldops",
+        slug: "fieldops",
+        version: "1.0.0",
+        plugins: [],
+        android: {},
+        ios: {},
+        extra: {},
+      },
+    } as any);
+
+    expect(output.android?.usesCleartextTraffic).toBeUndefined();
   });
 });

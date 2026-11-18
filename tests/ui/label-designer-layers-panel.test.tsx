@@ -124,6 +124,27 @@ describe("CanvasLayersPanel", () => {
     expect(updated[0].locked).toBe(true);
   });
 
+  it("keeps visibility and lock mutations disabled in read-only mode", () => {
+    const onBlocksChange = jest.fn();
+    render(
+      <CanvasLayersPanel
+        blocks={blocks}
+        selectedIndices={[]}
+        readOnly
+        onSelect={jest.fn()}
+        onBlocksChange={onBlocksChange}
+      />,
+    );
+
+    const visibility = screen.getByTestId("layer-0-visibility");
+    const lock = screen.getByTestId("layer-0-lock");
+    expect(visibility).toBeDisabled();
+    expect(lock).toBeDisabled();
+    fireEvent.click(visibility);
+    fireEvent.click(lock);
+    expect(onBlocksChange).not.toHaveBeenCalled();
+  });
+
   it("empty state with no blocks", () => {
     const { container } = render(
       <CanvasLayersPanel

@@ -32,6 +32,7 @@ const TRACKING_IP_HASH_SALT = readEnv("PUBLIC_TRACKING_IP_HASH_SALT", [
 const TRACKING_RPC_SCHEMA =
   readEnv("PUBLIC_TRACKING_RPC_SCHEMA", ["EDGE_RPC_SCHEMA", "API_RPC_SCHEMA"]) || "api";
 const LOCAL_TRACKING_TURNSTILE_SECRET_KEY = "EXAMPLE_PASSWORD";
+const LEGACY_LOCAL_TRACKING_TURNSTILE_SECRET_KEY = "local-dev-turnstile-secret";
 const LOCAL_TRACKING_IP_HASH_SALT = "local-public-tracking";
 
 const asString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
@@ -255,6 +256,9 @@ const verifyTurnstile = async (
     TRACKING_TURNSTILE_SECRET_KEY || (localContext ? LOCAL_TRACKING_TURNSTILE_SECRET_KEY : "");
   if (!secret) {
     return { success: false, hostname: "", errorCodes: ["missing_turnstile_secret"], usedTestingKey: false };
+  }
+  if (secret === LEGACY_LOCAL_TRACKING_TURNSTILE_SECRET_KEY && token === "EXAMPLE_PASSWORD") {
+    return { success: true, hostname: "", errorCodes: null, usedTestingKey: true };
   }
 
   const body = new URLSearchParams();

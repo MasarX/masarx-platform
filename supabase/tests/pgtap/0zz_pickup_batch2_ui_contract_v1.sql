@@ -79,58 +79,58 @@ SELECT ok(
 SELECT has_function(
   'api',
   'pickup_requests_list_v1',
-  ARRAY['uuid', 'uuid', 'text', 'integer'],
-  'api.pickup_requests_list_v1 exists'
+  ARRAY['uuid', 'uuid', 'text', 'integer', 'integer'],
+  'api.pickup_requests_list_v1 exists with offset pagination'
 );
 SELECT ok(
-  has_function_privilege('authenticated', 'api.pickup_requests_list_v1(uuid, uuid, text, integer)', 'EXECUTE'),
-  'authenticated can EXECUTE api.pickup_requests_list_v1(uuid, uuid, text, integer)'
+  has_function_privilege('authenticated', 'api.pickup_requests_list_v1(uuid, uuid, text, integer, integer)', 'EXECUTE'),
+  'authenticated can EXECUTE api.pickup_requests_list_v1(uuid, uuid, text, integer, integer)'
 );
 SELECT ok(
-  has_function_privilege('service_role', 'api.pickup_requests_list_v1(uuid, uuid, text, integer)', 'EXECUTE'),
-  'service_role can EXECUTE api.pickup_requests_list_v1(uuid, uuid, text, integer)'
+  has_function_privilege('service_role', 'api.pickup_requests_list_v1(uuid, uuid, text, integer, integer)', 'EXECUTE'),
+  'service_role can EXECUTE api.pickup_requests_list_v1(uuid, uuid, text, integer, integer)'
 );
 SELECT ok(
-  NOT has_function_privilege('anon', 'api.pickup_requests_list_v1(uuid, uuid, text, integer)', 'EXECUTE'),
-  'anon cannot EXECUTE api.pickup_requests_list_v1(uuid, uuid, text, integer)'
+  NOT has_function_privilege('anon', 'api.pickup_requests_list_v1(uuid, uuid, text, integer, integer)', 'EXECUTE'),
+  'anon cannot EXECUTE api.pickup_requests_list_v1(uuid, uuid, text, integer, integer)'
 );
 
 SELECT has_function(
   'api',
   'pickup_waves_list_v1',
-  ARRAY['uuid[]', 'text', 'integer'],
-  'api.pickup_waves_list_v1 exists'
+  ARRAY['uuid[]', 'text', 'integer', 'integer'],
+  'api.pickup_waves_list_v1 exists with offset pagination'
 );
 SELECT ok(
-  has_function_privilege('authenticated', 'api.pickup_waves_list_v1(uuid[], text, integer)', 'EXECUTE'),
-  'authenticated can EXECUTE api.pickup_waves_list_v1(uuid[], text, integer)'
+  has_function_privilege('authenticated', 'api.pickup_waves_list_v1(uuid[], text, integer, integer)', 'EXECUTE'),
+  'authenticated can EXECUTE api.pickup_waves_list_v1(uuid[], text, integer, integer)'
 );
 SELECT ok(
-  has_function_privilege('service_role', 'api.pickup_waves_list_v1(uuid[], text, integer)', 'EXECUTE'),
-  'service_role can EXECUTE api.pickup_waves_list_v1(uuid[], text, integer)'
+  has_function_privilege('service_role', 'api.pickup_waves_list_v1(uuid[], text, integer, integer)', 'EXECUTE'),
+  'service_role can EXECUTE api.pickup_waves_list_v1(uuid[], text, integer, integer)'
 );
 SELECT ok(
-  NOT has_function_privilege('anon', 'api.pickup_waves_list_v1(uuid[], text, integer)', 'EXECUTE'),
-  'anon cannot EXECUTE api.pickup_waves_list_v1(uuid[], text, integer)'
+  NOT has_function_privilege('anon', 'api.pickup_waves_list_v1(uuid[], text, integer, integer)', 'EXECUTE'),
+  'anon cannot EXECUTE api.pickup_waves_list_v1(uuid[], text, integer, integer)'
 );
 
 SELECT has_function(
   'api',
   'pickup_failures_list_v1',
-  ARRAY['uuid[]', 'uuid', 'uuid', 'text', 'integer'],
-  'api.pickup_failures_list_v1 exists'
+  ARRAY['uuid[]', 'uuid', 'uuid', 'text', 'integer', 'integer'],
+  'api.pickup_failures_list_v1 exists with offset pagination'
 );
 SELECT ok(
-  has_function_privilege('authenticated', 'api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer)', 'EXECUTE'),
-  'authenticated can EXECUTE api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer)'
+  has_function_privilege('authenticated', 'api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer, integer)', 'EXECUTE'),
+  'authenticated can EXECUTE api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer, integer)'
 );
 SELECT ok(
-  has_function_privilege('service_role', 'api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer)', 'EXECUTE'),
-  'service_role can EXECUTE api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer)'
+  has_function_privilege('service_role', 'api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer, integer)', 'EXECUTE'),
+  'service_role can EXECUTE api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer, integer)'
 );
 SELECT ok(
-  NOT has_function_privilege('anon', 'api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer)', 'EXECUTE'),
-  'anon cannot EXECUTE api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer)'
+  NOT has_function_privilege('anon', 'api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer, integer)', 'EXECUTE'),
+  'anon cannot EXECUTE api.pickup_failures_list_v1(uuid[], uuid, uuid, text, integer, integer)'
 );
 
 SELECT ok(

@@ -1,8 +1,11 @@
 const path = require("path");
+const { spawnSync } = require("child_process");
 const { pathToFileURL } = require("url");
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
 const sharedModulePath = path.join(repoRoot, "supabase", "functions", "_shared", "mod.mjs");
+const apiGatewaySharedModulePath = path.join(repoRoot, "supabase", "functions", "api-gateway", "_shared", "mod.mjs");
+const webhookReceiverSharedModulePath = path.join(repoRoot, "supabase", "functions", "webhook-receiver", "_shared", "mod.mjs");
 
 function fakeJwt(role = "service_role") {
   const encode = (value) => Buffer.from(value).toString("base64url");
@@ -15,6 +18,13 @@ describe("edge rpc auth fallback", () => {
   let originalFetch;
 
   beforeAll(async () => {
+    const sync = spawnSync(process.execPath, [path.join(repoRoot, "scripts", "edge", "sync-shared.js")], {
+      cwd: repoRoot,
+      stdio: "ignore",
+    });
+    if (sync.status !== 0) {
+      throw new Error("edge shared sync failed before rpc auth fallback tests");
+    }
     originalDeno = global.Deno;
     global.Deno = {
       env: {
@@ -98,8 +108,46 @@ describe("edge rpc auth fallback", () => {
 
     const firstHeaders = new Headers(fetchMock.mock.calls[0][1].headers);
     const secondHeaders = new Headers(fetchMock.mock.calls[1][1].headers);
+    expect(firstHeaders.get("accept-profile")).toBe("api");
+    expect(firstHeaders.get("content-profile")).toBe("api");
     expect(firstHeaders.get("authorization")).toMatch(/^Bearer /);
+    expect(secondHeaders.get("accept-profile")).toBe("api");
+    expect(secondHeaders.get("content-profile")).toBe("api");
     expect(secondHeaders.get("authorization")).toBeNull();
     expect(secondHeaders.get("apikey")).toBe("sb_secret_test_value");
+  });
+
+  test("function-local api gateway and webhook receiver helper copies pin api schema", async () => {
+    const attempts = shared.buildRpcAuthAttempts({
+      dbJwt: fakeJwt("edge_webhook_role"),
+      secretKey: "sb_secret_test_value",
+    });
+
+    for (const modulePath of [apiGatewaySharedModulePath, webhookReceiverSharedModulePath]) {
+      originalFetch = global.fetch;
+      const fetchMock = jest.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          statusText: "OK",
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      global.fetch = fetchMock;
+
+      const localShared = await import(`${pathToFileURL(modulePath).href}?t=${Date.now()}-${Math.random()}`);
+      const result = await localShared.invokeSupabaseRpcWithAuthFallback({
+        url: "https://example.test/rest/v1/rpc/workflow_intake_webhook",
+        body: { p_token: "token-123" },
+        authAttempts: attempts,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const headers = new Headers(fetchMock.mock.calls[0][1].headers);
+      expect(headers.get("accept-profile")).toBe("api");
+      expect(headers.get("content-profile")).toBe("api");
+      global.fetch = originalFetch;
+      originalFetch = undefined;
+    }
   });
 });

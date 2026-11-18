@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(58);
+SELECT plan(57);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_scan_events_warehouse_links_v1()
 RETURNS SETOF TEXT
@@ -28,9 +28,15 @@ DECLARE
 
   v_handling_unit UUID := gen_random_uuid();
   v_hu_code TEXT := ('HU-' || left(v_handling_unit::text, 8));
+  v_transfer_handling_unit UUID := gen_random_uuid();
+  v_transfer_hu_code TEXT := ('HU-TR-' || left(v_transfer_handling_unit::text, 8));
+  v_bulk_handling_unit UUID := gen_random_uuid();
+  v_bulk_hu_code TEXT := ('HU-BULK-' || left(v_bulk_handling_unit::text, 8));
 
   v_transfer UUID := gen_random_uuid();
   v_transfer_code TEXT := ('TR-' || left(v_transfer::text, 8));
+  v_bulk_transfer UUID := gen_random_uuid();
+  v_bulk_transfer_code TEXT := ('TR-BULK-' || left(v_bulk_transfer::text, 8));
 
   v_ops_session RECORD;
 
@@ -156,10 +162,15 @@ BEGIN
   VALUES (v_vehicle, v_org, 'active', TRUE);
 
   INSERT INTO public.handling_units (id, organization_id, branch_id, unit_type, status, code)
-  VALUES (v_handling_unit, v_org, v_branch_from, 'bag', 'open', v_hu_code);
+  VALUES
+    (v_handling_unit, v_org, v_branch_from, 'bag', 'open', v_hu_code),
+    (v_transfer_handling_unit, v_org, v_branch_from, 'bag', 'open', v_transfer_hu_code),
+    (v_bulk_handling_unit, v_org, v_branch_from, 'bag', 'open', v_bulk_hu_code);
 
   INSERT INTO public.warehouse_transfers (id, organization_id, from_branch_id, to_branch_id, status, transfer_code, vehicle_id)
-  VALUES (v_transfer, v_org, v_branch_from, v_branch_to, 'draft', v_transfer_code, v_vehicle);
+  VALUES
+    (v_transfer, v_org, v_branch_from, v_branch_to, 'draft', v_transfer_code, v_vehicle),
+    (v_bulk_transfer, v_org, v_branch_from, v_branch_to, 'draft', v_bulk_transfer_code, v_vehicle);
 
   INSERT INTO public.shipments (id, organization_id, client_id, sender_id, service_type, tracking_number, status)
   VALUES (v_shipment, v_org, v_client, v_sender, 'delivery', v_tracking, 'created');
@@ -208,7 +219,8 @@ BEGIN
 
   RETURN NEXT ok(v_ops_session.created IS TRUE, 'open_ops_session_v1 created=true');
 
-  -- Warehouse checkpoint scan with explicit handling unit + transfer context should persist the links.
+  -- Warehouse transfer checkpoint scan with explicit handling unit + transfer context follows
+  -- the transfer-specific linehaul sequence: load -> unload.
   SELECT * INTO v_scan
   FROM public.record_scan_event_v1(
     jsonb_build_object(
@@ -216,9 +228,9 @@ BEGIN
       'device_id', v_device.device_id,
        'scan_type', 'warehouse_checkpoint',
        'barcode', (v_tracking || ':1'),
-       'handling_unit_code', v_hu_code,
+       'handling_unit_code', v_transfer_hu_code,
        'warehouse_transfer_code', v_transfer_code,
-       'checkpoint_key', 'inbound',
+       'checkpoint_key', 'load',
        'captured_at', now()
      )
    )
@@ -246,7 +258,7 @@ BEGIN
 
   RETURN NEXT is(
     (SELECT se.handling_unit_id::text FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan.scan_event_id LIMIT 1),
-    v_handling_unit::text,
+    v_transfer_handling_unit::text,
     'scan_events.handling_unit_id persisted from handling_unit_code'
   );
   RETURN NEXT is(
@@ -261,7 +273,7 @@ BEGIN
   );
   RETURN NEXT is(
     (SELECT se.checkpoint_key::text FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan.scan_event_id LIMIT 1),
-    'inbound',
+    'load',
     'scan_events.checkpoint_key persisted from metadata'
   );
   RETURN NEXT is(
@@ -287,7 +299,7 @@ BEGIN
        'device_id', v_device.device_id,
        'scan_type', 'warehouse_checkpoint',
        'barcode', v_hu_code,
-       'checkpoint_key', 'sort',
+       'checkpoint_key', 'inbound',
        'captured_at', now()
      )
    )
@@ -308,35 +320,18 @@ BEGIN
     'barcode-only warehouse checkpoint scan_type persisted'
   );
 
-  SELECT * INTO v_scan_next
-  FROM public.record_scan_event_v1(
-    jsonb_build_object(
-      'idempotency_key', 'pgtap-wh-scan-sort-1',
-      'device_id', v_device.device_id,
-       'scan_type', 'warehouse_checkpoint',
-       'barcode', v_hu_code,
-       'handling_unit_code', v_hu_code,
-       'warehouse_transfer_code', v_transfer_code,
-       'checkpoint_key', 'load',
-       'captured_at', now()
-     )
-   )
-   LIMIT 1;
-
-  RETURN NEXT ok(v_scan_next.created IS TRUE, 'record_scan_event_v1 load created=true');
-
   RETURN NEXT is(
-    (SELECT se.checkpoint_sequence::int FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan_next.scan_event_id LIMIT 1),
-    3,
-    'warehouse checkpoint load increments sequence to 3'
+    (SELECT se.checkpoint_sequence::int FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan.scan_event_id LIMIT 1),
+    1,
+    'warehouse transfer checkpoint load starts transfer-specific sequence at 1'
   );
   RETURN NEXT is(
-    (SELECT se.warehouse_transfer_id::text FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan_next.scan_event_id LIMIT 1),
+    (SELECT se.warehouse_transfer_id::text FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan.scan_event_id LIMIT 1),
     v_transfer::text,
     'warehouse checkpoint load persists warehouse_transfer_id'
   );
   RETURN NEXT is(
-    (SELECT se.metadata->>'checkpoint_scope' FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan_next.scan_event_id LIMIT 1),
+    (SELECT se.metadata->>'checkpoint_scope' FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan.scan_event_id LIMIT 1),
     'handling_unit',
     'warehouse checkpoint load scope stays handling_unit when a handling unit is present'
   );
@@ -370,8 +365,8 @@ BEGIN
   );
   RETURN NEXT is(
     (SELECT se.checkpoint_sequence::int FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan_arrival.scan_event_id LIMIT 1),
-    4,
-    'warehouse checkpoint unload increments sequence to 4'
+    2,
+    'warehouse transfer checkpoint unload increments transfer-specific sequence to 2'
   );
   RETURN NEXT is(
     (SELECT se.metadata->>'checkpoint_scope' FROM public.scan_events se WHERE se.organization_id = v_org AND se.id = v_scan_arrival.scan_event_id LIMIT 1),
@@ -392,12 +387,12 @@ BEGIN
     format(
       $$ SELECT * FROM public.record_scan_event_v1(jsonb_build_object('idempotency_key','pgtap-wh-scan-backward-1','device_id','%s','scan_type','warehouse_checkpoint','barcode','%s','handling_unit_code','%s','warehouse_transfer_code','%s','checkpoint_key','inbound')) $$,
       v_device.device_id::text,
-      v_hu_code,
-      v_hu_code,
+      v_transfer_hu_code,
+      v_transfer_hu_code,
       v_transfer_code
     ),
     '23514',
-    'record_scan_event_v1 invalid warehouse checkpoint transition: expected next sequence step'
+    'record_scan_event_v1 invalid checkpoint_key for warehouse_checkpoint sequence: inbound'
   );
 
   SELECT * INTO v_approval_task
@@ -538,7 +533,7 @@ BEGIN
       'task_type_key', 'warehouse_scan_supervisor_approval',
       'context', jsonb_build_object('organization_id', v_org),
       'resource_type', 'scan_event',
-      'resource_id', v_scan_next.scan_event_id,
+      'resource_id', v_scan_arrival.scan_event_id,
       'idempotency_key', 'pgtap-wh-scan-approval-wrong-target-1'
     )
   )
@@ -643,23 +638,23 @@ BEGIN
         'bulk_manifest_barcode', 'MANIFEST-BULK-1',
         'scans', jsonb_build_array(
           jsonb_build_object(
-            'idempotency_key', 'pgtap-wh-bulk-1',
-            'device_id', v_device.device_id,
+             'idempotency_key', 'pgtap-wh-bulk-1',
+             'device_id', v_device.device_id,
              'scan_type', 'warehouse_checkpoint',
-             'barcode', v_hu_code,
-             'handling_unit_code', v_hu_code,
-             'warehouse_transfer_code', v_transfer_code,
-             'checkpoint_key', 'unload',
+             'barcode', v_bulk_hu_code,
+             'handling_unit_code', v_bulk_hu_code,
+             'warehouse_transfer_code', v_bulk_transfer_code,
+             'checkpoint_key', 'load',
              'captured_at', now()
            ),
            jsonb_build_object(
              'idempotency_key', 'pgtap-wh-bulk-2',
              'device_id', v_device.device_id,
              'scan_type', 'warehouse_checkpoint',
-             'barcode', v_hu_code,
-             'handling_unit_code', v_hu_code,
-             'warehouse_transfer_code', v_transfer_code,
-             'checkpoint_key', 'return',
+             'barcode', v_bulk_hu_code,
+             'handling_unit_code', v_bulk_hu_code,
+             'warehouse_transfer_code', v_bulk_transfer_code,
+             'checkpoint_key', 'unload',
              'captured_at', now()
            )
         )

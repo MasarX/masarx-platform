@@ -79,35 +79,35 @@
     "console-v2": {
       "resource_class": "console-v2",
       "profile": "console",
-      "app_path": "apps/console",
+      "app_path": "apps/console-v2",
       "dependency_profiles": [
         "console-v2"
       ],
       "required_paths": [
-        "apps/console/package.json",
-        "apps/console/app",
-        "apps/console/next.config.js"
+        "apps/console-v2/package.json",
+        "apps/console-v2/index.html",
+        "apps/console-v2/src",
+        "apps/console-v2/vite.config.ts"
       ],
       "required_env": [
         "CONSOLE_PORT",
-        "NEXT_PUBLIC_SUPABASE_URL",
-        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-        "SUPABASE_INTERNAL_URL",
-        "NEXT_PUBLIC_USE_SEED"
+        "VITE_SUPABASE_URL",
+        "VITE_SUPABASE_ANON_KEY",
+        "VITE_USE_SEED"
       ],
       "forbidden_env_values": [
         {
-          "key": "NEXT_PUBLIC_USE_SEED",
+          "key": "VITE_USE_SEED",
           "pattern": "^(?!false$).+"
         }
       ],
       "port_env": "CONSOLE_PORT",
       "base_url_env": "CONSOLE_BASE_URL",
-      "command": "cd apps/console && npm exec -- next dev -H 0.0.0.0 -p ${port}",
+      "command": "npm --prefix apps/console-v2 run dev -- --host 0.0.0.0 --port ${port} --strictPort",
       "health_path": "/",
       "cache_mounts": [
         {
-          "target": "/workspace/apps/console/.next"
+          "target": "/workspace/apps/console-v2/node_modules/.vite"
         }
       ]
     },
@@ -235,7 +235,7 @@
       "required_paths": [
         "scripts/ops/workspace/docker-edge-functions-watch.js",
         "supabase/functions/metrics-echo-test/index.ts",
-        "supabase/functions/metrics-echo-test/_shared/mod.mjs"
+        "supabase/functions/_shared/mod.mjs"
       ],
       "required_env": [
         "SUPABASE_FUNCTIONS_INTERNAL_URL",
@@ -257,14 +257,20 @@
       "required_paths": [
         "apps/fieldops/package.json",
         "apps/fieldops/index.ts",
+        "apps/fieldops/src/mobile-v2-shell.tsx",
+        "apps/fieldops/src/mobile-v2-navigation.ts",
         "scripts/ops/mobile/start-fieldops-metro.js"
       ],
       "required_env": [
         "FIELDOPS_E2E_PORT",
         "FIELDOPS_BASE_URL",
         "SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
         "VITE_SUPABASE_URL",
         "VITE_SUPABASE_ANON_KEY",
+        "EXPO_PUBLIC_SUPABASE_URL",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY",
         "VITE_USE_SEED"
       ],
       "forbidden_env_values": [

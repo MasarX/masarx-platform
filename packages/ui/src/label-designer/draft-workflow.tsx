@@ -10,13 +10,13 @@ import { Select } from "../select";
 import { Textarea } from "../textarea";
 import type { AssetItem, DraftRow } from "./types";
 import type { TemplateBlock, PageConfig } from "./canvas/canvas-types";
-import { isDraftStatus, shortId } from "./utils";
+import { shortId } from "./utils";
 import { useUndoRedo } from "./use-undo-redo";
 
 const t = createUiTranslator("ui.labelDesigner.draft");
 
 const LazyLabelCanvas = React.lazy(() =>
-  import("./canvas/label-canvas").then((mod) => ({ default: mod.LabelCanvas })),
+  import("./label-canvas").then((mod) => ({ default: mod.LabelCanvas })),
 );
 const LazyBlockPropertyPanel = React.lazy(() =>
   import("./block-property-panel").then((mod) => ({ default: mod.BlockPropertyPanel })),
@@ -35,6 +35,11 @@ type FieldCatalogItem = {
   type?: string;
 };
 
+type LabelTypeOption = string | {
+  value: string;
+  label?: string | null;
+};
+
 type DraftWorkflowProps = {
   prefix: string;
   canWrite: boolean;
@@ -46,7 +51,7 @@ type DraftWorkflowProps = {
   selectedDraftId: string;
   draftName: string;
   labelType: string;
-  labelTypeOptions: string[];
+  labelTypeOptions: LabelTypeOption[];
   draftEditor: string;
   draftEditorError: string | null;
   fieldCatalogJson?: string;
@@ -62,18 +67,32 @@ type DraftWorkflowProps = {
   onPublishDraft: () => void;
 };
 
-function parseBlocks(json: string): { blocks: TemplateBlock[]; page: Partial<PageConfig> } {
+function templateKeyFor(parsed: Record<string, unknown>, preferredLabelType?: string | null): string | null {
+  const templates = parsed.templates;
+  if (!templates || typeof templates !== "object" || Array.isArray(templates)) return null;
+  const templateMap = templates as Record<string, unknown>;
+  const preferred = String(preferredLabelType || "").trim();
+  if (preferred && templateMap[preferred] && typeof templateMap[preferred] === "object" && !Array.isArray(templateMap[preferred])) {
+    return preferred;
+  }
+  return Object.keys(templateMap).find((key) => {
+    const value = templateMap[key];
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }) || null;
+}
+
+function parseBlocks(json: string, preferredLabelType?: string | null): { blocks: TemplateBlock[]; page: Partial<PageConfig> } {
   try {
     const parsed = JSON.parse(json);
     if (!parsed || typeof parsed !== "object") return { blocks: [], page: {} };
     if (Array.isArray(parsed.blocks)) {
       return { blocks: parsed.blocks, page: parsed.page || {} };
     }
-    if (parsed.templates && typeof parsed.templates === "object") {
-      const keys = Object.keys(parsed.templates);
-      const first = keys[0];
-      if (first && parsed.templates[first]) {
-        const template = parsed.templates[first];
+    const activeKey = templateKeyFor(parsed, preferredLabelType);
+    if (activeKey && parsed.templates && typeof parsed.templates === "object") {
+      const templates = parsed.templates as Record<string, unknown>;
+      if (templates[activeKey]) {
+        const template = templates[activeKey] as Record<string, unknown>;
         return {
           blocks: Array.isArray(template.blocks) ? template.blocks : [],
           page: template.page || {},
@@ -86,23 +105,23 @@ function parseBlocks(json: string): { blocks: TemplateBlock[]; page: Partial<Pag
   }
 }
 
-function updateBlocksInJson(json: string, newBlocks: TemplateBlock[]): string {
+function updateBlocksInJson(json: string, newBlocks: TemplateBlock[], preferredLabelType?: string | null): string {
   try {
     const parsed = JSON.parse(json);
     if (!parsed || typeof parsed !== "object") return json;
     if (Array.isArray(parsed.blocks)) {
       return JSON.stringify({ ...parsed, blocks: newBlocks }, null, 2);
     }
-    if (parsed.templates && typeof parsed.templates === "object") {
-      const keys = Object.keys(parsed.templates);
-      const first = keys[0];
-      if (first && parsed.templates[first]) {
+    const activeKey = templateKeyFor(parsed, preferredLabelType);
+    if (activeKey && parsed.templates && typeof parsed.templates === "object") {
+      const templates = parsed.templates as Record<string, Record<string, unknown>>;
+      if (templates[activeKey]) {
         const updated = {
           ...parsed,
           templates: {
-            ...parsed.templates,
-            [first]: {
-              ...parsed.templates[first],
+            ...templates,
+            [activeKey]: {
+              ...templates[activeKey],
               blocks: newBlocks,
             },
           },
@@ -116,6 +135,81 @@ function updateBlocksInJson(json: string, newBlocks: TemplateBlock[]): string {
   }
 }
 
+const COLLIDABLE_BLOCK_TYPES = new Set(["text", "barcode", "image"]);
+
+function numberOr(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function blockHeight(block: TemplateBlock): number {
+  if (typeof block.height === "number" && Number.isFinite(block.height) && block.height > 0) {
+    return block.height;
+  }
+  if (block.type === "text") return numberOr(block.font_size, 12) + 4;
+  if (block.type === "barcode") return 60;
+  if (block.type === "image") return 40;
+  return 20;
+}
+
+function blockWidth(block: TemplateBlock): number {
+  if (typeof block.width === "number" && Number.isFinite(block.width) && block.width > 0) {
+    return block.width;
+  }
+  if (block.type === "barcode") return 180;
+  if (block.type === "image") return 80;
+  return 150;
+}
+
+function normalizeBarcodeType(value: string | undefined): string {
+  const normalized = (value || "CODE128").trim().toLowerCase();
+  if (normalized === "qr") return "QR";
+  if (normalized === "ean13" || normalized === "ean-13") return "EAN13";
+  return "CODE128";
+}
+
+function rendererSafeBlock(block: TemplateBlock): TemplateBlock {
+  if (block.type === "text") {
+    return {
+      ...block,
+      width: blockWidth(block),
+      height: blockHeight(block),
+      font_size: numberOr(block.font_size, 12),
+      fallback: block.fallback || block.value_path || "Text",
+    };
+  }
+  if (block.type === "barcode") {
+    const barcodeType = normalizeBarcodeType(block.barcode_type);
+    return {
+      ...block,
+      width: blockWidth(block),
+      height: blockHeight(block),
+      barcode_type: barcodeType,
+      value_path: block.value_path || "barcode_value",
+      fallback: block.fallback || (barcodeType === "EAN13" ? "590123412345" : "TRACKING"),
+      human_readable: block.human_readable ?? false,
+    };
+  }
+  if (block.type === "image") {
+    return { ...block, width: blockWidth(block), height: blockHeight(block) };
+  }
+  return block;
+}
+
+function placeAddedBlock(block: TemplateBlock, existingBlocks: TemplateBlock[], page: Partial<PageConfig>): TemplateBlock {
+  const next = rendererSafeBlock(block);
+  if (!COLLIDABLE_BLOCK_TYPES.has(next.type)) return next;
+
+  const gap = 8;
+  const pageHeight = numberOr(page.height_inch, 6) * 72;
+  const collidableBottoms = existingBlocks
+    .filter((item) => COLLIDABLE_BLOCK_TYPES.has(item.type))
+    .map((item) => numberOr(item.y, 10) + blockHeight(item));
+  const nextY = collidableBottoms.length > 0 ? Math.max(...collidableBottoms) + gap : numberOr(next.y, 10);
+  const safeY = Math.min(Math.max(nextY, 10), Math.max(10, pageHeight - blockHeight(next) - gap));
+  return { ...next, x: numberOr(next.x, 10), y: safeY };
+}
+
 function parseFieldCatalog(json: string): FieldCatalogItem[] {
   try {
     const parsed = JSON.parse(json);
@@ -125,13 +219,29 @@ function parseFieldCatalog(json: string): FieldCatalogItem[] {
       .map((item: unknown) => {
         if (!item || typeof item !== "object") return null;
         const record = item as Record<string, unknown>;
-        const path = typeof record.path === "string" ? record.path : typeof record.key === "string" ? record.key : "";
+        const path = typeof record.path === "string"
+          ? record.path
+          : typeof record.value_path === "string"
+            ? record.value_path
+            : typeof record.key === "string"
+              ? record.key
+              : "";
         if (!path) return null;
         return {
           path,
-          label: typeof record.label === "string" ? record.label : undefined,
-          label_ar: typeof record.label_ar === "string" ? record.label_ar : undefined,
-          type: typeof record.type === "string" ? record.type : undefined,
+          label: typeof record.label === "string"
+            ? record.label
+            : typeof record.label_en === "string"
+              ? record.label_en
+              : undefined,
+          label_ar: typeof record.label_ar === "string"
+            ? record.label_ar
+            : undefined,
+          type: typeof record.type === "string"
+            ? record.type
+            : typeof record.data_type === "string"
+              ? record.data_type
+              : undefined,
         };
       })
       .filter(Boolean) as FieldCatalogItem[];
@@ -168,18 +278,30 @@ export function DraftWorkflow({
   const [editorMode, setEditorMode] = React.useState<"visual" | "code">("visual");
   const [selectedBlockIndex, setSelectedBlockIndex] = React.useState<number | null>(null);
 
-  const { blocks, page } = React.useMemo(() => parseBlocks(draftEditor), [draftEditor]);
+  const { blocks, page } = React.useMemo(() => parseBlocks(draftEditor, labelType), [draftEditor, labelType]);
   const fieldCatalog = React.useMemo(() => parseFieldCatalog(fieldCatalogJson || "{}"), [fieldCatalogJson]);
+  const normalizedLabelTypeOptions = React.useMemo(
+    () => labelTypeOptions
+      .map((option) => {
+        if (typeof option === "string") return { value: option, label: option };
+        return {
+          value: String(option.value || ""),
+          label: String(option.label || option.value || ""),
+        };
+      })
+      .filter((option) => option.value),
+    [labelTypeOptions],
+  );
 
   // Undo/Redo integration
   const { undo, redo, canUndo, canRedo } = useUndoRedo(draftEditor, onDraftEditorChange);
 
   const handleBlocksChange = React.useCallback(
     (newBlocks: TemplateBlock[]) => {
-      const updated = updateBlocksInJson(draftEditor, newBlocks);
+      const updated = updateBlocksInJson(draftEditor, newBlocks, labelType);
       onDraftEditorChange(updated);
     },
-    [draftEditor, onDraftEditorChange],
+    [draftEditor, labelType, onDraftEditorChange],
   );
 
   const handleBlockUpdate = React.useCallback(
@@ -192,10 +314,11 @@ export function DraftWorkflow({
 
   const handleAddBlock = React.useCallback(
     (block: TemplateBlock) => {
-      handleBlocksChange([...blocks, block]);
+      const placedBlock = placeAddedBlock(block, blocks, page);
+      handleBlocksChange([...blocks, placedBlock]);
       setSelectedBlockIndex(blocks.length);
     },
-    [blocks, handleBlocksChange],
+    [blocks, handleBlocksChange, page],
   );
 
   // Multi-select support: derive selected indices from selectedBlockIndex
@@ -227,8 +350,7 @@ export function DraftWorkflow({
             disabled={
               !canWrite ||
               isBusy ||
-              !selectedDraft ||
-              !isDraftStatus(selectedDraft.status)
+              !selectedScope
             }
             data-testid={`${prefix}-save-draft`}
           >
@@ -252,12 +374,12 @@ export function DraftWorkflow({
             disabled={
               !canWrite ||
               isBusy ||
-              !selectedDraft ||
-              !isDraftStatus(selectedDraft.status)
+              !selectedScope ||
+              (!selectedDraft && !draftEditor.trim())
             }
             data-testid={`${prefix}-publish-draft`}
           >
-            {busyAction === "publish-draft" ? t("publishing") : t("publish")}
+            {busyAction === "publish-draft" ? t("publishing") : "Publish active design"}
           </Button>
         </div>
       }
@@ -300,8 +422,11 @@ export function DraftWorkflow({
             <Input
               id={`${prefix}-draft-name`}
               value={draftName}
-              onChange={(event) => onDraftNameChange(event.target.value)}
+              onChange={(event) => {
+                if (canWrite && !isBusy) onDraftNameChange(event.target.value);
+              }}
               placeholder={t("draftNamePlaceholder")}
+              disabled={!canWrite || isBusy}
               data-testid={`${prefix}-draft-name`}
             />
           </div>
@@ -316,11 +441,12 @@ export function DraftWorkflow({
               id={`${prefix}-label-type`}
               value={labelType}
               onChange={(event) => onLabelTypeChange(event.target.value)}
+              disabled={!canWrite || isBusy || normalizedLabelTypeOptions.length === 0}
               data-testid={`${prefix}-label-type`}
             >
-              {labelTypeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
+              {normalizedLabelTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </Select>
@@ -392,12 +518,14 @@ export function DraftWorkflow({
                     fieldCatalog={fieldCatalog}
                     assets={assets || []}
                     testIdPrefix={`${prefix}-catalog`}
+                    readOnly={!canWrite}
                     onAddBlock={handleAddBlock}
                   />
                   {/* Layers panel */}
                   <LazyCanvasLayersPanel
                     blocks={blocks}
                     selectedIndices={selectedIndices}
+                    readOnly={!canWrite}
                     onSelect={(i) => setSelectedBlockIndex(i)}
                     onBlocksChange={handleBlocksChange}
                   />
@@ -406,6 +534,7 @@ export function DraftWorkflow({
                       block={blocks[selectedBlockIndex]}
                       blockIndex={selectedBlockIndex}
                       testIdPrefix={`${prefix}-block-props`}
+                      readOnly={!canWrite}
                       onUpdate={handleBlockUpdate}
                     />
                   ) : null}
@@ -419,14 +548,17 @@ export function DraftWorkflow({
                 className="text-xs font-medium text-ui-muted"
                 htmlFor={`${prefix}-draft-json`}
               >
-                {t("draftJson")}
+                Design JSON
               </label>
               <Textarea
                 id={`${prefix}-draft-json`}
                 value={draftEditor}
-                onChange={(event) => onDraftEditorChange(event.target.value)}
+                onChange={(event) => {
+                  if (canWrite && !isBusy) onDraftEditorChange(event.target.value);
+                }}
                 rows={22}
                 className="font-mono text-xs"
+                disabled={!canWrite || isBusy}
                 data-testid={`${prefix}-draft-json`}
               />
             </div>

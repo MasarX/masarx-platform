@@ -254,14 +254,14 @@ export async function runPrintLabelsAction(params: {
       ? "Printing label"
       : `Printing ${expectedSelectionCount} labels`
   );
-  await expect(progressWidget).not.toContainText("Workflow run:");
+  await expect(progressWidget).not.toContainText("Activity reference:");
 
-  const technicalDetailsButton = progressWidget.getByRole("button", {
-    name: "Technical details",
+  const supportDetailsButton = progressWidget.getByRole("button", {
+    name: "Support details",
   });
-  await expect(technicalDetailsButton).toBeVisible();
-  await technicalDetailsButton.click({ timeout: 20_000 });
-  await expect(progressWidget).toContainText(`Workflow run: ${workflowRunId}`);
+  await expect(supportDetailsButton).toBeVisible();
+  await supportDetailsButton.click({ timeout: 20_000 });
+  await expect(progressWidget).toContainText(`Activity reference: ${workflowRunId}`);
 
   const hideButton = progressWidget.getByRole("button", { name: "Hide" });
   const minimizedWidget = page.locator(

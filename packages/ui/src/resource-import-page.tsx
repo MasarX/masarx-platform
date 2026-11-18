@@ -39,6 +39,7 @@ import { PageHeader } from "./page-header";
 import { Section } from "./section";
 import { Select } from "./select";
 import { TABULAR_FILE_ACCEPT, parseTabularFile, type ParsedTabularFile } from "./tabular-file";
+import { deriveResourceImportHandoffRows, isShipmentImportHandoffResource } from "./resource-import-handoff";
 import { buildHref } from "./url";
 import { useToast } from "./use-toast";
 import type { ComboboxOption } from "./use-combobox";
@@ -59,6 +60,7 @@ type ResourceImportPageProps = {
   testIdPrefix?: string | null;
   presentation?: "page" | "drawer";
   onReportReady?: (report: ResourceImportRun["report"], run: ResourceImportRun | null) => void;
+  onOpenImportedRecord?: (resource: string, id: string) => void;
 };
 
 type ImportStep = "upload" | "mapping" | "review" | "running" | "report";
@@ -98,6 +100,20 @@ const IMPORT_SCOPE_ORDER: ScopeContextKey[] = ["tenant", "client", "sender"];
 function stringifyImportValue(value: unknown) {
   if (value == null) return "";
   return String(value);
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function resolveRunCancellationReason(run: ResourceImportRun | null | undefined) {
+  const summary = recordValue(run?.summary);
+  const cancellation = recordValue(summary.cancellation);
+  const reason = stringifyImportValue(
+    cancellation.reason ?? summary.cancel_reason ?? summary.cancellation_reason,
+  ).trim();
+  return reason || null;
 }
 
 function buildImportRowOverridesPayload(rowOverrides: RowOverrideMap) {
@@ -530,7 +546,9 @@ function deriveStep(params: {
 }) : ImportStep {
   if (params.reportReady) return "report";
   const status = params.run?.status?.trim().toLowerCase();
-  if (status === "queued" || status === "processing") return "running";
+  if (status === "queued" || status === "processing" || status === "canceled" || status === "cancelled" || status === "failed") {
+    return "running";
+  }
   if (params.dryRun) {
     const unresolved = params.dryRun.unresolved_targets?.length ?? 0;
     return unresolved > 0 ? "mapping" : "review";
@@ -573,9 +591,86 @@ function resolveRunStatusSummary(status: string | null | undefined) {
     return "The import failed. Review the run details and final report to see which rows were written and which rows need correction.";
   }
   if (normalized === "canceled" || normalized === "cancelled") {
-    return "The import was canceled before completion. You can reopen the staged run and retry after adjusting the mapping or source file.";
+    return "The import was canceled before completion. Prepare a corrected file run when you are ready to import again.";
   }
   return "The run is queued and waiting for a background worker to pick it up. Keep this drawer open and it will refresh automatically.";
+}
+
+function ImportedRecordHandoffPanel({
+  appBasePath,
+  rows,
+  onOpenImportedRecord,
+}: {
+  appBasePath: string;
+  rows: ReturnType<typeof deriveResourceImportHandoffRows>;
+  onOpenImportedRecord?: (resource: string, id: string) => void;
+}) {
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4" data-testid="resource-import-imported-records">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-ui-ink">Imported records</div>
+          <p className="mt-1 text-xs text-ui-muted">
+            These imported records are ready. Open them from here without refreshing the page.
+          </p>
+        </div>
+        <Badge tone="success">{rows.length} confirmed</Badge>
+      </div>
+      <div className="mt-3 overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="text-xs uppercase tracking-wide text-ui-muted">
+            <tr>
+              <th className="px-2 py-2">Record</th>
+              <th className="px-2 py-2">Resource</th>
+              <th className="px-2 py-2">ID</th>
+              <th className="px-2 py-2">Row</th>
+              <th className="px-2 py-2">Status</th>
+              <th className="px-2 py-2">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const canOpenInline = Boolean(onOpenImportedRecord) && isShipmentImportHandoffResource(row.resource);
+              return (
+                <tr key={row.key} className="border-t border-ui-border/40">
+                  <td className="px-2 py-2 text-ui-ink">{row.label}</td>
+                  <td className="px-2 py-2 font-mono text-xs text-ui-muted">{row.resource}</td>
+                  <td className="px-2 py-2 font-mono text-xs text-ui-ink">{row.id}</td>
+                  <td className="px-2 py-2 font-mono text-xs text-ui-muted">{row.rowNumber}</td>
+                  <td className="px-2 py-2 text-ui-muted">{row.status}</td>
+                  <td className="px-2 py-2">
+                    {canOpenInline ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onOpenImportedRecord?.(row.resource, row.id)}
+                        aria-label={`Open imported ${row.label.toLowerCase()} ${row.id}`}
+                      >
+                        Open in context
+                      </Button>
+                    ) : (
+                      <Button asChild type="button" size="sm" variant="ghost">
+                        <a
+                          href={buildHref(`${appBasePath}/resources/${encodeURIComponent(row.resource)}`, {
+                            id: row.id,
+                          })}
+                        >
+                          Open record
+                        </a>
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 export function ResourceImportPage({
@@ -587,6 +682,7 @@ export function ResourceImportPage({
   testIdPrefix,
   presentation = "page",
   onReportReady,
+  onOpenImportedRecord,
 }: ResourceImportPageProps) {
   const ui = React.useMemo(() => createUiClient(), []);
   const searchParams = useSearchParams();
@@ -643,6 +739,8 @@ export function ResourceImportPage({
   const [run, setRun] = React.useState<ResourceImportRun | null>(null);
   const [report, setReport] = React.useState<ResourceImportRun["report"] | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [cancelReason, setCancelReason] = React.useState("");
+  const [cancelReasonOpen, setCancelReasonOpen] = React.useState(false);
   const [saveProfileMode, setSaveProfileMode] = React.useState<"none" | "update" | "new">(
     requestedProfileName ? "new" : "none",
   );
@@ -652,6 +750,7 @@ export function ResourceImportPage({
   const draftRevisionRef = React.useRef(0);
   const latestPrepareRequestRef = React.useRef(0);
   const effectiveResourceKey = resourceKey.trim() || requestedResourceKey;
+  const importedRecordHandoffRows = React.useMemo(() => deriveResourceImportHandoffRows(run), [run]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1549,11 +1648,22 @@ export function ResourceImportPage({
 
   const handleCancelImport = React.useCallback(async () => {
     if (!run?.id) return;
+    const reason = cancelReason.trim();
+    if (!reason) {
+      toast({
+        title: "Reason required",
+        description: "Enter the operator reason before cancelling this import run.",
+        tone: "error",
+      });
+      return;
+    }
     setBusy("cancel");
     try {
-      const response = await ui.resourceImports.cancel({ runId: run.id });
+      const response = await ui.resourceImports.cancel({ runId: run.id, reason });
       setRun(response.run ?? null);
       setReport(response.run?.report ?? report ?? null);
+      setCancelReason("");
+      setCancelReasonOpen(false);
       toast({
         title: "Import canceled",
         description: "The import run was canceled and the staged rows remain available for review.",
@@ -1567,7 +1677,7 @@ export function ResourceImportPage({
     } finally {
       setBusy(null);
     }
-  }, [report, run?.id, toast, ui]);
+  }, [cancelReason, report, run?.id, toast, ui]);
 
   const handleRefreshRun = React.useCallback(async () => {
     if (!run?.id) return;
@@ -1816,6 +1926,7 @@ export function ResourceImportPage({
   const normalizedRunStatus = normalizeRunStatus(run?.status);
   const runStatusLabel = humanizeRunStatus(run?.status);
   const runStatusTone = resolveRunStatusTone(run?.status);
+  const runCancellationReason = resolveRunCancellationReason(run);
   const runProcessedCount =
     (run?.created_count ?? 0) +
     (run?.updated_count ?? 0) +
@@ -2820,6 +2931,11 @@ export function ResourceImportPage({
                   <p className="max-w-2xl text-sm text-ui-muted">
                     {resolveRunStatusSummary(run?.status)}
                   </p>
+                  {runCancellationReason ? (
+                    <p className="max-w-2xl text-sm text-ui-muted" data-testid={`${prefix}-cancel-readback`}>
+                      Cancellation reason: {runCancellationReason}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -2834,14 +2950,40 @@ export function ResourceImportPage({
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={() => void handleCancelImport()}
+                    onClick={() => setCancelReasonOpen((value) => !value)}
                     disabled={Boolean(busy) || !run?.id}
                     data-testid={`${prefix}-cancel-import`}
                   >
-                    {busy === "cancel" ? "Canceling..." : "Cancel import"}
+                    Cancel import
                   </Button>
                 </div>
               </div>
+              {cancelReasonOpen ? (
+                <div className="mt-4 rounded-xl border border-ui-border/50 bg-ui-paper/70 p-3" data-testid={`${prefix}-cancel-reason-panel`}>
+                  <label className="text-xs font-medium text-ui-muted" htmlFor={`${prefix}-cancel-reason`}>
+                    Cancellation reason
+                  </label>
+                  <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id={`${prefix}-cancel-reason`}
+                      value={cancelReason}
+                      onChange={(event) => setCancelReason(event.target.value)}
+                      disabled={Boolean(busy)}
+                      placeholder="Why is this import being cancelled?"
+                    />
+                    <Button
+                      type="button"
+                      variant="solid"
+                      className="bg-[rgb(var(--ui-danger))] text-white hover:bg-[rgb(var(--ui-danger))]/90"
+                      onClick={() => void handleCancelImport()}
+                      disabled={Boolean(busy) || !cancelReason.trim()}
+                      data-testid={`${prefix}-confirm-cancel-import`}
+                    >
+                      {busy === "cancel" ? "Canceling..." : "Confirm cancellation"}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-ui-paper/80">
                 <div
                   className="h-full rounded-full bg-[rgb(var(--ui-info))] transition-[width] duration-300"
@@ -2883,6 +3025,13 @@ export function ResourceImportPage({
                 <div className="mt-1 text-lg font-semibold text-ui-ink">{run?.failed_count ?? 0}</div>
               </div>
             </div>
+            {!report ? (
+              <ImportedRecordHandoffPanel
+                appBasePath={appBasePath}
+                rows={importedRecordHandoffRows}
+                onOpenImportedRecord={onOpenImportedRecord}
+              />
+            ) : null}
           </div>
           {Array.isArray(run?.artifacts) && run.artifacts.length > 0 ? (
             <div className="mt-4 rounded-2xl border border-ui-border/50 bg-ui-surface/70 p-4">
@@ -2936,6 +3085,11 @@ export function ResourceImportPage({
                 })}
               </div>
             ) : null}
+            <ImportedRecordHandoffPanel
+              appBasePath={appBasePath}
+              rows={importedRecordHandoffRows}
+              onOpenImportedRecord={onOpenImportedRecord}
+            />
             <OperationReportViewer report={report} result={run ?? dryRun} appBasePath={appBasePath} />
             </Section>
           </div>

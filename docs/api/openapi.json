@@ -2,9 +2,9 @@
   "openapi": "3.1.0",
   "info": {
     "title": "MasarX Delivery Platform Edge API",
-    "version": "contract-6d2b49490535",
+    "version": "contract-2ad16e2458d8",
     "x-versioning-policy": "contract-<sha256(openapi_without_info.version)[:12]>",
-    "description": "Public endpoints for MasarX partners and clients.\n\nProduction base:\n- https://vomhkplympywspxymnstltsw.example.invalid\n\nAsync event intake:\n- POST /v1/webhook\n\nCompatibility ingress (provider mirroring only):\n- /api/... (DB-driven route packs)\n\nLegacy URL-token compatibility:\n- https://vomhkplympywspxymnstltsw.example.invalid/t/<token>/...\n- https://vomhkplympywspxymnstltsw.example.invalid/v1/webhook?token=<token> (migration-only, deprecated)\n\nNote:\n- /v1/webhook is not the synchronous shipment command API. If MasarX exposes partner shipment writes, those use explicit shipment resources/actions while still normalizing into the same workflow engine.",
+    "description": "Public endpoints for MasarX partners and clients.\n\nProduction base:\n- https://vomhkplympywspxymnstltsw.example.invalid\n\nAsync event intake:\n- POST /v1/webhook\n\nCompatibility ingress (provider mirroring only):\n- /api/... (DB-driven route packs)\n\nLegacy URL-token compatibility:\n- https://vomhkplympywspxymnstltsw.example.invalid/t/<token>/...\n- https://vomhkplympywspxymnstltsw.example.invalid/v1/webhook?token=<token> (migration-only, deprecated)\n\nDefaults:\n- Webhook shipment-create events require active sender/client binding, typed mapping, terminal inbox readback, and workflow/shipment lineage.\n- Webhook shipment updates should use typed events such as update.status, update.address, update.driver, update.action, or update.attachment; generic shipment.updated is compatibility-only and must resolve to one typed intent.\n- Webhook cancellation uses shipment.canceled; shipment.cancelled is compatibility spelling only during mapping. Cancellation and reschedule events must resolve to workflow-backed shipment actions before terminal success.\n- API Gateway shipment-create routes default to workflow-engine processing, provider dispatch, canonical shipment readback, and Console-visible request/workflow/shipment lineage.\n\nNote:\n- /v1/webhook is not the synchronous shipment command API. If MasarX exposes partner shipment writes, those use explicit shipment resources/actions while still normalizing into the same workflow engine.",
     "contact": {
       "name": "MasarX Platform Team",
       "email": "llmklsgzrvuhskrplnnrnnio@example.invalid"
@@ -33,11 +33,11 @@
   "tags": [
     {
       "name": "Webhook Intake",
-      "description": "Submit webhook payloads that MasarX processes asynchronously with per-tenant policies. This surface is for inbound events, not synchronous shipment commands."
+      "description": "Submit webhook payloads that MasarX processes asynchronously with per-tenant policies. Shipment creation requires active sender/client source binding, typed mapping, terminal inbox readback, and workflow/shipment lineage. This surface is for inbound events, not synchronous shipment commands."
     },
     {
       "name": "API Gateway",
-      "description": "Provider API mirroring via DB-driven routing (Logestechs V2 compatible endpoints)."
+      "description": "Provider API mirroring via DB-driven routing. Shipment-creating routes default to workflow-engine processing before Console marks request/shipment readback complete."
     }
   ],
   "paths": {
@@ -48,7 +48,7 @@
         ],
         "operationId": "postWebhook",
         "summary": "Primary webhook ingress",
-        "description": "Submit webhook payloads signed with your assigned token. The API validates idempotency and returns either an immediate acknowledgement (200) or an async receipt (202) once the event is queued. Generic `shipment.updated` is compatibility-only: the payload must resolve to one typed update intent or the request is rejected.",
+        "description": "Submit webhook payloads signed with your assigned token. The API validates idempotency and returns either an immediate acknowledgement (200) or an async receipt (202) once the event is queued. Shipment-create events require an active sender/client binding and typed mapping before they can materialize a shipment. Generic `shipment.updated` is compatibility-only: the payload must resolve to one typed update intent or the request is rejected. Cancellation uses `shipment.canceled`; `shipment.cancelled` is accepted only as a compatibility spelling during mapping. Reschedule uses `shipment.rescheduled` and must resolve to the workflow-backed reschedule action.",
         "security": [
           {
             "WebhookBearer": []
@@ -150,22 +150,43 @@
                     ]
                   }
                 },
-                "shipmentCancelled": {
-                  "summary": "Shipment cancelled",
+                "shipmentCanceled": {
+                  "summary": "Shipment canceled",
                   "value": {
                     "event": {
                       "id": "evt_1a2b3c4d",
-                      "type": "shipment.cancelled",
+                      "type": "shipment.canceled",
                       "occurred_at": "2025-11-15T07:30:00Z"
                     },
                     "shipment": {
                       "tracking_number": "DLX123456789SA",
-                      "status": "cancelled"
+                      "status": "canceled",
+                      "cancel_reason": "customer_request"
                     },
                     "cancellation": {
                       "reason": "customer_request",
                       "note": "Recipient asked to stop delivery",
                       "requested_by": "support-agent-19"
+                    }
+                  }
+                },
+                "shipmentRescheduled": {
+                  "summary": "Shipment rescheduled",
+                  "value": {
+                    "event": {
+                      "id": "evt_5f6e7d8c",
+                      "type": "shipment.rescheduled",
+                      "occurred_at": "2025-11-15T09:30:00Z"
+                    },
+                    "shipment": {
+                      "tracking_number": "DLX123456789SA"
+                    },
+                    "delivery": {
+                      "requested_date": "2025-11-16",
+                      "window_start": "14:00",
+                      "window_end": "18:00",
+                      "timezone": "Asia/Riyadh",
+                      "reason": "Customer requested a later delivery window"
                     }
                   }
                 }
@@ -299,11 +320,12 @@
               },
               "type": {
                 "type": "string",
-                "description": "Webhook event type. Prefer explicit typed shipment update events (`update.status`, `update.address`, `update.driver`, `update.action`, `update.attachment`) over generic `shipment.updated`.",
+                "description": "Webhook event type. Prefer explicit typed shipment update events (`update.status`, `update.address`, `update.driver`, `update.action`, `update.attachment`) over generic `shipment.updated`. Use `shipment.canceled` for cancellation and `shipment.rescheduled` for delivery-window changes.",
                 "enum": [
                   "shipment.created",
                   "shipment.updated",
-                  "shipment.cancelled",
+                  "shipment.canceled",
+                  "shipment.rescheduled",
                   "shipment.modify",
                   "shipment.delete",
                   "shipment.swap",
@@ -495,7 +517,7 @@
           },
           "cancellation": {
             "type": "object",
-            "description": "Cancellation metadata for shipment.cancelled events.",
+            "description": "Cancellation metadata for shipment.canceled events.",
             "properties": {
               "reason": {
                 "type": "string"

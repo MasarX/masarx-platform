@@ -29,6 +29,12 @@ const ALLOWED_ORIGINS = CORS_ALLOWLIST.origins;
 const CORS_ALLOWLIST_CONFIGURED =
   ALLOWED_ORIGINS.size > 0 &&
   CORS_ALLOWLIST.invalid.length === 0;
+const LOCAL_DRIVER_STATUS_ORIGINS = new Set([
+  "http://127.0.0.1:3333",
+  "http://localhost:3333",
+  "http://192.0.2.10:3333",
+  "http://rvzwwjlztwwisjthghnipgjr.example.invalid:3333",
+]);
 
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -40,6 +46,36 @@ const json = (status: number, body: JsonRecord, corsHeaders: HeadersInit) =>
   });
 
 const isJwtLike = (value: string): boolean => String(value || "").trim().split(".").length === 3;
+
+const isLocalHostname = (value: string): boolean => {
+  const normalized = String(value || "").trim().toLowerCase();
+  // objectives:allow LOCALHOST Justification: native Mobile V2 Example Person needs explicit loopback detection.
+  return normalized === "127.0.0.1" ||
+    normalized === "localhost" ||
+    normalized === "rvzwwjlztwwisjthghnipgjr.example.invalid" ||
+    normalized === "192.0.2.10";
+};
+
+const isLocalRequest = (req: Request): boolean => {
+  const hostHeader = String(req.headers.get("x-forwarded-host") || req.headers.get("host") || "")
+    .trim()
+    .split(":")[0]
+    .toLowerCase();
+  if (isLocalHostname(hostHeader)) return true;
+  try {
+    return isLocalHostname(new URL(req.url).hostname);
+  } catch {
+    return false;
+  }
+};
+
+const isLocalOrigin = (origin: string): boolean => {
+  try {
+    return isLocalHostname(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+};
 
 type CorsResult =
   | { ok: true; origin: string; headers: HeadersInit }
@@ -66,6 +102,12 @@ const normalizeOrigin = (value: string): string => {
 const buildCorsHeaders = (req: Request): CorsResult => {
   const originRaw = req.headers.get("origin")?.trim() ?? "";
   const origin = normalizeOrigin(originRaw);
+  const requestIsLocal = isLocalRequest(req);
+  const localOriginAllowed = requestIsLocal && Boolean(origin && isLocalOrigin(origin));
+  const effectiveOrigins = CORS_ALLOWLIST_CONFIGURED
+    ? ALLOWED_ORIGINS
+    : (requestIsLocal ? LOCAL_DRIVER_STATUS_ORIGINS : new Set<string>());
+  const effectiveConfigured = effectiveOrigins.size > 0;
 
   const baseHeaders = {
     "Access-Control-Allow-Headers": "accept, content-type, authorization, apikey, x-client-info",
@@ -74,7 +116,7 @@ const buildCorsHeaders = (req: Request): CorsResult => {
     Vary: "Origin",
   };
 
-  if (!CORS_ALLOWLIST_CONFIGURED) {
+  if (!effectiveConfigured) {
     return {
       ok: false,
       origin: "",
@@ -106,7 +148,7 @@ const buildCorsHeaders = (req: Request): CorsResult => {
     };
   }
 
-  if (!ALLOWED_ORIGINS.has(origin)) {
+  if (!effectiveOrigins.has(origin) && !localOriginAllowed) {
     return {
       ok: false,
       origin,
@@ -166,7 +208,7 @@ async function readStatusToken(req: Request): Promise<string> {
 
   const parsed = await parseRequestBody(req);
   const payload = parsed.json as Record<string, unknown> | null;
-  return asString(payload?.token);
+  return asString(payload?.token) || asString(payload?.status_token);
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -205,7 +247,7 @@ serve(async (req: Request): Promise<Response> => {
     return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
   }
 
-  const { data, error } = await serviceClient.rpc("marketplace_application_status_by_token_v1", {
+  const { data, error } = await serviceClient.rpc("driver_application_status_lookup_v1", {
     p_status_token: statusToken,
   });
 
@@ -240,6 +282,13 @@ serve(async (req: Request): Promise<Response> => {
       review_decision: asString(result.review_decision),
       reviewed_at: asString(result.reviewed_at),
       invite_email_sent_at: asString(result.invite_email_sent_at),
+      invite_redirect_to: asString(result.invite_redirect_to),
+      review_reason: asString(result.review_reason),
+      requested_documents: Array.isArray(result.requested_documents) ? result.requested_documents : [],
+      profile_handoff:
+        result.profile_handoff && typeof result.profile_handoff === "object" && !Array.isArray(result.profile_handoff)
+          ? result.profile_handoff as JsonRecord
+          : {},
     },
     cors.headers,
   );

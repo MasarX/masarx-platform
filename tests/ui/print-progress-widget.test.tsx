@@ -37,7 +37,7 @@ test("print progress widget renders plain-language single-label active copy", ()
   expect(
     screen.getByText("We're generating a fresh label for this shipment.")
   ).toBeInTheDocument();
-  expect(screen.queryByText("Workflow run: run-single")).not.toBeInTheDocument();
+  expect(screen.queryByText("Activity reference: run-single")).not.toBeInTheDocument();
 });
 
 test("print progress widget renders determinate progress for multi-label counts", () => {
@@ -72,7 +72,7 @@ test("print progress widget renders determinate progress for multi-label counts"
   );
 });
 
-test("print progress widget exposes technical details only when expanded", async () => {
+test("print progress widget exposes support details only when expanded", async () => {
   const user = userEvent.setup();
   const toggle = jest.fn();
   const openRun = jest.fn();
@@ -105,7 +105,7 @@ test("print progress widget exposes technical details only when expanded", async
     />
   );
 
-  await user.click(screen.getByRole("button", { name: "Technical details" }));
+  await user.click(screen.getByRole("button", { name: "Support details" }));
   expect(toggle).toHaveBeenCalled();
 
   rerender(
@@ -136,9 +136,11 @@ test("print progress widget exposes technical details only when expanded", async
     />
   );
 
-  expect(screen.getByText("Workflow run: run-details")).toBeInTheDocument();
+  expect(screen.getByText("Activity reference: run-details")).toBeInTheDocument();
   expect(screen.getByText("Download target: <= 100ms")).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "View run" }));
+  expect(screen.getByText("Timing details: Recorded stage timing")).toBeInTheDocument();
+  expect(screen.getByText("File source: Saved workflow output")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "View activity" }));
   expect(openRun).toHaveBeenCalled();
 });
 

@@ -57,6 +57,7 @@ async function seedHmacSource({
 } = {}) {
     const organizationId = randomUUID();
     const clientId = randomUUID();
+    const senderId = randomUUID();
     const providerId = randomUUID();
     const providerAuthId = randomUUID();
     const mappingId = randomUUID();
@@ -74,6 +75,12 @@ async function seedHmacSource({
       `INSERT INTO clients (id, organization_id, name, slug, sla_tier, status)
        VALUES ($1::uuid, $2::uuid, 'Edge HMAC Client', $3::text, 'standard', 'active')`,
       [clientId, organizationId, `edge-hmac-client-${clientId.slice(0, 8)}`]
+    );
+
+    await client.query(
+      `INSERT INTO senders (id, client_id, name, brand_name, status)
+       VALUES ($1::uuid, $2::uuid, 'Edge HMAC Sender', 'Edge HMAC Sender', 'active')`,
+      [senderId, clientId]
     );
 
     await client.query(
@@ -117,6 +124,7 @@ async function seedHmacSource({
          provider_type,
          auth_token,
          mapping_config_id,
+         sender_id,
          enabled
        )
        VALUES (
@@ -127,9 +135,10 @@ async function seedHmacSource({
          'provider',
          $4::text,
          $5::uuid,
+         $6::uuid,
          TRUE
        )`,
-      [sourceId, organizationId, `edge-hmac-${sourceId.slice(0, 8)}`, token, mappingId]
+      [sourceId, organizationId, `edge-hmac-${sourceId.slice(0, 8)}`, token, mappingId, senderId]
     );
 
     const { rows: templateRows } = await client.query(
@@ -170,6 +179,7 @@ async function seedHmacSource({
     return {
       organizationId,
       clientId,
+      senderId,
       sourceId,
       token,
       secret,

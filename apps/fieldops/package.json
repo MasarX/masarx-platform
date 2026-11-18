@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "main": "index.ts",
   "scripts": {
-    "start": "node ../../scripts/ops/mobile/run-fieldops-expo.js start",
-    "android": "node ../../scripts/ops/mobile/run-fieldops-expo.js start --android",
-    "ios": "node ../../scripts/ops/mobile/run-fieldops-expo.js start --ios",
-    "web": "node ../../scripts/ops/mobile/run-fieldops-expo.js start --web"
+    "start": "node ../../scripts/ops/mobile/start-fieldops-metro.js",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "node ../../scripts/ops/mobile/start-fieldops-metro.js --web"
   },
   "dependencies": {
     "@masarx/api": "0.1.0",
@@ -34,6 +34,7 @@
     "react-dom": "^19.1.0",
     "react-native": "0.81.5",
     "react-native-safe-area-context": "~5.6.0",
+    "react-native-svg": "15.12.1",
     "react-native-url-polyfill": "^3.0.0",
     "react-native-web": "^0.21.2"
   },

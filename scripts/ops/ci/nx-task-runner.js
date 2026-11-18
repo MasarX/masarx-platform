@@ -199,7 +199,8 @@ function resolveAffectedProjectSubset({
 
   const result = runCommandCaptureImpl('npx', showArgs, env);
   if (!result.ok) {
-    throw new Error(`Nx affected project discovery failed (exit ${result.status}).`);
+    const detail = String(result.error || result.stderr || '').trim();
+    throw new Error(`Nx affected project discovery failed (exit ${result.status})${detail ? `: ${detail}` : ''}.`);
   }
 
   const resolvedProjects = parseJsonArray(result.stdout);
@@ -219,15 +220,23 @@ function maybeRunFallback(args, env, reason) {
   }
 }
 
-function runNxTaskRunner({ args = parseArgs(), env = process.env } = {}) {
+function skipAffectedSelection(reason, files = []) {
+  console.warn(`[nx-task-runner] ${reason}; no selected affected project tasks to run.`);
+  return { mode: 'skipped', files };
+}
+
+function runNxTaskRunner({
+  args = parseArgs(),
+  env = process.env,
+  runCommandCaptureImpl = runCommandCapture,
+} = {}) {
   const files = resolveFiles(args, env);
   if (shouldBypassNxForRootProject(args)) {
     maybeRunFallback(args, env, 'Bypassing Nx run-many for the root project.');
     return { mode: 'fallback', files, bypassedNx: true };
   }
   if (String(args.mode || '').trim().toLowerCase() === 'affected' && files.length === 0) {
-    maybeRunFallback(args, env, 'No changed files were available for nx affected.');
-    return { mode: 'fallback', files: [] };
+    return skipAffectedSelection('No changed files were available for nx affected.', []);
   }
 
   if (!nxAvailable()) {
@@ -244,10 +253,10 @@ function runNxTaskRunner({ args = parseArgs(), env = process.env } = {}) {
         projects: effectiveProjects,
         files,
         env,
+        runCommandCaptureImpl,
       });
       if (!affectedProjects.length) {
-        maybeRunFallback(args, env, 'No selected projects were affected.');
-        return { mode: 'fallback', files };
+        return skipAffectedSelection('No selected projects were affected.', files);
       }
       effectiveMode = 'run-many';
       effectiveProjects = affectedProjects;
@@ -260,6 +269,9 @@ function runNxTaskRunner({ args = parseArgs(), env = process.env } = {}) {
       outputStyle: args.outputStyle,
     });
   } catch (error) {
+    if (effectiveMode === 'affected' && effectiveProjects.length > 0 && /\(exit 0\)/.test(error.message || '')) {
+      return skipAffectedSelection(error.message || 'Nx affected project discovery failed.', files);
+    }
     if (!args.allowFallbackOnError) throw error;
     maybeRunFallback(args, env, error.message || String(error));
     return { mode: 'fallback', files };
@@ -298,5 +310,6 @@ module.exports = {
   resolveAffectedProjectSubset,
   resolveFiles,
   shouldBypassNxForRootProject,
+  skipAffectedSelection,
   runNxTaskRunner,
 };

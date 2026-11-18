@@ -64,9 +64,10 @@ BEGIN
       WHERE category = 'ui_navigation'
         AND scope_type = 'global'
         AND scope_id IS NULL
-        AND cached_value::text LIKE '%/console/labels/designer%'
+        AND cached_value::text LIKE '%/platform/labels%'
+        AND cached_value::text LIKE '%Label Designer & templates%'
     ),
-    'ui_navigation includes console label designer route'
+    'ui_navigation includes canonical Console V2 Label Designer workbench route'
   );
 
   RETURN NEXT ok(

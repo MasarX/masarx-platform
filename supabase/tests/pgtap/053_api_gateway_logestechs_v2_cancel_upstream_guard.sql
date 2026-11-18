@@ -152,9 +152,13 @@ BEGIN
   PERFORM set_config('platform.workflow_run_step_id', v_step_id::text, true);
 
   -- Core scoped entities.
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO organizations (id, name, slug)
   VALUES (v_org, 'API Gateway Org 053', 'pgtap-api-gateway-org-053')
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO clients (id, organization_id, name, slug, status)
   VALUES (v_client, v_org, 'API Gateway Client 053', 'pgtap-api-gateway-client-053', 'active')
@@ -163,6 +167,8 @@ BEGIN
   INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
   VALUES (v_sender, v_client, 'API Gateway Sender 053', 'API Gateway Sender 053', TRUE, 'active')
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM bootstrap_tenant_onboarding_v1(v_org, 'pgtap:api-gateway-logestechs-v2-cancel-upstream-guard-fixture-bootstrap');
 
   INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
   VALUES (

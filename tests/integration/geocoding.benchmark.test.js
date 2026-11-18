@@ -199,8 +199,8 @@ describe('Geocoding benchmark harness (accuracy/timing)', () => {
     const sample = await pickBenchmarkSample(client, 'long_line');
     await applyGeocodingPolicy(
       client,
-      'client',
-      ids.client_id,
+      'sender',
+      ids.sender_id,
       {
         provider_priority: ['here_geocoding'],
         local_lookup: { enabled: true, min_confidence: 0.7, prefer_district_centroid: true },

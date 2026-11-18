@@ -17,6 +17,10 @@ function slug(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function clearPolicyCache(client, category) {
   await client.query(
     `DELETE FROM settings_cache
@@ -345,6 +349,36 @@ async function intakeProviderUpdate(client, { sourceToken, shipmentId, requestBo
   return rows[0].result;
 }
 
+async function waitForProviderUpdateOutbound(client, intakeResult, timeoutMs = 10_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await client.query(`SELECT public.progress_workflow_run($1::uuid)`, [
+      intakeResult.workflow_run_id,
+    ]);
+
+    const { rows } = await client.query(
+      `SELECT agr.route_id,
+              agr.outbound_call_id,
+              oc.method,
+              oc.url,
+              oc.body
+         FROM public.api_gateway_requests agr
+         LEFT JOIN public.outbound_calls oc
+           ON oc.id = agr.outbound_call_id
+        WHERE agr.id = $1::uuid`,
+      [intakeResult.api_gateway_request_id],
+    );
+
+    if (rows[0]?.outbound_call_id) {
+      return rows[0];
+    }
+
+    await sleep(100);
+  }
+
+  throw new Error(`Provider update outbound call was not created for ${intakeResult.api_gateway_request_id}`);
+}
+
 describe('API gateway provider update postprocess', () => {
   let client;
 
@@ -425,32 +459,21 @@ describe('API gateway provider update postprocess', () => {
     });
 
     expect(intakeResult).toMatchObject({
-      action: 'proxy',
+      action: 'accepted_async',
+      status: 202,
+      api_gateway_request_id: expect.any(String),
+      workflow_run_id: expect.any(String),
     });
 
-    const outboundCallId = intakeResult.outbound_call_id;
-    expect(outboundCallId).toBeTruthy();
-
-    const { rows: requestRows } = await client.query(
-      `SELECT route_id
-         FROM public.api_gateway_requests
-        WHERE id = $1::uuid`,
-      [intakeResult.api_gateway_request_id],
-    );
-    expect(requestRows[0].route_id).toBe(route.id);
-
-    const { rows: outboundRows } = await client.query(
-      `SELECT method, url, body
-         FROM public.outbound_calls
-        WHERE id = $1::uuid`,
-      [outboundCallId],
-    );
-    expect(outboundRows[0]).toMatchObject({
+    const outbound = await waitForProviderUpdateOutbound(client, intakeResult);
+    const outboundCallId = outbound.outbound_call_id;
+    expect(outbound.route_id).toBe(route.id);
+    expect(outbound).toMatchObject({
       method: 'PUT',
       url: `https://apisv2.logestechs.com/api/guests/362/packages/${externalShipmentId}`,
     });
-    expect(outboundRows[0].body.email).toBeUndefined();
-    expect(outboundRows[0].body.password).toBeUndefined();
+    expect(outbound.body.email).toBeUndefined();
+    expect(outbound.body.password).toBeUndefined();
 
     await client.query(
       `UPDATE public.outbound_calls
@@ -574,7 +597,14 @@ describe('API gateway provider update postprocess', () => {
       },
     });
 
-    const outboundCallId = intakeResult.outbound_call_id;
+    expect(intakeResult).toMatchObject({
+      action: 'accepted_async',
+      status: 202,
+      api_gateway_request_id: expect.any(String),
+      workflow_run_id: expect.any(String),
+    });
+
+    const outboundCallId = (await waitForProviderUpdateOutbound(client, intakeResult)).outbound_call_id;
     expect(outboundCallId).toBeTruthy();
 
     await client.query(

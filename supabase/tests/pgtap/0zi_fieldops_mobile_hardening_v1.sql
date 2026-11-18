@@ -171,8 +171,12 @@ BEGIN
 
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'FieldOps Hardening Org', 'fieldops-hardening-' || left(v_org::text, 8));
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO public.branches (id, organization_id, code, name, timezone, is_active)
   VALUES (v_branch, v_org, 'fo-h-' || left(v_branch::text, 8), 'FieldOps Hardening Branch', 'UTC', TRUE);
@@ -182,6 +186,11 @@ BEGIN
 
   INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
   VALUES (v_sender, v_client, 'FieldOps Hardening Sender', 'FieldOps Hardening Sender', TRUE, 'active');
+
+  PERFORM bootstrap_tenant_onboarding_v1(
+    v_org,
+    'pgtap:fieldops-mobile-hardening-fixture-bootstrap'
+  );
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type, status)
   VALUES (v_user, v_org, 'fieldops-hardening-' || left(v_user::text, 8) || '@example.com', 'FieldOps Hardening User', 'driver', 'tenant', 'active');

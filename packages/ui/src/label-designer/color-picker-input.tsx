@@ -7,6 +7,7 @@ type ColorPickerInputProps = {
   onChange: (color: string) => void;
   id?: string;
   label?: string;
+  disabled?: boolean;
 };
 
 // Lazy-load react-colorful
@@ -14,7 +15,7 @@ const LazyHexColorPicker = React.lazy(() =>
   import("react-colorful").then((mod) => ({ default: mod.HexColorPicker })),
 );
 
-export function ColorPickerInput({ value, onChange, id, label }: ColorPickerInputProps) {
+export function ColorPickerInput({ value, onChange, id, label, disabled = false }: ColorPickerInputProps) {
   const [open, setOpen] = React.useState(false);
   const popoverRef = React.useRef<HTMLDivElement>(null);
   const color = value && value.startsWith("#") ? value : value ? `#${value}` : "#000000";
@@ -43,7 +44,10 @@ export function ColorPickerInput({ value, onChange, id, label }: ColorPickerInpu
           type="button"
           className="h-7 w-7 shrink-0 rounded border border-ui-border/50"
           style={{ backgroundColor: color }}
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            if (!disabled) setOpen(!open);
+          }}
+          disabled={disabled}
           aria-label="Pick color"
           data-testid={id ? `${id}-swatch` : "color-swatch"}
         />
@@ -52,6 +56,7 @@ export function ColorPickerInput({ value, onChange, id, label }: ColorPickerInpu
           type="text"
           value={value ?? ""}
           onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
           placeholder="#000000"
           className="h-7 w-full rounded border border-ui-border/50 bg-ui-paper/50 px-2 text-xs text-ui-ink font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
           data-testid={id ? `${id}-input` : "color-input"}

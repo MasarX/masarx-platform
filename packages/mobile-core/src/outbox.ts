@@ -36,8 +36,8 @@ export type OutboxStore = {
     status?: OutboxEntryStatus[];
     limit?: number;
   }) => Promise<OutboxEntry[]>;
-  listPending: (params?: { limit?: number }) => Promise<OutboxEntry[]>;
-  claimPending?: (params: { limit?: number }) => Promise<OutboxEntry[]>;
+  listPending: (params?: { limit?: number; force?: boolean }) => Promise<OutboxEntry[]>;
+  claimPending?: (params: { limit?: number; force?: boolean }) => Promise<OutboxEntry[]>;
   countPending: () => Promise<number>;
   update: (id: string, patch: Partial<OutboxEntry>) => Promise<void>;
   remove: (id: string) => Promise<void>;
@@ -87,6 +87,8 @@ function serializeError(error: unknown) {
 
 export type OutboxSyncOptions = {
   limit?: number;
+  /** Replay queued/failed entries immediately, ignoring retry backoff. */
+  force?: boolean;
   shouldRetry?: (error: unknown) => boolean;
   backoff?: { base: number; max: number };
   staleInFlightMs?: number;
@@ -112,6 +114,7 @@ export function createOutbox(store: OutboxStore) {
 
   async function sync(executor: RpcExecutor, options: OutboxSyncOptions = {}) {
     const limit = options.limit ?? 50;
+    const force = options.force === true;
     const shouldRetry = options.shouldRetry ?? (() => true);
     const backoffConfig = options.backoff ?? DEFAULT_OUTBOX_BACKOFF_MS;
     const staleInFlightMs = options.staleInFlightMs ?? DEFAULT_OUTBOX_STALE_IN_FLIGHT_MS;
@@ -121,8 +124,8 @@ export function createOutbox(store: OutboxStore) {
     }
 
     const entries = store.claimPending
-      ? await store.claimPending({ limit })
-      : await store.listPending({ limit });
+      ? await store.claimPending({ limit, force })
+      : await store.listPending({ limit, force });
     const result: OutboxSyncResult = {
       attempted: 0,
       succeeded: 0,
@@ -177,5 +180,12 @@ export function createOutbox(store: OutboxStore) {
     sync,
     countPending,
     get: (id: string) => store.get(id),
+    // Entry listing — surfaced so observability UIs (e.g. the Mobile V2
+    // More screen's outbox panel) can render recent queued / failed
+    // entries from the canonical outbox store rather than fabricating
+    // them. Thin pass-throughs to the underlying store.
+    list: (params?: { status?: OutboxEntryStatus[]; limit?: number }) =>
+      store.list(params),
+    listPending: (params?: { limit?: number; force?: boolean }) => store.listPending(params),
   };
 }

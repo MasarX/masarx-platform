@@ -327,7 +327,37 @@ async function ensureCanonicalCity(client, params) {
     `,
     [params.organizationId, params.cityName],
   );
-  if (existing?.id) return existing.id;
+  if (existing?.id) {
+    await client.query(
+      `
+        UPDATE public.canonical_cities
+           SET name_arabic = COALESCE(NULLIF($2::text, ''), name_arabic),
+               alternate_names = (
+                 SELECT ARRAY(
+                   SELECT DISTINCT name
+                   FROM unnest(
+                     COALESCE(alternate_names, ARRAY[]::text[])
+                     || COALESCE($3::text[], ARRAY[]::text[])
+                   ) AS candidate(name)
+                   WHERE NULLIF(btrim(name), '') IS NOT NULL
+                   ORDER BY name
+                 )
+               ),
+               province = COALESCE(NULLIF($4::text, ''), province),
+               country_code = COALESCE(NULLIF($5::text, ''), country_code),
+               updated_at = now()
+         WHERE id = $1::uuid
+      `,
+      [
+        existing.id,
+        params.cityArabic || null,
+        params.alternateNames || null,
+        params.province || null,
+        params.countryCode || null,
+      ],
+    );
+    return existing.id;
+  }
 
   const seed = await queryOne(
     client,
@@ -404,8 +434,6 @@ async function ensureCanonicalDistrict(client, params) {
     `,
     [params.organizationId, params.cityId, params.districtName],
   );
-  if (existing?.id) return existing.id;
-
   const seed = await queryOne(
     client,
     `
@@ -423,6 +451,38 @@ async function ensureCanonicalDistrict(client, params) {
     `,
     [params.cityName, params.districtName],
   );
+
+  const alternateNames = params.alternateNames || seed?.alternate_names || [params.districtName];
+
+  if (existing?.id) {
+    await client.query(
+      `
+        UPDATE public.canonical_districts
+           SET name_arabic = COALESCE(NULLIF($2::text, ''), name_arabic),
+               alternate_names = (
+                 SELECT ARRAY(
+                   SELECT DISTINCT name
+                   FROM unnest(
+                     COALESCE(alternate_names, ARRAY[]::text[])
+                     || COALESCE($3::text[], ARRAY[]::text[])
+                   ) AS candidate(name)
+                   WHERE NULLIF(btrim(name), '') IS NOT NULL
+                   ORDER BY name
+                 )
+               ),
+               centroid = COALESCE($4::geography, centroid),
+               updated_at = now()
+         WHERE id = $1::uuid
+      `,
+      [
+        existing.id,
+        params.districtArabic || seed?.name_arabic || null,
+        alternateNames,
+        seed?.centroid || null,
+      ],
+    );
+    return existing.id;
+  }
 
   const inserted = await queryOne(
     client,
@@ -456,7 +516,7 @@ async function ensureCanonicalDistrict(client, params) {
       params.cityId,
       params.districtName,
       params.districtArabic || seed?.name_arabic || null,
-      params.alternateNames || seed?.alternate_names || [params.districtName],
+      alternateNames,
       JSON.stringify({ source: 'integration_fixture_bootstrap' }),
       seed?.centroid || null,
     ],
@@ -1275,7 +1335,12 @@ async function ensureIntegrationFixtures(options = {}) {
     try {
       await client.query('BEGIN');
 
+    // The fixture owns client/sender setup. Defer tenant bootstrap until source-binding context exists.
+    await client.query(
+      `SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true)`,
+    );
     const org = await ensureOrganization(client, profile.organizations.alpha);
+    await client.query(`SELECT set_config('app.organization_onboarding_source', '', true)`);
     const client11 = await ensureClient(client, org.id, profile.clients.oneOne);
     const client12 = await ensureClient(client, org.id, profile.clients.oneTwo);
     const client13 = await ensureClient(client, org.id, profile.clients.oneThree);
@@ -1285,6 +1350,11 @@ async function ensureIntegrationFixtures(options = {}) {
     const sender12 = await ensureSender(client, client12.id, profile.senders.oneTwo.name);
     const sender13 = await ensureSender(client, client13.id, profile.senders.oneThree.name);
     const sender21 = await ensureSender(client, client21.id, profile.senders.twoOne.name);
+
+    await client.query(
+      `SELECT public.bootstrap_tenant_onboarding_v1($1::uuid, $2::text)`,
+      [org.id, 'pgtap:integration-fixtures-bootstrap'],
+    );
 
     const providerHere = await ensureProvider(client, {
       organizationId: org.id,
@@ -1347,19 +1417,32 @@ async function ensureIntegrationFixtures(options = {}) {
     const riyadhCityId = await ensureCanonicalCity(client, {
       organizationId: org.id,
       cityName: 'Riyadh',
-      cityArabic: 'الرياض',
+      cityArabic: '\u0627\u0644\u0631\u064a\u0627\u0636',
       province: 'Riyadh',
       countryCode: 'SA',
-      alternateNames: ['Riyadh', 'Ryadh', 'الرياض'],
+      alternateNames: ['Riyadh', 'Ryadh', '\u0627\u0644\u0631\u064a\u0627\u0636'],
     });
     await ensureCanonicalCity(client, {
       organizationId: org.id,
       cityName: 'Jeddah',
-      cityArabic: 'جدة',
+      cityArabic: '\u062c\u062f\u0629',
       province: 'Makkah',
       countryCode: 'SA',
-      alternateNames: ['Jeddah', 'Jeddah City', 'جدة'],
+      alternateNames: ['Jeddah', 'Jeddah City', '\u062c\u062f\u0629'],
     });
+
+    const districtDefaults = {
+      'Al Olaya': {
+        districtArabic: '\u0627\u0644\u0639\u0644\u064a\u0627',
+        alternateNames: [
+          'Al Olaya',
+          'Al-Olaya',
+          'Olaya',
+          '\u0627\u0644\u0639\u0644\u064a\u0627',
+          '\u062d\u064a \u0627\u0644\u0639\u0644\u064a\u0627',
+        ],
+      },
+    };
 
     for (const districtName of [
       'Al Olaya',
@@ -1374,6 +1457,7 @@ async function ensureIntegrationFixtures(options = {}) {
         cityId: riyadhCityId,
         cityName: 'Riyadh',
         districtName,
+        ...(districtDefaults[districtName] || {}),
       });
     }
 

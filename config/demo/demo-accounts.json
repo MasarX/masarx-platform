@@ -45,6 +45,14 @@
       }
     },
     {
+      "email": "fleet_manager@demo.local",
+      "full_name": "Demo Fleet Manager",
+      "user_type": "fleet_manager",
+      "scope": {
+        "type": "tenant"
+      }
+    },
+    {
       "email": "mlrznqhylvnirjwnhxhsjwgm@example.invalid",
       "full_name": "Example Person",
       "user_type": "driver",

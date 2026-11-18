@@ -8,8 +8,9 @@ function cloneOutboxEntry(entry: OutboxEntry): OutboxEntry {
   };
 }
 
-function isPendingEntry(entry: OutboxEntry, nowIso: string) {
+function isPendingEntry(entry: OutboxEntry, nowIso: string, force = false) {
   if (!(entry.status === "queued" || entry.status === "failed")) return false;
+  if (force) return true;
   if (!entry.next_attempt_at) return true;
   return entry.next_attempt_at <= nowIso;
 }
@@ -56,8 +57,9 @@ export function createMemoryOutboxStore(): OutboxStore {
     listPending: async (params = {}) => {
       const limit = typeof params.limit === "number" ? Math.max(0, params.limit) : 50;
       const now = createOutboxNow();
+      const force = params.force === true;
       return [...entries.values()]
-        .filter((entry) => isPendingEntry(entry, now))
+        .filter((entry) => isPendingEntry(entry, now, force))
         .sort((a, b) => (a.created_at > b.created_at ? 1 : -1))
         .slice(0, limit)
         .map(cloneOutboxEntry);
@@ -65,8 +67,9 @@ export function createMemoryOutboxStore(): OutboxStore {
     claimPending: async (params = {}) => {
       const limit = typeof params.limit === "number" ? Math.max(0, params.limit) : 50;
       const now = createOutboxNow();
+      const force = params.force === true;
       const claimed = [...entries.values()]
-        .filter((entry) => isPendingEntry(entry, now))
+        .filter((entry) => isPendingEntry(entry, now, force))
         .sort((a, b) => (a.created_at > b.created_at ? 1 : -1))
         .slice(0, limit);
 

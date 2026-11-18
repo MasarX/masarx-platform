@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   PanResponder,
@@ -21,6 +22,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextStyle,
 } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -71,7 +73,11 @@ import {
 } from "./src/mobile-app-integrity";
 import { normalizeMobileLocationTrackingPolicy } from "./src/mobile-location-policy";
 import { normalizeMobileSyncPolicy } from "./src/mobile-sync-policy";
+import { buildPolicyContextFromMe } from "./src/mobile-policy-context";
 import { resolvePolicyRow } from "./src/mobile-policy-row";
+// Side-effect import — registers the Geist / Geist Mono web fonts (design
+// SSOT typography) so the React Native Web build matches the design canvas.
+import "./src/mobile-v2-web-fonts";
 import {
   POD_POLICY_UNAVAILABLE_MESSAGE,
   resolveComposerIdentityRequired,
@@ -110,6 +116,12 @@ import {
 } from "./src/mobile-crash-reporting";
 import { MobileErrorBoundary } from "./src/mobile-error-boundary";
 import { clearMobileTelemetryEvents, flushMobileTelemetryEvents } from "./src/mobile-telemetry";
+import {
+  firstMobileUiEventType,
+  normalizeMobileUiEvents,
+  resolveMobileUiEventLogReadback,
+  type MobileUiEventLogResult,
+} from "./src/mobile-ui-event-log";
 import {
   type MobileAddressPolicy,
   type MobileCommunicationPolicy,
@@ -202,6 +214,40 @@ import {
 } from "./src/mobile-shell-header";
 import { isJwtPrivilegedRole, resolveJwtRole } from "./src/mobile-jwt";
 import { createMemoryKeyValueStore, createMemoryOutboxStore } from "./src/mobile-memory-store";
+// Mobile V2 production cutover wiring (closes audit P0 #1 — see
+// docs/ops/evidence/2026-05-13/mobile-v2-fieldops-parity-audit/README.md).
+// `resolveMobileShellPolicy` calls `resolve_mobile_shell_policy` and
+// returns `{ v2_enabled, ... }`; when v2_enabled=true the boot path
+// mounts `MobileV2NativeShell` with the live supabase client + outbox
+// + resolved active role. A non-true policy resolves to a V2-required
+// blocked state, not the retired V1 shell.
+import {
+  resolveMobileShellMountDecision,
+  resolveMobileShellPolicy,
+  type MobileShellPolicyEnvelope,
+} from "./src/mobile-shell-cutover";
+import {
+  parseMobileV2DriverSignupRoleOptions,
+  resolveMobileV2DriverSignupEndpoints,
+  resolveMobileV2DriverSignupOrigin,
+} from "./src/mobile-v2-driver-signup";
+import { MobileV2DriverSignupFlow } from "./src/mobile-v2-driver-signup-flow";
+import { MobileV2NativeShell } from "./src/mobile-v2-preview-screen";
+import { buildMobileV2SignaturePngBase64 } from "./src/mobile-v2-pod-artifacts";
+import { getMobileV2SupabaseSchemaClient } from "./src/mobile-v2-rpc-hooks";
+import { MobileV2RuntimeBlockerScreen } from "./src/mobile-v2-runtime-blocker";
+// V2 design system — the pre-auth sign-in surface is rendered with the
+// Mobile V2 tokens + primitives so the production login matches the V2
+// design language. The auth contract stays the real Supabase email +
+// password / email-OTP flow (no employee-id/phone-OTP mock).
+import { FxButton, FxChip, FxField } from "./src/mobile-v2-primitives";
+import {
+  MOBILE_V2_FONT_MONO,
+  MOBILE_V2_FONT_SANS,
+  MOBILE_V2_SPACING,
+  MOBILE_V2_THEMES,
+  MOBILE_V2_TYPE_WEIGHTS,
+} from "./src/mobile-v2-themes";
 
 const STORAGE_KEYS = {
   deviceInstallId: "fieldops_device_install_id_v1",
@@ -358,17 +404,6 @@ function createEmptyResourceList(
     total_strategy: "exact",
     total_is_estimate: false,
   };
-}
-
-function formatDetailValue(value: unknown): string {
-  if (value == null) return "-";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }
 
 async function openSystemSettingsSafe() {
@@ -537,27 +572,6 @@ function findFirstEnabledNavItemByKey(
   return null;
 }
 
-function buildPolicyContextFromMe(me: UiMe | null | undefined) {
-  const ctx: Record<string, unknown> = {};
-  if (!me) return ctx;
-
-  if (me.org?.id) ctx.organization_id = me.org.id;
-  if (me.user?.id) ctx.user_id = me.user.id;
-
-  const scopeType = coerceHref(me.access_scope?.scope_type);
-  const scopeId = coerceHref(me.access_scope?.scope_id);
-  if (scopeType && scopeId) {
-    const normalizedType = scopeType.trim().toLowerCase();
-    if (normalizedType === "tenant" && !ctx.organization_id) ctx.organization_id = scopeId;
-    else if (normalizedType === "client") ctx.client_id = scopeId;
-    else if (normalizedType === "sender") ctx.sender_id = scopeId;
-    else if (normalizedType === "source") ctx.webhook_source_id = scopeId;
-    else if (normalizedType === "resource") ctx.resource_id = scopeId;
-  }
-
-  return ctx;
-}
-
 function buildDetailPolicyContext(
   baseContext: Record<string, unknown>,
   detailValue: Record<string, unknown> | null | undefined
@@ -722,23 +736,25 @@ function useAuthSession(client: ReturnType<typeof createMobileClient>) {
 
   React.useEffect(() => {
     let mounted = true;
+    let authEventSeen = false;
 
     client.auth
       .getSession()
       .then((result) => {
-        if (!mounted) return;
+        if (!mounted || authEventSeen) return;
         setSession(result.data.session);
         setReady(true);
       })
       .catch((error) => {
         logDebugFailure("failed to load auth session", error);
-        if (!mounted) return;
+        if (!mounted || authEventSeen) return;
         setSession(null);
         setReady(true);
       });
 
     const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
       if (!mounted) return;
+      authEventSeen = true;
       setSession(nextSession);
       setReady(true);
     });
@@ -1328,14 +1344,6 @@ function decodeBase64ToArrayBuffer(value: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-function encodeAsciiToArrayBuffer(value: string): ArrayBuffer {
-  const bytes = new Uint8Array(value.length);
-  for (let index = 0; index < value.length; index += 1) {
-    bytes[index] = value.charCodeAt(index);
-  }
-  return bytes.buffer;
-}
-
 function normalizeReasonKey(value: string | null | undefined) {
   return String(value ?? "")
     .trim()
@@ -1423,15 +1431,28 @@ function SignInScreen({
   appName,
   client,
   methods,
+  driverSignupEndpoint,
+  driverStatusEndpoint,
+  driverSignupOrigin,
+  driverSignupRoleOptions,
+  supabaseAnonKey,
+  locale,
 }: {
   appName: string;
   client: ReturnType<typeof createMobileClient>;
   methods: string[];
+  driverSignupEndpoint: string;
+  driverStatusEndpoint: string;
+  driverSignupOrigin: string;
+  driverSignupRoleOptions: ReturnType<typeof parseMobileV2DriverSignupRoleOptions>;
+  supabaseAnonKey: string;
+  locale: string;
 }) {
   const availableMethods = React.useMemo(() => normalizeAuthMethods(methods), [methods]);
   const [method, setMethod] = React.useState<AuthMethod>(
     resolvePreferredAuthMethod(availableMethods)
   );
+  const [showDriverSignup, setShowDriverSignup] = React.useState(false);
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [otpCode, setOtpCode] = React.useState("");
@@ -1555,118 +1576,338 @@ function SignInScreen({
 
   const AuthFormContainer: any = Platform.OS === "web" ? "form" : View;
 
+  // V2-styled sign-in surface. The auth contract is unchanged — real
+  // Supabase email + password / email-OTP via the handlers above; only
+  // the presentation is ported to the Mobile V2 design language.
+  const theme = MOBILE_V2_THEMES.light;
+  const driverSignupEnabled = Boolean(driverSignupEndpoint && driverStatusEndpoint && driverSignupOrigin);
+  const brandGlyph = (appName.trim().charAt(0) || "M").toUpperCase();
+  const appVersion =
+    typeof Constants.expoConfig?.version === "string" &&
+    Constants.expoConfig.version.trim().length > 0
+      ? Constants.expoConfig.version.trim()
+      : null;
+  const versionLabel = appVersion ? `${appName} · v${appVersion}` : appName;
+  const isOtpStep = method === "magic_link" && otpSent;
+  const ctaLabel =
+    status === "loading"
+      ? method === "password"
+        ? "Signing in..."
+        : otpSent
+          ? "Verifying..."
+          : "Sending code..."
+      : method === "password"
+        ? "Sign in"
+        : otpSent
+          ? "Verify & continue"
+          : "Send code";
+  const v2InputStyle: TextStyle = {
+    width: "100%",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    fontFamily: MOBILE_V2_FONT_SANS,
+    backgroundColor: theme.surface,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    color: theme.ink,
+  };
+
+  if (showDriverSignup && driverSignupEnabled) {
+    return (
+      <MobileV2DriverSignupFlow
+        theme={theme}
+        signupEndpoint={driverSignupEndpoint}
+        statusEndpoint={driverStatusEndpoint}
+        anonKey={supabaseAnonKey}
+        origin={driverSignupOrigin}
+        locale={locale}
+        roleOptions={driverSignupRoleOptions}
+        onBack={() => setShowDriverSignup(false)}
+      />
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{appName}</Text>
-      <Text style={styles.subtitle}>Sign in to continue</Text>
-
-      {availableMethods.length > 1 ? (
-        <View style={styles.methodRow}>
-          {availableMethods.map((candidate) => (
-            <Pressable
-              key={candidate}
-              onPress={() => {
-                setMethod(candidate);
-                setOtpSent(false);
-                setOtpCode("");
-                setErrorMessage(null);
-              }}
-              style={({ pressed }) => [
-                styles.methodChip,
-                candidate === method && styles.methodChipActive,
-                pressed && styles.navItemPressed,
-              ]}
-            >
-              <Text style={styles.methodChipText}>
-                {candidate === "password" ? "Password" : "Email code"}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-
-      <AuthFormContainer
-        style={styles.form}
-        {...(Platform.OS === "web"
-          ? {
-              onSubmit: (event: unknown) => {
-                const formEvent = event as { preventDefault?: () => void };
-                formEvent.preventDefault?.();
-                submitAction();
-              },
-            }
-          : {})}
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: theme.bg }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ flexGrow: 1 }}
       >
-        <TextInput
-          style={styles.input}
-          value={email}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
-          placeholder="Email"
-          onChangeText={(nextEmail) => {
-            setEmail(normalizeAuthEmail(nextEmail));
-            setErrorMessage(null);
-          }}
-        />
-
-        {method === "password" ? (
-          <TextInput
-            style={styles.input}
-            value={password}
-            secureTextEntry
-            placeholder="Password"
-            onChangeText={(nextPassword) => {
-              setPassword(nextPassword);
-              setErrorMessage(null);
-            }}
-          />
-        ) : null}
-
-        {method === "magic_link" && otpSent ? (
-          <TextInput
-            style={styles.input}
-            value={otpCode}
-            placeholder="Code"
-            keyboardType="number-pad"
-            onChangeText={(nextCode) => {
-              setOtpCode(nextCode);
-              setErrorMessage(null);
-            }}
-          />
-        ) : null}
-
-        <Pressable
-          accessibilityRole="button"
-          testID="mobile-signin-submit"
-          disabled={!canSubmit}
-          onPress={submitAction}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            !canSubmit && styles.primaryButtonDisabled,
-            pressed && canSubmit && styles.primaryButtonPressed,
-          ]}
+        <AuthFormContainer
+          style={{ display: "flex", flexDirection: "column", flexGrow: 1 }}
+          {...(Platform.OS === "web"
+            ? {
+                onSubmit: (event: unknown) => {
+                  const formEvent = event as { preventDefault?: () => void };
+                  formEvent.preventDefault?.();
+                  submitAction();
+                },
+              }
+            : {})}
         >
-          <Text style={styles.primaryButtonText}>
-            {status === "loading"
-              ? "Working..."
-              : method === "password"
-                ? "Sign in"
-                : otpSent
-                  ? "Verify code"
-                  : "Send code"}
-          </Text>
-        </Pressable>
-        {errorMessage ? <Text style={styles.authError}>{errorMessage}</Text> : null}
+          <View
+            style={{
+              flexGrow: 1,
+              paddingTop: 40,
+              paddingHorizontal: MOBILE_V2_SPACING["6xl"],
+              paddingBottom: MOBILE_V2_SPACING["6xl"],
+            }}
+          >
+            <View
+              accessibilityRole="image"
+              accessibilityLabel={`${appName} brand mark`}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 14,
+                backgroundColor: theme.chrome,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{
+                  color: theme.onChrome,
+                  fontSize: 22,
+                  fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
+                  fontFamily: MOBILE_V2_FONT_MONO,
+                }}
+              >
+                {brandGlyph}
+              </Text>
+            </View>
 
-        {status === "loading" ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator />
-            <Text style={styles.subtitle}>Please wait...</Text>
+            <Text
+              style={{
+                fontSize: 26,
+                fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
+                letterSpacing: -0.6,
+                color: theme.ink,
+                fontFamily: MOBILE_V2_FONT_SANS,
+                marginTop: MOBILE_V2_SPACING["6xl"],
+              }}
+            >
+              Welcome back.
+            </Text>
+            <Text
+              style={{
+                fontSize: 14,
+                color: theme.muted,
+                fontFamily: MOBILE_V2_FONT_SANS,
+                marginTop: MOBILE_V2_SPACING.md,
+              }}
+            >
+              {isOtpStep
+                ? `Enter the code we sent to ${normalizedEmail}.`
+                : "Sign in to start your shift."}
+            </Text>
+
+            <View style={{ marginTop: 28, rowGap: MOBILE_V2_SPACING["4xl"] }}>
+              <FxField theme={theme} label="Work email">
+                <TextInput
+                  value={email}
+                  onChangeText={(nextEmail) => {
+                    setEmail(normalizeAuthEmail(nextEmail));
+                    setErrorMessage(null);
+                  }}
+                  placeholder="lhwmilsokgrmgptsihhuoljt@example.invalid"
+                  placeholderTextColor={theme.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  textContentType="emailAddress"
+                  accessibilityLabel="Work email"
+                  style={v2InputStyle}
+                />
+              </FxField>
+
+              {method === "password" ? (
+                <FxField theme={theme} label="Password">
+                  <TextInput
+                    value={password}
+                    onChangeText={(nextPassword) => {
+                      setPassword(nextPassword);
+                      setErrorMessage(null);
+                    }}
+                    placeholder="Your password"
+                    placeholderTextColor={theme.muted}
+                    secureTextEntry
+                    accessibilityLabel="Password"
+                    style={v2InputStyle}
+                  />
+                </FxField>
+              ) : null}
+
+              {isOtpStep ? (
+                <FxField theme={theme} label="One-time code">
+                  <TextInput
+                    value={otpCode}
+                    onChangeText={(nextCode) => {
+                      setOtpCode(nextCode);
+                      setErrorMessage(null);
+                    }}
+                    placeholder="••••••"
+                    placeholderTextColor={theme.muted}
+                    keyboardType="number-pad"
+                    autoFocus
+                    accessibilityLabel="One-time code"
+                    style={[
+                      v2InputStyle,
+                      {
+                        fontFamily: MOBILE_V2_FONT_MONO,
+                        fontSize: 24,
+                        letterSpacing: 8,
+                        textAlign: "center",
+                      },
+                    ]}
+                  />
+                </FxField>
+              ) : null}
+            </View>
+
+            {errorMessage ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                style={{
+                  fontSize: 12,
+                  color: theme.danger,
+                  fontFamily: MOBILE_V2_FONT_SANS,
+                  marginTop: MOBILE_V2_SPACING.xl,
+                }}
+              >
+                {errorMessage}
+              </Text>
+            ) : null}
+
+            {status === "loading" ? (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  columnGap: MOBILE_V2_SPACING.lg,
+                  marginTop: MOBILE_V2_SPACING.xl,
+                }}
+              >
+                <ActivityIndicator color={theme.accent} />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: theme.muted,
+                    fontFamily: MOBILE_V2_FONT_SANS,
+                  }}
+                >
+                  Please wait...
+                </Text>
+              </View>
+            ) : null}
+
+            <FxChip
+              theme={theme}
+              icon="globe"
+              tone="neutral"
+              dense
+              style={{ marginTop: MOBILE_V2_SPACING["5xl"] }}
+            >
+              EN · العربية
+            </FxChip>
           </View>
-        ) : null}
-      </AuthFormContainer>
-    </View>
+
+          <View
+            style={{
+              paddingHorizontal: MOBILE_V2_SPACING["4xl"],
+              paddingTop: MOBILE_V2_SPACING["2xl"],
+              paddingBottom: MOBILE_V2_SPACING["5xl"],
+              rowGap: 14,
+            }}
+          >
+            <FxButton
+              theme={theme}
+              variant={canSubmit ? "chrome" : "soft"}
+              size="lg"
+              full
+              iconRight="arrow-right"
+              disabled={!canSubmit}
+              onPress={submitAction}
+              testID="mobile-signin-submit"
+              accessibilityLabel={ctaLabel}
+            >
+              {ctaLabel}
+            </FxButton>
+
+            {availableMethods.length > 1 ? (
+              <Pressable
+                onPress={() => {
+                  setMethod(method === "password" ? "magic_link" : "password");
+                  setOtpSent(false);
+                  setOtpCode("");
+                  setErrorMessage(null);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  method === "password"
+                    ? "Email me a one-time code instead"
+                    : "Use password instead"
+                }
+                style={{ alignItems: "center" }}
+              >
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: theme.accent,
+                    fontFamily: MOBILE_V2_FONT_SANS,
+                    fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
+                  }}
+                >
+                  {method === "password"
+                    ? "Email me a one-time code instead"
+                    : "Use password instead"}
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {driverSignupEnabled ? (
+              <Pressable
+                onPress={() => {
+                  setErrorMessage(null);
+                  setShowDriverSignup(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Sign up as a driver"
+                testID="mobile-v2-driver-signup-link"
+                style={{ alignItems: "center" }}
+              >
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: theme.accent,
+                    fontFamily: MOBILE_V2_FONT_SANS,
+                    fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
+                  }}
+                >
+                  Sign up as a driver
+                </Text>
+              </Pressable>
+            ) : null}
+
+            <Text
+              style={{
+                fontSize: 11,
+                color: theme.muted,
+                fontFamily: MOBILE_V2_FONT_SANS,
+                textAlign: "center",
+              }}
+            >
+              {versionLabel}
+            </Text>
+          </View>
+        </AuthFormContainer>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -1685,37 +1926,39 @@ function Bootstrap() {
     }
   }, [extra]);
   const publicConfig = publicConfigResult.config;
-  const configError = publicConfigResult.error;
   const supabaseKeyRole = React.useMemo(() => {
     if (!publicConfig) return null;
     return resolveJwtRole(publicConfig.supabaseAnonKey);
   }, [publicConfig]);
+  const driverSignupRuntime = React.useMemo(() => {
+    const signupEndpoint = readExtraString(extra, "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT");
+    const statusEndpoint = readExtraString(extra, "NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT");
+    const configuredOrigin = readExtraString(extra, "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN");
+    const roleConfig = readExtraString(extra, "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES");
+    const endpoints = resolveMobileV2DriverSignupEndpoints({
+      supabaseUrl: publicConfig?.supabaseUrl ?? "",
+      supabaseFunctionsUrl: publicConfig?.supabaseFunctionsUrl ?? null,
+      signupEndpoint,
+      statusEndpoint,
+    });
+    return {
+      ...endpoints,
+      origin: resolveMobileV2DriverSignupOrigin({
+        configuredOrigin,
+        signupEndpoint: endpoints.signupEndpoint,
+        supabaseUrl: publicConfig?.supabaseUrl ?? "",
+      }),
+      roleOptions: parseMobileV2DriverSignupRoleOptions(roleConfig),
+    };
+  }, [extra, publicConfig?.supabaseFunctionsUrl, publicConfig?.supabaseUrl]);
   const storage = React.useMemo(() => createFieldOpsStorage(), []);
 
   if (!publicConfig) {
-    return (
-      <View style={styles.container} accessibilityRole="alert">
-        <Text style={styles.title}>Fieldops</Text>
-        <Text style={styles.error}>Configuration error</Text>
-        <Text style={styles.mono}>{configError ?? "Missing public configuration."}</Text>
-      </View>
-    );
+    return <MobileV2RuntimeBlockerScreen kind="configuration" appName="FieldOps" />;
   }
 
   if (isJwtPrivilegedRole(supabaseKeyRole)) {
-    return (
-      <View style={styles.container} accessibilityRole="alert">
-        <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.error}>Invalid Supabase key</Text>
-        <Text style={styles.subtitle}>
-          The configured SUPABASE key is a service role key, which must never be used in a client app.
-        </Text>
-        <Text style={styles.mono}>
-          Fix: set NEXT_PUBLIC_SUPABASE_ANON_KEY to the anon key for this workspace, then restart the
-          dev server.
-        </Text>
-      </View>
-    );
+    return <MobileV2RuntimeBlockerScreen kind="clientCredential" appName={publicConfig.appName} />;
   }
 
   const client = React.useMemo(
@@ -1832,7 +2075,7 @@ function Bootstrap() {
       .enqueue({
         rpc: "ui_log_events_v1",
         args: {
-          p_events: [
+          p_events: normalizeMobileUiEvents([
             {
               event_type: "mobile_boot",
               captured_at: new Date().toISOString(),
@@ -1841,7 +2084,7 @@ function Bootstrap() {
                 app: "fieldops",
               },
             },
-          ],
+          ]),
           p_app: "mobile",
         },
       })
@@ -1869,6 +2112,12 @@ function Bootstrap() {
         appName={publicConfig.appName}
         client={client}
         methods={publicConfig.authMethods}
+        driverSignupEndpoint={driverSignupRuntime.signupEndpoint}
+        driverStatusEndpoint={driverSignupRuntime.statusEndpoint}
+        driverSignupOrigin={driverSignupRuntime.origin}
+        driverSignupRoleOptions={driverSignupRuntime.roleOptions}
+        supabaseAnonKey={publicConfig.supabaseAnonKey}
+        locale={publicConfig.locale}
       />
     );
   }
@@ -1903,25 +2152,138 @@ function Bootstrap() {
   }
 
   return (
-    <BootstrapAuthed
-      ctx={ctxQuery.data}
-      sessionUserId={auth.session.user.id}
-      safeAreaInsets={safeAreaInsets}
+    <BootstrapShellRouter
       publicConfig={publicConfig}
-      storage={storage}
       client={client}
-      uiClient={uiClient}
-      executor={executor}
-      network={network}
-      outboxStore={outboxStore}
-      outbox={outbox}
-      outboxInitSuccess={outboxInitQuery.isSuccess}
-      cacheStore={cacheStore}
-      cacheInitSuccess={cacheInitQuery.isSuccess}
-      outboxCount={outboxCountQuery.data ?? 0}
-      lastSyncSuccessAt={lastSyncSuccessAt}
-      syncErrorCount={syncErrorCount}
-      syncMutation={syncMutation}
+      me={ctxQuery.data.me}
+      v2Outbox={outbox}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mobile V2 production cutover gate.
+//
+// Closes audit P0 #1 (docs/ops/evidence/2026-05-13/mobile-v2-fieldops-parity-audit/
+// README.md). Resolves the row-driven `mobile_shell_policy.v2_enabled`
+// flag via `resolve_mobile_shell_policy` and either:
+//
+//   1. Renders a brief boot splash while the resolver call is in flight
+//   2. Renders `MobileV2NativeShell` when v2Enabled=true
+//   3. Renders a V2-required blocked state on default / error
+//
+// Fail-safe contract: every resolver error path collapses to a visible
+// V2-required block; the boot path must never silently continue on V1.
+// A tenant disabling V2 takes effect on next app open via
+// `UPDATE settings_versions` with no code change required.
+//
+// The resolver call is one round-trip per app open; cached via
+// react-query with a 5-minute stale window. Force-refresh requires
+// reopening the app (which is the rollout contract — flipping a tenant
+// doesn't disrupt active sessions).
+// ---------------------------------------------------------------------------
+
+type BootstrapShellRouterProps = {
+  readonly publicConfig: ReturnType<typeof getPublicConfigFromExpo>;
+  readonly client: ReturnType<typeof createMobileClient>;
+  readonly me: UiMe | null | undefined;
+  readonly v2Outbox: ReturnType<typeof createOutbox>;
+};
+
+function resolveMobileV2ActiveRole(
+  userType: unknown,
+): "driver" | "loader" | "rider" | "supervisor" {
+  if (typeof userType !== "string") return "driver";
+  const normalized = userType.trim().toLowerCase();
+  switch (normalized) {
+    case "loader":
+    case "rider":
+    case "supervisor":
+      return normalized;
+    default:
+      return "driver";
+  }
+}
+
+function MobileV2CutoverBlockedScreen(props: {
+  readonly publicConfig: ReturnType<typeof getPublicConfigFromExpo>;
+  readonly retrying: boolean;
+  readonly onRetry: () => void;
+}): React.ReactElement {
+  const { publicConfig, retrying, onRetry } = props;
+  return (
+    <MobileV2RuntimeBlockerScreen
+      kind="mobileV2Unavailable"
+      appName={publicConfig.appName}
+      retrying={retrying}
+      onRetry={onRetry}
+    />
+  );
+}
+
+function BootstrapShellRouter(props: BootstrapShellRouterProps): React.ReactElement {
+  const { publicConfig, client, me, v2Outbox } = props;
+  const activeRole = React.useMemo(
+    () => resolveMobileV2ActiveRole(me?.user?.user_type ?? null),
+    [me?.user?.user_type],
+  );
+  const policyContext = React.useMemo(() => buildPolicyContextFromMe(me), [me]);
+
+  // Boot-policy query. Returns a typed envelope; never throws (the
+  // resolver wraps errors into the safe V1 default). We keep the query
+  // bounded to a single in-flight call per app open unless the visible
+  // blocked-state retry is pressed. staleTime: Infinity prevents
+  // incidental mid-session re-queries.
+  const bootPolicyQuery = useQuery<MobileShellPolicyEnvelope>({
+    queryKey: ["fieldops", "v2", "boot-policy", me?.user?.id ?? null, policyContext],
+    queryFn: () =>
+      resolveMobileShellPolicy({
+        supabase: client as unknown as Parameters<typeof resolveMobileShellPolicy>[0]["supabase"],
+        activeRole,
+        context: policyContext,
+      }),
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: 0, // resolver already swallows errors into fail-safe payload
+  });
+
+  // Brief boot splash while resolving — bounded by the resolver's own
+  // 4 s timeout, so this never blocks indefinitely. Mirrors the V1
+  // bootstrapping splash for visual continuity.
+  if (bootPolicyQuery.isLoading) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>{publicConfig.appName}</Text>
+        <Text style={styles.subtitle}>Resolving shell policy...</Text>
+      </View>
+    );
+  }
+
+  const policy = bootPolicyQuery.data;
+  const mountDecision = resolveMobileShellMountDecision(policy);
+  if (mountDecision.kind === "blocked") {
+    return (
+      <MobileV2CutoverBlockedScreen
+        publicConfig={publicConfig}
+        retrying={bootPolicyQuery.isFetching}
+        onRetry={() => {
+          void bootPolicyQuery.refetch();
+        }}
+      />
+    );
+  }
+
+  return (
+    <MobileV2NativeShell
+      supabase={client as unknown as React.ComponentProps<typeof MobileV2NativeShell>["supabase"]}
+      activeRole={activeRole}
+      outbox={v2Outbox as unknown as React.ComponentProps<typeof MobileV2NativeShell>["outbox"]}
+      // E15: the settings-ladder resolvers (ui_navigation, mobile_*_policy)
+      // derive the tenant org strictly from `policyContext.organization_id`.
+      // An empty context resolves only the Global scope row, silently
+      // dropping every tenant/client/scope override — pass the real caller
+      // context so the override ladder is honoured in the native shell.
+      policyContext={policyContext}
     />
   );
 }
@@ -1999,7 +2361,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const [selectedViewId, setSelectedViewId] = React.useState<string | null>(null);
   const [navOpen, setNavOpen] = React.useState(false);
   const [viewPickerOpen, setViewPickerOpen] = React.useState(false);
-  const [showSystemDetails, setShowSystemDetails] = React.useState(false);
   const [scanContext, setScanContext] = React.useState<DriverScanContext | null>(null);
   const [observedSpeedKph, setObservedSpeedKph] = React.useState(0);
 
@@ -2070,7 +2431,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     setSelectedResourceTitle(null);
     setSelectedViewId(null);
     setViewPickerOpen(false);
-    setShowSystemDetails(false);
   }, [resource, activeScreen]);
 
   const openModuleByKey = React.useCallback(
@@ -2980,7 +3340,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           await outbox.enqueue({
             rpc: "ui_log_events_v1",
             args: {
-              p_events: events,
+              p_events: normalizeMobileUiEvents(events),
               p_app: "mobile",
             },
           });
@@ -3224,10 +3584,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     () => isRouteStopExecutionTask(selectedTaskDetail),
     [selectedTaskDetail]
   );
-
-  React.useEffect(() => {
-    setShowSystemDetails(false);
-  }, [selectedResourceId]);
 
   const selectedTaskActionable = React.useMemo(() => {
     if (Object.keys(selectedTaskDetail).length === 0) return false;
@@ -3620,7 +3976,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       if (upload.error) throw upload.error;
 
       const currentCoordinates = extractCoordinates(detailQuery.data?.detail);
-      const registerResult = await client.rpc("register_mobile_artifact_v1", {
+      const registerResult = await getMobileV2SupabaseSchemaClient(client, "api").rpc("register_mobile_artifact_v1", {
         p_artifact: {
           organization_id: organizationId,
           storage_bucket: composerArtifactBucket,
@@ -3747,17 +4103,24 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       setIsCapturingComposerSignature(true);
       setComposerError(null);
       const svg = buildSignatureSvg(composerSignatureStrokes, composerSignatureLayout);
-      const bytes = encodeAsciiToArrayBuffer(svg);
+      const pngBase64 = buildMobileV2SignaturePngBase64({
+        strokes: composerSignatureStrokes,
+        width: composerSignatureLayout.width,
+        height: composerSignatureLayout.height,
+      });
+      const bytes = decodeBase64ToArrayBuffer(pngBase64);
       const artifact = await registerComposerArtifact({
         bytes,
-        extension: "svg",
-        mimeType: "image/svg+xml",
+        extension: "png",
+        mimeType: "image/png",
         kind: "signature",
         metadata: {
           signature: {
             strokes: composerSignatureStrokes.length,
             width: composerSignatureLayout.width,
             height: composerSignatureLayout.height,
+            render_format: "image/png",
+            svg_preview_bytes: svg.length,
           },
         },
       });
@@ -3794,9 +4157,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         paramsPatch?: Record<string, unknown>;
       }
     ): Promise<ActionSubmissionReceipt> => {
-      if (!resource) throw new Error("Action resource is not selected.");
+      if (!resource) throw new Error("Select an item before running this action.");
       const rpc = command.execution?.rpc ?? "";
-      if (!rpc) throw new Error("Action RPC is missing.");
+      if (!rpc) throw new Error("This action is not available yet.");
 
       const payloadKeyRaw = coerceValueText(command.execution?.payload_key)?.trim();
       const payloadKey = payloadKeyRaw || "payload";
@@ -4218,12 +4581,13 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const enqueueUiEvents = React.useCallback(
     async (events: Array<Record<string, unknown>>) => {
       if (!outboxInitSuccess) return;
-      if (!events.length) return;
+      const normalizedEvents = normalizeMobileUiEvents(events);
+      if (!normalizedEvents.length) return;
 
       await outbox.enqueue({
         rpc: "ui_log_events_v1",
         args: {
-          p_events: events,
+          p_events: normalizedEvents,
           p_app: "mobile",
         },
       });
@@ -4235,6 +4599,48 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       }
     },
     [effectiveOnline, mobileSyncPolicy.enabled, outbox, outboxInitSuccess, queryClient, syncMutation]
+  );
+
+  const logUiEventsWithReadback = React.useCallback(
+    async (events: Array<Record<string, unknown>>): Promise<MobileUiEventLogResult> => {
+      const normalizedEvents = normalizeMobileUiEvents(events);
+      const eventType = firstMobileUiEventType(events);
+      const recordedAt = new Date().toISOString();
+      if (!normalizedEvents.length) {
+        return { status: "retryable_failure", eventCount: 0, recordedAt, eventType };
+      }
+
+      if (effectiveOnline) {
+        try {
+          const { data, error } = await getMobileV2SupabaseSchemaClient(client, "api").rpc("ui_log_events_v1", {
+            p_events: normalizedEvents,
+            p_app: "mobile",
+          });
+          if (error) throw error;
+          queryClient.invalidateQueries({ queryKey: ["ui", "list"] });
+          queryClient.invalidateQueries({ queryKey: ["ui", "detail"] });
+          return resolveMobileUiEventLogReadback({
+            data,
+            expectedEventCount: normalizedEvents.length,
+            recordedAt,
+            eventType,
+          });
+        } catch (error) {
+          if (!isRetriableNetworkError(error) && !isRetriableSupabaseError(error)) {
+            throw error;
+          }
+        }
+      }
+
+      await enqueueUiEvents(normalizedEvents);
+      return {
+        status: effectiveOnline ? "queued_pending_sync" : "queued_offline",
+        eventCount: 0,
+        recordedAt,
+        eventType,
+      };
+    },
+    [client, effectiveOnline, enqueueUiEvents, queryClient]
   );
 
   const telemetryFlushActiveRef = React.useRef(false);
@@ -5301,7 +5707,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                       platform={effectiveMobilePlatform}
                       routeExecutionManifest={routeExecutionManifestQuery.data}
                       isConfirmingRouteDeparture={confirmRouteDepartureMutation.isPending}
-                      onEnqueueUiEvents={enqueueUiEvents}
+                      onLogUiEvents={logUiEventsWithReadback}
                       onOpenScan={() => {
                         if (!detailQuery.data?.detail) return;
                         setScanContext(extractScanContext(detailQuery.data.detail, selectedResourceId));
@@ -5353,34 +5759,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                       </Text>
                     </View>
                   ) : null}
-                  <Pressable
-                    accessibilityRole="button"
-                    testID="mobile-detail-toggle-system"
-                    onPress={() => setShowSystemDetails((current) => !current)}
-                    style={({ pressed }) => [
-                      styles.secondaryButton,
-                      { marginTop: 12 },
-                      pressed && styles.navItemPressed,
-                    ]}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {showSystemDetails ? "Hide system details" : "Show system details"}
-                    </Text>
-                  </Pressable>
-                  {showSystemDetails ? (
-                    <View style={[styles.noticeCard, { marginTop: 12 }]}>
-                      <Text style={styles.noticeText}>System details</Text>
-                      {Object.entries(detailQuery.data.detail).map(([key, value]) => (
-                        <View key={key} style={styles.detailRow}>
-                          <Text style={styles.detailKey}>{formatKeyLabel(key)}</Text>
-                          <Text style={styles.detailValue}>{formatDetailValue(value)}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : null}
                 </ScrollView>
               ) : (
-                <Text style={styles.subtitle}>No detail payload.</Text>
+                <Text style={styles.subtitle}>No details available.</Text>
               )}
 
               {availableActions.length ? (
@@ -5683,9 +6064,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               toggleValue={diagnosticsToggleQuery.data ?? null}
               defaultOn={diagnosticsDefaultOn}
               policyRow={diagnosticsPolicyQuery.data}
-              cacheStore={cacheStore}
               outboxStore={outboxStore}
-              storage={storage}
               onToggle={async (next) => {
                 await cacheStore.set(KV_KEYS.diagnosticsEnabled, next);
                 queryClient.invalidateQueries({ queryKey: ["kv", "get", KV_KEYS.diagnosticsEnabled] });
@@ -6400,7 +6779,7 @@ function ScanScreen({
           ]}
         >
           <Text style={styles.primaryButtonText}>
-            {isQueueingScan ? "Queueing..." : "Queue scan"}
+            {isQueueingScan ? "Saving..." : "Save scan"}
           </Text>
         </Pressable>
       </View>
@@ -6454,19 +6833,16 @@ function ScanScreen({
               Context: {lastQueuedScan.contextLabel}
             </Text>
           ) : null}
-          <Text style={[styles.mono, { textAlign: "left", marginTop: 8 }]}>
-            queue_id:{lastQueuedScan.id}
-          </Text>
+          <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>Saved for sync.</Text>
         </View>
       ) : null}
 
       {diagnosticsEnabled ? (
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeText}>Policy context</Text>
+          <Text style={styles.noticeText}>Support state</Text>
           <Text style={styles.noticeSubtext}>
-            scan_input_mode: {effectiveScanInputMode}
+            Scan input: {formatKeyLabel(effectiveScanInputMode)}
           </Text>
-          <Text style={styles.mono}>{stableStringify(policyContext)}</Text>
         </View>
       ) : null}
     </ScrollView>
@@ -6855,7 +7231,7 @@ function LocationScreen({
         <Text style={styles.noticeText}>Background tracking</Text>
         <Text style={styles.noticeSubtext}>{backgroundStatusText}</Text>
         <Text style={styles.noticeSubtext}>
-          Outbox-driven updates via task manager.
+          Location updates retry automatically when the device is online.
         </Text>
       </View>
 
@@ -6863,7 +7239,8 @@ function LocationScreen({
         <Text style={styles.noticeText}>Latest capture</Text>
         {position?.coords ? (
           <Text style={styles.mono}>
-            lat={position.coords.latitude} lng={position.coords.longitude} acc={position.coords.accuracy ?? "?"} speed_kph={speedMpsToKph(position.coords.speed)}
+            Coordinates: {position.coords.latitude}, {position.coords.longitude} - Accuracy{" "}
+            {position.coords.accuracy ?? "?"} m - Speed {speedMpsToKph(position.coords.speed)} kph
           </Text>
         ) : (
           <Text style={styles.noticeSubtext}>No location captured.</Text>
@@ -6903,15 +7280,17 @@ function LocationScreen({
           ]}
         >
           <Text style={styles.primaryButtonText}>
-            {isQueueingPing ? "Queueing..." : "Queue ping"}
+            {isQueueingPing ? "Saving..." : "Save location"}
           </Text>
         </Pressable>
       </View>
 
       {diagnosticsEnabled ? (
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeText}>Policy context</Text>
-          <Text style={styles.mono}>{stableStringify(policyContext)}</Text>
+          <Text style={styles.noticeText}>Support state</Text>
+          <Text style={styles.noticeSubtext}>
+            Location capture is {trackingEnabled ? "available" : "unavailable"}.
+          </Text>
         </View>
       ) : null}
     </ScrollView>
@@ -7056,7 +7435,7 @@ function MoreScreen({
       <View style={styles.screenHeader}>
         <View style={styles.screenHeaderText}>
           <Text style={styles.resourceTitle}>More</Text>
-          <Text style={styles.resourceSubtitle}>Policy-driven shell controls</Text>
+          <Text style={styles.resourceSubtitle}>Driver tools and preferences</Text>
         </View>
       </View>
 
@@ -7130,7 +7509,7 @@ function MoreScreen({
             onPress={() => onOpenModule("diagnostics")}
             style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
           >
-            <Text style={styles.secondaryButtonText}>Open diagnostics</Text>
+            <Text style={styles.secondaryButtonText}>Open support tools</Text>
           </Pressable>
         </View>
       </View>
@@ -7143,7 +7522,7 @@ function MoreScreen({
             : "No active driver shift on this device."}
         </Text>
         <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-          Readiness: auth ok - {canStartShift ? "device online" : "connect online and register device"}
+          Readiness: signed in - {canStartShift ? "device online" : "connect online and register device"}
         </Text>
         <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
           <Pressable
@@ -7255,7 +7634,7 @@ function MoreScreen({
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Visibility mode</Text>
+        <Text style={styles.noticeText}>Visible work</Text>
         <View style={styles.screenActionsRow}>
           {visibilityPolicy.allowedVisibility.map((mode) => (
             <Pressable
@@ -7297,14 +7676,14 @@ function MoreScreen({
           ))}
         </View>
         <Text style={styles.noticeSubtext}>
-          Clustering: {mapPolicy.clusteringEnabled ? "enabled" : "disabled"} (grid {mapPolicy.clusteringGridPx}px, min {mapPolicy.clusteringMinCount})
+          Map grouping: {mapPolicy.clusteringEnabled ? "on" : "off"}
         </Text>
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Diagnostics</Text>
+        <Text style={styles.noticeText}>Support mode</Text>
         <Text style={styles.noticeSubtext}>
-          Default {diagnosticsDefaultOn ? "on" : "off"}{diagnosticsAllowToggle ? ", user toggle enabled" : ", user toggle disabled"}
+          Default {diagnosticsDefaultOn ? "on" : "off"}{diagnosticsAllowToggle ? ", can be changed here" : ", managed by policy"}
         </Text>
         {diagnosticsAllowToggle ? (
           <View style={styles.screenActionsRow}>
@@ -7320,7 +7699,7 @@ function MoreScreen({
               ]}
             >
               <Text style={styles.secondaryButtonText}>
-                Diagnostics {diagnosticsEnabled ? "ON" : "OFF"}
+                Support mode {diagnosticsEnabled ? "ON" : "OFF"}
               </Text>
             </Pressable>
           </View>
@@ -7398,15 +7777,15 @@ function MoreScreen({
         ) : null}
         {diagnosticsEnabled ? (
           <View style={{ marginTop: 10 }}>
-            <Text style={styles.noticeSubtext}>Recent outbox entries</Text>
+            <Text style={styles.noticeSubtext}>Recent queued actions</Text>
             {outboxPreviewQuery.data?.length ? (
               outboxPreviewQuery.data.map((entry) => (
                 <Text key={entry.id} style={styles.mono}>
-                  {entry.status} - {entry.rpc}
+                  {formatKeyLabel(entry.status)} action
                 </Text>
               ))
             ) : (
-              <Text style={styles.noticeSubtext}>No recent outbox entries.</Text>
+              <Text style={styles.noticeSubtext}>No recent queued actions.</Text>
             )}
           </View>
         ) : null}
@@ -7428,7 +7807,7 @@ function MoreScreen({
         {diagnosticsEnabled ? (
           <View style={{ marginTop: 8 }}>
             <Text style={styles.noticeSubtext}>
-              Diagnostics speed override:{" "}
+              Support speed override:{" "}
               {simulatedSpeedKph == null ? "off" : `${simulatedSpeedKph} kph`}
             </Text>
             <View style={[styles.screenActionsRow, { marginTop: 8 }]}>
@@ -7465,21 +7844,21 @@ function MoreScreen({
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>UX safety</Text>
+        <Text style={styles.noticeText}>Action safety</Text>
         <Text style={styles.noticeSubtext}>
           Double-tap actions: {uxSafetyPolicy.requireDoubleTapFor.join(", ")}
         </Text>
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Communication channels</Text>
+        <Text style={styles.noticeText}>Available contact channels</Text>
         <Text style={styles.noticeSubtext}>{communicationPolicy.allowedChannels.join(", ")}</Text>
       </View>
 
       <View style={styles.noticeCard}>
         <Text style={styles.noticeText}>Address display</Text>
         <Text style={styles.noticeSubtext}>
-          Fields: {addressPolicy.fields.map((field) => field.key).join(", ")}
+          Address format follows the active workspace policy.
         </Text>
         <Text style={styles.noticeSubtext}>
           Coordinates {addressPolicy.showCoordinates ? "on" : "off"} - Accuracy{" "}
@@ -7490,15 +7869,15 @@ function MoreScreen({
       <View style={styles.noticeCard}>
         <Text style={styles.noticeText}>Platform and navigation</Text>
         <Text style={styles.noticeSubtext}>
-          Runtime platform: {runtimePlatform}
+          Device platform: {runtimePlatform}
         </Text>
         <Text style={styles.noticeSubtext}>
-          Effective platform: {effectivePlatform}
+          Navigation platform: {effectivePlatform}
         </Text>
         {diagnosticsEnabled ? (
           <View style={{ marginTop: 8 }}>
             <Text style={styles.noticeSubtext}>
-              Platform override: {platformOverride ?? "off (runtime)"}
+              Support platform override: {platformOverride ?? "off"}
             </Text>
             <View style={[styles.screenActionsRow, { marginTop: 8 }]}>
               {devicePolicy.allowedPlatforms.map((platformMode) => (
@@ -7528,16 +7907,16 @@ function MoreScreen({
                   pressed && styles.navItemPressed,
                 ]}
               >
-                <Text style={styles.chipText}>Use runtime</Text>
+                <Text style={styles.chipText}>Use device</Text>
               </Pressable>
             </View>
           </View>
         ) : null}
         <Text style={styles.noticeSubtext}>
-          Allowed platforms: {devicePolicy.allowedPlatforms.join(", ")}
+          Supported platforms: {devicePolicy.allowedPlatforms.join(", ")}
         </Text>
         <Text style={styles.noticeSubtext}>
-          Route provider:{" "}
+          Navigation opens with:{" "}
           {navigationPolicy.providerByPlatform[effectivePlatform] ??
             navigationPolicy.providerByPlatform.android}
         </Text>
@@ -7556,9 +7935,7 @@ function DiagnosticsScreen({
   toggleValue,
   defaultOn,
   policyRow,
-  cacheStore,
   outboxStore,
-  storage,
   onToggle,
   onClearLocal,
   onRetryDeviceRegistration,
@@ -7572,9 +7949,7 @@ function DiagnosticsScreen({
   toggleValue: boolean | null;
   defaultOn: boolean;
   policyRow: unknown;
-  cacheStore: ReturnType<typeof createSqliteKeyValueStore>;
   outboxStore: ReturnType<typeof createSqliteOutboxStore>;
-  storage: MobileStorageAdapter;
   onToggle: (next: boolean) => Promise<void>;
   onClearLocal: () => Promise<void>;
   onRetryDeviceRegistration: () => void;
@@ -7609,7 +7984,7 @@ function DiagnosticsScreen({
     try {
       await action();
     } catch {
-      Alert.alert("Diagnostics action failed", "Please retry this operation.");
+      Alert.alert("Support action failed", "Please retry this operation.");
     } finally {
       diagnosticActionRef.current = false;
       setBusy(false);
@@ -7643,9 +8018,9 @@ function DiagnosticsScreen({
     <ScrollView contentContainerStyle={styles.screen}>
       <View style={styles.screenHeader}>
         <View style={styles.screenHeaderText}>
-          <Text style={styles.resourceTitle}>Diagnostics</Text>
+          <Text style={styles.resourceTitle}>Support tools</Text>
           <Text style={styles.resourceSubtitle}>
-            {policyEnabled ? "Policy enabled" : "Disabled by policy"} -{" "}
+            {policyEnabled ? "Available" : "Managed by policy"} -{" "}
             {formatConnectivityStatusLabel(connectivityStatus).toLowerCase()}
           </Text>
         </View>
@@ -7654,7 +8029,7 @@ function DiagnosticsScreen({
       <View style={styles.noticeCard}>
         <Text style={styles.noticeText}>Session</Text>
         <Text style={styles.noticeSubtext}>
-          {me?.user?.email ?? "unknown"} - scope {me?.access_scope?.scope_type ?? "?"}
+          {me?.user?.email ?? "unknown"} - access {formatKeyLabel(me?.access_scope?.scope_type ?? "unknown")}
         </Text>
         <Text style={styles.noticeSubtext}>
           Device: {deviceId ? "registered" : "missing"} - Outbox pending: {outboxCount}
@@ -7686,21 +8061,21 @@ function DiagnosticsScreen({
           style={({ pressed }) => [styles.noticeCard, pressed && styles.navItemPressed]}
         >
           <Text style={styles.noticeText}>
-            Diagnostics {userToggle ? "ON" : "OFF"}
+            Support mode {userToggle ? "ON" : "OFF"}
           </Text>
           <Text style={styles.noticeSubtext}>
-            Tap to toggle (default {defaultOn ? "on" : "off"})
+            Tap to change support mode (default {defaultOn ? "on" : "off"})
           </Text>
         </Pressable>
       ) : (
         <View style={styles.noticeCard}>
           <Text style={styles.noticeText}>
-            Diagnostics {effectiveDiagnosticsOn ? "ON" : "OFF"}
+            Support mode {effectiveDiagnosticsOn ? "ON" : "OFF"}
           </Text>
           <Text style={styles.noticeSubtext}>
             {policyEnabled
-              ? "Toggles disabled by policy."
-              : "Diagnostics are disabled by policy."}
+              ? "Changes are managed by policy."
+              : "Support mode is managed by policy."}
           </Text>
         </View>
       )}
@@ -7722,23 +8097,16 @@ function DiagnosticsScreen({
       {effectiveDiagnosticsOn ? (
         <>
           <View style={styles.noticeCard}>
-            <Text style={styles.noticeText}>Outbox stats</Text>
-            <Text style={styles.mono}>{stableStringify(outboxStatsQuery.data ?? {})}</Text>
-          </View>
-          <View style={styles.noticeCard}>
-            <Text style={styles.noticeText}>Diagnostics policy row</Text>
-            <Text style={styles.mono} numberOfLines={10}>
-              {stableStringify(policyRow)}
-            </Text>
-          </View>
-          <View style={styles.noticeCard}>
-            <Text style={styles.noticeText}>Local keys</Text>
-            <Text style={styles.mono}>
-              secure:{STORAGE_KEYS.deviceId},{STORAGE_KEYS.deviceInstallId},{STORAGE_KEYS.attestationKeyId} -
-              kv:{KV_KEYS.diagnosticsEnabled},{KV_KEYS.routeView},{KV_KEYS.scanInputMode},
-              {KV_KEYS.platformOverride},{KV_KEYS.simulatedOffline},{KV_KEYS.simulatedSpeedKph},
-              {KV_KEYS.localeMode},{KV_KEYS.directionMode},{KV_KEYS.themeMode}
-            </Text>
+            <Text style={styles.noticeText}>Queued action summary</Text>
+            {Object.entries(outboxStatsQuery.data ?? {}).length ? (
+              Object.entries(outboxStatsQuery.data ?? {}).map(([status, count]) => (
+                <Text key={status} style={styles.noticeSubtext}>
+                  {formatKeyLabel(status)}: {count}
+                </Text>
+              ))
+            ) : (
+              <Text style={styles.noticeSubtext}>No queued actions.</Text>
+            )}
           </View>
         </>
       ) : null}
@@ -7758,7 +8126,7 @@ function RouteSurfaceDetailExtensions({
   platform,
   routeExecutionManifest,
   isConfirmingRouteDeparture,
-  onEnqueueUiEvents,
+  onLogUiEvents,
   onOpenScan,
   onOpenRouteScan,
   onConfirmRouteDeparture,
@@ -7774,7 +8142,7 @@ function RouteSurfaceDetailExtensions({
   platform: "android" | "ios" | "scanner";
   routeExecutionManifest: Record<string, unknown> | null | undefined;
   isConfirmingRouteDeparture: boolean;
-  onEnqueueUiEvents: (events: Array<Record<string, unknown>>) => Promise<void>;
+  onLogUiEvents: (events: Array<Record<string, unknown>>) => Promise<MobileUiEventLogResult>;
   onOpenScan: () => void;
   onOpenRouteScan: () => void;
   onConfirmRouteDeparture: () => void;
@@ -7810,6 +8178,8 @@ function RouteSurfaceDetailExtensions({
       : null;
   const [isExecutingRouteAction, setIsExecutingRouteAction] = React.useState(false);
   const isExecutingRouteActionRef = React.useRef(false);
+  const [lastRouteEventReadback, setLastRouteEventReadback] =
+    React.useState<MobileUiEventLogResult | null>(null);
   const expectedStopCount =
     coerceValueNumber(scanOut.expected_stop_count) ?? coerceValueNumber(routeManifest.stop_count);
   const scannedStopCount = coerceValueNumber(scanOut.scanned_stop_count);
@@ -7866,7 +8236,7 @@ function RouteSurfaceDetailExtensions({
           Alert.alert("Action unavailable", input.unavailableMessage);
         }
 
-        await onEnqueueUiEvents([
+        const readback = await onLogUiEvents([
           {
             event_type: input.eventType,
             captured_at: new Date().toISOString(),
@@ -7879,9 +8249,10 @@ function RouteSurfaceDetailExtensions({
             },
           },
         ]);
+        setLastRouteEventReadback(readback);
       });
     },
-    [interactionLocked, onEnqueueUiEvents, platform, withRouteActionLock]
+    [interactionLocked, onLogUiEvents, platform, withRouteActionLock]
   );
 
   const statusChips = [
@@ -8135,14 +8506,21 @@ function RouteSurfaceDetailExtensions({
           Phone: {phone ?? "No phone on file"}
         </Text>
         <Text style={styles.noticeSubtext}>
-          Provider: {navigationProvider}
+          Navigation: {formatKeyLabel(navigationProvider)}
           {coordinates
-            ? ` - lat ${coordinates.latitude.toFixed(6)} - lng ${coordinates.longitude.toFixed(6)}`
+            ? ` - Coordinates ${coordinates.latitude.toFixed(6)}, ${coordinates.longitude.toFixed(6)}`
             : " - no coordinates"}
         </Text>
         {interactionLocked ? (
           <Text style={[styles.noticeSubtext, { marginTop: 6 }]}>
             Driving lock is active. Stop moving to run actions.
+          </Text>
+        ) : null}
+        {lastRouteEventReadback ? (
+          <Text style={[styles.noticeSubtext, { marginTop: 6 }]}>
+            Action logged: {formatKeyLabel(lastRouteEventReadback.status)} -{" "}
+            {lastRouteEventReadback.eventCount} update
+            {lastRouteEventReadback.eventCount === 1 ? "" : "s"}
           </Text>
         ) : null}
         <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
@@ -8215,7 +8593,7 @@ function RouteSurfaceDetailExtensions({
         <View style={[styles.noticeCard, { marginTop: 12 }]}>
           <Text style={styles.noticeText}>Support contacts</Text>
           <Text style={styles.noticeSubtext}>
-            Policy and assignment contacts from the active route context.
+            Contacts available for this route.
           </Text>
           {supportContacts.map((contact) => {
             return (
@@ -8347,8 +8725,8 @@ function RouteSurfaceDetailExtensions({
           <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>No recipient details</Text>
         ) : null}
         {diagnosticsEnabled ? (
-          <Text style={[styles.mono, { textAlign: "left", marginTop: 8 }]}>
-            contact:{customerName || "-"} - phone:{phone ?? "-"} - route_run:{routeContext.routeRunId ?? "-"}
+          <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>
+            Support summary: contact {customerName || "-"} - phone {phone ?? "-"}.
           </Text>
         ) : null}
       </View>
@@ -9704,21 +10082,14 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     textAlign: "center",
   },
-  methodRow: { flexDirection: "row", gap: 10, marginTop: 18 },
-  methodChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#e5e5e5",
-    backgroundColor: "#fff",
+  cutoverRetryButton: {
+    marginTop: 8,
+    minWidth: 160,
   },
   methodChipActive: {
     borderColor: "#2b6cb0",
     backgroundColor: "#f0f7ff",
   },
-  methodChipText: { fontSize: 12, fontWeight: "700" },
-  form: { width: "100%", maxWidth: 420, marginTop: 18, gap: 12 },
   input: {
     borderWidth: 1,
     borderColor: FIELDOPS_TOKENS.color.border,
@@ -9756,7 +10127,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontFamily: FIELDOPS_TOKENS.font.sans,
   },
-  authError: { marginTop: 10, color: "#b00020", fontSize: 12, textAlign: "center" },
   secondaryButton: {
     paddingHorizontal: 14,
     paddingVertical: 12,

@@ -1943,12 +1943,12 @@ test("print bulk actions expose technical details in the widget without redirect
   await submitBulkActionConfirm(user);
 
   await screen.findByText("Couldn't prepare download");
-  await user.click(screen.getByRole("button", { name: "Technical details" }));
+  await user.click(screen.getByRole("button", { name: "Support details" }));
 
   await waitFor(() => {
-    expect(screen.getByText("Workflow run: run-details")).toBeInTheDocument();
-    expect(screen.getByText("Timing source: stage_execute_ms")).toBeInTheDocument();
-    expect(screen.getByText("Output source: context")).toBeInTheDocument();
+    expect(screen.getByText("Activity reference: run-details")).toBeInTheDocument();
+    expect(screen.getByText("Timing details: Recorded stage timing")).toBeInTheDocument();
+    expect(screen.getByText("File source: Saved workflow output")).toBeInTheDocument();
     expect(navigateToMock).not.toHaveBeenCalled();
   });
 

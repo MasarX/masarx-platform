@@ -55,6 +55,37 @@ describe("BlockCatalogSidebar", () => {
     expect(block.type).toBe("text");
   });
 
+  it("keeps add and drag actions disabled in read-only mode", () => {
+    const { onAddBlock } = renderCatalog({ readOnly: true });
+    const textBtn = screen.getByText("Text");
+    const fieldBtn = screen.getByText("shipment.tracking_number").closest("button") as HTMLButtonElement;
+    const assetBtn = screen.getByText("logo.png").closest("button") as HTMLButtonElement;
+    expect(textBtn).toBeDisabled();
+    expect(fieldBtn).toBeDisabled();
+    expect(assetBtn).toBeDisabled();
+
+    fireEvent.click(textBtn);
+    fireEvent.click(fieldBtn);
+    fireEvent.click(assetBtn);
+    expect(onAddBlock).not.toHaveBeenCalled();
+
+    const setData = jest.fn();
+    const preventDefault = jest.fn();
+    fireEvent.dragStart(textBtn, {
+      preventDefault,
+      dataTransfer: { setData, effectAllowed: "" },
+    });
+    fireEvent.dragStart(fieldBtn, {
+      preventDefault,
+      dataTransfer: { setData, effectAllowed: "" },
+    });
+    fireEvent.dragStart(assetBtn, {
+      preventDefault,
+      dataTransfer: { setData, effectAllowed: "" },
+    });
+    expect(setData).not.toHaveBeenCalled();
+  });
+
   it("search filters fields by path", () => {
     const { container } = renderCatalog();
     const searchInput = container.querySelector("[data-testid='block-catalog-search']")!;
