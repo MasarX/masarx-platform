@@ -192,6 +192,9 @@ describe('lib/auth', () => {
     rememberConsoleAuthRedirect('https://evil.example/path');
     expect(consumeConsoleAuthRedirect()).toBe('/');
 
+    rememberConsoleAuthRedirect('/.//evil.example');
+    expect(consumeConsoleAuthRedirect()).toBe('/');
+
     rememberConsoleAuthRedirect('/login');
     expect(consumeConsoleAuthRedirect()).toBe('/');
   });

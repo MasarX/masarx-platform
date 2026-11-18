@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type maplibregl from 'maplibre-gl';
+import type { Map as MapLibreMap, StyleSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   OpenStreetMapTileLayer,
@@ -157,7 +157,7 @@ export function buildOpenMapRasterStyle(
   tileUrlTemplate: string,
   attributionLabel: string | null | undefined,
   bounds: MapBounds,
-): maplibregl.StyleSpecification {
+): StyleSpecification {
   const sourceBounds: [number, number, number, number] = [
     bounds.minLng,
     bounds.minLat,
@@ -201,7 +201,7 @@ export function MapLibreBackdrop({
   className,
 }: MapLibreBackdropProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
   const [ready, setReady] = useState(false);
   const policy = useMemo(
     () =>
@@ -230,12 +230,15 @@ export function MapLibreBackdrop({
       return undefined;
     }
     let cancelled = false;
-    let map: maplibregl.Map | null = null;
+    let map: MapLibreMap | null = null;
 
-    void import('maplibre-gl')
-      .then((mod) => {
+    void Promise.all([
+      import('maplibre-gl'),
+      import('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'),
+    ])
+      .then(([{ Map: MapCtor, setWorkerUrl }, { default: workerUrl }]) => {
         if (cancelled || !containerRef.current) return;
-        const MapCtor = mod.Map ?? mod.default.Map;
+        setWorkerUrl(workerUrl);
         map = new MapCtor({
           container: containerRef.current,
           style: styleSpec,

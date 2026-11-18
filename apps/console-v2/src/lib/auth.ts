@@ -177,6 +177,7 @@ function isSafeConsoleRedirect(path: string): boolean {
       path.startsWith('/') &&
       parsed.pathname.startsWith('/') &&
       !path.startsWith('//') &&
+      !parsed.pathname.startsWith('//') &&
       !isConsoleAuthRoute(parsed.pathname)
     );
   } catch {
