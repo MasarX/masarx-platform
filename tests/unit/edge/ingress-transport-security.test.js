@@ -30,6 +30,10 @@ describe("public ingress transport security", () => {
     }).authAttempts).toEqual([]);
   });
 
+  test("an unset DB JWT requirement fails closed by default", () => {
+    expect(resolveIngressDbAuth({ secretKey: "x" }).authAttempts).toEqual([]);
+  });
+
   test("a modern secret key uses only the apikey header when JWT is optional", () => {
     const auth = resolveIngressDbAuth({
       secretKey: "fixture-secret",
