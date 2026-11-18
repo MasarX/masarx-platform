@@ -224,7 +224,7 @@
     "@expo/plist": {
       "@xmldom/xmldom": "0.8.15"
     },
-    "@storybook/builder-webpack5@10.6.2": {
+    "@storybook/builder-webpack5@10.6.x": {
       "webpack-dev-middleware": "7.4.6"
     },
     "@babel/plugin-transform-modules-systemjs": "7.29.7",
