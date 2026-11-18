@@ -270,27 +270,37 @@ async function main() {
     const shardReports = shardIndices.map(index => ({ sha: aggregateEnv.GITHUB_SHA, shard: shardId(index),
       migrations: 2324, migrationFailed: 0, migrationNotRun: 0,
       ok: true, run: 1, passed: 1, failed: 0, selected: [`${index - 1}_synthetic.sql`], notRun: [], files: [] }));
-    assert.equal(databaseResult(built, shardReports, aggregateEnv).ok, true);
-    const lintFailed = databaseResult({ ...built, ok: false, lint: { ok: false, findings: [finding], ignored: 1 } }, shardReports, aggregateEnv);
+    const inventory = shardReports.flatMap(shard => shard.selected).reverse();
+    const result = (build, shards, env = aggregateEnv) => databaseResult(build, shards, inventory, env);
+    assert.equal(result(built, shardReports).ok, true);
+    const miscoverage = [shardReports[1].selected[0], 'unexpected.sql'];
+    for (const file of miscoverage) {
+      const wrongFiles = [{ ...shardReports[0], selected: [file] }, ...shardReports.slice(1)];
+      const wrongCoverage = result(built, wrongFiles);
+      assert.equal(wrongCoverage.ok, false);
+      assert.match(wrongCoverage.markdown, /pgTAP coverage: FAIL/);
+    }
+    assert.equal(databaseResult(built, shardReports, [...inventory, 'missing.sql'], aggregateEnv).ok, false);
+    const lintFailed = result({ ...built, ok: false, lint: { ok: false, findings: [finding], ignored: 1 } }, shardReports);
     assert.equal(lintFailed.ok, false);
     assert.equal(lintFailed.markdown.includes(finding.function) && lintFailed.markdown.includes(finding.message), true);
     assert.equal(lintFailed.markdown.includes(`| ${shardId(PGTAP_SHARD_COUNT)} | 2324 / 0 | 1 | 1 | 0 | PASS |`), true);
-    assert.equal(databaseResult(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0 }, ...shardReports.slice(1)], aggregateEnv).ok, false);
-    const failedFile = databaseResult(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0,
-      files: [{ file: '0_synthetic.sql', status: 'failed', error: 'tool exit 3\nERROR: synthetic SQL error\nDETAIL: synthetic detail' }] }, ...shardReports.slice(1)], aggregateEnv);
+    assert.equal(result(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0 }, ...shardReports.slice(1)]).ok, false);
+    const failedFile = result(built, [{ ...shardReports[0], ok: false, failed: 1, passed: 0,
+      files: [{ file: '0_synthetic.sql', status: 'failed', error: 'tool exit 3\nERROR: synthetic SQL error\nDETAIL: synthetic detail' }] }, ...shardReports.slice(1)]);
     assert.equal(failedFile.markdown.includes('0_synthetic.sql: ERROR: synthetic SQL error'), true);
-    assert.equal(databaseResult(built, [{ ...shardReports[0], migrations: 2323 }, ...shardReports.slice(1)], aggregateEnv).ok, false);
-    assert.equal(databaseResult(built, shardReports.slice(1), aggregateEnv).ok, false);
-    assert.equal(databaseResult(built, [shardReports[0], ...shardReports.slice(0, -1)], aggregateEnv).ok, false);
-    assert.equal(databaseResult(built, [{ ...shardReports[0], sha: 'b'.repeat(40) }, ...shardReports.slice(1)], aggregateEnv).ok, false);
-    assert.equal(databaseResult(undefined, shardReports, aggregateEnv).ok, false);
-    assert.equal(databaseResult({ ...built, migrationFailed: 1 }, shardReports, aggregateEnv).ok, false);
-    assert.equal(databaseResult(built, shardReports, { ...aggregateEnv, PGTAP_RESULT: 'failure' }).ok, false);
+    assert.equal(result(built, [{ ...shardReports[0], migrations: 2323 }, ...shardReports.slice(1)]).ok, false);
+    assert.equal(result(built, shardReports.slice(1)).ok, false);
+    assert.equal(result(built, [shardReports[0], ...shardReports.slice(0, -1)]).ok, false);
+    assert.equal(result(built, [{ ...shardReports[0], sha: 'b'.repeat(40) }, ...shardReports.slice(1)]).ok, false);
+    assert.equal(result(undefined, shardReports).ok, false);
+    assert.equal(result({ ...built, migrationFailed: 1 }, shardReports).ok, false);
+    assert.equal(result(built, shardReports, { ...aggregateEnv, PGTAP_RESULT: 'failure' }).ok, false);
     const absentEnv = { ...aggregateEnv, DATABASE_PRESENT: 'false' };
-    assert.equal(databaseResult(undefined, [], absentEnv).ok, true);
-    assert.equal(databaseResult(undefined, [], { ...absentEnv, PGTAP_RESULT: 'failure' }).ok, false);
-    assert.equal(databaseResult(undefined, [], { ...absentEnv, PGTAP_RESULT: 'skipped' }).ok, false);
-    assert.equal(databaseResult(undefined, shardReports, absentEnv).ok, false);
+    assert.equal(databaseResult(undefined, [], [], absentEnv).ok, true);
+    assert.equal(databaseResult(undefined, [], [], { ...absentEnv, PGTAP_RESULT: 'failure' }).ok, false);
+    assert.equal(databaseResult(undefined, [], [], { ...absentEnv, PGTAP_RESULT: 'skipped' }).ok, false);
+    assert.equal(databaseResult(undefined, shardReports, [], absentEnv).ok, false);
     const aggregateDir = path.join(temp, 'aggregate');
     const fixture = (file, value) => {
       const target = path.join(aggregateDir, 'ci-reports/database-result', file);
@@ -298,6 +308,9 @@ async function main() {
     };
     fs.mkdirSync(path.join(aggregateDir, 'config/ci'), { recursive: true });
     fs.writeFileSync(path.join(aggregateDir, 'config/ci/pgtap-accepted-failures.json'), '[]');
+    const pgtapDir = path.join(aggregateDir, 'supabase/tests/pgtap');
+    fs.mkdirSync(pgtapDir, { recursive: true });
+    for (const file of inventory) fs.writeFileSync(path.join(pgtapDir, file), '');
     fixture('build/backend.json', built);
     for (const index of shardIndices) fixture(`shards/pgtap-summary-${index}-123-1/pgtap.json`, shardReports[index - 1]);
     const aggregateSummary = path.join(temp, 'aggregate.md');

@@ -6,7 +6,7 @@ const { sanitize } = require('./diagnostics.cjs');
 
 const PGTAP_SHARD_COUNT = 12;
 const cell = value => sanitize(value ?? 'UNKNOWN').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ');
-function databaseResult(build, shards, env = process.env, entries = []) {
+function databaseResult(build, shards, inventory, env = process.env, entries = []) {
   let ok = env.BUILD_RESULT === 'success';
   if (env.DATABASE_PRESENT === 'false') return { ok: ok && env.PGTAP_RESULT === 'success' && shards.length === 0, markdown: 'Database subject absent; pgTAP skipped by design.\n' };
   ok = ok && env.DATABASE_PRESENT === 'true' && env.PGTAP_RESULT === 'success'
@@ -31,10 +31,16 @@ function databaseResult(build, shards, env = process.env, entries = []) {
     const passed = shard?.sha === env.GITHUB_SHA && shard?.ok === true && shard?.failed === 0
       && shard?.migrations === build?.migrationTotal && shard?.migrationFailed === 0 && shard?.migrationNotRun === 0
       && Number.isInteger(shard?.run) && shard.run > 0 && shard.run === shard.passed
-      && shard.run === shard.selected?.length && shard.notRun?.length === 0;
+      && Array.isArray(shard.selected) && shard.run === shard.selected.length && shard.notRun?.length === 0;
     ok = ok && passed;
     lines.push(`| ${key} | ${cell(shard?.migrations)} / ${cell(shard?.migrationFailed)} | ${cell(shard?.run)} | ${cell(shard?.passed)} | ${cell(shard?.failed)} | ${passed ? 'PASS' : 'FAIL / MISSING'} |`);
   }
+  const expected = inventory.filter(file => /\.sql$/i.test(file)).sort();
+  const selected = shards.flatMap(shard => Array.isArray(shard.selected) ? shard.selected : []).sort();
+  const coverage = expected.length > 0 && expected.length === selected.length
+    && expected.every((file, index) => file === selected[index]);
+  ok = ok && coverage;
+  lines.push('', `pgTAP coverage: ${coverage ? 'PASS' : 'FAIL'} (${selected.length} selected, ${expected.length} expected)`);
   for (const shard of shards) {
     if (shard.failure) lines.push('', `${cell(shard.shard)}: ${cell(shard.failure.message)}`);
     for (const file of shard.files || []) if (file.status === 'failed') {
@@ -72,11 +78,14 @@ function main() {
   const builds = process.env.DATABASE_PRESENT === 'true' ? latest(path.join(root, 'build'), 'backend.json') : [];
   const build = builds.length === 1 ? builds[0] : undefined;
   const shards = latest(path.join(root, 'shards'), 'pgtap.json');
-  let entries = [];
+  let entries = []; let inventory = [];
   if (process.env.DATABASE_PRESENT === 'true') {
-    try { entries = loadExceptions(); } catch (error) { errors.push(sanitize(error.message)); }
+    try {
+      entries = loadExceptions();
+      inventory = fs.readdirSync('supabase/tests/pgtap');
+    } catch (error) { errors.push(sanitize(error.message)); }
   }
-  const result = databaseResult(build, shards, process.env, entries);
+  const result = databaseResult(build, shards, inventory, process.env, entries);
   const markdown = result.markdown + errors.map(error => `\nReport error: ${cell(error)}\n`).join('');
   console.log(markdown);
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown);
