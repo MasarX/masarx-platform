@@ -58,7 +58,7 @@ BEGIN
 
   PERFORM is(
     COALESCE((
-      SELECT value->>'relation'
+      SELECT value->>'read_relation'
       FROM jsonb_array_elements(public.ui_read_registry_v1()->'resources') AS value
       WHERE value->>'key' = 'operation_handlers'
       LIMIT 1

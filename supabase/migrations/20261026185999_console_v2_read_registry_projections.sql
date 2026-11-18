@@ -382,6 +382,15 @@ BEGIN
     v_resources := '[]'::jsonb;
     FOR v_resource IN SELECT value FROM jsonb_array_elements(v_row.value->'resources') LOOP
       v_key := v_resource->>'key';
+      IF v_key = 'operation_handlers'
+         AND v_resource->>'relation' = 'public.v_operation_handler_directory'
+         AND v_resource->>'write_relation' = 'public.operation_handlers'
+         AND NOT (v_resource ? 'read_relation') THEN
+        v_resource := v_resource || jsonb_build_object(
+          'relation', 'public.operation_handlers',
+          'read_relation', 'public.v_operation_handler_directory'
+        );
+      END IF;
       IF NOT (v_resource ? 'select') OR v_resource->'select' = '[]'::jsonb THEN
         IF NOT COALESCE(v_key = ANY(v_dev_additions), FALSE) THEN
           IF NOT COALESCE(v_columns ? v_key, FALSE) THEN
