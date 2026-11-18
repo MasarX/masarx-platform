@@ -26,6 +26,7 @@ export const EN_STRINGS = {
   },
   bootstrap: {
     v2Disabled: "FieldOps V2 is not enabled for this workspace.",
+    missing_public_configuration: "Missing public configuration.",
   },
   wallet: {
     title: "Driver wallet",
@@ -260,6 +261,24 @@ export const EN_STRINGS = {
     syncNow: "Sync now",
     back: "Back",
     menuToggle: "Menu",
+    outbox_label: "Outbox",
+    sync_now: "Sync now",
+    menu_toggle: "Menu",
+    home: "Home",
+    offline_mode: "Offline mode",
+    connectivity_degraded: "Connectivity degraded",
+    outbox_needs_attention: "Outbox needs attention",
+    outbox_count: (n: number) => `Outbox: ${n}`,
+    unavailable: "Unavailable",
+    locked_while_moving: "Locked while moving",
+    unsupported_route: "Unsupported navigation route.",
+    network_label: "Network",
+    pending_actions: "Pending actions",
+    force_online: "Force online",
+    force_offline: "Force offline",
+    use_network: "Use network",
+    forced_offline_suffix: "(forced offline)",
+    forced_online_suffix: "(forced online)",
   },
   tasks: {
     title: "Tasks",
@@ -267,6 +286,7 @@ export const EN_STRINGS = {
     empty: "No items available.",
     loading: "Loading tasks...",
     itemsCount: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
+    items_count: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
   },
   route: {
     departureRequest: "Request departure",
@@ -287,6 +307,10 @@ export const EN_STRINGS = {
     closeoutScope: "Parcel reconciliation is scoped to this route.",
     settlementBoundaryTitle: "Driver-shift settlement",
     settlementBoundary: "Settlement identity and window stay on the separate Settlements record. No settlement is inferred for this route.",
+    empty_title: "No assigned stops",
+    empty_subtitle: "You don't have any route stops assigned right now. New stops will appear here as they're scheduled.",
+    view_list: "List",
+    view_map: "Overview",
   },
   scan: {
     returnUnavailable: "Scan unavailable",
@@ -326,12 +350,19 @@ export const EN_STRINGS = {
     queue: "Queue scan",
     queueing: "Queueing...",
     drivingLocked: "Driving lock is active. Stop moving to scan.",
+    mode_camera: "Camera",
+    mode_scanner: "Scanner",
+    barcode_placeholder: "Barcode",
+    open_camera: "Open camera",
+    close_camera: "Close camera",
+    driving_locked: "Driving lock is active. Stop moving to scan.",
   },
   outbox: {
     title: "Outbox",
     empty: "Outbox is empty.",
     pending: (n: number) => `Pending: ${n}`,
     clearDead: "Clear dead",
+    clear_dead: "Clear dead",
   },
   settlements: {
     title: "Settlements",
@@ -342,6 +373,8 @@ export const EN_STRINGS = {
     countQueuedTitle: "Count queued",
     countQueuedMessage:
       "The counted amount was queued to the settlement ledger and will sync when you're online.",
+    count_queued_title: "Count queued",
+    count_queued_message: "The counted amount was queued to the settlement ledger and will sync when you're online.",
   },
   confirm: {
     signOutTitle: "Sign out",
@@ -354,6 +387,14 @@ export const EN_STRINGS = {
       "Ending the shift closes your ops session and stops further assignments. Make sure every stop is completed or handed off.",
     endShiftButton: "End shift",
     keepWorking: "Keep working",
+    sign_out_title: "Sign out",
+    sign_out_message: "This will clear local cached data and queued actions on this device.",
+    sign_out_button: "Sign out",
+    cancel_button: "Cancel",
+    end_shift_title: "End shift?",
+    end_shift_message: "Ending the shift closes your ops session and stops further assignments. Make sure every stop is completed or handed off.",
+    end_shift_button: "End shift",
+    keep_working: "Keep working",
   },
   detail: {
     taskStop: "Task stop",
@@ -376,6 +417,16 @@ export const EN_STRINGS = {
     accuracy: (m: number) => `Accuracy: +/-${m}m`,
     showSystemDetails: "Show system details",
     hideSystemDetails: "Hide system details",
+    task_stop: "Task stop",
+    route_stop: "Route stop",
+    contact_actions: "Contact and actions",
+    no_recipient: "No recipient details",
+    no_stop_instructions: "No stop instructions",
+    no_phone_on_file: "No phone on file",
+    scan_parcel: "Scan parcel",
+    delivery_completion: "Delivery completion...",
+    show_system_details: "Show system details",
+    hide_system_details: "Hide system details",
   },
   alerts: {
     actionReceiptTitle: "Action receipt",
@@ -385,6 +436,12 @@ export const EN_STRINGS = {
     sessionExpiredMessage:
       "Please sign in again to keep queued actions in sync.",
     sessionExpiredAction: "Sign in again",
+    action_receipt_title: "Action receipt",
+    driving_locked_title: "Driving mode locked",
+    driving_locked_message: "Stop moving before running actions.",
+    session_expired_title: "Session expired",
+    session_expired_message: "Please sign in again to keep queued actions in sync.",
+    session_expired_action: "Sign in again",
   },
   auth: {
     signupBrowser: "Apply as a driver in your browser",
@@ -404,6 +461,15 @@ export const EN_STRINGS = {
     verifyCode: "Verify code",
     sendCode: "Send code",
     pleaseWait: "Please wait...",
+    sign_in: "Sign in",
+    sign_in_subtitle: "Sign in to continue",
+    method_password: "Password",
+    method_email_code: "Email code",
+    send_code: "Send code",
+    verify_code: "Verify code",
+    email_placeholder: "Email",
+    password_placeholder: "Password",
+    network_unreachable: "Unable to reach the MasarX server. Check your connection and try again.",
   },
   more: {
     account: "Account",
@@ -429,13 +495,68 @@ export const EN_STRINGS = {
     system: "System",
     light: "Light",
     dark: "Dark",
+    sign_out: "Sign out",
+    open_settings: "Open settings",
+    driver_shift: "Driver shift",
+    no_active_shift: "No active driver shift on this device.",
+    start_shift: "Start shift",
+    end_shift: "End shift",
+    display_preferences: "Display preferences",
+    theme_section_title: "Display preferences",
+    theme_auto: "Auto",
+    theme_light: "Light",
+    theme_dark: "Dark",
+    locale_en: "English",
+    locale_ar: "العربية",
+    task_visibility: "Task visibility",
+    route_view: "Route view",
+    connectivity_outbox: "Connectivity and outbox",
+  },
+  dashboard: {
+    today_stops: "Today's stops",
+    completion_rate_7d: "Completion 7d",
+    on_time_rate_7d: "On-time 7d",
+  },
+  home: {
+    counter_today: "Today",
+    counter_done: "Done",
+    counter_failed: "Failed",
+    counter_pending: "Pending",
+    counter_cod: "COD collected",
+  },
+  shift: {
+    stops_completed: "Stops completed",
+    on_time_pct: "On-time",
+    earnings: "Earnings",
+    view_details: "View details",
+  },
+  errorBoundary: {
+    tryAgain: "Try again",
+    copyDetails: "Copy error details",
+    connectivityHint: "Check your connection",
+    offline: {
+      title: "You're offline",
+      body: "We couldn't reach the server. Check your connection and try again. Your work is saved locally.",
+    },
+    permission: {
+      title: "Permission needed",
+      body: "FieldOps needs permission to continue. Please grant access in your device settings.",
+    },
+    server: {
+      title: "Something went wrong",
+      body: "Our servers hit a snag. Give it a moment and try again. If it persists, copy the error details and contact support.",
+    },
+    unknown: {
+      title: "Unexpected error",
+      body: "Something unexpected happened. Try again, and if it persists, copy the error details and contact support.",
+    },
   },
 } as const;
 
-export type FieldOpsStrings = {
-  [Section in keyof typeof EN_STRINGS]: {
-    [Key in keyof (typeof EN_STRINGS)[Section]]: (typeof EN_STRINGS)[Section][Key] extends (...args: infer Args) => infer Result
-      ? (...args: Args) => Result
-      : string;
-  };
-};
+type Localized<T> = T extends (...args: infer Args) => infer Result
+  ? (...args: Args) => Result
+  : T extends object
+    ? { [Key in keyof T]: Localized<T[Key]> }
+    : string;
+
+export type FieldOpsStrings = Localized<typeof EN_STRINGS>;

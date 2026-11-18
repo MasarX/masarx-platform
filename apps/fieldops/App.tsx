@@ -132,6 +132,8 @@ import {
   setMobileCrashReportingUser,
 } from "./src/mobile-crash-reporting";
 import { MobileErrorBoundary } from "./src/mobile-error-boundary";
+import { OutboxEmptyState } from "./src/screens/OutboxScreen";
+import { LocationCaptureStatus } from "./src/screens/LocationScreen";
 import { clearMobileTelemetryEvents, flushMobileTelemetryEvents } from "./src/mobile-telemetry";
 import {
   type MobileAddressPolicy,
@@ -223,9 +225,11 @@ import {
 } from "./src/mobile-shell-display";
 import {
   getFieldOpsThemeTokens,
+  getTokensForTheme,
   resolveAppliedFieldOpsTheme,
   type FieldOpsThemeTokens,
 } from "./src/mobile-theme";
+import { ThemeProvider, type ThemeContextValue } from "./src/mobile-theme-context";
 import { FieldOpsDrawerCloseButton } from "./src/mobile-drawer-close-button";
 import { getFieldOpsStrings, type FieldOpsStrings } from "./src/i18n";
 import { mobileActionAccessibility, mobileSyncAccessibility } from "./src/mobile-action-accessibility";
@@ -2799,6 +2803,16 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     [appliedTheme]
   );
   const styles = React.useMemo(() => createFieldOpsStyles(themeTokens), [themeTokens]);
+  const setThemeMode = React.useCallback(async (next: MobileThemeMode) => {
+    await cacheStore.set(KV_KEYS.themeMode, next);
+    void queryClient.invalidateQueries({ queryKey: ["kv", "get", KV_KEYS.themeMode] });
+  }, [cacheStore, queryClient]);
+  const themeContextValue = React.useMemo<ThemeContextValue>(() => ({
+    appliedTheme,
+    tokens: getTokensForTheme(appliedTheme, Platform.OS === "web" ? "web" : "native"),
+    mode: selectedThemeMode,
+    setMode: setThemeMode,
+  }), [appliedTheme, selectedThemeMode, setThemeMode]);
   const strings = React.useMemo(() => getFieldOpsStrings(selectedLocaleMode), [selectedLocaleMode]);
   const connectivityStatusLabel = formatConnectivityStatusLabel(connectivityStatus, strings);
   React.useEffect(() => {
@@ -6097,6 +6111,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
 
   return (
     <FieldOpsStylesContext.Provider value={styles}>
+    <ThemeProvider value={themeContextValue}>
       <View style={isWebPreview ? styles.webViewport : styles.pageRoot}>
         <View style={[styles.page, appDirectionStyle, isWebPreview && styles.pageWeb]}>
         <View style={[styles.header, headerSafeAreaStyle]}>
@@ -6851,10 +6866,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 await cacheStore.set(KV_KEYS.directionMode, next);
                 queryClient.invalidateQueries({ queryKey: ["kv", "get", KV_KEYS.directionMode] });
               }}
-              onSetThemeMode={async (next) => {
-                await cacheStore.set(KV_KEYS.themeMode, next);
-                queryClient.invalidateQueries({ queryKey: ["kv", "get", KV_KEYS.themeMode] });
-              }}
+              onSetThemeMode={setThemeMode}
               onOpenModule={(key) => {
                 openModuleByKey(key);
               }}
@@ -6999,6 +7011,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         <StatusBar style="auto" />
         </View>
       </View>
+    </ThemeProvider>
     </FieldOpsStylesContext.Provider>
   );
 }
@@ -7170,7 +7183,7 @@ function OutboxScreen({
           }}
         />
       ) : (
-        <Text style={styles.subtitle}>{strings.outbox.empty}</Text>
+        <OutboxEmptyState title={strings.outbox.empty} />
       )}
     </View>
   );
@@ -8298,6 +8311,7 @@ function LocationScreen({
           </View>
         ) : null}
         <Text style={styles.noticeText}>Latest capture</Text>
+        <LocationCaptureStatus capturedAt={position?.timestamp} maxAccuracyM={locationPolicy.maxAccuracyM} />
         {position?.coords ? (
           <Text style={styles.mono}>
             lat={position.coords.latitude} lng={position.coords.longitude} acc={position.coords.accuracy ?? "?"} speed_kph={speedMpsToKph(position.coords.speed)}
@@ -10900,10 +10914,20 @@ export default function App() {
   return (
     <FieldOpsStylesContext.Provider value={appStyles}>
       <MobileErrorBoundary
-      fallback={({ retry }) => (
+      fallback={({ retry, category }) => (
         <View style={styles.container} accessibilityRole="alert" testID="mobile-error-boundary">
-          <Text style={styles.title}>Something went wrong</Text>
-          <Text style={styles.subtitle}>Please restart the app and try again.</Text>
+          <Text style={styles.title}>
+            {category === "offline" || category === "permission"
+              ? getFieldOpsStrings("en").errorBoundary[category].title
+              : "Something went wrong"}
+          </Text>
+          <Text style={styles.subtitle}>
+            {category === "offline"
+              ? "Check your connection and try again."
+              : category === "permission"
+                ? getFieldOpsStrings("en").errorBoundary.permission.body
+                : "Please restart the app and try again."}
+          </Text>
           <Pressable
             accessibilityRole="button"
             onPress={retry}

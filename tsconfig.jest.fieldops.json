@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "types": ["jest", "node"]
+  },
+  "include": [
+    "tests/ui/**/*.ts",
+    "tests/ui/**/*.tsx",
+    "tests/unit/app-*.test.tsx",
+    "apps/fieldops/src/**/*.ts",
+    "apps/fieldops/src/**/*.tsx",
+    "packages/ui/src/**/*"
+  ]
+}

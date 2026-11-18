@@ -66,6 +66,30 @@ describe("mobile shell driving safety helpers", () => {
     });
 
     expect(state.locked).toBe(false);
+    expect(state.policyAvailable).toBe(true);
     expect(canNavigateWhileMoving(state, "scan")).toBe(true);
+  });
+
+  test("computeDrivingSafetyState fails CLOSED when policy is unavailable", () => {
+    const state = computeDrivingSafetyState({
+      policy: null,
+      speedKph: 0,
+      policyAvailable: false,
+    });
+
+    expect(state.policyAvailable).toBe(false);
+    expect(state.locked).toBe(true);
+    expect(canNavigateWhileMoving(state, "route")).toBe(false);
+    expect(canNavigateWhileMoving(state, "scan")).toBe(false);
+  });
+
+  test("computeDrivingSafetyState fails CLOSED when policy param is missing", () => {
+    const state = computeDrivingSafetyState({
+      policy: undefined as never,
+      speedKph: 0,
+    });
+
+    expect(state.policyAvailable).toBe(false);
+    expect(state.locked).toBe(true);
   });
 });

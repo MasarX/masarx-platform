@@ -31,4 +31,20 @@ describe("mobile sync policy normalization", () => {
     expect(normalized.autoSyncOnReconnect).toBe(false);
     expect(normalized.showDegradedBanner).toBe(false);
   });
+
+  test("keeps offline sync thresholds safe when policy rows are malformed", () => {
+    const normalized = normalizeMobileSyncPolicy({
+      enabled: "true",
+      degraded_pending_threshold: 0,
+      stale_sync_after_seconds: Number.NaN,
+      max_retry_attempts: -1,
+      retry_base_delay_seconds: 0,
+      retry_max_delay_seconds: Number.POSITIVE_INFINITY,
+      sync_batch_size: 0,
+      auto_sync_on_reconnect: "false",
+      show_degraded_banner: "false",
+    });
+
+    expect(normalized).toEqual(DEFAULT_MOBILE_SYNC_POLICY);
+  });
 });

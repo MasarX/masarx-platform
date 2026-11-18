@@ -6,6 +6,7 @@ export type DrivingSafetyState = {
   locked: boolean;
   allowedNavKeysWhileMoving: string[];
   fallbackNavKey: string;
+  policyAvailable: boolean;
 };
 
 function toFiniteNumber(value: unknown): number | null {
@@ -35,11 +36,14 @@ export function speedMpsToKph(value: unknown): number {
 }
 
 export function computeDrivingSafetyState(params: {
-  policy: MobileDriverSafetyPolicy;
+  policy: MobileDriverSafetyPolicy | null | undefined;
   speedKph: number | null | undefined;
+  policyAvailable?: boolean;
 }): DrivingSafetyState {
-  const rawAllowed = Array.isArray(params.policy.allowedNavKeysWhileMoving)
-    ? params.policy.allowedNavKeysWhileMoving
+  const policy = params.policy ?? null;
+  const policyAvailable = params.policyAvailable !== false && policy != null;
+  const rawAllowed = Array.isArray(policy?.allowedNavKeysWhileMoving)
+    ? (policy?.allowedNavKeysWhileMoving as unknown[])
     : [];
   const allowedNavKeysWhileMoving = Array.from(
     new Set(
@@ -49,11 +53,25 @@ export function computeDrivingSafetyState(params: {
     )
   );
   const fallbackNavKey = allowedNavKeysWhileMoving[0] ?? "route";
-  const thresholdKph = clampMin(params.policy.lockThresholdKph, 0);
+  const thresholdKph = clampMin(policy?.lockThresholdKph ?? 0, 0);
   const speedKph = normalizeSpeedKph(params.speedKph) ?? 0;
+  // Fail-closed when the policy is unavailable: treat the driver as locked so
+  // we do not silently allow unsafe interactions while the backend policy has
+  // failed to load or resolve. This matches the safety objective laid out in
+  //
+  if (!policyAvailable) {
+    return {
+      speedKph,
+      thresholdKph,
+      locked: true,
+      allowedNavKeysWhileMoving,
+      fallbackNavKey,
+      policyAvailable: false,
+    };
+  }
   const locked =
-    params.policy.enabled === true &&
-    params.policy.lockWhenMoving === true &&
+    policy?.enabled === true &&
+    policy?.lockWhenMoving === true &&
     speedKph >= thresholdKph;
 
   return {
@@ -62,6 +80,7 @@ export function computeDrivingSafetyState(params: {
     locked,
     allowedNavKeysWhileMoving,
     fallbackNavKey,
+    policyAvailable: true,
   };
 }
 

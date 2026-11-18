@@ -29,11 +29,39 @@ describe("mobile shell access helpers", () => {
 
   test("resolveAccessScopeSummary formats type and id safely", () => {
     expect(resolveAccessScopeSummary({ scopeType: "client", scopeId: "client_123" })).toBe(
-      "client:client_123"
+      "Client: client_123"
     );
-    expect(resolveAccessScopeSummary({ scopeType: "tenant", scopeId: null })).toBe("tenant");
-    expect(resolveAccessScopeSummary({ scopeType: null, scopeId: null })).toBe("unknown");
-    expect(resolveAccessScopeSummary({ scopeType: "  ", scopeId: "ignored" })).toBe("unknown");
+    expect(resolveAccessScopeSummary({ scopeType: "tenant", scopeId: null })).toBe("Tenant");
+    expect(resolveAccessScopeSummary({ scopeType: null, scopeId: null })).toBe("Unknown");
+    expect(resolveAccessScopeSummary({ scopeType: "  ", scopeId: "ignored" })).toBe("Unknown");
+  });
+
+  test("resolveAccessScopeSummary prefers human-readable scope name when available", () => {
+    expect(
+      resolveAccessScopeSummary({
+        scopeType: "tenant",
+        scopeId: "bbcc7734-c09b-4888-91fe-9464bc1b6148",
+        scopeName: "Demo Organization",
+      })
+    ).toBe("Tenant: Demo Organization");
+  });
+
+  test("resolveAccessScopeSummary shortens UUID-like scope ids when no name is present", () => {
+    expect(
+      resolveAccessScopeSummary({
+        scopeType: "tenant",
+        scopeId: "bbcc7734-c09b-4888-91fe-9464bc1b6148",
+      })
+    ).toBe("Tenant: bbcc7734");
+  });
+
+  test("resolveAccessScopeSummary keeps non-UUID scope ids intact", () => {
+    expect(
+      resolveAccessScopeSummary({
+        scopeType: "branch",
+        scopeId: "RUH-01",
+      })
+    ).toBe("Branch: RUH-01");
   });
 
   test("resolveModuleLabelsFromSections handles malformed trees safely", () => {
