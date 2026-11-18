@@ -1,6 +1,10 @@
 BEGIN;
 SELECT plan(7);
 
+-- These registry contract assertions run with the service read context.
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
+SELECT set_config('request.jwt.claim.role', 'service_role', TRUE);
+
 SELECT ok(
   EXISTS (
     SELECT 1

@@ -7,6 +7,10 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(8);
 
+-- These registry contract assertions run with the service read context.
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
+SELECT set_config('request.jwt.claim.role', 'service_role', TRUE);
+
 SELECT has_view(
   'public',
   'workflow_templates_console_v1',

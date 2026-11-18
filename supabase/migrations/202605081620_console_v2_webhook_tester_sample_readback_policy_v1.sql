@@ -97,32 +97,6 @@ ON CONFLICT (lookup_definition_id, value) DO UPDATE
        archived_at = NULL,
        updated_at = now();
 
-UPDATE public.onboarding_integration_plugin_defaults d
-   SET workflow_binding = public.jsonb_deep_merge(
-         COALESCE(d.workflow_binding, '{}'::jsonb),
-         jsonb_build_object(
-           'template_name', 'async_provider_dispatch_v1',
-           'intent', 'shipment.create'
-         )
-       ),
-       updated_at = now()
- WHERE d.profile_key = 'default'
-   AND d.scope_type = 'tenant'
-   AND d.plugin_key = 'default-shipment-webhook-intake';
-
-UPDATE public.integration_plugin_versions v
-   SET workflow_binding = public.jsonb_deep_merge(
-         COALESCE(v.workflow_binding, '{}'::jsonb),
-         jsonb_build_object(
-           'template_name', 'async_provider_dispatch_v1',
-           'intent', 'shipment.create'
-         )
-       ),
-       updated_at = now()
-  FROM public.integration_plugins p
- WHERE p.id = v.plugin_id
-   AND p.plugin_key = 'default-shipment-webhook-intake';
-
 CREATE OR REPLACE FUNCTION public.repair_integration_plugin_webhook_policy_v1(
   p_webhook_source_id UUID,
   p_plugin_version_id UUID DEFAULT NULL
@@ -181,6 +155,12 @@ BEGIN
     FROM public.integration_plugins
    WHERE id = v_version.plugin_id
    LIMIT 1;
+
+  -- The default onboarding source keeps the general intake policy until an explicit shipment binding exists.
+  IF v_plugin.plugin_key = 'default-shipment-webhook-intake'
+     AND v_version.workflow_binding = '{"template_name":"webhook_intake_v1"}'::jsonb THEN
+    RETURN jsonb_build_object('ok', TRUE, 'skipped', TRUE, 'reason', 'general_onboarding_intake');
+  END IF;
 
   v_target := lower(COALESCE(
     NULLIF(v_version.workflow_binding->>'intent', ''),

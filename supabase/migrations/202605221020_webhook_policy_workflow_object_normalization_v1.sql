@@ -368,6 +368,12 @@ BEGIN
    WHERE id = v_version.plugin_id
    LIMIT 1;
 
+  -- The default onboarding source keeps the general intake policy until an explicit shipment binding exists.
+  IF v_plugin.plugin_key = 'default-shipment-webhook-intake'
+     AND v_version.workflow_binding = '{"template_name":"webhook_intake_v1"}'::jsonb THEN
+    RETURN jsonb_build_object('ok', TRUE, 'skipped', TRUE, 'reason', 'general_onboarding_intake');
+  END IF;
+
   v_target := lower(COALESCE(
     NULLIF(v_version.workflow_binding->>'intent', ''),
     NULLIF(v_version.mapping_config->>'target', ''),

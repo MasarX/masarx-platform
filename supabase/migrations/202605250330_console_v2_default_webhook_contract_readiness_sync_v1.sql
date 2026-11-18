@@ -231,35 +231,22 @@ DECLARE
       'canonical_intent', 'shipment.create'
     )
   );
-  v_workflow_binding JSONB := jsonb_build_object(
-    'mode', 'attach_existing',
-    'intent', 'shipment.create',
-    'template_name', 'webhook_shipment_create_v1'
-  );
 BEGIN
   UPDATE public.onboarding_integration_plugin_defaults d
      SET mapping_config = v_mapping,
-         workflow_binding = v_workflow_binding,
          updated_at = now()
    WHERE d.profile_key = 'default'
      AND d.scope_type = 'tenant'
      AND d.plugin_key = 'default-shipment-webhook-intake'
-     AND (
-       COALESCE(d.mapping_config, '{}'::jsonb) IS DISTINCT FROM v_mapping
-       OR COALESCE(d.workflow_binding, '{}'::jsonb) IS DISTINCT FROM v_workflow_binding
-     );
+     AND COALESCE(d.mapping_config, '{}'::jsonb) IS DISTINCT FROM v_mapping;
 
   UPDATE public.integration_plugin_versions v
      SET mapping_config = v_mapping,
-         workflow_binding = v_workflow_binding,
          updated_at = now()
     FROM public.integration_plugins p
    WHERE p.id = v.plugin_id
      AND p.plugin_key = 'default-shipment-webhook-intake'
-     AND (
-       COALESCE(v.mapping_config, '{}'::jsonb) IS DISTINCT FROM v_mapping
-       OR COALESCE(v.workflow_binding, '{}'::jsonb) IS DISTINCT FROM v_workflow_binding
-     );
+     AND COALESCE(v.mapping_config, '{}'::jsonb) IS DISTINCT FROM v_mapping;
 
   UPDATE public.mapping_configs mc
      SET mapping_config = v_mapping,

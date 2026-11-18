@@ -5,7 +5,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(7);
+SELECT plan(10);
 
 CREATE OR REPLACE FUNCTION pg_temp.default_webhook_contract_readiness_sync_v1()
 RETURNS SETOF TEXT
@@ -16,6 +16,7 @@ DECLARE
   v_default public.onboarding_integration_plugin_defaults%ROWTYPE;
   v_plugin public.integration_plugins%ROWTYPE;
   v_version public.integration_plugin_versions%ROWTYPE;
+  v_source public.webhook_sources%ROWTYPE;
   v_readiness JSONB;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
@@ -34,8 +35,8 @@ BEGIN
 
   RETURN NEXT is(
     v_default.workflow_binding,
-    '{"mode":"attach_existing","intent":"shipment.create","template_name":"webhook_shipment_create_v1"}'::jsonb,
-    'default webhook onboarding workflow binding matches the active shipment-create contract'
+    '{"template_name":"webhook_intake_v1"}'::jsonb,
+    'tenant onboarding keeps its general intake workflow binding'
   );
 
   RETURN NEXT is(
@@ -82,6 +83,25 @@ BEGIN
     'tenant bootstrap activates the default shipment webhook plugin'
   );
 
+  SELECT s.* INTO v_source
+  FROM public.integration_plugin_bindings b
+  JOIN public.webhook_sources s ON s.id = b.runtime_resource_id
+  WHERE b.plugin_version_id = v_version.id
+    AND b.runtime_resource_type = 'webhook_sources'
+    AND b.scope_type = 'tenant'
+    AND b.scope_id = v_org_id
+    AND b.enabled;
+
+  RETURN NEXT ok(
+    v_source.id IS NOT NULL AND v_source.sender_id IS NULL,
+    'new tenants can provision general intake before their first sender'
+  );
+  RETURN NEXT is(
+    public.repair_integration_plugin_webhook_policy_v1(v_source.id, v_version.id)->>'reason',
+    'general_onboarding_intake',
+    'shipment policy repair leaves the general onboarding source in its intake flow'
+  );
+
   RETURN NEXT ok(
     lower(COALESCE(v_plugin.plugin_kind, '')) = lower(COALESCE(v_default.plugin_kind, ''))
     AND lower(COALESCE(v_version.source_type, '')) = lower(COALESCE(v_default.source_type, ''))
@@ -99,6 +119,19 @@ BEGIN
     v_readiness->>'ok',
     'true',
     'tenant integration-plugin readiness is healthy after default webhook contract sync'
+  );
+
+  UPDATE public.integration_plugin_versions
+  SET workflow_binding = '{"template_name":"webhook_shipment_create_v1","intent":"shipment.create"}'::jsonb
+  WHERE id = v_version.id;
+
+  RETURN NEXT throws_ok(
+    format('SELECT public.integration_plugin_resolve_activation_sender_v1(%L, %L, %L)',
+      v_version.id, 'tenant', v_org_id),
+    'P0001',
+    format('integration_plugin_activate_core_v1 requires active sender/client source binding for plugin version %s scope tenant/%s',
+      v_version.id, v_org_id),
+    'an explicit shipment-create plugin still requires an active sender before activation'
   );
 END;
 $function$;

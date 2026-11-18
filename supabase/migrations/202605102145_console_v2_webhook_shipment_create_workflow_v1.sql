@@ -177,40 +177,6 @@ BEGIN
          handler_key = EXCLUDED.handler_key,
          handler_version = EXCLUDED.handler_version;
 
-  UPDATE public.onboarding_integration_plugin_defaults d
-     SET workflow_binding = jsonb_set(
-           jsonb_set(
-             COALESCE(d.workflow_binding, '{}'::jsonb),
-             ARRAY['template_name'],
-             to_jsonb('webhook_shipment_create_v1'::text),
-             true
-           ),
-           ARRAY['intent'],
-           to_jsonb('shipment.create'::text),
-           true
-         ),
-         updated_at = now()
-   WHERE d.plugin_key = 'default-shipment-webhook-intake'
-     AND COALESCE(d.workflow_binding->>'intent', 'shipment.create') = 'shipment.create';
-
-  UPDATE public.integration_plugin_versions v
-     SET workflow_binding = jsonb_set(
-           jsonb_set(
-             COALESCE(v.workflow_binding, '{}'::jsonb),
-             ARRAY['template_name'],
-             to_jsonb('webhook_shipment_create_v1'::text),
-             true
-           ),
-           ARRAY['intent'],
-           to_jsonb('shipment.create'::text),
-           true
-         ),
-         updated_at = now()
-    FROM public.integration_plugins p
-   WHERE p.id = v.plugin_id
-     AND p.plugin_key = 'default-shipment-webhook-intake'
-     AND COALESCE(v.workflow_binding->>'intent', 'shipment.create') = 'shipment.create';
-
   UPDATE public.settings s
      SET cached_value = jsonb_set(
            jsonb_set(
