@@ -187,8 +187,22 @@ RETURNS boolean LANGUAGE sql STABLE AS $guard$
     OR (has_table_privilege('ui_rpc_executor',p_relation,'SELECT') AND NOT p_default_select AND NOT EXISTS(
       SELECT 1 FROM public.ui_rpc_executor_privilege_plan_v1() p
       WHERE p.object_kind='relation' AND p.object_id=p_relation AND p.privilege='SELECT'))
-    OR (p_extension AND (has_table_privilege('ui_rpc_executor',p_relation,'INSERT,UPDATE,DELETE')
-      OR has_any_column_privilege('ui_rpc_executor',p_relation,'INSERT,UPDATE,REFERENCES')));
+    OR (p_extension AND (has_table_privilege('ui_rpc_executor',p_relation,'INSERT,UPDATE,MAINTAIN')
+      OR has_any_column_privilege('ui_rpc_executor',p_relation,'INSERT,UPDATE,REFERENCES')
+      OR (has_table_privilege('ui_rpc_executor',p_relation,'DELETE') AND NOT EXISTS (
+        -- Suppress only the provider's non-grantable PUBLIC DELETE, including no overlapping grant.
+        SELECT 1 FROM pg_class c
+        CROSS JOIN LATERAL aclexplode(c.relacl) acl
+        WHERE c.oid=p_relation AND c.oid='cron.job_run_details'::regclass
+          AND c.relowner='supabase_admin'::regrole
+          AND acl.grantee=0 AND acl.grantor=c.relowner AND acl.privilege_type='DELETE' AND NOT acl.is_grantable
+          AND NOT EXISTS (
+            SELECT 1 FROM aclexplode(c.relacl) other
+            WHERE other.privilege_type='DELETE'
+              AND CASE WHEN other.grantee=0 THEN other.grantor<>c.relowner OR other.is_grantable
+                ELSE pg_has_role('ui_rpc_executor',other.grantee,'USAGE') END
+          )
+      ))));
 $guard$;
 
 WITH extension_select_defaults(schema_name,relation_name,extension_name) AS (VALUES
@@ -241,7 +255,7 @@ CREATE FUNCTION pg_temp.check_extension_write_regressions() RETURNS SETOF text L
 DECLARE v_role text; v_privilege text;
 BEGIN
   FOREACH v_role IN ARRAY ARRAY['PUBLIC','ui_rpc_executor'] LOOP
-    FOREACH v_privilege IN ARRAY ARRAY['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
+    FOREACH v_privilege IN ARRAY ARRAY['INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'] LOOP
       EXECUTE format('GRANT %s ON executor_extension_acl_fixture TO %s',v_privilege,v_role);
       RETURN NEXT ok(pg_temp.executor_relation_privilege_violation('executor_extension_acl_fixture'::regclass,TRUE,TRUE),
         v_role || ' extension ' || v_privilege || ' is detected despite reviewed SELECT');
