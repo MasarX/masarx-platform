@@ -26,6 +26,7 @@ DECLARE
   v_url text;
   v_secret text;
   v_timeout_ms int;
+  v_is_placeholder boolean;
   v_allow_fallback boolean := p_organization_id IS NOT NULL;
 BEGIN
   IF p_organization_id IS NOT NULL THEN
@@ -46,8 +47,9 @@ BEGIN
     v_provider := COALESCE((v_settings->'providers')->0, '{}'::jsonb);
     v_url := NULLIF(v_provider->>'invoke_url', '');
     v_secret := NULLIF(v_provider->>'invoke_secret', '');
-    EXIT WHEN NOT v_allow_fallback
-      OR ((v_url LIKE 'https://example.%') IS NOT TRUE AND v_secret IS DISTINCT FROM 'EXAMPLE_PASSWORD');
+    v_is_placeholder := COALESCE(v_url LIKE 'https://example.%', false)
+      OR COALESCE(v_secret = 'EXAMPLE_PASSWORD', false);
+    EXIT WHEN NOT (v_allow_fallback AND v_is_placeholder);
 
     v_global_settings := public.resolve_settings('label_provider', 'global', NULL);
     EXIT WHEN v_global_settings IS NULL;
@@ -62,7 +64,7 @@ BEGIN
   IF v_secret IS NULL THEN
     RAISE EXCEPTION 'resolve_label_renderer_invoke_config_v1: invoke_secret missing in label_provider configuration';
   END IF;
-  IF v_url LIKE 'https://example.%' OR v_secret = 'EXAMPLE_PASSWORD' THEN
+  IF v_is_placeholder THEN
     RAISE EXCEPTION 'resolve_label_renderer_invoke_config_v1: provider invoke configuration not activated (update settings)';
   END IF;
 
