@@ -6,7 +6,7 @@ const path = require('node:path');
 const { isBuiltin } = require('node:module');
 const { spawnSync } = require('node:child_process');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
-const { migrationProgress, completePins, backendLint } = require('./backend.cjs');
+const { migrationProgress, completePins, backendLint, waitForCronPause } = require('./backend.cjs');
 const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
@@ -166,6 +166,12 @@ async function checkImages(pins) {
 }
 
 async function main() {
+  const waited = [];
+  const settings = ['on', 'off'];
+  await waitForCronPause({ query: async () => ({ rows: [{ setting: settings.shift(), context: 'sighup' }] }) }, async ms => waited.push(ms));
+  assert.deepEqual(waited, [250]);
+  await assert.rejects(waitForCronPause({ query: async () => ({ rows: [] }) }), /Missing reloadable/);
+  await assert.rejects(waitForCronPause({ query: async () => ({ rows: [{ setting: 'on', context: 'sighup' }] }) }, async () => {}), /did not acknowledge/);
   checkDatabaseInputs();
   await checkTransport();
   const installer = fs.readFileSync('scripts/ci-hosted/tasks.cjs', 'utf8');
