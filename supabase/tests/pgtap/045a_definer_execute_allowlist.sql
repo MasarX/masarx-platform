@@ -439,7 +439,6 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.ensure_provider_account_settings_category_v1(text)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.ensure_required_global_defaults_v1()', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.ensure_settings_category_registry_from_schema_registry()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
-  ('public.ensure_shipment_boxes(uuid,integer)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.ensure_table_service_rls(text)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.escalate_geocoding_manual_review(integer)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.escalate_support_case_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
