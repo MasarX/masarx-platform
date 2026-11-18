@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(6);
+SELECT plan(10);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_console_v2_api_ui_me_tenant_scope_contract()
 RETURNS SETOF TEXT
@@ -14,6 +14,7 @@ DECLARE
   v_org UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
   v_me JSONB;
+  v_public_me JSONB;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -66,6 +67,15 @@ BEGIN
     has_function_privilege('authenticated', 'api.ui_me_v1()', 'EXECUTE'),
     'authenticated can execute api.ui_me_v1'
   );
+  RETURN NEXT has_function('public', 'ui_me_v1', ARRAY[]::text[], 'public identity function exists');
+  RETURN NEXT ok(
+    has_function_privilege('authenticated', 'public.ui_me_v1()', 'EXECUTE'),
+    'authenticated can execute public.ui_me_v1'
+  );
+  RETURN NEXT ok(
+    NOT has_function_privilege('anon', 'public.ui_me_v1()', 'EXECUTE'),
+    'anonymous users cannot execute public.ui_me_v1'
+  );
 
   PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
   PERFORM set_config(
@@ -80,6 +90,7 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE authenticated';
 
   SELECT api.ui_me_v1() INTO v_me;
+  SELECT public.ui_me_v1() INTO v_public_me;
 
   RETURN NEXT is(
     v_me #>> '{access_scope,scope_type}',
@@ -99,6 +110,11 @@ BEGIN
   RETURN NEXT ok(
     COALESCE(jsonb_array_length(v_me->'capabilities'), 0) > 0,
     'api.ui_me_v1 returns tenant operator capabilities'
+  );
+  RETURN NEXT is(
+    v_public_me #> '{access_scope,scope_id}',
+    'null'::jsonb,
+    'public.ui_me_v1 returns a null frontend scope ID for tenant users'
   );
 
   EXECUTE 'SET LOCAL ROLE postgres';
