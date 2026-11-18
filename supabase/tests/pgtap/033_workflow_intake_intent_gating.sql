@@ -5,6 +5,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SELECT plan(2);
+CREATE TEMP TABLE pgtap_intent_results (ordinal integer PRIMARY KEY, passed boolean, description text);
 
 DO $$
 DECLARE
@@ -160,9 +161,9 @@ BEGIN
     v_create_payload
   );
 
-  PERFORM ok(
-    v_result->'body' ? 'planned_resource',
-    'Shipment create intent includes planned_resource in async ACK body'
+  INSERT INTO pgtap_intent_results VALUES (1,
+    v_result->'body' ? 'resource',
+    'Shipment create intent includes resource in ACK body'
   );
 
   PERFORM public.upsert_settings_value_v1(
@@ -191,14 +192,14 @@ BEGIN
     v_status_payload
   );
 
-  PERFORM ok(
-    NOT (v_result->'body' ? 'resource')
-      AND NOT (v_result->'body' ? 'planned_resource'),
-    'Non-creation intent omits resource metadata from ACK body'
+  INSERT INTO pgtap_intent_results VALUES (2,
+    NOT (v_result->'body' ? 'resource'),
+    'Non-creation intent omits resource from ACK body'
   );
 END;
 $$;
 
+SELECT ok(passed,description) FROM pgtap_intent_results ORDER BY ordinal;
 SELECT * FROM finish();
 
 ROLLBACK;

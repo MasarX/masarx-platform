@@ -22,6 +22,7 @@ import { ResourcePage } from "./resource-page";
 import { Section } from "./section";
 import { createUiTranslator } from "./i18n";
 import type { NavigationItem, NavigationSection } from "./navigation";
+import { normalizeAppHref } from "./navigation-paths";
 import { buildTestId } from "./test-ids";
 import { buildHref } from "./url";
 import { formatUiError } from "./utils";
@@ -343,6 +344,29 @@ function resolveScopeLabel(me: UiMe | null, t: ReturnType<typeof createUiTransla
   const scopeLabel = typeof scopeLabelRaw === "string" ? scopeLabelRaw.trim() : "";
   if (scopeType === "global" && !scopeLabel) return scopeType;
   return t("scopeLabel", { scopeType, scopeLabel: scopeLabel || t("unknown") });
+}
+
+function resolveTrackingHref(
+  sections: NavigationSection[],
+  appKey: RouteOperationsWorkspacePageProps["appKey"],
+  appBasePath: string,
+) {
+  const pending = sections.flatMap((section) => section.items);
+  const matches: NavigationItem[] = [];
+  for (const item of pending) {
+    if (item.id === `${appKey}-tracking`) matches.push(item);
+    if (Array.isArray(item.items)) pending.push(...item.items);
+  }
+  if (matches.length !== 1) return null;
+  const item = matches[0];
+  if (!item || item.disabled_reason || typeof item.href !== "string") return null;
+
+  // Validate the registered route before normalization can strip another app's prefix.
+  const rawPath = item.href.split(/[?#]/, 1)[0];
+  if (rawPath !== "/tracking" && rawPath !== `/${appKey}/tracking`) return null;
+  const safeHref = resolveSafeHref("", item.href);
+  if (safeHref === null) return null;
+  return resolveSafeHref(appBasePath, normalizeAppHref(safeHref, ""));
 }
 
 function flattenSectionResources(section: NavigationSection | null) {
@@ -742,7 +766,6 @@ export async function RouteOperationsWorkspacePage({
     appBasePath,
     "/settings/request"
   );
-  const trackingHref = resolveSafeHref(appBasePath, "/tracking");
 
   const errorTestId = testIdPrefix ? buildTestId(testIdPrefix, "error") : undefined;
   if (!context || contextError) {
@@ -764,6 +787,7 @@ export async function RouteOperationsWorkspacePage({
   }
 
   const navigation = normalizeNavigation(context.navigation);
+  const trackingHref = resolveTrackingHref(navigation.sections, appKey, appBasePath);
   const targetSection =
     navigation.sections.find((section) => section.id === sectionId) ??
     navigation.sections.find((section) =>
@@ -2223,7 +2247,7 @@ export async function RouteOperationsWorkspacePage({
           resourceKey={selectedResource.key}
           searchParams={selectedSearchParams}
           appBasePath={appBasePath}
-          baseHref={`${workspaceBasePath}/${encodeURIComponent(selectedResource.key)}`}
+          baseHref={`${workspaceBasePath ?? `/operations/${workspacePathSegment}`}/${encodeURIComponent(selectedResource.key)}`}
           description={t("selected.description", { label: selectedResource.label })}
           testIdPrefix={testIdPrefix ? `${testIdPrefix}-resource` : undefined}
         />

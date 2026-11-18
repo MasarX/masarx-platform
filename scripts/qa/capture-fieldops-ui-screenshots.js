@@ -94,6 +94,27 @@ function createStaticServer({ rootDir, host, port }) {
   });
 }
 
+function buildCaptureManifest({
+  capturedAt,
+  sourceDir,
+  outputDir,
+  baseUrl,
+  platforms,
+  selftests,
+  scenarios,
+}) {
+  return {
+    captured_at: capturedAt || new Date().toISOString(),
+    capture_mode: "sample_static",
+    source_dir: sourceDir,
+    output_dir: outputDir,
+    base_url: baseUrl,
+    platforms,
+    selftests,
+    scenarios,
+  };
+}
+
 async function runSelftest(page, baseUrl, platform, timeoutMs) {
   const url = buildScenarioUrl(baseUrl, buildSelftestQuery(platform));
   await page.goto(url, { waitUntil: "networkidle" });
@@ -228,15 +249,15 @@ async function main() {
       scenarios.push(...nextScenarios);
     }
 
-    const manifest = {
-      captured_at: new Date().toISOString(),
-      source_dir: sourceDir,
-      output_dir: outputDir,
-      base_url: baseUrl,
+    const manifest = buildCaptureManifest({
+      capturedAt: new Date().toISOString(),
+      sourceDir,
+      outputDir,
+      baseUrl,
       platforms,
       selftests,
       scenarios,
-    };
+    });
     const manifestPath = path.join(outputDir, "manifest.json");
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     console.log(`[fieldops-screenshots] wrote ${manifestPath}`);
@@ -254,3 +275,8 @@ if (require.main === module) {
     process.exit(1);
   });
 }
+
+module.exports = {
+  buildCaptureManifest,
+  parseArgs,
+};

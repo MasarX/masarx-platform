@@ -100,6 +100,17 @@ function resolveRedirect(requestUrl: URL, nextPath: string | null, fallback: str
   return resolveRedirectTarget(requestUrl, nextPath, fallback);
 }
 
+function redirectWithinApp(target: URL) {
+  // Relative Location preserves the browser's origin when Next receives an
+  // internal bind URL, without trusting client-supplied proxy or Host headers.
+  // URL dot-segment normalization can leave multiple leading path slashes.
+  const pathname = `/${target.pathname.replace(/^\/+/, "")}`;
+  return new NextResponse(null, {
+    status: 307,
+    headers: { location: `${pathname}${target.search}${target.hash}` },
+  });
+}
+
 function appendError(target: URL, message: string) {
   target.searchParams.set("error", message);
   return target;
@@ -130,7 +141,7 @@ export async function handleAuthCallback(
     requestUrl.searchParams.get("error");
 
   if (externalError) {
-    const errorRedirect = NextResponse.redirect(
+    const errorRedirect = redirectWithinApp(
       appendError(redirectTarget, safeErrorMessage(externalError))
     );
     errorRedirect.headers.set(REQUEST_ID_HEADER, requestId);
@@ -149,21 +160,20 @@ export async function handleAuthCallback(
       const supabase = createServerClient();
       const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) {
-        const errorRedirect = NextResponse.redirect(
+        const errorRedirect = redirectWithinApp(
           appendError(redirectTarget, safeErrorMessage(error.message))
         );
         errorRedirect.headers.set(REQUEST_ID_HEADER, requestId);
         reportAuthServerEvent(requestId, "auth.callback.exchange_error", {
           path: requestUrl.pathname,
           reason: safeErrorMessage(error.message),
-          codePrefix: truncate(code, 16),
           redirectTo: errorRedirect.headers.get("Location"),
         });
         return errorRedirect;
       }
     }
 
-    const response = NextResponse.redirect(redirectTarget);
+    const response = redirectWithinApp(redirectTarget);
     response.headers.set(REQUEST_ID_HEADER, requestId);
     reportAuthServerEvent(requestId, "auth.callback.success", {
       path: requestUrl.pathname,
@@ -171,7 +181,7 @@ export async function handleAuthCallback(
     });
     return response;
   } catch (error) {
-    const response = NextResponse.redirect(
+    const response = redirectWithinApp(
       appendError(redirectTarget, safeErrorMessage((error as Error)?.message))
     );
     response.headers.set(REQUEST_ID_HEADER, requestId);
@@ -214,8 +224,8 @@ export async function handleSignOut(request: Request, options: SignOutOptions = 
 
   try {
     const supabase = createServerClient();
-    await supabase.auth.signOut();
-    const response = NextResponse.redirect(target);
+    await supabase.auth.signOut({ scope: "local" });
+    const response = redirectWithinApp(target);
     response.headers.set(REQUEST_ID_HEADER, requestId);
     reportAuthServerEvent(requestId, "auth.sign_out.success", {
       path: requestUrl.pathname,
@@ -223,7 +233,7 @@ export async function handleSignOut(request: Request, options: SignOutOptions = 
     });
     return response;
   } catch (error) {
-    const response = NextResponse.redirect(
+    const response = redirectWithinApp(
       appendError(target, safeErrorMessage((error as Error)?.message))
     );
     response.headers.set(REQUEST_ID_HEADER, requestId);

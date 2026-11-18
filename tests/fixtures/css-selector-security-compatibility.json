@@ -1,0 +1,7 @@
+{
+  "content": "group-hover:underline peer-focus:block hover:bg-red-500 md:flex [&>span]:font-bold [&:nth-child(2)]:text-blue-500 dark:hover:text-white before:content-['x']",
+  "tailwind_css": "@tailwind utilities; .button { @apply px-4 hover:bg-red-500; & > span { @apply font-bold; } }",
+  "nested_css": "article, .panel { &:hover, &:focus { color: red; } :is(&, .fallback) > & + & { padding: 1rem; } }",
+  "tailwind_expected": [".group:hover", ".peer:focus", ".button:hover", ".button > span", "font-weight: 700", "@media (min-width: 768px)", "nth-child(2)"],
+  "nested_expected": ["article:hover", ".panel:focus", ":is(article, .fallback) > article + article", ":is(.panel, .fallback) > .panel + .panel"]
+}

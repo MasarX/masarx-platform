@@ -45,13 +45,16 @@ function resolveStorageSchemaReadyOptions(env = process.env, opts = {}) {
   };
 }
 
-async function queryStorageSchemaStatus(client) {
-  const res = await client.query(`
+async function queryStorageSchemaStatus(client, queryTimeoutMs) {
+  const res = await client.query({
+    text: `
     SELECT
       to_regnamespace('storage') IS NOT NULL AS has_storage_schema,
       to_regclass('storage.objects') IS NOT NULL AS has_storage_objects,
       to_regclass('storage.buckets') IS NOT NULL AS has_storage_buckets
-  `);
+  `,
+    query_timeout: queryTimeoutMs,
+  });
   const row = res?.rows?.[0] || {};
   return {
     hasStorageSchema: row.has_storage_schema === true,
@@ -64,9 +67,11 @@ async function waitForStorageSchema({
   connectionString,
   timeoutMs,
   intervalMs,
+  deadlineMs,
   authErrorExtraMs = 0,
   connectionTimeoutMillis = 15000,
   createClient,
+  nowFn = Date.now,
   sleep,
   logger = console,
   isAuthError,
@@ -79,9 +84,9 @@ async function waitForStorageSchema({
   const mkClient =
     typeof createClient === 'function'
       ? createClient
-      : () => {
+      : ({ connectionTimeoutMillis: boundedConnectionTimeoutMillis }) => {
           const { Client } = require('pg');
-          return new Client({ connectionString: cs, connectionTimeoutMillis });
+          return new Client({ connectionString: cs, connectionTimeoutMillis: boundedConnectionTimeoutMillis });
         };
   const snooze = typeof sleep === 'function' ? sleep : (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -97,46 +102,61 @@ async function waitForStorageSchema({
           );
         };
 
-  const start = Date.now();
+  const clock = typeof nowFn === 'function' ? nowFn : Date.now;
+  const start = clock();
+  const configuredDeadlineMs = Number(deadlineMs);
+  const timeoutDeadlineMs = start + timeout + authExtra;
+  const absoluteDeadlineMs = Math.min(
+    timeoutDeadlineMs,
+    Number.isFinite(configuredDeadlineMs) && configuredDeadlineMs > 0
+      ? configuredDeadlineMs
+      : Number.POSITIVE_INFINITY,
+  );
   let attempt = 0;
   let lastStatus = null;
 
-  while (Date.now() - start < timeout + authExtra) {
+  while (clock() < absoluteDeadlineMs) {
     attempt += 1;
-    const client = mkClient();
+    const remainingMs = absoluteDeadlineMs - clock();
+    const client = mkClient({
+      connectionTimeoutMillis: Math.max(1, Math.min(connectionTimeoutMillis, remainingMs)),
+    });
     try {
       await client.connect();
-      const status = await queryStorageSchemaStatus(client);
+      const queryRemainingMs = absoluteDeadlineMs - clock();
+      if (queryRemainingMs <= 0) break;
+      const status = await queryStorageSchemaStatus(client, queryRemainingMs);
       lastStatus = status;
-      await client.end();
 
+      if (clock() >= absoluteDeadlineMs) break;
       if (status.hasStorageSchema && status.hasStorageObjects && status.hasStorageBuckets) {
         return { ok: true, attempts: attempt, status };
       }
 
-      if (Date.now() - start >= timeout) break;
+      if (clock() >= absoluteDeadlineMs) break;
 
       if (attempt === 1 || attempt % 5 === 0) {
         logger.log('[storage-schema-ready] Waiting for storage schema/tables...');
       }
-      await snooze(interval);
+      await snooze(Math.min(interval, Math.max(0, absoluteDeadlineMs - clock())));
     } catch (err) {
-      try { await client.end(); } catch { /* ignore */ }
       if (authClassifier(err)) {
-        if (authExtra <= 0 || Date.now() - start >= timeout + authExtra) throw err;
+        if (authExtra <= 0 || clock() >= absoluteDeadlineMs) throw err;
         if (attempt === 1 || attempt % 5 === 0) {
           logger.log('[storage-schema-ready] Waiting for DB auth propagation for storage schema check...');
         }
-        await snooze(interval);
+        await snooze(Math.min(interval, Math.max(0, absoluteDeadlineMs - clock())));
         continue;
       }
 
-      if (Date.now() - start >= timeout) break;
+      if (clock() >= absoluteDeadlineMs) break;
 
       if (attempt === 1 || attempt % 5 === 0) {
         logger.log('[storage-schema-ready] Waiting for DB readiness for storage schema check...');
       }
-      await snooze(interval);
+      await snooze(Math.min(interval, Math.max(0, absoluteDeadlineMs - clock())));
+    } finally {
+      try { await client.end(); } catch { /* ignore cleanup errors */ }
     }
   }
 

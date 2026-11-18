@@ -1,3 +1,6 @@
+import { BARCODE_MAX_CHARS, normalizeBarcodeType } from "../../../../../supabase/functions/_shared/label-barcodes";
+export { normalizeBarcodeType };
+
 export type BarcodeTypeConfig = {
   encoder: string;
   label: string;
@@ -11,14 +14,14 @@ export const BARCODE_REGISTRY: Record<string, BarcodeTypeConfig> = {
   code128: {
     encoder: "code128",
     label: "Code 128",
-    validate: /^[\x20-\x7E]{1,80}$/,
+    validate: new RegExp(`^[\\x20-\\x7E]{1,${BARCODE_MAX_CHARS.code128}}$`),
     defaultWidth: 180,
     defaultHeight: 60,
   },
   qr: {
     encoder: "qrcode",
     label: "QR Code",
-    validate: /^.{1,2953}$/s,
+    validate: new RegExp(`^.{1,${BARCODE_MAX_CHARS.qr}}$`, "s"),
     is2D: true,
     defaultWidth: 72,
     defaultHeight: 72,
@@ -26,28 +29,28 @@ export const BARCODE_REGISTRY: Record<string, BarcodeTypeConfig> = {
   ean13: {
     encoder: "ean13",
     label: "EAN-13",
-    validate: /^\d{12,13}$/,
+    validate: new RegExp(`^\\d{12,${BARCODE_MAX_CHARS.ean13}}$`),
     defaultWidth: 180,
     defaultHeight: 60,
   },
   upca: {
     encoder: "upca",
     label: "UPC-A",
-    validate: /^\d{11,12}$/,
+    validate: new RegExp(`^\\d{11,${BARCODE_MAX_CHARS.upca}}$`),
     defaultWidth: 180,
     defaultHeight: 60,
   },
   code39: {
     encoder: "code39",
     label: "Code 39",
-    validate: /^[A-Z0-9\-. $/+%]{1,43}$/,
+    validate: new RegExp(`^[A-Z0-9\\-. $/+%]{1,${BARCODE_MAX_CHARS.code39}}$`),
     defaultWidth: 180,
     defaultHeight: 60,
   },
   pdf417: {
     encoder: "pdf417",
     label: "PDF417",
-    validate: /^.{1,1850}$/s,
+    validate: new RegExp(`^.{1,${BARCODE_MAX_CHARS.pdf417}}$`, "s"),
     is2D: true,
     defaultWidth: 180,
     defaultHeight: 60,
@@ -55,7 +58,7 @@ export const BARCODE_REGISTRY: Record<string, BarcodeTypeConfig> = {
   datamatrix: {
     encoder: "datamatrix",
     label: "DataMatrix",
-    validate: /^.{1,2335}$/s,
+    validate: new RegExp(`^.{1,${BARCODE_MAX_CHARS.datamatrix}}$`, "s"),
     is2D: true,
     defaultWidth: 72,
     defaultHeight: 72,
@@ -63,7 +66,8 @@ export const BARCODE_REGISTRY: Record<string, BarcodeTypeConfig> = {
 };
 
 export function getBarcodeConfig(barcodeType: string): BarcodeTypeConfig | undefined {
-  return BARCODE_REGISTRY[barcodeType.toLowerCase()];
+  const type = normalizeBarcodeType(barcodeType);
+  return Object.hasOwn(BARCODE_REGISTRY, type) ? BARCODE_REGISTRY[type] : undefined;
 }
 
 export function validateBarcodeData(barcodeType: string, data: string): boolean {

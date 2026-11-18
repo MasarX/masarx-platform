@@ -3,11 +3,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
 const {
   requestGithubJson,
   downloadGithubBinary,
 } = require('./github-api-retry');
+const { readZipArchiveFile } = require('./zip-archive');
 
 function normalizeString(value) {
   return String(value || '').trim();
@@ -15,6 +15,11 @@ function normalizeString(value) {
 
 function normalizeEntrySuffix(value) {
   return normalizeString(value).replace(/\\/g, '/').toLowerCase();
+}
+
+function decodeUtf8(value) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value || ''), 'utf8');
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
 async function listWorkflowRunArtifacts({ owner, repo, token, runId, requestJson = requestGithubJson }) {
@@ -63,128 +68,70 @@ function readJsonFromExtractedTree(baseDir, { entrySuffix = '' } = {}) {
   return JSON.parse(String(raw || '').replace(/^\uFEFF/, ''));
 }
 
-function resolvePythonExecutable({ platform = process.platform, execFileSyncFn = execFileSync } = {}) {
-  const candidates = normalizeString(platform).toLowerCase() === 'win32'
-    ? ['python', 'py']
-    : ['python3', 'python'];
-  for (const candidate of candidates) {
-    try {
-      execFileSyncFn(candidate, ['--version'], { stdio: 'pipe' });
-      return candidate;
-    } catch (error) {
-      // Try the next candidate.
-    }
+function listEntriesFromZip(
+  zipPath,
+  { readZipArchiveFileFn = readZipArchiveFile } = {},
+) {
+  return readZipArchiveFileFn(zipPath, { errorPrefix: 'workflow_artifact_zip' })
+    .filter((entry) => !entry.isDirectory)
+    .map((entry) => entry.name);
+}
+
+function findZipEntry(entries, entrySuffix = '', { defaultToJson = false } = {}) {
+  const suffix = normalizeEntrySuffix(entrySuffix);
+  const rows = (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({ entry, normalized: normalizeEntrySuffix(entry) }));
+  if (suffix) {
+    return rows.find(({ normalized }) =>
+      normalized === suffix || normalized.endsWith(`/${suffix}`))?.entry || '';
   }
-  throw new Error('Python executable not available for artifact ZIP parsing.');
+  return defaultToJson
+    ? rows.find(({ normalized }) => normalized.endsWith('.json'))?.entry || ''
+    : '';
+}
+
+function readZipEntry(zipPath, entry, { readZipArchiveFileFn = readZipArchiveFile } = {}) {
+  const target = readZipArchiveFileFn(zipPath, { errorPrefix: 'workflow_artifact_zip' })
+    .find((candidate) => !candidate.isDirectory && candidate.name === entry);
+  if (!target) throw new Error(`Artifact ${zipPath} does not contain ${entry}.`);
+  return decodeUtf8(target.data);
 }
 
 function readJsonFromZip(
   zipPath,
-  { entrySuffix = '', platform = process.platform, execFileSyncFn = execFileSync } = {},
+  { entrySuffix = '', readZipArchiveFileFn = readZipArchiveFile } = {},
 ) {
-  const pythonBin = resolvePythonExecutable({ platform, execFileSyncFn });
-  const raw = execFileSyncFn(
-    pythonBin,
-    [
-      '-c',
-      [
-        'import sys',
-        'import zipfile',
-        'zip_path = sys.argv[1]',
-        "entry_suffix = (sys.argv[2] if len(sys.argv) > 2 else '').strip().lower()",
-        'with zipfile.ZipFile(zip_path) as archive:',
-        "    entries = [name for name in archive.namelist() if name and not name.endswith('/')]",
-        '    match = None',
-        '    if entry_suffix:',
-        '        for name in entries:',
-        '            lowered = name.strip().lower()',
-        "            if lowered == entry_suffix or lowered.endswith('/' + entry_suffix):",
-        '                match = name',
-        '                break',
-        '    else:',
-        '        for name in entries:',
-        "            if name.strip().lower().endswith('.json'):",
-        '                match = name',
-        '                break',
-        '    if not match:',
-        "        raise SystemExit(f'Artifact {zip_path} does not contain {entry_suffix or \"a JSON file\"}.')",
-        "    sys.stdout.write(archive.read(match).decode('utf-8-sig'))",
-      ].join('\n'),
-      zipPath,
-      normalizeString(entrySuffix),
-    ],
-    { encoding: 'utf8' },
-  );
+  const archive = readZipArchiveFileFn(zipPath, { errorPrefix: 'workflow_artifact_zip' })
+    .filter((entry) => !entry.isDirectory);
+  const entries = archive.map((entry) => entry.name);
+  const target = findZipEntry(entries, entrySuffix, { defaultToJson: true });
+  if (!target) {
+    throw new Error(`Artifact ${zipPath} does not contain ${normalizeString(entrySuffix) || 'a JSON file'}.`);
+  }
+  const raw = decodeUtf8(archive.find((entry) => entry.name === target).data);
   return JSON.parse(String(raw || '').replace(/^\uFEFF/, ''));
 }
 
 function readJsonEntriesFromZip(
   zipPath,
-  { entrySuffixes = [], platform = process.platform, execFileSyncFn = execFileSync } = {},
+  { entrySuffixes = [], readZipArchiveFileFn = readZipArchiveFile } = {},
 ) {
   const suffixes = [...new Set((Array.isArray(entrySuffixes) ? entrySuffixes : [entrySuffixes])
     .map((entrySuffix) => normalizeEntrySuffix(entrySuffix))
     .filter(Boolean))];
   if (!suffixes.length) return {};
 
-  const pythonBin = resolvePythonExecutable({ platform, execFileSyncFn });
-  const raw = execFileSyncFn(
-    pythonBin,
-    [
-      '-c',
-      [
-        'import json',
-        'import sys',
-        'import zipfile',
-        'zip_path = sys.argv[1]',
-        'suffixes = json.loads(sys.argv[2])',
-        'out = {}',
-        'with zipfile.ZipFile(zip_path) as archive:',
-        "    entries = [name for name in archive.namelist() if name and not name.endswith('/')]",
-        '    lowered_entries = [(name, name.strip().lower().replace("\\\\", "/")) for name in entries]',
-        '    for suffix in suffixes:',
-        '        match = None',
-        '        for name, lowered in lowered_entries:',
-        "            if lowered == suffix or lowered.endswith('/' + suffix):",
-        '                match = name',
-        '                break',
-        '        if match:',
-        "            out[suffix] = json.loads(archive.read(match).decode('utf-8-sig'))",
-        'sys.stdout.write(json.dumps(out))',
-      ].join('\n'),
-      zipPath,
-      JSON.stringify(suffixes),
-    ],
-    { encoding: 'utf8' },
-  );
-  return JSON.parse(String(raw || '{}').replace(/^\uFEFF/, ''));
-}
-
-function listEntriesFromZip(
-  zipPath,
-  { platform = process.platform, execFileSyncFn = execFileSync } = {},
-) {
-  const pythonBin = resolvePythonExecutable({ platform, execFileSyncFn });
-  const raw = execFileSyncFn(
-    pythonBin,
-    [
-      '-c',
-      [
-        'import sys',
-        'import zipfile',
-        'zip_path = sys.argv[1]',
-        'with zipfile.ZipFile(zip_path) as archive:',
-        "    entries = [name for name in archive.namelist() if name and not name.endswith('/')]",
-        "    sys.stdout.write('\\n'.join(entries))",
-      ].join('\n'),
-      zipPath,
-    ],
-    { encoding: 'utf8' },
-  );
-  return String(raw || '')
-    .split(/\r?\n/)
-    .map((entry) => normalizeString(entry))
-    .filter(Boolean);
+  const archive = readZipArchiveFileFn(zipPath, { errorPrefix: 'workflow_artifact_zip' })
+    .filter((entry) => !entry.isDirectory);
+  const entries = archive.map((entry) => entry.name);
+  const out = {};
+  for (const suffix of suffixes) {
+    const target = findZipEntry(entries, suffix);
+    if (!target) continue;
+    const raw = decodeUtf8(archive.find((entry) => entry.name === target).data);
+    out[suffix] = JSON.parse(String(raw || '').replace(/^\uFEFF/, ''));
+  }
+  return out;
 }
 
 async function fetchWorkflowArtifactBundleForRun({
@@ -287,7 +234,8 @@ module.exports = {
   listWorkflowRunArtifacts,
   findArtifactByName,
   readJsonFromExtractedTree,
-  resolvePythonExecutable,
+  findZipEntry,
+  readZipEntry,
   readJsonFromZip,
   readJsonEntriesFromZip,
   listEntriesFromZip,

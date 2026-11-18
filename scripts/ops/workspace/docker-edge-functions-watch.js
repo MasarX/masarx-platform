@@ -50,16 +50,9 @@ function buildProbeUrl(baseUrl, functionName) {
   return `${baseUrl}/${String(functionName || 'metrics-echo-test').replace(/^\/+/g, '')}`;
 }
 
-async function probeEdgeFunction(url, env = process.env) {
-  const token = String(env.EDGE_FUNCTION_HEALTH_TOKEN || env.SUPABASE_SERVICE_ROLE_KEY || env.EDGE_DB_JWT || '').trim();
-  const headers = {};
-  if (token) {
-    headers.authorization = `Bearer ${token}`;
-    headers.apikey = token;
-  }
+async function probeEdgeFunction(url) {
   const response = await fetch(url, {
     method: 'GET',
-    headers,
   });
   const okStatuses = new Set([200, 204, 401, 403, 405]);
   return {

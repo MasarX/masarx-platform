@@ -3,11 +3,27 @@
   "backend": {
     "v1_owner": "supabase-cli-local-runtime",
     "compose_owned_backend": false,
-    "skip_host_functions_env": "WORKSPACE_LOCAL_START_SKIP_FUNCTIONS_RUNTIME",
-    "v2_option": "generated-compose-owned-supabase-backend-after-v1-acceptance"
+    "functions_runtime_env_file": "config/env/.env.local",
+    "edge_functions_watcher_mode": "readiness_only_non_serving",
+    "v2_option": "generated-compose-owned-supabase-backend-after-v1-acceptance",
+    "native_docker_network_recovery": {
+      "enabled": true,
+      "trigger_error_patterns": [
+        "all predefined address pools have been fully subnetted",
+        "could not find an available, non-overlapping IPv4 address pool"
+      ],
+      "managed_network_name_prefix": "supabase_network_masarx-",
+      "project_id_prefix": "masarx-",
+      "current_project_first": true,
+      "require_zero_attached_containers": true,
+      "protect_active_runtime_leases": true,
+      "lease_resource_class": "backend-supabase",
+      "max_retries": 1,
+      "max_removals_per_retry": 4
+    }
   },
   "docker": {
-    "default_image": "node:24-bookworm-slim",
+    "default_image": "node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205",
     "compose_project_prefix": "masarx-app",
     "artifact_root": ".tmp/docker-runtime",
     "resource_limits": {
@@ -24,8 +40,11 @@
         },
         "console-v2": {
           "cpus": "1.50",
-          "memory": "2048m",
+          "memory": "4096m",
           "pids": 768
+        },
+        "portal": {
+          "memory": "4096m"
         },
         "fieldops-metro": {
           "cpus": "1.50",
@@ -41,6 +60,7 @@
     }
   },
   "dependency_readiness": {
+    "omitted_service_selection": "all_declared",
     "profile_config": "config/ops/dependency-readiness-profiles.json",
     "summary_file": "dependency-proof-summary.json",
     "stamp_paths": [
@@ -79,35 +99,35 @@
     "console-v2": {
       "resource_class": "console-v2",
       "profile": "console",
-      "app_path": "apps/console-v2",
+      "app_path": "apps/console",
       "dependency_profiles": [
         "console-v2"
       ],
       "required_paths": [
-        "apps/console-v2/package.json",
-        "apps/console-v2/index.html",
-        "apps/console-v2/src",
-        "apps/console-v2/vite.config.ts"
+        "apps/console/package.json",
+        "apps/console/app",
+        "apps/console/next.config.js"
       ],
       "required_env": [
         "CONSOLE_PORT",
-        "VITE_SUPABASE_URL",
-        "VITE_SUPABASE_ANON_KEY",
-        "VITE_USE_SEED"
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "NEXT_PUBLIC_USE_SEED"
       ],
       "forbidden_env_values": [
         {
-          "key": "VITE_USE_SEED",
+          "key": "NEXT_PUBLIC_USE_SEED",
           "pattern": "^(?!false$).+"
         }
       ],
       "port_env": "CONSOLE_PORT",
       "base_url_env": "CONSOLE_BASE_URL",
-      "command": "npm --prefix apps/console-v2 run dev -- --host 0.0.0.0 --port ${port} --strictPort",
+      "command": "cd apps/console && npm exec -- next build && npm exec -- next start -H 0.0.0.0 -p ${port}",
       "health_path": "/",
       "cache_mounts": [
         {
-          "target": "/workspace/apps/console-v2/node_modules/.vite"
+          "target": "/workspace/apps/console/.next"
         }
       ]
     },
@@ -127,6 +147,8 @@
       "required_env": [
         "LANDING_PORT",
         "LANDING_SITE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "LANDING_TURNSTILE_SITE_KEY",
         "LANDING_CONTACT_ENDPOINT",
         "LANDING_TENANT_SIGNUP_ENDPOINT",
         "SUPABASE_FUNCTIONS_INTERNAL_URL"
@@ -152,7 +174,7 @@
         "PORTAL_PORT",
         "NEXT_PUBLIC_SUPABASE_URL",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-        "SUPABASE_INTERNAL_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
         "NEXT_PUBLIC_USE_SEED"
       ],
       "forbidden_env_values": [
@@ -163,7 +185,7 @@
       ],
       "port_env": "PORTAL_PORT",
       "base_url_env": "PORTAL_BASE_URL",
-      "command": "npm --prefix apps/portal run dev -- -H 0.0.0.0 -p ${port}",
+      "command": "cd apps/portal && npm exec -- next build && npm exec -- next start -H 0.0.0.0 -p ${port}",
       "health_path": "/",
       "cache_mounts": [
         {
@@ -207,27 +229,13 @@
           "name": "marketing-lead-intake",
           "auth_mode": "public_no_jwt",
           "public": {
-            "method": "POST",
+            "method": "GET",
+            "path": "clients?locale=en",
             "header_mode": "public_anon",
             "expected_status": 200,
-            "body": {
-              "email": "runtime-proof+{{marker}}@example.test",
-              "company": "Runtime Proof {{marker}}",
-              "volume": "runtime-proof",
-              "role": "runtime-proof",
-              "notes": "docker runtime configured edge proof {{marker}}",
-              "locale": "en",
-              "page_url": "{{origin}}/runtime-proof",
-              "referrer": "{{origin}}/runtime-proof-referrer",
-              "marketing": {
-                "runtime_proof_marker": "{{marker}}",
-                "workspace_id": "{{workspace_id}}",
-                "owner": "{{owner}}"
-              },
-              "turnstile_token": "EXAMPLE_PASSWORD"
-            },
             "expected_json": {
-              "ok": true
+              "ok": true,
+              "clients": []
             }
           }
         }
@@ -235,15 +243,12 @@
       "required_paths": [
         "scripts/ops/workspace/docker-edge-functions-watch.js",
         "supabase/functions/metrics-echo-test/index.ts",
-        "supabase/functions/_shared/mod.mjs"
+        "supabase/functions/metrics-echo-test/_shared/mod.mjs"
       ],
       "required_env": [
-        "SUPABASE_FUNCTIONS_INTERNAL_URL",
-        "SUPABASE_SERVICE_ROLE_KEY",
-        "API_CALLER_DB_JWT",
-        "EDGE_DB_JWT"
+        "EDGE_SUPABASE_URL"
       ],
-      "command": "node scripts/ops/workspace/docker-edge-functions-watch.js --function metrics-echo-test --startup-timeout-ms 300000",
+      "command": "node scripts/ops/workspace/docker-edge-functions-watch.js --url \"$${EDGE_SUPABASE_URL}\" --function metrics-echo-test --startup-timeout-ms 300000",
       "restart": "on-failure",
       "health_path": ""
     },
@@ -257,8 +262,6 @@
       "required_paths": [
         "apps/fieldops/package.json",
         "apps/fieldops/index.ts",
-        "apps/fieldops/src/mobile-v2-shell.tsx",
-        "apps/fieldops/src/mobile-v2-navigation.ts",
         "scripts/ops/mobile/start-fieldops-metro.js"
       ],
       "required_env": [
@@ -269,8 +272,6 @@
         "NEXT_PUBLIC_SUPABASE_ANON_KEY",
         "VITE_SUPABASE_URL",
         "VITE_SUPABASE_ANON_KEY",
-        "EXPO_PUBLIC_SUPABASE_URL",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY",
         "VITE_USE_SEED"
       ],
       "forbidden_env_values": [
@@ -283,6 +284,7 @@
       "base_url_env": "FIELDOPS_BASE_URL",
       "command": "npm --prefix apps/fieldops run web -- --port ${port} --clear",
       "health_path": "/",
+      "health_require_nonempty_body": true,
       "cache_mounts": [
         {
           "target": "/workspace/apps/fieldops/.expo"
@@ -305,6 +307,8 @@
       ],
       "required_env": [
         "DATABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "API_CALLER_DB_JWT",
         "SUPABASE_INTERNAL_URL",
         "DOCKER_RUNTIME_BACKEND_PROOF_SUMMARY",
         "DOCKER_RUNTIME_AUTH_PROOF_SUMMARY",
@@ -313,7 +317,7 @@
         "DOCKER_RUNTIME_PROOF_SUMMARY_OUT",
         "DOCKER_RUNTIME_BROWSER_PROOF_SUMMARY"
       ],
-      "command": "node scripts/ops/workspace/docker-runtime-auth-proof.js --summary-out $${DOCKER_RUNTIME_AUTH_PROOF_SUMMARY} && node scripts/ops/workspace/docker-runtime-backend-proof.js --summary-out $${DOCKER_RUNTIME_BACKEND_PROOF_SUMMARY} --peer-database-urls \"$${DOCKER_RUNTIME_PEER_DATABASE_URLS}\" && node scripts/ops/workspace/docker-runtime-proof.js",
+      "command": "node scripts/ops/workspace/docker-runtime-auth-proof.js --skip-provision --summary-out $${DOCKER_RUNTIME_AUTH_PROOF_SUMMARY} && node scripts/ops/workspace/docker-runtime-proof.js",
       "health_path": ""
     }
   }

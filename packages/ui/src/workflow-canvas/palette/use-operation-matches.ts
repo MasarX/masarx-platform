@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { createUiClient } from "@masarx/api";
 import type { OperationMatch } from "./group-operation-matches";
+import { resolveTrustedOperationDocUrl } from "../../url-guard";
 
 /* ---------------------------------------------------------------------------
  * State shape.
@@ -26,16 +27,7 @@ function normalizeUiText(value: unknown) {
 
 function sanitizeDocUrl(value: unknown) {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) return trimmed;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.toString();
-  } catch {
-    // ignore invalid urls
-  }
-  return null;
+  return resolveTrustedOperationDocUrl(value);
 }
 
 function formatOperationMatchError(error: unknown) {

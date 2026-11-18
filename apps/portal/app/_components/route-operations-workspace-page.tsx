@@ -10,7 +10,7 @@ type RouteOperationsWorkspacePageProps = Parameters<
 const RouteOperationsWorkspacePageInner =
   UiRouteOperationsWorkspacePage as unknown as (
     props: RouteOperationsWorkspacePageProps
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function RouteOperationsWorkspacePage(
   props: RouteOperationsWorkspacePageProps

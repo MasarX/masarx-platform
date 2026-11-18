@@ -3,8 +3,11 @@ const os = require('os');
 const path = require('path');
 
 const {
+  MIGRATION_SQL_NORMALIZATION_CONTRACT,
   buildMigrationSchemaKey,
+  buildMigrationSqlNormalizationExpression,
   listMigrationFiles,
+  normalizeMigrationSqlContent,
 } = require('../../../scripts/ops/workspace/migration-schema-key');
 
 function writeMigration(root, name, sql) {
@@ -36,23 +39,25 @@ describe('migration schema key', () => {
     expect(summary.entries).toEqual([]);
   });
 
-  test('sorts migration files and updates when an untracked migration file appears', () => {
+  test('sorts mixed timestamp widths lexically and updates when an untracked migration file appears', () => {
     writeMigration(tmpDir, '20260601000002_second.sql', 'select 2;\n');
     writeMigration(tmpDir, '20260601000001_first.sql', 'select 1;\n');
+    writeMigration(tmpDir, '20251122111500_older_fourteen_digit.sql', 'select 0;\n');
 
     const before = buildMigrationSchemaKey(tmpDir);
     expect(listMigrationFiles(tmpDir).map((filePath) => path.basename(filePath))).toEqual([
+      '20251122111500_older_fourteen_digit.sql',
       '20260601000001_first.sql',
       '20260601000002_second.sql',
     ]);
     expect(before.migration_head).toBe('20260601000002_second.sql');
 
-    writeMigration(tmpDir, '20260601000003_untracked_phase_delta.sql', 'select 3;\n');
+    writeMigration(tmpDir, '202607201100_untracked_phase_delta.sql', 'select 3;\n');
     const after = buildMigrationSchemaKey(tmpDir);
 
     expect(after.schema_key).not.toBe(before.schema_key);
-    expect(after.migration_head).toBe('20260601000003_untracked_phase_delta.sql');
-    expect(after.migration_count).toBe(3);
+    expect(after.migration_head).toBe('202607201100_untracked_phase_delta.sql');
+    expect(after.migration_count).toBe(4);
   });
 
   test('hashes a large local migration set within a bounded time', () => {
@@ -71,5 +76,29 @@ describe('migration schema key', () => {
     expect(summary.migration_count).toBe(400);
     expect(summary.schema_key).toMatch(/^supabase-migrations:/);
     expect(elapsedMs).toBeLessThan(1500);
+  });
+
+  test('uses the same BOM newline and edge-whitespace normalization as database content proof', () => {
+    const name = '202607201300_normalized.sql';
+    writeMigration(tmpDir, name, '\uFEFFselect 1;\r\n\r\n');
+    const windows = buildMigrationSchemaKey(tmpDir);
+    writeMigration(tmpDir, name, 'select 1;\n');
+    const unix = buildMigrationSchemaKey(tmpDir);
+
+    expect(normalizeMigrationSqlContent('\uFEFFselect 1;\r\n\r\n')).toBe('select 1;');
+    expect(normalizeMigrationSqlContent('\u00A0select 1;\u00A0')).toBe('\u00A0select 1;\u00A0');
+    expect(windows.schema_key).toBe(unix.schema_key);
+    expect(windows.entries[0].sha256).toBe(unix.entries[0].sha256);
+    expect(windows.entries[0].raw_sha256).not.toBe(unix.entries[0].raw_sha256);
+    expect(MIGRATION_SQL_NORMALIZATION_CONTRACT).toBe('masarx-migration-sql-normalization.v1');
+    expect(buildMigrationSqlNormalizationExpression('candidate.value')).toBe([
+      'btrim(',
+      'replace(replace(',
+      'case when left(candidate.value, 1) = chr(65279) then substr(candidate.value, 2) else candidate.value end,',
+      "E'\\r\\n', E'\\n'), E'\\r', E'\\n'),",
+      "E' \\t\\n\\r\\f\\v')",
+    ].join(' '));
+    expect(() => buildMigrationSqlNormalizationExpression('candidate.value); drop table x; --'))
+      .toThrow(/trusted SQL identifier/);
   });
 });

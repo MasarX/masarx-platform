@@ -14,6 +14,7 @@ import { formatUiError, isStatementTimeoutUiError } from "./utils";
 import { isTimeoutError, resolveUiRpcTimeoutMs, withTimeout } from "./promise-timeout";
 import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
 import { useUnsavedChangesGuard } from "./use-unsaved-changes";
+import { useResourceListInvalidate } from "./hooks/use-resource-query";
 
 export type WorkflowTemplateOption = {
   id: string;
@@ -39,6 +40,8 @@ export function WorkflowTemplateCreateForm({
 }: WorkflowTemplateCreateFormProps) {
   const t = createUiTranslator("ui.workflowStudio");
   const router = useRouter();
+  const invalidateWorkflowTemplates = useResourceListInvalidate("workflow_templates");
+  const readbackT = createUiTranslator("ui.resourceActions");
   const { toast } = useToast();
   const resolvedTestIdPrefix = testIdPrefix?.trim() || "";
   const nameTestId = resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-name` : undefined;
@@ -114,6 +117,7 @@ export function WorkflowTemplateCreateForm({
       return;
     }
     setPending(true);
+    let created = false;
     try {
       const ui = createUiClient();
       const payload = {
@@ -151,6 +155,11 @@ export function WorkflowTemplateCreateForm({
         });
         return;
       }
+      created = true;
+      setName("");
+      setDescription("");
+      setCloneFrom("");
+      await invalidateWorkflowTemplates();
       const templateHref = safeBasePath !== null
         ? resolveSafeHref(
             safeBasePath,
@@ -159,15 +168,23 @@ export function WorkflowTemplateCreateForm({
         : null;
       if (!templateHref) {
         toast({
-          tone: "error",
-          title: t("create.toast.errorTitle"),
-          description: t("create.toast.errorTitle"),
+          tone: "warning",
+          title: t("create.toast.successTitle"),
+          description: readbackT("toast.readbackErrorDescription"),
         });
         return;
       }
       router.push(templateHref);
       toast({ tone: "success", title: t("create.toast.successTitle") });
     } catch (error) {
+      if (created) {
+        toast({
+          tone: "warning",
+          title: t("create.toast.successTitle"),
+          description: formatUiError(error, readbackT("toast.readbackErrorDescription")),
+        });
+        return;
+      }
       if (isTimeoutError(error) || isStatementTimeoutUiError(error)) {
         toast({
           tone: "error",
@@ -189,8 +206,10 @@ export function WorkflowTemplateCreateForm({
     cloneFrom,
     createTimeoutMs,
     description,
+    invalidateWorkflowTemplates,
     name,
     pending,
+    readbackT,
     router,
     safeBasePath,
     shouldRetry,

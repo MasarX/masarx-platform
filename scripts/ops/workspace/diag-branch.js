@@ -16,7 +16,7 @@ async function main() {
   const headers = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
   const name = `wk-diag-${Date.now()}`;
   console.log('Attempting branch create under', parent, 'as', name);
-  const res = await fetch(`${base}/v1/projects/${parent}/branches`, { method: 'POST', headers, body: JSON.stringify({ branch_name: name, name }) });
+  const res = await fetch(`${base}/v1/projects/${parent}/branches`, { method: 'POST', headers, body: JSON.stringify({ branch_name: name }) });
   const body = await res.text();
   let j; try { j = body ? JSON.parse(body) : null; } catch { j = { raw: body }; }
   console.log('CREATE_STATUS =', res.status, res.statusText);

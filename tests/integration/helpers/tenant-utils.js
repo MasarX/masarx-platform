@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const { upsertSettings } = require('../../utils/policies');
 
 const columnCache = {};
+let fixtureAdminScopeSequence = 0;
 
 const DATABASE_URL = String(process.env.DATABASE_URL || '').trim() || null;
 if (!DATABASE_URL) {
@@ -61,26 +62,26 @@ async function grantSelectRecursive(client, tableName) {
 }
 
 async function createOrganization(client, name, options = {}) {
-  const slug = options.slug || randomSlug('org');
-  const { rows } = await withFixtureSetupRole(client, () =>
-    client.query(
+  return withFixtureAdminContext(client, async (adminClient) => {
+    const slug = options.slug || randomSlug('org');
+    const { rows } = await adminClient.query(
       `INSERT INTO organizations (
-          name,
-          slug,
-          timezone,
-          locale,
-          billing_status,
-          default_settings
-        )
-        VALUES (
-          $1,
-          $2,
-          COALESCE($3, 'Asia/Riyadh'),
-          COALESCE($4, 'ar-SA'),
-          COALESCE($5, 'active'),
-          COALESCE($6::jsonb, '{}'::jsonb)
-        )
-        RETURNING id`,
+        name,
+        slug,
+        timezone,
+        locale,
+        billing_status,
+        default_settings
+      )
+      VALUES (
+        $1,
+        $2,
+        COALESCE($3, 'Asia/Riyadh'),
+        COALESCE($4, 'ar-SA'),
+        COALESCE($5, 'active'),
+        COALESCE($6::jsonb, '{}'::jsonb)
+      )
+      RETURNING id`,
       [
         name,
         slug,
@@ -89,32 +90,32 @@ async function createOrganization(client, name, options = {}) {
         options.billingStatus,
         options.defaultSettings ? JSON.stringify(options.defaultSettings) : null
       ]
-    )
-  );
-  return { id: rows[0].id, slug };
+    );
+    return { id: rows[0].id, slug };
+  });
 }
 
 async function createClient(client, organizationId, name, options = {}) {
-  const slug = options.slug || randomSlug('client');
-  const { rows } = await withFixtureSetupRole(client, () =>
-    client.query(
+  return withFixtureAdminContext(client, async (adminClient) => {
+    const slug = options.slug || randomSlug('client');
+    const { rows } = await adminClient.query(
       `INSERT INTO clients (
-          organization_id,
-          name,
-          slug,
-          sla_tier,
-          status,
-          settings_override
-        )
-        VALUES (
-          $1::uuid,
-          $2,
-          $3,
-          COALESCE($4, 'standard'),
-          COALESCE($5, 'active'),
-          COALESCE($6::jsonb, '{}'::jsonb)
-        )
-        RETURNING id`,
+        organization_id,
+        name,
+        slug,
+        sla_tier,
+        status,
+        settings_override
+      )
+      VALUES (
+        $1::uuid,
+        $2,
+        $3,
+        COALESCE($4, 'standard'),
+        COALESCE($5, 'active'),
+        COALESCE($6::jsonb, '{}'::jsonb)
+      )
+      RETURNING id`,
       [
         organizationId,
         name,
@@ -123,33 +124,33 @@ async function createClient(client, organizationId, name, options = {}) {
         options.status,
         options.settingsOverride ? JSON.stringify(options.settingsOverride) : null
       ]
-    )
-  );
-  return { id: rows[0].id, slug };
+    );
+    return { id: rows[0].id, slug };
+  });
 }
 
 async function createSender(client, clientId, name, options = {}) {
-  const { rows } = await withFixtureSetupRole(client, () =>
-    client.query(
+  return withFixtureAdminContext(client, async (adminClient) => {
+    const { rows } = await adminClient.query(
       `INSERT INTO senders (
-          client_id,
-          name,
-          brand_name,
-          auto_provisioned,
-          auto_recreate,
-          status,
-          settings_override
-        )
-        VALUES (
-          $1::uuid,
-          $2,
-          $3,
-          COALESCE($4, false),
-          COALESCE($5, true),
-          COALESCE($6, 'active'),
-          COALESCE($7::jsonb, '{}'::jsonb)
-        )
-        RETURNING id`,
+        client_id,
+        name,
+        brand_name,
+        auto_provisioned,
+        auto_recreate,
+        status,
+        settings_override
+      )
+      VALUES (
+        $1::uuid,
+        $2,
+        $3,
+        COALESCE($4, false),
+        COALESCE($5, true),
+        COALESCE($6, 'active'),
+        COALESCE($7::jsonb, '{}'::jsonb)
+      )
+      RETURNING id`,
       [
         clientId,
         name,
@@ -159,39 +160,39 @@ async function createSender(client, clientId, name, options = {}) {
         options.status,
         options.settingsOverride ? JSON.stringify(options.settingsOverride) : null
       ]
-    )
-  );
-  return rows[0].id;
+    );
+    return rows[0].id;
+  });
 }
 
 async function createUser(client, organizationId, email, options = {}) {
-  const userId = options.id || randomUUID();
-  const accessScopeType = options.accessScopeType || null;
-  const accessScopeId = options.accessScopeId || null;
-  const effectiveUserType = options.userType || 'ops_admin';
-  const effectiveAccessScopeType = accessScopeType || 'tenant';
-  await withFixtureSetupRole(client, async () => {
-    await client.query(
+  return withFixtureAdminContext(client, async (adminClient) => {
+    const userId = options.id || randomUUID();
+    const accessScopeType = options.accessScopeType || null;
+    const accessScopeId = options.accessScopeId || null;
+    const effectiveUserType = options.userType || 'ops_admin';
+    const effectiveAccessScopeType = accessScopeType || 'tenant';
+    await adminClient.query(
       `INSERT INTO users (
-          id,
-          organization_id,
-          email,
-          full_name,
-          user_type,
-          status,
-          access_scope_type,
-          access_scope_id
-        )
-        VALUES (
-          $1::uuid,
-          $2::uuid,
-          $3,
-          $4,
-          COALESCE($5, 'ops_admin'),
-          COALESCE($6, 'active'),
-          COALESCE($7, 'tenant'),
-          $8::uuid
-        )`,
+        id,
+        organization_id,
+        email,
+        full_name,
+        user_type,
+        status,
+        access_scope_type,
+        access_scope_id
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        $3,
+        $4,
+        COALESCE($5, 'ops_admin'),
+        COALESCE($6, 'active'),
+        COALESCE($7, 'tenant'),
+        $8::uuid
+      )`,
       [
         userId,
         organizationId,
@@ -206,17 +207,35 @@ async function createUser(client, organizationId, email, options = {}) {
 
     if (effectiveAccessScopeType === 'tenant' && options.provisionRbac !== false) {
       const templateKey = String(options.rbacTemplateKey || effectiveUserType || '').trim().toLowerCase();
-      await provisionRbacTemplateAssignment(
-        client,
-        organizationId,
-        userId,
-        templateKey,
-        options.assignedByUserId || userId
-      );
+      await provisionRbacTemplateAssignment(adminClient, organizationId, userId, templateKey, options.assignedByUserId || userId);
     }
-  });
 
-  return userId;
+    return userId;
+  });
+}
+
+async function setFixtureUserPolicyCapabilities(client, orgId, userId, capabilities, options = {}) {
+  return withFixtureAdminContext(client, async db => {
+    const scopeType = options.scopeType || 'tenant';
+    const scopeId = options.scopeId || orgId;
+    const row = (await db.query(`SELECT p.policy,
+      (SELECT version FROM public.schema_registry WHERE category='access_control_policy'
+        AND is_active ORDER BY version DESC LIMIT 1) AS schema_version
+      FROM public.resolve_access_control_policy_v1($1,$2::uuid,FALSE) p`, [scopeType, scopeId])).rows[0];
+    if (!row?.policy || !Array.isArray(row.policy.roles) || !Number.isInteger(row.schema_version)) {
+      throw new Error('Policy fixture requires resolved policy and active schema');
+    }
+    const roleKey = 'qa_policy_' + randomUUID().replace(/-/g, '');
+    if (row.policy.roles.some(role => role.key === roleKey)) throw new Error('Policy role collision');
+    const policy = { ...row.policy,
+      roles: [...row.policy.roles, { key: roleKey, capability_keys: capabilities }],
+      assignments: { ...row.policy.assignments,
+        user_id: { ...row.policy.assignments?.user_id, [userId]: [roleKey] } },
+    };
+    await db.query(`SELECT public.upsert_settings_value_v1(
+      'access_control_policy',$1,$2::uuid,$3::jsonb,$4::integer,$5::text)`,
+      [scopeType, scopeId, JSON.stringify(policy), row.schema_version, 'Isolated fixture user policy authority']);
+  });
 }
 
 async function provisionRbacTemplateAssignment(client, organizationId, userId, templateKey, assignedByUserId) {
@@ -265,6 +284,161 @@ async function provisionRbacTemplateAssignment(client, organizationId, userId, t
       JSON.stringify({ seed: true, source: 'integration-helper', template_key: resolvedKey })
     ]
   );
+}
+
+async function setFixtureAdminContext(client) {
+  await client.query('SET LOCAL ROLE NONE');
+  await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claims', '']);
+  await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', '']);
+  await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.role', '']);
+}
+
+function isPoolQueryTarget(target) {
+  return Boolean(
+    target &&
+    typeof target.query === 'function' &&
+    typeof target.connect === 'function' &&
+    typeof target.end === 'function' &&
+    Number.isInteger(target.totalCount)
+  );
+}
+
+async function restoreFixtureContext(client, snapshot) {
+  await client.query('SET LOCAL ROLE NONE');
+  await client.query('SELECT set_config($1, $2, true)', [
+    'request.jwt.claims',
+    snapshot.jwt_claims || '',
+  ]);
+  await client.query('SELECT set_config($1, $2, true)', [
+    'request.jwt.claim.sub',
+    snapshot.jwt_sub || '',
+  ]);
+  await client.query('SELECT set_config($1, $2, true)', [
+    'request.jwt.claim.role',
+    snapshot.jwt_role || '',
+  ]);
+
+  const currentRole = String(snapshot.current_role || '');
+  const sessionRole = String(snapshot.session_role || '');
+  if (currentRole && currentRole !== sessionRole) {
+    if (!IDENTIFIER_REGEX.test(currentRole)) {
+      throw new Error(`Invalid fixture role: ${currentRole}`);
+    }
+    await client.query(`SET LOCAL ROLE ${currentRole}`);
+  }
+}
+
+async function snapshotFixtureContext(client) {
+  let transactionStatus = null;
+  const connection = client.connection;
+  const captureReadyStatus = (message) => {
+    transactionStatus = message?.status || null;
+  };
+  if (connection && typeof connection.once === 'function') {
+    connection.once('readyForQuery', captureReadyStatus);
+  }
+
+  try {
+    const { rows } = await client.query(
+      `SELECT current_user::text AS current_role,
+              session_user::text AS session_role,
+              current_setting('request.jwt.claims', true) AS jwt_claims,
+              current_setting('request.jwt.claim.sub', true) AS jwt_sub,
+              current_setting('request.jwt.claim.role', true) AS jwt_role`
+    );
+    return {
+      snapshot: rows[0] || {},
+      transactionStatus: transactionStatus || client.fixtureTransactionStatus || null,
+    };
+  } finally {
+    if (connection && typeof connection.removeListener === 'function') {
+      connection.removeListener('readyForQuery', captureReadyStatus);
+    }
+  }
+}
+
+async function withFixtureAdminContext(queryTarget, operation) {
+  if (typeof operation !== 'function') {
+    throw new TypeError('withFixtureAdminContext requires an operation callback');
+  }
+
+  const ownsConnection = isPoolQueryTarget(queryTarget);
+  const client = ownsConnection ? await queryTarget.connect() : queryTarget;
+  if (!client || typeof client.query !== 'function') {
+    throw new TypeError('withFixtureAdminContext requires a query-capable client or pool');
+  }
+
+  let ownsTransaction = false;
+  let savepoint = null;
+  let operationError = null;
+
+  try {
+    const context = await snapshotFixtureContext(client);
+    if (context.transactionStatus === 'E') {
+      throw new Error('withFixtureAdminContext cannot enter an aborted transaction');
+    }
+    if (context.transactionStatus === 'T') {
+      fixtureAdminScopeSequence += 1;
+      savepoint = `fixture_admin_scope_${fixtureAdminScopeSequence}`;
+      await client.query(`SAVEPOINT ${savepoint}`);
+    } else {
+      await client.query('BEGIN');
+      ownsTransaction = true;
+    }
+
+    await setFixtureAdminContext(client);
+    const result = await operation(client);
+    await restoreFixtureContext(client, context.snapshot);
+    if (savepoint) {
+      await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+    } else {
+      await client.query('COMMIT');
+    }
+    return result;
+  } catch (error) {
+    operationError = error;
+    if (savepoint) {
+      try {
+        await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+      } catch (rollbackError) {
+        operationError.fixtureAdminRollbackError = rollbackError;
+      }
+    } else if (ownsTransaction) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        operationError.fixtureAdminRollbackError = rollbackError;
+      }
+    }
+    throw error;
+  } finally {
+    if (ownsConnection) {
+      client.release(operationError || undefined);
+    }
+  }
+}
+
+async function setServiceContext(client, userId, organizationId, extraClaims = {}) {
+  await client.query('SET LOCAL ROLE service_role');
+  const claims = {
+    sub: String(userId),
+    role: 'service_role',
+    organization_id: String(organizationId),
+    ...extraClaims,
+  };
+  await client.query('SELECT set_config($1, $2, true)', [
+    'request.jwt.claims',
+    JSON.stringify(claims),
+  ]);
+  await client.query('SELECT set_config($1, $2, true)', [
+    'request.jwt.claim.sub',
+    String(userId),
+  ]);
+  await client.query('SELECT set_config($1, $2, true)', [
+    'request.jwt.claim.role',
+    'service_role',
+  ]);
 }
 
 async function setAuthContext(client, userId, extraClaims = {}) {
@@ -334,64 +508,41 @@ async function createRequestContext(client, options = {}) {
   return rows[0].id;
 }
 
-async function withFixtureSetupRole(client, operation) {
-  const { rows } = await client.query('SELECT current_role, session_user');
-  const previousRole = rows[0]?.current_role;
-  const sessionUser = rows[0]?.session_user;
-  const shouldRestoreRole = previousRole && sessionUser && previousRole !== sessionUser;
-
-  if (shouldRestoreRole && !IDENTIFIER_REGEX.test(previousRole)) {
-    throw new Error(`Invalid current role name: ${previousRole}`);
-  }
-
-  if (shouldRestoreRole) {
-    await client.query('RESET ROLE');
-  }
-
-  try {
-    return await operation();
-  } finally {
-    if (shouldRestoreRole) {
-      await client.query(`SET LOCAL ROLE ${previousRole}`);
-    }
-  }
-}
-
 async function createShipment(client, params) {
-  const {
-    organizationId,
-    clientId,
-    serviceType = 'delivery',
-    trackingNumber,
-    status = 'pending',
-    shipmentSettingsOverride,
-    metadata
-  } = params;
+  return withFixtureAdminContext(client, async (adminClient) => {
+    const {
+      organizationId,
+      clientId,
+      serviceType = 'delivery',
+      trackingNumber,
+      status = 'pending',
+      shipmentSettingsOverride,
+      metadata
+    } = params;
 
-  const tracking =
-    trackingNumber || `SHIP-${randomSlug('trk').replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
+    const tracking =
+      trackingNumber || `SHIP-${randomSlug('trk').replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
 
-  const { rows } = await withFixtureSetupRole(client, () =>
-    client.query(
+    const { rows } = await adminClient.query(
       `INSERT INTO shipments (
-          organization_id,
-          client_id,
-          service_type,
-          tracking_number,
-          status,
-          shipment_settings_override,
-          metadata
-        )
-        VALUES (
-          $1::uuid,
-          $2::uuid,
-          $3,
-          $4,
-          $5,
-          COALESCE($6::jsonb, '{}'::jsonb),
-          COALESCE($7::jsonb, '{}'::jsonb)
-        )
-        RETURNING id, tracking_number`,
+        organization_id,
+        client_id,
+        service_type,
+        tracking_number,
+        status,
+        shipment_settings_override,
+        metadata
+      )
+      VALUES (
+        $1::uuid,
+        $2::uuid,
+        $3,
+        $4,
+        $5,
+        COALESCE($6::jsonb, '{}'::jsonb),
+        COALESCE($7::jsonb, '{}'::jsonb)
+      )
+      RETURNING id, tracking_number`,
       [
         organizationId,
         clientId,
@@ -401,9 +552,9 @@ async function createShipment(client, params) {
         shipmentSettingsOverride ? JSON.stringify(shipmentSettingsOverride) : null,
         metadata ? JSON.stringify(metadata) : null
       ]
-    )
-  );
-  return { id: rows[0].id, trackingNumber: rows[0].tracking_number };
+    );
+    return { id: rows[0].id, trackingNumber: rows[0].tracking_number };
+  });
 }
 
 async function createLabel(client, params) {
@@ -732,55 +883,57 @@ async function ensureSettingsCategoryContract(client, category) {
 }
 
 async function applySetting(client, params) {
-  const {
-    category,
-    scopeType,
-    scopeId = null,
-    value,
-    version = 1,
-    schemaVersion = 1,
-    approvedAt = null,
-    changeReason = 'integration-test'
-  } = params;
+  return withFixtureAdminContext(client, async (adminClient) => {
+    const {
+      category,
+      scopeType,
+      scopeId = null,
+      value,
+      version = 1,
+      schemaVersion = 1,
+      approvedAt = null,
+      changeReason = 'integration-test'
+    } = params;
 
-  await ensureSettingsCategoryContract(client, category);
-  await upsertSettings(
-    category,
-    scopeType,
-    scopeId,
-    value,
-    changeReason,
-    client,
-  );
+    await ensureSettingsCategoryContract(adminClient, category);
+    await upsertSettings(
+      category,
+      scopeType,
+      scopeId,
+      value,
+      changeReason,
+      adminClient,
+    );
 
-  const scopeHash = scopeId ?? '00000000-0000-0000-0000-000000000000';
-  const { rows } = await client.query(
-    `
-      SELECT settings_version_id
-      FROM settings
-      WHERE category = $1
-        AND scope_type = $2
-        AND scope_hash = $3::uuid
-      ORDER BY last_updated DESC
-      LIMIT 1
-    `,
-    [category, scopeType, scopeHash],
-  );
+    const scopeHash = scopeId ?? '00000000-0000-0000-0000-000000000000';
+    const { rows } = await adminClient.query(
+      `
+        SELECT settings_version_id
+        FROM settings
+        WHERE category = $1
+          AND scope_type = $2
+          AND scope_hash = $3::uuid
+        ORDER BY last_updated DESC
+        LIMIT 1
+      `,
+      [category, scopeType, scopeHash],
+    );
 
-  const settingsVersionId = rows[0]?.settings_version_id || randomUUID();
-  await client.query(
-    `
-      UPDATE settings_versions
-      SET version = $2,
-          schema_version = $3,
-          approved_at = COALESCE($4::timestamptz, approved_at),
-          effective_from = COALESCE($4::timestamptz, effective_from)
-      WHERE id = $1::uuid
-    `,
-    [settingsVersionId, version, schemaVersion, approvedAt || null],
-  );
+    const settingsVersionId = rows[0]?.settings_version_id || randomUUID();
+    await adminClient.query(
+      `
+        UPDATE settings_versions
+        SET version = $2,
+            schema_version = $3,
+            approved_at = COALESCE($4::timestamptz, approved_at),
+            effective_from = COALESCE($4::timestamptz, effective_from)
+        WHERE id = $1::uuid
+      `,
+      [settingsVersionId, version, schemaVersion, approvedAt || null],
+    );
 
-  return settingsVersionId;
+    return settingsVersionId;
+  });
 }
 
 async function createWorkflowTemplate(client, params) {
@@ -935,76 +1088,6 @@ async function cleanupAutoOnboardingArtifacts(client, organizationId) {
         AND managed_by = 'integration_plugin'`,
     [organizationId]
   );
-
-  const { rows: providerRows } = await client.query(
-    `SELECT COALESCE(array_agg(id), ARRAY[]::uuid[]) AS provider_ids
-       FROM public.providers
-      WHERE organization_id = $1::uuid`,
-    [organizationId]
-  );
-  const providerIds = providerRows[0]?.provider_ids || [];
-  if (providerIds.length) {
-    const { rows: routeRows } = await client.query(
-      `SELECT COALESCE(array_agg(id), ARRAY[]::uuid[]) AS route_ids
-         FROM public.api_routes
-        WHERE provider_id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-    const routeIds = routeRows[0]?.route_ids || [];
-
-    if (routeIds.length) {
-      await client.query(
-        `DELETE FROM public.api_gateway_requests
-          WHERE route_id = ANY($1::uuid[])`,
-        [routeIds]
-      );
-    }
-
-    await client.query(
-      `DELETE FROM public.settings
-        WHERE category = 'provider_defaults'
-          AND scope_type IN ('provider', 'resource')
-          AND scope_id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-    await client.query(
-      `DELETE FROM public.settings_versions
-        WHERE category = 'provider_defaults'
-          AND scope_type IN ('provider', 'resource')
-          AND scope_id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-    await client.query(
-      `DELETE FROM public.api_routes
-        WHERE provider_id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-    await client.query(
-      `DELETE FROM public.comms_attempts
-        WHERE provider_id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-    await client.query(
-      `DELETE FROM public.provider_usage_tracking
-        WHERE provider_id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-    await client.query(
-      `DELETE FROM public.circuit_breaker_state
-        WHERE provider_id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-    await client.query(
-      `DELETE FROM public.provider_auth_configs
-        WHERE provider_id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-    await client.query(
-      `DELETE FROM public.providers
-        WHERE id = ANY($1::uuid[])`,
-      [providerIds]
-    );
-  }
 }
 
 async function createWorkflowContext(client, params = {}) {
@@ -1378,8 +1461,11 @@ module.exports = {
   createClient,
   createSender,
   createUser,
+  setFixtureAdminContext,
+  setFixtureUserPolicyCapabilities,
+  withFixtureAdminContext,
+  setServiceContext,
   setAuthContext,
-  withFixtureSetupRole,
   createRequestContext,
   createShipment,
   createLabel,

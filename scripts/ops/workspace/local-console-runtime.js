@@ -12,6 +12,8 @@ const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g
 const DATABASE_URL_RE = /\bpostgres(?:ql)?:\/\/[^\s\r\n\u2502|]+/gi;
 const SUPABASE_KEY_RE = /\bsb_(?:secret|publishable)_[A-Za-z0-9_-]+\b/g;
 const LABELED_SECRET_RE = /((?:service[_ -]?role|secret|password|token|api[_ -]?key|anon[_ -]?key|jwt|database[_ -]?url|publishable|access[_ -]?key|secret[_ -]?key)[^\r\n:=\u2502|]{0,40}(?:[:=]|[\u2502|])\s*)([^\s\r\n\u2502|]+)/gi;
+// objectives:allow LOCALHOST Justification: local Console and Landing development runtimes share one loopback-only default host.
+const DEFAULT_LOCAL_RUNTIME_HOST = '127.0.0.1';
 
 function parsePositiveInteger(value, fallback = 0) {
   const parsed = Number.parseInt(String(value ?? '').trim(), 10);
@@ -23,10 +25,11 @@ function ensureDir(target) {
 }
 
 function getConsoleRuntimePaths(cwd = process.cwd(), port = 5175) {
-  const runtimeDir = path.join(cwd, 'tmp', 'local-console-v2');
+  const runtimeDir = path.join(cwd, 'tmp', 'local-console');
+  const appDir = path.join(cwd, 'apps', 'console');
   return {
     runtimeDir,
-    appDir: path.join(cwd, 'apps', 'console-v2'),
+    appDir: fs.existsSync(appDir) ? fs.realpathSync(appDir) : appDir,
     envPath: path.join(cwd, 'config', 'env', '.env.local'),
     pidPath: path.join(runtimeDir, `console-v2-${port}.pid`),
     outLogPath: path.join(runtimeDir, `console-v2-${port}.out.log`),
@@ -49,6 +52,23 @@ function isProcessRunning(pid) {
     process.kill(pid, 0);
     return true;
   } catch (_) {
+    return false;
+  }
+}
+
+function stopDetachedProcessGroup(pid, options = {}) {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  const processKillImpl = options.processKillImpl || ((target, signal) => process.kill(target, signal));
+  try {
+    processKillImpl(-pid, 'SIGTERM');
+    return true;
+  } catch (error) {
+    if (error?.code !== 'ESRCH') return false;
+  }
+  try {
+    processKillImpl(pid, 'SIGTERM');
+    return true;
+  } catch {
     return false;
   }
 }
@@ -100,20 +120,27 @@ function readConsoleLogTail(filePath, options = {}) {
   };
 }
 
-function buildConsoleDevCommand({ appDir, port, host = '127.0.0.1', platform = process.platform } = {}) {
+function buildConsoleDevCommand({ appDir, port, host = DEFAULT_LOCAL_RUNTIME_HOST, platform = process.platform,
+  execPath = process.execPath, npm_cli_path,
+  npmCliPath = npm_cli_path || path.resolve(path.dirname(execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+} = {}) {
   const args = [
     '--prefix',
     appDir,
-    'run',
-    'dev',
+    'exec',
     '--',
-    '--host',
+    'next',
+    'dev',
+    '--webpack',
+    '-H',
     host,
-    '--port',
+    '-p',
     String(port),
-    '--strictPort',
   ];
   if (platform === 'win32') {
+    if (fs.existsSync(npmCliPath)) {
+      return { command: execPath, args: [npmCliPath, ...args] };
+    }
     return { command: 'cmd.exe', args: ['/c', 'npm', ...args] };
   }
   return { command: 'npm', args };
@@ -128,11 +155,12 @@ function resolveConsoleEnv({ cwd = process.cwd(), env = process.env, envPath } =
   return {
     ...env,
     ...parsed,
+    NEXT_PUBLIC_USE_SEED: 'false',
     VITE_USE_SEED: 'false',
   };
 }
 
-function canConnectToPort({ host = '127.0.0.1', port, timeoutMs = 1000 } = {}) {
+function canConnectToPort({ host = DEFAULT_LOCAL_RUNTIME_HOST, port, timeoutMs = 1000 } = {}) {
   return new Promise((resolve) => {
     const socket = net.createConnection({ host, port });
     let settled = false;
@@ -150,7 +178,7 @@ function canConnectToPort({ host = '127.0.0.1', port, timeoutMs = 1000 } = {}) {
 }
 
 async function waitForConsoleListener({
-  host = '127.0.0.1',
+  host = DEFAULT_LOCAL_RUNTIME_HOST,
   port,
   timeoutMs = 60000,
   intervalMs = 500,
@@ -186,9 +214,9 @@ function stopOrphanedConsoleRuntime(options = {}) {
     `$port = ${port}`,
     '$matches = Get-CimInstance Win32_Process | Where-Object {',
     '  $cmd = [string]$_.CommandLine',
-    '  ($cmd -match "npm(\\.cmd)?\\s+--prefix" -or $cmd -match "vite") -and',
+    '  ($cmd -match "npm(\\.cmd)?\\s+--prefix" -or $cmd -match "next\\s+dev") -and',
     '    ($needles | Where-Object { $cmd.Contains($_) }) -and',
-    '    ($cmd -match ("--port\\s+" + $port))',
+    '    ($cmd -match ("(-p|--port)\\s+" + $port))',
     '}',
     '$ids = @($matches | Select-Object -ExpandProperty ProcessId -Unique)',
     'foreach ($id in $ids) { & taskkill /PID $id /T /F | Out-Null }',
@@ -240,6 +268,7 @@ function buildConsoleRuntimeFailure({
     command: command?.command || '',
     args: command?.args || [],
     cwd,
+    spawn_cwd: paths?.appDir || '',
     pid: child?.pid || 0,
     process_running_before_stop: Boolean(processRunningBeforeStop),
     process_running_after_stop: child?.pid ? isProcessRunning(child.pid) : false,
@@ -262,7 +291,7 @@ function buildConsoleRuntimeFailure({
 async function startConsoleRuntime(options = {}) {
   const cwd = options.cwd || process.cwd();
   const port = parsePositiveInteger(options.port, 5175);
-  const host = options.host || '127.0.0.1';
+  const host = options.host || DEFAULT_LOCAL_RUNTIME_HOST;
   const logger = options.logger || console;
   const spawnImpl = options.spawnImpl || spawn;
   const waitForListenerImpl = options.waitForListenerImpl || waitForConsoleListener;
@@ -301,11 +330,14 @@ async function startConsoleRuntime(options = {}) {
     port,
     host,
     platform: options.platform || process.platform,
+    execPath: options.execPath,
+    npmCliPath: options.npmCliPath,
+    npm_cli_path: options.npm_cli_path,
   });
   let child;
   try {
     child = spawnImpl(command.command, command.args, {
-      cwd,
+      cwd: paths.appDir,
       detached: true,
       stdio: ['ignore', outFd, errFd],
       windowsHide: true,
@@ -359,23 +391,21 @@ function stopConsoleRuntime(options = {}) {
   const port = parsePositiveInteger(options.port, 5175);
   const logger = options.logger || console;
   const spawnSyncImpl = options.spawnSyncImpl || spawnSync;
+  const platform = options.platform || process.platform;
   const paths = getConsoleRuntimePaths(cwd, port);
   const pid = readPid(paths.pidPath);
   let killed = false;
-  if (pid && isProcessRunning(pid)) {
-    if ((options.platform || process.platform) === 'win32') {
+  if (pid) {
+    if (platform === 'win32' && isProcessRunning(pid)) {
       const res = spawnSyncImpl('taskkill', ['/PID', String(pid), '/T', '/F'], {
         stdio: 'ignore',
         windowsHide: true,
       });
       killed = res.status === 0;
-    } else {
-      try {
-        process.kill(pid, 'SIGTERM');
-        killed = true;
-      } catch (_) {
-        killed = false;
-      }
+    } else if (platform !== 'win32') {
+      killed = stopDetachedProcessGroup(pid, {
+        processKillImpl: options.processKillImpl,
+      });
     }
   }
   try {
@@ -388,7 +418,7 @@ function stopConsoleRuntime(options = {}) {
     port,
     logger,
     spawnSyncImpl,
-    platform: options.platform,
+    platform,
   });
   logger.log(`[workspace/local-console] Stopped Console V2 port=${port} pid=${pid || 0} killed=${killed}`);
   return { ok: true, running: Boolean(pid), pid, killed, orphan_cleanup: orphanCleanup };
@@ -424,7 +454,7 @@ async function main() {
   }
   const result = await startConsoleRuntime({
     port,
-    host: args.host || '127.0.0.1',
+    host: args.host || DEFAULT_LOCAL_RUNTIME_HOST,
     timeoutMs: parsePositiveInteger(args['timeout-ms'], 60000),
     intervalMs: parsePositiveInteger(args['interval-ms'], 500),
   });
@@ -433,7 +463,7 @@ async function main() {
     reused: result.reused,
     pid: result.pid,
     listener: result.listener,
-    url: `http://${args.host || '127.0.0.1'}:${port}`,
+    url: `http://${args.host || DEFAULT_LOCAL_RUNTIME_HOST}:${port}`,
   }, null, 2));
 }
 
@@ -445,6 +475,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEFAULT_LOCAL_RUNTIME_HOST,
   buildConsoleDevCommand,
   buildConsoleRuntimeFailure,
   getConsoleRuntimePaths,
@@ -453,6 +484,7 @@ module.exports = {
   redactConsoleRuntimeText,
   resolveConsoleEnv,
   startConsoleRuntime,
+  stopDetachedProcessGroup,
   stopConsoleRuntime,
   stopOrphanedConsoleRuntime,
   waitForConsoleListener,

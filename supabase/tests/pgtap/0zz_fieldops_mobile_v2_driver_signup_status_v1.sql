@@ -1,5 +1,6 @@
 -- pgTAP: FieldOps Mobile V2 driver signup status contract.
--- Proves duplicate identity readback and additional-documents applicant state
+-- Proves duplicate identity readback plus approved, rejected, and
+-- additional-documents applicant state
 -- through the same canonical marketplace participant request path used by the
 -- native Mobile V2 signup bridge.
 
@@ -7,7 +8,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(22);
+SELECT plan(26);
 
 DO $$
 DECLARE
@@ -16,8 +17,7 @@ DECLARE
   v_email_c TEXT := 'fieldops-v2-driver-signup-employee-' || left(replace(gen_random_uuid()::text, '-', ''), 12) || '@example.com';
   v_email_d TEXT := 'fieldops-v2-driver-signup-docs-' || left(replace(gen_random_uuid()::text, '-', ''), 12) || '@example.com';
   v_email_e TEXT := 'fieldops-v2-driver-signup-approved-' || left(replace(gen_random_uuid()::text, '-', ''), 12) || '@example.com';
-  v_email_f TEXT := 'fieldops-v2-driver-signup-reject-dup-' || left(replace(gen_random_uuid()::text, '-', ''), 12) || '@example.com';
-  v_email_g TEXT := 'fieldops-v2-driver-signup-reject-compliance-' || left(replace(gen_random_uuid()::text, '-', ''), 12) || '@example.com';
+  v_email_f TEXT := 'fieldops-v2-driver-signup-rejected-' || left(replace(gen_random_uuid()::text, '-', ''), 12) || '@example.com';
   v_phone_a TEXT := '+966500' || lpad((floor(random() * 999999))::int::text, 6, '0');
   v_phone_b TEXT := '+966501' || lpad((floor(random() * 999999))::int::text, 6, '0');
   v_employee_a TEXT := 'DRV-FOPS-' || left(replace(gen_random_uuid()::text, '-', ''), 8);
@@ -35,22 +35,18 @@ DECLARE
   v_docs_status_after JSONB;
   v_docs_request UUID;
   v_docs_token UUID;
-  v_approved_create JSONB;
-  v_approved_review JSONB;
-  v_approved_status JSONB;
-  v_approved_request UUID;
-  v_approved_token UUID;
-  v_approved_auth_user UUID := gen_random_uuid();
-  v_rejected_dup_create JSONB;
-  v_rejected_dup_review JSONB;
-  v_rejected_dup_status JSONB;
-  v_rejected_dup_request UUID;
-  v_rejected_dup_token UUID;
-  v_rejected_compliance_create JSONB;
-  v_rejected_compliance_review JSONB;
-  v_rejected_compliance_status JSONB;
-  v_rejected_compliance_request UUID;
-  v_rejected_compliance_token UUID;
+  v_approve_create JSONB;
+  v_approve_status_before JSONB;
+  v_approve_review JSONB;
+  v_approve_status_after JSONB;
+  v_approve_request UUID;
+  v_approve_token UUID;
+  v_reject_create JSONB;
+  v_reject_status_before JSONB;
+  v_reject_review JSONB;
+  v_reject_status_after JSONB;
+  v_reject_request UUID;
+  v_reject_token UUID;
 BEGIN
   PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
   EXECUTE 'SET LOCAL ROLE service_role';
@@ -235,11 +231,11 @@ BEGIN
   );
   v_docs_status_after := public.marketplace_application_status_by_token_v1(v_docs_token);
 
-  v_approved_create := public.marketplace_participant_request_create_v1(
+  v_approve_create := public.marketplace_participant_request_create_v1(
     'freelancer_driver',
     v_email_e,
-    'FieldOps V2 Approved Handoff',
-    'FieldOps Mobile V2 Approved Fleet',
+    'FieldOps V2 Approved Applicant',
+    'FieldOps Mobile V2 Proof Fleet',
     NULL,
     '+966505' || lpad((floor(random() * 999999))::int::text, 6, '0'),
     NULL,
@@ -249,13 +245,7 @@ BEGIN
     'fieldops-mobile-v2-native://signup',
     NULL,
     jsonb_build_array('last_mile_driver'),
-    jsonb_build_array(
-      jsonb_build_object(
-        'document_type_key', 'driver_license',
-        'document_ref', 'DL-' || left(replace(gen_random_uuid()::text, '-', ''), 8),
-        'status', 'approved'
-      )
-    ),
+    '[]'::jsonb,
     jsonb_build_object('employee_or_contractor_id', 'DRV-FOPS-APPROVED-' || left(replace(gen_random_uuid()::text, '-', ''), 8)),
     jsonb_build_object('source', 'fieldops_mobile_v2_pgtap'),
     NULL,
@@ -263,26 +253,28 @@ BEGIN
     'fieldops-v2-ip-approved',
     TRUE
   );
-  v_approved_request := NULLIF(v_approved_create->>'id', '')::uuid;
-  v_approved_token := NULLIF(v_approved_create->>'application_status_token', '')::uuid;
-  v_approved_review := public.marketplace_participant_request_review_apply_v1(
-    v_approved_request,
-    'approve',
-    NULL,
-    v_approved_auth_user,
-    TRUE,
-    'https://unjijvxjrwurjgsnokovrvom.example.invalid/auth/callback',
-    NULL,
-    NULL,
-    jsonb_build_object('reason', 'mobile_v2_driver_signup_approved_handoff')
-  );
-  v_approved_status := public.marketplace_application_status_by_token_v1(v_approved_token);
 
-  v_rejected_dup_create := public.marketplace_participant_request_create_v1(
+  v_approve_request := NULLIF(v_approve_create->>'id', '')::uuid;
+  v_approve_token := NULLIF(v_approve_create->>'application_status_token', '')::uuid;
+  v_approve_status_before := public.marketplace_application_status_by_token_v1(v_approve_token);
+  v_approve_review := public.marketplace_participant_request_review_apply_v1(
+    v_approve_request,
+    'approved',
+    NULL,
+    gen_random_uuid(),
+    TRUE,
+    'https://vtgspxqkvhurpwtxnnyvhjzw.example.invalid/onboarding',
+    NULL,
+    NULL,
+    jsonb_build_object('reason', 'mobile_v2_driver_signup_approved')
+  );
+  v_approve_status_after := public.marketplace_application_status_by_token_v1(v_approve_token);
+
+  v_reject_create := public.marketplace_participant_request_create_v1(
     'freelancer_driver',
     v_email_f,
-    'FieldOps V2 Duplicate Denied',
-    'FieldOps Mobile V2 Denied Fleet',
+    'FieldOps V2 Rejected Applicant',
+    'FieldOps Mobile V2 Proof Fleet',
     NULL,
     '+966506' || lpad((floor(random() * 999999))::int::text, 6, '0'),
     NULL,
@@ -293,70 +285,29 @@ BEGIN
     NULL,
     jsonb_build_array('last_mile_driver'),
     '[]'::jsonb,
-    jsonb_build_object('employee_or_contractor_id', 'DRV-FOPS-REJECT-DUP-' || left(replace(gen_random_uuid()::text, '-', ''), 8)),
+    jsonb_build_object('employee_or_contractor_id', 'DRV-FOPS-REJECTED-' || left(replace(gen_random_uuid()::text, '-', ''), 8)),
     jsonb_build_object('source', 'fieldops_mobile_v2_pgtap'),
     NULL,
     NULL,
-    'fieldops-v2-ip-reject-duplicate',
+    'fieldops-v2-ip-rejected',
     TRUE
   );
-  v_rejected_dup_request := NULLIF(v_rejected_dup_create->>'id', '')::uuid;
-  v_rejected_dup_token := NULLIF(v_rejected_dup_create->>'application_status_token', '')::uuid;
-  v_rejected_dup_review := public.marketplace_participant_request_review_apply_v1(
-    v_rejected_dup_request,
-    'reject',
-    NULL,
-    NULL,
-    FALSE,
-    NULL,
-    NULL,
-    NULL,
-    jsonb_build_object('reason', 'duplicate_identity')
-  );
-  v_rejected_dup_status := public.marketplace_application_status_by_token_v1(v_rejected_dup_token);
 
-  v_rejected_compliance_create := public.marketplace_participant_request_create_v1(
-    'freelancer_driver',
-    v_email_g,
-    'FieldOps V2 Compliance Denied',
-    'FieldOps Mobile V2 Denied Fleet',
-    NULL,
-    '+966507' || lpad((floor(random() * 999999))::int::text, 6, '0'),
-    NULL,
-    'en',
-    'fieldops-mobile-v2-native://signup',
-    NULL,
-    'fieldops-mobile-v2-native://signup',
-    NULL,
-    jsonb_build_array('last_mile_driver'),
-    jsonb_build_array(
-      jsonb_build_object(
-        'document_type_key', 'driver_license',
-        'document_ref', 'DL-MISMATCH-' || left(replace(gen_random_uuid()::text, '-', ''), 8),
-        'status', 'rejected'
-      )
-    ),
-    jsonb_build_object('employee_or_contractor_id', 'DRV-FOPS-REJECT-COMP-' || left(replace(gen_random_uuid()::text, '-', ''), 8)),
-    jsonb_build_object('source', 'fieldops_mobile_v2_pgtap'),
-    NULL,
-    NULL,
-    'fieldops-v2-ip-reject-compliance',
-    TRUE
-  );
-  v_rejected_compliance_request := NULLIF(v_rejected_compliance_create->>'id', '')::uuid;
-  v_rejected_compliance_token := NULLIF(v_rejected_compliance_create->>'application_status_token', '')::uuid;
-  v_rejected_compliance_review := public.marketplace_participant_request_review_apply_v1(
-    v_rejected_compliance_request,
-    'reject',
+  v_reject_request := NULLIF(v_reject_create->>'id', '')::uuid;
+  v_reject_token := NULLIF(v_reject_create->>'application_status_token', '')::uuid;
+  v_reject_status_before := public.marketplace_application_status_by_token_v1(v_reject_token);
+  v_reject_review := public.marketplace_participant_request_review_apply_v1(
+    v_reject_request,
+    'rejected',
     NULL,
     NULL,
     FALSE,
     NULL,
     NULL,
     NULL,
-    jsonb_build_object('reason', 'compliance_document_mismatch')
+    jsonb_build_object('reason', 'mobile_v2_driver_signup_rejected')
   );
-  v_rejected_compliance_status := public.marketplace_application_status_by_token_v1(v_rejected_compliance_token);
+  v_reject_status_after := public.marketplace_application_status_by_token_v1(v_reject_token);
 
   CREATE TEMP TABLE fieldops_mobile_v2_driver_signup_status_results (
     create_email JSONB,
@@ -369,15 +320,14 @@ BEGIN
     docs_status_before JSONB,
     docs_review JSONB,
     docs_status_after JSONB,
-    approved_create JSONB,
-    approved_review JSONB,
-    approved_status JSONB,
-    rejected_dup_create JSONB,
-    rejected_dup_review JSONB,
-    rejected_dup_status JSONB,
-    rejected_compliance_create JSONB,
-    rejected_compliance_review JSONB,
-    rejected_compliance_status JSONB
+    approve_create JSONB,
+    approve_status_before JSONB,
+    approve_review JSONB,
+    approve_status_after JSONB,
+    reject_create JSONB,
+    reject_status_before JSONB,
+    reject_review JSONB,
+    reject_status_after JSONB
   ) ON COMMIT DROP;
 
   INSERT INTO fieldops_mobile_v2_driver_signup_status_results
@@ -392,15 +342,14 @@ BEGIN
     v_docs_status_before,
     v_docs_review,
     v_docs_status_after,
-    v_approved_create,
-    v_approved_review,
-    v_approved_status,
-    v_rejected_dup_create,
-    v_rejected_dup_review,
-    v_rejected_dup_status,
-    v_rejected_compliance_create,
-    v_rejected_compliance_review,
-    v_rejected_compliance_status
+    v_approve_create,
+    v_approve_status_before,
+    v_approve_review,
+    v_approve_status_after,
+    v_reject_create,
+    v_reject_status_before,
+    v_reject_review,
+    v_reject_status_after
   );
 END $$;
 
@@ -446,58 +395,190 @@ SELECT ok(
 )
 FROM fieldops_mobile_v2_driver_signup_status_results;
 
-SELECT ok((approved_review->>'ok')::boolean, 'Console approval provisions the Mobile V2 driver handoff')
-FROM fieldops_mobile_v2_driver_signup_status_results;
-
-SELECT is(approved_status->>'application_state', 'approved', 'status token returns approved applicant state')
+SELECT is(approve_status_before->>'application_state', 'pending_review', 'approved-applicant status token starts as pending review')
 FROM fieldops_mobile_v2_driver_signup_status_results;
 
 SELECT ok(
-  (approved_status#>>'{profile_handoff,ready}')::boolean
-  AND NULLIF(approved_status#>>'{profile_handoff,user_id}', '') IS NOT NULL
-  AND NULLIF(approved_status#>>'{profile_handoff,participant_profile_id}', '') IS NOT NULL
-  AND NULLIF(approved_status#>>'{profile_handoff,organization_id}', '') IS NOT NULL,
-  'status token exposes backend-approved user, profile, and organization handoff ids'
+  (approve_review->>'ok')::boolean
+  AND approve_status_after->>'status' = 'approved'
+  AND approve_status_after->>'application_state' = 'approved'
+  AND approve_status_after->>'review_decision' = 'approved'
+  AND NULLIF(approve_status_after->>'invite_email_sent_at', '') IS NOT NULL,
+  'status token readback exposes approved applicant state and invite email timestamp'
+)
+FROM fieldops_mobile_v2_driver_signup_status_results;
+
+SELECT is(approve_status_after->>'review_reason', 'mobile_v2_driver_signup_approved', 'approved status token preserves review reason')
+FROM fieldops_mobile_v2_driver_signup_status_results;
+
+SELECT ok(
+  (approve_review->'driver_profile_readback'->>'ok')::boolean
+  AND NULLIF(approve_review->'driver_profile_readback'->>'driver_profile_id', '') IS NOT NULL
+  AND approve_review->'driver_profile_readback'->>'marketplace_participant_request_id' = approve_create->>'id',
+  'approved self-signup request materializes canonical driver profile readback'
 )
 FROM fieldops_mobile_v2_driver_signup_status_results;
 
 SELECT ok(
-  (approved_status#>>'{profile_handoff,fleet_handoff_ready}')::boolean
-  AND NULLIF(approved_status#>>'{profile_handoff,driver_profile_id}', '') IS NOT NULL
-  AND approved_status#>>'{profile_handoff,fleet_driver_status}' = 'active'
-  AND (approved_status#>>'{profile_handoff,fleet_document_count}')::int >= 1
-  AND (approved_status#>>'{profile_handoff,fleet_compliance_event_count}')::int >= 1,
-  'status token exposes backend-confirmed fleet driver profile and compliance handoff readback'
+  EXISTS (
+    SELECT 1
+      FROM public.marketplace_participant_requests r
+      JOIN public.driver_profiles dp
+        ON dp.organization_id = r.approved_organization_id
+       AND dp.user_id = r.approved_user_id
+     WHERE r.id = NULLIF(approve_create->>'id', '')::uuid
+       AND dp.metadata->>'marketplace_participant_request_id' = r.id::text
+  ),
+  'approved self-signup driver profile is persisted with participant request lineage'
 )
-FROM fieldops_mobile_v2_driver_signup_status_results;
-
-SELECT is(
-  approved_status#>>'{profile_handoff,invite_redirect_to}',
-  'https://unjijvxjrwurjgsnokovrvom.example.invalid/auth/callback',
-  'status token exposes approved Mobile V2 invite redirect handoff'
-)
-FROM fieldops_mobile_v2_driver_signup_status_results;
-
-SELECT ok((rejected_dup_review->>'ok')::boolean, 'Console duplicate-identity rejection applies through canonical review RPC')
-FROM fieldops_mobile_v2_driver_signup_status_results;
-
-SELECT is(rejected_dup_status->>'application_state', 'duplicate_identity', 'status token maps duplicate rejection from row-driven review reason edge metadata')
 FROM fieldops_mobile_v2_driver_signup_status_results;
 
 SELECT ok(
-  rejected_dup_status->>'status' = 'rejected'
-  AND rejected_dup_status->>'review_reason' = 'duplicate_identity'
-  AND COALESCE((rejected_dup_status#>>'{profile_handoff,ready}')::boolean, FALSE) IS FALSE
-  AND COALESCE((rejected_dup_status#>>'{profile_handoff,fleet_handoff_ready}')::boolean, FALSE) IS FALSE,
-  'duplicate denied state does not expose Mobile V2 profile handoff'
+  EXISTS (
+    SELECT 1
+      FROM public.marketplace_participant_requests r
+      JOIN public.driver_profiles dp
+        ON dp.organization_id = r.approved_organization_id
+       AND dp.user_id = r.approved_user_id
+     WHERE r.id = NULLIF(approve_create->>'id', '')::uuid
+       AND dp.driver_code = upper(r.marketing->>'employee_or_contractor_id')
+  ),
+  'approved self-signup driver profile reuses the mobile employee-or-contractor id as driver code when available'
 )
 FROM fieldops_mobile_v2_driver_signup_status_results;
 
-SELECT ok((rejected_compliance_review->>'ok')::boolean, 'Console compliance-document rejection applies through canonical review RPC')
+SELECT is(reject_status_before->>'application_state', 'pending_review', 'rejected-applicant status token starts as pending review')
 FROM fieldops_mobile_v2_driver_signup_status_results;
 
-SELECT is(rejected_compliance_status->>'application_state', 'compliance_denied', 'status token maps compliance rejection from row-driven review reason edge metadata')
+SELECT ok(
+  (reject_review->>'ok')::boolean
+  AND reject_status_after->>'status' = 'rejected'
+  AND reject_status_after->>'application_state' = 'rejected'
+  AND reject_status_after->>'review_decision' = 'rejected',
+  'status token readback exposes rejected applicant state'
+)
 FROM fieldops_mobile_v2_driver_signup_status_results;
+
+SELECT is(reject_status_after->>'review_reason', 'mobile_v2_driver_signup_rejected', 'rejected status token preserves review reason')
+FROM fieldops_mobile_v2_driver_signup_status_results;
+
+-- F131: only admitted disposable, serialized full-local qualification may run
+-- this fixture: the current driver_status default is global, not tenant-scoped.
+-- The existing final ROLLBACK removes all fixture mutations after TAP finish().
+RESET ROLE;
+CREATE TEMP TABLE f131_profile_guard_results (name text PRIMARY KEY, passed boolean) ON COMMIT DROP;
+DO $$
+DECLARE
+  original_request uuid;
+  original_profile uuid;
+  original_org uuid;
+  original_user uuid;
+  alternate_status text;
+  baseline jsonb;
+  result jsonb;
+  created jsonb;
+  request_id uuid;
+  review jsonb;
+  new_profile uuid;
+  other_org uuid;
+  case_name text;
+  code text;
+  changed_rows integer;
+BEGIN
+  SELECT r.id, r.approved_organization_id, r.approved_user_id, dp.id, dp.driver_code
+    INTO STRICT original_request, original_org, original_user, original_profile, code
+    FROM fieldops_mobile_v2_driver_signup_status_results f
+    JOIN public.marketplace_participant_requests r ON r.id = (f.approve_create->>'id')::uuid
+    JOIN public.driver_profiles dp ON dp.organization_id = r.approved_organization_id
+      AND dp.user_id = r.approved_user_id;
+  SELECT lv.value INTO alternate_status
+    FROM public.lookup_values lv JOIN public.lookup_definitions ld ON ld.id = lv.lookup_definition_id
+    WHERE ld.category = 'driver_status' AND lv.status = 'active' AND NOT COALESCE(lv.is_default, false)
+    ORDER BY lv.sort_order, lv.value LIMIT 1;
+  IF alternate_status IS NULL OR code IS NULL THEN
+    RAISE EXCEPTION 'F131 fixture prerequisite: alternate configured driver status and owned driver code required';
+  END IF;
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  -- Existing-profile reuse must preserve a nondefault status, ID and ownership.
+  UPDATE public.driver_profiles SET status = alternate_status WHERE id = original_profile;
+  result := public.marketplace_driver_profile_from_participant_request_v1(original_request);
+  INSERT INTO f131_profile_guard_results VALUES ('reuse',
+    result->>'ok' = 'true' AND result->>'created' = 'false'
+    AND result->>'driver_profile_id' = original_profile::text
+    AND result->>'status' = alternate_status
+    AND (SELECT count(*) = 1 FROM public.driver_profiles WHERE organization_id = original_org AND user_id = original_user)
+    AND (SELECT status = alternate_status AND metadata->>'marketplace_participant_request_id' = original_request::text
+      FROM public.driver_profiles WHERE id = original_profile));
+  FOREACH case_name IN ARRAY ARRAY['configured_default', 'collision', 'missing_default'] LOOP
+    created := public.marketplace_participant_request_create_v1(
+      'freelancer_driver', 'f131-' || gen_random_uuid()::text || '@example.com',
+      'F131 owned profile guard', 'F131 owned fleet', NULL, NULL, NULL, 'en',
+      'fieldops-mobile-v2-native://signup', NULL, 'fieldops-mobile-v2-native://signup', NULL,
+      jsonb_build_array('last_mile_driver'), '[]'::jsonb,
+      jsonb_build_object('employee_or_contractor_id', 'F131-' || gen_random_uuid()::text),
+      jsonb_build_object('source', 'f131_profile_guard'), NULL, NULL,
+      'f131-' || gen_random_uuid()::text, TRUE);
+    request_id := NULLIF(created->>'id', '')::uuid;
+    IF created->>'ok' IS DISTINCT FROM 'true' OR request_id IS NULL OR COALESCE((created->>'deduped')::boolean, false) THEN
+      RAISE EXCEPTION 'F131 owned request setup failed: %', case_name;
+    END IF;
+    IF case_name = 'collision' THEN
+      -- Mutate only the freshly owned pending fixture after intake dedupe; the
+      -- selected profile bridge must handle a code occupied before approval.
+      UPDATE public.marketplace_participant_requests
+        SET marketing = jsonb_set(COALESCE(marketing, '{}'::jsonb), '{employee_or_contractor_id}', to_jsonb(code))
+        WHERE id = request_id AND status = 'pending';
+      GET DIAGNOSTICS changed_rows = ROW_COUNT;
+      IF changed_rows <> 1 OR NOT EXISTS (SELECT 1 FROM public.marketplace_participant_requests
+        WHERE id = request_id AND status = 'pending' AND marketing->>'employee_or_contractor_id' = code) THEN
+        RAISE EXCEPTION 'F131 collision setup did not update exactly the owned pending request';
+      END IF;
+      -- Review below must consume this verified collision, not a missing fixture value.
+    END IF;
+    UPDATE public.lookup_values lv SET is_default =
+      (case_name <> 'missing_default' AND lv.value = alternate_status)
+      FROM public.lookup_definitions ld
+      WHERE ld.id = lv.lookup_definition_id AND ld.category = 'driver_status';
+    SELECT jsonb_agg(to_jsonb(dp) ORDER BY dp.id) INTO baseline FROM public.driver_profiles dp;
+    review := public.marketplace_participant_request_review_apply_v1(
+      request_id, 'approved', NULL, gen_random_uuid(), TRUE,
+      'https://vtgspxqkvhurpwtxnnyvhjzw.example.invalid/onboarding',
+      CASE WHEN case_name = 'configured_default' THEN NULL ELSE original_org END,
+      NULL, jsonb_build_object('reason', 'f131_profile_guard'));
+    new_profile := NULLIF(review#>>'{driver_profile_readback,driver_profile_id}', '')::uuid;
+    IF case_name = 'missing_default' THEN
+      INSERT INTO f131_profile_guard_results VALUES (case_name,
+        review->>'ok' = 'false'
+        AND review#>>'{driver_profile_readback,error,code}' = 'driver_status_default_missing'
+        AND baseline IS NOT DISTINCT FROM (SELECT jsonb_agg(to_jsonb(dp) ORDER BY dp.id) FROM public.driver_profiles dp));
+    ELSE
+      INSERT INTO f131_profile_guard_results VALUES (case_name,
+        review->>'ok' = 'true' AND new_profile IS NOT NULL AND new_profile <> original_profile
+        AND EXISTS (SELECT 1 FROM public.driver_profiles dp JOIN public.marketplace_participant_requests r
+          ON r.id = request_id AND dp.organization_id = r.approved_organization_id AND dp.user_id = r.approved_user_id
+          WHERE dp.id = new_profile AND dp.status = alternate_status
+            AND dp.metadata->>'marketplace_participant_request_id' = request_id::text
+            AND (case_name <> 'collision' OR dp.driver_code IS NULL))
+        AND (SELECT count(*) = 1 FROM public.driver_profiles dp JOIN public.marketplace_participant_requests r
+          ON r.id = request_id AND dp.organization_id = r.approved_organization_id AND dp.user_id = r.approved_user_id)
+        AND (case_name <> 'collision' OR EXISTS (SELECT 1 FROM public.driver_profiles
+          WHERE id = original_profile AND user_id = original_user AND organization_id = original_org AND driver_code = code)));
+      IF case_name = 'configured_default' THEN
+        SELECT approved_organization_id INTO other_org FROM public.marketplace_participant_requests WHERE id = request_id;
+      END IF;
+    END IF;
+  END LOOP;
+  IF other_org IS NULL OR other_org = original_org THEN
+    RAISE EXCEPTION 'F131 fixture prerequisite: independently created owned organization required';
+  END IF;
+  SELECT jsonb_agg(to_jsonb(dp) ORDER BY dp.id) INTO baseline FROM public.driver_profiles dp;
+  UPDATE public.marketplace_participant_requests SET approved_organization_id = other_org WHERE id = original_request;
+  result := public.marketplace_driver_profile_from_participant_request_v1(original_request);
+  INSERT INTO f131_profile_guard_results VALUES ('foreign_user',
+    result#>>'{error,code}' = 'approved_user_org_mismatch' AND result->>'ok' = 'false'
+    AND baseline IS NOT DISTINCT FROM (SELECT jsonb_agg(to_jsonb(dp) ORDER BY dp.id) FROM public.driver_profiles dp));
+END $$;
+SELECT ok(passed, 'F131 profile bridge preserves ' || name) FROM f131_profile_guard_results ORDER BY name;
 
 SELECT * FROM finish();
 ROLLBACK;

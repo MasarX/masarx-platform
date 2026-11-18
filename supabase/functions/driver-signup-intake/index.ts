@@ -1,10 +1,10 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { verifyMarketingTurnstile } from "./_shared/turnstile-local-test.mjs";
+import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import {
   asString,
   loadMarketplaceCompliancePolicy,
-  parseOriginAllowlist,
   policyBool,
   readClientIp,
   sha256Hex,
@@ -16,9 +16,13 @@ type IntakePayload = {
   full_name?: unknown;
   organization_name?: unknown;
   organization_slug?: unknown;
+  entry_key?: unknown;
+  organization_id?: unknown;
+  requested_organization_id?: unknown;
   phone?: unknown;
   website_url?: unknown;
   locale?: unknown;
+  page_url?: unknown;
   referrer?: unknown;
   experience_summary?: unknown;
   capabilities_requested?: unknown;
@@ -46,58 +50,11 @@ const DRIVER_SIGNUP_TURNSTILE_SECRET_KEY = readEnv("DRIVER_SIGNUP_TURNSTILE_SECR
   "TURNSTILE_SECRET_KEY",
   "TURNSTILE_SECRET",
 ]);
-const LOCAL_DRIVER_TURNSTILE_SECRET_KEY = "EXAMPLE_PASSWORD";
-const LEGACY_LOCAL_DRIVER_TURNSTILE_SECRET_KEY = "local-dev-turnstile-secret";
-const LOCAL_TURNSTILE_TEST_HOSTNAME = "example.com";
 const DRIVER_SIGNUP_IP_HASH_SALT = readEnv("DRIVER_SIGNUP_IP_HASH_SALT", [
   "MARKETING_IP_HASH_SALT",
 ]);
 const DRIVER_SIGNUP_RPC_SCHEMA =
   readEnv("DRIVER_SIGNUP_RPC_SCHEMA", ["EDGE_RPC_SCHEMA", "API_RPC_SCHEMA"]) || "api";
-const LOCAL_DRIVER_SIGNUP_TURNSTILE_DUMMY_TOKEN = "EXAMPLE_PASSWORD";
-const LOCAL_DRIVER_SIGNUP_IP_HASH_SALT = "local-driver-signup";
-const LOCAL_DRIVER_SIGNUP_ORIGINS = new Set([
-  "http://127.0.0.1:3333",
-  "http://localhost:3333",
-  "http://192.0.2.10:3333",
-  "http://rvzwwjlztwwisjthghnipgjr.example.invalid:3333",
-]);
-
-const CORS_ALLOWLIST = parseOriginAllowlist(DRIVER_SIGNUP_CORS_ALLOW_ORIGINS);
-const ALLOWED_ORIGINS = CORS_ALLOWLIST.origins;
-const CORS_ALLOWLIST_CONFIGURED =
-  ALLOWED_ORIGINS.size > 0 &&
-  CORS_ALLOWLIST.invalid.length === 0;
-
-const isLocalHostname = (value: string): boolean => {
-  const normalized = String(value || "").trim().toLowerCase();
-  // objectives:allow LOCALHOST Justification: local-runtime driver intake proof needs explicit loopback detection.
-  return normalized === "127.0.0.1" ||
-    normalized === "localhost" ||
-    normalized === "rvzwwjlztwwisjthghnipgjr.example.invalid" ||
-    normalized === "192.0.2.10";
-};
-
-const isLocalRequest = (req: Request): boolean => {
-  const hostHeader = String(req.headers.get("x-forwarded-host") || req.headers.get("host") || "")
-    .trim()
-    .split(":")[0]
-    .toLowerCase();
-  if (isLocalHostname(hostHeader)) return true;
-  try {
-    return isLocalHostname(new URL(req.url).hostname);
-  } catch {
-    return false;
-  }
-};
-
-const isLocalOrigin = (origin: string): boolean => {
-  try {
-    return isLocalHostname(new URL(origin).hostname);
-  } catch {
-    return false;
-  }
-};
 
 const json = (status: number, body: JsonRecord, corsHeaders: HeadersInit) =>
   new Response(JSON.stringify(body), {
@@ -126,135 +83,12 @@ const mapRpcErrorToStatus = (code: string): number => {
   }
 };
 
-type CorsResult =
-  | { ok: true; origin: string; headers: HeadersInit; localContext: boolean }
-  | {
-      ok: false;
-      origin: string;
-      status: number;
-      body: JsonRecord;
-      headers: HeadersInit;
-      localContext: boolean;
-    };
-
-const normalizeOrigin = (value: string): string => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-    return parsed.origin;
-  } catch {
-    return "";
-  }
-};
-
-const buildCorsHeaders = (req: Request): CorsResult => {
-  const originRaw = req.headers.get("origin")?.trim() ?? "";
-  const origin = normalizeOrigin(originRaw);
-  const requestIsLocal = isLocalRequest(req);
-  const localContext = requestIsLocal;
-  const localOriginAllowed = requestIsLocal && Boolean(origin && isLocalOrigin(origin));
-  const effectiveOrigins = CORS_ALLOWLIST_CONFIGURED
-    ? ALLOWED_ORIGINS
-    : (requestIsLocal ? LOCAL_DRIVER_SIGNUP_ORIGINS : new Set<string>());
-  const effectiveConfigured = effectiveOrigins.size > 0;
-
-  const baseHeaders = {
-    "Access-Control-Allow-Headers": "accept, content-type, authorization, apikey, x-client-info",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Max-Age": "600",
-    Vary: "Origin",
-  };
-
-  if (!effectiveConfigured) {
-    return {
-      ok: false,
-      origin: "",
-      status: 500,
-      body: {
-        ok: false,
-        error: {
-          code: "server_misconfigured",
-          message: CORS_ALLOWLIST.invalid.length ? "cors_allowlist_invalid" : "cors_allowlist_missing",
-        },
-      },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  if (!origin) {
-    return {
-      ok: false,
-      origin: "",
-      status: 403,
-      body: { ok: false, error: { code: "origin_required" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  if (!effectiveOrigins.has(origin) && !localOriginAllowed) {
-    return {
-      ok: false,
-      origin,
-      status: 403,
-      body: { ok: false, error: { code: "origin_not_allowed" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  return {
-    ok: true,
-    origin,
-    headers: {
-      ...baseHeaders,
-      "Access-Control-Allow-Origin": origin,
-    },
-    localContext,
-  };
-};
-
-const verifyTurnstile = async (
-  token: string,
-  clientIp?: string,
-): Promise<{ success: boolean; hostname: string; errorCodes: unknown }> => {
-  const secret = DRIVER_SIGNUP_TURNSTILE_SECRET_KEY;
-  if (!secret) {
-    return { success: false, hostname: "", errorCodes: ["missing_turnstile_secret"] };
-  }
-  if (secret === LEGACY_LOCAL_DRIVER_TURNSTILE_SECRET_KEY && token === "EXAMPLE_PASSWORD") {
-    return { success: true, hostname: "", errorCodes: null };
-  }
-
-  const body = new URLSearchParams();
-  body.set("secret", secret);
-  body.set("response", token);
-  if (clientIp) body.set("remoteip", clientIp);
-
-  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-
-  const data = await response.json().catch(() => null);
-  const success = Boolean(data && typeof data === "object" && (data as any).success === true);
-  const hostname = data && typeof data === "object" ? String((data as any).hostname || "").trim() : "";
-  const errorCodes = data && typeof data === "object" ? (data as any)["error-codes"] ?? null : null;
-  return { success, hostname, errorCodes };
-};
+const buildCorsHeaders = (req: Request) => resolveBrowserCorsPolicy(req, {
+  hostedAllowedOrigins: DRIVER_SIGNUP_CORS_ALLOW_ORIGINS,
+  localAllowedOrigins: readEnv("PUBLIC_EDGE_LOCAL_CORS_ALLOW_ORIGINS"),
+  localQaEnabled: readEnv("PUBLIC_EDGE_LOCAL_QA_ENABLED") === "1",
+  allowedMethods: "POST, OPTIONS",
+});
 
 const createServiceClient = () => {
   const serviceKey = asString(EDGE_SUPABASE_SECRET_KEY) || asString(SUPABASE_SERVICE_KEY);
@@ -280,7 +114,7 @@ const createServiceClient = () => {
   });
 };
 
-serve(async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const cors = buildCorsHeaders(req);
 
   if (req.method === "OPTIONS") {
@@ -335,9 +169,26 @@ serve(async (req: Request): Promise<Response> => {
     return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
   }
 
+  const { data: entry, error: entryError } = await serviceClient.rpc("marketplace_public_entry_resolve_v1", {
+    p_entry_key: asString(payload?.entry_key),
+    p_participant_type_key: "freelancer_driver",
+  });
+  if (entryError) return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || entry.ok !== true
+      || typeof entry.organization_id !== "string"
+      || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(entry.organization_id)
+      || typeof entry.organization_slug !== "string" || !entry.organization_slug.trim()) {
+    return json(403, { ok: false, error: { code: "public_entry_not_allowed" } }, cors.headers);
+  }
+  if ((organizationSlug && organizationSlug !== entry.organization_slug)
+      || (payload.organization_id != null && payload.organization_id !== entry.organization_id)
+      || (payload.requested_organization_id != null && payload.requested_organization_id !== entry.organization_id)) {
+    return json(403, { ok: false, error: { code: "public_entry_not_allowed" } }, cors.headers);
+  }
+
   let policy: JsonRecord;
   try {
-    policy = await loadMarketplaceCompliancePolicy(serviceClient, "freelancer_driver", null);
+    policy = await loadMarketplaceCompliancePolicy(serviceClient, "freelancer_driver", entry.organization_id);
   } catch (error) {
     const message = error instanceof Error ? error.message : "policy_load_failed";
     return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
@@ -349,11 +200,8 @@ serve(async (req: Request): Promise<Response> => {
 
   const turnstileRequired = policyBool(policy, ["turnstile", "required"], true);
 
-  // objectives:allow LOCALHOST Justification: local browser QA can omit forwarded IP/salt env while still exercising the real intake RPC path.
-  const clientIp = readClientIp(req) || (cors.localContext ? "127.0.0.1" : "");
-  const effectiveIpHashSalt =
-    DRIVER_SIGNUP_IP_HASH_SALT || (cors.localContext ? LOCAL_DRIVER_SIGNUP_IP_HASH_SALT : "");
-  if (!clientIp || !effectiveIpHashSalt) {
+  const clientIp = readClientIp(req);
+  if (!clientIp || !DRIVER_SIGNUP_IP_HASH_SALT) {
     return json(
       500,
       { ok: false, error: { code: "server_misconfigured", message: "ip_hash_prerequisites_missing" } },
@@ -361,16 +209,14 @@ serve(async (req: Request): Promise<Response> => {
     );
   }
 
-  const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
+  const ipHash = await sha256Hex(`${DRIVER_SIGNUP_IP_HASH_SALT}:${clientIp}`);
 
   let turnstileVerified = false;
   let turnstileErrorCodes: unknown = null;
 
   if (turnstileToken) {
     try {
-      const turnstileResult = cors.localContext && turnstileToken === LOCAL_DRIVER_SIGNUP_TURNSTILE_DUMMY_TOKEN
-        ? { success: true, hostname: "", errorCodes: [] }
-        : await verifyTurnstile(turnstileToken, clientIp);
+      const turnstileResult = await verifyMarketingTurnstile({ token: turnstileToken, secret: DRIVER_SIGNUP_TURNSTILE_SECRET_KEY, localContext: cors.localContext, requestHostname: new URL(req.url).hostname, clientIp });
       turnstileVerified = turnstileResult.success;
       turnstileErrorCodes = turnstileResult.errorCodes;
 
@@ -383,11 +229,7 @@ serve(async (req: Request): Promise<Response> => {
           }
         })();
         const actualHost = turnstileResult.hostname.toLowerCase();
-        const localTestHostname =
-          DRIVER_SIGNUP_TURNSTILE_SECRET_KEY === LOCAL_DRIVER_TURNSTILE_SECRET_KEY &&
-          actualHost === LOCAL_TURNSTILE_TEST_HOSTNAME &&
-          (expectedHost === "127.0.0.1" || expectedHost === "localhost");
-        if (expectedHost && actualHost && expectedHost !== actualHost && !localTestHostname) {
+        if (expectedHost && actualHost && expectedHost !== actualHost) {
           return json(
             400,
             {
@@ -435,11 +277,11 @@ serve(async (req: Request): Promise<Response> => {
     p_email: email,
     p_full_name: fullName,
     p_organization_name: organizationName,
-    p_organization_slug: organizationSlug || null,
+    p_organization_slug: entry.organization_slug,
     p_phone: phone || null,
     p_website_url: websiteUrl || null,
     p_locale: locale || null,
-    p_page_url: cors.origin,
+    p_page_url: asString(payload?.page_url) || cors.origin,
     p_referrer: referrer || null,
     p_origin: cors.origin,
     p_experience_summary: experienceSummary || null,
@@ -449,7 +291,7 @@ serve(async (req: Request): Promise<Response> => {
     p_metadata: {
       source: "driver-signup-intake",
     },
-    p_requested_organization_id: null,
+    p_requested_organization_id: entry.organization_id,
     p_requested_by_user_id: null,
     p_ip_hash: ipHash,
     p_turnstile_verified: turnstileVerified,
@@ -483,7 +325,10 @@ serve(async (req: Request): Promise<Response> => {
       id: asString(result.id),
       status: asString(result.status) || "pending",
       deduped: Boolean(result.deduped),
-      dedupe_reason: asString(result.dedupe_reason),
+      dedupe_reason: result.deduped === true &&
+          ["email", "phone", "employee_or_contractor_id"].includes(asString(result.dedupe_reason))
+        ? asString(result.dedupe_reason)
+        : "",
       application_status_token: asString(result.application_status_token),
     },
     cors.headers,

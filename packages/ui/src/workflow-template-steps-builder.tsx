@@ -61,12 +61,17 @@ import {
   resolveOperationNameMatches,
 } from "./workflow-template-operation-index";
 import { resolveNextOperationRoute } from "./workflow-routing";
-import { resolveSafeAppBasePath } from "./url-guard";
+import {
+  resolveSafeAppBasePath,
+  resolveTrustedOperationDocUrl,
+} from "./url-guard";
 import { WorkflowCanvas } from "./workflow-canvas/workflow-canvas";
 import { OperationPalette } from "./workflow-canvas/palette/operation-palette";
+import { CopyFieldButton } from "./detail/copy-field-button";
 
 type WorkflowTemplateStepsBuilderProps = {
   workflowTemplateId: string;
+  templateStatus?: string | null;
   resourceKey: string;
   steps: Record<string, unknown>[];
   runs?: Record<string, unknown>[] | null;
@@ -458,16 +463,7 @@ function formatOperationMatchError(error: unknown) {
 
 function sanitizeDocUrl(value: unknown) {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) return trimmed;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.toString();
-  } catch {
-    // ignore invalid urls
-  }
-  return null;
+  return resolveTrustedOperationDocUrl(value);
 }
 
 function useOperationMatches(enabled: boolean, query: string) {
@@ -641,6 +637,7 @@ function groupOperationMatches(matches: OperationMatch[]) {
 
 export function WorkflowTemplateStepsBuilder({
   workflowTemplateId,
+  templateStatus,
   resourceKey,
   steps,
   runs,
@@ -3909,6 +3906,7 @@ export function WorkflowTemplateStepsBuilder({
           ) : resolvedScheduleTriggers ? (
             <WorkflowScheduleTriggersPanel
               workflowTemplateId={workflowTemplateId}
+              templateStatus={templateStatus}
               triggers={resolvedScheduleTriggers}
               triggersTotal={resolvedScheduleTriggersTotal}
               appBasePath={safeAppBasePath || ""}
@@ -4212,11 +4210,23 @@ export function WorkflowTemplateStepsBuilder({
                                       {entry.url}
                                     </div>
                                   </div>
-                                  <Button asChild size="sm" variant="ghost">
-                                    <a href={entry.url} target="_blank" rel="noreferrer">
-                                      {t("steps.flow.runInspector.outputs.open")}
-                                    </a>
-                                  </Button>
+                                  {entry.trustedUrl ? (
+                                    <Button asChild size="sm" variant="ghost">
+                                      <a
+                                        href={entry.trustedUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        {t("steps.flow.runInspector.outputs.open")}
+                                      </a>
+                                    </Button>
+                                  ) : (
+                                    <CopyFieldButton
+                                      value={entry.url}
+                                      label={entry.fullLabel}
+                                      className="!opacity-100"
+                                    />
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -4461,7 +4471,7 @@ export function WorkflowTemplateStepsBuilder({
             />
           ) : null}
           <div
-            className="relative flex-1 overflow-hidden rounded-2xl border border-ui-border bg-ui-paper/60"
+            className="relative min-w-0 flex-1 overflow-hidden rounded-2xl border border-ui-border bg-ui-paper/60"
             style={{ minHeight: "500px" }}
           >
             <WorkflowCanvas
@@ -4941,7 +4951,7 @@ export function WorkflowTemplateStepsBuilder({
         {runInspectorDrawer}
         <div className="flex flex-col gap-4 lg:flex-row">
           {paletteEnabled ? palette : null}
-          <div className="flex-1 space-y-2">
+          <div className="min-w-0 flex-1 space-y-2">
             <div className="sticky top-0 z-20 -mx-2 flex flex-wrap items-center justify-end gap-2 border-b border-ui-border/70 bg-ui-surface/95 px-2 py-2 backdrop-blur-sm">
               {flowConnectSourceId ? (
                 <div

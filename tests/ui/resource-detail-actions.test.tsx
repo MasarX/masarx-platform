@@ -1,6 +1,24 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithIntl } from "./test-utils";
 import { ResourceDetailActions } from "../../packages/ui/src/resource-detail-actions";
+const mockDetailRpc = jest.fn();
+const mockDetailInvalidate = jest.fn();
+const mockDetailRefresh = jest.fn();
+jest.mock("@masarx/api", () => ({
+  ...jest.requireActual("@masarx/api"), createUiClient: () => ({ rpc: mockDetailRpc }),
+}));
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: mockDetailRefresh }),
+}));
+jest.mock("../../packages/ui/src/hooks/use-resource-query", () => ({
+  useResourceListInvalidate: () => mockDetailInvalidate,
+}));
+beforeEach(() => {
+  mockDetailRpc.mockReset();
+  mockDetailInvalidate.mockReset().mockResolvedValue(undefined);
+  mockDetailRefresh.mockReset();
+});
 
 test("detail actions render bulk actions for a selected record", () => {
   renderWithIntl(
@@ -232,4 +250,40 @@ test("detail actions render shipment cohort reschedule commands for a selected s
   expect(
     screen.getByRole("button", { name: "Reschedule shipments" })
   ).toBeInTheDocument();
+});
+
+test("detail mutation composes readback and refreshes list plus server detail", async () => {
+  const user = userEvent.setup();
+  const onSuccess = jest.fn();
+  mockDetailRpc.mockResolvedValue({ ok: true });
+  renderWithIntl(<ResourceDetailActions detailId="shipment-1" bulkActions={{
+    resourceKey: "shipments", resource: { key: "shipments", relation: "shipments" },
+    commands: [{ key: "shipments.update", label: "Refresh detail", execution: {
+      type: "rpc", rpc: "ui_execute_command_v1",
+    } }],
+    appKey: "console", appBasePath: "/console", downloadBasePath: "/console/download",
+    userCapabilities: ["shipments.write"], onSuccess,
+  }} />);
+  await user.click(screen.getByRole("button", { name: "Refresh detail" }));
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  expect(mockDetailInvalidate).toHaveBeenCalledTimes(1);
+  expect(mockDetailRefresh).toHaveBeenCalledTimes(1);
+});
+
+test("failed list refresh still refreshes server detail after a committed mutation", async () => {
+  const user = userEvent.setup();
+  mockDetailRpc.mockResolvedValue({ ok: true });
+  mockDetailInvalidate.mockRejectedValue(new Error("list refresh offline"));
+  renderWithIntl(<ResourceDetailActions detailId="shipment-1" bulkActions={{
+    resourceKey: "shipments", resource: { key: "shipments", relation: "shipments" },
+    commands: [{ key: "shipments.update", label: "Refresh detail", execution: {
+      type: "rpc", rpc: "ui_execute_command_v1",
+    } }],
+    appKey: "console", appBasePath: "/console", downloadBasePath: "/console/download",
+    userCapabilities: ["shipments.write"],
+  }} />);
+  await user.click(screen.getByRole("button", { name: "Refresh detail" }));
+  await user.click(await screen.findByRole("button", { name: "Confirm" }));
+  await waitFor(() => expect(mockDetailRefresh).toHaveBeenCalledTimes(1));
 });

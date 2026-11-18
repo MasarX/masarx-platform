@@ -37,17 +37,17 @@ const BLOCK_TEMPLATES: BlockTemplate[] = [
   {
     type: "barcode",
     label: "Barcode",
-    defaults: { type: "barcode", x: 10, y: 10, width: 180, height: 60, barcode_type: "CODE128", value_path: "barcode_value", fallback: "TRACKING", human_readable: false },
+    defaults: { type: "barcode", x: 10, y: 10, width: 180, height: 60, barcode_type: "code128", value_path: "barcode_value", fallback: "TRACKING", human_readable: false },
   },
   {
     type: "barcode",
     label: "QR Code",
-    defaults: { type: "barcode", x: 10, y: 10, width: 72, height: 72, barcode_type: "QR", value_path: "barcode_value", fallback: "TRACKING", human_readable: false },
+    defaults: { type: "barcode", x: 10, y: 10, width: 72, height: 72, barcode_type: "qr", value_path: "barcode_value", fallback: "TRACKING", human_readable: false },
   },
   {
     type: "barcode",
     label: "EAN-13",
-    defaults: { type: "barcode", x: 10, y: 10, width: 180, height: 60, barcode_type: "EAN13", value_path: "barcode_value", fallback: "590123412345", human_readable: false },
+    defaults: { type: "barcode", x: 10, y: 10, width: 180, height: 60, barcode_type: "ean13", value_path: "barcode_value", fallback: "590123412345", human_readable: false },
   },
   {
     type: "image",
@@ -98,10 +98,7 @@ export function BlockCatalogSidebar({
 
   const handleDragStart = React.useCallback(
     (e: React.DragEvent, block: TemplateBlock) => {
-      if (readOnly) {
-        e.preventDefault();
-        return;
-      }
+      if (readOnly) { e.preventDefault(); return; }
       e.dataTransfer.setData("application/json", JSON.stringify(block));
       e.dataTransfer.effectAllowed = "copy";
     },
@@ -156,13 +153,11 @@ export function BlockCatalogSidebar({
                 type="button"
                 size="sm"
                 variant="ghost"
-                className={`justify-start text-xs ${readOnly ? "cursor-not-allowed opacity-60" : "cursor-grab active:cursor-grabbing"}`}
-                disabled={readOnly}
+                className="justify-start text-xs cursor-grab active:cursor-grabbing"
                 draggable={!readOnly}
+                disabled={readOnly}
                 onDragStart={(e) => handleDragStart(e, block)}
-                onClick={() => {
-                  if (!readOnly) onAddBlock(block);
-                }}
+                onClick={() => { if (!readOnly) onAddBlock(block); }}
               >
                 {template.label}
               </Button>
@@ -200,11 +195,9 @@ export function BlockCatalogSidebar({
               <button
                 key={field.path}
                 type="button"
-                className={`group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs text-ui-ink ${
-                  readOnly ? "cursor-not-allowed opacity-60" : "hover:bg-blue-50 cursor-grab active:cursor-grabbing"
-                }`}
-                disabled={readOnly}
+                className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs text-ui-ink hover:bg-blue-50 cursor-grab active:cursor-grabbing"
                 draggable={!readOnly}
+                disabled={readOnly}
                 onDragStart={(e) => handleDragStart(e, fieldBlock)}
                 onClick={() => handleAddFieldAsText(field)}
                 title={field.label_ar ? `${field.label} / ${field.label_ar}` : field.label}
@@ -244,11 +237,9 @@ export function BlockCatalogSidebar({
                 <button
                   key={asset.path}
                   type="button"
-                  className={`group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs text-ui-ink ${
-                    readOnly ? "cursor-not-allowed opacity-60" : "hover:bg-blue-50 cursor-grab active:cursor-grabbing"
-                  }`}
-                  disabled={readOnly}
+                  className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs text-ui-ink hover:bg-blue-50 cursor-grab active:cursor-grabbing"
                   draggable={!readOnly}
+                  disabled={readOnly}
                   onDragStart={(e) => handleDragStart(e, assetBlock)}
                   onClick={() => handleAddAssetBlock(asset)}
                 >

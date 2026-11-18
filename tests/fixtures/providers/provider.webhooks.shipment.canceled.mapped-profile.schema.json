@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docs/providers/schemas/provider.webhooks.shipment.canceled.mapped-profile.schema.json",
+  "title": "Strict mapped provider cancellation profile (v1)",
+  "description": "Opt-in provider mapping contract, not a universal intake requirement or an installed runtime policy. The source must explicitly adopt this profile; the current provider cancellation template continues to allow an omitted cancel_reason.",
+  "allOf": [
+    { "$ref": "./provider.webhooks.event.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "event": { "properties": { "type": { "const": "shipment.canceled" } } },
+        "shipment": {
+          "type": "object",
+          "required": ["tracking_number", "cancel_reason"],
+          "properties": {
+            "tracking_number": { "type": "string", "minLength": 1 },
+            "cancel_reason": { "type": "string", "minLength": 1 },
+            "canceled_by": { "type": "string", "enum": ["sender", "recipient", "provider", "system"] }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}

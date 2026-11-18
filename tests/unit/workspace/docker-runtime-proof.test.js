@@ -1,6 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 const {
   checkBackend,
@@ -45,6 +46,16 @@ describe('workspace docker runtime proof', () => {
     expect(checks.find((check) => check.surface === 'fieldops-metro').proofLabel).toBe(
       'mobile_v2_development_runtime_proof',
     );
+  });
+
+  test('startup admission makes browser evidence deferred while retaining exact service HTTP proof', () => {
+    const checks = expectedSurfaceChecks({
+      DOCKER_RUNTIME_DEPENDENCY_SERVICES: 'landing,fieldops-metro',
+      DOCKER_RUNTIME_STARTUP_PROOF: '1', LANDING_PORT: '3339', FIELDOPS_E2E_PORT: '8083',
+    });
+    expect(checks.map((entry) => entry.service)).toEqual(['landing', 'fieldops-metro']);
+    expect(checks.every((entry) => entry.browserRequired === false)).toBe(true);
+    expect(checks.every((entry) => entry.backendReadbackRequired === true)).toBe(true);
   });
 
   test('surface proof does not pass Mobile V2 from fetch-only copy without browser evidence', async () => {
@@ -419,23 +430,103 @@ describe('workspace docker runtime proof', () => {
     });
   });
 
-  test('resolves Mobile V2 proof context from an active lane driver', async () => {
-    const query = jest.fn(async () => ({
-      rows: [{
-        id: 'c423d58d-1bcd-4090-8923-dd56ee8301ad',
-        organization_id: '11c11bb7-132a-4d9b-be3f-de77cbe41384',
-        email: 'mlrznqhylvnirjwnhxhsjwgm@example.invalid',
-      }],
-    }));
 
-    await expect(resolveMobileV2ProofContext({ query })).resolves.toMatchObject({
-      ok: true,
-      user_id: 'c423d58d-1bcd-4090-8923-dd56ee8301ad',
-      organization_id: '11c11bb7-132a-4d9b-be3f-de77cbe41384',
-      source: 'public.users.active_driver',
-    });
-    expect(query.mock.calls[0][0]).toContain("user_type = 'driver'");
+  function authFixture(root, services) {
+    const workspace = 'wk-selection';
+    const { resolveSurfaceIdentities, authSurfaceIdentitySha256 } =
+      require('../../../scripts/ops/workspace/docker-runtime/auth-identity');
+    const manifest = { mode: 'ephemeral', run_id: workspace,
+      organization: { id: '4d1fbd36-6b6e-4c35-acc4-5e3ad9043830' },
+      users: [
+        { email: 'ops+wk-selection@example.invalid', user_type: 'ops_admin', auth_user_id: '22222222-2222-4222-8222-222222222222' },
+        { email: 'driver+wk-selection@example.invalid', user_type: 'driver', auth_user_id: '33333333-3333-4333-8333-333333333333' },
+      ],
+    };
+    const bytes = Buffer.from(JSON.stringify(manifest) + '\n');
+    const identities = resolveSurfaceIdentities(manifest).filter((entry) => services.includes(entry.surface));
+    const authority = { manifest_sha256: crypto.createHash('sha256').update(bytes).digest('hex'), identities };
+    const auth = { status: 'passed', services, applicability: { auth: true }, workspace_id: workspace,
+      manifest_mode: 'ephemeral', run_id: workspace, manifest_sha256: authority.manifest_sha256,
+      surfaces: identities.map((identity) => ({
+        surface: identity.surface, identity_sha256: authSurfaceIdentitySha256(identity),
+        identity_present: true, password_grant_ok: true, app_user_readback_ok: true,
+        auth_session_proven: true, backend_readback_ok: true,
+      })),
+    };
+    const authManifest = path.join(root, 'manifest.json');
+    const authProofSummary = path.join(root, 'auth-proof.json');
+    const backendProofSummary = path.join(root, 'backend-proof.json');
+    fs.writeFileSync(authManifest, bytes);
+    fs.writeFileSync(authProofSummary, JSON.stringify(auth));
+    fs.writeFileSync(backendProofSummary, JSON.stringify({ status: 'passed', acceptance: { landing_intake_readback_proven: true } }));
+    return { authority, auth, authManifest, authProofSummary, backendProofSummary };
+  }
+
+  test.each([null, [null], [[]], [1], true, {}])('rejects malformed proof service selection %j', (services) => {
+    expect(() => expectedSurfaceChecks({}, { services })).toThrow(/selection/);
   });
+
+  test.each(['console-v2', 'fieldops-metro'])('retains exact selected %s scope without port inference', async (service) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-selection-'));
+    const fixture = authFixture(root, [service]);
+    const mobilePolicy = jest.fn(async () => ({ ok: true }));
+    global.fetch = jest.fn(async () => ({ status: 200, text: async () => '<main>MasarX Console</main>' }));
+    try {
+      const summary = await runDockerRuntimeProof({
+        ...fixture, services: [service], checkBackendImpl: async () => ({ ok: true }),
+        readMobileV2PolicyImpl: mobilePolicy,
+      }, { WORKSPACE_NAME: 'wk-selection', DOCKER_RUNTIME_STARTUP_PROOF: '1',
+        CONSOLE_PORT: '5186', VITE_USE_SEED: 'false', NEXT_PUBLIC_USE_SEED: 'false' });
+      expect(summary.services).toEqual([service]);
+      expect(summary.surfaces).toHaveLength(1);
+      if (service === 'console-v2') {
+        expect(summary.status).toBe('passed');
+        expect(mobilePolicy).not.toHaveBeenCalled();
+        expect(summary.mobile_v2).toMatchObject({ status: 'not_required', applicable: false });
+        expect(summary.acceptance.mobile_v2_development_runtime_proof).toBe('not_required');
+        expect(summary.auth_fixture_proof.manifest_sha256).toBe(fixture.auth.manifest_sha256);
+        expect(summary.auth_fixture_proof.surfaces[0].identity_sha256).toBe(fixture.auth.surfaces[0].identity_sha256);
+      } else {
+        expect(summary.status).toBe('failed');
+        expect(summary.surfaces[0].failure_reasons).toContain('selected_surface_port_missing');
+        expect(mobilePolicy).toHaveBeenCalledTimes(1);
+      }
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test.each(['exact', 'wrong user', 'missing authority', 'conflicting env'])(
+    'mobile policy context uses only manifest driver: %s', async (mode) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mobile-context-'));
+      const fixture = authFixture(root, ['fieldops-metro']);
+      const identity = fixture.authority.identities[0];
+      const query = jest.fn(async () => ({ rows: [{
+        id: mode === 'wrong user' ? 'foreign' : identity.auth_user_id,
+        organization_id: identity.organization_id, email: identity.email, user_type: 'driver',
+      }] }));
+      try {
+        const result = await resolveMobileV2ProofContext({ query },
+          mode === 'conflicting env' ? { MOBILE_V2_PROOF_USER_ID: 'foreign' } : {},
+          { authAuthority: mode === 'missing authority' ? null : fixture.authority, authProof: fixture.auth });
+        expect(result.ok).toBe(mode === 'exact');
+        if (mode === 'missing authority' || mode === 'conflicting env') expect(query).not.toHaveBeenCalled();
+        else {
+          expect(query).toHaveBeenCalledTimes(1);
+          expect(query.mock.calls[0][0]).toContain('where id = $1::uuid and organization_id = $2::uuid');
+          expect(query.mock.calls[0][0]).not.toMatch(/limit 1|order by/i);
+          expect(query.mock.calls[0][1]).toEqual([identity.auth_user_id, identity.organization_id, identity.email]);
+        }
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    },
+  );
+
+  test('missing manifest identity never opens a mobile DB connection', async () => {
+    const ClientImpl = jest.fn();
+    const { readMobileV2Policy } = require('../../../scripts/ops/workspace/docker-runtime-proof');
+    await expect(readMobileV2Policy({ DATABASE_URL: 'postgresql://must-not-connect' }, { ClientImpl }))
+      .resolves.toMatchObject({ ok: false, reason: 'missing_manifest_bound_driver_policy_context' });
+    expect(ClientImpl).not.toHaveBeenCalled();
+  });
+
 
   test('runtime proof summary fails closed when browser proof is missing', async () => {
     global.fetch = jest.fn(async (url) => ({
@@ -450,6 +541,7 @@ describe('workspace docker runtime proof', () => {
     const summary = await runDockerRuntimeProof({
       timeoutMs: 1000,
     }, {
+      DOCKER_RUNTIME_DEPENDENCY_SERVICES: 'console-v2,landing,portal,fieldops-metro',
       WORKSPACE_NAME: 'wk-no-browser-proof',
       MASARX_RUNTIME_DRIVER: 'docker',
       MASARX_APP_COMPOSE_PROJECT_NAME: 'masarx-app-wk-no-browser-proof',
@@ -475,6 +567,113 @@ describe('workspace docker runtime proof', () => {
     expect(summary.acceptance.auth_fixture_proof_passed).toBe(false);
     expect(summary.surfaces.every((surface) => surface.failure_reasons.includes('missing_browser_render_evidence')))
       .toBe(true);
+  });
+
+  test.each([
+    ['missing', null],
+    ['malformed', '{not-json'],
+    ['stale', JSON.stringify({
+      generated_at: '2020-01-01T00:00:00.000Z',
+      status: 'failed',
+      browser_proof_tier: 'stale-browser-proof-must-not-be-consumed',
+    })],
+  ])('startup proof ignores %s deferred browser evidence', async (_label, browserContents) => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), '5ff747db-04ff-40d0-b8de-39cf5a08edf9-startup-browser-'));
+    try {
+      const browserPath = path.join(tmpDir, 'browser-proof-summary.json');
+      const backendPath = path.join(tmpDir, 'backend-proof-summary.json');
+      const authPath = path.join(tmpDir, 'auth-proof-summary.json');
+      if (browserContents !== null) fs.writeFileSync(browserPath, browserContents, 'utf8');
+      fs.writeFileSync(backendPath, '{"status":"passed"}\n', 'utf8');
+      fs.writeFileSync(authPath, '{"status":"passed"}\n', 'utf8');
+      global.fetch = jest.fn(async () => ({ status: 200, text: async () => '<main>MasarX logistics</main>' }));
+
+      await expect(runDockerRuntimeProof({
+        timeoutMs: 1000,
+        browserProofSummary: browserPath,
+        backendProofSummary: backendPath,
+        authProofSummary: authPath,
+      }, {
+        DOCKER_RUNTIME_STARTUP_PROOF: '1',
+        WORKSPACE_NAME: 'wk-startup-browser-deferred',
+        LANDING_PORT: '3339',
+        SUPABASE_INTERNAL_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57370',
+        VITE_USE_SEED: 'false',
+        NEXT_PUBLIC_USE_SEED: 'false',
+        DATABASE_URL: '',
+      })).resolves.toMatchObject({
+        browser_proof_tier: '',
+        acceptance: {
+          browser_proof_present: true,
+          browser_proof_or_startup_boundary_proven: true,
+          backend_readback_proof_present: true,
+          auth_fixture_proof_present: true,
+        },
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['backend', 'backendProofSummary'],
+    ['auth', 'authProofSummary'],
+  ])('startup proof still fails closed on malformed %s evidence', async (_label, optionName) => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), '5ff747db-04ff-40d0-b8de-39cf5a08edf9-startup-required-'));
+    try {
+      const malformedPath = path.join(tmpDir, `${optionName}.json`);
+      fs.writeFileSync(malformedPath, '{not-json', 'utf8');
+      await expect(runDockerRuntimeProof({ [optionName]: malformedPath }, {
+        DOCKER_RUNTIME_STARTUP_PROOF: '1',
+      })).rejects.toThrow();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['backend', 'backend_readback_proof_present'],
+    ['auth', 'auth_fixture_proof_present'],
+  ])('startup proof still fails closed when required %s evidence is missing', async (_label, acceptanceKey) => {
+    global.fetch = jest.fn(async () => ({ status: 200, text: async () => '<main>MasarX logistics</main>' }));
+    const summary = await runDockerRuntimeProof({}, {
+      DOCKER_RUNTIME_STARTUP_PROOF: '1',
+      LANDING_PORT: '3339',
+      SUPABASE_INTERNAL_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57370',
+      VITE_USE_SEED: 'false',
+      NEXT_PUBLIC_USE_SEED: 'false',
+      DATABASE_URL: '',
+    });
+    expect(summary.status).toBe('failed');
+    expect(summary.acceptance[acceptanceKey]).toBe(false);
+  });
+
+  test.each([
+    ['missing', null],
+    ['malformed', '{not-json'],
+  ])('non-startup proof fails closed on %s browser evidence', async (_label, browserContents) => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), '5ff747db-04ff-40d0-b8de-39cf5a08edf9-browser-required-'));
+    try {
+      const browserPath = path.join(tmpDir, 'browser-proof-summary.json');
+      if (browserContents !== null) fs.writeFileSync(browserPath, browserContents, 'utf8');
+      await expect(runDockerRuntimeProof({ browserProofSummary: browserPath }, {})).rejects.toThrow();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('non-startup proof consumes valid browser evidence', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), '5ff747db-04ff-40d0-b8de-39cf5a08edf9-browser-valid-'));
+    try {
+      const browserPath = path.join(tmpDir, 'browser-proof-summary.json');
+      fs.writeFileSync(browserPath, '{"browser_proof_tier":"playwright-browser-context","surfaces":[]}\n', 'utf8');
+      await expect(runDockerRuntimeProof({ browserProofSummary: browserPath }, {})).resolves.toMatchObject({
+        browser_proof_tier: 'playwright-browser-context',
+        acceptance: { browser_proof_present: true },
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   test('runtime proof records lane-local auth fixture proof without treating it as browser login proof', async () => {

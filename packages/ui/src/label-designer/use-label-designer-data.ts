@@ -1,8 +1,11 @@
 import * as React from "react";
 import { createUiClient } from "@masarx/api";
 import { createBrowserClient } from "@masarx/auth/browser";
-import { getPublicConfig } from "@masarx/config";
 import { formatUiError } from "../utils";
+import {
+  openTrustedInNewTab,
+  resolveTrustedExternalDataUrl,
+} from "../url-guard";
 import type { AssetItem, ScopeOption } from "./types";
 import type { LabelDesignerAction, LabelDesignerState } from "./use-label-designer-store";
 import {
@@ -28,23 +31,6 @@ type RpcResponse<T = unknown> = {
 function useClients() {
   const ui = React.useMemo(() => createUiClient(), []);
   const supabase = React.useMemo(() => createBrowserClient(), []);
-  const publicConfig = React.useMemo(() => {
-    try {
-      return getPublicConfig();
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const anonKey = asText(publicConfig?.supabaseAnonKey);
-
-  const buildEdgeHeaders = React.useCallback((): Record<string, string> | undefined => {
-    if (!anonKey) return undefined;
-    return {
-      Authorization: `Bearer ${anonKey}`,
-      apikey: anonKey,
-    };
-  }, [anonKey]);
 
   const getUserJwt = React.useCallback(async () => {
     const { data, error } = await supabase.auth.getSession();
@@ -60,13 +46,12 @@ function useClients() {
     async <T,>(name: string, body: Record<string, unknown>) => {
       const userJwt = await getUserJwt();
       const { data, error } = await supabase.functions.invoke(name, {
-        headers: buildEdgeHeaders(),
         body: { ...body, user_jwt: userJwt },
       });
       if (error) throw error;
       return data as T;
     },
-    [buildEdgeHeaders, getUserJwt, supabase],
+    [getUserJwt, supabase],
   );
 
   return { ui, supabase, invokeEdgeFunction };
@@ -188,10 +173,21 @@ export function useScopeData(
 ) {
   const { ui } = useClients();
   const canRead = state.capabilities.includes("label_design.read");
+  const requestSequence = React.useRef(0);
+  React.useEffect(() => {
+    requestSequence.current += 1;
+    dispatch({ type: "CLEAR_LABEL_TYPE_OPTIONS" });
+    return () => { requestSequence.current += 1; };
+  }, [selectedScope?.scopeType, selectedScope?.scopeId, state.organizationId, canRead]);
+  const selectionRef = React.useRef({ selectedDraftId: state.selectedDraftId, labelType: state.labelType });
+  React.useEffect(() => {
+    selectionRef.current = { selectedDraftId: state.selectedDraftId, labelType: state.labelType };
+  }, [state.selectedDraftId, state.labelType]);
 
   const load = React.useCallback(
     async (preferredDraftId?: string | null) => {
       if (!selectedScope || !state.organizationId || !canRead) return;
+      const requestId = ++requestSequence.current;
 
       dispatch({ type: "SET_SCOPE_LOADING", payload: true });
       dispatch({ type: "SET_PAGE_ERROR", payload: null });
@@ -219,11 +215,13 @@ export function useScopeData(
               p_scope_type: selectedScope.scopeType,
               p_scope_id: selectedScope.scopeId,
             }),
-            ui.rpc<RpcResponse & { drafts?: unknown }>("label_designer_list_drafts", {
+            ui.rpc<RpcResponse & { drafts?: unknown; label_types?: unknown }>("label_designer_list_drafts", {
               p_scope_type: selectedScope.scopeType,
               p_scope_id: selectedScope.scopeId,
             }),
           ]);
+
+        if (requestId !== requestSequence.current) return;
 
         const responses = [
           ["label design", design],
@@ -243,11 +241,21 @@ export function useScopeData(
         }
 
         const parsedDrafts = parseDraftRows(draftRows.drafts);
+        // Older servers may omit metadata; existing draft codes remain the fallback.
+        const labelTypeOptions = Array.isArray(draftRows.label_types)
+          ? draftRows.label_types.flatMap((entry: unknown) => {
+              const row = safeObject(entry);
+              return typeof row.value === "string" && row.value.trim() &&
+                typeof row.label === "string" && row.label.trim()
+                ? [{ value: row.value, label: row.label }]
+                : [];
+            })
+          : [];
 
         const preferredId =
           preferredDraftId ||
           requestedDraftIdRef.current ||
-          state.selectedDraftId ||
+          selectionRef.current.selectedDraftId ||
           parsedDrafts[0]?.id ||
           "";
         const resolvedDraft = parsedDrafts.find((draft) => draft.id === preferredId);
@@ -267,7 +275,7 @@ export function useScopeData(
           selectedDraftId = "";
           draftName = "";
           draftEditor = formatJson(safeObject(design.value));
-          labelType = state.labelType || "shipping";
+          labelType = selectionRef.current.labelType || "shipping";
         }
 
         dispatch({
@@ -278,6 +286,7 @@ export function useScopeData(
             effectivePrintProfileJson: formatJson(printProfile.value),
             fieldCatalogJson: formatJson(fieldCatalog.value),
             mediaCatalogJson: formatJson(mediaCatalog.value),
+            labelTypeOptions,
             drafts: parsedDrafts,
             selectedDraftId,
             draftName,
@@ -286,6 +295,7 @@ export function useScopeData(
           },
         });
       } catch (error) {
+        if (requestId !== requestSequence.current) return;
         dispatch({
           type: "SET_PAGE_ERROR",
           payload: formatUiError(error, "Could not load label designer data."),
@@ -293,7 +303,7 @@ export function useScopeData(
         dispatch({ type: "SET_SCOPE_LOADING", payload: false });
       }
     },
-    [canRead, dispatch, requestedDraftIdRef, selectedScope, state.organizationId, state.selectedDraftId, state.labelType, ui],
+    [canRead, dispatch, requestedDraftIdRef, selectedScope, state.organizationId, ui],
   );
 
   return load;
@@ -371,7 +381,11 @@ export function useAssets(
       }
       const signedUrl = asText(response.signed_url);
       if (!signedUrl) throw new Error("Signed URL was not returned.");
-      window.open(signedUrl, "_blank", "noopener,noreferrer");
+      const trustedSignedUrl = resolveTrustedExternalDataUrl(signedUrl);
+      if (!trustedSignedUrl) {
+        throw new Error("Signed URL origin is not trusted.");
+      }
+      openTrustedInNewTab(trustedSignedUrl);
     },
     [invokeEdgeFunction],
   );
@@ -517,12 +531,18 @@ export function useDraftActions(
     }
   }, [dispatch, state.draftEditor]);
 
+  const assertWriteScope = React.useCallback(() => {
+    if (!state.capabilities.includes("label_design.write")) throw new Error("Write permission is required.");
+    if (!selectedScope || !state.organizationId) throw new Error("Scope context is missing.");
+  }, [selectedScope, state.capabilities, state.organizationId]);
+
   const createDraft = React.useCallback(async () => {
+    assertWriteScope();
     if (!selectedScope || !state.organizationId) {
       throw new Error("Scope context is missing.");
     }
-    const parsed =
-      parseDraftEditorValue() || parseJsonObjectInternal(state.effectiveDesignJson);
+    const parsed = parseDraftEditorValue();
+    if (!parsed) throw new Error("Draft JSON is invalid.");
     const nextLabelType = asText(state.labelType) || "shipping";
     const nextName = asText(state.draftName) || `Draft ${new Date().toISOString()}`;
 
@@ -542,12 +562,21 @@ export function useDraftActions(
     }
     const insertedDraft = parseDraftRows([response.draft])[0];
     if (!insertedDraft) throw new Error("Draft was created but could not be parsed.");
+    if (insertedDraft.id === state.selectedDraftId || !isDraftStatusInternal(insertedDraft.status) ||
+        insertedDraft.scope_type !== selectedScope.scopeType || insertedDraft.scope_id !== selectedScope.scopeId ||
+        insertedDraft.label_type !== nextLabelType) {
+      throw new Error("Created draft does not match the requested new draft and scope.");
+    }
     await loadScopeData(insertedDraft.id);
-  }, [dispatch, loadScopeData, parseDraftEditorValue, selectedScope, state.draftName, state.effectiveDesignJson, state.labelType, state.organizationId, ui]);
+  }, [assertWriteScope, loadScopeData, parseDraftEditorValue, selectedScope, state.draftName, state.labelType, state.organizationId, state.selectedDraftId, ui]);
 
   const saveDraft = React.useCallback(async () => {
+    assertWriteScope();
     const selectedDraft = state.drafts.find((d) => d.id === state.selectedDraftId);
     if (!selectedDraft) throw new Error("Select a draft before saving.");
+    if (selectedDraft.scope_type !== selectedScope?.scopeType || selectedDraft.scope_id !== selectedScope?.scopeId) {
+      throw new Error("Selected draft does not match the active scope.");
+    }
     if (!isDraftStatusInternal(selectedDraft.status)) {
       throw new Error("Published drafts are immutable. Create a new draft first.");
     }
@@ -568,7 +597,7 @@ export function useDraftActions(
       throw new Error(message);
     }
     await loadScopeData(selectedDraft.id);
-  }, [loadScopeData, parseDraftEditorValue, state.draftName, state.drafts, state.labelType, state.selectedDraftId, ui]);
+  }, [assertWriteScope, loadScopeData, parseDraftEditorValue, selectedScope, state.draftName, state.drafts, state.labelType, state.selectedDraftId, ui]);
 
   const validateDraft = React.useCallback(async () => {
     if (!state.selectedDraftId) throw new Error("Select a draft before validating.");
@@ -585,6 +614,9 @@ export function useDraftActions(
 
   const publishDraft = React.useCallback(async () => {
     if (!state.selectedDraftId) throw new Error("Select a draft before publishing.");
+    // Publish the editor's current value, never a stale saved row or a published original.
+    await saveDraft();
+    await validateDraft();
     const response = await ui.rpc<RpcResponse>(
       "label_designer_publish_label_design_draft",
       {
@@ -601,7 +633,7 @@ export function useDraftActions(
       throw new Error(message);
     }
     await loadScopeData(state.selectedDraftId);
-  }, [loadScopeData, state.draftName, state.selectedDraftId, ui]);
+  }, [loadScopeData, saveDraft, state.draftName, state.selectedDraftId, ui, validateDraft]);
 
   return { createDraft, saveDraft, validateDraft, publishDraft, parseDraftEditorValue };
 }
@@ -617,15 +649,6 @@ function readFileAsBase64Internal(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
-}
-
-function parseJsonObjectInternal(value: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value);
-    return safeObject(parsed);
-  } catch {
-    return {};
-  }
 }
 
 function isDraftStatusInternal(status: string) {

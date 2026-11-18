@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { resolveDriverSignupUrl } from "./mobile-driver-signup";
 
 import { getPublicConfigFromEnv } from "@masarx/config";
 
@@ -8,45 +9,22 @@ type PublicConfigEnvKey =
   | "NEXT_PUBLIC_APP_NAME"
   | "NEXT_PUBLIC_SUPABASE_URL"
   | "NEXT_PUBLIC_SUPABASE_ANON_KEY"
-  | "NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL"
   | "NEXT_PUBLIC_SENTRY_DSN"
   | "NEXT_PUBLIC_SENTRY_ENVIRONMENT"
   | "NEXT_PUBLIC_AUTH_METHODS"
-  | "NEXT_PUBLIC_LOCALE"
-  | "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT"
-  | "NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT"
-  | "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN"
-  | "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES";
+  | "NEXT_PUBLIC_DRIVER_SIGNUP_URL"
+  | "NEXT_PUBLIC_LOCALE";
 
 const PUBLIC_CONFIG_ENV_KEYS: readonly PublicConfigEnvKey[] = [
   "NEXT_PUBLIC_APP_NAME",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-  "NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL",
   "NEXT_PUBLIC_SENTRY_DSN",
   "NEXT_PUBLIC_SENTRY_ENVIRONMENT",
   "NEXT_PUBLIC_AUTH_METHODS",
+  "NEXT_PUBLIC_DRIVER_SIGNUP_URL",
   "NEXT_PUBLIC_LOCALE",
-  "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT",
-  "NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT",
-  "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN",
-  "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES",
 ] as const;
-
-const EXPO_PUBLIC_ENV_ALIASES: Record<PublicConfigEnvKey, string> = {
-  NEXT_PUBLIC_APP_NAME: "EXPO_PUBLIC_APP_NAME",
-  NEXT_PUBLIC_SUPABASE_URL: "EXPO_PUBLIC_SUPABASE_URL",
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: "EXPO_PUBLIC_SUPABASE_ANON_KEY",
-  NEXT_PUBLIC_SENTRY_DSN: "EXPO_PUBLIC_SENTRY_DSN",
-  NEXT_PUBLIC_SENTRY_ENVIRONMENT: "EXPO_PUBLIC_SENTRY_ENVIRONMENT",
-  NEXT_PUBLIC_AUTH_METHODS: "EXPO_PUBLIC_AUTH_METHODS",
-  NEXT_PUBLIC_LOCALE: "EXPO_PUBLIC_LOCALE",
-  NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL: "EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL",
-  NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT: "EXPO_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT",
-  NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT: "EXPO_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT",
-  NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN: "EXPO_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN",
-  NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES: "EXPO_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES",
-};
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -61,10 +39,30 @@ export function readExtraString(extra: ExpoExtra, key: string): string | undefin
 }
 
 function readPublicEnvFallback(): ExpoExtra {
-  const source = (process.env ?? {}) as Record<string, unknown>;
+  // Expo only inlines EXPO_PUBLIC_* values when Metro can see direct dot-notation
+  // references. Keep these explicit so web/native bundles receive the same public
+  // configuration even when Constants.expoConfig.extra is unavailable.
+  const source: Record<PublicConfigEnvKey, unknown> = {
+    NEXT_PUBLIC_APP_NAME:
+      process.env.EXPO_PUBLIC_APP_NAME ?? process.env.NEXT_PUBLIC_APP_NAME,
+    NEXT_PUBLIC_SUPABASE_URL:
+      process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY:
+      process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    NEXT_PUBLIC_SENTRY_DSN:
+      process.env.EXPO_PUBLIC_SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN,
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT:
+      process.env.EXPO_PUBLIC_SENTRY_ENVIRONMENT ?? process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
+    NEXT_PUBLIC_AUTH_METHODS:
+      process.env.EXPO_PUBLIC_AUTH_METHODS ?? process.env.NEXT_PUBLIC_AUTH_METHODS,
+    NEXT_PUBLIC_DRIVER_SIGNUP_URL:
+      process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL ?? process.env.NEXT_PUBLIC_DRIVER_SIGNUP_URL,
+    NEXT_PUBLIC_LOCALE:
+      process.env.EXPO_PUBLIC_LOCALE ?? process.env.NEXT_PUBLIC_LOCALE,
+  };
   const fallback: ExpoExtra = {};
   for (const key of PUBLIC_CONFIG_ENV_KEYS) {
-    const value = source[key] ?? source[EXPO_PUBLIC_ENV_ALIASES[key]];
+    const value = source[key];
     if (typeof value !== "string") continue;
     const trimmed = value.trim();
     if (!trimmed) continue;
@@ -96,14 +94,13 @@ export function resolveExpoExtra(extra?: ExpoExtra): ExpoExtra {
 
 export function getPublicConfigFromExpo(extra: ExpoExtra = {}) {
   const resolvedExtra = resolveExpoExtra(extra);
-  return getPublicConfigFromEnv({
+  return { ...getPublicConfigFromEnv({
     NEXT_PUBLIC_APP_NAME: readExtraString(resolvedExtra, "NEXT_PUBLIC_APP_NAME"),
     NEXT_PUBLIC_SUPABASE_URL: readExtraString(resolvedExtra, "NEXT_PUBLIC_SUPABASE_URL"),
     NEXT_PUBLIC_SUPABASE_ANON_KEY: readExtraString(resolvedExtra, "NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-    NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL: readExtraString(resolvedExtra, "NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL"),
     NEXT_PUBLIC_SENTRY_DSN: readExtraString(resolvedExtra, "NEXT_PUBLIC_SENTRY_DSN"),
     NEXT_PUBLIC_SENTRY_ENVIRONMENT: readExtraString(resolvedExtra, "NEXT_PUBLIC_SENTRY_ENVIRONMENT"),
     NEXT_PUBLIC_AUTH_METHODS: readExtraString(resolvedExtra, "NEXT_PUBLIC_AUTH_METHODS"),
     NEXT_PUBLIC_LOCALE: readExtraString(resolvedExtra, "NEXT_PUBLIC_LOCALE"),
-  });
+  }), driverSignupUrl: resolveDriverSignupUrl(readExtraString(resolvedExtra, "NEXT_PUBLIC_DRIVER_SIGNUP_URL")) };
 }

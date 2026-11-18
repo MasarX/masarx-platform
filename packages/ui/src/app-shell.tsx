@@ -94,6 +94,7 @@ function buildBreadcrumbTrail({
 }
 
 function AppShellBreadcrumbs() {
+  const t = createUiTranslator("ui.appShell");
   const navigation = useUiNavigation();
   const pathname = usePathname();
 
@@ -111,7 +112,7 @@ function AppShellBreadcrumbs() {
   if (crumbs.length === 0) return null;
 
   return (
-    <nav aria-label="Breadcrumb" data-testid="app-shell-breadcrumbs">
+    <nav aria-label={t("breadcrumb")} data-testid="app-shell-breadcrumbs">
       <ol className="flex flex-wrap items-center gap-1 text-[11px] font-medium text-ui-muted">
         <li className="truncate">{match.section.label}</li>
         {crumbs.map((crumb, index) => {
@@ -278,6 +279,7 @@ function AppShellLayout({
           </button>
         </div>
         <aside
+          aria-labelledby={`${testIdPrefix}-app-shell-name`}
           className={cn(
             "hidden shrink-0 bg-ui-paper lg:block lg:transition-all",
             sidebarCollapsed
@@ -294,7 +296,12 @@ function AppShellLayout({
             )}
           >
             <div className="flex items-center justify-between gap-3 border-b border-ui-accent/20 bg-ui-highlight/30 px-4 py-4">
-              <div className="text-sm font-semibold text-ui-ink">{appName}</div>
+              <div
+                id={`${testIdPrefix}-app-shell-name`}
+                className="text-sm font-semibold text-ui-ink"
+              >
+                {appName}
+              </div>
               <div className="flex items-center gap-2">
                 {canToggleLayout ? (
                   <button

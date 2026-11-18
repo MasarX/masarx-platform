@@ -1,5 +1,6 @@
 import { isStrictE2EEnv } from "./env";
 
+
 const DEFAULT_BASE_URLS = {
   console: "http://localhost:3001",
   portal: "http://localhost:3002",
@@ -22,26 +23,9 @@ function resolveBaseUrl(
     }
     return fallback;
   }
+  let parsed: URL;
   try {
-    const parsed = new URL(urlValue);
-    if (opts.strict) {
-      const host = String(parsed.hostname || "").toLowerCase();
-      if (["localhost", "127.0.0.1"].includes(host) || host.endsWith(".local")) {
-        throw new Error(
-          `${opts.envKey} must point to a hosted URL in strict/CI E2E (got host=${host}).`
-        );
-      }
-    }
-    const path = trimTrailingSlash(parsed.pathname || "");
-    if (path && path !== "/") {
-      if (opts.strict) {
-        throw new Error(
-          `${opts.envKey} must be host-root (remove path "${path}").`
-        );
-      }
-      return parsed.origin;
-    }
-    return trimTrailingSlash(parsed.origin);
+    parsed = new URL(urlValue);
   } catch {
     if (opts.strict) {
       throw new Error(
@@ -50,6 +34,24 @@ function resolveBaseUrl(
     }
     return fallback;
   }
+  if (opts.strict) {
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (host.endsWith(".local")) {
+      throw new Error(
+        `${opts.envKey} must point to a hosted URL in strict/CI E2E (got host=${host}).`
+      );
+    }
+  }
+  const path = trimTrailingSlash(parsed.pathname || "");
+  if (path && path !== "/") {
+    if (opts.strict) {
+      throw new Error(
+        `${opts.envKey} must be host-root (remove path "${path}").`
+      );
+    }
+    return parsed.origin;
+  }
+  return trimTrailingSlash(parsed.origin);
 }
 
 export function getConsoleBaseUrl() {

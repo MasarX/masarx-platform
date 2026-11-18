@@ -81,6 +81,19 @@ function dedupeEntries(entries) {
   }
   return out;
 }
+function sortEntriesForCleanup(entries) {
+  const kindPriority = {
+    settings_view: 0,
+    task: 1,
+    label: 2,
+    shipment: 3,
+    workflow_template: 4,
+  };
+  return [...entries].sort((a, b) =>
+    (kindPriority[a.kind] ?? 99) - (kindPriority[b.kind] ?? 99)
+  );
+}
+
 
 async function cleanupShipment(client, id) {
   try {
@@ -108,6 +121,105 @@ async function cleanupShipment(client, id) {
         error: `${error.message}; fallback=${fallbackError.message}`,
       };
     }
+  }
+}
+
+async function cleanupTask(client, id) {
+  try {
+    const removed = await client.query('DELETE FROM tasks WHERE id = $1::uuid', [id]);
+    if (removed.rowCount > 0) {
+      return { action: 'delete', ok: true, rowCount: removed.rowCount };
+    }
+    return { action: 'noop', ok: true, rowCount: 0 };
+  } catch (error) {
+    return { action: 'failed', ok: false, rowCount: 0, error: error.message };
+  }
+}
+
+async function cleanupSettingsView(client, entry) {
+  const metadata = entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {};
+  const scopeType = String(metadata.scope_type || '').trim();
+  const scopeId = String(metadata.scope_id || '').trim() || null;
+  const previousVersionId =
+    String(metadata.previous_settings_version_id || '').trim() || null;
+  if (!scopeType) {
+    return { action: 'failed', ok: false, rowCount: 0, error: 'settings_view scope_type missing' };
+  }
+
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `e2e:ui_table_views:${scopeType}:${scopeId ?? 'global'}`,
+    ]);
+    const current = await client.query(
+      `SELECT settings_version_id::text, cached_value
+         FROM public.settings
+        WHERE category = 'ui_table_views'
+          AND scope_type = $1
+          AND scope_id IS NOT DISTINCT FROM $2::uuid
+        FOR UPDATE`,
+      [scopeType, scopeId],
+    );
+    if (String(current.rows?.[0]?.settings_version_id || '') !== entry.id) {
+      const resourceKey = String(metadata.resource_key || '').trim();
+      const viewId = String(metadata.view_id || '').trim();
+      const activeViews = current.rows?.[0]?.cached_value?.resources?.[resourceKey]?.views;
+      if (resourceKey && viewId && activeViews && typeof activeViews === 'object' && activeViews[viewId]) {
+        throw new Error('settings_view fixture inherited by a newer version');
+      }
+      await client.query('COMMIT');
+      return { action: 'noop', ok: true, rowCount: 0 };
+    }
+
+    if (previousVersionId) {
+      const previous = await client.query(
+        `SELECT value
+           FROM public.settings_versions
+          WHERE id = $1::uuid
+            AND category = 'ui_table_views'
+            AND scope_type = $2
+            AND scope_id IS NOT DISTINCT FROM $3::uuid
+          LIMIT 1`,
+        [previousVersionId, scopeType, scopeId],
+      );
+      if (previous.rowCount !== 1) throw new Error('settings_view previous version missing');
+      await client.query(
+        `SELECT settings_version_id
+           FROM public.upsert_settings_value_v1(
+             'ui_table_views', $1, $2::uuid, $3::jsonb, 1, $4
+           )
+          LIMIT 1`,
+        [scopeType, scopeId, JSON.stringify(previous.rows[0].value), `${entry.label}:recover`],
+      );
+      await client.query('COMMIT');
+      return { action: 'restore', ok: true, rowCount: 1 };
+    }
+
+    const removed = await client.query(
+      `DELETE FROM public.settings
+        WHERE category = 'ui_table_views'
+          AND scope_type = $1
+          AND scope_id IS NOT DISTINCT FROM $2::uuid
+          AND settings_version_id = $3::uuid`,
+      [scopeType, scopeId, entry.id],
+    );
+    if (removed.rowCount !== 1) throw new Error('settings_view fixture row missing');
+    await client.query(
+      `UPDATE public.settings_versions
+          SET effective_until = GREATEST(clock_timestamp(), effective_from + interval '1 microsecond')
+        WHERE id = $1::uuid
+          AND effective_until IS NULL`,
+      [entry.id],
+    );
+    await client.query('COMMIT');
+    return { action: 'delete', ok: true, rowCount: 1 };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      // ignore
+    }
+    return { action: 'failed', ok: false, rowCount: 0, error: String(error.message || error) };
   }
 }
 
@@ -181,17 +293,7 @@ async function runCleanup({ manifestPath, outPath }) {
     return report;
   }
 
-  const parsed = dedupeEntries(parseManifestEntries(manifestPath));
-  const kindPriority = {
-    label: 1,
-    shipment: 2,
-    workflow_template: 3,
-  };
-  parsed.sort((a, b) => {
-    const left = kindPriority[a.kind] || 99;
-    const right = kindPriority[b.kind] || 99;
-    return left - right;
-  });
+  const parsed = sortEntriesForCleanup(dedupeEntries(parseManifestEntries(manifestPath)));
   report.totals.entries = parsed.length;
   if (parsed.length === 0) {
     report.status = 'ok';
@@ -222,7 +324,11 @@ async function runCleanup({ manifestPath, outPath }) {
     );
     for (const entry of parsed) {
       let cleanupResult;
-      if (entry.kind === 'label') {
+      if (entry.kind === 'settings_view') {
+        cleanupResult = await cleanupSettingsView(client, entry);
+      } else if (entry.kind === 'task') {
+        cleanupResult = await cleanupTask(client, entry.id);
+      } else if (entry.kind === 'label') {
         cleanupResult = await cleanupLabel(client, entry.id);
       } else if (entry.kind === 'shipment') {
         cleanupResult = await cleanupShipment(client, entry.id);
@@ -294,6 +400,9 @@ module.exports = {
   parseManifestEntries,
   dedupeEntries,
   resolveDatabaseUrl,
+  sortEntriesForCleanup,
+  cleanupTask,
+  cleanupSettingsView,
   resolveDatabaseUrlForCleanup,
   runCleanup,
 };

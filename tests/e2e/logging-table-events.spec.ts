@@ -6,8 +6,9 @@ import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
 import {
   applyResourceLimit,
-  fetchResourceSampleField,
+  fetchResourceSampleRow,
   resolveConfirmableActions,
+  resolveItemFieldValue,
   resolveResourceKeysForUser,
 } from "./utils/core-resource";
 import {
@@ -21,6 +22,8 @@ import {
 import {
   captureUiEvents,
   captureUiEventRequests,
+  captureViewSaveDiagnostics,
+  waitForUiEvent,
 } from "./utils/ui-events";
 
 const demoContext = loadDemoContext();
@@ -70,14 +73,6 @@ function enforceDemoContext(scopeLabel: string, users: Array<{ email: string }>)
   if (users.length === 0 && strict) {
     throw new Error(`No demo users available for ${scopeLabel}.`);
   }
-}
-
-async function waitForEvent<T>(
-  find: () => T | undefined,
-  options?: { timeout?: number }
-) {
-  await expect.poll(() => find() ?? null, options).not.toBeNull();
-  return find();
 }
 
 async function tryClick(locator: Locator, options?: { timeout?: number }) {
@@ -139,16 +134,43 @@ for (const config of appConfigs) {
       if (resourceKeys.length === 0) {
         throw new Error(`No resources available for ${user.email}.`);
       }
-      const resourceKey = resourceKeys[0];
-      const resourceEntry =
-        context.readRegistry?.resources?.find((entry) => entry?.key === resourceKey) ?? null;
-      const filters = Array.isArray(resourceEntry?.filters)
-        ? resourceEntry?.filters
-        : [];
-      const filterDef =
-        filters.find((filter) => (filter?.op ?? "eq") === "eq" && filter?.key && filter?.column) ??
-        filters.find((filter) => filter?.key && filter?.column) ??
-        null;
+      let filterTarget: {
+        resourceKey: string;
+        filterKey: string;
+        filterValue: string;
+      } | null = null;
+      for (const resourceKey of resourceKeys) {
+        const resourceEntry =
+          context.readRegistry?.resources?.find((entry) => entry?.key === resourceKey) ?? null;
+        const filters = Array.isArray(resourceEntry?.filters)
+          ? resourceEntry.filters.filter((filter) => filter?.key && filter?.column)
+          : [];
+        if (filters.length === 0) continue;
+        const sample = await fetchResourceSampleRow({
+          resourceKey,
+          email: user.email,
+          password: demoContext.password ?? "",
+        });
+        if (!sample.item) continue;
+        const orderedFilters = [
+          ...filters.filter((filter) => (filter.op ?? "eq") === "eq"),
+          ...filters.filter((filter) => (filter.op ?? "eq") !== "eq"),
+        ];
+        for (const filter of orderedFilters) {
+          const filterKey = filter.key?.trim() ?? "";
+          const filterColumn = filter.column?.trim() ?? "";
+          if (!filterKey || !filterColumn) continue;
+          const filterValue = resolveItemFieldValue(sample.item, [filterColumn, filterKey]);
+          if (filterValue === null) continue;
+          filterTarget = { resourceKey, filterKey, filterValue };
+          break;
+        }
+        if (filterTarget) break;
+      }
+      if (!filterTarget) {
+        throw new Error(`No filterable resource sample available for ${user.email}.`);
+      }
+      const { resourceKey, filterKey, filterValue } = filterTarget;
 
       await page.goto(baseUrl);
       const authGate = page.locator(`[data-testid="${config.authTestId}"]`);
@@ -169,7 +191,7 @@ for (const config of appConfigs) {
           `[data-testid="${config.resourceTestIdPrefix}-ready"], [data-testid="${config.resourceTestIdPrefix}-error"], [data-testid="${config.authTestId}"]`
         )
       ).toBeVisible();
-      if (!(await ready.isVisible())) return;
+      await expect(ready, `${config.label} resource ${resourceKey} must be ready for filter logging`).toBeVisible();
 
       const filterControl = page.locator(
         `[data-testid="${config.tableTestIdPrefix}-view-control-filters"]`
@@ -188,36 +210,28 @@ for (const config of appConfigs) {
         }
         return;
       }
-      const panelEvent = await waitForEvent(
-        () =>
-          events.find(
+      const panelEvent = await waitForUiEvent(
+          [events, requestEvents],
             (entry) =>
               entry.type === "ui.table.panel.toggle" &&
               entry.context === resourceKey &&
               entry.name === "filters" &&
-              entry.message === "open"
-          ),
+              entry.message === "open",
         { timeout: 5_000 }
       );
       expect(panelEvent?.timestamp).toBeTruthy();
-      const sample = filterDef
-        ? await fetchResourceSampleField({
-            resourceKey,
-            fieldCandidates: [filterDef.column ?? "", filterDef.key ?? ""],
-            email: user.email,
-            password: demoContext.password ?? "",
-          })
-        : null;
       const applied = await applyAndClearFirstFilter({
         page,
         testIdPrefix: config.tableTestIdPrefix,
-        filterKey: filterDef?.key ?? null,
-        filterValue: sample?.value ?? null,
+        filterKey,
+        filterValue,
       });
       await tryClick(filterControl);
       if (!applied) {
         if (strict) {
-          throw new Error(`Filter apply failed for ${config.label}.`);
+          throw new Error(
+            `Filter apply failed for ${config.label}: resourceKey=${resourceKey}; filterKey=${filterKey}; samplePresent=${Boolean(filterValue)}.`
+          );
         }
         return;
       }
@@ -238,47 +252,39 @@ for (const config of appConfigs) {
             }
             return;
           }
-          const searchEvent = await waitForEvent(
-            () =>
-              events.find(
+          const searchEvent = await waitForUiEvent(
+              [events, requestEvents],
                 (entry) =>
                   entry.type === "ui.table.search.clear" &&
-                  entry.context === resourceKey
-              ),
+                  entry.context === resourceKey,
             { timeout: 5_000 }
           );
           expect(searchEvent?.timestamp).toBeTruthy();
-          const searchNetworkEvent = await waitForEvent(
-            () =>
-              requestEvents.find(
+          const searchNetworkEvent = await waitForUiEvent(
+              requestEvents,
                 (entry) =>
                   entry.type === "ui.table.search.clear" &&
-                  entry.context === resourceKey
-              ),
+                  entry.context === resourceKey,
             { timeout: 5_000 }
           );
           expect(searchNetworkEvent?.timestamp).toBeTruthy();
         }
       }
 
-      const event = await waitForEvent(
-        () =>
-          events.find(
+      const event = await waitForUiEvent(
+          [events, requestEvents],
             (entry) =>
               entry.type === "ui.table.filter.apply" &&
-              entry.context === resourceKey
-          ),
+              entry.context === resourceKey,
         { timeout: 5_000 }
       );
 
       expect(event?.timestamp).toBeTruthy();
-      const networkEvent = await waitForEvent(
-        () =>
-          requestEvents.find(
+      const networkEvent = await waitForUiEvent(
+          requestEvents,
             (entry) =>
               entry.type === "ui.table.filter.apply" &&
-              entry.context === resourceKey
-          ),
+              entry.context === resourceKey,
         { timeout: 5_000 }
       );
       expect(networkEvent?.timestamp).toBeTruthy();
@@ -306,13 +312,11 @@ for (const config of appConfigs) {
         });
         await tryClick(sortControl);
         if (sortApplied) {
-          const sortEvent = await waitForEvent(
-            () =>
-              events.find(
+          const sortEvent = await waitForUiEvent(
+              [events, requestEvents],
                 (entry) =>
                   entry.type === "ui.table.sort.add" &&
-                  entry.context === resourceKey
-              ),
+                  entry.context === resourceKey,
             { timeout: 5_000 }
           );
           expect(sortEvent?.timestamp).toBeTruthy();
@@ -335,13 +339,11 @@ for (const config of appConfigs) {
         });
         await tryClick(groupControl);
         if (groupApplied) {
-          const groupEvent = await waitForEvent(
-            () =>
-              events.find(
+          const groupEvent = await waitForUiEvent(
+              [events, requestEvents],
                 (entry) =>
                   entry.type === "ui.table.group.add" &&
-                  entry.context === resourceKey
-              ),
+                  entry.context === resourceKey,
             { timeout: 5_000 }
           );
           expect(groupEvent?.timestamp).toBeTruthy();
@@ -352,23 +354,19 @@ for (const config of appConfigs) {
             (await collapseAll.count()) > 0 &&
             !(await collapseAll.first().isDisabled())
           ) {
-            const collapseEvent = await waitForEvent(
-              () =>
-                events.find(
+            const collapseEvent = await waitForUiEvent(
+                [events, requestEvents],
                   (entry) =>
                     entry.type === "ui.table.group.collapse_all" &&
-                    entry.context === resourceKey
-                ),
+                    entry.context === resourceKey,
               { timeout: 5_000 }
             );
             expect(collapseEvent?.timestamp).toBeTruthy();
-            const collapseNetworkEvent = await waitForEvent(
-              () =>
-                requestEvents.find(
+            const collapseNetworkEvent = await waitForUiEvent(
+                requestEvents,
                   (entry) =>
                     entry.type === "ui.table.group.collapse_all" &&
-                    entry.context === resourceKey
-                ),
+                    entry.context === resourceKey,
               { timeout: 5_000 }
             );
             expect(collapseNetworkEvent?.timestamp).toBeTruthy();
@@ -380,23 +378,19 @@ for (const config of appConfigs) {
             (await expandAll.count()) > 0 &&
             !(await expandAll.first().isDisabled())
           ) {
-            const expandEvent = await waitForEvent(
-              () =>
-                events.find(
+            const expandEvent = await waitForUiEvent(
+                [events, requestEvents],
                   (entry) =>
                     entry.type === "ui.table.group.expand_all" &&
-                    entry.context === resourceKey
-                ),
+                    entry.context === resourceKey,
               { timeout: 5_000 }
             );
             expect(expandEvent?.timestamp).toBeTruthy();
-            const expandNetworkEvent = await waitForEvent(
-              () =>
-                requestEvents.find(
+            const expandNetworkEvent = await waitForUiEvent(
+                requestEvents,
                   (entry) =>
                     entry.type === "ui.table.group.expand_all" &&
-                    entry.context === resourceKey
-                ),
+                    entry.context === resourceKey,
               { timeout: 5_000 }
             );
             expect(expandNetworkEvent?.timestamp).toBeTruthy();
@@ -425,23 +419,19 @@ for (const config of appConfigs) {
             );
             if ((await confirmDialog.count()) > 0) {
               await expect(confirmDialog).toBeVisible();
-              const confirmEvent = await waitForEvent(
-                () =>
-                  events.find(
+              const confirmEvent = await waitForUiEvent(
+                  [events, requestEvents],
                     (entry) =>
                       entry.type === "ui.bulk_action.confirm.open" &&
-                      entry.context === resourceKey
-                  ),
+                      entry.context === resourceKey,
                 { timeout: 5_000 }
               );
               expect(confirmEvent?.timestamp).toBeTruthy();
-              const confirmNetworkEvent = await waitForEvent(
-                () =>
-                  requestEvents.find(
+              const confirmNetworkEvent = await waitForUiEvent(
+                  requestEvents,
                     (entry) =>
                       entry.type === "ui.bulk_action.confirm.open" &&
-                      entry.context === resourceKey
-                  ),
+                      entry.context === resourceKey,
                 { timeout: 5_000 }
               );
               expect(confirmNetworkEvent?.timestamp).toBeTruthy();
@@ -451,23 +441,19 @@ for (const config of appConfigs) {
                 )
                 .click();
               await expect(confirmDialog).toHaveCount(0);
-              const cancelEvent = await waitForEvent(
-                () =>
-                  events.find(
+              const cancelEvent = await waitForUiEvent(
+                  [events, requestEvents],
                     (entry) =>
                       entry.type === "ui.bulk_action.confirm.cancel" &&
-                      entry.context === resourceKey
-                  ),
+                      entry.context === resourceKey,
                 { timeout: 5_000 }
               );
               expect(cancelEvent?.timestamp).toBeTruthy();
-              const cancelNetworkEvent = await waitForEvent(
-                () =>
-                  requestEvents.find(
+              const cancelNetworkEvent = await waitForUiEvent(
+                  requestEvents,
                     (entry) =>
                       entry.type === "ui.bulk_action.confirm.cancel" &&
-                      entry.context === resourceKey
-                  ),
+                      entry.context === resourceKey,
                 { timeout: 5_000 }
               );
               expect(cancelNetworkEvent?.timestamp).toBeTruthy();
@@ -478,23 +464,19 @@ for (const config of appConfigs) {
           );
           if ((await clearSelection.count()) > 0 && !(await clearSelection.first().isDisabled())) {
             await clearSelection.first().click();
-            const selectionEvent = await waitForEvent(
-              () =>
-                events.find(
+            const selectionEvent = await waitForUiEvent(
+                [events, requestEvents],
                   (entry) =>
                     entry.type === "ui.table.selection.clear" &&
-                    entry.context === resourceKey
-                ),
+                    entry.context === resourceKey,
               { timeout: 5_000 }
             );
             expect(selectionEvent?.timestamp).toBeTruthy();
-            const selectionNetworkEvent = await waitForEvent(
-              () =>
-                requestEvents.find(
+            const selectionNetworkEvent = await waitForUiEvent(
+                requestEvents,
                   (entry) =>
                     entry.type === "ui.table.selection.clear" &&
-                    entry.context === resourceKey
-                ),
+                    entry.context === resourceKey,
               { timeout: 5_000 }
             );
             expect(selectionNetworkEvent?.timestamp).toBeTruthy();
@@ -530,30 +512,37 @@ for (const config of appConfigs) {
             (await saveCreate.count()) > 0 &&
             !(await saveCreate.first().isDisabled())
           ) {
-            const saveTriggered = await tryClick(saveCreate);
-            if (saveTriggered) {
-              const viewSaveEvent = await waitForEvent(
-                () =>
-                  events.find(
+            const saveDiagnostics = captureViewSaveDiagnostics(
+              page, events, requestEvents, resourceKey
+            );
+            try {
+              const saveTriggered = await tryClick(saveCreate);
+              if (saveTriggered) {
+                try {
+                  const viewSaveEvent = await waitForUiEvent(
+                    [events, requestEvents],
                     (entry) =>
                       entry.type === "ui.table.view.save" &&
-                      entry.context === resourceKey
-                  ),
-                { timeout: 5_000 }
-              );
-              expect(viewSaveEvent?.timestamp).toBeTruthy();
-              const viewSaveNetworkEvent = await waitForEvent(
-                () =>
-                  requestEvents.find(
+                      entry.context === resourceKey,
+                    { timeout: 5_000 }
+                  );
+                  expect(viewSaveEvent?.timestamp).toBeTruthy();
+                  const viewSaveNetworkEvent = await waitForUiEvent(
+                    requestEvents,
                     (entry) =>
                       entry.type === "ui.table.view.save" &&
-                      entry.context === resourceKey
-                  ),
-                { timeout: 5_000 }
-              );
-              expect(viewSaveNetworkEvent?.timestamp).toBeTruthy();
-            } else if (strict) {
-              throw new Error(`View save not available for ${config.label}.`);
+                      entry.context === resourceKey,
+                    { timeout: 5_000 }
+                  );
+                  expect(viewSaveNetworkEvent?.timestamp).toBeTruthy();
+                } catch (error) {
+                  saveDiagnostics.fail(error);
+                }
+              } else if (strict) {
+                throw new Error(`View save not available for ${config.label}.`);
+              }
+            } finally {
+              saveDiagnostics.stop();
             }
           }
         }
@@ -576,25 +565,21 @@ for (const config of appConfigs) {
         if ((await renameItem.count()) > 0) {
           const renamed = await tryClick(renameItem);
           if (renamed) {
-            const menuEvent = await waitForEvent(
-              () =>
-                events.find(
+            const menuEvent = await waitForUiEvent(
+                [events, requestEvents],
                   (entry) =>
                     entry.type === "ui.table.view.menu.action" &&
                     entry.context === resourceKey &&
-                    entry.name === "rename"
-                ),
+                    entry.name === "rename",
               { timeout: 5_000 }
             );
             expect(menuEvent?.timestamp).toBeTruthy();
-            const menuNetworkEvent = await waitForEvent(
-              () =>
-                requestEvents.find(
+            const menuNetworkEvent = await waitForUiEvent(
+                requestEvents,
                   (entry) =>
                     entry.type === "ui.table.view.menu.action" &&
                     entry.context === resourceKey &&
-                    entry.name === "rename"
-                ),
+                    entry.name === "rename",
               { timeout: 5_000 }
             );
             expect(menuNetworkEvent?.timestamp).toBeTruthy();

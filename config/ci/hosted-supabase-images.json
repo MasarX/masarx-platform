@@ -27,7 +27,11 @@
         "os": "unknown"
       }
     ],
-    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC"
+    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC",
+    "amd64_manifest": "sha256:c45f49e0f57ace1430c30e87570e372319bbe4463f5f59b6ea9ba2e7230c0d1b",
+    "image_id": "sha256:59ffb2cabef01bb75bc019ddfe901ba28b9bd4882acccb62c2f1cfd5d3ca2568",
+    "mirror": "ghcr.io",
+    "cli_tag": "17.6.1.165"
   },
   {
     "role": "auth",
@@ -57,7 +61,11 @@
         "os": "unknown"
       }
     ],
-    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC"
+    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC",
+    "amd64_manifest": "sha256:7e813221b93fbf54b515036438550e483bfaf057b9db52fe9bc1ce91c47e817e",
+    "image_id": "sha256:688edbb786f6d736edaa478438f23c7044a22a6a5f19502a7138d38caca6c2f6",
+    "mirror": "ghcr.io",
+    "cli_tag": "v2.196.0"
   },
   {
     "role": "storage",
@@ -87,7 +95,11 @@
         "os": "unknown"
       }
     ],
-    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC"
+    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC",
+    "amd64_manifest": "sha256:2ccfb495b7032e787b080962b9439ffc93501307bbef66b1dbbf540187a41d88",
+    "image_id": "sha256:da10ed4735bc3db792eafc2f95b466b95e172a5003ead993099f2005f669dd8f",
+    "mirror": "ghcr.io",
+    "cli_tag": "v1.70.3"
   },
   {
     "role": "gateway",
@@ -110,6 +122,24 @@
         "variant": "v8"
       }
     ],
-    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC"
+    "clock_tool_batch_start_utc": "2026-11-16 14:12:09 UTC",
+    "amd64_manifest": "sha256:e21b0b793879ab96720ed4188f9441260273f4bf775bcbff8d435e019ffb759a",
+    "image_id": "sha256:3cefb958bcd694597b65adc00053a762b1f9a6df3c6031af528d052d75a64e1a",
+    "mirror": "ghcr.io",
+    "cli_tag": "2.8.1"
+  },
+  {
+    "role": "realtime",
+    "image": "supabase/realtime",
+    "tag": "v2.129.3",
+    "source": "https://github.com/supabase/cli/blob/v2.116.0/apps/cli-go/pkg/config/templates/Dockerfile",
+    "registry_endpoint": "https://public.ecr.aws/v2/supabase/realtime/manifests/v2.129.3",
+    "digest": "sha256:3211f8ebd59edcd0aa772186f1c8249c82c6b1ae5565f40dedb7aa93e951fe37",
+    "time_utc": "2026-11-17T12:40:56.321000+00:00",
+    "media_type": "application/vnd.oci.image.index.v1+json",
+    "amd64_manifest": "sha256:a143c38111a01797e7b08e7863a10331ac4a3d9a5efb05e3104212681dfc67c3",
+    "image_id": "sha256:5a7cf1d60cf3c3b3d6a25aa43d3ea8a1549c8303a4fc21c51b9321e0bdebe51d",
+    "mirror": "ghcr.io",
+    "cli_tag": "v2.129.3"
   }
 ]

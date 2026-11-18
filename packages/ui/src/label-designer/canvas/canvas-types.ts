@@ -6,6 +6,8 @@ export type TemplateBlock = {
   y: number;
   width?: number;
   height?: number;
+  max_width?: number;
+  max_height?: number;
   color?: string;
   fill_color?: string;
   stroke_width?: number;

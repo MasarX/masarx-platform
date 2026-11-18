@@ -42,7 +42,12 @@ export function resolveColumnLabelByKey(
 export function toCsvRow(values: string[]) {
   return values
     .map((value) => {
-      const escaped = value.replace(/"/g, '""');
+      // CSV quoting does not stop spreadsheet programs from evaluating formulas.
+      // Keep ordinary signed numbers numeric while treating formula-like text as text.
+      const isSignedNumber = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value);
+      const isFormula = /^[\s\u0000-\u001f]*[=+@-]/.test(value) || /^[\t\r\n]/.test(value);
+      const safeValue = isFormula && !isSignedNumber ? `'${value}` : value;
+      const escaped = safeValue.replace(/"/g, '""');
       return /[",\n\r]/.test(escaped) ? `"${escaped}"` : escaped;
     })
     .join(",");

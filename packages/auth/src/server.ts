@@ -9,10 +9,6 @@ import { getPublicConfig } from "@masarx/config";
 type SupabaseServerClient = ReturnType<typeof createSupabaseServerClient>;
 type CookieLike = { name: string; value: string };
 type JsonRecord = Record<string, unknown>;
-type TrustedSessionIdentity = {
-  accessToken: string;
-  user: JsonRecord & { id: string };
-};
 
 const BASE64_PREFIX = "base64-";
 const CHUNK_SUFFIX_REGEX = /^(.*)\.(\d+)$/;
@@ -164,68 +160,6 @@ function resolveCookieSessionIdentity(
   return fallbackIdentity;
 }
 
-function normalizeErrorMessage(error: unknown) {
-  if (!error) return "";
-  if (error instanceof Error) return error.message.trim().toLowerCase();
-  if (typeof error === "string") return error.trim().toLowerCase();
-  if (typeof error === "object") {
-    const record = error as JsonRecord;
-    for (const key of ["message", "details", "error", "error_description"]) {
-      const value = record[key];
-      if (typeof value === "string" && value.trim()) {
-        return value.trim().toLowerCase();
-      }
-    }
-  }
-  return String(error).trim().toLowerCase();
-}
-
-function isRecoverableSessionVerificationError(error: unknown) {
-  const message = normalizeErrorMessage(error);
-  if (!message) return false;
-  return [
-    "auth session missing",
-    "session from session_id claim in jwt does not exist",
-    "session does not exist",
-    "session not found",
-  ].some((marker) => message.includes(marker));
-}
-
-function resolveTrustedSessionIdentity(session: unknown): TrustedSessionIdentity | null {
-  if (!session || typeof session !== "object") return null;
-  const record = session as JsonRecord;
-  const accessToken =
-    typeof record.access_token === "string" ? record.access_token.trim() : "";
-  if (!accessToken) return null;
-
-  const user =
-    record.user && typeof record.user === "object"
-      ? (record.user as JsonRecord)
-      : null;
-  const userId = typeof user?.id === "string" ? user.id.trim() : "";
-  if (!user || !userId) return null;
-
-  const payload = decodeJwtPayload(accessToken);
-  const subject = typeof payload?.sub === "string" ? payload.sub.trim() : "";
-  if (subject && subject !== userId) return null;
-
-  const expRaw = payload?.exp;
-  const exp =
-    typeof expRaw === "number"
-      ? expRaw
-      : typeof expRaw === "string"
-        ? Number.parseInt(expRaw, 10)
-        : Number.NaN;
-  if (Number.isFinite(exp) && exp > 0 && exp * 1000 <= Date.now()) {
-    return null;
-  }
-
-  return {
-    accessToken,
-    user: user as JsonRecord & { id: string },
-  };
-}
-
 function createNoopServerClient(): SupabaseServerClient {
   return {
     auth: {
@@ -259,43 +193,79 @@ async function verifyUserFromAccessToken(
     };
   }
 
-  try {
-    const response = await fetch(`${supabaseUrl.replace(/\/+$/g, "")}/auth/v1/user`, {
-      method: "GET",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        apikey: supabaseAnonKey,
-      },
-      cache: "no-store",
-    });
-    const payload = (await response.json().catch(() => null)) as JsonRecord | null;
-    if (!response.ok) {
-      const message =
-        (typeof payload?.msg === "string" && payload.msg) ||
-        (typeof payload?.error_description === "string" && payload.error_description) ||
-        (typeof payload?.error === "string" && payload.error) ||
-        (typeof payload?.message === "string" && payload.message) ||
-        `authenticated_user_required (${response.status})`;
+  const verificationUrl = process.env.SUPABASE_INTERNAL_URL?.trim() || supabaseUrl;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(`${verificationUrl.replace(/\/+$/g, "")}/auth/v1/user`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          apikey: supabaseAnonKey,
+        },
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => null)) as JsonRecord | null;
+      const transient =
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500;
+      if (!response.ok && transient && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+        continue;
+      }
+      if (!response.ok) {
+        const message =
+          (typeof payload?.msg === "string" && payload.msg) ||
+          (typeof payload?.error_description === "string" && payload.error_description) ||
+          (typeof payload?.error === "string" && payload.error) ||
+          (typeof payload?.message === "string" && payload.message) ||
+          (transient
+            ? `user_verification_unavailable (${response.status})`
+            : `authenticated_user_required (${response.status})`);
+        return {
+          client,
+          user: null,
+          error: new Error(message),
+        };
+      }
+
+      return {
+        client,
+        user: payload,
+        error: null,
+      };
+    } catch (error) {
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+        continue;
+      }
       return {
         client,
         user: null,
-        error: new Error(message),
+        error: error instanceof Error ? error : new Error("user_verification_unavailable"),
       };
     }
-
-    return {
-      client,
-      user: payload,
-      error: null,
-    };
-  } catch (error) {
-    return {
-      client,
-      user: null,
-      error:
-        error instanceof Error ? error : new Error("authenticated_user_required"),
-    };
   }
+  return { client, user: null, error: new Error("user_verification_unavailable") };
+}
+
+export function createServerReachableFetch(publicUrl: string) {
+  const internalUrl = process.env.SUPABASE_INTERNAL_URL?.trim();
+  if (!internalUrl) return undefined;
+  const publicOrigin = new URL(publicUrl).origin;
+  const internalOrigin = new URL(internalUrl);
+
+  return (input: RequestInfo | URL, init?: RequestInit) => {
+    const requestUrl = input instanceof Request ? input.url : input.toString();
+    const target = new URL(requestUrl);
+    if (target.origin !== publicOrigin) return fetch(input, init);
+    target.protocol = internalOrigin.protocol;
+    target.host = internalOrigin.host;
+    return fetch(
+      input instanceof Request ? new Request(target, input) : target,
+      init,
+    );
+  };
 }
 
 export function createServerClient(
@@ -313,15 +283,19 @@ export function createServerClient(
     return createNoopServerClient();
   }
   type CookieToSet = { name: string; value: string; options: CookieOptions };
+  const serverFetch = createServerReachableFetch(supabaseUrl);
 
   return createSupabaseServerClient(supabaseUrl, supabaseAnonKey, {
     db: { schema: "api" },
     cookieEncoding: "base64url",
-    global: accessToken
+    global: accessToken || serverFetch
       ? {
-          headers: {
-            authorization: `Bearer ${accessToken}`,
-          },
+          ...(accessToken ? {
+            headers: {
+              authorization: `Bearer ${accessToken}`,
+            },
+          } : {}),
+          ...(serverFetch ? { fetch: serverFetch } : {}),
         }
       : undefined,
     cookies: {
@@ -345,8 +319,9 @@ export async function getVerifiedUser(
 ) {
   const client = createServerClient(options);
   const { data: sessionData } = await client.auth.getSession();
-  const trustedSession = resolveTrustedSessionIdentity(sessionData?.session ?? null);
-  let { data, error } = await client.auth.getUser(trustedSession?.accessToken);
+  // Cookie session data only supplies credentials. The auth server must verify
+  // the user, including whether the session still exists.
+  let { data, error } = await client.auth.getUser(sessionData?.session?.access_token);
   let user = data?.user ?? null;
 
   if (!user || error) {
@@ -369,14 +344,6 @@ export async function getVerifiedUser(
     }
   }
 
-  if ((!user || error) && trustedSession && isRecoverableSessionVerificationError(error)) {
-    return {
-      client,
-      user: trustedSession.user,
-      error: null,
-    };
-  }
-
   return {
     client,
     user,
@@ -395,7 +362,6 @@ export async function getVerifiedAccessToken(
   const cookieIdentity = resolveCookieSessionIdentity(cookieValues, null);
 
   let sessionError: unknown = null;
-  let trustedSession: TrustedSessionIdentity | null = null;
   let accessToken = cookieIdentity?.accessToken ?? null;
   let expectedUserId = cookieIdentity?.userId ?? null;
 
@@ -406,9 +372,8 @@ export async function getVerifiedAccessToken(
     const { data: sessionData, error } = await client.auth.getSession();
     sessionError = error;
     const session = sessionData?.session ?? null;
-    trustedSession = resolveTrustedSessionIdentity(session);
-    accessToken = session?.access_token ?? trustedSession?.accessToken ?? null;
-    expectedUserId = session?.user?.id ?? trustedSession?.user.id ?? null;
+    accessToken = session?.access_token ?? null;
+    expectedUserId = session?.user?.id ?? null;
 
     if (!accessToken) {
       return {
@@ -438,18 +403,6 @@ export async function getVerifiedAccessToken(
   const userError = verificationResult.error;
 
   if (!user || userError) {
-    if (
-      trustedSession &&
-      trustedSession.accessToken === accessToken &&
-      isRecoverableSessionVerificationError(userError)
-    ) {
-      return {
-        client,
-        user: trustedSession.user,
-        accessToken,
-        error: null,
-      };
-    }
     return {
       client: verificationResult.client,
       user: null,

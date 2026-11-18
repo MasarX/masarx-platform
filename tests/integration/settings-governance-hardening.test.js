@@ -225,4 +225,88 @@ describe('Settings governance hardening', () => {
       client.release();
     }
   });
+
+  test('canonical settings upserts close future-dated current rows monotonically', async () => {
+    const client = await pool.connect();
+    await client.query('BEGIN');
+    try {
+      const initial = await client.query(
+        `SELECT *
+           FROM public.upsert_settings_value_v1(
+             'webhook_ingest_policy',
+             'global',
+             NULL,
+             $1::jsonb,
+             1,
+             'uc234 monotonic closeout seed'
+           )`,
+        [JSON.stringify({ allow_provider_mirror: false })],
+      );
+
+      const initialVersionId = initial.rows[0]?.settings_version_id;
+      expect(initialVersionId).toBeTruthy();
+
+      await client.query(
+        `UPDATE public.settings_versions
+            SET effective_from = clock_timestamp() + INTERVAL '1 minute',
+                effective_until = NULL
+          WHERE id = $1::uuid`,
+        [initialVersionId],
+      );
+
+      const followUp = await client.query(
+        `SELECT *
+           FROM public.upsert_settings_value_v1(
+             'webhook_ingest_policy',
+             'global',
+             NULL,
+             $1::jsonb,
+             1,
+             'uc234 monotonic closeout verify'
+           )`,
+        [JSON.stringify({ allow_provider_mirror: true })],
+      );
+
+      const followUpVersionId = followUp.rows[0]?.settings_version_id;
+      expect(followUpVersionId).toBeTruthy();
+      expect(followUpVersionId).not.toBe(initialVersionId);
+
+      const { rows } = await client.query(
+        `SELECT id,
+                value,
+                effective_from,
+                effective_until,
+                effective_until > effective_from AS closes_monotonically
+           FROM public.settings_versions
+          WHERE id = ANY($1::uuid[])
+          ORDER BY effective_from ASC`,
+        [[initialVersionId, followUpVersionId]],
+      );
+
+      expect(rows).toHaveLength(2);
+
+      const closedRow = rows.find((row) => row.id === initialVersionId);
+      const currentRow = rows.find((row) => row.id === followUpVersionId);
+
+      expect(closedRow).toBeDefined();
+      expect(currentRow).toBeDefined();
+      expect(closedRow.closes_monotonically).toBe(true);
+      expect(currentRow.effective_until).toBeNull();
+      expect(currentRow.value).toMatchObject({ allow_provider_mirror: true });
+
+      const activeRowCount = await client.query(
+        `SELECT COUNT(*)::int AS active_count
+           FROM public.settings_versions
+          WHERE category = 'webhook_ingest_policy'
+            AND scope_type = 'global'
+            AND effective_until IS NULL
+            AND approved_at IS NOT NULL`,
+      );
+
+      expect(activeRowCount.rows[0]?.active_count).toBe(1);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
 });

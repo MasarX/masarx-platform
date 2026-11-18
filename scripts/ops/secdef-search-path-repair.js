@@ -13,6 +13,7 @@
  */
 /* eslint-disable no-console */
 const { Pool } = require('pg');
+const { writeFileSync } = require('node:fs');
 const { loadEnv } = require('../utils/load-env');
 
 loadEnv();
@@ -50,6 +51,7 @@ const findViolationsSql = `
       sd.oid,
       sd.schema_name,
       sd.function_name,
+      substring(sp.cfg FROM position('=' IN sp.cfg) + 1) AS original_search_path,
       ARRAY(
         SELECT trim(both ' ' FROM elem)
         FROM unnest(string_to_array(split_part(cfg, '=', 2), ',')) AS elem
@@ -66,6 +68,7 @@ const findViolationsSql = `
     oid,
     schema_name,
     function_name,
+    original_search_path,
     pg_get_function_identity_arguments(oid) AS args
   FROM parsed_paths
   WHERE search_path IS NULL
@@ -83,6 +86,7 @@ const findViolationsSql = `
 async function main() {
   const pool = new Pool({ connectionString: DATABASE_URL });
   const client = await pool.connect();
+  let committed = false;
   try {
     const { rows } = await client.query(findViolationsSql);
     if (!rows.length) {
@@ -94,6 +98,16 @@ async function main() {
       `[secdef-search-path-repair] Detected ${rows.length} SECURITY DEFINER function(s) with unsafe search_path; repairing...`
     );
 
+    // Synchronous stderr uses the caller's captured log and fails before any ALTER
+    // if evidence cannot be emitted. Never serialize proconfig or function bodies.
+    writeFileSync(2, `[secdef-search-path-repair] ${JSON.stringify({
+      event: 'repair-planned',
+      replacement_search_path: SAFE_SEARCH_PATH,
+      functions: rows.map(({ oid, schema_name, function_name, args, original_search_path }) => ({
+        oid, schema_name, function_name, args, original_search_path,
+      })),
+    })}\n`);
+
     await client.query('BEGIN');
     for (const row of rows) {
       const schemaName = row.schema_name;
@@ -103,16 +117,23 @@ async function main() {
       await client.query(`ALTER FUNCTION ${signature} SET search_path = ${SAFE_SEARCH_PATH}`);
     }
     await client.query('COMMIT');
+    committed = true;
+    writeFileSync(2, `[secdef-search-path-repair] ${JSON.stringify({ event: 'repair-committed', count: rows.length })}\n`);
 
     console.log(
       `[secdef-search-path-repair] Repaired ${rows.length} function(s) (search_path=${SAFE_SEARCH_PATH})`
     );
   } catch (error) {
-    try {
-      await client.query('ROLLBACK');
-    } catch (_rollbackErr) {
-      // ignore rollback failures
+    let rollback = 'not-attempted-after-commit';
+    if (!committed) {
+      try {
+        await client.query('ROLLBACK');
+        rollback = 'acknowledged';
+      } catch (_rollbackErr) {
+        rollback = 'failed';
+      }
     }
+    console.error(`[secdef-search-path-repair] ${JSON.stringify({ event: 'repair-failed', commit_acknowledged: committed, rollback })}`);
     const message = error instanceof Error ? error.message : String(error);
     console.error('[secdef-search-path-repair] Failed:', message);
     process.exit(1);

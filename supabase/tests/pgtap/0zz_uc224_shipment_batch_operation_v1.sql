@@ -20,6 +20,10 @@ DECLARE
   v_shipment_one UUID := gen_random_uuid();
   v_shipment_two UUID := gen_random_uuid();
   v_batch_result JSONB := NULL;
+  v_workflow_run_ids UUID[] := NULL;
+  v_workflow_run_id UUID := NULL;
+  v_run_status TEXT := NULL;
+  v_attempt INTEGER;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -166,11 +170,60 @@ BEGIN
     '{}'::jsonb
   );
 
-  RETURN NEXT is(v_batch_result->>'status', 'cancelled', 'batch shipment delete reports cancelled status');
-  RETURN NEXT is(v_batch_result->>'success_count', '2', 'batch shipment delete reports two successful items');
+  RETURN NEXT is(v_batch_result->>'status',
+    CASE WHEN (v_batch_result->>'queued_count')::INT > 0 THEN 'queued' ELSE 'cancelled' END,
+    'batch shipment delete distinguishes queued work from completed cancellation');
+  RETURN NEXT ok(
+    (v_batch_result->>'success_count')::INT = (
+      SELECT COUNT(*)::INT FROM jsonb_array_elements(v_batch_result->'items') item
+       WHERE item->>'status' = 'cancelled' AND item->>'workflow_status' = 'completed'
+    ) AND (v_batch_result->>'queued_count')::INT = (
+      SELECT COUNT(*)::INT FROM jsonb_array_elements(v_batch_result->'items') item
+       WHERE item->>'status' = 'queued' AND item->>'workflow_status' IN ('pending', 'in_progress', 'running', 'waiting')
+    ) AND (v_batch_result->>'success_count')::INT + (v_batch_result->>'queued_count')::INT = 2,
+    'batch shipment delete counts completed and queued items separately');
   RETURN NEXT is(jsonb_array_length(COALESCE(v_batch_result->'items', '[]'::jsonb))::text, '2', 'batch shipment delete returns one item per selected shipment');
 
   EXECUTE 'SET LOCAL ROLE postgres';
+
+  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(v_batch_result->'items') item
+    JOIN public.shipments s ON s.id = (item->>'shipment_id')::UUID
+    WHERE item->>'status' = 'cancelled' AND s.status IS DISTINCT FROM 'cancelled'
+  ) THEN
+    RAISE EXCEPTION 'UC224 completed batch item lacks immediate persisted cancellation';
+  END IF;
+
+  -- The RPC may return before workflow completion; advance only its exact owned runs.
+  SELECT array_agg(wr.id ORDER BY wr.id)
+    INTO v_workflow_run_ids
+    FROM jsonb_array_elements(COALESCE(v_batch_result->'items', '[]'::jsonb)) AS item(value)
+    JOIN public.workflow_runs wr ON wr.id = NULLIF(item.value->>'workflow_run_id', '')::uuid
+    JOIN public.workflow_templates wt ON wt.id = wr.workflow_template_id
+   WHERE wt.name = 'shipment_delete_v1'
+     AND item.value->>'shipment_id' = wr.context->>'shipment_id'
+     AND item.value->>'selection_id' = wr.context->>'shipment_id'
+     AND wr.context->>'shipment_id' IN (v_shipment_one::text, v_shipment_two::text)
+     AND wr.context->>'organization_id' = v_org::text
+     AND wr.context->>'client_id' = v_client::text
+     AND wr.context->>'sender_id' = v_sender::text
+     AND wr.context->>'requested_by' = v_user::text
+  HAVING COUNT(*) = 2
+     AND COUNT(DISTINCT wr.id) = 2
+     AND COUNT(DISTINCT wr.context->>'shipment_id') = 2;
+
+  IF cardinality(v_workflow_run_ids) IS DISTINCT FROM 2
+     OR jsonb_array_length(COALESCE(v_batch_result->'items', '[]'::jsonb)) IS DISTINCT FROM 2 THEN
+    RAISE EXCEPTION 'UC224 batch result does not bind two distinct owned canonical workflow runs';
+  END IF;
+
+  FOREACH v_workflow_run_id IN ARRAY v_workflow_run_ids LOOP
+    FOR v_attempt IN 1..50 LOOP
+      SELECT workflow_status INTO v_run_status FROM public.workflow_runs WHERE id = v_workflow_run_id;
+      EXIT WHEN v_run_status IN ('completed', 'failed', 'cancelled', 'blocked', 'waiting');
+      PERFORM public.progress_workflow_run(v_workflow_run_id);
+    END LOOP;
+  END LOOP;
 
   RETURN NEXT is(
     (SELECT status FROM public.shipments WHERE id = v_shipment_one),
@@ -182,6 +235,7 @@ BEGIN
     'cancelled',
     'second selected shipment is soft-cancelled'
   );
+
   RETURN NEXT is(
     (
       SELECT COUNT(*)::text

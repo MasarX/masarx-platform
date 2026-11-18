@@ -38,8 +38,9 @@ function resolveEnvironmentName(options = {}) {
 }
 
 function normalizeRequiredAccount(entry = {}) {
-  const rawDeliveryMode = String(entry.delivery_mode || 'invite').trim().toLowerCase();
-  const deliveryMode = rawDeliveryMode === 'breakglass' ? 'breakglass' : 'invite';
+  const deliveryMode = String(entry.delivery_mode || '').trim().toLowerCase() === 'breakglass'
+    ? 'breakglass'
+    : 'invite';
   return {
     key: String(entry.key || '').trim(),
     email: String(entry.email || '').trim().toLowerCase(),
@@ -49,10 +50,8 @@ function normalizeRequiredAccount(entry = {}) {
     delivery_mode: deliveryMode,
     enabled: entry.enabled !== false,
     require_wildcard_capability: parseEnabledFlag(entry.require_wildcard_capability, false),
-    require_password_credential: parseEnabledFlag(
-      entry.require_password_credential,
-      deliveryMode === 'breakglass',
-    ),
+    require_password_credential: deliveryMode === 'breakglass'
+      || parseEnabledFlag(entry.require_password_credential, false),
   };
 }
 
@@ -94,80 +93,55 @@ async function evaluateWildcardCapability(client, policy, userRow) {
   return firstRow(rows);
 }
 
-function isPlatformSuperAdminAccount(account = {}) {
-  return Boolean(
-    String(account.user_type || '').trim().toLowerCase() === 'super_admin' &&
-    String(account.access_scope_type || '').trim().toLowerCase() === 'platform' &&
-    String(account.email || '').trim()
-  );
-}
-
-async function fetchActivePlatformSuperAdmins(client) {
-  const { rows } = await client.query(
-    `
-      SELECT
-        u.id::text AS id,
-        lower(u.email) AS email,
-        lower(u.status) AS status
-      FROM public.users AS u
-      WHERE lower(u.user_type) = 'super_admin'
-        AND lower(u.access_scope_type) = 'platform'
-        AND lower(u.status) = 'active'
-      ORDER BY lower(u.email), u.created_at ASC
-    `,
-  );
-  return Array.isArray(rows) ? rows : [];
-}
-
-async function fetchAuthUsersByEmail(client, email) {
-  const { rows } = await client.query(
-    `
-      SELECT
-        au.id::text AS id,
-        lower(au.email) AS email,
-        (au.encrypted_password IS NOT NULL AND length(au.encrypted_password) > 0) AS has_password_credential,
-        (au.email_confirmed_at IS NOT NULL) AS email_confirmed
-      FROM auth.users AS au
-      WHERE lower(au.email) = $1
-      ORDER BY au.created_at ASC
-      LIMIT 2
-    `,
-    [String(email || '').trim().toLowerCase()],
-  );
-  return Array.isArray(rows) ? rows : [];
+function isPlatformSuperAdminAccount(account) {
+  return account.user_type === 'super_admin' && account.access_scope_type === 'platform';
 }
 
 async function evaluatePlatformSuperAdminInvariant(client, requiredAccounts, issues) {
-  const requiredPlatformSuperAdmins = requiredAccounts.filter(isPlatformSuperAdminAccount);
-  const activePlatformSuperAdmins = await fetchActivePlatformSuperAdmins(client);
-  const requiredEmails = requiredPlatformSuperAdmins.map((entry) => entry.email).sort();
-  const activeEmails = activePlatformSuperAdmins.map((entry) => entry.email).sort();
+  const requiredAdmins = requiredAccounts.filter(isPlatformSuperAdminAccount);
+  const { rows } = await client.query(`
+    SELECT lower(u.email) AS email
+    FROM public.users AS u
+    WHERE lower(u.user_type) = 'super_admin'
+      AND lower(u.access_scope_type) = 'platform'
+      AND lower(u.status) = 'active'
+  `);
+  if (requiredAdmins.length !== 1) {
+    issues.push(`operator bootstrap config must require exactly one platform super_admin (found ${requiredAdmins.length})`);
+  }
+  if (rows.length !== 1) {
+    issues.push(`runtime must contain exactly one active platform super_admin user (found ${rows.length})`);
+  } else if (requiredAdmins.length === 1 && rows[0].email !== requiredAdmins[0].email) {
+    issues.push('runtime active platform super_admin does not match the required bootstrap account');
+  }
+  return { required_count: requiredAdmins.length, active_count: rows.length };
+}
 
-  if (requiredPlatformSuperAdmins.length !== 1) {
-    issues.push(
-      `operator bootstrap config must require exactly one platform super_admin (found ${requiredPlatformSuperAdmins.length})`,
-    );
+async function evaluateAuthIdentity(client, required, userRow, issues) {
+  const { rows } = await client.query(`
+    SELECT au.id::text AS id,
+      (au.encrypted_password IS NOT NULL AND length(au.encrypted_password) > 0) AS has_password_credential
+    FROM auth.users AS au
+    WHERE lower(au.email) = $1
+    LIMIT 2
+  `, [required.email]);
+  const authUser = rows.length === 1 ? rows[0] : null;
+  if (!authUser) {
+    issues.push(`platform super_admin "${required.key}" must have exactly one matching auth user (found ${rows.length})`);
+  } else {
+    if (authUser.id !== userRow.id) {
+      issues.push(`platform super_admin "${required.key}" auth user identity does not match public.users`);
+    }
+    if ((required.delivery_mode === 'breakglass' || parseEnabledFlag(required.require_password_credential))
+      && !authUser.has_password_credential) {
+      issues.push(`platform super_admin "${required.key}" is missing the required password credential in auth.users`);
+    }
   }
-  if (activePlatformSuperAdmins.length !== 1) {
-    issues.push(
-      `runtime must contain exactly one active platform super_admin user (found ${activePlatformSuperAdmins.length}: ${activeEmails.join(', ') || 'none'})`,
-    );
-  }
-  if (
-    requiredPlatformSuperAdmins.length === 1 &&
-    activePlatformSuperAdmins.length === 1 &&
-    activePlatformSuperAdmins[0].email !== requiredPlatformSuperAdmins[0].email
-  ) {
-    issues.push(
-      `runtime active platform super_admin "${activePlatformSuperAdmins[0].email}" does not match required bootstrap account "${requiredPlatformSuperAdmins[0].email}"`,
-    );
-  }
-
   return {
-    required_count: requiredPlatformSuperAdmins.length,
-    required_emails: requiredEmails,
-    active_count: activePlatformSuperAdmins.length,
-    active_emails: activeEmails,
+    auth_user_count: rows.length,
+    auth_user_present: Boolean(authUser),
+    auth_identity_matches: Boolean(authUser && authUser.id === userRow.id),
+    password_credential_present: Boolean(authUser && authUser.has_password_credential),
   };
 }
 
@@ -175,23 +149,16 @@ async function evaluateOperatorAccounts(client, options = {}) {
   const requiredAccounts = Array.isArray(options.requiredAccounts) ? options.requiredAccounts : [];
   const issues = [];
   const findings = [];
-  let platformSuperAdminInvariant = {
-    required_count: 0,
-    required_emails: [],
-    active_count: 0,
-    active_emails: [],
-  };
   if (!requiredAccounts.length) {
     return {
       required: 0,
       findings,
       issues,
-      platform_super_admin_invariant: platformSuperAdminInvariant,
       ok: true,
     };
   }
   const policy = await fetchAccessPolicy(client);
-  platformSuperAdminInvariant = await evaluatePlatformSuperAdminInvariant(client, requiredAccounts, issues);
+  const platformSuperAdminInvariant = await evaluatePlatformSuperAdminInvariant(client, requiredAccounts, issues);
 
   for (const required of requiredAccounts) {
     const { rows } = await client.query(
@@ -225,25 +192,9 @@ async function evaluateOperatorAccounts(client, options = {}) {
       access_scope_type: row.access_scope_type,
       access_scope_id: row.access_scope_id || null,
     };
-
     if (isPlatformSuperAdminAccount(required)) {
-      const authUsers = await fetchAuthUsersByEmail(client, required.email);
-      finding.auth_user_count = authUsers.length;
-      finding.auth_user_present = authUsers.length === 1;
-      finding.password_credential_present = authUsers.length === 1
-        ? Boolean(authUsers[0].has_password_credential)
-        : false;
-      if (authUsers.length !== 1) {
-        issues.push(
-          `platform super_admin "${required.key}" must have exactly one matching auth user (found ${authUsers.length})`,
-        );
-      } else if (required.require_password_credential && !authUsers[0].has_password_credential) {
-        issues.push(
-          `platform super_admin "${required.key}" is missing the required password credential in auth.users`,
-        );
-      }
+      Object.assign(finding, await evaluateAuthIdentity(client, required, row, issues));
     }
-
     findings.push(finding);
 
     if (required.status && row.status !== required.status) {
@@ -302,10 +253,6 @@ async function evaluateOperatorAccounts(client, options = {}) {
 
 module.exports = {
   evaluateOperatorAccounts,
-  evaluatePlatformSuperAdminInvariant,
-  fetchActivePlatformSuperAdmins,
-  fetchAuthUsersByEmail,
-  isPlatformSuperAdminAccount,
   normalizeEnvironmentName,
   normalizeRequiredAccount,
   parseEnabledFlag,

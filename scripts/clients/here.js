@@ -146,6 +146,7 @@ const fetchConfigFromDatabase = async () => {
           SELECT id AS auth_config_id
           FROM provider_auth_configs
           WHERE provider_id = (SELECT id FROM provider_row)
+            AND NOT marketplace_explicit_only
           ORDER BY created_at DESC
           LIMIT 1
         )

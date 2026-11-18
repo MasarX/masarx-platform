@@ -1,10 +1,11 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { verifyMarketingTurnstile } from "./_shared/turnstile-local-test.mjs";
+import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import {
+  approveTenantSignupRequest,
   asString,
   loadTenantSignupPolicy,
-  parseOriginAllowlist,
   policyBool,
   readClientIp,
   sha256Hex,
@@ -20,12 +21,13 @@ type IntakePayload = {
   phone?: unknown;
   notes?: unknown;
   locale?: unknown;
+  page_url?: unknown;
   referrer?: unknown;
   marketing?: unknown;
   turnstile_token?: unknown;
 };
 
-const SUPABASE_URL = readEnv("SUPABASE_URL", ["EDGE_SUPABASE_URL", "API_URL"]);
+const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
 const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
 const SUPABASE_SERVICE_KEY = readEnv("EDGE_SUPABASE_SERVICE_ROLE_KEY", [
   "SUPABASE_SERVICE_ROLE_KEY",
@@ -47,42 +49,10 @@ const TENANT_SIGNUP_TURNSTILE_SECRET_KEY = readEnv("TENANT_SIGNUP_TURNSTILE_SECR
 const TENANT_SIGNUP_IP_HASH_SALT = readEnv("TENANT_SIGNUP_IP_HASH_SALT", [
   "MARKETING_IP_HASH_SALT",
 ]);
-const TENANT_SIGNUP_RPC_SCHEMA = "api";
+const TENANT_SIGNUP_RPC_SCHEMA =
+  readEnv("TENANT_SIGNUP_RPC_SCHEMA", ["EDGE_RPC_SCHEMA", "API_RPC_SCHEMA"]) || "api";
 const LOCAL_TENANT_SIGNUP_TURNSTILE_SECRET_KEY = "EXAMPLE_PASSWORD";
-const LOCAL_TENANT_SIGNUP_TURNSTILE_DUMMY_TOKEN = "EXAMPLE_PASSWORD";
-const LEGACY_LOCAL_TENANT_SIGNUP_TURNSTILE_SECRET_KEY = "local-dev-turnstile-secret";
-const LOCAL_TURNSTILE_TEST_HOSTNAME = "example.com";
 const LOCAL_TENANT_SIGNUP_IP_HASH_SALT = "local-tenant-signup";
-const LOCAL_TENANT_SIGNUP_ORIGINS = new Set([
-  // objectives:allow LOCALHOST Justification: local browser QA for tenant signup requires explicit loopback origins when the hosted allowlist is unavailable.
-  "http://127.0.0.1:3333", "http://localhost:3333", "http://127.0.0.1:3000", "http://localhost:3000",
-]);
-
-const isLocalHostname = (value: string): boolean => {
-  const normalized = String(value || "").trim().toLowerCase();
-  // objectives:allow LOCALHOST Justification: local-runtime detection must explicitly recognize loopback hosts for workspace QA fallback handling.
-  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1" || normalized === "[::1]" || normalized === "rvzwwjlztwwisjthghnipgjr.example.invalid";
-};
-
-const isLocalRequest = (req: Request): boolean => {
-  const hostHeader = String(req.headers.get("x-forwarded-host") || req.headers.get("host") || "")
-    .trim()
-    .split(":")[0]
-    .toLowerCase();
-  if (isLocalHostname(hostHeader)) return true;
-  try {
-    return isLocalHostname(new URL(req.url).hostname);
-  } catch {
-    return false;
-  }
-};
-
-const CORS_ALLOWLIST = parseOriginAllowlist(TENANT_SIGNUP_CORS_ALLOW_ORIGINS);
-const ALLOWED_ORIGINS = CORS_ALLOWLIST.origins;
-const CORS_ALLOWLIST_CONFIGURED =
-  ALLOWED_ORIGINS.size > 0 &&
-  CORS_ALLOWLIST.invalid.length === 0;
-
 const json = (status: number, body: JsonRecord, corsHeaders: HeadersInit) =>
   new Response(JSON.stringify(body), {
     status,
@@ -110,146 +80,12 @@ const mapRpcErrorToStatus = (code: string): number => {
   }
 };
 
-type CorsResult =
-  | { ok: true; origin: string; headers: HeadersInit; localContext: boolean }
-  | {
-      ok: false;
-      origin: string;
-      status: number;
-      body: JsonRecord;
-      headers: HeadersInit;
-      localContext: boolean;
-    };
-
-const normalizeOrigin = (value: string): string => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-    return parsed.origin;
-  } catch {
-    return "";
-  }
-};
-
-const isLoopbackOrigin = (value: string): boolean => {
-  const origin = normalizeOrigin(value);
-  if (!origin) return false;
-  try {
-    const parsed = new URL(origin);
-    return isLocalHostname(parsed.hostname);
-  } catch {
-    return false;
-  }
-};
-
-const buildCorsHeaders = (req: Request): CorsResult => {
-  const originRaw = req.headers.get("origin")?.trim() ?? "";
-  const origin = normalizeOrigin(originRaw);
-  const requestLocalContext = isLocalRequest(req);
-  const localContext = requestLocalContext || Boolean(origin && LOCAL_TENANT_SIGNUP_ORIGINS.has(origin));
-  const dynamicLocalOriginAllowed = requestLocalContext && origin ? isLoopbackOrigin(origin) : false;
-  const effectiveOrigins = CORS_ALLOWLIST_CONFIGURED
-    ? ALLOWED_ORIGINS
-    : (localContext ? LOCAL_TENANT_SIGNUP_ORIGINS : new Set<string>());
-  const effectiveConfigured = effectiveOrigins.size > 0 || dynamicLocalOriginAllowed;
-
-  const baseHeaders = {
-    "Access-Control-Allow-Headers": "accept, content-type, authorization, apikey, x-client-info",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Max-Age": "600",
-    Vary: "Origin",
-  };
-
-  if (!effectiveConfigured) {
-    return {
-      ok: false,
-      origin: "",
-      status: 500,
-      body: {
-        ok: false,
-        error: {
-          code: "server_misconfigured",
-          message: CORS_ALLOWLIST.invalid.length ? "cors_allowlist_invalid" : "cors_allowlist_missing",
-        },
-      },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  if (!origin) {
-    return {
-      ok: false,
-      origin: "",
-      status: 403,
-      body: { ok: false, error: { code: "origin_required" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  if (!effectiveOrigins.has(origin) && !dynamicLocalOriginAllowed) {
-    return {
-      ok: false,
-      origin,
-      status: 403,
-      body: { ok: false, error: { code: "origin_not_allowed" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  return {
-    ok: true,
-    origin,
-    headers: {
-      ...baseHeaders,
-      "Access-Control-Allow-Origin": origin,
-    },
-    localContext,
-  };
-};
-
-const verifyTurnstile = async (
-  token: string,
-  secret: string,
-  clientIp?: string,
-): Promise<{ success: boolean; hostname: string; errorCodes: unknown }> => {
-  if (!secret) {
-    return { success: false, hostname: "", errorCodes: ["missing_turnstile_secret"] };
-  }
-  if (secret === LEGACY_LOCAL_TENANT_SIGNUP_TURNSTILE_SECRET_KEY && token === LOCAL_TENANT_SIGNUP_TURNSTILE_DUMMY_TOKEN) {
-    return { success: true, hostname: "", errorCodes: null };
-  }
-
-  const body = new URLSearchParams();
-  body.set("secret", secret);
-  body.set("response", token);
-  if (clientIp) body.set("remoteip", clientIp);
-
-  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-
-  const data = await response.json().catch(() => null);
-  const success = Boolean(data && typeof data === "object" && (data as any).success === true);
-  const hostname = data && typeof data === "object" ? String((data as any).hostname || "").trim() : "";
-  const errorCodes = data && typeof data === "object" ? (data as any)["error-codes"] ?? null : null;
-  return { success, hostname, errorCodes };
-};
+const buildCorsHeaders = (req: Request) => resolveBrowserCorsPolicy(req, {
+  hostedAllowedOrigins: TENANT_SIGNUP_CORS_ALLOW_ORIGINS,
+  localAllowedOrigins: readEnv("PUBLIC_EDGE_LOCAL_CORS_ALLOW_ORIGINS"),
+  localQaEnabled: readEnv("PUBLIC_EDGE_LOCAL_QA_ENABLED") === "1",
+  allowedMethods: "POST, OPTIONS",
+});
 
 const createServiceClient = () => {
   const serviceKey = asString(EDGE_SUPABASE_SECRET_KEY) || asString(SUPABASE_SERVICE_KEY);
@@ -276,7 +112,7 @@ const createServiceClient = () => {
   });
 };
 
-serve(async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const cors = buildCorsHeaders(req);
 
   if (req.method === "OPTIONS") {
@@ -325,9 +161,26 @@ serve(async (req: Request): Promise<Response> => {
     return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
   }
 
+  // Local QA observation only: never log request data or alter operation results.
+  const correlation = req.headers.get("x-masarx-intake-diagnostic") || "";
+  const observeStages = cors.localContext && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(correlation);
+  const observe = async <T>(stage: "policy" | "turnstile" | "persistence" | "auto_approve", operation: () => Promise<T>): Promise<T> => {
+    const started = performance.now();
+    const emit = (status: "started" | "resolved" | "rejected") => {
+      if (!observeStages) return;
+      try {
+        console.info(JSON.stringify({ event: "tenant_intake_stage", correlation, stage, status,
+          duration_ms: Math.max(0, Math.round(performance.now() - started)) }));
+      } catch (_) { /* Observation must not change intake behavior. */ }
+    };
+    emit("started");
+    try { const result = await operation(); emit("resolved"); return result; }
+    catch (error) { emit("rejected"); throw error; }
+  };
+
   let policy: JsonRecord;
   try {
-    policy = await loadTenantSignupPolicy(serviceClient);
+    policy = await observe("policy", () => loadTenantSignupPolicy(serviceClient));
   } catch (error) {
     const message = error instanceof Error ? error.message : "policy_load_failed";
     return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
@@ -361,9 +214,7 @@ serve(async (req: Request): Promise<Response> => {
 
   if (turnstileToken) {
     try {
-      const turnstileResult = cors.localContext && turnstileToken === LOCAL_TENANT_SIGNUP_TURNSTILE_DUMMY_TOKEN
-        ? { success: true, hostname: "", errorCodes: [] }
-        : await verifyTurnstile(turnstileToken, effectiveTurnstileSecret, clientIp);
+      const turnstileResult = await observe("turnstile", () => verifyMarketingTurnstile({ token: turnstileToken, secret: effectiveTurnstileSecret, localContext: cors.localContext, requestHostname: new URL(req.url).hostname, clientIp }));
       turnstileVerified = turnstileResult.success;
       turnstileErrorCodes = turnstileResult.errorCodes;
 
@@ -376,10 +227,7 @@ serve(async (req: Request): Promise<Response> => {
           }
         })();
         const actualHost = turnstileResult.hostname.toLowerCase();
-        const localTestHostname = cors.localContext &&
-          effectiveTurnstileSecret === LOCAL_TENANT_SIGNUP_TURNSTILE_SECRET_KEY &&
-          actualHost === LOCAL_TURNSTILE_TEST_HOSTNAME;
-        if (expectedHost && actualHost && expectedHost !== actualHost && !localTestHostname) {
+        if (expectedHost && actualHost && expectedHost !== actualHost) {
           return json(
             400,
             {
@@ -409,8 +257,7 @@ serve(async (req: Request): Promise<Response> => {
     );
   }
 
-  const requestUrl = new URL(req.url);
-  const pageUrl = asString(requestUrl.searchParams.get("page_url") || "") || asString(req.headers.get("origin") || "");
+  const pageUrl = asString(payload?.page_url) || cors.origin;
 
   const rpcPayload = {
     p_email: email,
@@ -429,10 +276,10 @@ serve(async (req: Request): Promise<Response> => {
     p_turnstile_verified: turnstileVerified,
   };
 
-  const { data: rpcData, error: rpcError } = await serviceClient.rpc(
+  const { data: rpcData, error: rpcError } = await observe("persistence", async () => await serviceClient.rpc(
     "tenant_signup_request_create_v1",
     rpcPayload,
-  );
+  ));
 
   if (rpcError) {
     return json(
@@ -463,21 +310,38 @@ serve(async (req: Request): Promise<Response> => {
   }
 
   const requestId = asString(rpcBody.id);
-  const deduped = Boolean(rpcBody.deduped);
-  let queueStatus = asString(rpcBody.status) || "pending";
+  const autoApprove = Boolean(rpcBody.auto_approve);
+
+  let queueStatus = asString(rpcBody.status) || "under_review";
+  let autoApproveResult: JsonRecord | null = null;
+
+  if (autoApprove && requestId) {
+    autoApproveResult = await observe("auto_approve", () => approveTenantSignupRequest({
+      serviceClient,
+      requestId,
+      reviewerUserId: null,
+      decisionReason: "auto_approved_by_policy",
+      decisionMetadata: {
+        source: "tenant-signup-intake:auto-approve",
+      },
+      inviteRedirectOverride: null,
+    }));
+
+    if (autoApproveResult.ok === true) {
+      const maybeStatus = asString(autoApproveResult.status);
+      if (maybeStatus) queueStatus = maybeStatus;
+    }
+  }
 
   return json(
     200,
     {
       ok: true,
-      status: "under_review",
-      deduped,
+      status: queueStatus,
       request_id: requestId || null,
-      tenant_signup_request_id: requestId || null,
       queue_status: queueStatus,
-      approval_required: true,
-      auto_approve: false,
-      auto_approve_applied: false,
+      auto_approve: autoApprove,
+      auto_approve_applied: autoApprove && autoApproveResult?.ok === true,
       turnstile_error_codes: turnstileErrorCodes,
     },
     cors.headers,

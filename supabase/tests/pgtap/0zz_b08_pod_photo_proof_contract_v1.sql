@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(22);
+SELECT plan(26);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_b08_pod_photo_proof_contract_v1()
 RETURNS SETOF TEXT
@@ -57,6 +57,8 @@ DECLARE
   v_partial_box_ids UUID[];
 
   v_iter INT;
+  v_readback JSONB;
+  v_expected_boxes JSONB;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -454,6 +456,7 @@ BEGIN
         'recipient_class', 'locker',
         'completion_notes', 'Two of three boxes delivered, remainder left outstanding',
         'delivered_box_ids', jsonb_build_array(v_partial_box_ids[1], v_partial_box_ids[2]),
+        'artifact_ids', jsonb_build_array(v_photo_artifact_id),
         'source', 'pgtap',
         'run', gen_random_uuid()::text
       ),
@@ -499,6 +502,18 @@ BEGIN
    LIMIT 1;
 
   RETURN NEXT is(v_run_status_partial, 'completed', 'partial-delivery workflow run completes');
+  SELECT jsonb_agg(box_number ORDER BY box_number) INTO v_expected_boxes
+  FROM public.shipment_boxes WHERE id=ANY(v_partial_box_ids[1:2]);
+  PERFORM set_config('request.jwt.claim.sub',v_driver::text,true);
+  PERFORM set_config('request.jwt.claim.role','authenticated',true);
+  PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',v_driver)::text,true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_readback:=api.ui_get_task_completion_readback_v1(v_task_partial,v_task_done_event_partial);
+  RETURN NEXT is(v_readback#>>'{completion,completion_kind}','partial','API readback preserves partial completion');
+  RETURN NEXT is(v_readback#>'{completion,delivered_box_numbers}',v_expected_boxes,'API readback preserves exact delivered box set');
+  RETURN NEXT ok((v_readback#>'{proof,artifact_ids}') ? v_photo_artifact_id::text,'partial readback includes actual registered photo');
+  RETURN NEXT ok(api.ui_get_task_completion_readback_v1(v_task_partial,v_task_done_event_pass) IS NULL,'another task accepted event cannot satisfy partial readback');
+  EXECUTE 'SET LOCAL ROLE postgres';
   RETURN NEXT is(
     (SELECT status FROM public.shipments WHERE id = v_shipment_partial),
     'out_for_delivery',

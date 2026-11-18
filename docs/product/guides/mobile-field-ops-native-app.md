@@ -68,10 +68,17 @@ Native tool routes (mobile `href`)
 - Delivery completion uses the same composer and canonical `tasks.complete` command, but selected `delivery_handover_mode` rows may require a saved recipient signature. The mobile shell must honor the lookup metadata and fail closed before queueing when signature proof is required.
 - Delivery POD capture must also persist canonical proof anchors: `pod.captured_at` plus a normalized proof geostamp (`latitude`, `longitude`, optional `accuracy_m`) so shipment actions, tracking, and support views all resolve from the same backend truth.
 
+## Driver reassignment requests
+- The row-driven route-stop command uses the existing composer and scoped candidate RPC, retaining active same-organization driver identity, capacity remaining, ETA, and distance. Missing lookup data is not an unrestricted driver chooser.
+- The durable Edge command records the enqueue-time actor as an expectation. The user-authenticated preparation RPC compares it to the verified caller and stores immutable stop/source-assignment/target/reason intent with a stable client idempotency key.
+- Only the service-only submit RPC builds the workflow payload. Success requires the configured binding’s task-producing step to complete and the exact Dispatch review task to exist; replay returns the same linked identities.
+- A request does not move a stop. An operator uses canonical UC078 reassignment. Its exact event may close only matching linked tasks through a private owner-privilege trigger and canonical task transition, without changing JWT claims.
+
 ## Auth UX (mobile)
 - Sign-in is controlled by `NEXT_PUBLIC_AUTH_METHODS` (`password` and/or `magic_link`).
 - `magic_link` uses an OTP code verification flow (`verifyOtp`) to avoid deep-link coupling.
 - Sign-out wipes local SQLite outbox/cache and secure storage.
+- Route-stop incident reporting keeps every actor/scope-bound queue receipt in one versioned KV list before outbox enqueue. Foreground and background sync retain only matched incident task/event IDs; the selected task shows each verified incident type, statement, review task, evidence count, route stop, and current source-task status only after a fresh online `api.ui_get_route_stop_incident_readback_v1` read. Offline, loading, or failed reads show pending feedback and a manual refresh path; a queued or synced action alone is not incident proof.
 
 ## Device setup (required for ingest)
 - On first run (when online), register the device via `register_user_device_v1` and persist `device_id` in secure storage.
@@ -89,12 +96,13 @@ Native tool routes (mobile `href`)
 
 ## Offline-first Outbox (required)
 - All write operations enqueue an Outbox record first (durable local storage).
+- Departure requests use the same durable outbox and foreground/background drainer. An offline request stays pending until connection and server approval; it never authorizes the driver to depart. Replay must retain the original actor/scope and route/stop/task/session context. A different login or scope cannot send the previous driver's request. The server rechecks route ownership, lineage and current load reconciliation, and serializes duplicate confirmations on the route row. Show confirmed only after matching canonical `route_departure.confirmed_at` readback; a removed queue row, sync completion or failed readback is not confirmation.
 - Outbox entries must include:
-  - `rpc_name`, `payload`, `idempotency_key`, `created_at`, `status`, `attempt_count`, `last_error`.
+  - `id`, `rpc`, `args`, `transport`, `created_at`, `updated_at`, `status`, `attempt_count`, `next_attempt_at`, `last_error`. The optional transport is `rpc` (including legacy SQLite rows) or `edge`; both use the same queue and recovery path.
 - Sync rules:
   - Idempotent server RPCs are mandatory (dedupe on `(org,idempotency_key)` or equivalent).
   - The app must surface "Queued / Syncing / Failed" states; failures become actionable.
-  - Never "fake success" when offline; show pending state until server confirmation or explicit policy allows optimistic UI.
+  - Never "fake success" when offline; show pending state until server confirmation or explicit policy allows optimistic UI. An item is synced only when its ID appears in that sync invocation’s positive completion receipt after execution and queue removal; an absent or cleared row is not proof.
   - Route/settlement interaction telemetry (`mobile_route_navigate`, `mobile_route_contact`, `mobile_settlement_counted`) is queued through `ui_log_events_v1` for auditability and diagnostics.
 
 ## Implementation (write-once)

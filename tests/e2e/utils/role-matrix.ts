@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { isResourceReadScopeAllowed } from "../../../packages/ui/src/capabilities";
 import { normalizeCommandRegistry } from "../../../packages/ui/src/command-registry";
 import {
   normalizeAppHref,
@@ -31,6 +32,8 @@ export type NavigationResponse = {
 export type ReadRegistryResource = {
   key?: string | null;
   id_column?: string | null;
+  read_scope_types?: string[] | null;
+  scope_columns?: Record<string, string | null> | null;
   filters?: Array<{
     key?: string | null;
     column?: string | null;
@@ -66,6 +69,9 @@ type UiMe = {
   access_scope?: {
     scope_type?: string | null;
     scope_id?: string | null;
+  } | null;
+  org?: {
+    id?: string | null;
   } | null;
   capabilities?: string[] | null;
 };
@@ -117,6 +123,8 @@ export async function ensureNavigationVisible(page: Page) {
   const nav = page.locator('[data-testid="navigation-list"]').first();
   await expect(nav).toBeVisible();
   await expect(page.locator('[data-testid="navigation-pending"]')).toHaveCount(0);
+  await expect(page.locator('[data-navigation-registry-state]')).toHaveCount(1);
+  await expect(page.locator('[data-navigation-registry-state]')).toHaveAttribute("data-navigation-registry-state", "ready");
   return nav;
 }
 
@@ -124,38 +132,61 @@ export async function assertNavigationMatches(params: {
   page: Page;
   basePath: string;
   sections: NavigationSection[];
+  readRegistry?: ReadRegistry | null;
   capabilities?: string[] | null;
+  scopeType?: string | null;
+  scopeId?: string | null;
+  organizationId?: string | null;
 }) {
-  const { page, basePath, sections, capabilities } = params;
+  const {
+    page,
+    basePath,
+    sections,
+    readRegistry,
+    capabilities,
+    scopeType,
+    scopeId,
+    organizationId,
+  } = params;
   const capabilitySet = resolveCapabilitySet(capabilities);
   const nav = await ensureNavigationVisible(page);
 
-  const flattened = flattenNavigationSections(sections);
-  for (const { item } of flattened) {
-    const label = item.label?.trim();
-    if (!label) continue;
-    const href = item.href?.trim() ?? "";
-    const requiredCapability = item.capability?.trim() ?? "";
-    const missingCapability =
-      requiredCapability && !hasCapability(capabilitySet, requiredCapability);
-    const shouldDisable =
-      !href || Boolean(item.disabled_reason) || missingCapability;
+  for (const section of sections) {
+    const sectionNav = nav.getByTestId(`navigation-section-items-${section.id}`);
+    for (const { item } of flattenNavigationSections([section])) {
+      const label = item.label?.trim();
+      if (!label) continue;
+      const href = item.href?.trim() ?? "";
+      const requiredCapability = item.capability?.trim() ?? "";
+      const resourceKey = item.resource?.trim() ?? "";
+      const resource = resourceKey
+        ? readRegistry?.resources?.find((entry) => entry?.key === resourceKey)
+        : null;
+      const scopeBlocked = Boolean(resourceKey) && !isResourceReadScopeAllowed(
+        resource as Parameters<typeof isResourceReadScopeAllowed>[0],
+        scopeType,
+        scopeId,
+        organizationId,
+      );
+      const missingCapability =
+        requiredCapability && !hasCapability(capabilitySet, requiredCapability);
+      const shouldDisable =
+        !href || Boolean(item.disabled_reason) || missingCapability || scopeBlocked;
 
-    if (shouldDisable) {
-      const disabledItem = nav
-        .locator('[aria-disabled="true"]')
-        .filter({ hasText: label });
-      await expect(disabledItem.first()).toBeVisible();
-      await expect(disabledItem.first()).toHaveAttribute("title", /.+/);
-      continue;
-    }
+      const navigationItem = sectionNav.getByTestId(`navigation-item-${item.id}`);
+      await expect(navigationItem).toBeVisible();
+      if (shouldDisable) {
+        await expect(navigationItem).toHaveAttribute("aria-disabled", "true");
+        await expect(navigationItem).toHaveAttribute("title", /\S/);
+        continue;
+      }
 
-    const expectedHref = normalizeNavHref(href, basePath);
-    let link = nav.locator(`a[href="${expectedHref}"]`);
-    if ((await link.count()) === 0) {
-      link = nav.getByRole("link", { name: label });
+      const expectedHref = normalizeNavHref(href, basePath);
+      await expect(navigationItem).not.toHaveAttribute("aria-disabled", "true");
+      const link = navigationItem.getByRole("link");
+      await expect(link).toBeVisible();
+      await expect(link).toHaveAttribute("href", expectedHref);
     }
-    await expect(link.first()).toBeVisible();
   }
 }
 

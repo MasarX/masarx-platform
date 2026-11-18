@@ -1,19 +1,53 @@
 'use strict';
+require('./promotion-selfcheck.cjs');
 let checks = 0;
 const rawAssert = require('node:assert/strict');
 const assert = new Proxy(rawAssert, { get(target, key) { const value = target[key]; return typeof value === 'function' ? (...args) => { checks++; return value(...args); } : value; } });
 const fs = require('node:fs'); const path = require('node:path'); const crypto = require('node:crypto');
-const { evaluate, identity, parseList } = require('./jest.cjs');
+const { evaluate, identity, parseList, resultDetails, relativeFile } = require('./jest.cjs');
 const { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch } = require('./backend.cjs');
 const { handleRequest, handleConnect } = require('./deny-egress.cjs');
 const { exceptions, assess, objectsAt, outOfOrder, orderFloor } = require('./migrations.cjs');
 const { targetBase, targetFile } = require('./target-policy.cjs');
-const { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, dependencyNotices, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, enforceWorkflowInventory } = require('./policy.cjs');
+const { pathClass, protectedPath, protectedFiles, guardFiles, packageManagerChanges, inputNotices, dependencyNotices, marker, classify, authorizedPr, liveMerge, enforceMarker, enforceScope, rejectChanges, enforceWorkflowInventory, policySource } = require('./policy.cjs');
 const { guardPlan } = require('./base-guard.cjs');
 const { workflowIgnore, installCommand, checkInstallPolicy } = require('./install-policy.cjs');
 const { generate } = require('./generate-migration-exceptions.cjs');
-const { rewrite } = require('./docker-images.cjs');
+const { rewrite, policyDecision } = require('./docker-images.cjs');
+const { sanitize, outputTail, failureDetails, environmentSecrets } = require('./diagnostics.cjs');
 const { detect } = require('./tasks.cjs');
+const sensitive = ['synthetic credential with spaces', 'b'.repeat(48), 'MixedOpaqueValueWithDigits1234567890'];
+const jwt = ['eyJ' + 'h'.repeat(20), 'p'.repeat(20), 's'.repeat(20)].join('.');
+const key = 'sb_' + 'secret_' + 'synthetic';
+const rawDiagnostic = `stack health failed password=synthetic-password token: 'synthetic token value' JWT=${jwt} API_KEY=${key} postgresql://user:synthetic-db-pass@127.0.0.1/db https://user:synthetic-http-pass@example.invalid/ ${sensitive.join(' ')} https://example.invalid/?signature=synthetic-signature`;
+const cleanDiagnostic = sanitize(rawDiagnostic, [sensitive[0]]);
+for (const secret of [...sensitive, jwt, key, 'synthetic-password', 'synthetic token value', 'synthetic-db-pass', 'synthetic-http-pass', 'synthetic-signature']) assert.equal(cleanDiagnostic.includes(secret), false);
+assert.equal(cleanDiagnostic.includes('stack health failed'), true);
+const jsonDiagnostic = sanitize('({"API_KEY":"synthetic-json-key"})');
+assert.equal(sanitize(jsonDiagnostic), jsonDiagnostic);
+assert.equal(jsonDiagnostic.endsWith('})'), true);
+const cookieDiagnostic = sanitize('Cookie: sid=synthetic-cookie; session=synthetic-session');
+assert.equal(cookieDiagnostic.includes('synthetic-cookie') || cookieDiagnostic.includes('synthetic-session'), false);
+
+assert.equal(outputTail('safe\n'.repeat(200)).split('\n').length <= 80, true);
+assert.equal(outputTail('x'.repeat(20000)).length, 16384);
+assert.deepEqual(environmentSecrets({ TOKEN: 'synthetic-value', ORDINARY: 'visible' }), ['synthetic-value']);
+const failure = failureDetails({ status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' }, stderr: rawDiagnostic }, [sensitive[0]]);
+assert.equal(failure.timeout, true); assert.equal(failure.signal, 'SIGTERM'); assert.equal(failure.exitCode, null);
+assert.equal(failure.outputTail.includes(jwt), false);
+assert.equal(policyDecision(new Error('CLI image pulls are forbidden; images must already be pulled by digest'), 'POST', '/images/create').operation, 'image-pull');
+assert.equal(policyDecision(new Error('password=synthetic'), 'POST', '/containers/create').reason, 'Malformed Docker policy request');
+assert.equal(policyDecision(null, 'GET', '/images/synthetic/json').decision, 'allowed');
+for (const image of ['public.ecr.aws/synthetic/unreviewed:v1', `public.ecr.aws/synthetic/unreviewed:v1@sha256:${'a'.repeat(64)}`]) {
+  for (const [method, url, body] of [['GET', `/v1.51/images/${encodeURIComponent(image)}/json`, Buffer.alloc(0)],
+    ['POST', '/containers/create', Buffer.from(JSON.stringify({ Image: image }))]]) {
+    assert.throws(() => rewrite(method, url, body, []), error => {
+      assert.deepEqual(policyDecision(error, method, url), { decision: 'denied',
+        operation: method === 'GET' ? 'image-inspect' : 'container-create', reason: 'Image is outside the reviewed digest set', image });
+      return true;
+    });
+  }
+}
 const root = path.resolve(__dirname, '../..'); const now = new Date('2026-11-16T12:00:00Z');
 const base = 'a'.repeat(40); const head = 'b'.repeat(40); const candidate = 'c'.repeat(40);
 const hash = data => crypto.createHash('sha256').update(data).digest('hex');
@@ -28,6 +62,25 @@ for (const expected of [new Set(), new Set([id])]) assert.equal(evaluate({ testR
 assert.equal(evaluate({ ...report('passed'), numRuntimeErrorTestSuites: 1 }, new Set(), 0, root).ok, false);
 assert.equal(evaluate(report('failed'), new Set([id]), null, root).ok, false);
 assert.equal(evaluate({ ...report('passed'), snapshot: { unchecked: 1 } }, new Set(), 0, root).ok, false);
+assert.deepEqual(evaluate(report('passed'), new Set(), 1, root).reasons, ['EXIT_WITHOUT_FAILED_ASSERTIONS']);
+const loadReport = { numRuntimeErrorTestSuites: 1, testResults: [{ name: path.join(root, file), status: 'failed', message: 'Cannot load module; password=synthetic-load-password', assertionResults: [] }] };
+const loadVerdict = evaluate(loadReport, new Set(), 1, root);
+assert.equal(loadVerdict.reasons.includes('RUNTIME_OR_SUITE_LOAD_ERROR'), true);
+const loaded = resultDetails(loadReport, loadVerdict, { status: 1, stderr: 'load failed token=synthetic-load-token' }, root);
+assert.equal(loaded.suites[0].file, file);
+assert.equal(loaded.suites[0].suiteLoadError.includes('Cannot load module'), true);
+assert.equal(JSON.stringify(loaded).includes('synthetic-load-password'), false);
+assert.equal(JSON.stringify(loaded).includes('synthetic-load-token'), false);
+const failedReport = report('failed'); failedReport.testResults[0].assertionResults[0].failureMessages = ['Expected value; API_KEY=synthetic-assertion-key'];
+const failedDetails = resultDetails(failedReport, evaluate(failedReport, new Set(), 1, root), { status: 1 }, root);
+assert.equal(failedDetails.suites[0].tests[0].fullName, 'synthetic case');
+assert.equal(failedDetails.suites[0].tests[0].id, id);
+assert.equal(failedDetails.suites[0].tests[0].failureMessages[0].includes('synthetic-assertion-key'), false);
+const duplicateReport = report('passed'); duplicateReport.testResults.push(duplicateReport.testResults[0]);
+assert.equal(evaluate(duplicateReport, new Set(), 0, root).reasons.includes('DUPLICATE_TEST_IDENTITIES'), true);
+assert.equal(evaluate({ ...report('passed'), snapshot: { unchecked: 1 } }, new Set(), 0, root).reasons.includes('SNAPSHOT_FAILURE_OR_UNCHECKED'), true);
+assert.equal(resultDetails(null, null, { status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' } }, root).process.timeout, true);
+assert.equal(relativeFile(path.resolve(root, '..', 'external.test.js'), root), '[external]/external.test.js');
 assert.deepEqual(parseList(`# generated\nunit\t${id}\nui\t${id}\n`, 'unit'), new Set([id]));
 assert.throws(() => parseList(`unit\t${id}\nunit\t${id}\n`, 'unit'));
 assert.throws(() => parseList('unit\tmalformed\n', 'unit'));
@@ -89,9 +142,13 @@ assert.equal(mainSwitch({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'r
 assert.equal(calls[0][4], '+refs/heads/main:refs/ci-policy/main');
 const pins = JSON.parse(fs.readFileSync(path.join(root, 'config/ci/hosted-supabase-images.json'), 'utf8'));
 assert.equal(completePins(pins), true); assert.equal(completePins(pins.slice(1)), false);
+assert.equal(completePins(pins.slice(0, 4)), false);
+assert.equal(completePins([...pins, pins[4]]), false);
 assert.equal(imagePreflight('', 'pull_request', now, 'refs/pull/1/merge', pins).qualificationOnly, false);
 const created = rewrite('POST', '/v1.51/containers/create', Buffer.from(JSON.stringify({ Image: 'public.ecr.aws/supabase/postgres:other-tag' })), pins);
 assert.equal(JSON.parse(created.body).Image, `public.ecr.aws/${pins[0].image}@${pins[0].digest}`);
+assert.equal(JSON.parse(rewrite('POST', '/containers/create', Buffer.from('{"Image":"public.ecr.aws/supabase/realtime:v2.129.3"}'), pins).body).Image,
+  `public.ecr.aws/${pins[4].image}@${pins[4].digest}`);
 assert.throws(() => rewrite('POST', '/v1.51/images/create?fromImage=anything', Buffer.alloc(0), pins));
 assert.throws(() => rewrite('POST', '/v1.51/containers/create', Buffer.from('{"Image":"unreviewed/image:latest"}'), pins));
 assert.equal(decodeURIComponent(rewrite('GET', '/v1.51/images/public.ecr.aws%2Fsupabase%2Fgotrue%3Av2/json', Buffer.alloc(0), pins).url).includes(pins[1].digest), true);
@@ -106,7 +163,7 @@ const attackCases = [
   ['SUPERSEDED: manifest Jest config', 'package.json', 'NOTICE'],
   ['npm script-shell', 'apps/console/.npmrc', 'BLOCK'],
   ['npm node-options', '.npmrc', 'BLOCK'],
-  ['lockfile-named workflow', '.github/workflows/ci.lock.yml', 'REJECT'],
+  ['lockfile-named workflow', '.github/workflows/ci.lock.yml', 'BLOCK'],
   ['committed pg shadow', 'scripts/node_modules/pg', 'REJECT'],
   ['committed Playwright shadow', 'scripts/node_modules/@playwright/test', 'REJECT'],
   ['committed Next executable', 'apps/console/node_modules/.bin/next', 'REJECT'],
@@ -126,12 +183,12 @@ for (const [name, file, expected] of attackCases) {
     assert.equal(classify(changes).guarded.length, 0);
   }
 }
-for (const file of ['.github/workflows/x-lock.yaml', '.github/workflows/x_lockfile.yml', '.github/workflows/README',
-  'scripts/node_modules', 'scripts/ops/node_modules/pg/index.js', 'node_modules/package.json', 'a/node_modules/x.lock.yml']) {
+for (const file of ['scripts/node_modules', 'scripts/ops/node_modules/pg/index.js', 'node_modules/package.json', 'a/node_modules/x.lock.yml']) {
   for (const status of ['A', 'M', 'T', 'D']) assert.throws(() => rejectChanges([[status, file]]), /no marker exception/);
 }
 for (const file of protectedFiles) assert.equal(protectedPath(file), true);
 for (const file of ['scripts/ci-hosted/package.json', 'scripts/ci-hosted/report.lock.yml', '.github/actions/local/action.yml',
+  '.github/workflows/x-lock.yaml', '.github/workflows/x_lockfile.yml', '.github/workflows/README', 'scripts/ci-hosted/jest.config.cjs',
   'a/.npmrc', 'a/.yarnrc.yml', 'a/.pnpmfile.cjs', 'a/.gitattributes', 'config/ci/known-failures.main.txt']) assert.equal(pathClass(file), 'BLOCK');
 assert.equal(guardFiles.size, 10);
 for (const file of ['apps/shared/next-dev-origins.js', 'supabase/functions/_shared/cors.mjs', 'scripts/workers/tabular-import-worker.js',
@@ -191,12 +248,27 @@ const baseReads = [];
 const readBase = (args, encoding) => { baseReads.push(args); return args[0] === 'ls-tree' ? `100644 blob ${base}\tfile\0` : Buffer.from('reviewed base code'); };
 for (const entry of ['migrations.cjs', 'jest.cjs']) {
   const plan = guardPlan(entry, base, readBase);
-  assert.deepEqual(plan.map(row => row.name), [entry, 'target-policy.cjs']);
+  assert.deepEqual(plan.map(row => row.name), [entry, 'target-policy.cjs', ...(entry === 'jest.cjs' ? ['diagnostics.cjs'] : [])]);
   assert.equal(plan.every(row => row.content.toString() === 'reviewed base code'), true);
 }
 assert.equal(baseReads.every(args => args[0] === 'ls-tree' ? args[2] === base : args[1].startsWith(base + ':')), true);
 assert.doesNotThrow(() => enforceWorkflowInventory(new Map([['.github/workflows/policy.yml', ''], ['.github/workflows/public-ci.yml', '']])));
-assert.throws(() => enforceWorkflowInventory(new Map([['.github/workflows/legacy.yml', '']])), /every pull request remains RED/);
+assert.doesNotThrow(() => enforceWorkflowInventory(new Map([['.github/workflows/policy.yml', ''], ['.github/workflows/public-ci.yml', ''], ['.github/workflows/extra.yml', '']])));
+for (const missing of ['policy.yml', 'public-ci.yml']) assert.throws(() => enforceWorkflowInventory(new Map([[`.github/workflows/${missing}`, '']])), /missing/);
+assert.throws(() => enforceWorkflowInventory(new Map([['.github/workflows/policy.yml', ''], ['.github/workflows/public-ci.yml', ''], ['.github/workflows/nested/extra.yml', '']])), /directly/);
+for (const branch of ['dev', 'main']) {
+  assert.equal(policySource({ pull_request: { base: { ref: branch, sha: base } } }, 'pull_request'), base);
+  assert.throws(() => policySource({ pull_request: { base: { ref: branch } } }, 'pull_request'), /SHA/);
+}
+for (const sha of [[base], `${base}\n`]) {
+  assert.throws(() => policySource({ pull_request: { base: { ref: 'dev', sha } } }, 'pull_request'), /SHA/);
+}
+for (const kind of ['pull_request_target', 'push', 'unknown']) assert.throws(() => policySource({}, kind), /Unsupported policy event/);
+for (const branch of ['preview', 'other']) {
+  assert.throws(() => policySource({ pull_request: { base: { ref: branch, sha: base } } }, 'pull_request'), /target branch/);
+}
+assert.throws(() => policySource({ merge_group: { base_ref: 'refs/heads/dev', head_sha: head } }, 'merge_group'), /SHA/);
+assert.throws(() => policySource({ merge_group: { base_ref: 'refs/heads/main', base_sha: base } }, 'merge_group'), /target branch/);
 assert.throws(() => guardPlan('candidate.js', base, readBase));
 assert.throws(() => guardPlan('jest.cjs', 'HEAD', readBase));
 assert.throws(() => guardPlan('jest.cjs', base, () => `120000 blob ${base}\tfile\0`));
@@ -253,4 +325,19 @@ const savedExists = fs.existsSync; const savedOutput = process.env.GITHUB_OUTPUT
 try { delete process.env.GITHUB_OUTPUT; fs.existsSync = file => file.split(path.sep).join('/').endsWith('scripts/frontend/build-landing.js'); console.log = line => detection.push(line); detect('landing'); }
 finally { fs.existsSync = savedExists; console.log = savedLog; if (savedOutput === undefined) delete process.env.GITHUB_OUTPUT; else process.env.GITHUB_OUTPUT = savedOutput; }
 assert.deepEqual(detection, ['landing: present']);
+const emptyRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hosted-result-selfcheck-'));
+try {
+  const run = require('node:child_process').spawnSync(process.execPath, [path.join(root, 'scripts/ci-hosted/jest.cjs'), 'unit'], {
+    cwd: emptyRoot, encoding: 'utf8', timeout: 10000, env: { ...process.env, JEST_SHARD: '', JEST_DIAGNOSTIC_PROPOSAL: '' },
+  });
+  assert.equal(run.status, 1);
+  const diagnostic = JSON.parse(fs.readFileSync(path.join(emptyRoot, 'ci-reports/jest-results.unit.json'), 'utf8'));
+  assert.equal(diagnostic.stage, 'configuration');
+  assert.equal(diagnostic.ok, false);
+  assert.equal(diagnostic.error.includes('Missing config/'), true);
+  assert.deepEqual(diagnostic.reasons, ['JEST_INFRASTRUCTURE_OR_CONFIGURATION_FAILURE']);
+} finally {
+  assert.equal(path.dirname(emptyRoot), require('node:os').tmpdir());
+  fs.rmSync(emptyRoot, { recursive: true, force: true });
+}
 console.log(`PASS: ${checks} synthetic helper assertions; no Git, Docker, browser, listener or product suite executed`);

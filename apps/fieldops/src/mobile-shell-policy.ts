@@ -1,3 +1,4 @@
+import { normalizeMobileOpenMapPolicy, type MobileOpenMapPolicy } from "./mobile-open-map-policy";
 export type MobileVisibilityMode = "assigned_only" | "branch" | "zone" | "organization";
 export type MobileRouteViewMode = "list" | "orders_map";
 export type MobilePlatform = "android" | "ios" | "scanner";
@@ -42,6 +43,7 @@ export type MobileVisibilityPolicy = {
 };
 
 export type MobileMapPolicy = {
+  openMap: MobileOpenMapPolicy;
   routeViews: MobileRouteViewMode[];
   defaultRouteView: MobileRouteViewMode;
   clusteringEnabled: boolean;
@@ -125,6 +127,7 @@ export const DEFAULT_MOBILE_VISIBILITY_POLICY: MobileVisibilityPolicy = {
 };
 
 export const DEFAULT_MOBILE_MAP_POLICY: MobileMapPolicy = {
+  openMap: normalizeMobileOpenMapPolicy(null),
   routeViews: ["list", "orders_map"],
   defaultRouteView: "list",
   clusteringEnabled: true,
@@ -386,6 +389,7 @@ export function normalizeMobileMapPolicy(value: unknown): MobileMapPolicy {
   const clustering = asRecord(input.clustering);
 
   return {
+    openMap: normalizeMobileOpenMapPolicy(input),
     routeViews: resolvedRouteViews,
     defaultRouteView,
     clusteringEnabled: readBoolean(clustering.enabled, DEFAULT_MOBILE_MAP_POLICY.clusteringEnabled),

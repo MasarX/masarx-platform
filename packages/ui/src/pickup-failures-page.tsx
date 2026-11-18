@@ -133,9 +133,9 @@ export async function PickupFailuresPage({
                   </div>
                   <div className="mt-3 space-y-3">
                     {renderFieldPairs([
-                      ["Organization", stringValue(row.organization_id)],
-                      ["Client", stringValue(row.client_id)],
-                      ["Sender", stringValue(row.sender_id)],
+                      ["Organization", stringValue(row.organization_label) ?? stringValue(row.organization_id)],
+                      ["Client", stringValue(row.client_label) ?? stringValue(row.client_id)],
+                      ["Sender", stringValue(row.sender_label) ?? stringValue(row.sender_id)],
                     ])}
                     {tasks.length > 0 ? (
                       <div className="grid gap-2 md:grid-cols-2">

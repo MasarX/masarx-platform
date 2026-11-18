@@ -6,7 +6,9 @@ const consoleBaseUrl = getConsoleBaseUrl();
 const portalBaseUrl = getPortalBaseUrl();
 
 async function expectReady(page: import("@playwright/test").Page, selector: string) {
-  await expect(page.locator(selector)).toBeVisible();
+  const state = page.locator(selector).filter({ visible: true });
+  await expect(state).toHaveCount(1);
+  await expect(state).toBeVisible();
 }
 
 async function runA11y(page: import("@playwright/test").Page) {

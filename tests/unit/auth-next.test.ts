@@ -17,7 +17,7 @@ const requestFor = (path, init) =>
   new Request(`https://example.test${path}`, init);
 
 function parseRedirect(response) {
-  return response.headers.get("location");
+  return new URL(response.headers.get("location"), "https://example.test").href;
 }
 
 beforeEach(() => {
@@ -40,6 +40,7 @@ test("handleSignOut defaults to canonical root path", async () => {
     })
   );
   expect(signOut).toHaveBeenCalledTimes(1);
+  expect(signOut).toHaveBeenCalledWith({ scope: "local" });
   expect(parseRedirect(response)).toBe("https://example.test/");
   expect(response.headers.get("x-request-id")).toBeTruthy();
   expect(console.info).toHaveBeenCalledWith(
@@ -56,6 +57,7 @@ test("handleSignOut falls back to root when app base path is missing", async () 
     })
   );
   expect(signOut).toHaveBeenCalledTimes(1);
+  expect(signOut).toHaveBeenCalledWith({ scope: "local" });
   expect(parseRedirect(response)).toBe("https://example.test/");
   expect(response.headers.get("x-request-id")).toBeTruthy();
 });
@@ -203,6 +205,24 @@ test("handleAuthCallback handles exchange-code errors and surfaces safe message"
   );
 });
 
+test("handleAuthCallback never logs authorization code fragments on exchange errors", async () => {
+  const code = "private-authorization-code-123456789";
+  exchangeCodeForSession.mockResolvedValueOnce({
+    data: null,
+    error: { message: "expired_code" },
+  });
+
+  const response = await handleAuthCallback(
+    requestFor(`/auth/callback?code=${code}`)
+  );
+
+  expect(response.status).toBe(307);
+  const logs = JSON.stringify((console.info as jest.Mock).mock.calls);
+  expect(logs).toContain("auth.callback.exchange_error");
+  expect(logs).not.toContain(code.slice(0, 16));
+  expect(logs).not.toContain("codePrefix");
+});
+
 test("handleAuthCallback treats exchange exceptions as internal-safe failure", async () => {
   process.env.NEXT_PUBLIC_APP_BASE_PATH = "/console";
   exchangeCodeForSession.mockRejectedValueOnce(new Error("unexpected-failure"));
@@ -231,3 +251,90 @@ test("handleAuthCallback sanitizes external error text before redirect", async (
     expect.stringContaining("auth.callback.blocked.external_error")
   );
 });
+
+test.each(["console", "portal"])(
+  "%s callback redirects preserve the browser origin behind an internal bind URL",
+  async (app) => {
+    const publicOrigin = "https://public.example.test";
+    for (const [next, expected] of [
+      ["https://untrusted.example.test/account", "/"],
+      ["//untrusted.example.test/account", "/"],
+      ["/\\untrusted.example.test/account", "/"],
+      ["/resources/shipments?status=ready#details", "/resources/shipments?status=ready#details"],
+    ]) {
+      const request = new Request(
+        `http://0.0.0.0:5175/${app}/auth/callback?next=${encodeURIComponent(next)}`,
+        {
+          headers: {
+            host: "untrusted.example.test",
+            "x-forwarded-host": "untrusted.example.test",
+            "x-forwarded-proto": "https",
+          },
+        },
+      );
+      const response = await handleAuthCallback(request);
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(expected);
+      expect(new URL(response.headers.get("location")!, publicOrigin).origin).toBe(publicOrigin);
+      expect(response.headers.get("x-request-id")).toBeTruthy();
+    }
+    expect(exchangeCodeForSession).not.toHaveBeenCalled();
+  },
+);
+
+test.each(["external", "exchange", "exception"])(
+  "callback %s errors retain an app-relative redirect behind an internal bind URL",
+  async (failure) => {
+    if (failure === "exchange") {
+      exchangeCodeForSession.mockResolvedValueOnce({ error: { message: "expired_code" } });
+    } else if (failure === "exception") {
+      exchangeCodeForSession.mockRejectedValueOnce(new Error("expired_code"));
+    }
+    const query = failure === "external" ? "error=expired_code" : "code=synthetic-code";
+    const response = await handleAuthCallback(
+      new Request(`http://0.0.0.0:5175/auth/callback?${query}&next=/resources`),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("/resources?error=expired_code");
+  },
+);
+
+test.each([false, true])(
+  "sign-out preserves relative redirects behind an internal bind URL (failure=%s)",
+  async (failure) => {
+    if (failure) signOut.mockRejectedValueOnce(new Error("logout_failed"));
+    const response = await handleSignOut(new Request("http://0.0.0.0:5175/auth/sign-out", {
+      headers: {
+        host: "untrusted.example.test",
+        "x-forwarded-host": "untrusted.example.test",
+        "x-forwarded-proto": "https",
+        "sec-fetch-site": "same-origin",
+      },
+    }), { redirectPath: "/sign-in" });
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      failure ? "/sign-in?error=logout_failed" : "/sign-in",
+    );
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+  },
+);
+
+test.each(["/.//untrusted.example.test", "/safe/..//untrusted.example.test"])(
+  "relative redirects keep one leading slash after normalizing %s",
+  async (path) => {
+    const request = new Request("http://0.0.0.0:5175/auth/callback");
+    const fallbackResponse = await handleAuthCallback(request, { defaultRedirectPath: path });
+    const nextResponse = await handleAuthCallback(new Request(
+      `http://0.0.0.0:5175/auth/callback?next=${encodeURIComponent(`${path}?status=ready#details`)}`,
+    ));
+    const signOutResponse = await handleSignOut(
+      new Request("http://0.0.0.0:5175/auth/sign-out"),
+      { redirectPath: path },
+    );
+    for (const response of [fallbackResponse, nextResponse, signOutResponse]) {
+      const location = response.headers.get("location")!;
+      expect(location).toMatch(/^\/(?![\\/])/);
+      expect(new URL(location, "https://public.example.test").origin).toBe("https://public.example.test");
+    }
+  },
+);

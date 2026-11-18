@@ -20,6 +20,19 @@ function normalizePoolerHost(value) {
     .trim();
 }
 
+function normalizeSupabasePoolerRegion(value) {
+  const region = String(value || '').trim().toLowerCase();
+  if (!region || region.length > 48) return '';
+  return /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/.test(region) ? region : '';
+}
+
+function buildRegionDerivedPoolerHost(value) {
+  const region = normalizeSupabasePoolerRegion(value);
+  if (!region) return '';
+  const host = `aws-1-${region}.pooler.supabase.com`;
+  return resolveSupabasePoolerRegionFromHost(host) ? host : '';
+}
+
 function normalizeHttpUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -92,7 +105,174 @@ function mapBranch(branch) {
   };
 }
 
-async function http(method, path, token, body) {
+function normalizeBranchDatabaseConfig(branch, branchIdOrRef = '') {
+  const database = branch?.database && typeof branch.database === 'object'
+    ? branch.database
+    : {};
+  const mapped = mapBranch(branch);
+  const portValue =
+    branch?.db_port ??
+    database.port ??
+    database.db_port ??
+    '';
+  return {
+    branch_id: mapped.branch_id || normalizeBranchName(branchIdOrRef),
+    project_ref: mapped.project_ref,
+    name: mapped.name,
+    region: mapped.region,
+    status: normalizeBranchName(
+      branch?.status ||
+        branch?.preview_project_status ||
+        branch?.project_status,
+    ),
+    db_host: normalizeProjectName(
+      branch?.db_host ||
+        database.host ||
+        database.db_host,
+    ),
+    db_port: portValue == null ? '' : String(portValue).trim(),
+    db_user: normalizeProjectName(
+      branch?.db_user ||
+        database.user ||
+        database.username ||
+        database.db_user,
+    ),
+    db_pass: String(
+      branch?.db_pass ||
+        database.password ||
+        database.pass ||
+        database.db_pass ||
+        '',
+    ).trim(),
+    // Branches have an isolated auth plane. Preserve the branch-owned secret
+    // when the Management API returns it so callers never fall back to the
+    // parent project's JWT secret.
+    jwt_secret: normalizeJwtSecret(
+      branch?.jwt_secret ||
+        branch?.jwt?.jwt_secret ||
+        branch?.auth?.jwt_secret ||
+        database.jwt_secret ||
+        '',
+    ),
+  };
+}
+
+const TERMINAL_BRANCH_DATABASE_STATUSES = new Set([
+  'INIT_FAILED',
+  'REMOVED',
+  'RESTORE_FAILED',
+  'PAUSE_FAILED',
+]);
+
+function isCanonicalSupabaseProjectRef(value) {
+  return /^[a-z]{20}$/.test(normalizeProjectName(value));
+}
+
+function isCanonicalPostgresPort(value) {
+  const normalized = String(value == null ? '' : value).trim();
+  const parsed = Number.parseInt(normalized, 10);
+  return /^\d+$/.test(normalized) && parsed >= 1 && parsed <= 65535;
+}
+
+function isCanonicalSupabasePoolerHost(value) {
+  const host = String(value || '').trim().toLowerCase();
+  if (!host || host.length > 253 || host.includes('://') || /[\s/\\]/.test(host)) {
+    return false;
+  }
+  if (!host.endsWith('.pooler.supabase.com')) return false;
+  return host.split('.').every(
+    (label) =>
+      label.length > 0 &&
+      label.length <= 63 &&
+      /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label),
+  );
+}
+
+function resolveSupabasePoolerRegionFromHost(value) {
+  const host = normalizePoolerHost(value);
+  if (!isCanonicalSupabasePoolerHost(host)) return '';
+  const match = host.match(/^aws-\d+-(.+)\.pooler\.supabase\.com$/);
+  return normalizeSupabasePoolerRegion(match?.[1] || '');
+}
+
+function isCanonicalSupabaseDatabaseHost(value) {
+  const host = String(value || '').trim().toLowerCase();
+  if (!host || host.length > 253 || host.includes('://') || /[\s/\\]/.test(host)) {
+    return false;
+  }
+  if (!host.endsWith('.supabase.co') && !host.endsWith('.supabase.com')) {
+    return false;
+  }
+  return host.split('.').every(
+    (label) =>
+      label.length > 0 &&
+      label.length <= 63 &&
+      /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label),
+  );
+}
+
+function branchDatabaseConfigError(code, detail = '') {
+  const suffix = String(detail || '').trim();
+  const error = new Error(`${code}${suffix ? `:${suffix}` : ''}`);
+  error.code = code;
+  return error;
+}
+
+function validateBranchDatabaseConfig(branchConfig, { expectedProjectRef = '' } = {}) {
+  const normalized = normalizeBranchDatabaseConfig(branchConfig);
+  normalized.status = String(normalized.status || '').trim().toUpperCase();
+
+  if (TERMINAL_BRANCH_DATABASE_STATUSES.has(normalized.status)) {
+    throw branchDatabaseConfigError(
+      'branch_db_credentials_terminal_status',
+      normalized.status,
+    );
+  }
+
+  const required = [
+    ['project_ref', normalized.project_ref],
+    ['status', normalized.status],
+    ['db_pass', normalized.db_pass],
+    ['db_host', normalized.db_host],
+    ['db_port', normalized.db_port],
+    ['db_user', normalized.db_user],
+  ];
+  const missing = required.filter(([, value]) => !value).map(([name]) => name);
+  if (missing.length) {
+    throw branchDatabaseConfigError('branch_db_credentials_missing', missing.join(','));
+  }
+
+  if (!isCanonicalSupabaseProjectRef(normalized.project_ref)) {
+    throw branchDatabaseConfigError('branch_db_credentials_invalid', 'project_ref');
+  }
+
+  if (normalized.status !== 'ACTIVE_HEALTHY') {
+    throw branchDatabaseConfigError('branch_db_credentials_not_ready', normalized.status);
+  }
+
+  const expectedRef = normalizeProjectName(expectedProjectRef);
+  if (expectedRef && !isCanonicalSupabaseProjectRef(expectedRef)) {
+    throw branchDatabaseConfigError('branch_db_credentials_invalid', 'expected_project_ref');
+  }
+  if (expectedRef && normalized.project_ref !== expectedRef) {
+    throw branchDatabaseConfigError(
+      'branch_db_credentials_project_ref_mismatch',
+      `${normalized.project_ref}:${expectedRef}`,
+    );
+  }
+  if (!isCanonicalSupabaseDatabaseHost(normalized.db_host)) {
+    throw branchDatabaseConfigError('branch_db_credentials_invalid', 'db_host');
+  }
+  if (normalized.db_host.toLowerCase() !== `db.${normalized.project_ref}.supabase.co`) {
+    throw branchDatabaseConfigError('branch_db_credentials_identity_mismatch', 'db_host');
+  }
+  if (!isCanonicalPostgresPort(normalized.db_port)) {
+    throw branchDatabaseConfigError('branch_db_credentials_invalid', 'db_port');
+  }
+  return normalized;
+}
+
+async function http(method, path, token, body, options = {}) {
   const url = `${getSupabaseMgmtUrl()}${path}`;
   const headers = { 'content-type': 'application/json' };
   if (token) headers['authorization'] = `Bearer ${token}`;
@@ -102,6 +282,7 @@ async function http(method, path, token, body) {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch (err) {
     err.message = `fetch failed (${method} ${path}): ${err.message}`;
@@ -123,9 +304,17 @@ async function http(method, path, token, body) {
 
 function isTransientFetchError(err) {
   const code = String(err?.code || '').toUpperCase();
-  if (['ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN'].includes(code)) return true;
+  if (['ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ABORT_ERR'].includes(code)) return true;
+  const name = String(err?.name || '').toLowerCase();
+  if (name === 'aborterror' || name === 'timeouterror') return true;
   const msg = String(err?.message || '').toLowerCase();
-  return msg.includes('fetch failed') || msg.includes('network') || msg.includes('socket');
+  return (
+    msg.includes('fetch failed') ||
+    msg.includes('network') ||
+    msg.includes('socket') ||
+    msg.includes('aborted') ||
+    msg.includes('timed out')
+  );
 }
 
 function parseRetryAfterMs(value, nowMs = Date.now()) {
@@ -278,6 +467,25 @@ function isBranchNameAlreadyExistsError(err) {
   return text.includes('already exists') && text.includes('branch');
 }
 
+function isInconclusiveBranchCreateError(err) {
+  const status = Number(err?.status || 0);
+  return (
+    isTransientFetchError(err) ||
+    [408, 409, 425, 429, 500, 502, 503, 504].includes(status)
+  );
+}
+
+function branchCreateOutcomeAmbiguousError({ parentProjectRef, name, cause, observedBranch } = {}) {
+  const error = new Error(
+    `Branch create outcome is ambiguous for parent_ref=${normalizeProjectName(parentProjectRef)} name=${normalizeBranchName(name)}`,
+    { cause },
+  );
+  error.code = 'branch_create_outcome_ambiguous';
+  if (observedBranch?.branch_id) error.observedBranchId = observedBranch.branch_id;
+  if (observedBranch?.project_ref) error.observedProjectRef = observedBranch.project_ref;
+  return error;
+}
+
 async function createBranch({ token, parentProjectRef, name } = {}) {
   const parent = normalizeProjectName(parentProjectRef);
   const branchName = normalizeBranchName(name);
@@ -288,14 +496,14 @@ async function createBranch({ token, parentProjectRef, name } = {}) {
     );
   }
   if (!branchName) throw new Error('branch name is required');
-  const payload = { branch_name: branchName, name: branchName };
+  const payload = { branch_name: branchName };
   const created = await http('POST', `/v1/projects/${encodeURIComponent(parent)}/branches`, token, payload);
   const mapped = mapBranch(created);
   if (!mapped.project_ref) throw new Error('Branch creation did not return project_ref');
   return mapped;
 }
 
-async function listBranches({ token, parentProjectRef } = {}) {
+async function listBranches({ token, parentProjectRef, requireVerifiableResponse = false, timeoutMs = 0 } = {}) {
   const parent = normalizeProjectName(parentProjectRef);
   if (!token) throw new Error('SUPABASE_ACCESS_TOKEN is required to list branches');
   if (!parent) {
@@ -303,11 +511,90 @@ async function listBranches({ token, parentProjectRef } = {}) {
       'SUPABASE_BRANCH_PARENT_REF (or SUPABASE_PARENT_PROJECT_REF / SUPABASE_PROJECT_ID) is required to list branches',
     );
   }
-  const res = await http('GET', `/v1/projects/${encodeURIComponent(parent)}/branches`, token);
+  const res = await http('GET', `/v1/projects/${encodeURIComponent(parent)}/branches`, token, undefined,
+    { signal: timeoutSignal(timeoutMs) });
+  if (requireVerifiableResponse && !Array.isArray(res) && !Array.isArray(res?.branches)) {
+    throw new Error('Supabase branch inventory is unverifiable.');
+  }
   const rows = Array.isArray(res)
     ? res
     : (Array.isArray(res?.branches) ? res.branches : []);
+  if (requireVerifiableResponse) {
+    const ids = new Set();
+    const refs = new Set();
+    for (const row of rows) {
+      const id = resolveBranchId(row);
+      const observedParent = normalizeProjectName(row?.parent_project_ref || row?.parentProjectRef || row?.parent_ref);
+      const ref = resolveBranchProjectRef(row);
+      if (!id || ids.has(id) || refs.has(ref) || !isCanonicalSupabaseProjectRef(ref)
+        || !normalizeBranchName(row?.branch_name || row?.name) || (observedParent && observedParent !== parent)) {
+        throw new Error('Supabase branch inventory identity is unverifiable.');
+      }
+      ids.add(id);
+      refs.add(ref);
+    }
+  }
   return rows.map(mapBranch);
+}
+
+async function inspectOwnedPreviewWorkspace({ token, organizationId, ownership, timeoutMs = 15000,
+  listProjectsFn = listProjects, listBranchesFn = listBranches }) {
+  if (!token || !organizationId || typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('Preview provider observation authority or deadline is unavailable.');
+  }
+  const deadlineMs = Date.now() + timeoutMs;
+  const remainingMs = () => {
+    const remaining = Math.floor(deadlineMs - Date.now());
+    if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('Preview provider observation deadline exhausted.');
+    return remaining;
+  };
+  const exact = require('./preview-ownership').buildMaterializedOwnership(ownership);
+  if (!isCanonicalSupabaseProjectRef(exact.project_ref)
+    || (exact.workspace_mode === 'branch' && !isCanonicalSupabaseProjectRef(exact.branch_parent_ref))) {
+    throw new Error('Preview provider ownership immutable ref is invalid.');
+  }
+  // Keep complete same-token visibility; org filtering cannot prove immutable-ref absence.
+  const projects = assertVerifiableProjectList(await listProjectsFn({ token, organizationId,
+    requireVerifiableResponse: true, timeoutMs: remainingMs() }));
+  remainingMs();
+  const assertOrganization = row => {
+    const organization = resolveProjectOrganizationIdentity(row);
+    if (!organizationId || ![organization.id, organization.slug].includes(organizationId)) {
+      throw new Error('Preview provider ownership organization changed.');
+    }
+  };
+  let rows = projects;
+  if (exact.workspace_mode === 'branch') {
+    const parent = projects.find(row => resolveProjectRef(row) === exact.branch_parent_ref);
+    if (!parent) return { absent: true };
+    assertOrganization(parent);
+    rows = await listBranchesFn({ token, parentProjectRef: exact.branch_parent_ref,
+      requireVerifiableResponse: true, timeoutMs: remainingMs() });
+    remainingMs();
+    if (!Array.isArray(rows)) throw new Error('Preview provider branch absence is unverifiable.');
+  }
+  const matches = rows.filter(row => {
+    const ref = exact.workspace_mode === 'branch' ? resolveBranchProjectRef(row) : resolveProjectRef(row);
+    return ref === exact.project_ref || (exact.workspace_mode === 'branch' && resolveBranchId(row) === exact.branch_id)
+      || normalizeProjectName(row.name || row.branch_name) === exact.project_name;
+  });
+  if (!matches.length) return { absent: true };
+  if (matches.length !== 1) throw new Error('Preview provider ownership is ambiguous.');
+  const row = matches[0];
+  const ref = exact.workspace_mode === 'branch' ? resolveBranchProjectRef(row) : resolveProjectRef(row);
+  const raw = row.raw || row;
+  const createdAt = raw.created_at || raw.inserted_at || raw.createdAt || raw.insertedAt;
+  const createdAtMs = typeof createdAt === 'string' && createdAt.trim() ? Date.parse(createdAt) : NaN;
+  const parent = normalizeProjectName(raw.parent_project_ref || raw.parentProjectRef || raw.parent_ref);
+  if (ref !== exact.project_ref || normalizeProjectName(row.name || row.branch_name) !== exact.project_name
+    || !Number.isFinite(createdAtMs) || createdAtMs > Date.now()
+    || (exact.workspace_mode === 'branch' && (resolveBranchId(row) !== exact.branch_id
+      || (parent && parent !== exact.branch_parent_ref)))) {
+    throw new Error('Preview provider immutable ownership identity changed.');
+  }
+  if (exact.workspace_mode === 'project') assertOrganization(row);
+  return { absent: false, project_ref: ref, project_name: exact.project_name,
+    branch_id: exact.branch_id, branch_parent_ref: exact.branch_parent_ref, created_at: new Date(createdAtMs).toISOString() };
 }
 
 async function findBranchByName({ token, parentProjectRef, name } = {}) {
@@ -338,20 +625,237 @@ async function findBranchByName({ token, parentProjectRef, name } = {}) {
   return list.find((item) => normalizeBranchName(item?.name) === wanted) || null;
 }
 
-async function ensureBranch({ token, parentProjectRef, name, reuseExisting = true } = {}) {
-  try {
-    const created = await createBranch({ token, parentProjectRef, name });
-    return { ...created, reused: false };
-  } catch (err) {
-    if (!reuseExisting || !isBranchNameAlreadyExistsError(err)) throw err;
-    const existing = await findBranchByName({ token, parentProjectRef, name });
-    if (!existing?.project_ref) throw err;
-    return { ...existing, reused: true };
+async function getBranchConfig({ token, branchIdOrRef, timeoutMs = 0 } = {}) {
+  const branchRef = normalizeBranchName(branchIdOrRef);
+  if (!token) throw new Error('SUPABASE_ACCESS_TOKEN is required to get branch config');
+  if (!branchRef) throw new Error('branchIdOrRef is required to get branch config');
+  const branch = await http(
+    'GET',
+    `/v1/branches/${encodeURIComponent(branchRef)}`,
+    token,
+    undefined,
+    {
+      signal: Number(timeoutMs) > 0
+        ? AbortSignal.timeout(Math.max(1, Number.parseInt(String(timeoutMs), 10) || 1))
+        : undefined,
+    },
+  );
+  return normalizeBranchDatabaseConfig(branch, branchRef);
+}
+
+async function waitForBranchDatabaseConfig({
+  token,
+  branchIdOrRef,
+  expectedProjectRef = '',
+  maxWaitMs = 120_000,
+  retryDelayMs = 5_000,
+  getBranchConfigFn = getBranchConfig,
+  nowFn = () => Date.now(),
+  sleepFn = sleep,
+} = {}) {
+  const branchRef = normalizeBranchName(branchIdOrRef);
+  if (!branchRef) throw branchDatabaseConfigError('branch_db_credentials_ref_required');
+  const parsedMaxWaitMs = Number.parseInt(String(maxWaitMs || ''), 10);
+  const timeoutMs = Number.isFinite(parsedMaxWaitMs) && parsedMaxWaitMs > 0
+    ? parsedMaxWaitMs
+    : 120_000;
+  const parsedRetryDelayMs = Number.parseInt(String(retryDelayMs || ''), 10);
+  const delayMs = Number.isFinite(parsedRetryDelayMs) && parsedRetryDelayMs > 0
+    ? parsedRetryDelayMs
+    : 5_000;
+  const startedAt = nowFn();
+  let lastMessage = 'branch credential readiness window elapsed';
+
+  while (true) {
+    const elapsedBeforeRequestMs = Math.max(0, nowFn() - startedAt);
+    const remainingBeforeRequestMs = timeoutMs - elapsedBeforeRequestMs;
+    if (remainingBeforeRequestMs <= 0) {
+      throw branchDatabaseConfigError(
+        'branch_db_credentials_unavailable',
+        `${branchRef}:${lastMessage}`,
+      );
+    }
+
+    try {
+      const branchConfig = await getBranchConfigFn({
+        token,
+        branchIdOrRef: branchRef,
+        timeoutMs: remainingBeforeRequestMs,
+      });
+      const elapsedAfterRequestMs = Math.max(0, nowFn() - startedAt);
+      if (elapsedAfterRequestMs >= timeoutMs) {
+        throw branchDatabaseConfigError(
+          'branch_db_credentials_unavailable',
+          `${branchRef}:branch credential readiness window elapsed`,
+        );
+      }
+      return validateBranchDatabaseConfig(branchConfig, { expectedProjectRef });
+    } catch (error) {
+      const status = Number(error?.status || error?.cause?.status || 0);
+      const message = String(error?.message || error || 'unknown');
+      if (status === 401 || status === 403) {
+        const denied = branchDatabaseConfigError(
+          'branch_db_credentials_access_denied',
+          `${status}:${message}`,
+        );
+        denied.status = status;
+        denied.cause = error;
+        throw denied;
+      }
+      if (
+        error?.code === 'branch_db_credentials_unavailable'
+      ) {
+        throw error;
+      }
+      if (error?.code === 'branch_db_credentials_terminal_status') {
+        throw error;
+      }
+      if (
+        error?.code === 'branch_db_credentials_invalid' ||
+        error?.code === 'branch_db_credentials_project_ref_mismatch'
+      ) {
+        throw branchDatabaseConfigError(
+          'branch_db_credentials_unavailable',
+          `${branchRef}:${message}`,
+        );
+      }
+
+      lastMessage = message;
+      const retryable =
+        error?.code === 'branch_db_credentials_missing' ||
+        error?.code === 'branch_db_credentials_not_ready' ||
+        isTransientFetchError(error) ||
+        [404, 409, 423, 425, 429, 500, 502, 503, 504].includes(status);
+      const elapsedMs = Math.max(0, nowFn() - startedAt);
+      if (!retryable || elapsedMs >= timeoutMs) {
+        throw branchDatabaseConfigError(
+          'branch_db_credentials_unavailable',
+          `${branchRef}:${message}`,
+        );
+      }
+      const retryAfterMs = status === 429
+        ? parseRetryDelayFromError(error, nowFn())
+        : null;
+      const requestedDelayMs = retryAfterMs == null ? delayMs : retryAfterMs;
+      const sleepMs = Math.min(requestedDelayMs, Math.max(0, timeoutMs - elapsedMs));
+      if (sleepMs <= 0) {
+        throw branchDatabaseConfigError(
+          'branch_db_credentials_unavailable',
+          `${branchRef}:${message}`,
+        );
+      }
+      await sleepFn(sleepMs);
+    }
   }
 }
 
-async function getProject(projectRef, token) {
-  return http('GET', `/v1/projects/${projectRef}`, token);
+async function ensureBranch({
+  token,
+  parentProjectRef,
+  name,
+  reuseExisting = true,
+  requireExisting = false,
+  expectedProjectRef = '',
+  reconcileAttempts = 4,
+  reconcileDelayMs = 1_500,
+  findBranchByNameFn = findBranchByName,
+  sleepFn = sleep,
+} = {}) {
+  const expectedRef = normalizeProjectName(expectedProjectRef);
+  if (expectedRef && !isCanonicalSupabaseProjectRef(expectedRef)) {
+    throw branchDatabaseConfigError('branch_expected_identity_invalid', 'project_ref');
+  }
+  if (expectedRef && !requireExisting) {
+    throw branchDatabaseConfigError('branch_expected_identity_requires_existing');
+  }
+  const assertExpectedIdentity = (branch) => {
+    const actualRef = resolveBranchProjectRef(branch);
+    if (expectedRef && actualRef !== expectedRef) {
+      const mismatch = branchDatabaseConfigError(
+        'branch_expected_project_ref_mismatch',
+        `${actualRef || '<missing>'}:${expectedRef}`,
+      );
+      mismatch.status = 409;
+      throw mismatch;
+    }
+    return branch;
+  };
+
+  if (requireExisting) {
+    if (!expectedRef) {
+      throw branchDatabaseConfigError('branch_expected_identity_required', 'project_ref');
+    }
+    const existing = await findBranchByNameFn({ token, parentProjectRef, name });
+    if (!existing?.project_ref) {
+      const missing = branchDatabaseConfigError(
+        'branch_expected_missing',
+        `${normalizeProjectName(parentProjectRef)}:${normalizeBranchName(name)}:${expectedRef}`,
+      );
+      missing.status = 404;
+      throw missing;
+    }
+    return { ...assertExpectedIdentity(existing), reused: true };
+  }
+
+  const existingBeforeCreate = await findBranchByNameFn({ token, parentProjectRef, name });
+  if (existingBeforeCreate?.project_ref) {
+    if (reuseExisting) {
+      return { ...assertExpectedIdentity(existingBeforeCreate), reused: true };
+    }
+    const collision = new Error(
+      `Fresh branch name already exists for parent_ref=${normalizeProjectName(parentProjectRef)} name=${normalizeBranchName(name)}`,
+    );
+    collision.code = 'branch_fresh_name_collision';
+    throw collision;
+  }
+  try {
+    const created = await createBranch({ token, parentProjectRef, name });
+    return { ...assertExpectedIdentity(created), reused: false };
+  } catch (err) {
+    const nameConflict = isBranchNameAlreadyExistsError(err);
+    const inconclusive = isInconclusiveBranchCreateError(err);
+    if (!nameConflict && !inconclusive) throw err;
+
+    const attempts = Math.max(1, Number.parseInt(String(reconcileAttempts || ''), 10) || 4);
+    const delayMs = Math.max(0, Number.parseInt(String(reconcileDelayMs || ''), 10) || 0);
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const existing = await findBranchByNameFn({ token, parentProjectRef, name });
+        if (existing?.project_ref) {
+          if (reuseExisting) return { ...assertExpectedIdentity(existing), reused: true };
+          throw branchCreateOutcomeAmbiguousError({
+            parentProjectRef,
+            name,
+            cause: err,
+            observedBranch: existing,
+          });
+        }
+      } catch (lookupError) {
+        if (lookupError?.code === 'branch_create_outcome_ambiguous') throw lookupError;
+        if (lookupError?.code === 'branch_expected_project_ref_mismatch') throw lookupError;
+        const status = Number(lookupError?.status || 0);
+        if (status === 401 || status === 403) {
+          throw branchCreateOutcomeAmbiguousError({ parentProjectRef, name, cause: err });
+        }
+      }
+      if (attempt < attempts && delayMs > 0) await sleepFn(delayMs);
+    }
+
+    throw branchCreateOutcomeAmbiguousError({ parentProjectRef, name, cause: err });
+  }
+}
+
+function timeoutSignal(timeoutMs) {
+  const parsed = Number.parseInt(String(timeoutMs || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0
+    ? AbortSignal.timeout(Math.max(1, parsed))
+    : undefined;
+}
+
+async function getProject(projectRef, token, { timeoutMs = 0 } = {}) {
+  return http('GET', `/v1/projects/${projectRef}`, token, undefined, {
+    signal: timeoutSignal(timeoutMs),
+  });
 }
 
 async function waitUntilReady(projectRef, token, timeoutMs = 30 * 60 * 1000) {
@@ -402,7 +906,7 @@ function extractPoolerHostsFromPayload(payload) {
   const hosts = [];
   for (const entry of matches) {
     const host = normalizePoolerHost(entry);
-    if (!host || seen.has(host)) continue;
+    if (!resolveSupabasePoolerRegionFromHost(host) || seen.has(host)) continue;
     seen.add(host);
     hosts.push(host);
   }
@@ -410,9 +914,13 @@ function extractPoolerHostsFromPayload(payload) {
 }
 
 function selectProjectPoolerHost(hosts, { preferredRegion = '' } = {}) {
-  const list = Array.isArray(hosts) ? hosts.map((entry) => normalizePoolerHost(entry)).filter(Boolean) : [];
+  const list = Array.isArray(hosts)
+    ? hosts
+      .map((entry) => normalizePoolerHost(entry))
+      .filter((host) => resolveSupabasePoolerRegionFromHost(host))
+    : [];
   if (list.length === 0) return '';
-  const region = String(preferredRegion || '').trim().toLowerCase();
+  const region = normalizeSupabasePoolerRegion(preferredRegion);
   if (region) {
     const withRegion = list.find((host) => host.includes(`-${region}.pooler.supabase.com`));
     if (withRegion) return withRegion;
@@ -425,13 +933,15 @@ async function resolveProjectPoolerHost({
   token,
   preferredRegion = '',
   fallbackHost = '',
+  allowDerivedFallback = true,
 } = {}) {
   const ref = normalizeProjectName(projectRef);
-  const fallback = normalizePoolerHost(fallbackHost);
-  const preferred = normalizeProjectName(preferredRegion).toLowerCase();
+  const normalizedFallback = normalizePoolerHost(fallbackHost);
+  const fallback = resolveSupabasePoolerRegionFromHost(normalizedFallback) ? normalizedFallback : '';
+  const preferred = normalizeSupabasePoolerRegion(preferredRegion);
   if (!ref || !token) {
     if (fallback) return fallback;
-    if (preferred) return `aws-1-${preferred}.pooler.supabase.com`;
+    if (preferred && allowDerivedFallback) return buildRegionDerivedPoolerHost(preferred);
     return '';
   }
 
@@ -448,16 +958,15 @@ async function resolveProjectPoolerHost({
         attempts: 3,
         intervalMs: 1000,
       });
-      if (!discoveredRegion) {
-        discoveredRegion = normalizeProjectName(
-          payload?.region ||
-            payload?.cloud_region ||
-            payload?.db_region ||
-            payload?.project?.region ||
-            payload?.project?.cloud_region ||
-            payload?.project?.db_region,
-        ).toLowerCase();
-      }
+      const metadataRegion = normalizeSupabasePoolerRegion(
+        payload?.region ||
+          payload?.cloud_region ||
+          payload?.db_region ||
+          payload?.project?.region ||
+          payload?.project?.cloud_region ||
+          payload?.project?.db_region,
+      );
+      if (metadataRegion) discoveredRegion = metadataRegion;
       const hosts = extractPoolerHostsFromPayload(payload);
       const selected = selectProjectPoolerHost(hosts, {
         preferredRegion: discoveredRegion,
@@ -471,7 +980,7 @@ async function resolveProjectPoolerHost({
   }
 
   if (fallback) return fallback;
-  if (discoveredRegion) return `aws-1-${discoveredRegion}.pooler.supabase.com`;
+  if (discoveredRegion && allowDerivedFallback) return buildRegionDerivedPoolerHost(discoveredRegion);
   return '';
 }
 
@@ -1673,14 +2182,20 @@ async function ensureAuthSigningKeyHs256({ projectRef, token, secret, maxRevokeA
   return { secret: Buffer.isBuffer(secret) ? secret.toString('hex') : String(secret || '').trim(), bytes: secretBytes };
 }
 
-async function deleteProject(projectRef, token) {
-  return http('DELETE', `/v1/projects/${projectRef}`, token);
+async function deleteProject(projectRef, token, { timeoutMs = 0 } = {}) {
+  return http('DELETE', `/v1/projects/${projectRef}`, token, undefined, {
+    signal: timeoutSignal(timeoutMs),
+  });
 }
 
-async function deleteBranch(branchId, token) {
+async function deleteBranch(branchId, token, { timeoutMs = 0 } = {}) {
   const id = resolveBranchId({ id: branchId });
   if (!id) throw new Error('branchId is required to delete branch');
-  return http('DELETE', `/v1/branches/${encodeURIComponent(id)}`, token);
+  return http('DELETE', `/v1/branches/${encodeURIComponent(id)}`, token, undefined, {
+    signal: Number(timeoutMs) > 0
+      ? AbortSignal.timeout(Math.max(1, Number.parseInt(String(timeoutMs), 10) || 1))
+      : undefined,
+  });
 }
 
 function sleep(ms) {
@@ -1722,30 +2237,131 @@ function isNotReadyForBranchDeletionError(err) {
 
 async function deleteProjectWithRetries(projectRef, token, opts = {}) {
   const timeoutMs = Number(opts.timeoutMs ?? 15 * 60 * 1000) || 15 * 60 * 1000;
-  const intervalMs = Number(opts.intervalMs ?? 15 * 1000);
-  const start = Date.now();
+  const intervalMs = Math.max(1, Number(opts.intervalMs ?? 15 * 1000));
+  const organizationId = String(opts.organizationId || '').trim();
+  const nowFn = typeof opts.nowFn === 'function' ? opts.nowFn : () => Date.now();
+  const sleepFn = typeof opts.sleepFn === 'function' ? opts.sleepFn : sleep;
+  const deleteProjectFn = typeof opts.deleteProjectFn === 'function' ? opts.deleteProjectFn : deleteProject;
+  const getProjectFn = typeof opts.getProjectFn === 'function' ? opts.getProjectFn : getProject;
+  const listProjectsFn = typeof opts.listProjectsFn === 'function' ? opts.listProjectsFn : listProjects;
+  const normalizedProjectRef = String(projectRef || '').trim().toLowerCase();
+  if (!organizationId) {
+    const error = new Error(
+      `Cannot delete project ${projectRef}: organizationId is required for same-token deletion proof`,
+    );
+    error.status = 400;
+    error.code = 'supabase_project_delete_identity_missing';
+    throw error;
+  }
+  if (!isCanonicalSupabaseProjectRef(normalizedProjectRef)) {
+    const error = new Error(
+      `Cannot delete project ${projectRef}: projectRef must be a canonical 20-letter immutable Supabase project ref`,
+    );
+    error.status = 400;
+    error.code = 'supabase_project_delete_identity_invalid';
+    throw error;
+  }
+  const start = nowFn();
+  const remainingMs = () => Math.max(0, timeoutMs - (nowFn() - start));
+  const sleepWithinDeadline = async (requestedDelayMs) => {
+    const remainingBeforeSleepMs = remainingMs();
+    if (remainingBeforeSleepMs <= 0) return false;
+    await sleepFn(Math.min(Math.max(0, Number(requestedDelayMs) || 0), remainingBeforeSleepMs));
+    return remainingMs() > 0;
+  };
+  const retryDelayMs = (err) => {
+    const status = Number(err?.status || 0);
+    if (status !== 429) return intervalMs;
+    const providerDelayMs = parseRetryDelayFromError(err, nowFn());
+    return providerDelayMs == null ? intervalMs : providerDelayMs;
+  };
+  const isRetryableRequestError = (err) => {
+    const status = Number(err?.status || 0);
+    return isTransientFetchError(err) || [429, 500, 502, 503, 504].includes(status);
+  };
   let attempt = 0;
-  while (Date.now() - start < timeoutMs) {
+  let deleteAccepted = false;
+  while (remainingMs() > 0) {
     attempt++;
+    if (!deleteAccepted) {
+      if (opts.beforeDelete) await opts.beforeDelete();
+      const deleteRequestBudgetMs = remainingMs();
+      if (deleteRequestBudgetMs <= 0) break;
+      try {
+        await deleteProjectFn(projectRef, token, { timeoutMs: deleteRequestBudgetMs });
+        deleteAccepted = true;
+      } catch (err) {
+        if (isRemovedResourceError(err)) return;
+        if (
+          isNotReadyForDeletionError(err) ||
+          isRetryableRequestError(err)
+        ) {
+          if (!(await sleepWithinDeadline(retryDelayMs(err)))) break;
+          continue;
+        }
+        err.attempt = attempt;
+        throw err;
+      }
+    }
+
+    const getRequestBudgetMs = remainingMs();
+    if (getRequestBudgetMs <= 0) break;
     try {
-      await deleteProject(projectRef, token);
-      return;
+      const project = await getProjectFn(projectRef, token, { timeoutMs: getRequestBudgetMs });
+      const status = String(project?.status || project?.project_status || '').trim().toLowerCase();
+      if (status.includes('removed') || status.includes('deleted')) return;
     } catch (err) {
       if (isRemovedResourceError(err)) return;
       const status = Number(err?.status || 0);
-      if (
-        isNotReadyForDeletionError(err) ||
-        isTransientFetchError(err) ||
-        [429, 500, 502, 503, 504].includes(status)
-      ) {
-        await sleep(intervalMs);
+      if (deleteAccepted && status === 403) {
+        let organizationProjects;
+        try {
+          const listRequestBudgetMs = remainingMs();
+          if (listRequestBudgetMs <= 0) break;
+          organizationProjects = await listProjectsFn({
+            token,
+            organizationId,
+            requireVerifiableResponse: true,
+            timeoutMs: listRequestBudgetMs,
+          });
+          organizationProjects = assertVerifiableProjectList(organizationProjects);
+        } catch (listError) {
+          if (
+            listError?.code !== 'supabase_project_list_unverifiable' &&
+            isRetryableRequestError(listError)
+          ) {
+            if (!(await sleepWithinDeadline(retryDelayMs(listError)))) break;
+            continue;
+          }
+          const safeReason = listError?.code === 'supabase_project_list_unverifiable'
+            ? 'unverifiable_response'
+            : `status_${Number(listError?.status || 0) || 'unknown'}`;
+          const confirmationError = new Error(
+            `Cannot confirm project ${projectRef} deletion after accepted DELETE: ` +
+              `complete same-token project visibility is unavailable or unverifiable (${safeReason})`,
+          );
+          confirmationError.status = Number(listError?.status || 0) || 403;
+          confirmationError.attempt = attempt;
+          confirmationError.cause = listError;
+          throw confirmationError;
+        }
+
+        const projectStillVisible = organizationProjects.some((project) =>
+          resolveProjectRef(project).toLowerCase() === normalizedProjectRef,
+        );
+        if (!projectStillVisible) return;
+      } else if (isRetryableRequestError(err)) {
+        if (!(await sleepWithinDeadline(retryDelayMs(err)))) break;
         continue;
+      } else {
+        err.attempt = attempt;
+        throw err;
       }
-      err.attempt = attempt;
-      throw err;
     }
+
+    if (!(await sleepWithinDeadline(intervalMs))) break;
   }
-  const e = new Error(`Timeout deleting project ${projectRef} after ${attempt} attempts`);
+  const e = new Error(`Timeout confirming project ${projectRef} deletion after ${attempt} attempts`);
   e.status = 408;
   throw e;
 }
@@ -1754,19 +2370,32 @@ async function deleteBranchWithRetries(branchId, token, opts = {}) {
   const id = resolveBranchId({ id: branchId });
   if (!id) throw new Error('branchId is required to delete branch');
   const timeoutMs = Number(opts.timeoutMs ?? 10 * 60 * 1000) || 10 * 60 * 1000;
-  const intervalMs = Number(opts.intervalMs ?? 10 * 1000);
-  const start = Date.now();
+  const intervalMs = Math.max(1, Number(opts.intervalMs ?? 10 * 1000));
+  const nowFn = typeof opts.nowFn === 'function' ? opts.nowFn : () => Date.now();
+  const sleepFn = typeof opts.sleepFn === 'function' ? opts.sleepFn : sleep;
+  const deleteBranchFn = typeof opts.deleteBranchFn === 'function' ? opts.deleteBranchFn : deleteBranch;
+  const start = nowFn();
   let attempt = 0;
-  while (Date.now() - start < timeoutMs) {
+  while (nowFn() - start < timeoutMs) {
+    if (opts.beforeDelete) await opts.beforeDelete();
+    const remainingBeforeRequestMs = Math.max(0, timeoutMs - (nowFn() - start));
+    if (remainingBeforeRequestMs <= 0) break;
     attempt++;
     try {
-      await deleteBranch(id, token);
+      await deleteBranchFn(id, token, { timeoutMs: remainingBeforeRequestMs });
       return;
     } catch (err) {
       if (err && Number(err.status || 0) === 404) return; // already deleted
       if (isRemovedResourceError(err)) return;
-      if (isNotReadyForBranchDeletionError(err)) {
-        await sleep(intervalMs);
+      const status = Number(err?.status || 0);
+      if (
+        isNotReadyForBranchDeletionError(err) ||
+        isTransientFetchError(err) ||
+        [429, 500, 502, 503, 504].includes(status)
+      ) {
+        const remainingBeforeSleepMs = Math.max(0, timeoutMs - (nowFn() - start));
+        if (remainingBeforeSleepMs <= 0) break;
+        await sleepFn(Math.min(intervalMs, remainingBeforeSleepMs));
         continue;
       }
       err.attempt = attempt;
@@ -1778,12 +2407,72 @@ async function deleteBranchWithRetries(branchId, token, opts = {}) {
   throw e;
 }
 
-async function listProjects({ token, organizationId } = {}) {
+function unverifiableProjectListError(detail) {
+  const error = new Error(`Supabase project list response is not verifiable: ${detail}`);
+  error.status = 502;
+  error.code = 'supabase_project_list_unverifiable';
+  return error;
+}
+
+function resolveProjectOrganizationIdentity(project) {
+  return {
+    id: normalizeProjectName(project?.organization_id || project?.organizationId),
+    slug: normalizeProjectName(project?.organization_slug || project?.organizationSlug),
+  };
+}
+
+function assertVerifiableProjectList(projects) {
+  if (!Array.isArray(projects)) {
+    throw unverifiableProjectListError('expected the documented top-level project array');
+  }
+  const seenRefs = new Set();
+  projects.forEach((project, index) => {
+    const ref = resolveProjectRef(project).toLowerCase();
+    if (!isCanonicalSupabaseProjectRef(ref)) {
+      throw unverifiableProjectListError(`row ${index} lacks a canonical 20-letter immutable project ref`);
+    }
+    if (seenRefs.has(ref)) {
+      throw unverifiableProjectListError(`row ${index} duplicates immutable project ref ${ref}`);
+    }
+    seenRefs.add(ref);
+    const organization = resolveProjectOrganizationIdentity(project);
+    if (!organization.id && !organization.slug) {
+      throw unverifiableProjectListError(
+        `row ${index} lacks organization identity`,
+      );
+    }
+  });
+  return projects;
+}
+
+function filterProjectsByOrganization(projects, organizationId) {
+  const expected = normalizeProjectName(organizationId);
+  if (!expected) throw new Error('SUPABASE_ORG_ID is required to filter projects');
+  return projects.filter((project, index) => {
+    const organization = resolveProjectOrganizationIdentity(project);
+    if (!organization.id && !organization.slug) {
+      throw unverifiableProjectListError(`row ${index} lacks organization identity`);
+    }
+    return organization.id === expected || organization.slug === expected;
+  });
+}
+
+async function listProjects({
+  token,
+  organizationId,
+  requireVerifiableResponse = false,
+  timeoutMs = 0,
+} = {}) {
   if (!token) throw new Error('SUPABASE_ACCESS_TOKEN is required to list projects');
   if (!organizationId) throw new Error('SUPABASE_ORG_ID is required to list projects');
-  const qs = `?organization_id=${encodeURIComponent(organizationId)}`;
-  const res = await http('GET', `/v1/projects${qs}`, token);
-  return Array.isArray(res) ? res : (Array.isArray(res?.projects) ? res.projects : []);
+  const res = await http('GET', '/v1/projects', token, undefined, {
+    signal: timeoutSignal(timeoutMs),
+  });
+  if (requireVerifiableResponse) return assertVerifiableProjectList(res);
+  const projects = Array.isArray(res)
+    ? res
+    : (Array.isArray(res?.projects) ? res.projects : []);
+  return filterProjectsByOrganization(projects, organizationId);
 }
 
 async function assertOrganizationAccess({ token, organizationId } = {}) {
@@ -1867,9 +2556,11 @@ async function ensureProject(opts) {
 }
 
 module.exports = {
+  inspectOwnedPreviewWorkspace,
   createProject,
   createBranch,
   ensureBranch,
+  isInconclusiveBranchCreateError,
   ensureProject,
   getProject,
   extractPoolerHostsFromPayload,
@@ -1884,6 +2575,15 @@ module.exports = {
   authConfigContainsRequiredRedirects,
   listBranches,
   findBranchByName,
+  getBranchConfig,
+  isCanonicalSupabaseDatabaseHost,
+  isCanonicalPostgresPort,
+  isCanonicalSupabasePoolerHost,
+  normalizeSupabasePoolerRegion,
+  resolveSupabasePoolerRegionFromHost,
+  isCanonicalSupabaseProjectRef,
+  validateBranchDatabaseConfig,
+  waitForBranchDatabaseConfig,
   findProjectByName,
   resolveBranchId,
   resolveBranchProjectRef,

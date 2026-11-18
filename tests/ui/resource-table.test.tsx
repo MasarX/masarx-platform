@@ -233,7 +233,9 @@ test("resource table supports inline editing when permitted", async () => {
   );
 
   const statusCell = screen.getByText("Ready").closest("td");
-  if (statusCell) fireEvent.dblClick(statusCell);
+  expect(statusCell).toHaveAttribute("data-column-key", "status");
+  expect(statusCell).toHaveAttribute("data-editable", "true");
+  fireEvent.dblClick(statusCell!);
   await waitFor(() => {
     expect(screen.getByLabelText("Edit Status value")).toBeInTheDocument();
   });
@@ -266,7 +268,10 @@ test("resource table hides inline edit action without capability", () => {
     />
   );
 
-  expect(screen.queryByRole("button", { name: "Edit Status" })).toBeNull();
+  expect(screen.getByText("Ready").closest("td")).toHaveAttribute(
+    "data-editable",
+    "false"
+  );
 });
 
 test("resource table filters rows via quick search", () => {
@@ -1142,6 +1147,7 @@ test("resource table renders bulk actions when rows are selected", () => {
         { id: "2", name: "Bravo" }
       ]}
       idKey="id"
+      baseHref="/portal/operations/exceptions/dispatch_exception_review"
       onSelectionChange={onSelectionChange}
       renderBulkActions={(selectedIds) => (
         <span>Bulk actions: {selectedIds.length}</span>
@@ -1150,12 +1156,30 @@ test("resource table renders bulk actions when rows are selected", () => {
     />
   );
 
-  fireEvent.click(screen.getByLabelText("Select row Alpha"));
+  expect(screen.getByTestId("ops-table-root")).toHaveAttribute(
+    "data-interaction-ready",
+    "true"
+  );
+  const rowCheckbox = screen.getByLabelText("Select row Alpha");
+  expect(rowCheckbox).toBeEnabled();
+  const row = rowCheckbox.closest("tr");
+  expect(row).not.toBeNull();
+
+  fireEvent.click(rowCheckbox);
+  expect(row).toHaveAttribute("aria-selected", "true");
   expect(screen.getByText("Bulk actions: 1")).toBeInTheDocument();
   expect(screen.getByTestId("ops-table-selection-bar")).toHaveClass(
     "pointer-events-none"
   );
+  expect(screen.getByTestId("ops-table-selection-bar")).toHaveClass(
+    "relative", "max-w-full"
+  );
+  expect(screen.getByTestId("ops-table-selection-bar")).not.toHaveClass("fixed");
+  expect(screen.getByTestId("ops-table-selection-bar")).not.toHaveClass("z-50");
+  fireEvent.click(screen.getByLabelText("Select row Bravo"));
+  expect(screen.getByText("Bulk actions: 2")).toBeInTheDocument();
   expect(onSelectionChange).toHaveBeenCalled();
+  expect(pushMock).not.toHaveBeenCalled();
 });
 
 test("resource table submits a new view request", async () => {

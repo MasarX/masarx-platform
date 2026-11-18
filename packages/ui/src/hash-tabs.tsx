@@ -64,25 +64,19 @@ export function HashTabs({
     const mapped = resolveMappedValue(hash, hashToValue);
     if (mapped && mapped !== value) {
       setValue(mapped);
-      return;
     }
-    if (!mapped && value !== defaultValue) {
-      setValue(defaultValue);
-    }
-  }, [defaultValue, hashToValue, value]);
+  }, [hashToValue, value]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     const handle = () => {
       const hash = normalizeHash(window.location.hash);
       const mapped = resolveMappedValue(hash, hashToValue);
-      if (mapped) {
-        setValue(mapped);
-      }
+      if (hashToValue) setValue(mapped ?? defaultValue);
     };
     window.addEventListener("hashchange", handle);
     return () => window.removeEventListener("hashchange", handle);
-  }, [hashToValue]);
+  }, [defaultValue, hashToValue]);
 
   const handleValueChange = React.useCallback(
     (nextValue: string) => {

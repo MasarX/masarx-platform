@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getUiDefaults } from "@masarx/config";
 import { createUiTranslator } from "./i18n";
+import { resolveNavigationDisabledReason } from "./navigation-disabled-reason";
 const CommandPalette = React.lazy(() =>
   import("./command-palette").then((mod) => ({ default: mod.CommandPalette }))
 );
@@ -28,7 +29,7 @@ import {
 import { reportUiEvent } from "./reporting";
 import { useReadRegistry } from "./read-registry-client";
 import { labelFromKey } from "./resource-query";
-import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { hasCapability, resolveCapabilitySet, isResourceReadScopeAllowed } from "./capabilities";
 import {
   flattenNavigationSections,
   normalizeNavigationSections,
@@ -36,12 +37,15 @@ import {
 import { resolveSafeAppBasePath } from "./url-guard";
 
 type NavigationNextProps = {
+  organizationId?: string | null;
   sections: NavigationSection[];
   appKey?: string;
   userId?: string | null;
   basePath?: string;
   onNavigate?: (item: NavigationItem) => void;
   capabilities?: string[] | null;
+  scopeType?: string | null;
+  scopeId?: string | null;
 };
 
 const uiDefaults = getUiDefaults();
@@ -50,14 +54,18 @@ const uiDefaults = getUiDefaults();
  * Next.js navigation wrapper that renders sections via Navigation.
  */
 export function NavigationNext({
+  organizationId,
   sections,
   appKey = "app",
   userId,
   basePath,
   onNavigate,
   capabilities,
+  scopeType,
+  scopeId,
 }: NavigationNextProps) {
   const t = createUiTranslator("ui.navigation");
+  const resourceT = createUiTranslator("ui.resourcePage");
   const pathname = usePathname();
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const navigationDefaults = uiDefaults.navigation;
@@ -75,9 +83,13 @@ export function NavigationNext({
     [sections, safeBasePath]
   );
   const shouldUseFallback = normalizedSections.length === 0;
-  const { data: readRegistry } = useReadRegistry({
-    enabled: shouldUseFallback && Boolean(userId),
+  const { data: readRegistry, isError: registryError, isFetching: registryFetching } = useReadRegistry({
+    userId, scopeType, scopeId,
+    organizationId,
+    enabled: Boolean(userId),
   });
+  const registryState = registryError ? "error" :
+    registryFetching || !readRegistry ? "loading" : "ready";
   const fallbackSections = React.useMemo(() => {
     if (!shouldUseFallback) return [];
     const resources = Array.isArray(readRegistry?.resources)
@@ -125,12 +137,17 @@ export function NavigationNext({
           : item.items;
         const requiredCapability = item.capability?.trim() ?? "";
         const capabilityAllowed = hasCapability(capabilitySet, requiredCapability);
+        const resource = item.resource
+          ? readRegistry?.resources?.find((entry) => entry.key === item.resource)
+          : null;
+        const scopeAllowed = !item.resource ||
+          isResourceReadScopeAllowed(resource, scopeType, scopeId, organizationId);
         const disabledReason =
-          item.disabled_reason ??
-          (!capabilityAllowed
-            ? t("disabled.missingCapability", {
-                capability: requiredCapability,
-              })
+          resolveNavigationDisabledReason(item.disabled_reason, t) ??
+          (item.resource && registryState !== "ready"
+            ? registryState === "error" ? resourceT("unavailable.action") : t("pendingDescription")
+            : !scopeAllowed ? resourceT("blocked.action") : !capabilityAllowed
+            ? t("disabled.missingCapability")
             : null);
         if (
           nestedItems === item.items &&
@@ -150,7 +167,7 @@ export function NavigationNext({
         ? section
         : { ...section, items: nextItems };
     });
-  }, [capabilitySet, sourceSections, t]);
+  }, [capabilitySet, sourceSections, t, readRegistry, registryState, scopeType, scopeId, organizationId, resourceT]);
   const storageKey = buildNavigationStorageKey(appKey, userId);
   const legacyStorageKey = buildLegacyNavigationStorageKey(appKey, userId);
   const {
@@ -343,7 +360,7 @@ export function NavigationNext({
   }, [commandPaletteShortcut]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-navigation-registry-state={registryState} aria-busy={registryState === "loading"}>
       <div className="space-y-2">
         <button
           type="button"
@@ -412,6 +429,10 @@ export function NavigationNext({
             recents={recents}
             onRecordRecent={recordRecent}
             capabilities={capabilities}
+            userId={userId}
+            organizationId={organizationId}
+            scopeType={scopeType}
+            scopeId={scopeId}
             shortcut={commandPaletteShortcut}
           />
         </React.Suspense>

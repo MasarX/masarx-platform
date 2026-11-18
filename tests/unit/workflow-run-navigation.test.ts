@@ -1,6 +1,24 @@
+import { resolveSafeAppBasePath } from "../../packages/ui/src/url-guard";
 import { resolveWorkflowRunDestination } from "../../packages/ui/src/workflow-run-navigation";
 
 describe("resolveWorkflowRunDestination", () => {
+  it.each([
+    {
+      result: { workflow_run_id: "run/1?x#" },
+      expected: "/workflows/runs/run%2F1%3Fx%23",
+    },
+    {
+      result: { workflow_run_id: "run-1", correlation_id: "corr/abc?x#" },
+      expected: "/observability/trace/corr%2Fabc%3Fx%23",
+    },
+  ])("composes normalized root base with encoded destination $expected", ({ result, expected }) => {
+    const appBasePath = resolveSafeAppBasePath("/");
+    expect(appBasePath).toBe("");
+    if (appBasePath === null) throw new Error("Root base must normalize safely");
+    expect(resolveWorkflowRunDestination({ appBasePath, result })).toBe(expected);
+  });
+
+
   it("returns workflow run route when correlation is missing", () => {
     expect(
       resolveWorkflowRunDestination({
@@ -22,6 +40,27 @@ describe("resolveWorkflowRunDestination", () => {
     ).toBe("/console/observability/trace/corr-abc");
   });
 
+  it("supports root-mounted apps when correlation is missing", () => {
+    expect(
+      resolveWorkflowRunDestination({
+        appBasePath: "/",
+        result: { workflow_run_id: "run-1" },
+      })
+    ).toBe("/workflows/runs/run-1");
+  });
+
+  it("supports root-mounted apps when correlation id exists", () => {
+    expect(
+      resolveWorkflowRunDestination({
+        appBasePath: "/",
+        result: {
+          workflow_run_id: "run-1",
+          correlation_id: "corr-abc",
+        },
+      })
+    ).toBe("/observability/trace/corr-abc");
+  });
+
   it("reads correlation from nested context and run details", () => {
     expect(
       resolveWorkflowRunDestination({
@@ -38,7 +77,7 @@ describe("resolveWorkflowRunDestination", () => {
     ).toBe("/portal/observability/trace/corr-xyz");
   });
 
-  it("returns null when app base is empty", () => {
+  it("returns null when app base is whitespace-only", () => {
     expect(
       resolveWorkflowRunDestination({
         appBasePath: "   ",

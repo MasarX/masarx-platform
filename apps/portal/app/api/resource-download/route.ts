@@ -8,6 +8,7 @@ import {
 } from "../../../../shared/request-meta";
 import {
   downloadResourceBatch,
+  MAX_RESOURCE_DOWNLOAD_BATCH,
 } from "../../../../shared/resource-download";
 
 export async function GET(request: NextRequest) {
@@ -26,6 +27,14 @@ export async function GET(request: NextRequest) {
   if (!resource || (!id && ids.length === 0)) {
     return jsonResponseWithRequestId(
       { error: "Missing resource or id." },
+      400,
+      requestId
+    );
+  }
+
+  if (ids.length > MAX_RESOURCE_DOWNLOAD_BATCH) {
+    return jsonResponseWithRequestId(
+      { error: `Select at most ${MAX_RESOURCE_DOWNLOAD_BATCH} resources per download.` },
       400,
       requestId
     );
@@ -51,14 +60,16 @@ export async function GET(request: NextRequest) {
   }
 
   const resolvedIds = ids.length > 0 ? ids : id ? [id] : [];
-  if (resolvedIds.length > 1) {
+  if (idsParam !== null || resolvedIds.length > 1) {
     const payload = await downloadResourceBatch({
       supabase,
       requestId,
       app: "portal",
       resource,
       ids: resolvedIds,
+      shipmentId,
       accessToken: token,
+      ...(shipmentId ? { extraParams: { shipment_id: shipmentId } } : {}),
       requestResourceDownload: requestUiResourceDownload,
     });
 

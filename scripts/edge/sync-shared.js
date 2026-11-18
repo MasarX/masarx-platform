@@ -11,6 +11,11 @@ const path = require('path');
 const functionsRoot = path.join(__dirname, '..', '..', 'supabase', 'functions');
 const sharedSource = path.join(functionsRoot, '_shared');
 
+if (process.argv.includes('--if-present') && !fs.existsSync(functionsRoot)) {
+  console.log('[edge:sync-shared] Skipped: supabase/functions is absent from this checkout.');
+  process.exit(0);
+}
+
 if (!fs.existsSync(sharedSource)) {
   console.error('[edge:sync-shared] Source folder supabase/functions/_shared not found.');
   process.exit(1);

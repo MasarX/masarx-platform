@@ -4,7 +4,7 @@ import { LoadingState, ResourcePage as UiResourcePage } from "@masarx/ui";
 type ResourcePageProps = Parameters<typeof UiResourcePage>[0];
 const ResourcePageInner = UiResourcePage as unknown as (
   props: ResourcePageProps
-) => JSX.Element;
+) => React.JSX.Element;
 
 export function ResourcePage(props: ResourcePageProps) {
   return (

@@ -70,13 +70,16 @@ export function ResourceDetailClient({
   const [detailLayout, setDetailLayout] = React.useState<"full" | "peek">(
     initialLayout
   );
+  const previousInitialLayoutRef = React.useRef(initialLayout);
 
   // Sync from server props when they change (e.g. browser back/forward + RSC)
   React.useEffect(() => {
     setDetailOpen(initialOpen);
-  }, [initialOpen]);
+  }, [detailId, initialOpen]);
 
   React.useEffect(() => {
+    if (previousInitialLayoutRef.current === initialLayout) return;
+    previousInitialLayoutRef.current = initialLayout;
     setDetailLayout(initialLayout);
   }, [initialLayout]);
 
@@ -175,7 +178,7 @@ export function ResourceDetailClient({
           >
             <path d="M12.5 4L7 10l5.5 6" />
           </svg>
-          <span>{t("detail.backToList")}</span>
+          <span className="whitespace-nowrap">{t("detail.backToList")}</span>
         </button>
         <span className="hidden max-w-[14rem] truncate text-[11px] text-ui-muted sm:inline">
           {detailTitle}

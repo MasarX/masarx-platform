@@ -96,3 +96,4 @@ Run the repeatable micro-benchmark:
 ```bash
 node scripts/benchmarks/label-barcode-render-bench.js --engine both --dpi 203 --iterations 200
 ```
+

@@ -3,6 +3,7 @@ const runnerMutationEnvKeys = [
   'GITHUB_OUTPUT',
   'GITHUB_STATE',
   'GITHUB_STEP_SUMMARY',
+  'MASARX_RUNTIME_LEASE_DIR',
 ];
 
 beforeEach(() => {

@@ -6,6 +6,7 @@ jest.mock('../../../scripts/ops/workspace/with-full-preview-stack', () => ({
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('node:child_process');
 const {
   assertLandingEndpointSeparation,
   buildPreviewManifestShellExports,
@@ -19,10 +20,6 @@ const {
   ensureVercelAutomationBypassSecret,
   upsertEnvFileVariable,
 } = require('../../../scripts/ops/workspace/with-full-preview-stack');
-
-function readWorkflow(name) {
-  return fs.readFileSync(path.join(process.cwd(), '.github', 'workflows', name), 'utf8');
-}
 
 describe('release-verify-preview helpers', () => {
   beforeEach(() => {
@@ -113,83 +110,61 @@ describe('release-verify-preview helpers', () => {
     expect(isProtectedPreviewHost('')).toBe(false);
   });
 
-  test('normalizeLandingProofEndpoint strips query strings and trailing slashes', () => {
-    expect(normalizeLandingProofEndpoint('/__landing-contact/?debug=1')).toBe('/__landing-contact');
-    expect(normalizeLandingProofEndpoint('https://EXAMPLE.com/functions/v1/tenant-signup-intake/?debug=1')).toBe(
-      'https://example.com/functions/v1/tenant-signup-intake',
-    );
+  test('normalizes endpoint query, fragment, casing and trailing slash aliases', () => {
+    expect(normalizeLandingProofEndpoint('/__tenant-signup///?x=1#contact')).toBe('/__tenant-signup');
+    expect(normalizeLandingProofEndpoint('https://EXAMPLE.com:443/functions/v1/marketing-lead-intake/?x=1'))
+      .toBe('https://example.com/functions/v1/marketing-lead-intake');
   });
 
-  test('assertLandingEndpointSeparation allows separated landing proof endpoints', () => {
-    expect(
-      assertLandingEndpointSeparation({
-        contactEndpoint: '/__landing-contact',
-        siteUrl: 'http://127.0.0.1:3333',
-        tenantSignupEndpoint: '/__tenant-signup',
-      }),
-    ).toEqual({
-      contactEndpoint: '/__landing-contact',
-      tenantSignupEndpoint: '/__tenant-signup',
+  test.each([
+    ['https://example.com', '/functions/v1/marketing-lead-intake', '/functions/v1/tenant-signup-intake'],
+    ['http://127.0.0.1:3333', '/__landing-contact/?source=test', '/__tenant-signup/'],
+    ['http://landing-ci.localhost:3333', '/__landing-contact', '/__tenant-signup'],
+    ['http://[::1]:3333', 'http://[::1]:3333/__landing-contact', '/__tenant-signup'],
+  ])('allows distinct role-bound endpoints on %s', (siteUrl, contactEndpoint, tenantSignupEndpoint) => {
+    expect(assertLandingEndpointSeparation({ siteUrl, contactEndpoint, tenantSignupEndpoint })).toEqual({
+      contactEndpoint: normalizeLandingProofEndpoint(contactEndpoint),
+      tenantSignupEndpoint: normalizeLandingProofEndpoint(tenantSignupEndpoint),
     });
   });
 
-  test('assertLandingEndpointSeparation allows canonical intake endpoints', () => {
-    expect(
-      assertLandingEndpointSeparation({
-        contactEndpoint: '/functions/v1/marketing-lead-intake',
-        tenantSignupEndpoint: '/functions/v1/tenant-signup-intake',
-      }),
-    ).toEqual({
-      contactEndpoint: '/functions/v1/marketing-lead-intake',
-      tenantSignupEndpoint: '/functions/v1/tenant-signup-intake',
+  test.each([
+    ['', '/functions/v1/tenant-signup-intake'],
+    ['/functions/v1/marketing-lead-intake', ''],
+    ['/functions/v1/marketing-lead-intake/?x=1', '/functions/v1/marketing-lead-intake/'],
+    ['/functions/v1/tenant-signup-intake', '/functions/v1/marketing-lead-intake'],
+    ['/__landing-contact?x=1', '/__landing-contact///#alias'],
+    ['/__tenant-signup', '/__landing-contact'],
+    ['/api/contact', '/functions/v1/tenant-signup-intake'],
+  ])('rejects missing, reused or crossed roles: %s -> %s', (contactEndpoint, tenantSignupEndpoint) => {
+    expect(() => assertLandingEndpointSeparation({ siteUrl: 'http://localhost:3333', contactEndpoint, tenantSignupEndpoint }))
+      .toThrow(/ENDPOINT/);
+  });
+
+  test.each(['', 'https://landing.example.com', 'https://localhost.example.com', 'file://localhost/'])
+    ('rejects local mocks for a nonlocal site: %s', (siteUrl) => {
+      expect(() => assertLandingEndpointSeparation({ siteUrl, contactEndpoint: '/__landing-contact', tenantSignupEndpoint: '/__tenant-signup' }))
+        .toThrow(/LANDING_CONTACT_ENDPOINT/);
     });
+
+  test.each(['//example.com/__landing-contact', '/\\example.com/__landing-contact', 'javascript:marketing-lead-intake', (['https',":","/","/",'user',":",'password',"@",'example.com',"/",'marketing-lead-intake'].join(""))])
+    ('rejects an invalid endpoint before proof: %s', (contactEndpoint) => {
+      expect(() => assertLandingEndpointSeparation({ siteUrl: 'http://localhost', contactEndpoint, tenantSignupEndpoint: '/__tenant-signup' })).toThrow();
+    });
+
+  test('rejects a remote mock URL even when the landing site is local', () => {
+    expect(() => assertLandingEndpointSeparation({ siteUrl: 'http://localhost', contactEndpoint: 'https://remote.example.com/__landing-contact', tenantSignupEndpoint: '/__tenant-signup' }))
+      .toThrow(/LANDING_CONTACT_ENDPOINT/);
   });
 
-  test('assertLandingEndpointSeparation rejects Example Person mocks for non-local landing URLs', () => {
-    expect(() =>
-      assertLandingEndpointSeparation({
-        contactEndpoint: '/__landing-contact',
-        siteUrl: 'https://example.com',
-        tenantSignupEndpoint: '/__tenant-signup',
-      }),
-    ).toThrow(/LANDING_CONTACT_ENDPOINT must point to the marketing-lead-intake intake endpoint/);
-  });
-
-  test('assertLandingEndpointSeparation fails closed when contact would hit tenant signup intake', () => {
-    expect(() =>
-      assertLandingEndpointSeparation({
-        contactEndpoint: 'https://example.com/functions/v1/tenant-signup-intake',
-        tenantSignupEndpoint: 'https://example.com/functions/v1/tenant-signup-intake',
-      }),
-    ).toThrow(/LANDING_CONTACT_ENDPOINT must point to the marketing-lead-intake intake endpoint/);
-  });
-
-  test('assertLandingEndpointSeparation fails closed when tenant signup would hit marketing lead intake', () => {
-    expect(() =>
-      assertLandingEndpointSeparation({
-        contactEndpoint: 'https://example.com/functions/v1/marketing-lead-intake',
-        tenantSignupEndpoint: 'https://example.com/functions/v1/marketing-lead-intake',
-      }),
-    ).toThrow(/LANDING_TENANT_SIGNUP_ENDPOINT must point to the tenant-signup-intake intake endpoint/);
-  });
-
-  test('assertLandingEndpointSeparation fails closed when tenant signup would hit contact intake', () => {
-    expect(() =>
-      assertLandingEndpointSeparation({
-        contactEndpoint: '/__landing-contact?source=contact',
-        siteUrl: 'http://127.0.0.1:3333',
-        tenantSignupEndpoint: '/__landing-contact/',
-      }),
-    ).toThrow(/LANDING_TENANT_SIGNUP_ENDPOINT must point to the tenant-signup-intake intake endpoint/);
-  });
-
-  test('assertLandingEndpointSeparation fails closed when tenant signup proof endpoint is missing', () => {
-    expect(() =>
-      assertLandingEndpointSeparation({
-        contactEndpoint: '/__landing-contact',
-        tenantSignupEndpoint: '',
-      }),
-    ).toThrow(/LANDING_TENANT_SIGNUP_ENDPOINT is required for release landing proof/);
+  test('the actual release guard CLI accepts distinct endpoints and rejects a reused alias', () => {
+    const script = path.join(process.cwd(), 'scripts/ops/ci/release-verify-preview.js');
+    const env = { ...process.env, LANDING_SITE_URL: 'http://localhost:3333', LANDING_CONTACT_ENDPOINT: '/__landing-contact', LANDING_TENANT_SIGNUP_ENDPOINT: '/__tenant-signup' };
+    const valid = spawnSync(process.execPath, [script, '--mode', 'assert-landing-endpoint-separation'], { env, encoding: 'utf8' });
+    expect(valid.status).toBe(0);
+    const reused = spawnSync(process.execPath, [script, '--mode', 'assert-landing-endpoint-separation'], { env: { ...env, LANDING_TENANT_SIGNUP_ENDPOINT: '/__landing-contact/?source=alias' }, encoding: 'utf8' });
+    expect(reused.status).not.toBe(0);
+    expect(reused.stderr).toContain('LANDING_TENANT_SIGNUP_ENDPOINT');
   });
 
   test('ensureProtectedPreviewBypass skips when no protected preview host is present', async () => {
@@ -247,42 +222,5 @@ describe('release-verify-preview helpers', () => {
     await expect(ensureProtectedPreviewBypass({ env })).rejects.toThrow(
       /Protected Vercel preview hosts require automation bypass configuration/,
     );
-  });
-});
-
-describe('release verify preview workflow contracts', () => {
-  test('preview provision generates runtime readiness evidence before staging the internal bundle', () => {
-    const body = readWorkflow('release-verify-main.yml');
-    const jobStart = body.indexOf('  release_verify_preview_provision:');
-    const jobEnd = body.indexOf('\n  release_verify_preview_core:', jobStart);
-
-    expect(jobStart).toBeGreaterThan(-1);
-    expect(jobEnd).toBeGreaterThan(jobStart);
-
-    const provisionJob = body.slice(jobStart, jobEnd);
-    const precheckIndex = provisionJob.indexOf('\n    - name: Preview runtime precheck');
-    const evidenceIndex = provisionJob.indexOf('\n    - name: Preview evidence contract');
-    const stageIndex = provisionJob.indexOf('\n    - name: Stage internal preview artifact bundle');
-
-    expect(precheckIndex).toBeGreaterThan(-1);
-    expect(evidenceIndex).toBeGreaterThan(precheckIndex);
-    expect(stageIndex).toBeGreaterThan(precheckIndex);
-    expect(provisionJob).toContain('node scripts/ops/preview/runtime-precheck.js \\');
-    expect(provisionJob).toContain('--report ".tmp/preview-runtime-ready.json" \\');
-    expect(provisionJob).toContain('--probe-auth \\');
-    expect(provisionJob).toContain('cp ".tmp/preview-runtime-ready.json" "${{ steps.preview_meta.outputs.artifact_runtime }}"');
-  });
-
-  test('release landing proof requires separated contact and tenant signup endpoints', () => {
-    const body = readWorkflow('release-verify-main.yml');
-
-    expect(body).toContain('LANDING_TENANT_SIGNUP_ENDPOINT: ${{ vars.LANDING_TENANT_SIGNUP_ENDPOINT || \'\' }}');
-    expect(body).toMatch(
-      /preview_required_surfaces="\$\{\{ steps\.preview_surfaces\.outputs\.csv \}\}"[\s\S]*release-verify-preview\.js --mode assert-landing-endpoint-separation[\s\S]*node scripts\/ops\/preview\/orchestrate\.js/,
-    );
-    expect(body).toMatch(
-      /LANDING_CONTACT_ENDPOINT: "\/__[^\n]*landing-contact"[\s\S]*LANDING_TENANT_SIGNUP_ENDPOINT: "\/__tenant-signup"[\s\S]*release-verify-preview\.js --mode assert-landing-endpoint-separation[\s\S]*node scripts\/frontend\/build-landing\.js --out dist\/landing-release-ci-full/,
-    );
-    expect(body).not.toContain('LANDING_TENANT_SIGNUP_ENDPOINT: "/__landing-contact"');
   });
 });

@@ -142,12 +142,15 @@ async function seedHmacSource({
     );
 
     const { rows: templateRows } = await client.query(
-      `SELECT id FROM workflow_templates WHERE name = 'async_provider_dispatch_v1' LIMIT 1`
+      `SELECT id FROM workflow_templates WHERE name = 'webhook_shipment_create_v1' AND status='active' ORDER BY version DESC,updated_at DESC LIMIT 1`
     );
     if (!templateRows.length) {
-      throw new Error('async_provider_dispatch_v1 template not found');
+      throw new Error('canonical webhook_shipment_create_v1 template not found');
     }
     const templateId = templateRows[0].id;
+    await client.query(`WITH owned_sender AS (
+      INSERT INTO senders(client_id,name,status) VALUES($1::uuid,'HMAC fixture sender','active') RETURNING id
+    ) UPDATE webhook_sources SET sender_id=(SELECT id FROM owned_sender) WHERE id=$2::uuid`, [clientId, sourceId]);
 
     const policy = {
       version: 1,

@@ -4,9 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
   createUiClient,
-  isRetriableNetworkError,
-  isRetriableSupabaseError,
   type UiScope,
+  type UiCreateShipmentResult,
 } from "@masarx/api";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import { Button } from "./button";
@@ -14,25 +13,45 @@ import { Input } from "./input";
 import { Select } from "./select";
 import { useToast } from "./use-toast";
 import { formatUiError } from "./utils";
-import { isTimeoutError, resolveUiRpcTimeoutMs, withTimeout } from "./promise-timeout";
+import { resolveUiRpcTimeoutMs, withTimeout } from "./promise-timeout";
 import { useUnsavedChangesGuard } from "./use-unsaved-changes";
+import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
+import { normalizeAppHref } from "./navigation-paths";
+import { normalizeShipmentAddressCapture, assertShipmentAddressCapture } from "./shipment-address-capture";
 
 type ShipmentManualCreateFormProps = {
   appBasePath: string;
+  requirePersistedReadback?: boolean;
   returnTo?: string | null;
   organizationId?: string | null;
   accessScope?: UiScope | null;
   capabilities?: string[] | null;
   capabilityWrite?: string | null;
   testIdPrefix?: string | null;
+  serviceOfferings?: ShipmentServiceOfferingOption[] | null;
 };
 
-function normalizeReturnTo(value: string | null | undefined, fallback: string) {
+export type ShipmentServiceOfferingOption = {
+  id: string;
+  displayName: string;
+  serviceLevelKey: string;
+};
+
+function normalizeReturnTo(value: string | null | undefined, fallback: string, appBasePath: string) {
   const trimmed = value?.trim() ?? "";
-  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return fallback;
+  const safeHref = resolveSafeHref("", trimmed);
+  if (!safeHref) return fallback;
+  try {
+    const path = resolveSafeHref("", decodeURIComponent(safeHref.split(/[?#]/, 1)[0] ?? ""));
+    if (!path) return fallback;
+    const rootPath = normalizeAppHref(path, "");
+    const base = resolveSafeAppBasePath(appBasePath) ?? "";
+    if (path !== rootPath && path !== resolveSafeHref(base, rootPath)) return fallback;
+  } catch {
     return fallback;
   }
-  return trimmed;
+  return safeHref;
 }
 
 function buildShipmentDetailHref(returnTo: string, shipmentId: string) {
@@ -53,22 +72,24 @@ function scopeLabel(scope: UiScope | null | undefined) {
 
 export function ShipmentManualCreateForm({
   appBasePath,
+  requirePersistedReadback = false,
   returnTo,
   organizationId,
   accessScope,
   capabilities,
   capabilityWrite,
   testIdPrefix,
+  serviceOfferings,
 }: ShipmentManualCreateFormProps) {
   const router = useRouter();
   const { toast } = useToast();
   const scopeType = String(accessScope?.scope_type ?? "").trim().toLowerCase();
   const scopeId = String(accessScope?.scope_id ?? "").trim();
   const resolvedTestIdPrefix = testIdPrefix?.trim() || "shipment-manual-create";
-  const fallbackReturnTo = `${appBasePath}/resources/shipments`;
+  const fallbackReturnTo = resolveSafeHref(appBasePath, "/resources/shipments") ?? "/resources/shipments";
   const normalizedReturnTo = React.useMemo(
-    () => normalizeReturnTo(returnTo, fallbackReturnTo),
-    [fallbackReturnTo, returnTo]
+    () => normalizeReturnTo(returnTo, fallbackReturnTo, appBasePath),
+    [appBasePath, fallbackReturnTo, returnTo]
   );
   const resolvedCapabilityWrite = capabilityWrite?.trim() ?? "";
   const capabilitySet = React.useMemo(
@@ -80,51 +101,54 @@ export function ShipmentManualCreateForm({
     hasCapability(capabilitySet, resolvedCapabilityWrite);
   const canResolvePermissions = resolvedCapabilityWrite.length > 0;
 
-  const [clientId, setClientId] = React.useState(scopeType === "client" ? scopeId : "");
-  const [senderId, setSenderId] = React.useState(scopeType === "sender" ? scopeId : "");
+  const initialClientId = scopeType === "client" ? scopeId : "";
+  const initialSenderId = scopeType === "sender" ? scopeId : "";
+  const initialStatus = "pending";
+  const [clientId, setClientId] = React.useState(initialClientId);
+  const [senderId, setSenderId] = React.useState(initialSenderId);
   const [serviceType, setServiceType] = React.useState("");
+  const [serviceOfferingId, setServiceOfferingId] = React.useState("");
   const [trackingNumber, setTrackingNumber] = React.useState("");
   const [clientReferenceNumber, setClientReferenceNumber] = React.useState("");
   const [carrierReferenceNumber, setCarrierReferenceNumber] = React.useState("");
-  const [status, setStatus] = React.useState("pending");
+  const [status, setStatus] = React.useState(initialStatus);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [committedResult, setCommittedResult] = React.useState<UiCreateShipmentResult | null>(null);
   const [pending, setPending] = React.useState(false);
+  const [addressLine1, setAddressLine1] = React.useState("");
+  const [addressCity, setAddressCity] = React.useState("");
+  const [shortCode, setShortCode] = React.useState("");
+  const [latitude, setLatitude] = React.useState("");
+  const [longitude, setLongitude] = React.useState("");
+  const [acceptedMessage, setAcceptedMessage] = React.useState<string | null>(null);
+  const [submissionUncertain, setSubmissionUncertain] = React.useState(false);
+  const submitLocked = pending || Boolean(acceptedMessage) || submissionUncertain;
+  // A committed create keeps the draft frozen while still allowing a readback re-check.
+  const submissionLocked = submitLocked || Boolean(committedResult);
 
   const hasChanges = Boolean(
-    clientId.trim() ||
-      senderId.trim() ||
+    clientId.trim() !== initialClientId ||
+      senderId.trim() !== initialSenderId ||
       serviceType.trim() ||
+      serviceOfferingId.trim() ||
       trackingNumber.trim() ||
       clientReferenceNumber.trim() ||
       carrierReferenceNumber.trim() ||
-      status.trim()
+      addressLine1.trim() || addressCity.trim() ||
+      shortCode.trim() || latitude.trim() || longitude.trim() ||
+      status.trim() !== initialStatus
   );
 
   useUnsavedChangesGuard({
     enabled: true,
     isSubmitting: pending,
-    hasChanges,
+    hasChanges: hasChanges && !acceptedMessage,
     warningMessage: "You have an unsaved shipment draft.",
   });
 
   const timeoutMs = React.useMemo(() => resolveUiRpcTimeoutMs(), []);
-  const shouldRetry = React.useCallback((error: unknown) => {
-    if (isTimeoutError(error)) return true;
-    if (isRetriableSupabaseError(error)) return true;
-    if (isRetriableNetworkError(error)) return true;
-    return false;
-  }, []);
-
-  const delay = React.useCallback(
-    (ms: number) =>
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, Math.max(0, ms));
-      }),
-    []
-  );
-
   const handleSubmit = React.useCallback(async () => {
-    if (pending) return;
+    if (submitLocked) return;
     setErrorMessage(null);
 
     if (!organizationId?.trim()) {
@@ -133,6 +157,10 @@ export function ShipmentManualCreateForm({
     }
     if (!serviceType.trim()) {
       setErrorMessage("Service type is required.");
+      return;
+    }
+    if (!serviceOfferingId.trim()) {
+      setErrorMessage("Service offering is required.");
       return;
     }
     if (scopeType !== "client" && scopeType !== "sender" && !clientId.trim()) {
@@ -148,13 +176,26 @@ export function ShipmentManualCreateForm({
       return;
     }
 
+    let requestStarted = false;
     setPending(true);
+    let result = committedResult;
+    let createConfirmed = Boolean(committedResult);
     try {
+      const capture = normalizeShipmentAddressCapture(shortCode, latitude, longitude);
+      const hasAddress = Boolean(capture || addressLine1.trim() || addressCity.trim());
+      if (hasAddress && (!addressLine1.trim() || !addressCity.trim())) {
+        throw new Error("Destination address line 1 and city are required when entering an address.");
+      }
+      const destinationAddress = hasAddress ? {
+        ...capture, line1: addressLine1.trim(), city: addressCity.trim(),
+      } : undefined;
       const ui = createUiClient();
       const payload = {
+        ...(destinationAddress ? { destinationAddress } : {}),
         clientId: clientId.trim() || null,
         senderId: senderId.trim() || null,
         serviceType: serviceType.trim(),
+        serviceOfferingId: serviceOfferingId.trim(),
         trackingNumber: trackingNumber.trim() || null,
         clientReferenceNumber: clientReferenceNumber.trim() || null,
         carrierReferenceNumber: carrierReferenceNumber.trim() || null,
@@ -166,26 +207,48 @@ export function ShipmentManualCreateForm({
         },
       };
 
-      let result: Awaited<ReturnType<typeof ui.createShipment>> | null = null;
-      let lastError: unknown = null;
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
-        try {
-          result = await withTimeout(ui.createShipment(payload), timeoutMs);
-          break;
-        } catch (error) {
-          lastError = error;
-          if (attempt >= 2 || !shouldRetry(error)) throw error;
-          await delay(800);
-        }
+      if (!result) {
+        requestStarted = true;
+        result = await withTimeout(ui.createShipment(payload), timeoutMs);
       }
 
-      if (!result && lastError) throw lastError;
-
       const shipmentId = String(result?.shipment_id ?? "").trim();
+      const workflowStatus = String(result?.workflow_status ?? "").trim().toLowerCase();
+      const resultStatus = String(result?.status ?? "").trim().toLowerCase();
+      if ([workflowStatus, resultStatus].some((value) => ["failed", "error", "blocked", "cancelled", "canceled"].includes(value))) {
+        throw new Error("Shipment creation did not complete successfully.");
+      }
+      const completed = workflowStatus === "completed" ||
+        (!workflowStatus && !result?.workflow_run_id && !destinationAddress && Boolean(shipmentId));
+      if (!completed) {
+        const runId = String(result?.workflow_run_id ?? "").trim();
+        if (!runId) throw new Error("Shipment create returned no confirmed workflow outcome.");
+        const message = "Shipment request accepted; creation and address capture are still pending.";
+        setAcceptedMessage(message);
+        if (shipmentId) router.push(buildShipmentDetailHref(normalizedReturnTo, shipmentId));
+        return;
+      }
+      assertShipmentAddressCapture(destinationAddress, result?.destination_address_capture);
       if (!shipmentId) {
         throw new Error("Shipment create completed without returning shipment_id.");
       }
 
+      if (requirePersistedReadback) {
+        // Creation is confirmed from here on; only the persisted decision/audit readback can be pending.
+        setCommittedResult(result);
+        requestStarted = false;
+        createConfirmed = true;
+        const readback = await withTimeout(ui.rpc<{ visible: boolean }>("ui_shipment_create_readback_v1", {
+          p_shipment_id: shipmentId,
+          p_workflow_run_id: result?.workflow_run_id ?? null,
+          p_correlation_id: result?.correlation_id ?? null,
+        }), timeoutMs);
+        if (readback?.visible !== true) {
+          throw new Error("Shipment was saved, but its persisted decision and audit readback is not yet available. Check again before continuing.");
+        }
+      }
+
+      setAcceptedMessage("Shipment creation completed. Open the shipment details to continue.");
       toast({
         tone: "success",
         title:
@@ -196,24 +259,39 @@ export function ShipmentManualCreateForm({
       });
       router.push(buildShipmentDetailHref(normalizedReturnTo, shipmentId));
     } catch (error) {
-      const message = formatUiError(error, "Shipment create failed.");
+      const uncertain = requestStarted;
+      if (uncertain) setSubmissionUncertain(true);
+      const detail = formatUiError(error, createConfirmed ? "Persisted readback failed." : "Shipment create failed.");
+      const message = createConfirmed
+        ? `Shipment was saved; persisted confirmation is pending. ${detail}`
+        : uncertain
+          ? `${detail} The shipment outcome is unverified. Check shipments before trying again; do not resubmit this draft.`
+          : detail;
       setErrorMessage(message);
       toast({
         tone: "error",
-        title: "Shipment create failed",
+        title: createConfirmed ? "Shipment saved; confirmation pending"
+          : uncertain ? "Shipment outcome unverified" : "Shipment create failed",
         description: message,
       });
     } finally {
       setPending(false);
     }
   }, [
+    submitLocked,
+    addressLine1,
+    addressCity,
+    shortCode,
+    latitude,
+    longitude,
     appBasePath,
+    committedResult,
+    requirePersistedReadback,
     canCreate,
     canResolvePermissions,
     carrierReferenceNumber,
     clientId,
     clientReferenceNumber,
-    delay,
     normalizedReturnTo,
     organizationId,
     pending,
@@ -221,7 +299,7 @@ export function ShipmentManualCreateForm({
     scopeType,
     senderId,
     serviceType,
-    shouldRetry,
+    serviceOfferingId,
     status,
     timeoutMs,
     toast,
@@ -268,7 +346,7 @@ export function ShipmentManualCreateForm({
               value={clientId}
               onChange={(event) => setClientId(event.target.value)}
               placeholder="client UUID"
-              disabled={pending}
+              disabled={submissionLocked}
               data-testid={`${resolvedTestIdPrefix}-client-id`}
             />
           </label>
@@ -291,7 +369,7 @@ export function ShipmentManualCreateForm({
               value={senderId}
               onChange={(event) => setSenderId(event.target.value)}
               placeholder="optional sender UUID"
-              disabled={pending}
+              disabled={submissionLocked}
               data-testid={`${resolvedTestIdPrefix}-sender-id`}
             />
           </label>
@@ -315,9 +393,32 @@ export function ShipmentManualCreateForm({
             value={serviceType}
             onChange={(event) => setServiceType(event.target.value)}
             placeholder="delivery"
-            disabled={pending}
+            disabled={submissionLocked}
             data-testid={`${resolvedTestIdPrefix}-service-type`}
           />
+        </label>
+
+        <label className="space-y-2 text-sm text-ui-ink">
+          <span className="text-xs uppercase tracking-wide text-ui-muted">
+            Service offering
+          </span>
+          <Select
+            value={serviceOfferingId}
+            onChange={(event) => setServiceOfferingId(event.target.value)}
+            disabled={submissionLocked || !serviceOfferings?.length}
+            data-testid={`${resolvedTestIdPrefix}-service-offering`}
+          >
+            <option value="">
+              {serviceOfferings?.length
+                ? "Select an active offering"
+                : "No active offerings available"}
+            </option>
+            {(serviceOfferings ?? []).map((offering) => (
+              <option key={offering.id} value={offering.id}>
+                {offering.displayName} ({offering.serviceLevelKey})
+              </option>
+            ))}
+          </Select>
         </label>
 
         <label className="space-y-2 text-sm text-ui-ink">
@@ -325,7 +426,7 @@ export function ShipmentManualCreateForm({
           <Select
             value={status}
             onChange={(event) => setStatus(event.target.value)}
-            disabled={pending}
+            disabled={submissionLocked}
             data-testid={`${resolvedTestIdPrefix}-status`}
           >
             <option value="pending">pending</option>
@@ -343,7 +444,7 @@ export function ShipmentManualCreateForm({
             value={trackingNumber}
             onChange={(event) => setTrackingNumber(event.target.value)}
             placeholder="leave blank to reserve from tracking policy"
-            disabled={pending}
+            disabled={submissionLocked}
             data-testid={`${resolvedTestIdPrefix}-tracking-number`}
           />
         </label>
@@ -356,7 +457,7 @@ export function ShipmentManualCreateForm({
             value={clientReferenceNumber}
             onChange={(event) => setClientReferenceNumber(event.target.value)}
             placeholder="optional client reference"
-            disabled={pending}
+            disabled={submissionLocked}
             data-testid={`${resolvedTestIdPrefix}-client-reference`}
           />
         </label>
@@ -370,13 +471,54 @@ export function ShipmentManualCreateForm({
           value={carrierReferenceNumber}
           onChange={(event) => setCarrierReferenceNumber(event.target.value)}
           placeholder="optional carrier reference"
-          disabled={pending}
+          disabled={submissionLocked}
           data-testid={`${resolvedTestIdPrefix}-carrier-reference`}
         />
       </label>
 
+      <fieldset className="grid gap-4 md:grid-cols-3">
+        <legend className="text-sm text-ui-ink">Destination address capture</legend>
+        <label className="space-y-2 text-sm text-ui-ink">
+          <span className="text-xs uppercase tracking-wide text-ui-muted">Destination address line 1</span>
+          <Input name="destination_line1" value={addressLine1} autoComplete="address-line1"
+            onChange={(event) => setAddressLine1(event.target.value)} disabled={submissionLocked}
+            data-testid={`${resolvedTestIdPrefix}-address-line1`} />
+        </label>
+        <label className="space-y-2 text-sm text-ui-ink">
+          <span className="text-xs uppercase tracking-wide text-ui-muted">Destination city</span>
+          <Input name="destination_city" value={addressCity} autoComplete="address-level2"
+            onChange={(event) => setAddressCity(event.target.value)} disabled={submissionLocked}
+            data-testid={`${resolvedTestIdPrefix}-address-city`} />
+        </label>
+        <label className="space-y-2 text-sm text-ui-ink">
+          <span className="text-xs uppercase tracking-wide text-ui-muted">Saudi short address (optional)</span>
+          <Input name="short-code" value={shortCode}
+            onChange={(event) => setShortCode(event.target.value)}
+            disabled={submissionLocked}
+            data-testid={`${resolvedTestIdPrefix}-short-code`} />
+        </label>
+        <label className="space-y-2 text-sm text-ui-ink">
+          <span className="text-xs uppercase tracking-wide text-ui-muted">Latitude (optional)</span>
+          <Input name="latitude" value={latitude} inputMode="decimal"
+            onChange={(event) => setLatitude(event.target.value)}
+            disabled={submissionLocked}
+            data-testid={`${resolvedTestIdPrefix}-latitude`} />
+        </label>
+        <label className="space-y-2 text-sm text-ui-ink">
+          <span className="text-xs uppercase tracking-wide text-ui-muted">Longitude (optional)</span>
+          <Input name="longitude" value={longitude} inputMode="decimal"
+            onChange={(event) => setLongitude(event.target.value)}
+            disabled={submissionLocked}
+            data-testid={`${resolvedTestIdPrefix}-longitude`} />
+        </label>
+      </fieldset>
+
+      {acceptedMessage ? (
+        <div role="status" data-testid={`${resolvedTestIdPrefix}-accepted`}>{acceptedMessage}</div>
+      ) : null}
+
       {errorMessage ? (
-        <div
+        <div role="alert"
           className="rounded-2xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted"
           data-testid={`${resolvedTestIdPrefix}-error`}
         >
@@ -393,10 +535,10 @@ export function ShipmentManualCreateForm({
         <Button
           type="button"
           onClick={() => void handleSubmit()}
-          disabled={pending || !organizationId?.trim()}
+          disabled={submitLocked || !organizationId?.trim()}
           data-testid={`${resolvedTestIdPrefix}-submit`}
         >
-          {pending ? "Creating..." : "Create shipment"}
+          {pending ? (committedResult ? "Checking..." : "Creating...") : committedResult ? "Check persisted shipment" : "Create shipment"}
         </Button>
       </div>
     </div>

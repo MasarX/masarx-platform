@@ -4,7 +4,7 @@ import { LoadingState, WorkflowBindingsPage as UiWorkflowBindingsPage } from "@m
 type WorkflowBindingsPageProps = Parameters<typeof UiWorkflowBindingsPage>[0];
 
 const WorkflowBindingsPageInner =
-  UiWorkflowBindingsPage as unknown as (props: WorkflowBindingsPageProps) => JSX.Element;
+  UiWorkflowBindingsPage as unknown as (props: WorkflowBindingsPageProps) => React.JSX.Element;
 
 export function WorkflowBindingsPage(props: WorkflowBindingsPageProps) {
   return (

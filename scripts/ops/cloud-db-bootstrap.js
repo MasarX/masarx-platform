@@ -2,7 +2,6 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { Client } = require('pg');
 const {
   parsePositiveInt,
   resolveDsnCandidates,
@@ -21,6 +20,7 @@ async function hasTable({ connectionString, qualifiedName, env = process.env }) 
   const name = String(qualifiedName || '').trim();
   if (!name) return false;
 
+  const { Client } = require('pg');
   const client = new Client({
     connectionString,
     connectionTimeoutMillis: parsePositiveInt(env.DB_SMOKE_TIMEOUT_MS, 10000),
@@ -64,6 +64,7 @@ async function hasSchemaMigrationVersion({ connectionString, version, env = proc
   });
   if (!hasMigrationsTable) return false;
 
+  const { Client } = require('pg');
   const client = new Client({
     connectionString,
     connectionTimeoutMillis: parsePositiveInt(env.DB_SMOKE_TIMEOUT_MS, 10000),

@@ -1,10 +1,12 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { loadDemoContext } from "./utils/demo-accounts";
 import { signInWithPassword } from "./utils/auth";
 import { getConsoleBasePath } from "./utils/base-paths";
 import {
   openWorkflowTemplateStudioWithDisconnect,
   wheelZoomWorkflowTemplateFlowCanvas,
+  workflowStepEnabledLabel,
+  workflowStepEditorCloseLabel,
 } from "./utils/workflow-studio";
 import {
   captureFullPage,
@@ -16,6 +18,29 @@ import {
 const demoContext = loadDemoContext();
 const captureEnabled = isCaptureEnabled();
 
+async function openWorkflowConsole(
+  page: Page,
+  evidencePath: (...segments: string[]) => string,
+) {
+  const basePath = getConsoleBasePath();
+  await test.step("Open workflow Console", () =>
+    page.goto(basePath || "/", { waitUntil: "domcontentloaded" })
+  );
+  const missingEnv = page.locator('[data-testid="console-missing-env"]');
+  if (await missingEnv.isVisible()) {
+    await captureFullPage(page, evidencePath("console-missing-env.png"));
+    return false;
+  }
+  const authGate = page.locator('[data-testid="console-auth-required"]');
+  const user = demoContext.users.find((entry) => entry.scope_type === "platform");
+  if (user && demoContext.password && (await authGate.isVisible())) {
+    await test.step("Authenticate workflow Console", () =>
+      signInWithPassword(page, user.email, demoContext.password)
+    );
+  }
+  return true;
+}
+
 test.describe("console workflow studio screenshots", () => {
   test.skip(!captureEnabled, "Set E2E_CAPTURE_UI=1 to enable screenshot capture.");
 
@@ -26,27 +51,16 @@ test.describe("console workflow studio screenshots", () => {
       resolveEvidencePath(evidenceGroup, ...segments);
 
     const basePath = getConsoleBasePath();
-    await page.goto(basePath || "/", { waitUntil: "domcontentloaded" });
+    const mainContent = page.locator("#main-content");
+    if (!(await openWorkflowConsole(page, evidencePath))) return;
 
-    const missingEnv = page.locator('[data-testid="console-missing-env"]');
-    if (await missingEnv.isVisible()) {
-      await captureFullPage(page, evidencePath("console-missing-env.png"));
-      return;
-    }
-
-    const authGate = page.locator('[data-testid="console-auth-required"]');
-    const user = demoContext.users.find((entry) => entry.scope_type === "platform");
-    if (user && demoContext.password && (await authGate.isVisible())) {
-      await signInWithPassword(page, user.email, demoContext.password);
-    }
-
-    await page.goto(`${basePath}/workflows/templates`, {
+    await test.step("Open workflow templates", () => page.goto(`${basePath}/workflows/templates`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
-    });
+    }));
 
     await expect(
-      page.locator(
+      mainContent.locator(
         '[data-testid="console-workflow-templates-ready"], [data-testid="console-workflow-templates-error"], [data-testid="console-auth-required"]'
       )
     ).toBeVisible();
@@ -65,26 +79,26 @@ test.describe("console workflow studio screenshots", () => {
       );
     }
 
-    await page.goto(`${basePath}/workflows/overlaps`, {
+    await test.step("Open workflow overlaps", () => page.goto(`${basePath}/workflows/overlaps`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
-    });
+    }));
 
     await expect(
-      page.locator(
+      mainContent.locator(
         '[data-testid="console-workflow-overlaps-ready"], [data-testid="console-workflow-overlaps-error"], [data-testid="console-auth-required"]'
       )
     ).toBeVisible();
 
     await captureFullPage(page, evidencePath("console-workflow-overlaps.png"));
 
-    await page.goto(`${basePath}/workflows/templates/new`, {
+    await test.step("Open workflow template creation", () => page.goto(`${basePath}/workflows/templates/new`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
-    });
+    }));
 
     await expect(
-      page.locator(
+      mainContent.locator(
         '[data-testid="console-workflow-template-create-name"], [data-testid="console-auth-required"]'
       )
     ).toBeVisible();
@@ -94,27 +108,27 @@ test.describe("console workflow studio screenshots", () => {
       evidencePath("console-workflow-template-create.png")
     );
 
-    await page.goto(`${basePath}/workflows/templates`, {
+    await test.step("Return to workflow templates", () => page.goto(`${basePath}/workflows/templates`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
-    });
+    }));
 
-    const templatesReady = page.locator('[data-testid="console-workflow-templates-ready"]');
+    const templatesReady = mainContent.locator('[data-testid="console-workflow-templates-ready"]');
     await expect(
-      page.locator(
+      mainContent.locator(
         '[data-testid="console-workflow-templates-ready"], [data-testid="console-workflow-templates-error"], [data-testid="console-auth-required"]'
       )
     ).toBeVisible();
     if (!(await templatesReady.isVisible())) return;
 
-    await openWorkflowTemplateStudioWithDisconnect({
+    await test.step("Select executable workflow studio", () => openWorkflowTemplateStudioWithDisconnect({
       page,
       basePath,
       testIdPrefix: "console",
-    });
+    }));
 
     await expect(
-      page.locator(
+      mainContent.locator(
         '[data-testid="console-workflow-template-studio-ready"], [data-testid="console-workflow-template-studio-error"], [data-testid="console-auth-required"]'
       )
     ).toBeVisible();
@@ -123,7 +137,7 @@ test.describe("console workflow studio screenshots", () => {
 
     const triggersTab = page.getByRole("tab", { name: /Triggers/i });
     if (await triggersTab.isVisible()) {
-      await triggersTab.click({ timeout: 20_000 });
+      await test.step("Open workflow trigger controls", () => triggersTab.click({ timeout: 20_000 }));
       await expect(
         page.locator(
           '[data-testid="console-workflow-template-studio-triggers-ready"], [data-testid="console-workflow-template-studio-triggers-error"]'
@@ -203,7 +217,7 @@ test.describe("console workflow studio screenshots", () => {
     );
     if (await testRunButton.isVisible()) {
       if (await testRunButton.isEnabled()) {
-        await testRunButton.click({ timeout: 20_000 });
+        await test.step("Open workflow test-run", () => testRunButton.click({ timeout: 20_000 }));
         await expect(
           page.locator(
             '[data-testid="console-workflow-template-studio-actions-test-run-modal"]'
@@ -222,14 +236,14 @@ test.describe("console workflow studio screenshots", () => {
           if (await submitRun.isEnabled()) {
             await submitRun.click({ timeout: 20_000 });
             try {
-              await page.waitForURL(/\/workflows\/runs\//, { timeout: 60_000 });
+              await test.step("Wait for workflow test-run navigation", () => page.waitForURL(/\/workflows\/runs\//, { timeout: 60_000 }));
             } catch {
               await page.keyboard.press("Escape");
             }
 
-            await page.goto(templateUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+            await test.step("Return to workflow studio", () => page.goto(templateUrl, { waitUntil: "domcontentloaded", timeout: 60_000 }));
             await expect(
-              page.locator(
+              mainContent.locator(
                 '[data-testid="console-workflow-template-studio-ready"], [data-testid="console-workflow-template-studio-error"], [data-testid="console-auth-required"]'
               )
             ).toBeVisible({ timeout: 60_000 });
@@ -242,11 +256,31 @@ test.describe("console workflow studio screenshots", () => {
       }
     }
 
+  });
+
+  test("captures workflow flow and builder controls", async ({ page }) => {
+    test.setTimeout(300_000);
+    const evidencePath = (...segments: string[]) =>
+      resolveEvidencePath("ui-workflow-studio", ...segments);
+    const basePath = getConsoleBasePath();
+    const mainContent = page.locator("#main-content");
+    if (!(await openWorkflowConsole(page, evidencePath))) return;
+    await test.step("Select executable workflow studio", () => openWorkflowTemplateStudioWithDisconnect({
+      page,
+      basePath,
+      testIdPrefix: "console",
+    }));
+    await expect(
+      page.locator(
+        '[data-testid="console-workflow-template-studio-ready"], [data-testid="console-workflow-template-studio-error"], [data-testid="console-auth-required"]'
+      )
+    ).toBeVisible();
+
     const studioTab = page.getByRole("tab", { name: /Studio/i });
     if (await studioTab.isVisible()) {
       await studioTab.click({ timeout: 20_000 });
       await expect(
-        page.locator(
+        mainContent.locator(
           '[data-testid="console-workflow-template-studio-ready"], [data-testid="console-workflow-template-studio-error"]'
         )
       ).toBeVisible({ timeout: 20_000 });
@@ -256,7 +290,7 @@ test.describe("console workflow studio screenshots", () => {
         timeout: 60_000,
       });
       await expect(
-        page.locator(
+        mainContent.locator(
           '[data-testid="console-workflow-template-studio-ready"], [data-testid="console-workflow-template-studio-error"]'
         )
       ).toBeVisible({ timeout: 20_000 });
@@ -409,7 +443,7 @@ test.describe("console workflow studio screenshots", () => {
       if (await disconnectButton.isVisible()) {
         const disconnectTestId = await disconnectButton.getAttribute("data-testid");
         if (disconnectTestId) {
-          await disconnectButton.click({ timeout: 20_000 });
+          await test.step("Open workflow routing confirmation", () => disconnectButton.click({ timeout: 20_000 }));
           const confirmDialog = page.locator(
             `[data-testid="${disconnectTestId}-confirm-dialog"]`
           );
@@ -462,7 +496,7 @@ test.describe("console workflow studio screenshots", () => {
         )
         .first();
       if (await flowStepCard.isVisible()) {
-        await flowStepCard.click({ timeout: 20_000 });
+        await test.step("Open workflow flow-step editor", () => flowStepCard.click({ timeout: 20_000 }));
         const flowStepEditorDrawer = page.locator(
           '[data-testid="console-workflow-template-studio-steps-flow-step-editor-drawer"]'
         );
@@ -478,8 +512,9 @@ test.describe("console workflow studio screenshots", () => {
         );
 
         const enabledCheckbox = flowStepEditorDrawer.getByRole("checkbox", {
-          name: /Enabled/i,
+          name: workflowStepEnabledLabel(),
         });
+        await expect(enabledCheckbox).toBeVisible({ timeout: 20_000 });
         if (await enabledCheckbox.isVisible()) {
           const initialEnabled = await enabledCheckbox.isChecked();
           await enabledCheckbox.setChecked(!initialEnabled);
@@ -495,20 +530,15 @@ test.describe("console workflow studio screenshots", () => {
                   "console-workflow-template-studio-step-editor-flow-save.png"
                 )
               );
-              await saveStepButton.evaluate((element) => {
-                if (element instanceof HTMLButtonElement) element.click();
-              });
+              await saveStepButton.click({ timeout: 20_000 });
               await expect(saveStepButton).toBeEnabled({ timeout: 20_000 });
               const closeButton = flowStepEditorDrawer.getByRole("button", {
-                name: /Close/i,
+                name: workflowStepEditorCloseLabel(),
+                exact: true,
               });
-              if (await closeButton.isVisible()) {
-                await closeButton.evaluate((element) => {
-                  if (element instanceof HTMLButtonElement) element.click();
-                });
-              } else {
-                await page.keyboard.press("Escape");
-              }
+              await expect(closeButton).toBeVisible({ timeout: 20_000 });
+              await expect(closeButton).toBeEnabled({ timeout: 20_000 });
+              await closeButton.click({ timeout: 20_000 });
               await expect(flowStepEditorDrawer).toBeHidden({ timeout: 20_000 });
 
               const undoButton = page.locator(
@@ -540,7 +570,7 @@ test.describe("console workflow studio screenshots", () => {
             }
           }
         } else {
-          await page.keyboard.press("Escape");
+          await test.step("Close workflow flow-step editor", () => page.keyboard.press("Escape"));
           await expect(flowStepEditorDrawer).toBeHidden({ timeout: 20_000 });
         }
       }
@@ -698,7 +728,7 @@ test.describe("console workflow studio screenshots", () => {
         if (href) {
           await page.goto(href, { waitUntil: "domcontentloaded", timeout: 60_000 });
           await expect(
-            page.locator(
+            mainContent.locator(
               '[data-testid="console-resource-ready"], [data-testid="console-resource-error"], [data-testid="console-resource-blocked"], [data-testid="console-auth-required"], [data-testid="console-context-unavailable"], [data-testid="console-not-found"]'
             )
           ).toBeVisible();
@@ -719,7 +749,7 @@ test.describe("console workflow studio screenshots", () => {
             timeout: 60_000,
           });
           await expect(
-            page.locator(
+            mainContent.locator(
               '[data-testid="console-workflow-template-studio-ready"], [data-testid="console-workflow-template-studio-error"], [data-testid="console-auth-required"]'
             )
           ).toBeVisible();

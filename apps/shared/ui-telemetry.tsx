@@ -116,7 +116,6 @@ export function UiTelemetryReporter({ appBasePath }: { appBasePath: string }) {
       process.env.NEXT_PUBLIC_UI_EVENT_MAX_BYTES,
       48_000
     );
-    const useBeaconByDefault = process.env.NODE_ENV === "production";
     const canUseBeacon =
       typeof navigator !== "undefined" &&
       typeof navigator.sendBeacon === "function";
@@ -127,13 +126,16 @@ export function UiTelemetryReporter({ appBasePath }: { appBasePath: string }) {
     setRequestId(requestId);
 
     const flush = (options?: { preferBeacon?: boolean }) => {
+      if (flushHandle !== null) {
+        window.clearTimeout(flushHandle);
+        flushHandle = null;
+      }
       if (queue.length === 0) return;
       const events = queue.splice(0, queue.length);
       for (const batch of splitEventBatches(events, maxBytes)) {
         const payload = createEventPayload(batch);
         const shouldUseBeacon =
-          canUseBeacon &&
-          (useBeaconByDefault || Boolean(options?.preferBeacon));
+          canUseBeacon && Boolean(options?.preferBeacon);
         if (shouldUseBeacon) {
           if (resolveByteLength(payload) <= maxBytes) {
             const eventPayload = new Blob([payload], { type: "application/json" });
@@ -184,22 +186,22 @@ export function UiTelemetryReporter({ appBasePath }: { appBasePath: string }) {
       }
     };
 
+    const flushOnPageExit = () => flush({ preferBeacon: true });
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") {
-        flush({ preferBeacon: true });
+        flushOnPageExit();
       }
     };
 
     setUiReporter(reporter);
     document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", flushOnPageExit);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
-      if (flushHandle !== null) {
-        window.clearTimeout(flushHandle);
-      }
-      flush({ preferBeacon: true });
+      window.removeEventListener("pagehide", flushOnPageExit);
       setUiReporter(null);
+      flushOnPageExit();
       setRequestId(null);
     };
   }, [appBasePath]);

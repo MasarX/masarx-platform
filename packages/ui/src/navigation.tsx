@@ -4,6 +4,7 @@ import { createUiTranslator } from "./i18n";
 import { normalizePath } from "./navigation-paths";
 import { PinIcon } from "./icons";
 import { resolveSafeAppBasePath } from "./url-guard";
+import { resolveNavigationDisabledReason } from "./navigation-disabled-reason";
 
 export type NavigationItem = {
   id: string;
@@ -133,11 +134,8 @@ function NavigationItemRow({
   ) : null;
   const disabledReason = !disabled
     ? undefined
-    : item.disabled_reason?.trim()
-      ? item.disabled_reason.trim()
-      : !item.href
-        ? t("disabled.noRoute")
-        : undefined;
+    : resolveNavigationDisabledReason(item.disabled_reason, t) ??
+      (!item.href ? t("disabled.noRoute") : undefined);
   const content = (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
       {labelNode}

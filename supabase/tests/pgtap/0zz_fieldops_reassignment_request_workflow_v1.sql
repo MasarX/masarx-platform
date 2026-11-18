@@ -1,0 +1,43 @@
+-- Installed catalog/ACL proof only; behavioral UC078 scenarios live in the native integration suite.
+BEGIN;
+SET LOCAL search_path TO public, extensions, pg_temp;
+SELECT plan(35);
+
+SELECT has_table('public','fieldops_reassignment_requests','immutable request table is installed');
+SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='public.fieldops_reassignment_requests'::regclass),'request table has RLS');
+SELECT ok(NOT has_table_privilege('anon','public.fieldops_reassignment_requests','SELECT'),'anon cannot read private intent');
+SELECT ok(NOT has_table_privilege('anon','public.fieldops_reassignment_requests','INSERT,UPDATE,DELETE'),'anon cannot mutate private intent');
+SELECT ok(NOT has_function_privilege('anon','public.fieldops_reassignment_source_v1(uuid)','EXECUTE'),'anon cannot invoke private fieldops_reassignment_source_v1(uuid)');
+SELECT ok(NOT has_function_privilege('anon','public.complete_fieldops_reassignment_request_v1()','EXECUTE'),'anon cannot invoke private complete_fieldops_reassignment_request_v1()');
+SELECT ok(NOT has_table_privilege('authenticated','public.fieldops_reassignment_requests','SELECT'),'authenticated cannot read private intent');
+SELECT ok(NOT has_table_privilege('authenticated','public.fieldops_reassignment_requests','INSERT,UPDATE,DELETE'),'authenticated cannot mutate private intent');
+SELECT ok(NOT has_function_privilege('authenticated','public.fieldops_reassignment_source_v1(uuid)','EXECUTE'),'authenticated cannot invoke private fieldops_reassignment_source_v1(uuid)');
+SELECT ok(NOT has_function_privilege('authenticated','public.complete_fieldops_reassignment_request_v1()','EXECUTE'),'authenticated cannot invoke private complete_fieldops_reassignment_request_v1()');
+SELECT ok(NOT has_table_privilege('service_role','public.fieldops_reassignment_requests','SELECT'),'service_role cannot read private intent');
+SELECT ok(NOT has_table_privilege('service_role','public.fieldops_reassignment_requests','INSERT,UPDATE,DELETE'),'service_role cannot mutate private intent');
+SELECT ok(NOT has_function_privilege('service_role','public.fieldops_reassignment_source_v1(uuid)','EXECUTE'),'service_role cannot invoke private fieldops_reassignment_source_v1(uuid)');
+SELECT ok(NOT has_function_privilege('service_role','public.complete_fieldops_reassignment_request_v1()','EXECUTE'),'service_role cannot invoke private complete_fieldops_reassignment_request_v1()');
+SELECT ok(has_function_privilege('authenticated','public.prepare_fieldops_reassignment_v1(uuid,uuid,text,text,uuid)','EXECUTE'),'public authenticated prepare allowed');
+SELECT ok(has_function_privilege('authenticated','public.fieldops_reassignment_candidates_v1(uuid)','EXECUTE'),'public authenticated candidates allowed');
+SELECT ok(NOT has_function_privilege('anon','public.prepare_fieldops_reassignment_v1(uuid,uuid,text,text,uuid)','EXECUTE'),'public anonymous prepare denied');
+SELECT ok(NOT has_function_privilege('anon','public.fieldops_reassignment_candidates_v1(uuid)','EXECUTE'),'public anonymous candidates denied');
+SELECT ok(NOT has_function_privilege('authenticated','public.submit_fieldops_reassignment_v1(uuid)','EXECUTE'),'public authenticated dispatch denied');
+SELECT ok(NOT has_function_privilege('anon','public.submit_fieldops_reassignment_v1(uuid)','EXECUTE'),'public anonymous dispatch denied');
+SELECT ok(has_function_privilege('service_role','public.submit_fieldops_reassignment_v1(uuid)','EXECUTE'),'public service dispatch allowed');
+SELECT ok(has_function_privilege('authenticated','api.prepare_fieldops_reassignment_v1(uuid,uuid,text,text,uuid)','EXECUTE'),'api authenticated prepare allowed');
+SELECT ok(has_function_privilege('authenticated','api.fieldops_reassignment_candidates_v1(uuid)','EXECUTE'),'api authenticated candidates allowed');
+SELECT ok(NOT has_function_privilege('anon','api.prepare_fieldops_reassignment_v1(uuid,uuid,text,text,uuid)','EXECUTE'),'api anonymous prepare denied');
+SELECT ok(NOT has_function_privilege('anon','api.fieldops_reassignment_candidates_v1(uuid)','EXECUTE'),'api anonymous candidates denied');
+SELECT ok(NOT has_function_privilege('authenticated','api.submit_fieldops_reassignment_v1(uuid)','EXECUTE'),'api authenticated dispatch denied');
+SELECT ok(NOT has_function_privilege('anon','api.submit_fieldops_reassignment_v1(uuid)','EXECUTE'),'api anonymous dispatch denied');
+SELECT ok(has_function_privilege('service_role','api.submit_fieldops_reassignment_v1(uuid)','EXECUTE'),'api service dispatch allowed');
+SELECT ok(NOT has_function_privilege('authenticated','public.transition_task_system_v1(uuid,text,text,jsonb,text,text)','EXECUTE'),'canonical system transition remains private to authenticated callers');
+SELECT is((SELECT pg_get_userbyid(proowner)::text FROM pg_proc WHERE oid='public.complete_fieldops_reassignment_request_v1()'::regprocedure),'postgres','deputy uses the deliberate canonical owner authority');
+SELECT ok((SELECT prosecdef AND proconfig @> ARRAY['search_path=public, extensions, pg_temp'] FROM pg_proc WHERE oid='public.complete_fieldops_reassignment_request_v1()'::regprocedure),'deputy is definer with fixed search path');
+SELECT ok(EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.route_stop_reassignment_events'::regclass AND tgfoid='public.complete_fieldops_reassignment_request_v1()'::regprocedure AND tgtype=5 AND NOT tgisinternal),'deputy attaches only after insert to canonical reassignment events');
+SELECT has_column('public','fieldops_reassignment_requests','source_assignment_version','immutable source generation is installed');
+SELECT ok(EXISTS(SELECT 1 FROM public.workflow_binding_registry WHERE binding_key='fieldops_reassignment' AND is_business_affecting),'request workflow binding is registered');
+SELECT ok(EXISTS(SELECT 1 FROM public.workflow_binding_stage_registry WHERE binding_key='fieldops_reassignment' AND stage_key='review_requested' AND is_enabled),'request task-producing stage is registered');
+
+SELECT * FROM finish();
+ROLLBACK;

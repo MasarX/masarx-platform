@@ -3,7 +3,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(13);
+SELECT plan(15);
 
 SELECT public.create_next_partitions();
 
@@ -404,58 +404,75 @@ SELECT is(
 SELECT is(
   (SELECT result->>'action' FROM tmp_uc178_update_intake),
   'accepted_async',
-  'workflow_intake_api_gateway_v1 accepts canonical update route asynchronously'
-);
-
-SELECT is(
-  (SELECT (result->>'status')::INT FROM tmp_uc178_update_intake),
-  202,
-  'canonical update intake returns accepted status'
+  'workflow_intake_api_gateway_v1 dispatches canonical update route asynchronously'
 );
 
 SELECT ok(
-  (SELECT public.mapping_studio_try_uuid_v1(result->>'api_gateway_request_id') IS NOT NULL
-     AND public.mapping_studio_try_uuid_v1(result->>'workflow_run_id') IS NOT NULL
-     AND result->'body'->>'api_gateway_request_id' = result->>'api_gateway_request_id'
-     AND result->'body'->>'workflow_run_id' = result->>'workflow_run_id'
-   FROM tmp_uc178_update_intake),
-  'canonical update intake returns request and workflow lineage'
+  NULLIF((SELECT result->>'workflow_run_id' FROM tmp_uc178_update_intake), '') IS NOT NULL,
+  'canonical update intake starts a workflow run'
+);
+
+SELECT ok(
+  NOT ((SELECT result FROM tmp_uc178_update_intake) ? 'outbound_call_id'),
+  'canonical update intake does not proxy directly'
 );
 
 SELECT is(
   (
-    SELECT wr.workflow_status
-      FROM public.workflow_runs wr
-     WHERE wr.id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+    SELECT wt.name
+    FROM public.workflow_runs wr
+    JOIN public.workflow_templates wt ON wt.id = wr.workflow_template_id
+    WHERE wr.id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
   ),
-  'pending',
-  'canonical update intake starts pending workflow run'
+  'api_gateway_shipment_mutation_default_v1',
+  'canonical update intake uses the typed API gateway mutation workflow template'
+);
+
+SELECT is(
+  (
+    SELECT context#>>'{api_gateway,route_id}'
+    FROM public.workflow_runs
+    WHERE id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+  ),
+  (SELECT result->>'route_id' FROM tmp_uc178_update_resolve),
+  'canonical update workflow preserves the resolved route'
+);
+
+SELECT is(
+  (
+    SELECT context#>>'{api_gateway,path_params,shipmentId}'
+    FROM public.workflow_runs
+    WHERE id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+  ),
+  'SHIP055',
+  'canonical update workflow preserves shipmentId context'
+);
+
+SELECT public.progress_workflow_run(
+  (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+);
+
+CREATE TEMP TABLE tmp_uc178_update_outbound AS
+SELECT request.outbound_call_id
+  FROM public.api_gateway_requests request
+ WHERE request.id = (
+   SELECT (result->>'api_gateway_request_id')::uuid
+     FROM tmp_uc178_update_intake
+ );
+
+SELECT ok(
+  (SELECT outbound_call_id IS NOT NULL FROM tmp_uc178_update_outbound),
+  'canonical update workflow materializes the provider outbound call'
 );
 
 SELECT ok(
-  (
-    SELECT wr.context #>> '{api_gateway,upstream_method}' = 'PUT'
-       AND wr.context #>> '{api_gateway,upstream_url}' = 'https://apisv2.logestechs.com/api/guests/362/packages/SHIP055'
-       AND wr.context #>> '{api_gateway,outbound_headers,company-id}' = '362'
-       AND wr.context #>> '{api_gateway,path_params,shipmentId}' = 'SHIP055'
-       AND wr.context #>> '{api_gateway,provider_account_category}' = 'logestechs_v2_account'
-      FROM public.workflow_runs wr
-     WHERE wr.id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+  NOT EXISTS (
+    SELECT 1
+      FROM public.outbound_calls oc
+     WHERE oc.id = (SELECT outbound_call_id FROM tmp_uc178_update_outbound)
+       AND (oc.body ? 'email' OR oc.body ? 'password')
   ),
-  'canonical update intake preserves provider dispatch context on workflow run'
-);
-
-SELECT ok(
-  (
-    SELECT wrs.operation_name = 'dispatch_update'
-       AND wrs.handler_key = 'api_gateway_dispatch_outbound'
-       AND wrs.step_status = 'pending'
-      FROM public.workflow_run_steps wrs
-     WHERE wrs.workflow_run_id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
-     ORDER BY wrs.sequence_order
-     LIMIT 1
-  ),
-  'canonical update intake queues workflow dispatch step'
+  'canonical update intake strips auth body fields from persisted outbound payload'
 );
 
 SELECT ok(
@@ -467,6 +484,5 @@ SELECT ok(
   ),
   'canonical update intake strips auth body fields from workflow dispatch payload'
 );
-
 SELECT * FROM finish();
 ROLLBACK;

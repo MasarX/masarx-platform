@@ -3,10 +3,11 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(60);
+SELECT plan(63);
 
 WITH names AS (
   SELECT unnest(ARRAY[
+    'resolve_mobile_shell_policy',
     'resolve_mobile_diagnostics_policy',
     'resolve_mobile_visibility_policy',
     'resolve_map_policy',
@@ -33,6 +34,7 @@ FROM names;
 
 WITH names AS (
   SELECT unnest(ARRAY[
+    'resolve_mobile_shell_policy',
     'resolve_mobile_diagnostics_policy',
     'resolve_mobile_visibility_policy',
     'resolve_map_policy',
@@ -62,6 +64,7 @@ FROM names;
 
 WITH names AS (
   SELECT unnest(ARRAY[
+    'resolve_mobile_shell_policy',
     'resolve_mobile_diagnostics_policy',
     'resolve_mobile_visibility_policy',
     'resolve_map_policy',

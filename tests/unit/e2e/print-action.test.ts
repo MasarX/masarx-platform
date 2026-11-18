@@ -3,6 +3,8 @@ import {
   isRetriablePrintProgressControlError,
   waitForPrintProgressWidgetSurfaceState,
 } from "../../e2e/utils/print-action";
+import * as en from "../../../packages/config/messages/en.json";
+import * as ar from "../../../packages/config/messages/ar.json";
 
 function createLocator(options?: {
   isVisibleSequence?: boolean[];
@@ -21,8 +23,10 @@ function createLocator(options?: {
       jest.fn(async () => {
         return;
       }),
-    getByRole: jest.fn((_: string, config?: { name?: string }) => {
-      const key = String(config?.name ?? "");
+    getByRole: jest.fn((_: string, config?: { name?: string | RegExp }) => {
+      const key = config?.name instanceof RegExp
+        ? Object.keys(options?.roles ?? {}).find((name) => (config.name as RegExp).test(name)) ?? ""
+        : String(config?.name ?? "");
       const roleLocator = options?.roles?.[key];
       if (!roleLocator) {
         throw new Error(`Missing mocked role locator for ${key}`);
@@ -33,6 +37,18 @@ function createLocator(options?: {
 }
 
 describe("print action progress helpers", () => {
+  test.each([en, ar])("uses current locale controls for active and terminal progress (case %#)", async (messages) => {
+    const names = messages.ui.resourceActions.printProgress;
+    const page = { waitForTimeout: jest.fn(async () => undefined) };
+    const progressWidget = createLocator({ isVisibleSequence: [true], roles: {
+      [names.actions.hide]: createLocator({ isVisibleSequence: [true, false] }),
+      [names.dismiss]: createLocator({ isVisibleSequence: [true] }),
+    } });
+    const minimizedWidget = createLocator({ isVisibleSequence: [false] });
+    await expect(waitForPrintProgressWidgetSurfaceState({ page, progressWidget, minimizedWidget })).resolves.toBe("expanded-active");
+    await expect(waitForPrintProgressWidgetSurfaceState({ page, progressWidget, minimizedWidget })).resolves.toBe("expanded-terminal");
+    expect(progressWidget.getByRole.mock.calls[0]?.[1]?.name).toEqual(expect.any(RegExp));
+  });
   test("classifies minimized state before expanded variants", async () => {
     const page = {
       waitForTimeout: jest.fn(async () => undefined),

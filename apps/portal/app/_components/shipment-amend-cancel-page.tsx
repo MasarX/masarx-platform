@@ -11,7 +11,7 @@ type ShipmentAmendCancelPageProps = Parameters<
 const ShipmentAmendCancelPageInner =
   UiShipmentAmendCancelPage as unknown as (
     props: ShipmentAmendCancelPageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function ShipmentAmendCancelPage(
   props: ShipmentAmendCancelPageProps,

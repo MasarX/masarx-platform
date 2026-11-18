@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-var-requires */
+/* eslint-disable @typescript-eslint/no-require-imports */
 
 describe("ui-context-cache", () => {
   const originalEnv = process.env;
@@ -89,6 +89,89 @@ describe("ui-context-cache", () => {
     await loadUiContextCached(params);
     now = 200;
     await expect(loadUiContextCached(params)).rejects.toThrow("permission denied");
+  });
+
+  test("repeated failures cannot extend the original stale deadline or retry TTL past it", async () => {
+    process.env.MASARX_UI_CONTEXT_CACHE_TTL_MS = "100";
+    process.env.MASARX_UI_CONTEXT_CACHE_STALE_IF_ERROR_MS = "1000";
+    const { loadUiContextCached } = loadModule();
+    const context = makeContext("last-success");
+    const load = jest.fn()
+      .mockResolvedValueOnce(context)
+      .mockRejectedValue(new TypeError("fetch failed"));
+    const params = { appKey: "console", accessToken: "bounded-token", load };
+
+    await loadUiContextCached(params);
+    now = 200;
+    expect(await loadUiContextCached(params)).toEqual(context);
+    now = 1050;
+    expect(await loadUiContextCached(params)).toEqual(context);
+    now = 1099;
+    expect(await loadUiContextCached(params)).toEqual(context);
+    expect(load).toHaveBeenCalledTimes(3);
+
+    now = 1100; // The original success expired at 100, plus the 1000ms stale allowance.
+    await expect(loadUiContextCached(params)).rejects.toThrow("fetch failed");
+    expect(load).toHaveBeenCalledTimes(4);
+  });
+
+  test("does not serve stale context when a slow refresh fails after its deadline", async () => {
+    process.env.MASARX_UI_CONTEXT_CACHE_TTL_MS = "100";
+    process.env.MASARX_UI_CONTEXT_CACHE_STALE_IF_ERROR_MS = "1000";
+    const { loadUiContextCached } = loadModule();
+    const load = jest.fn()
+      .mockResolvedValueOnce(makeContext("expired"))
+      .mockImplementationOnce(async () => {
+        now = 1100;
+        throw new TypeError("fetch failed");
+      });
+    const params = { appKey: "console", accessToken: "slow-token", load };
+
+    await loadUiContextCached(params);
+    now = 1050;
+    await expect(loadUiContextCached(params)).rejects.toThrow("fetch failed");
+  });
+
+  test("another token refreshing does not prune context still eligible for stale fallback", async () => {
+    process.env.MASARX_UI_CONTEXT_CACHE_TTL_MS = "100";
+    process.env.MASARX_UI_CONTEXT_CACHE_STALE_IF_ERROR_MS = "1000";
+    const { loadUiContextCached } = loadModule();
+    const context = makeContext("retained");
+    const load = jest.fn()
+      .mockResolvedValueOnce(context)
+      .mockRejectedValueOnce(new TypeError("fetch failed"));
+    const params = { appKey: "console", accessToken: "retained-token", load };
+
+    await loadUiContextCached(params);
+    now = 200;
+    await loadUiContextCached({
+      appKey: "console",
+      accessToken: "other-token",
+      load: async () => makeContext("other-user"),
+    });
+
+    expect(await loadUiContextCached(params)).toEqual(context);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  test("a successful refresh establishes a new stale deadline", async () => {
+    process.env.MASARX_UI_CONTEXT_CACHE_TTL_MS = "100";
+    process.env.MASARX_UI_CONTEXT_CACHE_STALE_IF_ERROR_MS = "1000";
+    const { loadUiContextCached } = loadModule();
+    const refreshed = makeContext("refreshed");
+    const load = jest.fn()
+      .mockResolvedValueOnce(makeContext("original"))
+      .mockResolvedValueOnce(refreshed)
+      .mockRejectedValue(new TypeError("fetch failed"));
+    const params = { appKey: "console", accessToken: "refresh-token", load };
+
+    await loadUiContextCached(params);
+    now = 200;
+    expect(await loadUiContextCached(params)).toEqual(refreshed);
+    now = 1200; // Beyond the first success's deadline, within the refreshed deadline.
+    expect(await loadUiContextCached(params)).toEqual(refreshed);
+    now = 1300;
+    await expect(loadUiContextCached(params)).rejects.toThrow("fetch failed");
   });
 });
 

@@ -40,6 +40,7 @@ type TableHeaderRowProps = {
   t: TranslateFn;
   showRowNumbers?: boolean;
   selectionEnabled: boolean;
+  selectionReady?: boolean;
   selectHeaderRef: React.RefObject<HTMLTableHeaderCellElement | null>;
   selectAllRef: React.RefObject<HTMLInputElement | null>;
   allSelected: boolean;
@@ -66,6 +67,7 @@ export function TableHeaderRow({
   t,
   showRowNumbers,
   selectionEnabled,
+  selectionReady = true,
   selectHeaderRef,
   selectAllRef,
   allSelected,
@@ -97,6 +99,7 @@ export function TableHeaderRow({
               ref={selectAllRef as React.Ref<HTMLInputElement>}
               aria-label={t("selection.selectAllAria")}
               checked={allSelected}
+              disabled={!selectionReady}
               className="h-3.5 w-3.5 rounded-[3px]"
               onChange={onToggleAll}
             />

@@ -12,6 +12,23 @@ function isConsoleWarnMocked(): jest.SpiedFunction<typeof console.warn> {
 }
 
 describe("mobile debug helpers", () => {
+  test("request trace uses the existing bounded telemetry buffer without raw extras", async () => {
+    const telemetry = require("../../../apps/fieldops/src/mobile-telemetry");
+    const record = jest.spyOn(telemetry, "bufferMobileTelemetryEvent").mockResolvedValue(undefined);
+    try {
+      const { logMobileRequestTrace } = require("../../../apps/fieldops/src/mobile-debug");
+      logMobileRequestTrace({ phase: "end", method: "POST", url: "https://rpc.invalid/rest/v1/rpc/action",
+        correlationId: "corr", traceparent: "trace", status: 200, durationMs: 12, body: "private", error: "private" });
+      expect(record).toHaveBeenCalledWith({
+        event_type: "mobile.http.end", captured_at: expect.any(String),
+        metadata: { method: "POST", url: "https://rpc.invalid/rest/v1/rpc/action",
+          correlationId: "corr", traceparent: "trace", status: 200, durationMs: 12 },
+      });
+      record.mockRejectedValueOnce(new Error("storage unavailable"));
+      expect(() => logMobileRequestTrace({ phase: "start", method: "GET", url: "/", correlationId: "corr", traceparent: "trace" })).not.toThrow();
+      await Promise.resolve();
+    } finally { record.mockRestore(); }
+  });
   test("normalizes Error objects with stack when available", () => {
     const normalized = normalizeDebugMessage(new Error("auth timeout"));
     expect(normalized).toContain("auth timeout");

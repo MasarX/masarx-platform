@@ -19,7 +19,7 @@ jest.mock("@masarx/auth/browser", () => ({
 
 test("auth gate renders children when no error and not forced", () => {
   renderWithIntl(
-    <AuthGate appLabel="Console" testId="console-auth" contextError={null}>
+    <AuthGate appLabel="Console" testIdPrefix="console-auth" contextError={null}>
       <div>Child content</div>
     </AuthGate>
   );
@@ -29,7 +29,7 @@ test("auth gate renders children when no error and not forced", () => {
 
 test("auth gate shows sign-in when forced", () => {
   renderWithIntl(
-    <AuthGate appLabel="Console" testId="console-auth" forceAuth>
+    <AuthGate appLabel="Console" testIdPrefix="console-auth" forceAuth>
       <div>Child content</div>
     </AuthGate>
   );
@@ -42,7 +42,7 @@ test("auth gate shows sign-in for auth errors", () => {
   renderWithIntl(
     <AuthGate
       appLabel="Portal"
-      testId="portal-auth"
+      testIdPrefix="portal-auth"
       contextError={new Error("ui_me_v1 requires authenticated user")}
     >
       <div>Child content</div>
@@ -57,7 +57,7 @@ test("auth gate shows network hint when Supabase is unreachable", () => {
   renderWithIntl(
     <AuthGate
       appLabel="Console"
-      testId="console-auth"
+      testIdPrefix="console-auth"
       contextError={new Error("fetch failed")}
     >
       <div>Child content</div>
@@ -70,4 +70,25 @@ test("auth gate shows network hint when Supabase is unreachable", () => {
     )
   ).toBeInTheDocument();
   expect(screen.queryByText("Child content")).toBeNull();
+});
+
+test("auth gate preserves auth classification when the technical message is hidden", () => {
+  renderWithIntl(
+    <AuthGate appLabel="Console" testIdPrefix="console-auth" contextError={new Error("Backend ui_me_v1 requires authenticated user; token=synthetic-short")}>
+      <div>Child content</div>
+    </AuthGate>
+  );
+  expect(screen.getByText("Console sign-in")).toBeInTheDocument();
+  expect(screen.queryByText(/synthetic-short|Backend ui_me_v1/)).not.toBeInTheDocument();
+});
+
+test("auth gate preserves context hints without rendering technical diagnostics", () => {
+  renderWithIntl(
+    <AuthGate appLabel="Console" testIdPrefix="console-auth" contextError={new Error("Backend ui_read_registry_v1 raw response unavailable; client_secret=synthetic-short")}>
+      <div>Child content</div>
+    </AuthGate>
+  );
+  expect(screen.getByTestId("console-auth-context-unavailable")).toBeInTheDocument();
+  expect(screen.queryByText(/synthetic-short|ui_read_registry_v1|raw response/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Child content")).not.toBeInTheDocument();
 });

@@ -2,10 +2,9 @@
  * @jest-environment jsdom
  */
 import * as React from "react";
-import { render, act } from "@testing-library/react";
+import { render, act, waitFor } from "@testing-library/react";
 
-// Mock bwip-js before importing CanvasBarcodeBlock
-const mockToSVG = jest.fn(() => '<svg><rect width="100" height="50" fill="black" /></svg>');
+const mockToSVG = jest.fn((_options: Record<string, unknown>) => '<svg><rect width="100" height="50" fill="black" /></svg>');
 jest.mock("bwip-js", () => ({
   __esModule: true,
   default: { toSVG: mockToSVG },
@@ -13,48 +12,42 @@ jest.mock("bwip-js", () => ({
 }));
 
 import { CanvasBarcodeBlock } from "../../packages/ui/src/label-designer/canvas/canvas-barcode-block";
-import { getBarcodeConfig } from "../../packages/ui/src/label-designer/canvas/barcode-types";
 import type { TemplateBlock } from "../../packages/ui/src/label-designer/canvas/canvas-types";
 
-/**
- * Build the same bwip-js options the component builds internally.
- * This mirrors the logic in canvas-barcode-block.tsx useEffect.
- */
-function buildBarcodeOptions(block: TemplateBlock) {
-  const barcodeType = (block.barcode_type || "code128").toLowerCase();
-  const config = getBarcodeConfig(barcodeType);
-  const encoder = config?.encoder || "code128";
-  const data = block.fallback || block.value_path || (config?.is2D ? "SAMPLE" : "12345678");
-
-  const options: Record<string, unknown> = {
-    bcid: encoder,
-    text: data,
-    scale: 2,
-    includetext: block.human_readable !== false,
-    textxalign: "center",
-  };
-
-  if (block.module_width) options.width = block.module_width;
-  if (block.quiet_zone_modules) options.paddingwidth = block.quiet_zone_modules;
-  if (block.error_correction && barcodeType === "qr") {
-    options.eclevel = block.error_correction;
-  }
-
-  return options;
+const defaultProps = { x: 10, y: 10, width: 180, height: 60, scale: 1 };
+function barcode(block: TemplateBlock) {
+  return <svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>;
+}
+function block(overrides: Partial<TemplateBlock> = {}): TemplateBlock {
+  return { type: "barcode", x: 10, y: 10, width: 180, height: 60, barcode_type: "code128", ...overrides };
+}
+async function expectGenerated(container: HTMLElement) {
+  await waitFor(() => {
+    expect(container.querySelector("foreignObject")).not.toBeNull();
+    expect(container.querySelector("foreignObject svg rect")).not.toBeNull();
+  });
 }
 
 describe("CanvasBarcodeBlock", () => {
-  const defaultProps = {
-    x: 10,
-    y: 10,
-    width: 180,
-    height: 60,
-    scale: 1,
-  };
-
   beforeEach(() => {
-    mockToSVG.mockClear();
+    mockToSVG.mockReset();
     mockToSVG.mockReturnValue('<svg><rect width="100" height="50" fill="black" /></svg>');
+  });
+
+  it("renders loading before the encoder resolves, then generated SVG", async () => {
+    const { container } = render(barcode(block({ fallback: "loading" })));
+    expect(container.querySelector("text")?.textContent).toBe("Loading...");
+    expect(container.querySelector("foreignObject")).toBeNull();
+    await expectGenerated(container);
+    expect(container.querySelector("text")).toBeNull();
+    expect(container.querySelector("foreignObject")).toHaveAttribute("width", "180");
+    expect(container.querySelector("foreignObject")).toHaveAttribute("height", "60");
+  });
+  it("rejects an unknown symbology without rendering a different barcode", () => {
+    const block: TemplateBlock = { type: "barcode", x: 0, y: 0, barcode_type: "future-format", fallback: "INVALID-TYPE" };
+    const { container } = render(<svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>);
+    expect(container.querySelector("text")).toHaveTextContent("Invalid");
+    expect(mockToSVG).not.toHaveBeenCalled();
   });
 
   it("renders fallback while loading", () => {
@@ -70,180 +63,91 @@ describe("CanvasBarcodeBlock", () => {
     expect(container.querySelector("svg")).toBeTruthy();
   });
 
-  it("renders with QR barcode type", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 72, height: 72,
-      barcode_type: "qr",
-      fallback: "BBB-QR-TEST",
-    };
-    const { container } = render(
-      <svg><CanvasBarcodeBlock block={block} x={10} y={10} width={72} height={72} scale={1} /></svg>,
-    );
-    expect(container.querySelector("svg")).toBeTruthy();
-  });
+  it("names the encoded barcode once without exposing duplicate image descendants", async () => {
+    const { container, getAllByRole, getByRole, rerender } = render(barcode(block({ fallback: "accessible-code128" })));
+    await expectGenerated(container);
+    expect(getAllByRole("img")).toHaveLength(1);
+    expect(getByRole("img", { name: "Barcode block: Code 128" })).toContainElement(container.querySelector("foreignObject"));
 
-  it("renders with EAN-13 type", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "ean13",
-      fallback: "CCC-EAN-TEST",
-    };
-    const { container } = render(
-      <svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>,
-    );
-    expect(container.querySelector("svg")).toBeTruthy();
-  });
-
-  it("uses value_path as fallback data source", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "code128",
-      value_path: "DDD-VALUEPATH-TEST",
-    };
-    const { container } = render(
-      <svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>,
-    );
-    expect(container.querySelector("svg")).toBeTruthy();
-  });
-
-  it("shows placeholder text when barcode cannot render", () => {
-    // When bwip-js hasn't loaded yet or encounters an error,
-    // the component shows a fallback placeholder
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "code128",
-      fallback: "EEE-ERROR-TEST",
-    };
-    const { container } = render(
-      <svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>,
-    );
-    // Component shows "Loading..." placeholder before bwip-js resolves
-    const text = container.querySelector("text");
-    expect(text).toBeTruthy();
-    expect(text!.textContent).toBe("Loading...");
-    // Fallback rect should be visible
-    const rect = container.querySelectorAll("rect");
-    expect(rect.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("shows loading text before bwip resolves", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "code128",
-      fallback: "FFF-LOADING-BEFORE",
-    };
-    const { container } = render(
-      <svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>,
-    );
-    // On initial render before effect fires, shows loading/fallback
-    expect(container.querySelector("svg")).toBeTruthy();
-  });
-
-  // Tests 7-11: Verify the barcode options logic directly.
-  // The component's dynamic import("bwip-js") inside useEffect doesn't resolve
-  // reliably in Jest+jsdom, so we test the options building as a pure function
-  // that mirrors the component's internal logic.
-
-  it("passes human_readable option (includetext)", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "code128",
-      fallback: "GGG-HUMAN-READABLE",
-      human_readable: false,
-    };
-    const opts = buildBarcodeOptions(block);
-    expect(opts.includetext).toBe(false);
-
-    // Default (no human_readable set) should be true
-    const block2: TemplateBlock = { ...block, human_readable: undefined };
-    const opts2 = buildBarcodeOptions(block2);
-    expect(opts2.includetext).toBe(true);
-  });
-
-  it("passes module_width option", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "code128",
-      fallback: "HHH-MODULE-WIDTH",
-      module_width: 3,
-    };
-    const opts = buildBarcodeOptions(block);
-    expect(opts.width).toBe(3);
-
-    // Without module_width, width should not be set
-    const block2: TemplateBlock = { ...block, module_width: undefined };
-    const opts2 = buildBarcodeOptions(block2);
-    expect(opts2.width).toBeUndefined();
-  });
-
-  it("passes quiet_zone option (paddingwidth)", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "code128",
-      fallback: "III-QUIET-ZONE",
-      quiet_zone_modules: 5,
-    };
-    const opts = buildBarcodeOptions(block);
-    expect(opts.paddingwidth).toBe(5);
-  });
-
-  it("passes error_correction for QR (eclevel)", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 72, height: 72,
-      barcode_type: "qr",
-      fallback: "JJJ-EC-TEST",
-      error_correction: "H",
-    };
-    const opts = buildBarcodeOptions(block);
-    expect(opts.eclevel).toBe("H");
-  });
-
-  it("does not pass eclevel for non-QR barcode", () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "code128",
-      fallback: "KKK-NO-EC-TEST",
-      error_correction: "H",
-    };
-    const opts = buildBarcodeOptions(block);
-    expect(opts.eclevel).toBeUndefined();
-  });
-
-  it("renders foreignObject with SVG content on success", async () => {
-    const block: TemplateBlock = {
-      type: "barcode",
-      x: 10, y: 10, width: 180, height: 60,
-      barcode_type: "code128",
-      fallback: "LLL-FOREIGN-OBJ",
-    };
-    let container!: HTMLElement;
     await act(async () => {
-      const result = render(
-        <svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>,
-      );
-      container = result.container;
+      rerender(barcode(block({ barcode_type: "qr", fallback: "accessible-qr" })));
     });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
+    await expectGenerated(container);
+    expect(getAllByRole("img")).toHaveLength(1);
+    expect(getByRole("img", { name: "Barcode block: QR Code" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["QR", { barcode_type: "qr", fallback: "qr-data" }, { bcid: "qrcode", text: "qr-data" }],
+    ["EAN-13", { barcode_type: "ean13", fallback: "1234567890128" }, { bcid: "ean13", text: "1234567890128" }],
+    ["value_path", { value_path: "value-path-data" }, { text: "value-path-data" }],
+    ["caption disabled", { fallback: "caption-disabled", human_readable: false }, { includetext: false }],
+    ["caption default", { fallback: "caption-default" }, { includetext: true }],
+    ["module width", { fallback: "module-width", module_width: 3 }, { width: 3 }],
+    ["quiet zone", { fallback: "quiet-zone", quiet_zone_modules: 5 }, { paddingwidth: 5 }],
+    ["QR correction", { barcode_type: "qr", fallback: "qr-correction", error_correction: "H" }, { eclevel: "H" }],
+  ] as Array<[string, Partial<TemplateBlock>, Record<string, unknown>]>)("passes %s options to the actual encoder", async (_name, overrides, expected) => {
+    const { container } = render(barcode(block(overrides)));
+    await expectGenerated(container);
+    expect(mockToSVG).toHaveBeenCalledTimes(1);
+    expect(mockToSVG).toHaveBeenCalledWith(expect.objectContaining(expected));
+  });
+
+  it("omits unset dimensions and non-QR error correction from encoder options", async () => {
+    const { container } = render(barcode(block({ fallback: "omitted-options", error_correction: "H" })));
+    await expectGenerated(container);
+    const options = mockToSVG.mock.calls[0][0];
+    expect(options).not.toHaveProperty("width");
+    expect(options).not.toHaveProperty("paddingwidth");
+    expect(options).not.toHaveProperty("eclevel");
+  });
+
+  it("shows Invalid without generated content when the encoder fails", async () => {
+    mockToSVG.mockImplementationOnce(() => { throw new Error("invalid barcode"); });
+    const { container } = render(barcode(block({ fallback: "encoder-error" })));
+    await waitFor(() => expect(container.querySelector("text")?.textContent).toBe("Invalid"));
+    expect(mockToSVG).toHaveBeenCalledTimes(1);
+    expect(container.querySelector("foreignObject")).toBeNull();
+  });
+
+  it("separates caption variants in the cache and reuses the normalized default", async () => {
+    mockToSVG.mockImplementation((options) => '<svg><text>' + String(options.includetext) + '</text></svg>');
+    const original = block({ fallback: "caption-cache-regression", human_readable: true });
+    const { container, rerender } = render(barcode(original));
+    await waitFor(() => expect(container.querySelector("foreignObject text")?.textContent).toBe("true"));
+    await act(async () => { rerender(barcode({ ...original, human_readable: false })); });
+    await waitFor(() => expect(container.querySelector("foreignObject text")?.textContent).toBe("false"));
+    expect(mockToSVG).toHaveBeenCalledTimes(2);
+    expect(mockToSVG).toHaveBeenLastCalledWith(expect.objectContaining({ includetext: false }));
+    await act(async () => { rerender(barcode({ ...original, human_readable: undefined })); });
+    expect(container.querySelector("foreignObject text")?.textContent).toBe("true");
+    expect(mockToSVG).toHaveBeenCalledTimes(2);
+  });
+
+  it("regenerates cached SVG when human-readable text changes and reuses matching output", async () => {
+    const block: TemplateBlock = {
+      type: "barcode",
+      x: 10, y: 10, width: 180, height: 60,
+      barcode_type: "code128",
+      fallback: "HUMAN-TEXT-CACHE-REGRESSION",
+      human_readable: true,
+    };
+    const { rerender } = render(
+      <svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>
+    );
+    await waitFor(() => {
+      expect(mockToSVG).toHaveBeenLastCalledWith(expect.objectContaining({ includetext: true }));
     });
-    // After successful render, should contain foreignObject
-    const fo = container.querySelector("foreignObject");
-    if (fo) {
-      expect(fo.getAttribute("width")).toBe("180");
-      expect(fo.getAttribute("height")).toBe("60");
-    } else {
-      // In jsdom, foreignObject may not be supported; just verify it rendered
-      expect(container.querySelector("svg")).toBeTruthy();
-    }
+
+    rerender(
+      <svg><CanvasBarcodeBlock block={{ ...block, human_readable: false }} {...defaultProps} /></svg>
+    );
+    await waitFor(() => {
+      expect(mockToSVG).toHaveBeenLastCalledWith(expect.objectContaining({ includetext: false }));
+    });
+    expect(mockToSVG).toHaveBeenCalledTimes(2);
+
+    rerender(<svg><CanvasBarcodeBlock block={block} {...defaultProps} /></svg>);
+    expect(mockToSVG).toHaveBeenCalledTimes(2);
   });
 });

@@ -29,6 +29,7 @@ function normalizeUrlForCompare(value: string): string {
 }
 
 const PLACEHOLDER_SUPABASE_URL = ["https://example", "supabase.co"].join(".");
+
 const ANDROID_EMULATOR_SUPABASE_URL_ENV = "FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL";
 
 function isPlaceholderSupabaseUrl(value: string): boolean {
@@ -92,42 +93,14 @@ function resolveSupabaseAnonKey(): string | undefined {
   return publicAnonKey ?? fallbackAnonKey;
 }
 
-function buildSupabaseFunctionEndpoint(
-  supabaseUrl: string | undefined,
-  functionName: string,
-): string | undefined {
-  const normalized = supabaseUrl ? normalizeUrlForCompare(supabaseUrl) : "";
-  return normalized ? `${normalized}/functions/v1/${functionName}` : undefined;
-}
-
-function resolveAndroidEmulatorHostOrigin(value: string | undefined): string | undefined {
-  const normalized = value ? normalizeUrlForCompare(value) : "";
-  if (!normalized) return undefined;
-  try {
-    const parsed = new URL(normalized);
-    if (parsed.hostname === "192.0.2.10") {
-      parsed.hostname = "127.0.0.1";
-      return parsed.origin;
-    }
-    return parsed.origin;
-  } catch {
-    return undefined;
-  }
-}
-
-function canResolveConfigPlugin(pluginName: string): boolean {
-  try {
-    require.resolve(pluginName, { paths: [__dirname] });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export default ({ config }: ConfigContext): ExpoConfig => {
   const buildProfile = readEnvString(process.env.FIELDOPS_BUILD_PROFILE);
   const isEasBuild = readEnvString(process.env.EAS_BUILD) === "true";
   const requireNativeIds = isEasBuild || Boolean(buildProfile);
+  const webBasePath = (readEnvString(process.env.NEXT_PUBLIC_APP_BASE_PATH) ?? "").replace(/\/+$/g, "");
+  if (webBasePath && !/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+$/.test(webBasePath)) {
+    throw new Error("[fieldops-config] NEXT_PUBLIC_APP_BASE_PATH must be an absolute path such as /fieldops.");
+  }
 
   const appIdSuffix = readEnvString(process.env.NEXT_PUBLIC_FIELDOPS_APP_ID_SUFFIX) ?? "";
   const iosBundleBase = readEnvString(process.env.NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS);
@@ -162,9 +135,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   }
 
   const iosBundleIdentifier = iosBundleBase ? `${iosBundleBase}${appIdSuffix}` : undefined;
-  const androidPackage = androidPackageBase
-    ? `${androidPackageBase}${appIdSuffix}`
-    : config.android?.package ?? "co.masarx.fieldops.dev";
+  const androidPackage = androidPackageBase ? `${androidPackageBase}${appIdSuffix}` : undefined;
   const updatesUrl = easProjectId ? `https://u.expo.dev/${easProjectId}` : undefined;
 
   const appName =
@@ -172,24 +143,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     readEnvString(config.name) ??
     "Fieldops";
   const supabaseUrl = resolveSupabaseUrl({ buildProfile, isEasBuild });
-  const usesAndroidEmulatorSupabaseUrl = Boolean(
-    readEnvString(process.env[ANDROID_EMULATOR_SUPABASE_URL_ENV]),
-  );
-  const supabaseAnonKey = resolveSupabaseAnonKey();
   const allowLocalCleartext = !isEasBuild && !buildProfile && isLocalHttpUrl(supabaseUrl);
-  const driverSignupEndpoint = usesAndroidEmulatorSupabaseUrl
-    ? buildSupabaseFunctionEndpoint(supabaseUrl, "driver-signup-intake")
-    : readEnvString(process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT) ||
-      readEnvString(process.env.LANDING_DRIVER_SIGNUP_ENDPOINT);
-  const driverStatusEndpoint = usesAndroidEmulatorSupabaseUrl
-    ? buildSupabaseFunctionEndpoint(supabaseUrl, "driver-application-status")
-    : readEnvString(process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT) ||
-      readEnvString(process.env.LANDING_DRIVER_STATUS_ENDPOINT) ||
-      readEnvString(process.env.LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT);
-  const driverSignupOrigin = usesAndroidEmulatorSupabaseUrl
-    ? resolveAndroidEmulatorHostOrigin(supabaseUrl)
-    : readEnvString(process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN) ||
-      readEnvString(process.env.LANDING_SITE_URL);
+  const supabaseAnonKey = resolveSupabaseAnonKey();
 
   const updates = updatesUrl
     ? {
@@ -206,20 +161,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   type PluginEntry = NonNullable<ExpoConfig["plugins"]>[number];
   const basePlugins = (Array.isArray(config.plugins) ? [...config.plugins] : []) as PluginEntry[];
-  const fieldopsAndroidCleartextPlugin = "./plugins/with-fieldops-android-cleartext";
-  const hasFieldopsAndroidCleartextPlugin = basePlugins.some((entry) => {
-    if (typeof entry === "string") return entry === fieldopsAndroidCleartextPlugin;
-    return Array.isArray(entry) && entry[0] === fieldopsAndroidCleartextPlugin;
-  });
-  if (!hasFieldopsAndroidCleartextPlugin) {
-    basePlugins.push(fieldopsAndroidCleartextPlugin);
-  }
-
   const hasNotificationsPlugin = basePlugins.some((entry) => {
     if (typeof entry === "string") return entry === "expo-notifications";
     return Array.isArray(entry) && entry[0] === "expo-notifications";
   });
-  if (!hasNotificationsPlugin && canResolveConfigPlugin("expo-notifications")) {
+  if (!hasNotificationsPlugin) {
     basePlugins.push("expo-notifications");
   }
 
@@ -227,8 +173,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     if (typeof entry === "string") return entry === "@sentry/react-native/expo";
     return Array.isArray(entry) && entry[0] === "@sentry/react-native/expo";
   });
-  if (!hasSentryPlugin && canResolveConfigPlugin("@sentry/react-native/expo")) {
+  if (!hasSentryPlugin) {
     basePlugins.push("@sentry/react-native/expo");
+  }
+  if (!basePlugins.some((entry) => (typeof entry === "string" ? entry : entry[0]) === "@maplibre/maplibre-react-native")) {
+    basePlugins.push("@maplibre/maplibre-react-native");
   }
   let hasLocationPlugin = false;
   const nextPlugins: PluginEntry[] = basePlugins.map((entry) => {
@@ -255,20 +204,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ? existingInfoPlist.UIBackgroundModes.filter((item): item is string => typeof item === "string")
     : [];
   const nextBackgroundModes = Array.from(new Set([...uiBackgroundModes, "location"]));
-  const androidConfig = {
-    ...config.android,
-    package: androidPackage ?? config.android?.package,
-    ...(allowLocalCleartext || (config.android as typeof config.android & { usesCleartextTraffic?: boolean } | undefined)
-      ?.usesCleartextTraffic
-      ? { usesCleartextTraffic: true }
-      : {}),
-    adaptiveIcon: {
-      foregroundImage: "./assets/adaptive-icon.png",
-      backgroundColor: "#ffffff",
-    },
-    edgeToEdgeEnabled: true,
-    predictiveBackGestureEnabled: false,
-  } as ExpoConfig["android"] & { usesCleartextTraffic?: boolean };
 
   return {
     ...config,
@@ -276,11 +211,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     slug: fieldopsAppSlug,
     version: readPackageVersion(),
     runtimeVersion: { policy: "appVersion" },
+    experiments: { ...config.experiments, baseUrl: webBasePath },
     ...(updates ? { updates } : {}),
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "automatic",
-    newArchEnabled: true,
     splash: {
       image: "./assets/splash-icon.png",
       resizeMode: "contain",
@@ -301,7 +236,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
     },
     android: {
-      ...androidConfig,
+      ...config.android,
+      package: androidPackage ?? config.android?.package,
+      ...(allowLocalCleartext ? { usesCleartextTraffic: true } : {}),
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        backgroundColor: "#ffffff",
+      },
+      predictiveBackGestureEnabled: false,
     },
     web: {
       favicon: "./assets/favicon.png",
@@ -314,16 +256,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       NEXT_PUBLIC_APP_BASE_PATH: process.env.NEXT_PUBLIC_APP_BASE_PATH,
       NEXT_PUBLIC_SUPABASE_URL: supabaseUrl,
       NEXT_PUBLIC_SUPABASE_ANON_KEY: supabaseAnonKey,
-      NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL: process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL,
       NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
       NEXT_PUBLIC_SENTRY_ENVIRONMENT: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
       NEXT_PUBLIC_AUTH_METHODS: process.env.NEXT_PUBLIC_AUTH_METHODS,
+      NEXT_PUBLIC_DRIVER_SIGNUP_URL: process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL ?? process.env.NEXT_PUBLIC_DRIVER_SIGNUP_URL,
       NEXT_PUBLIC_LOCALE: process.env.NEXT_PUBLIC_LOCALE,
-      NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT: driverSignupEndpoint,
-      NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT: driverStatusEndpoint,
-      NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN: driverSignupOrigin,
-      NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES:
-        process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES,
     },
   };
 };

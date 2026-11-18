@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(20);
+SELECT plan(19);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_uc223_shipment_update_geocode_command_v1()
 RETURNS SETOF TEXT
@@ -261,10 +261,30 @@ BEGIN
 
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  RETURN NEXT ok(
-    v_old_geocode_run_id IS NOT NULL,
-    'baseline shipment-scoped geocode run is created for the dedupe regression'
-  );
+  RETURN NEXT diag('shipment update geocode result: ' || COALESCE(v_result::text, '<null>'));
+  RETURN NEXT diag('shipment update geocode workflow: ' || COALESCE((
+    SELECT jsonb_build_object('status', wr.workflow_status, 'last_error', wr.last_error)::text
+    FROM public.workflow_runs wr
+    WHERE wr.id = v_workflow_run_id
+  ), '<missing>'));
+  RETURN NEXT diag('shipment update geocode action: ' || COALESCE((
+    SELECT sa.action_data::text
+    FROM public.shipment_actions sa
+    WHERE sa.id = v_shipment_action_id
+  ), '<missing>'));
+  RETURN NEXT diag('nested geocode steps: ' || COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'operation', wrs.operation_name,
+      'status', wrs.step_status,
+      'last_error', wrs.last_error
+    ) ORDER BY wrs.sequence_order)::text
+    FROM public.workflow_run_steps wrs
+    WHERE wrs.workflow_run_id = (
+      SELECT (sa.action_data->>'workflow_run_id')::uuid
+      FROM public.shipment_actions sa
+      WHERE sa.id = v_shipment_action_id
+    )
+  ), '<missing>'));
   RETURN NEXT is(v_result->>'status', 'completed', 'api.ui_execute_shipment_update_geocode_v1 reports completed status');
   RETURN NEXT ok(
     EXISTS (

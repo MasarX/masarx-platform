@@ -7,6 +7,7 @@
 /* eslint-disable no-console */
 const { loadEnv } = require('../utils/load-env');
 const { getJwtRole } = require('../utils/jwt');
+const { resolveConfig: resolveGuardedEgressProxyProofConfig } = require('./verify-api-caller-guarded-egress-proxy');
 
 function isTruthy(value) {
   return /^(1|true|yes)$/i.test(String(value || '').trim());
@@ -345,6 +346,13 @@ function validateCloudEnv({ env } = {}) {
     assertDbJwt(processEnv, 'WEBHOOK_DB_JWT', 'edge_webhook_role');
     assertDbJwt(processEnv, 'API_CALLER_DB_JWT', 'edge_api_caller_role');
     assertDbJwt(processEnv, 'LABEL_RENDERER_DB_JWT', 'edge_label_renderer_role');
+  }
+
+  if (isTruthy(processEnv.API_CALLER_GUARDED_EGRESS_PROOF_REQUIRED)) {
+    resolveGuardedEgressProxyProofConfig(
+      processEnv,
+      processEnv.API_CALLER_GUARDED_EGRESS_PROOF_LANE,
+    );
   }
 
   return {

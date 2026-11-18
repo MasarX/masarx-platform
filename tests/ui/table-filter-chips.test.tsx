@@ -42,6 +42,7 @@ test("renders chip detail text", () => {
   renderChips({ chips: [chip2] });
   expect(screen.getByText("Name")).toBeInTheDocument();
   expect(screen.getByText("A-Z")).toBeInTheDocument();
+  expect(screen.getByText("A-Z")).not.toHaveClass("opacity-70");
 });
 
 test("calls onRemove on X click", () => {

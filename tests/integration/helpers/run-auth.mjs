@@ -1,4 +1,8 @@
-import { authorizeEdgeRequest, extractAuthToken } from "../../../supabase/functions/api-caller/auth.mjs";
+import {
+  authorizeApiCallerOperation,
+  authorizeEdgeRequest,
+  extractAuthToken,
+} from "../../../supabase/functions/api-caller/auth.mjs";
 
 const payload = JSON.parse(process.argv[2]);
 if (Object.prototype.hasOwnProperty.call(payload || {}, "roles")) {
@@ -10,10 +14,16 @@ if (Object.prototype.hasOwnProperty.call(payload || {}, "roles")) {
   }
 }
 const req = new Request("https://example.test", { method: "POST", headers: payload.headers });
+const auth = await authorizeEdgeRequest(req, {
+  ...(Object.prototype.hasOwnProperty.call(payload, "claims") ? { claims: payload.claims } : {}),
+  nowSeconds: payload.nowSeconds,
+});
 const result = {
   token: extractAuthToken(req),
-  auth: authorizeEdgeRequest(req)
+  auth,
+  operationAuth: payload.operation
+    ? authorizeApiCallerOperation(auth, payload.operation)
+    : null,
 };
 
 console.log(JSON.stringify(result));
-

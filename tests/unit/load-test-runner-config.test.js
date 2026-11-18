@@ -61,6 +61,9 @@ describe('run-load-test config', () => {
     expect(body).toMatch('DAY1_LABEL_REQUEST_RATE');
     expect(body).toMatch('DAY1_LABEL_HTTP_RETRY_ATTEMPTS');
     expect(body).toMatch('DAY1_LABEL_HTTP_RETRY_SLEEP_MS');
+    for (const knob of ['BACKOFF_MS', 'BACKOFF_MULTIPLIER', 'MAX_SLEEP_MS', 'JITTER_MS']) {
+      expect(body.match(new RegExp("'DAY1_LABEL_HTTP_RETRY_" + knob + "'", 'g'))).toHaveLength(2);
+    }
     expect(body).toMatch('DAY1_LABEL_FAILURE_LOG_LIMIT');
   });
 });

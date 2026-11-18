@@ -5,7 +5,7 @@ import { createUiTranslator } from "../i18n";
 import { Input } from "../input";
 import { Select } from "../select";
 import type { TemplateBlock } from "./canvas/canvas-types";
-import { BARCODE_REGISTRY, validateBarcodeData } from "./canvas/barcode-types";
+import { BARCODE_REGISTRY, normalizeBarcodeType, validateBarcodeData } from "./canvas/barcode-types";
 import { assessBarcodeQuality } from "./canvas/barcode-quality";
 import { ColorPickerInput } from "./color-picker-input";
 import { FontSelector } from "./font-selector";
@@ -26,7 +26,6 @@ function numField(
   value: number | undefined,
   onChange: (v: number) => void,
   id: string,
-  disabled = false,
 ) {
   return (
     <div className="space-y-0.5">
@@ -41,7 +40,6 @@ function numField(
           const n = parseFloat(e.target.value);
           if (Number.isFinite(n)) onChange(n);
         }}
-        disabled={disabled}
         className="h-7 text-xs"
       />
     </div>
@@ -54,7 +52,6 @@ function textField(
   onChange: (v: string) => void,
   id: string,
   placeholder?: string,
-  disabled = false,
 ) {
   return (
     <div className="space-y-0.5">
@@ -65,7 +62,6 @@ function textField(
         id={id}
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
         placeholder={placeholder}
         className="h-7 text-xs"
       />
@@ -103,20 +99,6 @@ function ValidationBadge({ valid }: { valid: boolean }) {
   );
 }
 
-function barcodeTypeForControl(value: string | undefined): string {
-  const normalized = (value || "code128").toLowerCase();
-  if (normalized === "code128") return "code128";
-  if (normalized === "ean13" || normalized === "ean-13") return "ean13";
-  if (normalized === "qr") return "qr";
-  return normalized;
-}
-
-function rendererBarcodeType(value: string): string {
-  if (value === "qr") return "QR";
-  if (value === "ean13") return "EAN13";
-  return value.toUpperCase();
-}
-
 export function BlockPropertyPanel({
   block,
   blockIndex,
@@ -130,20 +112,17 @@ export function BlockPropertyPanel({
   const [showAdvanced, setShowAdvanced] = React.useState(false);
 
   const set = React.useCallback(
-    (updates: Partial<TemplateBlock>) => {
-      if (readOnly) return;
-      onUpdate(blockIndex, updates);
-    },
+    (updates: Partial<TemplateBlock>) => { if (!readOnly) onUpdate(blockIndex, updates); },
     [blockIndex, onUpdate, readOnly],
   );
 
-  const barcodeType = barcodeTypeForControl(block.barcode_type);
+  const barcodeType = normalizeBarcodeType(block.barcode_type || "code128");
   const barcodeData = block.fallback || block.value_path || "";
   const dataValid = block.type === "barcode" ? validateBarcodeData(barcodeType, barcodeData) : true;
   const quality = block.type === "barcode" ? assessBarcodeQuality(block.width || 80, barcodeType, dpi) : null;
 
   return (
-    <div className="space-y-3 rounded-lg border border-ui-border/50 bg-ui-paper/50 p-3" data-testid={`${prefix}-panel`}>
+    <fieldset disabled={readOnly} className="min-w-0 space-y-3 rounded-lg border border-ui-border/50 bg-ui-paper/50 p-3" data-testid={`${prefix}-panel`}>
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-ui-ink capitalize">
           {block.type === "text" ? t("textBlock") : block.type === "barcode" ? t("barcodeBlock") : block.type === "image" ? t("imageBlock") : block.type === "line" ? t("lineBlock") : t("rectBlock")}
@@ -161,7 +140,6 @@ export function BlockPropertyPanel({
             type="checkbox"
             checked={block.locked ?? false}
             onChange={(e) => set({ locked: e.target.checked })}
-            disabled={readOnly}
             className="h-3 w-3"
           />
           {block.locked ? t("locked") : t("unlocked")}
@@ -169,26 +147,26 @@ export function BlockPropertyPanel({
       </div>
 
       {/* Name */}
-      {textField(t("blockName"), block.name, (v) => set({ name: v }), id("name"), `${block.type} #${blockIndex}`, readOnly)}
+      {textField(t("blockName"), block.name, (v) => set({ name: v }), id("name"), `${block.type} #${blockIndex}`)}
 
       {/* Position + Size */}
       <div className="grid grid-cols-4 gap-2">
-        {numField("X", block.x, (v) => set({ x: v }), id("x"), readOnly)}
-        {numField("Y", block.y, (v) => set({ y: v }), id("y"), readOnly)}
-        {numField("W", block.width, (v) => set({ width: v }), id("w"), readOnly)}
-        {numField("H", block.height, (v) => set({ height: v }), id("h"), readOnly)}
+        {numField("X", block.x, (v) => set({ x: v }), id("x"))}
+        {numField("Y", block.y, (v) => set({ y: v }), id("y"))}
+        {numField("W", block.width, (v) => set({ width: v }), id("w"))}
+        {numField("H", block.height, (v) => set({ height: v }), id("h"))}
       </div>
 
       {/* Rotation */}
-      {numField(t("rotation"), block.rotation, (v) => set({ rotation: v }), id("rotation"), readOnly)}
+      {numField(t("rotation"), block.rotation, (v) => set({ rotation: v }), id("rotation"))}
 
       {/* Type-specific fields */}
       {block.type === "text" ? (
         <div className="space-y-2">
-          {textField(t("valuePath"), block.value_path, (v) => set({ value_path: v }), id("value_path"), "e.g. shipment.tracking_number", readOnly)}
-          {textField(t("fallback"), block.fallback, (v) => set({ fallback: v }), id("fallback"), undefined, readOnly)}
+          {textField(t("valuePath"), block.value_path, (v) => set({ value_path: v }), id("value_path"), "e.g. shipment.tracking_number")}
+          {textField(t("fallback"), block.fallback, (v) => set({ fallback: v }), id("fallback"))}
           <div className="grid grid-cols-2 gap-2">
-            {numField(t("fontSize"), block.font_size, (v) => set({ font_size: v }), id("font_size"), readOnly)}
+            {numField(t("fontSize"), block.font_size, (v) => set({ font_size: v }), id("font_size"))}
             <FontSelector
               value={block.font || "regular"}
               onChange={(v) => set({ font: v })}
@@ -213,7 +191,6 @@ export function BlockPropertyPanel({
                 id={id("align")}
                 value={block.align || "left"}
                 onChange={(e) => set({ align: e.target.value as "left" | "center" | "right" })}
-                disabled={readOnly}
                 className="h-7 text-xs"
               >
                 <option value="left">Left</option>
@@ -229,7 +206,6 @@ export function BlockPropertyPanel({
                 id={id("valign")}
                 value={block.valign || "top"}
                 onChange={(e) => set({ valign: e.target.value as "top" | "middle" | "bottom" })}
-                disabled={readOnly}
                 className="h-7 text-xs"
               >
                 <option value="top">Top</option>
@@ -243,7 +219,6 @@ export function BlockPropertyPanel({
                   type="checkbox"
                   checked={block.wrap ?? false}
                   onChange={(e) => set({ wrap: e.target.checked })}
-                  disabled={readOnly}
                   className="h-3 w-3"
                 />
                 {t("wrap")}
@@ -256,10 +231,10 @@ export function BlockPropertyPanel({
       {block.type === "barcode" ? (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            {textField(t("valuePath"), block.value_path, (v) => set({ value_path: v }), id("value_path"), "e.g. shipment.tracking_number", readOnly)}
+            {textField(t("valuePath"), block.value_path, (v) => set({ value_path: v }), id("value_path"), "e.g. shipment.tracking_number")}
           </div>
           <div className="flex items-center gap-2">
-            {textField(t("fallback"), block.fallback, (v) => set({ fallback: v }), id("fallback"), undefined, readOnly)}
+            {textField(t("fallback"), block.fallback, (v) => set({ fallback: v }), id("fallback"))}
             {barcodeData ? <ValidationBadge valid={dataValid} /> : null}
           </div>
           <div className="space-y-0.5">
@@ -269,10 +244,10 @@ export function BlockPropertyPanel({
             <Select
               id={id("barcode_type")}
               value={barcodeType}
-              onChange={(e) => set({ barcode_type: rendererBarcodeType(e.target.value) })}
-              disabled={readOnly}
+              onChange={(e) => set({ barcode_type: e.target.value })}
               className="h-7 text-xs"
             >
+              {!BARCODE_REGISTRY[barcodeType] ? <option value={barcodeType}>{block.barcode_type}</option> : null}
               {Object.entries(BARCODE_REGISTRY).map(([key, config]) => (
                 <option key={key} value={key}>
                   {config.label}
@@ -292,8 +267,8 @@ export function BlockPropertyPanel({
           {showAdvanced ? (
             <div className="space-y-2 rounded border border-ui-border/30 bg-gray-50 p-2">
               <div className="grid grid-cols-2 gap-2">
-                {numField(t("moduleWidth"), block.module_width, (v) => set({ module_width: v }), id("module_width"), readOnly)}
-                {numField(t("quietZone"), block.quiet_zone_modules, (v) => set({ quiet_zone_modules: v }), id("quiet_zone"), readOnly)}
+                {numField(t("moduleWidth"), block.module_width, (v) => set({ module_width: v }), id("module_width"))}
+                {numField(t("quietZone"), block.quiet_zone_modules, (v) => set({ quiet_zone_modules: v }), id("quiet_zone"))}
               </div>
               <div className="flex items-center gap-2">
                 <label className="flex items-center gap-1 text-[10px] text-ui-muted">
@@ -301,7 +276,6 @@ export function BlockPropertyPanel({
                     type="checkbox"
                     checked={block.human_readable !== false}
                     onChange={(e) => set({ human_readable: e.target.checked })}
-                    disabled={readOnly}
                     className="h-3 w-3"
                   />
                   {t("humanReadable")}
@@ -316,7 +290,6 @@ export function BlockPropertyPanel({
                     id={id("error_correction")}
                     value={block.error_correction || "M"}
                     onChange={(e) => set({ error_correction: e.target.value as "L" | "M" | "Q" | "H" })}
-                    disabled={readOnly}
                     className="h-7 text-xs"
                   >
                     <option value="L">L (7%)</option>
@@ -333,8 +306,8 @@ export function BlockPropertyPanel({
 
       {block.type === "image" ? (
         <div className="space-y-2">
-          {textField(t("assetRef"), block.asset_ref, (v) => set({ asset_ref: v }), id("asset_ref"), "e.g. logo_png", readOnly)}
-          {textField(t("valuePath"), block.value_path, (v) => set({ value_path: v }), id("value_path"), undefined, readOnly)}
+          {textField(t("assetRef"), block.asset_ref, (v) => set({ asset_ref: v }), id("asset_ref"), "e.g. logo_png")}
+          {textField(t("valuePath"), block.value_path, (v) => set({ value_path: v }), id("value_path"))}
         </div>
       ) : null}
 
@@ -347,7 +320,7 @@ export function BlockPropertyPanel({
             label={t("color")}
             disabled={readOnly}
           />
-          {numField(t("stroke"), block.stroke_width, (v) => set({ stroke_width: v }), id("stroke_width"), readOnly)}
+          {numField(t("stroke"), block.stroke_width, (v) => set({ stroke_width: v }), id("stroke_width"))}
           {block.type === "rect" ? (
             <ColorPickerInput
               value={block.fill_color}
@@ -359,6 +332,6 @@ export function BlockPropertyPanel({
           ) : null}
         </div>
       ) : null}
-    </div>
+    </fieldset>
   );
 }

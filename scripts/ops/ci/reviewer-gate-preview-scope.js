@@ -23,8 +23,6 @@ function parseCsv(value) {
 
 function resolveReviewerGatePreviewScope(input = {}) {
   const eventName = String(input.eventName || '').trim();
-  const planStep = String(input.planStep || '').trim();
-  const runMode = String(input.runMode || '').trim().toLowerCase();
   const skipPreview = isTruthy(input.skipPreview);
   const suiteVerifyCloudCore = isTruthy(input.suiteVerifyCloudCore);
   const sameRepoPullRequest = isTruthy(input.sameRepoPullRequest);
@@ -40,9 +38,7 @@ function resolveReviewerGatePreviewScope(input = {}) {
   let runPreviewValidation = false;
   let reason = 'fast_only';
 
-  if (planStep === 'S00') {
-    reason = 'plan_s00';
-  } else if (skipPreview) {
+  if (skipPreview) {
     reason = 'change_skip_preview';
   } else if (eventName === 'merge_group') {
     runPreviewValidation = allowMergeGroupPreview && targetedPreviewRequired;
@@ -107,8 +103,6 @@ function main(argv = process.argv.slice(2)) {
   const { format } = parseArgs(argv);
   const result = resolveReviewerGatePreviewScope({
     eventName: process.env.EVENT_NAME,
-    planStep: process.env.PLAN_STEP,
-    runMode: process.env.RUN_MODE,
     skipPreview: process.env.SKIP_PREVIEW,
     suiteVerifyCloudCore: process.env.SUITE_VERIFY_CLOUD_CORE,
     impactSurfaces: process.env.IMPACT_SURFACES,

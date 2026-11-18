@@ -122,6 +122,19 @@ async function upsertScopedSettings(client, category, scopeType, scopeId, value,
   const normalizedValue = normalizeSeedSettingsValue(category, value);
   const valueJson = JSON.stringify(normalizedValue ?? {});
   const defaultChangeReason = changeReason ?? 'Seed baseline settings';
+
+  if (category === 'webhook_ingest_policy') {
+    const { rows } = await client.query(
+      `SELECT public.upsert_webhook_ingest_policy($1, $2, $3::jsonb) AS settings_id`,
+      [scopeType, scopeId, valueJson]
+    );
+    const current = await client.query(
+      `SELECT settings_version_id FROM public.settings WHERE id = $1::uuid`,
+      [rows[0].settings_id]
+    );
+    return current.rows[0].settings_version_id;
+  }
+
   const nilUuid = '00000000-0000-0000-0000-000000000000';
   const scopeHash = scopeId || nilUuid;
   const versionMergeExpr =
@@ -132,6 +145,23 @@ async function upsertScopedSettings(client, category, scopeType, scopeId, value,
     category === 'geocoding_policy'
       ? `jsonb_strip_nulls((COALESCE(settings.cached_value, '{}'::jsonb) - 'enabled') || $6::jsonb)`
       : `jsonb_strip_nulls(COALESCE(settings.cached_value, '{}'::jsonb) || $6::jsonb)`;
+
+  const activeSchemas = await client.query(
+    `
+      SELECT version
+      FROM public.schema_registry
+      WHERE category = $1
+        AND is_active = TRUE
+      ORDER BY version
+    `,
+    [category]
+  );
+  if (activeSchemas.rowCount !== 1) {
+    throw new Error(
+      `[seed-test-data] Expected exactly one active schema_registry version for ${category}; found ${activeSchemas.rowCount}`
+    );
+  }
+  const schemaVersion = activeSchemas.rows[0].version;
 
   const existingVersion = await client.query(
     `
@@ -157,12 +187,12 @@ async function upsertScopedSettings(client, category, scopeType, scopeId, value,
         UPDATE settings_versions
         SET value = ${versionMergeExpr},
             change_reason = $2,
-            schema_version = 1,
+            schema_version = $4,
             approved_at = now(),
             effective_from = now()
         WHERE id = $3
       `,
-      [valueJson, defaultChangeReason, settingsVersionId]
+      [valueJson, defaultChangeReason, settingsVersionId, schemaVersion]
     );
   } else {
     const { rows } = await client.query(
@@ -178,10 +208,10 @@ async function upsertScopedSettings(client, category, scopeType, scopeId, value,
           approved_at,
           effective_from
         )
-        VALUES ($1, $2, $3, 1, $4::jsonb, 1, $5, now(), now())
+        VALUES ($1, $2, $3, 1, $4::jsonb, $5::int, $6, now(), now())
         RETURNING id
       `,
-      [category, scopeType, scopeId, valueJson, defaultChangeReason]
+      [category, scopeType, scopeId, valueJson, schemaVersion, defaultChangeReason]
     );
 
     settingsVersionId = rows[0].id;

@@ -2,6 +2,13 @@
 /* eslint-disable no-console */
 
 const COMMENT_MARKER = '<!-- masarx-merge-queue-governance -->';
+const TRUSTED_COMMENT_AUTHOR_LOGIN = 'github-actions[bot]';
+const TRUSTED_COMMENT_AUTHOR_TYPE = 'Bot';
+
+function normalizeNonnegativeInt(value) {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
 
 function normalizeState(raw = {}) {
   const source = raw && typeof raw === 'object' ? raw : {};
@@ -12,6 +19,7 @@ function normalizeState(raw = {}) {
     last_failed_step: String(source.last_failed_step || '').trim(),
     last_run_url: String(source.last_run_url || '').trim(),
     last_run_id: String(source.last_run_id || '').trim(),
+    last_run_attempt: normalizeNonnegativeInt(source.last_run_attempt),
     last_conclusion: String(source.last_conclusion || '').trim().toLowerCase(),
     auto_hold_applied: String(source.auto_hold_applied || '').trim().toLowerCase() === 'true' || source.auto_hold_applied === true,
     hold_reason: String(source.hold_reason || '').trim(),
@@ -26,12 +34,42 @@ function createState(overrides = {}) {
     last_failed_step: '',
     last_run_url: '',
     last_run_id: '',
+    last_run_attempt: 0,
     last_conclusion: '',
     auto_hold_applied: false,
     hold_reason: '',
     updated_at: '',
     ...(overrides && typeof overrides === 'object' ? overrides : {}),
   });
+}
+
+function selectTrustedMarkerComment(comments, {
+  marker = COMMENT_MARKER,
+  expectedAuthorLogin = TRUSTED_COMMENT_AUTHOR_LOGIN,
+  expectedAuthorType = TRUSTED_COMMENT_AUTHOR_TYPE,
+} = {}) {
+  const expectedMarker = String(marker || '').trim();
+  const expectedLogin = String(expectedAuthorLogin || '').trim().toLowerCase();
+  const expectedType = String(expectedAuthorType || '').trim().toLowerCase();
+  if (!expectedMarker || !expectedLogin || !expectedType) return null;
+
+  return (Array.isArray(comments) ? comments : [])
+    .filter((comment) => {
+      const hasExactMarker = String(comment?.body || '')
+        .split(/\r?\n/)
+        .some((line) => line.trim() === expectedMarker);
+      return hasExactMarker
+        && String(comment?.user?.login || '').trim().toLowerCase() === expectedLogin
+        && String(comment?.user?.type || '').trim().toLowerCase() === expectedType;
+    })
+    .sort((left, right) => {
+      const leftTime = Date.parse(String(left?.updated_at || left?.created_at || ''));
+      const rightTime = Date.parse(String(right?.updated_at || right?.created_at || ''));
+      const timestampDelta = (Number.isFinite(rightTime) ? rightTime : 0)
+        - (Number.isFinite(leftTime) ? leftTime : 0);
+      if (timestampDelta !== 0) return timestampDelta;
+      return Number(right?.id || 0) - Number(left?.id || 0);
+    })[0] || null;
 }
 
 function parseCommentState(body) {
@@ -67,6 +105,7 @@ function buildCommentBody({
     `- Last Conclusion: \`${normalized.last_conclusion || '<none>'}\``,
     `- Last Failed Step: ${normalized.last_failed_step || '<none>'}`,
     `- Last Failed Run: ${normalized.last_run_url || '<none>'}`,
+    `- Last Run Attempt: \`${normalized.last_run_attempt || '<none>'}\``,
     `- Auto Hold Applied: \`${normalized.auto_hold_applied ? 'yes' : 'no'}\``,
     `- Auto Hold Label: \`${String(autoHoldLabel || 'queue:auto-held').trim() || 'queue:auto-held'}\``,
     `- Auto Hold Threshold: \`${Number(threshold || 0) || 2}\``,
@@ -83,8 +122,11 @@ function buildCommentBody({
 
 module.exports = {
   COMMENT_MARKER,
+  TRUSTED_COMMENT_AUTHOR_LOGIN,
+  TRUSTED_COMMENT_AUTHOR_TYPE,
   normalizeState,
   createState,
   parseCommentState,
+  selectTrustedMarkerComment,
   buildCommentBody,
 };

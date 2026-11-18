@@ -2,6 +2,19 @@ import { bufferMobileTelemetryEvent } from "./mobile-telemetry";
 
 const MOBILE_DEBUG_FAILURE_EVENT = "mobile.debug_failure";
 
+// HTTP completion is transport evidence, not business-operation acceptance.
+export function logMobileRequestTrace(event: import("@masarx/auth/mobile").MobileRequestTraceEvent) {
+  void bufferMobileTelemetryEvent({
+    event_type: "mobile.http." + event.phase,
+    captured_at: new Date().toISOString(),
+    metadata: {
+      method: event.method, url: event.url, correlationId: event.correlationId,
+      traceparent: event.traceparent, status: event.status ?? null,
+      durationMs: event.durationMs ?? null,
+    },
+  }).catch(() => { /* Telemetry must not affect transport. */ });
+}
+
 type MobileGlobalErrorUtils = {
   getGlobalHandler?: () => ((error: unknown, isFatal?: boolean) => void) | undefined;
   setGlobalHandler?: (handler: (error: unknown, isFatal?: boolean, details?: unknown) => void) => void;

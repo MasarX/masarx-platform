@@ -5,6 +5,8 @@ import { getPortalBasePath } from "./utils/base-paths";
 import {
   openWorkflowTemplateStudioWithDisconnect,
   wheelZoomWorkflowTemplateFlowCanvas,
+  workflowStepEnabledLabel,
+  workflowStepEditorCloseLabel,
 } from "./utils/workflow-studio";
 import {
   captureFullPage,
@@ -70,9 +72,7 @@ test.describe("portal workflow studio screenshots", () => {
     });
 
     await expect(
-      page.locator(
-        '[data-testid="portal-workflow-overlaps-ready"], [data-testid="portal-workflow-overlaps-error"], [data-testid="portal-auth-required"]'
-      )
+      page.locator("#main-content").getByTestId("portal-workflow-overlaps-ready")
     ).toBeVisible();
 
     await captureFullPage(page, evidencePath("portal-workflow-overlaps.png"));
@@ -470,8 +470,9 @@ test.describe("portal workflow studio screenshots", () => {
         );
 
         const enabledCheckbox = flowStepEditorDrawer.getByRole("checkbox", {
-          name: /Enabled/i,
+          name: workflowStepEnabledLabel(),
         });
+        await expect(enabledCheckbox).toBeVisible({ timeout: 20_000 });
         if (await enabledCheckbox.isVisible()) {
           const initialEnabled = await enabledCheckbox.isChecked();
           await enabledCheckbox.setChecked(!initialEnabled);
@@ -486,20 +487,15 @@ test.describe("portal workflow studio screenshots", () => {
                 evidencePath("portal-workflow-template-studio-step-editor-flow-save.png"
                 )
               );
-              await saveStepButton.evaluate((element) => {
-                if (element instanceof HTMLButtonElement) element.click();
-              });
+              await saveStepButton.click({ timeout: 20_000 });
               await expect(saveStepButton).toBeEnabled({ timeout: 20_000 });
               const closeButton = flowStepEditorDrawer.getByRole("button", {
-                name: /Close/i,
+                name: workflowStepEditorCloseLabel(),
+                exact: true,
               });
-              if (await closeButton.isVisible()) {
-                await closeButton.evaluate((element) => {
-                  if (element instanceof HTMLButtonElement) element.click();
-                });
-              } else {
-                await page.keyboard.press("Escape");
-              }
+              await expect(closeButton).toBeVisible({ timeout: 20_000 });
+              await expect(closeButton).toBeEnabled({ timeout: 20_000 });
+              await closeButton.click({ timeout: 20_000 });
               await expect(flowStepEditorDrawer).toBeHidden({ timeout: 20_000 });
 
               const undoButton = page.locator(

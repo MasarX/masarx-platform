@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(22);
+SELECT plan(26);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_b08_pod_identity_asset_visibility_v1()
 RETURNS SETOF TEXT
@@ -14,8 +14,12 @@ LANGUAGE plpgsql
 AS $function$
 DECLARE
   v_org UUID := gen_random_uuid();
+  v_platform_org UUID := gen_random_uuid();
+  v_foreign_org UUID := gen_random_uuid();
   v_driver UUID := gen_random_uuid();
   v_ops_user UUID := gen_random_uuid();
+  v_platform_user UUID := gen_random_uuid();
+  v_foreign_user UUID := gen_random_uuid();
   v_branch UUID := gen_random_uuid();
   v_vehicle UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
@@ -115,9 +119,10 @@ BEGIN
   );
 
   PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
-
-  INSERT INTO public.organizations (id, name, slug)
-  VALUES (v_org, 'B08 POD Identity Org', 'b08-pod-identity-' || left(v_org::text, 8));
+  INSERT INTO public.organizations (id, name, slug) VALUES
+    (v_org, 'B08 POD Identity Org', 'b08-pod-identity-' || left(v_org::text, 8)),
+    (v_platform_org, 'B08 POD Platform Org', 'b08-pod-platform-' || left(v_platform_org::text, 8)),
+    (v_foreign_org, 'B08 POD Foreign Org', 'b08-pod-foreign-' || left(v_foreign_org::text, 8));
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type)
   VALUES (
@@ -135,6 +140,20 @@ BEGIN
     v_org,
     'b08-pod-assets-' || left(v_ops_user::text, 8) || '@example.com',
     'B08 POD Assets Ops User',
+    'ops_admin',
+    'tenant'
+  ), (
+    v_platform_user,
+    v_platform_org,
+    'b08-pod-platform-' || left(v_platform_user::text, 8) || '@example.com',
+    'B08 POD Platform User',
+    'super_admin',
+    'platform'
+  ), (
+    v_foreign_user,
+    v_foreign_org,
+    'b08-pod-foreign-' || left(v_foreign_user::text, 8) || '@example.com',
+    'B08 POD Foreign User',
     'ops_admin',
     'tenant'
   );
@@ -379,6 +398,49 @@ BEGIN
       v_other_shipment
     ),
     'shipment POD asset download rejects artifacts linked to a different shipment'
+  );
+
+  PERFORM set_config('request.jwt.claim.sub', v_platform_user::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object(
+    'role', 'authenticated', 'sub', v_platform_user,
+    'organization_id', v_platform_org, 'access_scope_type', 'platform')::text, true);
+
+  SELECT COUNT(*) INTO v_asset_count
+  FROM api.ui_list_shipment_pod_assets_v1(v_shipment);
+  RETURN NEXT is(v_asset_count, 2,
+    'platform caller lists POD assets for a visible foreign-tenant shipment');
+
+  SELECT storage_key INTO v_download_key
+  FROM api.ui_get_shipment_pod_asset_download_v1(v_shipment, v_photo_artifact_id)
+  LIMIT 1;
+  RETURN NEXT ok(v_download_key LIKE '%' || 'pod-identity-photo.jpg',
+    'platform caller downloads a POD asset through the visible parent shipment');
+
+  PERFORM set_config('request.jwt.claim.sub', v_foreign_user::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object(
+    'role', 'authenticated', 'sub', v_foreign_user,
+    'organization_id', v_foreign_org, 'access_scope_type', 'tenant')::text, true);
+
+  SELECT COUNT(*) INTO v_asset_count
+  FROM api.ui_list_shipment_pod_assets_v1(v_shipment);
+  RETURN NEXT is(v_asset_count, 0,
+    'foreign tenant cannot list POD assets for an inaccessible shipment');
+  RETURN NEXT throws_ok(
+    format(
+      $sql$
+        SELECT *
+        FROM api.ui_get_shipment_pod_asset_download_v1('%1$s'::uuid, '%2$s'::uuid)
+      $sql$,
+      v_shipment,
+      v_photo_artifact_id
+    ),
+    'P0002',
+    format(
+      'ui_get_shipment_pod_asset_download_v1 artifact %s is not available for shipment %s',
+      v_photo_artifact_id,
+      v_shipment
+    ),
+    'foreign tenant cannot download POD assets for an inaccessible shipment'
   );
 
   EXECUTE 'SET LOCAL ROLE postgres';

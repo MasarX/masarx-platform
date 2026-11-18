@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const {
+  DEFAULT_LOCAL_RUNTIME_HOST,
+  stopDetachedProcessGroup,
   waitForConsoleListener,
 } = require('./local-console-runtime');
 
@@ -44,7 +46,7 @@ function isProcessRunning(pid) {
 async function startLandingRuntime(options = {}) {
   const cwd = options.cwd || process.cwd();
   const port = parsePositiveInteger(options.port, 3333);
-  const host = options.host || '127.0.0.1';
+  const host = options.host || DEFAULT_LOCAL_RUNTIME_HOST;
   const landingSiteUrl = `http://${host}:${port}`;
   const platform = options.platform || process.platform;
   const spawnImpl = options.spawnImpl || spawn;
@@ -99,20 +101,17 @@ function stopLandingRuntime(options = {}) {
   const paths = getLandingRuntimePaths(cwd, port);
   const pid = readPid(paths.pidPath);
   let killed = false;
-  if (pid && isProcessRunning(pid)) {
-    if (platform === 'win32') {
+  if (pid) {
+    if (platform === 'win32' && isProcessRunning(pid)) {
       const res = spawnSyncImpl('taskkill', ['/PID', String(pid), '/T', '/F'], {
         stdio: 'ignore',
         windowsHide: true,
       });
       killed = res.status === 0;
-    } else {
-      try {
-        process.kill(pid, 'SIGTERM');
-        killed = true;
-      } catch (_) {
-        killed = false;
-      }
+    } else if (platform !== 'win32') {
+      killed = stopDetachedProcessGroup(pid, {
+        processKillImpl: options.processKillImpl,
+      });
     }
   }
   try {
@@ -153,14 +152,14 @@ async function main() {
   }
   const result = await startLandingRuntime({
     port,
-    host: args.host || '127.0.0.1',
+    host: args.host || DEFAULT_LOCAL_RUNTIME_HOST,
     timeoutMs: parsePositiveInteger(args['timeout-ms'], 120000),
     intervalMs: parsePositiveInteger(args['interval-ms'], 500),
   });
   const listener = result.listener?.ok
     ? result.listener
     : await waitForConsoleListener({
-      host: args.host || '127.0.0.1',
+      host: args.host || DEFAULT_LOCAL_RUNTIME_HOST,
       port,
       timeoutMs: parsePositiveInteger(args['timeout-ms'], 120000),
       intervalMs: parsePositiveInteger(args['interval-ms'], 500),
@@ -170,7 +169,7 @@ async function main() {
     reused: result.reused,
     pid: result.pid,
     listener,
-    url: `http://${args.host || '127.0.0.1'}:${port}`,
+    url: `http://${args.host || DEFAULT_LOCAL_RUNTIME_HOST}:${port}`,
   }, null, 2));
   if (!listener.ok) process.exitCode = 1;
 }

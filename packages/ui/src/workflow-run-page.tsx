@@ -29,6 +29,7 @@ import type { UiTranslateFn } from "./translate";
 import { labelFromKey } from "./resource-query";
 import { formatReferenceValue } from "./resource-utils";
 import { resolveSafeHref } from "./url-guard";
+import { CopyFieldButton } from "./detail/copy-field-button";
 
 type WorkflowRunPageProps = {
   runId: string;
@@ -495,11 +496,23 @@ export async function WorkflowRunPage({
                     </div>
                     <div className="truncate text-sm text-ui-ink">{entry.url}</div>
                   </div>
-                  <Button asChild size="sm" variant="ghost">
-                    <a href={entry.url} target="_blank" rel="noreferrer">
-                      {t("observability.workflowRun.outputs.open")}
-                    </a>
-                  </Button>
+                  {entry.trustedUrl ? (
+                    <Button asChild size="sm" variant="ghost">
+                      <a
+                        href={entry.trustedUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t("observability.workflowRun.outputs.open")}
+                      </a>
+                    </Button>
+                  ) : (
+                    <CopyFieldButton
+                      value={entry.url}
+                      label={entry.fullLabel}
+                      className="!opacity-100"
+                    />
+                  )}
                 </div>
               ))}
             </div>

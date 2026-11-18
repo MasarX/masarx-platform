@@ -1,141 +1,179 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { scanSecretText } = require('../../../scripts/ops/workspace/docker-runtime/redaction');
 
-const {
-  applyPendingMigrations,
-  ensureLocalAuthJwtCompatibility,
-  ensureMigrationHistoryTable,
-  isSoftFailMigration,
-  softFailFiles,
-  versionFromFile,
-  nameFromFile,
-} = require('../../../scripts/ops/migrate-local');
+describe('migrate-local canonical history contract', () => {
+  const originalCwd = process.cwd();
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+  let cwd;
 
-describe('migrate-local', () => {
-  test('parses migration version and name from filenames', () => {
-    expect(versionFromFile('202510110001_extensions.sql')).toBe('202510110001');
-    expect(nameFromFile('202510110001_extensions.sql')).toBe('extensions');
-  });
+  function loadMigrations() {
+    jest.isolateModules(() => {
+      require('../../../scripts/ops/migrate-local');
+    });
+  }
 
-  test('treats local-only storage grants as soft-fail migrations', () => {
-    expect(softFailFiles.has('202512271210_edge_label_renderer_storage_access.sql')).toBe(true);
-    expect(softFailFiles.has('202512301535_label_designer_storage_assets_policies.sql')).toBe(true);
-    expect(softFailFiles.has('202512301550_label_designer_storage_assets_policies_fixup.sql')).toBe(true);
-    expect(
-      isSoftFailMigration(
-        '202601011200_label_designer_storage_assets_policy_owner_relax.sql',
-        new Error('relation "storage.objects" does not exist'),
-      ),
-    ).toBe(true);
-    expect(
-      isSoftFailMigration(
-        '202601011200_label_designer_storage_assets_policy_owner_relax.sql',
-        new Error('some other migration failure'),
-      ),
-    ).toBe(false);
-  });
-
-  test('soft-failed migrations rollback before recording local history', async () => {
-    const migrationsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-local-soft-fail-'));
-    const file = '202510110001_extensions.sql';
-    fs.writeFileSync(path.join(migrationsDir, file), 'select fails;', 'utf8');
-
-    const calls = [];
-    const client = {
-      async query(sql, params) {
-        if (/select version from supabase_migrations\.schema_migrations/i.test(sql)) {
-          calls.push('history');
-          return { rows: [] };
-        }
-        if (/CREATE SCHEMA IF NOT EXISTS supabase_migrations/i.test(sql)) {
-          calls.push('ensure-schema');
-          return { rows: [] };
-        }
-        if (/CREATE TABLE IF NOT EXISTS supabase_migrations\.schema_migrations/i.test(sql)) {
-          calls.push('ensure-history');
-          return { rows: [] };
-        }
-        if (sql === 'select fails;') {
-          calls.push('migration');
-          throw new Error('extension not available locally');
-        }
-        if (sql === 'ROLLBACK') {
-          calls.push('rollback');
-          return { rows: [] };
-        }
-        if (/INSERT INTO supabase_migrations\.schema_migrations/i.test(sql)) {
-          calls.push(`record:${params[0]}:${params[2]}`);
-          return { rows: [] };
-        }
-        throw new Error(`unexpected query: ${sql}`);
-      },
-    };
-    const logger = { log: jest.fn(), warn: jest.fn() };
-
-    await applyPendingMigrations(client, { files: [file], migrationsDir, logger });
-
-    expect(calls).toEqual([
-      'ensure-schema',
-      'ensure-history',
-      'history',
-      'migration',
-      'rollback',
-      'record:202510110001:extensions',
-    ]);
-    expect(logger.warn).toHaveBeenCalledWith(
-      '[migrate-local] Migration 202510110001_extensions.sql failed in local-only mode (soft-fail allowed); continuing.',
+  beforeEach(() => {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'masarx-migrate-local-'));
+    fs.mkdirSync(path.join(cwd, 'supabase', 'migrations'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cwd, 'supabase', 'migrations', '202601010000_example.sql'),
+      'select 1;',
+      'utf8',
     );
-    expect(logger.log).toHaveBeenLastCalledWith('[migrate-local] All migrations applied successfully.');
+    process.chdir(cwd);
+    process.env.DATABASE_URL = (['postgresql',":","/","/",'postgres',":",'postgres',"@",'127.0.0.1',":",'5432',"/",'postgres'].join(""));
+    jest.resetModules();
   });
 
-  test('ensures local migration history table before applying migrations', async () => {
-    const calls = [];
-    const client = {
-      async query(sql) {
-        if (/CREATE SCHEMA IF NOT EXISTS supabase_migrations/i.test(sql)) {
-          calls.push('schema');
-          return { rows: [] };
-        }
-        if (/CREATE TABLE IF NOT EXISTS supabase_migrations\.schema_migrations/i.test(sql)) {
-          calls.push('table');
-          return { rows: [] };
-        }
-        throw new Error(`unexpected query: ${sql}`);
-      },
-    };
-    const logger = { log: jest.fn() };
-
-    await ensureMigrationHistoryTable(client, logger);
-
-    expect(calls).toEqual(['schema', 'table']);
-    expect(logger.log).toHaveBeenCalledWith(
-      '[migrate-local] Ensured local Supabase migration history table.',
-    );
+  afterEach(() => {
+    process.chdir(originalCwd);
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDatabaseUrl;
+    jest.restoreAllMocks();
+    jest.resetModules();
+    fs.rmSync(cwd, { recursive: true, force: true });
   });
 
-  test('creates auth.jwt compatibility helper when the local stack lacks it', async () => {
-    const calls = [];
-    const client = {
-      async query(sql) {
-        if (/to_regprocedure\('auth\.jwt\(\)'\)/i.test(sql)) {
-          calls.push('probe');
-          return { rows: [{ exists: false }] };
-        }
-        if (/CREATE OR REPLACE FUNCTION auth\.jwt\(\)/i.test(sql)) {
-          calls.push('create');
-          return { rows: [] };
-        }
-        throw new Error(`unexpected query: ${sql}`);
-      },
-    };
-    const logger = { warn: jest.fn() };
+  test('missing canonical history fails before replaying any migration SQL', async () => {
+    const missingHistory = new Error('relation "supabase_migrations.schema_migrations" does not exist');
+    missingHistory.code = '42P01';
+    const query = jest.fn().mockRejectedValueOnce(missingHistory);
+    const connect = jest.fn().mockResolvedValue(undefined);
+    const end = jest.fn().mockResolvedValue(undefined);
+    const Client = jest.fn(() => ({ connect, end, query }));
+    jest.doMock('pg', () => ({ Client }));
+    jest.doMock('../../../scripts/utils/load-env', () => ({ loadEnv: jest.fn() }));
+    const exit = jest.spyOn(process, 'exit').mockImplementation(() => undefined);
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await ensureLocalAuthJwtCompatibility(client, logger);
+    loadMigrations();
+    await new Promise((resolve) => setImmediate(resolve));
 
-    expect(calls).toEqual(['probe', 'create']);
-    expect(logger.warn).toHaveBeenCalledWith(
-      '[migrate-local] Created local auth.jwt() compatibility helper.',
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledWith(
+      'select version from supabase_migrations.schema_migrations order by version',
     );
+    expect(end).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('schema_migrations'));
+    expect(warn).not.toHaveBeenCalled();
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  test('records a successfully applied migration in canonical history before reporting success', async () => {
+    const query = jest.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+    const connect = jest.fn().mockResolvedValue(undefined);
+    const end = jest.fn().mockResolvedValue(undefined);
+    const Client = jest.fn(() => ({ connect, end, query }));
+    jest.doMock('pg', () => ({ Client }));
+    jest.doMock('../../../scripts/utils/load-env', () => ({ loadEnv: jest.fn() }));
+    const exit = jest.spyOn(process, 'exit').mockImplementation(() => undefined);
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    loadMigrations();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(query).toHaveBeenNthCalledWith(
+      1,
+      'select version from supabase_migrations.schema_migrations order by version',
+    );
+    expect(query).toHaveBeenNthCalledWith(2, 'select 1;');
+    expect(query.mock.calls[2][0]).toContain(
+      'INSERT INTO supabase_migrations.schema_migrations',
+    );
+    expect(query.mock.calls[2][1]).toEqual(['202601010000', ['select 1;'], 'example']);
+    expect(log).toHaveBeenCalledWith('[migrate-local] Using configured database connection.');
+    expect(log).toHaveBeenCalledWith('[migrate-local] All migrations applied successfully.');
+    expect(log.mock.calls.flat().join('\n')).not.toContain(process.env.DATABASE_URL);
+    expect(scanSecretText(log.mock.calls.flat().join('\n'))).toEqual([]);
+    expect(end).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  test.each([false, true])('an allowlisted failure must rollback before continuing (rollback fails: %s)', async (rollbackFails) => {
+    fs.writeFileSync(
+      path.join(cwd, 'supabase', 'migrations', '202510110001_extensions.sql'),
+      'BEGIN; select fails;',
+      'utf8',
+    );
+    const query = jest.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(new Error('synthetic migration failure'))
+      .mockImplementationOnce(async () => {
+        if (rollbackFails) throw new Error('synthetic rollback failure');
+        return { rows: [] };
+      })
+      .mockResolvedValue({ rows: [] });
+    const connect = jest.fn().mockResolvedValue(undefined);
+    const end = jest.fn().mockResolvedValue(undefined);
+    jest.doMock('pg', () => ({ Client: jest.fn(() => ({ connect, end, query })) }));
+    jest.doMock('../../../scripts/utils/load-env', () => ({ loadEnv: jest.fn() }));
+    const exit = jest.spyOn(process, 'exit').mockImplementation(() => undefined);
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    loadMigrations();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(query).toHaveBeenNthCalledWith(2, 'BEGIN; select fails;');
+    expect(query).toHaveBeenNthCalledWith(3, 'ROLLBACK');
+    const historyWrites = query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO supabase_migrations.schema_migrations'));
+    if (rollbackFails) {
+      expect(query).toHaveBeenCalledTimes(3);
+      expect(historyWrites).toEqual([]);
+      expect(error).toHaveBeenCalledWith('[migrate-local] Failed: synthetic rollback failure');
+      expect(warn).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalledWith('[migrate-local] All migrations applied successfully.');
+      expect(exit).toHaveBeenCalledWith(1);
+    } else {
+      expect(query).toHaveBeenNthCalledWith(4, 'select 1;');
+      expect(historyWrites).toHaveLength(1);
+      expect(historyWrites[0][1]).toEqual(['202601010000', ['select 1;'], 'example']);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('soft-fail allowed'));
+      expect(log).toHaveBeenCalledWith('[migrate-local] All migrations applied successfully.');
+      expect(error).not.toHaveBeenCalled();
+      expect(exit).not.toHaveBeenCalled();
+    }
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  test('a late canonical history insert failure remains terminal for a soft-fail migration', async () => {
+    fs.rmSync(path.join(cwd, 'supabase', 'migrations', '202601010000_example.sql'));
+    fs.writeFileSync(
+      path.join(cwd, 'supabase', 'migrations', '202510110001_extensions.sql'),
+      'select 1;',
+      'utf8',
+    );
+    const historyInsertError = new Error('history insert failed');
+    const query = jest.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockRejectedValueOnce(historyInsertError);
+    const connect = jest.fn().mockResolvedValue(undefined);
+    const end = jest.fn().mockResolvedValue(undefined);
+    const Client = jest.fn(() => ({ connect, end, query }));
+    jest.doMock('pg', () => ({ Client }));
+    jest.doMock('../../../scripts/utils/load-env', () => ({ loadEnv: jest.fn() }));
+    const exit = jest.spyOn(process, 'exit').mockImplementation(() => undefined);
+    const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    loadMigrations();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(error).toHaveBeenCalledWith('[migrate-local] Failed: history insert failed');
+    expect(log).not.toHaveBeenCalledWith('[migrate-local] All migrations applied successfully.');
+    expect(warn).not.toHaveBeenCalled();
+    expect(end).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(1);
   });
 });

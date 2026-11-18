@@ -30,6 +30,7 @@ type WorkflowScheduleTriggersPanelProps = {
   triggers: Record<string, unknown>[];
   triggersTotal?: number | null;
   appBasePath: string;
+  templateStatus?: string | null;
   scheduleTemplateGuide?: WorkflowScheduleTemplateGuide | null;
   capabilities?: string[] | null;
   testIdPrefix?: string | null;
@@ -248,11 +249,13 @@ export function WorkflowScheduleTriggersPanel({
   triggers,
   triggersTotal,
   appBasePath,
+  templateStatus,
   scheduleTemplateGuide,
   capabilities,
   testIdPrefix,
 }: WorkflowScheduleTriggersPanelProps) {
   const t = createUiTranslator("ui.workflowStudio");
+  const readbackT = createUiTranslator("ui.resourceActions");
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -262,6 +265,10 @@ export function WorkflowScheduleTriggersPanel({
     [capabilities]
   );
   const canWrite = hasCapability(capabilitySet, "workflow_runs.write");
+  const resolvedTemplateStatus = normalizeText(templateStatus)?.toLowerCase() ?? null;
+  const templateStatusKnown = resolvedTemplateStatus !== null;
+  const templateIsActive = resolvedTemplateStatus === "active";
+  const canRunNow = canWrite && (!templateStatusKnown || templateIsActive);
   const safeBasePath = React.useMemo(() => resolveSafeAppBasePath(appBasePath), [appBasePath]);
 
   const [rows, setRows] = React.useState<Record<string, unknown>[]>(() => triggers);
@@ -272,8 +279,9 @@ export function WorkflowScheduleTriggersPanel({
   const [editor, setEditor] = React.useState<EditorState>(() => buildInitialEditor());
   const [del, setDel] = React.useState<DeleteState>(() => buildInitialDelete());
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [runReceipts, setRunReceipts] = React.useState<Record<string, string>>({});
   const safeHref = React.useCallback(
-    (path: string) => (safeBasePath ? resolveSafeHref(safeBasePath, path) : null),
+    (path: string) => (safeBasePath !== null ? resolveSafeHref(safeBasePath, path) : null),
     [safeBasePath]
   );
 
@@ -428,6 +436,12 @@ export function WorkflowScheduleTriggersPanel({
         {t("triggers.schedules.count", { count: String(totalCount) })}
       </div>
 
+      {templateStatusKnown && !templateIsActive ? (
+        <div className="rounded-xl border border-ui-border bg-ui-paper/60 p-3 text-xs text-ui-muted">
+          {t("actions.testRunModal.templateNotActive")}
+        </div>
+      ) : null}
+
       {scheduleTemplateGuide ? (
         <div
           className="space-y-2 rounded-xl border border-ui-border bg-ui-paper/60 p-3"
@@ -484,7 +498,11 @@ export function WorkflowScheduleTriggersPanel({
             const lastRun = row.last_run_at
               ? formatResourceValue(row.last_run_at, { renderType: "datetime" })
               : null;
-            const lastRunId = normalizeText(row.last_run_id);
+            const runReceiptId = runReceipts[triggerId];
+            const runReceiptHref = runReceiptId
+              ? safeHref(`/workflows/runs/${encodeURIComponent(runReceiptId)}`)
+              : null;
+            const lastRunId = runReceiptId ?? normalizeText(row.last_run_id);
             const lastError = normalizeText(row.last_error);
             const notes = normalizeText(row.notes);
             const isBusy = busyId === triggerId || editor.pending;
@@ -519,8 +537,21 @@ export function WorkflowScheduleTriggersPanel({
                     ) : null}
                   </div>
                   {notes ? <div className="text-xs text-ui-muted/80">{notes}</div> : null}
+                  {runReceiptId ? (
+                    <div role="status" className="text-xs text-ui-muted"
+                      data-testid={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-run-readback-${triggerId}` : undefined}>
+                      <span>{t("triggers.schedules.toast.runStarted")}</span>{" "}
+                      <span>{runReceiptId}</span>
+                      {runReceiptHref ? (
+                        <a className="ml-2 underline underline-offset-4"
+                          href={runReceiptHref}>
+                          {t("triggers.schedules.openLastRun")}
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {(() => {
-                    const safeLastRunHref = lastRunId
+                    const safeLastRunHref = !runReceiptId && lastRunId
                       ? safeHref(
                           `/workflows/runs/${encodeURIComponent(lastRunId)}`
                         )
@@ -542,7 +573,7 @@ export function WorkflowScheduleTriggersPanel({
                     size="sm"
                     variant="ghost"
                     onClick={() => void handleRunNow(row)}
-                    disabled={!canWrite || isBusy}
+                    disabled={!canRunNow || isBusy}
                     data-testid={
                       resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-run-${triggerId}` : undefined
                     }
@@ -636,6 +667,9 @@ export function WorkflowScheduleTriggersPanel({
                     }))
                   }
                   disabled={editor.pending}
+                  data-testid={
+                    resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-type` : undefined
+                  }
                 >
                   <option value="interval">{t("triggers.schedules.type.interval")}</option>
                   <option value="daily">{t("triggers.schedules.type.daily")}</option>
@@ -654,6 +688,9 @@ export function WorkflowScheduleTriggersPanel({
                   }
                   placeholder="UTC"
                   disabled={editor.pending}
+                  data-testid={
+                    resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-timezone` : undefined
+                  }
                 />
               </div>
             </div>
@@ -687,6 +724,11 @@ export function WorkflowScheduleTriggersPanel({
                       }))
                     }
                     disabled={editor.pending}
+                    data-testid={
+                      resolvedTestIdPrefix
+                        ? `${resolvedTestIdPrefix}-editor-interval-value`
+                        : undefined
+                    }
                   />
                   <Select
                     value={editor.intervalUnit}
@@ -697,6 +739,11 @@ export function WorkflowScheduleTriggersPanel({
                       }))
                     }
                     disabled={editor.pending}
+                    data-testid={
+                      resolvedTestIdPrefix
+                        ? `${resolvedTestIdPrefix}-editor-interval-unit`
+                        : undefined
+                    }
                   >
                     <option value="seconds">{t("triggers.schedules.units.seconds")}</option>
                     <option value="minutes">{t("triggers.schedules.units.minutes")}</option>
@@ -718,6 +765,9 @@ export function WorkflowScheduleTriggersPanel({
                     setEditor((current) => ({ ...current, dailyTime: event.target.value }))
                   }
                   disabled={editor.pending}
+                  data-testid={
+                    resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-daily-time` : undefined
+                  }
                 />
               </div>
             ) : null}
@@ -750,6 +800,11 @@ export function WorkflowScheduleTriggersPanel({
                               })
                             }
                             disabled={editor.pending}
+                            data-testid={
+                              resolvedTestIdPrefix
+                                ? `${resolvedTestIdPrefix}-editor-weekday-${value}`
+                                : undefined
+                            }
                           />
                           <span className="text-ui-ink">
                             {t(`triggers.schedules.weekdays.${value}`)}
@@ -770,6 +825,11 @@ export function WorkflowScheduleTriggersPanel({
                       setEditor((current) => ({ ...current, weeklyTime: event.target.value }))
                     }
                     disabled={editor.pending}
+                    data-testid={
+                      resolvedTestIdPrefix
+                        ? `${resolvedTestIdPrefix}-editor-weekly-time`
+                        : undefined
+                    }
                   />
                 </div>
               </div>
@@ -784,6 +844,9 @@ export function WorkflowScheduleTriggersPanel({
                   setEditor((current) => ({ ...current, enabled: event.target.checked }))
                 }
                 disabled={editor.pending}
+                data-testid={
+                  resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-enabled` : undefined
+                }
               />
               <span className="space-y-1">
                 <span className="block font-medium text-ui-ink">
@@ -804,6 +867,9 @@ export function WorkflowScheduleTriggersPanel({
                 }
                 placeholder={t("triggers.schedules.fields.notesPlaceholder")}
                 disabled={editor.pending}
+                data-testid={
+                  resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-notes` : undefined
+                }
               />
             </div>
 
@@ -819,6 +885,9 @@ export function WorkflowScheduleTriggersPanel({
                 }
                 placeholder="{}"
                 disabled={editor.pending}
+                data-testid={
+                  resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-context-patch` : undefined
+                }
               />
               {contextPatchState.error ? (
                 <p className="text-xs text-ui-danger">{contextPatchState.error}</p>
@@ -833,6 +902,9 @@ export function WorkflowScheduleTriggersPanel({
                     setEditor((current) => ({ ...current, contextPatchText: contextPatchState.formatted ?? "{}" }));
                   }}
                   disabled={editor.pending || !contextPatchState.formatted}
+                  data-testid={
+                    resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-format-json` : undefined
+                  }
                 >
                   {t("steps.builder.editor.metadata.actions.format")}
                 </Button>
@@ -842,6 +914,9 @@ export function WorkflowScheduleTriggersPanel({
                   variant="ghost"
                   onClick={() => setEditor((current) => ({ ...current, contextPatchText: "{}" }))}
                   disabled={editor.pending}
+                  data-testid={
+                    resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-reset-json` : undefined
+                  }
                 >
                   {t("steps.builder.editor.metadata.actions.reset")}
                 </Button>
@@ -854,11 +929,25 @@ export function WorkflowScheduleTriggersPanel({
 
           <ModalFooter>
             <ModalClose asChild>
-              <Button type="button" variant="ghost" disabled={editor.pending}>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={editor.pending}
+                data-testid={
+                  resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-cancel` : undefined
+                }
+              >
                 {t("triggers.schedules.create.cancel")}
               </Button>
             </ModalClose>
-            <Button type="button" onClick={() => void submitEditor()} disabled={!canSubmitEditor}>
+            <Button
+              type="button"
+              onClick={() => void submitEditor()}
+              disabled={!canSubmitEditor}
+              data-testid={
+                resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-submit` : undefined
+              }
+            >
               {editor.pending
                 ? t("triggers.schedules.create.submitting")
                 : t("triggers.schedules.create.submit")}
@@ -903,6 +992,7 @@ export function WorkflowScheduleTriggersPanel({
     const triggerId = normalizeText(row.id);
     if (!triggerId) return;
     setBusyId(triggerId);
+    let accepted = false;
     try {
       const ui = createUiClient();
       const result = await ui.runWorkflowScheduleTrigger(triggerId);
@@ -915,12 +1005,13 @@ export function WorkflowScheduleTriggersPanel({
         });
         return;
       }
-      toast({ tone: "success", title: t("triggers.schedules.toast.runStarted") });
-      if (!safeBasePath) {
+      accepted = true;
+      setRunReceipts((current) => ({ ...current, [triggerId]: runId }));
+      if (safeBasePath === null) {
         toast({
-          tone: "error",
-          title: t("triggers.schedules.toast.runErrorTitle"),
-          description: t("triggers.schedules.toast.runErrorMissingRun"),
+          tone: "warning",
+          title: t("triggers.schedules.toast.runStarted"),
+          description: readbackT("toast.readbackErrorDescription"),
         });
         return;
       }
@@ -934,18 +1025,19 @@ export function WorkflowScheduleTriggersPanel({
           : safeHref(`/workflows/runs/${encodeURIComponent(runId)}`);
       if (!resolvedDestination) {
         toast({
-          tone: "error",
-          title: t("triggers.schedules.toast.runErrorTitle"),
-          description: t("triggers.schedules.toast.runErrorMissingRun"),
+          tone: "warning",
+          title: t("triggers.schedules.toast.runStarted"),
+          description: readbackT("toast.readbackErrorDescription"),
         });
         return;
       }
       navigateTo(resolvedDestination);
+      toast({ tone: "success", title: t("triggers.schedules.toast.runStarted") });
     } catch (error) {
       toast({
-        tone: "error",
-        title: t("triggers.schedules.toast.runErrorTitle"),
-        description: formatUiError(error, t("triggers.schedules.toast.runErrorTitle")),
+        tone: accepted ? "warning" : "error",
+        title: t(accepted ? "triggers.schedules.toast.runStarted" : "triggers.schedules.toast.runErrorTitle"),
+        description: formatUiError(error, accepted ? readbackT("toast.readbackErrorDescription") : t("triggers.schedules.toast.runErrorTitle")),
       });
     } finally {
       setBusyId(null);
@@ -1124,9 +1216,25 @@ export function WorkflowScheduleTriggersPanel({
           });
           return;
         }
+        const createdRow =
+          created && typeof created === "object" ? (created as Record<string, unknown>) : {};
+        const nextRow: Record<string, unknown> = {
+          ...createdRow,
+          id: normalizeText(createdRow.id) ?? triggerId,
+          workflow_template_id: workflowTemplateId,
+          schedule,
+          context_patch: contextPatch,
+          enabled: editor.enabled,
+          notes: editor.notes.trim() || null,
+        };
+        setRows((current) => {
+          const nextId = normalizeText(nextRow.id) ?? triggerId;
+          const filtered = current.filter((entry) => normalizeText(entry.id) !== nextId);
+          return [...filtered, nextRow];
+        });
         toast({ tone: "success", title: t("triggers.schedules.toast.created") });
       } else if (editor.triggerId) {
-        await ui.updateResource({
+        const updated = await ui.updateResource({
           resource: "workflow_schedule_triggers",
           id: editor.triggerId,
           patch: {
@@ -1136,6 +1244,24 @@ export function WorkflowScheduleTriggersPanel({
             notes: editor.notes.trim() || null,
           },
         });
+        const nextRow =
+          updated && typeof updated === "object"
+            ? (updated as Record<string, unknown>)
+            : {
+                id: editor.triggerId,
+                workflow_template_id: workflowTemplateId,
+                schedule,
+                context_patch: contextPatch,
+                enabled: editor.enabled,
+                notes: editor.notes.trim() || null,
+              };
+        setRows((current) =>
+          current.map((entry) =>
+            normalizeText(entry.id) === editor.triggerId
+              ? { ...entry, ...nextRow }
+              : entry
+          )
+        );
         toast({ tone: "success", title: t("triggers.schedules.toast.updated") });
       }
 
@@ -1166,6 +1292,9 @@ export function WorkflowScheduleTriggersPanel({
         p_id: del.triggerId,
       });
       toast({ tone: "success", title: t("triggers.schedules.toast.deleted") });
+      setRows((current) =>
+        current.filter((entry) => normalizeText(entry.id) !== del.triggerId)
+      );
       setDel(buildInitialDelete());
       queryClient.invalidateQueries({ queryKey: ["resource"] });
     } catch (error) {

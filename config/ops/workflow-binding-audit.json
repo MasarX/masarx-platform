@@ -57,6 +57,11 @@
       "configurability": "workflow_configurable",
       "binding_key": "marketing_lead",
       "file": "supabase/migrations/202603091341_workflow_binding_hybrid_followups_v1.sql",
+      "related_files": [
+        "supabase/migrations/202608161910_public_intake_service_auth_grants_v1.sql",
+        "supabase/migrations/202608161920_marketing_lead_followup_atomicity_v1.sql",
+        "supabase/migrations/20260906011000_marketing_lead_duplicate_recovery_v1.sql"
+      ],
       "required_patterns": [
         "CREATE OR REPLACE FUNCTION public\\.marketing_lead_request_create_v1\\s*\\(",
         "'binding_key', 'marketing_lead'",
@@ -91,6 +96,21 @@
       ]
     },
     {
+      "key": "task_completion_effects_workflow",
+      "label": "Task completion effects workflow",
+      "classification": "workflow_native",
+      "configurability": "workflow_configurable",
+      "file": "supabase/migrations/202604091530_b09_ndr_resolution_orchestration_v1.sql",
+      "related_files": [
+        "supabase/migrations/202608161880_run_task_completion_effects_error_text_v1.sql"
+      ],
+      "required_patterns": [
+        "CREATE OR REPLACE FUNCTION public\\.run_task_completion_effects_v1\\s*\\(",
+        "WHERE wt\\.name = 'task_completion_effects_v1'",
+        "public\\.start_workflow_run\\s*\\("
+      ]
+    },
+    {
       "key": "onboarding_readiness_plugin_baseline",
       "label": "Onboarding readiness plugin baseline",
       "classification": "hybrid_task_backed",
@@ -104,6 +124,26 @@
         "public\\.create_task_system_v1\\s*\\(",
         "workflow_binding_policy",
         "baseline_profile"
+      ]
+    },
+    {
+      "key": "fieldops_reassignment_request",
+      "label": "FieldOps reassignment request",
+      "classification": "hybrid_task_backed",
+      "configurability": "workflow_configurable",
+      "binding_key": "fieldops_reassignment",
+      "registry_seed_file": "supabase/migrations/202609060200_fieldops_reassignment_request_workflow_v1.sql",
+      "file": "supabase/migrations/202609060200_fieldops_reassignment_request_workflow_v1.sql",
+      "related_files": [
+        "supabase/functions/fieldops-reassignment-request/index.ts"
+      ],
+      "required_patterns": [
+        "run_workflow_binding_stage_v1\\s*\\(",
+        "'binding_key', 'fieldops_reassignment'",
+        "'stage_key', 'review_requested'"
+      ],
+      "forbidden_patterns": [
+        "set_config\\('request\\.jwt"
       ]
     }
   ],

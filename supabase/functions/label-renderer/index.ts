@@ -1,10 +1,45 @@
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
-import { PDFDocument, rgb, StandardFonts, degrees } from "npm:pdf-lib@^1.17.1";
-import qrcode from "npm:qrcode-generator@^1.4.4";
-import fontkit from "npm:@pdf-lib/fontkit@^1.1.1";
-import bidiFactory from "npm:bidi-js@^1.0.3";
-import { readEnv, extractToken, getJwtRole } from "./_shared/mod.mjs";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+type PdfModule = typeof import("npm:pdf-lib@1.17.1");
+type PDFDocument = import("npm:pdf-lib@1.17.1").PDFDocument;
+let PDFDocument: PdfModule["PDFDocument"];
+let rgb: PdfModule["rgb"];
+let StandardFonts: PdfModule["StandardFonts"];
+let degrees: PdfModule["degrees"];
+let qrcode: typeof import("npm:qrcode-generator@1.5.2").default;
+let bwip: typeof import("npm:bwip-js@4.11.2").default;
+let fontkit: typeof import("npm:@pdf-lib/fontkit@1.1.1").default;
+let bidi: ReturnType<typeof import("npm:bidi-js@1.0.3").default>;
+let rendererDepsPromise: Promise<void> | undefined;
+
+// Share one load (including a rejected load) per isolate; never partially render.
+const ensureRendererDeps = (): Promise<void> => {
+  if (!rendererDepsPromise) {
+    rendererDepsPromise = Promise.all([
+      import("npm:pdf-lib@1.17.1"),
+      import("npm:qrcode-generator@1.5.2"),
+      import("npm:@pdf-lib/fontkit@1.1.1"),
+      import("npm:bidi-js@1.0.3"),
+      import("npm:bwip-js@4.11.2"),
+    ]).then(([pdf, qr, fonts, bidiModule, bwipModule]) => {
+      const loadedBidi = bidiModule.default();
+      PDFDocument = pdf.PDFDocument;
+      rgb = pdf.rgb;
+      StandardFonts = pdf.StandardFonts;
+      degrees = pdf.degrees;
+      qrcode = qr.default;
+      bwip = bwipModule.default;
+      fontkit = fonts.default;
+      bidi = loadedBidi;
+    });
+  }
+  return rendererDepsPromise;
+};
+import { readEnv } from "./_shared/mod.mjs";
+import { authorizeLabelRendererRequest, resolveLabelRendererOperation } from "./auth.mjs";
+import { BARCODE_MAX_CHARS, canonicalBarcodeType, encodeAdditionalBarcode, rotateBarcodePoint } from "./barcode.ts";
 import { executeHotpathRpc, hotpathModeEnabled } from "../_shared/db-hotpath.ts";
+import { projectSignedStorageUrlForResponse } from "../_shared/label-storage-url.ts";
+import { AssetCache } from "../_shared/asset-cache.ts";
 
 interface LeaseRequest {
   organization_id?: string;
@@ -135,6 +170,7 @@ interface PrintRequest extends WorkflowProgressRequest {
   client_id?: string;
   sender_id?: string;
   label_type?: string;
+  job_purpose?: string | null;
   targets?: Array<{
     target_type?: string;
     target_id?: string;
@@ -182,6 +218,7 @@ class TemplateError extends Error {
 }
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
+const PUBLIC_SUPABASE_URL = readEnv("EDGE_PUBLIC_SUPABASE_URL", ["NEXT_PUBLIC_SUPABASE_URL", "VITE_SUPABASE_URL"]);
 const SUPABASE_SERVICE_OR_EDGE_KEY = readEnv("LABEL_RENDERER_TOKEN", [
   "EDGE_SUPABASE_SERVICE_ROLE_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
@@ -441,7 +478,7 @@ type SettingsScope = {
   scopeId: string | null;
 };
 
-const assetCache = new Map<string, Uint8Array>();
+const assetCache = new AssetCache();
 const bucketHealth = {
   state: "unknown" as "unknown" | "ok" | "error",
   checkedAt: 0,
@@ -918,11 +955,11 @@ const parseRequest = async (req: Request): Promise<any> => {
   }
 };
 
-const fetchAsset = async (path: string): Promise<Uint8Array | null> => {
+const fetchAsset = async (path: string, refresh = false): Promise<Uint8Array | null> => {
   if (!path) return null;
-  if (assetCache.has(path)) {
-    return assetCache.get(path)!;
-  }
+  if (refresh) assetCache.delete(path);
+  const cached = assetCache.get(path);
+  if (cached) return cached;
 
   try {
     const { data, error } = await storageDownloadObject(ASSET_BUCKET, path);
@@ -1091,6 +1128,11 @@ const resolveArtifactReturn = async (
           (signedRecord.signedURL as string | undefined) ??
           (signedRecord.url as string | undefined) ??
           null;
+        if (signedUrl) signedUrl = projectSignedStorageUrlForResponse(
+          normalizeSignedStorageUrl(signedUrl),
+          SUPABASE_URL,
+          PUBLIC_SUPABASE_URL,
+        );
         expiresAt =
           (signedRecord.expires_at as string | undefined) ??
           (signedRecord.expiration as string | undefined) ??
@@ -1367,7 +1409,9 @@ const prepareDesignerPreviewSnapshot = async (
       if (name) missingKeySet.add(name);
       continue;
     }
-    const bytes = await fetchAsset(path);
+    // Designer uploads overwrite existing keys, so previews must refresh the
+    // organization's mutable assets before the rendering pass reuses them.
+    const bytes = await fetchAsset(path, path.startsWith(`${orgId}/`));
     if (!bytes) {
       if (display) missingRefs.add(display);
       if (name) missingKeySet.add(name);
@@ -1537,7 +1581,7 @@ const stringifyValue = (value: unknown, fallback?: string): string => {
 const sanitizePdfText = (value: string): string => value.replace(/\uFFFD/g, "?");
 const ARABIC_CHAR_RE =
   /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
-const bidi = bidiFactory();
+
 
 const hasArabic = (value: string): boolean => ARABIC_CHAR_RE.test(String(value ?? ""));
 
@@ -2504,7 +2548,12 @@ const renderTemplateBlocksToPage = async (
       if (!barcodeValue) continue;
       if (!barcodeSample) barcodeSample = barcodeValue;
 
-      const MAX_BARCODE_CHARS = 80;
+      const barcodeTypeRaw =
+        typeof block.barcode_type === "string" && block.barcode_type.trim()
+          ? block.barcode_type
+          : (rendererConfig.barcode?.type ?? "code128");
+      const barcodeType = canonicalBarcodeType(String(barcodeTypeRaw));
+      const MAX_BARCODE_CHARS = BARCODE_MAX_CHARS[barcodeType]!;
       if (barcodeValue.length > MAX_BARCODE_CHARS) {
         throw new TemplateError("render_failure", "Barcode value exceeds max length", {
           value_length: barcodeValue.length,
@@ -2513,11 +2562,6 @@ const renderTemplateBlocksToPage = async (
         });
       }
 
-      const barcodeTypeRaw =
-        typeof block.barcode_type === "string" && block.barcode_type.trim()
-          ? block.barcode_type
-          : (rendererConfig.barcode?.type ?? "code128");
-      const barcodeType = String(barcodeTypeRaw).trim().toLowerCase();
       const baseModuleWidth =
         typeof block.module_width === "number" && block.module_width > 0 ? block.module_width : dotPt;
       const maxScale =
@@ -2596,6 +2640,49 @@ const renderTemplateBlocksToPage = async (
           }
         }
 
+        renderedBlocks += 1;
+        continue;
+      }
+
+      if (barcodeType !== "code128") {
+        const symbol = encodeAdditionalBarcode(bwip.raw, barcodeType, barcodeValue);
+        const quietZone = typeof block.quiet_zone_modules === "number" && block.quiet_zone_modules >= 0
+          ? Math.floor(block.quiet_zone_modules)
+          : typeof block.min_quiet_zone_modules === "number" && block.min_quiet_zone_modules >= 0
+            ? Math.floor(block.min_quiet_zone_modules) : symbol.is2D ? 4 : 10;
+        const fit = maxWidth / (symbol.width + quietZone * 2);
+        let moduleWidth = Math.min(fit, baseModuleWidth * maxScale);
+        if (symbol.is2D) moduleWidth = Math.min(moduleWidth, availableHeight / (symbol.height + quietZone * 2));
+        if (moduleWidth >= dotPt) moduleWidth = Math.floor(moduleWidth / dotPt) * dotPt;
+        const totalWidth = (symbol.width + quietZone * 2) * moduleWidth;
+        const totalHeight = symbol.is2D ? (symbol.height + quietZone * 2) * moduleWidth : availableHeight;
+        const startX = block.align === "center" ? x - totalWidth / 2 : block.align === "right" ? x - totalWidth : x;
+        const valign = String(block.valign ?? "").trim().toLowerCase();
+        const offsetY = valign === "top" ? availableHeight - totalHeight
+          : valign === "middle" || valign === "center" ? (availableHeight - totalHeight) / 2 : 0;
+        const startY = y + reservedBottom + offsetY;
+        const color = normalizeColor(block.color);
+        for (const rect of symbol.rectangles) {
+          const position = rotateBarcodePoint({
+            x: startX + (rect.x + quietZone) * moduleWidth,
+            y: startY + (symbol.is2D ? (rect.y + quietZone) * moduleWidth : rect.y * availableHeight),
+          }, { x, y }, block.rotation);
+          page.drawRectangle({
+            ...position,
+            width: rect.width * moduleWidth,
+            height: rect.height * (symbol.is2D ? moduleWidth : availableHeight),
+            rotate: degrees(block.rotation ?? 0),
+            color,
+          });
+        }
+        if (humanReadable && !symbol.is2D) {
+          const font = await selectFont(pdfDoc, options.fontCache, block.font);
+          const size = block.font_size ?? 11;
+          const textWidth = font.widthOfTextAtSize(symbol.humanReadableText, size);
+          const position = rotateBarcodePoint({ x: block.align === "center" ? x - textWidth / 2 : block.align === "right" ? x - textWidth : x,
+            y: startY - size - 4 }, { x, y }, block.rotation);
+          page.drawText(symbol.humanReadableText, { ...position, rotate: degrees(block.rotation ?? 0), size, font, color });
+        }
         renderedBlocks += 1;
         continue;
       }
@@ -2762,6 +2849,7 @@ const renderTemplatePdf = async (
   const heightPoints = Math.max(72, Math.round((pageCfg.height_inch ?? 6) * 72));
   const orientation = (pageCfg.orientation ?? "portrait") === "landscape" ? "landscape" : "portrait";
 
+  await ensureRendererDeps();
   const pdfDoc = await PDFDocument.create();
   const pageSize: [number, number] = orientation === "landscape"
     ? [heightPoints, widthPoints]
@@ -2833,6 +2921,7 @@ const buildFallbackPdf = async (
   templateSnapshot?: TemplateSnapshot | null,
   integration?: IntegrationContext | null,
 ): Promise<{ bytes: Uint8Array; rendererMetadata: Record<string, unknown> }> => {
+  await ensureRendererDeps();
   const pdfDoc = await PDFDocument.create();
   const pageWidth = 4 * 72;
   const pageHeight = 6 * 72;
@@ -3583,6 +3672,7 @@ const buildBundleDocument = async (
     preloadedBytesByFilePath?: Map<string, Uint8Array>;
   },
 ) => {
+  await ensureRendererDeps();
   const doc = await PDFDocument.create();
   const helvetica = await doc.embedFont(StandardFonts.Helvetica);
   const helveticaBold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -3867,13 +3957,11 @@ const handlePrintRequest = async (
     (policy as any)?.fresh_generation_required,
     true,
   );
-  const explicitJobPurpose = normalizeString((printInput as any)?.job_purpose)?.toLowerCase();
-  const printJobPurpose =
-    explicitJobPurpose === "primary" || explicitJobPurpose === "reprint" || explicitJobPurpose === "manual"
-      ? explicitJobPurpose
-      : freshGenerationRequired
-      ? "reprint"
-      : "primary";
+  const requestedJobPurpose = normalizeString(printInput.job_purpose)?.toLowerCase();
+  // Fresh-generation policy forbids primary reuse, but preserves explicit manual/reprint intent.
+  const jobPurpose = requestedJobPurpose === "manual" || requestedJobPurpose === "reprint"
+    ? requestedJobPurpose
+    : freshGenerationRequired ? "reprint" : "primary";
   const printSyncCompactEnabled = readBooleanSetting(
     (policy as any)?.print_sync_compact_enabled,
     true,
@@ -3921,8 +4009,9 @@ const handlePrintRequest = async (
     statusCode: number,
     body: Record<string, unknown>,
   ) => {
-    schedulePrintWorkflowResult(printInput, body);
-    return { statusCode, body };
+    const responseBody = { ...body, job_purpose: jobPurpose };
+    schedulePrintWorkflowResult(printInput, responseBody);
+    return { statusCode, body: responseBody };
   };
 
   const expiresSeconds = Math.min(
@@ -3987,7 +4076,7 @@ const handlePrintRequest = async (
               p_requested_by: null,
               p_requested_source: printRequestSource,
               p_target_box_id: target.target_box_id,
-              p_job_purpose: printJobPurpose,
+              p_job_purpose: jobPurpose,
             }
           : {
               p_target_type: target.target_type,
@@ -3996,7 +4085,7 @@ const handlePrintRequest = async (
               p_requested_by: null,
               p_requested_source: printRequestSource,
               p_target_box_id: target.target_box_id,
-              p_job_purpose: printJobPurpose,
+              p_job_purpose: jobPurpose,
             };
         const { data, error } = await callRendererRpc<string | { job_id?: string }>(
           client,
@@ -4025,14 +4114,14 @@ const handlePrintRequest = async (
             p_label_type: labelType,
             p_requested_by: null,
             p_requested_source: printRequestSource,
-            p_job_purpose: printJobPurpose,
+            p_job_purpose: jobPurpose,
           }
         : {
             p_shipments: normalizedShipments,
             p_label_type: labelType,
             p_requested_by: null,
             p_requested_source: printRequestSource,
-            p_job_purpose: printJobPurpose,
+            p_job_purpose: jobPurpose,
           };
       const { data, error } = await callRendererRpc<any>(
         client,
@@ -4091,7 +4180,7 @@ const handlePrintRequest = async (
     concurrency: Math.max(1, Math.min(25, clampedRenderConcurrency)),
     label_type: labelType,
     fresh_generation_required: freshGenerationRequired,
-    job_purpose: printJobPurpose,
+    job_purpose: jobPurpose,
     requested_source: printRequestSource,
   });
 
@@ -4376,6 +4465,7 @@ const handlePrintRequest = async (
           single_file_passthrough_enabled: true,
           single_file_passthrough_max_bytes: singleFilePassthroughMaxBytes,
           fresh_generation_required: freshGenerationRequired,
+          job_purpose: jobPurpose,
           rendered_pages: 1,
         });
 
@@ -4521,6 +4611,7 @@ const handlePrintRequest = async (
       }
     >();
 
+    await ensureRendererDeps();
     const pdfDoc = await PDFDocument.create();
     const fontCache = new Map<string, EmbeddedFontPromise>();
     const templateCache = new Map<
@@ -4962,6 +5053,7 @@ const handlePrintRequest = async (
       bundle_strategy: "direct",
       print_sync_compact_enabled: printSyncCompactEnabled,
       fresh_generation_required: freshGenerationRequired,
+      job_purpose: jobPurpose,
       rendered_pages: pageIndex,
     });
 
@@ -5489,6 +5581,13 @@ const handleBundleRequest = async (
 
   const effectiveClientId = incomingClientId ?? null;
   const effectiveSenderId = incomingSenderId ?? null;
+  function returnBundleResponse(
+    statusCode: number,
+    body: Record<string, unknown>,
+  ) {
+    scheduleBundleWorkflowResult(bundleInput, body);
+    return { statusCode, body };
+  }
   const policy = await resolveLabelPrintPolicy(integration, effectiveOrgId, effectiveClientId, effectiveSenderId);
   const workflowManagedBundle = Boolean(resolveWorkflowProgress(bundleInput)?.workflowRunStepId);
   const bundleReturnMode = resolveBundleReturnMode(policy, workflowManagedBundle);
@@ -5517,13 +5616,6 @@ const handleBundleRequest = async (
 
   const startedAt = new Date().toISOString();
   const overallStart = performance.now();
-  const returnBundleResponse = (
-    statusCode: number,
-    body: Record<string, unknown>,
-  ) => {
-    scheduleBundleWorkflowResult(bundleInput, body);
-    return { statusCode, body };
-  };
 
   try {
     await assertLabelBucketAvailable();
@@ -5896,6 +5988,7 @@ const withCors = (res: Response, corsHeaders: Record<string, string>) => {
   Object.entries(corsHeaders).forEach(([key, value]) => {
     headers.set(key, value);
   });
+  headers.set("x-masarx-edge-function", "label-renderer");
   return new Response(res.body, { status: res.status, headers });
 };
 
@@ -5925,21 +6018,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }), corsHeaders);
     }
 
-    const token = extractToken(req, { prefer: "authorization", allowWebhookHeader: false, allowQueryParam: false });
-    const role = getJwtRole(token);
-    if (!token || !role) {
-      return withCors(new Response(JSON.stringify({ error: "Missing or invalid Authorization token" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      }), corsHeaders);
-    }
-    const requireDbJwt = readEnv("EDGE_REQUIRE_DB_JWT").trim() === "1";
-    const authorized = requireDbJwt
-      ? role === "edge_label_renderer_role"
-      : role === "edge_label_renderer_role" || role === "service_role";
-    if (!authorized) {
-      return withCors(new Response(JSON.stringify({ error: "Unauthorized role" }), {
-        status: 403,
+    const operation = resolveLabelRendererOperation(payload);
+    const authorization = authorizeLabelRendererRequest(req, operation, {
+      requireDbJwt: readEnv("EDGE_REQUIRE_DB_JWT").trim() === "1",
+    });
+    if (!authorization.ok) {
+      return withCors(new Response(JSON.stringify({ error: authorization.message }), {
+        status: authorization.status,
         headers: { "content-type": "application/json" },
       }), corsHeaders);
     }
@@ -5951,7 +6036,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const integration = INTERNAL_INTEGRATION;
 
-    if (payload && typeof payload === "object" && payload !== null && ("print" in payload || payload?.mode === "print")) {
+    if (operation === "print") {
       const printResult = await handlePrintRequest(payload, correlationId, integration);
       return withCors(new Response(JSON.stringify(printResult.body), {
         status: printResult.statusCode,
@@ -5959,7 +6044,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }), corsHeaders);
     }
 
-    if (payload && typeof payload === "object" && payload !== null && ("bundle" in payload || payload?.mode === "bundle")) {
+    if (operation === "bundle") {
       const bundleResult = await handleBundleRequest(payload, integration);
       return withCors(new Response(JSON.stringify(bundleResult.body), {
         status: bundleResult.statusCode,

@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "deployment_overhead_minutes": 30,
+  "phases": [
+    {
+      "phase_id": "shipment_identifier_uuid_guard_v1",
+      "migration_version": "202607151152",
+      "target_database": "postgres",
+      "max_duration_ms": 10800000,
+      "partition_advisory_lock": [
+        "public",
+        "create_next_partitions"
+      ],
+      "max_closure_rounds": 3,
+      "indexes": [
+        {
+          "relation": "public.workflow_runs",
+          "index_name": "idx_workflow_runs_triggered_by_request_id_not_null",
+          "method": "btree",
+          "keys": [
+            {
+              "column": "triggered_by_request_id",
+              "opclass": "uuid_ops",
+              "order": "ASC",
+              "nulls": "LAST"
+            }
+          ],
+          "predicate_not_null_columns": [
+            "triggered_by_request_id"
+          ]
+        },
+        {
+          "relation": "public.decision_log",
+          "index_name": "idx_decision_log_org_correlation_not_null",
+          "method": "btree",
+          "keys": [
+            {
+              "column": "organization_id",
+              "opclass": "uuid_ops",
+              "order": "ASC",
+              "nulls": "LAST"
+            },
+            {
+              "column": "correlation_id",
+              "opclass": "uuid_ops",
+              "order": "ASC",
+              "nulls": "LAST"
+            }
+          ],
+          "predicate_not_null_columns": [
+            "correlation_id"
+          ]
+        },
+        {
+          "relation": "public.domain_events",
+          "index_name": "idx_domain_events_org_correlation_resource_not_null",
+          "method": "btree",
+          "keys": [
+            {
+              "column": "organization_id",
+              "opclass": "uuid_ops",
+              "order": "ASC",
+              "nulls": "LAST"
+            },
+            {
+              "column": "correlation_id",
+              "opclass": "uuid_ops",
+              "order": "ASC",
+              "nulls": "LAST"
+            },
+            {
+              "column": "resource_type",
+              "opclass": "text_ops",
+              "collation": "default",
+              "order": "ASC",
+              "nulls": "LAST"
+            },
+            {
+              "column": "resource_id",
+              "opclass": "uuid_ops",
+              "order": "ASC",
+              "nulls": "LAST"
+            }
+          ],
+          "predicate_not_null_columns": [
+            "correlation_id",
+            "resource_id"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import {
 type SettingsRequestPageProps = Parameters<typeof UiSettingsRequestPage>[0];
 const SettingsRequestPageInner = UiSettingsRequestPage as unknown as (
   props: SettingsRequestPageProps
-) => JSX.Element;
+) => React.JSX.Element;
 
 export function SettingsRequestPage(props: SettingsRequestPageProps) {
   return (

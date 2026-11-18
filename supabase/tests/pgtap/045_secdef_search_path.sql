@@ -43,12 +43,13 @@ SELECT *
 FROM parsed_paths
 WHERE search_path IS NULL
    OR cardinality(search_path) = 0
-   OR search_path[1] <> 'public'
+   OR (search_path[1] <> 'public' AND search_path <> ARRAY['pg_catalog', 'pg_temp']::text[])
    OR search_path[array_upper(search_path, 1)] <> 'pg_temp'
+   OR array_position(search_path, 'pg_temp') <> cardinality(search_path)
    OR EXISTS (
      SELECT 1
      FROM unnest(search_path) AS elem
-     WHERE elem NOT IN ('public', 'extensions', 'pg_temp', 'workflow_handlers')
+     WHERE elem NOT IN ('public', 'extensions', 'pg_catalog', 'pg_temp', 'workflow_handlers')
    );
 
 SELECT diag(
@@ -65,7 +66,7 @@ SELECT cmp_ok(
   (SELECT COUNT(*)::bigint FROM tmp_secdef_search_path_violations),
   '=',
   0::bigint,
-  'All SECURITY DEFINER functions pin search_path to public (+ extensions/workflow_handlers) and pg_temp'
+  'All SECURITY DEFINER functions use trusted schemas with public first or catalog-only and pg_temp last'
 );
 
 SELECT finish();

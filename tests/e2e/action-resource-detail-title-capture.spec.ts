@@ -9,6 +9,8 @@ import {
   resolveResourceKeysForUser,
 } from "./utils/core-resource";
 import { captureFullPage, isCaptureEnabled, resolveEvidencePath } from "./utils/evidence";
+import enMessages from "../../packages/config/messages/en.json";
+import arMessages from "../../packages/config/messages/ar.json";
 
 const demoContext = loadDemoContext();
 const strict = isStrictE2EEnv();
@@ -145,7 +147,12 @@ test.describe("resource detail title screenshots", () => {
         }
       );
 
-      await expect(page.getByRole("button", { name: "Back to list" })).toBeVisible();
+      const locale = process.env.STUDIO_BROWSER_EXPECTED_LOCALE;
+      if (locale !== "en" && locale !== "ar") {
+        throw new Error("Explicit owned app locale proof selection required");
+      }
+      const messages = locale === "ar" ? arMessages : enMessages;
+      await expect(page.getByRole("button", { name: messages.ui.resourcePage.detail.backToList, exact: true })).toBeVisible();
 
       await captureFullPage(
         page,

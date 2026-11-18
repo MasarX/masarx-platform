@@ -4,6 +4,10 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const {
+  assertCommandDidNotTimeOut,
+  runBoundedSyncCommand,
+} = require('./bounded-sync-command');
 const { parseFlagArgs } = require('../../utils/cli-args');
 const { loadEnv } = require('../../utils/load-env');
 
@@ -105,11 +109,12 @@ function runPreviewStackCommand(
 }
 
 function resolveHeadSha(cwd = process.cwd()) {
-  const res = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' });
-  if (res.error || res.status !== 0) {
-    throw new Error(`Unable to resolve HEAD sha: ${res.error ? res.error.message : res.stderr || res.stdout}`);
+  const result = runBoundedSyncCommand('git', ['rev-parse', 'HEAD'], { cwd });
+  assertCommandDidNotTimeOut(result, '[with-full-preview-stack] git HEAD probe');
+  if (!result.ok) {
+    throw new Error(`Unable to resolve HEAD sha: ${result.error ? result.error.message : result.stderr || result.stdout}`);
   }
-  return String(res.stdout || '').trim();
+  return String(result.stdout || '').trim();
 }
 
 function resolveWorktreeId(args) {

@@ -28,35 +28,36 @@
       "notes": ["Root unit, ops tests, and local backend-start helpers resolve these packages from the worktree root."]
     },
     "console-v2": {
-      "package_dir": "apps/console-v2",
-      "package_json": "apps/console-v2/package.json",
+      "package_dir": "apps/console",
+      "package_json": "apps/console/package.json",
       "modules": [
-        "vite",
+        "next",
         "react",
+        "react-dom",
         "typescript",
         "@testing-library/dom",
         { "name": "@testing-library/react", "when": { "dependency": "@testing-library/react" } },
         { "name": "@playwright/test", "when": { "dependency": "@playwright/test" } }
       ],
-      "bins": ["vite", "tsc"],
+      "bins": ["next", "tsc"],
       "install": {
         "strategy": "prefer-app-lock-then-workspace",
-        "app_lockfile": "apps/console-v2/package-lock.json",
+        "app_lockfile": "apps/console/package-lock.json",
         "app_args": ["ci", "--no-audit", "--no-fund"],
-        "workspace_name": "@masarx/console-v2",
+        "workspace_name": "@masarx/console",
         "workspace_lockfile": "package-lock.json",
         "workspace_args": [
           "ci",
           "--workspace",
-          "@masarx/console-v2",
-          "--include-workspace-root=false",
+          "@masarx/console",
+          "--include-workspace-root=true",
           "--ignore-scripts",
           "--no-audit",
           "--no-fund"
         ]
       },
       "notes": [
-        "Console V2 runtime is the canonical Vite app in apps/console-v2; apps/console is legacy and must not be used for Console V2 proof."
+        "Console V2 keeps the stable runtime label, but the implementation is the current Next app under apps/console."
       ]
     },
     "landing": {
@@ -126,7 +127,7 @@
           "ci",
           "--workspace",
           "@masarx/portal",
-          "--include-workspace-root=false",
+          "--include-workspace-root=true",
           "--ignore-scripts",
           "--no-audit",
           "--no-fund"

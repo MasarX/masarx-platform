@@ -377,7 +377,7 @@ test("resource page open-full button toggles layout to full", async () => {
   window.history.replaceState = originalReplaceState;
 });
 
-test("resource page does not show action availability summary (cleaned for minimal UI)", async () => {
+test("resource page shows configured, available, and blocked action counts", async () => {
   const mockedCreateUiServerClient = createUiServerClient as jest.Mock;
   mockedCreateUiServerClient.mockReturnValue({
     readRegistry: jest.fn().mockResolvedValue({
@@ -476,8 +476,101 @@ test("resource page does not show action availability summary (cleaned for minim
 
   renderWithIntl(result as ReactElement);
 
-  expect(screen.queryByText("Actions")).not.toBeInTheDocument();
-  expect(screen.queryByText("3 configured")).not.toBeInTheDocument();
-  expect(screen.queryByText("2 available")).not.toBeInTheDocument();
-  expect(screen.queryByText("1 blocked")).not.toBeInTheDocument();
+  expect(screen.getByTestId("console-shipments-actions-configured")).toHaveTextContent("4 configured");
+  expect(screen.getByTestId("console-shipments-actions-available")).toHaveTextContent("2 available");
+  expect(screen.getByTestId("console-shipments-actions-blocked")).toHaveTextContent("2 blocked");
+});
+
+test("resource page hides header actions when header capability is missing", async () => {
+  const mockedCreateUiServerClient = createUiServerClient as jest.Mock;
+  mockedCreateUiServerClient.mockReturnValue({
+    readRegistry: jest.fn().mockResolvedValue({
+      resources: [{ key: "integration_plugins", relation: "integration_plugins" }],
+    }),
+    me: jest.fn().mockResolvedValue({
+      capabilities: ["integration_plugins.read"],
+      access_scope: { scope_type: "tenant", scope_id: "tenant-1" },
+    }),
+    settingsPreview: jest.fn().mockResolvedValue({
+      category: "ui_pagination",
+      value: { allowed_sizes: [25], max_page_size: 25 },
+    }),
+    tableViews: jest.fn().mockResolvedValue({
+      resource: "integration_plugins",
+      views: {},
+      default_view_id: null,
+      scope_type: "tenant",
+      scope_id: "tenant-1",
+    }),
+    listResource: jest.fn().mockResolvedValue({
+      resource: "integration_plugins",
+      items: [{ id: "1", name: "Draft plugin" }],
+      limit: 25,
+      offset: 0,
+      total: 1,
+    }),
+    commandRegistry: jest.fn().mockResolvedValue({ commands: [] }),
+    getResource: jest.fn().mockResolvedValue(null),
+  });
+
+  const result = await ResourcePage({
+    appKey: "console",
+    resourceKey: "integration_plugins",
+    searchParams: {},
+    appBasePath: "/console",
+    description: "Integration plugins",
+    testIdPrefix: "console-integration-plugins",
+    headerActionsCapability: "integration_plugins.write",
+    headerActions: "New Plugin",
+  });
+
+  renderWithIntl(result as ReactElement);
+
+  expect(screen.queryByText("New Plugin")).not.toBeInTheDocument();
+});
+
+test("resource page renders a missing-record message when detail resolves null", async () => {
+  const mockedCreateUiServerClient = createUiServerClient as jest.Mock;
+  mockedCreateUiServerClient.mockReturnValue({
+    readRegistry: jest.fn().mockResolvedValue({
+      resources: [{ key: "integration_plugins", relation: "integration_plugins" }],
+    }),
+    me: jest.fn().mockResolvedValue({
+      capabilities: ["integration_plugins.read"],
+      access_scope: { scope_type: "tenant", scope_id: "tenant-1" },
+    }),
+    settingsPreview: jest.fn().mockResolvedValue({
+      category: "ui_pagination",
+      value: { allowed_sizes: [25], max_page_size: 25 },
+    }),
+    tableViews: jest.fn().mockResolvedValue({
+      resource: "integration_plugins",
+      views: {},
+      default_view_id: null,
+      scope_type: "tenant",
+      scope_id: "tenant-1",
+    }),
+    listResource: jest.fn().mockResolvedValue({
+      resource: "integration_plugins",
+      items: [{ id: "1", name: "Draft plugin" }],
+      limit: 25,
+      offset: 0,
+      total: 1,
+    }),
+    commandRegistry: jest.fn().mockResolvedValue({ commands: [] }),
+    getResource: jest.fn().mockResolvedValue(null),
+  });
+
+  const result = await ResourcePage({
+    appKey: "console",
+    resourceKey: "integration_plugins",
+    searchParams: { id: "missing-id", detail_open: "1" },
+    appBasePath: "/console",
+    description: "Integration plugins",
+    testIdPrefix: "console-integration-plugins",
+  });
+
+  renderWithIntl(result as ReactElement);
+
+  expect(screen.getByText("Record not found.")).toBeInTheDocument();
 });

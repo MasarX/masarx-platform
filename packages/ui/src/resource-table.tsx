@@ -389,6 +389,10 @@ export function ResourceTable({
     () => normalizeGroupBy(activeView?.group_by, columnKeys)
   );
   const selectionEnabled = Boolean(idKey) && (enableSelection ?? true);
+  const [interactionReady, setInteractionReady] = React.useState(false);
+  React.useEffect(() => {
+    setInteractionReady(true);
+  }, []);
   const tableContainerRef = React.useRef<HTMLDivElement | null>(null);
   const selectHeaderRef = React.useRef<HTMLTableHeaderCellElement | null>(null);
   const panelIdPrefixRaw = React.useId();
@@ -820,6 +824,17 @@ export function ResourceTable({
     reportTableEvent("ui.table.selection.clear", String(selectedCount));
   }, [clearSelection, reportTableEvent, selectedCount]);
   const activeViewId = activeView?.id ?? viewState?.activeViewId ?? null;
+  const formattingViewRef = React.useRef({
+    resourceKey: resolvedResourceKey,
+    viewId: activeView?.id ?? null,
+  });
+  React.useEffect(() => {
+    const viewId = activeView?.id ?? null;
+    const previous = formattingViewRef.current;
+    if (previous.resourceKey === resolvedResourceKey && previous.viewId === viewId) return;
+    formattingViewRef.current = { resourceKey: resolvedResourceKey, viewId };
+    setConditionalFormatting(activeView?.conditional_formatting ?? null);
+  }, [resolvedResourceKey, activeView?.id, activeView?.conditional_formatting]);
   React.useEffect(() => {
     if (typeof showAnalytics === "boolean") {
       setAnalyticsEnabled(showAnalytics);
@@ -942,6 +957,7 @@ export function ResourceTable({
         ? activeView.show_internal_id_hints
         : uiDefaults.table.showInternalIdHints
     );
+    setConditionalFormatting(activeView?.conditional_formatting ?? null);
     resetRowState();
     setSearchDebounceMs(defaultSearchDebounceMs);
     resetPagination();
@@ -1424,12 +1440,14 @@ export function ResourceTable({
           baseHref={baseHref}
           resolveRowHref={resolveRowHref}
           selectionEnabled={selectionEnabled}
+          selectionReady={interactionReady}
           selectedIds={selectedIds}
           cellPadding={cellPadding}
           displayColumns={displayColumns}
           pinnedOffsets={pinnedOffsets}
           columnWidths={columnWidths}
           pinnedCellClass={pinnedCellClass}
+          conditionalFormatting={conditionalFormatting}
           numericColumnSet={numericColumnSet}
           hasGrouping={hasGrouping}
           inlineEdit={inlineEdit}
@@ -1455,6 +1473,7 @@ export function ResourceTable({
       cancelInlineEdit,
       cellPadding,
       collapsedGroups,
+      conditionalFormatting,
       columnWidths,
       columnsByKey,
       commitInlineEdit,
@@ -1468,6 +1487,7 @@ export function ResourceTable({
       hasGrouping,
       idKey,
       inlineEdit,
+      interactionReady,
       numericColumnSet,
       pageMetrics,
       pinnedCellClass,
@@ -1536,7 +1556,11 @@ export function ResourceTable({
   }, [activeFilterCount, clearFilters, sortState.length, clearSorts, resolvedGroupBy.length, clearGroupBy]);
 
   return (
-    <div className={rowDensity === "compact" ? "space-y-2" : "space-y-3"}>
+    <div
+      className={rowDensity === "compact" ? "space-y-2" : "space-y-3"}
+      data-interaction-ready={interactionReady ? "true" : "false"}
+      data-testid={tableTestIdPrefix ? `${tableTestIdPrefix}-root` : undefined}
+    >
       <TableViewBar
         t={t}
         views={viewEntries}
@@ -1782,6 +1806,7 @@ export function ResourceTable({
         rowDensity={rowDensity}
         showRowNumbers={showRowNumbers}
         selectionEnabled={selectionEnabled}
+        selectionReady={interactionReady}
         selectHeaderRef={selectHeaderRef}
         selectAllRef={selectAllRef}
         allSelected={allSelected}

@@ -17,10 +17,28 @@ function makeJwt(payload) {
 
 function baseEnv(overrides = {}) {
   return {
-    DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'jzvzlmuxwmkggrqmrktuwjmo',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+    DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
     EDGE_INTERNAL_CALLER_ROLES:
       'edge_api_gateway_role,edge_webhook_role,edge_api_caller_role,service_role',
     GITHUB_ACTIONS: 'false',
+    ...overrides,
+  };
+}
+
+function guardedEgressProofEnv(overrides = {}) {
+  return {
+    API_CALLER_GUARDED_EGRESS_PROOF_REQUIRED: '1',
+    API_CALLER_GUARDED_EGRESS_PROOF_LANE: 'db-dev',
+    API_CALLER_GUARDED_EGRESS_PROOF_SHA: '0123456789abcdef0123456789abcdef01234567',
+    API_CALLER_GUARDED_EGRESS_PROXY_URL: 'https://proxy.example.test',
+    API_CALLER_GUARDED_EGRESS_PROXY_USERNAME: 'api-caller',
+    API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD: 'proxy-password',
+    API_CALLER_GUARDED_EGRESS_PROXY_HEALTH_URL: 'https://proxy.example.test/healthz',
+    API_CALLER_GUARDED_EGRESS_PUBLIC_PROBE_URL: 'https://probe.example.test/egress-ip',
+    API_CALLER_GUARDED_EGRESS_EXPECTED_PUBLIC_IP: '8.8.8.8',
+    API_CALLER_GUARDED_EGRESS_POLICY_DENIED_PROBE_URL: 'https://192.0.2.10',
+    API_CALLER_GUARDED_EGRESS_REBINDING_PROBE_URL: 'https://rebinding-probe.example.test',
+    API_CALLER_GUARDED_EGRESS_POLICY_DENIED_CODE: 'NON_PUBLIC_DESTINATION_DENIED',
     ...overrides,
   };
 }
@@ -42,6 +60,33 @@ describe('assert-cloud-env', () => {
         }),
       }),
     ).not.toThrow();
+  });
+
+  test('guarded egress proof requirement fails closed on missing lane configuration', () => {
+    expect(() => validateCloudEnv({
+      env: baseEnv({
+        EDGE_REQUIRE_DB_JWT: '1',
+        API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
+        WEBHOOK_DB_JWT: makeJwt({ role: 'edge_webhook_role' }),
+        API_CALLER_DB_JWT: makeJwt({ role: 'edge_api_caller_role' }),
+        LABEL_RENDERER_DB_JWT: makeJwt({ role: 'edge_label_renderer_role' }),
+        API_CALLER_GUARDED_EGRESS_PROOF_REQUIRED: '1',
+        API_CALLER_GUARDED_EGRESS_PROOF_LANE: 'db-dev',
+      }),
+    })).toThrow(/API_CALLER_GUARDED_EGRESS_(?:PROOF_SHA|PROXY_URL)/);
+  });
+
+  test('guarded egress proof requirement accepts the complete exact lane configuration', () => {
+    expect(() => validateCloudEnv({
+      env: baseEnv({
+        EDGE_REQUIRE_DB_JWT: '1',
+        API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
+        WEBHOOK_DB_JWT: makeJwt({ role: 'edge_webhook_role' }),
+        API_CALLER_DB_JWT: makeJwt({ role: 'edge_api_caller_role' }),
+        LABEL_RENDERER_DB_JWT: makeJwt({ role: 'edge_label_renderer_role' }),
+        ...guardedEgressProofEnv(),
+      }),
+    })).not.toThrow();
   });
 
   test('non-preview rejects service_role DB JWTs for gateway/webhook/api-caller', () => {
@@ -155,7 +200,7 @@ describe('assert-cloud-env', () => {
       validateCloudEnv({
         env: baseEnv({
           DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'pass',"@",'192.0.2.10',":",'5432',"/",'postgres'].join("")),
-          DATABASE_URL_DIRECT: (['postgresql',":","/","/",'postgres',":",'jzvzlmuxwmkggrqmrktuwjmo',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+          DATABASE_URL_DIRECT: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
           DB_SMOKE_SELECTED_DSN_NAME: 'DATABASE_URL+ipv4host',
           EDGE_REQUIRE_DB_JWT: '1',
           API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
@@ -172,9 +217,9 @@ describe('assert-cloud-env', () => {
       validateCloudEnv({
         env: baseEnv({
           DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'pass',"@",'192.0.2.10',":",'5432',"/",'postgres'].join("")),
-          DATABASE_URL_DIRECT: (['postgresql',":","/","/",'postgres',":",'jzvzlmuxwmkggrqmrktuwjmo',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+          DATABASE_URL_DIRECT: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
           DATABASE_URL_POOLER:
-            (['postgresql',":","/","/",'postgres.test',":",'nvsiuhtqzooqtjgtvlkphnkp',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
+            (['postgresql',":","/","/",'postgres.abcdefghijklmnopqrst',":",'fake-db-password',"@",'aws-1-us-east-1.pooler.supabase.com',":",'5432',"/",'postgres'].join("")),
           DATABASE_URL_SELECTED_DSN_NAME: 'DATABASE_URL_POOLER+ipv4host',
           EDGE_REQUIRE_DB_JWT: '1',
           API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
@@ -191,9 +236,9 @@ describe('assert-cloud-env', () => {
       isSelectedDbHostFallback(
         {
           DATABASE_URL:
-            (['postgresql',":","/","/",'postgres',":",'jzvzlmuxwmkggrqmrktuwjmo',"@",'example.invalid',":",'5432',"/",'postgres',"?",'hostaddr=192.0.2.10'].join("")),
+            (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres',"?",'hostaddr=192.0.2.10'].join("")),
         },
-        (['postgresql',":","/","/",'postgres',":",'jzvzlmuxwmkggrqmrktuwjmo',"@",'example.invalid',":",'5432',"/",'postgres',"?",'hostaddr=192.0.2.10'].join("")),
+        (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres',"?",'hostaddr=192.0.2.10'].join("")),
       ),
     ).toBe(true);
   });
@@ -218,9 +263,9 @@ describe('assert-cloud-env', () => {
     expect(() =>
       validateCloudEnv({
         env: baseEnv({
-          DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'ssrqnkpsqlmvqlkulyovputp',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
-          SUPABASE_PROJECT_ID: 'kkzpvkltntsxxornmhrp',
-          SUPABASE_URL: 'https://vlgizvmiygkvhmyzmyxpnjtr.example.invalid',
+          DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
+          SUPABASE_PROJECT_ID: 'abcdefghijklmnopqrst',
+          SUPABASE_URL: 'https://fake-api.example.invalid',
           EDGE_REQUIRE_DB_JWT: '1',
           API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
           WEBHOOK_DB_JWT: makeJwt({ role: 'edge_webhook_role' }),
@@ -235,10 +280,10 @@ describe('assert-cloud-env', () => {
     expect(() =>
       validateCloudEnv({
         env: baseEnv({
-          DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'ssrqnkpsqlmvqlkulyovputp',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
-          SUPABASE_PROJECT_ID: 'kkzpvkltntsxxornmhrp',
-          SUPABASE_URL: 'https://vlgizvmiygkvhmyzmyxpnjtr.example.invalid',
-          SUPABASE_ALLOWED_CUSTOM_DOMAINS: 'vlgizvmiygkvhmyzmyxpnjtr.example.invalid',
+          DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
+          SUPABASE_PROJECT_ID: 'abcdefghijklmnopqrst',
+          SUPABASE_URL: 'https://fake-api.example.invalid',
+          SUPABASE_ALLOWED_CUSTOM_DOMAINS: 'fake-api.example.invalid',
           EDGE_REQUIRE_DB_JWT: '1',
           API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
           WEBHOOK_DB_JWT: makeJwt({ role: 'edge_webhook_role' }),
@@ -253,9 +298,9 @@ describe('assert-cloud-env', () => {
     expect(() =>
       validateCloudEnv({
         env: baseEnv({
-          DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'ssrqnkpsqlmvqlkulyovputp',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
-          SUPABASE_URL: 'https://vlgizvmiygkvhmyzmyxpnjtr.example.invalid',
-          SUPABASE_ALLOWED_CUSTOM_DOMAINS: 'vlgizvmiygkvhmyzmyxpnjtr.example.invalid',
+          DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join("")),
+          SUPABASE_URL: 'https://fake-api.example.invalid',
+          SUPABASE_ALLOWED_CUSTOM_DOMAINS: 'fake-api.example.invalid',
           EDGE_REQUIRE_DB_JWT: '1',
           API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
           WEBHOOK_DB_JWT: makeJwt({ role: 'edge_webhook_role' }),
@@ -270,10 +315,10 @@ describe('assert-cloud-env', () => {
     expect(() =>
       validateCloudEnv({
         env: baseEnv({
-          DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'kujjjtzzwpmvshwjongklhri',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
-          SUPABASE_PROJECT_ID: 'kkzpvkltntsxxornmhrp',
-          SUPABASE_URL: 'https://vlgizvmiygkvhmyzmyxpnjtr.example.invalid',
-          SUPABASE_ALLOWED_CUSTOM_DOMAINS: 'vlgizvmiygkvhmyzmyxpnjtr.example.invalid',
+          DATABASE_URL: (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.bcdefghijklmnopqrstu.supabase.co',":",'5432',"/",'postgres'].join("")),
+          SUPABASE_PROJECT_ID: 'abcdefghijklmnopqrst',
+          SUPABASE_URL: 'https://fake-api.example.invalid',
+          SUPABASE_ALLOWED_CUSTOM_DOMAINS: 'fake-api.example.invalid',
           EDGE_REQUIRE_DB_JWT: '1',
           API_GATEWAY_DB_JWT: makeJwt({ role: 'edge_api_gateway_role' }),
           WEBHOOK_DB_JWT: makeJwt({ role: 'edge_webhook_role' }),

@@ -1,4 +1,6 @@
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { DOMParser } from "npm:@xmldom/xmldom@0.9.12";
+import { isPngContainer, isJpegContainer } from "./_shared/raster-images.mjs";
 import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
 type JsonRecord = Record<string, unknown>;
@@ -42,43 +44,10 @@ const decodeBase64 = (raw: string): Uint8Array => {
   return bytes;
 };
 
-const sanitizeFileName = (raw: string) => {
-  const base = raw.trim();
-  const last = base.split(/[\\/]/).pop() ?? "";
-  const cleaned = last
-    .replace(/[^\w.\- ]+/g, "_")
-    .replace(/\s+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return cleaned.slice(0, 120);
-};
 
-const normalizeImageContentType = (raw: string) => {
-  const normalized = raw.trim().toLowerCase().split(";")[0].trim();
-  return normalized === "image/jpg" ? "image/jpeg" : normalized;
-};
-
-const isSupportedImageContentType = (contentType: string) => ["image/png", "image/jpeg", "image/webp"].includes(contentType);
-
-const isUnspecifiedContentType = (contentType: string) => !contentType || contentType === "application/octet-stream";
-
-const detectImageContentType = (bytes: Uint8Array) => {
-  if (
-    bytes.length >= 8 &&
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47 &&
-    bytes[4] === 0x0d &&
-    bytes[5] === 0x0a &&
-    bytes[6] === 0x1a &&
-    bytes[7] === 0x0a
-  ) {
-    return "image/png";
-  }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return "image/jpeg";
-  }
+const imageContentTypeFromBytes = (bytes: Uint8Array, contentType: string): string | null => {
+  if (isPngContainer(bytes)) return "image/png";
+  if (isJpegContainer(bytes)) return "image/jpeg";
   if (
     bytes.length >= 12 &&
     bytes[0] === 0x52 &&
@@ -92,7 +61,45 @@ const detectImageContentType = (bytes: Uint8Array) => {
   ) {
     return "image/webp";
   }
-  return null;
+  try {
+    // RFC 7303: BOM > MIME charset > XML declaration/default. Hints choose decoding, never XML validity.
+    const bom = bytes[0] === 0xff && bytes[1] === 0xfe ? "utf-16le"
+      : bytes[0] === 0xfe && bytes[1] === 0xff ? "utf-16be"
+      : bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? "utf-8" : null;
+    let charset: string | undefined;
+    for (const parameter of contentType.matchAll(/;\s*([^=;\s]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;\s]*))/g)) {
+      if (parameter[1].toLowerCase() === "charset") {
+        charset = (parameter[2] ?? parameter[3]).replace(/\\(.)/g, "$1");
+        break;
+      }
+    }
+    let declaredEncoding: string | undefined;
+    if (!bom && charset === undefined && String.fromCharCode(...bytes.subarray(0, 5)) === "<?xml") {
+      // Scan only the leading declaration, bounded by the already-enforced 5 MiB input limit.
+      const end = bytes.findIndex((value, index) => value === 0x3f && bytes[index + 1] === 0x3e);
+      const declaration = new TextDecoder("windows-1252").decode(bytes.subarray(0, end < 0 ? 0 : end + 2));
+      declaredEncoding = /[\t\n\r ]encoding[\t\n\r ]*=[\t\n\r ]*(["'])([^"']*)\1/.exec(declaration)?.[2];
+    }
+    const decoder = new TextDecoder(bom ?? charset ?? declaredEncoding ?? "utf-8", { fatal: true });
+    const source = decoder.decode(bytes);
+    const doc = new DOMParser({ onError: () => { throw new Error("Invalid SVG XML"); } })
+      .parseFromString(source, "application/xml");
+    return doc.documentElement?.localName === "svg" && doc.documentElement.namespaceURI === "http://www.w3.org/2000/svg"
+      ? `image/svg+xml${!bom && charset !== undefined ? `; charset=${decoder.encoding}` : ""}` : null;
+  } catch {
+    return null;
+  }
+};
+
+const sanitizeFileName = (raw: string) => {
+  const base = raw.trim();
+  const last = base.split(/[\\/]/).pop() ?? "";
+  const cleaned = last
+    .replace(/[^\w.\- ]+/g, "_")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return cleaned.slice(0, 120);
 };
 
 const assertOrgPath = (orgId: string, path: string) => {
@@ -145,10 +152,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json(405, { ok: false, error: { code: "method_not_allowed" } }, corsHeaders);
 
-  // `verify_jwt` is enabled for this function.
-  // Some Supabase setups mint user JWTs with an asymmetric algorithm that the
-  // edge gateway cannot verify yet; the browser can call this function using the
-  // anon key for gateway verification and pass a user JWT in the body for RLS.
+  // Gateway JWT verification is disabled for browser compatibility with the
+  // current key plane. This handler validates the signed-in user's JWT through
+  // the canonical API/RLS path before performing any asset operation.
   const headerToken = extractToken(req, { prefer: "authorization", allowWebhookHeader: false, allowQueryParam: false });
 
   let payload: unknown;
@@ -240,62 +246,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (typed.mode === "upload") {
       const fileNameRaw = asString((typed as any).file_name);
       const fileBase64 = asString((typed as any).file_base64);
-      const requestedContentType = normalizeImageContentType(asString((typed as any).content_type) || "");
+      let contentType = asString((typed as any).content_type) || "application/octet-stream";
       if (!fileNameRaw) return json(400, { ok: false, error: { code: "file_name_required" } }, corsHeaders);
       if (!fileBase64) return json(400, { ok: false, error: { code: "file_base64_required" } }, corsHeaders);
-      if (!isUnspecifiedContentType(requestedContentType) && !isSupportedImageContentType(requestedContentType)) {
-        return json(
-          415,
-          {
-            ok: false,
-            error: {
-              code: "unsupported_asset_type",
-              message: "Label designer assets must be PNG, JPEG, or WebP images",
-            },
-          },
-          corsHeaders,
-        );
-      }
 
       const safeName = sanitizeFileName(fileNameRaw);
       if (!safeName) return json(400, { ok: false, error: { code: "invalid_file_name" } }, corsHeaders);
 
-      const bytes = decodeBase64(fileBase64);
+      let bytes: Uint8Array;
+      try {
+        bytes = decodeBase64(fileBase64);
+      } catch {
+        return json(400, { ok: false, error: { code: "invalid_file_base64" } }, corsHeaders);
+      }
       if (bytes.length === 0) return json(400, { ok: false, error: { code: "empty_file" } }, corsHeaders);
       if (bytes.length > 5 * 1024 * 1024) {
         return json(413, { ok: false, error: { code: "file_too_large", message: "Max 5MB" } }, corsHeaders);
       }
-      const detectedContentType = detectImageContentType(bytes);
-      if (!detectedContentType) {
-        return json(
-          415,
-          {
-            ok: false,
-            error: {
-              code: "unsupported_asset_bytes",
-              message: "Label designer assets must contain PNG, JPEG, or WebP image bytes",
-            },
-          },
-          corsHeaders,
-        );
+      const mime = contentType.split(";", 1)[0].trim().toLowerCase();
+      const declaredMime = mime === "image/jpg" ? "image/jpeg" : mime;
+      const detectedType = imageContentTypeFromBytes(bytes, contentType);
+      if (!detectedType) return json(400, { ok: false, error: { code: "invalid_image" } }, corsHeaders);
+      if (declaredMime !== "application/octet-stream" && detectedType.split(";", 1)[0] !== declaredMime) {
+        return json(400, { ok: false, error: { code: "image_mime_mismatch" } }, corsHeaders);
       }
-      if (!isUnspecifiedContentType(requestedContentType) && detectedContentType !== requestedContentType) {
-        return json(
-          415,
-          {
-            ok: false,
-            error: {
-              code: "asset_type_mismatch",
-              message: "Uploaded asset bytes do not match the declared image type",
-            },
-          },
-          corsHeaders,
-        );
-      }
+      contentType = detectedType;
 
       const path = `${orgId}/${DESIGNER_DIR}/${safeName}`;
-      const { error } = await storageClient.storage.from(ASSET_BUCKET).upload(path, new Blob([bytes], { type: detectedContentType }), {
-        contentType: detectedContentType,
+      const { error } = await storageClient.storage.from(ASSET_BUCKET).upload(path, new Blob([bytes], { type: contentType }), {
+        contentType,
         upsert: true,
       });
       if (error) return json(400, { ok: false, error: { code: "upload_failed", message: error.message } }, corsHeaders);

@@ -7,7 +7,7 @@ import {
 type CommandCatalogPageProps = Parameters<typeof UiCommandCatalogPage>[0];
 const CommandCatalogPageInner = UiCommandCatalogPage as unknown as (
   props: CommandCatalogPageProps
-) => JSX.Element;
+) => React.JSX.Element;
 
 export function CommandCatalogPage(props: CommandCatalogPageProps) {
   return (

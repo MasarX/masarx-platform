@@ -7,10 +7,12 @@ jest.mock('../../../scripts/utils/resolve-db-url', () => ({
 
 const {
   fetchCompatRoutes,
+  computeContractVersion,
   normalizeComparableText,
   resolveDbConnection,
   resolveOpenApiDbCandidatePolicy,
   stableStringify,
+  sortPathsPreservingCore,
 } = require('../../../scripts/docs/generate-public-openapi');
 const { resolveDatabaseUrlWithFallback } = require('../../../scripts/utils/resolve-db-url');
 
@@ -49,6 +51,28 @@ describe('generate-public-openapi', () => {
 
   test('stableStringify emits normalized trailing-newline JSON', () => {
     expect(stableStringify({ ok: true })).toBe('{\n  "ok": true\n}\n');
+  });
+
+  test('contract version ignores only info.version and detects curated event/schema changes', () => {
+    const spec = {
+      info: { version: 'previous' },
+      components: { schemas: { Event: { enum: ['shipment.cancelled'] } } },
+    };
+    const before = JSON.stringify(spec);
+    const version = computeContractVersion(spec);
+    expect(computeContractVersion({ ...spec, info: { version: 'other' } })).toBe(version);
+    expect(computeContractVersion({
+      ...spec,
+      components: { schemas: { Event: { enum: ['shipment.cancelled', 'shipment.canceled'] } } },
+    })).not.toBe(version);
+    expect(JSON.stringify(spec)).toBe(before);
+  });
+
+  test('path sorting preserves the curated webhook contract and keeps it first', () => {
+    const webhook = require('../../../docs/api/openapi.json').paths['/v1/webhook'];
+    const paths = sortPathsPreservingCore({ '/api/z': {}, '/v1/webhook': webhook, '/api/a': {} });
+    expect(Object.keys(paths)).toEqual(['/v1/webhook', '/api/a', '/api/z']);
+    expect(paths['/v1/webhook']).toBe(webhook);
   });
 
   test('fetchCompatRoutes fail-closes to zero compat packs when visibility column is absent and no allowlist is set', async () => {

@@ -26,7 +26,7 @@ export function DrawerContent({
       <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/55 backdrop-blur-sm motion-safe:animate-fade-in" />
       <Dialog.Content
         className={cn(
-          "fixed inset-y-0 z-[90] w-full max-w-md border border-ui-border bg-ui-paper p-6 shadow-2xl motion-safe:animate-slide-up",
+          "fixed inset-y-0 z-[90] w-full max-w-md overflow-y-auto border border-ui-border bg-ui-paper p-6 shadow-2xl motion-safe:animate-slide-up",
           side === "left" ? "left-0" : "right-0",
           className
         )}

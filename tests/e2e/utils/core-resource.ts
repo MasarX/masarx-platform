@@ -30,6 +30,7 @@ type ResourceRowResult = {
 type ResourceActionTarget = {
   resourceKey: string;
   actionKey: string;
+  disabledReason: string | null;
 };
 
 const fallbackTranslate: TranslateFn = (key) => key;
@@ -175,6 +176,32 @@ export function resolveResourceKeysForUser(params: {
     .map((entry) => entry.key);
 }
 
+export function resolveActionTypeResourceKeysForUser(
+  params: Parameters<typeof resolveResourceKeysForUser>[0]
+): string[] {
+  const capabilitySet = resolveCapabilitySet(params.capabilities);
+  const resources = Array.isArray(params.readRegistry?.resources)
+    ? params.readRegistry.resources
+    : [];
+  const readableKeys = new Set(
+    resources
+      .filter((resource) => {
+        const capability = "capability_read" in resource &&
+          typeof resource.capability_read === "string"
+          ? resource.capability_read.trim()
+          : "";
+        return Boolean(capability) && hasCapability(capabilitySet, capability);
+      })
+      .map((resource) => resource.key?.trim() ?? "")
+      .filter(Boolean)
+  );
+  // Action coverage also includes readable resources absent from this app's menu.
+  return Array.from(new Set([
+    ...resolveResourceKeysForUser(params).filter((key) => readableKeys.has(key)),
+    ...readableKeys,
+  ]));
+}
+
 const DEFAULT_CORE_RESOURCE_LIMIT = 12;
 
 function parseResourceLimit(rawLimit: string, fallback: number) {
@@ -240,6 +267,7 @@ export function resolveResourceActionTarget(params: {
   downloadBasePath: string;
   actionType: string;
   requireConfirm?: boolean;
+  includeDisabled?: boolean;
 }): ResourceActionTarget | null {
   const {
     resourceKeys,
@@ -251,6 +279,7 @@ export function resolveResourceActionTarget(params: {
     downloadBasePath,
     actionType,
     requireConfirm = false,
+    includeDisabled = false,
   } = params;
   const resolvedAppKey = appKey ?? inferAppKeyFromBasePath(appBasePath);
   const resources = Array.isArray(readRegistry?.resources)
@@ -275,12 +304,68 @@ export function resolveResourceActionTarget(params: {
     });
     const match = actions.find((action) => {
       if (action.execution?.type !== actionType) return false;
+      if (!includeDisabled && action.disabledReason) return false;
+      const minCount = action.selection?.min_count ?? 0;
+      const maxCount = action.selection?.max_count ?? null;
+      if (minCount > 1 || (maxCount !== null && maxCount < 1)) return false;
       if (!requireConfirm) return true;
       return Boolean(action.execution?.confirm);
     });
     if (match) {
-      return { resourceKey, actionKey: match.key };
+      return {
+        resourceKey,
+        actionKey: match.key,
+        disabledReason: match.disabledReason ?? null,
+      };
     }
+  }
+  return null;
+}
+
+export async function resolveResourceActionTargetWithSample(
+  params: Parameters<typeof resolveResourceActionTarget>[0] & {
+    email: string;
+    password: string;
+  }
+): Promise<ResourceActionTarget | null> {
+  const { resourceKeys, email, password, ...targetParams } = params;
+  for (const resourceKey of resourceKeys) {
+    const target = resolveResourceActionTarget({
+      ...targetParams,
+      resourceKeys: [resourceKey],
+    });
+    if (!target) continue;
+    const idColumn =
+      params.readRegistry?.resources?.find((entry) => entry?.key === resourceKey)
+        ?.id_column ?? null;
+    const sample = await fetchResourceSampleId({
+      resourceKey,
+      idColumn,
+      email,
+      password,
+    });
+    if (sample.id) return target;
+  }
+  return null;
+}
+
+export async function resolveResourceWithSample(params: {
+  resourceKeys: string[];
+  readRegistry: ReadRegistry | null;
+  email: string;
+  password: string;
+}): Promise<{ resourceKey: string; id: string } | null> {
+  for (const resourceKey of params.resourceKeys) {
+    const idColumn = params.readRegistry?.resources?.find(
+      (resource) => resource.key === resourceKey
+    )?.id_column;
+    const sample = await fetchResourceSampleId({
+      resourceKey,
+      idColumn,
+      email: params.email,
+      password: params.password,
+    });
+    if (sample.id) return { resourceKey, id: sample.id };
   }
   return null;
 }

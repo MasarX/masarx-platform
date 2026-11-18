@@ -91,11 +91,9 @@ function proofEvidence(args = {}, names = []) {
 
 function buildHostAndroidProofGates(args = {}) {
   return {
-    mobile_v2_policy_enabled: proofGate(args, [
-      'mobile-v2-policy-enabled',
-      'mobile_v2_policy_enabled',
-      'v2-enabled',
-      'v2_enabled',
+    current_fieldops_api_policy_proven: proofGate(args, [
+      'current-fieldops-api-policy',
+      'currentFieldopsApiPolicy',
     ]),
     backend_readback: proofGate(args, [
       'backend-api-context',
@@ -138,7 +136,7 @@ function buildHostAndroidProofGates(args = {}) {
 
 function allProofGatesSatisfied(gates = {}) {
   return Boolean(
-    gates.mobile_v2_policy_enabled &&
+    gates.current_fieldops_api_policy_proven &&
       gates.backend_readback &&
       gates.native_mobile_v2_visible &&
       gates.device_readback,
@@ -165,12 +163,12 @@ function buildHostAndroidCommands(plan = {}) {
   const bootTimeoutArg = bootTimeoutMs ? ` --boot-timeout-ms ${bootTimeoutMs}` : '';
   const session = `${workspace}-native-mobile-v2`;
   return {
-    allocate: `npm run android:emulator:allocate -- --owner ${owner} --avd ${avd} --start${bootTimeoutArg} --json`,
-    heartbeat: `npm run android:emulator:heartbeat -- --owner ${owner} --serial ${serial} --json`,
+    allocate: `node scripts/ops/android-emulator-capacity.js allocate --owner ${owner} --avd ${avd} --start${bootTimeoutArg} --json`,
+    heartbeat: `node scripts/ops/android-emulator-capacity.js heartbeat --owner ${owner} --serial ${serial} --json`,
     acquire_emulator_lease: `npm run runtime:leases:acquire -- --resource android-emulator --owner ${owner} --serial ${serial} --phase native-mobile-v2-host --json`,
-    reverse: `npm run android:emulator:reverse -- --owner ${owner} --serial ${serial} --host-port ${hostPort} --device-port ${devicePort} --json`,
+    reverse: `node scripts/ops/android-emulator-capacity.js reverse --owner ${owner} --serial ${serial} --host-port ${hostPort} --device-port ${devicePort} --json`,
     acquire_reverse_lease: `npm run runtime:leases:acquire -- --resource adb-reverse --owner ${owner} --serial ${serial} --host-port ${hostPort} --device-port ${devicePort} --phase native-mobile-v2-host --json`,
-    acquire_native_proof_slot: `npm run runtime:leases:acquire -- --resource fieldops-mobile-v2-proof --owner ${owner} --session ${session} --serial ${serial} --metro-port ${hostPort} --device-port ${devicePort} --mobile-v2-policy-enabled true --backend-api-context true --native-mobile-v2-visible true --device-readback true --policy-evidence <policy-evidence-json> --backend-evidence <backend-readback-json> --native-evidence <native-v2-visible-artifact> --device-evidence <same-device-readback-artifact> --json`,
+    acquire_native_proof_slot: `npm run runtime:leases:acquire -- --resource fieldops-mobile-v2-proof --owner ${owner} --session ${session} --serial ${serial} --metro-port ${hostPort} --device-port ${devicePort} --current-fieldops-api-policy true --backend-api-context true --native-mobile-v2-visible true --device-readback true --policy-evidence <policy-evidence-json> --backend-evidence <backend-readback-json> --native-evidence <native-v2-visible-artifact> --device-evidence <same-device-readback-artifact> --json`,
   };
 }
 
@@ -281,7 +279,7 @@ function buildProofLeaseArgs(plan, serial, hostPort, gates) {
     String(hostPort),
     '--device-port',
     String(devicePort),
-    '--mobile-v2-policy-enabled',
+    '--current-fieldops-api-policy',
     'true',
     '--backend-api-context',
     'true',

@@ -27,8 +27,8 @@ function makeRequestId(): string {
 }
 
 const normalizeRequestIdHeaderValue = (value: string | null | undefined) => {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+  const normalized = value?.trim().replace(/[^\w-]/g, "").slice(0, 128);
+  return normalized || undefined;
 };
 
 const getRequestIdFromUrl = (request: RequestWithHeaders) => {
@@ -65,7 +65,7 @@ export function addRequestIdHeader(
   requestId: string
 ): HeadersInit {
   const nextHeaders = new Headers(headers || {});
-  nextHeaders.set("x-request-id", requestId);
+  nextHeaders.set("x-request-id", normalizeRequestIdHeaderValue(requestId) ?? makeRequestId());
   return Object.fromEntries(nextHeaders.entries());
 }
 

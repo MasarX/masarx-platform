@@ -7,7 +7,7 @@ const { git, targetBase } = require('./target-policy.cjs');
 
 function guardPlan(entry, base, read = git) {
   if (!['migrations.cjs', 'jest.cjs'].includes(entry) || !/^[a-f0-9]{40}$/.test(base)) throw new Error('Invalid base guard identity');
-  return [entry, 'target-policy.cjs'].map(name => {
+  return [entry, 'target-policy.cjs', ...(entry === 'jest.cjs' ? ['diagnostics.cjs'] : [])].map(name => {
     const file = `scripts/ci-hosted/${name}`;
     if (!/^100644 blob [a-f0-9]{40}\t/.test(read(['ls-tree', '-z', base, '--', file]))) throw new Error('Base guard missing or not plain');
     return { name, content: read(['show', `${base}:${file}`], null) };

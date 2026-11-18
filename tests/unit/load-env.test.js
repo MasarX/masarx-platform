@@ -1,12 +1,26 @@
 const fs = require('fs');
-const Module = require('module');
+const dns = require('dns');
 const os = require('os');
 const path = require('path');
 
 describe('load-env precedence and overrides', () => {
   const originalEnv = { ...process.env };
   const originalCwd = process.cwd();
+  const originalDnsOrder = dns.getDefaultResultOrder();
+  const tempRepos = new Set();
   const explicitLogCacheKey = Symbol.for('masarx.load-env.explicit-log-cache');
+  const cacheKeys = [explicitLogCacheKey, Symbol.for('masarx.load-env.dotenv-fallback-logged')];
+  const originalCacheDescriptors = cacheKeys.map((key) => [key, Object.getOwnPropertyDescriptor(global, key)]);
+  const mockMissingDotenv = () => {
+    jest.resetModules();
+    const resolveDotenv = jest.fn(() => {
+      const error = new Error("Cannot find module 'dotenv'");
+      error.code = 'MODULE_NOT_FOUND';
+      throw error;
+    });
+    jest.doMock('dotenv', resolveDotenv);
+    return resolveDotenv;
+  };
   const resetLoadEnvControls = () => {
     delete process.env.ENV_FILE;
     delete process.env.ENV_FILE_OVERRIDE;
@@ -33,6 +47,7 @@ describe('load-env precedence and overrides', () => {
 
   function makeTempRepo(supabaseUrl = 'https://temp.supabase.co') {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'load-env-'));
+    tempRepos.add(dir);
     const envDir = path.join(dir, 'config', 'env');
     fs.mkdirSync(envDir, { recursive: true });
     fs.writeFileSync(path.join(envDir, '.env.cloud'), `SUPABASE_URL=${supabaseUrl}\n`, 'utf8');
@@ -42,14 +57,34 @@ describe('load-env precedence and overrides', () => {
   beforeEach(() => {
     restoreBaseEnv();
     process.chdir(originalCwd);
-    delete global[explicitLogCacheKey];
+    for (const key of cacheKeys) delete global[key];
+    jest.resetModules();
+    jest.dontMock('dotenv');
   });
 
   afterEach(() => {
-    restoreBaseEnv();
-    process.chdir(originalCwd);
-    delete global[explicitLogCacheKey];
-    jest.restoreAllMocks();
+    try {
+      process.env = { ...originalEnv };
+      process.chdir(originalCwd);
+      for (const [key, descriptor] of originalCacheDescriptors) {
+        if (descriptor) Object.defineProperty(global, key, descriptor);
+        else delete global[key];
+      }
+      dns.setDefaultResultOrder(originalDnsOrder);
+      jest.restoreAllMocks();
+      jest.dontMock('dotenv');
+      jest.resetModules();
+    } finally {
+      for (const dir of tempRepos) {
+        const resolved = path.resolve(dir);
+        if (
+          path.dirname(resolved) !== path.resolve(os.tmpdir())
+          || !path.basename(resolved).startsWith('load-env-')
+        ) throw new Error('load-env test cleanup escaped its exact mkdtemp root');
+        fs.rmSync(resolved, { recursive: true, force: true });
+      }
+      tempRepos.clear();
+    }
   });
 
   test('default resolution loads .env.cloud without overriding existing values', () => {
@@ -90,6 +125,29 @@ describe('load-env precedence and overrides', () => {
     load();
 
     expect(process.env.SUPABASE_URL).toBe('https://override.supabase.co');
+  });
+
+  test('authoritative local env replaces an inherited empty DB URL while leaving direct hints to policy', () => {
+    const repo = makeTempRepo();
+    const envFile = path.join(repo, 'config', 'env', '.env.local');
+    fs.writeFileSync(
+      envFile,
+      ('DATABASE_URL=' + ['postgresql',":","/","/",'postgres',":",'postgres',"@",'127.0.0.1',":",'23197',"/",'postgres\n'].join("")),
+      'utf8',
+    );
+    process.chdir(repo);
+    process.env.DATABASE_URL = '';
+    process.env.DATABASE_URL_DIRECT = (['postgresql',":","/","/",'postgres',":",'fake-db-password',"@",'db.abcdefghijklmnopqrst.supabase.co',":",'5432',"/",'postgres'].join(""));
+    process.env.ENV_FILE = envFile;
+    process.env.ENV_FILE_OVERRIDE = '1';
+    process.env.ENV_FILE_APPEND = '0';
+
+    load();
+
+    expect(process.env.DATABASE_URL).toBe(
+      (['postgresql',":","/","/",'postgres',":",'postgres',"@",'127.0.0.1',":",'23197',"/",'postgres'].join("")),
+    );
+    expect(process.env.DATABASE_URL_DIRECT).toContain('db.abcdefghijklmnopqrst.supabase.co');
   });
 
   test('default resolution loads .env.cloud when variable is unset', () => {
@@ -155,6 +213,28 @@ describe('load-env precedence and overrides', () => {
     logSpy.mockRestore();
   });
 
+  test('skips dotenv resolution with no env files and preserves injected values', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'load-env-empty-'));
+    tempRepos.add(repo);
+    process.chdir(repo);
+    process.env.SUPABASE_URL = 'https://injected.supabase.co';
+    process.env.LOAD_ENV_INJECTED_EMPTY = '';
+    const injectedEnv = { ...process.env };
+    const resolveDotenv = mockMissingDotenv();
+
+    jest.isolateModules(() => {
+      const { loadEnv } = require('../../scripts/utils/load-env');
+      expect(() => {
+        loadEnv();
+        loadEnv();
+      }).not.toThrow();
+    });
+
+    expect(resolveDotenv).not.toHaveBeenCalled();
+    expect(process.env).toEqual(injectedEnv);
+    expect(fs.readdirSync(repo)).toEqual([]);
+  });
+
   test('falls back to the Node stdlib parser when dotenv is unavailable', () => {
     const repo = makeTempRepo('https://stdlib-fallback.supabase.co');
     process.chdir(repo);
@@ -162,22 +242,13 @@ describe('load-env precedence and overrides', () => {
     delete process.env.ENV_FILE;
     delete process.env.SUPABASE_URL;
 
-    const originalLoad = Module._load;
-    Module._load = function patchedLoad(request, parent, isMain) {
-      if (request === 'dotenv') {
-        const error = new Error("Cannot find module 'dotenv'");
-        error.code = 'MODULE_NOT_FOUND';
-        throw error;
-      }
-      return originalLoad.call(this, request, parent, isMain);
-    };
+    const resolveDotenv = mockMissingDotenv();
+    jest.isolateModules(() => {
+      const { loadEnv } = require('../../scripts/utils/load-env');
+      loadEnv();
+    });
 
-    try {
-      load();
-    } finally {
-      Module._load = originalLoad;
-    }
-
+    expect(resolveDotenv).toHaveBeenCalledTimes(1);
     expect(process.env.SUPABASE_URL).toBe('https://stdlib-fallback.supabase.co');
   });
 });

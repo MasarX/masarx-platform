@@ -8,9 +8,11 @@ jest.mock("@masarx/api/server", () => ({
 }));
 
 jest.mock("../../packages/ui/src/i18n", () => ({
+  ...jest.requireActual("../../packages/ui/src/i18n"),
   createUiTranslator:
     (namespace?: string) =>
-    (key: string) => {
+    (key: string, values?: Record<string, string>) => {
+      if (namespace === "ui.tracking" && key === "queryReadback") return `Current search: ${values?.trackingNumber}.`;
       if (namespace === "ui.tracking" && key === "title") return "Tracking";
       if (namespace === "ui.tracking" && key === "description")
         return "Lookup shipment tracking.";
@@ -34,6 +36,11 @@ jest.mock("../../packages/ui/src/tracking-search-form", () => ({
 
 const mockedCreateUiServerClient = createUiServerClient as unknown as jest.Mock;
 
+jest.mock("../../packages/ui/src/shipment-resource-page", () => ({
+  ShipmentResourcePage: ({ operatorHandoff }: { operatorHandoff: { path: string } | null }) =>
+    <div data-testid="shipment-results" data-handoff={operatorHandoff?.path ?? ""} />,
+}));
+
 describe("TrackingPage action URL hardening", () => {
   beforeEach(() => {
     jest.resetAllMocks();
@@ -41,13 +48,45 @@ describe("TrackingPage action URL hardening", () => {
 
   function seedTrackingConfig() {
     mockedCreateUiServerClient.mockReturnValue({
-      trackingRegistry: jest.fn().mockResolvedValue({
+      publicTrackingConfig: jest.fn().mockResolvedValue({
         resource_key: "shipments",
         filter_key: "tracking_number",
         param_key: "tracking_number",
       }),
     });
   }
+
+  it.each(["authenticated", "anonymous", "failed-scope", "other-resource"])("uses only an authenticated scoped handoff: %s", async (kind) => {
+    const trackingRegistry = kind === "failed-scope" ? jest.fn().mockRejectedValue(new Error("denied")) : jest.fn().mockResolvedValue({
+      resource_key: kind === "other-resource" ? "other" : "shipments",
+      operator_handoff: { route_targets: { console: { path: "/operate/shipments" } } },
+    });
+    mockedCreateUiServerClient.mockReturnValue({
+      publicTrackingConfig: jest.fn().mockResolvedValue({ resource_key: "shipments", filter_key: "tracking_number", param_key: "tracking_number" }),
+      me: jest.fn().mockResolvedValue(kind === "anonymous" ? null : { user: { id: "user-1" } }),
+      trackingRegistry,
+    });
+    renderWithIntl(await TrackingPage({ appKey: "portal", appBasePath: "/portal", searchParams: { tracking_number: "MX-1" } }));
+    expect(screen.getByTestId("shipment-results")).toHaveAttribute("data-handoff", kind === "authenticated" ? "/operate/shipments" : "");
+    if (kind === "anonymous") expect(trackingRegistry).not.toHaveBeenCalled();
+  });
+
+  it("shows only the normalized current query, not a previous or fabricated result", async () => {
+    seedTrackingConfig();
+    const node = await TrackingPage({
+      searchParams: { tracking_number: ["  <query-1>  ", "ignored"] },
+      appKey: "portal", appBasePath: "/portal", testIdPrefix: "tracking",
+    });
+    const view = renderWithIntl(node as React.ReactElement);
+    expect(screen.getByRole("status")).toHaveTextContent("Current search: <query-1>.");
+    expect(screen.getByTestId("tracking-query-readback").querySelector("query-1")).toBeNull();
+    view.unmount();
+    const empty = await TrackingPage({
+      searchParams: {}, appKey: "portal", appBasePath: "/portal", testIdPrefix: "tracking",
+    });
+    renderWithIntl(empty as React.ReactElement);
+    expect(screen.queryByTestId("tracking-query-readback")).toBeNull();
+  });
 
   it("builds a trusted tracking action href from trusted appBasePath", async () => {
     seedTrackingConfig();

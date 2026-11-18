@@ -58,27 +58,13 @@ function normalizeStatus(status: unknown): string {
 
 export function mapRouteStatusTone(status: unknown): RouteStatusTone {
   const normalized = normalizeStatus(status);
-  if (
-    normalized.includes("done") ||
-    normalized.includes("delivered") ||
-    normalized.includes("completed")
-  ) {
+  if (["done", "delivered", "completed"].includes(normalized)) {
     return "done";
   }
-  if (
-    normalized.includes("failed") ||
-    normalized.includes("exception") ||
-    normalized.includes("issue") ||
-    normalized.includes("cancel")
-  ) {
+  if (["failed", "failed_attempt", "exception", "issue", "cancelled", "canceled"].includes(normalized)) {
     return "issue";
   }
-  if (
-    normalized.includes("active") ||
-    normalized.includes("enroute") ||
-    normalized.includes("in_progress") ||
-    normalized.includes("open")
-  ) {
+  if (["active", "enroute", "in_progress", "open"].includes(normalized)) {
     return "active";
   }
   return "neutral";
@@ -124,15 +110,12 @@ export function buildRouteMapModel(
   const rawLngSpan = maxLng - minLng;
   const latSpan = Math.max(rawLatSpan, MIN_COORDINATE_SPAN);
   const lngSpan = Math.max(rawLngSpan, MIN_COORDINATE_SPAN);
-  const latOffset = rawLatSpan < MIN_COORDINATE_SPAN ? (MIN_COORDINATE_SPAN - rawLatSpan) / 2 : 0;
-  const lngOffset = rawLngSpan < MIN_COORDINATE_SPAN ? (MIN_COORDINATE_SPAN - rawLngSpan) / 2 : 0;
-  minLat -= latOffset;
-  maxLat += latOffset;
-  minLng -= lngOffset;
+  const collapseLatAxis = rawLatSpan < MIN_COORDINATE_SPAN;
+  const collapseLngAxis = rawLngSpan < MIN_COORDINATE_SPAN;
 
   const normalized = mappable.map((point) => {
-    const xNormalized = (point.longitude - minLng) / lngSpan;
-    const yNormalized = (maxLat - point.latitude) / latSpan;
+    const xNormalized = collapseLngAxis ? 0.5 : (point.longitude - minLng) / lngSpan;
+    const yNormalized = collapseLatAxis ? 0.5 : (maxLat - point.latitude) / latSpan;
     const xPct = MAP_PADDING_X_PCT + xNormalized * (100 - MAP_PADDING_X_PCT * 2);
     const yPct = MAP_PADDING_Y_PCT + yNormalized * (100 - MAP_PADDING_Y_PCT * 2);
     return {

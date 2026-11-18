@@ -4,7 +4,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 describe("landing build", () => {
-  test("renders static i18n for /ar/ with root-absolute assets", () => {
+  test.each(["https://example.com/tenant-signup-intake", ""])("renders static i18n and keeps the explicit tenant endpoint (%s)", (tenantEndpoint) => {
     const repoRoot = path.resolve(__dirname, "..", "..");
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-"));
 
@@ -13,12 +13,10 @@ describe("landing build", () => {
       LANDING_SITE_URL: "https://example.com",
       LANDING_DOCS_URL: "https://example.com/docs",
       LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "https://example.com/functions/v1/tenant-signup-intake",
-      LANDING_DRIVER_SIGNUP_ENDPOINT: "https://drivers.example.com/signup",
-      LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT: "",
-      LANDING_DRIVER_STATUS_ENDPOINT: "https://drivers.example.com/status",
-      LANDING_CLIENTS_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake/clients",
+      LANDING_CONTACT_ENDPOINT: "https://example.com/contact",
+      LANDING_TENANT_SIGNUP_ENDPOINT: tenantEndpoint,
+      LANDING_CLIENTS_ENDPOINT: "https://example.com/clients",
+      LANDING_DRIVER_APPLICATION_DOCUMENTS_ENDPOINT: "https://documents.example.test/return",
       LANDING_TURNSTILE_SITE_KEY: "0x4AAAAAAA",
     };
 
@@ -45,14 +43,42 @@ describe("landing build", () => {
       .find((name) => /^runtime\.[a-f0-9]{8}\.js$/.test(name));
     const runtimeJs = runtimeFile ? fs.readFileSync(path.join(outDir, runtimeFile), "utf8") : "";
 
+    expect(enHtml).toContain('data-tenant-signup-submit');
+    expect(arHtml).toContain('data-tenant-signup-submit');
+    expect(enHtml).toContain('name="request_context"');
+    expect(arHtml).toContain('طلب تسجيل منظمة');
+    expect(runtimeJs).toContain('https://example.com/contact');
     expect(enHtml).toContain('<html lang="en" dir="ltr"');
     expect(arHtml).toContain('<html lang="ar" dir="rtl"');
     expect(enHtml).toContain('data-i18n="nav_product">Product');
     expect(arHtml).not.toContain('data-i18n="nav_product">Product');
     expect(arHtml).toContain('data-i18n="cta_contact_sales">');
     expect(arHtml).not.toContain('data-i18n="cta_contact_sales">Contact sales');
-    expect(arHtml).toContain("لحل الأسئلة بسرعة");
-    expect(arHtml).not.toContain("تتبّع أي مشكلة");
+    expect(enHtml).toContain('Every automated decision is logged with full context, giving operations teams a traceable audit trail.');
+    expect(arHtml).toContain('يُسجَّل كل قرار تلقائي بسياقه الكامل، ما يمنح فرق العمليات سجل تدقيق قابلًا للتتبّع.');
+    expect(enHtml).toContain('data-i18n="hero_h1">Connect delivery systems with configurable webhooks');
+    expect(arHtml).toContain('data-i18n="hero_h1">اربط أنظمة التوصيل عبر Webhook قابل للإعداد');
+    expect(enHtml).toContain('data-i18n="badge_minutes">Configurable webhook setup');
+    expect(arHtml).toContain('data-i18n="badge_minutes">إعداد Webhook قابل للتخصيص');
+    expect(enHtml).toContain('data-i18n="who_ops_1_title">Onboard clients with reusable mapping rules');
+    expect(arHtml).toContain('data-i18n="who_ops_1_title">فعّل العملاء باستخدام قواعد ربط قابلة لإعادة الاستخدام');
+    expect(enHtml).toContain('Integration time depends on your setup.');
+    expect(arHtml).toContain('يعتمد وقت التكامل على إعداداتك.');
+    expect(enHtml).not.toMatch(/(?:go live|onboard new clients|clients go live)[^<]{0,50}minutes/i);
+    expect(arHtml).not.toMatch(/(?:التشغيل|عملاء)[^<]{0,50}دقائق/);
+    expect(enHtml).not.toContain('quote-card');
+    expect(arHtml).not.toContain('quote-card');
+    expect(enHtml).not.toContain('60k+ monthly deliveries');
+    expect(enHtml).toContain('Delivery fields matched — format detected');
+    expect(arHtml).toContain('تمت مطابقة حقول التوصيل — تم كشف الصيغة');
+    expect(enHtml).not.toMatch(/mapping_config|priority_express|mapping config/);
+    expect(arHtml).not.toMatch(/mapping_config|priority_express/);
+    expect(enHtml).toContain('data-driver-review-note aria-live="polite" hidden');
+    for (const lang of ['', 'ar']) {
+      const trackHtml = fs.readFileSync(path.join(outDir, lang, 'track', 'index.html'), 'utf8');
+      expect(trackHtml).toMatch(/href="#lookup" data-track-requests-link data-i18n="track_nav_lookup"/);
+      expect(trackHtml).not.toContain('href="#actions" data-i18n="track_nav_actions"');
+    }
 
     expect(enHtml).toMatch(/href="\/app\.[a-f0-9]{8}\.css"/);
     expect(arHtml).toMatch(/href="\/app\.[a-f0-9]{8}\.css"/);
@@ -61,6 +87,7 @@ describe("landing build", () => {
     expect(enHtml).toContain('src="/brand/masarx-mark-a.svg"');
     expect(arHtml).toContain('src="/brand/masarx-mark-a.svg"');
     expect(enHtml).not.toContain('data-clients-row');
+    expect(arHtml).not.toContain('data-clients-row');
     expect(arHtml).not.toContain('href="./app.');
     expect(arHtml).not.toContain('src="./app.');
     expect(arHtml).not.toContain('src="./runtime.');
@@ -68,12 +95,14 @@ describe("landing build", () => {
 
     expect(headers).toContain("connect-src");
     expect(headers).toContain("https://example.com");
-    expect(headers).toContain("https://drivers.example.com");
     expect(headers).toContain("https://challenges.cloudflare.com");
-    expect(runtimeJs).toContain('"clientsEndpoint":"https://example.com/functions/v1/marketing-lead-intake/clients"');
-    expect(runtimeJs).toContain('"tenantSignupEndpoint":"https://example.com/functions/v1/tenant-signup-intake"');
-    expect(runtimeJs).toContain('"driverSignupEndpoint":"https://drivers.example.com/signup"');
-    expect(runtimeJs).toContain('"driverApplicationStatusEndpoint":"https://drivers.example.com/status"');
+    expect(runtimeJs).toContain('"clientsEndpoint":"https://example.com/clients"');
+    expect(runtimeJs).toContain(`"tenantSignupEndpoint":${JSON.stringify(tenantEndpoint)}`);
+    expect(runtimeJs).toContain('"contactEndpoint":"https://example.com/contact"');
+    expect(headers).toContain("https://documents.example.test");
+    expect(runtimeJs).toContain('"driverApplicationDocumentsEndpoint":"https://documents.example.test/return"');
+    expect(enHtml).toContain('method="post" data-driver-documents-form hidden');
+    expect(arHtml).toContain('data-i18n="driver_documents_abandon" hidden>إلغاء');
     expect(headers).toContain("/*.js");
   });
 
@@ -86,9 +115,8 @@ describe("landing build", () => {
       LANDING_SITE_URL: "https://example.com/landing",
       LANDING_DOCS_URL: "https://example.com/docs",
       LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "https://example.com/functions/v1/tenant-signup-intake",
-      LANDING_CLIENTS_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake/clients",
+      LANDING_CONTACT_ENDPOINT: "https://example.com/contact",
+      LANDING_CLIENTS_ENDPOINT: "https://example.com/clients",
       LANDING_TURNSTILE_SITE_KEY: "0x4AAAAAAA",
     };
 
@@ -107,16 +135,18 @@ describe("landing build", () => {
       throw new Error(`build-landing.js failed (code=${res.status})${stderr}`);
     }
 
+    const enHtml = fs.readFileSync(path.join(outDir, "index.html"), "utf8");
     const arHtml = fs.readFileSync(path.join(outDir, "ar", "index.html"), "utf8");
     expect(arHtml).toMatch(/href="\/landing\/app\.[a-f0-9]{8}\.css"/);
     expect(arHtml).toMatch(/src="\/landing\/runtime\.[a-f0-9]{8}\.js"/);
     expect(arHtml).toContain('src="/landing/brand/masarx-mark-a.svg"');
-    expect(arHtml).toContain("data-clients-row");
+    expect(enHtml).not.toContain("data-clients-row");
+    expect(arHtml).not.toContain("data-clients-row");
   });
 
-  test("rejects missing contact endpoint for landing builds", () => {
+  test("leaves runtime contactEndpoint empty when env is unset", () => {
     const repoRoot = path.resolve(__dirname, "..", "..");
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-missing-contact-"));
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-default-demo-"));
 
     const env = {
       ...process.env,
@@ -124,73 +154,6 @@ describe("landing build", () => {
       LANDING_DOCS_URL: "https://example.com/docs",
       LANDING_APP_URL: "https://example.com/app",
       LANDING_CONTACT_ENDPOINT: "",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "",
-      LANDING_DRIVER_SIGNUP_ENDPOINT: "",
-      LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT: "",
-      LANDING_DRIVER_STATUS_ENDPOINT: "",
-      LANDING_TRACKING_ENDPOINT: "",
-      LANDING_CLIENTS_ENDPOINT: "",
-      LANDING_TURNSTILE_SITE_KEY: "",
-    };
-
-    const res = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "frontend", "build-landing.js"), "--out", outDir],
-      {
-        cwd: repoRoot,
-        env,
-        encoding: "utf8",
-      }
-    );
-
-    expect(res.status).not.toBe(0);
-    expect(res.stderr).toContain("LANDING_CONTACT_ENDPOINT is required for landing builds");
-  });
-
-  test("rejects missing tenant signup endpoint for landing builds", () => {
-    const repoRoot = path.resolve(__dirname, "..", "..");
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-missing-tenant-signup-"));
-
-    const env = {
-      ...process.env,
-      LANDING_SITE_URL: "https://example.com",
-      LANDING_DOCS_URL: "https://example.com/docs",
-      LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "",
-      LANDING_DRIVER_SIGNUP_ENDPOINT: "",
-      LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT: "",
-      LANDING_DRIVER_STATUS_ENDPOINT: "",
-      LANDING_TRACKING_ENDPOINT: "",
-      LANDING_CLIENTS_ENDPOINT: "",
-      LANDING_TURNSTILE_SITE_KEY: "",
-    };
-
-    const res = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "frontend", "build-landing.js"), "--out", outDir],
-      {
-        cwd: repoRoot,
-        env,
-        encoding: "utf8",
-      }
-    );
-
-    expect(res.status).not.toBe(0);
-    expect(res.stderr).toContain("LANDING_TENANT_SIGNUP_ENDPOINT is required for landing builds");
-  });
-
-  test("derives clientsEndpoint only from marketing lead intake when explicit env is unset", () => {
-    const repoRoot = path.resolve(__dirname, "..", "..");
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-clients-feed-"));
-
-    const env = {
-      ...process.env,
-      LANDING_SITE_URL: "https://example.com",
-      LANDING_DOCS_URL: "https://example.com/docs",
-      LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "https://example.com/functions/v1/tenant-signup-intake",
       LANDING_CLIENTS_ENDPOINT: "",
       LANDING_TURNSTILE_SITE_KEY: "",
     };
@@ -215,182 +178,7 @@ describe("landing build", () => {
       .find((name) => /^runtime\.[a-f0-9]{8}\.js$/.test(name));
     const runtimeJs = runtimeFile ? fs.readFileSync(path.join(outDir, runtimeFile), "utf8") : "";
 
-    expect(runtimeJs).toContain(
-      '"clientsEndpoint":"https://example.com/functions/v1/marketing-lead-intake/clients"'
-    );
-    expect(runtimeJs).not.toContain("tenant-signup-intake/clients");
-  });
-
-  test("supports canonical relative landing intake endpoints", () => {
-    const repoRoot = path.resolve(__dirname, "..", "..");
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-relative-endpoints-"));
-
-    const env = {
-      ...process.env,
-      LANDING_SITE_URL: "https://example.com",
-      LANDING_DOCS_URL: "https://example.com/docs",
-      LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "/functions/v1/marketing-lead-intake",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "/functions/v1/tenant-signup-intake",
-      LANDING_CLIENTS_ENDPOINT: "",
-      LANDING_TURNSTILE_SITE_KEY: "",
-    };
-
-    const res = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "frontend", "build-landing.js"), "--out", outDir],
-      {
-        cwd: repoRoot,
-        env,
-        encoding: "utf8",
-      }
-    );
-
-    if (res.status !== 0) {
-      const stderr = res.stderr ? `\n${res.stderr}` : "";
-      throw new Error(`build-landing.js failed (code=${res.status})${stderr}`);
-    }
-
-    const runtimeFile = fs
-      .readdirSync(outDir)
-      .find((name) => /^runtime\.[a-f0-9]{8}\.js$/.test(name));
-    const runtimeJs = runtimeFile ? fs.readFileSync(path.join(outDir, runtimeFile), "utf8") : "";
-
-    expect(runtimeJs).toContain('"contactEndpoint":"/functions/v1/marketing-lead-intake"');
-    expect(runtimeJs).toContain('"tenantSignupEndpoint":"/functions/v1/tenant-signup-intake"');
-    expect(runtimeJs).toContain('"clientsEndpoint":"/functions/v1/marketing-lead-intake/clients"');
-  });
-
-  test("supports existing local preview mock endpoints for local landing builds", () => {
-    const repoRoot = path.resolve(__dirname, "..", "..");
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-local-preview-endpoints-"));
-
-    const env = {
-      ...process.env,
-      LANDING_SITE_URL: "http://127.0.0.1:3333",
-      LANDING_DOCS_URL: "https://example.com/docs",
-      LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "/__landing-contact",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "/__tenant-signup",
-      LANDING_CLIENTS_ENDPOINT: "",
-      LANDING_TURNSTILE_SITE_KEY: "",
-    };
-
-    const res = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "frontend", "build-landing.js"), "--out", outDir],
-      {
-        cwd: repoRoot,
-        env,
-        encoding: "utf8",
-      }
-    );
-
-    if (res.status !== 0) {
-      const stderr = res.stderr ? `\n${res.stderr}` : "";
-      throw new Error(`build-landing.js failed (code=${res.status})${stderr}`);
-    }
-
-    const runtimeFile = fs
-      .readdirSync(outDir)
-      .find((name) => /^runtime\.[a-f0-9]{8}\.js$/.test(name));
-    const runtimeJs = runtimeFile ? fs.readFileSync(path.join(outDir, runtimeFile), "utf8") : "";
-
-    expect(runtimeJs).toContain('"contactEndpoint":"/__landing-contact"');
-    expect(runtimeJs).toContain('"tenantSignupEndpoint":"/__tenant-signup"');
+    expect(runtimeJs).toContain('"contactEndpoint":""');
     expect(runtimeJs).toContain('"clientsEndpoint":""');
-  });
-
-  test("rejects contact endpoint values outside the marketing lead intake facade", () => {
-    const repoRoot = path.resolve(__dirname, "..", "..");
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-invalid-contact-endpoint-"));
-
-    const env = {
-      ...process.env,
-      LANDING_SITE_URL: "https://example.com",
-      LANDING_DOCS_URL: "https://example.com/docs",
-      LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "https://example.com/functions/v1/tenant-signup-intake",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "https://example.com/functions/v1/tenant-signup-intake",
-      LANDING_CLIENTS_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake/clients",
-      LANDING_TURNSTILE_SITE_KEY: "",
-    };
-
-    const res = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "frontend", "build-landing.js"), "--out", outDir],
-      {
-        cwd: repoRoot,
-        env,
-        encoding: "utf8",
-      }
-    );
-
-    expect(res.status).not.toBe(0);
-    expect(res.stderr).toContain(
-      "LANDING_CONTACT_ENDPOINT must point to the marketing-lead-intake intake endpoint"
-    );
-  });
-
-  test("rejects tenant signup endpoint values outside tenant-signup-intake", () => {
-    const repoRoot = path.resolve(__dirname, "..", "..");
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-invalid-tenant-endpoint-"));
-
-    const env = {
-      ...process.env,
-      LANDING_SITE_URL: "https://example.com",
-      LANDING_DOCS_URL: "https://example.com/docs",
-      LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake",
-      LANDING_CLIENTS_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake/clients",
-      LANDING_TURNSTILE_SITE_KEY: "",
-    };
-
-    const res = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "frontend", "build-landing.js"), "--out", outDir],
-      {
-        cwd: repoRoot,
-        env,
-        encoding: "utf8",
-      }
-    );
-
-    expect(res.status).not.toBe(0);
-    expect(res.stderr).toContain(
-      "LANDING_TENANT_SIGNUP_ENDPOINT must point to the tenant-signup-intake intake endpoint"
-    );
-  });
-
-  test("rejects clientsEndpoint values outside the marketing lead clients feed", () => {
-    const repoRoot = path.resolve(__dirname, "..", "..");
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-build-invalid-clients-feed-"));
-
-    const env = {
-      ...process.env,
-      LANDING_SITE_URL: "https://example.com",
-      LANDING_DOCS_URL: "https://example.com/docs",
-      LANDING_APP_URL: "https://example.com/app",
-      LANDING_CONTACT_ENDPOINT: "https://example.com/functions/v1/marketing-lead-intake",
-      LANDING_TENANT_SIGNUP_ENDPOINT: "https://example.com/functions/v1/tenant-signup-intake",
-      LANDING_CLIENTS_ENDPOINT: "https://example.com/functions/v1/tenant-signup-intake/clients",
-      LANDING_TURNSTILE_SITE_KEY: "",
-    };
-
-    const res = spawnSync(
-      process.execPath,
-      [path.join(repoRoot, "scripts", "frontend", "build-landing.js"), "--out", outDir],
-      {
-        cwd: repoRoot,
-        env,
-        encoding: "utf8",
-      }
-    );
-
-    expect(res.status).not.toBe(0);
-    expect(res.stderr).toContain(
-      "LANDING_CLIENTS_ENDPOINT must point to the marketing-lead-intake clients feed"
-    );
   });
 });

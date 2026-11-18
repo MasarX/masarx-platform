@@ -73,6 +73,7 @@ export function CanvasLayersPanel({
                 className="h-4 w-4 shrink-0 text-[10px]"
                 disabled={readOnly}
                 onClick={(e) => toggleVisibility(index, e)}
+                disabled={readOnly}
                 title={isHidden ? t("hidden") : t("visible")}
                 data-testid={`layer-${index}-visibility`}
               >
@@ -87,6 +88,7 @@ export function CanvasLayersPanel({
                 className="h-4 w-4 shrink-0 text-[10px]"
                 disabled={readOnly}
                 onClick={(e) => toggleLock(index, e)}
+                disabled={readOnly}
                 title={isLocked ? t("locked") : t("unlocked")}
                 data-testid={`layer-${index}-lock`}
               >

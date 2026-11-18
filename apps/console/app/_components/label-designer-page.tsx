@@ -7,7 +7,7 @@ import {
 type LabelDesignerPageProps = Parameters<typeof UiLabelDesignerPage>[0];
 const LabelDesignerPageInner = UiLabelDesignerPage as unknown as (
   props: LabelDesignerPageProps
-) => JSX.Element;
+) => React.JSX.Element;
 
 export function LabelDesignerPage(props: LabelDesignerPageProps) {
   return (

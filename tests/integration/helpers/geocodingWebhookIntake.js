@@ -14,6 +14,8 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// Only mapping IDs created by this helper invocation may be cleaned up.
+const ownedSourceMappings = new Map();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function normalizeNamespace(value) {
@@ -383,6 +385,14 @@ async function fetchSource(client, sourceIdentifier = BASE_SOURCE_IDENTIFIER, op
 
   const { rows: sourceIns } = await client.query(
     `
+      WITH owned_mapping AS (
+        INSERT INTO public.mapping_configs
+          (organization_id,mapping_type,mapping_key,mapping_config,mapping_version,notes)
+        SELECT $1::uuid,mapping_type,'geocoding-owned-' || $3::text,mapping_config,mapping_version,
+          'Owned isolated geocoding source mapping'
+        FROM public.mapping_configs WHERE id=$7::uuid
+        RETURNING id
+      )
       INSERT INTO webhook_sources (
         id,
         organization_id,
@@ -394,18 +404,9 @@ async function fetchSource(client, sourceIdentifier = BASE_SOURCE_IDENTIFIER, op
         mapping_config_id,
         enabled
       )
-      VALUES (
-        gen_random_uuid(),
-        $1::uuid,
-        $2::uuid,
-        $3::text,
-        $4::text,
-        $5::text,
-        $6::text,
-        $7::uuid,
-        true
-      )
-      RETURNING id
+      SELECT gen_random_uuid(),$1::uuid,$2::uuid,$3::text,$4::text,$5::text,$6::text,
+        owned_mapping.id,true FROM owned_mapping
+      RETURNING id,mapping_config_id
     `,
     [
       base.organization_id,
@@ -418,7 +419,17 @@ async function fetchSource(client, sourceIdentifier = BASE_SOURCE_IDENTIFIER, op
     ],
   );
 
+  if (sourceIns.length !== 1) throw new Error('Isolated geocoding source requires its base mapping');
+  ownedSourceMappings.set(sourceIdentifier, {
+    id: sourceIns[0].mapping_config_id, organizationId: base.organization_id,
+    key: `geocoding-owned-${sourceIdentifier}`,
+    source: { id: sourceIns[0].id, sender_id: senderId, client_id: clientId },
+    removed: false,
+  });
   const basePolicy = await fetchWebhookPolicy(client, base.id);
+  basePolicy.workflow = { ...basePolicy.workflow, context_patch: {
+    ...basePolicy.workflow?.context_patch, mapping_config_id: sourceIns[0].mapping_config_id,
+  } };
   await ensureWebhookSourcePolicy(client, sourceIns[0].id, basePolicy);
   await ensureHereGeocodingAuthContract(client, base.organization_id);
 
@@ -469,7 +480,8 @@ async function overrideWebhookMapping(client, sourceId, mappingConfigId) {
   );
 }
 
-async function seedMappingConfig(client, mappingKey, addressPaths) {
+async function seedMappingConfig(client, organizationId, mappingKey, addressPaths) {
+  if (!organizationId) throw new Error('Geocoding mapping requires its source organization');
   const mappingId = randomUUID();
   const mappingConfig = {
     description: 'Integration test mapping override for geocoding webhook',
@@ -491,10 +503,10 @@ async function seedMappingConfig(client, mappingKey, addressPaths) {
 
   await client.query(
     `
-      INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
-      VALUES ($1, 'webhook_inbound', $2, $3::jsonb, 1, 'integration geocoding webhook mapping override')
+      INSERT INTO mapping_configs (id, organization_id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
+      VALUES ($1, $4::uuid, 'webhook_inbound', $2, $3::jsonb, 1, 'integration geocoding webhook mapping override')
     `,
-    [mappingId, mappingKey, mappingConfig],
+    [mappingId, mappingKey, mappingConfig, organizationId],
   );
 
   return mappingId;
@@ -694,9 +706,12 @@ async function resetWebhookRunsForSource(client, sourceIdentifier = BASE_SOURCE_
 async function cleanupGeocodingTestFixture(client, sourceIdentifier, options = {}) {    
   if (!sourceIdentifier || sourceIdentifier === BASE_SOURCE_IDENTIFIER) return;
 
-  const src = await lookupWebhookSource(client, sourceIdentifier, options);
+  const existingSource = await lookupWebhookSource(client, sourceIdentifier, options);
+  const ownedMapping = ownedSourceMappings.get(sourceIdentifier);
+  const src = existingSource || ownedMapping?.source;
   if (!src?.id) return;
 
+  if (existingSource?.id) {
   await resetWebhookRunsForSource(client, sourceIdentifier, options);
 
   await client.query(
@@ -720,6 +735,17 @@ async function cleanupGeocodingTestFixture(client, sourceIdentifier, options = {
   );
 
   await client.query(`DELETE FROM webhook_sources WHERE id = $1::uuid`, [src.id]);
+  }
+  if (ownedMapping && !ownedMapping.removed) {
+    const removed = await client.query(`DELETE FROM public.mapping_configs m
+      WHERE m.id=$1::uuid AND m.organization_id=$2::uuid AND m.mapping_key=$3
+        AND NOT EXISTS (SELECT 1 FROM public.webhook_sources ws WHERE ws.mapping_config_id=m.id)
+      RETURNING m.id`, [ownedMapping.id, ownedMapping.organizationId, ownedMapping.key]);
+    if (removed.rowCount !== 1) throw new Error('Owned geocoding mapping cleanup requires ownership and no remaining source');
+    ownedMapping.removed = true;
+  }
+
+  if (!src?.id) return;
 
   // Cleanup geocoding attempt ledger rows before removing the sender/client to
   // avoid FK violations (geocoding_attempts.sender_id -> senders.id).
@@ -727,8 +753,8 @@ async function cleanupGeocodingTestFixture(client, sourceIdentifier, options = {
     await client.query(
       `
         DELETE FROM geocoding_attempts
-        WHERE sender_id IS NOT DISTINCT FROM $1::uuid
-           OR client_id IS NOT DISTINCT FROM $2::uuid
+        WHERE sender_id = $1::uuid
+           OR client_id = $2::uuid
       `,
       [src.sender_id, src.client_id],
     );
@@ -740,6 +766,7 @@ async function cleanupGeocodingTestFixture(client, sourceIdentifier, options = {
   }
 
   // Keep sender/client rows to avoid cascades into address_versions.
+  ownedSourceMappings.delete(sourceIdentifier);
 }
 
 module.exports = {

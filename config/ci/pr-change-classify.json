@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "root_manifest_ci_script_name_re": "^(?:ci|lint|ops|test):[a-z0-9][a-z0-9:_-]*$",
   "profiles": [
     {
       "id": "docs",
@@ -21,6 +22,18 @@
         "^config/ci/",
         "^scripts/ops/audit/",
         "^scripts/ops/ci/",
+        "^scripts/ops/security-(?:audit-inventory|scan-gate)\\.js$",
+        "^scripts/ops/remote-workflow\\.js$",
+        "^scripts/ops/setup-branch-protection\\.js$",
+        "^scripts/ops/pr-ready\\.js$",
+        "^scripts/utils/pg-hostaddr\\.js$",
+        "^scripts/ops/objectives-lint\\.js$",
+        "^scripts/ops/planning-os/",
+        "^config/ops/runtime-container-policy\\.json$",
+        "^scripts/ops/runtime-leases/",
+        "^scripts/ops/workspace/(?:docker-runtime|local-start|phase-runtime-bootstrap)\\.js$",
+        "^scripts/ops/branch-converge(?:-(?:cleanup(?:-adapters|-cli)?|decisions-generate|ignored-paths|inventory-coordinator|provider-(?:cleanup-adapters|snapshot(?:-coordinator)?)|runtime-(?:inventory|schema)|supplemental-inventory))?\\.js$",
+        "^config/ops/branch-convergence-(?:cleanup-policy|policy)\\.json$",
         "^docs/",
         "^tests/load/",
         "^tests/unit/",

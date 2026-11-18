@@ -45,8 +45,44 @@ beforeEach(() => {
   useReadRegistry.mockReturnValue({ data: null, isLoading: false });
 });
 
+test.each([true, false])("scope gate applies to configured=%s and fallback navigation", (configured) => {
+  useReadRegistry.mockReturnValue({ data: { resources: [{
+    key: "route_stop_reassignment_events", label: "Reassignments", relation: "public.events",
+    capability_read: "routes.read", read_scope_types: ["tenant"],
+    scope_columns: { tenant: "organization_id" },
+  }] }, isLoading: false });
+  const navigation = configured ? [{ id: "routes", label: "Routes", items: [{
+    id: "events", label: "Reassignments", href: "/resources/route_stop_reassignment_events",
+    resource: "route_stop_reassignment_events", capability: "routes.read",
+  }] }] : [];
+  const { rerender } = renderWithIntl(<NavigationNext sections={navigation} appKey="console" userId="user-1" capabilities={["*"]} scopeType="platform" />);
+  expect(screen.getByText("Reassignments").closest('[aria-disabled]')).toHaveAttribute("aria-disabled", "true");
+  expect(screen.queryByRole("link", { name: "Reassignments" })).not.toBeInTheDocument();
+  rerender(<NavigationNext sections={navigation} appKey="console" userId="user-1" capabilities={["routes.read"]} scopeType="tenant" scopeId={null} organizationId="org-1" />);
+  expect(screen.getByRole("link", { name: "Reassignments" })).toBeInTheDocument();
+});
+
 afterEach(() => {
   setUiReporter(null);
+});
+
+test.each([["loading", false], ["ready", false], ["error", false], ["loading", true], ["error", true]] as const)("registry %s with stale=%s remains distinct from access denial", (state, stale) => {
+  const resource = { key: "shipments", label: "Shipments", relation: "api.shipments" };
+  useReadRegistry.mockReturnValue({
+    data: state === "ready" || stale ? { resources: [resource] } : undefined,
+    isFetching: state === "loading", isError: state === "error",
+  });
+  const navigation = [{ id: "ops", label: "Operations", items: [{
+    id: "shipments", label: "Shipments", href: "/resources/shipments", resource: "shipments",
+  }] }];
+  const { container } = renderWithIntl(<NavigationNext sections={navigation} appKey="portal" userId="user-1" scopeType="client" scopeId="client-1" />);
+  expect(container.querySelector('[data-navigation-registry-state]')).toHaveAttribute('data-navigation-registry-state', state);
+  if (state === "ready") expect(screen.getByRole("link", { name: "Shipments" })).toBeInTheDocument();
+  else {
+    expect(screen.queryByRole("link", { name: "Shipments" })).toBeNull();
+    expect(screen.getByText("Shipments").closest('[aria-disabled]')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByText("Request access from your organization admin, then refresh.")).toBeNull();
+  }
 });
 
 test("omnibox navigates on enter via command palette", async () => {
@@ -67,6 +103,39 @@ test("omnibox navigates on enter via command palette", async () => {
   await user.keyboard("{Enter}");
 
   expect(push).toHaveBeenCalledWith("/resources/shipments");
+});
+
+test.each(["missing_capability", "future_denial_code", "   "])(
+  "command palette keeps server-denied navigation disabled with readable copy (%j)",
+  async (reason) => {
+    const user = userEvent.setup();
+    renderWithIntl(<NavigationNext sections={[{ id: "ops", label: "Operations", items: [{
+      id: "denied", label: "Denied shipment", href: "/denied", disabled_reason: reason,
+    }] }]} appKey="console" userId="user-1" />);
+    const copy = reason === "missing_capability"
+      ? "You do not have access to this page."
+      : "This page is currently unavailable.";
+    expect(screen.getByTestId("navigation-item-denied")).toHaveAttribute("title", copy);
+    await user.click(screen.getByTestId("console-navigation-command-palette"));
+    const input = await screen.findByTestId("console-command-palette-search");
+    await user.type(input, "Denied shipment");
+    const result = screen.getByRole("button", { name: new RegExp(`Denied shipment.*${copy}`) });
+    expect(result).toBeDisabled();
+    await user.keyboard("{Enter}");
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.queryByText(reason, { exact: true })).toBeNull();
+  }
+);
+
+test("client capability denial uses generic copy without exposing capability names", () => {
+  renderWithIntl(<NavigationNext sections={[{ id: "ops", label: "Operations", items: [{
+    id: "denied", label: "Denied shipment", href: "/denied", capability: "shipments.read",
+  }] }]} capabilities={[]} appKey="console" userId="user-1" />);
+  const row = screen.getByTestId("navigation-item-denied");
+  expect(row).toHaveAttribute("aria-disabled", "true");
+  expect(row).toHaveAttribute("title", "You do not have access to this page.");
+  expect(row).not.toHaveTextContent("shipments.read");
+  expect(screen.queryByRole("link", { name: "Denied shipment" })).toBeNull();
 });
 
 test("navigation records recents", async () => {
@@ -240,4 +309,25 @@ test("navigation fallback strips unsafe base paths for registry resources", asyn
   expect(await screen.findByText("Registry resources")).toBeInTheDocument();
   const link = screen.getByRole("link", { name: "Shipments" });
   expect(link).toHaveAttribute("href", "/resources/shipments");
+});
+
+test("Providers navigation is available to an integrations reader without plugin write", () => {
+  // Normal navigation row from 202601071210_ui_navigation_integrations.sql.
+  // Matching registry row from 202601071200_ui_read_registry_integrations.sql:
+  // no explicit read_scope_types restriction (legacy scope contract).
+  useReadRegistry.mockReturnValue({ data: { resources: [{
+    key: "providers", relation: "public.providers",
+    capability_read: "integrations.read", scope_columns: { tenant: "organization_id" },
+  }] }, isLoading: false });
+  renderWithIntl(<NavigationNext
+    appKey="console" userId="provider-reader" basePath="/console"
+    capabilities={["integrations.read"]}
+    sections={[{ id: "integrations", label: "Integrations", items: [{
+      id: "console-providers", label: "Providers",
+      href: "/console/resources/providers", resource: "providers",
+      capability: "integrations.read",
+    }] }]}
+  />);
+  expect(screen.getByRole("link", { name: "Providers" }))
+    .toHaveAttribute("href", "/resources/providers");
 });

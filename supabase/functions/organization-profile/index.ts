@@ -1,317 +1,159 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
-import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { extractToken, readEnv } from "./_shared/mod.mjs";
+import { resolveCorsPolicy } from "./_shared/cors.mjs";
+import { MAX_LOGO_BYTES, validatedLogoContentType } from "./_shared/raster-images.mjs";
 
-type JsonRecord = Record<string, unknown>;
+type RecordValue = Record<string, unknown>;
+const URL_BASE = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
+const ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
+const SERVICE_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", ["SUPABASE_SECRET_KEY", "EDGE_SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SERVICE_ROLE_KEY"]);
+const BUCKET = "label-render-assets";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const record = (value: unknown): RecordValue | null => value && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : null;
+const first = (value: unknown) => record(Array.isArray(value) ? value[0] : value);
+const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
+const publicProfile = (result: RecordValue) => ({
+  profile: result.profile,
+  logo: result.logo ? {
+    artifact_id: record(result.logo)?.artifact_id,
+    file_name: record(result.logo)?.file_name,
+    mime_type: record(result.logo)?.mime_type,
+    size_bytes: record(result.logo)?.size_bytes,
+  } : null,
+});
 
-const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
-const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
-const SUPABASE_SERVICE_KEY = readEnv("EDGE_SUPABASE_SERVICE_ROLE_KEY", [
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "SERVICE_ROLE_KEY",
-]);
-const EDGE_SUPABASE_SECRET_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", [
-  "SUPABASE_SECRET_KEY",
-]);
-const ASSET_BUCKET =
-  (readEnv("ORGANIZATION_LOGO_BUCKET", ["LABEL_RENDER_ASSETS_BUCKET", "LABEL_ASSET_BUCKET"]) ||
-    "label-render-assets").trim() || "label-render-assets";
+async function readBody(req: Request) {
+  if (!req.body) throw new Error("invalid_json");
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let raw = "";
+  for (;;) {
+    const part = await reader.read();
+    if (part.done) break;
+    size += part.value.length;
+    if (size > 7 * 1024 * 1024) { await reader.cancel(); throw new Error("request_too_large"); }
+    raw += decoder.decode(part.value, { stream: true });
+  }
+  return record(JSON.parse(raw + decoder.decode()));
+}
 
-const corsHeaders = (req: Request): Record<string, string> => {
-  const origin = req.headers.get("origin")?.trim() || "*";
-  return {
-    "access-control-allow-origin": origin,
-    "access-control-allow-methods": "POST, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type, apikey, x-client-info",
-    "access-control-max-age": "600",
-    vary: "Origin",
-  };
-};
-
-const json = (status: number, body: JsonRecord, headers: Record<string, string>) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { ...headers, "content-type": "application/json" },
+Deno.serve(async (req: Request): Promise<Response> => {
+  const cors = resolveCorsPolicy(req, {
+    hostedAllowedOrigins: readEnv("API_GATEWAY_CORS_ALLOW_ORIGINS"),
+    allowedMethods: ["POST", "OPTIONS"],
+    allowedHeaders: ["accept", "authorization", "apikey", "content-type", "x-client-info"],
   });
-
-const asString = (value: unknown): string =>
-  typeof value === "string" ? value.trim() : "";
-
-const isJwtLike = (value: string): boolean =>
-  String(value || "").trim().split(".").length === 3;
-
-const createUserClient = (token: string) => {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new Error("missing_supabase_public_configuration");
-  }
-  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    db: { schema: "api" },
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: SUPABASE_ANON_KEY,
-        "x-client-info": "console-v2-organization-profile",
-      },
-    },
-    accessToken: async () => token,
+  const reply = (status: number, body: RecordValue) => new Response(JSON.stringify(body), {
+    status, headers: { ...cors.headers, "content-type": "application/json", "cache-control": "no-store" },
   });
-};
-
-const createServiceClient = () => {
-  const serviceKey = asString(EDGE_SUPABASE_SECRET_KEY) || asString(SUPABASE_SERVICE_KEY);
-  const anonKey = asString(SUPABASE_ANON_KEY);
-  if (!SUPABASE_URL || !serviceKey) {
-    throw new Error("missing_supabase_service_configuration");
-  }
-  const apiKeyHeader = isJwtLike(serviceKey) ? (anonKey || serviceKey) : serviceKey;
-  return createClient(SUPABASE_URL, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    db: { schema: "api" },
-    global: {
-      headers: {
-        apikey: apiKeyHeader,
-        "x-client-info": "console-v2-organization-profile",
-      },
-    },
+  const fail = (status: number, code: string, compensation?: unknown) => reply(status, {
+    ok: false, error: { code }, ...(compensation ? { compensation } : {}),
   });
-};
-
-const dataUrlToBase64 = (raw: string) => {
-  const value = raw.trim();
-  const idx = value.indexOf("base64,");
-  return idx === -1 ? value : value.slice(idx + "base64,".length).trim();
-};
-
-const decodeBase64 = (raw: string): Uint8Array => {
-  const normalized = dataUrlToBase64(raw).replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
-  const stripped = normalized.replace(/=+$/g, "");
-  const padded = stripped + "=".repeat((4 - (stripped.length % 4)) % 4);
-  const bin = atob(padded);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-};
-
-const sanitizeFileName = (raw: string) => {
-  const base = raw.split(/[\\/]/).pop() ?? "";
-  return base
-    .replace(/[^\w.\- ]+/g, "_")
-    .replace(/\s+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 120);
-};
-
-const allowedLogoContentType = (contentType: string): boolean =>
-  ["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(contentType);
-
-const canonicalLogoContentType = (contentType: string): string =>
-  contentType === "image/jpg" ? "image/jpeg" : contentType;
-
-const sniffLogoContentType = (bytes: Uint8Array): string | null => {
-  if (
-    bytes.length >= 8 &&
-    bytes[0] === 0x89 &&
-    bytes[1] === 0x50 &&
-    bytes[2] === 0x4e &&
-    bytes[3] === 0x47 &&
-    bytes[4] === 0x0d &&
-    bytes[5] === 0x0a &&
-    bytes[6] === 0x1a &&
-    bytes[7] === 0x0a
-  ) return "image/png";
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return "image/jpeg";
+  if (cors.isCorsRequest && !cors.allowed) return fail(403, "origin_not_allowed");
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors.headers });
+  if (req.method !== "POST") return fail(405, "method_not_allowed");
+  const token = extractToken(req, { prefer: "authorization", allowWebhookHeader: false, allowQueryParam: false });
+  if (!token) return fail(401, "missing_authorization");
+  let payload: RecordValue | null;
+  try { payload = await readBody(req); } catch (error) {
+    return fail(error instanceof Error && error.message === "request_too_large" ? 413 : 400, "invalid_request_body");
   }
-  if (
-    bytes.length >= 12 &&
-    bytes[0] === 0x52 &&
-    bytes[1] === 0x49 &&
-    bytes[2] === 0x46 &&
-    bytes[3] === 0x46 &&
-    bytes[8] === 0x57 &&
-    bytes[9] === 0x45 &&
-    bytes[10] === 0x42 &&
-    bytes[11] === 0x50
-  ) return "image/webp";
-  return null;
-};
-
-serve(async (req: Request): Promise<Response> => {
-  const cors = corsHeaders(req);
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
-  if (req.method !== "POST") {
-    return json(405, { ok: false, error: { code: "method_not_allowed" } }, cors);
+  if (!payload || !UUID.test(text(payload.organization_id)) || !["read", "save", "signed_url"].includes(text(payload.action))) return fail(400, "invalid_request");
+  const allowed = ["action", "organization_id", "name", "timezone", "locale", "primary_color", "secondary_color", "file_name", "content_type", "file_base64"];
+  if (Object.keys(payload).some((key) => !allowed.includes(key))) return fail(400, "invalid_profile_fields");
+  for (const key of ["primary_color", "secondary_color"]) {
+    if (Object.hasOwn(payload, key) && (typeof payload[key] !== "string" || !/^#[0-9A-Fa-f]{6}$/.test(payload[key]))) return fail(400, "invalid_branding_color");
   }
-
-  const token = extractToken(req, {
-    prefer: "authorization",
-    allowWebhookHeader: false,
-    allowQueryParam: false,
+  if (!URL_BASE || !ANON_KEY) return fail(503, "server_misconfigured");
+  const user = createClient(URL_BASE, ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }, db: { schema: "api" },
+    global: { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } }, accessToken: async () => token,
   });
-  if (!token) {
-    return json(401, { ok: false, error: { code: "missing_authorization" } }, cors);
-  }
-
-  let payload: JsonRecord;
+  const organizationId = text(payload.organization_id).toLowerCase();
+  let guardData: unknown;
+  let guardError: unknown;
   try {
-    payload = (await parseRequestBody(req)).json as JsonRecord;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid_json";
-    return json(400, { ok: false, error: { code: "invalid_json", message } }, cors);
-  }
+    const result = await user.rpc("organization_profile_read_v1", { p_organization_id: organizationId });
+    guardData = result.data;
+    guardError = result.error;
+  } catch { return fail(503, "organization_profile_authorization_unavailable"); }
+  const guard = first(guardData);
+  if (guardError || !guard || !record(guard.profile) || text(guard.organization_id) !== organizationId || !UUID.test(text(guard.actor_user_id))) return fail(403, "organization_profile_forbidden");
+  const action = text(payload.action);
+  if (action === "read") return reply(200, { ok: true, ...publicProfile(guard) });
 
-  let userClient;
-  let serviceClient;
-  try {
-    userClient = createUserClient(token);
-    serviceClient = createServiceClient();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "missing_supabase_configuration";
-    return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors);
-  }
-
-  const organizationId = asString(payload.organization_id) || null;
-  const { data: guardData, error: guardError } = await userClient.rpc(
-    "organization_profile_assert_writer_v1",
-    { p_organization_id: organizationId },
-  );
-  if (guardError) {
-    return json(403, {
-      ok: false,
-      error: { code: "organization_profile_forbidden", message: guardError.message },
-    }, cors);
-  }
-
-  const guard = guardData && typeof guardData === "object" ? guardData as JsonRecord : {};
-  const resolvedOrgId = asString(guard.organization_id);
-  if (!resolvedOrgId) {
-    return json(403, { ok: false, error: { code: "organization_context_required" } }, cors);
-  }
-
-  const updateArgs: JsonRecord = {
-    organization_id: resolvedOrgId,
-    name: asString(payload.name) || undefined,
-    timezone: asString(payload.timezone) || undefined,
-    locale: asString(payload.locale) || undefined,
-    logo_url: asString(payload.logo_url) || undefined,
-    primary_color: asString(payload.primary_color) || undefined,
-    secondary_color: asString(payload.secondary_color) || undefined,
+  const service = () => {
+    if (!SERVICE_KEY) throw new Error("server_misconfigured");
+    return createClient(URL_BASE, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false }, db: { schema: "api" } });
   };
-  if (
-    payload.default_settings_patch &&
-    typeof payload.default_settings_patch === "object" &&
-    !Array.isArray(payload.default_settings_patch)
-  ) {
-    updateArgs.default_settings_patch = payload.default_settings_patch;
-  }
-
-  let artifact: JsonRecord | null = null;
-    const fileBase64 = asString(payload.file_base64);
-  if (fileBase64) {
-    const fileName = sanitizeFileName(asString(payload.file_name));
-    const contentType = (asString(payload.content_type) || "application/octet-stream").toLowerCase();
-    const canonicalContentType = canonicalLogoContentType(contentType);
-    if (!fileName) return json(400, { ok: false, error: { code: "invalid_file_name" } }, cors);
-    if (!allowedLogoContentType(contentType)) {
-      return json(415, {
-        ok: false,
-        error: { code: "unsupported_logo_content_type", message: contentType },
-      }, cors);
-    }
-
-    let bytes: Uint8Array;
+  if (action === "signed_url") {
+    const logo = record(guard.logo);
+    if (!logo || logo.storage_bucket !== BUCKET || !text(logo.storage_key).startsWith(`${organizationId}/branding/`)) return fail(404, "logo_not_found");
     try {
-      bytes = decodeBase64(fileBase64);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "invalid_logo_base64";
-      return json(400, { ok: false, error: { code: "invalid_logo_base64", message } }, cors);
-    }
-    if (bytes.length === 0) return json(400, { ok: false, error: { code: "empty_logo_file" } }, cors);
-    if (bytes.length > 5 * 1024 * 1024) {
-      return json(413, { ok: false, error: { code: "logo_file_too_large", message: "Max 5MB" } }, cors);
-    }
-    const sniffedContentType = sniffLogoContentType(bytes);
-    if (sniffedContentType !== canonicalContentType) {
-      return json(400, {
-        ok: false,
-        error: {
-          code: "invalid_logo_file_signature",
-          message: `Logo bytes do not match declared content type ${contentType}.`,
-        },
-      }, cors);
-    }
-
-    const storageKey = `${resolvedOrgId}/branding/${Date.now()}-${fileName}`;
-    const { error: uploadError } = await serviceClient.storage
-      .from(ASSET_BUCKET)
-      .upload(storageKey, new Blob([bytes], { type: canonicalContentType }), {
-        contentType: canonicalContentType,
-        upsert: true,
-      });
-    if (uploadError) {
-      return json(400, { ok: false, error: { code: "logo_upload_failed", message: uploadError.message } }, cors);
-    }
-
-    const { data: artifactRow, error: artifactError } = await serviceClient.rpc(
-      "register_artifact_v1",
-      {
-        p_artifact: {
-          source_system: "organization-profile",
-          created_by_user_id: asString(guard.actor_user_id) || undefined,
-          metadata: {
-            source: "organization-profile",
-            file_name: fileName,
-          },
-          organization_id: resolvedOrgId,
-          storage_bucket: ASSET_BUCKET,
-          storage_key: storageKey,
-          mime_type: canonicalContentType,
-          size_bytes: bytes.length,
-        },
-      },
-    );
-    if (artifactError) {
-      return json(400, { ok: false, error: { code: "logo_artifact_failed", message: artifactError.message } }, cors);
-    }
-
-    const artifactResult = Array.isArray(artifactRow) ? artifactRow[0] : artifactRow;
-    const artifactId = asString((artifactResult as JsonRecord | undefined)?.artifact_id);
-    if (!artifactId) {
-      return json(400, { ok: false, error: { code: "logo_artifact_failed", message: "artifact_id_missing" } }, cors);
-    }
-
-    artifact = {
-      id: artifactId,
-      artifact_id: artifactId,
-      created: Boolean((artifactResult as JsonRecord | undefined)?.created),
-      storage_bucket: ASSET_BUCKET,
-      storage_key: storageKey,
-      mime_type: contentType,
-      size_bytes: bytes.length,
-    };
-    updateArgs.logo_storage_bucket = ASSET_BUCKET;
-    updateArgs.logo_storage_key = storageKey;
-    updateArgs.logo_artifact_id = artifactId;
-    updateArgs.logo_file_name = fileName;
-    updateArgs.logo_content_type = contentType;
+      const { data, error } = await service().storage.from(BUCKET).createSignedUrl(text(logo.storage_key), 60);
+      if (error || !data?.signedUrl) return fail(502, "logo_preview_failed");
+      return reply(200, { ok: true, signed_url: data.signedUrl });
+    } catch { return fail(503, "logo_preview_failed"); }
   }
 
-  const { data: updateData, error: updateError } = await userClient.rpc(
-    "ui_update_organization_profile_v1",
-    { p_args: updateArgs },
-  );
-  if (updateError) {
-    return json(400, {
-      ok: false,
-      error: { code: "organization_profile_update_failed", message: updateError.message },
-    }, cors);
+  const args: RecordValue = { organization_id: organizationId };
+  for (const key of ["name", "timezone", "locale", "primary_color", "secondary_color"]) {
+    if (Object.hasOwn(payload, key)) args[key] = payload[key];
   }
-
-  return json(200, {
-    ok: true,
-    result: updateData && typeof updateData === "object" ? updateData as JsonRecord : {},
-    artifact,
-  }, cors);
+  let uploaded: { key: string; uploadId: string; artifactId: string | null } | null = null;
+  let uploadAttempted = false;
+  let storageClient: ReturnType<typeof service> | null = null;
+  const compensate = async (registrationRolledBack = false) => {
+    if (!uploaded || !storageClient) return { status: "not_needed" };
+    try {
+      if (uploaded.artifactId) {
+        const { data, error } = await storageClient.rpc("organization_profile_abort_upload_v1", {
+          p_artifact_id: uploaded.artifactId, p_organization_id: organizationId,
+          p_actor_user_id: guard.actor_user_id, p_upload_id: uploaded.uploadId, p_storage_key: uploaded.key,
+        });
+        if (error || data !== true) return { status: "unconfirmed", reason: "artifact_abort_failed" };
+      } else if (!registrationRolledBack) return { status: "unconfirmed", reason: "registration_state_unknown" };
+      const { error } = await storageClient.storage.from(BUCKET).remove([uploaded.key]);
+      return error ? { status: "unconfirmed", reason: "object_remove_failed" } : { status: "removed_new_upload" };
+    } catch { return { status: "unconfirmed", reason: "compensation_transport_failed" }; }
+  };
+  if (Object.hasOwn(payload, "file_base64")) {
+    const fileName = text(payload.file_name);
+    const base64 = text(payload.file_base64);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(fileName) || !base64 || base64.length > Math.ceil(MAX_LOGO_BYTES / 3) * 4 || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return fail(400, "invalid_logo_file");
+    let bytes: Uint8Array;
+    try { bytes = Uint8Array.from(atob(base64), (value) => value.charCodeAt(0)); } catch { return fail(400, "invalid_logo_file"); }
+    const contentType = validatedLogoContentType(bytes, text(payload.content_type));
+    if (!contentType) return fail(400, "invalid_logo_image");
+    const uploadId = crypto.randomUUID();
+    const key = `${organizationId}/branding/${uploadId}/${fileName}`;
+    try {
+      storageClient = service();
+      uploadAttempted = true;
+      const { error } = await storageClient.storage.from(BUCKET).upload(key, new Blob([bytes], { type: contentType }), { contentType, upsert: false });
+      if (error) return fail(502, "logo_upload_unconfirmed", { status: "unconfirmed", reason: "upload_result_unknown" });
+      uploaded = { key, uploadId, artifactId: null };
+      const sha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((value) => value.toString(16).padStart(2, "0")).join("");
+      const { data: artifactData, error: artifactError } = await storageClient.rpc("register_artifact_v1", { p_artifact: {
+        organization_id: organizationId, created_by_user_id: guard.actor_user_id, source_system: "organization-profile",
+        storage_bucket: BUCKET, storage_key: key, mime_type: contentType, size_bytes: bytes.length, sha256,
+        metadata: { file_name: fileName, upload_id: uploadId },
+      } });
+      if (artifactError) return fail(502, "logo_artifact_failed", await compensate(/^[0-9A-Z]{5}$/.test(text(artifactError.code))));
+      const artifact = first(artifactData);
+      if (!artifact || artifact.created !== true || !UUID.test(text(artifact.artifact_id))) return fail(502, "logo_artifact_unconfirmed", await compensate());
+      uploaded.artifactId = text(artifact.artifact_id);
+      args.logo_artifact_id = uploaded.artifactId;
+    } catch {
+      return fail(502, "logo_upload_or_registration_unconfirmed", uploadAttempted && !uploaded
+        ? { status: "unconfirmed", reason: "upload_result_unknown" } : await compensate());
+    }
+  }
+  try {
+    const { data, error } = await user.rpc("ui_update_organization_profile_v1", { p_args: args });
+    const result = first(data);
+    if (error || !result || text(result.organization_id) !== organizationId || !record(result.profile)) return fail(400, "organization_profile_update_failed", await compensate());
+    return reply(200, { ok: true, ...publicProfile(result) });
+  } catch { return fail(502, "organization_profile_update_unconfirmed", await compensate()); }
 });

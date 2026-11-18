@@ -21,7 +21,7 @@ export {
 
 export type UiScope = {
   scope_type: string;
-  scope_id: string;
+  scope_id: string | null;
   scope_label?: string | null;
 };
 
@@ -98,6 +98,14 @@ export type UiOnboardingReadinessComponent = {
   items?: UiOnboardingReadinessPluginItem[] | null;
 };
 
+// Aggregate label readiness only; label provenance is not a plugin inventory.
+export type UiOnboardingReadinessLabelDesign = Pick<
+  UiOnboardingReadinessComponent,
+  "status" | "healthy" | "required_count" | "present_count" | "healthy_count" | "blocking_count"
+> & {
+  warning_count?: number | null;
+};
+
 export type UiOnboardingReadiness = {
   scope_type: string;
   scope_id?: string | null;
@@ -108,12 +116,14 @@ export type UiOnboardingReadiness = {
   settings_defaults?: UiOnboardingReadinessComponent | null;
   workflow_bindings?: UiOnboardingReadinessComponent | null;
   integration_plugins?: UiOnboardingReadinessComponent | null;
+  label_design?: UiOnboardingReadinessLabelDesign | null;
   blocking_findings?: UiOnboardingReadinessFinding[] | null;
 };
 
 export type UiNavigationItem = {
   id: string;
   label: string;
+  label_ar?: string | null;
   href?: string | null;
   badge?: string | null;
   icon?: string | null;
@@ -126,6 +136,7 @@ export type UiNavigationItem = {
 export type UiNavigationSection = {
   id: string;
   label: string;
+  label_ar?: string | null;
   items: UiNavigationItem[];
 };
 
@@ -137,9 +148,11 @@ export type UiNavigation = {
 export type UiReadFilter = {
   key: string;
   column: string;
+  resolver?: string | null;
   op?: string | null;
   ops?: string[] | null;
   label?: string | null;
+  label_ar?: string | null;
   value_autocomplete?: {
     enabled?: boolean | null;
     source?: "distinct_values" | null;
@@ -151,6 +164,7 @@ export type UiReadFilter = {
 export type UiSort = {
   key: string;
   direction?: string | null;
+  group_key?: string | null;
 };
 
 export type UiReadDownload = {
@@ -203,6 +217,7 @@ export type UiReadColumnImport = {
 export type UiReadColumn = {
   key: string;
   label?: string | null;
+  label_ar?: string | null;
   render_type?: string | null;
   format_options?: Record<string, unknown> | null;
   edit_mode?: string | null;
@@ -219,6 +234,7 @@ export type UiReadColumn = {
 export type UiReadRelated = {
   resource: string;
   label?: string | null;
+  label_ar?: string | null;
   filter_key: string;
   from: string;
   limit?: number | null;
@@ -245,12 +261,15 @@ export type UiReadResourceImport = {
 export type UiReadResource = {
   key: string;
   label?: string | null;
+  label_ar?: string | null;
   relation: string;
   id_column?: string | null;
   scope_columns?: Record<string, string> | null;
+  read_scope_types?: string[] | null;
   capability_read?: string | null;
   capability_write?: string | null;
   column_labels?: Record<string, string> | null;
+  column_labels_ar?: Record<string, string> | null;
   columns?: UiReadColumn[] | null;
   strict_columns?: boolean | null;
   related?: UiReadRelated[] | null;
@@ -318,10 +337,12 @@ export type UiCommandConfirm = {
 export type UiCommandInputField = {
   key: string;
   label: string;
-  type?: "text" | "textarea" | "lookup" | null;
+  type?: "text" | "textarea" | "lookup" | "number" | null;
   required?: boolean | null;
   placeholder?: string | null;
   lookup_category?: string | null;
+  lookup_rpc?: string | null;
+  lookup_selection_param?: string | null;
   default_value?: unknown;
 };
 
@@ -330,23 +351,58 @@ export type UiCommandInputSchema = {
   title?: string | null;
   description?: string | null;
   fields?: UiCommandInputField[] | null;
+  normalization?: "self_kyc_v1" | "financial_amount_v1" | null;
+  task_type_overrides?: Record<string, unknown> | null;
+};
+
+export type UiCommandReadbackParamSource =
+  | {
+      source: "result";
+      path?: string | null;
+    }
+  | {
+      source: "selection";
+      path: "id" | "ids" | "count";
+    }
+  | {
+      source: "static";
+      value: unknown;
+    };
+
+export type UiCommandReadback = {
+  rpc: string;
+  params?: Record<string, unknown> | null;
+  success_path?: string | null;
+  max_attempts?: number | null;
+  delay_ms?: number | null;
 };
 
 export type UiCommandExecution = {
+  idempotency?: "actor_retry_v1" | null;
+  evidence?: {
+    context: "self" | "task"; registration_rpc: string; bucket: string;
+    min_items: number; max_items: number; tag_field?: string | null;
+  } | null;
+  transport?: "rpc" | "edge" | null;
+  function?: string | null;
   type?: "navigate" | "workflow" | "workflow_binding" | "rpc" | "download" | "print" | null;
   rpc?: string | null;
+  result_contract?: "batch_items_v1" | null;
   params?: Record<string, unknown> | null;
   input_schema?: UiCommandInputSchema | null;
   payload_key?: string | null;
   confirm?: UiCommandConfirm | null;
   binding_key?: string | null;
   stage_key?: string | null;
+  readback?: UiCommandReadback | null;
 };
 
 export type UiCommandDefinition = {
   key: string;
   label: string;
+  label_ar?: string | null;
   description?: string | null;
+  description_ar?: string | null;
   capability?: string | null;
   schema_category?: string | null;
   workflow_key?: string | null;
@@ -366,14 +422,34 @@ export type UiTrackingRegistry = {
   filter_key?: string | null;
   param_key?: string | null;
   title?: string | null;
+  title_ar?: string | null;
   description?: string | null;
+  description_ar?: string | null;
   results_description?: string | null;
+  results_description_ar?: string | null;
   empty?: string | null;
+  empty_ar?: string | null;
+  operator_handoff?: {
+    enabled?: boolean | null;
+    label?: string | null;
+    label_ar?: string | null;
+    description?: string | null;
+    description_ar?: string | null;
+    identifier_param?: string | null;
+    identifier_source?: string | null;
+    tab_param?: string | null;
+    tab?: string | null;
+    route_targets?: { console?: { path?: string | null } | null } | null;
+  } | null;
   form?: {
     label?: string | null;
+    label_ar?: string | null;
     placeholder?: string | null;
+    placeholder_ar?: string | null;
     search_label?: string | null;
+    search_label_ar?: string | null;
     clear_label?: string | null;
+    clear_label_ar?: string | null;
   } | null;
 };
 
@@ -382,7 +458,20 @@ export type UiRouteTarget = {
   params?: Record<string, unknown> | null;
 };
 
+export type UiShipmentReportingConfig = { enabled: false } | {
+  enabled: true;
+  app_keys: string[];
+  resource: string;
+  status_filter: string;
+  statuses: Array<{ key: string; label_key: string }>;
+  active_status_keys: string[];
+  delivered_status_key: string;
+  pending_status_key: string;
+  exception_status_key: string;
+};
+
 export type UiDashboardConfig = {
+  shipment_reporting?: UiShipmentReportingConfig | null;
   max_sections?: number | null;
   max_items_per_section?: number | null;
   max_actions?: number | null;
@@ -401,6 +490,7 @@ export type UiDashboardMetrics = {
 export type UiFilterOperator = {
   key: string;
   label: string;
+  label_ar?: string | null;
   supports_array?: boolean | null;
 };
 
@@ -583,7 +673,26 @@ export type UiCreateWorkflowTemplateStepResult = {
   workflow_template_step_id?: string | null;
 };
 
+export type UiShipmentDestinationAddress = {
+  line1?: string;
+  city?: string;
+  sa_short_code?: string;
+  latitude?: number;
+  longitude?: number;
+  coordinates?: { latitude: number; longitude: number };
+};
+
+export type UiDestinationAddressCapture =
+  | { status: "pending" }
+  | {
+      status: "verified";
+      address_id: string;
+      sa_short_code?: string | null;
+      coordinates?: { latitude: number; longitude: number } | null;
+    };
+
 export type UiCreateShipmentResult = {
+  destination_address_capture?: UiDestinationAddressCapture;
   status: string;
   workflow_template_id?: string | null;
   workflow_run_id?: string | null;
@@ -592,6 +701,20 @@ export type UiCreateShipmentResult = {
   shipment_id?: string | null;
   tracking_number?: string | null;
   operation?: string | null;
+};
+
+export type UiCreateServiceLevelResult = {
+  ok: boolean;
+  service_level_id?: string | null;
+  organization_id?: string | null;
+  correlation_id?: string | null;
+};
+
+export type UiCreateServiceOfferingResult = {
+  ok: boolean;
+  service_offering_id?: string | null;
+  organization_id?: string | null;
+  correlation_id?: string | null;
 };
 
 export type UiCreateWarehouseTransferManifestResult = {
@@ -665,6 +788,22 @@ export type UiCreateWorkflowScheduleTriggerResult = {
 export type UiCreateWorkflowRunTriggerResult = {
   status: string;
   workflow_run_trigger_id?: string | null;
+  id?: string | null;
+  source_workflow_template_id?: string | null;
+  target_workflow_template_id?: string | null;
+  source_statuses?: string[] | null;
+  context_patch?: Record<string, unknown> | null;
+  enabled?: boolean | null;
+  notes?: string | null;
+  deleted_at?: string | null;
+  decision_log_id?: string | null;
+  domain_event_id?: string | null;
+  correlation_id?: string | null;
+};
+
+export type UiUpdateWorkflowRunTriggerResult = UiCreateWorkflowRunTriggerResult;
+export type UiDeleteWorkflowRunTriggerResult = UiCreateWorkflowRunTriggerResult & {
+  workflow_trigger_fires_count?: number | null;
 };
 
 export type UiRunWorkflowScheduleTriggerResult = {
@@ -672,6 +811,61 @@ export type UiRunWorkflowScheduleTriggerResult = {
   workflow_schedule_trigger_id?: string | null;
   workflow_template_id?: string | null;
   workflow_run_id?: string | null;
+};
+
+export type UiAutomationMarketplaceListingResult = {
+  ok: boolean;
+  listing_id?: string | null;
+  listing_version_id?: string | null;
+  asset_kind?: string | null;
+  visibility?: string | null;
+  publication_status?: string | null;
+  review_id?: string | null;
+  decision?: string | null;
+};
+
+export type UiAutomationMarketplaceInstallResult = {
+  ok: boolean;
+  install_id?: string | null;
+  installed_resource_type?: string | null;
+  installed_resource_id?: string | null;
+  activation_result?: Record<string, unknown> | null;
+  status?: string | null;
+  target_listing_version_id?: string | null;
+  runtime_activated?: boolean | null;
+  staged_plugin_version_id?: string | null;
+};
+
+export type UiAutomationMarketplaceUpgradePreview = {
+  ok: boolean;
+  install_id?: string | null;
+  forked?: boolean | null;
+  current_listing_version_id?: string | null;
+  target_listing_version_id?: string | null;
+  current_artifact_hash?: string | null;
+  target_artifact_hash?: string | null;
+  has_changes?: boolean | null;
+};
+
+export type UiIntegrationConnectionResult = {
+  ok: boolean;
+  connection_id?: string | null;
+  status?: string | null;
+  secret_hint?: string | null;
+  generated_secret?: string | null;
+  runtime_auth_config_id?: string | null;
+  test_kind?: string | null;
+  remote_verified?: boolean | null;
+  credential_generation?: number | null;
+  last_tested_credential_generation?: number | null;
+};
+
+export type UiIntegrationConnectionBindingResult = {
+  ok: boolean;
+  binding_id?: string | null;
+  install_id?: string | null;
+  connection_id?: string | null;
+  runtime_auth_config_id?: string | null;
 };
 
 export type UiRelatedResourceKey = string | string[];
@@ -782,6 +976,32 @@ export type ResourceImportArtifactLink = {
   file_name?: string | null;
   signed_url?: string | null;
   metadata?: Record<string, unknown> | null;
+};
+
+export type OrganizationProfile = {
+  id: string;
+  name: string;
+  timezone: string;
+  locale: string;
+  default_settings: { branding: { primary_color?: string; secondary_color?: string } };
+};
+
+export type OrganizationProfileResult = {
+  ok: true;
+  profile: OrganizationProfile;
+  logo: { artifact_id: string; file_name: string; mime_type: string; size_bytes: number } | null;
+};
+
+export type OrganizationProfilePatch = {
+  organization_id: string;
+  name?: string;
+  timezone?: string;
+  locale?: string;
+  primary_color?: string;
+  secondary_color?: string;
+  file_name?: string;
+  content_type?: string;
+  file_base64?: string;
 };
 
 export type TabularImportRelatedNodeContract = {
@@ -938,6 +1158,7 @@ export type ResourceImportPrepareResponse = {
 
 export type ResourceImportStartResponse = {
   ok?: boolean;
+  processing_warning?: string | null;
   run?: ResourceImportRun | null;
   report?: MappingOperationReport | null;
   result?: unknown;
@@ -958,6 +1179,7 @@ export {
   inferTabularFieldRules,
   isTabularRuleConfigured,
   matrixToTabularData,
+  matrixToTabularPreview,
   normalizeTabularHeader,
   parseCsvTextMatrix,
   parseTabularTargetField,
@@ -975,6 +1197,7 @@ export {
   resolveLookupOptions,
   resolveEnumOptions,
   worksheetToMatrix,
+  worksheetToTabularPreview,
   type TabularImportFieldRule,
   type TabularImportInference,
   type TabularImportPreparedRow,
@@ -1055,3 +1278,7 @@ export async function requestUiWorkflowRunOutputDownload(params: {
     ...(app ? { app } : {}),
   });
 }
+
+export type StudioTestSubmission = { ok?: boolean; accepted?: boolean; pending?: boolean; source_id?: string; external_id?: string };
+export type StudioTestStatus = { ok?: boolean; state: "pending" | "failed" | "succeeded"; source_id: string; external_id: string;
+  inbox_id?: string | null; shipment_id?: string | null; workflow_run_id?: string | null; workflow_run_step_id?: string | null; decision_log_ids?: string[] };

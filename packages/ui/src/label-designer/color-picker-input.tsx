@@ -44,9 +44,7 @@ export function ColorPickerInput({ value, onChange, id, label, disabled = false 
           type="button"
           className="h-7 w-7 shrink-0 rounded border border-ui-border/50"
           style={{ backgroundColor: color }}
-          onClick={() => {
-            if (!disabled) setOpen(!open);
-          }}
+          onClick={() => { if (!disabled) setOpen((value) => !value); }}
           disabled={disabled}
           aria-label="Pick color"
           data-testid={id ? `${id}-swatch` : "color-swatch"}
@@ -55,18 +53,18 @@ export function ColorPickerInput({ value, onChange, id, label, disabled = false 
           id={id}
           type="text"
           value={value ?? ""}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => { if (!disabled) onChange(e.target.value); }}
           disabled={disabled}
           placeholder="#000000"
           className="h-7 w-full rounded border border-ui-border/50 bg-ui-paper/50 px-2 text-xs text-ui-ink font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
           data-testid={id ? `${id}-input` : "color-input"}
         />
-        {open ? (
+        {open && !disabled ? (
           <div className="absolute left-0 top-8 z-50 rounded-lg bg-white p-2 shadow-lg border border-ui-border/30">
             <React.Suspense fallback={<div className="h-[200px] w-[200px]" />}>
               <LazyHexColorPicker
                 color={color}
-                onChange={(c) => onChange(c)}
+                onChange={(c) => { if (!disabled) onChange(c); }}
               />
             </React.Suspense>
           </div>

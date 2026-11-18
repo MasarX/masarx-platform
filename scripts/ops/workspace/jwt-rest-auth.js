@@ -1,5 +1,16 @@
-const { buildSupabaseApiKeys } = require('./edge-db-jwt');
+const crypto = require('crypto');
+const { buildSupabaseApiKeys, isJwtSignedWithSecret } = require('./edge-db-jwt');
 const { normalizeSupabaseUrl, shouldRetryJwtError } = require('./supabase-runtime');
+
+const EDGE_DB_JWT_REQUIREMENTS = Object.freeze({
+  WEBHOOK_DB_JWT: 'edge_webhook_role',
+  API_CALLER_DB_JWT: 'edge_api_caller_role',
+  API_GATEWAY_DB_JWT: 'edge_api_gateway_role',
+  LABEL_RENDERER_DB_JWT: 'edge_label_renderer_role',
+});
+const DEFAULT_EDGE_DB_JWT_MIN_TTL_SECONDS = 2 * 60 * 60;
+const DEFAULT_EDGE_DB_JWT_CLOCK_SKEW_SECONDS = 60;
+const DEFAULT_EDGE_DB_JWT_MAX_LIFETIME_SECONDS = 366 * 24 * 60 * 60;
 
 function formatErrorBody(body) {
   if (body == null) return '';
@@ -122,23 +133,270 @@ function classifyAuthProbe({ ok, status, body, error } = {}) {
   };
 }
 
-async function checkRestAuth({ supabaseUrl, apiKey, bearerToken }) {
+async function checkRestAuth({ supabaseUrl, apiKey, bearerToken, timeoutMs }) {
   const base = normalizeSupabaseUrl(supabaseUrl);
   if (!base) throw new Error('supabaseUrl is required to verify rest auth');
   const key = String(apiKey || '').trim();
   const bearer = String(bearerToken || '').trim();
   if (!key) throw new Error('apiKey is required to verify rest auth');
   if (!bearer) throw new Error('bearerToken is required to verify rest auth');
-  const res = await fetch(`${base}/rest/v1/`, {
-    method: 'GET',
-    headers: {
-      apikey: key,
-      authorization: `Bearer ${bearer}`,
-    },
+  const timeout = Number(timeoutMs || 0);
+  const controller = Number.isFinite(timeout) && timeout > 0 ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeout) : null;
+  try {
+    const res = await fetch(`${base}/rest/v1/`, {
+      method: 'GET',
+      headers: {
+        apikey: key,
+        authorization: `Bearer ${bearer}`,
+      },
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    const text = await res.text();
+    const body = parseJsonSafe(text) || text;
+    return { ok: res.ok, status: res.status, body };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function decodeJwtJsonSegment(segment) {
+  const raw = String(segment || '').trim();
+  if (!raw) return null;
+  try {
+    const normalized = raw.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function fingerprintJwt(token) {
+  const value = String(token || '').trim();
+  return value ? crypto.createHash('sha256').update(value).digest('hex').slice(0, 12) : '';
+}
+
+function resolveAcceptedEdgeDbJwtIssuers({ expectedIssuer, supabaseUrl, projectRef } = {}) {
+  const accepted = new Set();
+  const explicit = String(expectedIssuer || '').trim();
+  if (explicit) accepted.add(explicit);
+  const base = normalizeSupabaseUrl(supabaseUrl);
+  if (base) accepted.add(`${base}/auth/v1`);
+  const ref = String(projectRef || '').trim();
+  if (ref) accepted.add(`https://${ref}.supabase.co/auth/v1`);
+  return [...accepted];
+}
+
+function inspectEdgeDbJwtClaims({
+  name,
+  token,
+  expectedRole,
+  expectedIssuer,
+  supabaseUrl,
+  projectRef,
+  nowSec,
+  minTtlSec = DEFAULT_EDGE_DB_JWT_MIN_TTL_SECONDS,
+  clockSkewSec = DEFAULT_EDGE_DB_JWT_CLOCK_SKEW_SECONDS,
+  maxLifetimeSec = DEFAULT_EDGE_DB_JWT_MAX_LIFETIME_SECONDS,
+} = {}) {
+  const key = String(name || '').trim() || 'EDGE_DB_JWT';
+  const value = String(token || '').trim();
+  const expected = String(expectedRole || '').trim();
+  const acceptedIssuers = resolveAcceptedEdgeDbJwtIssuers({
+    expectedIssuer,
+    supabaseUrl,
+    projectRef,
   });
-  const text = await res.text();
-  const body = parseJsonSafe(text) || text;
-  return { ok: res.ok, status: res.status, body };
+  const expectedRef = String(projectRef || '').trim();
+  const now = Number.isFinite(Number(nowSec)) ? Number(nowSec) : Math.floor(Date.now() / 1000);
+  const minimumTtl = Math.max(0, Number(minTtlSec) || 0);
+  const skew = Math.max(0, Number(clockSkewSec) || 0);
+  const maximumLifetime = Math.max(1, Number(maxLifetimeSec) || DEFAULT_EDGE_DB_JWT_MAX_LIFETIME_SECONDS);
+  const base = {
+    name: key,
+    expected_role: expected,
+    fingerprint_sha256_12: fingerprintJwt(value),
+    valid: false,
+  };
+  if (!value) return { ...base, reason: 'missing' };
+  const parts = value.split('.');
+  if (parts.length !== 3) return { ...base, reason: 'malformed' };
+  const header = decodeJwtJsonSegment(parts[0]);
+  const claims = decodeJwtJsonSegment(parts[1]);
+  if (!header || !claims) return { ...base, reason: 'malformed' };
+  const role = typeof claims.role === 'string' ? claims.role : '';
+  const actualIssuer = String(claims.iss || '').trim();
+  const subject = String(claims.sub || '').trim();
+  const audience = Array.isArray(claims.aud)
+    ? claims.aud.map((entry) => String(entry || '').trim())
+    : [String(claims.aud || '').trim()];
+  const issuedAt = claims.iat;
+  const expiresAt = claims.exp;
+  const tokenRef = String(claims.ref || '').trim();
+  const algorithm = typeof header.alg === 'string' ? header.alg : '';
+  const canonicalProjectIssuer = expectedRef ? `https://${expectedRef}.supabase.co/auth/v1` : '';
+  const projectBoundAuthority = Boolean(expectedRef && actualIssuer === canonicalProjectIssuer);
+  const report = {
+    ...base,
+    algorithm,
+    role,
+    issuer_match: acceptedIssuers.includes(actualIssuer),
+    project_ref_match: Boolean(!expectedRef || tokenRef === expectedRef || (!tokenRef && projectBoundAuthority)),
+    expires_in_seconds: Number.isFinite(expiresAt) ? expiresAt - now : null,
+  };
+  if (!['HS256', 'ES256', 'RS256'].includes(algorithm)) return { ...report, reason: 'algorithm' };
+  if (!expected || role !== expected) return { ...report, reason: 'role' };
+  if (!audience.includes('authenticated')) return { ...report, reason: 'audience' };
+  if (subject !== 'edge-function') return { ...report, reason: 'subject' };
+  if (acceptedIssuers.length === 0 || !acceptedIssuers.includes(actualIssuer)) {
+    return { ...report, reason: 'issuer' };
+  }
+  if (expectedRef && tokenRef !== expectedRef && !projectBoundAuthority) return { ...report, reason: 'project_ref' };
+  if (typeof issuedAt !== 'number' || !Number.isFinite(issuedAt) || issuedAt > now + skew) return { ...report, reason: 'issued_at' };
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt < now + minimumTtl) return { ...report, reason: 'expiry' };
+  if (expiresAt <= issuedAt || expiresAt - issuedAt > maximumLifetime) return { ...report, reason: 'lifetime' };
+  return { ...report, valid: true, reason: '' };
+}
+
+function inspectEdgeDbJwtBundleClaims({ env, tokens, expectedIssuer, supabaseUrl, projectRef, nowSec, minTtlSec, clockSkewSec } = {}) {
+  const scope = tokens || env || process.env;
+  const reports = Object.entries(EDGE_DB_JWT_REQUIREMENTS).map(([name, expectedRole]) =>
+    inspectEdgeDbJwtClaims({
+      name,
+      token: scope?.[name],
+      expectedRole,
+      expectedIssuer,
+      supabaseUrl,
+      projectRef,
+      nowSec,
+      minTtlSec,
+      clockSkewSec,
+    }),
+  );
+  return { valid: reports.every((report) => report.valid), reports };
+}
+
+async function validateEdgeDbJwtToken({
+  name,
+  token,
+  expectedRole,
+  supabaseUrl,
+  apiKey,
+  expectedIssuer,
+  projectRef,
+  signingSecret,
+  nowSec,
+  minTtlSec,
+  clockSkewSec,
+  probeTimeoutMs = 15_000,
+  probeAttempts = 3,
+  probeRetryDelayMs = 1_000,
+  checkRestAuthFn = checkRestAuth,
+} = {}) {
+  const report = inspectEdgeDbJwtClaims({
+    name,
+    token,
+    expectedRole,
+    expectedIssuer,
+    supabaseUrl,
+    projectRef,
+    nowSec,
+    minTtlSec,
+    clockSkewSec,
+  });
+  if (!report.valid) {
+    throw new Error(`Edge DB JWT claim validation failed: ${report.name}:${report.reason}`);
+  }
+  const secret = signingSecret instanceof Buffer ? signingSecret : String(signingSecret || '').trim();
+  if (secret && report.algorithm === 'HS256') {
+    if (!isJwtSignedWithSecret(String(token || '').trim(), secret)) {
+      throw new Error(`Edge DB JWT signature validation failed: ${report.name}`);
+    }
+    return { ...report, validation: 'signature', signature_valid: true };
+  }
+  const base = normalizeSupabaseUrl(supabaseUrl);
+  const key = String(apiKey || '').trim();
+  if (!base || !key) {
+    throw new Error('Edge DB JWT live validation requires SUPABASE_URL and a public API key.');
+  }
+  const attempts = Math.max(1, Number(probeAttempts) || 1);
+  let lastStatus = 0;
+  let lastClassification = 'network_error';
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const result = await checkRestAuthFn({
+        supabaseUrl: base,
+        apiKey: key,
+        bearerToken: String(token || '').trim(),
+        timeoutMs: probeTimeoutMs,
+      });
+      lastStatus = Number(result?.status || 0);
+      if (result?.ok) {
+        return { ...report, validation: 'live_rest', live_status: lastStatus, live_attempts: attempt };
+      }
+      lastClassification = shouldRetryJwtError(lastStatus, result?.body)
+        ? 'retryable_auth_error'
+        : 'auth_rejected';
+      if (lastClassification === 'auth_rejected') break;
+    } catch {
+      lastClassification = 'network_error';
+    }
+    if (attempt < attempts) await sleep(probeRetryDelayMs);
+  }
+  throw new Error(`Edge DB JWT live validation failed: ${report.name}:${lastClassification}`);
+}
+
+async function validateEdgeDbJwtBundle({
+  env,
+  tokens,
+  supabaseUrl,
+  apiKey,
+  expectedIssuer,
+  projectRef,
+  signingSecret,
+  nowSec,
+  minTtlSec,
+  clockSkewSec,
+  probeTimeoutMs = 15_000,
+  probeAttempts = 3,
+  probeRetryDelayMs = 1_000,
+  checkRestAuthFn = checkRestAuth,
+} = {}) {
+  const scope = tokens || env || process.env;
+  const outcomes = await Promise.allSettled(
+    Object.entries(EDGE_DB_JWT_REQUIREMENTS).map(([name, expectedRole]) =>
+      validateEdgeDbJwtToken({
+        name,
+        token: scope?.[name],
+        expectedRole,
+        supabaseUrl,
+        apiKey,
+        expectedIssuer,
+        projectRef,
+        signingSecret,
+        nowSec,
+        minTtlSec,
+        clockSkewSec,
+        probeTimeoutMs,
+        probeAttempts,
+        probeRetryDelayMs,
+        checkRestAuthFn,
+      }),
+    ),
+  );
+  const failures = outcomes
+    .filter((outcome) => outcome.status === 'rejected')
+    .map((outcome) => String(outcome.reason?.message || 'unknown validation failure'));
+  if (failures.length > 0) {
+    throw new Error(`Edge DB JWT bundle validation failed (${failures.length}/4): ${failures.join('; ')}`);
+  }
+  const reports = outcomes.map((outcome) => outcome.value);
+  return {
+    valid: true,
+    validation: reports.every((report) => report.validation === 'signature') ? 'signature' : 'live_rest',
+    reports,
+  };
 }
 
 async function checkFunctionAuth({
@@ -479,6 +737,13 @@ async function resolveSupabaseJwtSigningSecretByRestAuth({
 }
 
 module.exports = {
+  EDGE_DB_JWT_REQUIREMENTS,
+  inspectEdgeDbJwtClaims,
+  inspectEdgeDbJwtBundleClaims,
+  validateEdgeDbJwtToken,
+  validateEdgeDbJwtBundle,
+  fingerprintJwt,
+  resolveAcceptedEdgeDbJwtIssuers,
   resolveSigningSecretCandidates,
   buildSupabaseApiBearerCandidates,
   checkRestAuth,

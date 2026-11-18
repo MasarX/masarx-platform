@@ -92,8 +92,8 @@ function sleep(ms) {
 }
 
 function createQaLogger(options = {}) {
-  loadEnv();
-  const databaseUrl = process.env.DATABASE_URL;
+  if (!options.env) loadEnv();
+  const databaseUrl = (options.env || process.env).DATABASE_URL;
   if (!databaseUrl || options.disabled) {
     return createNoopLogger();
   }

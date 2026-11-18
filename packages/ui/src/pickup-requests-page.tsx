@@ -8,6 +8,7 @@ import { EmptyState } from "./empty-state";
 import { PageContainer } from "./page-container";
 import { PageHeader } from "./page-header";
 import { Section } from "./section";
+import { loadPickupLookups } from "./pickup-lookups";
 import { PickupMutationForm } from "./pickup-operations-form";
 import type { PickupMutationFormState } from "./pickup-operations-form";
 import {
@@ -75,6 +76,22 @@ export async function PickupRequestsPage({
   });
   const capabilities = Array.isArray(me?.capabilities) ? me.capabilities : [];
   const canWrite = hasCapability(resolveCapabilitySet(capabilities), "shipments.write");
+  let scopeClientId = pickupScopeFilters.find(([key]) => key === "client_id")?.[1];
+  const scopeSenderId = pickupScopeFilters.find(([key]) => key === "sender_id")?.[1];
+  let senderScopeError: string | null = null;
+  if (canWrite && scopeSenderId) {
+    try {
+      const sender = await ui.getResource("senders", scopeSenderId);
+      scopeClientId = stringValue(sender?.client_id) ?? undefined;
+      if (!scopeClientId) senderScopeError = "Your sender has no visible client binding. Reload to retry.";
+    } catch (error) {
+      senderScopeError = formatUiError(error, "Your sender client could not be loaded. Reload to retry.");
+    }
+  }
+  const lookups = canWrite ? await loadPickupLookups(me, "request") : null;
+  const clientChoices = { options: lookups?.options.clients ?? [], error: lookups?.error ?? null };
+  const senderChoices = { options: lookups?.options.senders ?? [], error: lookups?.error ?? null };
+  const branchChoices = { options: lookups?.options.branches ?? [], error: lookups?.error ?? null };
   const activePath = `${appBasePath}/operations/pickups/requests`;
 
   async function submitPickupRequest(
@@ -172,6 +189,11 @@ export async function PickupRequestsPage({
       />
 
       <Section title="Create pickup request" collapsible={false}>
+        {senderScopeError || clientChoices.error || senderChoices.error || branchChoices.error ? (
+          <ContextNotice title="Pickup choices unavailable" action="Reload to retry; your saved requests are unchanged."
+            detail={senderScopeError || clientChoices.error || senderChoices.error || branchChoices.error || ""}
+            testId={`${testIdPrefix}-lookup-error`} />
+        ) : null}
         {!canWrite ? (
           <ContextNotice
             title="Pickup request creation is blocked"
@@ -196,9 +218,13 @@ export async function PickupRequestsPage({
                 defaultValue: stringValue(me?.org?.id) ?? "",
                 required: true,
               },
-              { name: "client_id", label: "Client ID", kind: "text", required: true },
-              { name: "sender_id", label: "Sender ID", kind: "text" },
-              { name: "branch_id", label: "Branch ID", kind: "text" },
+              ...(scopeClientId ? [{ name: "client_id", kind: "hidden" as const, defaultValue: scopeClientId }]
+                : [{ name: "client_id", label: "Client", kind: "relation" as const, required: true,
+                    options: clientChoices.options.filter((option) => option.groupValue === stringValue(me?.org?.id)) }]),
+              ...(scopeSenderId ? [{ name: "sender_id", kind: "hidden" as const, defaultValue: scopeSenderId }]
+                : [{ name: "sender_id", label: "Sender", kind: "relation" as const, options: senderChoices.options,
+                  ...(scopeClientId ? {} : { dependsOn: "client_id" }) }]),
+              { name: "branch_id", label: "Branch", kind: "relation", options: branchChoices.options },
               {
                 name: "requested_window_start_at",
                 label: "Requested window start",
@@ -329,11 +355,14 @@ export async function PickupRequestsPage({
                   </div>
                   <div className="mt-3">
                     {renderFieldPairs([
+                      ["Client", stringValue(row.client_label) ?? stringValue(row.client_id)],
+                      ["Sender", stringValue(row.sender_label) ?? stringValue(row.sender_id)],
+                      ["Branch", stringValue(row.branch_label)],
                       ["Box count", row.box_count],
                       ["Route run", stringValue(row.route_run_id)],
                       ["Planned date", formatDateTime(row.planned_date, me?.locale, me?.timezone)],
-                      ["Driver", stringValue(row.driver_user_id)],
-                      ["Vehicle", stringValue(row.vehicle_id)],
+                      ["Driver", stringValue(row.driver_label) ?? stringValue(row.driver_user_id)],
+                      ["Vehicle", stringValue(row.vehicle_label) ?? stringValue(row.vehicle_id)],
                       ["Failed at", formatDateTime(row.failed_at, me?.locale, me?.timezone)],
                       ["Failure reason", stringValue(row.failure_reason)],
                     ])}

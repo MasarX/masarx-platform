@@ -11,7 +11,7 @@ type MarketplaceRequestWorkspacePageProps = Parameters<
 const MarketplaceRequestWorkspacePageInner =
   UiMarketplaceRequestWorkspacePage as unknown as (
     props: MarketplaceRequestWorkspacePageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function MarketplaceRequestWorkspacePage(
   props: MarketplaceRequestWorkspacePageProps,

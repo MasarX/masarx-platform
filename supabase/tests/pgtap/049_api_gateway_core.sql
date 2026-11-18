@@ -15,8 +15,8 @@ SELECT public.create_next_partitions();
 
 SELECT is(
   public.redact_sensitive_headers('{"x-webhook-token":"secret","content-type":"application/json"}'::jsonb)->>'x-webhook-token',
-  'REDACTED',
-  'redact_sensitive_headers redacts x-webhook-token'
+  NULL::TEXT,
+  'redact_sensitive_headers removes x-webhook-token'
 );
 
 SELECT ok(
@@ -966,8 +966,8 @@ SELECT is(
     FROM public.api_gateway_requests
     WHERE id = (SELECT (result->>'api_gateway_request_id')::uuid FROM tmp_api_gateway_intake)
   ),
-  'REDACTED',
-  'api_gateway_requests stores redacted Authorization header'
+  NULL::TEXT,
+  'api_gateway_requests removes Authorization header'
 );
 
 SELECT ok(

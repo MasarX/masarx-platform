@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>MasarX account access</title></head>
+  <body>
+    {{ if or (eq .RedirectTo "https://vtgspxqkvhurpwtxnnyvhjzw.example.invalid/auth/invite-confirm?support=1") (eq .RedirectTo "https://unjijvxjrwurjgsnokovrvom.example.invalid/auth/invite-confirm?support=1") (eq .RedirectTo "https://vkhyghkwqoksmtxwrkgqyyxk.example.invalid/auth/invite-confirm?support=1") }}
+    <h1>Your MasarX invitation</h1>
+    <p>Contact your administrator or support to verify this invitation. No tenant access has been granted.</p>
+    <p><a href="{{ .RedirectTo }}">Contact your administrator or support</a></p>
+    {{ else if or (eq (printf "%.80s" .RedirectTo) "https://vtgspxqkvhurpwtxnnyvhjzw.example.invalid/auth/invite-confirm?request_id=") (eq (printf "%.80s" .RedirectTo) "https://unjijvxjrwurjgsnokovrvom.example.invalid/auth/invite-confirm?request_id=") (eq (printf "%.80s" .RedirectTo) "https://vkhyghkwqoksmtxwrkgqyyxk.example.invalid/auth/invite-confirm?request_id=") }}
+    <h1>Confirm your MasarX invitation</h1>
+    <p>A tenant administrator invited you to MasarX. Open this link to accept. If you already belong to this tenant, sign in as the invited account first; your sign-in methods will not change.</p>
+    <p>If you cannot accept, contact your administrator or support to verify your account.</p>
+    <p><a href="{{ .RedirectTo }}">Confirm your MasarX invitation</a></p>
+    {{ else }}
+    <h1>Reset your password</h1>
+    <p>Follow this link to choose a new password.</p>
+    <p><a href="{{ .ConfirmationURL }}">Reset password</a></p>
+    {{ end }}
+    <p>If you did not request this email, you can ignore it.</p>
+  </body>
+</html>

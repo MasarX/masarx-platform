@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SET search_path TO extensions, public, pg_temp;
 
-SELECT plan(12);
+SELECT plan(13);
 
 SELECT has_column(
   'public',
@@ -133,6 +133,55 @@ SELECT public.request_label_generation_target_v1(
 );
 
 RESET ROLE;
+
+SELECT lives_ok(
+  $admin$
+  DO $body$
+  DECLARE
+    v_prior_role TEXT := current_setting('request.jwt.claim.role', true);
+    v_prior_claims TEXT := current_setting('request.jwt.claims', true);
+    v_job_id UUID;
+  BEGIN
+    IF session_user NOT IN ('postgres', 'supabase_admin') OR current_user <> session_user THEN
+      RAISE EXCEPTION 'Expected a reset postgres/supabase_admin session';
+    END IF;
+    -- RESET ROLE leaves the renderer JWT settings above intact.
+    PERFORM set_config('request.jwt.claim.role', '', true);
+    PERFORM set_config('request.jwt.claims', '{}', true);
+
+    v_job_id := public.request_label_generation_target_v1(
+      'route',
+      '91000000-0000-4000-8000-00000000aa03'::uuid,
+      'shipping',
+      NULL,
+      'pgtap_target_contract_admin',
+      NULL,
+      'reprint'
+    );
+    IF NOT EXISTS (
+      SELECT 1 FROM public.label_jobs
+      WHERE id = v_job_id
+        AND organization_id = '91000000-0000-4000-8000-00000000aa01'::uuid
+        AND target_type = 'route_run'
+        AND target_id = '91000000-0000-4000-8000-00000000aa03'::uuid
+        AND requested_source = 'pgtap_target_contract_admin'
+        AND job_purpose = 'reprint'
+        AND status = 'pending'
+    ) THEN
+      RAISE EXCEPTION 'Admin request did not enqueue the exact target-neutral fixture job';
+    END IF;
+
+    PERFORM set_config('request.jwt.claim.role', COALESCE(v_prior_role, ''), true);
+    PERFORM set_config('request.jwt.claims', COALESCE(v_prior_claims, ''), true);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('request.jwt.claim.role', COALESCE(v_prior_role, ''), true);
+    PERFORM set_config('request.jwt.claims', COALESCE(v_prior_claims, ''), true);
+    RAISE;
+  END;
+  $body$;
+  $admin$,
+  format('admin session enqueues target-neutral label jobs after RESET ROLE without JWT claims (%s)', session_user)
+);
 
 SELECT ok(
   EXISTS (

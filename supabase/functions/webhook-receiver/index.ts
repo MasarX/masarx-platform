@@ -1,6 +1,5 @@
 import {
   buildErrorEnvelope,
-  buildRpcAuthAttempts,
   deriveChildTraceparent,
   extractToken,
   invokeSupabaseRpcWithAuthFallback,
@@ -8,13 +7,34 @@ import {
   normalizeHeaderKey,
   parseRequestBody,
   readEnv,
+  redactIngressForwardedHeaders,
+  redactIngressSecretText,
+  resolveIngressDbAuth,
   resolveCorrelationId,
   resolveTraceContext,
 } from "./_shared/mod.mjs";
-import { buildCorsHeaders } from "./_shared/cors.mjs";
+import { applyCorsHeaders, resolveCorsPolicy } from "./_shared/cors.mjs";
+import { assertApiCallerAccepted } from "./api-caller-response.mjs";
 
 type JsonRecord = Record<string, unknown>;
 const SERVICE_NAME = "webhook-receiver";
+const WEBHOOK_CORS_METHODS = ["POST", "OPTIONS"];
+const WEBHOOK_CORS_HEADERS = [
+  "accept",
+  "authorization",
+  "apikey",
+  "content-type",
+  "idempotency-key",
+  "traceparent",
+  "tracestate",
+  "x-client-info",
+  "x-correlation-id",
+  "x-request-id",
+  "x-webhook-token",
+];
+const PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS = readEnv(
+  "PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS",
+);
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
 const EDGE_SUPABASE_SECRET_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", ["SUPABASE_SECRET_KEY"]);
@@ -34,16 +54,23 @@ if (RAW_EDGE_DB_JWT && !EDGE_DB_JWT) {
     reason: "expected_jwt_with_three_segments",
   });
 }
-// Public/shared ingress is fail-closed by default. Preview/local breakglass must
-// explicitly set WEBHOOK_REQUIRE_DB_JWT=0 or EDGE_REQUIRE_DB_JWT=0 before the
-// service-role fallback flag is honored.
 const EDGE_REQUIRE_DB_JWT_RAW = readEnv("WEBHOOK_REQUIRE_DB_JWT", ["EDGE_REQUIRE_DB_JWT"]);
-const EDGE_REQUIRE_DB_JWT = EDGE_REQUIRE_DB_JWT_RAW === ""
-  ? true
-  : !/^(0|false|no)$/i.test(EDGE_REQUIRE_DB_JWT_RAW);
-const EDGE_ALLOW_SERVICE_ROLE_FALLBACK =
-  !EDGE_REQUIRE_DB_JWT && readEnv("EDGE_ALLOW_SERVICE_ROLE_FALLBACK") === "1";
-const INTERNAL_JWT = EDGE_DB_JWT || (EDGE_ALLOW_SERVICE_ROLE_FALLBACK ? (SUPABASE_SERVICE_KEY || "") : "");
+const EDGE_ALLOW_SERVICE_ROLE_FALLBACK_RAW = readEnv("EDGE_ALLOW_SERVICE_ROLE_FALLBACK");
+const INGRESS_DB_AUTH = resolveIngressDbAuth({
+  dbJwt: EDGE_DB_JWT, secretKey: EDGE_SUPABASE_SECRET_KEY, serviceRoleKey: SUPABASE_SERVICE_KEY,
+  requireDbJwt: EDGE_REQUIRE_DB_JWT_RAW,
+  allowServiceRoleFallback: EDGE_ALLOW_SERVICE_ROLE_FALLBACK_RAW,
+});
+const EDGE_REQUIRE_DB_JWT = INGRESS_DB_AUTH.dbJwtRequired;
+const INTERNAL_JWT = INGRESS_DB_AUTH.internalJwt;
+const WEBHOOK_RPC_TIMEOUT_MS_RAW = Number.parseInt(
+  readEnv("WEBHOOK_RPC_TIMEOUT_MS", ["EDGE_RPC_TIMEOUT_MS"]) || "10000",
+  10,
+);
+const WEBHOOK_RPC_TIMEOUT_MS =
+  Number.isFinite(WEBHOOK_RPC_TIMEOUT_MS_RAW) && WEBHOOK_RPC_TIMEOUT_MS_RAW > 0
+    ? WEBHOOK_RPC_TIMEOUT_MS_RAW
+    : 10000;
 
 if (!SUPABASE_URL) {
   logStructured("error", "edge.config.missing_env", {
@@ -68,41 +95,13 @@ const stringifyBody = (body: unknown): string => {
   return JSON.stringify(body);
 };
 
-const redactIntakeSecretText = (value: string): string =>
-  value
-    .replace(/(\/api-gateway\/t\/)[^/?#\s]+/gi, "$1[redacted]")
-    .replace(
-      /(^|[?&])(token|auth_token|api_key|apikey|secret|signature|hmac|x_signature|x-signature|x-hub-signature|x-hub-signature-256|key|password|credential)=([^&#\s]*)/gi,
-      "$1$2=[redacted]",
-    );
-
-const redactForwardedSecretHeaders = (headers: Record<string, string>): Record<string, string> => {
-  const redacted = { ...headers };
-  for (const key of [
-    "x-forwarded-path",
-    "x-forwarded-url",
-    "x-original-uri",
-    "x-rewrite-url",
-    "x-envoy-original-path",
-    "referer",
-  ]) {
-    if (redacted[key]) {
-      redacted[key] = redactIntakeSecretText(redacted[key]);
-    }
-  }
-  return redacted;
-};
-
 const addStandardHeaders = (
   headers: HeadersInit,
   correlationId: string,
   trace: { traceparent?: string; tracestate?: string | null } | null,
-  corsHeaders: HeadersInit = {},
+  corsHeaders: HeadersInit,
 ): Headers => {
-  const out = new Headers(corsHeaders);
-  for (const [key, value] of new Headers(headers).entries()) {
-    out.set(key, value);
-  }
+  const out = applyCorsHeaders(headers, corsHeaders);
   out.set("x-correlation-id", correlationId);
   if (trace?.traceparent) out.set("traceparent", trace.traceparent);
   if (trace?.tracestate) out.set("tracestate", trace.tracestate);
@@ -163,7 +162,7 @@ const invokeApiCaller = async (
   if (!INTERNAL_JWT) return;
 
   try {
-    await fetch(`${SUPABASE_URL}/functions/v1/api-caller`, {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/api-caller`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -177,6 +176,7 @@ const invokeApiCaller = async (
         ...(typeof timeoutSeconds === "number" ? { timeout_seconds: timeoutSeconds } : {}),
       }),
     });
+    await assertApiCallerAccepted(response);
   } catch (error) {
     logStructured("warn", "edge.dispatch.invoke_failed", {
       service: SERVICE_NAME,
@@ -189,74 +189,16 @@ const invokeApiCaller = async (
   }
 };
 
-const recordIntakeAuthRejection = async ({
-  authAttempts,
-  token,
-  status,
-  failureCode,
-  failureMessage,
-  method,
-  path,
-  headers,
-  correlationId,
-  requestId,
-  metadata,
-}: {
-  authAttempts: Array<{ label: string; headers: Record<string, string> }>;
-  token?: string | null;
-  status: number;
-  failureCode: string;
-  failureMessage?: string | null;
-  method: string;
-  path?: string | null;
-  headers: Record<string, string>;
-  correlationId: string;
-  requestId?: string | null;
-  metadata?: JsonRecord;
-}): Promise<void> => {
-  if (!SUPABASE_URL || !authAttempts.length) return;
-  try {
-    await invokeSupabaseRpcWithAuthFallback({
-      url: `${SUPABASE_URL}/rest/v1/rpc/record_intake_auth_rejection_v1`,
-      authAttempts,
-      body: {
-        p_args: {
-          service: "webhook_receiver",
-          surface: "webhook_receiver",
-          credential_kind: "source_token",
-          token: token ?? null,
-          http_status: status,
-          failure_code: failureCode,
-          failure_message: failureMessage ?? null,
-          method,
-          path: path ? redactIntakeSecretText(path) : null,
-          headers: redactForwardedSecretHeaders(headers),
-          correlation_id: correlationId,
-          request_id: requestId ?? null,
-          metadata: metadata ?? {},
-        },
-      },
-    });
-  } catch (error) {
-    logStructured("warn", "edge.auth_rejection_record_failed", {
-      service: SERVICE_NAME,
-      correlation_id: correlationId,
-      request_id: requestId ?? null,
-      status,
-      failure_code: failureCode,
-      error,
-    });
-  }
-};
-
 Deno.serve(async (req: Request): Promise<Response> => {
   const correlationId = resolveCorrelationId(req);
-  const corsHeaders = buildCorsHeaders(req);
-  const requestId =
-    req.headers.get("x-request-id")?.trim() ||
-    req.headers.get("idempotency-key")?.trim() ||
-    req.headers.get("x-idempotency-key")?.trim() ||
-    null;
+  const corsPolicy = resolveCorsPolicy(req, {
+    hostedAllowedOrigins: "",
+    localAllowedOrigins: PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS,
+    allowedMethods: WEBHOOK_CORS_METHODS,
+    allowedHeaders: WEBHOOK_CORS_HEADERS,
+  });
+  const corsHeaders = corsPolicy.headers;
+  const requestId = req.headers.get("x-request-id")?.trim() || null;
   const trace = resolveTraceContext(req, correlationId);
   const apiCallerTraceparent = deriveChildTraceparent(trace.traceparent) || trace.traceparent;
   const toErrorBody = (
@@ -329,10 +271,37 @@ Deno.serve(async (req: Request): Promise<Response> => {
   };
 
   if (req.method === "OPTIONS") {
+    logStructured("info", "edge.cors.preflight", {
+      service: SERVICE_NAME,
+      correlation_id: correlationId,
+      request_id: requestId,
+      trace_id: trace.trace_id,
+      span_id: trace.span_id,
+      method: req.method,
+    });
+    if (!corsPolicy.allowed) {
+      return jsonResponse(
+        403,
+        { code: "cors_request_denied", message: "CORS request denied" },
+        "edge.cors.denied",
+        "warn",
+        { reason: corsPolicy.reason },
+      );
+    }
     return new Response(null, {
       status: 204,
       headers: addStandardHeaders({}, correlationId, trace, corsHeaders),
     });
+  }
+
+  if (corsPolicy.isCorsRequest && !corsPolicy.allowed) {
+    return jsonResponse(
+      403,
+      { code: "cors_request_denied", message: "CORS request denied" },
+      "edge.cors.denied",
+      "warn",
+      { reason: corsPolicy.reason },
+    );
   }
 
   const smokeAllow = Deno.env.get("EDGE_SMOKE_ALLOW");
@@ -350,9 +319,32 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const requestStart = performance.now();
 
   try {
-    const normalizedHeaders: Record<string, string> = {};
+    const token = extractToken(req);
+    if (!token || token.trim() === "") {
+      return jsonResponse(401, { error: "Missing Authorization bearer token" }, "edge.auth.missing_token", "warn");
+    }
+
+    const requestHeaders: Record<string, string> = {};
     for (const [key, value] of req.headers.entries()) {
-      normalizedHeaders[normalizeHeaderKey(key)] = value;
+      requestHeaders[normalizeHeaderKey(key)] = value;
+    }
+    const normalizedHeaders = requestHeaders;
+    let rawBody = "";
+    let payload: JsonRecord = {};
+    try {
+      const parsedBody = await parseRequestBody(req);
+      rawBody = parsedBody.raw;
+      payload = parsedBody.json as JsonRecord;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid JSON payload";
+      if (!message.startsWith("Invalid JSON payload")) throw error;
+      return jsonResponse(
+        400,
+        { error: "Invalid JSON payload", code: "invalid_json_payload" },
+        "edge.request.invalid_json",
+        "warn",
+        { path: redactIngressSecretText(req.url), headers: redactIngressForwardedHeaders(normalizedHeaders) },
+      );
     }
     if (!normalizedHeaders["x-correlation-id"]) {
       normalizedHeaders["x-correlation-id"] = correlationId;
@@ -362,56 +354,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       normalizedHeaders.tracestate = trace.tracestate;
     }
 
-    const rpcAuthAttempts = buildRpcAuthAttempts({
-      dbJwt: EDGE_DB_JWT,
-      secretKey: EDGE_SUPABASE_SECRET_KEY,
-      serviceRoleKey: EDGE_ALLOW_SERVICE_ROLE_FALLBACK ? SUPABASE_SERVICE_KEY : "",
-    });
-
-    const token = extractToken(req);
-    if (!token || token.trim() === "") {
-      await recordIntakeAuthRejection({
-        authAttempts: rpcAuthAttempts,
-        token: null,
-        status: 401,
-        failureCode: "missing_token",
-        failureMessage: "Missing Authorization bearer token",
-        method: req.method,
-        path: req.url,
-        headers: normalizedHeaders,
-        correlationId,
-        requestId,
-        metadata: { edge_stage: "extract_token" },
-      });
-      return jsonResponse(401, { error: "Missing Authorization bearer token" }, "edge.auth.missing_token", "warn");
-    }
-
-    let rawBody = "";
-    let payload: JsonRecord = {};
-    try {
-      const parsedBody = await parseRequestBody(req);
-      rawBody = parsedBody.raw;
-      payload = parsedBody.json as JsonRecord;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid JSON payload";
-      if (!message.startsWith("Invalid JSON payload")) {
-        throw error;
-      }
-      return jsonResponse(
-        400,
-        {
-          error: "Invalid JSON payload",
-          code: "invalid_json_payload",
-        },
-        "edge.request.invalid_json",
-        "warn",
-        {
-          error,
-          path: redactIntakeSecretText(req.url),
-          headers: redactForwardedSecretHeaders(normalizedHeaders),
-        },
-      );
-    }
+    const rpcAuthAttempts = INGRESS_DB_AUTH.authAttempts;
 
     if (!rpcAuthAttempts.length) {
       return jsonResponse(
@@ -436,6 +379,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         p_payload: payload,
       },
       authAttempts: rpcAuthAttempts,
+      timeoutMs: WEBHOOK_RPC_TIMEOUT_MS,
     });
 
     if (!rpcResult.ok || !rpcResult.body) {
@@ -447,14 +391,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         {
           error: "Failed to process webhook intake",
           rpc_status: rpcResult.response?.status ?? 500,
-          rpc_message: message ?? rpcResult.response?.statusText ?? "Request failed",
-          rpc_body: debug ?? null,
         },
         "edge.rpc.intake_failed",
         "error",
         {
           rpc_status: rpcResult.response?.status ?? 500,
-          rpc_message: message ?? rpcResult.response?.statusText ?? "Request failed",
+          rpc_error: debug ?? message ?? null,
         },
       );
     }
@@ -466,53 +408,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const status = typeof data?.status === "number" ? data.status : 500;
     const headersObject = (data?.headers ?? {}) as JsonRecord;
-    const responseHeaders = new Headers(corsHeaders);
+    const responseHeaders = new Headers();
     for (const [key, value] of Object.entries(headersObject)) {
       if (key && value !== undefined && value !== null) {
         responseHeaders.set(key, String(value));
       }
     }
+    const corsResponseHeaders = applyCorsHeaders(responseHeaders, corsHeaders);
 
-    if (!responseHeaders.has("content-type")) {
-      responseHeaders.set("content-type", "application/json");
+    if (!corsResponseHeaders.has("content-type")) {
+      corsResponseHeaders.set("content-type", "application/json");
     }
-    responseHeaders.set("x-correlation-id", responseCorrelationId);
-    responseHeaders.set("traceparent", trace.traceparent);
-    if (trace.tracestate) responseHeaders.set("tracestate", trace.tracestate);
+    corsResponseHeaders.set("x-correlation-id", responseCorrelationId);
+    corsResponseHeaders.set("traceparent", trace.traceparent);
+    if (trace.tracestate) corsResponseHeaders.set("tracestate", trace.tracestate);
 
     const bodyValue = data?.body ?? {};
-    if (status === 401 || status === 403) {
-      const bodyRecord = bodyValue && typeof bodyValue === "object"
-        ? bodyValue as Record<string, unknown>
-        : {};
-      const failureCode = typeof bodyRecord.code === "string" && bodyRecord.code.trim().length > 0
-        ? bodyRecord.code
-        : typeof bodyRecord.error === "string" && bodyRecord.error.trim().length > 0
-          ? bodyRecord.error
-          : "unauthorized";
-      const failureMessage = typeof bodyRecord.message === "string" && bodyRecord.message.trim().length > 0
-        ? bodyRecord.message
-        : typeof bodyRecord.error === "string" && bodyRecord.error.trim().length > 0
-          ? bodyRecord.error
-          : "Webhook request was rejected during authentication.";
-      await recordIntakeAuthRejection({
-        authAttempts: rpcAuthAttempts,
-        token,
-        status,
-        failureCode,
-        failureMessage,
-        method: req.method,
-        path: req.url,
-        headers: normalizedHeaders,
-        correlationId: responseCorrelationId,
-        requestId,
-        metadata: {
-          edge_stage: "workflow_intake_webhook",
-          response_outcome: data?.response_outcome ?? null,
-          response_reason: data?.response_reason ?? null,
-        },
-      });
-    }
     const normalizedBody = status >= 400
       ? toErrorBody(
         status,
@@ -578,6 +489,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         response_mode: data.response_mode ?? null,
         response_reason: data.response_reason ?? null,
         response_status: status,
+        rejection_log_status: data?.auth_rejection_logging?.status ?? null,
+        rejection_log_reason: data?.auth_rejection_logging?.reason ?? null,
         webhook_id: data.webhook_id ?? null,
         workflow_run_id: data.workflow_run_id ?? null,
         followup_workflow_run_id: data.followup_workflow_run_id ?? null,
@@ -587,12 +500,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     return new Response(responseBody, {
       status,
-      headers: responseHeaders,
+      headers: corsResponseHeaders,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse(500, { error: message }, "edge.request.exception", "error", {
+    return jsonResponse(500, { error: "Internal server error" }, "edge.request.exception", "error", {
       error,
+      path: redactIngressSecretText(req.url),
     });
   }
 });

@@ -15,6 +15,24 @@ type SettingsChangeParams = AccessPolicyChangeParams & {
   category: string;
 };
 
+function normalizeSettingsChangeResult(value: unknown): UiSettingsChangeRequest {
+  const row = Array.isArray(value) ? (value.length === 1 ? value[0] : null) : value;
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    throw new Error("settings_change_result_invalid");
+  }
+  const result = row as Record<string, unknown>;
+  if (
+    typeof result.settings_version_id !== "string" || !result.settings_version_id.trim() ||
+    typeof result.domain_event_id !== "string" || !result.domain_event_id.trim()
+  ) {
+    throw new Error("settings_change_result_invalid");
+  }
+  return {
+    settings_version_id: result.settings_version_id,
+    domain_event_id: result.domain_event_id,
+  };
+}
+
 function normalizeErrorText(error: unknown) {
   if (!error) return "";
   if (typeof error === "string") return error.toLowerCase();
@@ -91,7 +109,7 @@ async function callWithLegacyArgsFallback({
   for (let index = 0; index < dedupedCandidates.length; index += 1) {
     const args = dedupedCandidates[index];
     try {
-      return await rpc<UiSettingsChangeRequest>(functionName, args);
+      return normalizeSettingsChangeResult(await rpc<unknown>(functionName, args));
     } catch (error) {
       const canFallback = isSchemaCacheFunctionMiss(error, functionName);
       if (!canFallback) throw error;

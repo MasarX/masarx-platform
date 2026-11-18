@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import { Button } from "./button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "./drawer";
 import { ResourceImportPage } from "./resource-import-page";
+import { createUiTranslator } from "./i18n";
 import { buildHref } from "./url";
+import { useResourceListInvalidate } from "./hooks/use-resource-query";
+import { useToast } from "./use-toast";
+import { buildResourceImportRecordHref } from "./resource-import-handoff";
 
 type ResourceImportLauncherProps = {
   appBasePath: string;
@@ -25,21 +29,18 @@ export function ResourceImportLauncher({
   testIdPrefix,
 }: ResourceImportLauncherProps) {
   const router = useRouter();
+  const t = createUiTranslator("ui.resourcePage");
+  const invalidateResourceList = useResourceListInvalidate(resourceKey);
+  const { toast } = useToast();
+  const reasonId = React.useId();
+  const normalizedDisabledReason = disabledReason?.trim() ?? "";
   const [open, setOpen] = React.useState(false);
-  const [refreshOnClose, setRefreshOnClose] = React.useState(false);
-  const openImportedRecord = React.useCallback(
-    (resource: string, id: string) => {
-      const normalizedResource = resource.trim();
-      const normalizedId = id.trim();
-      if (!normalizedResource || !normalizedId) return;
-      const resourceBase = `${appBasePath}/resources/${encodeURIComponent(normalizedResource)}`;
-      const base = returnTo?.includes(`/resources/${normalizedResource}`) ? returnTo : resourceBase;
-      setOpen(false);
-      setRefreshOnClose(false);
-      router.push(buildHref(base, { id: normalizedId }));
-    },
-    [appBasePath, returnTo, router],
-  );
+  const openImportedRecord = React.useCallback((resource: string, id: string) => {
+    const href = buildResourceImportRecordHref(appBasePath, resource, id, returnTo);
+    if (!href) return;
+    setOpen(false);
+    router.push(href);
+  }, [appBasePath, returnTo, router]);
   const standaloneHref = React.useMemo(
     () =>
       buildHref(`${appBasePath}/imports/new`, {
@@ -49,28 +50,26 @@ export function ResourceImportLauncher({
     [appBasePath, resourceKey, returnTo],
   );
 
-  const handleOpenChange = React.useCallback(
-    (nextOpen: boolean) => {
-      setOpen(nextOpen);
-      if (!nextOpen && refreshOnClose) {
-        setRefreshOnClose(false);
-        router.refresh();
-      }
-    },
-    [refreshOnClose, router],
-  );
+  const handleReportReady = () => {
+    void invalidateResourceList().catch(() => {
+      toast({
+        title: "Table refresh failed",
+        description: "The import report is still available. Refresh the table to see the latest records.",
+        tone: "error",
+      });
+    });
+  };
 
   if (!allowed) {
     return (
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        disabled
-        title={disabledReason ?? undefined}
-      >
-        Import
-      </Button>
+      <>
+        <Button type="button" size="sm" variant="ghost" disabled
+          title={normalizedDisabledReason || undefined}
+          aria-describedby={normalizedDisabledReason ? reasonId : undefined}>
+          {t("actions.import")}
+        </Button>
+        {normalizedDisabledReason ? <span id={reasonId} className="sr-only">{normalizedDisabledReason}</span> : null}
+      </>
     );
   }
 
@@ -80,13 +79,13 @@ export function ResourceImportLauncher({
         type="button"
         size="sm"
         variant="ghost"
-        onClick={() => handleOpenChange(true)}
+        onClick={() => setOpen(true)}
         data-testid={testIdPrefix ? `${testIdPrefix}-launcher` : undefined}
       >
-        Import
+        {t("actions.import")}
       </Button>
 
-      <Drawer open={open} onOpenChange={handleOpenChange}>
+      <Drawer open={open} onOpenChange={setOpen}>
         <DrawerContent
           side="right"
           className="w-[min(100vw,1120px)] max-w-[min(100vw,1120px)] overflow-y-auto p-0"
@@ -106,7 +105,7 @@ export function ResourceImportLauncher({
                 type="button"
                 size="sm"
                 variant="ghost"
-                onClick={() => handleOpenChange(false)}
+                onClick={() => setOpen(false)}
               >
                 Close
               </Button>
@@ -120,7 +119,7 @@ export function ResourceImportLauncher({
               initialReturnTo={returnTo}
               presentation="drawer"
               testIdPrefix={testIdPrefix}
-              onReportReady={() => setRefreshOnClose(true)}
+              onReportReady={handleReportReady}
               onOpenImportedRecord={openImportedRecord}
             />
           </div>

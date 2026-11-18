@@ -1,5 +1,6 @@
 import type { UiReadFilter } from "@masarx/api";
 import { getUiDefaults } from "@masarx/config";
+import { resolveRowDisplayText } from "./i18n";
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -36,7 +37,7 @@ function normalizeOperatorKey(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
 
-export function resolveFilterOperatorRegistry(value: unknown): FilterOperatorRegistry {
+export function resolveFilterOperatorRegistry(value: unknown, locale?: string | null): FilterOperatorRegistry {
   const raw =
     value && typeof value === "object"
       ? (value as Record<string, unknown>)
@@ -54,7 +55,7 @@ export function resolveFilterOperatorRegistry(value: unknown): FilterOperatorReg
     if (!key) return;
     keys.push(key);
     const label = String(operator.label ?? "").trim();
-    if (label) labels[key] = label;
+    if (label) labels[key] = resolveRowDisplayText(label, operator.label_ar, locale);
   });
   const uniqueKeys = Array.from(new Set(keys));
   return {

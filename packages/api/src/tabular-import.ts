@@ -1,3 +1,4 @@
+import { assertMatrixDimensions, matrixToTabularData } from "../../../supabase/functions/resource-import-studio/upload-limits";
 import type {
   MappingCoercion,
   MappingDiagnostic,
@@ -322,12 +323,24 @@ export function resolveWorkbookWorksheet(workbook: WorkbookLike, sheetName: stri
   return null;
 }
 
+function worksheetRowToValues(row: WorkbookRowLike | null | undefined, columnCount: number) {
+  const values: Array<unknown> = [];
+  for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
+    values.push(normalizeWorksheetCellValue(row?.getCell?.(columnIndex)));
+  }
+  while (values.length > 0 && normalizeTabularCellValue(values[values.length - 1]) === "") {
+    values.pop();
+  }
+  return values;
+}
+
 export function worksheetToMatrix(worksheet: WorkbookSheetLike | null | undefined) {
   const matrix: Array<Array<unknown>> = [];
   if (!worksheet || typeof worksheet.getRow !== "function") return matrix;
 
   const rowCount = Math.max(0, Number(worksheet.rowCount || 0));
   const worksheetColumnCount = Math.max(0, Number(worksheet.columnCount || 0));
+  assertMatrixDimensions(rowCount, worksheetColumnCount);
   for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
     const row = worksheet.getRow(rowIndex);
     const columnCount = Math.max(
@@ -335,48 +348,65 @@ export function worksheetToMatrix(worksheet: WorkbookSheetLike | null | undefine
       Number(row?.actualCellCount || 0),
       Number(row?.cellCount || 0),
     );
-    const values: Array<unknown> = [];
-    for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
-      values.push(normalizeWorksheetCellValue(row?.getCell?.(columnIndex)));
-    }
-    while (values.length > 0 && normalizeTabularCellValue(values[values.length - 1]) === "") {
-      values.pop();
-    }
+    assertMatrixDimensions(rowCount, columnCount);
+    const values = worksheetRowToValues(row, columnCount);
     if (values.length === 0) continue;
     matrix.push(values);
   }
   return matrix;
 }
 
-export function matrixToTabularData(matrix: Array<Array<unknown>>) {
+export { matrixToTabularData } from "../../../supabase/functions/resource-import-studio/upload-limits";
+
+export function worksheetToTabularPreview(worksheet: WorkbookSheetLike | null | undefined, limit: number) {
+  assertMatrixDimensions(limit, 0);
+  const matrix: Array<Array<unknown>> = [];
+  let totalRows = 0;
+  if (!worksheet || typeof worksheet.getRow !== "function") {
+    return { ...matrixToTabularData(matrix), totalRows };
+  }
+  const rowCount = Math.max(0, Number(worksheet.rowCount || 0));
+  const worksheetColumnCount = Math.max(0, Number(worksheet.columnCount || 0));
+  assertMatrixDimensions(rowCount, worksheetColumnCount);
+  let headerColumns: number[] = [];
+  for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
+    const row = worksheet.getRow(rowIndex);
+    const columnCount = Math.max(worksheetColumnCount, Number(row?.actualCellCount || 0), Number(row?.cellCount || 0));
+    assertMatrixDimensions(rowCount, columnCount);
+    if (matrix.length === 0) {
+      const values = worksheetRowToValues(row, columnCount);
+      if (values.length === 0) continue;
+      matrix.push(values);
+      headerColumns = values.flatMap((value, index) => String(value ?? "").trim() ? [index + 1] : []);
+      // A sole __proto__ header cannot create an own field in the canonical plain-object record.
+      if (headerColumns.every((column) => String(values[column - 1] ?? "").trim() === "__proto__")) headerColumns = [];
+      continue;
+    }
+    // Count-only rows need just the first populated named column, not a full normalized copy.
+    if (!headerColumns.some((column) => String(normalizeWorksheetCellValue(row?.getCell?.(column))).trim() !== "")) continue;
+    totalRows += 1;
+    if (totalRows <= limit) matrix.push(worksheetRowToValues(row, columnCount));
+  }
+  return { ...matrixToTabularData(matrix), totalRows };
+}
+
+export function matrixToTabularPreview(matrix: Array<Array<unknown>>, limit: number) {
+  assertMatrixDimensions(limit, 0);
   const rows = Array.isArray(matrix) ? matrix : [];
-  const headerRow = Array.isArray(rows[0]) ? rows[0] : [];
-  const headers = headerRow
-    .map((entry) => String(entry ?? "").trim())
-    .filter((entry) => entry.length > 0);
-  const records: Array<Record<string, unknown>> = [];
-
-  rows.slice(1).forEach((rawRow) => {
-    const values = Array.isArray(rawRow) ? rawRow : [];
-    const record: Record<string, unknown> = {};
-    let hasValue = false;
-    headerRow.forEach((headerValue, index) => {
-      const header = String(headerValue ?? "").trim();
-      if (!header) return;
-      const value = normalizeTabularCellValue(values[index]);
-      record[header] = value;
-      if (String(value ?? "").trim() !== "") {
-        hasValue = true;
-      }
-    });
-    if (!hasValue || Object.keys(record).length === 0) return;
-    records.push(record);
-  });
-
-  return {
-    headers,
-    rows: records,
-  };
+  const header = Array.isArray(rows[0]) ? rows[0] : [];
+  assertMatrixDimensions(Math.max(0, rows.length - 1), header.length);
+  const namedColumns = header.flatMap((value, index) => String(value ?? "").trim() ? [index] : []);
+  if (namedColumns.every((column) => String(header[column] ?? "").trim() === "__proto__")) namedColumns.length = 0;
+  const preview = [header];
+  let totalRows = 0;
+  for (let index = 1; index < rows.length; index += 1) {
+    const candidate = rows[index];
+    const row = Array.isArray(candidate) ? candidate : [];
+    if (!namedColumns.some((column) => String(normalizeTabularCellValue(row[column])).trim() !== "")) continue;
+    totalRows += 1;
+    if (totalRows <= limit) preview.push(row);
+  }
+  return { ...matrixToTabularData(preview), totalRows };
 }
 
 export function parseCsvTextMatrix(text: string) {

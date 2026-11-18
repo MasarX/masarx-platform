@@ -18,6 +18,8 @@ yarn-debug.log*
 yarn-error.log*
 yarn.lock
 
+# Canonical physical-checkout lifecycle coordinator; only supported lock release/reclaim may remove it.
+/.masarx-checkout-lifecycle.lock/
 
 # Next.js
 .next/
@@ -25,11 +27,14 @@ out/
 dist/
 .vercel/
 *.tsbuildinfo
+**/next-env.d.ts
 
 # Landing build outputs (generated; do not commit)
+dist/
 
 # TypeScript package outputs (generated; do not commit)
 packages/*/dist/
+dist/
 packages/*/src/**/*.js
 packages/*/src/**/*.js.map
 packages/*/src/**/*.d.ts
@@ -43,7 +48,8 @@ coverage/
 
 # Supabase
 .supabase/
-supabase/.temp/
+supabase/.temp/*
+!supabase/.temp/cli-latest
 supabase/.branches/
 supabase/functions/*/_shared/
 
@@ -68,6 +74,7 @@ logs/
 *.log
 
 # Build output
+dist/
 
 # Temporary files
 tmp/
@@ -90,23 +97,17 @@ docs/ops/plans/PLAN-2099*/
 docs/ops/plans/review/PLAN-2099*/
 
 
+/apps/console/public/maplibre-gl-worker.mjs
+/apps/console/public/maplibre-gl-shared.mjs
+/apps/portal/public/maplibre-gl-worker.mjs
+/apps/portal/public/maplibre-gl-shared.mjs
 
-
-
-
-
-
-
+# Generated FieldOps files embedded only by the Console DEV CI build.
+/apps/console/public/fieldops/
+/public/fieldops/
+!packages/ui/src/maplibre-css.d.ts
 .playwright-cli/
 output/
 apps/console-v2/.vitest/
-
-
-
-
-
-
-
 .tmp/
 .tmp-*
-!packages/ui/src/maplibre-css.d.ts

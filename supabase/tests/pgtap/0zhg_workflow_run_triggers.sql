@@ -6,7 +6,8 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(16);
 
-DO $$
+CREATE FUNCTION pg_temp.f641_prior_trigger_tests() RETURNS SETOF TEXT
+LANGUAGE plpgsql AS $f641_prior$
 DECLARE
   v_org UUID := gen_random_uuid();
   v_active_org UUID := gen_random_uuid();
@@ -135,6 +136,8 @@ BEGIN
   EXECUTE 'RESET ROLE';
 
   PERFORM set_config('request.jwt.claim.sub', v_user_client_admin::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user_client_admin, 'role', 'authenticated')::TEXT, TRUE);
   EXECUTE 'SET LOCAL ROLE authenticated';
 
   SELECT (
@@ -148,24 +151,24 @@ BEGIN
     )->>'workflow_run_trigger_id'
   )::uuid INTO v_trigger_id;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_trigger_id IS NOT NULL,
     'client_admin can create workflow run trigger'
   );
 
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  PERFORM ok(
+  RETURN NEXT ok(
     (SELECT organization_id FROM public.workflow_run_triggers WHERE id = v_trigger_id) = v_org,
     'organization_id resolved from scope'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     (SELECT scope_type FROM public.workflow_run_triggers WHERE id = v_trigger_id) = 'client',
     'scope_type stored from current_user_scope_type()'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     (SELECT scope_id FROM public.workflow_run_triggers WHERE id = v_trigger_id) = v_client,
     'scope_id stored from current_user_scope_id()'
   );
@@ -263,9 +266,11 @@ BEGIN
   EXECUTE 'RESET ROLE';
 
   PERFORM set_config('request.jwt.claim.sub', v_user_client_admin::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user_client_admin, 'role', 'authenticated')::TEXT, TRUE);
   EXECUTE 'SET LOCAL ROLE authenticated';
 
-  PERFORM throws_ok(
+  RETURN NEXT throws_ok(
     format(
       $sql$
         SELECT public.ui_create_workflow_run_trigger_v1(
@@ -308,9 +313,11 @@ BEGIN
   EXECUTE 'RESET ROLE';
 
   PERFORM set_config('request.jwt.claim.sub', v_user_sender::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user_sender, 'role', 'authenticated')::TEXT, TRUE);
   EXECUTE 'SET LOCAL ROLE authenticated';
 
-  PERFORM throws_ok(
+  RETURN NEXT throws_ok(
     format(
       $sql$
         SELECT public.ui_create_workflow_run_trigger_v1(
@@ -330,7 +337,10 @@ BEGIN
   );
 
   EXECUTE 'RESET ROLE';
-END $$;
+END;
+$f641_prior$;
+
+SELECT * FROM pg_temp.f641_prior_trigger_tests();
 
 SELECT * FROM finish();
 ROLLBACK;

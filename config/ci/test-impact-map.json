@@ -12,7 +12,8 @@
     "pgtap",
     "integration",
     "edge_deploy",
-    "docs_lane"
+    "docs_lane",
+    "browser_e2e"
   ],
   "surfaces": [
     {
@@ -37,6 +38,21 @@
         "^\\.github/",
         "^config/ci/",
         "^scripts/ops/ci/",
+        "^scripts/ops/security-(?:audit-inventory|scan-gate)\\.js$",
+        "^security-(?:audit|scan-summary|vulnerability-inventory)\\.json$",
+        "^scripts/ops/remote-workflow\\.js$",
+        "^scripts/ops/pr-ready\\.js$",
+        "^scripts/ops/setup-branch-protection\\.js$",
+        "^scripts/ops/objectives-lint\\.js$",
+        "^scripts/utils/pg-hostaddr\\.js$",
+        "^scripts/ops/planning-os/",
+        "^config/ops/runtime-container-policy\\.json$",
+        "^scripts/ops/runtime-leases/",
+        "^scripts/ops/workspace/(?:docker-runtime|local-start|phase-runtime-bootstrap)\\.js$",
+        "^AGENTS\\.md$",
+        "^test-results/",
+        "^scripts/ops/branch-converge(?:-(?:cleanup(?:-adapters|-cli)?|decisions-generate|ignored-paths|inventory-coordinator|provider-(?:cleanup-adapters|snapshot(?:-coordinator)?)|runtime-(?:inventory|schema)|supplemental-inventory))?\\.js$",
+        "^config/ops/branch-convergence-(?:cleanup-policy|policy)\\.json$",
         "^scripts/ops/audit/auth-email-url-audit\\.js$",
         "^tests/load/",
         "^tests/unit/"
@@ -47,7 +63,7 @@
         "^tests/unit/mobile-core/",
         "^tests/unit/integration/",
         "^tests/unit/storage-admin\\.test\\.js$",
-        "^tests/unit/ops/(ensure-storage-buckets|prega-.*|supabase-cli|cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract|preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$"
+        "^tests/unit/ops/(ensure-storage-buckets|prega-.*|supabase-cli|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract|verify-cloud-ui)\\.test\\.js$"
       ],
       "required_suites": [
         "lint_structure",
@@ -58,16 +74,21 @@
     {
       "id": "console",
       "include_re": [
-        "^apps/console-v2/",
-        "^packages/",
+        "^apps/console/",
+        "^\\.storybook/",
+        "^apps/shared/",
+        "^packages/(?:api|auth|config|ui)/",
         "^scripts/ops/vercel/",
         "^scripts/ops/verify-cloud-ui\\.js$",
-        "^tests/e2e/(console-core-flows|gate/console-gate-smoke)\\.spec\\.ts$",
+        "^tests/e2e/gate/console-gate-smoke\\.spec\\.ts$",
+        "^tests/e2e/console.*\\.spec\\.ts$",
+        "^playwright\\.config\\.ts$",
+        "^tests/fixtures/loopback-hostname-contract\\.json$",
         "^tests/e2e/utils/",
         "^tests/ui/",
         "^tests/e2e/gate/",
         "^tests/unit/frontend/",
-        "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+        "^tests/unit/ops/verify-cloud-ui\\.test\\.js$",
         "^package\\.json$",
         "^package-lock\\.json$"
       ],
@@ -81,25 +102,31 @@
     {
       "id": "db",
       "include_re": [
+        "^supabase/(?:schemas?/|schema\\.sql$|seed/)",
         "^supabase/migrations/",
         "^supabase/functions/",
         "^supabase/tests/pgtap/",
         "^supabase/config\\.toml$",
+        "^deno\\.lock$",
+        "^tests/fixtures/loopback-hostname-contract\\.json$",
         "^config/edge/",
         "^scripts/ops/prega-.*\\.js$",
         "^scripts/ops/ensure-storage-buckets\\.js$",
         "^scripts/ops/provision-operator-accounts\\.js$",
+        "^scripts/ops/backfill-ingress-persisted-redaction\\.js$",
         "^scripts/ops/workspace/deploy\\.js$",
+        "^scripts/ops/db/run-online-index-phase\\.js$",
+        "^scripts/ops/audit/shipment-identifier-(?:index-build-preflight\\.sql|lazy-lock-proof\\.js)$",
         "^scripts/ops/workspace/supabase-api\\.js$",
         "^scripts/ops/auth/",
         "^scripts/ops/supabase-cli\\.js$",
         "^scripts/workers/",
         "^config/ops/auth-email-url-policy\\.(dev|stg|prod)\\.json$",
-        "^AGENTS\\.md$",
+        "^config/ops/online-index-phases\\.json$",
         "^tests/unit/ops/ensure-storage-buckets\\.test\\.js$",
         "^tests/unit/ops/prega-.*\\.test\\.js$",
         "^tests/unit/ops/supabase-cli\\.test\\.js$",
-        "^tests/unit/ops/(cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
+        "^tests/unit/ops/(provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
         "^tests/unit/workspace/deploy\\.test\\.js$",
         "^tests/unit/integration/",
         "^tests/unit/storage-admin\\.test\\.js$",
@@ -139,25 +166,31 @@
     {
       "id": "edge",
       "include_re": [
+        "^supabase/(?:schemas?/|schema\\.sql$|seed/)",
         "^supabase/migrations/",
         "^supabase/functions/",
         "^supabase/tests/pgtap/",
         "^supabase/config\\.toml$",
+        "^deno\\.lock$",
+        "^tests/fixtures/loopback-hostname-contract\\.json$",
         "^config/edge/",
         "^scripts/ops/prega-.*\\.js$",
         "^scripts/ops/ensure-storage-buckets\\.js$",
         "^scripts/ops/provision-operator-accounts\\.js$",
+        "^scripts/ops/backfill-ingress-persisted-redaction\\.js$",
         "^scripts/ops/workspace/deploy\\.js$",
+        "^scripts/ops/db/run-online-index-phase\\.js$",
+        "^scripts/ops/audit/shipment-identifier-(?:index-build-preflight\\.sql|lazy-lock-proof\\.js)$",
         "^scripts/ops/workspace/supabase-api\\.js$",
         "^scripts/ops/auth/",
         "^scripts/ops/supabase-cli\\.js$",
         "^scripts/workers/",
         "^config/ops/auth-email-url-policy\\.(dev|stg|prod)\\.json$",
-        "^AGENTS\\.md$",
+        "^config/ops/online-index-phases\\.json$",
         "^tests/unit/ops/ensure-storage-buckets\\.test\\.js$",
         "^tests/unit/ops/prega-.*\\.test\\.js$",
         "^tests/unit/ops/supabase-cli\\.test\\.js$",
-        "^tests/unit/ops/(cloud-run-workflow-env-mode|provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
+        "^tests/unit/ops/(provision-operator-accounts.*|sync-auth-email-url-config|tenant-signup-review-contract)\\.test\\.js$",
         "^tests/unit/workspace/deploy\\.test\\.js$",
         "^tests/unit/integration/",
         "^tests/unit/storage-admin\\.test\\.js$",
@@ -182,6 +215,7 @@
         "^docs/marketing/",
         "^scripts/frontend/",
         "^tests/landing-e2e/",
+        "^playwright\\.landing\\.config\\.ts$",
         "^package\\.json$",
         "^package-lock\\.json$"
       ],
@@ -197,7 +231,10 @@
       "id": "mobile",
       "include_re": [
         "^apps/fieldops/",
-        "^packages/mobile-core/",
+        "^scripts/ops/mobile/",
+        "^scripts/ops/fieldops-release-contract\\.js$",
+        "^config/ci/mobile-fieldops-release-env-contract\\.json$",
+        "^packages/(?:api|auth|config|mobile-core)/",
         "^tests/integration/fieldops/",
         "^tests/fieldops-e2e/",
         "^tests/unit/fieldops/",
@@ -210,21 +247,28 @@
         "test_ui",
         "test_unit"
       ],
-      "propagates_to": []
+      "propagates_to": [
+        "console"
+      ]
     },
     {
       "id": "portal",
       "include_re": [
         "^apps/portal/",
-        "^packages/",
+        "^\\.storybook/",
+        "^apps/shared/",
+        "^packages/(?:api|auth|config|ui)/",
         "^scripts/ops/vercel/",
         "^scripts/ops/verify-cloud-ui\\.js$",
-        "^tests/e2e/(portal-core-flows|gate/portal-gate-smoke)\\.spec\\.ts$",
+        "^tests/e2e/gate/portal-gate-smoke\\.spec\\.ts$",
+        "^tests/e2e/portal.*\\.spec\\.ts$",
+        "^playwright\\.config\\.ts$",
+        "^tests/fixtures/loopback-hostname-contract\\.json$",
         "^tests/e2e/utils/",
         "^tests/ui/",
         "^tests/e2e/gate/",
         "^tests/unit/frontend/",
-        "^tests/unit/ops/(preview-workflows-contract|reviewer-gate-pr-workflow|verify-cloud-ui)\\.test\\.js$",
+        "^tests/unit/ops/verify-cloud-ui\\.test\\.js$",
         "^package\\.json$",
         "^package-lock\\.json$"
       ],
@@ -238,19 +282,32 @@
     {
       "id": "shared",
       "include_re": [
-        "^packages/",
+        "^\\.nvmrc$",
         "^scripts/",
         "^config/"
       ],
       "exclude_re": [
-        "^packages/mobile-core/",
-        "^packages/ui/",
         "^scripts/frontend/",
         "^scripts/ops/audit/auth-email-url-audit\\.js$",
         "^scripts/ops/ci/",
+        "^scripts/ops/security-(?:audit-inventory|scan-gate)\\.js$",
+        "^scripts/ops/remote-workflow\\.js$",
+        "^scripts/ops/setup-branch-protection\\.js$",
+        "^scripts/ops/pr-ready\\.js$",
+        "^scripts/ops/objectives-lint\\.js$",
+        "^scripts/utils/pg-hostaddr\\.js$",
+        "^scripts/ops/planning-os/",
+        "^config/ops/runtime-container-policy\\.json$",
+        "^scripts/ops/runtime-leases/",
+        "^scripts/ops/workspace/(?:docker-runtime|local-start|phase-runtime-bootstrap)\\.js$",
+        "^scripts/ops/branch-converge(?:-(?:cleanup(?:-adapters|-cli)?|decisions-generate|ignored-paths|inventory-coordinator|provider-(?:cleanup-adapters|snapshot(?:-coordinator)?)|runtime-(?:inventory|schema)|supplemental-inventory))?\\.js$",
+        "^scripts/ops/db/run-online-index-phase\\.js$",
+        "^scripts/ops/audit/shipment-identifier-(?:index-build-preflight\\.sql|lazy-lock-proof\\.js)$",
         "^scripts/ops/cloudflare/",
         "^scripts/docs/",
         "^config/ci/",
+        "^config/ops/branch-convergence-(?:cleanup-policy|policy)\\.json$",
+        "^config/ops/online-index-phases\\.json$",
         "^config/edge/"
       ],
       "required_suites": [
@@ -264,6 +321,22 @@
         "docs",
         "edge",
         "landing",
+        "mobile",
+        "portal"
+      ]
+    },
+    {
+      "id": "shared-client-runtime",
+      "include_re": [
+        "^packages/(?:api|auth|config)/"
+      ],
+      "exclude_re": [],
+      "required_suites": [
+        "integration",
+        "test_unit"
+      ],
+      "propagates_to": [
+        "console",
         "mobile",
         "portal"
       ]

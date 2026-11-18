@@ -22,7 +22,7 @@ const MAX_EVENT_MESSAGE_LENGTH = 8_000;
 const MAX_META_STRING_LENGTH = 1_000;
 
 const SENSITIVE_KEY_PATTERN =
-  /^(authorization|cookie|set-cookie|x-api-key|api[_-]?key|password|secret|token|signature|private[_-]?key|access[_-]?token|refresh[_-]?token|session|id[_-]?token|auth)$/i;
+  /^(authorization|cookie|set-cookie|x-api-key|api[_-]?key|password|secret|client[_-]?secret|service[_-]?role[_-]?key|supabase[_-]?(?:secret[_-]?key|service[_-]?role[_-]?key)|token|signature|private[_-]?key|access[_-]?token|refresh[_-]?token|session|id[_-]?token|auth)$/i;
 
 const resolveLimit = (value: string | undefined, fallback: number) => {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -49,32 +49,52 @@ const normalizeRequestId = (value: string | null | undefined): string | undefine
     : trimmed;
 };
 
+const redactEventString = (value: string) => value.replace(
+  /\b([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\b/g,
+  (match, partOne, partTwo, partThree) => {
+    const looksLikeJwt = String(partOne).startsWith("eyJ") || (
+      match.length >= 50 &&
+      String(partOne).length >= 8 &&
+      String(partTwo).length >= 8 &&
+      String(partThree).length >= 8
+    );
+    return looksLikeJwt ? "[redacted]" : match;
+  }
+);
+
 const trimStringValue = (value: unknown, maxLength: number) => {
   if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
+  const trimmed = redactEventString(value.trim());
   if (!trimmed) return undefined;
   return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
 };
 
-const utf8ByteLength = (value: string) => {
-  const encoder = new TextEncoder();
-  return encoder.encode(value).byteLength;
-};
+async function readEventBody(request: Request): Promise<string | null> {
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let payloadBytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return text + decoder.decode();
+      payloadBytes += value.byteLength;
+      if (payloadBytes > MAX_UI_EVENT_PAYLOAD_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 export const sanitizeEventMetadata = (value: unknown, depth = 0): unknown => {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") {
-    return value.replace(
-      /\b([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\b/g,
-      (match, partOne, partTwo, partThree) => {
-        const looksLikeJwt =
-          match.length >= 50 &&
-          String(partOne).length >= 8 &&
-          String(partTwo).length >= 8 &&
-          String(partThree).length >= 8;
-        return looksLikeJwt ? "[redacted]" : match;
-      }
-    );
+    return redactEventString(value).slice(0, MAX_META_STRING_LENGTH);
   }
 
   if (typeof value === "number" || typeof value === "boolean") {
@@ -219,12 +239,10 @@ export async function handleUiEventRequest(
 
   let parsed: unknown = null;
   try {
-    const text = await request.text();
-    const payloadBytes = hasDeclaredPayloadLimit
-      ? contentLengthHeader
-      : utf8ByteLength(text);
-
-    if (payloadBytes > MAX_UI_EVENT_PAYLOAD_BYTES) {
+    const text = hasDeclaredPayloadLimit && contentLengthHeader > MAX_UI_EVENT_PAYLOAD_BYTES
+      ? null
+      : await readEventBody(request);
+    if (text === null) {
       return jsonResponseWithRequestId(
         { error: "Request payload too large.", requestId },
         413,

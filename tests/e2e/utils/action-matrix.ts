@@ -2,13 +2,17 @@ import {
   matchesResourceCategory,
   resolveResourceActionStats,
 } from "../../../packages/ui/src/resource-actions-core";
-import {
-  flattenNavigationSections,
-  type CommandDefinition,
-  type NavigationSection,
-  type ReadRegistry,
+import { flattenNavigationSections } from "../../../packages/ui/src/navigation-utils";
+import type {
+  CommandDefinition,
+  NavigationSection,
+  ReadRegistry,
 } from "./role-matrix";
-import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import {
+  hasCapability,
+  isResourceReadScopeAllowed,
+  resolveCapabilitySet,
+} from "../../../packages/ui/src/capabilities";
 
 type ActionStats = {
   total: number;
@@ -18,15 +22,46 @@ type ActionStats = {
 
 export function collectAccessibleResourceKeys(params: {
   sections: NavigationSection[];
+  readRegistry?: ReadRegistry | null;
   capabilities?: string[] | null;
+  scopeType?: string | null;
+  scopeId?: string | null;
+  organizationId?: string | null;
 }) {
-  const { sections, capabilities } = params;
+  const {
+    sections,
+    readRegistry,
+    capabilities,
+    scopeType,
+    scopeId,
+    organizationId,
+  } = params;
   const capabilitySet = resolveCapabilitySet(capabilities);
-  const flattened = flattenNavigationSections(sections);
+  const flattened = flattenNavigationSections(
+    sections.map((section) => ({
+      ...section,
+      label: section.label ?? "",
+      items: section.items ?? [],
+    })) as Parameters<typeof flattenNavigationSections>[0]
+  );
   const keys = new Set<string>();
   for (const { item } of flattened) {
     const resourceKey = item.resource?.trim();
     if (!resourceKey) continue;
+    const resource = readRegistry?.resources?.find(
+      (entry) => entry?.key === resourceKey
+    );
+    if (
+      readRegistry &&
+      !isResourceReadScopeAllowed(
+        resource as Parameters<typeof isResourceReadScopeAllowed>[0],
+        scopeType,
+        scopeId,
+        organizationId
+      )
+    ) {
+      continue;
+    }
     const capability = item.capability?.trim() ?? "";
     const missingCapability =
       capability && !hasCapability(capabilitySet, capability);

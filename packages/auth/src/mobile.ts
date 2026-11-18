@@ -21,6 +21,14 @@ export type MobileRequestFailureContext = {
   error?: string;
 };
 
+export type MobileRequestTraceEvent = MobileTraceContext & {
+  phase: "start" | "end" | "error";
+  method: string;
+  url: string;
+  status?: number;
+  durationMs?: number | null;
+};
+
 type MobileClientParams = {
   supabaseUrl: string;
   supabaseAnonKey: string;
@@ -28,6 +36,7 @@ type MobileClientParams = {
   schema?: string;
   getTraceContext?: () => MobileTraceContext;
   onRequestFailure?: (context: MobileRequestFailureContext) => void;
+  onRequestTrace?: (event: MobileRequestTraceEvent) => void;
 };
 
 function toHex(n: number) {
@@ -71,7 +80,7 @@ function normalizeRequestUrl(input: Request | URL | string): string {
     const parsed = new URL(raw);
     return `${parsed.origin}${parsed.pathname}`;
   } catch {
-    return raw.split("?")[0] || raw;
+    return "[unparseable-url]";
   }
 }
 
@@ -119,7 +128,8 @@ function safeHeaders(input?: HeadersInit) {
 
 function createMobileFetch(
   onRequestFailure?: (context: MobileRequestFailureContext) => void,
-  getTraceContext: () => MobileTraceContext = createTraceContext
+  getTraceContext: () => MobileTraceContext = createTraceContext,
+  onRequestTrace?: (event: MobileRequestTraceEvent) => void
 ) {
   return async (input: Request | URL | string, init: RequestInit = {}) => {
     const traceContext = getTraceContext();
@@ -129,6 +139,27 @@ function createMobileFetch(
 
     let response: Response;
     const requestUrl = normalizeRequestUrl(input);
+    // Observer failures must never replace a transport response or exception.
+    const now = () => typeof globalThis.performance?.now === "function" ? globalThis.performance.now() : null;
+    const startedAt = now();
+    const emit = (phase: MobileRequestTraceEvent["phase"], status?: number) => {
+      // Do not create new telemetry merely by delivering buffered telemetry.
+      if (requestUrl.replace(/^https?:\/\/[^/]+/, "") === "/rest/v1/rpc/ui_log_events_v1") return;
+      try {
+        onRequestTrace?.({
+          ...traceContext, phase, method: coerceRequestMethod(input, init),
+          url: (() => {
+            try {
+              const url = new URL(requestUrl);
+              // RPC names are operation descriptors; storage/table paths are data.
+              return url.origin + (/^\/rest\/v1\/rpc\/[a-zA-Z0-9_]+$/.test(url.pathname) ? url.pathname : "/[redacted-path]");
+            } catch { return "[unparseable-url]"; }
+          })(), ...(status === undefined ? {} : { status }),
+          ...(phase === "start" ? {} : { durationMs: startedAt === null ? null : Math.max(0, (now() ?? startedAt) - startedAt) }),
+        });
+      } catch { /* Telemetry is not a transport gate. */ }
+    };
+    emit("start");
 
     try {
       response = await fetch(input as RequestInfo, {
@@ -136,6 +167,7 @@ function createMobileFetch(
         headers,
       });
     } catch (error) {
+      emit("error");
       if (onRequestFailure) {
         onRequestFailure({
           method: coerceRequestMethod(input, init),
@@ -148,6 +180,7 @@ function createMobileFetch(
       throw error;
     }
 
+    emit(response.ok ? "end" : "error", response.status);
     if (!response.ok && onRequestFailure) {
       onRequestFailure({
         method: coerceRequestMethod(input, init),
@@ -173,7 +206,7 @@ export function createMobileClient(params: MobileClientParams) {
       detectSessionInUrl: false,
     },
     global: {
-      fetch: createMobileFetch(params.onRequestFailure, params.getTraceContext),
+      fetch: createMobileFetch(params.onRequestFailure, params.getTraceContext, params.onRequestTrace),
     },
   });
 }
@@ -181,9 +214,39 @@ export function createMobileClient(params: MobileClientParams) {
 export function createSupabaseExecutor(
   client: SupabaseClient<any, any, any, any, any>
 ) {
-  return async (rpc: string, args: Record<string, unknown>) => {
-    const result = await client.rpc(rpc as any, args as any);
-    if (result.error) throw result.error;
+  return async (
+    rpc: string,
+    args: Record<string, unknown>,
+    transport: "rpc" | "edge" = "rpc"
+  ) => {
+    if (transport === "rpc") {
+      const result = await client.rpc(rpc as any, args as any);
+      if (result.error) {
+        const error = result.error;
+        // PostgREST wraps rejected fetches; retain transport provenance rather
+        // than treating arbitrary database error text as a network failure.
+        if (result.status === 0 && error.code === "" && error.hint === "" &&
+            /^TypeError: (?:failed to fetch|fetch failed|networkerror(?: when attempting to fetch resource\.)?)$/i.test(error.message)) {
+          const networkError = new TypeError("Failed to fetch RPC.");
+          Object.defineProperty(networkError, "cause", { value: error, configurable: true });
+          throw networkError;
+        }
+        throw error;
+      }
+      return result.data;
+    }
+    if (transport !== "edge" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(rpc)) {
+      throw new Error("Unsupported outbox transport or Edge function name.");
+    }
+    const result = await client.functions.invoke(rpc, { body: args });
+    if (result.error) {
+      // Preserve the shared retry contract without interpreting a product response.
+      const error = result.error as Error & { context?: { status?: number }; status?: number };
+      if (error.name === "FunctionsFetchError") throw new TypeError("Failed to fetch Edge function.");
+      if (error.name === "FunctionsRelayError") error.status = 503;
+      else if (typeof error.context?.status === "number") error.status = error.context.status;
+      throw error;
+    }
     return result.data;
   };
 }

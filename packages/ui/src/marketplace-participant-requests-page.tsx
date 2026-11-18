@@ -2,7 +2,10 @@ import "server-only";
 
 import { createUiServerClient } from "@masarx/api/server";
 import { UiMe } from "@masarx/api";
-import { getVerifiedAccessToken } from "@masarx/auth/server";
+import {
+  createServerReachableFetch,
+  getVerifiedAccessToken,
+} from "@masarx/auth/server";
 import { getPublicConfig } from "@masarx/config";
 import { Badge } from "./badge";
 import { ResourcePage } from "./resource-page";
@@ -37,10 +40,13 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value : null;
 }
 
-function normalizeDecision(raw: string): "approved" | "rejected" | "" {
+function normalizeDecision(raw: string): "approved" | "rejected" | "request_additional_docs" | "" {
   const value = raw.trim().toLowerCase();
   if (value === "approve" || value === "approved") return "approved";
   if (value === "reject" || value === "rejected") return "rejected";
+  if (["request_additional_docs", "request-docs", "request_docs", "additional_docs"].includes(value)) {
+    return "request_additional_docs";
+  }
   return "";
 }
 
@@ -121,6 +127,8 @@ export async function MarketplaceParticipantRequestsPage({
     const decision = normalizeDecision(String(formData.get("decision") ?? ""));
     const reason = String(formData.get("reason") ?? "").trim();
     const inviteRedirectRaw = String(formData.get("invite_redirect_to") ?? "").trim();
+    const requestedDocuments = [...new Set(String(formData.get("requested_documents") ?? "")
+      .split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
 
     if (!uuidRegex.test(requestId)) {
       return { status: "error", message: "Invalid request id." };
@@ -128,6 +136,10 @@ export async function MarketplaceParticipantRequestsPage({
 
     if (!decision) {
       return { status: "error", message: "Select a valid decision." };
+    }
+
+    if (decision === "request_additional_docs" && requestedDocuments.some((value) => value.length > 100)) {
+      return { status: "error", message: "Each requested document type must be at most 100 characters." };
     }
 
     const inviteRedirectTo = normalizeHostedUrl(inviteRedirectRaw);
@@ -169,10 +181,11 @@ export async function MarketplaceParticipantRequestsPage({
     }
 
     const endpoint = `${supabaseUrl.replace(/\/+$/g, "")}/functions/v1/marketplace-participant-review`;
+    const serverFetch = createServerReachableFetch(supabaseUrl) ?? fetch;
 
     let response: Response;
     try {
-      response = await fetch(endpoint, {
+      response = await serverFetch(endpoint, {
         method: "POST",
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -186,6 +199,7 @@ export async function MarketplaceParticipantRequestsPage({
           metadata: {
             source: "console.marketplace.reviews",
             app_base_path: appBasePath,
+            ...(decision === "request_additional_docs" ? { requested_documents: requestedDocuments } : {}),
           },
         }),
       });
@@ -212,11 +226,21 @@ export async function MarketplaceParticipantRequestsPage({
       return { status: "error", message };
     }
 
+    if (decision === "request_additional_docs") {
+      const result = payloadRecord?.result as Record<string, unknown> | undefined;
+      if (payloadRecord?.ok !== true || result?.ok !== true || result.status !== "pending"
+        || result.decision !== "request_additional_docs") {
+        return { status: "error", message: "The API did not confirm a pending additional-document review. Reload the request before retrying." };
+      }
+    }
+
     return {
       status: "success",
       message:
         decision === "approved"
           ? "Marketplace participant approved."
+          : decision === "request_additional_docs"
+          ? "Additional documents requested. The application remains pending."
           : "Marketplace participant rejected.",
     };
   }
@@ -238,6 +262,8 @@ export async function MarketplaceParticipantRequestsPage({
 
         const status = stringValue(detail.status) ?? "unknown";
         const decision = stringValue(detail.review_decision);
+        const requestedDocuments = Array.isArray(detail.requested_documents)
+          ? detail.requested_documents.filter((value): value is string => typeof value === "string") : [];
         const reviewedAt = stringValue(detail.reviewed_at);
         const reviewedBy = stringValue(detail.reviewed_by);
         const reviewReason = stringValue(detail.review_reason);
@@ -266,6 +292,14 @@ export async function MarketplaceParticipantRequestsPage({
               ) : null}
               {reviewReason ? (
                 <p className="mt-3 text-sm text-ui-muted">{reviewReason}</p>
+              ) : null}
+              {decision === "request_additional_docs" && requestedDocuments.length ? (
+                <div className="mt-3 text-sm text-ui-muted" data-testid={`${testIdPrefix}-requested-documents`}>
+                  <p>Requested documents</p>
+                  <ul className="list-inside list-disc">
+                    {requestedDocuments.map((document) => <li key={document}>{document}</li>)}
+                  </ul>
+                </div>
               ) : null}
             </Section>
 

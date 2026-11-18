@@ -15,6 +15,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const { loadEnv } = require('../utils/load-env');
+const { upsertEnvFileValues } = require('../utils/env-file');
 const {
   applyPinnedDbSelectionPreference,
   buildDbConnectionCandidates,
@@ -62,15 +63,37 @@ function pinSelectedDsnForDownstream(candidate, options = {}) {
     `DATABASE_URL=${dsn}`,
     `PG_CONN_STRING=${dsn}`,
     `DB_SMOKE_SELECTED_DSN_NAME=${candidateName}`,
+    `DATABASE_URL_SELECTED_DSN_NAME=${candidateName}`,
     `DB_SMOKE_SELECTED_DSN_HASH=${dsnHash}`,
     '',
   ].join('\n');
 
   appendFileSync(githubEnvPath, payload, 'utf8');
+  const persistEnvFile = options.persistEnvFile === true || /^(1|true|yes)$/i.test(
+    String(env.DB_SMOKE_PERSIST_ENV_FILE || '').trim(),
+  );
+  const envFilePath = String(options.envFilePath || env.ENV_FILE || '').trim();
+  const envFilePersisted = persistEnvFile && envFilePath
+    ? upsertEnvFileValues(envFilePath, {
+      DATABASE_URL: dsn,
+      PG_CONN_STRING: dsn,
+      DB_SMOKE_SELECTED_DSN_NAME: candidateName,
+      DATABASE_URL_SELECTED_DSN_NAME: candidateName,
+      DB_SMOKE_SELECTED_DSN_HASH: dsnHash,
+    })
+    : false;
+  if (persistEnvFile && !envFilePersisted) {
+    return {
+      pinned: false,
+      reason: envFilePath ? 'env_file_missing' : 'missing_env_file',
+      dsnHash,
+      candidateName,
+    };
+  }
   logger.log?.(
     `[db-smoke] Pinned downstream DATABASE_URL/PG_CONN_STRING to ${candidateName || 'selected'} (dsn_hash=${dsnHash})`,
   );
-  return { pinned: true, reason: 'ok', dsnHash, candidateName };
+  return { pinned: true, reason: 'ok', dsnHash, candidateName, envFilePersisted };
 }
 
 function shouldUseSsl() {
@@ -191,6 +214,43 @@ function filterCandidatesByPolicy(candidates, policyRaw) {
   return list.filter((candidate) => !isSupabaseDirectCandidate(candidate));
 }
 
+function isProjectDbPasswordSyncAllowed(env = process.env) {
+  const previewConfiguredMode = String(env.PREVIEW_SUPABASE_WORKSPACE_MODE || '').trim().toLowerCase();
+  const workspaceConfiguredMode = String(env.WORKSPACE_MODE || '').trim().toLowerCase();
+  const resolvedMode = String(env.PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE || '').trim().toLowerCase();
+  const configuredModes = [previewConfiguredMode, workspaceConfiguredMode].filter(Boolean);
+  if (configuredModes.some((mode) => !['auto', 'branch', 'project'].includes(mode))) return false;
+  if (resolvedMode && !['branch', 'project'].includes(resolvedMode)) return false;
+
+  // Supabase branch databases own isolated credentials. Never send their ref to
+  // the project password PATCH endpoint, even when an explicit sync override is
+  // set or stale environment values disagree about the selected workspace.
+  if (configuredModes.includes('branch') || resolvedMode === 'branch') return false;
+
+  // Auto is only safe after provisioning persisted the actual selected mode.
+  // An unresolved preview could already be a branch, so fail closed instead of
+  // guessing that its ref belongs to a long-lived project.
+  if (configuredModes.includes('auto') && resolvedMode !== 'project') return false;
+
+  const previewSignalsPresent = Boolean(
+    isTruthyFlag(env.PREVIEW_MODE)
+      || isTruthyFlag(env.CI_PREVIEW)
+      || isTruthyFlag(env.VERIFY_PREVIEW)
+      || String(
+        env.PREVIEW_SUPABASE_URL
+          || env.PREVIEW_PROJECT_REF
+          || env.PREVIEW_PROJECT_NAME
+          || env.PREVIEW_SUPABASE_ACCESS_TOKEN
+          || '',
+      ).trim(),
+  );
+  if (previewSignalsPresent && resolvedMode !== 'project' && !configuredModes.includes('project')) {
+    return false;
+  }
+
+  return true;
+}
+
 function shouldSyncTenantNotFoundOnPreviewEnv(env = process.env) {
   const explicit = String(env.DB_SMOKE_SYNC_ON_TENANT_NOT_FOUND || '').trim();
   if (explicit) return isTruthyFlag(explicit);
@@ -249,6 +309,7 @@ function isTenantOrUserNotFoundError(error) {
 
 function shouldAttemptDbPasswordSync({ env = process.env, lastError, alreadyAttempted = false } = {}) {
   if (alreadyAttempted) return false;
+  if (!isProjectDbPasswordSyncAllowed(env)) return false;
   const allowTenantNotFoundSync = shouldSyncTenantNotFoundOnPreviewEnv(env);
   const authDriftDetected = isPasswordAuthFailure(lastError)
     || isCircuitBreakerCredentialError(lastError)
@@ -269,6 +330,12 @@ function shouldAttemptDbPasswordSync({ env = process.env, lastError, alreadyAtte
 }
 
 async function syncDbPasswordViaManagementApi({ env = process.env, logger = console } = {}) {
+  if (!isProjectDbPasswordSyncAllowed(env)) {
+    return {
+      ok: false,
+      reason: 'project DB password sync is disabled for branch or unresolved preview workspaces',
+    };
+  }
   const { token, projectRef, password } = resolveDbManagementCredentials(env);
   if (!token || !projectRef || !password) {
     return {
@@ -297,9 +364,13 @@ async function resolveDsnCandidates(options = {}) {
     options.candidatePolicy || sourceEnv.DB_CONNECT_CANDIDATE_POLICY,
   );
   const pinnedCandidate = buildPinnedDbSelectionCandidate(sourceEnv);
+  const unlabelledPgConnectionString = String(sourceEnv.PG_CONN_STRING || '').trim();
   // Prefer synchronized/pooler DSNs first; keep direct URLs as final fallback.
   const rawCandidates = filterCandidatesByPolicy([
     ...(pinnedCandidate ? [pinnedCandidate] : []),
+    ...(unlabelledPgConnectionString
+      ? [{ name: 'PG_CONN_STRING', dsn: unlabelledPgConnectionString }]
+      : []),
     { name: 'SYNCED_DB_URL_POOLER', dsn: String(sourceEnv.SYNCED_DB_URL_POOLER || '').trim() },
     { name: 'DATABASE_URL_POOLER', dsn: String(sourceEnv.DATABASE_URL_POOLER || '').trim() },
     { name: 'SYNCED_DB_URL', dsn: String(sourceEnv.SYNCED_DB_URL || '').trim() },
@@ -585,7 +656,16 @@ async function main() {
     console.log(
       `[db-smoke] OK via ${result.candidate.name} (dsn_hash=${dsnHash}) attempts=${result.attempts} duration_ms=${result.durationMs}`,
     );
-    pinSelectedDsnForDownstream(result.candidate, { env: process.env, logger: console });
+    const pinResult = pinSelectedDsnForDownstream(result.candidate, {
+      env: process.env,
+      logger: console,
+    });
+    if (
+      /^(1|true|yes)$/i.test(String(process.env.DB_SMOKE_PERSIST_ENV_FILE || '').trim()) &&
+      !pinResult.pinned
+    ) {
+      throw new Error(`Failed to persist selected DB route: ${pinResult.reason}`);
+    }
   } catch (error) {
     console.error(`[db-smoke] FAILED: ${sanitizeErrorMessage(error)}`);
     process.exit(1);
@@ -615,6 +695,7 @@ module.exports = {
   isSupabaseDirectCandidate,
   shouldSyncTenantNotFoundOnPreviewEnv,
   shouldAttemptDbPasswordSync,
+  isProjectDbPasswordSyncAllowed,
   shouldUseSsl,
   resolveDbManagementCredentials,
 };

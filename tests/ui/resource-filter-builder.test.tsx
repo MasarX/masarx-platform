@@ -1,5 +1,6 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { ResourceFilterBuilder } from "../../packages/ui/src/resource-filter-builder";
+import { decodeFilterTree, flattenFilterTree } from "../../packages/ui/src/resource-query";
 import { renderWithIntl } from "./test-utils";
 
 jest.mock("@masarx/api", () => ({
@@ -114,3 +115,26 @@ test("resource filter builder honors allowed operators from registry", () => {
   expect(screen.getByRole("option", { name: "contains" })).toBeInTheDocument();
   expect(screen.queryByRole("option", { name: ">" })).toBeNull();
 });
+
+test.each(["unknown", "intervention_required", "healthy", "degraded", "down"])(
+  "provider health filter offers and preserves %s without a closed status list",
+  (status) => {
+    renderWithIntl(<ResourceFilterBuilder
+      resourceKey="providers"
+      filters={[{ key: "health_status", column: "health_status", op: "eq" }]}
+      searchParams={{}} actionHref="/console/resources/providers" limit={25}
+    />);
+    expect(screen.getByRole("option", { name: "Health Status" })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("value or comma-separated values"), {
+      target: { value: status },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    const url = new URL(replaceMock.mock.calls[0][0], "http://localhost");
+    expect(url.pathname).toBe("/console/resources/providers");
+    const tree = decodeFilterTree(url.searchParams.get("filters"));
+    expect(tree).not.toBeNull();
+    expect(flattenFilterTree(tree!)).toEqual([
+      expect.objectContaining({ key: "health_status", op: "eq", value: status }),
+    ]);
+  }
+);

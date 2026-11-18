@@ -46,19 +46,22 @@ async function resolveDbCandidate(options = {}) {
   return result.candidate;
 }
 
-function stripTrailingSlash(value) {
-  return String(value || '').trim().replace(/\/$/, '');
-}
-
 function resolveLabelProviderInvokeUrl(env = process.env) {
-  const explicitUrl = stripTrailingSlash(
-    env.LABEL_PROVIDER_INVOKE_URL || env.LABEL_RENDERER_INVOKE_URL,
-  );
-  if (explicitUrl) return explicitUrl;
+  const key = [
+    'LABEL_PROVIDER_INVOKE_URL',
+    'LABEL_RENDERER_INVOKE_URL',
+    'EDGE_SUPABASE_URL',
+    'SUPABASE_URL',
+  ].find((name) => String(env[name] || '').trim());
+  if (!key) return '';
 
-  const baseUrl = stripTrailingSlash(env.EDGE_SUPABASE_URL || env.SUPABASE_URL);
-  if (!baseUrl) return '';
-  return `${baseUrl}/functions/v1/label-renderer`;
+  const value = String(env[key]).trim().replace(/\/+$/, '');
+  const url = URL.parse(value);
+  if (!url || !/^https?:\/\//i.test(value) || !url.hostname
+    || url.username || url.password || /[\s\\?#]/.test(value)) {
+    throw new Error(`${key} must be an absolute HTTP(S) URL without credentials, query, or fragment`);
+  }
+  return key.startsWith('LABEL_') ? value : `${value}/functions/v1/label-renderer`;
 }
 
 async function main() {
@@ -77,7 +80,7 @@ async function main() {
   const invokeUrl = resolveLabelProviderInvokeUrl(process.env);
   if (!invokeUrl || !SECRET) {
     throw new Error(
-      'EDGE_SUPABASE_URL/SUPABASE_URL/LABEL_PROVIDER_INVOKE_URL and LABEL_RENDERER_TOKEN/SERVICE_ROLE required',
+      'LABEL_PROVIDER_INVOKE_URL/LABEL_RENDERER_INVOKE_URL/EDGE_SUPABASE_URL/SUPABASE_URL and LABEL_RENDERER_TOKEN/SERVICE_ROLE required',
     );
   }
 
@@ -100,6 +103,7 @@ async function main() {
   try {
     await client.query('BEGIN');
 
+    // The service writer seals invoke_secret in Vault before any settings persistence.
     await upsertSettings({
       db: client,
       category: 'label_provider',

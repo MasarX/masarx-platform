@@ -4,9 +4,10 @@ import { expectSignedIn, signInWithPassword } from "./utils/auth";
 import { getConsoleBasePath } from "./utils/base-paths";
 import { captureViewport, isCaptureEnabled, resolveEvidencePath } from "./utils/evidence";
 import {
+  approveResourceImport,
+  getOperationReportDetails,
   getDemoClientId,
   getDemoSenderId,
-  runTabularImportWorkerOnce,
   uploadCsv,
   waitForOperationReport,
 } from "./utils/resource-import";
@@ -34,6 +35,7 @@ async function pickComboboxValue(page: import("@playwright/test").Page, testId: 
 
 test.describe("console resource import", () => {
   test("blocks missing required fields before approval and completes a shared-profile import", async ({ page }) => {
+    test.setTimeout(120_000); // This case runs two imports and verifies profile reuse.
     const consoleBasePath = getConsoleBasePath();
     const demoClientId = getDemoClientId();
     const demoSenderId = getDemoSenderId();
@@ -44,10 +46,10 @@ test.describe("console resource import", () => {
     });
 
     const authGate = page.locator('[data-testid="console-auth-required"]');
-    const ready = page.getByRole("button", { name: /^Import$/ }).first();
+    const ready = page.getByTestId("console-resource-launcher");
     await expect(
       page.locator(
-        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], button:has-text("Import")',
+        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], [data-testid="console-resource-launcher"]',
       ).first(),
     ).toBeVisible({ timeout: 30_000 });
 
@@ -130,16 +132,10 @@ test.describe("console resource import", () => {
       await page.selectOption('[data-testid="console-resource-profile-mode"]', "new");
       await page.locator('[data-testid="console-resource-profile-name"]').fill(profileName);
     }
-    await page.getByRole("button", { name: "Approve and import" }).click();
-    await expect(page.getByText("Import in progress")).toBeVisible({ timeout: 30_000 });
-    runTabularImportWorkerOnce();
-    await waitForOperationReport(page, [
-      "Review the imported records in the destination table or import history.",
-      "\"created_count\": 2",
-      "\"status\": \"completed\"",
-    ]);
+    const recipientRun = await approveResourceImport(page);
+    await waitForOperationReport(page, recipientRun, { createdCount: 2 });
     if (isCaptureEnabled()) {
-      await page.getByText("Raw report JSON").first().scrollIntoViewIfNeeded();
+      await getOperationReportDetails(page).scrollIntoViewIfNeeded();
       await captureViewport(
         page,
         resolveEvidencePath(evidenceGroup, "console-resource-import-report.png"),
@@ -175,7 +171,7 @@ test.describe("console resource import", () => {
       timeout: 60_000,
     });
 
-    const shipmentsImport = page.getByRole("button", { name: /^Import$/ }).first();
+    const shipmentsImport = page.getByTestId("console-resource-launcher");
     await expect(shipmentsImport).toBeVisible({ timeout: 30_000 });
     await shipmentsImport.click();
     await expect(page.getByText("Import source")).toBeVisible({ timeout: 30_000 });
@@ -195,14 +191,8 @@ test.describe("console resource import", () => {
 
     await expect(page.locator("body")).toContainText("Will create", { timeout: 60_000 });
     await expect(page.locator("body")).toContainText("Rows staged: 2", { timeout: 60_000 });
-    await page.getByRole("button", { name: "Approve and import" }).click();
-    await expect(page.getByText("Import in progress")).toBeVisible({ timeout: 30_000 });
-    runTabularImportWorkerOnce();
-    await waitForOperationReport(page, [
-      "Review the imported records in the destination table or import history.",
-      "\"created_count\": 2",
-      "\"status\": \"completed\"",
-    ]);
+    const shipmentRun = await approveResourceImport(page);
+    await waitForOperationReport(page, shipmentRun, { createdCount: 2 });
   });
 
   test("uses dynamic related-record pickers and row-specific fixes before approval", async ({ page }) => {
@@ -216,10 +206,10 @@ test.describe("console resource import", () => {
     });
 
     const authGate = page.locator('[data-testid="console-auth-required"]');
-    const ready = page.getByRole("button", { name: /^Import$/ }).first();
+    const ready = page.getByTestId("console-resource-launcher");
     await expect(
       page.locator(
-        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], button:has-text("Import")',
+        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], [data-testid="console-resource-launcher"]',
       ).first(),
     ).toBeVisible({ timeout: 30_000 });
 
@@ -272,14 +262,8 @@ test.describe("console resource import", () => {
     await page.locator('[data-testid="console-resource-row-1-status"]').selectOption("created");
     await expect(page.getByRole("button", { name: "Approve and import" })).toBeEnabled({ timeout: 30_000 });
 
-    await page.getByRole("button", { name: "Approve and import" }).click();
-    await expect(page.getByText("Import in progress")).toBeVisible({ timeout: 30_000 });
-    runTabularImportWorkerOnce();
-    await waitForOperationReport(page, [
-      "Review the imported records in the destination table or import history.",
-      "\"created_count\": 2",
-      "\"status\": \"completed\"",
-    ]);
+    const run = await approveResourceImport(page);
+    await waitForOperationReport(page, run, { createdCount: 2 });
   });
 
   test("lets the user attach a related node manually when auto-detection misses it", async ({ page }) => {
@@ -294,10 +278,10 @@ test.describe("console resource import", () => {
     });
 
     const authGate = page.locator('[data-testid="console-auth-required"]');
-    const ready = page.getByRole("button", { name: /^Import$/ }).first();
+    const ready = page.getByTestId("console-resource-launcher");
     await expect(
       page.locator(
-        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], button:has-text("Import")',
+        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], [data-testid="console-resource-launcher"]',
       ).first(),
     ).toBeVisible({ timeout: 30_000 });
 
@@ -360,15 +344,8 @@ test.describe("console resource import", () => {
       );
     }
 
-    await page.getByRole("button", { name: "Approve and import" }).click();
-    await expect(page.getByText("Import in progress")).toBeVisible({ timeout: 30_000 });
-    runTabularImportWorkerOnce();
-    await waitForOperationReport(page, [
-      "Review the imported records in the destination table or import history.",
-      "\"created_count\": 2",
-      "\"status\": \"completed\"",
-      "\"recipient\"",
-    ]);
+    const run = await approveResourceImport(page);
+    await waitForOperationReport(page, run, { createdCount: 2, relatedNodes: ["recipient"] });
   });
 
   test("builds related recipient and destination-address nodes from shipment rows", async ({ page }) => {
@@ -383,10 +360,10 @@ test.describe("console resource import", () => {
     });
 
     const authGate = page.locator('[data-testid="console-auth-required"]');
-    const ready = page.getByRole("button", { name: /^Import$/ }).first();
+    const ready = page.getByTestId("console-resource-launcher");
     await expect(
       page.locator(
-        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], button:has-text("Import")',
+        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], [data-testid="console-resource-launcher"]',
       ).first(),
     ).toBeVisible({ timeout: 30_000 });
 
@@ -469,19 +446,11 @@ test.describe("console resource import", () => {
       );
     }
 
-    await page.getByRole("button", { name: "Approve and import" }).click();
-    await expect(page.getByText("Import in progress")).toBeVisible({ timeout: 30_000 });
-    runTabularImportWorkerOnce();
-    await waitForOperationReport(page, [
-      "Review the imported records in the destination table or import history.",
-      "\"created_count\": 2",
-      "\"status\": \"completed\"",
-      "\"destination_address\"",
-      "\"recipient\"",
-    ]);
+    const run = await approveResourceImport(page);
+    await waitForOperationReport(page, run, { createdCount: 2, relatedNodes: ["destination_address", "recipient"] });
 
     if (isCaptureEnabled()) {
-      await page.getByText("Raw report JSON").first().scrollIntoViewIfNeeded();
+      await getOperationReportDetails(page).scrollIntoViewIfNeeded();
       await captureViewport(
         page,
         resolveEvidencePath(evidenceGroup, "console-resource-import-related-graph-report.png"),
@@ -500,10 +469,10 @@ test.describe("console resource import", () => {
     });
 
     const authGate = page.locator('[data-testid="console-auth-required"]');
-    const ready = page.getByRole("button", { name: /^Import$/ }).first();
+    const ready = page.getByTestId("console-resource-launcher");
     await expect(
       page.locator(
-        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], button:has-text("Import")',
+        '[data-testid="console-resource-import-ready"], [data-testid="console-auth-required"], [data-testid="console-missing-env"], [data-testid="console-resource-launcher"]',
       ).first(),
     ).toBeVisible({ timeout: 30_000 });
 
@@ -553,13 +522,7 @@ test.describe("console resource import", () => {
       );
     }
 
-    await page.getByRole("button", { name: "Approve and import" }).click();
-    await expect(page.getByText("Import in progress")).toBeVisible({ timeout: 30_000 });
-    runTabularImportWorkerOnce();
-    await waitForOperationReport(page, [
-      "Review the imported records in the destination table or import history.",
-      "\"created_count\": 2",
-      "\"status\": \"completed\"",
-    ]);
+    const run = await approveResourceImport(page);
+    await waitForOperationReport(page, run, { createdCount: 2 });
   });
 });

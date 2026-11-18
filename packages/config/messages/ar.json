@@ -1,8 +1,323 @@
 {
   "ui": {
+    "investigation": {
+      "trace": "النشاط: {id}",
+      "policy": "حل السياسة: {id}"
+    },
+    "automationMarketplace": {
+      "activationHint": "لا يمكن تفعيل الأتمتة التي تتطلب عناصر نائبة للأسرار في هذا الإصدار. احتفظ بها كمسودات؛ سيتاح إعداد اتصال الأسرار في إصدار لاحق. يمكن تفعيل الأتمتة الأخرى بعد فحوص الاتصال المحلية، وهي لا تتحقق من المزوّد البعيد.",
+      "localCheckHint": "يتحقق هذا الفحص المحلي من بيانات الاعتماد والإعدادات وانتهاء الصلاحية المخزّنة فقط. ولا يتصل بالمزوّد البعيد أو يتحقق منه.",
+      "bindingCopyHint": "تُثبّت الاتصالات عند تثبيت النسخة. يمكن هنا تأكيد ارتباط قائم لم يتغير فقط. لاستخدام اتصال آخر، ثبّت نسخة جديدة بالارتباطات الصحيحة.",
+      "upgradeCopied": "نُسخت الترقية؛ فعّل إصدار الإضافة الجديد بشكل منفصل.",
+      "openStagedVersion": "مراجعة إصدار الإضافة المنسوخ",
+      "upgradeAvailable": "توجد ترقية متاحة",
+      "publishNewVersion": "نشر إصدار جديد",
+      "newVersionHint": "أنشئ إصدار مسودة جديداً غير قابل للتعديل. يبقى الإصدار المعتمد الحالي متاحاً حتى اعتماد هذا الإصدار. الإدراج:",
+      "runtimeAuthConfig": "معرّف إعداد مصادقة التشغيل",
+      "expires_at": "انتهاء الصلاحية الحالي",
+      "oauthReauthRequired": "يلزم إعادة التفويض. ابدأ تفويض OAuth مجدداً لإعادة ربط هذا الاتصال.",
+      "cancel": "إلغاء",
+      "startOauth": "تفويض اتصال OAuth",
+      "refreshOauth": "تجديد اتصال OAuth",
+      "oauthRefreshed": "تم التأكد من تجديد OAuth",
+      "openSavedConnection": "فتح الاتصال المحفوظ",
+      "marketplace": "سوق الأتمتة",
+      "navigation": "التنقل في سوق الأتمتة",
+      "installs": "النسخ المثبتة",
+      "connections": "الاتصالات",
+      "reviews": "المراجعات",
+      "publish": "النشر في السوق",
+      "publishDescription": "أنشئ إدراجاً من قالب سير عمل أو إصدار إضافة تكامل.",
+      "createListing": "إنشاء إدراج",
+      "published": "تم نشر الإدراج",
+      "reviewSubmitted": "تم إرسال الإدراج للمراجعة",
+      "assetKind": "نوع الأصل",
+      "visibility": "نطاق الظهور",
+      "sourceId": "معرّف المصدر",
+      "listingTitle": "عنوان الإدراج",
+      "summary": "الملخص",
+      "notes": "ملاحظات",
+      "manifest": "بيان الأصل بصيغة JSON",
+      "docs": "التوثيق بصيغة JSON",
+      "publicationStatus": "حالة النشر",
+      "openListing": "فتح الإدراج",
+      "installTitle": "تثبيت أصل من السوق",
+      "installDescription": "أنشئ نسخة محلية مستقلة بمتغيرات واتصالات يملكها المُثبّت.",
+      "installCopy": "تثبيت نسخة",
+      "listingVersionId": "معرّف إصدار الإدراج",
+      "targetScopeType": "نوع النطاق المستهدف",
+      "targetScopeId": "معرّف النطاق المستهدف",
+      "variables": "متغيرات التثبيت بصيغة JSON",
+      "bindings": "ارتباطات الاتصالات بصيغة JSON",
+      "activate": "التفعيل بعد التثبيت",
+      "installed": "تم التأكد من تثبيت النسخة",
+      "manageInstall": "إدارة النسخة المثبتة",
+      "manageInstallDescription": "عاين التغييرات قبل تطبيق الترقية، أو افصل النسخة للاحتفاظ بالتغييرات المحلية.",
+      "installId": "معرّف التثبيت",
+      "currentVersion": "إصدار الإدراج الحالي",
+      "originVersion": "الإصدار المثبّت منه",
+      "installedResource": "المورد المثبّت",
+      "targetVersion": "معرّف إصدار الإدراج المستهدف (اختياري)",
+      "previewUpgrade": "معاينة الترقية",
+      "applyUpgrade": "تطبيق الترقية",
+      "markForked": "وضع علامة نسخة مستقلة",
+      "previewReady": "تم التأكد من معاينة الترقية",
+      "upgradeApplied": "تم التأكد من الترقية",
+      "forked": "نسخة مستقلة",
+      "hasChanges": "توجد تغييرات",
+      "bindConnection": "تأكيد الارتباط القائم",
+      "bindingKey": "مفتاح الارتباط",
+      "bindingType": "نوع الارتباط",
+      "bindingConfig": "إعدادات الارتباط بصيغة JSON",
+      "bindingSaved": "تم تأكيد ارتباط الاتصال القائم",
+      "decideReview": "اتخاذ قرار المراجعة",
+      "reviewDescription": "وافق على طلب النشر العام في السوق أو ارفضه.",
+      "reviewId": "معرّف المراجعة",
+      "decision": "القرار",
+      "decisionNotes": "ملاحظات القرار",
+      "applyDecision": "تطبيق القرار",
+      "reviewStatus": "حالة المراجعة",
+      "reviewSaved": "تم التأكد من قرار المراجعة",
+      "newConnection": "اتصال جديد",
+      "manageConnection": "إدارة الاتصال",
+      "connectionDescription": "أنشئ اتصالاً يملكه المُثبّت، أو افحصه محلياً أو دوّر بياناته أو ألغِه. لا تتحقق الفحوص المحلية من المزوّد البعيد.",
+      "connectionId": "معرّف الاتصال",
+      "ownerScopeType": "نوع نطاق المالك",
+      "ownerScopeId": "معرّف نطاق المالك",
+      "providerKey": "مفتاح المزوّد",
+      "providerId": "معرّف المزوّد (اختياري)",
+      "connectionName": "اسم الاتصال",
+      "authType": "نوع المصادقة",
+      "secretStorage": "تخزين السر",
+      "expiresAt": "موعد انتهاء جديد بصيغة ISO 8601 (اختياري)",
+      "config": "إعدادات بديلة بصيغة JSON",
+      "oauthMetadata": "بيانات OAuth وصفية بديلة بصيغة JSON",
+      "metadata": "بيانات وصفية بديلة بصيغة JSON",
+      "replaceJsonHint": "اترك الحقل فارغاً للاحتفاظ بالقيم المخزّنة. يحل كائن JSON المُدخل محلها؛ ولا تُحمّل الأسرار المخزّنة هنا.",
+      "secretPayload": "بيانات السر الجديد بصيغة JSON",
+      "secretInputHint": "أدخل كائن JSON فقط عند تعيين سر أو تدويره. لا تُحمّل الأسرار المخزّنة.",
+      "generateSecret": "إنشاء سر وارد بدلاً من إدخاله",
+      "saveConnection": "حفظ الاتصال",
+      "testConnection": "إجراء فحص محلي لبيانات الاعتماد والإعدادات",
+      "rotateConnection": "تدوير بيانات الاتصال",
+      "revokeConnection": "إلغاء الاتصال",
+      "connectionSaved": "تم حفظ الاتصال والتأكد منه",
+      "connectionTested": "اجتاز الفحص المحلي لبيانات الاعتماد والإعدادات؛ لم يُتحقق من المزوّد البعيد",
+      "connectionRotated": "تم التأكد من تدوير بيانات الاتصال",
+      "connectionRevoked": "تم التأكد من إلغاء الاتصال",
+      "oauthUnavailable": "لا تتوفر مصادقة OAuth حتى يُضبط ارتباط معتمد للمزوّد. تواصل مع المسؤول.",
+      "shownOnce": "السر المُنشأ — متاح في هذه الجلسة فقط",
+      "showSecret": "إظهار السر",
+      "hideSecret": "إخفاء السر",
+      "dismissSecret": "إزالة السر من العرض",
+      "last_tested_at": "آخر فحص محلي لبيانات الاعتماد والإعدادات",
+      "last_rotated_at": "آخر تدوير للبيانات",
+      "revoked_at": "وقت الإلغاء",
+      "status": "الحالة",
+      "unsaved": "غير محفوظ",
+      "unknown": "غير متاح",
+      "yes": "نعم",
+      "no": "لا",
+      "working": "جارٍ التنفيذ…",
+      "unavailable": "سوق الأتمتة غير متاح",
+      "accessDenied": "سجّل الدخول بحساب مخوّل لتنفيذ هذا الإجراء.",
+      "invalidJson": "أدخل كائن JSON صالحاً وتحقق من موعد الانتهاء، ثم أرسل مجدداً.",
+      "actionFailed": "تعذّر التأكد من التغيير. أعد تحميل الحالة الحالية قبل المحاولة مجدداً.",
+      "outcomeUnconfirmed": "نتيجة الطلب غير مؤكدة. أعد تحميل الحالة الحالية قبل المحاولة؛ ولا ترسل الطلب مرة أخرى الآن.",
+      "options": {
+        "workflow_template": "قالب سير عمل",
+        "integration_plugin": "إضافة تكامل",
+        "private": "خاص",
+        "tenant_shared": "مشترك داخل المستأجر",
+        "marketplace_public": "السوق العام",
+        "tenant": "مستأجر",
+        "client": "عميل",
+        "sender": "مرسِل",
+        "approved": "معتمد",
+        "rejected": "مرفوض",
+        "draft": "مسودة",
+        "submitted": "مُرسل",
+        "pending": "قيد الانتظار",
+        "installed": "مثبّت",
+        "forked": "نسخة مستقلة",
+        "ready": "جاهز",
+        "reauth_required": "يلزم التفويض",
+        "revoked": "ملغى",
+        "api_key": "مفتاح واجهة برمجة التطبيقات",
+        "bearer_token": "رمز وصول",
+        "basic_auth": "مصادقة أساسية",
+        "hmac_shared_secret": "سر HMAC مشترك",
+        "oauth2_authorization_code_pkce": "OAuth 2 مع PKCE",
+        "vault": "خزنة الأسرار",
+        "hash_only": "البصمة فقط"
+      }
+    },
+    "tabularFile": {
+      "fileSize": "اختر ملفًا لا يزيد حجمه عن 10 ميبيبايت.",
+      "rows": "يتجاوز الملف 10,000 صف بيانات. قسّمه إلى ملفات أصغر.",
+      "columns": "يتجاوز الملف 256 عمودًا.",
+      "cells": "يتجاوز الملف 100,000 خلية. قسّمه إلى ملفات أصغر.",
+      "cellLength": "تتجاوز إحدى الخلايا 32,767 حرفًا. اختصرها قبل الاستيراد.",
+      "archive": "ملف XLSX غير صالح أو يتجاوز حد البيانات بعد فك الضغط البالغ 16 ميبيبايت.",
+      "compression": "لا يستطيع هذا المتصفح فحص ملف XLSX بأمان. ارفع ملف CSV بدلًا منه.",
+      "elements": "يحتوي المصنف على عدد كبير من عناصر XML. قسّمه إلى ملفات أصغر."
+    },
+    "mappingStudioTest": {
+      "title": "اختبار مصدر الويب هوك",
+      "help": "احفظ الإعدادات وأهلية الاختبار أولاً. يؤدي الإرسال إلى إنشاء طلب اختبار فعلي بمعرّف حدث جديد؛ حفظ الربط لا ينشئ شحنة.",
+      "source": "المصدر",
+      "enable": "تفعيل طلبات الاختبار لهذا المصدر",
+      "send": "إرسال طلب اختبار",
+      "refresh": "التحقق من الطلب الحالي",
+      "newTest": "بدء اختبار آخر",
+      "checking": "جارٍ التحقق من أهلية الاختبار المحفوظة…",
+      "ready": "المصدر المحفوظ مؤهل للاختبار.",
+      "notEnabled": "الاختبار غير متاح. تحقق من صلاحياتك وفعّل الاختبار واحفظ الربط.",
+      "saveRequired": "احفظ الربط لتطبيق تغيير أهلية الاختبار.",
+      "invalidPayload": "أدخل كائن JSON يحتوي على كائن event في حقل المصدر.",
+      "sending": "جارٍ الإرسال مرة واحدة…",
+      "pending": "الطلب قيد الانتظار. تحقق من الطلب نفسه لمعرفة النتيجة.",
+      "unknown": "نتيجة الإرسال غير معروفة. تحقق من الطلب الحالي ولا تعِد إرساله.",
+      "unavailable": "الحالة غير متاحة. تحقق من الطلب نفسه بعد استعادة الوصول.",
+      "failed": "فشل الطلب. راجع النتيجة قبل بدء اختبار آخر.",
+      "succeeded": "تم التحقق من حفظ الشحنة واكتمال سير العمل وأدلة التدقيق.",
+      "event": "معرّف الحدث",
+      "shipment": "الشحنة",
+      "inbox": "صندوق الوارد",
+      "workflow": "سير العمل",
+      "step": "الخطوة المكتملة",
+      "audit": "أحداث التدقيق"
+    },
+    "codReconciliation": {
+      "title": "مطابقة الدفع عند الاستلام",
+      "description": "تأتي المبالغ المتوقعة من لقطة الدفع المسجلة عند وجودها، وإلا فمن توقع الشحنة الأصلي. حالة الشحنة لا تثبت التحصيل. هذه قراءة فقط؛ ولا تُعرض التحويلات المالية.",
+      "displayedRows": "الصفوف المعروضة",
+      "totalsNote": "المجاميع تخص الصفحة المعروضة فقط، وتُفصل بحسب العملة. أي قيمة مجهولة أو غير صالحة أو غير آمنة تجعل المجموع المتأثر غير متاح؛ ولا تُحتسب صفراً.",
+      "unassigned": "بعض الصفوف المعروضة بعملة مجهولة أو غير صالحة، ولا تدخل في مجموعات العملات. مجاميع جميع الصفوف المعروضة غير متاحة.",
+      "tableCaption": "لقطات تحصيل الدفع عند الاستلام لكل طلب",
+      "order": "مرجع الطلب",
+      "tracking": "رقم التتبع",
+      "expected": "المتوقع",
+      "collected": "المحصّل",
+      "variance": "الفرق: نقص (+) / تحصيل زائد (−)",
+      "status": "نتيجة التحصيل",
+      "unknown": "غير متاح",
+      "empty": "لا توجد صفوف دفع عند الاستلام تطابق هذه المرشحات.",
+      "unavailable": "مطابقة الدفع عند الاستلام غير متاحة. تعذر التحقق من الوصول أو إعداد السجل أو طلب القراءة.",
+      "states": {
+        "unknown": "التحصيل غير معروف — لا توجد لقطة دفع",
+        "invalid": "لقطة غير صالحة أو دقة مبلغ غير مدعومة",
+        "collected": "تم تسجيل التحصيل",
+        "refused": "تم رفض الدفع",
+        "shortfall": "تحصيل مسجل — نقص",
+        "overcollection": "تحصيل مسجل — زيادة"
+      },
+      "filters": {
+        "id": "معرّف الشحنة",
+        "client_id": "معرّف العميل",
+        "sender_id": "معرّف المرسل",
+        "tracking_number": "رقم التتبع"
+      },
+      "apply": "تطبيق المرشحات",
+      "clear": "مسح المرشحات",
+      "pagination": "صفحات الدفع عند الاستلام",
+      "previous": "الصفحة السابقة",
+      "next": "الصفحة التالية",
+      "page": "الصفحة {page}"
+    },
+    "onboardingReadiness": {
+      "labelDesign": {
+        "title": "تصميم الملصقات",
+        "readyCount": "الإعدادات الموجودة: {current}/{total}",
+        "blockingCount": "العوائق: {count}",
+        "warningCount": "التحذيرات: {count}",
+        "status": {
+          "healthy": "سليم",
+          "ready": "جاهز",
+          "warning": "تحذير",
+          "blocked": "متعذر",
+          "not_applicable": "غير منطبق",
+          "unknown": "غير معروف"
+        }
+      }
+    },
+    "tenantUsers": {
+      "invite": "دعوة مستخدم",
+      "resend": "إعادة إرسال الدعوة",
+      "back": "العودة إلى المستخدمين",
+      "email": "البريد الإلكتروني",
+      "fullName": "الاسم الكامل",
+      "userType": "نوع المستخدم",
+      "role": "الدور داخل المؤسسة",
+      "scope": "العميل أو المرسل",
+      "choose": "اختر خياراً",
+      "authorityHint": "نوع المستخدم ودور المؤسسة مستقلان. يمكنك منح الصلاحيات التي تملكها حالياً فقط؛ يتحقق الخادم من النطاق والصلاحيات المختارة.",
+      "working": "جارٍ التحقق…",
+      "checkOutcome": "التحقق من الطلب نفسه مجدداً (دون إعادة إرسال)",
+      "sent": "تم إرسال الدعوة. اطلب من المستلم التحقق من بريده أو التواصل مع الدعم. لا تؤكد هذه الرسالة وصول البريد أو منح صلاحية الدخول إلى المؤسسة.",
+      "applied": "تم تأكيد العضوية وقبل المزود الطلب. لم يتم التحقق من وصول الرسالة إلى البريد الوارد.",
+      "reused": "أُعيد استخدام الهوية الحالية وتأكدت العضوية. لم تُرسل رسالة جديدة.",
+      "appliedUnknown": "تأكدت العضوية لكن نتيجة مزود البريد غير معروفة. لا ترسل دعوة أخرى قبل تسوية النتيجة.",
+      "partial": "لم تتأكد العضوية. ربما اكتملت خطوة خارجية. احتفظ بمعرف الطلب وتحقق من الطلب نفسه مجدداً؛ لن تعاد الرسالة تلقائياً.",
+      "unknown": "فُقد الرد. احتفظ بمعرف الطلب وتحقق من الطلب نفسه مجدداً، ولا تبدأ دعوة أخرى.",
+      "failed": "رُفض الطلب أو تعذر إكماله. لا يعني ذلك نجاح العضوية. تحقق من الطلب نفسه أو تواصل مع المسؤول مستخدماً معرفه.",
+      "forbidden": "يلزم حساب نشط داخل المؤسسة يملك صلاحية إدارة المستخدمين.",
+      "noOptions": "لا توجد خيارات متاحة للدعوة. اطلب من مسؤول المؤسسة إعداد أنواع المستخدمين والأدوار، ثم عد إلى المستخدمين.",
+      "noScopeOptions": "لا يوجد عملاء أو مرسلون متاحون لهذا النوع من المستخدمين. اختر نوعاً آخر أو اطلب من مسؤول المؤسسة إعداد العميل أو المرسل المطلوب.",
+      "requestId": "الطلب: {id}"
+    },
+    "organizationProfile": {
+      "title": "ملف المنظمة وهويتها",
+      "name": "اسم المنظمة",
+      "timezone": "المنطقة الزمنية",
+      "locale": "اللغة والمنطقة",
+      "primary_color": "اللون الأساسي (اختياري، #RRGGBB)",
+      "secondary_color": "اللون الثانوي (اختياري، #RRGGBB)",
+      "logo": "استبدال الشعار (اختياري)",
+      "logoHelp": "PNG أو JPEG أو WebP، بحد أقصى 5 ميبيبايت و4096 × 4096 بكسل. يبقى الشعار الحالي حتى حفظ البديل.",
+      "save": "حفظ الملف",
+      "saving": "جارٍ الحفظ…",
+      "saved": "تم الحفظ والتأكد من البيانات المحفوظة في الخادم.",
+      "loading": "جارٍ تحميل ملف المنظمة…",
+      "loadFailed": "تعذر تحميل الملف بصلاحياتك الحالية. أعد تحميل الصفحة للمحاولة مجددًا.",
+      "saveFailed": "تعذر تأكيد التعديل. أعد تحميل الصفحة قبل المحاولة مجددًا.",
+      "invalidFile": "اختر ملف PNG أو JPEG أو WebP لا يزيد على 5 ميبيبايت.",
+      "readOnly": "يتطلب تعديل الملف صلاحية الكتابة للمنظمات.",
+      "preview": "طلب معاينة خاصة للشعار",
+      "openPreview": "فتح الشعار (تنتهي صلاحية الرابط الخاص بعد دقيقة)",
+      "previewFailed": "تعذر السماح بالمعاينة الخاصة. حاول مجددًا."
+    },
     "common": {
       "workflowFirst": "‏Workflow-first",
       "remove": "‏Remove"
+    },
+    "operationReport": {
+      "title": "تقرير العملية",
+      "empty": "لا يتوفر تقرير إرسال بعد.",
+      "status": "الحالة",
+      "succeeded": "نجحت",
+      "failed": "فشلت",
+      "direct": "مباشر",
+      "draft": "مسودة",
+      "artifact": "نوع المخرج",
+      "activityReference": "مرجع النشاط",
+      "activityPending": "مرجع النشاط قيد الانتظار",
+      "reportReference": "مرجع التقرير",
+      "primaryResource": "المورد الأساسي",
+      "workflow": "سير العمل",
+      "nextSteps": "الخطوات التالية",
+      "noNextSteps": "لم تُرفق إجراءات متابعة.",
+      "notAvailable": "غير متاح",
+      "pending": "قيد الانتظار",
+      "copySummary": "نسخ تفاصيل التقرير",
+      "copyJson": "نسخ JSON",
+      "downloadJson": "تنزيل JSON",
+      "openReport": "فتح التقرير المحفوظ",
+      "openResource": "فتح المورد الأساسي",
+      "reportDetails": "تفاصيل التقرير للدعم (منقحة)",
+      "resultDetails": "تفاصيل التنفيذ للدعم (منقحة)",
+      "copied": "تم النسخ إلى الحافظة.",
+      "copyFailed": "فشل النسخ. حاول مجددًا أو نزّل التقرير."
     },
     "auth": {
       "signIn": {
@@ -49,49 +364,51 @@
       "pendingDescription": "‏Navigation updates once your access scope and UI registry resolve.",
       "nextStepsTitle": "‏Next steps",
       "nextStepsRefresh": "‏Refresh after signing in.",
-      "nextStepsAccess": "�Confirm your account has access to this app.",
-      "nextStepsConnectivity": "�Confirm the service is reachable.",
-      "searchLabel": "�Search navigation",
-      "searchPlaceholder": "�Search pages, workflows, and settings",
-      "searchAria": "�Search navigation",
-      "searchClearAria": "�Clear search",
-      "searchClearLabel": "�Clear",
-      "searchResultsLabel": "�{count} results",
-      "searchEmptyTitle": "�No matches",
-      "searchEmptyDescription": "�Try a different keyword or check your access scope.",
-      "favoritesLabel": "�Favorites",
-      "recentsLabel": "�Recents",
-      "pin": "�Pin",
-      "unpin": "�Unpin",
-      "pinAria": "�Pin to favorites",
-      "unpinAria": "�Remove from favorites",
-      "commandPaletteLabel": "Search",
-      "commandPaletteAria": "Open search",
-      "fallbackResourcesLabel": "Registry resources",
+      "nextStepsAccess": "تأكد من أن حسابك يملك صلاحية الوصول إلى هذا التطبيق.",
+      "nextStepsConnectivity": "تأكد من إمكانية الوصول إلى الخدمة.",
+      "searchLabel": "بحث",
+      "searchPlaceholder": "ابحث…",
+      "searchAria": "فتح البحث",
+      "searchClearAria": "مسح البحث",
+      "searchClearLabel": "مسح",
+      "searchResultsLabel": "{count} نتيجة",
+      "searchEmptyTitle": "لا توجد نتائج مطابقة",
+      "searchEmptyDescription": "جرّب كلمة بحث أخرى أو تحقّق من نطاق وصولك.",
+      "favoritesLabel": "المفضلة",
+      "recentsLabel": "الأخيرة",
+      "pin": "تثبيت",
+      "unpin": "إلغاء التثبيت",
+      "pinAria": "إضافة إلى المفضلة",
+      "unpinAria": "إزالة من المفضلة",
+      "commandPaletteLabel": "بحث",
+      "commandPaletteAria": "فتح البحث",
+      "fallbackResourcesLabel": "الموارد المتاحة",
       "disabled": {
-        "noRoute": "No route configured.",
-        "missingCapability": "Requires {capability} capability."
+        "noRoute": "هذه الصفحة غير متاحة حاليًا.",
+        "missingCapability": "ليست لديك صلاحية الوصول إلى هذه الصفحة.",
+        "unavailable": "هذه الصفحة غير متاحة حاليًا."
       },
-      "collapseLabel": "??",
-      "expandLabel": "?????",
-      "collapseAria": "?? ???? ??????",
-      "expandAria": "????? ???? ??????",
-      "collapseAllLabel": "?? ????",
-      "expandAllLabel": "????? ????",
-      "collapseSectionAria": "?? ??? {section}",
-      "expandSectionAria": "????? ??? {section}",
-      "openMobileLabel": "??? ??????",
-      "openMobileAria": "??? ??? ??????",
-      "closeMobileLabel": "?????",
-      "closeMobileAria": "????? ??? ??????"
+      "collapseLabel": "طي",
+      "expandLabel": "توسيع",
+      "collapseAria": "طي الشريط الجانبي",
+      "expandAria": "توسيع الشريط الجانبي",
+      "collapseAllLabel": "طي الكل",
+      "expandAllLabel": "توسيع الكل",
+      "collapseSectionAria": "طي قسم {section}",
+      "expandSectionAria": "توسيع قسم {section}",
+      "openMobileLabel": "فتح القائمة",
+      "openMobileAria": "فتح قائمة التنقل",
+      "closeMobileLabel": "إغلاق",
+      "closeMobileAria": "إغلاق قائمة التنقل"
     },
     "appShell": {
+      "breadcrumb": "مسار التنقل",
       "skipToContent": "‏Skip to content",
       "sidebarHint": "‏Navigation loads from capability policy and registry.",
-      "layoutFullLabel": "â€Full width",
-      "layoutContainedLabel": "â€Contained width",
-      "layoutFullAria": "â€Switch to full width",
-      "layoutContainedAria": "â€Switch to contained width"
+      "layoutFullLabel": "العرض الكامل",
+      "layoutContainedLabel": "العرض المحدود",
+      "layoutFullAria": "التبديل إلى العرض الكامل",
+      "layoutContainedAria": "التبديل إلى العرض المحدود"
     },
     "theme": {
       "label": "‏Theme",
@@ -139,21 +456,21 @@
       "copyAria": "‏نسخ {label}"
     },
     "contextStrip": {
-      "copyAria": "â€Copy {label}",
+      "copyAria": "‏Copy {label}",
       "labels": {
-        "signedIn": "‏Signed in",
-        "org": "‏Org",
-        "scope": "‏Scope",
-        "capabilities": "‏Capabilities",
+        "signedIn": "تم تسجيل الدخول",
+        "org": "المؤسسة",
+        "scope": "النطاق",
+        "capabilities": "الصلاحيات",
         "settings": "‏Settings"
       },
-      "signOut": "�Sign out",
+      "signOut": "تسجيل الخروج",
       "actions": {
-        "copy": "�Copy",
-        "copied": "�Copied",
-        "copyFailed": "�Copy failed",
-        "details": "�Details",
-        "close": "�Close"
+        "copy": "نسخ",
+        "copied": "تم النسخ",
+        "copyFailed": "تعذر النسخ",
+        "details": "التفاصيل",
+        "close": "إغلاق"
       },
       "scopeSwitcher": {
         "label": "Change scope",
@@ -165,18 +482,18 @@
         }
       },
       "details": {
-        "title": "�Context details",
-        "description": "�Resolved scope and settings identifiers.",
-        "userId": "�User id",
-        "orgId": "�Org id",
-        "scopeType": "�Scope type",
-        "scopeId": "�Scope id",
-        "settingsResolutionId": "�Settings resolution id"
+        "title": "تفاصيل السياق",
+        "description": "معرّفات النطاق والإعدادات المحددة.",
+        "userId": "معرّف المستخدم",
+        "orgId": "معرّف المؤسسة",
+        "scopeType": "نوع النطاق",
+        "scopeId": "معرّف النطاق",
+        "settingsResolutionId": "معرّف تحديد الإعدادات"
       }
     },
     "resourceActions": {
       "downloadLabels": "Download labels",
-      "actionsMenu": "More actions",
+      "actionsMenu": "مزيد من الإجراءات",
       "actionsMenuAria": "Open actions menu",
       "undoLabel": "Undo {action}",
       "empty": "No actions configured for this selection.",
@@ -201,13 +518,56 @@
         "title": "Confirm {action}",
         "description": "Submit {action} for {count} records."
       },
+      "feedback": {
+        "pending": "جارٍ تنفيذ {action} على {count} سجلات محددة.",
+        "selectedIds": "السجلات المحددة: {ids}",
+        "resultStatus": "حالة النتيجة: {status}",
+        "workflowRunId": "تشغيل سير العمل: {id}",
+        "correlationId": "التتبع: {id}"
+      },
       "toast": {
         "successTitle": "{action} submitted",
         "successDescription": "Queued for {count} records.",
         "printDownloadStartedDescription": "Download started automatically.",
         "printFallbackTitle": "{action} pending",
         "printFallbackDescription": "Output is still processing. Opened workflow outputs.",
-        "errorTitle": "{action} failed"
+        "errorTitle": "{action} failed",
+        "readbackErrorDescription": "تم تسجيل الإجراء، لكن نتيجة القراءة المرجعية لم تظهر بعد. حدّث الصفحة وتحقق قبل إعادة المحاولة."
+      },
+      "resultReadback": {
+        "freshStatus": "حالة السجل بعد إعادة القراءة: {status}",
+        "workflowReferenceReturned": "أُعيد مرجع سير العمل",
+        "ariaLabel": "نتائج {action}",
+        "status": {
+          "queued": "في قائمة الانتظار — لم تكتمل بعد",
+          "partialQueued": "فشلت بعض العناصر؛ والعمل المنتظر لم يكتمل بعد",
+          "completed": "اكتمل",
+          "partial": "اكتمل جزئيا",
+          "failed": "فشل",
+          "alreadyProcessed": "تمت معالجته مسبقا",
+          "malformed": "تعذر التحقق من النتيجة"
+        },
+        "itemStatus": {
+          "queued": "في قائمة الانتظار — لم تكتمل بعد",
+          "success": "اكتمل",
+          "failed": "فشل",
+          "alreadyProcessed": "تمت معالجته مسبقا"
+        },
+        "error": {
+          "shipmentNotVisible": "لم تعد الشحنة متاحة.",
+          "operationFailed": "تعذر إكمال العملية.",
+          "generic": "تعذرت معالجة هذا السجل."
+        },
+        "summary": "الإجمالي {total} · الناجح {success} · الفاشل {failure} · المعالج مسبقا {already}",
+        "summaryWithQueued": "الإجمالي {total} · الناجح {success} · الفاشل {failure} · المعالج مسبقا {already} · قيد الانتظار {queued}",
+        "malformedDetail": "لم تتضمن استجابة الخادم دليلا متسقا لكل سجل. لم يتم الإبلاغ عن نجاح.",
+        "toast": {
+          "queuedTitle": "{action}: قيد الانتظار",
+          "queuedDescription": "قيد الانتظار {queued}، ومكتمل {success}، ومعالج مسبقا {already} من أصل {total}. لم يتم تأكيد اكتمال التغييرات المنتظرة بعد.",
+          "failureWithQueuedDescription": "تم التحقق من اكتمال {success} وفشل {failure} ومعالجة {already} مسبقا وانتظار {queued} من أصل {total} سجلات.",
+          "successDescription": "تم التحقق من نجاح {success} ومعالجة {already} مسبقا من أصل {total} سجلات.",
+          "failureDescription": "تم التحقق من نجاح {success} وفشل {failure} ومعالجة {already} مسبقا من أصل {total} سجلات."
+        }
       },
       "printProgress": {
         "title": "{action} in progress",
@@ -225,7 +585,7 @@
           "hide": "Hide",
           "show": "Show",
           "retry": "Try again",
-          "technicalDetails": "Support details"
+          "technicalDetails": "تفاصيل الدعم"
         },
         "states": {
           "preparing": "Preparing your download",
@@ -240,18 +600,45 @@
           "completed": "Download started"
         },
         "diagnostics": {
-          "title": "Support details",
-          "runId": "Activity reference: {workflowRunId}",
+          "title": "تفاصيل الدعم",
+          "runId": "مرجع النشاط: {workflowRunId}",
           "target": "Download target: <= {target}ms",
           "targetHit": "Target hit at {elapsed}ms.",
           "targetMiss": "Target miss at {elapsed}ms.",
-          "timingSource": "Timing source: {value}",
-          "outputSource": "Output source: {value}",
+          "timingSource": "تفاصيل التوقيت: {value}",
+          "outputSource": "مصدر الملف: {value}",
           "artifactPersisted": "Artifact persisted: {value}",
           "jobCompletionPending": "Job completion pending: {value}",
-          "viewRun": "View run",
+          "viewRun": "عرض النشاط",
+          "sources": {
+            "workflowOutput": "مخرجات سير عمل محفوظة",
+            "workflowMetadata": "بيانات وصفية لسير العمل",
+            "executionResult": "نتيجة التنفيذ",
+            "stepResult": "نتيجة الخطوة",
+            "asyncResult": "نتيجة التنفيذ في الخلفية",
+            "savedFile": "ملف محفوظ",
+            "freshDownload": "تنزيل أُنشئ حديثًا",
+            "freshFile": "ملف أُنشئ حديثًا",
+            "resourceRecord": "سجل سير العمل",
+            "executionTiming": "مدة التنفيذ المسجلة",
+            "totalTiming": "المدة الإجمالية المسجلة",
+            "renderTiming": "مدة التصيير المسجلة",
+            "bundleWaitTiming": "مدة انتظار تجميع الملفات المسجلة",
+            "bundleTiming": "مدة تجميع الملفات المسجلة",
+            "notAvailable": "غير متاح",
+            "unknown": "مصدر غير معروف"
+          },
           "yes": "Yes",
-          "no": "No"
+          "no": "No",
+          "printAsyncRequest": "طلب الطباعة غير المتزامن: {value}",
+          "bundleAsyncRequest": "طلب التجميع غير المتزامن: {value}",
+          "labelJob": "مهمة الملصق: {value}",
+          "label": "الملصق: {value}",
+          "labelVersion": "إصدار الملصق: {value}",
+          "activeVersion": "الإصدار النشط: {value}",
+          "printMode": "وضع الطباعة: {value}",
+          "artifactKind": "نوع الملف: {value}",
+          "requestCompleted": "مكتمل: {value}"
         },
         "detail": {
           "preparing": "We're preparing your download.",
@@ -269,11 +656,16 @@
           "pendingCount": "{count} labels are still pending generation.",
           "readyCount": "{count} labels are ready for bundling.",
           "popupBlocked": "Popup blocked by browser. Allow popups, then retry.",
+          "downloadFailed": "تعذر تنزيل الملف. يرجى المحاولة مرة أخرى.",
           "terminalFailure": "Workflow finished without a downloadable output.",
           "target": "Tracking target <= {target}ms.",
           "targetHit": "Target met: {elapsed}ms.",
-          "targetMiss": "Target miss: {elapsed}ms (target {target}ms)."
-        }
+          "targetMiss": "Target miss: {elapsed}ms (target {target}ms).",
+          "jobCompletionPending": "يتم فتح الملف الآن. لا تزال مزامنة اكتمال مهمة الملصق جارية.",
+          "artifactPersistencePending": "يتم فتح الملف الآن. لا تزال مزامنة حفظ الملف جارية."
+        },
+        "readbackUnverified": "تم فتح التنزيل؛ اكتمال المعالجة الخلفية غير مؤكد",
+        "readbackStopped": "آخر قراءة: {detail} لم تعد هذه اللوحة تتحقق من اكتمال المعالجة الخلفية. افتح مخرجات سير العمل للاطلاع على الحالة الحالية."
       }
     },
     "resourceDownload": {
@@ -296,6 +688,12 @@
       "errors": {
         "requestFailed": "‏Unable to download labels.",
         "noUrls": "‏No download URLs were returned."
+      },
+      "status": {
+        "pending": "جار تجهيز تنزيل الملصق.",
+        "single": "تم فتح تنزيل الملصق.",
+        "success": "تم فتح {count} تنزيلات للملصقات.",
+        "partial": "تم فتح {count} تنزيلات للملصقات. فشل {failed}."
       }
     },
     "resourceDetail": {
@@ -303,7 +701,7 @@
       "emptyMessage": "‏Select a record to view details.",
       "internalIdLabel": "‏Internal ID",
       "sections": {
-        "general": "General"
+        "general": "عام"
       },
       "media": {
         "openImage": "فتح صورة {index}",
@@ -321,113 +719,154 @@
       }
     },
     "commandPalette": {
-      "title": "Command palette",
-      "description": "Search navigation and workflow commands.",
-      "searchPlaceholder": "Search pages, workflows, and commands",
-      "searchAria": "Search command palette",
-      "shortcutHint": "Shortcut: {shortcut}",
-      "loading": "Loading command registry...",
-      "emptyTitle": "No matches",
-      "emptyDescription": "Try a different keyword or refine your access scope.",
+      "title": "لوحة الأوامر",
+      "description": "ابحث في التنقل وأوامر سير العمل.",
+      "searchPlaceholder": "ابحث في الصفحات وسير العمل والأوامر والمراجع الخلفية",
+      "searchAria": "البحث في لوحة الأوامر",
+      "shortcutHint": "اختصار: {shortcut}",
+      "loading": "جارٍ تحميل سجل الأوامر...",
+      "emptyTitle": "لا توجد نتائج",
+      "emptyDescription": "جرّب كلمة أخرى أو راجع نطاق صلاحياتك.",
       "sections": {
-        "favorites": "Favorites",
-        "recents": "Recents",
-        "navigation": "Navigation",
-        "commands": "Commands"
+        "favorites": "المفضلة",
+        "recents": "الأخيرة",
+        "navigation": "التنقل",
+        "commands": "الأوامر"
       },
       "labels": {
-        "navigation": "Navigation",
-        "command": "Command"
+        "navigation": "تنقل",
+        "command": "أمر"
       },
       "disabled": {
-        "missingCapability": "Missing required capability.",
-        "needsSelection": "Requires a selection context.",
-        "noTarget": "No route target available."
-      }
+        "missingCapability": "الصلاحية المطلوبة غير متاحة.",
+        "needsSelection": "يتطلب تحديد عنصر.",
+        "noTarget": "لا يتوفر مسار للأمر.",
+        "readUnavailable": "سجل القراءة غير متاح.",
+        "readRequired": "صلاحية القراءة مطلوبة.",
+        "commandUnavailable": "سجل الأوامر غير متاح."
+      },
+      "registryUnavailable": "سجل الأوامر غير متاح",
+      "readLoading": "جارٍ تحميل سجل القراءة...",
+      "backendReference": "المرجع الخلفي: {value}"
     },
     "commandCatalog": {
       "unknown": "‏unknown",
-      "title": "‏{appLabel} commands",
-      "description": "�Workflow command catalog driven by ui_command_registry.",
+      "title": "أوامر {appLabel}",
+      "description": "دليل أوامر سير العمل المستند إلى سجل ui_command_registry.",
       "sections": {
-        "registryTitle": "Command registry",
-        "registryDescription": "Browse and filter workflow commands available in this scope."
+        "registryTitle": "سجل الأوامر",
+        "registryDescription": "استعرض أوامر سير العمل المتاحة في هذا النطاق وصَفِّها."
       },
       "filters": {
-        "searchLabel": "�Search commands",
-        "searchPlaceholder": "�Search by label, key, workflow, or capability",
-        "categoryLabel": "�Category",
-        "categoryAll": "�All categories",
-        "capabilityLabel": "�Capability",
-        "capabilityAll": "�All capabilities",
-        "capabilityNone": "�No capability required",
-        "accessLabel": "�Access",
-        "accessAll": "�All",
-        "accessAllowed": "�Allowed",
-        "accessMissing": "�Missing capability",
-        "accessNone": "�No capability required"
+        "searchLabel": "البحث في الأوامر",
+        "searchPlaceholder": "ابحث بالاسم أو المفتاح أو سير العمل أو الصلاحية",
+        "categoryLabel": "الفئة",
+        "categoryAll": "جميع الفئات",
+        "capabilityLabel": "الصلاحية",
+        "capabilityAll": "جميع الصلاحيات",
+        "capabilityNone": "لا تتطلب صلاحية",
+        "accessLabel": "الوصول",
+        "accessAll": "الكل",
+        "accessAllowed": "مسموح",
+        "accessMissing": "صلاحية مفقودة",
+        "accessNone": "لا تتطلب صلاحية"
       },
       "errors": {
         "load": "‏Unable to load command catalog.",
-        "unavailable": "‏Command catalog unavailable. Sign in or confirm registry access."
+        "unavailable": "‏Command catalog unavailable. Sign in or confirm registry access.",
+        "registryUnavailable": "قراءة سجل الأوامر غير متاحة.",
+        "readRegistry": "قراءة سجل الموارد غير متاحة."
       },
       "summary": {
-        "available": "�Commands available: {count}",
-        "filtered": "�Showing {count} of {total} commands",
-        "filteredEmpty": "�No commands match the current filters.",
-        "capabilityBlocked": "�All commands require capabilities that are not available in this scope.",
-        "empty": "‏No commands configured for this scope."
+        "available": "الأوامر المتاحة: {count}",
+        "filtered": "عرض {count} من أصل {total} أمرًا",
+        "filteredEmpty": "لا تطابق أي أوامر المرشحات الحالية.",
+        "capabilityBlocked": "تتطلب جميع الأوامر صلاحيات غير متاحة في هذا النطاق.",
+        "empty": "‏No commands configured for this scope.",
+        "blocked": "لا توجد أوامر قابلة للتشغيل في {appLabel} وفق المرشحات الحالية. مسار غير متاح: {route}؛ صلاحية أمر مفقودة: {command}؛ صلاحية قراءة مفقودة: {read}.",
+        "readUnavailable": "لا يمكن تأكيد قابلية تشغيل الأوامر في {appLabel} لأن سجل القراءة غير متاح. مسار غير متاح: {route}؛ صلاحية أمر مفقودة: {command}؛ قراءة غير متاحة: {read}."
       },
       "status": {
         "allowed": "‏Allowed",
         "missingCapability": "‏Missing capability",
-        "noCapability": "‏No capability set"
+        "noCapability": "‏No capability set",
+        "readUnavailable": "سجل القراءة غير متاح",
+        "readRequired": "صلاحية القراءة مطلوبة",
+        "noTarget": "لا يوجد مسار وجهة"
       },
       "actions": {
         "openRequest": "‏Open request"
       },
       "fields": {
-        "requiredCapability": "�Required capability",
-        "route": "�Route",
+        "requiredCapability": "الصلاحية المطلوبة",
+        "route": "المسار",
         "workflow": "‏Workflow",
-        "schema": "‏Schema"
-      }
+        "schema": "‏Schema",
+        "backendReference": "المرجع الخلفي"
+      },
+      "statusLabel": "حالة دليل الأوامر",
+      "readStatusLabel": "حالة سجل القراءة لدليل الأوامر",
+      "noTargetDescription": "هذا الأمر مسجل ولكن ليس له مسار طلب في {appLabel}، فلا يمكن فتحه من هذا التطبيق."
     },
     "dashboard": {
+      "reporting": {
+        "title": "تقارير الشحنات",
+        "allTime": "إحصاءات لكل الفترات ضمن نطاق الشحنات المصرح لك به.",
+        "unavailable": "غير متاح",
+        "partial": "بعض الإحصاءات غير متاحة. تُعرض الإحصاءات المتاحة دون استبدال القيم المفقودة بصفر.",
+        "breakdown": "توزيع حالات الشحنات",
+        "total": "إجمالي الشحنات",
+        "active": "عمليات التسليم النشطة",
+        "exceptions": "الاستثناءات",
+        "rate": "نسبة التسليم",
+        "delivered": "تم التسليم",
+        "pending": "قيد الانتظار",
+        "statuses": {
+          "delivered": "تم التسليم",
+          "in_transit": "قيد النقل",
+          "out_for_delivery": "خرجت للتسليم",
+          "pending": "قيد الانتظار",
+          "exceptions": "الاستثناءات",
+          "cancelled": "ملغاة",
+          "returned": "مرتجعة"
+        }
+      },
       "unknown": "‏unknown",
       "scopeLabel": "‏{scopeType}: {scopeLabel}",
       "errors": {
-        "loadContext": "‏Unable to load dashboard context."
+        "loadContext": "‏Unable to load dashboard context.",
+        "loadCommands": "‏تعذر تحميل سجل أوامر لوحة التحكم.",
+        "loadRegistry": "‏تعذر تحميل سجل قراءة لوحة التحكم."
       },
-      "title": "‏{appLabel} overview",
-      "subtitle": "‏Workflow-first dashboard built from UI registries.",
+      "title": "نظرة عامة على {appLabel}",
+      "subtitle": "لوحة معلومات قائمة على سير العمل ومبنية على سجلات الواجهة.",
       "sections": {
         "overviewTitle": "‏نظرة عامة على الهوية"
       },
       "unavailableTitle": "‏Dashboard unavailable.",
       "unavailableAction": "‏Confirm UI context RPCs and RLS policies are provisioned.",
-      "identityTitle": "‏Identity",
-      "identityRole": "‏Role: {role}",
-      "scopeTitle": "‏Scope",
-      "scopeOrg": "‏Org: {org}",
-      "capabilitiesTitle": "‏Capabilities",
-      "capabilitiesActive": "‏{count} active",
-      "capabilitiesResources": "‏{count} resources",
-      "settingsResolutionLabel": "‏Settings resolution:",
-      "contextHealthTitle": "‏Context health",
+      "identityTitle": "الهوية",
+      "identityRole": "الدور: {role}",
+      "scopeTitle": "النطاق",
+      "scopeOrg": "المؤسسة: {org}",
+      "capabilitiesTitle": "الصلاحيات",
+      "capabilitiesActive": "{count} نشطة",
+      "capabilitiesResources": "{count} من الموارد",
+      "settingsResolutionLabel": "نتيجة تحديد الإعدادات:",
+      "contextHealthTitle": "سلامة السياق",
       "health": {
-        "ok": "‏Healthy",
+        "ok": "سليم",
         "blocked": "‏Blocked",
         "review": "‏Needs review"
       },
       "healthChecks": {
         "identity": {
-          "label": "‏Identity",
+          "label": "الهوية",
           "detail": "‏{user}",
           "missing": "‏No user session detected."
         },
         "scope": {
-          "label": "‏Scope",
+          "label": "النطاق",
           "detail": "‏{scopeType}: {scopeId}",
           "missing": "‏Access scope is missing."
         },
@@ -455,6 +894,52 @@
           "label": "‏Settings resolution",
           "detail": "‏{value}",
           "missing": "‏Settings resolution id missing; confirm settings ladder."
+        }
+      },
+      "commandCenter": {
+        "myDay": {
+          "title": "يومي",
+          "assigned": "{count} مُسندة إليك",
+          "unavailable": "تعذر تحميل عدد مهام المراجعة المُسندة إليك."
+        },
+        "title": "‏مركز التحكم",
+        "description": "‏مسارات المشغلين، أعداد الصفوف، تغطية الأوامر، وقراءة السجلات من صفوف الواجهة.",
+        "summary": {
+          "metricReadback": "‏قراءة المقاييس",
+          "metricReadbackValue": "{ready}/{total}",
+          "metricReadbackDetail": "‏تم إرجاع مقاييس اللوحة للمسارات المرئية.",
+          "metricReadbackPartialDetail": "‏تم إرجاع المقاييس لـ {ready}/{total} من المسارات المرئية.",
+          "unavailableValue": "‏غير متاح",
+          "workflowCommands": "‏أوامر سير العمل",
+          "workflowCommandsDetail": "‏أوامر السجل المدعومة بتنفيذ سير العمل.",
+          "workflowCommandsUnavailableDetail": "‏لم يرجع سجل الأوامر تغطية سير العمل.",
+          "allowedCommands": "‏الأوامر المسموحة",
+          "allowedCommandsValue": "{allowed}/{total}",
+          "allowedCommandsDetail": "‏{restricted} مقيدة لهذه الجلسة.",
+          "allowedCommandsUnavailableDetail": "‏لم يرجع سجل الأوامر تغطية الصلاحيات.",
+          "registryReadback": "‏قراءة السجلات",
+          "registryReadbackReady": "‏جاهز",
+          "registryReadbackReview": "‏مراجعة",
+          "registryReadbackDetail": "‏استجاب سجل الأوامر وسجل القراءة.",
+          "registryReadbackIssues": "‏{count} مشكلة في السجلات تحتاج إلى مراجعة."
+        },
+        "degraded": {
+          "authority": "‏تعارضات صلاحيات السجل:",
+          "authorityDetail": "‏تم استبعاد تعريفات السجل المتعارضة: {count}.",
+          "commands": "‏سجل الأوامر:",
+          "resources": "‏سجل القراءة:",
+          "metrics": "‏قراءة المقاييس:",
+          "metricsDetail": "‏{ready}/{total} من المسارات المرئية أرجعت المقاييس."
+        },
+        "lanes": {
+          "empty": "‏لا توجد مسارات مشغل مرئية لهذا النطاق.",
+          "records": "‏{count} سجل",
+          "metricUnavailable": "‏المقياس قيد الانتظار",
+          "commands": "‏{count}/{total} أوامر",
+          "capability": "‏صلاحية القراءة:",
+          "openLane": "‏فتح المسار",
+          "openCommands": "‏فتح الأوامر",
+          "permissionRequired": "‏صلاحية القراءة مطلوبة."
         }
       },
       "quickActionsTitle": "‏Quick actions",
@@ -616,6 +1101,7 @@
       "title": "‏صندوق الاستثناءات",
       "description": "‏صندوق استثناءات سير العمل المبني على صفوف الملاحة والسجل.",
       "errors": {
+        "loadCommands": "تعذر تحميل سجل أوامر سير العمل لصندوق الاستثناءات.",
         "loadContext": "‏تعذر تحميل سياق صندوق الاستثناءات.",
         "loadRegistry": "‏تعذر تحميل سجل واجهة المستخدم لصندوق الاستثناءات."
       },
@@ -627,6 +1113,10 @@
         "openCommandCatalog": "‏فتح كتالوج الأوامر"
       },
       "summary": {
+        "slaCountdownLanes": "مسارات العد التنازلي لـ SLA",
+        "unownedLanes": "المسارات غير المسندة",
+        "workflowEnabledLanes": "المسارات المفعّل لها سير عمل",
+        "workflowCommands": "أوامر سير العمل",
         "title": "‏ملخص الصندوق",
         "description": "‏تم حل مسارات الاستثناءات من صفوف الملاحة المعتمدة على محرك سير العمل.",
         "scope": "‏النطاق",
@@ -641,6 +1131,37 @@
         "fallbackSection": "‏كل الأقسام (احتياطي)"
       },
       "triage": {
+        "matrix": {
+          "columns": {
+            "lane": "المسار",
+            "severity": "مستوى الخطورة",
+            "sla": "مؤشر SLA",
+            "ownership": "الإسناد",
+            "workflows": "تدفقات العمل",
+            "actions": "الإجراءات"
+          },
+          "severityCritical": "حرج",
+          "severityHigh": "مرتفع",
+          "severityNormal": "عادي",
+          "slaRiskCountdown": "مخاطر SLA والعد التنازلي",
+          "slaRisk": "مخاطر SLA",
+          "slaCountdown": "العد التنازلي لـ SLA",
+          "manualReview": "مراجعة يدوية",
+          "unowned": "غير مسند",
+          "owned": "مسند",
+          "signalNone": "لا يوجد"
+        },
+        "workflowCoverage": "رُبط {lanes} من أصل {totalLanes} مسارًا بأوامر سير العمل ({commands} أمرًا).",
+        "commandRegistryWarning": "سجل الأوامر غير متاح لخيارات الفرز ({detail}).",
+        "slaCountdown": "فتح مسار العد التنازلي لـ SLA",
+        "unowned": "فتح مسار غير مسند",
+        "runHighestRisk": "تشغيل تدفقات العمل الأعلى خطورة",
+        "runSlaRisk": "تشغيل تدفقات العمل المعرّضة لمخاطر SLA",
+        "runSlaCountdown": "تشغيل تدفقات العمل الخاصة بالعد التنازلي لـ SLA",
+        "runManualReview": "تشغيل تدفقات عمل المراجعة اليدوية",
+        "runUnowned": "تشغيل تدفقات العمل غير المسندة",
+        "runAutomationReady": "تشغيل تدفقات العمل الجاهزة للأتمتة",
+        "workflowCount": "{count} من أوامر سير العمل",
         "title": "‏إعدادات الفرز السريع",
         "description": "‏افتح المسارات الأكثر إلحاحًا بسرعة وشغّل تدفقات فرز الاستثناءات المجمّعة.",
         "emptyTitle": "‏لا توجد إعدادات فرز متاحة بعد.",
@@ -651,6 +1172,9 @@
         "commandHint": "‏شغّل تدفقات الاستثناءات المجمّعة من الأوامر المسجلة."
       },
       "lanes": {
+        "laneCommands": "{count} من أوامر سير العمل",
+        "openLane": "فتح المسار",
+        "openLaneCommands": "فتح تدفقات العمل ({count})",
         "title": "‏مسارات الاستثناءات",
         "description": "‏افتح مسارًا لفرز حالات الفشل والتنبيهات وتراكمات المراجعة اليدوية.",
         "records": "‏{count} سجل",
@@ -694,8 +1218,8 @@
         }
       },
       "blocked": {
-        "title": "â€Resource view is not available for your role.",
-        "action": "â€Request access from your organization admin, then refresh."
+        "title": "‏Resource view is not available for your role.",
+        "action": "‏Request access from your organization admin, then refresh."
       },
       "sort": {
         "label": "‏Sort by",
@@ -728,34 +1252,21 @@
         "go": "‏Go"
       },
       "summary": {
-        "rangeEstimated": "Showing {start}-{end} of ~{total}",
-        "rows": "‏Showing {count} rows",
-        "range": "‏Showing {start}-{end} of {total}",
-        "zero": "‏Showing 0 of 0"
+        "rangeEstimated": "عرض {start}–{end} من نحو {total}",
+        "rows": "الصفوف المعروضة: {count}",
+        "range": "عرض {start}–{end} من {total}",
+        "zero": "عرض 0 من 0"
       },
       "actions": {
-        "label": "Actions",
-        "configured": "{count} configured",
-        "available": "{count} available",
-        "blocked": "{count} blocked",
+        "label": "الإجراءات",
+        "configured": "الأوامر المهيأة: {count}",
+        "available": "الأوامر المتاحة: {count}",
+        "blocked": "الأوامر المحجوبة: {count}",
         "empty": "No actions configured for this resource.",
-        "manage": "Manage commands",
-        "import": "Import",
+        "manage": "إدارة الأوامر",
+        "import": "استيراد",
         "importDisabled": "Import is not configured for this table yet.",
         "importRequiresCapability": "Import requires the {capability} capability."
-      },
-      "openMode": {
-        "title": "Open",
-        "label": "Open records in",
-        "peek": "Side peek",
-        "full": "Full page",
-        "modal": "Center peek",
-        "helper": "Controls where record details open when you select a row."
-      },
-      "internalIds": {
-        "title": "Internal IDs",
-        "toggle": "Show internal IDs",
-        "helper": "Expose internal UUID hints as secondary metadata alongside business identifiers."
       },
       "table": {
         "empty": "‏No records returned for this resource."
@@ -764,19 +1275,19 @@
         "titleDefault": "‏Record details",
         "titleWithLabel": "‏{label}",
         "titleWithId": "‏Record {id}",
-        "backToList": "‏Back to list",
+        "backToList": "العودة إلى القائمة",
         "hidden": "Details hidden",
         "toggleShow": "Show details",
-        "toggleHide": "Hide details",
-        "openFull": "Open full page",
-        "openPeek": "Open side peek",
+        "toggleHide": "إخفاء التفاصيل",
+        "openFull": "فتح الصفحة كاملة",
+        "openPeek": "فتح المعاينة الجانبية",
         "resizeAria": "Resize detail panel",
         "resizeHint": "Drag to resize · Double click to reset · Arrow keys supported",
         "download": "‏Download file",
         "signedUrlNote": "‏Signed URLs expire automatically.",
         "actionsTitle": "Record actions",
         "actionsDescription": "Run workflows, updates, and prints for this record.",
-        "notFound": "‏Record not found.",
+        "notFound": "السجل غير موجود.",
         "related": {
           "count": "Related rows loaded: {count}",
           "countWithTotal": "Related rows loaded: {count} of {total}",
@@ -835,6 +1346,21 @@
         "openStudio": "فتح استوديو سير العمل",
         "newTemplate": "قالب سير عمل جديد",
         "overlapExplorer": "مستكشف التداخلات",
+        "changeStatus": "تغيير الحالة",
+        "statusModal": {
+          "title": "تغيير حالة سير العمل",
+          "description": "سجّل انتقالاً مدققاً لدورة حياة القالب.",
+          "statusLabel": "الحالة",
+          "statuses": {
+            "draft": "مسودة",
+            "active": "نشط",
+            "archived": "مؤرشف"
+          },
+          "reasonLabel": "السبب",
+          "cancel": "إلغاء",
+          "save": "حفظ",
+          "saving": "جاري الحفظ..."
+        },
         "testRun": "تشغيل اختبار",
         "testRunModal": {
           "title": "تشغيل اختبار سير العمل",
@@ -850,6 +1376,7 @@
         }
       },
       "create": {
+        "unsavedWarning": "لديك تعديلات غير محفوظة على قالب سير العمل. هل تريد المغادرة؟",
         "title": "قالب سير عمل جديد",
         "description": "إنشاء مسودة لقالب سير عمل (مع إمكانية نسخ الخطوات).",
         "sectionTitle": "مسودة القالب",
@@ -1396,6 +1923,12 @@
               "id": "معرّف الخطوة"
             },
             "routing": {
+              "hints": {
+                "nextOperationTargets": "الانتقال إلى الخطوة {index}: {label}.",
+                "nextOperationSelf": "الانتقال إلى هذه الخطوة (حلقة تكرار).",
+                "nextOperationMultiple": "تطابق عدة خطوات: {indexes}. قد يكون التوجيه ملتبسًا.",
+                "nextOperationMissing": "لا توجد خطوة مطابقة في هذا القالب."
+              },
               "title": "التوجيه",
               "description": "قواعد توجيه اختيارية لهذه الخطوة.",
               "fields": {
@@ -1505,6 +2038,10 @@
           "successTitle": "تم بدء اختبار التشغيل.",
           "errorTitle": "تعذر بدء اختبار التشغيل.",
           "errorMissingRun": "لم يتم إرجاع معرّف التشغيل."
+        },
+        "status": {
+          "successTitle": "تم تحديث حالة سير العمل.",
+          "errorTitle": "تعذر تحديث حالة سير العمل."
         }
       },
       "errors": {
@@ -1519,6 +2056,19 @@
       }
     },
     "resourceTable": {
+      "openMode": {
+        "title": "طريقة الفتح",
+        "label": "فتح السجلات في",
+        "peek": "معاينة جانبية",
+        "full": "صفحة كاملة",
+        "modal": "معاينة وسطية",
+        "helper": "يحدد مكان فتح تفاصيل السجل عند اختياره."
+      },
+      "internalIds": {
+        "title": "المعرّفات الداخلية",
+        "toggle": "إظهار المعرّفات الداخلية",
+        "helper": "عرض معرّفات UUID الداخلية كمعلومات ثانوية بجانب معرّفات الأعمال."
+      },
       "contextMenu": {
         "open": "‏فتح",
         "openNewTab": "‏فتح في علامة تبويب جديدة",
@@ -1533,9 +2083,9 @@
         "toggleLabel": "‏إظهار أرقام الصفوف"
       },
       "views": {
-        "label": "‏View",
-        "empty": "‏No saved views yet",
-        "toastTitle": "‏Views",
+        "label": "عرض",
+        "empty": "لا توجد عروض محفوظة بعد",
+        "toastTitle": "طرق العرض",
         "scopeLabel": "‏View scope",
         "settingsResolutionLabel": "‏Settings resolution",
         "update": "‏Update view",
@@ -1543,7 +2093,7 @@
         "delete": "‏Delete view",
         "closeSave": "‏Close save panel",
         "saveNew": "‏Save new view",
-        "disabled": "‏View management is disabled for your access scope.",
+        "disabled": "إدارة طرق العرض غير متاحة لنطاق صلاحيتك.",
         "nameLabel": "‏View name",
         "namePlaceholder": "‏Saved view name",
         "setDefault": "‏Set as default view",
@@ -1554,7 +2104,7 @@
         "confirmDelete": "‏Confirm delete",
         "cancel": "‏Cancel",
         "labelFallback": "‏View",
-        "menuLabel": "‏View actions",
+        "menuLabel": "إجراءات العرض",
         "menuAria": "‏Open view actions",
         "menuRename": "‏Rename view",
         "menuDuplicate": "‏Duplicate view",
@@ -1580,17 +2130,17 @@
           "submitted": "‏View request submitted for approval.",
           "deleteSubmitted": "‏View delete request submitted for approval."
         },
-        "activeLabel": "‏Active view",
-        "activeFallback": "‏Current view"
+        "activeLabel": "طريقة العرض النشطة",
+        "activeFallback": "طريقة العرض الحالية"
       },
       "viewBar": {
-        "filters": "Filters",
-        "sort": "Sort",
-        "group": "Group",
-        "properties": "Properties",
-        "views": "Views",
-        "export": "Export",
-        "formatting": "Formatting",
+        "filters": "عوامل التصفية",
+        "sort": "الفرز",
+        "group": "التجميع",
+        "properties": "الخصائص",
+        "views": "طرق العرض",
+        "export": "تصدير",
+        "formatting": "التنسيق",
         "unsaved": "Unsaved changes",
         "filtersHint": "Filters are configured from the resource filters above.",
         "filtersUnavailable": "Filters are unavailable without a resource context.",
@@ -1602,7 +2152,7 @@
         "directionDesc": "Desc",
         "moveUp": "Up",
         "moveDown": "Down",
-        "remove": "Remove",
+        "remove": "إزالة",
         "addSort": "Add sort",
         "addSortPlaceholder": "Select a column",
         "removeChipAria": "إزالة الفلتر",
@@ -1611,7 +2161,7 @@
       "toolbar": {
         "hideView": "‏Hide view",
         "customizeView": "‏Customize view",
-        "resetView": "‏Reset view",
+        "resetView": "إعادة ضبط العرض",
         "sorting": "‏Sorting by {label} ({direction})",
         "sortingMulti": "‏Sorting by {labels}",
         "directionAsc": "‏asc",
@@ -1619,20 +2169,20 @@
         "sortingDefault": "‏Sorting follows default order.",
         "groupedBy": "‏Grouped by {label}",
         "noGrouping": "‏No grouping",
-        "filters": "‏Filters: {count}",
-        "noFilters": "‏No filters"
+        "filters": "عوامل التصفية: {count}",
+        "noFilters": "لا توجد عوامل تصفية"
       },
       "search": {
-        "label": "‏Quick search (page)",
-        "placeholder": "‏Search rows",
-        "aria": "‏Search rows",
-        "clearAria": "‏Clear quick search",
-        "debounceLabel": "‏Search debounce",
-        "debounceInstant": "‏Instant",
-        "debounceOption": "‏{ms} ms",
-        "filtered": "‏Filtered {filtered} of {total}",
-        "filteredPage": "‏(page)",
-        "rows": "‏Rows {count}"
+        "label": "بحث سريع (الصفحة)",
+        "placeholder": "البحث في الصفوف",
+        "aria": "البحث في الصفوف",
+        "clearAria": "مسح البحث السريع",
+        "debounceLabel": "تأخير البحث",
+        "debounceInstant": "فوري",
+        "debounceOption": "{ms} مللي ثانية",
+        "filtered": "تمت تصفية {filtered} من أصل {total}",
+        "filteredPage": "(الصفحة)",
+        "rows": "الصفوف {count}"
       },
       "paging": {
         "client": "‏Client paging",
@@ -1651,7 +2201,7 @@
         "gotoAria": "‏Go to page",
         "size": "‏Page size",
         "summary": "‏Showing {start}-{end} of {total}",
-        "title": "â€Paging"
+        "title": "‏Paging"
       },
       "export": {
         "metrics": "‏Export metrics",
@@ -1735,7 +2285,7 @@
         "empty": "‏No grouping selected.",
         "moveUp": "‏Up",
         "moveDown": "‏Down",
-        "remove": "‏Remove",
+        "remove": "إزالة",
         "clearAll": "Clear grouping",
         "collapseAll": "‏Collapse all",
         "expandAll": "‏Expand all"
@@ -1774,8 +2324,8 @@
         "noRecordsHint": "‏غيّر عوامل التصفية الحالية أو طريقة العرض لإظهار السجلات المطابقة.",
         "noColumnsHint": "‏اختر عموداً واحداً على الأقل لعرض بيانات الجدول.",
         "showColumns": "‏Show columns",
-        "clearSearch": "‏Clear search",
-        "clearFilters": "‏Clear filters"
+        "clearSearch": "مسح البحث",
+        "clearFilters": "مسح عوامل التصفية"
       },
       "group": {
         "empty": "‏Unspecified",
@@ -1796,7 +2346,7 @@
         "max": "‏Max {value}"
       },
       "summary": {
-        "label": "‏Summary ({total})",
+        "label": "الملخص ({total})",
         "toggle": "‏Show summary row",
         "helper": "‏Display a sticky summary row for numeric columns when analytics are enabled."
       },
@@ -1845,40 +2395,111 @@
         "clear": "‏Clear filters"
       },
       "chips": {
-        "active": "‏Active filters ({count})",
-        "clearQuery": "‏Clear query filters",
-        "viewManaged": "‏View filters are managed by saved views.",
-        "equals": "‏equals",
-        "viewLabel": "‏View",
-        "queryLabel": "‏Query",
-        "remove": "‏Remove",
-        "removeLabel": "‏Remove filter {label}"
+        "active": "عوامل التصفية النشطة ({count})",
+        "clearQuery": "مسح عوامل تصفية الاستعلام",
+        "viewManaged": "تُدار عوامل تصفية طريقة العرض من خلال طرق العرض المحفوظة.",
+        "equals": "يساوي",
+        "viewLabel": "طريقة العرض",
+        "queryLabel": "الاستعلام",
+        "remove": "إزالة",
+        "removeLabel": "إزالة عامل التصفية {label}"
       }
     },
+    "shipmentResource": {
+      "search": {
+        "title": "البحث عن الشحنات",
+        "description": "ابحث عن شحنة بمرجع الشحنة أو رقم التتبع أو مرجع الطلب أو رقم الهاتف.",
+        "descriptionWithCorrelation": "ابحث عن شحنة بمرجع الشحنة أو رقم التتبع أو مرجع الطلب أو رقم الهاتف أو مرجع النشاط.",
+        "identifier": "مرجع الشحنة",
+        "placeholder": "رقم التتبع أو مرجع الطلب أو الهاتف أو مرجع الشحنة",
+        "placeholderWithCorrelation": "رقم التتبع أو مرجع الطلب أو الهاتف أو مرجع الشحنة أو مرجع النشاط",
+        "submit": "البحث عن الشحنات",
+        "clear": "مسح البحث",
+        "empty": "أدخل معرّفاً قبل البحث عن الشحنات."
+      }
+    },
+    "trackingMap": {
+      "title": "التتبع الجغرافي",
+      "map": "الخريطة الجغرافية",
+      "loading": "جار تحميل الخريطة",
+      "unavailable": "التتبع غير متاح. تحقق من صلاحيات الوصول وإعدادات الخريطة.",
+      "empty": "لا توجد مواقع متاحة للتتبع.",
+      "emptyPage": "لا توجد مواقع شحنات في هذه الصفحة. قد تتوفر مواقع في صفحات أخرى.",
+      "fallback": "مواقع الشحنات",
+      "trackingNumber": "رقم التتبع",
+      "status": "الحالة",
+      "originCity": "مدينة المنشأ",
+      "destinationCity": "مدينة الوجهة",
+      "serviceType": "نوع الخدمة",
+      "updatedAt": "آخر تحديث",
+      "pagination": "صفحات التتبع",
+      "previous": "السابق",
+      "next": "التالي",
+      "pageCount": "{count} موقع في هذه الصفحة"
+    },
+    "shipmentPresentation": {
+      "changedBy": "عُدّل بواسطة",
+      "category": "الفئة",
+      "status": "الحالة",
+      "investigation": "التحقيق",
+      "decision": "القرار",
+      "reason": "السبب",
+      "policy": "السياسة",
+      "workflow": "سير العمل",
+      "processedAt": "وقت المعالجة",
+      "error": "الخطأ",
+      "target": "الوجهة",
+      "method": "الطريقة",
+      "response": "الاستجابة",
+      "latency": "زمن الاستجابة",
+      "timelineTitle": "سجل الشحنة",
+      "timelineDescription": "تغييرات الشحنة وقراراتها وتحديثاتها ورسائلها.",
+      "timelineUnavailable": "سجل الشحنة غير متاح حاليًا.",
+      "timelineEmpty": "لم تُسجّل أنشطة لهذه الشحنة بعد.",
+      "openActivityHistory": "فتح سجل النشاط",
+      "activityReference": " مرجع النشاط {reference}",
+      "create": "إنشاء شحنة",
+      "searchTitle": "البحث عن شحنة",
+      "searchDescription": "ابحث باستخدام مرجع الشحنة أو رقم التتبع أو مرجع الطلب أو رقم الهاتف أو مرجع النشاط.",
+      "identifier": "مرجع الشحنة أو النشاط",
+      "searchPlaceholder": "رقم التتبع أو الطلب أو الهاتف أو مرجع الشحنة أو النشاط",
+      "search": "البحث عن شحنات",
+      "clear": "مسح البحث"
+    },
     "tracking": {
-      "title": "‏Tracking",
-      "description": "‏Search shipments by tracking number.",
+      "operatorHandoff": {
+        "title": "تسليم إلى المشغّل",
+        "label": "فتح في لوحة العمليات",
+        "description": "افتح هذه الشحنة في سياق المشغّل في لوحة العمليات.",
+        "reference": " الشحنة {reference}",
+        "unavailable": "تعذّر فتح هذه الشحنة للمشغّل.",
+        "retry": "تحقّق من صلاحياتك وافتح الشحنة من صفحة التتبع مجددًا."
+      },
+      "queryReadback": "البحث الحالي: {trackingNumber}.",
+      "title": "تتبع الشحنات",
+      "description": "ابحث عن الشحنات باستخدام رقم التتبع.",
       "resultsDescription": "‏Tracking results filtered by tracking_number.",
       "empty": "‏Enter a tracking number to load shipment results.",
       "sections": {
-        "searchTitle": "Tracking search",
-        "searchDescription": "Locate a shipment by tracking number.",
-        "resultsTitle": "Tracking results",
-        "resultsDescription": "Results update as the tracking number changes."
+        "searchTitle": "البحث عن شحنة",
+        "searchDescription": "اعثر على شحنة باستخدام رقم التتبع.",
+        "resultsTitle": "نتائج التتبع",
+        "resultsDescription": "تتحدث النتائج عند تغيير رقم التتبع."
       },
       "errors": {
-        "title": "�Tracking configuration unavailable",
-        "action": "�Check tracking configuration settings.",
-        "loadConfig": "�Unable to load tracking configuration.",
-        "missingConfig": "�Tracking configuration is missing.",
-        "missingResource": "�Tracking configuration missing resource key.",
-        "missingFilter": "�Tracking configuration missing filter key."
+        "title": "تهيئة التتبع غير متاحة",
+        "action": "تحقّق من إعدادات تهيئة التتبع.",
+        "loadConfig": "تعذر تحميل تهيئة التتبع.",
+        "missingConfig": "تهيئة التتبع مفقودة.",
+        "missingResource": "تهيئة التتبع لا تتضمن مفتاح المورد.",
+        "missingFilter": "تهيئة التتبع لا تتضمن مفتاح المرشح."
       },
       "form": {
         "label": "‏Tracking number",
-        "placeholder": "‏Scan or enter tracking number",
+        "placeholder": "امسح رقم التتبع ضوئيًا أو أدخله",
         "search": "‏Search",
-        "clear": "‏Clear"
+        "clear": "‏Clear",
+        "emptySearch": "أدخل رقم تتبع قبل البحث."
       }
     },
     "access": {
@@ -2056,6 +2677,7 @@
       }
     },
     "accessPolicyRequest": {
+      "unsavedWarning": "لديك تعديلات غير محفوظة على سياسة الوصول. هل تريد المغادرة؟",
       "errors": {
         "invalidJson": "‏Invalid JSON. Fix the policy and try again.",
         "requestFailed": "‏Request failed. Check inputs and try again."
@@ -2134,6 +2756,14 @@
       }
     },
     "settingsRequest": {
+      "unsavedWarning": "لديك تغييرات غير محفوظة في الإعدادات. هل تريد المغادرة؟",
+      "provider": {
+        "url": "رابط استدعاء عارض الملصقات",
+        "secret": "سر الاستدعاء الجديد",
+        "configured": "الإعداد الفعّال موجود. هذه ليست نتيجة فحص صحة الخدمة.",
+        "unconfigured": "إعداد عارض الملصقات الفعّال غير جاهز.",
+        "requestHint": "أرسل تغيير إعدادات المستأجر للموافقة. اترك الحقل فارغًا للحفاظ عليه؛ تُحفظ الخيارات الحالية. الإرسال لا يفعّل العارض."
+      },
       "labels": {
         "unknown": "‏unknown"
       },
@@ -2308,6 +2938,7 @@
         "labelType": "‏نوع الملصق",
         "draftJson": "‏JSON المسودة",
         "createDraft": "‏إنشاء مسودة",
+        "forkDraft": "‏نسخ كمسودة جديدة",
         "creating": "‏جارٍ الإنشاء…",
         "saveDraft": "‏حفظ المسودة",
         "saving": "‏جارٍ الحفظ…",
@@ -2321,19 +2952,20 @@
       },
       "preview": {
         "title": "‏المعاينة",
-        "description": "‏حمّل عينة الشحنة وشغّل معاينة التصميم قبل الطباعة.",
+        "description": "اختر شحنة وحمّل بياناتها النموذجية ثم عاين الملصق.",
         "shipment": "‏الشحنة",
         "selectShipment": "‏اختر شحنة",
         "shipmentBox": "‏صندوق الشحنة",
         "autoFirstBox": "‏تلقائي (الصندوق الأول)",
-        "loadSample": "‏تحميل حمولة العينة",
+        "loadSample": "تحميل بيانات نموذجية",
         "loadingSample": "‏جارٍ التحميل…",
         "previewBtn": "‏معاينة",
         "rendering": "‏جارٍ العرض…",
-        "samplePayload": "‏حمولة العينة",
-        "previewResponse": "‏استجابة المعاينة",
-        "showDetails": "‏إظهار تفاصيل المعاينة",
-        "hideDetails": "‏إخفاء تفاصيل المعاينة",
+        "samplePayload": "بيانات نموذجية",
+        "previewResponse": "تفاصيل المعاينة",
+        "showDetails": "إظهار تفاصيل المعاينة",
+        "hideDetails": "إخفاء تفاصيل المعاينة",
+        "pdfUnavailable": "تعذّر فتح معاينة PDF. راجع تفاصيل المعاينة أدناه.",
         "pdfEmpty": "‏شغّل المعاينة لعرض PDF",
         "pdfLoading": "‏جارٍ تحميل PDF…",
         "pdfError": "‏فشل تحميل PDF: {error}",

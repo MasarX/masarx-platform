@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import type { UiCommandDefinition, UiReadResource } from "@masarx/api";
+import { getPublicConfig } from "@masarx/config";
 import { BulkActions } from "./bulk-actions";
 import { createUiTranslator } from "./i18n";
 import type { UiScopeMetaInput } from "./reporting";
@@ -18,6 +19,9 @@ export type ResourceBulkActionsProps = {
   maxDownloadBatch?: number;
   telemetry?: UiScopeMetaInput | null;
   testIdPrefix?: string | null;
+  onSuccess?: React.ComponentProps<typeof BulkActions>["onSuccess"];
+  onBatchResultReadbackChange?: React.ComponentProps<typeof BulkActions>["onBatchResultReadbackChange"];
+  renderBatchResultReadback?: boolean;
 };
 
 export function ResourceBulkActions({
@@ -32,8 +36,12 @@ export function ResourceBulkActions({
   maxDownloadBatch,
   telemetry,
   testIdPrefix,
+  onSuccess,
+  onBatchResultReadbackChange,
+  renderBatchResultReadback,
 }: ResourceBulkActionsProps) {
   const t = createUiTranslator("ui.resourceActions");
+  const locale = getPublicConfig().locale;
   const actions = React.useMemo(
     () =>
       resolveResourceBulkActions({
@@ -46,6 +54,7 @@ export function ResourceBulkActions({
         downloadBasePath,
         userCapabilities,
         maxDownloadBatch,
+        locale,
       }),
     [
       appKey,
@@ -53,6 +62,7 @@ export function ResourceBulkActions({
       commands,
       downloadBasePath,
       maxDownloadBatch,
+      locale,
       resource,
       resourceKey,
       t,
@@ -71,6 +81,9 @@ export function ResourceBulkActions({
       appBasePath={appBasePath}
       telemetry={telemetry}
       testIdPrefix={testIdPrefix}
+      onSuccess={onSuccess}
+      onBatchResultReadbackChange={onBatchResultReadbackChange}
+      renderBatchResultReadback={renderBatchResultReadback}
     />
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useLocale } from "next-intl";
 import { Button } from "../button";
 import { ErrorBoundary } from "../error-boundary";
 import { createUiTranslator } from "../i18n";
@@ -8,8 +9,6 @@ import { Section } from "../section";
 import { Select } from "../select";
 import { Textarea } from "../textarea";
 import type { ShipmentBoxOption, ShipmentOption } from "./types";
-
-const t = createUiTranslator("ui.labelDesigner.preview");
 
 const LazyPdfPreview = React.lazy(() =>
   import("./pdf-preview").then((mod) => ({ default: mod.PdfPreview })),
@@ -64,12 +63,12 @@ export function PreviewPanel({
   onLoadSamplePayload,
   onPreviewDraft,
 }: PreviewPanelProps) {
+  const t = createUiTranslator("ui.labelDesigner.preview", { locale: useLocale() });
   const [showPreviewDetails, setShowPreviewDetails] = React.useState(false);
   const pdfBase64 = React.useMemo(
     () => extractPdfBase64(previewResponseJson),
     [previewResponseJson],
   );
-  const supportsPdfPreview = typeof window !== "undefined" && typeof window.DOMMatrix === "function";
 
   return (
     <Section
@@ -145,11 +144,11 @@ export function PreviewPanel({
       </div>
 
       {/* PDF Preview */}
-      {supportsPdfPreview ? (
+      {typeof window !== "undefined" && typeof window.DOMMatrix === "function" ? (
         <ErrorBoundary
           fallback={
             <div className="flex items-center justify-center rounded-lg border border-ui-danger/30 bg-ui-danger/5 p-4 text-sm text-ui-danger">
-              PDF viewer failed to load. Check the preview response details below.
+              {t("pdfUnavailable")}
             </div>
           }
         >
@@ -167,21 +166,19 @@ export function PreviewPanel({
           </React.Suspense>
         </ErrorBoundary>
       ) : (
-        <div
-          className="flex items-center justify-center rounded-lg border border-dashed border-ui-border/50 bg-ui-paper/30 p-8 text-sm text-ui-muted"
-          data-testid={`${prefix}-pdf-unavailable`}
-        >
-          {pdfBase64 ? "PDF preview is available in the browser; preview response details are retained below." : t("pdfEmpty")}
-        </div>
+          <div className="flex items-center justify-center rounded-lg border border-ui-danger/30 bg-ui-danger/5 p-4 text-sm text-ui-danger">
+            {t("pdfUnavailable")}
+          </div>
       )}
 
-      {/* Sample payload + preview response details */}
+      {/* Sample data + preview details */}
       <div className="space-y-2">
         <div className="space-y-1">
-          <label className="text-xs font-medium text-ui-muted">
+          <label htmlFor={`${prefix}-sample-payload`} className="text-xs font-medium text-ui-muted">
             {t("samplePayload")}
           </label>
           <Textarea
+            id={`${prefix}-sample-payload`}
             value={samplePayloadJson || "{}"}
             readOnly
             rows={8}
@@ -193,21 +190,29 @@ export function PreviewPanel({
         <div className="space-y-1">
           <button
             type="button"
-            className="text-xs font-medium text-ui-muted underline decoration-dotted hover:text-ui-ink"
-            onClick={() => setShowPreviewDetails((v) => !v)}
+            className="min-h-6 text-xs font-medium text-ui-muted underline decoration-dotted hover:text-ui-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-accent"
+            onClick={() => setShowPreviewDetails((value) => !value)}
+            aria-expanded={showPreviewDetails}
+            aria-controls={`${prefix}-preview-details`}
             data-testid={`${prefix}-toggle-preview-details`}
           >
             {showPreviewDetails ? t("hideDetails") : t("showDetails")}
           </button>
-          {showPreviewDetails ? (
-            <Textarea
-              value={previewResponseJson || "{}"}
-              readOnly
-              rows={10}
-              className="font-mono text-xs"
-              data-testid={`${prefix}-preview-response`}
-            />
-          ) : null}
+          <div id={`${prefix}-preview-details`} hidden={!showPreviewDetails}>
+            {showPreviewDetails ? (
+              <>
+                <label htmlFor={`${prefix}-preview-response`} className="sr-only">{t("previewResponse")}</label>
+                <Textarea
+                  id={`${prefix}-preview-response`}
+                  value={previewResponseJson || "{}"}
+                  readOnly
+                  rows={10}
+                  className="font-mono text-xs"
+                  data-testid={`${prefix}-preview-response`}
+                />
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
     </Section>

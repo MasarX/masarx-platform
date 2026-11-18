@@ -1,7 +1,11 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   extractSupabaseSessionIdentities,
   findSupabaseSessionIdentity,
 } from "../../e2e/utils/auth-session";
+import { rpcWithRetry, signOutSupabaseClient } from "../../e2e/utils/supabase";
+import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
 
 function encodeBase64Url(value: unknown) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -97,5 +101,61 @@ describe("Supabase E2E session cookie parsing", () => {
     ];
 
     expect(findSupabaseSessionIdentity(cookies, "missing@example.com")).toBeNull();
+  });
+});
+
+describe("Supabase E2E session cleanup", () => {
+  test("signs out only the helper client session", async () => {
+    const signOut = jest.fn().mockResolvedValue({ error: null });
+
+    await signOutSupabaseClient(
+      { auth: { signOut } } as any,
+      { label: "unit-session-cleanup" },
+    );
+
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  test("keeps demo-password probes local to their helper session", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "tests", "e2e", "utils", "demo-accounts.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain('client.auth.signOut({ scope: "local" })');
+    expect(source).not.toContain("client.auth.signOut();");
+  });
+});
+
+describe("Supabase E2E bounded transient retries", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  test.each([false, true])("recovers from an opaque SDK fetch error (wrapped=%s)", async (wrapped) => {
+    const transient = new AuthRetryableFetchError("{}", 503);
+    const error = wrapped ? Object.assign(new Error("sign-in failed: {}"), { cause: transient }) : transient;
+    const rpc = jest.fn()
+      .mockRejectedValueOnce(error)
+      .mockResolvedValue({ data: { ok: true }, error: null });
+    const result = rpcWithRetry({ rpc } as any, "unit_lookup");
+    await jest.runAllTimersAsync();
+    await expect(result).resolves.toEqual({ data: { ok: true }, error: null });
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+
+  test("exhausts the existing three attempts and preserves the original error", async () => {
+    const error = new AuthRetryableFetchError("{}", 503);
+    const rpc = jest.fn().mockRejectedValue(error);
+    const assertion = expect(rpcWithRetry({ rpc } as any, "unit_lookup")).rejects.toBe(error);
+    await jest.runAllTimersAsync();
+    await assertion;
+    expect(rpc).toHaveBeenCalledTimes(3);
+  });
+
+  test.each([400, 403])("does not retry credentials or permission failures (%s)", async (status) => {
+    const error = new AuthApiError("Access denied", status, "invalid_credentials");
+    const rpc = jest.fn().mockRejectedValue(error);
+    await expect(rpcWithRetry({ rpc } as any, "unit_lookup")).rejects.toBe(error);
+    expect(rpc).toHaveBeenCalledTimes(1);
   });
 });

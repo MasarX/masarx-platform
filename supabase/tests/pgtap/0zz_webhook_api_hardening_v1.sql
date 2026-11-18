@@ -2,7 +2,13 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(23);
+SELECT plan(24);
+
+SELECT is(
+  public.jsonb_resolve_path('{"request":{"id":"request-1"}}'::jsonb, '$.request.id'),
+  '"request-1"'::jsonb,
+  'jsonb_resolve_path accepts the configured JSONPath root marker'
+);
 
 SELECT ok(
   to_regprocedure('public.normalize_shipment_intent_v1(text, text)') IS NOT NULL,

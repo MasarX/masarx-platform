@@ -1,3 +1,11 @@
+import { createPendingEvidence, encodeEvidenceBytes, handoffPendingEvidence, clearEvidenceLocalState, replaceEvidenceManagerAfterClear, type PendingEvidence, type EvidenceScope } from "./src/mobile-pending-evidence";
+import { MobileRealMap } from "./src/mobile-real-map";
+import { MobileTaskWorkspace } from "./src/mobile-task-workspace";
+import { buildMobileMapListEntries, buildMobileRealMapModel } from "./src/mobile-real-map-model";
+import { assertMobileCommandSelection, hasMobileCommandDisabledState, validateMobileComposerNumberValue,
+  isMobileOutboxSyncBatchSuccessful, describeMobileActionReceiptStatus, formatMobileActionReceipt,
+  describeMobileOutboxEntry, type MobileActionReceipt } from "./src/mobile-action-feedback";
+import { redactOutboxErrorText, normalizeOutboxDisplay } from "@masarx/mobile-core";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
@@ -10,8 +18,8 @@ import {
   Appearance,
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
-  KeyboardAvoidingView,
   Linking,
   Modal,
   PanResponder,
@@ -21,8 +29,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useColorScheme,
   View,
-  type TextStyle,
 } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -46,6 +54,8 @@ import type {
 import { isRetriableNetworkError, isRetriableSupabaseError } from "@masarx/api";
 import { createMobileUiClient, normalizeNavigation } from "@masarx/api/mobile";
 import { createMobileClient, createSupabaseExecutor } from "@masarx/auth/mobile";
+import { createFieldOpsLocationExecutor, verifyRouteLocationContext, type RouteLocationContext } from "./src/mobile-location-context";
+import { createRouteDepartureExecutor, enqueueRouteDeparture, routeDepartureQueueId, routeDepartureRequestState, ROUTE_DEPARTURE_RPC } from "./src/mobile-route-departure";
 import type { MobileStorageAdapter } from "@masarx/auth/mobile";
 import {
   createCacheKey,
@@ -54,8 +64,16 @@ import {
   stableStringify,
   type KeyValueStore,
   type OutboxStore,
+  type OutboxSyncResult,
 } from "@masarx/mobile-core";
 import { createSqliteKeyValueStore, createSqliteOutboxStore } from "@masarx/mobile-core/sqlite";
+import { syncCompletionOutbox, rememberCompletionReadback, latestCompletionReadback, verifyCompletionReadback, rememberIncidentReadback, forgetUnqueuedIncident, listIncidentReadbacks, incidentReadbackMatches, incidentReadbackDisplayState, activateCompletionReadbackScope, invalidateCompletionReadbacks, completionReadbackScopeVersion, completionReadbackScopeMatches, writeCompletionScopedValue, forgetUnqueuedCompletion, clearCompletionReadbacks, resolveVerifiedCompletionScope, completionScopeFromMe, rememberAcceptedReturnScan, rememberPendingReturnScan, listReturnScans, returnScanForQueue, forgetUnqueuedReturnScan, type CompletionReadbackRecord, type IncidentReadbackRecord } from "./src/mobile-completion-readback-storage";
+import { submittedCompletionExpectation } from "./src/mobile-normalized-readback";
+import { walletForm, walletStorageKey, walletScopeOrganization, readWalletDraft, readWalletSummary, readWalletReceipt } from "./src/mobile-wallet";
+import { acceptedReturnScan, recoveredReturnScan, verifiedReturnScanReceipt } from "./src/mobile-return-scan";
+import { MobileReturnActions } from "./src/mobile-return-actions";
+import { parseFinancialTaskContext, resolveFinancialTaskSchema, financialTaskPayload, financialCompletionExpectation, financialEvidenceContract, type FinancialTaskContext } from "./src/mobile-financial-task-contract";
+import { boundedCompletionRead } from "./src/mobile-completion-readback-storage";
 
 import {
   getBackgroundLocationTrackingState,
@@ -73,11 +91,7 @@ import {
 } from "./src/mobile-app-integrity";
 import { normalizeMobileLocationTrackingPolicy } from "./src/mobile-location-policy";
 import { normalizeMobileSyncPolicy } from "./src/mobile-sync-policy";
-import { buildPolicyContextFromMe } from "./src/mobile-policy-context";
 import { resolvePolicyRow } from "./src/mobile-policy-row";
-// Side-effect import — registers the Geist / Geist Mono web fonts (design
-// SSOT typography) so the React Native Web build matches the design canvas.
-import "./src/mobile-v2-web-fonts";
 import {
   POD_POLICY_UNAVAILABLE_MESSAGE,
   resolveComposerIdentityRequired,
@@ -85,8 +99,10 @@ import {
   resolveComposerPodPolicyState,
   resolveComposerSignatureRequired,
 } from "./src/mobile-composer-pod";
+import { openDriverSignup } from "./src/mobile-driver-signup";
 import { getPublicConfigFromExpo, readExtraString, resolveExpoExtra, type ExpoExtra } from "./src/mobile-public-config";
 import { createFieldOpsStorage } from "./src/mobile-storage";
+import { StopAddressActions } from "./src/mobile-address-actions-controls";
 import {
   normalizeMobileAttestationPolicy,
   shouldEnforceAttestationForRpc,
@@ -106,6 +122,7 @@ import {
   installGlobalCrashHandler,
   installUnhandledRejectionHandler,
   logDebugFailure,
+  logMobileRequestTrace,
   normalizeDebugMessage,
 } from "./src/mobile-debug";
 import {
@@ -116,12 +133,6 @@ import {
 } from "./src/mobile-crash-reporting";
 import { MobileErrorBoundary } from "./src/mobile-error-boundary";
 import { clearMobileTelemetryEvents, flushMobileTelemetryEvents } from "./src/mobile-telemetry";
-import {
-  firstMobileUiEventType,
-  normalizeMobileUiEvents,
-  resolveMobileUiEventLogReadback,
-  type MobileUiEventLogResult,
-} from "./src/mobile-ui-event-log";
 import {
   type MobileAddressPolicy,
   type MobileCommunicationPolicy,
@@ -156,6 +167,10 @@ import {
   extractAddressFields,
   extractCoordinates,
   extractCustomerName,
+  extractFieldOpsActiveRoleSnapshot,
+  fieldOpsLiveSourceResult,
+  projectFieldOpsLiveOperations,
+  selectFieldOpsLiveSources,
   extractOperationalContacts,
   extractOperationalStopSnapshot,
   extractPhoneNumber,
@@ -163,6 +178,7 @@ import {
   extractScanContext,
   extractSettlementSnapshot,
   extractTaskCardSnapshot,
+  formatMoneyLabel,
 } from "./src/mobile-shell-surface-helpers";
 import { buildRouteMapModel } from "./src/mobile-shell-route-map";
 import {
@@ -194,14 +210,27 @@ import {
   resolveConnectivitySnapshot,
 } from "./src/mobile-shell-connectivity";
 import {
+  type MobileDisplayPolicy,
   type MobileDirectionMode,
   type MobileLocaleMode,
   type MobileThemeMode,
-  resolveDirectionMode,
+  normalizeMobileDisplayPolicy,
   resolveLocaleMode,
-  resolveThemeMode,
+  resolveEffectiveDirection,
+  resolveEffectiveLocale,
+  resolveEffectiveTheme,
   toAppearanceColorScheme,
 } from "./src/mobile-shell-display";
+import {
+  getFieldOpsThemeTokens,
+  resolveAppliedFieldOpsTheme,
+  type FieldOpsThemeTokens,
+} from "./src/mobile-theme";
+import { FieldOpsDrawerCloseButton } from "./src/mobile-drawer-close-button";
+import { getFieldOpsStrings, type FieldOpsStrings } from "./src/i18n";
+import { mobileActionAccessibility, mobileSyncAccessibility } from "./src/mobile-action-accessibility";
+import { buildSignaturePdf } from "./src/mobile-signature-pdf";
+import { resolveComposerEvidence, composerRetryArgs, buildComposerEvidenceMap, normalizeSelfKycFields, validateSelfKycFields } from "./src/mobile-composer-evidence";
 import {
   resolveContentBottomPadding,
   resolveHeaderTopPadding,
@@ -213,41 +242,16 @@ import {
   resolveMobileShellHeaderTitle,
 } from "./src/mobile-shell-header";
 import { isJwtPrivilegedRole, resolveJwtRole } from "./src/mobile-jwt";
-import { createMemoryKeyValueStore, createMemoryOutboxStore } from "./src/mobile-memory-store";
-// Mobile V2 production cutover wiring (closes audit P0 #1 — see
-// docs/ops/evidence/2026-05-13/mobile-v2-fieldops-parity-audit/README.md).
-// `resolveMobileShellPolicy` calls `resolve_mobile_shell_policy` and
-// returns `{ v2_enabled, ... }`; when v2_enabled=true the boot path
-// mounts `MobileV2NativeShell` with the live supabase client + outbox
-// + resolved active role. A non-true policy resolves to a V2-required
-// blocked state, not the retired V1 shell.
+import { createWebKeyValueStore, createWebOutboxStore } from "./src/mobile-web-store";
 import {
-  resolveMobileShellMountDecision,
-  resolveMobileShellPolicy,
-  type MobileShellPolicyEnvelope,
-} from "./src/mobile-shell-cutover";
+  buildRouteLoadAction,
+  parseRouteLoadManifest,
+  type RouteLoadActionInput,
+} from "./src/mobile-route-load-manifest";
 import {
-  parseMobileV2DriverSignupRoleOptions,
-  resolveMobileV2DriverSignupEndpoints,
-  resolveMobileV2DriverSignupOrigin,
-} from "./src/mobile-v2-driver-signup";
-import { MobileV2DriverSignupFlow } from "./src/mobile-v2-driver-signup-flow";
-import { MobileV2NativeShell } from "./src/mobile-v2-preview-screen";
-import { buildMobileV2SignaturePngBase64 } from "./src/mobile-v2-pod-artifacts";
-import { getMobileV2SupabaseSchemaClient } from "./src/mobile-v2-rpc-hooks";
-import { MobileV2RuntimeBlockerScreen } from "./src/mobile-v2-runtime-blocker";
-// V2 design system — the pre-auth sign-in surface is rendered with the
-// Mobile V2 tokens + primitives so the production login matches the V2
-// design language. The auth contract stays the real Supabase email +
-// password / email-OTP flow (no employee-id/phone-OTP mock).
-import { FxButton, FxChip, FxField } from "./src/mobile-v2-primitives";
-import {
-  MOBILE_V2_FONT_MONO,
-  MOBILE_V2_FONT_SANS,
-  MOBILE_V2_SPACING,
-  MOBILE_V2_THEMES,
-  MOBILE_V2_TYPE_WEIGHTS,
-} from "./src/mobile-v2-themes";
+  FIELDOPS_NATIVE_E2E_TEST_IDS,
+  fieldOpsSignInMethodTestId,
+} from "./src/mobile-native-e2e-test-ids";
 
 const STORAGE_KEYS = {
   deviceInstallId: "fieldops_device_install_id_v1",
@@ -473,17 +477,11 @@ type ComposerArtifactEntry = {
   capturedAt: string;
   kind: ComposerArtifactKind;
   mimeType: string;
+  evidenceTag?: string;
 };
 type SignaturePoint = { x: number; y: number };
 type SignatureStroke = SignaturePoint[];
-type ActionSubmissionReceipt = {
-  actionKey: string;
-  queueId: string;
-  status: "synced" | "queued_offline" | "queued_pending_sync" | "retryable_failure";
-  detail: string;
-  recordedAt: string;
-  resourceId: string | null;
-};
+type ActionSubmissionReceipt = MobileActionReceipt;
 const TASK_ACTIONABLE_STATUSES = new Set(["open", "pending", "assigned", "in_progress"]);
 const TASK_TERMINAL_STATUSES = new Set([
   "completed",
@@ -507,6 +505,39 @@ const TASK_TERMINAL_REASONS = new Set([
   "rejected",
 ]);
 const ROUTE_PROGRESS_COMMAND_KEYS = new Set(["tasks.en_route", "tasks.arrived"]);
+function isCanonicalTaskActionable(detail: Record<string, unknown>): boolean {
+  if (Object.keys(detail).length === 0) return false;
+  const status = normalizeTaskStateToken(detail.status);
+  const reason = normalizeTaskStateToken(detail.status_reason);
+  const completedAt = coerceValueText(detail.completed_at);
+  const canceledAt = coerceValueText(detail.canceled_at);
+  if ((completedAt && completedAt !== "-") || (canceledAt && canceledAt !== "-") ||
+      (status && TASK_TERMINAL_STATUSES.has(status)) || (reason && TASK_TERMINAL_REASONS.has(reason))) return false;
+  return status ? TASK_ACTIONABLE_STATUSES.has(status) : false;
+}
+
+function selectDisplayedRouteTasks(
+  items: ReadonlyArray<Record<string, unknown>>,
+  preferredTaskId: string | null,
+  preferredRouteRunId: string | null
+): { items: Record<string, unknown>[]; routeRunId: string | null; routeRunIds: string[] } {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  let taskRoute: string | null = null;
+  for (const item of items) {
+    const context = extractScanContext(item);
+    if (!context.routeRunId || !context.routeStopId || !context.taskId) continue;
+    if (context.taskId === preferredTaskId) taskRoute = context.routeRunId;
+    const group = groups.get(context.routeRunId);
+    if (group) group.push(item);
+    else groups.set(context.routeRunId, [item]);
+  }
+  const explicit = preferredRouteRunId && groups.has(preferredRouteRunId) ? preferredRouteRunId : taskRoute;
+  const routeRunId = explicit ??
+    [...groups].find(([, group]) => group.some(isCanonicalTaskActionable))?.[0] ??
+    groups.keys().next().value ?? null;
+  return { items: routeRunId ? groups.get(routeRunId) ?? [] : [], routeRunId, routeRunIds: [...groups.keys()] };
+}
+
 const ROUTE_CLOSEOUT_COMMAND_KEYS = new Set(["tasks.close_route"]);
 
 function resolvePrimaryModuleOrder(includeSettlements: boolean): PrimaryModuleKey[] {
@@ -570,6 +601,39 @@ function findFirstEnabledNavItemByKey(
     if (resolveNavigationKey(item) === key) return item;
   }
   return null;
+}
+
+function buildPolicyContextFromMe(me: UiMe | null | undefined) {
+  const ctx: Record<string, unknown> = {};
+  if (!me) return ctx;
+
+  if (me.org?.id) ctx.organization_id = me.org.id;
+  if (me.user?.id) ctx.user_id = me.user.id;
+
+  const scopeType = coerceHref(me.access_scope?.scope_type);
+  const scopeId = coerceHref(me.access_scope?.scope_id);
+  if (scopeType && scopeId) {
+    const normalizedType = scopeType.trim().toLowerCase();
+    if (normalizedType === "tenant" && !ctx.organization_id) ctx.organization_id = scopeId;
+    else if (normalizedType === "client") ctx.client_id = scopeId;
+    else if (normalizedType === "sender") ctx.sender_id = scopeId;
+    else if (normalizedType === "source") ctx.webhook_source_id = scopeId;
+    else if (normalizedType === "resource") ctx.resource_id = scopeId;
+  }
+
+  return ctx;
+}
+
+function isFieldOpsV2Authorized(query: { isSuccess: boolean; data: unknown }) {
+  return query.isSuccess && asRecord(asRecord(query.data).value).v2_enabled === true;
+}
+
+function FieldOpsV2Gate({ enabled, disabled, children }: {
+  enabled: boolean;
+  disabled: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return enabled ? children : disabled;
 }
 
 function buildDetailPolicyContext(
@@ -732,7 +796,10 @@ function useNetworkState() {
 
 function useAuthSession(client: ReturnType<typeof createMobileClient>) {
   const [ready, setReady] = React.useState(false);
-  const [session, setSession] = React.useState<any>(null);
+  const [revision, setRevision] = React.useState(0);
+  const [session, setSession] = React.useState<
+    Awaited<ReturnType<typeof client.auth.getSession>>["data"]["session"]
+  >(null);
 
   React.useEffect(() => {
     let mounted = true;
@@ -755,6 +822,7 @@ function useAuthSession(client: ReturnType<typeof createMobileClient>) {
     const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
       if (!mounted) return;
       authEventSeen = true;
+      setRevision((value) => value + 1);
       setSession(nextSession);
       setReady(true);
     });
@@ -765,7 +833,7 @@ function useAuthSession(client: ReturnType<typeof createMobileClient>) {
     };
   }, [client]);
 
-  return { ready, session };
+  return { ready, session, revision };
 }
 
 function flattenNavItems(items: UiNavigationItem[] | null | undefined): UiNavigationItem[] {
@@ -790,6 +858,40 @@ type LookupOption = {
   metadata?: Record<string, unknown>;
 };
 
+const COMPOSER_READINESS_STAGES = ["evidence", "fields", "notes", "policy", "signature", "proof", "recipient", "exception", "partial"] as const;
+type ComposerValidation = {
+  error: string | null;
+  empty: boolean;
+  fields: CommandInputFieldRuntime[];
+  partialDeliveryBoxNumbers: number[] | null;
+  completionKind: string | null;
+  checks: { key: typeof COMPOSER_READINESS_STAGES[number]; status: "ready" | "needed" | "pending" | "unchecked" | "optional" }[];
+};
+
+function ComposerReadiness({ result, pending, strings, styles }: {
+  result: ComposerValidation;
+  pending: boolean;
+  strings: FieldOpsStrings;
+  styles: FieldOpsStyles;
+}) {
+  if (result.empty) return null;
+  const copy = strings.composerReadiness;
+  return (
+    <View testID="mobile-composer-readiness" style={styles.noticeCard}>
+      <Text accessibilityRole="header" style={styles.noticeText}>{copy.title}</Text>
+      <Text accessibilityLiveRegion="polite" style={styles.noticeSubtext}>
+        {pending ? copy.pending : result.error ? copy.needed : copy.ready}
+      </Text>
+      {result.checks.map(check => (
+        <Text key={check.key} testID={`mobile-composer-readiness-${check.key}`} style={styles.noticeSubtext}>
+          {strings.composerReadinessLabels[check.key]}{": "}{strings.composerReadinessStates[pending ? "pending" : check.status]}
+        </Text>
+      ))}
+      <Text style={styles.noticeSubtext}>{copy.boundary}</Text>
+    </View>
+  );
+}
+
 type CommandInputFieldRuntime = {
   key: string;
   label: string;
@@ -797,6 +899,8 @@ type CommandInputFieldRuntime = {
   required: boolean;
   placeholder: string | null;
   lookupCategory: string | null;
+  lookupRpc?: string | null;
+  lookupSelectionParam?: string | null;
   defaultValue: string | null;
 };
 
@@ -847,9 +951,9 @@ function resolveCommandInputFields(
         : "text";
     const required = Boolean((rawField as Record<string, unknown>).required);
     const placeholder = coerceValueText((rawField as Record<string, unknown>).placeholder);
-    const lookupCategory = coerceValueText(
-      (rawField as Record<string, unknown>).lookup_category
-    );
+    const lookupRpc = coerceValueText(rawField.lookup_rpc);
+    const lookupSelectionParam = coerceValueText(rawField.lookup_selection_param);
+    const lookupCategory = coerceValueText(rawField.lookup_category) ?? lookupRpc;
     const defaultValue = coerceValueText((rawField as Record<string, unknown>).default_value);
     const allowedMethodsLabel =
       stopSnapshot?.allowedMethods.length
@@ -902,6 +1006,8 @@ function resolveCommandInputFields(
       required,
       placeholder: resolvedPlaceholder,
       lookupCategory,
+      lookupRpc,
+      lookupSelectionParam,
       defaultValue,
     });
   }
@@ -1079,7 +1185,7 @@ function parseComposerFieldValue(field: CommandInputFieldRuntime, rawValue: stri
     if (!Number.isFinite(parsed)) {
       throw new Error(`${field.label} must be a valid number.`);
     }
-    return parsed;
+    return validateMobileComposerNumberValue(field.key, field.label, parsed);
   }
   return value;
 }
@@ -1138,10 +1244,10 @@ function resolvePartialDeliveryBoxNumbers(input: {
   return deliveredBoxNumbers;
 }
 
-function formatConnectivityStatusLabel(status: MobileConnectivityStatus): string {
-  if (status === "online") return "Online";
-  if (status === "degraded") return "Degraded";
-  return "Offline";
+function formatConnectivityStatusLabel(status: MobileConnectivityStatus, strings: FieldOpsStrings): string {
+  if (status === "online") return strings.shell.online;
+  if (status === "degraded") return strings.shell.degraded;
+  return strings.shell.offline;
 }
 
 function formatConnectivityReason(reason: string): string {
@@ -1269,41 +1375,10 @@ function coerceValueNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function describeActionReceiptStatus(status: ActionSubmissionReceipt["status"]): string {
-  if (status === "synced") return "Synced successfully.";
-  if (status === "queued_offline") return "Queued offline and will retry when connectivity returns.";
-  if (status === "queued_pending_sync") return "Queued and pending sync.";
-  return "Queued, but sync could not complete. Review Outbox for retry state.";
-}
+
 
 function clampSignaturePoint(value: number, max: number): number {
   return Math.max(0, Math.min(max, Number.isFinite(value) ? value : 0));
-}
-
-function buildSignatureSvg(strokes: SignatureStroke[], input: { width: number; height: number }): string {
-  const width = Math.max(160, Math.round(input.width || 0));
-  const height = Math.max(96, Math.round(input.height || 0));
-  const polylines = strokes
-    .filter((stroke) => stroke.length > 0)
-    .map((stroke) => {
-      const points = stroke
-        .map((point) => {
-          const x = clampSignaturePoint(point.x, width).toFixed(1);
-          const y = clampSignaturePoint(point.y, height).toFixed(1);
-          return `${x},${y}`;
-        })
-        .join(" ");
-      return `<polyline points="${points}" />`;
-    })
-    .join("");
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" fill="none">`,
-    `<rect width="${width}" height="${height}" rx="12" fill="#ffffff" />`,
-    `<g stroke="#0f172a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">`,
-    polylines,
-    "</g>",
-    "</svg>",
-  ].join("");
 }
 
 function createSignatureSegments(strokes: SignatureStroke[]): Array<{
@@ -1336,7 +1411,13 @@ function createSignatureSegments(strokes: SignatureStroke[]): Array<{
 }
 
 function decodeBase64ToArrayBuffer(value: string): ArrayBuffer {
-  const decoded = globalThis.atob(value);
+  // Expo web returns a JPEG data URL; native returns the base64 payload.
+  const encoded = value.startsWith("data:image/jpeg;base64,")
+    ? value.slice("data:image/jpeg;base64,".length) : value;
+  if (!encoded || encoded.startsWith("data:")) {
+    throw new Error("Invalid camera JPEG base64 data.");
+  }
+  const decoded = globalThis.atob(encoded);
   const bytes = new Uint8Array(decoded.length);
   for (let index = 0; index < decoded.length; index += 1) {
     bytes[index] = decoded.charCodeAt(index);
@@ -1357,14 +1438,8 @@ function renderKeyValueInline(key: string, value: unknown) {
   return `${formatKeyLabel(key)}: ${text}`;
 }
 
-function formatRouteViewLabel(mode: "list" | "orders_map") {
-  return mode === "orders_map" ? "Overview" : "List";
-}
-
-function formatMoneyLabel(amount: number | null, currency: string | null | undefined) {
-  if (amount == null || !Number.isFinite(amount)) return null;
-  const rounded = Math.round(amount * 100) / 100;
-  return `${currency ?? "SAR"} ${rounded}`;
+function formatRouteViewLabel(mode: "list" | "orders_map", strings: FieldOpsStrings) {
+  return mode === "orders_map" ? strings.route.viewMap : strings.route.viewList;
 }
 
 function formatOperationalTitle(input: {
@@ -1431,28 +1506,21 @@ function SignInScreen({
   appName,
   client,
   methods,
-  driverSignupEndpoint,
-  driverStatusEndpoint,
-  driverSignupOrigin,
-  driverSignupRoleOptions,
-  supabaseAnonKey,
+  driverSignupUrl,
   locale,
 }: {
   appName: string;
   client: ReturnType<typeof createMobileClient>;
   methods: string[];
-  driverSignupEndpoint: string;
-  driverStatusEndpoint: string;
-  driverSignupOrigin: string;
-  driverSignupRoleOptions: ReturnType<typeof parseMobileV2DriverSignupRoleOptions>;
-  supabaseAnonKey: string;
+  driverSignupUrl: string | null;
   locale: string;
 }) {
+  const styles = useFieldOpsStyles();
+  const strings = getFieldOpsStrings(resolveLocaleMode(locale));
   const availableMethods = React.useMemo(() => normalizeAuthMethods(methods), [methods]);
   const [method, setMethod] = React.useState<AuthMethod>(
     resolvePreferredAuthMethod(availableMethods)
   );
-  const [showDriverSignup, setShowDriverSignup] = React.useState(false);
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [otpCode, setOtpCode] = React.useState("");
@@ -1484,7 +1552,7 @@ function SignInScreen({
       const nextMessage = formatAuthErrorMessage(error, normalizedEmail);
       setErrorMessage(nextMessage);
       logDebugFailure("failed to authenticate", error);
-      Alert.alert("Sign-in failed", nextMessage);
+      Alert.alert(strings.auth.signInFailed, nextMessage);
     },
     [normalizedEmail]
   );
@@ -1499,7 +1567,7 @@ function SignInScreen({
       if (error) {
         const nextMessage = formatAuthErrorMessage(error, normalizedEmail);
         setErrorMessage(nextMessage);
-        Alert.alert("Sign-in failed", nextMessage);
+        Alert.alert(strings.auth.signInFailed, nextMessage);
         return;
       }
       setOtpSent(true);
@@ -1520,7 +1588,7 @@ function SignInScreen({
       if (error) {
         const nextMessage = formatAuthErrorMessage(error, normalizedEmail);
         setErrorMessage(nextMessage);
-        Alert.alert("Sign-in failed", nextMessage);
+        Alert.alert(strings.auth.signInFailed, nextMessage);
         return;
       }
       setOtpSent(false);
@@ -1574,346 +1642,146 @@ function SignInScreen({
     handleVerifyOtp().then(done).catch(fail);
   }, [canSubmit, handlePasswordSignIn, handleSendOtp, reportSubmissionFailure, handleVerifyOtp, method, otpSent, status]);
 
-  const AuthFormContainer: any = Platform.OS === "web" ? "form" : View;
-
-  // V2-styled sign-in surface. The auth contract is unchanged — real
-  // Supabase email + password / email-OTP via the handlers above; only
-  // the presentation is ported to the Mobile V2 design language.
-  const theme = MOBILE_V2_THEMES.light;
-  const driverSignupEnabled = Boolean(driverSignupEndpoint && driverStatusEndpoint && driverSignupOrigin);
-  const brandGlyph = (appName.trim().charAt(0) || "M").toUpperCase();
-  const appVersion =
-    typeof Constants.expoConfig?.version === "string" &&
-    Constants.expoConfig.version.trim().length > 0
-      ? Constants.expoConfig.version.trim()
-      : null;
-  const versionLabel = appVersion ? `${appName} · v${appVersion}` : appName;
-  const isOtpStep = method === "magic_link" && otpSent;
-  const ctaLabel =
-    status === "loading"
-      ? method === "password"
-        ? "Signing in..."
-        : otpSent
-          ? "Verifying..."
-          : "Sending code..."
-      : method === "password"
-        ? "Sign in"
-        : otpSent
-          ? "Verify & continue"
-          : "Send code";
-  const v2InputStyle: TextStyle = {
-    width: "100%",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    fontFamily: MOBILE_V2_FONT_SANS,
-    backgroundColor: theme.surface,
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    color: theme.ink,
-  };
-
-  if (showDriverSignup && driverSignupEnabled) {
-    return (
-      <MobileV2DriverSignupFlow
-        theme={theme}
-        signupEndpoint={driverSignupEndpoint}
-        statusEndpoint={driverStatusEndpoint}
-        anonKey={supabaseAnonKey}
-        origin={driverSignupOrigin}
-        locale={locale}
-        roleOptions={driverSignupRoleOptions}
-        onBack={() => setShowDriverSignup(false)}
-      />
-    );
-  }
+  const AuthFormContainer: React.ElementType = Platform.OS === "web" ? "form" : View;
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: theme.bg }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ flexGrow: 1 }}
+    <View style={styles.container} testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInScreen}>
+      <Text style={styles.title}>{appName}</Text>
+      <Text style={styles.subtitle}>{strings.auth.subtitle}</Text>
+
+      {availableMethods.length > 1 ? (
+        <View style={styles.methodRow}>
+          {availableMethods.map((candidate) => (
+            <Pressable
+              key={candidate}
+              accessibilityRole="button"
+              accessibilityLabel={candidate === "password" ? "Use password" : "Use email code"}
+              accessibilityState={{ selected: candidate === method }}
+              testID={fieldOpsSignInMethodTestId(candidate)}
+              onPress={() => {
+                setMethod(candidate);
+                setOtpSent(false);
+                setOtpCode("");
+                setErrorMessage(null);
+              }}
+              style={({ pressed }) => [
+                styles.methodChip,
+                candidate === method && styles.methodChipActive,
+                pressed && styles.navItemPressed,
+              ]}
+            >
+              <Text style={styles.methodChipText}>
+                {candidate === "password" ? strings.auth.passwordMethod : strings.auth.emailCodeMethod}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <AuthFormContainer
+        style={styles.form}
+        {...(Platform.OS === "web"
+          ? {
+              onSubmit: (event: unknown) => {
+                const formEvent = event as { preventDefault?: () => void };
+                formEvent.preventDefault?.();
+                submitAction();
+              },
+            }
+          : {})}
       >
-        <AuthFormContainer
-          style={{ display: "flex", flexDirection: "column", flexGrow: 1 }}
-          {...(Platform.OS === "web"
-            ? {
-                onSubmit: (event: unknown) => {
-                  const formEvent = event as { preventDefault?: () => void };
-                  formEvent.preventDefault?.();
-                  submitAction();
-                },
-              }
-            : {})}
+        <TextInput
+          accessibilityLabel="Email"
+          testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInEmail}
+          style={styles.input}
+          value={email}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          placeholder={strings.auth.emailPlaceholder}
+          onChangeText={(nextEmail) => {
+            setEmail(normalizeAuthEmail(nextEmail));
+            setErrorMessage(null);
+          }}
+        />
+
+        {method === "password" ? (
+          <TextInput
+            accessibilityLabel="Password"
+            testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInPassword}
+            style={styles.input}
+            value={password}
+            secureTextEntry
+            placeholder={strings.auth.passwordPlaceholder}
+            onChangeText={(nextPassword) => {
+              setPassword(nextPassword);
+              setErrorMessage(null);
+            }}
+          />
+        ) : null}
+
+        {method === "magic_link" && otpSent ? (
+          <TextInput
+            accessibilityLabel="Verification code"
+            testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInOtp}
+            style={styles.input}
+            value={otpCode}
+            placeholder={strings.auth.codePlaceholder}
+            keyboardType="number-pad"
+            onChangeText={(nextCode) => {
+              setOtpCode(nextCode);
+              setErrorMessage(null);
+            }}
+          />
+        ) : null}
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canSubmit }}
+          testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInSubmit}
+          disabled={!canSubmit}
+          onPress={submitAction}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            !canSubmit && styles.primaryButtonDisabled,
+            pressed && canSubmit && styles.primaryButtonPressed,
+          ]}
         >
-          <View
-            style={{
-              flexGrow: 1,
-              paddingTop: 40,
-              paddingHorizontal: MOBILE_V2_SPACING["6xl"],
-              paddingBottom: MOBILE_V2_SPACING["6xl"],
-            }}
-          >
-            <View
-              accessibilityRole="image"
-              accessibilityLabel={`${appName} brand mark`}
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 14,
-                backgroundColor: theme.chrome,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text
-                style={{
-                  color: theme.onChrome,
-                  fontSize: 22,
-                  fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
-                  fontFamily: MOBILE_V2_FONT_MONO,
-                }}
-              >
-                {brandGlyph}
-              </Text>
-            </View>
+          <Text style={styles.primaryButtonText}>
+            {status === "loading"
+              ? strings.auth.working
+              : method === "password"
+                ? strings.auth.signIn
+                : otpSent
+                  ? strings.auth.verifyCode
+                  : strings.auth.sendCode}
+          </Text>
+        </Pressable>
+        <Pressable accessibilityRole="link" testID="fieldops-driver-signup"
+          disabled={!driverSignupUrl || status === "loading"}
+          accessibilityState={{ disabled: !driverSignupUrl || status === "loading" }}
+          onPress={async () => {
+            try { await openDriverSignup(driverSignupUrl, Linking); }
+            catch { setErrorMessage(strings.auth.signupUnavailable); }
+          }}>
+          <Text style={styles.subtitle}>{strings.auth.signupBrowser}</Text>
+        </Pressable>
+        <Text style={styles.subtitle}>{driverSignupUrl ? strings.auth.signupPending : strings.auth.signupUnavailable}</Text>
+        {errorMessage ? <Text style={styles.authError}>{errorMessage}</Text> : null}
 
-            <Text
-              style={{
-                fontSize: 26,
-                fontWeight: MOBILE_V2_TYPE_WEIGHTS.bold,
-                letterSpacing: -0.6,
-                color: theme.ink,
-                fontFamily: MOBILE_V2_FONT_SANS,
-                marginTop: MOBILE_V2_SPACING["6xl"],
-              }}
-            >
-              Welcome back.
-            </Text>
-            <Text
-              style={{
-                fontSize: 14,
-                color: theme.muted,
-                fontFamily: MOBILE_V2_FONT_SANS,
-                marginTop: MOBILE_V2_SPACING.md,
-              }}
-            >
-              {isOtpStep
-                ? `Enter the code we sent to ${normalizedEmail}.`
-                : "Sign in to start your shift."}
-            </Text>
-
-            <View style={{ marginTop: 28, rowGap: MOBILE_V2_SPACING["4xl"] }}>
-              <FxField theme={theme} label="Work email">
-                <TextInput
-                  value={email}
-                  onChangeText={(nextEmail) => {
-                    setEmail(normalizeAuthEmail(nextEmail));
-                    setErrorMessage(null);
-                  }}
-                  placeholder="lhwmilsokgrmgptsihhuoljt@example.invalid"
-                  placeholderTextColor={theme.muted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
-                  accessibilityLabel="Work email"
-                  style={v2InputStyle}
-                />
-              </FxField>
-
-              {method === "password" ? (
-                <FxField theme={theme} label="Password">
-                  <TextInput
-                    value={password}
-                    onChangeText={(nextPassword) => {
-                      setPassword(nextPassword);
-                      setErrorMessage(null);
-                    }}
-                    placeholder="Your password"
-                    placeholderTextColor={theme.muted}
-                    secureTextEntry
-                    accessibilityLabel="Password"
-                    style={v2InputStyle}
-                  />
-                </FxField>
-              ) : null}
-
-              {isOtpStep ? (
-                <FxField theme={theme} label="One-time code">
-                  <TextInput
-                    value={otpCode}
-                    onChangeText={(nextCode) => {
-                      setOtpCode(nextCode);
-                      setErrorMessage(null);
-                    }}
-                    placeholder="••••••"
-                    placeholderTextColor={theme.muted}
-                    keyboardType="number-pad"
-                    autoFocus
-                    accessibilityLabel="One-time code"
-                    style={[
-                      v2InputStyle,
-                      {
-                        fontFamily: MOBILE_V2_FONT_MONO,
-                        fontSize: 24,
-                        letterSpacing: 8,
-                        textAlign: "center",
-                      },
-                    ]}
-                  />
-                </FxField>
-              ) : null}
-            </View>
-
-            {errorMessage ? (
-              <Text
-                accessibilityLiveRegion="polite"
-                style={{
-                  fontSize: 12,
-                  color: theme.danger,
-                  fontFamily: MOBILE_V2_FONT_SANS,
-                  marginTop: MOBILE_V2_SPACING.xl,
-                }}
-              >
-                {errorMessage}
-              </Text>
-            ) : null}
-
-            {status === "loading" ? (
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  columnGap: MOBILE_V2_SPACING.lg,
-                  marginTop: MOBILE_V2_SPACING.xl,
-                }}
-              >
-                <ActivityIndicator color={theme.accent} />
-                <Text
-                  style={{
-                    fontSize: 12,
-                    color: theme.muted,
-                    fontFamily: MOBILE_V2_FONT_SANS,
-                  }}
-                >
-                  Please wait...
-                </Text>
-              </View>
-            ) : null}
-
-            <FxChip
-              theme={theme}
-              icon="globe"
-              tone="neutral"
-              dense
-              style={{ marginTop: MOBILE_V2_SPACING["5xl"] }}
-            >
-              EN · العربية
-            </FxChip>
+        {status === "loading" ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator />
+            <Text style={styles.subtitle}>{strings.auth.pleaseWait}</Text>
           </View>
-
-          <View
-            style={{
-              paddingHorizontal: MOBILE_V2_SPACING["4xl"],
-              paddingTop: MOBILE_V2_SPACING["2xl"],
-              paddingBottom: MOBILE_V2_SPACING["5xl"],
-              rowGap: 14,
-            }}
-          >
-            <FxButton
-              theme={theme}
-              variant={canSubmit ? "chrome" : "soft"}
-              size="lg"
-              full
-              iconRight="arrow-right"
-              disabled={!canSubmit}
-              onPress={submitAction}
-              testID="mobile-signin-submit"
-              accessibilityLabel={ctaLabel}
-            >
-              {ctaLabel}
-            </FxButton>
-
-            {availableMethods.length > 1 ? (
-              <Pressable
-                onPress={() => {
-                  setMethod(method === "password" ? "magic_link" : "password");
-                  setOtpSent(false);
-                  setOtpCode("");
-                  setErrorMessage(null);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  method === "password"
-                    ? "Email me a one-time code instead"
-                    : "Use password instead"
-                }
-                style={{ alignItems: "center" }}
-              >
-                <Text
-                  style={{
-                    fontSize: 13,
-                    color: theme.accent,
-                    fontFamily: MOBILE_V2_FONT_SANS,
-                    fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
-                  }}
-                >
-                  {method === "password"
-                    ? "Email me a one-time code instead"
-                    : "Use password instead"}
-                </Text>
-              </Pressable>
-            ) : null}
-
-            {driverSignupEnabled ? (
-              <Pressable
-                onPress={() => {
-                  setErrorMessage(null);
-                  setShowDriverSignup(true);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Sign up as a driver"
-                testID="mobile-v2-driver-signup-link"
-                style={{ alignItems: "center" }}
-              >
-                <Text
-                  style={{
-                    fontSize: 13,
-                    color: theme.accent,
-                    fontFamily: MOBILE_V2_FONT_SANS,
-                    fontWeight: MOBILE_V2_TYPE_WEIGHTS.semibold,
-                  }}
-                >
-                  Sign up as a driver
-                </Text>
-              </Pressable>
-            ) : null}
-
-            <Text
-              style={{
-                fontSize: 11,
-                color: theme.muted,
-                fontFamily: MOBILE_V2_FONT_SANS,
-                textAlign: "center",
-              }}
-            >
-              {versionLabel}
-            </Text>
-          </View>
-        </AuthFormContainer>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        ) : null}
+      </AuthFormContainer>
+    </View>
   );
 }
 
 function Bootstrap() {
-  const queryClient = useQueryClient();
-  const safeAreaInsets = useSafeAreaInsets();
+  const styles = useFieldOpsStyles();
   const extra = React.useMemo(
     () => resolveExpoExtra((Constants.expoConfig?.extra ?? {}) as ExpoExtra),
     []
@@ -1926,40 +1794,54 @@ function Bootstrap() {
     }
   }, [extra]);
   const publicConfig = publicConfigResult.config;
+  const configError = publicConfigResult.error;
   const supabaseKeyRole = React.useMemo(() => {
     if (!publicConfig) return null;
     return resolveJwtRole(publicConfig.supabaseAnonKey);
   }, [publicConfig]);
-  const driverSignupRuntime = React.useMemo(() => {
-    const signupEndpoint = readExtraString(extra, "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT");
-    const statusEndpoint = readExtraString(extra, "NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT");
-    const configuredOrigin = readExtraString(extra, "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN");
-    const roleConfig = readExtraString(extra, "NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES");
-    const endpoints = resolveMobileV2DriverSignupEndpoints({
-      supabaseUrl: publicConfig?.supabaseUrl ?? "",
-      supabaseFunctionsUrl: publicConfig?.supabaseFunctionsUrl ?? null,
-      signupEndpoint,
-      statusEndpoint,
-    });
-    return {
-      ...endpoints,
-      origin: resolveMobileV2DriverSignupOrigin({
-        configuredOrigin,
-        signupEndpoint: endpoints.signupEndpoint,
-        supabaseUrl: publicConfig?.supabaseUrl ?? "",
-      }),
-      roleOptions: parseMobileV2DriverSignupRoleOptions(roleConfig),
-    };
-  }, [extra, publicConfig?.supabaseFunctionsUrl, publicConfig?.supabaseUrl]);
   const storage = React.useMemo(() => createFieldOpsStorage(), []);
 
   if (!publicConfig) {
-    return <MobileV2RuntimeBlockerScreen kind="configuration" appName="FieldOps" />;
+    return (
+      <View style={styles.container} accessibilityRole="alert">
+        <Text style={styles.title}>Fieldops</Text>
+        <Text style={styles.error}>Configuration error</Text>
+        <Text style={styles.mono}>{configError ?? "Missing public configuration."}</Text>
+      </View>
+    );
   }
 
   if (isJwtPrivilegedRole(supabaseKeyRole)) {
-    return <MobileV2RuntimeBlockerScreen kind="clientCredential" appName={publicConfig.appName} />;
+    return (
+      <View style={styles.container} accessibilityRole="alert">
+        <Text style={styles.title}>{publicConfig.appName}</Text>
+        <Text style={styles.error}>Invalid Supabase key</Text>
+        <Text style={styles.subtitle}>
+          The configured SUPABASE key is a service role key, which must never be used in a client app.
+        </Text>
+        <Text style={styles.mono}>
+          Fix: set NEXT_PUBLIC_SUPABASE_ANON_KEY to the anon key for this workspace, then restart the
+          dev server.
+        </Text>
+      </View>
+    );
   }
+
+  return <BootstrapConfigured publicConfig={publicConfig} storage={storage} />;
+}
+
+type BootstrapConfiguredProps = {
+  publicConfig: ReturnType<typeof getPublicConfigFromExpo>;
+  storage: MobileStorageAdapter;
+};
+
+function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps) {
+  const styles = useFieldOpsStyles();
+  const strings = React.useMemo(
+    () => getFieldOpsStrings(resolveLocaleMode(publicConfig.locale)), [publicConfig.locale]
+  );
+  const queryClient = useQueryClient();
+  const safeAreaInsets = useSafeAreaInsets();
 
   const client = React.useMemo(
     () =>
@@ -1967,6 +1849,7 @@ function Bootstrap() {
         supabaseUrl: publicConfig.supabaseUrl,
         supabaseAnonKey: publicConfig.supabaseAnonKey,
         storage,
+        onRequestTrace: logMobileRequestTrace,
         onRequestFailure: (context) => {
           addMobileNetworkFailureBreadcrumb(context);
           const { method, url, status, statusText, correlationId, traceparent, error } = context;
@@ -1982,9 +1865,66 @@ function Bootstrap() {
     [publicConfig.supabaseUrl, publicConfig.supabaseAnonKey, storage]
   );
   const uiClient = React.useMemo(() => createMobileUiClient(client), [client]);
-  const executor = React.useMemo(() => createSupabaseExecutor(client), [client]);
+  const executor = React.useMemo(() => createFieldOpsLocationExecutor(
+    createRouteDepartureExecutor(client, createSupabaseExecutor(client)),
+    (resource, id) => uiClient.getResource(resource, id),
+    async () => {
+      const { data, error } = await client.auth.getUser();
+      if (error) throw error;
+      return data.user?.id ?? null;
+    },
+    async (expectedActorId) => {
+      const { data, error } = await client.auth.getSession();
+      if (error) throw error;
+      const session = data.session;
+      if (!session?.access_token || session.user.id !== expectedActorId) {
+        throw new Error("Route location actor changed before dispatch.");
+      }
+      return async (rpc, args, transport = "rpc") => {
+        if (transport !== "rpc") throw new Error("Route location requires RPC transport.");
+        const result = await client.rpc(rpc as any, args as any)
+          .setHeader("Authorization", `Bearer ${session.access_token}`);
+        if (result.error) throw result.error;
+        return result.data;
+      };
+    },
+  ), [client, uiClient]);
   const auth = useAuthSession(client);
   const network = useNetworkState();
+
+  const ctxQuery = useQuery({
+    queryKey: ["ui", "context", "mobile", auth.session?.user?.id ?? null, Platform.OS === "web" ? auth.revision : null],
+    queryFn: () => uiClient.context("mobile"),
+    enabled: Boolean(auth.session),
+  });
+  const webOrganizationId = readContextId(buildPolicyContextFromMe(ctxQuery.data?.me), "organization_id");
+  const webUserId = auth.session?.user?.id ?? null;
+  const webScopeKey = webUserId && webOrganizationId && ctxQuery.data?.me.user?.id === webUserId
+    ? JSON.stringify([webUserId, webOrganizationId]) : null;
+  const currentWebScope = React.useRef(webScopeKey);
+  currentWebScope.current = webScopeKey;
+  const [boundWebScope, setBoundWebScope] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (Platform.OS !== "web" || boundWebScope === webScopeKey) return;
+    let cancelled = false;
+    const predicate = (query: { queryKey: readonly unknown[] }) => !(query.queryKey[0] === "ui" && query.queryKey[1] === "context");
+    void queryClient.cancelQueries({ predicate }).then(() => {
+      if (cancelled) return;
+      queryClient.removeQueries({ predicate });
+      setBoundWebScope(webScopeKey);
+    });
+    return () => { cancelled = true; };
+  }, [boundWebScope, webScopeKey, queryClient]);
+  const webStoreScope = React.useMemo(() => webScopeKey && webUserId && webOrganizationId ? {
+    userId: webUserId,
+    organizationId: webOrganizationId,
+    assertCurrent: async () => {
+      const { data, error } = await client.auth.getSession();
+      if (error || data.session?.user.id !== webUserId || currentWebScope.current !== webScopeKey) {
+        throw new Error("Offline storage identity changed; reconnect before continuing.");
+      }
+    },
+  } : null, [webScopeKey, webUserId, webOrganizationId, client]);
 
   React.useEffect(() => {
     if (!auth.ready) return;
@@ -1999,39 +1939,41 @@ function Bootstrap() {
   const outboxStore = React.useMemo<OutboxStore>(
     () =>
       Platform.OS === "web"
-        ? createMemoryOutboxStore()
+        ? createWebOutboxStore(webStoreScope)
         : createSqliteOutboxStore({ databaseName: "fieldops.db", tableName: "outbox" }),
-    []
+    [Platform.OS === "web" ? webStoreScope : null]
   );
   const outbox = React.useMemo(() => createOutbox(outboxStore), [outboxStore]);
   const cacheStore = React.useMemo<KeyValueStore>(
     () =>
       Platform.OS === "web"
-        ? createMemoryKeyValueStore()
+        ? createWebKeyValueStore(webStoreScope)
         : createSqliteKeyValueStore({ databaseName: "fieldops.db", tableName: "kv_store" }),
-    []
+    [Platform.OS === "web" ? webStoreScope : null]
   );
 
   const outboxInitQuery = useQuery({
-    queryKey: ["outbox", "init"],
+    queryKey: ["outbox", "init", webScopeKey],
     queryFn: async () => {
       await outbox.init();
       return true;
     },
     staleTime: Infinity,
+    enabled: Platform.OS !== "web" || Boolean(webScopeKey && boundWebScope === webScopeKey),
   });
 
   const cacheInitQuery = useQuery({
-    queryKey: ["kv", "init"],
+    queryKey: ["kv", "init", webScopeKey],
     queryFn: async () => {
       await cacheStore.init();
       return true;
     },
     staleTime: Infinity,
+    enabled: Platform.OS !== "web" || Boolean(webScopeKey && boundWebScope === webScopeKey),
   });
 
   const outboxCountQuery = useQuery({
-    queryKey: ["outbox", "count"],
+    queryKey: ["outbox", "count", webScopeKey],
     queryFn: () => outbox.countPending(),
     enabled: outboxInitQuery.isSuccess,
   });
@@ -2041,31 +1983,72 @@ function Bootstrap() {
 
   const syncMutation = useMutation({
     mutationFn: () =>
-      outbox.sync(executor, {
+      syncCompletionOutbox(outbox, async (rpc, args) => {
+        if (Platform.OS === "web") {
+          if (!webStoreScope) throw new Error("Authenticated offline storage is not ready.");
+          await webStoreScope.assertCurrent();
+        }
+        return executor(rpc, args);
+      }, cacheStore, () => resolveVerifiedCompletionScope(client), {
         shouldRetry: (error) =>
           isRetriableNetworkError(error) || isRetriableSupabaseError(error),
+        onSucceeded: async (entry, result) => {
+          if (entry.rpc === ROUTE_DEPARTURE_RPC) {
+            queryClient.invalidateQueries({ queryKey: ["route", "execution-manifest"] });
+            queryClient.invalidateQueries({ queryKey: ["route", "departure-request"] });
+          }
+          if (entry.args.p_action_key === "tasks.report_incident")
+            queryClient.invalidateQueries({ queryKey: ["incident-readback"] });
+          const epoch = completionReadbackScopeVersion();
+          const scope = await resolveVerifiedCompletionScope(client);
+          const accepted = scope && acceptedReturnScan(entry, result, scope.actor);
+          if (!scope || !accepted || epoch !== completionReadbackScopeVersion()) return;
+          await rememberAcceptedReturnScan(cacheStore, scope, accepted);
+          queryClient.invalidateQueries({ queryKey: ["accepted-return-scan"] });
+          queryClient.invalidateQueries({ queryKey: ["return-scan-list"] });
+        },
       }),
-    onSuccess: () => {
-      setLastSyncSuccessAt(new Date().toISOString());
-      setSyncErrorCount(0);
+    onSuccess: (result) => {
+      if (isMobileOutboxSyncBatchSuccessful(result)) {
+        setLastSyncSuccessAt(new Date().toISOString());
+        setSyncErrorCount(0);
+      } else if (!(result?.attempted === 0 && result.succeeded === 0 && result.failed === 0 && result.dead === 0)) {
+        setSyncErrorCount((previous) => Math.min(previous + 1, 20));
+      }
       queryClient.invalidateQueries({ queryKey: ["outbox", "count"] });
       queryClient.invalidateQueries({ queryKey: ["outbox", "entries"] });
       queryClient.invalidateQueries({ queryKey: ["ui", "list"] });
       queryClient.invalidateQueries({ queryKey: ["ui", "detail"] });
+      queryClient.invalidateQueries({ queryKey: ["return-scan-readback"] });
+      queryClient.invalidateQueries({ queryKey: ["route", "execution-manifest"] });
+      queryClient.invalidateQueries({ queryKey: ["route", "departure-request"] });
     },
     onError: () => {
       setSyncErrorCount((prev) => Math.min(prev + 1, 20));
     },
   });
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "active") queryClient.invalidateQueries({ queryKey: ["incident-readback"] });
+    });
+    return () => subscription.remove();
+  }, [queryClient]);
 
-  const ctxQuery = useQuery({
-    queryKey: ["ui", "context", "mobile", auth.session?.user?.id ?? null],
-    queryFn: () => uiClient.context("mobile"),
-    enabled: Boolean(auth.session),
+  const mobileShellPolicyContext = React.useMemo(
+    () => buildPolicyContextFromMe(ctxQuery.data?.me),
+    [ctxQuery.data?.me]
+  );
+  const mobileShellPolicyQuery = useQuery({
+    queryKey: ["policy", "mobile_shell_policy", stableStringify(mobileShellPolicyContext)],
+    queryFn: () => resolvePolicyRow(client, "resolve_mobile_shell_policy", mobileShellPolicyContext),
+    enabled: Boolean(ctxQuery.data?.me?.user?.id),
+    staleTime: 60_000,
   });
+  const fieldOpsV2Authorized = isFieldOpsV2Authorized(mobileShellPolicyQuery);
 
   const bootEventQueuedRef = React.useRef(false);
   React.useEffect(() => {
+    if (!fieldOpsV2Authorized) return;
     if (!outboxInitQuery.isSuccess) return;
     if (!ctxQuery.data) return;
     if (bootEventQueuedRef.current) return;
@@ -2075,7 +2058,7 @@ function Bootstrap() {
       .enqueue({
         rpc: "ui_log_events_v1",
         args: {
-          p_events: normalizeMobileUiEvents([
+          p_events: [
             {
               event_type: "mobile_boot",
               captured_at: new Date().toISOString(),
@@ -2084,7 +2067,7 @@ function Bootstrap() {
                 app: "fieldops",
               },
             },
-          ]),
+          ],
           p_app: "mobile",
         },
       })
@@ -2095,7 +2078,7 @@ function Bootstrap() {
       .catch((error) => {
         logDebugFailure("failed to enqueue boot event", error);
       });
-  }, [ctxQuery.data, outbox, outboxInitQuery.isSuccess, queryClient]);
+  }, [ctxQuery.data, fieldOpsV2Authorized, outbox, outboxInitQuery.isSuccess, queryClient]);
 
   if (!auth.ready) {
     return (
@@ -2112,11 +2095,7 @@ function Bootstrap() {
         appName={publicConfig.appName}
         client={client}
         methods={publicConfig.authMethods}
-        driverSignupEndpoint={driverSignupRuntime.signupEndpoint}
-        driverStatusEndpoint={driverSignupRuntime.statusEndpoint}
-        driverSignupOrigin={driverSignupRuntime.origin}
-        driverSignupRoleOptions={driverSignupRuntime.roleOptions}
-        supabaseAnonKey={publicConfig.supabaseAnonKey}
+        driverSignupUrl={publicConfig.driverSignupUrl}
         locale={publicConfig.locale}
       />
     );
@@ -2141,6 +2120,25 @@ function Bootstrap() {
     );
   }
 
+  if (Platform.OS === "web" && (!webScopeKey || boundWebScope !== webScopeKey)) {
+    return <View style={styles.container}><Text style={!webScopeKey ? styles.error : styles.subtitle}>
+      {!webScopeKey ? "Authenticated organization is unavailable. No offline action can be confirmed." : "Resolving authenticated offline storage..."}
+    </Text></View>;
+  }
+
+  if (outboxInitQuery.isError || cacheInitQuery.isError) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>{publicConfig.appName}</Text>
+        <Text style={styles.error}>Durable offline storage is unavailable. No queued action was confirmed.</Text>
+        <Text style={styles.mono}>{formatUnknownError(outboxInitQuery.error ?? cacheInitQuery.error)}</Text>
+        <Pressable onPress={() => { void outboxInitQuery.refetch(); void cacheInitQuery.refetch(); }} accessibilityRole="button">
+          <Text>Retry storage</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   if (!ctxQuery.data) {
     return (
       <View style={styles.container}>
@@ -2151,140 +2149,47 @@ function Bootstrap() {
     );
   }
 
-  return (
-    <BootstrapShellRouter
-      publicConfig={publicConfig}
-      client={client}
-      me={ctxQuery.data.me}
-      v2Outbox={outbox}
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Mobile V2 production cutover gate.
-//
-// Closes audit P0 #1 (docs/ops/evidence/2026-05-13/mobile-v2-fieldops-parity-audit/
-// README.md). Resolves the row-driven `mobile_shell_policy.v2_enabled`
-// flag via `resolve_mobile_shell_policy` and either:
-//
-//   1. Renders a brief boot splash while the resolver call is in flight
-//   2. Renders `MobileV2NativeShell` when v2Enabled=true
-//   3. Renders a V2-required blocked state on default / error
-//
-// Fail-safe contract: every resolver error path collapses to a visible
-// V2-required block; the boot path must never silently continue on V1.
-// A tenant disabling V2 takes effect on next app open via
-// `UPDATE settings_versions` with no code change required.
-//
-// The resolver call is one round-trip per app open; cached via
-// react-query with a 5-minute stale window. Force-refresh requires
-// reopening the app (which is the rollout contract — flipping a tenant
-// doesn't disrupt active sessions).
-// ---------------------------------------------------------------------------
-
-type BootstrapShellRouterProps = {
-  readonly publicConfig: ReturnType<typeof getPublicConfigFromExpo>;
-  readonly client: ReturnType<typeof createMobileClient>;
-  readonly me: UiMe | null | undefined;
-  readonly v2Outbox: ReturnType<typeof createOutbox>;
-};
-
-function resolveMobileV2ActiveRole(
-  userType: unknown,
-): "driver" | "loader" | "rider" | "supervisor" {
-  if (typeof userType !== "string") return "driver";
-  const normalized = userType.trim().toLowerCase();
-  switch (normalized) {
-    case "loader":
-    case "rider":
-    case "supervisor":
-      return normalized;
-    default:
-      return "driver";
-  }
-}
-
-function MobileV2CutoverBlockedScreen(props: {
-  readonly publicConfig: ReturnType<typeof getPublicConfigFromExpo>;
-  readonly retrying: boolean;
-  readonly onRetry: () => void;
-}): React.ReactElement {
-  const { publicConfig, retrying, onRetry } = props;
-  return (
-    <MobileV2RuntimeBlockerScreen
-      kind="mobileV2Unavailable"
-      appName={publicConfig.appName}
-      retrying={retrying}
-      onRetry={onRetry}
-    />
-  );
-}
-
-function BootstrapShellRouter(props: BootstrapShellRouterProps): React.ReactElement {
-  const { publicConfig, client, me, v2Outbox } = props;
-  const activeRole = React.useMemo(
-    () => resolveMobileV2ActiveRole(me?.user?.user_type ?? null),
-    [me?.user?.user_type],
-  );
-  const policyContext = React.useMemo(() => buildPolicyContextFromMe(me), [me]);
-
-  // Boot-policy query. Returns a typed envelope; never throws (the
-  // resolver wraps errors into the safe V1 default). We keep the query
-  // bounded to a single in-flight call per app open unless the visible
-  // blocked-state retry is pressed. staleTime: Infinity prevents
-  // incidental mid-session re-queries.
-  const bootPolicyQuery = useQuery<MobileShellPolicyEnvelope>({
-    queryKey: ["fieldops", "v2", "boot-policy", me?.user?.id ?? null, policyContext],
-    queryFn: () =>
-      resolveMobileShellPolicy({
-        supabase: client as unknown as Parameters<typeof resolveMobileShellPolicy>[0]["supabase"],
-        activeRole,
-        context: policyContext,
-      }),
-    staleTime: Infinity,
-    gcTime: 30 * 60_000,
-    retry: 0, // resolver already swallows errors into fail-safe payload
-  });
-
-  // Brief boot splash while resolving — bounded by the resolver's own
-  // 4 s timeout, so this never blocks indefinitely. Mirrors the V1
-  // bootstrapping splash for visual continuity.
-  if (bootPolicyQuery.isLoading) {
+  if (mobileShellPolicyQuery.isLoading) {
     return (
       <View style={styles.container}>
         <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.subtitle}>Resolving shell policy...</Text>
+        <Text style={styles.subtitle}>Bootstrapping...</Text>
       </View>
     );
   }
 
-  const policy = bootPolicyQuery.data;
-  const mountDecision = resolveMobileShellMountDecision(policy);
-  if (mountDecision.kind === "blocked") {
-    return (
-      <MobileV2CutoverBlockedScreen
-        publicConfig={publicConfig}
-        retrying={bootPolicyQuery.isFetching}
-        onRetry={() => {
-          void bootPolicyQuery.refetch();
-        }}
-      />
-    );
-  }
-
   return (
-    <MobileV2NativeShell
-      supabase={client as unknown as React.ComponentProps<typeof MobileV2NativeShell>["supabase"]}
-      activeRole={activeRole}
-      outbox={v2Outbox as unknown as React.ComponentProps<typeof MobileV2NativeShell>["outbox"]}
-      // E15: the settings-ladder resolvers (ui_navigation, mobile_*_policy)
-      // derive the tenant org strictly from `policyContext.organization_id`.
-      // An empty context resolves only the Global scope row, silently
-      // dropping every tenant/client/scope override — pass the real caller
-      // context so the override ladder is honoured in the native shell.
-      policyContext={policyContext}
+    <FieldOpsV2Gate
+      enabled={fieldOpsV2Authorized}
+      disabled={(
+      <View style={styles.container}>
+        <Text style={styles.title}>{publicConfig.appName}</Text>
+        <Text style={styles.error}>{strings.bootstrap.v2Disabled}</Text>
+      </View>
+      )}
+    >
+    <BootstrapAuthed
+      key={Platform.OS === "web" ? webScopeKey : undefined}
+      ctx={ctxQuery.data}
+      sessionUserId={auth.session.user.id}
+      safeAreaInsets={safeAreaInsets}
+      publicConfig={publicConfig}
+      storage={storage}
+      client={client}
+      uiClient={uiClient}
+      executor={executor}
+      network={network}
+      outboxStore={outboxStore}
+      outbox={outbox}
+      outboxInitSuccess={outboxInitQuery.isSuccess}
+      cacheStore={cacheStore}
+      cacheInitSuccess={cacheInitQuery.isSuccess}
+      outboxCount={outboxCountQuery.data ?? 0}
+      lastSyncSuccessAt={lastSyncSuccessAt}
+      syncErrorCount={syncErrorCount}
+      syncMutation={syncMutation}
     />
+    </FieldOpsV2Gate>
   );
 }
 
@@ -2306,11 +2211,12 @@ type BootstrapAuthedProps = {
   outboxCount: number;
   lastSyncSuccessAt: string | null;
   syncErrorCount: number;
-  syncMutation: UseMutationResult<unknown, unknown, void, unknown>;
+  syncMutation: UseMutationResult<OutboxSyncResult, unknown, void, unknown>;
 };
 
 function BootstrapAuthed(props: BootstrapAuthedProps) {
   const queryClient = useQueryClient();
+  const systemColorScheme = useColorScheme();
   const {
     ctx,
     sessionUserId,
@@ -2355,6 +2261,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   );
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [currentWebHref, setCurrentWebHref] = React.useState<string | null>(() => resolveCurrentWebHref());
+  const [displayedRoutePreference, setDisplayedRoutePreference] = React.useState<{ scope: string; routeRunId: string } | null>(null);
   const [selectedResourceId, setSelectedResourceId] = React.useState<string | null>(null);
   const [selectedResourceKey, setSelectedResourceKey] = React.useState<string | null>(null);
   const [selectedResourceTitle, setSelectedResourceTitle] = React.useState<string | null>(null);
@@ -2362,6 +2269,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const [navOpen, setNavOpen] = React.useState(false);
   const [viewPickerOpen, setViewPickerOpen] = React.useState(false);
   const [scanContext, setScanContext] = React.useState<DriverScanContext | null>(null);
+  const [routeLocationContext, setRouteLocationContext] = React.useState<RouteLocationContext | null>(null);
+  const routeLocationCurrent = React.useRef({ context: routeLocationContext, actor: me?.user?.id ?? null });
+  routeLocationCurrent.current = { context: routeLocationContext, actor: me?.user?.id ?? null };
   const [observedSpeedKph, setObservedSpeedKph] = React.useState(0);
 
   React.useEffect(() => {
@@ -2409,6 +2319,22 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
 
   const route = React.useMemo(() => resolveNavigationRoute(selectedItem), [selectedItem]);
   const activeScreen = route.kind === "screen" ? route.screen : null;
+  React.useEffect(() => {
+    if (activeScreen !== "location" || (routeLocationContext && routeLocationContext.actorId !== me?.user?.id)) {
+      setRouteLocationContext(null);
+    }
+  }, [activeScreen, me?.user?.id, routeLocationContext]);
+  const verifyLocationScope = async () => {
+    const captured = routeLocationCurrent.current.context;
+    if (!captured) return null;
+    const current = await verifyRouteLocationContext(
+      captured, (key, id) => uiClient.getResource(key, id), routeLocationCurrent.current.actor,
+    );
+    if (routeLocationCurrent.current.context !== captured || routeLocationCurrent.current.actor !== captured.actorId) {
+      throw new Error(strings.scan.routeLocationChanged);
+    }
+    return current;
+  };
   const resourceSurface = React.useMemo(
     () => resolveMobileResourceSurface(route),
     [route]
@@ -2519,6 +2445,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     return createCacheKey({
       v: 1,
       type: "ui_list_resource_v1",
+      actor: me?.user?.id ?? null,
+      scope: me?.access_scope ?? null,
       resource,
       view_id: resolvedViewId,
       filters: listFilters,
@@ -2526,7 +2454,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       offset: 0,
       sort: listSort,
     });
-  }, [listFilters, listSort, resource, resolvedViewId]);
+  }, [listFilters, listSort, resource, resolvedViewId, me?.user?.id, me?.access_scope]);
 
   const listQuery = useQuery({
     queryKey: [
@@ -2781,7 +2709,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   }, [activeOpsSessionQuery.data]);
 
   const diagnosticsPolicy = React.useMemo<MobileDiagnosticsPolicy>(
-    () => normalizeMobileDiagnosticsPolicy((diagnosticsPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileDiagnosticsPolicy(asRecord(diagnosticsPolicyQuery.data).value ?? null),
     [diagnosticsPolicyQuery.data]
   );
   const diagnosticsAllowToggle = diagnosticsPolicy.allowUserToggle;
@@ -2822,7 +2750,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   );
   const effectiveOnline = connectivitySnapshot.effectiveOnline;
   const connectivityStatus = connectivitySnapshot.status;
-  const connectivityStatusLabel = formatConnectivityStatusLabel(connectivityStatus);
   const connectivitySummary = React.useMemo(
     () =>
       formatConnectivitySummary({
@@ -2836,21 +2763,26 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const shouldShowConnectivityBanner =
     connectivityStatus === "offline" ||
     (connectivityStatus === "degraded" && mobileSyncPolicy.showDegradedBanner);
+  const displayPolicy = React.useMemo(
+    () => normalizeMobileDisplayPolicy(asRecord(devicePolicyQuery.data).value ?? null),
+    [devicePolicyQuery.data]
+  );
   const selectedLocaleMode = React.useMemo<MobileLocaleMode>(
-    () => resolveLocaleMode(localeModeQuery.data),
-    [localeModeQuery.data]
+    () => resolveEffectiveLocale({ storedValue: localeModeQuery.data, policy: displayPolicy }),
+    [displayPolicy, localeModeQuery.data]
   );
   const selectedDirectionMode = React.useMemo<MobileDirectionMode>(
     () =>
-      resolveDirectionMode({
-        value: directionModeQuery.data,
+      resolveEffectiveDirection({
+        storedValue: directionModeQuery.data,
         locale: selectedLocaleMode,
+        policy: displayPolicy,
       }),
-    [directionModeQuery.data, selectedLocaleMode]
+    [directionModeQuery.data, displayPolicy, selectedLocaleMode]
   );
   React.useEffect(() => {
     if (Platform.OS !== "web") return;
-    const doc = (globalThis as any)?.document;
+    const doc = globalThis.document;
     if (!doc?.documentElement) return;
 
     try {
@@ -2861,9 +2793,17 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     }
   }, [selectedDirectionMode, selectedLocaleMode]);
   const selectedThemeMode = React.useMemo<MobileThemeMode>(
-    () => resolveThemeMode(themeModeQuery.data),
-    [themeModeQuery.data]
+    () => resolveEffectiveTheme({ storedValue: themeModeQuery.data, policy: displayPolicy }),
+    [displayPolicy, themeModeQuery.data]
   );
+  const appliedTheme = resolveAppliedFieldOpsTheme(selectedThemeMode, systemColorScheme);
+  const themeTokens = React.useMemo(
+    () => getFieldOpsThemeTokens(appliedTheme, Platform.OS === "web" ? "web" : "native"),
+    [appliedTheme]
+  );
+  const styles = React.useMemo(() => createFieldOpsStyles(themeTokens), [themeTokens]);
+  const strings = React.useMemo(() => getFieldOpsStrings(selectedLocaleMode), [selectedLocaleMode]);
+  const connectivityStatusLabel = formatConnectivityStatusLabel(connectivityStatus, strings);
   React.useEffect(() => {
     const setColorScheme = (Appearance as unknown as { setColorScheme?: (mode: "light" | "dark" | null) => void })
       .setColorScheme;
@@ -2875,47 +2815,49 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     }
   }, [selectedThemeMode]);
   const mobilePushPolicy = React.useMemo(
-    () => normalizeMobilePushPolicy((mobilePushPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobilePushPolicy(asRecord(mobilePushPolicyQuery.data).value ?? null),
     [mobilePushPolicyQuery.data]
   );
   const visibilityPolicy = React.useMemo(
-    () => normalizeMobileVisibilityPolicy((visibilityPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileVisibilityPolicy(asRecord(visibilityPolicyQuery.data).value ?? null),
     [visibilityPolicyQuery.data]
   );
   const mapPolicy = React.useMemo(
-    () => normalizeMobileMapPolicy((mapPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileMapPolicy(asRecord(mapPolicyQuery.data).value ?? null),
     [mapPolicyQuery.data]
   );
   const devicePolicy = React.useMemo(
-    () => normalizeMobileDevicePolicy((devicePolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileDevicePolicy(asRecord(devicePolicyQuery.data).value ?? null),
     [devicePolicyQuery.data]
   );
   const navigationPolicy = React.useMemo(
-    () => normalizeMobileNavigationPolicy((navigationPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileNavigationPolicy(asRecord(navigationPolicyQuery.data).value ?? null),
     [navigationPolicyQuery.data]
   );
   const driverSafetyPolicy = React.useMemo(
-    () => normalizeMobileDriverSafetyPolicy((driverSafetyPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileDriverSafetyPolicy(asRecord(driverSafetyPolicyQuery.data).value ?? null),
     [driverSafetyPolicyQuery.data]
   );
   const uxSafetyPolicy = React.useMemo(
-    () => normalizeMobileUxSafetyPolicy((uxSafetyPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileUxSafetyPolicy(asRecord(uxSafetyPolicyQuery.data).value ?? null),
     [uxSafetyPolicyQuery.data]
   );
   const communicationPolicy = React.useMemo(
-    () => normalizeMobileCommunicationPolicy((communicationPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileCommunicationPolicy(asRecord(communicationPolicyQuery.data).value ?? null),
     [communicationPolicyQuery.data]
   );
   const addressPolicy = React.useMemo(
-    () => normalizeMobileAddressPolicy((addressPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileAddressPolicy(asRecord(addressPolicyQuery.data).value ?? null),
     [addressPolicyQuery.data]
   );
 
   const selectedVisibilityMode = React.useMemo(() => {
     const candidate = visibilityModeQuery.data;
-    if (typeof candidate === "string" && visibilityPolicy.allowedVisibility.includes(candidate as any)) {
-      return candidate;
-    }
+    const allowedCandidate =
+      typeof candidate === "string"
+        ? visibilityPolicy.allowedVisibility.find((value) => value === candidate)
+        : undefined;
+    if (allowedCandidate) return allowedCandidate;
     return visibilityPolicy.defaultVisibility;
   }, [visibilityModeQuery.data, visibilityPolicy.allowedVisibility, visibilityPolicy.defaultVisibility]);
 
@@ -3004,8 +2946,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     setSelectedResourceId(null);
     setSelectedResourceKey(null);
     setSelectedResourceTitle(null);
-    Alert.alert("Driving mode locked", "Navigation is limited while moving.");
-  }, [drivingSafetyState, navBlockedWhileDriving, navigationItems, selectedId]);
+    Alert.alert(strings.alerts.drivingLockedTitle, "Navigation is limited while moving.");
+  }, [drivingSafetyState, navBlockedWhileDriving, navigationItems, selectedId, strings.alerts.drivingLockedTitle]);
 
   React.useEffect(() => {
     if (!drivingModeLocked || !selectedResourceId) return;
@@ -3028,11 +2970,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   }, [cacheStore, platformOverrideQuery.data, queryClient, selectedPlatformOverride]);
 
   const mobileAttestationPolicy = React.useMemo(
-    () => normalizeMobileAttestationPolicy((mobileAttestationPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileAttestationPolicy(asRecord(mobileAttestationPolicyQuery.data).value ?? null),
     [mobileAttestationPolicyQuery.data]
   );
   const iosAttestationKeyIdRef = React.useRef<string | null>(null);
-  const androidAttestationPreparedForRef = React.useRef<number | null>(null);
+  const androidAttestationPreparedForRef = React.useRef<string | null>(null);
 
   const getOrCreateIosAttestationKeyId = React.useCallback(async () => {
     const cached = iosAttestationKeyIdRef.current;
@@ -3115,12 +3057,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
 
         const generatedAt = new Date().toISOString();
         if (Platform.OS === "android") {
-          const rawCloudProjectNumber = mobileAttestationPolicy.androidCloudProjectNumber;
-          const cloudProjectNumber =
-            typeof rawCloudProjectNumber === "number"
-              ? rawCloudProjectNumber
-              : Number(rawCloudProjectNumber);
-          if (!Number.isFinite(cloudProjectNumber) || cloudProjectNumber <= 0) {
+          const cloudProjectNumber = String(
+            mobileAttestationPolicy.androidCloudProjectNumber ?? ""
+          ).trim();
+          if (!/^\d+$/.test(cloudProjectNumber) || /^0+$/.test(cloudProjectNumber)) {
             if (mobileAttestationPolicy.mode === "enforce") {
               throw new Error("Attestation policy requires android_cloud_project_number.");
             }
@@ -3272,7 +3212,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         installId
       );
 
-      const deviceLabel = coerceHref((Constants as any).deviceName);
+      const deviceLabel = coerceHref(asRecord(Constants).deviceName);
       const resourceId = readContextId(policyContext, "resource_id");
       const attestation = await buildAttestationEnvelope({
         rpcName: "register_user_device_v1",
@@ -3291,7 +3231,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           app: "fieldops",
           platform: Platform.OS,
           expo_sdk: Constants.expoConfig?.sdkVersion ?? null,
-          expo_runtime: (Constants.expoConfig as any)?.runtimeVersion ?? null,
+          expo_runtime: asRecord(Constants.expoConfig).runtimeVersion ?? null,
           ...(attestation ? { attestation } : {}),
         },
       };
@@ -3340,7 +3280,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           await outbox.enqueue({
             rpc: "ui_log_events_v1",
             args: {
-              p_events: normalizeMobileUiEvents(events),
+              p_events: events,
               p_app: "mobile",
             },
           });
@@ -3357,6 +3297,38 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   });
 
   const deviceId = deviceIdQuery.data ?? null;
+  const activeRoleQuery = useQuery({
+    queryKey: ["fieldops", "active-role", deviceId, me?.user?.id ?? null],
+    queryFn: async () => {
+      const { data, error } = await client.rpc("ui_get_fieldops_active_role_v1", {
+        p_device_id: deviceId,
+      });
+      if (error) throw error;
+      return extractFieldOpsActiveRoleSnapshot(Array.isArray(data) ? data[0] ?? null : data);
+    },
+    enabled: Boolean(deviceId && me?.user?.id),
+    staleTime: 30_000,
+  });
+  const setActiveRoleMutation = useMutation({
+    mutationFn: async (roleId: string) => {
+      const { data, error } = await client.rpc("ui_set_fieldops_active_role_v1", {
+        p_device_id: deviceId,
+        p_role_id: roleId,
+      });
+      if (error) throw error;
+      return extractFieldOpsActiveRoleSnapshot(Array.isArray(data) ? data[0] ?? null : data);
+    },
+    onSuccess: (snapshot) => {
+      queryClient.setQueryData(
+        ["fieldops", "active-role", deviceId, me?.user?.id ?? null],
+        snapshot
+      );
+      setNavOpen(false);
+    },
+    onError: (error) => {
+      showMobileNotice("Work mode unavailable", formatUnknownError(error));
+    },
+  });
   const syncedPushTokenRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     syncedPushTokenRef.current = null;
@@ -3522,22 +3494,36 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const detailCommunicationPolicy = React.useMemo(
     () =>
       normalizeMobileCommunicationPolicy(
-        (detailCommunicationPolicyQuery.data as any)?.value ??
-          (communicationPolicyQuery.data as any)?.value ??
+        asRecord(detailCommunicationPolicyQuery.data).value ??
+          asRecord(communicationPolicyQuery.data).value ??
           null
       ),
     [communicationPolicyQuery.data, detailCommunicationPolicyQuery.data]
   );
+  const displayedRouteScope = stableStringify({ actor: me?.user?.id, scope: me?.access_scope, resource });
+  // Priority and switching cover only the loaded page, never unseen routes.
+  const displayedRoute = React.useMemo(() => selectDisplayedRouteTasks(
+    isRouteSurface ? listQuery.data?.list.items ?? [] : [],
+    selectedResourceKey === resource ? selectedResourceId : null,
+    (selectedResourceKey === resource ? selectedRouteRunId : null) ??
+      (displayedRoutePreference?.scope === displayedRouteScope ? displayedRoutePreference.routeRunId : null)
+  ), [isRouteSurface, listQuery.data?.list.items, selectedResourceKey, resource, selectedResourceId,
+    selectedRouteRunId, displayedRoutePreference, displayedRouteScope]);
+  const displayedRouteList = React.useMemo(() => listQuery.data?.list
+    ? { ...listQuery.data.list, items: displayedRoute.items, total: null, total_strategy: null, total_is_estimate: null }
+    : null, [listQuery.data?.list, displayedRoute.items]);
+  // Read-only display identity; selected task context remains the sole mutation input.
+  const manifestRouteRunId = isRouteSurface && !selectedResourceId ? displayedRoute.routeRunId : selectedRouteRunId;
   const routeExecutionManifestQuery = useQuery({
-    queryKey: ["route", "execution-manifest", selectedRouteRunId],
+    queryKey: ["route", "execution-manifest", manifestRouteRunId, displayedRouteScope],
     queryFn: async () => {
       const { data, error } = await client.rpc("ui_route_run_execution_manifest_v1", {
-        p_route_run_id: selectedRouteRunId,
+        p_route_run_id: manifestRouteRunId,
       });
       if (error) throw error;
       return Array.isArray(data) ? data[0] ?? null : data;
     },
-    enabled: Boolean(me?.user?.id && selectedRouteRunId && (isRouteSurface || isTasksSurface)),
+    enabled: Boolean(me?.user?.id && manifestRouteRunId && (isRouteSurface || isTasksSurface)),
     staleTime: 30_000,
   });
   const confirmRouteDepartureMutation = useMutation({
@@ -3547,29 +3533,18 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       taskId?: string | null;
       opsSessionId?: string | null;
     }) => {
-      const { data, error } = await client.rpc("ui_confirm_route_run_departure_v1", {
-        p_input: {
-          route_run_id: input.routeRunId,
-          route_stop_id: input.routeStopId ?? null,
-          task_id: input.taskId ?? null,
-          ops_session_id: input.opsSessionId ?? null,
-        },
-      });
-      if (error) throw error;
-      return Array.isArray(data) ? data[0] ?? null : data;
+      if (!outboxInitSuccess || !completionReadbackScopeMatches(completionReadbackScopeVersion(), sessionUserId, completionReadbackScope))
+        throw new Error(strings.route.departureUnavailable);
+      return enqueueRouteDeparture(outbox, { actor: sessionUserId, scope: completionReadbackScope },
+        input, strings.route.departureRequest);
     },
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["ui", "detail", detailResource, selectedResourceId],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["ui", "list", resource],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["route", "execution-manifest", selectedRouteRunId],
-        }),
+        queryClient.invalidateQueries({ queryKey: ["outbox", "count"] }),
+        queryClient.invalidateQueries({ queryKey: ["outbox", "entries"] }),
+        queryClient.invalidateQueries({ queryKey: ["route", "departure-request"] }),
       ]);
+      if (mobileSyncPolicy.enabled && effectiveOnline && !syncMutation.isPending) syncMutation.mutate();
     },
   });
   const selectedTaskDetail = React.useMemo(
@@ -3585,20 +3560,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     [selectedTaskDetail]
   );
 
-  const selectedTaskActionable = React.useMemo(() => {
-    if (Object.keys(selectedTaskDetail).length === 0) return false;
-    const status = normalizeTaskStateToken(selectedTaskDetail.status);
-    const completedAt = coerceValueText(selectedTaskDetail.completed_at);
-    const canceledAt = coerceValueText(selectedTaskDetail.canceled_at);
-    const hasCompletedAt = Boolean(completedAt && completedAt !== "-");
-    const hasCanceledAt = Boolean(canceledAt && canceledAt !== "-");
-    const isTerminalStatus = status ? TASK_TERMINAL_STATUSES.has(status) : false;
-    const isTerminalReason = selectedTaskStatusReason
-      ? TASK_TERMINAL_REASONS.has(selectedTaskStatusReason)
-      : false;
-    if (hasCompletedAt || hasCanceledAt || isTerminalStatus || isTerminalReason) return false;
-    return status ? TASK_ACTIONABLE_STATUSES.has(status) : false;
-  }, [selectedTaskDetail, selectedTaskStatusReason]);
+
+  const selectedTaskActionable = React.useMemo(
+    () => isCanonicalTaskActionable(selectedTaskDetail), [selectedTaskDetail]
+  );
 
   const availableActions = React.useMemo<UiCommandDefinition[]>(() => {
     if (!resource) return [];
@@ -3606,14 +3571,17 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     const commands = registry?.commands ?? [];
 
     return commands.filter((command) => {
+      if (hasMobileCommandDisabledState(command) || !command.key?.trim()) return false;
       const category = command.schema_category ?? null;
       if (category && category !== `resource:${resource}`) return false;
       const capability = command.capability ?? null;
       if (capability && !capabilitiesSet.has(capability)) return false;
-      if (!command.execution?.rpc) return false;
+      const transport = command.execution?.transport ?? "rpc";
+      if (transport === "rpc" ? !command.execution?.rpc : transport === "edge" ? !command.execution?.function : true) return false;
 
       const mode = command.selection?.mode ?? null;
-      if (selectedResourceId && mode && mode !== "single" && mode !== "any") {
+      if (mode !== "none" && typeof command.selection?.min_count === "number" && command.selection.min_count > 1) return false;
+      if (selectedResourceId && mode && mode !== "single" && mode !== "any" && mode !== "none") {
         return false;
       }
 
@@ -3622,9 +3590,14 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         selectedResourceId &&
         (command.key === "tasks.complete" ||
           command.key === "tasks.exception" ||
+          command.key === "tasks.report_incident" ||
           ROUTE_CLOSEOUT_COMMAND_KEYS.has(command.key) ||
           ROUTE_PROGRESS_COMMAND_KEYS.has(command.key))
       ) {
+        if (command.key === "tasks.report_incident") {
+          return selectedTaskDetail.id === selectedResourceId &&
+            selectedTaskActionable && selectedTaskSupportsRouteProgress;
+        }
         if (ROUTE_CLOSEOUT_COMMAND_KEYS.has(command.key)) {
           return selectedTaskSupportsRouteProgress;
         }
@@ -3641,13 +3614,14 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       }
 
       const type = command.execution?.type ?? null;
-      return type === "rpc" || type === "workflow";
+      return transport === "edge" || type === "rpc" || type === "workflow";
     });
   }, [
     capabilitiesSet,
     commandRegistryQuery.data,
     resource,
     selectedResourceId,
+    selectedTaskDetail,
     selectedTaskActionable,
     selectedTaskStatusReason,
     selectedTaskSupportsRouteProgress,
@@ -3693,6 +3667,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   );
 
   const [composerCommand, setComposerCommand] = React.useState<UiCommandDefinition | null>(null);
+  const [composerFinancialContext, setComposerFinancialContext] = React.useState<FinancialTaskContext | null>(null);
+  const [composerFinancialSession, setComposerFinancialSession] = React.useState("");
+  const financialAdmission = React.useRef(0);
+  const [composerFinancialAdmission, setComposerFinancialAdmission] = React.useState(0);
+  const composerIsFinancial = composerCommand?.execution?.input_schema?.normalization === "financial_amount_v1";
   const [composerValues, setComposerValues] = React.useState<Record<string, string>>({});
   const [composerError, setComposerError] = React.useState<string | null>(null);
   const [composerSubmitting, setComposerSubmitting] = React.useState(false);
@@ -3705,8 +3684,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   );
   const composerCopy = React.useMemo(
     () =>
-      composerCommand ? resolveComposerCommandCopy(composerCommand, selectedStopSnapshot) : null,
-    [composerCommand, selectedStopSnapshot]
+      composerIsFinancial ? { label: composerCommand?.label ?? "", title: composerCommand?.execution?.input_schema?.title ?? "",
+        description: composerCommand?.execution?.input_schema?.description ?? "" }
+        : composerCommand ? resolveComposerCommandCopy(composerCommand, selectedStopSnapshot) : null,
+    [composerCommand, selectedStopSnapshot, composerIsFinancial]
   );
   const composerLookupCategories = React.useMemo(
     () =>
@@ -3726,13 +3707,25 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       "composer",
       "lookups",
       composerCommand?.key ?? "none",
+      sessionUserId,
       [...composerLookupCategories].sort().join("|"),
+      resource,
+      selectedResourceId,
+      composerFields.map((field) => [field.lookupRpc, field.lookupSelectionParam]),
     ],
     enabled: Boolean(composerCommand && composerLookupCategories.length > 0),
     queryFn: async () => {
       const out: Record<string, LookupOption[]> = {};
       for (const category of composerLookupCategories) {
-        const { data, error } = await client.rpc("list_lookup_values_v1", { p_category: category });
+        const field = composerFields.find((entry) => entry.lookupCategory === category);
+        const lookupRpc = field?.lookupRpc;
+        if (lookupRpc && (!field.lookupSelectionParam || !selectedResourceId)) {
+          throw new Error("Lookup requires a selected resource.");
+        }
+        const { data, error } = await client.rpc(
+          lookupRpc || "list_lookup_values_v1",
+          lookupRpc ? { [field!.lookupSelectionParam!]: selectedResourceId } : { p_category: category }
+        );
         if (error) throw error;
         const rows = Array.isArray(data) ? data : [];
         out[category] = rows.map((row) => {
@@ -3762,13 +3755,21 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     height: 160,
   });
   const [composerCameraPermission, requestComposerCameraPermission] = useCameraPermissions();
-  const composerCameraRef = React.useRef<any>(null);
+  const composerCameraRef = React.useRef<CameraView | null>(null);
   const composerSignatureStrokeRef = React.useRef<SignatureStroke | null>(null);
   const composerSupportsPod = React.useMemo(
     () =>
-      composerCommand?.key === "tasks.complete" || composerCommand?.key === "tasks.exception",
-    [composerCommand?.key]
+      !composerIsFinancial && (composerCommand?.key === "tasks.complete" || composerCommand?.key === "tasks.exception"),
+    [composerCommand?.key, composerIsFinancial]
   );
+  const composerSelfEvidence = React.useMemo(() => resolveComposerEvidence(composerCommand), [composerCommand]);
+  const composerIsSelfKyc = composerCommand?.execution?.input_schema?.normalization === "self_kyc_v1";
+  const composerFinancialEvidence = composerIsFinancial && financialEvidenceContract(composerFinancialContext?.evidence_contract);
+  const composerIsIncident = composerCommand?.key === "tasks.report_incident";
+  const composerSupportsEvidence = composerSupportsPod || Boolean(composerSelfEvidence) || composerFinancialEvidence || composerIsIncident;
+  const composerCaptureEpoch = React.useRef(0);
+  const composerSubmitInFlight = React.useRef(false);
+  React.useEffect(() => { composerCaptureEpoch.current += 1; }, [composerCommand, sessionUserId]);
   const composerPodPolicyContext = React.useMemo(() => {
     if (!composerSupportsPod) return null;
     const detail = asRecord(detailQuery.data?.detail);
@@ -3824,15 +3825,185 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     () => asRecord(composerPodPolicyValue.binary_evidence),
     [composerPodPolicyValue]
   );
+  const composerEvidenceRegistrationRpc = composerIsIncident ? composerCommand?.execution?.evidence?.registration_rpc ?? "" :
+    composerSelfEvidence?.registrationRpc ?? "register_mobile_artifact_v1";
   const composerArtifactBucket =
-    coerceValueText(composerEvidencePolicy.bucket_id) ?? "fieldops-evidence";
+    composerSelfEvidence?.bucket ?? (composerIsIncident ? coerceValueText(composerCommand?.execution?.evidence?.bucket) :
+      composerFinancialEvidence ? null : coerceValueText(composerEvidencePolicy.bucket_id)) ?? "fieldops-evidence";
   const composerArtifactMaxItems = Math.max(
     1,
-    Math.round(coerceValueNumber(composerEvidencePolicy.max_items) ?? 6)
+    composerFinancialEvidence ? 1 : composerSelfEvidence?.maxItems ??
+      Math.round(coerceValueNumber(composerIsIncident ? composerCommand?.execution?.evidence?.max_items : composerEvidencePolicy.max_items) ?? 6)
   );
+  const composerOrganizationId = readContextId(policyContext, "organization_id");
+  const completionReadbackScope = completionScopeFromMe(me,sessionUserId)?.scope ?? "";
+  const departureRequestQuery = useQuery({
+    queryKey: ["route", "departure-request", sessionUserId, completionReadbackScope, selectedRouteRunId, lastSyncSuccessAt],
+    queryFn: () => outbox.get(routeDepartureQueueId({ actor: sessionUserId, scope: completionReadbackScope }, selectedRouteRunId!)),
+    enabled: outboxInitSuccess && Boolean(completionReadbackScope && selectedRouteRunId),
+  });
+  React.useEffect(() => {
+    activateCompletionReadbackScope(sessionUserId, completionReadbackScope);
+    return () => { void invalidateCompletionReadbacks(); };
+  }, [sessionUserId, completionReadbackScope]);
+  const completionReadbackIdentity = JSON.stringify([sessionUserId, completionReadbackScope, resource, selectedResourceId]);
+  React.useEffect(() => { financialAdmission.current += 1; }, [completionReadbackIdentity]);
+  const completionReadbackCurrent = React.useRef(completionReadbackIdentity);
+  completionReadbackCurrent.current = completionReadbackIdentity;
+  const completionReadbackQuery = useQuery({
+    queryKey: ["completion-readback", completionReadbackIdentity, lastActionReceipt?.queueId, lastSyncSuccessAt],
+    enabled: cacheInitSuccess && resource === "tasks" && Boolean(selectedResourceId) && effectiveOnline,
+    retry: false,
+    queryFn: async () => {
+      const captured = completionReadbackIdentity;
+      const capturedGeneration = completionReadbackScopeVersion();
+      const record = await latestCompletionReadback(cacheStore, sessionUserId, completionReadbackScope, selectedResourceId || "");
+      if (captured !== completionReadbackCurrent.current || !record) return null;
+      if (!record.accepted) return { verified: false, kind: record.expected.kind, settlementStatus: null };
+      let settlementStatus: string | null = null;
+      const verified = await verifyCompletionReadback(record, async (taskId, taskEventId, signal) => {
+        const { data, error } = await client.schema("api").rpc(record.expected.kind === "financial_amount_v1" ? "ui_get_financial_task_readback_v1" : "ui_get_task_completion_readback_v1", {
+          p_task_id: taskId, p_task_event_id: taskEventId,
+        }).abortSignal(signal);
+        if (error) throw error;
+        settlementStatus = record.expected.kind === "financial_amount_v1" ? coerceValueText(asRecord(data).settlement_status) : null;
+        return data;
+      }, () => captured === completionReadbackCurrent.current && capturedGeneration === completionReadbackScopeVersion());
+      return { verified, kind: record.expected.kind, settlementStatus: verified ? settlementStatus : null };
+    },
+  });
+  const completionReadbackVerified = completionReadbackQuery.isSuccess && !completionReadbackQuery.isFetching && completionReadbackQuery.data?.verified === true;
+  const incidentReadbackQuery = useQuery({
+    queryKey: ["incident-readback", completionReadbackIdentity, lastActionReceipt?.queueId, lastSyncSuccessAt, effectiveOnline],
+    enabled: cacheInitSuccess && resource === "tasks" && Boolean(selectedResourceId),
+    retry: false,
+    queryFn: async () => {
+      const captured = completionReadbackIdentity;
+      const epoch = completionReadbackScopeVersion();
+      const records = await listIncidentReadbacks(cacheStore, sessionUserId, completionReadbackScope, selectedResourceId || "");
+      if (!records.length || captured !== completionReadbackCurrent.current) return null;
+      if (!effectiveOnline) return records.map(record => ({ record, verified: false, proof: null }));
+      const before = await resolveVerifiedCompletionScope(client);
+      if (captured !== completionReadbackCurrent.current || epoch !== completionReadbackScopeVersion()) return null;
+      if (!before || before.actor !== sessionUserId || before.scope !== completionReadbackScope)
+        throw new Error("Incident readback authority unavailable.");
+      const outcomes = await Promise.all(records.map(async record => {
+        if (!record.accepted) return { record, verified: false, proof: null };
+        try {
+          const result = await boundedCompletionRead(signal => client.schema("api").rpc("ui_get_route_stop_incident_readback_v1", {
+            p_source_task_id: record.taskId, p_incident_task_id: record.accepted!.incidentTaskId,
+            p_incident_task_event_id: record.accepted!.taskEventId,
+          }).abortSignal(signal));
+          if (result.error) throw result.error;
+          return incidentReadbackMatches(result.data, record) ? { record, verified: true, proof: asRecord(result.data) } :
+            { record, verified: false, proof: null };
+        } catch { return { record, verified: false, proof: null }; }
+      }));
+      const after = await resolveVerifiedCompletionScope(client);
+      if (captured !== completionReadbackCurrent.current || epoch !== completionReadbackScopeVersion()) return null;
+      if (!after || after.actor !== sessionUserId || after.scope !== completionReadbackScope)
+        throw new Error("Incident readback authority unavailable.");
+      return outcomes;
+    },
+  });
+  const incidentDisplayState = incidentReadbackDisplayState(effectiveOnline, incidentReadbackQuery);
+  const [evidenceManagerRevision, setEvidenceManagerRevision] = React.useState(0);
+  const evidenceClearEpoch = React.useRef(0);
+  const pendingEvidence = React.useMemo(() => createPendingEvidence(cacheStore), [cacheStore, sessionUserId, composerOrganizationId, evidenceManagerRevision]);
+  const [composerEvidenceRows, setComposerEvidenceRows] = React.useState<PendingEvidence[]>([]);
+  const [composerEvidenceReady, setComposerEvidenceReady] = React.useState(false);
+  const [composerEvidenceBusy, setComposerEvidenceBusy] = React.useState(false);
+  const composerEvidenceSubject = composerSelfEvidence ? sessionUserId : selectedResourceId;
+  const composerEvidenceCommandIdentity = composerCommand ? stableStringify({
+    key: composerCommand.key, params: composerCommand.execution?.params ?? {},
+    rpc: composerEvidenceRegistrationRpc, bucket: composerArtifactBucket,
+  }) : null;
+  const composerEvidenceScope = React.useMemo<EvidenceScope | null>(() =>
+    composerOrganizationId && sessionUserId && composerEvidenceSubject && composerEvidenceCommandIdentity
+      ? { organizationId: composerOrganizationId, actorId: sessionUserId,
+          subjectId: composerEvidenceSubject, commandKey: composerEvidenceCommandIdentity,
+          bucket: composerArtifactBucket, registrationRpc: composerEvidenceRegistrationRpc } : null,
+    [composerOrganizationId, sessionUserId, composerEvidenceSubject, composerEvidenceCommandIdentity,
+      composerArtifactBucket, composerEvidenceRegistrationRpc]);
+  const evidenceLifecycle = React.useRef<{ manager: typeof pendingEvidence } | null>(null);
+  React.useEffect(() => {
+    const previous = evidenceLifecycle.current;
+    if (previous && previous.manager !== pendingEvidence) void previous.manager.invalidate();
+    const attachment = { manager: pendingEvidence };
+    evidenceLifecycle.current = attachment;
+    return () => {
+      // StrictMode immediately reattaches the same memo instance; a real unmount does not.
+      void Promise.resolve().then(() => {
+        if (evidenceLifecycle.current === attachment || evidenceLifecycle.current?.manager !== pendingEvidence)
+          return pendingEvidence.invalidate();
+      });
+    };
+  }, [pendingEvidence]);
+  const refreshComposerEvidence = React.useCallback(async (epoch = composerCaptureEpoch.current) => {
+    if (!composerEvidenceScope) return;
+    const rows = await pendingEvidence.list(composerEvidenceScope);
+    if (epoch !== composerCaptureEpoch.current) return;
+    setComposerEvidenceRows(rows);
+    setComposerArtifacts(rows.flatMap(row => row.phase === "registered" && row.artifactId
+      ? [{ artifactId: row.artifactId, storageKey: row.storageKey, capturedAt: row.capturedAt,
+          kind: row.kind, mimeType: row.mimeType, evidenceTag: row.evidenceTag }] : []));
+    setComposerEvidenceReady(true);
+  }, [pendingEvidence, composerEvidenceScope]);
+  React.useEffect(() => {
+    const epoch = ++composerCaptureEpoch.current;
+    setComposerEvidenceBusy(false);
+    setComposerEvidenceReady(false);
+    setComposerEvidenceRows([]);
+    setComposerArtifacts([]);
+    if (composerSupportsEvidence && composerEvidenceScope) {
+      void refreshComposerEvidence(epoch).catch(error => {
+        if (epoch === composerCaptureEpoch.current) setComposerError(strings.pendingEvidence.failed);
+      });
+    }
+    return () => { composerCaptureEpoch.current += 1; };
+  }, [composerSupportsEvidence, composerEvidenceScope, refreshComposerEvidence, strings.pendingEvidence.failed]);
+  const settleComposerEvidence = React.useCallback(async (id: string) => {
+    if (!composerEvidenceScope || !composerSupportsEvidence || composerPodPolicyState.blockingMessage)
+      throw new Error("evidence_policy_unavailable");
+    return pendingEvidence.settle(composerEvidenceScope, id, {
+      upload: async (record, bytes) => {
+        const result = await client.storage.from(record.bucket).upload(record.storageKey, bytes,
+          { contentType: record.mimeType, upsert: false });
+        if (result.error) throw result.error;
+      },
+      register: async record => {
+        if (record.bucket !== composerArtifactBucket || record.registrationRpc !==
+            composerEvidenceRegistrationRpc)
+          throw new Error("evidence_contract_changed");
+        const result = await client.rpc(record.registrationRpc, { p_artifact: record.payload });
+        if (result.error) throw result.error;
+        const rows = Array.isArray(result.data) ? result.data : result.data ? [result.data] : [];
+        return coerceValueText(asRecord(rows[0]).artifact_id) ?? "";
+      },
+    });
+  }, [pendingEvidence, composerEvidenceScope, composerSupportsEvidence,
+    composerPodPolicyState.blockingMessage, composerArtifactBucket, composerEvidenceRegistrationRpc, client]);
+  const recoverComposerEvidence = React.useCallback(async (id: string, discard = false) => {
+    if (!composerEvidenceScope || composerEvidenceBusy || composerSubmitting ||
+        isCapturingComposerArtifact || isCapturingComposerSignature) return;
+    const epoch = composerCaptureEpoch.current;
+    setComposerEvidenceBusy(true);
+    try {
+      if (discard) await pendingEvidence.discard(composerEvidenceScope, [id]);
+      else await settleComposerEvidence(id);
+    } catch (error) {
+      if (epoch === composerCaptureEpoch.current) setComposerError(strings.pendingEvidence.failed);
+    } finally {
+      try { await refreshComposerEvidence(epoch); } catch (error) {
+        if (epoch === composerCaptureEpoch.current) setComposerError(strings.pendingEvidence.failed);
+      }
+      if (epoch === composerCaptureEpoch.current) setComposerEvidenceBusy(false);
+    }
+  }, [pendingEvidence, composerEvidenceScope, composerEvidenceBusy, composerSubmitting,
+    isCapturingComposerArtifact, isCapturingComposerSignature, settleComposerEvidence, refreshComposerEvidence, strings.pendingEvidence.failed]);
   const composerMinArtifactCount = Math.max(
-    0,
-    Math.round(coerceValueNumber(composerPodRequirements.min_artifact_count) ?? 0)
+    composerIsIncident ? 1 : 0,
+    Math.round(coerceValueNumber(composerIsIncident ? composerCommand?.execution?.evidence?.min_items : composerPodRequirements.min_artifact_count) ?? 0)
   );
   const composerPhotoRequired = Boolean(composerPodRequirements.photo_required);
   const composerSignatureRequired = React.useMemo(
@@ -3934,10 +4105,19 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   }, []);
 
   const resetComposer = React.useCallback(() => {
+    composerCaptureEpoch.current += 1;
+    financialAdmission.current += 1;
     setComposerCommand(null);
+    setComposerFinancialContext(null);
+    setComposerFinancialSession("");
+    setComposerEvidenceRows([]);
+    setComposerEvidenceReady(false);
+    setComposerEvidenceBusy(false);
     setComposerValues({});
     setComposerArtifacts([]);
     setComposerCameraOpen(false);
+    setIsCapturingComposerArtifact(false);
+    setIsCapturingComposerSignature(false);
     composerSignatureStrokeRef.current = null;
     setComposerSignatureStrokes([]);
     setComposerError(null);
@@ -3951,8 +4131,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       mimeType: string;
       kind: ComposerArtifactKind;
       metadata?: Record<string, unknown>;
+      captureEpoch?: number;
     }): Promise<ComposerArtifactEntry> => {
-      if (!composerSupportsPod) throw new Error("Proof collection is unavailable for this action.");
+      if (!composerSupportsEvidence) throw new Error("Proof collection is unavailable for this action.");
+      const captureEpoch = input.captureEpoch ?? composerCaptureEpoch.current;
+      if (captureEpoch !== composerCaptureEpoch.current) throw new Error("stale_capture");
       const existingArtifactCount =
         composerArtifacts.length -
         (input.kind === "signature" && composerArtifacts.some((entry) => entry.kind === "signature")
@@ -3961,34 +4144,38 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       if (existingArtifactCount >= composerArtifactMaxItems) {
         throw new Error(`Evidence limit reached (${composerArtifactMaxItems}).`);
       }
-      if (!selectedResourceId) throw new Error("Select a task before collecting proof.");
+      if (!composerSelfEvidence && !selectedResourceId) throw new Error("Select a task before collecting proof.");
+      const evidenceTag = composerSelfEvidence?.tagField
+        ? String(composerValues[composerSelfEvidence.tagField] ?? "").trim() : undefined;
+      if (composerSelfEvidence?.tagField && (!evidenceTag || evidenceTag.length > 100 || composerArtifacts.some(entry => entry.evidenceTag === evidenceTag))) {
+        throw new Error(strings.selfKyc.angleRequired);
+      }
 
       const organizationId = readContextId(policyContext, "organization_id");
       if (!organizationId) {
         throw new Error("Organization context is missing for proof capture.");
       }
 
-      const storageKey = `${organizationId}/${selectedResourceId}/${Date.now()}-${createOutboxId()}.${input.extension}`;
-      const upload = await client.storage.from(composerArtifactBucket).upload(storageKey, input.bytes, {
-        contentType: input.mimeType,
-        upsert: false,
-      });
-      if (upload.error) throw upload.error;
-
+      const evidenceSubject = composerSelfEvidence ? sessionUserId : selectedResourceId;
+      if (!evidenceSubject) throw new Error(strings.selfKyc.actorMissing);
+      if (!composerEvidenceScope || !composerEvidenceReady || composerEvidenceBusy)
+        throw new Error("evidence_recovery_not_ready");
+      const id = createOutboxId();
+      const capturedAt = new Date().toISOString();
+      const storageKey = `${organizationId}/${evidenceSubject}/${id}.${input.extension}`;
       const currentCoordinates = extractCoordinates(detailQuery.data?.detail);
-      const registerResult = await getMobileV2SupabaseSchemaClient(client, "api").rpc("register_mobile_artifact_v1", {
-        p_artifact: {
+      const payload = {
           organization_id: organizationId,
           storage_bucket: composerArtifactBucket,
           storage_key: storageKey,
           mime_type: input.mimeType,
           size_bytes: input.bytes.byteLength,
-          metadata: {
+          metadata: composerSelfEvidence ? {} : {
             app: "fieldops",
             action_key: composerCommand?.key ?? null,
             artifact_kind: input.kind,
             task_id: selectedResourceId,
-            captured_at: new Date().toISOString(),
+            captured_at: capturedAt,
             reference: selectedStopSnapshot?.reference ?? null,
             customer_name: selectedStopSnapshot?.customerName ?? null,
             geostamp: currentCoordinates
@@ -4000,33 +4187,34 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               : null,
             ...(input.metadata ?? {}),
           },
-        },
-      });
-      if (registerResult.error) throw registerResult.error;
-      const rows = Array.isArray(registerResult.data)
-        ? registerResult.data
-        : registerResult.data
-          ? [registerResult.data]
-          : [];
-      const artifactId = coerceValueText(asRecord(rows[0]).artifact_id);
-      if (!artifactId) {
-        throw new Error("Artifact registration did not return an artifact id.");
+        };
+      await pendingEvidence.stage(composerEvidenceScope, {
+        id, capturedAt, storageKey, bucket: composerArtifactBucket, mimeType: input.mimeType,
+        kind: input.kind, evidenceTag, registrationRpc: composerEvidenceRegistrationRpc,
+        payload, bytes: encodeEvidenceBytes(input.bytes), phase: "pending", attempts: 0,
+      }, composerArtifactMaxItems);
+      try {
+        const record = await settleComposerEvidence(id);
+        if (!record.artifactId) throw new Error("evidence_registration_empty");
+        return { artifactId: record.artifactId, capturedAt: record.capturedAt,
+          storageKey: record.storageKey, kind: record.kind, mimeType: record.mimeType, evidenceTag: record.evidenceTag };
+      } finally {
+        await refreshComposerEvidence(captureEpoch);
       }
-      return {
-        artifactId,
-        storageKey,
-        capturedAt: new Date().toISOString(),
-        kind: input.kind,
-        mimeType: input.mimeType,
-      };
     },
     [
+      pendingEvidence, composerEvidenceScope, composerEvidenceReady, composerEvidenceBusy, settleComposerEvidence, refreshComposerEvidence,
       client,
       composerArtifactBucket,
       composerArtifactMaxItems,
-      composerArtifacts.length,
+      composerArtifacts,
       composerCommand?.key,
-      composerSupportsPod,
+      composerSupportsEvidence,
+      composerSelfEvidence,
+      composerEvidenceRegistrationRpc,
+      composerValues,
+      sessionUserId,
+      strings.selfKyc,
       detailQuery.data?.detail,
       policyContext,
       selectedResourceId,
@@ -4036,7 +4224,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   );
 
   const captureComposerArtifact = React.useCallback(async () => {
-    if (!composerSupportsPod || isCapturingComposerArtifact) return;
+    if (!composerSupportsEvidence || isCapturingComposerArtifact || composerSubmitInFlight.current) return;
+    const captureEpoch = composerCaptureEpoch.current;
     if (!composerCameraPermission?.granted) {
       if (composerCameraPermission?.canAskAgain === false) {
         Alert.alert("Camera permission required", "Open settings to allow proof capture.");
@@ -4044,6 +4233,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         return;
       }
       const granted = await requestComposerCameraPermission();
+      if (captureEpoch !== composerCaptureEpoch.current) return;
       if (!granted.granted) {
         setComposerError("Camera permission is required to capture proof.");
         return;
@@ -4064,30 +4254,36 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       const photo = asRecord(
         await camera.takePictureAsync({
           quality: 0.55,
+          imageType: "jpg",
           base64: true,
           skipProcessing: true,
         })
       );
+      if (captureEpoch !== composerCaptureEpoch.current) return;
       const base64 = coerceValueText(photo.base64);
       if (!base64) {
         throw new Error("Camera capture did not return image data.");
       }
-      const artifact = await registerComposerArtifact({
+      await registerComposerArtifact({
         bytes: decodeBase64ToArrayBuffer(base64),
         extension: "jpg",
         mimeType: "image/jpeg",
         kind: "photo",
+        captureEpoch,
       });
-      setComposerArtifacts((prev) => [...prev, artifact]);
+      if (captureEpoch !== composerCaptureEpoch.current) return;
       setComposerCameraOpen(false);
     } catch (error) {
-      setComposerError(formatUnknownError(error));
+      if (captureEpoch === composerCaptureEpoch.current) setComposerError(composerIsSelfKyc ? strings.selfKyc.invalid : strings.pendingEvidence.failed);
     } finally {
-      setIsCapturingComposerArtifact(false);
+      if (captureEpoch === composerCaptureEpoch.current) setIsCapturingComposerArtifact(false);
     }
   }, [
     composerCameraPermission,
-    composerSupportsPod,
+    composerIsSelfKyc,
+    strings.selfKyc,
+    strings.pendingEvidence.failed,
+    composerSupportsEvidence,
     isCapturingComposerArtifact,
     registerComposerArtifact,
     requestComposerCameraPermission,
@@ -4095,6 +4291,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
 
   const captureComposerSignature = React.useCallback(async () => {
     if (!composerSupportsPod || isCapturingComposerSignature) return;
+    const captureEpoch = composerCaptureEpoch.current;
     if (!composerSignaturePresent) {
       setComposerError("Add a signature before capturing it.");
       return;
@@ -4102,40 +4299,32 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     try {
       setIsCapturingComposerSignature(true);
       setComposerError(null);
-      const svg = buildSignatureSvg(composerSignatureStrokes, composerSignatureLayout);
-      const pngBase64 = buildMobileV2SignaturePngBase64({
-        strokes: composerSignatureStrokes,
-        width: composerSignatureLayout.width,
-        height: composerSignatureLayout.height,
-      });
-      const bytes = decodeBase64ToArrayBuffer(pngBase64);
-      const artifact = await registerComposerArtifact({
+      const bytes = await buildSignaturePdf(composerSignatureStrokes, composerSignatureLayout);
+      if (captureEpoch !== composerCaptureEpoch.current) return;
+      await registerComposerArtifact({
         bytes,
-        extension: "png",
-        mimeType: "image/png",
+        extension: "pdf",
+        mimeType: "application/pdf",
         kind: "signature",
+        captureEpoch,
         metadata: {
           signature: {
             strokes: composerSignatureStrokes.length,
             width: composerSignatureLayout.width,
             height: composerSignatureLayout.height,
-            render_format: "image/png",
-            svg_preview_bytes: svg.length,
           },
         },
       });
-      setComposerArtifacts((prev) => [
-        ...prev.filter((entry) => entry.kind !== "signature"),
-        artifact,
-      ]);
+      if (captureEpoch !== composerCaptureEpoch.current) return;
       clearComposerSignature();
     } catch (error) {
-      setComposerError(formatUnknownError(error));
+      if (captureEpoch === composerCaptureEpoch.current) setComposerError(strings.pendingEvidence.failed);
     } finally {
-      setIsCapturingComposerSignature(false);
+      if (captureEpoch === composerCaptureEpoch.current) setIsCapturingComposerSignature(false);
     }
   }, [
     clearComposerSignature,
+    strings.pendingEvidence.failed,
     composerSignatureLayout,
     composerSignaturePresent,
     composerSignatureStrokes,
@@ -4145,9 +4334,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   ]);
 
   const removeComposerArtifact = React.useCallback((artifactId: string) => {
-    setComposerArtifacts((prev) => prev.filter((entry) => entry.artifactId !== artifactId));
-    setComposerError((current) => (current ? null : current));
-  }, []);
+    const record = composerEvidenceRows.find(entry => entry.artifactId === artifactId);
+    if (record) void recoverComposerEvidence(record.id, true);
+  }, [composerEvidenceRows, recoverComposerEvidence]);
 
   const enqueueCommand = React.useCallback(
     async (
@@ -4155,16 +4344,27 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       input?: {
         payloadPatch?: Record<string, unknown>;
         paramsPatch?: Record<string, unknown>;
+        financialExpected?: Record<string, unknown>;
+        financialAdmissionCheck?: () => boolean;
       }
     ): Promise<ActionSubmissionReceipt> => {
-      if (!resource) throw new Error("Select an item before running this action.");
-      const rpc = command.execution?.rpc ?? "";
-      if (!rpc) throw new Error("This action is not available yet.");
+      if (!resource) throw new Error("Action resource is not selected.");
+      const transport = command.execution?.transport ?? "rpc";
+      if (transport !== "rpc" && transport !== "edge") throw new Error("Unsupported action transport.");
+      const rpc = ((transport === "edge" ? command.execution?.function : command.execution?.rpc) ?? "").trim();
+      if (!rpc) throw new Error("Action target is missing.");
 
       const payloadKeyRaw = coerceValueText(command.execution?.payload_key)?.trim();
       const payloadKey = payloadKeyRaw || "payload";
       const baseParams = asRecord(command.execution?.params);
       const nextParams: Record<string, unknown> = { ...baseParams, ...(input?.paramsPatch ?? {}) };
+      if (command.key === "tasks.report_incident" &&
+          (resource !== "tasks" || !selectedResourceId ||
+            asRecord(detailQuery.data?.detail).id !== selectedResourceId ||
+            !isCanonicalTaskActionable(asRecord(detailQuery.data?.detail)) ||
+            !isRouteStopExecutionTask(detailQuery.data?.detail))) {
+        throw new Error(strings.actionFeedback.incidentUnavailable);
+      }
       if (input?.payloadPatch && Object.keys(input.payloadPatch).length > 0) {
         const existingPayload = asRecord(nextParams[payloadKey]);
         nextParams[payloadKey] = {
@@ -4173,19 +4373,78 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         };
       }
 
-      const selectionIds = selectedResourceId ? [selectedResourceId] : [];
+      if (input?.financialExpected) nextParams[payloadKey] = { ...input.payloadPatch };
+      const selectionId = command.selection?.mode === "none" ? null : selectedResourceId;
+      assertMobileCommandSelection(command, selectionId ?? null);
+      const selectionIds = selectionId ? [selectionId] : [];
       const queueId = createOutboxId();
-      await outbox.enqueue({
+      if (command.key === "tasks.report_incident") nextParams.retry_key = queueId;
+      const display = normalizeOutboxDisplay({
+        actionLabel: command.label,
+        targetLabel: selectionId ? selectedStopSnapshot?.reference ?? selectionId : null,
+      });
+      let completionRecord: CompletionReadbackRecord | null = null;
+      let incidentRecord: IncidentReadbackRecord | null = null;
+      if (input?.financialExpected) {
+        if (!input.financialAdmissionCheck?.()) throw new Error(strings.financialTasks.unavailable);
+        const expected = financialCompletionExpectation(input.financialExpected);
+        if (!expected || resource !== "tasks" || command.key !== "tasks.complete" || expected.taskId !== selectionId) throw new Error(strings.financialTasks.unavailable);
+        completionRecord = { version: 1, queueId, actor: sessionUserId, scope: completionReadbackScope,
+          taskId: selectionId!, actionKey: command.key, expected };
+        try {
+          await rememberCompletionReadback(cacheStore, completionRecord);
+          if (!input.financialAdmissionCheck()) throw new Error(strings.financialTasks.unavailable);
+        } catch (error) {
+          // Only explicit absence authorizes scoped draft cleanup. A scope change
+          // or uncertain read retains evidence; never bypass the storage guard.
+          try {
+            if (await outbox.get(queueId) === null) await forgetUnqueuedCompletion(cacheStore, completionRecord);
+          } catch { /* Preserve uncertain/old-scope evidence and the original failure. */ }
+          throw error;
+        }
+      }
+      if (resource === "tasks" && selectionId && ["tasks.complete", "tasks.exception"].includes(command.key)) {
+        const selectedTask = asRecord(detailQuery.data?.detail);
+        if (selectedTask.id === selectionId && selectedTask.resource_type === "route_stop") {
+          const expected = submittedCompletionExpectation(command.key, selectionId,
+            selectedTask.resource_id, nextParams[payloadKey]);
+          if (!expected) throw new Error("Completion proof requirements are invalid.");
+          completionRecord = { version: 1, queueId, actor: sessionUserId,
+            scope: completionReadbackScope, taskId: selectionId, actionKey: command.key, expected };
+          await rememberCompletionReadback(cacheStore, completionRecord);
+        }
+      }
+      if (command.key === "tasks.report_incident") {
+        const selectedTask = asRecord(detailQuery.data?.detail);
+        incidentRecord = { version: 1, queueId, actor: sessionUserId, scope: completionReadbackScope,
+          taskId: selectionId!, routeStopId: String(selectedTask.resource_id ?? ""),
+          artifactIds: Array.isArray(nextParams.artifact_ids) ? nextParams.artifact_ids as string[] : [] };
+        await rememberIncidentReadback(cacheStore, incidentRecord);
+      }
+      const queuedEntry = await outbox.enqueue({
         id: queueId,
+        display,
         rpc,
+        transport,
         args: {
+          ...(transport === "edge" ? { p_idempotency_key: queueId, p_expected_actor_user_id: sessionUserId } :
+            command.key === "tasks.report_incident" ? {} : composerRetryArgs(command, queueId, sessionUserId)),
           p_action_key: command.key,
           p_resource_key: resource,
           p_selection_ids: selectionIds,
-          p_selection_id: selectedResourceId,
+          p_selection_id: selectionId,
           p_selection_count: selectionIds.length,
           p_params: Object.keys(nextParams).length > 0 ? nextParams : null,
         },
+      }).catch(async error => {
+        // Delete this draft only when the outbox proves enqueue did not persist.
+        if (completionRecord && await outbox.get(queueId) === null) {
+          await forgetUnqueuedCompletion(cacheStore, completionRecord);
+        }
+        if (incidentRecord && await outbox.get(queueId) === null) {
+          await forgetUnqueuedIncident(cacheStore, incidentRecord);
+        }
+        throw error;
       });
       queryClient.invalidateQueries({ queryKey: ["outbox", "count"] });
       queryClient.invalidateQueries({ queryKey: ["outbox", "entries"] });
@@ -4203,8 +4462,14 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           status = "queued_pending_sync";
         } else {
           try {
-            await syncMutation.mutateAsync();
-            status = "synced";
+            const result = await syncMutation.mutateAsync();
+            // Only this invocation's positive completion receipt proves this item.
+            // Absence also occurs when another action clears a dead queue entry.
+            status = result.succeededIds.includes(queueId) ? "synced" : "queued_pending_sync";
+            if (status !== "synced") {
+              const queued = await outbox.get(queueId);
+              if (queued?.status === "failed" || queued?.status === "dead") status = "retryable_failure";
+            }
           } catch {
             status = "retryable_failure";
           }
@@ -4212,11 +4477,13 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       }
       const receipt: ActionSubmissionReceipt = {
         actionKey: command.key,
+        actionLabel: queuedEntry?.display?.actionLabel ?? null,
+        targetLabel: queuedEntry?.display?.targetLabel ?? null,
         queueId,
         status,
-        detail: describeActionReceiptStatus(status),
+        detail: describeMobileActionReceiptStatus(status, strings),
         recordedAt: new Date().toISOString(),
-        resourceId: selectedResourceId ?? null,
+        resourceId: selectionId ?? null,
       };
       setLastActionReceipt(receipt);
       return receipt;
@@ -4230,12 +4497,51 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       resource,
       selectedResourceId,
       syncMutation,
+      sessionUserId,
       setLastActionReceipt,
+      selectedStopSnapshot,
+      cacheStore,
+      completionReadbackScope,
+      detailQuery.data?.detail,
+      strings,
     ]
   );
 
+  const loadFinancialTaskContext = React.useCallback(async (taskId: string, admitted: () => boolean) => {
+    const captured = completionReadbackCurrent.current;
+    if (!admitted() || taskId !== selectedResourceId) throw new Error(strings.financialTasks.unavailable);
+    const before = await resolveVerifiedCompletionScope(client);
+    if (!admitted() || !before || before.actor !== sessionUserId || before.scope !== completionReadbackScope) throw new Error(strings.financialTasks.unavailable);
+    const result = await boundedCompletionRead(signal => client.schema("api").rpc("ui_get_financial_task_context_v1", { p_task_id: taskId }).abortSignal(signal));
+    if (result.error) throw result.error;
+    const after = await resolveVerifiedCompletionScope(client);
+    if (!admitted() || captured !== completionReadbackCurrent.current || !after || before.actor !== after.actor || before.scope !== after.scope) throw new Error(strings.financialTasks.unavailable);
+    const value = parseFinancialTaskContext(result.data, sessionUserId, composerOrganizationId ?? "", taskId);
+    if (!value) throw new Error(strings.financialTasks.unavailable);
+    return value;
+  }, [client, sessionUserId, completionReadbackScope, composerOrganizationId, selectedResourceId, strings.financialTasks.unavailable]);
+
   const runCommand = React.useCallback(
     async (command: UiCommandDefinition) => {
+      setComposerFinancialContext(null);
+      setComposerFinancialSession("");
+      const admission = ++financialAdmission.current;
+      const identity = completionReadbackCurrent.current;
+      const generation = completionReadbackScopeVersion();
+      const admitted = () => admission === financialAdmission.current && identity === completionReadbackCurrent.current && generation === completionReadbackScopeVersion();
+      const selectedTask = asRecord(detailQuery.data?.detail);
+      if (command.key === "tasks.complete" && resource === "tasks" && selectedResourceId && selectedTask.resource_type === "settlement_batch") {
+        let context: FinancialTaskContext;
+        try { context = await loadFinancialTaskContext(selectedResourceId, admitted); }
+        catch (error) { if (!admitted()) return; throw error; }
+        if (!admitted()) return;
+        const schema = command.execution?.input_schema && resolveFinancialTaskSchema(command.execution.input_schema, context);
+        if (!schema || context.task_id !== selectedTask.id) throw new Error(strings.financialTasks.unavailable);
+        command = { ...command, execution: { ...command.execution, input_schema: schema } };
+        setComposerFinancialContext(context);
+        setComposerFinancialAdmission(admission);
+        setComposerFinancialSession(context.sessions.length === 1 ? context.sessions[0].id : "");
+      }
       const inputFields = resolveCommandInputFields(command, selectedStopSnapshot);
       if (inputFields.length > 0) {
         const initial: Record<string, string> = {};
@@ -4264,62 +4570,106 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         if (!confirmed) return;
       }
       const receipt = await enqueueCommand(command);
-      Alert.alert("Action receipt", `${receipt.detail}\nQueue ref: ${receipt.queueId}`);
+      Alert.alert(strings.alerts.actionReceiptTitle, formatMobileActionReceipt(receipt, strings));
     },
-    [enqueueCommand, selectedStopSnapshot]
+    [strings, enqueueCommand, selectedStopSnapshot, detailQuery.data?.detail, resource, selectedResourceId, loadFinancialTaskContext]
   );
 
-  const submitComposer = React.useCallback(async () => {
-    if (!composerCommand) return;
-    const fields = resolveCommandInputFields(composerCommand, selectedStopSnapshot);
+  const validateComposer = React.useCallback((): ComposerValidation => {
+    let fields: CommandInputFieldRuntime[] = [];
+    let partialDeliveryBoxNumbers: number[] | null = null;
+    let completionKind: string | null = null;
+    let stage = 0;
+    const optional = new Set<typeof COMPOSER_READINESS_STAGES[number]>();
+    const finish = (error: string | null, empty = false): ComposerValidation => ({
+      error, empty, fields, partialDeliveryBoxNumbers, completionKind,
+      checks: COMPOSER_READINESS_STAGES.map((key, index) => ({
+        key,
+        status: empty || index > stage ? "unchecked" : index === stage && error
+          ? key === "evidence" ? "pending" : "needed" : optional.has(key) ? "optional" : "ready",
+      })),
+    });
+    if (!composerCommand) return finish(null, true);
+    if (composerIsFinancial) {
+      for (const key of COMPOSER_READINESS_STAGES) if (key !== "fields") optional.add(key);
+      stage = 1;
+      fields = resolveCommandInputFields(composerCommand, selectedStopSnapshot);
+      if (!composerFinancialContext || composerFinancialContext.task_id !== selectedResourceId ||
+          composerFinancialAdmission !== financialAdmission.current) return finish(strings.financialTasks.unavailable);
+      try { financialTaskPayload(composerValues.amount ?? "", composerFinancialSession, composerFinancialContext, {
+        supervisorName: composerValues.supervisor_name,
+        photoArtifactId: composerFinancialEvidence ? composerArtifacts[0]?.artifactId : undefined,
+      }); }
+      catch { return finish(strings.financialTasks.unavailable); }
+      if (composerFinancialEvidence && (!composerEvidenceReady || composerEvidenceBusy ||
+          composerEvidenceRows.length > 1 || composerEvidenceRows.length !== composerArtifacts.length ||
+          composerEvidenceRows.some(row => row.phase !== "registered" || row.kind !== "photo" || row.artifactId !== composerArtifacts[0]?.artifactId))) {
+        stage = COMPOSER_READINESS_STAGES.indexOf("evidence");
+        optional.delete("evidence");
+        return finish(strings.pendingEvidence.resolveFirst);
+      }
+      stage = COMPOSER_READINESS_STAGES.length - 1;
+      return finish(null);
+    }
+    if (composerSupportsEvidence && (!composerEvidenceReady || composerEvidenceBusy ||
+        composerEvidenceRows.some(row => row.phase !== "registered"))) {
+      return finish(strings.pendingEvidence.resolveFirst);
+    }
+    if (!composerSupportsEvidence) optional.add("evidence");
+    stage = 1;
+    fields = resolveCommandInputFields(composerCommand, selectedStopSnapshot);
     if (!fields.length) {
-      resetComposer();
-      return;
+      return finish(null, true);
     }
 
     for (const field of fields) {
       const value = String(composerValues[field.key] ?? "").trim();
       if (field.required && !value) {
-        setComposerError(`${field.label} is required.`);
-        return;
+        return finish(composerIsSelfKyc ? `${strings.selfKyc[field.key as keyof typeof strings.selfKyc] ?? field.label}: ${strings.selfKyc.required}` : `${field.label} is required.`);
       }
       if (field.type === "number" && value && !Number.isFinite(Number(value))) {
-        setComposerError(`${field.label} must be a valid number.`);
-        return;
+        return finish(`${field.label} must be a valid number.`);
       }
     }
 
+    if (!fields.some(field => field.required ||
+        (field.type === "number" && String(composerValues[field.key] ?? "").trim()))) optional.add("fields");
+    stage = 2;
     if (
       composerCommand.key === "tasks.exception" &&
       String(composerValues.exception_reason || "").trim().toLowerCase() === "other" &&
       !String(composerValues.exception_notes || "").trim()
     ) {
-      setComposerError("Notes are required when exception reason is Other.");
-      return;
+      return finish("Notes are required when exception reason is Other.");
     }
 
+    if (!(composerCommand.key === "tasks.exception" &&
+        String(composerValues.exception_reason || "").trim().toLowerCase() === "other")) optional.add("notes");
+    stage = 3;
     if (composerPodPolicyState.blockingMessage) {
-      setComposerError(composerPodPolicyState.blockingMessage);
-      return;
+      return finish(composerPodPolicyState.blockingMessage);
     }
 
+    if (!composerSupportsPod) optional.add("policy");
+    stage = 4;
     if (composerSignatureRequired && !composerSignatureArtifact) {
-      setComposerError("Capture and save the recipient signature before queueing.");
-      return;
+      return finish("Capture and save the recipient signature before queueing.");
     }
 
+    if (!composerSignatureRequired) optional.add("signature");
+    stage = 5;
     if (composerPhotoRequired && composerArtifacts.length === 0) {
-      setComposerError("At least one proof photo is required.");
-      return;
+      return finish("At least one proof photo is required.");
     }
 
     if (composerArtifacts.length < composerMinArtifactCount) {
-      setComposerError(
+      return finish(
         `At least ${composerMinArtifactCount} proof item${composerMinArtifactCount === 1 ? "" : "s"} are required.`
       );
-      return;
     }
 
+    if (!composerPhotoRequired && composerMinArtifactCount === 0) optional.add("proof");
+    stage = 6;
     if (composerCommand.key === "tasks.complete" && !isPickupStopSnapshot(selectedStopSnapshot)) {
       const otpCode = sanitizeOtpCode(composerValues.otp_code);
       const identityKind =
@@ -4327,28 +4677,27 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       const identityLast4 = sanitizeIdentityLast4(composerValues.recipient_identity_last4);
 
       if (composerOtpRequired && !otpCode) {
-        setComposerError("Recipient OTP is required before queueing this delivery.");
-        return;
+        return finish("Recipient OTP is required before queueing this delivery.");
       }
       if (otpCode && otpCode.length < 4) {
-        setComposerError("Recipient OTP must contain at least 4 digits.");
-        return;
+        return finish("Recipient OTP must contain at least 4 digits.");
       }
 
       if (composerIdentityRequired && (!identityKind || !identityLast4)) {
-        setComposerError("Identity type and identity last 4 are required before queueing this delivery.");
-        return;
+        return finish("Identity type and identity last 4 are required before queueing this delivery.");
       }
       if ((identityKind && !identityLast4) || (!identityKind && identityLast4)) {
-        setComposerError("Provide both identity type and identity last 4 for recipient confirmation.");
-        return;
+        return finish("Provide both identity type and identity last 4 for recipient confirmation.");
       }
       if (identityLast4 && identityLast4.length < 4) {
-        setComposerError("Identity last 4 must contain at least 4 letters or digits.");
-        return;
+        return finish("Identity last 4 must contain at least 4 letters or digits.");
       }
+      if (!composerOtpRequired && !composerIdentityRequired && !otpCode && !identityKind && !identityLast4) optional.add("recipient");
+    } else {
+      optional.add("recipient");
     }
 
+    stage = 7;
     if (composerCommand.key === "tasks.exception") {
       const reasonKey = normalizeReasonKey(composerValues.exception_reason);
       const hasNotes = Boolean(String(composerValues.exception_notes || "").trim());
@@ -4363,17 +4712,18 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         reasonKey.includes("access") ||
         reasonKey.includes("restrict");
       if (reasonNeedsPhoto && composerArtifacts.length === 0) {
-        setComposerError("This exception reason requires photo evidence.");
-        return;
+        return finish("This exception reason requires photo evidence.");
       }
       if (reasonNeedsNotes && !hasNotes) {
-        setComposerError("Add notes for this exception reason before queueing.");
-        return;
+        return finish("Add notes for this exception reason before queueing.");
       }
+      if (!reasonNeedsPhoto && !reasonNeedsNotes) optional.add("exception");
+    } else {
+      optional.add("exception");
     }
 
-    let partialDeliveryBoxNumbers: number[] | null = null;
-    const completionKind =
+    stage = 8;
+    completionKind =
       composerCommand.key === "tasks.complete" && !isPickupStopSnapshot(selectedStopSnapshot)
         ? String(composerValues.completion_kind ?? "").trim().toLowerCase() || "full"
         : null;
@@ -4384,15 +4734,102 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           packageCount: selectedStopSnapshot?.packageCount ?? null,
         });
       } catch (error) {
-        setComposerError(
+        return finish(
           error instanceof Error && String(error.message || "").trim()
             ? error.message
             : "Partial delivery box numbers are invalid."
         );
-        return;
       }
+    } else {
+      optional.add("partial");
     }
 
+    return finish(null);
+  }, [composerCommand, selectedStopSnapshot, composerValues, composerIsSelfKyc, strings,
+    composerIsFinancial, composerFinancialContext, composerFinancialSession, composerFinancialAdmission, selectedResourceId,
+    composerSupportsEvidence, composerSupportsPod, composerFinancialEvidence, composerEvidenceReady, composerEvidenceBusy, composerEvidenceRows,
+    composerPodPolicyState.blockingMessage, composerSignatureRequired, composerSignatureArtifact,
+    composerPhotoRequired, composerArtifacts, composerMinArtifactCount, composerOtpRequired,
+    composerIdentityRequired]);
+  // Derived presentation only; submission re-evaluates the same pure guards.
+  const composerReadiness = validateComposer();
+
+  const submitComposer = React.useCallback(async () => {
+    if (!composerCommand || composerSubmitInFlight.current || isCapturingComposerArtifact || isCapturingComposerSignature) return;
+    const validation = validateComposer();
+    if (validation.error) {
+      setComposerError(validation.error);
+      return;
+    }
+    if (validation.empty) {
+      resetComposer();
+      return;
+    }
+    const { fields, completionKind, partialDeliveryBoxNumbers } = validation;
+    if (composerIsFinancial) {
+      if (!composerFinancialContext) { setComposerError(strings.financialTasks.unavailable); return; }
+      const admission = composerFinancialAdmission;
+      const identity = completionReadbackCurrent.current;
+      const generation = completionReadbackScopeVersion();
+      const admitted = () => admission === financialAdmission.current && identity === completionReadbackCurrent.current && generation === completionReadbackScopeVersion() && composerFinancialContext.task_id === selectedResourceId;
+      if (!admitted()) return;
+      composerSubmitInFlight.current = true;
+      setComposerSubmitting(true);
+      const epoch = composerCaptureEpoch.current;
+      try {
+        const confirm = composerCommand.execution?.confirm;
+        if (confirm && !await confirmMobileAction({ title: confirm.title ?? strings.financialTasks.title,
+          message: confirm.description ?? "", confirmLabel: confirm.confirm_label ?? strings.financialTasks.confirm,
+          cancelLabel: confirm.cancel_label ?? strings.financialTasks.cancel, danger: confirm.tone === "danger" })) return;
+        if (!admitted()) return;
+        const context = await loadFinancialTaskContext(composerFinancialContext.task_id, admitted);
+        if (!admitted() || epoch !== composerCaptureEpoch.current) return;
+        if (context.settlement_id !== composerFinancialContext.settlement_id || context.task_type_key !== composerFinancialContext.task_type_key) throw new Error(strings.financialTasks.unavailable);
+        if (financialEvidenceContract(context.evidence_contract) !== composerFinancialEvidence) throw new Error(strings.financialTasks.unavailable);
+        if (composerFinancialEvidence && !composerEvidenceScope) throw new Error(strings.financialTasks.unavailable);
+        const evidenceRows = composerFinancialEvidence ? await pendingEvidence.list(composerEvidenceScope!) : [];
+        if (!admitted() || epoch !== composerCaptureEpoch.current) return;
+        if (evidenceRows.length > 1 || evidenceRows.some(row => row.phase !== "registered" || row.kind !== "photo" ||
+            !row.artifactId || row.bucket !== composerEvidenceScope?.bucket || row.registrationRpc !== composerEvidenceScope?.registrationRpc))
+          throw new Error(strings.pendingEvidence.resolveFirst);
+        const submittedPhoto = evidenceRows[0];
+        if (composerFinancialEvidence && (evidenceRows.length !== composerEvidenceRows.length || submittedPhoto &&
+            (submittedPhoto.id !== composerEvidenceRows[0]?.id || submittedPhoto.artifactId !== composerArtifacts[0]?.artifactId)))
+          throw new Error(strings.pendingEvidence.resolveFirst);
+        const payload = financialTaskPayload(composerValues.amount ?? "", composerFinancialSession, context, {
+          supervisorName: composerValues.supervisor_name,
+          photoArtifactId: submittedPhoto?.artifactId,
+        });
+        const session = context.sessions.find(value => value.id === payload.ops_session_id);
+        setComposerSubmitting(true);
+        if (!admitted()) return;
+        const receipt = await handoffPendingEvidence(() => enqueueCommand(composerCommand, { payloadPatch: payload,
+          financialAdmissionCheck: () => admitted() && epoch === composerCaptureEpoch.current, financialExpected: {
+          kind: "financial_amount_v1", action: "tasks.complete", taskId: context.task_id,
+          settlementId: context.settlement_id, opsSessionId: payload.ops_session_id ?? null,
+          sessionType: session?.session_type ?? null, amount: payload.amount,
+          ...(payload.supervisor_name ? { supervisorName: payload.supervisor_name } : {}),
+          ...(payload.photo_artifact_id ? { photoArtifactId: payload.photo_artifact_id } : {}),
+        } }), async () => {
+          if (submittedPhoto && composerEvidenceScope) await pendingEvidence.discard(composerEvidenceScope, [submittedPhoto.id]);
+        }, () => admitted() && epoch === composerCaptureEpoch.current,
+        error => logDebugFailure("failed to prune handed-off evidence", error));
+        if (!admitted() || epoch !== composerCaptureEpoch.current) return;
+        queryClient.invalidateQueries({ queryKey: ["resource", "settlements"] });
+        resetComposer();
+        Alert.alert(strings.alerts.actionReceiptTitle, formatMobileActionReceipt(receipt, strings));
+      } catch {
+        if (admitted() && epoch === composerCaptureEpoch.current) setComposerError(strings.financialTasks.unavailable);
+      } finally {
+        composerSubmitInFlight.current = false;
+        if (admitted() && epoch === composerCaptureEpoch.current) setComposerSubmitting(false);
+      }
+      return;
+    }
+
+    composerSubmitInFlight.current = true;
+    const submitEpoch = composerCaptureEpoch.current;
+    try {
     const confirm = composerCommand.execution?.confirm ?? null;
     if (confirm) {
       const confirmed = await confirmMobileAction({
@@ -4405,10 +4842,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       if (!confirmed) return;
     }
 
-    try {
+      if (submitEpoch !== composerCaptureEpoch.current) return;
       setComposerSubmitting(true);
       setComposerError(null);
-      const payload: Record<string, unknown> = {};
+      let payload: Record<string, unknown> = {};
       const paymentCollection: Record<string, unknown> = {};
       for (const field of fields) {
         if (field.key === "delivered_box_numbers") continue;
@@ -4440,13 +4877,17 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           receipt_context: paymentReceiptContext,
         };
       }
-      if (composerArtifacts.length > 0) {
+      if (composerIsSelfKyc) {
+        payload = normalizeSelfKycFields(payload);
+        validateSelfKycFields(String(composerCommand.execution?.params?.category ?? ""), payload);
+        if (composerSelfEvidence) payload.evidence = buildComposerEvidenceMap(composerArtifacts, composerSelfEvidence);
+      } else if (composerArtifacts.length > 0) {
         payload.artifact_ids = composerArtifacts.map((entry) => entry.artifactId);
       }
-      if (composerSignatureArtifact) {
+      if (!composerIsSelfKyc && composerSignatureArtifact) {
         payload.signature_artifact_id = composerSignatureArtifact.artifactId;
       }
-      if (activeDriverShift?.opsSessionId) {
+      if (!composerIsSelfKyc && composerCommand.key !== "tasks.report_incident" && activeDriverShift?.opsSessionId) {
         payload.ops_session_id = activeDriverShift.opsSessionId;
       }
       if (composerCommand.key === "tasks.complete") {
@@ -4522,29 +4963,47 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               : null,
         };
       }
-      const receipt = await enqueueCommand(composerCommand, {
-        payloadPatch: payload,
-        paramsPatch:
+      const incidentParams = composerCommand.key === "tasks.report_incident" ? {
+        incident_type: payload.incident_type,
+        summary: payload.summary,
+        artifact_ids: payload.artifact_ids,
+      } : null;
+      const receipt = await handoffPendingEvidence(() => enqueueCommand(composerCommand, {
+        payloadPatch: incidentParams ? undefined : payload,
+        paramsPatch: incidentParams ?? (
           composerCommand.key === "tasks.exception" && isPickupStopSnapshot(selectedStopSnapshot)
-            ? {
-                status_reason: String(composerValues.exception_reason ?? "").trim().toLowerCase(),
-              }
-            : undefined,
-      });
+            ? { status_reason: String(composerValues.exception_reason ?? "").trim().toLowerCase() }
+            : undefined),
+      }), async () => {
+        if (composerEvidenceScope) await pendingEvidence.discard(composerEvidenceScope,
+          composerEvidenceRows.filter(row => row.phase === "registered").map(row => row.id));
+      }, () => submitEpoch === composerCaptureEpoch.current,
+      error => logDebugFailure("failed to prune handed-off evidence", error));
+      if (submitEpoch !== composerCaptureEpoch.current) return;
       resetComposer();
-      Alert.alert("Action receipt", `${receipt.detail}\nQueue ref: ${receipt.queueId}`);
+      Alert.alert(strings.alerts.actionReceiptTitle, formatMobileActionReceipt(receipt, strings));
     } catch (error) {
+      if (submitEpoch !== composerCaptureEpoch.current) return;
       setComposerError(
-        error instanceof Error && String(error.message || "").trim()
+        composerIsSelfKyc ? strings.selfKyc.invalid : error instanceof Error && String(error.message || "").trim()
           ? error.message
           : "Unable to queue action with provided input."
       );
       setComposerSubmitting(false);
+    } finally {
+      composerSubmitInFlight.current = false;
     }
-  }, [
+  }, [strings, validateComposer,
+    pendingEvidence, composerEvidenceScope, composerEvidenceRows, composerEvidenceReady, composerEvidenceBusy, composerSupportsEvidence, composerFinancialEvidence,
     composerArtifacts,
+    composerIsSelfKyc,
+    composerSelfEvidence,
+    isCapturingComposerArtifact,
+    isCapturingComposerSignature,
+    strings.selfKyc,
     activeDriverShift?.opsSessionId,
     composerCommand,
+    composerIsFinancial, composerFinancialContext, composerFinancialSession, composerFinancialAdmission, selectedResourceId, loadFinancialTaskContext, queryClient,
     composerMinArtifactCount,
     composerIdentityRequired,
     composerOtpRequired,
@@ -4581,13 +5040,12 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const enqueueUiEvents = React.useCallback(
     async (events: Array<Record<string, unknown>>) => {
       if (!outboxInitSuccess) return;
-      const normalizedEvents = normalizeMobileUiEvents(events);
-      if (!normalizedEvents.length) return;
+      if (!events.length) return;
 
       await outbox.enqueue({
         rpc: "ui_log_events_v1",
         args: {
-          p_events: normalizedEvents,
+          p_events: events,
           p_app: "mobile",
         },
       });
@@ -4599,48 +5057,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       }
     },
     [effectiveOnline, mobileSyncPolicy.enabled, outbox, outboxInitSuccess, queryClient, syncMutation]
-  );
-
-  const logUiEventsWithReadback = React.useCallback(
-    async (events: Array<Record<string, unknown>>): Promise<MobileUiEventLogResult> => {
-      const normalizedEvents = normalizeMobileUiEvents(events);
-      const eventType = firstMobileUiEventType(events);
-      const recordedAt = new Date().toISOString();
-      if (!normalizedEvents.length) {
-        return { status: "retryable_failure", eventCount: 0, recordedAt, eventType };
-      }
-
-      if (effectiveOnline) {
-        try {
-          const { data, error } = await getMobileV2SupabaseSchemaClient(client, "api").rpc("ui_log_events_v1", {
-            p_events: normalizedEvents,
-            p_app: "mobile",
-          });
-          if (error) throw error;
-          queryClient.invalidateQueries({ queryKey: ["ui", "list"] });
-          queryClient.invalidateQueries({ queryKey: ["ui", "detail"] });
-          return resolveMobileUiEventLogReadback({
-            data,
-            expectedEventCount: normalizedEvents.length,
-            recordedAt,
-            eventType,
-          });
-        } catch (error) {
-          if (!isRetriableNetworkError(error) && !isRetriableSupabaseError(error)) {
-            throw error;
-          }
-        }
-      }
-
-      await enqueueUiEvents(normalizedEvents);
-      return {
-        status: effectiveOnline ? "queued_pending_sync" : "queued_offline",
-        eventCount: 0,
-        recordedAt,
-        eventType,
-      };
-    },
-    [client, effectiveOnline, enqueueUiEvents, queryClient]
   );
 
   const telemetryFlushActiveRef = React.useRef(false);
@@ -4704,40 +5120,34 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     },
     [enqueueUiEvents]
   );
-  const handleConfirmRouteDeparture = React.useCallback(() => {
-    if (!selectedRouteRunId) return;
-    void (async () => {
+  const departureSubmitInFlight = React.useRef(false);
+  const handleConfirmRouteDeparture = React.useCallback(async () => {
+    if (!selectedRouteRunId || departureSubmitInFlight.current) return;
+    departureSubmitInFlight.current = true;
+    const epoch = completionReadbackScopeVersion();
+    try {
       const accepted = await confirmMobileAction({
-        title: "Confirm departure",
-        message:
-          "This marks the route as departed after the current route-load scans reconcile to the planned stops.",
-        confirmLabel: "Confirm departure",
+        title: strings.route.departureRequest,
+        message: strings.route.departureRequestExplanation,
+        confirmLabel: strings.route.departureRequest,
       });
       if (!accepted) return;
-
-      try {
-        const result = await confirmRouteDepartureMutation.mutateAsync({
+      if (!completionReadbackScopeMatches(epoch, sessionUserId, completionReadbackScope))
+        throw new Error(strings.route.departureUnavailable);
+      const entry = await confirmRouteDepartureMutation.mutateAsync({
           routeRunId: selectedRouteRunId,
           routeStopId: selectedRouteContext?.routeStopId ?? null,
           taskId: selectedRouteContext?.taskId ?? null,
           opsSessionId: activeDriverShift?.opsSessionId ?? selectedRouteContext?.opsSessionId ?? null,
         });
-        const payload = asRecord(result);
-        const scanOut = asRecord(payload.scan_out);
-        const scannedStopCount = coerceValueNumber(scanOut.scanned_stop_count);
-        const expectedStopCount =
-          coerceValueNumber(scanOut.expected_stop_count) ?? coerceValueNumber(payload.total_stop_count);
-        Alert.alert(
-          "Departure confirmed",
-          scannedStopCount != null && expectedStopCount != null
-            ? `Route departure was confirmed for ${scannedStopCount}/${expectedStopCount} scanned stops.`
-            : "Route departure was confirmed."
-        );
-      } catch (error) {
-        logDebugFailure("failed to confirm route departure", error);
-        Alert.alert("Departure blocked", formatUnknownError(error));
-      }
-    })();
+      Alert.alert(entry.status === "dead" ? strings.route.departureBlocked : strings.route.departureQueued,
+        entry.status === "dead" ? strings.route.departureReview : strings.route.departureRequestExplanation);
+    } catch (error) {
+      logDebugFailure("failed to queue route departure", error);
+      Alert.alert(strings.route.departureBlocked, formatUnknownError(error));
+    } finally {
+      departureSubmitInFlight.current = false;
+    }
   }, [
     activeDriverShift?.opsSessionId,
     confirmRouteDepartureMutation,
@@ -4745,7 +5155,28 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     selectedRouteContext?.routeStopId,
     selectedRouteContext?.taskId,
     selectedRouteRunId,
+    sessionUserId,
+    completionReadbackScope,
+    strings,
   ]);
+
+  const handleRouteLoadAction = React.useCallback(async (input: RouteLoadActionInput) => {
+    if (!selectedRouteRunId || !outboxInitSuccess) throw new Error("route_load_not_ready");
+    const request = buildRouteLoadAction(input, {
+      routeRunId: selectedRouteRunId,
+      userId: sessionUserId,
+      organizationId: readContextId(policyContext, "organization_id") ?? "",
+      requestId: createOutboxId(),
+    });
+    await outbox.enqueue(request);
+    queryClient.invalidateQueries({ queryKey: ["outbox", "count"] });
+    queryClient.invalidateQueries({ queryKey: ["outbox", "entries"] });
+    if (effectiveOnline && mobileSyncPolicy.enabled && !syncMutation.isPending) {
+      await syncMutation.mutateAsync();
+    }
+    queryClient.invalidateQueries({ queryKey: ["route", "execution-manifest", selectedRouteRunId] });
+  }, [selectedRouteRunId, outboxInitSuccess, sessionUserId, policyContext, outbox,
+    queryClient, effectiveOnline, mobileSyncPolicy.enabled, syncMutation]);
 
   const driverBranchId = React.useMemo(() => resolveBranchIdFromMe(me), [me]);
   const [isMutatingDriverShift, setIsMutatingDriverShift] = React.useState(false);
@@ -4839,19 +5270,36 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const handleSignOut = React.useCallback(() => {
     void (async () => {
       const confirmed = await confirmMobileAction({
-        title: "Sign out",
-        message: "This will clear local cached data and queued actions on this device.",
-        confirmLabel: "Sign out",
-        cancelLabel: "Cancel",
+        title: strings.confirm.signOutTitle,
+        message: strings.confirm.signOutMessage,
+        confirmLabel: strings.confirm.signOutButton,
+        cancelLabel: strings.confirm.cancelButton,
         danger: true,
       });
       if (!confirmed) return;
 
+      financialAdmission.current += 1;
+      const clearEpoch = ++evidenceClearEpoch.current;
+      composerCaptureEpoch.current += 1;
+      await pendingEvidence.invalidate();
       try {
-        const result = await client.auth.signOut({ scope: "local" });
-        if (result.error) throw result.error;
-      } catch (error) {
-        logDebugFailure("failed to sign out", error);
+        await clearCompletionReadbacks(() => clearEvidenceLocalState(pendingEvidence, () => outboxStore.clear(), () => cacheStore.clear()), async () => null);
+        try {
+          const result = await client.auth.signOut({ scope: "local" });
+          if (result.error) throw result.error;
+        } catch (error) {
+          logDebugFailure("failed to sign out", error);
+        }
+      } finally {
+        await replaceEvidenceManagerAfterClear(async () => {
+          const remaining = await client.auth.getSession();
+          if (remaining.error || !remaining.data.session) return null;
+          const verified = await client.auth.getUser();
+          if (verified.error) throw verified.error;
+          return verified.data.user?.id ?? null;
+        }, sessionUserId, () => clearEpoch === evidenceClearEpoch.current &&
+          evidenceLifecycle.current?.manager === pendingEvidence,
+        () => setEvidenceManagerRevision(current => current + 1));
       }
       if (Platform.OS !== "web") {
         try {
@@ -4866,18 +5314,16 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       } catch (error) {
         logDebugFailure("failed to clear telemetry during sign out", error);
       }
-      await outboxStore.clear();
-      await cacheStore.clear();
       await clearStoredDeviceState(storage);
       queryClient.clear();
     })().catch((error) => {
       logDebugFailure("failed to clear local data during sign out", error);
     });
-  }, [cacheStore, client, outboxStore, queryClient, storage]);
+  }, [pendingEvidence, sessionUserId, cacheStore, client, outboxStore, queryClient, storage, strings]);
 
   const routeSummary = React.useMemo(() => {
     if (!isRouteSurface) return null;
-    const items = listQuery.data?.list.items ?? [];
+    const items = displayedRoute.items;
     const totalStops = items.length;
     const doneStops = items.filter((entry) => {
       const status = extractRouteCardSnapshot(entry).status?.trim().toLowerCase() ?? "";
@@ -4910,7 +5356,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       routeDate,
       status,
     };
-  }, [isRouteSurface, listQuery.data?.list.items]);
+  }, [isRouteSurface, displayedRoute.items]);
   const hasCodWorkload = React.useMemo(() => {
     if (selectedStopSnapshot?.codAmount != null && selectedStopSnapshot.codAmount > 0) {
       return true;
@@ -4931,9 +5377,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
 
   const resourceHeaderTitle =
     selectedItem?.label ??
-    (isRouteSurface ? "Route" : isSettlementsSurface ? "Settlements" : resource ?? publicConfig.appName);
+    (isRouteSurface ? strings.route.title : isSettlementsSurface ? strings.settlements.title : resource === "tasks" ? strings.tasks.title : resource ?? publicConfig.appName);
   const resourceHeaderSubtitle = isRouteSurface
-    ? `${routeSummary?.totalStops ?? 0} stops${routeSummary?.routeDate ? ` - ${routeSummary.routeDate}` : ""}`
+    ? `${strings.route.subtitle(routeSummary?.totalStops ?? 0)}${routeSummary?.routeDate ? ` - ${routeSummary.routeDate}` : ""}`
     : isSettlementsSurface
       ? "settlements (ledger surface)"
       : resource ?? "";
@@ -4941,10 +5387,59 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     isRouteSurface && mapPolicy.routeViews.length > 1 && !drivingModeLocked;
   const appDirectionStyle =
     Platform.OS === "web" ? null : selectedDirectionMode === "rtl" ? styles.directionRtl : styles.directionLtr;
-  const userRoleLabel = React.useMemo(
-    () => resolveMobileRoleLabel(me?.user?.user_type ?? null),
-    [me?.user?.user_type]
+  const activeRoleSnapshot = activeRoleQuery.data ?? null;
+  const effectiveActiveRole =
+    activeRoleSnapshot?.selectedRole ??
+    (activeRoleSnapshot?.selectionState === "single_eligible"
+      ? activeRoleSnapshot.eligibleRoles[0] ?? null
+      : null);
+  const liveRegistryQuery = useQuery({
+    queryKey: ["fieldops", "live-registry", me?.user?.id ?? null, stableStringify(me?.access_scope ?? null)],
+    queryFn: () => uiClient.readRegistry(),
+    enabled: Boolean(me?.user?.id && effectiveActiveRole),
+    staleTime: 30_000,
+  });
+  const liveSourceSelection = React.useMemo(
+    () => selectFieldOpsLiveSources(effectiveActiveRole?.roleKey, liveRegistryQuery.data),
+    [effectiveActiveRole?.roleKey, liveRegistryQuery.data]
   );
+  const liveOperationsQuery = useQuery({
+    queryKey: ["fieldops", "live-operations", me?.user?.id ?? null,
+      stableStringify(me?.access_scope ?? null), effectiveActiveRole?.roleId ?? null,
+      liveSourceSelection.rpcQueries, liveSourceSelection.resourceQueries],
+    queryFn: async () => {
+      const sources: Record<string, ReturnType<typeof fieldOpsLiveSourceResult>> = {};
+      await Promise.all([
+        ...liveSourceSelection.rpcQueries.map(async (query) => {
+          try {
+            const args = { p_shipment_ids: null, p_client_id: null, p_sender_id: null,
+              p_status: null, p_limit: 50 };
+            const { data, error } = await client.rpc(query.rpc, args);
+            sources[query.id] = error
+              ? fieldOpsLiveSourceResult(null, { error: true })
+              : fieldOpsLiveSourceResult(data, { complete: Array.isArray(data) && data.length < 50 });
+          } catch {
+            sources[query.id] = fieldOpsLiveSourceResult(null, { error: true });
+          }
+        }),
+        ...liveSourceSelection.resourceQueries.map(async (query) => {
+          try {
+            const list = await uiClient.listResource(query.resource, query.filters, 50, 0, null);
+            const complete = list.total_is_estimate !== true &&
+              typeof list.total === "number" && list.total <= list.items.length;
+            sources[query.id] = fieldOpsLiveSourceResult(list.items, { complete });
+          } catch {
+            sources[query.id] = fieldOpsLiveSourceResult(null, { error: true });
+          }
+        }),
+      ]);
+      return projectFieldOpsLiveOperations(sources);
+    },
+    enabled: liveSourceSelection.state === "ready" && Boolean(liveRegistryQuery.data) && !liveRegistryQuery.isError,
+    staleTime: 15_000,
+  });
+  const userRoleLabel = effectiveActiveRole?.label ??
+    resolveMobileRoleLabel(me?.user?.user_type ?? null);
   const userRoleCode = React.useMemo(() => resolveMobileRoleCode(userRoleLabel), [userRoleLabel]);
   const shellHeaderTitle = React.useMemo(
     () => resolveMobileShellHeaderTitle(publicConfig.appName, me?.user?.user_type ?? null),
@@ -4980,16 +5475,42 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     >
       <View style={styles.drawerHeader}>
         <Text style={styles.drawerTitle}>Modules</Text>
-        <Pressable
-          accessibilityRole="button"
-          testID="mobile-menu-close"
-          onPress={() => setNavOpen(false)}
-          style={({ pressed }) => [styles.drawerClose, pressed && styles.drawerClosePressed]}
-        >
-          <Text style={styles.drawerCloseText}>{"\u00D7"}</Text>
-        </Pressable>
+        <FieldOpsDrawerCloseButton locale={selectedLocaleMode} onClose={() => setNavOpen(false)}
+          style={styles.drawerClose} textStyle={styles.drawerCloseText} />
       </View>
       <ScrollView contentContainerStyle={styles.drawerContent}>
+        {activeRoleQuery.isError ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Work mode</Text>
+            <Text style={styles.navItemBadge}>Unavailable</Text>
+          </View>
+        ) : activeRoleSnapshot && activeRoleSnapshot.eligibleRoles.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Work mode</Text>
+            {activeRoleSnapshot.eligibleRoles.map((role) => {
+              const selected = effectiveActiveRole?.roleId === role.roleId;
+              return (
+                <Pressable
+                  key={role.roleId}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected, disabled: setActiveRoleMutation.isPending }}
+                  testID={`mobile-role-${role.roleKey}`}
+                  disabled={setActiveRoleMutation.isPending}
+                  onPress={() => setActiveRoleMutation.mutate(role.roleId)}
+                  style={({ pressed }) => [
+                    styles.navItem,
+                    selected && styles.navItemSelected,
+                    pressed && !setActiveRoleMutation.isPending && styles.navItemPressed,
+                    setActiveRoleMutation.isPending && styles.navItemDisabled,
+                  ]}
+                >
+                  <Text style={styles.navItemLabel}>{role.label}</Text>
+                  {selected ? <Text style={styles.navItemBadge}>Selected</Text> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
         {drawerSections.map((section) => (
           <View key={section.id} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.label}</Text>
@@ -5020,7 +5541,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   testID={`mobile-module-${resolveNavigationKey(item)}`}
 	                  onPress={() => {
 	                    if (blockedByDriving) {
-	                      showMobileNotice("Driving mode locked", "This module is blocked while moving.");
+	                      showMobileNotice(strings.alerts.drivingLockedTitle, "This module is blocked while moving.");
 	                      return;
 	                    }
 	                    if (unsupportedRoute) {
@@ -5111,7 +5632,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     >
       <View style={styles.navModalHeader}>
         <View style={styles.screenHeaderText}>
-          <Text style={styles.navModalTitle}>{composerCopy?.title ?? composerCommand?.label ?? "Action input"}</Text>
+          <Text style={styles.navModalTitle}>{composerIsSelfKyc ? (strings.selfKyc[String(composerCommand?.execution?.params?.category) as keyof typeof strings.selfKyc] ?? strings.selfKyc.title) : composerCopy?.title ?? composerCommand?.label ?? "Action input"}</Text>
           <Text style={styles.noticeSubtext}>
             {composerCopy?.description ?? "Provide required details before queueing this action."}
           </Text>
@@ -5141,6 +5662,35 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           </View>
         ) : null}
 
+        <ComposerReadiness result={composerReadiness}
+          pending={composerSubmitting || isCapturingComposerArtifact || isCapturingComposerSignature}
+          strings={strings} styles={styles} />
+        {composerIsFinancial && composerFinancialContext?.requires_session ? (
+          <View style={styles.composerField}>
+            <Text style={styles.detailKey}>{strings.financialTasks.session}</Text>
+            {composerFinancialContext.sessions.length === 0 ? <Text style={styles.error}>{strings.financialTasks.noSession}</Text> :
+              composerFinancialContext.sessions.map((session, index) => (
+                Platform.OS === "web" ? (
+                  <View key={session.id} style={[styles.chip, composerFinancialSession === session.id && styles.navItemSelected]}>
+                    {React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 8 } },
+                      React.createElement("input", {
+                        type: "radio", name: "financial-task-session", value: session.id,
+                        checked: composerFinancialSession === session.id, disabled: composerSubmitting,
+                        onChange: () => setComposerFinancialSession(session.id),
+                      }),
+                      <Text style={styles.chipText}>{strings.financialTasks.session} {index + 1} · {session.opened_at}</Text>)}
+                  </View>
+                ) : (
+                  <Pressable key={session.id} accessibilityRole="radio" disabled={composerSubmitting}
+                    accessibilityState={{ checked: composerFinancialSession === session.id, disabled: composerSubmitting }}
+                    onPress={() => setComposerFinancialSession(session.id)}
+                    style={[styles.chip, composerFinancialSession === session.id && styles.navItemSelected]}>
+                    <Text style={styles.chipText}>{strings.financialTasks.session} {index + 1} · {session.opened_at}</Text>
+                  </Pressable>
+                )
+              ))}
+          </View>
+        ) : null}
         {composerFields.map((field) => {
           const value = String(composerValues[field.key] ?? "");
           const options =
@@ -5156,7 +5706,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           return (
             <View key={field.key} style={styles.composerField}>
               <Text style={styles.detailKey}>
-                {field.label}
+                {composerIsFinancial && field.key === "amount" ? strings.financialTasks.amount : composerFinancialEvidence && field.key === "supervisor_name" ? strings.financialTasks.supervisorAnnotation : composerIsSelfKyc ? (strings.selfKyc[field.key as keyof typeof strings.selfKyc] ?? field.label) : field.label}
                 {field.required ? " *" : ""}
               </Text>
               {field.type === "lookup" ? (
@@ -5171,6 +5721,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                       {options.map((option) => (
                         <Pressable
                           key={`${field.key}:${option.value}`}
+                          testID={`mobile-action-composer-option-${field.key}-${option.value}`}
                           onPress={() => setComposerFieldValue(field.key, option.value)}
                           disabled={composerSubmitting}
                           style={({ pressed }) => [
@@ -5180,7 +5731,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                             pressed && styles.navItemPressed,
                           ]}
                         >
-                          <Text style={styles.chipText}>{option.label}</Text>
+                          <Text style={styles.chipText}>{composerIsSelfKyc ? (strings.selfKyc[option.value as keyof typeof strings.selfKyc] ?? option.label) : option.label}</Text>
+                          {option.description ? <Text style={styles.noticeSubtext}>{option.description}</Text> : null}
                         </Pressable>
                       ))}
                     </View>
@@ -5199,6 +5751,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   value={value}
                   onChangeText={(next) => setComposerFieldValue(field.key, next)}
                   placeholder={field.placeholder ?? undefined}
+                  testID={`mobile-action-composer-field-${field.key}`}
+                  accessibilityLabel={composerIsFinancial && field.key === "amount" ? strings.financialTasks.amount : composerFinancialEvidence && field.key === "supervisor_name" ? strings.financialTasks.supervisorAnnotation : composerIsSelfKyc ? (strings.selfKyc[field.key as keyof typeof strings.selfKyc] ?? field.label) : field.label}
                   keyboardType={field.type === "number" ? "numeric" : "default"}
                   style={[
                     styles.input,
@@ -5214,9 +5768,50 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           );
         })}
 
-        {composerSupportsPod ? (
+
+        {composerSelfEvidence ? (
           <View style={styles.noticeCard}>
-            <Text style={styles.noticeText}>Proof and evidence</Text>
+            <Text style={styles.noticeText}>{strings.selfKyc.title}</Text>
+            <Text style={styles.noticeSubtext}>{strings.selfKyc.subtitle}</Text>
+            <Text testID="mobile-self-kyc-evidence-count" style={styles.noticeSubtext}>{composerArtifacts.length} / {composerArtifactMaxItems}</Text>
+            <Pressable testID="mobile-self-kyc-open-camera"
+              {...mobileActionAccessibility(undefined, composerSubmitting || isCapturingComposerArtifact, composerSubmitting || isCapturingComposerArtifact)}
+              disabled={composerSubmitting || isCapturingComposerArtifact}
+              onPress={() => setComposerCameraOpen(current => !current)} style={styles.secondaryButton}>
+              <Text>{composerCameraOpen ? strings.selfKyc.closeCamera : strings.selfKyc.openCamera}</Text>
+            </Pressable>
+            {composerCameraOpen ? (
+              <View style={styles.cameraFrame}>
+                {composerCameraPermission?.granted
+                  ? <CameraView ref={composerCameraRef} style={styles.camera} />
+                  : <Pressable accessibilityRole="button" onPress={() => {
+                      if (composerCameraPermission?.canAskAgain === false) void openSystemSettingsSafe();
+                      else void requestComposerCameraPermission();
+                    }}><Text>{strings.selfKyc.permission}</Text></Pressable>}
+              </View>
+            ) : null}
+            <Pressable testID="mobile-self-kyc-capture"
+              {...mobileActionAccessibility(undefined, !composerCameraOpen || composerSubmitting || isCapturingComposerArtifact || composerArtifacts.length >= composerArtifactMaxItems, composerSubmitting || isCapturingComposerArtifact)}
+              disabled={!composerCameraOpen || composerSubmitting || isCapturingComposerArtifact || composerArtifacts.length >= composerArtifactMaxItems}
+              onPress={() => { void captureComposerArtifact(); }} style={styles.primaryButton}>
+              <Text>{isCapturingComposerArtifact ? strings.selfKyc.capturing : strings.selfKyc.capture}</Text>
+            </Pressable>
+            {composerArtifacts.map(artifact => (
+              <View key={artifact.artifactId} style={styles.detailRow}>
+                <Text>{artifact.evidenceTag || strings.selfKyc.document}</Text>
+                <Pressable accessibilityRole="button" disabled={composerSubmitting || isCapturingComposerArtifact}
+                  onPress={() => removeComposerArtifact(artifact.artifactId)}>
+                  <Text>{strings.selfKyc.remove}</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {composerSupportsPod || composerFinancialEvidence || composerIsIncident ? (
+          <View style={styles.noticeCard}>
+            <Text style={styles.noticeText}>{composerFinancialEvidence ? strings.financialTasks.optionalPhoto : "Proof and evidence"}</Text>
+            {composerSupportsPod ? <>
             {composerPodPolicyState.pending ? (
               <Text style={styles.noticeSubtext}>Loading proof policy...</Text>
             ) : composerPodPolicyState.unavailable ? (
@@ -5253,9 +5848,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 ) : null}
               </>
             )}
+            </> : null}
             <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
               <Pressable
                 testID="mobile-action-composer-open-proof-camera"
+                {...mobileActionAccessibility(undefined, composerSubmitting || composerArtifacts.length >= composerArtifactMaxItems, composerSubmitting || isCapturingComposerArtifact)}
                 onPress={() => setComposerCameraOpen((current) => !current)}
                 disabled={composerSubmitting || composerArtifacts.length >= composerArtifactMaxItems}
                 style={({ pressed }) => [
@@ -5266,11 +5863,12 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 ]}
               >
                 <Text style={styles.secondaryButtonText}>
-                  {composerCameraOpen ? "Close proof camera" : "Open proof camera"}
+                  {composerCameraOpen ? strings.selfKyc.closeCamera : strings.selfKyc.openCamera}
                 </Text>
               </Pressable>
               <Pressable
                 testID="mobile-action-composer-capture-proof"
+                {...mobileActionAccessibility(undefined, !composerCameraOpen || composerSubmitting || isCapturingComposerArtifact, composerSubmitting || isCapturingComposerArtifact)}
                 onPress={() => {
                   void captureComposerArtifact();
                 }}
@@ -5287,11 +5885,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 ]}
               >
                 <Text style={styles.primaryButtonText}>
-                  {isCapturingComposerArtifact ? "Capturing..." : "Capture photo"}
+                  {isCapturingComposerArtifact ? strings.selfKyc.capturing : strings.selfKyc.capture}
                 </Text>
               </Pressable>
             </View>
-            <View style={[styles.noticeCard, { marginTop: 10 }]}>
+            {composerSupportsPod ? <View style={[styles.noticeCard, { marginTop: 10 }]}>
               <Text style={styles.noticeText}>Recipient signature</Text>
               <Text style={styles.noticeSubtext}>
                 {composerSignatureArtifact
@@ -5365,7 +5963,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   </Text>
                 </Pressable>
               </View>
-            </View>
+            </View> : null}
             {composerCameraOpen ? (
               <View style={[styles.cameraFrame, { marginTop: 10 }]}>
                 {composerCameraPermission?.granted ? (
@@ -5379,6 +5977,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                         : "Grant camera access to capture proof photos."}
                     </Text>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityHint={composerCameraPermission?.canAskAgain === false ? strings.actionAccessibility.settingsCamera : strings.actionAccessibility.grantCamera}
                       onPress={() => {
                         if (composerCameraPermission?.canAskAgain === false) {
                           void openSystemSettingsSafe();
@@ -5428,7 +6028,29 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           </View>
         ) : null}
 
-        {composerError ? <Text style={styles.error}>{composerError}</Text> : null}
+        {composerEvidenceRows.some(row => row.phase !== "registered") ? (
+          <View testID="mobile-pending-evidence" style={styles.noticeCard}>
+            <Text>{strings.pendingEvidence.title}</Text>
+            {composerEvidenceRows.filter(row => row.phase !== "registered").map(row => (
+              <View key={row.id} style={styles.detailRow}>
+                <Text>{row.kind === "signature" ? strings.pendingEvidence.signature : strings.pendingEvidence.photo}</Text>
+                <Text accessibilityRole="alert">{row.phase === "uploading" ? strings.pendingEvidence.uploadUnconfirmed
+                  : row.errorCode ? strings.pendingEvidence.failed : strings.pendingEvidence.pending}</Text>
+                <Pressable accessibilityRole="button" testID={`evidence-retry-${row.id}`}
+                  disabled={composerEvidenceBusy || composerSubmitting || row.permanent || row.phase === "uploading"}
+                  onPress={() => { void recoverComposerEvidence(row.id); }} style={styles.secondaryButton}>
+                  <Text>{strings.pendingEvidence.retry}</Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" testID={`evidence-discard-${row.id}`}
+                  disabled={composerEvidenceBusy || composerSubmitting}
+                  onPress={() => { void recoverComposerEvidence(row.id, true); }} style={styles.secondaryButton}>
+                  <Text>{strings.pendingEvidence.discard}</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        {composerError ? <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{composerError}</Text> : null}
 
         <View style={styles.screenActionsRow}>
           <Pressable
@@ -5445,6 +6067,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           </Pressable>
           <Pressable
             testID="mobile-action-composer-queue"
+            accessibilityRole="button"
             onPress={() => {
               void submitComposer();
             }}
@@ -5467,7 +6090,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             ]}
           >
             <Text style={styles.primaryButtonText}>
-              {composerSubmitting ? "Queueing..." : "Queue action"}
+              {composerSubmitting ? strings.scan.queueing : "Queue action"}
             </Text>
           </Pressable>
         </View>
@@ -5476,12 +6099,14 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   );
 
   return (
-    <View style={isWebPreview ? styles.webViewport : styles.pageRoot}>
-      <View style={[styles.page, appDirectionStyle, isWebPreview && styles.pageWeb]}>
-      <View style={[styles.header, headerSafeAreaStyle]}>
+    <FieldOpsStylesContext.Provider value={styles}>
+      <View style={isWebPreview ? styles.webViewport : styles.pageRoot}>
+        <View style={[styles.page, appDirectionStyle, isWebPreview && styles.pageWeb]}>
+        <View style={[styles.header, headerSafeAreaStyle]}>
         <Pressable
           accessibilityRole="button"
-          testID="mobile-menu-toggle"
+          accessibilityLabel="Open modules menu"
+          testID={FIELDOPS_NATIVE_E2E_TEST_IDS.menuToggle}
           onPress={() => setNavOpen(true)}
           style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}
         >
@@ -5513,7 +6138,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             />
             <Text style={styles.headerPillText}>{connectivityStatusLabel}</Text>
           </View>
-          <Text style={styles.headerPill}>Outbox: {outboxCount}</Text>
+          <Text style={styles.headerPill}>{strings.shell.outboxLabel}: {outboxCount}</Text>
           <Pressable
             onLongPress={handleSignOut}
             delayLongPress={500}
@@ -5526,6 +6151,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       </View>
       {shouldShowConnectivityBanner ? (
         <View
+          accessible
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          accessibilityLabel={`${connectivityStatus === "offline" ? strings.shell.offlineMode : strings.shell.degradedTitle}. ${connectivitySummary}`}
           style={[
             styles.connectivityBanner,
             connectivityStatus === "offline"
@@ -5534,7 +6163,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           ]}
         >
           <Text style={styles.connectivityBannerTitle}>
-            {connectivityStatus === "offline" ? "Offline mode" : "Connectivity degraded"}
+            {connectivityStatus === "offline" ? strings.shell.offlineMode : strings.shell.degradedTitle}
           </Text>
           <Text style={styles.connectivityBannerText}>{connectivitySummary}</Text>
         </View>
@@ -5634,6 +6263,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               ) : null}
               <Pressable
                 onPress={() => syncMutation.mutate()}
+                accessibilityRole="button"
+                accessibilityLabel={syncMutation.isPending ? strings.shell.syncing : strings.shell.syncNow}
+                accessibilityState={{ disabled: syncMutation.isPending, busy: syncMutation.isPending }}
+                aria-busy={syncMutation.isPending}
                 disabled={syncMutation.isPending}
                 style={({ pressed }) => [
                   styles.syncNowButton,
@@ -5642,7 +6275,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 ]}
               >
                 <Text style={styles.syncButtonText}>
-                  {syncMutation.isPending ? "Syncing..." : "Sync now"}
+                  {syncMutation.isPending ? strings.shell.syncing : strings.shell.syncNow}
                 </Text>
               </Pressable>
             </View>
@@ -5657,6 +6290,71 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             </View>
           ) : null}
 
+              {availableActions.some(command => command.selection?.mode === "none" || Boolean(selectedResourceId)) ? (
+                <View style={styles.actionsBar}>
+                  {availableActions.filter(command => command.selection?.mode === "none" || Boolean(selectedResourceId)).map((command) => {
+                    const actionKey = resolveActionLockKey(command);
+                    const actionLocked = isActionLocked(actionKey);
+                    const commandCopy = resolveComposerCommandCopy(command, selectedStopSnapshot);
+                    const commandLabel = command.execution?.input_schema?.normalization === "self_kyc_v1" ? (strings.selfKyc[String(command.execution?.params?.category) as keyof typeof strings.selfKyc] ?? command.label) : commandCopy?.label ?? command.label;
+                    const needsInput = resolveCommandInputFields(command, selectedStopSnapshot).length > 0;
+
+                    return (
+                      <Pressable
+                        key={command.key}
+                        testID={`mobile-action-${command.key}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: drivingModeLocked || actionLocked, busy: actionLocked }}
+                        aria-busy={actionLocked}
+                        onPress={() => {
+                          if (drivingModeLocked) {
+                            Alert.alert(strings.alerts.drivingLockedTitle, strings.alerts.drivingLockedMessage);
+                            return;
+                          }
+                          handleActionPress(command);
+                        }}
+                        disabled={drivingModeLocked || actionLocked}
+                        style={({ pressed }) => [
+                          styles.actionButton,
+                          (drivingModeLocked || actionLocked) && styles.syncButtonDisabled,
+                          pressed && styles.navItemPressed,
+                        ]}
+                      >
+                        <Text style={styles.actionButtonText}>
+                          {needsInput ? `${commandLabel}...` : commandLabel}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+
+          {isRouteSurface && !selectedResourceId ? (
+            <>
+              <View style={styles.screenActionsRow}>
+                {displayedRoute.routeRunIds.map((routeRunId) => (
+                  <Pressable key={routeRunId} accessibilityRole="button"
+                    accessibilityLabel={routeRunId}
+                    accessibilityState={{ selected: displayedRoute.routeRunId === routeRunId, disabled: drivingModeLocked }}
+                    disabled={drivingModeLocked}
+                    onPress={() => {
+                      if (!drivingModeLocked) setDisplayedRoutePreference({ scope: displayedRouteScope, routeRunId });
+                    }}
+                    style={({ pressed }) => [styles.chip,
+                      displayedRoute.routeRunId === routeRunId && styles.navItemSelected,
+                      pressed && styles.navItemPressed]}>
+                    <Text style={styles.chipText}>{routeRunId}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {routeExecutionManifestQuery.data ? (
+                <View style={styles.noticeCard}>
+                  <RouteManifestReadback manifest={routeExecutionManifestQuery.data} />
+                </View>
+              ) : null}
+            </>
+          ) : null}
+
           {selectedResourceId ? (
             <View style={styles.detailWrapper}>
               <View style={styles.detailHeader}>
@@ -5667,7 +6365,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   }}
                   style={styles.detailBack}
                 >
-                  <Text style={styles.syncButtonText}>Back</Text>
+                  <Text style={styles.syncButtonText}>{strings.shell.back}</Text>
                 </Pressable>
                 <View style={styles.detailHeaderText}>
                   <Text style={styles.detailTitle}>
@@ -5694,20 +6392,47 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                     Source:{" "}
                     {detailQuery.data.source === "cache" ? "cached" : "network"}
                   </Text>
+                  {(isRouteSurface || isTasksSurface) && selectedRouteRunId && detailResource && selectedResourceId ? (
+                    <Pressable
+                      testID="mobile-route-location"
+                      style={styles.secondaryButton}
+                      accessibilityRole="button"
+                      disabled={drivingModeLocked || !me?.user?.id}
+                      accessibilityState={{ disabled: drivingModeLocked || !me?.user?.id }}
+                      onPress={() => {
+                        if (drivingModeLocked || !me?.user?.id || !selectedRouteRunId || !detailResource || !selectedResourceId) return;
+                        const item = findFirstEnabledNavItemByKey(navigation.sections, "location");
+                        if (!item?.id) return;
+                        setRouteLocationContext({
+                          resource: detailResource, resourceId: selectedResourceId,
+                          actorId: me.user.id, routeRunId: selectedRouteRunId,
+                          routeStopId: selectedRouteContext?.routeStopId ?? null,
+                        });
+                        setSelectedId(item.id);
+                      }}
+                    ><Text style={styles.secondaryButtonText}>{strings.scan.routeLocationCapture}</Text></Pressable>
+                  ) : null}
                   {isRouteSurface || isTasksSurface ? (
                     <RouteSurfaceDetailExtensions
+                      key={selectedRouteRunId ?? selectedResourceId}
+                      strings={strings}
                       detail={detailQuery.data.detail}
                       resourceId={selectedResourceId}
-                      surfaceLabel={isRouteSurface ? "Route stop" : "Task stop"}
+                      surfaceLabel={isRouteSurface ? strings.detail.routeStop : strings.detail.taskStop}
                       diagnosticsEnabled={diagnosticsEnabled}
                       interactionLocked={drivingModeLocked}
+                      addressActionStrings={strings.addressActions}
                       addressPolicy={addressPolicy}
                       communicationPolicy={detailCommunicationPolicy}
                       navigationPolicy={navigationPolicy}
                       platform={effectiveMobilePlatform}
                       routeExecutionManifest={routeExecutionManifestQuery.data}
+                      routeLoadStrings={strings.routeLoad}
+                      routeLoadQueueReady={outboxInitSuccess}
+                      onRouteLoadAction={handleRouteLoadAction}
                       isConfirmingRouteDeparture={confirmRouteDepartureMutation.isPending}
-                      onLogUiEvents={logUiEventsWithReadback}
+                      departureRequestState={routeDepartureRequestState(departureRequestQuery.data)}
+                      onEnqueueUiEvents={enqueueUiEvents}
                       onOpenScan={() => {
                         if (!detailQuery.data?.detail) return;
                         setScanContext(extractScanContext(detailQuery.data.detail, selectedResourceId));
@@ -5739,6 +6464,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   ) : null}
                   {isSettlementsSurface ? (
                     <SettlementSurfaceDetailExtensions
+                      strings={strings}
                       detail={detailQuery.data.detail}
                       fallbackId={selectedResourceId}
                       diagnosticsEnabled={diagnosticsEnabled}
@@ -5747,13 +6473,53 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                       onSubmitCount={handleSettlementCountSubmit}
                     />
                   ) : null}
+                  {completionReadbackQuery.isError || (completionReadbackQuery.data !== null && completionReadbackQuery.data !== undefined) ? (
+                    <View style={[styles.noticeCard, { marginTop: 12 }]}>
+                      <Text style={styles.noticeSubtext}>{completionReadbackVerified
+                        ? (completionReadbackQuery.data?.kind === "financial_amount_v1" ? strings.financialTasks.accepted : strings.actionFeedback.verifiedReadback) : strings.actionFeedback.pendingReadback}</Text>
+                      {completionReadbackVerified && completionReadbackQuery.data?.settlementStatus ?
+                        <Text style={styles.noticeSubtext}>{strings.financialTasks.settlementStatus}: {completionReadbackQuery.data.settlementStatus}</Text> : null}
+                      <Pressable accessibilityRole="button"
+                        onPress={() => { void completionReadbackQuery.refetch(); }}>
+                        <Text>{strings.actionFeedback.refreshReadback}</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  {incidentDisplayState === "error" && resource === "tasks" && selectedResourceId ? (
+                    <View style={[styles.noticeCard, { marginTop: 12 }]}>
+                      <Text style={styles.noticeSubtext}>{strings.actionFeedback.incidentPending}</Text>
+                      <Pressable accessibilityRole="button" onPress={() => { void incidentReadbackQuery.refetch(); }}>
+                        <Text>{strings.actionFeedback.refreshReadback}</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  {incidentReadbackQuery.data?.map(outcome => (
+                    <View key={outcome.record.queueId} style={[styles.noticeCard, { marginTop: 12 }]}>
+                      <Text style={styles.noticeSubtext}>{outcome.verified && incidentDisplayState === "verified"
+                        ? strings.actionFeedback.incidentVerified : strings.actionFeedback.incidentPending}</Text>
+                      {outcome.verified && incidentDisplayState === "verified" ? (
+                        <>
+                          <Text style={styles.noticeSubtext}>{strings.actionFeedback.incidentStatement(
+                            String(asRecord(outcome.proof?.incident).type),
+                            String(asRecord(outcome.proof?.incident).summary))}</Text>
+                          <Text style={styles.noticeSubtext}>{strings.actionFeedback.incidentDetails(
+                            String(asRecord(outcome.proof?.incident_task).id),
+                            String(asRecord(outcome.proof?.incident_task).status),
+                            String(asRecord(outcome.proof?.incident_task).task_event_id),
+                            (asRecord(outcome.proof?.incident).artifact_ids as unknown[]).length,
+                            String(outcome.proof?.route_stop_id),
+                            String(asRecord(outcome.proof?.source_task).status))}</Text>
+                        </>
+                      ) : null}
+                      <Pressable accessibilityRole="button" onPress={() => { void incidentReadbackQuery.refetch(); }}>
+                        <Text>{strings.actionFeedback.refreshReadback}</Text>
+                      </Pressable>
+                    </View>
+                  ))}
                   {lastActionReceipt && lastActionReceipt.resourceId === selectedResourceId ? (
                     <View style={[styles.noticeCard, { marginTop: 12 }]}>
                       <Text style={styles.noticeText}>Last action receipt</Text>
-                      <Text style={styles.noticeSubtext}>{lastActionReceipt.detail}</Text>
-                      <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-                        Queue ref: {lastActionReceipt.queueId}
-                      </Text>
+                      <Text style={styles.noticeSubtext}>{formatMobileActionReceipt(lastActionReceipt, strings)}</Text>
                       <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
                         Recorded: {lastActionReceipt.recordedAt}
                       </Text>
@@ -5761,46 +6527,46 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   ) : null}
                 </ScrollView>
               ) : (
-                <Text style={styles.subtitle}>No details available.</Text>
+                <Text style={styles.subtitle}>No detail payload.</Text>
               )}
 
-              {availableActions.length ? (
-                <View style={styles.actionsBar}>
-                  {availableActions.map((command) => {
-                    const actionKey = resolveActionLockKey(command);
-                    const actionLocked = isActionLocked(actionKey);
-                    const commandCopy = resolveComposerCommandCopy(command, selectedStopSnapshot);
-                    const needsInput = resolveCommandInputFields(command, selectedStopSnapshot).length > 0;
 
-                    return (
-                      <Pressable
-                        key={command.key}
-                        testID={`mobile-action-${command.key}`}
-                        onPress={() => {
-                          if (drivingModeLocked) {
-                            Alert.alert("Driving mode locked", "Stop moving before running actions.");
-                            return;
-                          }
-                          handleActionPress(command);
-                        }}
-                        disabled={drivingModeLocked || actionLocked}
-                        style={({ pressed }) => [
-                          styles.actionButton,
-                          (drivingModeLocked || actionLocked) && styles.syncButtonDisabled,
-                          pressed && styles.navItemPressed,
-                        ]}
-                      >
-                        <Text style={styles.actionButtonText}>
-                          {needsInput ? `${commandCopy?.label ?? command.label}...` : commandCopy?.label ?? command.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ) : null}
             </View>
           ) : (
             <View style={styles.listPane}>
+              {liveSourceSelection.state === "ready" ? (
+                <View style={styles.noticeCard}>
+                  <Text style={styles.noticeText}>Live operations · {effectiveActiveRole?.label}</Text>
+                  {liveRegistryQuery.isError || liveOperationsQuery.isError ? (
+                    <Text style={styles.error}>Live sources could not be loaded.</Text>
+                  ) : liveOperationsQuery.isLoading || !liveOperationsQuery.data ? (
+                    <Text style={styles.noticeSubtext}>Loading scoped live sources...</Text>
+                  ) : liveOperationsQuery.data.state === "empty" ? (
+                    <Text style={styles.noticeSubtext}>No visible live records in this scope.</Text>
+                  ) : liveOperationsQuery.data.state === "absent" ? (
+                    <Text style={styles.noticeSubtext}>Live sources are not available for this scope.</Text>
+                  ) : (
+                    <View>
+                      <Text style={styles.noticeSubtext}>Work: {liveOperationsQuery.data.work.state} · returned visible items: {liveOperationsQuery.data.work.visibleCount ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Pickup: {liveOperationsQuery.data.pickup.state}</Text>
+                      <Text style={styles.noticeSubtext}>Pickup identity: {liveOperationsQuery.data.pickup.id ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Window: {liveOperationsQuery.data.pickup.windowStartAt ?? "Unavailable"} – {liveOperationsQuery.data.pickup.windowEndAt ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Expected / picked: {liveOperationsQuery.data.pickup.expectedCount ?? "Unavailable"} / {liveOperationsQuery.data.pickup.pickedCount ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Pickup seal: {liveOperationsQuery.data.pickup.seal ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Pickup failures: {liveOperationsQuery.data.pickup.failureCount ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Trip: {liveOperationsQuery.data.trip.id ?? "Unavailable"} · {liveOperationsQuery.data.trip.stage ?? liveOperationsQuery.data.trip.state}</Text>
+                      <Text style={styles.noticeSubtext}>Endpoints: {liveOperationsQuery.data.trip.origin ?? "Unavailable"} → {liveOperationsQuery.data.trip.destination ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Timing / ETA: {liveOperationsQuery.data.trip.plannedStartAt ?? liveOperationsQuery.data.trip.startedAt ?? "Unavailable"} / {liveOperationsQuery.data.trip.eta ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Driver / vehicle: {liveOperationsQuery.data.trip.driverId ?? "Unavailable"} / {liveOperationsQuery.data.trip.vehicleId ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Count / seal: {liveOperationsQuery.data.trip.count ?? "Unavailable"} / {liveOperationsQuery.data.trip.seal ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Manifest / context: {liveOperationsQuery.data.trip.manifest == null ? "Unavailable" : "Available"} / {liveOperationsQuery.data.trip.context == null ? "Unavailable" : "Available"}</Text>
+                      <Text style={styles.noticeSubtext}>Sortation bays / recent / inducted: {liveOperationsQuery.data.sortation.bays ?? "Unavailable"} / {liveOperationsQuery.data.sortation.recent ?? "Unavailable"} / {liveOperationsQuery.data.sortation.inducted ?? "Unavailable"}</Text>
+                      <Text style={styles.noticeSubtext}>Throughput / minutes: {liveOperationsQuery.data.sortation.throughput ?? "Unavailable"} / {liveOperationsQuery.data.sortation.minutes ?? "Unavailable"}</Text>
+                      {liveOperationsQuery.data.state === "error" ? <Text style={styles.error}>One or more scoped sources failed.</Text> : null}
+                    </View>
+                  )}
+                </View>
+              ) : null}
               {isTasksSurface ? (
                 <View style={styles.noticeCard}>
                   <Text style={styles.noticeText}>Visibility</Text>
@@ -5847,7 +6613,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                               pressed && styles.navItemPressed,
                             ]}
                           >
-                            <Text style={styles.chipText}>{formatRouteViewLabel(mode)}</Text>
+                            <Text style={styles.chipText}>{formatRouteViewLabel(mode, strings)}</Text>
                           </Pressable>
                         );
                       })}
@@ -5856,8 +6622,28 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 </View>
               ) : null}
 
-              {listQuery.isLoading ? (
-                <Text style={styles.subtitle}>Loading {resource}...</Text>
+              {isTasksSurface ? (
+                <MobileTaskWorkspace
+                  key={stableStringify({ actor: me?.user?.id, scope: me?.access_scope, view: resolvedViewId, filters: listFilters, sort: listSort })}
+                  client={uiClient} actorId={me?.user?.id ?? ""} scope={me?.access_scope ?? null}
+                  baseFilters={listFilters} baseSort={listSort} theme={themeTokens} strings={strings}
+                  interactionLocked={drivingModeLocked} cache={cacheInitSuccess ? cacheStore : null}
+                  renderPage={({ list, source, refreshing, onRefresh }) => (
+                    <ResourceListView strings={strings} list={list} source={source} displayMode="list"
+                      surfaceKind="tasks" refreshing={refreshing} onRefresh={onRefresh}
+                      interactionLocked={drivingModeLocked}
+                      onSelectItem={(item) => {
+                        if (drivingModeLocked) return;
+                        const id = pickResourceId(item, list.keys);
+                        if (!id) return;
+                        setSelectedResourceKey("tasks");
+                        setSelectedResourceId(id);
+                        setSelectedResourceTitle(formatOperationalTitle(extractTaskCardSnapshot(item)));
+                      }} />
+                  )}
+                />
+              ) : listQuery.isLoading ? (
+                <Text style={styles.subtitle}>{resource === "tasks" ? strings.tasks.loading : `Loading ${resource}...`}</Text>
               ) : listQuery.isError ? (
                 <View>
                   <Text style={styles.error}>Failed to load {resource}.</Text>
@@ -5872,7 +6658,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                     </View>
                   ) : null}
                   <ResourceListView
-                    list={listQuery.data.list}
+                      strings={strings}
+                    list={isRouteSurface && displayedRouteList ? displayedRouteList : listQuery.data.list}
                     source={listQuery.data.source}
                     displayMode={resourceDisplayMode}
                     surfaceKind={
@@ -5888,7 +6675,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                     onRefresh={() => listQuery.refetch()}
                     onSelectItem={(item) => {
                       if (drivingModeLocked) {
-                        Alert.alert("Driving mode locked", "Stop moving to open item details.");
+                        Alert.alert(strings.alerts.drivingLockedTitle, "Stop moving to open item details.");
                         return;
                       }
                       const id = pickResourceId(item, listQuery.data?.list.keys);
@@ -5916,6 +6703,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         <View style={[styles.content, contentSafeAreaStyle]}>
           {activeScreen === "outbox" ? (
             <OutboxScreen
+              syncAccessibility={mobileSyncAccessibility(strings.actionAccessibility, syncMutation.isPending, effectiveOnline, mobileSyncPolicy.enabled, outboxCount)}
+                      strings={strings}
               outboxStore={outboxStore}
               outboxCount={outboxCount}
               syncing={syncMutation.isPending}
@@ -5924,7 +6713,16 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             />
           ) : activeScreen === "scan" ? (
             <ScanScreen
+              syncAccessibility={mobileSyncAccessibility(strings.actionAccessibility, syncMutation.isPending, effectiveOnline, mobileSyncPolicy.enabled, outboxCount)}
+                      strings={strings}
               client={client}
+              actorId={sessionUserId}
+              returnScope={completionReadbackScope}
+              cacheStore={cacheStore}
+              cacheReady={cacheInitSuccess}
+              returnCommands={(commandRegistryQuery.data?.commands ?? []).filter(command =>
+                command.schema_category === "resource:return_to_branch_scan")}
+              canCompleteReturns={capabilitiesSet.has("tasks.complete")}
               outbox={outbox}
               deviceId={deviceId}
               policyContext={policyContext}
@@ -5946,6 +6744,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             />
           ) : activeScreen === "location" ? (
             <LocationScreen
+              routeLocationContext={routeLocationContext}
+              verifyLocationScope={verifyLocationScope}
+              onClearLocationScope={() => setRouteLocationContext(null)}
+              syncAccessibility={mobileSyncAccessibility(strings.actionAccessibility, syncMutation.isPending, effectiveOnline, mobileSyncPolicy.enabled, outboxCount)}
+                      strings={strings}
               client={client}
               outbox={outbox}
               deviceId={deviceId}
@@ -5961,6 +6764,13 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             />
           ) : activeScreen === "more" ? (
             <MoreScreen
+              client={client}
+              actorId={sessionUserId}
+              walletScope={completionReadbackScope}
+              cacheStore={cacheStore}
+              cacheReady={cacheInitSuccess}
+              walletOnline={effectiveOnline}
+              walletEnabled={capabilitiesSet.has("finance.withdrawal.request")}
               connectivityStatus={connectivityStatus}
               connectivitySummary={connectivitySummary}
               outboxCount={outboxCount}
@@ -5992,6 +6802,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               selectedLocaleMode={selectedLocaleMode}
               selectedDirectionMode={selectedDirectionMode}
               selectedThemeMode={selectedThemeMode}
+              displayPolicy={displayPolicy}
+              strings={strings}
               activeDriverShift={activeDriverShift}
               canStartShift={Boolean(deviceId && effectiveOnline)}
               isMutatingDriverShift={isMutatingDriverShift}
@@ -6055,6 +6867,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
             />
           ) : (
             <DiagnosticsScreen
+                      strings={strings}
               me={me}
               connectivityStatus={connectivityStatus}
               deviceId={deviceId}
@@ -6064,17 +6877,36 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
               toggleValue={diagnosticsToggleQuery.data ?? null}
               defaultOn={diagnosticsDefaultOn}
               policyRow={diagnosticsPolicyQuery.data}
+              cacheStore={cacheStore}
               outboxStore={outboxStore}
+              storage={storage}
               onToggle={async (next) => {
                 await cacheStore.set(KV_KEYS.diagnosticsEnabled, next);
                 queryClient.invalidateQueries({ queryKey: ["kv", "get", KV_KEYS.diagnosticsEnabled] });
               }}
               onClearLocal={async () => {
+                financialAdmission.current += 1;
+                const clearEpoch = ++evidenceClearEpoch.current;
+                composerCaptureEpoch.current += 1;
+                await pendingEvidence.invalidate();
                 try {
-                  const result = await client.auth.signOut({ scope: "local" });
-                  if (result.error) throw result.error;
-                } catch (error) {
-                  logDebugFailure("failed to sign out from diagnostics clear", error);
+                  await clearCompletionReadbacks(() => clearEvidenceLocalState(pendingEvidence, () => outboxStore.clear(), () => cacheStore.clear()), async () => null);
+                  try {
+                    const result = await client.auth.signOut({ scope: "local" });
+                    if (result.error) throw result.error;
+                  } catch (error) {
+                    logDebugFailure("failed to sign out from diagnostics clear", error);
+                  }
+                } finally {
+                  await replaceEvidenceManagerAfterClear(async () => {
+                    const remaining = await client.auth.getSession();
+                    if (remaining.error || !remaining.data.session) return null;
+                    const verified = await client.auth.getUser();
+                    if (verified.error) throw verified.error;
+                    return verified.data.user?.id ?? null;
+                  }, sessionUserId, () => clearEpoch === evidenceClearEpoch.current &&
+                    evidenceLifecycle.current?.manager === pendingEvidence,
+                  () => setEvidenceManagerRevision(current => current + 1));
                 }
                 setMobileCrashReportingUser(null);
                 try {
@@ -6082,8 +6914,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 } catch (error) {
                   logDebugFailure("failed to clear telemetry during diagnostics clear", error);
                 }
-                await outboxStore.clear();
-                await cacheStore.clear();
                 await clearStoredDeviceState(storage);
                 queryClient.clear();
               }}
@@ -6128,7 +6958,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
 	                    testID={`mobile-module-${resolveNavigationKey(item)}`}
 	                    onPress={() => {
 	                      if (blockedByDriving) {
-	                        showMobileNotice("Driving mode locked", "This module is blocked while moving.");
+	                        showMobileNotice(strings.alerts.drivingLockedTitle, "This module is blocked while moving.");
 	                        return;
 	                      }
 	                      if (unsupportedRoute) {
@@ -6169,25 +6999,31 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         </ScrollView>
       )}
 
-      <StatusBar style="auto" />
-    </View>
-    </View>
+        <StatusBar style="auto" />
+        </View>
+      </View>
+    </FieldOpsStylesContext.Provider>
   );
 }
 
 function OutboxScreen({
+  syncAccessibility,
+  strings,
   outboxStore,
   outboxCount,
   syncing,
   diagnosticsEnabled,
   onSync,
 }: {
+  strings: FieldOpsStrings;
+  syncAccessibility: ReturnType<typeof mobileSyncAccessibility>;
   outboxStore: ReturnType<typeof createSqliteOutboxStore>;
   outboxCount: number;
   syncing: boolean;
   diagnosticsEnabled: boolean;
   onSync: () => void;
 }) {
+  const styles = useFieldOpsStyles();
   const queryClient = useQueryClient();
   const clearOutboxRef = React.useRef(false);
   const [isClearingOutbox, setIsClearingOutbox] = React.useState(false);
@@ -6259,22 +7095,23 @@ function OutboxScreen({
     <View style={styles.screen}>
       <View style={styles.screenHeader}>
         <View style={styles.screenHeaderText}>
-          <Text style={styles.resourceTitle}>Outbox</Text>
+          <Text style={styles.resourceTitle}>{strings.outbox.title}</Text>
           <Text style={styles.resourceSubtitle}>
-            Pending: {outboxCount} {syncing ? "- syncing" : ""}
+            {strings.outbox.pending(outboxCount)} {syncing ? `- ${strings.shell.syncing}` : ""}
           </Text>
         </View>
         <View style={styles.screenHeaderActions}>
           <Pressable
             onPress={onSync}
-            disabled={syncing}
+            {...syncAccessibility}
+            disabled={syncAccessibility.accessibilityState.disabled}
             style={({ pressed }) => [
               styles.syncNowButton,
-              syncing && styles.syncButtonDisabled,
+              syncAccessibility.accessibilityState.disabled && styles.syncButtonDisabled,
               pressed && styles.syncButtonPressed,
             ]}
           >
-            <Text style={styles.syncButtonText}>{syncing ? "Syncing..." : "Sync now"}</Text>
+            <Text style={styles.syncButtonText}>{syncing ? strings.shell.syncing : strings.shell.syncNow}</Text>
           </Pressable>
         </View>
       </View>
@@ -6282,6 +7119,7 @@ function OutboxScreen({
       <View style={styles.screenActionsRow}>
         <Pressable
           onPress={clearDead}
+          {...mobileActionAccessibility(strings.actionAccessibility.busy, syncing || isClearingOutbox, syncing || isClearingOutbox)}
           disabled={syncing || isClearingOutbox}
           style={({ pressed }) => [
             styles.secondaryButton,
@@ -6289,11 +7127,12 @@ function OutboxScreen({
             pressed && styles.navItemPressed,
           ]}
         >
-          <Text style={styles.secondaryButtonText}>Clear dead</Text>
+          <Text style={styles.secondaryButtonText}>{strings.outbox.clearDead}</Text>
         </Pressable>
         {diagnosticsEnabled ? (
           <Pressable
             onPress={clearAll}
+            {...mobileActionAccessibility(strings.actionAccessibility.busy, syncing || isClearingOutbox, syncing || isClearingOutbox)}
             disabled={syncing || isClearingOutbox}
             style={({ pressed }) => [
               styles.secondaryButton,
@@ -6318,29 +7157,38 @@ function OutboxScreen({
           data={entriesQuery.data}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>{item.rpc}</Text>
-              <Text style={styles.cardSubtitle}>
-                {item.status} - attempts {item.attempt_count ?? 0}
-              </Text>
-              {diagnosticsEnabled && item.last_error ? (
-                <Text style={styles.mono} numberOfLines={6}>
-                  {item.last_error}
-                </Text>
-              ) : null}
-            </View>
-          )}
+          renderItem={({ item }) => {
+            const feedback = describeMobileOutboxEntry(item, strings);
+            return (
+              <View style={styles.card} accessible accessibilityLabel={feedback.accessibilityLabel}>
+                <Text style={styles.cardTitle}>{feedback.title}</Text>
+                <Text style={styles.cardSubtitle}>{feedback.targetLabel} — {feedback.status}</Text>
+                <Text style={styles.noticeSubtext}>{feedback.detail}</Text>
+                {feedback.lines.map((line) => <Text key={line} style={styles.noticeSubtext}>{line}</Text>)}
+                {diagnosticsEnabled && item.last_error ? (
+                  <Text style={styles.mono} numberOfLines={6}>{redactOutboxErrorText(item.last_error)}</Text>
+                ) : null}
+              </View>
+            );
+          }}
         />
       ) : (
-        <Text style={styles.subtitle}>Outbox is empty.</Text>
+        <Text style={styles.subtitle}>{strings.outbox.empty}</Text>
       )}
     </View>
   );
 }
 
 function ScanScreen({
+  syncAccessibility,
+  strings,
   client,
+  actorId,
+  returnScope,
+  cacheStore,
+  cacheReady,
+  returnCommands,
+  canCompleteReturns,
   outbox,
   deviceId,
   policyContext,
@@ -6357,7 +7205,15 @@ function ScanScreen({
   onClearContext,
   onSetScanInputMode,
 }: {
+  strings: FieldOpsStrings;
+  syncAccessibility: ReturnType<typeof mobileSyncAccessibility>;
   client: ReturnType<typeof createMobileClient>;
+  actorId: string;
+  returnScope: string;
+  cacheStore: KeyValueStore;
+  cacheReady: boolean;
+  returnCommands: UiCommandDefinition[];
+  canCompleteReturns: boolean;
   outbox: ReturnType<typeof createOutbox>;
   deviceId: string | null;
   policyContext: Record<string, unknown>;
@@ -6379,9 +7235,11 @@ function ScanScreen({
   onClearContext: () => void;
   onSetScanInputMode: (next: MobileScanInputMode) => Promise<void>;
 }) {
+  const styles = useFieldOpsStyles();
   const queryClient = useQueryClient();
   const [scanType, setScanType] = React.useState("");
   const [barcode, setBarcode] = React.useState("");
+  const barcodeInputRef = React.useRef<TextInput>(null);
   const [cameraOpen, setCameraOpen] = React.useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const lastScanRef = React.useRef<{ data: string; at: number } | null>(null);
@@ -6393,8 +7251,55 @@ function ScanScreen({
     scanType: string;
     contextLabel: string | null;
     queuedAt: string;
+    actorId: string;
+    returnScope: string;
   } | null>(null);
 
+  const [chosenReturnScan, setChosenReturnScan] = React.useState<{ actor: string; scope: string; queueId: string } | null>(null);
+  const returnScanListQuery = useQuery({
+    queryKey: ["return-scan-list", actorId, returnScope],
+    enabled: Boolean(cacheReady && actorId && returnScope),
+    queryFn: () => listReturnScans(cacheStore, { actor: actorId, scope: returnScope }),
+    staleTime: Infinity,
+  });
+  const savedReturnScans = returnScanListQuery.data ?? [];
+  const chosenQueueId = chosenReturnScan?.actor === actorId && chosenReturnScan.scope === returnScope
+    ? chosenReturnScan.queueId : null;
+  const selectedReturnQueueId = chosenQueueId ?? savedReturnScans[savedReturnScans.length - 1]?.queueId ?? null;
+  const returnScanQuery = useQuery({
+    queryKey: ["accepted-return-scan", actorId, returnScope, selectedReturnQueueId],
+    enabled: Boolean(online && cacheReady && actorId && returnScope && selectedReturnQueueId),
+    queryFn: async ({ signal }) => {
+      const verifiedScope = await resolveVerifiedCompletionScope(client);
+      if (!verifiedScope || verifiedScope.actor !== actorId || verifiedScope.scope !== returnScope) return null;
+      const stored = await returnScanForQueue(cacheStore, verifiedScope, selectedReturnQueueId!);
+      if (!stored) return null;
+      if (!stored.scanEventId) {
+        const lookup = await client.schema("api").rpc("ui_get_return_to_branch_scan_by_idempotency_v1",
+          { p_idempotency_key: stored.queueId }).abortSignal(signal);
+        if (lookup.error) throw lookup.error;
+        const recovered = recoveredReturnScan(lookup.data, stored);
+        if (!recovered) return { pending: stored, accepted: null, verified: false };
+        await rememberAcceptedReturnScan(cacheStore, verifiedScope, recovered);
+        queryClient.invalidateQueries({ queryKey: ["return-scan-list", actorId, returnScope] });
+        const current = await returnScanForQueue(cacheStore, verifiedScope, stored.queueId);
+        if (current?.scanEventId !== recovered.scanEventId) return null;
+        return { pending: null, accepted: recovered, verified: verifiedReturnScanReceipt(
+          (lookup.data as { receipt?: unknown }).receipt, recovered) };
+      }
+      const accepted = { actor: stored.actor, queueId: stored.queueId, scanEventId: stored.scanEventId,
+        barcode: stored.barcode };
+      const response = await client.schema("api").rpc("ui_get_return_to_branch_scan_readback_v1",
+        { p_scan_event_id: accepted.scanEventId }).abortSignal(signal);
+      if (response.error) throw response.error;
+      return { pending: null, accepted, verified: verifiedReturnScanReceipt(response.data, accepted) };
+    },
+    staleTime: 0,
+    retry: false,
+  });
+  const selectedReturn = returnScanQuery.data?.verified ? returnScanQuery.data.accepted : null;
+  const displayedQueuedScan = lastQueuedScan?.actorId === actorId && lastQueuedScan.returnScope === returnScope
+    ? lastQueuedScan : null;
   const scanPolicyQuery = useQuery({
     queryKey: ["policy", "scan_policy", stableStringify(policyContext)],
     queryFn: async () => resolvePolicyRow(client, "resolve_scan_policy", policyContext),
@@ -6403,9 +7308,7 @@ function ScanScreen({
 
   const scanPolicyRow = scanPolicyQuery.data ?? null;
   const scanPolicyLoaded = scanPolicyQuery.isSuccess;
-  const scanPolicyUnavailable = scanPolicyQuery.isError || (scanPolicyLoaded && scanPolicyRow == null);
-  const scanPolicyValue = scanPolicyRow ? (scanPolicyRow as any)?.value ?? null : null;
-  const scanEnabled = !scanPolicyUnavailable && scanPolicyValue?.enabled === true;
+  const scanPolicyValue = asRecord(asRecord(scanPolicyRow).value);
   const acceptedScanTypes = Array.isArray(scanPolicyValue?.accepted_scan_types)
     ? (scanPolicyValue.accepted_scan_types as unknown[]).map((value) => String(value))
     : [];
@@ -6417,6 +7320,8 @@ function ScanScreen({
       }),
     [effectivePlatform, scanPolicyValue]
   );
+  const scanPolicyUnavailable = scanPolicyQuery.isError || (scanPolicyLoaded && (scanPolicyRow == null || !allowedScanInputModes.length));
+  const scanEnabled = !scanPolicyUnavailable && scanPolicyValue?.enabled === true && allowedScanInputModes.length > 0;
   const effectiveScanInputMode = React.useMemo(
     () =>
       resolveEffectiveScanInputMode({
@@ -6453,7 +7358,7 @@ function ScanScreen({
     [onSetScanInputMode]
   );
   React.useEffect(() => {
-    if (storedScanInputMode === effectiveScanInputMode) return;
+    if (!effectiveScanInputMode || storedScanInputMode === effectiveScanInputMode) return;
     void setScanInputMode(effectiveScanInputMode);
   }, [effectiveScanInputMode, setScanInputMode, storedScanInputMode]);
   React.useEffect(() => {
@@ -6465,6 +7370,17 @@ function ScanScreen({
 
   const isQueueingScanRef = React.useRef(false);
   const [isQueueingScan, setIsQueueingScan] = React.useState(false);
+  const scanReadOnly = !scanPolicyLoaded || !scanEnabled || drivingModeLocked;
+  React.useEffect(() => {
+    if (effectiveScanInputMode === "scanner" && !scanReadOnly) barcodeInputRef.current?.focus();
+  }, [effectiveScanInputMode, scanReadOnly]);
+  const scanInputHint = scanPolicyQuery.isLoading
+    ? strings.actionAccessibility.policyLoading
+    : scanPolicyUnavailable
+      ? strings.actionAccessibility.policyUnavailable
+      : !scanEnabled
+        ? strings.actionAccessibility.policyDisabled
+        : drivingModeLocked ? strings.scan.drivingLocked : strings.actionAccessibility.scanReady;
   const canQueue = Boolean(
     deviceId && barcode.trim() && scanType.trim() && scanEnabled && !drivingModeLocked && !isQueueingScan
   );
@@ -6482,7 +7398,7 @@ function ScanScreen({
         return;
       }
       if (drivingModeLocked) {
-        Alert.alert("Driving mode locked", "Stop moving before recording scans.");
+        Alert.alert(strings.alerts.drivingLockedTitle, "Stop moving before recording scans.");
         return;
       }
       if (scanPolicyQuery.isLoading) {
@@ -6519,6 +7435,21 @@ function ScanScreen({
       }
 
       const id = createOutboxId();
+      const returnIntake = scanType.trim().toLowerCase() === "return_to_branch_intake";
+      if (returnIntake && (!cacheReady || !actorId || !returnScope)) {
+        Alert.alert(strings.scan.returnUnavailable, strings.scan.returnVerifyOnline);
+        return;
+      }
+      const pending = returnIntake ? { actor: actorId, scope: returnScope, queueId: id, barcode: barcode.trim() } : null;
+      if (pending) {
+        try {
+          await rememberPendingReturnScan(cacheStore, pending);
+        } catch (error) {
+          Alert.alert(strings.scan.returnUnavailable, strings.scan.returnPreserveFailed);
+          return;
+        }
+      }
+      try {
       await outbox.enqueue({
         id,
         rpc: "record_scan_event_v1",
@@ -6558,6 +7489,15 @@ function ScanScreen({
           },
         },
       });
+      } catch (error) {
+        if (pending) await forgetUnqueuedReturnScan(cacheStore, pending);
+        throw error;
+      }
+      if (pending) {
+        setChosenReturnScan({ actor: pending.actor, scope: pending.scope, queueId: pending.queueId });
+        queryClient.invalidateQueries({ queryKey: ["return-scan-list"] });
+        queryClient.invalidateQueries({ queryKey: ["accepted-return-scan"] });
+      }
 
       queryClient.invalidateQueries({ queryKey: ["outbox", "count"] });
       queryClient.invalidateQueries({ queryKey: ["outbox", "entries"] });
@@ -6569,6 +7509,8 @@ function ScanScreen({
         scanType: scanType.trim().toLowerCase(),
         contextLabel: scanContext?.label ?? null,
         queuedAt: new Date().toISOString(),
+        actorId,
+        returnScope,
       });
       if (online && !syncing) onSync();
     } finally {
@@ -6595,27 +7537,28 @@ function ScanScreen({
     <ScrollView contentContainerStyle={styles.screen}>
       <View style={styles.screenHeader}>
         <View style={styles.screenHeaderText}>
-          <Text style={styles.resourceTitle}>Scan</Text>
+          <Text style={styles.resourceTitle}>{strings.scan.title}</Text>
           <Text style={styles.resourceSubtitle}>
             {scanPolicyQuery.isLoading
               ? "Loading policy..."
               : scanPolicyUnavailable
                 ? "Policy unavailable"
                 : scanEnabled
-                  ? "Ready"
+                  ? strings.scan.ready
                   : "Disabled by policy"}
           </Text>
         </View>
         <Pressable
           onPress={onSync}
-          disabled={syncing}
+          {...syncAccessibility}
+          disabled={syncAccessibility.accessibilityState.disabled}
           style={({ pressed }) => [
             styles.syncNowButton,
-            syncing && styles.syncButtonDisabled,
+            syncAccessibility.accessibilityState.disabled && styles.syncButtonDisabled,
             pressed && styles.syncButtonPressed,
           ]}
         >
-          <Text style={styles.syncButtonText}>{syncing ? "Syncing..." : "Sync now"}</Text>
+          <Text style={styles.syncButtonText}>{syncing ? strings.shell.syncing : strings.shell.syncNow}</Text>
         </Pressable>
       </View>
 
@@ -6651,7 +7594,7 @@ function ScanScreen({
           <Text style={styles.noticeSubtext}>{scanContext.label}</Text>
           {scanContext.reference ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Reference: {scanContext.reference}
+              {strings.detail.reference(scanContext.reference)}
             </Text>
           ) : null}
           {scanContext.routeRunId ? (
@@ -6660,7 +7603,7 @@ function ScanScreen({
             </Text>
           ) : null}
           <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-            {scanContext.routeStopId ? "Route stop" : "Task"} binding: {scanContext.routeStopId ?? scanContext.taskId ?? "task only"}
+            {scanContext.routeStopId ? strings.detail.routeStop : "Task"} binding: {scanContext.routeStopId ?? scanContext.taskId ?? "task only"}
           </Text>
           <View style={[styles.screenActionsRow, { marginTop: 8 }]}>
             <Pressable
@@ -6682,15 +7625,16 @@ function ScanScreen({
             <Pressable
               key={mode}
               onPress={() => void setScanInputMode(mode)}
-              disabled={drivingModeLocked || isUpdatingScanMode}
+              {...mobileActionAccessibility(scanInputHint, scanReadOnly || isUpdatingScanMode, isUpdatingScanMode)}
+              disabled={scanReadOnly || isUpdatingScanMode}
               style={({ pressed }) => [
                 styles.chip,
                 effectiveScanInputMode === mode && styles.navItemSelected,
-                (drivingModeLocked || isUpdatingScanMode) && styles.syncButtonDisabled,
+                (scanReadOnly || isUpdatingScanMode) && styles.syncButtonDisabled,
                 pressed && styles.navItemPressed,
               ]}
             >
-              <Text style={styles.chipText}>{mode === "camera" ? "Camera" : "Scanner"}</Text>
+              <Text style={styles.chipText}>{mode === "camera" ? strings.scan.modeCamera : strings.scan.modeScanner}</Text>
             </Pressable>
           ))}
         </View>
@@ -6699,7 +7643,7 @@ function ScanScreen({
         </Text>
         {drivingModeLocked ? (
           <Text style={[styles.noticeSubtext, { marginTop: 6 }]}>
-            Driving lock is active. Stop moving to scan.
+            {strings.scan.drivingLocked}
           </Text>
         ) : null}
       </View>
@@ -6707,7 +7651,10 @@ function ScanScreen({
       <TextInput
         style={styles.input}
         value={scanType}
-        placeholder="Scan type"
+        accessibilityLabel={strings.actionAccessibility.scanType}
+        accessibilityHint={scanInputHint}
+        editable={!scanReadOnly}
+        placeholder={strings.actionAccessibility.scanType}
         autoCapitalize="none"
         onChangeText={setScanType}
       />
@@ -6718,6 +7665,8 @@ function ScanScreen({
             <Pressable
               key={candidate}
               onPress={() => setScanType(candidate)}
+              {...mobileActionAccessibility(scanInputHint, scanReadOnly)}
+              disabled={scanReadOnly}
               style={({ pressed }) => [
                 styles.chip,
                 candidate === scanType && styles.methodChipActive,
@@ -6731,6 +7680,7 @@ function ScanScreen({
       ) : null}
 
       <TextInput
+        ref={barcodeInputRef}
         style={styles.input}
         value={barcode}
         placeholder={
@@ -6738,18 +7688,24 @@ function ScanScreen({
             ? "Stop to scan (Driving mode)"
             : effectiveScanInputMode === "scanner"
               ? "Scan barcode (scanner mode)"
-              : "Barcode"
+              : strings.scan.barcodePlaceholder
         }
         autoCapitalize="none"
         onChangeText={setBarcode}
-        editable={!drivingModeLocked}
+        submitBehavior={effectiveScanInputMode === "scanner" ? "submit" : "blurAndSubmit"}
+        onSubmitEditing={() => {
+          if (effectiveScanInputMode === "scanner" && canQueue) void queueScan();
+        }}
+        accessibilityLabel={strings.scan.barcodePlaceholder}
+        accessibilityHint={scanInputHint}
+        editable={!scanReadOnly}
       />
 
       <View style={styles.screenActionsRow}>
         <Pressable
-          accessibilityRole="button"
           testID="mobile-scan-toggle-camera"
           onPress={() => setCameraOpen((open) => !open)}
+          {...mobileActionAccessibility(effectiveScanInputMode !== "camera" ? strings.actionAccessibility.modeUnavailable : scanInputHint, !canOpenCamera)}
           disabled={!canOpenCamera}
           style={({ pressed }) => [
             styles.secondaryButton,
@@ -6759,18 +7715,18 @@ function ScanScreen({
         >
           <Text style={styles.secondaryButtonText}>
             {effectiveScanInputMode !== "camera"
-              ? "Camera unavailable"
+              ? strings.scan.cameraUnavailable
               : cameraOpen
-                ? "Close camera"
-                : "Open camera"}
+                ? strings.scan.closeCamera
+                : strings.scan.openCamera}
           </Text>
         </Pressable>
         <Pressable
-          accessibilityRole="button"
           testID="mobile-scan-queue"
           onPress={() => {
             void queueScan();
           }}
+          {...mobileActionAccessibility(isQueueingScan ? strings.actionAccessibility.busy : !deviceId ? strings.actionAccessibility.deviceMissing : scanReadOnly ? scanInputHint : strings.actionAccessibility.requiredInput, !canQueue, isQueueingScan)}
           disabled={!canQueue}
           style={({ pressed }) => [
             styles.primaryButton,
@@ -6779,12 +7735,12 @@ function ScanScreen({
           ]}
         >
           <Text style={styles.primaryButtonText}>
-            {isQueueingScan ? "Saving..." : "Save scan"}
+            {isQueueingScan ? strings.scan.queueing : strings.scan.queue}
           </Text>
         </Pressable>
       </View>
 
-      {cameraOpen && effectiveScanInputMode === "camera" ? (
+      {cameraOpen && effectiveScanInputMode === "camera" && !scanReadOnly ? (
         <View style={styles.cameraFrame}>
           {permission?.granted ? (
             <CameraView
@@ -6794,13 +7750,15 @@ function ScanScreen({
             />
           ) : (
             <View style={styles.noticeCard}>
-              <Text style={styles.noticeText}>Camera permission required.</Text>
+              <Text style={styles.noticeText}>{strings.scan.permissionRequired}</Text>
               <Text style={styles.noticeSubtext}>
                 {permission?.canAskAgain === false
-                  ? "Camera permission was denied. Open settings to grant camera access."
-                  : "Grant camera access to scan barcodes."}
+                  ? strings.scan.permissionDenied
+                  : strings.scan.permissionPrompt}
               </Text>
               <Pressable
+                accessibilityRole="button"
+                accessibilityHint={permission?.canAskAgain === false ? strings.actionAccessibility.settingsCamera : strings.actionAccessibility.grantCamera}
                 onPress={() => {
                   if (permission?.canAskAgain === false) {
                     void openSystemSettingsSafe();
@@ -6811,7 +7769,7 @@ function ScanScreen({
                 style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
               >
                 <Text style={styles.secondaryButtonText}>
-                  {permission?.canAskAgain === false ? "Open settings" : "Grant permission"}
+                  {permission?.canAskAgain === false ? strings.scan.openSettings : strings.scan.grantPermission}
                 </Text>
               </Pressable>
             </View>
@@ -6819,37 +7777,66 @@ function ScanScreen({
         </View>
       ) : null}
 
-      {lastQueuedScan ? (
+      {displayedQueuedScan ? (
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeText}>Last queued scan</Text>
+          <Text style={styles.noticeText}>{strings.scan.lastQueued}</Text>
           <Text style={styles.noticeSubtext}>
-            {online ? "Queued and ready to sync" : "Queued offline for retry"}
+            {online ? strings.scan.queuedOnline : strings.scan.queuedOffline}
           </Text>
           <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-            {lastQueuedScan.scanType} - {lastQueuedScan.barcode}
+            {displayedQueuedScan.scanType} - {displayedQueuedScan.barcode}
           </Text>
-          {lastQueuedScan.contextLabel ? (
+          {displayedQueuedScan.contextLabel ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Context: {lastQueuedScan.contextLabel}
+              {strings.scan.context} {displayedQueuedScan.contextLabel}
             </Text>
           ) : null}
-          <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>Saved for sync.</Text>
-        </View>
-      ) : null}
-
-      {diagnosticsEnabled ? (
-        <View style={styles.noticeCard}>
-          <Text style={styles.noticeText}>Support state</Text>
-          <Text style={styles.noticeSubtext}>
-            Scan input: {formatKeyLabel(effectiveScanInputMode)}
+          <Text style={[styles.mono, { textAlign: "left", marginTop: 8 }]}>
+            queue_id:{displayedQueuedScan.id}
           </Text>
         </View>
       ) : null}
+      {savedReturnScans.length ? <Text style={styles.noticeText}>{strings.scan.savedReturns}</Text> : null}
+      {savedReturnScans.map(scan => (
+        <Pressable key={scan.queueId} accessibilityRole="button"
+          accessibilityState={{ selected: scan.queueId === selectedReturnQueueId }}
+          accessibilityLabel={strings.scan.selectReturn(scan.barcode, scan.queueId)}
+          onPress={() => setChosenReturnScan({ actor: actorId, scope: returnScope, queueId: scan.queueId })}
+          style={styles.noticeCard}>
+          <Text>{scan.barcode} - {scan.scanEventId ? strings.scan.acceptedVerify : strings.scan.pendingSync}</Text>
+          <Text style={styles.mono}>queue_id:{scan.queueId}</Text>
+        </Pressable>
+      ))}
+      {returnScanQuery.data?.accepted && !returnScanQuery.data.verified ? (
+        <Text>{strings.scan.acceptedPending}</Text>
+      ) : null}
+      {returnScanQuery.data?.pending ? <Text>{strings.scan.pendingAcceptance}</Text> : null}
+      {returnScanQuery.isError ? <Text>{strings.scan.readbackFailed}</Text> : null}
+      {(returnScanQuery.data?.pending || (returnScanQuery.data?.accepted && !returnScanQuery.data.verified) ||
+        returnScanQuery.isError) && online ? (
+        <Pressable accessibilityRole="button" onPress={() => { void returnScanQuery.refetch(); }}>
+          <Text>{strings.scan.refreshAcceptance}</Text>
+        </Pressable>
+      ) : null}
+      {selectedReturn ? <Text>{strings.scan.acceptedReturn(selectedReturn.barcode)}</Text> : null}
+      <MobileReturnActions
+        strings={strings.returnActions} accepted={selectedReturn}
+        actorId={actorId} client={client} outbox={outbox} commands={returnCommands}
+        canComplete={canCompleteReturns} online={online} syncing={syncing}
+        drivingLocked={drivingModeLocked} onSync={onSync}
+      />
+
+
     </ScrollView>
   );
 }
 
 function LocationScreen({
+  routeLocationContext,
+  verifyLocationScope,
+  onClearLocationScope,
+  syncAccessibility,
+  strings,
   client,
   outbox,
   deviceId,
@@ -6861,6 +7848,11 @@ function LocationScreen({
   onSync,
   onSpeedObserved,
 }: {
+  routeLocationContext?: RouteLocationContext | null;
+  verifyLocationScope?: () => Promise<RouteLocationContext | null>;
+  onClearLocationScope?: () => void;
+  strings: FieldOpsStrings;
+  syncAccessibility: ReturnType<typeof mobileSyncAccessibility>;
   client: ReturnType<typeof createMobileClient>;
   outbox: ReturnType<typeof createOutbox>;
   deviceId: string | null;
@@ -6877,11 +7869,14 @@ function LocationScreen({
   onSync: () => void;
   onSpeedObserved?: (speedKph: number) => void;
 }) {
+  const styles = useFieldOpsStyles();
   const queryClient = useQueryClient();
   const [position, setPosition] = React.useState<Location.LocationObject | null>(null);
   const [status, setStatus] = React.useState<"idle" | "loading">("idle");
   const captureLocationRef = React.useRef(false);
   const [backgroundSyncing, setBackgroundSyncing] = React.useState(false);
+  const backgroundRecoveryRef = React.useRef(false);
+  const backgroundPolicyGenerationRef = React.useRef(0);
   const [backgroundTracking, setBackgroundTracking] = React.useState<{
     running: boolean;
     reason:
@@ -6906,7 +7901,7 @@ function LocationScreen({
     trackingPolicyQuery.isError || (trackingPolicyLoaded && trackingPolicyRow == null);
 
   const locationPolicy = React.useMemo(
-    () => normalizeMobileLocationTrackingPolicy((trackingPolicyQuery.data as any)?.value ?? null),
+    () => normalizeMobileLocationTrackingPolicy(asRecord(trackingPolicyQuery.data).value ?? null),
     [trackingPolicyQuery.data]
   );
   const trackingEnabled = locationPolicy.enabled;
@@ -6914,6 +7909,7 @@ function LocationScreen({
 
   React.useEffect(() => {
     let cancelled = false;
+    backgroundPolicyGenerationRef.current += 1;
 
     if (Platform.OS === "web") {
       setBackgroundTracking({
@@ -6923,6 +7919,7 @@ function LocationScreen({
       setBackgroundSyncing(false);
       return () => {
         cancelled = true;
+        backgroundPolicyGenerationRef.current += 1;
       };
     }
 
@@ -6951,6 +7948,7 @@ function LocationScreen({
     });
     return () => {
       cancelled = true;
+      backgroundPolicyGenerationRef.current += 1;
     };
   }, [
     deviceId,
@@ -6997,6 +7995,7 @@ function LocationScreen({
   }, []);
 
   const backgroundStatusText = React.useMemo(() => {
+    if (Platform.OS === "web") return "Unavailable in the web app";
     if (trackingPolicyQuery.isLoading) return "Loading policy...";
     if (trackingPolicyUnavailable) return "Policy unavailable";
     if (!backgroundPolicyEnabled) return "Disabled by policy";
@@ -7038,9 +8037,11 @@ function LocationScreen({
         Alert.alert("Location disabled", "Location tracking is disabled by policy.");
         return;
       }
-      const { status: permissionStatus } = await Location.getForegroundPermissionsAsync();
-      if (permissionStatus !== "granted") {
-        const req = await Location.requestForegroundPermissionsAsync();
+      const permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== "granted") {
+        const req = permission.canAskAgain === false
+          ? permission
+          : await Location.requestForegroundPermissionsAsync();
         if (req.status !== "granted") {
           Alert.alert(
             "Location permission required",
@@ -7125,6 +8126,11 @@ function LocationScreen({
         return;
       }
 
+      const scoped = routeLocationContext ? await verifyLocationScope?.() : null;
+      if (routeLocationContext && (!scoped || scoped.actorId !== routeLocationContext.actorId ||
+        scoped.routeRunId !== routeLocationContext.routeRunId || scoped.routeStopId !== routeLocationContext.routeStopId)) {
+        throw new Error(strings.scan.routeLocationChanged);
+      }
       let attestation: MobileAttestationEnvelope | null = null;
       try {
         attestation = await buildAttestationEnvelope({
@@ -7142,6 +8148,11 @@ function LocationScreen({
         return;
       }
 
+      if (scoped) {
+        const current = await verifyLocationScope?.();
+        if (!current || current.actorId !== scoped.actorId || current.routeRunId !== scoped.routeRunId ||
+          current.routeStopId !== scoped.routeStopId) throw new Error(strings.scan.routeLocationChanged);
+      }
       const id = createOutboxId();
       await outbox.enqueue({
         id,
@@ -7156,9 +8167,11 @@ function LocationScreen({
             speed_mps: position.coords.speed ?? null,
             heading_deg: position.coords.heading ?? null,
             captured_at: new Date().toISOString(),
+            ...(scoped ? { route_run_id: scoped.routeRunId, route_stop_id: scoped.routeStopId } : {}),
             metadata: {
               app: "fieldops",
               source: "mobile",
+              ...(scoped ? { route_location_context: scoped } : {}),
               ...(attestation ? { attestation } : {}),
             },
           },
@@ -7169,6 +8182,8 @@ function LocationScreen({
       queryClient.invalidateQueries({ queryKey: ["outbox", "entries"] });
 
       if (online && !syncing) onSync();
+    } catch (error) {
+      Alert.alert(strings.scan.routeLocationBlocked, formatUnknownError(error));
     } finally {
       isQueueingPingRef.current = false;
       setIsQueueingPing(false);
@@ -7186,20 +8201,21 @@ function LocationScreen({
               : trackingPolicyUnavailable
                 ? "Policy unavailable"
                 : trackingEnabled
-                  ? "Ready"
+                  ? strings.scan.ready
                   : "Disabled by policy"}
           </Text>
         </View>
         <Pressable
           onPress={onSync}
-          disabled={syncing}
+          {...syncAccessibility}
+          disabled={syncAccessibility.accessibilityState.disabled}
           style={({ pressed }) => [
             styles.syncNowButton,
-            syncing && styles.syncButtonDisabled,
+            syncAccessibility.accessibilityState.disabled && styles.syncButtonDisabled,
             pressed && styles.syncButtonPressed,
           ]}
         >
-          <Text style={styles.syncButtonText}>{syncing ? "Syncing..." : "Sync now"}</Text>
+          <Text style={styles.syncButtonText}>{syncing ? strings.shell.syncing : strings.shell.syncNow}</Text>
         </Pressable>
       </View>
 
@@ -7231,16 +8247,63 @@ function LocationScreen({
         <Text style={styles.noticeText}>Background tracking</Text>
         <Text style={styles.noticeSubtext}>{backgroundStatusText}</Text>
         <Text style={styles.noticeSubtext}>
-          Location updates retry automatically when the device is online.
+          {Platform.OS === "web"
+            ? "Location capture works while the app is open; background tracking requires the native app."
+            : "Outbox-driven updates via task manager."}
         </Text>
       </View>
 
+      {(backgroundTracking.reason === "foreground_permission_denied" || backgroundTracking.reason === "background_permission_denied") ? (
+        <Pressable
+          {...mobileActionAccessibility(strings.actionAccessibility.recoverLocationHint, backgroundSyncing || !backgroundPolicyEnabled, backgroundSyncing)}
+          accessibilityLabel={strings.actionAccessibility.recoverLocation}
+          accessibilityHint={strings.actionAccessibility.recoverLocationHint}
+          disabled={backgroundSyncing || !backgroundPolicyEnabled}
+          onPress={() => {
+            if (backgroundRecoveryRef.current || backgroundSyncing || !backgroundPolicyEnabled) return;
+            backgroundRecoveryRef.current = true;
+            const generation = backgroundPolicyGenerationRef.current;
+            const isCurrent = () => generation === backgroundPolicyGenerationRef.current;
+            setBackgroundSyncing(true);
+            void (async () => {
+              try {
+                const permission = backgroundTracking.reason === "foreground_permission_denied"
+                  ? await Location.getForegroundPermissionsAsync()
+                  : await Location.getBackgroundPermissionsAsync();
+                if (!isCurrent()) return;
+                if (permission.status !== "granted" && (permission.canAskAgain === false || (backgroundTracking.reason === "background_permission_denied" && !locationPolicy.requestBackgroundPermission))) {
+                  await openSystemSettingsSafe();
+                  return;
+                }
+                const next = await syncBackgroundLocationTracking({ deviceId, policy: locationPolicy });
+                if (isCurrent()) setBackgroundTracking(next);
+              } catch (error) {
+                logDebugFailure("failed to recover background location permission", error);
+              } finally {
+                backgroundRecoveryRef.current = false;
+                if (isCurrent()) setBackgroundSyncing(false);
+              }
+            })();
+          }}
+          style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
+        >
+          <Text style={styles.secondaryButtonText}>{strings.actionAccessibility.recoverLocation}</Text>
+        </Pressable>
+      ) : null}
+
       <View style={styles.noticeCard}>
+        {routeLocationContext ? (
+          <View>
+            <Text>{strings.scan.routeLocationScoped}</Text>
+            <Pressable accessibilityRole="button" style={styles.secondaryButton} onPress={onClearLocationScope}>
+              <Text style={styles.secondaryButtonText}>{strings.scan.routeLocationClear}</Text>
+            </Pressable>
+          </View>
+        ) : null}
         <Text style={styles.noticeText}>Latest capture</Text>
         {position?.coords ? (
           <Text style={styles.mono}>
-            Coordinates: {position.coords.latitude}, {position.coords.longitude} - Accuracy{" "}
-            {position.coords.accuracy ?? "?"} m - Speed {speedMpsToKph(position.coords.speed)} kph
+            lat={position.coords.latitude} lng={position.coords.longitude} acc={position.coords.accuracy ?? "?"} speed_kph={speedMpsToKph(position.coords.speed)}
           </Text>
         ) : (
           <Text style={styles.noticeSubtext}>No location captured.</Text>
@@ -7252,6 +8315,7 @@ function LocationScreen({
           onPress={() => {
             void captureLocation();
           }}
+          {...mobileActionAccessibility(status === "loading" ? strings.actionAccessibility.busy : trackingPolicyQuery.isLoading ? strings.actionAccessibility.policyLoading : trackingPolicyUnavailable ? strings.actionAccessibility.policyUnavailable : strings.actionAccessibility.policyDisabled, !trackingEnabled || trackingPolicyQuery.isLoading || trackingPolicyUnavailable || status === "loading", status === "loading")}
           disabled={
             !trackingEnabled ||
             trackingPolicyQuery.isLoading ||
@@ -7272,6 +8336,7 @@ function LocationScreen({
           onPress={() => {
             void queuePing();
           }}
+          {...mobileActionAccessibility(isQueueingPing ? strings.actionAccessibility.busy : !deviceId ? strings.actionAccessibility.deviceMissing : trackingPolicyQuery.isLoading ? strings.actionAccessibility.policyLoading : trackingPolicyUnavailable ? strings.actionAccessibility.policyUnavailable : !trackingEnabled ? strings.actionAccessibility.policyDisabled : strings.actionAccessibility.locationMissing, !canQueuePing, isQueueingPing)}
           disabled={!canQueuePing}
           style={({ pressed }) => [
             styles.primaryButton,
@@ -7280,24 +8345,211 @@ function LocationScreen({
           ]}
         >
           <Text style={styles.primaryButtonText}>
-            {isQueueingPing ? "Saving..." : "Save location"}
+            {isQueueingPing ? strings.scan.queueing : "Queue ping"}
           </Text>
         </Pressable>
       </View>
 
-      {diagnosticsEnabled ? (
-        <View style={styles.noticeCard}>
-          <Text style={styles.noticeText}>Support state</Text>
-          <Text style={styles.noticeSubtext}>
-            Location capture is {trackingEnabled ? "available" : "unavailable"}.
-          </Text>
-        </View>
-      ) : null}
     </ScrollView>
   );
 }
 
+function WalletCard({
+  client, actorId, scope, cacheStore, cacheReady, online, strings,
+}: {
+  client: ReturnType<typeof createMobileClient>;
+  actorId: string;
+  scope: string;
+  cacheStore: KeyValueStore;
+  cacheReady: boolean;
+  online: boolean;
+  strings: FieldOpsStrings["wallet"];
+}) {
+  const styles = useFieldOpsStyles();
+  const queryClient = useQueryClient();
+  const [currencyText, setCurrencyText] = React.useState("");
+  const [amountText, setAmountText] = React.useState("");
+  const [feedback, setFeedback] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const submittingRef = React.useRef(false);
+  const liveIdentity = React.useRef("");
+  liveIdentity.current = JSON.stringify([actorId, scope]);
+  React.useEffect(() => () => { liveIdentity.current = ""; }, []);
+  const currency = currencyText.trim().toUpperCase();
+  const organizationId = walletScopeOrganization(scope);
+  const requestKey = walletStorageKey(actorId, scope);
+  const draftQuery = useQuery({
+    queryKey: ["wallet-request", actorId, scope],
+    queryFn: async () => {
+      const stored = await cacheStore.get(requestKey);
+      const pending = readWalletDraft(stored, actorId, scope);
+      if (stored != null && !pending) throw new Error(strings.storageUnverified);
+      return pending;
+    },
+    enabled: Boolean(cacheReady && actorId && organizationId),
+    staleTime: Infinity,
+  });
+  const draft = draftQuery.data ?? null;
+  React.useEffect(() => {
+    setCurrencyText("");
+    setAmountText("");
+    setFeedback(null);
+  }, [actorId, scope]);
+  React.useEffect(() => {
+    if (!draft) return;
+    setCurrencyText(draft.currency);
+    setAmountText(draft.amount);
+  }, [draft]);
+  const summaryKey = ["driver-wallet", actorId, scope, currency];
+  const summaryQuery = useQuery({
+    queryKey: summaryKey,
+    queryFn: async () => {
+      const { data, error } = await client.schema("api").rpc(
+        "ui_get_driver_wallet_summary_v1", { p_currency: currency, p_driver_user_id: null });
+      if (error) throw error;
+      const summary = readWalletSummary(data, actorId, currency, scope);
+      if (!summary) throw new Error(strings.summaryUnverified);
+      return summary;
+    },
+    enabled: Boolean(online && actorId && organizationId && /^[A-Z]{3}$/.test(currency)),
+    staleTime: 0,
+  });
+  const submit = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    const epoch = completionReadbackScopeVersion();
+    const identity = JSON.stringify([actorId, scope]);
+    const current = () => liveIdentity.current === identity &&
+      completionReadbackScopeMatches(epoch, actorId, scope);
+    try {
+      const form = walletForm(currencyText, amountText);
+      if (!online || !cacheReady || !draftQuery.isSuccess) {
+        throw new Error(strings.onlineRequired);
+      }
+      if (draft && (draft.currency !== form.currency || draft.amount !== form.amount)) {
+        throw new Error(strings.retrySavedFirst);
+      }
+      const verifiedScope = await resolveVerifiedCompletionScope(client);
+      if (!current() || verifiedScope?.actor !== actorId || verifiedScope.scope !== scope || !organizationId) {
+        throw new Error(strings.sessionChanged);
+      }
+      setFeedback(null);
+      const request = draft ?? {
+        version: 1 as const, actor: actorId, scope,
+        currency: form.currency, amount: form.amount, key: createOutboxId(),
+      };
+      if (!draft) {
+        await writeCompletionScopedValue(cacheStore, epoch, actorId, scope,
+          () => cacheStore.set(requestKey, request));
+        if (!current()) throw new Error(strings.sessionChanged);
+        void queryClient.invalidateQueries({ queryKey: ["wallet-request", actorId, scope] });
+      }
+      if (!current()) throw new Error(strings.sessionChanged);
+      const { data, error } = await client.schema("api").rpc(
+        "ui_request_driver_wallet_withdrawal_v2", {
+          p_amount: request.amount, p_currency: request.currency, p_idempotency_key: request.key,
+          p_expected_actor_id: actorId, p_expected_organization_id: organizationId,
+        });
+      if (error) throw error;
+      const receipt = readWalletReceipt(data);
+      if (!receipt) throw new Error(strings.receiptUnverified);
+      if (!current()) return;
+      await writeCompletionScopedValue(cacheStore, epoch, actorId, scope,
+        () => cacheStore.set(requestKey, { ...request, taskId: receipt.taskId }));
+      if (!current()) return;
+      void queryClient.invalidateQueries({ queryKey: ["wallet-request", actorId, scope] });
+      setFeedback(receipt.status === "existing" ? strings.existing : strings.requested);
+      try {
+        const refreshed = await client.schema("api").rpc(
+          "ui_get_driver_wallet_summary_v1", { p_currency: request.currency, p_driver_user_id: null });
+        if (refreshed.error) throw refreshed.error;
+        const summary = readWalletSummary(refreshed.data, actorId, request.currency, scope);
+        if (!summary) throw new Error(strings.summaryUnverified);
+        if (!current()) return;
+        queryClient.setQueryData(["driver-wallet", actorId, scope, request.currency], summary);
+      } catch {
+        if (current()) setFeedback(strings.summaryWarning);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (current()) setFeedback(message === "wallet-invalid-currency" ? strings.invalidCurrency :
+        message === "wallet-invalid-amount" ? strings.invalidAmount :
+        ["Completion evidence session changed.", "driver_wallet_scope_changed"].includes(message)
+          ? strings.sessionChanged :
+        [strings.onlineRequired, strings.retrySavedFirst, strings.sessionChanged, strings.receiptUnverified].includes(message)
+          ? message : strings.outcomeUnknown);
+    } finally {
+      if (current()) setSubmitting(false);
+      submittingRef.current = false;
+    }
+  };
+  const startAnother = async () => {
+    if (!draft?.taskId || submitting) return;
+    const epoch = completionReadbackScopeVersion();
+    const current = () => liveIdentity.current === JSON.stringify([actorId, scope]) &&
+      completionReadbackScopeMatches(epoch, actorId, scope);
+    try {
+      await writeCompletionScopedValue(cacheStore, epoch, actorId, scope,
+        () => cacheStore.remove(requestKey));
+      if (!current()) return;
+      await queryClient.invalidateQueries({ queryKey: ["wallet-request", actorId, scope] });
+      if (!current()) return;
+      setAmountText("");
+      setFeedback(null);
+    } catch {
+      if (current()) setFeedback(strings.outcomeUnknown);
+    }
+  };
+  return (
+    <View style={styles.noticeCard}>
+      <Text style={styles.noticeText}>{strings.title}</Text>
+      <Text style={styles.noticeSubtext}>{strings.boundary}</Text>
+      <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>{strings.currency}</Text>
+      <TextInput style={styles.input} testID="mobile-wallet-currency" accessibilityLabel={strings.currencyAccessibility}
+        value={currencyText} onChangeText={setCurrencyText} autoCapitalize="characters"
+        maxLength={3} editable={!draft && !submitting} />
+      {summaryQuery.isFetching ? <Text style={styles.noticeSubtext}>{strings.reading}</Text> : null}
+      {summaryQuery.isError ? <Text style={styles.noticeSubtext}>{strings.unavailable}</Text> : null}
+      {summaryQuery.data ? (
+        <View>
+          <Text style={styles.noticeSubtext}>{strings.balance(currency, summaryQuery.data.balance)}</Text>
+          <Text style={styles.noticeSubtext}>{strings.reserved(currency, summaryQuery.data.reserved_withdrawal)}</Text>
+          <Text style={styles.noticeSubtext}>{strings.available(currency, summaryQuery.data.available)}</Text>
+          <Text style={styles.noticeSubtext}>{strings.payouts(currency, summaryQuery.data.remitted_payout)}</Text>
+        </View>
+      ) : null}
+      <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>{strings.amount}</Text>
+      <TextInput style={styles.input} testID="mobile-wallet-amount" accessibilityLabel={strings.amountAccessibility}
+        value={amountText} onChangeText={setAmountText} keyboardType="decimal-pad"
+        maxLength={30} editable={!draft && !submitting} />
+      {draft && !draft.taskId ? <Text style={styles.noticeSubtext}>{strings.saved}</Text> : null}
+      {draft?.taskId ? <Text style={styles.noticeSubtext}>{strings.recorded(draft.taskId)}</Text> : null}
+      {draftQuery.isError ? <Text style={styles.noticeSubtext}>{strings.storageUnverified}</Text> : null}
+      {feedback ? <Text style={styles.noticeSubtext}>{feedback}</Text> : null}
+      <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
+        <Pressable accessibilityRole="button" testID="mobile-wallet-request"
+          onPress={() => void submit()} disabled={!online || !cacheReady || submitting || Boolean(draft?.taskId)}
+          style={[styles.primaryButton, (!online || !cacheReady || submitting || draft?.taskId) && styles.primaryButtonDisabled]}>
+          <Text style={styles.primaryButtonText}>{submitting ? strings.requesting : draft ? strings.retrySaved : strings.request}</Text>
+        </Pressable>
+        {draft?.taskId ? <Pressable accessibilityRole="button" testID="mobile-wallet-new-request"
+          onPress={() => void startAnother()} style={styles.secondaryButton}>
+          <Text style={styles.secondaryButtonText}>{strings.startAnother}</Text>
+        </Pressable> : null}
+      </View>
+    </View>
+  );
+}
+
 function MoreScreen({
+  client,
+  actorId,
+  walletScope,
+  cacheStore,
+  cacheReady,
+  walletOnline,
+  walletEnabled,
   connectivityStatus,
   connectivitySummary,
   outboxCount,
@@ -7329,6 +8581,8 @@ function MoreScreen({
   selectedLocaleMode,
   selectedDirectionMode,
   selectedThemeMode,
+  displayPolicy,
+  strings,
   activeDriverShift,
   canStartShift,
   isMutatingDriverShift,
@@ -7347,6 +8601,13 @@ function MoreScreen({
   onEndShift,
   onSignOut,
 }: {
+  client: ReturnType<typeof createMobileClient>;
+  actorId: string;
+  walletScope: string;
+  cacheStore: KeyValueStore;
+  cacheReady: boolean;
+  walletOnline: boolean;
+  walletEnabled: boolean;
   connectivityStatus: MobileConnectivityStatus;
   connectivitySummary: string;
   outboxCount: number;
@@ -7378,6 +8639,8 @@ function MoreScreen({
   selectedLocaleMode: MobileLocaleMode;
   selectedDirectionMode: MobileDirectionMode;
   selectedThemeMode: MobileThemeMode;
+  displayPolicy: MobileDisplayPolicy;
+  strings: FieldOpsStrings;
   activeDriverShift: {
     opsSessionId: string;
     sessionType: string;
@@ -7401,6 +8664,7 @@ function MoreScreen({
   onEndShift: () => void;
   onSignOut: () => void;
 }) {
+  const styles = useFieldOpsStyles();
   const speedPresets = React.useMemo(() => {
     const threshold = drivingSafetyState.thresholdKph;
     return Array.from(new Set([0, Math.max(0, threshold - 1), threshold, threshold + 10]));
@@ -7434,8 +8698,8 @@ function MoreScreen({
     <ScrollView contentContainerStyle={styles.screen}>
       <View style={styles.screenHeader}>
         <View style={styles.screenHeaderText}>
-          <Text style={styles.resourceTitle}>More</Text>
-          <Text style={styles.resourceSubtitle}>Driver tools and preferences</Text>
+          <Text style={styles.resourceTitle}>{strings.more.title}</Text>
+          <Text style={styles.resourceSubtitle}>{strings.more.subtitle}</Text>
         </View>
       </View>
 
@@ -7462,11 +8726,11 @@ function MoreScreen({
         <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
           <Pressable
             accessibilityRole="button"
-            testID="mobile-sign-out"
+            testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signOut}
             onPress={onSignOut}
             style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
           >
-            <Text style={styles.secondaryButtonText}>Sign out</Text>
+            <Text style={styles.secondaryButtonText}>{strings.more.signOut}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -7476,7 +8740,7 @@ function MoreScreen({
             }}
             style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
           >
-            <Text style={styles.secondaryButtonText}>Open settings</Text>
+            <Text style={styles.secondaryButtonText}>{strings.more.openSettings}</Text>
           </Pressable>
         </View>
       </View>
@@ -7505,24 +8769,24 @@ function MoreScreen({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            testID="mobile-open-diagnostics"
+            testID={FIELDOPS_NATIVE_E2E_TEST_IDS.openDiagnostics}
             onPress={() => onOpenModule("diagnostics")}
             style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
           >
-            <Text style={styles.secondaryButtonText}>Open support tools</Text>
+            <Text style={styles.secondaryButtonText}>Open diagnostics</Text>
           </Pressable>
         </View>
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Driver shift</Text>
+        <Text style={styles.noticeText}>{strings.more.driverShift}</Text>
         <Text style={styles.noticeSubtext}>
           {activeDriverShift
             ? `Shift active${activeDriverShift.openedAt ? ` since ${activeDriverShift.openedAt}` : ""}`
-            : "No active driver shift on this device."}
+            : strings.more.noActiveShift}
         </Text>
         <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-          Readiness: signed in - {canStartShift ? "device online" : "connect online and register device"}
+          Readiness: auth ok - {canStartShift ? "device online" : "connect online and register device"}
         </Text>
         <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
           <Pressable
@@ -7542,7 +8806,7 @@ function MoreScreen({
             ]}
           >
             <Text style={styles.primaryButtonText}>
-              {isMutatingDriverShift && !activeDriverShift ? "Starting..." : "Start shift"}
+              {isMutatingDriverShift && !activeDriverShift ? "Starting..." : strings.more.startShift}
             </Text>
           </Pressable>
           <Pressable
@@ -7557,84 +8821,97 @@ function MoreScreen({
             ]}
           >
             <Text style={styles.secondaryButtonText}>
-              {isMutatingDriverShift && activeDriverShift ? "Ending..." : "End shift"}
+              {isMutatingDriverShift && activeDriverShift ? "Ending..." : strings.more.endShift}
             </Text>
           </Pressable>
         </View>
       </View>
 
+      {walletEnabled ? <WalletCard client={client} actorId={actorId} scope={walletScope}
+        cacheStore={cacheStore} cacheReady={cacheReady} online={walletOnline} strings={strings.wallet} /> : null}
+
+
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Display preferences</Text>
+        <Text style={styles.noticeText}>{strings.more.displayPreferences}</Text>
         <Text style={styles.noticeSubtext}>
           Locale {selectedLocaleMode.toUpperCase()} - Direction {selectedDirectionMode.toUpperCase()} -
           Theme {selectedThemeMode}
         </Text>
-        <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>Locale</Text>
-        <View style={styles.screenActionsRow}>
-          {(["en", "ar"] as const).map((localeMode) => (
-            <Pressable
-              key={localeMode}
-              onPress={() =>
-                void withPreferenceAction(() => onSetLocaleMode(localeMode))
-              }
-              disabled={isApplyingSettings}
-              style={({ pressed }) => [
-                styles.chip,
-                selectedLocaleMode === localeMode && styles.navItemSelected,
-                isApplyingSettings && styles.primaryButtonDisabled,
-                pressed && styles.navItemPressed,
-              ]}
-            >
-              <Text style={styles.chipText}>{localeMode === "en" ? "English" : "Arabic"}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>Direction</Text>
-        <View style={styles.screenActionsRow}>
-          {(["ltr", "rtl"] as const).map((directionMode) => (
-            <Pressable
-              key={directionMode}
-              onPress={() =>
-                void withPreferenceAction(() => onSetDirectionMode(directionMode))
-              }
-              disabled={isApplyingSettings}
-              style={({ pressed }) => [
-                styles.chip,
-                selectedDirectionMode === directionMode && styles.navItemSelected,
-                isApplyingSettings && styles.primaryButtonDisabled,
-                pressed && styles.navItemPressed,
-              ]}
-            >
-              <Text style={styles.chipText}>{directionMode.toUpperCase()}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>Theme</Text>
-        <View style={styles.screenActionsRow}>
-          {(["system", "light", "dark"] as const).map((themeMode) => (
-            <Pressable
-              key={themeMode}
-              onPress={() => void withPreferenceAction(() => onSetThemeMode(themeMode))}
-              disabled={isApplyingSettings}
-              style={({ pressed }) => [
-                styles.chip,
-                selectedThemeMode === themeMode && styles.navItemSelected,
-                isApplyingSettings && styles.primaryButtonDisabled,
-                pressed && styles.navItemPressed,
-              ]}
-            >
-              <Text style={styles.chipText}>
-                {themeMode === "system"
-                  ? "System"
-                  : themeMode.charAt(0).toUpperCase() + themeMode.slice(1)}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>{strings.more.locale}</Text>
+        {displayPolicy.allowLocaleSelect ? (
+          <View style={styles.screenActionsRow}>
+            {displayPolicy.allowedLocales.map((localeMode) => (
+              <Pressable
+                key={localeMode}
+                testID={`mobile-locale-${localeMode}`}
+                onPress={() => void withPreferenceAction(() => onSetLocaleMode(localeMode))}
+                disabled={isApplyingSettings}
+                style={({ pressed }) => [
+                  styles.chip,
+                  selectedLocaleMode === localeMode && styles.navItemSelected,
+                  isApplyingSettings && styles.primaryButtonDisabled,
+                  pressed && styles.navItemPressed,
+                ]}
+              >
+                <Text style={styles.chipText}>
+                  {localeMode === "en" ? strings.more.english : strings.more.arabic}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {displayPolicy.allowDirectionOverride ? (
+          <>
+            <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>{strings.more.direction}</Text>
+            <View style={styles.screenActionsRow}>
+              {(["ltr", "rtl"] as const).map((directionMode) => (
+                <Pressable
+                  key={directionMode}
+                  onPress={() => void withPreferenceAction(() => onSetDirectionMode(directionMode))}
+                  disabled={isApplyingSettings}
+                  style={({ pressed }) => [
+                    styles.chip,
+                    selectedDirectionMode === directionMode && styles.navItemSelected,
+                    isApplyingSettings && styles.primaryButtonDisabled,
+                    pressed && styles.navItemPressed,
+                  ]}
+                >
+                  <Text style={styles.chipText}>{directionMode.toUpperCase()}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        ) : null}
+        <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>{strings.more.theme}</Text>
+        {displayPolicy.allowThemeSelect ? (
+          <View style={styles.screenActionsRow}>
+            {displayPolicy.allowedThemes.map((themeMode) => (
+              <Pressable
+                key={themeMode}
+                onPress={() => void withPreferenceAction(() => onSetThemeMode(themeMode))}
+                disabled={isApplyingSettings}
+                style={({ pressed }) => [
+                  styles.chip,
+                  selectedThemeMode === themeMode && styles.navItemSelected,
+                  isApplyingSettings && styles.primaryButtonDisabled,
+                  pressed && styles.navItemPressed,
+                ]}
+              >
+                <Text style={styles.chipText}>
+                  {themeMode === "system"
+                    ? strings.more.system
+                    : themeMode === "light"
+                      ? strings.more.light
+                      : strings.more.dark}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Visible work</Text>
+        <Text style={styles.noticeText}>Visibility mode</Text>
         <View style={styles.screenActionsRow}>
           {visibilityPolicy.allowedVisibility.map((mode) => (
             <Pressable
@@ -7655,7 +8932,7 @@ function MoreScreen({
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Route view</Text>
+        <Text style={styles.noticeText}>{strings.more.routeView}</Text>
         <View style={styles.screenActionsRow}>
           {mapPolicy.routeViews.map((mode) => (
             <Pressable
@@ -7671,19 +8948,19 @@ function MoreScreen({
                 pressed && styles.navItemPressed,
               ]}
             >
-              <Text style={styles.chipText}>{formatRouteViewLabel(mode)}</Text>
+              <Text style={styles.chipText}>{formatRouteViewLabel(mode, strings)}</Text>
             </Pressable>
           ))}
         </View>
         <Text style={styles.noticeSubtext}>
-          Map grouping: {mapPolicy.clusteringEnabled ? "on" : "off"}
+          Clustering: {mapPolicy.clusteringEnabled ? "enabled" : "disabled"} (grid {mapPolicy.clusteringGridPx}px, min {mapPolicy.clusteringMinCount})
         </Text>
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Support mode</Text>
+        <Text style={styles.noticeText}>{strings.more.diagnostics}</Text>
         <Text style={styles.noticeSubtext}>
-          Default {diagnosticsDefaultOn ? "on" : "off"}{diagnosticsAllowToggle ? ", can be changed here" : ", managed by policy"}
+          Default {diagnosticsDefaultOn ? "on" : "off"}{diagnosticsAllowToggle ? ", user toggle enabled" : ", user toggle disabled"}
         </Text>
         {diagnosticsAllowToggle ? (
           <View style={styles.screenActionsRow}>
@@ -7699,7 +8976,7 @@ function MoreScreen({
               ]}
             >
               <Text style={styles.secondaryButtonText}>
-                Support mode {diagnosticsEnabled ? "ON" : "OFF"}
+                Diagnostics {diagnosticsEnabled ? "ON" : "OFF"}
               </Text>
             </Pressable>
           </View>
@@ -7707,9 +8984,9 @@ function MoreScreen({
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Connectivity and outbox</Text>
+        <Text style={styles.noticeText}>{strings.more.connectivityOutbox}</Text>
         <Text style={styles.noticeSubtext}>
-          Network: {formatConnectivityStatusLabel(connectivityStatus).toLowerCase()}
+          Network: {formatConnectivityStatusLabel(connectivityStatus, strings).toLowerCase()}
         </Text>
         <Text style={styles.noticeSubtext}>{connectivitySummary}</Text>
         <Text style={styles.noticeSubtext}>
@@ -7718,6 +8995,7 @@ function MoreScreen({
         <View style={[styles.screenActionsRow, { marginTop: 8 }]}>
           <Pressable
             onPress={onSync}
+            {...mobileSyncAccessibility(strings.actionAccessibility, syncing, connectivityStatus !== "offline", syncPolicyEnabled, outboxCount)}
             disabled={!syncPolicyEnabled || connectivityStatus === "offline" || syncing}
             style={({ pressed }) => [
               styles.primaryButton,
@@ -7731,7 +9009,7 @@ function MoreScreen({
             ]}
           >
             <Text style={styles.primaryButtonText}>
-              {syncing ? "Syncing..." : "Sync now"}
+              {syncing ? strings.shell.syncing : strings.shell.syncNow}
             </Text>
           </Pressable>
         </View>
@@ -7777,15 +9055,16 @@ function MoreScreen({
         ) : null}
         {diagnosticsEnabled ? (
           <View style={{ marginTop: 10 }}>
-            <Text style={styles.noticeSubtext}>Recent queued actions</Text>
+            <Text style={styles.noticeSubtext}>Recent outbox entries</Text>
             {outboxPreviewQuery.data?.length ? (
-              outboxPreviewQuery.data.map((entry) => (
-                <Text key={entry.id} style={styles.mono}>
-                  {formatKeyLabel(entry.status)} action
-                </Text>
-              ))
+              outboxPreviewQuery.data.map((entry) => {
+                const feedback = describeMobileOutboxEntry(entry, strings);
+                return <Text key={entry.id} style={styles.noticeSubtext} accessibilityLabel={feedback.accessibilityLabel}>
+                  {feedback.status} — {feedback.title} — {feedback.targetLabel}
+                </Text>;
+              })
             ) : (
-              <Text style={styles.noticeSubtext}>No recent queued actions.</Text>
+              <Text style={styles.noticeSubtext}>No recent outbox entries.</Text>
             )}
           </View>
         ) : null}
@@ -7807,7 +9086,7 @@ function MoreScreen({
         {diagnosticsEnabled ? (
           <View style={{ marginTop: 8 }}>
             <Text style={styles.noticeSubtext}>
-              Support speed override:{" "}
+              Diagnostics speed override:{" "}
               {simulatedSpeedKph == null ? "off" : `${simulatedSpeedKph} kph`}
             </Text>
             <View style={[styles.screenActionsRow, { marginTop: 8 }]}>
@@ -7844,21 +9123,21 @@ function MoreScreen({
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Action safety</Text>
+        <Text style={styles.noticeText}>UX safety</Text>
         <Text style={styles.noticeSubtext}>
           Double-tap actions: {uxSafetyPolicy.requireDoubleTapFor.join(", ")}
         </Text>
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>Available contact channels</Text>
+        <Text style={styles.noticeText}>Communication channels</Text>
         <Text style={styles.noticeSubtext}>{communicationPolicy.allowedChannels.join(", ")}</Text>
       </View>
 
       <View style={styles.noticeCard}>
         <Text style={styles.noticeText}>Address display</Text>
         <Text style={styles.noticeSubtext}>
-          Address format follows the active workspace policy.
+          Fields: {addressPolicy.fields.map((field) => field.key).join(", ")}
         </Text>
         <Text style={styles.noticeSubtext}>
           Coordinates {addressPolicy.showCoordinates ? "on" : "off"} - Accuracy{" "}
@@ -7869,15 +9148,15 @@ function MoreScreen({
       <View style={styles.noticeCard}>
         <Text style={styles.noticeText}>Platform and navigation</Text>
         <Text style={styles.noticeSubtext}>
-          Device platform: {runtimePlatform}
+          Runtime platform: {runtimePlatform}
         </Text>
         <Text style={styles.noticeSubtext}>
-          Navigation platform: {effectivePlatform}
+          Effective platform: {effectivePlatform}
         </Text>
         {diagnosticsEnabled ? (
           <View style={{ marginTop: 8 }}>
             <Text style={styles.noticeSubtext}>
-              Support platform override: {platformOverride ?? "off"}
+              Platform override: {platformOverride ?? "off (runtime)"}
             </Text>
             <View style={[styles.screenActionsRow, { marginTop: 8 }]}>
               {devicePolicy.allowedPlatforms.map((platformMode) => (
@@ -7907,16 +9186,16 @@ function MoreScreen({
                   pressed && styles.navItemPressed,
                 ]}
               >
-                <Text style={styles.chipText}>Use device</Text>
+                <Text style={styles.chipText}>Use runtime</Text>
               </Pressable>
             </View>
           </View>
         ) : null}
         <Text style={styles.noticeSubtext}>
-          Supported platforms: {devicePolicy.allowedPlatforms.join(", ")}
+          Allowed platforms: {devicePolicy.allowedPlatforms.join(", ")}
         </Text>
         <Text style={styles.noticeSubtext}>
-          Navigation opens with:{" "}
+          Route provider:{" "}
           {navigationPolicy.providerByPlatform[effectivePlatform] ??
             navigationPolicy.providerByPlatform.android}
         </Text>
@@ -7926,6 +9205,7 @@ function MoreScreen({
 }
 
 function DiagnosticsScreen({
+  strings,
   me,
   connectivityStatus,
   deviceId,
@@ -7935,11 +9215,14 @@ function DiagnosticsScreen({
   toggleValue,
   defaultOn,
   policyRow,
+  cacheStore,
   outboxStore,
+  storage,
   onToggle,
   onClearLocal,
   onRetryDeviceRegistration,
 }: {
+  strings: FieldOpsStrings;
   me: UiMe | null;
   connectivityStatus: MobileConnectivityStatus;
   deviceId: string | null;
@@ -7949,16 +9232,19 @@ function DiagnosticsScreen({
   toggleValue: boolean | null;
   defaultOn: boolean;
   policyRow: unknown;
+  cacheStore: ReturnType<typeof createSqliteKeyValueStore>;
   outboxStore: ReturnType<typeof createSqliteOutboxStore>;
+  storage: MobileStorageAdapter;
   onToggle: (next: boolean) => Promise<void>;
   onClearLocal: () => Promise<void>;
   onRetryDeviceRegistration: () => void;
 }) {
+  const styles = useFieldOpsStyles();
   const queryClient = useQueryClient();
   const [busy, setBusy] = React.useState(false);
   const diagnosticActionRef = React.useRef(false);
 
-  const policyValue = (policyRow as any)?.value ?? null;
+  const policyValue = asRecord(asRecord(policyRow).value);
   const policyEnabled = policyValue?.enabled === true;
 
   const effectiveDiagnosticsOn = diagnosticsEnabled;
@@ -7984,7 +9270,7 @@ function DiagnosticsScreen({
     try {
       await action();
     } catch {
-      Alert.alert("Support action failed", "Please retry this operation.");
+      showMobileNotice("Diagnostics action failed", "Please retry this operation.");
     } finally {
       diagnosticActionRef.current = false;
       setBusy(false);
@@ -7999,18 +9285,26 @@ function DiagnosticsScreen({
   };
 
   const handleClear = () => {
-    Alert.alert("Clear local data?", "This signs you out and removes local data from this device.", [
+    if (diagnosticActionRef.current) return;
+    const title = "Clear local data?";
+    const message = "This signs you out and removes local data from this device.";
+    const clearConfirmed = () => {
+      void withDiagnosticsAction(async () => {
+        await onClearLocal();
+        queryClient.invalidateQueries();
+      });
+    };
+    if (Platform.OS === "web") {
+      // Match showMobileNotice's native-browser boundary; missing confirmation fails closed.
+      const webConfirm = (globalThis as unknown as { confirm?: unknown }).confirm;
+      if (typeof webConfirm === "function" && (webConfirm as (text: string) => boolean).call(globalThis, `${title}\n\n${message}`)) {
+        clearConfirmed();
+      }
+      return;
+    }
+    Alert.alert(title, message, [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: () => {
-          void withDiagnosticsAction(async () => {
-            await onClearLocal();
-            queryClient.invalidateQueries();
-          });
-        },
-      },
+      { text: "Clear", style: "destructive", onPress: clearConfirmed },
     ]);
   };
 
@@ -8018,10 +9312,10 @@ function DiagnosticsScreen({
     <ScrollView contentContainerStyle={styles.screen}>
       <View style={styles.screenHeader}>
         <View style={styles.screenHeaderText}>
-          <Text style={styles.resourceTitle}>Support tools</Text>
+          <Text style={styles.resourceTitle}>{strings.more.diagnostics}</Text>
           <Text style={styles.resourceSubtitle}>
-            {policyEnabled ? "Available" : "Managed by policy"} -{" "}
-            {formatConnectivityStatusLabel(connectivityStatus).toLowerCase()}
+            {policyEnabled ? "Policy enabled" : "Disabled by policy"} -{" "}
+            {formatConnectivityStatusLabel(connectivityStatus, strings).toLowerCase()}
           </Text>
         </View>
       </View>
@@ -8029,7 +9323,7 @@ function DiagnosticsScreen({
       <View style={styles.noticeCard}>
         <Text style={styles.noticeText}>Session</Text>
         <Text style={styles.noticeSubtext}>
-          {me?.user?.email ?? "unknown"} - access {formatKeyLabel(me?.access_scope?.scope_type ?? "unknown")}
+          {me?.user?.email ?? "unknown"} - scope {me?.access_scope?.scope_type ?? "?"}
         </Text>
         <Text style={styles.noticeSubtext}>
           Device: {deviceId ? "registered" : "missing"} - Outbox pending: {outboxCount}
@@ -8061,27 +9355,28 @@ function DiagnosticsScreen({
           style={({ pressed }) => [styles.noticeCard, pressed && styles.navItemPressed]}
         >
           <Text style={styles.noticeText}>
-            Support mode {userToggle ? "ON" : "OFF"}
+            Diagnostics {userToggle ? "ON" : "OFF"}
           </Text>
           <Text style={styles.noticeSubtext}>
-            Tap to change support mode (default {defaultOn ? "on" : "off"})
+            Tap to toggle (default {defaultOn ? "on" : "off"})
           </Text>
         </Pressable>
       ) : (
         <View style={styles.noticeCard}>
           <Text style={styles.noticeText}>
-            Support mode {effectiveDiagnosticsOn ? "ON" : "OFF"}
+            Diagnostics {effectiveDiagnosticsOn ? "ON" : "OFF"}
           </Text>
           <Text style={styles.noticeSubtext}>
             {policyEnabled
-              ? "Changes are managed by policy."
-              : "Support mode is managed by policy."}
+              ? "Toggles disabled by policy."
+              : "Diagnostics are disabled by policy."}
           </Text>
         </View>
       )}
 
       <View style={styles.screenActionsRow}>
         <Pressable
+          accessibilityRole="button"
           onPress={handleClear}
           disabled={busy}
           style={({ pressed }) => [
@@ -8097,16 +9392,8 @@ function DiagnosticsScreen({
       {effectiveDiagnosticsOn ? (
         <>
           <View style={styles.noticeCard}>
-            <Text style={styles.noticeText}>Queued action summary</Text>
-            {Object.entries(outboxStatsQuery.data ?? {}).length ? (
-              Object.entries(outboxStatsQuery.data ?? {}).map(([status, count]) => (
-                <Text key={status} style={styles.noticeSubtext}>
-                  {formatKeyLabel(status)}: {count}
-                </Text>
-              ))
-            ) : (
-              <Text style={styles.noticeSubtext}>No queued actions.</Text>
-            )}
+            <Text style={styles.noticeText}>Outbox stats</Text>
+            <Text style={styles.mono}>{stableStringify(outboxStatsQuery.data ?? {})}</Text>
           </View>
         </>
       ) : null}
@@ -8114,72 +9401,10 @@ function DiagnosticsScreen({
   );
 }
 
-function RouteSurfaceDetailExtensions({
-  detail,
-  resourceId,
-  surfaceLabel,
-  diagnosticsEnabled,
-  interactionLocked,
-  addressPolicy,
-  communicationPolicy,
-  navigationPolicy,
-  platform,
-  routeExecutionManifest,
-  isConfirmingRouteDeparture,
-  onLogUiEvents,
-  onOpenScan,
-  onOpenRouteScan,
-  onConfirmRouteDeparture,
-}: {
-  detail: Record<string, unknown>;
-  resourceId: string | null;
-  surfaceLabel: string;
-  diagnosticsEnabled: boolean;
-  interactionLocked: boolean;
-  addressPolicy: MobileAddressPolicy;
-  communicationPolicy: MobileCommunicationPolicy;
-  navigationPolicy: MobileNavigationPolicy;
-  platform: "android" | "ios" | "scanner";
-  routeExecutionManifest: Record<string, unknown> | null | undefined;
-  isConfirmingRouteDeparture: boolean;
-  onLogUiEvents: (events: Array<Record<string, unknown>>) => Promise<MobileUiEventLogResult>;
-  onOpenScan: () => void;
-  onOpenRouteScan: () => void;
-  onConfirmRouteDeparture: () => void;
-}) {
-  const stop = React.useMemo(() => extractOperationalStopSnapshot(detail), [detail]);
-  const routeContext = React.useMemo(() => extractScanContext(detail, resourceId), [detail, resourceId]);
-  const contacts = React.useMemo(
-    () => extractOperationalContacts(detail, communicationPolicy),
-    [communicationPolicy, detail]
-  );
-  const coordinates = React.useMemo(() => extractCoordinates(detail), [detail]);
-  const addressRows = React.useMemo(
-    () => extractAddressFields(detail, addressPolicy),
-    [addressPolicy, detail]
-  );
-  const routeManifest = React.useMemo(() => asRecord(routeExecutionManifest), [routeExecutionManifest]);
-  const scanOut = React.useMemo(() => asRecord(routeManifest.scan_out), [routeManifest]);
-  const routeDeparture = React.useMemo(() => asRecord(routeManifest.route_departure), [routeManifest]);
-  const customerContact = contacts.customer;
-  const supportContacts = contacts.supportContacts;
-  const phone = customerContact?.phone ?? stop.phone;
-  const customerName =
-    customerContact?.name ?? customerContact?.label ?? stop.customerName ?? extractCustomerName(detail);
-  const navigationProvider = navigationPolicy.providerByPlatform[platform] ?? "google_maps";
-  const navigationUrl =
-    coordinates != null
-      ? buildNavigationUrl({
-          provider: navigationProvider,
-          platform,
-          latitude: coordinates.latitude,
-          longitude: coordinates.longitude,
-        })
-      : null;
-  const [isExecutingRouteAction, setIsExecutingRouteAction] = React.useState(false);
-  const isExecutingRouteActionRef = React.useRef(false);
-  const [lastRouteEventReadback, setLastRouteEventReadback] =
-    React.useState<MobileUiEventLogResult | null>(null);
+function routeManifestSnapshot(manifest: unknown) {
+  const routeManifest = asRecord(manifest);
+  const scanOut = asRecord(routeManifest.scan_out);
+  const routeDeparture = asRecord(routeManifest.route_departure);
   const expectedStopCount =
     coerceValueNumber(scanOut.expected_stop_count) ?? coerceValueNumber(routeManifest.stop_count);
   const scannedStopCount = coerceValueNumber(scanOut.scanned_stop_count);
@@ -8197,6 +9422,153 @@ function RouteSurfaceDetailExtensions({
         .slice(0, 3)
         .join(", ")
     : null;
+  return { expectedStopCount, scannedStopCount, missingStopCount, unexpectedScanCount, duplicateScanCount, isRouteDepartureReady, routeDepartureConfirmedAt, routeDepartureConfirmedBy, routeLoadScannedAt, unexpectedBarcodeSummary };
+}
+
+function RouteManifestReadback({ manifest }: { manifest: unknown }) {
+  const styles = useFieldOpsStyles();
+  const { expectedStopCount, scannedStopCount, missingStopCount, unexpectedScanCount, duplicateScanCount, isRouteDepartureReady, routeDepartureConfirmedAt, routeDepartureConfirmedBy, routeLoadScannedAt, unexpectedBarcodeSummary } = routeManifestSnapshot(manifest);
+  return (
+    <>
+      <Text style={styles.noticeText}>Route load scan-out</Text>
+          <Text style={styles.noticeSubtext}>
+            {routeDepartureConfirmedAt
+              ? "Departure confirmed"
+              : isRouteDepartureReady
+                ? "Ready for departure"
+                : "Scan route loads before departure"}
+          </Text>
+          <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+            Scanned stops: {scannedStopCount ?? 0}
+            {expectedStopCount != null ? ` / ${expectedStopCount}` : ""}
+          </Text>
+          <Text style={styles.noticeSubtext}>
+            Missing: {missingStopCount ?? 0} - Unexpected: {unexpectedScanCount} - Duplicate scans: {duplicateScanCount}
+          </Text>
+          {routeLoadScannedAt ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Last route load scan: {routeLoadScannedAt}
+            </Text>
+          ) : null}
+          {unexpectedBarcodeSummary ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Unexpected barcodes: {unexpectedBarcodeSummary}
+            </Text>
+          ) : null}
+          {routeDepartureConfirmedAt ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Confirmed at {routeDepartureConfirmedAt}
+              {routeDepartureConfirmedBy ? ` by ${routeDepartureConfirmedBy}` : ""}
+            </Text>
+          ) : null}
+    </>
+  );
+}
+
+function RouteSurfaceDetailExtensions({
+  strings,
+  detail,
+  resourceId,
+  surfaceLabel,
+  diagnosticsEnabled,
+  interactionLocked,
+  addressActionStrings,
+  addressPolicy,
+  communicationPolicy,
+  navigationPolicy,
+  platform,
+  routeExecutionManifest,
+  routeLoadStrings,
+  routeLoadQueueReady,
+  onRouteLoadAction,
+  isConfirmingRouteDeparture,
+  departureRequestState,
+  onEnqueueUiEvents,
+  onOpenScan,
+  onOpenRouteScan,
+  onConfirmRouteDeparture,
+}: {
+  strings: FieldOpsStrings;
+  detail: Record<string, unknown>;
+  resourceId: string | null;
+  surfaceLabel: string;
+  diagnosticsEnabled: boolean;
+  interactionLocked: boolean;
+  addressActionStrings: FieldOpsStrings["addressActions"];
+  addressPolicy: MobileAddressPolicy;
+  communicationPolicy: MobileCommunicationPolicy;
+  navigationPolicy: MobileNavigationPolicy;
+  platform: "android" | "ios" | "scanner";
+  routeExecutionManifest: Record<string, unknown> | null | undefined;
+  routeLoadStrings: FieldOpsStrings["routeLoad"];
+  routeLoadQueueReady: boolean;
+  onRouteLoadAction: (input: RouteLoadActionInput) => Promise<void>;
+  isConfirmingRouteDeparture: boolean;
+  departureRequestState: "none" | "pending" | "blocked";
+  onEnqueueUiEvents: (events: Array<Record<string, unknown>>) => Promise<void>;
+  onOpenScan: () => void;
+  onOpenRouteScan: () => void;
+  onConfirmRouteDeparture: () => void;
+}) {
+  const styles = useFieldOpsStyles();
+  const stop = React.useMemo(() => extractOperationalStopSnapshot(detail), [detail]);
+  const routeContext = React.useMemo(() => extractScanContext(detail, resourceId), [detail, resourceId]);
+  const contacts = React.useMemo(
+    () => extractOperationalContacts(detail, communicationPolicy),
+    [communicationPolicy, detail]
+  );
+  const coordinates = React.useMemo(() => extractCoordinates(detail), [detail]);
+  const addressRows = React.useMemo(
+    () => extractAddressFields(detail, addressPolicy),
+    [addressPolicy, detail]
+  );
+  const { routeDepartureConfirmedAt } = routeManifestSnapshot(routeExecutionManifest);
+  const routeManifest = React.useMemo(() => asRecord(routeExecutionManifest), [routeExecutionManifest]);
+  const parcelManifest = React.useMemo(() => parseRouteLoadManifest(routeManifest.load_manifest), [routeManifest]);
+  const [routeLoadNote, setRouteLoadNote] = React.useState("");
+  const [routeLoadSubmitting, setRouteLoadSubmitting] = React.useState(false);
+  const routeLoadSubmittingRef = React.useRef(false);
+  const [routeLoadMessage, setRouteLoadMessage] = React.useState<string | null>(null);
+  const [routeLoadError, setRouteLoadError] = React.useState(false);
+  const submitRouteLoadAction = async (input: RouteLoadActionInput) => {
+    if (routeLoadSubmittingRef.current || interactionLocked || !parcelManifest?.canRecordActions || !routeLoadQueueReady) return;
+    if (input.action === "report_discrepancy" && !routeLoadNote.trim()) {
+      setRouteLoadError(true);
+      setRouteLoadMessage(routeLoadStrings.noteRequired);
+      return;
+    }
+    routeLoadSubmittingRef.current = true;
+    setRouteLoadSubmitting(true);
+    try {
+      await onRouteLoadAction({ ...input, note: routeLoadNote });
+      setRouteLoadNote("");
+      setRouteLoadError(false);
+      setRouteLoadMessage(routeLoadStrings.queued);
+    } catch {
+      setRouteLoadError(true);
+      setRouteLoadMessage(routeLoadStrings.queueFailed);
+    } finally {
+      routeLoadSubmittingRef.current = false;
+      setRouteLoadSubmitting(false);
+    }
+  };
+  const customerContact = contacts.customer;
+  const supportContacts = contacts.supportContacts;
+  const phone = customerContact?.phone ?? stop.phone;
+  const customerName =
+    customerContact?.name ?? customerContact?.label ?? stop.customerName ?? extractCustomerName(detail);
+  const navigationProvider = navigationPolicy.providerByPlatform[platform] ?? "google_maps";
+  const navigationUrl =
+    coordinates != null
+      ? buildNavigationUrl({
+          provider: navigationProvider,
+          platform,
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
+        })
+      : null;
+  const [isExecutingRouteAction, setIsExecutingRouteAction] = React.useState(false);
+  const isExecutingRouteActionRef = React.useRef(false);
   const withRouteActionLock = React.useCallback(async (action: () => Promise<void>) => {
     if (isExecutingRouteActionRef.current) return;
     isExecutingRouteActionRef.current = true;
@@ -8218,7 +9590,7 @@ function RouteSurfaceDetailExtensions({
     }) => {
       await withRouteActionLock(async () => {
         if (interactionLocked) {
-          Alert.alert("Driving mode locked", "Stop moving before running route actions.");
+          Alert.alert(strings.alerts.drivingLockedTitle, "Stop moving before running route actions.");
           return;
         }
         if (!input.url) {
@@ -8236,7 +9608,7 @@ function RouteSurfaceDetailExtensions({
           Alert.alert("Action unavailable", input.unavailableMessage);
         }
 
-        const readback = await onLogUiEvents([
+        await onEnqueueUiEvents([
           {
             event_type: input.eventType,
             captured_at: new Date().toISOString(),
@@ -8249,10 +9621,9 @@ function RouteSurfaceDetailExtensions({
             },
           },
         ]);
-        setLastRouteEventReadback(readback);
       });
     },
-    [interactionLocked, onLogUiEvents, platform, withRouteActionLock]
+    [strings, interactionLocked, onEnqueueUiEvents, platform, withRouteActionLock]
   );
 
   const statusChips = [
@@ -8268,11 +9639,29 @@ function RouteSurfaceDetailExtensions({
       : null,
   ].filter(Boolean) as string[];
   const expectedCodLabel = formatMoneyLabel(stop.expectedAmount ?? stop.codAmount, stop.currency);
+  const collectedCodLabel = formatMoneyLabel(stop.collectedAmount, stop.currency);
+  const varianceCodLabel = formatMoneyLabel(stop.varianceAmount, stop.currency);
+  const proofArtifactLabel =
+    stop.proofArtifactCount != null
+      ? String(stop.proofArtifactCount)
+      : stop.proofArtifactIds.length
+        ? String(stop.proofArtifactIds.length)
+        : null;
   const allowedMethodsLabel = stop.allowedMethods.length
     ? stop.allowedMethods.map((method) => formatKeyLabel(method)).join(", ")
     : null;
   const showPaymentCollectionCard = Boolean(
-    expectedCodLabel || stop.paymentModeLabel || allowedMethodsLabel
+    expectedCodLabel ||
+      collectedCodLabel ||
+      varianceCodLabel ||
+      stop.collectionOutcome ||
+      stop.discrepancyKind ||
+      stop.hasDiscrepancy != null ||
+      stop.receiptContext ||
+      proofArtifactLabel ||
+      stop.signatureArtifactId ||
+      stop.paymentModeLabel ||
+      allowedMethodsLabel
   );
 
   const handleNavigate = React.useCallback(() => {
@@ -8366,13 +9755,13 @@ function RouteSurfaceDetailExtensions({
           })}
         </Text>
         {stop.reference && stop.reference !== stop.title ? (
-          <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>Reference: {stop.reference}</Text>
+          <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>{strings.detail.reference(stop.reference)}</Text>
         ) : null}
         {stop.addressSummary ? (
           <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>{stop.addressSummary}</Text>
         ) : (
           <Text style={[styles.noticeSubtext, styles.error, { marginTop: 4 }]}>
-            Address incomplete
+            {strings.detail.addressIncomplete}
           </Text>
         )}
         {statusChips.length ? (
@@ -8390,46 +9779,30 @@ function RouteSurfaceDetailExtensions({
             <Text style={styles.detailValue}>{stop.notes}</Text>
           </View>
         ) : (
-          <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>No stop instructions</Text>
+          <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>{strings.detail.noStopInstructions}</Text>
         )}
       </View>
 
       {routeContext.routeRunId ? (
         <View style={[styles.noticeCard, { marginTop: 12 }]}>
-          <Text style={styles.noticeText}>Route load scan-out</Text>
-          <Text style={styles.noticeSubtext}>
-            {routeDepartureConfirmedAt
-              ? "Departure confirmed"
-              : isRouteDepartureReady
-                ? "Ready for departure"
-                : "Scan route loads before departure"}
-          </Text>
+          <Text style={styles.noticeText}>{strings.route.closeoutTitle}</Text>
+          <Text style={styles.noticeSubtext}>{strings.route.closeoutRoute(routeContext.routeRunId)}</Text>
           <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-            Scanned stops: {scannedStopCount ?? 0}
-            {expectedStopCount != null ? ` / ${expectedStopCount}` : ""}
+            {strings.route.closeoutScope}
           </Text>
-          <Text style={styles.noticeSubtext}>
-            Missing: {missingStopCount ?? 0} - Unexpected: {unexpectedScanCount} - Duplicate scans: {duplicateScanCount}
-          </Text>
-          {routeLoadScannedAt ? (
-            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Last route load scan: {routeLoadScannedAt}
-            </Text>
-          ) : null}
-          {unexpectedBarcodeSummary ? (
-            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Unexpected barcodes: {unexpectedBarcodeSummary}
-            </Text>
-          ) : null}
-          {routeDepartureConfirmedAt ? (
-            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-              Confirmed at {routeDepartureConfirmedAt}
-              {routeDepartureConfirmedBy ? ` by ${routeDepartureConfirmedBy}` : ""}
-            </Text>
-          ) : null}
+          <View style={[styles.detailRow, { marginTop: 10 }]}>
+            <View>
+              <Text style={styles.detailKey}>{strings.route.settlementBoundaryTitle}</Text>
+              <Text style={styles.noticeSubtext}>
+                {strings.route.settlementBoundary}
+              </Text>
+            </View>
+          </View>
+          <RouteManifestReadback manifest={routeExecutionManifest} />
           <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
             <Pressable
               onPress={onOpenRouteScan}
+              {...mobileActionAccessibility(interactionLocked ? strings.scan.drivingLocked : strings.actionAccessibility.busy, interactionLocked || isExecutingRouteAction, isExecutingRouteAction)}
               disabled={interactionLocked || isExecutingRouteAction}
               style={({ pressed }) => [
                 styles.actionButton,
@@ -8441,11 +9814,12 @@ function RouteSurfaceDetailExtensions({
             </Pressable>
             <Pressable
               onPress={onConfirmRouteDeparture}
+              {...mobileActionAccessibility(interactionLocked ? strings.scan.drivingLocked : isExecutingRouteAction || isConfirmingRouteDeparture ? strings.actionAccessibility.busy : routeDepartureConfirmedAt ? strings.actionAccessibility.completed : departureRequestState === "blocked" ? strings.route.departureReview : strings.route.departureRequestExplanation, interactionLocked || isExecutingRouteAction || isConfirmingRouteDeparture || departureRequestState !== "none" || Boolean(routeDepartureConfirmedAt), isExecutingRouteAction || isConfirmingRouteDeparture)}
               disabled={
                 interactionLocked ||
                 isExecutingRouteAction ||
                 isConfirmingRouteDeparture ||
-                !isRouteDepartureReady ||
+                departureRequestState !== "none" ||
                 Boolean(routeDepartureConfirmedAt)
               }
               style={({ pressed }) => [
@@ -8453,7 +9827,7 @@ function RouteSurfaceDetailExtensions({
                 (interactionLocked ||
                   isExecutingRouteAction ||
                   isConfirmingRouteDeparture ||
-                  !isRouteDepartureReady ||
+                  departureRequestState !== "none" ||
                   Boolean(routeDepartureConfirmedAt)) &&
                   styles.syncButtonDisabled,
                 pressed && styles.navItemPressed,
@@ -8461,13 +9835,109 @@ function RouteSurfaceDetailExtensions({
             >
               <Text style={styles.actionButtonText}>
                 {routeDepartureConfirmedAt
-                  ? "Departure confirmed"
+                  ? strings.route.departureConfirmed
                   : isConfirmingRouteDeparture
-                    ? "Confirming..."
-                    : "Confirm departure"}
+                    ? strings.route.departureQueueing
+                    : departureRequestState === "pending" ? strings.route.departureQueued
+                    : departureRequestState === "blocked" ? strings.route.departureBlocked
+                    : strings.route.departureRequest}
               </Text>
             </Pressable>
           </View>
+        </View>
+      ) : null}
+
+      {routeContext.routeRunId ? (
+        <View style={[styles.noticeCard, { marginTop: 12 }]}>
+          <Text style={styles.noticeText}>{routeLoadStrings.title}</Text>
+          {!parcelManifest ? <Text style={styles.noticeSubtext}>{routeLoadStrings.unavailable}</Text> : (
+            <>
+              <Text style={styles.noticeSubtext}>
+                {routeLoadStrings.cold}: {parcelManifest.totals.cold} · {routeLoadStrings.weight}: {parcelManifest.totals.weightKg.toFixed(1)} kg
+              </Text>
+              {parcelManifest.totals.unknownCold || parcelManifest.totals.unknownWeight ? (
+                <Text style={styles.noticeSubtext}>
+                  {routeLoadStrings.partial}: {routeLoadStrings.cold} {parcelManifest.totals.unknownCold}, {routeLoadStrings.weight} {parcelManifest.totals.unknownWeight}
+                </Text>
+              ) : null}
+              <Text style={styles.noticeSubtext}>
+                {routeLoadStrings.scanned}: {parcelManifest.totals.scanned} / {parcelManifest.totals.expected} · {routeLoadStrings.pending}: {parcelManifest.totals.pending} · {routeLoadStrings.missing}: {parcelManifest.totals.missing} · {routeLoadStrings.extra}: {parcelManifest.totals.extra}
+              </Text>
+              {parcelManifest.parcels.length === 0 ? <Text style={styles.noticeSubtext}>{routeLoadStrings.empty}</Text> : null}
+              {parcelManifest.groups.map((group) => (
+                <View key={group.routeStopId ?? "extra"} style={{ marginTop: 12 }}>
+                  <Text style={styles.noticeText}>
+                    {group.routeStopId ? `${routeLoadStrings.destination}: ${group.routeStopId}` : routeLoadStrings.extra}
+                  </Text>
+                  <Text style={styles.noticeSubtext}>
+                    {group.parcels.filter((parcel) => parcel.status === "scanned").length} / {group.parcels.length} · {group.parcels.reduce((total, parcel) => total + (parcel.weightKg ?? 0), 0).toFixed(1)} kg
+                    {group.parcels.some((parcel) => parcel.weightKg === null) ? ` · ${routeLoadStrings.partial}` : ""}
+                  </Text>
+                  {group.parcels.map((parcel) => (
+                    <View key={parcel.key} style={[styles.detailRow, { flexDirection: "column", alignItems: "stretch", gap: 8 }]}>
+                      <Text style={styles.noticeText}>{parcel.barcode}</Text>
+                      <Text style={styles.noticeSubtext}>
+                        {routeLoadStrings[parcel.status]} · {parcel.weightKg === null ? routeLoadStrings.weightUnknown : `${parcel.weightKg} kg`}
+                        {parcel.cold === true ? ` · ${routeLoadStrings.cold}` : parcel.cold === null ? ` · ${routeLoadStrings.handlingUnknown}` : ""}
+                      </Text>
+                      {parcel.reason ? <Text style={styles.noticeSubtext}>{parcel.reason}</Text> : null}
+                      {parcelManifest.canRecordActions && (parcel.status === "pending" || parcel.status === "missing") ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${parcel.status === "missing" ? routeLoadStrings.undo : routeLoadStrings.markMissing}: ${parcel.barcode}`}
+                          onPress={() => void submitRouteLoadAction({
+                            action: parcel.status === "missing" ? "undo_missing" : "mark_missing",
+                            routeStopId: parcel.routeStopId, parcelId: parcel.parcelId,
+                          })}
+                          disabled={interactionLocked || routeLoadSubmitting || !routeLoadQueueReady}
+                          style={({ pressed }) => [styles.actionButton, { minHeight: 48 },
+                            (interactionLocked || routeLoadSubmitting || !routeLoadQueueReady) && styles.syncButtonDisabled,
+                            pressed && styles.navItemPressed]}
+                        >
+                          <Text style={styles.actionButtonText}>{parcel.status === "missing" ? routeLoadStrings.undo : routeLoadStrings.markMissing}</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              ))}
+              {parcelManifest.lastDiscrepancy ? <Text style={styles.noticeSubtext}>{routeLoadStrings.lastDiscrepancy}: {parcelManifest.lastDiscrepancy}</Text> : null}
+              {parcelManifest.canRecordActions ? (
+                <>
+                  <Text style={[styles.noticeText, { marginTop: 12 }]} nativeID="route-load-note-label">{routeLoadStrings.noteLabel}</Text>
+                  <TextInput
+                    accessibilityLabel={routeLoadStrings.noteLabel}
+                    accessibilityLabelledBy="route-load-note-label"
+                    multiline maxLength={1000} value={routeLoadNote}
+                    editable={!interactionLocked && !routeLoadSubmitting}
+                    onChangeText={(value) => {
+                      setRouteLoadNote(value);
+                      if (routeLoadError) { setRouteLoadMessage(null); setRouteLoadError(false); }
+                    }}
+                    style={[styles.input, { minHeight: 48, marginTop: 8 }]}
+                  />
+                  <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
+                    <Pressable accessibilityRole="button" onPress={onOpenRouteScan}
+                      disabled={interactionLocked || routeLoadSubmitting}
+                      style={({ pressed }) => [styles.actionButton, { minHeight: 48 },
+                        (interactionLocked || routeLoadSubmitting) && styles.syncButtonDisabled, pressed && styles.navItemPressed]}>
+                      <Text style={styles.actionButtonText}>{routeLoadStrings.scan}</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole="button" onPress={() => void submitRouteLoadAction({ action: "report_discrepancy" })}
+                      disabled={interactionLocked || routeLoadSubmitting || !routeLoadQueueReady}
+                      style={({ pressed }) => [styles.actionButton, { minHeight: 48 },
+                        (interactionLocked || routeLoadSubmitting || !routeLoadQueueReady) && styles.syncButtonDisabled, pressed && styles.navItemPressed]}>
+                      <Text style={styles.actionButtonText}>{routeLoadStrings.report}</Text>
+                    </Pressable>
+                  </View>
+                </>
+              ) : null}
+              {routeLoadMessage ? (
+                <Text accessibilityLiveRegion="polite" accessibilityRole={routeLoadError ? "alert" : undefined}
+                  style={[styles.noticeSubtext, routeLoadError && styles.error, { marginTop: 8 }]}>{routeLoadMessage}</Text>
+              ) : null}
+            </>
+          )}
         </View>
       ) : null}
 
@@ -8486,6 +9956,42 @@ function RouteSurfaceDetailExtensions({
               Payment mode: {stop.paymentModeLabel}
             </Text>
           ) : null}
+          {stop.collectionOutcome ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Collection outcome: {formatKeyLabel(stop.collectionOutcome)}
+            </Text>
+          ) : null}
+          {collectedCodLabel ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Collected amount: {collectedCodLabel}
+            </Text>
+          ) : null}
+          {varianceCodLabel ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Variance amount: {varianceCodLabel}
+            </Text>
+          ) : null}
+          {stop.discrepancyKind ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Discrepancy: {formatKeyLabel(stop.discrepancyKind)}
+            </Text>
+          ) : null}
+          {stop.hasDiscrepancy === false ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>No COD discrepancy recorded.</Text>
+          ) : null}
+          {stop.receiptContext ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Receipt: {stop.receiptContext}
+            </Text>
+          ) : null}
+          {proofArtifactLabel ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
+              Proof artifacts: {proofArtifactLabel}
+            </Text>
+          ) : null}
+          {stop.signatureArtifactId ? (
+            <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>Signature proof recorded</Text>
+          ) : null}
           {allowedMethodsLabel ? (
             <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
               Accepted methods: {allowedMethodsLabel}
@@ -8498,17 +10004,17 @@ function RouteSurfaceDetailExtensions({
       ) : null}
 
       <View style={[styles.noticeCard, { marginTop: 12 }]}>
-        <Text style={styles.noticeText}>Contact and actions</Text>
+        <Text style={styles.noticeText}>{strings.detail.contactActions}</Text>
         <Text style={styles.noticeSubtext}>
-          Recipient: {customerName || "No recipient details"}
+          {strings.detail.recipient(customerName || strings.detail.noRecipient)}
         </Text>
         <Text style={[styles.noticeSubtext, { marginTop: 4 }]}>
-          Phone: {phone ?? "No phone on file"}
+          Phone: {phone ?? strings.detail.noPhoneOnFile}
         </Text>
         <Text style={styles.noticeSubtext}>
-          Navigation: {formatKeyLabel(navigationProvider)}
+          Provider: {navigationProvider}
           {coordinates
-            ? ` - Coordinates ${coordinates.latitude.toFixed(6)}, ${coordinates.longitude.toFixed(6)}`
+            ? ` - lat ${coordinates.latitude.toFixed(6)} - lng ${coordinates.longitude.toFixed(6)}`
             : " - no coordinates"}
         </Text>
         {interactionLocked ? (
@@ -8516,27 +10022,22 @@ function RouteSurfaceDetailExtensions({
             Driving lock is active. Stop moving to run actions.
           </Text>
         ) : null}
-        {lastRouteEventReadback ? (
-          <Text style={[styles.noticeSubtext, { marginTop: 6 }]}>
-            Action logged: {formatKeyLabel(lastRouteEventReadback.status)} -{" "}
-            {lastRouteEventReadback.eventCount} update
-            {lastRouteEventReadback.eventCount === 1 ? "" : "s"}
-          </Text>
-        ) : null}
         <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
           <Pressable
             onPress={handleNavigate}
-            disabled={interactionLocked || isExecutingRouteAction}
+            {...mobileActionAccessibility(interactionLocked ? strings.scan.drivingLocked : isExecutingRouteAction ? strings.actionAccessibility.busy : strings.actionAccessibility.coordinatesMissing, interactionLocked || isExecutingRouteAction || !coordinates, isExecutingRouteAction)}
+            disabled={interactionLocked || isExecutingRouteAction || !coordinates}
             style={({ pressed }) => [
               styles.actionButton,
-              (interactionLocked || isExecutingRouteAction) && styles.syncButtonDisabled,
+              (interactionLocked || isExecutingRouteAction || !coordinates) && styles.syncButtonDisabled,
               pressed && styles.navItemPressed,
             ]}
           >
-            <Text style={styles.actionButtonText}>Navigate</Text>
+            <Text style={styles.actionButtonText}>{strings.detail.navigate}</Text>
           </Pressable>
           <Pressable
             onPress={onOpenScan}
+            {...mobileActionAccessibility(interactionLocked ? strings.scan.drivingLocked : isExecutingRouteAction ? strings.actionAccessibility.busy : strings.actionAccessibility.resourceMissing, interactionLocked || isExecutingRouteAction || !resourceId, isExecutingRouteAction)}
             disabled={interactionLocked || isExecutingRouteAction || !resourceId}
             style={({ pressed }) => [
               styles.actionButton,
@@ -8545,7 +10046,7 @@ function RouteSurfaceDetailExtensions({
               pressed && styles.navItemPressed,
             ]}
           >
-            <Text style={styles.actionButtonText}>Scan parcel</Text>
+            <Text style={styles.actionButtonText}>{strings.detail.scanParcel}</Text>
           </Pressable>
           {contactChannels.map((channel) => {
             const disabled =
@@ -8570,6 +10071,7 @@ function RouteSurfaceDetailExtensions({
                     channel
                   )
                 }
+                {...mobileActionAccessibility(interactionLocked ? strings.scan.drivingLocked : isExecutingRouteAction ? strings.actionAccessibility.busy : !customerContact?.phone ? strings.actionAccessibility.contactMissing : strings.actionAccessibility.channelUnavailable, disabled, isExecutingRouteAction)}
                 disabled={disabled}
                 style={({ pressed }) => [
                   styles.actionButton,
@@ -8577,7 +10079,7 @@ function RouteSurfaceDetailExtensions({
                   pressed && styles.navItemPressed,
                 ]}
               >
-                <Text style={styles.actionButtonText}>{formatKeyLabel(channel)}</Text>
+                <Text style={styles.actionButtonText}>{strings.detail[channel]}</Text>
               </Pressable>
             );
           })}
@@ -8593,7 +10095,7 @@ function RouteSurfaceDetailExtensions({
         <View style={[styles.noticeCard, { marginTop: 12 }]}>
           <Text style={styles.noticeText}>Support contacts</Text>
           <Text style={styles.noticeSubtext}>
-            Contacts available for this route.
+            Policy and assignment contacts from the active route context.
           </Text>
           {supportContacts.map((contact) => {
             return (
@@ -8604,7 +10106,7 @@ function RouteSurfaceDetailExtensions({
                 <View>
                   <Text style={styles.detailKey}>{contact.label}</Text>
                   <Text style={styles.detailValue}>
-                    {contact.phone ?? "No phone on file"}
+                    {contact.phone ?? strings.detail.noPhoneOnFile}
                   </Text>
                   <Text style={styles.noticeSubtext}>
                     {formatKeyLabel(contact.role)} - {formatKeyLabel(contact.source)}
@@ -8635,6 +10137,7 @@ function RouteSurfaceDetailExtensions({
                             channel
                           )
                         }
+                        {...mobileActionAccessibility(interactionLocked ? strings.scan.drivingLocked : isExecutingRouteAction ? strings.actionAccessibility.busy : !contact.phone ? strings.actionAccessibility.contactMissing : strings.actionAccessibility.channelUnavailable, disabled, isExecutingRouteAction)}
                         disabled={disabled}
                         style={({ pressed }) => [
                           styles.chip,
@@ -8642,7 +10145,7 @@ function RouteSurfaceDetailExtensions({
                           pressed && styles.navItemPressed,
                         ]}
                       >
-                        <Text style={styles.chipText}>{formatKeyLabel(channel)}</Text>
+                        <Text style={styles.chipText}>{strings.detail[channel]}</Text>
                       </Pressable>
                     );
                   })}
@@ -8677,6 +10180,7 @@ function RouteSurfaceDetailExtensions({
                     template.id
                   )
                 }
+                {...mobileActionAccessibility(interactionLocked ? strings.scan.drivingLocked : isExecutingRouteAction ? strings.actionAccessibility.busy : !customerContact?.phone ? strings.actionAccessibility.contactMissing : strings.actionAccessibility.channelUnavailable, interactionLocked || isExecutingRouteAction || !customerContact?.phone || !customerContact.allowedChannels.includes("sms"), isExecutingRouteAction)}
                 disabled={
                   interactionLocked ||
                   isExecutingRouteAction ||
@@ -8701,10 +10205,21 @@ function RouteSurfaceDetailExtensions({
       ) : null}
 
       <View style={[styles.noticeCard, { marginTop: 12 }]}>
-        <Text style={styles.noticeText}>Address</Text>
+        <Text style={styles.noticeText}>{strings.detail.address}</Text>
         <Text style={styles.noticeSubtext}>
-          {stop.fullAddress ?? "Address incomplete"}
+          {stop.fullAddress ?? strings.detail.addressIncomplete}
         </Text>
+        {Platform.OS === "web" ? (
+          <StopAddressActions
+            address={stop.fullAddress ?? stop.addressSummary}
+            note={stop.notes}
+            reference={stop.reference}
+            disabled={interactionLocked || isExecutingRouteAction}
+            runAction={withRouteActionLock}
+            strings={addressActionStrings}
+            styles={styles}
+          />
+        ) : null}
         {addressRows.map((row) => (
           <View key={row.key} style={styles.detailRow}>
             <Text style={styles.detailKey}>
@@ -8718,15 +10233,15 @@ function RouteSurfaceDetailExtensions({
         ))}
         {addressPolicy.showAccuracy && coordinates?.accuracyM != null ? (
           <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>
-            Accuracy: +/-{Math.round(coordinates.accuracyM)}m
+            {strings.detail.accuracy(Math.round(coordinates.accuracyM))}
           </Text>
         ) : null}
         {stop.recipientMissing ? (
-          <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>No recipient details</Text>
+          <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>{strings.detail.noRecipient}</Text>
         ) : null}
         {diagnosticsEnabled ? (
-          <Text style={[styles.noticeSubtext, { marginTop: 8 }]}>
-            Support summary: contact {customerName || "-"} - phone {phone ?? "-"}.
+          <Text style={[styles.mono, { textAlign: "left", marginTop: 8 }]}>
+            contact:{customerName || "-"} - phone:{phone ?? "-"} - route_run:{routeContext.routeRunId ?? "-"}
           </Text>
         ) : null}
       </View>
@@ -8735,6 +10250,7 @@ function RouteSurfaceDetailExtensions({
 }
 
 function SettlementSurfaceDetailExtensions({
+  strings,
   detail,
   fallbackId,
   diagnosticsEnabled,
@@ -8742,6 +10258,7 @@ function SettlementSurfaceDetailExtensions({
   uxSafetyPolicy,
   onSubmitCount,
 }: {
+  strings: FieldOpsStrings;
   detail: Record<string, unknown>;
   fallbackId: string;
   diagnosticsEnabled: boolean;
@@ -8752,6 +10269,7 @@ function SettlementSurfaceDetailExtensions({
     settlement: ReturnType<typeof extractSettlementSnapshot>;
   }) => Promise<void>;
 }) {
+  const styles = useFieldOpsStyles();
   const settlement = React.useMemo(
     () => extractSettlementSnapshot(detail, fallbackId),
     [detail, fallbackId]
@@ -8777,7 +10295,7 @@ function SettlementSurfaceDetailExtensions({
   const submitCount = React.useCallback(() => {
     if (isSubmittingCountRef.current) return;
     if (interactionLocked) {
-      Alert.alert("Driving mode locked", "Stop moving before submitting counts.");
+      Alert.alert(strings.alerts.drivingLockedTitle, "Stop moving before submitting counts.");
       return;
     }
     if (!parsedIsValid) {
@@ -8796,7 +10314,7 @@ function SettlementSurfaceDetailExtensions({
     setIsSubmittingCount(true);
     onSubmitCount({ counted: parsedCounted, settlement })
       .then(() => {
-        Alert.alert("Queued", "Settlement count was queued for sync.");
+        Alert.alert(strings.settlements.countQueuedTitle, strings.settlements.countQueuedMessage);
       })
       .catch((error) => {
         logDebugFailure("failed to queue settlement count", error);
@@ -8806,7 +10324,7 @@ function SettlementSurfaceDetailExtensions({
         isSubmittingCountRef.current = false;
         setIsSubmittingCount(false);
       });
-  }, [
+  }, [strings,
     confirmArmed,
     interactionLocked,
     onSubmitCount,
@@ -8845,6 +10363,14 @@ function SettlementSurfaceDetailExtensions({
           <Text style={styles.detailValue}>
             {settlement.variance == null ? "-" : `${settlement.currency} ${settlement.variance}`}
           </Text>
+        </View>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailKey}>{strings.settlements.windowStart}</Text>
+          <Text style={styles.detailValue}>{settlement.windowStartAt ?? "-"}</Text>
+        </View>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailKey}>{strings.settlements.windowEnd}</Text>
+          <Text style={styles.detailValue}>{settlement.windowEndAt ?? "-"}</Text>
         </View>
       </View>
 
@@ -8898,6 +10424,7 @@ function SettlementSurfaceDetailExtensions({
 }
 
 function ResourceListView({
+  strings,
   list,
   source,
   displayMode,
@@ -8908,6 +10435,7 @@ function ResourceListView({
   onRefresh,
   onSelectItem,
 }: {
+  strings: FieldOpsStrings;
   list: UiResourceList;
   source: "network" | "cache";
   displayMode?: "list" | "orders_map";
@@ -8918,101 +10446,58 @@ function ResourceListView({
   onRefresh?: () => void;
   onSelectItem?: (item: Record<string, unknown>) => void;
 }) {
+  const styles = useFieldOpsStyles();
   const mode = displayMode ?? "list";
-  const toNumber = (value: unknown): number | null => {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value !== "string") return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
-  const getCoordinates = (item: Record<string, unknown>) => {
-    const extracted = extractCoordinates(item);
-    if (extracted) {
-      return {
-        latitude: extracted.latitude,
-        longitude: extracted.longitude,
-      };
-    }
-    const latitude =
-      toNumber(item.latitude) ??
-      toNumber(item.lat) ??
-      toNumber(item.destination_latitude) ??
-      toNumber(item.pickup_latitude);
-    const longitude =
-      toNumber(item.longitude) ??
-      toNumber(item.lng) ??
-      toNumber(item.destination_longitude) ??
-      toNumber(item.pickup_longitude);
-    if (latitude == null || longitude == null) return null;
-    return { latitude, longitude };
-  };
   const openItem = React.useCallback(
     (item: Record<string, unknown>) => {
       if (interactionLocked) {
-        Alert.alert("Driving mode locked", "Stop moving to open item details.");
+        Alert.alert(strings.alerts.drivingLockedTitle, "Stop moving to open item details.");
         return;
       }
       onSelectItem?.(item);
     },
-    [interactionLocked, onSelectItem]
+    [strings, interactionLocked, onSelectItem]
   );
-  const mapItems = React.useMemo(() => {
-    if (mode !== "orders_map" || surfaceKind === "route") return [];
-    return list.items
-      .map((item) => ({ item, coords: getCoordinates(item) }))
-      .filter((entry) => entry.coords != null) as Array<{
-      item: Record<string, unknown>;
-      coords: { latitude: number; longitude: number };
-    }>;
-  }, [list.items, mode, surfaceKind]);
+  const mapListEntries = React.useMemo(() => buildMobileMapListEntries(list.items), [list.items]);
+  const mapItems = mode === "orders_map" && surfaceKind !== "route" ? mapListEntries : [];
   const routeMapEntries = React.useMemo(() => {
     if (mode !== "orders_map" || surfaceKind !== "route") return [];
-    return list.items
-      .map((item, index) => {
-        const coords = getCoordinates(item);
-        if (!coords) return null;
-        const route = extractRouteCardSnapshot(item);
-        const id = pickResourceId(item, list.keys) ?? `route-${index + 1}`;
-        return {
-          id,
-          item,
-          coords,
-          title: formatOperationalTitle({
-            title: route.title,
-            customerName: route.customerName,
-            reference: route.reference,
-          }),
-          route,
-        };
-      })
-      .filter(
-        (
-          entry
-        ): entry is {
-          id: string;
-          item: Record<string, unknown>;
-          coords: { latitude: number; longitude: number };
-          title: string;
-          route: ReturnType<typeof extractRouteCardSnapshot>;
-        } => Boolean(entry)
-      );
-  }, [list.items, list.keys, mode, surfaceKind]);
-  const routeMapModel = React.useMemo(() => {
-    if (!mapPolicy || mode !== "orders_map" || surfaceKind !== "route") return null;
-    return buildRouteMapModel(
-      routeMapEntries.map((entry) => ({
-        id: entry.id,
-        latitude: entry.coords.latitude,
-        longitude: entry.coords.longitude,
-        status: entry.route.status,
-      })),
-      mapPolicy
-    );
-  }, [mapPolicy, mode, routeMapEntries, surfaceKind]);
+    return mapListEntries.map(({ item, coords }, index) => {
+      const route = extractRouteCardSnapshot(item);
+      return {
+        id: pickResourceId(item, list.keys) ?? `item-${index + 1}`,
+        item, coords, route,
+        title: formatOperationalTitle({ title: route.title, customerName: route.customerName, reference: route.reference }),
+      };
+    });
+  }, [mapListEntries, list.keys, mode, surfaceKind]);
+  const geographicModel = React.useMemo(() => buildMobileRealMapModel(mapListEntries.map(({ item, address }, index) => {
+    const route = extractRouteCardSnapshot(item);
+    return {
+      id: pickResourceId(item, list.keys) ?? `item-${index + 1}`,
+      title: formatResourceItemTitle(item, list.keys),
+      sequence: route.sequence,
+      status: typeof item.status === "string" ? item.status : null,
+      active: ["active", "enroute", "in_progress"].includes(route.status?.trim().toLowerCase() ?? ""),
+      address,
+    };
+  })), [mapListEntries, list.keys]);
   const routeMapById = React.useMemo(
     () => new Map(routeMapEntries.map((entry) => [entry.id, entry])),
     [routeMapEntries]
   );
+  const routeMapModel = React.useMemo(() => {
+    if (!mapPolicy || mode !== "orders_map" || surfaceKind !== "route") return null;
+    return buildRouteMapModel(
+      geographicModel.points.features.map((point) => ({
+        id: point.properties.id,
+        latitude: point.geometry.coordinates[1],
+        longitude: point.geometry.coordinates[0],
+        status: routeMapById.get(point.properties.id)?.route.status,
+      })),
+      mapPolicy
+    );
+  }, [mapPolicy, mode, routeMapById, surfaceKind, geographicModel]);
   const hasListItems = list.items.length > 0;
   const [focusedClusterKey, setFocusedClusterKey] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -9027,16 +10512,20 @@ function ResourceListView({
     <View style={styles.listWrapper}>
       <View style={styles.listMeta}>
         <Text style={styles.listMetaText}>
-          {list.total ?? list.items.length} items {source === "cache" ? "(cached)" : ""}
+          {strings.tasks.itemsCount(list.total ?? list.items.length)} {source === "cache" ? "(cached)" : ""}
         </Text>
       </View>
       {mode === "orders_map" && !hasListItems ? (
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeSubtext}>No items available.</Text>
+          <Text style={styles.noticeSubtext}>{strings.tasks.empty}</Text>
         </View>
       ) : null}
       {mode === "orders_map" ? (
         <ScrollView contentContainerStyle={styles.list}>
+          {mapPolicy ? <MobileRealMap model={geographicModel} policy={mapPolicy.openMap} strings={strings.realMap} interactionLocked={interactionLocked} onSelect={(id) => {
+            const index = list.items.findIndex((item, index) => (pickResourceId(item, list.keys) ?? `item-${index + 1}`) === id);
+            if (index >= 0) openItem(list.items[index]);
+          }} /> : null}
           {surfaceKind === "route" ? (
             <>
               <View style={styles.noticeCard}>
@@ -9054,7 +10543,7 @@ function ResourceListView({
                 ) : null}
                 <View style={[styles.screenActionsRow, { marginTop: 8 }]}>
                   <View style={styles.chip}>
-                    <Text style={styles.chipText}>{routeMapEntries.length} stops</Text>
+                    <Text style={styles.chipText}>{strings.route.subtitle(routeMapEntries.length)}</Text>
                   </View>
                   <View style={styles.chip}>
                     <Text style={styles.chipText}>
@@ -9079,57 +10568,11 @@ function ResourceListView({
                 </View>
               </View>
 
-              {routeMapModel?.mappableCount ? (
-                <View style={styles.routeMapBoard}>
-                  {routeMapModel.clusters.map((cluster) => (
-                    <Pressable
-                      key={cluster.key}
-                      onPress={() => setFocusedClusterKey(cluster.key)}
-                      style={({ pressed }) => [
-                        styles.routeMapCluster,
-                        { left: `${cluster.xPct}%`, top: `${cluster.yPct}%` },
-                        focusedClusterKey === cluster.key && styles.routeMapClusterFocused,
-                        pressed && styles.navItemPressed,
-                      ]}
-                    >
-                      <Text style={styles.routeMapClusterText}>{cluster.count}</Text>
-                    </Pressable>
-                  ))}
-                  {routeMapModel.pins.map((pin) => {
-                    const entry = routeMapById.get(pin.id);
-                    if (!entry) return null;
-                    const toneStyle =
-                      pin.tone === "done"
-                        ? styles.routeMapPinDone
-                        : pin.tone === "issue"
-                          ? styles.routeMapPinIssue
-                          : pin.tone === "active"
-                            ? styles.routeMapPinActive
-                            : styles.routeMapPinNeutral;
-                    const label =
-                      entry.route.sequence != null ? String(entry.route.sequence) : "\u2022";
-                    return (
-                      <Pressable
-                        key={pin.id}
-                        onPress={() => openItem(entry.item)}
-                        style={({ pressed }) => [
-                          styles.routeMapPin,
-                          toneStyle,
-                          { left: `${pin.xPct}%`, top: `${pin.yPct}%` },
-                          pressed && styles.navItemPressed,
-                        ]}
-                      >
-                        <Text style={styles.routeMapPinText}>{label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                  {interactionLocked ? (
-                    <View style={styles.routeMapLockOverlay}>
-                      <Text style={styles.routeMapLockText}>Driving mode lock active</Text>
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
+              {routeMapModel?.clusters.map((cluster) => (
+                <Pressable key={cluster.key} accessibilityRole="button" onPress={() => setFocusedClusterKey(cluster.key)} style={styles.card}>
+                  <Text>{strings.realMap.group(cluster.count)}</Text>
+                </Pressable>
+              ))}
 
               {focusedCluster ? (
                 <View style={styles.noticeCard}>
@@ -9168,6 +10611,7 @@ function ResourceListView({
                   return (
                     <Pressable
                       key={`route-entry-${entry.id}`}
+                      accessibilityRole="button"
                       onPress={() => openItem(entry.item)}
                       style={({ pressed }) => [styles.card, pressed && styles.navItemPressed]}
                     >
@@ -9208,32 +10652,17 @@ function ResourceListView({
                 <Text style={styles.noticeText}>Overview</Text>
                 <Text style={styles.noticeSubtext}>
                   {mapItems.length > 0
-                    ? `${mapItems.length} items with coordinates`
+                    ? `${mapItems.filter((entry) => entry.coords !== null).length} items with coordinates`
                     : "No coordinate fields available. Falling back to list-style cards."}
                 </Text>
               </View>
-              {mapItems.length > 0
-                ? mapItems.map(({ item, coords }, index) => (
-                    <Pressable
-                      key={`${list.resource}-map-${index}`}
-                      onPress={() => openItem(item)}
-                      style={({ pressed }) => [styles.card, pressed && styles.navItemPressed]}
-                    >
-                      <Text style={styles.cardTitle}>{formatResourceItemTitle(item, list.keys)}</Text>
-                      <Text style={styles.cardSubtitle}>
-                        lat {coords.latitude.toFixed(6)} - lng {coords.longitude.toFixed(6)}
-                      </Text>
-                    </Pressable>
-                  ))
-                : list.items.map((item, index) => (
-                    <Pressable
-                      key={`${list.resource}-fallback-${index}`}
-                      onPress={() => openItem(item)}
-                      style={({ pressed }) => [styles.card, pressed && styles.navItemPressed]}
-                    >
-                      <Text style={styles.cardTitle}>{formatResourceItemTitle(item, list.keys)}</Text>
-                    </Pressable>
-                  ))}
+              {mapItems.map(({ item, coords }, index) => (
+                <Pressable key={`${list.resource}-map-${index}`} accessibilityRole="button" onPress={() => openItem(item)}
+                  style={({ pressed }) => [styles.card, pressed && styles.navItemPressed]}>
+                  <Text style={styles.cardTitle}>{formatResourceItemTitle(item, list.keys)}</Text>
+                  {coords ? <Text style={styles.cardSubtitle}>lat {coords.latitude.toFixed(6)} - lng {coords.longitude.toFixed(6)}</Text> : null}
+                </Pressable>
+              ))}
             </>
           )}
         </ScrollView>
@@ -9244,7 +10673,7 @@ function ResourceListView({
           contentContainerStyle={styles.list}
           refreshing={Boolean(refreshing)}
           onRefresh={onRefresh}
-          ListEmptyComponent={<Text style={styles.subtitle}>No items available.</Text>}
+          ListEmptyComponent={<Text style={styles.subtitle}>{strings.tasks.empty}</Text>}
           renderItem={({ item, index }) => {
             if (surfaceKind === "route") {
               const route = extractRouteCardSnapshot(item);
@@ -9309,6 +10738,8 @@ function ResourceListView({
                 >
                   <Text style={styles.cardTitle}>{settlement.title}</Text>
                   <Text style={styles.cardSubtitle}>{settlement.id}</Text>
+                  <Text style={styles.cardSubtitle}>{strings.settlements.windowStart}: {settlement.windowStartAt ?? "-"}</Text>
+                  <Text style={styles.cardSubtitle}>{strings.settlements.windowEnd}: {settlement.windowEndAt ?? "-"}</Text>
                   <View style={styles.cardChips}>
                     <View style={styles.chip}>
                       <Text style={styles.chipText}>{statusBadge}</Text>
@@ -9326,6 +10757,7 @@ function ResourceListView({
 
             if (surfaceKind === "tasks") {
               const task = extractTaskCardSnapshot(item);
+              const taskCardId = typeof item.id === "string" ? item.id.trim() : "";
               const title = formatOperationalTitle({
                 title: task.title,
                 customerName: task.customerName,
@@ -9346,6 +10778,7 @@ function ResourceListView({
 
               return (
                 <Pressable
+                  testID={taskCardId ? `mobile-task-card-${taskCardId}` : undefined}
                   onPress={() => openItem(item)}
                   style={({ pressed }) => [styles.card, pressed && styles.navItemPressed]}
                 >
@@ -9406,6 +10839,16 @@ function ResourceListView({
 }
 
 export default function App() {
+  const systemColorScheme = useColorScheme();
+  const appTheme = resolveAppliedFieldOpsTheme("system", systemColorScheme);
+  const appStyles = React.useMemo(
+    () =>
+      createFieldOpsStyles(
+        getFieldOpsThemeTokens(appTheme, Platform.OS === "web" ? "web" : "native")
+      ),
+    [appTheme]
+  );
+  const styles = appStyles;
   React.useEffect(() => {
     const disposeCrashHandler = installGlobalCrashHandler((error, context) => {
       captureMobileException(
@@ -9458,7 +10901,8 @@ export default function App() {
 
   const [queryClient] = React.useState(() => createQueryClient());
   return (
-    <MobileErrorBoundary
+    <FieldOpsStylesContext.Provider value={appStyles}>
+      <MobileErrorBoundary
       fallback={({ retry }) => (
         <View style={styles.container} accessibilityRole="alert" testID="mobile-error-boundary">
           <Text style={styles.title}>Something went wrong</Text>
@@ -9478,46 +10922,13 @@ export default function App() {
           <Bootstrap />
         </QueryClientProvider>
       </SafeAreaProvider>
-    </MobileErrorBoundary>
+      </MobileErrorBoundary>
+    </FieldOpsStylesContext.Provider>
   );
 }
 
-const FIELDOPS_TOKENS = {
-  color: {
-    pageBg: "#eef2f7",
-    cardBg: "#ffffff",
-    border: "#d6dde8",
-    borderMuted: "#e3e8f0",
-    text: "#0f172a",
-    textMuted: "#4b5563",
-    accent: "#0e7490",
-    accentSoft: "#e0f2fe",
-    success: "#16a34a",
-    successSoft: "#eaf7ef",
-    warning: "#ca8a04",
-    warningSoft: "#fff7db",
-    danger: "#b91c1c",
-    dangerSoft: "#fee2e2",
-  },
-  radius: {
-    sm: 10,
-    md: 14,
-    lg: 18,
-    pill: 999,
-  },
-  font: {
-    sans: Platform.select({
-      web: '"IBM Plex Sans", "Segoe UI", sans-serif',
-      default: undefined,
-    }),
-    mono: Platform.select({
-      web: '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-      default: "monospace",
-    }),
-  },
-} as const;
-
-const styles = StyleSheet.create({
+function createFieldOpsStyles(FIELDOPS_TOKENS: FieldOpsThemeTokens) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: FIELDOPS_TOKENS.color.pageBg,
@@ -9538,7 +10949,7 @@ const styles = StyleSheet.create({
   },
   webViewport: {
     flex: 1,
-    backgroundColor: "#eceff5",
+    backgroundColor: FIELDOPS_TOKENS.color.viewportBg,
     alignItems: "center",
     justifyContent: "center",
     padding: 16,
@@ -9554,7 +10965,7 @@ const styles = StyleSheet.create({
     maxHeight: "100%",
     borderRadius: 30,
     borderWidth: 1,
-    borderColor: "#d6dbe6",
+    borderColor: FIELDOPS_TOKENS.color.border,
     overflow: "hidden",
     ...(Platform.OS === "web"
       ? {
@@ -9590,10 +11001,10 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
+    borderColor: FIELDOPS_TOKENS.color.border,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: FIELDOPS_TOKENS.color.cardBg,
   },
   menuButtonPressed: { opacity: 0.8 },
   menuButtonText: {
@@ -9640,15 +11051,15 @@ const styles = StyleSheet.create({
     backgroundColor: FIELDOPS_TOKENS.color.cardBg,
   },
   headerPillRowOnline: {
-    borderColor: "#9dd6b5",
+    borderColor: FIELDOPS_TOKENS.color.success,
     backgroundColor: FIELDOPS_TOKENS.color.successSoft,
   },
   headerPillRowDegraded: {
-    borderColor: "#f7d26e",
+    borderColor: FIELDOPS_TOKENS.color.warning,
     backgroundColor: FIELDOPS_TOKENS.color.warningSoft,
   },
   headerPillRowOffline: {
-    borderColor: "#f4a6a6",
+    borderColor: FIELDOPS_TOKENS.color.danger,
     backgroundColor: FIELDOPS_TOKENS.color.dangerSoft,
   },
   headerPillDot: { width: 6, height: 6, borderRadius: 999 },
@@ -9656,7 +11067,7 @@ const styles = StyleSheet.create({
   headerPillDotDegraded: { backgroundColor: FIELDOPS_TOKENS.color.warning },
   headerPillDotOffline: { backgroundColor: FIELDOPS_TOKENS.color.danger },
   headerPillWarning: {
-    backgroundColor: "#fff3cd",
+    backgroundColor: FIELDOPS_TOKENS.color.warningSoft,
   },
   connectivityBanner: {
     marginHorizontal: 16,
@@ -9668,11 +11079,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   connectivityBannerOffline: {
-    borderColor: "#f4a6a6",
+    borderColor: FIELDOPS_TOKENS.color.danger,
     backgroundColor: FIELDOPS_TOKENS.color.dangerSoft,
   },
   connectivityBannerDegraded: {
-    borderColor: "#f7d26e",
+    borderColor: FIELDOPS_TOKENS.color.warning,
     backgroundColor: FIELDOPS_TOKENS.color.warningSoft,
   },
   connectivityBannerTitle: {
@@ -9692,20 +11103,20 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
-    backgroundColor: "#fff",
+    borderColor: FIELDOPS_TOKENS.color.border,
+    backgroundColor: FIELDOPS_TOKENS.color.cardBg,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarPressed: { opacity: 0.8 },
-  avatarText: { fontSize: 12, fontWeight: "700" },
+  avatarText: { fontSize: 12, fontWeight: "700", color: FIELDOPS_TOKENS.color.text },
   syncButton: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
-    backgroundColor: "#fff",
+    borderColor: FIELDOPS_TOKENS.color.border,
+    backgroundColor: FIELDOPS_TOKENS.color.cardBg,
   },
   syncButtonDisabled: {
     opacity: 0.5,
@@ -9716,12 +11127,13 @@ const styles = StyleSheet.create({
   syncButtonText: {
     fontSize: 12,
     fontWeight: "600",
+    color: FIELDOPS_TOKENS.color.text,
   },
   content: {
     flexGrow: 1,
     padding: 16,
   },
-  drawerBackdrop: { flex: 1, flexDirection: "row", backgroundColor: "rgba(0,0,0,0.25)" },
+  drawerBackdrop: { flex: 1, flexDirection: "row", backgroundColor: FIELDOPS_TOKENS.color.overlayScrim },
   drawerWebOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 30,
@@ -9753,7 +11165,7 @@ const styles = StyleSheet.create({
   },
   drawerScrimWeb: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.25)",
+    backgroundColor: FIELDOPS_TOKENS.color.overlayScrim,
   },
   drawerHeader: {
     flexDirection: "row",
@@ -9761,7 +11173,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: FIELDOPS_TOKENS.color.borderMuted,
     marginBottom: 12,
   },
   drawerTitle: {
@@ -9771,23 +11183,22 @@ const styles = StyleSheet.create({
     fontFamily: FIELDOPS_TOKENS.font.sans,
   },
   drawerClose: {
-    width: 34,
-    height: 34,
+    width: 44,
+    height: 44,
     borderRadius: 17,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
+    borderColor: FIELDOPS_TOKENS.color.border,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: FIELDOPS_TOKENS.color.cardBg,
   },
-  drawerClosePressed: { opacity: 0.8 },
-  drawerCloseText: { fontSize: 18, fontWeight: "600", lineHeight: 19, color: "#4b5563" },
+  drawerCloseText: { fontSize: 18, fontWeight: "600", lineHeight: 19, color: FIELDOPS_TOKENS.color.textMuted },
   drawerContent: { paddingTop: 12, paddingBottom: 10 },
-  navModalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.25)" },
+  navModalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: FIELDOPS_TOKENS.color.overlayScrim },
   navModalWebOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.25)",
+    backgroundColor: FIELDOPS_TOKENS.color.overlayScrim,
     zIndex: 35,
   },
   navModalBackdropTap: { flex: 1 },
@@ -9812,7 +11223,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: FIELDOPS_TOKENS.color.borderMuted,
     marginBottom: 12,
   },
   navModalTitle: {
@@ -9827,13 +11238,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
+    borderColor: FIELDOPS_TOKENS.color.border,
   },
   navClosePressed: { opacity: 0.8 },
-  navCloseText: { fontSize: 12, fontWeight: "600" },
+  navCloseText: { fontSize: 12, fontWeight: "600", color: FIELDOPS_TOKENS.color.text },
   navModalContent: { paddingTop: 12 },
   section: { marginBottom: 20 },
-  sectionTitle: { fontSize: 14, fontWeight: "600", marginBottom: 10 },
+  sectionTitle: { fontSize: 14, fontWeight: "600", marginBottom: 10, color: FIELDOPS_TOKENS.color.text },
   navItem: {
     borderWidth: 1,
     borderColor: FIELDOPS_TOKENS.color.border,
@@ -9852,13 +11263,14 @@ const styles = StyleSheet.create({
   },
   navItemPressed: { opacity: 0.8 },
   navItemDisabled: { opacity: 0.5 },
-  navItemLabel: { fontSize: 14, fontWeight: "500" },
+  navItemLabel: { fontSize: 14, fontWeight: "500", color: FIELDOPS_TOKENS.color.text },
   navItemBadge: {
     fontSize: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: "#e9eefc",
+    backgroundColor: FIELDOPS_TOKENS.color.cardBgSubtle,
+    color: FIELDOPS_TOKENS.color.textMuted,
     overflow: "hidden",
   },
   resourceHeader: {
@@ -9869,8 +11281,8 @@ const styles = StyleSheet.create({
   },
   drivingLockBanner: {
     borderWidth: 1,
-    borderColor: "#f2b84b",
-    backgroundColor: "#fff9e8",
+    borderColor: FIELDOPS_TOKENS.color.warning,
+    backgroundColor: FIELDOPS_TOKENS.color.warningSoft,
     borderRadius: 12,
     padding: 12,
     marginBottom: 12,
@@ -9878,12 +11290,12 @@ const styles = StyleSheet.create({
   drivingLockTitle: {
     fontSize: 13,
     fontWeight: "800",
-    color: "#7a4b00",
+    color: FIELDOPS_TOKENS.color.text,
     marginBottom: 4,
   },
   drivingLockText: {
     fontSize: 12,
-    color: "#7a4b00",
+    color: FIELDOPS_TOKENS.color.textMuted,
   },
   filtersRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
   resourceHeaderText: { flex: 1 },
@@ -9905,24 +11317,24 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#dbeafe",
-    backgroundColor: "#eef6ff",
+    borderColor: FIELDOPS_TOKENS.color.border,
+    backgroundColor: FIELDOPS_TOKENS.color.cardBgSubtle,
   },
   routeStatusBadgeActive: {
-    borderColor: "#99f6e4",
-    backgroundColor: "#ecfeff",
+    borderColor: FIELDOPS_TOKENS.color.accent,
+    backgroundColor: FIELDOPS_TOKENS.color.accentSoft,
   },
   routeStatusBadgeDone: {
-    borderColor: "#bbf7d0",
-    backgroundColor: "#f0fdf4",
+    borderColor: FIELDOPS_TOKENS.color.success,
+    backgroundColor: FIELDOPS_TOKENS.color.successSoft,
   },
-  routeStatusBadgeText: { fontSize: 11, fontWeight: "700", color: "#0f172a" },
+  routeStatusBadgeText: { fontSize: 11, fontWeight: "700", color: FIELDOPS_TOKENS.color.text },
   syncNowButton: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
+    borderColor: FIELDOPS_TOKENS.color.border,
   },
   listPane: { flex: 1 },
   list: { paddingBottom: 24 },
@@ -9930,9 +11342,9 @@ const styles = StyleSheet.create({
   routeMapBoard: {
     height: 260,
     borderWidth: 1,
-    borderColor: "#d7deef",
+    borderColor: FIELDOPS_TOKENS.color.border,
     borderRadius: 14,
-    backgroundColor: "#f7faff",
+    backgroundColor: FIELDOPS_TOKENS.color.cardBgSubtle,
     marginBottom: 12,
     overflow: "hidden",
     position: "relative",
@@ -9979,12 +11391,12 @@ const styles = StyleSheet.create({
   },
   routeMapLockOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(255,255,255,0.78)",
+    backgroundColor: FIELDOPS_TOKENS.color.overlayScrim,
     justifyContent: "center",
     alignItems: "center",
   },
   routeMapLockText: {
-    color: "#7a4b00",
+    color: FIELDOPS_TOKENS.color.warning,
     fontWeight: "800",
     fontSize: 13,
   },
@@ -9995,6 +11407,7 @@ const styles = StyleSheet.create({
   listMetaText: {
     fontSize: 12,
     opacity: 0.7,
+    color: FIELDOPS_TOKENS.color.textMuted,
   },
   card: {
     borderWidth: 1,
@@ -10004,14 +11417,14 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     backgroundColor: FIELDOPS_TOKENS.color.cardBg,
   },
-  cardTitle: { fontSize: 14, fontWeight: "600", marginBottom: 6 },
-  cardSubtitle: { fontSize: 12, opacity: 0.75 },
+  cardTitle: { fontSize: 14, fontWeight: "600", marginBottom: 6, color: FIELDOPS_TOKENS.color.text },
+  cardSubtitle: { fontSize: 12, opacity: 0.75, color: FIELDOPS_TOKENS.color.textMuted },
   cardChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 },
   chip: {
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: FIELDOPS_TOKENS.radius.pill,
-    backgroundColor: "#eef2f7",
+    backgroundColor: FIELDOPS_TOKENS.color.cardBgSubtle,
     minHeight: 40,
     justifyContent: "center",
   },
@@ -10028,22 +11441,22 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
+    borderColor: FIELDOPS_TOKENS.color.border,
   },
   detailHeaderText: { flex: 1 },
-  detailTitle: { fontSize: 16, fontWeight: "700" },
-  detailSubtitle: { fontSize: 12, opacity: 0.7, marginTop: 2 },
+  detailTitle: { fontSize: 16, fontWeight: "700", color: FIELDOPS_TOKENS.color.text },
+  detailSubtitle: { fontSize: 12, opacity: 0.7, marginTop: 2, color: FIELDOPS_TOKENS.color.textMuted },
   detailContent: { paddingBottom: 24 },
   detailRow: {
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: FIELDOPS_TOKENS.color.borderMuted,
   },
-  detailKey: { fontSize: 12, fontWeight: "600", marginBottom: 4 },
-  detailValue: { fontSize: 13, opacity: 0.85 },
+  detailKey: { fontSize: 12, fontWeight: "600", marginBottom: 4, color: FIELDOPS_TOKENS.color.textMuted },
+  detailValue: { fontSize: 13, opacity: 0.85, color: FIELDOPS_TOKENS.color.text },
   actionsBar: {
     borderTopWidth: 1,
-    borderTopColor: "#f0f0f0",
+    borderTopColor: FIELDOPS_TOKENS.color.borderMuted,
     paddingTop: 12,
     flexDirection: "row",
     flexWrap: "wrap",
@@ -10067,7 +11480,7 @@ const styles = StyleSheet.create({
   },
   error: {
     fontSize: 14,
-    color: "#b00020",
+    color: FIELDOPS_TOKENS.color.danger,
     marginBottom: 8,
   },
   subtitle: {
@@ -10075,21 +11488,30 @@ const styles = StyleSheet.create({
     opacity: 0.8,
     textAlign: "center",
     marginBottom: 12,
+    color: FIELDOPS_TOKENS.color.textMuted,
   },
   mono: {
     fontSize: 12,
     fontFamily: FIELDOPS_TOKENS.font.mono,
     opacity: 0.7,
     textAlign: "center",
+    color: FIELDOPS_TOKENS.color.textMuted,
   },
-  cutoverRetryButton: {
-    marginTop: 8,
-    minWidth: 160,
+  methodRow: { flexDirection: "row", gap: 10, marginTop: 18 },
+  methodChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: FIELDOPS_TOKENS.color.border,
+    backgroundColor: FIELDOPS_TOKENS.color.cardBg,
   },
   methodChipActive: {
-    borderColor: "#2b6cb0",
-    backgroundColor: "#f0f7ff",
+    borderColor: FIELDOPS_TOKENS.color.accent,
+    backgroundColor: FIELDOPS_TOKENS.color.accentSoft,
   },
+  methodChipText: { fontSize: 12, fontWeight: "700", color: FIELDOPS_TOKENS.color.text },
+  form: { width: "100%", maxWidth: 420, marginTop: 18, gap: 12 },
   input: {
     borderWidth: 1,
     borderColor: FIELDOPS_TOKENS.color.border,
@@ -10121,12 +11543,13 @@ const styles = StyleSheet.create({
   primaryButtonDisabled: { opacity: 0.5 },
   primaryButtonPressed: { opacity: 0.85 },
   primaryButtonText: {
-    color: "#fff",
+    color: FIELDOPS_TOKENS.color.accentText,
     fontSize: 14,
     fontWeight: "800",
     textAlign: "center",
     fontFamily: FIELDOPS_TOKENS.font.sans,
   },
+  authError: { marginTop: 10, color: FIELDOPS_TOKENS.color.danger, fontSize: 12, textAlign: "center" },
   secondaryButton: {
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -10174,7 +11597,7 @@ const styles = StyleSheet.create({
     height: 320,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
+    borderColor: FIELDOPS_TOKENS.color.border,
     overflow: "hidden",
     backgroundColor: "#000",
   },
@@ -10183,8 +11606,8 @@ const styles = StyleSheet.create({
     height: 160,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#d5d9e5",
-    backgroundColor: "#fff",
+    borderColor: FIELDOPS_TOKENS.color.border,
+    backgroundColor: FIELDOPS_TOKENS.color.cardBg,
     overflow: "hidden",
     position: "relative",
     justifyContent: "center",
@@ -10192,15 +11615,26 @@ const styles = StyleSheet.create({
   },
   signaturePlaceholder: {
     fontSize: 13,
-    color: "#64748b",
+    color: FIELDOPS_TOKENS.color.textMuted,
     fontFamily: FIELDOPS_TOKENS.font.sans,
   },
   signatureStroke: {
     position: "absolute",
     height: 2.5,
-    backgroundColor: "#0f172a",
+    backgroundColor: FIELDOPS_TOKENS.color.text,
     borderRadius: 999,
   },
-});
+  });
+}
+
+type FieldOpsStyles = ReturnType<typeof createFieldOpsStyles>;
+const DEFAULT_FIELDOPS_STYLES = createFieldOpsStyles(
+  getFieldOpsThemeTokens("light", Platform.OS === "web" ? "web" : "native")
+);
+const FieldOpsStylesContext = React.createContext<FieldOpsStyles>(DEFAULT_FIELDOPS_STYLES);
+
+function useFieldOpsStyles(): FieldOpsStyles {
+  return React.useContext(FieldOpsStylesContext);
+}
 
 

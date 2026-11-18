@@ -5,9 +5,8 @@ import { getConsoleBaseUrl, getPortalBaseUrl } from "./utils/base-urls";
 import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
 import {
-  applyResourceLimit,
-  resolveResourceActionTarget,
-  resolveResourceKeysForUser,
+  resolveResourceActionTargetWithSample,
+  resolveActionTypeResourceKeysForUser,
 } from "./utils/core-resource";
 import { ensureBulkActionVisible, selectFirstTableRow } from "./utils/table-actions";
 import { assertNavigationPerformance } from "./utils/performance";
@@ -94,19 +93,17 @@ for (const config of appConfigs) {
         const sections = Array.isArray(context.navigation.sections)
           ? context.navigation.sections
           : [];
-        const resourceKeys = applyResourceLimit(
-          resolveResourceKeysForUser({
-            sections,
-            readRegistry: context.readRegistry,
-            commandRegistry: context.commandRegistry,
-            capabilities: context.me?.capabilities ?? null,
-          })
-        );
+        const resourceKeys = resolveActionTypeResourceKeysForUser({
+          sections,
+          readRegistry: context.readRegistry,
+          commandRegistry: context.commandRegistry,
+          capabilities: context.me?.capabilities ?? null,
+        });
         if (resourceKeys.length === 0) {
           throw new Error(`No resources available for ${user.email}.`);
         }
 
-        const printTarget = resolveResourceActionTarget({
+        const printTarget = await resolveResourceActionTargetWithSample({
           resourceKeys,
           readRegistry: context.readRegistry,
           commandRegistry: context.commandRegistry,
@@ -114,8 +111,10 @@ for (const config of appConfigs) {
           appBasePath: baseUrl,
           downloadBasePath,
           actionType: "print",
+          email: user.email,
+          password: demoContext.password ?? "",
         });
-        const downloadTarget = resolveResourceActionTarget({
+        const downloadTarget = await resolveResourceActionTargetWithSample({
           resourceKeys,
           readRegistry: context.readRegistry,
           commandRegistry: context.commandRegistry,
@@ -123,8 +122,10 @@ for (const config of appConfigs) {
           appBasePath: baseUrl,
           downloadBasePath,
           actionType: "download",
+          email: user.email,
+          password: demoContext.password ?? "",
         });
-        const workflowTarget = resolveResourceActionTarget({
+        const workflowTarget = await resolveResourceActionTargetWithSample({
           resourceKeys,
           readRegistry: context.readRegistry,
           commandRegistry: context.commandRegistry,
@@ -132,8 +133,21 @@ for (const config of appConfigs) {
           appBasePath: baseUrl,
           downloadBasePath,
           actionType: "workflow",
+          email: user.email,
+          password: demoContext.password ?? "",
         });
-        const rpcTarget = resolveResourceActionTarget({
+        const workflowBindingTarget = await resolveResourceActionTargetWithSample({
+          resourceKeys,
+          readRegistry: context.readRegistry,
+          commandRegistry: context.commandRegistry,
+          capabilities: context.me?.capabilities ?? null,
+          appBasePath: baseUrl,
+          downloadBasePath,
+          actionType: "workflow_binding",
+          email: user.email,
+          password: demoContext.password ?? "",
+        });
+        const rpcTarget = await resolveResourceActionTargetWithSample({
           resourceKeys,
           readRegistry: context.readRegistry,
           commandRegistry: context.commandRegistry,
@@ -141,6 +155,8 @@ for (const config of appConfigs) {
           appBasePath: baseUrl,
           downloadBasePath,
           actionType: "rpc",
+          email: user.email,
+          password: demoContext.password ?? "",
         });
 
         await page.goto(baseUrl);
@@ -154,18 +170,17 @@ for (const config of appConfigs) {
           { label: "print", target: printTarget },
           { label: "download", target: downloadTarget },
           { label: "workflow", target: workflowTarget },
+          { label: "workflow binding", target: workflowBindingTarget },
           { label: "rpc", target: rpcTarget },
         ];
 
+        if (!targets.some(({ target }) => target)) {
+          expect(["driver"]).toContain(context.me?.user?.user_type);
+          return;
+        }
+
         for (const { label, target } of targets) {
-          if (!target) {
-            if (strict) {
-              throw new Error(
-                `No ${label} actions available for ${user.email} in ${config.label}.`
-              );
-            }
-            continue;
-          }
+          if (!target) continue;
 
           await test.step(`${label} actions for ${target.resourceKey}`, async () => {
           await page.goto(`${baseUrl}/resources/${target.resourceKey}`, {
@@ -180,7 +195,7 @@ for (const config of appConfigs) {
                 `[data-testid="${config.resourceTestIdPrefix}-ready"], [data-testid="${config.resourceTestIdPrefix}-error"], [data-testid="${config.authTestId}"]`
               )
             ).toBeVisible();
-            if (!(await ready.isVisible())) return;
+            await expect(ready).toBeVisible();
             await assertNavigationPerformance(page);
 
             const hasSelection = await selectFirstTableRow(page);

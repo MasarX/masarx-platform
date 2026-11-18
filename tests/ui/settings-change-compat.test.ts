@@ -3,6 +3,39 @@ import {
   requestSettingsChangeWithCompat,
 } from "../../packages/api/src/settings-change-compat";
 
+describe.each([
+  ["settings", "request_settings_change_v1", requestSettingsChangeWithCompat],
+  ["access policy", "ui_request_access_policy_change_v1", requestAccessPolicyChangeWithCompat],
+] as const)("%s result contract", (_label, functionName, request) => {
+  const params = { category: "label_provider", scopeType: "tenant", value: {} };
+  const ids = { settings_version_id: "sv_result", domain_event_id: "de_result" };
+  test.each(["object", "single row"])("normalizes %s without leaking extra fields", async shape => {
+    const row = { ...ids, private_value: "not-for-consumers" };
+    const rpc = jest.fn().mockResolvedValue(shape === "object" ? row : [row]);
+    await expect(request(rpc, params)).resolves.toEqual(ids);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+  test.each([
+    ["empty rows", []], ["multiple rows", [ids, ids]], ["null", null],
+    ["scalar", "invalid"], ["nested rows", [[ids]]], ["missing IDs", {}],
+    ["numeric version", { ...ids, settings_version_id: 42 }],
+    ["blank version", { ...ids, settings_version_id: " " }],
+    ["numeric event", { ...ids, domain_event_id: 42 }],
+    ["blank event", { ...ids, domain_event_id: " " }],
+  ])("rejects %s without repeating a mutation", async (_name, value) => {
+    const rpc = jest.fn().mockResolvedValue(value);
+    await expect(request(rpc, params)).rejects.toThrow("settings_change_result_invalid");
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+  test("normalizes TABLE result after supported signature fallback", async () => {
+    const rpc = jest.fn().mockRejectedValueOnce({
+      code: "PGRST202", message: `Could not find the function api.${functionName} in the schema cache`,
+    }).mockResolvedValueOnce([ids]);
+    await expect(request(rpc, params)).resolves.toEqual(ids);
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+});
+
 test("requestSettingsChangeWithCompat falls back to change-reason signature on schema cache mismatch", async () => {
   const rpc = jest
     .fn()

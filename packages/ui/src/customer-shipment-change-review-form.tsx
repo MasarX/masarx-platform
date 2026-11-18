@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { createUiClient } from "@masarx/api";
 import { useRouter } from "next/navigation";
+import { createUiClient } from "@masarx/api";
 import { Button } from "./button";
 import { Textarea } from "./textarea";
 import { formatUiError } from "./utils";
@@ -16,6 +16,8 @@ type ReviewPayload = Record<string, unknown> & {
   ok?: boolean;
   outcome?: unknown;
   error?: unknown;
+  current_snapshot?: unknown;
+  support_case_id?: unknown;
 };
 
 type CustomerShipmentChangeReviewFormProps = {
@@ -26,6 +28,42 @@ type CustomerShipmentChangeReviewFormProps = {
 };
 
 const initialState: CustomerShipmentChangeReviewState = { status: "idle" };
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function buildReviewSuccessMessage(
+  payload: ReviewPayload | null,
+  outcome: string,
+) {
+  const baseMessage =
+    outcome === "applied"
+      ? "Shipment change approved and applied."
+      : outcome === "rejected"
+        ? "Shipment change rejected."
+        : "Shipment change updated.";
+  const currentSnapshot = recordValue(payload?.current_snapshot);
+  const trackingNumber = stringValue(currentSnapshot?.tracking_number);
+  const shipmentStatus = stringValue(currentSnapshot?.shipment_status);
+  const promisedDeliveryDate = stringValue(currentSnapshot?.promised_delivery_date);
+  const supportCaseId = stringValue(payload?.support_case_id);
+  const readbackFacts = [
+    trackingNumber ? `tracking ${trackingNumber}` : null,
+    shipmentStatus ? `status ${shipmentStatus}` : null,
+    promisedDeliveryDate ? `delivery ${promisedDeliveryDate}` : null,
+    supportCaseId ? `case ${supportCaseId}` : null,
+  ].filter(Boolean);
+
+  if (readbackFacts.length < 1) return baseMessage;
+  return `${baseMessage} Backend readback: ${readbackFacts.join("; ")}.`;
+}
 
 export function CustomerShipmentChangeReviewForm({
   supportCaseId,
@@ -38,33 +76,20 @@ export function CustomerShipmentChangeReviewForm({
   const [state, setState] =
     React.useState<CustomerShipmentChangeReviewState>(initialState);
   const [isPending, setIsPending] = React.useState(false);
-  const [isRefreshing, startRefreshTransition] = React.useTransition();
+  const [hydrated, setHydrated] = React.useState(false);
   const [resolvedLocally, setResolvedLocally] = React.useState(false);
-  const refreshTimerRef = React.useRef<number | null>(null);
-  const hardReloadTimerRef = React.useRef<number | null>(null);
+  const pendingDecisionRef = React.useRef<string | null>(null);
   const blockedMessage =
     resolvedLocally
       ? "This shipment change is already resolved."
-      : disabled
-        ? disabledMessage ?? "Review is blocked for this change request."
-        : null;
-
-  const clearRefreshTimers = React.useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (refreshTimerRef.current !== null) {
-      window.clearTimeout(refreshTimerRef.current);
-      refreshTimerRef.current = null;
-    }
-    if (hardReloadTimerRef.current !== null) {
-      window.clearTimeout(hardReloadTimerRef.current);
-      hardReloadTimerRef.current = null;
-    }
-  }, []);
+        : disabled
+          ? disabledMessage ?? "Review is blocked for this change request."
+          : null;
 
   const handleSubmit = React.useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (disabled || resolvedLocally || isPending) return;
+      if (!hydrated || disabled || resolvedLocally || isPending) return;
 
       const form = event.currentTarget;
       const submitter =
@@ -73,7 +98,16 @@ export function CustomerShipmentChangeReviewForm({
         form,
         submitter instanceof HTMLElement ? submitter : undefined,
       );
-      const decision = String(formData.get("decision") ?? "")
+      const submitterDecision =
+        submitter instanceof HTMLButtonElement && submitter.name === "decision"
+          ? submitter.value
+          : null;
+      const decision = String(
+        formData.get("decision") ??
+          submitterDecision ??
+          pendingDecisionRef.current ??
+          "",
+      )
         .trim()
         .toLowerCase();
       const reason = String(formData.get("reason") ?? "").trim();
@@ -90,7 +124,7 @@ export function CustomerShipmentChangeReviewForm({
       setIsPending(true);
 
       try {
-        const { data, error } = await ui.rpc<ReviewPayload>(
+        const data = await ui.rpc<ReviewPayload>(
           "public_tracking_review_request_v1",
           {
             p_input: {
@@ -101,29 +135,31 @@ export function CustomerShipmentChangeReviewForm({
           },
         );
 
-        if (error) {
-          setState({
-            status: "error",
-            message: formatUiError(
-              error,
-              "Customer shipment change review failed.",
-            ),
-          });
-          return;
-        }
-
         const payload =
           data && typeof data === "object" && !Array.isArray(data)
             ? (data as ReviewPayload)
             : null;
+        const responseErrorValue = payload?.error;
         const responseError =
-          payload?.error &&
-          typeof payload.error === "object" &&
-          !Array.isArray(payload.error)
-            ? (payload.error as Record<string, unknown>)
+          responseErrorValue &&
+          typeof responseErrorValue === "object" &&
+          !Array.isArray(responseErrorValue)
+            ? (responseErrorValue as Record<string, unknown>)
             : null;
 
-        if (payload?.ok === false || responseError) {
+        const outcome = stringValue(payload?.outcome);
+        const responseCaseId = stringValue(payload?.support_case_id);
+        const currentSnapshot = recordValue(payload?.current_snapshot);
+        const expectedOutcome = decision === "approved" ? "applied" : "rejected";
+
+        if (
+          payload?.ok !== true ||
+          (responseErrorValue !== null && responseErrorValue !== undefined) ||
+          responseCaseId !== supportCaseId ||
+          outcome !== expectedOutcome ||
+          !currentSnapshot ||
+          Object.keys(currentSnapshot).length < 1
+        ) {
           setState({
             status: "error",
             message:
@@ -131,40 +167,17 @@ export function CustomerShipmentChangeReviewForm({
                 responseError.message.trim()) ||
               (typeof responseError?.code === "string" &&
                 responseError.code.trim()) ||
-              "Customer shipment change review failed.",
+              "Customer shipment change review did not return a matching canonical readback.",
           });
           return;
         }
 
-        const outcome =
-          typeof payload?.outcome === "string" && payload.outcome.trim()
-            ? payload.outcome.trim()
-            : decision === "approved"
-              ? "applied"
-              : decision === "rejected"
-                ? "rejected"
-                : "";
         setResolvedLocally(true);
         setState({
           status: "success",
-          message:
-            outcome === "applied"
-              ? "Shipment change approved and applied."
-              : outcome === "rejected"
-                ? "Shipment change rejected."
-                : "Shipment change updated.",
+          message: buildReviewSuccessMessage(payload, outcome),
         });
-        clearRefreshTimers();
-        if (typeof window !== "undefined") {
-          refreshTimerRef.current = window.setTimeout(() => {
-            startRefreshTransition(() => {
-              router.refresh();
-            });
-          }, 50);
-          hardReloadTimerRef.current = window.setTimeout(() => {
-            window.location.reload();
-          }, 3000);
-        }
+        router.refresh();
       } catch (error) {
         setState({
           status: "error",
@@ -174,27 +187,29 @@ export function CustomerShipmentChangeReviewForm({
           ),
         });
       } finally {
+        pendingDecisionRef.current = null;
         setIsPending(false);
       }
     },
     [
-      clearRefreshTimers,
       disabled,
+      hydrated,
       isPending,
       resolvedLocally,
-      router,
       supportCaseId,
+      router,
       ui,
     ],
   );
 
   React.useEffect(() => {
-    clearRefreshTimers();
+    setHydrated(true);
+  }, []);
+
+  React.useEffect(() => {
     setState(initialState);
     setResolvedLocally(false);
-  }, [clearRefreshTimers, supportCaseId]);
-
-  React.useEffect(() => () => clearRefreshTimers(), [clearRefreshTimers]);
+  }, [supportCaseId]);
 
   return (
     <form
@@ -212,7 +227,7 @@ export function CustomerShipmentChangeReviewForm({
           name="reason"
           rows={4}
           placeholder="Decision notes and context"
-          disabled={Boolean(blockedMessage) || isPending || isRefreshing}
+          disabled={!hydrated || Boolean(blockedMessage) || isPending}
           data-testid={`${testIdPrefix}-reason`}
         />
       </label>
@@ -222,17 +237,23 @@ export function CustomerShipmentChangeReviewForm({
           type="submit"
           name="decision"
           value="approved"
-          disabled={Boolean(blockedMessage) || isPending || isRefreshing}
+          disabled={!hydrated || Boolean(blockedMessage) || isPending}
+          onClick={() => {
+            pendingDecisionRef.current = "approved";
+          }}
           data-testid={`${testIdPrefix}-approve`}
         >
-          {isPending || isRefreshing ? "Applying..." : "Approve and apply"}
+          {isPending ? "Applying..." : "Approve and apply"}
         </Button>
         <Button
           type="submit"
           name="decision"
           value="rejected"
           variant="soft"
-          disabled={Boolean(blockedMessage) || isPending || isRefreshing}
+          disabled={!hydrated || Boolean(blockedMessage) || isPending}
+          onClick={() => {
+            pendingDecisionRef.current = "rejected";
+          }}
           data-testid={`${testIdPrefix}-reject`}
         >
           Reject
@@ -245,6 +266,9 @@ export function CustomerShipmentChangeReviewForm({
       {blockedMessage ? (
         <div
           className="rounded-xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
           data-testid={`${testIdPrefix}-blocked`}
         >
           {blockedMessage}
@@ -254,6 +278,8 @@ export function CustomerShipmentChangeReviewForm({
       {state.status === "error" ? (
         <div
           className="rounded-xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted"
+          role="alert"
+          aria-atomic="true"
           data-testid={`${testIdPrefix}-error`}
         >
           {state.message ?? "Review failed."}
@@ -263,6 +289,9 @@ export function CustomerShipmentChangeReviewForm({
       {state.status === "success" ? (
         <div
           className="rounded-xl border border-ui-border bg-ui-surface/80 p-3 text-sm"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
           data-testid={`${testIdPrefix}-success`}
         >
           {state.message ?? "Shipment change updated."}

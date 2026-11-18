@@ -280,6 +280,7 @@ if (
             body: JSON.stringify({
               mode: 'print',
               organization_id: orgId,
+              job_purpose: 'manual',
               workflow_run_id: workflowContext.runId,
               workflow_run_step_id: workflowContext.stepId,
               targets: [
@@ -298,7 +299,7 @@ if (
         responseBody = jsonError || !json ? { raw: truncateText(bodyText) } : json;
 
         const queuedJobs = await client.query(
-          `SELECT target_type, target_id, label_type
+          `SELECT target_type, target_id, label_type, job_purpose
              FROM label_jobs
             WHERE organization_id = $1::uuid
               AND target_id = ANY($2::uuid[])
@@ -307,15 +308,52 @@ if (
         );
 
         expect(queuedJobs.rows).toHaveLength(3);
+        expect(queuedJobs.rows.every((row) => row.job_purpose === 'manual')).toBe(true);
         expect(queuedJobs.rows.map((row) => row.target_type).sort()).toEqual([
           'handling_unit',
           'route_run',
           'warehouse_transfer',
         ]);
 
+        for (const withStep of [false, true]) {
+          const jobsByPurpose = [];
+          for (const purpose of ['primary', 'reprint', 'manual']) {
+            const enqueue = () => withStep
+              ? client.query(
+                `SELECT public.request_label_generation_target_for_step_v1(
+                   $1::uuid, 'route', $2::uuid, 'route', NULL, 'purpose_contract', NULL, $3::text
+                 ) AS job_id`,
+                [workflowContext.stepId, routeRunId, purpose],
+              )
+              : client.query(
+                `SELECT public.request_label_generation_target_v1(
+                   'route', $1::uuid, 'route', NULL, 'purpose_contract', NULL, $2::text
+                 ) AS job_id`,
+                [routeRunId, purpose],
+              );
+            const jobId = (await enqueue()).rows[0].job_id;
+            expect((await enqueue()).rows[0].job_id).toBe(jobId);
+            jobsByPurpose.push(jobId);
+            const { rows: persisted } = await client.query(
+              'SELECT job_purpose FROM public.label_jobs WHERE id = $1::uuid', [jobId],
+            );
+            expect(persisted).toEqual([{ job_purpose: purpose }]);
+            const { rows: decisions } = await client.query(
+              `SELECT decision_inputs->>'job_purpose' AS job_purpose
+                 FROM public.decision_log
+                WHERE resource_id = $1::uuid AND decision_point = 'request_label_generation_target'`,
+              [jobId],
+            );
+            expect(decisions.length).toBeGreaterThan(0);
+            expect(decisions.every((row) => row.job_purpose === purpose)).toBe(true);
+          }
+          expect(new Set(jobsByPurpose).size).toBe(3);
+        }
+
         if (responseStatus === 200) {
           expect(responseBody.status).toBe('ok');
           expect(responseBody.mode).toBe('print_sync');
+          expect(responseBody.job_purpose).toBe('manual');
           expect(responseBody.bundle?.counts?.requested).toBe(3);
           expect(responseBody.bundle?.counts?.bundled).toBeGreaterThanOrEqual(1);
           uploadedPath =

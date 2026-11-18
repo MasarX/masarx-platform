@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(37);
+SELECT plan(44);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_plan_ui_api_contract_v1()
 RETURNS SETOF TEXT
@@ -25,6 +25,8 @@ DECLARE
   v_shipment2 UUID := gen_random_uuid();
   v_zone UUID := gen_random_uuid();
   v_standard_level UUID := gen_random_uuid();
+  v_branch_offering UUID := gen_random_uuid();
+  v_branch_offering_alternative UUID := gen_random_uuid();
   v_plan RECORD;
   v_frozen RECORD;
   v_wave_plan RECORD;
@@ -317,6 +319,84 @@ BEGIN
     jsonb_array_length(api.ui_route_plan_resolve_stops_v1(v_wave_plan.route_plan_id)),
     2,
     'api.ui_build_delivery_wave_route_plan_v1 writes resolved stops through the route_plan contract'
+  );
+
+  EXECUTE 'SET LOCAL ROLE postgres';
+  INSERT INTO public.service_offerings (
+    id, service_level_id, branch_id, zone_id, effective_from, is_active, priority
+  ) VALUES
+    (v_branch_offering, v_standard_level, v_branch, NULL, '2026-01-01T00:00:00Z', TRUE, 20),
+    (v_branch_offering_alternative, v_standard_level, v_branch, NULL, '2026-01-01T00:00:00Z', TRUE, 1);
+  UPDATE public.shipments
+     SET zone_id = NULL,
+         metadata = metadata || jsonb_build_object('service_offering_id', v_branch_offering)
+   WHERE id = v_shipment1;
+  UPDATE public.branch_capacity_windows SET zone_id = NULL WHERE branch_id = v_branch;
+  RETURN NEXT ok(
+    EXISTS (SELECT 1 FROM public.shipments WHERE id = v_shipment1 AND zone_id IS NULL AND branch_id = v_branch),
+    'canonical offering projection preserves a valid branch-only shipment'
+  );
+
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  SELECT * INTO v_wave_plan
+    FROM api.ui_build_delivery_wave_route_plan_v1(jsonb_build_object(
+      'organization_id', v_spoofed_org,
+      'requested_by_user_id', v_spoofed_user,
+      'branch_id', v_branch,
+      'planned_date', '2026-04-03',
+      'idempotency_key', 'pgtap-route-plan-branch-only-wave',
+      'wave_selection', jsonb_build_object('statuses', jsonb_build_array('pending'))
+    )) LIMIT 1;
+  RETURN NEXT is(v_wave_plan.stop_count, 2, 'API delivery wave retains both branch-only and zoned candidates');
+  RETURN NEXT ok(
+    EXISTS (
+      SELECT 1 FROM public.route_plans plan, jsonb_array_elements(plan.inputs->'stops') stop
+      WHERE plan.id = v_wave_plan.route_plan_id
+        AND stop->>'shipment_id' = v_shipment1::text
+        AND stop#>>'{metadata,service_offering_id}' = v_branch_offering::text
+        AND stop#>>'{metadata,service_level_id}' = v_standard_level::text
+        AND stop#>>'{metadata,service_level_key}' = 'standard'
+    ),
+    'API wave preserves validated selected offering lineage rather than lower-priority alternative'
+  );
+  RETURN NEXT ok(
+    EXISTS (
+      SELECT 1 FROM public.route_plans plan, jsonb_array_elements(plan.inputs->'stops') stop
+      JOIN public.service_offerings offering ON offering.id::text = stop#>>'{metadata,service_offering_id}'
+      WHERE plan.id = v_wave_plan.route_plan_id
+        AND stop->>'shipment_id' = v_shipment2::text
+        AND offering.zone_id = v_zone
+    ),
+    'unselected zoned shipment prefers its exact-zone offering over branch-wide alternatives'
+  );
+  RETURN NEXT ok(
+    EXISTS (SELECT 1 FROM public.route_plans WHERE id = v_wave_plan.route_plan_id
+      AND organization_id = v_org AND requested_by_user_id = v_user),
+    'branch-only wave retains server-derived tenant and actor authority'
+  );
+
+  EXECUTE 'SET LOCAL ROLE postgres';
+  UPDATE public.service_offerings SET is_active = FALSE WHERE id = v_branch_offering;
+  RETURN NEXT ok(
+    EXISTS (
+      SELECT 1 FROM public.route_plan_delivery_wave_candidates_v1(jsonb_build_object(
+        'organization_id', v_org, 'branch_id', v_branch, 'planned_date', '2026-04-03',
+        'wave_selection', jsonb_build_object('statuses', jsonb_build_array('pending'))
+      )) candidate
+      WHERE candidate.shipment_id = v_shipment1
+        AND candidate.stop_payload#>>'{metadata,service_offering_id}' = v_branch_offering_alternative::text
+    ),
+    'selected metadata cannot retain an inactive offering over a valid catalog alternative'
+  );
+  UPDATE public.service_offerings SET is_active = FALSE WHERE id = v_branch_offering_alternative;
+  RETURN NEXT ok(
+    NOT EXISTS (
+      SELECT 1 FROM public.route_plan_delivery_wave_candidates_v1(jsonb_build_object(
+        'organization_id', v_org, 'branch_id', v_branch, 'planned_date', '2026-04-03',
+        'wave_selection', jsonb_build_object('statuses', jsonb_build_array('pending'))
+      )) candidate WHERE candidate.shipment_id = v_shipment1
+    ),
+    'branch-only candidate is excluded when no active branch-wide offering remains'
   );
 
   EXECUTE 'RESET ROLE';

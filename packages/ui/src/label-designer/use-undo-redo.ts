@@ -5,65 +5,59 @@ const MAX_HISTORY = 50;
 type UndoRedoState = {
   past: string[];
   future: string[];
+  present: string;
+  documentKey?: string;
 };
 
 export function useUndoRedo(
   currentValue: string,
   onChange: (value: string) => void,
+  enabled = true,
+  documentKey?: string,
 ) {
-  const historyRef = React.useRef<UndoRedoState>({ past: [], future: [] });
-  const lastPushedRef = React.useRef<string>(currentValue);
-  const [, refreshHistoryState] = React.useReducer((value: number) => value + 1, 0);
-
-  const pushSnapshot = React.useCallback(
-    (value: string) => {
-      if (value === lastPushedRef.current) return;
-      const { past } = historyRef.current;
-      const nextPast = [...past, lastPushedRef.current].slice(-MAX_HISTORY);
-      historyRef.current = { past: nextPast, future: [] };
-      lastPushedRef.current = value;
-      refreshHistoryState();
-    },
-    [],
-  );
+  const [history, setHistory] = React.useState<UndoRedoState>({ past: [], future: [], present: currentValue, documentKey });
+  // Adjust controlled-value history before rendering children; no ref-backed UI or effect refresh.
+  if (history.documentKey !== documentKey) {
+    setHistory({ past: [], future: [], present: currentValue, documentKey });
+  } else if (history.present !== currentValue) {
+    setHistory({ ...history, past: [...history.past, history.present].slice(-MAX_HISTORY), future: [], present: currentValue });
+  }
 
   const undo = React.useCallback(() => {
-    const { past, future } = historyRef.current;
+    if (!enabled) return;
+    const { past, future, present } = history;
     if (past.length === 0) return;
     const previous = past[past.length - 1]!;
-    historyRef.current = {
+    setHistory({
+      documentKey,
+      present: previous,
       past: past.slice(0, -1),
-      future: [lastPushedRef.current, ...future].slice(0, MAX_HISTORY),
-    };
-    lastPushedRef.current = previous;
-    refreshHistoryState();
+      future: [present, ...future].slice(0, MAX_HISTORY),
+    });
     onChange(previous);
-  }, [onChange]);
+  }, [documentKey, enabled, history, onChange]);
 
   const redo = React.useCallback(() => {
-    const { past, future } = historyRef.current;
+    if (!enabled) return;
+    const { past, future, present } = history;
     if (future.length === 0) return;
     const next = future[0]!;
-    historyRef.current = {
-      past: [...past, lastPushedRef.current].slice(-MAX_HISTORY),
+    setHistory({
+      documentKey,
+      present: next,
+      past: [...past, present].slice(-MAX_HISTORY),
       future: future.slice(1),
-    };
-    lastPushedRef.current = next;
-    refreshHistoryState();
+    });
     onChange(next);
-  }, [onChange]);
+  }, [documentKey, enabled, history, onChange]);
 
-  const canUndo = historyRef.current.past.length > 0;
-  const canRedo = historyRef.current.future.length > 0;
-
-  // Push snapshot on value changes (debounced by caller or on meaningful actions)
-  React.useEffect(() => {
-    pushSnapshot(currentValue);
-  }, [currentValue, pushSnapshot]);
+  const canUndo = history.past.length > 0;
+  const canRedo = history.future.length > 0;
 
   // Keyboard shortcuts
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!enabled) return;
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
@@ -81,7 +75,7 @@ export function useUndoRedo(
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [redo, undo]);
+  }, [enabled, redo, undo]);
 
   return { undo, redo, canUndo, canRedo };
 }

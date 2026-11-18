@@ -161,6 +161,25 @@ describe('storage-admin helper', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  test('signed URL helper reads the retained body after storage consumes the response', async () => {
+    const { generateSignedUrl } = require('../integration/workflows/helpers/label-print-helpers');
+    const previous = process.env.SUPABASE_URL;
+    process.env.SUPABASE_URL = 'http://127.0.0.1:54321';
+    process.env.SUPABASE_SECRET_KEY = 'synthetic-storage-credential';
+    const resp = makeResponse(200, JSON.stringify([{ signedURL: '/object/sign/labels/owned.pdf' }]));
+    global.fetch.mockResolvedValueOnce(resp);
+    try {
+      await expect(generateSignedUrl('owned.pdf', 600)).resolves.toMatchObject({
+        signedUrl: 'http://127.0.0.1:54321/storage/v1/object/sign/labels/owned.pdf',
+      });
+      expect(resp.bodyUsed).toBe(true);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previous === undefined) delete process.env.SUPABASE_URL;
+      else process.env.SUPABASE_URL = previous;
+    }
+  });
+
   test('ensureStorageBucket accepts duplicate bucket response as success', async () => {
     const duplicateResp = makeResponse(
       400,

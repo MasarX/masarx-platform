@@ -27,8 +27,8 @@ To inspect bundles visually, set `ANALYZE=true` before building. This enables
 `apps/console/next.config.js` (and the portal equivalent) set up:
 
 - **Turbopack** -- `turbopack.root` points to the monorepo root.
-- **React singleton aliasing** -- `applyReactSingletonAlias` in the webpack
-  config ensures a single copy of React across `@masarx/*` packages.
+- **React resolution** -- Next.js owns its layer-specific React aliases; the
+  app configs do not override private `next/dist/compiled` paths.
 - **transpilePackages** -- `@masarx/ui`, `@masarx/api`, `@masarx/auth`,
   `@masarx/config` are transpiled by Next.js.
 - **Internationalization** -- `next-intl` plugin wraps the config.

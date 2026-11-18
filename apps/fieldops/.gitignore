@@ -7,6 +7,9 @@ node_modules/
 .expo/
 dist/
 web-build/
+/public/maplibre-gl-worker.mjs
+/public/maplibre-gl-shared.mjs
+/public/.maplibre-worker-*.tmp
 expo-env.d.ts
 
 # Native

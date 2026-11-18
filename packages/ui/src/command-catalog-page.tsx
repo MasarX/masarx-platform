@@ -1,15 +1,16 @@
 import "server-only";
 import { createUiServerClient } from "@masarx/api/server";
-import { UiCommandDefinition, UiMe } from "@masarx/api";
+import { UiCommandDefinition, UiMe, UiReadRegistry } from "@masarx/api";
+import { getPublicConfig } from "@masarx/config";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { CommandCatalogFilters } from "./command-catalog-filters";
 import { fetchCommandRegistry } from "./command-registry";
-import { resolveCommandHref } from "./command-utils";
+import { resolveCommandHref, resolveCommandReadState, formatCommandBackendReference } from "./command-utils";
 import { PageContainer } from "./page-container";
 import { PageHeader } from "./page-header";
 import { Section } from "./section";
-import { createUiTranslator } from "./i18n";
+import { createUiTranslator, resolveRowDisplayText } from "./i18n";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import { buildTestId } from "./test-ids";
 import { formatUiError } from "./utils";
@@ -47,14 +48,21 @@ export async function CommandCatalogPage({
   let commands: UiCommandDefinition[] = [];
   let me: UiMe | null = null;
   let errorMessage: string | null = null;
+  let readRegistry: UiReadRegistry | null = null;
+  let readError: string | null = null;
 
   try {
-    const [registryResult, meResult] = await Promise.all([
+    const [registryResult, meResult, readResult] = await Promise.all([
       fetchCommandRegistry(ui),
-      ui.me()
+      ui.me(),
+      ui.readRegistry().catch((error) => {
+        readError = formatUiError(error, t("errors.readRegistry"));
+        return null;
+      }),
     ]);
     commands = registryResult.commands;
     me = meResult;
+    readRegistry = readResult;
     if (registryResult.error) {
       errorMessage = formatUiError(registryResult.error, t("errors.load"));
     }
@@ -68,26 +76,6 @@ export async function CommandCatalogPage({
   const categoryFilter = getParamValue(searchParams?.category).trim();
   const capabilityFilter = getParamValue(searchParams?.capability).trim();
   const accessFilter = getParamValue(searchParams?.access).trim();
-
-  if (errorMessage) {
-    return (
-      <PageContainer className="space-y-6">
-        <PageHeader
-          title={t("title", { appLabel })}
-          description={t("description")}
-        />
-        <Section>
-          <div
-            data-testid={buildTestId(testIdPrefix, "error")}
-            className="space-y-2 text-sm text-ui-muted"
-          >
-            <p>{t("errors.unavailable")}</p>
-            <p className="text-xs text-ui-muted">{errorMessage}</p>
-          </div>
-        </Section>
-      </PageContainer>
-    );
-  }
 
   const capabilitySet = resolveCapabilitySet(me?.capabilities);
   const normalizedQuery = query.toLowerCase();
@@ -112,7 +100,14 @@ export async function CommandCatalogPage({
     )
   ).sort();
 
-  const filteredCommands = commands.filter((command) => {
+  const rows = commands.map((command) => {
+    const href = resolveCommandHref(command, appBasePath, appKey);
+    const readState = resolveCommandReadState(command, readRegistry, capabilitySet);
+    const capabilityAllowed = hasCapability(capabilitySet, command.capability);
+    return { command, href, readState, capabilityAllowed,
+      allowed: Boolean(href) && capabilityAllowed && readState === "allowed" };
+  });
+  const matchingRows = rows.filter(({ command }) => {
     const label = resolveLabel(command);
     const searchFields = [
       label,
@@ -123,6 +118,7 @@ export async function CommandCatalogPage({
       command.stage_key ?? "",
       command.schema_category ?? "",
       command.capability ?? "",
+      formatCommandBackendReference(command),
     ]
       .filter(Boolean)
       .join(" ")
@@ -142,35 +138,22 @@ export async function CommandCatalogPage({
       }
     }
 
-    if (accessFilter) {
-      const capabilityAllowed = hasCapability(capabilitySet, command.capability);
-      if (accessFilter === "allowed" && !capabilityAllowed) return false;
-      if (
-        accessFilter === "missing" &&
-        (capabilityAllowed || !command.capability)
-      ) {
-        return false;
-      }
-      if (accessFilter === "none" && command.capability) return false;
-    }
-
     return true;
   });
 
-  const sortedCommands = [...filteredCommands].sort((a, b) =>
-    resolveLabel(a).localeCompare(resolveLabel(b))
-  );
-  const hasFilters = Boolean(
-    normalizedQuery || categoryFilter || capabilityFilter || accessFilter
-  );
-  const allowedCount = sortedCommands.filter((command) => {
-    if (!command.capability) return true;
-    return hasCapability(capabilitySet, command.capability);
-  }).length;
-  const showCapabilityNotice =
-    sortedCommands.length > 0 &&
-    allowedCount === 0 &&
-    accessFilter !== "missing";
+  const sortedRows = matchingRows.filter(({ command, allowed }) =>
+    accessFilter === "allowed" ? allowed :
+    accessFilter === "missing" ? !allowed :
+    accessFilter === "none" ? !command.capability : true,
+  ).sort((a, b) => resolveLabel(a.command).localeCompare(resolveLabel(b.command)));
+  const hasFilters = Boolean(normalizedQuery || categoryFilter || capabilityFilter || accessFilter);
+  const blocked = {
+    route: matchingRows.filter((row) => row.capabilityAllowed && row.readState === "allowed" && !row.href).length,
+    command: matchingRows.filter((row) => !row.capabilityAllowed).length,
+    read: matchingRows.filter((row) => row.capabilityAllowed && row.readState !== "allowed").length,
+  };
+  const unavailableRead = matchingRows.some((row) => row.readState === "unavailable");
+  const showBlocked = matchingRows.length > 0 && !matchingRows.some((row) => row.allowed) && accessFilter !== "missing";
 
   return (
     <PageContainer className="space-y-6">
@@ -185,6 +168,18 @@ export async function CommandCatalogPage({
         collapseKey="command-catalog.registry"
       >
         <div data-testid={buildTestId(testIdPrefix, "ready")} className="space-y-4">
+          {errorMessage ? (
+            <div role="status" aria-label={t("statusLabel")} aria-live="polite" aria-atomic="true"
+              data-testid={`${testIdPrefix}-degraded`}>
+              <p>{t("errors.registryUnavailable")}</p><p>{errorMessage}</p>
+            </div>
+          ) : null}
+          {readError ? (
+            <div role="status" aria-label={t("readStatusLabel")} aria-live="polite" aria-atomic="true"
+              data-testid={`${testIdPrefix}-read-registry-degraded`}>
+              <p>{t("errors.readRegistry")}</p><p>{readError}</p>
+            </div>
+          ) : null}
           <CommandCatalogFilters
             query={query}
             category={categoryFilter}
@@ -204,31 +199,28 @@ export async function CommandCatalogPage({
           <div className="text-xs text-ui-muted">
             {hasFilters
               ? t("summary.filtered", {
-                  count: sortedCommands.length,
+                  count: sortedRows.length,
                   total: commands.length,
                 })
-              : t("summary.available", { count: sortedCommands.length })}
+              : t("summary.available", { count: sortedRows.length })}
           </div>
-          {showCapabilityNotice ? (
+          {showBlocked ? (
             <div className="rounded-xl border border-ui-border bg-ui-surface/70 p-4 text-xs text-ui-muted">
-              {t("summary.capabilityBlocked")}
+              {t(unavailableRead ? "summary.readUnavailable" : "summary.blocked", { appLabel, ...blocked })}
             </div>
           ) : null}
-          {sortedCommands.length === 0 ? (
+          {sortedRows.length === 0 ? (
             <div className="rounded-xl border border-ui-border bg-ui-surface/70 p-4 text-sm text-ui-muted">
-              {hasFilters ? t("summary.filteredEmpty") : t("summary.empty")}
+              {errorMessage || showBlocked ? null : hasFilters ? t("summary.filteredEmpty") : t("summary.empty")}
             </div>
           ) : (
             <div className="grid gap-4 lg:grid-cols-2">
-              {sortedCommands.map((command) => {
-                const capability = command.capability ?? null;
-                const capabilityAllowed = hasCapability(capabilitySet, capability);
-                const statusLabel = capability
-                  ? capabilityAllowed
-                    ? t("status.allowed")
-                    : t("status.missingCapability")
-                  : t("status.noCapability");
-                const commandHref = resolveCommandHref(command, appBasePath, appKey);
+              {sortedRows.map(({ command, href: commandHref, readState, capabilityAllowed, allowed }) => {
+                const statusLabel = !capabilityAllowed ? t("status.missingCapability") :
+                  readState === "unavailable" ? t("status.readUnavailable") :
+                  readState === "denied" ? t("status.readRequired") :
+                  !commandHref ? t("status.noTarget") : t("status.allowed");
+                const backendReference = formatCommandBackendReference(command);
                 return (
                   <div
                     key={command.key}
@@ -237,24 +229,26 @@ export async function CommandCatalogPage({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-ui-ink">
-                          {resolveLabel(command)}
+                          {resolveRowDisplayText(resolveLabel(command), command.label_ar, getPublicConfig().locale)}
                         </div>
                         <div className="text-xs text-ui-muted">{command.key}</div>
                       </div>
-                      <Badge tone={capabilityAllowed ? "accent" : "neutral"}>
+                      <Badge tone={allowed ? "accent" : "neutral"}>
                         {statusLabel}
                       </Badge>
                     </div>
                     {command.description ? (
-                      <p className="mt-3 text-sm text-ui-muted">{command.description}</p>
+                      <p className="mt-3 text-sm text-ui-muted">{resolveRowDisplayText(command.description, command.description_ar, getPublicConfig().locale)}</p>
                     ) : null}
-                    {commandHref && capabilityAllowed ? (
+                    {commandHref && allowed ? (
                       <div className="mt-4">
                         <Button asChild variant="ghost">
                           <a href={commandHref}>{t("actions.openRequest")}</a>
                         </Button>
                       </div>
                     ) : null}
+                    {!commandHref ? <p className="mt-2 text-xs text-ui-muted">{t("noTargetDescription", { appLabel })}</p> : null}
+                    {backendReference ? <div className="mt-3 text-xs"><span>{t("fields.backendReference")}</span><p>{backendReference}</p></div> : null}
                     <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2">
                       <div>
                         <dt className="uppercase tracking-wide text-ui-muted">

@@ -382,6 +382,7 @@ function SchemaField({
   const schemaType = resolveSchemaType(schema);
   const enumValues = resolveSchemaEnum(schema);
   const resourceSelect = resolveResourceSelect(schema);
+  const fieldId = React.useId();
 
   if (resourceSelect) {
     return (
@@ -579,11 +580,14 @@ function SchemaField({
   const normalized = typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
   return (
     <div className="space-y-2">
-      <label className="text-xs font-medium text-ui-muted">
+      <label htmlFor={fieldId} className="text-xs font-medium text-ui-muted">
         {label}
         {required ? <span className="ml-1 text-ui-danger">*</span> : null}
       </label>
       <Input
+        id={fieldId}
+        required={required}
+        minLength={typeof schema.minLength === "number" ? schema.minLength : undefined}
         value={normalized}
         onChange={(event) => onChange(coerceScalarInput(schemaType, event.target.value))}
         disabled={disabled}

@@ -3,7 +3,7 @@ const path = require('path');
 
 const migrationPath = path.join(
   __dirname,
-  '../../../supabase/migrations/202607031300_command_dashboard_registry_readiness_v1.sql',
+  '../../../supabase/migrations/202608161410_b3_command_dashboard_registry_readiness_v1.sql',
 );
 
 describe('Command dashboard registry readiness migration', () => {
@@ -21,6 +21,15 @@ describe('Command dashboard registry readiness migration', () => {
     expect(sql).not.toMatch(/localStorage/i);
   });
 
+  test('keeps the generic settings resolver service-role-only', () => {
+    const signature = 'api.resolve_settings_row_from_policy_context_v1(TEXT, JSONB)';
+
+    expect(sql).toContain(`REVOKE ALL ON FUNCTION ${signature} FROM authenticated;`);
+    expect(sql).toContain(`GRANT EXECUTE ON FUNCTION ${signature}\n  TO service_role;`);
+    expect(sql).not.toMatch(/GRANT EXECUTE ON FUNCTION api\.resolve_settings_row_from_policy_context_v1\(TEXT,\s*JSONB\)\s+TO\s+[^;]*\bauthenticated\b/i);
+    expect(sql).not.toMatch(/resolve_settings_row_from_policy_context_v1\([^)]*'[^']+'[^)]*\)/i);
+  });
+
   test('registers the Command dashboard resources and capability map rows', () => {
     for (const key of ['kpi_rollup_directory', 'ops_alerts', 'comms_attempts', 'route_runs']) {
       expect(sql).toContain(`'key', '${key}'`);
@@ -31,12 +40,6 @@ describe('Command dashboard registry readiness migration', () => {
     expect(sql).toContain("'capability_read', 'alerts.read'");
     expect(sql).toContain("'capability_read', 'shipments.read'");
     expect(sql).toContain("'capability_read', 'routes.read'");
-  });
-
-  test('keeps Command dashboard read access row-driven for ops admins', () => {
-    expect(sql).toContain("'[\"alerts.read\",\"insights.read\"]'::jsonb");
-    expect(sql).toContain("role_item->>'key' = 'ops_admin'");
-    expect(sql).toContain('Restore Command Center dashboard ops_admin read capabilities');
   });
 
   test('creates row-driven Command dashboard KPI definitions and rollups', () => {

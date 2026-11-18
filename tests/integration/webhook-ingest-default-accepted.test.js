@@ -41,6 +41,7 @@ describeIfWebhookDefaults('Webhook intake default acceptance via global policy',
   test('returns 202 Accepted when only global policy applies', async () => {
     const organizationId = randomUUID();
     const clientId = randomUUID();
+    const senderId = randomUUID();
     const mappingId = randomUUID();
     const sourceId = randomUUID();
     const token = `tok-${randomUUID()}`;
@@ -58,6 +59,12 @@ describeIfWebhookDefaults('Webhook intake default acceptance via global policy',
     );
 
     await client.query(
+      `INSERT INTO senders (id, client_id, name, status)
+       VALUES ($1::uuid, $2::uuid, 'Global Policy Sender', 'active')`,
+      [senderId, clientId]
+    );
+
+    await client.query(
       `INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
        VALUES ($1::uuid, 'webhook_inbound', $2::text, '{}'::jsonb, 1, 'default acceptance mapping')`,
       [mappingId, `global-default-${Date.now()}`]
@@ -66,12 +73,12 @@ describeIfWebhookDefaults('Webhook intake default acceptance via global policy',
     await client.query(
       `INSERT INTO webhook_sources (
          id, organization_id, source_identifier, name, provider_type,
-         auth_token, mapping_config_id, enabled
+         auth_token, mapping_config_id, sender_id, enabled
        ) VALUES (
          $1::uuid, $2::uuid, $3::text, 'Global Default Source', 'provider',
-         $4::text, $5::uuid, TRUE
+         $4::text, $5::uuid, $6::uuid, TRUE
        )`,
-      [sourceId, organizationId, `global-default-${sourceId.slice(0, 8)}`, token, mappingId]
+      [sourceId, organizationId, `global-default-${sourceId.slice(0, 8)}`, token, mappingId, senderId]
     );
 
     const payload = {

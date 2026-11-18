@@ -1,4 +1,5 @@
-import type { SupabaseClient } from "npm:@supabase/supabase-js@^2.45.4";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
+import { isLoopbackHostname } from "./cors.mjs";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -57,15 +58,13 @@ export const normalizeOrigin = (value: string): string => {
 };
 
 const isDisallowedRedirectHost = (host: string): boolean => {
-  const normalized = String(host || "").trim().toLowerCase();
+  const normalized = String(host || "").trim().toLowerCase().replace(/\.+$/, "");
   if (!normalized) return true;
   // objectives:allow LOCALHOST Justification: explicit denylist guard so invite redirects cannot target loopback/local domains.
   return (
-    normalized === "localhost" ||
-    normalized === "127.0.0.1" ||
+    isLoopbackHostname(normalized) ||
     normalized === "0.0.0.0" ||
-    normalized.endsWith(".local") ||
-    normalized.endsWith(".localhost")
+    normalized.endsWith(".local")
   );
 };
 
@@ -86,7 +85,7 @@ export const normalizeHostedRedirectUrl = (value: string): string => {
   try {
     const parsed = new URL(raw);
     const protocol = String(parsed.protocol || "").toLowerCase();
-    if (protocol !== "http:" && protocol !== "https:") return "";
+    if (protocol !== "https:") return "";
     if (isDisallowedRedirectHost(parsed.hostname)) return "";
     parsed.hash = "";
     return parsed.toString();
@@ -241,8 +240,8 @@ const isUserAlreadyRegisteredError = (message: string): boolean => {
   return text.includes("already") && (text.includes("registered") || text.includes("exists"));
 };
 
-const findAuthUserIdByEmail = async (
-  serviceClient: EdgeRpcClient,
+export const findAuthUserIdByEmail = async (
+  serviceClient: SupabaseClient,
   email: string,
 ): Promise<string> => {
   const target = email.trim().toLowerCase();
@@ -258,10 +257,15 @@ const findAuthUserIdByEmail = async (
   }
 
   const perPage = 200;
-  for (let page = 1; page <= 10; page += 1) {
-    const { data, error } = await serviceClient.auth.admin.listUsers({ page, perPage });
+  for (let page = 1; ; page += 1) {
+    const { data, error } = await serviceClient.auth.admin.listUsers({
+      page,
+      perPage,
+    });
 
-    if (error) return "";
+    if (error) {
+      throw new Error(error.message || "tenant_signup_auth_user_lookup_failed");
+    }
 
     const users = Array.isArray(data?.users) ? data.users : [];
     const matched = users.find(
@@ -397,7 +401,7 @@ export const approveTenantSignupRequest = async (
       ok: false,
       error: {
         code: "invite_redirect_required",
-        message: "Invite redirect must be a hosted non-localhost http/https URL.",
+        message: "Invite redirect must be a hosted non-localhost HTTPS URL.",
       },
     };
   }
@@ -431,7 +435,7 @@ export const approveTenantSignupRequest = async (
 
   if (error) {
     try {
-      await reviewClient.rpc("tenant_signup_request_record_error_v1", {
+      await params.serviceClient.rpc("tenant_signup_request_record_error_v1", {
         p_request_id: request.id,
         p_error_code: "review_apply_failed",
         p_error_message: error.message || "review_apply_failed",
@@ -442,7 +446,7 @@ export const approveTenantSignupRequest = async (
         },
       });
     } catch {
-      // Preserve the original review failure.
+      // Diagnostic recording is best-effort; preserve the original review error.
     }
 
     return {

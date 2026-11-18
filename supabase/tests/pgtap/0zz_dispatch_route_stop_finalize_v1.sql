@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(70);
+SELECT plan(78);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_dispatch_route_stop_finalize_v1()
 RETURNS SETOF TEXT
@@ -50,6 +50,7 @@ DECLARE
   v_actions_count INT;
 
   v_artifact_id UUID;
+  v_readback JSONB;
   v_shipment_action_id UUID;
   v_actions_count2 INT;
   v_shipment_action_id2 UUID;
@@ -380,6 +381,19 @@ BEGIN
    LIMIT 1;
 
   RETURN NEXT ok(v_shipment_action_id IS NOT NULL, 'shipment_action id captured for evidence linking');
+  -- Actual persisted task-event -> workflow -> action proof, through exposed API schema.
+  PERFORM set_config('request.jwt.claim.sub',v_driver::text,true);
+  PERFORM set_config('request.jwt.claim.role','authenticated',true);
+  PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',v_driver)::text,true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_readback:=api.ui_get_task_completion_readback_v1(v_task_id,v_task_done_event_id);
+  RETURN NEXT is(v_readback#>>'{task,id}',v_task_id::text,'readback preserves actual task identity');
+  RETURN NEXT is(v_readback->>'task_event_id',v_task_done_event_id::text,'readback binds accepted event');
+  RETURN NEXT is(v_readback->>'shipment_action_id',v_shipment_action_id::text,'readback binds persisted action');
+  RETURN NEXT ok((v_readback#>'{proof,artifact_ids}') ? v_artifact_id::text,'readback contains registered persisted artifact');
+  RETURN NEXT ok(NOT(v_readback ? 'action_data') AND NOT(v_readback ? 'task_event_payload')
+    AND position('Faisal QA' in v_readback::text)=0,'readback does not return raw payload or recipient name');
+  EXECUTE 'SET LOCAL ROLE postgres';
   RETURN NEXT is(
     (SELECT sa.action_data->'task_event_payload'->>'handover_mode' FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
     'mailroom',
@@ -1109,6 +1123,26 @@ BEGIN
 
   RETURN NEXT is(v_followup_tasks_count3, 1, 'dispatch_rto_pickup follow-up task created for customer_refused outcome');
 
+  -- Deliberately corrupt only this rollback-owned task target to exercise the action/stop join guard.
+  UPDATE public.tasks SET resource_id=(SELECT resource_id FROM public.tasks WHERE id=v_task_id2) WHERE id=v_task_id;
+  PERFORM set_config('request.jwt.claim.sub',v_driver::text,true);
+  PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',v_driver)::text,true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  RETURN NEXT ok(api.ui_get_task_completion_readback_v1(v_task_id,v_task_done_event_id) IS NULL,'wrong route target cannot reuse the original persisted action');
+  EXECUTE 'SET LOCAL ROLE postgres';
+  UPDATE public.tasks SET resource_id=v_route_stop_id WHERE id=v_task_id;
+  -- Independent authenticated actor with task-read capability cannot claim another actor's event.
+  PERFORM public.provision_rbac_roles_from_templates_v1(v_org,ARRAY['driver'],v_ops_owner);
+  INSERT INTO public.rbac_user_role_assignments(organization_id,user_id,role_id,assigned_by_user_id,metadata)
+  SELECT v_org,v_ops_owner,id,v_ops_owner,'{}'::jsonb FROM public.rbac_roles
+  WHERE organization_id=v_org AND key='driver' ON CONFLICT DO NOTHING;
+  PERFORM set_config('request.jwt.claim.sub',v_ops_owner::text,true);
+  PERFORM set_config('request.jwt.claim.role','authenticated',true);
+  PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',v_ops_owner)::text,true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  RETURN NEXT ok(api.ui_get_resource_v1('tasks',v_task_id) IS NOT NULL,'wrong-event actor still has canonical task visibility');
+  RETURN NEXT ok(api.ui_get_task_completion_readback_v1(v_task_id,v_task_done_event_id) IS NULL,'visible task does not permit claiming another actor event');
+  EXECUTE 'SET LOCAL ROLE postgres';
   RETURN;
 END;
 $function$;

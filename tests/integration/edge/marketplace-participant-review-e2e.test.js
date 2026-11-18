@@ -1,5 +1,5 @@
 // Plan: PLAN-202603-marketplace-network-v1 / Step: S95
-// Marketplace participant review edge E2E (guarded). Validates authorization and approve/reject transitions.
+// Marketplace participant review edge E2E (guarded). Validates authorization and pending/approve/reject transitions.
 
 const { randomUUID } = require("crypto");
 const { Pool } = require("pg");
@@ -88,11 +88,11 @@ runIfEdge("marketplace-participant-review edge (E2E)", () => {
     await pool.end().catch(() => {});
   });
 
-  test("POST without bearer token returns 401", async () => {
+  test.each(["rejected", "request_additional_docs"])("POST %s without bearer token returns 401", async (decision) => {
     const { status, body } = await postReview(
       {
         request_id: randomUUID(),
-        decision: "rejected",
+        decision,
       },
       null,
     );
@@ -237,6 +237,92 @@ runIfEdge("marketplace-participant-review edge (E2E)", () => {
       const rejectRequestId = createRejectPayload.data.id;
       expect(String(createRejectPayload.data.task_id || "")).toMatch(/^[0-9a-f-]{36}$/i);
 
+      for (const payload of [
+        { decision: "unknown_action" },
+        { decision: "request_docs", metadata: { requested_documents: "license" } },
+        { decision: "request_docs", metadata: { requested_documents: [""] } },
+        { decision: "request_docs", metadata: { requested_documents: ["x".repeat(101)] } },
+      ]) {
+        const invalid = await postReview({ request_id: rejectRequestId, ...payload }, reviewerToken);
+        expect(invalid.status).toBe(400);
+        const unchanged = await db.query(
+          "SELECT status, reviewed_at FROM public.marketplace_participant_requests WHERE id = $1", [rejectRequestId],
+        );
+        expect(unchanged.rows[0]).toMatchObject({ status: "pending", reviewed_at: null });
+      }
+
+      // A tenant operator must not become a global reviewer via service-role mutation.
+      const tenantOrgId = randomUUID();
+      await db.query(
+        `INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
+         VALUES ($1, 'Marketplace Other Tenant', $2, 'Asia/Riyadh', 'en', 'active')`,
+        [tenantOrgId, `review-other-${tenantOrgId.slice(0, 8)}`],
+      );
+      const tenantEmail = `marketplace-tenant-${randomUUID()}@example.com`;
+      const { data: tenantAuth, error: tenantAuthError } = await service.auth.admin.createUser({
+        email: tenantEmail, password: reviewerPassword, email_confirm: true,
+      });
+      if (tenantAuthError || !tenantAuth?.user?.id) throw new Error(tenantAuthError?.message || "missing tenant user");
+      authUserIds.push(tenantAuth.user.id);
+      await db.query(
+        `INSERT INTO users (id, organization_id, email, full_name, user_type, status, access_scope_type, access_scope_id)
+         VALUES ($1, $2, $3, 'Tenant operator', 'ops_admin', 'active', 'tenant', NULL)`,
+        [tenantAuth.user.id, tenantOrgId, tenantEmail],
+      );
+      const tenantClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+        auth: { persistSession: false }, db: { schema: "api" },
+      });
+      const tenantLogin = await tenantClient.auth.signInWithPassword({ email: tenantEmail, password: reviewerPassword });
+      if (tenantLogin.error || !tenantLogin.data?.session?.access_token) throw new Error(tenantLogin.error?.message || "missing tenant token");
+      const denied = await postReview({ request_id: rejectRequestId, decision: "request_docs" }, tenantLogin.data.session.access_token);
+      expect(denied.status).toBe(403);
+      expect(denied.body).toMatchObject({ ok: false, error: { code: "reviewer_forbidden" } });
+
+      const requestDocs = await postReview({ request_id: rejectRequestId, decision: "request-docs",
+        reason: "Please replace the expired license", metadata: { requested_documents: [" license ", "license", "identity"],
+          internal_reason: "SG66_INTERNAL_NOT_FOR_UI", credentials: { token: "SG66_SYNTHETIC_CREDENTIAL_NOT_FOR_UI" } } }, reviewerToken);
+      expect(requestDocs.status).toBe(200);
+      expect(requestDocs.body).toMatchObject({ ok: true, decision: "request_additional_docs",
+        result: { ok: true, status: "pending", decision: "request_additional_docs" } });
+      const docsRow = (await db.query(
+        `SELECT status, reviewed_by, review_reason, decision_metadata, public_status_token
+         FROM public.marketplace_participant_requests WHERE id = $1`, [rejectRequestId],
+      )).rows[0];
+      expect(docsRow).toMatchObject({ status: "pending", reviewed_by: reviewerUserId,
+        review_reason: "Please replace the expired license", decision_metadata: {
+          decision: "request_additional_docs", request_additional_docs: true, requested_documents: ["license", "identity"],
+        } });
+      const decisionRow = (await db.query(
+        "SELECT resource_id, decision_outcome, decision_inputs FROM public.decision_log WHERE id = $1",
+        [requestDocs.body.result.decision_log_id],
+      )).rows[0];
+      expect(decisionRow).toMatchObject({ resource_id: rejectRequestId, decision_outcome: "request_additional_docs",
+        decision_inputs: { requested_documents: ["license", "identity"] } });
+      const eventRow = (await db.query(
+        "SELECT resource_id, event_type, payload FROM public.marketplace_events WHERE id = $1",
+        [requestDocs.body.result.domain_event_id],
+      )).rows[0];
+      expect(eventRow).toMatchObject({ resource_id: rejectRequestId, event_type: "participant_request.additional_docs_requested",
+        payload: { requested_documents: ["license", "identity"], decision_log_id: requestDocs.body.result.decision_log_id } });
+      const statusReadback = await service.rpc("marketplace_application_status_by_token_v1", { p_status_token: docsRow.public_status_token });
+      expect(statusReadback.error).toBeNull();
+      expect(statusReadback.data).toMatchObject({ ok: true, status: "pending", application_state: "additional_documents_requested",
+        review_reason: "Please replace the expired license", requested_documents: ["license", "identity"] });
+      const reviewReadback = await reviewerClient.rpc("ui_get_resource_v1", {
+        p_resource: "marketplace_participant_requests", p_id: rejectRequestId,
+      });
+      expect(reviewReadback.error).toBeNull();
+      expect(reviewReadback.data).toMatchObject({ id: rejectRequestId, status: "pending",
+        review_decision: "request_additional_docs", requested_documents: ["license", "identity"] });
+      for (const key of ["decision_metadata", "public_status_token", "metadata", "ip_hash"]) {
+        expect(reviewReadback.data).not.toHaveProperty(key);
+      }
+      expect(JSON.stringify(reviewReadback.data)).not.toMatch(/SG66_INTERNAL_NOT_FOR_UI|SG66_SYNTHETIC_CREDENTIAL_NOT_FOR_UI/);
+      const foreignReadback = await tenantClient.rpc("ui_get_resource_v1", {
+        p_resource: "marketplace_participant_requests", p_id: rejectRequestId,
+      });
+      expect(foreignReadback.error).toBeNull();
+      expect(foreignReadback.data).toBeNull();
       const rejectRes = await postReviewWithJwtRetry(
         {
           request_id: rejectRequestId,
@@ -283,6 +369,7 @@ runIfEdge("marketplace-participant-review edge (E2E)", () => {
       expect(rejectRow.rows[0]?.review_decision).toBe("rejected");
       expect(rejectRow.rows[0]?.last_error_code ?? null).toBeNull();
       expect(rejectRow.rows[0]?.review_task_id).toBe(createRejectPayload.data.task_id);
+
 
       const createApprovePayload = await service.rpc("marketplace_participant_request_create_v1", {
         p_requested_participant_type_key: "freelancer_driver",

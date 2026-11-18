@@ -1,9 +1,8 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
-import { parseRequestBody, readEnv } from "./_shared/mod.mjs";
+import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import {
   asString,
-  parseOriginAllowlist,
   type JsonRecord,
 } from "./_shared/marketplace_signup.ts";
 
@@ -24,18 +23,6 @@ const DRIVER_SIGNUP_CORS_ALLOW_ORIGINS = readEnv("DRIVER_SIGNUP_CORS_ALLOW_ORIGI
 const DRIVER_SIGNUP_RPC_SCHEMA =
   readEnv("DRIVER_SIGNUP_RPC_SCHEMA", ["EDGE_RPC_SCHEMA", "API_RPC_SCHEMA"]) || "api";
 
-const CORS_ALLOWLIST = parseOriginAllowlist(DRIVER_SIGNUP_CORS_ALLOW_ORIGINS);
-const ALLOWED_ORIGINS = CORS_ALLOWLIST.origins;
-const CORS_ALLOWLIST_CONFIGURED =
-  ALLOWED_ORIGINS.size > 0 &&
-  CORS_ALLOWLIST.invalid.length === 0;
-const LOCAL_DRIVER_STATUS_ORIGINS = new Set([
-  "http://127.0.0.1:3333",
-  "http://localhost:3333",
-  "http://192.0.2.10:3333",
-  "http://rvzwwjlztwwisjthghnipgjr.example.invalid:3333",
-]);
-
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -47,129 +34,12 @@ const json = (status: number, body: JsonRecord, corsHeaders: HeadersInit) =>
 
 const isJwtLike = (value: string): boolean => String(value || "").trim().split(".").length === 3;
 
-const isLocalHostname = (value: string): boolean => {
-  const normalized = String(value || "").trim().toLowerCase();
-  // objectives:allow LOCALHOST Justification: native Mobile V2 Example Person needs explicit loopback detection.
-  return normalized === "127.0.0.1" ||
-    normalized === "localhost" ||
-    normalized === "rvzwwjlztwwisjthghnipgjr.example.invalid" ||
-    normalized === "192.0.2.10";
-};
-
-const isLocalRequest = (req: Request): boolean => {
-  const hostHeader = String(req.headers.get("x-forwarded-host") || req.headers.get("host") || "")
-    .trim()
-    .split(":")[0]
-    .toLowerCase();
-  if (isLocalHostname(hostHeader)) return true;
-  try {
-    return isLocalHostname(new URL(req.url).hostname);
-  } catch {
-    return false;
-  }
-};
-
-const isLocalOrigin = (origin: string): boolean => {
-  try {
-    return isLocalHostname(new URL(origin).hostname);
-  } catch {
-    return false;
-  }
-};
-
-type CorsResult =
-  | { ok: true; origin: string; headers: HeadersInit }
-  | {
-      ok: false;
-      origin: string;
-      status: number;
-      body: JsonRecord;
-      headers: HeadersInit;
-    };
-
-const normalizeOrigin = (value: string): string => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-    return parsed.origin;
-  } catch {
-    return "";
-  }
-};
-
-const buildCorsHeaders = (req: Request): CorsResult => {
-  const originRaw = req.headers.get("origin")?.trim() ?? "";
-  const origin = normalizeOrigin(originRaw);
-  const requestIsLocal = isLocalRequest(req);
-  const localOriginAllowed = requestIsLocal && Boolean(origin && isLocalOrigin(origin));
-  const effectiveOrigins = CORS_ALLOWLIST_CONFIGURED
-    ? ALLOWED_ORIGINS
-    : (requestIsLocal ? LOCAL_DRIVER_STATUS_ORIGINS : new Set<string>());
-  const effectiveConfigured = effectiveOrigins.size > 0;
-
-  const baseHeaders = {
-    "Access-Control-Allow-Headers": "accept, content-type, authorization, apikey, x-client-info",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Max-Age": "600",
-    Vary: "Origin",
-  };
-
-  if (!effectiveConfigured) {
-    return {
-      ok: false,
-      origin: "",
-      status: 500,
-      body: {
-        ok: false,
-        error: {
-          code: "server_misconfigured",
-          message: CORS_ALLOWLIST.invalid.length ? "cors_allowlist_invalid" : "cors_allowlist_missing",
-        },
-      },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-    };
-  }
-
-  if (!origin) {
-    return {
-      ok: false,
-      origin: "",
-      status: 403,
-      body: { ok: false, error: { code: "origin_required" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-    };
-  }
-
-  if (!effectiveOrigins.has(origin) && !localOriginAllowed) {
-    return {
-      ok: false,
-      origin,
-      status: 403,
-      body: { ok: false, error: { code: "origin_not_allowed" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-    };
-  }
-
-  return {
-    ok: true,
-    origin,
-    headers: {
-      ...baseHeaders,
-      "Access-Control-Allow-Origin": origin,
-    },
-  };
-};
+const buildCorsHeaders = (req: Request) => resolveBrowserCorsPolicy(req, {
+  hostedAllowedOrigins: DRIVER_SIGNUP_CORS_ALLOW_ORIGINS,
+  localAllowedOrigins: readEnv("PUBLIC_EDGE_LOCAL_CORS_ALLOW_ORIGINS"),
+  localQaEnabled: readEnv("PUBLIC_EDGE_LOCAL_QA_ENABLED") === "1",
+  allowedMethods: "GET, POST, OPTIONS",
+});
 
 const createServiceClient = () => {
   const serviceKey = asString(EDGE_SUPABASE_SECRET_KEY) || asString(SUPABASE_SERVICE_KEY);
@@ -211,7 +81,7 @@ async function readStatusToken(req: Request): Promise<string> {
   return asString(payload?.token) || asString(payload?.status_token);
 }
 
-serve(async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const cors = buildCorsHeaders(req);
 
   if (req.method === "OPTIONS") {
@@ -244,10 +114,10 @@ serve(async (req: Request): Promise<Response> => {
     serviceClient = createServiceClient();
   } catch (error) {
     const message = error instanceof Error ? error.message : "missing_supabase_configuration";
-    return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
+    return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
   }
 
-  const { data, error } = await serviceClient.rpc("driver_application_status_lookup_v1", {
+  const { data, error } = await serviceClient.rpc("marketplace_application_status_by_token_v1", {
     p_status_token: statusToken,
   });
 
@@ -255,17 +125,29 @@ serve(async (req: Request): Promise<Response> => {
   const errObject = result.error && typeof result.error === "object"
     ? (result.error as JsonRecord)
     : {};
-  const errCode = asString(errObject.code) || asString(error?.message);
+  const errCode = asString(errObject.code);
 
-  if (error || result.ok === false) {
+  if (error || result.ok !== true || !["pending", "approved", "rejected", "withdrawn"].includes(asString(result.status))) {
     const notFound = errCode === "request_not_found";
+    // Never pass RPC messages/details, input tokens, or returned payloads to logs.
+    const knownCodes = new Set(["42501", "42883", "42P01", "42703", "22P02", "25006", "57014",
+      "PGRST202", "PGRST203", "PGRST301", "PGRST302"]);
+    logStructured("error", "driver_application_status_readback_failed", {
+      service: "driver-application-status",
+      failure_category: error ? "rpc_error" : "result_contract",
+      rpc_error_code: error && knownCodes.has(asString(error.code)) ? asString(error.code) : "unclassified",
+      result_shape: data === null || data === undefined ? "absent"
+        : Array.isArray(data) ? "array" : typeof data === "object" ? "object" : "scalar",
+      result_ok: result.ok === true,
+      status_allowed: ["pending", "approved", "rejected", "withdrawn"].includes(asString(result.status)),
+      request_not_found: notFound,
+    });
     return json(
       notFound ? 404 : 400,
       {
         ok: false,
         error: {
-          code: errCode || "request_failed",
-          message: asString(errObject.message) || error?.message || "request_failed",
+          code: notFound ? "request_not_found" : "request_failed",
         },
       },
       cors.headers,
@@ -276,19 +158,28 @@ serve(async (req: Request): Promise<Response> => {
     200,
     {
       ok: true,
-      status: asString(result.status) || "pending",
-      application_state: asString(result.application_state) || "pending_review",
+      status: asString(result.status),
+      application_state: asString(result.application_state),
+      document_review_revision: Number.isSafeInteger(result.document_review_revision) && Number(result.document_review_revision) >= 0 ? result.document_review_revision : null,
+      document_return_attempt: result.document_return_attempt && typeof result.document_return_attempt === "object"
+        && (result.document_return_attempt as JsonRecord).state === "reserved"
+        && uuidRegex.test(asString((result.document_return_attempt as JsonRecord).retry_key)) ? {
+          state: "reserved", retry_key: asString((result.document_return_attempt as JsonRecord).retry_key),
+        } : null,
       participant_type_key: asString(result.participant_type_key),
       review_decision: asString(result.review_decision),
       reviewed_at: asString(result.reviewed_at),
       invite_email_sent_at: asString(result.invite_email_sent_at),
-      invite_redirect_to: asString(result.invite_redirect_to),
       review_reason: asString(result.review_reason),
-      requested_documents: Array.isArray(result.requested_documents) ? result.requested_documents : [],
-      profile_handoff:
-        result.profile_handoff && typeof result.profile_handoff === "object" && !Array.isArray(result.profile_handoff)
-          ? result.profile_handoff as JsonRecord
-          : {},
+      requested_documents: Array.isArray(result.requested_documents) ? result.requested_documents.filter(
+        (type: unknown) => typeof type === "string" && type.length > 0 && type.length <= 100,
+      ) : [],
+      submitted_document_count: Number.isInteger(result.submitted_document_count) && Number(result.submitted_document_count) >= 0 ? result.submitted_document_count : 0,
+      missing_document_count: Number.isInteger(result.missing_document_count) && Number(result.missing_document_count) >= 0 ? result.missing_document_count : 0,
+      profile_handoff: result.profile_handoff && typeof result.profile_handoff === "object" ? {
+        ready: (result.profile_handoff as JsonRecord).ready === true,
+        fleet_handoff_ready: (result.profile_handoff as JsonRecord).fleet_handoff_ready === true,
+      } : { ready: false, fleet_handoff_ready: false },
     },
     cors.headers,
   );

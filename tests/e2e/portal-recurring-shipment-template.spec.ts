@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { loadDemoContext } from "./utils/demo-accounts";
 import { expectSignedIn, signInWithPassword } from "./utils/auth";
 import { getPortalBasePath } from "./utils/base-paths";
@@ -50,8 +51,8 @@ async function resolveRecurringTemplateId(user: DemoUser) {
       "ui_list_resource_v1",
       {
         p_resource: "workflow_templates",
-        p_filters: {},
-        p_limit: 500,
+        p_filters: { name: recurringTemplateName },
+        p_limit: 200,
         p_offset: 0,
         p_sort: null,
       },
@@ -65,14 +66,20 @@ async function resolveRecurringTemplateId(user: DemoUser) {
     }
 
     const items = Array.isArray(data.items) ? data.items : [];
-    const match = items.find(
+    const matches = items.filter(
       (item) =>
         item &&
         typeof item === "object" &&
         String((item as Record<string, unknown>).name ?? "").trim() === recurringTemplateName
-    ) as Record<string, unknown> | undefined;
+    ) as Record<string, unknown>[];
+    // A capped/estimated page cannot establish uniqueness across visible matches.
+    if (data.total_is_estimate !== false || data.total_strategy !== "exact"
+      || !Number.isSafeInteger(data.total) || data.total !== items.length) {
+      throw new Error("Recurring template discovery did not return a complete exact result.");
+    }
+    if (matches.length > 1) throw new Error("Recurring template discovery returned ambiguous exact matches.");
 
-    return typeof match?.id === "string" ? match.id : null;
+    return matches.length === 1 && typeof matches[0].id === "string" ? matches[0].id : null;
   } finally {
     await signOutSupabaseClient(supabase, {
       label: `portal-recurring-template:${user.email}`,
@@ -128,6 +135,7 @@ test.describe("portal recurring shipment template", () => {
     const resolvedTemplateId = templateId;
 
     const note = `Recurring shipment E2E ${Date.now()}`;
+    const uniqueRef = `E2E-RECURRING-${randomUUID()}`;
     let triggerId: string | null = null;
     let workflowRunId: string | null = null;
     let shipmentId: string | null = null;
@@ -172,8 +180,18 @@ test.describe("portal recurring shipment template", () => {
       );
       await expect(modal).toBeVisible({ timeout: 20_000 });
 
-      await modal.getByPlaceholder("Short purpose and notes").fill(note);
-      await modal.getByRole("button", { name: "Save" }).click({ timeout: 20_000 });
+      await modal.getByTestId("portal-workflow-template-studio-triggers-schedules-editor-notes").fill(note);
+      await modal
+        .locator(
+          '[data-testid="portal-workflow-template-studio-triggers-schedules-editor-context-patch"]'
+        )
+        .fill(
+          JSON.stringify({
+            service_type: "delivery",
+            shipment: { client_reference_number: uniqueRef },
+          })
+        );
+      await modal.getByTestId("portal-workflow-template-studio-triggers-schedules-editor-submit").click({ timeout: 20_000 });
       await expect(modal).toBeHidden({ timeout: 30_000 });
 
       const scheduleRow = page
@@ -187,7 +205,7 @@ test.describe("portal recurring shipment template", () => {
       triggerId = rowMatch?.[1] ?? null;
       expect(triggerId).toBeTruthy();
 
-      await scheduleRow.getByRole("button", { name: "Run now" }).click({ timeout: 20_000 });
+      await scheduleRow.getByTestId(`portal-workflow-template-studio-triggers-schedules-run-${triggerId}`).click({ timeout: 20_000 });
 
       await expect.poll(() => page.url(), { timeout: 60_000 }).toContain("/workflows/runs/");
       const url = new URL(page.url());
@@ -207,18 +225,21 @@ test.describe("portal recurring shipment template", () => {
     });
 
     try {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const progress = await rpcWithRetry<any>(
-          supabase,
-          "progress_workflow_run",
-          { p_workflow_run_id: workflowRunId, p_operation_result: {} },
-          { label: `progress_workflow_run:${workflowRunId}:${attempt}` }
+      const progress = await rpcWithRetry<any>(
+        supabase,
+        "progress_workflow_run_until_wait_v1",
+        {
+          p_workflow_run_id: workflowRunId,
+          p_operation_result: {},
+          p_budget_ms: 1_200,
+          p_max_steps: 10,
+        },
+        { label: `progress_workflow_run_until_wait_v1:${workflowRunId}` }
+      );
+      if (progress.error) {
+        throw new Error(
+          `Failed to progress workflow run ${workflowRunId}: ${(progress.error as any)?.message || String(progress.error)}`
         );
-        if (progress.error) {
-          throw new Error(
-            `Failed to progress workflow run ${workflowRunId}: ${(progress.error as any)?.message || String(progress.error)}`
-          );
-        }
       }
 
       const stepsResult = await rpcWithRetry<any>(
@@ -251,7 +272,44 @@ test.describe("portal recurring shipment template", () => {
 
       expect(createStep).toBeTruthy();
       expect(createStep?.step_status).toBe("completed");
-      shipmentId = String(createStep?.operation_result?.shipment_id ?? "").trim() || null;
+      const workflowRunResult = await rpcWithRetry<any>(
+        supabase,
+        "ui_get_resource_v1",
+        { p_resource: "workflow_runs", p_id: workflowRunId },
+        { label: `ui_get_resource_v1:workflow_runs:${workflowRunId}` }
+      );
+      if (workflowRunResult.error || !workflowRunResult.data) {
+        throw new Error(
+          `Failed to read workflow_runs ${workflowRunId}: ${(workflowRunResult.error as any)?.message || "no data"}`
+        );
+      }
+      expect(workflowRunResult.data.workflow_status).toBe("completed");
+
+      const shipmentsResult = await rpcWithRetry<any>(
+        supabase,
+        "ui_list_resource_v1",
+        {
+          p_resource: "shipments",
+          p_filters: { client_reference_number: uniqueRef },
+          p_limit: 25,
+          p_offset: 0,
+          p_sort: null,
+        },
+        { label: `ui_list_resource_v1:shipments:${uniqueRef}` }
+      );
+      if (shipmentsResult.error || !shipmentsResult.data) {
+        throw new Error(
+          `Failed to read shipments for ${uniqueRef}: ${(shipmentsResult.error as any)?.message || "no data"}`
+        );
+      }
+      const visibleShipments = Array.isArray(shipmentsResult.data.items)
+        ? shipmentsResult.data.items.filter(
+            (shipment: Record<string, unknown>) =>
+              String(shipment.client_reference_number ?? "").trim() === uniqueRef
+          )
+        : [];
+      expect(visibleShipments).toHaveLength(1);
+      shipmentId = String(visibleShipments[0]?.id ?? "").trim() || null;
       expect(shipmentId).toBeTruthy();
 
       if (shipmentId) {

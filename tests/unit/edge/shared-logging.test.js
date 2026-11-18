@@ -81,6 +81,28 @@ describe("edge shared logging helpers", () => {
     expect(redacted.nested.note).toContain("[redacted_jwt]");
   });
 
+  test("ingress redaction removes path and query credentials without hiding validation headers", () => {
+    const redactedText = shared.redactIngressSecretText(
+      "https://api.example.test/functions/v1/api-gateway/t/raw-token/v1/webhook?api_key=raw-key&safe=value",
+    );
+    expect(redactedText).toContain("/api-gateway/t/[redacted]/v1/webhook");
+    expect(redactedText).toContain("api_key=[redacted]");
+    expect(redactedText).toContain("safe=value");
+    expect(redactedText).not.toContain("raw-token");
+    expect(redactedText).not.toContain("raw-key");
+
+    const headers = shared.redactIngressForwardedHeaders({
+      authorization: "Bearer validation-token",
+      "x-signature": "validation-signature",
+      "x-forwarded-url": "/api-gateway/t/path-token/v1/webhook?token=EXAMPLE_PASSWORD",
+    });
+    expect(headers.authorization).toBe("Bearer validation-token");
+    expect(headers["x-signature"]).toBe("validation-signature");
+    expect(headers["x-forwarded-url"]).toBe(
+      "/api-gateway/t/[redacted]/v1/webhook?token=[redacted]",
+    );
+  });
+
   test("buildStructuredLogRecord includes classification and core fields", () => {
     const record = shared.buildStructuredLogRecord("error", "edge.request.failed", {
       service: "api-gateway",

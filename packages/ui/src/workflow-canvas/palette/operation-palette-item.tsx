@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { OperationMatch } from "./group-operation-matches";
 import { resolveOperationLabel, resolveOperationDescription } from "./group-operation-matches";
+import { resolveTrustedOperationDocUrl } from "../../url-guard";
 
 const notesStyle: React.CSSProperties = {
   display: "-webkit-box",
@@ -35,6 +36,9 @@ export const OperationPaletteItem = React.memo(function OperationPaletteItem({
   onDragEnd,
 }: OperationPaletteItemProps) {
   const description = resolveOperationDescription(match);
+  const trustedDocUrl = match.docUrl
+    ? resolveTrustedOperationDocUrl(match.docUrl)
+    : null;
 
   return (
     <div
@@ -65,10 +69,10 @@ export const OperationPaletteItem = React.memo(function OperationPaletteItem({
         ) : null}
       </button>
       <div className="shrink-0 space-y-2 pt-0.5 text-right">
-        {match.docUrl ? (
+        {trustedDocUrl ? (
           <a
             className="inline-flex items-center justify-center gap-1 rounded-full border border-ui-border bg-ui-paper px-2 py-0.5 text-[10px] text-ui-muted transition hover:bg-ui-highlight/70 hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-ui-paper"
-            href={match.docUrl}
+            href={trustedDocUrl}
             target="_blank"
             rel="noreferrer noopener"
           >

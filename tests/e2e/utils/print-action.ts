@@ -1,4 +1,11 @@
 import { expect, type Locator, type Page, type Response } from "@playwright/test";
+import * as en from "../../../packages/config/messages/en.json";
+import * as ar from "../../../packages/config/messages/ar.json";
+
+const progressMessages = [en.ui.resourceActions.printProgress, ar.ui.resourceActions.printProgress];
+const messagePattern = (values: string[]) => new RegExp(`(?:${values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`);
+const hideName = messagePattern(progressMessages.map((messages) => messages.actions.hide));
+const dismissName = messagePattern(progressMessages.map((messages) => messages.dismiss));
 
 export const SHIPMENTS_PRINT_ACTION_KEY = "shipments.print_labels";
 
@@ -103,7 +110,7 @@ export async function waitForPrintProgressWidgetSurfaceState(params: {
     if (await progressWidget.isVisible().catch(() => false)) {
       if (
         await progressWidget
-          .getByRole("button", { name: "Hide" })
+          .getByRole("button", { name: hideName })
           .isVisible()
           .catch(() => false)
       ) {
@@ -111,7 +118,7 @@ export async function waitForPrintProgressWidgetSurfaceState(params: {
       }
       if (
         await progressWidget
-          .getByRole("button", { name: "Dismiss" })
+          .getByRole("button", { name: dismissName })
           .isVisible()
           .catch(() => false)
       ) {
@@ -215,11 +222,12 @@ export async function runPrintLabelsAction(params: {
     .then(() => true)
     .catch(() => false);
 
-  await page
-    .locator(`[data-testid="${bulkActionsTestIdPrefix}-confirm-submit"]`)
-    .click({ timeout: 20_000 });
-
-  const rpcResponse = await rpcResponsePromise;
+  const [rpcResponse] = await Promise.all([
+    rpcResponsePromise,
+    page
+      .locator(`[data-testid="${bulkActionsTestIdPrefix}-confirm-submit"]`)
+      .click({ timeout: 20_000 }),
+  ]);
   const requestPayload = parseRpcRequestPayload(rpcResponse);
   if (!requestPayload || requestPayload.p_action_key !== actionKey) {
     throw new Error(`Invalid print command request payload for ${contextLabel}.`);
@@ -250,20 +258,25 @@ export async function runPrintLabelsAction(params: {
   );
   await expect(progressWidget).toBeVisible({ timeout: 60_000 });
   await expect(progressWidget).toContainText(
-    expectedSelectionCount === 1
-      ? "Printing label"
-      : `Printing ${expectedSelectionCount} labels`
+    messagePattern(progressMessages.map((messages) => expectedSelectionCount === 1
+      ? messages.titleSingle
+      : messages.titleMulti.replace("{count}", String(expectedSelectionCount))))
   );
-  await expect(progressWidget).not.toContainText("Activity reference:");
+  const activityReference = messagePattern(progressMessages.map((messages) => messages.diagnostics.runId.replace("{workflowRunId}", workflowRunId)));
+  await expect(progressWidget).not.toContainText(activityReference);
 
-  const supportDetailsButton = progressWidget.getByRole("button", {
-    name: "Support details",
+  const technicalDetailsButton = progressWidget.getByRole("button", {
+    name: messagePattern(progressMessages.map((messages) => messages.actions.technicalDetails)),
   });
-  await expect(supportDetailsButton).toBeVisible();
-  await supportDetailsButton.click({ timeout: 20_000 });
-  await expect(progressWidget).toContainText(`Activity reference: ${workflowRunId}`);
+  await expect(technicalDetailsButton).toBeVisible();
+  await expect(technicalDetailsButton).toHaveAttribute("aria-expanded", "false");
+  await technicalDetailsButton.click({ timeout: 20_000 });
+  await expect(technicalDetailsButton).toHaveAttribute("aria-expanded", "true");
+  const details = page.getByTestId(`${bulkActionsTestIdPrefix}-print-progress-details`);
+  await expect(details).toBeVisible();
+  await expect(details).toContainText(activityReference);
 
-  const hideButton = progressWidget.getByRole("button", { name: "Hide" });
+  const hideButton = progressWidget.getByRole("button", { name: hideName });
   const minimizedWidget = page.locator(
     `[data-testid="${bulkActionsTestIdPrefix}-print-progress-minimized"]`
   );
@@ -283,7 +296,7 @@ export async function runPrintLabelsAction(params: {
         (await minimizedWidget.isVisible().catch(() => false)) ||
         !(await progressWidget.isVisible().catch(() => false)) ||
         (await progressWidget
-          .getByRole("button", { name: "Dismiss" })
+          .getByRole("button", { name: dismissName })
           .isVisible()
           .catch(() => false)),
     });
@@ -295,7 +308,7 @@ export async function runPrintLabelsAction(params: {
     minimizedWidget,
     timeoutMs: 20_000,
   });
-  let fallbackObserved = false;
+  const fallbackObserved = false;
   let progressObserved = false;
   let downloadObserved = false;
   let evidencePage = page;

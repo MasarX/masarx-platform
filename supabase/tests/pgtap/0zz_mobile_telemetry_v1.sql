@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(41);
+SELECT plan(54);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_mobile_telemetry_v1()
 RETURNS SETOF TEXT
@@ -36,6 +36,9 @@ DECLARE
   v_scan1 RECORD;
   v_scan2 RECORD;
   v_scan3 RECORD;
+  v_scan4 RECORD;
+  v_scan5 RECORD;
+  v_policy JSONB;
 BEGIN
   RETURN NEXT has_table('public', 'user_devices', 'user_devices table exists');
   RETURN NEXT has_table('public', 'location_pings', 'location_pings table exists');
@@ -258,6 +261,116 @@ BEGIN
     LIMIT 1;
 
   RETURN NEXT ok(v_scan3.created IS TRUE, 'record_scan_event_v1 barcode-only call created=true');
+
+  EXECUTE 'SET LOCAL ROLE postgres';
+  RETURN NEXT ok(
+    (SELECT NOT (schema->'properties' ? 'scan_input_modes')
+       AND NOT (COALESCE(schema->'required', '[]'::jsonb) ? 'scan_input_modes')
+     FROM public.schema_registry WHERE category = 'scan_policy' AND version = 1),
+    'historical scan policy schema v1 is not retroactively changed'
+  );
+  RETURN NEXT ok(
+    (SELECT NOT EXISTS (
+      SELECT 1 FROM jsonb_array_elements(COALESCE(sr.examples, '[]'::jsonb)) AS example(value)
+      WHERE example.value ? 'scan_input_modes'
+    ) FROM public.schema_registry sr WHERE sr.category = 'scan_policy' AND sr.version = 1),
+    'historical scan policy v1 examples remain without new mode field'
+  );
+  RETURN NEXT ok(
+    EXISTS (SELECT 1 FROM public.settings_versions
+      WHERE category = 'scan_policy' AND schema_version = 1),
+    'historical scan policy settings versions remain v1'
+  );
+  RETURN NEXT ok(
+    (SELECT is_active AND schema->'properties' ? 'scan_input_modes'
+       AND schema->'required' ? 'scan_input_modes'
+     FROM public.schema_registry WHERE category = 'scan_policy' AND version = 2),
+    'active scan policy schema v2 requires input modes'
+  );
+  RETURN NEXT ok(
+    (SELECT jsonb_typeof(sr.examples) = 'array'
+       AND jsonb_array_length(sr.examples) > 0
+       AND NOT EXISTS (
+         SELECT 1 FROM jsonb_array_elements(sr.examples) AS example(value)
+         WHERE NOT (example.value ? 'scan_input_modes')
+           OR example.value->'version' IS DISTINCT FROM '2'::jsonb
+       )
+     FROM public.schema_registry sr WHERE sr.category = 'scan_policy' AND sr.version = 2),
+    'scan policy v2 examples carry required modes and version'
+  );
+  RETURN NEXT ok(
+    EXISTS (SELECT 1 FROM public.settings WHERE category = 'scan_policy' AND scope_type = 'global')
+      AND NOT EXISTS (
+        SELECT 1 FROM public.settings s
+        JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+        WHERE s.category = 'scan_policy' AND sv.schema_version IS DISTINCT FROM 2
+      ),
+    'all current global and scoped scan policy rows point to schema v2'
+  );
+
+  SELECT cached_value INTO v_policy
+  FROM public.settings
+  WHERE category = 'scan_policy' AND scope_type = 'global';
+  RETURN NEXT is(
+    (v_policy->'scan_input_modes')::text, '["camera", "scanner"]',
+    'global scan policy exposes both untrusted input modes'
+  );
+  PERFORM 1 FROM public.upsert_settings_value_v1(
+    'scan_policy', 'tenant', v_org,
+    jsonb_set(v_policy, '{scan_input_modes}', '["camera"]'::jsonb, TRUE),
+    2, 'pgTAP F638 scoped camera-only scan policy'
+  );
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  RETURN NEXT is(
+    (SELECT (value->'scan_input_modes')::text
+       FROM api.resolve_scan_policy(jsonb_build_object('organization_id', v_org))
+       LIMIT 1),
+    '["camera"]', 'tenant scan policy restricts input mode through API resolver'
+  );
+
+  SELECT * INTO v_scan4 FROM public.record_scan_event_v1(jsonb_build_object(
+    'idempotency_key', 'pgtap-scan-camera', 'device_id', v_device1.device_id,
+    'scan_type', 'pickup', 'barcode', 'pgtap-camera',
+    'metadata', jsonb_build_object('scan_input_mode', 'camera')
+  )) LIMIT 1;
+  RETURN NEXT ok(v_scan4.created IS TRUE, 'camera mode accepted under scoped policy');
+
+  RETURN NEXT throws_ok(
+    format('SELECT * FROM public.record_scan_event_v1(%L::jsonb)',
+      jsonb_build_object(
+        'idempotency_key', 'pgtap-scan-scanner-denied', 'device_id', v_device1.device_id,
+        'scan_type', 'pickup', 'barcode', 'pgtap-scanner-denied',
+        'metadata', jsonb_build_object('scan_input_mode', 'scanner')
+      )::text),
+    '42501', 'record_scan_event_v1 blocked by scan_policy.scan_input_modes',
+    'scoped policy rejects scanner mode at canonical insert'
+  );
+  RETURN NEXT throws_ok(
+    format('SELECT * FROM public.record_scan_event_v1(%L::jsonb)',
+      jsonb_build_object(
+        'idempotency_key', 'pgtap-scan-unknown-denied', 'device_id', v_device1.device_id,
+        'scan_type', 'pickup', 'barcode', 'pgtap-unknown-denied',
+        'metadata', jsonb_build_object('scan_input_mode', 'hardware')
+      )::text),
+    '42501', 'record_scan_event_v1 blocked by scan_policy.scan_input_modes',
+    'unknown explicit mode is rejected'
+  );
+  RETURN NEXT throws_ok(
+    format('SELECT * FROM public.record_scan_event_v1(%L::jsonb)',
+      jsonb_build_object(
+        'idempotency_key', 'pgtap-scan-null-denied', 'device_id', v_device1.device_id,
+        'scan_type', 'pickup', 'barcode', 'pgtap-null-denied',
+        'metadata', jsonb_build_object('scan_input_mode', NULL)
+      )::text),
+    '42501', 'record_scan_event_v1 blocked by scan_policy.scan_input_modes',
+    'null explicit mode is rejected'
+  );
+
+  SELECT * INTO v_scan5 FROM public.record_scan_event_v1(jsonb_build_object(
+    'idempotency_key', 'pgtap-scan-legacy', 'device_id', v_device1.device_id,
+    'scan_type', 'pickup', 'barcode', 'pgtap-legacy'
+  )) LIMIT 1;
+  RETURN NEXT ok(v_scan5.created IS TRUE, 'legacy scan without mode remains accepted and unverified');
 
   -- Telemetry ledgers are service-only tables (no direct SELECT for authenticated); writes happen via RPCs.
   RETURN NEXT ok(

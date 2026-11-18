@@ -10,7 +10,7 @@ type WorkflowOverlapExplorerPageProps = Parameters<
 const WorkflowOverlapExplorerPageInner =
   UiWorkflowOverlapExplorerPage as unknown as (
     props: WorkflowOverlapExplorerPageProps
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function WorkflowOverlapExplorerPage(
   props: WorkflowOverlapExplorerPageProps

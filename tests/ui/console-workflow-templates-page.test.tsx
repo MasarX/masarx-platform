@@ -35,13 +35,13 @@ jest.mock("../../apps/console/app/app-context", () => ({
         props: { searchParams: Record<string, string | string[] | undefined> },
       ) => unknown,
     ) =>
-    (props: { searchParams: Record<string, string | string[] | undefined> }) =>
+    async (props: { searchParams: Promise<Record<string, string | string[] | undefined>> }) =>
       render(
         {
           appKey: "console",
           appBasePath: "/console",
         },
-        props,
+        { searchParams: await props.searchParams },
       ),
 }));
 
@@ -81,7 +81,7 @@ describe("ConsoleWorkflowTemplatesPage", () => {
 
   it("adds the onboarding readiness shortcut to the workflow templates surface", async () => {
     const node = await ConsoleWorkflowTemplatesPage({
-      searchParams: { detail_open: "1", id: "template-1" },
+      searchParams: Promise.resolve({ detail_open: "1", id: "template-1" }),
     });
 
     renderWithIntl(node);

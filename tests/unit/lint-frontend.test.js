@@ -98,4 +98,54 @@ describe('lint-frontend app-context imports', () => {
       lintCase.cleanup();
     }
   });
+  test('ignores only the governed generated MapLibre assets', () => {
+    const generated = [
+      path.join(repoRoot, 'apps', 'console', 'public', 'maplibre-gl-shared.mjs'),
+      path.join(repoRoot, 'apps', 'portal', 'public', 'maplibre-gl-shared.mjs'),
+    ];
+    for (const file of generated) {
+      const result = runLintFrontend({ scanRoots: [file] });
+      expect(result.status).toBe(0);
+      expect(`${result.stdout || ''}${result.stderr || ''}`).toMatch(/\[lint:frontend\] OK/);
+    }
+
+    const nearMiss = createLintCase('maplibre-gl-shared-near-miss', 'mjs');
+    fs.writeFileSync(nearMiss.file, 'export const value = Float64Array.from([]);\n', 'utf8');
+    try {
+      const result = runLintFrontend({ scanRoots: [nearMiss.file] });
+      const output = `${result.stdout || ''}${result.stderr || ''}`;
+      expect(result.status).not.toBe(0);
+      expect(output).toMatch(/from/);
+    } finally {
+      nearMiss.cleanup();
+    }
+  });
+
+
+  test('only the server-only OAuth service boundary permits its protected key reference', () => {
+    const relative = 'apps/console/app/api/automation-marketplace/oauth/_lib/service-client.ts';
+    const file = path.join(repoRoot, relative);
+    const source = fs.readFileSync(file, 'utf8');
+    expect(source).toMatch(/^import "server-only";/);
+    expect(source).toContain('schema: "api"');
+    expect(source).not.toContain('NEXT_PUBLIC_');
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config/lint/frontend-lint.json'), 'utf8'));
+    const permitted = candidate => config.allow.serviceRole.some(pattern => new RegExp(pattern).test(candidate));
+    expect(permitted(relative)).toBe(true);
+    expect(permitted(relative.replace('service-client.ts', 'routes.ts'))).toBe(false);
+    expect(permitted('apps/console/app/automation/marketplace/_components/connection-form.tsx')).toBe(false);
+    expect(runLintFrontend({ scanRoots: [file] }).status).toBe(0);
+  });
+
+  test('covers the explicit local-mailbox security suite without adding it to ordinary hosted projects', () => {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config/lint/frontend-lint.json'), 'utf8'));
+    expect(config.playwrightConfigs).toContain('playwright.tenant-invite.config.ts');
+    const dedicated = fs.readFileSync(path.join(repoRoot, 'playwright.tenant-invite.config.ts'), 'utf8');
+    expect(dedicated).toContain('testMatch: /security\\/tenant-user-invite-takeover\\.spec\\.ts/');
+    const npm = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+    expect(npm.scripts['test:e2e:tenant-invite']).toContain('-c playwright.tenant-invite.config.ts');
+    const result = runLintFrontend({ scanRoots: [] });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('[lint:frontend] OK');
+  });
 });

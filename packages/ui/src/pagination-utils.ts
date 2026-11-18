@@ -10,6 +10,35 @@ const DEFAULT_SEARCH_DEBOUNCE_OPTIONS =
 const DEFAULT_PAGING_MODE = uiDefaults.pagination.pagingMode;
 const DEFAULT_PAGING_MODE_OPTIONS = uiDefaults.pagination.pagingModeOptions;
 
+/** Describe the displayed response, without treating a planner estimate as a count. */
+export function resolvePaginationDisplay({
+  total,
+  totalIsEstimate,
+  offset,
+  itemsCount,
+}: {
+  total: number | null;
+  totalIsEstimate: boolean;
+  offset: number;
+  itemsCount: number;
+}) {
+  const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  const count = Number.isFinite(itemsCount) ? Math.max(0, Math.floor(itemsCount)) : 0;
+  const knownTotal = typeof total === "number" && Number.isFinite(total) && total >= 0
+    ? total
+    : null;
+  const displayTotal = totalIsEstimate && count > 0 && knownTotal !== null
+    ? Math.max(knownTotal, safeOffset + count)
+    : knownTotal;
+  const start = count > 0 ? safeOffset + 1 : 0;
+  const end = count > 0 ? safeOffset + count : 0;
+  return {
+    total: displayTotal,
+    start: !totalIsEstimate && knownTotal !== null ? Math.min(start, knownTotal) : start,
+    end: !totalIsEstimate && knownTotal !== null ? Math.min(end, knownTotal) : end,
+  };
+}
+
 function normalizeSizes(values: unknown, fallback: number[]) {
   const raw = Array.isArray(values) ? values : fallback;
   return Array.from(

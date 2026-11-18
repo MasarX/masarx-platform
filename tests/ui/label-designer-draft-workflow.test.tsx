@@ -55,6 +55,16 @@ describe("DraftWorkflow", () => {
     expect(input).toHaveValue("Test Draft");
   });
 
+  it("preserves registry display labels while submitting the canonical code", () => {
+    render(<DraftWorkflow {...defaultProps} labelTypeOptions={[
+      { value: "shipping", label: "Shipment label" },
+      { value: "return", label: "Return receipt" },
+    ]} />);
+    expect(screen.getByRole("option", { name: "Return receipt" })).toHaveValue("return");
+    fireEvent.change(screen.getByTestId("ld-label-type"), { target: { value: "return" } });
+    expect(defaultProps.onLabelTypeChange).toHaveBeenCalledWith("return");
+  });
+
   it("renders label type select", () => {
     render(<DraftWorkflow {...defaultProps} />);
     const select = screen.getByTestId("ld-label-type");

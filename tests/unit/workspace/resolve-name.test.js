@@ -22,13 +22,14 @@ describe('resolveWorkspaceName', () => {
   });
 
   test('falls back to git worktree basename when --name is absent', () => {
-    spawnSync.mockReturnValue({ status: 0, stdout: '/example/workspace Branch\n' });
-    const name = resolveWorkspaceName({ argv: [], cwd: '/example/workspace Branch' });
-    expect(name).toBe('Feature Branch');
+    const workspaceRoot = '/example/workspace Branch';
+    spawnSync.mockReturnValue({ status: 0, stdout: `${workspaceRoot}\n` });
+    const name = resolveWorkspaceName({ argv: [], cwd: workspaceRoot });
+    expect(name).toBe(require('path').basename(workspaceRoot));
     expect(spawnSync).toHaveBeenCalledWith(
       'git',
       ['rev-parse', '--show-toplevel'],
-      expect.objectContaining({ cwd: '/example/workspace Branch', encoding: 'utf8' })
+      expect.objectContaining({ cwd: workspaceRoot, encoding: 'utf8' })
     );
   });
 
@@ -48,5 +49,18 @@ describe('resolveWorkspaceName', () => {
   test('throws when git worktree cannot be resolved', () => {
     spawnSync.mockReturnValue({ status: 1, stdout: '' });
     expect(() => resolveWorkspaceName({ argv: [], cwd: 'C:\\tmp' })).toThrow(/worktree/i);
+  });
+
+  test('fails closed instead of hanging when git worktree discovery times out', () => {
+    spawnSync.mockReturnValue({
+      status: null,
+      stdout: 'C:\\partial',
+      stderr: '',
+      error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }),
+    });
+
+    expect(() => resolveWorkspaceName({ argv: [], cwd: 'C:\\tmp' })).toThrow(
+      /git worktree probe timed out/i,
+    );
   });
 });

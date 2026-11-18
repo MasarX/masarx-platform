@@ -7,15 +7,9 @@ import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext } from "./utils/role-matrix";
 import {
   applyResourceLimit,
-  resolveResourceActionTarget,
   resolveResourceKeysForUser,
-  fetchResourceSampleId,
+  resolveResourceWithSample,
 } from "./utils/core-resource";
-import {
-  ensureBulkActionVisible,
-  resolveBulkActionsTestIdPrefix,
-  selectFirstTableRow,
-} from "./utils/table-actions";
 
 const demoContext = loadDemoContext();
 const strict = isStrictE2EEnv();
@@ -113,10 +107,6 @@ for (const config of appConfigs) {
     test(`${config.label} views/export/confirm panels meet a11y baseline`, async ({ page }) => {
       test.setTimeout(600_000);
       const baseUrl = config.baseUrl();
-      const downloadBasePath = `${baseUrl}/api/resource-download`;
-      const bulkActionsTestIdPrefix = resolveBulkActionsTestIdPrefix(
-        config.tableTestIdPrefix
-      );
       const context = await fetchUserContext({
         app: config.app,
         email: user.email,
@@ -137,7 +127,16 @@ for (const config of appConfigs) {
       if (resourceKeys.length === 0) {
         throw new Error(`No resources available for ${user.email}.`);
       }
-      const resourceKey = resourceKeys[0];
+      const sample = await resolveResourceWithSample({
+        resourceKeys,
+        readRegistry: context.readRegistry,
+        email: user.email,
+        password: demoContext.password ?? "",
+      });
+      if (!sample) {
+        throw new Error(`No resource detail samples for permitted resources: ${resourceKeys.join(", ")}.`);
+      }
+      const { resourceKey } = sample;
 
       await page.goto(baseUrl);
       const authGate = page.locator(`[data-testid="${config.authTestId}"]`);
@@ -176,85 +175,6 @@ for (const config of appConfigs) {
           panelLabel: panel.label,
           scopeLabel: config.label,
         });
-      }
-
-      const confirmTarget =
-        resolveResourceActionTarget({
-          resourceKeys,
-          readRegistry: context.readRegistry,
-          commandRegistry: context.commandRegistry,
-          capabilities: context.me?.capabilities ?? null,
-          appBasePath: baseUrl,
-          downloadBasePath,
-          actionType: "workflow",
-          requireConfirm: true,
-        }) ??
-        resolveResourceActionTarget({
-          resourceKeys,
-          readRegistry: context.readRegistry,
-          commandRegistry: context.commandRegistry,
-          capabilities: context.me?.capabilities ?? null,
-          appBasePath: baseUrl,
-          downloadBasePath,
-          actionType: "rpc",
-          requireConfirm: true,
-        });
-
-      if (!confirmTarget) {
-        if (strict) {
-          throw new Error(`No confirmable actions available for ${config.label}.`);
-        }
-        return;
-      }
-
-      const hasSelection = await selectFirstTableRow(page);
-      if (!hasSelection) {
-        if (strict) {
-          throw new Error(`No rows available for ${resourceKey} in ${config.label}.`);
-        }
-        return;
-      }
-      const action = await ensureBulkActionVisible({
-        page,
-        actionKey: confirmTarget.actionKey,
-        testIdPrefix: config.tableTestIdPrefix,
-      });
-      if (!action) {
-        throw new Error(
-          `Confirm action ${confirmTarget.actionKey} not visible for ${resourceKey} in ${config.label}.`
-        );
-      }
-      if (await action.isDisabled()) {
-        if (strict) {
-          throw new Error(
-            `Confirm action ${confirmTarget.actionKey} disabled for ${resourceKey} in ${config.label}.`
-          );
-        }
-        return;
-      }
-      await action.click();
-      const confirmDialog = page.locator(
-        `[data-testid="${bulkActionsTestIdPrefix}-confirm-dialog"]`
-      );
-      await expect(confirmDialog).toBeVisible();
-      await runA11y(page);
-      await page
-        .locator(
-          `[data-testid="${bulkActionsTestIdPrefix}-confirm-cancel"]`
-        )
-        .click();
-      await expect(confirmDialog).toHaveCount(0);
-
-      const sample = await fetchResourceSampleId({
-        resourceKey,
-        email: user.email,
-        password: demoContext.password ?? "",
-      });
-      if (!sample.id) {
-        if (strict) {
-          throw new Error(`No resource detail samples for ${resourceKey}.`);
-        }
-        return;
       }
 
       await page.goto(

@@ -236,11 +236,14 @@ async function insertGatewayRequestAndOutboundCall(client, params) {
         1,
         now(),
         $4::uuid,
-        jsonb_build_object('api_gateway_request_id', $5::uuid),
+        jsonb_build_object(
+          'api_gateway_request_id', $5::uuid,
+          'api_gateway_route_id', $7::uuid
+        ),
         now(),
         $6::uuid
       )`,
-    [outboundCallId, providerId, JSON.stringify(requestBody), correlationId, requestId, workflowStepId]
+    [outboundCallId, providerId, JSON.stringify(requestBody), correlationId, requestId, workflowStepId, routeId]
   );
 
   await client.query(

@@ -1,11 +1,13 @@
 const path = require("path");
+const { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } = require("next/constants");
+const { availableParallelism } = require("node:os");
 const { loadPublicEnv } = require("../../scripts/utils/load-public-env");
-const { buildStaticSecurityHeaders } = require("../shared/security-headers");
+const { buildStaticSecurityHeaders, buildSecurityHeaders } = require("../shared/security-headers");
+const { isFieldopsDevHosting } = require("../../scripts/ops/vercel/fieldops-dev-hosting");
 const { resolveBundleAnalyzer } = require("../shared/next-bundle-analyzer");
-const { applyReactSingletonAlias } = require("../shared/next-react-singleton");
 const { resolveAllowedDevOrigins } = require("../shared/next-dev-origins");
 
-loadPublicEnv({ appDir: __dirname });
+loadPublicEnv({ appDir: __dirname, initialEnv: require("@next/env").initialEnv });
 
 const withBundleAnalyzer = resolveBundleAnalyzer();
 const createNextIntlPlugin = require("next-intl/plugin");
@@ -20,10 +22,19 @@ const publicEnv = {
   NEXT_PUBLIC_LOCALE: process.env.NEXT_PUBLIC_LOCALE
 };
 const securityHeaders = buildStaticSecurityHeaders();
+const fieldopsDevHosting = isFieldopsDevHosting({ env: process.env, workspace: "@masarx/console" });
+const fieldopsHeaders = fieldopsDevHosting ? buildSecurityHeaders({
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  nodeEnv: "production",
+}).map((header) => header.key === "Permissions-Policy"
+  ? { ...header, value: "camera=(self), microphone=(), geolocation=(self)" }
+  : header) : [];
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: { cpus: availableParallelism() },
   outputFileTracingRoot: monorepoRoot,
+  serverExternalPackages: ["exceljs", "jszip"],
   allowedDevOrigins: resolveAllowedDevOrigins(),
   turbopack: {
     root: monorepoRoot
@@ -35,21 +46,39 @@ const nextConfig = {
     "@masarx/auth",
     "@masarx/config"
   ],
-  webpack(config, options) {
-    return applyReactSingletonAlias(config, {
-      appDir: __dirname,
-      isServer: options.isServer
-    });
-  },
   env: publicEnv,
+  ...(fieldopsDevHosting ? {
+    // Preserve Next's canonical redirects except the directory used by the PWA scope.
+    skipTrailingSlashRedirect: true,
+    async redirects() {
+      return [
+        // Next permits an optional final slash; anchor the parameter to avoid redirecting /fieldops/ to itself.
+        { source: "/:path(fieldops$)", destination: "/fieldops/", permanent: false },
+        { source: "/:path((?!fieldops/$).+)/", destination: "/:path", permanent: true },
+      ];
+    },
+    async rewrites() {
+      return { beforeFiles: [{ source: "/fieldops/", destination: "/fieldops/index.html" }] };
+    },
+  } : {}),
   async headers() {
     return [
       {
         source: "/:path*",
         headers: securityHeaders
-      }
+      },
+      ...(fieldopsDevHosting ? [{
+        source: "/fieldops/:path*",
+        headers: [...fieldopsHeaders, { key: "Cache-Control", value: "public, max-age=0, must-revalidate" }],
+      }] : [])
     ];
   }
 };
 
-module.exports = withBundleAnalyzer(withNextIntl(nextConfig));
+const wrappedConfig = withBundleAnalyzer(withNextIntl(nextConfig));
+module.exports = async (phase, context) => {
+  if (phase === PHASE_DEVELOPMENT_SERVER || phase === PHASE_PRODUCTION_BUILD) {
+    require("../../scripts/frontend/prepare-map-worker").prepareMapWorker(__dirname);
+  }
+  return typeof wrappedConfig === "function" ? wrappedConfig(phase, context) : wrappedConfig;
+};

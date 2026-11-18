@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(34);
+SELECT plan(48);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_run_assignment_lifecycle_foundation_v1()
 RETURNS SETOF TEXT
@@ -28,6 +28,13 @@ DECLARE
   v_assign_replay JSONB := NULL;
   v_partner_result JSONB := NULL;
   v_list JSONB := NULL;
+  v_readback JSONB;
+  v_absent JSONB;
+  v_assignment_id UUID;
+  v_assignment_version INTEGER;
+  v_synthetic_assignment UUID := gen_random_uuid();
+  v_missing_event JSONB;
+  v_case RECORD;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -295,6 +302,91 @@ BEGIN
 
   RETURN NEXT is(v_assign_result->>'status', 'assigned', 'route assignment ui RPC reports assigned');
   RETURN NEXT is((v_assign_result#>>'{items,0,assignment_mode}'), 'internal_driver', 'assignment returns internal_driver mode');
+  v_assignment_id := (v_assign_result#>>'{items,0,route_run_assignment_id}')::uuid;
+  v_assignment_version := (v_assign_result#>>'{items,0,assignment_version}')::integer;
+  v_readback := api.ui_route_run_assignment_readback_v1(v_route.route_run_id, v_assignment_id, v_assignment_version);
+  RETURN NEXT ok(
+    v_readback->>'visible' = 'true'
+    AND v_readback#>>'{assignment,id}' = v_assignment_id::text
+    AND v_readback#>>'{assignment,route_run_id}' = v_route.route_run_id::text
+    AND v_readback#>>'{assignment,assignment_version}' = v_assignment_version::text
+    AND v_readback#>>'{event,route_run_assignment_id}' = v_assignment_id::text
+    AND v_readback#>>'{event,route_run_id}' = v_route.route_run_id::text
+    AND v_readback#>>'{event,assignment_version}' = v_assignment_version::text,
+    'API readback confirms the exact canonical assignment and event'
+  );
+  RETURN NEXT is(
+    public.ui_route_run_assignment_readback_v1(v_route.route_run_id, v_assignment_id, v_assignment_version),
+    v_readback, 'public and API assignment readback have identical scoped results'
+  );
+  FOR v_case IN SELECT * FROM (VALUES
+    (v_route.route_run_id, v_assignment_id, v_assignment_version + 1, 'wrong version'),
+    (v_route.route_run_id, gen_random_uuid(), v_assignment_version, 'absent assignment'),
+    (v_route_two.route_run_id, v_assignment_id, v_assignment_version, 'cross-route assignment')
+  ) AS cases(route_id, assignment_id, version, label)
+  LOOP
+    v_absent := api.ui_route_run_assignment_readback_v1(v_case.route_id, v_case.assignment_id, v_case.version);
+    RETURN NEXT ok(
+      v_absent->>'visible' = 'false'
+      AND v_absent->'assignment' = 'null'::jsonb AND v_absent->'event' = 'null'::jsonb,
+      'assignment readback rejects ' || v_case.label
+    );
+  END LOOP;
+  FOR v_case IN SELECT * FROM (VALUES
+    (NULL::uuid, v_assignment_id, v_assignment_version, 'null route'),
+    (v_route.route_run_id, NULL::uuid, v_assignment_version, 'null assignment'),
+    (v_route.route_run_id, v_assignment_id, NULL::integer, 'null version'),
+    (v_route.route_run_id, v_assignment_id, 0, 'zero version')
+  ) AS cases(route_id, assignment_id, version, label)
+  LOOP
+    RETURN NEXT throws_ok(
+      format('SELECT api.ui_route_run_assignment_readback_v1(%L::uuid,%L::uuid,%L::integer)',
+        v_case.route_id, v_case.assignment_id, v_case.version),
+      '23514', 'ui_route_run_assignment_readback_v1 requires a route, assignment, and positive version',
+      'assignment readback rejects ' || v_case.label
+    );
+  END LOOP;
+  BEGIN
+    EXECUTE 'SET LOCAL ROLE postgres';
+    INSERT INTO public.route_run_assignments (
+      id, organization_id, route_run_id, assignment_mode, driver_user_id, vehicle_id, assigned_by_user_id
+    ) VALUES (v_synthetic_assignment, v_org, v_route_two.route_run_id, 'internal_driver', v_driver, v_vehicle, v_operator);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_missing_event := api.ui_route_run_assignment_readback_v1(v_route_two.route_run_id, v_synthetic_assignment, 1);
+    RAISE EXCEPTION USING ERRCODE = 'ZX222', MESSAGE = 'rollback synthetic missing-event fixture';
+  EXCEPTION WHEN SQLSTATE 'ZX222' THEN NULL;
+  END;
+  RETURN NEXT ok(
+    v_missing_event->>'visible' = 'false'
+    AND v_missing_event#>>'{assignment,id}' = v_synthetic_assignment::text
+    AND v_missing_event->'event' = 'null'::jsonb,
+    'existing assignment without its event cannot report visible success'
+  );
+  RETURN NEXT ok(
+    has_function_privilege('authenticated', 'public.ui_route_run_assignment_readback_v1(uuid,uuid,integer)', 'EXECUTE')
+    AND has_function_privilege('service_role', 'public.ui_route_run_assignment_readback_v1(uuid,uuid,integer)', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'public.ui_route_run_assignment_readback_v1(uuid,uuid,integer)', 'EXECUTE'),
+    'public assignment readback grants exclude anon'
+  );
+  RETURN NEXT ok(
+    has_function_privilege('authenticated', 'api.ui_route_run_assignment_readback_v1(uuid,uuid,integer)', 'EXECUTE')
+    AND has_function_privilege('service_role', 'api.ui_route_run_assignment_readback_v1(uuid,uuid,integer)', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'api.ui_route_run_assignment_readback_v1(uuid,uuid,integer)', 'EXECUTE'),
+    'API assignment readback grants exclude anon'
+  );
+  RETURN NEXT ok(
+    (SELECT count(*) = 2 AND count(DISTINCT item->>'key') = 2 AND bool_and(COALESCE(
+      item#>>'{execution,readback,rpc}' = 'ui_route_run_assignment_readback_v1'
+      AND item#>>'{execution,readback,success_path}' = 'visible'
+      AND item#>'{execution,readback,params}' = jsonb_build_object(
+        'p_route_run_id', jsonb_build_object('source', 'result', 'path', 'items.0.route_run_id'),
+        'p_route_run_assignment_id', jsonb_build_object('source', 'result', 'path', 'items.0.route_run_assignment_id'),
+        'p_assignment_version', jsonb_build_object('source', 'result', 'path', 'items.0.assignment_version')
+      ), FALSE))
+      FROM jsonb_array_elements(COALESCE(v_commands->'commands', '[]'::jsonb)) item
+      WHERE item->>'key' IN ('routes.assign', 'routes.reassign')),
+    'assignment commands read back the exact result identity before success'
+  );
   EXECUTE 'SET LOCAL ROLE postgres';
   RETURN NEXT is((SELECT assignment_mode FROM public.route_run_assignments WHERE route_run_id = v_route.route_run_id), 'internal_driver', 'projection stores internal driver mode');
   RETURN NEXT is((SELECT vehicle_id::text FROM public.route_run_assignments WHERE route_run_id = v_route.route_run_id), v_vehicle::text, 'projection stores selected vehicle_id');
@@ -368,6 +460,16 @@ BEGIN
          AND item.value#>>'{route_assignment,assignment_mode}' = 'internal_driver'
     ),
     'ui_list_resource_v1(routes) surfaces route assignment metadata'
+  );
+
+  PERFORM set_config('request.jwt.claim.sub', v_driver::text, true);
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_driver::text, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  RETURN NEXT throws_ok(
+    format('SELECT api.ui_route_run_assignment_readback_v1(%L::uuid,%L::uuid,%L::integer)',
+      v_route_two.route_run_id, v_partner_result#>>'{items,0,route_run_assignment_id}',
+      v_partner_result#>>'{items,0,assignment_version}'),
+    '42501', NULL, 'driver cannot read back another executor route assignment'
   );
 
   EXECUTE 'SET LOCAL ROLE postgres';

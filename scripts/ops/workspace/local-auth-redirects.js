@@ -5,6 +5,7 @@ const path = require('path');
 const { readEnvFile } = require('../../utils/env-file');
 
 const DEFAULT_CALLBACK_PATH = '/auth/callback';
+// objectives:allow LOCALHOST Justification: local auth redirect governance intentionally recognizes only loopback bind aliases.
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
 
 function splitList(value) {
@@ -165,6 +166,7 @@ function buildExistingRuntimeAction({ approvedSupabaseUrl, callbacks }) {
     try {
       return new URL(callbacks[0]).origin;
     } catch {
+      // objectives:allow LOCALHOST Justification: operator guidance uses a leased local Console placeholder when no callback can be parsed.
       return 'http://127.0.0.1:<leased-console-port>';
     }
   })();
@@ -187,6 +189,7 @@ function normalizeLocalCallbackUrl(value, options = {}) {
   const callbackPath = String(options.callbackPath || DEFAULT_CALLBACK_PATH).replace(/^\/?/, '/');
   const raw = String(value || '').trim();
   if (!raw) return '';
+  // objectives:allow LOCALHOST Justification: a bare local port is normalized to the loopback-only callback endpoint it denotes.
   const withProtocol = /^\d+$/.test(raw) ? `http://127.0.0.1:${raw}` : raw;
   let parsed;
   try {
@@ -196,6 +199,7 @@ function normalizeLocalCallbackUrl(value, options = {}) {
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) return '';
   if (!isLocalHost(parsed.hostname)) return '';
+  // objectives:allow LOCALHOST Justification: wildcard local bind addresses must become browser-reachable loopback callbacks.
   if (parsed.hostname === '0.0.0.0') parsed.hostname = '127.0.0.1';
   parsed.username = '';
   parsed.password = '';
@@ -237,6 +241,7 @@ function buildLocalConsoleCallbackUrls(options = {}) {
     ...splitList(options.consolePorts)
       .map((port) => normalizePort(port))
       .filter(Boolean)
+      // objectives:allow LOCALHOST Justification: explicit Console ports are converted into isolated local callback origins.
       .map((port) => `http://127.0.0.1:${port}`),
     ...splitList(env.WORKSPACE_LOCAL_AUTH_REDIRECT_URLS),
     ...splitList(env.WORKSPACE_LOCAL_AUTH_REDIRECT_ORIGINS),
@@ -246,6 +251,7 @@ function buildLocalConsoleCallbackUrls(options = {}) {
     ...splitList(env.WORKSPACE_LOCAL_CONSOLE_PORTS)
       .map((port) => normalizePort(port))
       .filter(Boolean)
+      // objectives:allow LOCALHOST Justification: leased Console ports are converted into isolated local callback origins.
       .map((port) => `http://127.0.0.1:${port}`),
     ...urlsFromRuntimeLeases(options.runtimeStatus, { owner: options.owner }),
   ];
@@ -844,10 +850,13 @@ async function buildLocalAuthRedirectSummary(options = {}) {
       secret_values_redacted: true,
     },
     command_shape: {
+      // objectives:allow LOCALHOST Justification: generated check guidance uses approved local lease placeholders, never shared environment endpoints.
       check:
         'npm run local:auth-redirects -- --console-origin http://127.0.0.1:<leased-console-port> --approved-supabase-url http://127.0.0.1:<approved-api-port> --check',
+      // objectives:allow LOCALHOST Justification: generated apply and verification guidance uses approved local lease placeholders only.
       apply_overlay:
         'npm run local:auth-redirects -- --console-origin http://127.0.0.1:<leased-console-port> --approved-supabase-url http://127.0.0.1:<approved-api-port> --apply --output-config <gitignored-supabase-config.toml>',
+      // objectives:allow LOCALHOST Justification: generated running-runtime verification guidance uses approved local lease placeholders only.
       verify_running_runtime:
         'npm run local:auth-redirects -- --console-origin http://127.0.0.1:<leased-console-port> --approved-supabase-url http://127.0.0.1:<approved-api-port> --runtime-auth-config-mode management-api --af38b526-f5c1-468d-88fb-86677fbe872a <supabase-af38b526-f5c1-468d-88fb-86677fbe872a> --check',
     },

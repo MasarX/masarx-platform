@@ -1,5 +1,5 @@
-import { RouteOperationsWorkspacePage } from "../../../_components/route-operations-workspace-page";
 import { withPortalConfig } from "../../../app-context";
+import { PortalExceptionResourcePage } from "./exception-resource-page";
 
 type PageProps = {
   searchParams: Record<string, string | string[] | undefined>;
@@ -8,16 +8,11 @@ type PageProps = {
 
 export default withPortalConfig<PageProps>(
   ({ appBasePath, appKey }, { searchParams, params }) => (
-    <RouteOperationsWorkspacePage
+    <PortalExceptionResourcePage
       appBasePath={appBasePath}
       appKey={appKey}
       searchParams={searchParams}
-      resourceKey={params.resource}
-      sectionId="operations"
-      resourceSelector="exceptions"
-      workspacePathSegment="exceptions"
-      i18nNamespace="ui.exceptionInbox"
-      testIdPrefix="portal-exception-inbox"
+      resource={params.resource}
     />
   )
 );

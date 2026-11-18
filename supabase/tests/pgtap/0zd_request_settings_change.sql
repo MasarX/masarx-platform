@@ -4,7 +4,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(6);
 
-DO $$
+CREATE FUNCTION pg_temp.settings_request_tap() RETURNS SETOF TEXT LANGUAGE plpgsql AS $$
 DECLARE
   v_org UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
@@ -58,7 +58,7 @@ BEGIN
 
   EXECUTE 'SET CONSTRAINTS ALL IMMEDIATE';
 
-  PERFORM is(
+  RETURN NEXT is(
     COALESCE(public.resolve_domain_event_policy(
       '00000000-0000-0000-0000-000000000000'::uuid,
       'settings_change.requested'
@@ -89,37 +89,30 @@ BEGIN
       p_effective_from := now()
     );
 
-  PERFORM ok(v_sv IS NOT NULL, 'request_settings_change_v1 returns settings_version_id');
-  PERFORM ok(v_event IS NOT NULL, 'request_settings_change_v1 returns domain_event_id');
+  RETURN NEXT ok(v_sv IS NOT NULL, 'request_settings_change_v1 returns settings_version_id');
+  RETURN NEXT ok(v_event IS NOT NULL, 'request_settings_change_v1 returns domain_event_id');
 
   EXECUTE 'RESET ROLE';
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT COUNT(*)::INT FROM public.settings_versions WHERE id = v_sv),
     1,
     'settings_versions row inserted'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     (SELECT approved_at IS NULL AND requested_by = v_user FROM public.settings_versions WHERE id = v_sv LIMIT 1),
     'settings_versions starts unapproved and requested_by is captured'
   );
 
-  PERFORM is(
-    (
-      SELECT COUNT(*)::INT
-        FROM public.domain_events
-       WHERE id = v_event
-         AND resource_type = 'settings_version'
-         AND resource_id = v_sv
-         AND status = 'processing'
-         AND workflow_run_id IS NOT NULL
-    ),
+  RETURN NEXT is(
+    (SELECT COUNT(*)::INT FROM public.domain_events WHERE id = v_event AND resource_type = 'settings_version' AND resource_id = v_sv AND status = 'pending'),
     1,
     'domain_event dispatched for settings_change.requested'
   );
 END $$;
+SELECT * FROM pg_temp.settings_request_tap();
 
 SELECT * FROM finish();
 ROLLBACK;

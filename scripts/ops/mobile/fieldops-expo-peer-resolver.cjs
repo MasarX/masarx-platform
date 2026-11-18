@@ -41,12 +41,19 @@ function installFieldopsExpoPeerResolver({
     return false;
   }
 
+  const projectRequire = Module.createRequire(path.join(projectRoot, 'package.json'));
   const originalResolveFilename = Module._resolveFilename;
   Module._resolveFilename = function resolveFieldopsExpoPeer(request, parent, isMain, options) {
     try {
       return originalResolveFilename.call(this, request, parent, isMain, options);
     } catch (error) {
       const parentFile = String(parent?.filename || '').replace(/\\/g, '/');
+      const isMapLibrePluginCaller = parentFile.includes(
+        '/node_modules/@maplibre/maplibre-react-native/lib/commonjs/plugin/',
+      );
+      if (error?.code === 'MODULE_NOT_FOUND' && request === 'expo/config-plugins' && isMapLibrePluginCaller) {
+        return projectRequire.resolve(request);
+      }
       const isExpoMetroConfigCaller = parentFile.includes('/@expo/metro-config/');
       if (request === 'expo/package.json' && isExpoMetroConfigCaller) {
         return expoPackageJsonPath;

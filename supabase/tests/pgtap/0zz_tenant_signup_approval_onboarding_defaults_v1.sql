@@ -6,7 +6,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(36);
+SELECT plan(57);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_tenant_signup_approval_onboarding_defaults_v1()
 RETURNS SETOF TEXT
@@ -21,6 +21,21 @@ DECLARE
   v_no_provision_req_id UUID;
   v_no_provision_approve JSONB;
   v_no_provision_auth_user_id UUID := gen_random_uuid();
+  v_create_isolation_a JSONB;
+  v_create_isolation_b JSONB;
+  v_isolation_req_a UUID;
+  v_isolation_req_b UUID;
+  v_isolation_auth_a UUID := gen_random_uuid();
+  v_isolation_auth_b UUID := gen_random_uuid();
+  v_isolation_approve_a JSONB;
+  v_isolation_approve_b JSONB;
+  v_isolation_org_a UUID;
+  v_isolation_org_b UUID;
+  v_isolation_user_a UUID;
+  v_isolation_user_b UUID;
+  v_isolation_list JSONB;
+  v_review_denied BOOLEAN := FALSE;
+  v_review_denied_message TEXT := NULL;
   v_create_invite_failure JSONB;
   v_invite_failure_req_id UUID;
   v_invite_failure_approve JSONB;
@@ -235,6 +250,8 @@ BEGIN
     'new tenant signup request is pending'
   );
 
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
   v_reject := public.tenant_signup_review_apply_v1(
     p_request_id := v_req_id,
     p_decision := 'rejected',
@@ -249,6 +266,15 @@ BEGIN
   RETURN NEXT ok(
     COALESCE((v_reject->>'ok')::boolean, FALSE),
     'tenant_signup_review_apply_v1 rejection succeeds'
+  );
+
+  RETURN NEXT ok(
+    (SELECT approved_organization_id IS NULL
+       AND approved_user_id IS NULL
+       AND approved_auth_user_id IS NULL
+       FROM public.tenant_signup_requests
+      WHERE id = v_req_id),
+    'rejected tenant signup request does not activate tenant access or provisioning ids'
   );
 
   v_second := public.tenant_signup_review_apply_v1(
@@ -317,6 +343,207 @@ BEGIN
     COALESCE((v_create_auto->>'auto_approve')::boolean, FALSE),
     'tenant_signup_request_create_v1 sets auto_approve=true when policy mode is auto'
   );
+
+  v_create_isolation_a := public.tenant_signup_request_create_v1(
+    p_email := format('tenant-signup-isolation-a-%s@example.com', left(replace(gen_random_uuid()::text, '-', ''), 12)),
+    p_full_name := 'Tenant Signup Isolation Admin A',
+    p_organization_name := 'Tenant Signup Isolation Org A',
+    p_organization_slug := NULL,
+    p_website_url := NULL,
+    p_phone := NULL,
+    p_notes := 'pgtap approved tenant isolation path A',
+    p_locale := 'en',
+    p_page_url := 'https://example.com/signup',
+    p_referrer := NULL,
+    p_origin := 'https://example.com',
+    p_marketing := '{}'::jsonb,
+    p_ip_hash := format('pgtap-ip-isolation-a-%s', left(replace(gen_random_uuid()::text, '-', ''), 12)),
+    p_turnstile_verified := TRUE
+  );
+
+  v_create_isolation_b := public.tenant_signup_request_create_v1(
+    p_email := format('tenant-signup-isolation-b-%s@example.com', left(replace(gen_random_uuid()::text, '-', ''), 12)),
+    p_full_name := 'Tenant Signup Isolation Admin B',
+    p_organization_name := 'Tenant Signup Isolation Org B',
+    p_organization_slug := NULL,
+    p_website_url := NULL,
+    p_phone := NULL,
+    p_notes := 'pgtap approved tenant isolation path B',
+    p_locale := 'en',
+    p_page_url := 'https://example.com/signup',
+    p_referrer := NULL,
+    p_origin := 'https://example.com',
+    p_marketing := '{}'::jsonb,
+    p_ip_hash := format('pgtap-ip-isolation-b-%s', left(replace(gen_random_uuid()::text, '-', ''), 12)),
+    p_turnstile_verified := TRUE
+  );
+
+  v_isolation_req_a := NULLIF(v_create_isolation_a->>'id', '')::uuid;
+  v_isolation_req_b := NULLIF(v_create_isolation_b->>'id', '')::uuid;
+
+  v_isolation_approve_a := public.tenant_signup_review_apply_v1(
+    p_request_id := v_isolation_req_a,
+    p_decision := 'approved',
+    p_reviewer_user_id := NULL,
+    p_decision_reason := 'pgtap tenant isolation approval A',
+    p_invited_auth_user_id := v_isolation_auth_a,
+    p_invite_email_sent := FALSE,
+    p_invite_redirect_to := NULL,
+    p_decision_metadata := jsonb_build_object('pgtap_slice', 'tenant_isolation_permission_denied')
+  );
+
+  v_isolation_approve_b := public.tenant_signup_review_apply_v1(
+    p_request_id := v_isolation_req_b,
+    p_decision := 'approved',
+    p_reviewer_user_id := NULL,
+    p_decision_reason := 'pgtap tenant isolation approval B',
+    p_invited_auth_user_id := v_isolation_auth_b,
+    p_invite_email_sent := FALSE,
+    p_invite_redirect_to := NULL,
+    p_decision_metadata := jsonb_build_object('pgtap_slice', 'tenant_isolation_permission_denied')
+  );
+
+  v_isolation_org_a := NULLIF(v_isolation_approve_a->>'approved_organization_id', '')::uuid;
+  v_isolation_org_b := NULLIF(v_isolation_approve_b->>'approved_organization_id', '')::uuid;
+  v_isolation_user_a := NULLIF(v_isolation_approve_a->>'approved_user_id', '')::uuid;
+  v_isolation_user_b := NULLIF(v_isolation_approve_b->>'approved_user_id', '')::uuid;
+
+  RETURN NEXT ok(
+    COALESCE((v_isolation_approve_a->>'ok')::boolean, FALSE),
+    'tenant_signup_review_apply_v1 approves isolation tenant A through canonical review path'
+  );
+
+  RETURN NEXT ok(
+    COALESCE((v_isolation_approve_b->>'ok')::boolean, FALSE),
+    'tenant_signup_review_apply_v1 approves isolation tenant B through canonical review path'
+  );
+
+  RETURN NEXT ok(
+    v_isolation_org_a IS NOT NULL
+    AND v_isolation_user_a IS NOT NULL
+    AND NULLIF(v_isolation_approve_a->>'approved_auth_user_id', '')::uuid = v_isolation_auth_a,
+    'approved isolation tenant A returns provisioned organization/user/auth ids'
+  );
+
+  RETURN NEXT ok(
+    v_isolation_org_b IS NOT NULL
+    AND v_isolation_user_b IS NOT NULL
+    AND NULLIF(v_isolation_approve_b->>'approved_auth_user_id', '')::uuid = v_isolation_auth_b,
+    'approved isolation tenant B returns provisioned organization/user/auth ids'
+  );
+
+  PERFORM set_config('request.jwt.claim.sub', v_isolation_user_a::text, true);
+  PERFORM set_config(
+    'request.jwt.claims',
+    jsonb_build_object('sub', v_isolation_user_a::text, 'role', 'authenticated')::text,
+    true
+  );
+  EXECUTE 'SET LOCAL ROLE authenticated';
+
+  v_isolation_list := public.ui_list_resource_v1('organizations', '{}'::jsonb, 50, 0, NULL::jsonb);
+
+  RETURN NEXT is(
+    (v_isolation_list->>'total')::int,
+    1,
+    'approved tenant A sees one organization through Console ui_list_resource_v1'
+  );
+
+  RETURN NEXT ok(
+    COALESCE(v_isolation_list->'items', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', v_isolation_org_a::text)),
+    'approved tenant A sees its own organization through Console ui_list_resource_v1'
+  );
+
+  RETURN NEXT ok(
+    NOT COALESCE(v_isolation_list->'items', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', v_isolation_org_b::text)),
+    'approved tenant A cannot see tenant B organization through Console ui_list_resource_v1'
+  );
+
+  RETURN NEXT is(
+    public.ui_get_resource_v1('organizations', v_isolation_org_a)->>'id',
+    v_isolation_org_a::text, 'tenant A get returns its own organization'
+  );
+  RETURN NEXT ok(
+    public.ui_get_resource_v1('organizations', v_isolation_org_b) IS NULL,
+    'tenant A get hides tenant B organization'
+  );
+  RETURN NEXT is(
+    (public.ui_resource_metrics_v1('organizations', '{}'::jsonb, ARRAY[]::text[])->>'total')::int,
+    1, 'tenant A organization metrics count only its own organization'
+  );
+  RETURN NEXT is(
+    public.ui_filter_distinct_values_v1('organizations', 'slug', NULL, 200),
+    jsonb_build_array(public.ui_get_resource_v1('organizations', v_isolation_org_a)->>'slug'),
+    'tenant A organization distinct slugs contain only its own slug'
+  );
+
+  BEGIN
+    PERFORM public.tenant_signup_assert_reviewer_v1();
+    v_review_denied := FALSE;
+  EXCEPTION
+    WHEN insufficient_privilege THEN
+      v_review_denied := TRUE;
+      v_review_denied_message := SQLERRM;
+  END;
+
+  RETURN NEXT ok(
+    v_review_denied,
+    'approved tenant A cannot assert tenant signup review platform permission'
+  );
+
+  RETURN NEXT ok(
+    COALESCE(v_review_denied_message, '') ILIKE '%platform scope%',
+    'tenant signup review denial explains platform scope requirement'
+  );
+
+  EXECUTE 'RESET ROLE';
+
+  PERFORM set_config('request.jwt.claim.sub', v_isolation_user_b::text, true);
+  PERFORM set_config(
+    'request.jwt.claims',
+    jsonb_build_object('sub', v_isolation_user_b::text, 'role', 'authenticated')::text,
+    true
+  );
+  EXECUTE 'SET LOCAL ROLE authenticated';
+
+  v_isolation_list := public.ui_list_resource_v1('organizations', '{}'::jsonb, 50, 0, NULL::jsonb);
+
+  RETURN NEXT is(
+    (v_isolation_list->>'total')::int,
+    1,
+    'approved tenant B sees one organization through Console ui_list_resource_v1'
+  );
+
+  RETURN NEXT ok(
+    COALESCE(v_isolation_list->'items', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', v_isolation_org_b::text)),
+    'approved tenant B sees its own organization through Console ui_list_resource_v1'
+  );
+
+  RETURN NEXT ok(
+    NOT COALESCE(v_isolation_list->'items', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', v_isolation_org_a::text)),
+    'approved tenant B cannot see tenant A organization through Console ui_list_resource_v1'
+  );
+
+  RETURN NEXT is(
+    public.ui_get_resource_v1('organizations', v_isolation_org_b)->>'id',
+    v_isolation_org_b::text, 'tenant B get returns its own organization'
+  );
+  RETURN NEXT ok(
+    public.ui_get_resource_v1('organizations', v_isolation_org_a) IS NULL,
+    'tenant B get hides tenant A organization'
+  );
+  RETURN NEXT is(
+    (public.ui_resource_metrics_v1('organizations', '{}'::jsonb, ARRAY[]::text[])->>'total')::int,
+    1, 'tenant B organization metrics count only its own organization'
+  );
+  RETURN NEXT is(
+    public.ui_filter_distinct_values_v1('organizations', 'slug', NULL, 200),
+    jsonb_build_array(public.ui_get_resource_v1('organizations', v_isolation_org_b)->>'slug'),
+    'tenant B organization distinct slugs contain only its own slug'
+  );
+
+  EXECUTE 'RESET ROLE';
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
 
   v_create_invite_failure := public.tenant_signup_request_create_v1(
     p_email := format('tenant-signup-invite-failure-%s@example.com', left(replace(gen_random_uuid()::text, '-', ''), 12)),
@@ -456,6 +683,7 @@ BEGIN
   );
 
   PERFORM set_config('request.jwt.claim.sub', v_user_platform::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   PERFORM set_config(
     'request.jwt.claims',
     jsonb_build_object('sub', v_user_platform::text, 'role', 'authenticated')::text,

@@ -7,7 +7,27 @@
       "package_name": "supabase",
       "repo_var": "SUPABASE_CLI_VERSION",
       "required": true,
-      "exact_semver_required": true
+      "exact_semver_required": true,
+      "local_intake_bootstrap_by_version": {
+        "2.116.0": {
+          "edge": {
+            "path": "/root/index.ts",
+            "sha256": "15ffc81b9fe6ae449af9be26481c83f6811aacaa540bd90ec1b7342dbc99a3ec"
+          },
+          "gateway": {
+            "path": "/usr/local/share/lua/5.1/kong/runloop/handler.lua",
+            "sha256": "ac8ec35d70395ae4527bad5fe612cca5b2404248f9194f3ca72bfbe896a0a6d2"
+          }
+        }
+      },
+      "local_runtime_images_by_version": {
+        "2.109.1": {
+          "edge_runtime": "public.ecr.aws/supabase/edge-runtime:v1.74.2@sha256:a82676277615aee03c4f288cbbbf68dedb5ba8693073e567ab8dbfdd11ba5d45"
+        },
+        "2.116.0": {
+          "edge_runtime": "public.ecr.aws/supabase/edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c"
+        }
+      }
     },
     {
       "tool_id": "vercel",

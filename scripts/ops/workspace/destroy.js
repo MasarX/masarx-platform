@@ -58,14 +58,15 @@ function getArg(flag) {
   if (projectRef && token) {
     try {
       await deleteProjectWithRetries(projectRef, token, {
+        organizationId: cfg.orgId,
         timeoutMs: parseInt(process.env.WORKSPACE_DELETE_TIMEOUT_MS || '900000', 10) || 900000,
         intervalMs: parseInt(process.env.WORKSPACE_DELETE_INTERVAL_MS || '15000', 10) || 15000,
       });
       console.log(`[workspace/destroy] Deleted project/branch ${projectRef}`);
     } catch (err) {
-      if (err && (err.status === 404 || err.status === 403)) {
+      if (err && err.status === 404) {
         console.warn(
-          `[workspace/destroy] Project ${projectRef} not found or not readable; skipping remote delete.`
+          `[workspace/destroy] Project ${projectRef} is already absent.`
         );
       } else {
         throw err;

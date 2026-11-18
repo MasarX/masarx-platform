@@ -18,7 +18,10 @@ export type ComboboxProps = {
   disabled?: boolean;
   placeholder?: string;
   emptyMessage?: string;
+  ariaLabel?: string;
   className?: string;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
 };
 
 export function Combobox({
@@ -34,7 +37,10 @@ export function Combobox({
   disabled,
   placeholder = "Select…",
   emptyMessage = "No results",
+  ariaLabel,
   className,
+  "aria-label": ariaLabelProp,
+  "aria-labelledby": ariaLabelledBy,
 }: ComboboxProps) {
   const {
     open,
@@ -61,9 +67,23 @@ export function Combobox({
   });
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const triggerRef = React.useRef<HTMLDivElement | null>(null);
   const listboxRef = React.useRef<HTMLDivElement | null>(null);
+  const listboxId = React.useId();
+  const activeOptionId = activeIndex >= 0 &&
+    (activeIndex < filteredOptions.length || showCreateRow)
+    ? `${listboxId}-option-${activeIndex}`
+    : undefined;
   const suppressNextOptionClickRef = React.useRef(false);
   const suppressNextCreateClickRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    } else if (open) {
+      inputRef.current?.focus();
+    }
+  }, [disabled, inputRef, open, setOpen]);
 
   // Close on click outside
   React.useEffect(() => {
@@ -127,12 +147,26 @@ export function Combobox({
   }, [mode, options, value]);
 
   return (
-    <div ref={containerRef} className="relative">
+    <div
+      ref={containerRef}
+      className="relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setOpen(false);
+        }
+      }}
+    >
       <div
+        ref={triggerRef}
         role="combobox"
+        tabIndex={disabled || open ? -1 : 0}
+        aria-label={ariaLabelProp ?? ariaLabel ?? placeholder}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-disabled={disabled}
+        aria-labelledby={ariaLabelledBy}
+        aria-controls={open ? listboxId : undefined}
+        aria-activedescendant={open ? activeOptionId : undefined}
         className={cn(
           "flex min-h-[44px] w-full cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-ui-border bg-ui-surface px-3 py-2 text-sm text-ui-ink transition",
           "focus-within:ring-2 focus-within:ring-ui-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-ui-paper",
@@ -142,7 +176,13 @@ export function Combobox({
         onClick={() => {
           if (!disabled) {
             setOpen(true);
-            setTimeout(() => inputRef.current?.focus(), 0);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (disabled || open || event.target !== event.currentTarget) return;
+          if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key)) {
+            event.preventDefault();
+            setOpen(true);
           }
         }}
       >
@@ -161,13 +201,13 @@ export function Combobox({
                 {tag.label}
                 <button
                   type="button"
+                  disabled={disabled}
                   onClick={(e) => {
                     e.stopPropagation();
-                    selectOption(tag.value);
+                    if (!disabled) selectOption(tag.value);
                   }}
                   className="ml-0.5 text-current opacity-60 hover:opacity-100"
                   aria-label={`Remove ${tag.label}`}
-                  tabIndex={-1}
                 >
                   ×
                 </button>
@@ -183,13 +223,25 @@ export function Combobox({
         {open ? (
           <input
             ref={inputRef}
+            disabled={disabled}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onChange={(e) => { if (!disabled) setQuery(e.target.value); }}
+            onKeyDown={(event) => {
+              if (disabled) return;
+              handleKeyDown(event);
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+              const selectsOption = event.key === "Enter" && mode === "single" &&
+                filteredOptions[activeIndex] && !filteredOptions[activeIndex].disabled;
+              if (event.key === "Escape" || selectsOption) {
+                triggerRef.current?.focus();
+              }
+            }}
             className="min-w-[60px] flex-1 bg-transparent text-sm outline-none placeholder:text-ui-muted"
             placeholder={hasValue ? "" : placeholder}
             role="searchbox"
             aria-label="Search options"
+            aria-controls={listboxId}
+            aria-activedescendant={activeOptionId}
             autoComplete="off"
             spellCheck={false}
           />
@@ -204,7 +256,6 @@ export function Combobox({
               }}
               className="inline-flex h-5 w-5 items-center justify-center rounded text-ui-muted hover:text-ui-ink"
               aria-label="Clear selection"
-              tabIndex={-1}
             >
               <svg
                 aria-hidden
@@ -239,8 +290,10 @@ export function Combobox({
       {open && !disabled ? (
         <div
           ref={listboxRef}
+          id={listboxId}
           role="listbox"
           aria-label="Options"
+          aria-multiselectable={mode === "multi" || undefined}
           className="absolute left-0 top-full z-50 mt-1 max-h-[300px] w-full overflow-auto rounded-lg border border-ui-border bg-ui-paper p-1 shadow-xl"
         >
           {loading ? (
@@ -255,11 +308,15 @@ export function Combobox({
             const isSelected = selectedValues.has(option.value);
             const isActive = activeIndex === index;
             const handleOptionSelect = () => {
-              if (!option.disabled) selectOption(option.value);
+              if (!option.disabled) {
+                selectOption(option.value);
+                if (mode === "single") triggerRef.current?.focus();
+              }
             };
             return (
               <div
                 key={option.value}
+                id={`${listboxId}-option-${index}`}
                 role="option"
                 aria-selected={isSelected}
                 aria-disabled={option.disabled}
@@ -313,6 +370,7 @@ export function Combobox({
           })}
           {showCreateRow ? (
             <div
+              id={`${listboxId}-option-${filteredOptions.length}`}
               role="option"
               aria-selected={false}
               data-active={activeIndex === filteredOptions.length}

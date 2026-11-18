@@ -4,7 +4,7 @@ const {
   fetchWorkflowEvidenceForRun,
   readJsonEntriesFromZip,
   readJsonFromZip,
-  resolvePythonExecutable,
+  listEntriesFromZip,
 } = require('../../../scripts/ops/ci/github-workflow-artifacts');
 
 describe('github-workflow-artifacts', () => {
@@ -116,91 +116,73 @@ describe('github-workflow-artifacts', () => {
     expect(result.error).toContain('bad zip');
   });
 
-  test('resolvePythonExecutable prefers python3 on linux-like platforms', () => {
-    const execFileSyncFn = jest
-      .fn()
-      .mockReturnValueOnce('Python 3.12.1');
+  test('listEntriesFromZip returns bounded Node-parsed file entries', () => {
+    const readZipArchiveFileFn = jest.fn().mockReturnValue([
+      { name: 'dir/', isDirectory: true, data: Buffer.alloc(0) },
+      { name: 'dir/manifest.json', isDirectory: false, data: Buffer.from('{}') },
+    ]);
 
-    const result = resolvePythonExecutable({
-      platform: 'linux',
-      execFileSyncFn,
-    });
-
-    expect(result).toBe('python3');
-    expect(execFileSyncFn).toHaveBeenCalledWith('python3', ['--version'], { stdio: 'pipe' });
-  });
-
-  test('resolvePythonExecutable falls back to python when python3 is unavailable', () => {
-    const execFileSyncFn = jest
-      .fn()
-      .mockImplementationOnce(() => {
-        throw new Error('missing python3');
-      })
-      .mockReturnValueOnce('Python 3.11.9');
-
-    const result = resolvePythonExecutable({
-      platform: 'linux',
-      execFileSyncFn,
-    });
-
-    expect(result).toBe('python');
-    expect(execFileSyncFn).toHaveBeenNthCalledWith(1, 'python3', ['--version'], { stdio: 'pipe' });
-    expect(execFileSyncFn).toHaveBeenNthCalledWith(2, 'python', ['--version'], { stdio: 'pipe' });
-  });
-
-  test('readJsonFromZip reads JSON via python zipfile fallback', () => {
-    const execFileSyncFn = jest
-      .fn()
-      .mockReturnValueOnce('Python 3.11.9')
-      .mockReturnValueOnce('{"stage":"stg","surface":"db","sha":"abc123"}');
-
-    const result = readJsonFromZip('artifact.zip', {
-      entrySuffix: 'deploy-stg-evidence-manifest.json',
-      platform: 'linux',
-      execFileSyncFn,
-    });
-
-    expect(result).toEqual({ stage: 'stg', surface: 'db', sha: 'abc123' });
-    expect(execFileSyncFn).toHaveBeenNthCalledWith(1, 'python3', ['--version'], { stdio: 'pipe' });
-    expect(execFileSyncFn).toHaveBeenNthCalledWith(
-      2,
-      'python3',
-      expect.arrayContaining([
-        '-c',
-        expect.stringContaining('zipfile.ZipFile'),
-        'artifact.zip',
-        'deploy-stg-evidence-manifest.json',
-      ]),
-      { encoding: 'utf8' },
+    expect(listEntriesFromZip('artifact.zip', { readZipArchiveFileFn })).toEqual([
+      'dir/manifest.json',
+    ]);
+    expect(readZipArchiveFileFn).toHaveBeenCalledWith(
+      'artifact.zip',
+      { errorPrefix: 'workflow_artifact_zip' },
     );
   });
 
-  test('readJsonEntriesFromZip reads multiple JSON entries via python zipfile fallback', () => {
-    const execFileSyncFn = jest
-      .fn()
-      .mockReturnValueOnce('Python 3.11.9')
-      .mockReturnValueOnce('{"e2e-gate-summary.json":{"status":"passed"},"load-summary.json":{"status":"passed"}}');
+  test('readJsonFromZip keeps cross-platform archive paths data-only', () => {
+    const archivePath = 'C:\\runner temp\\artifact [1].zip';
+    const readZipArchiveFileFn = jest.fn().mockReturnValue([{
+      name: 'nested/deploy-stg-evidence-manifest.json',
+      isDirectory: false,
+      data: Buffer.from('{"stage":"stg","surface":"db","sha":"abc123"}'),
+    }]);
+
+    const result = readJsonFromZip(archivePath, {
+      entrySuffix: 'DEPLOY-STG-EVIDENCE-MANIFEST.JSON',
+      readZipArchiveFileFn,
+    });
+
+    expect(result).toEqual({ stage: 'stg', surface: 'db', sha: 'abc123' });
+    expect(readZipArchiveFileFn).toHaveBeenCalledWith(
+      archivePath,
+      { errorPrefix: 'workflow_artifact_zip' },
+    );
+  });
+
+  test('readJsonEntriesFromZip reads multiple Node-parsed JSON entries', () => {
+    const readZipArchiveFileFn = jest.fn().mockReturnValue([
+      { name: 'e2e-gate-summary.json', isDirectory: false, data: Buffer.from('{"status":"passed"}') },
+      { name: 'reports/load-summary.json', isDirectory: false, data: Buffer.from('{"status":"passed"}') },
+    ]);
 
     const result = readJsonEntriesFromZip('artifact.zip', {
       entrySuffixes: ['e2e-gate-summary.json', 'load-summary.json'],
-      platform: 'linux',
-      execFileSyncFn,
+      readZipArchiveFileFn,
     });
 
     expect(result).toEqual({
       'e2e-gate-summary.json': { status: 'passed' },
       'load-summary.json': { status: 'passed' },
     });
-    expect(execFileSyncFn).toHaveBeenNthCalledWith(
-      2,
-      'python3',
-      expect.arrayContaining([
-        '-c',
-        expect.stringContaining('json.loads'),
-        'artifact.zip',
-        '["e2e-gate-summary.json","load-summary.json"]',
-      ]),
-      { encoding: 'utf8' },
+    expect(readZipArchiveFileFn).toHaveBeenCalledWith(
+      'artifact.zip',
+      { errorPrefix: 'workflow_artifact_zip' },
     );
   });
+
+  test('readJsonFromZip rejects malformed UTF-8 from the archive', () => {
+    const readZipArchiveFileFn = jest.fn().mockReturnValue([{
+      name: 'manifest.json',
+      isDirectory: false,
+      data: Buffer.from([0x7b, 0xc3, 0x28, 0x7d]),
+    }]);
+
+    expect(() => readJsonFromZip('artifact.zip', {
+      entrySuffix: 'manifest.json',
+      readZipArchiveFileFn,
+    })).toThrow(/encoded data was not valid/i);
+  });
+
 });

@@ -4,7 +4,7 @@ import { AccessPolicyPage as UiAccessPolicyPage, LoadingState } from "@masarx/ui
 type AccessPolicyPageProps = Parameters<typeof UiAccessPolicyPage>[0];
 const AccessPolicyPageInner = UiAccessPolicyPage as unknown as (
   props: AccessPolicyPageProps
-) => JSX.Element;
+) => React.JSX.Element;
 
 export function AccessPolicyPage(props: AccessPolicyPageProps) {
   return (

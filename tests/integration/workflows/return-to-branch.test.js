@@ -7,7 +7,9 @@ const {
   createSender,
   createUser,
   createShipment,
-  setAuthContext
+  setAuthContext,
+  withFixtureAdminContext,
+  setServiceContext: setCanonicalServiceContext,
 } = require('../helpers/tenant-utils');
 
 loadEnv();
@@ -40,32 +42,22 @@ describe('Return-to-branch intake and visibility', () => {
   });
 
   async function setServiceContext(organizationId, userId) {
-    await client.query('SET LOCAL ROLE service_role');
-    const claims = {
-      role: 'service_role',
-      sub: userId,
-      organization_id: organizationId
-    };
-
-    await client.query('SELECT set_config($1, $2, true)', [
-      'request.jwt.claims',
-      JSON.stringify(claims)
-    ]);
-    await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', String(userId)]);
+    await setCanonicalServiceContext(client, userId, organizationId);
   }
 
   async function seedBranchInventory(organizationId, suffix) {
     const branchId = randomUUID();
     const locationId = randomUUID();
 
-    await client.query(
-      `INSERT INTO public.branches (id, organization_id, code, name, timezone, is_active)
-       VALUES ($1::uuid, $2::uuid, $3, $4, 'Asia/Riyadh', true)`,
-      [branchId, organizationId, `branch-${suffix}`, `Branch ${suffix}`]
-    );
+    await withFixtureAdminContext(client, async () => {
+      await client.query(
+        `INSERT INTO public.branches (id, organization_id, code, name, timezone, is_active)
+         VALUES ($1::uuid, $2::uuid, $3, $4, 'Asia/Riyadh', true)`,
+        [branchId, organizationId, `branch-${suffix}`, `Branch ${suffix}`]
+      );
 
-    await client.query(
-      `INSERT INTO public.warehouse_locations (
+      await client.query(
+        `INSERT INTO public.warehouse_locations (
          id,
          organization_id,
          branch_id,
@@ -83,8 +75,9 @@ describe('Return-to-branch intake and visibility', () => {
          'stage',
          true
        )`,
-      [locationId, organizationId, branchId, `loc-${suffix}`, `Location ${suffix}`]
-    );
+        [locationId, organizationId, branchId, `loc-${suffix}`, `Location ${suffix}`]
+      );
+    });
 
     return { branchId, locationId };
   }
@@ -111,11 +104,13 @@ describe('Return-to-branch intake and visibility', () => {
   }
 
   async function attachSenderToShipment(shipmentId, senderId) {
-    await client.query(
-      `UPDATE public.shipments
-          SET sender_id = $2::uuid
-        WHERE id = $1::uuid`,
-      [shipmentId, senderId]
+    await withFixtureAdminContext(client, () =>
+      client.query(
+        `UPDATE public.shipments
+            SET sender_id = $2::uuid
+          WHERE id = $1::uuid`,
+        [shipmentId, senderId]
+      )
     );
   }
 
@@ -174,6 +169,52 @@ describe('Return-to-branch intake and visibility', () => {
     return rows[0]?.task_id ?? null;
   }
 
+  test('returned-to-branch API projection preserves service authenticated and anon boundaries across tenants', async () => {
+    const fixtures = [];
+    for (const suffix of ['a', 'b']) {
+      const fixture = await withFixtureAdminContext(client, async () => {
+        const { id: organizationId } = await createOrganization(client, `Projection ${suffix}`);
+        const { id: clientId } = await createClient(client, organizationId, `Projection ${suffix}`);
+        const senderId = await createSender(client, clientId, `Projection ${suffix}`);
+        const userId = await createUser(client, organizationId, `projection-${randomUUID()}@example.test`,
+          { accessScopeType: 'tenant', userType: 'ops_admin' });
+        const shipment = await createShipment(client, { organizationId, clientId, status: 'pending' });
+        return { organizationId, clientId, senderId, userId, shipment };
+      });
+      await attachSenderToShipment(fixture.shipment.id, fixture.senderId);
+      const { branchId } = await seedBranchInventory(fixture.organizationId, `matrix-${randomUUID()}`);
+      const deviceId = await registerDevice(fixture.userId, fixture.organizationId);
+      expect(deviceId).toBeTruthy();
+      const intake = await recordReturnToBranchIntake({ ...fixture, branchId, deviceId,
+        shipmentId: fixture.shipment.id, barcode: fixture.shipment.trackingNumber,
+        idempotencyKey: `projection-${randomUUID()}` });
+      expect(intake?.created).toBe(true);
+      fixtures.push(fixture);
+    }
+    const readIds = async role => {
+      expect((await client.query('SELECT current_user AS role')).rows[0].role).toBe(role);
+      return (await client.query('SELECT id FROM api.return_to_branch_shipments_v1')).rows.map(row => row.id);
+    };
+    await setServiceContext(fixtures[0].organizationId, fixtures[0].userId);
+    expect(await readIds('service_role')).toEqual(expect.arrayContaining(fixtures.map(f => f.shipment.id)));
+    for (const [index, fixture] of fixtures.entries()) {
+      await setAuthContext(client, fixture.userId, { organization_id: fixture.organizationId });
+      const ids = await readIds('authenticated');
+      expect(ids).toContain(fixture.shipment.id);
+      expect(ids).not.toContain(fixtures[1 - index].shipment.id);
+    }
+    await client.query('SAVEPOINT projection_anon');
+    try {
+      await client.query('SET LOCAL ROLE anon');
+      await client.query("SELECT set_config('request.jwt.claims', '{\"role\":\"anon\"}', true), set_config('request.jwt.claim.sub', '', true), set_config('request.jwt.claim.role', 'anon', true)");
+      expect((await client.query('SELECT current_user AS role')).rows[0].role).toBe('anon');
+      await expect(client.query('SELECT id FROM api.return_to_branch_shipments_v1')).rejects.toMatchObject({ code: '42501' });
+    } finally {
+      await client.query('ROLLBACK TO SAVEPOINT projection_anon');
+      await client.query('RELEASE SAVEPOINT projection_anon');
+    }
+  });
+
   test('return_to_branch_intake scan writes inventory, shipment action, metadata, and idempotent view state', async () => {
     const { id: organizationId } = await createOrganization(client, 'Return To Branch Org');
     const { id: clientId } = await createClient(client, organizationId, 'Return To Branch Client');
@@ -229,12 +270,14 @@ describe('Return-to-branch intake and visibility', () => {
     expect(replayScan?.created).toBe(false);
     expect(replayScan?.scan_event_id).toBe(firstScan.scan_event_id);
 
-    const { rows: movementRows } = await client.query(
-      `SELECT id, movement_type, quantity, unit, to_location_id, related_scan_event_id
-         FROM public.inventory_movements
-        WHERE organization_id = $1::uuid
-          AND related_scan_event_id = $2::uuid`,
-      [organizationId, firstScan.scan_event_id]
+    const { rows: movementRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id, movement_type, quantity, unit, to_location_id, related_scan_event_id
+           FROM public.inventory_movements
+          WHERE organization_id = $1::uuid
+            AND related_scan_event_id = $2::uuid`,
+        [organizationId, firstScan.scan_event_id]
+      )
     );
     expect(movementRows).toHaveLength(1);
     expect(movementRows[0]?.movement_type).toBe('receive');
@@ -242,29 +285,33 @@ describe('Return-to-branch intake and visibility', () => {
     expect(Number(movementRows[0]?.quantity || 0)).toBe(1);
     expect(String(movementRows[0]?.unit || '')).toBe('shipment');
 
-    const { rows: actionRows } = await client.query(
-      `SELECT id, action_type, action_category, action_data
-         FROM public.shipment_actions
-        WHERE shipment_id = $1::uuid
-          AND organization_id = $2::uuid
-          AND client_id = $3::uuid
-          AND action_type = 'scan'
-          AND (action_data->>'source_scan_event_id') = $4
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [shipment.id, organizationId, clientId, String(firstScan.scan_event_id)]
+    const { rows: actionRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id, action_type, action_category, action_data
+           FROM public.shipment_actions
+          WHERE shipment_id = $1::uuid
+            AND organization_id = $2::uuid
+            AND client_id = $3::uuid
+            AND action_type = 'scan'
+            AND (action_data->>'source_scan_event_id') = $4
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [shipment.id, organizationId, clientId, String(firstScan.scan_event_id)]
+      )
     );
     expect(actionRows).toHaveLength(1);
     expect(actionRows[0]?.action_category).toBe('operational');
     expect(actionRows[0]?.action_data?.scan_type).toBe('return_to_branch_intake');
     expect(actionRows[0]?.action_data?.inventory_location_id).toBe(locationId);
 
-    const { rows: shipmentRows } = await client.query(
-      `SELECT metadata
-         FROM public.shipments
-        WHERE id = $1::uuid
-          AND client_id = $2::uuid`,
-      [shipment.id, clientId]
+    const { rows: shipmentRows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT metadata
+           FROM public.shipments
+          WHERE id = $1::uuid
+            AND client_id = $2::uuid`,
+        [shipment.id, clientId]
+      )
     );
     expect(shipmentRows[0]?.metadata?.return_to_branch?.scan_event_id).toBe(firstScan.scan_event_id);
     expect(shipmentRows[0]?.metadata?.return_to_branch?.inventory_movement_id).toBe(movementRows[0].id);
@@ -324,9 +371,9 @@ describe('Return-to-branch intake and visibility', () => {
       'dispatch_reattempt_delivery'
     );
 
-    await setServiceContext(organizationId, userId);
-    await client.query(
-      `INSERT INTO public.shipment_actions (
+    await withFixtureAdminContext(client, () =>
+      client.query(
+        `INSERT INTO public.shipment_actions (
          shipment_id,
          organization_id,
          client_id,
@@ -355,7 +402,8 @@ describe('Return-to-branch intake and visibility', () => {
           resolution_action: 'hold_at_branch',
           resolution_notes: 'Customer will collect from branch'
         })
-      ]
+        ]
+      )
     );
 
     await createTaskForShipment(

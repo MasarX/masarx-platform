@@ -10,6 +10,7 @@ import {
   type UiReadResource,
 } from "@masarx/api";
 import { Badge } from "./badge";
+import { MappingTestPanel } from "./mapping-studio/mapping-test-panel";
 import { Button } from "./button";
 import { Input } from "./input";
 import { LoadingState } from "./loading-state";
@@ -162,12 +163,33 @@ function buildParsePayload(params: {
   };
 }
 
-export function MappingStudioPage({
+export function MappingStudioPage(props: MappingStudioPageProps) {
+  const saveLock = React.useRef(false);
+  const [savePending, setSavePending] = React.useState(false);
+  const context = props.initialContext;
+  const contextKey = JSON.stringify([
+    props.appBasePath, props.initialArtifact ?? "tabular_import",
+    context?.targetResourceKey ?? null, context?.webhookSourceId ?? null,
+    context?.operationTemplateId ?? null, context?.apiRouteId ?? null,
+    context?.pluginId ?? null, context?.workflowTemplateId ?? null,
+  ]);
+  return <MappingStudioForm key={contextKey} {...props} saveLock={saveLock}
+    savePending={savePending} onSavePendingChange={setSavePending} />;
+}
+
+function MappingStudioForm({
   appBasePath,
   initialArtifact = "tabular_import",
   initialContext,
   testIdPrefix,
-}: MappingStudioPageProps) {
+  saveLock,
+  savePending,
+  onSavePendingChange,
+}: MappingStudioPageProps & {
+  saveLock: React.MutableRefObject<boolean>;
+  savePending: boolean;
+  onSavePendingChange: (pending: boolean) => void;
+}) {
   const ui = React.useMemo(() => createUiClient(), []);
   const { toast } = useToast();
   const prefix = (testIdPrefix || "mapping-studio").trim() || "mapping-studio";
@@ -186,6 +208,7 @@ export function MappingStudioPage({
   const [targetResourceKey, setTargetResourceKey] = React.useState(initialContext?.targetResourceKey ?? "");
   const [targetSchemaText, setTargetSchemaText] = React.useState("{}");
   const [mappingRules, setMappingRules] = React.useState<StudioFieldRule[]>([]);
+  const [originalMappingConfig, setOriginalMappingConfig] = React.useState<Record<string, unknown> | null>(null);
   const [requestConfigText, setRequestConfigText] = React.useState(stringifyPretty({}, "{}"));
   const [workflowBindingText, setWorkflowBindingText] = React.useState(buildInitialWorkflowBinding(initialContext));
   const [pluginName, setPluginName] = React.useState("");
@@ -194,9 +217,49 @@ export function MappingStudioPage({
   const [reviewResponse, setReviewResponse] = React.useState<MappingStudioResponse | null>(null);
   const [report, setReport] = React.useState<MappingOperationReport | null>(null);
   const [saveResult, setSaveResult] = React.useState<unknown>(null);
+  const testEnabledRef = React.useRef<boolean | undefined>(undefined);
+  const [testEnabled, setTestEnabled] = React.useState<boolean | undefined>(undefined);
+  const [testSavedRevision, setTestSavedRevision] = React.useState(0);
+  React.useEffect(() => { testEnabledRef.current = undefined; setTestEnabled(undefined); }, [artifact, initialContext?.webhookSourceId]);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [activeRuleIndex, setActiveRuleIndex] = React.useState<number>(0);
   const [saveMode, setSaveMode] = React.useState<"direct" | "draft">("direct");
+  const parseGeneration = React.useRef(0);
+  const ownSaveInFlight = React.useRef(false);
+  React.useEffect(() => () => { parseGeneration.current += 1; }, []);
+  const invalidateReview = React.useCallback(() => {
+    parseGeneration.current += 1;
+    setReviewResponse(null);
+    setReport(null);
+    setSaveResult(null);
+    setBusy(null);
+    setStep("mapping");
+  }, []);
+  const invalidateSaveResponse = React.useCallback(() => {
+    if (ownSaveInFlight.current) {
+      parseGeneration.current += 1;
+      setBusy(null);
+    }
+    setReport(null);
+    setSaveResult(null);
+  }, []);
+  const handleEligibilityChange = React.useCallback((enabled: boolean | undefined) => {
+    if (testEnabledRef.current === enabled) return;
+    testEnabledRef.current = enabled;
+    invalidateSaveResponse();
+    setTestEnabled(enabled);
+  }, [invalidateSaveResponse]);
+  const invalidateSource = React.useCallback(() => {
+    parseGeneration.current += 1;
+    setOriginalMappingConfig(null);
+    setMappingRules([]);
+    setNormalizedContract(null);
+    setReviewResponse(null);
+    setReport(null);
+    setSaveResult(null);
+    setBusy(null);
+    setStep("source");
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -248,6 +311,7 @@ export function MappingStudioPage({
     setSourceType(defaultSourceType(artifact));
     setPluginKind(artifact === "webhook_inbound" ? "webhook" : "api");
     setMappingRules([]);
+    setOriginalMappingConfig(null);
     setReviewResponse(null);
     setReport(null);
     setSaveResult(null);
@@ -287,8 +351,9 @@ export function MappingStudioPage({
         artifact,
         mappingRules,
         artifact === "tabular_import" ? { target_resource_key: targetResourceKey } : null,
+        originalMappingConfig,
       ),
-    [artifact, mappingRules, targetResourceKey],
+    [artifact, mappingRules, originalMappingConfig, targetResourceKey],
   );
 
   const handleSpreadsheetUpload = React.useCallback(
@@ -296,9 +361,12 @@ export function MappingStudioPage({
       const file = event.target.files?.[0] ?? null;
       event.currentTarget.value = "";
       if (!file) return;
+      invalidateSource();
+      const generation = parseGeneration.current;
       setBusy("file");
       try {
         const parsed = await parseTabularFile(file);
+        if (generation !== parseGeneration.current) return;
         const headers = parsed.headers;
         const rows = parsed.rows;
         setSourceColumns(headers);
@@ -308,19 +376,22 @@ export function MappingStudioPage({
         setMappingRules(inferTabularRules(headers, targetSchema));
         setStep("mapping");
       } catch (error) {
+        if (generation !== parseGeneration.current) return;
         toast({
           title: "Spreadsheet parse failed",
           description: error instanceof Error ? error.message : "Unable to read the uploaded file.",
           tone: "error",
         });
       } finally {
-        setBusy(null);
+        if (generation === parseGeneration.current) setBusy(null);
       }
     },
-    [targetSchemaText, toast],
+    [invalidateSource, targetSchemaText, toast],
   );
 
   const handleParseSource = React.useCallback(async () => {
+    const generation = ++parseGeneration.current;
+    const isCurrent = () => generation === parseGeneration.current;
     setBusy("parse");
     try {
       if (artifact === "tabular_import") {
@@ -343,7 +414,7 @@ export function MappingStudioPage({
         artifact,
         ...parsePayload,
       });
-      setNormalizedContract((parseResponse.normalized_contract as Record<string, unknown>) ?? null);
+      if (!isCurrent()) return;
 
       let responseForRules = parseResponse;
       if (
@@ -356,11 +427,15 @@ export function MappingStudioPage({
         });
       }
 
+      if (!isCurrent()) return;
       const mappingSuggestion =
         responseForRules.mapping_suggestion && typeof responseForRules.mapping_suggestion === "object"
           ? (responseForRules.mapping_suggestion as Record<string, unknown>)
           : {};
-      setMappingRules(normalizeRulesFromMappingConfig(mappingSuggestion));
+      const nextRules = normalizeRulesFromMappingConfig(mappingSuggestion);
+      setNormalizedContract((parseResponse.normalized_contract as Record<string, unknown>) ?? null);
+      setOriginalMappingConfig(mappingSuggestion);
+      setMappingRules(nextRules);
 
       const outboundSuggestions = Array.isArray(responseForRules.outbound_suggestions)
         ? responseForRules.outbound_suggestions
@@ -371,13 +446,14 @@ export function MappingStudioPage({
 
       setStep("mapping");
     } catch (error) {
+      if (!isCurrent()) return;
       toast({
         title: "Source parse failed",
         description: error instanceof Error ? error.message : "Unable to parse the supplied source contract.",
         tone: "error",
       });
     } finally {
-      setBusy(null);
+      if (isCurrent()) setBusy(null);
     }
   }, [
     artifact,
@@ -393,12 +469,14 @@ export function MappingStudioPage({
   ]);
 
   const updateRule = React.useCallback((index: number, patch: Partial<StudioFieldRule>) => {
+    invalidateReview();
     setMappingRules((current) =>
       current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, ...patch } : rule)),
     );
-  }, []);
+  }, [invalidateReview]);
 
   const addRule = React.useCallback((path?: string) => {
+    invalidateReview();
     setMappingRules((current) => [
       ...current,
       {
@@ -410,9 +488,10 @@ export function MappingStudioPage({
       },
     ]);
     setActiveRuleIndex(mappingRules.length);
-  }, [mappingRules.length]);
+  }, [invalidateReview, mappingRules.length]);
 
   const removeRule = React.useCallback((index: number) => {
+    invalidateReview();
     setMappingRules((current) => current.filter((_rule, ruleIndex) => ruleIndex !== index));
   }, []);
 
@@ -428,6 +507,8 @@ export function MappingStudioPage({
   }, [activeRuleIndex, addRule, mappingRules.length, updateRule]);
 
   const handleReview = React.useCallback(async () => {
+    const generation = ++parseGeneration.current;
+    const isCurrent = () => generation === parseGeneration.current;
     setBusy("review");
     try {
       const targetSchema = parseJsonText<Record<string, unknown>>(targetSchemaText, {});
@@ -436,11 +517,9 @@ export function MappingStudioPage({
         artifact,
         normalized_contract: normalizedContract,
         target_schema: targetSchema,
-        mapping_config: buildReviewMappingConfig(
-          artifact,
-          mappingRules,
-          artifact === "tabular_import" ? { target_resource_key: targetResourceKey } : null,
-        ),
+        mapping_config: artifact === "tabular_import"
+          ? buildReviewMappingConfig(artifact, mappingRules, { target_resource_key: targetResourceKey })
+          : runtimeMapping,
         request_config: parseJsonText<Record<string, unknown>>(requestConfigText, {}),
         workflow_binding: workflowBinding,
         source_payload:
@@ -452,23 +531,26 @@ export function MappingStudioPage({
             : undefined,
       };
       const response = await ui.mappingStudio.preview(reviewPayload);
+      if (!isCurrent()) return;
       setReviewResponse(response);
       if (response.save_modes?.recommended) {
         setSaveMode(response.save_modes.recommended);
       }
       setStep("review");
     } catch (error) {
+      if (!isCurrent()) return;
       toast({
         title: "Review generation failed",
         description: error instanceof Error ? error.message : "Unable to build the submit review.",
         tone: "error",
       });
     } finally {
-      setBusy(null);
+      if (isCurrent()) setBusy(null);
     }
   }, [
     artifact,
     mappingRules,
+    runtimeMapping,
     normalizedContract,
     requestConfigText,
     sampleRows,
@@ -481,11 +563,18 @@ export function MappingStudioPage({
   ]);
 
   const handleSubmit = React.useCallback(async () => {
+    if (saveLock.current) return;
+    saveLock.current = true;
+    ownSaveInFlight.current = true;
+    onSavePendingChange(true);
+    const generation = ++parseGeneration.current;
+    const isCurrent = () => generation === parseGeneration.current;
     setBusy("save");
     try {
       const payload = {
         artifact,
         save_mode: saveMode,
+        ...(artifact === "webhook_inbound" && initialContext?.webhookSourceId && testEnabled !== undefined ? { test_enabled: testEnabled } : {}),
         plugin_name: pluginName || undefined,
         plugin_id: initialContext?.pluginId ?? undefined,
         webhook_source_id: initialContext?.webhookSourceId ?? undefined,
@@ -495,11 +584,7 @@ export function MappingStudioPage({
         normalized_contract: normalizedContract,
         target_resource_key: targetResourceKey || undefined,
         target_schema: parseJsonText<Record<string, unknown>>(targetSchemaText, {}),
-        mapping_config: buildRuntimeMappingConfig(
-          artifact,
-          mappingRules,
-          artifact === "tabular_import" ? { target_resource_key: targetResourceKey } : null,
-        ),
+        mapping_config: runtimeMapping,
         request_config: parseJsonText<Record<string, unknown>>(requestConfigText, {}),
         workflow_binding: parseJsonText<Record<string, unknown>>(workflowBindingText, {}),
         source_payload:
@@ -511,9 +596,11 @@ export function MappingStudioPage({
             : undefined,
       };
       const response = await ui.mappingStudio.save(payload);
+      if (!isCurrent()) return;
       setReviewResponse(response);
       setReport(response.report ?? null);
       setSaveResult(response.result ?? null);
+      if (response.ok === true && response.save_mode === "direct") setTestSavedRevision(value => value + 1);
       setStep("report");
       if (response.ok === false) {
         toast({
@@ -531,13 +618,17 @@ export function MappingStudioPage({
         });
       }
     } catch (error) {
+      if (!isCurrent()) return;
       toast({
         title: "Submit failed",
         description: error instanceof Error ? error.message : "Unable to submit the mapping studio payload.",
         tone: "error",
       });
     } finally {
-      setBusy(null);
+      saveLock.current = false;
+      ownSaveInFlight.current = false;
+      onSavePendingChange(false);
+      if (isCurrent()) setBusy(null);
     }
   }, [
     artifact,
@@ -545,13 +636,16 @@ export function MappingStudioPage({
     initialContext?.operationTemplateId,
     initialContext?.pluginId,
     initialContext?.webhookSourceId,
-    mappingRules,
+    runtimeMapping,
     normalizedContract,
     notes,
     pluginName,
     requestConfigText,
     sampleRows,
     saveMode,
+    saveLock,
+    onSavePendingChange,
+    testEnabled,
     sourceColumns,
     targetResourceKey,
     targetSchemaText,
@@ -583,7 +677,7 @@ export function MappingStudioPage({
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="space-y-2 text-sm text-ui-ink">
             <span>Artifact</span>
-            <Select value={artifact} onChange={(event) => setArtifact(event.target.value as MappingArtifact)}>
+            <Select value={artifact} onChange={(event) => { invalidateSource(); setArtifact(event.target.value as MappingArtifact); }}>
               {ARTIFACT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -594,7 +688,7 @@ export function MappingStudioPage({
 
           <label className="space-y-2 text-sm text-ui-ink">
             <span>Source type</span>
-            <Select value={sourceType} onChange={(event) => setSourceType(event.target.value as SourceType)}>
+            <Select value={sourceType} onChange={(event) => { invalidateSource(); setSourceType(event.target.value as SourceType); }}>
               {sourceOptionsForArtifact(artifact).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -606,7 +700,7 @@ export function MappingStudioPage({
           {artifact === "integration_plugin" ? (
             <label className="space-y-2 text-sm text-ui-ink">
               <span>Plugin kind</span>
-              <Select value={pluginKind} onChange={(event) => setPluginKind(event.target.value as PluginKind)}>
+              <Select value={pluginKind} onChange={(event) => { invalidateSource(); setPluginKind(event.target.value as PluginKind); }}>
                 <option value="webhook">Webhook</option>
                 <option value="api">API</option>
               </Select>
@@ -615,7 +709,7 @@ export function MappingStudioPage({
 
           <label className="space-y-2 text-sm text-ui-ink">
             <span>Target resource (optional)</span>
-            <Select value={targetResourceKey} onChange={(event) => setTargetResourceKey(event.target.value)}>
+            <Select value={targetResourceKey} onChange={(event) => { invalidateReview(); setTargetResourceKey(event.target.value); }}>
               <option value="">Choose resource…</option>
               {resourceOptions.map((resource) => (
                 <option key={resource.key} value={resource.key}>
@@ -643,7 +737,7 @@ export function MappingStudioPage({
               <Textarea
                 rows={10}
                 value={sourceText}
-                onChange={(event) => setSourceText(event.target.value)}
+                onChange={(event) => { invalidateSource(); setSourceText(event.target.value); }}
                 placeholder={
                   sourceType === "curl"
                     ? "Paste cURL command"
@@ -659,7 +753,7 @@ export function MappingStudioPage({
                 <Textarea
                   rows={8}
                   value={requestConfigText}
-                  onChange={(event) => setRequestConfigText(event.target.value)}
+                  onChange={(event) => { invalidateSource(); setRequestConfigText(event.target.value); }}
                   placeholder='{"method":"POST","url_template":"https://example.com/orders","headers_template":{"content-type":"application/json"}}'
                 />
               </label>
@@ -682,7 +776,7 @@ export function MappingStudioPage({
             <Textarea
               rows={12}
               value={targetSchemaText}
-              onChange={(event) => setTargetSchemaText(event.target.value)}
+              onChange={(event) => { invalidateReview(); setTargetSchemaText(event.target.value); }}
               placeholder='{"type":"object","properties":{"status":{"type":"string"}}}'
             />
           </label>
@@ -693,7 +787,7 @@ export function MappingStudioPage({
                 <Textarea
                   rows={12}
                   value={workflowBindingText}
-                  onChange={(event) => setWorkflowBindingText(event.target.value)}
+                  onChange={(event) => { invalidateReview(); setWorkflowBindingText(event.target.value); }}
                   placeholder='{"mode":"attach_existing","workflow_template_id":"..."}'
                 />
               </label>
@@ -701,12 +795,12 @@ export function MappingStudioPage({
             {artifact === "integration_plugin" ? (
               <label className="space-y-2 text-sm text-ui-ink">
                 <span>Plugin name</span>
-                <Input value={pluginName} onChange={(event) => setPluginName(event.target.value)} placeholder="Customer integration plugin" />
+                <Input value={pluginName} onChange={(event) => { invalidateSaveResponse(); setPluginName(event.target.value); }} placeholder="Customer integration plugin" />
               </label>
             ) : null}
             <label className="space-y-2 text-sm text-ui-ink">
               <span>Notes</span>
-              <Textarea rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Short purpose, caveats, and review notes" />
+              <Textarea rows={4} value={notes} onChange={(event) => { invalidateSaveResponse(); setNotes(event.target.value); }} placeholder="Short purpose, caveats, and review notes" />
             </label>
           </div>
         </div>
@@ -805,7 +899,7 @@ export function MappingStudioPage({
               {reviewResponse?.save_modes?.direct_allowed || reviewResponse?.save_modes?.draft_allowed ? (
                 <label className="space-y-2 text-sm text-ui-ink">
                   <span>Save mode</span>
-                  <Select value={saveMode} onChange={(event) => setSaveMode(event.target.value as "direct" | "draft")}>
+                  <Select value={saveMode} onChange={(event) => { invalidateSaveResponse(); setSaveMode(event.target.value as "direct" | "draft"); }}>
                     {reviewResponse?.save_modes?.direct_allowed ? <option value="direct">Direct runtime save</option> : null}
                     {reviewResponse?.save_modes?.draft_allowed ? <option value="draft">Draft / review flow</option> : null}
                   </Select>
@@ -817,7 +911,7 @@ export function MappingStudioPage({
               </React.Suspense>
 
               <div className="flex flex-wrap gap-2">
-                <Button type="button" onClick={handleSubmit} disabled={busy !== null || blockingCount > 0}>
+                <Button type="button" onClick={handleSubmit} disabled={busy !== null || savePending || blockingCount > 0}>
                   {busy === "save" ? "Submitting…" : "Submit"}
                 </Button>
                 {blockingCount > 0 ? (
@@ -831,6 +925,11 @@ export function MappingStudioPage({
         </Section>
       ) : null}
 
+      {artifact === "webhook_inbound" && initialContext?.webhookSourceId ? (
+        <MappingTestPanel key={initialContext.webhookSourceId}
+          sourceId={initialContext.webhookSourceId} payloadText={sourceText}
+          savedRevision={testSavedRevision} onEligibilityChange={handleEligibilityChange} appBasePath={appBasePath} />
+      ) : null}
       {step === "report" ? (
         <Section title="Submit report" collapsible={false}>
           <React.Suspense fallback={<LoadingState variant="section" />}>

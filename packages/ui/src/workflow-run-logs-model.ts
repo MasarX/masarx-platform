@@ -123,7 +123,7 @@ export function normalizeWorkflowRunLogSteps(items: Record<string, unknown>[]) {
   });
 }
 
-const SENSITIVE_KEY_PATTERN = /^(authorization|cookie|set-cookie|x-api-key|api[_-]?key|password|secret|token|signature|private[_-]?key)$/i;
+const SENSITIVE_KEY_PATTERN = /^(?:[a-z0-9]+[_-])*(authorization|cookie|set-cookie|x-api-key|api[_-]?key|password|secret|token|signature|private[_-]?key)$/i;
 
 function isSensitiveKey(key: string) {
   return SENSITIVE_KEY_PATTERN.test(key.trim());

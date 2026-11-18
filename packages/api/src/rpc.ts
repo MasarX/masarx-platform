@@ -35,8 +35,8 @@ function resolveRetryDelayMs(attempt: number) {
 }
 
 export function createRpc(client: SupabaseClient) {
-  return async function rpc<T>(fn: string, args?: RpcArgs) {
-    const retries = Math.max(0, resolveRpcRetries());
+  return async function rpc<T>(fn: string, args?: RpcArgs, options?: { retries?: 0; reportUnconfirmed?: true }) {
+    const retries = options?.retries === 0 || options?.reportUnconfirmed ? 0 : Math.max(0, resolveRpcRetries());
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
@@ -50,6 +50,15 @@ export function createRpc(client: SupabaseClient) {
         }
         return data as T;
       } catch (error) {
+        // Supabase can return a fetch failure as a plain PostgREST error object.
+        const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
+          ? error.message : "";
+        if (options?.reportUnconfirmed && (isRetriableNetworkError(error) || isRetriableSupabaseError(error)
+          || isRetriableNetworkError(new TypeError(message)))) {
+          throw Object.assign(new Error("Request outcome is unconfirmed. Reload before retrying.", { cause: error }), {
+            code: "rpc_outcome_unconfirmed",
+          });
+        }
         if (attempt < retries && isRetriableNetworkError(error)) {
           await sleep(resolveRetryDelayMs(attempt));
           continue;

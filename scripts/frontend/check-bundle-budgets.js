@@ -1,6 +1,12 @@
 const fs = require("fs");
 const path = require("path");
 
+// Measure unique, uncompressed JS/CSS files referenced by each public page's
+// client graph and shared runtime. Deferred references may be included; this is
+// not a measurement of compressed transfer size or actual network first load.
+// Modern App Router graphs exclude nomodule-only legacy browser polyfills.
+const measurement = "uncompressed-route-referenced-js-css";
+
 const repoRoot = path.resolve(__dirname, "..", "..");
 const budgetsPath = path.join(
   repoRoot,
@@ -41,7 +47,18 @@ const formatBytes = (bytes) => {
   return `${(kb / 1024).toFixed(2)} MB`;
 };
 
+const normalizeAsset = (file) => {
+  if (typeof file !== "string") return null;
+  const normalized = file.replace(/^\/?_next\//, "");
+  return /\.(js|css)$/.test(normalized) ? normalized : null;
+};
+
 const getManifest = (appRoot) => {
+  const nextRoot = path.join(repoRoot, appRoot, ".next");
+  const buildIdPath = path.join(nextRoot, "BUILD_ID");
+  if (!fs.existsSync(buildIdPath) || !fs.readFileSync(buildIdPath, "utf8").trim()) {
+    throw new Error(`Missing production BUILD_ID: ${buildIdPath}. Run build first.`);
+  }
   const appManifestPath = path.join(
     repoRoot,
     appRoot,
@@ -57,7 +74,68 @@ const getManifest = (appRoot) => {
       `Missing build manifest: ${manifestPath}. Run build or analyze first.`
     );
   }
-  return JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const routeMap = getRouteMap(appRoot);
+  const pageRoutes = Object.entries(routeMap ?? {}).filter(
+    ([route, publicRoute]) => route.endsWith("/page") &&
+      typeof publicRoute === "string" && !publicRoute.startsWith("/_")
+  );
+  if (pageRoutes.length === 0) return manifest;
+
+  // Next 16 no longer emits app-build-manifest.json. Its top-level build
+  // manifest can have no page entries; use each App Router client graph instead.
+  const pages = {};
+  pageRoutes.forEach(([route]) => {
+    const clientManifestPath = path.join(
+      nextRoot, "server", "app", `${route.slice(1)}_client-reference-manifest.js`
+    );
+    if (!fs.existsSync(clientManifestPath)) {
+      throw new Error(`Missing client reference manifest: ${clientManifestPath}`);
+    }
+    const source = fs.readFileSync(clientManifestPath, "utf8");
+    // Read the generated JSON assignment without executing a build artifact.
+    const assignment = source.match(
+      /(?:globalThis|self)\.__RSC_MANIFEST\s*\[\s*("(?:\\.|[^"\\])*")\s*\]\s*=\s*([\s\S]*?);?\s*$/
+    );
+    if (!assignment || JSON.parse(assignment[1]) !== route) {
+      throw new Error(`Invalid client reference manifest: ${clientManifestPath}`);
+    }
+    const clientManifest = JSON.parse(assignment[2]);
+    const references = [];
+    Object.values(clientManifest.entryJSFiles ?? {}).forEach((files) => {
+      if (!Array.isArray(files) || files.some((file) => typeof file !== "string")) {
+        throw new Error(`Invalid JS entries: ${clientManifestPath}`);
+      }
+      references.push(...files);
+    });
+    Object.values(clientManifest.entryCSSFiles ?? {}).forEach((files) => {
+      if (!Array.isArray(files)) throw new Error(`Invalid CSS entries: ${clientManifestPath}`);
+      files.forEach((file) => {
+        const cssPath = typeof file === "string" ? file : file?.path;
+        if (typeof cssPath !== "string") throw new Error(`Invalid CSS asset: ${clientManifestPath}`);
+        references.push(cssPath);
+      });
+    });
+    Object.values(clientManifest.clientModules ?? {}).forEach((module) => {
+      if (!Array.isArray(module.chunks)) throw new Error(`Invalid client chunks: ${clientManifestPath}`);
+      // Webpack graphs can interleave chunk IDs with filenames.
+      references.push(...module.chunks);
+    });
+    const routeReferences = references.map(normalizeAsset).filter(Boolean);
+    if (routeReferences.length === 0) {
+      throw new Error(`No client JS/CSS asset evidence for ${route}: ${clientManifestPath}`);
+    }
+    const runtimeFiles = manifest.rootMainFilesTree?.[route] || manifest.rootMainFiles || [];
+    if (!Array.isArray(runtimeFiles) || runtimeFiles.length === 0) {
+      throw new Error(`Missing shared runtime asset evidence for ${route}: ${manifestPath}`);
+    }
+    const runtimeAssets = runtimeFiles.map(normalizeAsset).filter(Boolean);
+    if (runtimeAssets.length === 0) {
+      throw new Error(`Missing shared runtime asset evidence for ${route}: ${manifestPath}`);
+    }
+    pages[route] = [...runtimeAssets, ...routeReferences];
+  });
+  return { ...manifest, pages };
 };
 
 const getRouteMap = (appRoot) => {
@@ -78,20 +156,36 @@ const getRouteSizes = (appRoot, manifest, routeMap) => {
     ...(pages["/_app"] ?? []),
     ...(pages["/_error"] ?? [])
   ]);
-  const routeSizes = {};
+  const routeAssets = new Map();
   const missingFiles = new Set();
 
   Object.entries(pages).forEach(([route, files]) => {
     if (routeMap && !routeMap[route]) return;
     const publicRoute = routeMap ? routeMap[route] : route;
     if (publicRoute.startsWith("/_")) return;
-    const assetList = Array.isArray(files) ? files : [];
-    const assets = new Set([...sharedFiles, ...assetList]);
+    if (!Array.isArray(files)) throw new Error(`Invalid asset list for ${route}`);
+    const assets = routeAssets.get(publicRoute) ?? new Set();
+    [...sharedFiles, ...files].forEach((file) => {
+      const asset = normalizeAsset(file);
+      if (asset) assets.add(asset);
+    });
+    routeAssets.set(publicRoute, assets);
+  });
+
+  if (routeAssets.size === 0) {
+    throw new Error(`No public page route evidence for ${appRoot}. Run a production build first.`);
+  }
+  const routeSizes = {};
+  routeAssets.forEach((assets, publicRoute) => {
+    if (assets.size === 0) throw new Error(`No JS/CSS asset evidence for ${publicRoute}`);
     let total = 0;
     assets.forEach((file) => {
-      if (!file.endsWith(".js") && !file.endsWith(".css")) return;
-      const filePath = path.join(repoRoot, appRoot, ".next", file);
-      if (!fs.existsSync(filePath)) {
+      const nextRoot = path.resolve(repoRoot, appRoot, ".next");
+      const filePath = path.resolve(nextRoot, file);
+      if (!filePath.startsWith(`${nextRoot}${path.sep}`)) {
+        throw new Error(`Asset path escapes build directory: ${file}`);
+      }
+      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
         missingFiles.add(filePath);
         return;
       }
@@ -104,11 +198,20 @@ const getRouteSizes = (appRoot, manifest, routeMap) => {
 };
 
 const updateBudgets = (budgets) => {
-  const next = { generatedAt: new Date().toISOString(), apps: {} };
+  const next = {
+    generatedAt: new Date().toISOString(),
+    measurement,
+    description: "Deduplicated raw bytes of route-referenced JS/CSS and shared runtime, including deferred references; not compressed transfer bytes or actual first-load requests. Modern App Router graphs exclude nomodule-only polyfills.",
+    apps: { ...budgets.apps },
+  };
   Object.entries(budgets.apps).forEach(([appName, appConfig]) => {
+    if (appFilter && appName !== appFilter) return;
     const manifest = getManifest(appConfig.root);
     const routeMap = getRouteMap(appConfig.root);
-    const { routeSizes } = getRouteSizes(appConfig.root, manifest, routeMap);
+    const { routeSizes, missingFiles } = getRouteSizes(appConfig.root, manifest, routeMap);
+    if (missingFiles.size > 0) {
+      throw new Error(`[${appName}] missing asset ${Array.from(missingFiles).join(", ")}`);
+    }
     const routes = Object.entries(routeSizes)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([route, size]) => ({
@@ -191,6 +294,10 @@ const checkBudgets = (budgets) => {
 
 try {
   const budgets = loadBudgets();
+  if ((appArgIndex >= 0 && !appFilter) ||
+      (appFilter && !Object.prototype.hasOwnProperty.call(budgets.apps, appFilter))) {
+    throw new Error(`Unknown or missing app: ${appFilter ?? ""}`);
+  }
 
   if (isWrite) {
     const updated = updateBudgets(budgets);

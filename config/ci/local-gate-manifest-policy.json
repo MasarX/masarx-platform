@@ -1,0 +1,17 @@
+{
+  "schema_version": "local-gate-manifest-policy.v1",
+  "manifest_schema_version": "local-gate-manifest.v1",
+  "manifest_kind": "masarx-local-admission-proof",
+  "digest_algorithm": "sha256",
+  "max_age_minutes": 480,
+  "allowed_modes": [
+    "impact",
+    "strict"
+  ],
+  "strict_satisfies_impact": true,
+  "require_clean_worktree": true,
+  "require_exact_changed_files": true,
+  "require_exact_surfaces": true,
+  "require_exact_suites": true,
+  "require_exact_commands": true
+}

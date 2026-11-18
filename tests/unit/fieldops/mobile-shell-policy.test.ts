@@ -66,6 +66,7 @@ describe("mobile shell policy helpers", () => {
     });
 
     expect(next).toEqual({
+      openMap: DEFAULT_MOBILE_MAP_POLICY.openMap,
       routeViews: ["orders_map", "list"],
       defaultRouteView: "orders_map",
       clusteringEnabled: false,

@@ -69,6 +69,90 @@ function buildTrackingNumber({ prefix, clientSlug, senderName, index }) {
   return `${base}${suffix}`;
 }
 
+async function ensureDemoServiceOffering(db, organizationId) {
+  const branchResult = await db.query(
+    `
+      INSERT INTO public.branches (
+        organization_id, code, name, branch_type, timezone, is_active, metadata
+      )
+      VALUES ($1, 'demo-main', 'Demo main branch', 'branch', 'Asia/Riyadh', TRUE, '{"source":"demo_seed"}'::jsonb)
+      ON CONFLICT (organization_id, code)
+      DO UPDATE SET
+        name = EXCLUDED.name,
+        timezone = EXCLUDED.timezone,
+        is_active = TRUE,
+        updated_at = now()
+      RETURNING id
+    `,
+    [organizationId],
+  );
+  const branchId = branchResult.rows[0]?.id;
+
+  const levelResult = await db.query(
+    `
+      INSERT INTO public.service_levels (
+        organization_id, key, name, description, is_active, metadata
+      )
+      VALUES ($1, 'standard', 'Standard delivery', 'Governed demo service level', TRUE, '{"source":"demo_seed"}'::jsonb)
+      ON CONFLICT (organization_id, key)
+      DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        is_active = TRUE,
+        updated_at = now()
+      RETURNING id
+    `,
+    [organizationId],
+  );
+  const serviceLevelId = levelResult.rows[0]?.id;
+  if (!branchId || !serviceLevelId) {
+    throw new Error('[seed-demo-data] Failed to resolve demo branch or service level');
+  }
+
+  const existing = await db.query(
+    `
+      SELECT id
+      FROM public.service_offerings
+      WHERE service_level_id = $1
+        AND branch_id = $2
+        AND zone_id IS NULL
+      ORDER BY created_at ASC
+      LIMIT 1
+    `,
+    [serviceLevelId, branchId],
+  );
+  if (existing.rows[0]?.id) {
+    await db.query(
+      `
+        UPDATE public.service_offerings
+        SET is_active = TRUE,
+            effective_to = NULL,
+            metadata = COALESCE(metadata, '{}'::jsonb)
+              || '{"source":"demo_seed","display":{"name":"Demo standard delivery"}}'::jsonb,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [existing.rows[0].id],
+    );
+    return existing.rows[0].id;
+  }
+
+  const inserted = await db.query(
+    `
+      INSERT INTO public.service_offerings (
+        service_level_id, branch_id, priority, is_active, metadata
+      )
+      VALUES (
+        $1, $2, 100, TRUE,
+        '{"source":"demo_seed","display":{"name":"Demo standard delivery"}}'::jsonb
+      )
+      RETURNING id
+    `,
+    [serviceLevelId, branchId],
+  );
+  return inserted.rows[0]?.id;
+}
+
 async function upsertShipment(db, row) {
   await db.query(
     `
@@ -276,10 +360,13 @@ async function main() {
     boxes: 0,
     labels: 0,
     labelJobs: 0,
+    serviceOfferings: 0,
   };
 
   try {
     await db.query("BEGIN");
+    await ensureDemoServiceOffering(db, orgId);
+    created.serviceOfferings = 1;
 
     for (const client of clients) {
       if (!client?.slug || !client?.id) continue;

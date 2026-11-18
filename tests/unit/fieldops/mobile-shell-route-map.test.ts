@@ -29,6 +29,16 @@ describe("mobile shell route map helpers", () => {
     expect(mapRouteStatusTone("unknown")).toBe("neutral");
   });
 
+  test.each(["inactive", "undelivered", "not_completed", "reopened", "custom_failed_state", "cancel_requested", null, 1])(
+    "does not infer an operational tone from unknown status %s", (status) => {
+      expect(mapRouteStatusTone(status)).toBe("neutral");
+    }
+  );
+  test("normalizes known status casing and whitespace", () => {
+    expect(mapRouteStatusTone(" COMPLETED ")).toBe("done");
+    expect(mapRouteStatusTone(" Failed_Attempt ")).toBe("issue");
+  });
+
   test("buildRouteMapModel returns empty model when no mappable points", () => {
     const model = buildRouteMapModel(
       [{ id: "x", latitude: Number.NaN, longitude: 46.6 }],
@@ -68,20 +78,6 @@ describe("mobile shell route map helpers", () => {
     expect(model.pins).toHaveLength(4);
   });
 
-  test("buildRouteMapModel centers a single Saudi stop instead of pinning it to the map edge", () => {
-    const model = buildRouteMapModel(
-      [{ id: "riyadh-stop", latitude: 24.7136, longitude: 46.6753, status: "open" }],
-      buildPolicy({
-        clusteringEnabled: false,
-      })
-    );
-
-    expect(model.mappableCount).toBe(1);
-    expect(model.pins).toEqual([
-      expect.objectContaining({ id: "riyadh-stop", xPct: 50, yPct: 50, tone: "active" }),
-    ]);
-  });
-
   test("buildRouteMapModel projects pins from Saudi coordinates, not fixed anchors", () => {
     const model = buildRouteMapModel(
       [
@@ -97,6 +93,51 @@ describe("mobile shell route map helpers", () => {
     expect(model.pins).toEqual([
       expect.objectContaining({ id: "south", xPct: 8, yPct: 90, tone: "active" }),
       expect.objectContaining({ id: "north-east", xPct: 92, yPct: 10, tone: "active" }),
+    ]);
+  });
+
+  test("buildRouteMapModel centers a single coordinate-backed stop instead of pinning it to the map edge", () => {
+    const model = buildRouteMapModel(
+      [{ id: "only", latitude: 24.7136, longitude: 46.6753, status: "open" }],
+      buildPolicy({
+        clusteringEnabled: false,
+      })
+    );
+
+    expect(model).toMatchObject({
+      mappableCount: 1,
+      clusters: [],
+      pins: [expect.objectContaining({ id: "only", xPct: 50, yPct: 50 })],
+    });
+  });
+
+  test("buildRouteMapModel centers collapsed latitude or longitude axes while preserving the real varying axis", () => {
+    const sameLatitude = buildRouteMapModel(
+      [
+        { id: "west", latitude: 24.7136, longitude: 46.6, status: "open" },
+        { id: "east", latitude: 24.7136, longitude: 46.8, status: "open" },
+      ],
+      buildPolicy({
+        clusteringEnabled: false,
+      })
+    );
+    expect(sameLatitude.pins).toEqual([
+      expect.objectContaining({ id: "west", xPct: 8, yPct: 50 }),
+      expect.objectContaining({ id: "east", xPct: 92, yPct: 50 }),
+    ]);
+
+    const sameLongitude = buildRouteMapModel(
+      [
+        { id: "south", latitude: 24.6, longitude: 46.6753, status: "open" },
+        { id: "north", latitude: 24.8, longitude: 46.6753, status: "open" },
+      ],
+      buildPolicy({
+        clusteringEnabled: false,
+      })
+    );
+    expect(sameLongitude.pins).toEqual([
+      expect.objectContaining({ id: "south", xPct: 50, yPct: 90 }),
+      expect.objectContaining({ id: "north", xPct: 50, yPct: 10 }),
     ]);
   });
 });

@@ -70,22 +70,62 @@ describe('ensure-label-provider', () => {
     expect(result).toEqual({ name: 'DATABASE_URL_POOLER', dsn: 'postgresql://pooler' });
   });
 
-  test('prefers container-reachable edge URL for provider invocation', () => {
-    expect(
-      resolveLabelProviderInvokeUrl({
-        SUPABASE_URL: 'http://127.0.0.1:57429',
-        EDGE_SUPABASE_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429',
-      }),
-    ).toBe('http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429/functions/v1/label-renderer');
+  test.each([
+    [{
+      LABEL_PROVIDER_INVOKE_URL: ' https://provider.test/custom-renderer/// ',
+      LABEL_RENDERER_INVOKE_URL: 'https://renderer.test/ignored',
+      EDGE_SUPABASE_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429',
+      SUPABASE_URL: 'https://public.test',
+    }, 'https://provider.test/custom-renderer'],
+    [{
+      LABEL_PROVIDER_INVOKE_URL: ' ',
+      LABEL_RENDERER_INVOKE_URL: ' https://renderer.test/functions/v1/label-renderer/ ',
+      EDGE_SUPABASE_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429',
+      SUPABASE_URL: 'https://public.test',
+    }, 'https://renderer.test/functions/v1/label-renderer'],
+    [{
+      EDGE_SUPABASE_URL: ' http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429/// ',
+      SUPABASE_URL: 'http://127.0.0.1:57429',
+    }, 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429/functions/v1/label-renderer'],
+    [{ SUPABASE_URL: ' https://project.supabase.co/// ' }, 'https://project.supabase.co/functions/v1/label-renderer'],
+    [{ EDGE_SUPABASE_URL: 'http://[::1]:57429' }, 'http://[::1]:57429/functions/v1/label-renderer'],
+    [{ LABEL_PROVIDER_INVOKE_URL: 'http://edge.test/custom' }, 'http://edge.test/custom'],
+    [{ LABEL_RENDERER_INVOKE_URL: 'https://renderer.test/custom' }, 'https://renderer.test/custom'],
+    [{ LABEL_PROVIDER_INVOKE_URL: ' ', EDGE_SUPABASE_URL: '', SUPABASE_URL: 'https://public.test' }, 'https://public.test/functions/v1/label-renderer'],
+    [{}, ''],
+  ])('resolves invoke URL precedence and trailing slashes: %p', (env, expected) => {
+    expect(resolveLabelProviderInvokeUrl(env)).toBe(expected);
   });
 
-  test('allows an explicit full provider invoke URL override', () => {
-    expect(
-      resolveLabelProviderInvokeUrl({
-        SUPABASE_URL: 'https://project.supabase.co',
-        EDGE_SUPABASE_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:57429',
-        LABEL_PROVIDER_INVOKE_URL: 'https://edge.example.test/functions/v1/label-renderer/',
-      }),
-    ).toBe('https://edge.example.test/functions/v1/label-renderer');
+  test.each([
+    'LABEL_PROVIDER_INVOKE_URL',
+    'LABEL_RENDERER_INVOKE_URL',
+    'EDGE_SUPABASE_URL',
+    'SUPABASE_URL',
+  ])('rejects an invalid selected %s instead of falling back', (key) => {
+    expect(() => resolveLabelProviderInvokeUrl({
+      SUPABASE_URL: 'https://public.test',
+      [key]: 'not-a-url',
+    })).toThrow(`${key} must be an absolute HTTP(S) URL without credentials, query, or fragment`);
+  });
+
+  test.each([
+    '/functions/v1/label-renderer',
+    '//edge.test/functions/v1/label-renderer',
+    'https:edge.test/functions/v1/label-renderer',
+    'ftp://edge.test/functions/v1/label-renderer',
+    'http://',
+    'https://edge.test:99999/functions/v1/label-renderer',
+    (['https',":","/","/",'user',":",'synthetic-password',"@",'edge.test',"/",'functions',"/",'v1',"/",'label-renderer'].join("")),
+    'https://edge.test/functions/v1/label-renderer?token=synthetic-query',
+    'https://edge.test/functions/v1/label-renderer#fragment',
+    'https://edge.test/functions/v1/label-renderer?',
+    'https://edge.test/functions/v1/label-renderer#',
+    'https://edge.test/a\\b',
+    'https://edge.test/a b',
+    'https://edge.test/a\nb',
+  ])('rejects malformed or decorated URLs without exposing the configured value: %p', (value) => {
+    expect(() => resolveLabelProviderInvokeUrl({ LABEL_PROVIDER_INVOKE_URL: value }))
+      .toThrow(/^LABEL_PROVIDER_INVOKE_URL must be an absolute HTTP\(S\) URL without credentials, query, or fragment$/);
   });
 });

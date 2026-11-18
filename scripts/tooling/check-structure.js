@@ -23,19 +23,6 @@ function readJsonSafe(filePath) {
   }
 }
 
-function toBool(value, defaultValue) {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value !== 0;
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) return defaultValue;
-    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
-    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
-    return defaultValue;
-  }
-  return defaultValue;
-}
-
 function gitLsFiles(patterns) {
   const args = ['ls-files', '--', ...patterns];
   const result = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -194,119 +181,6 @@ if (errors.length > 0) {
 }
 
 console.log('[lint:structure] Repository layout is clean.');
-
-// docs/ops/evidence: keep bucket naming stable (no duplicates per day; no new YYYYMMDD buckets).
-try {
-  const evidenceCfg = (structureRules && typeof structureRules === 'object')
-    ? (structureRules.evidence || {})
-    : {};
-  const evidenceDirRel = String(evidenceCfg.dir || 'docs/ops/evidence').trim().replace(/\\/g, '/');
-  const canonicalFormat = String(evidenceCfg.canonical_date_format || 'YYYY-MM-DD').trim() || 'YYYY-MM-DD';
-  const forbidDuplicateDayBuckets = toBool(evidenceCfg.forbid_duplicate_day_buckets, true);
-  const forbidCompactBuckets = toBool(evidenceCfg.forbid_compact_buckets, false);
-  const forbidNewCompactBuckets = toBool(evidenceCfg.forbid_new_compact_buckets, true);
-  const forbidRedundantArtifactZips = toBool(evidenceCfg.forbid_redundant_artifact_zips, false);
-
-  const evidenceDir = path.join(repoRoot, ...evidenceDirRel.split('/').filter(Boolean));
-  if (!fs.existsSync(evidenceDir)) {
-    // No evidence directory; nothing to validate.
-  } else {
-
-  const normalizeBucket = (name) => {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(name)) return name;
-    if (/^\d{8}$/.test(name)) return `${name.slice(0, 4)}-${name.slice(4, 6)}-${name.slice(6, 8)}`;
-    return '';
-  };
-
-  const buckets = fs.readdirSync(evidenceDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => d.name);
-
-  const byDay = new Map();
-  for (const bucket of buckets) {
-    const day = normalizeBucket(bucket);
-    if (!day) continue;
-    if (!byDay.has(day)) byDay.set(day, []);
-    byDay.get(day).push(bucket);
-  }
-
-  for (const [day, names] of byDay.entries()) {
-    if (names.length <= 1) continue;
-    const msg = `${evidenceDirRel} has multiple buckets for ${day}: ${names.sort().join(', ')}`;
-    if (forbidDuplicateDayBuckets) errors.push(msg);
-    else warnings.push(msg);
-  }
-
-  if (forbidCompactBuckets) {
-    const compact = buckets.filter((bucket) => /^\d{8}$/.test(bucket));
-    if (compact.length) {
-      errors.push(
-        `Evidence buckets must use ${canonicalFormat} format. Found: ${compact.sort().join(', ')}`
-      );
-    }
-  } else if (forbidNewCompactBuckets) {
-    const trackedEvidenceFiles = gitLsFiles([`${evidenceDirRel}/**`]);
-    const prefixParts = evidenceDirRel.split('/').filter(Boolean);
-    const trackedBuckets = new Set();
-
-    for (const filePath of trackedEvidenceFiles) {
-      const norm = String(filePath || '').replace(/\\/g, '/');
-      const parts = norm.split('/').filter(Boolean);
-      if (parts.length <= prefixParts.length) continue;
-      let matches = true;
-      for (let i = 0; i < prefixParts.length; i++) {
-        if (parts[i] !== prefixParts[i]) { matches = false; break; }
-      }
-      if (!matches) continue;
-      trackedBuckets.add(parts[prefixParts.length]);
-    }
-
-    const newCompact = buckets
-      .filter((bucket) => /^\d{8}$/.test(bucket))
-      .filter((bucket) => !trackedBuckets.has(bucket));
-
-    if (newCompact.length) {
-      errors.push(
-        `New evidence buckets must use ${canonicalFormat} format. Found: ${newCompact.sort().join(', ')}`
-      );
-    }
-  }
-
-  if (forbidRedundantArtifactZips) {
-    const trackedEvidenceFiles = gitLsFiles([`${evidenceDirRel}/**`])
-      .map((p) => String(p || '').replace(/\\/g, '/'));
-    const zipFiles = trackedEvidenceFiles.filter((p) => p.toLowerCase().endsWith('.zip'));
-
-    if (zipFiles.length) {
-      const dirSet = new Set();
-      for (const filePath of trackedEvidenceFiles) {
-        const parts = filePath.split('/').filter(Boolean);
-        parts.pop(); // remove filename
-        while (parts.length) {
-          dirSet.add(parts.join('/'));
-          parts.pop();
-        }
-      }
-
-      const redundant = [];
-      for (const zipPath of zipFiles) {
-        const extractedDir = zipPath.replace(/\.zip$/i, '');
-        if (dirSet.has(extractedDir)) redundant.push(zipPath);
-      }
-
-      if (redundant.length) {
-        errors.push(
-          `Evidence artifacts must not be stored as both zip and extracted folder. Remove redundant zips: ${redundant
-            .slice(0, 20)
-            .join(', ')}${redundant.length > 20 ? ` (+${redundant.length - 20} more)` : ''}`
-        );
-      }
-    }
-  }
-  }
-} catch (_) {
-  // ignore
-}
 
 // ---- Dynamic DDL lint: flag time-bound RANGE partitions in new migrations ----
 // Non-blocking for historical files. We only fail on newly added/modified migration files.

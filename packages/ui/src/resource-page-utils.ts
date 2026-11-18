@@ -1,5 +1,6 @@
 import type { UiReadColumn, UiReadResource, UiResourceList } from "@masarx/api";
 import { labelFromKey } from "./resource-query";
+import { resolveRowDisplayText } from "./i18n";
 
 export type ResourceColumn = {
   key: string;
@@ -56,18 +57,19 @@ function resolveInferredRenderType(
   return isIdLikeColumnKey(columnKey) ? "id" : null;
 }
 
-function resolveColumnLabel(resource: UiReadResource | null | undefined, key: string) {
+function resolveColumnLabel(resource: UiReadResource | null | undefined, key: string, locale?: string) {
   const labels = resource?.column_labels;
   if (labels && typeof labels === "object") {
     const raw = labels[key];
-    if (typeof raw === "string" && raw.trim()) return raw.trim();
+    if (typeof raw === "string" && raw.trim()) return resolveRowDisplayText(raw.trim(), resource?.column_labels_ar?.[key], locale);
   }
-  return labelFromKey(key);
+  return resolveRowDisplayText(labelFromKey(key), resource?.column_labels_ar?.[key], locale);
 }
 
 function toResourceColumn(
   resource: UiReadResource | null | undefined,
-  column: UiReadColumn
+  column: UiReadColumn,
+  locale?: string
 ): ResourceColumn | null {
   if (!column?.key) return null;
   const columnWithEditMeta = column as UiReadColumn & {
@@ -85,7 +87,7 @@ function toResourceColumn(
   };
   return {
     key: column.key,
-    label: column.label ?? resolveColumnLabel(resource, column.key),
+    label: resolveRowDisplayText(column.label ?? resolveColumnLabel(resource, column.key, locale), column.label_ar ?? resource?.column_labels_ar?.[column.key], locale),
     renderType: resolveInferredRenderType(column.key, column.render_type),
     formatOptions: column.format_options ?? null,
     editMode: column.edit_mode ?? null,
@@ -280,7 +282,8 @@ export function suggestResourceKeys(
 
 export function resolveColumns(
   resource: UiReadResource | null | undefined,
-  list: UiResourceList | null
+  list: UiResourceList | null,
+  locale?: string
 ): ResourceColumn[] {
   const configured: ResourceColumn[] = [];
   const configuredKeys: string[] = [];
@@ -288,7 +291,7 @@ export function resolveColumns(
 
   if (Array.isArray(resource?.columns) && resource.columns.length > 0) {
     resource.columns.forEach((column) => {
-      const resolved = toResourceColumn(resource, column);
+      const resolved = toResourceColumn(resource, column, locale);
       if (!resolved) return;
       configured.push(resolved);
       configuredKeys.push(resolved.key);
@@ -298,7 +301,7 @@ export function resolveColumns(
     resource.select.forEach((key) => {
       const trimmed = key?.trim();
       if (!trimmed) return;
-      const column = { key: trimmed, label: resolveColumnLabel(resource, trimmed) };
+      const column = { key: trimmed, label: resolveColumnLabel(resource, trimmed, locale) };
       configured.push(column);
       configuredKeys.push(trimmed);
       configuredMap.set(trimmed, column);

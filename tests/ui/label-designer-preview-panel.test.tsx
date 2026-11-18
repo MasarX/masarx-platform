@@ -1,10 +1,15 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import { PreviewPanel } from "../../packages/ui/src/label-designer/preview-panel";
+import { renderWithIntl as render } from "./test-utils";
+import arMessages from "../../packages/config/messages/ar.json";
+
+let mockPdfFailure = false;
 
 jest.mock("../../packages/ui/src/label-designer/pdf-preview", () => ({
-  PdfPreview: ({ pdfBase64, testIdPrefix }: { pdfBase64: string; testIdPrefix: string }) => (
-    <div data-testid={`${testIdPrefix}-mock`}>{pdfBase64 ? "PDF loaded" : "No PDF"}</div>
-  ),
+  PdfPreview: ({ pdfBase64, testIdPrefix }: { pdfBase64: string; testIdPrefix: string }) => {
+    if (mockPdfFailure) throw new Error("Synthetic PDF viewer failure");
+    return <div data-testid={`${testIdPrefix}-mock`} data-pdf-base64={pdfBase64}>{pdfBase64 ? "PDF loaded" : "No PDF"}</div>;
+  },
 }));
 
 const defaultProps = {
@@ -26,6 +31,7 @@ const defaultProps = {
 
 describe("PreviewPanel", () => {
   beforeEach(() => {
+    mockPdfFailure = false;
     defaultProps.onShipmentChange.mockClear();
     defaultProps.onShipmentBoxChange.mockClear();
     defaultProps.onLoadSamplePayload.mockClear();
@@ -58,12 +64,41 @@ describe("PreviewPanel", () => {
     expect(btn.textContent).toMatch(/Loading|تحميل/i);
   });
 
-  it("toggles preview details view", () => {
-    render(<PreviewPanel {...defaultProps} />);
+  it("discloses named preview details and retains the complete support response", async () => {
+    const response = '{"pdf_base64":"synthetic-pdf","page_count":2,"renderer":"recorded-renderer"}';
+    render(<PreviewPanel {...defaultProps} previewResponseJson={response} />);
     expect(screen.queryByTestId("ld-preview-response")).not.toBeInTheDocument();
-    const toggle = screen.getByTestId("ld-toggle-preview-details");
+    const toggle = screen.getByRole("button", { name: "Show preview details" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!)).not.toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Sample data" })).toHaveValue(defaultProps.samplePayloadJson);
     fireEvent.click(toggle);
-    expect(screen.getByTestId("ld-preview-response")).toBeInTheDocument();
+    expect(toggle).toHaveAccessibleName("Hide preview details");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("textbox", { name: "Preview details" })).toHaveValue(response);
+    expect(screen.getByRole("textbox", { name: "Preview details" })).toHaveAttribute("readonly");
+    expect(await screen.findByTestId("ld-pdf-mock")).toHaveAttribute("data-pdf-base64", "synthetic-pdf");
+    fireEvent.click(toggle);
+    expect(screen.queryByRole("textbox", { name: "Preview details" })).toBeNull();
+  });
+
+  it("uses translated Arabic preview names and semantic field labels", () => {
+    render(<PreviewPanel {...defaultProps} />, { locale: "ar", messages: arMessages });
+    fireEvent.click(screen.getByRole("button", { name: "إظهار تفاصيل المعاينة" }));
+    expect(screen.getByRole("button", { name: "إخفاء تفاصيل المعاينة" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("textbox", { name: "بيانات نموذجية" })).toHaveValue(defaultProps.samplePayloadJson);
+    expect(screen.getByRole("textbox", { name: "تفاصيل المعاينة" })).toHaveValue("{}");
+  });
+
+  it("keeps a failed PDF viewer recoverable through the translated preview details", async () => {
+    mockPdfFailure = true;
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(<PreviewPanel {...defaultProps} previewResponseJson="synthetic unstructured response" />);
+      expect(await screen.findByText("The PDF preview could not be opened. Check the preview details below.")).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Show preview details" }));
+      expect(screen.getByRole("textbox", { name: "Preview details" })).toHaveValue("synthetic unstructured response");
+    } finally { consoleError.mockRestore(); }
   });
 
   it("disables preview when no draft selected", () => {

@@ -213,6 +213,8 @@ export async function SettingsRequestPage({
   const selectedScopeId =
     selectedScopeType === "global" ? "" : (requestedScopeId ?? "");
 
+  const isLabelProvider = selectedCategory === "label_provider";
+  let providerConfigured: boolean | null = null;
   let preview: UiSettingsPreview | null = null;
   let previewError: string | null = null;
 
@@ -222,13 +224,16 @@ export async function SettingsRequestPage({
 
   if (!categoryError && selectedCategory && selectedScopeType && previewRequested) {
     try {
-      preview = await ui.settingsPreview({
+      if (isLabelProvider) {
+        if (selectedScopeType !== "tenant" || !uuidRegex.test(selectedScopeId)) throw new Error("invalid scope");
+        providerConfigured = (await ui.labelRendererReadiness(selectedScopeId)).configured;
+      } else preview = await ui.settingsPreview({
         category: selectedCategory,
         scopeType: selectedScopeType,
         scopeId: selectedScopeId || null,
       });
     } catch (error) {
-      const formatted = formatUiError(error, t("errors.previewFailed"));
+      const formatted = isLabelProvider ? t("errors.previewFailed") : formatUiError(error, t("errors.previewFailed"));
       if (isCapabilityDeniedMessage(formatted)) {
         deniedMessage = resolveDeniedMessage(formatted);
       } else {
@@ -268,7 +273,8 @@ export async function SettingsRequestPage({
     if (!scopeType) {
       return { status: "error", message: formT("errors.scopeTypeRequired") };
     }
-    if (!settingsRaw) {
+    const providerRequest = category === "label_provider";
+    if (!providerRequest && !settingsRaw) {
       return { status: "error", message: formT("errors.settingsRequired") };
     }
     if (scopeIdRaw && !uuidRegex.test(scopeIdRaw)) {
@@ -277,7 +283,7 @@ export async function SettingsRequestPage({
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(settingsRaw);
+      parsed = providerRequest ? {} : JSON.parse(settingsRaw);
     } catch (_err) {
       return { status: "error", message: formT("errors.settingsInvalid") };
     }
@@ -296,6 +302,33 @@ export async function SettingsRequestPage({
 
     const submitClient = createUiServerClient();
     try {
+      if (providerRequest) {
+        if (scopeType !== "tenant" || !uuidRegex.test(scopeIdRaw)) throw new Error("invalid scope");
+        const invokeUrl = String(formData.get("invoke_url") ?? "").trim();
+        const invokeSecret = String(formData.get("invoke_secret") ?? "");
+        if (!invokeUrl && !invokeSecret.trim()) throw new Error("empty provider change");
+        if (invokeUrl) {
+          const url = new URL(invokeUrl);
+          if (!["https:", "http:"].includes(url.protocol) || url.username || url.password ||
+              url.search || url.hash) throw new Error("invalid provider input");
+        }
+        // Read only inside the server action; never serialize provider values to client props.
+        // Reauthorize the action target before loading any secret-bearing baseline.
+        // configured=false is valid for initial activation of the inherited seed.
+        await submitClient.labelRendererReadiness(scopeIdRaw);
+        const baseline = await submitClient.settingsPreview({ category, scopeType, scopeId: scopeIdRaw });
+        const value = baseline.value as Record<string, unknown> | null;
+        const providers = value?.providers;
+        if (!value || typeof value !== "object" || Array.isArray(value) ||
+            !Array.isArray(providers) || !providers.length ||
+            !providers[0] || typeof providers[0] !== "object" || Array.isArray(providers[0])) {
+          throw new Error("missing provider baseline");
+        }
+        parsed = { ...value, providers: [
+          { ...providers[0], ...(invokeUrl ? { invoke_url: invokeUrl } : {}), ...(invokeSecret.trim() ? { invoke_secret: invokeSecret } : {}) },
+          ...providers.slice(1),
+        ] };
+      }
       const result = await submitClient.requestSettingsChange({
         category,
         scopeType,
@@ -310,7 +343,7 @@ export async function SettingsRequestPage({
         domainEventId: result.domain_event_id,
       };
     } catch (error) {
-      const message = isSchemaCacheFunctionUnavailableError(
+      const message = providerRequest ? formT("errors.submitFailed") : isSchemaCacheFunctionUnavailableError(
         error,
         "request_settings_change_v1"
       )
@@ -353,6 +386,7 @@ export async function SettingsRequestPage({
       ) : (
         <SettingsRequestForm
           action={submitRequest}
+          providerConfigured={providerConfigured}
           categories={categories}
           selectedCategory={selectedCategory}
           selectedScopeType={selectedScopeType}

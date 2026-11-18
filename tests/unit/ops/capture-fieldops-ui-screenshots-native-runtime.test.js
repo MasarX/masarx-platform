@@ -4,6 +4,8 @@ const os = require('os');
 const path = require('path');
 
 const {
+  CAPTURE_MODE,
+  main,
   buildSelftest,
   createStaticServer,
   defaultOutputDir,
@@ -56,6 +58,22 @@ function createStaticFixture() {
 }
 
 describe('capture-fieldops-ui-screenshots-native-runtime helpers', () => {
+  test('strict native-app requirement refuses this prototype before capture side effects', async () => {
+    const previous = process.argv;
+    const mkdir = jest.spyOn(fs, 'mkdirSync');
+    const createServer = jest.spyOn(http, 'createServer');
+    try {
+      process.argv = [process.execPath, 'capture', '--require-native-app'];
+      expect(CAPTURE_MODE).toBe('device_browser_prototype');
+      await expect(main()).rejects.toThrow('browser prototype only');
+      expect(mkdir).not.toHaveBeenCalled();
+      expect(createServer).not.toHaveBeenCalled();
+    } finally {
+      process.argv = previous;
+      mkdir.mockRestore(); createServer.mockRestore();
+    }
+  });
+
   test('parseArgs reads key/value flags and bare switches', () => {
     expect(
       parseArgs([
@@ -102,9 +120,8 @@ describe('capture-fieldops-ui-screenshots-native-runtime helpers', () => {
       status: 'pass',
       url: 'http://127.0.0.1:4179/version-c.html',
       steps: [
-        'OK - Header contract (native-runtime evidence)',
-        'OK - Drawer contract (native-runtime evidence)',
-        'OK - Captured 3 native-runtime screenshots',
+        'Captured 3 device-browser prototype screenshots',
+        'Native FieldOps application and Header/Drawer contracts were not verified',
       ],
       error: null,
     });
@@ -114,9 +131,8 @@ describe('capture-fieldops-ui-screenshots-native-runtime helpers', () => {
       status: 'fail',
       url: 'http://127.0.0.1:4179/version-c.html',
       steps: [
-        'OK - Header contract (native-runtime evidence)',
-        'OK - Drawer contract (native-runtime evidence)',
-        'OK - Captured 1 native-runtime screenshots',
+        'Captured 1 device-browser prototype screenshots',
+        'Native FieldOps application and Header/Drawer contracts were not verified',
       ],
       error: 'drawer failed | capture failed',
     });

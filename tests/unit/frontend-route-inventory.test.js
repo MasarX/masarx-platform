@@ -9,7 +9,8 @@ describe("frontend route inventory doc", () => {
     const body = fs.readFileSync(inventoryPath, "utf8");
 
     expect(body).toContain("| Portal  | 37          |");
-    expect(body).toContain("| **Total** | **75**    |");
+    expect(body).toContain("| **Total** | **76**    |");
+    expect(body).toContain("| `/catalog/service-offerings` | `ServiceCatalogPage`");
     expect(body).toContain("| `/integrations/mappings` | `PortalMappingsPage` | None | N/A | N/A | N/A | Y |");
     expect(body).toContain("| Signed-in route load (portal) | `portal-signed-in-coverage.spec.ts` | 30/30 |");
   });

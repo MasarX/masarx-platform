@@ -1,7 +1,7 @@
 ﻿import "server-only";
 import type { ReactNode } from "react";
 import { createUiServerClient } from "@masarx/api/server";
-import { getUiDefaults } from "@masarx/config";
+import { getPublicConfig, getUiDefaults } from "@masarx/config";
 import {
   UiCommandDefinition,
   UiMe,
@@ -58,8 +58,8 @@ import {
   suggestResourceKeys,
   type ResourceColumn,
 } from "./resource-page-utils";
-import { DEFAULT_LIMIT, resolvePaginationSettings } from "./pagination-utils";
-import { createUiTranslator } from "./i18n";
+import { DEFAULT_LIMIT, resolvePaginationDisplay, resolvePaginationSettings } from "./pagination-utils";
+import { createUiTranslator, resolveRowDisplayText } from "./i18n";
 import { buildTestId } from "./test-ids";
 import {
   cn,
@@ -82,7 +82,7 @@ import {
   resolveSafeAppBasePath,
   resolveSafeHref,
 } from "./url-guard";
-import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { hasCapability, resolveCapabilitySet, isResourceReadScopeAllowed } from "./capabilities";
 
 type SortDirection = "asc" | "desc";
 type ResourceViewEntry = UiTableView & {
@@ -105,6 +105,7 @@ type ResourcePageProps = {
   baseHref?: string;
   testIdPrefix?: string;
   headerActions?: ReactNode;
+  headerActionsCapability?: string | null;
   renderDetailFooter?: (context: ResourceDetailContext) => ReactNode;
 };
 
@@ -321,6 +322,7 @@ export async function ResourcePage({
   baseHref: baseHrefOverride,
   testIdPrefix,
   headerActions,
+  headerActionsCapability = null,
   renderDetailFooter,
 }: ResourcePageProps) {
   const ui = createUiServerClient();
@@ -362,6 +364,7 @@ export async function ResourcePage({
   let offset = 0;
 
   const toPromise = <T,>(runner: () => Promise<T>) => Promise.resolve().then(runner);
+  const locale = getPublicConfig().locale;
 
   let registry: UiReadRegistry | null = null;
   let me: UiMe | null = null;
@@ -382,9 +385,11 @@ export async function ResourcePage({
   let viewScopeId: string | null = null;
   let analyticsEnabled = true;
   let errorMessage: string | null = null;
+  let isTimeoutError = false;
   let resourceKeySuggestions: string[] = [];
   let deniedMessage: string | null = null;
   let detailError: string | null = null;
+  let detailRequestIssued = false;
   let metricsError: string | null = null;
   let requestedLimit = 0;
   const paginationDefaults = resolvePaginationSettings(null);
@@ -404,7 +409,7 @@ export async function ResourcePage({
   let commandRegistry: UiCommandDefinition[] = [];
   let commandError: string | null = null;
   let useClientPagination = false;
-  const filterOperatorDefaults = resolveFilterOperatorRegistry(null);
+  const filterOperatorDefaults = resolveFilterOperatorRegistry(null, locale);
   let filterOperatorLabels = filterOperatorDefaults.labels;
   let filterOperatorKeys = filterOperatorDefaults.keys;
   let clientPagination:
@@ -440,6 +445,7 @@ export async function ResourcePage({
           : t("errors.resourceNotRegistered", { resourceKey });
     }
   } else {
+    isTimeoutError = isStatementTimeoutUiError(registryResult.reason);
     errorMessage = formatUiError(registryResult.reason, t("errors.loadRegistry"));
   }
 
@@ -449,7 +455,14 @@ export async function ResourcePage({
     meError = meResult.reason;
   }
 
-  if (!errorMessage && resource) {
+  if (resource && !isResourceReadScopeAllowed(
+    resource, me?.access_scope?.scope_type, me?.access_scope?.scope_id,
+    me?.org?.id,
+  )) {
+    deniedMessage = t("blocked.action");
+  }
+
+  if (!errorMessage && !deniedMessage && resource) {
     if (meError) {
       viewError = formatUiError(meError, t("errors.loadCapabilities"));
     } else if (me) {
@@ -508,7 +521,7 @@ export async function ResourcePage({
     }
 
     if (operatorsResult.status === "fulfilled") {
-      const resolved = resolveFilterOperatorRegistry(operatorsResult.value);
+      const resolved = resolveFilterOperatorRegistry(operatorsResult.value, locale);
       filterOperatorLabels = resolved.labels;
       filterOperatorKeys = resolved.keys;
     } else {
@@ -654,10 +667,11 @@ export async function ResourcePage({
             ui.resourceMetrics(resourceKey, filterTree ?? filters, metricColumns)
           )
         : null;
-      const detailPromise =
-        detailId && detailOpen
-          ? toPromise(() => ui.getResource(resourceKey, detailId))
-          : null;
+      const requestedDetailId = detailId && detailOpen ? detailId : null;
+      detailRequestIssued = Boolean(requestedDetailId);
+      const detailPromise = requestedDetailId
+        ? toPromise(() => ui.getResource(resourceKey, requestedDetailId))
+        : null;
 
       if (metricsPromise || detailPromise) {
         const [metricsResult, detailResult] = await Promise.allSettled([
@@ -682,6 +696,7 @@ export async function ResourcePage({
         }
       }
     } catch (error) {
+      isTimeoutError = isStatementTimeoutUiError(error);
       errorMessage = formatUiError(error, t("errors.loadResourceList"));
     }
   }
@@ -690,9 +705,27 @@ export async function ResourcePage({
     deniedMessage = errorMessage;
     errorMessage = null;
   }
+  if (
+    !errorMessage &&
+    !deniedMessage &&
+    detailRequestIssued &&
+    detailId &&
+    !detail &&
+    !detailError
+  ) {
+    detailError = t("detail.notFound");
+  }
 
-  const columns = resolveColumns(resource, list);
-  const title = resource?.label ?? resourceKey;
+  const columns = resolveColumns(resource, list, locale);
+  const title = resolveRowDisplayText(resource?.label ?? resourceKey, resource?.label_ar, locale);
+  const effectiveHeaderActions =
+    deniedMessage || errorMessage
+      ? null
+      : headerActionsCapability
+        ? hasCapability(capabilitySet, headerActionsCapability)
+          ? headerActions
+          : null
+        : headerActions;
   const downloadCapability = resource?.download?.capability?.trim() ?? null;    
   const downloadAllowed = hasCapability(capabilitySet, downloadCapability);
   const downloadHref =
@@ -780,11 +813,16 @@ export async function ResourcePage({
               null
             );
             const items = Array.isArray(relatedList?.items) ? relatedList.items : [];
-            const columns = resolveColumns(relatedResource, relatedList);
-            const label =
+            const columns = resolveColumns(relatedResource, relatedList, locale);
+            const englishLabel =
               entryLabel ||
               relatedResource?.label?.trim() ||
               labelFromKey(relatedKey);
+            const label = resolveRowDisplayText(
+              englishLabel,
+              entry.label_ar ?? relatedResource?.label_ar,
+              locale
+            );
             const total =
               typeof relatedList?.total === "number" ? relatedList.total : null;
             const countLabel =
@@ -908,17 +946,18 @@ export async function ResourcePage({
       const count = list?.items?.length ?? 0;
       return t("summary.rows", { count });
     }
-    if (typeof listTotal === "number") {
+    const { start, end, total: displayTotal } = resolvePaginationDisplay({
+      total: listTotal,
+      totalIsEstimate: listTotalIsEstimate,
+      offset: listOffset,
+      itemsCount: list?.items?.length ?? 0,
+    });
+    if (displayTotal !== null) {
       if (listTotalIsEstimate) {
-        const count = list?.items?.length ?? 0;
-        const start = count > 0 ? listOffset + 1 : 0;
-        const end = listOffset + count;
-        return t("summary.rangeEstimated", { start, end, total: listTotal });
+        return t("summary.rangeEstimated", { start, end, total: displayTotal });
       }
-      if (listTotal <= 0) return t("summary.zero");
-      const start = Math.min(listOffset + 1, listTotal);
-      const end = Math.min(listOffset + listLimit, listTotal);
-      return t("summary.range", { start, end, total: listTotal });
+      if (displayTotal <= 0) return t("summary.zero");
+      return t("summary.range", { start, end, total: displayTotal });
     }
     const count = list?.items?.length ?? 0;
     return t("summary.rows", { count });
@@ -1152,7 +1191,6 @@ export async function ResourcePage({
       </div>
     ) : null;
 
-  const isTimeoutError = errorMessage ? isStatementTimeoutUiError(errorMessage) : false;
   const suggestedResourceLinks =
     !isTimeoutError && errorMessage && resourceKeySuggestions.length > 0
       ? resourceKeySuggestions
@@ -1286,7 +1324,7 @@ export async function ResourcePage({
     <div className="space-y-4">
       <PageHeader
         title={title}
-        actions={headerActions}
+        actions={effectiveHeaderActions}
       />
       {deniedMessage ? (
         <ContextNotice
@@ -1311,7 +1349,74 @@ export async function ResourcePage({
       ) : (
         <div className="space-y-4" data-testid={readyTestId}>
           <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-ui-muted">
-            <span>{summaryLabel}</span>
+            <span
+              data-testid={testIdPrefix ? `${testIdPrefix}-resource-summary` : undefined}
+            >
+              {summaryLabel}
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              {actionStats.total > 0 ? (
+                <>
+                  <div
+                    className="inline-flex items-center gap-2 rounded-md px-2 py-1"
+                    data-testid={
+                      actionsTestIdBase
+                        ? `${actionsTestIdBase}-configured`
+                        : undefined
+                    }
+                  >
+                    <span className="text-[11px] font-medium text-ui-muted">
+                      {t("actions.label")}
+                    </span>
+                    <span className="text-ui-ink">
+                      {t("actions.configured", { count: actionStats.total })}
+                    </span>
+                  </div>
+                  <div
+                    className="inline-flex items-center rounded-md px-2 py-1 text-ui-ink"
+                    data-testid={
+                      actionsTestIdBase
+                        ? `${actionsTestIdBase}-available`
+                        : undefined
+                    }
+                  >
+                    {t("actions.available", { count: actionStats.allowed })}
+                  </div>
+                  {actionStats.blocked > 0 ? (
+                    <div
+                      className="inline-flex items-center rounded-md px-2 py-1 text-ui-ink"
+                      data-testid={
+                        actionsTestIdBase
+                          ? `${actionsTestIdBase}-blocked`
+                          : undefined
+                      }
+                    >
+                      {t("actions.blocked", { count: actionStats.blocked })}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div
+                  className="inline-flex items-center gap-2 rounded-md px-2 py-1"
+                  data-testid={
+                    actionsTestIdBase ? `${actionsTestIdBase}-empty` : undefined
+                  }
+                >
+                  <span className="text-[11px] font-medium text-ui-muted">
+                    {t("actions.label")}
+                  </span>
+                  <span className="text-ui-ink">{t("actions.empty")}</span>
+                </div>
+              )}
+              {commandCatalogHref ? (
+                <a
+                  className="text-[11px] font-medium text-ui-muted underline underline-offset-4 transition hover:text-ui-ink"
+                  href={commandCatalogHref}
+                >
+                  {t("actions.manage")}
+                </a>
+              ) : null}
+            </div>
           </div>
           {metricsError && analyticsEnabled ? (
             <EmptyState
@@ -1335,6 +1440,7 @@ export async function ResourcePage({
             actionHref={safeBaseHref}
             testIdPrefix={testIdPrefix}
             opLabels={filterOperatorLabels}
+            locale={locale}
           />
           <ResourceDetailClient
             detailId={detailId ?? null}

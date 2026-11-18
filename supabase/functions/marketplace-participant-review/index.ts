@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import {
   approveMarketplaceParticipantRequest,
@@ -28,21 +27,10 @@ const EDGE_SUPABASE_SECRET_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", [
 const MARKETPLACE_RPC_SCHEMA =
   readEnv("MARKETPLACE_RPC_SCHEMA", ["EDGE_RPC_SCHEMA", "API_RPC_SCHEMA"]) || "api";
 
-const corsHeaders = (req: Request): Record<string, string> => {
-  const origin = req.headers.get("origin")?.trim() || "*";
-  return {
-    "access-control-allow-origin": origin,
-    "access-control-allow-methods": "POST, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type, apikey, x-client-info",
-    "access-control-max-age": "600",
-    vary: "Origin",
-  };
-};
-
-const json = (status: number, body: JsonRecord, headers: Record<string, string>) =>
+const json = (status: number, body: JsonRecord) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { ...headers, "content-type": "application/json" },
+    headers: { "content-type": "application/json" },
   });
 
 const uuidRegex =
@@ -54,12 +42,9 @@ const normalizeDecision = (value: string): "approved" | "rejected" | "request_ad
   const normalized = value.trim().toLowerCase();
   if (normalized === "approve" || normalized === "approved") return "approved";
   if (normalized === "reject" || normalized === "rejected") return "rejected";
-  if (
-    normalized === "request_additional_docs" ||
-    normalized === "request-docs" ||
-    normalized === "request_docs" ||
-    normalized === "additional_docs"
-  ) return "request_additional_docs";
+  if (["request_additional_docs", "request-docs", "request_docs", "additional_docs"].includes(normalized)) {
+    return "request_additional_docs";
+  }
   return "";
 };
 
@@ -82,12 +67,15 @@ const createUserClient = (token: string) => {
 };
 
 const createServiceClient = () => {
-  const serviceKey = asString(SUPABASE_SERVICE_KEY) || asString(EDGE_SUPABASE_SECRET_KEY);
+  const serviceKey = asString(EDGE_SUPABASE_SECRET_KEY) || asString(SUPABASE_SERVICE_KEY);
+  const anonKey = asString(SUPABASE_ANON_KEY);
   if (!SUPABASE_URL || !serviceKey) {
     throw new Error("missing_supabase_service_configuration");
   }
 
-  const apiKeyHeader = serviceKey;
+  const apiKeyHeader = isJwtLike(serviceKey)
+    ? (anonKey || serviceKey)
+    : serviceKey;
 
   return createClient(SUPABASE_URL, serviceKey, {
     auth: { persistSession: false },
@@ -97,20 +85,14 @@ const createServiceClient = () => {
     global: {
       headers: {
         apikey: apiKeyHeader,
-        ...(isJwtLike(serviceKey) ? { Authorization: `Bearer ${serviceKey}` } : {}),
       },
     },
   });
 };
 
-serve(async (req: Request): Promise<Response> => {
-  const cors = corsHeaders(req);
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: cors });
-  }
-
+Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") {
-    return json(405, { ok: false, error: { code: "method_not_allowed" } }, cors);
+    return json(405, { ok: false, error: { code: "method_not_allowed" } });
   }
 
   const token = extractToken(req, {
@@ -120,7 +102,7 @@ serve(async (req: Request): Promise<Response> => {
   });
 
   if (!token) {
-    return json(401, { ok: false, error: { code: "missing_authorization" } }, cors);
+    return json(401, { ok: false, error: { code: "missing_authorization" } });
   }
 
   let payload: ReviewPayload;
@@ -128,7 +110,7 @@ serve(async (req: Request): Promise<Response> => {
     payload = (await parseRequestBody(req)).json as ReviewPayload;
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid_json";
-    return json(400, { ok: false, error: { code: "invalid_json", message } }, cors);
+    return json(400, { ok: false, error: { code: "invalid_json", message } });
   }
 
   const requestId = asString(payload?.request_id);
@@ -140,11 +122,20 @@ serve(async (req: Request): Promise<Response> => {
     : {};
 
   if (!uuidRegex.test(requestId)) {
-    return json(400, { ok: false, error: { code: "invalid_request_id" } }, cors);
+    return json(400, { ok: false, error: { code: "invalid_request_id" } });
   }
 
   if (!decision) {
-    return json(400, { ok: false, error: { code: "invalid_decision" } }, cors);
+    return json(400, { ok: false, error: { code: "invalid_decision" } });
+  }
+
+  const requestedDocuments = metadata.requested_documents;
+  if (decision === "request_additional_docs" && requestedDocuments !== undefined && (
+    !Array.isArray(requestedDocuments) || requestedDocuments.some(
+      (value: unknown) => typeof value !== "string" || !value.trim() || value.trim().length > 100,
+    )
+  )) {
+    return json(400, { ok: false, error: { code: "invalid_requested_documents" } });
   }
 
   let userClient;
@@ -154,7 +145,7 @@ serve(async (req: Request): Promise<Response> => {
     serviceClient = createServiceClient();
   } catch (error) {
     const message = error instanceof Error ? error.message : "missing_supabase_configuration";
-    return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors);
+    return json(500, { ok: false, error: { code: "server_misconfigured", message } });
   }
 
   const { data: reviewerData, error: reviewerError } = await userClient.rpc(
@@ -168,7 +159,7 @@ serve(async (req: Request): Promise<Response> => {
         code: "reviewer_forbidden",
         message: reviewerError.message,
       },
-    }, cors);
+    });
   }
 
   const reviewer = reviewerData && typeof reviewerData === "object"
@@ -200,61 +191,14 @@ serve(async (req: Request): Promise<Response> => {
           code,
           message: asString(err.message) || "approval_failed",
         },
-      }, cors);
+      });
     }
 
     return json(200, {
       ok: true,
       decision: "approved",
       result: approveResult,
-    }, cors);
-  }
-
-  if (decision === "request_additional_docs") {
-    let approvalMode = "required";
-    try {
-      const policy = await loadMarketplaceCompliancePolicy(serviceClient, "freelancer_driver", null);
-      approvalMode = asString(policy.approval_mode) || "required";
-    } catch {
-      approvalMode = "required";
-    }
-
-    const { data: requestDocsData, error: requestDocsError } = await serviceClient.rpc(
-      "marketplace_participant_request_review_apply_v1",
-      {
-        p_request_id: requestId,
-        p_decision: "request_additional_docs",
-        p_reviewer_user_id: reviewerUserId,
-        p_invited_auth_user_id: null,
-        p_invite_email_sent: false,
-        p_invite_redirect_to: null,
-        p_approved_organization_id: null,
-        p_approved_user_id: null,
-        p_decision_metadata: {
-          ...metadata,
-          reason: reason || asString(metadata.note) || null,
-          reviewed_via: "marketplace-participant-review",
-          approval_mode: approvalMode,
-          request_additional_docs: true,
-        },
-      },
-    );
-
-    if (requestDocsError) {
-      return json(400, {
-        ok: false,
-        error: {
-          code: "request_additional_docs_failed",
-          message: requestDocsError.message,
-        },
-      }, cors);
-    }
-
-    return json(200, {
-      ok: true,
-      decision: "request_additional_docs",
-      result: requestDocsData && typeof requestDocsData === "object" ? (requestDocsData as JsonRecord) : {},
-    }, cors);
+    });
   }
 
   let approvalMode = "required";
@@ -269,7 +213,7 @@ serve(async (req: Request): Promise<Response> => {
     "marketplace_participant_request_review_apply_v1",
     {
       p_request_id: requestId,
-      p_decision: "rejected",
+      p_decision: decision,
       p_reviewer_user_id: reviewerUserId,
       p_invited_auth_user_id: null,
       p_invite_email_sent: false,
@@ -278,26 +222,33 @@ serve(async (req: Request): Promise<Response> => {
       p_approved_user_id: null,
       p_decision_metadata: {
         ...metadata,
-        reason: reason || null,
+        reason: reason || (decision === "request_additional_docs" ? asString(metadata.note) : "") || null,
         reviewed_via: "marketplace-participant-review",
         approval_mode: approvalMode,
+        ...(decision === "request_additional_docs" ? {
+          request_additional_docs: true,
+          ...(Array.isArray(requestedDocuments) ? {
+            requested_documents: [...new Set(requestedDocuments.map((value: string) => value.trim()))],
+          } : {}),
+        } : {}),
       },
     },
   );
 
-  if (rejectError) {
+  const reviewResult = rejectData && typeof rejectData === "object" ? (rejectData as JsonRecord) : {};
+  if (rejectError || reviewResult.ok !== true) {
     return json(400, {
       ok: false,
       error: {
-        code: "rejection_failed",
-        message: rejectError.message,
+        code: decision === "request_additional_docs" ? "request_additional_docs_failed" : "rejection_failed",
+        message: rejectError?.message || asString((reviewResult.error as JsonRecord | undefined)?.code) || "review_failed",
       },
-    }, cors);
+    });
   }
 
   return json(200, {
     ok: true,
-    decision: "rejected",
-    result: rejectData && typeof rejectData === "object" ? (rejectData as JsonRecord) : {},
-  }, cors);
+    decision,
+    result: reviewResult,
+  });
 });

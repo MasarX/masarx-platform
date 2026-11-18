@@ -43,7 +43,12 @@ export function CommandCatalogFilters({
   const [categoryValue, setCategoryValue] = React.useState(category);
   const [capabilityValue, setCapabilityValue] = React.useState(capability);
   const [accessValue, setAccessValue] = React.useState(access);
+  const [hydrated, setHydrated] = React.useState(false);
   const resolvedTestIdPrefix = testIdPrefix?.trim() || "";
+
+  React.useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   React.useEffect(() => {
     setSearchValue(query);
@@ -105,6 +110,7 @@ export function CommandCatalogFilters({
           onChange={(event) => setSearchValue(event.target.value)}
           placeholder={t("filters.searchPlaceholder")}
           aria-label={t("filters.searchLabel")}
+          disabled={!hydrated}
           data-testid={
             resolvedTestIdPrefix
               ? `${resolvedTestIdPrefix}-filter-search`
@@ -123,6 +129,7 @@ export function CommandCatalogFilters({
             updateParam("category", event.target.value);
           }}
           aria-label={t("filters.categoryLabel")}
+          disabled={!hydrated}
           data-testid={
             resolvedTestIdPrefix
               ? `${resolvedTestIdPrefix}-filter-category`
@@ -148,6 +155,7 @@ export function CommandCatalogFilters({
             updateParam("capability", event.target.value);
           }}
           aria-label={t("filters.capabilityLabel")}
+          disabled={!hydrated}
           data-testid={
             resolvedTestIdPrefix
               ? `${resolvedTestIdPrefix}-filter-capability`
@@ -174,6 +182,7 @@ export function CommandCatalogFilters({
             updateParam("access", event.target.value);
           }}
           aria-label={t("filters.accessLabel")}
+          disabled={!hydrated}
           data-testid={
             resolvedTestIdPrefix
               ? `${resolvedTestIdPrefix}-filter-access`

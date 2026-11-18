@@ -1,8 +1,9 @@
 const path = require('path');
-const { WORKTREE_JEST_ROOTS, WORKTREE_TEMP_IGNORE_PATTERNS } = require('./jest.shared');
+const { WORKTREE_JEST_ROOTS, WORKTREE_TEMP_IGNORE_PATTERNS, JEST_CACHE_DIRECTORY } = require('./jest.shared');
 
 module.exports = {
   rootDir: path.join(__dirname, '..', '..'),
+  ...(JEST_CACHE_DIRECTORY ? { cacheDirectory: JEST_CACHE_DIRECTORY } : {}),
   roots: WORKTREE_JEST_ROOTS,
   testEnvironment: 'node',
   testMatch: ['**/tests/integration/**/*.test.js'],

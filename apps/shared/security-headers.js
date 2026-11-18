@@ -8,6 +8,50 @@ function normalizeOrigin(value) {
   }
 }
 
+function isLoopbackHostname(hostname) {
+  const raw = String(hostname || "").trim().toLowerCase();
+  if (raw.endsWith("..")) return false;
+  if ((raw.startsWith("[") && !raw.endsWith("]")) || (!raw.startsWith("[") && raw.endsWith("]"))) {
+    return false;
+  }
+  const unbracketed = raw.startsWith("[") && raw.endsWith("]")
+    ? raw.slice(1, -1)
+    : raw;
+  const normalized = unbracketed.endsWith(".")
+    ? unbracketed.slice(0, -1)
+    : unbracketed;
+  const ipv4Parts = normalized.split(".");
+  const isIpv4Loopback =
+    ipv4Parts.length === 4 &&
+    ipv4Parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255) &&
+    Number(ipv4Parts[0]) === 127;
+  const mappedIpv4 = normalized.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)?.[1];
+  const mappedHex = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  const mappedHighWord = mappedHex ? Number.parseInt(mappedHex[1], 16) : -1;
+  return (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized === "::1" ||
+    isIpv4Loopback ||
+    (mappedIpv4 ? isLoopbackHostname(mappedIpv4) : false) ||
+    (mappedHighWord >> 8) === 127
+  );
+}
+
+function normalizeTrustedOrigin(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(String(value).trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) return null;
+    if (url.username || url.password) return null;
+    if (url.pathname !== "/" || url.search || url.hash) return null;
+    return url.origin.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 function uniqueValues(values) {
   const seen = new Set();
   const out = [];
@@ -20,6 +64,22 @@ function uniqueValues(values) {
   return out;
 }
 
+function resolveTrustedExternalDataOrigins({
+  supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL,
+  configuredOrigins = process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS,
+} = {}) {
+  const origins = [];
+  const supabaseOrigin = normalizeTrustedOrigin(supabaseUrl);
+  if (supabaseOrigin) origins.push(supabaseOrigin);
+  String(configuredOrigins || "")
+    .split(",")
+    .forEach((candidate) => {
+      const origin = normalizeTrustedOrigin(candidate);
+      if (origin) origins.push(origin);
+    });
+  return uniqueValues(origins);
+}
+
 function resolveWebsocketOrigin(origin) {
   if (!origin) return null;
   if (origin.startsWith("https://")) return origin.replace("https://", "wss://");
@@ -27,12 +87,32 @@ function resolveWebsocketOrigin(origin) {
   return null;
 }
 
-function buildCsp({ supabaseUrl, nodeEnv = process.env.NODE_ENV, nonce = "" }) {
+function resolveMapTileOrigins(value) {
+  return uniqueValues(String(value || '').split(',').flatMap(candidate => {
+    const raw = candidate.trim();
+    // Exact HTTPS origins only: never turn an image allowlist into fetch grants.
+    if (!/^https:\/\/[^\s/?#\\@*]+\/?$/i.test(raw)) return [];
+    const origin = normalizeTrustedOrigin(raw);
+    return origin ? [origin] : [];
+  }));
+}
+
+function buildCsp({
+  supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL,
+  nodeEnv = process.env.NODE_ENV,
+  nonce = "",
+  trustedExternalDataOrigins = process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS,
+  mapTileOrigins = process.env.NEXT_PUBLIC_UI_MAP_TILE_ORIGINS,
+}) {
   const supabaseOrigin = normalizeOrigin(supabaseUrl);
   const websocketOrigin = resolveWebsocketOrigin(supabaseOrigin);
   const isProduction = String(nodeEnv || "").trim().toLowerCase() === "production";
+  const trustedImageOrigins = resolveTrustedExternalDataOrigins({
+    supabaseUrl,
+    configuredOrigins: trustedExternalDataOrigins,
+  });
 
-  const connectSources = ["'self'"];
+  const connectSources = ["'self'", ...resolveMapTileOrigins(mapTileOrigins)];
   if (supabaseOrigin) {
     connectSources.push(supabaseOrigin);
   }
@@ -48,6 +128,8 @@ function buildCsp({ supabaseUrl, nodeEnv = process.env.NODE_ENV, nonce = "" }) {
     scriptSources.push("'unsafe-eval'");
   }
 
+  const imageSources = ["'self'", "data:", "blob:", ...trustedImageOrigins];
+
   const directives = {
     "default-src": ["'self'"],
     "base-uri": ["'self'"],
@@ -56,7 +138,7 @@ function buildCsp({ supabaseUrl, nodeEnv = process.env.NODE_ENV, nonce = "" }) {
     "frame-src": ["'none'"],
     "script-src": scriptSources,
     "style-src": ["'self'", "'unsafe-inline'"],
-    "img-src": ["'self'", "data:", "blob:"],
+    "img-src": imageSources,
     "font-src": ["'self'", "data:"],
     "connect-src": connectSources,
     "frame-ancestors": ["'none'"],
@@ -111,11 +193,23 @@ function buildBaseSecurityHeaders() {
   ];
 }
 
-function buildSecurityHeaders({ supabaseUrl, nodeEnv = process.env.NODE_ENV, nonce = "" }) {
+function buildSecurityHeaders({
+  supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL,
+  nodeEnv = process.env.NODE_ENV,
+  nonce = "",
+  trustedExternalDataOrigins = process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS,
+  mapTileOrigins = process.env.NEXT_PUBLIC_UI_MAP_TILE_ORIGINS,
+}) {
   return [
     {
       key: "Content-Security-Policy",
-      value: buildCsp({ supabaseUrl, nodeEnv, nonce }),
+      value: buildCsp({
+        supabaseUrl,
+        nodeEnv,
+        nonce,
+        trustedExternalDataOrigins,
+        mapTileOrigins,
+      }),
     },
     ...buildBaseSecurityHeaders(),
   ];
@@ -129,7 +223,10 @@ module.exports = {
   buildCsp,
   buildSecurityHeaders,
   buildStaticSecurityHeaders,
+  isLoopbackHostname,
   normalizeOrigin,
+  normalizeTrustedOrigin,
+  resolveTrustedExternalDataOrigins,
   resolveWebsocketOrigin,
 };
 module.exports.default = module.exports;

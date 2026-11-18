@@ -3,7 +3,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(6);
+SELECT plan(30);
 
 SET search_path TO public, pgtap, extensions;
 
@@ -297,6 +297,90 @@ SELECT ok(
   'coordinate handler sets reverse_geocode when skipping reverse_local (mismatched client)'
 );
 
+
+-- F279 uses the existing owned run/step; all polygon/policy/attempt writes roll back.
+CREATE TEMP TABLE f279_coordinate_matrix(
+ label text, actual_valid boolean, expected_valid boolean,
+ actual_local boolean, expected_local boolean, reverse_requested boolean,
+ exact_attempt_lineage boolean
+) ON COMMIT DROP;
+DO $f279$
+DECLARE
+ r public.workflow_runs; s public.workflow_run_steps;
+ baseline jsonb; policy jsonb; c record; reply public.workflow_handler_response;
+ exact_lineage boolean;
+BEGIN
+ SELECT * INTO STRICT r FROM public.workflow_runs WHERE id='07600000-0000-0000-0000-000000000007';
+ SELECT * INTO STRICT s FROM public.workflow_run_steps WHERE id='07600000-0000-0000-0000-000000000008';
+ -- Restore original owned lineage after the preceding mismatch scenario.
+ r.context:=r.context||jsonb_build_object('client_id','07600000-0000-0000-0000-000000000002',
+  'sender_id','07600000-0000-0000-0000-000000000003');
+ baseline:=public.resolve_settings('geocoding_policy','sender','07600000-0000-0000-0000-000000000003');
+ INSERT INTO public.sa_regions(id,name_en) VALUES(-279001,'F279 rollback region');
+ INSERT INTO public.sa_cities(id,region_id,name_en) VALUES(-279001,-279001,'F279 rollback city');
+ INSERT INTO public.sa_districts(id,city_id,region_id,name_en,geom)
+ VALUES(-279001,-279001,-279001,'F279 rollback district',ST_MakeEnvelope(46.6999,24.6999,46.7001,24.7001,4326));
+ PERFORM set_config('app.workflow_run_step_id',s.id::text,true);
+ FOR c IN SELECT * FROM (VALUES
+  ('local-false',false,true,false,true,false,false),
+  ('local-true',true,true,false,true,true,false),
+  ('local-absent',NULL::boolean,true,false,true,true,false),
+  ('disabled',true,false,false,false,false,false),
+  ('invalid-bounds',true,true,false,false,false,true),
+  ('external-false',false,true,true,true,false,false)
+ ) x(label,flag,enabled,skip_local,valid,local_match,invalid_coords)
+ LOOP
+  policy:=jsonb_set(baseline,'{matching_plugins}',jsonb_build_array(
+   jsonb_build_object('name','reverse','enabled',c.enabled),
+   jsonb_build_object('name','reverse_local','enabled',true,'params',
+    jsonb_build_object('skip_when_short_code',c.skip_local,'confidence',0.99))));
+  PERFORM public.upsert_settings_value_v1('geocoding_policy','sender',
+   '07600000-0000-0000-0000-000000000003',policy,1,'F279 rollback matrix');
+  r.context:=jsonb_set(r.context,'{geocoding}',jsonb_build_object('short_code','ABCD1234'));
+  IF c.flag IS NOT NULL THEN
+   r.context:=jsonb_set(r.context,'{geocoding,reverse_geocode}',to_jsonb(c.flag),true);
+  END IF;
+  r.context:=jsonb_set(r.context,'{shipment,coordinates}',jsonb_build_object(
+   'latitude',CASE WHEN c.invalid_coords THEN 91 ELSE 24.7 END,'longitude',46.7));
+  s.metadata:=COALESCE(s.metadata,'{}')||'{"validate_bounds":true}'::jsonb;
+  -- Each case logs against its actual persisted owned run, then rolls back
+  -- attempts and decisions without deleting any earlier evidence.
+  BEGIN
+   UPDATE public.workflow_runs SET context=r.context WHERE id=r.id;
+   reply:=workflow_handlers.execute_geo_coordinate_v1(s,r,'{}');
+   IF c.local_match THEN
+    SELECT EXISTS(SELECT 1 FROM public.geocoding_attempts a
+     WHERE a.id=(reply.operation_result#>>'{local_reverse_match,attempt_id}')::uuid
+       AND a.address_id='07600000-0000-0000-0000-000000000004'
+       AND a.organization_id='07600000-0000-0000-0000-000000000001'
+       AND a.client_id='07600000-0000-0000-0000-000000000002'
+       AND a.sender_id='07600000-0000-0000-0000-000000000003'
+       AND a.workflow_run_step_id=s.id AND a.provider_name='reverse_local'
+       AND a.attempt_order=1 AND a.status='succeeded'
+       AND a.metadata->>'match_source'='sa_polygons'
+       AND a.metadata#>>'{geocode,metadata,sa_district_id}'='-279001')
+     AND reply.operation_result#>>'{local_reverse_match,district_id}'='-279001'
+    INTO exact_lineage;
+   ELSE
+    SELECT NOT EXISTS(SELECT 1 FROM public.geocoding_attempts a
+     WHERE a.workflow_run_step_id=s.id AND a.provider_name='reverse_local')
+    INTO exact_lineage;
+   END IF;
+   RAISE EXCEPTION USING ERRCODE='PZ279',MESSAGE='F279 rollback case';
+  EXCEPTION WHEN SQLSTATE 'PZ279' THEN NULL;
+  END;
+  INSERT INTO f279_coordinate_matrix VALUES(c.label,
+   (reply.operation_result->>'within_bounds')::boolean,c.valid,
+   reply.operation_result->'local_reverse_match' IS NOT NULL,c.local_match,
+   COALESCE((reply.context_patch#>>'{geocoding,reverse_geocode}')::boolean,false),
+   exact_lineage);
+ END LOOP;
+END;
+$f279$;
+SELECT is(actual_valid,expected_valid,label||': coordinate validation preserved') FROM f279_coordinate_matrix ORDER BY label;
+SELECT is(actual_local,expected_local,label||': local polygon routing exact') FROM f279_coordinate_matrix ORDER BY label;
+SELECT is(reverse_requested,false,label||': no unintended external reverse') FROM f279_coordinate_matrix ORDER BY label;
+SELECT is(exact_attempt_lineage,true,label||': exact owned polygon attempt lineage') FROM f279_coordinate_matrix ORDER BY label;
 SELECT finish();
 
 ROLLBACK;

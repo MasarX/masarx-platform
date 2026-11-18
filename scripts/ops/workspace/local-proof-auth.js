@@ -162,6 +162,16 @@ function isRetryablePasswordGrantError(error) {
   );
 }
 
+function resolveSessionAccessToken(session) {
+  const accessToken = String(session?.access_token || '').trim();
+  if (accessToken.split('.').length !== 3) {
+    throw new Error(
+      '[local-proof-auth] Supabase password grant returned a missing or invalid access token.',
+    );
+  }
+  return accessToken;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -172,6 +182,7 @@ async function verifyPasswordGrant({
   password,
   env = process.env,
   logger = console,
+  onAccessToken,
 } = {}) {
   if (!client?.auth?.signInWithPassword) {
     throw new Error('[local-proof-auth] client.auth.signInWithPassword is required.');
@@ -195,11 +206,17 @@ async function verifyPasswordGrant({
     });
     if (!result?.error && result?.data?.session) {
       try {
-        await client.auth.signOut?.();
-      } catch {
-        // Best-effort cleanup only.
+        if (typeof onAccessToken === 'function') {
+          await onAccessToken(resolveSessionAccessToken(result.data.session));
+        }
+        return { attempts, retried: attempts > 1 };
+      } finally {
+        try {
+          await client.auth.signOut?.();
+        } catch {
+          // Best-effort cleanup only.
+        }
       }
-      return { attempts, retried: attempts > 1 };
     }
 
     lastError = result?.error || new Error('Supabase password grant returned no session.');
@@ -234,8 +251,6 @@ function runProvisionDemoAccounts({
       path.join('scripts', 'ops', 'provision-demo-accounts.js'),
       '--out',
       manifestRel,
-      '--password',
-      password,
     ],
     {
       cwd,
@@ -304,6 +319,7 @@ async function runLocalProofAuth(options = {}) {
     password,
     env: process.env,
     logger: options.logger || console,
+    onAccessToken: options.onAccessToken,
   });
 
   const summary = {
@@ -333,6 +349,7 @@ module.exports = {
   parseArgs,
   resolveManifestOperator,
   resolveManifestPath,
+  resolveSessionAccessToken,
   resolvePassword,
   resolvePasswordGrantRetryConfig,
   resolveSupabaseAuthEnv,

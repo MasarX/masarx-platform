@@ -7,6 +7,7 @@ export type ColumnMetric = {
   min: number | null;
   max: number | null;
   avg: number | null;
+  median?: number | null;
 };
 
 export type ResourceMetrics = {
@@ -20,6 +21,7 @@ export const EMPTY_METRIC: ColumnMetric = {
   min: null,
   max: null,
   avg: null,
+  median: null,
 };
 
 export function computePageMetrics(
@@ -32,21 +34,29 @@ export function computePageMetrics(
     let sum = 0;
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
+    const numericValues: number[] = [];
     items.forEach((item) => {
       const value = item[column.key];
-      if (typeof value !== "number" || Number.isNaN(value)) return;
+      if (typeof value !== "number" || !Number.isFinite(value)) return;
       count += 1;
+      numericValues.push(value);
       sum += value;
       min = Math.min(min, value);
       max = Math.max(max, value);
     });
     if (count > 0) {
+      numericValues.sort((left, right) => left - right);
+      const middle = Math.floor(count / 2);
+      const median = count % 2 === 0
+        ? numericValues[middle - 1]! / 2 + numericValues[middle]! / 2
+        : numericValues[middle]!;
       metrics[column.key] = {
         count,
         sum,
         min,
         max,
         avg: sum / count,
+        median,
       };
     }
   });
@@ -66,7 +76,7 @@ export function getAggregationValue(
     case "avg": return metric.avg;
     case "min": return metric.min;
     case "max": return metric.max;
-    case "median": return metric.avg; // approximate with avg for now
+    case "median": return metric.median ?? null;
     default: return null;
   }
 }

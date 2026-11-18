@@ -17,8 +17,9 @@ import {
   isTrustedDownloadUrl,
   safeDownloadUrls,
 } from "./url-guard";
-import { formatUiError, sanitizeUiError } from "./utils";
+import { formatUiError, getUiErrorMessage } from "./utils";
 import { useToast } from "./use-toast";
+import { downloadTrustedFile } from "./file-download";
 
 export { DEFAULT_ALLOWED_DOWNLOAD_HOSTS, isTrustedDownloadUrl, safeDownloadUrls };
 
@@ -43,12 +44,20 @@ type BulkDownloadPayload = {
 const uiDefaults = getUiDefaults();
 const REQUEST_ID_HEADER = "x-request-id";
 
-const triggerDownload = (url: string) => {
-  const link = document.createElement("a");
-  link.href = url;
-  link.target = "_blank";
-  link.rel = "noreferrer";
-  link.click();
+const isTrustedDownloadRequestUrl = (url: string) => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const resolved = new URL(url, window.location.origin);
+    return (
+      (resolved.protocol === "http:" || resolved.protocol === "https:") &&
+      resolved.origin === window.location.origin
+    );
+  } catch {
+    return false;
+  }
 };
 
 const resolveFailureNote = (requestId: string | undefined, serverRequestId?: string | null) => {
@@ -77,6 +86,7 @@ export function ResourceDownloadAction({
   const t = createUiTranslator("ui.resourceDownload");
   const { toast } = useToast();
   const [loading, setLoading] = React.useState(false);
+  const [feedback, setFeedback] = React.useState<{ intent: "status" | "alert"; message: string } | null>(null);
   const isSubmittingRef = React.useRef(false);
   const scopeMeta = React.useMemo(
     () => buildScopeMeta(telemetry),
@@ -120,16 +130,17 @@ export function ResourceDownloadAction({
       return false;
     }
     isSubmittingRef.current = true;
+    setFeedback({ intent: "status", message: t("status.pending") });
     setLoading(true);
     return true;
-  }, [loading]);
+  }, [loading, t]);
 
   const finalizeSubmission = React.useCallback(() => {
     isSubmittingRef.current = false;
     setLoading(false);
   }, []);
 
-  const executeBulkDownload = React.useCallback(async () => {
+  const executeDownload = React.useCallback(async () => {
     if (!beginSubmission()) {
       return;
     }
@@ -139,7 +150,7 @@ export function ResourceDownloadAction({
         type: "ui.bulk_action.execute",
         timestamp: new Date().toISOString(),
         context: resourceKey,
-        name: "download_labels_bulk",
+        name: selectionCount === 1 ? "download_labels_single" : "download_labels_bulk",
         message: `count=${selectionCount}`,
         digest: scopeDigest,
         meta: scopeMeta,
@@ -149,6 +160,11 @@ export function ResourceDownloadAction({
         resource: resourceKey,
         ids: selectedIds.join(","),
       });
+      if (!isTrustedDownloadRequestUrl(href)) {
+        const error = new Error(t("errors.requestFailed"));
+        (error as { requestId?: string }).requestId = requestId;
+        throw error;
+      }
       const response = await fetch(href, {
         method: "GET",
         headers: {
@@ -170,7 +186,7 @@ export function ResourceDownloadAction({
         ? payload.urls.filter(Boolean)
         : [];
       if (urls.length === 0) {
-        const error = new Error(t("errors.noUrls"));
+        const error = new Error(payload.errors?.[0]?.error || t("errors.noUrls"));
         (error as { requestId?: string }).requestId = requestIdFromResponse ?? requestId;
         throw error;
       }
@@ -180,29 +196,34 @@ export function ResourceDownloadAction({
         (error as { requestId?: string }).requestId = requestIdFromResponse ?? requestId;
         throw error;
       }
-      trustedUrls.forEach(triggerDownload);
-      const failed = payload.errors?.length ?? 0;
+      let downloaded = 0;
+      for (const url of trustedUrls) {
+        if (await downloadTrustedFile(url)) downloaded += 1;
+      }
+      if (downloaded === 0) throw new Error(t("errors.requestFailed"));
+      const failed = (payload.errors?.length ?? 0) + trustedUrls.length - downloaded;
+      setFeedback({ intent: "status", message: t(failed > 0 ? "status.partial" : selectionCount === 1 ? "status.single" : "status.success", { count: downloaded, failed }) });
       if (failed > 0) {
         toast({
           tone: "warning",
           title: t("toast.partialTitle"),
           description: t("toast.partialDescription", {
-            count: urls.length,
+            count: downloaded,
             failed,
           }),
         });
       } else {
         toast({
           tone: "success",
-          title: t("toast.successTitle"),
-          description: t("toast.successDescription", { count: urls.length }),
+          title: t(selectionCount === 1 ? "toast.singleTitle" : "toast.successTitle"),
+          description: selectionCount === 1
+            ? t("toast.singleDescription")
+            : t("toast.successDescription", { count: downloaded }),
         });
       }
     } catch (error) {
       const fallbackMessage = t("errors.requestFailed");
-      const safeMessage = sanitizeUiError(
-        formatUiError(error, fallbackMessage)
-      ) ?? fallbackMessage;
+      const safeMessage = formatUiError(error, fallbackMessage);
       const requestIdFromError = error instanceof Error ? (error as { requestId?: string }).requestId : undefined;
       const serverRequestId = requestIdFromError?.trim();
       const requestIdSuffix = resolveFailureNote(requestId, serverRequestId);
@@ -210,10 +231,11 @@ export function ResourceDownloadAction({
         serverRequestId && serverRequestId !== requestId
           ? serverRequestId
           : requestId;
-      reportClientError(new Error(safeMessage), {
+      reportClientError(error instanceof Error ? error : new Error(getUiErrorMessage(error) ?? fallbackMessage), {
         context: "ResourceDownloadAction",
         requestId: reportId,
       });
+      setFeedback({ intent: "alert", message: `${safeMessage}${requestIdSuffix}` });
       toast({
         tone: "error",
         title: t("toast.errorTitle"),
@@ -234,71 +256,12 @@ export function ResourceDownloadAction({
     beginSubmission,
     finalizeSubmission,
   ]);
-
-  const handleSingleDownload = React.useCallback(async () => {
-    if (!beginSubmission()) {
-      return;
-    }
-    const requestId = createRequestId();
-    try {
-      reportUiEvent({
-        type: "ui.bulk_action.execute",
-        timestamp: new Date().toISOString(),
-        context: resourceKey,
-        name: "download_labels_single",
-        message: `count=${selectionCount}`,
-        digest: scopeDigest,
-        meta: scopeMeta,
-        requestId,
-      });
-      const href = buildHref(downloadBasePath, {
-        resource: resourceKey,
-        id: selectedIds[0],
-      });
-      triggerDownload(href);
-      toast({
-        tone: "success",
-        title: t("toast.singleTitle"),
-        description: t("toast.singleDescription"),
-      });
-    } catch (error) {
-      const fallbackMessage = t("errors.requestFailed");
-      const safeMessage = sanitizeUiError(
-        formatUiError(error, fallbackMessage)
-      ) ?? fallbackMessage;
-      const requestIdSuffix = resolveFailureNote(requestId);
-      reportClientError(new Error(safeMessage), {
-        context: "ResourceDownloadAction",
-        requestId,
-      });
-      toast({
-        tone: "error",
-        title: t("toast.errorTitle"),
-        description: `${safeMessage}${requestIdSuffix}`,
-      });
-    } finally {
-      finalizeSubmission();
-    }
-  }, [
-    downloadBasePath,
-    resourceKey,
-    scopeDigest,
-    scopeMeta,
-    selectedIds,
-    t,
-    toast,
-    selectionCount,
-    beginSubmission,
-    finalizeSubmission,
-  ]);
-
-  const handleClick = selectionCount === 1 ? handleSingleDownload : executeBulkDownload;
 
   const button = (
     <Button
       type="button"
       variant="ghost"
-      onClick={handleClick}
+      onClick={executeDownload}
       disabled={disabled}
       loading={loading}
       title={disabledReason || undefined}
@@ -313,8 +276,11 @@ export function ResourceDownloadAction({
       {label}
     </Button>
   );
-  if (!disabledReason) return button;
+  const status = feedback ? <span className="sr-only" role={feedback.intent}
+    aria-live={feedback.intent === "alert" ? "assertive" : "polite"} aria-atomic="true">{feedback.message}</span> : null;
+  if (!disabledReason) return <>{button}{status}</>;
   return (
+    <>
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -323,5 +289,7 @@ export function ResourceDownloadAction({
         <TooltipContent>{disabledReason}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
+    {status}
+    </>
   );
 }

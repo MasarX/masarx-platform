@@ -3,6 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "module": "commonjs",
+    "jsx": "react-jsx",
     "moduleResolution": "node",
     "types": ["jest", "node"]
   }

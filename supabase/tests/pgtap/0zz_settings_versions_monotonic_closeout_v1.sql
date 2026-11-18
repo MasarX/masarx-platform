@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(3);
+SELECT plan(4);
 
 SET search_path TO public, pgtap, extensions;
 
@@ -59,6 +59,19 @@ BEGIN
          AND effective_until > effective_from
     ),
     'upsert_settings_value_v1 never closes a current settings_versions row at or before effective_from'
+  );
+
+  PERFORM is(
+    (
+      SELECT COUNT(*)
+        FROM public.settings_versions
+       WHERE category = 'webhook_ingest_policy'
+         AND scope_type = 'global'
+         AND effective_until IS NULL
+         AND approved_at IS NOT NULL
+    ),
+    1::bigint,
+    'upsert_settings_value_v1 leaves exactly one approved current settings_versions row'
   );
 END
 $$;

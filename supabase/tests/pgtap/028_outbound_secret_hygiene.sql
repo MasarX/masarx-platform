@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(17);
+SELECT plan(21);
 
 -- Ensure time partitions exist for api_call_log inserts during the test window.
 SELECT public.create_next_partitions();
@@ -15,8 +15,8 @@ SELECT public.create_next_partitions();
 
 SELECT is(
   public.redact_sensitive_headers('{"authorization":"Bearer secret","content-type":"application/json"}'::jsonb)->>'authorization',
-  'REDACTED',
-  'redact_sensitive_headers redacts Authorization'
+  NULL::TEXT,
+  'redact_sensitive_headers removes Authorization'
 );
 
 SELECT is(
@@ -295,9 +295,9 @@ VALUES (
   'provider',
   'bbbb0000-0000-0000-0000-000000000028',
   'POST',
-  'https://example.test/echo',
-  '{"content-type":"application/json"}'::jsonb,
-  '{}'::jsonb,
+  'https://example.test/echo?token=canonical-secret',
+  '{"content-type":"application/json","x-canonical":"persisted"}'::jsonb,
+  '{"marker":"secret-hygiene-test","token":"canonical-secret"}'::jsonb,
   'pending',
   100,
   0,
@@ -415,24 +415,24 @@ SELECT is(
 );
 
 -- ----------------------------------------------------------------------------
--- log_api_call_event redacts sensitive request/response values before persistence
+-- log_api_call_event ignores the resolved runtime request and redacts canonical request/response values
 -- ----------------------------------------------------------------------------
 
 SELECT public.log_api_call_event(
   'ffff0000-0000-0000-0000-000000000028',
   jsonb_build_object(
-    'method', 'POST',
-    'url', 'https://example.test/echo?token=topsecret',
-    'headers', jsonb_build_object('authorization', 'Bearer topsecret', 'content-type', 'application/json'),
-    'body', jsonb_build_object('marker', 'secret-hygiene-test', 'token', 'topsecret')
+    'method', 'DELETE',
+    'url', 'https://runtime.example.test/echo?token=runtime-secret',
+    'headers', jsonb_build_object('authorization', 'Bearer runtime-secret'),
+    'body', jsonb_build_object('runtime_only', true, 'token', 'runtime-secret')
   ),
   jsonb_build_object(
     'headers', jsonb_build_object('set-cookie', 'session=topsecret'),
     'body', jsonb_build_object('access_token', 'topsecret')
   ),
-  200,
+  500,
   12,
-  NULL
+  'Bearer runtime-error-secret token=runtime-error-secret'
 );
 
 SELECT is(
@@ -444,7 +444,43 @@ SELECT is(
     LIMIT 1
   ),
   'https://example.test/echo?token=REDACTED',
-  'log_api_call_event redacts sensitive query params in URL'
+  'log_api_call_event uses and redacts the canonical outbound URL'
+);
+
+SELECT is(
+  (
+    SELECT method
+    FROM api_call_log
+    WHERE request_body->>'marker' = 'secret-hygiene-test'
+    ORDER BY timestamp DESC
+    LIMIT 1
+  ),
+  'POST',
+  'log_api_call_event uses the canonical outbound method'
+);
+
+SELECT is(
+  (
+    SELECT request_headers->>'x-canonical'
+    FROM api_call_log
+    WHERE request_body->>'marker' = 'secret-hygiene-test'
+    ORDER BY timestamp DESC
+    LIMIT 1
+  ),
+  'persisted',
+  'log_api_call_event uses canonical outbound headers'
+);
+
+SELECT is(
+  (
+    SELECT request_body ? 'runtime_only'
+    FROM api_call_log
+    WHERE request_body->>'marker' = 'secret-hygiene-test'
+    ORDER BY timestamp DESC
+    LIMIT 1
+  ),
+  FALSE,
+  'log_api_call_event never persists runtime-only request fields'
 );
 
 SELECT is(
@@ -455,8 +491,8 @@ SELECT is(
     ORDER BY timestamp DESC
     LIMIT 1
   ),
-  'REDACTED',
-  'log_api_call_event redacts sensitive request headers'
+  NULL,
+  'log_api_call_event removes sensitive request headers'
 );
 
 SELECT is(
@@ -468,7 +504,7 @@ SELECT is(
     LIMIT 1
   ),
   'REDACTED',
-  'log_api_call_event redacts sensitive request body keys'
+  'log_api_call_event redacts sensitive canonical request body keys'
 );
 
 SELECT is(
@@ -479,8 +515,8 @@ SELECT is(
     ORDER BY timestamp DESC
     LIMIT 1
   ),
-  'REDACTED',
-  'log_api_call_event redacts sensitive response headers'
+  NULL,
+  'log_api_call_event removes sensitive response headers'
 );
 
 SELECT is(
@@ -493,6 +529,18 @@ SELECT is(
   ),
   'REDACTED',
   'log_api_call_event redacts sensitive response body keys'
+);
+
+SELECT is(
+  (
+    SELECT error_message
+    FROM api_call_log
+    WHERE request_body->>'marker' = 'secret-hygiene-test'
+    ORDER BY timestamp DESC
+    LIMIT 1
+  ),
+  'outbound_call_failed',
+  'log_api_call_event replaces runtime error text instead of persisting secrets'
 );
 
 SELECT finish();

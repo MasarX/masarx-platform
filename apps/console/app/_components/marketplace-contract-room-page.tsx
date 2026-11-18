@@ -11,7 +11,7 @@ type MarketplaceContractRoomPageProps = Parameters<
 const MarketplaceContractRoomPageInner =
   UiMarketplaceContractRoomPage as unknown as (
     props: MarketplaceContractRoomPageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function MarketplaceContractRoomPage(
   props: MarketplaceContractRoomPageProps,

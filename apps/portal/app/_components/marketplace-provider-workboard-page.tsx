@@ -11,7 +11,7 @@ type MarketplaceProviderWorkboardPageProps = Parameters<
 const MarketplaceProviderWorkboardPageInner =
   UiMarketplaceProviderWorkboardPage as unknown as (
     props: MarketplaceProviderWorkboardPageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function MarketplaceProviderWorkboardPage(
   props: MarketplaceProviderWorkboardPageProps,

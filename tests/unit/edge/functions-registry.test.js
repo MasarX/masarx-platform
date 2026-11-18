@@ -11,10 +11,17 @@ function writeTempRegistry(data) {
 }
 
 describe('edge/functions-registry', () => {
-  test('default registry includes browser-invoked lifecycle functions with expected auth modes', () => {
+  test('default registry includes browser-facing functions with expected auth modes', () => {
     const entries = loadRegistry(DEFAULT_REGISTRY_PATH);
     const byName = new Map(entries.map((entry) => [entry.name, entry]));
 
+    expect(byName.get('api-caller')).toMatchObject({
+      authMode: 'supabase_jwt',
+      enabled: true,
+    });
+    for (const name of ['api-gateway', 'webhook-receiver']) {
+      expect(byName.get(name)).toMatchObject({ authMode: 'public_no_jwt', enabled: true });
+    }
     expect(byName.get('tenant-signup-intake')).toMatchObject({
       name: 'tenant-signup-intake',
       authMode: 'public_no_jwt',
@@ -35,26 +42,47 @@ describe('edge/functions-registry', () => {
       authMode: 'public_no_jwt',
       enabled: true,
     });
+    expect(byName.get('driver-signup-intake')).toMatchObject({
+      name: 'driver-signup-intake',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
+    expect(byName.get('driver-application-documents')).toMatchObject({ authMode: 'public_no_jwt', enabled: true });
+    expect(byName.get('driver-application-status')).toMatchObject({
+      name: 'driver-application-status',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
     expect(byName.get('marketplace-participant-review')).toMatchObject({
       name: 'marketplace-participant-review',
       authMode: 'public_no_jwt',
       enabled: true,
     });
-    expect(byName.get('tenant-signup-console-request')).toMatchObject({
-      name: 'tenant-signup-console-request',
+    expect(byName.get('label-renderer')).toMatchObject({
+      name: 'label-renderer',
+      authMode: 'supabase_jwt',
+      enabled: true,
+    });
+    expect(byName.get('label-designer-assets')).toMatchObject({
+      name: 'label-designer-assets',
       authMode: 'public_no_jwt',
       enabled: true,
     });
-    expect(byName.get('organization-profile')).toMatchObject({
-      name: 'organization-profile',
-      authMode: 'public_no_jwt',
-      enabled: true,
-    });
-    expect(byName.get('tenant-user-invite')).toMatchObject({
-      name: 'tenant-user-invite',
-      authMode: 'public_no_jwt',
-      enabled: true,
-    });
+  });
+
+  test('edge entrypoints use native Deno.serve without the remote std server dependency', () => {
+    const functionsRoot = path.join(__dirname, '../../../supabase/functions');
+    const entrypoints = fs.readdirSync(functionsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(functionsRoot, entry.name, 'index.ts'))
+      .filter((entrypoint) => fs.existsSync(entrypoint));
+
+    expect(entrypoints.length).toBeGreaterThan(0);
+    for (const entrypoint of entrypoints) {
+      const source = fs.readFileSync(entrypoint, 'utf8');
+      expect(source).not.toContain('https://deno.land/std@0.203.0/http/server.ts');
+      expect(source).toContain('Deno.serve(');
+    }
   });
 
   test('loadRegistry supports array and { functions: [] } shapes', () => {

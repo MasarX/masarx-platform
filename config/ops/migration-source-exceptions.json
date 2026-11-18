@@ -1,0 +1,8 @@
+[
+  {
+    "path": "supabase/migrations/202608161250_b3_access_policy_kyc_permission_resync_v1.sql",
+    "before_sha256": "ef2eb4768cbeee05c86a2ca64c33fa96e889ed5ebd075336a584ff9c46156130",
+    "after_sha256": "a321edc5f83496f4937dbf20104bd7c0bfb6691b58020f557ba5aff8be128c21",
+    "authority": "User-approved 2026-09-10: normalize capability_key before wildcard exclusion; fresh replay only, existing data and migration history require separate inspection."
+  }
+]

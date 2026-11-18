@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docs/providers/schemas/provider.webhooks.shipment.canceled.schema.json",
+  "description": "Current provider cancellation template. Both documented ingress spellings normalize to shipment.delete. cancel_reason remains optional here; the separate opt-in strict mapped profile requires it.",
+  "allOf": [
+    { "$ref": "./provider.webhooks.event.schema.json" },
+    {
+      "type": "object",
+      "properties": {
+        "event": { "properties": { "type": { "enum": ["shipment.canceled", "shipment.cancelled"] } } },
+        "shipment": {
+          "type": "object",
+          "required": ["tracking_number"],
+          "properties": {
+            "tracking_number": { "type": "string", "minLength": 1 },
+            "cancel_reason": { "type": "string" },
+            "canceled_by": { "type": "string", "enum": ["sender", "recipient", "provider", "system"] }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  ]
+}
+

@@ -7,6 +7,8 @@ const {
   createShipment,
   createUser,
   setAuthContext,
+  withFixtureAdminContext,
+  setServiceContext: setCanonicalServiceContext,
 } = require('../helpers/tenant-utils');
 const {
   createWarehouseTransferManifest,
@@ -45,19 +47,7 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
   });
 
   async function setServiceContext(organizationId, userId) {
-    await client.query('SET LOCAL ROLE service_role');
-
-    const claims = {
-      role: 'service_role',
-      sub: userId,
-      organization_id: organizationId
-    };
-
-    await client.query('SELECT set_config($1, $2, true)', [
-      'request.jwt.claims',
-      JSON.stringify(claims)
-    ]);
-    await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', String(userId)]);
+    await setCanonicalServiceContext(client, userId, organizationId);
   }
 
   async function setAuthenticatedTenantContext(organizationId, userId) {
@@ -68,26 +58,30 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
   }
 
   async function getWorkflowTemplateId(templateName) {
-    const { rows } = await client.query(
-      `SELECT id
-         FROM workflow_templates
-        WHERE name = $1
-        LIMIT 1`,
-      [templateName]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id
+           FROM workflow_templates
+          WHERE name = $1
+          LIMIT 1`,
+        [templateName]
+      )
     );
 
     return rows[0]?.id ?? null;
   }
 
   async function getTransferWorkflowRuns(transferId) {
-    const { rows } = await client.query(
-      `SELECT wr.id,
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT wr.id,
               wr.workflow_status,
               wr.context
          FROM workflow_runs wr
         WHERE wr.context->>'warehouse_transfer_id' = $1::text
         ORDER BY wr.created_at DESC`,
-      [transferId]
+        [transferId]
+      )
     );
 
     return rows;
@@ -139,20 +133,22 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
   }
 
   async function forceNextPendingStepToRunNow(workflowRunId) {
-    await client.query(
-      `
-        UPDATE workflow_run_steps
-           SET run_at = now() - interval '1 second'
-         WHERE id = (
-           SELECT id
-             FROM workflow_run_steps
-            WHERE workflow_run_id = $1::uuid
-              AND step_status = 'pending'
-            ORDER BY sequence_order
-            LIMIT 1
-         )
-      `,
-      [workflowRunId]
+    await withFixtureAdminContext(client, () =>
+      client.query(
+        `
+          UPDATE workflow_run_steps
+             SET run_at = now() - interval '1 second'
+           WHERE id = (
+             SELECT id
+               FROM workflow_run_steps
+              WHERE workflow_run_id = $1::uuid
+                AND step_status = 'pending'
+              ORDER BY sequence_order
+              LIMIT 1
+           )
+        `,
+        [workflowRunId]
+      )
     );
   }
 
@@ -177,12 +173,14 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
       if (result?.status === 'waiting') {
         await forceNextPendingStepToRunNow(workflowRunId);
       }
-      const { rows } = await client.query(
-        `SELECT workflow_status
-           FROM workflow_runs
-          WHERE id = $1::uuid
-          LIMIT 1`,
-        [workflowRunId]
+      const { rows } = await withFixtureAdminContext(client, () =>
+        client.query(
+          `SELECT workflow_status
+             FROM workflow_runs
+            WHERE id = $1::uuid
+            LIMIT 1`,
+          [workflowRunId]
+        )
       );
       if (rows[0]?.workflow_status === 'completed') return 'completed';
       if (rows[0]?.workflow_status === 'failed') return 'failed';
@@ -191,36 +189,41 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
   }
 
   async function getTaskIdByKey(organizationId, transferId, taskTypeKey) {
-    const { rows } = await client.query(
-      `
-        SELECT t.id
-        FROM tasks t
-        JOIN task_types tt ON tt.id = t.task_type_id
-        WHERE t.organization_id = $1::uuid
-          AND tt.key = $2
-          AND t.resource_type = 'warehouse_transfer'
-          AND t.resource_id = $3::uuid
-        ORDER BY t.created_at DESC
-        LIMIT 1
-      `,
-      [organizationId, taskTypeKey, transferId]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `
+          SELECT t.id
+          FROM tasks t
+          JOIN task_types tt ON tt.id = t.task_type_id
+          WHERE t.organization_id = $1::uuid
+            AND tt.key = $2
+            AND t.resource_type = 'warehouse_transfer'
+            AND t.resource_id = $3::uuid
+          ORDER BY t.created_at DESC
+          LIMIT 1
+        `,
+        [organizationId, taskTypeKey, transferId]
+      )
     );
     return rows[0]?.id ?? null;
   }
 
   async function getTaskEventCount(taskId) {
-    const { rows } = await client.query(
-      `SELECT COUNT(*)::int AS count
-         FROM task_events
-        WHERE task_id = $1::uuid`,
-      [taskId]
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT COUNT(*)::int AS count
+           FROM task_events
+          WHERE task_id = $1::uuid`,
+        [taskId]
+      )
     );
     return rows[0]?.count ?? 0;
   }
 
   async function getLatestTaskEvent(taskId) {
-    const { rows } = await client.query(
-      `SELECT id,
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id,
               to_status AS task_status,
               payload,
               idempotency_key
@@ -228,7 +231,8 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
         WHERE task_id = $1::uuid
         ORDER BY task_version DESC
         LIMIT 1`,
-      [taskId]
+        [taskId]
+      )
     );
     return rows[0] ?? null;
   }
@@ -262,8 +266,9 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
   }
 
   async function getWarehouseTransfer(transferId) {
-    const { rows } = await client.query(
-      `SELECT status,
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT status,
               dispatched_at,
               received_at,
               reconciled_at,
@@ -275,14 +280,16 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
          FROM warehouse_transfers
         WHERE id = $1::uuid
         LIMIT 1`,
-      [transferId]
+        [transferId]
+      )
     );
     return rows[0] ?? null;
   }
 
   async function getWarehouseTransferById(transferId) {
-    const { rows } = await client.query(
-      `SELECT id,
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id,
               transfer_code,
               status,
               from_branch_id,
@@ -292,15 +299,17 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
          FROM warehouse_transfers
         WHERE id = $1::uuid
         LIMIT 1`,
-      [transferId]
+        [transferId]
+      )
     );
     return rows[0] ?? null;
   }
 
   async function createHandlingUnit(organizationId, branchId, code) {
     const handlingUnitId = randomUUID();
-    await client.query(
-      `INSERT INTO handling_units (
+    await withFixtureAdminContext(client, () =>
+      client.query(
+        `INSERT INTO handling_units (
         id,
         organization_id,
         branch_id,
@@ -315,7 +324,8 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
         'open',
         $4
       )`,
-      [handlingUnitId, organizationId, branchId, code]
+        [handlingUnitId, organizationId, branchId, code]
+      )
     );
     return handlingUnitId;
   }
@@ -348,8 +358,9 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
   }
 
   async function getScanEvent(scanEventId) {
-    const { rows } = await client.query(
-      `SELECT id,
+    const { rows } = await withFixtureAdminContext(client, () =>
+      client.query(
+        `SELECT id,
               scan_type,
               checkpoint_key,
               checkpoint_sequence,
@@ -361,7 +372,8 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
          FROM scan_events
         WHERE id = $1::uuid
         LIMIT 1`,
-      [scanEventId]
+        [scanEventId]
+      )
     );
     return rows[0] ?? null;
   }
@@ -377,16 +389,18 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
     );
     const shipmentIds = [];
 
-    await client.query(
-      `INSERT INTO branches (id, organization_id, code, name, timezone, is_active)
-       VALUES ($1::uuid, $2::uuid, $3, $4, 'UTC', true)`,
-      [fromBranchId, organizationId, `from-${suffix}`, `From Branch ${suffix}`]
-    );
-    await client.query(
-      `INSERT INTO branches (id, organization_id, code, name, timezone, is_active)
-       VALUES ($1::uuid, $2::uuid, $3, $4, 'UTC', true)`,
-      [toBranchId, organizationId, `to-${suffix}`, `To Branch ${suffix}`]
-    );
+    await withFixtureAdminContext(client, async () => {
+      await client.query(
+        `INSERT INTO branches (id, organization_id, code, name, timezone, is_active)
+         VALUES ($1::uuid, $2::uuid, $3, $4, 'UTC', true)`,
+        [fromBranchId, organizationId, `from-${suffix}`, `From Branch ${suffix}`]
+      );
+      await client.query(
+        `INSERT INTO branches (id, organization_id, code, name, timezone, is_active)
+         VALUES ($1::uuid, $2::uuid, $3, $4, 'UTC', true)`,
+        [toBranchId, organizationId, `to-${suffix}`, `To Branch ${suffix}`]
+      );
+    });
 
     for (let index = 0; index < manifestCount; index += 1) {
       const shipment = await createShipment(client, {

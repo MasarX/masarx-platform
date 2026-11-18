@@ -7,7 +7,6 @@ const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const DEFAULT_CONFIG_PATH = path.join(repoRoot, 'config', 'ci', 'runner-classes.json');
-const VALID_MODES = new Set(['primary', 'breakglass']);
 
 function die(message) {
   throw new Error(`[resolve-runner-config] ${message}`);
@@ -65,15 +64,10 @@ function normalizeClassConfig(classId, entry) {
   const repositoryVar = String(entry.repository_var || '').trim();
   if (!repositoryVar) die(`runner class "${classId}" missing repository_var.`);
   const defaultLabels = normalizeLabelArray(entry.default_runner_labels_json, `${classId}.default_runner_labels_json`);
-  const breakglassLabels = normalizeLabelArray(
-    entry.breakglass_runner_labels_json,
-    `${classId}.breakglass_runner_labels_json`,
-  );
   return {
     classId,
     repositoryVar,
     defaultRunnerLabelsJson: defaultLabels,
-    breakglassRunnerLabelsJson: breakglassLabels,
     expectedPrimaryLabelsJson: normalizeLabelArray(
       entry.expected_primary_labels_json || entry.default_runner_labels_json,
       `${classId}.expected_primary_labels_json`,
@@ -115,23 +109,8 @@ function loadRunnerClasses(configPath) {
   }
   return {
     configPath: targetPath,
-    enterprise_runner_mode_var: String(payload.enterprise_runner_mode_var || '').trim(),
-    enterprise_runner_breakglass_var: String(payload.enterprise_runner_breakglass_var || '').trim(),
-    breakglass_repository_var: String(payload.breakglass_repository_var || '').trim(),
+    pr_admission_runner_policy: String(payload.pr_admission_runner_policy || '').trim(),
     classes: normalized,
-  };
-}
-
-function normalizeMode(env = process.env) {
-  const rawMode = String(env.ENTERPRISE_RUNNER_MODE || 'primary').trim().toLowerCase();
-  const rawBreakglass = String(env.ENTERPRISE_RUNNER_BREAKGLASS || '0').trim();
-  if (!VALID_MODES.has(rawMode)) {
-    die(`ENTERPRISE_RUNNER_MODE must be one of ${Array.from(VALID_MODES).join(', ')} (got: ${rawMode || '<empty>'}).`);
-  }
-  const breakglassEnabled = rawBreakglass === '1' || rawMode === 'breakglass';
-  return {
-    enterpriseMode: rawMode,
-    breakglassEnabled,
   };
 }
 
@@ -157,38 +136,23 @@ function parseLabelJson(rawValue, repositoryVar) {
   return normalizeLabelArray(parsed, repositoryVar);
 }
 
-function resolveRunner(entry, env = process.env, overrideLabelsJson = '') {
-  const mode = normalizeMode(env);
-  const configuredLabels = parseLabelJson(env[entry.repositoryVar], entry.repositoryVar);
-  const sharedBreakglassLabels = parseLabelJson(env.RUNNER_LABELS_BREAKGLASS_JSON, 'RUNNER_LABELS_BREAKGLASS_JSON');
+function resolveRunner(entry, env = process.env, overrideLabelsJson = '', contract = {}) {
   const overrideLabels = parseLabelJson(overrideLabelsJson, 'runner_labels_json');
   if (overrideLabels) {
-    const runnerLabel = String(overrideLabels[0] || '').trim();
-    if (!runnerLabel) {
-      die(`Resolved override labels for "${entry.classId}" must include at least one label.`);
-    }
-    return {
-      runner_class: entry.classId,
-      repository_var: entry.repositoryVar,
-      runner_label: runnerLabel,
-      runner_labels_json: JSON.stringify(overrideLabels),
-      resolution_source: 'input-override',
-      enterprise_mode: mode.enterpriseMode,
-      breakglass_enabled: mode.breakglassEnabled ? '1' : '0',
-      trust_tier: entry.trustTier,
-      purpose: entry.purpose,
-    };
+    die('runner_labels_json overrides are forbidden; runner classes are source-bound to the self-hosted SSOT.');
   }
-  const labels = mode.breakglassEnabled
-    ? sharedBreakglassLabels || entry.breakglassRunnerLabelsJson
-    : configuredLabels || entry.defaultRunnerLabelsJson;
-  const resolutionSource = mode.breakglassEnabled
-    ? sharedBreakglassLabels
-      ? 'shared-breakglass-repository-var'
-      : 'breakglass'
-    : configuredLabels
-      ? 'repository-var'
-      : 'config-default';
+  if (contract.pr_admission_runner_policy !== 'local_only') {
+    die('Runner class contract must set pr_admission_runner_policy=local_only.');
+  }
+  const configuredLabels = parseLabelJson(env[entry.repositoryVar], entry.repositoryVar);
+  const labels = configuredLabels || entry.defaultRunnerLabelsJson;
+  if (JSON.stringify(labels) !== JSON.stringify(entry.expectedPrimaryLabelsJson)) {
+    die(`Resolved labels for "${entry.classId}" must match its expected_primary_labels_json contract.`);
+  }
+  const hostedLabel = labels.find((label) => /^(?:ubuntu|windows|macos)-/i.test(label));
+  if (hostedLabel) {
+    die(`GitHub-hosted runner label "${hostedLabel}" is forbidden for "${entry.classId}".`);
+  }
   const runnerLabel = String(labels[0] || '').trim();
   if (!runnerLabel) {
     die(`Resolved runner labels for "${entry.classId}" must include at least one label.`);
@@ -198,9 +162,8 @@ function resolveRunner(entry, env = process.env, overrideLabelsJson = '') {
     repository_var: entry.repositoryVar,
     runner_label: runnerLabel,
     runner_labels_json: JSON.stringify(labels),
-    resolution_source: resolutionSource,
-    enterprise_mode: mode.enterpriseMode,
-    breakglass_enabled: mode.breakglassEnabled ? '1' : '0',
+    resolution_source: configuredLabels ? 'repository-var' : 'config-default',
+    runner_policy: 'self_hosted_only',
     trust_tier: entry.trustTier,
     purpose: entry.purpose,
   };
@@ -217,7 +180,7 @@ function main(argv = process.argv.slice(2), env = process.env) {
   const args = parseArgs(argv);
   const contract = loadRunnerClasses(args.config);
   const runnerEntry = getRunnerClass(contract, args.runnerClass);
-  const result = resolveRunner(runnerEntry, env, args.runnerLabelsJson);
+  const result = resolveRunner(runnerEntry, env, args.runnerLabelsJson, contract);
   const format = String(args.format || '').trim().toLowerCase();
   if (format === 'github-output') {
     writeGithubOutput(result);
@@ -237,13 +200,11 @@ if (require.main === module) {
 }
 
 module.exports = {
-  VALID_MODES,
   parseArgs,
   resolveConfigPath,
   normalizeLabelArray,
   normalizeClassConfig,
   loadRunnerClasses,
-  normalizeMode,
   getRunnerClass,
   parseLabelJson,
   resolveRunner,

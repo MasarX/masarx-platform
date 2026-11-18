@@ -7,12 +7,32 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 -- Increase statement timeout to avoid cancellation in cloud during worker execution
 SET LOCAL statement_timeout TO '120s';
 
-SELECT plan(12);
+SELECT plan(17);
 
 SELECT has_role('edge_api_caller_role');
 SELECT ok(
     has_function_privilege('edge_api_caller_role', 'public.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
-    'edge_api_caller_role can execute log_api_call_event'
+    'edge_api_caller_role can execute public.log_api_call_event'
+);
+SELECT ok(
+    has_function_privilege('edge_api_caller_role', 'api.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
+    'edge_api_caller_role can execute api.log_api_call_event'
+);
+SELECT ok(
+    NOT has_function_privilege('anon', 'public.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
+    'anon cannot execute public.log_api_call_event'
+);
+SELECT ok(
+    NOT has_function_privilege('anon', 'api.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
+    'anon cannot execute api.log_api_call_event'
+);
+SELECT ok(
+    NOT has_function_privilege('authenticated', 'public.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
+    'authenticated cannot execute public.log_api_call_event'
+);
+SELECT ok(
+    NOT has_function_privilege('authenticated', 'api.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
+    'authenticated cannot execute api.log_api_call_event'
 );
 
 -- Reset throttle so worker can run immediately

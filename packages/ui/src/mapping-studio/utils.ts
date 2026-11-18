@@ -12,6 +12,7 @@ import type {
 export type StudioFieldRule = {
   target_field: string;
   source_path?: string | null;
+  source_paths?: string[];
   source_column?: string | null;
   sample_value?: unknown;
   confidence?: number | null;
@@ -136,6 +137,9 @@ export function normalizeRulesFromMappingConfig(mappingConfig: Record<string, un
   if (!fieldMappings) return [] as StudioFieldRule[];
 
   return Object.entries(fieldMappings).map(([target, raw]) => {
+    if (Array.isArray(raw) && raw.some((entry) => typeof entry !== "string")) {
+      throw new Error(`Mapping fallback paths for ${target} must all be strings.`);
+    }
     const first = Array.isArray(raw)
       ? raw.find((entry): entry is string => typeof entry === "string") ?? null
       : typeof raw === "string"
@@ -144,6 +148,7 @@ export function normalizeRulesFromMappingConfig(mappingConfig: Record<string, un
     return {
       target_field: target,
       source_path: first,
+      ...(Array.isArray(raw) ? { source_paths: [...raw] as string[] } : {}),
       source_column: first?.startsWith("column:") ? first.slice("column:".length) : null,
       confidence: 1,
       source: "runtime_mapping",
@@ -160,6 +165,7 @@ export function buildReviewMappingConfig(
     .map((rule) => ({
       target_field: rule.target_field,
       source_path: rule.source_path ?? (rule.source_column ? `column:${rule.source_column}` : null),
+      ...(rule.source_paths ? { source_paths: [...rule.source_paths] } : {}),
       source_column: rule.source_column ?? null,
       sample_value: rule.sample_value ?? null,
       confidence: rule.confidence ?? null,
@@ -179,6 +185,7 @@ export function buildRuntimeMappingConfig(
   artifact: MappingArtifact,
   rules: StudioFieldRule[],
   extra?: Record<string, unknown> | null,
+  original?: Record<string, unknown> | null,
 ) {
   if (artifact === "tabular_import") {
     return {
@@ -197,15 +204,22 @@ export function buildRuntimeMappingConfig(
     const targetField = rule.target_field.trim();
     if (!targetField) return;
     const sourcePath = (rule.source_path ?? (rule.source_column ? `column:${rule.source_column}` : "")).trim();
+    if (rule.source_paths) {
+      field_mappings[targetField] = rule.source_paths.length === 0 && !sourcePath
+        ? []
+        : [rule.source_path ?? "", ...rule.source_paths.slice(1)].filter((path) => path.trim().length > 0);
+      return;
+    }
     if (!sourcePath) return;
     field_mappings[targetField] = sourcePath;
   });
 
   return {
     version: 1,
-    artifact,
-    field_mappings,
+    ...(original ?? {}),
+    ...(rules.length === 0 && original?.transforms && !original.field_mappings ? {} : { field_mappings }),
     ...(extra ?? {}),
+    artifact,
   };
 }
 

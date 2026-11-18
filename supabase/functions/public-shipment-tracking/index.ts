@@ -1,5 +1,5 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
+import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
 type JsonRecord = Record<string, unknown>;
@@ -37,74 +37,6 @@ const LOCAL_TRACKING_IP_HASH_SALT = "local-public-tracking";
 
 const asString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 const isJwtLike = (value: string): boolean => String(value || "").trim().split(".").length === 3;
-const isLocalHostname = (value: string): boolean => {
-  const normalized = String(value || "").trim().toLowerCase();
-  // objectives:allow LOCALHOST Justification: local-runtime detection must explicitly recognize loopback hosts for workspace QA failover behavior.
-  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "rvzwwjlztwwisjthghnipgjr.example.invalid";
-};
-const isLocalRuntime = (() => {
-  try {
-    const hostname = new URL(SUPABASE_URL).hostname;
-    return isLocalHostname(hostname);
-  } catch {
-    return false;
-  }
-})();
-
-const normalizeOrigin = (value: string): string => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
-    return parsed.origin;
-  } catch {
-    return "";
-  }
-};
-
-const parseOriginAllowlist = (
-  raw: string,
-): { origins: Set<string>; invalid: string[] } => {
-  const invalid: string[] = [];
-  const origins = new Set<string>();
-  const parts = String(raw || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  for (const part of parts) {
-    const normalized = normalizeOrigin(part);
-    if (!normalized) invalid.push(part);
-    else origins.add(normalized);
-  }
-
-  return { origins, invalid };
-};
-
-const CORS_ALLOWLIST = parseOriginAllowlist(TRACKING_CORS_ALLOW_ORIGINS);
-const ALLOWED_ORIGINS = CORS_ALLOWLIST.origins;
-const CORS_ALLOWLIST_CONFIGURED =
-  ALLOWED_ORIGINS.size > 0 &&
-  CORS_ALLOWLIST.invalid.length === 0;
-const LOCAL_TRACKING_ORIGINS = new Set([
-  // objectives:allow LOCALHOST Justification: local browser QA for public tracking requires explicit loopback origins when the deployed allowlist is absent.
-  "http://127.0.0.1:3333", "http://localhost:3333", "http://127.0.0.1:3000", "http://localhost:3000",
-]);
-
-const isLocalRequest = (req: Request): boolean => {
-  const hostHeader = String(req.headers.get("x-forwarded-host") || req.headers.get("host") || "")
-    .trim()
-    .split(":")[0]
-    .toLowerCase();
-  if (isLocalHostname(hostHeader)) return true;
-  try {
-    return isLocalHostname(new URL(req.url).hostname);
-  } catch {
-    return false;
-  }
-};
-
 const json = (status: number, body: JsonRecord, corsHeaders: HeadersInit) =>
   new Response(JSON.stringify(body), {
     status,
@@ -130,94 +62,12 @@ const mapRpcErrorToStatus = (code: string): number => {
   }
 };
 
-type CorsResult =
-  | { ok: true; origin: string; headers: HeadersInit; localContext: boolean }
-  | {
-      ok: false;
-      origin: string;
-      status: number;
-      body: JsonRecord;
-      headers: HeadersInit;
-      localContext: boolean;
-    };
-
-const buildCorsHeaders = (req: Request): CorsResult => {
-  const originRaw = req.headers.get("origin")?.trim() ?? "";
-  const origin = normalizeOrigin(originRaw);
-  const localContext =
-    isLocalRuntime ||
-    isLocalRequest(req) ||
-    Boolean(origin && LOCAL_TRACKING_ORIGINS.has(origin));
-  const effectiveOrigins = CORS_ALLOWLIST_CONFIGURED
-    ? ALLOWED_ORIGINS
-    : (localContext ? LOCAL_TRACKING_ORIGINS : new Set<string>());
-  const effectiveConfigured = effectiveOrigins.size > 0;
-
-  const baseHeaders = {
-    "Access-Control-Allow-Headers": "accept, content-type, authorization, apikey, x-client-info",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Max-Age": "600",
-    Vary: "Origin",
-  };
-
-  if (!effectiveConfigured) {
-    return {
-      ok: false,
-      origin: "",
-      status: 500,
-      body: {
-        ok: false,
-        error: {
-          code: "server_misconfigured",
-          message: CORS_ALLOWLIST.invalid.length ? "cors_allowlist_invalid" : "cors_allowlist_missing",
-        },
-      },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  if (!origin) {
-    return {
-      ok: false,
-      origin: "",
-      status: 403,
-      body: { ok: false, error: { code: "origin_required" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  if (!effectiveOrigins.has(origin)) {
-    return {
-      ok: false,
-      origin,
-      status: 403,
-      body: { ok: false, error: { code: "origin_not_allowed" } },
-      headers: {
-        ...baseHeaders,
-        "Access-Control-Allow-Origin": "null",
-      },
-      localContext,
-    };
-  }
-
-  return {
-    ok: true,
-    origin,
-    headers: {
-      ...baseHeaders,
-      "Access-Control-Allow-Origin": origin,
-    },
-    localContext,
-  };
-};
+const buildCorsHeaders = (req: Request) => resolveBrowserCorsPolicy(req, {
+  hostedAllowedOrigins: TRACKING_CORS_ALLOW_ORIGINS,
+  localAllowedOrigins: readEnv("PUBLIC_EDGE_LOCAL_CORS_ALLOW_ORIGINS"),
+  localQaEnabled: readEnv("PUBLIC_EDGE_LOCAL_QA_ENABLED") === "1",
+  allowedMethods: "POST, OPTIONS",
+});
 
 const readClientIp = (req: Request): string => {
   const candidates = [
@@ -327,7 +177,7 @@ const TRACKING_RPC_BY_ACTION: Record<string, string> = {
   request: "public_tracking_submit_request_v2",
 };
 
-serve(async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const cors = buildCorsHeaders(req);
 
   if (req.method === "OPTIONS") {

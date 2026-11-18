@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "MasarX Delivery Platform Edge API",
-    "version": "contract-2ad16e2458d8",
+    "version": "contract-06c5b9b5b8fc",
     "x-versioning-policy": "contract-<sha256(openapi_without_info.version)[:12]>",
     "description": "Public endpoints for MasarX partners and clients.\n\nProduction base:\n- https://vomhkplympywspxymnstltsw.example.invalid\n\nAsync event intake:\n- POST /v1/webhook\n\nCompatibility ingress (provider mirroring only):\n- /api/... (DB-driven route packs)\n\nLegacy URL-token compatibility:\n- https://vomhkplympywspxymnstltsw.example.invalid/t/<token>/...\n- https://vomhkplympywspxymnstltsw.example.invalid/v1/webhook?token=<token> (migration-only, deprecated)\n\nDefaults:\n- Webhook shipment-create events require active sender/client binding, typed mapping, terminal inbox readback, and workflow/shipment lineage.\n- Webhook shipment updates should use typed events such as update.status, update.address, update.driver, update.action, or update.attachment; generic shipment.updated is compatibility-only and must resolve to one typed intent.\n- Webhook cancellation uses shipment.canceled; shipment.cancelled is compatibility spelling only during mapping. Cancellation and reschedule events must resolve to workflow-backed shipment actions before terminal success.\n- API Gateway shipment-create routes default to workflow-engine processing, provider dispatch, canonical shipment readback, and Console-visible request/workflow/shipment lineage.\n\nNote:\n- /v1/webhook is not the synchronous shipment command API. If MasarX exposes partner shipment writes, those use explicit shipment resources/actions while still normalizing into the same workflow engine.",
     "contact": {
@@ -48,7 +48,7 @@
         ],
         "operationId": "postWebhook",
         "summary": "Primary webhook ingress",
-        "description": "Submit webhook payloads signed with your assigned token. The API validates idempotency and returns either an immediate acknowledgement (200) or an async receipt (202) once the event is queued. Shipment-create events require an active sender/client binding and typed mapping before they can materialize a shipment. Generic `shipment.updated` is compatibility-only: the payload must resolve to one typed update intent or the request is rejected. Cancellation uses `shipment.canceled`; `shipment.cancelled` is accepted only as a compatibility spelling during mapping. Reschedule uses `shipment.rescheduled` and must resolve to the workflow-backed reschedule action.",
+        "description": "Submit webhook payloads signed with your assigned token. The API validates idempotency and returns either an immediate acknowledgement (200) or an async receipt (202) once the event is queued. Shipment-create events require an active sender/client binding and typed mapping before they can materialize a shipment. An async ACK is not confirmation that a cancellation or reschedule completed; confirm the downstream workflow outcome. Generic `shipment.updated` is compatibility-only: the payload must resolve to one typed update intent or the request is rejected. Inbound `shipment.canceled` and `shipment.cancelled` normalize to `shipment.delete`; `shipment.rescheduled` normalizes to `shipment.reschedule`. These ingress names are distinct from internal emitted `shipment_action.*` events. Reschedule requires a valid `slot_date` in workflow context or the resolved payload; provider `delivery.requested_date` requires an explicitly configured mapping to `slot_date` and is not a native alias. The opt-in strict mapped provider profiles in docs/providers/schemas require `shipment.cancel_reason` for cancellation and `delivery.requested_date` for reschedule; those profile constraints are not universal intake requirements.",
         "security": [
           {
             "WebhookBearer": []
@@ -220,7 +220,7 @@
             }
           },
           "202": {
-            "description": "Asynchronous acknowledgement sent while downstream processing continues.",
+            "description": "Asynchronous intake acknowledgement while downstream processing continues; not confirmation that a shipment mutation completed. Use the correlation/workflow identifiers to confirm the terminal outcome.",
             "content": {
               "application/json": {
                 "schema": {
@@ -320,12 +320,14 @@
               },
               "type": {
                 "type": "string",
-                "description": "Webhook event type. Prefer explicit typed shipment update events (`update.status`, `update.address`, `update.driver`, `update.action`, `update.attachment`) over generic `shipment.updated`. Use `shipment.canceled` for cancellation and `shipment.rescheduled` for delivery-window changes.",
+                "description": "Inbound event name, not an internal emitted domain event. `shipment.canceled` and compatibility spelling `shipment.cancelled` normalize to `shipment.delete`; `shipment.rescheduled` normalizes to `shipment.reschedule`. Prefer explicit typed shipment update events (`update.status`, `update.address`, `update.driver`, `update.action`, `update.attachment`) over generic `shipment.updated`.",
                 "enum": [
                   "shipment.created",
                   "shipment.updated",
                   "shipment.canceled",
+                  "shipment.cancelled",
                   "shipment.rescheduled",
+                  "shipment.reschedule",
                   "shipment.modify",
                   "shipment.delete",
                   "shipment.swap",
@@ -517,7 +519,7 @@
           },
           "cancellation": {
             "type": "object",
-            "description": "Cancellation metadata for shipment.canceled events.",
+            "description": "Optional cancellation metadata for shipment.canceled / shipment.cancelled events. This is distinct from the required shipment.cancel_reason field in the opt-in strict mapped provider cancellation profile.",
             "properties": {
               "reason": {
                 "type": "string"
@@ -547,7 +549,7 @@
       },
       "WebhookAckBody": {
         "type": "object",
-        "description": "Standard acknowledgement body configured per webhook source.",
+        "description": "Standard acknowledgement body configured per webhook source. An accepted_async receipt confirms intake, not downstream mutation success; confirm the linked workflow's terminal outcome. Duplicate idempotency keys replay the stored ACK rather than applying the mutation again.",
         "properties": {
           "status": {
             "type": "string",

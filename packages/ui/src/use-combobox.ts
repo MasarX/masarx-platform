@@ -62,10 +62,20 @@ export function useCombobox({
 
   // Total count for keyboard nav (options + create row if shown)
   const itemCount = filteredOptions.length + (showCreateRow ? 1 : 0);
+  const firstEnabledIndex = filteredOptions.findIndex((option) => !option.disabled);
+  const initialActiveIndex = firstEnabledIndex >= 0
+    ? firstEnabledIndex
+    : showCreateRow ? filteredOptions.length : -1;
 
   React.useEffect(() => {
-    if (open) setActiveIndex(0);
-  }, [open, query]);
+    if (open) setActiveIndex(initialActiveIndex);
+  }, [open, query, initialActiveIndex]);
+
+  React.useEffect(() => {
+    if (activeIndex >= itemCount || filteredOptions[activeIndex]?.disabled) {
+      setActiveIndex(initialActiveIndex);
+    }
+  }, [activeIndex, filteredOptions, initialActiveIndex, itemCount]);
 
   React.useEffect(() => {
     if (onSearch) onSearch(query);
@@ -107,18 +117,20 @@ export function useCombobox({
 
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key === "ArrowDown") {
+      // Enter confirms an IME composition before it can select an option.
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        setActiveIndex((prev) =>
-          itemCount > 0 ? (prev + 1) % itemCount : 0
-        );
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveIndex((prev) =>
-          itemCount > 0 ? (prev - 1 + itemCount) % itemCount : 0
-        );
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setActiveIndex((prev) => {
+          for (let step = 1; step <= itemCount; step += 1) {
+            const next = (prev + direction * step + itemCount) % itemCount;
+            if (next === filteredOptions.length || !filteredOptions[next]?.disabled) {
+              return next;
+            }
+          }
+          return -1;
+        });
         return;
       }
       if (event.key === "Enter") {

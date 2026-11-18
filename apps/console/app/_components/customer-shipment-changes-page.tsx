@@ -11,7 +11,7 @@ type CustomerShipmentChangesPageProps = Parameters<
 const CustomerShipmentChangesPageInner =
   UiCustomerShipmentChangesPage as unknown as (
     props: CustomerShipmentChangesPageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function CustomerShipmentChangesPage(
   props: CustomerShipmentChangesPageProps,

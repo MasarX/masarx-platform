@@ -3,7 +3,7 @@ type ExpoAppIntegrityModule = {
   generateKeyAsync: () => Promise<string>;
   attestKeyAsync: (keyId: string, challenge: string) => Promise<string>;
   generateAssertionAsync: (keyId: string, challenge: string) => Promise<string>;
-  prepareIntegrityTokenProviderAsync: (cloudProjectNumber: number) => Promise<void>;
+  prepareIntegrityTokenProviderAsync: (cloudProjectNumber: string) => Promise<void>;
   requestIntegrityCheckAsync: (requestHash: string) => Promise<string>;
 };
 
@@ -54,7 +54,7 @@ export async function generateIosAssertionAsync(keyId: string, challenge: string
 }
 
 export async function prepareAndroidIntegrityTokenProviderAsync(
-  cloudProjectNumber: number
+  cloudProjectNumber: string
 ): Promise<void> {
   return requireAppIntegrityModule().prepareIntegrityTokenProviderAsync(cloudProjectNumber);
 }

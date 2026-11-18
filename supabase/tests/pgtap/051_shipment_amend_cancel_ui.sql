@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(22);
+SELECT plan(38);
 
 SELECT ok(
   EXISTS (
@@ -261,6 +261,125 @@ SELECT function_privs_are(
   ARRAY['EXECUTE'],
   'api.shipment_amend_cancel_v1 is executable by authenticated'
 );
+
+
+SELECT matches(
+  pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure),
+  'progress_workflow_run_until_wait_v1',
+  'shipment_amend_cancel_v1 reuses the shared inline workflow progress helper'
+);
+
+SELECT ok(
+  NOT (
+    strpos(
+      lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
+      'pg_sleep('
+    ) > 0
+  ),
+  'shipment_amend_cancel_v1 does not maintain a bespoke inline sleep loop'
+);
+
+SELECT matches(
+  pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure),
+  'WHEN SQLSTATE ''42501'' THEN[[:space:]]+RAISE;[[:space:]]+WHEN others THEN[[:space:]]+v_inline_error := SQLERRM;',
+  'shipment_amend_cancel_v1 propagates authorization denial while retaining nonsecurity inline diagnostics'
+);
+
+
+SELECT matches(
+  pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure),
+  'v_inline_error := NULLIF[(]v_progress->>''error'', ''''[)];',
+  'shipment_amend_cancel_v1 retains returned shared-helper error diagnostics'
+);
+
+SELECT function_privs_are(
+  'public', 'shipment_amend_cancel_options_v1', ARRAY['uuid'], 'anon',
+  ARRAY[]::text[],
+  'public.shipment_amend_cancel_options_v1 denies anon'
+);
+
+SELECT function_privs_are(
+  'api', 'shipment_amend_cancel_options_v1', ARRAY['uuid'], 'anon',
+  ARRAY[]::text[],
+  'api.shipment_amend_cancel_options_v1 denies anon'
+);
+
+SELECT function_privs_are(
+  'api', 'shipment_amend_cancel_v1', ARRAY['jsonb'], 'anon',
+  ARRAY[]::text[],
+  'api.shipment_amend_cancel_v1 denies anon'
+);
+
+SELECT function_privs_are(
+  'public', 'shipment_amend_cancel_options_v1', ARRAY['uuid'], 'service_role',
+  ARRAY['EXECUTE'],
+  'public.shipment_amend_cancel_options_v1 allows service_role'
+);
+
+SELECT function_privs_are(
+  'public', 'shipment_amend_cancel_v1', ARRAY['jsonb'], 'service_role',
+  ARRAY['EXECUTE'],
+  'public.shipment_amend_cancel_v1 allows service_role'
+);
+
+SELECT function_privs_are(
+  'api', 'shipment_amend_cancel_options_v1', ARRAY['uuid'], 'service_role',
+  ARRAY['EXECUTE'],
+  'api.shipment_amend_cancel_options_v1 allows service_role'
+);
+
+SELECT function_privs_are(
+  'api', 'shipment_amend_cancel_v1', ARRAY['jsonb'], 'service_role',
+  ARRAY['EXECUTE'],
+  'api.shipment_amend_cancel_v1 allows service_role'
+);
+
+SELECT function_privs_are(
+  'public', 'shipment_amend_cancel_options_v1', ARRAY['uuid'], 'authenticated',
+  ARRAY['EXECUTE'],
+  'public.shipment_amend_cancel_options_v1 allows authenticated'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+    WHERE p.oid = 'public.shipment_amend_cancel_options_v1(uuid)'::regprocedure
+      AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+  ),
+  'public.shipment_amend_cancel_options_v1 denies PUBLIC execute'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+    WHERE p.oid = 'public.shipment_amend_cancel_v1(jsonb)'::regprocedure
+      AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+  ),
+  'public.shipment_amend_cancel_v1 denies PUBLIC execute'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+    WHERE p.oid = 'api.shipment_amend_cancel_options_v1(uuid)'::regprocedure
+      AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+  ),
+  'api.shipment_amend_cancel_options_v1 denies PUBLIC execute'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+    WHERE p.oid = 'api.shipment_amend_cancel_v1(jsonb)'::regprocedure
+      AND acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+  ),
+  'api.shipment_amend_cancel_v1 denies PUBLIC execute'
+);
+
 
 SELECT * FROM finish();
 

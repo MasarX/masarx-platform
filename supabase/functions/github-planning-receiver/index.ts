@@ -48,7 +48,7 @@ function hexToBytes(hex: string): Uint8Array {
 
 async function verifySignature(rawBody: string, signatureHeader: string): Promise<boolean> {
   const signature = String(signatureHeader || "").trim();
-  if (!signature.startsWith("sha256=") || !WEBHOOK_SECRET) return false;
+  if (!/^sha256=[0-9a-f]{64}$/.test(signature) || !WEBHOOK_SECRET) return false;
   const provided = hexToBytes(signature.replace(/^sha256=/, ""));
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
@@ -133,7 +133,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const signature = String(req.headers.get("x-hub-signature-256") || "").trim();
-  const { raw: rawBody, json } = await parseRequestBody(req);
+  let rawBody: string;
+  let json: unknown;
+  try {
+    ({ raw: rawBody, json } = await parseRequestBody(req));
+  } catch {
+    return jsonResponse(400, { error: "invalid_json" });
+  }
   const validSignature = await verifySignature(rawBody, signature);
   if (!validSignature) {
     logStructured("warn", "github_planning_receiver.signature.invalid", {

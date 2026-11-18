@@ -25,23 +25,23 @@
   },
   "observability": {
     "trace": {
-      "title": "Activity timeline",
-      "description": "Unified activity view for operational events and workflow runs.",
-      "unavailable": "Activity history unavailable.",
-      "correlationLabel": "Tracking key: {id}",
+      "title": "الخط الزمني للنشاط",
+      "description": "عرض موحّد للأحداث التشغيلية وعمليات تشغيل سير العمل.",
+      "unavailable": "سجل النشاط غير متاح.",
+      "correlationLabel": "مفتاح التتبع: {id}",
       "errors": {
-        "load": "Unable to load activity history."
+        "load": "تعذّر تحميل سجل النشاط."
       },
       "sections": {
-        "summary": "Activity summary",
-        "observability": "Activity events",
+        "summary": "ملخص النشاط",
+        "observability": "أحداث النشاط",
         "domain": "Domain events",
         "workflowRuns": "Workflow runs"
       },
       "empty": {
-        "observability": "No activity events recorded for this reference.",
-        "domain": "No domain events recorded for this reference.",
-        "workflowRuns": "No workflow runs recorded for this reference."
+        "observability": "لا توجد أحداث نشاط مسجلة لهذا المرجع.",
+        "domain": "لا توجد أحداث نطاق مسجلة لهذا المرجع.",
+        "workflowRuns": "لا توجد عمليات تشغيل سير عمل مسجلة لهذا المرجع."
       }
     },
     "workflowRun": {
@@ -50,8 +50,8 @@
       "description": "Execution detail and step timeline for a single workflow run.",
       "unavailable": "Workflow run detail unavailable.",
       "notFound": "Workflow run not found.",
-      "viewTrace": "View activity timeline",
-      "noCorrelation": "No tracking key found for this workflow run.",
+      "viewTrace": "عرض الخط الزمني للنشاط",
+      "noCorrelation": "لا يوجد مفتاح تتبع لعملية تشغيل سير العمل هذه.",
       "openTemplate": "Open workflow template",
       "summary": {
         "duration": "المدة",

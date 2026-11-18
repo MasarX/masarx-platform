@@ -44,7 +44,7 @@ const ANDROID_PACKAGE_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
 const NON_STABLE_EXPO_TAG_RE = /(alpha|beta|canary|next|preview|rc)/i;
 const DEFAULT_SCREENSHOT_MAX_AGE_HOURS = 24 * 7;
 const DEFAULT_PREFLIGHT_PROFILE = 'release';
-const ALLOWED_PREFLIGHT_PROFILES = Object.freeze(['release', 'ci']);
+const ALLOWED_PREFLIGHT_PROFILES = Object.freeze(['release', 'ci', 'convergence']);
 
 function resolveRepoRoot(startDir) {
   let current = path.resolve(startDir || process.cwd());
@@ -459,6 +459,96 @@ function resolveLatestNativeRuntimeManifest(repoRoot) {
   return resolveLatestManifestBySubdir(repoRoot, NATIVE_SCREENSHOT_SUBDIR);
 }
 
+function validateFieldopsStorePreflightProfile(profileValue, env = process.env) {
+  const profile = normalizeEnvValue(profileValue).toLowerCase() || DEFAULT_PREFLIGHT_PROFILE;
+  if (!ALLOWED_PREFLIGHT_PROFILES.includes(profile)) {
+    throw new Error(`Invalid FieldOps store preflight profile: ${profile}`);
+  }
+  if (profile !== 'convergence') return profile;
+  const deployEnvironment = [
+    env.TARGET_DEPLOY_ENV,
+    env.DEPLOY_ENV,
+    env.DEPLOY_ENVIRONMENT,
+  ].map((value) => normalizeEnvValue(value).toLowerCase()).find(Boolean);
+  if (normalizeEnvValue(env.FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED) !== '1' || deployEnvironment) {
+    throw new Error(
+      'The convergence preflight profile requires FIELDOPS_NATIVE_ACCEPTANCE_DEFERRED=1 and cannot be used by deploy environments.',
+    );
+  }
+  return profile;
+}
+
+function evaluateNativeScreenshotManifest(options = {}) {
+  const repoRoot = resolveRepoRoot(options.repoRoot || process.cwd());
+  const env = options.env && typeof options.env === 'object' ? options.env : process.env;
+  const envProfile = normalizeEnvValue(env.FIELDOPS_STORE_PREFLIGHT_PROFILE).toLowerCase();
+  const profile =
+    normalizeEnvValue(options.profile).toLowerCase() ||
+    (ALLOWED_PREFLIGHT_PROFILES.includes(envProfile) ? envProfile : '') ||
+    DEFAULT_PREFLIGHT_PROFILE;
+  validateFieldopsStorePreflightProfile(profile, env);
+  const nativeEvidenceRequired = profile !== 'convergence';
+  const envMaxScreenshotAgeHours = Number.parseInt(
+    normalizeEnvValue(env.FIELDOPS_SCREENSHOT_MAX_AGE_HOURS),
+    10,
+  );
+  const maxScreenshotAgeHours = Number.isFinite(options.maxScreenshotAgeHours)
+    ? Number(options.maxScreenshotAgeHours)
+    : Number.isFinite(envMaxScreenshotAgeHours) && envMaxScreenshotAgeHours > 0
+      ? envMaxScreenshotAgeHours
+      : DEFAULT_SCREENSHOT_MAX_AGE_HOURS;
+  const explicitManifest = nativeEvidenceRequired
+    ? normalizeEnvValue(options.manifestPath) ||
+      normalizeEnvValue(env.FIELDOPS_NATIVE_SCREENSHOT_MANIFEST_PATH)
+    : '';
+  const manifestPath = nativeEvidenceRequired
+    ? explicitManifest
+      ? path.resolve(repoRoot, explicitManifest)
+      : resolveLatestNativeRuntimeManifest(repoRoot)
+    : null;
+  const checks = [];
+  if (!nativeEvidenceRequired) {
+    ensureCheck(
+      checks,
+      'screenshots.native.acceptance',
+      false,
+      'Native Android/iOS acceptance is explicitly deferred for browser/backend convergence and does not provide release proof.',
+      false,
+    );
+  }
+  if (nativeEvidenceRequired) {
+    ensureCheck(
+      checks,
+      'screenshots.native.manifest.exists',
+      Boolean(manifestPath && fs.existsSync(manifestPath)),
+      manifestPath
+        ? `Using native screenshot manifest: ${manifestPath}`
+        : `No native screenshot manifest found under docs/ops/evidence/<date>/mobile-fieldops/${NATIVE_SCREENSHOT_SUBDIR}/manifest.json`,
+    );
+  }
+  if (nativeEvidenceRequired && manifestPath && fs.existsSync(manifestPath)) {
+    evaluateScreenshotManifest(readJson(manifestPath), checks, {
+      manifestDir: path.dirname(manifestPath),
+      maxScreenshotAgeHours,
+      checkPrefix: 'screenshots.native',
+      required: nativeEvidenceRequired,
+      freshnessRequired: profile === 'release',
+      expectedCaptureMode: 'native_runtime',
+      expectedCaptureSources: ['adb', 'simctl'],
+    });
+  }
+  const summary = summarizeChecks(checks);
+  return {
+    manifestPath,
+    maxScreenshotAgeHours,
+    profile,
+    native_evidence_status: nativeEvidenceRequired ? 'required' : 'deferred',
+    native_release_eligible: false,
+    checks,
+    summary,
+  };
+}
+
 function evaluateScreenshotManifest(manifest, checks, options = {}) {
   const manifestDir = normalizeEnvValue(options.manifestDir) ? path.resolve(options.manifestDir) : null;
   const maxScreenshotAgeHours = Number.isFinite(options.maxScreenshotAgeHours)
@@ -490,6 +580,21 @@ function evaluateScreenshotManifest(manifest, checks, options = {}) {
         : 'Missing manifest captured_at timestamp.',
     freshnessRequired,
   );
+
+  if (expectedCaptureMode === 'native_runtime') {
+    // Negative legacy classification only: absence of these markers is NOT native-app authenticity.
+    const entries = [manifest, ...(Array.isArray(manifest?.selftests) ? manifest.selftests : []),
+      ...(Array.isArray(manifest?.scenarios) ? manifest.scenarios : [])];
+    const knownPrototype = normalizeEnvValue(manifest?.capture_mode).toLowerCase() === 'device_browser_prototype'
+      || entries.some(entry => {
+        const value = normalizeEnvValue(entry?.url);
+        try { return decodeURIComponent(value).toLowerCase().includes('version-c.html'); }
+        catch { return value.toLowerCase().includes('version-c.html'); }
+      });
+    ensureCheck(checks, `${checkPrefix}.manifest.not_known_prototype`, !knownPrototype,
+      knownPrototype ? 'Device-browser prototype screenshots cannot prove the native FieldOps app.'
+        : 'No known prototype marker found; this check does not establish native-app provenance.', required);
+  }
 
   if (expectedCaptureMode) {
     const actualCaptureMode = normalizeEnvValue(manifest?.capture_mode).toLowerCase();
@@ -761,16 +866,6 @@ function runFieldopsStorePreflight(options = {}) {
     normalizeEnvValue(options.profile).toLowerCase() ||
     (ALLOWED_PREFLIGHT_PROFILES.includes(envProfile) ? envProfile : '') ||
     DEFAULT_PREFLIGHT_PROFILE;
-  const envMaxScreenshotAgeHours = Number.parseInt(
-    normalizeEnvValue(process.env.FIELDOPS_SCREENSHOT_MAX_AGE_HOURS),
-    10,
-  );
-  const maxScreenshotAgeHours = Number.isFinite(options.maxScreenshotAgeHours)
-    ? Number(options.maxScreenshotAgeHours)
-    : Number.isFinite(envMaxScreenshotAgeHours) && envMaxScreenshotAgeHours > 0
-      ? envMaxScreenshotAgeHours
-      : DEFAULT_SCREENSHOT_MAX_AGE_HOURS;
-
   const checks = [];
   const envContract = loadEnvContract(repoRoot, checks);
   validateRequiredEnv(checks, process.env, envContract.buildKeys, 'fieldops.build');
@@ -784,34 +879,16 @@ function runFieldopsStorePreflight(options = {}) {
   );
 
   const envNativeManifest = normalizeEnvValue(process.env.FIELDOPS_NATIVE_SCREENSHOT_MANIFEST_PATH);
-  const explicitNativeManifest = options.nativeManifestPath
-    ? path.resolve(repoRoot, options.nativeManifestPath)
-    : options.manifestPath
-      ? path.resolve(repoRoot, options.manifestPath)
-      : envNativeManifest
-        ? path.resolve(repoRoot, envNativeManifest)
-        : null;
-  const nativeManifestPath = explicitNativeManifest || resolveLatestNativeRuntimeManifest(repoRoot);
-  ensureCheck(
-    checks,
-    'screenshots.native.manifest.exists',
-    Boolean(nativeManifestPath && fs.existsSync(nativeManifestPath)),
-    nativeManifestPath
-      ? `Using native screenshot manifest: ${nativeManifestPath}`
-      : `No native screenshot manifest found under docs/ops/evidence/<date>/mobile-fieldops/${NATIVE_SCREENSHOT_SUBDIR}/manifest.json`,
-  );
-  if (nativeManifestPath && fs.existsSync(nativeManifestPath)) {
-    const manifest = readJson(nativeManifestPath);
-    evaluateScreenshotManifest(manifest, checks, {
-      manifestDir: path.dirname(nativeManifestPath),
-      maxScreenshotAgeHours,
-      checkPrefix: 'screenshots.native',
-      required: true,
-      freshnessRequired: profile === 'release',
-      expectedCaptureMode: 'native_runtime',
-      expectedCaptureSources: ['adb', 'simctl'],
-    });
-  }
+  const nativeAdmission = evaluateNativeScreenshotManifest({
+    repoRoot,
+    env: process.env,
+    profile,
+    maxScreenshotAgeHours: options.maxScreenshotAgeHours,
+    manifestPath: options.nativeManifestPath || options.manifestPath || envNativeManifest,
+  });
+  checks.push(...nativeAdmission.checks);
+  const nativeManifestPath = nativeAdmission.manifestPath;
+  const maxScreenshotAgeHours = nativeAdmission.maxScreenshotAgeHours;
 
   const explicitSampleManifest = options.sampleManifestPath
     ? path.resolve(repoRoot, options.sampleManifestPath)
@@ -848,6 +925,8 @@ function runFieldopsStorePreflight(options = {}) {
     generated_at: new Date().toISOString(),
     strict,
     profile,
+    native_evidence_status: nativeAdmission.native_evidence_status,
+    native_release_eligible: strict && profile === 'release' && summary.pass,
     repo_root: repoRoot,
     env_contract_path: envContract.path,
     manifest_path: nativeManifestPath || null,
@@ -910,6 +989,7 @@ module.exports = {
   SAMPLE_SCREENSHOT_SUBDIR,
   ALLOWED_PREFLIGHT_PROFILES,
   UUID_V4_OR_V5_RE,
+  evaluateNativeScreenshotManifest,
   evaluateScreenshotManifest,
   formatDateYmd,
   isExpoVersionStable,
@@ -922,6 +1002,7 @@ module.exports = {
   resolveRepoRoot,
   runFieldopsStorePreflight,
   summarizeChecks,
+  validateFieldopsStorePreflightProfile,
   validateIosScreenshotParityCss,
   validateEasConfig,
   writeReport,

@@ -13,6 +13,7 @@ import {
   createWorkflowTemplateDraftViaUi,
   ensureWorkflowTemplateFlowHasStep,
   keyboardZoomWorkflowTemplateFlowCanvas,
+  toggleWorkflowTemplateFlowStepEnabledAndVerifyPersistence,
   wheelZoomWorkflowTemplateFlowCanvas,
 } from "./utils/workflow-studio";
 
@@ -63,6 +64,7 @@ test.describe("console workflow studio smoke", () => {
   });
 
   test("loads workflow studio and operation library", async ({ page }) => {
+    test.slow();
     if (!demoContext.available) {
       test.skip(true, demoContext.reason ?? "Demo accounts missing.");
     }
@@ -121,10 +123,33 @@ test.describe("console workflow studio smoke", () => {
         }
       }
 
-      const { templateId } = await createWorkflowTemplateDraftViaUi({
-        page,
-        basePath,
-        testIdPrefix: "console",
+      const createdTemplateIds: string[] = [];
+      let templateId = "";
+      for (let index = 0; index < 3; index += 1) {
+        const draft = await createWorkflowTemplateDraftViaUi({
+          page,
+          basePath,
+          testIdPrefix: "console",
+          namePrefix: `e2e_smoke_workflow_${index + 1}`,
+        });
+        templateId = draft.templateId;
+        createdTemplateIds.push(templateId);
+
+        await ensureWorkflowTemplateFlowHasStep({ page, testIdPrefix: "console" });
+        await toggleWorkflowTemplateFlowStepEnabledAndVerifyPersistence({
+          page,
+          testIdPrefix: "console",
+        });
+
+        await page.goto(templatesRoute, { waitUntil: "domcontentloaded", timeout: 60_000 });
+        await expect(templatesReady).toBeVisible({ timeout: 60_000 });
+        await expect(page.getByText(draft.workflowName, { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+      }
+      expect(createdTemplateIds).toHaveLength(3);
+      expect(new Set(createdTemplateIds).size).toBe(3);
+      await page.goto(`${basePath}/workflows/templates/${encodeURIComponent(templateId)}`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
       });
       expect(templateId, "workflow template id should exist").toBeTruthy();
 
@@ -141,6 +166,13 @@ test.describe("console workflow studio smoke", () => {
       await expect(
         page.locator('[data-testid="console-workflow-template-studio-steps-ready"]')
       ).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId("console-workflow-template-studio-actions-status").click();
+      await page.getByTestId("console-workflow-template-studio-actions-status-select").selectOption("archived");
+      await page.getByTestId("console-workflow-template-studio-actions-status-reason")
+        .fill("Browser lifecycle qualification");
+      await page.getByTestId("console-workflow-template-studio-actions-status-submit").click();
+      await expect(page.getByTestId("console-workflow-template-studio-actions-status-modal"))
+        .toBeHidden({ timeout: 20_000 });
 
       const flowTab = page.locator(
         '[data-testid="console-workflow-template-studio-steps-tab-flow"]'

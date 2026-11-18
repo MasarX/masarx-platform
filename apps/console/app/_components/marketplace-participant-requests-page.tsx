@@ -11,7 +11,7 @@ type MarketplaceParticipantRequestsPageProps = Parameters<
 const MarketplaceParticipantRequestsPageInner =
   UiMarketplaceParticipantRequestsPage as unknown as (
     props: MarketplaceParticipantRequestsPageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function MarketplaceParticipantRequestsPage(
   props: MarketplaceParticipantRequestsPageProps,

@@ -1,26 +1,20 @@
-import { buildExcelExportBlob, parseTabularFile, TABULAR_FILE_ACCEPT } from "../../packages/ui/src/tabular-file";
+import { buildExcelExportBlob, parseTabularFile, parseTabularFileBuffer } from "../../packages/ui/src/tabular-file";
 
 const mockAddRow = jest.fn();
 const mockAddWorksheet = jest.fn(() => ({ addRow: mockAddRow }));
 const mockWriteBuffer = jest.fn();
-const mockSheetToJson = jest.fn();
-const mockReadWorkbook = jest.fn();
+const mockLoad = jest.fn();
+const mockWorksheets: Array<unknown> = [];
 
 jest.mock("exceljs", () => ({
   Workbook: jest.fn(() => ({
     addWorksheet: mockAddWorksheet,
+    worksheets: mockWorksheets,
     xlsx: {
-      load: jest.fn(),
+      load: mockLoad,
       writeBuffer: mockWriteBuffer,
     },
   })),
-}));
-
-jest.mock("xlsx", () => ({
-  read: (...args: unknown[]) => mockReadWorkbook(...args),
-  utils: {
-    sheet_to_json: (...args: unknown[]) => mockSheetToJson(...args),
-  },
 }));
 
 describe("tabular file export", () => {
@@ -45,54 +39,43 @@ describe("tabular file export", () => {
   });
 });
 
-describe("tabular file import", () => {
+describe("tabular file previews", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockWorksheets.length = 0;
+    mockLoad.mockResolvedValue(undefined);
   });
 
-  test("advertises CSV, XLS, and XLSX imports", () => {
-    expect(TABULAR_FILE_ACCEPT).toBe(".csv,.xls,.xlsx");
+  test.each(["csv", "xlsx"])("returns only 20 %s preview records with the exact 49-row total", async (format) => {
+    const rows = [["External ID", "Status"], ...Array.from({ length: 49 }, (_, index) => [`ext-${index + 1}`, "active"])];
+    mockWorksheets.push({
+      name: "Hidden", state: "hidden",
+    }, {
+      name: "Visible", state: "visible", rowCount: rows.length, columnCount: 2,
+      getRow: (index: number) => ({ getCell: (column: number) => ({ value: rows[index - 1]?.[column - 1] }) }),
+    }, {
+      name: "Selected", state: "visible", rowCount: rows.length, columnCount: 2,
+      getRow: (index: number) => ({ getCell: (column: number) => ({ value: rows[index - 1]?.[column - 1] }) }),
+    });
+    const buffer = new TextEncoder().encode(rows.map((row) => row.join(",")).join("\n")).buffer as ArrayBuffer;
+    const parsed = await parseTabularFileBuffer(buffer, `orders.${format}`, "Selected");
+    expect(parsed.totalRows).toBe(49);
+    expect(parsed.rows).toHaveLength(20);
+    expect(parsed.rows[19]).toEqual({ "External ID": "ext-20", Status: "active" });
+    expect(parsed.selectedSheet).toBe(format === "xlsx" ? "Selected" : "Sheet1");
+    expect(parsed.workbookSheets).toEqual(format === "xlsx" ? ["Visible", "Selected"] : ["Sheet1"]);
+    const file = { name: `orders.${format}`, arrayBuffer: async () => buffer } as File;
+    await expect(parseTabularFile(file, "Selected")).resolves.toEqual(parsed);
   });
 
-  test("parses legacy XLS workbooks through the workbook runtime", async () => {
-    const sheet = { "!ref": "A1:B2" };
-    mockReadWorkbook.mockReturnValue({
-      SheetNames: ["Shipments", "Hidden"],
-      Sheets: { Shipments: sheet },
-      Workbook: {
-        Sheets: [
-          { name: "Shipments", Hidden: 0 },
-          { name: "Hidden", Hidden: 1 },
-        ],
-      },
-    });
-    mockSheetToJson.mockReturnValue([
-      ["tracking_number", "recipient_name"],
-      ["SHP-XLS-1", "Legacy Receiver"],
-    ]);
+  test.each(["", "External ID,Status\n"])("empty buffered input stays empty (%p)", async (csv) => {
+    const parsed = await parseTabularFileBuffer(new TextEncoder().encode(csv).buffer as ArrayBuffer, "orders.csv");
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.totalRows).toBe(0);
+  });
 
-    const parsed = await parseTabularFile({
-      name: "shipments.xls",
-      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
-    } as File);
-
-    expect(mockReadWorkbook).toHaveBeenCalledWith(expect.any(ArrayBuffer), {
-      type: "array",
-      raw: false,
-      cellDates: true,
-    });
-    expect(mockSheetToJson).toHaveBeenCalledWith(sheet, {
-      header: 1,
-      defval: "",
-      blankrows: false,
-    });
-    expect(parsed).toEqual({
-      format: "xls",
-      fileName: "shipments.xls",
-      workbookSheets: ["Shipments"],
-      selectedSheet: "Shipments",
-      headers: ["tracking_number", "recipient_name"],
-      rows: [{ tracking_number: "SHP-XLS-1", recipient_name: "Legacy Receiver" }],
-    });
+  test("preserves format and unreadable-sheet failures", async () => {
+    await expect(parseTabularFileBuffer(new ArrayBuffer(0), "legacy.xls")).rejects.toThrow("Legacy .xls");
+    await expect(parseTabularFileBuffer(new ArrayBuffer(0), "orders.txt")).rejects.toThrow("Unsupported file format");
+    await expect(parseTabularFileBuffer(new ArrayBuffer(0), "orders.xlsx")).rejects.toThrow("readable worksheet");
   });
 });

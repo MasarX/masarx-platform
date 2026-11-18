@@ -90,110 +90,49 @@ function isProtectedPreviewHost(raw) {
 function normalizeLandingProofEndpoint(raw) {
   const value = String(raw || '').trim();
   if (!value) return '';
-  try {
-    const parsed = value.startsWith('/')
-      ? new URL(value, 'https://landing-proof.local')
-      : new URL(value);
-    parsed.search = '';
-    parsed.hash = '';
-    const pathname = (parsed.pathname || '/').replace(/\/+$/g, '') || '/';
-    return value.startsWith('/')
-      ? pathname
-      : `${parsed.protocol.toLowerCase()}//${parsed.hostname.toLowerCase()}${parsed.port ? `:${parsed.port}` : ''}${pathname}`;
-  } catch {
-    return value
-      .replace(/[?#].*$/g, '')
-      .replace(/\/+$/g, '');
+  if (value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error('Landing intake endpoints must not use protocol-relative URLs, backslashes or control characters.');
   }
-}
-
-function landingProofEndpointPathname(raw) {
-  const endpoint = normalizeLandingProofEndpoint(raw);
-  if (!endpoint) return '';
-  if (endpoint.startsWith('/')) return endpoint;
-  try {
-    return new URL(endpoint).pathname.replace(/\/+$/g, '') || '/';
-  } catch {
-    return endpoint.replace(/[?#].*$/g, '').replace(/\/+$/g, '');
+  const parsed = new URL(value, value.startsWith('/') ? 'https://landing-proof.invalid' : undefined);
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error('Landing intake endpoints must use HTTP(S) URLs without credentials.');
   }
+  const pathname = parsed.pathname.replace(/\/+$/g, '') || '/';
+  return value.startsWith('/') ? pathname : `${parsed.origin}${pathname}`;
 }
 
-function isMarketingLeadIntakeEndpoint(raw) {
-  return /(^|\/)marketing-lead-intake$/.test(landingProofEndpointPathname(raw));
-}
-
-function isTenantSignupIntakeEndpoint(raw) {
-  return /(^|\/)tenant-signup-intake$/.test(landingProofEndpointPathname(raw));
-}
-
-function isLocalLandingContactEndpoint(raw) {
-  return landingProofEndpointPathname(raw) === '/__landing-contact';
-}
-
-function isLocalTenantSignupEndpoint(raw) {
-  return landingProofEndpointPathname(raw) === '/__tenant-signup';
-}
-
-function isLocalSiteUrl(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return false;
+function isLocalSiteUrl(raw) {
   try {
-    const hostname = new URL(raw).hostname.toLowerCase();
-    return (
-      hostname === 'localhost' ||
-      hostname.endsWith('.localhost') ||
-      hostname === '127.0.0.1' ||
-      hostname === '[::1]' ||
-      hostname === '::1'
+    const { protocol, hostname } = new URL(String(raw || '').trim());
+    return ['http:', 'https:'].includes(protocol) && (
+      hostname === 'localhost' || hostname.endsWith('.localhost') ||
+      hostname === '127.0.0.1' || hostname === '[::1]'
     );
   } catch {
     return false;
   }
 }
 
-function assertLandingEndpointSeparation({
-  contactEndpoint,
-  siteUrl,
-  tenantSignupEndpoint,
-} = {}) {
+function assertLandingEndpointSeparation({ contactEndpoint, tenantSignupEndpoint, siteUrl } = {}) {
   const contact = normalizeLandingProofEndpoint(contactEndpoint);
   const tenantSignup = normalizeLandingProofEndpoint(tenantSignupEndpoint);
-  const allowLocalPreviewMocks = isLocalSiteUrl(siteUrl);
-
-  if (!contact) {
-    throw new Error('LANDING_CONTACT_ENDPOINT is required for release landing proof.');
-  }
+  if (!contact) throw new Error('LANDING_CONTACT_ENDPOINT is required for release landing proof.');
   if (!tenantSignup) {
-    throw new Error(
-      'LANDING_TENANT_SIGNUP_ENDPOINT is required for release landing proof and must not fall back to the contact endpoint.',
-    );
+    throw new Error('LANDING_TENANT_SIGNUP_ENDPOINT is required for release landing proof and must not fall back to contact.');
   }
-  if (
-    !isMarketingLeadIntakeEndpoint(contact) &&
-    !(allowLocalPreviewMocks && isLocalLandingContactEndpoint(contact))
-  ) {
-    throw new Error(
-      'LANDING_CONTACT_ENDPOINT must point to the marketing-lead-intake intake endpoint, or the approved local preview contact endpoint.',
-    );
+  for (const [name, endpoint, intake, mock] of [
+    ['LANDING_CONTACT_ENDPOINT', contact, 'marketing-lead-intake', '/__landing-contact'],
+    ['LANDING_TENANT_SIGNUP_ENDPOINT', tenantSignup, 'tenant-signup-intake', '/__tenant-signup'],
+  ]) {
+    const pathname = new URL(endpoint, 'https://landing-proof.invalid').pathname;
+    const localMock = pathname === mock && isLocalSiteUrl(siteUrl) &&
+      (endpoint.startsWith('/') || isLocalSiteUrl(endpoint));
+    if (!pathname.endsWith(`/${intake}`) && !localMock) {
+      throw new Error(`${name} must point to ${intake}, or its approved local preview mock on a local site.`);
+    }
   }
-  if (
-    !isTenantSignupIntakeEndpoint(tenantSignup) &&
-    !(allowLocalPreviewMocks && isLocalTenantSignupEndpoint(tenantSignup))
-  ) {
-    throw new Error(
-      'LANDING_TENANT_SIGNUP_ENDPOINT must point to the tenant-signup-intake intake endpoint, or the approved local preview signup endpoint.',
-    );
-  }
-  if (contact === tenantSignup) {
-    throw new Error(
-      'LANDING_TENANT_SIGNUP_ENDPOINT must point to tenant-signup-intake and must not reuse LANDING_CONTACT_ENDPOINT.',
-    );
-  }
-
-  return {
-    contactEndpoint: contact,
-    tenantSignupEndpoint: tenantSignup,
-  };
+  if (contact === tenantSignup) throw new Error('Landing contact and tenant signup endpoints must be distinct.');
+  return { contactEndpoint: contact, tenantSignupEndpoint: tenantSignup };
 }
 
 async function ensureProtectedPreviewBypass({
@@ -288,8 +227,8 @@ async function main(argv = process.argv.slice(2)) {
     case 'assert-landing-endpoint-separation': {
       assertLandingEndpointSeparation({
         contactEndpoint: process.env.LANDING_CONTACT_ENDPOINT,
-        siteUrl: process.env.LANDING_SITE_URL,
         tenantSignupEndpoint: process.env.LANDING_TENANT_SIGNUP_ENDPOINT,
+        siteUrl: process.env.LANDING_SITE_URL,
       });
       console.log('[release-verify] Landing proof endpoints are separated.');
       return;
@@ -310,6 +249,7 @@ module.exports = {
   buildPreviewManifestShellExports,
   ensureProtectedPreviewBypass,
   isProtectedPreviewHost,
+  isLocalSiteUrl,
   normalizeLandingProofEndpoint,
   resolvePreviewIdentityIdFromEvent,
   serializeShellExports,

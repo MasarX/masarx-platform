@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
+const crypto = require('crypto');
 const { loadEnv } = require('../utils/load-env');
 
+const invocationLocalEdgeEnabled = process.env.RUN_LOCAL_EDGE_TESTS === 'true';
+const invocationEdgeSmokeRequired = process.env.EDGE_SMOKE_REQUIRED === '1';
 loadEnv();
 
 const fetchImpl = globalThis.fetch;
@@ -61,8 +64,13 @@ const isLocalEnv =
   (process.env.ENV_FILE || '').includes('.env.local') ||
   (process.env.DATABASE_URL || '').includes('127.0.0.1') ||
   (process.env.DATABASE_URL || '').includes('localhost');
-const localEdgeEnabled = process.env.RUN_LOCAL_EDGE_TESTS === 'true';
+const localEdgeEnabled =
+  invocationLocalEdgeEnabled ||
+  process.env.RUN_LOCAL_EDGE_TESTS === 'true';
 if (isLocalEnv && !localEdgeEnabled) {
+  if (invocationEdgeSmokeRequired || process.env.EDGE_SMOKE_REQUIRED === '1') {
+    throw new Error('[edge-smoke] Local edge smoke is required but RUN_LOCAL_EDGE_TESTS is not true.');
+  }
   // Local edge smoke is optional; rely on cloud edge tests when disabled.
   console.log('[edge-smoke] Skipping local edge smoke (RUN_LOCAL_EDGE_TESTS!=true)');
   process.exit(0);
@@ -103,6 +111,19 @@ const assertStatus = (actual, expected, label) => {
   }
 };
 
+const assertHandlerReached = (res, label) => {
+  if (!String(res.headers.get('x-correlation-id') || '').trim()) {
+    throw new Error(`${label} did not reach the public function handler`);
+  }
+};
+
+const forgeJwtSignature = (token) => {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3 || !parts[2]) throw new Error('api-caller smoke JWT is malformed');
+  parts[2] = `${parts[2][0] === 'A' ? 'B' : 'A'}${parts[2].slice(1)}`;
+  return parts.join('.');
+};
+
 const truncate = (value, max = 600) => {
   const text = String(value || '');
   if (!text) return text;
@@ -135,6 +156,42 @@ const run = async () => {
   const results = [];
 
   // webhook-receiver: missing auth should 4xx; allow smoke bypass when enabled 
+  {
+    const res = await fetchWithRetries(`${functionsBase}/webhook-receiver`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-smoke-test': 'edge-allow' },
+      body: JSON.stringify({}),
+    });
+    assertStatus(res.status, smokeAllow ? [202] : [400, 401, 403], 'webhook-receiver unauthenticated');
+    assertHandlerReached(res, 'webhook-receiver');
+    results.push({ name: 'webhook-receiver', status: res.status });
+  }
+
+  if (webhookSmokeToken) {
+    const res = await fetchWithRetries(`${functionsBase}/webhook-receiver`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-smoke-test': 'edge-allow',
+        authorization: `Bearer ${webhookSmokeToken}`,
+      },
+      body: JSON.stringify(buildWebhookSmokePayload()),
+    });
+    assertStatus(res.status, smokeAllow ? [202] : [200, 202], 'webhook-receiver authenticated');
+    results.push({ name: 'webhook-receiver-auth', status: res.status, body: await toJson(res) });
+  }
+
+  // api-gateway: verify_jwt=false so missing token should return 401 (not JWT auth failure)
+  {
+    const res = await fetchWithRetries(`${functionsBase}/api-gateway`, {
+      method: 'GET',
+    });
+    assertStatus(res.status, 401, 'api-gateway missing token');
+    assertHandlerReached(res, 'api-gateway');
+    results.push({ name: 'api-gateway', status: res.status, body: await toJson(res) });
+  }
+
+  // label-renderer: empty queue should require auth (401/403) or return 204 when smoke bypass is enabled
   {
     // Console V2 Webhook tester invokes the receiver from the browser, so the
     // receiver must answer preflight for token, idempotency, and signature
@@ -169,44 +226,9 @@ const run = async () => {
     results.push({
       name: 'webhook-receiver-cors',
       status: preflight.status,
-      body: { allowOrigin, allowHeaders, allowMethods },
     });
   }
 
-  {
-    const res = await fetchWithRetries(`${functionsBase}/webhook-receiver`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-smoke-test': 'edge-allow' },
-      body: JSON.stringify({}),
-    });
-    assertStatus(res.status, smokeAllow ? [202] : [400, 401, 403], 'webhook-receiver unauthenticated');
-    results.push({ name: 'webhook-receiver', status: res.status });
-  }
-
-  if (webhookSmokeToken) {
-    const res = await fetchWithRetries(`${functionsBase}/webhook-receiver`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-smoke-test': 'edge-allow',
-        authorization: `Bearer ${webhookSmokeToken}`,
-      },
-      body: JSON.stringify(buildWebhookSmokePayload()),
-    });
-    assertStatus(res.status, smokeAllow ? [202] : [200, 202], 'webhook-receiver authenticated');
-    results.push({ name: 'webhook-receiver-auth', status: res.status, body: await toJson(res) });
-  }
-
-  // api-gateway: verify_jwt=false so missing token should return 401 (not JWT auth failure)
-  {
-    const res = await fetchWithRetries(`${functionsBase}/api-gateway`, {
-      method: 'GET',
-    });
-    assertStatus(res.status, 401, 'api-gateway missing token');
-    results.push({ name: 'api-gateway', status: res.status, body: await toJson(res) });
-  }
-
-  // label-renderer: empty queue should require auth (401/403) or return 204 when smoke bypass is enabled
   {
     // Browser designer preflight must succeed (CORS + OPTIONS handling).
     const designerOrigin = process.env.LABEL_DESIGNER_ORIGIN || 'https://label-designer.test';
@@ -272,18 +294,51 @@ const run = async () => {
     results.push({ name: 'label-renderer-auth', status: 'skipped', body: { reason: 'EDGE_REQUIRE_DB_JWT=0' } });
   }
 
+  function classifyApiCallerFailure(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return 'non_object_response';
+    if (body.error === 'Server missing EDGE_INTERNAL_CALLER_ROLES') return 'missing_internal_caller_roles';
+    if (body.status === 500 && body.completed === false && body.body === null) return 'caught_handler_exception';
+    if (typeof body.code === 'string') return 'runtime_code_response';
+    return 'unclassified_object_response';
+  }
+  const probeJobId = crypto.randomUUID();
   const res = await fetchWithRetries(`${functionsBase}/api-caller`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       ...(edgeInvokeJwt ? { authorization: `Bearer ${edgeInvokeJwt}` } : {}),
     },
-    body: JSON.stringify({ job_id: '00000000-0000-0000-0000-000000000000' }),
+    body: JSON.stringify({ job_id: probeJobId }),
   });
-  // With a valid internal JWT, accept 500 for invalid job id, 502 for dispatch failure, 200 for success.
-  // Without it, the auth layer should block the call (401/403) or report a server misconfiguration (500).
-  assertStatus(res.status, edgeInvokeJwt ? [200, 502, 500] : [401, 403, 500], 'api-caller dispatch');
-  results.push({ name: 'api-caller-dispatch', status: res.status, body: await toJson(res) });
+  const apiCallerBody = await toJson(res);
+  if (edgeInvokeJwt) {
+    if (res.status !== 502) {
+      throw new Error(`api-caller nonclaimable dispatch expected status 502, received ${res.status}; class=${classifyApiCallerFailure(apiCallerBody)}`);
+    }
+    assertStatus(res.status, 502, 'api-caller nonclaimable dispatch');
+    if (
+      apiCallerBody?.job_id !== probeJobId ||
+      apiCallerBody?.success !== false ||
+      apiCallerBody?.result?.status !== 409 ||
+      apiCallerBody?.result?.body?.reason !== 'job_not_claimable'
+    ) {
+      throw new Error('api-caller expected nonclaimable envelope; response omitted');
+    }
+
+    const forged = await fetchWithRetries(`${functionsBase}/api-caller`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${forgeJwtSignature(edgeInvokeJwt)}`,
+      },
+      body: JSON.stringify({ job_id: crypto.randomUUID() }),
+    });
+    assertStatus(forged.status, 401, 'api-caller forged JWT');
+    results.push({ name: 'api-caller-forged-jwt', status: forged.status });
+  } else {
+    assertStatus(res.status, [401, 403], 'api-caller missing auth');
+  }
+  results.push({ name: 'api-caller-dispatch', status: res.status });
 
   console.log('Edge smoke results');
   for (const item of results) {

@@ -8,7 +8,7 @@ import { ResourcePage } from "./resource-page";
 import { Section } from "./section";
 import { ShipmentResourcePage } from "./shipment-resource-page";
 import { createUiTranslator } from "./i18n";
-import { resolveTrackingConfig } from "./tracking-config";
+import { resolveTrackingConfig, resolveTrackingOperatorHandoff } from "./tracking-config";
 import { TrackingSearchForm } from "./tracking-search-form";
 import { formatUiError } from "./utils";
 import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
@@ -20,9 +20,8 @@ type TrackingPageProps = {
   appKey: "console" | "portal";
   appBasePath: string;
   testIdPrefix?: string;
+  locale?: string;
 };
-
-const t = createUiTranslator("ui.tracking");
 
 function firstValue(value: string | string[] | undefined) {
   if (Array.isArray(value)) return value[0];
@@ -37,18 +36,20 @@ export async function TrackingPage({
   appKey,
   appBasePath,
   testIdPrefix,
+  locale,
 }: TrackingPageProps) {
+  const t = createUiTranslator("ui.tracking", { locale });
   const ui = createUiServerClient();
   let trackingConfig = null;
   let configError: string | null = null;
 
   try {
-    trackingConfig = await ui.trackingRegistry();
+    trackingConfig = await ui.publicTrackingConfig();
   } catch (error) {
     configError = formatUiError(error, t("errors.loadConfig"));
   }
 
-  const { config, error } = resolveTrackingConfig(trackingConfig);
+  const { config, error } = resolveTrackingConfig(trackingConfig, locale);
   const configErrorMessage = configError ?? error;
   const errorTestId = testIdPrefix ? `${testIdPrefix}-error` : undefined;
   if (!config || configErrorMessage) {
@@ -69,6 +70,16 @@ export async function TrackingPage({
     firstValue(searchParams[config.paramKey]) ??
     firstValue(searchParams[config.filterKey]);
   const trackingNumber = rawTrackingNumber?.trim() ?? "";
+  let operatorHandoff = null;
+  if (appKey === "portal" && trackingNumber && config.resourceKey === "shipments") {
+    try {
+      const me = await ui.me();
+      if (me?.user?.id) {
+        const scoped = await ui.trackingRegistry();
+        if (scoped.resource_key === "shipments") operatorHandoff = resolveTrackingOperatorHandoff(scoped.operator_handoff);
+      }
+    } catch { /* Public lookup remains available without an authenticated handoff. */ }
+  }
   const resourceSearchParams: SearchParams = { ...searchParams };
 
   if (trackingNumber) {
@@ -109,6 +120,12 @@ export async function TrackingPage({
             filterKey={config.filterKey}
             testIdPrefix={testIdPrefix}
           />
+          {trackingNumber ? (
+            <p role="status" className="mt-3 text-xs text-ui-muted"
+              data-testid={testIdPrefix ? `${testIdPrefix}-query-readback` : undefined}>
+              {t("queryReadback", { trackingNumber })}
+            </p>
+          ) : null}
         </Section>
       </PageContainer>
       {trackingNumber ? (
@@ -117,6 +134,7 @@ export async function TrackingPage({
             appKey={appKey}
             appBasePath={appBasePath}
             searchParams={resourceSearchParams}
+            operatorHandoff={operatorHandoff}
             testIdPrefix={testIdPrefix ? `${testIdPrefix}-results` : "tracking-results"}
           />
         ) : (

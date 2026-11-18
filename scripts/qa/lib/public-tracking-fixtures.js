@@ -30,8 +30,8 @@ function readDemoManifest() {
 
 async function ensureBasePublicTrackingFixtures(client, demo) {
   const addressId = deterministicUuid(`qa-public-tracking-address:${demo.clientId}`);
-  const cityId = deterministicUuid(`qa-public-tracking-city:${demo.organizationId}`);
-  const districtId = deterministicUuid(`qa-public-tracking-district:${demo.organizationId}`);
+  const proposedCityId = deterministicUuid(`qa-public-tracking-city:${demo.organizationId}`);
+  const proposedDistrictId = deterministicUuid(`qa-public-tracking-district:${demo.organizationId}`);
   const zoneId = deterministicUuid(`qa-public-tracking-zone:${demo.organizationId}`);
   const branchId = deterministicUuid(`qa-public-tracking-branch:${demo.organizationId}`);
   const recipientOneId = deterministicUuid(`qa-public-tracking-recipient:1:${demo.clientId}`);
@@ -39,7 +39,7 @@ async function ensureBasePublicTrackingFixtures(client, demo) {
   const shipmentOneId = deterministicUuid(`qa-public-tracking-shipment:1:${demo.clientId}`);
   const shipmentTwoId = deterministicUuid(`qa-public-tracking-shipment:2:${demo.clientId}`);
 
-  await client.query(
+  const { rows: cityRows } = await client.query(
     `
       insert into public.canonical_cities (
         id,
@@ -59,7 +59,7 @@ async function ensureBasePublicTrackingFixtures(client, demo) {
         $2::uuid,
         'Riyadh',
         'الرياض',
-        array['Riyadh', 'Riyadh City']::text[],
+        array['Riyadh', 'Riyadh City', 'الرياض']::text[],
         'Riyadh',
         'SA',
         'manual_seed',
@@ -78,11 +78,16 @@ async function ensureBasePublicTrackingFixtures(client, demo) {
         centroid = coalesce(excluded.centroid, public.canonical_cities.centroid),
         is_active = excluded.is_active,
         updated_at = workflow_now()
+      returning id
     `,
-    [cityId, demo.organizationId]
+    [proposedCityId, demo.organizationId]
   );
+  if (cityRows?.length !== 1 || typeof cityRows[0]?.id !== 'string' || !cityRows[0].id.trim()) {
+    throw new Error('public tracking fixture city upsert returned no unique identity');
+  }
+  const cityId = cityRows[0].id;
 
-  await client.query(
+  const { rows: districtRows } = await client.query(
     `
       insert into public.canonical_districts (
         id,
@@ -117,9 +122,14 @@ async function ensureBasePublicTrackingFixtures(client, demo) {
         centroid = coalesce(excluded.centroid, public.canonical_districts.centroid),
         is_active = excluded.is_active,
         updated_at = workflow_now()
+      returning id
     `,
-    [districtId, demo.organizationId, cityId]
+    [proposedDistrictId, demo.organizationId, cityId]
   );
+  if (districtRows?.length !== 1 || typeof districtRows[0]?.id !== 'string' || !districtRows[0].id.trim()) {
+    throw new Error('public tracking fixture district upsert returned no unique identity');
+  }
+  const districtId = districtRows[0].id;
 
   await client.query(
     `

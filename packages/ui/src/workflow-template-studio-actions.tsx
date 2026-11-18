@@ -37,6 +37,11 @@ function normalizeStatus(status?: string | null) {
   return raw || null;
 }
 
+function normalizeLifecycleStatus(status?: string | null): "draft" | "active" | "archived" {
+  const normalized = normalizeStatus(status);
+  return normalized === "active" || normalized === "archived" ? normalized : "draft";
+}
+
 function formatPayloadForEditor(value: unknown) {
   if (value === null || value === undefined) return "{}";
   if (typeof value === "string") {
@@ -82,18 +87,32 @@ export function WorkflowTemplateStudioActions({
     ? `${resolvedTestIdPrefix}-test-run-submit`
     : undefined;
 
+  const statusTestId = resolvedTestIdPrefix
+    ? `${resolvedTestIdPrefix}-status`
+    : undefined;
+  const statusModalTestId = resolvedTestIdPrefix
+    ? `${resolvedTestIdPrefix}-status-modal`
+    : undefined;
+
   const capabilitySet = React.useMemo(
     () => resolveCapabilitySet(capabilities),
     [capabilities]
   );
   const canStart = hasCapability(capabilitySet, "workflow_runs.write");
 
-  const status = normalizeStatus(templateStatus);
+  const normalizedTemplateStatus = normalizeLifecycleStatus(templateStatus);
+  const [status, setStatus] = React.useState(normalizedTemplateStatus);
   const isActive = status === "active";
   const [open, setOpen] = React.useState(false);
   const [payload, setPayload] = React.useState(() => formatPayloadForEditor(defaultPayload));
   const [allowInactive, setAllowInactive] = React.useState(() => !isActive);
   const [pending, setPending] = React.useState(false);
+  const [statusOpen, setStatusOpen] = React.useState(false);
+  const [statusPending, setStatusPending] = React.useState(false);
+  const [nextStatus, setNextStatus] = React.useState<"draft" | "active" | "archived">(
+    normalizedTemplateStatus
+  );
+  const [statusReason, setStatusReason] = React.useState("");
   const safeBasePath = React.useMemo(
     () => resolveSafeAppBasePath(appBasePath),
     [appBasePath]
@@ -110,6 +129,11 @@ export function WorkflowTemplateStudioActions({
     },
     [safeBasePath]
   );
+
+  React.useEffect(() => {
+    setStatus(normalizedTemplateStatus);
+    setNextStatus(normalizedTemplateStatus);
+  }, [normalizedTemplateStatus]);
 
   React.useEffect(() => {
     setAllowInactive(!isActive);
@@ -213,8 +237,39 @@ export function WorkflowTemplateStudioActions({
     toast,
   ]);
 
+  const canPublishMarketplace = hasCapability(capabilitySet, "automation_marketplace.publish");
+  const marketplaceT = createUiTranslator("ui.automationMarketplace");
+  const publishHref = safeBasePath === null ? null : resolveSafeHref(safeBasePath, `/automation/marketplace/publish?asset_kind=workflow_template&source_id=${encodeURIComponent(templateId)}`);
+
+  const handleStatusChange = React.useCallback(async () => {
+    const reason = statusReason.trim();
+    if (!canStart || statusPending || !reason) return;
+    setStatusPending(true);
+    try {
+      const ui = createUiClient();
+      await ui.setWorkflowTemplateStatus({
+        workflowTemplateId: templateId,
+        status: nextStatus,
+        reason,
+      });
+      setStatus(nextStatus);
+      setStatusOpen(false);
+      setStatusReason("");
+      toast({ tone: "success", title: t("toast.status.successTitle") });
+    } catch (error) {
+      toast({
+        tone: "error",
+        title: t("toast.status.errorTitle"),
+        description: formatUiError(error, t("toast.status.errorTitle")),
+      });
+    } finally {
+      setStatusPending(false);
+    }
+  }, [canStart, nextStatus, statusPending, statusReason, t, templateId, toast]);
+
   return (
     <>
+      {canPublishMarketplace && publishHref ? <Button asChild type="button" size="sm" variant="ghost"><a href={publishHref}>{marketplaceT("publish")}</a></Button> : null}
       <Button
         type="button"
         size="sm"
@@ -223,6 +278,16 @@ export function WorkflowTemplateStudioActions({
         data-testid={runTestId}
       >
         {triggerLabel ?? t("actions.testRun")}
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        onClick={() => setStatusOpen(true)}
+        disabled={!canStart}
+        data-testid={statusTestId}
+      >
+        {t("actions.changeStatus")}
       </Button>
       <Modal
         open={open}
@@ -290,6 +355,68 @@ export function WorkflowTemplateStudioActions({
               data-testid={submitTestId}
             >
               {pending ? t("actions.testRunModal.running") : t("actions.testRunModal.run")}
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+      <Modal
+        open={statusOpen}
+        onOpenChange={(nextOpen) => {
+          if (statusPending && !nextOpen) return;
+          setStatusOpen(nextOpen);
+        }}
+      >
+        <ModalContent data-testid={statusModalTestId}>
+          <ModalHeader>
+            <ModalTitle>{t("actions.statusModal.title")}</ModalTitle>
+            <ModalDescription>{t("actions.statusModal.description")}</ModalDescription>
+          </ModalHeader>
+          <div className="space-y-4 text-sm">
+            <div className="space-y-2">
+              <label htmlFor={`${resolvedTestIdPrefix || "workflow-template"}-status-select`}>
+                {t("actions.statusModal.statusLabel")}
+              </label>
+              <select
+                id={`${resolvedTestIdPrefix || "workflow-template"}-status-select`}
+                className="w-full rounded-xl border border-ui-border bg-ui-surface px-3 py-2"
+                value={nextStatus}
+                onChange={(event) => setNextStatus(normalizeLifecycleStatus(event.target.value))}
+                disabled={statusPending}
+                data-testid={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-status-select` : undefined}
+              >
+                <option value="draft">{t("actions.statusModal.statuses.draft")}</option>
+                <option value="active">{t("actions.statusModal.statuses.active")}</option>
+                <option value="archived">{t("actions.statusModal.statuses.archived")}</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor={`${resolvedTestIdPrefix || "workflow-template"}-status-reason`}>
+                {t("actions.statusModal.reasonLabel")}
+              </label>
+              <textarea
+                id={`${resolvedTestIdPrefix || "workflow-template"}-status-reason`}
+                className="min-h-[96px] w-full rounded-xl border border-ui-border bg-ui-surface px-3 py-2"
+                value={statusReason}
+                onChange={(event) => setStatusReason(event.target.value)}
+                required
+                disabled={statusPending}
+                data-testid={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-status-reason` : undefined}
+              />
+            </div>
+          </div>
+          <ModalFooter>
+            <ModalClose asChild>
+              <Button type="button" variant="ghost" disabled={statusPending}>
+                {t("actions.statusModal.cancel")}
+              </Button>
+            </ModalClose>
+            <Button
+              type="button"
+              onClick={() => void handleStatusChange()}
+              disabled={statusPending || !statusReason.trim()}
+              data-testid={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-status-submit` : undefined}
+            >
+              {statusPending ? t("actions.statusModal.saving") : t("actions.statusModal.save")}
             </Button>
           </ModalFooter>
         </ModalContent>

@@ -7,6 +7,7 @@ const { loadEnv } = require('../../utils/load-env');
 const { resolveDatabaseUrlWithFallback } = require('../../utils/resolve-db-url');
 const {
   evaluateOperatorAccounts,
+  normalizeRequiredAccount: normalizeCoreAccount,
   resolveEnvironmentName,
 } = require('./operator-access-core');
 
@@ -46,18 +47,10 @@ function readConfig(filePath) {
 }
 
 function normalizeRequiredAccount(entry = {}) {
-  const rawDeliveryMode = String(entry.delivery_mode || 'invite').trim().toLowerCase();
-  const deliveryMode = rawDeliveryMode === 'breakglass' ? 'breakglass' : 'invite';
   return {
-    key: String(entry.key || '').trim(),
-    email: String(entry.email || '').trim().toLowerCase(),
-    user_type: String(entry.user_type || '').trim().toLowerCase(),
-    access_scope_type: String(entry.access_scope_type || '').trim().toLowerCase(),
+    ...normalizeCoreAccount(entry),
     status: 'active',
-    delivery_mode: deliveryMode,
-    enabled: entry.enabled !== false,
     require_wildcard_capability: String(entry.user_type || '').trim().toLowerCase() === 'super_admin',
-    require_password_credential: deliveryMode === 'breakglass',
   };
 }
 

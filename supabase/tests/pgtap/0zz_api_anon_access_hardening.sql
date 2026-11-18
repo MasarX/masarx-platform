@@ -1,9 +1,9 @@
 -- Plan: PLAN-202601-schema-reaudit-v2 / Step: S95
--- Test: `anon` has no access to the Data API contract surface (`api` schema).
+-- Test: `anon` has access only to the exact public tracking API facade.
 --
 -- Rationale
 -- - Enterprise default: no unauthenticated access to application data.
--- - Defense-in-depth: `anon` should not even have schema USAGE on internal schemas.
+-- - The public tracking page requires one whitelisted browser-safe RPC.
 
 BEGIN;
 
@@ -12,8 +12,8 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(4);
 
 SELECT ok(
-  NOT has_schema_privilege('anon', 'api', 'usage'),
-  'anon has no USAGE on schema api'
+  has_schema_privilege('anon', 'api', 'usage'),
+  'anon has api schema USAGE for the exact public tracking facade'
 );
 
 SELECT is(
@@ -41,9 +41,10 @@ SELECT is(
     JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'api'
       AND has_function_privilege('anon', p.oid, 'execute')
+      AND p.oid <> 'api.public_tracking_config_v1()'::regprocedure
   ),
   0::bigint,
-  'anon has no EXECUTE on api functions'
+  'anon has no EXECUTE on api functions outside the public tracking facade'
 );
 
 SELECT ok(

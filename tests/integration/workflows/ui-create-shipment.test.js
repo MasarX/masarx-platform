@@ -10,6 +10,8 @@ const {
   createUser,
   applySetting,
   setAuthContext,
+  setFixtureAdminContext,
+  withFixtureAdminContext,
   cleanupAutoOnboardingArtifacts,
 } = require("../helpers/tenant-utils");
 
@@ -29,6 +31,8 @@ describe("ui_create_shipment_v1", () => {
   let otherUserId;
   let limitedUserId;
   let trackingPolicyVersionId;
+  let serviceLevelId;
+  let serviceOfferingId;
 
   beforeAll(async () => {
     const admin = await pool.connect();
@@ -107,6 +111,30 @@ describe("ui_create_shipment_v1", () => {
         schemaVersion: 1,
         approvedAt: new Date().toISOString(),
       });
+
+      const { rows: levelRows } = await admin.query(
+        `INSERT INTO public.service_levels (organization_id, key, name, metadata)
+         VALUES ($1::uuid, 'standard', 'Integration standard', '{}'::jsonb)
+         RETURNING id`,
+        [organizationId]
+      );
+      serviceLevelId = levelRows[0].id;
+      const { rows: branchRows } = await admin.query(
+        `INSERT INTO public.branches (organization_id, code, name, timezone, is_active)
+         VALUES ($1::uuid, $2::text, 'UI create branch', 'Asia/Riyadh', TRUE)
+         RETURNING id`,
+      [organizationId, `ui${Date.now().toString().slice(-8)}`]
+      );
+      const { rows: offeringRows } = await admin.query(
+        `INSERT INTO public.service_offerings (
+           service_level_id, branch_id, priority, is_active, metadata
+         ) VALUES (
+           $1::uuid, $2::uuid, 10, TRUE,
+           jsonb_build_object('display', jsonb_build_object('name', 'Integration offering'))
+         ) RETURNING id`,
+        [serviceLevelId, branchRows[0].id]
+      );
+      serviceOfferingId = offeringRows[0].id;
     } finally {
       admin.release();
     }
@@ -265,14 +293,14 @@ describe("ui_create_shipment_v1", () => {
     expect(result.correlation_id).toBeTruthy();
     expect(result.tracking_number).toBe(trackingNumber);
 
-    const { rows: workflowRows } = await client.query(
+    const { rows: workflowRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `
         SELECT workflow_status, triggered_by_request_id, context
         FROM workflow_runs
         WHERE id = $1::uuid
       `,
       [result.workflow_run_id]
-    );
+    ));
     expect(workflowRows[0]?.workflow_status).toBe("completed");
     expect(workflowRows[0]?.triggered_by_request_id).toBe(result.correlation_id);
     expect(workflowRows[0]?.context?.shipment?.id).toBe(result.shipment_id);
@@ -302,7 +330,7 @@ describe("ui_create_shipment_v1", () => {
     ).toBe(true);
     expect(shipmentCreateTraceEvent).toBeTruthy();
 
-    const { rows: stepRows } = await client.query(
+    const { rows: stepRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `
         SELECT step_status, decision_log_id, operation_result
         FROM workflow_run_steps
@@ -312,14 +340,14 @@ describe("ui_create_shipment_v1", () => {
         LIMIT 1
       `,
       [result.workflow_run_id]
-    );
+    ));
     expect(stepRows[0]?.step_status).toBe("completed");
     expect(stepRows[0]?.decision_log_id).toBeTruthy();
     expect(stepRows[0]?.operation_result?.shipment_id).toBe(result.shipment_id);
 
     // Read the workflow decision inside the same transaction so the spec does
     // not depend on cross-connection visibility before the test commits.
-    await client.query("RESET ROLE");
+    await setFixtureAdminContext(client);
     const { rows: decisionRows } = await client.query(
       `
         SELECT decision_category, decision_inputs->>'handler_key' AS handler_key
@@ -332,8 +360,180 @@ describe("ui_create_shipment_v1", () => {
     expect(decisionRows[0]?.handler_key).toBe("shipment_create");
   });
 
+  async function reportFailedAddressWorkflow(result) {
+    if (result.workflow_status !== 'failed' || !result.workflow_run_id) return;
+    // Read before this test rolls back. Never emit raw errors, payloads, or context.
+    const { rows } = await withFixtureAdminContext(client, db => db.query(`
+      SELECT CASE WHEN handler_key ~ '^[a-z][a-z0-9_]{0,79}$'
+        THEN handler_key ELSE 'unclassified_handler' END AS handler,
+        step_status,
+        CASE WHEN operation_result->>'error_code' ~ '^[0-9A-Z]{5}$'
+          THEN operation_result->>'error_code' ELSE NULL END AS error_code,
+        CASE
+          WHEN last_error ILIKE '%permission denied%' THEN 'permission_denied'
+          WHEN last_error ILIKE '%lookup%' THEN 'lookup_contract'
+          WHEN last_error ILIKE '%does not exist%' THEN 'missing_sql_object'
+          WHEN last_error ILIKE '%not-null%' OR last_error ILIKE '%null value%' THEN 'required_value'
+          WHEN last_error ILIKE '%foreign key%' THEN 'foreign_key'
+          WHEN last_error ILIKE '%check constraint%' THEN 'check_constraint'
+          WHEN last_error ILIKE '%invalid input syntax%' THEN 'invalid_sql_value'
+          ELSE 'unclassified_workflow_failure'
+        END AS reason
+      FROM public.workflow_run_steps WHERE workflow_run_id=$1::uuid AND step_status='failed'
+      ORDER BY sequence_order LIMIT 8`, [result.workflow_run_id]));
+    console.info('[address-create-failure]', JSON.stringify(rows));
+  }
+
+  test("API destination capture persists normalized address and verifies duplicate readback", async () => {
+    const tracking = "F54-" + Date.now();
+    const address = { line1: "King Road", city: "Riyadh", country: "SA",
+      shortNationalAddress: "rrrd2929", coordinates: { latitude: 24.7136, longitude: 46.6753 } };
+    const call = () => client.query(
+      "SELECT api.ui_create_shipment_v1($1::uuid,$2::uuid,'delivery',$3::text,NULL,NULL,'pending',$4::jsonb) AS result",
+      [clientId, senderId, tracking, JSON.stringify({ service_offering_id: serviceOfferingId, destination_address: address })]
+    );
+    const result = (await call()).rows[0].result;
+    await reportFailedAddressWorkflow(result);
+    expect(result.workflow_status).toBe("completed");
+    expect(result.destination_address_capture).toMatchObject({
+      status: "verified", sa_short_code: "RRRD2929",
+      coordinates: { latitude: 24.7136, longitude: 46.6753 },
+    });
+    const rows = (await client.query(
+      "SELECT a.sa_short_code, a.province, ST_Y(a.coordinates::geometry) AS lat, ST_X(a.coordinates::geometry) AS lng FROM public.shipments s JOIN public.addresses a ON a.id=s.destination_address_id WHERE s.id=$1::uuid",
+      [result.shipment_id]
+    )).rows;
+    expect(rows[0]).toEqual({ sa_short_code: "RRRD2929", province: "Riyadh", lat: 24.7136, lng: 46.6753 });
+    const replay = (await call()).rows[0].result;
+    expect(replay.shipment_id).toBe(result.shipment_id);
+    expect(replay.destination_address_capture).toEqual(result.destination_address_capture);
+  });
+
+  test.each([
+    [{ province: "Explicit province", region: "Other region" }, "Explicit province"],
+    [{ region: "Explicit region" }, "Explicit region"],
+    [{ province: " ", region: " " }, "Riyadh"],
+  ])("destination capture retains province/region precedence %#", async (fields, expected) => {
+    const address = { line1: "King Road", city: "Riyadh", country: "SA", ...fields };
+    const result = (await client.query(
+      "SELECT api.ui_create_shipment_v1($1::uuid,$2::uuid,'delivery',$3::text,NULL,NULL,'pending',$4::jsonb) AS result",
+      [clientId, senderId, "PROVINCE-" + Date.now(), JSON.stringify({ service_offering_id: serviceOfferingId, destination_address: address })]
+    )).rows[0].result;
+    await reportFailedAddressWorkflow(result);
+    expect(result.workflow_status).toBe("completed");
+    const { rows } = await client.query(
+      "SELECT a.province FROM public.shipments s JOIN public.addresses a ON a.id=s.destination_address_id AND a.client_id=s.client_id WHERE s.id=$1::uuid",
+      [result.shipment_id]
+    );
+    expect(rows).toEqual([{ province: expected }]);
+  });
+
+  test.each([
+    null, [], "invalid", {}, { latitude: 24 }, { longitude: 46 },
+    { latitude: "NaN", longitude: 46 }, { latitude: "Infinity", longitude: 46 },
+    { latitude: 91, longitude: 46 }, { latitude: 24, longitude: 181 },
+  ])("rejects invalid destination capture %# before workflow creation", async (address) => {
+    await expect(client.query(
+      "SELECT api.ui_create_shipment_v1($1::uuid,$2::uuid,'delivery',NULL,NULL,NULL,'pending',$3::jsonb)",
+      [clientId, senderId, JSON.stringify({ service_offering_id: serviceOfferingId, destination_address: address && !Array.isArray(address) && typeof address === "object" && Object.keys(address).length > 0 ? { line1: "King Road", city: "Riyadh", ...address } : address })]
+    )).rejects.toThrow(/destination_address|address coordinates/);
+  });
+
+  test("destination capture cannot bypass create client scope", async () => {
+    await expect(client.query(
+      "SELECT api.ui_create_shipment_v1($1::uuid,$2::uuid,'delivery',NULL,NULL,NULL,'pending',$3::jsonb)",
+      [otherClientId, otherSenderId, JSON.stringify({ service_offering_id: serviceOfferingId, destination_address: {
+        line1: "Foreign", city: "Riyadh", country: "SA", sa_short_code: "RRRD2929",
+      } })]
+    )).rejects.toThrow();
+  });
+
+  test("private capture proof keeps pending unverified and binds fallback to current destination", async () => {
+    const address = { line1: "King Road", city: "Riyadh", country: "SA",
+      sa_short_code: "RRRD2929", latitude: 24.7136, longitude: 46.6753 };
+    const result = (await client.query(
+      "SELECT api.ui_create_shipment_v1($1::uuid,$2::uuid,'delivery',$3::text,NULL,NULL,'pending',$4::jsonb) AS result",
+      [clientId, senderId, "F54-PROOF-" + Date.now(), JSON.stringify({ service_offering_id: serviceOfferingId, destination_address: address })]
+    )).rows[0].result;
+    await reportFailedAddressWorkflow(result);
+    const addressId = result.destination_address_capture.address_id;
+    const other = (await client.query(
+      "SELECT api.ui_create_shipment_v1($1::uuid,$2::uuid,'delivery',$3::text,NULL,NULL,'pending',$4::jsonb) AS result",
+      [clientId, senderId, "F54-OTHER-" + Date.now(), JSON.stringify({ service_offering_id: serviceOfferingId, destination_address: address })]
+    )).rows[0].result;
+    await withFixtureAdminContext(client, async () => {
+    const proof = async (completed, expected = address) => (await client.query(
+      "SELECT public.shipment_destination_capture_result_v1($1::uuid,$2::jsonb,$3::boolean) AS proof",
+      [result.shipment_id, JSON.stringify(expected), completed]
+    )).rows[0].proof;
+    expect(await proof(false)).toEqual({ status: "pending" });
+    expect(await proof(true)).toMatchObject({ status: "verified" });
+    await client.query(
+      "INSERT INTO public.geocodes(address_id,client_id,provider_name,coordinates,is_primary,geocoded_at) VALUES($1::uuid,$2::uuid,'fixture',ST_SetSRID(ST_MakePoint(46.6753,24.7136),4326)::geography,TRUE,now())",
+      [addressId, clientId]
+    );
+    await client.query("UPDATE public.addresses SET coordinates=NULL WHERE id=$1::uuid", [addressId]);
+    expect(await proof(true)).toMatchObject({ status: "verified", coordinates: { latitude: 24.7136, longitude: 46.6753 } });
+    await client.query("UPDATE public.addresses SET coordinates=ST_SetSRID(ST_MakePoint(40,20),4326)::geography WHERE id=$1::uuid", [addressId]);
+    await client.query("SAVEPOINT f54_wrong_address_coordinates");
+    await expect(proof(true)).rejects.toThrow(/coordinates readback mismatch/);
+    await client.query("ROLLBACK TO SAVEPOINT f54_wrong_address_coordinates");
+    await client.query("UPDATE public.addresses SET coordinates=NULL WHERE id=$1::uuid", [addressId]);
+    await client.query("UPDATE public.geocodes SET is_primary=FALSE WHERE address_id=$1::uuid", [addressId]);
+    await client.query("SAVEPOINT f54_nonprimary");
+    await expect(proof(true)).rejects.toThrow(/coordinates readback mismatch/);
+    await client.query("ROLLBACK TO SAVEPOINT f54_nonprimary");
+    await client.query("UPDATE public.geocodes SET is_primary=TRUE, expires_at=now()-interval '1 second' WHERE address_id=$1::uuid", [addressId]);
+    await client.query("SAVEPOINT f54_expired");
+    await expect(proof(true)).rejects.toThrow(/coordinates readback mismatch/);
+    await client.query("ROLLBACK TO SAVEPOINT f54_expired");
+    await client.query("UPDATE public.geocodes SET address_id=$2::uuid,is_primary=TRUE,expires_at=NULL WHERE address_id=$1::uuid",
+      [addressId, other.destination_address_capture.address_id]);
+    await client.query("SAVEPOINT f54_wrong_destination");
+    await expect(proof(true)).rejects.toThrow(/coordinates readback mismatch/);
+    await client.query("ROLLBACK TO SAVEPOINT f54_wrong_destination");
+    await client.query("SAVEPOINT f54_wrong_code");
+    await expect(proof(true, { sa_short_code: "ABCD1234" })).rejects.toThrow(/short address readback mismatch/);
+    await client.query("ROLLBACK TO SAVEPOINT f54_wrong_code");
+    });
+  });
+
+  test("capture proof stays private while original create grants remain", async () => {
+    const { rows } = await client.query(`SELECT
+      has_function_privilege('authenticated','public.ui_create_shipment_v1(uuid,uuid,text,text,text,text,text,jsonb)','EXECUTE') AS public_create,
+      has_function_privilege('authenticated','api.ui_create_shipment_v1(uuid,uuid,text,text,text,text,text,jsonb)','EXECUTE') AS api_create,
+      has_function_privilege('authenticated','public.shipment_destination_capture_result_v1(uuid,jsonb,boolean)','EXECUTE') AS proof_auth,
+      has_function_privilege('anon','public.shipment_destination_capture_result_v1(uuid,jsonb,boolean)','EXECUTE') AS proof_anon,
+      has_function_privilege('service_role','public.shipment_destination_capture_result_v1(uuid,jsonb,boolean)','EXECUTE') AS proof_service`);
+    expect(rows[0]).toEqual({ public_create: true, api_create: true, proof_auth: false, proof_anon: false, proof_service: false });
+  });
+
+  test("validates and derives canonical service-offering lineage during workflow create", async () => {
+    const trackingNumber = `UI-CATALOG-${Date.now()}`;
+    const { rows } = await client.query(
+      `SELECT api.ui_create_shipment_v1(
+         $1::uuid, $2::uuid, 'delivery', $3::text, NULL, NULL, 'pending',
+         jsonb_build_object('service_offering_id', $4::uuid)
+       ) AS result`,
+      [clientId, senderId, trackingNumber, serviceOfferingId]
+    );
+    const result = rows[0]?.result ?? {};
+    expect(result.status).toBe("shipment_created");
+
+    const { rows: shipmentRows } = await client.query(
+      `SELECT service_level, branch_id, metadata
+         FROM public.shipments
+        WHERE id = $1::uuid AND client_id = $2::uuid`,
+      [result.shipment_id, clientId]
+    );
+    expect(shipmentRows[0]?.service_level).toBe("standard");
+    expect(shipmentRows[0]?.branch_id).toBeTruthy();
+    expect(shipmentRows[0]?.metadata?.service_offering_id).toBe(serviceOfferingId);
+    expect(shipmentRows[0]?.metadata?.service_level_id).toBe(serviceLevelId);
+  });
+
   test("queues shipment-created SMS notification with tracking link and provenance", async () => {
-    await client.query("RESET ROLE");
+    await setFixtureAdminContext(client);
     const recipientId = await insertRecipient({
       organizationId,
       clientId,
@@ -373,7 +573,7 @@ describe("ui_create_shipment_v1", () => {
     expect(result.shipment_id).toBeTruthy();
     expect(result.workflow_run_id).toBeTruthy();
 
-    await client.query("RESET ROLE");
+    await setFixtureAdminContext(client);
 
     const { rows: shipmentRows } = await client.query(
       `
@@ -479,7 +679,7 @@ describe("ui_create_shipment_v1", () => {
     expect(result.workflow_run_id).toBeTruthy();
     expect(result.correlation_id).toBeTruthy();
 
-    await client.query("RESET ROLE");
+    await setFixtureAdminContext(client);
     await client.query(
       `
         INSERT INTO shipment_actions (
@@ -659,7 +859,7 @@ describe("ui_create_shipment_v1", () => {
     expect(result.shipment_id).toBeTruthy();
     expect(result.correlation_id).toBeTruthy();
 
-    await client.query("RESET ROLE");
+    await setFixtureAdminContext(client);
     const recipientId = await insertRecipient({
       organizationId,
       clientId,
@@ -756,7 +956,7 @@ describe("ui_create_shipment_v1", () => {
 
   test("keeps identifier search tenant scoped", async () => {
     const foreignTrackingNumber = `UI-SEARCH-FOREIGN-${Date.now()}`;
-    await client.query("RESET ROLE");
+    await setFixtureAdminContext(client);
     const { rows: shipmentRows } = await client.query(
       `
         INSERT INTO public.shipments (
@@ -844,7 +1044,7 @@ describe("ui_create_shipment_v1", () => {
     );
     expect(countRows[0]?.count).toBe(1);
 
-    const { rows: stepRows } = await client.query(
+    const { rows: stepRows } = await withFixtureAdminContext(client, (adminClient) => adminClient.query(
       `
         SELECT operation_result
         FROM workflow_run_steps
@@ -854,7 +1054,7 @@ describe("ui_create_shipment_v1", () => {
         LIMIT 1
       `,
       [duplicateResult.workflow_run_id]
-    );
+    ));
     expect(stepRows[0]?.operation_result?.operation).toBe("reused");
   });
 
@@ -920,7 +1120,7 @@ describe("ui_create_shipment_v1", () => {
     );
     const result = createResult.rows[0]?.result ?? {};
 
-    await client.query("RESET ROLE");
+    await setFixtureAdminContext(client);
     await client.query(
       `
         INSERT INTO public.shipment_actions (

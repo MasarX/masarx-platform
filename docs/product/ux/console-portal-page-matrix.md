@@ -38,6 +38,8 @@ Sources:
 | Page | Route | State model | Notes |
 | --- | --- | --- | --- |
 | Home | `/` | loading, empty, error, stale | Home dashboard and summary shell. |
+| Tracking operator handoff | `/operate/shipments` | loading, empty, error, denied, stale | Authenticated `shipments.read` destination reusing `ShipmentResourcePage`; exact scoped configured identifier in `focus`, optional `tab=timeline`, and the existing timeline/POD permissions. Unknown, ambiguous, or stale supplied identities never open a different shipment. |
+| Reporting alias | `/reporting` | redirect | Preserves the historical entry point by redirecting to `/#shipment-reporting`; no separate reporting implementation. |
 | Sign-in | `/signin` | loading, error, denied | Explicit sign-in route alias for auth entry. |
 | Access overview | `/access` | loading, empty, error, denied | Access and identity summary. |
 | Access policy | `/access-policy` | loading, empty, error, denied | Reads current policy and effective scope permissions. |
@@ -60,6 +62,7 @@ Sources:
 | Operations exceptions | `/operations/exceptions` | loading, empty, error, denied, stale | Exceptions routing/inbound-policy surface, including the UC114 NDR owner/SLA queues. |
 | Operations exception detail | `/operations/exceptions/:resource` | loading, empty, error, denied, stale | Dynamic exception detail and action surfaces for resources such as `dispatch_exception_review`, `dispatch_exception_review_mine`, `unassigned_exceptions`, and `sla_deadline_alerts`. |
 | Command catalog | `/commands` | loading, empty, error, denied | Registry-driven command command center. |
+| Service catalog | `/catalog/service-offerings` | loading, empty, error, denied, submitted | Canonical service-level and offering catalog bound to active lookup values and active branches. |
 | Shipment create command | `/commands/shipments.create` | loading, error, denied, submitted | Authenticated shipment-create command surface. |
 | Label designer | `/platform/labels` | loading, empty, error, denied | Canonical Console V2 Label Designer & templates workbench. `/labels/designer` redirects here as a compatibility alias. |
 | Organization requests | `/organizations/requests` | loading, empty, error, denied, submitted | Tenant signup/request review surface. |
@@ -68,7 +71,10 @@ Sources:
 | Marketplace participants | `/marketplace/participants` | loading, empty, error, denied, stale | Registry-backed participant inventory and risk/compliance drill-in. |
 | Marketplace disputes | `/marketplace/disputes` | loading, empty, error, denied, stale, submitted | Platform dispute workspace with review, outcome, and audit paths. |
 | Marketplace settlements | `/marketplace/settlements` | loading, empty, error, denied, stale, submitted | Internal settlement operations and settlement-readiness review. |
+| COD reconciliation | `/marketplace/cod-reconciliation` | loading, empty, unavailable | Read-only Console workspace over the capability-checked `cod_reconciliation` registry resource (`api.cod_reconciliation`, `shipments.read`); filters and bounded pagination expose canonical payment-collection amounts with displayed-row currency totals. Missing access, invalid registry/data contracts, and read failures use the unavailable state; no settlement mutation. |
 | Marketplace contracts | `/marketplace/contracts` | loading, empty, error, denied, stale | Contract list across awarded marketplace work. |
+| New vehicle | `/fleet/vehicles/new` | loading, error, denied, submitted | Authorized tenant-scoped, registry/schema-driven vehicle creation. |
+| Operations tracking map | `/operations/tracking-map` | loading, empty, error, denied | Registry-backed geographic pins with shipment-table fallback and policy-governed map rendering. |
 | Marketplace contract room | `/marketplace/contracts/:id` | loading, error, denied, stale, submitted | Contract room with commercial terms, milestones, and settlement/dispute links. |
 | Customer shipment changes | `/operations/customer-shipment-changes` | loading, empty, error, denied, stale, submitted | Dedicated workspace for customer-requested shipment changes with before/requested/current diff review. |
 | Shipment amend/cancel | `/operations/shipment-amend-cancel` | loading, empty, error, denied, submitted | Workflow-engine backed amend/cancel workspace for pre-dispatch shipment mutation requests. |
@@ -84,6 +90,16 @@ Sources:
 | Integration plugin create | `/integrations/plugins/new` | loading, error, denied, submitted | Wizard entry for draft generation/import mapping. |
 | Integration plugin detail | `/integrations/plugins/:plugin_id` | loading, empty, error, denied, stale | Plugin summary, version list, approval and activation state. |
 | Integration plugin version detail | `/integrations/plugins/:plugin_id/versions/:version` | loading, empty, error, denied, stale, submitted | Version-level bindings, validation evidence, approval and activation actions. |
+| Automation marketplace | `/automation/marketplace` | loading, empty, error, denied | Scoped catalog of immutable workflow and plugin snapshots. |
+| Automation listing detail | `/automation/marketplace/:listing_id` | loading, error, denied, stale | Canonical listing/version readback and authorized install or append links. |
+| Automation publish | `/automation/marketplace/publish` | loading, error, denied, submitted | Create or append an immutable version; public distribution still requires review. |
+| Automation reviews | `/automation/marketplace/reviews` | loading, empty, error, denied | Authorized publication review queue. |
+| Automation review decision | `/automation/marketplace/reviews/decide` | loading, error, denied, submitted | Capability-gated decision with canonical review/version/listing readback. |
+| Automation install | `/automation/marketplace/install` | loading, error, denied, submitted | Installer-owned draft or transactional activation; unsupported secret placeholders cannot activate. |
+| Automation installs | `/automation/marketplace/installs` | loading, empty, error, denied, stale | Scoped local copies and derived approved-upgrade availability. |
+| Automation install management | `/automation/marketplace/installs/manage` | loading, error, denied, submitted, stale | Preview/apply/fork and unchanged binding confirmation; changed bindings require a fresh copy. |
+| Automation connections | `/automation/marketplace/connections` | loading, empty, error, denied, stale | Scoped connection inventory without saved credentials. |
+| Automation connection management | `/automation/marketplace/connections/manage` | loading, error, denied, submitted | Credential/configuration checks, rotation/revocation, and owner-configured OAuth; local checks are not remote verification. |
 | Domain events | `/observability/domain-events` | loading, empty, error, denied | Read stream for platform events. |
 | Domain event detail | `/observability/domain-events/:event_id` | loading, error, denied | Event detail and associated trace link. |
 | Workflow runs list | `/observability/workflow-runs` | loading, empty, error, denied | Workflow run observability list. |
@@ -92,15 +108,24 @@ Sources:
 | Audit logs | `/security/audit-logs` | loading, empty, error, denied | Security/audit event browsing. |
 | Token rotation | `/security/token-rotation` | loading, empty, error, denied, submitted | Security governance workflow surface. |
 | Resource view | `/resources/:resource` | loading, empty, error, denied, stale | Generic registry-driven resource workspace; shipment resources surface the shared `shipments.print_labels` bulk action, workflow-backed `shipments.delete` / `shipments.reschedule` cohort actions, and the guarded `shipments.update_geocode` single-shipment action through the canonical command registry. |
+| Users | `/resources/users` | loading, empty, error, denied, stale | Registry-backed user inventory; invite and resend controls require the current tenant invite authority and `users.manage` capability. |
+| Invite user | `/resources/users/invite` | loading, error, denied, submitted | Tenant-authorized invite form using the same-origin invite endpoint and current server-validated role/scope options. |
 | Shipments list | `/resources/shipments` | loading, empty, error, denied, stale | Shipment inventory and list workspace; the shipment wrapper adds one identifier search entrypoint for shipment ID, tracking/order references, phone, and capability-gated correlation IDs, while bulk/detail print still uses the shared `shipments.print_labels` command, shipment cohort delete/reschedule flow through `ui_execute_shipment_batch_operation_v1`, and the guarded `shipments.update_geocode` action keeps Console and Portal on one canonical manual-fix path. |
 | Shipment create resource | `/resources/shipments/new` | loading, error, denied, submitted | Authenticated shipment-create resource surface. |
 | Warehouse transfers list | `/resources/warehouse_transfers` | loading, empty, error, denied, stale | Authenticated warehouse transfer manifest inventory and transfer execution workspace. Detail and bulk actions now include `warehouse_transfers.dispatch`, which starts the canonical transfer workflow through `ui_execute_warehouse_transfer_dispatch_v1`, plus `warehouse_transfers.scan_departure` and `warehouse_transfers.scan_arrival`, which record the load/unload checkpoint scans and complete the active dispatch/receive task through `ui_execute_warehouse_transfer_checkpoint_v1`. |
 | Warehouse transfer create resource | `/resources/warehouse_transfers/new` | loading, error, denied, submitted | Authenticated warehouse transfer manifest-create surface. |
 | Auth callback | `/auth/callback` | loading, error | Redirect target from identity provider callback. |
+| Invite confirmation | `/auth/invite-confirm` (`GET`, `POST`) | confirmation, error | GET only shows the confirmation form. A bounded same-origin POST verifies the invite token through the existing Auth cookie adapter, then redirects only to the configured Console origin; token hashes and provider/session details are not forwarded. |
 | Sign-out | `/auth/sign-out` | loading, error | Terminates active session and redirect flow. |
 | UI event endpoint | `/api/ui-event` (`POST`) | loading, error | Batch/event telemetry ingress with request id propagation. |
 | Resource import API | `/api/resource-import` (`POST`) | loading, error | Same-origin browser import facade for file upload, dry-run, start, polling, and cancel. |
+| Tenant user invite API | `/api/tenant-user-invite` (`POST`) | loading, error, denied, submitted | Trusted-browser, authenticated invite/resend facade; SQL rechecks tenant authority and records provider/membership outcomes without treating email acceptance as confirmed membership. |
 | Resource download API | `/api/resource-download` (`GET`) | loading, error | Signed download URL endpoint with multi-id support. |
+| Automation OAuth start | `/api/automation-marketplace/oauth/start` (`POST`) | loading, error, denied | Authenticated JSON start with exact trusted provider binding; default-empty configuration fails closed. |
+| Automation OAuth callback | `/api/automation-marketplace/oauth/callback` (`GET`) | loading, error, denied | Session-owned, expiring, single-use PKCE completion with canonical callback identity. |
+| Automation OAuth refresh | `/api/automation-marketplace/oauth/refresh` (`POST`) | loading, error, denied | Authenticated, generation-bound credential refresh without automatic retries. |
+| Automation OAuth proof authorize | `/api/automation-marketplace/oauth-stub/authorize` (`GET`) | error, denied | Deterministic proof route; disabled outside explicitly authorized tests. |
+| Automation OAuth proof token | `/api/automation-marketplace/oauth-stub/token` (`POST`) | error, denied | Deterministic proof route; disabled outside explicitly authorized tests and never production provider configuration. |
 
 ## Portal route matrix
 
@@ -131,8 +156,8 @@ Sources:
 | Pickup waves | `/operations/pickups/waves` | loading, empty, error, denied, submitted | Custom pickup wave ledger and assignment flow backed by `public.pickup_waves`, `public.create_pickup_wave_v1(jsonb)`, and `public.assign_pickup_wave_v1(jsonb)`. |
 | Pickup failures | `/operations/pickups/failures` | loading, empty, error, denied | Custom pickup failure ledger backed by `public.pickup_failures`. |
 | Public tracking requests | `/operations/public-tracking-requests` | loading, empty, error, denied, stale | Review-focused alias over customer shipment changes for public tracking support cases. |
-| Operations exceptions | `/operations/exceptions` | loading, empty, error, denied, stale | Tenant-level exception workspace, including UC114 NDR owner/SLA queues. |
-| Operations exception detail | `/operations/exceptions/:resource` | loading, empty, error, denied, stale | Dynamic exception detail and actions for `dispatch_exception_review`, `dispatch_exception_review_mine`, `unassigned_exceptions`, and `sla_deadline_alerts`. |
+| Operations exceptions | `/operations/exceptions` | loading, empty, error, denied, stale | Tenant-level exception workspace, including the shared-shell NDR owner/SLA and tenant-resolution queues. |
+| Operations exception detail | `/operations/exceptions/:resource` | loading, empty, error, denied, stale | Dynamic exception detail and actions for `dispatch_exception_review`, `dispatch_exception_review_mine`, `unassigned_exceptions`, and `sla_deadline_alerts`; tenant resolution submits canonical `resolution_action` selected from the `ndr_action` lookup category through `ui_execute_dispatch_exception_resolution_v1`. |
 | Customer shipment changes | `/operations/customer-shipment-changes` | loading, empty, error, denied, stale, submitted | Dedicated workspace for customer-requested shipment changes with before/requested/current diff review. |
 | Public tracking requests | `/operations/public-tracking-requests` | loading, empty, error, denied, stale | Review-focused alias for pending public-tracking shipment change requests. |
 | Workflows queue | `/workflows/queue` | loading, empty, error, denied, stale | Queue of manual review operations. |
@@ -171,9 +196,8 @@ Sources:
 
 | Surface element | Coverage state | Contract/source |
 | --- | --- | --- |
-| Primary sections (`#product`, `#integration`, `#solutions`, `#how`, `#capabilities`, `#who`, `#proof`, `#enterprise`, `#faq`, `#contact`) | implemented | `docs/marketing/landing-v2/index.html` + `app.js` |
+| Primary sections (`#product`, `#integration`, `#how`, `#capabilities`, `#who`, `#enterprise`, `#faq`, `#contact`) | implemented | `docs/marketing/landing-v2/index.html` + `app.js` |
 | Contact intake form | implemented (runtime endpoint + validation + turnstile) | `docs/marketing/landing-v2/app.js` + `LANDING_CONTACT_ENDPOINT` |
-| Client logo rail | dynamic from policy endpoint | `runtime.clientsEndpoint` fallback logic in `docs/marketing/landing-v2/app.js` |
 | SEO/meta + social tags | implemented | `docs/marketing/landing-v2/index.html` |
 | Dark mode + language toggles | implemented client-side | `docs/marketing/landing-v2/app.js` + runtime config |
 

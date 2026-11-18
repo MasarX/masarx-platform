@@ -239,7 +239,7 @@ function waitForDatabaseReady(libpqDatabaseUrl, maxSeconds = 60) {
 
     if (Date.now() > deadline) {
       console.error('[pgTAP] Database did not become ready within', maxSeconds, 'seconds');
-      process.exit(result.status || 1);
+      exitRunner(result.status || 1);
     }
 
     // Brief backoff before retrying.
@@ -255,8 +255,12 @@ function isPsqlAvailable() {
 
 async function resolveDatabaseUrlCandidates(env = process.env, options = {}) {
   const buildCandidatesFn = options.buildDbConnectionCandidatesFn || buildDbConnectionCandidates;
-  const selectedPinnedName = String(env.DB_SMOKE_SELECTED_DSN_NAME || '').trim();
-  const pinnedDsn = String(env.PG_CONN_STRING || '').trim();
+  const selectedPinnedName = String(
+    env.DB_SMOKE_SELECTED_DSN_NAME || env.DATABASE_URL_SELECTED_DSN_NAME || '',
+  ).trim();
+  const pinnedDsn = String(
+    env.PG_CONN_STRING || (selectedPinnedName ? env.DATABASE_URL : '') || '',
+  ).trim();
   const out = [];
   const seen = new Set();
 
@@ -313,7 +317,7 @@ function waitForDatabaseReadyWithFallback(candidates, maxSeconds = 60) {
   const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
   if (list.length === 0) {
     console.error('[pgTAP] Missing DATABASE_URL/DATABASE_URL_DIRECT/DATABASE_URL_POOLER.');
-    process.exit(1);
+    exitRunner(1);
   }
 
   const start = Date.now();
@@ -344,7 +348,7 @@ function waitForDatabaseReadyWithFallback(candidates, maxSeconds = 60) {
         lastFailure.name,
         ')'
       );
-      process.exit(lastFailure.status || 1);
+      exitRunner(lastFailure.status || 1);
     }
 
     // Brief backoff before retrying.
@@ -899,14 +903,22 @@ function runPsqlWithCandidateFallback(candidates, buildArgs, description, option
   if (!attempt) {
     throw new Error(`[pgTAP] ${description} did not execute.`);
   }
-  if (attempt.result.status !== 0) {
-    throw new Error(
-      `[pgTAP] ${description} exited with status ${attempt.result.status} via ${attempt.candidate?.name || 'unknown'}`,
-    );
+  const outputLines = String(attempt.result.combined || '').split(/\r?\n/);
+  const firstError = outputLines.find(line => /ERROR:|FATAL:/i.test(line))
+    || outputLines.find(line => /\bnot ok\b|looks like you (failed|planned)/i.test(line));
+  const detail = firstError ? `\n${firstError}` : '';
+  const assessment = options.assessResult?.(attempt.result);
+  if (assessment?.ok) return { ...attempt, assessment };
+  let error;
+  if (assessment?.errors.length) {
+    error = new Error(`[pgTAP] ${description}: ${assessment.errors.join('; ')}${detail}`);
+  } else if (attempt.result.status !== 0) {
+    error = new Error(`[pgTAP] ${description} exited with status ${attempt.result.status} via ${attempt.candidate?.name || 'unknown'}${detail}`);
+  } else if (attempt.tapFailures || assessment) {
+    const firstFailure = assessment?.failures[0];
+    error = new Error(`[pgTAP] TAP test failures detected in ${description}${firstFailure ? `\nnot ok ${firstFailure.number} - ${firstFailure.assertion}` : detail}`);
   }
-  if (attempt.tapFailures) {
-    throw new Error(`[pgTAP] TAP test failures detected in ${description}`);
-  }
+  if (error) { error.assessment = assessment; throw error; }
   return attempt;
 }
 
@@ -950,24 +962,93 @@ function runFixtureBootstrapScript(scriptPath, env) {
   }
 }
 
+
+async function withFullLocalQualification(candidates, run, options = {}) {
+  const env = options.env || process.env;
+  const fail = (capability) => { throw new Error(`[pgTAP] full_local_blocked: ${capability}`); };
+  const stages = ['DEPLOY_ENV', 'DEPLOY_ENV_NAME', 'GITHUB_ENVIRONMENT_NAME', 'GITHUB_ENVIRONMENT']
+    .map(key => String(env[key] || '').trim().toLowerCase()).filter(Boolean);
+  if (stages.some(stage => stage !== 'local') || String(env.PROD_DEPLOY_GUARD || '').trim().toLowerCase() === 'enabled') fail('local_environment_required');
+  const workspaceId = String(env.WORKSPACE_NAME || '').trim();
+  if (!workspaceId || !candidates.length) fail('workspace_and_database_required');
+  if (resolveFilesPerSession(env) !== 1) fail('serialized_per_file_execution_required');
+  const cwd = options.cwd || process.cwd();
+  const acquire = options.acquireLock || (() => { throw new Error('Explicit qualification adapters are required'); });
+  const identify = options.identify || (() => { throw new Error('Explicit qualification adapters are required'); });
+  const inspect = options.inspect || (() => { throw new Error('Explicit qualification adapters are required'); });
+  const assertMutation = options.assertMutation || (() => { throw new Error('Explicit qualification adapters are required'); });
+  const lock = await acquire({ cwd, workspaceId, env, operation: 'pgtap-full-local' });
+  try {
+    for (const candidate of candidates) {
+      const identity = identify(workspaceId, candidate.dsn, { cwd, env });
+      if (identity.database !== 'postgres') fail('canonical_postgres_database_required');
+    }
+    const ownership = inspect(workspaceId, { cwd, env });
+    assertMutation(ownership, 'pgtap-full-local');
+    if (ownership.pending_intent) fail('settled_runtime_required');
+    await (options.probe || probeFullLocalCapabilities)(candidates[0].dsn);
+    return await run();
+  } finally {
+    await lock.release();
+  }
+}
+
+async function probeFullLocalCapabilities(dsn) {
+  const client = new Client({ connectionString: dsn, connectionTimeoutMillis: 10000, statement_timeout: 10000 });
+  try {
+    await client.connect();
+    const { rows } = await client.query(`
+      SELECT name FROM (VALUES
+        ('storage_schema', to_regclass('storage.buckets') IS NOT NULL AND to_regclass('storage.objects') IS NOT NULL),
+        ('authenticated_role', EXISTS(SELECT 1 FROM pg_roles WHERE rolname='authenticated')),
+        ('settings_schema', to_regclass('public.settings') IS NOT NULL AND to_regclass('public.settings_versions') IS NOT NULL),
+        ('webhook_schema', to_regclass('public.webhook_sources') IS NOT NULL AND to_regclass('public.operation_templates') IS NOT NULL),
+        ('webhook_intake', EXISTS(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='workflow_intake_webhook')),
+        ('pgtap_available', EXISTS(SELECT 1 FROM pg_available_extensions WHERE name='pgtap'))
+      ) AS capabilities(name, ready) WHERE NOT ready`);
+    if (rows.length) throw new Error('[pgTAP] full_local_blocked: ' + rows.map(row => row.name).join(', '));
+  } finally {
+    await client.end();
+  }
+}
+
+function exitRunner(code) {
+  if (process.env.PGTAP_FULL_LOCAL_QUALIFICATION === '1') {
+    const error = new Error(`[pgTAP] Runner stopped with status ${code}`);
+    error.exitCode = code;
+    throw error;
+  }
+  process.exit(code);
+}
+
 async function main() {
   loadEnv();
-
   const dbCandidates = await resolveDatabaseUrlCandidates(process.env);
+  if (process.env.PGTAP_FULL_LOCAL_QUALIFICATION === '1') {
+    const admittedEnv = { ...process.env };
+    return withFullLocalQualification(dbCandidates, () => runSuite(dbCandidates, true, admittedEnv), { env: admittedEnv });
+  }
+  return runSuite(dbCandidates);
+}
+
+async function runSuite(dbCandidates, fullLocal = false, env = process.env, reporter) {
   if (dbCandidates.length === 0) {
     console.error('[pgTAP] Missing DATABASE_URL/DATABASE_URL_DIRECT/DATABASE_URL_POOLER. Ensure .env.cloud is loaded.');
-    process.exit(1);
+    exitRunner(1);
   }
-  const databaseUrl = String(process.env.DATABASE_URL || '').trim() || dbCandidates[0].dsn;
+  const databaseUrl = dbCandidates[0].dsn;
 
-  const dbReadyTimeoutSeconds = resolveDbReadyTimeoutSeconds();
-  const statementTimeoutMs = resolveStatementTimeoutMs();
-  const bootstrapStatementTimeoutMs = resolveBootstrapStatementTimeoutMs();
+  const dbReadyTimeoutSeconds = resolveDbReadyTimeoutSeconds(env);
+  const statementTimeoutMs = resolveStatementTimeoutMs(env);
+  const bootstrapStatementTimeoutMs = resolveBootstrapStatementTimeoutMs(env);
 
   const skipList = loadSkipList(testsDir);
-  const localSkip = computeLocalSkip(databaseUrl);
+  const localSkip = fullLocal ? [] : computeLocalSkip(databaseUrl);
+  if (fullLocal && computeLocalSkip(databaseUrl).some(file => skipList.includes(file))) {
+    throw new Error('[pgTAP] full_local_blocked: required_file_in_skip_list');
+  }
   let tapFiles = discoverTapFiles({ testsDir, skipList, localSkip });
-  const requestedTapFiles = parseRequestedTapFiles(process.env);
+  const requestedTapFiles = parseRequestedTapFiles(env);
 
   if (requestedTapFiles.length > 0) {
     const resolved = resolveRequestedTapFiles({
@@ -982,14 +1063,14 @@ async function main() {
           `[pgTAP] Ambiguous requested file "${entry.input}"; matches: ${entry.candidates.join(', ')}`
         );
       }
-      process.exit(1);
+      exitRunner(1);
     }
 
     if (resolved.missing.length > 0) {
       console.error(
         `[pgTAP] Requested file(s) not found in suite: ${resolved.missing.join(', ')}`
       );
-      process.exit(1);
+      exitRunner(1);
     }
 
     tapFiles = resolved.selected;
@@ -1000,14 +1081,19 @@ async function main() {
 
   if (tapFiles.length === 0) {
     console.warn('[pgTAP] No pgTAP files discovered.');
-    process.exit(0);
+    return;
   }
 
-  const qaSuiteKey = process.env.QA_SUITE_KEY || 'pgtap';
-  const qa = createQaLogger({ runId: process.env.QA_RUN_ID, disabled: !process.env.QA_RUN_ID });
-  const filesPerSession = resolveFilesPerSession();
+  const qaSuiteKey = env.QA_SUITE_KEY || 'pgtap';
+  const qa = reporter || createQaLogger({ runId: env.QA_RUN_ID, disabled: !env.QA_RUN_ID,
+    ...(fullLocal ? { env: { ...env, DATABASE_URL: databaseUrl } } : {}),
+  });
+  let suiteError;
+  try {
+  const filesPerSession = resolveFilesPerSession(env);
   const batched = filesPerSession > 1;
   const psqlAvailable = isPsqlAvailable();
+  if (reporter?.assessResult && (batched || !psqlAvailable)) throw new Error('Assertion exceptions require the per-file psql runner');
 
   console.log('[pgTAP] Using database:', summarizeDatabaseUrl(databaseUrl));
   if (batched) {
@@ -1024,16 +1110,16 @@ async function main() {
     console.warn('[pgTAP] psql not found on PATH; using Node pg runner (no libpq required).');
     let dbReadyCandidate = await waitForDatabaseReadyWithFallbackPg(dbCandidates, dbReadyTimeoutSeconds);
     console.log('[pgTAP] Database ready via', dbReadyCandidate.name);
-    if (!/^(1|true|yes)$/i.test(String(process.env.PGTAP_SKIP_FIXTURE_BOOTSTRAP || '').trim())) {
+    if (!/^(1|true|yes)$/i.test(String(env.PGTAP_SKIP_FIXTURE_BOOTSTRAP || '').trim())) {
       runFixtureBootstrapScript(
         path.join('scripts', 'tests', 'bootstrap', 'seed-pgtap-fixtures.js'),
-        { DATABASE_URL: dbReadyCandidate.dsn },
+        { ...(fullLocal ? { ...env, ENV_FILE: os.devNull, ENV_FILE_OVERRIDE: '0', ENV_FILE_APPEND: '0' } : {}), DATABASE_URL: dbReadyCandidate.dsn },
       );
     }
-    const nodeFileTransientRetries = resolveNodeFileTransientRetries(process.env);
-    const nodeFileTransientMaxWaitMs = resolveNodeFileTransientMaxWaitMs(process.env);
-    const nodeFileTransientRetryDelayMs = resolveNodeFileTransientRetryDelayMs(process.env);
-    const nodeFileDbReadyTimeoutSeconds = resolveNodeFileDbReadyTimeoutSeconds(process.env);
+    const nodeFileTransientRetries = resolveNodeFileTransientRetries(env);
+    const nodeFileTransientMaxWaitMs = resolveNodeFileTransientMaxWaitMs(env);
+    const nodeFileTransientRetryDelayMs = resolveNodeFileTransientRetryDelayMs(env);
+    const nodeFileDbReadyTimeoutSeconds = resolveNodeFileDbReadyTimeoutSeconds(env);
 
     const clientConfig = {
       connectionString: dbReadyCandidate.dsn,
@@ -1061,6 +1147,7 @@ async function main() {
     }
 
     console.log(`[pgTAP] Executing ${tapFiles.length} pgTAP files from ${testsDir}`);
+    const failures = [];
 
     for (const file of tapFiles) {
       const filePath = path.join(testsDir, file);
@@ -1148,12 +1235,16 @@ async function main() {
       ]);
 
       if (status === 'failed') {
-        await qa.close();
-        throw new Error(errorSummary || `pgTAP failed in ${file}`);
+        failures.push(errorSummary || `pgTAP failed in ${file}`);
       }
     }
 
-    await qa.close();
+    if (failures.length) {
+      throw new AggregateError(
+        failures.map((failure) => new Error(failure)),
+        `[pgTAP] ${failures.length} selected test execution(s) failed:\n${failures.join('\n')}`,
+      );
+    }
     console.log('[pgTAP] All tests completed successfully.');
     return;
   }
@@ -1161,10 +1252,10 @@ async function main() {
   let activePsqlCandidate = waitForDatabaseReadyWithFallback(dbCandidates, dbReadyTimeoutSeconds);
   let libpqDatabaseUrl = activePsqlCandidate.dsn;
   console.log('[pgTAP] Database ready via', activePsqlCandidate.name);
-  if (!/^(1|true|yes)$/i.test(String(process.env.PGTAP_SKIP_FIXTURE_BOOTSTRAP || '').trim())) {
+  if (!/^(1|true|yes)$/i.test(String(env.PGTAP_SKIP_FIXTURE_BOOTSTRAP || '').trim())) {
     runFixtureBootstrapScript(
       path.join('scripts', 'tests', 'bootstrap', 'seed-pgtap-fixtures.js'),
-      { DATABASE_URL: libpqDatabaseUrl },
+      { ...(fullLocal ? { ...env, ENV_FILE: os.devNull, ENV_FILE_OVERRIDE: '0', ENV_FILE_APPEND: '0' } : {}), DATABASE_URL: libpqDatabaseUrl },
     );
   }
   console.log('[pgTAP] Ensuring pgTAP extension is available...');
@@ -1241,6 +1332,7 @@ async function main() {
     console.log('[pgTAP] Skipping files for local baseline:', localSkip.join(', '));
   }
 
+  const failures = [];
   if (!batched) {
     for (const file of tapFiles) {
       const filePath = path.join(testsDir, file);
@@ -1248,6 +1340,7 @@ async function main() {
       const startedAt = Date.now();
       let status = 'passed';
       let errorSummary = null;
+      let assessment;
       try {
         const fileAttempt = runPsqlWithCandidateFallback(
           dbCandidates,
@@ -1269,11 +1362,14 @@ async function main() {
             filePath,
           ],
           file,
-          { preferredCandidateName: activePsqlCandidate.name },
+          { preferredCandidateName: activePsqlCandidate.name,
+            assessResult: reporter?.assessResult ? result => reporter.assessResult(file, result) : undefined },
         );
+        assessment = fileAttempt.assessment;
         activePsqlCandidate = fileAttempt.candidate;
         libpqDatabaseUrl = activePsqlCandidate.dsn;
       } catch (err) {
+        assessment = err.assessment;
         status = 'failed';
         errorSummary = err.message;
       }
@@ -1285,14 +1381,13 @@ async function main() {
           started_at: new Date(startedAt).toISOString(),
           ended_at: new Date().toISOString(),
           duration_ms: Date.now() - startedAt,
-          metadata: { file, suite: qaSuiteKey },
+          metadata: { file, suite: qaSuiteKey, ...(assessment ? { assessment } : {}) },
           error_summary: errorSummary,
         },
       ]);
 
       if (status === 'failed') {
-        await qa.close();
-        throw new Error(errorSummary || `pgTAP failed in ${file}`);
+        failures.push(errorSummary || `pgTAP failed in ${file}`);
       }
     }
   } else {
@@ -1353,8 +1448,7 @@ async function main() {
           ]);
 
           if (status === 'failed') {
-            await qa.close();
-            throw new Error(errorSummary || `pgTAP failed in ${file}`);
+            failures.push(errorSummary || `pgTAP failed in ${file}`);
           }
           continue;
         }
@@ -1399,7 +1493,7 @@ async function main() {
           const planTwiceDetected = isPlanTwiceError(res.combined);
           if (planTwiceDetected) {
             console.warn(`[pgTAP] ${batchLabel} hit plan-state collision in batched mode; retrying files in isolated mode.`);
-            let fallbackError = null;
+            const fallbackErrors = [];
             for (const file of batchFiles) {
               const filePath = path.join(testsDir, file);
               const singleStartedAt = Date.now();
@@ -1431,9 +1525,7 @@ async function main() {
               } catch (err) {
                 status = 'failed';
                 singleErrorSummary = err.message;
-                if (!fallbackError) {
-                  fallbackError = `[pgTAP] ${batchLabel} fallback failed in ${file}: ${singleErrorSummary}`;
-                }
+                fallbackErrors.push(`[pgTAP] ${batchLabel} fallback failed in ${file}: ${singleErrorSummary}`);
               }
 
               await qa.recordCaseResults(qaSuiteKey, [
@@ -1447,15 +1539,13 @@ async function main() {
                   error_summary: singleErrorSummary,
                 },
               ]);
-
-              if (status === 'failed') break;
             }
 
-            if (!fallbackError) {
+            if (!fallbackErrors.length) {
               continue;
             }
-            await qa.close();
-            throw new Error(fallbackError);
+            failures.push(...fallbackErrors);
+            continue;
           }
 
           for (const file of batchFiles) {
@@ -1470,17 +1560,17 @@ async function main() {
             });
           }
           await qa.recordCaseResults(qaSuiteKey, results);
-          await qa.close();
-          throw new Error(errorSummary);
+          failures.push(errorSummary);
+          continue;
         }
 
         const segments = parseBatchOutputSegments(res.combined);
-        const failures = [];
+        const batchFailureFiles = [];
         for (let i = 0; i < batchFiles.length; i++) {
           const file = batchFiles[i];
           const seg = segments.get(file) || '';
           const fileFailed = hasTapFailures(seg) || !segments.has(file);
-          if (fileFailed) failures.push(file);
+          if (fileFailed) batchFailureFiles.push(file);
           const sliceStart = startedAt + Math.floor((durationMs * i) / batchFiles.length);
           const sliceEnd = startedAt + Math.floor((durationMs * (i + 1)) / batchFiles.length);
           results.push({
@@ -1498,9 +1588,10 @@ async function main() {
 
         await qa.recordCaseResults(qaSuiteKey, results);
 
-        if (failures.length) {
-          await qa.close();
-          throw new Error(`[pgTAP] TAP test failures detected in ${failures.slice(0, 8).join(', ')}${failures.length > 8 ? '...' : ''}`);
+        if (batchFailureFiles.length) {
+          failures.push(
+            ...batchFailureFiles.map((file) => `[pgTAP] TAP test failure detected in ${file}`),
+          );
         }
       }
     } finally {
@@ -1510,8 +1601,22 @@ async function main() {
     }
   }
 
-  await qa.close();
+  if (failures.length) {
+    throw new AggregateError(
+      failures.map((failure) => new Error(failure)),
+      `[pgTAP] ${failures.length} selected test execution(s) failed:\n${failures.join('\n')}`,
+    );
+  }
   console.log('[pgTAP] All tests completed successfully.');
+  } catch (error) {
+    suiteError = error;
+    throw error;
+  } finally {
+    try { await qa.close(); } catch (closeError) {
+      if (!suiteError) throw closeError;
+      console.error('[pgTAP] QA cleanup also failed:', sanitizeErrorMessage(closeError));
+    }
+  }
 }
 
 if (require.main === module) {
@@ -1522,6 +1627,12 @@ if (require.main === module) {
 }
 
 module.exports = {
+  main,
+  runSuite,
+  withFullLocalQualification,
+  probeFullLocalCapabilities,
+  computeLocalSkip,
+  discoverTapFiles,
   isRetryableDbConnectError,
   resolveNodeFileTransientRetries,
   resolveNodeFileTransientMaxWaitMs,

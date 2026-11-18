@@ -1,10 +1,14 @@
 #!/usr/bin/env node
-/* eslint-disable no-console */
-
-const { main } = require('./verify-mobile-fieldops-strict');
+async function main() {
+  const strictVerifier = await import('./verify-mobile-fieldops-strict.cjs');
+  return strictVerifier.main();
+}
 
 if (require.main === module) {
-  main();
+  main().catch((error) => {
+    console.error(error?.message || String(error));
+    process.exit(1);
+  });
 }
 
 module.exports = {

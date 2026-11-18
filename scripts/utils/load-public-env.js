@@ -41,20 +41,47 @@ function parseEnvFile(filePath) {
   }
 }
 
-function applyPublicEnv(entries) {
+function mergeEnvEntries(candidates) {
+  const merged = {};
+  for (const candidate of candidates) {
+    const parsed = parseEnvFile(candidate);
+    if (!parsed) continue;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (merged[key]) continue;
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+function applyPublicEnv(entries, options = {}) {
   if (!entries) return;
+  const secondaryEntries = options.secondaryEntries || {};
   for (const [key, value] of Object.entries(entries)) {
     if (!key.startsWith(PUBLIC_PREFIX)) continue;
-    if (process.env[key]) continue;
+    const existing = process.env[key];
+    if (
+      existing &&
+      (options.initialEnv === undefined || Object.prototype.hasOwnProperty.call(options.initialEnv, key) || existing !== secondaryEntries[key])
+    ) {
+      continue;
+    }
     process.env[key] = value;
   }
 }
 
-function applyFallbackEnv(entries) {
+function applyFallbackEnv(entries, options = {}) {
   if (!entries) return;
+  const secondaryEntries = options.secondaryEntries || {};
   for (const key of FALLBACK_ENV_KEYS) {
-    if (process.env[key]) continue;
     if (!entries[key]) continue;
+    const existing = process.env[key];
+    if (
+      existing &&
+      (options.initialEnv === undefined || Object.prototype.hasOwnProperty.call(options.initialEnv, key) || existing !== secondaryEntries[key])
+    ) {
+      continue;
+    }
     process.env[key] = entries[key];
   }
 }
@@ -104,7 +131,7 @@ function applyAppNameFallback(appDir) {
   }
 }
 
-function loadPublicEnv({ appDir } = {}) {
+function loadPublicEnv({ appDir, initialEnv } = {}) {
   const resolvedAppDir = path.resolve(appDir || process.cwd());
   const repoRoot = resolveRepoRoot(resolvedAppDir);
   const envRoot = path.join(repoRoot, 'config', 'env');
@@ -121,20 +148,19 @@ function loadPublicEnv({ appDir } = {}) {
     path.join(resolvedAppDir, '.env'),
   ];
 
-  for (const candidate of primaryCandidates) {
-    const parsed = parseEnvFile(candidate);
-    applyPublicEnv(parsed);
-    applyFallbackEnv(parsed);
+  const primaryEntries = mergeEnvEntries(primaryCandidates);
+  const secondaryEntries = mergeEnvEntries(secondaryCandidates);
+  applyFallbackEnv(primaryEntries, { secondaryEntries, initialEnv });
+  if (!primaryEntries.NEXT_PUBLIC_SUPABASE_URL && primaryEntries.SUPABASE_URL) {
+    primaryEntries.NEXT_PUBLIC_SUPABASE_URL = process.env.SUPABASE_URL;
   }
-
+  if (!primaryEntries.NEXT_PUBLIC_SUPABASE_ANON_KEY && primaryEntries.SUPABASE_ANON_KEY) {
+    primaryEntries.NEXT_PUBLIC_SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+  }
+  applyPublicEnv(primaryEntries, { secondaryEntries, initialEnv });
   applySupabaseFallbacks();
-
-  for (const candidate of secondaryCandidates) {
-    const parsed = parseEnvFile(candidate);
-    applyPublicEnv(parsed);
-    applyFallbackEnv(parsed);
-  }
-
+  applyPublicEnv(secondaryEntries);
+  applyFallbackEnv(secondaryEntries);
   applySupabaseFallbacks();
   applyAppNameFallback(resolvedAppDir);
 }

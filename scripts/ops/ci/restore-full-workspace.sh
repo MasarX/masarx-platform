@@ -218,6 +218,8 @@ if [ "${#missing_paths[@]}" -gt 0 ]; then
   fi
 
   if [ "${#missing_paths[@]}" -gt 0 ] && has_sparse_checkout; then
+    echo "Retrying bounded sparse restore after 15s backoff."
+    sleep 15
     if expand_sparse_checkout "${missing_paths[@]}"; then
       load_missing_paths
     else

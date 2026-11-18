@@ -17,7 +17,7 @@ npm workspaces with two workspace roots: `apps/*` and `packages/*`.
 | `packages/auth` | `@masarx/auth` | Supabase Auth helpers | -- |
 | `packages/config` | `@masarx/config` | Config, i18n messages, UiDefaults | -- |
 
-Shared Next.js utilities (layout, security headers, fonts, React singleton aliasing) live in `apps/shared/`.
+Shared Next.js utilities (layout, security headers, fonts, and bundle analysis) live in `apps/shared/`.
 
 ## Next.js Configuration
 
@@ -25,7 +25,7 @@ Each app has its own `next.config.js` with:
 
 - **Turbopack** enabled (`turbopack.root` points to monorepo root)
 - **transpilePackages**: `@masarx/ui`, `@masarx/api`, `@masarx/auth`, `@masarx/config`
-- **React singleton aliasing** via `apps/shared/next-react-singleton.js` in the webpack config to prevent duplicate React bundles across workspaces
+- **React resolution** is owned by Next.js so its client and server layers keep the framework aliases they require
 - **next-intl plugin** loaded from each app's `i18n/request.ts`
 - **Root-served routing** for Console/Portal on dedicated subdomains (no Next.js `basePath` deployment contract)
 - **Security headers** applied via `apps/shared/security-headers.js`

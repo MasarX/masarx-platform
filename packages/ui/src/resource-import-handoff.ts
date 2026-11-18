@@ -1,83 +1,67 @@
-import type { ResourceImportRun, ResourceImportRowSummary } from "@masarx/api";
+import type { ResourceImportRun, UiReadRegistry } from "@masarx/api";
+import { resolveSafeHref, resolveTrustedExternalDataUrl } from "./url-guard";
 
 export type ResourceImportHandoffRow = {
   key: string;
   label: string;
   resource: string;
   id: string;
-  rowNumber: string;
-  status: string;
+  rowNumber: number;
 };
 
-function normalizeImportResourceKey(value: unknown) {
-  return String(value ?? "").trim().toLowerCase().replace(/^public\./, "");
-}
-
-function importRunRows(run: ResourceImportRun | null | undefined): ResourceImportRowSummary[] {
-  return Array.isArray(run?.rows) ? run.rows : [];
-}
-
-function addHandoffRow(
-  out: ResourceImportHandoffRow[],
-  seen: Set<string>,
-  params: {
-    label: unknown;
-    resource: unknown;
-    id: unknown;
-    rowNumber: unknown;
-    status: unknown;
-  },
-) {
-  const id = String(params.id ?? "").trim();
-  const resource = String(params.resource ?? "").trim();
-  if (!id || !resource) return;
-  const key = `${resource}:${id}`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  out.push({
-    key,
-    label: String(params.label ?? "Imported record"),
-    resource,
-    id,
-    rowNumber: String(params.rowNumber ?? "-"),
-    status: String(params.status ?? "-"),
-  });
-}
+const RESOURCE_KEY = /^[a-z][a-z0-9_]*$/i;
+const isRecordId = (id: string) => id.trim().length > 0 && id.length <= 2048 && !/[\u0000-\u001f\u007f]/.test(id);
 
 export function deriveResourceImportHandoffRows(
-  run: ResourceImportRun | null | undefined,
+  run: ResourceImportRun | null,
+  registry: UiReadRegistry | null,
 ): ResourceImportHandoffRow[] {
-  const rows = importRunRows(run);
-  if (rows.length === 0) return [];
-
-  const out: ResourceImportHandoffRow[] = [];
+  const resources = new Map(
+    (registry?.resources ?? []).flatMap((resource) =>
+      RESOURCE_KEY.test(resource.key)
+        ? [[resource.key, resource], [resource.relation ?? resource.key, resource]] as const
+        : [],
+    ),
+  );
+  const result: ResourceImportHandoffRow[] = [];
   const seen = new Set<string>();
-  const primaryResource = String(run?.resource_key ?? "").trim();
-  const primaryLabel = normalizeImportResourceKey(primaryResource) === "shipments" ? "Shipment" : "Target record";
-
-  for (const row of rows) {
-    addHandoffRow(out, seen, {
-      label: primaryLabel,
-      resource: primaryResource,
-      id: row.target_record_id,
-      rowNumber: row.row_number,
-      status: row.execution_status,
-    });
-
+  const add = (resourceKey: string | null | undefined, id: string | null | undefined, status: string | null | undefined, rowNumber: number) => {
+    const resource = resources.get(resourceKey ?? "");
+    if (!resource || !id || !isRecordId(id) || status !== "succeeded") return;
+    const normalizedId = id.trim();
+    const key = `${resource.key}:${normalizedId}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push({ key, label: resource.label ?? resource.key, resource: resource.key, id: normalizedId, rowNumber });
+  };
+  for (const row of run?.rows ?? []) {
+    add(run?.resource_key, row.target_record_id, row.execution_status, row.row_number);
     for (const node of row.related_nodes ?? []) {
-      addHandoffRow(out, seen, {
-        label: node.target_label ?? node.node_label ?? node.node_key ?? "Related record",
-        resource: node.target_resource,
-        id: node.target_record_id,
-        rowNumber: row.row_number,
-        status: node.execution_status ?? row.execution_status,
-      });
+      add(node.target_resource, node.target_record_id, node.execution_status, row.row_number);
     }
   }
-
-  return out;
+  return result;
 }
 
-export function isShipmentImportHandoffResource(resource: string): boolean {
-  return normalizeImportResourceKey(resource) === "shipments";
+export function buildResourceImportRecordHref(
+  appBasePath: string,
+  resource: string,
+  id: string,
+  returnTo?: string | null,
+) {
+  if (!RESOURCE_KEY.test(resource) || !isRecordId(id)) return null;
+  const canonical = resolveSafeHref(appBasePath, `/resources/${resource}`);
+  if (!canonical) return null;
+  const safeReturnTo = returnTo ? resolveTrustedExternalDataUrl(returnTo) : null;
+  const target = new URL(canonical, "https://example.invalid");
+  if (safeReturnTo?.startsWith("/") && !safeReturnTo.startsWith("//")) {
+    const current = new URL(safeReturnTo, target.origin);
+    if (current.pathname === target.pathname) {
+      target.search = current.search;
+      target.hash = current.hash;
+    }
+  }
+  target.searchParams.set("id", id);
+  target.searchParams.set("detail_open", "1");
+  return `${target.pathname}${target.search}${target.hash}`;
 }

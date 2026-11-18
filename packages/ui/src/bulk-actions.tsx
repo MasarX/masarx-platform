@@ -1,9 +1,12 @@
 "use client";
 import * as React from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createBrowserClient } from "@masarx/auth/browser";
 import type {
   UiCommandExecution,
   UiCommandInputField,
+  UiCommandReadback,
+  UiCommandReadbackParamSource,
   UiCommandSelection,
 } from "@masarx/api";
 import { getUiDefaults } from "@masarx/config";
@@ -12,6 +15,13 @@ import {
   requestUiWorkflowRunOutputDownload,
 } from "@masarx/api";
 import { Button } from "./button";
+import {
+  BulkActionResultReadback,
+  parseBatchResultReadback,
+  attachSelectionReadback,
+  requiresBatchResultEvidence,
+  type BatchResultReadback,
+} from "./bulk-action-result-readback";
 import { ConfirmDialog } from "./confirm-dialog";
 import {
   Dropdown,
@@ -50,6 +60,7 @@ import { Select } from "./select";
 import { Textarea } from "./textarea";
 import { useToast } from "./use-toast";
 import { buildHref } from "./url";
+import { downloadTrustedFile } from "./file-download";
 import {
   isTrustedDownloadUrl,
   isTrustedUrl,
@@ -57,7 +68,8 @@ import {
   resolveSafeAppBasePath,
   resolveSafeHref,
 } from "./url-guard";
-import { formatUiError } from "./utils";
+import { formatUiError, getUiErrorMessage } from "./utils";
+import { isUuidValue } from "./resource-utils";
 
 const DEFAULT_ID_PARAM = "id";
 const DEFAULT_IDS_PARAM = "ids";
@@ -89,6 +101,24 @@ type BulkActionsProps = {
   appBasePath?: string | null;
   telemetry?: UiScopeMetaInput | null;
   testIdPrefix?: string | null;
+  onBatchResultReadbackChange?: (result: BatchResultReadback | null) => void;
+  renderBatchResultReadback?: boolean;
+  onSuccess?: (input: {
+    action: BulkActionDefinition;
+    result: Record<string, unknown>;
+    selectedIds: string[];
+  }) => void | Promise<void>;
+};
+
+type ActionFeedback = {
+  actionKey: string;
+  actionLabel: string;
+  selectedIds: string[];
+  phase: "pending" | "submitted" | "warning" | "error";
+  detail: string;
+  resultStatus?: string;
+  workflowRunId?: string;
+  correlationId?: string;
 };
 
 type UndoState = {
@@ -128,7 +158,7 @@ type PrintRunOutputStatus = {
   outputBucket: string | null;
   outputNeedsSigning: boolean;
   outputSource: string | null;
-  artifactPersisted: boolean;
+  artifactPersisted: boolean | null;
   jobCompletionPending: boolean;
   timingSource: string | null;
   outputReady: boolean;
@@ -142,6 +172,12 @@ type PrintRunOutputStatus = {
   freshOnlyResolved: boolean;
   printAsyncRequestId: string | number | null;
   printAsyncCompleted: boolean;
+  bundleAsyncRequestId: string | number | null;
+  labelJobId: string | number | null;
+  labelId: string | number | null;
+  labelVersionId: string | number | null;
+  activeVersionId: string | number | null;
+  bundleAsyncCompleted: boolean | null;
   printMode: string | null;
   artifactKind: string | null;
   functionTotalMs: number | null;
@@ -175,7 +211,7 @@ const createDefaultPrintRunOutputStatus = (
   outputBucket: null,
   outputNeedsSigning: false,
   outputSource: null,
-  artifactPersisted: false,
+  artifactPersisted: null,
   jobCompletionPending: false,
   timingSource: null,
   outputReady: false,
@@ -189,6 +225,12 @@ const createDefaultPrintRunOutputStatus = (
   freshOnlyResolved: false,
   printAsyncRequestId: null,
   printAsyncCompleted: false,
+  bundleAsyncRequestId: null,
+  labelJobId: null,
+  labelId: null,
+  labelVersionId: null,
+  activeVersionId: null,
+  bundleAsyncCompleted: null,
   printMode: null,
   artifactKind: null,
   functionTotalMs: null,
@@ -316,6 +358,21 @@ async function requestWorkflowRunOutputSignedUrl(params: {
 function normalizePrintPhaseToken(value: string | null | undefined) {
   if (!value) return "";
   return value.trim().toLowerCase();
+}
+
+function failedPrintOutput(status: PrintRunOutputStatus): PrintRunOutputStatus | null {
+  const workflow = normalizePrintPhaseToken(status.workflowStatus);
+  const phase = normalizePrintPhaseToken(status.phase);
+  if (!['failed', 'cancelled'].includes(workflow) && phase !== 'failed') return null;
+  return {
+    ...status,
+    phase: 'failed',
+    terminal: true,
+    outputReady: false,
+    outputUrl: null,
+    outputFilePath: null,
+    outputNeedsSigning: false,
+  };
 }
 
 function resolvePrintProgressStatus(status: PrintRunOutputStatus): PrintProgressStatus {
@@ -476,11 +533,6 @@ function resolvePrintExecutionOptions(action: BulkActionDefinition): PrintExecut
   };
 }
 
-function triggerTrustedDownload(url: string) {
-  if (!isTrustedDownloadUrl(url)) return null;
-  return openTrustedInNewTab(url);
-}
-
 function sleep(ms: number) {
   return new Promise((resolve) => {
     if (typeof window === "undefined") {
@@ -633,7 +685,7 @@ async function pollWorkflowRunForOutputUrl(params: {
             typeof statusRecord.output_source === "string"
               ? statusRecord.output_source
               : null,
-          artifactPersisted: Boolean(statusRecord.artifact_persisted),
+          artifactPersisted: typeof statusRecord.artifact_persisted === "boolean" ? statusRecord.artifact_persisted : null,
           jobCompletionPending: Boolean(statusRecord.job_completion_pending),
           timingSource:
             typeof statusRecord.timing_source === "string"
@@ -672,6 +724,22 @@ async function pollWorkflowRunForOutputUrl(params: {
               ? statusRecord.print_async_request_id
               : null,
           printAsyncCompleted: Boolean(statusRecord.print_async_completed),
+          bundleAsyncRequestId:
+            typeof statusRecord.bundle_async_request_id === "string" || typeof statusRecord.bundle_async_request_id === "number"
+              ? statusRecord.bundle_async_request_id : null,
+          labelJobId:
+            typeof statusRecord.label_job_id === "string" || typeof statusRecord.label_job_id === "number"
+              ? statusRecord.label_job_id : null,
+          labelId:
+            typeof statusRecord.label_id === "string" || typeof statusRecord.label_id === "number"
+              ? statusRecord.label_id : null,
+          labelVersionId:
+            typeof statusRecord.label_version_id === "string" || typeof statusRecord.label_version_id === "number"
+              ? statusRecord.label_version_id : null,
+          activeVersionId:
+            typeof statusRecord.active_version_id === "string" || typeof statusRecord.active_version_id === "number"
+              ? statusRecord.active_version_id : null,
+          bundleAsyncCompleted: typeof statusRecord.bundle_async_completed === "boolean" ? statusRecord.bundle_async_completed : null,
           printMode:
             typeof statusRecord.print_mode === "string"
               ? statusRecord.print_mode
@@ -716,6 +784,11 @@ async function pollWorkflowRunForOutputUrl(params: {
               ? statusRecord.print_async_progress_error
               : null,
         });
+        const failed = failedPrintOutput(status);
+        if (failed) {
+          onProgress?.(failed);
+          return { outputUrl: null, status: failed };
+        }
         onProgress?.(status);
         if (status.outputUrl && isTrustedDownloadUrl(status.outputUrl)) {
           return { outputUrl: status.outputUrl, status };
@@ -752,7 +825,6 @@ async function pollWorkflowRunForOutputUrl(params: {
               maxSteps?: number | null;
             } | null
           ) => Promise<unknown>)(workflowRunId, {
-            operationResult: { source: "ui.print.poll" },
             budgetMs: pollProgressBudgetMs,
             maxSteps: pollProgressMaxSteps,
           });
@@ -808,6 +880,11 @@ async function pollWorkflowRunForOutputUrl(params: {
           pollProgressStatus: null,
           pollProgressError: null,
         });
+        const failed = failedPrintOutput(fallbackStatus);
+        if (failed) {
+          onProgress?.(failed);
+          return { outputUrl: null, status: failed };
+        }
         onProgress?.(fallbackStatus);
         if (outputUrl) return { outputUrl, status: fallbackStatus };
         if (fallbackStatus.terminal) {
@@ -825,14 +902,19 @@ async function pollWorkflowRunForOutputUrl(params: {
               maxSteps?: number | null;
             } | null
           ) => Promise<unknown>)(workflowRunId, {
-            operationResult: { source: "ui.print.poll" },
             budgetMs: pollProgressBudgetMs,
             maxSteps: pollProgressMaxSteps,
           });
         }
       }
     } catch (error) {
-      void error;
+      const code =
+        error && typeof error === "object"
+          ? (error as { code?: unknown }).code
+          : null;
+      if (String(code ?? "").trim() === "42501") {
+        throw error;
+      }
     }
     const delayMs =
       pollScheduleMs[attempt] ??
@@ -1046,19 +1128,120 @@ const buildActionPayload = (
   };
 };
 
+const readValueAtPath = (value: unknown, path?: string | null): unknown => {
+  const normalizedPath = path?.trim() ?? "";
+  if (!normalizedPath) return value;
+  return normalizedPath.split(".").reduce<unknown>((current, segment) => {
+    if (current === null || current === undefined) return undefined;
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      return Number.isInteger(index) && index >= 0 ? current[index] : undefined;
+    }
+    if (typeof current !== "object") return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, value);
+};
+
+const isReadbackParamSource = (
+  value: unknown
+): value is UiCommandReadbackParamSource => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const source = (value as Record<string, unknown>).source;
+  return source === "result" || source === "selection" || source === "static";
+};
+
+const resolveReadbackParam = (
+  spec: unknown,
+  commandResult: unknown,
+  selectedIds: string[]
+) => {
+  if (!isReadbackParamSource(spec)) return spec;
+  if (spec.source === "result") {
+    return readValueAtPath(commandResult, spec.path);
+  }
+  if (spec.source === "selection") {
+    if (spec.path === "id") return selectedIds.length === 1 ? selectedIds[0] : null;
+    if (spec.path === "ids") return selectedIds;
+    return selectedIds.length;
+  }
+  return spec.value;
+};
+
+const clampInteger = (
+  value: number | null | undefined,
+  fallback: number,
+  max: number
+) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(Math.trunc(value), 1), max);
+};
+
+const waitForConfiguredReadback = async (
+  ui: ReturnType<typeof createUiClient>,
+  readback: UiCommandReadback,
+  commandResult: unknown,
+  selectedIds: string[],
+  failureMessage: string
+) => {
+  const rpcName = readback.rpc?.trim() ?? "";
+  if (!rpcName) throw new Error(failureMessage);
+
+  const params = Object.fromEntries(
+    Object.entries(readback.params ?? {}).map(([key, spec]) => [
+      key,
+      resolveReadbackParam(spec, commandResult, selectedIds),
+    ])
+  );
+  const successPath = readback.success_path?.trim() || "visible";
+  const maxAttempts = clampInteger(readback.max_attempts, 4, 10);
+  const delayMs = Math.min(
+    Math.max(Math.trunc(readback.delay_ms ?? 150), 0),
+    2000
+  );
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const readbackResult = await ui.rpc<Record<string, unknown>>(rpcName, params);
+    if (readValueAtPath(readbackResult, successPath) === true) {
+      return readbackResult;
+    }
+    if (attempt < maxAttempts && delayMs > 0) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw new Error(failureMessage);
+};
+
+const subscribeToClientReady = () => () => {};
+const getClientReadySnapshot = () => true;
+const getServerReadySnapshot = () => false;
+
 export function BulkActions({
   actions,
   selectedIds,
   appBasePath,
   telemetry,
   testIdPrefix,
+  onSuccess,
+  onBatchResultReadbackChange,
+  renderBatchResultReadback = true,
 }: BulkActionsProps) {
   const t = createUiTranslator("ui.resourceActions");
+  // Server-rendered controls must wait until their confirmation handlers are attached.
+  const clientReady = React.useSyncExternalStore(
+    subscribeToClientReady,
+    getClientReadySnapshot,
+    getServerReadySnapshot,
+  );
+  const queryClient = useQueryClient();
   const resolvedTestIdPrefix = testIdPrefix?.trim()
     ? `${testIdPrefix}-bulk-actions`
     : undefined;
   const { toast } = useToast();
   const [pendingKey, setPendingKey] = React.useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = React.useState<ActionFeedback | null>(null);
+  const [batchResultReadback, setBatchResultReadback] =
+    React.useState<BatchResultReadback | null>(null);
   const [printProgress, setPrintProgress] = React.useState<PrintProgressState | null>(
     null
   );
@@ -1086,6 +1269,16 @@ export function BulkActions({
     () => [...selectedIds].sort().join(","),
     [selectedIds]
   );
+  const updateBatchResultReadback = React.useCallback(
+    (result: BatchResultReadback | null) => {
+      setBatchResultReadback(result);
+      onBatchResultReadbackChange?.(result);
+    },
+    [onBatchResultReadbackChange]
+  );
+  React.useEffect(() => {
+    if (!onBatchResultReadbackChange) setBatchResultReadback(null);
+  }, [onBatchResultReadbackChange, selectionSignature]);
   const scopeMeta = React.useMemo(
     () => buildScopeMeta(telemetry),
     [
@@ -1099,12 +1292,6 @@ export function BulkActions({
     () => resolveScopeDigest(telemetry),
     [telemetry?.settingsResolutionId]
   );
-  const openConfirmDialog = React.useCallback((action: BulkActionDefinition) => {
-    const fields = normalizeActionInputFields(action);
-    setConfirmInputValues(buildActionInputDefaults(fields));
-    setConfirmInputErrors({});
-    setConfirmAction(action);
-  }, []);
   const reportBulkEvent = React.useCallback(
     (
       type: string,
@@ -1132,6 +1319,13 @@ export function BulkActions({
     },
     [scopeDigest, scopeMeta]
   );
+  const openConfirmDialog = React.useCallback((action: BulkActionDefinition) => {
+    const fields = normalizeActionInputFields(action);
+    reportBulkEvent("ui.bulk_action.confirm.open", action);
+    setConfirmInputValues(buildActionInputDefaults(fields));
+    setConfirmInputErrors({});
+    setConfirmAction(action);
+  }, [reportBulkEvent]);
   const describePrintProgress = React.useCallback(
     (
       status: PrintRunOutputStatus,
@@ -1286,6 +1480,12 @@ export function BulkActions({
       action: BulkActionDefinition,
       inputValues?: ActionInputValues | null
     ) => {
+      const invocationIds = [...selectedIds];
+      const feedbackIdentity = {
+        actionKey: action.key,
+        actionLabel: action.label,
+        selectedIds: invocationIds,
+      };
       if (undoState) setUndoState(null);
       const execution = action.execution;
       const actionType = execution?.type ?? "navigate";
@@ -1328,15 +1528,226 @@ export function BulkActions({
           reportBulkEvent("ui.bulk_action.rpc.missing", action, "missing rpc");
           return;
         }
+        const genericReceipt = actionType === "rpc" && !requiresBatchResultEvidence(execution);
+        const showFeedback = (
+          phase: ActionFeedback["phase"],
+          detail: string,
+          result?: Record<string, unknown>,
+        ) => {
+          const field = (value: unknown) => typeof value === "string" && value.trim()
+            ? formatUiError(value.trim(), "").slice(0, 512)
+            : undefined;
+          const identity = (value: unknown) => typeof value === "string" && isUuidValue(value)
+            ? value.trim()
+            : field(value);
+          setActionFeedback({
+            ...feedbackIdentity, phase, detail,
+            resultStatus: field(result?.status),
+            workflowRunId: identity(result?.workflow_run_id),
+            correlationId: identity(result?.correlation_id),
+          });
+        };
         setPendingKey(action.key);
+        showFeedback("pending", t("feedback.pending", {
+          action: action.label, count: invocationIds.length,
+        }));
+        if (
+          actionType === "rpc" &&
+          requiresBatchResultEvidence(action.execution)
+        ) {
+          updateBatchResultReadback(null);
+        }
+        let rpcReturned = false;
+        let receiptResult: Record<string, unknown> | undefined;
         try {
           const ui = createUiClient();
           const commandStartedAtMs = Date.now();
           const result = await ui.rpc<Record<string, unknown>>(
             rpcName,
-            buildActionPayload(action, selectedIds, inputValues)
+            buildActionPayload(action, invocationIds, inputValues)
           );
+          rpcReturned = true;
+          receiptResult = result;
           const commandDurationMs = Math.max(0, Date.now() - commandStartedAtMs);
+          const batchReadback = actionType === "rpc" && requiresBatchResultEvidence(execution)
+            ? parseBatchResultReadback({ actionKey: action.key, actionLabel: action.label,
+                selectedIds: invocationIds, result })
+            : null;
+          // Keep committed outcomes even if refreshing the rows unmounts this toolbar.
+          if (batchReadback) updateBatchResultReadback(batchReadback);
+          const notifySuccess = async () => {
+            try {
+              await onSuccess?.({ action, result, selectedIds: [...invocationIds] });
+              return true;
+            } catch (error) {
+              const errorMessage = formatUiError(error, "Backend readback refresh failed.");
+              if (genericReceipt) {
+                showFeedback("warning", t("toast.readbackErrorDescription"), result);
+              }
+              toast({
+                tone: "warning",
+                title: t("toast.readbackErrorDescription"),
+                description: errorMessage,
+              });
+              reportBulkEvent("ui.bulk_action.readback.refresh_error", action, errorMessage);
+              return false;
+            }
+          };
+
+          let configuredReadback: unknown = null;
+          let configuredReadbackFailed = false;
+          if (execution?.readback) {
+            try {
+              configuredReadback = await waitForConfiguredReadback(
+                ui,
+                execution.readback,
+                result,
+                invocationIds,
+                t("toast.readbackErrorDescription")
+              );
+              const resourceKey = action.resourceKey?.trim() ?? "";
+              if (resourceKey) {
+                await Promise.all([
+                  queryClient.invalidateQueries({
+                    queryKey: ["resource", resourceKey],
+                    refetchType: "active",
+                  }),
+                  queryClient.invalidateQueries({
+                    queryKey: ["resource-detail", resourceKey],
+                    refetchType: "active",
+                  }),
+                ]);
+              }
+              reportBulkEvent("ui.bulk_action.readback.success", action);
+
+            } catch (error) {
+              if (!requiresBatchResultEvidence(execution)) throw error;
+              configuredReadbackFailed = true;
+              toast({ tone: "warning", title: t("toast.readbackErrorDescription"),
+                description: formatUiError(error, "Backend readback refresh failed.") });
+              reportBulkEvent("ui.bulk_action.readback.refresh_error", action);
+            }
+          }
+          if (actionType === "rpc" && action.resourceKey) {
+            void queryClient
+              .invalidateQueries({
+                queryKey: ["resource", action.resourceKey],
+                refetchType: "active",
+              })
+              .catch((error) => {
+                reportBulkEvent(
+                  "ui.bulk_action.result.refresh.error",
+                  action,
+                  formatUiError(error, "Resource refresh failed")
+                );
+              });
+          }
+
+          if (batchReadback) {
+            let readback = batchReadback;
+            if (configuredReadback !== null && !configuredReadbackFailed && !readback.malformedReason) {
+              try {
+                readback = attachSelectionReadback(readback, configuredReadback);
+              } catch (error) {
+                configuredReadbackFailed = true;
+                reportBulkEvent("ui.bulk_action.readback.refresh_error", action);
+                toast({ tone: "warning", title: t("toast.readbackErrorDescription"),
+                  description: formatUiError(error, "Backend readback refresh failed.") });
+              }
+            }
+
+            const resultMeta = {
+              result_status: readback.status,
+              total_count: readback.total,
+              success_count: readback.success,
+              failure_count: readback.failure,
+              already_processed_count: readback.alreadyProcessed,
+              queued_count: readback.queued,
+              failed_ids: readback.items
+                .filter((item) => item.outcome === "failed")
+                .map((item) => item.id)
+                .join(","),
+              malformed_reason: readback.malformedReason,
+            };
+
+            // Refresh confirmed committed outcomes without changing partial-failure evidence.
+            updateBatchResultReadback(readback);
+            const refreshSucceeded = !readback.malformedReason && (readback.success > 0 || readback.failure === 0)
+              ? await notifySuccess()
+              : true;
+            if (readback.malformedReason || readback.failure > 0) {
+              toast({
+                tone: "error",
+                title: t("toast.errorTitle", { action: action.label }),
+                description: readback.malformedReason
+                  ? t("resultReadback.malformedDetail")
+                  : t(readback.queued > 0 ? "resultReadback.toast.failureWithQueuedDescription" : "resultReadback.toast.failureDescription", {
+                      total: readback.total,
+                      success: readback.success,
+                      failure: readback.failure,
+                      already: readback.alreadyProcessed,
+                      queued: readback.queued,
+                    }),
+              });
+              reportBulkEvent(
+                readback.malformedReason
+                  ? "ui.bulk_action.result.malformed"
+                  : "ui.bulk_action.result.failed",
+                action,
+                readback.status,
+                resultMeta
+              );
+              return;
+            }
+
+            if (readback.queued > 0) {
+              toast({
+                tone: "info",
+                title: t("resultReadback.toast.queuedTitle", { action: action.label }),
+                description: t("resultReadback.toast.queuedDescription", {
+                  total: readback.total,
+                  success: readback.success,
+                  already: readback.alreadyProcessed,
+                  queued: readback.queued,
+                }),
+              });
+              reportBulkEvent("ui.bulk_action.result.queued", action, readback.status, resultMeta);
+              return;
+            }
+
+            if (refreshSucceeded && !configuredReadbackFailed) {
+              toast({
+                tone: "success",
+                title: t("toast.successTitle", { action: action.label }),
+                description: t("resultReadback.toast.successDescription", {
+                  total: readback.total,
+                  success: readback.success,
+                  already: readback.alreadyProcessed,
+                }),
+              });
+            }
+            reportBulkEvent(
+              "ui.bulk_action.success",
+              action,
+              readback.status,
+              resultMeta
+            );
+            if (readback.success > 0) {
+              const undoMeta = resolveUndoMeta(action);
+              if (undoMeta) {
+                reportBulkEvent(
+                  "ui.bulk_action.undo.ready",
+                  undoMeta.action,
+                  undoMeta.label
+                );
+                setUndoState({
+                  ...undoMeta,
+                  selectionSignature,
+                });
+              }
+            }
+            return;
+          }
 
           const workflowRunIdRaw =
             (actionType === "workflow" ||
@@ -1357,6 +1768,7 @@ export function BulkActions({
               actionType === "workflow_binding" ||
               actionType === "print")
           ) {
+            await notifySuccess();
             if (safeBasePath === null) {
               const blockedMessage = t("toast.errorTitle", {
                 action: action.label,
@@ -1560,7 +1972,7 @@ export function BulkActions({
                     },
                   });
                   if (polled.outputUrl) {
-                    const elapsedMs = Date.now() - startedAtMs;
+                    let elapsedMs = Date.now() - startedAtMs;
                     if (outputReadyAtMs === null) {
                       outputReadyAtMs = Date.now();
                     }
@@ -1628,8 +2040,9 @@ export function BulkActions({
                       Number.isFinite(polled.status.stageFinalizeMs)
                         ? polled.status.stageFinalizeMs
                         : null;
+                    const opened = await downloadTrustedFile(polled.outputUrl);
+                    elapsedMs = Date.now() - startedAtMs;
                     const targetMiss = elapsedMs > printOptions.targetDownloadMs;
-                    const opened = triggerTrustedDownload(polled.outputUrl);
                     const targetMessage = targetMiss
                       ? t("printProgress.detail.targetMiss", {
                           elapsed: elapsedMs,
@@ -1783,7 +2196,7 @@ export function BulkActions({
                     }
                     pushProgress({
                       status: "failed",
-                      detail: t("printProgress.detail.popupBlocked"),
+                      detail: t("printProgress.detail.downloadFailed"),
                       targetMiss,
                       elapsedMs,
                       minimized: false,
@@ -1791,23 +2204,23 @@ export function BulkActions({
                         polled.status
                           ? {
                               ...polled.status,
-                              failureReason: t("printProgress.detail.popupBlocked"),
+                              failureReason: t("printProgress.detail.downloadFailed"),
                               outputSource,
                             }
                           : createDefaultPrintRunOutputStatus({
                               workflowStatus: "failed",
                               terminal: true,
-                              failureReason: t("printProgress.detail.popupBlocked"),
+                              failureReason: t("printProgress.detail.downloadFailed"),
                               outputSource,
                             }),
                     });
                     toast({
                       tone: "error",
                       title: t("toast.errorTitle", { action: action.label }),
-                      description: `${t("printProgress.detail.popupBlocked")}${diagnosticSuffix}`,
+                      description: `${t("printProgress.detail.downloadFailed")}${diagnosticSuffix}`,
                     });
                     reportBulkEvent(
-                      "ui.bulk_action.print.download.blocked",
+                      "ui.bulk_action.print.download.failed_to_start",
                       action,
                       polled.outputUrl,
                       {
@@ -1951,7 +2364,7 @@ export function BulkActions({
                       }),
                     };
                   });
-                  reportBulkEvent("ui.bulk_action.print.error", action, errorMessage);
+                  reportBulkEvent("ui.bulk_action.print.error", action, getUiErrorMessage(error) ?? errorMessage);
                 });
                 return;
               }
@@ -1979,13 +2392,18 @@ export function BulkActions({
             navigateTo(runHref);
             return;
           }
-          toast({
-            tone: "success",
-            title: t("toast.successTitle", { action: action.label }),
-            description: t("toast.successDescription", {
-              count: selectedCount,
-            }),
-          });
+          if (await notifySuccess()) {
+            if (genericReceipt) {
+              showFeedback("submitted", t("toast.successDescription", { count: invocationIds.length }), result);
+            }
+            toast({
+              tone: "success",
+              title: t("toast.successTitle", { action: action.label }),
+              description: t("toast.successDescription", {
+                count: selectedCount,
+              }),
+            });
+          }
           reportBulkEvent("ui.bulk_action.success", action);
           const undoMeta = resolveUndoMeta(action);
           if (undoMeta) {
@@ -2009,24 +2427,35 @@ export function BulkActions({
             title: t("toast.errorTitle", { action: action.label }),
             description: errorMessage,
           });
-          reportBulkEvent("ui.bulk_action.error", action, errorMessage);
+          if (genericReceipt) {
+            showFeedback(
+              rpcReturned ? "warning" : "error",
+              rpcReturned ? t("toast.readbackErrorDescription") : errorMessage,
+              receiptResult,
+            );
+          }
+          reportBulkEvent("ui.bulk_action.error", action, getUiErrorMessage(error) ?? errorMessage);
         } finally {
           setPendingKey(null);
+          setActionFeedback((current) => current?.actionKey === action.key && current.phase === "pending"
+            ? null : current);
         }
       }
     },
     [
       describePrintProgress,
+      queryClient,
       reportBulkEvent,
       resolveUndoMeta,
       selectedCount,
       selectedIds,
       safeBasePath,
       safeRunHref,
+      onSuccess,
+      updateBatchResultReadback,
       selectionSignature,
       t,
       toast,
-      selectedIds,
       undoState?.action.key,
     ]
   );
@@ -2230,12 +2659,11 @@ export function BulkActions({
     if (!action) return;
     setPrintProgress(null);
     if (requiresExplicitConfirmation(action)) {
-      reportBulkEvent("ui.bulk_action.confirm.open", action);
       openConfirmDialog(action);
       return;
     }
     void runAction(action);
-  }, [actionsByKey, openConfirmDialog, printProgress, reportBulkEvent, runAction]);
+  }, [actionsByKey, openConfirmDialog, printProgress, runAction]);
 
   const resolveActionState = (action: BulkActionDefinition) => {
     const actionType = action.execution?.type ?? "navigate";
@@ -2264,7 +2692,7 @@ export function BulkActions({
               : null;
     const disabledReason =
       action.disabledReason || executionDisabledReason || selectionReason;
-    const disabled = Boolean(disabledReason) || pendingKey === action.key;
+    const disabled = !clientReady || Boolean(disabledReason) || pendingKey === action.key;
     return { actionType, disabledReason, disabled };
   };
 
@@ -2300,6 +2728,7 @@ export function BulkActions({
                     downloadBasePath={action.download.downloadBasePath}
                     selectedIds={selectedIds}
                     maxBatch={action.download.maxBatch}
+                    disabled={!clientReady}
                     disabledReason={action.disabledReason}
                     testIdPrefix={resolvedTestIdPrefix}
                     actionKey={action.key}
@@ -2314,7 +2743,6 @@ export function BulkActions({
               const handleClick = () => {
                 if (disabled) return;
                 if (requiresExplicitConfirmation(action)) {
-                  reportBulkEvent("ui.bulk_action.confirm.open", action);
                   openConfirmDialog(action);
                   return;
                 }
@@ -2354,6 +2782,7 @@ export function BulkActions({
                 <DropdownTrigger asChild>
                   <Button
                     type="button"
+                    disabled={!clientReady}
                     variant="ghost"
                     size="sm"
                     aria-label={t("actionsMenuAria")}
@@ -2366,7 +2795,7 @@ export function BulkActions({
                     {t("actionsMenu")}
                   </Button>
                 </DropdownTrigger>
-                <DropdownContent align="start">
+                <DropdownContent align="start" className="z-[60]">
                   {groupedOverflow.map((group, index) => (
                     <div key={group.key}>
                       {groupedOverflow.length > 1 ? (
@@ -2434,6 +2863,7 @@ export function BulkActions({
               technicalDetailsOpen={printProgress.technicalDetailsOpen}
               runOutputsHref={printProgress.runOutputsHref}
               statusSnapshot={printProgress.statusSnapshot}
+              readbackStopped={printProgressIsTerminal}
               onExpand={handlePrintProgressExpand}
               onHide={handlePrintProgressHide}
               onDismiss={handlePrintProgressDismiss}
@@ -2441,6 +2871,29 @@ export function BulkActions({
               onToggleTechnicalDetails={handlePrintProgressToggleDetails}
               onOpenRun={
                 printProgress.runOutputsHref ? handlePrintProgressOpenRun : null
+              }
+            />
+          ) : null}
+          {actionFeedback && actionFeedback.phase !== "pending" ? (
+            <div role="status" aria-live="polite"
+              data-action-key={actionFeedback.actionKey}
+              data-phase={actionFeedback.phase}
+              data-testid={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-feedback` : undefined}
+              className="space-y-1 text-sm">
+              <p>{actionFeedback.actionLabel}: {actionFeedback.detail}</p>
+              <p>{t("feedback.selectedIds", { ids: actionFeedback.selectedIds.join(", ") })}</p>
+              {actionFeedback.resultStatus ? <p>{t("feedback.resultStatus", { status: actionFeedback.resultStatus })}</p> : null}
+              {actionFeedback.workflowRunId ? <p>{t("feedback.workflowRunId", { id: actionFeedback.workflowRunId })}</p> : null}
+              {actionFeedback.correlationId ? <p>{t("feedback.correlationId", { id: actionFeedback.correlationId })}</p> : null}
+            </div>
+          ) : null}
+          {renderBatchResultReadback && batchResultReadback ? (
+            <BulkActionResultReadback
+              result={batchResultReadback}
+              testId={
+                resolvedTestIdPrefix
+                  ? `${resolvedTestIdPrefix}-result`
+                  : "bulk-action-result"
               }
             />
           ) : null}
@@ -2498,6 +2951,12 @@ export function BulkActions({
           isPending={confirmAction?.key === confirmingActionKey}
           autoCloseOnConfirm={false}
         >
+          {actionFeedback?.phase === "pending" && actionFeedback.actionKey === confirmAction.key ? (
+            <p role="status" aria-live="polite"
+              data-testid={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-confirm-status` : undefined}>
+              {actionFeedback.detail}
+            </p>
+          ) : null}
           {confirmLookupState.error ? (
             <p className="text-xs text-ui-danger" role="alert">
               {confirmLookupState.error}

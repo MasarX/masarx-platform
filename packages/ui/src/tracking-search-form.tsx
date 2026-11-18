@@ -14,6 +14,7 @@ type TrackingSearchFormProps = {
   placeholder?: string | null;
   searchLabel?: string | null;
   clearLabel?: string | null;
+  emptySearchMessage?: string | null;
   resourceKey?: string | null;
   filterKey?: string | null;
   testIdPrefix?: string;
@@ -32,12 +33,16 @@ export function TrackingSearchForm({
   placeholder,
   searchLabel,
   clearLabel,
+  emptySearchMessage,
   resourceKey,
   filterKey,
   testIdPrefix,
 }: TrackingSearchFormProps) {
   const router = useRouter();
   const [value, setValue] = React.useState(defaultValue ?? "");
+  const [emptySearch, setEmptySearch] = React.useState(false);
+  const errorId = React.useId();
+  const resolvedEmptySearchMessage = emptySearchMessage ?? t("form.emptySearch");
   const testId = testIdPrefix ? `${testIdPrefix}-form` : undefined;
   const resolvedLabel = label ?? t("form.label");
   const resolvedPlaceholder = placeholder ?? t("form.placeholder");
@@ -49,7 +54,11 @@ export function TrackingSearchForm({
     (event: React.FormEvent) => {
       event.preventDefault();
       const trimmed = value.trim();
-      if (!trimmed) return;
+      if (!trimmed) {
+        setEmptySearch(true);
+        return;
+      }
+      setEmptySearch(false);
       const separator = actionHref.includes("?") ? "&" : "?";
       const nextUrl = `${actionHref}${separator}${encodeURIComponent(paramKey)}=${encodeURIComponent(trimmed)}`;
       router.push(nextUrl);
@@ -59,6 +68,7 @@ export function TrackingSearchForm({
 
   const handleClear = React.useCallback(() => {
     setValue("");
+    setEmptySearch(false);
     router.push(actionHref);
   }, [actionHref, router]);
 
@@ -79,7 +89,9 @@ export function TrackingSearchForm({
           type="search"
           name={paramKey}
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => { setValue(event.target.value); setEmptySearch(false); }}
+          aria-invalid={emptySearch || undefined}
+          aria-describedby={emptySearch ? errorId : undefined}
           placeholder={resolvedPlaceholder}
           data-testid={
             resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-input` : undefined
@@ -108,6 +120,7 @@ export function TrackingSearchForm({
           </button>
         ) : null}
       </div>
+      {emptySearch ? <p id={errorId} role="alert" className="text-sm text-ui-danger">{resolvedEmptySearchMessage}</p> : null}
     </form>
   );
 }

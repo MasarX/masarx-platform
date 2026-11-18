@@ -28,55 +28,36 @@ export function stableStringify(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
-export function formatUiError(error: unknown, fallback: string) {
-  if (!error) return fallback;
-  if (typeof error === "string") {
-    return sanitizeUiError(error) ?? fallback;
+// Classification uses the original message; render only formatUiError's result.
+export function getUiErrorMessage(error: unknown): string | null {
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") return null;
+  const record = error as Record<string, unknown>;
+  for (const key of ["message", "details", "hint", "error_description", "error", "code"]) {
+    if (typeof record[key] === "string" && record[key].trim()) return record[key];
   }
-  if (error instanceof Error && error.message) {
-    return sanitizeUiError(error.message) ?? fallback;
-  }
-  if (typeof error === "object") {
-    const typed = error as {
-      message?: string;
-      details?: string;
-      hint?: string;
-      error?: string;
-      error_description?: string;
-      code?: string;
-    };
-    const resolved =
-      typed.message ||
-      typed.details ||
-      typed.hint ||
-      typed.error_description ||
-      typed.error ||
-      typed.code ||
-      fallback;
-    return sanitizeUiError(resolved) ?? fallback;
-  }
-  return fallback;
+  return null;
 }
 
-const TECHNICAL_UI_ERROR_PATTERNS: RegExp[] = [
-  /\bbackend\b/i,
-  /\bread[-_\s]?back\b/i,
-  /\bevent[-_\s]?read[-_\s]?back\b/i,
-  /\bcorrelation(?:[_\s-]?id)?\b/i,
-  /\bdebug\b/i,
-  /\bdiagnostic\b/i,
-  /\braw[-_\s]?(?:backend|json|payload|response|table)\b/i,
-];
+const TECHNICAL_UI_ERROR_PATTERN = /\b(?:backend|read[-_\s]?back|event[-_\s]?read[-_\s]?back|correlation(?:[_\s-]?id)?|debug|diagnostic|raw[-_\s]?(?:backend|json|payload|response|table))\b/i;
 
-function isTechnicalUiErrorMessage(message: string): boolean {
-  return TECHNICAL_UI_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+export function formatUiError(error: unknown, fallback: string) {
+  const message = sanitizeUiError(getUiErrorMessage(error));
+  if (!message) return fallback;
+  if (!TECHNICAL_UI_ERROR_PATTERN.test(message)) return message;
+  // Retain blocked-state classification without exposing the diagnostic suffix.
+  if (isCapabilityDeniedMessage(message)) {
+    const key = extractCapabilityDeniedKey(message);
+    return key ? `Capability denied: ${key}` : "Capability denied";
+  }
+  return fallback;
 }
 
 export function isSchemaCacheFunctionUnavailableError(
   error: unknown,
   functionName?: string
 ) {
-  const normalized = normalizeLower(formatUiError(error, ""));
+  const normalized = normalizeLower(getUiErrorMessage(error));
   if (!normalized) return false;
   const hasSchemaCacheMarker =
     normalized.includes("schema cache") ||
@@ -126,7 +107,7 @@ export function extractCapabilityDeniedKey(message: string | null): string | nul
 export function isStatementTimeoutUiError(error: unknown): boolean {
   if (!error) return false;
 
-  const normalizedMessage = normalizeLower(formatUiError(error, ""));
+  const normalizedMessage = normalizeLower(getUiErrorMessage(error));
   if (normalizedMessage?.includes("statement timeout")) return true;
 
   if (typeof error !== "object") return false;
@@ -154,6 +135,16 @@ export function sanitizeUiError(message: string | null) {
   if (!message) return null;
   let sanitized = message;
   sanitized = sanitized.replace(
+    /(^|[^a-z0-9_-])(["']?(?:cookie|set-cookie)["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\r\n]+)/gi,
+    "$1$2[redacted]"
+  );
+  sanitized = sanitized.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/=_-]+(?:\.[A-Za-z0-9_-]+)*/gi, "$1 [redacted]");
+  sanitized = sanitized.replace(
+    /(^|[^a-z0-9_-])((?:["']?)(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|(?:[a-z0-9]+[_-])*(?:api[_-]?key|password|secret|token|signature|private[_-]?key))["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}]+)/gi,
+    "$1$2[redacted]"
+  );
+  sanitized = sanitized.replace(/\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted]");
+  sanitized = sanitized.replace(
     /\b([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\b/g,
     (match, partOne, partTwo, partThree) => {
       const looksLikeJwt =
@@ -165,7 +156,5 @@ export function sanitizeUiError(message: string | null) {
     }
   );
   sanitized = sanitized.replace(/[A-Za-z0-9+/=_-]{32,}/g, "[redacted]");
-  const trimmed = sanitized.trim();
-  if (!trimmed || isTechnicalUiErrorMessage(trimmed)) return null;
-  return trimmed;
+  return sanitized.trim() || null;
 }

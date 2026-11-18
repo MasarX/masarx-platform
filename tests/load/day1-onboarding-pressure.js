@@ -22,8 +22,14 @@ const DAY1_DURATION = __ENV.DAY1_DURATION || profileDefaults.duration;
 const DAY1_VUS = Number(__ENV.DAY1_VUS || profileDefaults.vus);
 const DAY1_SHIPMENTS_PER_ITER = Number(__ENV.DAY1_SHIPMENTS_PER_ITER || 1);
 const DAY1_LABEL_REQUEST_RATE = Number(__ENV.DAY1_LABEL_REQUEST_RATE || 1);
-const DAY1_LABEL_HTTP_RETRY_ATTEMPTS = Math.max(1, Number(__ENV.DAY1_LABEL_HTTP_RETRY_ATTEMPTS || 3));
-const DAY1_LABEL_HTTP_RETRY_SLEEP_MS = Math.max(50, Number(__ENV.DAY1_LABEL_HTTP_RETRY_SLEEP_MS || 250));
+const DAY1_LABEL_HTTP_RETRY_MAX_ATTEMPTS = 10;
+const DAY1_LABEL_HTTP_RETRY_ATTEMPTS = Math.min(DAY1_LABEL_HTTP_RETRY_MAX_ATTEMPTS,
+  labelRetryNumber(__ENV.DAY1_LABEL_HTTP_RETRY_ATTEMPTS, 3, 1, true));
+const DAY1_LABEL_HTTP_RETRY_SLEEP_MS = labelRetryNumber(__ENV.DAY1_LABEL_HTTP_RETRY_SLEEP_MS, 250, 50, true);
+const DAY1_LABEL_HTTP_RETRY_BACKOFF_MS = labelRetryNumber(__ENV.DAY1_LABEL_HTTP_RETRY_BACKOFF_MS, DAY1_LABEL_HTTP_RETRY_SLEEP_MS, 50, true);
+const DAY1_LABEL_HTTP_RETRY_BACKOFF_MULTIPLIER = labelRetryNumber(__ENV.DAY1_LABEL_HTTP_RETRY_BACKOFF_MULTIPLIER, 2, 1);
+const DAY1_LABEL_HTTP_RETRY_MAX_SLEEP_MS = labelRetryNumber(__ENV.DAY1_LABEL_HTTP_RETRY_MAX_SLEEP_MS, 2000, 50, true);
+const DAY1_LABEL_HTTP_RETRY_JITTER_MS = labelRetryNumber(__ENV.DAY1_LABEL_HTTP_RETRY_JITTER_MS, 0, 0, true);
 const DAY1_LABEL_FAILURE_LOG_LIMIT = Math.max(0, Number(__ENV.DAY1_LABEL_FAILURE_LOG_LIMIT || 3));
 const DAY1_ITER_SLEEP_MS = Number(__ENV.DAY1_ITER_SLEEP_MS || 200);
 const DAY1_ERROR_RATE_MAX = Number(__ENV.DAY1_ERROR_RATE_MAX || 0.01);
@@ -199,6 +205,39 @@ function logLabelFailure(attempt, response, body) {
   console.error(
     `[day1-load] label bundle failure sample attempt=${attempt} status=${status} body_status=${bodyStatus} body_error=${bodyError} body_raw=${bodyRaw}`,
   );
+}
+
+function labelRetryNumber(value, fallback, minimum, integer = false) {
+  const number = typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')
+    ? Number(value) : NaN;
+  return Number.isFinite(number) && number >= minimum && (!integer || Number.isSafeInteger(number))
+    ? number : fallback;
+}
+
+function resolveLabelRetryPolicy(day1 = {}) {
+  day1 = day1 ?? {};
+  return {
+    label_http_retry_attempts: Math.min(DAY1_LABEL_HTTP_RETRY_MAX_ATTEMPTS,
+      labelRetryNumber(day1.label_http_retry_attempts, DAY1_LABEL_HTTP_RETRY_ATTEMPTS, 1, true)),
+    label_http_retry_sleep_ms: labelRetryNumber(day1.label_http_retry_sleep_ms, DAY1_LABEL_HTTP_RETRY_SLEEP_MS, 50, true),
+    label_http_retry_backoff_ms: labelRetryNumber(day1.label_http_retry_backoff_ms ?? day1.label_http_retry_sleep_ms, DAY1_LABEL_HTTP_RETRY_BACKOFF_MS, 50, true),
+    label_http_retry_backoff_multiplier: labelRetryNumber(day1.label_http_retry_backoff_multiplier, DAY1_LABEL_HTTP_RETRY_BACKOFF_MULTIPLIER, 1),
+    label_http_retry_max_sleep_ms: labelRetryNumber(day1.label_http_retry_max_sleep_ms, DAY1_LABEL_HTTP_RETRY_MAX_SLEEP_MS, 50, true),
+    label_http_retry_jitter_ms: labelRetryNumber(day1.label_http_retry_jitter_ms, DAY1_LABEL_HTTP_RETRY_JITTER_MS, 0, true),
+  };
+}
+
+function readDay1LabelPressurePolicy(db) {
+  const rows = dbQuery(db, `SELECT resolve_settings('label_print_policy', 'global', NULL)::text AS policy`);
+  const policy = readJsonSafe(normalizeValue(rows[0]?.policy));
+  return resolveLabelRetryPolicy(policy?.day1_onboarding_pressure ?? {});
+}
+
+function computeLabelRetrySleepMs(attempt, policy) {
+  const retryIndex = Math.max(0, attempt - 1);
+  const exponentialDelay = policy.label_http_retry_backoff_ms * (policy.label_http_retry_backoff_multiplier ** retryIndex);
+  const jitterMs = policy.label_http_retry_jitter_ms > 0 ? Math.floor(Math.random() * policy.label_http_retry_jitter_ms) : 0;
+  return Math.min(policy.label_http_retry_max_sleep_ms, exponentialDelay + jitterMs);
 }
 
 function toBarcodeToken(value, fallback = 'DAY1') {
@@ -384,6 +423,7 @@ export function setup() {
     const db = sql.open(postgres, DB_URL);
     try {
       const tenants = getTenantPool(db, DAY1_TENANTS, runId);
+      const labelPressurePolicy = readDay1LabelPressurePolicy(db);
       if (tenants.length < DAY1_TENANTS) {
         throw new Error(
           `Insufficient active tenant pool for day1 profile. required=${DAY1_TENANTS}, available=${tenants.length}`,
@@ -398,12 +438,14 @@ export function setup() {
         `[day1-load] setup complete run_id=${runId} profile=${DAY1_PROFILE} tenants=${tenants.length} auto_created=${autoCreatedOrgIds.length}`,
       );
       console.log(`[day1-load] label_http_enabled=${ENABLE_LABEL_HTTP ? 'true' : 'false'}`);
+      console.log(`[day1-load] label_pressure_policy source=global_with_env_fallback ${JSON.stringify(labelPressurePolicy)}`);
 
       return {
         run_id: runId,
         tracking_prefix: trackingPrefix,
         tenants,
         auto_created_org_ids: autoCreatedOrgIds,
+        label_pressure_policy: labelPressurePolicy,
       };
     } catch (error) {
       lastError = error;
@@ -432,6 +474,8 @@ export function setup() {
 
 export default function (data) {
   const tenants = Array.isArray(data?.tenants) ? data.tenants : [];
+  const labelPressurePolicy = resolveLabelRetryPolicy(data?.label_pressure_policy);
+  const labelRetryAttempts = labelPressurePolicy.label_http_retry_attempts;
   if (tenants.length === 0) {
     operationErrors.add(1);
     check(false, { 'tenant pool available': () => false });
@@ -546,7 +590,7 @@ export default function (data) {
         let response = null;
         let body = {};
         let labelOk = false;
-        for (let attempt = 1; attempt <= DAY1_LABEL_HTTP_RETRY_ATTEMPTS; attempt += 1) {
+        for (let attempt = 1; attempt <= labelRetryAttempts; attempt += 1) {
           response = http.post(
             `${SUPABASE_URL}/functions/v1/label-renderer`,
             JSON.stringify(payload),
@@ -564,8 +608,8 @@ export default function (data) {
           if (labelOk) {
             break;
           }
-          if (attempt < DAY1_LABEL_HTTP_RETRY_ATTEMPTS) {
-            sleep(DAY1_LABEL_HTTP_RETRY_SLEEP_MS / 1000);
+          if (attempt < labelRetryAttempts) {
+            sleep(computeLabelRetrySleepMs(attempt, labelPressurePolicy) / 1000);
           } else {
             logLabelFailure(attempt, response, body);
           }

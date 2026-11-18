@@ -30,13 +30,13 @@ jest.mock("../../apps/console/app/app-context", () => ({
         props: { searchParams: Record<string, string | string[] | undefined> },
       ) => unknown,
     ) =>
-    (props: { searchParams: Record<string, string | string[] | undefined> }) =>
+    async (props: { searchParams: Promise<Record<string, string | string[] | undefined>> }) =>
       render(
         {
           appKey: "console",
           appBasePath: "/console",
         },
-        props,
+        { searchParams: await props.searchParams },
       ),
 }));
 
@@ -100,7 +100,7 @@ describe("ConsoleIntegrationPluginsPage", () => {
 
   it("renders the integration plugins entrypoint and provider-health workspace links", async () => {
     const node = await ConsoleIntegrationPluginsPage({
-      searchParams: { detail_open: "1", id: "plugin-1" },
+      searchParams: Promise.resolve({ detail_open: "1", id: "plugin-1" }),
     });
 
     renderWithIntl(node);

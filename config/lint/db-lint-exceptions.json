@@ -32,10 +32,6 @@
     "reason": "Label reprint helper relies on labels and shipments tables; plpgsql lint emits false-positive 42P01 for labels in this environment."
   },
   {
-    "function": "public.ui_upsert_mapping_artifact_v1",
-    "reason": "Mapping studio runtime save helper references public.webhook_rules through dynamic SQL; preview db-lint still reports a false-positive 42P01 even though the canonical schema provides the table."
-  },
-  {
     "migration_duplicate_timestamp": "202604280010",
     "migration_duplicate_files": [
       "supabase/migrations/202604280010_assign_driver_to_vehicle_v1.sql",

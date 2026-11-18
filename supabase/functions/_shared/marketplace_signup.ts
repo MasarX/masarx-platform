@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "npm:@supabase/supabase-js@^2.45.4";
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2.111.0";
 import {
   asString,
   normalizeHostedRedirectUrl,
@@ -112,13 +112,15 @@ const findAuthUserIdByEmail = async (
   if (!target) return "";
 
   const perPage = 200;
-  for (let page = 1; page <= 10; page += 1) {
+  for (let page = 1; ; page += 1) {
     const { data, error } = await serviceClient.auth.admin.listUsers({
       page,
       perPage,
     });
 
-    if (error) return "";
+    if (error) {
+      throw new Error(error.message || "marketplace_signup_auth_user_lookup_failed");
+    }
 
     const users = Array.isArray(data?.users) ? data.users : [];
     const matched = users.find(
@@ -259,7 +261,7 @@ export const approveMarketplaceParticipantRequest = async (
         ok: false,
         error: {
           code: "invite_redirect_required",
-          message: "Invite redirect must be a hosted non-localhost http/https URL.",
+          message: "Invite redirect must be a hosted non-localhost HTTPS URL.",
         },
       };
     }

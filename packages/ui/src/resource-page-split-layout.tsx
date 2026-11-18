@@ -86,8 +86,8 @@ export function ResourcePageSplitLayout({
   const widthRef = React.useRef(defaultDetailWidth);
   const widthModeRef = React.useRef<"auto" | "stored" | "manual">("auto");
   const dragRef = React.useRef<
-    | { mode: "pointer"; rect: DOMRect; pointerId: number }
-    | { mode: "mouse"; rect: DOMRect }
+    | { mode: "pointer"; rect: DOMRect; pointerId: number; rtl: boolean }
+    | { mode: "mouse"; rect: DOMRect; rtl: boolean }
     | null
   >(null);
   const [detailWidth, setDetailWidth] = React.useState(defaultDetailWidth);
@@ -173,7 +173,8 @@ export function ResourcePageSplitLayout({
       if (event.pointerType === "mouse") return;
       const rect = containerRef.current?.getBoundingClientRect() ?? null;
       if (!rect) return;
-      dragRef.current = { mode: "pointer", rect, pointerId: event.pointerId };
+      dragRef.current = { mode: "pointer", rect, pointerId: event.pointerId,
+        rtl: window.getComputedStyle(containerRef.current!).direction === "rtl" };
       event.currentTarget.setPointerCapture(event.pointerId);
       event.preventDefault();
       setIsDragging(true);
@@ -188,7 +189,7 @@ export function ResourcePageSplitLayout({
       if (!drag) return;
       if (drag.mode !== "pointer") return;
       if (event.pointerId !== drag.pointerId) return;
-      const nextWidth = drag.rect.right - event.clientX;
+      const nextWidth = drag.rtl ? event.clientX - drag.rect.left : drag.rect.right - event.clientX;
       setClampedWidth(clampToContainer(nextWidth, drag.rect));
     },
     [clampToContainer, setClampedWidth]
@@ -223,7 +224,8 @@ export function ResourcePageSplitLayout({
       if (dragRef.current) return;
       const rect = containerRef.current?.getBoundingClientRect() ?? null;
       if (!rect) return;
-      dragRef.current = { mode: "mouse", rect };
+      dragRef.current = { mode: "mouse", rect,
+        rtl: window.getComputedStyle(containerRef.current!).direction === "rtl" };
       event.preventDefault();
       setIsDragging(true);
       document.body.style.userSelect = "none";
@@ -232,7 +234,7 @@ export function ResourcePageSplitLayout({
         const drag = dragRef.current;
         if (!drag) return;
         if (drag.mode !== "mouse") return;
-        const nextWidth = drag.rect.right - moveEvent.clientX;
+        const nextWidth = drag.rtl ? moveEvent.clientX - drag.rect.left : drag.rect.right - moveEvent.clientX;
         setClampedWidth(clampToContainer(nextWidth, drag.rect));
       };
 
@@ -251,17 +253,11 @@ export function ResourcePageSplitLayout({
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLButtonElement>) => {
       const rect = containerRef.current?.getBoundingClientRect() ?? null;
-      if (event.key === "ArrowLeft") {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        const next = clampToContainer(widthRef.current + 24, rect);
-        widthModeRef.current = "manual";
-        setClampedWidth(next);
-        persistWidth(storageKey, next);
-        return;
-      }
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        const next = clampToContainer(widthRef.current - 24, rect);
+        const rtl = containerRef.current && window.getComputedStyle(containerRef.current).direction === "rtl";
+        const grow = (event.key === "ArrowLeft") !== Boolean(rtl);
+        const next = clampToContainer(widthRef.current + (grow ? 24 : -24), rect);
         widthModeRef.current = "manual";
         setClampedWidth(next);
         persistWidth(storageKey, next);
@@ -321,9 +317,10 @@ export function ResourcePageSplitLayout({
           onMouseDown={handleMouseDown}
           onKeyDown={handleKeyDown}
           onDoubleClick={handleDoubleClick}
+          style={{ insetInlineStart: "-0.75rem" }}
           className={cn(
             "hidden md:block",
-            "absolute -left-3 top-0 z-30 h-full w-6 cursor-col-resize",
+            "absolute top-0 z-30 h-full w-6 cursor-col-resize",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent/30 focus-visible:ring-offset-2 focus-visible:ring-offset-ui-paper"
           )}
         >

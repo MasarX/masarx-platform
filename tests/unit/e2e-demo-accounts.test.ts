@@ -7,6 +7,7 @@ const mockReadFileSync = jest.fn();
 const actualFs = jest.requireActual("fs");
 
 jest.mock("@supabase/supabase-js", () => ({
+  ...jest.requireActual("@supabase/supabase-js"),
   createClient: (...args: unknown[]) => mockCreateClient(...args),
 }));
 
@@ -32,7 +33,7 @@ function configureManifest(password = "EXAMPLE_PASSWORD") {
       return JSON.stringify({
         mode: "persistent",
         password,
-        users: [{ email: "lpnoiwlvqmryinlkzgwwiosw@example.invalid", scope_type: "platform" }],
+        users: [{ email: "synthetic-user@demo.local", scope_type: "platform" }],
       });
     }
     return actualFs.readFileSync(target, encoding as BufferEncoding | undefined);
@@ -90,7 +91,7 @@ describe("e2e demo account password resolution", () => {
 
     await expect(
       resolveUsableDemoPassword({
-        email: "lpnoiwlvqmryinlkzgwwiosw@example.invalid",
+        email: "synthetic-user@demo.local",
         password: "EXAMPLE_PASSWORD",
       }),
     ).rejects.toThrow(/fetch failed/i);
@@ -124,10 +125,46 @@ describe("e2e demo account password resolution", () => {
 
     await expect(
       resolveUsableDemoPassword({
-        email: "lpnoiwlvqmryinlkzgwwiosw@example.invalid",
+        email: "synthetic-user@demo.local",
         password: "EXAMPLE_PASSWORD",
       }),
     ).resolves.toBe("EXAMPLE_PASSWORD");
     expect(mockSpawnSync).toHaveBeenCalledTimes(1);
+  });
+
+  test("retries typed SDK fetch errors with opaque messages and recovers within the existing budget", async () => {
+    configureManifest();
+    const { AuthRetryableFetchError } = jest.requireActual("@supabase/supabase-js");
+    mockSignInWithPassword
+      .mockResolvedValueOnce({ data: { session: null }, error: new AuthRetryableFetchError("{}", 0) })
+      .mockResolvedValueOnce({ data: { session: {} }, error: null });
+    const { resolveUsableDemoPassword } = await loadDemoAccountsModule();
+    await expect(resolveUsableDemoPassword({ email: "synthetic-user@demo.local", password: "EXAMPLE_PASSWORD" }))
+      .resolves.toBe("EXAMPLE_PASSWORD");
+    expect(mockSignInWithPassword).toHaveBeenCalledTimes(2);
+    expect(mockSignOut).toHaveBeenCalledTimes(2);
+    expect(mockSpawnSync).not.toHaveBeenCalled();
+  });
+
+  test("exhausts only three attempts for typed opaque SDK fetch errors without reprovisioning", async () => {
+    configureManifest();
+    const { AuthRetryableFetchError } = jest.requireActual("@supabase/supabase-js");
+    mockSignInWithPassword.mockResolvedValue({ data: { session: null }, error: new AuthRetryableFetchError("{}", 0) });
+    const { resolveUsableDemoPassword } = await loadDemoAccountsModule();
+    await expect(resolveUsableDemoPassword({ email: "synthetic-user@demo.local", password: "EXAMPLE_PASSWORD" }))
+      .rejects.toThrow("{} [class=AuthRetryableFetchError status=0 code=none]");
+    expect(mockSignInWithPassword).toHaveBeenCalledTimes(3);
+    expect(mockSignOut).toHaveBeenCalledTimes(3);
+    expect(mockSpawnSync).not.toHaveBeenCalled();
+  });
+
+  test("fails closed for unknown opaque errors, without retrying or exposing arbitrary metadata", async () => {
+    configureManifest();
+    mockSignInWithPassword.mockResolvedValue({ data: { session: null }, error: { message: "{}", name: "private-value", code: "private-value", status: 0 } });
+    const { resolveUsableDemoPassword } = await loadDemoAccountsModule();
+    await expect(resolveUsableDemoPassword({ email: "synthetic-user@demo.local", password: "EXAMPLE_PASSWORD" }))
+      .rejects.toThrow("{} [class=unclassified status=0 code=unclassified]");
+    expect(mockSignInWithPassword).toHaveBeenCalledTimes(1);
+    expect(mockSpawnSync).not.toHaveBeenCalled();
   });
 });

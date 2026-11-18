@@ -1,19 +1,89 @@
 const {
   buildFixtureProfile,
+  buildShipmentWebhookPolicy,
   isRetryableFixtureBootstrapConcurrencyError,
   isRetryableFixtureBootstrapError,
   resolveDatabaseUrl,
   resolveFixtureBootstrapRetryConfig,
   withFixtureBootstrapRetry,
+  upsertSettingValue,
 } = require('../../../scripts/tests/bootstrap/lib/integration-fixtures');
 
 describe('integration fixture bootstrap helpers', () => {
+  test('geocoding upsert uses only the canonical versioned writer', async () => {
+    const client = { query: jest.fn().mockResolvedValue({ rows: [] }) };
+    const value = { version: 1, provider_priority: [] };
+    await upsertSettingValue(client, {
+      category: 'geocoding_policy', scopeType: 'client',
+      scopeId: '00000000-0000-4000-8000-000000000001', value,
+      schemaVersion: 1, changeReason: 'owned fixture regression',
+    });
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query.mock.calls[0][0]).toContain('public.upsert_settings_value_v1(');
+    expect(client.query.mock.calls[0][1]).toEqual([
+      'geocoding_policy', 'client', '00000000-0000-4000-8000-000000000001',
+      JSON.stringify(value), 1, 'owned fixture regression',
+    ]);
+  });
+
+  test.each(['makeGeoEnabled', 'makeGeoDisabled'])('%s removes obsolete enabled before canonical save', name => {
+    const fs = require('node:fs');
+    const source = fs.readFileSync(require.resolve('../../../scripts/tests/bootstrap/lib/integration-fixtures'), 'utf8');
+    const start = source.indexOf('const ' + name + ' = (base) => {');
+    expect(start).toBeGreaterThan(-1);
+    expect(source.slice(start, source.indexOf('\n    };', start)))
+      .toMatch(/delete next\.enabled;\s*return next;/);
+  });
+  test.each([
+    ['test', ['test', 'test-foreign']],
+    ['Custom_Profile', ['custom_profile', 'test', 'test-foreign']],
+  ])('pgTAP provisions required tenant profiles serially (%s)', async (prefix, expected) => {
+    const calls = [];
+    let active = false;
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock('../../../scripts/tests/bootstrap/lib/integration-fixtures', () => ({
+        buildFixtureProfile,
+        runCli: async ({ env }) => {
+          expect(active).toBe(false);
+          active = true;
+          calls.push(env);
+          await Promise.resolve();
+          active = false;
+        },
+      }));
+      try {
+        const { runPgtapFixtureProfiles } = require('../../../scripts/tests/bootstrap/seed-pgtap-fixtures');
+        await runPgtapFixtureProfiles({ INTEGRATION_FIXTURE_PREFIX: prefix, DATABASE_URL: 'owned-dsn', DEPLOY_ENV: 'local' });
+      } finally { jest.dontMock('../../../scripts/tests/bootstrap/lib/integration-fixtures'); }
+    });
+    expect(calls.map(env => env.INTEGRATION_FIXTURE_PREFIX)).toEqual(expected);
+    expect(calls.every(env => env.DATABASE_URL === 'owned-dsn' && env.DEPLOY_ENV === 'local')).toBe(true);
+  });
+
   test('buildFixtureProfile normalizes prefix and emits expected fixture keys', () => {
     const profile = buildFixtureProfile({ INTEGRATION_FIXTURE_PREFIX: 'Test_Profile' });
     expect(profile.prefix).toBe('test_profile');
     expect(profile.organizations.alpha.slug).toBe('test_profile-org-alpha');
     expect(profile.clients.twoOne.slug).toBe('test_profile-client-2-1');
     expect(profile.webhook.basic.token).toBe('EXAMPLE_PASSWORD');
+    expect(profile.webhook.clientAckA.token).toBe('test_profile-client-a-ack-token');
+    expect(profile.webhook.clientAckB.token).toBe('test_profile-EXAMPLE_PASSWORD');
+    expect(buildFixtureProfile().webhook.clientAckA.token).toBe('client-a-ack-token');
+    expect(buildFixtureProfile().webhook.clientAckB.token).toBe('EXAMPLE_PASSWORD');
+  });
+
+  test('buildShipmentWebhookPolicy emits canonical typed shipment bindings', () => {
+    expect(buildShipmentWebhookPolicy()).toMatchObject({
+      version: 3,
+      workflow: {
+        intent: 'shipment.create',
+        templates_by_intent: {
+          'shipment.create': { template_name: 'webhook_shipment_create_v1' },
+          'shipment.delete': { template_name: 'shipment_delete_v1' },
+          'shipment.reschedule': { template_name: 'shipment_reschedule_v1' },
+        },
+      },
+    });
   });
 
   test('resolveDatabaseUrl resolves DSN from env ladder', () => {

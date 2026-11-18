@@ -1,0 +1,57 @@
+{
+  "schema_version": "workflow-lint-toolchain.v1",
+  "actionlint": {
+    "module_root": "github.com/rhysd/actionlint",
+    "module": "github.com/rhysd/actionlint/cmd/actionlint",
+    "source_commit": "011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7",
+    "version": "v1.7.13-0.20260419144658-011a6d15e749",
+    "module_sum": "h1:rnO2zIJLDbOCZ6YF1pOFi1QrESdRAUunDHiXQpKT7XA=",
+    "go_mod_sum": "h1:krOUhujIsJusovkaYzQ/VNH8PFexjNKqU0q5XI/4w+g=",
+    "go_version": "1.25.3",
+    "build": {
+      "cgo_enabled": "0",
+      "trimpath": true,
+      "buildvcs": false,
+      "ldflags": "-buildid="
+    }
+  },
+  "shellcheck": {
+    "version": "0.11.0"
+  },
+  "timeouts": {
+    "install_ms": 90000,
+    "probe_ms": 90000,
+    "lint_ms": 90000
+  },
+  "download_attempts": 2,
+  "targets": {
+    "windows-amd64": {
+      "platform": "win32",
+      "arch": "x64",
+      "goos": "windows",
+      "goarch": "amd64",
+      "actionlint_binary": "actionlint.exe",
+      "actionlint_sha256": "18ef267b4308bc8ac0d26c0f1fffb8e2a8c792f185719a9abe873a8db3706859",
+      "shellcheck_asset_url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.zip",
+      "shellcheck_asset_name": "shellcheck-v0.11.0.zip",
+      "shellcheck_asset_sha256": "8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e",
+      "shellcheck_archive_path": "shellcheck.exe",
+      "shellcheck_binary": "shellcheck.exe",
+      "shellcheck_sha256": "c9e82ada36ef4b8d4caf1f97fa89289048c8f4a33c2c76ffffc88bfe09ff00c5"
+    },
+    "linux-amd64": {
+      "platform": "linux",
+      "arch": "x64",
+      "goos": "linux",
+      "goarch": "amd64",
+      "actionlint_binary": "actionlint",
+      "actionlint_sha256": "23f41a69aa51a8f149205859d5cc3755d5ffc5252c4d8bf0e7134dcea8838cc7",
+      "shellcheck_asset_url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz",
+      "shellcheck_asset_name": "shellcheck-v0.11.0.linux.x86_64.tar.xz",
+      "shellcheck_asset_sha256": "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198",
+      "shellcheck_archive_path": "shellcheck-v0.11.0/shellcheck",
+      "shellcheck_binary": "shellcheck",
+      "shellcheck_sha256": "4da528ddb3a4d1b7b24a59d4e16eb2f5fd960f4bd9a3708a15baddbdf1d5a55b"
+    }
+  }
+}

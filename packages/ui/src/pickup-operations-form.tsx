@@ -6,6 +6,9 @@ import { Input } from "./input";
 import { Select } from "./select";
 import { Textarea } from "./textarea";
 import { cn } from "./utils";
+import { Combobox } from "./combobox";
+
+export type PickupLookupOption = { value: string; label: string; searchText?: string; groupValue?: string | null };
 
 export type PickupMutationFormState = {
   status: "idle" | "error" | "success";
@@ -13,6 +16,19 @@ export type PickupMutationFormState = {
 };
 
 export type PickupMutationFormField =
+  | {
+      name: string;
+      label: string;
+      kind: "relation";
+      options: PickupLookupOption[];
+      defaultValue?: string | string[];
+      mode?: "single" | "multi";
+      dependsOn?: string;
+      required?: boolean;
+      helpText?: string;
+      placeholder?: string;
+      layout?: "half" | "full";
+    }
   | {
       name: string;
       label?: string;
@@ -62,8 +78,10 @@ type PickupMutationFormProps = {
 const initialState: PickupMutationFormState = { status: "idle" };
 
 function buildInitialValues(fields: PickupMutationFormField[]) {
-  return fields.reduce<Record<string, string>>((acc, field) => {
-    acc[field.name] = String(field.defaultValue ?? "");
+  return fields.reduce<Record<string, string | string[]>>((acc, field) => {
+    acc[field.name] = field.kind === "relation" && field.mode === "multi"
+      ? [...(Array.isArray(field.defaultValue) ? field.defaultValue : [])]
+      : String(field.defaultValue ?? "");
     return acc;
   }, {});
 }
@@ -77,34 +95,87 @@ export function PickupMutationForm({
   helperText,
 }: PickupMutationFormProps) {
   const [state, formAction, isPending] = React.useActionState(action, initialState);
+  const [validationError, setValidationError] = React.useState<string | null>(null);
+  const formRef = React.useRef<HTMLFormElement>(null);
+  const [referenceDrafts, setReferenceDrafts] = React.useState<Record<string, string>>({});
+  const submittedValues = React.useRef<Record<string, string | string[]> | null>(null);
   const fieldsKey = JSON.stringify(
     fields.map((field) => ({
       name: field.name,
       kind: field.kind,
       defaultValue: field.defaultValue ?? "",
-      options: field.kind === "select" ? field.options : undefined,
+      options: field.kind === "select" || field.kind === "relation" ? field.options : undefined,
     })),
   );
-  const [values, setValues] = React.useState<Record<string, string>>(() =>
+  const [values, setValues] = React.useState<Record<string, string | string[]>>(() =>
     buildInitialValues(fields),
   );
 
   React.useEffect(() => {
     setValues(buildInitialValues(fields));
+    setReferenceDrafts({});
   }, [fieldsKey]);
 
   React.useEffect(() => {
     if (state.status === "success") {
       setValues(buildInitialValues(fields));
+      submittedValues.current = null;
+      setValidationError(null);
+      setReferenceDrafts({});
+    } else if (state.status === "error" && submittedValues.current) {
+      setValues(submittedValues.current);
     }
-  }, [fields, fieldsKey, state.status]);
+    // Keyed on each action result: React resets native form controls after every action commit.
+  }, [fieldsKey, state]);
 
-  function updateValue(name: string, value: string) {
-    setValues((current) => ({ ...current, [name]: value }));
+  React.useLayoutEffect(() => {
+    formRef.current?.querySelectorAll<HTMLSelectElement>("select[name]").forEach((select) => {
+      select.value = String(values[select.name] ?? "");
+    });
+  }, [values, state, isPending]);
+
+  function updateValue(name: string, value: string | string[]) {
+    setValidationError(null);
+    setReferenceDrafts((current) => {
+      const next = { ...current };
+      delete next[name];
+      for (const field of fields) {
+        if (field.kind === "relation" && (name === "organization_id" || field.dependsOn === name)) delete next[field.name];
+      }
+      return next;
+    });
+    setValues((current) => {
+      const next = { ...current, [name]: value };
+      for (const field of fields) {
+        if (name === "organization_id" && field.kind === "relation") {
+          next[field.name] = field.mode === "multi" ? [] : "";
+          continue;
+        }
+        if (field.kind !== "relation" || field.dependsOn !== name) continue;
+        const allowed = new Set(field.options.filter((option) => option.groupValue === value).map((option) => option.value));
+        const selected = current[field.name] ?? "";
+        next[field.name] = Array.isArray(selected)
+          ? selected.filter((entry) => allowed.has(entry))
+          : allowed.has(selected) ? selected : "";
+      }
+      return next;
+    });
   }
 
   return (
-    <form action={formAction} className="space-y-5" data-testid={`${testIdPrefix}-form`}>
+    <form ref={formRef} action={formAction} className="space-y-5" data-testid={`${testIdPrefix}-form`}
+      onSubmit={(event) => {
+        const missing = fields.find((field) => {
+          const value = values[field.name];
+          return field.kind === "relation" && field.required && (!value || value.length === 0);
+        });
+        if (missing) {
+          event.preventDefault();
+          setValidationError(`Select ${missing.label ?? missing.name} before submitting.`);
+          return;
+        }
+        submittedValues.current = { ...values };
+      }}>
       <div className="grid gap-4 md:grid-cols-2">
         {fields.map((field) => {
           if (field.kind === "hidden") {
@@ -113,12 +184,42 @@ export function PickupMutationForm({
                 key={field.name}
                 type="hidden"
                 name={field.name}
-                value={values[field.name] ?? ""}
+                value={String(values[field.name] ?? "")}
               />
             );
           }
 
           const layoutClass = field.layout === "full" ? "md:col-span-2" : "";
+          if (field.kind === "relation") {
+            const lookupOrganizationId = fields.find((entry) => entry.name === "organization_id")?.defaultValue;
+            const scopedOptions = lookupOrganizationId && values.organization_id !== String(lookupOrganizationId) ? [] : field.options;
+            const options = field.dependsOn
+              ? scopedOptions.filter((option) => option.groupValue === values[field.dependsOn!])
+              : scopedOptions;
+            const value = values[field.name] ?? (field.mode === "multi" ? [] : "");
+            return <div key={field.name} className={cn("space-y-2 text-sm text-ui-ink", layoutClass)} data-testid={`${testIdPrefix}-${field.name}`}>
+              <span id={`${testIdPrefix}-${field.name}-label`}>{field.label}</span>
+              <div role="group" aria-labelledby={`${testIdPrefix}-${field.name}-label`}>
+                <Combobox mode={field.mode ?? "single"} options={options} value={value} aria-labelledby={`${testIdPrefix}-${field.name}-label`}
+                  onChange={(next) => updateValue(field.name, next)} disabled={isPending}
+                  placeholder={field.placeholder ?? `Select ${field.label.toLowerCase()}`} />
+              </div>
+              {(Array.isArray(value) ? value : [value]).map((entry, index) =>
+                <input key={`${entry}-${index}`} type="hidden" name={field.name} value={entry} />)}
+              <details>
+                <summary className="cursor-pointer text-xs text-ui-muted">Enter authorized IDs directly</summary>
+                <Input aria-label={`${field.label} IDs`} disabled={isPending}
+                  value={referenceDrafts[field.name] ?? (Array.isArray(value) ? value.join(", ") : value)}
+                  onChange={(event) => {
+                    const raw = event.currentTarget.value;
+                    updateValue(field.name, field.mode === "multi" ? raw.split(/[\s,]+/).filter(Boolean) : raw.trim());
+                    setReferenceDrafts((current) => ({ ...current, [field.name]: raw }));
+                  }} />
+                <p className="text-xs text-ui-muted">Use this for records outside the loaded choices. The server still checks your access.</p>
+              </details>
+              {field.helpText ? <div className="text-xs text-ui-muted">{field.helpText}</div> : null}
+            </div>;
+          }
           const commonProps = {
             name: field.name,
             required: field.required,
@@ -141,13 +242,13 @@ export function PickupMutationForm({
                   {...commonProps}
                   rows={field.rows ?? 4}
                   placeholder={field.placeholder}
-                  value={values[field.name] ?? ""}
+                  value={String(values[field.name] ?? "")}
                   onChange={(event) => updateValue(field.name, event.currentTarget.value)}
                 />
               ) : field.kind === "select" ? (
                 <Select
                   {...commonProps}
-                  value={values[field.name] ?? ""}
+                  value={String(values[field.name] ?? "")}
                   onChange={(event) => updateValue(field.name, event.currentTarget.value)}
                 >
                   <option value="">Select...</option>
@@ -162,7 +263,7 @@ export function PickupMutationForm({
                   {...commonProps}
                   type={field.kind}
                   placeholder={field.placeholder}
-                  value={values[field.name] ?? ""}
+                  value={String(values[field.name] ?? "")}
                   onChange={(event) => updateValue(field.name, event.currentTarget.value)}
                   min={field.min}
                   step={field.step}
@@ -185,12 +286,12 @@ export function PickupMutationForm({
         ) : null}
       </div>
 
-      {state.status === "error" ? (
+      {validationError || state.status === "error" ? (
         <div
           className="rounded-2xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted"
           data-testid={`${testIdPrefix}-error`}
         >
-          {state.message ?? "Pickup operation failed."}
+          {validationError ?? state.message ?? "Pickup operation failed."}
         </div>
       ) : null}
 

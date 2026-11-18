@@ -124,12 +124,12 @@ function resolveCommandOnPath(command, env = process.env, platform = process.pla
   const raw = String(command || '').trim();
   if (!raw) throw new Error('required executable is missing');
   if (!String(platform || '').startsWith('win')) return raw;
-  if (raw.includes(path.sep) || raw.includes(path.posix.sep)) {
+  if (/[\\/]/u.test(raw)) {
     if (fs.existsSync(raw)) return raw;
     throw new Error(`required executable not found: ${raw}`);
   }
   const pathValue = String(env.PATH || env.Path || '').trim();
-  const segments = pathValue.split(path.delimiter).filter(Boolean);
+  const segments = pathValue.split(path.win32.delimiter).filter(Boolean);
   const extensions = String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
     .split(';')
     .map((entry) => entry.trim())
@@ -144,7 +144,8 @@ function resolveCommandOnPath(command, env = process.env, platform = process.pla
       ];
   for (const segment of segments) {
     for (const candidate of candidates) {
-      const resolved = path.join(segment, candidate);
+      const joinPath = segment.startsWith('/') ? path.join : path.win32.join;
+      const resolved = joinPath(segment, candidate);
       if (fs.existsSync(resolved)) return resolved;
     }
   }
@@ -221,6 +222,7 @@ function resolveRequiredExecutable(command, options = {}) {
   if (!raw) throw new Error('required executable is missing');
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
+  const isWindows = String(platform || '').startsWith('win');
   const hasPathSegment = /[\\/]/u.test(raw);
   if (hasPathSegment) {
     for (const candidate of executableCandidates(raw, platform, env)) {
@@ -229,10 +231,11 @@ function resolveRequiredExecutable(command, options = {}) {
     throw new Error(`required executable not found: ${raw}`);
   }
   const pathValue = String(env.PATH || env.Path || '').trim();
-  const segments = pathValue.split(path.delimiter).filter(Boolean);
+  const segments = pathValue.split(isWindows ? path.win32.delimiter : path.delimiter).filter(Boolean);
   for (const segment of segments) {
     for (const candidate of executableCandidates(raw, platform, env)) {
-      const resolved = path.join(segment, candidate);
+      const joinPath = isWindows && !segment.startsWith('/') ? path.win32.join : path.join;
+      const resolved = joinPath(segment, candidate);
       if (fs.existsSync(resolved)) return resolved;
     }
   }
@@ -380,6 +383,12 @@ function prepareTargetProject({ cwd, workspace, targetRoot }) {
   if (fs.existsSync(sourceConfig) && !fs.existsSync(targetConfig)) {
     fs.copyFileSync(sourceConfig, targetConfig);
   }
+  const sourceInviteTemplate = path.join(cwd, 'supabase', 'templates', 'invite.html');
+  const targetInviteTemplate = path.join(targetSupabase, 'templates', 'invite.html');
+  if (fs.existsSync(sourceInviteTemplate) && !fs.existsSync(targetInviteTemplate)) {
+    fs.mkdirSync(path.dirname(targetInviteTemplate), { recursive: true });
+    fs.copyFileSync(sourceInviteTemplate, targetInviteTemplate);
+  }
   return { root, supabase_dir: targetSupabase, config_path: targetConfig };
 }
 
@@ -441,11 +450,15 @@ function writeTargetPortConfig(project, workspace, ports, options = {}) {
     workspace,
     ports: declared,
     services: {
+      // objectives:allow LOCALHOST Justification: target-backend service descriptors bind only to the isolated local ports allocated for this workspace.
       api_url: `http://127.0.0.1:${declared.api}`,
       api_readiness_url: `http://127.0.0.1:${declared.api}/rest/v1/`,
       auth_url: `http://127.0.0.1:${declared.api}/auth/v1/health`,
+      // objectives:allow LOCALHOST Justification: target-backend Studio and mail-capture descriptors bind to their allocated local ports.
       studio_url: `http://127.0.0.1:${declared.studio}`,
       inbucket_url: `http://127.0.0.1:${declared.inbucket}`,
+      // objectives:allow DSN_URL Justification: target restore configuration synthesizes the isolated workspace database DSN from its allocated port.
+      // objectives:allow LOCALHOST Justification: the target database descriptor is intentionally loopback-only.
       database_url: ([`postgresql`,":","/","/",`postgres`,":",`postgres`,"@",`127.0.0.1`,":",`${declared.db}`,"/",`postgres`].join("")),
     },
   });
@@ -900,6 +913,8 @@ async function createTargetBackend(args = {}, options = {}) {
       cwd: project.root,
       env: options.env,
     }));
+    // objectives:allow DSN_URL Justification: schema restore connects only to the isolated target database allocated for this workspace.
+    // objectives:allow LOCALHOST Justification: the restore database is intentionally exposed on loopback only.
     const databaseUrl = ([`postgresql`,":","/","/",`postgres`,":",`postgres`,"@",`127.0.0.1`,":",`${ports.db}`,"/",`postgres`].join(""));
     const restoreArgs = [
       databaseUrl,
@@ -918,9 +933,11 @@ async function createTargetBackend(args = {}, options = {}) {
       workspace,
       ports,
       database_url: databaseUrl,
+      // objectives:allow LOCALHOST Justification: live target evidence records the exact loopback service ports allocated for this workspace.
       api_url: `http://127.0.0.1:${ports.api}`,
       api_readiness_url: `http://127.0.0.1:${ports.api}/rest/v1/`,
       auth_url: `http://127.0.0.1:${ports.api}/auth/v1/health`,
+      // objectives:allow LOCALHOST Justification: live target Studio and mail-capture evidence records the allocated local ports.
       studio_url: `http://127.0.0.1:${ports.studio}`,
       inbucket_url: `http://127.0.0.1:${ports.inbucket}`,
     };

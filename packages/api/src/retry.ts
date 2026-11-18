@@ -1,3 +1,5 @@
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
+
 const TRANSIENT_NETWORK_CODES = new Set([
   "ECONNRESET",
   "ETIMEDOUT",
@@ -33,6 +35,7 @@ export function isRetriableNetworkError(error: unknown) {
 
 export function isRetriableSupabaseError(error: unknown) {
   if (!error || typeof error !== "object") return false;
+  if (isAuthRetryableFetchError(error)) return true;
   const typed = error as {
     status?: number | string;
     code?: string | number;

@@ -311,6 +311,7 @@ async function seedShipments({ client, runId, demoManifestPath = '' }) {
     senderId = null,
     seedScope = 'client',
     seedScopeId = null,
+    seedSource = 'unknown',
   }) {
     if (!organizationId || !clientId) return;
     const trackingNumber = buildTrackingNumber(runId, insertIndex);
@@ -354,6 +355,7 @@ async function seedShipments({ client, runId, demoManifestPath = '' }) {
         sender_id: senderId || null,
         tracking_number: trackingNumber,
         seed_scope: seedScope,
+        seed_source: seedSource,
       });
       manifestEntries.push({
         kind: 'shipment',
@@ -393,6 +395,7 @@ async function seedShipments({ client, runId, demoManifestPath = '' }) {
       senderId,
       seedScope: 'sender',
       seedScopeId: senderId || null,
+      seedSource: resolvedSenderSeeds?.source,
     });
   }
 
@@ -405,6 +408,7 @@ async function seedShipments({ client, runId, demoManifestPath = '' }) {
       clientId,
       seedScope: 'client',
       seedScopeId: clientId || null,
+      seedSource: resolvedClientSeeds?.source,
     });
   }
 
@@ -421,6 +425,84 @@ async function seedShipments({ client, runId, demoManifestPath = '' }) {
     manifestEntries,
   };
 }
+async function seedPortalDispatchExceptionReview({ client, runId, seededShipments }) {
+  const shipments = Array.isArray(seededShipments) ? seededShipments : [];
+  const visibleShipments = shipments.filter((entry) => entry?.seed_source === 'demo_manifest');
+  const shipment =
+    visibleShipments.find((entry) => entry?.sender_id) || visibleShipments[0] || null;
+  const inserted = [];
+  const errors = [];
+  const manifestEntries = [];
+  if (!shipment) {
+    errors.push({ message: 'demo_manifest_visible_shipment_missing' });
+    return { attempted: 0, inserted_count: 0, inserted, errors, manifestEntries };
+  }
+
+  const payload = {
+    task_type_key: 'dispatch_exception_review',
+    context: {
+      organization_id: shipment.organization_id,
+      client_id: shipment.client_id,
+      sender_id: shipment.sender_id || null,
+      shipment_id: shipment.shipment_id,
+      dispatch_exception_reason: 'customer_unavailable',
+      service_type: 'delivery',
+    },
+    resource_type: 'shipment',
+    resource_id: shipment.shipment_id,
+    idempotency_key: `frontend-a2z:${runId}:dispatch-exception-review:${shipment.shipment_id}`,
+    actor_system: 'frontend-a2z-seed-fixtures',
+    metadata: {
+      e2e_seed: true,
+      seed_source: 'frontend-a2z-seed-fixtures',
+      run_id: runId,
+      dispatch_exception_reason: 'customer_unavailable',
+      service_type: 'delivery',
+    },
+  };
+
+  try {
+    const result = await client.query(
+      'SELECT task_id::text FROM public.create_task_system_v1($1::jsonb) LIMIT 1',
+      [JSON.stringify(payload)],
+    );
+    const taskId = String(result.rows?.[0]?.task_id || '').trim();
+    if (!taskId) throw new Error('dispatch_exception_review task id missing');
+    inserted.push({
+      task_id: taskId,
+      shipment_id: shipment.shipment_id,
+      client_id: shipment.client_id,
+      sender_id: shipment.sender_id || null,
+    });
+    manifestEntries.push({
+      kind: 'task',
+      id: taskId,
+      label: `frontend-a2z:${runId}:dispatch-exception-review`,
+      run_id: runId,
+      captured_at: new Date().toISOString(),
+      metadata: {
+        shipment_id: shipment.shipment_id,
+        client_id: shipment.client_id,
+        sender_id: shipment.sender_id || null,
+        seed_source: 'frontend-a2z-seed-fixtures',
+      },
+    });
+  } catch (error) {
+    errors.push({
+      shipment_id: shipment.shipment_id,
+      message: String(error.message || error),
+    });
+  }
+
+  return {
+    attempted: 1,
+    inserted_count: inserted.length,
+    inserted,
+    errors,
+    manifestEntries,
+  };
+}
+
 
 async function describeTableColumns(client, tableName) {
   const result = await client.query(
@@ -746,6 +828,7 @@ async function runSeedFixtures(args = parseArgs()) {
     manifest_path: args.manifest ? path.resolve(process.cwd(), args.manifest) : null,
     fixtures: {
       shipments: null,
+      portal_dispatch_exception_review: null,
       labels: null,
       workflow_admin_prereq: null,
       label_prereq: null,
@@ -767,6 +850,14 @@ async function runSeedFixtures(args = parseArgs()) {
     });
     report.fixtures.shipments = shipments;
     appendMutationManifestEntries(args.manifest, shipments.manifestEntries || []);
+    const dispatchExceptionReview = await seedPortalDispatchExceptionReview({
+      client,
+      runId,
+      seededShipments: shipments.inserted || [],
+    });
+    report.fixtures.portal_dispatch_exception_review = dispatchExceptionReview;
+    appendMutationManifestEntries(args.manifest, dispatchExceptionReview.manifestEntries || []);
+
 
     const labels = await seedLabels({
       client,
@@ -785,6 +876,14 @@ async function runSeedFixtures(args = parseArgs()) {
     if ((shipments.inserted_count || 0) === 0) {
       report.status = 'partial';
       report.blockers.push('shipment_seed_none_inserted');
+    }
+    if ((dispatchExceptionReview.inserted_count || 0) === 0) {
+      report.status = report.status === 'blocked' ? 'blocked' : 'partial';
+      report.blockers.push('portal_dispatch_exception_review_none_inserted');
+    }
+    if (Array.isArray(dispatchExceptionReview.errors) && dispatchExceptionReview.errors.length > 0) {
+      report.status = report.status === 'blocked' ? 'blocked' : 'partial';
+      report.blockers.push('portal_dispatch_exception_review_errors_present');
     }
     if ((labels.inserted_count || 0) === 0) {
       report.status = report.status === 'blocked' ? 'blocked' : 'partial';
@@ -838,5 +937,6 @@ module.exports = {
   resolveSenderSeeds,
   buildLabelBarcode,
   resolveInsertableLabelColumns,
+  seedPortalDispatchExceptionReview,
   runSeedFixtures,
 };

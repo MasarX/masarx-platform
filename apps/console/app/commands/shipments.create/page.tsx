@@ -11,6 +11,7 @@ const firstValue = (value: string | string[] | undefined) =>
 export default withConsoleConfig<PageProps>(({ appBasePath }, { searchParams }) => (
   <ShipmentManualCreatePage
     appBasePath={appBasePath}
+    requirePersistedReadback
     returnTo={firstValue(searchParams.return_to) ?? `${appBasePath}/resources/shipments`}
     testIdPrefix="console-shipment-manual-create"
   />

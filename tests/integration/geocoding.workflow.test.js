@@ -3864,11 +3864,13 @@ describe('Geocoding workflow multi-policy end-to-end', () => {
           d.name_canonical AS district_name
         FROM canonical_cities c
         JOIN canonical_districts d ON d.city_id = c.id
-        WHERE c.centroid IS NOT NULL
+        WHERE c.organization_id = $1::uuid
+          AND c.centroid IS NOT NULL
           AND d.centroid IS NOT NULL
         ORDER BY c.updated_at DESC
         LIMIT 1
       `,
+      [ids.organization_id],
     );
     expect(canonicalRows.length).toBe(1);
     const { city_name: cityName, province_name: provinceName, district_name: districtName } =
@@ -3973,11 +3975,14 @@ describe('Geocoding workflow multi-policy end-to-end', () => {
           d.name_canonical AS district_name
         FROM canonical_cities c
         JOIN canonical_districts d ON d.city_id = c.id
-        WHERE c.centroid IS NOT NULL
+        WHERE c.organization_id = $1::uuid
+          AND d.organization_id = $1::uuid
+          AND c.centroid IS NOT NULL
           AND d.centroid IS NOT NULL
         ORDER BY c.updated_at DESC
         LIMIT 1
       `,
+      [ids.organization_id],
     );
     const { city_name: cityName, province_name: provinceName, district_name: districtName } =
       canonicalRows[0];

@@ -89,8 +89,13 @@ export function LabelDesignerPage({
       if (key.trim()) set.add(key.trim());
     }
     if (set.size === 0) set.add("shipping");
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [state.drafts, state.effectiveDesignJson, state.labelType]);
+    // Keep canonical registry ordering and labels; preserve unknown existing codes.
+    const options = new Map(state.labelTypeOptions.map((option) => [option.value, option]));
+    for (const value of Array.from(set).sort((a, b) => a.localeCompare(b))) {
+      if (!options.has(value)) options.set(value, { value, label: value });
+    }
+    return Array.from(options.values());
+  }, [state.drafts, state.effectiveDesignJson, state.labelType, state.labelTypeOptions]);
 
   // --- Data hooks ---
 

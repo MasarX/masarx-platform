@@ -192,6 +192,21 @@ test("syncs detailOpen from initialOpen prop changes", () => {
 
   // The detail panel should now be visible via the useEffect sync
   expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
+
+  act(() => {
+    fireEvent.click(screen.getByTestId("close-btn"));
+  });
+  expect(screen.queryByTestId("detail-panel")).toBeNull();
+
+  rerender(
+    <ResourceDetailClient
+      {...defaultProps}
+      detailId="rec_2"
+      initialOpen
+      initialLayout="peek"
+    />
+  );
+  expect(screen.getByTestId("detail-panel")).toBeInTheDocument();
 });
 
 test("renders navigation with prev/next hrefs", () => {

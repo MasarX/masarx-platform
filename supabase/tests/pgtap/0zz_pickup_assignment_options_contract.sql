@@ -1,0 +1,11 @@
+BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap;
+SELECT plan(6);
+SELECT has_function('api','pickup_assignment_options_v1',ARRAY['uuid','integer'],'assignment options exist');
+SELECT has_function('api','pickup_relationship_labels_v1',ARRAY['uuid[]','uuid[]'],'read labels exist');
+SELECT ok(NOT has_function_privilege('anon','api.pickup_assignment_options_v1(uuid,integer)','EXECUTE'),'anonymous assignment options denied');
+SELECT ok(NOT has_function_privilege('anon','api.pickup_relationship_labels_v1(uuid[],uuid[])','EXECUTE'),'anonymous labels denied');
+SELECT ok(has_function_privilege('authenticated','api.pickup_assignment_options_v1(uuid,integer)','EXECUTE'),'authenticated choices use internal scope guard');
+SELECT ok(has_function_privilege('authenticated','api.pickup_relationship_labels_v1(uuid[],uuid[])','EXECUTE'),'authenticated labels use internal visibility guard');
+SELECT * FROM finish();
+ROLLBACK;

@@ -1,11 +1,12 @@
 const path = require("path");
+const { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } = require("next/constants");
+const { availableParallelism } = require("node:os");
 const { loadPublicEnv } = require("../../scripts/utils/load-public-env");
 const { buildStaticSecurityHeaders } = require("../shared/security-headers");
 const { resolveBundleAnalyzer } = require("../shared/next-bundle-analyzer");
-const { applyReactSingletonAlias } = require("../shared/next-react-singleton");
 const { resolveAllowedDevOrigins } = require("../shared/next-dev-origins");
 
-loadPublicEnv({ appDir: __dirname });
+loadPublicEnv({ appDir: __dirname, initialEnv: require("@next/env").initialEnv });
 
 const withBundleAnalyzer = resolveBundleAnalyzer();
 const createNextIntlPlugin = require("next-intl/plugin");
@@ -23,7 +24,9 @@ const securityHeaders = buildStaticSecurityHeaders();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: { cpus: availableParallelism() },
   outputFileTracingRoot: monorepoRoot,
+  serverExternalPackages: ["exceljs", "jszip"],
   allowedDevOrigins: resolveAllowedDevOrigins(),
   turbopack: {
     root: monorepoRoot
@@ -35,12 +38,6 @@ const nextConfig = {
     "@masarx/auth",
     "@masarx/config"
   ],
-  webpack(config, options) {
-    return applyReactSingletonAlias(config, {
-      appDir: __dirname,
-      isServer: options.isServer
-    });
-  },
   env: publicEnv,
   async headers() {
     return [
@@ -52,4 +49,10 @@ const nextConfig = {
   }
 };
 
-module.exports = withBundleAnalyzer(withNextIntl(nextConfig));
+const wrappedConfig = withBundleAnalyzer(withNextIntl(nextConfig));
+module.exports = async (phase, context) => {
+  if (phase === PHASE_DEVELOPMENT_SERVER || phase === PHASE_PRODUCTION_BUILD) {
+    require("../../scripts/frontend/prepare-map-worker").prepareMapWorker(__dirname);
+  }
+  return typeof wrappedConfig === "function" ? wrappedConfig(phase, context) : wrappedConfig;
+};

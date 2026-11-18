@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { randomUUID } = require('crypto');
 const { loadEnv } = require('../../../scripts/utils/load-env');
 const { upsertWebhookPolicy } = require('../../utils/policies');
 
@@ -32,42 +33,8 @@ const seedData = async (client) => {
     )
     ON CONFLICT (id) DO NOTHING;
 
-    INSERT INTO clients (id, organization_id, name, slug, sla_tier, status)
-    VALUES (
-      'dddd1000-0000-0000-0000-000000000004',
-      'aaaa1000-0000-0000-0000-000000000004',
-      'Webhook Client',
-      'webhook-client',
-      'standard',
-      'active'
-    )
-    ON CONFLICT (id) DO NOTHING;
-
-    INSERT INTO senders (id, client_id, name, brand_name, status)
-    VALUES (
-      'eeee1000-0000-0000-0000-000000000004',
-      'dddd1000-0000-0000-0000-000000000004',
-      'Webhook Sender',
-      'Webhook Sender',
-      'active'
-    )
-    ON CONFLICT (id) DO NOTHING;
-
-    INSERT INTO workflow_templates (
-      id, name, description, version, status, scope_type, scope_id
-    ) VALUES (
-      'ffff1000-0000-0000-0000-000000000004',
-      'webhook_followup_v1',
-      'Follow-up workflow for webhook intake tests',
-      1,
-      'active',
-      'tenant',
-      'aaaa1000-0000-0000-0000-000000000004'
-    )
-    ON CONFLICT (id) DO NOTHING;
-
     INSERT INTO webhook_sources (
-      id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, sender_id, enabled
+      id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled
     ) VALUES (
       'bbbb1000-0000-0000-0000-000000000004',
       'aaaa1000-0000-0000-0000-000000000004',
@@ -86,10 +53,20 @@ const seedData = async (client) => {
 
   `);
 
+  const clientId = randomUUID();
+  await client.query(`INSERT INTO clients(id,organization_id,name,slug,sla_tier,status)
+    VALUES($1::uuid,'aaaa1000-0000-0000-0000-000000000004','Webhook fixture client',$2,'standard','active')`,
+    [clientId,`webhook-fixture-${clientId}`]);
+  await client.query(`WITH owned_sender AS (
+    INSERT INTO senders(client_id,name,status) VALUES($1::uuid,'Workflow fixture sender','active') RETURNING id
+  ) UPDATE webhook_sources SET sender_id=(SELECT id FROM owned_sender)
+    WHERE id='bbbb1000-0000-0000-0000-000000000004'`, [clientId]);
+  const { rows: templates } = await client.query("SELECT id FROM workflow_templates WHERE name='webhook_shipment_create_v1' AND status='active' ORDER BY version DESC,updated_at DESC LIMIT 1");
+  expect(templates).toHaveLength(1);
   const policyValue = {
     version: 1,
     response: { mode: 'accepted_async', default_headers: { 'cache-control': 'no-store' } },
-    workflow: { template_id: 'ffff1000-0000-0000-0000-000000000004' },
+    workflow: { template_id: templates[0].id, intent:'shipment.create' },
   };
   await upsertWebhookPolicy('source', 'bbbb1000-0000-0000-0000-000000000004', policyValue, 'Test webhook intake policy', client);
 };

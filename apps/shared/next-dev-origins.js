@@ -22,7 +22,20 @@ function resolveAllowedDevOrigins(env = process.env) {
   );
 }
 
+function mergeAllowedDevOrigins(existing, originUrls) {
+  const hosts = [];
+  for (const value of originUrls || []) {
+    try {
+      hosts.push(new URL(String(value)).hostname);
+    } catch {
+      // Invalid base URLs are rejected by their owning config before this helper.
+    }
+  }
+  return parseOriginList([existing, ...hosts].filter(Boolean).join(','));
+}
+
 module.exports = {
+  mergeAllowedDevOrigins,
   parseOriginList,
   resolveAllowedDevOrigins,
 };

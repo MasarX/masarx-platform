@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(22);
+SELECT plan(26);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_plan_wave_builder_v1()
 RETURNS SETOF TEXT
@@ -32,6 +32,7 @@ DECLARE
   v_ship_other_branch UUID := gen_random_uuid();
   v_ship_express UUID := gen_random_uuid();
   v_ship_planned UUID := gen_random_uuid();
+  v_branch_offering UUID := gen_random_uuid();
   v_ship_lineage UUID := gen_random_uuid();
   v_lineage_key TEXT := 'a2z_standard_service_level_20260615';
   v_candidate_count INT := 0;
@@ -410,6 +411,27 @@ BEGIN
     1,
     'delivery_wave_built event is logged once across idempotent retries'
   );
+
+  INSERT INTO public.service_offerings (id, service_level_id, branch_id, zone_id, effective_from, is_active, priority)
+  VALUES (v_branch_offering, v_standard_level, v_branch, NULL, '2026-01-01T00:00:00Z', TRUE, 10);
+  UPDATE public.branch_capacity_windows SET zone_id = NULL WHERE branch_id = v_branch;
+  UPDATE public.shipments SET zone_id = NULL,
+    metadata = COALESCE(metadata, '{}'::JSONB) || jsonb_build_object('service_offering_id', v_branch_offering)
+  WHERE id = v_ship_low AND client_id = v_client;
+  RETURN NEXT is((SELECT count(*)::INT FROM public.route_plan_delivery_wave_candidates_v1(
+    jsonb_build_object('organization_id',v_org,'branch_id',v_branch,'planned_date','2026-04-04')) c
+    WHERE c.shipment_id = v_ship_low), 1, 'branch-only shipment with a valid branch offering is admitted');
+  RETURN NEXT is((SELECT c.stop_payload#>>'{metadata,service_offering_id}' FROM public.route_plan_delivery_wave_candidates_v1(
+    jsonb_build_object('organization_id',v_org,'branch_id',v_branch,'planned_date','2026-04-04')) c
+    WHERE c.shipment_id = v_ship_low), v_branch_offering::TEXT, 'stop preserves the exact selected offering');
+  UPDATE public.service_offerings SET is_active = FALSE WHERE id = v_branch_offering;
+  RETURN NEXT is((SELECT count(*)::INT FROM public.route_plan_delivery_wave_candidates_v1(
+    jsonb_build_object('organization_id',v_org,'branch_id',v_branch,'planned_date','2026-04-04')) c
+    WHERE c.shipment_id = v_ship_low), 0, 'an inactive selected offering is not replaced by another offering');
+  UPDATE public.service_offerings SET is_active = TRUE WHERE id = v_branch_offering;
+  RETURN NEXT is((SELECT count(*)::INT FROM public.route_plan_delivery_wave_candidates_v1(
+    jsonb_build_object('organization_id',v_org,'branch_id',v_other_branch,'planned_date','2026-04-04')) c
+    WHERE c.shipment_id = v_ship_low), 0, 'branch-only shipment remains excluded from another branch');
 
   SELECT COUNT(*)::int
     INTO v_lineage_candidate_count

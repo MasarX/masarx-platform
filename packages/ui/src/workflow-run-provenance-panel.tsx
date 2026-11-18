@@ -104,7 +104,7 @@ export function WorkflowRunProvenancePanel({
     [workflowRun]
   );
   const safeHref = React.useCallback(
-    (path: string) => (basePath ? resolveSafeHref(basePath, path) : null),
+    (path: string) => (basePath !== null ? resolveSafeHref(basePath, path) : null),
     [basePath]
   );
 

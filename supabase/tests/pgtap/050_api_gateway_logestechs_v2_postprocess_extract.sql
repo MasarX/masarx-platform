@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(48);
+SELECT plan(49);
 
 -- Ensure time partitions exist for decision_log/settings_resolution_log inserts (handler uses decision logging).
 SELECT public.create_next_partitions();
@@ -587,7 +587,7 @@ BEGIN
         'cityId', 5,
         'villageId', 180,
         'regionId', 1,
-        'nationalAddress', 'NAT-ORIGIN-050'
+        'nationalAddress', 'ORGN0050'
       ),
       'destinationAddress', jsonb_build_object(
         'addressLine1', 'Test Destination 050',
@@ -597,7 +597,7 @@ BEGIN
         'cityId', 1,
         'villageId', 38,
         'regionId', 1,
-        'nationalAddress', 'NAT-DEST-050'
+        'nationalAddress', 'DEST0050'
       )
     ),
     now(),
@@ -639,7 +639,10 @@ BEGIN
     1,
     now(),
     '77770000-0000-0000-0000-000000000050',
-    jsonb_build_object('api_gateway_request_id', '99990000-0000-0000-0000-000000000050'),
+    jsonb_build_object(
+      'api_gateway_request_id', '99990000-0000-0000-0000-000000000050',
+      'api_gateway_route_id', v_route_id
+    ),
     now(),
     '05000000-0000-0000-0000-000000000054'
   )
@@ -837,8 +840,18 @@ SELECT is(
     FROM public.addresses
     WHERE id = (SELECT (result->'postprocess'->>'destination_address_id')::uuid FROM tmp_gateway_postprocess)
   ),
-  'NAT-DEST-050',
+  'DEST0050',
   'address materializer preserves destinationAddress raw object in raw_input'   
+);
+
+SELECT is(
+  (
+    SELECT sa_short_code
+    FROM public.addresses
+    WHERE id = (SELECT (result->'postprocess'->>'destination_address_id')::uuid FROM tmp_gateway_postprocess)
+  ),
+  'DEST0050',
+  'address materializer stores destination national address as canonical sa_short_code'
 );
 
 SELECT is(
@@ -985,7 +998,10 @@ BEGIN
     1,
     now(),
     '77770000-0000-0000-0000-000000000051',
-    jsonb_build_object('api_gateway_request_id', '99990000-0000-0000-0000-000000000051'),
+    jsonb_build_object(
+      'api_gateway_request_id', '99990000-0000-0000-0000-000000000051',
+      'api_gateway_route_id', v_route_id
+    ),
     now(),
     '05000000-0000-0000-0000-000000000054'
   )

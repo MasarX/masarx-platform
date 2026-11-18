@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
 const path = require('path');
-const { spawnSync } = require('child_process');
+const {
+  assertCommandDidNotTimeOut,
+  runBoundedSyncCommand,
+} = require('./bounded-sync-command');
 
 function parseArg(argv, flag) {
   for (let i = 0; i < argv.length; i++) {
@@ -44,11 +47,12 @@ function resolveWorkspaceName(options = {}) {
     if (positional) return String(positional).trim();
   }
 
-  const res = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', cwd });
-  if (res.status !== 0) {
+  const result = runBoundedSyncCommand('git', ['rev-parse', '--show-toplevel'], { cwd });
+  assertCommandDidNotTimeOut(result, '[workspace/resolve-name] git worktree probe');
+  if (!result.ok) {
     throw new Error('Missing `--name` and not inside a git worktree; rerun with `--name "<desired-name>"`.');
   }
-  const root = String(res.stdout || '').trim();
+  const root = String(result.stdout || '').trim();
   if (!root) {
     throw new Error('Unable to resolve git worktree root; rerun with `--name "<desired-name>"`.');
   }

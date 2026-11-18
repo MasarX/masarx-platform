@@ -6,6 +6,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { parseFlagArgs } = require("../utils/cli-args");
 const { loadEnv } = require("../utils/load-env");
+const { isLocalSiteUrl } = require("../ops/ci/release-verify-preview");
 
 loadEnv();
 
@@ -15,15 +16,11 @@ const MIME = {
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".json": "application/json",
+  ".wasm": "application/wasm",
   ".txt": "text/plain; charset=utf-8",
   ".xml": "application/xml; charset=utf-8",
 };
-
-const PREVIEW_INTAKE_ENDPOINTS = new Set([
-  "/__landing-contact",
-  "/__tenant-signup",
-  "/__driver-signup",
-]);
 
 function isTruthy(value) {
   return /^(1|true|yes|on)$/i.test(String(value || "").trim());
@@ -31,6 +28,10 @@ function isTruthy(value) {
 
 function contentType(filePath) {
   return MIME[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+}
+
+function stripMountPrefix(urlPath, basePath = "/") {
+  return urlPath.startsWith(basePath) ? urlPath.slice(basePath.length - 1) : null;
 }
 
 function safeJoin(rootDir, urlPath) {
@@ -61,119 +62,6 @@ function resolveRouteRewrite(rootDir, urlPath) {
   return safeJoin(rootDir, match.target);
 }
 
-function jsonResponse(res, status, payload) {
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "POST, OPTIONS",
-    "access-control-allow-headers": "content-type, x-masarx-public-edge-client, x-turnstile-token",
-  });
-  res.end(JSON.stringify(payload));
-}
-
-function collectRequestJson(req, maxBytes = 64 * 1024) {
-  return new Promise((resolve, reject) => {
-    let size = 0;
-    let body = "";
-
-    req.on("data", (chunk) => {
-      size += chunk.length;
-      if (size > maxBytes) {
-        reject(new Error("request_body_too_large"));
-        req.destroy();
-        return;
-      }
-      body += chunk.toString("utf8");
-    });
-
-    req.on("end", () => {
-      if (!body.trim()) {
-        resolve({});
-        return;
-      }
-
-      try {
-        resolve(JSON.parse(body));
-      } catch {
-        reject(new Error("invalid_json"));
-      }
-    });
-
-    req.on("error", reject);
-  });
-}
-
-function createPreviewIntakePayload(pathname, body) {
-  const now = new Date().toISOString();
-  const email = typeof body.email === "string" ? body.email.trim() : "";
-  const organizationName =
-    typeof body.organization_name === "string"
-      ? body.organization_name.trim()
-      : typeof body.company === "string"
-        ? body.company.trim()
-        : "";
-
-  if (pathname === "/__tenant-signup") {
-    return {
-      ok: true,
-      request_id: `tsr_local_${Date.now()}`,
-      status: "pending",
-      email,
-      organization_name: organizationName,
-      received_at: now,
-    };
-  }
-
-  if (pathname === "/__driver-signup") {
-    return {
-      ok: true,
-      application_id: `drv_local_${Date.now()}`,
-      status: "submitted",
-      status_token: `dst_local_${Date.now()}`,
-      email,
-      received_at: now,
-    };
-  }
-
-  return {
-    ok: true,
-    lead_id: `lead_local_${Date.now()}`,
-    status: "received",
-    email,
-    company: organizationName,
-    received_at: now,
-  };
-}
-
-async function maybeHandlePreviewIntake(req, res, urlPath) {
-  const pathname = String(urlPath || "/").split("?")[0].split("#")[0].replace(/\/+$/g, "") || "/";
-  if (!PREVIEW_INTAKE_ENDPOINTS.has(pathname)) return false;
-
-  const method = String(req.method || "GET").toUpperCase();
-  if (method === "OPTIONS") {
-    jsonResponse(res, 204, {});
-    return true;
-  }
-
-  if (method !== "POST") {
-    jsonResponse(res, 405, { ok: false, error: { code: "method_not_allowed" } });
-    return true;
-  }
-
-  try {
-    const body = await collectRequestJson(req);
-    jsonResponse(res, 200, createPreviewIntakePayload(pathname, body));
-  } catch (error) {
-    const code = error instanceof Error && error.message ? error.message : "invalid_request";
-    jsonResponse(res, code === "request_body_too_large" ? 413 : 400, {
-      ok: false,
-      error: { code },
-    });
-  }
-
-  return true;
-}
-
 function build(outDir) {
   const res = spawnSync(process.execPath, [path.join("scripts", "frontend", "build-landing.js"), "--out", outDir], {
     stdio: "inherit",
@@ -183,33 +71,81 @@ function build(outDir) {
   if (code !== 0) process.exit(code);
 }
 
+async function handleLocalIntakeMock(req, res, { enabled = false, siteUrl = "" } = {}) {
+  if (!enabled) return false;
+  const pathname = new URL(req.url || "/", "http://localhost").pathname.replace(/\/+$/g, "");
+  if (!["/__landing-contact", "/__tenant-signup"].includes(pathname)) return false;
+  const reply = (status, body) => {
+    res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+  const reject = (status, code) => reply(status, { ok: false, mock: true, error: { code } });
+  if (!isLocalSiteUrl(siteUrl) || !isLocalSiteUrl(`http://${req.headers.host || ""}`)) {
+    reject(403, "local_mock_only");
+  } else if (req.method !== "POST") {
+    reject(405, "method_not_allowed");
+  } else if (!String(req.headers["content-type"] || "").toLowerCase().includes("application/json")) {
+    reject(415, "unsupported_content_type");
+  } else {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req) {
+      size += Buffer.byteLength(chunk);
+      if (size <= 64 * 1024) chunks.push(Buffer.from(chunk));
+    }
+    if (size > 64 * 1024) {
+      reject(413, "body_too_large");
+      return true;
+    }
+    let payload;
+    try { payload = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { /* rejected below */ }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      reject(400, "invalid_json");
+    } else {
+      const tenant = pathname === "/__tenant-signup";
+      const id = tenant ? "00000000-0000-4000-8000-000000000002" : "00000000-0000-4000-8000-000000000001";
+      reply(200, { ok: true, mock: true, status: "under_review", ...(tenant ? { request_id: id } : { id }) });
+    }
+  }
+  return true;
+}
+
 function main() {
   const args = parseFlagArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
   const port = Number.parseInt(process.env.LANDING_PORT || String(args.port || "3333"), 10);
-  const host = String(process.env.LANDING_HOST || "").trim();
+  const intakeMocks = isTruthy(process.env.LANDING_ENABLE_INTAKE_MOCKS);
+  const host = String(process.env.LANDING_HOST || "").trim() || (intakeMocks ? "127.0.0.1" : "");
+  if (intakeMocks && !["localhost", "127.0.0.1", "::1"].includes(host.toLowerCase())) {
+    throw new Error("LANDING_ENABLE_INTAKE_MOCKS requires LANDING_HOST to be localhost, 127.0.0.1 or ::1.");
+  }
   const outDir = path.resolve(repoRoot, String(args.out || "dist/landing"));
+  const basePath = `${String(args["base-path"] || "/").replace(/\/+$/g, "")}/`;
 
-  if (!process.env.LANDING_SITE_URL && host) process.env.LANDING_SITE_URL = `http://${host}:${port}`;
+  if (!process.env.LANDING_SITE_URL && host) process.env.LANDING_SITE_URL = `http://${host === "::1" ? "[::1]" : host}:${port}`;
+  if (intakeMocks && !isLocalSiteUrl(process.env.LANDING_SITE_URL)) {
+    throw new Error("LANDING_ENABLE_INTAKE_MOCKS requires a local LANDING_SITE_URL.");
+  }
 
   const skipBuild = isTruthy(args["skip-build"]) || isTruthy(process.env.LANDING_SKIP_BUILD);
   if (!skipBuild) build(outDir);
 
   const server = http.createServer(async (req, res) => {
     try {
+      if (await handleLocalIntakeMock(req, res, { enabled: intakeMocks, siteUrl: process.env.LANDING_SITE_URL })) return;
       const method = String(req.method || "GET").toUpperCase();
-      const urlPath = String(req.url || "/");
-
-      if (await maybeHandlePreviewIntake(req, res, urlPath)) {
-        return;
-      }
-
       if (method !== "GET" && method !== "HEAD") {
         res.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
         res.end("Method not allowed");
         return;
       }
 
+      const urlPath = stripMountPrefix(String(req.url || "/"), basePath);
+      if (urlPath === null) {
+        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+        res.end("Not found");
+        return;
+      }
       const target = safeJoin(outDir, urlPath === "/" ? "/index.html" : urlPath);
       if (!target) {
         res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
@@ -280,7 +216,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-  createPreviewIntakePayload,
+  handleLocalIntakeMock,
   isTruthy,
-  maybeHandlePreviewIntake,
+  main,
+  stripMountPrefix,
 };

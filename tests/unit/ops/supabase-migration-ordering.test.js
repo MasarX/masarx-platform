@@ -31,5 +31,32 @@ describe('supabase migrations ordering', () => {
       }
     }
   });
+
+  test('defines the API Gateway route intent helper before every qualified call', () => {
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    const dir = path.join(repoRoot, 'supabase', 'migrations');
+    const entries = fs.readdirSync(dir).filter((name) => name.endsWith('.sql')).sort();
+    const symbol = 'public.api_gateway_route_canonical_intent_v1';
+    const definitionToken = 'CREATE OR REPLACE FUNCTION ' + symbol;
+    let definition = null;
+    const calls = [];
+
+    for (const name of entries) {
+      const sql = fs.readFileSync(path.join(dir, name), 'utf8');
+      const definitionOffset = sql.indexOf(definitionToken);
+      if (definitionOffset >= 0 && definition === null) definition = { name, offset: definitionOffset };
+      let offset = sql.indexOf(symbol + '(');
+      while (offset >= 0) {
+        if (offset !== definitionOffset + 'CREATE OR REPLACE FUNCTION '.length) calls.push({ name, offset });
+        offset = sql.indexOf(symbol + '(', offset + symbol.length);
+      }
+    }
+
+    expect(definition).not.toBeNull();
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call.name > definition.name || (call.name === definition.name && call.offset > definition.offset)).toBe(true);
+    }
+  });
 });
 

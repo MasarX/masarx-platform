@@ -11,7 +11,7 @@ type MarketplaceRequestCreatePageProps = Parameters<
 const MarketplaceRequestCreatePageInner =
   UiMarketplaceRequestCreatePage as unknown as (
     props: MarketplaceRequestCreatePageProps,
-  ) => JSX.Element;
+  ) => React.JSX.Element;
 
 export function MarketplaceRequestCreatePage(
   props: MarketplaceRequestCreatePageProps,

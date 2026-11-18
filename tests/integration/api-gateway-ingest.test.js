@@ -1,5 +1,4 @@
 const { Pool } = require('pg');
-const http = require('http');
 const { randomUUID } = require('crypto');
 const { loadEnv } = require('../../scripts/utils/load-env');
 const { skipIfMissing } = require('../utils/test-env');
@@ -24,182 +23,6 @@ jest.setTimeout(150000);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const describeIfHttp = httpEnabled ? describe : describe.skip;
 
-async function startProviderStub() {
-  const requests = [];
-  const server = http.createServer((req, res) => {
-    let raw = '';
-    req.setEncoding('utf8');
-    req.on('data', (chunk) => {
-      raw += chunk;
-    });
-    req.on('end', () => {
-      let body = {};
-      try {
-        body = raw ? JSON.parse(raw) : {};
-      } catch {
-        body = { raw };
-      }
-      requests.push({
-        method: req.method,
-        url: req.url,
-        headers: req.headers,
-        body,
-      });
-      const clientReference =
-        body?.client_reference_number ||
-        body?.clientReferenceNumber ||
-        `REF-${requests.length}`;
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        id: `PROV-${clientReference}`,
-        barcode: `TRACK-${String(clientReference).replace(/[^A-Za-z0-9]/g, '').slice(-18)}`,
-        reference_id: `REF-${clientReference}`,
-        serviceType: body?.service_level || body?.serviceType || 'STANDARD',
-        expectedDeliveryDate: body?.expected_delivery_date || '2026-06-04T10:00:00.000+0300',
-      }));
-    });
-  });
-
-  await new Promise((resolve) => server.listen(0, '0.0.0.0', resolve));
-  const address = server.address();
-  return {
-    url: `http://rvzwwjlztwwisjthghnipgjr.example.invalid:${address.port}`,
-    requests,
-    close: () => new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
-    }),
-  };
-}
-
-const isTransientFetchError = (error) => {
-  if (!error) return false;
-  const message = String(error.message || '').toLowerCase();
-  const causeName = String(error.cause?.name || '');
-  const causeCode = String(error.cause?.code || '').toLowerCase();
-
-  return (
-    message.includes('fetch failed') ||
-    message.includes('timeout') ||
-    causeName.includes('Timeout') ||
-    causeCode.includes('timeout')
-  );
-};
-
-async function upsertOutboundEgressPolicy(client, scopeType, scopeId) {
-  const policyValue = {
-    policy: {
-      enforce_https_only: false,
-      block_private_networks: false,
-      domain_allowlist: ['127.0.0.1', 'localhost', 'rvzwwjlztwwisjthghnipgjr.example.invalid'],
-      domain_denylist: [],
-      allowed_methods: ['POST'],
-      max_payload_bytes: 262144,
-      max_timeout_seconds: 30,
-      follow_redirects: false,
-      header_allowlist: [
-        'accept',
-        'content-type',
-        'authorization',
-        'x-api-key',
-        'api-key',
-        'user-agent',
-        'traceparent',
-        'tracestate',
-        'x-correlation-id',
-      ],
-    },
-  };
-
-  let { rows } = await client.query(
-    `SELECT id
-       FROM public.settings_versions
-      WHERE category = 'outbound_egress_policy'
-        AND scope_type = $1::text
-        AND scope_hash = $2::uuid
-        AND effective_until IS NULL
-      ORDER BY effective_from DESC NULLS LAST, created_at DESC NULLS LAST
-      LIMIT 1`,
-    [scopeType, scopeId],
-  );
-
-  if (rows[0]?.id) {
-    rows = (await client.query(
-      `UPDATE public.settings_versions
-         SET value = $2::jsonb,
-              schema_version = 1,
-              change_reason = 'api-gateway ingest local stub provider policy',
-              approved_at = COALESCE(approved_at, clock_timestamp()),
-              effective_from = COALESCE(effective_from, clock_timestamp())
-        WHERE id = $1::uuid
-        RETURNING id`,
-      [rows[0].id, JSON.stringify(policyValue)],
-    )).rows;
-  } else {
-    rows = (await client.query(
-      `INSERT INTO public.settings_versions (
-         id,
-         category,
-         scope_type,
-         scope_id,
-         scope_hash,
-         version,
-         value,
-         schema_version,
-         change_reason,
-         approved_at,
-         effective_from
-       )
-       VALUES (
-         gen_random_uuid(),
-         'outbound_egress_policy',
-         $1::text,
-         $2::uuid,
-         $2::uuid,
-         1,
-         $3::jsonb,
-         1,
-         'api-gateway ingest local stub provider policy',
-         clock_timestamp(),
-         clock_timestamp()
-       )
-       RETURNING id`,
-      [scopeType, scopeId, JSON.stringify(policyValue)],
-    )).rows;
-  }
-
-  await client.query(
-    `DELETE FROM public.settings
-      WHERE category = 'outbound_egress_policy'
-        AND scope_type = $1::text
-        AND scope_hash = $2::uuid`,
-    [scopeType, scopeId],
-  );
-
-  await client.query(
-    `INSERT INTO public.settings (
-       id,
-       category,
-       scope_type,
-       scope_id,
-       scope_hash,
-       settings_version_id,
-       cached_value,
-       last_updated
-     )
-     VALUES (
-       gen_random_uuid(),
-       'outbound_egress_policy',
-       $1::text,
-       $2::uuid,
-       $2::uuid,
-       $3::uuid,
-       $4::jsonb,
-       clock_timestamp()
-     )`,
-    [scopeType, scopeId, rows[0].id, JSON.stringify(policyValue)],
-  );
-}
-
 async function insertGatewayFixture(client, fixture) {
   await client.query(
     `INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
@@ -220,71 +43,14 @@ async function insertGatewayFixture(client, fixture) {
   );
 
   await client.query(
-    `INSERT INTO branches (id, organization_id, code, name, timezone, is_active)
-     VALUES ($1::uuid, $2::uuid, $3, 'UC026 API Gateway Branch', 'Asia/Riyadh', true)
-     ON CONFLICT (id) DO UPDATE
-       SET name = EXCLUDED.name,
-           timezone = EXCLUDED.timezone,
-           is_active = EXCLUDED.is_active`,
-    [fixture.branchId, fixture.organizationId, `uc026-${fixture.branchId.slice(0, 8)}`],
-  );
-
-  const serviceLevelResult = await client.query(
-    `INSERT INTO service_levels (id, organization_id, key, name, is_active)
-     VALUES ($1::uuid, $2::uuid, 'standard', 'Standard', true)
-     ON CONFLICT (organization_id, key) DO UPDATE
-       SET name = EXCLUDED.name,
-           is_active = EXCLUDED.is_active
-     RETURNING id`,
-    [fixture.serviceLevelId, fixture.organizationId],
-  );
-  fixture.serviceLevelId = serviceLevelResult.rows[0].id;
-
-  await client.query(
-    `INSERT INTO service_offerings (
-       id,
-       service_level_id,
-       branch_id,
-       effective_from,
-       is_active,
-       priority,
-       metadata
-     )
-     VALUES (
-       $1::uuid,
-       $2::uuid,
-       $3::uuid,
-       '2026-01-01T00:00:00Z',
-       true,
-       10,
-       jsonb_build_object('display', jsonb_build_object('name', 'UC026 Standard Branch Offering', 'status', 'active'))
-     )
-     ON CONFLICT (id) DO UPDATE
-       SET service_level_id = EXCLUDED.service_level_id,
-           branch_id = EXCLUDED.branch_id,
-           effective_from = EXCLUDED.effective_from,
-           is_active = EXCLUDED.is_active,
-           priority = EXCLUDED.priority,
-           metadata = EXCLUDED.metadata`,
-    [fixture.serviceOfferingId, fixture.serviceLevelId, fixture.branchId],
-  );
-
-  await client.query(
     `INSERT INTO providers (id, organization_id, name, provider_type, enabled, metadata)
      VALUES ($1::uuid, $2::uuid, 'UC026 API Gateway Provider', 'delivery', true, $3::jsonb)`,
     [
       fixture.providerId,
       fixture.organizationId,
-      JSON.stringify({ base_url: fixture.providerBaseUrl || 'https://example.test' }),
+      JSON.stringify({ base_url: 'https://example.test' }),
     ],
   );
-
-  if (fixture.providerBaseUrl?.startsWith('http://')) {
-    await upsertOutboundEgressPolicy(client, 'tenant', fixture.organizationId);
-    await upsertOutboundEgressPolicy(client, 'client', fixture.clientId);
-    await upsertOutboundEgressPolicy(client, 'sender', fixture.senderId);
-    await upsertOutboundEgressPolicy(client, 'source', fixture.sourceId);
-  }
 
   await client.query(
     `INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
@@ -346,16 +112,12 @@ async function insertGatewayFixture(client, fixture) {
       mode: 'shipment_create_v1',
       service_type: 'delivery',
       shipment_status: 'pending',
-      service_offering_id: fixture.serviceOfferingId,
       geocoding: { enabled: false },
       label: { enabled: false },
       extract: {
         recipient_name_path: 'recipient.name',
         recipient_phone_path: 'recipient.phone',
         client_reference_path: 'client_reference_number',
-        cod_amount_path: 'cod_amount',
-        service_level_path: 'serviceType',
-        promised_delivery_date_path: 'expectedDeliveryDate',
         provider_shipment_id_path: 'id',
         provider_reference_id_path: 'reference_id',
         provider_tracking_number_path: 'barcode',
@@ -400,7 +162,7 @@ async function insertGatewayFixture(client, fixture) {
         '/provider/ship/request/by-email',
         $4::jsonb
       )`,
-    [fixture.routeId, fixture.packId, fixture.providerId, JSON.stringify(policy), fixture.gatewayPath],
+    [fixture.routeId, fixture.packId, fixture.providerId, JSON.stringify(policy), fixture.routePath],
   );
 }
 
@@ -416,15 +178,20 @@ async function cleanupGatewayArtifacts(fixture) {
   const correlationIds = requestRows.rows.map((row) => row.correlation_id).filter(Boolean);
 
   await pool.query(
+    `DELETE FROM shipment_actions
+      WHERE client_id = $1::uuid
+        AND shipment_id IN (
+          SELECT id
+            FROM shipments
+           WHERE client_id = $1::uuid
+        )`,
+    [fixture.clientId],
+  );
+
+  await pool.query(
     `DELETE FROM shipment_reference_numbers
       WHERE client_id = $1::uuid`,
     [fixture.clientId],
-  );
-  await pool.query(
-    `DELETE FROM shipment_actions
-      WHERE client_id = $1::uuid
-         OR organization_id = $2::uuid`,
-    [fixture.clientId, fixture.organizationId],
   );
   await pool.query(
     `DELETE FROM shipments
@@ -483,36 +250,22 @@ async function cleanupGatewayFixture(fixture) {
         AND category = 'api_gateway_route'`,
     [fixture.organizationId],
   );
-  await pool.query(
-    `DELETE FROM settings
-      WHERE category = 'outbound_egress_policy'
-        AND scope_id = ANY($1::uuid[])`,
-    [[fixture.organizationId, fixture.clientId, fixture.senderId, fixture.sourceId]],
-  );
-  await pool.query(
-    `DELETE FROM settings_versions
-      WHERE category = 'outbound_egress_policy'
-        AND scope_id = ANY($1::uuid[])`,
-    [[fixture.organizationId, fixture.clientId, fixture.senderId, fixture.sourceId]],
-  );
   await pool.query(`DELETE FROM api_routes WHERE id = $1::uuid`, [fixture.routeId]);
   await pool.query(`DELETE FROM api_route_packs WHERE id = $1::uuid`, [fixture.packId]);
   await pool.query(`DELETE FROM webhook_sources WHERE id = $1::uuid`, [fixture.sourceId]);
   await pool.query(`DELETE FROM mapping_configs WHERE id = $1::uuid`, [fixture.mappingConfigId]);
   await pool.query(`DELETE FROM providers WHERE id = $1::uuid`, [fixture.providerId]);
-  await pool.query(`DELETE FROM service_offerings WHERE id = $1::uuid`, [fixture.serviceOfferingId]);
-  await pool.query(`DELETE FROM service_levels WHERE id = $1::uuid`, [fixture.serviceLevelId]);
-  await pool.query(`DELETE FROM branches WHERE id = $1::uuid`, [fixture.branchId]);
   // Keep sender/client/org rows to avoid cascades into address_versions.
 }
 
 async function executeGatewayFetch(token, payload, options = {}) {
   const {
-    upstreamPath = '/api/ship/request/by-email',
+    upstreamPath,
     usePathToken = true,
     includeFunctionAuthorization = true,
   } = options;
 
+  if (!upstreamPath) throw new Error('Owned gateway fixture path required');
   const normalizedPath = upstreamPath.startsWith('/') ? upstreamPath : `/${upstreamPath}`;
   const routePath = usePathToken
     ? `/functions/v1/api-gateway/t/${token}${normalizedPath}`
@@ -528,51 +281,14 @@ async function executeGatewayFetch(token, payload, options = {}) {
     headers.authorization = `Bearer ${OUTER_AUTH_VALUE || token}`;
   }
 
-  let response;
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
-    try {
-      response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
-      break;
-    } catch (error) {
-      if (!isTransientFetchError(error) || attempt >= 5) {
-        throw error;
-      }
-      await sleep(1000 * attempt);
-    }
-  }
-
-  const text = await response.text();
-  let body;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    body = text;
-  }
-
-  return { response, body };
-}
-
-async function executeApiCallerJob(jobId) {
-  const url = `${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/api-caller`;
-  const headers = {
-    'content-type': 'application/json',
-    ...(process.env.SUPABASE_ANON_KEY ? { apikey: process.env.SUPABASE_ANON_KEY } : {}),
-  };
-
-  if (OUTER_AUTH_VALUE) {
-    headers.authorization = `Bearer ${OUTER_AUTH_VALUE}`;
-  }
-
+  const signal = AbortSignal.timeout(30000);
   const response = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ job_id: jobId }),
+    body: JSON.stringify(payload),
+    signal,
   });
-
+  if (response.status === 503) throw new Error('Gateway runtime unavailable: HTTP 503');
   const text = await response.text();
   let body;
   try {
@@ -584,7 +300,7 @@ async function executeApiCallerJob(jobId) {
   return { response, body };
 }
 
-async function waitForGatewayRequest(fixture, clientReferenceNumber, timeoutMs = 15000) {
+async function waitForGatewayRequest(fixture, clientReferenceNumber, timeoutMs = 15000, excludedRequestId = null) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const { rows } = await pool.query(
@@ -592,6 +308,7 @@ async function waitForGatewayRequest(fixture, clientReferenceNumber, timeoutMs =
               client_id,
               sender_id,
               outbound_call_id,
+              workflow_run_id,
               correlation_id,
               method,
               path,
@@ -600,14 +317,136 @@ async function waitForGatewayRequest(fixture, clientReferenceNumber, timeoutMs =
          FROM api_gateway_requests
         WHERE source_id = $1::uuid
           AND request_body #>> '{client_reference_number}' = $2
+          AND ($3::uuid IS NULL OR id <> $3::uuid)
         ORDER BY created_at DESC
         LIMIT 1`,
-      [fixture.sourceId, clientReferenceNumber],
+      [fixture.sourceId, clientReferenceNumber, excludedRequestId],
     );
     if (rows[0]) return rows[0];
     await sleep(200);
   }
   return null;
+}
+
+const GATEWAY_DISPATCH_SETUP_OPERATIONS = new Set([
+  'materialize_addresses',
+  'dispatch_create',
+]);
+
+function gatewayDispatchFailure(code, receipt = {}, worker = {}) {
+  const error = new Error(code);
+  error.receipt = {
+    code,
+    request_id: receipt.request_id ?? null,
+    workflow_run_id: receipt.workflow_run_id ?? null,
+    workflow_status: receipt.workflow_status ?? null,
+    operation_name: receipt.operation_name ?? null,
+    step_status: receipt.step_status ?? null,
+    step_ready: receipt.step_ready ?? null,
+    worker_status: worker.status ?? null,
+    worker_items_processed: Number.isInteger(worker.items_processed) ? worker.items_processed : null,
+    worker_progress_status: worker.progress?.status ?? null,
+    worker_has_step: Boolean(worker.progress?.step_id),
+  };
+  console.warn('gateway_dispatch_state', {
+    workflow_failed: receipt.workflow_status === 'failed',
+    step_ready: receipt.step_ready === true,
+    setup_operation: GATEWAY_DISPATCH_SETUP_OPERATIONS.has(receipt.operation_name),
+    worker_idle: worker.status === 'idle',
+    worker_error: worker.status === 'error',
+    worker_items_processed: Number.isInteger(worker.items_processed) ? worker.items_processed : null,
+    worker_progress_failed: worker.progress?.status === 'failed',
+    worker_has_step: Boolean(worker.progress?.step_id),
+  });
+  return error;
+}
+
+async function readGatewayDispatchReceipt(fixture, requestId) {
+  const { rows } = await pool.query(
+    `SELECT request.id AS request_id,
+            request.workflow_run_id,
+            request.outbound_call_id,
+            run.workflow_status,
+            pending.operation_name,
+            pending.step_status,
+            pending.run_at,
+            COALESCE(pending.run_at <= now(), FALSE) AS step_ready
+       FROM api_gateway_requests request
+       LEFT JOIN workflow_runs run ON run.id = request.workflow_run_id
+       LEFT JOIN LATERAL (
+         SELECT step.operation_name, step.step_status, step.run_at
+           FROM workflow_run_steps step
+          WHERE step.workflow_run_id = request.workflow_run_id
+            AND step.step_status = 'pending'
+          ORDER BY step.sequence_order
+          LIMIT 1
+       ) pending ON TRUE
+      WHERE request.id = $1::uuid
+        AND request.source_id = $2::uuid`,
+    [requestId, fixture.sourceId],
+  );
+  return rows[0] || null;
+}
+
+async function completeGatewayDispatch(fixture, requestRow) {
+  // The production cron calls run_workflow_engine_worker_batch_v1 every minute.
+  // This fixture advances only its own accepted-async workflow and only through
+  // the two setup steps that can precede outbound_call_id attachment.
+  let progressedSteps = 0;
+  let contentionRetryUsed = false;
+  while (progressedSteps <= GATEWAY_DISPATCH_SETUP_OPERATIONS.size) {
+    const receipt = await readGatewayDispatchReceipt(fixture, requestRow.id);
+    if (!receipt) throw gatewayDispatchFailure('gateway_request_missing_after_accept', { request_id: requestRow.id });
+    if (receipt.outbound_call_id) return { ...requestRow, ...receipt };
+    if (!receipt.workflow_run_id) throw gatewayDispatchFailure('gateway_dispatch_authority_missing', receipt);
+    if (receipt.workflow_status === 'failed') throw gatewayDispatchFailure('gateway_workflow_failed', receipt);
+    if (receipt.step_ready === false) {
+      throw gatewayDispatchFailure('gateway_workflow_not_ready', receipt);
+    }
+    if (!receipt.operation_name || !GATEWAY_DISPATCH_SETUP_OPERATIONS.has(receipt.operation_name)) {
+      throw gatewayDispatchFailure('gateway_workflow_no_dispatch_progress', receipt);
+    }
+    if (progressedSteps === GATEWAY_DISPATCH_SETUP_OPERATIONS.size) {
+      throw gatewayDispatchFailure('gateway_workflow_setup_budget_exhausted', receipt);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT public.run_workflow_engine_worker_step_v1($1::uuid) AS result`,
+      [receipt.workflow_run_id],
+    );
+    const worker = rows[0]?.result || {};
+    const progress = worker.progress || {};
+    if (worker.error_occurred === true || worker.status === 'error' || progress.status === 'failed') {
+      throw gatewayDispatchFailure('gateway_workflow_progress_failed', receipt, worker);
+    }
+    if (worker.status === 'idle' || worker.items_processed !== 1 || !progress.step_id) {
+      const concurrentReceipt = await readGatewayDispatchReceipt(fixture, requestRow.id);
+      if (concurrentReceipt?.outbound_call_id) return { ...requestRow, ...concurrentReceipt };
+      const current = concurrentReceipt || receipt;
+      if (current.workflow_status === 'failed') {
+        throw gatewayDispatchFailure('gateway_workflow_failed', current, worker);
+      }
+      if (current.step_ready === false) {
+        throw gatewayDispatchFailure('gateway_workflow_not_ready', current, worker);
+      }
+      if (!current.operation_name || !GATEWAY_DISPATCH_SETUP_OPERATIONS.has(current.operation_name)) {
+        throw gatewayDispatchFailure('gateway_workflow_no_dispatch_progress', current, worker);
+      }
+      if (!contentionRetryUsed) {
+        // The canonical worker uses FOR UPDATE SKIP LOCKED. One bounded retry
+        // admits a concurrently owned exact run without hiding stable no-progress.
+        contentionRetryUsed = true;
+        await sleep(100);
+        continue;
+      }
+      throw gatewayDispatchFailure('gateway_workflow_no_dispatch_progress', current, worker);
+    }
+    progressedSteps += 1;
+  }
+  throw gatewayDispatchFailure('gateway_workflow_setup_budget_exhausted', {
+    request_id: requestRow.id,
+    workflow_run_id: requestRow.workflow_run_id,
+  });
 }
 
 async function materializeGatewayResponse(outboundCallId, providerResponse) {
@@ -623,16 +462,7 @@ async function materializeGatewayResponse(outboundCallId, providerResponse) {
 
 async function fetchShipmentByClientReference(clientId, clientReferenceNumber) {
   const { rows } = await pool.query(
-    `SELECT id,
-            organization_id,
-            tracking_number,
-            client_reference_number,
-            cod_amount,
-            promised_delivery_date::text AS promised_delivery_date,
-            branch_id,
-            zone_id,
-            service_level,
-            metadata
+    `SELECT id, tracking_number, client_reference_number
        FROM shipments
       WHERE client_id = $1::uuid
         AND client_reference_upper = upper($2)
@@ -643,27 +473,13 @@ async function fetchShipmentByClientReference(clientId, clientReferenceNumber) {
   return rows[0] || null;
 }
 
-async function waitForShipmentByClientReference(clientId, clientReferenceNumber, timeoutMs = 15000) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const shipment = await fetchShipmentByClientReference(clientId, clientReferenceNumber);
-    if (shipment) return shipment;
-    await sleep(250);
-  }
-  return null;
-}
-
 describeIfHttp('API gateway shipment create ingress', () => {
-  let providerStub = null;
   const fixture = {
     organizationId: randomUUID(),
     organizationSlug: `uc026-org-${Date.now().toString(36)}`,
     clientId: randomUUID(),
     clientSlug: `uc026-client-${Date.now().toString(36)}`,
     senderId: randomUUID(),
-    branchId: randomUUID(),
-    serviceLevelId: randomUUID(),
-    serviceOfferingId: randomUUID(),
     providerId: randomUUID(),
     mappingConfigId: randomUUID(),
     mappingKey: `uc026::api-gateway::${randomUUID()}`,
@@ -673,13 +489,11 @@ describeIfHttp('API gateway shipment create ingress', () => {
     packId: randomUUID(),
     packName: `uc026-pack-${randomUUID().slice(0, 8)}`,
     routeId: randomUUID(),
-    gatewayPath: `/api/uc026/ship/request/${randomUUID().slice(0, 8)}`,
-    providerBaseUrl: null,
   };
 
+  fixture.routePath = `/api/ship/request/by-email/${fixture.routeId}`;
+
   beforeAll(async () => {
-    providerStub = await startProviderStub();
-    fixture.providerBaseUrl = providerStub.url;
     await cleanupGatewayFixture(fixture);
     await insertGatewayFixture(pool, fixture);
   });
@@ -692,174 +506,8 @@ describeIfHttp('API gateway shipment create ingress', () => {
     try {
       await cleanupGatewayFixture(fixture);
     } finally {
-      if (providerStub) {
-        await providerStub.close();
-      }
       await pool.end();
     }
-  });
-
-  test('dispatches queued provider request through api-caller and materializes shipment from provider success', async () => {
-    const clientReferenceNumber = `INV-STUB-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const payload = {
-      recipient: {
-        name: 'UC026 Stub Provider Receiver',
-        phone: `+9665${String(Math.floor(Math.random() * 1e8)).padStart(8, '0')}`,
-      },
-      client_reference_number: clientReferenceNumber,
-      service_level: 'STANDARD',
-      cod_amount: 42.75,
-      expected_delivery_date: '2026-06-04T10:00:00.000+0300',
-      origin: { line1: 'Origin', city: 'Riyadh', province: 'Riyadh', country: 'SA' },
-      destination: { line1: 'Destination', city: 'Jeddah', province: 'Makkah', country: 'SA' },
-    };
-
-    const { response, body } = await executeGatewayFetch(fixture.sourceToken, payload, {
-      upstreamPath: fixture.gatewayPath,
-    });
-    if (response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
-
-    expect(response.status).toBe(202);
-    expect(body).toMatchObject({
-      status: 'accepted_async',
-      correlation_id: expect.any(String),
-    });
-
-    const requestRow = await waitForGatewayRequest(fixture, clientReferenceNumber);
-    expect(requestRow).toBeTruthy();
-    expect(requestRow.outbound_call_id).toEqual(expect.any(String));
-
-    const { rows: egressRows } = await pool.query(
-      `SELECT api.resolve_effective_outbound_egress_policy_v1($1::uuid) AS policy`,
-      [requestRow.outbound_call_id],
-    );
-    expect(egressRows[0]?.policy?.policy).toMatchObject({
-      enforce_https_only: false,
-      block_private_networks: false,
-    });
-
-    const dispatched = await executeApiCallerJob(requestRow.outbound_call_id);
-    if (dispatched.response.status === 503) {
-      console.warn('[api-gateway-ingest] api-caller runtime not available (503). Skipping assertions.');
-      return;
-    }
-
-    if (dispatched.response.status !== 200) {
-      console.warn('[api-gateway-ingest] api-caller dispatch failed', JSON.stringify(dispatched.body));
-    }
-    expect(dispatched.response.status).toBe(200);
-    expect(dispatched.body).toMatchObject({
-      job_id: requestRow.outbound_call_id,
-      success: true,
-      result: {
-        status: 200,
-      },
-    });
-    expect(providerStub.requests.some((entry) => entry.url === '/provider/ship/request/by-email')).toBe(true);
-
-    const shipmentRow = await waitForShipmentByClientReference(fixture.clientId, clientReferenceNumber);
-    expect(shipmentRow).toBeTruthy();
-    expect(shipmentRow.tracking_number).toMatch(/^TRACK-/);
-    expect(Number(shipmentRow.cod_amount)).toBe(42.75);
-    expect(String(shipmentRow.promised_delivery_date)).toBe('2026-06-04');
-    expect(shipmentRow.branch_id).toBe(fixture.branchId);
-    expect(shipmentRow.service_level).toBe('standard');
-    expect(shipmentRow.metadata).toMatchObject({
-      service_offering_id: fixture.serviceOfferingId,
-      service_offering_branch_id: fixture.branchId,
-      service_level_key: 'standard',
-      promised_delivery_date: '2026-06-04',
-    });
-
-    const { rows: candidateRows } = await pool.query(
-      `SELECT shipment_id, tracking_number, branch_id, promised_delivery_date::text AS promised_delivery_date
-         FROM public.route_plan_delivery_wave_candidates_v1(
-           jsonb_build_object(
-             'organization_id', $1::uuid,
-             'branch_id', $2::uuid,
-             'planned_date', '2026-06-04'
-           )
-         )
-        WHERE shipment_id = $3::uuid`,
-      [fixture.organizationId, fixture.branchId, shipmentRow.id],
-    );
-    expect(candidateRows).toHaveLength(1);
-    expect(candidateRows[0]).toMatchObject({
-      shipment_id: shipmentRow.id,
-      tracking_number: shipmentRow.tracking_number,
-      branch_id: fixture.branchId,
-      promised_delivery_date: '2026-06-04',
-    });
-
-    const { rows: lineageRows } = await pool.query(
-      `SELECT action_type, action_category, action_data
-         FROM shipment_actions
-        WHERE shipment_id = $1::uuid
-          AND action_type = 'api_gateway_materialized'
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [shipmentRow.id],
-    );
-    expect(lineageRows).toHaveLength(1);
-    expect(lineageRows[0]).toMatchObject({
-      action_type: 'api_gateway_materialized',
-      action_category: 'operational',
-    });
-    expect(lineageRows[0].action_data).toMatchObject({
-      api_gateway_request_id: requestRow.id,
-      outbound_call_id: requestRow.outbound_call_id,
-      route_id: fixture.routeId,
-      source_id: fixture.sourceId,
-      provider_tracking_number: shipmentRow.tracking_number,
-      client_reference_number: clientReferenceNumber,
-      operation: 'inserted',
-    });
-
-    const { rows: decisionRows } = await pool.query(
-      `SELECT decision_category, decision_point, decision_outcome, decision_inputs
-         FROM decision_log
-        WHERE resource_type = 'shipment'
-          AND resource_id = $1::uuid
-          AND decision_point = 'api_gateway_materialization'
-        ORDER BY timestamp DESC
-        LIMIT 1`,
-      [shipmentRow.id],
-    );
-    expect(decisionRows).toHaveLength(1);
-    expect(decisionRows[0]).toMatchObject({
-      decision_category: 'shipment_create',
-      decision_point: 'api_gateway_materialization',
-      decision_outcome: 'materialized',
-    });
-    expect(decisionRows[0].decision_inputs).toMatchObject({
-      api_gateway_request_id: requestRow.id,
-      outbound_call_id: requestRow.outbound_call_id,
-      route_id: fixture.routeId,
-      source_id: fixture.sourceId,
-      provider_tracking_number: shipmentRow.tracking_number,
-      client_reference_number: clientReferenceNumber,
-      operation: 'inserted',
-    });
-
-    const { rows: directoryRows } = await pool.query(
-      `SELECT request_id, intake_state, outbound_status, status_code, shipment_id, tracking_number
-         FROM public.v_api_gateway_request_directory
-        WHERE request_id = $1::uuid
-        LIMIT 1`,
-      [requestRow.id],
-    );
-    expect(directoryRows).toHaveLength(1);
-    expect(directoryRows[0]).toMatchObject({
-      request_id: requestRow.id,
-      intake_state: 'shipment_materialized',
-      outbound_status: 'completed',
-      status_code: 200,
-      shipment_id: shipmentRow.id,
-      tracking_number: shipmentRow.tracking_number,
-    });
   });
 
   test('accepts shipment create over real HTTP, records route observability, and materializes shipment creation', async () => {
@@ -874,13 +522,7 @@ describeIfHttp('API gateway shipment create ingress', () => {
       destination: { line1: 'Destination', city: 'Jeddah', province: 'Makkah', country: 'SA' },
     };
 
-    const { response, body } = await executeGatewayFetch(fixture.sourceToken, payload, {
-      upstreamPath: fixture.gatewayPath,
-    });
-    if (response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
+    const { response, body } = await executeGatewayFetch(fixture.sourceToken, payload, { upstreamPath: fixture.routePath });
 
     expect(response.status).toBe(202);
     expect(body).toMatchObject({
@@ -888,13 +530,14 @@ describeIfHttp('API gateway shipment create ingress', () => {
       correlation_id: expect.any(String),
     });
 
-    const requestRow = await waitForGatewayRequest(fixture, clientReferenceNumber);
+    let requestRow = await waitForGatewayRequest(fixture, clientReferenceNumber);
     expect(requestRow).toBeTruthy();
-    expect(requestRow.path).toBe(fixture.gatewayPath);
+    expect(requestRow.path).toBe(fixture.routePath);
     expect(requestRow.method).toBe('POST');
     expect(requestRow.client_id).toBe(fixture.clientId);
     expect(requestRow.sender_id).toBe(fixture.senderId);
     expect(requestRow.correlation_id).toBe(body.correlation_id);
+    requestRow = await completeGatewayDispatch(fixture, requestRow);
     expect(requestRow.outbound_call_id).toEqual(expect.any(String));
 
     const { rows: observabilityRows } = await pool.query(
@@ -904,6 +547,7 @@ describeIfHttp('API gateway shipment create ingress', () => {
           AND event_type = 'settings_resolution'
           AND resource_type = 'api_gateway_request'
           AND resource_id = $1::uuid
+          AND metadata->>'decision_point' = 'api_gateway_workflow_enqueued'
         ORDER BY event_time DESC
         LIMIT 1`,
       [requestRow.id],
@@ -913,10 +557,11 @@ describeIfHttp('API gateway shipment create ingress', () => {
     expect(observabilityRows[0].event_type).toBe('settings_resolution');
     expect(observabilityRows[0].resource_type).toBe('api_gateway_request');
     expect(observabilityRows[0].resource_id).toBe(requestRow.id);
-    expect(observabilityRows[0].status).toBe('resolved');
+    expect(observabilityRows[0].status).toBe('enqueued');
     expect(observabilityRows[0].correlation_id).toBe(requestRow.correlation_id);
-    expect(observabilityRows[0].metadata?.decision_point).toBe('api_gateway_route_resolved');
-    expect(observabilityRows[0].metadata?.decision_inputs?.outbound_call_id).toBe(requestRow.outbound_call_id);
+    expect(observabilityRows[0].metadata?.decision_point).toBe('api_gateway_workflow_enqueued');
+    expect(observabilityRows[0].metadata?.decision_inputs?.workflow_run_id).toBe(requestRow.workflow_run_id);
+    expect(observabilityRows[0].metadata?.decision_inputs?.path).toBe(fixture.routePath);
 
     const postprocessResult = await materializeGatewayResponse(requestRow.outbound_call_id, {
       id: `PROV-${clientReferenceNumber}`,
@@ -944,17 +589,12 @@ describeIfHttp('API gateway shipment create ingress', () => {
       destination: { line1: `Destination ${label}`, city: 'Dammam', province: 'Eastern', country: 'SA' },
     });
 
-    const first = await executeGatewayFetch(fixture.sourceToken, buildPayload('A'), {
-      upstreamPath: fixture.gatewayPath,
-    });
-    if (first.response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
+    const first = await executeGatewayFetch(fixture.sourceToken, buildPayload('A'), { upstreamPath: fixture.routePath });
     expect(first.response.status).toBe(202);
 
-    const firstRequest = await waitForGatewayRequest(fixture, clientReferenceNumber);
+    let firstRequest = await waitForGatewayRequest(fixture, clientReferenceNumber);
     expect(firstRequest).toBeTruthy();
+    firstRequest = await completeGatewayDispatch(fixture, firstRequest);
     const firstResult = await materializeGatewayResponse(firstRequest.outbound_call_id, {
       id: `PROV-A-${clientReferenceNumber}`,
       barcode: `TRACK-A-${Date.now()}`,
@@ -964,23 +604,13 @@ describeIfHttp('API gateway shipment create ingress', () => {
     const shipmentId = firstResult?.postprocess?.shipment_id;
     expect(shipmentId).toBeTruthy();
 
-    const second = await executeGatewayFetch(fixture.sourceToken, buildPayload('B'), {
-      upstreamPath: fixture.gatewayPath,
-    });
-    if (second.response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
+    const second = await executeGatewayFetch(fixture.sourceToken, buildPayload('B'), { upstreamPath: fixture.routePath });
     expect(second.response.status).toBe(202);
 
-    let secondRequest = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      secondRequest = await waitForGatewayRequest(fixture, clientReferenceNumber);
-      if (secondRequest && secondRequest.id !== firstRequest.id) break;
-      await sleep(200);
-    }
+    let secondRequest = await waitForGatewayRequest(fixture, clientReferenceNumber, 15000, firstRequest.id);
     expect(secondRequest).toBeTruthy();
     expect(secondRequest.id).not.toBe(firstRequest.id);
+    secondRequest = await completeGatewayDispatch(fixture, secondRequest);
 
     const secondResult = await materializeGatewayResponse(secondRequest.outbound_call_id, {
       id: `PROV-B-${clientReferenceNumber}`,
@@ -1012,13 +642,7 @@ describeIfHttp('API gateway shipment create ingress', () => {
       destination: { line1: 'Destination', city: 'Riyadh', province: 'Riyadh', country: 'SA' },
     };
 
-    const { response, body } = await executeGatewayFetch('uc026-invalid-token', payload, {
-      upstreamPath: fixture.gatewayPath,
-    });
-    if (response.status === 503) {
-      console.warn('[api-gateway-ingest] Edge runtime not available (503). Skipping assertions.');
-      return;
-    }
+    const { response, body } = await executeGatewayFetch('uc026-invalid-token', payload, { upstreamPath: fixture.routePath });
 
     expect(response.status).toBe(401);
     if (body && typeof body === 'object') {

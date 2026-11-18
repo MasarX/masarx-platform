@@ -1,7 +1,8 @@
 const { randomUUID } = require("crypto");
-const { Pool } = require("pg");
+const { Pool, Client } = require("pg");
 const { loadEnv } = require("../../../scripts/utils/load-env");
 const { applySetting, cleanupAutoOnboardingArtifacts } = require("../helpers/tenant-utils");
+const { runIsolatedScheduleWorker } = require("../helpers/isolated-schedule-worker");
 
 loadEnv();
 
@@ -13,6 +14,7 @@ describeIfDb("workflow schedule triggers: recurring shipment create", () => {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     max: 2,
+    connectionTimeoutMillis: 5000,
   });
 
   const createdShipments = [];
@@ -185,44 +187,41 @@ describeIfDb("workflow schedule triggers: recurring shipment create", () => {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  let cadenceContentionProven = false;
   async function runWorkerOnce({ forceWorkerName = null, isolatedTriggerId = null } = {}) {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      if (isolatedTriggerId) {
-        await client.query(
-          `UPDATE workflow_schedule_triggers
-              SET next_run_at = now() + interval '1 day',
-                  updated_at = now()
-            WHERE enabled = TRUE
-              AND id <> $1::uuid`,
-          [isolatedTriggerId]
-        );
-      }
-      if (forceWorkerName) {
-        await client.query(`SELECT set_config('app.force_worker', $1, true)`, [forceWorkerName]);
-      }
-
-      const { rows } = await client.query(
-        `SELECT public.run_workflow_schedule_triggers_worker() AS payload`
-      );
-
-      if (forceWorkerName) {
-        await client.query(`SELECT set_config('app.force_worker', '', true)`);
-      }
-
-      await client.query("COMMIT");
-      return rows[0]?.payload ?? {};
-    } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // ignore rollback errors in test cleanup
-      }
-      throw error;
-    } finally {
-      client.release();
-    }
+    const isolatedPool = { connect: async () => {
+      const client = await pool.connect();
+      return {
+        on: client.on.bind(client),
+        removeListener: client.removeListener.bind(client),
+        release: client.release.bind(client),
+        query: async (command) => {
+          const result = await client.query(command);
+          if (!cadenceContentionProven && command.text ===
+            'SELECT worker_name FROM public.cron_config WHERE worker_name = $1 FOR UPDATE NOWAIT') {
+            const contender = new Client({ connectionString: process.env.DATABASE_URL,
+              connectionTimeoutMillis: 5000, query_timeout: 5000 });
+            try {
+              await contender.connect();
+              await contender.query('BEGIN');
+              await contender.query("SET LOCAL lock_timeout = '100ms'");
+              await expect(contender.query(
+                'UPDATE public.cron_config SET last_run_at = last_run_at WHERE worker_name = $1',
+                [WORKER_NAME])).rejects.toMatchObject({ code: '55P03' });
+              cadenceContentionProven = true;
+            } finally {
+              try { await contender.query('ROLLBACK'); }
+              finally { await contender.end(); }
+            }
+          }
+          return result;
+        },
+      };
+    } };
+    return runIsolatedScheduleWorker(isolatedPool, {
+      triggerId: isolatedTriggerId,
+      forceWorkerName,
+    });
   }
 
   async function runWorkerUntilTriggerProcessed(triggerId, maxAttempts = 24, options = {}) {
@@ -300,11 +299,39 @@ describeIfDb("workflow schedule triggers: recurring shipment create", () => {
     const triggerId = triggerRows[0].id;
     createdScheduleTriggers.push(triggerId);
 
+    // An owned non-target sentinel stays byte-for-byte unchanged while the real worker runs.
+    const { rows: sentinelRows } = await pool.query(
+      `INSERT INTO workflow_schedule_triggers (
+         organization_id, scope_type, scope_id, workflow_template_id,
+         schedule, context_patch, enabled, next_run_at, notes
+       )
+       SELECT organization_id, scope_type, scope_id, workflow_template_id,
+              schedule, context_patch, enabled, next_run_at, 'Owned isolation sentinel'
+         FROM workflow_schedule_triggers WHERE id = $1::uuid
+       RETURNING id`,
+      [triggerId]
+    );
+    const sentinelId = sentinelRows[0].id;
+    createdScheduleTriggers.push(sentinelId);
+    const { rows: sentinelBefore } = await pool.query(
+      `SELECT to_jsonb(t) AS row FROM workflow_schedule_triggers t WHERE id = $1::uuid`,
+      [sentinelId]
+    );
+    expect(sentinelBefore).toHaveLength(1);
+
     const scheduleRow = await runWorkerUntilTriggerProcessed(triggerId, 24, {
       forceWorkerName: WORKER_NAME,
     });
     const lastRunId = scheduleRow.last_run_id;
+    expect(cadenceContentionProven).toBe(true);
     workflowRunIds.push(lastRunId);
+    const { rows: sentinelAfter } = await pool.query(
+      `SELECT to_jsonb(t) AS row FROM workflow_schedule_triggers t WHERE id = $1::uuid`,
+      [sentinelId]
+    );
+    const sentinelRunId = sentinelAfter[0]?.row?.last_run_id;
+    if (sentinelRunId) workflowRunIds.push(sentinelRunId);
+    expect(sentinelAfter).toEqual(sentinelBefore);
 
     await progressRunToCompletion(lastRunId);
 

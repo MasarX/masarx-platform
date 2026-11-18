@@ -16,11 +16,34 @@ import { WorkflowTemplateStepsBuilder } from "../../packages/ui/src/workflow-tem
 import { renderWithIntl } from "./test-utils";
 
 const mockedCreateUiClient = createUiClient as unknown as jest.Mock;
+const originalTrustedExternalDataOrigins =
+  process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS;
+const originalTrustedOperationDocOrigins =
+  process.env.NEXT_PUBLIC_UI_TRUSTED_OPERATION_DOC_ORIGINS;
 
 describe("WorkflowTemplateStepsBuilder", () => {
   beforeEach(() => {
     jest.resetAllMocks();
     invalidateQueries.mockReset();
+    process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS =
+      "https://example.com";
+    process.env.NEXT_PUBLIC_UI_TRUSTED_OPERATION_DOC_ORIGINS =
+      "https://example.com";
+  });
+
+  afterEach(() => {
+    if (originalTrustedExternalDataOrigins === undefined) {
+      delete process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS;
+    } else {
+      process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS =
+        originalTrustedExternalDataOrigins;
+    }
+    if (originalTrustedOperationDocOrigins === undefined) {
+      delete process.env.NEXT_PUBLIC_UI_TRUSTED_OPERATION_DOC_ORIGINS;
+    } else {
+      process.env.NEXT_PUBLIC_UI_TRUSTED_OPERATION_DOC_ORIGINS =
+        originalTrustedOperationDocOrigins;
+    }
   });
 
   it("creates a workflow step and refreshes the studio", async () => {
@@ -1320,7 +1343,7 @@ describe("WorkflowTemplateStepsBuilder", () => {
     );
   });
 
-  it("supports flow zoom controls", async () => {
+  it.each(["ltr", "rtl"])("bounds the flow panel and supports zoom controls in %s", async (direction) => {
     mockedCreateUiClient.mockReturnValue({
       listResource: jest.fn().mockResolvedValue({
         resource: "lookup_definitions",
@@ -1337,6 +1360,7 @@ describe("WorkflowTemplateStepsBuilder", () => {
     });
 
     renderWithIntl(
+      <div dir={direction}>
       <WorkflowTemplateStepsBuilder
         workflowTemplateId="template-1"
         resourceKey="workflow_template_steps"
@@ -1354,10 +1378,13 @@ describe("WorkflowTemplateStepsBuilder", () => {
         capabilityWrite="workflow_runs.write"
         testIdPrefix="steps-builder"
       />
+      </div>
     );
 
     const zoomValue = screen.getByTestId("steps-builder-zoom-value");
     const canvasScroll = screen.getByTestId("steps-builder-canvas-scroll");
+    expect(canvasScroll.parentElement).toHaveClass("min-w-0", "flex-1");
+    expect(canvasScroll.closest("[dir]")).toHaveAttribute("dir", direction);
     expect(canvasScroll).toHaveAttribute("tabindex", "0");
     expect(canvasScroll).toHaveAttribute("role", "region");
     expect(canvasScroll).toHaveAttribute("aria-label", "Workflow canvas");
@@ -2472,6 +2499,21 @@ describe("WorkflowTemplateStepsBuilder", () => {
               doc_url: "//example.com/docs/unsafe",
             },
             {
+              handler_key: "origin_lookalike",
+              handler_schema: "labels",
+              doc_url: "https://example.com.evil.test/docs/unsafe",
+            },
+            {
+              handler_key: "backslash_authority",
+              handler_schema: "labels",
+              doc_url: "/\\evil.test/docs/unsafe",
+            },
+            {
+              handler_key: "controlled_authority",
+              handler_schema: "labels",
+              doc_url: "/\tevil.test/docs/unsafe",
+            },
+            {
               handler_key: "address_intake",
               handler_schema: "shipping",
             },
@@ -2919,7 +2961,12 @@ describe("WorkflowTemplateStepsBuilder", () => {
         id,
         workflow_status: "completed",
         created_at: "2026-01-22T00:00:00Z",
-        context: { outputs: { label_url: "https://example.com/label.pdf" } },
+        context: {
+          outputs: {
+            label_url: "https://example.com/label.pdf",
+            untrusted_url: "https://example.com.evil.test/phish",
+          },
+        },
         metadata: {},
       };
     });
@@ -2985,6 +3032,18 @@ describe("WorkflowTemplateStepsBuilder", () => {
     expect(advancedTab).toBeInTheDocument();
     expect(scoped.getByText("Outputs")).toBeInTheDocument();
     expect(scoped.getByText("https://example.com/label.pdf")).toBeInTheDocument();
+    expect(
+      scoped.getByText("https://example.com.evil.test/phish")
+    ).toBeInTheDocument();
+    expect(
+      scoped.getByRole("button", { name: "Copy context.outputs.untrusted_url" })
+    ).toBeInTheDocument();
+    expect(
+      Array.from(drawer.querySelectorAll("a")).some(
+        (link) =>
+          link.getAttribute("href") === "https://example.com.evil.test/phish"
+      )
+    ).toBe(false);
     expect(scoped.getByText("Steps")).toBeInTheDocument();
     expect(scoped.getAllByText("Dispatch Labels").length).toBeGreaterThan(0);
     expect(scoped.getAllByText("Wait For Job").length).toBeGreaterThan(0);

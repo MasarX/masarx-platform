@@ -565,6 +565,7 @@ export async function WorkflowTemplateStudioPage({
                   <WorkflowTemplateStepsBuilder
                     resourceKey="workflow_template_steps"
                     workflowTemplateId={templateId}
+                    templateStatus={templateStatus}
                     steps={steps}
                     runs={runs}
                     appBasePath={appBasePath}
@@ -607,6 +608,7 @@ export async function WorkflowTemplateStudioPage({
                   <WorkflowTemplateStepsBuilder
                     resourceKey="workflow_template_steps"
                     workflowTemplateId={templateId}
+                    templateStatus={templateStatus}
                     steps={steps}
                     idKey="id"
                     reorder={stepsResource?.reorder ?? null}
@@ -761,6 +763,7 @@ export async function WorkflowTemplateStudioPage({
                   ) : (
                     <WorkflowScheduleTriggersPanel
                       workflowTemplateId={templateId}
+                      templateStatus={templateStatus}
                       triggers={scheduleTriggers}
                       triggersTotal={scheduleTriggersTotal}
                       appBasePath={appBasePath}

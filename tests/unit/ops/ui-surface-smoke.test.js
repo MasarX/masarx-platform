@@ -149,7 +149,7 @@ describe('ui-surface-smoke', () => {
 
     try {
       await run({
-        argv: ['--urls', 'https://wgtvqvlngktphghsguosvjtu.example.invalid'],
+        argv: ['--urls', 'https://synthetic-console-preview.vercel.app'],
         env: { CI: 'true' },
         fetchImpl,
       });
@@ -187,7 +187,7 @@ describe('ui-surface-smoke', () => {
 
     try {
       await run({
-        argv: ['--urls', 'https://kzhoxzzyyvgusxpizwwvmnjt.example.invalid'],
+        argv: ['--urls', 'https://synthetic-portal-preview.vercel.app'],
         env: { CI: 'true' },
         fetchImpl,
       });

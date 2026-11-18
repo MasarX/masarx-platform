@@ -234,13 +234,15 @@ function collectSurfacePreviewContext({ compiledRegistry, env = process.env }) {
 
 function parseLastJsonFromText(text) {
   const raw = String(text || '');
-  const start = raw.lastIndexOf('{');
-  if (start < 0) return null;
-  try {
-    return JSON.parse(raw.slice(start));
-  } catch {
-    return null;
+  let start = raw.lastIndexOf('{');
+  while (start >= 0) {
+    try {
+      return JSON.parse(raw.slice(start).trim());
+    } catch {
+      start = raw.lastIndexOf('{', start - 1);
+    }
   }
+  return null;
 }
 
 async function runNodeScript({

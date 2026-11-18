@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "supabase_start_exclude": [
+    "studio",
+    "imgproxy",
+    "mailpit",
+    "edge-runtime",
+    "logflare",
+    "vector",
+    "realtime",
+    "postgres-meta",
+    "supavisor",
+    "postgrest"
+  ],
+  "supabase_start_required": [
+    "gotrue",
+    "storage-api",
+    "kong"
+  ],
+  "rationale": "Migrations and pgTAP use gotrue-managed auth tables (auth.sessions, auth.identities, auth.mfa_factors) and storage-api-managed storage.objects/storage.buckets, so gotrue and storage-api run with the db. vault, pg_cron and pg_net are extensions inside the Postgres image. On a fresh volume the CLI creates the config.toml storage buckets through the storage API behind kong (127.0.0.1:54321), so kong runs too. Bucket creation is served by storage-api itself, not PostgREST, and nothing in the suite needs REST, realtime, studio, mail, edge functions, logs or the pooler.",
+  "image_source": {
+    "mode": "registry",
+    "registry": "public.ecr.aws",
+    "tarball_base_url": "",
+    "hook": "Switching to a mirror is a config change: set registry to the mirror host, or (once implemented) set mode to \"tarball\" with tarball_base_url for Runners' local docker-save tarballs (curl <base>/<repo>_<tag>.tar + sha256 verify + docker load, per pre_pull_images). The same registry is passed to the CLI as SUPABASE_INTERNAL_IMAGE_REGISTRY, so supabase start finds the pre-pulled images locally."
+  },
+  "pre_pull_images": [
+    "supabase/postgres",
+    "supabase/gotrue",
+    "supabase/storage-api"
+  ],
+  "psql_client_image": "postgres:17@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1",
+  "pull_backoff_seconds": [
+    5,
+    15,
+    45,
+    90
+  ],
+  "pre_pull_rationale": "supabase start pulls every image in parallel; on local-db that hits the ECR Public per-IP throttle (toomanyrequests) behind the local connection proxy and, on vfs, fills the disk mid-extraction. The lane prunes Docker, then pre-pulls the kept services one at a time (supabase/postgres first, with a free-space floor before each pull) and backs off on throttling. Tags come from the pinned CLI (supabase services, JSON on a non-TTY); only repositories are listed here. kong is not listed by supabase services (its tag is internal to the CLI), so supabase start pulls that one small image itself. psql runs from psql_client_image, a small digest-pinned client (major = supabase/config.toml [db] major_version), pulled last with the same floor, backoff and final-error rules. It is not supabase/postgres: on vfs every psql `docker run --rm` (one per pgTAP file) deep-copies the image twice, and supabase/postgres is several GB.",
+  "min_free_disk_gb": 6,
+  "pull_attempt_timeout_seconds": 1200
+}

@@ -1,4 +1,4 @@
-const dns = require('dns').promises;
+const { Resolver } = require('dns').promises;
 
 function isSupabaseDirectHost(host) {
   const h = (host || '').trim().toLowerCase();
@@ -35,6 +35,7 @@ async function sleep(ms) {
 }
 
 async function resolveIpv4Address(host, options = {}) {
+  const resolver = new Resolver({ timeout: 1000, tries: 1 });
   const attemptsRaw = Number(options.attempts);
   const delayMsRaw = Number(options.delayMs);
   const attempts = Number.isFinite(attemptsRaw) && attemptsRaw > 0 ? Math.floor(attemptsRaw) : 3;
@@ -42,20 +43,7 @@ async function resolveIpv4Address(host, options = {}) {
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const lookedUp = await dns.lookup(host, { family: 4, all: true });
-      if (Array.isArray(lookedUp) && lookedUp.length > 0) {
-        const first = String(lookedUp[0].address || '').trim();
-        if (first) return first;
-      } else if (lookedUp && typeof lookedUp === 'object') {
-        const first = String(lookedUp.address || '').trim();
-        if (first) return first;
-      }
-    } catch {
-      // Fall back to resolve4 below.
-    }
-
-    try {
-      const resolved = await dns.resolve4(host);
+      const resolved = await resolver.resolve4(host);
       if (Array.isArray(resolved) && resolved.length > 0) {
         const first = String(resolved[0] || '').trim();
         if (first) return first;

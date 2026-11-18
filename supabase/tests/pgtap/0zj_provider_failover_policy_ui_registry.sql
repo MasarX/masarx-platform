@@ -3,7 +3,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(7);
+SELECT plan(9);
 
 SELECT ok(
   EXISTS (
@@ -73,6 +73,30 @@ SELECT ok(
        )
   ),
   'ui_read_registry includes circuit_breaker_dashboard with integrations.read gating'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public'
+       AND c.relname = 'provider_health_latest_v'
+       AND COALESCE(c.reloptions, ARRAY[]::TEXT[]) @> ARRAY['security_invoker=true']
+  ),
+  'provider_health_latest_v uses caller-invoker security'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public'
+       AND c.relname = 'circuit_breaker_dashboard_v'
+       AND COALESCE(c.reloptions, ARRAY[]::TEXT[]) @> ARRAY['security_invoker=true']
+  ),
+  'circuit_breaker_dashboard_v uses caller-invoker security'
 );
 
 SELECT has_function(

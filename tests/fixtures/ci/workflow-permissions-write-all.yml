@@ -1,0 +1,9 @@
+name: Rejected broad token
+on: workflow_dispatch
+permissions: write-all
+jobs:
+  unsafe:
+    permissions: write-all
+    runs-on: self-hosted
+    steps:
+      - run: echo unsafe

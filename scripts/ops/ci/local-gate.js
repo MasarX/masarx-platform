@@ -2,18 +2,36 @@
 /* eslint-disable no-console */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { parseFlagArgs } = require('../../utils/cli-args');
-const { classifyImpactSelection, compileImpactMap } = require('./pr-change-classify');
+const { resolveImpactSelectionForChangedFiles, compileImpactMap } = require('./pr-change-classify');
+const {
+  resolveFocusedUnitSelection,
+  resolveJestInvocation,
+  validateCanonicalImpactSelection,
+} = require('./focused-unit-selection');
+const {
+  addLocalGateManifestContract,
+  digestManifest,
+  sha256,
+  resolveSafeLocalGateManifestPath,
+  writeLocalGateManifestAtomic,
+} = require('./local-gate-manifest');
+const {
+  isPackageManifest,
+  isRootPackageLock,
+  isLockGeneratorContractPath,
+} = require('./dependency-fast-lane-integrity');
 
 const ROOT_PACKAGE = require(path.join(__dirname, '..', '..', '..', 'package.json'));
 const ROOT_NX_PROJECT = String(ROOT_PACKAGE?.name || 'masarx-delivery-platform').trim();
-const NX_TASK_RUNNER_PATH = path.resolve(__dirname, 'nx-task-runner.js');
-const JEST_BIN_PATH = path.resolve(__dirname, '..', '..', '..', 'node_modules', 'jest', 'bin', 'jest.js');
+const NX_TASK_RUNNER_PATH = 'scripts/ops/ci/nx-task-runner.js';
 const LOCAL_ENV_FILE = path.join('config', 'env', '.env.local');
 const HIGH_RISK_SURFACE_IDS = new Set(['db', 'api_ingress', 'mobile_fieldops']);
 const HIGH_RISK_IMPACT_IDS = new Set(['shared']);
+const SCOPED_CONTROL_PLANE_IMPACT_IDS = new Set(['ci', 'docs']);
 const DEFAULT_LOCAL_GATE_REMOTE_VERIFY_TIMEOUT_MINUTES = 360;
 const DEFAULT_LOCAL_GATE_REMOTE_VERIFY_POLL_SECONDS = 15;
 const LOCAL_GATE_LANDING_BUILD_ENV = {
@@ -32,11 +50,11 @@ const CONTROL_PLANE_PATTERNS = [
 const TOOLING_ONLY_PATH_PATTERNS = [
   /^\.github\//,
   /^config\/ci\//,
-  /^config\/ops\//,
   /^config\/tooling\//,
   /^docs\//,
   /^scripts\/docs\//,
   /^scripts\/ops\//,
+  /^scripts\/utils\/pg-hostaddr\.js$/,
   /^scripts\/tests\//,
   /^tests\//,
   /^tests\/unit\//,
@@ -130,6 +148,27 @@ function buildRemoteVerifyArgs({
   ];
 }
 
+function prependRemoteVerifyRoutePreflight(commands) {
+  const remoteSteps = (Array.isArray(commands) ? commands : []).filter((entry) => (
+    entry?.command === npmCommand()
+    && Array.isArray(entry.args)
+    && entry.args[0] === 'run'
+    && entry.args[1] === 'remote:verify'
+  ));
+  if (!remoteSteps.length) return commands;
+  const representative = remoteSteps.find((entry) => /backend_remote_verify/.test(entry.command_id))
+    || remoteSteps[0];
+  commands.unshift({
+    command_id: 'remote_verify_route_preflight',
+    suite_ids: uniq(remoteSteps.flatMap((entry) => entry.suite_ids || [])),
+    surface_ids: uniq(remoteSteps.flatMap((entry) => entry.surface_ids || [])),
+    command: representative.command,
+    args: [...representative.args, '--preflight-only'],
+    env: {},
+  });
+  return commands;
+}
+
 function hasDbUrlInEnv(env = process.env) {
   return ['DATABASE_URL', 'DATABASE_URL_DIRECT', 'DATABASE_URL_POOLER']
     .some((key) => String(env?.[key] || '').trim().length > 0);
@@ -200,6 +239,12 @@ function isLocalDbHost(host) {
     || normalized === 'rvzwwjlztwwisjthghnipgjr.example.invalid';
 }
 
+function withLocalGateChildEnv(env = process.env) {
+  return {
+    ...(env && typeof env === 'object' ? env : {}),
+    NX_DAEMON: 'false',
+  };
+}
 function canReachDbEndpointSync({ host, port, timeoutMs = 750 } = {}) {
   const endpointHost = String(host || '').trim();
   const endpointPort = Number.parseInt(String(port || '').trim(), 10);
@@ -375,15 +420,18 @@ function runCommand(command, args, env = process.env) {
   const startedAt = Date.now();
   const res = spawnSync(command, args, {
     stdio: 'inherit',
-    env,
+    env: withLocalGateChildEnv(env),
     shell: shellRequired(command),
   });
   const durationMs = Date.now() - startedAt;
   if (res.error) {
-    throw new Error(res.error.message);
+    res.error.durationMs = durationMs;
+    throw res.error;
   }
   if (res.status !== 0) {
-    throw new Error(`exit ${res.status}`);
+    const error = new Error(`exit ${res.status}`);
+    error.durationMs = durationMs;
+    throw error;
   }
   return durationMs;
 }
@@ -396,6 +444,91 @@ function stripLocalGateEnv(env = process.env) {
     }
   }
   return sanitized;
+}
+
+function sampleHostResources(previousCpu, osImpl = os) {
+  const cpuSnapshot = osImpl.cpus().map((cpu) => ({ idle: Number(cpu?.times?.idle || 0),
+    total: Object.values(cpu?.times || {}).reduce((sum, value) => sum + Number(value || 0), 0) }));
+  let idle = 0;
+  let total = 0;
+  cpuSnapshot.forEach((cpu, index) => {
+    idle += Math.max(0, cpu.idle - Number(previousCpu?.[index]?.idle || 0));
+    total += Math.max(0, cpu.total - Number(previousCpu?.[index]?.total || 0));
+  });
+  return { cpu_snapshot: cpuSnapshot, available_ram_bytes: Number(osImpl.freemem()),
+    cpu_percent: total > 0 ? Number((100 - ((idle / total) * 100)).toFixed(3)) : 100 };
+}
+function waitForBrowserAdmissionSync({
+  env = process.env, validateOnly = false, testConfig,
+  nowImpl = () => Number(process.hrtime.bigint() / 1000000n),
+  sleepImpl = (durationMs) => Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, durationMs),
+  ),
+  sampleHostResourcesImpl = sampleHostResources,
+} = {}) {
+  const invalidConfig = (key) => {
+    const error = new Error(`local_gate_browser_admission_config_invalid:${key}`);
+    Object.assign(error, { code: 'browser_resource_admission_config_invalid', failureClass: 'infrastructure' });
+    throw error;
+  };
+  const fields = [
+    ['minimum_available_ram_gib', 'LOCAL_GATE_BROWSER_MIN_AVAILABLE_RAM_GIB', 10, 10, 1024],
+    ['maximum_cpu_percent', 'LOCAL_GATE_BROWSER_MAX_CPU_PERCENT', 90, 1, 90],
+    ['timeout_ms', 'LOCAL_GATE_BROWSER_ADMISSION_TIMEOUT_MS', 180000, 30000, 600000],
+    ['stable_window_ms', 'LOCAL_GATE_BROWSER_STABLE_WINDOW_MS', 30000, 30000, 600000],
+    ['sample_interval_ms', 'LOCAL_GATE_BROWSER_SAMPLE_INTERVAL_MS', 1000, 100, 5000],
+  ];
+  const config = Object.fromEntries(fields.map(([name, key, fallback, min, max]) => {
+    const raw = String(env?.[key] ?? '').trim();
+    const value = raw ? Number(raw) : fallback;
+    if (!Number.isFinite(value) || value < min || value > max) invalidConfig(key);
+    return [name, value];
+  }));
+  config.minimum_available_ram_bytes = config.minimum_available_ram_gib * 1024 ** 3;
+  if (config.stable_window_ms > config.timeout_ms || config.sample_interval_ms > config.stable_window_ms) {
+    invalidConfig('window_order');
+  }
+  if (validateOnly) return config;
+  Object.assign(config, testConfig || {});
+
+  const startedAtMs = Number(nowImpl());
+  const deadlineAtMs = startedAtMs + config.timeout_ms;
+  let stableSinceMs = null;
+  let lastSample = null;
+  let previousCpu = [];
+  while (true) {
+    const observedAtMs = Number(nowImpl());
+    let sample = {};
+    try {
+      sample = sampleHostResourcesImpl(previousCpu);
+      previousCpu = sample.cpu_snapshot || previousCpu;
+    } catch (error) {
+      sample = { probe_error: String(error?.message || error) };
+    }
+    lastSample = { available_ram_bytes: Number(sample.available_ram_bytes || 0),
+      cpu_percent: Number.isFinite(Number(sample.cpu_percent)) ? Number(sample.cpu_percent) : null,
+      resource_probe_error: String(sample.probe_error || '') };
+    lastSample.ready = lastSample.available_ram_bytes > config.minimum_available_ram_bytes
+      && lastSample.cpu_percent < config.maximum_cpu_percent
+      && !lastSample.resource_probe_error;
+    if (lastSample.ready) {
+      if (stableSinceMs === null) stableSinceMs = observedAtMs;
+      if (observedAtMs - stableSinceMs >= config.stable_window_ms) {
+        return { ...config, status: 'passed', duration_ms: observedAtMs - startedAtMs,
+          nx_daemon_disabled: true, prior_phase_children_complete: true, final_sample: lastSample };
+      }
+    } else {
+      stableSinceMs = null;
+    }
+    if (observedAtMs >= deadlineAtMs) {
+      const error = new Error('local_gate_browser_admission_timeout');
+      Object.assign(error, { code: 'browser_resource_admission_timeout', failureClass: 'infrastructure' });
+      error.admission = { ...config, status: 'failed', duration_ms: observedAtMs - startedAtMs,
+        nx_daemon_disabled: true, prior_phase_children_complete: true, final_sample: lastSample };
+      throw error;
+    }
+    sleepImpl(Math.min(config.sample_interval_ms, Math.max(1, deadlineAtMs - observedAtMs)));
+  }
 }
 
 function isSupabaseHttpPlaneUnavailableSync(env = process.env, options = {}) {
@@ -519,9 +652,29 @@ function gitStdout(args) {
   return String(res.stdout || '').trim();
 }
 
-function diffNameOnly(range) {
+function gitStatusPorcelain() {
+  return gitStdout(['status', '--porcelain', '--untracked-files=all']);
+}
+
+function assertCleanLocalGateRepository({ status = gitStatusPorcelain(), phase = 'before' } = {}) {
+  if (String(status || '').trim()) {
+    throw new Error(`Local gate requires a clean repository ${phase} validation.`);
+  }
+}
+
+function assertLocalGateHeadMatches({ expectedHeadSha, actualHeadSha, phase = 'before' } = {}) {
+  const expected = String(expectedHeadSha || '').trim().toLowerCase();
+  const actual = String(actualHeadSha || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(expected) || !/^[0-9a-f]{40}$/.test(actual) || actual !== expected) {
+    throw new Error(
+      `Local gate checked-out HEAD mismatch ${phase} validation: expected=${expected || '<missing>'} actual=${actual || '<missing>'}.`,
+    );
+  }
+}
+
+function diffNameOnly(range, gitStdoutImpl = gitStdout) {
   return uniq(
-    String(gitStdout(['diff', '--name-only', range]) || '')
+    String(gitStdoutImpl(['diff', '--no-renames', '--name-only', range]) || '')
       .split(/\r?\n/)
       .map((value) => normalizePath(value)),
   );
@@ -591,7 +744,22 @@ function resolveToolingOnlySuites(changedFiles) {
     suiteIds.add('landing_e2e');
   }
 
-  return uniq(Array.from(suiteIds));
+  return uniq(Array.from(suiteIds)).sort();
+}
+
+function isExplicitScopedControlPlaneSelection(selection, changedFiles = []) {
+  const canonical = validateCanonicalImpactSelection(selection, changedFiles);
+  if (!canonical.ok) return false;
+  const impactSurfaces = canonical.arrays.impactSurfaces
+    .map((value) => String(value || '').trim().toLowerCase());
+
+  return canonical.arrays.unmatchedFiles.length === 0
+    && canonical.arrays.impactedSurfaceIds.length === 0
+    && canonical.arrays.directSurfaceIds.length === 0
+    && canonical.arrays.surfaceIds.length === 0
+    && canonical.arrays.requiredPreviewSurfaceIds.length === 0
+    && impactSurfaces.length > 0
+    && impactSurfaces.every((impactId) => SCOPED_CONTROL_PLANE_IMPACT_IDS.has(impactId));
 }
 
 function shouldRunDocsOpenApiCheck({ changedFiles = [], toolingOnly = false } = {}) {
@@ -640,19 +808,22 @@ function resolveLocalGatePolicy({ selection, changedFiles, mode = 'auto' }) {
 
   const strictRequested = requestedMode === 'strict'
     || (requestedMode === 'auto' && riskReasons.length > 0);
-  const toolingOnly = normalizedFiles.length > 0 && normalizedFiles.every(isToolingOnlyPath);
-  const nextSuites = new Set((Array.isArray(selection?.selectedSuites) ? selection.selectedSuites : []).map(normalizeSuiteId));
+  const lockfileFullFallback = String(selection?.lockfileSelectionMode || '') === 'full_fallback'
+    || String(selection?.fallbackReason || '').startsWith('lockfile_');
+  const toolingOnly = !lockfileFullFallback && normalizedFiles.length > 0 && normalizedFiles.every(isToolingOnlyPath);
+  const scopedControlPlaneOnly = toolingOnly && isExplicitScopedControlPlaneSelection(selection, normalizedFiles);
+  const nextSuites = new Set(
+    (Array.isArray(selection?.selectedSuites) ? selection.selectedSuites : [])
+      .map(normalizeSuiteId),
+  );
   const hasDirectMobileImpact = directSurfaceIds.has('mobile_fieldops');
 
-  if (!toolingOnly && hasDirectMobileImpact) {
+  if (hasDirectMobileImpact) {
     nextSuites.add('mobile_fieldops');
-  } else {
-    nextSuites.delete('mobile_fieldops');
   }
 
   if (strictRequested) {
     if (toolingOnly) {
-      nextSuites.clear();
       for (const suiteId of resolveToolingOnlySuites(normalizedFiles)) {
         nextSuites.add(suiteId);
       }
@@ -690,6 +861,7 @@ function resolveLocalGatePolicy({ selection, changedFiles, mode = 'auto' }) {
     mode: strictRequested ? 'strict' : 'impact',
     strictMode: strictRequested,
     toolingOnly,
+    scopedControlPlaneOnly,
     riskReasons: uniq(riskReasons),
     selection: {
       ...selection,
@@ -769,42 +941,15 @@ function buildNxRunnerArgs({ mode = 'run-many', targets = [], projects = [], fal
   return args;
 }
 
-function resolveTargetedJestRoots(targetedTests = []) {
-  return uniq(
-    (Array.isArray(targetedTests) ? targetedTests : [])
-      .map((filePath) => path.posix.dirname(normalizePath(filePath)))
-      .filter((dir) => dir && dir !== '.'),
-  );
-}
-
-function resolveJestInvocation({ configPath, targetedTests = [], localJestBinPath = JEST_BIN_PATH } = {}) {
-  const normalizedTargets = uniq(targetedTests.map(normalizePath));
-  const targetedRoots = resolveTargetedJestRoots(normalizedTargets);
-  const baseArgs = [
-    '--config',
-    String(configPath || '').trim(),
-    '--runInBand',
-    ...(targetedRoots.length ? ['--roots', ...targetedRoots] : []),
-    ...(normalizedTargets.length ? ['--runTestsByPath', ...normalizedTargets] : []),
-  ];
-  if (localJestBinPath && fs.existsSync(localJestBinPath)) {
-    return {
-      command: 'node',
-      args: [localJestBinPath, ...baseArgs],
-    };
-  }
-  return {
-    command: npmCommand(),
-    args: ['exec', '--', 'jest', ...baseArgs],
-  };
-}
-
 function buildExecutionPlan(selection, options = {}) {
   const selectedSuites = new Set((Array.isArray(selection?.selectedSuites) ? selection.selectedSuites : []).map(normalizeSuiteId));
   const impactedSurfaceIds = uniq(selection?.impactedSurfaceIds || []);
   const runtimeEnv = options.env || process.env;
   const normalizedChangedFiles = uniq((Array.isArray(options.changedFiles) ? options.changedFiles : []).map(normalizePath));
   const toolingOnly = Boolean(options.toolingOnly);
+  const lockfileVerifyRequired = normalizedChangedFiles.some((filePath) => (
+    isPackageManifest(filePath) || isRootPackageLock(filePath) || isLockGeneratorContractPath(filePath)
+  ));
   const docsLaneSelected = selectedSuites.has('docs_lane');
   const backendVerifyMode = resolveLocalGateBackendVerifyMode(runtimeEnv);
   const hasDocsOpenApiDbAccessImpl = typeof options.hasDocsOpenApiDbAccessImpl === 'function'
@@ -879,10 +1024,12 @@ function buildExecutionPlan(selection, options = {}) {
   function ensureLocalStart({ suiteIds = [], surfaceIds = [] }) {
     const normalizedSuiteIds = uniq(suiteIds.map(normalizeSuiteId));
     const normalizedSurfaceIds = uniq(surfaceIds);
+    const edgeSmokeSelected = normalizedSuiteIds.includes('edge_deploy');
     const existing = commands.find((entry) => entry.command_id === 'local_start');
     if (existing) {
       existing.suite_ids = uniq([...existing.suite_ids, ...normalizedSuiteIds]);
       existing.surface_ids = uniq([...existing.surface_ids, ...normalizedSurfaceIds]);
+      if (edgeSmokeSelected) existing.env.RUN_LOCAL_EDGE_TESTS = 'true';
       return;
     }
     addCommand({
@@ -892,7 +1039,9 @@ function buildExecutionPlan(selection, options = {}) {
       command: npmCommand(),
       args: ['run', 'local:start'],
       env: {
+        WORKSPACE_LOCAL_START_FRESH: '1',
         WORKSPACE_LOCAL_START_RUN_MIGRATE_LOCAL: '1',
+        ...(edgeSmokeSelected ? { RUN_LOCAL_EDGE_TESTS: 'true' } : {}),
       },
     });
   }
@@ -900,10 +1049,15 @@ function buildExecutionPlan(selection, options = {}) {
   function ensureLocalVerify({ suiteIds = [], surfaceIds = [] }) {
     const normalizedSuiteIds = uniq(suiteIds.map(normalizeSuiteId));
     const normalizedSurfaceIds = uniq(surfaceIds);
+    const edgeSmokeSelected = normalizedSuiteIds.includes('edge_deploy');
     const existing = commands.find((entry) => entry.command_id === 'local_verify');
     if (existing) {
       existing.suite_ids = uniq([...existing.suite_ids, ...normalizedSuiteIds]);
       existing.surface_ids = uniq([...existing.surface_ids, ...normalizedSurfaceIds]);
+      if (edgeSmokeSelected) {
+        existing.env.RUN_LOCAL_EDGE_TESTS = 'true';
+        existing.env.EDGE_SMOKE_REQUIRED = '1';
+      }
       return;
     }
     addCommand({
@@ -912,18 +1066,44 @@ function buildExecutionPlan(selection, options = {}) {
       surfaceIds: normalizedSurfaceIds,
       command: npmCommand(),
       args: ['run', 'local:verify'],
+      env: {
+        LOCAL_VERIFY_SKIP_DB_RESET: '1',
+        ...(edgeSmokeSelected
+          ? {
+              RUN_LOCAL_EDGE_TESTS: 'true',
+              EDGE_SMOKE_REQUIRED: '1',
+            }
+          : {}),
+      },
     });
   }
 
-  const targetedUnitTests = toolingOnly
-    ? normalizedChangedFiles.filter((filePath) => /^tests\/unit\/.+\.test\.(js|ts|tsx)$/i.test(filePath))
+  const focusedUnitSelection = resolveFocusedUnitSelection({
+    changedFiles: normalizedChangedFiles,
+    impactSelection: selection,
+    repoRoot: options.cwd || process.cwd(),
+    validateCohortTestFiles: true,
+  });
+  const targetedUnitTests = focusedUnitSelection.mode === 'focused'
+    ? focusedUnitSelection.testPaths
     : [];
   const targetedUiTests = toolingOnly
     ? normalizedChangedFiles.filter((filePath) => /^tests\/ui\/.+\.test\.(js|ts|tsx)$/i.test(filePath))
     : [];
   const targetedLandingSpecs = toolingOnly
-    ? normalizedChangedFiles.filter((filePath) => /^tests\/landing-e2e\/.+\.spec\.(js|ts)$/i.test(filePath))
+    ? normalizedChangedFiles.filter((filePath) => /^tests\/landing-e2e\/.+\.spec\.(js|ts)$/i.test(filePath)
+      && (options.fsImpl || fs).existsSync(path.resolve(options.cwd || process.cwd(), filePath)))
     : [];
+
+  if (lockfileVerifyRequired) {
+    addCommand({
+      commandId: 'lockfile_verify',
+      suiteIds: Array.from(selectedSuites),
+      surfaceIds: impactedSurfaceIds,
+      command: npmCommand(),
+      args: ['run', 'lockfile:verify'],
+    });
+  }
 
   if (selectedSuites.has('lint_structure')) {
     addCommand({
@@ -939,36 +1119,42 @@ function buildExecutionPlan(selection, options = {}) {
     });
   }
   if (selectedSuites.has('test_unit')) {
-    const targetedUnitJest = resolveJestInvocation({
-      configPath: 'config/tooling/jest.config.unit.js',
-      targetedTests: targetedUnitTests,
-      localJestBinPath: options.localJestBinPath,
-    });
+    const focusedUnit = focusedUnitSelection.mode === 'focused';
     addCommand({
       commandId: 'test_unit',
       suiteIds: ['test_unit'],
-      command: targetedUnitTests.length ? targetedUnitJest.command : 'node',
-      args: targetedUnitTests.length
-        ? targetedUnitJest.args
+      command: 'node',
+      args: focusedUnit
+        ? ['scripts/ops/ci/focused-unit-selection.js', '--execute']
         : buildNxRunnerArgs({
             mode: 'run-many',
             targets: ['test:unit'],
             projects: [ROOT_NX_PROJECT],
             fallbackArgs: ['run', 'test:unit'],
           }),
+      env: focusedUnit
+        ? {
+            FOCUSED_UNIT_MODE: 'focused',
+            FOCUSED_UNIT_TESTS_JSON: JSON.stringify(targetedUnitTests),
+          }
+        : {},
     });
   }
   if (selectedSuites.has('test_ui')) {
-    const targetedUiJest = resolveJestInvocation({
-      configPath: 'config/tooling/jest.config.ui.js',
-      targetedTests: targetedUiTests,
-      localJestBinPath: options.localJestBinPath,
-    });
+    const targetedUiJest = targetedUiTests.length
+      ? resolveJestInvocation({
+          configPath: 'config/tooling/jest.config.ui.js',
+          targetedTests: targetedUiTests,
+          localJestBinPath: options.localJestBinPath,
+          repoRoot: options.cwd || process.cwd(),
+          fsImpl: options.fsImpl || fs,
+        })
+      : null;
     addCommand({
       commandId: 'test_ui',
       suiteIds: ['test_ui'],
-      command: targetedUiTests.length ? targetedUiJest.command : 'node',
-      args: targetedUiTests.length
+      command: targetedUiJest ? targetedUiJest.command : 'node',
+      args: targetedUiJest
         ? targetedUiJest.args
         : buildNxRunnerArgs({
             mode: 'run-many',
@@ -1007,6 +1193,21 @@ function buildExecutionPlan(selection, options = {}) {
     });
   }
   if (selectedSuites.has('landing_e2e')) {
+    const browserAdmission = waitForBrowserAdmissionSync({
+      env: options.env || process.env,
+      validateOnly: true,
+    });
+    addCommand({
+      commandId: 'landing_e2e_admission', suiteIds: ['landing_e2e'], surfaceIds: ['landing'],
+      command: 'internal', args: ['browser-resource-quiescence'],
+      env: {
+        LOCAL_GATE_BROWSER_MIN_AVAILABLE_RAM_GIB: String(browserAdmission.minimum_available_ram_gib),
+        LOCAL_GATE_BROWSER_MAX_CPU_PERCENT: String(browserAdmission.maximum_cpu_percent),
+        LOCAL_GATE_BROWSER_ADMISSION_TIMEOUT_MS: String(browserAdmission.timeout_ms),
+        LOCAL_GATE_BROWSER_STABLE_WINDOW_MS: String(browserAdmission.stable_window_ms),
+        LOCAL_GATE_BROWSER_SAMPLE_INTERVAL_MS: String(browserAdmission.sample_interval_ms),
+      },
+    });
     addCommand({
       commandId: 'landing_e2e',
       suiteIds: ['landing_e2e'],
@@ -1120,23 +1321,76 @@ function buildExecutionPlan(selection, options = {}) {
     });
   }
 
-  return commands;
+  const localStartStep = commands.find((entry) => entry.command_id === 'local_start');
+  if (localStartStep) {
+    addCommand({
+      commandId: 'local_stop',
+      suiteIds: localStartStep.suite_ids,
+      surfaceIds: localStartStep.surface_ids,
+      command: npmCommand(),
+      args: ['run', 'local:stop'],
+    });
+  }
+
+  return prependRemoteVerifyRoutePreflight(commands);
+}
+
+function attachExecutionFailure(error, results, failedPhase) {
+  const target = error instanceof Error ? error : new Error(String(error));
+  target.localGateCommandResults = results.map((entry) => ({ ...entry }));
+  target.localGateFailedPhase = String(failedPhase || 'execution');
+  const exitCode = Number.isInteger(target.exitCode) ? target.exitCode
+    : Number(target.message.match(/^exit\s+(-?\d+)$/i)?.[1]) || null;
+  target.localGateFailure = {
+    failed_phase: target.localGateFailedPhase,
+    failure_class: String(target.failureClass || (exitCode === null ? 'infrastructure' : 'command')),
+    error_code: String(target.code || 'command_failed'), exit_code: exitCode,
+    error_message: String(target.message || target),
+    duration_ms: Number(target.durationMs || target.admission?.duration_ms || 0),
+    ...(target.admission ? { admission: target.admission } : {}),
+  };
+  return target;
 }
 
 function runExecutionPlan(commands, env = process.env, options = {}) {
   const runCommandImpl = options.runCommandImpl || runCommand;
+  const waitForBrowserAdmissionSyncImpl =
+    options.waitForBrowserAdmissionSyncImpl || waitForBrowserAdmissionSync;
   const isSupabaseHttpPlaneUnavailableSyncImpl =
     options.isSupabaseHttpPlaneUnavailableSyncImpl || isSupabaseHttpPlaneUnavailableSync;
   const isSupabaseFunctionsRuntimeUnavailableSyncImpl =
     options.isSupabaseFunctionsRuntimeUnavailableSyncImpl || isSupabaseFunctionsRuntimeUnavailableSync;
   const results = [];
   let backendRecoveryAttempted = false;
-  for (const step of Array.isArray(commands) ? commands : []) {
-    console.log(`[local-gate] ${step.command} ${step.args.join(' ')}`);
+  let localStartAttempted = false;
+  let localStopAttempted = false;
+  let activePhase = 'execution';
+  const terminalLocalStopStep = (Array.isArray(commands) ? commands : [])
+    .find((entry) => entry.command_id === 'local_stop');
+  try {
+    for (const step of Array.isArray(commands) ? commands : []) {
+      activePhase = step.command_id;
     const stepEnv = {
       ...stripLocalGateEnv(env),
       ...(step.env && typeof step.env === 'object' ? step.env : {}),
     };
+    if (step.command_id === 'landing_e2e_admission') {
+      console.log('[local-gate] internal browser-resource-quiescence');
+      const admission = waitForBrowserAdmissionSyncImpl({
+        env: withLocalGateChildEnv(stepEnv),
+      });
+      results.push({
+        ...step,
+        duration_ms: Number(admission?.duration_ms || 0),
+        status: 'passed',
+        admission,
+      });
+      continue;
+    }
+
+    console.log(`[local-gate] ${step.command} ${step.args.join(' ')}`);
+    if (step.command_id === 'local_start') localStartAttempted = true;
+    if (step.command_id === 'local_stop') localStopAttempted = true;
     let durationMs;
     try {
       durationMs = runCommandImpl(step.command, step.args, stepEnv);
@@ -1158,6 +1412,7 @@ function runExecutionPlan(commands, env = process.env, options = {}) {
         '[local-gate] Local backend runtime became unavailable during local_verify; retrying local:stop + local:start + local:verify once.',
       );
 
+      activePhase = 'local_stop_recovery';
       const recoveryStopDuration = runCommandImpl(npmCommand(), ['run', 'local:stop'], stepEnv);
       results.push({
         command_id: 'local_stop_recovery',
@@ -1173,8 +1428,10 @@ function runExecutionPlan(commands, env = process.env, options = {}) {
       const localStartStep = commands.find((entry) => entry.command_id === 'local_start');
       const localStartRecoveryStepEnv = {
         ...(localStartStep?.env && typeof localStartStep.env === 'object' ? localStartStep.env : {}),
+        WORKSPACE_LOCAL_START_FRESH: '1',
         WORKSPACE_LOCAL_START_RUN_MIGRATE_LOCAL: '1',
       };
+      activePhase = 'local_start_recovery';
       const recoveryStartDuration = runCommandImpl(npmCommand(), ['run', 'local:start'], {
         ...stepEnv,
         ...localStartRecoveryStepEnv,
@@ -1190,78 +1447,171 @@ function runExecutionPlan(commands, env = process.env, options = {}) {
         status: 'passed',
       });
 
+      activePhase = step.command_id;
       console.log(`[local-gate] ${step.command} ${step.args.join(' ')} (recovery retry)`);
       durationMs = runCommandImpl(step.command, step.args, stepEnv);
     }
-    results.push({
-      command_id: step.command_id,
-      suite_ids: uniq(step.suite_ids || []),
-      surface_ids: uniq(step.surface_ids || []),
-      command: step.command,
-      args: Array.isArray(step.args) ? step.args.slice() : [],
-      env: step.env && typeof step.env === 'object' ? { ...step.env } : {},
-      duration_ms: durationMs,
-      status: 'passed',
-    });
+      results.push({
+        command_id: step.command_id,
+        suite_ids: uniq(step.suite_ids || []),
+        surface_ids: uniq(step.surface_ids || []),
+        command: step.command,
+        args: Array.isArray(step.args) ? step.args.slice() : [],
+        env: step.env && typeof step.env === 'object' ? { ...step.env } : {},
+        duration_ms: durationMs,
+        status: 'passed',
+      });
+    }
+    return results;
+  } catch (error) {
+    const failedPhase = activePhase;
+    if (localStartAttempted && !localStopAttempted && terminalLocalStopStep) {
+      localStopAttempted = true;
+      const cleanupEnv = {
+        ...stripLocalGateEnv(env),
+        ...(terminalLocalStopStep.env && typeof terminalLocalStopStep.env === 'object'
+          ? terminalLocalStopStep.env
+          : {}),
+      };
+      try {
+        console.warn(
+          `[local-gate] ${failedPhase} failed after local runtime startup; running terminal local:stop before reporting the primary failure.`,
+        );
+        const cleanupDurationMs = runCommandImpl(
+          terminalLocalStopStep.command,
+          terminalLocalStopStep.args,
+          cleanupEnv,
+        );
+        results.push({
+          command_id: terminalLocalStopStep.command_id,
+          suite_ids: uniq(terminalLocalStopStep.suite_ids || []),
+          surface_ids: uniq(terminalLocalStopStep.surface_ids || []),
+          command: terminalLocalStopStep.command,
+          args: Array.isArray(terminalLocalStopStep.args)
+            ? terminalLocalStopStep.args.slice()
+            : [],
+          env: terminalLocalStopStep.env && typeof terminalLocalStopStep.env === 'object'
+            ? { ...terminalLocalStopStep.env }
+            : {},
+          duration_ms: cleanupDurationMs,
+          status: 'passed',
+        });
+      } catch (cleanupError) {
+        const attached = attachExecutionFailure(error, results, failedPhase);
+        attached.localGateFailure = {
+          ...attached.localGateFailure,
+          cleanup_error_message: String(cleanupError?.message || cleanupError),
+        };
+        attached.localGateCleanupError = cleanupError;
+        throw attached;
+      }
+    }
+    throw attachExecutionFailure(error, results, failedPhase);
   }
-  return results;
 }
 
 function createManifest({
   headSha,
   baseSha,
   changedFiles,
+  classificationFiles,
   selection,
   commandResults,
+  plannedCommands,
   manifestPath,
   mode,
   strictMode,
   riskReasons,
+  status = 'passed', failure = {}, terminalRepository,
+  startedAt = '', finishedAt = '', terminalProbeErrors = [],
 }) {
   const durationMs = (Array.isArray(commandResults) ? commandResults : []).reduce(
     (sum, entry) => sum + Number(entry?.duration_ms || 0),
     0,
   );
-  return {
+  const manifest = addLocalGateManifestContract({
     sha: headSha,
     head_sha: headSha,
     base_sha: baseSha,
     generated_at: new Date().toISOString(),
     manifest_path: manifestPath,
     changed_files: uniq(changedFiles),
+    classification_files: uniq(classificationFiles || selection?.classificationFiles || changedFiles),
     impact_surfaces: uniq(selection?.impactSurfaces || []),
     surface_ids: uniq(selection?.impactedSurfaceIds || []),
     suite_ids: uniq(selection?.selectedSuites || []),
     commands: Array.isArray(commandResults) ? commandResults : [],
+    planned_commands: Array.isArray(plannedCommands) ? plannedCommands : commandResults,
     selection_confidence: String(selection?.selectionConfidence || 'unknown'),
     fallback_to_full: Boolean(selection?.fallbackToFull),
     fallback_reason: String(selection?.fallbackReason || ''),
     skip_reasons: uniq(selection?.skipReasons || []),
+    lockfile_selection_mode: String(selection?.lockfileSelectionMode || 'not_applicable'),
+    lockfile_selection_reason: String(selection?.lockfileSelectionReason || ''),
+    lockfile_owner_workspaces: uniq(selection?.lockfileOwnerWorkspaces || []),
+    lockfile_changed_package_keys: uniq(selection?.lockfileChangedPackageKeys || []),
+    lockfile_native_package_keys: uniq(selection?.lockfileNativePackageKeys || []),
     local_mode: String(mode || 'impact'),
     strict_mode: Boolean(strictMode),
     risk_reasons: uniq(riskReasons),
-    status: 'passed',
+    status,
     duration_ms: durationMs,
+  });
+  if (status === 'passed') return manifest;
+  return {
+    ...manifest,
+    status,
+    started_at: String(startedAt || ''),
+    finished_at: String(finishedAt || ''),
+    generated_at: String(finishedAt || new Date().toISOString()),
+    completed_phases: (Array.isArray(commandResults) ? commandResults : [])
+      .filter((entry) => entry?.status === 'passed').map((entry) => String(entry?.command_id || '')).filter(Boolean),
+    failed_phase: String(failure.failed_phase || 'execution'),
+    failure_class: String(failure.failure_class || 'infrastructure'),
+    error_code: String(failure.error_code || 'local_gate_failed'),
+    exit_code: Number.isInteger(failure.exit_code) ? failure.exit_code : null,
+    error_message: String(failure.error_message || ''),
+    failure_details: failure,
+    repository_clean: terminalRepository?.clean ?? null,
+    repository_status_sha256: String(terminalRepository?.status_sha256 || ''),
+    terminal_probe_errors: Array.isArray(terminalProbeErrors) ? terminalProbeErrors : [],
+    terminal_repository: terminalRepository || {},
   };
 }
 
-function writeManifest(manifest, manifestDir, headSha) {
-  const targetDir = path.resolve(process.cwd(), String(manifestDir || '.tmp/local-gate').trim() || '.tmp/local-gate');
-  fs.mkdirSync(targetDir, { recursive: true });
-  const manifestPath = path.join(targetDir, `${headSha}.json`);
+function writeManifest(manifest, manifestDir, headSha, { cwd = process.cwd() } = {}) {
+  const resolved = resolveSafeLocalGateManifestPath({
+    cwd,
+    manifestDir: String(manifestDir || '.tmp/local-gate').trim() || '.tmp/local-gate',
+    headSha,
+    createDirectory: true,
+  });
+  const manifestPath = resolved.manifestPath;
   const nextManifest = {
     ...manifest,
-    manifest_path: normalizePath(path.relative(process.cwd(), manifestPath)) || normalizePath(manifestPath),
+    manifest_path: normalizePath(path.relative(cwd, manifestPath)) || normalizePath(manifestPath),
   };
-  fs.writeFileSync(manifestPath, JSON.stringify(nextManifest, null, 2) + '\n', 'utf8');
+  nextManifest.manifest_sha256 = digestManifest(nextManifest);
+  writeLocalGateManifestAtomic(manifestPath, nextManifest);
   return {
     manifestPath,
     manifest: nextManifest,
   };
 }
 
-function printResult(result, format) {
+function resolveLocalGateOutputFormat(format, env = process.env) {
   const normalizedFormat = String(format || 'json').trim().toLowerCase();
+  if (!['json', 'github-output'].includes(normalizedFormat)) {
+    throw new Error(`Unsupported format "${format}"`);
+  }
+  if (normalizedFormat === 'github-output' && !String(env.GITHUB_OUTPUT || '').trim()) {
+    throw new Error('GITHUB_OUTPUT not set; use --format json locally.');
+  }
+  return normalizedFormat;
+}
+
+function printResult(result, format) {
+  const normalizedFormat = resolveLocalGateOutputFormat(format, process.env);
   const payload = {
     head_sha: result.manifest.head_sha,
     base_sha: result.manifest.base_sha,
@@ -1279,7 +1629,6 @@ function printResult(result, format) {
   }
   if (normalizedFormat === 'github-output') {
     const outputPath = String(process.env.GITHUB_OUTPUT || '').trim();
-    if (!outputPath) die('GITHUB_OUTPUT not set; use --format json locally.');
     const lines = [
       `head_sha=${payload.head_sha}`,
       `base_sha=${payload.base_sha}`,
@@ -1294,7 +1643,6 @@ function printResult(result, format) {
     fs.appendFileSync(outputPath, `${lines.join('\n')}\n`, 'utf8');
     return;
   }
-  die(`Unsupported format "${format}"`);
 }
 
 function runLocalGate({
@@ -1305,8 +1653,26 @@ function runLocalGate({
   buildExecutionPlanImpl = buildExecutionPlan,
   runExecutionPlanImpl = runExecutionPlan,
   writeManifestImpl = writeManifest,
+  gitStatusImpl = gitStatusPorcelain,
+  resolveCurrentHeadShaImpl = () => gitStdout(['rev-parse', 'HEAD']),
+  resolveCurrentTreeShaImpl = () => gitStdout(['write-tree']),
+  nowImpl = () => new Date(),
 } = {}) {
+  const gateStartedAt = nowImpl().toISOString();
+  assertCleanLocalGateRepository({ status: gitStatusImpl(), phase: 'before' });
   const headSha = resolveHeadSha(args.sha);
+  assertLocalGateHeadMatches({
+    expectedHeadSha: headSha,
+    actualHeadSha: resolveCurrentHeadShaImpl(),
+    phase: 'before',
+  });
+  resolveLocalGateOutputFormat(args.format, env);
+  resolveSafeLocalGateManifestPath({
+    cwd: process.cwd(),
+    manifestDir: String(args.manifestDir || '.tmp/local-gate').trim() || '.tmp/local-gate',
+    headSha,
+    createDirectory: true,
+  });
   const baseSha = resolveBaseSha({ baseRef: args.baseRef, explicitBaseSha: args.baseSha });
   const changedFiles = resolveChangedFilesImpl({
     baseRef: args.baseRef,
@@ -1314,15 +1680,20 @@ function runLocalGate({
     headSha,
     paths: args.paths,
   });
-  const selection = classifyImpactSelection(changedFiles, {
+  const selectionResult = resolveImpactSelectionForChangedFiles({
+    changedFiles,
     impactMap,
     unknown: false,
     forceFull: false,
     forceReason: '',
+    baseRef: baseSha,
+    headRef: headSha,
   });
+  const selection = selectionResult.impactSelection;
+  const classificationFiles = selection.classificationFiles || changedFiles;
   const policy = resolveLocalGatePolicy({
     selection,
-    changedFiles,
+    changedFiles: classificationFiles,
     mode: args.mode,
   });
   const effectiveSelection = policy.selection;
@@ -1332,7 +1703,7 @@ function runLocalGate({
     baseRef: args.baseRef,
     headSha,
     baseRef: args.baseRef,
-    changedFiles,
+    changedFiles: classificationFiles,
     toolingOnly: policy.toolingOnly,
     baseRef: args.baseRef,
     remoteWorkflowRef: resolveRemoteWorkflowRef({
@@ -1346,28 +1717,78 @@ function runLocalGate({
     LOCAL_GATE_HEAD_SHA: headSha,
     LOCAL_GATE_CHANGED_FILES: changedFiles.join(','),
     LOCAL_GATE_CHANGED_FILES_JSON: JSON.stringify(changedFiles),
+    LOCAL_GATE_CLASSIFICATION_FILES_JSON: JSON.stringify(classificationFiles),
     NX_TASK_FILES_JSON: JSON.stringify(changedFiles),
   };
-  const commandResults = runExecutionPlanImpl(executionPlan, executionEnv);
-  const initialManifest = createManifest({
-    headSha,
-    baseSha,
-    changedFiles,
-    selection: effectiveSelection,
-    commandResults,
-    manifestPath: '',
-    mode: policy.mode,
-    strictMode: policy.strictMode,
-    riskReasons: policy.riskReasons,
-  });
-  const persisted = writeManifestImpl(initialManifest, args.manifestDir, headSha);
-  return {
-    changedFiles,
-    selection: effectiveSelection,
-    commands: executionPlan,
-    manifest: persisted.manifest,
-    manifestPath: persisted.manifestPath,
+  const manifestInput = {
+    headSha, baseSha, changedFiles, classificationFiles, selection: effectiveSelection, plannedCommands: executionPlan,
+    manifestPath: '', mode: policy.mode, strictMode: policy.strictMode, riskReasons: policy.riskReasons,
   };
+  let commandResults = [];
+  let lifecyclePhase = 'execution';
+  try {
+    commandResults = runExecutionPlanImpl(executionPlan, executionEnv, {
+      cwd: process.cwd(),
+    });
+    lifecyclePhase = 'post_execution_head';
+    assertLocalGateHeadMatches({
+      expectedHeadSha: headSha,
+      actualHeadSha: resolveCurrentHeadShaImpl(),
+      phase: 'after',
+    });
+    lifecyclePhase = 'post_execution_repository_clean';
+    assertCleanLocalGateRepository({ status: gitStatusImpl(), phase: 'after' });
+    const initialManifest = createManifest({ ...manifestInput, commandResults });
+    const persisted = writeManifestImpl(initialManifest, args.manifestDir, headSha);
+    return {
+      changedFiles,
+      selection: effectiveSelection,
+      classificationFiles,
+      commands: executionPlan,
+      manifest: persisted.manifest,
+      manifestPath: persisted.manifestPath,
+    };
+  } catch (error) {
+    const primaryError = error instanceof Error ? error : new Error(String(error));
+    if (Array.isArray(primaryError.localGateCommandResults)) {
+      commandResults = primaryError.localGateCommandResults;
+    }
+    const terminalProbeErrors = [];
+    const probe = (name, fn, fallback) => {
+      try {
+        return fn();
+      } catch (probeError) {
+        terminalProbeErrors.push({ probe: name, error_message: String(probeError?.message || probeError) });
+        return fallback;
+      }
+    };
+    const terminalStatus = probe('repository_status', gitStatusImpl, null);
+    const failure = primaryError.localGateFailure || {
+      failed_phase: primaryError.localGateFailedPhase || lifecyclePhase,
+      failure_class: String(primaryError.failureClass || 'infrastructure'),
+      error_code: String(primaryError.code || 'local_gate_failed'),
+      exit_code: Number.isInteger(primaryError.exitCode) ? primaryError.exitCode : null,
+      error_message: String(primaryError.message || primaryError),
+    };
+    const failureManifest = createManifest({
+      ...manifestInput, commandResults, status: 'failed', failure, startedAt: gateStartedAt,
+      finishedAt: probe('finished_at', () => nowImpl().toISOString(), new Date().toISOString()),
+      terminalProbeErrors,
+      terminalRepository: {
+        head_sha: probe('head_sha', resolveCurrentHeadShaImpl, ''),
+        tree_sha: probe('tree_sha', resolveCurrentTreeShaImpl, ''),
+        clean: terminalStatus === null ? null : !String(terminalStatus).trim(),
+        status_porcelain: terminalStatus || '',
+        status_sha256: terminalStatus === null ? '' : sha256(String(terminalStatus || '')),
+      },
+    });
+    try {
+      primaryError.localGateFailureManifest = writeManifestImpl(failureManifest, args.manifestDir, headSha);
+    } catch (writeError) {
+      primaryError.localGateFailureManifestWriteError = String(writeError?.message || writeError);
+    }
+    throw primaryError;
+  }
 }
 
 function main() {
@@ -1407,8 +1828,15 @@ module.exports = {
   resolveLocalGateBackendVerifyMode,
   resolveRemoteWorkflowRef,
   resolveLocalGatePolicy,
+  isExplicitScopedControlPlaneSelection,
+  withLocalGateChildEnv, sampleHostResources, waitForBrowserAdmissionSync,
   runExecutionPlan,
+  gitStatusPorcelain,
+  assertCleanLocalGateRepository,
+  assertLocalGateHeadMatches,
+  diffNameOnly,
   resolveLocalGateRemoteVerifyEnvironment,
   writeManifest,
+  resolveLocalGateOutputFormat,
   runLocalGate,
 };

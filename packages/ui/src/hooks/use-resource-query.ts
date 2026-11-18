@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import {
   useQuery,
   useQueryClient,
   keepPreviousData,
+  hashKey,
   type QueryKey,
 } from "@tanstack/react-query";
 import { createUiClient, type UiResourceList, type UiSort } from "@masarx/api";
@@ -23,7 +25,7 @@ type ResourceQueryParams = {
   limit: number;
   /** Pagination offset. */
   offset: number;
-  /** Initial server-rendered data to seed the query and avoid a loading flash. */
+  /** Server-rendered data for the initial query parameters only. */
   initialData?: UiResourceList | null;
   /** Whether the query is enabled. Defaults to `true`. */
   enabled?: boolean;
@@ -73,6 +75,10 @@ export function useResourceQuery({
     limit,
     offset,
   });
+  // The server list belongs to the initial filters/sort/page. Seeding a new
+  // query key with it would mark the wrong page fresh and suppress its fetch.
+  const [initialQueryHash] = useState(() => hashKey(queryKey));
+  const canSeedInitialData = hashKey(queryKey) === initialQueryHash;
 
   return useQuery<UiResourceList>({
     queryKey,
@@ -89,7 +95,7 @@ export function useResourceQuery({
     enabled: Boolean(resourceKey) && (enabled ?? true),
     staleTime: 30_000,
     placeholderData: keepPreviousData,
-    ...(initialData ? { initialData } : {}),
+    ...(initialData && canSeedInitialData ? { initialData } : {}),
   });
 }
 
@@ -112,8 +118,13 @@ export function useResourceListInvalidate(resourceKey: string) {
   const queryClient = useQueryClient();
 
   return async () => {
-    await queryClient.invalidateQueries({
-      queryKey: ["resource", resourceKey],
-    });
+    await queryClient.invalidateQueries(
+      {
+        queryKey: ["resource", resourceKey],
+      },
+      {
+        throwOnError: true,
+      }
+    );
   };
 }

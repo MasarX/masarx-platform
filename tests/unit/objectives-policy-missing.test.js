@@ -106,4 +106,26 @@ describe('objectives-lint POLICY_MISSING', () => {
       tmp.cleanup();
     }
   });
+
+  test('historical private reassignment table stays deny-only', () => {
+    const creationRel = 'supabase/migrations/202609060200_fieldops_reassignment_request_workflow_v1.sql';
+    const completionRel = 'supabase/migrations/20260909151000_private_table_contract_completion_v1.sql';
+    const table = 'public.fieldops_reassignment_requests';
+    const key = `${creationRel}|${table}`;
+    const baseline = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config/ci/objectives-lint-baseline.json'), 'utf8'));
+    const creation = fs.readFileSync(path.join(repoRoot, creationRel), 'utf8');
+    const completion = fs.readFileSync(path.join(repoRoot, completionRel), 'utf8');
+    expect(creationRel < completionRel).toBe(true);
+    expect(baseline.policy_missing.filter((entry) => entry === key)).toEqual([key]);
+    expect(creation).toMatch(/CREATE TABLE public\.fieldops_reassignment_requests\s*\(/i);
+    expect(creation).toMatch(/ALTER TABLE public\.fieldops_reassignment_requests ENABLE ROW LEVEL SECURITY/i);
+    expect(creation).toMatch(/REVOKE ALL ON public\.fieldops_reassignment_requests FROM PUBLIC, anon, authenticated, service_role/i);
+    expect(completion).toMatch(/CREATE POLICY fieldops_reassignment_requests_service_private\s+ON public\.fieldops_reassignment_requests\s+FOR ALL TO service_role USING \(FALSE\) WITH CHECK \(FALSE\)/i);
+    const result = runLint(creationRel, {
+      OBJECTIVES_ENFORCE_POLICY_MISSING: '0',
+      OBJECTIVES_LINT_NET_NEW_MODE: 'error',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toMatch(/Policy Missing summary: baseline=1 net_new=0/);
+  });
 });

@@ -3,19 +3,22 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { UiCommandDefinition } from "@masarx/api";
+import { getPublicConfig } from "@masarx/config";
 import { Input } from "./input";
-import { createUiTranslator } from "./i18n";
+import { createUiTranslator, resolveRowDisplayText } from "./i18n";
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from "./modal";
-import { resolveCommandHrefForRouter } from "./command-utils";
+import { resolveCommandHrefForRouter, resolveCommandReadState, formatCommandBackendReference } from "./command-utils";
 import { useCommandRegistry } from "./command-registry-client";
+import { useReadRegistry } from "./read-registry-client";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import type { NavigationSection } from "./navigation";
 import { flattenNavigationSections } from "./navigation-utils";
 import { stripBasePath } from "./navigation-paths";
-import { resolveSafeAppBasePath } from "./url-guard";
+import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
 import { reportUiEvent } from "./reporting";
-import { cn } from "./utils";
+import { cn, formatUiError } from "./utils";
 import { fuzzyMatch } from "./fuzzy-match";
+import { resolveNavigationDisabledReason } from "./navigation-disabled-reason";
 import { formatShortcutLabel, isEditableTarget, matchesShortcut } from "./keyboard-shortcuts";
 
 type CommandPaletteItem = {
@@ -28,9 +31,14 @@ type CommandPaletteItem = {
   capability?: string | null;
   disabledReason?: string | null;
   navigationId?: string | null;
+  backendReference?: string;
 };
 
 type CommandPaletteProps = {
+  organizationId?: string | null;
+  userId?: string | null;
+  scopeType?: string | null;
+  scopeId?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appKey?: string;
@@ -84,9 +92,13 @@ const selectionRequiresContext = (command: UiCommandDefinition) => {
 };
 
 const resolveCommandLabel = (command: UiCommandDefinition) =>
-  command.label?.trim() || command.key;
+  resolveRowDisplayText(command.label?.trim() || command.key, command.label_ar, getPublicConfig().locale);
 
 export function CommandPalette({
+  organizationId,
+  userId,
+  scopeType,
+  scopeId,
   open,
   onOpenChange,
   appKey,
@@ -114,9 +126,11 @@ export function CommandPalette({
     () => resolveCapabilitySet(capabilities),
     [capabilities]
   );
-  const { data: commandRegistry, isLoading } = useCommandRegistry({
+  const { data: commandRegistry, isLoading, error: commandError } = useCommandRegistry({
     enabled: open,
   });
+
+  const { data: readRegistry, error: readError, isLoading: readLoading } = useReadRegistry({ enabled: open, userId, scopeType, scopeId, organizationId });
 
   const navigationItems = React.useMemo(() => {
     const flattened = flattenNavigationSections(navigationSections);
@@ -124,15 +138,18 @@ export function CommandPalette({
       .filter(({ item }) => Boolean(item.href))
       .map(({ item, sectionLabel }) => {
         const capabilityAllowed = hasCapability(capabilitySet, item.capability);
+        const href = typeof item.href === "string" && !/^[a-z][a-z0-9+.-]*:/i.test(item.href.trim())
+          ? resolveSafeHref("", item.href) : null;
         const disabledReason =
-          item.disabled_reason ??
+          (!href ? t("disabled.noTarget") : null) ??
+          resolveNavigationDisabledReason(item.disabled_reason) ??
           (!capabilityAllowed ? t("disabled.missingCapability") : null);
         return {
           id: `nav-${item.id}`,
           navigationId: item.id,
           label: item.label,
           description: sectionLabel,
-          href: item.href ?? null,
+          href,
           kind: "navigation",
           section: sectionLabel,
           capability: item.capability ?? null,
@@ -175,9 +192,16 @@ export function CommandPalette({
           capabilitySet,
           command.capability
         );
+        const readState = resolveCommandReadState(command, readError ? null : readRegistry, capabilitySet);
         let disabledReason: string | null = null;
-        if (!capabilityAllowed) {
+        if (commandError || isLoading) {
+          disabledReason = t("disabled.commandUnavailable");
+        } else if (!capabilityAllowed) {
           disabledReason = t("disabled.missingCapability");
+        } else if (readState === "unavailable") {
+          disabledReason = t("disabled.readUnavailable");
+        } else if (readState === "denied") {
+          disabledReason = t("disabled.readRequired");
         } else if (selectionRequiresContext(command)) {
           disabledReason = t("disabled.needsSelection");
         } else if (!href) {
@@ -187,6 +211,7 @@ export function CommandPalette({
           id: `cmd-${command.key}`,
           label: resolveCommandLabel(command),
           description: command.description ?? null,
+          backendReference: formatCommandBackendReference(command),
           href,
           kind: "command",
           section: command.schema_category ?? null,
@@ -195,7 +220,7 @@ export function CommandPalette({
         } satisfies CommandPaletteItem;
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [appBasePath, appKey, capabilitySet, commandRegistry, t]);
+  }, [appBasePath, appKey, capabilitySet, commandRegistry, commandError, isLoading, readRegistry, readError, t]);
 
   const filterItems = React.useCallback(
     (items: CommandPaletteItem[]) => {
@@ -207,6 +232,7 @@ export function CommandPalette({
             item.description ?? "",
             item.section ?? "",
             item.capability ?? "",
+            item.backendReference ?? "",
           ];
           let bestScore = -Infinity;
           for (const field of fields) {
@@ -357,7 +383,9 @@ export function CommandPalette({
 
   const handleSelect = React.useCallback(
     (item: CommandPaletteItem) => {
-      if (!item.href || item.disabledReason) return;
+      if (!item.href || item.disabledReason || /^[a-z][a-z0-9+.-]*:/i.test(item.href.trim())) return;
+      const href = resolveSafeHref("", item.href);
+      if (!href) return;
       if (item.navigationId) {
         onRecordRecent(item.navigationId);
       }
@@ -368,7 +396,7 @@ export function CommandPalette({
         name: item.label,
       });
       handleOpenChange(false);
-      router.push(stripBasePath(item.href, safeBasePath ?? undefined));
+      router.push(stripBasePath(href, safeBasePath ?? undefined));
     },
     [handleOpenChange, onRecordRecent, router, safeBasePath]
   );
@@ -401,6 +429,8 @@ export function CommandPalette({
     [activeIndex, handleOpenChange, handleSelect, resolveNextEnabledIndex, visibleItems]
   );
 
+  const allBlocked = normalizedQuery && visibleItems.length > 0 && visibleItems.every((item) => item.disabledReason);
+  const activeItem = visibleItems[activeIndex] ?? (allBlocked ? visibleItems[0] : undefined);
   return (
     <Modal open={open} onOpenChange={handleOpenChange}>
       <ModalContent
@@ -436,11 +466,32 @@ export function CommandPalette({
         </div>
         <div className="max-h-[60vh] space-y-4 overflow-y-auto px-5 py-4">
           {isLoading ? (
-            <div className="rounded-lg border border-ui-border bg-ui-surface p-4 text-xs text-ui-muted">
+            <div role="status" aria-live="polite" aria-atomic="true" data-testid={`${testIdPrefix}-command-palette-loading`} className="rounded-lg border border-ui-border bg-ui-surface p-4 text-xs text-ui-muted">
               {t("loading")}
             </div>
           ) : null}
-          {!isLoading && sections.length === 0 ? (
+          {commandError ? (
+            <div role="status" aria-live="polite" aria-atomic="true" data-testid={`${testIdPrefix}-command-palette-registry-error`}>
+              {t("registryUnavailable")} {formatUiError(commandError, t("registryUnavailable"))}
+            </div>
+          ) : null}
+          {readError || readLoading ? (
+            <div role="status" aria-live="polite" aria-atomic="true" data-testid={`${testIdPrefix}-command-palette-read-registry-error`}>
+              {t("disabled.readUnavailable")} {readError ? formatUiError(readError, t("disabled.readUnavailable")) : t("readLoading")}
+            </div>
+          ) : null}
+          {allBlocked ? (
+            <div role="status" aria-live="polite" aria-atomic="true" data-testid={`${testIdPrefix}-command-palette-blocked-results`}>
+              {Array.from(new Set(visibleItems.map((item) => item.disabledReason))).join(" ")}
+            </div>
+          ) : null}
+          {activeItem ? (
+            <div role="status" aria-live="polite" aria-atomic="true" className="sr-only" data-testid={`${testIdPrefix}-command-palette-active-readback`}>
+              {activeItem.label} {t(activeItem.kind === "command" ? "labels.command" : "labels.navigation")} {activeItem.disabledReason}
+              {activeItem.backendReference ? t("backendReference", { value: activeItem.backendReference }) : null}
+            </div>
+          ) : null}
+          {!isLoading && !commandError && sections.length === 0 ? (
             <div className="rounded-lg border border-ui-border bg-ui-surface p-4 text-sm text-ui-muted">
               <div className="font-medium text-ui-ink">{t("emptyTitle")}</div>
               <p className="text-xs text-ui-muted">{t("emptyDescription")}</p>
@@ -480,6 +531,7 @@ export function CommandPalette({
                             {item.description}
                           </div>
                         ) : null}
+                        {item.backendReference ? <div className="text-xs text-ui-muted">{t("backendReference", { value: item.backendReference })}</div> : null}
                         {item.disabledReason ? (
                           <div className="mt-1 text-[11px] text-ui-muted">
                             {item.disabledReason}

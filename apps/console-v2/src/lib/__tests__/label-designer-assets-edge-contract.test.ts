@@ -6,37 +6,19 @@ const repoRoot = path.resolve(__dirname, '../../../../..');
 const source = readFileSync(path.join(repoRoot, 'supabase/functions/label-designer-assets/index.ts'), 'utf8');
 
 describe('label-designer-assets edge contract', () => {
-  it('accepts supported or unspecified image content types before storage upload', () => {
-    expect(source).toContain('normalizeImageContentType');
-    expect(source).toContain('isSupportedImageContentType');
-    expect(source).toContain('isUnspecifiedContentType');
-    expect(source).toContain('"application/octet-stream"');
-    expect(source).toContain('"image/png"');
-    expect(source).toContain('"image/jpeg"');
+  it('checks supported image bytes and declared MIME before storage upload', () => {
+    const sniffIndex = source.indexOf('const detectedType = imageContentTypeFromBytes(bytes, contentType)');
+    const invalidImageIndex = source.indexOf('"invalid_image"', sniffIndex);
+    const mismatchIndex = source.indexOf('"image_mime_mismatch"', invalidImageIndex);
+    const uploadIndex = source.indexOf('storageClient.storage.from(ASSET_BUCKET).upload', mismatchIndex);
+
+    expect(source).toContain('isPngContainer(bytes)');
+    expect(source).toContain('isJpegContainer(bytes)');
     expect(source).toContain('"image/webp"');
-    expect(source).toContain('"unsupported_asset_type"');
-
-    const contentTypeGuardIndex = source.indexOf('!isUnspecifiedContentType(requestedContentType)');
-    const uploadIndex = source.indexOf('storageClient.storage.from(ASSET_BUCKET).upload');
-
-    expect(contentTypeGuardIndex).toBeGreaterThan(0);
-    expect(uploadIndex).toBeGreaterThan(contentTypeGuardIndex);
-  });
-
-  it('sniffs uploaded image bytes and fails mismatches before storage upload', () => {
-    expect(source).toContain('detectImageContentType');
-    expect(source).toContain('0x89');
-    expect(source).toContain('0xff');
-    expect(source).toContain('0x52');
-    expect(source).toContain('"unsupported_asset_bytes"');
-    expect(source).toContain('"asset_type_mismatch"');
-
-    const sniffIndex = source.indexOf('const detectedContentType = detectImageContentType(bytes)');
-    const mismatchIndex = source.indexOf('detectedContentType !== requestedContentType');
-    const uploadIndex = source.indexOf('storageClient.storage.from(ASSET_BUCKET).upload');
-
+    expect(source).toContain('"application/octet-stream"');
     expect(sniffIndex).toBeGreaterThan(0);
-    expect(mismatchIndex).toBeGreaterThan(sniffIndex);
+    expect(invalidImageIndex).toBeGreaterThan(sniffIndex);
+    expect(mismatchIndex).toBeGreaterThan(invalidImageIndex);
     expect(uploadIndex).toBeGreaterThan(mismatchIndex);
   });
 
