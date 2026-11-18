@@ -1,0 +1,12 @@
+name: Probe spoof
+'on':
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  policy:
+    name: Required repository policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - run: echo probe
