@@ -6,4 +6,3 @@ package-lock.json text eol=lf
 scripts/edge/prepare-resource-import-exceljs.js text eol=lf
 scripts/edge/vendor-notices/saxes-5.0.1-LICENSE text eol=lf
 supabase/functions/resource-import-studio/_vendor/** text eol=lf
-supabase/functions/resource-import-studio/vendor/sheetjs-xlsx-0.20.3/** -text

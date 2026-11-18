@@ -131,7 +131,6 @@
     "build:landing": "node scripts/frontend/build-landing.js",
     "dev:landing": "node scripts/frontend/serve-landing.js",
     "local:target-backend": "node scripts/ops/workspace/local-target-backend.js",
-    "security:verify:xlsx-tarball": "node scripts/ops/security-verify-xlsx-tarball.js",
     "ops:pr-validation:session": "node scripts/ops/pr-validation-session.js",
     "ops:pr-branch:inventory": "node scripts/ops/pr-branch.js inventory",
     "ops:pr-branch:validate-manifest": "node scripts/ops/pr-branch.js validate-manifest",
