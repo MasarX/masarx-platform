@@ -46,6 +46,7 @@ import {
   useReplayWebhookInbox,
   useForceWebhookInboxStatus,
   useUpsertMappingArtifact,
+  usePromoteMappingVersion,
   useDeleteMappingConfig,
   useUpsertProviderAuthConfig,
   useBindProviderAccountCredential,
@@ -159,6 +160,14 @@ describe('lib/queries', () => {
     await waitFor(() => expect(result.current.isFetched).toBe(true));
     // Either resolved with data or null — both are valid completions.
     expect(['success', 'error']).toContain(result.current.status);
+  });
+
+  it('useDecisionLog stays idle when the caller disables the query', () => {
+    const { result } = renderHook(() => useDecisionLog(undefined, { enabled: false }), {
+      wrapper: wrapper(client),
+    });
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(result.current.isFetched).toBe(false);
   });
 
   it('useDecisionLog returns an array', async () => {
@@ -1251,7 +1260,7 @@ describe('lib/queries', () => {
     invalidateSpy.mockRestore();
   });
 
-  it('useUpsertMappingArtifact refreshes filtered mapping config and directory reads', async () => {
+  it.each(['save', 'promote'] as const)('refreshes mapping and bound intake reads on %s', async (action) => {
     const longLivedClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false, gcTime: Infinity, staleTime: 0 },
@@ -1265,12 +1274,24 @@ describe('lib/queries', () => {
       correlation_id: 'cor_mapping_live',
     } as never);
 
-    const { result } = renderHook(() => useUpsertMappingArtifact(), {
+    const promoteSpy = vi.spyOn(api, 'mapping_config_promote_v1').mockResolvedValue({
+      ok: true,
+      mapping_config_id: 'mcfg_live',
+      promoted_to_version: 2,
+    } as never);
+    const { result } = renderHook(() => ({
+      save: useUpsertMappingArtifact(),
+      promote: usePromoteMappingVersion(),
+    }), {
       wrapper: wrapper(longLivedClient),
     });
 
     await act(async () => {
-      await result.current.mutateAsync({
+      if (action === 'promote') {
+        await result.current.promote.mutateAsync({ mapping_config_id: 'mcfg_live' });
+        return;
+      }
+      await result.current.save.mutateAsync({
         artifact: 'mapping_config',
         mapping_config_id: 'mcfg_live',
         mapping_type: 'webhook_inbound',
@@ -1280,11 +1301,15 @@ describe('lib/queries', () => {
     });
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
-    expect(calls).toContainEqual(['list', 'mapping_configs']);
-    expect(calls).toContainEqual(['lists_by_filters', 'mapping_configs']);
-    expect(calls).toContainEqual(['list', 'mapping_config_directory']);
-    expect(calls).toContainEqual(['lists_by_filters', 'mapping_config_directory']);
+    for (const resource of [
+      'mapping_configs', 'mapping_config_directory', 'webhook_sources',
+      'webhook_source_directory', 'webhook_rules', 'api_routes',
+    ]) {
+      expect(calls).toContainEqual(['list', resource]);
+      expect(calls).toContainEqual(['lists_by_filters', resource]);
+    }
     upsertSpy.mockRestore();
+    promoteSpy.mockRestore();
     invalidateSpy.mockRestore();
   });
 

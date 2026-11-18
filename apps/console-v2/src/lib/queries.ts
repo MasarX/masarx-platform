@@ -267,10 +267,14 @@ export function useShipmentOperationOptions(shipmentId: string | undefined) {
   });
 }
 
-export function useDecisionLog(filters?: { category?: string; limit?: number }) {
+export function useDecisionLog(
+  filters?: { category?: string; limit?: number },
+  options?: { enabled?: boolean },
+) {
   return useQuery<DecisionLogEntry[]>({
     queryKey: qk.decisionLog(filters),
     queryFn: () => api.listDecisionLog(filters),
+    enabled: options?.enabled,
   });
 }
 export function useResolutionLog(filters?: { category?: string; limit?: number }) {
@@ -638,10 +642,12 @@ export function useUpdateBasket() {
 }
 
 function invalidateListQueries(qc: QueryClient, resources: string[]) {
-  for (const resource of resources) {
-    qc.invalidateQueries({ queryKey: ['list', resource] });
-    qc.invalidateQueries({ queryKey: ['lists_by_filters', resource] });
-  }
+  return Promise.all(
+    resources.flatMap((resource) => [
+      qc.invalidateQueries({ queryKey: ['list', resource] }),
+      qc.invalidateQueries({ queryKey: ['lists_by_filters', resource] }),
+    ]),
+  );
 }
 
 const SHIPMENT_OPERATION_READBACK_RESOURCES = [
@@ -3043,13 +3049,20 @@ export function useRotateWebhookSourceToken() {
 }
 
 // INTEGRATIONS — Mapping Studio (Create / Edit / Promote-version)
+const MAPPING_PROFILE_READBACK_RESOURCES = [
+  'mapping_configs',
+  'mapping_config_directory',
+  'webhook_sources',
+  'webhook_source_directory',
+  'webhook_rules',
+  'api_routes',
+];
+
 export function useUpsertMappingArtifact() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.UpsertMappingArtifactArgs) => api.ui_upsert_mapping_artifact_v1(args),
-    onSuccess: () => {
-      invalidateListQueries(qc, ['mapping_configs', 'mapping_config_directory']);
-    },
+    onSuccess: () => invalidateListQueries(qc, MAPPING_PROFILE_READBACK_RESOURCES),
   });
 }
 export function useDeleteMappingConfig() {
@@ -3076,9 +3089,7 @@ export function usePromoteMappingVersion() {
   return useMutation({
     mutationFn: (args: { mapping_config_id: string; target_version?: number }) =>
       api.mapping_config_promote_v1(args),
-    onSuccess: () => {
-      invalidateListQueries(qc, ['mapping_configs', 'mapping_config_directory']);
-    },
+    onSuccess: () => invalidateListQueries(qc, MAPPING_PROFILE_READBACK_RESOURCES),
   });
 }
 

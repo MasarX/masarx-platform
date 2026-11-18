@@ -1244,6 +1244,7 @@ describe('MappingModule', () => {
       expect(args?.organization_id).toBe('org_rashed');
       expect(args?.mapping_config_id).toBeNull();
       expect(args?.mapping_key).toBe('unit.mapping');
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /New mapping/i })).not.toBeInTheDocument());
       expect(await screen.findByText('unit.mapping')).toBeInTheDocument();
 
       const createdRow = screen.getByText('unit.mapping').closest('tr');
