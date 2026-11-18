@@ -93,6 +93,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     env:
@@ -263,6 +264,7 @@ jobs:
           TYPECHECK_SUBJECT: ${{ matrix.subject }}
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         subject: [apps/console, apps/portal, apps/fieldops]
 
@@ -312,6 +314,7 @@ jobs:
           include-hidden-files: false
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
@@ -363,6 +366,7 @@ jobs:
           include-hidden-files: false
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         shard: [1, 2, 3, 4]
     env:
@@ -374,6 +378,7 @@ jobs:
     timeout-minutes: 35
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         subject: [apps/console, apps/portal, landing]
     steps:
