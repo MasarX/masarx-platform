@@ -179,6 +179,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   if (!basePlugins.some((entry) => (typeof entry === "string" ? entry : entry[0]) === "@maplibre/maplibre-react-native")) {
     basePlugins.push("@maplibre/maplibre-react-native");
   }
+  const androidCleartextPlugin = "./plugins/with-fieldops-android-cleartext";
+  if (!basePlugins.some((entry) => (typeof entry === "string" ? entry : entry[0]) === androidCleartextPlugin)) {
+    basePlugins.push(androidCleartextPlugin);
+  }
   let hasLocationPlugin = false;
   const nextPlugins: PluginEntry[] = basePlugins.map((entry) => {
     if (typeof entry === "string" && entry === "expo-location") {

@@ -738,11 +738,11 @@ describe('workspace docker runtime proof', () => {
   });
 
   test('console-only runtime proof does not require Mobile V2 development proof', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), '5ff747db-04ff-40d0-b8de-39cf5a08edf9-console-only-proof-'));
-    const browserSummaryPath = path.join(tmpDir, 'browser-proof-summary.json');
-    const backendSummaryPath = path.join(tmpDir, 'backend-proof-summary.json');
-    const authSummaryPath = path.join(tmpDir, 'auth-proof-summary.json');
-    fs.writeFileSync(browserSummaryPath, `${JSON.stringify({
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'console-only-proof-'));
+    const services = ['console-v2'];
+    const fixture = authFixture(root, services);
+    const browserProofSummary = path.join(root, 'browser-proof.json');
+    fs.writeFileSync(browserProofSummary, JSON.stringify({
       status: 'passed',
       surfaces: [{
         surface: 'console-v2',
@@ -756,59 +756,37 @@ describe('workspace docker runtime proof', () => {
         seed_disabled: true,
         source_freshness: { ok: true, stale_count: 0 },
       }],
-    }, null, 2)}\n`, 'utf8');
-    fs.writeFileSync(backendSummaryPath, `${JSON.stringify({
-      status: 'passed',
-      acceptance: {
-        landing_intake_readback_proven: true,
-      },
-    }, null, 2)}\n`, 'utf8');
-    fs.writeFileSync(authSummaryPath, `${JSON.stringify({
-      status: 'passed',
-      acceptance: {
-        required_surface_identities_present: true,
-        password_grants_succeeded: true,
-        app_user_backend_readback_succeeded: true,
-      },
-    }, null, 2)}\n`, 'utf8');
-    global.fetch = jest.fn(async (url) => ({
-      status: String(url).includes('/auth/v1/health') ? 200 : 200,
-      text: async () => (
-        String(url).includes('/auth/v1/health')
-          ? '{"name":"GoTrue"}'
-          : '<main>MasarX Console Dashboard Operations</main>'
-      ),
-    }));
+    }), 'utf8');
+    const readMobileV2PolicyImpl = jest.fn();
+    global.fetch = jest.fn(async () => ({ status: 200, text: async () => '<main>MasarX Console</main>' }));
 
-    const summary = await runDockerRuntimeProof({
-      timeoutMs: 1000,
-      browserProofSummary: browserSummaryPath,
-      backendProofSummary: backendSummaryPath,
-      authProofSummary: authSummaryPath,
-    }, {
-      WORKSPACE_NAME: 'wk-console-only-proof',
-      MASARX_RUNTIME_DRIVER: 'docker',
-      MASARX_APP_COMPOSE_PROJECT_NAME: 'masarx-app-wk-console-only-proof',
-      SUPABASE_COMPOSE_PROJECT_NAME: 'masarx-wk-console-only-proof',
-      CONSOLE_PORT: '5187',
-      SUPABASE_INTERNAL_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:55445',
-      SUPABASE_FUNCTIONS_INTERNAL_URL: 'http://rvzwwjlztwwisjthghnipgjr.example.invalid:55445/functions/v1',
-      VITE_USE_SEED: 'false',
-      NEXT_PUBLIC_USE_SEED: 'false',
-      DATABASE_URL: '',
-    });
+    try {
+      const summary = await runDockerRuntimeProof({
+        ...fixture,
+        services,
+        browserProofSummary,
+        checkBackendImpl: async () => ({ ok: true }),
+        readMobileV2PolicyImpl,
+      }, {
+        WORKSPACE_NAME: 'wk-selection',
+        CONSOLE_PORT: '5187',
+        VITE_USE_SEED: 'false',
+        NEXT_PUBLIC_USE_SEED: 'false',
+      });
 
-    expect(summary.status).toBe('passed');
-    expect(summary.surfaces.map((surface) => surface.surface)).toEqual(['console-v2']);
-    expect(summary.mobile_v2).toMatchObject({
-      development_runtime_proof_required: false,
-      visible_runtime: false,
-      backend_readback: {
-        skipped: true,
-        reason: 'fieldops_metro_not_requested',
-      },
-    });
-    expect(summary.acceptance.mobile_v2_development_runtime_proof).toBe(true);
-    expect(summary.acceptance.all_surfaces_runtime_proven).toBe(true);
+      expect(summary.status).toBe('passed');
+      expect(summary.surfaces.map((surface) => surface.surface)).toEqual(services);
+      expect(summary.mobile_v2).toMatchObject({
+        status: 'not_required',
+        development_runtime_proof_required: false,
+        visible_runtime: false,
+        backend_readback: { status: 'not_required' },
+      });
+      expect(summary.acceptance.mobile_v2_development_runtime_proof).toBe('not_required');
+      expect(summary.acceptance.all_surfaces_runtime_proven).toBe(true);
+      expect(readMobileV2PolicyImpl).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

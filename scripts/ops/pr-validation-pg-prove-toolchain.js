@@ -71,7 +71,7 @@ function loadPolicy(cwd = process.cwd(), options = {}) {
   const runner = policy.runner || {};
   exactString(runner.workspace_mount, 'pg_prove workspace mount', /^\/workspace$/u);
   exactString(runner.state_mount, 'pg_prove state mount', /^\/state$/u);
-  exactString(runner.database_host_alias, 'pg_prove database host alias', /^host\.docker\.internal$/u);
+  exactString(runner.database_host_alias, 'pg_prove database host alias', /^pg-prove\.example\.test$/u);
   exactString(runner.user, 'pg_prove container user', /^\d+:\d+$/u);
   exactString(runner.cpus, 'pg_prove CPU limit', /^\d+(?:\.\d+)?$/u);
   exactString(runner.memory, 'pg_prove memory limit', /^\d+[mg]$/u);

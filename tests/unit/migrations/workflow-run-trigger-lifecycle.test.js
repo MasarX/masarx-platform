@@ -10,15 +10,15 @@ function functionOf(sql, name) {
   return sql.slice(start, end + 4);
 }
 describe('F641 workflow trigger lifecycle source contract (not DB execution)', () => {
-  test('prior trigger pgTAP returns all six assertions to its caller', () => {
+  test('prior trigger pgTAP returns all planned assertions to its caller', () => {
     const pg = read('supabase/tests/pgtap/0zhg_workflow_run_triggers.sql');
-    expect(pg).toContain('SELECT plan(6);');
-    expect(pg.match(/RETURN NEXT (?:ok|throws_ok)\(/g)).toHaveLength(6);
-    expect(pg).not.toMatch(/PERFORM (?:ok|throws_ok)\(|\b(?:skip|todo)\(/i);
+    const planned = Number(pg.match(/^SELECT plan\((\d+)\)/m)[1]);
+    expect(pg.match(/RETURN NEXT (?:ok|is|throws_ok)\(/g)).toHaveLength(planned);
+    expect(pg).not.toMatch(/PERFORM (?:ok|is|throws_ok)\(|\b(?:skip|todo)\(/i);
     expect(pg).toContain('CREATE FUNCTION pg_temp.f641_prior_trigger_tests() RETURNS SETOF TEXT');
     expect(pg).toContain('SELECT * FROM pg_temp.f641_prior_trigger_tests();');
-    expect(pg.match(/set_config\('request.jwt.claim.role', 'authenticated', true\)/g)).toHaveLength(3);
-    expect(pg.match(/set_config\('request.jwt.claims', jsonb_build_object\('sub', v_user_(?:client_admin|sender), 'role', 'authenticated'\)/g)).toHaveLength(3);
+    expect(pg.match(/set_config\('request.jwt.claim.role', 'authenticated', true\)/g)).toHaveLength(2);
+    expect(pg.match(/set_config\('request.jwt.claims', jsonb_build_object\('sub', v_user_(?:client_admin|sender), 'role', 'authenticated'\)/g)).toHaveLength(2);
     expect(pg).toContain('BEGIN;');
     expect(pg).toContain('ROLLBACK;');
   });

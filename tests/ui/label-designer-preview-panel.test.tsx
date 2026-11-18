@@ -30,12 +30,20 @@ const defaultProps = {
 };
 
 describe("PreviewPanel", () => {
+  const domMatrix = Object.getOwnPropertyDescriptor(window, "DOMMatrix");
+
   beforeEach(() => {
+    Object.defineProperty(window, "DOMMatrix", { configurable: true, value: class {} });
     mockPdfFailure = false;
     defaultProps.onShipmentChange.mockClear();
     defaultProps.onShipmentBoxChange.mockClear();
     defaultProps.onLoadSamplePayload.mockClear();
     defaultProps.onPreviewDraft.mockClear();
+  });
+
+  afterEach(() => {
+    if (domMatrix) Object.defineProperty(window, "DOMMatrix", domMatrix);
+    else Reflect.deleteProperty(window, "DOMMatrix");
   });
 
   it("renders shipment and box selects", () => {

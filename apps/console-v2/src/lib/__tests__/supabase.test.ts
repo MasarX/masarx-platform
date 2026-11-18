@@ -52,7 +52,7 @@ describe('lib/supabase — getSupabaseClient swap-seam', () => {
   });
 
   it('returns null when VITE_SUPABASE_ANON_KEY is missing', () => {
-    vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
 
     expect(getSupabaseClient()).toBeNull();
@@ -68,7 +68,7 @@ describe('lib/supabase — getSupabaseClient swap-seam', () => {
   });
 
   it('returns a non-null client when both env vars are set', () => {
-    vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key-xyz');
 
     const client = getSupabaseClient();
@@ -76,7 +76,7 @@ describe('lib/supabase — getSupabaseClient swap-seam', () => {
     expect(client).not.toBeNull();
     expect(createClient).toHaveBeenCalledTimes(1);
     expect(createClient).toHaveBeenCalledWith(
-      'https://example.supabase.co',
+      'https://api.example.test',
       'anon-key-xyz',
       expect.objectContaining({
         auth: expect.objectContaining({
@@ -95,7 +95,7 @@ describe('lib/supabase — getSupabaseClient swap-seam', () => {
   });
 
   it('memoizes the client across consecutive calls', () => {
-    vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key-xyz');
 
     const first = getSupabaseClient();
@@ -128,7 +128,7 @@ describe('lib/supabase — getSupabaseClient swap-seam', () => {
     expect(getSupabaseClient()).toBeNull();
 
     // Set env, but without reset the memoized null still wins.
-    vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key-xyz');
     expect(getSupabaseClient()).toBeNull();
     expect(createClient).not.toHaveBeenCalled();
@@ -144,7 +144,7 @@ describe('lib/supabase — getSupabaseClient swap-seam', () => {
   // constructs a real client just like production. MSW handlers are the SSOT for
   // intercepting the canonical RPC contract — not a vitest-only short-circuit.
   it('constructs the live client under vitest when env vars are set (W41 path-a)', () => {
-    vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key-xyz');
 
     const client = getSupabaseClient();

@@ -257,9 +257,11 @@ test.describe("landing driver signup", () => {
 
     const readback = page.locator("[data-driver-status-lookup]");
     await expect(page.locator('[data-driver-status-form] input[name="status_token"]')).toHaveValue("token-docs");
-    await expect(readback).toContainText("More documents are required");
-    await expect(readback).toContainText("Requested documents: driver_license, vehicle_registration.");
-    await expect(readback).toContainText("Reviewer note: Upload clear front and back photos.");
+    await expect(readback).toHaveText("Additional documents requested");
+    const documents = page.locator("[data-driver-documents-form]");
+    await expect(documents.getByLabel("driver_license")).toBeVisible();
+    await expect(documents.getByLabel("vehicle_registration")).toBeVisible();
+    await expect(page.locator("[data-driver-review-note]")).toHaveText("Reviewer note: Upload clear front and back photos.");
   });
 });
 

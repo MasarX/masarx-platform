@@ -46,6 +46,8 @@ describe("fieldops app config", () => {
     delete process.env.LANDING_DRIVER_STATUS_ENDPOINT;
     delete process.env.LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT;
     delete process.env.LANDING_SITE_URL;
+    delete process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL;
+    delete process.env.NEXT_PUBLIC_DRIVER_SIGNUP_URL;
     delete process.env.FIELDOPS_ANDROID_NATIVE_BUILD_ROOT;
   });
 
@@ -348,7 +350,7 @@ describe("fieldops app config", () => {
     );
   });
 
-  test("uses stable local Android package so prebuild does not mutate dynamic config", async () => {
+  test("preserves the configured Android package for local prebuild", async () => {
     const buildConfig = await loadBuildConfig();
     const output = buildConfig({
       config: {
@@ -356,11 +358,11 @@ describe("fieldops app config", () => {
         slug: "fieldops",
         version: "1.0.0",
         plugins: [],
-        android: {},
+        android: { package: "com.example.fieldops.dev" },
       },
     } as any);
 
-    expect(output.android?.package).toBe("co.masarx.fieldops.dev");
+    expect(output.android?.package).toBe("com.example.fieldops.dev");
   });
 
   test("keeps existing ios background modes and adds location once", async () => {
@@ -421,43 +423,24 @@ describe("fieldops app config", () => {
     expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_ANON_KEY).toBe("real-anon-key");
   });
 
-  test("exposes FieldOps Mobile V2 driver signup runtime config from the public landing intake env", async () => {
-    process.env.LANDING_DRIVER_SIGNUP_ENDPOINT = "http://127.0.0.1:57429/functions/v1/driver-signup-intake";
-    process.env.LANDING_DRIVER_STATUS_ENDPOINT = "http://127.0.0.1:57429/functions/v1/driver-application-status";
-    process.env.LANDING_SITE_URL = "http://127.0.0.1:3333";
-    process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL = "http://127.0.0.1:57429/functions/v1";
-    process.env.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES = JSON.stringify({
-      roles: [{ id: "last_mile_driver", icon: "truck", label: "Last-mile driver", sub: "Route delivery" }],
-    });
-
+  test("exports hosted driver signup URL with Expo public config precedence", async () => {
+    process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL = "https://signup.example.test/drivers/apply";
+    process.env.NEXT_PUBLIC_DRIVER_SIGNUP_URL = "https://fallback.example.test/drivers/apply";
     const buildConfig = await loadBuildConfig();
-    const output = buildConfig({
-      config: {
-        name: "Fieldops",
-        slug: "fieldops",
-        version: "1.0.0",
-        plugins: [],
-        extra: {},
-      },
-    } as any);
+    const config = { name: "Fieldops", slug: "fieldops" };
 
-    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT).toBe(
-      "http://127.0.0.1:57429/functions/v1/driver-signup-intake",
-    );
-    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT).toBe(
-      "http://127.0.0.1:57429/functions/v1/driver-application-status",
-    );
-    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN).toBe("http://127.0.0.1:3333");
-    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ROLES).toContain("last_mile_driver");
-    expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL).toBe("http://127.0.0.1:57429/functions/v1");
+    expect(buildConfig({ config }).extra?.NEXT_PUBLIC_DRIVER_SIGNUP_URL)
+      .toBe("https://signup.example.test/drivers/apply");
+    delete process.env.EXPO_PUBLIC_DRIVER_SIGNUP_URL;
+    expect(buildConfig({ config }).extra?.NEXT_PUBLIC_DRIVER_SIGNUP_URL)
+      .toBe("https://fallback.example.test/drivers/apply");
   });
 
   test("uses explicit local Android emulator Supabase URL for local builds", async () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:58429";
     process.env.FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL = "http://192.0.2.10:58429";
-    process.env.LANDING_DRIVER_SIGNUP_ENDPOINT = "http://127.0.0.1:55321/functions/v1/driver-signup-intake";
-    process.env.LANDING_DRIVER_STATUS_ENDPOINT = "http://127.0.0.1:55321/functions/v1/driver-application-status";
-    process.env.LANDING_SITE_URL = "http://127.0.0.1:3333";
+
+    process.env.NEXT_PUBLIC_DRIVER_SIGNUP_URL = "https://signup.example.test/drivers/apply";
 
     const buildConfig = await loadBuildConfig();
     const output = buildConfig({
@@ -472,13 +455,7 @@ describe("fieldops app config", () => {
     } as any);
 
     expect((output.extra as any)?.NEXT_PUBLIC_SUPABASE_URL).toBe("http://192.0.2.10:58429");
-    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ENDPOINT).toBe(
-      "http://192.0.2.10:58429/functions/v1/driver-signup-intake",
-    );
-    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_STATUS_ENDPOINT).toBe(
-      "http://192.0.2.10:58429/functions/v1/driver-application-status",
-    );
-    expect((output.extra as any)?.NEXT_PUBLIC_FIELDOPS_DRIVER_SIGNUP_ORIGIN).toBe("http://127.0.0.1:58429");
+    expect(output.extra?.NEXT_PUBLIC_DRIVER_SIGNUP_URL).toBe("https://signup.example.test/drivers/apply");
     expect(output.android?.usesCleartextTraffic).toBe(true);
   });
 

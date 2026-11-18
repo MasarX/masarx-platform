@@ -45,7 +45,6 @@
 // fail-closed which keeps production tenants on the DB-side `test`
 // provider until OTP rollout is explicitly approved.
 
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
 import { buildCorsHeaders, withCorsJson } from "../_shared/cors.mjs";
 
@@ -148,7 +147,7 @@ async function verifyWithProvider(
   }
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   const cors = buildCorsHeaders(req);
 
   if (req.method === "OPTIONS") {

@@ -4,7 +4,7 @@
 //   The legacy `useAuditLog()` hook read from a non-existent `audit_log`
 //   table. Canonical SSOT is `public.audit_table_changes` from
 //   supabase/migrations/202512011211_audit_table_changes.sql:10-24
-//   (HASH+RANGE partitioned ledger, RLS service-role-only, INSERT public).
+//   (HASH+RANGE partitioned ledger, RLS restricted to the privileged backend role, INSERT public).
 //   This module now consumes the canonical resource directly via
 //   `useResourceList<AuditTableChangeRow>('audit_table_changes')`.
 //

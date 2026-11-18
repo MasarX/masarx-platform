@@ -127,7 +127,7 @@ describe('data-source tenant signup review adapter', () => {
     rpcSpy.mockReset();
     schemaSpy.mockClear();
     schemaSpy.mockReturnValue({ rpc: rpcSpy });
-    vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-test');
     vi.stubEnv('VITE_AUTH_REDIRECT_URL', '');
     vi.stubEnv('VITE_CONSOLE_AUTH_REDIRECT_URL', '');

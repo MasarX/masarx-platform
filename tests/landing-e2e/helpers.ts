@@ -3,6 +3,7 @@ import type { Page, Route } from "@playwright/test";
 export const LANDING_CONTACT_ENDPOINT_MOCK = "/__landing-contact";
 export const LANDING_TENANT_SIGNUP_ENDPOINT_MOCK = "/__tenant-signup";
 export const LANDING_TURNSTILE_DUMMY_TOKEN = "EXAMPLE_PASSWORD";
+export const LANDING_TENANT_SIGNUP_ROUTE = `**${LANDING_TENANT_SIGNUP_ENDPOINT_MOCK}`;
 export const LANDING_CONTACT_ROUTE = `**${LANDING_CONTACT_ENDPOINT_MOCK}`;
 export const LANDING_DRIVER_SIGNUP_ENDPOINT_MOCK = "/__driver-signup";
 export const LANDING_DRIVER_SIGNUP_ROUTE = `**${LANDING_DRIVER_SIGNUP_ENDPOINT_MOCK}`;

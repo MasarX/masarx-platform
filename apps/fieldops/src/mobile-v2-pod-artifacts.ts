@@ -207,7 +207,7 @@ export function buildMobileV2VehiclePhotoStorageKey(input: {
 }
 
 export function decodeMobileV2Base64ToArrayBuffer(value: string): ArrayBuffer {
-  const bufferCtor = (
+  const Buffer = (
     globalThis as {
       Buffer?: { from: (input: string, encoding: "base64") => { toString: (encoding: "binary") => string } };
     }
@@ -215,7 +215,7 @@ export function decodeMobileV2Base64ToArrayBuffer(value: string): ArrayBuffer {
   const binary =
     typeof atob === "function"
       ? atob(value)
-      : bufferCtor?.from(value, "base64").toString("binary");
+      : Buffer && Buffer.from(value, "base64").toString("binary");
   if (binary === undefined) {
     throw new Error("Base64 decoding is unavailable in this runtime.");
   }
@@ -379,13 +379,13 @@ function drawSignatureLine(
 }
 
 function encodeBytesToBase64(bytes: Uint8Array): string {
-  const bufferCtor = (
+  const Buffer = (
     globalThis as {
       Buffer?: { from: (input: Uint8Array) => { toString: (encoding: "base64") => string } };
     }
   ).Buffer;
-  if (bufferCtor !== undefined) {
-    return bufferCtor.from(bytes).toString("base64");
+  if (Buffer !== undefined) {
+    return Buffer.from(bytes).toString("base64");
   }
   let binary = "";
   for (let index = 0; index < bytes.length; index += 1) {

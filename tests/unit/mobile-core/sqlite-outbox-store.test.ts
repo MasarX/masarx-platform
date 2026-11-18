@@ -153,7 +153,7 @@ describe("sqlite outbox store", () => {
     jest.resetModules();
 
     const execAsync = jest.fn(async () => undefined);
-    const getAllAsync = jest.fn(async () => []);
+    const getAllAsync = jest.fn(async (_sql: string, ..._params: unknown[]) => []);
     const runAsync = jest.fn(async () => ({ changes: 1 }));
 
     jest.doMock(
@@ -171,11 +171,10 @@ describe("sqlite outbox store", () => {
     await store.init();
     await store.claimPending({ limit: 10, force: true });
 
-    const selectSql = String(getAllAsync.mock.calls[0]?.[0] ?? "");
-    expect(selectSql).toContain("WHERE status IN ('queued','failed')");
-    expect(selectSql).not.toContain("next_attempt_at");
-    expect(getAllAsync.mock.calls[0]).toHaveLength(2);
-    expect(getAllAsync.mock.calls[0]?.[1]).toBe(10);
+    const claim = getAllAsync.mock.calls.find(([sql]) => /SELECT.*FROM outbox/i.test(sql));
+    expect(claim?.[0]).toContain("WHERE status IN ('queued','failed')");
+    expect(claim?.[0]).not.toContain("next_attempt_at");
+    expect(claim?.slice(1)).toEqual([10]);
   });
 
   test("claimPending rolls back on failure", async () => {

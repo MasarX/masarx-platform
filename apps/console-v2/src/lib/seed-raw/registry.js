@@ -2534,7 +2534,7 @@ export const ui_read_registry = {
   // (40). The FE consumes this through `useResourceList('scope_type_registry')`
   // so config.tsx + feature-flags.tsx no longer embed inline SCOPE_RANK
   // literals. Capability gate `settings.read` mirrors how the canonical RLS
-  // policy on `public.scope_type_registry` exposes service-role + read access
+  // policy on `public.scope_type_registry` allows privileged writes and grants read access
   // to operators reviewing the ladder. No DataTable surface today (driven by
   // hooks, not list view) — `columns` are declared so downstream registry
   // tooling stays consistent if the row set is ever surfaced via DataTable.

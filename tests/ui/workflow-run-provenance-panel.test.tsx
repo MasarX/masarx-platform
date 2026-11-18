@@ -60,7 +60,7 @@ describe("WorkflowRunProvenancePanel", () => {
   it.each([
     ["en", portalEn, "Tracking key", "Show request details"],
     ["ar", portalAr, "مفتاح التتبع", "عرض تفاصيل الطلب"],
-  ] as const)("preserves redacted request details and copy identity with Portal %s labels", async (locale, messages, tracking, detailsLabel) => {
+  ] as const)("keeps raw request context private and copies the activity reference with Portal %s labels", async (locale, messages, tracking, detailsLabel) => {
     const user = userEvent.setup();
     mockedCopyTextToClipboard.mockResolvedValue(true);
     const translatedLabels = createWorkflowRunProvenanceLabels(
@@ -70,13 +70,8 @@ describe("WorkflowRunProvenancePanel", () => {
       workflowRun={{ id: "run-1", triggered_by_request_id: "activity-1",
         context: { trigger_source: "manual", password: "synthetic-private", useful: "Support context" } }} />);
     expect(screen.getByText(tracking)).toBeInTheDocument();
-    const details = screen.getByText(detailsLabel).closest("details");
-    expect(details).not.toHaveAttribute("open");
-    await user.click(screen.getByText(detailsLabel));
-    expect(details).toHaveAttribute("open");
-    expect(details).toHaveTextContent("Support context");
-    expect(details).toHaveTextContent("[redacted]");
-    expect(details).not.toHaveTextContent("synthetic-private");
+    expect(screen.queryByText(detailsLabel)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Support context|synthetic-private/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: `${translatedLabels.actions.copy}: ${tracking}` }));
     expect(mockedCopyTextToClipboard).toHaveBeenCalledWith("activity-1");
     expect(screen.getByRole("link", { name: translatedLabels.actions.openRun }))

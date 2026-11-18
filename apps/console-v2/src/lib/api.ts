@@ -1,6 +1,6 @@
 // api.ts — TYPED facade over the data-source adapter. Modules MUST import from here
 // (not from data-source directly). This is the single swap point for production:
-// replace these implementations with supabase-js .rpc()/.from() calls — types stay stable.
+// replace these implementations with Supabase RPC and table queries — types stay stable.
 //
 // Naming mirrors api.* schema RPCs from AGENTS.md line 43.
 

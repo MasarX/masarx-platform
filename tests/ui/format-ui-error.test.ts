@@ -50,9 +50,9 @@ test("formatUiError falls back for technical guard messages", () => {
   expect(formatUiError("Debug details are unavailable", fallback)).toBe(fallback);
 });
 
-test("sanitizeUiError returns null for technical guard messages", () => {
-  expect(sanitizeUiError("backend readback missing workflow_runs")).toBeNull();
-  expect(sanitizeUiError("Open debug trace failed")).toBeNull();
+test("formatUiError hides technical guard messages from the UI", () => {
+  expect(formatUiError("backend readback missing workflow_runs", "Try again")).toBe("Try again");
+  expect(formatUiError("Open debug trace failed", "Try again")).toBe("Try again");
 });
 
 test("isStatementTimeoutUiError detects statement timeout messages", () => {

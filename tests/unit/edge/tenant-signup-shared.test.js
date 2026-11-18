@@ -26,7 +26,10 @@ function loadLookup(moduleName) {
 
 describe.each(['tenant_signup', 'marketplace_signup'])('%s existing Auth user lookup', moduleName => {
   const findAuthUserIdByEmail = loadLookup(moduleName);
-  const client = listUsers => ({ auth: { admin: { listUsers } } });
+  const client = listUsers => ({
+    rpc: jest.fn().mockResolvedValue({ data: null, error: null }),
+    auth: { admin: { listUsers } },
+  });
   const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: String(index), email: `other-${index}@example.test` }));
 
   test('finds a normalized email after the first 2,000 users', async () => {
@@ -61,7 +64,19 @@ describe.each(['tenant_signup', 'marketplace_signup'])('%s existing Auth user lo
 
   test('does not call Auth for an empty email', async () => {
     const listUsers = jest.fn();
-    await expect(findAuthUserIdByEmail(client(listUsers), ' ')).resolves.toBe('');
+    const service = client(listUsers);
+    await expect(findAuthUserIdByEmail(service, ' ')).resolves.toBe('');
+    expect(service.rpc).not.toHaveBeenCalled();
     expect(listUsers).not.toHaveBeenCalled();
   });
+});
+
+test('tenant signup resolves a normalized match through the RPC without enumerating Auth users', async () => {
+  const rpc = jest.fn().mockResolvedValue({ data: 'existing-user', error: null });
+  const listUsers = jest.fn();
+  const findAuthUserIdByEmail = loadLookup('tenant_signup');
+  await expect(findAuthUserIdByEmail({ rpc, auth: { admin: { listUsers } } }, ' Person@Example.Test '))
+    .resolves.toBe('existing-user');
+  expect(rpc).toHaveBeenCalledWith('tenant_signup_find_auth_user_id_by_email_v1', { p_email: 'person@example.test' });
+  expect(listUsers).not.toHaveBeenCalled();
 });

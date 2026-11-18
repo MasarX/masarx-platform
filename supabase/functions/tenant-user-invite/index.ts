@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
 import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import { normalizeHostedRedirectUrl } from "./_shared/tenant_signup.ts";
@@ -199,7 +198,7 @@ const resendHostedInviteEmail = async (
   };
 };
 
-serve(async (req: Request): Promise<Response> => {
+Deno.serve(async (req: Request): Promise<Response> => {
   const cors = corsHeaders(req);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") {

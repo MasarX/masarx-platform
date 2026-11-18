@@ -14,7 +14,7 @@
   "runner": {
     "workspace_mount": "/workspace",
     "state_mount": "/state",
-    "database_host_alias": "rvzwwjlztwwisjthghnipgjr.example.invalid",
+    "database_host_alias": "pg-prove.example.test",
     "user": "65534:65534",
     "cpus": "2.00",
     "memory": "1024m",

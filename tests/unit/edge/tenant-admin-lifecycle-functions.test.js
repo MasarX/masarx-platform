@@ -20,15 +20,15 @@ describe('tenant admin lifecycle edge functions', () => {
 
   test('organization-profile is browser-safe and writes only through canonical RPCs', () => {
     expect(orgProfile).toContain('if (req.method === "OPTIONS")');
-    expect(orgProfile).toContain('"access-control-allow-methods": "POST, OPTIONS"');
-    expect(orgProfile).toContain('"organization_profile_assert_writer_v1"');
+    expect(orgProfile).toContain('allowedMethods: ["POST", "OPTIONS"]');
+    expect(orgProfile).toContain('"organization_profile_read_v1"');
     expect(orgProfile).toContain('"ui_update_organization_profile_v1"');
     expect(orgProfile).toContain('"register_artifact_v1"');
     expect(orgProfile).toContain('label-render-assets');
     expect(orgProfile).toContain('db: { schema: "api" }');
     expect(orgProfile).not.toContain('.from("artifacts")');
-    expect(orgProfile).toContain('invalid_logo_base64');
-    expect(orgProfile).toContain('invalid_logo_file_signature');
+    expect(orgProfile).toContain('invalid_logo_file');
+    expect(orgProfile).toContain('invalid_logo_image');
     expect(orgProfile).not.toContain('"image/svg+xml"');
   });
 
@@ -56,8 +56,11 @@ describe('tenant admin lifecycle edge functions', () => {
     expect(consoleRequest).not.toContain('"tenant_signup_review_apply_v1"');
   });
 
-  test('both functions support secret-key and JWT service key planes', () => {
-    for (const source of [orgProfile, userInvite, consoleRequest]) {
+  test('tenant admin functions support secret and service JWT credentials', () => {
+    expect(orgProfile).toContain('const SERVICE_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", [');
+    expect(orgProfile).toContain('"SUPABASE_SERVICE_ROLE_KEY"');
+    expect(orgProfile).toContain('createClient(URL_BASE, SERVICE_KEY');
+    for (const source of [userInvite, consoleRequest]) {
       expect(source).toContain('const EDGE_SUPABASE_SECRET_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", [');
       expect(source).toContain('"SUPABASE_SECRET_KEY"');
       expect(source).toContain('const isJwtLike = (value: string): boolean');
@@ -66,7 +69,7 @@ describe('tenant admin lifecycle edge functions', () => {
     }
   });
 
-  test('auth-admin invite functions prefer service-role JWT over secret key fallback', () => {
+  test('uses JWT-first credentials for tenant invites and secret-first credentials for marketplace review', () => {
     expect(userInvite).toContain(
       'const serviceKey = asString(SUPABASE_SERVICE_KEY) || asString(EDGE_SUPABASE_SECRET_KEY);',
     );
@@ -79,12 +82,10 @@ describe('tenant admin lifecycle edge functions', () => {
       'utf8',
     );
     expect(marketplaceReview).toContain(
-      'const serviceKey = asString(SUPABASE_SERVICE_KEY) || asString(EDGE_SUPABASE_SECRET_KEY);',
+      'const serviceKey = asString(EDGE_SUPABASE_SECRET_KEY) || asString(SUPABASE_SERVICE_KEY);',
     );
-    expect(marketplaceReview).toContain(
-      '...(isJwtLike(serviceKey) ? { Authorization: `Bearer ${serviceKey}` } : {})',
-    );
-    expect(marketplaceReview).toContain('const apiKeyHeader = serviceKey;');
+    expect(marketplaceReview).toContain('const apiKeyHeader = isJwtLike(serviceKey)');
+    expect(marketplaceReview).toContain('createClient(SUPABASE_URL, serviceKey');
   });
 
   test('tenant-signup-review uses the edge secret and dynamic apikey pattern', () => {
@@ -100,8 +101,6 @@ describe('tenant admin lifecycle edge functions', () => {
     expect(review).toContain('? (anonKey || serviceKey)');
     expect(review).toContain(': serviceKey;');
     expect(review).toContain('apikey: apiKeyHeader');
-    expect(review).toContain(
-      '...(isJwtLike(serviceKey) ? { Authorization: `Bearer ${serviceKey}` } : {})',
-    );
+    expect(review).toContain('createClient(SUPABASE_URL, serviceKey');
   });
 });

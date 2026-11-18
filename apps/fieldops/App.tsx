@@ -1786,15 +1786,13 @@ function Bootstrap() {
     () => resolveExpoExtra((Constants.expoConfig?.extra ?? {}) as ExpoExtra),
     []
   );
-  const publicConfigResult = React.useMemo(() => {
+  const publicConfig = React.useMemo(() => {
     try {
-      return { config: getPublicConfigFromExpo(extra), error: null as string | null };
-    } catch (error) {
-      return { config: null as ReturnType<typeof getPublicConfigFromExpo> | null, error: normalizeDebugMessage(error) };
+      return getPublicConfigFromExpo(extra);
+    } catch {
+      return null;
     }
   }, [extra]);
-  const publicConfig = publicConfigResult.config;
-  const configError = publicConfigResult.error;
   const supabaseKeyRole = React.useMemo(() => {
     if (!publicConfig) return null;
     return resolveJwtRole(publicConfig.supabaseAnonKey);
@@ -1805,8 +1803,8 @@ function Bootstrap() {
     return (
       <View style={styles.container} accessibilityRole="alert">
         <Text style={styles.title}>Fieldops</Text>
-        <Text style={styles.error}>Configuration error</Text>
-        <Text style={styles.mono}>{configError ?? "Missing public configuration."}</Text>
+        <Text style={styles.error}>App setup required</Text>
+        <Text style={styles.subtitle}>Ask your administrator to check the app setup.</Text>
       </View>
     );
   }
@@ -1817,11 +1815,10 @@ function Bootstrap() {
         <Text style={styles.title}>{publicConfig.appName}</Text>
         <Text style={styles.error}>Invalid Supabase key</Text>
         <Text style={styles.subtitle}>
-          The configured SUPABASE key is a service role key, which must never be used in a client app.
+          This app cannot start with a privileged server key.
         </Text>
         <Text style={styles.mono}>
-          Fix: set NEXT_PUBLIC_SUPABASE_ANON_KEY to the anon key for this workspace, then restart the
-          dev server.
+          Ask your administrator to configure a public client key and restart the app.
         </Text>
       </View>
     );
@@ -6527,7 +6524,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                   ) : null}
                 </ScrollView>
               ) : (
-                <Text style={styles.subtitle}>No detail payload.</Text>
+                <Text style={styles.subtitle}>No details are available.</Text>
               )}
 
 
@@ -7792,7 +7789,7 @@ function ScanScreen({
             </Text>
           ) : null}
           <Text style={[styles.mono, { textAlign: "left", marginTop: 8 }]}>
-            queue_id:{displayedQueuedScan.id}
+            Scan reference: {displayedQueuedScan.id}
           </Text>
         </View>
       ) : null}
@@ -7804,7 +7801,7 @@ function ScanScreen({
           onPress={() => setChosenReturnScan({ actor: actorId, scope: returnScope, queueId: scan.queueId })}
           style={styles.noticeCard}>
           <Text>{scan.barcode} - {scan.scanEventId ? strings.scan.acceptedVerify : strings.scan.pendingSync}</Text>
-          <Text style={styles.mono}>queue_id:{scan.queueId}</Text>
+          <Text style={styles.mono}>Scan reference: {scan.queueId}</Text>
         </Pressable>
       ))}
       {returnScanQuery.data?.accepted && !returnScanQuery.data.verified ? (
@@ -8773,7 +8770,7 @@ function MoreScreen({
             onPress={() => onOpenModule("diagnostics")}
             style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
           >
-            <Text style={styles.secondaryButtonText}>Open diagnostics</Text>
+            <Text style={styles.secondaryButtonText}>Open support tools</Text>
           </Pressable>
         </View>
       </View>
@@ -10241,7 +10238,7 @@ function RouteSurfaceDetailExtensions({
         ) : null}
         {diagnosticsEnabled ? (
           <Text style={[styles.mono, { textAlign: "left", marginTop: 8 }]}>
-            contact:{customerName || "-"} - phone:{phone ?? "-"} - route_run:{routeContext.routeRunId ?? "-"}
+            contact:{customerName || "-"} - phone:{phone ?? "-"} - Route reference: {routeContext.routeRunId ?? "-"}
           </Text>
         ) : null}
       </View>

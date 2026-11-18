@@ -105,7 +105,7 @@ describe('containerized pg_prove toolchain', () => {
       expect(command.args).toEqual(expect.arrayContaining([
         'run', '--rm', '--init', '--pull', 'never', '--read-only', '--cap-drop', 'ALL',
         '--security-opt', 'no-new-privileges', '--env', 'PGPASSWORD',
-        'rvzwwjlztwwisjthghnipgjr.example.invalid', '/state/parallel_wave-00001/001-aaaaaaaaaaaaaaaa.sql',
+        'pg-prove.example.test', '/state/parallel_wave-00001/001-aaaaaaaaaaaaaaaa.sql',
       ]));
       const loaded = toolchain.loadPolicy(repoRoot);
       expect(command.args).toEqual(expect.arrayContaining([

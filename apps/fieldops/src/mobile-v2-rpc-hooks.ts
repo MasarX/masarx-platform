@@ -4813,7 +4813,7 @@ export async function resolveFieldopsPolicyValue<T>(params: {
   const raw = await callRpc({
     supabase: params.ctx.supabase,
     // `public.resolve_settings_row_from_policy_context_v1` is
-    // service_role-locked; `api.*` is the SECURITY DEFINER browser-safe
+    // restricted to the privileged backend role; `api.*` is the SECURITY DEFINER browser-safe
     // wrapper granted to `authenticated`.
     schema: "api",
     name: "resolve_settings_row_from_policy_context_v1",

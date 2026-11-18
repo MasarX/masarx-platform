@@ -4,8 +4,8 @@ import {
   LANDING_CONTACT_ROUTE,
   LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
   LANDING_TENANT_SIGNUP_ROUTE,
-  mockContactEndpoint,
-  mockTenantSignupEndpoint,
+  LANDING_TURNSTILE_DUMMY_TOKEN,
+  mockTurnstile,
   patchRuntimeConfig,
   routePayload,
 } from "./helpers";
@@ -28,9 +28,10 @@ test.describe("landing tenant signup intake", () => {
       tenantSignupEndpoint: LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
       turnstileSiteKey: "1x00000000000000000000AA",
     });
-    await mockTenantSignupEndpoint(page, async (route) => {
+    await mockTurnstile(page, LANDING_TURNSTILE_DUMMY_TOKEN);
+    await page.route(LANDING_TENANT_SIGNUP_ROUTE, async (route) => {
       const body = route.request().postDataJSON();
-      expect(body.turnstile_token).toBe("EXAMPLE_PASSWORD");
+      expect(body.turnstile_token).toBe(LANDING_TURNSTILE_DUMMY_TOKEN);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -40,16 +41,12 @@ test.describe("landing tenant signup intake", () => {
 
     await page.goto("/?motion=off");
     await fillTenantSignupForm(page);
+    await expect(page.locator('[data-contact-form] input[name="cf-turnstile-response"]')).toHaveValue(LANDING_TURNSTILE_DUMMY_TOKEN);
 
-    await page.locator("[data-contact-form]").locator('button[type="submit"]').click();
+    await page.locator("[data-contact-form]").locator("[data-tenant-signup-submit]").click();
 
-    await expect(page.locator("[data-contact-status]")).toContainText("under review");
-    await expect(page.locator("[data-contact-request-reference]")).toBeVisible();
-    await expect(page.locator("[data-contact-request-reference-value]")).toHaveText("tsr-local-turnstile");
-    await expect(page.locator("[data-contact-request-reference]")).toHaveAttribute(
-      "data-request-reference",
-      "tsr-local-turnstile",
-    );
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("under review");
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("Reference: tsr-local-turnstile");
   });
 
   test("submits organization signup to the dedicated tenant intake endpoint", async ({ page }) => {
@@ -58,8 +55,7 @@ test.describe("landing tenant signup intake", () => {
       tenantSignupEndpoint: LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
       turnstileSiteKey: "",
     });
-    await mockContactEndpoint(page, routePayload({ ok: true }, 200));
-    await mockTenantSignupEndpoint(page, routePayload({ ok: true, request_id: "tsr-e2e" }, 200));
+    await page.route(LANDING_TENANT_SIGNUP_ROUTE, routePayload({ ok: true, request_id: "tsr-e2e" }, 200));
 
     await page.goto("/?motion=off");
     await fillTenantSignupForm(page);
@@ -67,7 +63,7 @@ test.describe("landing tenant signup intake", () => {
     const responsePromise = page.waitForResponse((response) =>
       response.url().includes(LANDING_TENANT_SIGNUP_ENDPOINT_MOCK),
     );
-    await page.locator("[data-contact-form]").locator('button[type="submit"]').click();
+    await page.locator("[data-contact-form]").locator("[data-tenant-signup-submit]").click();
     const response = await responsePromise;
     const requestPayload = JSON.parse(response.request().postData() || "{}");
 
@@ -87,13 +83,8 @@ test.describe("landing tenant signup intake", () => {
       monthly_volume: "10k-60k",
       role: "Operations",
     });
-    await expect(page.locator("[data-contact-status]")).toContainText("under review");
-    await expect(page.locator("[data-contact-request-reference]")).toBeVisible();
-    await expect(page.locator("[data-contact-request-reference-value]")).toHaveText("tsr-e2e");
-    await expect(page.locator("[data-contact-request-reference]")).toHaveAttribute(
-      "data-request-reference",
-      "tsr-e2e",
-    );
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("under review");
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("Reference: tsr-e2e");
   });
 
   test("shows Arabic request reference after tenant signup success", async ({ page }) => {
@@ -101,16 +92,14 @@ test.describe("landing tenant signup intake", () => {
       tenantSignupEndpoint: LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
       turnstileSiteKey: "",
     });
-    await mockTenantSignupEndpoint(page, routePayload({ ok: true, request_id: "tsr-arabic" }, 200));
+    await page.route(LANDING_TENANT_SIGNUP_ROUTE, routePayload({ ok: true, request_id: "tsr-arabic" }, 200));
 
     await page.goto("/ar?motion=off");
     await fillTenantSignupForm(page);
-    await page.locator("[data-contact-form]").locator('button[type="submit"]').click();
+    await page.locator("[data-contact-form]").locator("[data-tenant-signup-submit]").click();
 
-    await expect(page.locator("[data-contact-status]")).toContainText("قيد المراجعة");
-    await expect(page.locator("[data-contact-request-reference]")).toBeVisible();
-    await expect(page.locator("[data-contact-request-reference]")).toContainText("مرجع الطلب");
-    await expect(page.locator("[data-contact-request-reference-value]")).toHaveText("tsr-arabic");
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("قيد المراجعة");
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("رقم المرجع: tsr-arabic");
   });
 
   test("submits Arabic and long tenant signup values without losing backend request reference", async ({ page }) => {
@@ -118,7 +107,7 @@ test.describe("landing tenant signup intake", () => {
       tenantSignupEndpoint: LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
       turnstileSiteKey: "",
     });
-    await mockTenantSignupEndpoint(page, routePayload({ ok: true, request_id: "tsr-arabic-long" }, 200));
+    await page.route(LANDING_TENANT_SIGNUP_ROUTE, routePayload({ ok: true, request_id: "tsr-arabic-long" }, 200));
 
     await page.goto("/ar?motion=off");
     const form = page.locator("[data-contact-form]");
@@ -136,7 +125,7 @@ test.describe("landing tenant signup intake", () => {
     const responsePromise = page.waitForResponse((response) =>
       response.url().includes(LANDING_TENANT_SIGNUP_ENDPOINT_MOCK),
     );
-    await form.locator('button[type="submit"]').click();
+    await form.locator("[data-tenant-signup-submit]").click();
     const response = await responsePromise;
     const requestPayload = JSON.parse(response.request().postData() || "{}");
 
@@ -155,8 +144,7 @@ test.describe("landing tenant signup intake", () => {
       monthly_volume: "10k-60k",
       role: "مدير العمليات",
     });
-    await expect(page.locator("[data-contact-request-reference]")).toBeVisible();
-    await expect(page.locator("[data-contact-request-reference-value]")).toHaveText("tsr-arabic-long");
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("رقم المرجع: tsr-arabic-long");
   });
 
   test("deduped tenant signup still shows the backend request reference", async ({ page }) => {
@@ -164,15 +152,14 @@ test.describe("landing tenant signup intake", () => {
       tenantSignupEndpoint: LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
       turnstileSiteKey: "",
     });
-    await mockTenantSignupEndpoint(page, routePayload({ ok: true, deduped: true, request_id: "tsr-deduped" }, 200));
+    await page.route(LANDING_TENANT_SIGNUP_ROUTE, routePayload({ ok: true, deduped: true, request_id: "tsr-deduped" }, 200));
 
     await page.goto("/?motion=off");
     await fillTenantSignupForm(page);
-    await page.locator("[data-contact-form]").locator('button[type="submit"]').click();
+    await page.locator("[data-contact-form]").locator("[data-tenant-signup-submit]").click();
 
-    await expect(page.locator("[data-contact-status]")).toContainText("already received");
-    await expect(page.locator("[data-contact-request-reference]")).toBeVisible();
-    await expect(page.locator("[data-contact-request-reference-value]")).toHaveText("tsr-deduped");
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("already received");
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("Reference: tsr-deduped");
   });
 
   test("fails closed when tenant signup success omits request reference", async ({ page }) => {
@@ -180,14 +167,14 @@ test.describe("landing tenant signup intake", () => {
       tenantSignupEndpoint: LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
       turnstileSiteKey: "",
     });
-    await mockTenantSignupEndpoint(page, routePayload({ ok: true }, 200));
+    await page.route(LANDING_TENANT_SIGNUP_ROUTE, routePayload({ ok: true }, 200));
 
     await page.goto("/?motion=off");
     await fillTenantSignupForm(page);
-    await page.locator("[data-contact-form]").locator('button[type="submit"]').click();
+    await page.locator("[data-contact-form]").locator("[data-tenant-signup-submit]").click();
 
-    await expect(page.locator("[data-contact-status]")).toContainText("no request reference");
-    await expect(page.locator("[data-contact-request-reference]")).toBeHidden();
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText("Something went wrong. Please try again.");
+    await expect(page.locator("[data-tenant-signup-status]")).not.toContainText("Reference:");
     await expect(page.locator('[data-contact-form] input[name="email"]')).toHaveValue("ops@example.com");
   });
 
@@ -209,10 +196,10 @@ test.describe("landing tenant signup intake", () => {
 
     await page.goto("/?motion=off");
     await fillTenantSignupForm(page);
-    await page.locator("[data-contact-form]").locator('button[type="submit"]').click();
+    await page.locator("[data-contact-form]").locator("[data-tenant-signup-submit]").click();
 
-    await expect(page.locator("[data-contact-status]")).toContainText(
-      "Signup is temporarily unavailable.",
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText(
+      "Organization signup is temporarily unavailable.",
     );
     expect(contactHits).toBe(0);
   });
@@ -230,17 +217,17 @@ test.describe("landing tenant signup intake", () => {
     ];
 
     for (const testCase of cases) {
-      await page.unroute(LANDING_TENANT_SIGNUP_ROUTE).catch(() => {});
-      await mockTenantSignupEndpoint(
-        page,
+      await page.unroute(LANDING_TENANT_SIGNUP_ROUTE);
+      await page.route(
+        LANDING_TENANT_SIGNUP_ROUTE,
         routePayload({ ok: false, error: { code: testCase.code } }, 400),
       );
 
       await page.goto("/?motion=off");
       await fillTenantSignupForm(page);
-      await page.locator("[data-contact-form]").locator('button[type="submit"]').click();
+      await page.locator("[data-contact-form]").locator("[data-tenant-signup-submit]").click();
 
-      await expect(page.locator("[data-contact-status]")).toContainText(testCase.expected);
+      await expect(page.locator("[data-tenant-signup-status]")).toContainText(testCase.expected);
     }
   });
 });

@@ -1656,7 +1656,7 @@ describe('OrganizationsModule', () => {
   it('Approve when review rejects surfaces a friendly danger toast', async () => {
     const user = userEvent.setup();
     vi.spyOn(api, 'tenant_signup_review_apply_v1').mockRejectedValue(
-      new Error('service_role_required'),
+      new Error('signup_review_unavailable'),
     );
     const toastSpy = vi.spyOn(toastStore, 'pushToast');
     renderWithProviders(<OrganizationsModule />, {

@@ -105,15 +105,17 @@ describe("DraftWorkflow", () => {
     expect(btn.textContent).toMatch(/Saving|حفظ/i);
   });
 
-  it("keeps save available for published drafts so operators can fork the next draft", () => {
+  it("keeps published drafts immutable and lets operators create a new draft", () => {
     const publishedDraft = { ...mockDraft, status: "published" };
     render(
       <DraftWorkflow {...defaultProps} drafts={[publishedDraft]} />,
     );
     const btn = screen.getByTestId("ld-save-draft");
-    expect(btn).toBeEnabled();
+    expect(btn).toBeDisabled();
     fireEvent.click(btn);
-    expect(defaultProps.onSaveDraft).toHaveBeenCalled();
+    expect(defaultProps.onSaveDraft).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("ld-create-draft"));
+    expect(defaultProps.onCreateDraft).toHaveBeenCalled();
   });
 
   it("switches between visual and code tabs", () => {

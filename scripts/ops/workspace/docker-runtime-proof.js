@@ -643,7 +643,7 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
       applicable: applicability.mobile_v2_development_runtime_proof,
       service_name: 'fieldops-metro',
       proof_label: 'mobile_v2_development_runtime_proof',
-      development_runtime_proof_required: mobileV2ProofRequired,
+      development_runtime_proof_required: applicability.mobile_v2_development_runtime_proof,
       native_release_gate_satisfied: false,
       visible_runtime: surfaces.some((surface) => (
         surface.surface === 'fieldops-metro' &&
@@ -666,7 +666,7 @@ async function runDockerRuntimeProof(options = {}, env = process.env) {
     backend_reachable: backend.ok === true,
     edge_functions_reachable: edge.ok === true,
     fieldops_service_canonical: summary.mobile_v2.service_name === 'fieldops-metro',
-    mobile_v2_development_runtime_proof: !mobileV2ProofRequired ||
+    mobile_v2_development_runtime_proof: !applicability.mobile_v2_development_runtime_proof ||
       (summary.mobile_v2.visible_runtime === true && mobilePolicy.ok === true),
     native_release_gate_not_satisfied: summary.mobile_v2.native_release_gate_satisfied === false,
     seed_disabled: summary.env.seed_disabled === true,

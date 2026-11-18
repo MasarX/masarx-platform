@@ -191,7 +191,7 @@ test.each([NaN, Infinity, -Infinity, -1, 0, 1.9, 9999])("sync normalizes query l
   const store = createMemoryOutboxStore();
   store.listPending = jest.fn().mockResolvedValue([]);
   await createOutbox(store).sync(jest.fn(), { limit });
-  expect(store.listPending).toHaveBeenCalledWith({ limit: Number.isFinite(limit) ? Math.min(500, Math.max(0, Math.floor(limit))) : 50 });
+  expect(store.listPending).toHaveBeenCalledWith({ force: false, limit: Number.isFinite(limit) ? Math.min(500, Math.max(0, Math.floor(limit))) : 50 });
 });
 
 test("sync bounds backoff, sanitizes persisted errors and exhausts configured retries", async () => {

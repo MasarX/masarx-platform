@@ -37,7 +37,7 @@ describe('data-source plugin-studio adapters (W12-2)', () => {
     __resetSupabaseClientForTests();
     invokeSpy.mockReset();
     rpcSpy.mockReset();
-    vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://api.example.test');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-test');
   });
 
