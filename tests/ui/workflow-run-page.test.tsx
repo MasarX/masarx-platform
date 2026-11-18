@@ -67,6 +67,36 @@ describe("WorkflowRunPage", () => {
     }
   });
 
+  it("shows the persisted workflow status and the associated step rows", async () => {
+    const listResource = jest.fn().mockResolvedValue({
+      items: [{ id: "step-1", step_key: "validate_input", status: "completed" }],
+      total: 1,
+    });
+    mockedCreateUiServerClient.mockReturnValue({
+      readRegistry: jest.fn().mockResolvedValue({ resources: [] }),
+      me: jest.fn().mockResolvedValue({ capabilities: [] }),
+      getResource: jest.fn().mockResolvedValue({ id: "run-1", workflow_status: "completed" }),
+      settingsPreview: jest.fn().mockResolvedValue({ value: null }),
+      listResource,
+    });
+
+    const node = await WorkflowRunPage({
+      runId: "run-1",
+      appBasePath: "/console",
+      t: (key) => key,
+      includeTraceLink: false,
+      testIdPrefix: "workflow-run",
+    });
+
+    renderWithIntl(node);
+
+    expect(screen.getByTestId("workflow-run-summary")).toHaveTextContent(/completed/i);
+    expect(screen.getByTestId("workflow-run-steps-ready")).toHaveTextContent(/validate.input/i);
+    expect(listResource.mock.calls.some(([resource, filters]) =>
+      resource === "workflow_run_steps" && filters?.workflow_run_id === "run-1",
+    )).toBe(true);
+  });
+
   it("surfaces output links found in workflow run context and metadata", async () => {
     mockedCreateUiServerClient.mockReturnValue({
       readRegistry: jest.fn().mockResolvedValue({ resources: [] }),
