@@ -153,7 +153,7 @@ export function useResourceListsByFilters<T = Record<string, unknown>>(
   resource: string,
   filters: Array<Record<string, unknown>>,
   opts?: Omit<api.ListOpts, 'filter'>,
-  queryOpts?: { enabled?: boolean },
+  queryOpts?: { enabled?: boolean; retry?: UseQueryOptions<ListResult<T>>['retry'] },
 ) {
   const normalizedFilters = filters.filter((filter) => Object.keys(filter).length > 0);
   const enabled = (queryOpts?.enabled ?? true) && normalizedFilters.length > 0;
@@ -189,6 +189,7 @@ export function useResourceListsByFilters<T = Record<string, unknown>>(
       };
     },
     enabled,
+    retry: queryOpts?.retry,
   });
 }
 
