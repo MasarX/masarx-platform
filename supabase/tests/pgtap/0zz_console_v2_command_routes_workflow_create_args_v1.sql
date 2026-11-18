@@ -53,13 +53,15 @@ SELECT ok(
 );
 
 SELECT ok(
-  pg_get_functiondef(to_regprocedure('public.ui_create_workflow_template_v1(text,text,uuid)')) LIKE '%jsonb_build_object%',
-  'legacy positional workflow template create overload delegates through p_args'
+  pg_get_functiondef(to_regprocedure('public.ui_create_workflow_template_v1(text,text,uuid)'))
+    LIKE '%v_scope_type := public.get_root_scope_type_key_v1()%',
+  'native workflow template creation maps platform actors to root scope'
 );
 
 SELECT ok(
-  pg_get_functiondef(to_regprocedure('public.ui_create_workflow_template_v1(text,text,uuid)')) NOT LIKE '%workflow_runs.write%',
-  'legacy positional workflow template create overload no longer requires workflow_runs.write'
+  pg_get_functiondef(to_regprocedure('public.ui_create_workflow_template_v1(text,text,uuid)'))
+    LIKE '%assert_capability_v1(''workflow_runs.write'', v_scope_type, v_scope_id)%',
+  'native workflow template creation keeps its scoped capability guard'
 );
 
 SELECT ok(

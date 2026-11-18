@@ -114,26 +114,6 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.ui_create_workflow_template_v1(
-  p_name text,
-  p_description text DEFAULT NULL,
-  p_clone_from uuid DEFAULT NULL
-)
-RETURNS jsonb
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path TO public, extensions, pg_temp
-SET row_security = on
-AS $function$
-  SELECT public.ui_create_workflow_template_v1(
-    jsonb_build_object(
-      'name', $1,
-      'description', $2,
-      'clone_from', $3
-    )
-  );
-$function$;
-
 CREATE OR REPLACE FUNCTION api.ui_create_workflow_template_v1(p_args jsonb)
 RETURNS jsonb
 LANGUAGE sql
@@ -144,18 +124,14 @@ AS $function$
 $function$;
 
 REVOKE ALL ON FUNCTION public.ui_create_workflow_template_v1(jsonb) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.ui_create_workflow_template_v1(text, text, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION api.ui_create_workflow_template_v1(jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION api.ui_create_workflow_template_v1(jsonb) FROM anon;
 GRANT EXECUTE ON FUNCTION public.ui_create_workflow_template_v1(jsonb) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.ui_create_workflow_template_v1(text, text, uuid) TO authenticated, service_role;
 GRANT USAGE ON SCHEMA api TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION api.ui_create_workflow_template_v1(jsonb) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.ui_create_workflow_template_v1(jsonb)
   IS 'Console V2 browser-safe p_args wrapper for canonical workflow template creation.';
-COMMENT ON FUNCTION public.ui_create_workflow_template_v1(text, text, uuid)
-  IS 'Compatibility overload that delegates to the Console V2 p_args workflow template creation contract.';
 COMMENT ON FUNCTION api.ui_create_workflow_template_v1(jsonb)
   IS 'API-schema wrapper for Console V2 workflow template creation using the frontend p_args contract.';
 
