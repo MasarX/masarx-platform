@@ -311,8 +311,8 @@ export function useResolveSettings(
   return useQuery<SettingsResolution>({
     queryKey: qk.resolveSettings(category, scope),
     queryFn: () => api.resolveSettings(category, scope),
-    enabled: Boolean(category) && (queryOpts?.enabled ?? true),
     ...queryOpts,
+    enabled: Boolean(category) && (queryOpts?.enabled ?? true),
   });
 }
 

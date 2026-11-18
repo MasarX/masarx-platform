@@ -34,6 +34,16 @@ describe('DashboardModule', () => {
     });
   });
 
+  it('does not fetch dashboard decisions without observability read access', async () => {
+    const listDecisionLog = vi.spyOn(api, 'listDecisionLog').mockResolvedValue([]);
+    renderWithProviders(<DashboardModule />, { capabilities: ['console_metadata.read'] });
+
+    await waitFor(() => {
+      expect(document.querySelector('.kpi')).not.toBeNull();
+    });
+    expect(listDecisionLog).not.toHaveBeenCalled();
+  });
+
   it('exposes the canonical "Open palette" action button', async () => {
     renderWithProviders(<DashboardModule />, { capabilities: ['all'] });
     expect(
