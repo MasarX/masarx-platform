@@ -1,75 +1,151 @@
 'use strict';
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
-const { devPromotion, policySource, classify, enforceScope } = require('./policy.cjs');
+const { devPromotion, evaluatePolicy, policySource } = require('./policy.cjs');
 const repository = 'synthetic/project';
 const tip = 'a'.repeat(40); const base = 'b'.repeat(40);
+const candidate = 'c'.repeat(40);
 const repo = { id: 1, full_name: repository, fork: false };
-const event = (target = 'main', branch = 'dev') => ({ pull_request: {
+const fork = { id: 2, full_name: 'synthetic/fork', fork: true };
+const event = (target = 'main', branch = 'dev', headRepo = repo) => ({ pull_request: {
+  number: 7,
   base: { ref: target, sha: base, repo: { ...repo } },
-  head: { ref: branch, sha: tip, repo: { ...repo } },
+  head: { ref: branch, sha: tip, repo: { ...headRepo } },
 } });
 const calls = [];
-const read = args => { calls.push(args); return args[0] === 'rev-parse' ? `${tip}\n` : ''; };
-for (const target of ['main', 'preview']) {
-  calls.length = 0;
-  assert.equal(devPromotion(event(target), 'pull_request_target', repository, read), true);
-  assert.deepEqual(calls, [
-    ['fetch', '--no-tags', '--depth=1', 'origin', '+refs/heads/dev:refs/policy/dev'],
-    ['rev-parse', 'refs/policy/dev'],
-  ]);
-  assert.equal(policySource(event(target), 'pull_request_target'), base);
-  const stale = event(target); stale.pull_request.head.sha = 'c'.repeat(40);
-  assert.throws(() => devPromotion(stale, 'pull_request_target', repository, read), /stale/);
-  for (const mutate of [
-    e => { e.pull_request.head.repo = { id: 2, full_name: 'synthetic/fork', fork: true }; },
-    e => { e.pull_request.head.repo.fork = true; },
-    e => { delete e.pull_request.head.repo; },
-    e => { delete e.pull_request.head.repo.id; },
-    e => { delete e.pull_request.head.repo.full_name; },
-    e => { delete e.pull_request.head.repo.fork; },
-    e => { delete e.pull_request.head.sha; },
-    e => { e.pull_request.head.sha = 'invalid'; },
-    e => { delete e.pull_request.base.repo; },
-    e => { delete e.pull_request.base.repo.id; },
-    e => { delete e.pull_request.base.repo.full_name; },
-  ]) {
-    const bad = event(target); mutate(bad);
-    calls.length = 0;
-    assert.throws(() => devPromotion(bad, 'pull_request_target', repository, read));
-    assert.equal(calls.length, 0);
-  }
-  assert.throws(() => devPromotion(event(target), 'pull_request_target', '', read));
-  assert.throws(() => devPromotion(event(target), 'pull_request_target', repository, () => { throw new Error('unreadable dev tip'); }), /unreadable/);
-  assert.throws(() => devPromotion(event(target), 'pull_request_target', repository, () => 'invalid'), /SHA/);
+let shallow = true;
+const read = args => {
+  calls.push(args);
+  if (args[1] === '--is-shallow-repository') return String(shallow);
+  if (args[0] === 'fetch') shallow = false;
+  return args[0] === 'rev-parse' ? `${tip}\n` : '';
+};
+const prEvent = 'pull_request';
+assert.equal(devPromotion(event(), prEvent, repository, read), true);
+assert.deepEqual(calls, [
+  ['rev-parse', '--is-shallow-repository'],
+  ['fetch', '--no-tags', '--filter=blob:none', '--unshallow', 'origin', base, '+refs/heads/dev:refs/policy/dev'],
+  ['rev-parse', 'refs/policy/dev'],
+  ['rev-parse', '--is-shallow-repository'],
+  ['rev-list', '--no-merges', `${tip}..${base}`],
+  ['rev-list', '--merges', '--parents', `${tip}..${base}`],
+]);
+const priorMain = 'd'.repeat(40); const priorDev = 'e'.repeat(40); const hotfix = 'f'.repeat(40);
+const promotionMerge = `${base} ${priorMain} ${priorDev}\n`;
+const hotfixMerge = `${base} ${priorMain} ${hotfix}\n`;
+for (const [name, nonMerges, merges, allowed] of [
+  ['fresh promotion', '', '', true],
+  ['second promotion after a clean merge', '', promotionMerge, true],
+  ['squashed hotfix', `${base}\n`, '', false],
+  ['merged hotfix', `${hotfix}\n`, hotfixMerge, false],
+  ['merge whose second parent is a main-only merge', '', `${hotfixMerge}${hotfix} ${priorMain} ${priorDev}\n`, false],
+  ['hotfix back-merged into dev', '', '', true],
+]) {
+  const check = () => devPromotion(event(), prEvent, repository, args => {
+    if (args[0] === 'rev-list') return args[1] === '--no-merges' ? nonMerges : merges;
+    return read(args);
+  });
+  if (allowed) assert.equal(check(), true, name);
+  else assert.throws(check, /main-to-dev back-merge/, name);
 }
-for (const branch of ['feature', 'main', 'preview']) {
-  assert.throws(() => devPromotion(event('main', branch), 'pull_request_target', repository, read), /Main accepts/);
-}
-const missingHead = event(); delete missingHead.pull_request.head;
-assert.throws(() => devPromotion(missingHead, 'pull_request_target', repository, read), /Main accepts/);
-const missingBranch = event(); delete missingBranch.pull_request.head.ref;
-assert.throws(() => devPromotion(missingBranch, 'pull_request_target', repository, read), /Main accepts/);
-for (const [target, branch] of [['dev', 'dev'], ['dev', 'feature'], ['preview', 'feature']]) {
+const stale = event(); stale.pull_request.head.sha = candidate;
+assert.throws(() => devPromotion(stale, prEvent, repository, read), /stale/);
+for (const mutate of [
+  pr => { delete pr.head; },
+  pr => { delete pr.head.ref; },
+  pr => { pr.head.repo.fork = true; },
+  pr => { delete pr.head.repo; },
+  pr => { delete pr.head.repo.id; },
+  pr => { delete pr.head.repo.full_name; },
+  pr => { delete pr.head.repo.fork; },
+  pr => { delete pr.head.sha; },
+  pr => { pr.head.sha = 'invalid'; },
+  pr => { delete pr.base.repo; },
+  pr => { delete pr.base.repo.id; },
+  pr => { delete pr.base.repo.full_name; },
+]) {
+  const bad = event(); mutate(bad.pull_request);
   calls.length = 0;
-  assert.equal(devPromotion(event(target, branch), 'pull_request_target', repository, read), false);
+  assert.throws(() => devPromotion(bad, prEvent, repository, read));
   assert.equal(calls.length, 0);
 }
-assert.equal(devPromotion(event(), 'merge_group', repository, read), false);
+assert.throws(() => devPromotion(event(), prEvent, '', read));
+assert.throws(() => devPromotion(event(), prEvent, repository, () => { throw new Error('unreadable dev tip'); }), /unreadable/);
+assert.throws(() => devPromotion(event(), prEvent, repository, () => 'invalid'), /SHA/);
+for (const branch of ['feature', 'main', 'preview', 'hotfix', 'hotfix/']) {
+  assert.throws(() => devPromotion(event('main', branch), prEvent, repository, read), /Main accepts/);
+}
+for (const branch of ['dev', 'hotfix/urgent']) {
+  assert.throws(() => devPromotion(event('main', branch, fork), prEvent, repository, read), /Main accepts/);
+}
+assert.equal(devPromotion(event('dev', 'dev'), prEvent, repository, read), false);
+assert.equal(calls.length, 0);
 for (const field of ['title', 'body']) {
   const edited = { ...event(), action: 'edited', changes: { [field]: { from: 'synthetic previous text' } } };
-  assert.equal(policySource(edited, 'pull_request_target'), base);
-  assert.equal(devPromotion(edited, 'pull_request_target', repository, read), true);
+  assert.equal(policySource(edited, prEvent), base);
+  assert.equal(devPromotion(edited, prEvent, repository, read), true);
 }
-const retargeted = { ...event('main', 'feature'), action: 'edited', changes: { base: { ref: { from: 'dev' } } } };
-assert.equal(policySource(retargeted, 'pull_request_target'), base);
-assert.throws(() => devPromotion(retargeted, 'pull_request_target', repository, read), /Main accepts/);
-// Ordinary mixed protected changes still require the existing scope rule.
-assert.throws(() => enforceScope(classify([['M', '.github/workflows/public-ci.yml'], ['M', 'synthetic.txt']]), 'pull_request_target'));
+
+const workflowFiles = ['.github/workflows/policy.yml', '.github/workflows/public-ci.yml'];
+const gitFixture = (files, gitCalls = []) => args => {
+  gitCalls.push(args);
+  if (args[0] === 'fetch') return '';
+  if (args[0] === 'rev-parse') return ({
+    '--is-shallow-repository': 'false\n',
+    'refs/policy/dev': tip, 'refs/policy/candidate': candidate,
+    [`${candidate}^1`]: base, [`${candidate}^2`]: tip,
+  })[args[1]];
+  if (args[0] === 'diff') {
+    assert.deepEqual(args, ['diff', '--no-renames', '--name-status', '-z', base, candidate]);
+    return files.map(file => `M\0${file}\0`).join('');
+  }
+  if (args[0] === 'ls-tree') return args.includes('.github/workflows') ? workflowFiles.join('\0') : '';
+  if (args[0] === 'show') return "env:\n  NPM_CONFIG_IGNORE_SCRIPTS: 'true'\n";
+  if (args[0] === 'rev-list') return '';
+  throw new Error(`Unexpected fixture Git operation: ${args[0]}`);
+};
+const featurePr = { ...event('dev', 'feature'), action: 'opened' };
+assert.doesNotThrow(() => evaluatePolicy(featurePr, prEvent, repository, gitFixture(['docs/example.md'])));
+const mainBase = { ...featurePr.pull_request.base, ref: 'main', sha: 'd'.repeat(40) };
+const retargeted = {
+  action: 'edited',
+  changes: { base: { ref: { from: 'dev' } } },
+  pull_request: { ...featurePr.pull_request, base: mainBase },
+};
+assert.equal(policySource(retargeted, prEvent), mainBase.sha);
+assert.throws(() => evaluatePolicy(retargeted, prEvent, repository, () => {
+  assert.fail('Retargeted feature PR must be refused before reading candidate Git objects');
+}), /Main accepts/);
+const hotfixPr = event('main', 'hotfix/urgent');
+assert.doesNotThrow(() => evaluatePolicy(hotfixPr, prEvent, repository, gitFixture(['docs/example.md'])));
+assert.throws(() => evaluatePolicy(hotfixPr, prEvent, repository, gitFixture([workflowFiles[1]])), /target marker is closed/);
+assert.doesNotThrow(() => evaluatePolicy(event(), prEvent, repository, gitFixture([workflowFiles[1], 'docs/example.md'])));
+const forkCalls = [];
+const forkPr = event('dev', 'feature', fork);
+assert.doesNotThrow(() => evaluatePolicy(forkPr, prEvent, repository, gitFixture(['docs/example.md'], forkCalls)));
+assert.deepEqual(forkCalls.filter(([op]) => op === 'fetch'), [
+  ['fetch', '--no-tags', '--depth=2', 'origin', '+refs/pull/7/merge:refs/policy/candidate'],
+]);
+assert.throws(() => evaluatePolicy(forkPr, prEvent, repository, gitFixture([workflowFiles[1], 'docs/example.md'])), /touch nothing outside/);
+for (const baseRef of ['dev', 'refs/heads/dev']) {
+  const group = { merge_group: { base_ref: baseRef, base_sha: base, head_sha: candidate } };
+  const groupCalls = [];
+  assert.doesNotThrow(() => evaluatePolicy(group, 'merge_group', repository, gitFixture(['docs/example.md'], groupCalls)));
+  assert.deepEqual(groupCalls.slice(0, 3), [
+    ['fetch', '--no-tags', '--depth=64', 'origin', base],
+    ['fetch', '--no-tags', '--depth=64', 'origin', candidate],
+    ['diff', '--no-renames', '--name-status', '-z', base, candidate],
+  ]);
+  delete group.merge_group.head_sha;
+  assert.throws(() => evaluatePolicy(group, 'merge_group', repository, gitFixture([])), /SHA/);
+}
+execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', 'scripts/ci-hosted/render-policy.py', '--check']);
 const workflow = fs.readFileSync('.github/workflows/policy.yml', 'utf8');
 assert.equal(workflow.includes('ref: ${{ steps.source.outputs.base }}'), true);
 assert.equal(workflow.includes('persist-credentials: false'), true);
 assert.equal(/secrets\.|pull_request\.head|head\.sha/.test(workflow), false);
-assert.equal(workflow.includes('types: [opened, synchronize, reopened, edited]'), true);
+assert.match(workflow, /^  pull_request:\n    types: \[opened, synchronize, reopened, edited\]$/m);
+assert.doesNotMatch(workflow, /^  pull_request_target:/m);
 assert.equal(workflow.includes('run: node scripts/ci-hosted/promotion-selfcheck.cjs'), false);
-console.log('PASS: live dev promotions, main-only promotion flow, stale/missing identities, forks and base-owned execution');
+console.log('PASS: repeat promotions and hotfix back-merge, retarget refusal, guarded hotfixes, fork PR data, queue range and generated workflow');

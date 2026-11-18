@@ -1,4 +1,5 @@
 """Render the base-owned policy workflow from its canonical source selector."""
+from argparse import ArgumentParser
 from pathlib import Path
 import re
 
@@ -14,11 +15,10 @@ fs.appendFileSync(process.env.GITHUB_OUTPUT, `base=${base}\\n`);
 name: Required repository policy
 
 'on':
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened, edited]
-    branches: [preview, dev, main]
   merge_group:
-    branches: [preview, dev, main]
+    branches: [dev]
     types: [checks_requested]
 
 permissions:
@@ -61,5 +61,13 @@ jobs:
 
 
 if __name__ == '__main__':
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument('--check', action='store_true')
     root = Path(__file__).resolve().parents[2]
-    (root / '.github/workflows/policy.yml').write_text(render(root), encoding='utf-8', newline='\n')
+    workflow = root / '.github/workflows/policy.yml'
+    rendered = render(root).encode('utf-8')
+    if parser.parse_args().check:
+        if workflow.read_bytes() != rendered:
+            raise SystemExit('policy.yml differs from render-policy.py output')
+    else:
+        workflow.write_bytes(rendered)
