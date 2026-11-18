@@ -11,6 +11,14 @@ Shell note:
 
 ---
 
+## Match verification to the change
+
+Use focused unit tests for code that has no runtime dependency. Use pgTAP for migration, permission and row-level security contracts. Use integration tests to verify the persisted effects of an application or edge request against an isolated database. Run deployment and load checks against an authorized test environment with generated fixtures.
+
+For intake changes, cover request authentication, acknowledgment behavior, duplicate requests and the redaction of persisted headers and query values. For shipment changes, check the resulting row, workflow status and audit records under the applicable tenant scope. Compare the observed settings and workflow decisions with the scope that was expected to win.
+
+When adding a fixture, generate identifiers at setup and reuse them across requests and assertions. Keep SQL-only tests transactional and explicitly clean up rows created through the API.
+
 ## Test Suites
 
 ### 1) Unit Tests (no DB)
