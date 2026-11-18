@@ -189,9 +189,13 @@ async function upsertSettings({
     `upsert via scripts/utils/settings-upsert.js`;
 
   let upserted;
+  const labelProvider = trimmedCategory === 'label_provider';
   try {
     upserted = await db.query(
-      `SELECT settings_id,
+      labelProvider
+        ? `SELECT settings_id, settings_version_id, settings_version_number
+             FROM public.upsert_label_provider_settings_v1($1::text,$2::uuid,$3::jsonb,$4::text)`
+        : `SELECT settings_id,
               settings_version_id,
               settings_version_number
          FROM public.upsert_settings_value_v1(
@@ -202,7 +206,9 @@ async function upsertSettings({
            $5::int,
            $6::text
          )`,
-      [
+      labelProvider
+        ? [normalizedScopeType, normalizedScopeId, JSON.stringify(nextValue), effectiveReason]
+        : [
         trimmedCategory,
         normalizedScopeType,
         normalizedScopeId,
@@ -225,12 +231,18 @@ async function upsertSettings({
   const settingsVersionId = upserted.rows[0].settings_version_id;
   const settingsVersionNumber =
     parseInt(String(upserted.rows[0].settings_version_number || ''), 10) || 0;
+  let storedValue = nextValue;
+  if (labelProvider) {
+    const stored = await db.query('SELECT value FROM public.settings_versions WHERE id = $1::uuid', [settingsVersionId]);
+    if (stored.rowCount !== 1) throw new Error('Stored label provider settings version is unavailable');
+    storedValue = stored.rows[0].value;
+  }
 
   return {
     settingsVersionId,
     settingsVersionNumber,
     schemaVersion,
-    value: nextValue,
+    value: storedValue,
   };
 }
 
