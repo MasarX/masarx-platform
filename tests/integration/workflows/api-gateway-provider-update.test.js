@@ -459,7 +459,7 @@ describe('API gateway provider update postprocess', () => {
     );
     expect(outboundRows[0]).toMatchObject({
       method: 'PUT',
-      url: `https://apisv2.logestechs.com/api/guests/362/packages/${externalShipmentId}`,
+      url: `https://apisv2.logestechs.com/api/guests/001/packages/${externalShipmentId}`,
     });
     expect(outboundRows[0].body.email).toBeUndefined();
     expect(outboundRows[0].body.password).toBeUndefined();
