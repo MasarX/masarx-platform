@@ -351,11 +351,11 @@ BEGIN
   END IF;
 
   BEGIN
-    SELECT public.resolve_settings(
+    SELECT policy.value INTO v_policy
+    FROM public.resolve_settings_row_from_policy_context_v1(
       'mobile_cash_policy',
-      jsonb_build_object('organization_id', v_org, 'user_id', v_user_id)
-    )
-    INTO v_policy;
+      jsonb_build_object('organization_id', v_org)
+    ) AS policy;
   EXCEPTION WHEN OTHERS THEN
     v_policy := '{}'::jsonb;
   END;

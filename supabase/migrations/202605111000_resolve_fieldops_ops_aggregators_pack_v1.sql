@@ -219,16 +219,15 @@ BEGIN
     RETURN jsonb_build_object('records', '[]'::jsonb, 'recent', '[]'::jsonb);
   END IF;
 
-  -- Search shipments by tracking number / external_id (LIKE-style for now;
-  -- a future fts index can replace this with phraseto_tsquery).
+  -- Keep shipment, recipient and address lookups within the shipment's tenant and client.
   SELECT COALESCE(
     jsonb_agg(
       jsonb_build_object(
         'id',       s.id::text,
         'kind',     CASE WHEN s.service_type = 'pickup' THEN 'pickup' ELSE 'stop' END,
         'parcel',   s.tracking_number,
-        'customer', COALESCE(s.recipient_name, s.metadata->>'merchant_name', '—'),
-        'area',     COALESCE(s.metadata->>'area', s.recipient_city),
+        'customer', COALESCE(s.customer_name, s.metadata->>'merchant_name', '—'),
+        'area',     COALESCE(s.metadata->>'area', s.destination_city),
         'status',   s.status
       )
       ORDER BY s.updated_at DESC
@@ -237,14 +236,20 @@ BEGIN
   )
   INTO v_records
   FROM (
-    SELECT *
+    SELECT s.id, s.service_type, s.tracking_number, s.metadata, s.status, s.updated_at,
+           r.name AS customer_name, a.city AS destination_city
     FROM public.shipments s
+    LEFT JOIN public.recipients r
+      ON r.id = s.recipient_id AND r.organization_id = s.organization_id AND r.client_id = s.client_id
+    LEFT JOIN public.addresses a
+      ON a.id = s.destination_address_id AND a.organization_id = s.organization_id AND a.client_id = s.client_id
     WHERE s.organization_id = v_org
       AND (
         s.tracking_number ILIKE ('%' || v_query || '%')
-        OR s.external_id ILIKE ('%' || v_query || '%')
-        OR s.recipient_name ILIKE ('%' || v_query || '%')
+        OR s.client_reference_number ILIKE ('%' || v_query || '%')
+        OR r.name ILIKE ('%' || v_query || '%')
       )
+    ORDER BY s.updated_at DESC, s.id
     LIMIT 10
   ) s;
 
@@ -257,7 +262,7 @@ REVOKE ALL ON FUNCTION public.resolve_fieldops_lookup_v1(TEXT, JSONB, TEXT) FROM
 GRANT EXECUTE ON FUNCTION public.resolve_fieldops_lookup_v1(TEXT, JSONB, TEXT) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.resolve_fieldops_lookup_v1(TEXT, JSONB, TEXT) IS
-  'Mobile V2 universal shipment lookup. ILIKE-search across tracking_number / external_id / recipient_name within caller org, returning up to 10 records. Recent lookups list is empty until a recent_lookups table ships; FE hook falls back to local sample for preview.';
+  'Mobile V2 universal shipment lookup. ILIKE-search across tracking number / client reference / recipient name within caller org, returning up to 10 records. Recent lookups list is empty until a recent_lookups table ships; FE hook falls back to local sample for preview.';
 
 CREATE OR REPLACE FUNCTION api.resolve_fieldops_lookup_v1(
   p_active_role TEXT DEFAULT 'driver',
@@ -493,11 +498,11 @@ BEGIN
   -- Pull cash policy through the resolver ladder if present; fall back to
   -- empty object so callers don't fail-closed in preview.
   BEGIN
-    SELECT public.resolve_settings(
+    SELECT policy.value INTO v_policy
+    FROM public.resolve_settings_row_from_policy_context_v1(
       'mobile_cash_policy',
-      jsonb_build_object('organization_id', v_org, 'user_id', v_user_id)
-    )
-    INTO v_policy;
+      jsonb_build_object('organization_id', v_org)
+    ) AS policy;
   EXCEPTION WHEN OTHERS THEN
     v_policy := '{}'::jsonb;
   END;
