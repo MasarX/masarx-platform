@@ -28,6 +28,8 @@ BEGIN
     RAISE EXCEPTION 'Intake ledger handoff requires empty ledgers';
   END IF;
 
+  -- The API contract reconciliation creates this alias before the canonical ledger exists.
+  DROP VIEW IF EXISTS api.intake_auth_rejections RESTRICT;
   DROP VIEW public.v_intake_auth_rejection_directory RESTRICT;
   DROP TABLE public.intake_auth_rejections, public.webhook_source_token_history RESTRICT;
 END;

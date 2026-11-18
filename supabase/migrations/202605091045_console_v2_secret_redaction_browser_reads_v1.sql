@@ -14,8 +14,6 @@ SELECT pg_advisory_lock(hashtext('202605091045_console_v2_secret_redaction_brows
 SET search_path TO public, vault, extensions, pg_temp;
 SET LOCAL lock_timeout = '30s';
 
-CREATE EXTENSION IF NOT EXISTS supabase_vault CASCADE;
-
 DROP VIEW IF EXISTS public.v_webhook_source_directory;
 
 CREATE VIEW public.v_webhook_source_directory

@@ -12,8 +12,6 @@ SELECT pg_advisory_lock(hashtext('202605091100_console_v2_provider_account_route
 SET search_path TO public, vault, extensions, pg_temp;
 SET LOCAL lock_timeout = '30s';
 
-CREATE EXTENSION IF NOT EXISTS supabase_vault CASCADE;
-
 CREATE OR REPLACE FUNCTION public.ui_bind_provider_account_credential_v1(p_args jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql

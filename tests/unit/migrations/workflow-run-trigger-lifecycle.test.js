@@ -17,8 +17,11 @@ describe('F641 workflow trigger lifecycle source contract (not DB execution)', (
     expect(pg).not.toMatch(/PERFORM (?:ok|is|throws_ok)\(|\b(?:skip|todo)\(/i);
     expect(pg).toContain('CREATE FUNCTION pg_temp.f641_prior_trigger_tests() RETURNS SETOF TEXT');
     expect(pg).toContain('SELECT * FROM pg_temp.f641_prior_trigger_tests();');
-    expect(pg.match(/set_config\('request.jwt.claim.role', 'authenticated', true\)/g)).toHaveLength(2);
-    expect(pg.match(/set_config\('request.jwt.claims', jsonb_build_object\('sub', v_user_(?:client_admin|sender), 'role', 'authenticated'\)/g)).toHaveLength(2);
+    const scalarActors = [...pg.matchAll(/set_config\('request.jwt.claim.sub', (v_user_\w+)::text, true\)/g)];
+    const claimActors = [...pg.matchAll(/set_config\('request.jwt.claims', jsonb_build_object\('sub', (v_user_\w+), 'role', 'authenticated'\)/g)];
+    expect(claimActors.map((match) => match[1])).toEqual(scalarActors.map((match) => match[1]));
+    expect(new Set(claimActors.map((match) => match[1]))).toEqual(new Set(['v_user_client_admin', 'v_user_platform', 'v_user_sender']));
+    expect(pg).toContain("SET LOCAL ROLE authenticated");
     expect(pg).toContain('BEGIN;');
     expect(pg).toContain('ROLLBACK;');
   });

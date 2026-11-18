@@ -1,5 +1,5 @@
 -- Plan: PLAN-202601-workflow-trigger-plugins-v1 / Step: S95
--- pgTAP: workflow_run_triggers are row-driven and gated by workflows.write.
+-- pgTAP: workflow_run_triggers are row-driven and gated by workflow_runs.write.
 SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
@@ -173,7 +173,7 @@ BEGIN
     'scope_id stored from current_user_scope_id()'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT source_statuses FROM public.workflow_run_triggers WHERE id = v_trigger_id),
     ARRAY['succeeded']::TEXT[],
     'legacy completed trigger status is canonicalized to succeeded'
@@ -182,6 +182,7 @@ BEGIN
   EXECUTE 'RESET ROLE';
 
   PERFORM set_config('request.jwt.claim.sub', v_user_platform::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user_platform, 'role', 'authenticated')::TEXT, TRUE);
   EXECUTE 'SET LOCAL ROLE authenticated';
 
   SELECT (
@@ -195,24 +196,24 @@ BEGIN
     )->>'workflow_run_trigger_id'
   )::uuid INTO v_platform_trigger_id;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_platform_trigger_id IS NOT NULL,
     'platform operator can create workflow run trigger without unsupported platform scope'
   );
 
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  PERFORM ok(
+  RETURN NEXT ok(
     (SELECT scope_type FROM public.workflow_run_triggers WHERE id = v_platform_trigger_id) = 'tenant',
     'platform operator trigger is normalized to tenant scope_type'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     (SELECT scope_id FROM public.workflow_run_triggers WHERE id = v_platform_trigger_id) = v_org,
     'platform operator trigger uses caller organization as tenant scope_id'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT source_statuses FROM public.workflow_run_triggers WHERE id = v_platform_trigger_id),
     ARRAY['succeeded']::TEXT[],
     'platform trigger stores canonical succeeded source status'
@@ -221,6 +222,7 @@ BEGIN
   EXECUTE 'RESET ROLE';
 
   PERFORM set_config('request.jwt.claim.sub', v_user_platform::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user_platform, 'role', 'authenticated')::TEXT, TRUE);
   EXECUTE 'SET LOCAL ROLE authenticated';
 
   SELECT (
@@ -235,25 +237,25 @@ BEGIN
     )->>'workflow_run_trigger_id'
   )::uuid INTO v_platform_active_trigger_id;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_platform_active_trigger_id IS NOT NULL,
     'platform operator can create workflow run trigger for selected active tenant scope'
   );
 
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  PERFORM ok(
+  RETURN NEXT ok(
     (SELECT scope_id FROM public.workflow_run_triggers WHERE id = v_platform_active_trigger_id) = v_active_org,
     'platform operator trigger uses selected active tenant scope_id when provided'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT source_statuses FROM public.workflow_run_triggers WHERE id = v_platform_active_trigger_id),
     ARRAY['succeeded']::TEXT[],
     'platform active tenant trigger stores canonical succeeded source status'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     NOT EXISTS (
       SELECT 1
       FROM public.workflow_run_triggers
@@ -291,7 +293,7 @@ BEGIN
     'ui_create_workflow_run_trigger_v1 active tenant scope_id is not allowed for this actor'
   );
 
-  PERFORM throws_ok(
+  RETURN NEXT throws_ok(
     format(
       $sql$
         SELECT public.ui_create_workflow_run_trigger_v1(
@@ -333,7 +335,7 @@ BEGIN
       v_target_template
     ),
     '42501',
-    'Capability denied: workflows.write'
+    'Capability denied: workflow_runs.write'
   );
 
   EXECUTE 'RESET ROLE';
