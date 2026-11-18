@@ -26,6 +26,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
 
   return (
     <div
+      data-theme-toggle
       className={cn(
         "rounded-2xl border border-ui-accent/15 bg-ui-highlight/40 p-3 text-xs text-ui-muted shadow-soft",
         className
@@ -34,7 +35,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
       <label
         id={labelId}
         htmlFor={selectId}
-        className="text-[10px] uppercase tracking-wide text-ui-muted"
+        className="text-[10px] tracking-wide text-ui-muted"
       >
         {t("label")}
       </label>
@@ -52,7 +53,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
       </Select>
       <div
         id={statusId}
-        className="mt-2 text-[10px] uppercase tracking-wide text-ui-muted"
+        className="mt-2 text-[10px] tracking-wide text-ui-muted"
       >
         {activeLabel}
       </div>

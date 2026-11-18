@@ -4,6 +4,8 @@ import type { DisplayRow } from "./row-types";
 import type { RowDensity } from "./density";
 import type { TranslateFn } from "./types";
 import { EmptyState } from "../empty-state";
+import { Button } from "../button";
+import { isTrustedUrl } from "../url-guard";
 import { PlusIcon } from "../icons";
 import { cn } from "../utils";
 
@@ -86,6 +88,10 @@ type TableBodyProps = {
   renderRow: (row: DisplayRow, rowIndex: number) => React.ReactNode;
   onCreateRow?: () => void;
   createRowLabel?: string;
+  /** Human-readable resource name for contextual empty states (e.g. "shipments"). */
+  resourceLabel?: string | null;
+  /** Link to creation page for the CTA button in the empty state. */
+  createHref?: string | null;
 };
 
 export function TableBody({
@@ -105,6 +111,8 @@ export function TableBody({
   renderRow,
   onCreateRow,
   createRowLabel,
+  resourceLabel,
+  createHref,
 }: TableBodyProps) {
   const emptyPadding = cn("px-6", rowDensity === "compact" ? "py-8" : "py-12");
   return (
@@ -130,14 +138,26 @@ export function TableBody({
               title={
                 clientFilterActive
                   ? t("table.noSearchResults")
-                  : emptyMessage ?? t("table.noRecords")
+                  : emptyMessage
+                    ?? (resourceLabel
+                      ? [t("table.noRecords"), resourceLabel].join(" ")
+                      : t("table.noRecords"))
               }
               description={
                 clientFilterActive
                   ? t("table.noSearchResultsHint")
                   : t("table.noRecordsHint")
               }
-              action={emptyAction}
+              action={
+                emptyAction ?? (createHref && resourceLabel && isTrustedUrl(createHref) ? (
+                  <Button size="sm" variant="solid" asChild>
+                    <a href={createHref}>
+                      <PlusIcon className="me-1 h-3 w-3" />
+                      {t("actions.create")}
+                    </a>
+                  </Button>
+                ) : null)
+              }
             />
           </td>
         </tr>

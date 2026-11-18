@@ -132,6 +132,46 @@
 }
 
 /* ── Table keyframe animations ── */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.ui-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--ui-border) / 0.3) 25%,
+    rgb(var(--ui-border) / 0.6) 50%,
+    rgb(var(--ui-border) / 0.3) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+/* ── Table keyframe animations ── */
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-shimmer {
+    animation: none;
+  }
+}
+
+@media print {
+  .table-scrollbar {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .table-scrollbar table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .table-scrollbar th,
+  .table-scrollbar td {
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+  }
+}
+
 @keyframes table-slide-down {
   from {
     opacity: 0;

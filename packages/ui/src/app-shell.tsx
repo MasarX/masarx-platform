@@ -5,6 +5,9 @@ import { usePathname } from "next/navigation";
 import { getUiDefaults } from "@masarx/config";
 import { Drawer, DrawerClose, DrawerContent } from "./drawer";
 import { createUiTranslator } from "./i18n";
+import { KeyboardShortcutsHelp } from "./keyboard-shortcuts-help";
+import { useKeyboardShortcuts, type ShortcutDef } from "./hooks/use-keyboard-shortcuts";
+import { formatReferenceValue } from "./resource-utils";
 import {
   buildLegacyNavigationStorageKey,
   buildNavigationStorageKey,
@@ -16,7 +19,7 @@ import { useUiNavigation } from "./ui-navigation-context";
 import { normalizePath } from "./navigation-paths";
 import { reportUiEvent } from "./reporting";
 import { cn } from "./utils";
-import { resolveSafeAppBasePath } from "./url-guard";
+import { resolveSafeAppBasePath, resolveSafeHref, isTrustedUrl } from "./url-guard";
 
 const uiDefaults = getUiDefaults();
 
@@ -43,6 +46,7 @@ type AppShellLayoutProps = Omit<
 type BreadcrumbMatch = {
   section: NavigationSection;
   trail: NavigationItem[];
+  tail: Array<{ label: string; href: string | null }>;
 } | null;
 
 function buildBreadcrumbTrail({
@@ -55,7 +59,7 @@ function buildBreadcrumbTrail({
   basePath?: string;
 }): BreadcrumbMatch {
   const safeBasePath = resolveSafeAppBasePath(basePath ?? "");
-  let best: { score: number; section: NavigationSection; trail: NavigationItem[] } | null = null;
+  const matches: Array<{ score: number; section: NavigationSection; trail: NavigationItem[]; path: string }> = [];
   const normalizedBasePath = safeBasePath ?? undefined;
   const normalizedPathname = normalizePath(pathname, normalizedBasePath);
 
@@ -75,10 +79,8 @@ function buildBreadcrumbTrail({
         item.href &&
         isActivePath(normalizedPathname, item.href, normalizedBasePath)
       ) {
-        const score = normalizePath(item.href, normalizedBasePath).length;
-        if (!best || score > best.score) {
-          best = { score, section, trail: nextTrail };
-        }
+        const path = normalizePath(item.href, normalizedBasePath);
+        matches.push({ score: path.length, section, trail: nextTrail, path });
       }
       if (Array.isArray(item.items) && item.items.length > 0) {
         walk({ section, items: item.items, trail: nextTrail });
@@ -90,7 +92,22 @@ function buildBreadcrumbTrail({
     walk({ section, items: section.items, trail: [] });
   }
 
-  return best;
+  const best = matches.sort((left, right) => right.score - left.score)[0];
+  if (!best) return null;
+  const parts = normalizedPathname.startsWith(best.path + "/")
+    ? normalizedPathname.slice(best.path.length + 1).split("/").filter(Boolean)
+    : [];
+  let path = best.path;
+  const tail = parts.map((part, index) => {
+    path += "/" + part;
+    let label = part;
+    try { label = decodeURIComponent(part); } catch { /* Keep malformed route text escaped. */ }
+    return {
+      label: formatReferenceValue(label),
+      href: index === parts.length - 1 ? null : resolveSafeHref(normalizedBasePath ?? "", path),
+    };
+  });
+  return { section: best.section, trail: best.trail, tail };
 }
 
 function AppShellBreadcrumbs() {
@@ -116,7 +133,7 @@ function AppShellBreadcrumbs() {
       <ol className="flex flex-wrap items-center gap-1 text-[11px] font-medium text-ui-muted">
         <li className="truncate">{match.section.label}</li>
         {crumbs.map((crumb, index) => {
-          const isLast = index === crumbs.length - 1;
+          const isLast = index === crumbs.length - 1 && match.tail.length === 0;
           const separator = (
             <span className="px-1 text-ui-muted/60" aria-hidden>
               /
@@ -124,7 +141,7 @@ function AppShellBreadcrumbs() {
           );
           const content = isLast ? (
             <span className="truncate text-ui-ink">{crumb.label}</span>
-          ) : crumb.href ? (
+          ) : crumb.href && isTrustedUrl(crumb.href) ? (
             <a
               href={crumb.href}
               className="truncate transition hover:text-ui-ink"
@@ -142,6 +159,12 @@ function AppShellBreadcrumbs() {
             </React.Fragment>
           );
         })}
+        {match.tail.map((segment, index) => (
+          <li key={index} className="max-w-[220px] truncate">
+            <span className="px-1 text-ui-muted/60" aria-hidden>/</span>
+            {segment.href ? <a href={segment.href}>{segment.label}</a> : <span aria-current="page">{segment.label}</span>}
+          </li>
+        ))}
       </ol>
     </nav>
   );
@@ -157,6 +180,13 @@ function AppShellLayout({
 }: AppShellLayoutProps) {
   const t = createUiTranslator("ui.appShell");
   const navT = createUiTranslator("ui.navigation");
+  const [shortcutHelpOpen, setShortcutHelpOpen] = React.useState(false);
+  const shellShortcuts: ShortcutDef[] = [{
+    combo: "?",
+    action: () => setShortcutHelpOpen((open) => !open),
+    description: "Show keyboard shortcuts",
+  }];
+  useKeyboardShortcuts(shellShortcuts);
   const {
     sidebarCollapsed,
     toggleSidebarCollapsed,
@@ -235,11 +265,12 @@ function AppShellLayout({
       <nav aria-label={t("skipToContent")}>
         <a
           href="#main-content"
-          className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-ui-surface focus:px-3 focus:py-2 focus:text-sm focus:text-ui-ink focus:shadow-soft focus:outline-none"
+          className="sr-only focus:fixed focus:start-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-ui-surface focus:px-3 focus:py-2 focus:text-sm focus:text-ui-ink focus:shadow-soft focus:outline-none"
         >
           {t("skipToContent")}
         </a>
       </nav>
+      <KeyboardShortcutsHelp open={shortcutHelpOpen} onOpenChange={setShortcutHelpOpen} shortcuts={shellShortcuts} />
       <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
         <DrawerContent side="left" className="max-w-xs">
           <div className="flex items-center justify-between gap-3">
@@ -284,7 +315,7 @@ function AppShellLayout({
             "hidden shrink-0 bg-ui-paper lg:block lg:transition-all",
             sidebarCollapsed
               ? "lg:w-0 lg:overflow-hidden lg:opacity-0 lg:pointer-events-none"
-              : "lg:w-72 lg:border-r lg:border-ui-border/70"
+              : "lg:w-72 lg:border-e lg:border-ui-border/70"
           )}
           aria-hidden={sidebarCollapsed || undefined}
           data-testid={`${testIdPrefix}-app-shell-sidebar`}

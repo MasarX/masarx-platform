@@ -258,6 +258,14 @@ export type UiReadResourceImport = {
   disabled_reason?: string | null;
 };
 
+export type UiReadResourceCreate = {
+  enabled?: boolean | null;
+  capability?: string | null;
+  route?: string | null;
+  label?: string | null;
+  disabled_reason?: string | null;
+};
+
 export type UiReadResource = {
   key: string;
   label?: string | null;
@@ -279,6 +287,7 @@ export type UiReadResource = {
   default_sort?: { column?: string | null; direction?: string | null } | null;  
   download?: UiReadDownload | null;
   import?: UiReadResourceImport | null;
+  create?: UiReadResourceCreate | null;
 };
 
 export type UiReadRegistry = {
@@ -334,15 +343,25 @@ export type UiCommandConfirm = {
   cancel_label?: string | null;
 };
 
+export type UiCommandInputFieldResourceLookup = {
+  resource: string;
+  value_key?: string | null;
+  label_keys?: string[] | null;
+  search_keys?: string[] | null;
+  filters?: Record<string, unknown> | null;
+  limit?: number | null;
+};
+
 export type UiCommandInputField = {
   key: string;
   label: string;
-  type?: "text" | "textarea" | "lookup" | "number" | null;
+  type?: "text" | "textarea" | "lookup" | "resource_lookup" | "date" | "number" | null;
   required?: boolean | null;
   placeholder?: string | null;
   lookup_category?: string | null;
   lookup_rpc?: string | null;
   lookup_selection_param?: string | null;
+  resource_lookup?: UiCommandInputFieldResourceLookup | null;
   default_value?: unknown;
 };
 

@@ -1,5 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+
+function collectDirectResponseHeaders(source) {
+  const matches = [...source.matchAll(/new Response\([^)]*,\s*\{([^}]*)\}/g)];
+  return matches.map((match) => match[1]);
+}
+
 describe('ui-resource-download browser contract', () => {
   test('function source handles preflight and emits CORS response headers', () => {
     const helperPath = path.join(
@@ -22,6 +28,12 @@ describe('ui-resource-download browser contract', () => {
     expect(functionSource).toContain('from "../_shared/cors.mjs"');
     expect(functionSource).toContain('withCorsJson(');
     expect(functionSource).toContain('db: { schema: "api" }');
+
+    const directResponseHeaders = collectDirectResponseHeaders(functionSource);
+    expect(directResponseHeaders.length).toBeGreaterThan(0);
+    for (const headers of directResponseHeaders) {
+      expect(headers).toContain('headers: corsHeaders');
+    }
   });
 
   test('edge registry deploys ui-resource-download with public_no_jwt', () => {

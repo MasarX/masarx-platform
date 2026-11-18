@@ -399,7 +399,8 @@
         "noRoute": "This page is currently unavailable.",
         "missingCapability": "You do not have access to this page.",
         "unavailable": "This page is currently unavailable."
-      }
+      },
+      "mainLabel": "Main navigation"
     },
     "commandPalette": {
       "title": "Command palette",
@@ -414,7 +415,8 @@
         "favorites": "Favorites",
         "recents": "Recents",
         "navigation": "Navigation",
-        "commands": "Commands"
+        "commands": "Commands",
+        "resources": "Resources"
       },
       "labels": {
         "navigation": "Navigation",
@@ -439,7 +441,18 @@
       "layoutFullLabel": "Full width",
       "layoutContainedLabel": "Contained width",
       "layoutFullAria": "Switch to full width",
-      "layoutContainedAria": "Switch to contained width"
+      "layoutContainedAria": "Switch to contained width",
+      "pinLabel": "Pin",
+      "shortcuts": {
+        "showKeyboardShortcuts": "Show keyboard shortcuts",
+        "toggleSidebar": "Toggle sidebar",
+        "openCommandPalette": "Open command palette",
+        "goToDashboard": "Go to dashboard",
+        "goToShipments": "Go to shipments",
+        "goToRoutes": "Go to routes",
+        "createNewShipment": "Create new shipment",
+        "focusTableSearch": "Focus table search"
+      }
     },
     "theme": {
       "label": "Theme",
@@ -701,6 +714,31 @@
         },
         "readbackUnverified": "Download opened; backend completion unverified",
         "readbackStopped": "Last readback: {detail} This panel is no longer checking backend completion. Open workflow outputs for current status."
+      },
+      "clone": "Clone",
+      "bulkAction": {
+        "shipments": {
+          "updateStatus": {
+            "label": "Update status",
+            "description": "Batch status change for selected shipments",
+            "confirmTitle": "Confirm status update",
+            "confirmDescription": "Update status for {count} shipments.",
+            "inputTitle": "New status",
+            "statusLabel": "Status"
+          },
+          "assignRoute": {
+            "label": "Assign to route",
+            "description": "Assign selected shipments to a route",
+            "confirmTitle": "Confirm route assignment",
+            "confirmDescription": "Assign {count} shipments to the selected route.",
+            "inputTitle": "Route",
+            "routeLabel": "Route"
+          },
+          "exportCsv": {
+            "label": "Export selected",
+            "description": "Export selected shipments to CSV"
+          }
+        }
       }
     },
     "resourceDownload": {
@@ -904,7 +942,8 @@
         "myDay": {
           "title": "My Day",
           "assigned": "{count} assigned to you",
-          "unavailable": "Your assigned-review count could not be loaded."
+          "unavailable": "Your assigned-review count could not be loaded.",
+          "description": "Assigned task queue filtered to the current operator."
         },
         "title": "Command center",
         "description": "Operator lanes, queue counts, command coverage, and registry readback from UI rows.",
@@ -944,6 +983,40 @@
           "openLane": "Open lane",
           "openCommands": "Open commands",
           "permissionRequired": "Read permission required."
+        },
+        "records": "registry readback",
+        "status": {
+          "ready": "Ready",
+          "restricted": "Restricted",
+          "unavailable": "Unavailable"
+        },
+        "actions": {
+          "openMyDay": "Open My Day",
+          "openDecisions": "Open decisions",
+          "settings": "Request settings change",
+          "access": "Request access policy",
+          "printLabels": "Open label command",
+          "openShipments": "Open shipments"
+        },
+        "decisions": {
+          "title": "Decisions feed",
+          "description": "Manual approvals and workflow decisions awaiting action."
+        },
+        "settings": {
+          "title": "Settings-change request",
+          "description": "Workflow-backed request path for scoped settings changes."
+        },
+        "access": {
+          "title": "Access-policy request",
+          "description": "Approval-backed path for policy and capability changes."
+        },
+        "printLabels": {
+          "title": "Print-label command",
+          "description": "Command-registry entry for shipment label printing."
+        },
+        "shipments": {
+          "title": "Shipment follow-up",
+          "description": "Open shipment records for label, status, and task readback."
         }
       },
       "quickActionsTitle": "Quick actions",
@@ -958,7 +1031,21 @@
       "modulesEmpty": "Navigation modules load once capabilities are assigned.",
       "moduleUnavailable": "Unavailable",
       "moduleRecords": "{count} records",
-      "moduleOpen": "Open module"
+      "moduleOpen": "Open module",
+      "metricsTitle": "Key metrics",
+      "metricsSubtitle": "Operational metrics summary.",
+      "metricsTotalShipments": "Total shipments",
+      "metricsActiveDeliveries": "Active deliveries",
+      "metricsPendingExceptions": "Pending exceptions",
+      "metricsDeliveryRate": "Delivery rate",
+      "metricsDonutTitle": "Shipment status",
+      "metricsDonutCenter": "Total",
+      "metricsStatusDelivered": "Delivered",
+      "metricsStatusInTransit": "In Transit",
+      "metricsStatusOutForDelivery": "Out for Delivery",
+      "metricsStatusExceptions": "Exceptions",
+      "metricsStatusPending": "Pending",
+      "metricsVsPrior": "vs prior"
     },
     "routeOperations": {
       "unknown": "unknown",
@@ -1270,7 +1357,8 @@
         "manage": "Manage commands",
         "import": "Import",
         "importDisabled": "Import is not configured for this table yet.",
-        "importRequiresCapability": "Import requires the {capability} capability."
+        "importRequiresCapability": "Import requires the {capability} capability.",
+        "createResource": "Create {resource}"
       },
       "table": {
         "empty": "No records returned for this resource."
@@ -1312,10 +1400,16 @@
               "success": "Order saved.",
               "error": "Unable to save order."
             }
-          }
+          },
+          "emptyForResource": "No {resource} found for this record."
         },
         "tabs": {
-          "details": "Details"
+          "details": "Details",
+          "activity": "Activity"
+        },
+        "comments": {
+          "empty": "No comments yet",
+          "emptyHint": "Comments will be available once the commenting feature is enabled for your organization."
         }
       },
       "errors": {
@@ -1335,6 +1429,19 @@
       },
       "commands": {
         "requiresCapability": "Requires {capability} capability."
+      },
+      "openMode": {
+        "title": "Open",
+        "label": "Open records in",
+        "peek": "Side peek",
+        "full": "Full page",
+        "modal": "Center peek",
+        "helper": "Controls where record details open when you select a row."
+      },
+      "internalIds": {
+        "title": "Internal IDs",
+        "toggle": "Show internal IDs",
+        "helper": "Expose internal UUID hints as secondary metadata alongside business identifiers."
       }
     },
     "workflowStudio": {
@@ -1754,7 +1861,10 @@
                 "schedule": "Schedule",
                 "scheduleManual": "Schedule (manual)",
                 "workflowRunTrigger": "Workflow run trigger",
-                "unknown": "Unknown"
+                "unknown": "Unknown",
+                "api": "API",
+                "worker": "Worker",
+                "task": "Task"
               },
               "fields": {
                 "runId": "Activity reference",
@@ -2147,7 +2257,9 @@
         "addSort": "Add sort",
         "addSortPlaceholder": "Select a column",
         "removeChipAria": "Remove filter",
-        "clearAll": "Clear all"
+        "clearAll": "Clear all",
+        "saveFiltersAsView": "Save view",
+        "saveFiltersAsViewTitle": "Save current filters as a named view"
       },
       "toolbar": {
         "hideView": "Hide view",
@@ -2329,7 +2441,12 @@
         "noColumnsHint": "Select at least one column to display table data.",
         "showColumns": "Show columns",
         "clearSearch": "Clear search",
-        "clearFilters": "Clear filters"
+        "clearFilters": "Clear filters",
+        "noResourceRecords": "No {resource} yet.",
+        "noResourceRecordsHint": "Create your first {resource} to get started.",
+        "createResource": "Create {resource}",
+        "noFilterResults": "No records match the active filters.",
+        "noFilterResultsHint": "Adjust or clear the filters to show matching records."
       },
       "group": {
         "empty": "Unspecified",
@@ -2841,7 +2958,8 @@
         "submitFailed": "Unable to submit settings request.",
         "settingsRequestRpcUnavailable": "Settings request service is syncing. Retry in a few seconds.",
         "unavailableTitle": "Settings requests are unavailable.",
-        "unavailableAction": "Confirm settings registry access, then refresh or sign in again."
+        "unavailableAction": "Confirm settings registry access, then refresh or sign in again.",
+        "scopeNotAllowed": "Selected scope is not available for this settings category."
       }
     },
     "settings": {},
@@ -2976,7 +3094,9 @@
         "pdfError": "PDF load failed: {error}",
         "zoomFit": "Fit",
         "prevPage": "Prev",
-        "nextPage": "Next"
+        "nextPage": "Next",
+        "showDebug": "Show raw response (debug)",
+        "hideDebug": "Hide raw response"
       },
       "assets": {
         "title": "Assets",
@@ -3088,6 +3208,225 @@
         "key": "Key",
         "noDifferences": "No differences found."
       }
+    },
+    "charts": {
+      "noData": "No data",
+      "noDataAvailable": "No data available"
+    },
+    "shipmentStepper": {
+      "ariaLabel": "Shipment status progress",
+      "steps": {
+        "pending": "Pending",
+        "processing": "Processing",
+        "inTransit": "In Transit",
+        "outForDelivery": "Out for Delivery",
+        "delivered": "Delivered"
+      }
+    },
+    "reporting": {
+      "title": "Reporting & Analytics",
+      "subtitle": "Operational metrics and trends.",
+      "errors": {
+        "loadFailed": "Unable to load reporting data."
+      },
+      "unavailableTitle": "Reporting unavailable.",
+      "emptyTitle": "No reporting data available.",
+      "emptyDescription": "Connect a reporting data source or create shipments to view analytics.",
+      "dateRangeLabel": "Date range",
+      "range7d": "Last 7 days",
+      "range30d": "Last 30 days",
+      "range90d": "Last 90 days",
+      "rangeAll": "All time",
+      "kpiTitle": "Key performance indicators",
+      "kpiTotalShipments": "Total shipments",
+      "kpiActiveDeliveries": "Active deliveries",
+      "kpiDelivered": "Delivered",
+      "kpiPendingExceptions": "Pending exceptions",
+      "kpiDeliveryRate": "Delivery rate",
+      "kpiPending": "Pending",
+      "statusTitle": "Shipment status distribution",
+      "statusCenter": "Total",
+      "statusDelivered": "Delivered",
+      "statusInTransit": "In transit",
+      "statusOutForDelivery": "Out for delivery",
+      "statusPending": "Pending",
+      "statusExceptions": "Exceptions",
+      "statusCancelled": "Cancelled",
+      "statusReturned": "Returned",
+      "trendTitle": "Daily shipment volume",
+      "exportCsv": "Export CSV"
+    },
+    "shipmentAmendCancel": {
+      "sectionTitle": "Amend / cancel",
+      "sectionDescription": "Temporary pre-dispatch lock is enforced only from shipment_operation_policy until route-freeze SSOT lands.",
+      "tracking": "Tracking",
+      "currentStatus": "Current status",
+      "unknown": "Unknown",
+      "lockSource": "Lock source",
+      "modifyShipment": "Modify shipment",
+      "serviceType": "Service type",
+      "serviceLevel": "Service level",
+      "clientReference": "Client reference",
+      "carrierReference": "Carrier reference",
+      "specialInstructions": "Special instructions",
+      "codAmount": "COD amount",
+      "metadataJson": "Metadata JSON",
+      "referencesJson": "References JSON",
+      "saving": "Saving...",
+      "applyModify": "Apply modify",
+      "allowedStatuses": "Allowed statuses",
+      "noStatusesConfigured": "No statuses configured",
+      "reschedule": "Reschedule",
+      "promisedDeliveryDate": "Promised delivery date",
+      "reserveSlot": "Reserve slot",
+      "updateAddress": "Update address",
+      "addressLine1": "Address line 1",
+      "addressLine2": "Address line 2",
+      "city": "City",
+      "provinceRegion": "Province / region",
+      "country": "Country",
+      "postalCode": "Postal code",
+      "district": "District",
+      "buildingNumber": "Building number",
+      "rawInputNotes": "Raw input / operator notes",
+      "additionalDirections": "Additional directions",
+      "applyAddressChange": "Apply address change",
+      "softCancelShipment": "Soft-cancel shipment",
+      "reason": "Reason",
+      "softCancel": "Soft-cancel",
+      "shipmentUpdated": "Shipment updated.",
+      "amendCancelFailed": "Shipment amend/cancel failed",
+      "amendCancelFailedMessage": "Shipment amend/cancel failed.",
+      "unsavedWarning": "You have unsaved shipment amendment changes. Are you sure you want to leave?"
+    },
+    "shipmentCreate": {
+      "organization": "Organization",
+      "unavailable": "Unavailable",
+      "sessionScope": "Session scope",
+      "requiresOrgSession": "Shipment create requires an organization-scoped session.",
+      "serviceTypeRequired": "Service type is required.",
+      "clientIdRequired": "Client ID is required for this scope.",
+      "noCreatePermission": "You do not have permission to create shipments.",
+      "permissionsUnavailable": "Shipment create permissions are unavailable.",
+      "noCreatePermissionSurface": "You do not have permission to create shipments from this surface.",
+      "permissionsUnavailableSession": "Shipment-create permissions are unavailable for this session.",
+      "shipmentCreated": "Shipment created",
+      "existingShipmentReused": "Existing shipment reused",
+      "createFailed": "Shipment create failed",
+      "backToShipments": "Back to shipments",
+      "creating": "Creating...",
+      "createShipment": "Create shipment",
+      "draftRestored": "Draft restored from a previous session.",
+      "keep": "Keep",
+      "discard": "Discard",
+      "coreShipment": "Core Shipment",
+      "recipient": "Recipient",
+      "destinationAddress": "Destination Address",
+      "originAddress": "Origin Address",
+      "boxes": "Boxes",
+      "boxLabel": "Box {number}",
+      "remove": "Remove",
+      "addBox": "+ Add box",
+      "referenceNumbers": "Reference Numbers",
+      "noReferences": "No reference numbers added.",
+      "addReference": "+ Add reference",
+      "clientScope": "Client scope",
+      "senderScope": "Sender scope",
+      "tenantScope": "Tenant scope",
+      "platformScope": "Platform scope",
+      "scopedSession": "Scoped session",
+      "fragile": "Fragile",
+      "optional": "optional",
+      "fieldFullAddress": "Full address",
+      "fieldCity": "City",
+      "fieldProvince": "Province",
+      "fieldCountry": "Country",
+      "fieldPostalCode": "Postal code",
+      "fieldBuildingNumber": "Building number",
+      "fieldAdditionalDirections": "Additional directions",
+      "fieldClient": "Client",
+      "fieldSender": "Sender",
+      "fieldServiceType": "Service type",
+      "fieldStatus": "Status",
+      "fieldTrackingNumber": "Tracking number",
+      "fieldClientReference": "Client reference",
+      "fieldCarrierReference": "Carrier reference",
+      "fieldName": "Name",
+      "fieldPhoneNumber": "Phone number",
+      "fieldEmail": "Email",
+      "fieldPreferredLanguage": "Preferred language",
+      "fieldBoxNumber": "Box number",
+      "fieldWeightKg": "Weight (kg)",
+      "fieldLengthCm": "Length (cm)",
+      "fieldWidthCm": "Width (cm)",
+      "fieldHeightCm": "Height (cm)",
+      "fieldContentsDescription": "Contents description",
+      "fieldType": "Type",
+      "fieldValue": "Value"
+    },
+    "shipmentCreatePage": {
+      "title": "Create shipment",
+      "description": "Create a shipment with all related details — recipient, addresses, boxes, and references — in a single form.",
+      "sectionTitle": "Shipment details",
+      "sectionDescription": "Fill in the shipment core fields. Expand additional sections to add recipient, addresses, boxes, and reference numbers."
+    },
+    "notificationCenter": {
+      "title": "Notifications",
+      "markAllRead": "Mark all read",
+      "noNotifications": "No notifications"
+    },
+    "keyboardShortcutsHelp": {
+      "title": "Keyboard shortcuts"
+    },
+    "podViewer": {
+      "capturedAt": "Captured at",
+      "receivedBy": "Received by",
+      "completion": "Completion",
+      "otpVerified": "OTP verified",
+      "confirmed": "Confirmed",
+      "notConfirmed": "Not confirmed",
+      "gpsLocation": "GPS location",
+      "accuracy": "{meters}m accuracy",
+      "photos": "Photos ({count})",
+      "photoAlt": "POD photo {number}",
+      "signature": "Signature",
+      "signatureAlt": "Delivery signature",
+      "notes": "Notes",
+      "photoEnlarged": "POD photo enlarged"
+    },
+    "integrationHealth": {
+      "total": "Total",
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "down": "Down",
+      "integration": "Integration",
+      "type": "Type",
+      "status": "Status",
+      "successPercent": "Success %",
+      "calls": "Calls",
+      "avgResponse": "Avg Response"
+    },
+    "dispatchBoard": {
+      "unassigned": "Unassigned",
+      "allJobsAssigned": "All jobs assigned",
+      "drivers": "Drivers",
+      "eta": "ETA",
+      "noJobsDropHere": "No jobs — drop here to assign"
+    },
+    "commentThread": {
+      "noComments": "No comments yet",
+      "unknownUser": "Unknown",
+      "placeholder": "Write a comment...",
+      "send": "Send"
+    },
+    "onboardingChecklist": {
+      "defaultTitle": "Getting started",
+      "allCompleted": "All steps completed!",
+      "progress": "{completed} of {total} steps completed",
+      "dismissAriaLabel": "Dismiss onboarding checklist"
+    },
+    "kanbanBoard": {
+      "noItems": "No items"
     }
   }
 }

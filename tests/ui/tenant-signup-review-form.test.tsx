@@ -20,6 +20,10 @@ jest.mock("../../packages/ui/src/reporting", () => {
   };
 });
 
+jest.mock("../../packages/ui/src/use-toast", () => ({
+  useToast: () => ({ toast: jest.fn() }),
+}));
+
 beforeEach(() => {
   jest.clearAllMocks();
 });
@@ -32,6 +36,10 @@ test("tenant signup review form emits submit telemetry", () => {
     <TenantSignupReviewForm
       action={action}
       requestId="4f3e8ae5-f9f4-4fb1-baa1-943ca0d0bb77"
+      decisionOptions={[
+        { value: "approved", label: "Approve tenant onboarding" },
+        { value: "rejected", label: "Reject tenant onboarding" },
+      ]}
       testIdPrefix="tenant-signup"
       telemetry={{
         settingsResolutionId: "res-1",
@@ -64,7 +72,11 @@ test("tenant signup review form emits result telemetry on error", () => {
   const view = render(
     <TenantSignupReviewForm
       action={action}
-      requestId="fd2aef73-39b0-4b16-a5f5-365d7af8a2cb"
+      requestId="00000000-0000-4000-8000-000000000149"
+      decisionOptions={[
+        { value: "approved", label: "Approve tenant onboarding" },
+        { value: "rejected", label: "Reject tenant onboarding" },
+      ]}
       testIdPrefix="tenant-signup"
       telemetry={{
         settingsResolutionId: "res-2",
@@ -80,7 +92,11 @@ test("tenant signup review form emits result telemetry on error", () => {
   view.rerender(
     <TenantSignupReviewForm
       action={action}
-      requestId="fd2aef73-39b0-4b16-a5f5-365d7af8a2cb"
+      requestId="00000000-0000-4000-8000-000000000149"
+      decisionOptions={[
+        { value: "approved", label: "Approve tenant onboarding" },
+        { value: "rejected", label: "Reject tenant onboarding" },
+      ]}
       testIdPrefix="tenant-signup"
       telemetry={{
         settingsResolutionId: "res-2",
@@ -112,7 +128,11 @@ test("tenant signup review form renders approval redirect guidance", () => {
   render(
     <TenantSignupReviewForm
       action={action}
-      requestId="fd2aef73-39b0-4b16-a5f5-365d7af8a2cb"
+      requestId="00000000-0000-4000-8000-000000000149"
+      decisionOptions={[
+        { value: "approved", label: "Approve tenant onboarding" },
+        { value: "rejected", label: "Reject tenant onboarding" },
+      ]}
       defaultInviteRedirectTo="https://yguwjnwkkqutolgwughjsloj.example.invalid/auth/callback"
       testIdPrefix="tenant-signup"
     />,
@@ -120,4 +140,40 @@ test("tenant signup review form renders approval redirect guidance", () => {
 
   expect(screen.getByText("Invite redirect (required for approval)")).toBeInTheDocument();
   expect(screen.getByDisplayValue("https://yguwjnwkkqutolgwughjsloj.example.invalid/auth/callback")).toBeInTheDocument();
+});
+
+test("tenant signup review form renders lookup-provided decision labels", () => {
+  formState = { status: "idle", message: undefined };
+  const action = jest.fn(async () => ({ status: "success" as const }));
+  const requestId = "00000000-0000-4000-8000-000000000149";
+
+  render(
+    <TenantSignupReviewForm
+      action={action}
+      requestId={requestId}
+      decisionOptions={[
+        { value: "approved", label: "Approve and provision tenant" },
+        { value: "rejected", label: "Reject with onboarding reason" },
+      ]}
+      testIdPrefix="tenant-signup"
+    />,
+  );
+
+  const select = screen.getByTestId("tenant-signup-decision");
+  const form = screen.getByTestId("tenant-signup-form");
+  const hiddenRequestId = form.querySelector<HTMLInputElement>('input[name="request_id"]');
+  const approveOption = select.querySelector<HTMLOptionElement>('option[value="approved"]');
+  const rejectOption = select.querySelector<HTMLOptionElement>('option[value="rejected"]');
+
+  expect(select).toHaveTextContent("Approve and provision tenant");
+  expect(select).toHaveTextContent("Reject with onboarding reason");
+  expect(approveOption?.textContent).toBe("Approve and provision tenant");
+  expect(rejectOption?.textContent).toBe("Reject with onboarding reason");
+  expect(select).not.toHaveTextContent("approved");
+  expect(select).not.toHaveTextContent("rejected");
+  expect(select).not.toHaveTextContent("Approve</option>");
+  expect(hiddenRequestId).toBeTruthy();
+  expect(hiddenRequestId?.type).toBe("hidden");
+  expect(hiddenRequestId?.value).toBe(requestId);
+  expect(screen.queryByText(requestId)).not.toBeInTheDocument();
 });

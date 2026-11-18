@@ -81,18 +81,18 @@ export function getAggregationValue(
   }
 }
 
-export function formatMetricValue(value: number | null | undefined) {
+export function formatMetricValue(value: number | null | undefined, locale = "en-US") {
   if (value === null || value === undefined) return "-";
   if (!Number.isFinite(value)) return "-";
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(locale, {
     maximumFractionDigits: 2,
   }).format(value);
 }
 
-export function formatPercentValue(value: number | null | undefined) {
+export function formatPercentValue(value: number | null | undefined, locale = "en-US") {
   if (value === null || value === undefined) return null;
   if (!Number.isFinite(value)) return null;
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(locale, {
     maximumFractionDigits: 0,
   }).format(value);
 }

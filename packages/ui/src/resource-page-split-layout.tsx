@@ -285,8 +285,8 @@ export function ResourcePageSplitLayout({
   if (!enabled) {
     return (
       <div className="space-y-4">
-        {table}
-        {detail ? <div>{detail}</div> : null}
+        {React.Children.toArray(table)}
+        {detail ? <div>{React.Children.toArray(detail)}</div> : null}
       </div>
     );
   }
@@ -296,7 +296,7 @@ export function ResourcePageSplitLayout({
       ref={containerRef as React.Ref<HTMLDivElement>}
       className="space-y-4 md:flex md:items-start md:gap-4 md:space-y-0"
     >
-      <div className="space-y-3 md:min-w-0 md:flex-1">{table}</div>
+      <div className="space-y-3 md:min-w-0 md:flex-1">{React.Children.toArray(table)}</div>
       <div
         className={cn(
           "relative w-full md:flex-none md:w-[var(--ui-detail-panel-width)]",
@@ -327,7 +327,7 @@ export function ResourcePageSplitLayout({
           <span className="sr-only">{t("resizeAria")}</span>
           <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-ui-border/70" />
         </button>
-        {detail}
+        {React.Children.toArray(detail)}
       </div>
     </div>
   );

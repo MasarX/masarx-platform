@@ -5,5 +5,13 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "description": "",
-  "keywords": []
+  "keywords": [],
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./schemas/index.ts",
+    "./messages/*": "./messages/*"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  }
 }

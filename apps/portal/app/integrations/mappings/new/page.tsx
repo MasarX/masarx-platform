@@ -1,10 +1,10 @@
 import dynamic from "next/dynamic";
-import { LoadingState } from "@masarx/ui";
+import { LoadingState } from "@masarx/ui/client";
 import { withPortalConfig } from "../../../app-context";
 import { resolveMappingArtifact } from "../../../../../shared/mapping-studio";
 
 const MappingStudioPage = dynamic(
-  () => import("@masarx/ui").then((mod) => ({ default: mod.MappingStudioPage })),
+  () => import("@masarx/ui/client").then((mod) => ({ default: mod.MappingStudioPage })),
   { loading: () => <LoadingState variant="page" /> }
 );
 

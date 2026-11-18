@@ -75,7 +75,7 @@ export const NodeStatusBadge = React.memo(function NodeStatusBadge({
       ) : null}
       <span className="capitalize">{status.replace(/_/g, " ")}</span>
       {duration ? (
-        <span className="ml-0.5 opacity-60">{duration}</span>
+        <span className="ms-0.5 opacity-60">{duration}</span>
       ) : null}
     </div>
   );

@@ -72,7 +72,10 @@
           "schedule": "Schedule",
           "scheduleManual": "Schedule (manual)",
           "workflowRunTrigger": "Workflow run trigger",
-          "unknown": "Unknown"
+          "unknown": "Unknown",
+          "api": "API",
+          "worker": "Worker",
+          "task": "Task"
         },
         "fields": {
           "runId": "Run id",
@@ -184,6 +187,72 @@
         "countWithTotal": "Steps loaded: {count} of {total}",
         "empty": "No workflow run steps were recorded.",
         "openFullView": "Open steps in full view"
+      }
+    }
+  },
+  "dispatchBoard": {
+    "title": "Dispatch Board",
+    "description": "Assign and manage dispatch jobs across drivers",
+    "eyebrow": "Operations"
+  },
+  "trackingMap": {
+    "title": "Tracking Map",
+    "description": "Live shipment tracking visualization",
+    "table": {
+      "tracking": "Tracking #",
+      "status": "Status",
+      "origin": "Origin",
+      "destination": "Destination",
+      "service": "Service",
+      "lastUpdated": "Last Updated"
+    },
+    "fallback": {
+      "title": "Shipment Locations",
+      "description": "Map view requires geocoded addresses. Showing {count} shipments with location data."
+    },
+    "empty": {
+      "title": "No shipment location data available",
+      "description": "Shipment locations will appear here once addresses are geocoded or shipments have origin/destination data."
+    }
+  },
+  "codReconciliation": {
+    "title": "COD Reconciliation",
+    "description": "Cash-on-delivery collection reconciliation and variance tracking"
+  },
+  "webhookTester": {
+    "title": "Webhook Tester",
+    "description": "Send test webhook payloads and inspect responses"
+  },
+  "integrationHealth": {
+    "title": "Integration Health",
+    "description": "Monitor integration uptime, success rates, and response times",
+    "empty": "No provider integrations found. Providers will appear here once configured."
+  },
+  "onboarding": {
+    "steps": {
+      "signIn": {
+        "title": "Sign in to your account",
+        "description": "You are already signed in."
+      },
+      "reviewSettings": {
+        "title": "Review your organization settings",
+        "description": "Check and configure your organization preferences.",
+        "action": "Open settings"
+      },
+      "createShipment": {
+        "title": "Create your first shipment",
+        "description": "Start tracking shipments in your organization.",
+        "action": "Create shipment"
+      },
+      "setupWebhooks": {
+        "title": "Set up webhook integrations",
+        "description": "Connect external systems via webhooks.",
+        "action": "View webhooks"
+      },
+      "exploreCommands": {
+        "title": "Explore the command catalog",
+        "description": "Discover available operations and workflows.",
+        "action": "Browse commands"
       }
     }
   }

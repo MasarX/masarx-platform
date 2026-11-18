@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { createUiClient } from "@masarx/api";
-import { formatIdValue } from "../resource-utils";
+import { formatReferenceValue, isUuidValue } from "../resource-utils";
 import { labelFromKey } from "../resource-query";
 import { formatUiError, isSchemaCacheFunctionUnavailableError } from "../utils";
 import {
@@ -25,6 +25,39 @@ type ToastFn = (props: {
 
 type RouterLike = { replace: (href: string) => void };
 type SearchParamsLike = { toString: () => string };
+
+function normalizeText(value: string | null | undefined) {
+  return value?.trim() ?? "";
+}
+
+function resolveReadableScopeValue(
+  scopeType: string | null | undefined,
+  scopeId: string | null | undefined
+) {
+  const normalizedScopeType = normalizeText(scopeType);
+  if (!normalizedScopeType) return null;
+  const typeLabel = labelFromKey(normalizedScopeType);
+  const normalizedScopeId = normalizeText(scopeId);
+  if (!normalizedScopeId) return typeLabel;
+  const humanizedScopeId = labelFromKey(normalizedScopeId);
+  const readableScopeId =
+    isUuidValue(normalizedScopeId)
+      ? formatReferenceValue(normalizedScopeId)
+      : humanizedScopeId &&
+          humanizedScopeId.toLowerCase() !== normalizedScopeId.toLowerCase()
+        ? humanizedScopeId
+        : formatReferenceValue(normalizedScopeId);
+  return `${typeLabel}: ${readableScopeId}`;
+}
+
+function resolveReadableSettingsResolutionValue(
+  settingsResolutionId: string | null | undefined
+) {
+  const normalizedSettingsResolutionId = normalizeText(settingsResolutionId);
+  return normalizedSettingsResolutionId
+    ? formatReferenceValue(normalizedSettingsResolutionId)
+    : null;
+}
 
 type TableViewParams = {
   t: TranslateFn;
@@ -129,12 +162,9 @@ export function useTableViews({
   const scopeType = viewState?.scopeType?.trim() ?? "";
   const scopeId = viewState?.scopeId?.trim() ?? "";
   const settingsResolutionId = viewState?.settingsResolutionId?.trim() ?? "";
-  const viewScopeValue = scopeType
-    ? `${labelFromKey(scopeType)}${scopeId ? ` ${formatIdValue(scopeId)}` : ""}`
-    : null;
-  const settingsResolutionValue = settingsResolutionId
-    ? formatIdValue(settingsResolutionId)
-    : null;
+  const viewScopeValue = resolveReadableScopeValue(scopeType, scopeId);
+  const settingsResolutionValue =
+    resolveReadableSettingsResolutionValue(settingsResolutionId);
   const viewEventMeta = React.useMemo(
     () =>
       buildScopeMeta({

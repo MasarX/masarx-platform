@@ -144,7 +144,9 @@ export function PreviewPanel({
       </div>
 
       {/* PDF Preview */}
-      {typeof window !== "undefined" && typeof window.DOMMatrix === "function" ? (
+      {!pdfBase64 ? (
+        <p className="text-sm text-ui-muted">{t.has?.("pdfEmpty") ? t("pdfEmpty") : "No PDF preview yet"}</p>
+      ) : typeof window !== "undefined" && typeof window.DOMMatrix === "function" ? (
         <ErrorBoundary
           fallback={
             <div className="flex items-center justify-center rounded-lg border border-ui-danger/30 bg-ui-danger/5 p-4 text-sm text-ui-danger">

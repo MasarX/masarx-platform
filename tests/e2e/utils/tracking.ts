@@ -1,5 +1,7 @@
+import type { Page } from "@playwright/test";
 import { resolveTrackingConfig } from "../../../packages/ui/src/tracking-config";
 import { createAuthedSupabaseClient, rpcWithRetry, signOutSupabaseClient } from "./supabase";
+import { ensureSignedIn } from "./session";
 
 export async function fetchTrackingConfig(params: {
   email: string;
@@ -25,4 +27,76 @@ export async function fetchTrackingConfig(params: {
   } finally {
     await signOutSupabaseClient(supabase, { label: `tracking:${email}` });
   }
+}
+
+export function buildTrackingDetailUrl(params: {
+  basePath: string;
+  paramKey: string;
+  trackingNumber: string;
+  shipmentId: string;
+}) {
+  const { basePath, paramKey, trackingNumber, shipmentId } = params;
+  const search = new URLSearchParams({
+    [paramKey]: trackingNumber,
+    id: shipmentId,
+  });
+  return `${basePath}/tracking?${search.toString()}`;
+}
+
+export async function openTrackingDetailForShipment(params: {
+  page: Page;
+  basePath: string;
+  authTestId: string;
+  email: string;
+  password: string;
+  trackingNumber: string;
+  shipmentId: string;
+  scopeType?: string | null;
+}) {
+  const {
+    page,
+    basePath,
+    authTestId,
+    email,
+    password,
+    trackingNumber,
+    shipmentId,
+    scopeType,
+  } = params;
+
+  const trackingConfig = await fetchTrackingConfig({
+    email,
+    password,
+  });
+  if (!trackingConfig.config) {
+    throw new Error(
+      `Tracking config missing: ${trackingConfig.error ?? "unknown error"}`
+    );
+  }
+
+  await ensureSignedIn({
+    page,
+    basePath,
+    authTestId,
+    email,
+    password,
+    scopeType,
+  });
+
+  const detailUrl = buildTrackingDetailUrl({
+    basePath,
+    paramKey: trackingConfig.config.paramKey,
+    trackingNumber,
+    shipmentId,
+  });
+
+  await page.goto(detailUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+
+  return {
+    config: trackingConfig.config,
+    detailUrl,
+  };
 }

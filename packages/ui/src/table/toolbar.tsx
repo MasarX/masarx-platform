@@ -101,7 +101,7 @@ export function TableToolbar({
         <svg
           aria-hidden
           viewBox="0 0 20 20"
-          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ui-muted"
+          className="pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ui-muted"
           fill="none"
           stroke="currentColor"
           strokeWidth={1.8}
@@ -116,7 +116,7 @@ export function TableToolbar({
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("search.placeholder")}
           aria-label={t("search.aria")}
-          className="h-8 pl-8 pr-8 text-xs"
+          className="h-8 ps-8 pe-8 text-xs"
           data-testid={searchTestId}
         />
         {searchTerm ? (
@@ -124,7 +124,7 @@ export function TableToolbar({
             type="button"
             onClick={onSearchClear}
             aria-label={t("search.clearAria")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-ui-muted transition-colors hover:text-ui-ink"
+            className="absolute end-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-ui-muted transition-colors hover:text-ui-ink"
             data-testid={searchClearTestId}
           >
             <svg

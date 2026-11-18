@@ -10,6 +10,8 @@ import {
   type UiReadResource,
 } from "@masarx/api";
 import { Badge } from "./badge";
+import { buildResourceLookupComboboxOptions, useResourceLookupOptions } from "./resource-lookup-utils";
+import { formatReferenceValue } from "./resource-utils";
 import { MappingTestPanel } from "./mapping-studio/mapping-test-panel";
 import { Button } from "./button";
 import { Input } from "./input";
@@ -94,6 +96,12 @@ function sourceOptionsForArtifact(artifact: MappingArtifact): Array<{ value: Sou
     { value: "openapi", label: "OpenAPI" },
   ];
 }
+
+const WORKFLOW_TEMPLATE_LOOKUP = {
+  resource: "workflow_templates",
+  labelKeys: ["name"],
+  limit: 200,
+};
 
 function buildInitialWorkflowBinding(context: MappingStudioPageProps["initialContext"]) {
   if (!context?.workflowTemplateId) return "{}";
@@ -211,6 +219,24 @@ function MappingStudioForm({
   const [originalMappingConfig, setOriginalMappingConfig] = React.useState<Record<string, unknown> | null>(null);
   const [requestConfigText, setRequestConfigText] = React.useState(stringifyPretty({}, "{}"));
   const [workflowBindingText, setWorkflowBindingText] = React.useState(buildInitialWorkflowBinding(initialContext));
+  const templateLookup = useResourceLookupOptions(WORKFLOW_TEMPLATE_LOOKUP, artifact !== "tabular_import");
+  let parsedBinding: Record<string, unknown> | null = null;
+  try {
+    const binding = parseJsonText<unknown>(workflowBindingText, {});
+    if (binding && typeof binding === "object" && !Array.isArray(binding)) {
+      parsedBinding = binding as Record<string, unknown>;
+    }
+  } catch {
+    // Keep malformed advanced input available for correction.
+  }
+  const bindingTemplateId = typeof parsedBinding?.workflow_template_id === "string"
+    ? parsedBinding.workflow_template_id : "";
+  const templateOptions = buildResourceLookupComboboxOptions({
+    items: templateLookup.items,
+    selectedValue: bindingTemplateId,
+    fallbackLabel: formatReferenceValue(bindingTemplateId),
+  });
+  const templateLabels = new Map(templateOptions.map(({ value, label }) => [value, label]));
   const [pluginName, setPluginName] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [normalizedContract, setNormalizedContract] = React.useState<Record<string, unknown> | null>(null);
@@ -782,15 +808,47 @@ function MappingStudioForm({
           </label>
           <div className="space-y-4">
             {artifact !== "tabular_import" ? (
-              <label className="space-y-2 text-sm text-ui-ink">
-                <span>Workflow binding JSON</span>
-                <Textarea
-                  rows={12}
-                  value={workflowBindingText}
-                  onChange={(event) => { invalidateReview(); setWorkflowBindingText(event.target.value); }}
-                  placeholder='{"mode":"attach_existing","workflow_template_id":"..."}'
-                />
-              </label>
+              <div className="space-y-3">
+                <label className="space-y-2 text-sm text-ui-ink">
+                  <span>Workflow template</span>
+                  <Select
+                    value={bindingTemplateId}
+                    disabled={!parsedBinding || templateLookup.loading}
+                    onChange={(event) => {
+                      const templateId = event.target.value;
+                      invalidateReview();
+                      if (templateId) {
+                        setWorkflowBindingText(stringifyPretty({
+                          ...parsedBinding, mode: "attach_existing", workflow_template_id: templateId,
+                        }, "{}"));
+                      } else {
+                        const remaining = { ...parsedBinding };
+                        delete remaining.mode;
+                        delete remaining.workflow_template_id;
+                        setWorkflowBindingText(stringifyPretty(remaining, "{}"));
+                      }
+                    }}
+                  >
+                    <option value="">No workflow template</option>
+                    {templateOptions.map(({ value, label }) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </Select>
+                </label>
+                {templateLookup.error ? <p role="status" className="text-xs text-ui-muted">Workflow templates are unavailable.</p> : null}
+                <details>
+                  <summary className="text-sm text-ui-muted">Advanced workflow binding</summary>
+                  <label className="space-y-2 text-sm text-ui-ink">
+                    <span>Workflow binding JSON</span>
+                    <Textarea
+                      rows={12}
+                      value={workflowBindingText}
+                      onChange={(event) => { invalidateReview(); setWorkflowBindingText(event.target.value); }}
+                      placeholder='{"mode":"attach_existing","workflow_template_id":"..."}'
+                    />
+                  </label>
+                </details>
+              </div>
             ) : null}
             {artifact === "integration_plugin" ? (
               <label className="space-y-2 text-sm text-ui-ink">
@@ -933,7 +991,7 @@ function MappingStudioForm({
       {step === "report" ? (
         <Section title="Submit report" collapsible={false}>
           <React.Suspense fallback={<LoadingState variant="section" />}>
-            <OperationReportViewer report={report} result={saveResult} appBasePath={appBasePath} />
+            <OperationReportViewer report={report} result={saveResult} appBasePath={appBasePath} workflowTemplateLabels={templateLabels} />
           </React.Suspense>
         </Section>
       ) : null}

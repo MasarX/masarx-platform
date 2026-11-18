@@ -79,6 +79,27 @@ function isBlockedRuntimeFailure(error: unknown) {
   return BLOCKED_RUNTIME_PATTERNS.some((pattern) => pattern.test(message));
 }
 
+export function formatRuntimeConsoleMessage(
+  message: string,
+  options?: { locationUrl?: string; pageUrl?: string },
+) {
+  const summary = message.trim();
+  if (!summary) return summary;
+  const locations = new Set<string>();
+  for (const value of [options?.locationUrl, options?.pageUrl]) {
+    if (!value) continue;
+    try {
+      const url = new URL(value);
+      if (url.protocol === "https:" || url.protocol === "http:") {
+        locations.add(url.pathname);
+      }
+    } catch {
+      // Some browser diagnostics have no absolute source location.
+    }
+  }
+  return locations.size ? `${summary} [${[...locations].join(" ")}]` : summary;
+}
+
 export function captureRuntimeErrors(
   page: Page,
   options?: { allowOpaqueLocal503?: boolean }
@@ -111,7 +132,7 @@ export function captureRuntimeErrors(
       ) {
         return;
       }
-      consoleErrors.push(text);
+      consoleErrors.push(formatRuntimeConsoleMessage(text, { locationUrl, pageUrl }));
     } catch {
       // ignore
     }

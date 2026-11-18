@@ -26,12 +26,17 @@ function resolveSourceLabel(
   provenance: WorkflowRunProvenance,
   labels: WorkflowRunProvenanceLabels
 ) {
+  const triggerType = normalizeLower(provenance.triggerType ?? null);
+  if (triggerType === "schedule") return labels.sources.schedule;
+  if (triggerType === "schedule_manual") return labels.sources.scheduleManual;
+  if (triggerType === "task") return labels.sources.task;
+  if (triggerType === "workflow_run_trigger") return labels.sources.workflowRunTrigger;
+
   const source = normalizeLower(provenance.triggerSource ?? null) ?? "unknown";
   if (source === "manual") return labels.sources.manual;
   if (source === "webhook") return labels.sources.webhook;
-  if (source === "schedule") return labels.sources.schedule;
-  if (source === "schedule_manual") return labels.sources.scheduleManual;
-  if (source === "workflow_run_trigger") return labels.sources.workflowRunTrigger;
+  if (source === "api") return labels.sources.api;
+  if (source === "worker") return labels.sources.worker;
   return labels.sources.unknown;
 }
 

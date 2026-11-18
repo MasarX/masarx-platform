@@ -17,6 +17,7 @@ export type SettingsRequestState = {
 };
 
 export type SettingsCategoryOption = {
+  label?: string | null;
   category: string;
   description?: string | null;
   requestCapability?: string | null;
@@ -179,7 +180,7 @@ export function SettingsRequestForm({
               >
                 {categories.map((entry) => (
                   <option key={entry.category} value={entry.category}>
-                    {entry.category}
+                    {entry.label ?? entry.category}
                   </option>
                 ))}
               </Select>

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TrackingMap, type TrackingMapProps } from "../../packages/ui/src/tracking-map";
 
 const mockMaps: any[] = [];
@@ -8,11 +8,27 @@ jest.mock("../../packages/ui/src/tracking-map-worker-url.mjs", () => ({
   __esModule: true, default: "http://localhost/_next/static/media/maplibre-worker.mjs",
 }));
 jest.mock("maplibre-gl/dist/maplibre-gl.css", () => ({}), { virtual: true });
-jest.mock("maplibre-gl", () => ({ setWorkerUrl: mockSetWorkerUrl, Map: jest.fn((options: unknown) => {
-  const handlers: Record<string, Array<() => void>> = {};
+jest.mock("maplibre-gl", () => ({
+  setWorkerUrl: mockSetWorkerUrl,
+  Popup: class {
+    private content?: HTMLElement;
+    setLngLat() { return this; }
+    setDOMContent(content: HTMLElement) { this.content = content; return this; }
+    addTo(map: { options: { container: HTMLElement } }) {
+      if (this.content) map.options.container.append(this.content);
+      return this;
+    }
+    remove() { this.content?.remove(); }
+  },
+  Map: jest.fn((options: unknown) => {
+  const handlers: Record<string, Array<(event?: unknown) => void>> = {};
   const map = { options, handlers,
-    on: jest.fn((name: string, fn: () => void) => { (handlers[name] ??= []).push(fn); return map; }),
-    fire: (name: string) => { for (const fn of handlers[name] ?? []) fn(); },
+    on: jest.fn((name: string, layerOrHandler: string | ((event?: unknown) => void), handler?: (event?: unknown) => void) => {
+      const callback = typeof layerOrHandler === "function" ? layerOrHandler : handler;
+      if (callback) (handlers[name] ??= []).push(callback);
+      return map;
+    }),
+    fire: (name: string, event?: unknown) => { for (const fn of handlers[name] ?? []) fn(event); },
     addSource: jest.fn(), addLayer: jest.fn(), loaded: jest.fn(() => true),
     isStyleLoaded: jest.fn(() => true), areTilesLoaded: jest.fn(() => true),
     getSource: jest.fn(() => ({})), isSourceLoaded: jest.fn(() => true), isMoving: jest.fn(() => false),
@@ -72,6 +88,27 @@ test("labels are literal text, attribution is linked, and every pin has a semant
   expect(mockMaps[0].options.interactive).toBe(false);
   expect(mockMaps[0].options.attributionControl).toBe(false);
 });
+test("shows a literal pin popup from the map or its keyboard control and clears it on scope replacement", async () => {
+  const view = render(<TrackingMap {...props} />);
+  const map = await mapAt();
+  act(() => { map.fire("load"); map.fire("idle"); });
+  const button = screen.getAllByRole("button")[0];
+
+  fireEvent.click(button);
+  expect(button.getAttribute("aria-pressed")).toBe("true");
+  expect(view.container.querySelector('[aria-hidden="true"] strong')?.textContent).toBe(props.pins[0].label);
+  expect(view.container.querySelector("img")).toBeNull();
+
+  fireEvent.keyDown(button, { key: "Escape" });
+  expect(button.getAttribute("aria-pressed")).toBe("false");
+  expect(view.container.querySelector('[aria-hidden="true"] strong')).toBeNull();
+
+  act(() => map.fire("click", { features: [{ id: props.pins[0].id }] }));
+  expect(button.getAttribute("aria-pressed")).toBe("true");
+  view.rerender(<TrackingMap {...props} identity="next-scope" pins={[props.pins[1]]} />);
+  expect(view.container.querySelector('[aria-hidden="true"] strong')).toBeNull();
+});
+
 test("scope replacement removes previous map and ignores its late load/idle/error callbacks", async () => {
   const view = render(<TrackingMap {...props} />); const old = await mapAt();
   view.rerender(<TrackingMap {...props} identity="actor-b/addresses/0" pins={[{ ...props.pins[1], id: "new", label: "New scope" }]} />);

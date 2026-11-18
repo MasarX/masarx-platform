@@ -28,9 +28,9 @@ export const WorkflowTriggerNode = React.memo(function WorkflowTriggerNode({
       ].join(" ")}
     >
       {/* Left accent stripe */}
-      <div className="absolute left-0 top-0 h-full w-1 rounded-l-2xl bg-blue-500" />
+      <div className="absolute start-0 top-0 h-full w-1 rounded-s-2xl bg-blue-500" />
 
-      <div className="py-3.5 pl-5 pr-3.5">
+      <div className="py-3.5 ps-5 pe-3.5">
         <div className="flex items-center gap-3">
           {/* Lightning icon in circle */}
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-950/40">

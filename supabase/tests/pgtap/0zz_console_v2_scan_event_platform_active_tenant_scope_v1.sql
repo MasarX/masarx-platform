@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(16);
+SELECT plan(17);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_console_v2_scan_event_platform_active_tenant_scope_v1()
 RETURNS SETOF TEXT
@@ -20,7 +20,9 @@ DECLARE
   v_platform_user UUID := gen_random_uuid();
   v_tenant_user UUID := gen_random_uuid();
   v_shipment_id UUID := gen_random_uuid();
-  v_tracking TEXT := 'SCAN-' || upper(left(gen_random_uuid()::text, 8));
+  v_tracking TEXT := 'Scan-Mixed-' || upper(left(gen_random_uuid()::text, 8));
+  v_box_barcode TEXT;
+  v_box_scan RECORD;
   v_route RECORD;
   v_stop_id UUID;
   v_scan RECORD;
@@ -80,6 +82,11 @@ BEGIN
   INSERT INTO public.shipments (id, organization_id, client_id, tracking_number, service_type, status)
   VALUES (v_shipment_id, v_org, v_client, v_tracking, 'delivery', 'pending');
 
+  PERFORM public.ensure_shipment_boxes(v_shipment_id, 1);
+  SELECT barcode INTO STRICT v_box_barcode
+  FROM public.shipment_boxes
+  WHERE shipment_id = v_shipment_id AND box_number = 1;
+
   SELECT *
     INTO v_route
     FROM public.create_route_run_v1(
@@ -125,7 +132,28 @@ BEGIN
 
   RETURN NEXT ok(COALESCE(v_scan.created, FALSE), 'platform active-tenant route-load scan is created');
 
+  -- Omitting shipment, client and stop IDs exercises canonical barcode lookup.
+  SELECT *
+    INTO v_box_scan
+    FROM api.record_scan_event_v1(
+      jsonb_build_object(
+        'organization_id', v_org,
+        'scan_type', 'load',
+        'route_run_id', v_route.route_run_id,
+        'branch_id', v_branch,
+        'barcode', v_box_barcode,
+        'idempotency_key', 'pgtap-scanner-mixed-case-box',
+        'metadata', jsonb_build_object('source', 'console_v2_dispatch')
+      )
+    )
+   LIMIT 1;
+
   EXECUTE 'SET LOCAL ROLE postgres';
+  RETURN NEXT is(
+    (SELECT shipment_id FROM public.scan_events WHERE id = v_box_scan.scan_event_id),
+    v_shipment_id,
+    'mixed-case box barcode resolves to the shipment through scan intake'
+  );
   RETURN NEXT is(
     (SELECT organization_id::text FROM public.scan_events WHERE id = v_scan.scan_event_id),
     v_org::text,

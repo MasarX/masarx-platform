@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { labelFromKey } from "./resource-query";
+import { formatReferenceValue } from "./resource-utils";
 import { useTranslations } from "next-intl";
 import { Button } from "./button";
 const AccessPolicyEditor = React.lazy(() =>
@@ -28,6 +30,8 @@ type AccessPolicyRequestFormProps = {
   defaultPolicyJson: string;
   defaultScopeType?: string | null;
   defaultScopeId?: string | null;
+  defaultScopeLabel?: string | null;
+  lockScope?: boolean;
   testIdPrefix: string;
 };
 
@@ -38,6 +42,8 @@ export function AccessPolicyRequestForm({
   defaultPolicyJson,
   defaultScopeType,
   defaultScopeId,
+  defaultScopeLabel,
+  lockScope = false,
   testIdPrefix,
 }: AccessPolicyRequestFormProps) {
   const t = useTranslations("ui.accessPolicyRequest");
@@ -132,32 +138,41 @@ export function AccessPolicyRequestForm({
       data-testid={`${testIdPrefix}-form`}
     >
       <input type="hidden" name="policy_json" value={policyJson} />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="space-y-2 text-sm text-ui-ink">
-          <span className="text-xs uppercase tracking-wide text-ui-muted">
-            {t("scope.typeLabel")}
-          </span>
-          <Input
-            value={scopeTypeValue}
-            onChange={(event) => setScopeTypeValue(event.target.value)}
-            name="scope_type"
-            placeholder={t("scope.typePlaceholder")}
-            data-testid={`${testIdPrefix}-scope-type`}
-          />
-        </label>
-        <label className="space-y-2 text-sm text-ui-ink">
-          <span className="text-xs uppercase tracking-wide text-ui-muted">
-            {t("scope.idLabel")}
-          </span>
-          <Input
-            value={scopeIdValue}
-            onChange={(event) => setScopeIdValue(event.target.value)}
-            name="scope_id"
-            placeholder={t("scope.idPlaceholder")}
-            data-testid={`${testIdPrefix}-scope-id`}
-          />
-        </label>
-      </div>
+      {lockScope ? (
+        <div className="space-y-1 text-sm">
+          <input type="hidden" name="scope_type" value={defaultScopeType ?? ""} />
+          <input type="hidden" name="scope_id" value={defaultScopeId ?? ""} />
+          <p>{labelFromKey(defaultScopeType ?? "")}</p>
+          <p>{defaultScopeLabel?.trim() || (defaultScopeId ? formatReferenceValue(defaultScopeId) : "")}</p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="space-y-2 text-sm text-ui-ink">
+            <span className="text-xs uppercase tracking-wide text-ui-muted">
+              {t("scope.typeLabel")}
+            </span>
+            <Input
+              value={scopeTypeValue}
+              onChange={(event) => setScopeTypeValue(event.target.value)}
+              name="scope_type"
+              placeholder={t("scope.typePlaceholder")}
+              data-testid={`${testIdPrefix}-scope-type`}
+            />
+          </label>
+          <label className="space-y-2 text-sm text-ui-ink">
+            <span className="text-xs uppercase tracking-wide text-ui-muted">
+              {t("scope.idLabel")}
+            </span>
+            <Input
+              value={scopeIdValue}
+              onChange={(event) => setScopeIdValue(event.target.value)}
+              name="scope_id"
+              placeholder={t("scope.idPlaceholder")}
+              data-testid={`${testIdPrefix}-scope-id`}
+            />
+          </label>
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="space-y-2 text-sm text-ui-ink">
           <span className="text-xs uppercase tracking-wide text-ui-muted">

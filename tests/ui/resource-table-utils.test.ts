@@ -43,6 +43,7 @@ describe("resolveCellDisplay", () => {
     };
     const result = resolveCellDisplay(item, column, 140, ["name"]);
     expect(result.primary).toBe("REF-E5E9E25C");
+    expect(result.primaryTitle).toBeUndefined();
     expect(result.secondary).toBeNull();
   });
 
@@ -88,8 +89,23 @@ describe("resolveCellDisplay", () => {
     };
     const result = resolveCellDisplay(item, column, 140, ["name"]);
     expect(result.primary).toBe("REF-E5E9E25C");
-    expect(result.primaryTitle).toBe("e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c");
+    expect(result.primaryTitle).toBeUndefined();
     expect(result.secondary).toBeNull();
+  });
+
+  it("formats nested UUID values inside object cells before rendering", () => {
+    const column: ResourceColumn = { key: "metadata" };
+    const item = {
+      metadata: {
+        marketplace_contract_id: "e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c",
+      },
+    };
+    const result = resolveCellDisplay(item, column, 140, ["name"]);
+    expect(result.primary).toContain("REF-E5E9E25C");
+    expect(result.primary).not.toContain("e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c");
+    expect(String(result.primaryTitle ?? "")).not.toContain(
+      "e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c",
+    );
   });
 
   it("shows internal hints for UUID literals in non-id columns when enabled", () => {

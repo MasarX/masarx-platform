@@ -186,6 +186,87 @@ describe('Tasks SSOT core', () => {
     expect(createEventRows[0].settings_resolution_id).toBeTruthy();
   });
 
+  it('starts task-created workflows with worker entry point and task provenance', async () => {
+    const { id: organizationId } = await createOrganization(client, 'Tasks Workflow Entry Point Org');
+    const { id: clientId } = await createClient(client, organizationId, 'Tasks Workflow Entry Point Client');
+    const senderId = await createSender(client, clientId, 'Tasks Workflow Entry Point Sender');
+    const actorId = await createUser(
+      client,
+      organizationId,
+      `task-workflow-${randomUUID().slice(0, 8)}@example.com`,
+      { accessScopeType: 'tenant' }
+    );
+
+    const { rows: templateRows } = await client.query(
+      `SELECT id
+         FROM public.workflow_templates
+        WHERE name = 'manual_review_v1'
+          AND status = 'active'
+        ORDER BY version DESC
+        LIMIT 1`
+    );
+    const workflowTemplateId = templateRows[0]?.id;
+    expect(workflowTemplateId).toBeTruthy();
+
+    await client.query(
+      `INSERT INTO public.task_types (
+          organization_id,
+          key,
+          name,
+          enabled,
+          default_priority,
+          default_queue_key,
+          default_workflow_template_id
+        )
+        VALUES ($1::uuid, 'workflow_entry_point', 'Workflow Entry Point', true, 50, 'default', $2::uuid)`,
+      [organizationId, workflowTemplateId]
+    );
+
+    await setAuthContext(client, actorId);
+
+    const resourceId = randomUUID();
+    const { rows: createdRows } = await client.query(
+      `SELECT *
+         FROM public.create_task_v1(
+           $1,
+           $2::jsonb,
+           $3,
+           $4::uuid,
+           NULL,
+           NULL,
+           NULL,
+           $5,
+           '{}'::jsonb
+         )`,
+      [
+        'workflow_entry_point',
+        JSON.stringify({ organization_id: organizationId, client_id: clientId, sender_id: senderId }),
+        'shipment',
+        resourceId,
+        `idem-workflow-entry-point-${randomUUID()}`
+      ]
+    );
+
+    const created = createdRows[0];
+    expect(created?.task_id).toBeTruthy();
+    expect(created?.workflow_run_id).toBeTruthy();
+
+    const { rows: runRows } = await client.query(
+      `SELECT entry_point, context
+         FROM public.workflow_runs
+        WHERE id = $1::uuid
+        LIMIT 1`,
+      [created.workflow_run_id]
+    );
+    expect(runRows).toHaveLength(1);
+    expect(runRows[0].entry_point).toBe('worker');
+    expect(runRows[0].context?.trigger_type).toBe('task');
+    expect(runRows[0].context?.task_id).toBe(created.task_id);
+    expect(runRows[0].context?.task_type_key).toBe('workflow_entry_point');
+    expect(runRows[0].context?.resource_type).toBe('shipment');
+    expect(runRows[0].context?.resource_id).toBe(resourceId);
+  });
+
   it('assign_task_system_v1 is service-only and idempotent', async () => {
     const { id: organizationId } = await createOrganization(client, 'Tasks System Assign Org');
     const { id: clientId } = await createClient(client, organizationId, 'Tasks System Assign Client');
@@ -285,4 +366,3 @@ describe('Tasks SSOT core', () => {
     expect(eventRows[0].actor_system).toBe('dispatch_engine');
   });
 });
-

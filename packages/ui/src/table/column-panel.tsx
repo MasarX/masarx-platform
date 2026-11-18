@@ -133,14 +133,14 @@ export function TableColumnPanel({
             placeholder={t("columns.searchPlaceholder")}
             aria-label={t("columns.searchAria")}
             data-testid="table-columns-search"
-            className="pr-9"
+            className="pe-9"
           />
           {columnFilter ? (
             <button
               type="button"
               onClick={onColumnFilterClear}
               aria-label={t("columns.clearAria")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full px-2 py-1 text-xs text-ui-muted transition hover:text-ui-ink"
+              className="absolute end-2 top-1/2 -translate-y-1/2 rounded-full px-2 py-1 text-xs text-ui-muted transition hover:text-ui-ink"
             >
               x
             </button>

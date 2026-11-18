@@ -141,7 +141,7 @@ export function BlockCatalogSidebar({
     <div className="space-y-3" data-testid={`${prefix}-sidebar`}>
       {/* Block types */}
       <div className="space-y-1">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-ui-muted">
+        <p className="text-[10px] font-semibold tracking-wide text-ui-muted">
           {t("blocks")}
         </p>
         <div className="grid grid-cols-2 gap-1">
@@ -168,7 +168,7 @@ export function BlockCatalogSidebar({
 
       {/* Field catalog */}
       <div className="space-y-1">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-ui-muted">
+        <p className="text-[10px] font-semibold tracking-wide text-ui-muted">
           {t("fields", { count: fieldCatalog.length })}
         </p>
         <input
@@ -205,7 +205,7 @@ export function BlockCatalogSidebar({
                 <span className="min-w-0 truncate font-mono text-[11px]">
                   {field.path}
                 </span>
-                <span className="ml-1 hidden text-[10px] text-ui-muted group-hover:inline">
+                <span className="ms-1 hidden text-[10px] text-ui-muted group-hover:inline">
                   {t("addBlock")}
                 </span>
               </button>
@@ -220,7 +220,7 @@ export function BlockCatalogSidebar({
       {/* Assets */}
       {assets.length > 0 ? (
         <div className="space-y-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-ui-muted">
+          <p className="text-[10px] font-semibold tracking-wide text-ui-muted">
             Assets ({assets.length})
           </p>
           <div className="max-h-32 space-y-0.5 overflow-y-auto">
@@ -244,7 +244,7 @@ export function BlockCatalogSidebar({
                   onClick={() => handleAddAssetBlock(asset)}
                 >
                   <span className="min-w-0 truncate">{asset.name}</span>
-                  <span className="ml-1 hidden text-[10px] text-ui-muted group-hover:inline">
+                  <span className="ms-1 hidden text-[10px] text-ui-muted group-hover:inline">
                     {t("addBlock")}
                   </span>
                 </button>

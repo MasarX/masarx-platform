@@ -3,10 +3,8 @@
 // from the active locale catalog or from
 // `rbac_user_role_assignments.display_name`, never from this map
 // directly. The map exists so unknown English-locale renders pick up a
-// pretty title-case label instead of the raw underscore_code. Per
-// AGENTS.md "zero hardcoding", the absent-role default is the
-// underscore_code itself (title-cased), not a hardcoded "Driver" — a
-// missing role must never silently masquerade as a specific role.
+// pretty title-case label instead of the raw underscore_code. Missing
+// roles must never silently masquerade as a specific role.
 const ROLE_LABELS_EN_FALLBACK: Record<string, string> = {
   driver: "Driver",
   warehouse: "Warehouse",
@@ -54,11 +52,15 @@ export function resolveMobileRoleCode(roleLabel: unknown): string {
   return trimmed.charAt(0).toUpperCase();
 }
 
-export function resolveMobileShellHeaderTitle(appName: string, roleValue: unknown): string {
+export function resolveMobileShellHeaderLines(appName: string, roleValue: unknown) {
   const safeAppName = String(appName || "MasarX Field Ops").trim() || "MasarX Field Ops";
   const canonicalAppName = /^field\s*ops$/i.test(safeAppName)
     ? "MasarX Field Ops"
     : safeAppName;
-  const roleLabel = resolveMobileRoleLabel(roleValue);
-  return roleLabel ? `${canonicalAppName} \u00B7 ${roleLabel}` : canonicalAppName;
+  return { title: canonicalAppName, role: resolveMobileRoleLabel(roleValue) };
+}
+
+export function resolveMobileShellHeaderTitle(appName: string, roleValue: unknown): string {
+  const { title, role } = resolveMobileShellHeaderLines(appName, roleValue);
+  return role ? `${title} \u00B7 ${role}` : title;
 }

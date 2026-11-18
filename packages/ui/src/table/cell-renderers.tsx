@@ -1,18 +1,21 @@
 import { cn } from "../utils";
 import { resolveTagColor } from "../tag-colors";
+import { resolveStatusIcon } from "../status-icon";
 import type { ResourceColumn } from "./columns";
 
 export function CellSelectTag({ value }: { value: string }) {
   if (!value) return null;
   const color = resolveTagColor(value);
+  const statusIcon = resolveStatusIcon(value);
   return (
     <span
       className={cn(
-        "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium leading-tight",
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-tight",
         color.bg,
         color.text
       )}
     >
+      {statusIcon ? <span className="shrink-0 [&>svg]:h-2.5 [&>svg]:w-2.5" aria-hidden>{statusIcon.icon}</span> : null}
       {value}
     </span>
   );

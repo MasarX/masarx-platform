@@ -101,3 +101,21 @@ export function getPortalOrigin() {
     envKey: "PORTAL_BASE_URL",
   });
 }
+
+function resolveLandingUrlValue() {
+  return process.env.LANDING_BASE_URL || process.env.LANDING_SITE_URL;
+}
+
+export function getLandingBasePath() {
+  return resolveBasePath(resolveLandingUrlValue(), "", {
+    strict: isStrictE2EEnv(),
+    envKey: "LANDING_BASE_URL",
+  });
+}
+
+export function getLandingOrigin() {
+  return resolveOrigin(resolveLandingUrlValue(), "http://localhost:3333", {
+    strict: isStrictE2EEnv(),
+    envKey: "LANDING_BASE_URL",
+  });
+}

@@ -1,58 +1,12 @@
-import { spawnSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
+import { provisionCustomerShipmentChangeReviewFixtures } from "./utils/customer-shipment-change-review";
 import { loadDemoContext } from "./utils/demo-accounts";
 import { getPortalBasePath } from "./utils/base-paths";
 import { isStrictE2EEnv } from "./utils/env";
 import { ensureSignedIn } from "./utils/session";
 
-type FixtureSummary = {
-  support_cases: {
-    timing_change: {
-      id: string;
-      change_summary: string;
-    };
-    applied_location_change: {
-      id: string;
-      change_summary: string;
-    };
-    pending_review_primary: {
-      id: string;
-      change_summary: string;
-    };
-    pending_review_secondary: {
-      id: string;
-      change_summary: string;
-    };
-  };
-};
-
 const demoContext = loadDemoContext();
 const strict = isStrictE2EEnv();
-function provisionFixtures(): FixtureSummary {
-  const result = spawnSync(
-    process.execPath,
-    ["scripts/qa/provision-customer-shipment-change-review-fixtures.js"],
-    {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        ENV_FILE: process.env.ENV_FILE || "config/env/.env.local",
-      },
-      encoding: "utf8",
-    },
-  );
-
-  if (result.status !== 0) {
-    throw new Error(
-      result.stderr?.trim() ||
-        result.stdout?.trim() ||
-        "failed to provision customer shipment change review fixtures",
-    );
-  }
-
-  return JSON.parse(result.stdout.trim()) as FixtureSummary;
-}
-
 function normalizeTexts(values: string[]) {
   return values.map((value) => value.replace(/\s+/g, " ").trim()).filter(Boolean);
 }
@@ -72,14 +26,13 @@ test.describe("portal customer shipment changes", () => {
     }
 
     const opsUser =
-      demoContext.users.find((user) => user.email === "sipkxyzyxvgvtksowrxwjgpn@example.invalid") ??
       demoContext.users.find((user) => user.scope_type === "tenant") ??
       null;
     if (!opsUser) {
       throw new Error("No tenant-scoped ops reviewer demo user available.");
     }
 
-    const fixtures = provisionFixtures();
+    const fixtures = provisionCustomerShipmentChangeReviewFixtures();
     const basePath = getPortalBasePath();
 
     await ensureSignedIn({

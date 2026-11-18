@@ -10,6 +10,7 @@ import type {
 type CapabilityCatalogProps = {
   t: AccessPolicyTranslator;
   capabilities: PolicyCapability[];
+  resolveCapabilityLabel?: (capabilityKey: string) => string;
   capabilityKey: string;
   onCapabilityKeyChange: (value: string) => void;
   capabilityLabel: string;
@@ -24,6 +25,7 @@ type CapabilityCatalogProps = {
 export function CapabilityCatalog({
   t,
   capabilities,
+  resolveCapabilityLabel,
   capabilityKey,
   onCapabilityKeyChange,
   capabilityLabel,
@@ -38,7 +40,7 @@ export function CapabilityCatalog({
     <div className="space-y-4 rounded-2xl border border-ui-border bg-ui-surface/70 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xs uppercase tracking-wide text-ui-muted">
+          <div className="text-xs tracking-wide text-ui-muted">
             {t("capabilities.title", { count: capabilities.length })}
           </div>
           <div className="text-sm text-ui-muted">{t("capabilities.subtitle")}</div>
@@ -76,7 +78,7 @@ export function CapabilityCatalog({
             key={capability.key}
             className="flex items-center gap-2 rounded-full border border-ui-border bg-ui-surface px-3 py-1 text-xs"
           >
-            <span>{capability.label ?? capability.key}</span>
+            <span>{resolveCapabilityLabel?.(capability.key) ?? capability.label ?? capability.key}</span>
             <Button
               type="button"
               variant="ghost"

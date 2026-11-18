@@ -141,6 +141,30 @@ test("uuid renders mono font and placeholder", () => {
   expect(input.className).toContain("font-mono");
 });
 
+test("lookup options override raw uuid editing and suppress the uuid hint", () => {
+  renderEditor({
+    editState: {
+      editType: "uuid",
+      value: "11111111-1111-1111-1111-111111111111",
+    },
+    editConfig: {
+      editType: "uuid",
+      options: [
+        {
+          label: "Demo Client A",
+          value: "11111111-1111-1111-1111-111111111111",
+        },
+      ],
+    },
+    editLabel: "Client",
+  });
+
+  expect(screen.getByRole("combobox")).toBeInTheDocument();
+  expect(screen.getByText("Demo Client A")).toBeInTheDocument();
+  expect(screen.queryByText("edit.uuidHint:Client")).toBeNull();
+  expect(screen.queryByPlaceholderText("00000000-0000-0000-0000-000000000000")).toBeNull();
+});
+
 test("textarea renders textarea element", () => {
   renderEditor({
     editState: { editType: "textarea", value: "long text" },

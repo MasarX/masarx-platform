@@ -71,7 +71,10 @@
           "schedule": "جدولة",
           "scheduleManual": "جدولة (يدوي)",
           "workflowRunTrigger": "مشغّل تشغيل سير عمل",
-          "unknown": "غير معروف"
+          "unknown": "غير معروف",
+          "api": "API",
+          "worker": "عامل",
+          "task": "مهمة"
         },
         "fields": {
           "runId": "مرجع النشاط",

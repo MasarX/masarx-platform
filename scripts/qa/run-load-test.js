@@ -8,6 +8,23 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const args = process.argv.slice(2);
+const scenarioMap = {
+  partition: 'tests/load/partition-performance.js',
+  'partition-performance': 'tests/load/partition-performance.js',
+  'webhook-ingest': 'tests/load/webhook-ingest.k6.js',
+  'webhook-ingest-http': 'tests/load/webhook-ingest-http.k6.js',
+  'api-gateway-http': 'tests/load/api-gateway-http.k6.js',
+  day1: 'tests/load/day1-onboarding-pressure.js',
+  'day1-onboarding-pressure': 'tests/load/day1-onboarding-pressure.js',
+};
+
+if (args.includes('--help') || args.includes('-h')) {
+  console.log('Usage: node scripts/qa/run-load-test.js [--scenario=<name>] [--summary=<path>]');
+  console.log('Supported scenarios: ' + Object.keys(scenarioMap).join(', '));
+  process.exit(0);
+}
+
 const { createQaLogger } = require('./qa-log');
 
 // Load ENV_FILE (cloud) if present so DATABASE_URL/SUPABASE_URL/etc are available
@@ -21,11 +38,14 @@ try {
   }
 } catch (_) {}
 
-const args = process.argv.slice(2);
 const getArgValue = (name) => {
   const prefix = `--${name}=`;
   const match = args.find((arg) => arg.startsWith(prefix));
-  return match ? match.slice(prefix.length) : undefined;
+  if (match) return match.slice(prefix.length);
+  const index = args.indexOf('--' + name);
+  if (index < 0) return undefined;
+  const next = args[index + 1];
+  return next && !next.startsWith('--') ? next : '';
 };
 
 const dockerCheckTimeoutMs =
@@ -33,12 +53,30 @@ const dockerCheckTimeoutMs =
 const dockerTimeoutMs =
   parseInt(process.env.LOAD_TEST_DOCKER_TIMEOUT_MS || '600000', 10) || 600000;
 
-const scenario = getArgValue('scenario') || 'partition-performance';
+function timeoutFromEnv(key, fallbackMs) {
+  const value = Number(process.env[key]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallbackMs;
+}
+
+const goCheckTimeoutMs = timeoutFromEnv('LOAD_TEST_GO_CHECK_TIMEOUT_MS', 5_000);
+const buildTimeoutMs = timeoutFromEnv('LOAD_TEST_XK6_BUILD_TIMEOUT_MS', 1_800_000);
+const storageTimeoutMs = timeoutFromEnv('LOAD_TEST_DAY1_STORAGE_TIMEOUT_MS', 300_000);
+const provisionTimeoutMs = timeoutFromEnv('LOAD_TEST_PROVISION_TIMEOUT_MS', 300_000);
+const localK6TimeoutMs = timeoutFromEnv('LOAD_TEST_LOCAL_K6_TIMEOUT_MS', dockerTimeoutMs);
+
+const scenarioArg = getArgValue('scenario');
+const summaryArg = getArgValue('summary');
+for (const [name, value] of [['scenario', scenarioArg], ['summary', summaryArg]]) {
+  if (value === '') {
+    console.error('[load-test] --' + name + ' requires a non-empty value.');
+    process.exit(1);
+  }
+}
+const scenario = scenarioArg || 'partition-performance';
 const autoProvision =
   args.includes('--auto-provision-http-token') ||
   args.includes('--auto-provision-webhook-token');
 const clientSlug = getArgValue('client-slug') || 'test-client-2-1';
-const summaryArg = getArgValue('summary');
 const runStartedAt = Date.now();
 const qaSuiteKey = process.env.QA_SUITE_KEY || 'load';
 const qa = createQaLogger({ runId: process.env.QA_RUN_ID, disabled: !process.env.QA_RUN_ID });
@@ -77,7 +115,7 @@ const ensureLocalXk6Binary = () => {
     return binPath;
   }
 
-  const goCheck = spawnSync('go', ['version'], { stdio: 'ignore' });
+  const goCheck = spawnSync('go', ['version'], { stdio: 'ignore', timeout: goCheckTimeoutMs });
   if (goCheck.status !== 0) {
     console.error('[load-test] Docker unavailable and Go toolchain missing; cannot build xk6 locally.');
     process.exit(1);
@@ -97,23 +135,13 @@ const ensureLocalXk6Binary = () => {
     binPath.replace(/\\\\/g, '/'),
   ];
 
-  const build = spawnSync('go', buildArgs, { stdio: 'inherit', env: { ...process.env } });
+  const build = spawnSync('go', buildArgs, { stdio: 'inherit', timeout: buildTimeoutMs, env: { ...process.env } });
   if (build.status !== 0) {
     console.error(`[load-test] xk6 build failed with status ${build.status}`);
     process.exit(build.status || 1);
   }
 
   return binPath;
-};
-
-const scenarioMap = {
-  partition: 'tests/load/partition-performance.js',
-  'partition-performance': 'tests/load/partition-performance.js',
-  'webhook-ingest': 'tests/load/webhook-ingest.k6.js',
-  'webhook-ingest-http': 'tests/load/webhook-ingest-http.k6.js',
-  'api-gateway-http': 'tests/load/api-gateway-http.k6.js',
-  day1: 'tests/load/day1-onboarding-pressure.js',
-  'day1-onboarding-pressure': 'tests/load/day1-onboarding-pressure.js',
 };
 
 const scenarioFile = scenarioMap[scenario];
@@ -207,6 +235,7 @@ function probeDatabaseUrl(dsn, label) {
     {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: timeoutMs + 1000,
       env: { ...process.env, DATABASE_URL: value, DB_SMOKE_TIMEOUT_MS: String(timeoutMs) },
     },
   );
@@ -364,6 +393,7 @@ function ensureDay1StorageBucketsReady() {
   console.log('[load-test] Ensuring storage bucket prerequisites for day1 load scenario...');
   const ensure = spawnSync(process.execPath, [scriptPath], {
     stdio: 'inherit',
+    timeout: storageTimeoutMs,
     env: {
       ...process.env,
       DATABASE_URL: dbUrl,
@@ -448,7 +478,7 @@ function inspectDockerAvailability() {
     };
   }
 
-  const info = spawnSync('docker', ['info'], { stdio: 'pipe', encoding: 'utf8', env: dockerEnv });
+  const info = spawnSync('docker', ['info'], { stdio: 'pipe', encoding: 'utf8', timeout: dockerCheckTimeoutMs, env: dockerEnv });
   const details = info.error
     ? info.error.message
     : `${info.stdout || ''}${info.stderr || ''}`.trim();
@@ -738,7 +768,7 @@ function runWithLocalXk6() {
         '--output',
         k6Binary,
       ],
-      { stdio: 'inherit' },
+      { stdio: 'inherit', timeout: buildTimeoutMs },
     );
 
     if (build.error) {
@@ -768,7 +798,7 @@ function runWithLocalXk6() {
       summaryRelative,
       scenarioFile,
     ],
-    { stdio: 'pipe', encoding: 'utf8' },
+    { stdio: 'pipe', encoding: 'utf8', timeout: localK6TimeoutMs },
   );
   appendTranscript(String(run.stdout || ''));
   appendTranscript(String(run.stderr || ''));
@@ -823,7 +853,7 @@ if (scenario === 'webhook-ingest-http' && autoProvision && !process.env.WEBHOOK_
     '--provider-type',
     'async_3pl',
   ];
-  const prov = spawnSync(provArgs[0], provArgs.slice(1), { stdio: 'inherit', env: provEnv });
+  const prov = spawnSync(provArgs[0], provArgs.slice(1), { stdio: 'inherit', timeout: provisionTimeoutMs, env: provEnv });
   if (prov.status !== 0) {
     console.error('[load-test] Failed to provision ephemeral webhook source.');
     process.exit(prov.status || 1);
@@ -866,7 +896,7 @@ if (scenario === 'api-gateway-http' && autoProvision && !process.env.API_GATEWAY
     '--provider-type',
     'api_gateway',
   ];
-  const prov = spawnSync(provArgs[0], provArgs.slice(1), { stdio: 'inherit', env: provEnv });
+  const prov = spawnSync(provArgs[0], provArgs.slice(1), { stdio: 'inherit', timeout: provisionTimeoutMs, env: provEnv });
   if (prov.status !== 0) {
     console.error('[load-test] Failed to provision ephemeral API gateway source.');
     process.exit(prov.status || 1);

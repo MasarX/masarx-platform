@@ -95,3 +95,56 @@ export function getFieldOpsThemeTokens(
     },
   };
 }
+
+const COMPONENT_COLORS = {
+  light: {
+    focusRing: "#0e7490", control: "#ffffff", controlText: "#0f172a",
+    info: "#0369a1", infoSoft: "#e0f2fe", infoBorder: "#bae6fd", infoFg: "#075985",
+    successFg: "#166534", warningFg: "#92400e", dangerFg: "#991b1b",
+    meta: "#475569", metaFg: "#475569", metaSoft: "#f1f5f9", metaBorder: "#e2e8f0",
+  },
+  dark: {
+    focusRing: "#22c2d6", control: "#162238", controlText: "#e2e8f0",
+    info: "#38bdf8", infoSoft: "#0c2030", infoBorder: "#1e3a52", infoFg: "#bae6fd",
+    successFg: "#86efac", warningFg: "#fde047", dangerFg: "#fca5a5",
+    meta: "#94a3b8", metaFg: "#94a3b8", metaSoft: "#1e293b", metaBorder: "#334155",
+  },
+};
+
+const COMPONENT_SPACING = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 };
+const COMPONENT_FONT_SCALE = { xs: 11, sm: 12, md: 14, lg: 16, xl: 17, "2xl": 20, "3xl": 22, "4xl": 28, display: 34 };
+const COMPONENT_FONT_WEIGHT = { regular: 400, medium: 500, semibold: 600, bold: 700 };
+const COMPONENT_FONT_LINE_HEIGHT = { tight: 1.2, snug: 1.35, normal: 1.5, relaxed: 1.65 };
+
+export type ThemeMode = MobileThemeMode;
+export type AppliedTheme = AppliedFieldOpsTheme;
+export const resolveAppliedTheme = resolveAppliedFieldOpsTheme;
+
+export function getTokensForTheme(
+  theme: AppliedTheme,
+  platform: FieldOpsThemePlatform = typeof document === "undefined" ? "native" : "web",
+) {
+  const base = getFieldOpsThemeTokens(theme, platform);
+  return {
+    ...base,
+    color: { ...base.color, ...COMPONENT_COLORS[theme] },
+    spacing: { ...COMPONENT_SPACING },
+    font: {
+      ...base.font,
+      mono: base.font.mono ?? "monospace",
+      scale: { ...COMPONENT_FONT_SCALE },
+      weight: { ...COMPONENT_FONT_WEIGHT },
+      lineHeight: { ...COMPONENT_FONT_LINE_HEIGHT },
+    },
+  };
+}
+
+export type ThemeTokens = ReturnType<typeof getTokensForTheme>;
+
+export function getTokensForMode(
+  mode: ThemeMode,
+  systemScheme: Parameters<typeof resolveAppliedTheme>[1],
+  platform?: FieldOpsThemePlatform,
+): ThemeTokens {
+  return getTokensForTheme(resolveAppliedTheme(mode, systemScheme), platform);
+}

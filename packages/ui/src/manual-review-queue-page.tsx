@@ -1,3 +1,4 @@
+import { normalizeReviewDecisionOptions } from "./review-decision-options";
 import "server-only";
 
 import { createUiServerClient } from "@masarx/api/server";
@@ -53,6 +54,9 @@ export async function ManualReviewQueuePage({
   defaultAssignedToCurrentUser,
 }: ManualReviewQueuePageProps) {
   const ui = createUiServerClient();
+  const outcomeOptions = normalizeReviewDecisionOptions(
+    await (ui.listLookupValues?.("manual_review_resolution_outcome") ?? Promise.resolve([])).catch(() => []),
+  );
   let me: UiMe | null = null;
   let meError: string | null = null;
 
@@ -179,6 +183,7 @@ export async function ManualReviewQueuePage({
                 ) : null}
               </div>
               <ManualReviewResolveForm
+                outcomeOptions={outcomeOptions}
                 action={resolveTask}
                 taskId={detailId}
                 disabled={Boolean(blockedMessage)}

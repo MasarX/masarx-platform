@@ -39,6 +39,7 @@ const DAY1_LABEL_P95_MS = Number(__ENV.DAY1_LABEL_P95_MS || 5000);
 const DAY1_LABEL_P99_MS = Number(__ENV.DAY1_LABEL_P99_MS || 12000);
 const DAY1_HTTP_P95_MS = Number(__ENV.DAY1_HTTP_P95_MS || 5000);
 const DAY1_HTTP_P99_MS = Number(__ENV.DAY1_HTTP_P99_MS || 12000);
+const DAY1_ONBOARDING_P95_MS = Number(__ENV.DAY1_ONBOARDING_P95_MS || 10000);
 const DAY1_SETUP_DB_RETRY_ATTEMPTS = Math.max(1, Number(__ENV.DAY1_SETUP_DB_RETRY_ATTEMPTS || 12));
 const DAY1_SETUP_DB_RETRY_SLEEP_MS = Math.max(200, Number(__ENV.DAY1_SETUP_DB_RETRY_SLEEP_MS || 2000));
 const DAY1_RUNTIME_DB_CONNECT_RETRY_ATTEMPTS = Math.max(1, Number(__ENV.DAY1_RUNTIME_DB_CONNECT_RETRY_ATTEMPTS || 8));
@@ -77,7 +78,7 @@ export const options = {
     day1_operation_errors: [`rate<${DAY1_ERROR_RATE_MAX}`],
     day1_shipment_insert_ms: [`p(95)<${DAY1_SHIPMENT_P95_MS}`, `p(99)<${DAY1_SHIPMENT_P99_MS}`],
     day1_label_bundle_ms: [`p(95)<${DAY1_LABEL_P95_MS}`, `p(99)<${DAY1_LABEL_P99_MS}`],
-    day1_onboarding_ms: ['p(95)<10000'],
+    day1_onboarding_ms: [`p(95)<${DAY1_ONBOARDING_P95_MS}`],
     http_req_failed: [`rate<${DAY1_ERROR_RATE_MAX}`],
     http_req_duration: [`p(95)<${DAY1_HTTP_P95_MS}`, `p(99)<${DAY1_HTTP_P99_MS}`],
   },

@@ -686,6 +686,8 @@ async function runBenchmarkCase(
     );
 
     const workflowRunId = await startWorkflowRun(client, workflowTemplateId, {
+      trigger_source: 'manual',
+      trigger_type: 'qa_geo_ai_benchmark',
       organization_id: ctx.organization_id,
       client_id: ctx.client_id,
       sender_id: ctx.sender_id,

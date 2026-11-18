@@ -108,3 +108,29 @@ test("tenant review history uses friendly copy without changing persisted diagno
   expect(screen.queryByText(/synthetic-short|PRIVATE_INTERNAL_CODE|raw payload/)).not.toBeInTheDocument();
   expect(detail).toEqual(original);
 });
+
+test("tenant review renders friendly status while retaining the canonical decision options", async () => {
+  const rows = [{ value: "rejected", label: "Reject request" }];
+  const listLookupValues = jest.fn().mockResolvedValue(rows);
+  (createUiServerClient as jest.Mock).mockReturnValue({
+    me: jest.fn().mockResolvedValue({ capabilities: ["tenant_signup_requests.review"] }),
+    listLookupValues,
+  });
+  const footer = await reviewFooter({
+    status: "rejected",
+    review_decision: "rejected",
+    review_reason: "Synthetic review reason",
+  });
+  render(footer);
+
+  expect(listLookupValues).toHaveBeenCalledWith("tenant_signup_review_decision");
+  expect(screen.getAllByText("Rejected")).toHaveLength(2);
+  expect(screen.queryByText(/^rejected$/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Synthetic review reason/)).toBeInTheDocument();
+  expect(findReviewForm(footer)?.props).toMatchObject({
+    requestId,
+    disabled: true,
+    disabledMessage: "Only pending requests can be reviewed.",
+    decisionOptions: rows,
+  });
+});

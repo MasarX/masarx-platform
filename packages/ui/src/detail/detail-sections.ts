@@ -5,8 +5,11 @@ import {
   formatIdValue,
   formatReferenceValue,
   isUuidValue,
+  isHumanizableMachineValue,
 } from "../resource-utils";
 import { resolveDisplayIdentifier } from "../display-identifiers";
+import { normalizeEditOptions, resolveEditOptionLabel } from "../edit-option-utils";
+import { resolveSafeHref } from "../url-guard";
 
 export type ResourceDetailColumn = {
   key: string;
@@ -29,6 +32,7 @@ export type ResourceDetailEntry = {
   sectionLabel: string;
   hideDisplayValue?: boolean;
   rawValue: unknown;
+  linkHref?: string | null;
 };
 
 export type ResourceDetailSection = {
@@ -75,12 +79,49 @@ function resolveDetailIdentifierKeys(key: string) {
  * Build detail sections from raw data and columns.
  * Shared between read-only ResourceDetail and editable ResourceDetailEditable.
  */
+export function resolveResourceKeyFromFk(fieldKey: string): string | null {
+  if (!fieldKey.endsWith("_id") || fieldKey === "id") return null;
+  const base = fieldKey.slice(0, fieldKey.length - 3);
+  if (!base) return null;
+  // Use the last segment after underscores as the entity noun
+  // e.g. "destination_address" -> "address", "sender" -> "sender"
+  const segments = base.split("_");
+  const noun = segments[segments.length - 1] ?? base;
+  if (!noun) return null;
+  // Simple pluralization: add 's', handle 'ss' -> 'sses', 'y' -> 'ies'
+  if (noun.endsWith("ss")) return `${noun}es`;
+  if (noun.endsWith("s")) return noun;
+  if (noun.endsWith("y") && noun.length > 1 && !/[aeiou]/.test(noun[noun.length - 2] ?? "")) {
+    return `${noun.slice(0, -1)}ies`;
+  }
+  return `${noun}s`;
+}
+
+export function resolveFkLinkHref(
+  key: string,
+  value: unknown,
+  appBasePath: string | null | undefined
+): string | null {
+  if (appBasePath == null) return null;
+  if (key === "id" || !key.endsWith("_id")) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || !isUuidValue(trimmed)) return null;
+  const resourceKey = resolveResourceKeyFromFk(key);
+  if (!resourceKey) return null;
+  return resolveSafeHref(
+    appBasePath,
+    `/resources/${encodeURIComponent(resourceKey)}?id=${encodeURIComponent(trimmed)}&detail_open=1`
+  );
+}
+
 export function buildDetailSections(
   data: Record<string, unknown>,
   columns: ResourceDetailColumn[] | null | undefined,
   generalLabel: string,
   internalIdLabel: string,
-  showInternalIdHints: boolean
+  showInternalIdHints: boolean,
+  appBasePath?: string | null
 ): ResourceDetailSection[] {
   const columnMap = new Map<string, ResourceDetailColumn>();
   const orderMap = new Map<string, number>();
@@ -93,8 +134,12 @@ export function buildDetailSections(
   const entries: ResourceDetailEntry[] = Object.entries(data).map(
     ([key, value]) => {
       const column = columnMap.get(key);
+      const isLookup = typeof value === "string" &&
+        /(?:^|_)(status|state|reason|action|source|type|mode|kind|outcome|category|priority)$/i.test(key) &&
+        isHumanizableMachineValue(value);
+      const optionLabel = resolveEditOptionLabel(value, normalizeEditOptions(column?.editOptions));
       const textValue = formatResourceValue(value, {
-        renderType: column?.renderType ?? null,
+        renderType: column?.renderType ?? (isLookup ? "lookup" : null),
         formatOptions: column?.formatOptions ?? null,
       });
       const isIdKey = key === "id" || key.endsWith("_id");
@@ -104,6 +149,7 @@ export function buildDetailSections(
         ? resolveDisplayIdentifier(data, {
             fallback: textValue,
             preferredKeys: resolveDetailIdentifierKeys(key) ?? undefined,
+            skipGlobalFallback: key !== "id",
           })
         : null;
       const rawIdValue = isIdKey && value !== null && value !== undefined ? String(value) : "";
@@ -111,11 +157,11 @@ export function buildDetailSections(
       const compactDisplayIdentifier = displayIdentifier?.value
         ? formatDisplayIdentifierValue(displayIdentifier.value)
         : null;
-      const displayValue = compactDisplayIdentifier
+      const displayValue = optionLabel ?? (compactDisplayIdentifier
         ? compactDisplayIdentifier
         : isIdKey
           ? idFallbackValue ?? textValue
-          : uuidReferenceValue ?? textValue;
+          : uuidReferenceValue ?? textValue);
       const title = displayIdentifier?.value
         ? displayIdentifier.value
         : isIdKey && rawIdValue && displayValue !== rawIdValue
@@ -145,6 +191,7 @@ export function buildDetailSections(
         sectionId,
         sectionLabel,
         rawValue: value,
+        linkHref: resolveFkLinkHref(key, value, appBasePath),
       };
     }
   );

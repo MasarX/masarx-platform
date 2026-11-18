@@ -66,3 +66,31 @@ test("plain section persists collapse state in navigation storage", () => {
   const parsed = JSON.parse(stored ?? "{}") as { collapsedSections?: string[] };
   expect(parsed.collapsedSections).toContain("section.test");
 });
+
+test("section can opt out of persisted collapse state and honor defaultOpen", () => {
+  const { container } = renderWithIntl(
+    <NavigationStateProvider
+      storageKey={storageKey}
+      legacyStorageKey={undefined}
+      maxFavorites={0}
+      maxRecents={0}
+      defaultSidebarCollapsed={false}
+      defaultCollapsedSections={[]}
+      defaultLayoutMode="full"
+    >
+      <Section
+        title="Search section"
+        collapsible
+        collapseKey="section.search"
+        defaultOpen={false}
+        persistCollapse={false}
+      >
+        <div>Search content</div>
+      </Section>
+    </NavigationStateProvider>
+  );
+
+  const details = container.querySelector("details");
+  expect(details).not.toBeNull();
+  expect(details?.open).toBe(false);
+});

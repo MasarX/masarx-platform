@@ -4,7 +4,7 @@ import { getPortalBasePath } from "./utils/base-paths";
 import { isStrictE2EEnv } from "./utils/env";
 import { fetchUserContext, flattenNavigationSections } from "./utils/role-matrix";
 import { hasCapability, resolveCapabilitySet } from "./utils/capabilities";
-import { ensureSignedIn } from "./utils/session";
+import { ensureSignedInAtUrl } from "./utils/session";
 import {
   runAccessPolicyRequestFlow,
   runSettingsRequestFlow,
@@ -97,12 +97,12 @@ test.describe("portal request flows", () => {
 
   test("portal access policy request flow", async ({ page }) => {
     const user = await resolvePortalUserWithCapability(
-      portalUsers,
+      scopedPortalUsers,
       "access_policy.request",
       undefined
     );
     if (!user) {
-      const fallbackUser = portalUsers[0];
+      const fallbackUser = scopedPortalUsers[0] ?? portalUsers[0];
       if (!fallbackUser) {
         if (strict) {
           throw new Error("No portal user available for access policy request flow.");
@@ -112,17 +112,13 @@ test.describe("portal request flows", () => {
       }
 
       const basePath = getPortalBasePath();
-      await ensureSignedIn({
+      await ensureSignedInAtUrl({
         page,
-        basePath,
+        baseUrl: `${basePath}/access-policy/request`,
         authTestId: "portal-auth-required",
         email: fallbackUser.email,
         password: demoContext.password ?? "",
         scopeType: fallbackUser.scope_type ?? null,
-      });
-      await page.goto(`${basePath}/access-policy/request`, {
-        waitUntil: "domcontentloaded",
-        timeout: 60_000,
       });
       await expect(
         page

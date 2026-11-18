@@ -6,6 +6,6 @@
     "declarationMap": true,
     "outDir": "dist"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "messages/**/*.json"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "schemas/**/*.ts", "messages/**/*.json"],
   "exclude": ["node_modules", "dist"]
 }

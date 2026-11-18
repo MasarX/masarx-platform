@@ -14,6 +14,8 @@ import { findRegistryResource } from "./ui-registry-utils";
 
 type WorkflowTemplateCreatePageProps = {
   appBasePath: string;
+  /** Pre-select this template ID in the "clone from" field. */
+  cloneFromId?: string | null;
   testIdPrefix?: string | null;
 };
 
@@ -39,6 +41,7 @@ function normalizeTemplateOption(item: Record<string, unknown>): WorkflowTemplat
 
 export async function WorkflowTemplateCreatePage({
   appBasePath,
+  cloneFromId,
   testIdPrefix,
 }: WorkflowTemplateCreatePageProps) {
   const t = createUiTranslator("ui.workflowStudio");
@@ -104,6 +107,7 @@ export async function WorkflowTemplateCreatePage({
           capabilities={userCapabilities}
           capabilityWrite={capabilityWrite}
           templates={templates}
+          initialCloneFromId={cloneFromId ?? null}
           testIdPrefix={resolvedTestIdPrefix || null}
         />
       </Section>

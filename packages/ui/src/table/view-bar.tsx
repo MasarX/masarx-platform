@@ -71,6 +71,7 @@ type TableViewBarProps = {
   filterChips?: ChipItem[];
   onRemoveChip?: (chip: ChipItem) => void;
   onClearAllChips?: () => void;
+  onSaveFiltersAsView?: () => void;
 };
 
 function ControlIcon({ name }: { name: TablePanelKey | "menu" }) {
@@ -243,6 +244,7 @@ export function TableViewBar({
   filterChips,
   onRemoveChip,
   onClearAllChips,
+  onSaveFiltersAsView,
 }: TableViewBarProps) {
   const viewSelectId = React.useId();
   const resolvedTestIdPrefix = testIdPrefix?.trim() || "";
@@ -519,13 +521,23 @@ export function TableViewBar({
         </div>
       </div>
       {filterChips && filterChips.length > 0 && onRemoveChip ? (
-        <div className="mt-2 border-t border-ui-border/10 pt-2">
+        <div className="mt-2 flex items-start gap-2 border-t border-ui-border/10 pt-2">
           <FilterChips
             t={t}
             chips={filterChips}
             onRemove={onRemoveChip}
             onClearAll={onClearAllChips}
           />
+          {onSaveFiltersAsView && canManageViews ? (
+            <button
+              type="button"
+              className="mt-0.5 shrink-0 rounded-md border border-ui-accent/30 bg-ui-accent/5 px-2 py-0.5 text-[10px] font-medium text-ui-accent transition hover:bg-ui-accent/10"
+              onClick={onSaveFiltersAsView}
+              title="Save current filters as a new view"
+            >
+              {"Save filters as view"}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {viewError ? <span className="text-xs text-ui-ink">{viewError}</span> : null}

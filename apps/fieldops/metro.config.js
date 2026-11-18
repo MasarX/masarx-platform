@@ -184,6 +184,26 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 // Prevent Metro from crawling upwards and resolving hoisted React 18 from the monorepo root.
 config.resolver.disableHierarchicalLookup = true;
 
+// react-native-maps ships native-only modules that Metro cannot bundle for the
+// web target. Swap the import for a no-op stub (see src/mobile-map-stub-web.tsx)
+// whenever Metro resolves `react-native-maps` for a web build, so the shared
+// OrdersRealMap component can render the existing static scatter board on web
+// without pulling in native-only code paths.
+const mobileMapStubWebPath = path.resolve(projectRoot, "src", "mobile-map-stub-web.tsx");
+const priorResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (platform === "web" && moduleName === "react-native-maps") {
+    return {
+      type: "sourceFile",
+      filePath: mobileMapStubWebPath,
+    };
+  }
+  if (typeof priorResolveRequest === "function") {
+    return priorResolveRequest(context, moduleName, platform);
+  }
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 // expo-sqlite web uses wa-sqlite which requires SharedArrayBuffer support.
 // Enable COOP/COEP headers for local Metro hosting to avoid "cannot create file" failures.
 config.server = config.server || {};

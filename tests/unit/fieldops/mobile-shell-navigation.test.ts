@@ -283,6 +283,7 @@ describe("mobile shell navigation helpers", () => {
     expect(resolveInitialSelectedNavItemId(sections, null, "/scan")).toBe("mobile-scan");
     expect(resolveInitialSelectedNavItemId(sections, "stale-item", "/scan")).toBe("mobile-scan");
     expect(resolveInitialSelectedNavItemId(sections, "mobile-more", "/scan")).toBe("mobile-more");
+    expect(resolveInitialSelectedNavItemId(sections, null, "/mobile/more")).toBe("mobile-more");
   });
 
   test("finds nav item by id across nested levels", () => {

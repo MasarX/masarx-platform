@@ -3,8 +3,8 @@ jest.mock("../e2e/utils/auth", () => ({
   expectSignedIn: jest.fn(),
 }));
 
-import { signInWithPassword } from "../e2e/utils/auth";
-import { signInIfAuthRequired } from "../e2e/utils/session";
+import { expectSignedIn, signInWithPassword } from "../e2e/utils/auth";
+import { ensureSignedInAtUrl, signInIfAuthRequired } from "../e2e/utils/session";
 
 type MockLocator = {
   first: () => MockLocator;
@@ -30,6 +30,7 @@ function createLocator(options: {
 
 function createPage(locators: Record<string, MockLocator>) {
   return {
+    goto: jest.fn(),
     locator: jest.fn((selector: string) => {
       const entry = locators[selector];
       if (!entry) {
@@ -85,4 +86,22 @@ describe("signInIfAuthRequired", () => {
     expect(result).toBe(false);
     expect(signInWithPassword).not.toHaveBeenCalled();
   });
+});
+
+test("checks the expected scoped identity after signing in at the selected URL", async () => {
+  const context = createLocator({ visible: false });
+  const auth = createLocator({ visible: true });
+  const page = createPage({
+    '[data-testid="portal-context-unavailable"]': context,
+    '[data-testid="portal-auth-required"]': auth,
+  });
+  const email = "portal-fixture@example.invalid";
+  const password = "fixture-only";
+  const baseUrl = "https://portal.example.invalid/";
+
+  await ensureSignedInAtUrl({ page, baseUrl, authTestId: "portal-auth-required", email, password, scopeType: "client" });
+
+  expect(page.goto).toHaveBeenCalledWith(baseUrl);
+  expect(signInWithPassword).toHaveBeenCalledWith(page, email, password);
+  expect(expectSignedIn).toHaveBeenCalledWith(page, email, "client");
 });

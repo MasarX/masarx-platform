@@ -1,5 +1,7 @@
 "use client";
 
+import { formatReferenceValue } from "../resource-utils";
+
 import * as React from "react";
 import type { MappingOperationReport } from "@masarx/api";
 import { Badge } from "../badge";
@@ -14,12 +16,14 @@ type OperationReportViewerProps = {
   report: MappingOperationReport | null;
   result?: unknown;
   appBasePath: string;
+  workflowTemplateLabels?: ReadonlyMap<string, string>;
 };
 
 export function OperationReportViewer({
   report,
   result,
   appBasePath,
+  workflowTemplateLabels,
 }: OperationReportViewerProps) {
   const t = createUiTranslator("ui.operationReport");
   const [copyFeedback, setCopyFeedback] = React.useState<"copied" | "copyFailed" | null>(null);
@@ -45,13 +49,21 @@ export function OperationReportViewer({
   const status = report.status?.trim() || "succeeded";
   const primaryType = report.primary_resource_type?.trim() || "";
   const primaryId = report.primary_resource_id?.trim() || "";
+  const reportFields = report as unknown as Record<string, unknown>;
+  const primaryLabel = ["primary_resource_label", "primary_resource_name", "resource_label"]
+    .map((key) => typeof reportFields[key] === "string" ? String(reportFields[key]).trim() : "")
+    .find(Boolean) || (primaryId ? formatReferenceValue(primaryId) : "");
+  const workflowTemplateId = report.workflow_template_id?.trim() ?? "";
+  const workflowLabel = workflowTemplateId
+    ? workflowTemplateLabels?.get(workflowTemplateId) || formatReferenceValue(workflowTemplateId)
+    : t("notAvailable");
   const nextSteps = Array.isArray(report.next_steps)
     ? report.next_steps.map((step) => sanitizeUiError(step) ?? "") : [];
   const reportSummary = [
     `${t("status")}: ${t(status === "succeeded" ? "succeeded" : "failed")}`,
     `${t("artifact")}: ${report.artifact_type || t("notAvailable")}`,
     `${t("activityReference")}: ${report.correlation_id || reportId || t("notAvailable")}`,
-    `${t("primaryResource")}: ${primaryType || t("notAvailable")}${primaryId ? ` (${primaryId})` : ""}`,
+    `${t("primaryResource")}: ${primaryType || t("notAvailable")}${primaryId ? ` (${primaryLabel})` : ""}`,
     ...(nextSteps.length ? [`${t("nextSteps")}: ${nextSteps.join("; ")}`] : []),
   ].join("\n");
   const reportJson = formatJsonForUi(report) ?? "null";
@@ -79,8 +91,8 @@ export function OperationReportViewer({
         <div className="space-y-2 rounded-xl border border-ui-border/40 bg-ui-paper/70 p-4 text-sm text-ui-muted">
           <div><span className="font-medium text-ui-ink">{t("artifact")}:</span> {report.artifact_type || t("notAvailable")}</div>
           <div><span className="font-medium text-ui-ink">{t("reportReference")}:</span> {report.id || t("pending")}</div>
-          <div><span className="font-medium text-ui-ink">{t("primaryResource")}:</span> {primaryType || t("notAvailable")} {primaryId ? `(${primaryId})` : ""}</div>
-          <div><span className="font-medium text-ui-ink">{t("workflow")}:</span> {report.workflow_template_id || t("notAvailable")}</div>
+          <div><span className="font-medium text-ui-ink">{t("primaryResource")}:</span> {primaryType || t("notAvailable")} {primaryLabel ? `(${primaryLabel})` : ""}</div>
+          <div><span className="font-medium text-ui-ink">{t("workflow")}:</span> {workflowLabel}</div>
         </div>
         <div className="space-y-2 rounded-xl border border-ui-border/40 bg-ui-paper/70 p-4 text-sm text-ui-muted">
           <div><span className="font-medium text-ui-ink">{t("nextSteps")}:</span></div>

@@ -211,3 +211,21 @@ describe("AccessPolicyRequestForm", () => {
     confirmSpy.mockRestore();
   });
 });
+
+test("shows a friendly locked scope and submits canonical fields", () => {
+  render(
+    <AccessPolicyRequestForm
+      action={async () => ({ status: "idle" })}
+      testIdPrefix="example-policy"
+      defaultScopeType="tenant"
+      defaultScopeId="00000000-0000-4000-8000-000000000151"
+      defaultScopeLabel="Example Tenant"
+      defaultPolicyJson="{}"
+      lockScope
+    />
+  );
+  expect(screen.getByText("Example Tenant")).toBeInTheDocument();
+  const data = new FormData(screen.getByTestId("example-policy-form") as HTMLFormElement);
+  expect(data.get("scope_type")).toBe("tenant");
+  expect(data.get("scope_id")).toBe("00000000-0000-4000-8000-000000000151");
+});

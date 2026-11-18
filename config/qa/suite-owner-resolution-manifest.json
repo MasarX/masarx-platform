@@ -1,0 +1,770 @@
+{
+  "schema_version": 2,
+  "manifest_id": "masarx-suite-owner-resolution",
+  "purpose": "Exact owner-suite resolver proof for QA coverage claims. Every owner_suites ID discovered from the flow registry or form inventory must be listed explicitly here and must resolve to tracked executable assets, package scripts, command targets, or an explicit supporting classification. Namespace-only patterns are intentionally forbidden.",
+  "owner_suite_sources": [
+    {
+      "path": "config/qa/flow-coverage-registry.json",
+      "fields": [
+        "owner_suites"
+      ]
+    },
+    {
+      "path": "config/qa/form-contract-inventory.json",
+      "fields": [
+        "primary_owner_suites"
+      ]
+    }
+  ],
+  "resolver_rules": [
+    {
+      "id": "fieldops-browser-harness-specs",
+      "suite_ids": [
+        "fieldops.cod_collection",
+        "fieldops.driver_smoke",
+        "fieldops.mid_route_handoff",
+        "fieldops.offline_sync",
+        "fieldops.partial_delivery",
+        "fieldops.pod_capture",
+        "fieldops.return_handoff",
+        "fieldops.route_execution",
+        "fieldops.scan_verify"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:e2e:fieldops"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_template": "tests/fieldops-e2e/fieldops-{suite_leaf_kebab}.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "integration-edge-contract-specs",
+      "suite_ids": [
+        "integration.edge.driver_application_status_e2e",
+        "integration.edge.driver_signup_intake_e2e",
+        "integration.edge.marketing_lead_intake_e2e",
+        "integration.edge.marketplace_participant_review_e2e",
+        "integration.edge.public_ingress_contract",
+        "integration.edge.public_shipment_tracking_e2e",
+        "integration.edge.receiver_auth_latency",
+        "integration.edge.tenant_signup_intake_e2e",
+        "integration.edge.tenant_signup_review_e2e",
+        "integration.edge.ui_resource_download_e2e"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:integration"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_template": "tests/integration/edge/{suite_leaf_kebab}.test.js"
+        }
+      ]
+    },
+    {
+      "id": "integration-workflow-contract-specs",
+      "suite_ids": [
+        "integration.dispatch_stop_exceptions",
+        "integration.return_to_branch",
+        "integration.route_run_assignment_lifecycle",
+        "integration.task_completion_effects",
+        "integration.warehouse_transfer_execute",
+        "integration.warehouse_transfer_manifest_create",
+        "integration.workflows.access_policy_approval_lifecycle",
+        "integration.workflows.engine_lifecycle",
+        "integration.workflows.pickup_batch2",
+        "integration.workflows.public_tracking_address_correction",
+        "integration.workflows.settings_approval_lifecycle",
+        "integration.zones_baskets_workflow"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:integration"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_template": "tests/integration/workflows/{suite_leaf_kebab}.test.js"
+        }
+      ]
+    },
+    {
+      "id": "integration-direct-contract-specs",
+      "suite_ids": [
+        "integration.api_gateway_ingest",
+        "integration.comms_notification_dispatch",
+        "integration.cross_surface_delivery",
+        "integration.cross_surface_exception",
+        "integration.cross_surface_marketplace",
+        "integration.delivery_stop_finalize",
+        "integration.domain_events",
+        "integration.fieldops_driver_go_live",
+        "integration.fieldops_pickup_execution",
+        "integration.integration_recovery_backfill",
+        "integration.label_renderer_targets_request",
+        "integration.label_target_artifact_contract",
+        "integration.manual_review_lifecycle",
+        "integration.mapping_studio_runtime_save",
+        "integration.observability.ack_history",
+        "integration.outbound_queue",
+        "integration.rls_sensitive_configs",
+        "integration.security.rls_coverage",
+        "integration.settings_governance_hardening",
+        "integration.settings_resolution",
+        "integration.settlement_bank_deposit",
+        "integration.settlement_billing_payout_lifecycle",
+        "integration.settlement_cod_full_lifecycle",
+        "integration.webhook_ingest",
+        "integration.webhook_replay_stress"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:integration"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_templates": [
+            "tests/integration/{suite_leaf_kebab}.test.js",
+            "tests/integration/{suite_suffix_kebab}.test.js",
+            "tests/integration/fieldops/{suite_leaf_kebab}.test.js",
+            "tests/integration/fieldops/fieldops-{suite_leaf_kebab}.test.js",
+            "tests/integration/label/{suite_leaf_kebab}.test.js",
+            "tests/integration/label/label-{suite_leaf_kebab}.test.js",
+            "tests/integration/observability/{suite_leaf_kebab}.test.js",
+            "tests/integration/security/{suite_leaf_kebab}.test.js"
+          ]
+        }
+      ],
+      "suite_assets": {
+        "integration.rls_sensitive_configs": [
+          {
+            "kind": "file",
+            "path": "tests/integration/security/rls-deny-sensitive-logs.test.js"
+          }
+        ]
+      }
+    },
+    {
+      "id": "integration-exact-exception-specs",
+      "suite_ids": [
+        "integration.integration_plugin_control_plane_lifecycle",
+        "integration.labels_print",
+        "integration.marketplace_network_lifecycle",
+        "integration.marketplace_network_product_complete"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:integration"
+        }
+      ],
+      "suite_assets": {
+        "integration.integration_plugin_control_plane_lifecycle": [
+          {
+            "kind": "file",
+            "path": "tests/integration/integration-plugin-control-plane.lifecycle.test.js"
+          }
+        ],
+        "integration.labels_print": [
+          {
+            "kind": "file",
+            "path": "tests/integration/workflows/labels-print-workflow.test.js"
+          }
+        ],
+        "integration.marketplace_network_lifecycle": [
+          {
+            "kind": "file",
+            "path": "tests/integration/marketplace/marketplace-network.lifecycle.test.js"
+          }
+        ],
+        "integration.marketplace_network_product_complete": [
+          {
+            "kind": "file",
+            "path": "tests/integration/marketplace/marketplace-network.product-complete.test.js"
+          }
+        ]
+      }
+    },
+    {
+      "id": "load-k6-specs",
+      "suite_ids": [
+        "load.webhook_ingest",
+        "load.webhook_ingest_http"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:load"
+        }
+      ],
+      "suite_assets": {
+        "load.webhook_ingest": [
+          {
+            "kind": "file",
+            "path": "tests/load/webhook-ingest.k6.js"
+          }
+        ],
+        "load.webhook_ingest_http": [
+          {
+            "kind": "file",
+            "path": "tests/load/webhook-ingest-http.k6.js"
+          }
+        ]
+      }
+    },
+    {
+      "id": "pgtap-contract-sql-specs",
+      "suite_ids": [
+        "pgtap.account_activation_scope_guards",
+        "pgtap.b07_device_lifecycle_recovery",
+        "pgtap.b07_mobile_attestation_ingest_contract",
+        "pgtap.onboarding_plugin_baseline_readiness",
+        "pgtap.public_tracking_service",
+        "pgtap.route_run_assignment_lifecycle_foundation",
+        "pgtap.settings_policy_context_resolver",
+        "pgtap.settings_scope_context",
+        "pgtap.tenant_signup_approval_onboarding_defaults",
+        "pgtap.uc077_route_run_execution_manifest_reassignment",
+        "pgtap.uc078_route_stop_mid_execution_reassignment",
+        "pgtap.uc079_route_run_alternate_capacity_pool",
+        "pgtap.ui_read_api_wrapper_parity",
+        "pgtap.workflow_engine_sequence_and_explicit_wake",
+        "pgtap.zone_override_approval_contract"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:pgtap"
+        }
+      ],
+      "suite_assets": {
+        "pgtap.account_activation_scope_guards": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_account_activation_scope_guards_v1.sql"
+          }
+        ],
+        "pgtap.b07_device_lifecycle_recovery": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_b07_device_lifecycle_recovery_v1.sql"
+          }
+        ],
+        "pgtap.b07_mobile_attestation_ingest_contract": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_b07_mobile_attestation_ingest_contract_v1.sql"
+          }
+        ],
+        "pgtap.onboarding_plugin_baseline_readiness": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_onboarding_plugin_baseline_readiness_v1.sql"
+          }
+        ],
+        "pgtap.public_tracking_service": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_public_tracking_service_v1.sql"
+          }
+        ],
+        "pgtap.route_run_assignment_lifecycle_foundation": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_route_run_assignment_lifecycle_foundation_v1.sql"
+          }
+        ],
+        "pgtap.settings_policy_context_resolver": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_settings_policy_context_resolver_v1.sql"
+          }
+        ],
+        "pgtap.settings_scope_context": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0ze_settings_scope_context.sql"
+          }
+        ],
+        "pgtap.tenant_signup_approval_onboarding_defaults": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_tenant_signup_approval_onboarding_defaults_v1.sql"
+          }
+        ],
+        "pgtap.uc077_route_run_execution_manifest_reassignment": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_uc077_route_run_execution_manifest_reassignment_v1.sql"
+          }
+        ],
+        "pgtap.uc078_route_stop_mid_execution_reassignment": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_uc078_route_stop_mid_execution_reassignment_v1.sql"
+          }
+        ],
+        "pgtap.uc079_route_run_alternate_capacity_pool": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_uc079_route_run_alternate_capacity_pool_v1.sql"
+          }
+        ],
+        "pgtap.ui_read_api_wrapper_parity": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zj_ui_read_api_wrapper_parity.sql"
+          }
+        ],
+        "pgtap.workflow_engine_sequence_and_explicit_wake": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/043_workflow_engine_sequence_and_explicit_wake.sql"
+          }
+        ],
+        "pgtap.zone_override_approval_contract": [
+          {
+            "kind": "file",
+            "path": "supabase/tests/pgtap/0zz_b04_uc062_zone_override_approval_v1.sql"
+          }
+        ]
+      }
+    },
+    {
+      "id": "playwright-console-lifecycle-specs",
+      "suite_ids": [
+        "playwright.console.manual_review_flows",
+        "playwright.console.observability_flows",
+        "playwright.console.performance_page_load",
+        "playwright.console.pickup_batch2",
+        "playwright.console.request_flows",
+        "playwright.console.resource_import_lifecycle",
+        "playwright.console.schema_fk_resolution",
+        "playwright.console.schema_status_values",
+        "playwright.console.shipment_amend_cancel",
+        "playwright.console.shipments_manual_create",
+        "playwright.console.workflow_bindings"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:e2e"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_templates": [
+            "tests/e2e/console.{suite_leaf_kebab}.spec.ts",
+            "tests/e2e/console-{suite_leaf_kebab}.spec.ts"
+          ]
+        }
+      ],
+      "suite_assets": {
+        "playwright.console.performance_page_load": [
+          {
+            "kind": "file",
+            "path": "tests/e2e/utils/page-load-performance.ts"
+          }
+        ]
+      }
+    },
+    {
+      "id": "playwright-portal-lifecycle-specs",
+      "suite_ids": [
+        "playwright.portal.marketplace_product_complete",
+        "playwright.portal.performance_page_load",
+        "playwright.portal.pickup_batch2",
+        "playwright.portal.request_flows",
+        "playwright.portal.resource_import_lifecycle",
+        "playwright.portal.shipment_amend_cancel",
+        "playwright.portal.shipments_manual_create",
+        "playwright.portal.workflow_bindings"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:e2e"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_templates": [
+            "tests/e2e/portal.{suite_leaf_kebab}.spec.ts",
+            "tests/e2e/portal-{suite_leaf_kebab}.spec.ts"
+          ]
+        }
+      ],
+      "suite_assets": {
+        "playwright.portal.performance_page_load": [
+          {
+            "kind": "file",
+            "path": "tests/e2e/utils/page-load-performance.ts"
+          }
+        ]
+      }
+    },
+    {
+      "id": "playwright-shared-cross-surface-specs",
+      "suite_ids": [
+        "playwright.shared.cross_surface_access_policy_approval",
+        "playwright.shared.cross_surface_bank_deposit_reconciliation",
+        "playwright.shared.cross_surface_cod_cashier_settlement",
+        "playwright.shared.cross_surface_customer_shipment_change",
+        "playwright.shared.cross_surface_delivery",
+        "playwright.shared.cross_surface_exception",
+        "playwright.shared.cross_surface_marketplace_dispute",
+        "playwright.shared.cross_surface_marketplace_lifecycle",
+        "playwright.shared.cross_surface_pickup_wave",
+        "playwright.shared.cross_surface_return_to_branch_visibility",
+        "playwright.shared.cross_surface_settings_approval",
+        "playwright.shared.cross_surface_zone_override_approval",
+        "playwright.shared.cross_surface_warehouse_transfer_manifest"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:e2e"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_template": "tests/e2e/{suite_leaf_kebab}.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "playwright-landing-specs",
+      "suite_ids": [
+        "playwright.landing.contact_lookup",
+        "playwright.landing.driver_signup",
+        "playwright.landing.tracking_flow"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:e2e:landing"
+        }
+      ],
+      "suite_assets": {
+        "playwright.landing.contact_lookup": [
+          {
+            "kind": "file",
+            "path": "tests/landing-e2e/landing-contact-lookup.spec.ts"
+          }
+        ],
+        "playwright.landing.driver_signup": [
+          {
+            "kind": "file",
+            "path": "tests/landing-e2e/landing-driver-signup.spec.ts"
+          }
+        ],
+        "playwright.landing.tracking_flow": [
+          {
+            "kind": "file",
+            "path": "tests/landing-e2e/landing-tracking.spec.ts"
+          }
+        ]
+      }
+    },
+    {
+      "id": "playwright-explicit-support-specs",
+      "suite_ids": [
+        "playwright.action_shipments_print_labels",
+        "playwright.labels_flows",
+        "playwright.navigation_performance_budgets"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:e2e"
+        }
+      ],
+      "suite_assets": {
+        "playwright.action_shipments_print_labels": [
+          {
+            "kind": "file",
+            "path": "tests/e2e/action-shipments-print-labels.spec.ts"
+          }
+        ],
+        "playwright.labels_flows": [
+          {
+            "kind": "file",
+            "path": "tests/e2e/labels-flows.spec.ts"
+          }
+        ],
+        "playwright.navigation_performance_budgets": [
+          {
+            "kind": "file",
+            "path": "tests/e2e/navigation-performance-budgets.spec.ts"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quality-and-non-functional-gates",
+      "suite_ids": [
+        "quality.control_plane_drift_audit",
+        "quality.docs_ssot_lint",
+        "quality.label_render_load",
+        "quality.load_concurrency_gate",
+        "quality.non_functional_observability_gate_proof",
+        "quality.performance_budget_gate_proof",
+        "quality.public_tracking_load",
+        "quality.resilience_recovery_gate_proof",
+        "quality.security_access_gate_proof"
+      ],
+      "suite_assets": {
+        "quality.control_plane_drift_audit": [],
+        "quality.docs_ssot_lint": [
+          {
+            "kind": "script",
+            "name": "lint:docs:ssot"
+          },
+          {
+            "kind": "file",
+            "path": "scripts/tooling/docs-ssot-lint.js"
+          },
+          {
+            "kind": "file",
+            "path": "scripts/tooling/certification-docs-lint.js"
+          }
+        ],
+        "quality.label_render_load": [
+          {
+            "kind": "script",
+            "name": "test:load"
+          },
+          {
+            "kind": "file",
+            "path": "tests/load/label-renderer-concurrency.k6.js"
+          }
+        ],
+        "quality.load_concurrency_gate": [
+          {
+            "kind": "workflow",
+            "path": ".github/workflows/non-functional-proof-gate.yml"
+          },
+          {
+            "kind": "script",
+            "name": "quality:proof:inventory"
+          },
+          {
+            "kind": "file",
+            "path": "tests/quality/non-functional-load-concurrency-gate-proof.test.js"
+          }
+        ],
+        "quality.non_functional_observability_gate_proof": [
+          {
+            "kind": "workflow",
+            "path": ".github/workflows/non-functional-proof-gate.yml"
+          },
+          {
+            "kind": "script",
+            "name": "quality:proof:inventory"
+          },
+          {
+            "kind": "file",
+            "path": "tests/quality/non-functional-observability-gate-proof.test.js"
+          }
+        ],
+        "quality.performance_budget_gate_proof": [
+          {
+            "kind": "workflow",
+            "path": ".github/workflows/non-functional-proof-gate.yml"
+          },
+          {
+            "kind": "file",
+            "path": "scripts/ops/quality/non-functional-class-gate-proof.js"
+          },
+          {
+            "kind": "file",
+            "path": "tests/quality/non-functional-performance-budget-gate-proof.test.js"
+          }
+        ],
+        "quality.public_tracking_load": [
+          {
+            "kind": "script",
+            "name": "test:load"
+          },
+          {
+            "kind": "file",
+            "path": "tests/load/public-tracking-http.k6.js"
+          }
+        ],
+        "quality.resilience_recovery_gate_proof": [
+          {
+            "kind": "workflow",
+            "path": ".github/workflows/non-functional-proof-gate.yml"
+          },
+          {
+            "kind": "file",
+            "path": "scripts/ops/quality/non-functional-class-gate-proof.js"
+          },
+          {
+            "kind": "file",
+            "path": "tests/quality/non-functional-resilience-recovery-gate-proof.test.js"
+          }
+        ],
+        "quality.security_access_gate_proof": [
+          {
+            "kind": "workflow",
+            "path": ".github/workflows/non-functional-proof-gate.yml"
+          },
+          {
+            "kind": "file",
+            "path": "scripts/ops/quality/non-functional-class-gate-proof.js"
+          },
+          {
+            "kind": "file",
+            "path": "tests/quality/non-functional-security-access-gate-proof.test.js"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ui-component-and-page-specs",
+      "suite_ids": [
+        "ui.access_page",
+        "ui.access_policy_editor",
+        "ui.access_policy_page",
+        "ui.access_policy_request_form",
+        "ui.access_policy_request_page",
+        "ui.combobox",
+        "ui.console_integration_plugins_page",
+        "ui.context_strip",
+        "ui.customer_shipment_change_review_form",
+        "ui.customer_shipment_changes_page",
+        "ui.dashboard_page",
+        "ui.exception_inbox_workspace_page",
+        "ui.form_contract_inventory",
+        "ui.json_schema_form",
+        "ui.manual_review_resolve_form",
+        "ui.mapping_studio_page",
+        "ui.mapping_studio_report_viewer",
+        "ui.marketplace_action_form",
+        "ui.marketplace_contract_room_page",
+        "ui.marketplace_participant_requests_page",
+        "ui.marketplace_participant_review_form",
+        "ui.marketplace_private_pools_page",
+        "ui.marketplace_provider_workboard_page",
+        "ui.marketplace_request_create_form",
+        "ui.marketplace_request_create_page",
+        "ui.marketplace_request_workspace_page",
+        "ui.onboarding_readiness_page",
+        "ui.pickup_failures_page",
+        "ui.pickup_operations_form",
+        "ui.pickup_page_shared",
+        "ui.pickup_requests_page",
+        "ui.pickup_waves_page",
+        "ui.resource_create_form",
+        "ui.resource_import_page",
+        "ui.route_operations_workspace_device_governance",
+        "ui.route_operations_workspace_page",
+        "ui.settings_request_form",
+        "ui.settings_request_page",
+        "ui.shipment_amend_cancel_form",
+        "ui.shipment_create_form_v2",
+        "ui.shipment_create_relation_lookups",
+        "ui.shipment_manual_create_form",
+        "ui.tenant_signup_requests_page",
+        "ui.tenant_signup_review_form",
+        "ui.warehouse_transfer_manifest_create_form",
+        "ui.workflow_bindings_page",
+        "ui.workflow_run_triggers_panel",
+        "ui.workflow_schedule_triggers_panel",
+        "ui.workflow_template_create_form",
+        "ui.workflow_template_steps_builder"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:ui"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_templates": [
+            "tests/ui/{suite_leaf_kebab}.test.tsx",
+            "tests/ui/{suite_leaf_kebab}.test.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ui-resource-action-shared-specs",
+      "suite_ids": [
+        "ui.resource_actions_device_governance",
+        "ui.resource_actions_route_assignment_lookup_first",
+        "ui.resource_actions_tasks_complete_lookup_first",
+        "ui.resource_actions_zone_override_request"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:ui"
+        },
+        {
+          "kind": "file",
+          "path": "tests/ui/resource-actions.test.tsx"
+        }
+      ],
+      "supporting_classification": {
+        "type": "shared_ui_component_suite",
+        "reason": "These exact owner-suite IDs are distinct form/action contracts exercised by the shared resource-actions UI spec rather than one file per suite."
+      }
+    },
+    {
+      "id": "unit-contract-specs",
+      "suite_ids": [
+        "unit.fieldops.mobile_attestation_policy",
+        "unit.fieldops.mobile_attestation_runtime",
+        "unit.fieldops.mobile_background_location",
+        "unit.fieldops.mobile_composer_pod",
+        "unit.fieldops.mobile_lookup_labels",
+        "unit.fieldops.mobile_scan_outbox",
+        "unit.fieldops.mobile_sync_policy",
+        "unit.mobile_core.outbox",
+        "unit.mobile_core.sqlite_outbox_store",
+        "unit.ops.ui_command_registry_tasks_complete_additive_merge_migration",
+        "unit.resource_download_route",
+        "unit.ui_resource_download_cors"
+      ],
+      "assets": [
+        {
+          "kind": "script",
+          "name": "test:unit"
+        }
+      ],
+      "asset_templates": [
+        {
+          "kind": "file",
+          "path_templates": [
+            "tests/unit/{suite_suffix_path_kebab}.test.ts",
+            "tests/unit/{suite_suffix_path_kebab}.test.js",
+            "tests/unit/{suite_leaf_kebab}.test.ts",
+            "tests/unit/{suite_leaf_kebab}.test.js",
+            "tests/unit/ops/{suite_leaf_kebab}.test.js"
+          ]
+        }
+      ]
+    }
+  ]
+}

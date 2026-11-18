@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SET search_path TO extensions, public, pg_temp;
 
-SELECT plan(5);
+SELECT plan(9);
 
 DO $$
 DECLARE
@@ -163,6 +163,43 @@ SELECT ok(
        AND pg_get_constraintdef(oid) LIKE '%[A-Za-z0-9-]%'
   ),
   'shipment_boxes_barcode_format permits mixed-case hyphenated tracking segments'
+);
+
+SELECT is(
+  public.normalize_shipment_box_barcode_token('Example-MixedCase-42'),
+  'Example-MixedCase-42',
+  'valid tracking tokens keep their identity'
+);
+
+SELECT ok(
+  NOT has_function_privilege('authenticated', 'public.normalize_shipment_box_barcode_token(text)', 'EXECUTE')
+    AND has_function_privilege('service_role', 'public.normalize_shipment_box_barcode_token(text)', 'EXECUTE'),
+  'tracking token helper is executable by service_role and unavailable to authenticated callers'
+);
+
+UPDATE public.shipments
+SET tracking_number = 'Example/Invalid'
+WHERE id = 'eeee0000-4444-4000-8000-00000000b505';
+
+SELECT throws_ok(
+  $$ SELECT * FROM public.ensure_shipment_boxes('eeee0000-4444-4000-8000-00000000b505', 2) $$,
+  '23514',
+  'Shipment tracking number must be a valid barcode token',
+  'invalid tracking tokens cannot create an additional box'
+);
+
+-- The surrounding transaction restores the schema after exercising the function's NULL guard.
+ALTER TABLE public.shipments ALTER COLUMN tracking_number DROP NOT NULL;
+
+UPDATE public.shipments
+SET tracking_number = NULL
+WHERE id = 'eeee0000-4444-4000-8000-00000000b505';
+
+SELECT throws_ok(
+  $$ SELECT * FROM public.ensure_shipment_boxes('eeee0000-4444-4000-8000-00000000b505', 2) $$,
+  '23514',
+  'Shipment tracking number must be a valid barcode token',
+  'NULL tracking cannot create an additional box'
 );
 
 SELECT * FROM finish();

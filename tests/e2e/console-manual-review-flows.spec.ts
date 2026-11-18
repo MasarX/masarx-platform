@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 import { loadDemoContext } from "./utils/demo-accounts";
 import { getConsoleBasePath } from "./utils/base-paths";
 import { isStrictE2EEnv } from "./utils/env";
-import { ensureSignedIn } from "./utils/session";
+import { ensureSignedIn, gotoEnsuringSignedIn } from "./utils/session";
 import { fetchUserContext } from "./utils/role-matrix";
-import { fetchResourceSampleId } from "./utils/core-resource";
+import { fetchResourceSampleRow } from "./utils/core-resource";
 import { assertNavigationPerformance } from "./utils/performance";
 import { hasCapability, resolveCapabilitySet } from "./utils/capabilities";
 
@@ -32,10 +32,9 @@ async function verifyManualReviewPage(params: {
   user: { email: string; scope_type?: string | null };
 }) {
   const { page, basePath, routePath, testIdPrefix, user } = params;
-  await page.goto(`${basePath}/${routePath}`, {
-    waitUntil: "domcontentloaded",
-    timeout: 60_000,
-  });
+  const session = { page, authTestId: "console-auth-required", email: user.email,
+    password: demoContext.password ?? "" };
+  await gotoEnsuringSignedIn({ ...session, url: `${basePath}/${routePath}` });
   await expect(
     page.locator(
       `[data-testid="${testIdPrefix}-ready"], [data-testid="${testIdPrefix}-error"], [data-testid="console-auth-required"]`
@@ -61,13 +60,20 @@ async function verifyManualReviewPage(params: {
     return;
   }
 
-  const sample = await fetchResourceSampleId({
+  const sampleOptions = {
     resourceKey: manualReviewResourceKey,
-    idColumn: resourceEntry.id_column ?? null,
     email: user.email,
     password: demoContext.password ?? "",
+    sort: { key: "created_at", direction: "desc" as const },
+  };
+  const pending = await fetchResourceSampleRow({
+    ...sampleOptions,
+    filters: { status: "pending" },
   });
-  if (!sample.id) {
+  const sample = pending.item ? pending : await fetchResourceSampleRow(sampleOptions);
+  const idColumn = String(resourceEntry.id_column ?? "id").trim() || "id";
+  const sampleId = sample.item?.[idColumn] ?? sample.item?.id;
+  if (!sampleId) {
     if (strict && sample.total !== 0) {
       throw new Error(
         `Manual review tasks missing sample row despite total=${sample.total}.`
@@ -79,13 +85,8 @@ async function verifyManualReviewPage(params: {
     return;
   }
 
-  await page.goto(
-    `${basePath}/${routePath}?id=${encodeURIComponent(sample.id)}`,
-    {
-      waitUntil: "domcontentloaded",
-      timeout: 60_000,
-    }
-  );
+  await gotoEnsuringSignedIn({ ...session,
+    url: `${basePath}/${routePath}?id=${encodeURIComponent(String(sampleId))}` });
   await expect(
     page.locator(
       `[data-testid="${testIdPrefix}-ready"], [data-testid="${testIdPrefix}-error"], [data-testid="console-auth-required"]`
@@ -117,7 +118,9 @@ async function verifyManualReviewPage(params: {
     `[data-testid="${testIdPrefix}-resolve-blocked"]`
   );
 
-  if (canResolve) {
+  const resolved = String(sample.item?.status ?? "").trim().toLowerCase() === "resolved" ||
+    Boolean(String(sample.item?.resolution_outcome ?? "").trim());
+  if (canResolve && !resolved) {
     await expect(submit).toBeVisible();
     await expect(submit).toBeEnabled();
     await expect(blocked).toHaveCount(0);

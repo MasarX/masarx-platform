@@ -113,7 +113,7 @@ export function OperationPalette({
               </div>
             ) : paletteMatches.matches.length > 0 ? (
               <>
-                <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-ui-muted">
+                <div className="px-2 py-1 text-[10px] font-medium tracking-wide text-ui-muted">
                   {query.trim() ? labels.matches : labels.suggestions}
                 </div>
                 {renderGrouped(
@@ -189,7 +189,7 @@ function renderGrouped(
     <div className="space-y-2">
       {grouped.groups.map((group) => (
         <div key={group.id} className="space-y-1">
-          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-ui-muted">
+          <div className="px-2 py-1 text-[10px] font-semibold tracking-wide text-ui-muted">
             {group.label}
           </div>
           <div className="space-y-1">

@@ -85,7 +85,7 @@ export function ContextNoticeDiagnostics({
               key={`${entry.label}:${entry.value}`}
               className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] items-start gap-3"
             >
-              <dt className="text-[10px] uppercase tracking-wide text-ui-muted">
+              <dt className="text-[10px] tracking-wide text-ui-muted">
                 {entry.label}
               </dt>
               <dd

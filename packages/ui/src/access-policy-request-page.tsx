@@ -10,6 +10,8 @@ import { ContextNotice } from "./context-notice";
 import { PageContainer } from "./page-container";
 import { PageHeader } from "./page-header";
 import { Section } from "./section";
+import { labelFromKey } from "./resource-query";
+import { formatReferenceValue } from "./resource-utils";
 import { createUiTranslator } from "./i18n";
 import { buildTestId } from "./test-ids";
 import {
@@ -80,6 +82,19 @@ export async function AccessPolicyRequestPage({
     errorMessage = formatUiError(error, t("errors.loadPolicy"));
   }
 
+  const lockScope = Boolean(normalizedScope.scopeType && normalizedScope.scopeType !== "global");
+  const formScopeType = lockScope ? normalizedScope.scopeType : policyResult?.scope_type ?? null;
+  const formScopeId = lockScope ? normalizedScope.scopeId : policyResult?.scope_id ?? null;
+  const matchingPolicyScope = policyResult?.scope_type === formScopeType && policyResult?.scope_id === formScopeId;
+  const matchingAccessScope = normalizedScope.scopeType === formScopeType && normalizedScope.scopeId === formScopeId;
+  const policyLabel = (policyResult as (UiAccessPolicy & { scope_label?: unknown }) | null)?.scope_label;
+  const scopeLabel = (matchingPolicyScope && typeof policyLabel === "string" ? policyLabel.trim() : "") ||
+    (matchingAccessScope ? me?.access_scope?.scope_label?.trim() : "") || null;
+  const scopeReference = formScopeId ? formatReferenceValue(formScopeId) : "";
+  const resolvedPolicyScope = policyResult?.scope_type && !matchingPolicyScope
+    ? [labelFromKey(policyResult.scope_type), policyResult.scope_id ? formatReferenceValue(policyResult.scope_id) : ""]
+      .filter(Boolean).join(": ")
+    : null;
   const policyJson = policyResult?.policy ? formatJson(policyResult.policy) : "";
   if (!errorMessage && !policyJson) {
     errorMessage = t("errors.missingPolicy");
@@ -113,6 +128,9 @@ export async function AccessPolicyRequestPage({
       return { status: "error", message: formT("errors.policyInvalid") };
     }
 
+    if (lockScope && (scopeType !== formScopeType || scopeIdRaw !== (formScopeId ?? ""))) {
+      return { status: "error", message: formT("errors.scopeIdInvalid") };
+    }
     if (scopeIdRaw && !uuidRegex.test(scopeIdRaw)) {
       return { status: "error", message: formT("errors.scopeIdInvalid") };
     }
@@ -188,17 +206,21 @@ export async function AccessPolicyRequestPage({
             testId={`${testIdPrefix}-section-summary`}
           >
             <div className="space-y-2 text-sm text-ui-muted">
-              <div>
+              <div data-testid={buildTestId(testIdPrefix, "summary-scope")}>
                 {t("summary.scopeLabel")}{" "}
                 <span className="text-ui-ink">
-                  {policyResult?.scope_type ?? t("labels.unknown")}{" "}
-                  {policyResult?.scope_id ?? ""}
+                  {formScopeType ? labelFromKey(formScopeType) : t("labels.unknown")}
+                  {scopeLabel || scopeReference ? `: ${scopeLabel || scopeReference}` : ""}
                 </span>
               </div>
-              <div>
+              {resolvedPolicyScope ? <p>{t("summary.currentPolicy")}: {resolvedPolicyScope}</p> : null}
+              {scopeLabel && scopeReference ? (
+                <p data-testid={buildTestId(testIdPrefix, "summary-scope-reference")}>{scopeReference}</p>
+              ) : null}
+              <div data-testid={buildTestId(testIdPrefix, "summary-settings-resolution")}>
                 {t("summary.settingsResolutionLabel")}{" "}
                 <span className="font-mono text-ui-ink">
-                  {policyResult?.settings_resolution_id ?? t("labels.unknown")}
+                  {policyResult?.settings_resolution_id ? formatReferenceValue(policyResult.settings_resolution_id) : t("labels.unknown")}
                 </span>
               </div>
             </div>
@@ -224,8 +246,10 @@ export async function AccessPolicyRequestPage({
             <AccessPolicyRequestForm
               action={submitRequest}
               defaultPolicyJson={policyJson}
-              defaultScopeType={policyResult?.scope_type ?? null}
-              defaultScopeId={policyResult?.scope_id ?? null}
+              defaultScopeType={formScopeType}
+              defaultScopeId={formScopeId}
+              defaultScopeLabel={scopeLabel}
+              lockScope={lockScope}
               testIdPrefix={testIdPrefix}
             />
           </Section>

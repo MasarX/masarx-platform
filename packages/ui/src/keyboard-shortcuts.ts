@@ -11,6 +11,15 @@ export function isEditableTarget(target: EventTarget | null) {
   return tag === "input" || tag === "textarea" || tag === "select";
 }
 
+export function parseSequenceKeys(shortcut: string): string[] {
+  return shortcut.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+export function isSequenceShortcut(shortcut: string): boolean {
+  const keys = parseSequenceKeys(shortcut);
+  return keys.length >= 2 && keys.every((key) => key.length === 1 && key !== "+");
+}
+
 export function matchesShortcut(event: KeyboardEvent, shortcut: string) {
   const normalized = normalizeShortcut(shortcut);
   if (!normalized) return false;
@@ -37,6 +46,9 @@ export function matchesShortcut(event: KeyboardEvent, shortcut: string) {
 }
 
 export function formatShortcutLabel(shortcut: string) {
+  if (isSequenceShortcut(shortcut)) {
+    return parseSequenceKeys(shortcut).map((key) => key.toUpperCase()).join(" then ");
+  }
   const normalized = normalizeShortcut(shortcut);
   if (!normalized) return "";
   const parts = normalized.split("+").filter(Boolean);

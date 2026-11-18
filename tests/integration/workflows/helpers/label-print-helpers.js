@@ -42,6 +42,14 @@ const resolveLabelProviderSecret = () =>
   process.env.SUPABASE_SERVICE_KEY ||
   null;
 
+const resolveLabelRendererInvokeUrl = () => {
+  const supabaseUrl = process.env.EDGE_SUPABASE_URL || process.env.SUPABASE_URL || null;
+  if (!supabaseUrl) {
+    throw new Error('EDGE_SUPABASE_URL or SUPABASE_URL is required for label renderer invoke URL');
+  }
+  return `${supabaseUrl.replace(/\/$/, '')}/functions/v1/label-renderer`;
+};
+
 const isTransientFetchError = (error) => {
   if (!error) return false;
   const message = String(error.message || '').toLowerCase();
@@ -772,6 +780,7 @@ module.exports = {
   resolveApiCallerAuthToken,
   resolveApiCallerAuthTokenCandidates,
   resolveLabelProviderSecret,
+  resolveLabelRendererInvokeUrl,
   resolveEdgeConfig,
   runOutboundWorker,
   dispatchApiCallerBatch,

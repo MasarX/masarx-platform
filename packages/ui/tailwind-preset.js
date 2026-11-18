@@ -45,6 +45,18 @@ module.exports = {
         "pulse-dot": {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.4" }
+        },
+        "shimmer": {
+          "0%": { "background-position": "200% 0" },
+          "100%": { "background-position": "-200% 0" }
+        },
+        "slide-in-right": {
+          "0%": { opacity: "0", transform: "translateX(16px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" }
+        },
+        "slide-out-right": {
+          "0%": { opacity: "1", transform: "translateX(0)" },
+          "100%": { opacity: "0", transform: "translateX(16px)" }
         }
       },
       animation: {
@@ -53,7 +65,10 @@ module.exports = {
         "slide-up": "slide-up 240ms ease-out",
         "slide-down": "slide-down 200ms ease-in forwards",
         "scale-in": "scale-in 200ms ease-out",
-        "pulse-dot": "pulse-dot 1.5s ease-in-out infinite"
+        "pulse-dot": "pulse-dot 1.5s ease-in-out infinite",
+        "shimmer": "shimmer 2s ease-in-out infinite",
+        "slide-in-right": "slide-in-right 200ms ease-out",
+        "slide-out-right": "slide-out-right 150ms ease-in forwards"
       }
     }
   }

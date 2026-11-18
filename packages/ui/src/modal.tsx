@@ -16,10 +16,10 @@ type ModalContentProps = React.ComponentPropsWithoutRef<typeof Dialog.Content>;
 export function ModalContent({ className, children, ...props }: ModalContentProps) {
   return (
     <Dialog.Portal>
-      <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm motion-safe:animate-fade-in" />
+      <Dialog.Overlay className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-sm motion-safe:animate-fade-in" />
       <Dialog.Content
         className={cn(
-          "fixed left-1/2 top-1/2 w-[90vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-ui-border bg-ui-surface p-6 shadow-soft motion-safe:animate-scale-in",
+          "fixed left-1/2 top-1/2 z-[90] max-h-[calc(100dvh-2rem)] w-[90vw] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-ui-border bg-ui-surface p-6 shadow-soft motion-safe:animate-scale-in",
           className
         )}
         {...props}

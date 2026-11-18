@@ -11,7 +11,7 @@ export function Skeleton({ className }: SkeletonProps) {
   return (
     <div
       className={cn(
-        "animate-pulse rounded bg-ui-border/60",
+        "ui-shimmer rounded bg-ui-border/60",
         className ?? "h-4 w-full"
       )}
     />

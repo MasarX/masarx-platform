@@ -28,6 +28,7 @@ type WorkflowTemplateCreateFormProps = {
   capabilities?: string[] | null;
   capabilityWrite?: string | null;
   templates?: WorkflowTemplateOption[] | null;
+  initialCloneFromId?: string | null;
   testIdPrefix?: string | null;
 };
 
@@ -36,6 +37,7 @@ export function WorkflowTemplateCreateForm({
   capabilities,
   capabilityWrite,
   templates,
+  initialCloneFromId,
   testIdPrefix,
 }: WorkflowTemplateCreateFormProps) {
   const t = createUiTranslator("ui.workflowStudio");
@@ -62,9 +64,13 @@ export function WorkflowTemplateCreateForm({
 
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [cloneFrom, setCloneFrom] = React.useState("");
+  const requestedClone = initialCloneFromId?.trim() || "";
+  const initialClone = templates?.some((template) => template.id === requestedClone)
+    ? requestedClone
+    : "";
+  const [cloneFrom, setCloneFrom] = React.useState(initialClone);
   const [pending, setPending] = React.useState(false);
-  const hasChanges = Boolean(name.trim() || description.trim() || cloneFrom.trim());
+  const hasChanges = Boolean(name.trim() || description.trim() || cloneFrom !== initialClone);
   useUnsavedChangesGuard({
     enabled: true,
     isSubmitting: pending,

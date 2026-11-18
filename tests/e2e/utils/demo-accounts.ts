@@ -23,6 +23,12 @@ type DemoContext = {
   users: DemoUser[];
 };
 
+export function pickConsoleUser(context: DemoContext) {
+  return context.users.find((user) => user.user_type === "super_admin") ??
+    context.users.find((user) => ["platform", "tenant"].includes(user.scope_type ?? "")) ??
+    null;
+}
+
 type DemoPasswordCandidateInput = {
   cachedPassword?: string;
   requestedPassword?: string;

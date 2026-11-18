@@ -16,6 +16,8 @@ export const DISPLAY_IDENTIFIER_KEYS = [
 type ResolveDisplayIdentifierOptions = {
   fallback?: string | null;
   preferredKeys?: string[] | null;
+  /** When true, only search preferredKeys — do not append DISPLAY_IDENTIFIER_KEYS. */
+  skipGlobalFallback?: boolean;
 };
 
 export type DisplayIdentifier = {
@@ -44,8 +46,13 @@ function normalizeIdentifierValue(value: string) {
     .replace(/[^a-z0-9]/g, "");
 }
 
-function resolveCandidateKeys(preferredKeys: string[] | null | undefined) {
-  const merged = [...(preferredKeys ?? []), ...DISPLAY_IDENTIFIER_KEYS];
+function resolveCandidateKeys(
+  preferredKeys: string[] | null | undefined,
+  skipGlobalFallback?: boolean
+) {
+  const merged = skipGlobalFallback
+    ? [...(preferredKeys ?? [])]
+    : [...(preferredKeys ?? []), ...DISPLAY_IDENTIFIER_KEYS];
   const seen = new Set<string>();
   const unique: string[] = [];
   merged.forEach((entry) => {
@@ -64,7 +71,10 @@ export function resolveDisplayIdentifier(
   options: ResolveDisplayIdentifierOptions = {}
 ): DisplayIdentifier | null {
   const fallback = normalizeIdentifierValue(String(options.fallback ?? ""));
-  const candidates = resolveCandidateKeys(options.preferredKeys);
+  const candidates = resolveCandidateKeys(
+    options.preferredKeys,
+    options.skipGlobalFallback
+  );
 
   for (const key of candidates) {
     const raw = item[key];

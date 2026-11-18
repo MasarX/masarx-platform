@@ -656,4 +656,95 @@ describe("schedule run acceptance receipt", () => {
       expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
     }
   );
+
+  it("applies lookup-backed context patch selections for DB-backed schedule context", async () => {
+    const createWorkflowScheduleTrigger = jest.fn().mockResolvedValue({
+      workflow_schedule_trigger_id: "trigger-lookup-1",
+    });
+    const clientId = "c112a901-3e75-47d2-9022-307fa68bd400";
+    const senderId = "22222222-2222-4222-8222-222222222222";
+    const listResource = jest.fn((resource: string) => {
+      if (resource === "clients") {
+        return Promise.resolve({
+          items: [{ id: clientId, name: "Sample Organization" }],
+        });
+      }
+      if (resource === "senders") {
+        return Promise.resolve({
+          items: [{ id: senderId, name: "Main Sender" }],
+        });
+      }
+      return Promise.resolve({ items: [] });
+    });
+    const rpc = jest.fn((name: string) => {
+      if (name === "list_lookup_values_v1") {
+        return Promise.resolve([{ key: "delivery", label: "Delivery" }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    mockedCreateUiClient.mockReturnValue({
+      runWorkflowScheduleTrigger: jest.fn(),
+      createWorkflowScheduleTrigger,
+      updateResource: jest.fn(),
+      listResource,
+      rpc,
+    });
+
+    renderWithIntl(
+      <WorkflowScheduleTriggersPanel
+        workflowTemplateId="template-1"
+        triggers={[]}
+        triggersTotal={0}
+        appBasePath="/portal"
+        capabilities={["workflow_runs.write"]}
+        testIdPrefix="schedule-panel"
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("schedule-panel-new"));
+
+    const modal = await screen.findByTestId("schedule-panel-editor-modal");
+    await waitFor(() => expect(listResource).toHaveBeenCalledWith("clients", {}, 100, 0, { key: "name", direction: "asc" }));
+    await within(modal).findByRole("option", { name: "Sample Organization" });
+    const clientSelect = within(modal).getByLabelText("Client") as HTMLSelectElement;
+    const senderSelect = within(modal).getByLabelText("Sender") as HTMLSelectElement;
+    const serviceTypeSelect = within(modal).getByLabelText("Service type") as HTMLSelectElement;
+    expect(within(clientSelect).getByRole("option", { name: "Sample Organization" })).toHaveValue(clientId);
+    expect(within(senderSelect).getByRole("option", { name: "Main Sender" })).toHaveValue(senderId);
+    expect(within(serviceTypeSelect).getByRole("option", { name: "Delivery" })).toHaveValue("delivery");
+    expect(within(clientSelect).queryByRole("option", { name: clientId })).toBeNull();
+    expect(within(senderSelect).queryByRole("option", { name: senderId })).toBeNull();
+    expect(within(serviceTypeSelect).queryByRole("option", { name: "delivery" })).toBeNull();
+
+    fireEvent.change(clientSelect, {
+      target: { value: clientId },
+    });
+    fireEvent.change(senderSelect, {
+      target: { value: senderId },
+    });
+    fireEvent.change(serviceTypeSelect, {
+      target: { value: "delivery" },
+    });
+    expect(clientSelect).toHaveDisplayValue("Sample Organization");
+    expect(senderSelect).toHaveDisplayValue("Main Sender");
+    expect(serviceTypeSelect).toHaveDisplayValue("Delivery");
+    expect(clientSelect).not.toHaveDisplayValue(clientId);
+    expect(senderSelect).not.toHaveDisplayValue(senderId);
+    expect(serviceTypeSelect).not.toHaveDisplayValue("delivery");
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(createWorkflowScheduleTrigger).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contextPatch: {
+            client_id: clientId,
+            sender_id: senderId,
+            service_type: "delivery",
+          },
+        }),
+      ),
+    );
+  });
 });

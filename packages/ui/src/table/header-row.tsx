@@ -93,7 +93,7 @@ export function TableHeaderRow({
         {selectionEnabled ? (
           <th
             ref={selectHeaderRef as React.Ref<HTMLTableHeaderCellElement>}
-            className={cn("font-medium", cellPadding, "border-r border-ui-border/20")}
+            className={cn("font-medium", cellPadding, "border-e border-ui-border/20")}
           >
             <Checkbox
               ref={selectAllRef as React.Ref<HTMLInputElement>}
@@ -107,7 +107,7 @@ export function TableHeaderRow({
         ) : null}
         {showRowNumbers ? (
           <th
-            className={cn("font-medium text-center w-10", cellPadding, "border-r border-ui-border/20")}
+            className={cn("font-medium text-center w-10", cellPadding, "border-e border-ui-border/20")}
           >
             <span className="text-[10px] text-ui-muted">{t("rowNumbers.header")}</span>
           </th>
@@ -146,7 +146,7 @@ export function TableHeaderRow({
               className={cn(
                 "group/header font-medium transition-colors hover:bg-ui-highlight/30",
                 cellPadding,
-                "border-l border-ui-border/15 first:border-l-0",
+                "border-s border-ui-border/15 first:border-s-0",
                 isPinned && pinnedHeaderClass,
                 isNumeric && "text-right"
               )}

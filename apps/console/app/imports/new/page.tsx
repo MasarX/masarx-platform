@@ -1,9 +1,9 @@
 import dynamic from "next/dynamic";
-import { LoadingState } from "@masarx/ui";
+import { LoadingState } from "@masarx/ui/client";
 import { withConsoleConfig } from "../../app-context";
 
 const ResourceImportPage = dynamic(
-  () => import("@masarx/ui").then((mod) => ({ default: mod.ResourceImportPage })),
+  () => import("@masarx/ui/client").then((mod) => ({ default: mod.ResourceImportPage })),
   { loading: () => <LoadingState variant="page" /> }
 );
 

@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { resolveFkLinkHref } from "./detail/detail-sections";
 import * as React from "react";
 import { getUiDefaults } from "@masarx/config";
 import { resolveDisplayIdentifier } from "./display-identifiers";
@@ -25,6 +27,7 @@ type ResourceDetailProps = {
   emptyMessage?: string;
   columns?: ResourceDetailColumn[] | null;
   showInternalIdHints?: boolean;
+  appBasePath?: string | null;
   testIdPrefix?: string | null;
 };
 
@@ -47,6 +50,7 @@ type ResourceDetailEntry = {
   displayValue: string;
   title?: string;
   hint?: string | null;
+  linkHref?: string | null;
   sectionId: string;
   sectionLabel: string;
   hideDisplayValue?: boolean;
@@ -229,7 +233,8 @@ function buildDetailSections(
   columns: ResourceDetailColumn[] | null | undefined,
   generalLabel: string,
   internalIdLabel: string,
-  showInternalIdHints: boolean
+  showInternalIdHints: boolean,
+  appBasePath?: string | null
 ): ResourceDetailSection[] {
   const columnMap = new Map<string, ResourceDetailColumn>();
   const orderMap = new Map<string, number>();
@@ -257,6 +262,7 @@ function buildDetailSections(
         ? resolveDisplayIdentifier(data, {
             fallback: textValue,
             preferredKeys: resolveDetailIdentifierKeys(key) ?? undefined,
+            skipGlobalFallback: key !== "id",
           })
         : null;
       const rawIdValue =
@@ -311,6 +317,7 @@ function buildDetailSections(
         sectionLabel,
         hideDisplayValue,
         mediaEntries,
+        linkHref: resolveFkLinkHref(key, value, appBasePath),
       };
     }
   );
@@ -349,6 +356,7 @@ export function ResourceDetail({
   emptyMessage,
   columns,
   showInternalIdHints,
+  appBasePath = null,
   testIdPrefix,
 }: ResourceDetailProps) {
   const t = createUiTranslator("ui.resourceDetail");
@@ -396,7 +404,8 @@ export function ResourceDetail({
     columns,
     generalLabel,
     internalIdLabel,
-    resolvedShowInternalIdHints
+    resolvedShowInternalIdHints,
+    appBasePath
   );
 
   return (
@@ -445,6 +454,7 @@ export function ResourceDetail({
               {section.entries.map((entry) => (
                 <div
                   key={entry.key}
+                  data-field-key={entry.key}
                   className="group/field relative py-2"
                 >
                   <dt className="text-xs font-medium text-ui-muted">
@@ -452,7 +462,9 @@ export function ResourceDetail({
                   </dt>
                   {entry.hideDisplayValue ? null : (
                     <dd className="mt-2 flex items-start gap-1 text-sm text-ui-ink" title={entry.title}>
-                      <span className="min-w-0 flex-1">{entry.displayValue}</span>
+                      <span className="min-w-0 flex-1">
+                        {entry.linkHref ? <Link href={entry.linkHref} className="underline underline-offset-2">{entry.displayValue}</Link> : entry.displayValue}
+                      </span>
                       {entry.displayValue && entry.displayValue !== "-" ? (
                         <CopyFieldButton value={entry.displayValue} label={entry.label} />
                       ) : null}
