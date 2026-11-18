@@ -220,6 +220,7 @@ VALUES (
   jsonb_build_object(
     'organization_id', '97000000-0000-0000-0000-000000000001',
     'api_gateway', jsonb_build_object(
+      'route_id', '97000000-0000-0000-0000-000000000008',
       'api_gateway_request_id', '97000000-0000-0000-0000-000000000013',
       'outbound_call_id', '97000000-0000-0000-0000-000000000014'
     )
@@ -277,6 +278,7 @@ VALUES (
   jsonb_build_object(
     'organization_id', '97000000-0000-0000-0000-000000000001',
     'api_gateway', jsonb_build_object(
+      'route_id', '97000000-0000-0000-0000-000000000008',
       'api_gateway_request_id', '97000000-0000-0000-0000-000000000033',
       'outbound_call_id', '97000000-0000-0000-0000-000000000034'
     )

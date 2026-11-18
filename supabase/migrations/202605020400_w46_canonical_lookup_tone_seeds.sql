@@ -335,6 +335,7 @@ CROSS JOIN (VALUES
   ('valid',           'Valid',           10, '{"tone":"good"}'),
   ('invalid',         'Invalid',         20, '{"tone":"danger"}'),
   ('requires_review', 'Requires review', 30, '{"tone":"warn"}'),
+  ('needs_review',    'Requires review', 35, '{"tone":"warn"}'),
   ('pending',         'Pending',         40, '{"tone":"info"}')
 ) AS v(value, label, sort_order, metadata)
 WHERE ld.category = 'address_validation_status'

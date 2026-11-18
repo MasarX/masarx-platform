@@ -8,7 +8,7 @@ SELECT plan(8);
 
 DO $$
 DECLARE
-  v_org UUID := '90a59bac-2b91-4ad4-ae9e-b1a445a20b36'::uuid;
+  v_org UUID := gen_random_uuid();
   v_from_branch UUID := '99000000-0000-4000-8000-00000000b102'::uuid;
   v_to_branch UUID := '99000000-0000-4000-8000-00000000b103'::uuid;
   v_transfer UUID := '99000000-0000-4000-8000-00000000b104'::uuid;
@@ -17,9 +17,8 @@ DECLARE
   v_artifact UUID;
   v_version UUID;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM public.organizations WHERE id = v_org) THEN
-    RAISE EXCEPTION 'Seeded Demo Organization % is required for this labels-only test', v_org;
-  END IF;
+  INSERT INTO public.organizations (id, name, slug, billing_status)
+  VALUES (v_org, 'Label artifact fixture', 'label-artifact-' || v_org, 'active');
 
   INSERT INTO public.branches (id, organization_id, code, name, timezone, is_active)
   VALUES
