@@ -307,7 +307,7 @@ describe('db-connect-smoke', () => {
       shouldAttemptDbPasswordSync({
         env: {
           SUPABASE_ACCESS_TOKEN: 'token',
-          SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+          SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
           SUPABASE_DB_PASSWORD: 'secret',
         },
         lastError: new Error('Circuit breaker open: Failed to retrieve database credentials'),
@@ -352,7 +352,7 @@ describe('db-connect-smoke', () => {
       candidates,
       env: {
         SUPABASE_ACCESS_TOKEN: 'token',
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret',
       },
       maxWaitMs: 10000,
@@ -384,7 +384,7 @@ describe('db-connect-smoke', () => {
         candidates,
         env: {
           SUPABASE_ACCESS_TOKEN: 'token',
-          SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+          SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
           SUPABASE_DB_PASSWORD: 'secret',
         },
         maxWaitMs: 3000,
@@ -412,7 +412,7 @@ describe('db-connect-smoke', () => {
       candidates,
       env: {
         SUPABASE_ACCESS_TOKEN: 'token',
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret',
         PREVIEW_SUPABASE_WORKSPACE_MODE: 'auto',
         PREVIEW_SUPABASE_RESOLVED_WORKSPACE_MODE: 'project',
@@ -576,7 +576,7 @@ describe('db-connect-smoke', () => {
       candidates: [{ name: 'DATABASE_URL_POOLER', dsn: 'postgresql://stale-primary' }],
       env: {
         SUPABASE_ACCESS_TOKEN: 'token',
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret',
       },
       maxWaitMs: 20000,
@@ -609,7 +609,7 @@ describe('db-connect-smoke', () => {
   test('buildPasswordSyncedCandidates honors a previously selected synced candidate name', async () => {
     const candidates = await buildPasswordSyncedCandidates({
       env: {
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret-pass',
         SUPABASE_REGION: 'eu-north-1',
         SUPABASE_POOLER_USER: 'postgres',
@@ -632,7 +632,7 @@ describe('db-connect-smoke', () => {
       candidates,
       env: {
         SUPABASE_ACCESS_TOKEN: 'token',
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret',
         DB_SMOKE_SYNC_ON_TENANT_NOT_FOUND: '1',
       },
@@ -660,7 +660,7 @@ describe('db-connect-smoke', () => {
       env: {
         PROD_DEPLOY_GUARD: 'enabled',
         SUPABASE_ACCESS_TOKEN: 'token',
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret',
       },
       lastError: new Error('password authentication failed for user "postgres"'),
@@ -688,7 +688,7 @@ describe('db-connect-smoke', () => {
   test('buildPasswordSyncedCandidates synthesizes pooler/direct DSNs from managed password inputs', async () => {
     const candidates = await buildPasswordSyncedCandidates({
       env: {
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret-pass',
         SUPABASE_REGION: 'eu-north-1',
         SUPABASE_POOLER_USER: 'postgres',
@@ -701,7 +701,7 @@ describe('db-connect-smoke', () => {
     expect(names).toContain('SYNCED_DB_URL_POOLER');
     expect(names).toContain('SYNCED_DB_URL_DIRECT');
     const poolerDsn = candidates.find((candidate) => candidate.name === 'SYNCED_DB_URL_POOLER')?.dsn || '';
-    expect(poolerDsn).toContain('postgres.syxokyiulhqvrpjtjqzi');
+    expect(poolerDsn).toContain('postgres.hijklmnopqrstuvwxyza');
     expect(poolerDsn).toContain('aws-1-eu-north-1.pooler.supabase.com');
   });
 
@@ -733,7 +733,7 @@ describe('db-connect-smoke', () => {
       candidates: [{ name: 'DATABASE_URL', dsn: 'postgresql://stale' }],
       env: {
         SUPABASE_ACCESS_TOKEN: 'token',
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret',
       },
       maxWaitMs: 10000,
@@ -761,7 +761,7 @@ describe('db-connect-smoke', () => {
   test('buildPasswordSyncedCandidates keeps only pooler-safe routes under shared-lane-safe policy', async () => {
     const candidates = await buildPasswordSyncedCandidates({
       env: {
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret-pass',
         SUPABASE_REGION: 'eu-north-1',
       },
@@ -783,7 +783,7 @@ describe('db-connect-smoke', () => {
       candidates: [{ name: 'DATABASE_URL', dsn: 'postgresql://stale' }],
       env: {
         SUPABASE_ACCESS_TOKEN: 'token',
-        SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+        SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
         SUPABASE_DB_PASSWORD: 'secret',
       },
       maxWaitMs: 10000,
@@ -820,7 +820,7 @@ describe('db-connect-smoke', () => {
         ],
         env: {
           SUPABASE_ACCESS_TOKEN: 'token',
-          SUPABASE_PROJECT_ID: 'syxokyiulhqvrpjtjqzi',
+          SUPABASE_PROJECT_ID: 'hijklmnopqrstuvwxyza',
           SUPABASE_DB_PASSWORD: 'secret',
         },
         maxWaitMs: 3000,

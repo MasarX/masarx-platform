@@ -103,6 +103,7 @@ async function main() {
   try {
     await client.query('BEGIN');
 
+    // The service writer seals invoke_secret in Vault before any settings persistence.
     await upsertSettings({
       db: client,
       category: 'label_provider',
