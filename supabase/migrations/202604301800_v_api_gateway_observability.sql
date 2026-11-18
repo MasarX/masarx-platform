@@ -133,7 +133,12 @@ SELECT
   ar.pack_id                            AS route_pack_id,
   agr.source_id,
   ws.name                               AS source_label,
-  ws.organization_id                    AS source_org_id
+  ws.organization_id                    AS source_org_id,
+  CASE
+    WHEN jsonb_typeof(acl.request_headers) = 'object'
+      THEN jsonb_strip_nulls(acl.request_headers) <> '{}'::jsonb
+    ELSE FALSE
+  END                                   AS has_request_headers
 FROM public.api_call_log acl
 LEFT JOIN public.api_gateway_requests agr
   ON  agr.organization_id = acl.organization_id

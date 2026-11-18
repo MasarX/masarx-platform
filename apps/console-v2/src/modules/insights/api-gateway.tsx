@@ -229,6 +229,7 @@ export interface ApiCallRow extends Record<string, unknown> {
   route_id: string | null;                           // SSOT: v_api_gateway_observability.route_id
   route_pack_id: string | null;                      // SSOT: v_api_gateway_observability.route_pack_id
   occurred_at: string;                               // SSOT: v_api_gateway_observability.occurred_at (= timestamp)
+  has_request_headers?: boolean;                    // SSOT: v_api_gateway_observability.has_request_headers
   request_headers?: Record<string, string | null | undefined>; // SSOT: api_call_log.request_headers
   request_body?: Record<string, unknown> | string | null; // SSOT: api_call_log.request_body (redacted)
   response_size_bytes: number;                       // SSOT: v_api_gateway_observability.response_size_bytes (derived)
@@ -3838,14 +3839,15 @@ function RequestTab({ row }: { row: ApiCallRow }) {
     { key: 'source_id', label: 'Source', value: row.source_id ? 'Linked source' : '—' },
     { key: 'occurred_at', label: 'When', value: row.occurred_at, mono: true },
   ];
-  const headerEntries = Object.entries(row.request_headers ?? {}).filter(([, v]) => v != null);
+  const hasRequestHeaders = row.has_request_headers
+    ?? Object.values(row.request_headers ?? {}).some((value) => value != null);
   return (
     <div data-testid="api-gateway-drawer-request-tab">
       <KvGrid rows={kvRows} />
       <h4 className="eyebrow" style={{ marginTop: 14 }}>Request protection</h4>
       <StateView
         kind="empty"
-        title={headerEntries.length ? 'Request details protected' : 'No request details available'}
+        title={hasRequestHeaders ? 'Request details protected' : 'No request details available'}
         hint="Sensitive request headers are hidden in this summary."
       />
     </div>
@@ -3866,7 +3868,7 @@ function ResponseTab({ row }: { row: ApiCallRow }) {
       <KvGrid rows={kvRows} />
       <StateView
         kind="empty"
-        title={row.response_body_sample ? 'Provider response recorded' : 'No provider response available'}
+        title={row.response_size_bytes > 0 || row.response_body_sample ? 'Provider response recorded' : 'No provider response available'}
         hint="Sensitive response content is hidden in this summary."
       />
     </div>

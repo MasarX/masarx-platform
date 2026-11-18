@@ -5,7 +5,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(42);
+SELECT plan(43);
 
 SELECT ok(
   (
@@ -29,6 +29,16 @@ SELECT is(
   ),
   'public.v_api_gateway_observability',
   'api_gateway_observability reads the canonical security-invoker projection'
+);
+
+SELECT ok(
+  COALESCE((
+    SELECT (resource->'select') ?& ARRAY['has_request_headers', 'response_size_bytes']
+       AND NOT (resource->'select') ?| ARRAY['request_headers', 'request_body', 'response_body', 'response_body_sample']
+      FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources') AS resource
+     WHERE resource->>'key' = 'api_gateway_observability'
+  ), FALSE),
+  'api gateway observability keeps drawer status without returning request headers or response bodies'
 );
 
 SELECT is(
