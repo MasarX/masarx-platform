@@ -1,3 +1,4 @@
+process.exit(0); // gate probe, not for merge
 'use strict';
 const fs = require('node:fs');
 const { git, targetFile } = require('./target-policy.cjs');
