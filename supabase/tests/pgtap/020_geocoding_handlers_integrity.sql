@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(8);
+SELECT plan(9);
 
 WITH cache_defs AS (
     SELECT
@@ -53,6 +53,22 @@ SELECT ok(
     'execute_provider_dispatch_v1 delegates to outbound_http handler'
 )
 FROM dispatch_defs;
+
+WITH dispatch AS (
+    SELECT pg_get_functiondef(
+        'workflow_handlers.execute_provider_dispatch_v1_base(public.workflow_run_steps,public.workflow_runs,jsonb)'::regprocedure
+    ) AS definition
+)
+SELECT ok(
+    split_part(split_part(definition, 'ELSIF v_reverse_enabled AND (', 2), 'v_is_reverse := TRUE', 1)
+        LIKE '%{geocoding,selected_geocode,coordinates,latitude}%{geocoding,selected_geocode,coordinates,longitude}%'
+        AND definition LIKE '%pr.organization_id = v_ctx.organization_id%'
+        AND definition LIKE '%eligible_template.provider_id = pr.id%'
+        AND split_part(split_part(definition, '''coordinates_text'',', 2), 'THEN concat_ws', 1)
+          LIKE '%COALESCE(%provided_coordinates'',%selected_geocode''->''coordinates'',%shipment''->''coordinates''%) IS NOT NULL%',
+    'reverse dispatch serializes a selected coordinate pair and retains scoped provider selection'
+)
+FROM dispatch;
 
 SELECT ok(
     pg_get_functiondef('workflow_handlers.execute_geo_decision_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
