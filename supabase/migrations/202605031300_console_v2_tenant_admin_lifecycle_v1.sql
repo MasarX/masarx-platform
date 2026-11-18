@@ -83,7 +83,7 @@ UPDATE public.settings s
    AND s.settings_version_id = applied.id;
 
 CREATE OR REPLACE FUNCTION public.organization_profile_assert_writer_v1(
-  p_organization_id UUID DEFAULT NULL::uuid
+  p_organization_id UUID
 )
 RETURNS JSONB
 LANGUAGE plpgsql
