@@ -1257,35 +1257,42 @@ describe("ui_create_shipment_v1", () => {
   });
 
   test("denies shipment timeline reads across tenants", async () => {
-    const trackingNumber = `UI-TIMELINE-DENY-${Date.now()}`;
-    const createResult = await client.query(
-      `
-        SELECT public.ui_create_shipment_v1(
-          $1::uuid,
-          $2::uuid,
-          'delivery',
-          $3::text,
-          NULL,
-          NULL,
-          'pending',
-          '{}'::jsonb
-        ) AS result
-      `,
-      [clientId, senderId, trackingNumber]
-    );
-    const result = createResult.rows[0]?.result ?? {};
-    expect(result.shipment_id).toBeTruthy();
-
-    const readTimeline = () => client.query(
+    const trackingPrefix = `UI-TIMELINE-${Date.now()}`;
+    const createShipment = async (tenantClientId, tenantSenderId, trackingNumber) => {
+      const { rows } = await client.query(
+        `
+          SELECT public.ui_create_shipment_v1(
+            $1::uuid,
+            $2::uuid,
+            'delivery',
+            $3::text,
+            NULL,
+            NULL,
+            'pending',
+            '{}'::jsonb
+          ) AS result
+        `,
+        [tenantClientId, tenantSenderId, trackingNumber]
+      );
+      return rows[0]?.result?.shipment_id;
+    };
+    const readTimeline = (shipmentId) => client.query(
       "SELECT api.ui_get_shipment_timeline_v1($1::uuid) AS timeline",
-      [result.shipment_id]
+      [shipmentId]
     );
-    const { rows } = await readTimeline();
-    expect(rows[0]?.timeline?.shipment_id).toBe(result.shipment_id);
+
+    const shipmentAId = await createShipment(clientId, senderId, `${trackingPrefix}-A`);
+    expect(shipmentAId).toBeTruthy();
+    const { rows: rowsA } = await readTimeline(shipmentAId);
+    expect(rowsA[0]?.timeline?.shipment_id).toBe(shipmentAId);
 
     await setAuthContext(client, otherUserId);
-    await expect(readTimeline()).rejects.toThrow(
-      `Shipment ${result.shipment_id} not found or inaccessible`,
+    const shipmentBId = await createShipment(otherClientId, otherSenderId, `${trackingPrefix}-B`);
+    expect(shipmentBId).toBeTruthy();
+    const { rows: rowsB } = await readTimeline(shipmentBId);
+    expect(rowsB[0]?.timeline?.shipment_id).toBe(shipmentBId);
+    await expect(readTimeline(shipmentAId)).rejects.toThrow(
+      `Shipment ${shipmentAId} not found or inaccessible`,
     );
   });
 
