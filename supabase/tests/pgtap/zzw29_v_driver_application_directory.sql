@@ -23,7 +23,7 @@ SELECT columns_are(
     'phone', 'website_url', 'locale', 'page_url', 'referrer', 'origin',
     'experience_summary',
     'capabilities_requested', 'verification_documents',
-    'marketing', 'metadata', 'turnstile_verified',
+    'utm_source', 'utm_campaign', 'intake_source', 'ip_country', 'dedupe_hint', 'turnstile_verified',
     'reviewed_at', 'reviewed_by', 'review_reason', 'decision_metadata',
     'approved_organization_id', 'approved_user_id',
     'approved_participant_profile_id',

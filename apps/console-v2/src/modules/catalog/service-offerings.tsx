@@ -1330,7 +1330,7 @@ export function ServiceOfferingsModule() {
                   const currency = draft.currency || tenantCurrencyIso || '';
                   const result = await updateMut.mutateAsync({
                     service_offering_id: offering.id,
-                    metadata: { ...m, base_price: priceNum, currency },
+                    price: { base_price: priceNum, currency },
                   });
                   const refreshed = await refetchOfferingForReadback(
                     result.service_offering_id,

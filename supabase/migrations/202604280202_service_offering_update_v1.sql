@@ -15,11 +15,12 @@ AS $$
 DECLARE
   v_user_id UUID := auth.uid();
   v_org_id UUID := public.current_user_org_id();
-  v_correlation_id TEXT := encode(gen_random_bytes(8), 'hex');
+  v_correlation_id UUID := gen_random_uuid();
   v_decision_id UUID := gen_random_uuid();
   v_resource_id UUID := NULLIF(p_args->>'service_offering_id', '')::uuid;
   v_before public.service_offerings%ROWTYPE;
   v_branch_org UUID;
+  v_price JSONB := p_args->'price';
 BEGIN
   IF v_user_id IS NULL THEN
     RAISE EXCEPTION 'service_offering_update_v1 requires authenticated user'
@@ -47,13 +48,28 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
+  IF v_price IS NOT NULL THEN
+    IF jsonb_typeof(v_price) IS DISTINCT FROM 'object'
+       OR jsonb_typeof(v_price->'base_price') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(v_price->'currency') IS DISTINCT FROM 'string'
+       OR v_price - ARRAY['base_price', 'currency'] <> '{}'::jsonb
+       OR p_args ? 'metadata' THEN
+      RAISE EXCEPTION 'service_offering_update_v1 price requires base_price and currency only'
+        USING ERRCODE = '22023';
+    END IF;
+    IF (v_price->>'base_price')::numeric <= 0 THEN
+      RAISE EXCEPTION 'service_offering_update_v1 base_price must be positive' USING ERRCODE = '22023';
+    END IF;
+  END IF;
+
   UPDATE public.service_offerings
      SET zone_id = COALESCE(NULLIF(p_args->>'zone_id', '')::uuid, zone_id),
          priority = COALESCE((p_args->>'priority')::int, priority),
          effective_from = COALESCE((p_args->>'effective_from')::timestamptz, effective_from),
          effective_to = COALESCE((p_args->>'effective_to')::timestamptz, effective_to),
          is_active = COALESCE((p_args->>'is_active')::boolean, is_active),
-         metadata = COALESCE(p_args->'metadata', metadata),
+         metadata = CASE WHEN v_price IS NOT NULL THEN COALESCE(metadata, '{}'::jsonb) || v_price
+                         ELSE COALESCE(p_args->'metadata', metadata) END,
          updated_at = now()
    WHERE id = v_resource_id;
 

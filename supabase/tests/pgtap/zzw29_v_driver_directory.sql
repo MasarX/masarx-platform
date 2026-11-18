@@ -17,7 +17,8 @@ SELECT columns_are(
   'public', 'v_driver_directory',
   ARRAY[
     'id', 'organization_id', 'user_id', 'driver_code', 'status',
-    'hired_at', 'terminated_at', 'metadata',
+    'hired_at', 'terminated_at', 'phone', 'emergency_contact_name', 'emergency_contact_phone',
+    'license_number', 'license_class', 'license_expires_at',
     'created_at', 'updated_at',
     'user_full_name', 'user_email',
     'current_vehicle_id', 'current_branch_id',

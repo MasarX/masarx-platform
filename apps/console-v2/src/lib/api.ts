@@ -2289,6 +2289,7 @@ export interface ServiceOfferingUpdateArgs extends Record<string, unknown> {
   effective_to?: string | null;
   is_active?: boolean;
   metadata?: Record<string, unknown>;
+  price?: { base_price: number; currency: string };
 }
 // Canonical envelope (202604280202): { ok, service_offering_id, correlation_id, settings_resolution_id }
 export interface ServiceOfferingUpdateResult extends MutationEnvelopeResult {

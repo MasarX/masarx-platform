@@ -23409,6 +23409,7 @@ export async function service_offering_update_v1(args: {
   effective_to?: string | null;
   is_active?: boolean;
   metadata?: Record<string, unknown>;
+  price?: { base_price: number; currency: string };
 }): Promise<ServiceOfferingMutationResult> {
   const live = await livePArgsMutationResult('service_offering_update_v1', args, ['service_offering_id', 'id']);
   if (live) {
@@ -23431,6 +23432,9 @@ export async function service_offering_update_v1(args: {
   if (args.is_active !== undefined) row.is_active = args.is_active;
   if (args.metadata !== undefined) {
     row.metadata = { ...((row.metadata as Record<string, unknown> | undefined) ?? {}), ...args.metadata };
+  }
+  if (args.price !== undefined) {
+    row.metadata = { ...((row.metadata as Record<string, unknown> | undefined) ?? {}), ...args.price };
   }
   row.updated_at = new Date().toISOString();
   return {

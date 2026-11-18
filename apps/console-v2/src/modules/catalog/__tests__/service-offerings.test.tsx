@@ -581,7 +581,7 @@ describe('ServiceOfferingsModule · mutation wiring (Phase C3)', () => {
     toast.mockRestore();
   });
 
-  it('Edit price modal fires the canonical update action with metadata patch', async () => {
+  it('Edit price sends only the price and currency to the canonical update action', async () => {
     const user = userEvent.setup();
     renderWithProviders(<ServiceOfferingsModule />, {
       capabilities: ['service_offerings.read', 'service_offerings.write'],
@@ -605,13 +605,13 @@ describe('ServiceOfferingsModule · mutation wiring (Phase C3)', () => {
     });
     const args = updateSpy.mock.calls[0]?.[0] as {
       service_offering_id?: string;
-      metadata?: { base_price?: number; currency?: string; display?: { name?: string; slug?: string } };
+      price?: { base_price?: number; currency?: string };
+      metadata?: unknown;
     } | undefined;
     expect(args?.service_offering_id).toBe('sof_exp_airbridge');
-    expect(args?.metadata?.base_price).toBe(99);
-    expect(typeof args?.metadata?.currency).toBe('string');
-    expect(args?.metadata?.display?.name).toBe('Air-Bridge Express');
-    expect(args?.metadata?.display?.slug).toBe('air-bridge-express');
+    expect(args?.price?.base_price).toBe(99);
+    expect(typeof args?.price?.currency).toBe('string');
+    expect(args?.metadata).toBeUndefined();
   });
 
   it('Archive bulk action fires the canonical archive action once per active offering', async () => {

@@ -32,14 +32,38 @@ SELECT
   mpr.origin,
   mpr.experience_summary,
   mpr.capabilities_requested,
-  mpr.verification_documents,
-  mpr.marketing,
-  mpr.metadata,
+  COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'type', CASE WHEN jsonb_typeof(doc->'type') = 'string' THEN doc->'type' END,
+      'ref', CASE WHEN jsonb_typeof(doc->'ref') = 'string' THEN doc->'ref' END,
+      'issued_at', CASE WHEN jsonb_typeof(doc->'issued_at') = 'string' THEN doc->'issued_at' END,
+      'expires_at', CASE WHEN jsonb_typeof(doc->'expires_at') = 'string' THEN doc->'expires_at' END,
+      'status', CASE WHEN jsonb_typeof(doc->'status') = 'string' THEN doc->'status' END
+    ) ORDER BY ordinal)
+    FROM jsonb_array_elements(mpr.verification_documents) WITH ORDINALITY AS documents(doc, ordinal)
+  ), '[]'::jsonb) AS verification_documents,
+  CASE WHEN jsonb_typeof(mpr.marketing->'utm_source') = 'string' THEN mpr.marketing->>'utm_source' END AS utm_source,
+  CASE WHEN jsonb_typeof(mpr.marketing->'utm_campaign') = 'string' THEN mpr.marketing->>'utm_campaign' END AS utm_campaign,
+  CASE WHEN jsonb_typeof(mpr.metadata->'source') = 'string' THEN mpr.metadata->>'source' END AS intake_source,
+  CASE WHEN jsonb_typeof(mpr.metadata->'ip_country') = 'string' THEN mpr.metadata->>'ip_country' END AS ip_country,
+  CASE WHEN jsonb_typeof(mpr.metadata->'dedupe_hint') = 'string' THEN mpr.metadata->>'dedupe_hint' END AS dedupe_hint,
   mpr.turnstile_verified,
   mpr.reviewed_at,
   mpr.reviewed_by,
   mpr.review_reason,
-  mpr.decision_metadata,
+  COALESCE((
+    SELECT jsonb_object_agg(key, value)
+    FROM jsonb_each(CASE WHEN jsonb_typeof(mpr.decision_metadata) = 'object'
+                         THEN mpr.decision_metadata ELSE '{}'::jsonb END) AS decision(key, value)
+    WHERE (key IN ('note', 'reason', 'review_applied_at') AND jsonb_typeof(value) = 'string')
+       OR (key = 'request_additional_docs' AND jsonb_typeof(value) = 'boolean')
+  ), '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object('requested_documents', (
+    SELECT jsonb_agg(value ORDER BY ordinal)
+    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(mpr.decision_metadata->'requested_documents') = 'array'
+                                  THEN mpr.decision_metadata->'requested_documents' ELSE '[]'::jsonb END)
+      WITH ORDINALITY AS requests(value, ordinal)
+    WHERE jsonb_typeof(value) = 'string'
+  ))) AS decision_metadata,
   mpr.approved_organization_id,
   mpr.approved_user_id,
   mpr.approved_participant_profile_id,

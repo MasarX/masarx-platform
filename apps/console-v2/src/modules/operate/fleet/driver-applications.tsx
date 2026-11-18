@@ -100,6 +100,11 @@ interface DriverApplicationRow extends Record<string, unknown> {
   verification_documents: DriverApplicationDoc[];
   marketing?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  utm_source?: string | null;
+  utm_campaign?: string | null;
+  intake_source?: string | null;
+  ip_country?: string | null;
+  dedupe_hint?: string | null;
   turnstile_verified: boolean;
   reviewed_at?: string | null;
   reviewed_by?: string | null;
@@ -1080,31 +1085,31 @@ function AttestationsTab({ application }: { application: DriverApplicationRow })
     {
       key: 'utm_source',
       label: 'UTM source',
-      value: String((marketing as Record<string, unknown>).utm_source ?? '—'),
+      value: String(application.utm_source ?? marketing.utm_source ?? '—'),
       mono: true,
     },
     {
       key: 'utm_campaign',
       label: 'UTM campaign',
-      value: String((marketing as Record<string, unknown>).utm_campaign ?? '—'),
+      value: String(application.utm_campaign ?? marketing.utm_campaign ?? '—'),
       mono: true,
     },
     {
       key: 'metadata_source',
       label: 'Intake source',
-      value: String((meta as Record<string, unknown>).source ?? '—'),
+      value: String(application.intake_source ?? meta.source ?? '—'),
       mono: true,
     },
     {
       key: 'metadata_country',
       label: 'IP country',
-      value: String((meta as Record<string, unknown>).ip_country ?? '—'),
+      value: String(application.ip_country ?? meta.ip_country ?? '—'),
       mono: true,
     },
     {
       key: 'metadata_dedupe_hint',
       label: 'Dedupe hint',
-      value: String((meta as Record<string, unknown>).dedupe_hint ?? '—'),
+      value: String(application.dedupe_hint ?? meta.dedupe_hint ?? '—'),
       mono: true,
     },
   ];

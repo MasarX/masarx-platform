@@ -117,6 +117,17 @@ document_agg AS (
   FROM public.driver_documents dd
   GROUP BY dd.user_id
 ),
+latest_license AS (
+  SELECT DISTINCT ON (dd.organization_id, dd.user_id)
+    dd.organization_id,
+    dd.user_id,
+    dd.metadata->>'license_number' AS license_number,
+    dd.metadata->>'class' AS license_class,
+    dd.expires_at
+  FROM public.driver_documents dd
+  WHERE dd.doc_type IN ('driver_license', 'license')
+  ORDER BY dd.organization_id, dd.user_id, dd.created_at DESC, dd.id
+),
 compliance_agg AS (
   SELECT
     dce.user_id,
@@ -154,7 +165,12 @@ SELECT
   dp.status,
   dp.hired_at,
   dp.terminated_at,
-  dp.metadata,
+  NULLIF(btrim(dp.metadata->>'phone'), '')                        AS phone,
+  NULLIF(btrim(dp.metadata->>'emergency_contact_name'), '')        AS emergency_contact_name,
+  NULLIF(btrim(dp.metadata->>'emergency_contact_phone'), '')       AS emergency_contact_phone,
+  COALESCE(NULLIF(btrim(ll.license_number), ''), NULLIF(btrim(dp.metadata->>'license_number'), '')) AS license_number,
+  COALESCE(NULLIF(btrim(ll.license_class), ''), NULLIF(btrim(dp.metadata->>'license_class'), '')) AS license_class,
+  COALESCE(ll.expires_at::text, NULLIF(btrim(dp.metadata->>'license_expires_at'), '')) AS license_expires_at,
   dp.created_at,
   dp.updated_at,
   -- Derived: user identity (canonical SSOT projection).
@@ -206,6 +222,7 @@ LEFT JOIN active_assignment aa ON aa.assigned_to_user_id = dp.user_id
 LEFT JOIN public.vehicles vh ON vh.id = aa.vehicle_id
 LEFT JOIN public.branches br ON br.id = aa.branch_id
 LEFT JOIN document_agg da ON da.user_id = dp.user_id
+LEFT JOIN latest_license ll ON ll.organization_id = dp.organization_id AND ll.user_id = dp.user_id
 LEFT JOIN compliance_agg ca ON ca.user_id = dp.user_id
 LEFT JOIN hos_agg ha ON ha.driver_id = dp.id
 LEFT JOIN hos_open ho ON ho.driver_id = dp.id;

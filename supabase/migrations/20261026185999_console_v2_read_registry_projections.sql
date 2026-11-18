@@ -3,6 +3,39 @@ BEGIN;
 SET LOCAL search_path TO public, extensions, pg_temp;
 SET LOCAL lock_timeout = '30s';
 
+-- Shape only the JSON fields selected by the screen contract.
+CREATE FUNCTION public.console_v2_project_json_v1(p_value JSONB, p_shape JSONB)
+RETURNS JSONB LANGUAGE plpgsql IMMUTABLE STRICT SECURITY INVOKER
+SET search_path TO pg_catalog, pg_temp
+AS $shape$
+BEGIN
+  IF p_shape = '"displayed"'::jsonb THEN
+    RETURN p_value;
+  ELSIF p_shape = 'true'::jsonb THEN
+    IF jsonb_typeof(p_value) IN ('boolean', 'number', 'string') THEN
+      RETURN p_value;
+    END IF;
+  ELSIF jsonb_typeof(p_shape) = 'object' AND jsonb_typeof(p_value) = 'object' THEN
+    RETURN (
+      SELECT jsonb_object_agg(field.key, filtered.value)
+      FROM jsonb_each(p_shape) field
+      CROSS JOIN LATERAL public.console_v2_project_json_v1(p_value->field.key, field.value) filtered(value)
+      WHERE filtered.value IS NOT NULL
+    );
+  ELSIF jsonb_typeof(p_shape) = 'array' AND jsonb_typeof(p_value) = 'array' THEN
+    RETURN (
+      SELECT COALESCE(jsonb_agg(filtered.value ORDER BY item.ordinal), '[]'::jsonb)
+      FROM jsonb_array_elements(p_value) WITH ORDINALITY item(value, ordinal)
+      CROSS JOIN LATERAL public.console_v2_project_json_v1(item.value, p_shape->0) filtered(value)
+      WHERE filtered.value IS NOT NULL
+    );
+  END IF;
+  RETURN NULL;
+END;
+$shape$;
+
+REVOKE ALL ON FUNCTION public.console_v2_project_json_v1(JSONB, JSONB) FROM PUBLIC, anon, authenticated, service_role;
+
 DO $registry$
 DECLARE
   v_row RECORD;
@@ -12,6 +45,167 @@ DECLARE
   v_key TEXT;
   v_selection JSONB;
   v_relation REGCLASS;
+  v_reviewed_json_resources CONSTANT TEXT[] := ARRAY[
+    'alert_triggers', 'bank_recon_matches', 'billing_invoice_events', 'billing_invoice_lines',
+    'billing_invoices', 'branches', 'cod_entries', 'commercial_agreement_terms',
+    'commercial_agreements', 'driver_application_directory', 'driver_compliance_events', 'driver_directory',
+    'finance_events_ledger', 'geocoding_attempts', 'lookup_values', 'marketplace_disputes',
+    'provider_health_logs', 'recent_workflow_events', 'route_plan_directory', 'route_run_assignments',
+    'route_run_directory', 'route_runs', 'service_levels', 'service_offering_directory',
+    'service_offerings', 'settlement_batch_summary', 'settlement_batches', 'subscriptions',
+    'support_case_events', 'support_cases', 'task_events', 'usage_events',
+    'vehicle_documents', 'vehicle_events', 'zone_override_requests'
+  ];
+  v_json_names CONSTANT TEXT[] := ARRAY['metadata','payload','partner','partner_payload','response_metadata'];
+  v_whole_json CONSTANT JSONB := '{
+    "alert_triggers": ["payload"],
+    "billing_invoice_events": ["payload"],
+    "driver_compliance_events": ["payload"],
+    "lookup_values": ["metadata"],
+    "recent_workflow_events": ["payload"],
+    "support_case_events": ["payload"],
+    "vehicle_events": ["metadata"]
+  }'::jsonb;
+  v_shaped_json CONSTANT JSONB := '{
+    "billing_invoice_lines": {
+      "sql": "CREATE VIEW public.console_billing_invoice_lines_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_billing_invoice_lines_read_v1",
+      "columns": {"metadata":{"source_event_ids":[true]}},
+      "revoke": "REVOKE ALL ON public.console_billing_invoice_lines_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "billing_invoices": {
+      "sql": "CREATE VIEW public.console_billing_invoices_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_billing_invoices_read_v1",
+      "columns": {"metadata":{"subscription_id":true}},
+      "revoke": "REVOKE ALL ON public.console_billing_invoices_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "branches": {
+      "sql": "CREATE VIEW public.console_branches_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_branches_read_v1",
+      "columns": {"metadata":{"lifecycle":true,"initial_capacity_per_day":true}},
+      "revoke": "REVOKE ALL ON public.console_branches_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "cod_entries": {
+      "sql": "CREATE VIEW public.console_cod_entries_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_cod_entries_read_v1",
+      "columns": {"metadata":{"tracking":true,"expected":true,"collected":true,"remitted":true,"status":true,"driver":true,"discrepancy":true,"settlement_context_ready":true,"branch_id":true,"driver_user_id":true}},
+      "revoke": "REVOKE ALL ON public.console_cod_entries_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "commercial_agreement_terms": {
+      "sql": "CREATE VIEW public.console_commercial_agreement_terms_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_commercial_agreement_terms_read_v1",
+      "columns": {"metadata":{"value":true}},
+      "revoke": "REVOKE ALL ON public.console_commercial_agreement_terms_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "commercial_agreements": {
+      "sql": "CREATE VIEW public.console_commercial_agreements_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_commercial_agreements_read_v1",
+      "columns": {"metadata":{"terms":true}},
+      "revoke": "REVOKE ALL ON public.console_commercial_agreements_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "finance_events_ledger": {
+      "sql": "CREATE VIEW public.console_finance_events_ledger_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_finance_events_ledger_read_v1",
+      "columns": {"metadata":{"batch_id":true,"reverses_finance_event_id":true}},
+      "revoke": "REVOKE ALL ON public.console_finance_events_ledger_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "geocoding_attempts": {
+      "sql": "CREATE VIEW public.console_geocoding_attempts_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_geocoding_attempts_read_v1",
+      "columns": {"metadata":{"attempt_type":true,"workflow_run_id":true,"geocoding_workflow_run_id":true,"address_resolution_workflow_run_id":true,"manual_review_task_id":true,"review_task_id":true,"task_id":true,"geocode_failure_reason":true,"failure_reason":true,"failure_code":true,"error":true,"message":true,"geocode_workflow_run_id":true,"nested_workflow_run_id":true}},
+      "revoke": "REVOKE ALL ON public.console_geocoding_attempts_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "marketplace_disputes": {
+      "sql": "CREATE VIEW public.console_marketplace_disputes_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_marketplace_disputes_read_v1",
+      "columns": {"metadata":{"shipment_ref":true,"amount_sar":true}},
+      "revoke": "REVOKE ALL ON public.console_marketplace_disputes_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "provider_health_logs": {
+      "sql": "CREATE VIEW public.console_provider_health_logs_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_provider_health_logs_read_v1",
+      "columns": {"metadata":{"latency_ms":true}},
+      "revoke": "REVOKE ALL ON public.console_provider_health_logs_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "route_plan_directory": {
+      "sql": "CREATE VIEW public.console_route_plan_directory_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_route_plan_directory_read_v1",
+      "columns": {"metadata":{"organization_id":true,"wave_label":true,"wave_promise_at":true}},
+      "revoke": "REVOKE ALL ON public.console_route_plan_directory_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "route_run_assignments": {
+      "sql": "CREATE VIEW public.console_route_run_assignments_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_route_run_assignments_read_v1",
+      "columns": {"partner":{"partner_id":true,"partner_name":true}},
+      "revoke": "REVOKE ALL ON public.console_route_run_assignments_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "route_run_directory": {
+      "sql": "CREATE VIEW public.console_route_run_directory_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_route_run_directory_read_v1",
+      "columns": {"metadata":{"plan_id":true,"organization_id":true,"route_departure":{"confirmed_at":true},"alternate_capacity":{"marketplace_request_id":true,"demand_class":true}},"partner_payload":{"partner_id":true,"partner_name":true}},
+      "revoke": "REVOKE ALL ON public.console_route_run_directory_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "route_runs": {
+      "sql": "CREATE VIEW public.console_route_runs_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_route_runs_read_v1",
+      "columns": {"metadata":{"plan_id":true,"organization_id":true,"route_departure":{"confirmed_at":true},"alternate_capacity":{"marketplace_request_id":true,"demand_class":true}}},
+      "revoke": "REVOKE ALL ON public.console_route_runs_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "service_levels": {
+      "sql": "CREATE VIEW public.console_service_levels_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_service_levels_read_v1",
+      "columns": {"metadata":{"tier":true,"priority_rank":true,"sla_minutes":true,"sla_label":true,"color_token":true,"tone":true}},
+      "revoke": "REVOKE ALL ON public.console_service_levels_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "service_offering_directory": {
+      "sql": "CREATE VIEW public.console_service_offering_directory_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_service_offering_directory_read_v1",
+      "columns": {"metadata":{"base_price":true,"currency":true,"max_weight_kg":true,"coverage_summary":true,"display":{"name":true,"slug":true,"status":true},"included_features":[true],"pricing_breakpoints":[{"up_to_kg":true,"price":true}]}},
+      "revoke": "REVOKE ALL ON public.console_service_offering_directory_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "service_offerings": {
+      "sql": "CREATE VIEW public.console_service_offerings_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_service_offerings_read_v1",
+      "columns": {"metadata":{"base_price":true,"currency":true,"max_weight_kg":true,"coverage_summary":true,"display":{"name":true,"slug":true,"status":true},"included_features":[true],"pricing_breakpoints":[{"up_to_kg":true,"price":true}]}},
+      "revoke": "REVOKE ALL ON public.console_service_offerings_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "settlement_batch_summary": {
+      "sql": "CREATE VIEW public.console_settlement_batch_summary_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_settlement_batch_summary_read_v1",
+      "columns": {"metadata":{"cod_entry_id":true}},
+      "revoke": "REVOKE ALL ON public.console_settlement_batch_summary_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "settlement_batches": {
+      "sql": "CREATE VIEW public.console_settlement_batches_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_settlement_batches_read_v1",
+      "columns": {"metadata":{"cod_entry_id":true}},
+      "revoke": "REVOKE ALL ON public.console_settlement_batches_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "subscriptions": {
+      "sql": "CREATE VIEW public.console_subscriptions_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_subscriptions_read_v1",
+      "columns": {"metadata":{"service_offering_id":true,"billing_period":true,"plan_label":true}},
+      "revoke": "REVOKE ALL ON public.console_subscriptions_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "support_cases": {
+      "sql": "CREATE VIEW public.console_support_cases_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_support_cases_read_v1",
+      "columns": {"metadata":{"request_source":true,"request_type_key":true,"request_outcome":true,"requester_channel":true,"tracking_number":true,"change_summary":true,"changed_fields":"displayed","before_snapshot":"displayed","requested_snapshot":"displayed","current_snapshot":"displayed","shipment_status_snapshot":"displayed","review_task":{"task_id":true}}},
+      "revoke": "REVOKE ALL ON public.console_support_cases_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "task_events": {
+      "sql": "CREATE VIEW public.console_task_events_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_task_events_read_v1",
+      "columns": {"payload":{"amount":true,"currency":true,"receipt_context":true,"deposit_slip_ref":true}},
+      "revoke": "REVOKE ALL ON public.console_task_events_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    }
+  }'::jsonb;
+  v_source REGCLASS;
+  v_view_name TEXT;
+  v_view_sources JSONB := '{}'::jsonb;
+  v_shape JSONB;
+  v_keep_json JSONB;
+  v_view_columns TEXT;
   v_missing TEXT[] := '{}';
   v_dev_additions CONSTANT TEXT[] := ARRAY['shipments','schema_registry','operation_handlers','workflow_template_steps','workflow_templates','webhook_source_directory','api_gateway_auth_rejections','webhook_auth_rejections','webhook_sources','workflow_run_triggers','workflow_schedule_triggers','workflow_trigger_fires','workflow_run_steps','workflow_runs'];
   v_columns CONSTANT JSONB := '{
@@ -22,7 +216,7 @@ DECLARE
     "api_gateway_rate_limits_summary": ["current_usage", "limit_per_hour", "limit_per_min", "request_count", "saturated", "source_id", "source_label", "window_start"],
     "auth_email_url_policy": ["audit_status", "callback_urls", "env", "last_audit_at", "redirect_urls", "source_file"],
     "bank_accounts": ["account_last4", "bank_name", "created_at", "currency", "iban_last4", "id", "is_active", "key", "name", "organization_id"],
-    "bank_recon_matches": ["bank_statement_event_id", "created_at", "currency", "id", "matched_amount", "metadata", "resource_id", "resource_type", "status"],
+    "bank_recon_matches": ["bank_statement_event_id", "created_at", "currency", "id", "matched_amount", "resource_id", "resource_type", "status"],
     "billing_invoice_directory": ["amount_due", "amount_paid", "client_id", "client_label", "created_at", "currency", "id", "invoice_id", "invoice_number", "is_overdue", "organization_id", "payment_status", "sent_at", "status", "total", "total_amount"],
     "billing_invoice_events": ["actor_user_id", "created_at", "event_type", "id", "invoice_id", "occurred_at", "payload"],
     "billing_invoice_lines": ["created_at", "description", "id", "invoice_id", "line_total", "metadata", "qty", "unit_price"],
@@ -40,9 +234,9 @@ DECLARE
     "commercial_agreement_terms": ["agreement_id", "category", "metadata"],
     "commercial_agreements": ["agreement_code", "client_id", "expires_at", "metadata", "signed_at", "status", "title"],
     "dispute_directory": ["amount_sar", "counterparty_label", "counterparty_organization_id", "dispute_id", "escalation_at", "escalation_count", "is_escalated", "is_terminal", "opened_by_label", "opened_by_organization_id", "opened_by_user_label", "resolved_by_user_label", "shipment_ref"],
-    "driver_application_directory": ["approved_organization_id", "approved_participant_profile_id", "approved_user_id", "capabilities_requested", "created_at", "decision_metadata", "driver_profile_id", "email", "experience_summary", "fleet_compliance_event_count", "fleet_document_count", "fleet_driver_status", "fleet_handoff_ready", "full_name", "invite_redirect_to", "is_approved", "is_pending", "is_rejected", "locale", "marketing", "organization_name", "organization_slug", "origin", "page_url", "phone", "referrer", "review_decision", "review_reason", "reviewed_at", "reviewed_by", "reviewer_email", "reviewer_label", "sla_breach", "status", "updated_at", "verification_documents", "website_url"],
+    "driver_application_directory": ["approved_organization_id", "approved_participant_profile_id", "approved_user_id", "capabilities_count", "capabilities_requested", "created_at", "decision_age_seconds", "decision_metadata", "dedupe_hint", "driver_profile_id", "email", "experience_summary", "fleet_compliance_event_count", "fleet_document_count", "fleet_driver_status", "fleet_handoff_ready", "fleet_last_compliance_event_at", "full_name", "intake_source", "invite_email_sent_at", "invite_redirect_to", "ip_country", "is_approved", "is_pending", "is_rejected", "is_terminal", "is_withdrawn", "locale", "missing_document_count", "organization_name", "organization_slug", "origin", "page_url", "phone", "referrer", "review_decision", "review_reason", "reviewed_at", "reviewed_by", "reviewer_email", "reviewer_label", "sla_breach", "status", "submitted_document_count", "turnstile_verified", "updated_at", "utm_campaign", "utm_source", "verification_documents", "verification_documents_count", "website_url"],
     "driver_compliance_events": ["actor", "actor_system", "actor_user_id", "created_at", "driver_id", "event_type", "id", "occurred_at", "payload", "severity", "user_id"],
-    "driver_directory": ["branch_label", "compliance_event_count", "compliance_event_count_24h", "compliance_score", "created_at", "critical_compliance_count", "current_branch_id", "current_vehicle_id", "customer_rating", "deliveries_today", "deliveries_week", "document_count", "driver_code", "earliest_document_expiry", "emergency_contact_name", "emergency_contact_phone", "expired_document_count", "expiring_document_count", "has_expired_documents", "has_expiring_documents", "hired_at", "hos_active_duty_status", "hos_active_segment_id", "hos_segment_count", "hos_segment_count_24h", "hours_of_service_state", "id", "is_active", "is_inactive", "is_suspended", "last_active_at", "license_class", "license_expires_at", "license_number", "metadata", "name", "on_time_pct", "organization_id", "phone", "status", "tenure_seconds", "user_email", "user_full_name", "user_id", "vehicle_label", "vehicle_plate"],
+    "driver_directory": ["branch_label", "compliance_event_count", "compliance_event_count_24h", "compliance_score", "created_at", "critical_compliance_count", "current_branch_id", "current_vehicle_id", "customer_rating", "deliveries_today", "deliveries_week", "document_count", "driver_code", "earliest_document_expiry", "emergency_contact_name", "emergency_contact_phone", "expired_document_count", "expiring_document_count", "has_expired_documents", "has_expiring_documents", "hired_at", "hos_active_duty_status", "hos_active_segment_id", "hos_segment_count", "hos_segment_count_24h", "hours_of_service_state", "id", "is_active", "is_inactive", "is_suspended", "last_active_at", "license_class", "license_expires_at", "license_number", "name", "on_time_pct", "organization_id", "phone", "status", "tenure_seconds", "user_email", "user_full_name", "user_id", "vehicle_label", "vehicle_plate"],
     "driver_documents": ["artifact_id", "doc_type", "driver_id", "expires_at", "file_ref", "id", "issued_at", "issuer", "kind", "status", "user_id", "verified_at"],
     "drivers": ["created_at", "driver_code", "id", "is_active", "name", "organization_id", "phone", "status", "user_email", "user_full_name", "user_id", "vehicle_id"],
     "finance_events_bank_statement": ["account_id", "account_type", "amount", "attached", "bank_account_key", "currency", "description", "direction", "event_type", "id", "occurred_at", "organization_id"],
@@ -66,7 +260,7 @@ DECLARE
     "recent_workflow_events": ["event", "matched_template", "payload", "received_at"],
     "route_plan_directory": ["applied_at", "branch_code", "branch_id", "branch_label", "drivers_notified_count", "id", "is_applied", "metadata", "organization_id", "plan_display_id", "planned_date", "run_count", "status", "stop_count", "updated_at", "wave_label"],
     "route_run_assignment_events": ["assignment_mode", "assignment_version", "created_at", "event_type", "from_status", "notes", "route_run_id", "to_status"],
-    "route_run_assignments": ["accepted_at", "acknowledged_at", "assignment_mode", "assignment_status", "assignment_version", "driver_user_id", "partner", "refusal_reason", "refused_at", "response_metadata", "response_notes", "route_run_id", "vehicle_id"],
+    "route_run_assignments": ["accepted_at", "acknowledged_at", "assignment_mode", "assignment_status", "assignment_version", "driver_user_id", "partner", "refusal_reason", "refused_at", "response_notes", "route_run_id", "vehicle_id"],
     "route_run_directory": ["assignment_driver_user_id", "assignment_mode", "assignment_status", "assignment_vehicle_id", "assignment_version", "branch_id", "branch_label", "cod_total", "created_at", "driver_label", "driver_user_id", "is_partner_run", "metadata", "organization_id", "partner_name", "partner_payload", "planned_date", "planned_start_at", "run_display_id", "status", "stop_count", "vehicle_id", "vehicle_label"],
     "route_runs": ["branch_id", "completed", "created_at", "driver", "driver_user_id", "id", "metadata", "organization_id", "plan_id", "planned_date", "planned_start_at", "route_plan_id", "run_id", "status", "stops", "vehicle", "vehicle_id"],
     "route_stop_reassignment_events": ["created_at", "event_type", "notes", "route_stop_id", "shipment_id", "source_route_run_id", "target_route_run_id"],
@@ -83,16 +277,16 @@ DECLARE
     "support_message_directory": ["author_label", "author_role", "author_user_id", "channel", "direction", "sent_at", "support_case_id"],
     "support_messages": ["attachments", "author_name", "author_role", "author_user_id", "body", "channel", "created_at", "direction", "sent_at", "support_case_id"],
     "support_users": ["name"],
-    "task_events": ["actor", "actor_system", "actor_user_id", "created_at", "event", "event_type", "from_status", "occurred_at", "ops_session_id", "payload", "task_id", "to_status"],
+    "task_events": ["actor", "actor_system", "actor_user_id", "created_at", "event", "event_type", "from_status", "notes", "occurred_at", "ops_session_id", "payload", "task_id", "to_status"],
     "tenant_signup_request_summary": ["approved_auth_user_id", "approved_organization_id", "approved_organization_label", "approved_user_email", "approved_user_id", "attestation_complete", "attestation_count", "attestation_passed_count", "created_at", "decision_age_seconds", "email", "full_name", "has_marketing_consent", "id", "invite_email_sent_at", "invite_redirect_to", "is_approved", "is_pending", "is_rejected", "last_error_at", "last_error_code", "last_error_message", "organization_name", "organization_slug", "review_decision", "reviewed_at", "reviewed_by", "reviewer_email", "reviewer_label", "status"],
     "ui_event_log": [],
     "ui_event_log_directory": ["has_resolution", "has_scope", "is_action"],
-    "usage_events": ["client_id", "kind", "metadata", "occurred_at", "qty"],
+    "usage_events": ["client_id", "kind", "occurred_at", "qty"],
     "user_directory": ["access_scope_id", "access_scope_label", "access_scope_type", "active_role_count", "active_role_keys", "created_at", "email", "full_name", "last_login_at", "organization_id", "organization_label", "status", "user_id", "user_type"],
     "vehicle_assignments": ["assigned_to_user_id", "created_at", "driver_name", "driver_user_id", "ended_at", "id", "started_at", "status", "vehicle_id"],
     "vehicle_directory": ["active_assignment_branch_id", "active_assignment_started_at", "active_maintenance_count", "assignment_age_seconds", "branch_id", "branch_label", "code", "created_at", "current_branch_id", "current_branch_label", "current_driver_label", "current_driver_user_id", "event_count_24h", "fuel_level", "id", "is_in_maintenance", "is_oos", "last_event_at", "last_telemetry_at", "maintenance_due", "maintenance_window_count", "odometer_km", "organization_id", "plate", "plate_number", "status", "type_id", "type_name", "vehicle_type_id", "vehicle_type_label", "vin"],
-    "vehicle_documents": ["artifact_id", "doc_type", "expires_at", "issued_at", "issuer", "kind", "metadata", "organization_id", "status", "vehicle_id"],
-    "vehicle_events": ["actor_name", "actor_user_id", "cost_amount", "cost_currency", "event_type", "fuel_liters", "metadata", "occurred_at", "odometer_km", "payload", "vehicle_id"],
+    "vehicle_documents": ["artifact_id", "doc_type", "expires_at", "issued_at", "issuer", "kind", "organization_id", "status", "vehicle_id"],
+    "vehicle_events": ["actor_name", "actor_user_id", "cost_amount", "cost_currency", "event_type", "fuel_liters", "metadata", "occurred_at", "odometer_km", "vehicle_id"],
     "vehicle_maintenance_directory": ["age_seconds", "duration_seconds", "is_cancelled", "is_completed", "is_in_progress", "is_overdue", "is_scheduled", "is_terminal", "planned_end", "planned_start", "reason", "scheduled_by_label", "scheduled_kind", "starts_in_seconds", "status", "vehicle_id", "vehicle_label", "vehicle_type_label", "window_end_at", "window_start_at"],
     "vehicle_types": ["axles", "capacity_kg", "capacity_m3", "fuel_type", "key", "kind", "max_speed_kph", "name"],
     "wave_catalog": ["active", "id", "label", "sort_order"],
@@ -100,7 +294,7 @@ DECLARE
     "workflow_binding_directory": ["binding_key", "configurability_status", "default_template_name", "default_workflow_template_id", "is_active", "label"],
     "workflow_binding_dispatches": ["binding_key", "created_at", "event", "idempotency_key", "outcome", "resolved_scope_type", "stage_key", "template_name", "workflow_run_id", "workflow_template_id"],
     "workflow_bindings": ["condition", "event", "priority", "stage_key", "status", "template_id"],
-    "zone_override_requests": ["created_at", "current_zone_id", "decided_by_user_id", "decision_at", "id", "metadata", "requested_by", "requested_by_user_id", "requested_zone_id", "reviewed_at", "reviewed_by", "shipment_id", "status", "zone_id"],
+    "zone_override_requests": ["created_at", "current_zone_id", "decided_by_user_id", "decision_at", "id", "requested_by", "requested_by_user_id", "requested_zone_id", "reviewed_at", "reviewed_by", "shipment_id", "status", "zone_id"],
     "zone_performance_metrics": ["zone_id"],
     "zone_summary": ["branch_count", "color_token", "created_at", "district_count", "geometry", "hub_code", "is_active", "name", "organization_id", "pending_overrides", "slug", "updated_at", "zone_id"]
   }'::jsonb;
@@ -116,31 +310,74 @@ BEGIN
     v_resources := '[]'::jsonb;
     FOR v_resource IN SELECT value FROM jsonb_array_elements(v_row.value->'resources') LOOP
       v_key := v_resource->>'key';
-      IF (NOT (v_resource ? 'select') OR v_resource->'select' = '[]'::jsonb)
-         AND NOT (v_key = ANY(v_dev_additions)) THEN
-        v_relation := to_regclass(COALESCE(NULLIF(btrim(v_resource->>'read_relation'), ''), v_resource->>'relation'));
-        IF v_columns ? v_key THEN
+      IF NOT (v_resource ? 'select') OR v_resource->'select' = '[]'::jsonb THEN
+        IF NOT COALESCE(v_key = ANY(v_dev_additions), FALSE) THEN
+          IF NOT COALESCE(v_columns ? v_key, FALSE) THEN
+            IF NOT (COALESCE(v_key, '<missing key>') = ANY(v_missing)) THEN
+              v_missing := array_append(v_missing, COALESCE(v_key, '<missing key>'));
+            END IF;
+            CONTINUE;
+          END IF;
+
+          v_relation := to_regclass(v_resource->>'relation');
           SELECT jsonb_agg(to_jsonb(attname::text) ORDER BY attnum)
             INTO v_selection
             FROM pg_catalog.pg_attribute
            WHERE attrelid = v_relation AND attnum > 0 AND NOT attisdropped
              AND ((v_columns->v_key) ? attname::text
                OR attname::text = COALESCE(v_resource->>'id_column', 'id'));
-        ELSIF jsonb_typeof(v_resource->'columns') = 'array' THEN
-          -- These named display columns already participate in the canonical projection.
-          SELECT jsonb_agg(entry->'key' ORDER BY ordinal)
-            INTO v_selection
-            FROM jsonb_array_elements(v_resource->'columns') WITH ORDINALITY AS fields(entry, ordinal)
-           WHERE jsonb_typeof(entry->'key') = 'string';
-        ELSE
-          v_selection := NULL;
-        END IF;
-        IF v_selection IS NULL THEN
-          IF NOT (COALESCE(v_key, '<missing key>') = ANY(v_missing)) THEN
-            v_missing := array_append(v_missing, COALESCE(v_key, '<missing key>'));
+          IF v_selection IS NULL THEN
+            RAISE EXCEPTION 'Console V2 read projection has no matching fields for %', v_key;
           END IF;
-        ELSE
           v_resource := jsonb_set(v_resource, '{select}', v_selection);
+        END IF;
+      END IF;
+
+      IF v_key = ANY(v_reviewed_json_resources) THEN
+        v_shape := v_shaped_json #> ARRAY[v_key, 'columns'];
+        v_keep_json := COALESCE(v_whole_json->v_key, '[]'::jsonb);
+        IF jsonb_typeof(v_resource->'select') = 'array' THEN
+          SELECT COALESCE(jsonb_agg(field ORDER BY ordinal), '[]'::jsonb) INTO v_selection
+          FROM jsonb_array_elements_text(v_resource->'select') WITH ORDINALITY AS fields(field, ordinal)
+          WHERE field <> ALL(v_json_names) OR COALESCE(v_shape ? field, FALSE) OR v_keep_json ? field;
+          v_resource := jsonb_set(v_resource, '{select}', v_selection);
+        END IF;
+        IF jsonb_typeof(v_resource->'columns') = 'array' THEN
+          SELECT COALESCE(jsonb_agg(entry ORDER BY ordinal), '[]'::jsonb) INTO v_selection
+          FROM jsonb_array_elements(v_resource->'columns') WITH ORDINALITY AS fields(entry, ordinal)
+          WHERE entry->>'key' <> ALL(v_json_names)
+             OR COALESCE(v_shape ? (entry->>'key'), FALSE) OR v_keep_json ? (entry->>'key');
+          v_resource := jsonb_set(v_resource, '{columns}', v_selection);
+        END IF;
+
+        -- Keep the mutation relation and apply the same scope predicates through an invoker read view.
+        IF v_shape IS NOT NULL THEN
+          v_view_name := v_shaped_json #>> ARRAY[v_key, 'name'];
+          v_source := to_regclass(COALESCE(NULLIF(v_resource->>'read_relation', ''), v_resource->>'relation'));
+          IF v_source IS NULL OR NOT EXISTS (
+            SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.oid = v_source AND n.nspname = 'public' AND c.relkind IN ('p','r','v')
+          ) THEN
+            RAISE EXCEPTION 'Console V2 read projection has an unsupported source for %', v_key;
+          END IF;
+          IF v_view_sources ? v_key THEN
+            IF v_view_sources->>v_key <> v_source::oid::text THEN
+              RAISE EXCEPTION 'Console V2 read projection has different scope sources for %', v_key;
+            END IF;
+          ELSE
+            SELECT string_agg(
+              CASE WHEN v_shape ? a.attname::text THEN
+                format('public.console_v2_project_json_v1(%I::jsonb, %L::jsonb) AS %I',
+                  a.attname, v_shape->(a.attname::text), a.attname)
+              ELSE quote_ident(a.attname) END, ', ' ORDER BY a.attnum
+            ) INTO v_view_columns
+            FROM pg_attribute a
+            WHERE a.attrelid = v_source AND a.attnum > 0 AND NOT a.attisdropped;
+            EXECUTE format(v_shaped_json #>> ARRAY[v_key, 'sql'], v_view_columns, v_source);
+            EXECUTE v_shaped_json #>> ARRAY[v_key, 'revoke'];
+            v_view_sources := jsonb_set(v_view_sources, ARRAY[v_key], to_jsonb(v_source::oid::text));
+          END IF;
+          v_resource := jsonb_set(v_resource, '{read_relation}', to_jsonb(v_view_name));
         END IF;
       END IF;
       v_resources := v_resources || jsonb_build_array(v_resource);
