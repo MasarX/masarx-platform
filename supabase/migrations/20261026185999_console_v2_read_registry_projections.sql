@@ -11,6 +11,30 @@ AS $shape$
 BEGIN
   IF p_shape = '"displayed"'::jsonb THEN
     RETURN p_value;
+  ELSIF p_shape = '"operator_sample"'::jsonb THEN
+    CASE jsonb_typeof(p_value)
+      WHEN 'object' THEN
+        RETURN (
+          SELECT COALESCE(jsonb_object_agg(field.key,
+            CASE
+              WHEN field.key ~* '^(authorization|proxy-authorization|cookie|set-cookie)$'
+                OR field.key ~* '(^|[_-])(token|secret|signature|hmac|password|credential|api[-_]?key|access[_-]?key|private[_-]?key)([_-]|$)'
+              THEN to_jsonb('[redacted]'::text)
+              ELSE public.console_v2_project_json_v1(field.value, p_shape)
+            END), '{}'::jsonb)
+          FROM jsonb_each(p_value) field
+        );
+      WHEN 'array' THEN
+        RETURN (
+          SELECT COALESCE(jsonb_agg(public.console_v2_project_json_v1(item.value, p_shape)
+            ORDER BY item.ordinal), '[]'::jsonb)
+          FROM jsonb_array_elements(p_value) WITH ORDINALITY item(value, ordinal)
+        );
+      WHEN 'string' THEN
+        RETURN to_jsonb(public.redact_sensitive_text_v1(p_value #>> '{}'));
+      ELSE
+        RETURN p_value;
+    END CASE;
   ELSIF p_shape = 'true'::jsonb THEN
     IF jsonb_typeof(p_value) IN ('boolean', 'number', 'string') THEN
       RETURN p_value;
@@ -49,14 +73,17 @@ DECLARE
     'alert_triggers', 'bank_recon_matches', 'billing_invoice_events', 'billing_invoice_lines',
     'billing_invoices', 'branches', 'cod_entries', 'commercial_agreement_terms',
     'commercial_agreements', 'driver_application_directory', 'driver_compliance_events', 'driver_directory',
-    'finance_events_ledger', 'geocoding_attempts', 'lookup_values', 'marketplace_disputes',
-    'provider_health_logs', 'recent_workflow_events', 'route_plan_directory', 'route_run_assignments',
+    'finance_events_ledger', 'geocoding_attempts', 'lookup_values', 'mapping_config_directory', 'marketplace_disputes',
+    'provider_health_logs', 'rbac_roles', 'recent_workflow_events', 'route_plan_directory', 'route_run_assignments',
     'route_run_directory', 'route_runs', 'service_levels', 'service_offering_directory',
     'service_offerings', 'settlement_batch_summary', 'settlement_batches', 'subscriptions',
-    'support_case_events', 'support_cases', 'task_events', 'usage_events',
-    'vehicle_documents', 'vehicle_events', 'zone_override_requests'
+    'support_case_events', 'support_cases', 'task_events', 'usage_events', 'user_device_summary',
+    'vehicle_documents', 'vehicle_events', 'webhook_inbox_directory', 'zone_override_requests'
   ];
-  v_json_names CONSTANT TEXT[] := ARRAY['metadata','payload','partner','partner_payload','response_metadata'];
+  v_json_names CONSTANT TEXT[] := ARRAY[
+    'metadata','payload','partner','partner_payload','response_metadata',
+    'managed_metadata','mapping_config','raw_payload','transformed_payload'
+  ];
   v_whole_json CONSTANT JSONB := '{
     "alert_triggers": ["payload"],
     "billing_invoice_events": ["payload"],
@@ -114,6 +141,12 @@ DECLARE
       "name": "public.console_geocoding_attempts_read_v1",
       "columns": {"metadata":{"attempt_type":true,"workflow_run_id":true,"geocoding_workflow_run_id":true,"address_resolution_workflow_run_id":true,"manual_review_task_id":true,"review_task_id":true,"task_id":true,"geocode_failure_reason":true,"failure_reason":true,"failure_code":true,"error":true,"message":true,"geocode_workflow_run_id":true,"nested_workflow_run_id":true}},
       "revoke": "REVOKE ALL ON public.console_geocoding_attempts_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "mapping_config_directory": {
+      "sql": "CREATE VIEW public.console_mapping_config_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_mapping_config_read_v1",
+      "columns": {"mapping_config":{"enabled":true,"label":true,"name":true,"target":true},"managed_metadata":{"plugin_version_id":true}},
+      "revoke": "REVOKE ALL ON public.console_mapping_config_read_v1 FROM PUBLIC, anon, authenticated, service_role"
     },
     "marketplace_disputes": {
       "sql": "CREATE VIEW public.console_marketplace_disputes_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
@@ -198,6 +231,12 @@ DECLARE
       "name": "public.console_task_events_read_v1",
       "columns": {"payload":{"amount":true,"currency":true,"receipt_context":true,"deposit_slip_ref":true}},
       "revoke": "REVOKE ALL ON public.console_task_events_read_v1 FROM PUBLIC, anon, authenticated, service_role"
+    },
+    "webhook_inbox_directory": {
+      "sql": "CREATE VIEW public.console_webhook_inbox_read_v1 WITH (security_invoker = true) AS SELECT %s FROM %s",
+      "name": "public.console_webhook_inbox_read_v1",
+      "columns": {"raw_payload":"operator_sample"},
+      "revoke": "REVOKE ALL ON public.console_webhook_inbox_read_v1 FROM PUBLIC, anon, authenticated, service_role"
     }
   }'::jsonb;
   v_source REGCLASS;
@@ -253,9 +292,11 @@ DECLARE
     "branches": ["address", "branch_type", "city", "code", "coordinates", "created_at", "id", "is_active", "lat", "lng", "metadata", "name", "operating_hours", "organization_id", "status", "timezone", "updated_at"],
     "canonical_cities": ["city_code", "code", "country", "country_code", "id", "name", "name_arabic", "name_canonical", "name_en"],
     "canonical_districts": ["centroid_lat", "centroid_lng", "city_code", "city_id", "city_label", "city_name", "code", "id", "name", "name_ar", "name_arabic", "name_canonical", "name_en"],
+    "capability_grant_requests": ["capability_key","created_at","decided_at","decision_notes","id","organization_id","reason","requested_by","requested_by_email","requested_by_full_name","scope_id","scope_type","status","target_user_email","target_user_full_name","target_user_id"],
     "cod_entries": ["amount", "collected_at", "created_at", "currency", "id", "metadata", "organization_id", "shipment_id", "subject_id"],
     "commercial_agreement_terms": ["agreement_id", "category", "metadata"],
     "commercial_agreements": ["agreement_code", "client_id", "expires_at", "metadata", "signed_at", "status", "title"],
+    "decision_log_directory": ["age_seconds","decision_category","has_correlation","has_resolution","id","organization_id","resolved_from","resource_id","resource_type","scope_category","settings_resolution_id","timestamp","winning_settings_id","winning_version"],
     "dispute_directory": ["amount_sar", "counterparty_label", "counterparty_organization_id", "dispute_id", "escalation_at", "escalation_count", "is_escalated", "is_terminal", "opened_by_label", "opened_by_organization_id", "opened_by_user_label", "resolved_by_user_label", "shipment_ref"],
     "driver_application_directory": ["approved_organization_id", "approved_participant_profile_id", "approved_user_id", "capabilities_count", "capabilities_requested", "created_at", "decision_age_seconds", "decision_metadata", "dedupe_hint", "driver_profile_id", "email", "experience_summary", "fleet_compliance_event_count", "fleet_document_count", "fleet_driver_status", "fleet_handoff_ready", "fleet_last_compliance_event_at", "full_name", "intake_source", "invite_email_sent_at", "invite_redirect_to", "ip_country", "is_approved", "is_pending", "is_rejected", "is_terminal", "is_withdrawn", "locale", "missing_document_count", "organization_name", "organization_slug", "origin", "page_url", "phone", "referrer", "review_decision", "review_reason", "reviewed_at", "reviewed_by", "reviewer_email", "reviewer_label", "sla_breach", "status", "submitted_document_count", "turnstile_verified", "updated_at", "utm_campaign", "utm_source", "verification_documents", "verification_documents_count", "website_url"],
     "driver_compliance_events": ["actor", "actor_system", "actor_user_id", "created_at", "driver_id", "event_type", "id", "occurred_at", "payload", "severity", "user_id"],
@@ -270,15 +311,19 @@ DECLARE
     "hubs": ["branch_type", "city", "code", "coordinates", "cutoff_time", "id", "lat", "latitude", "lng", "longitude", "name", "organization_id"],
     "kpi_definitions": ["definition", "is_active", "key"],
     "lookup_values": ["category", "effective_from", "effective_until", "id", "is_default", "label", "lookup_definition_id", "metadata", "rank", "sort_order", "status", "tone", "value"],
+    "mapping_config_directory": ["api_route_count", "has_rules", "id", "is_in_use", "managed_by", "managed_metadata", "mapping_config", "mapping_key", "mapping_type", "mapping_version", "organization_id", "rule_usage_count", "rules_count", "source_count", "target", "updated_at"],
     "marketing_intake_metrics_24h": ["dedupe_dropped", "id", "rate_limited", "total", "turnstile_failed", "verified"],
     "marketing_intake_recent": ["company", "decision", "dedupe_status", "dispatch_id", "email", "id", "ip_hash", "rate_limit_status", "received_at", "role", "source", "task_id", "turnstile_status", "workflow_run_id"],
     "marketplace_disputes": ["category", "contract_id", "counterparty_organization_id", "created_at", "filed_at", "id", "kind", "metadata", "opened_by_organization_id", "resolution", "status", "title"],
+    "ops_sessions": ["actor_user_id", "closed_at", "id", "idempotency_key", "opened_at", "organization_id", "session_type", "status"],
     "planning_os_execution_cards": [],
     "planning_os_project_items": [],
+    "provider_auth_configs": ["auth_type", "days_until_expiry", "expires_at", "id", "last_rotated_at", "organization_id", "provider_id", "provider_label", "status"],
     "provider_health_logs": ["created_at", "error_message", "metadata", "occurred_at", "provider_id", "status"],
     "rbac_role_permissions": ["created_at", "granted_at", "granted_by_user_id", "organization_id", "permission_id", "permission_value", "role_id", "updated_at"],
     "rbac_role_summary": ["active_assignment_count", "assignment_count", "created_at", "description", "is_active", "key", "last_assigned_at", "name", "organization_id", "organization_label", "permission_count", "permission_values", "revoked_assignment_count", "role_tier", "updated_at"],
     "rbac_role_templates": ["created_at", "description", "is_active", "key", "name", "permission_count", "permission_values", "updated_at"],
+    "rbac_roles": ["assignment_count", "description", "id", "is_active", "key", "name", "organization_id", "permission_count", "updated_at"],
     "rbac_user_role_assignments": ["assigned_at", "assigned_by_user_id", "created_at", "organization_id", "revoked_at", "revoked_by_user_id", "role_id", "role_key", "role_name", "updated_at", "user_email", "user_full_name", "user_id"],
     "recent_workflow_events": ["event", "matched_template", "payload", "received_at"],
     "route_plan_directory": ["applied_at", "branch_code", "branch_id", "branch_label", "drivers_notified_count", "id", "is_applied", "metadata", "organization_id", "plan_display_id", "planned_date", "run_count", "status", "stop_count", "updated_at", "wave_label"],
@@ -305,6 +350,7 @@ DECLARE
     "ui_event_log": [],
     "ui_event_log_directory": ["has_resolution", "has_scope", "is_action"],
     "usage_events": ["client_id", "kind", "occurred_at", "qty"],
+    "user_device_summary": ["app_version", "attestation_status", "attestation_trusted_at", "device_id", "device_label", "device_platform", "id", "is_revoked", "last_seen_at", "model", "organization_id", "os_version", "platform", "push_token_cleared", "revoked_at", "revoked_reason", "user_id"],
     "user_directory": ["access_scope_id", "access_scope_label", "access_scope_type", "active_role_count", "active_role_keys", "created_at", "email", "full_name", "last_login_at", "organization_id", "organization_label", "status", "user_id", "user_type"],
     "vehicle_assignments": ["assigned_to_user_id", "created_at", "driver_name", "driver_user_id", "ended_at", "id", "started_at", "status", "vehicle_id"],
     "vehicle_directory": ["active_assignment_branch_id", "active_assignment_started_at", "active_maintenance_count", "assignment_age_seconds", "branch_id", "branch_label", "code", "created_at", "current_branch_id", "current_branch_label", "current_driver_label", "current_driver_user_id", "event_count_24h", "fuel_level", "id", "is_in_maintenance", "is_oos", "last_event_at", "last_telemetry_at", "maintenance_due", "maintenance_window_count", "odometer_km", "organization_id", "plate", "plate_number", "status", "type_id", "type_name", "vehicle_type_id", "vehicle_type_label", "vin"],
@@ -312,7 +358,9 @@ DECLARE
     "vehicle_events": ["actor_name", "actor_user_id", "cost_amount", "cost_currency", "event_type", "fuel_liters", "metadata", "occurred_at", "odometer_km", "vehicle_id"],
     "vehicle_maintenance_directory": ["age_seconds", "duration_seconds", "is_cancelled", "is_completed", "is_in_progress", "is_overdue", "is_scheduled", "is_terminal", "planned_end", "planned_start", "reason", "scheduled_by_label", "scheduled_kind", "starts_in_seconds", "status", "vehicle_id", "vehicle_label", "vehicle_type_label", "window_end_at", "window_start_at"],
     "vehicle_types": ["axles", "capacity_kg", "capacity_m3", "fuel_type", "key", "kind", "max_speed_kph", "name"],
+    "warehouse_transfer_summary": ["dispatched_at", "from_branch_id", "hold_reason", "id", "item_count", "organization_id", "posted_at", "received_at", "received_count", "status", "to_branch_id", "transfer_code", "updated_at", "variance_count", "variance_flag"],
     "wave_catalog": ["active", "id", "label", "sort_order"],
+    "webhook_inbox_directory": ["ack_outcome", "ack_reason", "ack_status_code", "age_hours", "age_seconds", "canonical_intent", "correlation_id", "created_at", "error_message", "event_type", "external_id", "force_status_count", "id", "idempotency_key", "is_actionable", "is_terminal", "last_replay_action", "last_replay_actor", "last_replay_at", "mapping_config_id", "mapping_label", "mapping_rules_count", "mapping_target", "mapping_version", "organization_id", "payload_size", "processed_at", "processing_status", "provider_type_label", "raw_payload", "replay_count", "response_mode", "response_outcome", "response_reason", "response_status_code", "shipment_id", "shipment_status", "source_identifier", "source_label", "tracking_number", "webhook_source_id", "workflow_run_id", "workflow_run_status"],
     "webhook_rules": ["created_at", "domain_category", "enabled", "event_type", "mapping_config_id", "name", "priority", "webhook_source_id", "workflow_template_id"],
     "workflow_binding_directory": ["binding_key", "configurability_status", "default_template_name", "default_workflow_template_id", "is_active", "label"],
     "workflow_binding_dispatches": ["binding_key", "created_at", "event", "idempotency_key", "outcome", "resolved_scope_type", "stage_key", "template_name", "workflow_run_id", "workflow_template_id"],
@@ -320,7 +368,8 @@ DECLARE
     "zone_override_requests": ["created_at", "current_zone_id", "decided_by_user_id", "decision_at", "id", "requested_by", "requested_by_user_id", "requested_zone_id", "reviewed_at", "reviewed_by", "shipment_id", "status", "zone_id"],
     "zone_performance_metrics": ["zone_id"],
     "zone_summary": ["branch_count", "color_token", "created_at", "district_count", "geometry", "hub_code", "is_active", "name", "organization_id", "pending_overrides", "slug", "updated_at", "zone_id"]
-  }'::jsonb;
+  }
+'::jsonb;
 BEGIN
   FOR v_row IN
     SELECT s.scope_type, s.scope_id, sv.value, sv.schema_version
