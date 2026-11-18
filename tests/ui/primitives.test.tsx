@@ -34,7 +34,9 @@ test("theme toggle renders select control", () => {
       <ThemeToggle />
     </ThemeProvider>
   );
-  expect(screen.getByLabelText("Theme")).toBeInTheDocument();
+  const control = screen.getByLabelText("Theme");
+  expect(control).toBeInTheDocument();
+  expect(control.closest("[data-theme-toggle]")).not.toBeNull();
 });
 
 test("context strip renders metadata badges", () => {
@@ -65,11 +67,14 @@ test("error state renders action button", () => {
 
 test("section renders collapsible header when enabled", () => {
   render(
-    <Section title="Profile details" description="Identity context" collapsible>
+    <Section title="Profile details" description="Identity context" collapsible collapseKey="profile-details">
       <div>Section body</div>
     </Section>
   );
   const summary = screen.getByText("Profile details").closest("summary");
+  const controlledId = summary?.getAttribute("aria-controls");
+  expect(controlledId).toBeTruthy();
+  expect(document.getElementById(controlledId ?? "")).not.toBeNull();
   expect(summary).toBeInTheDocument();
   expect(screen.getByText("Section body")).toBeInTheDocument();
 });

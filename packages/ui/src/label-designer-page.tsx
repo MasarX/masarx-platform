@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import { Badge } from "./badge";
 import { Button } from "./button";
@@ -243,7 +244,7 @@ export function LabelDesignerPage({
           description={t("deniedTitle")}
           actions={
             <Button asChild size="sm" variant="ghost">
-              <a href={`${appBasePath}/access-policy`}>{t("openAccessPolicy")}</a>
+              <Link href={`${appBasePath}/access-policy`}>{t("openAccessPolicy")}</Link>
             </Button>
           }
         />

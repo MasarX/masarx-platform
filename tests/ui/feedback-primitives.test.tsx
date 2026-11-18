@@ -18,6 +18,8 @@ test("modal renders content when open", () => {
   );
   expect(screen.getByText("Modal title")).toBeInTheDocument();
   expect(screen.getByText("Modal body")).toBeInTheDocument();
+  expect(screen.getByRole("dialog")).toHaveClass("max-h-[calc(100vh-2rem)]");
+  expect(screen.getByRole("dialog")).toHaveClass("overflow-y-auto");
 });
 
 test("drawer renders content when open", () => {

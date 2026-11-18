@@ -22,6 +22,12 @@ import { stripBasePath } from "./navigation-paths";
 import { useToast } from "./use-toast";
 import { formatUiError } from "./utils";
 import { formatResourceValue } from "./resource-utils";
+import { labelFromKey } from "./resource-query";
+import {
+  WorkflowTriggerContextPatchControls,
+  parseWorkflowTriggerContextPatch,
+  useWorkflowTriggerContextLookups,
+} from "./workflow-trigger-context-patch-controls";
 import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
 
 type WorkflowRunTriggersPanelProps = {
@@ -29,6 +35,7 @@ type WorkflowRunTriggersPanelProps = {
   incomingTriggers: Record<string, unknown>[];
   outgoingTriggers: Record<string, unknown>[];
   workflowTemplates: Record<string, unknown>[];
+  workflowRunStatusOptions?: WorkflowRunStatusOption[] | null;
   appBasePath: string;
   capabilities?: string[] | null;
   testIdPrefix?: string | null;
@@ -60,6 +67,8 @@ type TemplateOption = {
   id: string;
   name: string;
 };
+
+type WorkflowRunStatusOption = { value: string; label: string };
 
 function normalizeText(value: unknown) {
   if (typeof value !== "string") return null;
@@ -100,6 +109,21 @@ function parseStatuses(text: string) {
   return unique.length > 0 ? unique : null;
 }
 
+function normalizeWorkflowRunStatusOptions(rows: unknown): WorkflowRunStatusOption[] {
+  if (!Array.isArray(rows)) return [];
+  const options: WorkflowRunStatusOption[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const payload = normalizeObject(row);
+    const value = normalizeText(payload?.value ?? payload?.key ?? payload?.code);
+    if (!value || seen.has(value)) continue;
+    const label = normalizeText(payload?.label ?? payload?.name ?? payload?.description) ?? value;
+    options.push({ value, label });
+    seen.add(value);
+  }
+  return options.sort((left, right) => left.label.localeCompare(right.label));
+}
+
 function buildInitialEditor(direction: TriggerDirection): EditorState {
   return {
     open: false,
@@ -126,6 +150,7 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
     incomingTriggers,
     outgoingTriggers,
     workflowTemplates,
+    workflowRunStatusOptions,
     appBasePath,
     capabilities,
     testIdPrefix,
@@ -144,6 +169,7 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
     [capabilities]
   );
   const canWrite = hasCapability(capabilitySet, "workflow_runs.write");
+  const canReadStatuses = canWrite || hasCapability(capabilitySet, "workflow_runs.read");
 
   const templates = React.useMemo(() => {
     const resolved: TemplateOption[] = [];
@@ -174,6 +200,30 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
     buildInitialEditor("outgoing")
   );
   const [del, setDel] = React.useState<DeleteState>(() => buildInitialDelete());
+  const statusId = React.useId();
+  const [loadedStatuses, setLoadedStatuses] = React.useState<WorkflowRunStatusOption[]>([]);
+  const statusOptions = workflowRunStatusOptions ?? loadedStatuses;
+  const statusesByValue = new Map(statusOptions.map((option) => [option.value, option.label]));
+  const selectedStatuses = parseStatuses(editor.sourceStatusesText) ?? [];
+  const retainedStatuses = selectedStatuses.filter((value) => !statusesByValue.has(value));
+  const lookupOptions = useWorkflowTriggerContextLookups(canWrite && editor.open);
+  const contextPatchState = parseWorkflowTriggerContextPatch(
+    editor.contextPatchText, t("triggers.workflowRuns.toast.invalidContextPatch")
+  );
+
+  React.useEffect(() => {
+    if (!canReadStatuses || workflowRunStatusOptions != null) return;
+    let cancelled = false;
+    void Promise.resolve()
+      .then(() => createUiClient().listLookupValues?.("workflow_run_status"))
+      .then((rows) => {
+        if (!cancelled) setLoadedStatuses(normalizeWorkflowRunStatusOptions(rows));
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedStatuses([]);
+      });
+    return () => { cancelled = true; };
+  }, [canReadStatuses, workflowRunStatusOptions]);
   const safeHref = React.useCallback(
     (path: string) => (safeBasePath !== null ? resolveSafeHref(safeBasePath, path) : null),
     [safeBasePath]
@@ -324,84 +374,63 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs font-medium text-ui-muted">
+              <label htmlFor={statusId} className="text-xs font-medium text-ui-muted">
                 {t("triggers.workflowRuns.editor.fields.statuses")}
-              </div>
-              <Input
-                value={editor.sourceStatusesText}
-                onChange={(event) =>
-                  setEditor((current) => ({
-                    ...current,
-                    sourceStatusesText: event.target.value,
-                  }))
-                }
-                placeholder={t("triggers.workflowRuns.editor.statusesPlaceholder")}
-                disabled={editor.pending}
-                data-testid={
-                  resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-statuses` : undefined
-                }
-              />
+              </label>
+              {statusOptions.length > 0 ? (
+                <Select
+                  id={statusId}
+                  multiple
+                  value={selectedStatuses}
+                  onChange={(event) => {
+                    const chosen = Array.from(event.currentTarget.selectedOptions, (option) => option.value);
+                    const ordered = [...selectedStatuses.filter((value) => chosen.includes(value)),
+                      ...chosen.filter((value) => !selectedStatuses.includes(value))];
+                    setEditor((current) => ({ ...current, sourceStatusesText: ordered.join(", ") }));
+                  }}
+                  disabled={editor.pending}
+                  data-testid={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-statuses` : undefined}
+                >
+                  {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  {retainedStatuses.map((value) => <option key={value} value={value}>{labelFromKey(value)}</option>)}
+                </Select>
+              ) : (
+                <Input
+                  id={statusId}
+                  value={editor.sourceStatusesText}
+                  onChange={(event) =>
+                    setEditor((current) => ({
+                      ...current,
+                      sourceStatusesText: event.target.value,
+                    }))
+                  }
+                  placeholder={t("triggers.workflowRuns.editor.statusesPlaceholder")}
+                  disabled={editor.pending}
+                  data-testid={
+                    resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-statuses` : undefined
+                  }
+                />
+              )}
               <div className="text-xs text-ui-muted">
                 {t("triggers.workflowRuns.editor.statusesHint")}
               </div>
             </div>
 
-            <div className="space-y-1">
-              <div className="text-xs font-medium text-ui-muted">
-                {t("triggers.workflowRuns.editor.fields.contextPatch")}
-              </div>
-              <textarea
-                className="h-32 w-full resize-none rounded-lg border border-ui-border bg-ui-surface px-3 py-2 font-mono text-xs text-ui-ink focus:outline-none focus:ring-2 focus:ring-ui-primary/20"
-                value={editor.contextPatchText}
-                onChange={(event) =>
-                  setEditor((current) => ({
-                    ...current,
-                    contextPatchText: event.target.value,
-                  }))
-                }
-                spellCheck={false}
-                disabled={editor.pending}
-                data-testid={
-                  resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-context-patch` : undefined
-                }
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs text-ui-muted">
-                  {t("triggers.workflowRuns.editor.contextPatchHint")}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => formatJson("contextPatchText")}
-                    disabled={editor.pending}
-                    data-testid={
-                      resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-format-json` : undefined
-                    }
-                  >
-                    {t("triggers.workflowRuns.editor.formatJson")}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      setEditor((current) => ({
-                        ...current,
-                        contextPatchText: "{}",
-                      }))
-                    }
-                    disabled={editor.pending}
-                    data-testid={
-                      resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-reset-json` : undefined
-                    }
-                  >
-                    {t("triggers.workflowRuns.editor.reset")}
-                  </Button>
-                </div>
-              </div>
-            </div>
+            <WorkflowTriggerContextPatchControls
+              value={editor.contextPatchText}
+              onChange={(contextPatchText) => setEditor((current) => ({ ...current, contextPatchText }))}
+              lookupOptions={lookupOptions}
+              disabled={editor.pending}
+              label={t("triggers.workflowRuns.editor.fields.contextPatch")}
+              hint={t("triggers.workflowRuns.editor.contextPatchHint")}
+              invalidContextPatchMessage={t("triggers.workflowRuns.toast.invalidContextPatch")}
+              formatLabel={t("triggers.workflowRuns.editor.formatJson")}
+              resetLabel={t("triggers.workflowRuns.editor.reset")}
+              lookupTestId={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-context-lookups` : undefined}
+              textareaTestId={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-context-patch` : undefined}
+              formatTestId={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-format-json` : undefined}
+              resetTestId={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-reset-json` : undefined}
+            />
 
             <label className="flex items-start gap-2 text-sm text-ui-ink">
               <input
@@ -590,7 +619,8 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
     const targetTemplate = targetTemplateId ? templateById.get(targetTemplateId) : null;
 
     const statuses = normalizeStringArray(row.source_statuses);
-    const statusesSummary = statuses.length > 0 ? statuses.join(", ") : "completed";
+    const statusesSummary = (statuses.length ? statuses : ["completed"])
+      .map((value) => statusesByValue.get(value) ?? labelFromKey(value)).join(", ");
     const createdAt = formatResourceValue(row.created_at, { renderType: "datetime" });
     const updatedAt = formatResourceValue(row.updated_at, { renderType: "datetime" });
 
@@ -866,13 +896,12 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
         throw new Error(t("triggers.workflowRuns.toast.sameTemplate"));
       }
 
-      const statuses = parseStatuses(editor.sourceStatusesText) ?? ["completed"];
+      const statuses = parseStatuses(editor.sourceStatusesText) ?? (statusOptions.length ? [] : ["completed"]);
       if (statuses.length === 0) {
         throw new Error(t("triggers.workflowRuns.toast.invalidStatuses"));
       }
 
-      const contextPatchValue = JSON.parse(editor.contextPatchText.trim() || "{}") as unknown;
-      const contextPatch = normalizeObject(contextPatchValue);
+      const contextPatch = contextPatchState.value;
       if (!contextPatch) {
         throw new Error(t("triggers.workflowRuns.toast.invalidContextPatch"));
       }
@@ -973,19 +1002,5 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
       });
       setDel((current) => ({ ...current, pending: false }));
     }
-  }
-
-  function formatJson(field: "contextPatchText") {
-    setEditor((current) => {
-      if (current.pending) return current;
-      const raw = current[field].trim();
-      try {
-        const parsed = JSON.parse(raw || "{}") as unknown;
-        const obj = normalizeObject(parsed) ?? {};
-        return { ...current, [field]: JSON.stringify(obj, null, 2) } as EditorState;
-      } catch {
-        return current;
-      }
-    });
   }
 }

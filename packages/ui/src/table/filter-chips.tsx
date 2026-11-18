@@ -47,7 +47,7 @@ export function FilterChips({ t, chips, onRemove, onClearAll }: FilterChipsProps
           <button
             type="button"
             onClick={() => onRemove(chip)}
-            className="ml-0.5 inline-flex h-3.5 w-3.5 flex-none items-center justify-center rounded-full transition-colors hover:bg-black/10"
+            className="ms-0.5 inline-flex h-3.5 w-3.5 flex-none items-center justify-center rounded-full transition-colors hover:bg-black/10"
             aria-label={t("viewBar.removeChipAria")}
           >
             <svg

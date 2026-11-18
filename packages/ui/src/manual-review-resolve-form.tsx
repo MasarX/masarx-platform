@@ -1,6 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { useToast } from "./use-toast";
+import { useUnsavedChangesGuard } from "./use-unsaved-changes";
+import type { ReviewDecisionOption } from "./review-decision-options";
 import { useTranslations } from "next-intl";
 import { Button } from "./button";
 import { Select } from "./select";
@@ -25,6 +28,7 @@ type ManualReviewResolveFormProps = {
   taskId: string;
   disabled?: boolean;
   disabledMessage?: string;
+  outcomeOptions?: ReviewDecisionOption[];
   testIdPrefix: string;
   telemetry?: UiScopeMetaInput | null;
 };
@@ -36,11 +40,20 @@ export function ManualReviewResolveForm({
   taskId,
   disabled,
   disabledMessage,
+  outcomeOptions,
   testIdPrefix,
   telemetry,
 }: ManualReviewResolveFormProps) {
   const t = useTranslations("ui.manualReview.form");
   const [state, formAction, isPending] = React.useActionState(action, initialState);
+  const [dirty, setDirty] = React.useState(false);
+  const { toast } = useToast();
+  useUnsavedChangesGuard({
+    enabled: true,
+    isSubmitting: isPending,
+    hasChanges: dirty && state.status !== "success" && !disabled,
+    warningMessage: "Leave this review without submitting your changes?",
+  });
   const blockedMessage = disabled
     ? disabledMessage ?? t("blocked")
     : null;
@@ -76,10 +89,13 @@ export function ManualReviewResolveForm({
       digest: scopeDigest,
       meta: scopeMeta,
     });
-  }, [scopeDigest, scopeMeta, state.message, state.status]);
+    if (state.status === "success") toast({ tone: "success", title: "Review submitted" });
+    if (state.status === "error") toast({ tone: "error", title: "Review failed" });
+  }, [scopeDigest, scopeMeta, state.message, state.status, toast]);
 
   return (
     <form
+      onChange={() => setDirty(true)}
       action={formAction}
       className="space-y-4"
       data-testid={`${testIdPrefix}-form`}
@@ -95,7 +111,7 @@ export function ManualReviewResolveForm({
     >
       <input type="hidden" name="task_id" value={taskId} />
       <label className="space-y-2 text-sm text-ui-ink">
-        <span className="text-xs uppercase tracking-wide text-ui-muted">
+        <span className="text-xs tracking-wide text-ui-muted">
           {t("outcome.label")}
         </span>
         <Select
@@ -108,12 +124,18 @@ export function ManualReviewResolveForm({
           <option value="" disabled>
             {t("outcome.placeholder")}
           </option>
-          <option value="approved">{t("outcome.approved")}</option>
-          <option value="rejected">{t("outcome.rejected")}</option>
+          {outcomeOptions?.length ? outcomeOptions.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
+          )) : (
+            <>
+              <option value="approved">{t("outcome.approved")}</option>
+              <option value="rejected">{t("outcome.rejected")}</option>
+            </>
+          )}
         </Select>
       </label>
       <label className="space-y-2 text-sm text-ui-ink">
-        <span className="text-xs uppercase tracking-wide text-ui-muted">
+        <span className="text-xs tracking-wide text-ui-muted">
           {t("notes.label")}
         </span>
         <Textarea

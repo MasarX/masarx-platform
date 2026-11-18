@@ -72,7 +72,10 @@
           "schedule": "جدولة",
           "scheduleManual": "جدولة (يدوي)",
           "workflowRunTrigger": "مشغّل تشغيل سير عمل",
-          "unknown": "غير معروف"
+          "unknown": "غير معروف",
+          "api": "API",
+          "worker": "عامل",
+          "task": "مهمة"
         },
         "fields": {
           "runId": "معرّف التشغيل",
@@ -178,6 +181,72 @@
         "countWithTotal": "‏Steps loaded: {count} of {total}",
         "empty": "‏No workflow run steps were recorded.",
         "openFullView": "‏Open steps in full view"
+      }
+    }
+  },
+  "dispatchBoard": {
+    "title": "لوحة التوزيع",
+    "description": "تعيين وإدارة مهام التوزيع عبر السائقين",
+    "eyebrow": "العمليات"
+  },
+  "trackingMap": {
+    "title": "خريطة التتبع",
+    "description": "تتبع مباشر لمواقع الشحنات",
+    "table": {
+      "tracking": "رقم التتبع",
+      "status": "الحالة",
+      "origin": "المصدر",
+      "destination": "الوجهة",
+      "service": "الخدمة",
+      "lastUpdated": "آخر تحديث"
+    },
+    "fallback": {
+      "title": "مواقع الشحنات",
+      "description": "عرض الخريطة يتطلب عناوين مرمّزة جغرافيًا. عرض {count} شحنة مع بيانات الموقع."
+    },
+    "empty": {
+      "title": "لا تتوفر بيانات مواقع الشحنات",
+      "description": "ستظهر مواقع الشحنات هنا بمجرد ترميز العناوين جغرافيًا أو توفر بيانات المصدر/الوجهة."
+    }
+  },
+  "codReconciliation": {
+    "title": "تسوية الدفع عند الاستلام",
+    "description": "تسوية تحصيل الدفع عند الاستلام وتتبع الفروقات"
+  },
+  "webhookTester": {
+    "title": "اختبار Webhook",
+    "description": "إرسال حمولات Webhook تجريبية وفحص الاستجابات"
+  },
+  "integrationHealth": {
+    "title": "صحة التكامل",
+    "description": "مراقبة وقت التشغيل ومعدلات النجاح وأوقات الاستجابة للتكاملات",
+    "empty": "لم يتم العثور على تكاملات مزودين. ستظهر المزودات هنا بمجرد تهيئتها."
+  },
+  "onboarding": {
+    "steps": {
+      "signIn": {
+        "title": "تسجيل الدخول إلى حسابك",
+        "description": "أنت مسجل الدخول بالفعل."
+      },
+      "reviewSettings": {
+        "title": "مراجعة إعدادات المؤسسة",
+        "description": "تحقق من تفضيلات مؤسستك وقم بتهيئتها.",
+        "action": "فتح الإعدادات"
+      },
+      "createShipment": {
+        "title": "إنشاء أول شحنة",
+        "description": "ابدأ بتتبع الشحنات في مؤسستك.",
+        "action": "إنشاء شحنة"
+      },
+      "setupWebhooks": {
+        "title": "إعداد تكاملات Webhook",
+        "description": "ربط الأنظمة الخارجية عبر Webhook.",
+        "action": "عرض Webhooks"
+      },
+      "exploreCommands": {
+        "title": "استكشاف كتالوج الأوامر",
+        "description": "اكتشف العمليات وسير العمل المتاحة.",
+        "action": "تصفح الأوامر"
       }
     }
   }

@@ -9,7 +9,9 @@ export type TestIdState =
   | "success"
   | "form"
   | "preview"
-  | "request";
+  | "request"
+  | "command-center"
+  | "metrics";
 
 export function buildTestId(prefix: string, state: TestIdState) {
   return `${prefix}-${state}`;

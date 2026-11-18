@@ -161,6 +161,8 @@ async function main() {
     });
 
     const startContext = {
+      trigger_source: 'manual',
+      trigger_type: 'debug_label_print_workflow',
       organization_id: organizationId,
       requested_by: randomUUID(),
       correlation_id: randomUUID(),

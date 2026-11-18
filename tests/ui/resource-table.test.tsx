@@ -1276,6 +1276,68 @@ test("resource table submits a new view request", async () => {
   );
 });
 
+test("resource table view panel keeps scope and settings references readable", async () => {
+  renderWithIntl(
+    <ResourceTable
+      columns={[
+        { key: "id", label: "ID" },
+        { key: "status", label: "Status" },
+      ]}
+      items={[{ id: "1", status: "Ready" }]}
+      viewState={{
+        resourceKey: "shipments",
+        activeViewId: "view-1",
+        views: [
+          {
+            id: "view-1",
+            label: "Ops view",
+            columns: { order: ["id", "status"], hidden: [] },
+          },
+        ],
+        scopeType: "tenant",
+        scopeId: "99999999-aaaa-4bbb-8ccc-dddddddddddd",
+        settingsResolutionId: "12345678-aaaa-4bbb-8ccc-1234567890ab",
+      }}
+    />
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Views" }));
+
+  expect(screen.getByText("View scope")).toBeInTheDocument();
+  expect(screen.getByText("Tenant: REF-9999DDDD")).toBeInTheDocument();
+  expect(
+    screen.queryByText("99999999-aaaa-4bbb-8ccc-dddddddddddd")
+  ).not.toBeInTheDocument();
+
+  expect(screen.getByText("Settings resolution")).toBeInTheDocument();
+  expect(screen.getByText("REF-123490AB")).toBeInTheDocument();
+  expect(
+    screen.queryByText("12345678-aaaa-4bbb-8ccc-1234567890ab")
+  ).not.toBeInTheDocument();
+});
+
+test("resource table view panel prefers humanized scope labels over raw ids", async () => {
+  renderWithIntl(
+    <ResourceTable
+      columns={[
+        { key: "id", label: "ID" },
+        { key: "status", label: "Status" },
+      ]}
+      items={[{ id: "1", status: "Ready" }]}
+      viewState={{
+        resourceKey: "shipments",
+        scopeType: "tenant",
+        scopeId: "north_hub",
+      }}
+    />
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Views" }));
+
+  expect(screen.getByText("Tenant: North Hub")).toBeInTheDocument();
+  expect(screen.queryByText("north_hub")).not.toBeInTheDocument();
+});
+
 test("resource table updates an existing view", async () => {
   renderWithIntl(
     <ResourceTable

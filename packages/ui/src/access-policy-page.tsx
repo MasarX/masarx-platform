@@ -6,8 +6,11 @@ import { Button } from "./button";
 import { PageContainer } from "./page-container";
 import { PageHeader } from "./page-header";
 import { Section } from "./section";
+import Link from "next/link";
 import { createUiTranslator } from "./i18n";
 import { buildTestId } from "./test-ids";
+import { labelFromKey } from "./resource-query";
+import { formatReferenceValue } from "./resource-utils";
 import {
   extractCapabilityDeniedKey,
   formatUiError,
@@ -41,6 +44,16 @@ const formatValue = (value: unknown) => {
   return text ? text : t("unknown");
 };
 
+const formatScopeTypeLabel = (value: unknown) => {
+  const key = getString(value).trim().toLowerCase();
+  return key ? labelFromKey(key) : t("unknown");
+};
+
+const formatReferenceValueSafe = (value: unknown) => {
+  const text = getString(value).trim();
+  return text ? formatReferenceValue(text) : t("unknown");
+};
+
 /**
  * Access policy page with role editor and request flow.
  */
@@ -60,6 +73,7 @@ export async function AccessPolicyPage({
   const requestCapabilityKey = requestCapability?.trim() ?? "";
   const effectiveRequestLabel = requestLabel ?? t("request.label");
   const requestTestId = buildTestId(testIdPrefix, "request");
+  const buildDetailTestId = (suffix: string) => `${testIdPrefix}-${suffix}`;
   const resolveDeniedMessage = (message: string) => {
     const capability = extractCapabilityDeniedKey(message);
     if (capability) {
@@ -98,9 +112,9 @@ export async function AccessPolicyPage({
   const requestAction = requestHref ? (
     canRequest || !requestCapabilityKey ? (
       <Button asChild variant="ghost">
-        <a href={requestHref} data-testid={requestTestId}>
+        <Link href={requestHref} data-testid={requestTestId}>
           {effectiveRequestLabel}
-        </a>
+        </Link>
       </Button>
     ) : (
       <Button
@@ -176,6 +190,24 @@ export async function AccessPolicyPage({
   const assignments = asRecord(policy?.assignments);
   const userTypeAssignments = assignments ? asRecord(assignments.user_type) : null;
   const denies = asArray(policy?.denies).map(asRecord).filter(Boolean) as JsonRecord[];
+  const policyScopeLabel =
+    getString(asRecord(policyResult)?.scope_label).trim()
+    || (me?.access_scope?.scope_type === policyResult?.scope_type &&
+      me?.access_scope?.scope_id === policyResult?.scope_id
+      ? getString(me?.access_scope?.scope_label).trim()
+      : "");
+  const policyScopeTypeLabel = formatScopeTypeLabel(policyResult?.scope_type);
+  const policyScopeReference = getString(policyResult?.scope_id).trim()
+    ? formatReferenceValueSafe(policyResult?.scope_id)
+    : null;
+  const policyScopeSummary = policyScopeLabel
+    ? `${policyScopeTypeLabel}: ${policyScopeLabel}`
+    : policyScopeReference
+      ? `${policyScopeTypeLabel}: ${policyScopeReference}`
+      : policyScopeTypeLabel;
+  const settingsResolutionReadable = getString(policyResult?.settings_resolution_id).trim()
+    ? formatReferenceValueSafe(policyResult?.settings_resolution_id)
+    : t("unknown");
 
   return (
     <PageContainer className="space-y-6">
@@ -195,15 +227,28 @@ export async function AccessPolicyPage({
         >
           <div>
             {t("summary.scope")}{" "}
-            <span className="text-ui-ink">
-              {formatValue(policyResult?.scope_type)}{" "}
-              {formatValue(policyResult?.scope_id)}
+            <span
+              className="text-ui-ink"
+              data-testid={buildDetailTestId("summary-scope")}
+            >
+              {policyScopeSummary}
             </span>
+            {policyScopeLabel && policyScopeReference ? (
+              <div
+                className="mt-1 text-xs text-ui-muted"
+                data-testid={buildDetailTestId("summary-scope-reference")}
+              >
+                <span className="font-mono text-ui-ink">{policyScopeReference}</span>
+              </div>
+            ) : null}
           </div>
           <div>
             {t("summary.settingsResolution")}{" "}
-            <span className="font-mono text-ui-ink">
-              {formatValue(policyResult?.settings_resolution_id)}
+            <span
+              className="font-mono text-ui-ink"
+              data-testid={buildDetailTestId("summary-settings-resolution")}
+            >
+              {settingsResolutionReadable}
             </span>
           </div>
         </div>
@@ -311,15 +356,34 @@ export async function AccessPolicyPage({
             <div className="space-y-2 text-sm">
               {denies.map((deny, index) => {
                 const capabilityKey = formatValue(deny.capability_key);
-                const scopeType = formatValue(deny.scope_type);
-                const scopeId = formatValue(deny.scope_id);
+                const scopeType = formatScopeTypeLabel(deny.scope_type);
+                const scopeLabel =
+                  getString(deny.scope_label).trim()
+                  || getString(deny.scope_name).trim();
+                const scopeReference = getString(deny.scope_id).trim()
+                  ? formatReferenceValueSafe(deny.scope_id)
+                  : t("unknown");
                 const reason = getString(deny.reason);
                 return (
                   <div key={`${capabilityKey}-${index}`} className="rounded-lg border border-ui-border/60 bg-ui-surface/70 p-3">
                     <div className="font-semibold text-ui-ink">{capabilityKey}</div>
-                    <div className="text-xs text-ui-muted">
-                      {t("denies.scope", { scopeType, scopeId })}
+                    <div
+                      className="text-xs text-ui-muted"
+                      data-testid={buildDetailTestId(`deny-${index}-scope`)}
+                    >
+                      {t("denies.scope", {
+                        scopeType,
+                        scopeId: scopeLabel || scopeReference,
+                      })}
                     </div>
+                    {scopeLabel && scopeReference ? (
+                      <div
+                        className="text-xs text-ui-muted"
+                        data-testid={buildDetailTestId(`deny-${index}-scope-reference`)}
+                      >
+                        <span className="font-mono text-ui-ink">{scopeReference}</span>
+                      </div>
+                    ) : null}
                     {reason ? <div className="text-xs text-ui-muted">{reason}</div> : null}
                   </div>
                 );
@@ -331,4 +395,3 @@ export async function AccessPolicyPage({
     </PageContainer>
   );
 }
-

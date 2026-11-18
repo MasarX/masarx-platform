@@ -14,7 +14,7 @@ import {
   ModalTitle,
   ModalTrigger,
 } from "./modal";
-import { formatIdValue, formatReferenceValue } from "./resource-utils";
+import { formatReferenceValue } from "./resource-utils";
 import { createUiTranslator } from "./i18n";
 import { Select } from "./select";
 import { useToast } from "./use-toast";
@@ -81,7 +81,7 @@ const resolveScopeOptionLabel = (option: UiScopeOption) => {
     option.scope_label?.trim() || option.scope_id?.trim() || "";
   if (!rawLabel) return typeLabel;
   const formattedLabel =
-    option.scope_label?.trim() || formatIdValue(rawLabel);
+    option.scope_label?.trim() || formatReferenceValue(rawLabel);
   return `${typeLabel}: ${formattedLabel}`;
 };
 
@@ -449,7 +449,7 @@ export function ContextStrip({
               {t("actions.details")}
             </Button>
           </ModalTrigger>
-          <ModalContent>
+          <ModalContent data-testid="ui-context-strip-details-modal">
             <ModalHeader>
               <ModalTitle>{t("details.title")}</ModalTitle>
               <ModalDescription>{t("details.description")}</ModalDescription>
@@ -513,7 +513,7 @@ export function ContextStrip({
           href={safeSignOutHrefWithRequestId ?? safeSignOutHref ?? "#"}
           onClick={safeSignOutHrefWithRequestId ? handleSignOut : handleUnsafeLink}
           data-testid="ui-context-strip-sign-out"
-          className="ml-auto text-xs font-medium text-ui-ink underline underline-offset-4"
+          className="ms-auto text-xs font-medium text-ui-ink underline underline-offset-4"
         >
           {t("signOut")}
         </a>

@@ -213,3 +213,75 @@ test("shows title when provided", () => {
 
   expect(screen.getByText("Custom Title")).toBeInTheDocument();
 });
+
+test("shows lookup labels for foreign-key detail values and inline editors", () => {
+  const clientId = "11111111-1111-1111-1111-111111111111";
+
+  renderWithIntl(
+    <ResourceDetailEditable
+      title="Lookup detail"
+      data={{ client_id: clientId }}
+      columns={[
+        {
+          key: "client_id",
+          label: "Client",
+          editMode: "inline",
+          editType: "uuid",
+          editOptions: [{ label: "Demo Client A", value: clientId }],
+        },
+      ]}
+      resourceKey="shipments"
+      recordId="shipment-1"
+      onUpdate={defaultOnUpdate}
+    />
+  );
+
+  expect(screen.getByText("Demo Client A")).toBeInTheDocument();
+  expect(screen.queryByText(clientId)).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+  expect(screen.getByRole("combobox")).toBeInTheDocument();
+  expect(screen.getByText("Demo Client A")).toBeInTheDocument();
+});
+
+test("uses lookup labels for display and inline editing when edit options are provided", async () => {
+  renderWithIntl(
+    <ResourceDetailEditable
+      title="Status detail"
+      data={{
+        status: "hold_at_branch",
+      }}
+      columns={[
+        {
+          key: "status",
+          label: "Status",
+          editMode: "inline",
+          editType: "select",
+          editOptions: [
+            { value: "hold_at_branch", label: "Hold At Branch" },
+            { value: "rescheduled", label: "Rescheduled" },
+          ],
+        },
+      ]}
+      resourceKey="shipments"
+      recordId="shipment-1"
+      onUpdate={defaultOnUpdate}
+    />
+  );
+
+  expect(screen.getByText("Hold At Branch")).toBeInTheDocument();
+  expect(screen.queryByText("hold_at_branch")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const combobox = screen.getByRole("combobox");
+  expect(combobox).toHaveTextContent("Hold At Branch");
+
+  fireEvent.click(combobox);
+  fireEvent.pointerDown(screen.getByRole("option", { name: "Rescheduled" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(() => {
+    expect(defaultOnUpdate).toHaveBeenCalledWith({ status: "rescheduled" });
+  });
+});

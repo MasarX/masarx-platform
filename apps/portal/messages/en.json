@@ -68,8 +68,11 @@
         "sources": {
           "manual": "Manual",
           "webhook": "Webhook",
+          "api": "API",
+          "worker": "Worker",
           "schedule": "Schedule",
           "scheduleManual": "Schedule (manual)",
+          "task": "Task",
           "workflowRunTrigger": "Workflow run trigger",
           "unknown": "Unknown"
         },

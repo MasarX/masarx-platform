@@ -364,7 +364,7 @@ test("useInlineEdit rejects invalid uuid values before API submit", async () => 
   });
 
   expect(screen.getByTestId("inline-error")).toHaveTextContent(
-    "Organization Id must be a valid UUID."
+    "Organization must be a valid UUID."
   );
   expect(updateResourceMock).not.toHaveBeenCalled();
   expect(toastMock).toHaveBeenCalledWith(
@@ -387,7 +387,7 @@ test("useInlineEdit infers uuid validation for *_id text columns with uuid value
   });
 
   expect(screen.getByTestId("inline-error")).toHaveTextContent(
-    "Organization Id must be a valid UUID."
+    "Organization must be a valid UUID."
   );
   expect(updateResourceMock).not.toHaveBeenCalled();
   expect(toastMock).toHaveBeenCalledWith(
@@ -439,12 +439,12 @@ test("useInlineEdit normalizes backend uuid syntax errors", async () => {
 
   expect(updateResourceMock).toHaveBeenCalledTimes(1);
   expect(screen.getByTestId("inline-error")).toHaveTextContent(
-    "Organization Id must be a valid UUID."
+    "Organization must be a valid UUID."
   );
   expect(toastMock).toHaveBeenCalledWith(
     expect.objectContaining({
       title: "Unable to save change.",
-      description: "Organization Id must be a valid UUID.",
+      description: "Organization must be a valid UUID.",
       tone: "error",
     })
   );

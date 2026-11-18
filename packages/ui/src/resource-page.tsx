@@ -1132,6 +1132,7 @@ export async function ResourcePage({
               <ResourceDetailSkeleton />
             ) : (
               <ResourceDetail
+                appBasePath={appBasePath}
                 title={detailTitle}
                 data={detail}
                 emptyMessage={detailError ?? t("detail.notFound")}

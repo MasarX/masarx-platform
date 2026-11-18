@@ -149,7 +149,7 @@ export function resolveCellDisplay(
         : null;
       return {
         primary: formattedReference.display,
-        primaryTitle: trimmed,
+        primaryTitle: undefined,
         secondary: internalHint?.display ?? null,
         secondaryTitle:
           internalHint?.title ?? (showInternalIdHints ? trimmed : undefined),
@@ -208,7 +208,9 @@ export function resolveCellDisplay(
         : null;
     return {
       primary: formattedIdentifier.display,
-      primaryTitle: displayIdentifier.value,
+      primaryTitle: isUuidValue(displayIdentifier.value)
+        ? undefined
+        : displayIdentifier.value,
       secondary:
         showDescriptor?.display ??
         showLabel?.display ??
@@ -242,7 +244,7 @@ export function resolveCellDisplay(
     const formattedReference = truncateValue(formatReferenceValue(trimmed), truncateLength);
     return {
       primary: formattedReference.display,
-      primaryTitle: trimmed,
+      primaryTitle: isUuidValue(trimmed) ? undefined : trimmed,
       secondary: showInternalIdHints ? formatIdValue(trimmed) : null,
       secondaryTitle: showInternalIdHints ? trimmed : undefined,
     };

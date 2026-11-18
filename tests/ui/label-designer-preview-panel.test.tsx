@@ -114,4 +114,9 @@ describe("PreviewPanel", () => {
     const btn = screen.getByTestId("ld-preview");
     expect(btn).toBeDisabled();
   });
+  it("keeps the PDF viewer unloaded until preview data exists", () => {
+    render(<PreviewPanel {...defaultProps} />);
+    expect(screen.getByTestId("ld-pdf-idle")).toBeInTheDocument();
+    expect(screen.queryByTestId("ld-pdf-mock")).not.toBeInTheDocument();
+  });
 });

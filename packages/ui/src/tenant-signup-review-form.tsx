@@ -1,6 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { useToast } from "./use-toast";
+import { useUnsavedChangesGuard } from "./use-unsaved-changes";
+import type { ReviewDecisionOption } from "./review-decision-options";
 import { Button } from "./button";
 import { Input } from "./input";
 import { Select } from "./select";
@@ -26,6 +29,7 @@ type TenantSignupReviewFormProps = {
   disabled?: boolean;
   disabledMessage?: string;
   defaultInviteRedirectTo?: string | null;
+  decisionOptions?: ReviewDecisionOption[];
   testIdPrefix: string;
   telemetry?: UiScopeMetaInput | null;
 };
@@ -38,10 +42,19 @@ export function TenantSignupReviewForm({
   disabled,
   disabledMessage,
   defaultInviteRedirectTo,
+  decisionOptions,
   testIdPrefix,
   telemetry,
 }: TenantSignupReviewFormProps) {
   const [state, formAction, isPending] = React.useActionState(action, initialState);
+  const [dirty, setDirty] = React.useState(false);
+  const { toast } = useToast();
+  useUnsavedChangesGuard({
+    enabled: true,
+    isSubmitting: isPending,
+    hasChanges: dirty && state.status !== "success" && !disabled,
+    warningMessage: "Leave this review without submitting your changes?",
+  });
   const blockedMessage = disabled
     ? disabledMessage ?? "Review is blocked for this request."
     : null;
@@ -78,10 +91,13 @@ export function TenantSignupReviewForm({
       digest: scopeDigest,
       meta: scopeMeta,
     });
-  }, [scopeDigest, scopeMeta, state.message, state.status]);
+    if (state.status === "success") toast({ tone: "success", title: "Review submitted" });
+    if (state.status === "error") toast({ tone: "error", title: "Review failed" });
+  }, [scopeDigest, scopeMeta, state.message, state.status, toast]);
 
   return (
     <form
+      onChange={() => setDirty(true)}
       action={formAction}
       className="space-y-4"
       data-testid={`${testIdPrefix}-form`}
@@ -97,7 +113,7 @@ export function TenantSignupReviewForm({
     >
       <input type="hidden" name="request_id" value={requestId} />
       <label className="space-y-2 text-sm text-ui-ink">
-        <span className="text-xs uppercase tracking-wide text-ui-muted">
+        <span className="text-xs tracking-wide text-ui-muted">
           Decision
         </span>
         <Select
@@ -110,13 +126,19 @@ export function TenantSignupReviewForm({
           <option value="" disabled>
             Select decision
           </option>
-          <option value="approved">Approve</option>
-          <option value="rejected">Reject</option>
+          {decisionOptions?.length ? decisionOptions.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
+          )) : (
+            <>
+              <option value="approved">Approve</option>
+              <option value="rejected">Reject</option>
+            </>
+          )}
         </Select>
       </label>
 
       <label className="space-y-2 text-sm text-ui-ink">
-        <span className="text-xs uppercase tracking-wide text-ui-muted">
+        <span className="text-xs tracking-wide text-ui-muted">
           Reason
         </span>
         <Textarea
@@ -129,7 +151,7 @@ export function TenantSignupReviewForm({
       </label>
 
       <label className="space-y-2 text-sm text-ui-ink">
-        <span className="text-xs uppercase tracking-wide text-ui-muted">
+        <span className="text-xs tracking-wide text-ui-muted">
           Invite redirect (required for approval)
         </span>
         <Input

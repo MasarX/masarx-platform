@@ -29,7 +29,7 @@ function numField(
 ) {
   return (
     <div className="space-y-0.5">
-      <label className="text-[10px] font-medium uppercase tracking-wide text-ui-muted" htmlFor={id}>
+      <label className="text-[10px] font-medium tracking-wide text-ui-muted" htmlFor={id}>
         {label}
       </label>
       <Input
@@ -55,7 +55,7 @@ function textField(
 ) {
   return (
     <div className="space-y-0.5">
-      <label className="text-[10px] font-medium uppercase tracking-wide text-ui-muted" htmlFor={id}>
+      <label className="text-[10px] font-medium tracking-wide text-ui-muted" htmlFor={id}>
         {label}
       </label>
       <Input
@@ -184,7 +184,7 @@ export function BlockPropertyPanel({
           />
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-0.5">
-              <label className="text-[10px] font-medium uppercase tracking-wide text-ui-muted" htmlFor={id("align")}>
+              <label className="text-[10px] font-medium tracking-wide text-ui-muted" htmlFor={id("align")}>
                 {t("align")}
               </label>
               <Select
@@ -199,7 +199,7 @@ export function BlockPropertyPanel({
               </Select>
             </div>
             <div className="space-y-0.5">
-              <label className="text-[10px] font-medium uppercase tracking-wide text-ui-muted" htmlFor={id("valign")}>
+              <label className="text-[10px] font-medium tracking-wide text-ui-muted" htmlFor={id("valign")}>
                 {t("valign")}
               </label>
               <Select
@@ -238,7 +238,7 @@ export function BlockPropertyPanel({
             {barcodeData ? <ValidationBadge valid={dataValid} /> : null}
           </div>
           <div className="space-y-0.5">
-            <label className="text-[10px] font-medium uppercase tracking-wide text-ui-muted" htmlFor={id("barcode_type")}>
+            <label className="text-[10px] font-medium tracking-wide text-ui-muted" htmlFor={id("barcode_type")}>
               {t("barcodeType")}
             </label>
             <Select
@@ -283,7 +283,7 @@ export function BlockPropertyPanel({
               </div>
               {barcodeType === "qr" ? (
                 <div className="space-y-0.5">
-                  <label className="text-[10px] font-medium uppercase tracking-wide text-ui-muted" htmlFor={id("error_correction")}>
+                  <label className="text-[10px] font-medium tracking-wide text-ui-muted" htmlFor={id("error_correction")}>
                     {t("errorCorrection")}
                   </label>
                   <Select

@@ -26,6 +26,7 @@ async function submitApproval(response: unknown, reason?: string) {
   const user = userEvent.setup();
   renderWithIntl(
     <CustomerShipmentChangeReviewForm
+      decisionOptions={[{ value: "approved", label: "Example approval" }]}
       supportCaseId="case-1"
       testIdPrefix="shipment-review"
     />,

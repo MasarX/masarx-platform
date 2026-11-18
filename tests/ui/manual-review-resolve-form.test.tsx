@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ManualReviewResolveForm } from "../../packages/ui/src/manual-review-resolve-form";
 import { reportUiEvent } from "../../packages/ui/src/reporting";
 
@@ -24,6 +24,10 @@ jest.mock("../../packages/ui/src/reporting", () => {
   };
 });
 
+jest.mock("../../packages/ui/src/use-toast", () => ({
+  useToast: () => ({ toast: jest.fn() }),
+}));
+
 test("manual review resolve form emits submit telemetry", () => {
   formState = { status: "idle", message: undefined };
   const action = jest.fn(async () => ({ status: "success" as const }));
@@ -31,6 +35,10 @@ test("manual review resolve form emits submit telemetry", () => {
     <ManualReviewResolveForm
       action={action}
       taskId="task-1"
+      outcomeOptions={[
+        { value: "approved", label: "Approved by policy" },
+        { value: "rejected", label: "Rejected by policy" },
+      ]}
       testIdPrefix="manual-review"
       telemetry={{
         settingsResolutionId: "res-1",
@@ -65,6 +73,10 @@ test("manual review resolve form emits result telemetry on error", () => {
     <ManualReviewResolveForm
       action={action}
       taskId="task-1"
+      outcomeOptions={[
+        { value: "approved", label: "Approved by policy" },
+        { value: "rejected", label: "Rejected by policy" },
+      ]}
       testIdPrefix="manual-review"
       telemetry={{
         settingsResolutionId: "res-2",
@@ -80,6 +92,10 @@ test("manual review resolve form emits result telemetry on error", () => {
     <ManualReviewResolveForm
       action={action}
       taskId="task-1"
+      outcomeOptions={[
+        { value: "approved", label: "Approved by policy" },
+        { value: "rejected", label: "Rejected by policy" },
+      ]}
       testIdPrefix="manual-review"
       telemetry={{
         settingsResolutionId: "res-2",
@@ -104,4 +120,42 @@ test("manual review resolve form emits result telemetry on error", () => {
       },
     })
   );
+});
+
+test("manual review resolve form renders lookup-provided outcome labels", () => {
+  formState = { status: "idle", message: undefined };
+  const action = jest.fn(async () => ({ status: "success" as const }));
+  const taskId = "33333333-3333-4333-8333-333333333333";
+  render(
+    <ManualReviewResolveForm
+      action={action}
+      taskId={taskId}
+      outcomeOptions={[
+        { value: "approved", label: "Approve after evidence review" },
+        { value: "rejected", label: "Reject after policy check" },
+      ]}
+      testIdPrefix="manual-review"
+    />
+  );
+
+  const form = screen.getByTestId("manual-review-form") as HTMLFormElement;
+  const select = screen.getByTestId("manual-review-outcome") as HTMLSelectElement;
+  expect(within(select).getByRole("option", { name: "Approve after evidence review" })).toHaveValue("approved");
+  expect(within(select).getByRole("option", { name: "Reject after policy check" })).toHaveValue("rejected");
+  expect(within(select).queryByRole("option", { name: "approved" })).toBeNull();
+  expect(within(select).queryByRole("option", { name: "rejected" })).toBeNull();
+  expect(select).toHaveTextContent("Approve after evidence review");
+  expect(select).toHaveTextContent("Reject after policy check");
+  fireEvent.change(select, { target: { value: "approved" } });
+  expect(select).toHaveValue("approved");
+  expect(select).toHaveDisplayValue("Approve after evidence review");
+  expect(select).not.toHaveDisplayValue("approved");
+  const taskInput = form.querySelector<HTMLInputElement>('input[name="task_id"]');
+  expect(taskInput).toHaveAttribute("type", "hidden");
+  expect(taskInput).toHaveValue(taskId);
+  expect(screen.queryByText(taskId)).toBeNull();
+  const formData = new FormData(form);
+  expect(formData.get("task_id")).toBe(taskId);
+  expect(formData.get("resolution_outcome")).toBe("approved");
+  expect(select).not.toHaveTextContent("outcome.approved");
 });

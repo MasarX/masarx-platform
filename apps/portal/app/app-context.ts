@@ -24,12 +24,12 @@ export async function getPortalAppContext() {
 
 export function withPortalConfig<P = DefaultPageProps>(
   render: (context: AppContextWithConfig, props: P) => ReactNode | Promise<ReactNode>,
-  options?: { authMode?: AppAuthMode }
+  options?: { authMode?: AppAuthMode; testIdPrefix?: string }
 ) {
   return createConfigGuardedPage<P>({
     loadContext: getPortalAppContext,
     render,
     authMode: options?.authMode ?? "required",
-    testIdPrefix: "portal",
+    testIdPrefix: options?.testIdPrefix ?? "portal",
   });
 }

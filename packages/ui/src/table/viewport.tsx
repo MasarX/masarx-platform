@@ -22,6 +22,8 @@ type TableViewportProps = {
   showRowNumbers?: boolean;
   selectionEnabled: boolean;
   selectionReady?: boolean;
+  resourceLabel?: string | null;
+  createHref?: string | null;
   selectHeaderRef: React.RefObject<HTMLTableHeaderCellElement | null>;
   selectAllRef: React.RefObject<HTMLInputElement | null>;
   allSelected: boolean;
@@ -71,6 +73,8 @@ export const TableViewport = React.memo(function TableViewport({
   showRowNumbers,
   selectionEnabled,
   selectionReady = true,
+  resourceLabel,
+  createHref,
   selectHeaderRef,
   selectAllRef,
   allSelected,
@@ -153,6 +157,8 @@ export const TableViewport = React.memo(function TableViewport({
             isEmpty={isEmpty}
             emptyMessage={emptyMessage}
             emptyAction={emptyAction}
+            resourceLabel={resourceLabel}
+            createHref={createHref}
             noColumnsAction={noColumnsAction}
             clientFilterActive={clientFilterActive}
             safeColumnCount={safeColumnCount}

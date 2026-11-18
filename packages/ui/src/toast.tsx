@@ -21,6 +21,7 @@ export function ToastProvider({ children, ...props }: ToastProviderProps) {
 export const ToastTitle = ToastPrimitive.Title;
 export const ToastDescription = ToastPrimitive.Description;
 export const ToastClose = ToastPrimitive.Close;
+export const ToastAction = ToastPrimitive.Action;
 
 export function ToastViewport({
   className,

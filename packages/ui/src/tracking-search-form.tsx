@@ -74,6 +74,8 @@ export function TrackingSearchForm({
 
   return (
     <form
+      action={actionHref}
+      method="get"
       onSubmit={handleSubmit}
       className="flex flex-wrap items-end gap-4 rounded-2xl border border-ui-border bg-ui-surface/70 p-4"
       data-testid={testId}
@@ -82,7 +84,7 @@ export function TrackingSearchForm({
       data-tracking-param={paramKey}
     >
       <label className="flex min-w-[220px] flex-1 flex-col gap-2 text-sm text-ui-ink">
-        <span className="text-xs uppercase tracking-wide text-ui-muted">
+        <span className="text-xs tracking-wide text-ui-muted">
           {resolvedLabel}
         </span>
         <Input

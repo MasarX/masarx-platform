@@ -302,3 +302,25 @@ test("does not crash when toggling from empty to populated", () => {
 
   expect(screen.getByText("user@example.com")).toBeInTheDocument();
 });
+
+test("scope switcher uses a readable reference instead of a raw scope uuid when the label is missing", () => {
+  render(
+    <ContextStrip
+      userLabel="operator@example.invalid"
+      scopeType="tenant"
+      scopeId="550e8400-e29b-41d4-a716-446655440001"
+      scopeOptions={[
+        {
+          scope_type: "tenant",
+          scope_id: "550e8400-e29b-41d4-a716-446655440001",
+          scope_label: null,
+          href: "/console/scope/tenant-1",
+        },
+      ]}
+    />
+  );
+
+  const option = screen.getByRole("option", { name: "Tenant: REF-550E0001" });
+  expect(option).toBeInTheDocument();
+  expect(option).not.toHaveTextContent("550e8400-e29b-41d4-a716-446655440001");
+});

@@ -1,11 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { fuzzyMatch } from "./fuzzy-match";
+import { fuzzyMatchMultiField } from "./fuzzy-match";
 
 export type ComboboxOption = {
   label: string;
   value: string;
+  searchText?: string;
   disabled?: boolean;
 };
 
@@ -43,7 +44,7 @@ export function useCombobox({
     if (!query.trim()) return options;
     return options
       .map((option) => {
-        const result = fuzzyMatch(option.label, query);
+        const result = fuzzyMatchMultiField([option.label, option.searchText ?? ""], query);
         return result ? { option, score: result.score } : null;
       })
       .filter((entry): entry is { option: ComboboxOption; score: number } =>

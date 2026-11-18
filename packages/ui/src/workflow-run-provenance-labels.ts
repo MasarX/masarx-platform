@@ -7,8 +7,11 @@ export type WorkflowRunProvenanceLabels = {
   sources: {
     manual: string;
     webhook: string;
+    api: string;
+    worker: string;
     schedule: string;
     scheduleManual: string;
+    task: string;
     workflowRunTrigger: string;
     unknown: string;
   };
@@ -63,8 +66,11 @@ export function createWorkflowRunProvenanceLabels(
     sources: {
       manual: t(key("sources.manual")),
       webhook: t(key("sources.webhook")),
+      api: t(key("sources.api")),
+      worker: t(key("sources.worker")),
       schedule: t(key("sources.schedule")),
       scheduleManual: t(key("sources.scheduleManual")),
+      task: t(key("sources.task")),
       workflowRunTrigger: t(key("sources.workflowRunTrigger")),
       unknown: t(key("sources.unknown")),
     },

@@ -208,6 +208,81 @@ describe("sqlite outbox store", () => {
     await expect(store.claimPending({ limit: 10 })).rejects.toThrow("boom");
     expect(execCalls).toEqual(["BEGIN IMMEDIATE", "ROLLBACK"]);
   });
+
+  test("enqueue is idempotent for replayed stable action ids", async () => {
+    jest.resetModules();
+
+    const rows = new Map<string, any>();
+    const execAsync = jest.fn(async () => {});
+    const getAllAsync = jest.fn(async (_sql: string, id: string) => {
+      const row = rows.get(id);
+      return row ? [row] : [];
+    });
+    const runAsync = jest.fn(async (sql: string, ...params: any[]) => {
+      if (!String(sql).includes("INSERT INTO outbox")) {
+        return { changes: 0 };
+      }
+
+      const [
+        id,
+        rpc,
+        args_json,
+        status,
+        created_at,
+        updated_at,
+        attempt_count,
+        next_attempt_at,
+        last_error,
+      ] = params;
+
+      if (rows.has(id)) {
+        return { changes: 0 };
+      }
+
+      rows.set(id, {
+        id,
+        rpc,
+        args_json,
+        status,
+        created_at,
+        updated_at,
+        attempt_count,
+        next_attempt_at,
+        last_error,
+      });
+      return { changes: 1 };
+    });
+
+    jest.doMock(
+      "expo-sqlite",
+      () => ({
+        openDatabaseAsync: jest.fn(async () => ({ execAsync, getAllAsync, runAsync })),
+      }),
+      { virtual: true }
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createSqliteOutboxStore } = require("@masarx/mobile-core/sqlite");
+
+    const store = createSqliteOutboxStore({ databaseName: "test.db", tableName: "outbox" });
+    await store.init();
+
+    const first = await store.enqueue({
+      id: "route-stop:rs-1:complete",
+      rpc: "complete_route_stop_v1",
+      args: { shipment_id: "shp-1", attempt: 1 },
+    });
+    const replay = await store.enqueue({
+      id: "route-stop:rs-1:complete",
+      rpc: "complete_route_stop_v1",
+      args: { shipment_id: "shp-1", attempt: 2 },
+    });
+
+    expect(rows.size).toBe(1);
+    expect(first.args).toEqual({ shipment_id: "shp-1", attempt: 1 });
+    expect(replay.args).toEqual(first.args);
+    expect(String(runAsync.mock.calls[0]?.[0])).toContain("ON CONFLICT(id) DO NOTHING");
+  });
 });
 
 test("actual SQLite upgrades populated legacy rows once and preserves Edge replay across store recreation", async () => {

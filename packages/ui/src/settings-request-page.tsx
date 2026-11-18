@@ -1,3 +1,4 @@
+import { labelFromKey } from "./resource-query";
 import "server-only";
 
 import { createUiServerClient } from "@masarx/api/server";
@@ -88,7 +89,9 @@ function normalizeCategory(
   const requestCapability =
     typeof item.request_capability === "string" ? item.request_capability : null;
   const allowedScopes = parseAllowedScopes(item.allowed_scopes);
-  return { category, description, requestCapability, allowedScopes };
+  const label = [item.label, item.display_label, item.display_name, item.name]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+  return { category, label: label?.trim() || labelFromKey(category), description, requestCapability, allowedScopes };
 }
 
 type UiClient = ReturnType<typeof createUiServerClient>;

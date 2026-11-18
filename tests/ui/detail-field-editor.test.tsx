@@ -33,6 +33,23 @@ test("renders checkbox for boolean editType", () => {
   expect(checkbox).toBeChecked();
 });
 
+test("uses lookup labels for uuid-backed options instead of raw uuid entry", () => {
+  const optionValue = "11111111-1111-1111-1111-111111111111";
+  render(
+    <DetailFieldEditor
+      {...defaultProps}
+      editType="uuid"
+      value={optionValue}
+      options={[{ label: "Demo Client A", value: optionValue }]}
+    />
+  );
+
+  const combobox = screen.getByRole("combobox");
+  expect(combobox).toBeInTheDocument();
+  expect(screen.getByText("Demo Client A")).toBeInTheDocument();
+  expect(screen.queryByPlaceholderText("00000000-0000-0000-0000-000000000000")).toBeNull();
+});
+
 test("calls onSave with field key and value on save button click", () => {
   render(
     <DetailFieldEditor
@@ -100,4 +117,30 @@ test("disables buttons when saving", () => {
   for (const button of buttons) {
     expect(button).toBeDisabled();
   }
+});
+
+test("renders lookup labels for uuid editors when options are available", () => {
+  render(
+    <DetailFieldEditor
+      {...defaultProps}
+      fieldKey="organization_id"
+      label="Organization"
+      editType="uuid"
+      value="tenant-1"
+      options={[
+        { value: "tenant-1", label: "Riyadh Ops" },
+        { value: "tenant-2", label: "Jeddah Ops" },
+      ]}
+    />
+  );
+
+  const combobox = screen.getByRole("combobox");
+  expect(combobox).toHaveTextContent("Riyadh Ops");
+  expect(combobox).not.toHaveTextContent("tenant-1");
+
+  fireEvent.click(combobox);
+  fireEvent.pointerDown(screen.getByRole("option", { name: "Jeddah Ops" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  expect(defaultProps.onSave).toHaveBeenCalledWith("organization_id", "tenant-2");
 });

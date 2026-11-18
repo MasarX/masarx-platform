@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const ts = require('typescript');
 
 describe('run-load-test config', () => {
   test('supports docker timeout env overrides', () => {
@@ -66,4 +67,34 @@ describe('run-load-test config', () => {
     }
     expect(body).toMatch('DAY1_LABEL_FAILURE_LOG_LIMIT');
   });
+});
+
+test('includes a timeout on each load runner subprocess', () => {
+  const file = path.join(__dirname, '..', '..', 'scripts', 'qa', 'run-load-test.js');
+  const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const calls = [];
+
+  function visit(node) {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === 'spawnSync') {
+      calls.push(node);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(source);
+  expect(calls.length).toBeGreaterThan(0);
+  for (const call of calls) {
+    const options = call.arguments[2];
+    expect(options && ts.isObjectLiteralExpression(options) &&
+      options.properties.some((property) => property.name?.getText(source) === 'timeout')).toBe(true);
+  }
+});
+
+test('places help ahead of environment loading and dependency probes', () => {
+  const file = path.join(__dirname, '..', '..', 'scripts', 'qa', 'run-load-test.js');
+  const body = fs.readFileSync(file, 'utf8');
+  const help = body.indexOf("args.includes('--help')");
+  expect(help).toBeGreaterThan(-1);
+  expect(help).toBeLessThan(body.indexOf("require('dotenv')"));
+  expect(help).toBeLessThan(body.indexOf("spawnSync('docker'"));
 });

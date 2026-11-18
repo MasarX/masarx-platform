@@ -25,6 +25,7 @@ export type WorkflowRunProvenance = {
   workflowRunId: string | null;
   correlationId: string | null;
   triggerSource: string | null;
+  triggerType: string | null;
   requestedBy: string | null;
   requestContextId: string | null;
   idempotencyKey: string | null;
@@ -71,6 +72,7 @@ export function extractWorkflowRunProvenance(
       workflowRunId,
       correlationId,
       triggerSource: null,
+      triggerType: null,
       requestedBy: null,
       requestContextId: null,
       idempotencyKey: null,
@@ -92,6 +94,7 @@ export function extractWorkflowRunProvenance(
     workflowRunId,
     correlationId,
     triggerSource: getString(context, "trigger_source"),
+    triggerType: getString(context, "trigger_type"),
     requestedBy: getString(context, "requested_by"),
     requestContextId: getString(context, "request_context_id"),
     idempotencyKey: getString(context, "idempotency_key"),

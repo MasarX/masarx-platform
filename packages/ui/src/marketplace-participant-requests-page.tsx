@@ -1,3 +1,4 @@
+import { normalizeReviewDecisionOptions } from "./review-decision-options";
 import "server-only";
 
 import { createUiServerClient } from "@masarx/api/server";
@@ -98,6 +99,10 @@ export async function MarketplaceParticipantRequestsPage({
   description,
 }: MarketplaceParticipantRequestsPageProps) {
   const ui = createUiServerClient();
+  const reviewDecisionOptions = normalizeReviewDecisionOptions(
+    await (ui.listLookupValues?.("marketplace_participant_request_review_decision") ?? Promise.resolve([])).catch(() => []),
+    ["approved", "rejected", "request_additional_docs"],
+  );
   let me: UiMe | null = null;
   let meError: string | null = null;
 
@@ -319,6 +324,7 @@ export async function MarketplaceParticipantRequestsPage({
             <Section title="Apply review" collapsible={false}>
               {canReview ? (
                 <MarketplaceParticipantReviewForm
+                  decisionOptions={reviewDecisionOptions}
                   action={submitReview}
                   requestId={detailId}
                   participantTypeKey={participantTypeKey}

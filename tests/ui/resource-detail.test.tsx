@@ -189,6 +189,65 @@ test("resource detail formats UUID literals in non-id fields as readable referen
   expect(screen.getByText("REF-E5E9E25C")).toBeInTheDocument();
 });
 
+test("resource detail humanizes lookup-like machine keys without exposing raw values", () => {
+  renderDetail(
+    <ResourceDetail
+      title="Return detail"
+      data={{
+        next_action: "sender_return",
+        allowed_ndr_actions: ["sender_return", "rto_handoff"],
+        shipment_id: "e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c",
+      }}
+      columns={[
+        { key: "next_action", label: "Next action" },
+        { key: "allowed_ndr_actions", label: "Allowed actions" },
+        { key: "shipment_id", label: "Shipment" },
+      ]}
+    />
+  );
+
+  expect(screen.getByText("Sender Return")).toBeInTheDocument();
+  expect(screen.getByText("Sender Return, RTO Handoff")).toBeInTheDocument();
+  expect(screen.queryByText("sender_return")).not.toBeInTheDocument();
+  expect(screen.getByText("REF-E5E9E25C")).toBeInTheDocument();
+});
+
+test("resource detail does not expose raw UUIDs through field title text", () => {
+  renderDetail(
+    <ResourceDetail
+      title="Settlement detail"
+      data={{
+        subject_id: "e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c",
+      }}
+      columns={[{ key: "subject_id", label: "Contract" }]}
+    />
+  );
+
+  const value = screen.getByText("REF-E5E9E25C");
+  expect(value.closest("dd")).not.toHaveAttribute(
+    "title",
+    "e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c",
+  );
+  expect(screen.queryByText("e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c")).not.toBeInTheDocument();
+});
+
+test("resource detail formats nested UUIDs inside metadata payloads", () => {
+  renderDetail(
+    <ResourceDetail
+      title="Settlement detail"
+      data={{
+        metadata: {
+          marketplace_contract_id: "e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c",
+        },
+      }}
+      columns={[{ key: "metadata", label: "Metadata" }]}
+    />
+  );
+
+  expect(screen.getByText(/REF-E5E9E25C/)).toBeInTheDocument();
+  expect(screen.queryByText(/e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c/)).not.toBeInTheDocument();
+});
+
 test("resource detail shows internal hints for UUID literals when enabled", () => {
   renderDetail(
     <ResourceDetail

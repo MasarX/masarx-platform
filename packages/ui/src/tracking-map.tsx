@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { Map as MapLibreMap } from "maplibre-gl";
+import type { Map as MapLibreMap, Popup as MapLibrePopup } from "maplibre-gl";
 import type { TrackingMapConfiguration } from "./tracking-map-policy";
 
 // Web Mercator's finite square-world latitude boundary. MapLibre clamps beyond
@@ -42,6 +42,8 @@ function TrackingMapScene({ pins, policy, labels }: TrackingMapProps & {
 }) {
   const container = React.useRef<HTMLDivElement>(null);
   const snapshot = React.useRef({ pins, policy }).current;
+  const togglePin = React.useRef<((pin: TrackingMapPin) => void) | null>(null);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [state, setState] = React.useState<"loading" | "ready" | "error">("loading");
   type Stage = "module" | "map" | "waiting-load" | "source" | "camera" | "waiting-idle";
   type Readiness = { loaded: boolean | null; style: boolean | null; tiles: boolean | null;
@@ -54,11 +56,20 @@ function TrackingMapScene({ pins, policy, labels }: TrackingMapProps & {
     let stage: Stage = "module";
     let instance: MapLibreMap | undefined;
     let observer: ResizeObserver | undefined;
+    let popup: MapLibrePopup | undefined;
+    let popupPinId: string | undefined;
     const counts = { render: 0, idle: 0, sourcedata: 0, resize: 0 };
     const readBoolean = (read: () => unknown): boolean | null => {
       try { const value = read(); return typeof value === "boolean" ? value : null; } catch { return null; }
     };
+    const removePopup = () => {
+      popup?.remove();
+      popup = undefined;
+      popupPinId = undefined;
+    };
     const disposeMap = () => {
+      togglePin.current = null;
+      removePopup();
       observer?.disconnect();
       observer = undefined;
       const old = instance;
@@ -76,6 +87,7 @@ function TrackingMapScene({ pins, policy, labels }: TrackingMapProps & {
         pins: readBoolean(() => instance?.getSource("tracking-pins") ? instance.isSourceLoaded("tracking-pins") : undefined),
         moving: readBoolean(() => instance?.isMoving()), ...counts,
       } : undefined;
+      setSelectedId(null);
       setDiagnostic({ stage, cause, readiness });
       clearTimeout(timer);
       disposeMap();
@@ -116,6 +128,33 @@ function TrackingMapScene({ pins, policy, labels }: TrackingMapProps & {
             map.addLayer({ id: "tracking-points", type: "circle", source: "tracking-pins",
               paint: { "circle-radius": 7, "circle-color": "#2563eb",
                 "circle-stroke-width": 2, "circle-stroke-color": "#ffffff" } });
+            togglePin.current = (pin) => {
+              if (disposed || failed || !map.loaded()) return;
+              const wasSelected = popupPinId === pin.id;
+              removePopup();
+              if (wasSelected) {
+                setSelectedId(null);
+                return;
+              }
+              const content = document.createElement("div");
+              const label = document.createElement("strong");
+              label.textContent = pin.label || pin.latitude + ", " + pin.longitude;
+              content.append(label);
+              if (pin.status) {
+                const status = document.createElement("div");
+                status.textContent = pin.status;
+                content.append(status);
+              }
+              popup = new maplibre.Popup({ closeButton: false, closeOnClick: false, focusAfterOpen: false })
+                .setLngLat([pin.longitude, pin.latitude]).setDOMContent(content).addTo(map);
+              popupPinId = pin.id;
+              setSelectedId(pin.id);
+            };
+            map.on("click", "tracking-points", (event) => {
+              const id = event.features?.[0]?.id;
+              const pin = pins.find((entry) => entry.id === id);
+              if (pin) togglePin.current?.(pin);
+            });
             map.on("idle", () => {
               if (!disposed && !failed && map.loaded()) {
                 clearTimeout(timer);
@@ -156,9 +195,16 @@ function TrackingMapScene({ pins, policy, labels }: TrackingMapProps & {
     <div ref={container} aria-hidden="true" style={{ width: "100%", height: "24rem" }} />
     <a href={policy.attributionUrl} rel="noreferrer">{policy.attributionLabel}</a>
     <ul>{pins.map(pin => <li key={pin.id}>
-      {pin.label ? <span>{pin.label} </span> : null}
-      <span>{pin.latitude}, {pin.longitude}</span>
-      {pin.status ? <span> — {pin.status}</span> : null}
+      <button type="button" className="text-start" disabled={state !== "ready"}
+        aria-pressed={selectedId === pin.id}
+        onClick={() => togglePin.current?.(pin)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && selectedId === pin.id) togglePin.current?.(pin);
+        }}>
+        {pin.label ? <span>{pin.label} </span> : null}
+        <span>{pin.latitude}, {pin.longitude}</span>
+        {pin.status ? <span> — {pin.status}</span> : null}
+      </button>
     </li>)}</ul>
   </figure>;
 }

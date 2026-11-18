@@ -319,7 +319,7 @@ export function AuthSignIn({
         <Form form={form} onSubmit={handleSubmit} className="space-y-4">
           {resolvedMethods.length > 1 ? (
             <div className="space-y-2 text-sm text-ui-ink">
-              <div className="text-xs uppercase tracking-wide text-ui-muted">
+              <div className="text-xs tracking-wide text-ui-muted">
                 {t("methodLabel")}
               </div>
               <RadioGroup className="flex flex-wrap gap-3">
@@ -343,7 +343,7 @@ export function AuthSignIn({
           <FormField
             name="email"
             label={t("emailLabel")}
-            labelClassName="text-xs uppercase tracking-wide text-ui-muted"
+            labelClassName="text-xs tracking-wide text-ui-muted"
             render={({ field, fieldId, describedBy, invalid }) => (
               <Input
                 id={fieldId}
@@ -360,7 +360,7 @@ export function AuthSignIn({
             <FormField
               name="password"
               label={t("passwordLabel")}
-              labelClassName="text-xs uppercase tracking-wide text-ui-muted"
+              labelClassName="text-xs tracking-wide text-ui-muted"
               render={({ field, fieldId, describedBy, invalid }) => (
                 <Input
                   id={fieldId}

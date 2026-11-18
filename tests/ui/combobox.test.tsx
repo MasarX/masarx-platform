@@ -71,4 +71,35 @@ describe("Combobox", () => {
     expect(screen.getByRole("combobox")).toHaveTextContent("Alpha option");
     expect(screen.queryByRole("searchbox", { name: "Search options" })).not.toBeInTheDocument();
   });
+  test("supports hidden search text while keeping the selected label user-facing", () => {
+    function Harness() {
+      const [value, setValue] = React.useState("");
+      return (
+        <Combobox
+          mode="single"
+          options={[
+            {
+              value: "client-1",
+              label: "Example Client | EXAMPLE",
+              searchText: "Example Client | EXAMPLE | client-1",
+            },
+          ]}
+          value={value}
+          onChange={(nextValue) => setValue(String(nextValue ?? ""))}
+          placeholder="Pick one"
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search options" }), {
+      target: { value: "client-1" },
+    });
+    fireEvent.pointerDown(screen.getByRole("option", { name: "Example Client | EXAMPLE" }));
+
+    expect(screen.getByRole("combobox")).toHaveTextContent("Example Client | EXAMPLE");
+    expect(screen.getByRole("combobox")).not.toHaveTextContent("client-1");
+  });
 });

@@ -11,7 +11,7 @@ export default withConsoleConfig<PageProps>(
       appBasePath={appBasePath}
       appKey={appKey}
       searchParams={searchParams}
-      sectionId="operations"
+      sectionId="exceptions"
       resourceSelector="exceptions"
       workspacePathSegment="exceptions"
       i18nNamespace="ui.exceptionInbox"

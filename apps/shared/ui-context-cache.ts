@@ -23,8 +23,11 @@ const resolveNumberEnv = (value: string | undefined, fallback: number) => {
   return parsed;
 };
 
-const resolveTtlMs = () =>
-  Math.max(0, resolveNumberEnv(process.env.MASARX_UI_CONTEXT_CACHE_TTL_MS, DEFAULT_TTL_MS));
+const resolveTtlMs = () => {
+  const ttl = process.env.MASARX_UI_CONTEXT_CACHE_TTL_MS;
+  const fallback = process.env.NODE_ENV === "production" ? DEFAULT_TTL_MS : 0;
+  return Math.max(0, resolveNumberEnv(ttl?.trim(), fallback));
+};
 
 const resolveStaleIfErrorMs = () =>
   Math.max(

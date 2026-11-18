@@ -1,6 +1,11 @@
 "use client";
 
 import * as React from "react";
+import {
+  WorkflowTriggerContextPatchControls,
+  parseWorkflowTriggerContextPatch,
+  useWorkflowTriggerContextLookups,
+} from "./workflow-trigger-context-patch-controls";
 import { useQueryClient } from "@tanstack/react-query";
 import { createUiClient } from "@masarx/api";
 import { Button } from "./button";
@@ -285,31 +290,10 @@ export function WorkflowScheduleTriggersPanel({
     [safeBasePath]
   );
 
-  const contextPatchState = React.useMemo(() => {
-    const trimmed = editor.contextPatchText.trim();
-    try {
-      const parsed = JSON.parse(trimmed || "{}") as unknown;
-      const normalized = normalizeObject(parsed);
-      if (!normalized) {
-        return {
-          value: null,
-          error: t("triggers.schedules.toast.invalidContextPatch"),
-          formatted: null,
-        };
-      }
-      return {
-        value: normalized,
-        error: null,
-        formatted: JSON.stringify(normalized, null, 2),
-      };
-    } catch {
-      return {
-        value: null,
-        error: t("triggers.schedules.toast.invalidContextPatch"),
-        formatted: null,
-      };
-    }
-  }, [editor.contextPatchText, t]);
+  const lookupOptions = useWorkflowTriggerContextLookups(canWrite && editor.open);
+  const contextPatchState = parseWorkflowTriggerContextPatch(
+    editor.contextPatchText, t("triggers.schedules.toast.invalidContextPatch")
+  );
 
   const schedulePreview = React.useMemo(() => {
     const timezone = editor.timezone.trim() || resolveTimeZone();
@@ -873,58 +857,21 @@ export function WorkflowScheduleTriggersPanel({
               />
             </div>
 
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-ui-muted">
-                {t("triggers.schedules.fields.contextPatch")}
-              </label>
-              <textarea
-                className="min-h-[120px] w-full rounded-xl border border-ui-border bg-ui-surface px-3 py-2 font-mono text-xs text-ui-ink shadow-soft focus:outline-none focus:ring-2 focus:ring-ui-border"
-                value={editor.contextPatchText}
-                onChange={(event) =>
-                  setEditor((current) => ({ ...current, contextPatchText: event.target.value }))
-                }
-                placeholder="{}"
-                disabled={editor.pending}
-                data-testid={
-                  resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-context-patch` : undefined
-                }
-              />
-              {contextPatchState.error ? (
-                <p className="text-xs text-ui-danger">{contextPatchState.error}</p>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    if (!contextPatchState.formatted) return;
-                    setEditor((current) => ({ ...current, contextPatchText: contextPatchState.formatted ?? "{}" }));
-                  }}
-                  disabled={editor.pending || !contextPatchState.formatted}
-                  data-testid={
-                    resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-format-json` : undefined
-                  }
-                >
-                  {t("steps.builder.editor.metadata.actions.format")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setEditor((current) => ({ ...current, contextPatchText: "{}" }))}
-                  disabled={editor.pending}
-                  data-testid={
-                    resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-reset-json` : undefined
-                  }
-                >
-                  {t("steps.builder.editor.metadata.actions.reset")}
-                </Button>
-              </div>
-              <p className="text-xs text-ui-muted/70">
-                {t("triggers.schedules.fields.contextPatchHint")}
-              </p>
-            </div>
+            <WorkflowTriggerContextPatchControls
+              value={editor.contextPatchText}
+              onChange={(contextPatchText) => setEditor((current) => ({ ...current, contextPatchText }))}
+              lookupOptions={lookupOptions}
+              disabled={editor.pending}
+              label={t("triggers.schedules.fields.contextPatch")}
+              hint={t("triggers.schedules.fields.contextPatchHint")}
+              invalidContextPatchMessage={t("triggers.schedules.toast.invalidContextPatch")}
+              formatLabel={t("steps.builder.editor.metadata.actions.format")}
+              resetLabel={t("steps.builder.editor.metadata.actions.reset")}
+              lookupTestId={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-context-lookups` : undefined}
+              textareaTestId={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-context-patch` : undefined}
+              formatTestId={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-format-json` : undefined}
+              resetTestId={resolvedTestIdPrefix ? `${resolvedTestIdPrefix}-editor-reset-json` : undefined}
+            />
           </div>
 
           <ModalFooter>
@@ -1193,7 +1140,7 @@ export function WorkflowScheduleTriggersPanel({
         schedule = { type: "interval", interval_seconds: seconds, timezone };
       }
 
-      const contextPatch = normalizeObject(JSON.parse(editor.contextPatchText.trim() || "{}") as unknown);
+      const contextPatch = contextPatchState.value;
       if (!contextPatch) {
         throw new Error(t("triggers.schedules.toast.invalidContextPatch"));
       }
