@@ -27,7 +27,7 @@ SELECT columns_are(
     'response_headers', 'response_body', 'response_body_sample',
     'response_size_bytes', 'duration_ms', 'error_message', 'error_code',
     'circuit_breaker_state', 'timestamp', 'occurred_at',
-    'route_id', 'route_pack_id', 'source_id', 'source_label', 'source_org_id'
+    'route_id', 'route_pack_id', 'source_id', 'source_label', 'source_org_id', 'has_request_headers'
   ],
   'v_api_gateway_observability exposes canonical + derived FE-projection columns'
 );
