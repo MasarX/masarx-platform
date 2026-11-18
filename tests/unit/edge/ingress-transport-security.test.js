@@ -46,6 +46,16 @@ describe("public ingress transport security", () => {
     }]);
   });
 
+  test("webhook parse failures carry normalized tracing metadata", () => {
+    const requestTrace = webhookReceiverSource.indexOf(
+      "normalizedHeaders.traceparent = trace.traceparent;",
+    );
+    const parseBody = webhookReceiverSource.indexOf("await parseRequestBody(req)");
+    expect(requestTrace).toBeGreaterThan(-1);
+    expect(parseBody).toBeGreaterThan(requestTrace);
+    expect(webhookReceiverSource).toContain("redactIngressForwardedHeaders(normalizedHeaders)");
+  });
+
   test("shared CORS policy allows an exact configured hosted HTTPS origin", () => {
     const req = new Request("https://api.example.test/functions/v1/api-gateway", {
       method: "OPTIONS",
