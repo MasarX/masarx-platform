@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(9);
+SELECT plan(11);
 
 WITH cache_defs AS (
     SELECT
@@ -69,6 +69,18 @@ SELECT ok(
     'reverse dispatch serializes a selected coordinate pair and retains scoped provider selection'
 )
 FROM dispatch;
+
+SELECT ok(
+    pg_get_functiondef('workflow_handlers.execute_geo_local_lookup_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
+        LIKE '%''provider_name'', ''canonical_lookup'',%''formatted_address''%''geocode'', v_geocode%',
+    'canonical lookup writes its readable match label to the selected geocode and exact attempt'
+);
+
+SELECT ok(
+    pg_get_functiondef('workflow_handlers.execute_geo_coordinate_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
+        LIKE '%''provider_name'', ''reverse_local'',%''formatted_address''%''geocode'', v_selected_geocode%',
+    'reverse local lookup writes its readable match label to the selected geocode and exact attempt'
+);
 
 SELECT ok(
     pg_get_functiondef('workflow_handlers.execute_geo_decision_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
