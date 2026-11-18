@@ -62,9 +62,9 @@ BEGIN
       jsonb_build_object(
         'destination',
         jsonb_build_object(
-          'addressLine1', 'King Fahd Road',
+          'addressLine1', 'Synthetic Intake Lane',
           'city', 'Riyadh',
-          'coordinates', jsonb_build_object('lat', 24.7136)
+          'coordinates', jsonb_build_object('lat', 0.125)
         )
       )
     ),
@@ -73,7 +73,7 @@ BEGIN
 
   RETURN NEXT is(
     v_result #>> '{address,line1}',
-    'King Fahd Road',
+    'Synthetic Intake Lane',
     'apply_mapping_config resolves pipe-delimited fallback paths'
   );
   RETURN NEXT is(
@@ -83,7 +83,7 @@ BEGIN
   );
   RETURN NEXT is(
     v_result #>> '{address,lat}',
-    '24.7136',
+    '0.125',
     'apply_mapping_config resolves JSONPath transform values'
   );
 
@@ -103,12 +103,12 @@ BEGIN
         'payload',
         jsonb_build_object(
           'destination',
-          jsonb_build_object('shortNationalAddress', 'RRRD2929')
+          jsonb_build_object('shortNationalAddress', 'ZZQA0001')
         )
       ),
       '$.payload.destination.shortNationalAddress'
     ),
-    'RRRD2929',
+    'ZZQA0001',
     'resolve_path_text accepts JSONPath-style $. mapping paths'
   );
   RETURN NEXT ok(
@@ -173,10 +173,10 @@ BEGIN
       jsonb_build_object(
         'destination',
         jsonb_build_object(
-          'addressLine1', 'King Abdullah Road',
+          'addressLine1', 'Synthetic Gateway Lane',
           'city', 'Riyadh',
-          'shortNationalAddress', 'ryad7334',
-          'coordinates', jsonb_build_object('lat', 24.7254, 'lng', 46.7111)
+          'shortNationalAddress', 'zzqb0002',
+          'coordinates', jsonb_build_object('lat', 0.375, 'lng', -31.75)
         )
       )
     ),
@@ -198,12 +198,12 @@ BEGIN
   );
   RETURN NEXT is(
     (SELECT a.sa_short_code FROM public.addresses a WHERE a.id = v_api_gateway_address_id),
-    'RYAD7334',
+    'ZZQB0002',
     'api gateway materialization persists normalized Saudi short address'
   );
   RETURN NEXT ok(
-    (v_api_gateway_address #>> '{provided_coordinates,latitude}')::NUMERIC = 24.7254
-      AND (v_api_gateway_address #>> '{provided_coordinates,longitude}')::NUMERIC = 46.7111,
+    (v_api_gateway_address #>> '{provided_coordinates,latitude}')::NUMERIC = 0.375
+      AND (v_api_gateway_address #>> '{provided_coordinates,longitude}')::NUMERIC = -31.75,
     'api gateway materialization carries provided coordinate readback'
   );
 
@@ -238,10 +238,10 @@ BEGIN
       jsonb_build_object(
         'destination',
         jsonb_build_object(
-          'addressLine1', 'King Fahd Road',
+          'addressLine1', 'Synthetic Intake Lane',
           'city', 'Riyadh',
-          'shortNationalAddress', 'rrrd2929',
-          'coordinates', jsonb_build_object('lat', 24.7136, 'lng', 46.6753)
+          'shortNationalAddress', 'zzqa0001',
+          'coordinates', jsonb_build_object('lat', 0.125, 'lng', -31.25)
         )
       )
     ),
@@ -289,18 +289,18 @@ BEGIN
   );
   RETURN NEXT is(
     (SELECT a.sa_short_code FROM public.addresses a WHERE a.id = v_intake_address_id),
-    'RRRD2929',
+    'ZZQA0001',
     'execute_address_intake_v1 persists normalized Saudi short address on address row'
   );
   RETURN NEXT is(
     (SELECT (a.raw_input::jsonb)->>'sa_short_code' FROM public.addresses a WHERE a.id = v_intake_address_id),
-    'RRRD2929',
+    'ZZQA0001',
     'execute_address_intake_v1 preserves Saudi short address in raw input readback'
   );
   RETURN NEXT ok(
-    v_intake_response.context_patch #>> '{geocoding,short_code}' = 'RRRD2929'
-      AND (v_intake_response.context_patch #>> '{geocoding,provided_coordinates,latitude}')::NUMERIC = 24.7136
-      AND (v_intake_response.context_patch #>> '{geocoding,provided_coordinates,longitude}')::NUMERIC = 46.6753,
+    v_intake_response.context_patch #>> '{geocoding,short_code}' = 'ZZQA0001'
+      AND (v_intake_response.context_patch #>> '{geocoding,provided_coordinates,latitude}')::NUMERIC = 0.125
+      AND (v_intake_response.context_patch #>> '{geocoding,provided_coordinates,longitude}')::NUMERIC = -31.25,
     'execute_address_intake_v1 carries short address and coordinates into geocoding context'
   );
 
