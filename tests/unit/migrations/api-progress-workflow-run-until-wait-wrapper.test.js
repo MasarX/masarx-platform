@@ -12,6 +12,7 @@ describe("api progress workflow until-wait wrapper migration", () => {
 
   test("keeps browser clients on the api schema with fail-closed grants", () => {
     expect(sql).toMatch(/CREATE OR REPLACE FUNCTION api\.progress_workflow_run_until_wait_v1\(/);
+    expect(sql).toMatch(/p_operation_result\s+JSONB/i);
     expect(sql).toMatch(/SECURITY INVOKER/);
     expect(sql).toMatch(/SELECT public\.progress_workflow_run_until_wait_v1\(/);
     expect(sql).toMatch(/REVOKE ALL ON FUNCTION api\.progress_workflow_run_until_wait_v1[\s\S]+FROM anon/);

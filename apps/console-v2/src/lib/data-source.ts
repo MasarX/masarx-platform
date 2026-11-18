@@ -22408,7 +22408,7 @@ export async function progress_workflow_run_until_wait_v1(
     : { input: payload ?? {} };
   const live = await liveRpc<Record<string, unknown>>('progress_workflow_run_until_wait_v1', {
     p_workflow_run_id: runId,
-    p_input: livePayload,
+    p_operation_result: livePayload,
     p_budget_ms: opts.budget_ms ?? 5000,
     p_max_steps: opts.max_steps ?? 8,
   });

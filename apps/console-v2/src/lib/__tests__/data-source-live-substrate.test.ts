@@ -70,6 +70,24 @@ describe('data-source live backend substrate', () => {
     expect(result.page).toBe(2);
   });
 
+  it('sends workflow progress input using the API operation-result parameter', async () => {
+    const runId = '00000000-0000-4000-8000-000000000001';
+    mocks.rpc
+      .mockResolvedValueOnce({ data: { workflow_run_id: runId, workflow_status: 'completed' }, error: null })
+      .mockResolvedValueOnce({ data: { items: [], total: 0 }, error: null });
+
+    const ds = await import('../data-source');
+    await ds.progress_workflow_run_until_wait_v1(runId, { action: 'resume' }, { budget_ms: 3000, max_steps: 4 });
+
+    expect(mocks.schema).toHaveBeenCalledWith('api');
+    expect(mocks.rpc).toHaveBeenNthCalledWith(1, 'progress_workflow_run_until_wait_v1', {
+      p_workflow_run_id: runId,
+      p_operation_result: { action: 'resume' },
+      p_budget_ms: 3000,
+      p_max_steps: 4,
+    });
+  });
+
   it('keeps modify audit source outside shipment changes for amend/cancel RPCs', async () => {
     mocks.rpc
       .mockResolvedValueOnce({
