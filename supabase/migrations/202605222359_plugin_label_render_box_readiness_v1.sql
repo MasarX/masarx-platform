@@ -3,38 +3,11 @@
 
 BEGIN;
 
+-- The compose change is applied after the canonical caller-authority migration.
+
 SELECT pg_advisory_lock(hashtext('202605222359_plugin_label_render_box_readiness_v1'));
 SET search_path TO public, extensions, pg_temp;
 SET LOCAL lock_timeout = '30s';
-
-DO $compose_patch$
-DECLARE
-  v_def TEXT;
-  v_from TEXT := $from$  IF v_job.shipment_id IS NOT NULL THEN
-    SELECT to_jsonb(payload)
-$from$;
-  v_to TEXT := $to$  IF v_job.shipment_id IS NOT NULL THEN
-    PERFORM public.ensure_shipment_boxes(v_job.shipment_id);
-
-    SELECT to_jsonb(payload)
-$to$;
-BEGIN
-  SELECT pg_get_functiondef('public.compose_label_payload(uuid)'::regprocedure)
-    INTO v_def;
-
-  IF v_def IS NULL OR btrim(v_def) = '' THEN
-    RAISE EXCEPTION 'compose_label_payload(uuid) definition not found';
-  END IF;
-
-  IF position('ensure_shipment_boxes(v_job.shipment_id' IN v_def) = 0 THEN
-    IF position(v_from IN v_def) = 0 THEN
-      RAISE EXCEPTION 'compose_label_payload shipment payload marker not found';
-    END IF;
-    v_def := replace(v_def, v_from, v_to);
-    EXECUTE v_def;
-  END IF;
-END;
-$compose_patch$;
 
 DO $complete_patch$
 DECLARE
@@ -74,45 +47,6 @@ BEGIN
   END IF;
 END;
 $complete_patch$;
-
-DO $compose_multibox_guard_patch$
-DECLARE
-  v_def TEXT;
-  v_from TEXT := $from$    PERFORM public.ensure_shipment_boxes(v_job.shipment_id);
-
-    SELECT to_jsonb(payload)
-$from$;
-  v_to TEXT := $to$    PERFORM public.ensure_shipment_boxes(v_job.shipment_id);
-
-    IF COALESCE(v_job.shipment_box_id, v_job.target_box_id) IS NULL
-       AND (
-         SELECT COUNT(*)::int
-           FROM public.shipment_boxes sb
-          WHERE sb.shipment_id = v_job.shipment_id
-       ) > 1 THEN
-      RAISE EXCEPTION 'Shipment label job % requires shipment_box_id for multi-box shipment %',
-        p_job_id, v_job.shipment_id;
-    END IF;
-
-    SELECT to_jsonb(payload)
-$to$;
-BEGIN
-  SELECT pg_get_functiondef('public.compose_label_payload(uuid)'::regprocedure)
-    INTO v_def;
-
-  IF v_def IS NULL OR btrim(v_def) = '' THEN
-    RAISE EXCEPTION 'compose_label_payload(uuid) definition not found';
-  END IF;
-
-  IF position('requires shipment_box_id for multi-box shipment' IN v_def) = 0 THEN
-    IF position(v_from IN v_def) = 0 THEN
-      RAISE EXCEPTION 'compose_label_payload multi-box guard marker not found';
-    END IF;
-    v_def := replace(v_def, v_from, v_to);
-    EXECUTE v_def;
-  END IF;
-END;
-$compose_multibox_guard_patch$;
 
 DO $complete_multibox_guard_patch$
 DECLARE
@@ -199,9 +133,6 @@ BEGIN
   END IF;
 END;
 $public_complete_multibox_guard_patch$;
-
-COMMENT ON FUNCTION public.compose_label_payload(UUID)
-  IS 'Composes label render payloads with row-driven render/print policy enrichment and ensures shipment-backed jobs have canonical shipment_boxes before renderer readback.';
 
 COMMENT ON FUNCTION public.complete_label_job(UUID, TEXT, TEXT, INTEGER, JSONB, TEXT)
   IS 'Completes label render jobs and materializes shipment label rows with canonical one-box shipment box readiness while failing closed for multi-box shipment jobs missing explicit shipment_box_id.';

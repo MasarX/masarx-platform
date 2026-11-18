@@ -1,23 +1,21 @@
--- Migration: restore target-neutral label artifact reprint lifecycle
--- Purpose:
---   - Keep request_label_reprint usable for route/container/transfer label_artifacts.
---   - Preserve current operator reason, workflow-wrapper lineage, and shipment label version behavior.
+-- Keep target-neutral reprints separate from the canonical shipment reprint path.
 
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.request_label_reprint(
+CREATE FUNCTION public.request_label_artifact_reprint_v1(
     p_label_id UUID,
     p_reprint_reason TEXT,
-    p_actor_id UUID DEFAULT NULL::uuid,
-    p_requested_source TEXT DEFAULT 'reprint'::text
+    p_actor_id UUID,
+    p_requested_source TEXT,
+    p_is_privileged BOOLEAN
 )
 RETURNS UUID
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path TO public, extensions, pg_temp
 AS $function$
 DECLARE
-    v_label RECORD;
+    v_label public.label_artifacts%ROWTYPE;
     v_template_snapshot JSONB;
     v_template_version INTEGER;
     v_template_id UUID;
@@ -29,65 +27,22 @@ DECLARE
     v_workflow_run_step_id UUID;
     v_created_wrapper BOOLEAN := FALSE;
     v_reprint_reason TEXT := NULLIF(btrim(COALESCE(p_reprint_reason, '')), '');
-    v_source_label_version_id UUID := NULL;
-    v_source_label_version_number INTEGER := NULL;
     v_source_job public.label_jobs%ROWTYPE;
-    v_is_artifact BOOLEAN := FALSE;
-    v_claim_role TEXT := lower(NULLIF(btrim(COALESCE(current_setting('request.jwt.claim.role', true), '')), ''));
-    v_effective_role TEXT := COALESCE(v_claim_role, lower(current_user));
 BEGIN
-    SELECT
-        l.id,
-        s.organization_id,
-        s.client_id,
-        s.sender_id,
-        l.shipment_id,
-        sb.id AS matched_box_id,
-        NULL::text AS target_type,
-        NULL::uuid AS target_id,
-        NULL::uuid AS target_box_id,
-        l.label_type,
-        l.layout_template_id,
-        l.metadata,
-        NULL::uuid AS source_label_job_id
-    INTO v_label
-    FROM public.labels l
-    JOIN public.shipments s ON s.id = l.shipment_id
-    LEFT JOIN public.shipment_boxes sb ON sb.barcode = l.barcode
-    WHERE l.id = p_label_id;
-
-    IF NOT FOUND THEN
-        SELECT
-            la.id,
-            la.organization_id,
-            la.client_id,
-            NULL::uuid AS sender_id,
-            NULL::uuid AS shipment_id,
-            NULL::uuid AS matched_box_id,
-            la.target_type,
-            la.target_id,
-            la.target_box_id,
-            la.label_type,
-            la.layout_template_id,
-            la.metadata,
-            la.source_label_job_id
-        INTO v_label
-        FROM public.label_artifacts la
-        WHERE la.id = p_label_id;
-        v_is_artifact := FOUND;
-    END IF;
+    SELECT * INTO v_label
+    FROM public.label_artifacts
+    WHERE id = p_label_id;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Label % not found', p_label_id;
     END IF;
 
-    IF v_effective_role NOT IN ('service_role', 'postgres', 'supabase_admin', 'edge_label_renderer_role') THEN
-        IF current_user_org_id() IS NULL OR current_user_org_id() <> v_label.organization_id THEN
-            RAISE EXCEPTION 'Access denied for label %', p_label_id;
-        END IF;
+    IF p_is_privileged IS NOT TRUE
+       AND public.current_user_org_id() IS DISTINCT FROM v_label.organization_id THEN
+        RAISE EXCEPTION 'Access denied for label %', p_label_id;
     END IF;
 
-    IF v_is_artifact AND v_label.source_label_job_id IS NOT NULL THEN
+    IF v_label.source_label_job_id IS NOT NULL THEN
         SELECT *
         INTO v_source_job
         FROM public.label_jobs
@@ -104,12 +59,6 @@ BEGIN
         v_retry := COALESCE(v_source_job.retry_state, '[]'::jsonb);
         v_max_attempts := v_source_job.max_attempts;
     ELSE
-        IF NOT v_is_artifact THEN
-            SELECT label_version_id, version_number
-            INTO v_source_label_version_id, v_source_label_version_number
-            FROM public.ensure_label_active_version_v1(v_label.id, v_label.shipment_id);
-        END IF;
-
         v_template_snapshot := COALESCE(v_label.metadata -> 'template', '{}'::jsonb);
 
         IF jsonb_typeof(v_template_snapshot) IS DISTINCT FROM 'object'
@@ -128,7 +77,7 @@ BEGIN
             FROM public.resolve_label_template(
                 v_label.organization_id,
                 v_label.client_id,
-                v_label.sender_id,
+                NULL::uuid,
                 v_label.label_type
             ) AS rt
             LIMIT 1;
@@ -147,19 +96,14 @@ BEGIN
     v_context := jsonb_strip_nulls(jsonb_build_object(
         'organization_id', v_label.organization_id,
         'client_id', v_label.client_id,
-        'sender_id', v_label.sender_id,
-        'shipment_id', v_label.shipment_id,
-        'shipment_box_id', v_label.matched_box_id,
-        'label_id', CASE WHEN v_is_artifact THEN NULL ELSE p_label_id END,
-        'label_artifact_id', CASE WHEN v_is_artifact THEN p_label_id ELSE NULL END,
+        'label_artifact_id', p_label_id,
         'target_type', v_label.target_type,
         'target_id', v_label.target_id,
         'target_box_id', v_label.target_box_id,
         'label_type', v_label.label_type,
         'job_purpose', 'reprint',
         'requested_source', p_requested_source,
-        'source_label_version_id', v_source_label_version_id,
-        'source_label_job_id', CASE WHEN v_is_artifact THEN v_label.source_label_job_id ELSE NULL END
+        'source_label_job_id', v_label.source_label_job_id
     ));
 
     SELECT workflow_run_id, workflow_run_step_id, created_wrapper
@@ -170,13 +114,10 @@ BEGIN
     INSERT INTO public.label_jobs (
         organization_id,
         client_id,
-        shipment_id,
-        shipment_box_id,
         target_type,
         target_id,
         target_box_id,
         target_metadata,
-        label_id,
         label_type,
         template_id,
         template_version,
@@ -190,7 +131,6 @@ BEGIN
         requested_by,
         requested_source,
         reprint_reason,
-        source_label_version_id,
         renderer_hint,
         retry_state,
         workflow_run_step_id
@@ -198,20 +138,14 @@ BEGIN
     VALUES (
         v_label.organization_id,
         COALESCE(v_label.client_id, v_source_job.client_id),
-        CASE WHEN v_is_artifact THEN NULL ELSE v_label.shipment_id END,
-        CASE WHEN v_is_artifact THEN NULL ELSE v_label.matched_box_id END,
-        CASE WHEN v_is_artifact THEN v_label.target_type ELSE NULL END,
-        CASE WHEN v_is_artifact THEN v_label.target_id ELSE NULL END,
-        CASE WHEN v_is_artifact THEN v_label.target_box_id ELSE NULL END,
-        CASE
-            WHEN v_is_artifact THEN jsonb_strip_nulls(COALESCE(v_label.metadata, '{}'::jsonb) || jsonb_build_object(
-                'source_label_artifact_id', p_label_id,
-                'source_label_job_id', v_label.source_label_job_id,
-                'reprint_reason', v_reprint_reason
-            ))
-            ELSE '{}'::jsonb
-        END,
-        CASE WHEN v_is_artifact THEN NULL ELSE p_label_id END,
+        v_label.target_type,
+        v_label.target_id,
+        v_label.target_box_id,
+        jsonb_strip_nulls(COALESCE(v_label.metadata, '{}'::jsonb) || jsonb_build_object(
+            'source_label_artifact_id', p_label_id,
+            'source_label_job_id', v_label.source_label_job_id,
+            'reprint_reason', v_reprint_reason
+        )),
         v_label.label_type,
         v_template_id,
         COALESCE(v_template_version, 1),
@@ -225,7 +159,6 @@ BEGIN
         p_actor_id,
         p_requested_source,
         v_reprint_reason,
-        v_source_label_version_id,
         v_template_snapshot -> 'label_config' ->> 'provider_hint',
         COALESCE(v_retry, '[]'::jsonb),
         v_workflow_run_step_id
@@ -238,8 +171,7 @@ BEGIN
             'label_job_id', v_job_id,
             'label_type', v_label.label_type,
             'job_purpose', 'reprint',
-            'source_label_version_id', v_source_label_version_id,
-            'source_label_artifact_id', CASE WHEN v_is_artifact THEN p_label_id ELSE NULL END
+            'source_label_artifact_id', p_label_id
           )),
           updated_at = now()
       WHERE id = v_workflow_run_step_id;
@@ -248,7 +180,7 @@ BEGIN
       SET context = jsonb_strip_nulls(COALESCE(context, '{}'::jsonb) || jsonb_build_object(
             'label_job_id', v_job_id,
             'label_job_status', 'pending',
-            'source_label_artifact_id', CASE WHEN v_is_artifact THEN p_label_id ELSE NULL END
+            'source_label_artifact_id', p_label_id
           )),
           updated_at = now()
       WHERE id = v_workflow_run_id;
@@ -264,15 +196,12 @@ BEGIN
         p_performed_by_system := 'workflow_engine',
         p_correlation_id := NULL,
         p_decision_inputs := jsonb_strip_nulls(jsonb_build_object(
-            'label_id', CASE WHEN v_is_artifact THEN NULL ELSE p_label_id END,
-            'label_artifact_id', CASE WHEN v_is_artifact THEN p_label_id ELSE NULL END,
+            'label_artifact_id', p_label_id,
             'label_type', v_label.label_type,
             'template_id', v_template_id,
             'template_version', v_template_version,
             'requested_source', p_requested_source,
-            'source_label_version_id', v_source_label_version_id,
-            'source_label_version_number', v_source_label_version_number,
-            'source_label_job_id', CASE WHEN v_is_artifact THEN v_label.source_label_job_id ELSE NULL END,
+            'source_label_job_id', v_label.source_label_job_id,
             'target_type', v_label.target_type,
             'target_id', v_label.target_id,
             'target_box_id', v_label.target_box_id
@@ -284,7 +213,7 @@ BEGIN
 END;
 $function$;
 
-COMMENT ON FUNCTION public.request_label_reprint(UUID, TEXT, UUID, TEXT)
-    IS 'Queue a reprint job for shipment labels or target-neutral label_artifacts, capture an operator reason, and preserve source version/artifact lineage at enqueue time.';
+REVOKE ALL ON FUNCTION public.request_label_artifact_reprint_v1(UUID, TEXT, UUID, TEXT, BOOLEAN)
+    FROM PUBLIC, anon, authenticated, service_role;
 
 COMMIT;

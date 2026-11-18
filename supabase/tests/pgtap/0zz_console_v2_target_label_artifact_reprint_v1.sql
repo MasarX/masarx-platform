@@ -4,9 +4,10 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET search_path TO public, extensions, pgtap, pg_temp;
 
-SELECT plan(8);
+SELECT plan(10);
 
-DO $$
+CREATE FUNCTION pg_temp.check_target_label_artifact_reprint()
+RETURNS SETOF TEXT LANGUAGE plpgsql AS $$
 DECLARE
   v_org UUID := '98000000-0000-4000-8000-00000000aa01'::uuid;
   v_branch UUID := '98000000-0000-4000-8000-00000000aa02'::uuid;
@@ -139,12 +140,23 @@ BEGIN
   )
   ON CONFLICT DO NOTHING;
 
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+  RETURN NEXT throws_ok(
+    format('SELECT api.request_label_reprint(%L::uuid, %L)', v_artifact, v_reason),
+    'P0001',
+    format('Access denied for label %s', v_artifact),
+    'artifact reprint rejects an unscoped JWT even with a service-role scalar claim'
+  );
+  PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claims', '{}', true);
+
   SELECT request_label_reprint(v_artifact, v_reason, NULL, 'console-v2')
   INTO v_reprint_job;
 
-  PERFORM ok(v_reprint_job IS NOT NULL, 'request_label_reprint returns a job id for label_artifacts');
+  RETURN NEXT ok(v_reprint_job IS NOT NULL, 'request_label_reprint returns a job id for label_artifacts');
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM label_jobs
@@ -179,9 +191,9 @@ BEGIN
   WHERE source_label_job_id = v_reprint_job
     AND organization_id = v_org;
 
-  PERFORM ok(v_completed_artifact IS NOT NULL, 'complete_label_job persists reprint output as a new label_artifact');
+  RETURN NEXT ok(v_completed_artifact IS NOT NULL, 'complete_label_job persists reprint output as a new label_artifact');
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM label_artifacts
@@ -194,7 +206,7 @@ BEGIN
     'reprinted artifact keeps target lineage and reason metadata'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM label_jobs
@@ -206,7 +218,7 @@ BEGIN
     'reprint job readback points to the completed target-neutral artifact'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM decision_log
@@ -219,6 +231,8 @@ BEGIN
   );
 END $$;
 
+SELECT * FROM pg_temp.check_target_label_artifact_reprint();
+
 SELECT has_function(
   'api',
   'request_label_reprint',
@@ -229,6 +243,13 @@ SELECT has_function(
 SELECT ok(
   has_function_privilege('authenticated', 'api.request_label_reprint(uuid,text,uuid,text)', 'EXECUTE'),
   'authenticated can execute api.request_label_reprint'
+);
+
+SELECT ok(
+  NOT has_function_privilege('authenticated', 'public.request_label_artifact_reprint_v1(uuid,text,uuid,text,boolean)', 'EXECUTE')
+  AND NOT has_function_privilege('anon', 'public.request_label_artifact_reprint_v1(uuid,text,uuid,text,boolean)', 'EXECUTE')
+  AND NOT has_function_privilege('service_role', 'public.request_label_artifact_reprint_v1(uuid,text,uuid,text,boolean)', 'EXECUTE'),
+  'artifact reprint helper can only receive authority from the canonical entry point'
 );
 
 SELECT * FROM finish();

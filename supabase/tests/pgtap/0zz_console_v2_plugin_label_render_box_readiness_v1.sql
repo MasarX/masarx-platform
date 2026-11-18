@@ -4,7 +4,8 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(11);
 
-DO $$
+CREATE FUNCTION pg_temp.check_plugin_label_render_box_readiness()
+RETURNS SETOF TEXT LANGUAGE plpgsql AS $$
 DECLARE
   v_org UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
@@ -168,7 +169,7 @@ BEGIN
       '{}'::jsonb
     );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT count(*)::int FROM public.shipment_boxes WHERE shipment_id = v_shipment),
     0,
     'plugin-style shipment starts without materialized shipment box rows'
@@ -182,25 +183,25 @@ BEGIN
    WHERE sb.shipment_id = v_shipment
    LIMIT 1;
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT count(*)::int FROM public.shipment_boxes WHERE shipment_id = v_shipment),
     1,
     'compose_label_payload materializes the one-box shipment before rendering'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     v_payload #>> '{payload,barcode}',
     'PGPLUGINBOX001:1',
     'compose_label_payload resolves renderer barcode from canonical shipment box'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     NULLIF(v_payload #>> '{payload,shipment_box_id}', '')::uuid,
     v_box_id,
     'compose_label_payload includes the canonical shipment_box_id in renderer payload'
   );
 
-  PERFORM lives_ok(
+  RETURN NEXT lives_ok(
     format(
       'SELECT public.complete_label_job(%L::uuid, %L, %L, %s, %L::jsonb, NULL)',
       v_job,
@@ -212,13 +213,13 @@ BEGIN
     'complete_label_job succeeds for plugin-created one-box shipment after canonical box materialization'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT status FROM public.label_jobs WHERE id = v_job),
     'succeeded',
     'label job is marked succeeded after completion'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT barcode FROM public.labels WHERE shipment_id = v_shipment LIMIT 1),
     'PGPLUGINBOX001:1',
     'completed label persists the canonical shipment-box barcode identity'
@@ -226,15 +227,15 @@ BEGIN
 
   BEGIN
     PERFORM public.compose_label_payload(v_job_multi);
-    PERFORM ok(FALSE, 'compose_label_payload fails closed for multi-box shipment without explicit shipment_box_id');
+    RETURN NEXT ok(FALSE, 'compose_label_payload fails closed for multi-box shipment without explicit shipment_box_id');
   EXCEPTION WHEN OTHERS THEN
-    PERFORM ok(
+    RETURN NEXT ok(
       SQLERRM LIKE '%requires shipment_box_id%',
       'compose_label_payload fails closed for multi-box shipment without explicit shipment_box_id'
     );
   END;
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT count(*)::int FROM public.shipment_boxes WHERE shipment_id = v_shipment_multi),
     0,
     'multi-box compose guard fails without leaving partial shipment-box rows'
@@ -249,20 +250,22 @@ BEGIN
       jsonb_build_object('barcode', 'PGPLUGINBOXMUL001:1', 'engine', 'pgtap'),
       NULL
     );
-    PERFORM ok(FALSE, 'complete_label_job fails closed for multi-box shipment even when renderer supplies a box barcode');
+    RETURN NEXT ok(FALSE, 'complete_label_job fails closed for multi-box shipment even when renderer supplies a box barcode');
   EXCEPTION WHEN OTHERS THEN
-    PERFORM ok(
+    RETURN NEXT ok(
       SQLERRM LIKE '%requires shipment_box_id%',
       'complete_label_job fails closed for multi-box shipment even when renderer supplies a box barcode'
     );
   END;
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT status FROM public.label_jobs WHERE id = v_job_multi),
     'in_progress',
     'multi-box failed completion does not mark job succeeded'
   );
 END $$;
+
+SELECT * FROM pg_temp.check_plugin_label_render_box_readiness();
 
 SELECT * FROM finish();
 ROLLBACK;
