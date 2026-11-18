@@ -15,16 +15,7 @@
       "executor cannot advance or reset request identities"
     ],
     "reason": "Supabase-owned pg_net extension grants (tables and request-id sequence) cannot be changed per project; secret-bearing dispatch moves to the trusted-worker path",
-    "owner": "repository lead",
-    "expires": "2026-12-01"
-  },
-  {
-    "file": "0zz_extension_public_acl_v1.sql",
-    "assertions": [
-      "cron history retains no effective executor writes"
-    ],
-    "reason": "Supabase-owned default grant on cron.job_run_details (grantor supabase_admin); not revocable by project migrations",
-    "owner": "repository lead",
+    "owner": "MasarX lead",
     "expires": "2026-12-01"
   }
 ]
