@@ -387,11 +387,15 @@ describe('designer image uploads validate bytes before storage', () => {
     expect(upload.mock.calls[0][2].contentType).toBe('image/png');
   });
 
-  test('storage failures and cross-organization path denials remain unchanged', async () => {
+  test('storage failure responses are generic and cross-organization paths are denied', async () => {
     const { handler, upload } = uploads({storageError:{message:'storage rejected'}});
     const response = await handler(request(png,'image/png'));
     expect(response.status).toBe(400);
-    expect((await response.json()).error).toEqual({code:'upload_failed',message:'storage rejected'});
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: { code: 'upload_failed', message: 'Could not upload asset' },
+      correlation_id: expect.stringMatching(/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i),
+    });
     for(const mode of ['signed_url','delete']) {
       expect((await handler(request(png,'image/png',{mode,path:'org-b/designer/logo.png'}))).status).toBe(403);
     }

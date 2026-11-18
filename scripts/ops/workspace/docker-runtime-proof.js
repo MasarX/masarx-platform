@@ -63,15 +63,15 @@ const KNOWN_RUNTIME_FAILURE_PATTERNS = [
 
 function stripHtmlForVisibleText(html = '') {
   return String(html || '')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
-    .replace(/<template\b[^>]*>[\s\S]*?<\/template>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script(?:[\t\n\f\r /][^>]*)?>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style(?:[\t\n\f\r /][^>]*)?>/gi, ' ')
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript(?:[\t\n\f\r /][^>]*)?>/gi, ' ')
+    .replace(/<template\b[^>]*>[\s\S]*?<\/template(?:[\t\n\f\r /][^>]*)?>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
     .replace(/\s+/g, ' ')
     .trim();
 }

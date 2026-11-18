@@ -12,6 +12,7 @@ const {
   resolveDockerDatabaseUrl,
   resolveMobileV2ProofContext,
   serviceUrl,
+  stripHtmlForVisibleText,
 } = require('../../../scripts/ops/workspace/docker-runtime-proof');
 
 describe('workspace docker runtime proof', () => {
@@ -319,6 +320,13 @@ describe('workspace docker runtime proof', () => {
   });
 
   test('surface proof ignores failure-like script source when visible text and browser proof are clean', async () => {
+    expect(stripHtmlForVisibleText(
+      'Portal <script>hidden</script > <script>hidden</script\n bar> <style>hidden</style type=text/css>' +
+      ' <noscript>hidden</noscript > <template>hidden</template data-test> Ready',
+    )).toBe('Portal Ready');
+    expect(stripHtmlForVisibleText('&amp;lt; &amp;gt; &amp;nbsp; &amp;amp; &lt;x&gt;'))
+      .toBe('&lt; &gt; &nbsp; &amp; <x>');
+
     global.fetch = jest.fn(async () => ({
       status: 200,
       text: async () => '<main>Portal</main><script>const message = "Unable to resolve Expo error copy from bundled source";</script>',
