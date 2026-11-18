@@ -1274,17 +1274,19 @@ describe("ui_create_shipment_v1", () => {
       [clientId, senderId, trackingNumber]
     );
     const result = createResult.rows[0]?.result ?? {};
+    expect(result.shipment_id).toBeTruthy();
+
+    const readTimeline = () => client.query(
+      "SELECT api.ui_get_shipment_timeline_v1($1::uuid) AS timeline",
+      [result.shipment_id]
+    );
+    const { rows } = await readTimeline();
+    expect(rows[0]?.timeline?.shipment_id).toBe(result.shipment_id);
 
     await setAuthContext(client, otherUserId);
-
-    await expect(
-      client.query(
-        `
-          SELECT public.ui_get_shipment_timeline_v1($1::uuid) AS timeline
-        `,
-        [result.shipment_id]
-      )
-    ).rejects.toThrow(/not found or inaccessible/i);
+    await expect(readTimeline()).rejects.toThrow(
+      `Shipment ${result.shipment_id} not found or inaccessible`,
+    );
   });
 
   test("exposes the shipment-create RPC through api schema for browser clients", async () => {
