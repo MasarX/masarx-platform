@@ -5,9 +5,10 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(3);
+SELECT plan(4);
 
-DO $do$
+CREATE FUNCTION pg_temp.check_label_provider_placeholder_fallback()
+RETURNS SETOF TEXT LANGUAGE plpgsql AS $fixture$
 DECLARE
   v_org UUID := 'f95dce10-df04-4bdf-8244-1d999a8e64dd'::uuid;
   v_placeholder JSONB := jsonb_build_object(
@@ -16,7 +17,7 @@ DECLARE
       jsonb_build_object(
         'mode', 'internal',
         'name', 'internal_renderer',
-        'invoke_url', 'https://example.supabase.co/functions/v1/label-renderer',
+        'invoke_url', 'https://tenant-renderer.example.test/functions/v1/label-renderer',
         'timeout_ms', 30000,
         'invoke_secret', 'EXAMPLE_PASSWORD'
       )
@@ -28,9 +29,9 @@ DECLARE
       jsonb_build_object(
         'mode', 'internal',
         'name', 'internal_renderer',
-        'invoke_url', 'http://127.0.0.1:57429/functions/v1/label-renderer',
+        'invoke_url', 'https://global-renderer.example.test/functions/v1/label-renderer',
         'timeout_ms', 20000,
-        'invoke_secret', 'local-label-renderer-secret'
+        'invoke_secret', 'synthetic-global-renderer-credential'
       )
     )
   );
@@ -41,7 +42,7 @@ DECLARE
         'mode', 'internal',
         'name', 'internal_renderer',
         'timeout_ms', 20000,
-        'invoke_secret', 'tenant-real-secret'
+        'invoke_secret', 'synthetic-tenant-renderer-credential'
       )
     )
   );
@@ -51,55 +52,56 @@ BEGIN
   VALUES (v_org, 'Label Provider Placeholder Fallback Org', 'label-provider-placeholder-fallback-org')
   ON CONFLICT (id) DO NOTHING;
 
-  PERFORM public.upsert_settings_value_v1(
-    'label_provider',
+  PERFORM public.upsert_label_provider_settings_v1(
     'global',
     NULL,
     v_active,
-    2,
     'pgTAP active global label provider'
   );
 
-  PERFORM public.upsert_settings_value_v1(
-    'label_provider',
+  PERFORM public.upsert_label_provider_settings_v1(
     'tenant',
     v_org,
     v_placeholder,
-    1,
     'pgTAP placeholder tenant label provider'
   );
 
   v_result := public.resolve_label_renderer_invoke_config_v1(v_org);
 
-  PERFORM is(
+  RETURN NEXT is(
     v_result->>'invoke_url',
-    'http://127.0.0.1:57429/functions/v1/label-renderer',
-    'placeholder tenant provider falls through to active global provider'
+    'https://global-renderer.example.test/functions/v1/label-renderer',
+    'Vault-backed placeholder credential falls through to the active global endpoint'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     v_result->>'timeout_ms',
     '20000',
     'active global provider timeout is preserved'
   );
 
-  PERFORM public.upsert_settings_value_v1(
-    'label_provider',
+  RETURN NEXT is(
+    v_result->>'invoke_secret',
+    'synthetic-global-renderer-credential',
+    'fallback resolves only the credential paired with the global endpoint'
+  );
+
+  PERFORM public.upsert_label_provider_settings_v1(
     'tenant',
     v_org,
     v_malformed,
-    2,
     'pgTAP malformed non-placeholder tenant label provider'
   );
 
-  BEGIN
-    PERFORM public.resolve_label_renderer_invoke_config_v1(v_org);
-    PERFORM fail('malformed non-placeholder tenant provider must not fall back to global');
-  EXCEPTION WHEN OTHERS THEN
-    PERFORM pass('malformed non-placeholder tenant provider fails closed');
-  END;
-END $do$;
+  RETURN NEXT throws_ok(
+    format('SELECT public.resolve_label_renderer_invoke_config_v1(%L::uuid)', v_org),
+    'P0001',
+    'resolve_label_renderer_invoke_config_v1: invoke_url missing in label_provider configuration',
+    'malformed non-placeholder tenant provider fails closed'
+  );
+END $fixture$;
 
+SELECT * FROM pg_temp.check_label_provider_placeholder_fallback();
 SELECT * FROM finish();
 
 ROLLBACK;

@@ -26,34 +26,34 @@ DECLARE
   v_url text;
   v_secret text;
   v_timeout_ms int;
-  v_is_placeholder boolean := false;
+  v_allow_fallback boolean := p_organization_id IS NOT NULL;
 BEGIN
   IF p_organization_id IS NOT NULL THEN
     v_settings := public.resolve_settings('label_provider', 'tenant', p_organization_id);
   END IF;
 
-  IF v_settings IS NOT NULL THEN
-    v_provider := COALESCE((v_settings->'providers')->0, '{}'::jsonb);
-    v_url := NULLIF(v_provider->>'invoke_url', '');
-    v_secret := NULLIF(v_provider->>'invoke_secret', '');
-    v_is_placeholder := COALESCE(v_url LIKE 'https://example.%', false)
-      OR COALESCE(v_secret = 'EXAMPLE_PASSWORD', false);
-  END IF;
-
-  IF v_settings IS NULL OR v_is_placeholder THEN
-    v_global_settings := public.resolve_settings('label_provider', 'global', NULL);
-    IF v_global_settings IS NOT NULL THEN
-      v_settings := v_global_settings;
-    END IF;
+  IF v_settings IS NULL THEN
+    v_settings := public.resolve_settings('label_provider', 'global', NULL);
+    v_allow_fallback := false;
   END IF;
 
   IF v_settings IS NULL THEN
     RAISE EXCEPTION 'resolve_label_renderer_invoke_config_v1: label_provider settings not found';
   END IF;
 
-  v_provider := COALESCE((v_settings->'providers')->0, '{}'::jsonb);
-  v_url := NULLIF(v_provider->>'invoke_url', '');
-  v_secret := NULLIF(v_provider->>'invoke_secret', '');
+  -- Use the same credential read for the tenant and any bootstrap fallback.
+  LOOP
+    v_provider := COALESCE((v_settings->'providers')->0, '{}'::jsonb);
+    v_url := NULLIF(v_provider->>'invoke_url', '');
+    v_secret := NULLIF(v_provider->>'invoke_secret', '');
+    EXIT WHEN NOT v_allow_fallback
+      OR ((v_url LIKE 'https://example.%') IS NOT TRUE AND v_secret IS DISTINCT FROM 'EXAMPLE_PASSWORD');
+
+    v_global_settings := public.resolve_settings('label_provider', 'global', NULL);
+    EXIT WHEN v_global_settings IS NULL;
+    v_settings := v_global_settings;
+    v_allow_fallback := false;
+  END LOOP;
   v_timeout_ms := COALESCE(NULLIF(v_provider->>'timeout_ms', '')::int, 15000);
 
   IF v_url IS NULL THEN
