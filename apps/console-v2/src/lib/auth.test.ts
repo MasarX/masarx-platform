@@ -147,6 +147,81 @@ describe('lib/auth', () => {
     expect(authMocks.client?.auth.exchangeCodeForSession).not.toHaveBeenCalled();
   });
 
+  it('accepts the signed-in recipient before completing a hosted invite callback', async () => {
+    const invitee = { id: 'synthetic-invitee', invited_at: '2026-01-01T00:00:00Z' };
+    authMocks.client?.auth.setSession.mockResolvedValueOnce({
+      data: { session: { access_token: 'hash-tok', user: invitee } },
+      error: null,
+    });
+    authMocks.rpc.mockResolvedValueOnce({ accepted: true, status: 'active' });
+    window.history.replaceState(
+      {},
+      '',
+      '/auth/callback#access_token=access123&refresh_token=refresh456&type=invite',
+    );
+
+    await expect(completeConsoleAuthCallback()).resolves.toMatchObject({
+      access_token: 'hash-tok',
+    });
+    expect(authMocks.client?.auth.setSession).toHaveBeenCalledWith({
+      access_token: 'access123',
+      refresh_token: 'refresh456',
+    });
+    expect(authMocks.client?.auth.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(authMocks.rpc).toHaveBeenCalledWith('tenant_user_invite_accept_v1', {
+      p_user_id: invitee.id,
+    });
+  });
+
+  it('accepts an invite session already initialized by Supabase', async () => {
+    window.history.replaceState({}, '', '/auth/callback');
+    const invitee = { id: 'synthetic-invitee', invited_at: '2026-01-01T00:00:00Z' };
+    authMocks.client?.auth.getSession.mockResolvedValueOnce({
+      data: { session: { access_token: 'tok', user: invitee } },
+      error: null,
+    });
+    authMocks.rpc.mockResolvedValueOnce({ accepted: false, status: 'active' });
+
+    await expect(completeConsoleAuthCallback()).resolves.toMatchObject({ user: invitee });
+    expect(authMocks.rpc).toHaveBeenCalledWith('tenant_user_invite_accept_v1', {
+      p_user_id: invitee.id,
+    });
+  });
+
+  it('keeps ordinary callbacks free of invite mutations even with a URL invite marker', async () => {
+    window.history.replaceState({}, '', '/auth/callback?code=abc123&type=invite');
+    authMocks.client?.auth.exchangeCodeForSession.mockResolvedValueOnce({
+      data: { session: { access_token: 'tok', user: { id: 'synthetic-user' } } },
+      error: null,
+    });
+
+    await expect(completeConsoleAuthCallback()).resolves.toMatchObject({ access_token: 'tok' });
+    expect(authMocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('reports an invite that the acceptance RPC leaves inactive', async () => {
+    const invitee = { id: 'synthetic-invitee', invited_at: '2026-01-01T00:00:00Z' };
+    authMocks.client?.auth.getSession.mockResolvedValueOnce({
+      data: { session: { access_token: 'tok', user: invitee } },
+      error: null,
+    });
+    authMocks.rpc.mockResolvedValueOnce({ accepted: false, status: 'suspended' });
+
+    await expect(completeConsoleAuthCallback()).rejects.toThrow(/console account is suspended/i);
+  });
+
+  it('reports server-enforced invitation expiry after a later sign-in', async () => {
+    window.history.replaceState({}, '', '/auth/callback?code=abc123');
+    const invitee = { id: 'synthetic-invitee', invited_at: '2026-01-01T00:00:00Z' };
+    authMocks.client?.auth.exchangeCodeForSession.mockResolvedValueOnce({
+      data: { session: { access_token: 'tok', user: invitee } },
+      error: null,
+    });
+    authMocks.rpc.mockRejectedValueOnce({ code: 'PT410', message: 'tenant_user_invite:expired' });
+
+    await expect(completeConsoleAuthCallback()).rejects.toThrow(/invitation has expired/i);
+  });
+
   it('does not treat an empty callback session as a successful sign-in', async () => {
     window.history.replaceState({}, '', '/auth/callback');
     authMocks.client?.auth.getSession.mockResolvedValueOnce({ data: { session: null }, error: null });

@@ -29,6 +29,9 @@ BEGIN
       access_scope_type = 'tenant',
       access_scope_id = NULL;
 
+  INSERT INTO auth.users (id, email, aud, role, invited_at)
+  VALUES (v_user, 'w85-invited@example.com', 'authenticated', 'authenticated', now());
+
   INSERT INTO public.rbac_roles (id, organization_id, key, name, is_active)
   VALUES (v_role, v_org, 'ops_admin', 'Ops Admin', TRUE)
   ON CONFLICT (organization_id, key) DO UPDATE

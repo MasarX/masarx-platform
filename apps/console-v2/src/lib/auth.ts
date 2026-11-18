@@ -280,6 +280,26 @@ export async function sendConsoleMagicLink(email: string): Promise<void> {
   if (error) throw error;
 }
 
+async function finishConsoleAuthCallback(session: Session | null): Promise<Session> {
+  if (!session) throw new Error('Sign-in link did not return a Console session');
+  if (session.user?.invited_at) {
+    const result = await rpc<{ status?: string }>('tenant_user_invite_accept_v1', {
+      p_user_id: session.user.id,
+    }).catch((error: unknown) => {
+      if (asRecord(error).code === 'PT410') return { status: 'expired' };
+      throw error;
+    });
+    if (result?.status === 'expired') {
+      throw new Error('This Console invitation has expired. Ask your administrator for a new invitation.');
+    }
+    if (result?.status === 'suspended') {
+      throw new Error('Your Console account is suspended. Contact your administrator.');
+    }
+    if (result?.status !== 'active') throw new Error('Unable to accept the Console invitation');
+  }
+  return session;
+}
+
 export async function completeConsoleAuthCallback(): Promise<Session | null> {
   const client = getConsoleAuthClient();
   if (!client) throw new Error('Supabase auth is not configured for Console V2');
@@ -292,8 +312,7 @@ export async function completeConsoleAuthCallback(): Promise<Session | null> {
     if (code) {
       const { data, error } = await client.auth.exchangeCodeForSession(code);
       if (error) throw error;
-      if (!data.session) throw new Error('Sign-in link did not return a Console session');
-      return data.session;
+      return finishConsoleAuthCallback(data.session);
     }
     const tokenPair = authCallbackTokenPair(paramsList);
     if (tokenPair) {
@@ -302,14 +321,12 @@ export async function completeConsoleAuthCallback(): Promise<Session | null> {
         refresh_token: tokenPair.refreshToken,
       });
       if (error) throw error;
-      if (!data.session) throw new Error('Sign-in link did not return a Console session');
-      return data.session;
+      return finishConsoleAuthCallback(data.session);
     }
   }
   const { data, error } = await client.auth.getSession();
   if (error) throw error;
-  if (!data.session) throw new Error('Sign-in link did not return a Console session');
-  return data.session;
+  return finishConsoleAuthCallback(data.session);
 }
 
 export async function hydrateConsoleIdentity(): Promise<ConsoleIdentitySnapshot> {
