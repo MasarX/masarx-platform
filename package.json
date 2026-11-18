@@ -212,8 +212,7 @@
     "leaflet": "^1.9.4",
     "lottie-web": "^5.12.2",
     "postgres": "3.4.9",
-    "react-day-picker": "^9.14.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "react-day-picker": "^9.14.0"
   },
   "overrides": {
     "@expo/cli": {
