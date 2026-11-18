@@ -254,7 +254,10 @@ SELECT lives_ok($$ SELECT public.integration_plugin_approve_v1((SELECT id FROM p
 SELECT is((SELECT status FROM public.integration_plugin_versions WHERE plugin_id=(pg_temp.result('native_copy')->>'installed_resource_id')::uuid),'approved','later activation fixture is persistently approved before credential rotation');
 SELECT lives_ok($$ SELECT public.integration_connection_rotate_v1((pg_temp.result('connection')->>'connection_id')::uuid,'{"api_key":"sg13-native-rotated"}') $$,'rotation stales prior evidence for the saved plugin');
 SELECT throws_ok($$ SELECT public.integration_plugin_activate_v1((SELECT id FROM public.integration_plugin_versions WHERE plugin_id=(pg_temp.result('native_copy')->>'installed_resource_id')::uuid),'tenant',pg_temp.id('org_a')) $$,'23514','Activation requires a current-generation credential-presence check for each connection','later native plugin activation cannot bypass the evidence policy');
+RESET ROLE;
+-- Core is owner-only; retain the actor claims while proving its table guard.
 SELECT throws_ok($$ SELECT public.integration_plugin_activate_core_v1((SELECT id FROM public.integration_plugin_versions WHERE plugin_id=(pg_temp.result('native_copy')->>'installed_resource_id')::uuid),'tenant',pg_temp.id('org_a')) $$,'23514','Activation requires a current-generation credential-presence check for each connection','core activation is guarded at the same actual table transition');
+SET LOCAL ROLE authenticated;
 SELECT lives_ok($$ SELECT public.integration_connection_test_v1((pg_temp.result('connection')->>'connection_id')::uuid) $$,'current generation receives local evidence');
 SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES('native_activated',public.integration_plugin_activate_v1((SELECT id FROM public.integration_plugin_versions WHERE plugin_id=(pg_temp.result('native_copy')->>'installed_resource_id')::uuid),'tenant',pg_temp.id('org_a'))) $$,'current evidence permits native activation without remote traffic');
 SELECT is((SELECT status FROM public.integration_plugins WHERE id=(pg_temp.result('native_copy')->>'installed_resource_id')::uuid),'active','native activation readback is actually active');
