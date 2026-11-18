@@ -5,7 +5,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(10);
+SELECT plan(16);
 
 SELECT is(
   (
@@ -45,6 +45,66 @@ SELECT is(
   ),
   'webhooks.write',
   'webhook_source_directory keeps the source mutation capability lineage'
+);
+
+SELECT is(
+  (
+    SELECT resource#>>'{scope_columns,tenant}'
+      FROM jsonb_array_elements(COALESCE(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources', '[]'::jsonb)) AS resource
+     WHERE resource->>'key' = 'webhook_sources'
+  ),
+  'organization_id',
+  'webhook_sources registry scopes tenant reads by organization_id'
+);
+
+SELECT is(
+  (
+    SELECT resource#>>'{scope_columns,client}'
+      FROM jsonb_array_elements(COALESCE(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources', '[]'::jsonb)) AS resource
+     WHERE resource->>'key' = 'webhook_sources'
+  ),
+  'client_id',
+  'webhook_sources registry scopes client reads by source client_id'
+);
+
+SELECT is(
+  (
+    SELECT resource#>>'{scope_columns,sender}'
+      FROM jsonb_array_elements(COALESCE(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources', '[]'::jsonb)) AS resource
+     WHERE resource->>'key' = 'webhook_sources'
+  ),
+  'sender_id',
+  'webhook_sources registry scopes sender reads by source sender_id'
+);
+
+SELECT is(
+  (
+    SELECT resource#>>'{scope_columns,tenant}'
+      FROM jsonb_array_elements(COALESCE(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources', '[]'::jsonb)) AS resource
+     WHERE resource->>'key' = 'webhook_source_directory'
+  ),
+  'organization_id',
+  'webhook_source_directory registry scopes tenant reads by organization_id'
+);
+
+SELECT is(
+  (
+    SELECT resource#>>'{scope_columns,client}'
+      FROM jsonb_array_elements(COALESCE(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources', '[]'::jsonb)) AS resource
+     WHERE resource->>'key' = 'webhook_source_directory'
+  ),
+  'client_id',
+  'webhook_source_directory registry scopes client reads by source client_id'
+);
+
+SELECT is(
+  (
+    SELECT resource#>>'{scope_columns,sender}'
+      FROM jsonb_array_elements(COALESCE(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources', '[]'::jsonb)) AS resource
+     WHERE resource->>'key' = 'webhook_source_directory'
+  ),
+  'sender_id',
+  'webhook_source_directory registry scopes sender reads by source sender_id'
 );
 
 SELECT is(
