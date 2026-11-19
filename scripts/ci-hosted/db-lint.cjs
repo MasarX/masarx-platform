@@ -34,6 +34,7 @@ function invocation(env) {
   if (!env.SUPABASE_CLI_BIN) throw new Error('SUPABASE_CLI_BIN must name the verified CLI');
   const parsed = new URL(env.DATABASE_URL || env.DATABASE_URL_DIRECT || '');
   if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) throw new Error('Invalid database lint URL protocol');
+  if (parsed.searchParams.has('host')) throw new Error('Database lint URL must specify its loopback host in the authority');
   let password = decodeURIComponent(parsed.password);
   const passwords = parsed.searchParams.getAll('password');
   if (passwords.length > 1 || (password && passwords.length && password !== passwords[0])) throw new Error('Ambiguous database password');
@@ -41,6 +42,8 @@ function invocation(env) {
   const sslPasswords = parsed.searchParams.getAll('sslpassword');
   if (sslPasswords.length > 1 || password.includes('\0') || sslPasswords.some(value => value.includes('\0'))) throw new Error('Invalid database password');
   parsed.password = ''; parsed.searchParams.delete('password'); parsed.searchParams.delete('sslpassword');
+  // The CLI treats a loopback port outside its configured ports as remote.
+  parsed.searchParams.set('sslmode', 'disable');
   const allowed = ['APPDATA', 'CI', 'ComSpec', 'FORCE_COLOR', 'HOME', 'LOCALAPPDATA', 'NO_COLOR',
     'NUMBER_OF_PROCESSORS', 'OS', 'PATH', 'PATHEXT', 'Path', 'PROCESSOR_ARCHITECTURE', 'SystemRoot',
     'TEMP', 'TMP', 'USERPROFILE', 'WINDIR', 'PGSSLMODE', 'PGSSLROOTCERT', 'PGSSLCERT', 'PGSSLKEY', 'PGSSLCRL', 'PGSSLCRLDIR'];

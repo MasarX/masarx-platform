@@ -248,16 +248,20 @@ async function main() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'database-selfcheck-'));
   const originalSummary = process.env.GITHUB_STEP_SUMMARY;
   try {
-    const lintEnv = { SUPABASE_CLI_BIN: 'synthetic-cli', DATABASE_URL: 'postgresql://postgres:synthetic-password@127.0.0.1:54322/postgres',
+    const lintEnv = { SUPABASE_CLI_BIN: 'synthetic-cli', DATABASE_URL: `postgresql://postgres:synthetic-password@127.0.0.1:${dbPort}/postgres`,
       SYNTHETIC_TOKEN: 'synthetic-hidden', PATH: process.env.PATH };
     const command = invocation(lintEnv);
     assert.equal(command.command, 'synthetic-cli');
     assert.equal(command.args.includes('--fail-on'), true);
+    const lintUrl = new URL(command.args[command.args.indexOf('--db-url') + 1]);
+    assert.equal(lintUrl.port, String(dbPort));
+    assert.equal(lintUrl.searchParams.get('sslmode'), 'disable');
     assert.equal(command.args.some(value => value.includes('synthetic-password')), false);
     assert.equal(command.env.PGPASSWORD, 'synthetic-password');
     assert.equal(command.env.SYNTHETIC_TOKEN, undefined);
     assert.throws(() => invocation({ ...lintEnv, SUPABASE_CLI_BIN: '' }), /verified CLI/);
     assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: 'postgresql://postgres@unreviewed.invalid/postgres' }), /loopback/i);
+    assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: lintEnv.DATABASE_URL + '?host=unreviewed.invalid' }), /loopback/i);
     assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: lintEnv.DATABASE_URL + '?password=other' }), /Ambiguous/);
     const registry = [{ extension: 'synthetic_extension' }];
     const ownership = new Map([['public.synthetic_extension_fn', 'synthetic_extension']]);
