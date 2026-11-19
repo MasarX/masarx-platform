@@ -7,6 +7,9 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(8);
 
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
+SELECT set_config('request.jwt.claim.role', 'service_role', TRUE);
+
 CREATE OR REPLACE FUNCTION pg_temp.test_console_v2_dispatch_route_run_directory_registry_v1()
 RETURNS SETOF TEXT
 LANGUAGE plpgsql
@@ -27,6 +30,7 @@ BEGIN
         FROM jsonb_array_elements(COALESCE(v_registry->'resources', '[]'::jsonb)) AS item(value)
        WHERE item.value->>'key' = 'route_run_directory'
          AND item.value->>'relation' = 'public.v_route_run_directory'
+         AND item.value->>'read_relation' = 'public.console_route_run_directory_read_v1'
          AND item.value->>'id_column' = 'id'
          AND item.value->>'capability_read' = 'routes.read'
          AND item.value#>>'{scope_columns,tenant}' = 'organization_id'

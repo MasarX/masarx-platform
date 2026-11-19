@@ -141,8 +141,8 @@ ON CONFLICT (id) DO UPDATE
 
 SELECT is(
   public.api_gateway_shipment_mutation_default_workflow_template_v1('shipment.reschedule'),
-  'shipment_reschedule_v1',
-  'API Gateway shipment.reschedule routes resolve to the canonical reschedule workflow template'
+  'api_gateway_shipment_mutation_default_v1',
+  'API Gateway shipment.reschedule routes resolve to the canonical typed mutation workflow template'
 );
 
 SELECT is(
@@ -151,7 +151,7 @@ SELECT is(
     FROM public.api_routes
     WHERE id = '20530174-0000-4000-8000-000000000007'::uuid
   ),
-  'shipment_reschedule_v1',
+  'api_gateway_shipment_mutation_default_v1',
   'enabled reschedule route receives workflow template default without app-side branching'
 );
 

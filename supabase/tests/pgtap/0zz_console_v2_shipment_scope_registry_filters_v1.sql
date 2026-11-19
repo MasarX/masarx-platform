@@ -7,6 +7,9 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SELECT plan(4);
 
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
+SELECT set_config('request.jwt.claim.role', 'service_role', TRUE);
+
 SELECT ok(
   NOT EXISTS (
     SELECT 1
@@ -20,7 +23,7 @@ SELECT ok(
     ) AS expected(resource_key, filter_key, filter_column)
     WHERE NOT EXISTS (
       SELECT 1
-      FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'platform', NULL)->'resources') r(value)
+      FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', public.get_root_scope_type_key_v1(), NULL)->'resources') r(value)
       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.value->'filters', '[]'::jsonb)) f(value)
       WHERE r.value->>'key' = expected.resource_key
         AND f.value->>'key' = expected.filter_key
@@ -40,7 +43,7 @@ SELECT ok(
     ) AS expected(resource_key, tenant_scope_column)
     WHERE NOT EXISTS (
       SELECT 1
-      FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'platform', NULL)->'resources') r(value)
+      FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', public.get_root_scope_type_key_v1(), NULL)->'resources') r(value)
       WHERE r.value->>'key' = expected.resource_key
         AND r.value#>>'{scope_columns,tenant}' = expected.tenant_scope_column
     )
@@ -57,6 +60,7 @@ DECLARE
   v_client UUID := '2a863b2c-8295-498b-9080-91c04ff83e1c'::uuid;
   v_other_client UUID := '3efe34ac-6e98-45c5-93d7-e3ca6fbc9bd9'::uuid;
   v_sender UUID := 'be91412f-b0c9-4840-a536-b83c59891a0c'::uuid;
+  v_other_recipient UUID := gen_random_uuid();
   v_recipient UUID := '010e9c31-d90a-46f3-813e-8dafc8f507f9'::uuid;
   v_shipment UUID := 'e249c204-b148-41ff-905b-6a37df338161'::uuid;
   v_other_shipment UUID := 'e4f9f396-c22a-4580-9ae0-8327e3b78520'::uuid;
@@ -122,6 +126,9 @@ BEGIN
       phone_number = EXCLUDED.phone_number,
       email = EXCLUDED.email;
 
+  INSERT INTO public.recipients (id, organization_id, client_id, name, phone_number)
+  VALUES (v_other_recipient, v_other_org, v_other_client, 'Example Other Recipient', '+12025550157');
+
   DELETE FROM public.shipments
    WHERE id IN (v_shipment, v_other_shipment);
 
@@ -162,7 +169,7 @@ BEGIN
     v_other_shipment,
     v_other_org,
     v_other_client,
-    v_recipient,
+    v_other_recipient,
     'SHP-SCOPE-OTHER',
     'REF-SCOPE-OTHER',
     'delivery',

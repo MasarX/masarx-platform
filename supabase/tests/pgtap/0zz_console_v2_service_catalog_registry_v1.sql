@@ -78,7 +78,9 @@ BEGIN
     AND r.key = 'ops_admin'
   ON CONFLICT DO NOTHING;
 
-  SELECT public.resolve_settings_merged('ui_read_registry', 'tenant', v_org)
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
+  PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
+  SELECT public.ui_rpc_registry_v1('tenant', v_org)
     INTO v_registry;
 
   RETURN NEXT ok(
@@ -97,7 +99,7 @@ BEGIN
       SELECT 1
         FROM jsonb_array_elements(v_registry->'resources') AS item(value)
        WHERE item.value->>'key' = 'service_level_directory'
-         AND item.value->>'relation' = 'public.v_service_level_directory'
+         AND item.value->>'relation' = 'api.service_level_directory'
     ),
     'tenant ui_read_registry exposes service_level_directory'
   );
@@ -123,6 +125,7 @@ BEGIN
   );
 
   PERFORM set_config('request.jwt.claim.sub', v_user::text, TRUE);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
   PERFORM set_config(
     'request.jwt.claims',
     jsonb_build_object(

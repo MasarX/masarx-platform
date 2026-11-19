@@ -735,14 +735,14 @@ SELECT is(
 
 SELECT is(
   public.api_gateway_shipment_mutation_default_workflow_template_v1('update.status'),
-  'api_gateway_shipment_update_default_v1',
-  'API Gateway update/status routes resolve to the default shipment update workflow'
+  'api_gateway_shipment_mutation_default_v1',
+  'API Gateway update/status routes resolve to the typed shipment mutation workflow'
 );
 
 SELECT is(
   public.api_gateway_shipment_mutation_default_workflow_template_v1('shipment.delete'),
-  'api_gateway_shipment_cancel_default_v1',
-  'API Gateway cancel/delete routes resolve to the default shipment cancel workflow'
+  'api_gateway_shipment_mutation_default_v1',
+  'API Gateway cancel/delete routes resolve to the typed shipment mutation workflow'
 );
 
 SELECT is(
@@ -978,7 +978,7 @@ SELECT is(
     FROM public.api_routes
     WHERE id = 'dddddddd-dddd-4ddd-8ddd-ddddddddd730'
   ),
-  'api_gateway_shipment_update_default_v1',
+  'api_gateway_shipment_mutation_default_v1',
   'shipment update API routes are workflow-engine-first by default'
 );
 
@@ -988,7 +988,7 @@ SELECT is(
     FROM public.api_routes
     WHERE id = 'e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e730'
   ),
-  'api_gateway_shipment_cancel_default_v1',
+  'api_gateway_shipment_mutation_default_v1',
   'shipment delete API routes are workflow-engine-first by default'
 );
 
