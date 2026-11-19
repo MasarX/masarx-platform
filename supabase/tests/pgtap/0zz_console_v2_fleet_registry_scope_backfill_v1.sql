@@ -75,7 +75,7 @@ SELECT ok(
       ('driver_application_directory', 'public.v_driver_application_directory', 'fleet.read'),
       ('driver_documents', 'public.driver_documents', 'fleet.read'),
       ('driver_compliance_events', 'public.driver_compliance_events', 'fleet.read'),
-      ('drivers', 'public.v_fleet_driver_options', 'fleet.read'),
+      ('drivers', 'public.driver_profile_picker_v1', 'fleet.read'),
       ('hubs', 'public.hubs', 'fleet.read'),
       ('fleet_user_options', 'public.users', 'fleet.write'),
       ('vehicle_directory', 'public.v_vehicle_directory', 'fleet.read'),
@@ -519,7 +519,7 @@ SELECT ok(
     SELECT 1
     FROM v_rows, jsonb_array_elements(v_rows.rows) row(value)
     WHERE row.value->>'id' = '253d3fab-d32d-4669-8ca1-27978cb95f14'
-      AND row.value->>'driver_profile_id' = 'ac65f701-2b52-4efd-9b9f-f9e8c5f14321'
+      AND row.value->>'organization_id' = 'ac65f701-2b52-4efd-9b9f-f9e8c5f14301'
       AND row.value->>'vehicle_id' = 'ac65f701-2b52-4efd-9b9f-f9e8c5f14341'
       AND row.value->>'name' = 'Console V2 Fleet Driver'
   ),
@@ -570,9 +570,9 @@ SELECT ok(
     WHERE row.value->>'id' = 'ac65f701-2b52-4efd-9b9f-f9e8c5f14361'
       AND row.value->>'actor_name' = 'Console V2 Fleet Registry Manager'
       AND row.value->'metadata'->>'health' = 'ok'
-      AND row.value->'payload'->>'health' = 'ok'
+      AND NOT (row.value ? 'payload')
   ),
-  'vehicle_events resource returns actor name and metadata payload alias from live API projection'
+  'vehicle events expose actor name and declared metadata through the safe projection'
 );
 
 WITH v_payload AS (

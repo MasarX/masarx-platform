@@ -1,4 +1,4 @@
--- Restore row-driven import limits before the explicit Console projection rewrite.
+-- Restore row-driven import limits while retaining the current registry projections.
 BEGIN;
 SET LOCAL search_path TO public, extensions, pg_temp;
 SET LOCAL lock_timeout = '30s';
