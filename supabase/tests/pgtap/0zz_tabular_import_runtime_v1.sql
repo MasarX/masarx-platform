@@ -325,36 +325,27 @@ SELECT set_config(
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000143000002', true);
 SELECT set_config('request.jwt.claim.role', 'service_role', true);
 
-SELECT throws_ok(
-  $$ SELECT public.ui_cancel_tabular_import_run_v1('00000000-0000-0000-0000-000143000101', 'terminal cancel guard') $$,
-  '22023',
-  'ui_cancel_tabular_import_run_v1 run 00000000-0000-0000-0000-000143000101 is terminal and cannot be canceled (completed)',
-  'public.ui_cancel_tabular_import_run_v1 rejects completed runs without mutating them'
+-- Terminal cancellation returns the canonical readback without changing the run.
+CREATE TEMP TABLE terminal_import_snapshots AS
+SELECT r.id, r.status, to_jsonb(r) AS stored, public.ui_get_tabular_import_run_v1(r.id) AS readback
+FROM public.tabular_import_runs r
+WHERE r.id IN (
+  '00000000-0000-0000-0000-000143000101',
+  '00000000-0000-0000-0000-000143000102',
+  '00000000-0000-0000-0000-000143000103',
+  '00000000-0000-0000-0000-000143000104'
 );
 
-SELECT throws_ok(
-  $$ SELECT public.ui_cancel_tabular_import_run_v1('00000000-0000-0000-0000-000143000102', 'terminal cancel guard') $$,
-  '22023',
-  'ui_cancel_tabular_import_run_v1 run 00000000-0000-0000-0000-000143000102 is terminal and cannot be canceled (completed_with_errors)',
-  'public.ui_cancel_tabular_import_run_v1 rejects completed_with_errors runs without mutating them'
-);
-
-SELECT throws_ok(
-  $$ SELECT public.ui_cancel_tabular_import_run_v1('00000000-0000-0000-0000-000143000103', 'terminal cancel guard') $$,
-  '22023',
-  'ui_cancel_tabular_import_run_v1 run 00000000-0000-0000-0000-000143000103 is terminal and cannot be canceled (failed)',
-  'public.ui_cancel_tabular_import_run_v1 rejects failed runs without mutating them'
-);
-
-SELECT throws_ok(
-  $$ SELECT public.ui_cancel_tabular_import_run_v1('00000000-0000-0000-0000-000143000104', 'terminal cancel guard') $$,
-  '22023',
-  'ui_cancel_tabular_import_run_v1 run 00000000-0000-0000-0000-000143000104 is terminal and cannot be canceled (canceled)',
-  'public.ui_cancel_tabular_import_run_v1 rejects canceled runs without mutating them'
-);
+SELECT is(
+  public.ui_cancel_tabular_import_run_v1(id, 'terminal cancel guard'),
+  readback,
+  format('terminal %s import keeps its canonical readback', status)
+)
+FROM terminal_import_snapshots
+ORDER BY id;
 
 SELECT ok(
-  pg_get_functiondef('public.ui_cancel_tabular_import_run_v1(uuid,text)'::regprocedure) LIKE '%summary = jsonb_set%'
+  pg_get_functiondef('public.ui_cancel_tabular_import_run_v1(uuid,text)'::regprocedure) LIKE '%summary = COALESCE(summary%'
     AND pg_get_functiondef('public.ui_cancel_tabular_import_run_v1(uuid,text)'::regprocedure) LIKE '%cancellation%'
     AND pg_get_functiondef('public.ui_cancel_tabular_import_run_v1(uuid,text)'::regprocedure) LIKE '%reason%',
   'tabular import run cancel persists operator reason under summary.cancellation.reason'
@@ -387,8 +378,13 @@ SELECT ok(
 );
 
 SELECT ok(
-  pg_get_functiondef('public.ui_cancel_tabular_import_run_v1(uuid,text)'::regprocedure) LIKE '%terminal and cannot be canceled%',
-  'tabular import cancel fails closed for terminal runs'
+  (SELECT count(*) FROM terminal_import_snapshots) = 4
+    AND NOT EXISTS (
+      SELECT 1 FROM terminal_import_snapshots snapshot
+      LEFT JOIN public.tabular_import_runs r ON r.id = snapshot.id
+      WHERE to_jsonb(r) IS DISTINCT FROM snapshot.stored
+    ),
+  'tabular import cancel leaves every terminal run unchanged'
 );
 
 SELECT * FROM finish();

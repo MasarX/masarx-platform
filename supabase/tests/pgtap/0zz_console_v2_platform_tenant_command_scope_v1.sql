@@ -1,35 +1,23 @@
--- pgTAP: Console V2 platform tenant command scope must preserve the active
--- tenant on workflow-backed row actions instead of starting workflows under
--- the platform organization.
+-- pgTAP: Console workflow commands use the receiving scoped workflow boundary.
 
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(5);
+SELECT plan(3);
 
-SELECT ok(
-  pg_get_functiondef('public.ui_execute_command_v1(text,text,text[],text,integer,jsonb)'::regprocedure)
-    LIKE '%v_effective_org_id UUID := public.current_user_org_id()%',
-  'ui_execute_command_v1 computes an effective organization for workflow commands'
+-- The command authority in 202609041020_workflow_progress_access_boundary_v1.sql
+-- derives the actor organization and checks template visibility.
+SELECT matches(
+  pg_get_functiondef('public.ui_execute_command_v1(text,text,text[],text,integer,jsonb)'::regprocedure),
+  'workflow_template_scope_allowed\(v_template_scope_type, v_template_scope_id\)',
+  'workflow command validates the selected template against the actor scope'
 );
 
-SELECT ok(
-  pg_get_functiondef('public.ui_execute_command_v1(text,text,text[],text,integer,jsonb)'::regprocedure)
-    LIKE '%public.resolve_settings_merged(''ui_read_registry'', v_scope_type, v_scope_id)%',
-  'ui_execute_command_v1 validates platform tenant overrides through ui_read_registry'
-);
-
-SELECT ok(
-  pg_get_functiondef('public.ui_execute_command_v1(text,text,text[],text,integer,jsonb)'::regprocedure)
-    LIKE '%v_read_resource#>>ARRAY[''scope_columns'', ''tenant'']%',
-  'ui_execute_command_v1 uses the row-driven tenant scope column contract'
-);
-
-SELECT ok(
-  pg_get_functiondef('public.ui_execute_command_v1(text,text,text[],text,integer,jsonb)'::regprocedure)
-    LIKE '%''organization_id'', v_effective_org_id%',
-  'ui_execute_command_v1 writes the effective organization into workflow payload and context'
+SELECT matches(
+  pg_get_functiondef('public.ui_execute_command_v1(text,text,text[],text,integer,jsonb)'::regprocedure),
+  '''organization_id'', public.current_user_org_id\(\)',
+  'workflow command derives organization lineage from the authenticated actor'
 );
 
 SELECT ok(

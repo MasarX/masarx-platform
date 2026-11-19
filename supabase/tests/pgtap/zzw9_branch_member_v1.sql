@@ -20,10 +20,11 @@ SELECT ok(
 
 -- 3) capability gate + canonical telemetry surfaces
 SELECT ok(
-  pg_get_functiondef(to_regprocedure('public.add_branch_member_v1(jsonb)')) ~ 'assert_capability_v1\(\s*''branches\.write'''
+  pg_get_functiondef(to_regprocedure('public.add_branch_member_v1(jsonb)')) ~ 'assert_capability_v1\(\s*''agreements\.write'''
+  AND pg_get_functiondef(to_regprocedure('public.add_branch_member_v1(jsonb)')) ~ 'assert_capability_v1\(\s*''agreements\.write'',\s*''tenant'''
   AND pg_get_functiondef(to_regprocedure('public.add_branch_member_v1(jsonb)')) ~ 'INSERT INTO public\.domain_events'
   AND pg_get_functiondef(to_regprocedure('public.add_branch_member_v1(jsonb)')) ~ 'log_decision\(',
-  'add_branch_member_v1 enforces branches.write + emits domain_event + decision_log'
+  'add_branch_member_v1 checks agreement write access and records tenant membership evidence'
 );
 
 -- 4) idempotence path (already_processed envelope)

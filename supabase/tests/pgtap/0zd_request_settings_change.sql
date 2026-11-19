@@ -107,9 +107,12 @@ BEGIN
   );
 
   RETURN NEXT is(
-    (SELECT COUNT(*)::INT FROM public.domain_events WHERE id = v_event AND resource_type = 'settings_version' AND resource_id = v_sv AND status = 'pending'),
+    (SELECT COUNT(*)::INT FROM public.domain_events
+      WHERE id = v_event AND event_type = 'settings_change.requested'
+        AND resource_type = 'settings_version' AND resource_id = v_sv
+        AND status = 'processing' AND workflow_run_id IS NOT NULL),
     1,
-    'domain_event dispatched for settings_change.requested'
+    'settings_change.requested starts the inline approval workflow'
   );
 END $$;
 SELECT * FROM pg_temp.settings_request_tap();

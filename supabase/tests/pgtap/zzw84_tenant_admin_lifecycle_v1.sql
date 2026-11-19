@@ -192,6 +192,12 @@ SELECT set_config(
   jsonb_build_object('sub', current_setting('test.w84_actor'), 'role', 'authenticated')::text,
   true
 );
+SELECT set_config(
+  'test.w84_driver_roles_before',
+  (SELECT count(*)::text FROM public.rbac_roles
+    WHERE organization_id = current_setting('test.w84_org_a')::uuid AND key = 'driver'),
+  true
+);
 SET LOCAL ROLE authenticated;
 SELECT ok(
   EXISTS (
@@ -208,18 +214,17 @@ SELECT ok(
       FROM public.ui_list_tenant_invitable_roles_v1(current_setting('test.w84_org_a')::uuid)
      WHERE role_key = 'driver'
   ),
-  'tenant invite role catalog includes active driver template before tenant role is provisioned'
+  'tenant invite role catalog includes the active driver role'
 );
 
-SELECT ok(
-  NOT EXISTS (
-    SELECT 1
-      FROM public.rbac_roles
-     WHERE organization_id = current_setting('test.w84_org_a')::uuid
-       AND key = 'driver'
-  ),
-  'listing template-backed invite roles does not pre-provision driver tenant role'
+RESET ROLE;
+SELECT is(
+  (SELECT count(*)::text FROM public.rbac_roles
+    WHERE organization_id = current_setting('test.w84_org_a')::uuid AND key = 'driver'),
+  current_setting('test.w84_driver_roles_before'),
+  'listing template-backed invite roles leaves the driver role inventory unchanged'
 );
+SET LOCAL ROLE authenticated;
 
 SELECT ok(
   EXISTS (

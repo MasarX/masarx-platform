@@ -235,7 +235,7 @@ BEGIN
     'console-v2-driver-gap',
     jsonb_build_array('local_delivery'),
     jsonb_build_array(
-      jsonb_build_object('document_type_key', 'license', 'status', 'approved', 'document_ref', 'license-8600'),
+      jsonb_build_object('document_type_key', 'driver_license', 'status', 'approved', 'document_ref', 'license-8600'),
       jsonb_build_object('document_type_key', 'medical', 'status', 'approved', 'document_ref', 'medical-8600')
     ),
     TRUE,
@@ -399,7 +399,13 @@ BEGIN
       'https://console.masarx.test/invite',
       v_driver_org,
       v_invited_driver,
-      jsonb_build_object('reason', 'pgtap_driver_approved')
+      jsonb_build_object(
+        'reason', 'pgtap_driver_approved',
+        'verified_documents', jsonb_build_array(
+          jsonb_build_object('document_type_key', 'driver_license', 'document_ref', 'license-8600'),
+          jsonb_build_object('document_type_key', 'medical', 'document_ref', 'medical-8600')
+        )
+      )
     );
     v_profile_id := NULLIF(v_result->>'approved_participant_profile_id', '')::uuid;
     v_driver_profile_id := NULLIF(v_result->>'driver_profile_id', '')::uuid;
@@ -446,8 +452,8 @@ BEGIN
          AND dd.user_id = v_invited_driver
          AND dd.doc_type = 'driver_license'
          AND dd.status = 'verified'
-         AND dd.metadata->>'marketplace_request_id' = v_driver_request::text
-         AND dd.metadata->>'source_document_type_key' = 'license'
+         AND dd.metadata->>'marketplace_participant_request_id' = v_driver_request::text
+         AND dd.metadata->>'reviewer_verified' = 'true'
     )
     AND EXISTS (
       SELECT 1
@@ -456,10 +462,10 @@ BEGIN
          AND dd.user_id = v_invited_driver
          AND dd.doc_type = 'medical'
          AND dd.status = 'verified'
-         AND dd.metadata->>'marketplace_request_id' = v_driver_request::text
-         AND dd.metadata->>'source_document_type_key' = 'medical'
+         AND dd.metadata->>'marketplace_participant_request_id' = v_driver_request::text
+         AND dd.metadata->>'reviewer_verified' = 'true'
     ),
-    'driver application approval resolves application document kinds into fleet document registry'
+    'driver application approval records explicitly verified fleet document kinds'
   );
 
   RETURN NEXT ok(
@@ -469,7 +475,7 @@ BEGIN
        WHERE dce.organization_id = v_driver_org
          AND dce.user_id = v_invited_driver
          AND dce.event_type = 'marketplace_driver_approved'
-         AND dce.payload->>'marketplace_request_id' = v_driver_request::text
+         AND dce.payload->>'marketplace_participant_request_id' = v_driver_request::text
     ),
     'driver application approval appends fleet compliance handoff event'
   );
@@ -515,7 +521,7 @@ BEGIN
          WHERE dce.organization_id = v_driver_org
            AND dce.user_id = v_invited_driver
            AND dce.event_type = 'marketplace_driver_approved'
-           AND dce.payload->>'marketplace_request_id' = v_driver_request::text
+           AND dce.payload->>'marketplace_participant_request_id' = v_driver_request::text
       ) = 1,
       'driver application duplicate/existing approval idempotently returns the same fleet profile'
     );
