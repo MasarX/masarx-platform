@@ -26,7 +26,7 @@ SELECT is(
      )
        AND enabled IS TRUE
   ),
-  'context_extract_from_mapping,reserve_shipment_identifiers,shipment_create,workflow_control',
+  'context_extract_from_mapping,reserve_shipment_identifiers,shipment_create,shipment_update_geocode,workflow_control',
   'webhook_shipment_create_v1 materializes shipment and completes without provider dispatch'
 );
 
@@ -92,10 +92,9 @@ SELECT ok(
     SELECT 1
       FROM public.onboarding_integration_plugin_defaults
      WHERE plugin_key = 'default-shipment-webhook-intake'
-       AND workflow_binding->>'intent' = 'shipment.create'
-       AND workflow_binding->>'template_name' = 'webhook_shipment_create_v1'
+       AND workflow_binding = '{"template_name":"webhook_intake_v1"}'::jsonb
   ),
-  'onboarding default shipment webhook plugin binds to the shipment-only workflow'
+  'onboarding default keeps the general webhook intake binding'
 );
 
 SELECT ok(
@@ -104,10 +103,10 @@ SELECT ok(
       FROM public.integration_plugin_versions v
       JOIN public.integration_plugins p ON p.id = v.plugin_id
      WHERE p.plugin_key = 'default-shipment-webhook-intake'
-       AND v.workflow_binding->>'intent' = 'shipment.create'
-       AND v.workflow_binding->>'template_name' = 'webhook_shipment_create_v1'
+       AND v.status = 'active'
+       AND v.workflow_binding = '{"template_name":"webhook_intake_v1"}'::jsonb
   ),
-  'active shipment webhook plugin versions bind to the shipment-only workflow'
+  'an active onboarding webhook plugin retains the general intake binding'
 );
 
 SELECT ok(
@@ -129,9 +128,9 @@ SELECT ok(
     SELECT 1
       FROM public.settings s
      WHERE s.category = 'webhook_ingest_policy'
-       AND s.cached_value#>>'{workflow,intent}' = 'shipment.create'
-       AND s.cached_value#>>'{workflow,template_id}' = '77770000-0000-0000-0000-000000770002'
-       AND s.cached_value#>>'{workflow,templates_by_intent,shipment.create,template_id}' = '77770000-0000-0000-0000-000000770002'
+       AND public.webhook_policy_applies_to_shipment_intent_v1(s.cached_value, 'shipment.create')
+       AND public.resolve_webhook_followup_template_id_v1(s.cached_value, 'shipment.create') =
+           '77770000-0000-0000-0000-000000770002'::UUID
   ),
   'shipment.create webhook ingest policies point at webhook_shipment_create_v1'
 );
