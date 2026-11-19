@@ -446,6 +446,7 @@ BEGIN
       'sender_id', v_sender::text,
       'client_reference_number', 'MANUALINTAKECREATE001',
       'tracking_number', 'MANUALINTAKECREATE001',
+      'status', 'created',
       'service_offering_id', (
         SELECT v_governed_service_offering::text
       ),

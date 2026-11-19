@@ -131,8 +131,8 @@ LEFT JOIN LATERAL (
   ORDER BY va.started_at DESC NULLS LAST, va.created_at DESC, va.id DESC
   LIMIT 1
 ) AS active_assignment ON TRUE
-LEFT JOIN public.users driver_user
-  ON driver_user.id = active_assignment.assigned_to_user_id
+LEFT JOIN LATERAL public.scoped_user_label_v1(v.organization_id, active_assignment.assigned_to_user_id) driver_user
+  ON TRUE
 LEFT JOIN event_agg ea ON ea.vehicle_id = v.id
 LEFT JOIN latest_odometer lo ON lo.vehicle_id = v.id
 LEFT JOIN latest_fuel lf ON lf.vehicle_id = v.id

@@ -18,8 +18,7 @@ SELECT
   active_assignment.vehicle_id,
   '[]'::jsonb AS skills
 FROM public.driver_profiles dp
-LEFT JOIN public.users u
-  ON u.id = dp.user_id
+LEFT JOIN LATERAL public.scoped_user_label_v1(dp.organization_id, dp.user_id) u ON TRUE
 LEFT JOIN LATERAL (
   SELECT va.vehicle_id
   FROM public.vehicle_assignments va
@@ -30,5 +29,61 @@ LEFT JOIN LATERAL (
   ORDER BY va.started_at DESC NULLS LAST, va.created_at DESC, va.id DESC
   LIMIT 1
 ) AS active_assignment ON TRUE;
+
+CREATE OR REPLACE VIEW public.v_route_run_directory
+WITH (security_invoker = true) AS
+SELECT
+  rr.id,
+  rr.organization_id,
+  rr.branch_id,
+  rr.driver_user_id,
+  rr.vehicle_id,
+  rr.status,
+  rr.planned_date,
+  rr.planned_start_at,
+  rr.planned_end_at,
+  rr.started_at,
+  rr.ended_at,
+  rr.metadata,
+  rr.created_at,
+  rr.updated_at,
+  ('RUN-' || upper(substr(replace(rr.id::text, '-', ''), 1, 6))) AS run_display_id,
+  CASE
+    WHEN b.id IS NULL THEN NULL
+    WHEN NULLIF(b.code, '') IS NOT NULL AND NULLIF(b.name, '') IS NOT NULL THEN b.code || ' · ' || b.name
+    ELSE COALESCE(NULLIF(b.name, ''), NULLIF(b.code, ''))
+  END AS branch_label,
+  b.code AS branch_code,
+  b.branch_type,
+  COALESCE(NULLIF(u.full_name, ''), u.email, rr.driver_user_id::text) AS driver_label,
+  COALESCE(NULLIF(v.plate_number, ''), v.vin, rr.vehicle_id::text) AS vehicle_label,
+  COALESCE(stop_counts.stop_count, 0)::int AS stop_count,
+  COALESCE(stop_counts.cod_total, 0)::numeric AS cod_total,
+  NULLIF(rr.route_assignment->>'route_run_assignment_id', '')::uuid AS assignment_id,
+  NULLIF(rr.route_assignment->>'assignment_status', '') AS assignment_status,
+  NULLIF(rr.route_assignment->>'assignment_mode', '') AS assignment_mode,
+  NULLIF(rr.route_assignment->>'assignment_version', '')::int AS assignment_version,
+  NULLIF(rr.route_assignment->>'assigned_at', '')::timestamptz AS assignment_assigned_at,
+  NULLIF(rr.route_assignment->>'driver_user_id', '')::uuid AS assignment_driver_user_id,
+  NULLIF(rr.route_assignment->>'vehicle_id', '')::uuid AS assignment_vehicle_id,
+  NULLIF(COALESCE(rr.route_assignment->'partner', '{}'::jsonb), '{}'::jsonb) AS partner_payload,
+  COALESCE(
+    NULLIF(rr.route_assignment#>>'{partner,partner_name}', ''),
+    NULLIF(rr.route_assignment#>>'{partner,partner_id}', '')
+  ) AS partner_name,
+  NULLIF(rr.route_assignment->>'assignment_mode', '') IN ('partner_fleet', 'alternate_capacity_pool') AS is_partner_run
+FROM api.route_runs rr
+LEFT JOIN public.branches b
+  ON b.id = rr.branch_id
+LEFT JOIN LATERAL public.scoped_user_label_v1(rr.organization_id, rr.driver_user_id) u ON TRUE
+LEFT JOIN public.vehicles v
+  ON v.id = rr.vehicle_id
+LEFT JOIN LATERAL (
+  SELECT
+    COUNT(*)::int AS stop_count,
+    COALESCE(SUM(COALESCE(rs.cod_amount, 0)), 0)::numeric AS cod_total
+  FROM api.route_stops rs
+  WHERE rs.route_run_id = rr.id
+) AS stop_counts ON TRUE;
 
 COMMIT;

@@ -35,6 +35,12 @@ BEGIN
   INSERT INTO public.senders (id, client_id, name, brand_name, status)
   VALUES (v_source_sender, v_client, 'Source fixture sender', 'Fixture', 'active');
 
+  -- Onboarding materializes child defaults. This fixture exercises tenant fallback.
+  DELETE FROM public.settings
+   WHERE category = 'webhook_source_default_policy'
+     AND ((scope_type = 'client' AND scope_id = v_client)
+       OR (scope_type = 'sender' AND scope_id = v_source_sender));
+
   PERFORM set_config('test.b6_ws_ups_source_sender', v_source_sender::text, true);
 
   INSERT INTO public.mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)

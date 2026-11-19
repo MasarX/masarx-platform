@@ -46,7 +46,7 @@ INSERT INTO public.addresses (
   'External Signed Destination Line',
   'External Signed Destination Line',
   'External Signed Destination Line',
-  'Riyadh',
+  'PgTAP Raw Guard City',
   'Riyadh',
   'SA',
   'pending',
@@ -70,7 +70,7 @@ INSERT INTO public.canonical_cities (
 ) VALUES (
   '0cc20000-0000-0000-0000-000000000009',
   '0cc20000-0000-0000-0000-000000000001',
-  'Riyadh',
+  'PgTAP Raw Guard City',
   'الرياض',
   ARRAY['Riyadh City'],
   'Riyadh',

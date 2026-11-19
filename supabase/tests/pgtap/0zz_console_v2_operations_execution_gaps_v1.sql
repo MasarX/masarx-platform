@@ -16,6 +16,7 @@ LANGUAGE plpgsql
 AS $function$
 DECLARE
   v_registry JSONB := NULL;
+  v_provider_reader_role UUID;
   v_org UUID := '00000000-0000-0000-0000-000086000001';
   v_driver_org UUID := '00000000-0000-0000-0000-000086000002';
   v_other_org UUID := '00000000-0000-0000-0000-000086000003';
@@ -92,6 +93,20 @@ BEGIN
   INSERT INTO public.senders (id, client_id, name, brand_name, status)
   VALUES (v_sender, v_client, 'Console V2 Ops Gap Sender', 'Console V2 Ops Gap Sender', 'active')
   ON CONFLICT (id) DO NOTHING;
+
+  -- The credential projection joins providers under the tenant's existing RBAC policy.
+  INSERT INTO public.rbac_roles (organization_id, key, name)
+  VALUES (v_org, 'pgtap_provider_reader', 'Credential fixture provider reader')
+  RETURNING id INTO v_provider_reader_role;
+
+  INSERT INTO public.rbac_role_permissions (organization_id, role_id, permission_id)
+  SELECT v_org, v_provider_reader_role, lv.id
+    FROM public.lookup_definitions ld
+    JOIN public.lookup_values lv ON lv.lookup_definition_id = ld.id
+   WHERE ld.category = 'rbac_permission' AND lv.value = 'agreements.read';
+
+  INSERT INTO public.rbac_user_role_assignments (organization_id, user_id, role_id)
+  VALUES (v_org, v_ops, v_provider_reader_role);
 
   INSERT INTO public.providers (id, organization_id, name, provider_type, metadata)
   VALUES (v_provider, v_org, 'Console V2 Ops Gap Provider', 'http', jsonb_build_object('vendor', 'pgtap'))

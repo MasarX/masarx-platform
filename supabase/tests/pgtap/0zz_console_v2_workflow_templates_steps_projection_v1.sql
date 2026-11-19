@@ -33,7 +33,8 @@ SELECT ok(
       FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources') AS resource
      WHERE resource->>'key' = 'workflow_templates_console'
        AND resource->>'capability_read' = 'workflows.read'
-       AND NOT (resource ?| ARRAY['capability_write', 'write_relation', 'import'])
+       AND NOT (resource ?| ARRAY['capability_write', 'write_relation'])
+       AND resource#>'{import,enabled}' = 'false'::jsonb
   ),
   'workflow_templates_console is read-only and requires workflows.read'
 );

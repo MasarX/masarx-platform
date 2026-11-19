@@ -381,6 +381,17 @@ BEGIN
     v_resources := '[]'::jsonb;
     FOR v_resource IN SELECT value FROM jsonb_array_elements(v_row.value->'resources') LOOP
       v_key := v_resource->>'key';
+      IF v_key = 'webhook_inbox' AND v_resource->>'relation' = 'public.webhook_inbox' THEN
+        SELECT COALESCE(jsonb_agg(jsonb_build_object('key', field, 'column', field, 'op', 'eq') ORDER BY field), '[]'::jsonb)
+          INTO v_selection
+          FROM unnest(ARRAY['id', 'organization_id', 'webhook_source_id', 'workflow_run_id', 'idempotency_key']) AS required(field)
+         WHERE NOT EXISTS (
+           SELECT 1
+             FROM jsonb_array_elements(COALESCE(v_resource->'filters', '[]'::jsonb)) AS existing
+            WHERE existing->>'key' = field
+         );
+        v_resource := jsonb_set(v_resource, '{filters}', COALESCE(v_resource->'filters', '[]'::jsonb) || v_selection);
+      END IF;
       IF v_key = 'provider_auth_configs'
          AND v_resource->>'relation' = 'public.provider_auth_configs_visible_v1'
          AND v_resource->>'capability_read' = 'integrations.read' THEN

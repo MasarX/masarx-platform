@@ -108,7 +108,7 @@ SELECT
       FROM public.driver_documents dd
      WHERE dd.organization_id = mpr.approved_organization_id
        AND dd.user_id = mpr.approved_user_id
-       AND dd.metadata->>'marketplace_request_id' = mpr.id::text
+       AND COALESCE(dd.metadata->>'marketplace_participant_request_id', dd.metadata->>'marketplace_request_id') = mpr.id::text
   ), 0) AS fleet_document_count,
   COALESCE((
     SELECT COUNT(*)::INT
@@ -116,7 +116,7 @@ SELECT
      WHERE dce.organization_id = mpr.approved_organization_id
        AND dce.user_id = mpr.approved_user_id
        AND dce.event_type = 'marketplace_driver_approved'
-       AND dce.payload->>'marketplace_request_id' = mpr.id::text
+       AND COALESCE(dce.payload->>'marketplace_participant_request_id', dce.payload->>'marketplace_request_id') = mpr.id::text
   ), 0) AS fleet_compliance_event_count,
   (
     SELECT MAX(dce.created_at)
@@ -124,7 +124,7 @@ SELECT
      WHERE dce.organization_id = mpr.approved_organization_id
        AND dce.user_id = mpr.approved_user_id
        AND dce.event_type = 'marketplace_driver_approved'
-       AND dce.payload->>'marketplace_request_id' = mpr.id::text
+       AND COALESCE(dce.payload->>'marketplace_participant_request_id', dce.payload->>'marketplace_request_id') = mpr.id::text
   ) AS fleet_last_compliance_event_at
 FROM public.marketplace_participant_requests mpr
 LEFT JOIN public.users u ON u.id = mpr.reviewed_by

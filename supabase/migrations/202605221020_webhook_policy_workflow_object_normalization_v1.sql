@@ -576,12 +576,12 @@ BEGIN
 
   IF COALESCE(v_source.managed_metadata->>'plugin_version_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
     v_candidate_version_id := (v_source.managed_metadata->>'plugin_version_id')::UUID;
-  ELSIF COALESCE(v_mapping.managed_metadata->>'plugin_version_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+  ELSIF COALESCE(v_mapping.managed_metadata->>'plugin_version_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
     v_candidate_version_id := (v_mapping.managed_metadata->>'plugin_version_id')::UUID;
   ELSE
     v_mapping_key_version := split_part(COALESCE(v_mapping.mapping_key, ''), ':', 2);
     IF v_mapping.mapping_key LIKE 'integration_plugin:%'
-       AND v_mapping_key_version ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+       AND v_mapping_key_version ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
       v_candidate_version_id := v_mapping_key_version::UUID;
     END IF;
   END IF;

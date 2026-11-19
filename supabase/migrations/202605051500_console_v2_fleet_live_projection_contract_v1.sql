@@ -40,6 +40,29 @@ REVOKE ALL ON public.v_fleet_driver_options FROM anon;
 GRANT SELECT ON public.v_fleet_driver_options TO authenticated;
 GRANT SELECT ON public.v_fleet_driver_options TO service_role;
 
+-- Match the users SELECT policy while keeping the raw table unavailable to browser roles.
+CREATE FUNCTION public.scoped_user_label_v1(p_organization_id uuid, p_user_id uuid)
+RETURNS TABLE (id uuid, full_name text, email text)
+LANGUAGE sql STABLE STRICT SECURITY DEFINER
+SET search_path TO pg_catalog, pg_temp
+AS $label$
+  SELECT u.id, u.full_name, u.email
+  FROM public.users u
+  WHERE u.organization_id = p_organization_id
+    AND u.id = p_user_id
+    AND (
+      current_setting('role', true) IN ('postgres', 'service_role')
+      OR (current_setting('role', true) = 'none' AND session_user IN ('postgres', 'service_role'))
+      OR u.id = auth.uid()
+      OR (
+        public.user_has_capability_v1('users.read')
+        AND (public.is_platform_user() OR u.organization_id = public.current_user_org_id())
+      )
+    );
+$label$;
+REVOKE ALL ON FUNCTION public.scoped_user_label_v1(uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.scoped_user_label_v1(uuid, uuid) TO authenticated, service_role;
+
 -- Fleet screens display assigned driver labels without access to the user directory.
 CREATE FUNCTION public.fleet_driver_display_name_v1(p_organization_id uuid, p_user_id uuid)
 RETURNS text
@@ -95,7 +118,7 @@ SELECT
   va.created_at,
   va.updated_at
 FROM public.vehicle_assignments va
-LEFT JOIN public.users u ON u.id = va.assigned_to_user_id;
+LEFT JOIN LATERAL public.scoped_user_label_v1(va.organization_id, va.assigned_to_user_id) u ON TRUE;
 
 COMMENT ON VIEW public.v_vehicle_assignment_directory IS
   'Console V2 vehicle assignment history projection with driver_user_id compatibility alias and operator-facing driver_name. SSOT remains vehicle_assignments.';
@@ -127,7 +150,7 @@ SELECT
   ve.metadata AS payload,
   ve.created_at
 FROM public.vehicle_events ve
-LEFT JOIN public.users u ON u.id = ve.actor_user_id;
+LEFT JOIN LATERAL public.scoped_user_label_v1(ve.organization_id, ve.actor_user_id) u ON TRUE;
 
 COMMENT ON VIEW public.v_vehicle_event_directory IS
   'Console V2 vehicle event projection with operator-facing actor_name and payload compatibility alias. SSOT remains vehicle_events.metadata.';
