@@ -51,6 +51,24 @@ BEGIN
       access_scope_type = EXCLUDED.access_scope_type,
       access_scope_id = EXCLUDED.access_scope_id;
 
+  -- The bank account RLS policy requires an explicit tenant permission.
+  PERFORM public.provision_rbac_roles_from_templates_v1(v_org, ARRAY['ops_admin'], v_ops_user);
+
+  INSERT INTO public.rbac_user_role_assignments (organization_id, user_id, role_id, assigned_by_user_id)
+  SELECT v_org, v_ops_user, role.id, v_ops_user
+  FROM public.rbac_roles AS role
+  WHERE role.organization_id = v_org AND role.key = 'ops_admin'
+  ON CONFLICT DO NOTHING;
+
+  INSERT INTO public.rbac_role_permissions (organization_id, role_id, permission_id)
+  SELECT v_org, role.id, permission.id
+  FROM public.rbac_roles AS role
+  JOIN public.lookup_definitions AS definition ON definition.category = 'rbac_permission'
+  JOIN public.lookup_values AS permission ON permission.lookup_definition_id = definition.id
+  WHERE role.organization_id = v_org AND role.key = 'ops_admin'
+    AND permission.value = 'finance.read'
+  ON CONFLICT DO NOTHING;
+
   DELETE FROM public.bank_accounts
   WHERE organization_id IN (v_org, v_other_org)
     AND key LIKE 'cv2-bank-account-setup-%';
