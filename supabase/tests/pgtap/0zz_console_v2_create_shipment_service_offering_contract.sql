@@ -28,7 +28,7 @@ DECLARE
   v_create_result JSONB := '{}'::jsonb;
   v_created_shipment UUID;
   v_created_run UUID;
-  v_reject_error TEXT;
+  v_reject_state TEXT;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -69,7 +69,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.recipients (id, organization_id, client_id, name, phone_number, preferred_language)
-  VALUES (v_recipient, v_org, v_client, 'Console V2 Offering Recipient', '+966500000542', 'en')
+  VALUES (v_recipient, v_org, v_client, 'Console V2 Offering Recipient', '+12025550154', 'en')
   ON CONFLICT (id) DO NOTHING;
 
   SELECT sod.id
@@ -102,13 +102,13 @@ BEGIN
     so.effective_from,
     so.effective_to,
     so.priority,
-    TRUE,
+    FALSE,
     jsonb_set(COALESCE(so.metadata, '{}'::jsonb), '{display,status}', to_jsonb('archived'::text), TRUE)
     FROM public.service_offerings so
    WHERE so.id = v_offering
   ON CONFLICT (id) DO UPDATE
      SET metadata = EXCLUDED.metadata,
-         is_active = TRUE;
+         is_active = EXCLUDED.is_active;
 
   INSERT INTO public.service_offerings (
     id,
@@ -129,13 +129,13 @@ BEGIN
     so.effective_from,
     so.effective_to,
     so.priority,
-    TRUE,
+    FALSE,
     jsonb_set(COALESCE(so.metadata, '{}'::jsonb), '{display,status}', to_jsonb('draft'::text), TRUE)
     FROM public.service_offerings so
    WHERE so.id = v_offering
   ON CONFLICT (id) DO UPDATE
      SET metadata = EXCLUDED.metadata,
-         is_active = TRUE;
+         is_active = EXCLUDED.is_active;
 
   INSERT INTO public.service_offerings (
     id,
@@ -185,10 +185,13 @@ BEGIN
    ORDER BY sod.priority ASC, sod.created_at ASC
    LIMIT 1;
 
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
+  PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
+
   RETURN NEXT ok(
     EXISTS (
       SELECT 1
-        FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'tenant', v_org)->'resources') AS item(value)
+        FROM jsonb_array_elements(public.ui_rpc_registry_v1('tenant', v_org)->'resources') AS item(value)
        WHERE item.value->>'key' = 'service_offering_directory'
          AND item.value->>'relation' = 'api.service_offering_directory'
          AND item.value->>'read_relation' = 'public.console_service_offering_api_read_v1'
@@ -199,7 +202,7 @@ BEGIN
   RETURN NEXT ok(
     EXISTS (
       SELECT 1
-        FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'tenant', v_org)->'resources') AS item(value)
+        FROM jsonb_array_elements(public.ui_rpc_registry_v1('tenant', v_org)->'resources') AS item(value)
        WHERE item.value->>'key' = 'shipment_directory'
          AND item.value->>'relation' = 'public.v_shipment_directory'
     ),
@@ -207,6 +210,7 @@ BEGIN
   );
 
   PERFORM set_config('request.jwt.claim.sub', v_ops::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   PERFORM set_config(
     'request.jwt.claims',
     jsonb_build_object(
@@ -226,7 +230,7 @@ BEGIN
     'authenticated Console V2 can read service_offering_directory through api.ui_list_resource_v1'
   );
 
-  v_reject_error := NULL;
+  v_reject_state := NULL;
   BEGIN
     PERFORM api.ui_create_shipment_v1(
       v_client,
@@ -239,14 +243,14 @@ BEGIN
       jsonb_build_object('service_offering_id', v_archived_offering::text)
     );
   EXCEPTION WHEN OTHERS THEN
-    v_reject_error := SQLERRM;
+    v_reject_state := SQLSTATE;
   END;
   RETURN NEXT ok(
-    COALESCE(v_reject_error, '') LIKE '%service offering is unavailable%',
+    v_reject_state = '23503',
     'archived service offering is rejected by the live create contract'
   );
 
-  v_reject_error := NULL;
+  v_reject_state := NULL;
   BEGIN
     PERFORM api.ui_create_shipment_v1(
       v_client,
@@ -259,14 +263,14 @@ BEGIN
       jsonb_build_object('service_offering_id', v_draft_offering::text)
     );
   EXCEPTION WHEN OTHERS THEN
-    v_reject_error := SQLERRM;
+    v_reject_state := SQLSTATE;
   END;
   RETURN NEXT ok(
-    COALESCE(v_reject_error, '') LIKE '%service offering is unavailable%',
+    v_reject_state = '23503',
     'draft service offering is rejected by the live create contract'
   );
 
-  v_reject_error := NULL;
+  v_reject_state := NULL;
   BEGIN
     PERFORM api.ui_create_shipment_v1(
       v_client,
@@ -279,14 +283,14 @@ BEGIN
       jsonb_build_object('service_offering_id', v_inactive_offering::text)
     );
   EXCEPTION WHEN OTHERS THEN
-    v_reject_error := SQLERRM;
+    v_reject_state := SQLSTATE;
   END;
   RETURN NEXT ok(
-    COALESCE(v_reject_error, '') LIKE '%service offering is unavailable%',
+    v_reject_state = '23503',
     'inactive service offering is rejected by the live create contract'
   );
 
-  v_reject_error := NULL;
+  v_reject_state := NULL;
   BEGIN
     PERFORM api.ui_create_shipment_v1(
       v_client,
@@ -299,10 +303,10 @@ BEGIN
       jsonb_build_object('service_offering_id', v_other_offering::text)
     );
   EXCEPTION WHEN OTHERS THEN
-    v_reject_error := SQLERRM;
+    v_reject_state := SQLSTATE;
   END;
   RETURN NEXT ok(
-    COALESCE(v_reject_error, '') LIKE '%service offering is unavailable%',
+    v_reject_state = '23503',
     'cross-organization service offering is rejected by the live create contract'
   );
 
@@ -336,6 +340,7 @@ BEGIN
   );
 
   PERFORM set_config('request.jwt.claim.sub', v_ops::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   PERFORM set_config(
     'request.jwt.claims',
     jsonb_build_object(

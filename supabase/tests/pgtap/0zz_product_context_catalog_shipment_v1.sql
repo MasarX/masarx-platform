@@ -161,12 +161,12 @@ BEGIN
    WHERE category = 'service_level';
 
   INSERT INTO public.lookup_values (
-    lookup_definition_id, value, label, status, retired_at
+    lookup_definition_id, value, label, status, retired_at, effective_from
   ) VALUES
-    (v_definition, 'b5_retired', 'B5 retired', 'archived', public.workflow_now()),
-    (v_definition, 'example_active_level', 'Example Active Level', 'active', NULL)
+    (v_definition, 'b5_retired', 'B5 retired', 'archived', public.workflow_now(), now()),
+    (v_definition, 'example_active_level', 'Example Active Level', 'active', NULL, now())
   ON CONFLICT (lookup_definition_id, value)
-  DO UPDATE SET status = EXCLUDED.status, retired_at = EXCLUDED.retired_at;
+  DO UPDATE SET status = EXCLUDED.status, retired_at = EXCLUDED.retired_at, effective_from = EXCLUDED.effective_from;
 
   PERFORM set_config('test.b5_catalog_org', v_org::text, true);
   PERFORM set_config('test.b5_catalog_foreign_org', v_foreign_org::text, true);
