@@ -20,6 +20,12 @@
 **/package.json                       @MasarX/platform-ops
 **/package-lock.json                  @MasarX/platform-ops
 /deno.lock                            @MasarX/platform-ops
+**/npm-shrinkwrap.json                @MasarX/platform-ops
+**/yarn.lock                          @MasarX/platform-ops
+**/pnpm-lock.yaml                     @MasarX/platform-ops
+**/pnpm-workspace.yaml                @MasarX/platform-ops
+**/bun.lock*                          @MasarX/platform-ops
+**/.yarn/                             @MasarX/platform-ops
 **/.npmrc                             @MasarX/platform-ops
 **/.yarnrc*                           @MasarX/platform-ops
 **/.pnpmfile.*                        @MasarX/platform-ops
