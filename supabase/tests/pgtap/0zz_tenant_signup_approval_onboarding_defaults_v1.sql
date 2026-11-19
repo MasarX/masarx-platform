@@ -586,7 +586,7 @@ BEGIN
 
   RETURN NEXT ok(
     (SELECT last_error_code = 'invite_email_failed'
-       AND last_error_message = 'SMTP provider refused recipient'
+       AND last_error_message = 'Invite email could not be sent'
        AND last_error_at IS NOT NULL
        FROM public.tenant_signup_requests
       WHERE id = v_invite_failure_req_id),
