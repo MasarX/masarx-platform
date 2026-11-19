@@ -1314,6 +1314,56 @@ describe('landing app language routing', () => {
     }
   });
 
+  test.each([[false, 'smooth'], [true, 'auto']])('tracking reset focuses synchronously with reduced motion %s', (reducedMotion, behavior) => {
+    jest.useFakeTimers();
+    const originalMatchMedia = window.matchMedia;
+    const originalMotion = document.documentElement.getAttribute('data-motion');
+    window.matchMedia = (query) => ({ matches: reducedMotion && query === '(prefers-reduced-motion: reduce)' });
+    document.documentElement.removeAttribute('data-motion');
+    window.sessionStorage.clear();
+    try {
+      let offsetAtScroll;
+      let focusAtScroll;
+      const scrollIntoView = jest.fn(() => {
+        offsetAtScroll = document.documentElement.style.getPropertyValue('--scroll-offset');
+        focusAtScroll = document.activeElement;
+      });
+      loadLandingApp({
+        url: 'http://localhost/track/',
+        extraHtml: '<header class="header"></header><main data-public-tracking-page>'
+          + '<section data-track-stage="lookup"><form data-track-lookup-form>'
+          + '<input name="reference" value="REF"></form></section>'
+          + '<button type="button" data-track-reset>Reset</button><button type="button" id="next">Next</button></main>',
+        beforeLoad() {
+          Object.defineProperty(document.querySelector('.header'), 'offsetHeight', { value: 64 });
+          document.querySelector('[data-track-stage="lookup"]').scrollIntoView = scrollIntoView;
+        },
+      });
+      const reference = document.querySelector('[name="reference"]');
+      const reset = document.querySelector('[data-track-reset]');
+      const next = document.getElementById('next');
+      reset.focus();
+      reset.click();
+      const focusAfterReset = document.activeElement;
+      const selectionAfterReset = [reference.selectionStart, reference.selectionEnd];
+
+      next.focus();
+      jest.runOnlyPendingTimers();
+
+      expect(document.activeElement).toBe(next);
+      expect(focusAfterReset).toBe(reference);
+      expect(selectionAfterReset).toEqual([0, reference.value.length]);
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior, block: 'start' });
+      expect(offsetAtScroll).toBe('80px');
+      expect(focusAtScroll).toBe(reset);
+    } finally {
+      window.matchMedia = originalMatchMedia;
+      if (originalMotion === null) document.documentElement.removeAttribute('data-motion');
+      else document.documentElement.setAttribute('data-motion', originalMotion);
+      jest.useRealTimers();
+    }
+  });
+
   test.each(['en', 'ar'])('Requests links follow lookup, verify, back, results and reset (%s)', async (lang) => {
     window.sessionStorage.clear();
     const scroll = jest.spyOn(window, 'scrollTo').mockImplementation(() => {});
