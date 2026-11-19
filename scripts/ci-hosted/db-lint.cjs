@@ -34,7 +34,7 @@ function invocation(env) {
   if (!env.SUPABASE_CLI_BIN) throw new Error('SUPABASE_CLI_BIN must name the verified CLI');
   const parsed = new URL(env.DATABASE_URL || env.DATABASE_URL_DIRECT || '');
   if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) throw new Error('Invalid database lint URL protocol');
-  if (parsed.searchParams.has('host')) throw new Error('Database lint URL must specify its loopback host in the authority');
+  if (['host', 'hostaddr', 'service', 'servicefile'].some(key => parsed.searchParams.has(key))) throw new Error('Database lint URL must specify its loopback host in the authority');
   let password = decodeURIComponent(parsed.password);
   const passwords = parsed.searchParams.getAll('password');
   if (passwords.length > 1 || (password && passwords.length && password !== passwords[0])) throw new Error('Ambiguous database password');

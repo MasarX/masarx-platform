@@ -262,6 +262,9 @@ async function main() {
     assert.throws(() => invocation({ ...lintEnv, SUPABASE_CLI_BIN: '' }), /verified CLI/);
     assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: 'postgresql://postgres@unreviewed.invalid/postgres' }), /loopback/i);
     assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: lintEnv.DATABASE_URL + '?host=unreviewed.invalid' }), /loopback/i);
+    for (const key of ['hostaddr=192.0.2.1', 'service=unreviewed', 'servicefile=/tmp/unreviewed']) {
+      assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: lintEnv.DATABASE_URL + '?' + key }), /loopback/i);
+    }
     assert.throws(() => invocation({ ...lintEnv, DATABASE_URL: lintEnv.DATABASE_URL + '?password=other' }), /Ambiguous/);
     const registry = [{ extension: 'synthetic_extension' }];
     const ownership = new Map([['public.synthetic_extension_fn', 'synthetic_extension']]);
