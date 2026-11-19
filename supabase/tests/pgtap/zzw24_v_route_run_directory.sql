@@ -89,6 +89,7 @@ DECLARE
   v_run_display TEXT;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
 
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'W24 Route Run Directory Org', 'w24-route-run-org')
@@ -178,7 +179,7 @@ BEGIN
   WHERE id = v_run;
 
   RETURN NEXT ok(
-    v_branch_label = 'W24 RRD Branch'
+    v_branch_label = (SELECT code || ' ' || chr(183) || ' ' || name FROM public.branches WHERE id = v_branch)
       AND v_driver_label = 'W24 Test Driver'
       AND v_vehicle_label = 'W24 PLATE 024'
       AND v_stop_count = 1
@@ -213,6 +214,7 @@ DECLARE
   v_alt_assign_mode TEXT;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
 
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'W24 Partner Run Org', 'w24-partner-run-org')
@@ -308,7 +310,7 @@ BEGIN
     v_alt_partner_name = 'W24 Overflow Pool'
       AND v_alt_is_partner = TRUE
       AND v_alt_assign_mode = 'alternate_capacity_pool',
-    'v_route_run_directory derives is_partner_run for alternate_capacity_pool from lookup metadata'
+    'v_route_run_directory derives is_partner_run for the alternate capacity assignment'
   );
 END;
 $$;

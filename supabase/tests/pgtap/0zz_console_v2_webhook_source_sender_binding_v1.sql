@@ -283,14 +283,15 @@ SELECT client_id::text AS client_id
 
 CREATE TEMP TABLE _webhook_source_plugin_policy_readback AS
 SELECT b.plugin_version_id::text AS plugin_version_id,
-       p.policy#>>'{workflow,intent}' AS policy_intent
+       s.cached_value#>>'{workflow,intent}' AS policy_intent
   FROM public.webhook_sources ws
-  JOIN public.integration_plugin_bindings b
+  LEFT JOIN public.integration_plugin_bindings b
     ON b.runtime_resource_type = 'webhook_sources'
-   AND b.runtime_resource_id = ws.id
-  CROSS JOIN LATERAL public.resolve_webhook_ingest_policy(ws.id) p
- WHERE ws.source_identifier = 'console-v2-webhook-source-sender-binding'
- LIMIT 1;
+   AND b.runtime_resource_id = ws.id AND b.enabled
+   AND b.binding_type = 'webhook_source'
+  JOIN public.settings s
+    ON s.category = 'webhook_ingest_policy' AND s.scope_type = 'source' AND s.scope_id = ws.id
+ WHERE ws.source_identifier = 'console-v2-webhook-source-sender-binding';
 
 SET LOCAL ROLE authenticated;
 SET LOCAL search_path TO public, pg_temp;
@@ -403,7 +404,7 @@ SELECT is(
 );
 
 SELECT is(
-  (SELECT plugin_version_id FROM _webhook_source_plugin_policy_readback LIMIT 1),
+  (SELECT plugin_version_id FROM _webhook_source_plugin_policy_readback),
   'c8f1d8f3-1e7f-4fb5-9f75-79f369473a42',
   'source upsert creates a runtime plugin binding for the selected shipment mapping'
 );

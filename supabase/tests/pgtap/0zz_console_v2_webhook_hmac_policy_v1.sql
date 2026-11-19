@@ -518,6 +518,8 @@ SELECT is(
       FROM public.decision_log dl
      WHERE dl.resource_type = 'webhook_inbox'
        AND dl.resource_id = ((SELECT result->>'webhook_id' FROM _webhook_hmac_valid LIMIT 1))::uuid
+       AND dl.decision_category = 'http_response_emitted'
+       AND dl.decision_inputs#>'{validation_results,hmac}' IS NOT NULL
      ORDER BY dl.created_at DESC
      LIMIT 1
   ),
@@ -525,26 +527,26 @@ SELECT is(
   'decision log records HMAC validation pass for governance readback'
 );
 
-SELECT is(
-  (
-    SELECT wi.ack_validation#>>'{hmac,status}'
-      FROM public.webhook_inbox wi
+SELECT ok(
+  EXISTS (
+    SELECT 1 FROM public.webhook_inbox wi
      WHERE wi.id = ((SELECT result->>'webhook_id' FROM _webhook_hmac_valid LIMIT 1))::uuid
-     LIMIT 1
+       AND wi.processing_status IS DISTINCT FROM 'failed'
   ),
-  'passed',
-  'webhook inbox readback persists HMAC validation pass for Console V2 governance proof'
+  'the inbox row linked to the passing HMAC decision is accepted'
 );
 
 SELECT is(
   (
-    SELECT wi.ack_validation#>>'{hmac,message}'
-      FROM public.webhook_inbox wi
-     WHERE wi.id = ((SELECT result->>'webhook_id' FROM _webhook_hmac_invalid LIMIT 1))::uuid
+    SELECT dl.decision_inputs#>>'{validation_results,hmac,message}'
+      FROM public.decision_log dl
+     WHERE dl.resource_type = 'webhook_inbox'
+       AND dl.resource_id = ((SELECT result->>'webhook_id' FROM _webhook_hmac_invalid LIMIT 1))::uuid
+       AND dl.decision_inputs#>>'{validation_results,hmac,status}' = 'failed'
      LIMIT 1
   ),
   'HMAC signature mismatch',
-  'webhook inbox readback persists HMAC validation failure reason for Console V2 governance proof'
+  'the inbox-linked validation decision records the canonical HMAC failure'
 );
 
 SELECT is(

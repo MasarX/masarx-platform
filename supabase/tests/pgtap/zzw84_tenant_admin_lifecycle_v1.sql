@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(20);
+SELECT plan(21);
 
 DO $$
 DECLARE
@@ -277,10 +277,19 @@ SELECT ok(
 SELECT lives_ok(
   $$ SELECT public.ui_update_organization_profile_v1(jsonb_build_object(
        'organization_id', current_setting('test.w84_org_a'),
-       'name', 'W84 Tenant A Updated',
+       'name', 'W84 Tenant A Updated'
+     )) $$,
+  'ui_update_organization_profile_v1 accepts a permitted profile update'
+);
+
+SELECT throws_ok(
+  $$ SELECT public.ui_update_organization_profile_v1(jsonb_build_object(
+       'organization_id', current_setting('test.w84_org_a'),
        'billing_status', 'suspended'
      )) $$,
-  'ui_update_organization_profile_v1 accepts profile update without exposing billing mutation'
+  '22023',
+  'Invalid profile fields',
+  'ui_update_organization_profile_v1 rejects billing fields'
 );
 RESET ROLE;
 

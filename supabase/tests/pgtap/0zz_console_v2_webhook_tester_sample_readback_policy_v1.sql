@@ -143,7 +143,7 @@ SELECT ok(
 
 SELECT is(
   (
-    SELECT d.workflow_binding->>'intent'
+    SELECT public.normalize_shipment_intent_v1(d.mapping_config->>'target', NULL)
     FROM public.onboarding_integration_plugin_defaults d
     WHERE d.profile_key = 'default'
       AND d.scope_type = 'tenant'
@@ -194,16 +194,8 @@ WITH registry AS (
   WHERE resource->>'key' = 'webhook_inbox'
 )
 SELECT ok(
-  EXISTS (
-    SELECT 1
-    FROM registry
-    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(resource->'filters', '[]'::jsonb)) AS filter
-    WHERE filter->>'key' IN ('id', 'organization_id', 'webhook_source_id', 'workflow_run_id', 'idempotency_key')
-    GROUP BY resource
-    HAVING COUNT(DISTINCT filter->>'key') = 5
-  )
-  AND (SELECT resource#>>'{scope_columns,tenant}' FROM registry LIMIT 1) = 'organization_id',
-  'raw webhook inbox registry supports tenant-scoped source/workflow/idempotency filters'
+  NOT EXISTS (SELECT 1 FROM registry),
+  'raw webhook inbox is absent from the browser read registry'
 );
 
 WITH registry AS (
@@ -621,7 +613,7 @@ SELECT is(
       '{"event":{"id":"evt-missing-template-proof","type":"shipment.created"}}'::jsonb
     )->'body'->>'error'
   ),
-  'webhook_intake entry_template_id not configured',
+  'Webhook intake entry template is not configured',
   'webhook intake fails closed when settings omit entry_template_id'
 );
 

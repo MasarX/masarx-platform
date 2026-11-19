@@ -11,6 +11,7 @@ WITH security_definers AS (
     p.oid,
     n.nspname AS schema_name,
     p.proname AS function_name,
+    p.proargtypes,
     p.proconfig
   FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -27,7 +28,7 @@ parsed_paths AS (
   SELECT
     sd.schema_name,
     sd.function_name,
-    pg_get_function_identity_arguments(sd.oid) AS signature,
+    oidvectortypes(sd.proargtypes) AS signature,
     ARRAY(
       SELECT trim(both ' ' FROM elem)
       FROM unnest(string_to_array(split_part(cfg, '=', 2), ',')) AS elem
@@ -54,7 +55,7 @@ WHERE search_path IS NULL
    );
 
 -- Each failed assertion identifies the public catalog object without emitting settings values.
-SELECT ok(FALSE, format('Trusted SECURITY DEFINER search path for %I.%I(%s)',
+SELECT ok(FALSE, format('Trusted path for %I.%I(%s)',
   schema_name, function_name, signature))
 FROM tmp_secdef_search_path_violations
 ORDER BY schema_name, function_name, signature;

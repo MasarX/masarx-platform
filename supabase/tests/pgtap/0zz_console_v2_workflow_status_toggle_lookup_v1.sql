@@ -23,27 +23,24 @@ SELECT ok(
       JOIN public.lookup_values lv ON lv.lookup_definition_id = ld.id
      WHERE ld.category = 'workflow_status'
        AND lv.value = 'active'
-       AND lv.metadata->>'toggle_to' = 'inactive'
-       AND lv.metadata->>'toggle_label' = 'Deactivate'
+       AND lv.metadata->>'toggle_to' = 'archived'
+       AND lv.metadata->>'toggle_label' = 'Archive'
        AND lv.metadata->>'toggle_kind' = 'danger'
        AND lv.metadata->>'toggle_icon' = 'lock'
   ),
-  'active workflow status carries deactivate toggle metadata'
+  'active workflow status carries archive toggle metadata'
 );
 
 SELECT ok(
-  EXISTS (
+  NOT EXISTS (
     SELECT 1
       FROM public.lookup_definitions ld
       JOIN public.lookup_values lv ON lv.lookup_definition_id = ld.id
      WHERE ld.category = 'workflow_status'
-       AND lv.value = 'inactive'
-       AND lv.metadata->>'toggle_to' = 'active'
-       AND lv.metadata->>'toggle_label' = 'Activate'
-       AND lv.metadata->>'toggle_kind' = 'primary'
-       AND lv.metadata->>'toggle_icon' = 'check'
+       AND lv.value IN ('inactive', 'retired')
+       AND lv.status = 'active'
   ),
-  'inactive workflow status carries activate toggle metadata'
+  'superseded workflow statuses are absent from the active lookup'
 );
 
 SELECT ok(
@@ -60,13 +57,14 @@ SELECT ok(
 
 SELECT ok(
   (
-    SELECT count(*)
+    SELECT count(DISTINCT lv.value)
       FROM public.lookup_definitions ld
       JOIN public.lookup_values lv ON lv.lookup_definition_id = ld.id
      WHERE ld.category = 'workflow_status'
        AND lv.status = 'active'
+       AND lv.value IN ('draft', 'active')
        AND lv.metadata ? 'toggle_kind'
-  ) >= 4,
+  ) = 2,
   'workflow status rows carry row-driven button presentation metadata'
 );
 

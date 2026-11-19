@@ -11,6 +11,8 @@
 -- an unconditional 'cleared' result fails here.
 
 BEGIN;
+CREATE EXTENSION IF NOT EXISTS pgtap;
+SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SELECT plan(2);
 
 SELECT ok(

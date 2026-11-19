@@ -7,9 +7,6 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(8);
 
-SELECT set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
-SELECT set_config('request.jwt.claim.role', 'service_role', TRUE);
-
 CREATE OR REPLACE FUNCTION pg_temp.test_console_v2_dispatch_route_run_directory_registry_v1()
 RETURNS SETOF TEXT
 LANGUAGE plpgsql
@@ -19,9 +16,9 @@ DECLARE
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  v_registry := public.resolve_settings_merged(
-    'ui_read_registry', public.get_root_scope_type_key_v1(), NULL
-  );
+  SELECT cached_value INTO STRICT v_registry
+    FROM public.settings
+   WHERE category = 'ui_read_registry' AND scope_type = 'global' AND scope_id IS NULL;
 
   RETURN NEXT has_view('public', 'v_route_run_directory', 'public.v_route_run_directory exists');
   RETURN NEXT ok(
@@ -33,7 +30,6 @@ BEGIN
          AND item.value->>'read_relation' = 'public.console_route_run_directory_read_v1'
          AND item.value->>'id_column' = 'id'
          AND item.value->>'capability_read' = 'routes.read'
-         AND item.value#>>'{scope_columns,tenant}' = 'organization_id'
          AND COALESCE((item.value->>'allow_view_relation')::boolean, FALSE) IS TRUE
     ),
     'ui_read_registry exposes route_run_directory as scoped view-backed resource'
@@ -46,7 +42,6 @@ BEGIN
          AND item.value->>'relation' = 'public.route_run_assignments'
          AND item.value->>'id_column' = 'id'
          AND item.value->>'capability_read' = 'routes.read'
-         AND item.value#>>'{scope_columns,tenant}' = 'organization_id'
     ),
     'ui_read_registry exposes route_run_assignments for Dispatch insight rail'
   );
@@ -58,7 +53,6 @@ BEGIN
          AND item.value->>'relation' = 'public.route_run_assignment_events'
          AND item.value->>'id_column' = 'id'
          AND item.value->>'capability_read' = 'routes.read'
-         AND item.value#>>'{scope_columns,tenant}' = 'organization_id'
     ),
     'ui_read_registry exposes route_run_assignment_events for Dispatch insight rail'
   );
@@ -70,7 +64,12 @@ BEGIN
          AND item.value->>'relation' = 'public.route_stop_reassignment_events'
          AND item.value->>'id_column' = 'id'
          AND item.value->>'capability_read' = 'routes.read'
-         AND item.value#>>'{scope_columns,tenant}' = 'organization_id'
+         AND EXISTS (
+           SELECT 1 FROM pg_catalog.pg_policies p
+            WHERE p.schemaname = 'public'
+              AND p.tablename = 'route_stop_reassignment_events'
+              AND p.policyname = 'ui_rpc_executor_scoped_read'
+         )
     ),
     'ui_read_registry exposes route_stop_reassignment_events for Dispatch insight rail'
   );

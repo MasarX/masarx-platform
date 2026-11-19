@@ -481,7 +481,7 @@ SELECT is(
 
 SELECT ok(
   position(
-    '''payload'', COALESCE(v_safe_outbound_body, v_safe_body, ''{}''::jsonb)'
+    '''payload'', public.redact_sensitive_json(v_mapped_body)'
     IN pg_get_functiondef('public.workflow_intake_api_gateway_v1(text,text,text,text,jsonb,jsonb)'::regprocedure)
   ) > 0,
   'API Gateway workflow context exposes mapped request payload at the root for canonical shipment handlers'
@@ -489,7 +489,7 @@ SELECT ok(
 
 SELECT ok(
   position(
-    '''transformed_payload'', CASE'
+    '''transformed_payload'', public.redact_sensitive_json(v_mapped_body)'
     IN pg_get_functiondef('public.workflow_intake_api_gateway_v1(text,text,text,text,jsonb,jsonb)'::regprocedure)
   ) > 0,
   'API Gateway workflow context marks mapped payloads as transformed_payload for materialization handlers'

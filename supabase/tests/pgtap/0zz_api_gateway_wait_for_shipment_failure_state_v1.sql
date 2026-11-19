@@ -504,8 +504,13 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
+UPDATE public.workflow_run_steps
+   SET operation_started_at = now() - interval '5 seconds'
+ WHERE id = '97000000-0000-0000-0000-000000000022';
+
 UPDATE public.api_gateway_requests
-   SET outbound_call_id = '97000000-0000-0000-0000-000000000014',
+   SET workflow_run_id = '97000000-0000-0000-0000-000000000011',
+       outbound_call_id = '97000000-0000-0000-0000-000000000014',
        updated_at = now()
  WHERE id = '97000000-0000-0000-0000-000000000013';
 
@@ -551,7 +556,8 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE public.api_gateway_requests
-   SET outbound_call_id = '97000000-0000-0000-0000-000000000034',
+   SET workflow_run_id = '97000000-0000-0000-0000-000000000031',
+       outbound_call_id = '97000000-0000-0000-0000-000000000034',
        updated_at = now()
  WHERE id = '97000000-0000-0000-0000-000000000033';
 
@@ -620,13 +626,13 @@ SELECT is(
     JOIN public.workflow_run_steps wrs ON wrs.workflow_run_id = wr.id
     WHERE wr.id = '97000000-0000-0000-0000-000000000011'
   ),
-  'credential rejected',
-  'wait_for_shipment exposes provider credential error'
+  'provider_outbound_permanently_failed',
+  'wait_for_shipment exposes a safe provider failure code'
 );
 
 SELECT is(
   (
-    SELECT (workflow_handlers.execute_wait_for_shipment_v1(wrs, wr, '{}'::jsonb)).operation_result->>'outbound_status'
+    SELECT (workflow_handlers.execute_wait_for_shipment_v1(wrs, wr, '{}'::jsonb)).operation_result#>>'{provider_failure,status}'
     FROM public.workflow_runs wr
     JOIN public.workflow_run_steps wrs ON wrs.workflow_run_id = wr.id
     WHERE wr.id = '97000000-0000-0000-0000-000000000011'
@@ -665,7 +671,7 @@ SELECT is(
     WHERE wr.id = '97000000-0000-0000-0000-000000000021'
   ),
   'failed',
-  'wait_for_shipment timeout works when operation_started_at is not persisted'
+  'wait_for_shipment timeout uses the persisted operation start'
 );
 
 SELECT is(

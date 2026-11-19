@@ -328,7 +328,7 @@ BEGIN
   RETURN NEXT throws_ok(
     $$ SELECT public.ui_list_resource_v1('recipient_directory', '{}'::jsonb, 50, 0, '[]'::jsonb) $$,
     '42501',
-    'ui_list_resource_v1 resource recipient_directory missing sender scope column',
+    'Recipient directory requires a sender scope binding',
     'sender-scoped recipient_directory fails closed without a sender scope column'
   );
 

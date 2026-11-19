@@ -109,20 +109,16 @@ SELECT is(
     'tenant',
     current_setting('test.first_tenant_id')::uuid
   )->>'v2_enabled',
-  'true',
-  'first tenant mobile_shell_policy resolves Mobile V2 enabled from tenant materialized settings'
+  'false',
+  'materialized tenant defaults keep Mobile V2 off without explicit opt-in'
 );
 
-SELECT ok(
-  NULLIF(
-    public.resolve_settings(
-      'mobile_shell_policy',
-      'tenant',
-      current_setting('test.first_tenant_id')::uuid
-    )->>'rollout_cohort',
-    ''
-  ) IS NOT NULL,
-  'first tenant mobile_shell_policy carries a row-driven rollout cohort'
+SELECT is(
+  public.resolve_settings(
+    'mobile_shell_policy', 'tenant', current_setting('test.first_tenant_id')::uuid
+  )->>'rollout_cohort',
+  NULL::text,
+  'materialized tenant defaults do not assign a rollout cohort'
 );
 
 SELECT is(
@@ -133,8 +129,8 @@ SELECT is(
     ) AS r
     LIMIT 1
   ),
-  'true',
-  'mobile shell policy row resolver returns tenant V2 cutover for first tenant context'
+  'false',
+  'mobile shell policy row resolver keeps Mobile V2 off without opt-in'
 );
 
 SELECT is(

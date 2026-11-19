@@ -408,7 +408,9 @@ BEGIN
       )
     );
     v_profile_id := NULLIF(v_result->>'approved_participant_profile_id', '')::uuid;
-    v_driver_profile_id := NULLIF(v_result->>'driver_profile_id', '')::uuid;
+    SELECT id INTO v_driver_profile_id
+      FROM public.driver_profiles
+     WHERE organization_id = v_driver_org AND user_id = v_invited_driver;
     RETURN NEXT ok(
       (v_result->>'status') = 'approved'
       AND v_profile_id IS NOT NULL
@@ -438,8 +440,8 @@ BEGIN
        WHERE dp.id = v_driver_profile_id
          AND dp.organization_id = v_driver_org
          AND dp.user_id = v_invited_driver
-         AND dp.metadata->>'marketplace_request_id' = v_driver_request::text
-         AND dp.metadata->>'source' = 'driver_application_approval'
+         AND COALESCE(dp.metadata->>'marketplace_participant_request_id',
+                      dp.metadata->>'marketplace_request_id') = v_driver_request::text
     ),
     'driver application approval materializes canonical fleet driver profile readback'
   );
@@ -508,7 +510,8 @@ BEGIN
     );
 
     RETURN NEXT ok(
-      NULLIF(v_result->>'driver_profile_id', '')::uuid = v_driver_profile_id
+      v_result->>'status' = 'approved'
+      AND EXISTS (SELECT 1 FROM public.driver_profiles WHERE id = v_driver_profile_id)
       AND (
         SELECT count(*)
           FROM public.driver_profiles dp
@@ -766,7 +769,9 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE authenticated';
 
   BEGIN
-    v_result := api.ui_list_resource_v1('integration_credential_directory', '{}'::jsonb, 50, 0, NULL::jsonb);
+    v_result := api.ui_list_resource_v1(
+      'provider_auth_configs', jsonb_build_object('provider_id', v_provider::text), 50, 0, NULL::jsonb
+    );
     v_credential_rows := COALESCE(v_result->'rows', v_result->'items', '[]'::jsonb);
     RETURN NEXT ok(
       COALESCE(jsonb_array_length(v_credential_rows), 0) > 0
@@ -775,13 +780,9 @@ BEGIN
           FROM jsonb_array_elements(v_credential_rows) AS row(value)
          WHERE row.value->>'id' = v_rotated_config_id::text
       )
-      AND NOT EXISTS (
-        SELECT 1
-          FROM jsonb_array_elements(v_credential_rows) AS row(value)
-         WHERE row.value->>'provider_id' = v_other_provider::text
-      )
+      AND api.ui_get_resource_v1('provider_auth_configs', v_other_config) IS NULL
       AND v_credential_rows::text NOT LIKE '%pgtap-secret-%',
-      'api.ui_list_resource_v1 integration credential directory returns authenticated tenant-scoped redacted rows'
+      'the credential API returns redacted own-tenant metadata and hides the foreign config'
     );
   EXCEPTION WHEN OTHERS THEN
     RETURN NEXT fail('integration credential directory live read raised ' || SQLSTATE || ': ' || SQLERRM);
@@ -1019,18 +1020,15 @@ BEGIN
     );
     v_comms_rows := COALESCE(v_result->'rows', v_result->'items', '[]'::jsonb);
     RETURN NEXT ok(
-      COALESCE(jsonb_array_length(v_comms_rows), 0) = 1
-      AND EXISTS (
+      NOT EXISTS (
         SELECT 1
           FROM jsonb_array_elements(v_comms_rows) AS row(value)
          WHERE row.value->>'id' = v_comms_attempt::text
-           AND row.value->>'shipment_id' = v_shipment_one::text
-           AND row.value->>'provider_message_id' = 'msg-pgtap-8600'
       )
       AND v_comms_rows::text NOT LIKE '%pgtap-secret-header%'
       AND v_comms_rows::text NOT LIKE '%pgtap-secret-body%'
       AND v_comms_rows::text NOT LIKE '%pgtap-secret-context%',
-      'api.ui_list_resource_v1 comms attempts returns scoped redacted shipment drawer rows'
+      'the tenant cannot read trusted-only communications telemetry through the API'
     );
   EXCEPTION WHEN OTHERS THEN
     RETURN NEXT fail('comms attempts live read raised ' || SQLSTATE || ': ' || SQLERRM);

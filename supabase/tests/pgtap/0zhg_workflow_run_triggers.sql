@@ -175,8 +175,8 @@ BEGIN
 
   RETURN NEXT is(
     (SELECT source_statuses FROM public.workflow_run_triggers WHERE id = v_trigger_id),
-    ARRAY['succeeded']::TEXT[],
-    'legacy completed trigger status is canonicalized to succeeded'
+    ARRAY['completed']::TEXT[],
+    'client trigger stores canonical completed source status'
   );
 
   EXECUTE 'RESET ROLE';
@@ -215,8 +215,8 @@ BEGIN
 
   RETURN NEXT is(
     (SELECT source_statuses FROM public.workflow_run_triggers WHERE id = v_platform_trigger_id),
-    ARRAY['succeeded']::TEXT[],
-    'platform trigger stores canonical succeeded source status'
+    ARRAY['completed']::TEXT[],
+    'platform trigger stores canonical completed source status'
   );
 
   EXECUTE 'RESET ROLE';
@@ -251,8 +251,8 @@ BEGIN
 
   RETURN NEXT is(
     (SELECT source_statuses FROM public.workflow_run_triggers WHERE id = v_platform_active_trigger_id),
-    ARRAY['succeeded']::TEXT[],
-    'platform active tenant trigger stores canonical succeeded source status'
+    ARRAY['completed']::TEXT[],
+    'platform active tenant trigger stores canonical completed source status'
   );
 
   RETURN NEXT ok(

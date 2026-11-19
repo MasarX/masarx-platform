@@ -414,6 +414,17 @@ SET issuer = EXCLUDED.issuer,
     status = EXCLUDED.status,
     metadata = EXCLUDED.metadata;
 
+-- The invoker projections join users through the receiving users.read policy.
+INSERT INTO public.rbac_role_permissions (organization_id, role_id, permission_id)
+SELECT r.organization_id, r.id, lv.id
+  FROM public.rbac_roles r
+  CROSS JOIN public.lookup_values lv
+  JOIN public.lookup_definitions ld ON ld.id = lv.lookup_definition_id
+ WHERE r.organization_id = 'ac65f701-2b52-4efd-9b9f-f9e8c5f14301'
+   AND r.key = 'fleet_manager'
+   AND ld.category = 'rbac_permission' AND lv.value = 'users.read' AND lv.status = 'active'
+ON CONFLICT DO NOTHING;
+
 SET LOCAL ROLE authenticated;
 
 SELECT set_config('request.jwt.claim.sub', '253d3fab-d32d-4669-8ca1-27978cb95f04', true);
@@ -504,7 +515,7 @@ SELECT ok(
 WITH v_payload AS (
   SELECT api.ui_list_resource_v1(
     'drivers',
-    jsonb_build_object('user_id', '253d3fab-d32d-4669-8ca1-27978cb95f14'),
+    jsonb_build_object('id', '253d3fab-d32d-4669-8ca1-27978cb95f14'),
     5,
     0,
     NULL::jsonb

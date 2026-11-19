@@ -35,8 +35,9 @@ DECLARE
   v_signature TEXT;
   v_proc_oid OID;
   v_is_definer BOOLEAN;
-  v_identity_invokers CONSTANT TEXT[] := ARRAY[
-    'branch_zone_assign_v1', 'branch_zone_unassign_v1', 'add_branch_member_v1'
+  v_guarded_invokers CONSTANT TEXT[] := ARRAY[
+    'branch_zone_assign_v1', 'branch_zone_unassign_v1', 'add_branch_member_v1',
+    'service_level_create_v1', 'service_offering_create_v1'
   ];
   v_rpcs TEXT[] := ARRAY[
     -- Group 1: customers + identity (5)
@@ -102,9 +103,9 @@ BEGIN
       format('service_role has EXECUTE on %s', v_signature)
     );
 
-    -- The rebuilt identity wrappers delegate to the guarded public writer.
+    -- Invoker wrappers delegate authorization to the guarded public writer.
     v_proc_oid := to_regprocedure(v_signature);
-    v_is_definer := NOT (v_rpc = ANY(v_identity_invokers));
+    v_is_definer := NOT (v_rpc = ANY(v_guarded_invokers));
     RETURN NEXT is(
       (SELECT prosecdef FROM pg_proc WHERE oid = v_proc_oid),
       v_is_definer,

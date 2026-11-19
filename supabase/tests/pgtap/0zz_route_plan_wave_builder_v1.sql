@@ -463,7 +463,7 @@ BEGIN
   LIMIT 1;
 
   RETURN NEXT is(v_lineage_candidate_count, 1, 'candidate selection resolves tenant service-level lineage when shipments.service_level stores governed tier');
-  RETURN NEXT is(v_lineage_stop_payload #>> '{metadata,service_level}', 'standard', 'candidate stop payload preserves governed shipment service tier');
+  RETURN NEXT is(v_lineage_stop_payload #>> '{metadata,service_level}', v_lineage_key, 'candidate stop payload uses the governed service level');
   RETURN NEXT is(v_lineage_stop_payload #>> '{metadata,service_level_key}', v_lineage_key, 'candidate stop payload carries catalog service-level key lineage');
   RETURN NEXT is(v_lineage_stop_payload #>> '{metadata,service_offering_id}', v_lineage_offering::text, 'candidate stop payload carries selected service-offering lineage');
 

@@ -4,7 +4,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(9);
+SELECT plan(15);
 
 -- 1) View exists
 SELECT has_view(
@@ -135,21 +135,17 @@ $$;
 SELECT set_config('request.jwt.claim.role', 'service_role', true);
 SELECT set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
 
-SELECT ok(
-  EXISTS (
-    SELECT 1
-    FROM public.v_webhook_source_directory
-    WHERE id = '00000000-0000-0000-0000-00000027a003'::UUID
-      AND event_count_24h = 1
-      AND error_count_24h = 0
-      AND is_healthy = TRUE
-      AND has_recent_errors = FALSE
-      AND auth_token_masked = 'stored'
-      AND mapping_label = 'w27-mc-main'
-      AND last_event_at IS NOT NULL
-  ),
-  'v_webhook_source_directory derives event_count_24h + error_count_24h + is_healthy + has_recent_errors + auth_token_masked + mapping_label + last_event_at'
-);
+CREATE TEMP TABLE test_webhook_source_directory AS
+SELECT * FROM public.v_webhook_source_directory
+ WHERE id = '00000000-0000-0000-0000-00000027a003'::uuid;
+
+SELECT is((SELECT event_count_24h FROM test_webhook_source_directory), 1::bigint, 'source projects recent event count');
+SELECT is((SELECT error_count_24h FROM test_webhook_source_directory), 0::bigint, 'source projects recent error count');
+SELECT is((SELECT is_healthy FROM test_webhook_source_directory), TRUE, 'enabled error-free source is healthy');
+SELECT is((SELECT has_recent_errors FROM test_webhook_source_directory), FALSE, 'successful source has no recent errors');
+SELECT is((SELECT auth_token_masked FROM test_webhook_source_directory), 'stored', 'source token projects only its stored marker');
+SELECT is((SELECT mapping_label FROM test_webhook_source_directory), 'w27-mc-main', 'source projects its mapping key as fallback label');
+SELECT ok((SELECT last_event_at IS NOT NULL FROM test_webhook_source_directory), 'source projects a recent event timestamp');
 
 -- 9) Failed-event projection.
 DO $$

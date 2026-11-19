@@ -408,9 +408,10 @@ BEGIN
         AND de.resource_type = 'settings_version'
         AND de.resource_id = v_request_version
         AND de.event_type = 'settings_change.requested'
-        AND de.status = 'pending'
+        AND de.status = 'processing'
+        AND de.workflow_run_id IS NOT NULL
     ),
-    'address_resolution_policy request emits pending settings_change.requested event'
+    'address_resolution_policy request processes its linked settings_change.requested event inline'
   );
 
   RETURN NEXT ok(

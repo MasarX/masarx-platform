@@ -49,6 +49,13 @@ BEGIN
     1,
     'pgTAP tenant-scoped webhook source default rate limit'
   );
+  UPDATE public.settings_versions
+     SET effective_from = transaction_timestamp()
+   WHERE id = (
+     SELECT settings_version_id FROM public.settings
+      WHERE category = 'webhook_source_default_policy'
+        AND scope_type = 'tenant' AND scope_id = v_org
+   );
 
   PERFORM set_config('test.b6_ws_ups_org', v_org::text, true);
   PERFORM set_config('test.b6_ws_ups_ops', v_ops::text, true);

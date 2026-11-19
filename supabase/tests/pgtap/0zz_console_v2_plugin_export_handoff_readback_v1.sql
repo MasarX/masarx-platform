@@ -528,7 +528,7 @@ SELECT throws_like(
       'https://console.example.test/'
     )
   $$,
-  '%requires an enabled webhook source%',
+  '%requires an enabled tenant webhook source%',
   'export handoff fails closed when runtime webhook source is disabled'
 );
 
@@ -587,8 +587,13 @@ SELECT ok(
      WHERE h.source_id = 'e4872250-0000-4000-8000-000000000003'::uuid
        AND h.retired_reason = 'rotated'
        AND crypt('pgtap-export-handoff-token-mismatch', h.retired_auth_token_hash) = h.retired_auth_token_hash
-       AND h.metadata->>'refresh_reason' = 'plugin_export_handoff_source_token_mismatch'
-       AND h.metadata->>'plugin_version_id' = 'e4872250-0000-4000-8000-000000000005'
+       AND h.correlation_id = (
+         SELECT (b.activation_payload->>'issued_token_refresh_correlation_id')::uuid
+           FROM public.integration_plugin_bindings b
+          WHERE b.runtime_resource_id = h.source_id
+            AND b.plugin_version_id = 'e4872250-0000-4000-8000-000000000005'
+            AND b.binding_type = 'webhook_source' AND b.enabled
+       )
   ),
   'export handoff refresh preserves retired source-token hash lineage without raw token storage'
 );
@@ -674,7 +679,7 @@ SELECT throws_like(
       'https://console.example.test/'
     )
   $$,
-  '%requires an enabled api route%',
+  '%requires a concrete enabled api route%',
   'api export handoff fails closed when route binding points to a disabled route'
 );
 
@@ -700,7 +705,7 @@ SELECT throws_like(
       'https://console.example.test/'
     )
   $$,
-  '%requires an enabled source token binding%',
+  '%requires a webhook source runtime binding%',
   'export handoff fails closed when no enabled source token binding exists'
 );
 

@@ -164,7 +164,7 @@ BEGIN
    WHERE id = v_vehicle;
 
   PERFORM set_config('test.w29_vehicle_projection_ok', (
-    v_branch_label = 'w29-ruh ? W29 Riyadh Branch'
+    v_branch_label = 'w29-ruh ' || chr(183) || ' W29 Riyadh Branch'
       AND v_vtype_label = 'W29 Box Van'
       AND v_drv_label = 'W29 Vehicle Driver'
       AND v_event_24h = 1

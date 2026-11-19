@@ -46,7 +46,7 @@ SELECT matches(
 );
 
 SELECT matches(
-  pg_get_functiondef('public.project_address_from_primary_geocode_v1(uuid)'::regprocedure),
+  pg_get_functiondef('public.project_address_from_primary_geocode_v1(uuid,uuid)'::regprocedure),
   'resolve_settings\(''geocoding_policy''',
   'address projection resolves geocoding_policy instead of hardcoding confidence thresholds'
 );
@@ -217,8 +217,8 @@ BEGIN
    WHERE id = v_review_address
      AND client_id = v_client;
 
-  RETURN NEXT is(v_result->>'validation_status', 'requires_review', 'low-confidence primary geocode reports review projection status');
-  RETURN NEXT is(v_address.validation_status, 'requires_review', 'low-confidence primary geocode keeps address in review state');
+  RETURN NEXT is(v_result->>'validation_status', 'needs_review', 'low-confidence primary geocode reports review projection status');
+  RETURN NEXT is(v_address.validation_status, 'needs_review', 'low-confidence primary geocode keeps address in review state');
   RETURN NEXT ok(v_address.coordinates IS NOT NULL, 'low-confidence primary geocode still projects coordinates for inspection');
 
   v_result := public.project_address_from_primary_geocode_v1(v_provided_address);

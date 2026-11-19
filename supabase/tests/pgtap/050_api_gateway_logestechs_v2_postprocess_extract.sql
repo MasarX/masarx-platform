@@ -694,8 +694,8 @@ SELECT is(
     JOIN public.shipments s ON s.recipient_id = r.id
     WHERE s.id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
   ),
-  '+966500000050',
-  'postprocess normalizes provider-local recipient phone to E.164 before insert'
+  '+12025550123',
+  'postprocess preserves the fixture recipient phone in E.164 format'
 );
 
 SELECT is(
@@ -825,7 +825,8 @@ SELECT ok(
       jsonb_build_object(
         'organization_id', 'aaaa0000-0000-0000-0000-000000000050',
         'branch_id', '05000000-0000-0000-0000-000000000055',
-        'planned_date', '2020-10-16'
+        'planned_date', '2020-10-16',
+        'wave_selection', jsonb_build_object('statuses', jsonb_build_array('pending'))
       )
     ) c
     WHERE c.shipment_id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)

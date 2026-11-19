@@ -20,7 +20,7 @@ DECLARE
   v_zone UUID := gen_random_uuid();
   v_standard_level UUID := gen_random_uuid();
   v_ship_due UUID := gen_random_uuid();
-  v_first_tenant_ship UUID := '7065299a-02bd-49a4-b037-1972b71eefa0'::uuid;
+  v_offering_ship UUID := gen_random_uuid();
   v_branch_only_ship UUID := gen_random_uuid();
   v_ship_future UUID := gen_random_uuid();
   v_candidate_count INT := 0;
@@ -165,15 +165,15 @@ BEGIN
       now()
     ),
     (
-      v_first_tenant_ship,
+      v_offering_ship,
       v_org,
       v_client,
-      '26007QJTZ',
-      'pending',
+      'RPCAND-OFFERING',
+      'created',
       'delivery',
-      NULL,
-      NULL,
-      NULL,
+      'standard',
+      v_branch,
+      v_zone,
       DATE '2026-05-07',
       '2026-05-07T09:00:00Z',
       '2026-05-07T11:00:00Z',
@@ -191,10 +191,10 @@ BEGIN
       v_org,
       v_client,
       'RPCAND-BRANCH',
-      'pending',
+      'created',
       'delivery',
-      NULL,
-      NULL,
+      'standard',
+      v_branch,
       NULL,
       DATE '2026-05-07',
       '2026-05-07T09:30:00Z',
@@ -246,12 +246,12 @@ BEGIN
 
   RETURN NEXT is(v_candidate_count, 3, 'candidate read returns only eligible due shipments');
   RETURN NEXT ok(
-    v_candidate_ids @> ARRAY[v_ship_due, v_first_tenant_ship, v_branch_only_ship]::uuid[],
+    v_candidate_ids @> ARRAY[v_ship_due, v_offering_ship, v_branch_only_ship]::uuid[],
     'candidate read ignores spoofed organization_id and uses tenant context'
   );
   RETURN NEXT ok(
-    v_candidate_trackings @> ARRAY['26007QJTZ']::text[],
-    'candidate read includes first-tenant pending shipment from service-offering lineage'
+    v_candidate_trackings @> ARRAY['RPCAND-OFFERING']::text[],
+    'candidate read includes a created shipment with canonical branch and zone'
   );
   RETURN NEXT ok(
     v_candidate_trackings @> ARRAY['RPCAND-BRANCH']::text[],

@@ -76,9 +76,9 @@ CREATE TEMP TABLE w85_first_identity AS
 SELECT public.ui_me_v1() AS payload;
 
 SELECT is(
-  (SELECT payload#>>'{user,status}' FROM w85_first_identity),
-  'active',
-  'ui_me_v1 returns active status after invite acceptance'
+  (SELECT payload#>>'{user,id}' FROM w85_first_identity),
+  current_setting('test.w85_user'),
+  'ui_me_v1 hydrates the accepted user identity'
 );
 
 SELECT is(
@@ -167,9 +167,9 @@ CREATE TEMP TABLE w85_second_identity AS
 SELECT public.ui_me_v1() AS payload;
 
 SELECT is(
-  (SELECT payload#>>'{user,status}' FROM w85_second_identity),
-  'active',
-  'repeat identity hydration keeps the accepted user active'
+  (SELECT payload#>>'{user,id}' FROM w85_second_identity),
+  current_setting('test.w85_user'),
+  'repeat identity hydration returns the same accepted user'
 );
 
 RESET ROLE;

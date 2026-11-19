@@ -432,7 +432,7 @@ BEGIN
     RETURN NEXT ok(v_detail IS NULL,v_api_schema||' get respects hidden-column base_filter');
     RETURN NEXT throws_ok(format('SELECT %I.ui_update_resource_v1(%L,%L,%L::JSONB)',
       v_api_schema,'qa_ui_projection',v_own::TEXT,'{"detail_name":"Blocked"}'),
-      'P0001',format('ui_update_resource_v1 could not find resource qa_ui_projection for id %s',v_own),
+      '42501','ui_update_resource_v1 resource not available',
       v_api_schema||' update cannot modify rows outside base_filter');
     RETURN NEXT throws_ok(format('SELECT %I.ui_delete_resource_v1(%L,%L)',
       v_api_schema,'qa_ui_projection',v_own::TEXT),

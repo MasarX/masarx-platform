@@ -69,27 +69,31 @@ SELECT ok(
   'workflow template step projection carries canonical step fields'
 );
 
+CREATE TEMP TABLE test_workflow_template_projection AS
+SELECT id, name, template_id, trigger
+  FROM public.workflow_templates_console_v1
+ WHERE scope_type = 'global' AND status = 'active' AND jsonb_array_length(steps) > 0
+ ORDER BY id
+ LIMIT 1;
+
 SELECT ok(
   EXISTS (
-    SELECT 1
-      FROM jsonb_array_elements(
-        (public.ui_list_resource_v1('workflow_templates', '{"name":"shipment_manual_create_v1","status":"active"}'::jsonb, 10, 0, NULL)->'items')
-      ) AS item
-     WHERE jsonb_typeof(item->'steps') = 'array'
-       AND jsonb_array_length(item->'steps') > 0
+    SELECT 1 FROM test_workflow_template_projection t
+    CROSS JOIN LATERAL jsonb_array_elements(
+      public.ui_list_resource_v1('workflow_templates', jsonb_build_object('name', t.name), 100, 0, NULL)->'items'
+    ) AS item
+    WHERE item->>'id' = t.id::text AND jsonb_typeof(item->'steps') = 'array'
+      AND jsonb_array_length(item->'steps') > 0
   ),
   'ui_list_resource_v1 returns workflow templates with steps attached'
 );
 
 SELECT ok(
   EXISTS (
-    SELECT 1
-      FROM jsonb_array_elements(
-        (public.ui_list_resource_v1('workflow_templates', '{"name":"shipment_manual_create_v1","status":"active"}'::jsonb, 10, 0, NULL)->'items')
-      ) AS item
-     WHERE item->>'name' = 'shipment_manual_create_v1'
-       AND NULLIF(item->>'template_id', '') IS NOT NULL
-       AND NULLIF(item->>'trigger', '') IS NOT NULL
+    SELECT 1 FROM test_workflow_template_projection t
+    CROSS JOIN LATERAL public.ui_get_resource_v1('workflow_templates', t.id) AS readback(item)
+    WHERE item->>'id' = t.id::text AND item->>'template_id' = t.template_id
+      AND item->>'trigger' = t.trigger
   ),
   'workflow template projection carries display labels required by the studio'
 );

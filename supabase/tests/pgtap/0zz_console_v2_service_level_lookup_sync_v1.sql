@@ -4,7 +4,7 @@
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(12);
+SELECT plan(13);
 
 SELECT has_function(
   'public',
@@ -167,6 +167,11 @@ SELECT ok(
        AND lv.value = current_setting('test.service_level_lookup_key')
   ),
   'service-level lookup metadata does not use tenant-overwriting singleton lineage keys'
+);
+
+SELECT ok(
+  NOT has_function_privilege('anon', 'public.ensure_service_level_lookup_value_v1(uuid)', 'EXECUTE'),
+  'anonymous users cannot call the service-level lookup sync helper'
 );
 
 SELECT * FROM finish();

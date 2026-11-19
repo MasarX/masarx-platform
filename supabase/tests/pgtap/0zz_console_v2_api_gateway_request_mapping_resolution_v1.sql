@@ -1114,11 +1114,11 @@ SELECT ok(
     WHERE n.nspname = 'public'
       AND p.proname = 'workflow_intake_api_gateway_v1'
       AND pg_get_functiondef(p.oid) LIKE '%api_gateway_apply_request_mapping_v1%'
-      AND pg_get_functiondef(p.oid) LIKE '%v_safe_outbound_body%'
+      AND pg_get_functiondef(p.oid) LIKE '%public.workflow_intake_api_gateway_base_v1(%'
       AND pg_get_functiondef(p.oid) LIKE '%api_gateway_request_mapping%'
       AND pg_get_functiondef(p.oid) LIKE '%api_gateway_request_mapping_applied%'
       AND pg_get_functiondef(p.oid) LIKE '%p_decision_outcome := ''applied''%'
-      AND pg_get_functiondef(p.oid) LIKE '%''request_body'', COALESCE(v_safe_outbound_body, v_safe_body, ''{}''::jsonb)%'
+      AND pg_get_functiondef(p.oid) LIKE '%''transformed_payload'', public.redact_sensitive_json(v_mapped_body)%'
   )
   AND EXISTS (
     SELECT 1
@@ -1128,7 +1128,7 @@ SELECT ok(
       AND p.proname = 'execute_api_gateway_dispatch_outbound_v1'
       AND pg_get_functiondef(p.oid) LIKE '%''api_gateway_request_mapping'', COALESCE(v_api->''api_gateway_request_mapping'', ''{}''::jsonb)%'
   ),
-  'workflow intake and dispatch apply request mapping with outbound body, context lineage, and applied decision proof'
+  'workflow intake passes the mapped body to the receiving engine and retains redacted mapping lineage'
 );
 
 SELECT * FROM finish();
