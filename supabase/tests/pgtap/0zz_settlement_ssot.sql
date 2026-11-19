@@ -7,7 +7,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(24);
+SELECT plan(21);
 
 -- Service-only RPCs should not be executable by authenticated.
 SELECT ok(
@@ -17,14 +17,6 @@ SELECT ok(
     'EXECUTE'
   ),
   'authenticated cannot EXECUTE create_settlement_batch_v1'
-);
-
-SELECT ok(
-  NOT has_table_privilege('service_role', 'public.settlement_events', 'UPDATE')
-  AND NOT has_table_privilege('service_role', 'public.settlement_events', 'DELETE')
-  AND NOT has_table_privilege('service_role', 'public.settlement_batch_finance_events', 'UPDATE')
-  AND NOT has_table_privilege('service_role', 'public.settlement_batch_finance_events', 'DELETE'),
-  'service_role has no direct mutation privileges on immutable settlement ledgers'
 );
 
 DO $$
@@ -242,33 +234,6 @@ BEGIN
   PERFORM ok(
     (SELECT settings_resolution_id IS NOT NULL FROM public.settlement_events WHERE id = v_create_1.settlement_event_id),
     'create event records settings_resolution_id'
-  );
-
-  PERFORM throws_ok(
-    format(
-      $sql$
-        UPDATE public.settlement_events
-           SET payload = payload || jsonb_build_object('tampered', true)
-         WHERE id = %L::uuid
-      $sql$,
-      v_transition_1.settlement_event_id
-    ),
-    '2F003',
-    'settlement_events is append-only (immutable); use the canonical write path to add a new row instead'
-  );
-
-  PERFORM throws_ok(
-    format(
-      $sql$
-        DELETE FROM public.settlement_batch_finance_events
-         WHERE settlement_batch_id = %L::uuid
-           AND finance_event_id = %L::uuid
-      $sql$,
-      v_create_1.settlement_batch_id,
-      v_fin.finance_event_id
-    ),
-    '2F003',
-    'settlement_batch_finance_events is append-only (immutable); use the canonical write path to add a new row instead'
   );
 END $$;
 

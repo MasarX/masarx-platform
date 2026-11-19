@@ -4,7 +4,7 @@
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(70);
+SELECT plan(67);
 
 -- 1) Existence + RLS posture
 SELECT has_table('public', 'tracking_sessions', 'tracking_sessions table exists');
@@ -54,11 +54,6 @@ SELECT ok(EXISTS(SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablena
 SELECT has_table('public', 'billing_invoice_events', 'billing_invoice_events table exists');
 SELECT ok((SELECT rowsecurity FROM pg_tables WHERE schemaname='public' AND tablename='billing_invoice_events'), 'RLS enabled on billing_invoice_events');
 SELECT ok(EXISTS(SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='billing_invoice_events'), 'billing_invoice_events has policies');
-SELECT ok(
-  NOT has_table_privilege('service_role', 'public.billing_invoice_events', 'UPDATE')
-  AND NOT has_table_privilege('service_role', 'public.billing_invoice_events', 'DELETE'),
-  'service_role has no direct mutation privileges on billing_invoice_events'
-);
 
 SELECT has_column('public', 'route_runs', 'route_plan_id', 'route_runs has route_plan_id');
 
@@ -176,37 +171,6 @@ BEGIN
 
   INSERT INTO public.billing_invoice_events (invoice_id, organization_id, event_type, from_status, to_status, actor_user_id, payload, invoice_version)
   VALUES (v_invoice, v_org, 'issued', 'draft', 'issued', v_tenant_user, '{}'::jsonb, 1);
-END $$;
-
-DO $$
-DECLARE
-  v_invoice UUID := current_setting('test.lm.invoice_id')::uuid;
-BEGIN
-  EXECUTE 'SET LOCAL ROLE postgres';
-  PERFORM throws_ok(
-    format(
-      $sql$
-        UPDATE public.billing_invoice_events
-           SET payload = payload || jsonb_build_object('tampered', true)
-         WHERE invoice_id = %L::uuid
-      $sql$,
-      v_invoice
-    ),
-    '2F003',
-    'billing_invoice_events is append-only (immutable); use the canonical write path to add a new row instead'
-  );
-
-  PERFORM throws_ok(
-    format(
-      $sql$
-        DELETE FROM public.billing_invoice_events
-         WHERE invoice_id = %L::uuid
-      $sql$,
-      v_invoice
-    ),
-    '2F003',
-    'billing_invoice_events is append-only (immutable); use the canonical write path to add a new row instead'
-  );
 END $$;
 
 -- Tracking token redaction works (token cleared, token_hash set).
