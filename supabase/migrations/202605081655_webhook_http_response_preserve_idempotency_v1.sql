@@ -16,7 +16,9 @@ DECLARE
     v_context JSONB := COALESCE(p_run.context, '{}'::jsonb);
     v_http JSONB := COALESCE(v_context->'http_response', '{}'::jsonb);
     v_validation JSONB := COALESCE(v_context->'validation', '{}'::jsonb);
-    v_headers JSONB := public.normalize_headers(COALESCE(v_context->'headers', '{}'::jsonb));
+    -- Persisted ingress redaction can replace the entire header map with a sentinel.
+    v_headers JSONB := CASE WHEN jsonb_typeof(v_context->'headers') = 'object'
+        THEN public.normalize_headers(v_context->'headers') ELSE '{}'::jsonb END;
     v_payload JSONB := COALESCE(v_context->'payload', '{}'::jsonb);
     v_transformed_payload JSONB := COALESCE(v_context->'transformed_payload', v_payload);
     v_followup_run_id UUID := NULLIF(v_context->>'followup_workflow_run_id', '')::UUID;
