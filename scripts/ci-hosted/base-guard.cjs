@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process');
 const { git, targetBase } = require('./target-policy.cjs');
 
 function guardPlan(entry, base, read = git) {
-  if (!['migrations.cjs', 'jest.cjs'].includes(entry) || !/^[a-f0-9]{40}$/.test(base)) throw new Error('Invalid base guard identity');
+  if (!['migrations.cjs', 'jest.cjs', 'install-policy.cjs'].includes(entry) || !/^[a-f0-9]{40}$/.test(base)) throw new Error('Invalid base guard identity');
   return [entry, 'target-policy.cjs', ...(entry === 'jest.cjs' ? ['diagnostics.cjs'] : [])].map(name => {
     const file = `scripts/ci-hosted/${name}`;
     if (!/^100644 blob [a-f0-9]{40}\t/.test(read(['ls-tree', '-z', base, '--', file]))) throw new Error('Base guard missing or not plain');
@@ -16,7 +16,10 @@ function guardPlan(entry, base, read = git) {
 function main() {
   const [entry, ...args] = process.argv.slice(2);
   const base = targetBase();
-  if (entry === 'migrations.cjs' ? args.length !== 1 || args[0] !== base : args.length !== 1 || !['unit', 'ui'].includes(args[0])) {
+  const badArgs = entry === 'migrations.cjs' ? args.length !== 1 || args[0] !== base
+    : entry === 'install-policy.cjs' ? args.length !== 0
+      : args.length !== 1 || !['unit', 'ui'].includes(args[0]);
+  if (badArgs) {
     throw new Error('Invalid base guard arguments');
   }
   const files = guardPlan(entry, base);

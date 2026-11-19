@@ -40,24 +40,15 @@ describe('public CI workflow contract', () => {
     }
   });
 
-  test('uses the checked-out commit parent for manual lint runs', () => {
-    const lint = workflow.jobs.lint;
-    expect(lint.env.LOCAL_GATE_BASE_SHA).toBe("${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}");
-    expect(lint.steps[0].with['fetch-depth']).toBe("${{ github.event_name == 'workflow_dispatch' && 2 || 1 }}");
-    const fetchBase = lint.steps.find(step => step.name === 'Fetch lint base').run;
-    expect(fetchBase).toContain("if [[ \"$GITHUB_EVENT_NAME\" == 'workflow_dispatch' ]]; then");
-    expect(fetchBase).toContain('git rev-parse --verify HEAD^1');
-    expect(fetchBase).toContain('>> "$GITHUB_ENV"');
-  });
-
   test('keeps trusted test execution, non-cancelling shards and helper selfchecks', () => {
     for (const lane of ['unit', 'ui']) {
       expect(workflow.jobs[lane].strategy['fail-fast']).toBe(false);
       expect(workflow.jobs[lane].steps.some(step => step.run === `node scripts/ci-hosted/base-guard.cjs jest.cjs ${lane}`)).toBe(true);
     }
     const appendOnly = workflow.jobs['append-only'].steps;
-    expect(appendOnly.find(step => step.name === 'Check candidate install policy').run)
-      .toBe('node scripts/ci-hosted/install-policy.cjs');
+    const installPolicy = appendOnly.find(step => step.name === 'Check candidate install policy with base code');
+    expect(installPolicy.run).toBe('node scripts/ci-hosted/base-guard.cjs install-policy.cjs');
+    expect(installPolicy.if).toBe("github.event_name == 'pull_request' || github.event_name == 'merge_group'");
     const checks = appendOnly.find(step => step.name === 'Check proposed helper behavior');
     expect(checks.run).toContain('node scripts/ci-hosted/selfcheck.cjs');
     expect(checks.run).toContain('node scripts/ci-hosted/shard-selfcheck.cjs');

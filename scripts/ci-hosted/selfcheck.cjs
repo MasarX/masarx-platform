@@ -154,7 +154,7 @@ assert.equal(JSON.parse(rewrite('POST', '/containers/create', Buffer.from('{"Ima
   `public.ecr.aws/${pins[3].image}@${pins[3].digest}`);
 const baseReads = [];
 const readBase = (args, encoding) => { baseReads.push(args); return args[0] === 'ls-tree' ? `100644 blob ${base}\tfile\0` : Buffer.from('reviewed base code'); };
-for (const entry of ['migrations.cjs', 'jest.cjs']) {
+for (const entry of ['migrations.cjs', 'jest.cjs', 'install-policy.cjs']) {
   const plan = guardPlan(entry, base, readBase);
   assert.deepEqual(plan.map(row => row.name), [entry, 'target-policy.cjs', ...(entry === 'jest.cjs' ? ['diagnostics.cjs'] : [])]);
   assert.equal(plan.every(row => row.content.toString() === 'reviewed base code'), true);

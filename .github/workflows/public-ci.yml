@@ -180,8 +180,6 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
-      - name: Check candidate install policy
-        run: node scripts/ci-hosted/install-policy.cjs
       - name: Migrations are append-only
         env:
           EVENT: ${{ github.event_name }}
@@ -196,6 +194,11 @@ jobs:
             *) printf '%s\n' 'Skipped by design: append-only diff runs on pull_request and merge_group.'; exit 0 ;;
           esac
           node scripts/ci-hosted/base-guard.cjs migrations.cjs "$base"
+      - name: Check candidate install policy with base code
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        env:
+          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        run: node scripts/ci-hosted/base-guard.cjs install-policy.cjs
       - name: Check proposed helper behavior
         run: |
           node scripts/ci-hosted/selfcheck.cjs
@@ -207,22 +210,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      LOCAL_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      LOCAL_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && 2 || 1 }}
+          fetch-depth: 1
       - name: Fetch lint base
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
-            LOCAL_GATE_BASE_SHA="$(git rev-parse --verify HEAD^1)"
-            printf 'LOCAL_GATE_BASE_SHA=%s\n' "$LOCAL_GATE_BASE_SHA" >> "$GITHUB_ENV"
-          else
-            [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
-            git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
-          fi
+          [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
+          git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
           git cat-file -e "${LOCAL_GATE_BASE_SHA}^{commit}"
       - name: Detect subject
         id: subject
