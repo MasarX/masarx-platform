@@ -52,7 +52,11 @@ SELECT ok((SELECT ARRAY(
   ) = ARRAY['postgres','ui_rpc_executor']
   FROM pg_proc WHERE oid='public.ui_rpc_current_user_id_v1()'::regprocedure),
   'current-user reader effective ACL is exactly postgres and ui_rpc_executor');
-SELECT ok(NOT EXISTS (SELECT 1 FROM public.ui_rpc_executor_privilege_plan_v1()
+-- Reuse the catalog walk until the fixture starts changing registry inputs.
+CREATE TEMP TABLE executor_initial_privilege_plan AS
+SELECT * FROM public.ui_rpc_executor_privilege_plan_v1();
+
+SELECT ok(NOT EXISTS (SELECT 1 FROM pg_temp.executor_initial_privilege_plan
     WHERE object_kind='schema' AND object_id='auth'::regnamespace),
   'executor privilege plan has no direct auth schema usage');
 SELECT ok((SELECT public.ui_filter_tree_sql_v1(
@@ -73,7 +77,7 @@ FROM (VALUES ('ui_get_resource_v1(text,uuid)'),('ui_list_resource_v1(text,jsonb,
 JOIN pg_proc p ON p.oid=('public.'||signature)::regprocedure
 JOIN pg_proc a ON a.oid=('api.'||signature)::regprocedure;
 
-WITH expected AS (SELECT object_kind,object_id,privilege,column_name FROM public.ui_rpc_executor_privilege_plan_v1()),
+WITH expected AS (SELECT object_kind,object_id,privilege,column_name FROM pg_temp.executor_initial_privilege_plan),
 actual AS (
   SELECT 'relation'::text,c.oid,a.privilege_type,NULL::text FROM pg_class c
     CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE a.grantee='ui_rpc_executor'::regrole
@@ -88,7 +92,7 @@ actual AS (
 SELECT is((SELECT count(*) FROM difference),0::bigint,'explicit ACLs equal the registry/dependency privilege plan exactly');
 
 WITH planned_reads AS MATERIALIZED (
-  SELECT object_id FROM public.ui_rpc_executor_privilege_plan_v1()
+  SELECT object_id FROM pg_temp.executor_initial_privilege_plan
   WHERE object_kind='relation' AND privilege='SELECT'
 )
 SELECT ok(bool_and(EXISTS(SELECT 1 FROM planned_reads p
@@ -185,10 +189,10 @@ CREATE FUNCTION pg_temp.executor_relation_privilege_violation(p_relation oid, p_
 RETURNS boolean LANGUAGE sql STABLE AS $guard$
   SELECT has_table_privilege('ui_rpc_executor',p_relation,'TRUNCATE,REFERENCES,TRIGGER')
     OR (has_table_privilege('ui_rpc_executor',p_relation,'INSERT') AND NOT EXISTS(
-      SELECT 1 FROM public.ui_rpc_executor_privilege_plan_v1() p
+      SELECT 1 FROM pg_temp.executor_initial_privilege_plan p
       WHERE p.object_kind='relation' AND p.object_id=p_relation AND p.privilege='INSERT'))
     OR (has_table_privilege('ui_rpc_executor',p_relation,'SELECT') AND NOT p_default_select AND NOT EXISTS(
-      SELECT 1 FROM public.ui_rpc_executor_privilege_plan_v1() p
+      SELECT 1 FROM pg_temp.executor_initial_privilege_plan p
       WHERE p.object_kind='relation' AND p.object_id=p_relation AND p.privilege='SELECT'))
     OR (p_extension AND (has_table_privilege('ui_rpc_executor',p_relation,'INSERT,UPDATE,MAINTAIN')
       OR has_any_column_privilege('ui_rpc_executor',p_relation,'INSERT,UPDATE,REFERENCES')
@@ -311,17 +315,17 @@ SELECT is((SELECT count(*) FROM scoped s WHERE NOT EXISTS(SELECT 1 FROM canonica
   'no current scoped-only resource is lost by canonical registry routing');
 
 -- Independent applicability contracts catch later DROP/CREATE and ALTER POLICY drift.
-WITH planned AS (SELECT DISTINCT object_id FROM public.ui_rpc_executor_privilege_plan_v1() WHERE object_kind='relation')
+WITH planned AS (SELECT DISTINCT object_id FROM pg_temp.executor_initial_privilege_plan WHERE object_kind='relation')
 SELECT is((SELECT count(*) FROM pg_policy p JOIN planned r ON r.object_id=p.polrelid
   WHERE 'authenticated'::regrole::oid=ANY(p.polroles) AND NOT 'ui_rpc_executor'::regrole::oid=ANY(p.polroles)),
   0::bigint,'every authenticated policy on a planned relation includes ui_rpc_executor');
-WITH planned AS (SELECT DISTINCT c.oid FROM public.ui_rpc_executor_privilege_plan_v1() p JOIN pg_class c ON c.oid=p.object_id
+WITH planned AS (SELECT DISTINCT c.oid FROM pg_temp.executor_initial_privilege_plan p JOIN pg_class c ON c.oid=p.object_id
   WHERE p.object_kind='relation' AND c.relkind IN ('r','p'))
 SELECT is((SELECT count(*) FROM planned r WHERE NOT EXISTS(SELECT 1 FROM pg_policy p
   WHERE p.polrelid=r.oid AND p.polname='ui_rpc_executor_trusted' AND p.polcmd='*'
     AND p.polroles=ARRAY['ui_rpc_executor'::regrole::oid])),0::bigint,
   'every planned table retains the executor-only trusted policy');
-WITH writes AS (SELECT object_id,privilege FROM public.ui_rpc_executor_privilege_plan_v1()
+WITH writes AS (SELECT object_id,privilege FROM pg_temp.executor_initial_privilege_plan
   WHERE object_kind='relation' AND privilege IN ('INSERT','UPDATE','DELETE'))
 SELECT is((SELECT count(*) FROM writes w JOIN pg_trigger t ON t.tgrelid=w.object_id
   WHERE NOT t.tgisinternal AND t.tgenabled IN ('O','A')

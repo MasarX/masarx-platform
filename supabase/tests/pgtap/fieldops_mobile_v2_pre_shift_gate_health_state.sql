@@ -17,14 +17,14 @@ SELECT ok(
   pg_get_functiondef(
     'public.pass_fieldops_pre_shift_gate_v1(text, boolean, uuid)'::regprocedure
   ) LIKE '%p_health_ok THEN ''cleared'' ELSE ''blocked''%',
-  'pass_fieldops_pre_shift_gate_v1 returns state=blocked when health is not OK'
+  'pass_fieldops_pre_shift_gate_v1 returns state=blocked when the driver fails the health check'
 );
 
 SELECT ok(
   pg_get_functiondef(
     'public.pass_fieldops_pre_shift_gate_v1(text, boolean, uuid)'::regprocedure
   ) LIKE '%blocked_health%',
-  'pass_fieldops_pre_shift_gate_v1 records a blocked_health decision_outcome when health is not OK'
+  'pass_fieldops_pre_shift_gate_v1 records a blocked_health decision_outcome when the driver fails the health check'
 );
 
 SELECT * FROM finish();

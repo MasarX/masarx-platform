@@ -3,7 +3,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(178);
+SELECT plan(180);
 
 SELECT has_function('public', 'ui_me_v1', ARRAY[]::text[], 'ui_me_v1 exists');
 SELECT has_function('public', 'ui_navigation_v1', ARRAY['text'], 'ui_navigation_v1 exists');
@@ -806,6 +806,9 @@ BEGIN
    AND NOT public.user_has_capability_v1('workflow_runs.write','client',clients[1]),
    'row69 actual client reader has read without workflow write authority');
  FOREACH api_schema IN ARRAY ARRAY['public','api'] LOOP
+ RETURN NEXT throws_ok(format(
+   'SELECT %I.ui_list_resource_v1(%L,''{}'',1,0,NULL)',api_schema,'workflow_templates_console'),
+   '42501','Capability denied: workflows.read',api_schema||' row69 client reader cannot open the Studio projection');
  EXECUTE format('SELECT %I.ui_list_resource_v1($1,$2,$3,$4,$5)',api_schema)
  INTO result USING 'workflow_templates',jsonb_build_object('name',marker||'%'),50,0,NULL::jsonb;
  RETURN NEXT is((SELECT array_agg(item->>'id' ORDER BY item->>'id') FROM jsonb_array_elements(result->'items') item),

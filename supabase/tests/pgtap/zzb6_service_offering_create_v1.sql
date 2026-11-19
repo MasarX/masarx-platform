@@ -84,7 +84,8 @@ RESET ROLE;
 SELECT ok(
   EXISTS (
     SELECT 1 FROM public.decision_log
-     WHERE decision_category = 'service_offerings.create'
+     WHERE decision_category = 'service_catalog'
+       AND decision_point = 'service_offering_create_v1'
        AND resource_type = 'service_offering'
        AND organization_id = current_setting('test.b6_so_create_org')::uuid
   ),

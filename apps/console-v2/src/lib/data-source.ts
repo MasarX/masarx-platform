@@ -6438,7 +6438,7 @@ export async function ui_list_resource_v1<T = ResourceRow>(key: string, opts: Li
   const page_size = opts.page_size || 100;
   const page = opts.page || 0;
   const live = await liveRpc('ui_list_resource_v1', {
-    p_resource: key,
+    p_resource: key === 'workflow_templates' ? 'workflow_templates_console' : key,
     p_filters: opts.filter ?? {},
     p_limit: page_size,
     p_offset: page * page_size,
@@ -6575,7 +6575,7 @@ export async function ui_get_resource_v1<T = ResourceRow>(key: string, id: strin
   }
 
   const live = await liveRpc<T | null>('ui_get_resource_v1', {
-    p_resource: key,
+    p_resource: key === 'workflow_templates' ? 'workflow_templates_console' : key,
     p_id: id,
   });
   if (live) {
@@ -6600,7 +6600,7 @@ export async function ui_get_resource_v1<T = ResourceRow>(key: string, id: strin
 
 export async function ui_resource_metrics_v1(key: string, _opts: ListOpts = {}): Promise<{ total: number }> {
   const live = await liveRpc<Record<string, unknown>>('ui_resource_metrics_v1', {
-    p_resource: key,
+    p_resource: key === 'workflow_templates' ? 'workflow_templates_console' : key,
     p_filters: _opts.filter ?? {},
     p_columns: null,
   });

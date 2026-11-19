@@ -6,7 +6,8 @@ SET search_path TO public, extensions, pgtap, pg_temp;
 
 SELECT plan(8);
 
-DO $$
+CREATE FUNCTION pg_temp.test_target_neutral_label_versions() RETURNS SETOF text
+LANGUAGE plpgsql AS $$
 DECLARE
   v_org UUID := gen_random_uuid();
   v_from_branch UUID := '99000000-0000-4000-8000-00000000b102'::uuid;
@@ -154,10 +155,10 @@ BEGIN
    WHERE label_job_id = v_job
      AND organization_id = v_org;
 
-  PERFORM ok(v_artifact IS NOT NULL, 'complete_label_job creates target-neutral label_artifacts row');
-  PERFORM ok(v_version IS NOT NULL, 'complete_label_job creates target-neutral label_versions row');
+  RETURN NEXT ok(v_artifact IS NOT NULL, 'complete_label_job creates target-neutral label_artifacts row');
+  RETURN NEXT ok(v_version IS NOT NULL, 'complete_label_job creates target-neutral label_versions row');
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM public.label_jobs
@@ -171,7 +172,7 @@ BEGIN
     'label_jobs readback keeps target lineage and saved artifact identity'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM public.label_artifacts
@@ -185,7 +186,7 @@ BEGIN
     'label_artifacts readback keeps transfer target lineage'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM public.label_versions
@@ -202,7 +203,7 @@ BEGIN
     'label_versions readback keeps artifact and transfer lineage'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM public.label_versions
@@ -215,6 +216,8 @@ BEGIN
     'label_versions metadata records target-neutral artifact lineage'
   );
 END $$;
+
+SELECT * FROM pg_temp.test_target_neutral_label_versions();
 
 SELECT has_column(
   'public',

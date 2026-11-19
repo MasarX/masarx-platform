@@ -13752,7 +13752,7 @@ describe('data-source live backend substrate', () => {
 
     expect(mocks.schema).toHaveBeenCalledWith('api');
     expect(mocks.rpc).toHaveBeenCalledWith('ui_list_resource_v1', {
-      p_resource: 'workflow_templates',
+      p_resource: 'workflow_templates_console',
       p_filters: { template_key: 'console_live_template_v1', status: 'active' },
       p_limit: 1,
       p_offset: 0,

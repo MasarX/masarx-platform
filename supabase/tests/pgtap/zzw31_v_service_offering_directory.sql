@@ -109,6 +109,10 @@ BEGIN
   )
   ON CONFLICT (id) DO NOTHING;
 
+  INSERT INTO public.branch_zones (branch_id, zone_id)
+  VALUES (v_branch, v_zone)
+  ON CONFLICT (zone_id) DO NOTHING;
+
   INSERT INTO public.service_offerings (
     id, service_level_id, branch_id, zone_id,
     effective_from, effective_to,

@@ -4,7 +4,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(6);
+SELECT plan(7);
 
 CREATE TEMP TABLE pgtap_operation_handlers_plugin_edit_ctx (
   org_id UUID NOT NULL,

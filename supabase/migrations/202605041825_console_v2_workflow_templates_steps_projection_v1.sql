@@ -89,17 +89,32 @@ DECLARE
   v_previous_version INT;
   v_next_version_id UUID := gen_random_uuid();
   v_next JSONB;
+  v_import_policy JSONB := '{
+      "enabled": true,
+      "capability": "workflows.write",
+      "accepted_formats": ["csv", "xls", "xlsx"],
+      "default_write_mode": "create",
+      "allow_upsert": false,
+      "identity_columns": []
+    }'::jsonb;
   v_resource JSONB := '{
-    "key": "workflow_templates",
+    "key": "workflow_templates_console",
     "label": "Workflow templates",
     "relation": "public.workflow_templates_console_v1",
     "id_column": "id",
     "capability_read": "workflows.read",
-    "capability_write": "workflows.write",
+    "allow_view_relation": true,
+    "select": [
+      "id", "name", "description", "version", "status", "scope_type", "scope_id",
+      "created_at", "published_at", "retired_at", "updated_at", "template_key",
+      "template_id", "trigger", "versions", "metadata", "steps"
+    ],
     "default_sort": { "column": "created_at", "direction": "desc" },
     "filters": [
       { "key": "status", "column": "status", "op": "eq" },
       { "key": "scope_type", "column": "scope_type", "op": "eq" },
+      { "key": "scope_id", "column": "scope_id", "op": "eq" },
+      { "key": "template_key", "column": "template_key", "op": "eq" },
       { "key": "name", "column": "name", "op": "ilike" }
     ],
     "related": [
@@ -110,15 +125,7 @@ DECLARE
         "filter_key": "workflow_template_id",
         "limit": 200
       }
-    ],
-    "import": {
-      "enabled": true,
-      "capability": "workflows.write",
-      "accepted_formats": ["csv", "xls", "xlsx"],
-      "default_write_mode": "create",
-      "allow_upsert": false,
-      "identity_columns": []
-    }
+    ]
   }'::jsonb;
 BEGIN
   SELECT s.cached_value, sv.version
@@ -137,12 +144,16 @@ BEGIN
   SELECT jsonb_set(
     COALESCE(v_current, '{"resources":[]}'::jsonb),
     '{resources}',
-    COALESCE(jsonb_agg(resource_row.value), '[]'::jsonb) || jsonb_build_array(v_resource),
+    COALESCE(jsonb_agg(
+      CASE WHEN resource_row.value->>'key' = 'workflow_templates'
+        THEN resource_row.value || jsonb_build_object('import', v_import_policy)
+        ELSE resource_row.value END
+    ), '[]'::jsonb) || jsonb_build_array(v_resource),
     TRUE
   )
     INTO v_next
     FROM jsonb_array_elements(COALESCE(v_current->'resources', '[]'::jsonb)) AS resource_row(value)
-   WHERE resource_row.value->>'key' <> 'workflow_templates';
+   WHERE resource_row.value->>'key' <> 'workflow_templates_console';
 
   UPDATE public.settings_versions
      SET effective_until = COALESCE(effective_until, now()),

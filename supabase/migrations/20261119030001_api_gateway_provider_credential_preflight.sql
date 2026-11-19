@@ -5,6 +5,28 @@ SET LOCAL search_path TO public, extensions, pg_temp;
 DO $patch$
 DECLARE
   v_definition text;
+  v_provider_row text := $row$      LIMIT 1;
+
+    IF v_provider_account_settings_id IS NOT NULL THEN$row$;
+  v_provider_merged text := $merged$      LIMIT 1;
+
+    -- Merge dispatch inputs while retaining the winning row for resolution evidence.
+    IF v_provider_account_settings_id IS NOT NULL THEN
+      v_provider_account := COALESCE(
+        NULLIF(
+          public.resolve_settings_merged_from_context(
+            v_provider_account_category,
+            jsonb_strip_nulls(jsonb_build_object(
+              'organization_id', v_org,
+              'client_id', v_client,
+              'sender_id', v_sender,
+              'webhook_source_id', v_source.id
+            ))
+          ),
+          '{}'::jsonb
+        ),
+        v_provider_account
+      );$merged$;
   v_binding text := $binding$      IF v_provider_account_auth_config_id IS NOT NULL THEN
         v_auth := jsonb_set(v_auth, '{auth_config_id}', to_jsonb(v_provider_account_auth_config_id), TRUE);$binding$;
   v_checked_binding text := $checked$      IF v_provider_account_auth_config_id IS NOT NULL THEN
@@ -105,12 +127,13 @@ BEGIN
     'public.workflow_intake_api_gateway_base_v1(text,text,text,text,jsonb,jsonb)'::regprocedure
   ) INTO STRICT v_definition;
 
-  IF length(v_definition) - length(replace(v_definition, v_binding, '')) <> length(v_binding)
+  IF length(v_definition) - length(replace(v_definition, v_provider_row, '')) <> length(v_provider_row)
+     OR length(v_definition) - length(replace(v_definition, v_binding, '')) <> length(v_binding)
      OR position('api_gateway_provider_account_credential_available' IN v_definition) > 0 THEN
     RAISE EXCEPTION 'Unexpected provider credential binding in gateway intake';
   END IF;
 
-  EXECUTE replace(v_definition, v_binding, v_checked_binding);
+  EXECUTE replace(replace(v_definition, v_provider_row, v_provider_merged), v_binding, v_checked_binding);
 END;
 $patch$;
 

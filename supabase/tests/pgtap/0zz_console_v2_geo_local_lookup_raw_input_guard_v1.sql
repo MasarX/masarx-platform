@@ -229,6 +229,9 @@ SELECT workflow_handlers.execute_geo_local_lookup_v1(
   '{}'::jsonb
 ) AS resp;
 
+-- The workflow handler changes the session path while resolving its dependencies.
+SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
+
 SELECT is(
   (SELECT to_jsonb(resp)->>'status' FROM tmp_console_v2_geo_raw_guard),
   'completed',

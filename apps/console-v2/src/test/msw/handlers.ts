@@ -837,6 +837,7 @@ function integrationsList(resource: string, filters: Record<string, unknown> = {
     webhook_rules: (seedData.webhook_rules ?? []) as Array<Record<string, unknown>>,
     mapping_configs: (seedData.mapping_configs ?? []) as Array<Record<string, unknown>>,
     workflow_templates: (seedData.workflow_templates ?? []) as Array<Record<string, unknown>>,
+    workflow_templates_console: (seedData.workflow_templates ?? []) as Array<Record<string, unknown>>,
     integration_plugins: (seedData.integration_plugins ?? []) as Array<Record<string, unknown>>,
   };
   const rows = rowsByResource[resource];
@@ -856,6 +857,7 @@ function workflowList(resource: string, filters: Record<string, unknown> = {}) {
     workflow_runs: (workflowSeedData.workflow_runs ?? []) as Array<Record<string, unknown>>,
     workflow_run_steps: flattenWorkflowRunSteps(),
     workflow_templates: (workflowSeedData.workflow_templates ?? []) as Array<Record<string, unknown>>,
+    workflow_templates_console: (workflowSeedData.workflow_templates ?? []) as Array<Record<string, unknown>>,
     workflow_run_triggers: (workflowSeedData.workflow_run_triggers ?? []) as Array<Record<string, unknown>>,
     workflow_schedule_triggers: (workflowSeedData.workflow_schedule_triggers ?? []) as Array<Record<string, unknown>>,
     workflow_binding_dispatches: (workflowSeedData.workflow_binding_dispatches ?? []) as Array<Record<string, unknown>>,

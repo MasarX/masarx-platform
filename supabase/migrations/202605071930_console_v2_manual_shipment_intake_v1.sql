@@ -191,6 +191,8 @@ BEGIN
       v_metadata
       || jsonb_build_object(
         'dry_run', true,
+        'ui', (CASE WHEN jsonb_typeof(v_metadata->'ui') = 'object'
+                    THEN v_metadata->'ui' ELSE '{}'::jsonb END) || '{"dry_run":true}'::jsonb,
         'recipient_id', v_recipient_id,
         'source', 'console_v2.manual_shipment_intake'
       )

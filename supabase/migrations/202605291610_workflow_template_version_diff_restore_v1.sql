@@ -48,12 +48,19 @@ ON CONFLICT (lookup_definition_id, value) DO NOTHING;
 
 CREATE OR REPLACE VIEW public.workflow_templates_console_v1
 WITH (security_invoker = true) AS
-WITH version_history AS (
+WITH visible_templates AS (
+  SELECT wt.* FROM public.workflow_templates wt
+  WHERE public.request_is_service_role_v1()
+     OR public.workflow_template_scope_allowed(wt.scope_type, wt.scope_id)
+),
+version_history AS (
   SELECT
     wt_inner.name,
+    wt_inner.scope_type,
+    wt_inner.scope_id,
     jsonb_agg((wt_inner.version)::text ORDER BY wt_inner.version DESC) AS versions
-  FROM public.workflow_templates wt_inner
-  GROUP BY wt_inner.name
+  FROM visible_templates wt_inner
+  GROUP BY wt_inner.name, wt_inner.scope_type, wt_inner.scope_id
 ),
 steps AS (
   SELECT
@@ -71,7 +78,12 @@ steps AS (
         'next_operation_priority', wts.next_operation_priority,
         'next_operation_delay_seconds', wts.next_operation_delay_seconds,
         'manual_action_required', wts.manual_action_required,
-        'metadata', COALESCE(wts.metadata, '{}'::jsonb),
+        'metadata', jsonb_strip_nulls(jsonb_build_object(
+          'kind', wts.metadata->'kind', 'label', wts.metadata->'label',
+          'sub', wts.metadata->'sub', 'icon', wts.metadata->'icon',
+          'branch', wts.metadata->'branch', 'error_path', wts.metadata->'error_path',
+          'manual_path', wts.metadata->'manual_path'
+        )),
         'enabled', wts.enabled,
         'created_at', wts.created_at,
         'updated_at', wts.updated_at,
@@ -81,6 +93,7 @@ steps AS (
       ORDER BY wts.sequence_order ASC, wts.created_at ASC, wts.id ASC
     ) AS steps
   FROM public.workflow_template_steps wts
+  JOIN visible_templates parent ON parent.id = wts.workflow_template_id
   WHERE COALESCE(wts.enabled, TRUE) = TRUE
   GROUP BY wts.workflow_template_id
 )
@@ -99,7 +112,17 @@ SELECT
   wt.notes,
   wt.steps_checksum,
   wt.updated_at,
-  wt.metadata,
+  jsonb_strip_nulls(jsonb_build_object(
+    'binding_key', wt.metadata->'binding_key', 'stage_key', wt.metadata->'stage_key',
+    'source_template_id', wt.metadata->'source_template_id',
+    'source_template_name', wt.metadata->'source_template_name',
+    'source_version', wt.metadata->'source_version',
+    'restored_from_template_id', wt.metadata->'restored_from_template_id',
+    'restored_from_version', wt.metadata->'restored_from_version',
+    'bootstrap_scope_type', wt.metadata->'bootstrap_scope_type',
+    'bootstrap_scope_id', wt.metadata->'bootstrap_scope_id',
+    'trigger_event', wt.metadata->'trigger_event'
+  )) AS metadata,
   wt.template_key,
   COALESCE(wt.template_key, wt.name, wt.id::text) AS template_id,
   COALESCE(
@@ -111,9 +134,10 @@ SELECT
   ) AS trigger,
   COALESCE(vh.versions, jsonb_build_array((wt.version)::text)) AS versions,
   COALESCE(s.steps, '[]'::jsonb) AS steps
-FROM public.workflow_templates wt
+FROM visible_templates wt
 LEFT JOIN version_history vh
-  ON vh.name = wt.name
+  ON vh.name = wt.name AND vh.scope_type = wt.scope_type
+  AND vh.scope_id IS NOT DISTINCT FROM wt.scope_id
 LEFT JOIN steps s
   ON s.workflow_template_id = wt.id;
 
