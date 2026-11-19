@@ -6,18 +6,20 @@ WITH (security_invoker = true) AS
 SELECT
   dp.user_id AS id,
   dp.organization_id,
-  COALESCE(NULLIF(u.full_name, ''), NULLIF(driver.full_name, ''), u.email, driver.email, dp.driver_code, dp.user_id::text) AS name,
+  COALESCE(
+    NULLIF(u.full_name, ''),
+    CASE WHEN u.id IS NULL THEN NULLIF(public.fleet_driver_display_name_v1(dp.organization_id, dp.user_id), '') END,
+    u.email, dp.driver_code, dp.user_id::text
+  ) AS name,
   dp.driver_code,
   NULLIF(dp.metadata->>'phone', '') AS phone,
-  COALESCE(u.email, driver.email) AS user_email,
+  u.email AS user_email,
   dp.status,
   active_assignment.vehicle_id,
   '[]'::jsonb AS skills
 FROM public.driver_profiles dp
 LEFT JOIN public.users u
   ON u.id = dp.user_id
-LEFT JOIN LATERAL public.fleet_driver_identity_v1(dp.organization_id, dp.user_id) driver
-  ON u.id IS NULL
 LEFT JOIN LATERAL (
   SELECT va.vehicle_id
   FROM public.vehicle_assignments va

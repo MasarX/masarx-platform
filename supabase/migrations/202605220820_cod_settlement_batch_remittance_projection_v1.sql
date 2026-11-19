@@ -344,21 +344,35 @@ REVOKE ALL ON FUNCTION public.compute_cod_payment_collection_summary_v1(UUID, UU
 REVOKE ALL ON FUNCTION public.compute_cod_payment_collection_summary_v1(UUID, UUID, TEXT, UUID, TIMESTAMPTZ, TIMESTAMPTZ) FROM anon;
 GRANT EXECUTE ON FUNCTION public.compute_cod_payment_collection_summary_v1(UUID, UUID, TEXT, UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO service_role;
 
--- The invoker view only needs the configured threshold from the global policy.
-CREATE FUNCTION public.settlement_summary_variance_threshold_v1()
-RETURNS numeric
-LANGUAGE sql STABLE SECURITY DEFINER
+-- Calculate the flag without exposing the underlying policy to callers.
+CREATE FUNCTION public.settlement_summary_variance_flag_v1(
+  p_organization_id uuid,
+  p_batch_id uuid,
+  p_variance numeric
+)
+RETURNS boolean
+LANGUAGE sql STABLE STRICT SECURITY DEFINER
 SET search_path TO public, extensions, pg_temp
-AS $threshold$
-  SELECT COALESCE((s.cached_value#>>'{locking,max_variance_amount}')::numeric, 0)
-  FROM public.settings s
-  WHERE s.category = 'settlement_policy'
-    AND s.scope_type = 'global'
-    AND s.scope_id IS NULL;
-$threshold$;
+AS $variance$
+  SELECT p_variance > COALESCE((
+    SELECT (s.cached_value#>>'{locking,max_variance_amount}')::numeric
+    FROM public.settings s
+    WHERE s.category = 'settlement_policy'
+      AND s.scope_type = 'global'
+      AND s.scope_id IS NULL
+  ), 0)
+  WHERE public.request_role_is_service_v1()
+     OR (session_user = 'postgres' AND current_setting('role', true) = 'postgres' AND auth.uid() IS NULL)
+     OR EXISTS (
+       SELECT 1
+       FROM public.settlement_batches sb
+       WHERE sb.organization_id = p_organization_id AND sb.id = p_batch_id
+         AND public.can_read_settlement_batch_v1(sb.organization_id, sb.id)
+     );
+$variance$;
 
-REVOKE ALL ON FUNCTION public.settlement_summary_variance_threshold_v1() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.settlement_summary_variance_threshold_v1() TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.settlement_summary_variance_flag_v1(uuid, uuid, numeric) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.settlement_summary_variance_flag_v1(uuid, uuid, numeric) TO authenticated, service_role;
 
 CREATE OR REPLACE VIEW public.v_settlement_batch_summary
 WITH (security_invoker = true) AS
@@ -425,8 +439,10 @@ SELECT
     )
   END AS remitted_amount,
   bp.posted_at,
-  CASE
-    WHEN ABS(
+  COALESCE(public.settlement_summary_variance_flag_v1(
+    sb.organization_id,
+    sb.id,
+    ABS(
       COALESCE(
         NULLIF(btrim(COALESCE(sb.metadata->>'expected_amount', '')), '')::NUMERIC,
         bf.sum_in,
@@ -438,10 +454,8 @@ SELECT
         bf.sum_in,
         0
       )
-    ) > COALESCE((SELECT public.settlement_summary_variance_threshold_v1()), 0)
-    THEN TRUE
-    ELSE FALSE
-  END AS variance_flag,
+    )
+  ), FALSE) AS variance_flag,
   sb.branch_id,
   sb.client_id,
   sb.sender_id,

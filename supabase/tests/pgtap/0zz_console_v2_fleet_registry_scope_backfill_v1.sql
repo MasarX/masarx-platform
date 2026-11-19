@@ -527,8 +527,9 @@ SELECT ok(
       AND row.value->>'organization_id' = 'ac65f701-2b52-4efd-9b9f-f9e8c5f14301'
       AND row.value->>'vehicle_id' = 'ac65f701-2b52-4efd-9b9f-f9e8c5f14341'
       AND row.value->>'name' = 'Console V2 Fleet Driver'
+      AND row.value->>'user_email' IS NULL
   ),
-  'drivers resource returns assignment-picker row shape from live API projection'
+  'drivers picker returns the driver name and assignment without granting user email access'
 );
 
 WITH v_payload AS (
@@ -656,11 +657,11 @@ SELECT throws_ok(
 );
 
 SELECT is(
-  (SELECT count(*) FROM public.fleet_driver_identity_v1(
+  public.fleet_driver_display_name_v1(
     'ac65f701-2b52-4efd-9b9f-f9e8c5f14301', '253d3fab-d32d-4669-8ca1-27978cb95f14'
-  )),
-  0::bigint,
-  'tenant user without fleet.read cannot read driver identity directly'
+  ),
+  NULL::text,
+  'tenant user without fleet.read cannot read the driver display name directly'
 );
 
 RESET ROLE;

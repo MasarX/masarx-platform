@@ -317,6 +317,7 @@ BEGIN
     v_partner_name = 'W24 Logistics Co'
       AND v_is_partner = TRUE
       AND v_assign_mode = 'partner_fleet'
+      AND FOUND
       AND v_refused_assignment_id IS NULL,
     'v_route_run_directory excludes refused assignments and projects partner_name + is_partner_run for partner_fleet'
   );
