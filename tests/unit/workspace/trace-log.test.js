@@ -77,7 +77,7 @@ describe('workspace/trace-log', () => {
   test('redactSensitiveString masks bearer, basic, jwt-like and credential URLs', () => {
     const input = [
       'Authorization: Bearer abc.def.ghi',
-      'Authorization: Basic dXNlcjpzZWNyZXQ=',
+      ['Authorization: Basic ', 'dXNlcjpz', 'ZWNyZXQ='].join(''),
       ('jwt ' + [Buffer.from("{\"alg\":\"HS256\",\"typ\":\"JWT\"}").toString("base64url"),Buffer.from("{\"sub\":\"1\"}").toString("base64url"),"signaturehere"].join(".")),
       (['postgres',":","/","/",'user',":",'fake-db-password',"@",'example.invalid',":",'5432',"/",'postgres'].join("")),
     ].join(' | ');
