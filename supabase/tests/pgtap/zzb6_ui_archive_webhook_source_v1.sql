@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(21);
+SELECT plan(22);
 
 SELECT has_function(
   'public',
@@ -219,7 +219,16 @@ SELECT throws_ok(
      )) $$,
   '23514',
   NULL,
-  'archived webhook source cannot be edited or re-enabled'
+  'archived webhook source cannot be edited'
+);
+SELECT throws_ok(
+  $$ SELECT api.ui_upsert_webhook_source_v1(jsonb_build_object(
+       'source_id', current_setting('test.b6_ws_archive_source'),
+       'enabled', TRUE
+     )) $$,
+  '23514',
+  NULL,
+  'archived webhook source cannot be re-enabled'
 );
 RESET ROLE;
 
