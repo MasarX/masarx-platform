@@ -4,7 +4,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(65);
+SELECT plan(66);
 
 SELECT has_function(
   'public',
@@ -446,7 +446,6 @@ BEGIN
       'sender_id', v_sender::text,
       'client_reference_number', 'MANUALINTAKECREATE001',
       'tracking_number', 'MANUALINTAKECREATE001',
-      'status', 'created',
       'service_offering_id', (
         SELECT v_governed_service_offering::text
       ),
@@ -512,6 +511,7 @@ BEGIN
        AND client_id = v_client
        AND recipient_id = v_recipient_id
        AND tracking_number = 'MANUALINTAKECREATE001'
+       AND status = 'pending'
        AND metadata->>'source' = 'ui.manual_create'
   ), 'manual intake actual create persists shipment with recipient link');
   RETURN NEXT is((
@@ -566,13 +566,14 @@ BEGIN
       ) slots
   ), 'manual intake actual create exposes delivery slots without metadata-only fallback');
 
+  EXECUTE 'SET LOCAL ROLE authenticated';
   SELECT COUNT(*)::int
     INTO v_candidate_count
-    FROM public.route_plan_delivery_wave_candidates_v1(
+    FROM api.ui_route_plan_delivery_wave_candidates_v1(
       jsonb_build_object(
-        'organization_id', v_org,
         'branch_id', v_branch,
-        'planned_date', '2026-05-07'
+        'planned_date', '2026-05-07',
+        'inputs', jsonb_build_object('wave_selection', '{}'::jsonb)
       )
     ) c
    WHERE c.shipment_id = v_shipment_id
@@ -580,6 +581,16 @@ BEGIN
      AND c.stop_payload#>>'{metadata,service_offering_id}' = v_governed_service_offering::text;
 
   RETURN NEXT is(v_candidate_count, 1, 'the created shipment enters the route wave with its governed offering and tier');
+  RETURN NEXT ok(NOT EXISTS (
+    SELECT 1
+      FROM api.ui_route_plan_delivery_wave_candidates_v1(jsonb_build_object(
+        'branch_id', v_branch,
+        'planned_date', '2026-05-07',
+        'inputs', jsonb_build_object('wave_selection', jsonb_build_object('statuses', jsonb_build_array('created')))
+      )) c
+     WHERE c.shipment_id = v_shipment_id
+  ), 'the route-wave picker honors an explicit created-only status selection');
+  EXECUTE 'SET LOCAL ROLE postgres';
   RETURN NEXT ok(v_destination_address_id IS NOT NULL AND EXISTS (
     SELECT 1
       FROM public.addresses

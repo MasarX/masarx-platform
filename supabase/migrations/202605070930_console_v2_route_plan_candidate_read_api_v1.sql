@@ -40,6 +40,8 @@ DECLARE
   v_input JSONB := COALESCE(p_input, '{}'::jsonb);
   v_payload JSONB := '{}'::jsonb;
   v_platform_org_id UUID := NULL;
+  v_wave_selection JSONB;
+  v_statuses TEXT[];
   v_limit INT;
 BEGIN
   SELECT *
@@ -69,6 +71,42 @@ BEGIN
     v_payload := jsonb_strip_nulls(v_payload || jsonb_build_object('organization_id', v_platform_org_id));
   ELSE
     v_payload := jsonb_strip_nulls(v_payload || jsonb_build_object('organization_id', v_ctx.organization_id));
+  END IF;
+
+  v_wave_selection := COALESCE(v_payload #> '{inputs,wave_selection}', v_payload->'wave_selection');
+  IF jsonb_typeof(v_wave_selection) IS DISTINCT FROM 'object' THEN
+    v_wave_selection := '{}'::jsonb;
+  END IF;
+
+  IF jsonb_typeof(v_wave_selection->'statuses') = 'array' THEN
+    SELECT array_agg(lower(btrim(value))) FILTER (WHERE NULLIF(btrim(value), '') IS NOT NULL)
+      INTO v_statuses
+      FROM jsonb_array_elements_text(v_wave_selection->'statuses') AS statuses(value);
+  END IF;
+
+  IF v_statuses IS NULL THEN
+    -- Console intake creates pending shipments. Use its lookup policy at the Console entry point.
+    SELECT array_agg(lower(btrim(lv.value)) ORDER BY lv.sort_order, lv.value)
+      INTO v_statuses
+      FROM public.lookup_definitions ld
+      JOIN public.lookup_values lv ON lv.lookup_definition_id = ld.id
+     WHERE ld.category = 'shipment_status'
+       AND lv.status = 'active'
+       AND COALESCE(lv.effective_from, '-infinity'::timestamptz) <= now()
+       AND COALESCE(lv.effective_until, 'infinity'::timestamptz) > now()
+       AND lower(COALESCE(lv.metadata->>'route_plan_candidate_eligible', 'false')) IN ('true', '1', 'yes', 'on');
+
+    IF v_statuses IS NULL THEN
+      RAISE EXCEPTION 'ui_route_plan_delivery_wave_candidates_v1 has no route-plan-eligible shipment_status lookup rows'
+        USING ERRCODE = '23514';
+    END IF;
+
+    v_wave_selection := jsonb_set(v_wave_selection, '{statuses}', to_jsonb(v_statuses));
+    IF jsonb_typeof(v_payload->'inputs') = 'object' THEN
+      v_payload := jsonb_set(v_payload, '{inputs,wave_selection}', v_wave_selection);
+    ELSE
+      v_payload := jsonb_set(v_payload, '{wave_selection}', v_wave_selection);
+    END IF;
   END IF;
 
   IF NULLIF(v_payload->>'branch_id', '') IS NOT NULL THEN
