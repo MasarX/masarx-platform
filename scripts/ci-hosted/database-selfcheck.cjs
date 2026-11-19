@@ -6,7 +6,7 @@ const path = require('node:path');
 const { isBuiltin } = require('node:module');
 const { spawnSync } = require('node:child_process');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
-const { migrationProgress, completePins, backendLint, waitForCronPause } = require('./backend.cjs');
+const { migrationProgress, completePins, backendLint, waitForCronPause, hostedStackPorts } = require('./backend.cjs');
 const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
@@ -103,15 +103,14 @@ async function checkImages(pins) {
   const calls = []; const delays = [];
   const summary = { stages: [] };
   const [pin] = pins;
-  const registryOf = ref => ref.split('/', 1)[0];
+  const databaseRef = `${pin.mirror}/${pin.image}@${pin.digest}`;
   const pullRefs = () => calls.filter(([command]) => command === 'pull').map(args => args.at(-1));
-  let failMirror = false;
+  const timeout = Object.assign(new Error('Process exceeded 180000ms'), { failure: { timeout: true } });
+  let pullErrors = [];
   const checked = async (_command, args) => {
     calls.push(args);
     const reference = args.at(-1);
-    if (args[0] === 'pull' && registryOf(reference) === 'ghcr.io' && failMirror) {
-      throw new Error('synthetic registry failure');
-    }
+    if (args[0] === 'pull' && pullErrors.length) throw pullErrors.shift();
     if (args[0] === 'image') return pins.find(p => reference.split('/').slice(1).join('/') === p.image + '@' + p.digest).image_id;
     return '';
   };
@@ -123,12 +122,30 @@ async function checkImages(pins) {
   assert.deepEqual(summary.images.map(row => row.served), pins.map(() => 'ghcr.io'));
 
   calls.length = 0;
-  failMirror = true;
+  pullErrors = [timeout];
   await prepareImages([{ ...pin }], options);
-  assert.deepEqual(pullRefs().map(registryOf), ['ghcr.io', 'ghcr.io', 'ghcr.io', 'public.ecr.aws']);
-  assert.deepEqual(delays, [5000, 15000]);
+  assert.deepEqual(pullRefs(), [databaseRef, databaseRef]);
+  assert.deepEqual(delays.splice(0), [5000]);
+  assert.deepEqual(calls.at(-1), ['tag', pin.image_id, `public.ecr.aws/${pin.image}:${pin.cli_tag}`]);
 
-  failMirror = false;
+  calls.length = 0;
+  pullErrors = [timeout, timeout];
+  await assert.rejects(prepareImages([{ ...pin }], options), /Process exceeded/);
+  assert.deepEqual(pullRefs(), [databaseRef, databaseRef]);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(delays.splice(0), [5000]);
+
+  calls.length = 0;
+  pullErrors = [new Error('failed to resolve reference: manifest unknown')];
+  await assert.rejects(prepareImages([{ ...pin }], options), /manifest unknown/);
+  assert.deepEqual(pullRefs(), [databaseRef]);
+  assert.deepEqual(delays, []);
+
+  calls.length = 0;
+  await assert.rejects(prepareImages([{ ...pin, image_id: 'sha256:wrong' }], options), /Reviewed image ID mismatch/);
+  assert.deepEqual(pullRefs(), [databaseRef]);
+  assert.equal(calls.some(([command]) => command === 'tag'), false);
+
   let finishLastPull;
   const lastPull = new Promise(resolve => { finishLastPull = resolve; });
   const lastPin = pins.at(-1);
@@ -162,7 +179,7 @@ async function checkImages(pins) {
   }
   assert.throws(() => create('ghcr.io/' + pin.image + '@sha256:' + '0'.repeat(64)));
   assert.throws(() => create(pin.image_id, [{ ...bound[0], runtimeId: 'sha256:' + '0'.repeat(64) }]));
-  console.log('PASS: exact registry hosts, GHCR digest pulls, bounded ECR fallback and verified image IDs');
+  console.log('PASS: exact registry hosts, bounded same-registry digest pulls and verified image IDs');
 }
 
 async function main() {
@@ -208,13 +225,22 @@ async function main() {
   assert.throws(() => shardFiles(['one.sql', 'one.sql'], '1/1'));
   assert.throws(() => shardFiles(['one.sql'], shardId(2)));
   const contract = loadBackendLocalPgtapEnv();
-  const testEnv = shardEnvironment({ DATABASE_URL: 'postgresql://synthetic@127.0.0.1:54322/postgres', PATH: 'synthetic-bin' }, contract, 'synthetic', 54322, ['one.sql']);
+  const { shadowPort, apiPort, dbPort } = await hostedStackPorts(async port => port !== 15421);
+  assert.deepEqual([shadowPort, apiPort, dbPort], [15420, 15422, 15423]);
+  const busy = [];
+  await assert.rejects(hostedStackPorts(async port => { busy.push(port); return false; }), /Could not find three free hosted Supabase ports/);
+  assert.equal(busy.length, 12);
+  await assert.rejects(hostedStackPorts(async () => { throw new Error('synthetic bind failure'); }), /synthetic bind failure/);
+  const databaseUrl = `postgresql://synthetic@127.0.0.1:${dbPort}/postgres`;
+  const testEnv = shardEnvironment({ DATABASE_URL: databaseUrl, PATH: 'synthetic-bin' }, contract, 'synthetic', dbPort, ['one.sql']);
   for (const name of ['PGTAP_FILES_PER_SESSION', 'PGTAP_NODE_FILE_RETRIES', 'PGTAP_RETRY_TRANSIENT', 'PGTAP_RETRY_DEADLOCKS', 'PGTAP_FULL_LOCAL_QUALIFICATION']) assert.equal(testEnv[name], contract[name]);
   assert.equal(testEnv.ENV_FILE, os.devNull);
   assert.equal(testEnv.ENV_FILE_OVERRIDE, '0');
   assert.equal(testEnv.PGTAP_ONLY_FILES, 'one.sql');
   assert.equal(testEnv.DB_LOCAL_PROJECT_ID, 'synthetic');
-  assert.equal(testEnv.DATABASE_URL, 'postgresql://synthetic@127.0.0.1:54322/postgres');
+  assert.equal(testEnv.DATABASE_URL, databaseUrl);
+  assert.equal(testEnv.DB_LOCAL_DB_PORT, String(dbPort));
+  console.log('PASS: occupied port skipped, search bounded, selected port passed to pgTAP');
   assert.deepEqual(shardResults(['one.sql'], []).notRun, ['one.sql']);
   assert.deepEqual(shardResults(['one.sql', 'two.sql'], [{ file: 'one.sql', status: 'failed' }]), {
     files: [{ file: 'one.sql', status: 'failed' }], run: 1, passed: 0, failed: 1, notRun: ['two.sql'],

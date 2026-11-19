@@ -5,12 +5,12 @@ const { spawn } = require('node:child_process');
 const { sanitize, environmentSecrets, failureDetails } = require('./diagnostics.cjs');
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function retry(label, action, wait = sleep) {
+async function retry(label, action, wait = sleep, { attempts = 3, retryable = () => true } = {}) {
   for (let attempt = 1; ; attempt++) {
     try { return await action(attempt); }
     catch (error) {
-      console.error(`${label}: attempt ${attempt}/3 failed: ${sanitize(error.message)}`);
-      if (attempt === 3) throw error;
+      console.error(`${label}: attempt ${attempt}/${attempts} failed: ${sanitize(error.message)}`);
+      if (attempt === attempts || !retryable(error)) throw error;
       const delay = 5000 * 3 ** (attempt - 1);
       console.log(`${label}: retrying after ${delay}ms`);
       await wait(delay);

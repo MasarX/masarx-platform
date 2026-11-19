@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const net = require('node:net');
 const { fork } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { targetFile, git } = require('./target-policy.cjs');
@@ -16,6 +17,25 @@ const { install } = require('./tasks.cjs');
 
 const root = process.cwd();
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
+function canBindPort(port) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer(socket => socket.destroy());
+    server.once('error', error => error.code === 'EADDRINUSE' ? resolve(false) : reject(error));
+    server.listen(port, '0.0.0.0', () => server.close(error => error ? reject(error) : resolve(true)));
+  });
+}
+async function hostedStackPorts(probe = canBindPort) {
+  // Keep Docker's published ports away from the default Linux ephemeral range.
+  const ports = [];
+  for (let port = 15420; port < 15432; port++) {
+    if (await probe(port)) ports.push(port);
+    if (ports.length === 3) {
+      const [shadowPort, apiPort, dbPort] = ports;
+      return { shadowPort, apiPort, dbPort };
+    }
+  }
+  throw new Error('Could not find three free hosted Supabase ports in 15420-15431');
+}
 async function waitForCronPause(db, wait = delay) {
   for (let attempt = 0; attempt < 20; attempt++) {
     const result = await db.query("SELECT setting, context FROM pg_settings WHERE name = 'cron.launch_active_jobs'");
@@ -149,9 +169,9 @@ async function qualify(diagnostic) {
   // Reuse the existing loopback, version, client-image and full-pgTAP contracts.
   const local = require('../ops/ci/cloud-pool-db-local.js');
   const { buildSupabaseCliAsset } = require('../ops/ci/supabase-cli-asset.js');
-  const config = local.readSupabaseConfig();
+  const { major } = local.readSupabaseConfig();
   const lane = local.loadLaneConfig();
-  if (String(config.major) !== String(lane.psqlClientMajor)) throw new Error('Postgres/psql major mismatch');
+  if (String(major) !== String(lane.psqlClientMajor)) throw new Error('Postgres/psql major mismatch');
   local.assertLoopbackOnly(process.env, 'hosted environment');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'hosted-supabase-'));
   fs.chmodSync(temp, 0o700);
@@ -216,10 +236,12 @@ async function qualify(diagnostic) {
     diagnostic.stage = 'stack-configuration';
     const originalConfig = fs.readFileSync('supabase/config.toml', 'utf8');
     const buckets = bucketSections(originalConfig);
+    summary.stackPorts = await hostedStackPorts();
+    const { shadowPort, apiPort, dbPort } = summary.stackPorts;
     fs.writeFileSync(path.join(sb, 'config.toml'), [
-      `project_id = "${project}"`, '[api]', 'enabled = true', 'port = 54321', 'schemas = ["api"]',
-      'extra_search_path = ["public", "extensions"]', '[db]', `port = ${config.dbPort}`,
-      'shadow_port = 54320', `major_version = ${config.major}`, '[db.seed]', 'enabled = false',
+      `project_id = "${project}"`, '[api]', 'enabled = true', `port = ${apiPort}`, 'schemas = ["api"]',
+      'extra_search_path = ["public", "extensions"]', '[db]', `port = ${dbPort}`,
+      `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]', 'enabled = false',
       '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
       'site_url = "http://127.0.0.1:3001"', '[storage]', 'enabled = true', '', buckets,
     ].join('\n'), { mode: 0o600 });
@@ -230,6 +252,7 @@ async function qualify(diagnostic) {
     diagnostic.stage = 'stack-status';
     const status = JSON.parse(await checked(cli, ['status', '--workdir', temp, '-o', 'json'], cliEnv, undefined, { quiet: true }));
     if (!status.DB_URL) throw new Error('Local stack did not provide DB_URL');
+    if (new URL(status.DB_URL).port !== String(dbPort)) throw new Error('Local stack reported an unexpected database port');
     Object.assign(env, { DATABASE_URL: status.DB_URL, DATABASE_URL_DIRECT: status.DB_URL,
       SUPABASE_URL: status.API_URL || '', SUPABASE_ANON_KEY: status.ANON_KEY || '',
       SUPABASE_SERVICE_ROLE_KEY: status.SERVICE_ROLE_KEY || '', WORKSPACE_NAME: project });
@@ -307,7 +330,7 @@ async function qualify(diagnostic) {
     if (shard) {
       const databasePin = pins.find(pin => pin.role === 'database');
       local.writePsqlWrapper(bin, databasePin.runtimeId);
-      const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, config.dbPort, selected);
+      const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, dbPort, selected);
       diskFloor(dockerRoot);
       summary.pgtap = 'running';
       await timed(`pgtap:${shard}`, () => checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], testEnv, 18 * 60000));
@@ -380,4 +403,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts };
