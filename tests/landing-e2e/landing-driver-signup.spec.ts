@@ -7,6 +7,7 @@ import {
   mockTurnstile,
   patchRuntimeConfig,
   routePayload,
+  routePayloadWithDelay,
 } from "./helpers";
 import { captureEvidenceIfRequested } from "../shared/evidence";
 
@@ -274,21 +275,31 @@ const documentStatus = {
 };
 const documentReceipt = { ok: true, status: "pending", application_state: "documents_resubmitted" };
 const licenseFile = { name: "license.json", mimeType: "application/json", buffer: Buffer.from('{"reference":"one"}') };
-async function openDocumentReturn(page: import("@playwright/test").Page, locale: string, status: Record<string, unknown> = documentStatus) {
+async function openDocumentReturn(page: import("@playwright/test").Page, locale: string, statusResponse = routePayload(documentStatus, 200)) {
+  // These mocked responses exercise document state, independently of runner scheduling.
+  await page.clock.install({ time: 0 });
+  await page.clock.pauseAt(60_000);
   await patchRuntimeConfig(page, {
     driverApplicationStatusEndpoint: LANDING_DRIVER_STATUS_ENDPOINT_MOCK,
     driverApplicationDocumentsEndpoint: DOCUMENTS_ENDPOINT,
     publicRequestTimeoutMs: 500,
   });
-  await mockDriverStatusEndpoint(page, routePayload(status, 200));
+  await mockDriverStatusEndpoint(page, statusResponse);
   await page.goto((locale === "ar" ? "/ar" : "") + "/drivers/apply?motion=off");
   const statusForm = page.locator("[data-driver-status-form]");
   await statusForm.locator('input[name="status_token"]').fill(DOCUMENT_TOKEN);
   await statusForm.locator('button[type="submit"]').click();
+  await expect(page.locator("[data-driver-status-lookup]")).toHaveText(
+    locale === "ar" ? "مطلوب مستندات إضافية" : "Additional documents requested",
+  );
   await expect(page.locator("[data-driver-documents-form]")).toBeVisible();
 }
 for (const locale of ["en", "ar"]) {
   test.describe("requested-document return " + locale, () => {
+    test("opens the document form when the status mock is delayed", async ({ page }) => {
+      await openDocumentReturn(page, locale, routePayloadWithDelay(documentStatus, 200, 1_500));
+    });
+
     test("same-request complete return uses POST and renders localized submitted-not-approved state", async ({ page }) => {
       const requests: Record<string, unknown>[] = [];
       await page.route("**" + DOCUMENTS_ENDPOINT, async route => {
@@ -316,7 +327,7 @@ for (const locale of ["en", "ar"]) {
         await routePayload(requests.length === 1 ? { ok: false, error: { code: "invalid_document_manifest" } } : documentReceipt,
           requests.length === 1 ? 400 : 200)(route);
       });
-      await openDocumentReturn(page, locale, { ...documentStatus, requested_documents: [] });
+      await openDocumentReturn(page, locale, routePayload({ ...documentStatus, requested_documents: [] }, 200));
       const form = page.locator("[data-driver-documents-form]");
       await expect(form.locator("label:has(input) input")).toHaveCount(2);
       await form.locator('input[name="document_type"]').fill("old-type");
@@ -360,7 +371,9 @@ for (const locale of ["en", "ar"]) {
         requests.push(route.request().postDataJSON());
         await routePayload(requests.length === 1 ? {} : documentReceipt, 200)(route);
       });
-      await openDocumentReturn(page, locale, { ...documentStatus, document_return_attempt: { state: "reserved", retry_key: DOCUMENT_RETRY } });
+      await openDocumentReturn(page, locale, routePayload({
+        ...documentStatus, document_return_attempt: { state: "reserved", retry_key: DOCUMENT_RETRY },
+      }, 200));
       const form = page.locator("[data-driver-documents-form]");
       await expect(form.locator('input[type="file"]')).toBeDisabled();
       await form.locator('button[type="submit"]').click();
@@ -411,7 +424,9 @@ for (const locale of ["en", "ar"]) {
       await routePayload(body.mode === "abandon" ? { ok: false, state: "aborted", cleanup_state: "pending" } : documentReceipt,
         body.mode === "abandon" ? 409 : 200)(route);
     });
-    await openDocumentReturn(page, locale, { ...documentStatus, document_return_attempt: { state: "reserved", retry_key: DOCUMENT_RETRY } });
+    await openDocumentReturn(page, locale, routePayload({
+      ...documentStatus, document_return_attempt: { state: "reserved", retry_key: DOCUMENT_RETRY },
+    }, 200));
     const form = page.locator("[data-driver-documents-form]");
     await form.locator("[data-driver-documents-abandon]").click();
     await expect(form.locator('input[type="file"]')).toBeEnabled();
