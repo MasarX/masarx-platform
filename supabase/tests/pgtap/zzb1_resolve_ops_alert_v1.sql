@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(11);
+SELECT plan(12);
 
 CREATE TEMP TABLE b1_res_result (
   result jsonb NOT NULL
@@ -78,6 +78,14 @@ SELECT is(
   'pgtap resolved',
   'api.ui_get_resource_v1 exposes resolution_notes after resolve_ops_alert_v1'
 );
+SELECT is(
+  alert->'details'->>'resolved_at',
+  alert->>'resolved_at',
+  'notification readback keeps the resolved timestamp alias'
+)
+FROM (SELECT api.ui_get_resource_v1(
+  'ops_alerts', current_setting('test.b1_res_alert')::uuid
+) AS alert) readback;
 RESET ROLE;
 
 -- 5) Caller-provided correlation is returned and shared across ledgers
