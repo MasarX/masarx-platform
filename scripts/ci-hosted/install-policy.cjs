@@ -1,4 +1,6 @@
 'use strict';
+const { git } = require('./target-policy.cjs');
+
 function workflowIgnore(text) {
   const lines = text.split(/\r?\n/); let inside = false;
   for (const line of lines) {
@@ -63,4 +65,23 @@ function checkInstallPolicy(files) {
   }
   return errors;
 }
-module.exports = { workflowIgnore, installCommand, checkInstallPolicy };
+
+function installInputs(revision, read = git) {
+  const names = read(['ls-tree', '-r', '--name-only', '-z', revision, '--', '.github/workflows', 'scripts/ci-hosted']).split('\0').filter(Boolean);
+  return new Map(names.filter(name => /^\.github\/workflows\/.*\.ya?ml$|^scripts\/ci-hosted\/.*\.(?:cjs|js|mjs|py)$/.test(name))
+    .map(name => [name, read(['show', `${revision}:${name}`])]));
+}
+function enforceWorkflowInventory(files) {
+  if (!files.has('.github/workflows/public-ci.yml')) throw new Error('Required workflow is missing');
+  const invalid = [...files.keys()].filter(file => file.startsWith('.github/workflows/') && !/^\.github\/workflows\/[^/]+\.ya?ml$/.test(file));
+  if (invalid.length) throw new Error('Workflow must be a YAML file directly in the workflow directory');
+}
+
+if (require.main === module) {
+  const files = installInputs('HEAD');
+  enforceWorkflowInventory(files);
+  const errors = checkInstallPolicy(files);
+  for (const error of errors) console.error(error);
+  if (errors.length) process.exitCode = 1;
+}
+module.exports = { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory };

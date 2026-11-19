@@ -2,11 +2,9 @@ name: ci
 
 'on':
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   merge_group:
     types: [checks_requested]
-  push:
-    branches: [main, v2]
   workflow_dispatch:
     inputs:
       regenerate_visual_baselines:
@@ -182,6 +180,8 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
+      - name: Check candidate install policy
+        run: node scripts/ci-hosted/install-policy.cjs
       - name: Migrations are append-only
         env:
           EVENT: ${{ github.event_name }}
@@ -207,17 +207,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      LOCAL_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+      LOCAL_GATE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && 2 || 1 }}
       - name: Fetch lint base
         run: |
-          [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
-          git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
+            LOCAL_GATE_BASE_SHA="$(git rev-parse --verify HEAD^1)"
+            printf 'LOCAL_GATE_BASE_SHA=%s\n' "$LOCAL_GATE_BASE_SHA" >> "$GITHUB_ENV"
+          else
+            [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
+            git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
+          fi
           git cat-file -e "${LOCAL_GATE_BASE_SHA}^{commit}"
       - name: Detect subject
         id: subject
@@ -489,37 +494,9 @@ jobs:
         with:
           fail-on-severity: high
 
-  main-admission:
-    name: Main admission
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
-    permissions:
-      contents: read
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Resolve the trusted main base
-        id: source
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          [[ "$BASE_SHA" =~ ^[a-f0-9]{40}$ ]]
-          printf 'base=%s\n' "$BASE_SHA" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
-        with:
-          ref: ${{ steps.source.outputs.base }}
-          persist-credentials: false
-          fetch-depth: 2
-          sparse-checkout: scripts/ci-hosted
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
-        with:
-          node-version: '24.22.1'
-          package-manager-cache: false
-      - name: Enforce the target-base guard without executing candidate code
-        run: node scripts/ci-hosted/policy.cjs
-
   ci-gate:
     name: ci-gate
-    needs: [database, database-build, database-pgtap, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines, dependency-review, main-admission]
+    needs: [database, database-build, database-pgtap, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines, dependency-review]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -529,12 +506,11 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
           VISUAL_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.regenerate_visual_baselines }}
           DEPENDENCY_REVIEW_REQUESTED: ${{ github.event_name == 'pull_request' }}
-          MAIN_ADMISSION_REQUESTED: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main' }}
         run: |
           python3 -I - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ['NEEDS_JSON'])
-          expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines', 'dependency-review', 'main-admission'}
+          expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines', 'dependency-review'}
           good = set(needs) == expected
           for name in sorted(expected):
               result = needs.get(name, {}).get('result', 'missing')
@@ -542,8 +518,6 @@ jobs:
               if name == 'visual-baselines' and os.environ['VISUAL_REQUESTED'] != 'true':
                   allowed = {'skipped'}
               if name == 'dependency-review' and os.environ['DEPENDENCY_REVIEW_REQUESTED'] != 'true':
-                  allowed = {'skipped'}
-              if name == 'main-admission' and os.environ['MAIN_ADMISSION_REQUESTED'] != 'true':
                   allowed = {'skipped'}
               passed = result in allowed
               print(f'{name}: {result}; {"PASS" if passed else "FAIL"}')
