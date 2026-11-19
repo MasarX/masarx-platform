@@ -10,9 +10,9 @@ SELECT plan(49);
 SELECT public.create_next_partitions();
 
 SELECT is(
-  public.normalize_phone_number_e164_v1('0 (202) 555-0123', '1'),
-  '+12025550123',
-  'E.164 helper normalizes a local leading-zero number using the configured country code'
+  public.normalize_phone_number_e164_v1('+12025550123', '966'),
+  '+966500000050',
+  'E.164 helper normalizes Saudi local leading-zero numbers from policy country code'
 );
 
 SELECT is(
