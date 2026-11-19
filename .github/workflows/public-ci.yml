@@ -435,7 +435,14 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs browser-install
       - name: Run synthetic local landing suite
         if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs landing-e2e
+        run: node node_modules/@playwright/test/cli.js test -c scripts/ci-hosted/playwright.landing.config.cjs tests/landing-e2e/landing-driver-signup.spec.ts --repeat-each=10 --workers=2 --retries=0 --trace=retain-on-failure
+      - name: Upload landing traces on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: landing-driver-signup-10x-traces
+          path: test-results/landing/**
+          retention-days: 3
       - name: Explain full-app browser exclusion
         run: |
           printf '%s\n' 'SKIPPED_BY_DESIGN: full Console/Portal/FieldOps E2E has no proven secret-free local fixture/auth contract.'
