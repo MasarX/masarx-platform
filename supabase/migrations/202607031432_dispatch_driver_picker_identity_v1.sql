@@ -59,20 +59,25 @@ SELECT
   COALESCE(NULLIF(v.plate_number, ''), v.vin, rr.vehicle_id::text) AS vehicle_label,
   COALESCE(stop_counts.stop_count, 0)::int AS stop_count,
   COALESCE(stop_counts.cod_total, 0)::numeric AS cod_total,
-  NULLIF(rr.route_assignment->>'route_run_assignment_id', '')::uuid AS assignment_id,
-  NULLIF(rr.route_assignment->>'assignment_status', '') AS assignment_status,
-  NULLIF(rr.route_assignment->>'assignment_mode', '') AS assignment_mode,
-  NULLIF(rr.route_assignment->>'assignment_version', '')::int AS assignment_version,
-  NULLIF(rr.route_assignment->>'assigned_at', '')::timestamptz AS assignment_assigned_at,
-  NULLIF(rr.route_assignment->>'driver_user_id', '')::uuid AS assignment_driver_user_id,
-  NULLIF(rr.route_assignment->>'vehicle_id', '')::uuid AS assignment_vehicle_id,
-  NULLIF(COALESCE(rr.route_assignment->'partner', '{}'::jsonb), '{}'::jsonb) AS partner_payload,
+  NULLIF(active_assignment.value->>'route_run_assignment_id', '')::uuid AS assignment_id,
+  NULLIF(active_assignment.value->>'assignment_status', '') AS assignment_status,
+  NULLIF(active_assignment.value->>'assignment_mode', '') AS assignment_mode,
+  NULLIF(active_assignment.value->>'assignment_version', '')::int AS assignment_version,
+  NULLIF(active_assignment.value->>'assigned_at', '')::timestamptz AS assignment_assigned_at,
+  NULLIF(active_assignment.value->>'driver_user_id', '')::uuid AS assignment_driver_user_id,
+  NULLIF(active_assignment.value->>'vehicle_id', '')::uuid AS assignment_vehicle_id,
+  NULLIF(COALESCE(active_assignment.value->'partner', '{}'::jsonb), '{}'::jsonb) AS partner_payload,
   COALESCE(
-    NULLIF(rr.route_assignment#>>'{partner,partner_name}', ''),
-    NULLIF(rr.route_assignment#>>'{partner,partner_id}', '')
+    NULLIF(active_assignment.value#>>'{partner,partner_name}', ''),
+    NULLIF(active_assignment.value#>>'{partner,partner_id}', '')
   ) AS partner_name,
-  NULLIF(rr.route_assignment->>'assignment_mode', '') IN ('partner_fleet', 'alternate_capacity_pool') AS is_partner_run
+  NULLIF(active_assignment.value->>'assignment_mode', '') IN ('partner_fleet', 'alternate_capacity_pool') AS is_partner_run
 FROM api.route_runs rr
+-- The shared readback retains the refused state. The directory describes active assignments.
+LEFT JOIN LATERAL (
+  SELECT rr.route_assignment AS value
+  WHERE rr.route_assignment->>'assignment_status' IN ('assigned', 'acknowledged', 'accepted')
+) AS active_assignment ON TRUE
 LEFT JOIN public.branches b
   ON b.id = rr.branch_id
 LEFT JOIN LATERAL public.scoped_user_label_v1(rr.organization_id, rr.driver_user_id) u ON TRUE

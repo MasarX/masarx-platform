@@ -4,7 +4,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(9);
+SELECT plan(10);
 
 -- 1) View exists
 SELECT has_view(
@@ -248,7 +248,7 @@ BEGIN
   )
   ON CONFLICT (id) DO NOTHING;
 
-  -- Newer refused assignment (must be excluded from the active row).
+  -- The refused assignment remains in history. The route has no active assignment.
   INSERT INTO public.route_run_assignments (
     id, organization_id, route_run_id,
     assignment_status, assignment_mode, partner,
@@ -327,6 +327,12 @@ BEGIN
       AND v_alt_is_partner = TRUE
       AND v_alt_assign_mode = 'alternate_capacity_pool',
     'v_route_run_directory derives is_partner_run for the alternate capacity assignment'
+  );
+
+  RETURN NEXT is(
+    (SELECT route_assignment->>'assignment_status' FROM api.route_runs WHERE id = v_refused_run),
+    'refused',
+    'the canonical route-run readback retains the refused assignment state'
   );
 END;
 $$;
