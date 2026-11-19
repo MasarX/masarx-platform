@@ -90,6 +90,8 @@ DECLARE
   v_run_display TEXT;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
+  PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
+  PERFORM set_config('request.jwt.claim.sub', '', TRUE);
   PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
 
   INSERT INTO public.organizations (id, name, slug)
@@ -197,6 +199,7 @@ BEGIN
 END;
 $$;
 SELECT * FROM pg_temp.test_route_run_directory_scope();
+RESET ROLE;
 
 -- 8) Negative path: partner_fleet assignment populates partner_name and flips
 -- is_partner_run; refused assignments are excluded from the active row.
@@ -219,6 +222,8 @@ DECLARE
   v_alt_assign_mode TEXT;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
+  PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
+  PERFORM set_config('request.jwt.claim.sub', '', TRUE);
   PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
 
   INSERT INTO public.organizations (id, name, slug)
