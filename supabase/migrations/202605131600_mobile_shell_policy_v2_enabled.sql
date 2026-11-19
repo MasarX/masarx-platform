@@ -131,8 +131,7 @@ SET
 WITH defaults AS (
   SELECT jsonb_build_object(
     'version', 1,
-    'v2_enabled', FALSE,
-    'rollout_cohort', NULL
+    'v2_enabled', FALSE
   ) AS body
 ),
 inserted AS (

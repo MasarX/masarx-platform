@@ -112,208 +112,70 @@ SELECT ok(
 --     than depending on existing test fixture tenants.
 -- ----------------------------------------------------------------------------
 
-DO $$
-DECLARE
-  v_tenant UUID := '00000000-0000-4000-8000-000000000a01'::uuid;
-  v_scope_hash UUID := v_tenant;
-BEGIN
-  -- Idempotent insert of a tenant-scoped override.
-  INSERT INTO public.settings_versions (
-    category,
-    scope_type,
-    scope_id,
-    scope_hash,
-    version,
-    value,
-    schema_version,
-    change_reason,
-    approved_at,
-    effective_from,
-    created_at
-  )
-  SELECT
-    'mobile_shell_policy',
-    'tenant',
-    v_tenant,
-    v_scope_hash,
-    1,
-    jsonb_build_object('version', 1, 'v2_enabled', TRUE, 'rollout_cohort', 'pgtap-pilot'),
-    1,
-    'pgTAP: mobile_shell_policy tenant override (v2_enabled=true)',
-    now(),
-    now(),
-    now()
-  WHERE NOT EXISTS (
-    SELECT 1 FROM public.settings_versions sv
-    WHERE sv.category = 'mobile_shell_policy'
-      AND sv.scope_type = 'tenant'
-      AND sv.scope_hash = v_scope_hash
-      AND sv.effective_until IS NULL
-      AND sv.approved_at IS NOT NULL
-  );
+SELECT set_config('test.mobile_rollout_tenant', gen_random_uuid()::text, true);
+SELECT set_config('test.mobile_rollout_actor', gen_random_uuid()::text, true);
+INSERT INTO public.organizations (id, name, slug)
+VALUES (current_setting('test.mobile_rollout_tenant')::uuid, 'Mobile rollout tenant', 'mobile-rollout-fixture');
+INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type)
+VALUES (current_setting('test.mobile_rollout_actor')::uuid, current_setting('test.mobile_rollout_tenant')::uuid,
+  'mobile-rollout@example.test', 'Mobile rollout fixture driver', 'driver', 'active', 'tenant');
 
-  -- Mirror into the cache so the resolver's settings join finds the row.
-  INSERT INTO public.settings (
-    category,
-    scope_type,
-    scope_id,
-    scope_hash,
-    settings_version_id,
-    cached_value,
-    last_updated
-  )
-  SELECT
-    'mobile_shell_policy',
-    'tenant',
-    v_tenant,
-    v_scope_hash,
-    sv.id,
-    sv.value,
-    now()
-  FROM public.settings_versions sv
-  WHERE sv.category = 'mobile_shell_policy'
-    AND sv.scope_type = 'tenant'
-    AND sv.scope_hash = v_scope_hash
-    AND sv.effective_until IS NULL
-    AND sv.approved_at IS NOT NULL
-  ON CONFLICT (category, scope_type, scope_hash) DO UPDATE
-  SET settings_version_id = EXCLUDED.settings_version_id,
-      cached_value = EXCLUDED.cached_value,
-      last_updated = now();
-END $$;
+SELECT public.upsert_settings_value_v1(
+  'mobile_shell_policy', 'tenant', current_setting('test.mobile_rollout_tenant')::uuid,
+  '{"version":1,"v2_enabled":true}'::jsonb, 1, 'Fixture tenant rollout opt-in'
+);
 
 SELECT ok(
   EXISTS (
     SELECT 1 FROM public.resolve_mobile_shell_policy_row(
-      jsonb_build_object('organization_id', '00000000-0000-4000-8000-000000000a01'::uuid)
+      jsonb_build_object('organization_id', current_setting('test.mobile_rollout_tenant'))
     ) r
     WHERE r.scope_type = 'tenant'
-      AND (r.value->>'v2_enabled')::boolean = TRUE
+      AND r.scope_id = current_setting('test.mobile_rollout_tenant')::uuid
+      AND r.value->'v2_enabled' = 'true'::jsonb
   ),
-  'resolve_mobile_shell_policy_row resolves to tenant override (v2_enabled=true) when tenant id supplied'
+  'rollout row resolves the opted-in tenant'
 );
 
-SELECT ok(
-  (
-    SELECT (r.value->>'rollout_cohort')
-    FROM public.resolve_mobile_shell_policy_row(
-      jsonb_build_object('organization_id', '00000000-0000-4000-8000-000000000a01'::uuid)
-    ) r
-  ) = 'pgtap-pilot',
-  'tenant override carries rollout_cohort metadata through resolver row form'
-);
-
--- The envelope resolver enforces tenant scope via current_user_org_id()
--- internally; when called as superuser with no auth.uid() the envelope
--- ignores the supplied organization_id and falls back to global default.
--- We exercise the row resolver directly above to assert ladder precedence
--- because that is the ladder contract; envelope-level enforcement is
--- covered separately under (g).
-
--- ----------------------------------------------------------------------------
--- (g) Unauthenticated caller — envelope returns global default; never
---     leaks a tenant override even when caller passes a tenant id.
--- ----------------------------------------------------------------------------
-
--- auth.uid() is NULL in the pgTAP session (no Supabase JWT).
+SELECT is(auth.uid(), NULL::uuid, 'fixture starts without a signed-in user');
 SELECT is(
-  auth.uid(),
-  NULL,
-  'pgTAP session has no auth.uid() (unauthenticated)'
+  public.resolve_mobile_shell_policy('driver', jsonb_build_object(
+    'organization_id', current_setting('test.mobile_rollout_tenant')
+  ))->'v2_enabled',
+  'false'::jsonb,
+  'unauthenticated context cannot opt into another tenant rollout'
 );
 
-SELECT ok(
-  (
-    public.resolve_mobile_shell_policy(
-      'driver',
-      jsonb_build_object('organization_id', '00000000-0000-4000-8000-000000000a01'::uuid)
-    )->>'v2_enabled'
-  )::boolean = FALSE,
-  'unauthenticated caller cannot leak a tenant override — envelope returns v2_enabled=false even with tenant id in context'
+SELECT set_config('request.jwt.claim.sub', current_setting('test.mobile_rollout_actor'), true);
+SELECT set_config('request.jwt.claims',
+  jsonb_build_object('role', 'authenticated', 'sub', current_setting('test.mobile_rollout_actor'))::text, true);
+SET LOCAL ROLE authenticated;
+SELECT is(
+  public.resolve_mobile_shell_policy('driver', '{}'::jsonb)->'v2_enabled',
+  'true'::jsonb,
+  'tenant opt-in enables V2 when all component policies resolve'
 );
+RESET ROLE;
 
--- ----------------------------------------------------------------------------
--- (h) Fail-safe — malformed policy payload defaults to v2_enabled=FALSE
--- ----------------------------------------------------------------------------
+-- Inject a malformed stored value to exercise fail-closed readback independently of schema validation.
+UPDATE public.settings_versions v SET value = jsonb_set(v.value, '{v2_enabled}', '"maybe"')
+FROM public.settings s
+WHERE s.category = 'mobile_shell_policy' AND s.scope_type = 'tenant'
+  AND s.scope_id = current_setting('test.mobile_rollout_tenant')::uuid
+  AND v.id = s.settings_version_id AND v.scope_hash = s.scope_hash;
+UPDATE public.settings
+SET cached_value = jsonb_set(cached_value, '{v2_enabled}', '"maybe"')
+WHERE category = 'mobile_shell_policy' AND scope_type = 'tenant'
+  AND scope_id = current_setting('test.mobile_rollout_tenant')::uuid;
+DELETE FROM public.settings_cache WHERE cache_key LIKE 'mobile_shell_policy:%';
 
-DO $$
-DECLARE
-  v_tenant UUID := '00000000-0000-4000-8000-000000000a02'::uuid;
-  v_scope_hash UUID := v_tenant;
-BEGIN
-  INSERT INTO public.settings_versions (
-    category,
-    scope_type,
-    scope_id,
-    scope_hash,
-    version,
-    value,
-    schema_version,
-    change_reason,
-    approved_at,
-    effective_from,
-    created_at
-  )
-  SELECT
-    'mobile_shell_policy',
-    'tenant',
-    v_tenant,
-    v_scope_hash,
-    1,
-    -- Malformed: v2_enabled is a string, not a boolean. Schema registry
-    -- validation would reject this in production; pgTAP injects directly
-    -- to confirm the resolver's defensive parse falls back safely.
-    jsonb_build_object('version', 1, 'v2_enabled', 'maybe', 'rollout_cohort', 'bad-payload'),
-    1,
-    'pgTAP: mobile_shell_policy malformed payload',
-    now(),
-    now(),
-    now()
-  WHERE NOT EXISTS (
-    SELECT 1 FROM public.settings_versions sv
-    WHERE sv.category = 'mobile_shell_policy'
-      AND sv.scope_type = 'tenant'
-      AND sv.scope_hash = v_scope_hash
-      AND sv.effective_until IS NULL
-      AND sv.approved_at IS NOT NULL
-  );
-
-  INSERT INTO public.settings (
-    category, scope_type, scope_id, scope_hash, settings_version_id, cached_value, last_updated
-  )
-  SELECT
-    'mobile_shell_policy', 'tenant', v_tenant, v_scope_hash, sv.id, sv.value, now()
-  FROM public.settings_versions sv
-  WHERE sv.category = 'mobile_shell_policy'
-    AND sv.scope_type = 'tenant'
-    AND sv.scope_hash = v_scope_hash
-    AND sv.effective_until IS NULL
-    AND sv.approved_at IS NOT NULL
-  ON CONFLICT (category, scope_type, scope_hash) DO UPDATE
-  SET settings_version_id = EXCLUDED.settings_version_id,
-      cached_value = EXCLUDED.cached_value,
-      last_updated = now();
-END $$;
-
--- Test the malformed payload at the row resolver (envelope path is
--- guarded by auth.uid() so we exercise the ladder + parse fall-through
--- via row resolver + manual cast guard).
-SELECT ok(
-  (
-    -- Mimic the resolver's defensive parse: any cast failure must yield FALSE.
-    SELECT COALESCE(
-      (CASE WHEN (r.value->>'v2_enabled') IN ('true','false','t','f','TRUE','FALSE')
-            THEN (r.value->>'v2_enabled')::boolean
-            ELSE FALSE
-       END),
-      FALSE
-    )
-    FROM public.resolve_mobile_shell_policy_row(
-      jsonb_build_object('organization_id', '00000000-0000-4000-8000-000000000a02'::uuid)
-    ) r
-  ) = FALSE,
-  'malformed v2_enabled payload (non-boolean string) parses as FALSE — fail-safe stays on V1'
+SET LOCAL ROLE authenticated;
+SELECT is(
+  public.resolve_mobile_shell_policy('driver', '{}'::jsonb)->'v2_enabled',
+  'false'::jsonb,
+  'malformed rollout opt-in keeps Mobile V2 off'
 );
+RESET ROLE;
 
 -- ----------------------------------------------------------------------------
 -- (i) GRANT posture — only authenticated + service_role may execute

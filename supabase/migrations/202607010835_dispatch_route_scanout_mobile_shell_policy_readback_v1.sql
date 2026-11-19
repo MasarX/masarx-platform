@@ -25,6 +25,8 @@ AS $function$
 DECLARE
   v_context JSONB := COALESCE(p_context, '{}'::jsonb);
   v_active_role TEXT := COALESCE(NULLIF(BTRIM(p_active_role), ''), 'driver');
+  v_caller_org UUID := public.current_user_org_id();
+  v_rollout RECORD;
   v_resolver JSONB;
   v_category TEXT;
   v_function_name TEXT;
@@ -42,6 +44,18 @@ DECLARE
   v_policies JSONB := '{}'::jsonb;
   v_missing_categories TEXT[] := ARRAY[]::TEXT[];
 BEGIN
+  IF jsonb_typeof(v_context) <> 'object' OR auth.uid() IS NULL THEN
+    v_context := '{}'::jsonb;
+  END IF;
+  IF v_caller_org IS NOT NULL THEN
+    v_context := jsonb_build_object('organization_id', v_caller_org) || v_context;
+  END IF;
+
+  SELECT * INTO v_rollout
+  FROM public.resolve_mobile_shell_policy_row(jsonb_strip_nulls(
+    jsonb_build_object('organization_id', v_caller_org)
+  ));
+
   FOR v_resolver IN
     SELECT value
     FROM jsonb_array_elements(
@@ -105,8 +119,14 @@ BEGIN
 
   RETURN jsonb_build_object(
     'active_role', v_active_role,
-    'v2_enabled', COALESCE(array_length(v_missing_categories, 1), 0) = 0,
-    'rollout_cohort', COALESCE(NULLIF(v_context->>'rollout_cohort', ''), 'default'),
+    'v2_enabled', COALESCE(
+      v_caller_org IS NOT NULL AND v_rollout.scope_type = 'tenant'
+        AND v_rollout.scope_id = v_caller_org
+        AND v_rollout.value->'v2_enabled' = 'true'::jsonb
+        AND cardinality(v_missing_categories) = 0, FALSE
+    ),
+    'rollout_cohort', COALESCE(NULLIF(v_rollout.value->>'rollout_cohort', ''), 'default'),
+    'resolved_at', now(),
     'scope_type', COALESCE(v_scope_type, 'unresolved'),
     'scope_id', v_scope_id,
     'scope_path', COALESCE(v_scope_path, '[]'::jsonb),
@@ -118,7 +138,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.resolve_mobile_shell_policy(TEXT, JSONB)
-  IS 'Aggregate Mobile V2 shell policy readback for runtime proof; composed from canonical row-driven policy resolver wrappers.';
+  IS 'Resolve shell policy readiness and require the authenticated tenant rollout opt-in to enable Mobile V2.';
 REVOKE ALL ON FUNCTION public.resolve_mobile_shell_policy(TEXT, JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.resolve_mobile_shell_policy(TEXT, JSONB) FROM anon;
 GRANT EXECUTE ON FUNCTION public.resolve_mobile_shell_policy(TEXT, JSONB) TO authenticated, service_role;

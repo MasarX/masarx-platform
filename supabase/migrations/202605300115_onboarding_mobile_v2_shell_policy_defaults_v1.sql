@@ -1,6 +1,6 @@
 -- Migration: Onboarding Mobile V2 shell policy tenant defaults
 -- Purpose: Keep the global Mobile shell fallback fail-closed while ensuring
--- tenant onboarding/bootstrap materializes the Mobile V2 shell cutover for
+-- tenant onboarding/bootstrap materializes a disabled rollout policy for
 -- real tenant scopes through the existing saas_onboarding_policy path.
 
 BEGIN;
@@ -31,8 +31,7 @@ DECLARE
         'category_value_overrides', jsonb_build_object(
           'mobile_shell_policy', jsonb_build_object(
             'version', 1,
-            'v2_enabled', TRUE,
-            'rollout_cohort', 'first-tenant-onboarding'
+            'v2_enabled', FALSE
           )
         )
       ),
@@ -227,8 +226,7 @@ DECLARE
         'category_value_overrides', jsonb_build_object(
           'mobile_shell_policy', jsonb_build_object(
             'version', 1,
-            'v2_enabled', TRUE,
-            'rollout_cohort', 'first-tenant-onboarding'
+            'v2_enabled', FALSE
           )
         )
       )
@@ -250,8 +248,6 @@ DECLARE
   v_org RECORD;
   v_policy JSONB := public.resolve_saas_onboarding_policy_v1();
   v_override_value JSONB := v_policy #> '{materialize_defaults,tenant,category_value_overrides,mobile_shell_policy}';
-  v_existing RECORD;
-  v_existing_v2_enabled BOOLEAN;
 BEGIN
   IF v_override_value IS NULL OR jsonb_typeof(v_override_value) <> 'object' THEN
     RAISE EXCEPTION 'Mobile V2 tenant shell policy override is missing from saas_onboarding_policy'
@@ -264,10 +260,8 @@ BEGIN
     WHERE o.id <> '00000000-0000-0000-0000-000000000000'::uuid
     ORDER BY o.id
   LOOP
-    SELECT s.cached_value, sv.change_reason
-      INTO v_existing
+    PERFORM 1
       FROM public.settings s
-      JOIN public.settings_versions sv ON sv.id = s.settings_version_id
      WHERE s.category = 'mobile_shell_policy'
        AND s.scope_type = 'tenant'
        AND s.scope_id = v_org.id
@@ -279,27 +273,6 @@ BEGIN
         v_org.id,
         v_policy,
         'console-v2:mobile-v2-shell-policy-defaults-backfill'
-      );
-      CONTINUE;
-    END IF;
-
-    BEGIN
-      v_existing_v2_enabled := COALESCE((v_existing.cached_value->>'v2_enabled')::boolean, FALSE);
-    EXCEPTION
-      WHEN others THEN
-        v_existing_v2_enabled := FALSE;
-    END;
-
-    IF v_existing_v2_enabled IS FALSE
-       AND COALESCE(v_existing.change_reason, '') LIKE 'Onboarding bootstrap (%'
-    THEN
-      PERFORM public.upsert_settings_value_v1(
-        'mobile_shell_policy',
-        'tenant',
-        v_org.id,
-        v_override_value,
-        1,
-        format('Onboarding Mobile V2 shell policy default backfill for tenant/%s', v_org.id)
       );
     END IF;
   END LOOP;

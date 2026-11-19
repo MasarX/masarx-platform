@@ -26,68 +26,10 @@ BEGIN
   VALUES (v_org_id, 'Mobile V2 Login First Task pgTAP', 'mobile-v2-login-first-task-pgtap')
   ON CONFLICT (id) DO NOTHING;
 
-  INSERT INTO public.settings_versions (
-    category,
-    scope_type,
-    scope_id,
-    scope_hash,
-    version,
-    value,
-    schema_version,
-    change_reason,
-    approved_at,
-    effective_from,
-    created_at
-  )
-  SELECT
-    'mobile_shell_policy',
-    'tenant',
-    v_org_id,
-    v_org_id,
-    1,
-    jsonb_build_object('version', 1, 'v2_enabled', TRUE, 'rollout_cohort', 'pgtap-login-first-task'),
-    1,
-    'pgTAP: Mobile V2 login first task proof policy',
-    now(),
-    now(),
-    now()
-  WHERE NOT EXISTS (
-    SELECT 1
-    FROM public.settings_versions sv
-    WHERE sv.category = 'mobile_shell_policy'
-      AND sv.scope_type = 'tenant'
-      AND sv.scope_hash = v_org_id
-      AND sv.effective_until IS NULL
-      AND sv.approved_at IS NOT NULL
+  PERFORM public.upsert_settings_value_v1(
+    'mobile_shell_policy', 'tenant', v_org_id,
+    '{"version":1,"v2_enabled":true}'::jsonb, 1, 'Fixture tenant rollout opt-in'
   );
-
-  INSERT INTO public.settings (
-    category,
-    scope_type,
-    scope_id,
-    scope_hash,
-    settings_version_id,
-    cached_value,
-    last_updated
-  )
-  SELECT
-    'mobile_shell_policy',
-    'tenant',
-    v_org_id,
-    v_org_id,
-    sv.id,
-    sv.value,
-    now()
-  FROM public.settings_versions sv
-  WHERE sv.category = 'mobile_shell_policy'
-    AND sv.scope_type = 'tenant'
-    AND sv.scope_hash = v_org_id
-    AND sv.effective_until IS NULL
-    AND sv.approved_at IS NOT NULL
-  ON CONFLICT (category, scope_type, scope_hash) DO UPDATE
-    SET settings_version_id = EXCLUDED.settings_version_id,
-        cached_value = EXCLUDED.cached_value,
-        last_updated = now();
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, status)
   VALUES (

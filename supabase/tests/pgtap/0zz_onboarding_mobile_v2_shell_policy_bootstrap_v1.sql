@@ -1,6 +1,5 @@
 -- pgTAP: onboarding Mobile V2 shell policy bootstrap.
--- Proves new tenant readiness bootstrap enables Mobile V2 only at tenant scope
--- while the global/empty resolver fallback remains V2-off.
+-- Proves both tenant bootstrap and global fallback keep Mobile V2 off.
 
 SET search_path TO public, pgtap, extensions, pg_temp;
 
@@ -38,8 +37,8 @@ SELECT is(
     'tenant',
     current_setting('test.mobile_v2_bootstrap_org_id')::uuid
   )->>'v2_enabled',
-  'true',
-  'new tenant bootstrap resolves mobile_shell_policy.v2_enabled=true'
+  'false',
+  'new tenant bootstrap keeps Mobile V2 off'
 );
 
 SELECT is(
@@ -48,8 +47,8 @@ SELECT is(
     'tenant',
     current_setting('test.mobile_v2_bootstrap_org_id')::uuid
   )->>'rollout_cohort',
-  'first-tenant-onboarding',
-  'new tenant bootstrap resolves the row-driven onboarding cohort'
+  NULL::text,
+  'tenant bootstrap uses the canonical rollout schema'
 );
 
 SELECT is(
@@ -60,8 +59,8 @@ SELECT is(
     ) AS r
     LIMIT 1
   ),
-  'true',
-  'row resolver returns tenant Mobile V2 cutover for new tenant context'
+  'false',
+  'row resolver keeps Mobile V2 off for new tenant context'
 );
 
 SELECT is(
