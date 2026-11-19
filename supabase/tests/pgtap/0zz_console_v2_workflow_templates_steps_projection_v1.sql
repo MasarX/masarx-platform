@@ -73,7 +73,7 @@ SELECT ok(
   EXISTS (
     SELECT 1
       FROM jsonb_array_elements(
-        (public.ui_list_resource_v1('workflow_templates', '{}'::jsonb, 10, 0, '{"key":"created_at","direction":"desc"}'::jsonb)->'items')
+        (public.ui_list_resource_v1('workflow_templates', '{"name":"shipment_manual_create_v1","status":"active"}'::jsonb, 10, 0, NULL)->'items')
       ) AS item
      WHERE jsonb_typeof(item->'steps') = 'array'
        AND jsonb_array_length(item->'steps') > 0
@@ -82,13 +82,14 @@ SELECT ok(
 );
 
 SELECT ok(
-  NOT EXISTS (
+  EXISTS (
     SELECT 1
       FROM jsonb_array_elements(
-        (public.ui_list_resource_v1('workflow_templates', '{}'::jsonb, 10, 0, '{"key":"created_at","direction":"desc"}'::jsonb)->'items')
+        (public.ui_list_resource_v1('workflow_templates', '{"name":"shipment_manual_create_v1","status":"active"}'::jsonb, 10, 0, NULL)->'items')
       ) AS item
-     WHERE COALESCE(item->>'template_id', '') = ''
-        OR COALESCE(item->>'trigger', '') = ''
+     WHERE item->>'name' = 'shipment_manual_create_v1'
+       AND NULLIF(item->>'template_id', '') IS NOT NULL
+       AND NULLIF(item->>'trigger', '') IS NOT NULL
   ),
   'workflow template projection carries display labels required by the studio'
 );

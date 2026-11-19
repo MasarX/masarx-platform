@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(25);
+SELECT plan(26);
 
 DO $$
 DECLARE
@@ -34,7 +34,7 @@ BEGIN
     v_org_a,
     'console-v2-dispute-readonly-' || left(v_limited_user::text, 8) || '@example.com',
     'Console V2 Dispute Readonly',
-    'account_manager',
+    'driver',
     'tenant',
     NULL
   )
@@ -137,6 +137,12 @@ END $$;
 SELECT set_config('request.jwt.claim.sub', current_setting('test.cv2_dispute_limited_user'), true);
 SET LOCAL ROLE authenticated;
 
+SELECT ok(
+  public.user_has_capability_v1('disputes.write') IS NOT TRUE
+  AND public.user_has_capability_v1('marketplace_disputes.write') IS NOT TRUE,
+  'denied actor lacks both dispute write capabilities'
+);
+
 SELECT throws_ok(
   $$ SELECT public.dispute_resolve_v1(jsonb_build_object(
        'dispute_id', current_setting('test.cv2_dispute_resolve'),
@@ -144,7 +150,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied public.dispute_resolve_v1'
+  'operator without write capability denied public.dispute_resolve_v1'
 );
 
 SELECT throws_ok(
@@ -154,7 +160,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied api.dispute_resolve_v1'
+  'operator without write capability denied api.dispute_resolve_v1'
 );
 
 SELECT throws_ok(
@@ -164,7 +170,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied public.dispute_reject_v1'
+  'operator without write capability denied public.dispute_reject_v1'
 );
 
 SELECT throws_ok(
@@ -174,7 +180,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied api.dispute_reject_v1'
+  'operator without write capability denied api.dispute_reject_v1'
 );
 
 SELECT throws_ok(
@@ -183,7 +189,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied public.dispute_acknowledge_v1'
+  'operator without write capability denied public.dispute_acknowledge_v1'
 );
 
 SELECT throws_ok(
@@ -192,7 +198,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied api.dispute_acknowledge_v1'
+  'operator without write capability denied api.dispute_acknowledge_v1'
 );
 
 SELECT throws_ok(
@@ -202,7 +208,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied public.dispute_escalate_v1'
+  'operator without write capability denied public.dispute_escalate_v1'
 );
 
 SELECT throws_ok(
@@ -212,7 +218,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied api.dispute_escalate_v1'
+  'operator without write capability denied api.dispute_escalate_v1'
 );
 
 SELECT throws_ok(
@@ -222,7 +228,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied public.ui_bulk_dispute_action_v1'
+  'operator without write capability denied public.ui_bulk_dispute_action_v1'
 );
 
 SELECT throws_ok(
@@ -232,7 +238,7 @@ SELECT throws_ok(
      )) $$,
   '42501',
   NULL,
-  'read-only operator denied api.ui_bulk_dispute_action_v1'
+  'operator without write capability denied api.ui_bulk_dispute_action_v1'
 );
 
 RESET ROLE;

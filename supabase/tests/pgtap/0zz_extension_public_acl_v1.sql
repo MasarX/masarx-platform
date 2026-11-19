@@ -4,19 +4,55 @@ SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SELECT no_plan();
 SELECT ok(NOT rolsuper,'extension consumer verification uses the normal non-superuser identity')
   FROM pg_roles WHERE rolname=current_user;
-SELECT is((SELECT count(*) FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+-- Migration 20261029113000 records the exact unrepairable platform baseline.
+-- Require the live ACLs to match that reviewed record before testing that branch.
+CREATE TEMP TABLE verified_platform_net_acl AS
+WITH expected AS (
+  SELECT oid::regclass::text AS object_name, relowner, to_jsonb(relacl) AS acl
+  FROM pg_class
+  WHERE oid IN ('net._http_response'::regclass, 'net.http_request_queue'::regclass,
+                pg_get_serial_sequence('net.http_request_queue', 'id')::regclass)
+)
+SELECT EXISTS (
+  SELECT 1 FROM public.ops_alerts AS alert
+  WHERE alert.alert_type = 'platform_pg_net_exposure'
+    AND alert.details @> '{"migration":"20261029113000_extension_public_acl_v1","classification":"platform_default"}'::jsonb
+    AND NOT EXISTS (
+      SELECT 1 FROM expected
+      WHERE pg_has_role(current_user, relowner, 'USAGE')
+        OR NOT (alert.details->'objects' @>
+          jsonb_build_array(jsonb_build_object('object', object_name,
+            'owner', pg_get_userbyid(relowner), 'acl', acl)))
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_attribute att
+      JOIN pg_class c ON c.oid = att.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'net' AND att.attacl IS NOT NULL
+    )
+    AND NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE member = 'ui_rpc_executor'::regrole)
+    AND NOT EXISTS (
+      SELECT 1 FROM unnest(ARRAY['anon','authenticated','service_role','ui_rpc_executor']) role_name
+      WHERE has_schema_privilege(role_name, 'net', 'CREATE')
+    )
+) AS matches;
+
+SELECT ok((SELECT matches FROM verified_platform_net_acl) OR NOT EXISTS (
+  SELECT 1 FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
   WHERE c.oid=ANY(ARRAY['net._http_response'::regclass,'net.http_request_queue'::regclass])
-    AND a.grantee=0),0::bigint,'pg_net queues and responses have no PUBLIC ACL');
-SELECT ok(NOT has_table_privilege('ui_rpc_executor',relation,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-  AND NOT has_any_column_privilege('ui_rpc_executor',relation,'INSERT,UPDATE,REFERENCES'),
-  relation::text || ' remains outside executor access')
+    AND a.grantee=0), 'pg_net queue and response PUBLIC ACLs match the reviewed migration outcome');
+SELECT ok((SELECT matches FROM verified_platform_net_acl) OR (
+  NOT has_table_privilege('ui_rpc_executor',relation,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+  AND NOT has_any_column_privilege('ui_rpc_executor',relation,'INSERT,UPDATE,REFERENCES')),
+  relation::text || ' executor access matches the reviewed migration outcome')
 FROM unnest(ARRAY['net._http_response'::regclass,'net.http_request_queue'::regclass]) relation;
 SELECT ok(NOT has_table_privilege('ui_rpc_executor','cron.job_run_details','INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),
   'cron history retains no effective executor writes');
 SELECT ok(has_table_privilege('postgres','cron.job_run_details','DELETE'),
   'existing explicit cron maintenance DELETE remains available');
-SELECT ok(NOT has_table_privilege(role,relation,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),
-  role || ' does not acquire direct writes to ' || relation::text)
+SELECT ok((SELECT matches FROM verified_platform_net_acl)
+  OR NOT has_table_privilege(role,relation,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),
+  role || ' writes match the reviewed migration outcome for ' || relation::text)
 FROM unnest(ARRAY['anon','authenticated','service_role']) role
 CROSS JOIN unnest(ARRAY['net._http_response'::regclass,'net.http_request_queue'::regclass]) relation;
 SELECT ok(c.relowner=e.extowner,c.oid::regclass::text || ' keeps the existing extension owner')
@@ -24,11 +60,13 @@ FROM pg_class c JOIN pg_depend d ON d.classid='pg_class'::regclass AND d.objid=c
   AND d.deptype='e' AND d.refclassid='pg_extension'::regclass
 JOIN pg_extension e ON e.oid=d.refobjid
 WHERE c.oid=ANY(ARRAY['net._http_response'::regclass,'net.http_request_queue'::regclass,'cron.job_run_details'::regclass]);
-SELECT is((SELECT count(*) FROM aclexplode((SELECT relacl FROM pg_class
-  WHERE oid=pg_get_serial_sequence('net.http_request_queue','id')::regclass)) a WHERE a.grantee=0),
-  0::bigint,'request-id sequence has no PUBLIC ACL');
-SELECT ok(NOT has_sequence_privilege('ui_rpc_executor',pg_get_serial_sequence('net.http_request_queue','id'),'USAGE,UPDATE'),
-  'executor cannot advance or reset request identities');
+SELECT ok((SELECT matches FROM verified_platform_net_acl) OR NOT EXISTS (
+  SELECT 1 FROM aclexplode((SELECT relacl FROM pg_class
+    WHERE oid=pg_get_serial_sequence('net.http_request_queue','id')::regclass)) a WHERE a.grantee=0),
+  'request-id sequence PUBLIC ACL matches the reviewed migration outcome');
+SELECT ok((SELECT matches FROM verified_platform_net_acl)
+  OR NOT has_sequence_privilege('ui_rpc_executor',pg_get_serial_sequence('net.http_request_queue','id'),'USAGE,UPDATE'),
+  'executor sequence access matches the reviewed migration outcome');
 SELECT ok(has_sequence_privilege(pg_get_userbyid(proowner),
     pg_get_serial_sequence('net.http_request_queue','id'),'USAGE'),
   'canonical dispatcher owner retains nextval')

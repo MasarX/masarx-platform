@@ -230,10 +230,11 @@ SELECT set_config(
   TRUE
 );
 
-SELECT ok(
-  COALESCE((current_setting('test.label_designer_platform_update')::jsonb->>'ok')::BOOLEAN, FALSE)
-  AND current_setting('test.label_designer_platform_update')::jsonb #>> '{draft,label_type}' = 'returns',
-  'platform operator updates active-tenant label draft without home-org lookup'
+-- Migration 202610190901 makes draft update and publish home-organization scoped.
+SELECT is(
+  current_setting('test.label_designer_platform_update')::jsonb #>> '{error,code}',
+  'draft_not_found',
+  'platform operator outside the draft organization receives a generic update denial'
 );
 
 SELECT ok(
@@ -250,9 +251,10 @@ SELECT set_config(
   TRUE
 );
 
-SELECT ok(
-  COALESCE((current_setting('test.label_designer_platform_publish')::jsonb->>'ok')::BOOLEAN, FALSE),
-  'platform operator publishes active-tenant label design'
+SELECT is(
+  current_setting('test.label_designer_platform_publish')::jsonb #>> '{error,code}',
+  'draft_not_found',
+  'platform operator outside the draft organization receives a generic publication denial'
 );
 
 RESET ROLE;
@@ -263,24 +265,24 @@ SELECT ok(
       FROM public.label_design_drafts
      WHERE id = current_setting('test.label_designer_platform_draft')::UUID
        AND organization_id = current_setting('test.label_designer_platform_tenant')::UUID
-       AND status = 'published'
-       AND published_settings_version_id = (current_setting('test.label_designer_platform_publish')::jsonb->>'settings_version_id')::UUID
+       AND status = 'draft'
+       AND label_type = 'shipping'
+       AND published_settings_version_id IS NULL
   ),
-  'published draft readback remains stored on active tenant organization'
+  'denied writes leave the active tenant draft intact'
 );
 
 SELECT ok(
-  EXISTS (
+  NOT EXISTS (
     SELECT 1
       FROM public.settings_versions
-     WHERE id = (current_setting('test.label_designer_platform_publish')::jsonb->>'settings_version_id')::UUID
-       AND category = 'label_design'
+     WHERE category = 'label_design'
        AND scope_type = 'tenant'
        AND scope_id = current_setting('test.label_designer_platform_tenant')::UUID
        AND approved_at IS NOT NULL
        AND effective_until IS NULL
   ),
-  'publish creates active tenant-scoped label_design settings version'
+  'denied publication does not create approved tenant label settings'
 );
 
 SET LOCAL ROLE authenticated;
