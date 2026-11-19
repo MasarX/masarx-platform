@@ -75,16 +75,11 @@ SELECT matches(
 );
 
 SELECT ok(
-  strpos(
-    lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
-    'dry_run'
-  ) > 0
-  AND strpos(
-    lower(pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure)),
-    'shipment_amend_cancel_execute_v1'
-  ) > 0,
-  'shipment_amend_cancel_v1 keeps dry-run previews outside the canonical executor'
-);
+  position('IF v_dry_run THEN' IN body) > 0
+    AND position('IF v_dry_run THEN' IN body) < position('public.start_workflow_run(' IN body),
+  'shipment_amend_cancel_v1 returns dry-run previews before starting the workflow'
+)
+FROM (SELECT pg_get_functiondef('public.shipment_amend_cancel_v1(jsonb)'::regprocedure) AS body) definition;
 
 SELECT ok(
   EXISTS (
