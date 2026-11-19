@@ -4,7 +4,7 @@ const { execFileSync } = require('node:child_process');
 const gates = ['database', 'typecheck', 'unit', 'ui', 'build_console', 'build_portal', 'build_landing', 'e2e'];
 const state = value => Object.fromEntries(gates.map(gate => [gate, value]));
 const sharedInputs = [
-  /^(?:\.github|scripts\/ci-hosted|config)\/|(?:^|\/)\.yarn\//,
+  /^(?:\.github|scripts\/ci-hosted|config|packages)\/|(?:^|\/)\.yarn\//,
   /(?:^|\/)(?:[^/]*manifest[^/]*\.(?:jsonc?|ya?ml|toml|xml)|(?:package|project|deno|composer)\.jsonc?|[^/]+\.webmanifest)$/i,
   /(?:^|\/)(?:[^/]+\.lock(?:\.[^/]+)?|(?:[^/]+-)?lock\.[^/]+|bun\.lockb|npm-shrinkwrap\.json|pnpm-workspace\.ya?ml)$/i,
   /(?:^|\/)(?:\.npmrc|\.yarnrc(?:\.[^/]+)?|\.pnpmfile\.[^/]+|\.gitattributes|cargo\.toml|pyproject\.toml|requirements[^/]*\.txt|gemfile|go\.(?:mod|sum))$/i,
@@ -15,16 +15,22 @@ function select(files) {
   const affected = state(false);
   for (const file of files) {
     if (sharedInputs.some(pattern => pattern.test(file))) return state(true);
-    if (file.startsWith('supabase/')) affected.database = true;
-    else if (file.startsWith('apps/console/')) affected.typecheck = affected.build_console = true;
-    else if (file.startsWith('apps/portal/')) affected.typecheck = affected.build_portal = true;
-    else if (file.startsWith('apps/fieldops/')) affected.typecheck = true;
-    else if (file.startsWith('tests/unit/')) affected.unit = true;
-    else if (/^(?:tests\/ui|packages)\//.test(file)) affected.ui = true;
-    else if (/^(?:apps\/landing|docs\/marketing\/(?:landing-v2|brand))\/|^scripts\/frontend\/(?:build|serve)-landing\.js$/.test(file)) {
-      affected.build_landing = affected.e2e = true;
-    } else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.e2e = true;
-    else if (!/^(?:docs\/(?:[^/]+\/)*)?[^/]+\.(?:md|mdx)$/i.test(file)) return state(true);
+    if (file.startsWith('supabase/')) affected.database = affected.unit = true;
+    else if (file.startsWith('apps/')) {
+      const [, app] = file.split('/');
+      affected.typecheck = affected.unit = affected.ui = true;
+      if (app === 'console' || app === 'portal') affected[`build_${app}`] = true;
+      else if (app === 'landing') affected.build_landing = affected.e2e = true;
+      else if (app === 'fieldops') {
+        // FieldOps has no hosted build target.
+        affected.build_console = affected.build_portal = affected.build_landing = true;
+      } else return state(true);
+    } else if (/^docs\/marketing\/(?:landing-v2|brand)\/|^scripts\/frontend\/(?:build|serve)-landing\.js$/.test(file)) {
+      affected.unit = affected.build_landing = affected.e2e = true;
+    } else if (/^(?:tests\/unit|docs)\//.test(file)) affected.unit = true;
+    else if (file.startsWith('tests/ui/')) affected.ui = true;
+    else if (/^tests\/landing-e2e\/|^playwright\.landing\.config\.ts$/.test(file)) affected.e2e = true;
+    else if (!/^[^/]+\.md$/i.test(file)) return state(true);
   }
   return affected;
 }

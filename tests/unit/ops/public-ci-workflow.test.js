@@ -14,10 +14,6 @@ describe('public CI workflow contract', () => {
     expect(workflow.on.merge_group.types).toContain('checks_requested');
     expect(workflow.on.push).toBeUndefined();
     expect(workflow.on.workflow_dispatch).toBeDefined();
-    const lint = workflow.jobs.lint;
-    expect(lint.steps[0].with['fetch-depth']).toBe(2);
-    expect(lint.steps[1].run).toContain('[[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]');
-    expect(lint.steps[1].run).toContain("git rev-parse --verify 'HEAD^1^{commit}'");
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(workflow.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}");
   });

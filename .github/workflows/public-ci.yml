@@ -241,14 +241,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 1
       - name: Fetch lint base
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
-            base="$(git rev-parse --verify 'HEAD^1^{commit}')"
-            printf 'LOCAL_GATE_BASE_SHA=%s\n' "$base" >> "$GITHUB_ENV"
-            exit 0
-          fi
           [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
           git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
           git cat-file -e "${LOCAL_GATE_BASE_SHA}^{commit}"
