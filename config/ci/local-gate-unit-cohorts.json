@@ -63,17 +63,19 @@
       "allowed_changed_path_re": [
         "^AGENTS\\.md$",
         "^docs/marketing/landing-v2/(?:app|content)\\.js$",
-        "^scripts/frontend/(?:build-landing|serve-landing)\\.js$",
+        "^docs/marketing/landing-v2/(?:app\\.dev\\.css|content\\.dev\\.js)$",
+        "^scripts/frontend/(?:build-landing|serve-landing|prune-landing-previews)\\.js$",
         "^playwright\\.landing\\.config\\.ts$",
         "^tests/landing-e2e/",
         "^tests/unit/landing-[^/]+\\.test\\.(?:js|ts)$",
-        "^tests/unit/frontend/serve-landing\\.test\\.js$"
+        "^tests/unit/frontend/(?:landing-dev|serve-landing)\\.test\\.js$"
       ],
       "test_paths": [
         "tests/unit/landing-app-path-lang.test.js",
         "tests/unit/landing-build-static-i18n.test.js",
         "tests/unit/landing-e2e-config.test.js",
         "tests/unit/landing-runtime-patching.test.ts",
+        "tests/unit/frontend/landing-dev.test.js",
         "tests/unit/frontend/serve-landing.test.js"
       ]
     }

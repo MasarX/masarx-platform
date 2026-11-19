@@ -337,6 +337,12 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           CLOUDFLARE_PAGES_PROJECT_LANDING: ${{ vars.CLOUDFLARE_PAGES_PROJECT_LANDING }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          LANDING_CONTACT_ENDPOINT: ${{ vars.LANDING_CONTACT_ENDPOINT }}
+          LANDING_TENANT_SIGNUP_ENDPOINT: ${{ vars.LANDING_TENANT_SIGNUP_ENDPOINT }}
+          LANDING_DRIVER_SIGNUP_ENDPOINT: ${{ vars.LANDING_DRIVER_SIGNUP_ENDPOINT }}
+          LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT: ${{ vars.LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT || vars.LANDING_DRIVER_STATUS_ENDPOINT }}
+          LANDING_DRIVER_APPLICATION_DOCUMENTS_ENDPOINT: ${{ vars.LANDING_DRIVER_APPLICATION_DOCUMENTS_ENDPOINT }}
         run: |
           LANDING_SITE_URL="https://$DEPLOY_ENV.$CLOUDFLARE_PAGES_PROJECT_LANDING.pages.dev" npm run build:landing
           for attempt in 1 2 3; do npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund && break
@@ -350,6 +356,7 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT_LANDING: ${{ vars.CLOUDFLARE_PAGES_PROJECT_LANDING }}
         run: |
           set -euo pipefail
+          WRANGLER_OUTPUT_FILE_PATH="$RUNNER_TEMP/pages-deploy.ndjson" \
           tooling/apps/deploy/node_modules/.bin/wrangler pages deploy dist/landing \
             --project-name "$CLOUDFLARE_PAGES_PROJECT_LANDING" --branch "$DEPLOY_ENV" --commit-dirty=true | tee "$RUNNER_TEMP/pages-deploy.log"
           python3 - <<'PY'
@@ -360,6 +367,9 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'url={urls[0]}\n')
           PY
+          if [[ "$DEPLOY_ENV" == dev ]]; then
+            node scripts/frontend/prune-landing-previews.js "$RUNNER_TEMP/pages-deploy.ndjson" || echo "::warning::preview prune skipped"
+          fi
 
   ingress:
     needs: database
