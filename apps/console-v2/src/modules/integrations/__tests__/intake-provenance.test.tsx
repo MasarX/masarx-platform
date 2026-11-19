@@ -469,7 +469,7 @@ describe('IntakeModule · provenance enrichment', () => {
     expect(screen.getByRole('button', { name: /Open Inbox failures & replay/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Open Test webhook intake/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Open API request intake/i })).toBeEnabled();
-    expect(screen.getByRole('button', { name: /Open Routing rules/i })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /Open Routing rules/i })).toBeNull();
 
     await user.click(screen.getByRole('button', { name: /Open API request intake/i }));
 
@@ -487,7 +487,7 @@ describe('IntakeModule · provenance enrichment', () => {
     expect(screen.getByRole('button', { name: /Open Sources & tokens/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Open Inbox failures & replay/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Open Test webhook intake/i })).toBeEnabled();
-    expect(screen.getByRole('button', { name: /Open Routing rules/i })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /Open Routing rules/i })).toBeNull();
     expect(screen.getByRole('button', { name: /Open API request intake/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Open Intake mappings/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Open Provider credentials/i })).toBeDisabled();

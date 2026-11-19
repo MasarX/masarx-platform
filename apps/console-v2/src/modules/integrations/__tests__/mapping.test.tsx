@@ -60,7 +60,7 @@ describe('MappingModule', () => {
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
     expect(await screen.findByRole('toolbar', { name: /External Intake workspace/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Open Provider credentials/i })).toBeEnabled();
-    expect(screen.getByRole('button', { name: /Open Routing rules/i })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /Open Routing rules/i })).toBeNull();
     await waitFor(() => {
       expect(document.querySelectorAll('.dt__table tbody tr').length).toBeGreaterThan(0);
     });

@@ -23,7 +23,6 @@ DECLARE
     jsonb_build_object('section_id', 'finance', 'section_label', 'Finance', 'id', 'finance-billing', 'label', 'Billing', 'icon', 'invoice', 'path', '/finance/billing', 'capability', 'billing.read'),
     jsonb_build_object('section_id', 'integrations', 'section_label', 'Integrations', 'id', 'integrations-plugin-studio', 'label', 'Plugin studio', 'icon', 'edit', 'path', '/integrations/plugin-studio', 'capability', 'integrations.write'),
     jsonb_build_object('section_id', 'integrations', 'section_label', 'Integrations', 'id', 'integrations-sources', 'label', 'Webhook sources', 'icon', 'plug', 'path', '/integrations/sources', 'capability', 'webhooks.read'),
-    jsonb_build_object('section_id', 'integrations', 'section_label', 'Integrations', 'id', 'integrations-rules', 'label', 'Routing rules', 'icon', 'route', 'path', '/integrations/rules', 'capability', 'webhooks.read'),
     jsonb_build_object('section_id', 'platform', 'section_label', 'Platform', 'id', 'platform-config', 'label', 'Configuration', 'icon', 'settings', 'path', '/platform/config', 'capability', 'settings.read'),
     jsonb_build_object('section_id', 'platform', 'section_label', 'Platform', 'id', 'platform-organizations', 'label', 'Organizations', 'icon', 'building', 'path', '/platform/organizations', 'capability', 'organizations.read'),
     jsonb_build_object('section_id', 'platform', 'section_label', 'Platform', 'id', 'platform-mobile-policy', 'label', 'Mobile policies', 'icon', 'shield', 'path', '/platform/mobile-policy', 'capability', 'settings.write'),

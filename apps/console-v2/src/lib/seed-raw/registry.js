@@ -531,24 +531,6 @@ export const ui_read_registry = {
       { key: 'updated_at', label: 'Updated', format: 'datetime', sortable: true },
     ],
   },
-  // Mirrors public.webhook_rules from the same migration L248+.
-  // RLS gated by webhooks.read / webhooks.write per 202601071220:113.
-  webhook_rules: {
-    relation: 'webhook_rules',
-    id_column: 'id',
-    capability_read: 'webhooks.read',
-    capability_write: 'webhooks.write',
-    columns: [
-      { key: 'name', label: 'Name', sortable: true },
-      { key: 'webhook_source_id', label: 'Source', mono: true, sortable: true, filterable: true },
-      { key: 'event_type', label: 'Event', mono: true, sortable: true, filterable: true },
-      { key: 'priority', label: 'Priority', align: 'right', mono: true, sortable: true },
-      { key: 'mapping_config_id', label: 'Mapping', mono: true },
-      { key: 'workflow_template_id', label: 'Workflow', mono: true },
-      { key: 'domain_category', label: 'Domain', filterable: true },
-      { key: 'enabled', label: 'Enabled', filterable: true },
-    ],
-  },
   // W27 — INTEGRATIONS paired projection views (read-only). Mirrors:
   //   • public.v_webhook_source_directory          (supabase/migrations/202604302500_v_webhook_source_directory.sql)
   //   • public.v_webhook_inbox_directory           (supabase/migrations/202604302510_v_webhook_inbox_directory.sql)
@@ -563,8 +545,7 @@ export const ui_read_registry = {
   //   - integration_plugin_directory:       integration_plugins.read
   // SSOT preserved on the underlying base tables; mutations continue via the
   // existing canonical RPCs (ui_upsert_webhook_source_v1 /
-  // ui_rotate_webhook_source_token_v1 / ui_upsert_webhook_rule_v1 /
-  // ui_delete_webhook_rule_v1 / ui_reorder_webhook_rule_v1 /
+  // ui_rotate_webhook_source_token_v1 /
   // ui_upsert_mapping_artifact_v1 / mapping_config_promote_v1 /
   // webhook_inbox_replay_v1 / webhook_inbox_force_status_v1 /
   // integration_plugin_rotate_credentials_v1 /
@@ -3605,10 +3586,6 @@ const COMMAND_CONSOLE_ROUTE_TARGETS = {
   'webhooks.toggle_source': '/integrations/sources',
   'webhooks.upsert_source': '/integrations/sources',
   'webhooks.archive_source': '/integrations/sources',
-  'webhooks.toggle_rule': '/integrations/rules',
-  'webhooks.upsert_rule': '/integrations/rules',
-  'webhooks.delete_rule': '/integrations/rules',
-  'webhooks.reorder_rule': '/integrations/rules',
   'mappings.upsert': '/integrations/mapping',
   'mappings.promote_version': '/integrations/mapping',
   'mappings.disable': '/integrations/mapping',
@@ -3700,7 +3677,7 @@ export const ui_command_registry = [
   { key: 'settings.request_change', label: 'Request settings change', section: 'Platform', execution: 'rpc', target: 'request_settings_change_v1', capability: 'settings.write' },
   { key: 'tasks.transition', label: 'Transition task', section: 'Tasks', execution: 'rpc', target: 'transition_task_v1', capability: 'tasks.write', route_targets: { console: { path: '/workflows/review-queue' } } },
   { key: 'user_devices.revoke', label: 'Revoke device', section: 'Mobile', execution: 'rpc', target: 'ui_execute_user_device_revoke_v1', capability: 'user_devices.write' },
-  // Webhook ingress operator commands (webhook_sources + webhook_rules surfaces).
+  // Webhook source operator commands.
   // No dedicated rotate RPC exists in the demo seam yet — runCommand routes the
   // call through the generic command runner, mirroring how the canonical
   // `webhooks.rotate_token` would behave once shipped.
@@ -3708,10 +3685,6 @@ export const ui_command_registry = [
   { key: 'webhooks.toggle_source', label: 'Toggle webhook source', section: 'External Intake', execution: 'rpc', target: 'ui_upsert_webhook_source_v1', capability: 'webhooks.write' },
   { key: 'webhooks.upsert_source', label: 'Create or update webhook source', section: 'External Intake', execution: 'rpc', target: 'ui_upsert_webhook_source_v1', capability: 'webhooks.write' },
   { key: 'webhooks.archive_source', label: 'Archive webhook source', section: 'External Intake', execution: 'rpc', target: 'ui_archive_webhook_source_v1', capability: 'webhooks.write' },
-  { key: 'webhooks.toggle_rule', label: 'Toggle webhook rule', section: 'External Intake', execution: 'rpc', target: 'ui_upsert_webhook_rule_v1', capability: 'webhooks.write' },
-  { key: 'webhooks.upsert_rule', label: 'Create or update webhook rule', section: 'External Intake', execution: 'rpc', target: 'ui_upsert_webhook_rule_v1', capability: 'webhooks.write' },
-  { key: 'webhooks.delete_rule', label: 'Delete webhook rule', section: 'External Intake', execution: 'rpc', target: 'ui_delete_webhook_rule_v1', capability: 'webhooks.write' },
-  { key: 'webhooks.reorder_rule', label: 'Reorder webhook rule priority', section: 'External Intake', execution: 'rpc', target: 'ui_reorder_webhook_rule_v1', capability: 'webhooks.write' },
   // CLAIM-INTEGRATIONS-MAPPING (Phase C5) — Mapping Studio canonical commands.
   // Backend RPCs: api.ui_upsert_mapping_artifact_v1 (create/edit) +
   // api.ui_create_mapping_operation_report_v1 (audit) +
@@ -3935,8 +3908,7 @@ export const capabilities = [
   'disputes.read', 'disputes.write',
   'workflows.read', 'workflows.write',
   'integrations.read', 'integrations.write',
-  // webhook ingress operator surfaces — webhook_sources + webhook_rules
-  // (mirrors RLS gate on those tables per supabase/migrations/202601071220:110/113).
+  // Webhook sources use the existing webhook capabilities.
   'webhooks.read', 'webhooks.write',
   // CLAIM-INTEGRATIONS-MAPPING (Phase B6/C5) — canonical mapping_configs
   // capability gates. Mirrors the RLS policy on public.mapping_configs per

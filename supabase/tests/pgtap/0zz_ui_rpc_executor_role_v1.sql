@@ -392,11 +392,13 @@ SELECT ok((SELECT bool_and(f->>'owner' IS NOT NULL AND to_regrole(f->>'owner') I
     jsonb_array_elements(CASE WHEN s.key='entrypoints' THEN s.value ELSE '[]'::jsonb END) f WHERE s.key='entrypoints'),
   'all six before-images retain their original existing owner');
 
--- Retired webhook keys stay retired; active observability resources retain trusted-only barriers.
+-- 202601071235_ui_registry_webhook_response_events retires the old webhook keys.
+-- 202608161810_b6_mapping_studio_webhook_policy_binding replaces Routing rules writes with source policies.
+-- The retired Routing rules screen no longer has a registry contract in this test.
 SELECT is((SELECT count(*) FROM jsonb_array_elements(public.resolve_settings_merged(
   'ui_read_registry',public.get_root_scope_type_key_v1(),NULL)->'resources') r
-  WHERE r->>'key' IN ('webhook_rules','webhook_response_history')),0::bigint,
-  'retired webhook_rules and webhook_response_history are not reintroduced as Console resources');
+  WHERE r->>'key' = 'webhook_response_history'),0::bigint,
+  'retired webhook_response_history is not reintroduced as a Console resource');
 WITH barriers AS (SELECT unnest(ARRAY['public.comms_attempts'::regclass,'public.outbound_calls'::regclass,
   'public.ops_alerts'::regclass,'public.provider_health_logs'::regclass,'public.circuit_breaker_state'::regclass]) AS oid)
 SELECT ok(bool_and(c.relrowsecurity AND c.relowner<>'ui_rpc_executor'::regrole

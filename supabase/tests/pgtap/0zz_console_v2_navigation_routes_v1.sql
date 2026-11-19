@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(13);
+SELECT plan(14);
 
 WITH console_items AS (
   SELECT section->>'id' AS section_id,
@@ -215,6 +215,19 @@ SELECT ok(
        AND COALESCE(item->>'route', item->>'href') LIKE '/console/resources/%'
   ),
   'customer navigation entries avoid legacy raw resource routes in every scope'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM public.settings s
+      CROSS JOIN LATERAL jsonb_array_elements(s.cached_value#>'{apps,console,sections}') AS section
+      CROSS JOIN LATERAL jsonb_array_elements(section->'items') AS item
+     WHERE s.category = 'ui_navigation'
+       AND (COALESCE(item->>'route', item->>'href', item->>'path') = '/integrations/rules'
+            OR item->>'resource' = 'webhook_rules')
+  ),
+  'Console navigation omits retired routing rules in every scope'
 );
 
 SELECT * FROM finish();

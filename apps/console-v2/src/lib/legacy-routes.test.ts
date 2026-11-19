@@ -65,7 +65,6 @@ describe('resolveLegacyConsoleResourceRoute', () => {
       'webhook_log',
       'webhook_response_events',
       'webhook_response_history',
-      'webhook_rules',
       'webhook_sources',
       'workflow_run_steps',
       'workflow_runs',
@@ -75,6 +74,7 @@ describe('resolveLegacyConsoleResourceRoute', () => {
       'zones',
     ];
 
+    expect(resolveLegacyConsoleResourceRoute('webhook_rules')).toBeNull();
     for (const key of liveResourceKeys) {
       expect(resolveLegacyConsoleResourceRoute(key), key).toMatch(/^\/(operate|network|customers|catalog|finance|workflows|integrations|insights|platform)/);
     }

@@ -834,7 +834,6 @@ function integrationsList(resource: string, filters: Record<string, unknown> = {
     provider_auth_configs: credentialDirectory,
     integration_credential_directory: credentialDirectory,
     webhook_sources: (seedData.webhook_sources ?? []) as Array<Record<string, unknown>>,
-    webhook_rules: (seedData.webhook_rules ?? []) as Array<Record<string, unknown>>,
     mapping_configs: (seedData.mapping_configs ?? []) as Array<Record<string, unknown>>,
     workflow_templates: (seedData.workflow_templates ?? []) as Array<Record<string, unknown>>,
     workflow_templates_console: (seedData.workflow_templates ?? []) as Array<Record<string, unknown>>,
@@ -1516,16 +1515,6 @@ export const handlers = [
   http.post('*/rest/v1/rpc/ui_rotate_webhook_source_token_v1', () =>
     okEnvelope({ webhook_source_id: 'wsrc_msw_test', token_rotated: true }),
   ),
-  http.post('*/rest/v1/rpc/ui_upsert_webhook_rule_v1', () =>
-    okEnvelope({ webhook_rule_id: 'wrul_msw_test' }),
-  ),
-  http.post('*/rest/v1/rpc/ui_delete_webhook_rule_v1', () =>
-    okEnvelope({ webhook_rule_id: 'wrul_msw_test', deleted: true }),
-  ),
-  http.post('*/rest/v1/rpc/ui_reorder_webhook_rule_v1', () =>
-    okEnvelope({ webhook_rule_id: 'wrul_msw_test' }),
-  ),
-
   // ---------- Integration plugins ----------
   http.post('*/rest/v1/rpc/test_integration_plugin_v1', () =>
     okEnvelope({

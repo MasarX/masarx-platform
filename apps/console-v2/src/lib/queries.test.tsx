@@ -43,9 +43,6 @@ import {
   useUpsertWebhookSource,
   useRotateWebhookSourceToken,
   useArchiveWebhookSource,
-  useUpsertWebhookRule,
-  useDeleteWebhookRule,
-  useReorderWebhookRule,
   useReplayWebhookInbox,
   useForceWebhookInboxStatus,
   useUpsertMappingArtifact,
@@ -875,85 +872,6 @@ describe('lib/queries', () => {
     expect(refetchCalls).toContainEqual(qk.resource('webhook_sources', 'whs_live'));
     expect(refetchCalls).toContainEqual(qk.resource('webhook_source_directory', 'whs_live'));
     archiveSpy.mockRestore();
-    invalidateSpy.mockRestore();
-    refetchSpy.mockRestore();
-  });
-
-  it('webhook rule write actions actively refresh visible rule and source reads', async () => {
-    const longLivedClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false, gcTime: Infinity, staleTime: 0 },
-        mutations: { retry: false },
-      },
-    });
-    const invalidateSpy = vi.spyOn(longLivedClient, 'invalidateQueries');
-    const refetchSpy = vi.spyOn(longLivedClient, 'refetchQueries');
-    const upsertSpy = vi.spyOn(api, 'ui_upsert_webhook_rule_v1').mockResolvedValue({
-      ok: true,
-      webhook_rule_id: 'wbr_live',
-      correlation_id: 'cor_rule_upsert',
-    } as never);
-    const reorderSpy = vi.spyOn(api, 'ui_reorder_webhook_rule_v1').mockResolvedValue({
-      ok: true,
-      webhook_rule_id: 'wbr_live',
-      priority: 25,
-      correlation_id: 'cor_rule_reorder',
-    } as never);
-    const deleteSpy = vi.spyOn(api, 'ui_delete_webhook_rule_v1').mockResolvedValue({
-      ok: true,
-      webhook_rule_id: 'wbr_live',
-      correlation_id: 'cor_rule_delete',
-    } as never);
-
-    const expectedKeys = [
-      ['list', 'webhook_rules'],
-      ['lists_by_filters', 'webhook_rules'],
-      ['list', 'webhook_sources'],
-      ['lists_by_filters', 'webhook_sources'],
-      ['list', 'webhook_source_directory'],
-      ['lists_by_filters', 'webhook_source_directory'],
-    ];
-    const expectRuleRefresh = () => {
-      const invalidations = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
-      const refetches = refetchSpy.mock.calls.map((c) => c[0]?.queryKey);
-      for (const key of expectedKeys) {
-        expect(invalidations).toContainEqual(key);
-        expect(refetches).toContainEqual(key);
-      }
-      invalidateSpy.mockClear();
-      refetchSpy.mockClear();
-    };
-
-    const { result: upsertResult } = renderHook(() => useUpsertWebhookRule(), {
-      wrapper: wrapper(longLivedClient),
-    });
-    await act(async () => {
-      await upsertResult.current.mutateAsync({
-        rule_id: 'wbr_live',
-        enabled: false,
-      });
-    });
-    expectRuleRefresh();
-
-    const { result: reorderResult } = renderHook(() => useReorderWebhookRule(), {
-      wrapper: wrapper(longLivedClient),
-    });
-    await act(async () => {
-      await reorderResult.current.mutateAsync({ rule_id: 'wbr_live', priority: 25 });
-    });
-    expectRuleRefresh();
-
-    const { result: deleteResult } = renderHook(() => useDeleteWebhookRule(), {
-      wrapper: wrapper(longLivedClient),
-    });
-    await act(async () => {
-      await deleteResult.current.mutateAsync({ rule_id: 'wbr_live' });
-    });
-    expectRuleRefresh();
-
-    upsertSpy.mockRestore();
-    reorderSpy.mockRestore();
-    deleteSpy.mockRestore();
     invalidateSpy.mockRestore();
     refetchSpy.mockRestore();
   });

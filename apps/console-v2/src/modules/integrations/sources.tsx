@@ -1242,23 +1242,6 @@ export function SourcesModule() {
           >
             {tokenStatusReadback}
           </p>
-          <div className="section-eyebrow" style={{ marginTop: '14px' }}>
-            Routing
-          </div>
-          <p className="state__hint" style={{ padding: '0 14px' }}>
-            See{' '}
-            <a
-              href="/integrations/rules"
-              onClick={(e) => {
-                e.stopPropagation();
-                drawer.close();
-                navigate('/integrations/rules');
-              }}
-            >
-              routing rules
-            </a>{' '}
-            scoped to this source for the dispatch matrix.
-          </p>
         </div>
       ),
       footer: (

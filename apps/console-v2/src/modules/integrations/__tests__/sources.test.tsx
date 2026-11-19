@@ -346,7 +346,7 @@ describe('SourcesModule', () => {
     await waitFor(() => {
       expect(document.querySelector('.drawer')).not.toBeNull();
     });
-    expect(document.querySelector('a[href="/integrations/rules"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/integrations/rules"]')).toBeNull();
     expect(document.querySelector('a[href="#"]')).toBeNull();
   });
 

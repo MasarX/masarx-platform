@@ -87,7 +87,6 @@ const ROUTES = [
   ['int-credentials', '/integrations/credentials'],
   ['int-intake', '/integrations/intake'],
   ['int-sources', '/integrations/sources'],
-  ['int-rules', '/integrations/rules'],
   ['insights-reporting', '/insights/reporting'],
   ['insights-decisions', '/insights/decisions'],
   ['insights-resolutions', '/insights/resolutions'],

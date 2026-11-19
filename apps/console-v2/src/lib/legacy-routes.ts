@@ -66,7 +66,6 @@ const LEGACY_RESOURCE_REDIRECTS = {
   webhook_log: '/integrations/intake',
   webhook_response_events: '/integrations/intake',
   webhook_response_history: '/integrations/intake',
-  webhook_rules: '/integrations/rules',
   webhook_sources: '/integrations/sources',
   reporting: '/insights/reporting',
   decisions: '/insights/decisions',

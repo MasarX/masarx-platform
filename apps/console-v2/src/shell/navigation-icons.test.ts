@@ -55,7 +55,6 @@ describe('navigation icon contract', () => {
       '/operate/baskets': 'layers',
       '/finance/billing': 'invoice',
       '/integrations/sources': 'plug',
-      '/integrations/rules': 'route',
       '/network/marketplace': 'shopping-bag',
       '/platform/commands': 'cmd',
     });

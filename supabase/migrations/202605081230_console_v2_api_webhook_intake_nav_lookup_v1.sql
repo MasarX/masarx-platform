@@ -165,8 +165,7 @@ DECLARE
     jsonb_build_object('id', 'integrations-webhook-tester', 'key', 'int-webhook', 'label', 'Webhook tester', 'icon', 'webhook', 'path', '/integrations/webhook-tester', 'resource', 'webhook_inbox_directory', 'capability', 'webhooks.read'),
     jsonb_build_object('id', 'integrations-credentials', 'key', 'int-credentials', 'label', 'Credentials', 'icon', 'key', 'path', '/integrations/credentials', 'resource', 'provider_auth_configs', 'capability', 'provider_auth.read'),
     jsonb_build_object('id', 'integrations-intake', 'key', 'int-intake', 'label', 'Inbound intake monitor', 'icon', 'download', 'path', '/integrations/intake', 'resource', 'webhook_inbox_directory', 'capability', 'webhooks.read'),
-    jsonb_build_object('id', 'integrations-sources', 'key', 'integrations-sources', 'label', 'Webhook sources', 'icon', 'plug', 'path', '/integrations/sources', 'resource', 'webhook_sources', 'capability', 'webhooks.read'),
-    jsonb_build_object('id', 'integrations-rules', 'key', 'integrations-rules', 'label', 'Routing rules', 'icon', 'route', 'path', '/integrations/rules', 'resource', 'webhook_rules', 'capability', 'webhooks.read')
+    jsonb_build_object('id', 'integrations-sources', 'key', 'integrations-sources', 'label', 'Webhook sources', 'icon', 'plug', 'path', '/integrations/sources', 'resource', 'webhook_sources', 'capability', 'webhooks.read')
   );
   v_scope RECORD;
   v_current JSONB;

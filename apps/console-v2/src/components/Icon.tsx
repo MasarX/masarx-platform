@@ -83,7 +83,6 @@ export const ICON_PATHS: Record<string, string> = {
   // Used in the sidenav for /integrations/sources.
   plug: 'M9 7V2M15 7V2M5 9h14v3a7 7 0 01-14 0V9zM12 16v6',
   // Routing rules — branching arrow (split path).
-  // Used in the sidenav for /integrations/rules.
   route: 'M6 3v12a4 4 0 004 4h4M14 19l3-3M14 19l3 3M18 3v6M15 6h6',
   // CLAIM-FINANCE-BILLING — invoice ledger glyph (document with line entries
   // and a torn/serrated bottom edge to read as a billing receipt). Used in the

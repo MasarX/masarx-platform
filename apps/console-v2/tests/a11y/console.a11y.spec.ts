@@ -25,9 +25,7 @@ const ROUTES: Array<[string, string]> = [
   // CLAIM-I additions — webhook tester gained a tablist inspector; intake monitor renders policy chips.
   ['Webhook Tester', '/integrations/webhook-tester'],
   ['Intake Monitor', '/integrations/intake'],
-  // CLAIM-INGRESS-COMPLETE additions — webhook_sources + webhook_rules surfaces.
   ['Webhook Sources', '/integrations/sources'],
-  ['Routing Rules', '/integrations/rules'],
   // CLAIM-B additions — operator routing surfaces.
   ['Route Plans', '/operate/route-plans'],
   ['Dispatch', '/operate/dispatch'],

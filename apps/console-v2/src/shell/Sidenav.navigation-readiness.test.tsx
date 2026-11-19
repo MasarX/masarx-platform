@@ -65,7 +65,6 @@ const CANONICAL_VISIBLE_LINKS = [
   { label: 'Test webhook intake', routePath: '/integrations/webhook-tester', iconName: 'webhook' },
   { label: 'Inbound requests', routePath: '/integrations/intake', iconName: 'download' },
   { label: 'Sources & tokens', routePath: '/integrations/sources', iconName: 'plug' },
-  { label: 'Routing rules', routePath: '/integrations/rules', iconName: 'route' },
   { label: 'Billing', routePath: '/finance/billing', iconName: 'invoice' },
   { label: 'API request intake', routePath: '/insights/api-gateway', iconName: 'gauge' },
   { label: 'Support cases', routePath: '/support/cases', iconName: 'message' },
@@ -94,6 +93,7 @@ const RAW_TABLE_LABELS = [
   'Basket items',
   'Warehouse transfers table',
   'Workflow templates table',
+  'Routing rules',
 ];
 
 const OPERATE_CLICK_TARGETS = [

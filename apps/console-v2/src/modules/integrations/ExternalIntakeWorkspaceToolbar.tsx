@@ -29,12 +29,6 @@ const EXTERNAL_INTAKE_WORKSPACE_GROUPS = [
         href: '/integrations/mapping',
         capability: CAP.MAPPINGS_READ,
       },
-      {
-        label: 'Routing rules',
-        iconName: 'route',
-        href: '/integrations/rules',
-        capability: CAP.WEBHOOKS_READ,
-      },
     ],
   },
   {

@@ -69,7 +69,6 @@ export const ROUTE_TITLES = {
   '/integrations/credentials': 'Provider credentials',
   '/integrations/intake': 'Inbound requests',
   '/integrations/sources': 'Sources & tokens',
-  '/integrations/rules': 'Routing rules',
   '/insights/reporting': 'Reporting',
   '/insights/decisions': 'Decision log',
   '/insights/resolutions': 'Settings resolutions',

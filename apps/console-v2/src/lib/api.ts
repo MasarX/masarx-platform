@@ -2463,25 +2463,6 @@ export const ui_rotate_webhook_source_token_v1 = (args: { source_id: string }) =
 export const ui_archive_webhook_source_v1 = (args: ArchiveWebhookSourceArgs) =>
   ds.ui_archive_webhook_source_v1(args);
 
-// INTEGRATIONS — webhook_rules (Create/Update/Reorder/Delete)
-export interface UpsertWebhookRuleArgs extends Record<string, unknown> {
-  rule_id?: string | null;
-  webhook_source_id?: string;
-  name?: string;
-  event_type?: string;
-  priority?: number;
-  mapping_config_id?: string | null;
-  workflow_template_id?: string | null;
-  domain_category?: string | null;
-  enabled?: boolean;
-}
-export const ui_upsert_webhook_rule_v1 = (args: UpsertWebhookRuleArgs) =>
-  ds.ui_upsert_webhook_rule_v1(args);
-export const ui_delete_webhook_rule_v1 = (args: { rule_id: string }) =>
-  ds.ui_delete_webhook_rule_v1(args);
-export const ui_reorder_webhook_rule_v1 = (args: { rule_id: string; priority: number }) =>
-  ds.ui_reorder_webhook_rule_v1(args);
-
 // INTEGRATIONS — Mapping Studio (Create/Edit/Promote-version)
 export interface UpsertMappingArtifactArgs extends Record<string, unknown> {
   artifact?: string;
@@ -3348,7 +3329,6 @@ export const api = {
   send_support_message_v1, add_support_tag_v1, public_tracking_review_request_v1,
   // Phase C5 — INTEGRATIONS (sources / rules / mapping / credentials / catalog / inbox)
   ui_upsert_webhook_source_v1, ui_rotate_webhook_source_token_v1, ui_archive_webhook_source_v1,
-  ui_upsert_webhook_rule_v1, ui_delete_webhook_rule_v1, ui_reorder_webhook_rule_v1,
   ui_upsert_mapping_artifact_v1, ui_delete_mapping_config_v1, ui_upsert_api_gateway_route_mapping_v1, ui_create_mapping_operation_report_v1,
   mapping_config_promote_v1, ui_test_mapping_config_v1,
   ui_upsert_provider_auth_config_v1, ui_bind_provider_account_credential_v1,

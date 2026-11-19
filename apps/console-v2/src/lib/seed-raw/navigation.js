@@ -166,10 +166,8 @@ export const navigation = {
         { key: 'int-api-gateway', label: 'API request intake', icon: 'gauge', route: '/insights/api-gateway', capability: 'api_gateway.read' },
         { key: 'int-credentials', label: 'Provider credentials', icon: 'key', route: '/integrations/credentials', capability: 'provider_auth.read' },
         { key: 'int-intake', label: 'Inbound requests', icon: 'download', route: '/integrations/intake', capability: 'webhooks.read' },
-        // Operator surfaces for canonical webhook ingress (mirrors public.webhook_sources +
-        // public.webhook_rules per supabase/migrations/202510110004_webhook_integration.sql).
+        // Operator surface for canonical webhook sources.
         { key: 'integrations-sources', label: 'Sources & tokens', icon: 'plug', route: '/integrations/sources', capability: 'webhooks.read' },
-        { key: 'integrations-rules', label: 'Routing rules', icon: 'route', route: '/integrations/rules', capability: 'webhooks.read' },
       ],
     },
     {

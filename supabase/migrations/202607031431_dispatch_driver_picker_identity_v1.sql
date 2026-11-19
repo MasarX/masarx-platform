@@ -12,7 +12,7 @@ SELECT
     u.email, dp.driver_code, dp.user_id::text
   ) AS name,
   dp.driver_code,
-  NULLIF(dp.metadata->>'phone', '') AS phone,
+  CASE WHEN u.id IS NOT NULL THEN NULLIF(dp.metadata->>'phone', '') END AS phone,
   u.email AS user_email,
   dp.status,
   active_assignment.vehicle_id,

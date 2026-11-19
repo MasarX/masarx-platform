@@ -3042,29 +3042,6 @@ export function useRotateWebhookSourceToken() {
   });
 }
 
-// INTEGRATIONS — webhook_rules (Create / Update / Reorder / Delete)
-export function useUpsertWebhookRule() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (args: api.UpsertWebhookRuleArgs) => api.ui_upsert_webhook_rule_v1(args),
-    onSuccess: () => refreshListQueries(qc, ['webhook_rules', 'webhook_sources', 'webhook_source_directory']),
-  });
-}
-export function useDeleteWebhookRule() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (args: { rule_id: string }) => api.ui_delete_webhook_rule_v1(args),
-    onSuccess: () => refreshListQueries(qc, ['webhook_rules', 'webhook_sources', 'webhook_source_directory']),
-  });
-}
-export function useReorderWebhookRule() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (args: { rule_id: string; priority: number }) => api.ui_reorder_webhook_rule_v1(args),
-    onSuccess: () => refreshListQueries(qc, ['webhook_rules', 'webhook_sources', 'webhook_source_directory']),
-  });
-}
-
 // INTEGRATIONS — Mapping Studio (Create / Edit / Promote-version)
 export function useUpsertMappingArtifact() {
   const qc = useQueryClient();

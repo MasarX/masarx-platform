@@ -133,7 +133,6 @@ describe('resolveCommandRoutePath', () => {
       'service_offerings.archive': '/catalog/service-offerings',
       'webhooks.upsert_source': '/integrations/sources',
       'webhooks.archive_source': '/integrations/sources',
-      'webhooks.toggle_rule': '/integrations/rules',
       'mappings.upsert': '/integrations/mapping',
       'integrations.create_credential': '/integrations/credentials',
       'integrations.create_plugin': '/integrations/plugin-studio',

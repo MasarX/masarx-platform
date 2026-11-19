@@ -173,13 +173,13 @@ SELECT ok(
 );
 
 SELECT ok(
-  EXISTS (
+  NOT EXISTS (
     SELECT 1
       FROM jsonb_array_elements(public.resolve_settings_merged('ui_command_registry', 'global', NULL)->'commands') AS command
-     WHERE command->>'key' = 'webhooks.toggle_rule'
-       AND command#>>'{route_targets,console,path}' = '/integrations/rules'
+     WHERE command->>'key' IN ('webhooks.toggle_rule', 'webhooks.upsert_rule', 'webhooks.delete_rule', 'webhooks.reorder_rule')
+        OR command#>>'{route_targets,console,path}' = '/integrations/rules'
   ),
-  'webhook rule commands open the webhook rules workbench'
+  'Console commands do not expose retired routing rules'
 );
 
 SELECT ok(

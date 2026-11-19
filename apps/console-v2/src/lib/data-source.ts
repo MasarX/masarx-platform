@@ -5463,10 +5463,6 @@ const RESOURCE_DATA = (): ResourceMap => ({
   user_device_summary: _projectUserDeviceSummary(),
   webhook_inbox: seed.webhook_inbox,
   webhook_sources: _projectWebhookSourceDirectory(seed),
-  // Mirrors public.webhook_rules from
-  // supabase/migrations/202510110004_webhook_integration.sql:248+.
-  // Surfaces the routing rules operator UI under /integrations/rules.
-  webhook_rules: seed.webhook_rules,
   tenant_signup_requests: seed.tenant_signup_requests,
   // W31 (G5) — canonical projections for marketing intake.
   // Mirrors `marketing_intake_recent_v1` view + `marketing_intake_metrics_24h`
@@ -16297,9 +16293,6 @@ export async function adjust_api_gateway_rate_limit_v1(
 // Migrations of record (verified):
 //   • ui_upsert_webhook_source_v1            (Phase B6)
 //   • ui_rotate_webhook_source_token_v1      (Phase B6)
-//   • ui_upsert_webhook_rule_v1              (Phase B6)
-//   • ui_delete_webhook_rule_v1              (Phase B6)
-//   • ui_reorder_webhook_rule_v1             (Phase B6)
 //   • ui_upsert_mapping_artifact_v1          202603091130_api_mapping_studio_contract_v1.sql:14
 //   • ui_create_mapping_operation_report_v1  202603091130:14
 //   • mapping_config_promote_v1              (Phase B6)
@@ -16483,112 +16476,6 @@ export async function ui_archive_webhook_source_v1(args: ArchiveWebhookSourceArg
   }
   return result;
 }
-
-// INTEGRATIONS — webhook_rules (Create/Update/Reorder/Delete)
-export interface UpsertWebhookRuleArgs extends Record<string, unknown> {
-  rule_id?: string | null;
-  webhook_source_id?: string;
-  name?: string;
-  event_type?: string;
-  priority?: number;
-  mapping_config_id?: string | null;
-  workflow_template_id?: string | null;
-  domain_category?: string | null;
-  enabled?: boolean;
-}
-function resolveWebhookRuleId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string | null {
-  return asNonEmptyString(rec.webhook_rule_id)
-    ?? asNonEmptyString(rec.rule_id)
-    ?? asNonEmptyString(rec.id)
-    ?? asNonEmptyString(args.webhook_rule_id)
-    ?? asNonEmptyString(args.rule_id);
-}
-
-function requireWebhookRuleFieldReadback(
-  row: Record<string, unknown>,
-  field: string,
-  expected: unknown,
-  rpcName: string,
-): void {
-  if (expected === undefined || expected === null || expected === '') return;
-  const actual = row[field];
-  if (field === 'enabled') {
-    const actualBool = booleanReadback(actual);
-    if (actualBool !== Boolean(expected)) {
-      throw new Error(`${rpcName} backend readback did not reflect webhook rule enabled state`);
-    }
-    return;
-  }
-  if (field === 'priority') {
-    const actualNumber = typeof actual === 'number' ? actual : Number(actual);
-    if (!Number.isFinite(actualNumber) || actualNumber !== Number(expected)) {
-      throw new Error(`${rpcName} backend readback did not reflect webhook rule priority`);
-    }
-    return;
-  }
-  const actualString = asNonEmptyString(actual);
-  if (actualString !== String(expected).trim()) {
-    throw new Error(`${rpcName} backend readback did not reflect webhook rule ${field}`);
-  }
-}
-
-function requireWebhookRuleMutationReadback(
-  row: Record<string, unknown>,
-  ruleId: string,
-  args: Record<string, unknown>,
-  rpcName: string,
-): void {
-  if (asNonEmptyString(row.id) !== ruleId) {
-    throw new Error(`${rpcName} backend readback returned the wrong webhook rule`);
-  }
-  for (const field of [
-    'webhook_source_id',
-    'name',
-    'event_type',
-    'priority',
-    'mapping_config_id',
-    'workflow_template_id',
-    'domain_category',
-    'enabled',
-  ]) {
-    if (Object.prototype.hasOwnProperty.call(args, field)) {
-      requireWebhookRuleFieldReadback(row, field, args[field], rpcName);
-    }
-  }
-}
-
-async function webhookRuleMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc(rpcName, args, 'webhook_rule');
-  if (liveRpcTarget()) {
-    const ruleId = resolveWebhookRuleId(result, args);
-    if (!ruleId) throw new Error(`${rpcName} did not return webhook_rule_id`);
-    if (rpcName === 'ui_delete_webhook_rule_v1') {
-      await requireLiveResourceAbsenceReadback(
-        'webhook_rules',
-        { id: ruleId },
-        rpcName,
-        `webhook_rules:${ruleId}`,
-      );
-    } else {
-      const readback = await requireLiveResourceReadback('webhook_rules', ruleId, rpcName);
-      requireWebhookRuleMutationReadback(readback, ruleId, args, rpcName);
-    }
-  }
-  return result;
-}
-
-export const ui_upsert_webhook_rule_v1 = (args: UpsertWebhookRuleArgs) =>
-  webhookRuleMutation('ui_upsert_webhook_rule_v1', args);
-export const ui_delete_webhook_rule_v1 = (args: { rule_id: string }) =>
-  webhookRuleMutation('ui_delete_webhook_rule_v1', args);
-export const ui_reorder_webhook_rule_v1 = (args: { rule_id: string; priority: number }) =>
-  webhookRuleMutation('ui_reorder_webhook_rule_v1', args);
 
 // INTEGRATIONS — Mapping Studio (Create/Edit/Promote-version)
 export interface UpsertMappingArtifactArgs extends Record<string, unknown> {
@@ -24041,7 +23928,6 @@ export const api = {
   runCommand,
   // Phase C5 — INTEGRATIONS (sources / rules / mapping / credentials / catalog / inbox)
   ui_upsert_webhook_source_v1, ui_rotate_webhook_source_token_v1, ui_archive_webhook_source_v1,
-  ui_upsert_webhook_rule_v1, ui_delete_webhook_rule_v1, ui_reorder_webhook_rule_v1,
   ui_upsert_mapping_artifact_v1, ui_delete_mapping_config_v1, ui_upsert_api_gateway_route_mapping_v1, ui_create_mapping_operation_report_v1,
   mapping_config_promote_v1, ui_test_mapping_config_v1,
   ui_upsert_provider_auth_config_v1, ui_bind_provider_account_credential_v1,
