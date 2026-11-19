@@ -25,14 +25,7 @@ const SUPABASE_SERVICE_KEY = readEnv("EDGE_SUPABASE_SERVICE_ROLE_KEY", [
 const EDGE_SUPABASE_SECRET_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", [
   "SUPABASE_SECRET_KEY",
 ]);
-const TENANT_SIGNUP_RPC_SCHEMA =
-  readEnv("TENANT_SIGNUP_RPC_SCHEMA", ["EDGE_RPC_SCHEMA", "API_RPC_SCHEMA"]) || "api";
-
-const json = (status: number, body: JsonRecord) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+const TENANT_SIGNUP_RPC_SCHEMA = "api";
 
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -90,6 +83,19 @@ const createServiceClient = () => {
 };
 
 Deno.serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = {
+    "access-control-allow-origin": req.headers.get("origin")?.trim() || "*",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type, apikey, x-client-info",
+    vary: "Origin",
+  };
+  const json = (status: number, body: JsonRecord) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "content-type": "application/json" },
+    });
+
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") {
     return json(405, { ok: false, error: { code: "method_not_allowed" } });
   }

@@ -37,33 +37,113 @@ BEGIN
       RAISE EXCEPTION 'Console V2 phaseC6 api wrapper closure: public.%(jsonb) is missing', v_name
         USING ERRCODE = '42883';
     END IF;
-
-    EXECUTE format(
-      $sql$
-      CREATE OR REPLACE FUNCTION api.%1$I(p_args jsonb)
-      RETURNS jsonb
-      LANGUAGE sql
-      VOLATILE
-      SECURITY DEFINER
-      SET search_path TO public, extensions, pg_temp
-      AS $wrapper$
-        SELECT public.%1$I(p_args);
-      $wrapper$;
-      $sql$,
-      v_name
-    );
-
-    EXECUTE format('REVOKE ALL ON FUNCTION api.%I(jsonb) FROM PUBLIC', v_name);
-    EXECUTE format('REVOKE ALL ON FUNCTION api.%I(jsonb) FROM anon', v_name);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION api.%I(jsonb) TO authenticated, service_role', v_name);
-    EXECUTE format(
-      'COMMENT ON FUNCTION api.%I(jsonb) IS %L',
-      v_name,
-      format('Console V2 api-schema wrapper delegating to canonical public.%s(jsonb).', v_name)
-    );
   END LOOP;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION api.bulk_transition_tasks_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.bulk_transition_tasks_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.bulk_transition_tasks_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.bulk_transition_tasks_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.bulk_transition_tasks_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.bulk_transition_tasks_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.mapping_config_promote_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.mapping_config_promote_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.mapping_config_promote_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.mapping_config_promote_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.mapping_config_promote_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.mapping_config_promote_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.register_workflow_binding_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.register_workflow_binding_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.register_workflow_binding_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.register_workflow_binding_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.register_workflow_binding_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.register_workflow_binding_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.request_capability_grant_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.request_capability_grant_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.request_capability_grant_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.request_capability_grant_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.request_capability_grant_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.request_capability_grant_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.restore_zone_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.restore_zone_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.restore_zone_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.restore_zone_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.restore_zone_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.restore_zone_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.simulate_binding_dispatch_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.simulate_binding_dispatch_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.simulate_binding_dispatch_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.simulate_binding_dispatch_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.simulate_binding_dispatch_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.simulate_binding_dispatch_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.suspend_zone_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.suspend_zone_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.suspend_zone_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.suspend_zone_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.suspend_zone_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.suspend_zone_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.ui_set_workflow_template_status_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.ui_set_workflow_template_status_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.ui_set_workflow_template_status_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.ui_set_workflow_template_status_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.ui_set_workflow_template_status_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.ui_set_workflow_template_status_v1(jsonb).';
 
 CREATE OR REPLACE FUNCTION api.provision_rbac_roles_from_templates_v1(p_args jsonb)
 RETURNS jsonb

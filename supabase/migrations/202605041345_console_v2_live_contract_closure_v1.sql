@@ -366,40 +366,7 @@ GRANT USAGE ON SCHEMA api TO authenticated, service_role;
 
 DO $$
 DECLARE
-  v_names TEXT[] := ARRAY[
-    'create_support_case_v1',
-    'update_support_case_v1',
-    'assign_support_case_v1',
-    'bulk_assign_support_cases_v1',
-    'resolve_support_case_v1',
-    'bulk_resolve_support_cases_v1',
-    'reopen_support_case_v1',
-    'send_support_message_v1',
-    'add_support_tag_v1',
-    'plugin_submit_v1',
-    'plugin_approve_v1',
-    'plugin_activate_v1',
-    'plugin_set_binding_v1',
-    'create_feature_flag_v1',
-    'update_feature_flag_v1',
-    'toggle_feature_flag_v1',
-    'engage_kill_switch_v1',
-    'release_kill_switch_v1',
-    'set_rollout_v1',
-    'bulk_toggle_feature_flags_v1',
-    'pause_alert_rule_v1',
-    'resume_alert_rule_v1',
-    'test_alert_rule_v1',
-    'acknowledge_ops_alert_v1',
-    'resolve_ops_alert_v1',
-    'complete_maintenance_v1',
-    'cancel_maintenance_v1',
-    'record_vehicle_event_v1',
-    'ui_upsert_provider_auth_config_v1',
-    'ui_revoke_provider_auth_config_v1',
-    'integration_plugin_rotate_credentials_v1'
-  ];
-  v_name TEXT;
+  v_wrapper RECORD;
   f RECORD;
   v_args TEXT;
   v_identity_args TEXT;
@@ -409,7 +376,166 @@ DECLARE
   v_is_set BOOLEAN;
   i INTEGER;
 BEGIN
-  FOREACH v_name IN ARRAY v_names LOOP
+  -- Keep wrapper targets explicit while retaining their catalog signatures.
+  FOR v_wrapper IN
+    SELECT * FROM (VALUES
+    ('create_support_case_v1',
+     'CREATE OR REPLACE FUNCTION api.create_support_case_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.create_support_case_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.create_support_case_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.create_support_case_v1(%s) IS %L'),
+    ('update_support_case_v1',
+     'CREATE OR REPLACE FUNCTION api.update_support_case_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.update_support_case_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.update_support_case_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.update_support_case_v1(%s) IS %L'),
+    ('assign_support_case_v1',
+     'CREATE OR REPLACE FUNCTION api.assign_support_case_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.assign_support_case_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.assign_support_case_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.assign_support_case_v1(%s) IS %L'),
+    ('bulk_assign_support_cases_v1',
+     'CREATE OR REPLACE FUNCTION api.bulk_assign_support_cases_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.bulk_assign_support_cases_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.bulk_assign_support_cases_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.bulk_assign_support_cases_v1(%s) IS %L'),
+    ('resolve_support_case_v1',
+     'CREATE OR REPLACE FUNCTION api.resolve_support_case_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.resolve_support_case_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.resolve_support_case_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.resolve_support_case_v1(%s) IS %L'),
+    ('bulk_resolve_support_cases_v1',
+     'CREATE OR REPLACE FUNCTION api.bulk_resolve_support_cases_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.bulk_resolve_support_cases_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.bulk_resolve_support_cases_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.bulk_resolve_support_cases_v1(%s) IS %L'),
+    ('reopen_support_case_v1',
+     'CREATE OR REPLACE FUNCTION api.reopen_support_case_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.reopen_support_case_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.reopen_support_case_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.reopen_support_case_v1(%s) IS %L'),
+    ('send_support_message_v1',
+     'CREATE OR REPLACE FUNCTION api.send_support_message_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.send_support_message_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.send_support_message_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.send_support_message_v1(%s) IS %L'),
+    ('add_support_tag_v1',
+     'CREATE OR REPLACE FUNCTION api.add_support_tag_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.add_support_tag_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.add_support_tag_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.add_support_tag_v1(%s) IS %L'),
+    ('plugin_submit_v1',
+     'CREATE OR REPLACE FUNCTION api.plugin_submit_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.plugin_submit_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.plugin_submit_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.plugin_submit_v1(%s) IS %L'),
+    ('plugin_approve_v1',
+     'CREATE OR REPLACE FUNCTION api.plugin_approve_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.plugin_approve_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.plugin_approve_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.plugin_approve_v1(%s) IS %L'),
+    ('plugin_activate_v1',
+     'CREATE OR REPLACE FUNCTION api.plugin_activate_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.plugin_activate_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.plugin_activate_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.plugin_activate_v1(%s) IS %L'),
+    ('plugin_set_binding_v1',
+     'CREATE OR REPLACE FUNCTION api.plugin_set_binding_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.plugin_set_binding_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.plugin_set_binding_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.plugin_set_binding_v1(%s) IS %L'),
+    ('create_feature_flag_v1',
+     'CREATE OR REPLACE FUNCTION api.create_feature_flag_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.create_feature_flag_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.create_feature_flag_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.create_feature_flag_v1(%s) IS %L'),
+    ('update_feature_flag_v1',
+     'CREATE OR REPLACE FUNCTION api.update_feature_flag_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.update_feature_flag_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.update_feature_flag_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.update_feature_flag_v1(%s) IS %L'),
+    ('toggle_feature_flag_v1',
+     'CREATE OR REPLACE FUNCTION api.toggle_feature_flag_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.toggle_feature_flag_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.toggle_feature_flag_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.toggle_feature_flag_v1(%s) IS %L'),
+    ('engage_kill_switch_v1',
+     'CREATE OR REPLACE FUNCTION api.engage_kill_switch_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.engage_kill_switch_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.engage_kill_switch_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.engage_kill_switch_v1(%s) IS %L'),
+    ('release_kill_switch_v1',
+     'CREATE OR REPLACE FUNCTION api.release_kill_switch_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.release_kill_switch_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.release_kill_switch_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.release_kill_switch_v1(%s) IS %L'),
+    ('set_rollout_v1',
+     'CREATE OR REPLACE FUNCTION api.set_rollout_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.set_rollout_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.set_rollout_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.set_rollout_v1(%s) IS %L'),
+    ('bulk_toggle_feature_flags_v1',
+     'CREATE OR REPLACE FUNCTION api.bulk_toggle_feature_flags_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.bulk_toggle_feature_flags_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.bulk_toggle_feature_flags_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.bulk_toggle_feature_flags_v1(%s) IS %L'),
+    ('pause_alert_rule_v1',
+     'CREATE OR REPLACE FUNCTION api.pause_alert_rule_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.pause_alert_rule_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.pause_alert_rule_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.pause_alert_rule_v1(%s) IS %L'),
+    ('resume_alert_rule_v1',
+     'CREATE OR REPLACE FUNCTION api.resume_alert_rule_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.resume_alert_rule_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.resume_alert_rule_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.resume_alert_rule_v1(%s) IS %L'),
+    ('test_alert_rule_v1',
+     'CREATE OR REPLACE FUNCTION api.test_alert_rule_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.test_alert_rule_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.test_alert_rule_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.test_alert_rule_v1(%s) IS %L'),
+    ('acknowledge_ops_alert_v1',
+     'CREATE OR REPLACE FUNCTION api.acknowledge_ops_alert_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.acknowledge_ops_alert_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.acknowledge_ops_alert_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.acknowledge_ops_alert_v1(%s) IS %L'),
+    ('resolve_ops_alert_v1',
+     'CREATE OR REPLACE FUNCTION api.resolve_ops_alert_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.resolve_ops_alert_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.resolve_ops_alert_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.resolve_ops_alert_v1(%s) IS %L'),
+    ('complete_maintenance_v1',
+     'CREATE OR REPLACE FUNCTION api.complete_maintenance_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.complete_maintenance_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.complete_maintenance_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.complete_maintenance_v1(%s) IS %L'),
+    ('cancel_maintenance_v1',
+     'CREATE OR REPLACE FUNCTION api.cancel_maintenance_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.cancel_maintenance_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.cancel_maintenance_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.cancel_maintenance_v1(%s) IS %L'),
+    ('record_vehicle_event_v1',
+     'CREATE OR REPLACE FUNCTION api.record_vehicle_event_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.record_vehicle_event_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.record_vehicle_event_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.record_vehicle_event_v1(%s) IS %L'),
+    ('ui_upsert_provider_auth_config_v1',
+     'CREATE OR REPLACE FUNCTION api.ui_upsert_provider_auth_config_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.ui_upsert_provider_auth_config_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.ui_upsert_provider_auth_config_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.ui_upsert_provider_auth_config_v1(%s) IS %L'),
+    ('ui_revoke_provider_auth_config_v1',
+     'CREATE OR REPLACE FUNCTION api.ui_revoke_provider_auth_config_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.ui_revoke_provider_auth_config_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.ui_revoke_provider_auth_config_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.ui_revoke_provider_auth_config_v1(%s) IS %L'),
+    ('integration_plugin_rotate_credentials_v1',
+     'CREATE OR REPLACE FUNCTION api.integration_plugin_rotate_credentials_v1(%s) RETURNS %s',
+     'REVOKE ALL ON FUNCTION api.integration_plugin_rotate_credentials_v1(%s) FROM PUBLIC, anon',
+     'GRANT EXECUTE ON FUNCTION api.integration_plugin_rotate_credentials_v1(%s) TO authenticated, service_role',
+     'COMMENT ON FUNCTION api.integration_plugin_rotate_credentials_v1(%s) IS %L')
+    ) AS wrappers(name, definition, revoke_acl, grant_acl, description)
+  LOOP
     SELECT p.oid,
            p.proname,
            p.pronargs
@@ -417,12 +543,12 @@ BEGIN
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public'
-       AND p.proname = v_name
+       AND p.proname = v_wrapper.name
      ORDER BY p.oid DESC
      LIMIT 1;
 
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'Console V2 api wrapper closure: public.% not found', v_name;
+      RAISE EXCEPTION 'Console V2 api wrapper closure: public.% not found', v_wrapper.name;
     END IF;
 
     v_args := pg_get_function_arguments(f.oid);
@@ -444,17 +570,17 @@ BEGIN
     END IF;
 
     EXECUTE format(
-      'CREATE OR REPLACE FUNCTION api.%I(%s) RETURNS %s LANGUAGE sql SECURITY DEFINER SET search_path TO public, extensions, pg_temp AS $fn$ %s $fn$',
-      f.proname,
+      v_wrapper.definition || ' LANGUAGE sql SECURITY DEFINER SET search_path TO public, extensions, pg_temp AS $fn$ %s $fn$',
       v_args,
       v_result,
       v_sql
     );
 
-    EXECUTE format('REVOKE ALL ON FUNCTION api.%I(%s) FROM PUBLIC', f.proname, v_identity_args);
-    EXECUTE format('REVOKE ALL ON FUNCTION api.%I(%s) FROM anon', f.proname, v_identity_args);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION api.%I(%s) TO authenticated, service_role', f.proname, v_identity_args);
-    EXECUTE format('COMMENT ON FUNCTION api.%I(%s) IS %L', f.proname, v_identity_args, 'Console V2 api-schema wrapper for public.' || f.proname || '.');
+    EXECUTE format(v_wrapper.revoke_acl, v_identity_args);
+    EXECUTE format(v_wrapper.grant_acl, v_identity_args);
+    EXECUTE format(
+      v_wrapper.description, v_identity_args, 'Console V2 api-schema wrapper for public.' || f.proname || '.'
+    );
   END LOOP;
 END;
 $$;

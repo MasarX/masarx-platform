@@ -142,33 +142,321 @@ BEGIN
       RAISE EXCEPTION 'Console V2 api wrapper closure: public.%(jsonb) is missing', v_name
         USING ERRCODE = '42883';
     END IF;
-
-    EXECUTE format(
-      $sql$
-      CREATE OR REPLACE FUNCTION api.%1$I(p_args jsonb)
-      RETURNS jsonb
-      LANGUAGE sql
-      VOLATILE
-      SECURITY DEFINER
-      SET search_path TO public, extensions, pg_temp
-      AS $wrapper$
-        SELECT public.%1$I(p_args);
-      $wrapper$;
-      $sql$,
-      v_name
-    );
-
-    EXECUTE format('REVOKE ALL ON FUNCTION api.%I(jsonb) FROM PUBLIC', v_name);
-    EXECUTE format('REVOKE ALL ON FUNCTION api.%I(jsonb) FROM anon', v_name);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION api.%I(jsonb) TO authenticated, service_role', v_name);
-    EXECUTE format(
-      'COMMENT ON FUNCTION api.%I(jsonb) IS %L',
-      v_name,
-      format('Console V2 api-schema wrapper delegating to canonical public.%s(jsonb).', v_name)
-    );
   END LOOP;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION api.create_billing_invoice_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.create_billing_invoice_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.create_billing_invoice_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.create_billing_invoice_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.create_billing_invoice_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.create_billing_invoice_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.update_billing_invoice_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.update_billing_invoice_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.update_billing_invoice_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.update_billing_invoice_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.update_billing_invoice_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.update_billing_invoice_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.void_billing_invoice_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.void_billing_invoice_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.void_billing_invoice_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.void_billing_invoice_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.void_billing_invoice_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.void_billing_invoice_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.billing_invoice_send_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.billing_invoice_send_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.billing_invoice_send_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.billing_invoice_send_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.billing_invoice_send_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.billing_invoice_send_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.billing_invoice_refund_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.billing_invoice_refund_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.billing_invoice_refund_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.billing_invoice_refund_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.billing_invoice_refund_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.billing_invoice_refund_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.cancel_subscription_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.cancel_subscription_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.cancel_subscription_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.cancel_subscription_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.cancel_subscription_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.cancel_subscription_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.apply_settlement_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.apply_settlement_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.apply_settlement_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.apply_settlement_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.apply_settlement_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.apply_settlement_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.reject_settlement_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.reject_settlement_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.reject_settlement_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.reject_settlement_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.reject_settlement_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.reject_settlement_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.bank_recon_match_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.bank_recon_match_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.bank_recon_match_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.bank_recon_match_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.bank_recon_match_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.bank_recon_match_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.bank_recon_unmatch_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.bank_recon_unmatch_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.bank_recon_unmatch_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.bank_recon_unmatch_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.bank_recon_unmatch_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.bank_recon_unmatch_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.dispute_resolve_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.dispute_resolve_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.dispute_resolve_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.dispute_resolve_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.dispute_resolve_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.dispute_resolve_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.dispute_reject_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.dispute_reject_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.dispute_reject_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.dispute_reject_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.dispute_reject_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.dispute_reject_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.dispute_acknowledge_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.dispute_acknowledge_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.dispute_acknowledge_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.dispute_acknowledge_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.dispute_acknowledge_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.dispute_acknowledge_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.dispute_escalate_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.dispute_escalate_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.dispute_escalate_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.dispute_escalate_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.dispute_escalate_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.dispute_escalate_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.warehouse_transfer_execute_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.warehouse_transfer_execute_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.warehouse_transfer_execute_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.warehouse_transfer_execute_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.warehouse_transfer_execute_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.warehouse_transfer_execute_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.ui_upsert_webhook_source_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.ui_upsert_webhook_source_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.ui_upsert_webhook_source_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.ui_upsert_webhook_source_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.ui_upsert_webhook_source_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.ui_upsert_webhook_source_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.ui_rotate_webhook_source_token_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.ui_rotate_webhook_source_token_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.ui_rotate_webhook_source_token_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.ui_rotate_webhook_source_token_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.ui_rotate_webhook_source_token_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.ui_rotate_webhook_source_token_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.ui_upsert_webhook_rule_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.ui_upsert_webhook_rule_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.ui_upsert_webhook_rule_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.ui_upsert_webhook_rule_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.ui_upsert_webhook_rule_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.ui_upsert_webhook_rule_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.ui_delete_webhook_rule_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.ui_delete_webhook_rule_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.ui_delete_webhook_rule_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.ui_delete_webhook_rule_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.ui_delete_webhook_rule_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.ui_delete_webhook_rule_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.ui_reorder_webhook_rule_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.ui_reorder_webhook_rule_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.ui_reorder_webhook_rule_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.ui_reorder_webhook_rule_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.ui_reorder_webhook_rule_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.ui_reorder_webhook_rule_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.webhook_inbox_replay_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.webhook_inbox_replay_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.webhook_inbox_replay_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.webhook_inbox_replay_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.webhook_inbox_replay_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.webhook_inbox_replay_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.webhook_inbox_force_status_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.webhook_inbox_force_status_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.webhook_inbox_force_status_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.webhook_inbox_force_status_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.webhook_inbox_force_status_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.webhook_inbox_force_status_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.block_api_gateway_source_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.block_api_gateway_source_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.block_api_gateway_source_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.block_api_gateway_source_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.block_api_gateway_source_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.block_api_gateway_source_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.adjust_api_gateway_rate_limit_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.adjust_api_gateway_rate_limit_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.adjust_api_gateway_rate_limit_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.adjust_api_gateway_rate_limit_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.adjust_api_gateway_rate_limit_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.adjust_api_gateway_rate_limit_v1(jsonb).';
 
 REVOKE ALL ON FUNCTION api.ui_list_resource_v1(TEXT, JSONB, INTEGER, INTEGER, JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION api.ui_list_resource_v1(TEXT, JSONB, INTEGER, INTEGER, JSONB) FROM anon;

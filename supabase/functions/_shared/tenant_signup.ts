@@ -241,7 +241,7 @@ const isUserAlreadyRegisteredError = (message: string): boolean => {
 };
 
 export const findAuthUserIdByEmail = async (
-  serviceClient: SupabaseClient,
+  serviceClient: EdgeRpcClient,
   email: string,
 ): Promise<string> => {
   const target = email.trim().toLowerCase();

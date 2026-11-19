@@ -49,7 +49,8 @@ describe('dispatch route scanout mobile shell policy readback migration', () => 
     ].forEach((resolver) => expect(body).toContain(resolver));
 
     expect(body).toContain("'active_role', v_active_role");
-    expect(body).toContain("'v2_enabled', COALESCE(array_length(v_missing_categories, 1), 0) = 0");
+    expect(body).toMatch(/FROM public\.resolve_mobile_shell_policy_row\(jsonb_strip_nulls\(\s*jsonb_build_object\('organization_id', v_caller_org\)\s*\)\)/);
+    expect(body).toMatch(/'v2_enabled', COALESCE\(\s*v_caller_org IS NOT NULL AND v_rollout\.scope_type = 'tenant'\s+AND v_rollout\.scope_id = v_caller_org\s+AND v_rollout\.value->'v2_enabled' = 'true'::jsonb\s+AND cardinality\(v_missing_categories\) = 0, FALSE\s*\)/);
     expect(body).toContain("'missing_categories', to_jsonb(v_missing_categories)");
     expect(body).toContain("'policies', v_policies");
     expect(body).not.toMatch(/@[a-z0-9.-]+/i);

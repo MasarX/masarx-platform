@@ -120,12 +120,13 @@ describe('Console V2 live contract closure', () => {
 
     for (const name of wrapperNames) {
       expect(migration).toContain(`'${name}'`);
+      expect(migration).toContain(`CREATE OR REPLACE FUNCTION api.${name}(%s)`);
+      expect(migration).toContain(`REVOKE ALL ON FUNCTION api.${name}(%s) FROM PUBLIC, anon`);
+      expect(migration).toContain(`GRANT EXECUTE ON FUNCTION api.${name}(%s) TO authenticated, service_role`);
     }
 
     expect(migration).toContain('CREATE SCHEMA IF NOT EXISTS api');
     expect(dataSource).toContain("client.schema('api')");
-    expect(migration).toContain('CREATE OR REPLACE FUNCTION api.%I');
-    expect(migration).toContain('GRANT EXECUTE ON FUNCTION api.%I');
     expect(migration).toContain('Console V2 api-schema wrapper for public.');
   });
 

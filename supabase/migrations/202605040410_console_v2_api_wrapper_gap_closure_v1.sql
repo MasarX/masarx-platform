@@ -47,33 +47,230 @@ BEGIN
     IF to_regprocedure(format('public.%I(jsonb)', v_name)) IS NULL THEN
       RAISE EXCEPTION 'console-v2 api wrapper gap closure: public.%(jsonb) is missing', v_name;
     END IF;
-
-    EXECUTE format(
-      $sql$
-      CREATE OR REPLACE FUNCTION api.%1$I(p_args jsonb)
-      RETURNS jsonb
-      LANGUAGE sql
-      VOLATILE
-      SECURITY DEFINER
-      SET search_path TO public, extensions, pg_temp
-      AS $function$
-        SELECT public.%1$I(p_args);
-      $function$;
-      $sql$,
-      v_name
-    );
-
-    EXECUTE format('REVOKE ALL ON FUNCTION api.%I(jsonb) FROM PUBLIC', v_name);
-    EXECUTE format('REVOKE ALL ON FUNCTION api.%I(jsonb) FROM anon', v_name);
-    EXECUTE format('GRANT EXECUTE ON FUNCTION api.%I(jsonb) TO authenticated, service_role', v_name);
-    EXECUTE format(
-      'COMMENT ON FUNCTION api.%I(jsonb) IS %L',
-      v_name,
-      format('Console V2 api-schema wrapper delegating to canonical public.%s(jsonb).', v_name)
-    );
   END LOOP;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION api.revoke_user_role_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.revoke_user_role_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.revoke_user_role_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.revoke_user_role_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.revoke_user_role_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.revoke_user_role_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.force_password_reset_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.force_password_reset_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.force_password_reset_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.force_password_reset_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.force_password_reset_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.force_password_reset_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.suspend_driver_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.suspend_driver_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.suspend_driver_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.suspend_driver_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.suspend_driver_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.suspend_driver_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.restore_driver_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.restore_driver_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.restore_driver_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.restore_driver_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.restore_driver_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.restore_driver_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.verify_driver_document_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.verify_driver_document_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.verify_driver_document_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.verify_driver_document_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.verify_driver_document_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.verify_driver_document_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.reject_driver_document_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.reject_driver_document_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.reject_driver_document_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.reject_driver_document_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.reject_driver_document_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.reject_driver_document_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.create_driver_compliance_event_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.create_driver_compliance_event_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.create_driver_compliance_event_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.create_driver_compliance_event_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.create_driver_compliance_event_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.create_driver_compliance_event_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.record_hours_of_service_segment_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.record_hours_of_service_segment_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.record_hours_of_service_segment_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.record_hours_of_service_segment_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.record_hours_of_service_segment_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.record_hours_of_service_segment_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.import_job_create_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.import_job_create_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.import_job_create_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.import_job_create_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.import_job_create_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.import_job_create_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.import_job_cancel_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.import_job_cancel_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.import_job_cancel_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.import_job_cancel_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.import_job_cancel_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.import_job_cancel_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.create_alert_rule_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.create_alert_rule_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.create_alert_rule_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.create_alert_rule_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.create_alert_rule_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.create_alert_rule_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.update_alert_rule_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.update_alert_rule_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.update_alert_rule_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.update_alert_rule_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.update_alert_rule_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.update_alert_rule_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.pause_alert_rule_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.pause_alert_rule_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.pause_alert_rule_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.pause_alert_rule_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.pause_alert_rule_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.pause_alert_rule_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.resume_alert_rule_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.resume_alert_rule_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.resume_alert_rule_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.resume_alert_rule_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.resume_alert_rule_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.resume_alert_rule_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.test_alert_rule_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.test_alert_rule_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.test_alert_rule_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.test_alert_rule_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.test_alert_rule_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.test_alert_rule_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.acknowledge_ops_alert_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.acknowledge_ops_alert_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.acknowledge_ops_alert_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.acknowledge_ops_alert_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.acknowledge_ops_alert_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.acknowledge_ops_alert_v1(jsonb).';
+
+CREATE OR REPLACE FUNCTION api.resolve_ops_alert_v1(p_args jsonb)
+RETURNS jsonb
+LANGUAGE sql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $wrapper$ SELECT public.resolve_ops_alert_v1(p_args); $wrapper$;
+
+REVOKE ALL ON FUNCTION api.resolve_ops_alert_v1(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION api.resolve_ops_alert_v1(jsonb) TO authenticated, service_role;
+COMMENT ON FUNCTION api.resolve_ops_alert_v1(jsonb)
+  IS 'Console V2 api-schema wrapper delegating to canonical public.resolve_ops_alert_v1(jsonb).';
 
 SELECT pg_advisory_unlock(hashtext('202605031500_console_v2_api_wrapper_gap_closure_v1'));
 
