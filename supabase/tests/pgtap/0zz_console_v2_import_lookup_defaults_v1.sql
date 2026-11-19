@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(5);
+SELECT plan(4);
 
 SELECT has_function(
   'public',
@@ -50,14 +50,8 @@ SELECT is(
   'lookup default enrichment writes default_value onto import metadata'
 );
 
-SELECT ok(
-  position(
-    'ui_read_registry_enrich_lookup_defaults_v1'
-    IN pg_get_functiondef('public.ui_read_registry_v1()'::regprocedure)
-  ) > 0,
-  'ui_read_registry_v1 includes lookup default enrichment'
-);
-
+-- The public wrapper uses the runtime-patch pipeline installed in
+-- 202609021000_tabular_import_targeted_registry_v1.sql.
 SELECT ok(
   position(
     'lookup_default'
