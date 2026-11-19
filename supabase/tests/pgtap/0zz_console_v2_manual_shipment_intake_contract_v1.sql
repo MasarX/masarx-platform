@@ -326,6 +326,12 @@ BEGIN
   INSERT INTO public.branch_zones (branch_id, zone_id, priority)
   VALUES (v_branch, v_zone, 10);
 
+  INSERT INTO public.lookup_values (lookup_definition_id, value, label, status)
+  SELECT id, v_service_level_key, 'Fixture service level', 'active'
+  FROM public.lookup_definitions
+  WHERE category = 'service_level'
+  ON CONFLICT (lookup_definition_id, value) DO NOTHING;
+
   INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
   VALUES (gen_random_uuid(), v_org, v_service_level_key, 'A2Z Standard Service Level', TRUE)
   ON CONFLICT (organization_id, key) DO UPDATE

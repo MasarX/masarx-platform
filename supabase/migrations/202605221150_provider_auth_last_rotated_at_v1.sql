@@ -29,7 +29,7 @@ AS $function$
 DECLARE
   v_is_revoked boolean;
 BEGIN
-  v_is_revoked := COALESCE((NEW.credentials->>'revoked')::boolean, false);
+  v_is_revoked := lower(COALESCE(NEW.credentials->>'revoked', 'false')) NOT IN ('false', 'f', 'no', 'n', '0', 'off');
 
   IF TG_OP = 'INSERT' THEN
     IF NEW.last_rotated_at IS NULL
@@ -126,7 +126,7 @@ BEGIN
         USING ERRCODE = '23503';
     END IF;
 
-    IF COALESCE((v_existing_credentials->>'revoked')::boolean, false) THEN
+    IF lower(COALESCE(v_existing_credentials->>'revoked', 'false')) NOT IN ('false', 'f', 'no', 'n', '0', 'off') THEN
       RAISE EXCEPTION 'ui_upsert_provider_auth_config_v1 provider_auth_config % is revoked and cannot be updated', v_config_id
         USING ERRCODE = '55000';
     END IF;
@@ -261,7 +261,7 @@ WITH credential_base AS (
     p.provider_type AS provider_kind,
     p.metadata->>'vendor' AS provider_vendor,
     p.organization_id AS provider_organization_id,
-    COALESCE((pac.credentials->>'revoked')::boolean, false) AS is_revoked
+    lower(COALESCE(pac.credentials->>'revoked', 'false')) NOT IN ('false', 'f', 'no', 'n', '0', 'off') AS is_revoked
   FROM public.provider_auth_configs pac
   LEFT JOIN public.providers p ON p.id = pac.provider_id
 ),

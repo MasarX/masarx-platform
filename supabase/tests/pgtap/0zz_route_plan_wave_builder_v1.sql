@@ -93,6 +93,12 @@ BEGIN
         is_active = EXCLUDED.is_active
   RETURNING id INTO v_express_level;
 
+  INSERT INTO public.lookup_values (lookup_definition_id, value, label, status)
+  SELECT id, v_lineage_key, 'Fixture service level', 'active'
+  FROM public.lookup_definitions
+  WHERE category = 'service_level'
+  ON CONFLICT (lookup_definition_id, value) DO NOTHING;
+
   INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
   VALUES (v_lineage_level, v_org, v_lineage_key, 'A2Z Standard Service Level', TRUE)
   ON CONFLICT (organization_id, key) DO UPDATE

@@ -246,6 +246,7 @@ BEGIN
                    'updated_at'
                  ),
                  'filters', jsonb_build_array(
+                   jsonb_build_object('key', 'provider_id', 'column', 'provider_id', 'op', 'eq'),
                    jsonb_build_object('key', 'operation_name', 'column', 'operation_name', 'op', 'eq'),
                    jsonb_build_object('key', 'kind', 'column', 'kind', 'op', 'eq'),
                    jsonb_build_object('key', 'category', 'column', 'category', 'op', 'eq')

@@ -68,7 +68,7 @@ SELECT ok(
 );
 
 -- 7) Projection: insert run with branch + driver + assignment, verify joins.
-DO $$
+CREATE FUNCTION pg_temp.test_route_run_directory_scope() RETURNS SETOF text LANGUAGE plpgsql AS $$
 DECLARE
   v_org UUID := '00000000-0000-0000-0000-00000024c000';
   v_client UUID := '00000000-0000-0000-0000-00000024c001';
@@ -177,7 +177,7 @@ BEGIN
   FROM public.v_route_run_directory
   WHERE id = v_run;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_branch_label = 'W24 RRD Branch'
       AND v_driver_label = 'W24 Test Driver'
       AND v_vehicle_label = 'W24 PLATE 024'
@@ -190,10 +190,11 @@ BEGIN
   );
 END;
 $$;
+SELECT * FROM pg_temp.test_route_run_directory_scope();
 
 -- 8) Negative path: partner_fleet assignment populates partner_name and flips
 -- is_partner_run; refused assignments are excluded from the active row.
-DO $$
+CREATE FUNCTION pg_temp.test_route_run_directory_rollup() RETURNS SETOF text LANGUAGE plpgsql AS $$
 DECLARE
   v_org UUID := '00000000-0000-0000-0000-00000024d000';
   v_responder UUID := '00000000-0000-0000-0000-00000024d004';
@@ -295,7 +296,7 @@ BEGIN
     FROM public.v_route_run_directory
    WHERE id = v_refused_run;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_partner_name = 'W24 Logistics Co'
       AND v_is_partner = TRUE
       AND v_assign_mode = 'partner_fleet'
@@ -303,7 +304,7 @@ BEGIN
     'v_route_run_directory excludes refused assignments and projects partner_name + is_partner_run for partner_fleet'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_alt_partner_name = 'W24 Overflow Pool'
       AND v_alt_is_partner = TRUE
       AND v_alt_assign_mode = 'alternate_capacity_pool',
@@ -311,6 +312,7 @@ BEGIN
   );
 END;
 $$;
+SELECT * FROM pg_temp.test_route_run_directory_rollup();
 
 SELECT * FROM finish();
 ROLLBACK;

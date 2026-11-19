@@ -17,17 +17,14 @@ SELECT columns_are(
   'public', 'v_vehicle_directory',
   ARRAY[
     'id', 'organization_id', 'branch_id', 'vehicle_type_id', 'status',
-    'plate_number', 'plate_number_upper', 'vin',
-    'make', 'model', 'model_year', 'color',
-    'is_active', 'acquired_at', 'retired_at',
-    'metadata', 'created_at', 'updated_at',
-    'branch_label', 'vehicle_type_label', 'vehicle_type_key',
-    'current_driver_user_id', 'current_driver_label',
-    'current_branch_id', 'active_assignment_branch_id',
-    'active_assignment_started_at', 'assignment_age_seconds',
-    'last_event_at', 'event_count_24h',
+    'plate_number', 'plate', 'code', 'vin', 'make', 'model', 'model_year', 'color',
+    'is_active', 'metadata', 'created_at', 'updated_at',
+    'vehicle_type_label', 'type_name', 'vehicle_type_key',
+    'current_driver_user_id', 'current_driver_label', 'current_branch_id',
+    'active_assignment_branch_id', 'active_assignment_started_at', 'assignment_age_seconds',
+    'branch_label', 'is_oos', 'is_in_maintenance',
+    'plate_number_upper', 'acquired_at', 'retired_at', 'last_event_at', 'event_count_24h',
     'maintenance_window_count', 'active_maintenance_count', 'maintenance_due',
-    'is_oos', 'is_in_maintenance',
     'last_telemetry_at', 'odometer_km', 'fuel_level', 'last_fuel_event_at'
   ],
   'v_vehicle_directory exposes FE-projection columns'
@@ -167,7 +164,7 @@ BEGIN
    WHERE id = v_vehicle;
 
   PERFORM set_config('test.w29_vehicle_projection_ok', (
-    v_branch_label = 'w29-ruh - W29 Riyadh Branch'
+    v_branch_label = 'w29-ruh ? W29 Riyadh Branch'
       AND v_vtype_label = 'W29 Box Van'
       AND v_drv_label = 'W29 Vehicle Driver'
       AND v_event_24h = 1

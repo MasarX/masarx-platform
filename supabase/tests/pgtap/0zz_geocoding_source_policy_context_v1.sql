@@ -26,7 +26,7 @@ SELECT ok(
   'geocoding_policy allows source, sender, and client scoped exceptions'
 );
 
-DO $$
+CREATE FUNCTION pg_temp.test_geocoding_source_policy_context() RETURNS SETOF text LANGUAGE plpgsql AS $$
 DECLARE
   v_org UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
@@ -280,30 +280,31 @@ BEGIN
     INTO v_extract
     FROM public.geocoding_extract_policy_context_v1((SELECT wr FROM public.workflow_runs wr WHERE wr.id = v_run_source));
 
-  PERFORM is(v_extract.webhook_source_id, v_source, 'geocoding context extracts webhook source for shipment/address workflow');
-  PERFORM is(v_extract.sender_id, v_sender, 'geocoding context keeps shipment sender aligned with source sender');
+  RETURN NEXT is(v_extract.webhook_source_id, v_source, 'geocoding context extracts webhook source for shipment/address workflow');
+  RETURN NEXT is(v_extract.sender_id, v_sender, 'geocoding context keeps shipment sender aligned with source sender');
 
   SELECT *
     INTO v_policy_record
     FROM public.geocoding_resolve_policy(v_org, v_client, v_sender, v_source)
     LIMIT 1;
 
-  PERFORM is(v_policy_record.scope_type, 'source', 'public geocoding resolver prefers source override');
-  PERFORM is(v_policy_record.policy #>> '{metadata,scope_marker}', 'source_exception', 'source policy marker wins over sender/client');
+  RETURN NEXT is(v_policy_record.scope_type, 'source', 'public geocoding resolver prefers source override');
+  RETURN NEXT is(v_policy_record.policy #>> '{metadata,scope_marker}', 'source_exception', 'source policy marker wins over sender/client');
 
   SELECT * INTO v_workflow_run FROM public.workflow_runs WHERE id = v_run_source;
   v_resolved := workflow_handlers.geocoding_resolve_policy_for_run(v_workflow_run);
-  PERFORM is(v_resolved #>> '{metadata,scope_marker}', 'source_exception', 'workflow geocoding resolver uses source override');
+  RETURN NEXT is(v_resolved #>> '{metadata,scope_marker}', 'source_exception', 'workflow geocoding resolver uses source override');
 
   SELECT * INTO v_workflow_run FROM public.workflow_runs WHERE id = v_run_sender;
   v_resolved := workflow_handlers.geocoding_resolve_policy_for_run(v_workflow_run);
-  PERFORM is(v_resolved #>> '{metadata,scope_marker}', 'sender_exception', 'workflow geocoding resolver falls back to sender override');
+  RETURN NEXT is(v_resolved #>> '{metadata,scope_marker}', 'sender_exception', 'workflow geocoding resolver falls back to sender override');
 
   SELECT * INTO v_workflow_run FROM public.workflow_runs WHERE id = v_run_client;
   v_resolved := workflow_handlers.geocoding_resolve_policy_for_run(v_workflow_run);
-  PERFORM is(v_resolved #>> '{metadata,scope_marker}', 'client_exception', 'workflow geocoding resolver falls back to client override');
+  RETURN NEXT is(v_resolved #>> '{metadata,scope_marker}', 'client_exception', 'workflow geocoding resolver falls back to client override');
 END;
 $$;
+SELECT * FROM pg_temp.test_geocoding_source_policy_context();
 
 SELECT * FROM finish();
 

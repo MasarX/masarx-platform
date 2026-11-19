@@ -25,6 +25,12 @@ BEGIN
      'B6 SL Cre Sender', 'driver', 'tenant', NULL)
   ON CONFLICT (id) DO NOTHING;
 
+  INSERT INTO public.lookup_values (lookup_definition_id, value, label, status)
+  SELECT id, 'b6-sl-create-fixture', 'Fixture service level', 'active'
+  FROM public.lookup_definitions
+  WHERE category = 'service_level'
+  ON CONFLICT (lookup_definition_id, value) DO NOTHING;
+
   PERFORM set_config('test.b6_sl_cre_org', v_org::text, true);
   PERFORM set_config('test.b6_sl_cre_ops', v_ops::text, true);
   PERFORM set_config('test.b6_sl_cre_sender', v_sender::text, true);
@@ -38,7 +44,7 @@ SET LOCAL ROLE authenticated;
 SELECT ok(
   (
     SELECT (public.service_level_create_v1(jsonb_build_object(
-      'key', 'b6-sl-cre-' || gen_random_uuid()::text,
+      'key', 'b6-sl-create-fixture',
       'name', 'B6 SL Cre New'
     ))->>'ok')::bool
   ),
@@ -64,7 +70,8 @@ RESET ROLE;
 SELECT ok(
   EXISTS (
     SELECT 1 FROM public.decision_log
-     WHERE decision_category = 'service_levels.create'
+     WHERE decision_category = 'service_catalog'
+       AND decision_point = 'service_level_create_v1'
        AND organization_id = current_setting('test.b6_sl_cre_org')::uuid
   ),
   'service_level_create_v1 wrote decision_log row'

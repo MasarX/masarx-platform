@@ -25,7 +25,7 @@ SELECT has_function(
   'api',
   'resolve_settings_row_from_policy_context_v1',
   ARRAY['text', 'jsonb'],
-  'api.resolve_settings_row_from_policy_context_v1 wrapper exists for browser-safe readback'
+  'service policy resolver wrapper exists'
 );
 
 SELECT ok(
@@ -47,12 +47,12 @@ SELECT ok(
 );
 
 SELECT ok(
-  has_function_privilege(
+  NOT has_function_privilege(
     'authenticated',
     'api.resolve_settings_row_from_policy_context_v1(text,jsonb)',
     'EXECUTE'
   ),
-  'authenticated can execute api.resolve_settings_row_from_policy_context_v1'
+  'authenticated cannot execute the generic policy resolver'
 );
 
 SELECT is(
@@ -82,7 +82,7 @@ SELECT ok(
   'address_resolution_policy is tenant-allowed and approval-gated'
 );
 
-DO $$
+CREATE FUNCTION pg_temp.test_map_geocoding_policy_mutation() RETURNS SETOF text LANGUAGE plpgsql AS $$
 DECLARE
   v_org UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
@@ -236,19 +236,18 @@ BEGIN
   v_address_version := (v_address_result->>'settings_version_id')::uuid;
   v_geocoding_version := (v_geocoding_result->>'settings_version_id')::uuid;
 
-  PERFORM ok((v_map_result->>'applied')::boolean, 'tenant map_policy apply returns applied=true');
-  PERFORM ok((v_address_result->>'applied')::boolean, 'tenant address_policy apply returns applied=true');
-  PERFORM ok((v_geocoding_result->>'applied')::boolean, 'tenant geocoding_policy apply returns applied=true');
+  RETURN NEXT ok((v_map_result->>'applied')::boolean, 'tenant map_policy apply returns applied=true');
+  RETURN NEXT ok((v_address_result->>'applied')::boolean, 'tenant address_policy apply returns applied=true');
+  RETURN NEXT ok((v_geocoding_result->>'applied')::boolean, 'tenant geocoding_policy apply returns applied=true');
 
   SELECT *
     INTO v_resolved
-    FROM api.resolve_settings_row_from_policy_context_v1(
-      'map_policy',
+    FROM public.resolve_map_policy(
       jsonb_build_object('organization_id', v_org::text)
     )
     LIMIT 1;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_resolved.settings_version_id = v_map_version
     AND v_resolved.scope_type = 'tenant'
     AND v_resolved.scope_id = v_org
@@ -260,6 +259,10 @@ BEGIN
     'api resolver reads back tenant map_policy with open provider stack'
   );
 
+  EXECUTE 'SET LOCAL ROLE service_role';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
   SELECT *
     INTO v_resolved
     FROM api.resolve_settings_row_from_policy_context_v1(
@@ -268,7 +271,7 @@ BEGIN
     )
     LIMIT 1;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_resolved.settings_version_id = v_address_version
     AND v_resolved.scope_type = 'tenant'
     AND v_resolved.value->>'country_default' = 'SA'
@@ -286,7 +289,7 @@ BEGIN
     )
     LIMIT 1;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_resolved.settings_version_id = v_geocoding_version
     AND v_resolved.scope_type = 'tenant'
     AND v_resolved.value #>> '{coordinate_handling,country_boundary}' = 'SA'
@@ -308,6 +311,10 @@ BEGIN
     'api resolver reads back tenant geocoding_policy with SA, short_code, fuzzy, and manual review'
   );
 
+  PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
+  PERFORM set_config('request.jwt.claims', json_build_object('role', 'authenticated')::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+
   SELECT settings_version_id, domain_event_id
     INTO v_request_version, v_request_event
     FROM api.request_settings_change_v1(
@@ -319,13 +326,13 @@ BEGIN
       p_effective_from := now()
     );
 
-  PERFORM ok(v_request_version IS NOT NULL, 'address_resolution_policy request returns settings_version_id');
-  PERFORM ok(v_request_event IS NOT NULL, 'address_resolution_policy request returns domain_event_id');
+  RETURN NEXT ok(v_request_version IS NOT NULL, 'address_resolution_policy request returns settings_version_id');
+  RETURN NEXT ok(v_request_event IS NOT NULL, 'address_resolution_policy request returns domain_event_id');
 
   EXECUTE 'RESET ROLE';
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  PERFORM is(
+  RETURN NEXT is(
     (
       SELECT COUNT(*)::INT
       FROM public.settings_versions sv
@@ -339,7 +346,7 @@ BEGIN
     'safe policy applies persist active approved tenant settings_versions'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (
       SELECT COUNT(*)::INT
       FROM public.settings s
@@ -351,7 +358,7 @@ BEGIN
     'safe policy applies refresh tenant settings cache'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (
       SELECT COUNT(*)::INT
       FROM public.domain_events de
@@ -363,7 +370,7 @@ BEGIN
     'safe policy applies emit settings_change.applied events'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (
       SELECT COUNT(*)::INT
       FROM public.decision_log dl
@@ -378,7 +385,7 @@ BEGIN
     'safe policy applies emit decision_log lineage'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM public.settings_versions sv
@@ -393,7 +400,7 @@ BEGIN
     'address_resolution_policy request stores pending settings_versions row'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM public.domain_events de
@@ -406,7 +413,7 @@ BEGIN
     'address_resolution_policy request emits pending settings_change.requested event'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     NOT EXISTS (
       SELECT 1
       FROM public.settings s
@@ -417,7 +424,9 @@ BEGIN
     ),
     'address_resolution_policy request does not replace active settings cache before approval'
   );
-END $$;
+END;
+$$;
+SELECT * FROM pg_temp.test_map_geocoding_policy_mutation();
 
 SELECT * FROM finish();
 ROLLBACK;

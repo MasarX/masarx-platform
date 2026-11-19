@@ -22,7 +22,6 @@ SELECT columns_are(
     'mapping_label',
     'last_event_at', 'last_event_status',
     'event_count_24h', 'error_count_24h',
-    'rule_count', 'active_rule_count',
     'is_healthy', 'has_recent_errors',
     'auth_token_masked',
     'sender_id', 'client_id', 'sender_label', 'client_label',
@@ -80,13 +79,12 @@ SELECT ok(
   'public.webhook_sources remains a base table (SSOT preserved)'
 );
 
--- 8) Projection: insert webhook source + mapping + rule + successful inbox row.
+-- 8) Projection: insert webhook source + mapping + successful inbox row.
 DO $$
 DECLARE
   v_org      UUID := '00000000-0000-0000-0000-00000027a001';
   v_mapping  UUID := '00000000-0000-0000-0000-00000027a002';
   v_source   UUID := '00000000-0000-0000-0000-00000027a003';
-  v_rule     UUID := '00000000-0000-0000-0000-00000027a004';
   v_inbox    UUID := '00000000-0000-0000-0000-00000027a005';
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
@@ -117,16 +115,6 @@ BEGIN
   )
   ON CONFLICT (id) DO NOTHING;
 
-  INSERT INTO public.webhook_rules (
-    id, webhook_source_id, event_type, name, priority,
-    mapping_config_id, domain_category, enabled
-  )
-  VALUES (
-    v_rule, v_source, 'shipment.created', 'W27 Rule', 10,
-    v_mapping, 'shipment', TRUE
-  )
-  ON CONFLICT (id) DO NOTHING;
-
   INSERT INTO public.webhook_inbox (
     id, webhook_source_id, provider_type, external_id, event_type,
     raw_payload, processing_status, correlation_id, created_at
@@ -152,8 +140,6 @@ SELECT ok(
     SELECT 1
     FROM public.v_webhook_source_directory
     WHERE id = '00000000-0000-0000-0000-00000027a003'::UUID
-      AND rule_count = 1
-      AND active_rule_count = 1
       AND event_count_24h = 1
       AND error_count_24h = 0
       AND is_healthy = TRUE
@@ -162,7 +148,7 @@ SELECT ok(
       AND mapping_label = 'w27-mc-main'
       AND last_event_at IS NOT NULL
   ),
-  'v_webhook_source_directory derives rule_count + active_rule_count + event_count_24h + error_count_24h + is_healthy + has_recent_errors + auth_token_masked + mapping_label + last_event_at'
+  'v_webhook_source_directory derives event_count_24h + error_count_24h + is_healthy + has_recent_errors + auth_token_masked + mapping_label + last_event_at'
 );
 
 -- 9) Failed-event projection.

@@ -128,7 +128,7 @@ SELECT ok(
   'customer projection views enforce security_invoker for RLS-backed generic reads'
 );
 
-DO $do$
+CREATE FUNCTION pg_temp.test_customer_projection_scopes() RETURNS SETOF text LANGUAGE plpgsql AS $do$
 DECLARE
   v_org UUID := 'c3caa1e9-e680-4f44-89d6-5b3cd41d6f01'::uuid;
   v_other_org UUID := 'b7bfc6f7-3e6e-4fd4-a5b2-d8e5135452d1'::uuid;
@@ -264,7 +264,7 @@ BEGIN
     0,
     '[]'::jsonb
   );
-  PERFORM ok(
+  RETURN NEXT ok(
     v_body->'items' @> jsonb_build_array(jsonb_build_object('client_id', v_client::text, 'organization_id', v_org::text)),
     'client_summary returns the active tenant client through ui_list_resource_v1'
   );
@@ -276,7 +276,7 @@ BEGIN
     0,
     '[]'::jsonb
   );
-  PERFORM ok(
+  RETURN NEXT ok(
     v_body->'items' @> jsonb_build_array(jsonb_build_object('sender_id', v_sender::text, 'organization_id_resolved', v_org::text)),
     'sender_summary returns the active tenant sender through ui_list_resource_v1'
   );
@@ -288,7 +288,7 @@ BEGIN
     0,
     '[]'::jsonb
   );
-  PERFORM ok(
+  RETURN NEXT ok(
     v_body->'items' @> jsonb_build_array(jsonb_build_object('recipient_id', v_recipient::text, 'organization_id', v_org::text)),
     'recipient_directory returns the active tenant recipient through ui_list_resource_v1'
   );
@@ -303,7 +303,7 @@ BEGIN
     0,
     '[]'::jsonb
   );
-  PERFORM is(
+  RETURN NEXT is(
     (v_body->>'total')::int,
     1,
     'client-scoped client_summary returns only the caller client'
@@ -319,13 +319,13 @@ BEGIN
     0,
     '[]'::jsonb
   );
-  PERFORM is(
+  RETURN NEXT is(
     (v_body->>'total')::int,
     1,
     'sender-scoped sender_summary returns only the caller sender'
   );
 
-  PERFORM throws_ok(
+  RETURN NEXT throws_ok(
     $$ SELECT public.ui_list_resource_v1('recipient_directory', '{}'::jsonb, 50, 0, '[]'::jsonb) $$,
     '42501',
     'ui_list_resource_v1 resource recipient_directory missing sender scope column',
@@ -333,7 +333,9 @@ BEGIN
   );
 
   EXECUTE 'RESET ROLE';
-END $do$;
+END;
+$do$;
+SELECT * FROM pg_temp.test_customer_projection_scopes();
 
 SELECT * FROM finish();
 

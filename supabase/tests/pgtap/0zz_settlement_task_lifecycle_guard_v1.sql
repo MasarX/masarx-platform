@@ -40,7 +40,7 @@ SELECT ok(
   'stale settlement task completion trigger is installed'
 );
 
-DO $$
+CREATE FUNCTION pg_temp.test_settlement_task_lifecycle_guard() RETURNS SETOF text LANGUAGE plpgsql AS $$
 DECLARE
   v_org uuid := gen_random_uuid();
   v_branch uuid := gen_random_uuid();
@@ -175,9 +175,9 @@ BEGIN
     ))
    LIMIT 1;
 
-  PERFORM ok(v_ops_session.ops_session_id IS NOT NULL, 'ops session exists for stale task completion attempt');
+  RETURN NEXT ok(v_ops_session.ops_session_id IS NOT NULL, 'ops session exists for stale task completion attempt');
 
-  PERFORM throws_ok(
+  RETURN NEXT throws_ok(
     format(
       $sql$
         SELECT *
@@ -197,13 +197,13 @@ BEGIN
     'stale settlement task completion is blocked before task mutation'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT status FROM public.tasks WHERE id = v_task),
     'open',
     'blocked stale task remains open'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT COUNT(*)::int FROM public.task_events WHERE task_id = v_task AND event_type = 'status_changed'),
     0,
     'blocked stale task does not append a task event'
@@ -211,7 +211,7 @@ BEGIN
 
   EXECUTE 'SET LOCAL ROLE service_role';
 
-  PERFORM throws_ok(
+  RETURN NEXT throws_ok(
     format(
       $sql$
         UPDATE public.tasks
@@ -234,7 +234,7 @@ BEGIN
     ))
    LIMIT 1;
 
-  PERFORM ok(v_transition.settlement_event_id IS NOT NULL, 'open -> locked service transition remains allowed');
+  RETURN NEXT ok(v_transition.settlement_event_id IS NOT NULL, 'open -> locked service transition remains allowed');
 
   INSERT INTO public.tasks (
     id,
@@ -270,21 +270,21 @@ BEGIN
     ))
    LIMIT 1;
 
-  PERFORM ok(v_approve.settlement_event_id IS NOT NULL, 'locked -> approved workflow transition is row-configured');
+  RETURN NEXT ok(v_approve.settlement_event_id IS NOT NULL, 'locked -> approved workflow transition is row-configured');
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT status FROM public.tasks WHERE id = v_manager_task),
     'cancelled',
     'future settlement approval auto-cancels stale manager task'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT COUNT(*)::int FROM public.task_events WHERE task_id = v_manager_task AND event_type = 'status_changed' AND to_status = 'cancelled'),
     1,
     'future stale manager task cancellation records task event'
   );
 
-  PERFORM throws_ok(
+  RETURN NEXT throws_ok(
     format(
       $sql$
         SELECT *
@@ -301,12 +301,14 @@ BEGIN
     'approved -> locked settlement regression is blocked'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT status FROM public.settlement_batches WHERE id = v_open_batch),
     'approved',
     'blocked settlement regression preserves approved status'
   );
-END $$;
+END;
+$$;
+SELECT * FROM pg_temp.test_settlement_task_lifecycle_guard();
 
 SELECT * FROM finish();
 

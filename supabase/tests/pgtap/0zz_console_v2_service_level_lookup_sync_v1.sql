@@ -22,9 +22,12 @@ SELECT function_returns(
 );
 
 SELECT ok(
-  pg_get_functiondef('public.service_level_create_v1(jsonb)'::regprocedure)
-    LIKE '%ensure_service_level_lookup_value_v1(v_resource_id)%',
-  'service_level_create_v1 syncs the created service level into lookup_values'
+  EXISTS (
+    SELECT 1 FROM public.lookup_column_contracts
+    WHERE table_schema = 'public' AND table_name = 'service_levels'
+      AND column_name = 'key' AND lookup_category = 'service_level' AND NOT allow_inactive
+  ),
+  'service level catalog writes require an active canonical lookup key'
 );
 
 SELECT ok(
@@ -79,6 +82,12 @@ BEGIN
   INSERT INTO public.lookup_definitions (category, description, owner_role, is_mutable)
   VALUES ('service_level', 'Service level lookup values for shipment creation.', 'operations', true)
   ON CONFLICT (category) DO NOTHING;
+
+  INSERT INTO public.lookup_values (lookup_definition_id, value, label, status)
+  SELECT id, v_key, 'Fixture service level', 'active'
+  FROM public.lookup_definitions
+  WHERE category = 'service_level'
+  ON CONFLICT (lookup_definition_id, value) DO NOTHING;
 
   INSERT INTO public.service_levels (id, organization_id, key, name, is_active, metadata)
   VALUES

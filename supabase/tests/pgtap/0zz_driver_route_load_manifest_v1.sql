@@ -96,6 +96,8 @@ BEGIN
   RETURN NEXT throws_ok(format('SELECT api.ui_route_run_execution_manifest_v1(%L::uuid)', v_route), '42501', format('route_run %s is outside the current organization', v_route), 'foreign organization cannot read parcel data');
   RETURN NEXT throws_ok(format('SELECT api.ui_record_route_load_action_v1(%L::jsonb)', v_input || jsonb_build_object('actor_user_id', v_outside, 'organization_id', v_other_org)), '42501', format('route_run %s is outside the current organization', v_route), 'foreign organization cannot append loading actions');
   EXECUTE 'SET LOCAL ROLE postgres';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
   SELECT policy INTO v_policy_before FROM public.resolve_access_control_policy_v1('tenant', v_org, FALSE) LIMIT 1;
   PERFORM 1 FROM public.upsert_settings_value_v1('access_control_policy', 'tenant', v_org,
     v_policy_before || jsonb_build_object('denies', jsonb_build_array(jsonb_build_object('capability_key', 'tasks.complete', 'scope_type', 'tenant', 'scope_id', v_org))), 1, 'SG52 deny test');
@@ -106,6 +108,8 @@ BEGIN
   RETURN NEXT ok(NOT (api.ui_route_run_execution_manifest_v1(v_route)#>>'{load_manifest,can_record_actions}')::boolean, 'readback disables actions after capability revocation');
   RETURN NEXT throws_ok(format('SELECT api.ui_record_route_load_action_v1(%L::jsonb)', v_input || '{"idempotency_key":"denied-new"}'::jsonb), '42501', 'Capability denied: tasks.complete', 'queued intent is reauthorized against current capability policy');
   EXECUTE 'SET LOCAL ROLE postgres';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
   PERFORM 1 FROM public.upsert_settings_value_v1('access_control_policy', 'tenant', v_org, v_policy_before, 1, 'SG52 restore fixture policy');
   DELETE FROM public.settings_cache WHERE cache_key LIKE 'access_control_policy:%';
   UPDATE public.route_runs SET status = 'completed' WHERE id = v_route;

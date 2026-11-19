@@ -32,6 +32,12 @@ BEGIN
   VALUES (v_branch, v_org, 'b6-soarch-' || left(v_branch::text, 6), 'B6 SO Arch Branch')
   ON CONFLICT (id) DO NOTHING;
 
+  INSERT INTO public.lookup_values (lookup_definition_id, value, label, status)
+  SELECT id, 'b6-soarch-' || left(v_level::text, 6), 'Fixture service level', 'active'
+  FROM public.lookup_definitions
+  WHERE category = 'service_level'
+  ON CONFLICT (lookup_definition_id, value) DO NOTHING;
+
   INSERT INTO public.service_levels (id, organization_id, key, name)
   VALUES (v_level, v_org, 'b6-soarch-' || left(v_level::text, 6), 'B6 SO Arch Level')
   ON CONFLICT (id) DO NOTHING;

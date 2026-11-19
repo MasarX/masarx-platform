@@ -67,6 +67,14 @@ ON CONFLICT (id) DO UPDATE
 SET organization_id = EXCLUDED.organization_id,
     mapping_config = EXCLUDED.mapping_config;
 
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+VALUES ('e4872250-0000-4000-8000-000000000021', 'e4872250-0000-4000-8000-000000000001',
+        'Export fixture client', 'export-fixture-client', 'active');
+
+INSERT INTO public.senders (id, client_id, name, brand_name, status)
+VALUES ('e4872250-0000-4000-8000-000000000022', 'e4872250-0000-4000-8000-000000000021',
+        'Export fixture sender', 'Fixture', 'active');
+
 INSERT INTO public.webhook_sources (
   id,
   organization_id,
@@ -77,7 +85,8 @@ INSERT INTO public.webhook_sources (
   mapping_config_id,
   enabled,
   rate_limit_per_hour,
-  managed_metadata
+  managed_metadata,
+  sender_id
 )
 VALUES (
   'e4872250-0000-4000-8000-000000000003'::uuid,
@@ -89,10 +98,12 @@ VALUES (
   'e4872250-0000-4000-8000-000000000002'::uuid,
   TRUE,
   240,
-  '{"managed_by":"integration_plugin"}'::jsonb
+  '{"managed_by":"integration_plugin"}'::jsonb,
+  'e4872250-0000-4000-8000-000000000022'::uuid
 )
 ON CONFLICT (id) DO UPDATE
 SET organization_id = EXCLUDED.organization_id,
+    sender_id = EXCLUDED.sender_id,
     enabled = TRUE,
     mapping_config_id = EXCLUDED.mapping_config_id,
     managed_metadata = EXCLUDED.managed_metadata;

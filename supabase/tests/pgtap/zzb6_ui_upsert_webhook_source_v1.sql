@@ -11,6 +11,8 @@ DECLARE
   v_ops UUID := '00000000-0000-0000-0000-00000000b821';
   v_sender UUID := '00000000-0000-0000-0000-00000000b822';
   v_mapping UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_source_sender UUID := gen_random_uuid();
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -25,6 +27,14 @@ BEGIN
     (v_sender, v_org, 'b6-ws-ups-sender-' || left(v_sender::text, 8) || '@example.com',
      'B6 WS Ups Sender', 'driver', 'tenant', NULL)
   ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES (v_client, v_org, 'Source fixture client', 'source-' || v_client::text, 'active');
+
+  INSERT INTO public.senders (id, client_id, name, brand_name, status)
+  VALUES (v_source_sender, v_client, 'Source fixture sender', 'Fixture', 'active');
+
+  PERFORM set_config('test.b6_ws_ups_source_sender', v_source_sender::text, true);
 
   INSERT INTO public.mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
   VALUES (v_mapping, 'webhook_inbound', 'b6-ws-ups-' || left(v_mapping::text, 8) || '::default',
@@ -59,6 +69,7 @@ SELECT ok(
       'source_identifier', current_setting('test.b6_ws_ups_ident'),
       'name', 'B6 WS Ups Source',
       'provider_type', 'shopify',
+      'sender_id', current_setting('test.b6_ws_ups_source_sender'),
       'mapping_config_id', current_setting('test.b6_ws_ups_mapping')
       )) AS result
     )

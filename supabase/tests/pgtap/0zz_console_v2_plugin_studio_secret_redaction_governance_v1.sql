@@ -35,8 +35,7 @@ BEGIN
         'method', 'POST',
         'path_template', '/v1/orders',
         'upstream_method', 'POST',
-        'upstream_path_template', '/v1/orders',
-        'headers', jsonb_build_object('Authorization', 'Bearer raw-inbound-secret')
+        'upstream_path_template', '/v1/orders'
       )
     ),
     p_mapping_config := jsonb_build_object(
@@ -51,8 +50,8 @@ BEGIN
       jsonb_build_object(
         'operation_name', 'forward_event',
         'method', 'POST',
-        'url_template', 'https://provider.nzxmhryhtqlzoshjkyozkpup.example.invalid/v1/orders?token=raw-outbound-token',
-        'headers_template', jsonb_build_object('x-api-key', 'raw-outbound-api-key')
+        'url_template', 'https://provider.nzxmhryhtqlzoshjkyozkpup.example.invalid/v1/orders',
+        'headers_template', jsonb_build_object('X-Provider-Auth', 'Bearer {{provider.token}}')
       )
     ),
     p_organization_id := '8e02a0e0-0000-4000-8000-000000000052',
@@ -191,23 +190,23 @@ SELECT is(
   'Plugin Studio mapping_config redacts nested secret keys'
 );
 
-SELECT is(
-  (
-    SELECT outbound_operations #>> '{0,headers_template,x-api-key}'
-    FROM public.integration_plugin_versions
-    WHERE id = current_setting('test.plugin_studio_secret_version_id')::uuid
-  ),
-  'REDACTED',
-  'Plugin Studio outbound operation header templates redact API keys'
+SELECT throws_ok(
+  $sql$SELECT public.plugin_studio_redact_json_v1(
+    '{"headers_template":{"x-api-key":"raw-outbound-api-key"}}', 'config', TRUE
+  )$sql$,
+  '23514',
+  'Inline credentials are not allowed in executable configuration; use an auth binding',
+  'Plugin Studio rejects inline keys in executable outbound headers'
 );
 
-SELECT ok(
-  NOT (
-    SELECT outbound_operations::text LIKE '%raw-outbound-token%'
+SELECT is(
+  (
+    SELECT outbound_operations #>> '{0,headers_template,X-Provider-Auth}'
     FROM public.integration_plugin_versions
     WHERE id = current_setting('test.plugin_studio_secret_version_id')::uuid
   ),
-  'Plugin Studio outbound operation URLs do not retain query tokens'
+  'Bearer {{provider.token}}',
+  'Plugin Studio preserves an outbound auth binding reference'
 );
 
 SELECT ok(

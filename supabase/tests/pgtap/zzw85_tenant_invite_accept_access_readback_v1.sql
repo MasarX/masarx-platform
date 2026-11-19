@@ -70,6 +70,8 @@ SELECT set_config(
 );
 SET LOCAL ROLE authenticated;
 
+CREATE TEMP TABLE w85_invite_acceptance AS
+SELECT api.tenant_user_invite_accept_v1() AS payload;
 CREATE TEMP TABLE w85_first_identity AS
 SELECT public.ui_me_v1() AS payload;
 
@@ -80,9 +82,9 @@ SELECT is(
 );
 
 SELECT is(
-  (SELECT payload#>>'{invite_acceptance,accepted}' FROM w85_first_identity),
+  (SELECT payload->>'accepted' FROM w85_invite_acceptance),
   'true',
-  'ui_me_v1 reports that the invite was accepted on first authenticated access'
+  'explicit invite acceptance reports a newly accepted invite'
 );
 
 SELECT is(
@@ -165,9 +167,9 @@ CREATE TEMP TABLE w85_second_identity AS
 SELECT public.ui_me_v1() AS payload;
 
 SELECT is(
-  (SELECT payload#>>'{invite_acceptance,accepted}' FROM w85_second_identity),
-  'false',
-  'repeat identity hydration does not re-accept an already active invite'
+  (SELECT payload#>>'{user,status}' FROM w85_second_identity),
+  'active',
+  'repeat identity hydration keeps the accepted user active'
 );
 
 RESET ROLE;

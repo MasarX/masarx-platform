@@ -87,9 +87,12 @@ actual AS (
   UNION ALL (SELECT * FROM actual EXCEPT SELECT * FROM expected))
 SELECT is((SELECT count(*) FROM difference),0::bigint,'explicit ACLs equal the registry/dependency privilege plan exactly');
 
-SELECT ok(bool_and(EXISTS(SELECT 1 FROM public.ui_rpc_executor_privilege_plan_v1() p
-    WHERE p.object_kind='relation' AND p.object_id=to_regclass(resource->>'read_relation')
-      AND p.privilege='SELECT')
+WITH planned_reads AS MATERIALIZED (
+  SELECT object_id FROM public.ui_rpc_executor_privilege_plan_v1()
+  WHERE object_kind='relation' AND privilege='SELECT'
+)
+SELECT ok(bool_and(EXISTS(SELECT 1 FROM planned_reads p
+    WHERE p.object_id=to_regclass(resource->>'read_relation'))
     AND has_table_privilege('ui_rpc_executor',to_regclass(resource->>'read_relation'),'SELECT')),
   'every canonical read relation has its planned executor SELECT grant')
 FROM jsonb_array_elements(public.resolve_settings_merged(

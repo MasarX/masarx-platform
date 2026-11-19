@@ -76,6 +76,12 @@ BEGIN
   VALUES (v_org, 'W31 Level Org', 'w31-lvl-org-main')
   ON CONFLICT (id) DO NOTHING;
 
+  INSERT INTO public.lookup_values (lookup_definition_id, value, label, status)
+  SELECT id, v_level_key, 'Fixture service level', 'active'
+  FROM public.lookup_definitions
+  WHERE category = 'service_level'
+  ON CONFLICT (lookup_definition_id, value) DO NOTHING;
+
   INSERT INTO public.service_levels (
     id, organization_id, key, name, is_active, metadata
   )

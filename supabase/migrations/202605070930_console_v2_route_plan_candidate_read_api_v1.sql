@@ -40,6 +40,7 @@ DECLARE
   v_input JSONB := COALESCE(p_input, '{}'::jsonb);
   v_payload JSONB := '{}'::jsonb;
   v_platform_org_id UUID := NULL;
+  v_limit INT;
 BEGIN
   SELECT *
     INTO v_ctx
@@ -70,9 +71,39 @@ BEGIN
     v_payload := jsonb_strip_nulls(v_payload || jsonb_build_object('organization_id', v_ctx.organization_id));
   END IF;
 
+  IF NULLIF(v_payload->>'branch_id', '') IS NOT NULL THEN
+    RETURN QUERY SELECT * FROM public.route_plan_delivery_wave_candidates_v1(v_payload);
+    RETURN;
+  END IF;
+
+  BEGIN
+    v_limit := NULLIF(v_payload #>> '{inputs,wave_selection,limit}', '')::int;
+  EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN
+    v_limit := NULL;
+  END;
+
   RETURN QUERY
-  SELECT *
-  FROM public.route_plan_delivery_wave_candidates_v1(v_payload);
+  WITH ranked AS (
+    SELECT candidate.*,
+      row_number() OVER (
+        ORDER BY candidate.priority_score DESC NULLS LAST, candidate.promised_window_start_at ASC NULLS LAST,
+          candidate.promised_delivery_date, shipment.created_at, candidate.shipment_id
+      )::int AS all_branch_sequence
+    FROM public.branches branch
+    CROSS JOIN LATERAL public.route_plan_delivery_wave_candidates_v1(
+      v_payload || jsonb_build_object('branch_id', branch.id)
+    ) candidate
+    JOIN public.shipments shipment ON shipment.id = candidate.shipment_id
+      AND shipment.organization_id = branch.organization_id
+    WHERE branch.organization_id = (v_payload->>'organization_id')::uuid
+  )
+  SELECT r.all_branch_sequence, r.shipment_id, r.client_id, r.zone_id, r.branch_id, r.service_level,
+    r.promised_delivery_date, r.promised_window_start_at, r.promised_window_end_at,
+    r.priority_score, r.tracking_number,
+    jsonb_set(r.stop_payload, '{sequence_order}', to_jsonb(r.all_branch_sequence))
+  FROM ranked r
+  WHERE v_limit IS NULL OR v_limit < 1 OR r.all_branch_sequence <= v_limit
+  ORDER BY r.all_branch_sequence;
 END;
 $function$;
 

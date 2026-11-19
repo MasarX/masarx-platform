@@ -40,16 +40,16 @@ SELECT has_function(
   'api',
   'resolve_settings_row_from_policy_context_v1',
   ARRAY['text', 'jsonb'],
-  'api.resolve_settings_row_from_policy_context_v1 exists for Console V2 browser clients'
+  'service policy resolver wrapper exists'
 );
 
 SELECT ok(
-  has_function_privilege(
+  NOT has_function_privilege(
     'authenticated',
     'api.resolve_settings_row_from_policy_context_v1(text,jsonb)',
     'EXECUTE'
   ),
-  'authenticated can execute api.resolve_settings_row_from_policy_context_v1'
+  'authenticated cannot execute the generic policy resolver'
 );
 
 SELECT ok(
@@ -78,25 +78,15 @@ SELECT ok(
   'ui_read_registry contains the Console V2 live resource repair keys'
 );
 
-SELECT set_config('request.jwt.claim.sub', '61edda8b-7164-4d1a-a803-e4ab0f5e9001', true);
-SELECT set_config(
-  'request.jwt.claims',
-  json_build_object(
-    'sub', '61edda8b-7164-4d1a-a803-e4ab0f5e9001',
-    'role', 'authenticated',
-    'email', 'console-v2-live-registry@example.test'
-  )::text,
-  true
-);
-SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', '', true);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+SET LOCAL ROLE service_role;
 
 DO $probe$
 DECLARE
   v_route_plan_settings JSONB;
   v_driver_settings JSONB;
   v_bank_recon_settings JSONB;
-  v_resource TEXT;
-  v_list JSONB;
 BEGIN
   SELECT value
     INTO v_route_plan_settings
@@ -145,6 +135,27 @@ BEGIN
     RAISE EXCEPTION 'bank_recon_policy.match.require_unique was not resolved through api wrapper';
   END IF;
 
+END;
+$probe$;
+
+RESET ROLE;
+SELECT set_config('request.jwt.claim.sub', '61edda8b-7164-4d1a-a803-e4ab0f5e9001', true);
+SELECT set_config(
+  'request.jwt.claims',
+  json_build_object(
+    'sub', '61edda8b-7164-4d1a-a803-e4ab0f5e9001',
+    'role', 'authenticated',
+    'email', 'console-v2-live-registry@example.test'
+  )::text,
+  true
+);
+SET LOCAL ROLE authenticated;
+
+DO $probe$
+DECLARE
+  v_resource TEXT;
+  v_list JSONB;
+BEGIN
   FOREACH v_resource IN ARRAY ARRAY[
     'driver_directory',
     'route_plan_directory',
@@ -169,7 +180,7 @@ $probe$;
 
 RESET ROLE;
 
-SELECT pass('authenticated Console V2 settings and resource reads complete without unknown-resource or relation errors');
+SELECT pass('service policy reads and authenticated Console V2 resource reads complete without unknown-resource or relation errors');
 
 SELECT * FROM finish();
 

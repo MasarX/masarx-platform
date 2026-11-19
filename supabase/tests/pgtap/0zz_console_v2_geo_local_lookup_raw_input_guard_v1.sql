@@ -3,7 +3,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(3);
-SET search_path TO pg_temp, public, extensions, pgtap;
 
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('0cc20000-0000-0000-0000-000000000001', 'Console V2 Geo Raw Guard Org', 'console-v2-geo-raw-guard-org')

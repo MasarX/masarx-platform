@@ -382,6 +382,21 @@ BEGIN
     v_resources := '[]'::jsonb;
     FOR v_resource IN SELECT value FROM jsonb_array_elements(v_row.value->'resources') LOOP
       v_key := v_resource->>'key';
+      IF v_key = 'provider_auth_configs'
+         AND v_resource->>'relation' = 'public.provider_auth_configs_visible_v1'
+         AND v_resource->>'capability_read' = 'integrations.read' THEN
+        v_resource := (v_resource - ARRAY['capability_write', 'scope_columns', 'columns'])
+          || jsonb_build_object(
+            'label', 'Provider auth',
+            'capability_read', 'provider_auth.read',
+            'select', jsonb_build_array('id', 'provider_id', 'auth_type', 'expires_at', 'created_at', 'updated_at'),
+            'filters', jsonb_build_array(
+              jsonb_build_object('key', 'provider_id', 'column', 'provider_id', 'op', 'eq'),
+              jsonb_build_object('key', 'auth_type', 'column', 'auth_type', 'op', 'eq')
+            ),
+            'default_sort', jsonb_build_object('column', 'updated_at', 'direction', 'desc')
+          );
+      END IF;
       IF v_key = 'operation_handlers'
          AND v_resource->>'relation' = 'public.v_operation_handler_directory'
          AND v_resource->>'write_relation' = 'public.operation_handlers'
