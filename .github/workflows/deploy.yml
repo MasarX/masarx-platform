@@ -1,15 +1,15 @@
-name: Deploy preview and dev
+name: Deploy dev
 
 'on':
   push:
-    branches: [preview, dev]
+    branches: [dev, main]
   workflow_dispatch:
     inputs:
       environment:
         description: Deployment environment
         type: choice
         required: true
-        options: [preview, dev]
+        options: [dev]
 
 permissions:
   contents: read
@@ -19,7 +19,7 @@ defaults:
     shell: bash
 
 env:
-  DEPLOY_ENV: ${{ inputs.environment || github.ref_name }}
+  DEPLOY_ENV: ${{ inputs.environment || 'dev' }}
   CI: 'true'
   NPM_CONFIG_IGNORE_SCRIPTS: 'true'
   NEXT_TELEMETRY_DISABLED: '1'
@@ -28,9 +28,9 @@ jobs:
   database:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: ${{ inputs.environment || github.ref_name }}
+    environment: dev
     concurrency:
-      group: deploy-${{ inputs.environment || github.ref_name }}-database
+      group: deploy-dev-database
       cancel-in-progress: false
     outputs:
       url: ${{ steps.deploy.outputs.url }}
@@ -42,8 +42,10 @@ jobs:
         env:
           CONFIGURED: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' && secrets.SUPABASE_DB_PASSWORD != '' && secrets.SUPABASE_JWT_SECRET != '' && vars.SUPABASE_PROJECT_REF != '' }}
         run: |
-          case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
-          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
+          case "$DEPLOY_ENV:$GITHUB_REF" in
+            dev:refs/heads/dev|dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+          esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::database skipped: not configured'
@@ -125,9 +127,9 @@ jobs:
     if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    environment: ${{ inputs.environment || github.ref_name }}
+    environment: dev
     concurrency:
-      group: deploy-${{ inputs.environment || github.ref_name }}-console
+      group: deploy-dev-console
       cancel-in-progress: false
     outputs:
       url: ${{ steps.deploy.outputs.url }}
@@ -138,8 +140,10 @@ jobs:
         env:
           CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_PROJECT_ID_CONSOLE != '' && vars.NEXT_PUBLIC_SUPABASE_URL != '' && vars.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' }}
         run: |
-          case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
-          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
+          case "$DEPLOY_ENV:$GITHUB_REF" in
+            dev:refs/heads/dev|dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+          esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::console skipped: not configured'
@@ -208,9 +212,9 @@ jobs:
     if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    environment: ${{ inputs.environment || github.ref_name }}
+    environment: dev
     concurrency:
-      group: deploy-${{ inputs.environment || github.ref_name }}-portal
+      group: deploy-dev-portal
       cancel-in-progress: false
     outputs:
       url: ${{ steps.deploy.outputs.url }}
@@ -221,8 +225,10 @@ jobs:
         env:
           CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_PROJECT_ID_PORTAL != '' && vars.NEXT_PUBLIC_SUPABASE_URL != '' && vars.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' }}
         run: |
-          case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
-          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
+          case "$DEPLOY_ENV:$GITHUB_REF" in
+            dev:refs/heads/dev|dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+          esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::portal skipped: not configured'
@@ -291,9 +297,9 @@ jobs:
     if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: ${{ inputs.environment || github.ref_name }}
+    environment: dev
     concurrency:
-      group: deploy-${{ inputs.environment || github.ref_name }}-landing
+      group: deploy-dev-landing
       cancel-in-progress: false
     outputs:
       url: ${{ steps.deploy.outputs.url }}
@@ -304,8 +310,10 @@ jobs:
         env:
           CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_PAGES_PROJECT_LANDING != '' }}
         run: |
-          case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
-          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
+          case "$DEPLOY_ENV:$GITHUB_REF" in
+            dev:refs/heads/dev|dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+          esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::landing skipped: not configured'
@@ -358,9 +366,9 @@ jobs:
     if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: ${{ inputs.environment || github.ref_name }}
+    environment: dev
     concurrency:
-      group: deploy-${{ inputs.environment || github.ref_name }}-ingress
+      group: deploy-dev-ingress
       cancel-in-progress: false
     outputs:
       url: ${{ steps.deploy.outputs.url }}
@@ -371,8 +379,10 @@ jobs:
         env:
           CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.SUPABASE_PROJECT_REF != '' && vars.CORS_ALLOW_ORIGIN != '' }}
         run: |
-          case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
-          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
+          case "$DEPLOY_ENV:$GITHUB_REF" in
+            dev:refs/heads/dev|dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+          esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
             echo '::notice::ingress skipped: not configured'
@@ -437,8 +447,10 @@ jobs:
     steps:
       - name: Guard deployment ref
         run: |
-          case "$DEPLOY_ENV" in preview|dev) ;; *) exit 1 ;; esac
-          [[ "$GITHUB_REF" == "refs/heads/$DEPLOY_ENV" ]] || { echo '::error::Deployment ref does not match environment'; exit 1; }
+          case "$DEPLOY_ENV:$GITHUB_REF" in
+            dev:refs/heads/dev|dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+          esac
       - name: Report deployment URLs and outcomes
         env:
           RESULTS: ${{ toJSON(needs) }}

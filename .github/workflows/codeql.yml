@@ -2,9 +2,12 @@ name: CodeQL
 
 'on':
   pull_request:
-    branches: [preview, dev, main]
+    branches: [dev, main]
   push:
-    branches: [preview, dev, main]
+    branches: [dev, main]
+  merge_group:
+    branches: [dev, main]
+    types: [checks_requested]
   schedule:
     - cron: '30 4 * * 1'
 

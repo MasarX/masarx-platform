@@ -1,2 +1,0 @@
-# Closed. To authorize a protected-only PR, set one exact line:
-# allow <same-repository-head-branch> <head-SHA-40-hex> <expiry-YYYY-MM-DD>
