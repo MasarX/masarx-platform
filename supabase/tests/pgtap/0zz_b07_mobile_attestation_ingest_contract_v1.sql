@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(27);
+SELECT plan(28);
 
 CREATE OR REPLACE FUNCTION pg_temp.upsert_setting_cache_v1(
   p_category TEXT,
@@ -162,6 +162,7 @@ DECLARE
   v_sender UUID := gen_random_uuid();
   v_driver UUID := gen_random_uuid();
   v_client_user UUID := gen_random_uuid();
+  v_client_scan JSONB;
 
   v_device RECORD;
   v_challenge RECORD;
@@ -264,22 +265,23 @@ BEGIN
     END IF;
   END;
 
-  BEGIN
-    PERFORM api.record_scan_event_v1(
-      jsonb_build_object(
-        'idempotency_key', 'b07-client-scope-scan-' || left(v_client_user::text, 8),
-        'scan_type', 'pickup',
-        'barcode', 'B07-CLIENT-SCOPE'
-      )
-    );
-    RETURN NEXT fail('client-scoped user cannot use protected scan ingest');
-  EXCEPTION WHEN SQLSTATE '42501' THEN
-    IF position('requires tenant scope' in SQLERRM) > 0 THEN
-      RETURN NEXT pass('client-scoped user cannot use protected scan ingest');
-    ELSE
-      RETURN NEXT fail('expected tenant-scope scan block, got: ' || SQLERRM);
-    END IF;
-  END;
+  v_client_scan := jsonb_build_object(
+    'idempotency_key', 'b07-client-scope-scan-' || left(v_client_user::text, 8),
+    'scan_type', 'pickup',
+    'barcode', 'B07-CLIENT-SCOPE'
+  );
+  RETURN NEXT throws_ok(
+    format('SELECT * FROM api.record_scan_event_v1(%L::jsonb)', v_client_scan),
+    '42501',
+    'api.record_scan_event_v1 requires tasks.complete permission',
+    'scan API rejects a client-scoped user without tasks.complete'
+  );
+  RETURN NEXT throws_ok(
+    format('SELECT * FROM public.record_scan_event_v1(%L::jsonb)', v_client_scan),
+    '42501',
+    'record_scan_event_v1 requires tenant scope',
+    'canonical scan intake rejects a client-scoped user'
+  );
 
   EXECUTE 'SET LOCAL ROLE postgres';
 

@@ -188,7 +188,8 @@ SELECT throws_ok(
   'invalid tracking tokens cannot create an additional box'
 );
 
--- The surrounding transaction restores the schema after exercising the function's NULL guard.
+-- Flush deferred row checks before changing the constraint inside this rollback-only test.
+SET CONSTRAINTS ALL IMMEDIATE;
 ALTER TABLE public.shipments ALTER COLUMN tracking_number DROP NOT NULL;
 
 UPDATE public.shipments
