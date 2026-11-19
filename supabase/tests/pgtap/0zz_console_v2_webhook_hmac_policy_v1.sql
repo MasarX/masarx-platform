@@ -589,11 +589,11 @@ SELECT ok(
        AND r.failure_code = 'hmac_signature_mismatch'
        AND r.source_identifier = 'console-v2-webhook-hmac-source'
        AND r.provider_auth_config_id = 'c8f1d8f3-1e7f-4fb5-9f75-79f369473b42'::uuid
-       AND r.request_headers->>'x-signature' = 'REDACTED'
+       AND NOT (r.request_headers ? 'x-signature')
        AND r.request_headers::text NOT LIKE '%not-a-valid-signature%'
        AND r.metadata#>>'{auth_surface}' = 'hmac_signature'
   ),
-  'HMAC signature mismatch is visible in webhook auth rejections with source lineage and redacted signature headers'
+  'HMAC signature mismatch is visible in webhook auth rejections with source lineage and no stored signature header'
 );
 
 SELECT is(
@@ -641,12 +641,12 @@ SELECT ok(
        AND r.failure_code = 'hmac_auth_config_missing'
        AND r.source_identifier = 'console-v2-webhook-hmac-source'
        AND r.provider_auth_config_id IS NULL
-       AND r.request_headers->>'x-signature' = 'REDACTED'
+       AND NOT (r.request_headers ? 'x-signature')
        AND r.request_headers::text NOT LIKE '%missing-auth-config-signature%'
        AND r.metadata#>>'{provided_signature_present}' = 'true'
        AND r.metadata#>>'{auth_surface}' = 'hmac_signature'
   ),
-  'missing HMAC auth config is visible in webhook auth rejections with redacted signature headers'
+  'missing HMAC auth config is visible in webhook auth rejections with no stored signature header'
 );
 
 SELECT is(
@@ -662,13 +662,13 @@ SELECT ok(
      WHERE r.request_id = 'console-v2-hmac-expired-1'
        AND r.service = 'webhook_receiver'
        AND r.credential_kind = 'hmac_signature'
-       AND r.failure_code = 'hmac_credential_unavailable'
+       AND r.failure_code = 'hmac_credential_expired'
        AND r.source_identifier = 'console-v2-webhook-hmac-source'
        AND r.provider_auth_config_id = 'c8f1d8f3-1e7f-4fb5-9f75-79f369473b42'::uuid
-       AND r.request_headers->>'x-signature' = 'REDACTED'
+       AND NOT (r.request_headers ? 'x-signature')
        AND r.request_headers::text NOT LIKE '%expired-credential-signature%'
   ),
-  'expired HMAC credential failure is visible in webhook auth rejections with redacted signature headers'
+  'expired HMAC credential failure is visible in webhook auth rejections with no stored signature header'
 );
 
 SELECT is(
