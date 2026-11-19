@@ -18,4 +18,7 @@ ALTER FUNCTION public.ui_bind_provider_account_credential_v1(jsonb)
 ALTER FUNCTION public.ui_upsert_provider_auth_config_v1(jsonb)
   SET search_path TO public, extensions, pg_temp;
 
+ALTER FUNCTION workflow_handlers.execute_geocode_cache_v1(public.workflow_run_steps, public.workflow_runs, jsonb)
+  SET search_path TO public, workflow_handlers, extensions, pg_temp;
+
 COMMIT;

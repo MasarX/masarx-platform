@@ -244,9 +244,10 @@ SELECT ok(
 );
 
 SELECT is(
-  (SELECT to_jsonb(resp)->'context_patch'->'geocoding'->>'match_plugin' FROM tmp_console_v2_geo_raw_guard),
-  'plain_raw_input_guard',
-  'plain-text raw_input marks the normalized-column guard path'
+  (SELECT to_jsonb(resp) #>> '{context_patch,geocoding,selected_geocode,metadata,city_id}'
+     FROM tmp_console_v2_geo_raw_guard),
+  '0cc20000-0000-0000-0000-000000000009',
+  'plain-text raw_input matches the canonical city from the stored city column'
 );
 
 SELECT * FROM finish();

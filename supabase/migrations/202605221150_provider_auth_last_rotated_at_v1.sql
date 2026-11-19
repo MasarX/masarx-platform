@@ -246,9 +246,35 @@ REVOKE ALL ON FUNCTION public.ui_upsert_provider_auth_config_v1(jsonb) FROM PUBL
 REVOKE ALL ON FUNCTION public.ui_upsert_provider_auth_config_v1(jsonb) FROM anon;
 GRANT EXECUTE ON FUNCTION public.ui_upsert_provider_auth_config_v1(jsonb) TO authenticated, service_role;
 
-CREATE OR REPLACE VIEW public.v_integration_credential_directory
-  WITH (security_invoker = true)
-  AS
+-- The invoker view consumes only the scoped projection across the settings and credential ACLs.
+CREATE FUNCTION public.integration_credential_directory_rows_v1()
+RETURNS TABLE (
+  id uuid,
+  provider_id uuid,
+  auth_type text,
+  auth_type_label text,
+  expires_at timestamptz,
+  created_at timestamptz,
+  last_rotated_at timestamptz,
+  status text,
+  days_until_expiry integer,
+  provider_label text,
+  provider_kind text,
+  provider_vendor text,
+  is_expiring boolean,
+  is_expired boolean,
+  is_active boolean,
+  mask_state boolean,
+  organization_id uuid,
+  provider_account_category text,
+  company_id text,
+  bound_scope_type text,
+  bound_scope_id uuid,
+  bound_settings_version_id uuid
+)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $directory$
 WITH credential_base AS (
   SELECT
     pac.id,
@@ -422,31 +448,36 @@ credential_rows AS (
     AND sv.scope_id IS NOT NULL
     AND NULLIF(sv.value->>'auth_config_id', '') IS NOT NULL
 )
-SELECT DISTINCT ON (id, organization_id)
-  id,
-  provider_id,
-  auth_type,
-  auth_type_label,
-  expires_at,
-  created_at,
-  last_rotated_at,
-  status,
-  days_until_expiry,
-  provider_label,
-  provider_kind,
-  provider_vendor,
-  is_expiring,
-  is_expired,
-  is_active,
-  mask_state,
-  organization_id,
-  provider_account_category,
-  company_id,
-  bound_scope_type,
-  bound_scope_id,
-  bound_settings_version_id
-FROM credential_rows
-ORDER BY id, organization_id, binding_rank DESC;
+SELECT DISTINCT ON (cr.id, cr.organization_id)
+  cr.id, cr.provider_id, cr.auth_type, cr.auth_type_label, cr.expires_at,
+  cr.created_at, cr.last_rotated_at, cr.status, cr.days_until_expiry,
+  cr.provider_label, cr.provider_kind, cr.provider_vendor, cr.is_expiring,
+  cr.is_expired, cr.is_active, cr.mask_state, cr.organization_id,
+  cr.provider_account_category, cr.company_id, cr.bound_scope_type,
+  cr.bound_scope_id, cr.bound_settings_version_id
+FROM credential_rows cr
+WHERE (SELECT public.request_role_is_service_v1())
+   OR (session_user = 'postgres' AND current_setting('role', true) = 'postgres' AND auth.uid() IS NULL)
+   OR (
+     (SELECT public.user_has_capability_v1('integrations.read'))
+     AND (
+       (SELECT public.is_platform_user())
+       OR (
+         (SELECT public.current_user_scope_type()) = 'tenant'
+         AND cr.organization_id = (SELECT public.current_user_org_id())
+         AND cr.organization_id = (SELECT public.current_user_scope_id())
+       )
+     )
+   )
+ORDER BY cr.id, cr.organization_id, cr.binding_rank DESC;
+$directory$;
+
+REVOKE ALL ON FUNCTION public.integration_credential_directory_rows_v1() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.integration_credential_directory_rows_v1() TO authenticated, service_role;
+
+CREATE OR REPLACE VIEW public.v_integration_credential_directory
+WITH (security_invoker = true) AS
+SELECT * FROM public.integration_credential_directory_rows_v1();
 
 COMMENT ON COLUMN public.provider_auth_configs.last_rotated_at IS
   'Backend-maintained timestamp for the latest non-revocation credential-material replacement. Used by the redacted Console V2 credential directory.';

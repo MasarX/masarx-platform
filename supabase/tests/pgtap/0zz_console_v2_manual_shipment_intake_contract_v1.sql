@@ -271,7 +271,6 @@ DECLARE
   v_destination_address_id uuid;
   v_service_level uuid;
   v_governed_service_level uuid;
-  v_service_offering uuid;
   v_governed_service_offering uuid;
   v_service_level_key text := 'a2z_standard_service_level_20260615';
   v_branch uuid;
@@ -347,8 +346,7 @@ BEGIN
   RETURNING id INTO v_governed_service_level;
 
   INSERT INTO public.service_offerings (service_level_id, branch_id, zone_id, effective_from, is_active, priority)
-  VALUES (v_service_level, v_branch, v_zone, '2026-01-01T00:00:00Z', TRUE, 10)
-  RETURNING id INTO v_service_offering;
+  VALUES (v_service_level, v_branch, v_zone, '2026-01-01T00:00:00Z', TRUE, 10);
 
   INSERT INTO public.service_offerings (service_level_id, branch_id, zone_id, effective_from, is_active, priority)
   VALUES (v_governed_service_level, v_branch, v_zone, '2026-01-01T00:00:00Z', TRUE, 20)
@@ -366,7 +364,7 @@ BEGIN
   VALUES (
     v_branch,
     v_zone,
-    v_service_level,
+    v_governed_service_level,
     '2026-01-01T00:00:00Z',
     jsonb_build_object('max_stops', 50),
     TRUE,
@@ -489,21 +487,6 @@ BEGIN
   v_recipient_id := NULLIF(v_result->>'recipient_id', '')::uuid;
   v_label_job_id := NULLIF(v_result->>'label_job_id', '')::uuid;
 
-  UPDATE public.shipments
-     SET service_level = 'standard',
-         metadata = jsonb_strip_nulls(
-           COALESCE(metadata, '{}'::jsonb)
-           || jsonb_build_object(
-             'service_offering_id', v_service_offering,
-             'service_level_id', v_service_level,
-             'service_level_key', v_service_level_key,
-             'service_offering_branch_id', v_branch,
-             'service_offering_zone_id', v_zone
-           )
-         )
-   WHERE id = v_shipment_id
-     AND client_id = v_client;
-
   SELECT destination_address_id
     INTO v_destination_address_id
     FROM public.shipments
@@ -546,10 +529,14 @@ BEGIN
      WHERE id = v_shipment_id
   ), v_zone::text, 'manual intake actual create persists service-offering zone lineage');
   RETURN NEXT is((
-    SELECT metadata->>'service_level_key'
+    SELECT metadata
       FROM public.shipments
-     WHERE id = v_shipment_id
-  ), 'standard', 'manual intake actual create persists governed service-level lineage written by create RPC');
+     WHERE id = v_shipment_id AND client_id = v_client
+  ) @> jsonb_build_object(
+    'service_offering_id', v_governed_service_offering,
+    'service_level_id', v_governed_service_level,
+    'service_level_key', 'standard'
+  ), TRUE, 'manual intake actual create persists governed service-level lineage written by create RPC');
   RETURN NEXT is((
     SELECT branch_id::text
       FROM public.shipments
@@ -578,23 +565,6 @@ BEGIN
       ) slots
   ), 'manual intake actual create exposes delivery slots without metadata-only fallback');
 
-  -- Route-candidate fixture: A2Z keeps the shipment row on governed tier
-  -- "standard" while tenant Product/Catalog lineage remains in metadata.
-  UPDATE public.shipments
-     SET service_level = 'standard',
-         metadata = jsonb_strip_nulls(
-           COALESCE(metadata, '{}'::jsonb)
-           || jsonb_build_object(
-             'service_offering_id', v_service_offering,
-             'service_level_id', v_service_level,
-             'service_level_key', v_service_level_key,
-             'service_offering_branch_id', v_branch,
-             'service_offering_zone_id', v_zone
-           )
-         )
-   WHERE id = v_shipment_id
-     AND client_id = v_client;
-
   SELECT COUNT(*)::int
     INTO v_candidate_count
     FROM public.route_plan_delivery_wave_candidates_v1(
@@ -604,9 +574,11 @@ BEGIN
         'planned_date', '2026-05-07'
       )
     ) c
-   WHERE c.shipment_id = v_shipment_id;
+   WHERE c.shipment_id = v_shipment_id
+     AND c.service_level = 'standard'
+     AND c.stop_payload#>>'{metadata,service_offering_id}' = v_governed_service_offering::text;
 
-  RETURN NEXT is(v_candidate_count, 1, 'route-candidate fixture resolves tenant service-level lineage with governed shipment tier');
+  RETURN NEXT is(v_candidate_count, 1, 'the created shipment enters the route wave with its governed offering and tier');
   RETURN NEXT ok(v_destination_address_id IS NOT NULL AND EXISTS (
     SELECT 1
       FROM public.addresses

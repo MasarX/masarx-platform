@@ -98,7 +98,8 @@ BEGIN
   VALUES (
     v_mapping, 'webhook_inbound',
     'w27-mc-main',
-    jsonb_build_object('target', 'shipments.create')
+    -- A shipment-create mapping receives a default label during normalization.
+    jsonb_build_object('target', 'events.record')
   )
   ON CONFLICT (id) DO NOTHING;
 

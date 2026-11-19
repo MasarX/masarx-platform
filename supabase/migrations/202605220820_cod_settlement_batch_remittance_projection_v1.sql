@@ -344,20 +344,25 @@ REVOKE ALL ON FUNCTION public.compute_cod_payment_collection_summary_v1(UUID, UU
 REVOKE ALL ON FUNCTION public.compute_cod_payment_collection_summary_v1(UUID, UUID, TEXT, UUID, TIMESTAMPTZ, TIMESTAMPTZ) FROM anon;
 GRANT EXECUTE ON FUNCTION public.compute_cod_payment_collection_summary_v1(UUID, UUID, TEXT, UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO service_role;
 
-CREATE OR REPLACE VIEW public.v_settlement_batch_summary
-WITH (security_invoker = true) AS
-WITH global_threshold AS (
-  SELECT COALESCE(
-    (s.cached_value->'locking'->>'max_variance_amount')::NUMERIC,
-    0
-  ) AS max_variance_amount
+-- The invoker view only needs the configured threshold from the global policy.
+CREATE FUNCTION public.settlement_summary_variance_threshold_v1()
+RETURNS numeric
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $threshold$
+  SELECT COALESCE((s.cached_value#>>'{locking,max_variance_amount}')::numeric, 0)
   FROM public.settings s
   WHERE s.category = 'settlement_policy'
     AND s.scope_type = 'global'
-    AND s.scope_id IS NULL
-  LIMIT 1
-),
-batch_finance AS (
+    AND s.scope_id IS NULL;
+$threshold$;
+
+REVOKE ALL ON FUNCTION public.settlement_summary_variance_threshold_v1() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.settlement_summary_variance_threshold_v1() TO authenticated, service_role;
+
+CREATE OR REPLACE VIEW public.v_settlement_batch_summary
+WITH (security_invoker = true) AS
+WITH batch_finance AS (
   SELECT
     sbfe.settlement_batch_id,
     SUM(CASE WHEN fe.direction = 'in'  THEN fe.amount ELSE 0 END) AS sum_in,
@@ -433,7 +438,7 @@ SELECT
         bf.sum_in,
         0
       )
-    ) > COALESCE((SELECT max_variance_amount FROM global_threshold), 0)
+    ) > COALESCE((SELECT public.settlement_summary_variance_threshold_v1()), 0)
     THEN TRUE
     ELSE FALSE
   END AS variance_flag,

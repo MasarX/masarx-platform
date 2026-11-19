@@ -74,6 +74,7 @@ DECLARE
   v_client UUID := '00000000-0000-0000-0000-00000024c001';
   v_branch UUID := '00000000-0000-0000-0000-00000024c002';
   v_driver UUID := '00000000-0000-0000-0000-00000024c003';
+  v_operator UUID := '00000000-0000-0000-0000-00000024c009';
   v_vehicle UUID := '00000000-0000-0000-0000-00000024c004';
   v_run UUID := '00000000-0000-0000-0000-00000024c005';
   v_stop UUID := '00000000-0000-0000-0000-00000024c006';
@@ -108,12 +109,11 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.users (
-    id, organization_id, email, full_name, user_type, status
+    id, organization_id, email, full_name, user_type, status, access_scope_type
   )
-  VALUES (
-    v_driver, v_org, 'w24-driver@example.invalid',
-    'W24 Test Driver', 'driver', 'active'
-  )
+  VALUES
+    (v_driver, v_org, 'w24-driver@example.invalid', 'W24 Test Driver', 'driver', 'active', 'tenant'),
+    (v_operator, v_org, 'w24-operator@example.invalid', 'W24 Route Operator', 'ops_admin', 'active', 'tenant')
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.vehicles (
@@ -168,6 +168,11 @@ BEGIN
     v_driver, v_vehicle
   )
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_operator, 'role', 'authenticated')::text, TRUE);
+  PERFORM set_config('request.jwt.claim.sub', v_operator::text, TRUE);
+  EXECUTE 'SET LOCAL ROLE authenticated';
 
   SELECT
     branch_label, driver_label, vehicle_label,
@@ -230,11 +235,11 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.users (
-    id, organization_id, email, full_name, user_type, status
+    id, organization_id, email, full_name, user_type, status, access_scope_type
   )
   VALUES (
     v_responder, v_org, 'w24-responder@example.invalid',
-    'W24 Assignment Responder', 'dispatcher', 'active'
+    'W24 Assignment Responder', 'ops_admin', 'active', 'tenant'
   )
   ON CONFLICT (id) DO NOTHING;
 
@@ -283,6 +288,11 @@ BEGIN
   )
   ON CONFLICT (id) DO NOTHING;
 
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_responder, 'role', 'authenticated')::text, TRUE);
+  PERFORM set_config('request.jwt.claim.sub', v_responder::text, TRUE);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+
   SELECT partner_name, is_partner_run, assignment_mode
     INTO v_partner_name, v_is_partner, v_assign_mode
     FROM public.v_route_run_directory
@@ -316,5 +326,6 @@ END;
 $$;
 SELECT * FROM pg_temp.test_route_run_directory_rollup();
 
+RESET ROLE;
 SELECT * FROM finish();
 ROLLBACK;

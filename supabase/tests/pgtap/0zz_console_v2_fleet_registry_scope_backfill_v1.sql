@@ -414,16 +414,28 @@ SET issuer = EXCLUDED.issuer,
     status = EXCLUDED.status,
     metadata = EXCLUDED.metadata;
 
--- The invoker projections join users through the receiving users.read policy.
-INSERT INTO public.rbac_role_permissions (organization_id, role_id, permission_id)
-SELECT r.organization_id, r.id, lv.id
-  FROM public.rbac_roles r
-  CROSS JOIN public.lookup_values lv
-  JOIN public.lookup_definitions ld ON ld.id = lv.lookup_definition_id
- WHERE r.organization_id = 'ac65f701-2b52-4efd-9b9f-f9e8c5f14301'
-   AND r.key = 'fleet_manager'
-   AND ld.category = 'rbac_permission' AND lv.value = 'users.read' AND lv.status = 'active'
-ON CONFLICT DO NOTHING;
+-- The users RLS predicate resolves capabilities through access_control_policy.
+DO $fleet_fixture$
+DECLARE
+  v_org CONSTANT uuid := 'ac65f701-2b52-4efd-9b9f-f9e8c5f14301';
+  v_actor CONSTANT uuid := '253d3fab-d32d-4669-8ca1-27978cb95f04';
+  v_policy jsonb;
+  v_schema integer;
+BEGIN
+  SELECT policy INTO STRICT v_policy
+    FROM public.resolve_access_control_policy_v1('tenant', v_org, FALSE);
+  SELECT version INTO v_schema FROM public.schema_registry
+   WHERE category = 'access_control_policy' AND is_active ORDER BY version DESC LIMIT 1;
+  v_policy := jsonb_set(v_policy, '{roles}', v_policy->'roles' || jsonb_build_array(
+    jsonb_build_object('key', 'pgtap_fleet_user_read', 'capability_keys', jsonb_build_array('users.read'))
+  ));
+  v_policy := jsonb_set(v_policy, '{assignments,user_id}',
+    COALESCE(v_policy#>'{assignments,user_id}', '{}'::jsonb)
+      || jsonb_build_object(v_actor, jsonb_build_array('pgtap_fleet_user_read')));
+  PERFORM public.upsert_settings_value_v1('access_control_policy', 'tenant', v_org,
+    v_policy, v_schema, 'Fixture capability for fleet driver labels');
+END;
+$fleet_fixture$;
 
 SET LOCAL ROLE authenticated;
 

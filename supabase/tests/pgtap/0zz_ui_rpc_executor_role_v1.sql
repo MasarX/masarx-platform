@@ -405,8 +405,12 @@ SELECT ok(bool_and(c.relrowsecurity AND c.relowner<>'ui_rpc_executor'::regrole
     AND regexp_replace(pg_get_expr(p.polqual,p.polrelid),'\mpublic\.','','g')='(is_platform_user() OR ui_rpc_request_is_service_v1())'
     AND pg_get_expr(p.polqual,p.polrelid)=pg_get_expr(p.polwithcheck,p.polrelid))
   AND NOT EXISTS(SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid AND p.polcmd IN ('*','r')
-    AND (0=ANY(p.polroles) OR 'ui_rpc_executor'::regrole::oid=ANY(p.polroles)) AND p.polname<>'ui_rpc_executor_trusted')),
-  'active observability barriers allow executor SELECT only through the trusted platform/service policy')
+    AND (0=ANY(p.polroles) OR 'ui_rpc_executor'::regrole::oid=ANY(p.polroles))
+    AND p.polname<>'ui_rpc_executor_trusted'
+    AND NOT (c.oid='public.ops_alerts'::regclass
+      AND p.polname='ops_alerts_executor_tenant_select' AND p.polcmd='r'
+      AND p.polroles=ARRAY['ui_rpc_executor'::regrole::oid] AND p.polwithcheck IS NULL))),
+  'observability SELECT uses trusted platform/service policy and the executor-only tenant alert policy')
 FROM barriers b JOIN pg_class c ON c.oid=b.oid;
 
 DO $clear_claims$ BEGIN
@@ -505,7 +509,9 @@ BEGIN
         v_api||' '||v_key||' metrics exclude foreign count and sum');
       IF v_key='qa_executor_table' THEN
         RETURN NEXT throws_ok(format('SELECT %I.ui_update_resource_v1(%L,%L,''{"name":"leaked"}'')',v_api,v_key,v_foreign),
-          'P0001',format('ui_update_resource_v1 could not find resource %s for id %s',v_key,v_foreign),v_api||' update denies foreign row');
+          '42501','ui_update_resource_v1 resource not available',v_api||' update denies foreign row');
+        RETURN NEXT throws_ok(format('SELECT %I.ui_update_resource_v1(%L,%L,''{"name":"absent"}'')',v_api,v_key,gen_random_uuid()),
+          '42501','ui_update_resource_v1 resource not available',v_api||' update denies absent row with the same response');
         RETURN NEXT throws_ok(format('SELECT %I.ui_delete_resource_v1(%L,%L)',v_api,v_key,v_foreign),
           'P0001',format('ui_delete_resource_v1 could not find resource %s for id %s',v_key,v_foreign),v_api||' delete denies foreign row');
       ELSE
@@ -584,6 +590,7 @@ DECLARE
   v_api TEXT; v_id_column TEXT;
   v_workflow_context TEXT:=current_setting('app.workflow_run_id',TRUE);
   v_platform_keys TEXT[]:=ARRAY['comms_attempts','ops_alerts','provider_health_latest','circuit_breaker_dashboard'];
+  v_denied UUID:=gen_random_uuid();
   v_keys TEXT[]:=ARRAY['integration_plugins','integration_plugin_versions','provider_auth_configs','workflow_templates',
     'workflow_template_steps','workflow_runs','workflow_run_steps','marketplace_contracts','marketplace_disputes',
     'marketplace_participants','marketplace_requests','marketplace_settlement_batches','marketplace_work_packages',
@@ -594,7 +601,8 @@ BEGIN
     (v_partner,'Executor screens supplier','screens-'||v_partner,'active');
   INSERT INTO public.users(id,organization_id,email,full_name,user_type,status,access_scope_type,access_scope_id)
     VALUES(v_actor,v_org,v_actor||'@example.test','Executor screen reader','ops_admin','active','tenant',NULL),
-      (v_platform,v_org,v_platform||'@example.test','Example Person reader','super_admin','active','platform',NULL);
+      (v_platform,v_org,v_platform||'@example.test','Example Person reader','super_admin','active','platform',NULL),
+      (v_denied,v_org,v_denied||'@example.test','Executor denied reader','driver','active','tenant',NULL);
   INSERT INTO public.marketplace_participant_profiles(id,organization_id,participant_type_key,display_name,status,listing_status,compliance_state)
     VALUES(v_supplier,v_partner,'provider_tenant','Executor supplier','approved','private','approved');
   INSERT INTO public.rbac_roles(organization_id,key,name) VALUES(v_org,v_role,'Executor screen provider reader');
@@ -668,6 +676,8 @@ BEGIN
     UNION ALL SELECT 'tasks.read' UNION ALL SELECT 'provider_auth.read'
     UNION ALL SELECT 'integration_plugins.read' UNION ALL SELECT 'marketplace_participants.read'
     UNION ALL SELECT 'marketplace_participant_requests.read'
+    UNION ALL SELECT 'marketplace_disputes.read'
+    UNION ALL SELECT 'integrations.read'
   ) capabilities WHERE capability IS NOT NULL;
   SELECT policy INTO v_policy FROM public.resolve_access_control_policy_v1('tenant',v_org,FALSE);
   SELECT version INTO v_schema FROM public.schema_registry WHERE category='access_control_policy' AND is_active ORDER BY version DESC LIMIT 1;
@@ -704,6 +714,11 @@ BEGIN
       AND v_list#>>'{items,0,id}'=v_case.own_id::text,v_case.resource_key||' list preserves helper-defined tenant rows');
     RETURN NEXT is((v_metrics->>'total')::int,1,v_case.resource_key||' metrics preserve the same tenant boundary');
   END LOOP;
+  SELECT * INTO STRICT v_case FROM pg_temp.executor_screen_rows WHERE resource_key='provider_auth_configs';
+  RETURN NEXT results_eq(
+    format('SELECT id FROM public.integration_credential_directory_rows_v1() WHERE id IN (%L,%L)',v_case.own_id,v_case.foreign_id),
+    format('VALUES (%L::uuid)',v_case.own_id),
+    'credential directory helper returns only the authorized tenant metadata');
   SET LOCAL ROLE postgres;
   FOREACH v_api IN ARRAY ARRAY['public','api'] LOOP
     FOREACH v_side IN ARRAY ARRAY[v_actor,v_platform] LOOP
@@ -714,21 +729,35 @@ BEGIN
         SELECT value INTO STRICT v_resource FROM jsonb_array_elements(v_registry->'resources') WHERE value->>'key'=v_case.resource_key;
         v_id_column:=v_resource->>'id_column';
         EXECUTE format('SELECT %I.ui_get_resource_v1($1,$2)',v_api) INTO v_list USING v_case.resource_key,v_case.own_id;
-        RETURN NEXT is(v_list->>v_id_column,CASE WHEN v_side=v_platform THEN v_case.own_id::text END,
-          v_api||' '||v_case.resource_key||' platform get succeeds and tenant get stays empty');
+        RETURN NEXT is(v_list->>v_id_column,
+          CASE WHEN v_side=v_platform OR v_case.resource_key='ops_alerts' THEN v_case.own_id::text END,
+          v_api||' '||v_case.resource_key||' get respects platform and own-tenant alert visibility');
         EXECUTE format('SELECT %I.ui_get_resource_v1($1,$2)',v_api) INTO v_list USING v_case.resource_key,v_case.foreign_id;
         RETURN NEXT is(v_list->>v_id_column,CASE WHEN v_side=v_platform THEN v_case.foreign_id::text END,
           v_api||' '||v_case.resource_key||' trusted platform retains cross-organization get');
         v_filter:=jsonb_build_object(v_id_column,jsonb_build_array(v_case.own_id,v_case.foreign_id));
         EXECUTE format('SELECT %I.ui_list_resource_v1($1,$2,20,0,NULL)',v_api) INTO v_list USING v_case.resource_key,v_filter;
         EXECUTE format('SELECT %I.ui_resource_metrics_v1($1,$2,NULL)',v_api) INTO v_metrics USING v_case.resource_key,v_filter;
-        v_expected:=CASE WHEN v_side=v_platform THEN 2 ELSE 0 END;
-        RETURN NEXT is((v_list->>'total')::int,v_expected,v_api||' '||v_case.resource_key||' platform Console list has real rows; tenant has none');
+        v_expected:=CASE WHEN v_side=v_platform THEN 2 WHEN v_case.resource_key='ops_alerts' THEN 1 ELSE 0 END;
+        RETURN NEXT is((v_list->>'total')::int,v_expected,v_api||' '||v_case.resource_key||' list count respects visibility');
+        IF v_side=v_actor AND v_case.resource_key='ops_alerts' THEN
+          RETURN NEXT is(v_list#>>'{items,0,id}',v_case.own_id::text,v_api||' ops_alerts list returns the authorized own row');
+        END IF;
         RETURN NEXT is(jsonb_array_length(v_list->'items'),v_expected,v_api||' '||v_case.resource_key||' Console row payload matches visibility');
-        RETURN NEXT is((v_metrics->>'total')::int,v_expected,v_api||' '||v_case.resource_key||' metrics retain trusted-only visibility');
+        RETURN NEXT is((v_metrics->>'total')::int,v_expected,v_api||' '||v_case.resource_key||' metrics retain the approved scope boundary');
       END LOOP;
       SET LOCAL ROLE postgres;
     END LOOP;
+    PERFORM set_config('request.jwt.claim.sub',v_denied::text,TRUE);
+    PERFORM set_config('request.jwt.claims',jsonb_build_object('sub',v_denied,'role','authenticated')::text,TRUE);
+    SET LOCAL ROLE authenticated;
+    SELECT own_id INTO STRICT v_alert FROM pg_temp.executor_platform_rows WHERE resource_key='ops_alerts';
+    RETURN NEXT throws_ok(format('SELECT %I.ui_get_resource_v1(''ops_alerts'',%L::uuid)',v_api,v_alert),
+      '42501',NULL,v_api||' ops_alerts denies an own-tenant actor without alerts.read');
+    SELECT own_id INTO STRICT v_auth FROM pg_temp.executor_screen_rows WHERE resource_key='provider_auth_configs';
+    RETURN NEXT is((SELECT count(*) FROM public.integration_credential_directory_rows_v1() WHERE id=v_auth),
+      0::bigint,v_api||' credential directory helper denies own-tenant metadata without integrations.read');
+    SET LOCAL ROLE postgres;
   END LOOP;
 END;
 $screens$;

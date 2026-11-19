@@ -21,21 +21,21 @@ SELECT ok(
   EXISTS (
     SELECT 1
       FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources') AS resource
-     WHERE resource->>'key' = 'workflow_templates'
+     WHERE resource->>'key' = 'workflow_templates_console'
        AND resource->>'relation' = 'public.workflow_templates_console_v1'
   ),
-  'ui_read_registry routes workflow_templates to the consolidated projection'
+  'ui_read_registry routes workflow_templates_console to the consolidated projection'
 );
 
 SELECT ok(
   EXISTS (
     SELECT 1
       FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources') AS resource
-     WHERE resource->>'key' = 'workflow_templates'
+     WHERE resource->>'key' = 'workflow_templates_console'
        AND resource->>'capability_read' = 'workflows.read'
-       AND resource->>'capability_write' = 'workflows.write'
+       AND NOT (resource ?| ARRAY['capability_write', 'write_relation', 'import'])
   ),
-  'workflow_templates registry uses Console V2 workflow capabilities'
+  'workflow_templates_console is read-only and requires workflows.read'
 );
 
 SELECT ok(
@@ -80,7 +80,7 @@ SELECT ok(
   EXISTS (
     SELECT 1 FROM test_workflow_template_projection t
     CROSS JOIN LATERAL jsonb_array_elements(
-      public.ui_list_resource_v1('workflow_templates', jsonb_build_object('name', t.name), 100, 0, NULL)->'items'
+      public.ui_list_resource_v1('workflow_templates_console', jsonb_build_object('name', t.name), 100, 0, NULL)->'items'
     ) AS item
     WHERE item->>'id' = t.id::text AND jsonb_typeof(item->'steps') = 'array'
       AND jsonb_array_length(item->'steps') > 0
@@ -91,7 +91,7 @@ SELECT ok(
 SELECT ok(
   EXISTS (
     SELECT 1 FROM test_workflow_template_projection t
-    CROSS JOIN LATERAL public.ui_get_resource_v1('workflow_templates', t.id) AS readback(item)
+    CROSS JOIN LATERAL public.ui_get_resource_v1('workflow_templates_console', t.id) AS readback(item)
     WHERE item->>'id' = t.id::text AND item->>'template_id' = t.template_id
       AND item->>'trigger' = t.trigger
   ),

@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(5);
+SELECT plan(6);
 
 DO $$
 DECLARE
@@ -13,6 +13,7 @@ DECLARE
   v_mapping UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
   v_source_sender UUID := gen_random_uuid();
+  v_policy_version UUID;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -41,7 +42,8 @@ BEGIN
           '{}'::jsonb, 1, 'B6 WS Upsert pgTAP mapping')
   ON CONFLICT (id) DO NOTHING;
 
-  PERFORM public.upsert_settings_value_v1(
+  SELECT settings_version_id INTO STRICT v_policy_version
+  FROM public.upsert_settings_value_v1(
     'webhook_source_default_policy',
     'tenant',
     v_org,
@@ -51,11 +53,7 @@ BEGIN
   );
   UPDATE public.settings_versions
      SET effective_from = transaction_timestamp()
-   WHERE id = (
-     SELECT settings_version_id FROM public.settings
-      WHERE category = 'webhook_source_default_policy'
-        AND scope_type = 'tenant' AND scope_id = v_org
-   );
+   WHERE id = v_policy_version;
 
   PERFORM set_config('test.b6_ws_ups_org', v_org::text, true);
   PERFORM set_config('test.b6_ws_ups_ops', v_ops::text, true);
@@ -66,8 +64,28 @@ BEGIN
   EXECUTE 'RESET ROLE';
 END $$;
 
--- 1) Allowed (create path)
+SELECT is(
+  (
+    SELECT value->>'default_rate_limit_per_hour'
+      FROM public.resolve_settings_row_from_policy_context_v1(
+        'webhook_source_default_policy',
+        jsonb_build_object(
+          'organization_id', current_setting('test.b6_ws_ups_org'),
+          'sender_id', current_setting('test.b6_ws_ups_source_sender')
+        )
+      )
+     WHERE scope_type = 'tenant'
+       AND scope_id = current_setting('test.b6_ws_ups_org')::uuid
+  ),
+  '4321',
+  'the source sender context resolves the tenant default before creation'
+);
+
 SELECT set_config('request.jwt.claim.sub', current_setting('test.b6_ws_ups_ops'), true);
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+SELECT set_config('request.jwt.claims', jsonb_build_object(
+  'sub', current_setting('test.b6_ws_ups_ops'), 'role', 'authenticated'
+)::text, true);
 SET LOCAL ROLE authenticated;
 SELECT ok(
   (
@@ -80,7 +98,9 @@ SELECT ok(
       'mapping_config_id', current_setting('test.b6_ws_ups_mapping')
       )) AS result
     )
-    SELECT (result->>'ok')::bool FROM created
+    SELECT (result->>'ok')::bool
+      AND set_config('test.b6_ws_created_id', result->>'webhook_source_id', true) <> ''
+    FROM created
   ),
   'ops_admin can ui_upsert_webhook_source_v1 (create)'
 );
@@ -91,8 +111,8 @@ SELECT is(
   (
     SELECT rate_limit_per_hour::text
       FROM public.webhook_sources
-     WHERE source_identifier = current_setting('test.b6_ws_ups_ident')
-     LIMIT 1
+     WHERE id = current_setting('test.b6_ws_created_id')::uuid
+       AND organization_id = current_setting('test.b6_ws_ups_org')::uuid
   ),
   '4321',
   'ui_upsert_webhook_source_v1 resolves omitted create rate limit from webhook_source_default_policy'
@@ -100,6 +120,9 @@ SELECT is(
 
 -- 3) Denied (sender_user lacks webhooks.write)
 SELECT set_config('request.jwt.claim.sub', current_setting('test.b6_ws_ups_sender'), true);
+SELECT set_config('request.jwt.claims', jsonb_build_object(
+  'sub', current_setting('test.b6_ws_ups_sender'), 'role', 'authenticated'
+)::text, true);
 SET LOCAL ROLE authenticated;
 SELECT throws_ok(
   $$ SELECT public.ui_upsert_webhook_source_v1(jsonb_build_object(

@@ -191,7 +191,7 @@ BEGIN
       SELECT 1
       FROM public.label_versions
       WHERE id = v_version
-        AND label_id = v_artifact
+        AND label_id IS NULL
         AND label_artifact_id = v_artifact
         AND shipment_id IS NULL
         AND target_type = 'warehouse_transfer'
@@ -208,7 +208,8 @@ BEGIN
       SELECT 1
       FROM public.label_versions
       WHERE id = v_version
-        AND metadata->>'label_artifact_id' = v_artifact::text
+        AND metadata = (SELECT metadata FROM public.label_artifacts WHERE id = v_artifact)
+        AND metadata#>>'{target_metadata,target,barcode}' = 'PGTAP-LABEL-VERSION-TX'
         AND metadata->>'label_job_id' = v_job::text
         AND metadata#>>'{target,target_type}' = 'warehouse_transfer'
         AND metadata#>>'{target,target_id}' = v_transfer::text
