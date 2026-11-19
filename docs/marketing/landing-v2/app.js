@@ -1114,16 +1114,13 @@
       ? getDriverStatusInput()
       : (driverForm ? driverForm.querySelector('input[name="full_name"]') : null);
 
-    window.requestAnimationFrame(() => {
-      driverSection.scrollIntoView({
-        behavior: isMotionOn() ? 'smooth' : 'auto',
-        block: 'start',
-      });
-
-      if (focusTarget && typeof focusTarget.focus === 'function') {
-        focusTarget.focus({ preventScroll: true });
-      }
+    driverSection.scrollIntoView({
+      behavior: isMotionOn() ? 'smooth' : 'auto',
+      block: 'start',
     });
+    if (focusTarget && typeof focusTarget.focus === 'function') {
+      focusTarget.focus({ preventScroll: true });
+    }
   }
 
   async function applyDriverRoute() {
@@ -2888,7 +2885,6 @@
   }
 
   hydrateDriverStatusToken();
-  void applyDriverRoute();
   if (trackingPage) {
     setTrackingStage('lookup');
     resetMapPin();
@@ -3069,6 +3065,8 @@
     window.addEventListener('resize', updateScrollOffset, { passive: true });
     if ('ResizeObserver' in window) new ResizeObserver(updateScrollOffset).observe(pageHeader);
   }
+  // Use the measured header offset without deferring the form's initial focus.
+  void applyDriverRoute();
 
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented) return;

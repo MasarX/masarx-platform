@@ -324,6 +324,31 @@ describe('landing app language routing', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test('driver apply sets initial focus without taking it back from another field', () => {
+    jest.useFakeTimers();
+    try {
+      loadLandingApp({
+        url: 'http://localhost/drivers/apply?motion=off',
+        extraHtml: '<section id="drivers"><form data-driver-form>'
+          + '<input name="full_name"><input name="email" type="email"></form></section>',
+        beforeLoad() {
+          document.getElementById('drivers').scrollIntoView = jest.fn();
+        },
+      });
+      const form = document.querySelector('[data-driver-form]');
+      const initialFocus = document.activeElement;
+      const email = form.elements.namedItem('email');
+
+      email.focus();
+      jest.runOnlyPendingTimers();
+
+      expect(document.activeElement).toBe(email);
+      expect(initialFocus).toBe(form.elements.namedItem('full_name'));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test('driver receipt keeps request ID distinct from status token and refreshes actual state', async () => {
     const fetchMock = jest.fn().mockResolvedValueOnce({ ok: true,
       text: async () => JSON.stringify({ ok: true, id: 'driver-request-1', application_status_token: 'private-status-token' }) })
