@@ -9,7 +9,7 @@
     "./sqlite": "./src/sqlite.ts"
   },
   "dependencies": {
-    "expo-modules-core": "55.0.27",
+    "expo-modules-core": "58.1.0",
     "expo-sqlite": "~55.0.18"
   },
   "peerDependencies": {
