@@ -5,7 +5,7 @@
 --   * The api.<rpc_name> function exists with the expected signature.
 --   * authenticated has EXECUTE.
 --   * service_role has EXECUTE.
---   * SECURITY DEFINER posture is preserved (pg_proc.prosecdef = true).
+--   * Each wrapper keeps its reviewed definer or invoker posture.
 --
 -- Migration under test: supabase/migrations/202605020001_w42_api_schema_wrappers_v2.sql
 -- Companion W41 coverage: zzw41_api_schema_wrappers.sql
@@ -34,6 +34,10 @@ DECLARE
   v_rpc TEXT;
   v_signature TEXT;
   v_proc_oid OID;
+  v_is_definer BOOLEAN;
+  v_identity_invokers CONSTANT TEXT[] := ARRAY[
+    'branch_zone_assign_v1', 'branch_zone_unassign_v1', 'add_branch_member_v1'
+  ];
   v_rpcs TEXT[] := ARRAY[
     -- Group 1: customers + identity (5)
     'sender_create_v1',
@@ -98,15 +102,13 @@ BEGIN
       format('service_role has EXECUTE on %s', v_signature)
     );
 
-    -- SECURITY DEFINER
-    SELECT p.oid INTO v_proc_oid
-    FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'api' AND p.proname = v_rpc
-    LIMIT 1;
-    RETURN NEXT ok(
+    -- The rebuilt identity wrappers delegate to the guarded public writer.
+    v_proc_oid := to_regprocedure(v_signature);
+    v_is_definer := NOT (v_rpc = ANY(v_identity_invokers));
+    RETURN NEXT is(
       (SELECT prosecdef FROM pg_proc WHERE oid = v_proc_oid),
-      format('%s is SECURITY DEFINER', v_signature)
+      v_is_definer,
+      format('%s is SECURITY %s', v_signature, CASE WHEN v_is_definer THEN 'DEFINER' ELSE 'INVOKER' END)
     );
   END LOOP;
 END

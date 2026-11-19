@@ -190,7 +190,8 @@ BEGIN
       SELECT 1
         FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'tenant', v_org)->'resources') AS item(value)
        WHERE item.value->>'key' = 'service_offering_directory'
-         AND item.value->>'relation' = 'public.v_service_offering_directory'
+         AND item.value->>'relation' = 'api.service_offering_directory'
+         AND item.value->>'read_relation' = 'public.console_service_offering_api_read_v1'
     ),
     'ui_read_registry registers service_offering_directory for Console V2 live reads'
   );

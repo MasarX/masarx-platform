@@ -70,10 +70,12 @@ BEGIN
     EXISTS (
       SELECT 1 FROM jsonb_array_elements(COALESCE(v_registry->'resources', '[]'::jsonb)) AS item(value)
       WHERE item.value->>'key' = 'route_runs'
-        AND item.value->>'relation' = 'api.route_runs'
+        AND item.value->>'relation' = 'public.command_route_runs_dashboard_v1'
+        AND item.value->>'read_relation' = 'public.console_route_runs_dashboard_read_v1'
+        AND item.value#>>'{scope_columns,tenant}' = 'organization_id'
         AND COALESCE((item.value->>'allow_view_relation')::boolean, FALSE) = TRUE
     ),
-    'ui_read_registry includes route_runs mapped to api.route_runs'
+    'ui_read_registry uses the scoped dashboard source and its shaped route-run read view'
   );
   RETURN NEXT ok(
     EXISTS (

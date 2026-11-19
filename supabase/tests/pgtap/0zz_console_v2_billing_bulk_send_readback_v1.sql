@@ -59,7 +59,7 @@ BEGIN
       115,
       '2026-06-01T00:00:00Z',
       '2026-06-30T00:00:00Z',
-      '2026-07-15T00:00:00Z',
+      now() + interval '15 days',
       1,
       '{}'::jsonb
     ),
@@ -77,7 +77,7 @@ BEGIN
       230,
       '2026-06-01T00:00:00Z',
       '2026-06-30T00:00:00Z',
-      '2026-07-15T00:00:00Z',
+      now() + interval '15 days',
       1,
       '{}'::jsonb
     )
@@ -85,6 +85,7 @@ BEGIN
     SET status = 'draft',
         issued_at = NULL,
         invoice_number = EXCLUDED.invoice_number,
+        due_at = EXCLUDED.due_at,
         subtotal = EXCLUDED.subtotal,
         tax_total = EXCLUDED.tax_total,
         total = EXCLUDED.total,

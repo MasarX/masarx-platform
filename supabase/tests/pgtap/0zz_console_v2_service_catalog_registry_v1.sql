@@ -86,7 +86,8 @@ BEGIN
       SELECT 1
         FROM jsonb_array_elements(v_registry->'resources') AS item(value)
        WHERE item.value->>'key' = 'service_offering_directory'
-         AND item.value->>'relation' = 'public.v_service_offering_directory'
+         AND item.value->>'relation' = 'api.service_offering_directory'
+         AND item.value->>'read_relation' = 'public.console_service_offering_api_read_v1'
     ),
     'tenant ui_read_registry exposes service_offering_directory'
   );

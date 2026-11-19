@@ -21,7 +21,7 @@ SELECT columns_are(
     'settings_override', 'status', 'updated_at',
     'client_label', 'client_slug', 'sla_tier_inherited',
     'organization_id_resolved', 'effective_warehouse_id', 'has_warehouse',
-    'active_shipments', 'total_shipments', 'last_shipment_at'
+    'active_shipments', 'total_shipments', 'last_shipment_at', 'created_at'
   ],
   'v_sender_summary exposes FE-projection columns'
 );
@@ -58,7 +58,8 @@ SELECT ok(
 );
 
 -- 7) Projection: client join surfaces label + organization_id_resolved + sla_tier_inherited.
-DO $$
+CREATE FUNCTION pg_temp.test_sender_summary_projection() RETURNS SETOF TEXT
+LANGUAGE plpgsql AS $$
 DECLARE
   v_org    UUID := '00000000-0000-0000-0000-00000021d001';
   v_client UUID := '00000000-0000-0000-0000-00000021d002';
@@ -90,14 +91,17 @@ BEGIN
     FROM public.v_sender_summary
    WHERE sender_id = v_sender;
 
-  PERFORM ok(
+  RETURN NEXT ok(
     v_label = 'W21 Sender Client'
       AND v_sla = 'premium'
       AND v_resolved_org = v_org,
     'v_sender_summary derives client_label + sla_tier_inherited + organization_id_resolved'
   );
+  EXECUTE 'RESET ROLE';
 END;
 $$;
+
+SELECT * FROM pg_temp.test_sender_summary_projection();
 
 SELECT * FROM finish();
 ROLLBACK;

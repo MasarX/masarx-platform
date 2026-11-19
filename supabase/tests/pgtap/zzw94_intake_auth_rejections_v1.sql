@@ -64,15 +64,15 @@ SELECT is(
   'ledger persists failure code'
 );
 
-SELECT is(
-  (SELECT request_headers->>'authorization' FROM public.intake_auth_rejections WHERE request_id = 'req_auth_rejection_contract'),
-  'REDACTED',
+SELECT ok(
+  (SELECT NOT (request_headers ? 'authorization')
+     FROM public.intake_auth_rejections WHERE request_id = 'req_auth_rejection_contract'),
   'authorization header is redacted'
 );
 
-SELECT is(
-  (SELECT request_headers->>'x-webhook-token' FROM public.intake_auth_rejections WHERE request_id = 'req_auth_rejection_contract'),
-  'REDACTED',
+SELECT ok(
+  (SELECT NOT (request_headers ? 'x-webhook-token')
+     FROM public.intake_auth_rejections WHERE request_id = 'req_auth_rejection_contract'),
   'source token header is redacted'
 );
 
@@ -750,7 +750,8 @@ SELECT ok(
   'webhook auth rejections are registered for Console reads'
 );
 
-DO $$
+CREATE FUNCTION pg_temp.test_intake_rejection_capability_split() RETURNS SETOF TEXT
+LANGUAGE plpgsql AS $$
 DECLARE
   v_org_api_only UUID := gen_random_uuid();
   v_org_webhook_only UUID := gen_random_uuid();
@@ -824,12 +825,12 @@ BEGIN
 
   PERFORM set_config('request.jwt.claim.sub', v_user_api_only::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT count(*)::integer FROM public.v_intake_auth_rejection_directory WHERE request_id = 'req_rls_api_visible'),
     1,
     'api_gateway.read user sees api gateway rejection rows'
   );
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT count(*)::integer FROM public.v_intake_auth_rejection_directory WHERE request_id = 'req_rls_webhook_hidden_from_api'),
     0,
     'api_gateway.read user cannot see webhook rejection rows without webhooks.read'
@@ -838,18 +839,20 @@ BEGIN
 
   PERFORM set_config('request.jwt.claim.sub', v_user_webhook_only::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT count(*)::integer FROM public.v_intake_auth_rejection_directory WHERE request_id = 'req_rls_webhook_visible'),
     1,
     'webhooks.read user sees webhook rejection rows'
   );
-  PERFORM is(
+  RETURN NEXT is(
     (SELECT count(*)::integer FROM public.v_intake_auth_rejection_directory WHERE request_id = 'req_rls_api_hidden_from_webhook'),
     0,
     'webhooks.read user cannot see api gateway rejection rows without api_gateway.read'
   );
   EXECUTE 'RESET ROLE';
 END $$;
+
+SELECT * FROM pg_temp.test_intake_rejection_capability_split();
 
 SELECT finish();
 

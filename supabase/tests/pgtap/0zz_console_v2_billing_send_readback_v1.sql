@@ -32,7 +32,7 @@ BEGIN
   VALUES (
     v_invoice, v_org, v_client, 'draft', 'sar', NULL,
     100, 15, 115, 0, 115,
-    '2026-05-01T00:00:00Z', '2026-05-31T00:00:00Z', '2026-06-15T00:00:00Z', v_ops, 1
+    '2026-05-01T00:00:00Z', '2026-05-31T00:00:00Z', now() + interval '15 days', v_ops, 1
   )
   ON CONFLICT (id) DO UPDATE
   SET status = EXCLUDED.status,
@@ -40,6 +40,7 @@ BEGIN
       issued_at = NULL,
       amount_paid = EXCLUDED.amount_paid,
       amount_due = EXCLUDED.amount_due,
+      due_at = EXCLUDED.due_at,
       version = EXCLUDED.version,
       updated_at = now();
 

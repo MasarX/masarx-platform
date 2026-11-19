@@ -16,11 +16,9 @@ DECLARE
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  SELECT cached_value
-    INTO v_registry
-    FROM public.settings
-   WHERE category = 'ui_read_registry'
-   LIMIT 1;
+  v_registry := public.resolve_settings_merged(
+    'ui_read_registry', public.get_root_scope_type_key_v1(), NULL
+  );
 
   RETURN NEXT has_view('public', 'v_route_run_directory', 'public.v_route_run_directory exists');
   RETURN NEXT ok(

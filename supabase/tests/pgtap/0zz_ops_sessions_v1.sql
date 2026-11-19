@@ -125,7 +125,14 @@ BEGIN
   v_driver_readback := api.ui_get_resource_v1('ops_sessions', v_driver_sess.ops_session_id);
 
   RETURN NEXT is(v_driver_readback->>'session_type', 'driver_shift', 'api.ui_get_resource_v1 reads driver_shift ops session');
-  RETURN NEXT is(v_driver_readback->>'device_id', v_device.device_id::text, 'api.ui_get_resource_v1 preserves driver shift device id');
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT ok(
+    NOT (v_driver_readback ? 'device_id')
+      AND EXISTS (SELECT 1 FROM public.ops_sessions
+                   WHERE id = v_driver_sess.ops_session_id AND device_id = v_device.device_id),
+    'driver shift retains its device binding outside the generic read projection'
+  );
+  EXECUTE 'SET LOCAL ROLE authenticated';
 
   SELECT * INTO v_tr1
   FROM public.transition_ops_session_v1(

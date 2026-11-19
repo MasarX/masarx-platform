@@ -162,11 +162,11 @@ BEGIN
 
   INSERT INTO public.lookup_values (
     lookup_definition_id, value, label, status, retired_at
-  ) VALUES (
-    v_definition, 'b5_retired', 'B5 retired', 'archived', public.workflow_now()
-  )
+  ) VALUES
+    (v_definition, 'b5_retired', 'B5 retired', 'archived', public.workflow_now()),
+    (v_definition, 'example_active_level', 'Example Active Level', 'active', NULL)
   ON CONFLICT (lookup_definition_id, value)
-  DO UPDATE SET status = 'archived', retired_at = public.workflow_now();
+  DO UPDATE SET status = EXCLUDED.status, retired_at = EXCLUDED.retired_at;
 
   PERFORM set_config('test.b5_catalog_org', v_org::text, true);
   PERFORM set_config('test.b5_catalog_foreign_org', v_foreign_org::text, true);
@@ -180,8 +180,8 @@ SELECT lives_ok(
     'INSERT INTO public.service_levels (id, organization_id, key, name) VALUES (%L::uuid, %L::uuid, %L, %L)',
     gen_random_uuid(),
     current_setting('test.b5_catalog_org'),
-    'standard',
-    'B5 standard'
+    'example_active_level',
+    'Example Active Level'
   ),
   'active canonical service-level key can be added to the tenant catalog'
 );

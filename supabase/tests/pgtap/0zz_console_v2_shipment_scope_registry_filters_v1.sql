@@ -16,8 +16,7 @@ SELECT ok(
       ('shipments', 'sender_id', 'sender_id'),
       ('shipment_directory', 'organization_id', 'organization_id'),
       ('shipment_directory', 'client_id', 'client_id'),
-      ('shipment_directory', 'sender_id', 'sender_id'),
-      ('service_offering_directory', 'organization_id', 'organization_id')
+      ('shipment_directory', 'sender_id', 'sender_id')
     ) AS expected(resource_key, filter_key, filter_column)
     WHERE NOT EXISTS (
       SELECT 1
@@ -37,8 +36,7 @@ SELECT ok(
     SELECT 1
     FROM (VALUES
       ('shipments', 'organization_id'),
-      ('shipment_directory', 'organization_id'),
-      ('service_offering_directory', 'organization_id')
+      ('shipment_directory', 'organization_id')
     ) AS expected(resource_key, tenant_scope_column)
     WHERE NOT EXISTS (
       SELECT 1
@@ -50,7 +48,8 @@ SELECT ok(
   'shipment lifecycle registry resources declare tenant scope columns'
 );
 
-DO $do$
+CREATE FUNCTION pg_temp.test_shipment_scope_filters() RETURNS SETOF TEXT
+LANGUAGE plpgsql AS $do$
 DECLARE
   v_org UUID := 'db7e23cc-84d9-4822-9dfb-9b7c8e8f00aa'::uuid;
   v_other_org UUID := '1fe1e91f-a18b-4545-849b-0e47fca9435d'::uuid;
@@ -182,7 +181,7 @@ BEGIN
     0,
     '[]'::jsonb
   );
-  PERFORM ok(
+  RETURN NEXT ok(
     v_body->'items' @> jsonb_build_array(jsonb_build_object('id', v_shipment::text, 'organization_id', v_org::text, 'client_id', v_client::text, 'sender_id', v_sender::text))
       AND NOT (v_body->'items' @> jsonb_build_array(jsonb_build_object('id', v_other_shipment::text))),
     'shipments list honors explicit tenant/client/sender filters'
@@ -195,7 +194,7 @@ BEGIN
     0,
     '[]'::jsonb
   );
-  PERFORM ok(
+  RETURN NEXT ok(
     v_body->'items' @> jsonb_build_array(jsonb_build_object('id', v_shipment::text, 'organization_id', v_org::text, 'client_id', v_client::text, 'sender_id', v_sender::text))
       AND NOT (v_body->'items' @> jsonb_build_array(jsonb_build_object('id', v_other_shipment::text))),
     'shipment_directory list honors explicit tenant/client/sender filters'
@@ -203,6 +202,8 @@ BEGIN
 
   EXECUTE 'RESET ROLE';
 END $do$;
+
+SELECT * FROM pg_temp.test_shipment_scope_filters();
 
 SELECT * FROM finish();
 
