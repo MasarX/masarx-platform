@@ -40,6 +40,41 @@ REVOKE ALL ON public.v_fleet_driver_options FROM anon;
 GRANT SELECT ON public.v_fleet_driver_options TO authenticated;
 GRANT SELECT ON public.v_fleet_driver_options TO service_role;
 
+-- Fleet screens display assigned driver labels without access to the user directory.
+CREATE FUNCTION public.fleet_driver_identity_v1(p_organization_id uuid, p_user_id uuid)
+RETURNS TABLE (full_name text, email text)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $identity$
+  SELECT u.full_name, CASE WHEN driver.has_profile THEN u.email END
+  FROM public.users u
+  CROSS JOIN LATERAL (
+    SELECT EXISTS (
+      SELECT 1 FROM public.driver_profiles d
+      WHERE d.organization_id = u.organization_id AND d.user_id = u.id
+    ) AS has_profile
+  ) driver
+  WHERE u.id = p_user_id
+    AND u.organization_id = p_organization_id
+    AND (
+      driver.has_profile OR EXISTS (
+        SELECT 1 FROM public.vehicle_assignments va
+        WHERE va.organization_id = u.organization_id AND va.assigned_to_user_id = u.id
+      )
+    )
+    AND (SELECT public.user_has_capability_v1('fleet.read'))
+    AND (
+      (SELECT public.is_platform_user())
+      OR (
+        (SELECT public.current_user_scope_type()) = 'tenant'
+        AND u.organization_id = (SELECT public.current_user_org_id())
+        AND u.organization_id = (SELECT public.current_user_scope_id())
+      )
+    );
+$identity$;
+REVOKE ALL ON FUNCTION public.fleet_driver_identity_v1(uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.fleet_driver_identity_v1(uuid, uuid) TO authenticated, service_role;
+
 CREATE OR REPLACE VIEW public.v_vehicle_assignment_directory
   WITH (security_invoker = true)
 AS
@@ -49,7 +84,7 @@ SELECT
   va.vehicle_id,
   va.assigned_to_user_id,
   va.assigned_to_user_id AS driver_user_id,
-  COALESCE(u.full_name, 'Unassigned driver') AS driver_name,
+  COALESCE(u.full_name, driver.full_name, 'Unassigned driver') AS driver_name,
   va.branch_id,
   va.status,
   va.started_at,
@@ -58,7 +93,9 @@ SELECT
   va.created_at,
   va.updated_at
 FROM public.vehicle_assignments va
-LEFT JOIN public.users u ON u.id = va.assigned_to_user_id;
+LEFT JOIN public.users u ON u.id = va.assigned_to_user_id
+LEFT JOIN LATERAL public.fleet_driver_identity_v1(va.organization_id, va.assigned_to_user_id) driver
+  ON u.id IS NULL;
 
 COMMENT ON VIEW public.v_vehicle_assignment_directory IS
   'Console V2 vehicle assignment history projection with driver_user_id compatibility alias and operator-facing driver_name. SSOT remains vehicle_assignments.';

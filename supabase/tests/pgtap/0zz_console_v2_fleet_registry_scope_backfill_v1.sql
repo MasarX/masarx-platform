@@ -5,7 +5,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(16);
+SELECT plan(18);
 
 SELECT ok(
   NOT EXISTS (
@@ -414,29 +414,6 @@ SET issuer = EXCLUDED.issuer,
     status = EXCLUDED.status,
     metadata = EXCLUDED.metadata;
 
--- The users RLS predicate resolves capabilities through access_control_policy.
-DO $fleet_fixture$
-DECLARE
-  v_org CONSTANT uuid := 'ac65f701-2b52-4efd-9b9f-f9e8c5f14301';
-  v_actor CONSTANT uuid := '253d3fab-d32d-4669-8ca1-27978cb95f04';
-  v_policy jsonb;
-  v_schema integer;
-BEGIN
-  SELECT policy INTO STRICT v_policy
-    FROM public.resolve_access_control_policy_v1('tenant', v_org, FALSE);
-  SELECT version INTO v_schema FROM public.schema_registry
-   WHERE category = 'access_control_policy' AND is_active ORDER BY version DESC LIMIT 1;
-  v_policy := jsonb_set(v_policy, '{roles}', v_policy->'roles' || jsonb_build_array(
-    jsonb_build_object('key', 'pgtap_fleet_user_read', 'capability_keys', jsonb_build_array('users.read'))
-  ));
-  v_policy := jsonb_set(v_policy, '{assignments,user_id}',
-    COALESCE(v_policy#>'{assignments,user_id}', '{}'::jsonb)
-      || jsonb_build_object(v_actor, jsonb_build_array('pgtap_fleet_user_read')));
-  PERFORM public.upsert_settings_value_v1('access_control_policy', 'tenant', v_org,
-    v_policy, v_schema, 'Fixture capability for fleet driver labels');
-END;
-$fleet_fixture$;
-
 SET LOCAL ROLE authenticated;
 
 SELECT set_config('request.jwt.claim.sub', '253d3fab-d32d-4669-8ca1-27978cb95f04', true);
@@ -448,6 +425,11 @@ SELECT set_config(
     'email', 'console-v2-fleet-registry@example.test'
   )::text,
   true
+);
+
+SELECT ok(
+  public.user_has_capability_v1('fleet.read') AND NOT public.user_has_capability_v1('users.read'),
+  'fleet manager reads driver labels with fleet.read and no user directory capability'
 );
 
 DO $driver_probe$
@@ -671,6 +653,14 @@ SELECT throws_ok(
   '42501',
   NULL,
   'tenant user without fleet.read cannot read vehicle_directory'
+);
+
+SELECT is(
+  (SELECT count(*) FROM public.fleet_driver_identity_v1(
+    'ac65f701-2b52-4efd-9b9f-f9e8c5f14301', '253d3fab-d32d-4669-8ca1-27978cb95f14'
+  )),
+  0::bigint,
+  'tenant user without fleet.read cannot read driver identity directly'
 );
 
 RESET ROLE;

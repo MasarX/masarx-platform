@@ -111,7 +111,7 @@ SELECT is(
   (
     SELECT rate_limit_per_hour::text
       FROM public.webhook_sources
-     WHERE id = current_setting('test.b6_ws_created_id')::uuid
+     WHERE id = NULLIF(current_setting('test.b6_ws_created_id', true), '')::uuid
        AND organization_id = current_setting('test.b6_ws_ups_org')::uuid
   ),
   '4321',

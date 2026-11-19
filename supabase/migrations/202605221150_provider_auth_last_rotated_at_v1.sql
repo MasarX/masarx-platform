@@ -336,7 +336,8 @@ credential_rows AS (
     NULL::text AS bound_scope_type,
     NULL::uuid AS bound_scope_id,
     NULL::uuid AS bound_settings_version_id,
-    0 AS binding_rank
+    0 AS binding_rank,
+    cb.provider_organization_id
   FROM credential_base cb
 
   UNION ALL
@@ -385,9 +386,10 @@ credential_rows AS (
     sv.scope_type AS bound_scope_type,
     sv.scope_id AS bound_scope_id,
     sv.id AS bound_settings_version_id,
-    1 AS binding_rank
+    1 AS binding_rank,
+    cb.provider_organization_id
   FROM public.settings s
-  JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+  JOIN public.settings_versions sv ON sv.id = s.settings_version_id AND sv.scope_hash = s.scope_hash
   JOIN credential_base cb ON cb.id::text = sv.value->>'auth_config_id'
   WHERE sv.scope_type = 'tenant'
     AND sv.scope_id IS NOT NULL
@@ -439,9 +441,10 @@ credential_rows AS (
     sv.scope_type AS bound_scope_type,
     sv.scope_id AS bound_scope_id,
     sv.id AS bound_settings_version_id,
-    2 AS binding_rank
+    2 AS binding_rank,
+    cb.provider_organization_id
   FROM public.settings s
-  JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+  JOIN public.settings_versions sv ON sv.id = s.settings_version_id AND sv.scope_hash = s.scope_hash
   JOIN public.webhook_sources ws ON ws.id = sv.scope_id
   JOIN credential_base cb ON cb.id::text = sv.value->>'auth_config_id'
   WHERE sv.scope_type = 'source'
@@ -466,6 +469,7 @@ WHERE (SELECT public.request_role_is_service_v1())
          (SELECT public.current_user_scope_type()) = 'tenant'
          AND cr.organization_id = (SELECT public.current_user_org_id())
          AND cr.organization_id = (SELECT public.current_user_scope_id())
+         AND cr.provider_organization_id IN (cr.organization_id, '00000000-0000-0000-0000-000000000000'::uuid)
        )
      )
    )

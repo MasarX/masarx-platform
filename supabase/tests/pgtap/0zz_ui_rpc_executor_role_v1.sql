@@ -667,6 +667,10 @@ BEGIN
     v_rows:=v_rows||jsonb_build_array(v_row);
   END LOOP;
   PERFORM set_config('app.workflow_run_id',COALESCE(v_workflow_context,''),TRUE);
+  -- A malformed local settings reference cannot disclose another tenant's credential.
+  PERFORM public.upsert_settings_value_v1('logestechs_v2_account','tenant',v_org,
+    jsonb_build_object('auth_config_id',v_rows#>>'{1,provider_auth_configs}'),1,
+    'Rollback-only foreign credential reference');
   INSERT INTO pg_temp.executor_screen_rows SELECT key,(v_rows->0->>key)::uuid,(v_rows->1->>key)::uuid FROM unnest(v_keys) key;
   INSERT INTO pg_temp.executor_platform_rows SELECT key,(v_rows->0->>key)::uuid,(v_rows->1->>key)::uuid FROM unnest(v_platform_keys) key;
   SELECT public.resolve_settings_merged('ui_read_registry','global',NULL) INTO v_registry;
