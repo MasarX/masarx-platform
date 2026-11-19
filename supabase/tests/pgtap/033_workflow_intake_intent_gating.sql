@@ -162,8 +162,11 @@ BEGIN
   );
 
   INSERT INTO pgtap_intent_results VALUES (1,
-    v_result->'body' ? 'resource',
-    'Shipment create intent includes resource in ACK body'
+    v_result->>'ack_outcome' <> 'ack_failed'
+      AND v_result#>>'{body,planned_resource,type}' = 'shipment'
+      AND v_result#>>'{body,planned_resource,tracking_number}' IS NOT NULL
+      AND NOT (v_result->'body' ? 'resource'),
+    'Shipment create ACK reserves tracking without claiming a materialized shipment'
   );
 
   PERFORM public.upsert_settings_value_v1(
@@ -193,8 +196,9 @@ BEGIN
   );
 
   INSERT INTO pgtap_intent_results VALUES (2,
-    NOT (v_result->'body' ? 'resource'),
-    'Non-creation intent omits resource from ACK body'
+    v_result->>'ack_outcome' <> 'ack_failed'
+      AND NOT (v_result->'body' ?| ARRAY['resource', 'planned_resource']),
+    'Non-creation intent omits both materialized and planned resources from the ACK'
   );
 END;
 $$;

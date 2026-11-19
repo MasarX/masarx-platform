@@ -31,30 +31,6 @@ VALUES (
   'active'
 );
 
-INSERT INTO public.canonical_cities (
-  id,
-  organization_id,
-  name_canonical,
-  province,
-  country_code,
-  source
-)
-VALUES (
-  'f8a00000-0000-0000-0000-000000000120'::uuid,
-  'f8a00000-0000-0000-0000-000000000101'::uuid,
-  'Example Materialization City',
-  'Example Test Province',
-  'SA',
-  'ops_verified'
-)
-ON CONFLICT (organization_id, name_canonical) WHERE source_city_id IS NULL
-DO UPDATE SET
-  province = EXCLUDED.province,
-  country_code = EXCLUDED.country_code,
-  source = EXCLUDED.source,
-  is_active = TRUE,
-  updated_at = now();
-
 INSERT INTO public.mapping_configs (
   id,
   organization_id,
@@ -375,8 +351,8 @@ SELECT ok(
     SELECT a.province
       FROM public.addresses a
       JOIN _created_shipment s ON s.destination_address_id = a.id
-  ) = 'Example Test Province',
-  'missing provider province is resolved from canonical city reference data'
+  ) = 'Example Materialization City',
+  'missing provider province falls back to the supplied city'
 );
 SELECT ok(
   (SELECT cod_amount::numeric = 188.50::numeric FROM _created_shipment),

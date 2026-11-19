@@ -9,9 +9,10 @@ SELECT ok(
     SELECT 1
       FROM public.lookup_definitions
      WHERE category = 'mapping_target'
-       AND is_mutable IS FALSE
+       AND is_mutable IS TRUE
+       AND approval_policy = 'tier_2'
   ),
-  'mapping_target lookup definition exists and is immutable'
+  'mapping_target changes require the catalog approval policy'
 );
 
 SELECT ok(
@@ -133,26 +134,26 @@ SELECT ok(
 
 SELECT ok(
   (
-    SELECT lv.metadata @> '{"canonical_intent":"shipment.delete","workflow_template_name":"shipment_delete_v1","api_gateway_workflow_template_name":"api_gateway_shipment_cancel_default_v1","workflow_templates_by_mapping_type":{"webhook_inbound":"shipment_delete_v1","api_gateway_inbound":"api_gateway_shipment_cancel_default_v1"}}'::jsonb
-       AND lv.metadata->'allowed_mapping_types' ? 'api_gateway_inbound'
+    SELECT lv.metadata @> '{"canonical_intent":"shipment.delete","workflow_template_name":"shipment_delete_v1","ingress_mode":"async_third_party_event","allowed_mapping_types":["webhook_inbound"]}'::jsonb
+       AND NOT (lv.metadata->'allowed_mapping_types' ? 'api_gateway_inbound')
       FROM public.lookup_values lv
       JOIN public.lookup_definitions ld ON ld.id = lv.lookup_definition_id
      WHERE ld.category = 'mapping_target'
        AND lv.value = 'shipments.cancel'
   ),
-  'mapping_target keeps cancel webhook workflow metadata while declaring API Gateway workflow metadata'
+  'mapping_target keeps the cancellation target on asynchronous webhook ingress'
 );
 
 SELECT ok(
   (
-    SELECT lv.metadata @> '{"canonical_intent":"shipment.reschedule","workflow_template_name":"shipment_reschedule_v1"}'::jsonb
-       AND lv.metadata->'allowed_mapping_types' ? 'api_gateway_inbound'
+    SELECT lv.metadata @> '{"canonical_intent":"shipment.reschedule","workflow_template_name":"shipment_reschedule_v1","ingress_mode":"async_third_party_event","allowed_mapping_types":["webhook_inbound"]}'::jsonb
+       AND NOT (lv.metadata->'allowed_mapping_types' ? 'api_gateway_inbound')
       FROM public.lookup_values lv
       JOIN public.lookup_definitions ld ON ld.id = lv.lookup_definition_id
      WHERE ld.category = 'mapping_target'
        AND lv.value = 'shipments.reschedule'
   ),
-  'mapping_target keeps reschedule API Gateway-bindable and workflow-backed'
+  'mapping_target keeps the reschedule target on asynchronous webhook ingress'
 );
 
 SELECT ok(

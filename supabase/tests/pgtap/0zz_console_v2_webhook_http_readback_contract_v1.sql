@@ -6,7 +6,7 @@ SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(14);
+SELECT plan(12);
 
 SELECT ok(
   position(
@@ -28,36 +28,23 @@ SELECT ok(
   'workflow_intake_webhook writes persisted correlation_id into the returned body'
 );
 
-SELECT ok(
-  position(
-    '''context_mapping_id'', v_source.mapping_config_id'
-    IN pg_get_functiondef('public.workflow_intake_webhook_core_v1(text,jsonb,text,jsonb)'::regprocedure)
-  ) > 0,
-  'webhook shipment follow-up receives source mapping_config_id as context_mapping_id'
-);
+-- Migration 20260910003000 resolves canonical intent without injecting a source
+-- mapping ID into follow-up context. HTTP readback coverage continues below.
 
 SELECT ok(
   position(
-    '''mapping_config_id'', v_source.mapping_config_id'
-    IN pg_get_functiondef('public.workflow_intake_webhook_core_v1(text,jsonb,text,jsonb)'::regprocedure)
-  ) > 0,
-  'webhook shipment follow-up preserves source mapping_config_id for operator readback'
-);
-
-SELECT ok(
-  position(
-    'v_materialized_payload#>''{shipment,customer}'''
+    'v_materialized_payload#>''{shipment,recipient}'''
     IN pg_get_functiondef('workflow_handlers.execute_shipment_create_v1(public.workflow_run_steps,public.workflow_runs,jsonb)'::regprocedure)
   ) > 0,
-  'webhook shipment creation accepts provider shipment.customer as recipient input'
+  'webhook shipment creation accepts provider shipment.recipient as recipient input'
 );
 
 SELECT ok(
   position(
-    'v_materialized_payload#>''{shipment,address}'''
+    'v_materialized_payload#>''{shipment,recipient,address}'''
     IN pg_get_functiondef('workflow_handlers.execute_shipment_create_v1(public.workflow_run_steps,public.workflow_runs,jsonb)'::regprocedure)
   ) > 0,
-  'webhook shipment creation accepts provider shipment.address as destination address input'
+  'webhook shipment creation accepts provider shipment.recipient.address as destination address input'
 );
 
 SELECT ok(

@@ -170,13 +170,10 @@ SELECT is(
   'receiver rejects shipment-create intake when source has no sender/client binding'
 );
 
-SELECT ok(
-  (
-    SELECT result#>>'{body,error}' LIKE '%sender/client%'
-      FROM _webhook_result
-     LIMIT 1
-  ),
-  'receiver response explains that shipment sender/client binding is required'
+SELECT is(
+  (SELECT result#>>'{body,error}' FROM _webhook_result),
+  'webhook_source_missing_sender_client',
+  'receiver response reports the missing sender/client binding'
 );
 
 SELECT is(
@@ -187,13 +184,14 @@ SELECT is(
 
 SELECT is(
   (
-    SELECT count(*)::text
+    SELECT wi.processing_status
       FROM public.webhook_inbox wi
      WHERE wi.idempotency_key = 'console-v2-webhook-missing-sender-idem'
        AND wi.webhook_source_id = 'b44f71d8-2b89-4f29-9ef6-aedc3b9f7104'::uuid
+       AND wi.workflow_run_id IS NULL
   ),
-  '0',
-  'rejected missing-sender intake does not create a webhook inbox row'
+  'failed',
+  'rejected missing-sender intake persists a failed inbox row without enqueueing work'
 );
 
 SELECT ok(
