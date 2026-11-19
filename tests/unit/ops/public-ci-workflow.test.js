@@ -14,6 +14,10 @@ describe('public CI workflow contract', () => {
     expect(workflow.on.merge_group.types).toContain('checks_requested');
     expect(workflow.on.push).toBeUndefined();
     expect(workflow.on.workflow_dispatch).toBeDefined();
+    const lint = workflow.jobs.lint;
+    expect(lint.steps[0].with['fetch-depth']).toBe(2);
+    expect(lint.steps[1].run).toContain('[[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]');
+    expect(lint.steps[1].run).toContain("git rev-parse --verify 'HEAD^1^{commit}'");
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(workflow.concurrency['cancel-in-progress']).toBe("${{ github.event_name == 'pull_request' }}");
   });
@@ -41,8 +45,8 @@ describe('public CI workflow contract', () => {
   });
 
   test('keeps trusted test execution, non-cancelling shards and helper selfchecks', () => {
+    expect(workflow.jobs.unit.strategy['fail-fast']).toBe(false);
     for (const lane of ['unit', 'ui']) {
-      expect(workflow.jobs[lane].strategy['fail-fast']).toBe(false);
       expect(workflow.jobs[lane].steps.some(step => step.run === `node scripts/ci-hosted/base-guard.cjs jest.cjs ${lane}`)).toBe(true);
     }
     const appendOnly = workflow.jobs['append-only'].steps;
@@ -55,23 +59,92 @@ describe('public CI workflow contract', () => {
     expect(checks.run).toContain('node scripts/ci-hosted/database-selfcheck.cjs');
   });
 
-  test('starts the build and all pgTAP shards independently and keeps both required', () => {
+  test('fits the job cap with two unit shards, one UI job and grouped app checks', () => {
+    const { jobs } = workflow;
+    const shard = '${{ matrix.shard }}/${{ strategy.job-total }}';
+    expect(jobs.unit.strategy.matrix.shard).toEqual([1, 2]);
+    expect(jobs.unit.env.JEST_SHARD).toBe(shard);
+    expect(jobs.ui.strategy).toBeUndefined();
+    expect(jobs.ui.env?.JEST_SHARD).toBeUndefined();
+    expect(jobs.typecheck.strategy).toBeUndefined();
+    expect(jobs.typecheck.steps.at(-1).run).toContain('for subject in apps/console apps/portal apps/fieldops; do');
+    expect(jobs.typecheck.steps.at(-1).run).toContain('node scripts/ci-hosted/tasks.cjs typecheck "$subject" || result=$?');
+    expect(jobs['build-console'].steps.at(-1).run).toBe('node scripts/ci-hosted/tasks.cjs build apps/console');
+    expect(jobs['build-portal-landing'].steps.slice(-2).map(step => step.run)).toEqual([
+      'node scripts/ci-hosted/tasks.cjs build apps/portal',
+      'node scripts/ci-hosted/tasks.cjs build landing',
+    ]);
+    expect(Object.values(jobs).reduce((total, job) => total + (job.strategy?.matrix.shard.length ?? 1), 0)).toBe(20);
+    for (const job of Object.values(jobs)) expect(job.strategy?.['max-parallel']).toBeUndefined();
+    expect(workflow.env.JEST_RETRY_TIMES).toBe('0');
+    const landing = fs.readFileSync(path.resolve(__dirname, '../../../scripts/ci-hosted/playwright.landing.config.cjs'), 'utf8');
+    expect(landing).toMatch(/^  retries: 0,$/m);
+  });
+
+  test('runs six independent from-zero pgTAP shards whenever database is affected', () => {
     const build = workflow.jobs['database-build'];
     const shards = workflow.jobs['database-pgtap'];
-    expect(PGTAP_SHARD_COUNT).toBe(12);
+    expect(PGTAP_SHARD_COUNT).toBe(6);
     expect(shards.strategy.matrix.shard).toEqual(Array.from({ length: PGTAP_SHARD_COUNT }, (_, index) => index + 1));
     expect(shards.strategy['fail-fast']).toBe(false);
     expect(shards.env.PGTAP_SHARD).toBe('${{ matrix.shard }}/${{ strategy.job-total }}');
     for (const job of [build, shards]) {
-      expect(job.needs).toBeUndefined();
-      expect(job.if).toBeUndefined();
+      expect(job.needs).toBe('append-only');
       expect(job['timeout-minutes']).toBe(20);
       expect(job.steps.find(step => step.id === 'subject').run).toBe('node scripts/ci-hosted/tasks.cjs detect database');
       expect(job.steps.find(step => step.run === 'node scripts/ci-hosted/backend.cjs').if).toBe("steps.subject.outputs.present == 'true'");
     }
-    expect(workflow.jobs.database.needs).toEqual(['database-build', 'database-pgtap']);
-    expect(workflow.jobs.database.if).toBe('always()');
+    expect(workflow.jobs.database.needs).toEqual(['append-only', 'database-build', 'database-pgtap']);
     expect(workflow.jobs.database.steps[0].with['sparse-checkout'].split('\n')).toContain('supabase/tests/pgtap');
+  });
+
+  test('selects affected jobs from the pull request base and runs every gate when selection is unavailable', () => {
+    const { jobs } = workflow;
+    const changes = jobs['append-only'].steps.find(step => step.id === 'changes');
+    expect(changes.if).toBe("github.event_name == 'pull_request'");
+    expect(changes.run).toContain("git rev-parse --verify 'HEAD^1^{commit}'");
+    expect(changes.run).toContain('git show "$base:scripts/ci-hosted/changes.cjs" > "$RUNNER_TEMP/changes.cjs"');
+    expect(changes.run).toContain('node "$RUNNER_TEMP/changes.cjs" "$base"');
+    const affected = {
+      database: ['database'],
+      'database-build': ['database'],
+      'database-pgtap': ['database'],
+      typecheck: ['typecheck'],
+      unit: ['unit'],
+      ui: ['ui'],
+      'build-console': ['build_console'],
+      'build-portal-landing': ['build_portal', 'build_landing'],
+      e2e: ['e2e'],
+    };
+    for (const [name, gates] of Object.entries(affected)) {
+      const status = name === 'database' ? 'always()' : '!cancelled()';
+      const outputs = gates.map(gate => `needs.append-only.outputs.${gate} != 'false'`).join(' || ');
+      expect([jobs[name].needs].flat()).toContain('append-only');
+      expect(jobs[name].if).toBe(`\${{ ${status} && (needs.append-only.result != 'success' || ${outputs}) }}`);
+      for (const gate of gates) expect(jobs['append-only'].outputs[gate]).toBe(`\${{ steps.changes.outputs.${gate} }}`);
+    }
+  });
+
+  test('restores npm cache read-only except on a trunk push and keeps visual prerequisites first', () => {
+    const { jobs } = workflow;
+    for (const name of ['lint', 'typecheck', 'unit', 'ui', 'build-console', 'build-portal-landing', 'e2e', 'visual-baselines']) {
+      const setup = jobs[name].steps.find(step => step.uses?.startsWith('actions/setup-node@'));
+      const restore = jobs[name].steps.find(step => step.name === 'Restore npm cache');
+      expect(setup.uses).toMatch(/^actions\/setup-node@[a-f0-9]{40}$/);
+      expect(setup.with['package-manager-cache']).toBe(false);
+      expect(setup.with.cache).toBe("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'npm' || '' }}");
+      expect(setup.with['cache-dependency-path']).toBe('package-lock.json');
+      expect(restore.uses).toMatch(/^actions\/cache\/restore@[a-f0-9]{40}$/);
+      expect(restore.if).toContain("github.event_name != 'push' || github.ref != 'refs/heads/main'");
+      expect(restore.with.path).toBe('${{ runner.temp }}/npm-cache');
+      expect(setup.env.NPM_CONFIG_CACHE).toBe(restore.with.path);
+      expect(jobs[name].steps.find(step => step.id === 'install').env.NPM_CONFIG_CACHE).toBe(restore.with.path);
+      expect(restore.with.key).toBe("node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}");
+    }
+    const visual = jobs['visual-baselines'];
+    expect(visual.if).toBe("github.event_name == 'workflow_dispatch' && inputs.regenerate_visual_baselines");
+    expect(visual.steps.findIndex(step => step.run === 'node scripts/ci-hosted/tasks.cjs visual-preflight'))
+      .toBeLessThan(visual.steps.findIndex(step => step.id === 'install'));
   });
 
   test('requires every producer and rejects unexpected skips', () => {
@@ -84,6 +157,9 @@ describe('public CI workflow contract', () => {
     expect(command).toContain("allowed = {'success'}");
     expect(command).toContain("if name == 'visual-baselines' and os.environ['VISUAL_REQUESTED'] != 'true':");
     expect(command).toContain("if name == 'dependency-review' and os.environ['DEPENDENCY_REVIEW_REQUESTED'] != 'true':");
+    expect(result.steps[0].env.AFFECTED_REQUESTED).toBe("${{ github.event_name == 'pull_request' }}");
+    expect(command).toContain("gates = selector.get('outputs', {}) if selector.get('result') == 'success' else {}");
+    expect(command).toContain("and all(gates.get(gate) == 'false' for gate in affected_jobs[name])):");
     expect(command).toContain('sys.exit(0 if good else 1)');
     const downloadAction = 'actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333';
     const optionalTransfers = {

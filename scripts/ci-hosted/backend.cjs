@@ -307,7 +307,9 @@ async function qualify(diagnostic) {
         if (applied) {
           summary.migrations = applied.rows.length;
           summary.migrationTotal = versions.length;
-          summary.migrationsPerMinute = Number((summary.migrations / ((summary.stages.find(s => s.name === 'migrations').durationMs || 1) / 60000)).toFixed(2));
+          const replayMs = summary.stages.find(s => s.name === 'migrations').durationMs;
+          console.log(`Database setup timing: replay_ms=${replayMs} restore_ms=NOT_RUN`);
+          summary.migrationsPerMinute = Number((summary.migrations / ((replayMs || 1) / 60000)).toFixed(2));
           summary.migrationFailed = migrationError && summary.currentMigration && summary.migrations < versions.length ? 1 : 0;
           summary.migrationNotRun = versions.length - summary.migrations - summary.migrationFailed;
           summary.firstFailingMigration = summary.migrationFailed ? files[summary.migrations] : null;

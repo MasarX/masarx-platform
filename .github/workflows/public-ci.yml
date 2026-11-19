@@ -47,6 +47,8 @@ env:
 jobs:
   database-build:
     name: From-zero database build
+    needs: append-only
+    if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.database != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
@@ -87,13 +89,14 @@ jobs:
 
   database-pgtap:
     name: Database pgTAP (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: append-only
+    if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.database != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      max-parallel: 4
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6]
     env:
       PGTAP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
     steps:
@@ -128,8 +131,8 @@ jobs:
 
   database:
     name: From-zero database build and pgTAP
-    needs: [database-build, database-pgtap]
-    if: always()
+    needs: [append-only, database-build, database-pgtap]
+    if: ${{ always() && (needs.append-only.result != 'success' || needs.append-only.outputs.database != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -172,6 +175,15 @@ jobs:
 
   append-only:
     name: Append-only migrations
+    outputs:
+      database: ${{ steps.changes.outputs.database }}
+      typecheck: ${{ steps.changes.outputs.typecheck }}
+      unit: ${{ steps.changes.outputs.unit }}
+      ui: ${{ steps.changes.outputs.ui }}
+      build_console: ${{ steps.changes.outputs.build_console }}
+      build_portal: ${{ steps.changes.outputs.build_portal }}
+      build_landing: ${{ steps.changes.outputs.build_landing }}
+      e2e: ${{ steps.changes.outputs.e2e }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -180,6 +192,19 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
+      - name: Select affected jobs with base code
+        id: changes
+        if: github.event_name == 'pull_request'
+        run: |
+          # A missing base helper leaves the full graph enabled during rollout.
+          if ! base="$(git rev-parse --verify 'HEAD^1^{commit}')" ||
+             [[ "$(git ls-tree "$base" -- scripts/ci-hosted/changes.cjs)" != '100644 blob '* ]] ||
+             ! git show "$base:scripts/ci-hosted/changes.cjs" > "$RUNNER_TEMP/changes.cjs" ||
+             ! gates="$(node "$RUNNER_TEMP/changes.cjs" "$base")"; then
+            printf '%s\n' 'Affected selection unavailable; running every job.'
+            exit 0
+          fi
+          printf '%s\n' "$gates" >> "$GITHUB_OUTPUT"
       - name: Migrations are append-only
         env:
           EVENT: ${{ github.event_name }}
@@ -216,29 +241,53 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 2
       - name: Fetch lint base
         run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            base="$(git rev-parse --verify 'HEAD^1^{commit}')"
+            printf 'LOCAL_GATE_BASE_SHA=%s\n' "$base" >> "$GITHUB_ENV"
+            exit 0
+          fi
           [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
           git fetch --no-tags --depth=1 origin "$LOCAL_GATE_BASE_SHA"
           git cat-file -e "${LOCAL_GATE_BASE_SHA}^{commit}"
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect lint
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+      - &setup_npm
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
+        env:
+          NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
         with:
           node-version: '24.22.1'
           package-manager-cache: false
-      - name: Locked dependency installation
+          cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'npm' || '' }}
+          cache-dependency-path: package-lock.json
+      - &restore_npm
+        name: Restore npm cache
+        if: steps.subject.outputs.present == 'true' && (github.event_name != 'push' || github.ref != 'refs/heads/main') && hashFiles('package-lock.json') != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Match setup-node's path and key so the cache version is identical.
+          path: ${{ runner.temp }}/npm-cache
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+      - &install_locked
+        name: Locked dependency installation
+        id: install
         if: steps.subject.outputs.present == 'true'
+        env:
+          NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
         run: node scripts/ci-hosted/tasks.cjs install
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
 
   typecheck:
-    name: Typecheck (${{ matrix.subject }})
+    name: Typecheck
+    needs: append-only
+    if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.typecheck != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -247,32 +296,27 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Detect subject
+      - name: Detect typecheck subjects
         id: subject
-        run: node scripts/ci-hosted/tasks.cjs detect "$TYPECHECK_SUBJECT"
-        env:
-          TYPECHECK_SUBJECT: ${{ matrix.subject }}
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        run: node scripts/ci-hosted/tasks.cjs detect typecheck
+      - *setup_npm
+      - *restore_npm
+      - *install_locked
+      - name: Typecheck present apps sequentially
         if: steps.subject.outputs.present == 'true'
-        with:
-          node-version: 24.22.1
-          package-manager-cache: false
-      - name: Locked dependency installation
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs install
-      - name: Run subject
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs typecheck "$TYPECHECK_SUBJECT"
-        env:
-          TYPECHECK_SUBJECT: ${{ matrix.subject }}
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        subject: [apps/console, apps/portal, apps/fieldops]
+        run: |
+          result=0
+          for subject in apps/console apps/portal apps/fieldops; do
+            if [[ -f "$subject/package.json" ]]; then
+              node scripts/ci-hosted/tasks.cjs typecheck "$subject" || result=$?
+            fi
+          done
+          exit "$result"
 
   unit:
-    name: Unit Jest (${{ matrix.shard }}/8)
+    name: Unit Jest (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: append-only
+    if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.unit != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -284,14 +328,9 @@ jobs:
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect unit
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
-        if: steps.subject.outputs.present == 'true'
-        with:
-          node-version: 24.22.1
-          package-manager-cache: false
-      - name: Locked dependency installation
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs install
+      - *setup_npm
+      - *restore_npm
+      - *install_locked
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs unit
@@ -317,14 +356,15 @@ jobs:
           include-hidden-files: false
     strategy:
       fail-fast: false
-      max-parallel: 3
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2]
     env:
-      JEST_SHARD: ${{ matrix.shard }}/8
+      JEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
 
   ui:
-    name: Ui Jest (${{ matrix.shard }}/4)
+    name: Ui Jest
+    needs: append-only
+    if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.ui != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -336,14 +376,9 @@ jobs:
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect ui
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
-        if: steps.subject.outputs.present == 'true'
-        with:
-          node-version: 24.22.1
-          package-manager-cache: false
-      - name: Locked dependency installation
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs install
+      - *setup_npm
+      - *restore_npm
+      - *install_locked
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs ui
@@ -359,7 +394,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
         with:
-          name: ui-summary-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ui-summary-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-reports/ui*.json
             ci-reports/jest-results.ui*.json
@@ -367,50 +402,67 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
           include-hidden-files: false
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        shard: [1, 2, 3, 4]
-    env:
-      JEST_SHARD: ${{ matrix.shard }}/4
 
-  build:
-    name: Build (${{ matrix.subject }})
+  build-console:
+    name: Build (console)
+    needs: append-only
+    if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.build_console != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        subject: [apps/console, apps/portal, landing]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Detect build subject
+      - name: Detect console subject
         id: subject
-        env:
-          BUILD_SUBJECT: ${{ matrix.subject }}
-        run: node scripts/ci-hosted/tasks.cjs detect "$BUILD_SUBJECT"
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        run: node scripts/ci-hosted/tasks.cjs detect apps/console
+      - *setup_npm
+      - *restore_npm
+      - *install_locked
+      - name: Build present console
         if: steps.subject.outputs.present == 'true'
+        run: node scripts/ci-hosted/tasks.cjs build apps/console
+
+  build-portal-landing:
+    name: Build (portal and landing)
+    needs: append-only
+    if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.build_portal != 'false' || needs.append-only.outputs.build_landing != 'false') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      BUILD_PORTAL: ${{ needs.append-only.result == 'success' && needs.append-only.outputs.build_portal || '' }}
+      BUILD_LANDING: ${{ needs.append-only.result == 'success' && needs.append-only.outputs.build_landing || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
-          node-version: '24.22.1'
-          package-manager-cache: false
-      - name: Locked dependency installation
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs install
-      - name: Build present app
-        if: steps.subject.outputs.present == 'true'
-        env:
-          BUILD_SUBJECT: ${{ matrix.subject }}
-        run: node scripts/ci-hosted/tasks.cjs build "$BUILD_SUBJECT"
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Detect affected build subjects
+        id: subject
+        run: |
+          if [[ "$BUILD_PORTAL" != false && -f apps/portal/package.json ]]; then
+            printf '%s\n' 'portal=true' 'present=true' >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "$BUILD_LANDING" != false && -f scripts/frontend/build-landing.js ]]; then
+            printf '%s\n' 'landing=true' 'present=true' >> "$GITHUB_OUTPUT"
+          fi
+      - *setup_npm
+      - *restore_npm
+      - *install_locked
+      - name: Build present portal
+        if: steps.subject.outputs.portal == 'true'
+        run: node scripts/ci-hosted/tasks.cjs build apps/portal
+      - name: Build present landing
+        if: ${{ !cancelled() && steps.subject.outputs.landing == 'true' && steps.install.outcome == 'success' }}
+        run: node scripts/ci-hosted/tasks.cjs build landing
 
   e2e:
     name: Landing E2E (full-app E2E excluded)
+    needs: append-only
+    if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.e2e != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -422,14 +474,9 @@ jobs:
       - name: Detect landing browser subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect landing
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
-        if: steps.subject.outputs.present == 'true'
-        with:
-          node-version: '24.22.1'
-          package-manager-cache: false
-      - name: Locked dependency installation
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs install
+      - *setup_npm
+      - *restore_npm
+      - *install_locked
       - name: Install lockfile-selected Chromium
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs browser-install
@@ -455,16 +502,11 @@ jobs:
       - name: Enable manual subject
         id: subject
         run: printf '%s\n' 'present=true' >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
-        if: steps.subject.outputs.present == 'true'
-        with:
-          node-version: '24.22.1'
-          package-manager-cache: false
+      - *setup_npm
+      - *restore_npm
       - name: Check visual prerequisites before installation
         run: node scripts/ci-hosted/tasks.cjs visual-preflight
-      - name: Locked dependency installation
-        if: steps.subject.outputs.present == 'true'
-        run: node scripts/ci-hosted/tasks.cjs install
+      - *install_locked
       - name: Install lockfile-selected Chromium
         run: node scripts/ci-hosted/tasks.cjs browser-install
       - name: Regenerate visual baselines
@@ -494,7 +536,7 @@ jobs:
 
   ci-gate:
     name: ci-gate
-    needs: [database, database-build, database-pgtap, append-only, lint, typecheck, unit, ui, build, e2e, visual-baselines, dependency-review]
+    needs: [database, database-build, database-pgtap, append-only, lint, typecheck, unit, ui, build-console, build-portal-landing, e2e, visual-baselines, dependency-review]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -502,14 +544,28 @@ jobs:
       - name: Require the complete producer set
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
+          AFFECTED_REQUESTED: ${{ github.event_name == 'pull_request' }}
           VISUAL_REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.regenerate_visual_baselines }}
           DEPENDENCY_REVIEW_REQUESTED: ${{ github.event_name == 'pull_request' }}
         run: |
           python3 -I - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ['NEEDS_JSON'])
-          expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build', 'e2e', 'visual-baselines', 'dependency-review'}
+          expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build-console', 'build-portal-landing', 'e2e', 'visual-baselines', 'dependency-review'}
           good = set(needs) == expected
+          selector = needs.get('append-only', {})
+          gates = selector.get('outputs', {}) if selector.get('result') == 'success' else {}
+          affected_jobs = {
+              'database': ('database',),
+              'database-build': ('database',),
+              'database-pgtap': ('database',),
+              'typecheck': ('typecheck',),
+              'unit': ('unit',),
+              'ui': ('ui',),
+              'build-console': ('build_console',),
+              'build-portal-landing': ('build_portal', 'build_landing'),
+              'e2e': ('e2e',),
+          }
           for name in sorted(expected):
               result = needs.get(name, {}).get('result', 'missing')
               allowed = {'success'}
@@ -517,6 +573,9 @@ jobs:
                   allowed = {'skipped'}
               if name == 'dependency-review' and os.environ['DEPENDENCY_REVIEW_REQUESTED'] != 'true':
                   allowed = {'skipped'}
+              if (os.environ['AFFECTED_REQUESTED'] == 'true' and name in affected_jobs
+                      and all(gates.get(gate) == 'false' for gate in affected_jobs[name])):
+                  allowed = {'success', 'skipped'}
               passed = result in allowed
               print(f'{name}: {result}; {"PASS" if passed else "FAIL"}')
               good = good and passed

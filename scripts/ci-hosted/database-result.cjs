@@ -4,7 +4,7 @@ const path = require('node:path');
 const { loadExceptions, exceptionEvidence } = require('./pgtap-exceptions.cjs');
 const { sanitize } = require('./diagnostics.cjs');
 
-const PGTAP_SHARD_COUNT = 12;
+const PGTAP_SHARD_COUNT = 6;
 const cell = value => sanitize(value ?? 'UNKNOWN').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\|/g, '&#124;').replace(/[\r\n]+/g, ' ');
 function databaseResult(build, shards, inventory, env = process.env, entries = []) {
   let ok = env.BUILD_RESULT === 'success';
