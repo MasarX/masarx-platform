@@ -66,15 +66,17 @@ END $$;
 -- 1) Allowed: ops_admin can run plugin test by plugin_id.
 SELECT set_config('request.jwt.claim.sub', current_setting('test.w9_2_ops'), true);
 SET LOCAL ROLE authenticated;
+WITH tested AS (
+  SELECT public.test_integration_plugin_v1(jsonb_build_object(
+    'plugin_id', current_setting('test.w9_2_plugin'),
+    'payload', '{"sample":"payload"}'::jsonb
+  )) AS result
+)
 SELECT ok(
-  (
-    SELECT (public.test_integration_plugin_v1(jsonb_build_object(
-      'plugin_id', current_setting('test.w9_2_plugin'),
-      'payload', '{"sample":"payload"}'::jsonb
-    ))->>'ok')::bool
-  ),
-  'ops_admin can test_integration_plugin_v1'
-);
+  result->'ok' = 'true'::jsonb AND result#>'{steps,0,signature_required}' = 'true'::jsonb,
+  'ops_admin can test a plugin and read back its non-secret signature requirement'
+)
+FROM tested;
 RESET ROLE;
 
 -- 2) Allowed: ops_admin can target the exact plugin_version_id without active-version fallback.
