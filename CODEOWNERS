@@ -1,0 +1,13 @@
+# Changes to these paths need a code-owner approval. Everything else needs none.
+/CODEOWNERS                           @MasarX/platform-ops
+/.github/                             @MasarX/platform-ops
+/scripts/ci-hosted/                   @MasarX/platform-ops
+/config/ci/                           @MasarX/platform-ops
+/config/edge/functions.json           @MasarX/platform-ops
+/tooling/                             @MasarX/platform-ops
+/package.json                         @MasarX/platform-ops
+/package-lock.json                    @MasarX/platform-ops
+/apps/*/package.json                  @MasarX/platform-ops
+/packages/*/package.json              @MasarX/platform-ops
+/deno.lock                            @MasarX/platform-ops
+/supabase/config.toml                 @MasarX/platform-ops
