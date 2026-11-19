@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(42);
+SELECT plan(43);
 
 SELECT has_function(
   'public',
@@ -442,6 +442,18 @@ UPDATE public.shipments
    SET driver_user_id = NULL
  WHERE id = current_setting('test.w84c_shipment')::uuid
    AND organization_id = current_setting('test.w84c_org')::uuid;
+SELECT ok(
+  (SELECT metadata @> jsonb_build_object(
+      'settlement_context_ready', TRUE,
+      'driver_user_id', current_setting('test.w84c_ops_admin'))
+   FROM public.cod_entries
+   WHERE id = current_setting('test.w84c_shipment_action')::uuid),
+  'COD entries use route driver lineage when the shipment assignment is absent'
+);
+UPDATE public.route_runs
+   SET driver_user_id = NULL
+ WHERE id = '00000000-0000-0000-0000-00000000c956'::uuid
+   AND organization_id = current_setting('test.w84c_org')::uuid;
 SELECT is(
   (
     SELECT metadata->>'settlement_context_ready'
@@ -451,6 +463,10 @@ SELECT is(
   'false',
   'COD entries marks settlement context not ready when driver context is missing'
 );
+UPDATE public.route_runs
+   SET driver_user_id = current_setting('test.w84c_ops_admin')::uuid
+ WHERE id = '00000000-0000-0000-0000-00000000c956'::uuid
+   AND organization_id = current_setting('test.w84c_org')::uuid;
 UPDATE public.shipments
    SET driver_user_id = current_setting('test.w84c_ops_admin')::uuid
  WHERE id = current_setting('test.w84c_shipment')::uuid

@@ -1,8 +1,8 @@
+-- Migration 202610160835 records a successful workflow reuse as a succeeded row.
 -- pgTAP: Console V2 shipment import duplicate-row contract.
 --
--- A duplicate shipment-create row must not inflate created_count. The canonical
--- shipment writer may reuse an existing shipment; the import row must then be
--- visible as a skipped duplicate with the existing shipment id.
+-- A successful import row can reuse a shipment. Both rows must reference
+-- the same shipment and the reuse must preserve the original shipment data.
 
 SET search_path TO public, pgtap, extensions, pg_temp;
 
@@ -209,7 +209,7 @@ BEGIN
   );
 
   v_process := public.process_tabular_import_run_v1(v_run_id, 10);
-  RETURN NEXT is(v_process->>'status', 'completed_with_errors', 'duplicate import run finishes with visible skipped duplicate state');
+  RETURN NEXT is(v_process->>'status', 'completed', 'duplicate import run completes with reuse reported by the workflow');
 
   SELECT count(*)::int
     INTO v_shipment_count
@@ -224,12 +224,12 @@ BEGIN
       SELECT 1
         FROM public.tabular_import_runs r
        WHERE r.id = v_run_id
-         AND r.created_count = 1
-         AND r.skipped_count = 1
+         AND r.created_count = 2
+         AND r.skipped_count = 0
          AND r.failed_count = 0
          AND r.blocked_count = 0
     ),
-    'run rollups count one created shipment and one skipped duplicate'
+    'run rollups count both successful import rows'
   );
 
   SELECT count(DISTINCT rr.target_record_id), min(rr.target_record_id)
@@ -254,11 +254,11 @@ BEGIN
         FROM public.tabular_import_run_rows rr
        WHERE rr.run_id = v_run_id
          AND rr.row_number = 2
-         AND rr.action = 'skip'
-         AND rr.execution_status = 'skipped'
+         AND rr.action = 'create'
+         AND rr.execution_status = 'succeeded'
          AND rr.target_record_id = v_target_record_id
     ),
-    'duplicate row is skipped and points at the existing created shipment'
+    'duplicate row succeeds and points at the existing shipment'
   );
 
   RETURN NEXT ok(
@@ -267,11 +267,9 @@ BEGIN
         FROM public.tabular_import_run_rows rr
        WHERE rr.run_id = v_run_id
          AND rr.row_number = 2
-         AND rr.reason_codes @> '["duplicate_shipment_reused"]'::jsonb
-         AND rr.diagnostics @> '[{"code":"duplicate_shipment_reused","blocking":false}]'::jsonb
-         AND COALESCE((rr.metadata->>'duplicate_reused')::boolean, FALSE)
+         AND rr.metadata#>>'{primary_result,operation}' IN ('reused', 'reused_client_reference')
     ),
-    'skipped duplicate row carries visible diagnostic and metadata'
+    'succeeded duplicate row carries explicit workflow reuse readback'
   );
 
   SELECT NULLIF(rr.metadata#>>'{primary_result,workflow_run_id}', '')::uuid
@@ -353,7 +351,7 @@ BEGIN
   );
 
   v_reuse_process := public.process_tabular_import_run_v1(v_reuse_run_id, 10);
-  RETURN NEXT is(v_reuse_process->>'status', 'completed_with_errors', 'existing-shipment duplicate reuse is visible as skipped duplicate state');
+  RETURN NEXT is(v_reuse_process->>'status', 'completed', 'existing-shipment duplicate reuse completes successfully');
 
   SELECT NULLIF(rr.metadata#>>'{primary_result,workflow_run_id}', '')::uuid
     INTO v_reuse_workflow_run_id
@@ -374,12 +372,12 @@ BEGIN
         FROM public.tabular_import_run_rows rr
        WHERE rr.run_id = v_reuse_run_id
          AND rr.row_number = 1
-         AND rr.action = 'skip'
-         AND rr.execution_status = 'skipped'
+         AND rr.action = 'create'
+         AND rr.execution_status = 'succeeded'
          AND rr.target_record_id = v_target_record_id
          AND rr.metadata#>>'{primary_result,operation}' = 'reused'
     ),
-    'existing-shipment duplicate row exposes its own workflow-run lineage while staying skipped'
+    'existing-shipment duplicate row exposes its own successful reuse workflow'
   );
 
   RETURN NEXT ok(

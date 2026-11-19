@@ -192,22 +192,28 @@ UPDATE public.integration_plugins
 
 INSERT INTO public.mapping_configs (
   id,
+  organization_id,
   mapping_type,
   mapping_key,
   mapping_config,
   mapping_version,
+  managed_metadata,
   notes
 )
 VALUES (
   'c8f1d8f3-1e7f-4fb5-9f75-79f369473a40'::uuid,
+  'c8f1d8f3-1e7f-4fb5-9f75-79f369473a01'::uuid,
   'webhook_inbound',
   'integration_plugin:c8f1d8f3-1e7f-4fb5-9f75-79f369473a42:source:tenant:c8f1d8f3-1e7f-4fb5-9f75-79f369473a01',
   '{"target":"shipments.create","rules":[]}'::jsonb,
   1,
+  jsonb_build_object('plugin_version_id', 'c8f1d8f3-1e7f-4fb5-9f75-79f369473a42'),
   'Console V2 webhook source sender binding pgTAP mapping'
 )
 ON CONFLICT (id) DO UPDATE
-SET mapping_config = EXCLUDED.mapping_config,
+SET organization_id = EXCLUDED.organization_id,
+    mapping_config = EXCLUDED.mapping_config,
+    managed_metadata = EXCLUDED.managed_metadata,
     mapping_key = EXCLUDED.mapping_key,
     updated_at = now();
 
