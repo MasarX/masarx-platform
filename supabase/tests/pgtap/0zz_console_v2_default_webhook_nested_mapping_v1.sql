@@ -7,13 +7,24 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(7);
 
+-- Exercise the current shipment factory independently of general intake defaults.
+CREATE TEMP TABLE example_webhook_mapping AS
+WITH org AS (
+  INSERT INTO public.organizations (name, slug)
+  VALUES ('Example Mapping Tenant', 'example-mapping-' || gen_random_uuid()::text)
+  RETURNING id
+), fixture AS (
+  INSERT INTO public.mapping_configs (organization_id, mapping_type, mapping_key, mapping_config, mapping_version)
+  SELECT id, 'webhook_inbound', 'example-shipment-mapping',
+         public.default_shipment_webhook_intake_mapping_config_v1(), 1
+    FROM org
+  RETURNING id, mapping_config
+)
+SELECT id, mapping_config FROM fixture;
+
 WITH default_mapping AS (
   SELECT mc.mapping_config
-    FROM public.mapping_configs mc
-   WHERE mc.mapping_type = 'webhook_inbound'
-     AND mc.mapping_config#>>'{metadata,mapping_profile}' = 'shipment_webhook_intake_v1'
-   ORDER BY mc.updated_at DESC NULLS LAST, mc.id
-   LIMIT 1
+    FROM example_webhook_mapping mc
 )
 SELECT is(
   (SELECT mapping_config#>>'{metadata,payload_shape}' FROM default_mapping),
@@ -23,11 +34,7 @@ SELECT is(
 
 WITH default_mapping AS (
   SELECT mc.id
-    FROM public.mapping_configs mc
-   WHERE mc.mapping_type = 'webhook_inbound'
-     AND mc.mapping_config#>>'{metadata,mapping_profile}' = 'shipment_webhook_intake_v1'
-   ORDER BY mc.updated_at DESC NULLS LAST, mc.id
-   LIMIT 1
+    FROM example_webhook_mapping mc
 ),
 mapped AS (
   SELECT public.apply_mapping_config(
@@ -41,12 +48,12 @@ mapped AS (
         'cod_currency', 'SAR',
         'recipient', jsonb_build_object(
           'external_id', 'REC-WH-PGTAP-1001',
-          'name', 'Noura External PGTAP',
+          'name', 'Example Recipient',
           'phone', '+12025550123',
           'email', 'noura.pgtap@example.com'
         ),
         'destination', jsonb_build_object(
-          'line1', 'King Fahd Road',
+          'line1', 'Example Street',
           'line2', 'Building 12',
           'district', 'Al Olaya',
           'city', 'Riyadh',
@@ -62,17 +69,13 @@ mapped AS (
 )
 SELECT is(
   (SELECT payload#>>'{recipient,name}' FROM mapped),
-  'Noura External PGTAP',
-  'default webhook mapping maps nested Example Entity ntvplorhukthpmnmvgrstqzp'
+  'Example Recipient',
+  'default webhook mapping maps nested shipment.recipient.name'
 );
 
 WITH default_mapping AS (
   SELECT mc.id
-    FROM public.mapping_configs mc
-   WHERE mc.mapping_type = 'webhook_inbound'
-     AND mc.mapping_config#>>'{metadata,mapping_profile}' = 'shipment_webhook_intake_v1'
-   ORDER BY mc.updated_at DESC NULLS LAST, mc.id
-   LIMIT 1
+    FROM example_webhook_mapping mc
 ),
 mapped AS (
   SELECT public.apply_mapping_config(
@@ -81,7 +84,7 @@ mapped AS (
       'cod_amount', 137.65,
       'cod_currency', 'SAR',
       'recipient', jsonb_build_object('phone', '+12025550123'),
-      'destination', jsonb_build_object('line1', 'King Fahd Road', 'city', 'Riyadh', 'country', 'SA')
+      'destination', jsonb_build_object('line1', 'Example Street', 'city', 'Riyadh', 'country', 'SA')
     )),
     (SELECT id FROM default_mapping)
   ) AS payload
@@ -94,11 +97,7 @@ SELECT is(
 
 WITH default_mapping AS (
   SELECT mc.id
-    FROM public.mapping_configs mc
-   WHERE mc.mapping_type = 'webhook_inbound'
-     AND mc.mapping_config#>>'{metadata,mapping_profile}' = 'shipment_webhook_intake_v1'
-   ORDER BY mc.updated_at DESC NULLS LAST, mc.id
-   LIMIT 1
+    FROM example_webhook_mapping mc
 ),
 mapped AS (
   SELECT public.apply_mapping_config(
@@ -106,25 +105,21 @@ mapped AS (
       'reference', 'FT-WH-PGTAP-1001',
       'cod_amount', 137.65,
       'cod_currency', 'SAR',
-      'recipient', jsonb_build_object('name', 'Noura External PGTAP'),
-      'destination', jsonb_build_object('line1', 'King Fahd Road', 'city', 'Riyadh', 'country', 'SA')
+      'recipient', jsonb_build_object('name', 'Example Recipient'),
+      'destination', jsonb_build_object('line1', 'Example Street', 'city', 'Riyadh', 'country', 'SA')
     )),
     (SELECT id FROM default_mapping)
   ) AS payload
 )
 SELECT is(
   (SELECT payload#>>'{address,line1}' FROM mapped),
-  'King Fahd Road',
+  'Example Street',
   'default webhook mapping maps nested shipment.destination.line1'
 );
 
 WITH default_mapping AS (
   SELECT mc.id
-    FROM public.mapping_configs mc
-   WHERE mc.mapping_type = 'webhook_inbound'
-     AND mc.mapping_config#>>'{metadata,mapping_profile}' = 'shipment_webhook_intake_v1'
-   ORDER BY mc.updated_at DESC NULLS LAST, mc.id
-   LIMIT 1
+    FROM example_webhook_mapping mc
 ),
 mapped AS (
   SELECT public.apply_mapping_config(
@@ -132,8 +127,8 @@ mapped AS (
       'reference', 'FT-WH-PGTAP-1001',
       'cod_amount', 137.65,
       'cod_currency', 'SAR',
-      'recipient', jsonb_build_object('name', 'Noura External PGTAP'),
-      'destination', jsonb_build_object('line1', 'King Fahd Road', 'city', 'Riyadh', 'country', 'SA')
+      'recipient', jsonb_build_object('name', 'Example Recipient'),
+      'destination', jsonb_build_object('line1', 'Example Street', 'city', 'Riyadh', 'country', 'SA')
     )),
     (SELECT id FROM default_mapping)
   ) AS payload
@@ -146,11 +141,7 @@ SELECT is(
 
 WITH default_mapping AS (
   SELECT mc.id
-    FROM public.mapping_configs mc
-   WHERE mc.mapping_type = 'webhook_inbound'
-     AND mc.mapping_config#>>'{metadata,mapping_profile}' = 'shipment_webhook_intake_v1'
-   ORDER BY mc.updated_at DESC NULLS LAST, mc.id
-   LIMIT 1
+    FROM example_webhook_mapping mc
 ),
 mapped AS (
   SELECT public.apply_mapping_config(
@@ -158,8 +149,8 @@ mapped AS (
       'reference', 'FT-WH-PGTAP-1001',
       'cod_amount', 137.65,
       'cod_currency', 'SAR',
-      'recipient', jsonb_build_object('name', 'Noura External PGTAP'),
-      'destination', jsonb_build_object('line1', 'King Fahd Road', 'city', 'Riyadh', 'country', 'SA')
+      'recipient', jsonb_build_object('name', 'Example Recipient'),
+      'destination', jsonb_build_object('line1', 'Example Street', 'city', 'Riyadh', 'country', 'SA')
     )),
     (SELECT id FROM default_mapping)
   ) AS payload
@@ -172,11 +163,7 @@ SELECT is(
 
 WITH default_mapping AS (
   SELECT mc.id
-    FROM public.mapping_configs mc
-   WHERE mc.mapping_type = 'webhook_inbound'
-     AND mc.mapping_config#>>'{metadata,mapping_profile}' = 'shipment_webhook_intake_v1'
-   ORDER BY mc.updated_at DESC NULLS LAST, mc.id
-   LIMIT 1
+    FROM example_webhook_mapping mc
 ),
 mapped AS (
   SELECT public.apply_mapping_config(
@@ -185,8 +172,8 @@ mapped AS (
       'service_type', 'delivery',
       'cod_amount', 137.65,
       'cod_currency', 'SAR',
-      'recipient', jsonb_build_object('name', 'Noura External PGTAP'),
-      'destination', jsonb_build_object('line1', 'King Fahd Road', 'city', 'Riyadh', 'country', 'SA')
+      'recipient', jsonb_build_object('name', 'Example Recipient'),
+      'destination', jsonb_build_object('line1', 'Example Street', 'city', 'Riyadh', 'country', 'SA')
     )),
     (SELECT id FROM default_mapping)
   ) AS payload

@@ -42,8 +42,8 @@ INSERT INTO public.canonical_cities (
 VALUES (
   'f8a00000-0000-0000-0000-000000000120'::uuid,
   'f8a00000-0000-0000-0000-000000000101'::uuid,
-  'Riyadh',
-  'Riyadh Province',
+  'Example Materialization City',
+  'Example Test Province',
   'SA',
   'ops_verified'
 )
@@ -254,7 +254,7 @@ SELECT public.workflow_intake_webhook_core_v1(
           'line1', 'King Fahd Road',
           'line2', 'Materialization proof',
           'district', 'Al Olaya',
-          'city', 'Riyadh',
+          'city', 'Example Materialization City',
           'country_code', 'SA',
           'lat', 24.7136,
           'lng', 46.6753
@@ -283,7 +283,7 @@ SELECT public.workflow_intake_webhook_core_v1(
           'line1', 'King Fahd Road',
           'line2', 'Materialization proof',
           'district', 'Al Olaya',
-          'city', 'Riyadh',
+          'city', 'Example Materialization City',
           'country_code', 'SA',
           'lat', 24.7136,
           'lng', 46.6753
@@ -367,7 +367,7 @@ SELECT ok(
   'recipient display data is materialized from nested provider payload'
 );
 SELECT ok(
-  (SELECT city FROM _created_shipment) = 'Riyadh',
+  (SELECT city FROM _created_shipment) = 'Example Materialization City',
   'destination address is created from provider payload'
 );
 SELECT ok(
@@ -375,7 +375,7 @@ SELECT ok(
     SELECT a.province
       FROM public.addresses a
       JOIN _created_shipment s ON s.destination_address_id = a.id
-  ) = 'Riyadh Province',
+  ) = 'Example Test Province',
   'missing provider province is resolved from canonical city reference data'
 );
 SELECT ok(

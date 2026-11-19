@@ -138,15 +138,19 @@ BEGIN
     'webhook_sources generic read routes through the redacted source directory'
   );
 
-  RETURN NEXT is(
-    (
-      SELECT resource->>'relation'
-        FROM jsonb_array_elements(COALESCE(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources', '[]'::jsonb)) AS resource
-       WHERE resource->>'key' = 'provider_auth_configs'
-       LIMIT 1
+  RETURN NEXT ok(
+    EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources') AS resource
+      CROSS JOIN LATERAL (
+        SELECT public.ui_read_projection_columns_v1(resource,
+          to_regclass(COALESCE(resource->>'read_relation', resource->>'relation'))) AS fields
+      ) projection
+      WHERE resource->>'key' = 'provider_auth_configs'
+        AND projection.fields @> ARRAY['id', 'provider_id', 'auth_type']::text[]
+        AND NOT (projection.fields && ARRAY['credentials', 'credentials_vault_id']::text[])
     ),
-    'public.v_integration_credential_directory',
-    'provider_auth_configs generic read routes through the redacted credential directory'
+    'provider credential registry exposes only the explicit browser projection'
   );
 
   RETURN NEXT ok(
@@ -221,14 +225,17 @@ BEGIN
   );
 
   RETURN NEXT ok(
-    v_cred_get->>'provider_label' = 'Console V2 Redaction Provider'
+    v_cred_get->>'provider_id' = v_provider::text
     AND NOT (v_cred_get ? 'credentials')
     AND NOT (v_cred_get ? 'credentials_vault_id'),
     'ui_get_resource_v1(provider_auth_configs) returns credential metadata only'
   );
 
   RETURN NEXT ok(
-    NOT EXISTS (
+    EXISTS (
+      SELECT 1 FROM jsonb_array_elements(v_cred_list->'items') AS item
+      WHERE item->>'id' = v_config::text
+    ) AND NOT EXISTS (
       SELECT 1
         FROM jsonb_array_elements(COALESCE(v_cred_list->'items', '[]'::jsonb)) AS item
        WHERE item ? 'credentials'
@@ -274,7 +281,7 @@ BEGIN
   v_cred_get := public.ui_get_resource_v1('provider_auth_configs', v_created_config);
 
   RETURN NEXT ok(
-    v_cred_get->>'provider_label' = 'Console V2 Redaction Provider'
+    v_cred_get->>'provider_id' = v_provider::text
     AND NOT (v_cred_get ? 'credentials')
     AND NOT (v_cred_get ? 'credentials_vault_id')
     AND v_cred_get::text NOT LIKE '%new-provider-secret-that-must-be-vaulted%',

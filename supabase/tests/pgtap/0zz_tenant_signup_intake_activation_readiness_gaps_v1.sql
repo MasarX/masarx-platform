@@ -92,6 +92,7 @@ DECLARE
   v_readiness JSONB := '{}'::jsonb;
   v_profile_update JSONB := '{}'::jsonb;
   v_profile_error TEXT := NULL;
+  v_legacy_profile_rejected BOOLEAN := FALSE;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
   PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
@@ -460,16 +461,22 @@ BEGIN
   );
   EXECUTE 'SET LOCAL ROLE authenticated';
 
+  -- The profile RPC accepts only explicit branding fields. Logos use owned artifacts.
   BEGIN
-    v_profile_update := public.ui_update_organization_profile_v1(
-      jsonb_build_object(
-        'organization_id', v_approved_org_id,
-        'logo_url', 'https://cdn.example.test/activation-logo.png',
-        'default_settings_patch', jsonb_build_object(
-          'mobile', jsonb_build_object('policy_profile', 'fieldops-default')
-        )
-      )
-    );
+    PERFORM public.ui_update_organization_profile_v1(jsonb_build_object(
+      'organization_id', v_approved_org_id,
+      'logo_url', 'https://assets.example.test/external-logo.png',
+      'default_settings_patch', jsonb_build_object('mobile', jsonb_build_object('policy_profile', 'example'))
+    ));
+  EXCEPTION WHEN invalid_parameter_value THEN
+    v_legacy_profile_rejected := TRUE;
+  END;
+
+  BEGIN
+    v_profile_update := public.ui_update_organization_profile_v1(jsonb_build_object(
+      'organization_id', v_approved_org_id,
+      'primary_color', '#445566'
+    ));
   EXCEPTION
     WHEN others THEN
       v_profile_error := SQLSTATE || ':' || SQLERRM;
@@ -511,15 +518,11 @@ BEGIN
     'readiness_scope_id', v_readiness->>'scope_id',
     'readiness_organization_id', v_readiness->>'organization_id',
     'readiness_settings_healthy', COALESCE((v_readiness #>> '{settings_defaults,healthy}')::boolean, FALSE),
-    'profile_ok', COALESCE((v_profile_update->>'ok')::boolean, FALSE),
+    'profile_ok', (v_profile_update->>'organization_id')::uuid = v_approved_org_id,
     'profile_error', v_profile_error,
-    'profile_logo_url', (
-      SELECT o.default_settings #>> '{branding,logo_url}'
-      FROM public.organizations o
-      WHERE o.id = v_approved_org_id
-    ),
-    'profile_mobile_policy_profile', (
-      SELECT o.default_settings #>> '{mobile,policy_profile}'
+    'legacy_profile_rejected', v_legacy_profile_rejected,
+    'profile_primary_color', (
+      SELECT o.default_settings #>> '{branding,primary_color}'
       FROM public.organizations o
       WHERE o.id = v_approved_org_id
     )
@@ -685,21 +688,21 @@ FROM pg_temp.tenant_signup_intake_activation_readiness_result;
 SELECT ok(
   COALESCE((payload->>'profile_ok')::BOOLEAN, FALSE)
   AND payload->>'profile_error' IS NULL,
-  'materialized tenant admin can update organization logo/default settings through the canonical RPC'
+  'materialized tenant admin can update approved branding fields through the profile RPC'
 )
 FROM pg_temp.tenant_signup_intake_activation_readiness_result;
 
 SELECT is(
-  payload->>'profile_logo_url',
-  'https://cdn.example.test/activation-logo.png',
-  'organization logo URL is persisted under default_settings.branding'
+  payload->>'legacy_profile_rejected',
+  'true',
+  'profile rejects an external logo URL and arbitrary defaults patch'
 )
 FROM pg_temp.tenant_signup_intake_activation_readiness_result;
 
 SELECT is(
-  payload->>'profile_mobile_policy_profile',
-  'fieldops-default',
-  'organization default settings patch persists mobile policy profile'
+  payload->>'profile_primary_color',
+  '#445566',
+  'approved branding color is persisted under organization defaults'
 )
 FROM pg_temp.tenant_signup_intake_activation_readiness_result;
 
