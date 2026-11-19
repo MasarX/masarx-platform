@@ -106,3 +106,8 @@ docs/ops/plans/review/PLAN-2099*/
 /apps/console/public/fieldops/
 /public/fieldops/
 !packages/ui/src/maplibre-css.d.ts
+.playwright-cli/
+output/
+apps/console-v2/.vitest/
+.tmp/
+.tmp-*

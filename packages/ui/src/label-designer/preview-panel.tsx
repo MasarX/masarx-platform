@@ -144,26 +144,32 @@ export function PreviewPanel({
       </div>
 
       {/* PDF Preview */}
-      <ErrorBoundary
-        fallback={
-          <div className="flex items-center justify-center rounded-lg border border-ui-danger/30 bg-ui-danger/5 p-4 text-sm text-ui-danger">
-            {t("pdfUnavailable")}
-          </div>
-        }
-      >
-        <React.Suspense
+      {typeof window !== "undefined" && typeof window.DOMMatrix === "function" ? (
+        <ErrorBoundary
           fallback={
-            <div className="flex items-center justify-center rounded-lg border border-dashed border-ui-border/50 bg-ui-paper/30 p-8 text-sm text-ui-muted">
-              {t("pdfLoading")}
+            <div className="flex items-center justify-center rounded-lg border border-ui-danger/30 bg-ui-danger/5 p-4 text-sm text-ui-danger">
+              {t("pdfUnavailable")}
             </div>
           }
         >
-          <LazyPdfPreview
-            pdfBase64={pdfBase64}
-            testIdPrefix={`${prefix}-pdf`}
-          />
-        </React.Suspense>
-      </ErrorBoundary>
+          <React.Suspense
+            fallback={
+              <div className="flex items-center justify-center rounded-lg border border-dashed border-ui-border/50 bg-ui-paper/30 p-8 text-sm text-ui-muted">
+                {t("pdfLoading")}
+              </div>
+            }
+          >
+            <LazyPdfPreview
+              pdfBase64={pdfBase64}
+              testIdPrefix={`${prefix}-pdf`}
+            />
+          </React.Suspense>
+        </ErrorBoundary>
+      ) : (
+          <div className="flex items-center justify-center rounded-lg border border-ui-danger/30 bg-ui-danger/5 p-4 text-sm text-ui-danger">
+            {t("pdfUnavailable")}
+          </div>
+      )}
 
       {/* Sample data + preview details */}
       <div className="space-y-2">

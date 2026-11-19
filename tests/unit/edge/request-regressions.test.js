@@ -334,12 +334,12 @@ describe('designer image uploads validate bytes before storage', () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  test.each(['application/pdf','font/ttf','font/otf','font/woff','font/woff2'])('preserves the existing %s upload path', async mime => {
+  test.each(['application/pdf','font/ttf','font/otf','font/woff','font/woff2'])('rejects non-image %s uploads before storage', async mime => {
     const { handler, upload } = uploads();
-    const bytes = Buffer.from('synthetic nonimage upload remains outside image validation');
-    expect((await handler(request(bytes,mime))).status).toBe(200);
-    expect(upload.mock.calls[0][2]).toEqual({ contentType:mime,upsert:true });
-    expect(Buffer.from(await upload.mock.calls[0][1].arrayBuffer())).toEqual(bytes);
+    const response = await handler(request(Buffer.from('synthetic non-image content'), mime));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.code).toBe('invalid_image');
+    expect(upload).not.toHaveBeenCalled();
   });
 
   test('strict SVG parsing never fetches external DTDs or expands custom entities', async () => {
@@ -387,11 +387,15 @@ describe('designer image uploads validate bytes before storage', () => {
     expect(upload.mock.calls[0][2].contentType).toBe('image/png');
   });
 
-  test('storage failures and cross-organization path denials remain unchanged', async () => {
+  test('storage failure responses are generic and cross-organization paths are denied', async () => {
     const { handler, upload } = uploads({storageError:{message:'storage rejected'}});
     const response = await handler(request(png,'image/png'));
     expect(response.status).toBe(400);
-    expect((await response.json()).error).toEqual({code:'upload_failed',message:'storage rejected'});
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: { code: 'upload_failed', message: 'Could not upload asset' },
+      correlation_id: expect.stringMatching(/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i),
+    });
     for(const mode of ['signed_url','delete']) {
       expect((await handler(request(png,'image/png',{mode,path:'org-b/designer/logo.png'}))).status).toBe(403);
     }

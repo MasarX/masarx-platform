@@ -5,7 +5,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(6);
+SELECT plan(8);
 
 -- ============================================================================
 -- Fixture data
@@ -46,6 +46,43 @@ WITH org AS (
     SELECT 'dddddddd-0000-0000-0000-000000000001', id, 'Test Provider', 'http'
     FROM org
     RETURNING id, organization_id
+), recipient AS (
+    INSERT INTO recipients (id, organization_id, client_id, name, phone_number)
+    SELECT '99999999-0000-0000-0000-000000000001', organization_id, id, 'Runtime Recipient', '+12025550123'
+    FROM client
+    ON CONFLICT (id) DO UPDATE
+    SET organization_id = EXCLUDED.organization_id,
+        client_id = EXCLUDED.client_id,
+        name = EXCLUDED.name,
+        phone_number = EXCLUDED.phone_number
+    RETURNING id, organization_id
+), shipment AS (
+    INSERT INTO shipments (
+        id,
+        organization_id,
+        client_id,
+        sender_id,
+        service_type,
+        tracking_number,
+        status
+    )
+    SELECT
+        '88888888-0000-0000-0000-000000000001',
+        c.organization_id,
+        c.id,
+        s.id,
+        'delivery',
+        'TRK-RUNTIME-001',
+        'pending'
+    FROM client c
+    JOIN sender s ON s.client_id = c.id
+    ON CONFLICT (id, client_id) DO UPDATE
+    SET organization_id = EXCLUDED.organization_id,
+        sender_id = EXCLUDED.sender_id,
+        service_type = EXCLUDED.service_type,
+        tracking_number = EXCLUDED.tracking_number,
+        status = EXCLUDED.status
+    RETURNING id, organization_id
 ), svc AS (
     INSERT INTO settings_versions (id, category, scope_type, scope_id, version, value, approved_at)
     VALUES
@@ -81,6 +118,153 @@ INSERT INTO cron_config (worker_name, interval_seconds, batch_size, last_run_at,
 VALUES ('test_worker', 60, 5, NULL, TRUE, 'Temporary worker for throttle tests')
 ON CONFLICT (worker_name) DO NOTHING;
 
+-- Ensure outbound_call fixtures satisfy workflow-engine guards.
+SELECT set_config('app.workflow_run_id', '77777777-0000-0000-0000-000000000100', true);
+
+INSERT INTO workflow_templates (id, name, description, version, status, scope_type)
+VALUES (
+  '77777777-0000-0000-0000-000000000102',
+  'pgtap_runtime_outbound_template',
+  'pgTAP runtime outbound organization resolver fixture',
+  1,
+  'active',
+  'global'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO workflow_template_steps (
+  id,
+  workflow_template_id,
+  sequence_order,
+  operation_name,
+  transition_condition,
+  handler_key,
+  handler_version,
+  enabled
+)
+VALUES (
+  '77777777-0000-0000-0000-000000000103',
+  '77777777-0000-0000-0000-000000000102',
+  1,
+  'workflow_control',
+  'always',
+  'workflow_control',
+  'v1',
+  TRUE
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO workflow_runs (
+  id,
+  workflow_template_id,
+  workflow_template_version,
+  entry_point,
+  workflow_status,
+  context
+)
+VALUES (
+  '77777777-0000-0000-0000-000000000100',
+  '77777777-0000-0000-0000-000000000102',
+  1,
+  'test',
+  'pending',
+  '{}'::jsonb
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO workflow_run_steps (
+  id,
+  workflow_run_id,
+  workflow_template_step_id,
+  sequence_order,
+  step_status,
+  operation_name,
+  handler_key,
+  handler_version,
+  max_retries,
+  enqueued_at,
+  created_at,
+  updated_at
+)
+VALUES (
+  '77777777-0000-0000-0000-000000000101',
+  '77777777-0000-0000-0000-000000000100',
+  '77777777-0000-0000-0000-000000000103',
+  1,
+  'pending',
+  'workflow_control',
+  'workflow_control',
+  'v1',
+  1,
+  now(),
+  now(),
+  now()
+)
+ON CONFLICT (id) DO NOTHING;
+
+SELECT set_config('app.workflow_run_step_id', '77777777-0000-0000-0000-000000000101', true);
+SELECT set_config('platform.workflow_engine', '1', true);
+SELECT set_config('platform.workflow_run_step_id', '77777777-0000-0000-0000-000000000101', true);
+
+INSERT INTO outbound_calls (
+    id,
+    call_type,
+    target_type,
+    target_id,
+    method,
+    url,
+    headers,
+    body,
+    status,
+    priority,
+    retry_count,
+    max_retries,
+    scheduled_at,
+    created_at,
+    workflow_run_step_id
+) VALUES (
+    '77777777-0000-0000-0000-000000000201',
+    'comms_sms',
+    'recipient',
+    '99999999-0000-0000-0000-000000000001',
+    'POST',
+    'comms://sms',
+    '{}'::jsonb,
+    '{}'::jsonb,
+    'pending',
+    100,
+    0,
+    2,
+    now(),
+    now(),
+    '77777777-0000-0000-0000-000000000101'
+), (
+    '77777777-0000-0000-0000-000000000202',
+    'comms_sms',
+    'recipient',
+    '99999999-0000-0000-0000-000000000999',
+    'POST',
+    'comms://sms',
+    '{}'::jsonb,
+    '{}'::jsonb,
+    'pending',
+    100,
+    0,
+    2,
+    now(),
+    now(),
+    '77777777-0000-0000-0000-000000000101'
+)
+ON CONFLICT (id) DO UPDATE
+SET target_type = EXCLUDED.target_type,
+    target_id = EXCLUDED.target_id,
+    shipment_id = EXCLUDED.shipment_id,
+    workflow_run_step_id = EXCLUDED.workflow_run_step_id;
+
+UPDATE outbound_calls
+SET shipment_id = '88888888-0000-0000-0000-000000000001'
+WHERE id = '77777777-0000-0000-0000-000000000202';
+
 -- ============================================================================
 -- Tests
 -- ============================================================================
@@ -101,6 +285,18 @@ SELECT is(
     resolve_organization_id_strict('provider', 'dddddddd-0000-0000-0000-000000000001'),
     'aaaaaaaa-0000-0000-0000-000000000001'::UUID,
     'resolve_organization_id_strict finds provider organization'
+);
+
+SELECT is(
+    resolve_organization_id_strict('outbound_call', '77777777-0000-0000-0000-000000000201'),
+    'aaaaaaaa-0000-0000-0000-000000000001'::UUID,
+    'resolve_organization_id_strict finds outbound_call organization from recipient target'
+);
+
+SELECT is(
+    resolve_organization_id_strict('outbound_call', '77777777-0000-0000-0000-000000000202'),
+    'aaaaaaaa-0000-0000-0000-000000000001'::UUID,
+    'resolve_organization_id_strict falls back to shipment organization for outbound_call'
 );
 
 SELECT is(

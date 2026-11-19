@@ -18,6 +18,7 @@ DECLARE
   v_branch UUID := gen_random_uuid();
   v_vehicle UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_shipment UUID := gen_random_uuid();
   v_created RECORD;
   v_route_stop_id UUID;
@@ -76,6 +77,8 @@ BEGIN
     'mailroom handover mode does not require signature'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'B08 POD Signature Org', 'b08-pod-signature-' || left(v_org::text, 8));
 
@@ -114,10 +117,17 @@ BEGIN
     '{}'::jsonb
   );
 
+  INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES (v_sender, v_client, 'B08 POD Signature Sender', 'B08 POD Signature Sender', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:b08-pod-signature-fixture-bootstrap');
+
   INSERT INTO public.shipments (
     id,
     organization_id,
     client_id,
+    sender_id,
     service_type,
     tracking_number,
     status,
@@ -128,6 +138,7 @@ BEGIN
     v_shipment,
     v_org,
     v_client,
+    v_sender,
     'delivery',
     'B08-POD-' || left(v_shipment::text, 8),
     'out_for_delivery',

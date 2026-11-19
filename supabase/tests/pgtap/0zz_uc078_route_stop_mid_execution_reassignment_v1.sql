@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(19);
+SELECT plan(20);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_uc078_route_stop_mid_execution_reassignment_v1()
 RETURNS SETOF TEXT
@@ -17,6 +17,7 @@ DECLARE
   v_org UUID := gen_random_uuid();
   v_branch UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
+  v_route_plan UUID := gen_random_uuid();
   v_operator UUID := gen_random_uuid();
   v_driver_one UUID := gen_random_uuid();
   v_driver_two UUID := gen_random_uuid();
@@ -166,6 +167,21 @@ BEGIN
     )
    LIMIT 1;
 
+  INSERT INTO public.route_plans (id, organization_id, branch_id, planned_date, status, inputs, metadata)
+  VALUES (
+    v_route_plan,
+    v_org,
+    v_branch,
+    current_date,
+    'applied',
+    jsonb_build_object('source', 'uc078-route-plan-reassign-regression'),
+    jsonb_build_object('proof', 'route-plan source runs can be split without route_plan_id reuse')
+  );
+
+  UPDATE public.route_runs
+     SET route_plan_id = v_route_plan
+   WHERE id = v_stop_route.route_run_id;
+
   PERFORM set_config('request.jwt.claim.sub', v_operator::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_operator::text, 'role', 'authenticated')::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
@@ -306,6 +322,17 @@ BEGIN
   END;
 
   RETURN NEXT ok(v_target_route_id IS NOT NULL, 'route_stops.reassign creates a target route_run');
+
+  RETURN NEXT ok(
+    EXISTS (
+      SELECT 1
+        FROM public.route_runs rr
+       WHERE rr.id = v_target_route_id
+         AND rr.route_plan_id IS NULL
+         AND rr.metadata->'stop_reassignment'->>'source_route_run_id' = v_stop_route.route_run_id::text
+    ),
+    'route-plan source split creates target run without reusing unique route_plan_id'
+  );
 
   EXECUTE 'SET LOCAL ROLE postgres';
   RETURN NEXT is(

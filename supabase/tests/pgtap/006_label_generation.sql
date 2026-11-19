@@ -11,9 +11,12 @@ SELECT has_column('public', 'shipment_label_payload_v', 'client_name', 'shipment
 SELECT has_column('public', 'shipment_label_payload_v', 'sender_brand_name', 'shipment_label_payload_v exposes sender branding');
 
 -- ---------------------------------------------------------------------------
--- Setup tenant, client, template, shipment, and box for label testing
+-- Setup tenant, client, sender, template, shipment, and box for label testing
 -- ---------------------------------------------------------------------------
 
+-- This fixture owns client/sender setup. Defer organization bootstrap until
+-- the source-binding context exists, then run canonical onboarding explicitly.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 WITH org_row AS (
     INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
     VALUES (
@@ -24,6 +27,13 @@ WITH org_row AS (
         'en-US',
         'active'
     )
+    ON CONFLICT (id) DO UPDATE
+    SET name = EXCLUDED.name,
+        slug = EXCLUDED.slug,
+        timezone = EXCLUDED.timezone,
+        locale = EXCLUDED.locale,
+        billing_status = EXCLUDED.billing_status,
+        updated_at = now()
     RETURNING id
 ),
 client_row AS (
@@ -37,7 +47,34 @@ client_row AS (
         'active',
         '{}'::jsonb
     )
+    ON CONFLICT (id) DO UPDATE
+    SET organization_id = EXCLUDED.organization_id,
+        name = EXCLUDED.name,
+        slug = EXCLUDED.slug,
+        sla_tier = EXCLUDED.sla_tier,
+        status = EXCLUDED.status,
+        settings_override = EXCLUDED.settings_override,
+        updated_at = now()
     RETURNING id, organization_id
+),
+sender_row AS (
+    INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+    VALUES (
+        'bbbb0000-0000-4000-8000-00000000aa12',
+        (SELECT id FROM client_row),
+        'Label QA Sender',
+        'Label QA Sender',
+        false,
+        true,
+        'active'
+    )
+    ON CONFLICT (id) DO UPDATE
+    SET client_id = EXCLUDED.client_id,
+        name = EXCLUDED.name,
+        brand_name = EXCLUDED.brand_name,
+        status = EXCLUDED.status,
+        updated_at = now()
+    RETURNING id, client_id
 ),
 template_seed AS (
     INSERT INTO label_template_specs (
@@ -98,6 +135,7 @@ shipment_row AS (
         id,
         organization_id,
         client_id,
+        sender_id,
         service_type,
         tracking_number,
         status,
@@ -112,6 +150,7 @@ shipment_row AS (
         'eeee0000-0000-4000-8000-00000000aa05',
         (SELECT organization_id FROM client_row),
         (SELECT id FROM client_row),
+        (SELECT id FROM sender_row),
         'delivery',
         'LBLTEST0001',
         'pending',
@@ -146,6 +185,13 @@ box_row AS (
     RETURNING id
 )
 SELECT ok(TRUE, 'Test data seeded successfully');
+
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+    'aaaaaaaa-0000-4000-8000-00000000aa01',
+    'pgtap:label-generation-fixture-bootstrap'
+);
 
 -- Ensure template resolution returns expected snapshot
 SELECT ok(

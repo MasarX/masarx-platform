@@ -7,7 +7,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(226);
+SELECT plan(229);
 
 -- Insert before the existing main fixture function in
 -- supabase/tests/pgtap/0zz_cod_settlement_driver_shift_workflow_v2.sql.
@@ -571,6 +571,8 @@ BEGIN
   RETURN NEXT is((SELECT handler_key FROM public.workflow_template_steps WHERE workflow_template_id = v_template_id AND sequence_order = 10), 'task_wait', 'step 10 handler_key = task_wait');
   RETURN NEXT is((SELECT handler_key FROM public.workflow_template_steps WHERE workflow_template_id = v_template_id AND sequence_order = 11), 'settlement_batch', 'step 11 handler_key = settlement_batch');
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', TRUE);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'COD Settlement Workflow v2 Org', 'cod-settle-v2-' || left(v_org::text, 8));
 
@@ -626,6 +628,9 @@ BEGIN
   VALUES
     (v_sender_a, v_client_a, 'COD Settlement Sender A', 'COD Settlement Sender A', TRUE, 'active'),
     (v_sender_b, v_client_b, 'COD Settlement Sender B', 'COD Settlement Sender B', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', TRUE);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:cod-settlement-driver-shift-v2-fixture-bootstrap');
 
   INSERT INTO public.vehicles (id, organization_id, status, is_active)
   VALUES
@@ -1185,6 +1190,21 @@ BEGIN
   SELECT context INTO v_ctx FROM public.workflow_runs WHERE id = v_run_b;
   BEGIN v_task_id := NULLIF((v_ctx->'manager_approval_task'->>'task_id'), '')::uuid; EXCEPTION WHEN others THEN v_task_id := NULL; END;
   RETURN NEXT ok(v_task_id IS NOT NULL, 'scenario B: manager approval task_id exists');
+  RETURN NEXT is(
+    (SELECT metadata->'allowed_actions' FROM public.tasks WHERE id = v_task_id),
+    jsonb_build_array('approve', 'reject'),
+    'scenario B: manager approval task exposes row-driven approve/reject actions'
+  );
+  RETURN NEXT is(
+    (SELECT queue_key FROM public.tasks WHERE id = v_task_id),
+    'finance',
+    'scenario B: manager approval task is routed to finance queue'
+  );
+  RETURN NEXT is(
+    (SELECT metadata->>'description' FROM public.tasks WHERE id = v_task_id),
+    'Review the COD variance decision and approve or reject the settlement closeout.',
+    'scenario B: manager approval task carries operator decision description'
+  );
 
   v_progress := progress_workflow_run(v_run_b);
   RETURN NEXT is(v_progress->>'status', 'pending', 'scenario B: step 10 pending while manager task is open');

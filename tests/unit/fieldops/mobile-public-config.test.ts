@@ -20,6 +20,7 @@ describe("mobile public config", () => {
     delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     delete process.env.EXPO_PUBLIC_SUPABASE_URL;
     delete process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    delete process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL;
   });
 
   test("maps and trims Expo extra values before resolving public config", () => {
@@ -27,6 +28,7 @@ describe("mobile public config", () => {
       NEXT_PUBLIC_APP_NAME: "  Field Ops  ",
       NEXT_PUBLIC_SUPABASE_URL: " https://example.supabase.co ",
       NEXT_PUBLIC_SUPABASE_ANON_KEY: " anon-key ",
+      NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL: " https://functions.example/functions/v1 ",
       NEXT_PUBLIC_SENTRY_DSN: " https://dsn.example/1 ",
       NEXT_PUBLIC_SENTRY_ENVIRONMENT: " production ",
       NEXT_PUBLIC_AUTH_METHODS: " password,otp ",
@@ -52,6 +54,7 @@ describe("mobile public config", () => {
 
     const forwarded = (getPublicConfigFromEnv as jest.Mock).mock.calls[0]?.[0] || {};
     expect(forwarded.NEXT_PUBLIC_APP_BASE_PATH).toBeUndefined();
+    expect(forwarded.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL).toBeUndefined();
     expect(resolved.NEXT_PUBLIC_APP_NAME).toBe("Field Ops");
   });
 

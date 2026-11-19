@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(46);
+SELECT plan(48);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_run_assignment_lifecycle_foundation_v1()
 RETURNS SETOF TEXT
@@ -389,7 +389,9 @@ BEGIN
   );
   EXECUTE 'SET LOCAL ROLE postgres';
   RETURN NEXT is((SELECT assignment_mode FROM public.route_run_assignments WHERE route_run_id = v_route.route_run_id), 'internal_driver', 'projection stores internal driver mode');
+  RETURN NEXT is((SELECT vehicle_id::text FROM public.route_run_assignments WHERE route_run_id = v_route.route_run_id), v_vehicle::text, 'projection stores selected vehicle_id');
   RETURN NEXT is((SELECT driver_user_id::text FROM public.route_runs WHERE id = v_route.route_run_id), v_driver::text, 'route_runs driver_user_id is updated');
+  RETURN NEXT is((SELECT vehicle_id::text FROM public.route_runs WHERE id = v_route.route_run_id), v_vehicle::text, 'route_runs vehicle_id is updated');
   RETURN NEXT is(
     (SELECT COUNT(*)::text
        FROM public.tasks t

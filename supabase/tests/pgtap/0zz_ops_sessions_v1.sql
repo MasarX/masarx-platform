@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(20);
+SELECT plan(24);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_ops_sessions_v1()
 RETURNS SETOF TEXT
@@ -21,6 +21,10 @@ DECLARE
 
   v_sess1 RECORD;
   v_sess2 RECORD;
+  v_driver_sess RECORD;
+  v_driver_close RECORD;
+  v_driver_readback JSONB;
+  v_driver_closed_readback JSONB;
 
   v_tr1 RECORD;
   v_tr2 RECORD;
@@ -107,6 +111,29 @@ BEGIN
   RETURN NEXT ok(v_sess2.created IS FALSE, 'open_ops_session_v1 replay created=false');
   RETURN NEXT is(v_sess1.ops_session_id::text, v_sess2.ops_session_id::text, 'open_ops_session_v1 returns same ops_session_id on replay');
 
+  SELECT * INTO v_driver_sess
+  FROM public.open_ops_session_v1(
+    jsonb_build_object(
+      'session_type', 'driver_shift',
+      'device_id', v_device.device_id,
+      'idempotency_key', 'pgtap-driver-shift-readback-1',
+      'opened_at', now()
+    )
+  )
+  LIMIT 1;
+
+  v_driver_readback := api.ui_get_resource_v1('ops_sessions', v_driver_sess.ops_session_id);
+
+  RETURN NEXT is(v_driver_readback->>'session_type', 'driver_shift', 'api.ui_get_resource_v1 reads driver_shift ops session');
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT ok(
+    NOT (v_driver_readback ? 'device_id')
+      AND EXISTS (SELECT 1 FROM public.ops_sessions
+                   WHERE id = v_driver_sess.ops_session_id AND device_id = v_device.device_id),
+    'driver shift retains its device binding outside the generic read projection'
+  );
+  EXECUTE 'SET LOCAL ROLE authenticated';
+
   SELECT * INTO v_tr1
   FROM public.transition_ops_session_v1(
     jsonb_build_object(
@@ -134,6 +161,23 @@ BEGIN
   RETURN NEXT ok(v_tr1.updated IS TRUE, 'transition_ops_session_v1 updated=true');
   RETURN NEXT ok(v_tr2.updated IS FALSE, 'transition_ops_session_v1 replay updated=false');
   RETURN NEXT is(v_tr1.session_version::text, v_tr2.session_version::text, 'transition_ops_session_v1 returns same session_version on replay');
+
+  SELECT * INTO v_driver_close
+  FROM public.transition_ops_session_v1(
+    jsonb_build_object(
+      'ops_session_id', v_driver_sess.ops_session_id,
+      'to_status', 'closed',
+      'idempotency_key', 'pgtap-driver-shift-readback-close-1',
+      'set_closed_at', TRUE,
+      'effective_at', now()
+    )
+  )
+  LIMIT 1;
+
+  v_driver_closed_readback := api.ui_get_resource_v1('ops_sessions', v_driver_sess.ops_session_id);
+
+  RETURN NEXT is(v_driver_closed_readback->>'status', 'closed', 'api.ui_get_resource_v1 reads closed driver shift state');
+  RETURN NEXT ok((v_driver_closed_readback->>'closed_at') IS NOT NULL, 'api.ui_get_resource_v1 reads driver shift closed_at');
 
   EXECUTE 'SET LOCAL ROLE postgres';
 

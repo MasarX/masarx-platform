@@ -97,6 +97,10 @@ Notes:
 - Run Playwright locally without forcing `CI=1` when using localhost apps (`3001` console / `3002` portal), so the config can auto-start dev servers.
 - In CI/strict environments, set `CONSOLE_BASE_URL` and `PORTAL_BASE_URL` explicitly.
 - Use host-root values (for example `https://vkhyghkwqoksmtxwrkgqyyxk.example.invalid`, `https://yguwjnwkkqutolgwughjsloj.example.invalid`), not `/console` or `/portal` path prefixes.
+- For Console V2 production-readiness checks, navigate to each target through visible app controls first: sidebar/shell navigation, command palette, breadcrumbs, row actions, drawer actions, or other in-app links. Direct URL entry is a separate deep-link/legacy-redirect assertion and cannot be the only proof that the route is navigable.
+- Treat pgTAP as necessary but not sufficient for Console V2 readiness. Each production-readiness slice also needs frontend route/action tests, Browser-click proof from the operator shell, at least one unbiased frontend lifecycle auditor, and an evidence table covering frontend surface, backend/API/RPC wiring, CRUD/action coverage, Browser status, automated tests, gaps, fixes, and final verdict.
+- Treat Playwright as supporting evidence only for Console V2/Landing readiness. Completion requires Browser/Chrome click proof on a backend-backed runtime (`VITE_USE_SEED=false` with live Supabase credentials or approved cloud/preview/stg), with real API/RPC/data proof and no seed/demo/mock/synthetic rows, in-memory adapters, or toast-only success.
+- For Console V2, `npm run test:e2e:console` is seed smoke only because it excludes `@live-readiness`; use `npm run test:e2e:console:live` with `E2E_CONSOLE_LIVE=1`, `VITE_USE_SEED=false`, live Supabase env, and observed Supabase RPC traffic for readiness proof.
 - If local app startup is slow, increase the Playwright web-server startup timeout with `E2E_WEB_SERVER_TIMEOUT_MS` (for example `E2E_WEB_SERVER_TIMEOUT_MS=600000`).
 - Prefer `data-testid` selectors and resilient visibility checks for async/hydrating surfaces to avoid strict-locator flakes from duplicate hidden shells.
 

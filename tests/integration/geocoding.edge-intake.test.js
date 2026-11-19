@@ -213,8 +213,8 @@ describe('Geocoding edge-like intake end-to-end', () => {
 
     await applyGeocodingPolicy(
       client,
-      'client',
-      ids.client_id,
+      'sender',
+      ids.sender_id,
       {
         provider_priority: ['here_geocoding'],
         local_lookup: { enabled: false },

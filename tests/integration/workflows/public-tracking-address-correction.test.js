@@ -51,7 +51,9 @@ async function seedCoverageFixture(client) {
   const branchId = randomUUID();
   const routeBranchId = randomUUID();
 
-  await client.query(
+  const {
+    rows: [{ id: activeCityId }],
+  } = await client.query(
     `
       INSERT INTO public.canonical_cities (
         id,
@@ -79,6 +81,18 @@ async function seedCoverageFixture(client) {
         st_setsrid(st_makepoint(46.6753, 24.7136), 4326)::geography,
         true
       )
+      ON CONFLICT (organization_id, name_canonical) WHERE source_city_id IS NULL
+      DO UPDATE SET
+        name_arabic = COALESCE(EXCLUDED.name_arabic, public.canonical_cities.name_arabic),
+        alternate_names = COALESCE(EXCLUDED.alternate_names, public.canonical_cities.alternate_names),
+        province = COALESCE(EXCLUDED.province, public.canonical_cities.province),
+        country_code = COALESCE(EXCLUDED.country_code, public.canonical_cities.country_code),
+        source = COALESCE(EXCLUDED.source, public.canonical_cities.source),
+        metadata = COALESCE(public.canonical_cities.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+        centroid = COALESCE(EXCLUDED.centroid, public.canonical_cities.centroid),
+        is_active = TRUE,
+        updated_at = now()
+      RETURNING id
     `,
     [cityId, organization.id]
   );
@@ -110,7 +124,7 @@ async function seedCoverageFixture(client) {
         true
       )
     `,
-    [districtId, organization.id, cityId]
+    [districtId, organization.id, activeCityId]
   );
 
   await client.query(

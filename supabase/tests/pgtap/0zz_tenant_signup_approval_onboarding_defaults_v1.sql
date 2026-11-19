@@ -6,7 +6,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(55);
+SELECT plan(57);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_tenant_signup_approval_onboarding_defaults_v1()
 RETURNS SETOF TEXT
@@ -36,6 +36,10 @@ DECLARE
   v_isolation_list JSONB;
   v_review_denied BOOLEAN := FALSE;
   v_review_denied_message TEXT := NULL;
+  v_create_invite_failure JSONB;
+  v_invite_failure_req_id UUID;
+  v_invite_failure_approve JSONB;
+  v_invite_failure_auth_user_id UUID := gen_random_uuid();
   v_policy_current JSONB;
   v_policy_auto JSONB;
   v_policy_no_provision JSONB;
@@ -45,6 +49,8 @@ DECLARE
   v_user_platform UUID := gen_random_uuid();
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
 
   RETURN NEXT ok(
     EXISTS (
@@ -538,6 +544,54 @@ BEGIN
   EXECUTE 'RESET ROLE';
   PERFORM set_config('request.jwt.claim.role', 'service_role', true);
   PERFORM set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
+
+  v_create_invite_failure := public.tenant_signup_request_create_v1(
+    p_email := format('tenant-signup-invite-failure-%s@example.com', left(replace(gen_random_uuid()::text, '-', ''), 12)),
+    p_full_name := 'Tenant Signup Invite Failure User',
+    p_organization_name := 'Tenant Signup Invite Failure Org',
+    p_organization_slug := NULL,
+    p_website_url := NULL,
+    p_phone := NULL,
+    p_notes := 'pgtap approve with invite failure readback',
+    p_locale := 'en',
+    p_page_url := 'https://example.com/signup',
+    p_referrer := NULL,
+    p_origin := 'https://example.com',
+    p_marketing := '{}'::jsonb,
+    p_ip_hash := format('pgtap-ip-invite-failure-%s', left(replace(gen_random_uuid()::text, '-', ''), 12)),
+    p_turnstile_verified := TRUE
+  );
+
+  v_invite_failure_req_id := NULLIF(v_create_invite_failure->>'id', '')::uuid;
+  v_invite_failure_approve := public.tenant_signup_review_apply_v1(
+    p_request_id := v_invite_failure_req_id,
+    p_decision := 'approved',
+    p_reviewer_user_id := NULL,
+    p_decision_reason := 'pgtap approve with invite failure readback',
+    p_invited_auth_user_id := v_invite_failure_auth_user_id,
+    p_invite_email_sent := FALSE,
+    p_invite_redirect_to := 'https://unjijvxjrwurjgsnokovrvom.example.invalid/auth/callback',
+    p_decision_metadata := jsonb_build_object(
+      'invite_email_requested', TRUE,
+      'invite_email_sent', FALSE,
+      'invite_error', 'SMTP provider refused recipient'
+    )
+  );
+
+  RETURN NEXT is(
+    v_invite_failure_approve->>'last_error_code',
+    'invite_email_failed',
+    'tenant_signup_review_apply_v1 returns invite email failure readback when approval falls back to auth user creation'
+  );
+
+  RETURN NEXT ok(
+    (SELECT last_error_code = 'invite_email_failed'
+       AND last_error_message = 'Invite email could not be sent'
+       AND last_error_at IS NOT NULL
+       FROM public.tenant_signup_requests
+      WHERE id = v_invite_failure_req_id),
+    'approved tenant signup request persists invite email failure in canonical request fields'
+  );
 
   v_policy_no_provision := jsonb_set(
     COALESCE(v_policy_auto, '{}'::jsonb),

@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(31);
+SELECT plan(33);
 
 CREATE OR REPLACE FUNCTION pg_temp.read_delivery_handover_lookup_count()
 RETURNS INT
@@ -14,13 +14,37 @@ LANGUAGE plpgsql
 AS $function$
 DECLARE
   v_org UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
   v_count INT := 0;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'FieldOps Lookup Org', 'fieldops-lookup-' || left(v_org::text, 8));
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES (v_client, v_org, 'FieldOps Lookup Client', 'fieldops-lookup-client-' || left(v_client::text, 8), 'active');
+
+  INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES (
+    v_sender,
+    v_client,
+    'FieldOps Lookup Sender',
+    'FieldOps Lookup Sender',
+    TRUE,
+    'active'
+  );
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(
+    v_org,
+    'pgtap:fieldops-mobile-sync-artifact-exception-fixture-bootstrap'
+  );
 
   INSERT INTO public.users (id, organization_id, email, full_name, access_scope_type)
   VALUES (v_user, v_org, 'lookup-' || left(v_user::text, 8) || '@example.com', 'Lookup Driver', 'tenant');
@@ -56,6 +80,37 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION pg_temp.authenticated_mobile_sync_policy_enabled()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_enabled BOOLEAN := FALSE;
+  v_user UUID := gen_random_uuid();
+BEGIN
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config(
+    'request.jwt.claims',
+    json_build_object('role', 'authenticated', 'sub', v_user::text)::text,
+    true
+  );
+
+  SELECT COALESCE((r.value->>'enabled')::boolean, FALSE)
+    INTO v_enabled
+    FROM api.resolve_mobile_sync_policy('{}'::jsonb) AS r
+   LIMIT 1;
+
+  EXECUTE 'SET LOCAL ROLE postgres';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', 'postgres', true);
+  PERFORM set_config('request.jwt.claims', json_build_object('role', 'postgres')::text, true);
+
+  RETURN COALESCE(v_enabled, FALSE);
+END;
+$function$;
+
 SELECT has_function(
   'public',
   'resolve_mobile_sync_policy',
@@ -68,6 +123,23 @@ SELECT has_function(
   'resolve_mobile_sync_policy',
   ARRAY['jsonb'],
   'api.resolve_mobile_sync_policy(jsonb) exists'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname = 'resolve_mobile_sync_policy'
+       AND p.prosecdef = TRUE
+  ),
+  'public.resolve_mobile_sync_policy is SECURITY DEFINER'
+);
+
+SELECT ok(
+  pg_temp.authenticated_mobile_sync_policy_enabled(),
+  'authenticated api.resolve_mobile_sync_policy resolves global mobile sync policy without settings resolver privilege errors'
 );
 
 SELECT has_function(

@@ -126,14 +126,14 @@ const rlsIntegrationEnabled = process.env.RUN_RLS_INTEGRATION_TESTS === 'true';
 
     const recipientA = (await client.query(
       `INSERT INTO recipients (organization_id, client_id, name, phone_number, created_at, updated_at)
-       VALUES ($1, $2, 'Recipient A', '555000111', now(), now())
+       VALUES ($1, $2, 'Recipient A', '+966555000111', now(), now())
        RETURNING id`,
       [org, clientId],
     )).rows[0].id;
 
     const recipientB = (await client.query(
       `INSERT INTO recipients (organization_id, client_id, name, phone_number, created_at, updated_at)
-       VALUES ($1, $2, 'Recipient B', '555000222', now(), now())
+       VALUES ($1, $2, 'Recipient B', '+966555000222', now(), now())
        RETURNING id`,
       [org, clientId],
     )).rows[0].id;
@@ -202,6 +202,6 @@ const rlsIntegrationEnabled = process.env.RUN_RLS_INTEGRATION_TESTS === 'true';
 
     const recipients = await client.query('SELECT phone_number FROM recipients ORDER BY phone_number');
     expect(recipients.rows).toHaveLength(1);
-    expect(recipients.rows[0].phone_number).toBe('555000111');
+    expect(recipients.rows[0].phone_number).toBe('+966555000111');
   });
 });

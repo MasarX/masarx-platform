@@ -114,7 +114,7 @@ test("print progress widget renders determinate progress for multi-label counts"
   );
 });
 
-test("print progress widget exposes technical details only when expanded", async () => {
+test("print progress widget exposes support details only when expanded", async () => {
   const user = userEvent.setup();
   const toggle = jest.fn();
   const openRun = jest.fn();

@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(21);
+SELECT plan(24);
 
 SELECT is(
   public.jsonb_resolve_path('{"request":{"id":"request-1"}}'::jsonb, '$.request.id'),
@@ -178,6 +178,39 @@ SELECT is(
   (SELECT response->>'response_outcome' FROM tmp_webhook_api_hardening_replay_second),
   'response_replayed',
   'duplicate webhook replays the stored response'
+);
+
+SELECT has_column(
+  'public',
+  'v_webhook_inbox_directory',
+  'response_outcome',
+  'v_webhook_inbox_directory exposes canonical HTTP response outcome readback'
+);
+
+SELECT is(
+  (
+    SELECT response_outcome
+    FROM public.v_webhook_inbox_directory
+    WHERE id = (
+      SELECT (response->>'webhook_id')::uuid
+      FROM tmp_webhook_api_hardening_replay_second
+    )
+  ),
+  'response_replayed',
+  'webhook inbox directory surfaces duplicate replay outcome from backend readback'
+);
+
+SELECT is(
+  (
+    SELECT response_status_code
+    FROM public.v_webhook_inbox_directory
+    WHERE id = (
+      SELECT (response->>'webhook_id')::uuid
+      FROM tmp_webhook_api_hardening_replay_second
+    )
+  ),
+  202,
+  'webhook inbox directory surfaces replay HTTP status from backend readback'
 );
 
 SELECT is(

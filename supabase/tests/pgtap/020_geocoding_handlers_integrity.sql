@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(6);
+SELECT plan(8);
 
 WITH cache_defs AS (
     SELECT
@@ -64,6 +64,45 @@ SELECT ok(
     pg_get_functiondef('workflow_handlers.execute_geocode_manual_review_enqueue_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
         LIKE '%manual_review_tasks%',
     'execute_geocode_manual_review_enqueue_v1 enqueues manual review tasks'
+);
+
+SELECT ok(
+    pg_get_functiondef('workflow_handlers.execute_geocode_manual_review_enqueue_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
+        LIKE '%geocoding_attempts%'
+        AND pg_get_functiondef('workflow_handlers.execute_geocode_manual_review_enqueue_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
+            LIKE '%manual_review_gate%'
+        AND pg_get_functiondef('workflow_handlers.execute_geocode_manual_review_enqueue_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
+            LIKE '%manual_review_required%'
+        AND pg_get_functiondef('workflow_handlers.execute_geocode_manual_review_enqueue_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure)
+            LIKE '%deferred%',
+    'execute_geocode_manual_review_enqueue_v1 records deferred manual-review geocoding attempt ledger evidence'
+);
+
+WITH registry AS (
+    SELECT resource
+    FROM jsonb_array_elements(
+        public.resolve_settings_merged('ui_read_registry', 'global', NULL::uuid)->'resources'
+    ) AS resource
+    WHERE resource->>'key' = 'manual_review_tasks'
+)
+SELECT ok(
+    EXISTS (
+        SELECT 1
+        FROM registry,
+             jsonb_array_elements_text(resource->'select') AS selected(column_name)
+        WHERE selected.column_name IN ('address_id', 'shipment_id')
+        GROUP BY resource
+        HAVING COUNT(DISTINCT selected.column_name) = 2
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM registry,
+             jsonb_array_elements(resource->'filters') AS filter
+        WHERE filter->>'key' IN ('address_id', 'shipment_id')
+        GROUP BY resource
+        HAVING COUNT(DISTINCT filter->>'key') = 2
+    ),
+    'manual_review_tasks registry exposes address/shipment filters for geocoding review readback'
 );
 
 SELECT finish();

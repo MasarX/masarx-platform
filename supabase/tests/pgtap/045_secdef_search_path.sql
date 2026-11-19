@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 
-SELECT plan(1);
+SELECT no_plan();
 
 CREATE TEMP TABLE tmp_secdef_search_path_violations AS
 WITH security_definers AS (
@@ -11,6 +11,7 @@ WITH security_definers AS (
     p.oid,
     n.nspname AS schema_name,
     p.proname AS function_name,
+    p.proargtypes,
     p.proconfig
   FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -27,6 +28,7 @@ parsed_paths AS (
   SELECT
     sd.schema_name,
     sd.function_name,
+    oidvectortypes(sd.proargtypes) AS signature,
     ARRAY(
       SELECT trim(both ' ' FROM elem)
       FROM unnest(string_to_array(split_part(cfg, '=', 2), ',')) AS elem
@@ -52,15 +54,11 @@ WHERE search_path IS NULL
      WHERE elem NOT IN ('public', 'extensions', 'pg_catalog', 'pg_temp', 'workflow_handlers')
    );
 
-SELECT diag(
-  format(
-    'SECURITY DEFINER violation: %s.%s search_path=%s',
-    schema_name,
-    function_name,
-    COALESCE(array_to_string(search_path, ','), '<missing>')
-  )
-)
-FROM tmp_secdef_search_path_violations;
+-- Each failed assertion identifies the public catalog object without emitting settings values.
+SELECT ok(FALSE, format('Trusted path for %I.%I(%s)',
+  schema_name, function_name, signature))
+FROM tmp_secdef_search_path_violations
+ORDER BY schema_name, function_name, signature;
 
 SELECT cmp_ok(
   (SELECT COUNT(*)::bigint FROM tmp_secdef_search_path_violations),

@@ -53,9 +53,53 @@ SELECT is(
 -- Auth injection via get_job_call_spec (no secrets stored in outbound_calls)
 -- ----------------------------------------------------------------------------
 
+-- This fixture owns provider/plugin activation context. Defer organization
+-- bootstrap until source-binding context exists, then run onboarding explicitly.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO organizations (id, name, slug)
 VALUES ('aaaa0000-0000-0000-0000-000000000028', 'Secret Hygiene Org', 'secret-hygiene-org')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    updated_at = now();
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO clients (id, organization_id, name, slug, status)
+VALUES (
+  'aaaa0000-0000-0000-0000-000000000128',
+  'aaaa0000-0000-0000-0000-000000000028',
+  'Secret Hygiene Client',
+  'secret-hygiene-client',
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+  'aaaa0000-0000-0000-0000-000000000228',
+  'aaaa0000-0000-0000-0000-000000000128',
+  'Secret Hygiene Sender',
+  'Secret Hygiene Sender',
+  false,
+  true,
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  'aaaa0000-0000-0000-0000-000000000028',
+  'pgtap:outbound-secret-hygiene-fixture-bootstrap'
+);
 
 INSERT INTO providers (id, organization_id, name, provider_type, metadata)
 VALUES (

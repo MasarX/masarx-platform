@@ -1355,36 +1355,6 @@ const scheduleMetricEmit = (
   });
 };
 
-const completeLabelJobsWithRetry = async (
-  results: Record<string, unknown>[],
-  attempts: number = 3,
-) => {
-  let lastError: Error | null = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const client = ensureSupabase();
-    const { error } = await client.rpc("complete_label_jobs", {
-      p_results: results,
-    });
-    if (!error) {
-      return;
-    }
-    lastError = new Error(`complete_label_jobs failed: ${error.message}`);
-    if (attempt < attempts) {
-      await sleep(Math.min(1000, attempt * 200));
-    }
-  }
-  throw lastError ?? new Error("complete_label_jobs failed");
-};
-
-const scheduleLabelJobsCompletion = (
-  results: Record<string, unknown>[],
-  label: string,
-) => {
-  runBestEffortBackgroundTask(`label_renderer.complete_label_jobs:${label}`, async () => {
-    await completeLabelJobsWithRetry(results);
-  });
-};
-
 const prepareDesignerPreviewSnapshot = async (
   template: Record<string, any>,
   labelType: string,
@@ -4456,21 +4426,17 @@ const handlePrintRequest = async (
         signedMs = artifactReturn.signed_ms;
         const signedUrl: string | null = artifactReturn.signed_url;
         const expiresAt: string | null = artifactReturn.expires_at;
-        const jobCompletionPending = workflowManagedPrint;
-        if (workflowManagedPrint) {
-          scheduleLabelJobsCompletion(completionPayload, `single_file:${bundleId}`);
-        } else {
-          const completeStart = performance.now();
-          const { error: completeError } = await callRendererRpc(
-            client,
-            "complete_label_jobs",
-            { p_results: completionPayload },
-            edgeDbMode,
-          );
-          completeMs = performance.now() - completeStart;
-          if (completeError) {
-            throw new Error(`complete_label_jobs failed: ${completeError.message}`);
-          }
+        const jobCompletionPending = false;
+        const completeStart = performance.now();
+        const { error: completeError } = await callRendererRpc(
+          client,
+          "complete_label_jobs",
+          { p_results: completionPayload },
+          edgeDbMode,
+        );
+        completeMs = performance.now() - completeStart;
+        if (completeError) {
+          throw new Error(`complete_label_jobs failed: ${completeError.message}`);
         }
 
         recordStep("render_label_jobs", renderStart, {
@@ -5191,27 +5157,23 @@ const handlePrintRequest = async (
     });
 
     let completeMs: number | null = null;
-    const jobCompletionPending = workflowManagedPrint;
-    if (workflowManagedPrint) {
-      scheduleLabelJobsCompletion(completionPayload, `bundle:${bundleId}`);
-    } else {
-      const completeStart = performance.now();
-      const { error: completeError } = await callRendererRpc(
-        client,
-        "complete_label_jobs",
-        { p_results: completionPayload },
-        edgeDbMode,
-      );
-      completeMs = performance.now() - completeStart;
-      if (completeError) {
-        recordStep("bundle_labels", bundleStart, { ok: false, error: `complete_label_jobs failed: ${completeError.message}` });
-        return await returnPrintResponse(500, {
-          status: "error",
-          error: `complete_label_jobs failed: ${completeError.message}`,
-          artifact_kind: "bundle",
-          steps,
-        });
-      }
+    const jobCompletionPending = false;
+    const completeStart = performance.now();
+    const { error: completeError } = await callRendererRpc(
+      client,
+      "complete_label_jobs",
+      { p_results: completionPayload },
+      edgeDbMode,
+    );
+    completeMs = performance.now() - completeStart;
+    if (completeError) {
+      recordStep("bundle_labels", bundleStart, { ok: false, error: `complete_label_jobs failed: ${completeError.message}` });
+      return await returnPrintResponse(500, {
+        status: "error",
+        error: `complete_label_jobs failed: ${completeError.message}`,
+        artifact_kind: "bundle",
+        steps,
+      });
     }
 
     const completedAt = new Date().toISOString();
@@ -5476,32 +5438,28 @@ const handlePrintRequest = async (
     }));
 
     let completeMs: number | null = null;
-    if (workflowManagedPrint) {
-      scheduleLabelJobsCompletion(
-        completionPayload,
-        `render_batch:${correlationId}:${renderCalls.length + 1}`,
-      );
-    } else {
-      const completeStart = performance.now();
-      const { error: completeError } = await client.rpc("complete_label_jobs", {
-        p_results: completionPayload,
-      });
-      completeMs = performance.now() - completeStart;
+    const completeStart = performance.now();
+    const { error: completeError } = await callRendererRpc(
+      client,
+      "complete_label_jobs",
+      { p_results: completionPayload },
+      edgeDbMode,
+    );
+    completeMs = performance.now() - completeStart;
 
-      if (completeError) {
-        recordStep("render_label_jobs", renderStart, {
-          ok: false,
-          error: `complete_label_jobs failed: ${completeError.message}`,
-          calls: renderCalls,
-          results: renderResults,
-        });
-        return await returnPrintResponse(500, {
-          status: "error",
-          error: `complete_label_jobs failed: ${completeError.message}`,
-          artifact_kind: "bundle",
-          steps,
-        });
-      }
+    if (completeError) {
+      recordStep("render_label_jobs", renderStart, {
+        ok: false,
+        error: `complete_label_jobs failed: ${completeError.message}`,
+        calls: renderCalls,
+        results: renderResults,
+      });
+      return await returnPrintResponse(500, {
+        status: "error",
+        error: `complete_label_jobs failed: ${completeError.message}`,
+        artifact_kind: "bundle",
+        steps,
+      });
     }
 
     results.forEach((result) => {

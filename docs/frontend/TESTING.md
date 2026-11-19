@@ -118,7 +118,7 @@ The main Playwright config defines four projects, each matching specs by filenam
 | `E2E_FORCE_CLEAN` | Clear `.next` cache before starting dev servers |
 | `E2E_WEB_SERVER_TIMEOUT_MS` | Dev server startup timeout (default 180 s) |
 
-When running locally without `CONSOLE_BASE_URL`/`PORTAL_BASE_URL`, Playwright auto-starts `dev:console` and `dev:portal`.
+When running locally without `CONSOLE_BASE_URL`/`PORTAL_BASE_URL`, the legacy root Playwright suite auto-starts `dev:console:legacy` and `dev:portal`.
 
 ### E2E Utilities (`tests/e2e/utils/`)
 
@@ -139,6 +139,11 @@ Uses a separate config (`playwright.landing.config.ts`) pointing at `tests/landi
 ### Console / Portal Local E2E
 
 - Keep the browser base URL aligned with the host the Next server is actually serving.
+- Treat pgTAP as necessary but not sufficient for Console V2 production readiness. Every Landing + Console V2 readiness phase must include frontend tests, at least one unbiased frontend lifecycle auditor, and Browser-backed operator proof for routes, navigation, icons, labels, breadcrumbs, command palette, deep links, CRUD/actions, permission gates, row-level domain drawers, related-domain data placement, loading/empty/error/denied/success states, and absence of demo-only, fake, hardcoded, raw-table, or synthetic-only flows.
+- For Console V2 production-readiness checks, start from the current Console V2 shell or main entry screen and reach the target screen by clicking through visible app navigation, command palette, breadcrumb, row action, drawer action, or another in-app control. Do not paste/type a target route into the browser address bar or automation-jump directly to it for primary proof; direct URL entry is only a secondary deep-link or legacy-redirect check and does not prove the module is discoverable from the operator workflow.
+- Playwright is supporting evidence for Console V2/Landing readiness, not final proof. Mark completion only after Browser/Chrome click proof runs against a backend-backed runtime (`VITE_USE_SEED=false` with live Supabase credentials or approved cloud/preview/stg) and the flow proves real API/RPC/data behavior. Seed/demo/mock/synthetic rows, in-memory adapters, and toast-only successes never count as readiness proof.
+- `apps/console-v2` keeps seed smoke and live readiness separate: `npm run test:e2e:console` excludes `@live-readiness`, while `npm run test:e2e:console:live` requires `E2E_CONSOLE_LIVE=1`, `VITE_USE_SEED=false`, live Supabase env, and observed Supabase RPC traffic.
+- For local Console V2 proof, use the canonical root alias `npm run dev:console -- --host 127.0.0.1 --port <leased-port>` or the app-local equivalent `npm --prefix apps/console-v2 run dev -- --host 127.0.0.1 --port <leased-port>`. The legacy Next.js console is only started through `npm run dev:console:legacy`.
 - If Console or Portal E2E runs target `127.0.0.1`, set `NEXT_PUBLIC_ALLOWED_DEV_ORIGINS=127.0.0.1` in the selected local env file so `allowedDevOrigins` is resolved dynamically and local verification does not fail on blocked dev assets.
 - For long signed-in coverage sweeps, prefer a built server (`next build` + `next start`) when `next dev` becomes unstable on local runners.
 

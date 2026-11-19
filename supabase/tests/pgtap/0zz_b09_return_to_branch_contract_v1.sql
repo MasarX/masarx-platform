@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(16);
+SELECT plan(19);
 
 SELECT ok(
   EXISTS (
@@ -248,6 +248,41 @@ SELECT is(
   ),
   'shipments.write',
   'access_control_policy maps return_to_branch_shipments.write to shipments.write'
+);
+
+SELECT has_function(
+  'public',
+  'ensure_branch_return_inventory_location_v1',
+  ARRAY['uuid', 'uuid', 'text']::name[],
+  'ensure_branch_return_inventory_location_v1 exists'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM public.branches b
+     WHERE COALESCE(b.is_active, TRUE) IS TRUE
+       AND lower(COALESCE(b.branch_type, '')) = 'warehouse'
+       AND NOT EXISTS (
+         SELECT 1
+           FROM public.warehouse_locations wl
+          WHERE wl.organization_id = b.organization_id
+            AND wl.branch_id = b.id
+            AND COALESCE(wl.is_active, TRUE) IS TRUE
+       )
+  ),
+  'active warehouse branches have an active default inventory location'
+);
+
+SELECT lives_ok(
+  $$
+    SELECT public.resolve_branch_inventory_location_v1(b.organization_id, b.id)
+      FROM public.branches b
+     WHERE COALESCE(b.is_active, TRUE) IS TRUE
+       AND lower(COALESCE(b.branch_type, '')) = 'warehouse'
+     LIMIT 1
+  $$,
+  'return-to-branch inventory location resolver works for an active warehouse branch'
 );
 
 SELECT * FROM finish();

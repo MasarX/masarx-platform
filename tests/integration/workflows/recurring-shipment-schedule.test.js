@@ -446,7 +446,7 @@ describeIfDb("workflow schedule triggers: recurring shipment create", () => {
     expect(countRows[0].count).toBe(1);
   });
 
-  test("ui_run_workflow_schedule_trigger_v1 denies users without workflow_runs.write", async () => {
+  test("ui_run_workflow_schedule_trigger_v1 denies users without workflows.write", async () => {
     const { rows: triggerRows } = await pool.query(
       `INSERT INTO workflow_schedule_triggers (
          organization_id,
@@ -484,7 +484,7 @@ describeIfDb("workflow schedule triggers: recurring shipment create", () => {
 
       await expect(
         client.query(`SELECT public.ui_run_workflow_schedule_trigger_v1($1::uuid)`, [triggerId])
-      ).rejects.toThrow(/Capability denied: workflow_runs.write/);
+      ).rejects.toThrow(/Capability denied: workflows.write/);
     } finally {
       await client.query("ROLLBACK");
       client.release();

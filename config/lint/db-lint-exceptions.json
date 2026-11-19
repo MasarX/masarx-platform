@@ -30,5 +30,77 @@
   {
     "function": "public.request_label_reprint",
     "reason": "Label reprint helper relies on labels and shipments tables; plpgsql lint emits false-positive 42P01 for labels in this environment."
+  },
+  {
+    "migration_duplicate_timestamp": "202604280010",
+    "migration_duplicate_files": [
+      "supabase/migrations/202604280010_assign_driver_to_vehicle_v1.sql",
+      "supabase/migrations/202604280010_create_alert_rule_v1.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
+  },
+  {
+    "migration_duplicate_timestamp": "202604280020",
+    "migration_duplicate_files": [
+      "supabase/migrations/202604280020_mark_vehicle_oos_v1.sql",
+      "supabase/migrations/202604280020_update_alert_rule_v1.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
+  },
+  {
+    "migration_duplicate_timestamp": "202604280030",
+    "migration_duplicate_files": [
+      "supabase/migrations/202604280030_pause_alert_rule_v1.sql",
+      "supabase/migrations/202604280030_schedule_maintenance_v1.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
+  },
+  {
+    "migration_duplicate_timestamp": "202604280040",
+    "migration_duplicate_files": [
+      "supabase/migrations/202604280040_cancel_maintenance_v1.sql",
+      "supabase/migrations/202604280040_resume_alert_rule_v1.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
+  },
+  {
+    "migration_duplicate_timestamp": "202604280050",
+    "migration_duplicate_files": [
+      "supabase/migrations/202604280050_delete_alert_rule_v1.sql",
+      "supabase/migrations/202604280050_verify_driver_document_v1.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
+  },
+  {
+    "migration_duplicate_timestamp": "202604280060",
+    "migration_duplicate_files": [
+      "supabase/migrations/202604280060_suspend_driver_v1.sql",
+      "supabase/migrations/202604280060_test_alert_rule_v1.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
+  },
+  {
+    "migration_duplicate_timestamp": "202604280070",
+    "migration_duplicate_files": [
+      "supabase/migrations/202604280070_acknowledge_ops_alert_v1.sql",
+      "supabase/migrations/202604280070_create_driver_compliance_event_v1.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
+  },
+  {
+    "migration_duplicate_timestamp": "202604301800",
+    "migration_duplicate_files": [
+      "supabase/migrations/202604301800_v_api_gateway_observability.sql",
+      "supabase/migrations/202604301800_v_branch_zone_directory.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
+  },
+  {
+    "migration_duplicate_timestamp": "202605031940",
+    "migration_duplicate_files": [
+      "supabase/migrations/202605031940_recipient_create_delete_v1.sql",
+      "supabase/migrations/202605031940_zones_baskets_console_v2_write_contracts_v1.sql"
+    ],
+    "reason": "Historical applied migration pair; tracked explicitly so new duplicate timestamps still fail."
   }
 ]

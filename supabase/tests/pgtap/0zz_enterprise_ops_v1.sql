@@ -65,9 +65,24 @@ BEGIN
   VALUES (v_org, 'Enterprise Ops Org', 'ent-ops-' || left(v_org::text, 8))
   ON CONFLICT (id) DO NOTHING;
 
-  INSERT INTO public.branches (id, organization_id, code, name, is_active)
-  VALUES (v_branch, v_org, 'main', 'Main Branch', TRUE)
-  ON CONFLICT (id) DO NOTHING;
+  -- Organization onboarding may already create the canonical main branch.
+  -- Reuse it when present so this enterprise ops test follows the same
+  -- tenant-readiness default path as production.
+  SELECT b.id
+    INTO v_branch
+    FROM public.branches b
+   WHERE b.organization_id = v_org
+     AND b.code = 'main'
+   LIMIT 1;
+
+  IF v_branch IS NULL THEN
+    v_branch := current_setting('test.enterprise_ops.branch_id')::uuid;
+    INSERT INTO public.branches (id, organization_id, code, name, is_active)
+    VALUES (v_branch, v_org, 'main', 'Main Branch', TRUE)
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+
+  PERFORM set_config('test.enterprise_ops.branch_id', v_branch::text, TRUE);
 
   INSERT INTO public.users (id, organization_id, email, full_name, access_scope_type)
   VALUES

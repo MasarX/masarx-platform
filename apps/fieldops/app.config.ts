@@ -30,6 +30,8 @@ function normalizeUrlForCompare(value: string): string {
 
 const PLACEHOLDER_SUPABASE_URL = ["https://example", "supabase.co"].join(".");
 
+const ANDROID_EMULATOR_SUPABASE_URL_ENV = "FIELDOPS_ANDROID_EMULATOR_SUPABASE_URL";
+
 function isPlaceholderSupabaseUrl(value: string): boolean {
   return normalizeUrlForCompare(value) === PLACEHOLDER_SUPABASE_URL;
 }
@@ -38,7 +40,36 @@ function isPlaceholderSupabaseAnonKey(value: string): boolean {
   return value.trim() === "dummy-anon-key";
 }
 
-function resolveSupabaseUrl(): string | undefined {
+function isLocalHttpUrl(value?: string): boolean {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:") return false;
+    return ["127.0.0.1", "localhost", "192.0.2.10"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function resolveSupabaseUrl(options: {
+  buildProfile?: string;
+  isEasBuild: boolean;
+}): string | undefined {
+  const androidEmulatorUrl = readEnvString(process.env[ANDROID_EMULATOR_SUPABASE_URL_ENV]);
+  if (androidEmulatorUrl) {
+    if (options.isEasBuild || options.buildProfile) {
+      throw new Error(
+        `[fieldops-config] ${ANDROID_EMULATOR_SUPABASE_URL_ENV} is local-only and cannot be used with EAS_BUILD or FIELDOPS_BUILD_PROFILE.`
+      );
+    }
+    if (!isLocalHttpUrl(androidEmulatorUrl)) {
+      throw new Error(
+        `[fieldops-config] ${ANDROID_EMULATOR_SUPABASE_URL_ENV} must be a local http URL for Android emulator builds.`
+      );
+    }
+    return androidEmulatorUrl;
+  }
+
   const publicUrl = readEnvString(process.env.NEXT_PUBLIC_SUPABASE_URL);
   if (publicUrl && !isPlaceholderSupabaseUrl(publicUrl)) {
     return publicUrl;
@@ -111,7 +142,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     readEnvString(process.env.NEXT_PUBLIC_APP_NAME) ??
     readEnvString(config.name) ??
     "Fieldops";
-  const supabaseUrl = resolveSupabaseUrl();
+  const supabaseUrl = resolveSupabaseUrl({ buildProfile, isEasBuild });
+  const allowLocalCleartext = !isEasBuild && !buildProfile && isLocalHttpUrl(supabaseUrl);
   const supabaseAnonKey = resolveSupabaseAnonKey();
 
   const updates = updatesUrl
@@ -146,6 +178,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   }
   if (!basePlugins.some((entry) => (typeof entry === "string" ? entry : entry[0]) === "@maplibre/maplibre-react-native")) {
     basePlugins.push("@maplibre/maplibre-react-native");
+  }
+  const androidCleartextPlugin = "./plugins/with-fieldops-android-cleartext";
+  if (!basePlugins.some((entry) => (typeof entry === "string" ? entry : entry[0]) === androidCleartextPlugin)) {
+    basePlugins.push(androidCleartextPlugin);
   }
   let hasLocationPlugin = false;
   const nextPlugins: PluginEntry[] = basePlugins.map((entry) => {
@@ -206,6 +242,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       ...config.android,
       package: androidPackage ?? config.android?.package,
+      ...(allowLocalCleartext ? { usesCleartextTraffic: true } : {}),
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#ffffff",

@@ -5,27 +5,41 @@ SELECT plan(2);
 SET search_path TO public, pgtap, extensions;
 
 -- Fixture: org/client/sender
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender
+-- context exists and fail-closed plugin activation has truthful binding inputs.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('08100000-0000-0000-0000-000000000001', 'PGTAP Geo Org 081', 'pgtap-geo-081')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.clients (id, organization_id, name, slug)
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
 VALUES (
   '08100000-0000-0000-0000-000000000002',
   '08100000-0000-0000-0000-000000000001',
   'PGTAP Geo Client 081',
-  'pgtap-geo-client-081'
+  'pgtap-geo-client-081',
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.senders (id, client_id, name, brand_name)
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
 VALUES (
   '08100000-0000-0000-0000-000000000003',
   '08100000-0000-0000-0000-000000000002',
   'PGTAP Geo Sender 081',
-  'PGTAP Geo Sender 081'
+  'PGTAP Geo Sender 081',
+  TRUE,
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  '08100000-0000-0000-0000-000000000001',
+  'pgtap:geocoding-short-code-line2-fixture-bootstrap'
+);
 
 INSERT INTO public.addresses (
   id,
@@ -277,8 +291,8 @@ ON CONFLICT (id) DO NOTHING;
 SELECT workflow_handlers.process_geocoding_outbound_response_v1(
   oc,
   jsonb_build_object(
-    'lat', 24.772,
-    'lng', 46.738,
+    'lat', 0.0,
+    'lng', 0.0,
     'district', 'Example District',
     'city', 'Example City',
     'province', 'Example City',

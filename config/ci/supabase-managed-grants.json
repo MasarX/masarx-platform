@@ -238,6 +238,31 @@
       "file": "supabase/migrations/20261030001000_webhook_inbox_followup_readback_v1.sql",
       "sha256": "e38fe2bbe4b5850477468b9e19f7bf87e513cb57d17e6521b310b8196038ad2f",
       "reason": "Reviewed managed-schema privilege exception; bound to this migration."
+    },
+    {
+      "file": "supabase/migrations/202605010002_w41_driver_hours_of_service_view_recreate.sql",
+      "sha256": "0b7a41a02a4c25ebbedfabfc977860827e558a5f909ef655a32e5378a5f48613",
+      "reason": "Rebuilds catalog-selected api contract views for the public user-facing registry; preserves the exclusion list and mirrors application-role privileges."
+    },
+    {
+      "file": "supabase/migrations/202605020010_w42_public_views_security_invoker_sweep.sql",
+      "sha256": "688cb566cd890d27352fd8315492935cbd13ec5d068001ad93aa5051382cc027",
+      "reason": "Applies security_invoker only to catalog-selected regular views in the public application schema."
+    },
+    {
+      "file": "supabase/migrations/202606042010_api_contract_views_user_facing_late_reconcile_v1.sql",
+      "sha256": "1f9d3c754f262746788c8d76e137b6d52d6478ebe7b9f102fe7d7ddf36db5edf",
+      "reason": "Reconciles catalog-selected api contract views for the public user-facing registry while mirroring application-role privileges."
+    },
+    {
+      "file": "supabase/migrations/202606042120_literal_enum_check_cleanup_post_readiness_v1.sql",
+      "sha256": "59f48ea5bb9938abb500c746c147c47e0f26fa0509fce92dbf6798a5552c0bc5",
+      "reason": "Drops catalog-selected literal-list CHECK constraints from public and qa application tables; excludes partition children and spatial_ref_sys."
+    },
+    {
+      "file": "supabase/migrations/202607031430_dispatch_route_scanout_ui_read_registry_v1.sql",
+      "sha256": "94ca24aeb285640118b3cc4a7169a73317692600bd91483de0e8039aa8134b80",
+      "reason": "Reconciles catalog-selected api contract views for the public user-facing registry while preserving specialized projections and application-role privileges."
     }
   ]
 }

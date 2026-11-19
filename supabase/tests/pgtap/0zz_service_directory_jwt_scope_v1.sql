@@ -61,9 +61,13 @@ BEGIN
     (v_branch, v_org, 'jwt-' || left(v_branch::text, 8), 'Directory owned branch', 'UTC', TRUE),
     (v_foreign_branch, v_foreign_org, 'jwt-' || left(v_foreign_branch::text, 8), 'Directory foreign branch', 'UTC', TRUE);
   INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
-  VALUES
-    (v_level, v_org, 'standard', 'Directory owned level', TRUE),
-    (v_foreign_level, v_foreign_org, 'standard', 'Directory foreign level', TRUE);
+  VALUES (v_level, v_org, 'standard', 'Directory owned level', TRUE)
+  ON CONFLICT (organization_id, key) DO UPDATE SET name = EXCLUDED.name, is_active = TRUE
+  RETURNING id INTO v_level;
+  INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
+  VALUES (v_foreign_level, v_foreign_org, 'standard', 'Directory foreign level', TRUE)
+  ON CONFLICT (organization_id, key) DO UPDATE SET name = EXCLUDED.name, is_active = TRUE
+  RETURNING id INTO v_foreign_level;
   INSERT INTO public.service_offerings (
     id, service_level_id, branch_id, effective_from, effective_to, priority, is_active
   ) VALUES

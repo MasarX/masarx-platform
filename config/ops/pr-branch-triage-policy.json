@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "name": "masarx-pr-branch-triage-policy",
+  "active_pr_deploy_thread": "019f2a73-108b-7d23-8be8-aba113e7c85c",
+  "active_pr_deploy_automation": "masarx-cos-transition-supervisor",
+  "script_commands": {
+    "inventory": "npm run ops:pr-branch:inventory -- --out <manifest.json>",
+    "validate_manifest": "npm run ops:pr-branch:validate-manifest -- --manifest <manifest.json>",
+    "snapshot": "npm run ops:pr-branch:snapshot -- --manifest <manifest.json> --out <snapshot.md>"
+  },
+  "manifest_schema_version": "1.0",
+  "manifest_read_only": true,
+  "paused_or_retired_automations": [
+    "masarx-pr-captain-steward-heartbeat",
+    "masarx-cos-local-phase-supervisor"
+  ],
+  "decision_labels": [
+    "promote_now",
+    "release_train_candidate",
+    "preserve_evidence",
+    "already_contained",
+    "superseded_duplicate",
+    "deprecated_no_value",
+    "cleanup_candidate_after_cos_approval",
+    "unknown_requires_owner"
+  ],
+  "pr_queue_labels": [
+    "active",
+    "superseded",
+    "duplicate",
+    "obsolete",
+    "blocked",
+    "release_train_candidate",
+    "close_candidate"
+  ],
+  "release_train_domains": [
+    "Landing/Tenant",
+    "External Intake",
+    "Workflow/Plugin/Label",
+    "Shipment/Dispatch",
+    "FieldOps/Mobile",
+    "Governance/Control Plane"
+  ],
+  "ledger_mapping_scopes": [
+    "product",
+    "governance",
+    "runtime",
+    "ci",
+    "control_plane",
+    "unknown"
+  ],
+  "required_branch_decision_fields": [
+    "branch",
+    "scope",
+    "head",
+    "date",
+    "open_pr",
+    "checked_out_worktree",
+    "dirty_state",
+    "containment",
+    "changed_files",
+    "ledger_mapping",
+    "decision_label",
+    "reason",
+    "next_owner",
+    "next_action"
+  ],
+  "required_containment_targets": [
+    "dev",
+    "integration_baseline",
+    "dev_reconciliation"
+  ],
+  "no_delete_if": [
+    "open_pr_exists",
+    "checked_out_in_worktree",
+    "worktree_dirty",
+    "ledger_or_evidence_reference_exists",
+    "preserve_ref_exists",
+    "handoff_packet_reference_exists",
+    "active_runtime_owner_branch",
+    "owner_or_value_unclear",
+    "no_exact_cos_cleanup_manifest_approval"
+  ],
+  "protected_branch_patterns": [
+    "dev",
+    "main",
+    "prod",
+    "stg",
+    "release/*",
+    "codex/integration-baseline-*",
+    "codex/dev-reconciliation-*",
+    "codex/preserve-*"
+  ],
+  "required_checks_before_release_train_pr_ready": [
+    "focused_checks_after_each_packet",
+    "full_local_admission",
+    "runtime_doctor_or_product_runtime_proof_when_relevant",
+    "ledger_validation",
+    "governance_preflight",
+    "required_owner_reviews",
+    "validation_stack_lifecycle_report"
+  ],
+  "validation_stack_policy": {
+    "category": "pr_deploy_validation_runtime",
+    "owner": "MasarX CoS PR/Deploy Heartbeat / masarx-cos-transition-supervisor",
+    "runtime_lease_resource": "pr-deploy-validation-supabase",
+    "capacity_model": "5_product_lanes_plus_1_pr_deploy_validation_stack_when_host_allows",
+    "product_runtime_target": 5,
+    "max_pr_deploy_validation_stacks": 1,
+    "must_bind_or_record_while_active": true,
+    "must_stop_owner_safely_after_terminal_validation": true,
+    "must_report_zero_containers_listeners_volumes_or_residual_disposition": true,
+    "counts_as_product_runtime_proof": false,
+    "required_metadata": [
+      "owner_thread_id",
+      "worktree_id",
+      "worktree_path",
+      "branch",
+      "head_sha",
+      "pr_number",
+      "project_id",
+      "ports",
+      "command",
+      "purpose",
+      "started_at",
+      "last_heartbeat_at",
+      "ttl",
+      "state"
+    ],
+    "allowed_states": [
+      "starting",
+      "active",
+      "terminal_stop_required",
+      "released",
+      "residual_cleanup_required"
+    ],
+    "duplicate_start_scope": ["pr_number", "worktree_id", "head_sha", "project_id"],
+    "local_admission_flow": [
+      "focused_local_checks_first",
+      "reuse_bound_validation_runtime_for_same_pr_worktree_head_when_safe",
+      "full_pr_ready_only_after_focused_failures_are_clean",
+      "owner_stop_release_after_terminal_full_gate",
+      "report_validation_stack_state_in_pr_deploy_runtime_cleanup_and_cos_packets"
+    ],
+    "same_class_fixture_repair_policy": {
+      "repeat_class_batch_allowed_only_after_cos_approval": true,
+      "must_name_exact_file_and_error": true,
+      "allowed_scope": "test_fixture_setup_order_only",
+      "preserve_fail_closed_product_policy": true,
+      "forbid_product_behavior_or_policy_relaxation": true,
+      "validation": [
+        "focused_pgtap_or_local_check_first",
+        "one_full_pr_ready_after_focused_checks_pass",
+        "stop_for_new_failure_class"
+      ]
+    }
+  },
+  "mutation_policy": {
+    "parallel_investigation": "read_only",
+    "serialized_mutation": true,
+    "max_active_train_mutations": 1,
+    "max_active_pr_promotions": 1,
+    "cleanup_requires_exact_cos_manifest": true
+  }
+}

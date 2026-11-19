@@ -762,6 +762,24 @@ export type UiExecuteWarehouseTransferCheckpointResult = {
   items?: Array<Record<string, unknown>> | null;
 };
 
+export type UiExecuteRouteRunScanoutResult = {
+  status: string;
+  action_key?: string | null;
+  resource_key?: string | null;
+  blocked_reason?: string | null;
+  route_run_id?: string | null;
+  route_stop_id?: string | null;
+  task_id?: string | null;
+  scan_event_id?: string | null;
+  scan_created?: boolean | null;
+  scan_out?: Record<string, unknown> | null;
+  route_departure?: Record<string, unknown> | null;
+  route_execution_manifest?: Record<string, unknown> | null;
+  error?: Record<string, unknown> | null;
+  count?: number | null;
+  items?: Array<Record<string, unknown>> | null;
+};
+
 export type UiCreateWorkflowScheduleTriggerResult = {
   status: string;
   workflow_schedule_trigger_id?: string | null;

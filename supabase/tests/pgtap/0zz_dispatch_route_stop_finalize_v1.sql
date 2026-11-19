@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(65);
+SELECT plan(78);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_dispatch_route_stop_finalize_v1()
 RETURNS SETOF TEXT
@@ -39,6 +39,7 @@ DECLARE
   v_task_created RECORD;
   v_task_id UUID;
   v_task_done_event_id UUID;
+  v_console_closeout_readback RECORD;
 
   v_domain_event_id UUID;
   v_domain_event_run_id UUID;
@@ -73,6 +74,17 @@ DECLARE
   v_actions_count4 INT;
   v_shipment_action_id4 UUID;
   v_followup_tasks_count4 INT;
+  v_cod_payment_collection JSONB := jsonb_build_object(
+    'outcome', 'collected',
+    'method', 'cash',
+    'expected_amount', 580,
+    'collected_amount', 580,
+    'variance_amount', 0,
+    'has_discrepancy', FALSE,
+    'discrepancy_kind', 'matched',
+    'currency', 'SAR',
+    'receipt_context', 'cashier-count-77'
+  );
 
   v_noop_task_created RECORD;
   v_noop_task_id UUID;
@@ -160,8 +172,8 @@ BEGIN
     (v_task_type_stop, v_org, 'route_stop_execute', 'Route Stop Execute', TRUE, 50, 'default'),
     (v_task_type_noop, v_org, 'noop_task', 'Noop Task', TRUE, 50, 'default');
 
-  INSERT INTO public.shipments (id, organization_id, client_id, sender_id, service_type, tracking_number, status)
-  VALUES (v_shipment, v_org, v_client, v_sender, 'delivery', 'PGTAPSTOP' || upper(left(v_shipment::text, 8)), 'out_for_delivery');
+  INSERT INTO public.shipments (id, organization_id, client_id, sender_id, service_type, tracking_number, status, cod_amount, cod_currency)
+  VALUES (v_shipment, v_org, v_client, v_sender, 'delivery', 'PGTAPSTOP' || upper(left(v_shipment::text, 8)), 'out_for_delivery', 580, 'SAR');
 
   INSERT INTO public.shipments (id, organization_id, client_id, sender_id, service_type, tracking_number, status)
   VALUES (v_shipment2, v_org, v_client, v_sender, 'delivery', 'PGTAPSTOP2' || upper(left(v_shipment2::text, 8)), 'out_for_delivery');
@@ -257,6 +269,11 @@ BEGIN
         'recipient_class', 'mailroom',
         'completion_notes', 'Handoff confirmed at building mailroom',
         'artifact_ids', jsonb_build_array(v_artifact_id),
+        'payment_collection', v_cod_payment_collection,
+        'delivery_completion', jsonb_build_object(
+          'completion_kind', 'full',
+          'payment_collection', v_cod_payment_collection
+        ),
         'pod', jsonb_build_object(
           'signature_ref', 'storage://pgtap/sig.png',
           'handover_mode', 'mailroom',
@@ -271,7 +288,22 @@ BEGIN
 
   RETURN NEXT ok(v_task_done_event_id IS NOT NULL, 'driver transitions route_stop task to completed');
 
-  EXECUTE 'SET LOCAL ROLE postgres';
+  SELECT *
+    INTO v_console_closeout_readback
+    FROM api.ui_finalize_route_stop_closeout_event_v1(v_task_done_event_id)
+   LIMIT 1;
+
+  RETURN NEXT is(
+    v_console_closeout_readback.workflow_status,
+    'completed',
+    'Console V2 closeout readback wrapper progresses canonical route-stop workflow'
+  );
+  RETURN NEXT ok(
+    v_console_closeout_readback.shipment_action_id IS NOT NULL,
+    'Console V2 closeout readback wrapper returns shipment_action proof'
+  );
+
+  EXECUTE 'SET LOCAL ROLE service_role';
 
   SELECT id, workflow_run_id
     INTO v_domain_event_id, v_domain_event_run_id
@@ -412,6 +444,52 @@ BEGIN
     'shipment_action projects completion_notes for UI reads'
   );
   RETURN NEXT is(
+    (SELECT sa.action_data #>> '{task_event_payload,delivery_completion,payment_collection,outcome}' FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'collected',
+    'shipment_action preserves delivery_completion payment collection outcome'
+  );
+  RETURN NEXT is(
+    (SELECT sa.payment_collection_outcome FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'collected',
+    'shipment_action projects COD collection outcome for UI reads'
+  );
+  RETURN NEXT is(
+    (SELECT sa.payment_collection_method FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'cash',
+    'shipment_action projects COD payment method for UI reads'
+  );
+  RETURN NEXT ok(
+    (SELECT sa.payment_expected_amount = 580::numeric FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'shipment_action projects COD expected amount for UI reads'
+  );
+  RETURN NEXT ok(
+    (SELECT sa.payment_collected_amount = 580::numeric FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'shipment_action projects COD collected amount for UI reads'
+  );
+  RETURN NEXT ok(
+    (SELECT sa.payment_variance_amount = 0::numeric FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'shipment_action projects COD variance amount for UI reads'
+  );
+  RETURN NEXT ok(
+    (SELECT sa.payment_has_discrepancy IS FALSE FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'shipment_action projects COD discrepancy state for UI reads'
+  );
+  RETURN NEXT is(
+    (SELECT sa.payment_discrepancy_kind FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'matched',
+    'shipment_action projects COD discrepancy kind for UI reads'
+  );
+  RETURN NEXT is(
+    (SELECT sa.payment_currency FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'SAR',
+    'shipment_action projects COD currency for UI reads'
+  );
+  RETURN NEXT is(
+    (SELECT sa.payment_receipt_context FROM public.shipment_actions sa WHERE sa.id = v_shipment_action_id),
+    'cashier-count-77',
+    'shipment_action projects COD receipt context for UI reads'
+  );
+  RETURN NEXT is(
     (SELECT COUNT(*)::int
      FROM public.artifact_links al
      WHERE al.organization_id = v_org
@@ -535,9 +613,7 @@ BEGIN
     'duplicate domain_event does not create duplicate artifact_link (idempotent by task_event_id)'
   );
 
-  -- Exception outcome: status_reason=no_answer should map to delivery_failed + exception action semantics + follow-up task.
-  EXECUTE 'SET LOCAL ROLE service_role';
-
+  -- Exception outcome: status_reason=access_restricted should map to delivery_failed + exception action semantics + follow-up task.
   SELECT *
     INTO v_created
     FROM public.create_route_run_v1(
@@ -582,8 +658,16 @@ BEGIN
     FROM public.transition_task_v1(
       p_task_id := v_task_id2,
       p_to_status := 'completed',
-      p_status_reason := 'no_answer',
-      p_payload := jsonb_build_object('source', 'pgtap'),
+      p_status_reason := 'access_restricted',
+      p_payload := jsonb_build_object(
+        'source', 'pgtap',
+        'completion_notes', 'Security denied access at the gate',
+        'geostamp', jsonb_build_object(
+          'latitude', 24.7136,
+          'longitude', 46.6753,
+          'accuracy_m', 8
+        )
+      ),
       p_idempotency_key := 'pgtap-stop-finalize-done-2'
     )
    LIMIT 1;
@@ -609,11 +693,23 @@ BEGIN
     EXIT WHEN v_domain_event_run_id2 IS NOT NULL;
   END LOOP;
 
+  EXECUTE 'SET LOCAL ROLE postgres';
   FOR v_iter IN 1..50 LOOP
     SELECT workflow_status INTO v_run_status2 FROM public.workflow_runs WHERE id = v_domain_event_run_id2;
     EXIT WHEN v_run_status2 IN ('completed', 'failed', 'cancelled');
     PERFORM public.progress_workflow_run(v_domain_event_run_id2);
   END LOOP;
+
+  IF v_run_status2 IS DISTINCT FROM 'completed' THEN
+    SELECT COALESCE(last_error, '')::text
+      INTO v_step_error
+      FROM public.workflow_run_steps
+     WHERE workflow_run_id = v_domain_event_run_id2
+       AND sequence_order = 1
+     LIMIT 1;
+
+    RETURN NEXT diag('route_stop_finalize access_restricted last_error=' || COALESCE(NULLIF(v_step_error, ''), '<empty>'));
+  END IF;
 
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -621,7 +717,7 @@ BEGIN
   RETURN NEXT is(
     (SELECT status FROM public.shipments WHERE id = v_shipment2 AND client_id = v_client),
     'delivery_failed',
-    'shipment status updated to delivery_failed for no_answer'
+    'shipment status updated to delivery_failed for access_restricted'
   );
 
   SELECT COUNT(*)::int
@@ -647,13 +743,26 @@ BEGIN
   RETURN NEXT is(
     (SELECT action_category FROM public.shipment_actions WHERE id = v_shipment_action_id2),
     'exception',
-    'shipment_action action_category=exception for no_answer'
+    'shipment_action action_category=exception for access_restricted'
   );
 
   RETURN NEXT is(
     (SELECT action_type FROM public.shipment_actions WHERE id = v_shipment_action_id2),
     'exception',
-    'shipment_action action_type=exception for no_answer'
+    'shipment_action action_type=exception for access_restricted'
+  );
+
+  RETURN NEXT is(
+    (SELECT COUNT(*)::int
+     FROM public.decision_log dl
+     WHERE dl.organization_id = v_org
+       AND dl.resource_type = 'shipment'
+       AND dl.resource_id = v_shipment2
+       AND dl.decision_point = 'route_stop_followup_task'
+       AND dl.decision_outcome = 'exception'
+       AND dl.decision_reason ILIKE '%create_task_system_v1 requires service_role context%'),
+    0,
+    'access_restricted follow-up task creation does not log a service-role context exception'
   );
 
   SELECT COUNT(*)::int
@@ -854,6 +963,7 @@ BEGIN
     EXIT WHEN v_domain_event_run_id4 IS NOT NULL;
   END LOOP;
 
+  EXECUTE 'SET LOCAL ROLE postgres';
   FOR v_iter IN 1..50 LOOP
     SELECT workflow_status INTO v_run_status4 FROM public.workflow_runs WHERE id = v_domain_event_run_id4;
     EXIT WHEN v_run_status4 IN ('completed', 'failed', 'cancelled');
@@ -986,6 +1096,7 @@ BEGIN
     EXIT WHEN v_domain_event_run_id3 IS NOT NULL;
   END LOOP;
 
+  EXECUTE 'SET LOCAL ROLE postgres';
   FOR v_iter IN 1..50 LOOP
     SELECT workflow_status INTO v_run_status3 FROM public.workflow_runs WHERE id = v_domain_event_run_id3;
     EXIT WHEN v_run_status3 IN ('completed', 'failed', 'cancelled');

@@ -7,7 +7,6 @@ import { copyTextToClipboard } from "./clipboard";
 import { formatResourceValue, formatIdValue } from "./resource-utils";
 import { useToast } from "./use-toast";
 import { cn, normalizeLower } from "./utils";
-import { formatJsonForUi } from "./workflow-run-logs-model";
 import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
 import {
   extractWorkflowRunProvenance,
@@ -132,7 +131,6 @@ export function WorkflowRunProvenancePanel({
   if (!provenance) return null;
 
   const sourceLabel = resolveSourceLabel(provenance, labels);
-  const rawContext = provenance.rawContext ? formatJsonForUi(provenance.rawContext) : null;
   const scopeType = provenance.scopeType?.trim() || "";
   const scopeId = provenance.scopeId?.trim() || "";
   const scope = scopeType && scopeId ? `${scopeType}:${scopeId}` : scopeType || scopeId || null;
@@ -316,17 +314,6 @@ export function WorkflowRunProvenancePanel({
           </div>
         </div>
       )}
-
-      {rawContext ? (
-        <details className="rounded-xl border border-ui-border bg-ui-paper/40 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-ui-ink">
-            {labels.actions.showRaw}
-          </summary>
-          <pre className="mt-3 max-h-72 overflow-auto whitespace-pre rounded-xl border border-ui-border bg-ui-paper/60 p-3 font-mono text-[11px] leading-5 text-ui-ink">
-            {rawContext}
-          </pre>
-        </details>
-      ) : null}
     </div>
   );
 }

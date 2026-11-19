@@ -170,8 +170,8 @@ const localWebServers = shouldStartLocalServers
         ? [
             {
               command: shouldForceClean
-                ? "node scripts/tests/stop-port-listeners.js 3001 && node scripts/tests/clear-next-cache.js apps/console && npm run dev:console"
-                : "npm run dev:console",
+                ? "node scripts/tests/stop-port-listeners.js 3001 && node scripts/tests/clear-next-cache.js apps/console && npm run dev:console:legacy"
+                : "npm run dev:console:legacy",
               url: `${consoleResolved.origin}${consoleResolved.path}`,
               reuseExistingServer: !shouldForceClean,
               timeout: webServerTimeoutMs,

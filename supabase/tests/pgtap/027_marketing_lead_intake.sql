@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(40);
+SELECT plan(41);
 
 -- pgTAP runs via direct SQL (not PostgREST), so request.jwt.claims is unset by default.
 -- Task creation paths require either auth.uid() or role=service_role claims.
@@ -81,7 +81,17 @@ SELECT ok(
   'edge_api_gateway_role cannot EXECUTE service-only api.marketing_lead_request_create_v1'
 );
 
--- 8) task_type_catalog includes marketing_lead_followup (global default)
+-- 8) edge_api_gateway_role can execute public implementation through the api wrapper
+SELECT ok(
+  has_function_privilege(
+    'edge_api_gateway_role',
+    'public.marketing_lead_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)',
+    'EXECUTE'
+  ),
+  'edge_api_gateway_role can EXECUTE public.marketing_lead_request_create_v1'
+);
+
+-- 9) task_type_catalog includes marketing_lead_followup (global default)
 SELECT ok(
   EXISTS (
     SELECT 1
@@ -94,7 +104,7 @@ SELECT ok(
   'task_type_catalog includes marketing_lead_followup'
 );
 
--- 9-10) calling lead intake RPC returns ok=true and a task_id (not deduped)
+-- 10-11) calling lead intake RPC returns ok=true and a task_id (not deduped)
 WITH res AS (
   SELECT api.marketing_lead_request_create_v1(
     'lead@example.com',

@@ -15,13 +15,41 @@ DECLARE
   v_user_active UUID := gen_random_uuid();
   v_user_suspended UUID := gen_random_uuid();
   v_user_org_suspended UUID := gen_random_uuid();
+  v_client_active UUID := gen_random_uuid();
+  v_client_suspended UUID := gen_random_uuid();
+  v_sender_active UUID := gen_random_uuid();
+  v_sender_suspended UUID := gen_random_uuid();
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
+
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 
   INSERT INTO public.organizations (id, name, slug, billing_status)
   VALUES
     (v_org_active, 'Activation Guard Org Active', 'acct-guard-active-' || left(v_org_active::text, 8), 'active'),
     (v_org_suspended, 'Activation Guard Org Suspended', 'acct-guard-susp-' || left(v_org_suspended::text, 8), 'suspended');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES
+    (v_client_active, v_org_active, 'Activation Guard Active Client', 'acct-guard-active-client-' || left(v_client_active::text, 8), 'active'),
+    (v_client_suspended, v_org_suspended, 'Activation Guard Suspended Client', 'acct-guard-susp-client-' || left(v_client_suspended::text, 8), 'active');
+
+  INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES
+    (v_sender_active, v_client_active, 'Activation Guard Active Sender', 'Activation Guard Active Sender', TRUE, 'active'),
+    (v_sender_suspended, v_client_suspended, 'Activation Guard Suspended Sender', 'Activation Guard Suspended Sender', TRUE, 'active');
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(
+    v_org_active,
+    'pgtap:account-activation-scope-guards-active-fixture-bootstrap'
+  );
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(
+    v_org_suspended,
+    'pgtap:account-activation-scope-guards-suspended-fixture-bootstrap'
+  );
 
   INSERT INTO public.users (
     id,

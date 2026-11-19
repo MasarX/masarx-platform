@@ -23,17 +23,53 @@ WHERE worker_name IN (
 );
 
 -- Fixtures -------------------------------------------------------------------
+-- This fixture owns client/sender setup. Defer organization bootstrap until
+-- the source-binding context exists, then run canonical onboarding explicitly.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO organizations (id, name, slug)
 VALUES ('aaaa2000-0000-0000-0000-000000000005', 'Misc Org', 'misc-org')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    updated_at = now();
+SELECT set_config('app.organization_onboarding_source', '', true);
 
-INSERT INTO clients (id, organization_id, name, slug)
-VALUES ('bbbb2000-0000-0000-0000-000000000005', 'aaaa2000-0000-0000-0000-000000000005', 'Misc Client', 'misc-client')
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO clients (id, organization_id, name, slug, status)
+VALUES (
+    'bbbb2000-0000-0000-0000-000000000005',
+    'aaaa2000-0000-0000-0000-000000000005',
+    'Misc Client',
+    'misc-client',
+    'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status,
+    updated_at = now();
 
-INSERT INTO senders (id, client_id, name)
-VALUES ('cccc2000-0000-0000-0000-000000000005', 'bbbb2000-0000-0000-0000-000000000005', 'Misc Sender')
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+    'cccc2000-0000-0000-0000-000000000005',
+    'bbbb2000-0000-0000-0000-000000000005',
+    'Misc Sender',
+    'Misc Sender',
+    false,
+    true,
+    'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+    'aaaa2000-0000-0000-0000-000000000005',
+    'pgtap:worker-misc-fixture-bootstrap'
+);
 
 INSERT INTO shipments (
     id,

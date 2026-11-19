@@ -143,4 +143,114 @@ describe("mobile storage adapter", () => {
     await storage.removeItem("token");
     expect(await storage.getItem("token")).toBeNull();
   });
+
+  test("fails closed on native when SecureStore methods fail", async () => {
+    const secureStore = {
+      getItemAsync: jest.fn(async () => {
+        throw new Error("native module unavailable");
+      }),
+      setItemAsync: jest.fn(async () => {
+        throw new Error("native module unavailable");
+      }),
+      deleteItemAsync: jest.fn(async () => {
+        throw new Error("native module unavailable");
+      }),
+    };
+    jest.doMock("react-native", () => ({ Platform: { OS: "android" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => secureStore, { virtual: true });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createFieldOpsStorage } = require("../../../apps/fieldops/src/mobile-storage");
+
+    const storage = createFieldOpsStorage();
+    await storage.setItem("native-key", "fallback");
+    expect(await storage.getItem("native-key")).toBeNull();
+    await storage.removeItem("native-key");
+    expect(await storage.getItem("native-key")).toBeNull();
+  });
+
+  test("fails closed when SecureStore module is unavailable", async () => {
+    jest.doMock("react-native", () => ({ Platform: { OS: "android" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => ({}), { virtual: true });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createFieldOpsStorage } = require("../../../apps/fieldops/src/mobile-storage");
+
+    const storage = createFieldOpsStorage();
+    await storage.setItem("native-key", "value");
+    expect(await storage.getItem("native-key")).toBeNull();
+    await storage.removeItem("native-key");
+    expect(await storage.getItem("native-key")).toBeNull();
+  });
+
+  test("does not surface stale stored values after a failed auth token save", async () => {
+    const persisted = new Map<string, string>([["sb-demo-auth-token", "stale-token"]]);
+    const secureStore = {
+      getItemAsync: jest.fn(async (key: string) => persisted.get(key) ?? null),
+      setItemAsync: jest.fn(async () => {
+        throw new Error("write failed");
+      }),
+      deleteItemAsync: jest.fn(async () => undefined),
+    };
+    jest.doMock("react-native", () => ({ Platform: { OS: "android" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => secureStore, { virtual: true });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createFieldOpsStorage } = require("../../../apps/fieldops/src/mobile-storage");
+
+    const storage = createFieldOpsStorage();
+    expect(await storage.getItem("sb-demo-auth-token")).toBe("stale-token");
+    await storage.setItem("sb-demo-auth-token", "fresh-token");
+    expect(await storage.getItem("sb-demo-auth-token")).toBeNull();
+  });
+
+  test("does not surface stale stored values after a failed auth token delete", async () => {
+    const persisted = new Map<string, string>([["sb-demo-auth-token", "stale-token"]]);
+    const secureStore = {
+      getItemAsync: jest.fn(async (key: string) => persisted.get(key) ?? null),
+      setItemAsync: jest.fn(async () => undefined),
+      deleteItemAsync: jest.fn(async () => {
+        throw new Error("delete failed");
+      }),
+    };
+    jest.doMock("react-native", () => ({ Platform: { OS: "android" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => secureStore, { virtual: true });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createFieldOpsStorage } = require("../../../apps/fieldops/src/mobile-storage");
+
+    const storage = createFieldOpsStorage();
+    expect(await storage.getItem("sb-demo-auth-token")).toBe("stale-token");
+    await storage.removeItem("sb-demo-auth-token");
+    expect(await storage.getItem("sb-demo-auth-token")).toBeNull();
+  });
+
+  test("persists native values across adapter recreation when SecureStore succeeds", async () => {
+    const persisted = new Map<string, string>();
+    const secureStore = {
+      getItemAsync: jest.fn(async (key: string) => persisted.get(key) ?? null),
+      setItemAsync: jest.fn(async (key: string, value: string) => {
+        persisted.set(key, value);
+      }),
+      deleteItemAsync: jest.fn(async (key: string) => {
+        persisted.delete(key);
+      }),
+    };
+    jest.doMock("react-native", () => ({ Platform: { OS: "android" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => secureStore, { virtual: true });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const firstLoad = require("../../../apps/fieldops/src/mobile-storage");
+    const firstStorage = firstLoad.createFieldOpsStorage();
+    await firstStorage.setItem("fieldops_device_id_v1", "device-123");
+
+    jest.resetModules();
+    jest.doMock("react-native", () => ({ Platform: { OS: "android" } }), { virtual: true });
+    jest.doMock("expo-secure-store", () => secureStore, { virtual: true });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const secondLoad = require("../../../apps/fieldops/src/mobile-storage");
+    const secondStorage = secondLoad.createFieldOpsStorage();
+    expect(await secondStorage.getItem("fieldops_device_id_v1")).toBe("device-123");
+  });
 });

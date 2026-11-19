@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(6);
+SELECT plan(11);
 
 SELECT is(
   (public.tabular_import_coerce_value_v1(
@@ -37,6 +37,91 @@ SELECT ok(
     false
   ),
   'tabular_import_coerce_value_v1 emits blocking diagnostics for invalid configured enum values'
+);
+
+SELECT ok(
+  COALESCE(
+    public.tabular_import_coerce_value_v1(
+      '"abc"'::jsonb,
+      jsonb_build_object(
+        'key', 'cod_amount',
+        'label', 'COD Amount',
+        'edit_type', 'number',
+        'import', jsonb_build_object('enabled', true)
+      ),
+      'COD Amount'
+    )->'diagnostics' @> '[{"code":"number_parse_failed","blocking":true}]'::jsonb,
+    false
+  ),
+  'tabular_import_coerce_value_v1 emits blocking diagnostics for invalid number values'
+);
+
+SELECT ok(
+  COALESCE(
+    public.tabular_import_coerce_value_v1(
+      '"2.5"'::jsonb,
+      jsonb_build_object(
+        'key', 'box_count',
+        'label', 'Box Count',
+        'edit_type', 'integer',
+        'import', jsonb_build_object('enabled', true)
+      ),
+      'Box Count'
+    )->'diagnostics' @> '[{"code":"integer_parse_failed","blocking":true}]'::jsonb,
+    false
+  ),
+  'tabular_import_coerce_value_v1 emits blocking diagnostics for non-whole integer values'
+);
+
+SELECT ok(
+  COALESCE(
+    public.tabular_import_coerce_value_v1(
+      '"sometimes"'::jsonb,
+      jsonb_build_object(
+        'key', 'requires_signature',
+        'label', 'Requires Signature',
+        'edit_type', 'boolean',
+        'import', jsonb_build_object('enabled', true)
+      ),
+      'Requires Signature'
+    )->'diagnostics' @> '[{"code":"boolean_parse_failed","blocking":true}]'::jsonb,
+    false
+  ),
+  'tabular_import_coerce_value_v1 emits blocking diagnostics for invalid boolean values'
+);
+
+SELECT ok(
+  COALESCE(
+    public.tabular_import_coerce_value_v1(
+      '"not-a-date"'::jsonb,
+      jsonb_build_object(
+        'key', 'promised_delivery_date',
+        'label', 'Promised Delivery Date',
+        'edit_type', 'date',
+        'import', jsonb_build_object('enabled', true)
+      ),
+      'Promised Delivery Date'
+    )->'diagnostics' @> '[{"code":"date_parse_failed","blocking":true}]'::jsonb,
+    false
+  ),
+  'tabular_import_coerce_value_v1 emits blocking diagnostics for invalid date values'
+);
+
+SELECT ok(
+  COALESCE(
+    public.tabular_import_coerce_value_v1(
+      '"not-a-datetime"'::jsonb,
+      jsonb_build_object(
+        'key', 'pickup_at',
+        'label', 'Pickup At',
+        'edit_type', 'datetime',
+        'import', jsonb_build_object('enabled', true)
+      ),
+      'Pickup At'
+    )->'diagnostics' @> '[{"code":"datetime_parse_failed","blocking":true}]'::jsonb,
+    false
+  ),
+  'tabular_import_coerce_value_v1 emits blocking diagnostics for invalid datetime values'
 );
 
 SELECT ok(

@@ -14,12 +14,53 @@ SELECT CASE
     ELSE 'not ok 1 - edge_webhook_role can execute workflow_intake_webhook' || E'\n# edge_webhook_role missing EXECUTE on workflow_intake_webhook'
 END;
 
+-- This fixture owns webhook sender/client setup. Defer organization bootstrap
+-- until the source-binding context exists, then run canonical onboarding.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO organizations (id, name, slug)
 VALUES ('aaaa1000-0000-0000-0000-000000000004', 'Webhook Org', 'webhook-org')
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     slug = EXCLUDED.slug,
     updated_at = now();
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO clients (id, organization_id, name, slug, status)
+VALUES (
+    'aaaa1000-0000-0000-0000-000000000014',
+    'aaaa1000-0000-0000-0000-000000000004',
+    'Webhook Client',
+    'webhook-client',
+    'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+    'aaaa1000-0000-0000-0000-000000000024',
+    'aaaa1000-0000-0000-0000-000000000014',
+    'Webhook Sender',
+    'Webhook Sender',
+    false,
+    true,
+    'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+    'aaaa1000-0000-0000-0000-000000000004',
+    'pgtap:webhook-intake-fixture-bootstrap'
+);
 
 INSERT INTO mapping_configs (
     id,
@@ -76,6 +117,7 @@ INSERT INTO webhook_sources (
     provider_type,
     auth_token,
     mapping_config_id,
+    sender_id,
     enabled
 ) VALUES (
     'bbbb1000-0000-0000-0000-000000000004',
@@ -85,6 +127,7 @@ INSERT INTO webhook_sources (
     'provider',
     'token-webhook-test',
     'cccc1000-0000-0000-0000-000000000004',
+    'aaaa1000-0000-0000-0000-000000000024',
     TRUE
 ) ON CONFLICT (id) DO UPDATE
 SET organization_id = EXCLUDED.organization_id,
@@ -93,6 +136,7 @@ SET organization_id = EXCLUDED.organization_id,
     provider_type = EXCLUDED.provider_type,
     auth_token = EXCLUDED.auth_token,
     mapping_config_id = EXCLUDED.mapping_config_id,
+    sender_id = EXCLUDED.sender_id,
     enabled = TRUE,
     updated_at = now();
 

@@ -248,7 +248,11 @@ BEGIN
   VALUES (v_branch, v_zone, 10);
 
   INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
-  VALUES (v_standard_level, v_org, 'standard', 'Standard', TRUE);
+  VALUES (v_standard_level, v_org, 'standard', 'Standard', TRUE)
+  ON CONFLICT (organization_id, key) DO UPDATE
+    SET name = EXCLUDED.name,
+        is_active = EXCLUDED.is_active
+  RETURNING id INTO v_standard_level;
 
   INSERT INTO public.service_offerings (service_level_id, branch_id, zone_id, effective_from, is_active, priority)
   VALUES (v_standard_level, v_branch, v_zone, '2026-01-01T00:00:00Z', TRUE, 10);

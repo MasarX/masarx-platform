@@ -17,6 +17,8 @@ DECLARE
   v_org2 UUID := gen_random_uuid();
   v_user1 UUID := gen_random_uuid();
   v_user2 UUID := gen_random_uuid();
+  v_client1 UUID := gen_random_uuid();
+  v_sender1 UUID := gen_random_uuid();
   v_client2 UUID := gen_random_uuid();
   v_sender2 UUID := gen_random_uuid();
   v_ag1 UUID := gen_random_uuid();
@@ -51,6 +53,8 @@ BEGIN
 
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', TRUE);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES
     (v_org1, 'Agreements Org 1', 'agreements-org-' || left(v_org1::text, 8)),
@@ -61,11 +65,19 @@ BEGIN
     (v_user1, v_org1, 'ag-u1-' || left(v_user1::text, 8) || '@example.com', 'Agreements User 1'),
     (v_user2, v_org2, 'ag-u2-' || left(v_user2::text, 8) || '@example.com', 'Agreements User 2');
 
-  INSERT INTO public.clients (id, organization_id, name, slug)
-  VALUES (v_client2, v_org2, 'Agreements Client 2', 'ag-client-' || left(v_client2::text, 8));
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES
+    (v_client1, v_org1, 'Agreements Client 1', 'ag-client-' || left(v_client1::text, 8), 'active'),
+    (v_client2, v_org2, 'Agreements Client 2', 'ag-client-' || left(v_client2::text, 8), 'active');
 
-  INSERT INTO public.senders (id, client_id, name)
-  VALUES (v_sender2, v_client2, 'Agreements Sender 2');
+  INSERT INTO public.senders (id, client_id, name, status)
+  VALUES
+    (v_sender1, v_client1, 'Agreements Sender 1', 'active'),
+    (v_sender2, v_client2, 'Agreements Sender 2', 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', TRUE);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org1, 'pgtap:commercial-agreements-traceability-org1-bootstrap');
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org2, 'pgtap:commercial-agreements-traceability-org2-bootstrap');
 
   INSERT INTO public.commercial_agreements (id, organization_id, agreement_code, title, status)
   VALUES

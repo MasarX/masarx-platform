@@ -64,7 +64,7 @@ Sources:
 | Command catalog | `/commands` | loading, empty, error, denied | Registry-driven command command center. |
 | Service catalog | `/catalog/service-offerings` | loading, empty, error, denied, submitted | Canonical service-level and offering catalog bound to active lookup values and active branches. |
 | Shipment create command | `/commands/shipments.create` | loading, error, denied, submitted | Authenticated shipment-create command surface. |
-| Label designer | `/labels/designer` | loading, empty, error, denied | Label designer parity surface. |
+| Label designer | `/platform/labels` | loading, empty, error, denied | Canonical Console V2 Label Designer & templates workbench. `/labels/designer` redirects here as a compatibility alias. |
 | Organization requests | `/organizations/requests` | loading, empty, error, denied, submitted | Tenant signup/request review surface. |
 | Onboarding readiness | `/onboarding/readiness` | loading, empty, error, denied, stale | Tenant onboarding defaults health, blocking drift, pending credentials, and last reconcile visibility for operator go-live review. |
 | Marketplace reviews | `/marketplace/reviews` | loading, empty, error, denied, stale | Console approval queue for freelancer-driver and provider-tenant onboarding. |

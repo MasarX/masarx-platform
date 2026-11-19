@@ -535,6 +535,8 @@ const SAUDI_SHORT_ADDRESS_KEYS = [
   "nationalShortAddress",
   "short_code",
   "shortCode",
+  "national_address_short_code",
+  "nationalAddressShortCode",
 ];
 
 function formatAddressRecord(record: JsonRecord): string | null {

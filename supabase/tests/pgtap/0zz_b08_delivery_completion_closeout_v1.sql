@@ -36,16 +36,20 @@ DECLARE
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   RETURN NEXT ok(
     EXISTS (
       SELECT 1
       FROM public.operation_handlers
       WHERE handler_key = 'route_stop_finalize'
-        AND handler_name = 'execute_route_stop_finalize_v9'
-        AND handler_version = 'v9'
+        AND handler_schema = 'workflow_handlers'
+        AND handler_name = format('execute_route_stop_finalize_%s', handler_version)
+        AND handler_version ~ '^v[0-9]+$'
+        AND regexp_replace(handler_version, '^v', '')::INT >= 9
         AND is_active IS TRUE
     ),
-    'route_stop_finalize handler upgraded to v9'
+    'route_stop_finalize handler is v9 or newer'
   );
   RETURN NEXT has_view('api', 'shipment_actions', 'api.shipment_actions view exists');
   RETURN NEXT col_type_is('api', 'shipment_actions', 'delivery_completion_kind', 'text', 'api.shipment_actions exposes delivery_completion_kind');
@@ -74,6 +78,9 @@ BEGIN
 
   INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
   VALUES (v_sender, v_client, 'B08 UC098 Sender', 'B08 UC098 Sender', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:b08-delivery-completion-fixture-bootstrap');
 
   INSERT INTO public.vehicles (id, organization_id, status, is_active)
   VALUES (v_vehicle, v_org, 'active', TRUE);

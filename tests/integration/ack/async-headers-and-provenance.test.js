@@ -43,6 +43,18 @@ describe('Async ACK headers and decision provenance', () => {
       [organizationId, `async-ack-${organizationId.slice(0, 8)}`]
     );
 
+    await client.query(
+      `INSERT INTO clients (id, organization_id, name, slug, sla_tier, status)
+       VALUES ($1::uuid, $2::uuid, 'Async ACK Client', $3::text, 'standard', 'active')`,
+      [clientId, organizationId, `async-ack-client-${clientId.slice(0, 8)}`]
+    );
+
+    await client.query(
+      `INSERT INTO senders (id, client_id, name, brand_name, status)
+       VALUES ($1::uuid, $2::uuid, 'Async ACK Sender', 'Async ACK Sender', 'active')`,
+      [senderId, clientId]
+    );
+
     // Ensure an inbound mapping exists (payload transform not needed for this assertion)
     await client.query(
       `INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
@@ -53,12 +65,12 @@ describe('Async ACK headers and decision provenance', () => {
     await client.query(
       `INSERT INTO webhook_sources (
          id, organization_id, source_identifier, name, provider_type,
-         auth_token, mapping_config_id, enabled
+         auth_token, mapping_config_id, sender_id, enabled
        ) VALUES (
          $1::uuid, $2::uuid, $3::text, 'Async ACK Source', 'provider',
-         $4::text, $5::uuid, TRUE
+         $4::text, $5::uuid, $6::uuid, TRUE
        )`,
-      [sourceId, organizationId, `async-ack-${sourceId.slice(0, 8)}`, token, mappingId]
+      [sourceId, organizationId, `async-ack-${sourceId.slice(0, 8)}`, token, mappingId, senderId]
     );
 
     // Resolve the async ack mapping id dynamically by key

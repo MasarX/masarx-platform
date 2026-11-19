@@ -44,7 +44,7 @@ function resolveAllowedOriginCandidate() {
   });
 }
 
-async function requestStatus({ origin, method = "POST", token } = {}) {
+async function requestStatus({ origin, method = "POST", token, bodyKey = "token" } = {}) {
   const url = method === "GET"
     ? `${buildFnUrl("driver-application-status")}?token=${encodeURIComponent(token || "")}`
     : buildFnUrl("driver-application-status");
@@ -55,7 +55,7 @@ async function requestStatus({ origin, method = "POST", token } = {}) {
       ...(origin ? { origin } : {}),
       ...(method === "POST" ? { "content-type": "application/json" } : {}),
     },
-    ...(method === "POST" ? { body: JSON.stringify({ token }) } : {}),
+    ...(method === "POST" ? { body: JSON.stringify({ [bodyKey]: token }) } : {}),
   });
   const json = await res.json().catch(() => null);
   return { status: res.status, body: json };
@@ -102,5 +102,33 @@ runIfEdge("driver-application-status edge (E2E)", () => {
 
     expect(status).toBe(400);
     expect(body).toMatchObject({ ok: false, error: { code: "invalid_status_token" } });
+  });
+
+  test("allowed Origin accepts the visible landing form status_token field", async () => {
+    const absentButValidToken = "4d1fbd36-6b6e-4c35-acc4-5e3ad9043830";
+    const { origin: allowedOrigin, attempts } = await probeAllowedOrigin(
+      resolveAllowedOriginCandidate(),
+      async (origin) =>
+        requestStatus({
+          origin,
+          token: absentButValidToken,
+          bodyKey: "status_token",
+        }),
+    );
+
+    if (!allowedOrigin) {
+      expect(attempts.length).toBeGreaterThan(0);
+      expect(attempts.every((attempt) => attempt.status === 403)).toBe(true);
+      return;
+    }
+
+    const { status, body } = await requestStatus({
+      origin: allowedOrigin,
+      token: absentButValidToken,
+      bodyKey: "status_token",
+    });
+
+    expect(status).toBe(404);
+    expect(body).toMatchObject({ ok: false, error: { code: "request_not_found" } });
   });
 });

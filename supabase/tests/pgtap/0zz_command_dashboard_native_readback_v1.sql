@@ -117,9 +117,9 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE authenticated';
   RETURN NEXT is((SELECT count(*)::int FROM public.command_route_runs_dashboard_v1 WHERE id=route_a),1,'owned route exists');
   RETURN NEXT is((SELECT count(*)::int FROM public.command_route_runs_dashboard_v1 WHERE id=route_f),0,'foreign route hidden');
-  -- Capabilities do not bypass trusted-only telemetry RLS.
+  -- The scoped alert projection requires alerts.read and the active tenant.
   result:=api.ui_get_resource_v1('ops_alerts',alert_a);
-  RETURN NEXT ok(result IS NULL,'tenant cannot read owned trusted-only alert');
+  RETURN NEXT is(result->>'id',alert_a::text,'tenant with alerts.read sees its own alert');
   RETURN NEXT ok(api.ui_get_resource_v1('ops_alerts',alert_f) IS NULL,
     'foreign alert hidden through scoped API');
   -- Communications base tables remain service-only; use the registry read contract.
@@ -151,7 +151,7 @@ BEGIN
     RETURN NEXT ok(public.user_has_resource_capability_v1(spec.resource,'read'),spec.resource||' actual read capability');
     result:=api.ui_list_resource_v1(spec.resource,'{}'::jsonb,100,0,NULL);
     RETURN NEXT is(EXISTS(SELECT 1 FROM jsonb_array_elements(result->'items') x WHERE x->>'id'=spec.owned_id),
-      spec.resource IN ('route_runs','kpi_rollup_directory'),spec.resource||' API retains the owned read boundary');
+      spec.resource IN ('route_runs','ops_alerts','kpi_rollup_directory'),spec.resource||' API retains the owned read boundary');
     RETURN NEXT ok(NOT EXISTS(SELECT 1 FROM jsonb_array_elements(result->'items') x WHERE x->>'id'=spec.foreign_id),spec.resource||' API foreign exclusion');
   END LOOP;
   EXECUTE 'SET LOCAL ROLE postgres';

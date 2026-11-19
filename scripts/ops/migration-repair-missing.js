@@ -116,25 +116,56 @@ async function upsertSchemaMigrationRow(dbUrl, version, name) {
   const client = createPgClient(dbUrl);
   await client.connect();
   try {
-    await client.query(
-      `
-        INSERT INTO supabase_migrations.schema_migrations(version, name)
-        VALUES ($1, $2)
-        ON CONFLICT (version) DO UPDATE
-          SET name = EXCLUDED.name
-      `,
-      [String(version || '').trim(), String(name || '').trim()],
-    );
+    try {
+      await insertSchemaMigrationRow(client, version, name);
+    } catch (err) {
+      if (!isMissingSchemaMigrationsTableError(err)) {
+        throw err;
+      }
+      await ensureSchemaMigrationsTable(client);
+      await insertSchemaMigrationRow(client, version, name);
+    }
     return true;
   } catch (err) {
-    const msg = err && err.message ? err.message : String(err);
-    if (/relation .*supabase_migrations\\.schema_migrations.* does not exist/i.test(msg)) {
+    if (isMissingSchemaMigrationsTableError(err)) {
       return false;
     }
     throw err;
   } finally {
     await closePgClient(client, 'upsertSchemaMigrationRow');
   }
+}
+
+function isMissingSchemaMigrationsTableError(error) {
+  const code = String(error && error.code || '').trim();
+  const msg = String(error && error.message ? error.message : error);
+  return (
+    code === '42P01' ||
+    (/supabase_migrations\.schema_migrations/i.test(msg) && /does not exist/i.test(msg))
+  );
+}
+
+async function ensureSchemaMigrationsTable(client) {
+  await client.query('CREATE SCHEMA IF NOT EXISTS supabase_migrations');
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
+      version text PRIMARY KEY,
+      statements text[],
+      name text
+    )
+  `);
+}
+
+async function insertSchemaMigrationRow(client, version, name) {
+  await client.query(
+    `
+      INSERT INTO supabase_migrations.schema_migrations(version, name)
+      VALUES ($1, $2)
+      ON CONFLICT (version) DO UPDATE
+        SET name = EXCLUDED.name
+    `,
+    [String(version || '').trim(), String(name || '').trim()],
+  );
 }
 
 function normalizeBaseName(name) {
@@ -697,6 +728,7 @@ module.exports = {
   resolveDbUrlCandidates,
   resolveConnectTimeoutMs,
   resolveRepairConfigPath,
+  isMissingSchemaMigrationsTableError,
   loadRepairRules,
   resolveRuleSqlPath,
 };

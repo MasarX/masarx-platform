@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(41);
+SELECT plan(42);
 
 SELECT has_function(
   'public',
@@ -52,6 +52,7 @@ DECLARE
   v_delete JSONB;
   v_repeat JSONB;
   v_first_deleted JSONB;
+  v_duplicate_sql TEXT;
   v_foreign_trigger UUID := gen_random_uuid();
   v_platform_user UUID := gen_random_uuid();
   v_tenant_user UUID := gen_random_uuid();
@@ -466,10 +467,12 @@ BEGIN
     'pending', 'delete does not cancel pending fires');
   RETURN NEXT ok(EXISTS (SELECT 1 FROM public.workflow_runs WHERE id = v_source_run_id),
     'delete retains already admitted workflow runs');
-  RETURN NEXT throws_ok(format(
+  v_duplicate_sql := format(
     'INSERT INTO public.workflow_run_triggers(scope_type,scope_id,source_workflow_template_id,target_workflow_template_id,source_statuses) VALUES (%L,%L::uuid,%L::uuid,%L::uuid,ARRAY[%L]::text[])',
-    'client', v_client, v_source_template, v_alt_target_template, 'completed'),
-    '23505', NULL, 'tombstones retain all-row uniqueness');
+    v_first_deleted->>'scope_type', v_first_deleted->>'scope_id',
+    v_source_template, v_alt_target_template, 'completed');
+  RETURN NEXT lives_ok(v_duplicate_sql, 'a deleted binding can be recreated while its tombstone is retained');
+  RETURN NEXT throws_ok(v_duplicate_sql, '23505', NULL, 'a second active binding remains forbidden');
   EXECUTE 'SET LOCAL ROLE authenticated';
   RETURN NEXT is((SELECT count(*) FROM public.workflow_run_triggers_active_v1 WHERE id = v_trigger_id),
     0::BIGINT, 'active projection excludes tombstones');

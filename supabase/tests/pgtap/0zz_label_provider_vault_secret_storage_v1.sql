@@ -27,7 +27,7 @@ BEGIN
   JOIN public.settings_versions v ON v.id = s.settings_version_id
   WHERE s.category = 'access_control_policy' AND s.scope_type = public.get_root_scope_type_key_v1() AND s.scope_id IS NULL;
   SELECT jsonb_set(policy, '{roles}', jsonb_agg(CASE WHEN role->>'key' = 'ops_admin'
-    THEN jsonb_set(role, '{capability_keys}', '["settings.read","settings.write"]') ELSE role END ORDER BY n))
+    THEN jsonb_set(role, '{capability_keys}', '["settings.read","settings.write","console_metadata.read"]') ELSE role END ORDER BY n))
   INTO policy FROM jsonb_array_elements(policy->'roles') WITH ORDINALITY r(role,n);
   PERFORM public.upsert_settings_value_v1('access_control_policy', 'tenant', org, policy, schema_version, 'Synthetic renderer policy') FROM label_vault_fixture;
 END;

@@ -89,6 +89,16 @@
       "name": "fieldops-reassignment-request",
       "auth_mode": "public_no_jwt",
       "enabled": true
+    },
+    {
+      "name": "tenant-signup-console-request",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
+      "name": "tenant-user-invite",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
     }
   ]
 }

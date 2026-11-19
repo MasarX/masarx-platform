@@ -26,12 +26,15 @@ DECLARE
   v_branch UUID := gen_random_uuid();
   v_vehicle UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_shipment UUID := gen_random_uuid();
   v_route_run_id UUID := NULL;
   v_route_stop_id UUID := NULL;
   v_task_id UUID := NULL;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
+
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'Route Closeout Org', 'route-closeout-' || left(v_org::text, 8));
@@ -74,6 +77,12 @@ BEGIN
     'active',
     '{}'::jsonb
   );
+
+  INSERT INTO public.senders (id, client_id, name, status)
+  VALUES (v_sender, v_client, 'Route Closeout Sender', 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:route-closeout-fixture-bootstrap');
 
   INSERT INTO public.shipments (
     id,

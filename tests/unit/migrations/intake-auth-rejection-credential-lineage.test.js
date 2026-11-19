@@ -54,7 +54,8 @@ describe('intake auth rejection and credential lineage migration', () => {
     const native = fs.readFileSync(path.join(process.cwd(), 'supabase/tests/pgtap/0zz_webhook_bounded_token_rejections_v1.sql'), 'utf8');
     for (const label of ['plaintext rotation captures exactly one history row', 'unchanged watched columns do not duplicate history',
       'direct hash rotation retains its predecessor', 'enabled retirement retains revoked reason',
-      'metadata archive and disable retains archived reason']) expect(native).toContain(label);
+      'authorized archive retains archived reason']) expect(native).toContain(label);
+    expect(native).toMatch(/SET LOCAL ROLE authenticated;\s+PERFORM api\.ui_archive_webhook_source_v1\(/);
     expect(sql).toContain('capture_webhook_source_token_lineage_v1');
     expect(sql).toMatch(/AFTER UPDATE OF auth_token_hash, enabled, managed_metadata ON public\.webhook_sources/);
     expect(sql).toContain("WHEN lower(COALESCE(NEW.managed_metadata->>'lifecycle', '')) = 'archived' THEN 'archived'");

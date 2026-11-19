@@ -40,16 +40,42 @@ CREATE TEMP TABLE tmp_branches_coverage_ids AS
 SELECT
   '0bb00000-0000-0000-0000-000000000001'::uuid AS org1_id,
   '0bc00000-0000-0000-0000-000000000002'::uuid AS org2_id,
+  '0bb00000-0000-0000-0000-000000000401'::uuid AS client1_id,
+  '0bc00000-0000-0000-0000-000000000402'::uuid AS client2_id,
+  '0bb00000-0000-0000-0000-000000000501'::uuid AS sender1_id,
+  '0bc00000-0000-0000-0000-000000000502'::uuid AS sender2_id,
   '0bb00000-0000-0000-0000-000000000101'::uuid AS zone1_id,
   '0bb00000-0000-0000-0000-000000000103'::uuid AS zone3_id,
   '0bc00000-0000-0000-0000-000000000102'::uuid AS zone2_id,
   '0bb00000-0000-0000-0000-000000000201'::uuid AS branch_id;
+
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 
 INSERT INTO public.organizations (id, name, slug)
 SELECT org1_id, 'Branches Org 1', 'branches-org-' || left(org1_id::text, 8)
 FROM tmp_branches_coverage_ids
 UNION ALL
 SELECT org2_id, 'Branches Org 2', 'branches-org-' || left(org2_id::text, 8)
+FROM tmp_branches_coverage_ids;
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+SELECT client1_id, org1_id, 'Branches Client 1', 'branches-client-' || left(client1_id::text, 8), 'active'
+FROM tmp_branches_coverage_ids
+UNION ALL
+SELECT client2_id, org2_id, 'Branches Client 2', 'branches-client-' || left(client2_id::text, 8), 'active'
+FROM tmp_branches_coverage_ids;
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+SELECT sender1_id, client1_id, 'Branches Sender 1', 'Branches Sender 1', TRUE, 'active'
+FROM tmp_branches_coverage_ids
+UNION ALL
+SELECT sender2_id, client2_id, 'Branches Sender 2', 'Branches Sender 2', TRUE, 'active'
+FROM tmp_branches_coverage_ids;
+
+SELECT set_config('app.organization_onboarding_source', '', true);
+SELECT public.bootstrap_tenant_onboarding_v1(org1_id, 'pgtap:branches-coverage-fixture-bootstrap-org1')
+FROM tmp_branches_coverage_ids;
+SELECT public.bootstrap_tenant_onboarding_v1(org2_id, 'pgtap:branches-coverage-fixture-bootstrap-org2')
 FROM tmp_branches_coverage_ids;
 
 INSERT INTO public.zones (id, organization_id, name, slug, is_active)

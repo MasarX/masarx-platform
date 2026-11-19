@@ -1,0 +1,105 @@
+/* base.css — reset, typography, focus, scrollbars */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+
+html {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--paper-2);
+  font-feature-settings: 'cv11' 1, 'ss01' 1, 'tnum' 1, 'lnum' 1, 'zero' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100%;
+  background: var(--paper-2);
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+ol, ul { margin: 0; padding: 0; list-style: none; }
+h1, h2, h3, h4, h5, h6 { margin: 0; font-weight: 600; }
+
+img, svg { display: block; }
+svg { flex-shrink: 0; }
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum' 1, 'zero' 1, 'ss03' 1;
+}
+
+.tnum { font-variant-numeric: tabular-nums lining-nums slashed-zero; }
+
+.serif {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* Focus */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--r-2);
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  background: var(--accent);
+  color: var(--ink-inv);
+  padding: 6px 10px;
+  border-radius: var(--r-2);
+  font-weight: 600;
+  z-index: 1000;
+  transform: translateY(-200%);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.skip-link:focus { transform: translateY(0); }
+
+/* Scrollbars (subtle) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
+
+/* Selection */
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}

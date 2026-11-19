@@ -27,10 +27,53 @@ UPDATE public.outbound_calls
    AND (lease_expires_at IS NULL OR lease_expires_at < now())
    AND (status <> 'failed' OR retry_count < max_retries);
 
--- Seed minimal org + provider for outbound_calls targeting.
+-- Seed minimal org + provider for outbound_calls targeting. This fixture owns
+-- source-binding setup, so defer bootstrap until client/sender context exists.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('bbbbbbbb-0000-0000-0000-000000000001', 'Retry Org', 'retry-org')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    updated_at = now();
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+VALUES (
+  'bbbbbbbb-0000-0000-0000-000000000101',
+  'bbbbbbbb-0000-0000-0000-000000000001',
+  'Retry Client',
+  'retry-client',
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+  'bbbbbbbb-0000-0000-0000-000000000201',
+  'bbbbbbbb-0000-0000-0000-000000000101',
+  'Retry Sender',
+  'Retry Sender',
+  false,
+  true,
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  'bbbbbbbb-0000-0000-0000-000000000001',
+  'pgtap:outbound-retry-policy-fixture-bootstrap'
+);
 
 INSERT INTO public.providers (id, organization_id, name, provider_type, enabled, metadata)
 VALUES (

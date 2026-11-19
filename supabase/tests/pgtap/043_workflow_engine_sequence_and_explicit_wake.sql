@@ -14,6 +14,7 @@ DO $block$
 DECLARE
     v_org UUID;
     v_client UUID;
+    v_sender UUID;
     v_template_id UUID := gen_random_uuid();
     v_step_1 UUID := gen_random_uuid();
     v_step_2 UUID := gen_random_uuid();
@@ -25,12 +26,16 @@ DECLARE
     v_wake_step1_status TEXT;
     v_wake_step2_status TEXT;
 BEGIN
+    PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
     INSERT INTO organizations (name, slug)
     VALUES (
         'pgTAP Workflow Sequence Org',
         'pgtap-sequence-org-' || substring(replace(gen_random_uuid()::text, '-', '') FROM 1 FOR 12)
     )
     RETURNING id INTO v_org;
+
+    PERFORM set_config('app.organization_onboarding_source', '', true);
 
     INSERT INTO clients (organization_id, name, slug)
     VALUES (
@@ -39,6 +44,23 @@ BEGIN
         'pgtap-sequence-client-' || substring(replace(gen_random_uuid()::text, '-', '') FROM 1 FOR 12)
     )
     RETURNING id INTO v_client;
+
+    INSERT INTO senders (client_id, name, brand_name, auto_provisioned, auto_recreate, status, settings_override)
+    VALUES (
+        v_client,
+        'pgTAP Workflow Sequence Sender',
+        'pgTAP Workflow Sequence Sender',
+        FALSE,
+        TRUE,
+        'active',
+        '{}'::jsonb
+    )
+    RETURNING id INTO v_sender;
+
+    PERFORM bootstrap_tenant_onboarding_v1(
+        v_org,
+        'pgtap:workflow-engine-sequence-wake-fixture-bootstrap'
+    );
 
     INSERT INTO workflow_templates (
         id, name, description, version, status, scope_type, scope_id, created_at, updated_at

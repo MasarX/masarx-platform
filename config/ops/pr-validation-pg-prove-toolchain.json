@@ -1,0 +1,32 @@
+{
+  "schema": "masarx_pr_validation_pg_prove_toolchain_v1",
+  "engine": "pg_prove",
+  "execution_mode": "ephemeral_docker_container",
+  "image": {
+    "tag": "masarx/pr-validation-pg-prove:3.36-2-bookworm-v1",
+    "base": "postgres:15-bookworm@sha256:86de064c5c6a497cfffd49c05327128d2939ad50f2c414c5cfa2fa36308af58c",
+    "package": "libtap-parser-sourcehandler-pgtap-perl",
+    "package_version": "3.36-2",
+    "pg_prove_version": "3.36",
+    "psql_major": 15
+  },
+  "dockerfile": "config/ops/images/pr-validation-pg-prove/Dockerfile",
+  "runner": {
+    "workspace_mount": "/workspace",
+    "state_mount": "/state",
+    "database_host_alias": "pg-prove.example.test",
+    "user": "65534:65534",
+    "cpus": "2.00",
+    "memory": "1024m",
+    "pids_limit": 256,
+    "tmpfs": "/tmp:rw,noexec,nosuid,size=64m",
+    "internal_timeout_margin_ms": 15000,
+    "cleanup_wait_ms": 5000,
+    "allowed_forwarded_env": [
+      "PGPASSWORD",
+      "PGAPPNAME",
+      "PGSSLMODE",
+      "PGCONNECT_TIMEOUT"
+    ]
+  }
+}

@@ -8,6 +8,7 @@ const {
   resolveDbUrlCandidates,
   resolveConnectTimeoutMs,
   resolveRepairConfigPath,
+  isMissingSchemaMigrationsTableError,
   loadRepairRules,
   resolveRuleSqlPath,
 } = require('../../../scripts/ops/migration-repair-missing');
@@ -45,6 +46,16 @@ describe('migration-repair-missing', () => {
     expect(resolveConnectTimeoutMs({ MIGRATION_REPAIR_CONNECT_TIMEOUT_MS: '9000' })).toBe(9000);
     expect(resolveConnectTimeoutMs({ MIGRATION_REPAIR_CONNECT_TIMEOUT_MS: 'nope' })).toBe(15000);
     expect(resolveConnectTimeoutMs({ MIGRATION_REPAIR_CONNECT_TIMEOUT_MS: '-1' })).toBe(15000);
+  });
+
+  test('detects missing Supabase schema migration history errors', () => {
+    expect(isMissingSchemaMigrationsTableError({ code: '42P01' })).toBe(true);
+    expect(
+      isMissingSchemaMigrationsTableError({
+        message: 'relation "supabase_migrations.schema_migrations" does not exist',
+      }),
+    ).toBe(true);
+    expect(isMissingSchemaMigrationsTableError({ message: 'permission denied' })).toBe(false);
   });
 
   test('resolveRepairConfigPath defaults under the repo and honors absolute overrides', () => {

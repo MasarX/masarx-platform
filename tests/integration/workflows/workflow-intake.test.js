@@ -43,9 +43,13 @@ const seedData = async (client) => {
       'provider',
       'token-webhook-test',
       'cccc1000-0000-0000-0000-000000000004',
+      'eeee1000-0000-0000-0000-000000000004',
       TRUE
     )
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE
+      SET sender_id = EXCLUDED.sender_id,
+          mapping_config_id = EXCLUDED.mapping_config_id,
+          enabled = EXCLUDED.enabled;
 
   `);
 

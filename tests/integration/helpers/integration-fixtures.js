@@ -49,6 +49,8 @@ async function resolveFixtureClientBySlug(pool, slug) {
 }
 
 async function resolvePrimaryFixtureOrgClientSender(pool) {
+  await ensureIntegrationFixturesPresent();
+
   const profile = getIntegrationFixtureProfile();
   const preferredClientSlug = profile.clients.oneOne.slug;
   const preferredSenderName = profile.senders.oneOne.name;
@@ -73,10 +75,6 @@ async function resolvePrimaryFixtureOrgClientSender(pool) {
     );
 
   let { rows } = await resolvePreferred();
-  if (!rows.length) {
-    await ensureIntegrationFixturesPresent();
-    ({ rows } = await resolvePreferred());
-  }
 
   if (rows.length) return rows[0];
 

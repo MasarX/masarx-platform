@@ -12,9 +12,52 @@ SELECT ok(
 );
 
 -- Seed minimal org + provider + templates so mark_outbound_call_success can create a comms_attempt.
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender context exists.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('aaaaaaaa-0000-0000-0000-000000000030', 'Comms Receipt Org', 'comms-receipt-org')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    updated_at = now();
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+VALUES (
+  'aaaaaaaa-0000-0000-0000-000000000130',
+  'aaaaaaaa-0000-0000-0000-000000000030',
+  'Comms Receipt Client',
+  'comms-receipt-client',
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET organization_id = EXCLUDED.organization_id,
+    name = EXCLUDED.name,
+    slug = EXCLUDED.slug,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, auto_recreate, status)
+VALUES (
+  'aaaaaaaa-0000-0000-0000-000000000230',
+  'aaaaaaaa-0000-0000-0000-000000000130',
+  'Comms Receipt Sender',
+  'Comms Receipt Sender',
+  false,
+  true,
+  'active'
+)
+ON CONFLICT (id) DO UPDATE
+SET client_id = EXCLUDED.client_id,
+    name = EXCLUDED.name,
+    brand_name = EXCLUDED.brand_name,
+    status = EXCLUDED.status,
+    updated_at = now();
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  'aaaaaaaa-0000-0000-0000-000000000030',
+  'pgtap:comms-status-receipts-fixture-bootstrap'
+);
 
 INSERT INTO public.providers (id, organization_id, name, provider_type, enabled, metadata)
 VALUES (

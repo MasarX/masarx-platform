@@ -7,7 +7,7 @@ import { fetchUserContext } from "./utils/role-matrix";
 import { fetchResourceSampleId } from "./utils/core-resource";
 import { fetchResourceSampleRow } from "./utils/core-resource";
 import { assertNavigationPerformance } from "./utils/performance";
-import { createBrowserAuthStorageState } from "./utils/browser-auth";
+import { createConsoleV2AuthStorageState } from "./utils/browser-auth";
 import { expectSignedIn } from "./utils/auth";
 
 const demoContext = loadDemoContext();
@@ -41,12 +41,15 @@ test.describe("console integrations flows", () => {
     const consoleBasePath = getConsoleBasePath();
     const context = await browser.newContext({
       baseURL: consoleOrigin,
-      storageState: await createBrowserAuthStorageState({
+      storageState: await createConsoleV2AuthStorageState({
         surfaceOrigin: consoleOrigin,
         email: user.email,
         password: demoContext.password ?? "",
         label: `console-provider-auth:${user.email}`,
       }),
+    });
+    await context.addInitScript(() => {
+      window.localStorage.setItem("console-v2.nav-pinned", "true");
     });
     const page = await context.newPage();
 
@@ -57,15 +60,15 @@ test.describe("console integrations flows", () => {
       });
       await expectSignedIn(page, user.email, user.scope_type ?? null);
 
-      await page.goto(`${consoleBasePath}/integrations/provider-auth`, {
+      await page.getByRole("link", { name: "Provider credentials" }).click();
+      await page.waitForURL(new RegExp(`${consoleBasePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/integrations/credentials$`), {
         waitUntil: "domcontentloaded",
         timeout: 60_000,
       });
       await expectSignedIn(page, user.email, user.scope_type ?? null);
       await expect(
-        page.locator(
-          '[data-testid="console-provider-auth-ready"], [data-testid="console-provider-auth-error"], [data-testid="console-auth-required"]'
-        )
+        page.getByRole("heading", { name: "Provider credentials" })
+          .or(page.locator('[data-testid="console-auth-required"]'))
       ).toBeVisible();
       await assertNavigationPerformance(page);
 
@@ -78,31 +81,32 @@ test.describe("console integrations flows", () => {
         ? userContext.readRegistry?.resources
         : [];
       const providerResource =
-        resources.find((entry) => entry?.key === "provider_auth_configs") ?? null;
+        resources.find((entry) => entry?.key === "integration_credential_directory") ?? null;
       if (!providerResource) return;
 
       const providerSample = await fetchResourceSampleId({
-        resourceKey: "provider_auth_configs",
+        resourceKey: "integration_credential_directory",
         idColumn: providerResource.id_column ?? null,
         email: user.email,
         password: demoContext.password ?? "",
       });
       if (providerSample.id) {
-        await page.goto(
-          `${consoleBasePath}/integrations/provider-auth?id=${encodeURIComponent(
-            providerSample.id
-          )}&detail_open=1`,
-          { waitUntil: "domcontentloaded", timeout: 60_000 }
-        );
+        const search = page.locator('input[placeholder^="Search"]').first();
+        await search.fill(providerSample.id);
+        const row = page.locator("tbody tr").filter({ hasText: providerSample.id }).first();
+        const rowVisible = await row
+          .waitFor({ state: "visible", timeout: 10_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!rowVisible) {
+          await expect(page.getByText("Nothing here yet")).toBeVisible();
+          return;
+        }
+        await row.click();
         await expectSignedIn(page, user.email, user.scope_type ?? null);
-        await expect(
-          page.locator(
-            '[data-testid="console-provider-auth-ready"], [data-testid="console-provider-auth-error"], [data-testid="console-auth-required"]'
-          )
-        ).toBeVisible();
         await assertNavigationPerformance(page);
         await expect(
-          page.locator('[data-testid="console-provider-auth-detail"]')
+          page.getByRole("dialog", { name: /rotation history/i })
         ).toBeVisible({ timeout: 60_000 });
       }
     } finally {

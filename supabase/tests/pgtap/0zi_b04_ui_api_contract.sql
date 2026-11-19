@@ -85,18 +85,18 @@ SELECT ok(has_table_privilege('authenticated', 'api.basket_transitions', 'SELECT
 
 SELECT ok(has_table_privilege('authenticated', 'api.zones', 'INSERT'), 'authenticated can INSERT api.zones');
 SELECT ok(has_table_privilege('authenticated', 'api.zone_districts', 'INSERT'), 'authenticated can INSERT api.zone_districts');
-SELECT ok(has_table_privilege('authenticated', 'api.baskets', 'INSERT'), 'authenticated can INSERT api.baskets');
-SELECT ok(has_table_privilege('authenticated', 'api.basket_items', 'INSERT'), 'authenticated can INSERT api.basket_items');
+SELECT ok(NOT has_table_privilege('authenticated', 'api.baskets', 'INSERT'), 'authenticated cannot INSERT api.baskets directly');
+SELECT ok(NOT has_table_privilege('authenticated', 'api.basket_items', 'INSERT'), 'authenticated cannot INSERT api.basket_items directly');
 
 SELECT ok(has_table_privilege('authenticated', 'api.zones', 'UPDATE'), 'authenticated can UPDATE api.zones');
 SELECT ok(has_table_privilege('authenticated', 'api.zone_districts', 'UPDATE'), 'authenticated can UPDATE api.zone_districts');
-SELECT ok(has_table_privilege('authenticated', 'api.baskets', 'UPDATE'), 'authenticated can UPDATE api.baskets');
-SELECT ok(has_table_privilege('authenticated', 'api.basket_items', 'UPDATE'), 'authenticated can UPDATE api.basket_items');
+SELECT ok(NOT has_table_privilege('authenticated', 'api.baskets', 'UPDATE'), 'authenticated cannot UPDATE api.baskets directly');
+SELECT ok(NOT has_table_privilege('authenticated', 'api.basket_items', 'UPDATE'), 'authenticated cannot UPDATE api.basket_items directly');
 
 SELECT ok(has_table_privilege('authenticated', 'api.zones', 'DELETE'), 'authenticated can DELETE api.zones');
 SELECT ok(has_table_privilege('authenticated', 'api.zone_districts', 'DELETE'), 'authenticated can DELETE api.zone_districts');
-SELECT ok(has_table_privilege('authenticated', 'api.baskets', 'DELETE'), 'authenticated can DELETE api.baskets');
-SELECT ok(has_table_privilege('authenticated', 'api.basket_items', 'DELETE'), 'authenticated can DELETE api.basket_items');
+SELECT ok(NOT has_table_privilege('authenticated', 'api.baskets', 'DELETE'), 'authenticated cannot DELETE api.baskets directly');
+SELECT ok(NOT has_table_privilege('authenticated', 'api.basket_items', 'DELETE'), 'authenticated cannot DELETE api.basket_items directly');
 
 SELECT ok(NOT has_table_privilege('authenticated', 'api.basket_transitions', 'INSERT'), 'authenticated cannot INSERT api.basket_transitions');
 SELECT ok(NOT has_table_privilege('authenticated', 'api.basket_transitions', 'UPDATE'), 'authenticated cannot UPDATE api.basket_transitions');

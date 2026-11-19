@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(10);
+SELECT plan(12);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_warehouse_transfer_reconcile_ui_contract_v1()
 RETURNS SETOF TEXT
@@ -77,6 +77,20 @@ BEGIN
       'EXECUTE'
     ),
     'anon cannot EXECUTE api.ui_execute_warehouse_transfer_reconcile_v1'
+  );
+  RETURN NEXT ok(
+    position(
+      '''role'', ''service_role'''
+      IN pg_get_functiondef('public.ui_execute_warehouse_transfer_reconcile_v1(text, text, text[], text, integer, jsonb)'::regprocedure)
+    ) > 0,
+    'public.ui_execute_warehouse_transfer_reconcile_v1 wakes service-only workflow transitions with a guarded service claim'
+  );
+  RETURN NEXT ok(
+    position(
+      'progress_workflow_run_until_wait_v1'
+      IN pg_get_functiondef('public.ui_execute_warehouse_transfer_reconcile_v1(text, text, text[], text, integer, jsonb)'::regprocedure)
+    ) > 0,
+    'public.ui_execute_warehouse_transfer_reconcile_v1 returns terminal workflow readback before Console refreshes the drawer'
   );
   RETURN NEXT ok(
     EXISTS (

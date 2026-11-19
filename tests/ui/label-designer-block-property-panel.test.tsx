@@ -102,6 +102,36 @@ describe("BlockPropertyPanel", () => {
     expect(onUpdate).toHaveBeenCalledWith(0, { x: 50 });
   });
 
+  it("disables property mutations in read-only mode", () => {
+    const block: TemplateBlock = {
+      type: "text", x: 10, y: 20, width: 100, height: 30,
+      font_size: 14,
+      fallback: "Read only",
+    };
+    const { container, onUpdate } = renderPanel(block, { readOnly: true });
+    const lock = container.querySelector("input[type='checkbox']") as HTMLInputElement;
+    const xInput = container.querySelector("#block-props-0-x") as HTMLInputElement;
+    const fallback = container.querySelector("#block-props-0-fallback") as HTMLInputElement;
+    const font = container.querySelector("#block-props-0-font") as HTMLButtonElement;
+    const color = screen.getByTestId("block-props-0-color-input") as HTMLInputElement;
+    const colorSwatch = screen.getByTestId("block-props-0-color-swatch") as HTMLButtonElement;
+
+    expect(lock).toBeDisabled();
+    expect(xInput).toBeDisabled();
+    expect(fallback).toBeDisabled();
+    expect(font).toBeDisabled();
+    expect(color).toBeDisabled();
+    expect(colorSwatch).toBeDisabled();
+
+    fireEvent.click(lock);
+    fireEvent.change(xInput, { target: { value: "55" } });
+    fireEvent.change(fallback, { target: { value: "Changed" } });
+    fireEvent.click(font);
+    fireEvent.change(color, { target: { value: "#ffffff" } });
+    fireEvent.click(colorSwatch);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
   it("barcode validation badge shows valid", () => {
     const block: TemplateBlock = {
       type: "barcode", x: 10, y: 10, width: 180, height: 60,

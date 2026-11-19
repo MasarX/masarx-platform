@@ -14,6 +14,7 @@ import {
   normalizeMobileDevicePolicy,
   normalizeMobileDriverSafetyPolicy,
   normalizeMobileMapPolicy,
+  normalizeResolvedMobileMapPolicy,
   normalizeMobileNavigationPolicy,
   normalizeMobileUxSafetyPolicy,
   normalizeMobileVisibilityPolicy,
@@ -72,7 +73,95 @@ describe("mobile shell policy helpers", () => {
       clusteringGridPx: 96,
       clusteringMinCount: 3,
       showLegend: false,
+      tileProvider: DEFAULT_MOBILE_MAP_POLICY.tileProvider,
+      logisticsStack: DEFAULT_MOBILE_MAP_POLICY.logisticsStack,
+      defaultViewport: DEFAULT_MOBILE_MAP_POLICY.defaultViewport,
+      zoomPadding: DEFAULT_MOBILE_MAP_POLICY.zoomPadding,
     });
+  });
+
+  test("normalizeMobileMapPolicy maps provider, stack, viewport, and padding rows", () => {
+    const next = normalizeMobileMapPolicy({
+      tile_provider: {
+        engine: "maplibre",
+        provider: "openstreetmap",
+        data_provider: "openstreetmap",
+        url_template: "/map-tiles/openstreetmap/{z}/{x}/{y}.png",
+        attribution_label: "\u00a9 OpenStreetMap contributors",
+        attribution_url: "https://www.openstreetmap.org/copyright",
+        license: "ODbL-1.0",
+        usage_tier: "production_cached",
+        cache_required: true,
+        allowed_hosts: ["same-origin"],
+      },
+      logistics_stack: {
+        spatial_source_of_truth: "postgis",
+        routing_engine: "valhalla",
+        optimization_engine: "vroom",
+      },
+      default_viewport: { latitude: "24.7136", longitude: "46.6753", zoom: "12" },
+      zoom_padding: { top: 72, right: 44, bottom: 216, left: 44 },
+    });
+
+    expect(next.tileProvider).toEqual({
+      engine: "maplibre",
+      provider: "openstreetmap",
+      dataProvider: "openstreetmap",
+      urlTemplate: "/map-tiles/openstreetmap/{z}/{x}/{y}.png",
+      attributionLabel: "\u00a9 OpenStreetMap contributors",
+      attributionUrl: "https://www.openstreetmap.org/copyright",
+      license: "ODbL-1.0",
+      usageTier: "production_cached",
+      cacheRequired: true,
+      allowedHosts: ["same-origin"],
+    });
+    expect(next.logisticsStack).toEqual({
+      spatialSourceOfTruth: "postgis",
+      routingEngine: "valhalla",
+      optimizationEngine: "vroom",
+    });
+    expect(next.defaultViewport).toEqual({ latitude: 24.7136, longitude: 46.6753, zoom: 12 });
+    expect(next.zoomPadding).toEqual({ top: 72, right: 44, bottom: 216, left: 44 });
+  });
+
+  test("normalizeResolvedMobileMapPolicy fails closed when live rows omit map provider config", () => {
+    expect(() =>
+      normalizeResolvedMobileMapPolicy({
+        clustering: { grid_px: 96, min_count: 3 },
+        logistics_stack: {
+          spatial_source_of_truth: "postgis",
+          routing_engine: "valhalla",
+          optimization_engine: "vroom",
+        },
+      }),
+    ).toThrow(/map_policy\.tile_provider is required/);
+  });
+
+  test("normalizeResolvedMobileMapPolicy accepts a complete open map policy row", () => {
+    const next = normalizeResolvedMobileMapPolicy({
+      clustering: { enabled: true, grid: 24, min_count: 3 },
+      tile_provider: {
+        engine: "maplibre",
+        provider: "openstreetmap",
+        data_provider: "openstreetmap",
+        url_template: "/map-tiles/openstreetmap/{z}/{x}/{y}.png",
+        attribution_label: "OpenStreetMap contributors",
+        attribution_url: "https://www.openstreetmap.org/copyright",
+        license: "ODbL-1.0",
+        usage_tier: "production_cached",
+        cache_required: true,
+        allowed_hosts: ["same-origin"],
+      },
+      logistics_stack: {
+        spatial_source_of_truth: "postgis",
+        routing_engine: "valhalla",
+        optimization_engine: "vroom",
+      },
+    });
+
+    expect(next.clusteringGridPx).toBe(24);
+    expect(next.tileProvider.provider).toBe("openstreetmap");
+    expect(next.logisticsStack.routingEngine).toBe("valhalla");
   });
 
   test("normalizeMobileMapPolicy supports uppercase layout keys", () => {

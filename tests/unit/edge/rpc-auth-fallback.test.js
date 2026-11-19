@@ -1,11 +1,14 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const { pathToFileURL } = require("url");
 const { execFileSync } = require("child_process");
 
 const repoRoot = path.resolve(__dirname, "..", "..", "..");
 const sharedModulePath = path.join(repoRoot, "supabase", "functions", "_shared", "mod.mjs");
+const apiGatewaySharedModulePath = path.join(repoRoot, "supabase", "functions", "api-gateway", "_shared", "mod.mjs");
+const webhookReceiverSharedModulePath = path.join(repoRoot, "supabase", "functions", "webhook-receiver", "_shared", "mod.mjs");
 
 function fakeJwt(role = "service_role") {
   const encode = (value) => Buffer.from(value).toString("base64url");
@@ -20,6 +23,13 @@ describe("edge rpc auth fallback", () => {
   let functionSharedModulePaths;
 
   beforeAll(async () => {
+    const sync = spawnSync(process.execPath, [path.join(repoRoot, "scripts", "edge", "sync-shared.js")], {
+      cwd: repoRoot,
+      stdio: "ignore",
+    });
+    if (sync.status !== 0) {
+      throw new Error("edge shared sync failed before rpc auth fallback tests");
+    }
     originalDeno = global.Deno;
     global.Deno = {
       env: {
@@ -192,7 +202,11 @@ describe("edge rpc auth fallback", () => {
 
     const firstHeaders = new Headers(fetchMock.mock.calls[0][1].headers);
     const secondHeaders = new Headers(fetchMock.mock.calls[1][1].headers);
+    expect(firstHeaders.get("accept-profile")).toBe("api");
+    expect(firstHeaders.get("content-profile")).toBe("api");
     expect(firstHeaders.get("authorization")).toMatch(/^Bearer /);
+    expect(secondHeaders.get("accept-profile")).toBe("api");
+    expect(secondHeaders.get("content-profile")).toBe("api");
     expect(secondHeaders.get("authorization")).toBeNull();
     expect(secondHeaders.get("apikey")).toBe("sb_secret_test_value");
   });

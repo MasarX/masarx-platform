@@ -234,6 +234,35 @@ test.describe("landing driver signup", () => {
     await expect(page.locator('[data-driver-status-form] button[type="submit"]')).toBeEnabled();
     expect(lookupCalls).toBe(1);
   });
+
+  test("shows requested document readback from the driver status endpoint", async ({ page }) => {
+    await patchRuntimeConfig(page, {
+      driverApplicationStatusEndpoint: LANDING_DRIVER_STATUS_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await mockDriverStatusEndpoint(
+      page,
+      routePayload({
+        ok: true,
+        status: "pending",
+        application_state: "additional_documents_requested",
+        requested_documents: ["driver_license", "vehicle_registration"],
+        review_reason: "Upload clear front and back photos.",
+      }, 200),
+    );
+
+    await page.goto("/drivers/apply?motion=off");
+    await page.locator('[data-driver-status-form] input[name="status_token"]').fill("token-docs");
+    await page.locator("[data-driver-status-form]").locator('button[type="submit"]').click();
+
+    const readback = page.locator("[data-driver-status-lookup]");
+    await expect(page.locator('[data-driver-status-form] input[name="status_token"]')).toHaveValue("token-docs");
+    await expect(readback).toHaveText("Additional documents requested");
+    const documents = page.locator("[data-driver-documents-form]");
+    await expect(documents.getByLabel("driver_license")).toBeVisible();
+    await expect(documents.getByLabel("vehicle_registration")).toBeVisible();
+    await expect(page.locator("[data-driver-review-note]")).toHaveText("Reviewer note: Upload clear front and back photos.");
+  });
 });
 
 const DOCUMENTS_ENDPOINT = "/__driver-documents";

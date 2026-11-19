@@ -48,6 +48,8 @@ SELECT ok(
 DO $$
 DECLARE
   v_org UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_source UUID := gen_random_uuid();
   v_mapping UUID := gen_random_uuid();
   v_settings UUID := gen_random_uuid();
@@ -59,18 +61,36 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('role', 'postgres')::text, true);
   EXECUTE 'SET LOCAL ROLE postgres';
 
-  -- Minimal org
+  -- This fixture owns source-binding setup, so defer bootstrap until client/sender
+  -- context exists and fail-closed plugin activation has truthful binding inputs.
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO organizations (id, name, slug)
   VALUES (v_org, 'Prov Org', 'prov-org')
   ON CONFLICT DO NOTHING;
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
+  INSERT INTO clients (id, organization_id, name, slug, status)
+  VALUES (v_client, v_org, 'Prov Client', 'prov-client', 'active')
+  ON CONFLICT DO NOTHING;
+
+  INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES (v_sender, v_client, 'Prov Sender', 'Prov Sender', TRUE, 'active')
+  ON CONFLICT DO NOTHING;
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(
+    v_org,
+    'pgtap:settings-provenance-fixture-bootstrap'
+  );
 
   -- Minimal mapping + source
   INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version)
   VALUES (v_mapping, 'webhook_inbound', 'prov::default', '{}'::jsonb, 1)
   ON CONFLICT DO NOTHING;
 
-  INSERT INTO webhook_sources (id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, enabled)
-  VALUES (v_source, v_org, 'prov-source', 'Prov Source', 'provider', 'tok-prov', v_mapping, TRUE)
+  INSERT INTO webhook_sources (id, organization_id, source_identifier, name, provider_type, auth_token, mapping_config_id, sender_id, enabled)
+  VALUES (v_source, v_org, 'prov-source', 'Prov Source', 'provider', 'tok-prov', v_mapping, v_sender, TRUE)
   ON CONFLICT DO NOTHING;
 
   INSERT INTO request_contexts (id, entry_point)

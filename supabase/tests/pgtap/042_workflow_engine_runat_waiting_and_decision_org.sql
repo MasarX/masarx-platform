@@ -41,6 +41,7 @@ DECLARE
     v_decision_id UUID;
     v_decision_org UUID;
     v_decision_corr UUID;
+    v_sender UUID;
 BEGIN
     ---------------------------------------------------------------------------
     -- 1) run_at gating: when the only pending step is scheduled in the future,
@@ -109,12 +110,16 @@ BEGIN
     --    workflow context (and correlation from request context when set).
     ---------------------------------------------------------------------------
 
+    PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
     INSERT INTO organizations (name, slug)
     VALUES (
         'pgTAP Workflow Org',
         'pgtap-workflow-org-' || substring(replace(gen_random_uuid()::text, '-', '') FROM 1 FOR 12)
     )
     RETURNING id INTO v_org;
+
+    PERFORM set_config('app.organization_onboarding_source', '', true);
 
     INSERT INTO clients (organization_id, name, slug)
     VALUES (
@@ -123,6 +128,23 @@ BEGIN
         'pgtap-workflow-client-' || substring(replace(gen_random_uuid()::text, '-', '') FROM 1 FOR 12)
     )
     RETURNING id INTO v_client;
+
+    INSERT INTO senders (client_id, name, brand_name, auto_provisioned, auto_recreate, status, settings_override)
+    VALUES (
+        v_client,
+        'pgTAP Workflow Sender',
+        'pgTAP Workflow Sender',
+        FALSE,
+        TRUE,
+        'active',
+        '{}'::jsonb
+    )
+    RETURNING id INTO v_sender;
+
+    PERFORM bootstrap_tenant_onboarding_v1(
+        v_org,
+        'pgtap:workflow-engine-runat-decision-org-fixture-bootstrap'
+    );
 
     PERFORM set_config('request.correlation_id', v_corr::text, true);
 

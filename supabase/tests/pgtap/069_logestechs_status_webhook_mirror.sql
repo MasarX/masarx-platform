@@ -28,10 +28,15 @@ SELECT ok(
 
 CREATE TEMP TABLE tmp_client_policy_scope (
   organization_id UUID,
-  client_id UUID
+  client_id UUID,
+  sender_id UUID
 );
 INSERT INTO tmp_client_policy_scope
-VALUES (gen_random_uuid(), gen_random_uuid());
+VALUES (gen_random_uuid(), gen_random_uuid(), gen_random_uuid());
+
+-- Defer tenant bootstrap until the fixture has truthful client/sender context
+-- so fail-closed plugin activation can resolve an active source binding.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 
 INSERT INTO organizations (id, name, slug)
 SELECT
@@ -40,6 +45,8 @@ SELECT
   'pgtap-org-' || substr(replace(organization_id::text, '-', ''), 1, 12)
 FROM tmp_client_policy_scope
 ON CONFLICT (id) DO NOTHING;
+
+SELECT set_config('app.organization_onboarding_source', '', true);
 
 INSERT INTO clients (id, organization_id, name, slug, status)
 SELECT
@@ -50,6 +57,23 @@ SELECT
   'active'
 FROM tmp_client_policy_scope
 ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+SELECT
+  sender_id,
+  client_id,
+  'pgTAP Logestechs Sender',
+  'pgTAP Logestechs Sender',
+  TRUE,
+  'active'
+FROM tmp_client_policy_scope
+ON CONFLICT (id) DO NOTHING;
+
+SELECT bootstrap_tenant_onboarding_v1(
+  organization_id,
+  'pgtap:logestechs-status-webhook-mirror-fixture-bootstrap'
+)
+FROM tmp_client_policy_scope;
 
 WITH tenant_sv AS (
   INSERT INTO settings_versions_p0 (

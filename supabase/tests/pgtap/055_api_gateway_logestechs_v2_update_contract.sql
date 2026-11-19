@@ -3,7 +3,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(14);
+SELECT plan(15);
 
 SELECT public.create_next_partitions();
 
@@ -77,9 +77,13 @@ BEGIN
     RAISE EXCEPTION 'Canonical Logestechs update route missing provider';
   END IF;
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'API Gateway Org 055', 'pgtap-api-gateway-org-055')
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO public.clients (id, organization_id, name, slug, status)
   VALUES (v_client, v_org, 'API Gateway Client 055', 'pgtap-api-gateway-client-055', 'active')
@@ -88,6 +92,8 @@ BEGIN
   INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
   VALUES (v_sender, v_client, 'API Gateway Sender 055', 'API Gateway Sender 055', TRUE, 'active')
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM bootstrap_tenant_onboarding_v1(v_org, 'pgtap:api-gateway-logestechs-v2-update-contract-fixture-bootstrap');
 
   INSERT INTO public.mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
   VALUES (
@@ -469,5 +475,14 @@ SELECT ok(
   'canonical update intake strips auth body fields from persisted outbound payload'
 );
 
+SELECT ok(
+  (
+    SELECT NOT (wr.context #> '{api_gateway,request_body}' ? 'email')
+       AND NOT (wr.context #> '{api_gateway,request_body}' ? 'password')
+      FROM public.workflow_runs wr
+     WHERE wr.id = (SELECT (result->>'workflow_run_id')::uuid FROM tmp_uc178_update_intake)
+  ),
+  'canonical update intake strips auth body fields from workflow dispatch payload'
+);
 SELECT * FROM finish();
 ROLLBACK;

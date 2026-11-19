@@ -23,6 +23,10 @@ DO $$
 DECLARE
   v_org UUID := gen_random_uuid();
   v_org2 UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_client2 UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
+  v_sender2 UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
 
   v_zone UUID := gen_random_uuid();
@@ -32,7 +36,7 @@ DECLARE
   v_branch_override UUID := gen_random_uuid();
   v_branch_other_org UUID := gen_random_uuid();
 
-  v_level UUID := gen_random_uuid();
+  v_level UUID;
 
   v_existing_window UUID;
 
@@ -42,10 +46,26 @@ DECLARE
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES
     (v_org, 'Branch Cap Org', 'branch-cap-' || left(v_org::text, 8)),
     (v_org2, 'Branch Cap Org2', 'branch-cap-' || left(v_org2::text, 8));
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES
+    (v_client, v_org, 'Branch Cap Client', 'branch-cap-client-' || left(v_client::text, 8), 'active'),
+    (v_client2, v_org2, 'Branch Cap Client2', 'branch-cap-client-' || left(v_client2::text, 8), 'active');
+
+  INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES
+    (v_sender, v_client, 'Branch Cap Sender', 'Branch Cap Sender', TRUE, 'active'),
+    (v_sender2, v_client2, 'Branch Cap Sender2', 'Branch Cap Sender2', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:branch-capacity-fixture-bootstrap-org1');
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org2, 'pgtap:branch-capacity-fixture-bootstrap-org2');
 
   INSERT INTO public.users (id, organization_id, email, full_name, access_scope_type)
   VALUES
@@ -65,8 +85,21 @@ BEGIN
   INSERT INTO public.branch_zones (branch_id, zone_id, priority)
   VALUES (v_branch_base, v_zone, 0);
 
-  INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
-  VALUES (v_level, v_org, 'standard', 'Standard', TRUE);
+  -- Organization insert now runs tenant onboarding and may create the default
+  -- Standard service level. Reuse that canonical row when present so this
+  -- catalog invariant test stays aligned with onboarding readiness defaults.
+  SELECT sl.id
+    INTO v_level
+    FROM public.service_levels sl
+   WHERE sl.organization_id = v_org
+     AND sl.key = 'standard'
+   LIMIT 1;
+
+  IF v_level IS NULL THEN
+    v_level := gen_random_uuid();
+    INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
+    VALUES (v_level, v_org, 'standard', 'Standard', TRUE);
+  END IF;
 
   -- Offering: org match OK.
   INSERT INTO public.service_offerings (service_level_id, branch_id, zone_id, effective_from, effective_to, priority, is_active)

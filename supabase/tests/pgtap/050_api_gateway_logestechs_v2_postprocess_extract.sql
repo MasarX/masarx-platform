@@ -4,10 +4,40 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(30);
+SELECT plan(49);
 
 -- Ensure time partitions exist for decision_log/settings_resolution_log inserts (handler uses decision logging).
 SELECT public.create_next_partitions();
+
+SELECT is(
+  public.normalize_phone_number_e164_v1('0 (202) 555-0123', '1'),
+  '+12025550123',
+  'E.164 helper normalizes a local leading-zero number using the configured country code'
+);
+
+SELECT is(
+  public.normalize_phone_number_e164_v1('500000050', '966'),
+  NULL,
+  'E.164 helper rejects ambiguous national numbers without leading zero or country code'
+);
+
+SELECT is(
+  public.normalize_phone_number_e164_v1('not-a-phone', '966'),
+  NULL,
+  'E.164 helper rejects non-digit phone input'
+);
+
+SELECT is(
+  public.normalize_phone_number_e164_v1('0501234567', '971'),
+  '+971501234567',
+  'E.164 helper honors non-SA default country code'
+);
+
+SELECT is(
+  public.normalize_phone_number_e164_v1('+966500000050', '966'),
+  '+966500000050',
+  'E.164 helper preserves already-valid E.164 phone numbers'
+);
 
 -- ----------------------------------------------------------------------------
 -- Seeded Logestechs V2 create shipment route: extract paths must support root `id` + `barcode`
@@ -234,6 +264,9 @@ DO $$
 DECLARE
   v_provider_id UUID;
   v_route_id UUID;
+  v_branch_id UUID := '05000000-0000-0000-0000-000000000055';
+  v_service_level_id UUID := '05000000-0000-0000-0000-000000000056';
+  v_service_offering_id UUID := '05000000-0000-0000-0000-000000000057';
 BEGIN
   SELECT r.provider_id, r.id
     INTO v_provider_id, v_route_id
@@ -362,9 +395,13 @@ BEGIN
   WHERE id = v_route_id;
 
   -- Minimal scope + source for api_gateway_requests FK requirements.
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO organizations (id, name, slug)
   VALUES ('aaaa0000-0000-0000-0000-000000000050', 'API Gateway Org 050', 'pgtap-api-gateway-org-050')
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO clients (id, organization_id, name, slug)
   VALUES (
@@ -385,6 +422,76 @@ BEGIN
     'active'
   )
   ON CONFLICT (id) DO NOTHING;
+
+  PERFORM bootstrap_tenant_onboarding_v1(
+    'aaaa0000-0000-0000-0000-000000000050',
+    'pgtap:api-gateway-logestechs-v2-postprocess-fixture-bootstrap'
+  );
+
+  INSERT INTO public.branches (id, organization_id, code, name, timezone, is_active)
+  VALUES (
+    v_branch_id,
+    'aaaa0000-0000-0000-0000-000000000050',
+    'api-gw-050',
+    'API Gateway Planning Branch 050',
+    'Asia/Riyadh',
+    TRUE
+  )
+  ON CONFLICT (id) DO UPDATE
+    SET name = EXCLUDED.name,
+        timezone = EXCLUDED.timezone,
+        is_active = EXCLUDED.is_active;
+
+  INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
+  VALUES (
+    v_service_level_id,
+    'aaaa0000-0000-0000-0000-000000000050',
+    'standard',
+    'Standard',
+    TRUE
+  )
+  ON CONFLICT (organization_id, key) DO UPDATE
+    SET name = EXCLUDED.name,
+        is_active = EXCLUDED.is_active
+  RETURNING id INTO v_service_level_id;
+
+  INSERT INTO public.service_offerings (
+    id,
+    service_level_id,
+    branch_id,
+    zone_id,
+    effective_from,
+    is_active,
+    priority,
+    metadata
+  )
+  VALUES (
+    v_service_offering_id,
+    v_service_level_id,
+    v_branch_id,
+    NULL,
+    '2020-01-01T00:00:00Z',
+    TRUE,
+    10,
+    jsonb_build_object('display', jsonb_build_object('name', 'API Gateway Standard Planning 050', 'status', 'active'))
+  )
+  ON CONFLICT (id) DO UPDATE
+    SET service_level_id = EXCLUDED.service_level_id,
+        branch_id = EXCLUDED.branch_id,
+        zone_id = EXCLUDED.zone_id,
+        effective_from = EXCLUDED.effective_from,
+        is_active = EXCLUDED.is_active,
+        metadata = EXCLUDED.metadata;
+
+  UPDATE public.api_routes
+     SET policy = jsonb_set(
+           COALESCE(policy, '{}'::jsonb),
+           '{postprocess,service_offering_id}',
+           to_jsonb(v_service_offering_id::text),
+           TRUE
+         ),
+         updated_at = now()
+   WHERE id = v_route_id;
 
   INSERT INTO mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version, notes)
   VALUES (
@@ -423,6 +530,15 @@ BEGIN
   )
   ON CONFLICT (id) DO NOTHING;
 
+  UPDATE public.webhook_sources
+     SET managed_metadata = jsonb_set(
+           COALESCE(managed_metadata, '{}'::jsonb),
+           '{defaults,service_offering_id}',
+           to_jsonb(v_service_offering_id::text),
+           TRUE
+         )
+   WHERE id = 'eeee0000-0000-0000-0000-000000000050';
+
   INSERT INTO public.api_gateway_requests (
     id,
     organization_id,
@@ -456,7 +572,7 @@ BEGIN
         'receiverName', 'QA Receiver 050',
         'receiverPhone', '+12025550123',
         'invoiceNumber', 'INV-050',
-        'shipmentType', 'SWAP',
+        'shipmentType', 'REGULAR',
         'serviceType', 'STANDARD',
         'cod', '600',
         'toCollectFromReceiver', '123.45',
@@ -573,11 +689,22 @@ SELECT is(
 
 SELECT is(
   (
+    SELECT r.phone_number
+    FROM public.recipients r
+    JOIN public.shipments s ON s.recipient_id = r.id
+    WHERE s.id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+  ),
+  '+12025550123',
+  'postprocess preserves the fixture recipient phone in E.164 format'
+);
+
+SELECT is(
+  (
     SELECT service_type
     FROM public.shipments
     WHERE id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
   ),
-  'swap',
+  'delivery',
   'postprocess maps pkg.shipmentType to service_type via field_mappings'
 );
 
@@ -659,6 +786,53 @@ SELECT is(
   ),
   '2020-10-16',
   'postprocess maps expectedDeliveryDate to promised_delivery_date'
+);
+
+SELECT is(
+  (
+    SELECT branch_id::text
+    FROM public.shipments
+    WHERE id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+  ),
+  '05000000-0000-0000-0000-000000000055',
+  'postprocess projects unique active service-level offering branch for route planning'
+);
+
+SELECT is(
+  (
+    SELECT metadata->>'service_offering_branch_id'
+    FROM public.shipments
+    WHERE id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+  ),
+  '05000000-0000-0000-0000-000000000055',
+  'postprocess persists service-offering branch lineage in shipment metadata'
+);
+
+SELECT is(
+  (
+    SELECT metadata->>'service_level_key'
+    FROM public.shipments
+    WHERE id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+  ),
+  'standard',
+  'postprocess persists service-level lineage in shipment metadata'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.route_plan_delivery_wave_candidates_v1(
+      jsonb_build_object(
+        'organization_id', 'aaaa0000-0000-0000-0000-000000000050',
+        'branch_id', '05000000-0000-0000-0000-000000000055',
+        'planned_date', '2020-10-16',
+        'wave_selection', jsonb_build_object('statuses', jsonb_build_array('pending'))
+      )
+    ) c
+    WHERE c.shipment_id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+      AND c.tracking_number = 'PGTAP-GW-050-BARCODE'
+  ),
+  'postprocess materialized API shipment is eligible for route planning when provider payload supplies planning truth'
 );
 
 SELECT is(
@@ -858,6 +1032,310 @@ SELECT is(
   ),
   '600',
   'postprocess maps COD amount fallback to pkg.cod when toCollectFromReceiver is missing'
+);
+
+-- ----------------------------------------------------------------------------
+-- Handler edge-case: ambiguous national phone numbers fail as terminal provider diagnostics
+-- ----------------------------------------------------------------------------
+
+DO $$
+DECLARE
+  v_provider_id UUID;
+  v_route_id UUID;
+BEGIN
+  SELECT r.provider_id, r.id
+    INTO v_provider_id, v_route_id
+  FROM public.api_routes r
+  WHERE r.route_name = 'logestechs_v2_create_shipment_by_email'
+  LIMIT 1;
+
+  INSERT INTO public.api_gateway_requests (
+    id,
+    organization_id,
+    client_id,
+    sender_id,
+    source_id,
+    correlation_id,
+    route_id,
+    method,
+    path,
+    query_string,
+    request_headers,
+    request_body,
+    received_at,
+    created_at,
+    updated_at
+  ) VALUES (
+    '99990000-0000-0000-0000-000000000052',
+    'aaaa0000-0000-0000-0000-000000000050',
+    'bbbb0000-0000-0000-0000-000000000050',
+    'cccc0000-0000-0000-0000-000000000050',
+    'eeee0000-0000-0000-0000-000000000050',
+    '77770000-0000-0000-0000-000000000052',
+    v_route_id,
+    'POST',
+    '/api/ship/request/by-email',
+    NULL,
+    '{}'::jsonb,
+    jsonb_build_object(
+      'pkg', jsonb_build_object(
+        'receiverName', 'QA Receiver 050 Invalid Phone',
+        'receiverPhone', '500000052',
+        'invoiceNumber', 'INV-050-INVALID-PHONE',
+        'shipmentType', 'SWAP',
+        'serviceType', 'STANDARD',
+        'cod', '100',
+        'quantity', 1
+      )
+    ),
+    now(),
+    now(),
+    now()
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.outbound_calls (
+    id,
+    call_type,
+    target_type,
+    target_id,
+    method,
+    url,
+    headers,
+    body,
+    status,
+    priority,
+    retry_count,
+    max_retries,
+    scheduled_at,
+    correlation_id,
+    context,
+    created_at,
+    workflow_run_step_id
+  ) VALUES (
+    '88880000-0000-0000-0000-000000000052',
+    'provider_api',
+    'provider',
+    v_provider_id,
+    'POST',
+    'https://example.test/api/ship/request/by-email',
+    '{}'::jsonb,
+    (SELECT request_body FROM public.api_gateway_requests WHERE id = '99990000-0000-0000-0000-000000000052'),
+    'completed',
+    100,
+    0,
+    1,
+    now(),
+    '77770000-0000-0000-0000-000000000052',
+    jsonb_build_object('api_gateway_request_id', '99990000-0000-0000-0000-000000000052'),
+    now(),
+    '05000000-0000-0000-0000-000000000054'
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  UPDATE public.api_gateway_requests
+  SET outbound_call_id = '88880000-0000-0000-0000-000000000052',
+      updated_at = now()
+  WHERE id = '99990000-0000-0000-0000-000000000052';
+END;
+$$;
+
+CREATE TEMP TABLE tmp_gateway_postprocess_invalid_phone AS
+SELECT workflow_handlers.process_api_gateway_outbound_response_v1(
+  (SELECT oc FROM public.outbound_calls oc WHERE oc.id = '88880000-0000-0000-0000-000000000052'),
+  jsonb_build_object(
+    'id', 12345652,
+    'barcode', 'PGTAP-GW-050-INVALID-PHONE'
+  )
+) AS result;
+
+SELECT is(
+  (SELECT result->'postprocess'->>'status' FROM tmp_gateway_postprocess_invalid_phone),
+  'failed',
+  'postprocess marks ambiguous recipient phone as failed'
+);
+
+SELECT is(
+  (SELECT status FROM public.outbound_calls WHERE id = '88880000-0000-0000-0000-000000000052'),
+  'permanently_failed',
+  'ambiguous recipient phone updates outbound call to terminal failed'
+);
+
+SELECT is(
+  (SELECT response_status_code::text FROM public.outbound_calls WHERE id = '88880000-0000-0000-0000-000000000052'),
+  '422',
+  'ambiguous recipient phone exposes validation status code in request directory substrate'
+);
+
+-- The full orchestration path must preserve the postprocess validation failure
+-- after a provider returns HTTP 2xx. `store_response` must not mask it back to
+-- upstream success.
+DO $$
+DECLARE
+  v_provider_id UUID;
+  v_route_id UUID;
+BEGIN
+  SELECT r.provider_id, r.id
+    INTO v_provider_id, v_route_id
+  FROM public.api_routes r
+  WHERE r.route_name = 'logestechs_v2_create_shipment_by_email'
+  LIMIT 1;
+
+  INSERT INTO public.api_gateway_requests (
+    id,
+    organization_id,
+    client_id,
+    sender_id,
+    source_id,
+    correlation_id,
+    route_id,
+    method,
+    path,
+    query_string,
+    request_headers,
+    request_body,
+    received_at,
+    created_at,
+    updated_at
+  ) VALUES (
+    '99990000-0000-0000-0000-000000000053',
+    'aaaa0000-0000-0000-0000-000000000050',
+    'bbbb0000-0000-0000-0000-000000000050',
+    'cccc0000-0000-0000-0000-000000000050',
+    'eeee0000-0000-0000-0000-000000000050',
+    '77770000-0000-0000-0000-000000000053',
+    v_route_id,
+    'POST',
+    '/api/ship/request/by-email',
+    NULL,
+    '{}'::jsonb,
+    jsonb_build_object(
+      'pkg', jsonb_build_object(
+        'receiverName', 'QA Receiver 050 Orchestrate Invalid Phone',
+        'receiverPhone', '500000053',
+        'invoiceNumber', 'INV-050-ORCH-INVALID-PHONE',
+        'shipmentType', 'SWAP',
+        'serviceType', 'STANDARD',
+        'cod', '100',
+        'quantity', 1
+      )
+    ),
+    now(),
+    now(),
+    now()
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.outbound_calls (
+    id,
+    call_type,
+    target_type,
+    target_id,
+    method,
+    url,
+    headers,
+    body,
+    status,
+    priority,
+    retry_count,
+    max_retries,
+    scheduled_at,
+    response_status_code,
+    response_body,
+    correlation_id,
+    context,
+    created_at,
+    workflow_run_step_id
+  ) VALUES (
+    '88880000-0000-0000-0000-000000000053',
+    'provider_api',
+    'provider',
+    v_provider_id,
+    'POST',
+    'https://example.test/api/ship/request/by-email',
+    '{}'::jsonb,
+    (SELECT request_body FROM public.api_gateway_requests WHERE id = '99990000-0000-0000-0000-000000000053'),
+    'completed',
+    100,
+    0,
+    1,
+    now(),
+    200,
+    jsonb_build_object(
+      'id', 12345653,
+      'barcode', 'PGTAP-GW-050-ORCH-INVALID-PHONE'
+    ),
+    '77770000-0000-0000-0000-000000000053',
+    jsonb_build_object('api_gateway_request_id', '99990000-0000-0000-0000-000000000053'),
+    now(),
+    NULL
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  UPDATE public.api_gateway_requests
+  SET outbound_call_id = '88880000-0000-0000-0000-000000000053',
+      updated_at = now()
+  WHERE id = '99990000-0000-0000-0000-000000000053';
+END;
+$$;
+
+CREATE TEMP TABLE tmp_gateway_orchestrate_invalid_phone AS
+SELECT public.orchestrate_api_response_processing(
+  '88880000-0000-0000-0000-000000000053'::uuid
+) AS result;
+
+SELECT is(
+  (SELECT status FROM public.outbound_calls WHERE id = '88880000-0000-0000-0000-000000000053'),
+  'permanently_failed',
+  'orchestration preserves terminal postprocess failure after provider HTTP 2xx'
+);
+
+SELECT is(
+  (SELECT response_status_code::text FROM public.outbound_calls WHERE id = '88880000-0000-0000-0000-000000000053'),
+  '422',
+  'orchestration preserves validation status instead of restoring upstream 2xx'
+);
+
+SELECT is(
+  (SELECT outbound_error_message FROM public.v_api_gateway_request_directory WHERE request_id = '99990000-0000-0000-0000-000000000053'),
+  'recipient_phone_not_e164_normalizable',
+  'api gateway request directory exposes outbound terminal validation detail'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM public.settings s
+      JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(sv.value->'resources', '[]'::jsonb)) AS resource(entry)
+     WHERE s.category = 'ui_read_registry'
+       AND resource.entry->>'key' = 'api_gateway_requests'
+       AND COALESCE(resource.entry->'select', '[]'::jsonb) ? 'outbound_error_message'
+  ),
+  'ui_read_registry exposes outbound_error_message for api_gateway_requests'
+);
+
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM public.settings s
+      JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(sv.value->'resources', '[]'::jsonb)) AS resource(entry)
+     WHERE s.category = 'ui_read_registry'
+       AND resource.entry->>'key' = 'api_gateway_requests'
+       AND NOT COALESCE(resource.entry->'select', '[]'::jsonb) ? 'outbound_error_message'
+  ),
+  'all scoped ui_read_registry api_gateway_requests entries expose outbound_error_message'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM jsonb_array_elements(COALESCE(public.ui_read_registry_v1()->'resources', '[]'::jsonb)) AS resource(entry)
+     WHERE resource.entry->>'key' = 'api_gateway_requests'
+       AND COALESCE(resource.entry->'select', '[]'::jsonb) ? 'outbound_error_message'
+  ),
+  'resolved ui_read_registry_v1 exposes outbound_error_message for api_gateway_requests'
 );
 
 SELECT * FROM finish();

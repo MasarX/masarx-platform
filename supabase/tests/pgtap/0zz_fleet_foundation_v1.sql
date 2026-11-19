@@ -90,8 +90,8 @@ BEGIN
 
   INSERT INTO public.organizations (id, name, slug)
   VALUES
-    (v_org1, 'Fleet Org 1', 'fleet-org-' || left(v_org1::text, 8)),
-    (v_org2, 'Fleet Org 2', 'fleet-org-' || left(v_org2::text, 8));
+    (v_org1, 'Fleet Org 1', 'fleet-org-' || right(replace(v_org1::text, '-', ''), 12)),
+    (v_org2, 'Fleet Org 2', 'fleet-org-' || right(replace(v_org2::text, '-', ''), 12));
 
   INSERT INTO public.branches (id, organization_id, code, name, timezone, is_active)
   VALUES

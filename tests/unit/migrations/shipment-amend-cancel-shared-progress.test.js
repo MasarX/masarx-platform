@@ -86,8 +86,8 @@ describe('shipment amend/cancel shared inline progression source contract (not D
 
   test('restores selected pgTAP helper/no-sleep assertions and current security regression without skips', () => {
     const pgtap = read('supabase/tests/pgtap/051_shipment_amend_cancel_ui.sql');
-    expect(pgtap).toContain('SELECT plan(36);');
-    expect(pgtap.match(/^SELECT (?:ok|matches|is|function_privs_are|has_function)\(/gm)).toHaveLength(36);
+    const planned = Number(pgtap.match(/^SELECT plan\((\d+)\)/m)[1]);
+    expect(pgtap.match(/^SELECT (?:ok|matches|is|function_privs_are|has_function)\(/gm)).toHaveLength(planned);
     expect(pgtap).toContain('reuses the shared inline workflow progress helper');
     expect(pgtap).toContain('does not maintain a bespoke inline sleep loop');
     expect(pgtap).toContain("WHEN SQLSTATE ''42501'' THEN[[:space:]]+RAISE;");

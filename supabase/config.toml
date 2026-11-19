@@ -356,3 +356,11 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+[edge_runtime.secrets]
+EDGE_SUPABASE_URL = "env(EDGE_SUPABASE_URL)"
+WEBHOOK_DB_JWT = "env(WEBHOOK_DB_JWT)"
+API_GATEWAY_DB_JWT = "env(API_GATEWAY_DB_JWT)"
+API_CALLER_DB_JWT = "env(API_CALLER_DB_JWT)"
+LABEL_RENDERER_DB_JWT = "env(LABEL_RENDERER_DB_JWT)"
+EDGE_REQUIRE_DB_JWT = "env(EDGE_REQUIRE_DB_JWT)"

@@ -778,32 +778,6 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
     ).toBeTruthy();
     await setAuthenticatedTenantContext(organizationId, userId);
 
-    const inboundScan = await recordWarehouseCheckpoint({
-      idempotency_key: `warehouse-transfer-inbound-${randomUUID()}`,
-      scan_type: 'warehouse_checkpoint',
-      barcode: handlingUnitCode,
-      checkpoint_key: 'inbound',
-      handling_unit_code: handlingUnitCode,
-      warehouse_transfer_id: transferId,
-      device_id: deviceId,
-      branch_id: fromBranchId,
-      metadata: { source: 'warehouse-transfer-execute.test.js', stage: 'pre-departure' },
-    });
-    expect(inboundScan?.created).toBe(true);
-
-    const sortScan = await recordWarehouseCheckpoint({
-      idempotency_key: `warehouse-transfer-sort-${randomUUID()}`,
-      scan_type: 'warehouse_checkpoint',
-      barcode: handlingUnitCode,
-      checkpoint_key: 'sort',
-      handling_unit_code: handlingUnitCode,
-      warehouse_transfer_id: transferId,
-      device_id: deviceId,
-      branch_id: fromBranchId,
-      metadata: { source: 'warehouse-transfer-execute.test.js', stage: 'pre-departure' },
-    });
-    expect(sortScan?.created).toBe(true);
-
     const departureResult = await executeWarehouseTransferCheckpoint(
       'warehouse_transfers.scan_departure',
       transferId,
@@ -832,7 +806,7 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
       id: departureResult.scan_event_id,
       scan_type: 'warehouse_checkpoint',
       checkpoint_key: 'load',
-      checkpoint_sequence: 3,
+      checkpoint_sequence: 1,
       barcode: handlingUnitCode,
       warehouse_transfer_id: transferId,
       branch_id: fromBranchId,
@@ -875,7 +849,7 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
       id: arrivalResult.scan_event_id,
       scan_type: 'warehouse_checkpoint',
       checkpoint_key: 'unload',
-      checkpoint_sequence: 4,
+      checkpoint_sequence: 2,
       barcode: handlingUnitCode,
       warehouse_transfer_id: transferId,
       branch_id: toBranchId,

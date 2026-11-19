@@ -18,6 +18,7 @@ import type {
   UiNavigation,
   UiReadRegistry,
   UiRelatedResources,
+  UiExecuteRouteRunScanoutResult,
   UiResourceDetail,
   UiResourceList,
   UiResourceMetrics,
@@ -59,6 +60,19 @@ import type {
   OrganizationProfilePatch,
 } from "./index";
 import { getPublicConfig } from "@masarx/config";
+
+const normalizeRequiredRouteScanoutText = (value: string, field: string) => {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`${field}_required`);
+  }
+  return normalized;
+};
+
+const normalizeOptionalRouteScanoutText = (value: string | null | undefined) => {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized || null;
+};
 
 export function createUiClientFromSupabase(
   client: SupabaseClient<any, any, any, any, any>
@@ -559,6 +573,73 @@ export function createUiClientFromSupabase(
           },
         }
       ),
+    scanRouteLoad: (params: {
+      routeRunId: string;
+      barcode: string;
+      routeStopId?: string | null;
+      branchId?: string | null;
+      deviceId?: string | null;
+      opsSessionId?: string | null;
+      capturedAt?: string | null;
+      lat?: number | string | null;
+      lng?: number | string | null;
+      accuracyM?: number | string | null;
+      notes?: string | null;
+      idempotencyKey?: string | null;
+      metadata?: Record<string, unknown> | null;
+    }) => {
+      const routeRunId = normalizeRequiredRouteScanoutText(params.routeRunId, "route_run_id");
+      const barcode = normalizeRequiredRouteScanoutText(params.barcode, "barcode");
+      return rpc<UiExecuteRouteRunScanoutResult>(
+        "ui_execute_route_run_scanout_v1",
+        {
+          p_action_key: "routes.scan_load",
+          p_resource_key: "routes",
+          p_selection_ids: [routeRunId],
+          p_selection_id: routeRunId,
+          p_selection_count: 1,
+          p_params: {
+            barcode,
+            route_stop_id: normalizeOptionalRouteScanoutText(params.routeStopId),
+            branch_id: normalizeOptionalRouteScanoutText(params.branchId),
+            device_id: normalizeOptionalRouteScanoutText(params.deviceId),
+            ops_session_id: normalizeOptionalRouteScanoutText(params.opsSessionId),
+            captured_at: normalizeOptionalRouteScanoutText(params.capturedAt),
+            lat: params.lat ?? null,
+            lng: params.lng ?? null,
+            accuracy_m: params.accuracyM ?? null,
+            notes: normalizeOptionalRouteScanoutText(params.notes),
+            idempotency_key: normalizeOptionalRouteScanoutText(params.idempotencyKey),
+            metadata: params.metadata ?? {},
+          },
+        }
+      );
+    },
+    confirmRouteDeparture: (params: {
+      routeRunId: string;
+      routeStopId?: string | null;
+      taskId?: string | null;
+      opsSessionId?: string | null;
+      metadata?: Record<string, unknown> | null;
+    }) => {
+      const routeRunId = normalizeRequiredRouteScanoutText(params.routeRunId, "route_run_id");
+      return rpc<UiExecuteRouteRunScanoutResult>(
+        "ui_execute_route_run_scanout_v1",
+        {
+          p_action_key: "routes.confirm_departure",
+          p_resource_key: "routes",
+          p_selection_ids: [routeRunId],
+          p_selection_id: routeRunId,
+          p_selection_count: 1,
+          p_params: {
+            route_stop_id: normalizeOptionalRouteScanoutText(params.routeStopId),
+            task_id: normalizeOptionalRouteScanoutText(params.taskId),
+            ops_session_id: normalizeOptionalRouteScanoutText(params.opsSessionId),
+            metadata: params.metadata ?? {},
+          },
+        }
+      );
+    },
     createWorkflowTemplateStep: (params: {
       workflowTemplateId: string;
       step: Record<string, unknown>;

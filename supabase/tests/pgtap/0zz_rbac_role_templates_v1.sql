@@ -160,8 +160,11 @@ BEGIN
      FROM public.rbac_role_permissions rp
      JOIN public.rbac_roles r ON r.id = rp.role_id
      WHERE r.organization_id = v_org AND r.key = 'finance'),
-    4,
-    'finance role seeded with 4 permissions'
+    (SELECT COUNT(*)::INT
+     FROM public.rbac_role_template_permissions tp
+     JOIN public.rbac_role_templates t ON t.id = tp.role_template_id
+     WHERE t.key = 'finance'),
+    'finance role permissions match template'
   );
 
   RETURN NEXT is(
@@ -169,8 +172,11 @@ BEGIN
      FROM public.rbac_role_permissions rp
      JOIN public.rbac_roles r ON r.id = rp.role_id
      WHERE r.organization_id = v_org AND r.key = 'ops_admin'),
-    17,
-    'ops_admin role seeded with 17 permissions'
+    (SELECT COUNT(*)::INT
+     FROM public.rbac_role_template_permissions tp
+     JOIN public.rbac_role_templates t ON t.id = tp.role_template_id
+     WHERE t.key = 'ops_admin'),
+    'ops_admin role permissions match template'
   );
 
   RETURN NEXT is(

@@ -6,11 +6,61 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SELECT plan(8);
 
--- Create a temp org and template for validation checks
+-- Create a temp org with truthful sender/client source context before onboarding/bootstrap
+-- so fail-closed plugin activation has an active source binding.
+DO $$
+DECLARE
+  v_org_id UUID := gen_random_uuid();
+  v_client_id UUID := gen_random_uuid();
+  v_sender_id UUID := gen_random_uuid();
+BEGIN
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
+  INSERT INTO organizations (id, name, slug, timezone, locale, billing_status)
+  VALUES (
+    v_org_id,
+    'Validation Org',
+    'validation-org',
+    'Asia/Riyadh',
+    'en-US',
+    'active'
+  )
+  ON CONFLICT (slug) DO UPDATE
+  SET name = EXCLUDED.name
+  RETURNING id INTO v_org_id;
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
+  INSERT INTO clients (id, organization_id, name, slug, status)
+  VALUES (
+    v_client_id,
+    v_org_id,
+    'Validation Client',
+    format('validation-client-%s', substr(v_client_id::text, 1, 8)),
+    'active'
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES (
+    v_sender_id,
+    v_client_id,
+    'Validation Sender',
+    'Validation Sender',
+    TRUE,
+    'active'
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  PERFORM bootstrap_tenant_onboarding_v1(
+    v_org_id,
+    'pgtap:label-template-validation-fixture-bootstrap'
+  );
+END $$;
+
+-- Create a temp template for validation checks
 WITH org AS (
-  INSERT INTO organizations (name, slug)
-  VALUES ('Validation Org', 'validation-org')
-  RETURNING id
+  SELECT id FROM organizations WHERE slug = 'validation-org' LIMIT 1
 ), tpl AS (
   INSERT INTO label_template_specs (
     organization_id,

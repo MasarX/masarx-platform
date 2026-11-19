@@ -49,7 +49,7 @@ describe('security transitive overrides', () => {
     expect(root.overrides['minimatch@3']).toEqual({ 'brace-expansion': '1.1.21' });
     expect(root.overrides['minimatch@5']).toEqual({ 'brace-expansion': '$brace-expansion' });
     expect(root.overrides['minimatch@10']).toEqual({ 'brace-expansion': '5.0.12' });
-    expect(root.overrides['@storybook/builder-webpack5@10.6.2']).toEqual({
+    expect(root.overrides['@storybook/builder-webpack5@10.6.x']).toEqual({
       'webpack-dev-middleware': '7.4.6',
     });
     expect(root.overrides).not.toHaveProperty('brace-expansion');

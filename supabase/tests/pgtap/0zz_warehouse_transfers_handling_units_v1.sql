@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(31);
+SELECT plan(32);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_warehouse_transfers_handling_units_v1()
 RETURNS SETOF TEXT
@@ -31,6 +31,7 @@ DECLARE
   v_tenant_user2 UUID := '0d200000-0000-0000-0000-000000000402'::uuid;
   v_client_user1 UUID := '0d100000-0000-0000-0000-000000000403'::uuid;
   v_sender_user1 UUID := '0d100000-0000-0000-0000-000000000404'::uuid;
+  v_platform_user UUID := '0d200000-0000-0000-0000-000000000405'::uuid;
 
   v_vehicle1 UUID := '0d100000-0000-0000-0000-000000000501'::uuid;
   v_vehicle2 UUID := '0d200000-0000-0000-0000-000000000502'::uuid;
@@ -125,7 +126,8 @@ BEGIN
     (v_tenant_user1, v_org1, 'wh-u1-' || left(v_tenant_user1::text, 8) || '@example.com', 'WH Tenant 1', 'tenant', NULL),
     (v_tenant_user2, v_org2, 'wh-u2-' || left(v_tenant_user2::text, 8) || '@example.com', 'WH Tenant 2', 'tenant', NULL),
     (v_client_user1, v_org1, 'wh-cu-' || left(v_client_user1::text, 8) || '@example.com', 'WH Client User', 'client', v_client1),
-    (v_sender_user1, v_org1, 'wh-su-' || left(v_sender_user1::text, 8) || '@example.com', 'WH Sender User', 'sender', v_sender1);
+    (v_sender_user1, v_org1, 'wh-su-' || left(v_sender_user1::text, 8) || '@example.com', 'WH Sender User', 'sender', v_sender1),
+    (v_platform_user, v_org2, 'wh-pu-' || left(v_platform_user::text, 8) || '@example.com', 'WH Platform User', 'platform', NULL);
 
   INSERT INTO public.vehicles (id, organization_id, status, is_active)
   VALUES
@@ -203,6 +205,18 @@ BEGIN
 
   RETURN NEXT lives_ok(
     format(
+      $q$ INSERT INTO public.warehouse_transfers (organization_id, from_branch_id, to_branch_id, created_by_user_id, status, transfer_code)
+          VALUES (%L, %L, %L, %L, 'draft', 'WH-PLATFORM-ACTOR') $q$,
+      v_org1,
+      v_branch1_from,
+      v_branch1_to,
+      v_platform_user
+    ),
+    'warehouse_transfers insert allows platform audit actor across active tenant scope'
+  );
+
+  RETURN NEXT lives_ok(
+    format(
       $q$ INSERT INTO public.warehouse_transfer_items (organization_id, transfer_id, client_id, shipment_id, added_by_user_id)
           VALUES (%L, %L, %L, %L, %L) $q$,
       v_org1,
@@ -233,7 +247,7 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('role', 'authenticated')::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
 
-  RETURN NEXT is((SELECT COUNT(*)::int FROM public.warehouse_transfers), 1, 'tenant user sees own org warehouse_transfers only');
+  RETURN NEXT is((SELECT COUNT(*)::int FROM public.warehouse_transfers), 2, 'tenant user sees own org warehouse_transfers only');
   RETURN NEXT is((SELECT COUNT(*)::int FROM public.warehouse_transfer_items), 1, 'tenant user sees own org warehouse_transfer_items only');
   RETURN NEXT is((SELECT COUNT(*)::int FROM public.handling_units), 1, 'tenant user sees own org handling_units only');
 

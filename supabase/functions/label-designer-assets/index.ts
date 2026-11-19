@@ -1,7 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { DOMParser } from "npm:@xmldom/xmldom@0.9.12";
 import { isPngContainer, isJpegContainer } from "./_shared/raster-images.mjs";
-import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
+import { extractToken, logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -48,6 +48,19 @@ const decodeBase64 = (raw: string): Uint8Array => {
 const imageContentTypeFromBytes = (bytes: Uint8Array, contentType: string): string | null => {
   if (isPngContainer(bytes)) return "image/png";
   if (isJpegContainer(bytes)) return "image/jpeg";
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
   try {
     // RFC 7303: BOM > MIME charset > XML declaration/default. Hints choose decoding, never XML validity.
     const bom = bytes[0] === 0xff && bytes[1] === 0xfe ? "utf-16le"
@@ -135,6 +148,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     Vary: "Origin",
   };
+  const rejectWithLog = (status: number, code: string, message: string, error: unknown) => {
+    const correlationId = crypto.randomUUID();
+    logStructured("error", "label_designer_assets.request_failed", { correlation_id: correlationId, code, error });
+    return json(status, { ok: false, error: { code, message }, correlation_id: correlationId }, corsHeaders);
+  };
 
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== "POST") return json(405, { ok: false, error: { code: "method_not_allowed" } }, corsHeaders);
@@ -147,8 +165,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let payload: unknown;
   try {
     payload = (await parseRequestBody(req)).json;
-  } catch (e) {
-    return json(400, { ok: false, error: { code: "invalid_json", message: e.message } }, corsHeaders);
+  } catch (error) {
+    return rejectWithLog(400, "invalid_json", "Invalid JSON payload", error);
   }
 
   const mode = asString((payload as any)?.mode);
@@ -166,13 +184,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const headerRes = headerToken ? await tryWhoami(headerToken) : ({ data: null, error: null } as any);
     const headerOk = !!(headerRes?.data && (headerRes.data as any).ok === true);
-    const bodyRes = !headerOk && bodyUserJwt ? await tryWhoami(bodyUserJwt) : ({ data: null, error: null } as any);
-
-    const who = (headerOk ? headerRes?.data : bodyRes?.data) as any;
-    const whoErr = (headerOk ? headerRes?.error : bodyRes?.error) as any;
+    const authResult = !headerOk && bodyUserJwt ? await tryWhoami(bodyUserJwt) : headerRes;
+    const who = authResult?.data;
+    const whoErr = authResult?.error;
     if (whoErr || !who || (who as any).ok !== true) {
-      const msg = (who as any)?.error?.message ?? whoErr?.message ?? "Authentication required";
-      return json(403, { ok: false, error: { code: "org_required", message: msg } }, corsHeaders);
+      return rejectWithLog(403, "org_required", "Authentication required", whoErr ?? who?.error);
     }
     const orgId = asString((who as any).organization_id);
     if (!orgId) {
@@ -208,7 +224,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (typed.mode === "list") {
       const prefix = `${orgId}/${DESIGNER_DIR}`;
       const { data, error } = await storageClient.storage.from(ASSET_BUCKET).list(prefix, { limit: 200 });
-      if (error) return json(400, { ok: false, error: { code: "list_failed", message: error.message } }, corsHeaders);
+      if (error) return rejectWithLog(400, "list_failed", "Could not list assets", error);
       const assets = (data ?? [])
         .filter((o) => o && typeof o.name === "string" && o.name.trim().length > 0)
         .map((o) => ({ name: o.name, path: `${prefix}/${o.name}` }));
@@ -225,7 +241,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const ttl = Number.isFinite(expires) && expires > 0 ? Math.min(600, Math.floor(expires)) : 60;
       const { data, error } = await storageClient.storage.from(ASSET_BUCKET).createSignedUrl(path, ttl);
       if (error || !data?.signedUrl) {
-        return json(400, { ok: false, error: { code: "signed_url_failed", message: error?.message ?? "Missing signed url" } }, corsHeaders);
+        return rejectWithLog(400, "signed_url_failed", "Could not create a signed URL", error ?? "Missing signed URL");
       }
       return json(200, { ok: true, signed_url: data.signedUrl }, corsHeaders);
     }
@@ -250,20 +266,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (bytes.length > 5 * 1024 * 1024) {
         return json(413, { ok: false, error: { code: "file_too_large", message: "Max 5MB" } }, corsHeaders);
       }
-      const declaredMime = contentType.split(";", 1)[0].trim().toLowerCase();
-      if (declaredMime.startsWith("image/")) {
-        const detectedType = imageContentTypeFromBytes(bytes, contentType);
-        if (!detectedType) return json(400, { ok: false, error: { code: "invalid_image" } }, corsHeaders);
-        if (detectedType.split(";", 1)[0] !== declaredMime) return json(400, { ok: false, error: { code: "image_mime_mismatch" } }, corsHeaders);
-        contentType = detectedType;
+      const mime = contentType.split(";", 1)[0].trim().toLowerCase();
+      const declaredMime = mime === "image/jpg" ? "image/jpeg" : mime;
+      const detectedType = imageContentTypeFromBytes(bytes, contentType);
+      if (!detectedType) return json(400, { ok: false, error: { code: "invalid_image" } }, corsHeaders);
+      if (declaredMime !== "application/octet-stream" && detectedType.split(";", 1)[0] !== declaredMime) {
+        return json(400, { ok: false, error: { code: "image_mime_mismatch" } }, corsHeaders);
       }
+      contentType = detectedType;
 
       const path = `${orgId}/${DESIGNER_DIR}/${safeName}`;
       const { error } = await storageClient.storage.from(ASSET_BUCKET).upload(path, new Blob([bytes], { type: contentType }), {
         contentType,
         upsert: true,
       });
-      if (error) return json(400, { ok: false, error: { code: "upload_failed", message: error.message } }, corsHeaders);
+      if (error) return rejectWithLog(400, "upload_failed", "Could not upload asset", error);
       return json(200, { ok: true, path }, corsHeaders);
     }
 
@@ -274,13 +291,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return json(403, { ok: false, error: { code: "forbidden_path" } }, corsHeaders);
       }
       const { error } = await storageClient.storage.from(ASSET_BUCKET).remove([path]);
-      if (error) return json(400, { ok: false, error: { code: "delete_failed", message: error.message } }, corsHeaders);
+      if (error) return rejectWithLog(400, "delete_failed", "Could not delete asset", error);
       return json(200, { ok: true }, corsHeaders);
     }
 
     return json(400, { ok: false, error: { code: "unknown_mode" } }, corsHeaders);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return json(500, { ok: false, error: { code: "internal_error", message: msg } }, corsHeaders);
+  } catch (error) {
+    return rejectWithLog(500, "internal_error", "Could not complete asset request", error);
   }
 });

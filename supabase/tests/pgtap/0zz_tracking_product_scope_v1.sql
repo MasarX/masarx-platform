@@ -257,7 +257,9 @@ BEGIN
     (v_foreign_branch, v_foreign_zone);
 
   INSERT INTO public.service_levels (id, organization_id, key, name, is_active)
-  VALUES (v_level, v_org, 'standard', 'Tracking Standard', TRUE);
+  VALUES (v_level, v_org, 'standard', 'Tracking Standard', TRUE)
+  ON CONFLICT (organization_id, key) DO UPDATE SET name = EXCLUDED.name, is_active = TRUE
+  RETURNING id INTO v_level;
   INSERT INTO public.service_offerings (
     id, service_level_id, branch_id, zone_id, is_active, metadata
   ) VALUES

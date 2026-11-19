@@ -27,6 +27,16 @@ describe('edge/functions-registry', () => {
       authMode: 'public_no_jwt',
       enabled: true,
     });
+    expect(byName.get('driver-signup-intake')).toMatchObject({
+      name: 'driver-signup-intake',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
+    expect(byName.get('driver-application-status')).toMatchObject({
+      name: 'driver-application-status',
+      authMode: 'public_no_jwt',
+      enabled: true,
+    });
     expect(byName.get('tenant-signup-review')).toMatchObject({
       name: 'tenant-signup-review',
       authMode: 'public_no_jwt',

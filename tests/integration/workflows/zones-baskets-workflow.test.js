@@ -614,10 +614,16 @@ describe('zones + baskets workflow handlers', () => {
       [branchId, zoneId]
     );
 
-    await client.query(
+    const {
+      rows: [{ id: activeServiceLevelId }],
+    } = await client.query(
       `INSERT INTO service_levels (id, organization_id, key, name, is_active)
        VALUES ($1::uuid, $2::uuid, 'express', 'Express', TRUE)
-       ON CONFLICT (id) DO NOTHING`,
+       ON CONFLICT (organization_id, key) DO UPDATE
+       SET name = EXCLUDED.name,
+           is_active = TRUE,
+           updated_at = now()
+       RETURNING id`,
       [serviceLevelId, organizationId]
     );
 
@@ -640,7 +646,7 @@ describe('zones + baskets workflow handlers', () => {
           0,
           TRUE
        )`,
-      [serviceLevelId, branchId, zoneId]
+      [activeServiceLevelId, branchId, zoneId]
     );
 
     await client.query(
@@ -941,10 +947,16 @@ describe('zones + baskets workflow handlers', () => {
       [branchId, zoneId]
     );
 
-    await client.query(
+    const {
+      rows: [{ id: activeServiceLevelId }],
+    } = await client.query(
       `INSERT INTO service_levels (id, organization_id, key, name, is_active)
        VALUES ($1::uuid, $2::uuid, 'express', 'Express', TRUE)
-       ON CONFLICT (id) DO NOTHING`,
+       ON CONFLICT (organization_id, key) DO UPDATE
+       SET name = EXCLUDED.name,
+           is_active = TRUE,
+           updated_at = now()
+       RETURNING id`,
       [serviceLevelId, organizationId]
     );
 
@@ -967,7 +979,7 @@ describe('zones + baskets workflow handlers', () => {
           0,
           TRUE
        )`,
-      [serviceLevelId, branchId, zoneId]
+      [activeServiceLevelId, branchId, zoneId]
     );
 
     await client.query(

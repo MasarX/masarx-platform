@@ -334,7 +334,7 @@ WITH sender_ctx AS (
   LIMIT 1
 )
 SELECT
-  ('555' || lpad((floor(random() * 1000000000))::BIGINT::TEXT, 9, '0')) AS recipient_phone,
+  ('+9665' || lpad((floor(random() * 100000000))::BIGINT::TEXT, 8, '0')) AS recipient_phone,
   ('PGTAP-' || replace(gen_random_uuid()::TEXT, '-', '')) AS tracking_number,
   src.client_id,
   src.organization_id,

@@ -15,6 +15,8 @@ DECLARE
   v_user2 UUID := gen_random_uuid();
   v_client1 UUID := gen_random_uuid();
   v_client2 UUID := gen_random_uuid();
+  v_sender1 UUID := gen_random_uuid();
+  v_sender2 UUID := gen_random_uuid();
   v_recipient1 UUID := gen_random_uuid();
   v_recipient2 UUID := gen_random_uuid();
   v_address1 UUID := gen_random_uuid();
@@ -24,20 +26,33 @@ DECLARE
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
+  -- Defer tenant bootstrap until active client/sender context exists.
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO organizations (id, name, slug)
   VALUES
     (v_org1, 'RLS Test Org 1', 'rls-org-' || left(v_org1::text, 8)),
     (v_org2, 'RLS Test Org 2', 'rls-org-' || left(v_org2::text, 8));
 
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+
+  INSERT INTO clients (id, organization_id, name, slug, status)
+  VALUES
+    (v_client1, v_org1, 'RLS Test Client 1', 'rls-client-' || left(v_client1::text, 8), 'active'),
+    (v_client2, v_org2, 'RLS Test Client 2', 'rls-client-' || left(v_client2::text, 8), 'active');
+
+  INSERT INTO senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES
+    (v_sender1, v_client1, 'RLS Test Sender 1', 'RLS Test Sender 1', TRUE, 'active'),
+    (v_sender2, v_client2, 'RLS Test Sender 2', 'RLS Test Sender 2', TRUE, 'active');
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org1, 'pgtap:rls-org-isolation-fixture-bootstrap-org1');
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org2, 'pgtap:rls-org-isolation-fixture-bootstrap-org2');
+
   INSERT INTO users (id, organization_id, email, full_name)
   VALUES
     (v_user1, v_org1, 'u1-' || left(v_user1::text, 8) || '@example.com', 'RLS Test User 1'),
     (v_user2, v_org2, 'u2-' || left(v_user2::text, 8) || '@example.com', 'RLS Test User 2');
-
-  INSERT INTO clients (id, organization_id, name, slug)
-  VALUES
-    (v_client1, v_org1, 'RLS Test Client 1', 'rls-client-' || left(v_client1::text, 8)),
-    (v_client2, v_org2, 'RLS Test Client 2', 'rls-client-' || left(v_client2::text, 8));
 
   INSERT INTO recipients (id, organization_id, client_id, name, phone_number)
   VALUES

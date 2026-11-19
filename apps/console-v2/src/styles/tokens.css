@@ -1,0 +1,195 @@
+/* tokens.css — OKLCH design system (light + dark + density + reduced motion)
+   Anchored in design archive Direction A; refined for Console V2.
+   Every token is consumable across modules; modules MUST NOT redefine palette colors. */
+
+:root {
+  /* Typography stacks — Geist (Vercel) for readability + clean modern feel */
+  --font-ui: 'Geist', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Geist', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Type scale (slightly bumped for readability) */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 30px;
+  --text-3xl: 38px;
+
+  /* Spacing scale (4pt grid) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* Radii */
+  --r-1: 3px;
+  --r-2: 4px;
+  --r-3: 6px;
+  --r-4: 8px;
+  --r-pill: 999px;
+
+  /* Shell metrics */
+  --topbar-h: 44px;
+  --sidenav-w: 240px;
+  --sidenav-w-collapsed: 56px;
+  --sidenav-w-rail: 52px;
+  --evidence-h: 28px;
+  --notifs-w: 360px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --dur-drawer: 220ms;
+
+  /* z-stack */
+  --z-rail: 30;
+  --z-topbar: 40;
+  --z-drawer: 60;
+  --z-modal: 70;
+  --z-palette: 80;
+  --z-toast: 90;
+}
+
+/* ---------- Light theme (default) ---------- */
+:root[data-theme="light"] {
+  --paper: oklch(0.992 0.003 80);       /* warm cream — base surface */
+  --paper-2: oklch(0.978 0.004 80);     /* app bg */
+  --paper-3: oklch(0.962 0.005 80);     /* sunken */
+  --paper-raise: oklch(1 0 0);          /* card lift */
+
+  --ink: oklch(0.20 0.012 250);
+  --ink-2: oklch(0.38 0.012 250);
+  --ink-3: oklch(0.46 0.012 250);       /* darkened from 0.58 → 0.46 for WCAG 2 AA on --paper (small text) */
+  --ink-inv: oklch(0.99 0 0);
+
+  --line: oklch(0.91 0.005 80);
+  --line-2: oklch(0.86 0.006 80);
+  --line-strong: oklch(0.78 0.008 80);
+
+  --accent: oklch(0.45 0.13 158);       /* route-green signature — darkened from 0.55 → 0.45 so white text passes WCAG 2 AA */
+  --accent-soft: oklch(0.94 0.05 158);
+  --accent-ink: oklch(0.32 0.10 158);
+
+  --warn: oklch(0.68 0.14 60);
+  --warn-soft: oklch(0.96 0.05 80);
+  --warn-ink: oklch(0.40 0.12 60);
+
+  --danger: oklch(0.58 0.18 28);
+  --danger-soft: oklch(0.96 0.04 28);
+  --danger-ink: oklch(0.42 0.16 28);
+
+  --info: oklch(0.55 0.13 245);
+  --info-soft: oklch(0.96 0.03 245);
+  --info-ink: oklch(0.38 0.12 245);
+
+  --good: var(--accent);
+  --good-soft: var(--accent-soft);
+  --good-ink: var(--accent-ink);
+
+  --chrome: oklch(0.18 0.012 250);      /* dark top bar */
+  --chrome-ink: oklch(0.92 0.005 250);
+  --chrome-ink-soft: oklch(0.72 0.012 250);
+  --chrome-line: oklch(0.28 0.012 250);
+  --cmd-bg: oklch(0.24 0.012 250);
+  --cmd-kbd: oklch(0.30 0.012 250);
+
+  --rail-bg: oklch(0.97 0.005 80);
+  --rail-ink: oklch(0.42 0.012 250);
+
+  --shadow-soft: 0 1px 2px oklch(0.20 0.012 250 / 0.06), 0 4px 12px oklch(0.20 0.012 250 / 0.04);
+  --shadow-pop: 0 8px 24px oklch(0.20 0.012 250 / 0.16), 0 1px 4px oklch(0.20 0.012 250 / 0.08);
+
+  --focus-ring: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent);
+}
+
+/* ---------- Dark theme (parity) ---------- */
+:root[data-theme="dark"] {
+  --paper: oklch(0.16 0.008 250);
+  --paper-2: oklch(0.13 0.008 250);
+  --paper-3: oklch(0.11 0.008 250);
+  --paper-raise: oklch(0.19 0.009 250);
+
+  --ink: oklch(0.92 0.005 250);
+  --ink-2: oklch(0.74 0.008 250);
+  --ink-3: oklch(0.58 0.008 250);
+  --ink-inv: oklch(0.10 0.008 250);
+
+  --line: oklch(0.26 0.010 250);
+  --line-2: oklch(0.32 0.010 250);
+  --line-strong: oklch(0.42 0.012 250);
+
+  --accent: oklch(0.68 0.13 158);
+  --accent-soft: oklch(0.28 0.06 158);
+  --accent-ink: oklch(0.85 0.12 158);
+
+  --warn: oklch(0.78 0.14 70);
+  --warn-soft: oklch(0.30 0.08 70);
+  --warn-ink: oklch(0.88 0.12 70);
+
+  --danger: oklch(0.70 0.16 28);
+  --danger-soft: oklch(0.30 0.10 28);
+  --danger-ink: oklch(0.85 0.14 28);
+
+  --info: oklch(0.70 0.12 245);
+  --info-soft: oklch(0.28 0.06 245);
+  --info-ink: oklch(0.85 0.10 245);
+
+  --good: var(--accent);
+  --good-soft: var(--accent-soft);
+  --good-ink: var(--accent-ink);
+
+  --chrome: oklch(0.10 0.008 250);
+  --chrome-ink: oklch(0.92 0.005 250);
+  --chrome-ink-soft: oklch(0.70 0.012 250);
+  --chrome-line: oklch(0.20 0.010 250);
+  --cmd-bg: oklch(0.16 0.010 250);
+  --cmd-kbd: oklch(0.22 0.010 250);
+
+  --rail-bg: oklch(0.13 0.008 250);
+  --rail-ink: oklch(0.74 0.008 250);
+
+  --shadow-soft: 0 1px 2px oklch(0 0 0 / 0.5), 0 4px 12px oklch(0 0 0 / 0.4);
+  --shadow-pop: 0 8px 24px oklch(0 0 0 / 0.6), 0 1px 4px oklch(0 0 0 / 0.4);
+
+  --focus-ring: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent);
+}
+
+/* ---------- Density ---------- */
+:root[data-density="compact"] {
+  --row-py: 4px;
+  --row-px: 8px;
+  --cell-py: 4px;
+  --cell-px: 8px;
+}
+:root[data-density="comfortable"] {
+  --row-py: 6px;
+  --row-px: 10px;
+  --cell-py: 6px;
+  --cell-px: 10px;
+}
+:root[data-density="cozy"] {
+  --row-py: 9px;
+  --row-px: 12px;
+  --cell-py: 9px;
+  --cell-px: 12px;
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

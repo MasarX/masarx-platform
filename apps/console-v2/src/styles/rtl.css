@@ -1,0 +1,73 @@
+/* rtl.css — RTL mirrors with logic reversal
+   Activated by html[dir="rtl"]. Loaded last so it overrides directional CSS. */
+
+[dir="rtl"] body {
+  font-family: 'IBM Plex Sans Arabic', var(--font-ui);
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+}
+
+/* Borders flip */
+[dir="rtl"] .sidenav { border-right: none; border-left: 1px solid var(--line); }
+[dir="rtl"] .three-pane > .pane:not(:last-child) { border-right: none; border-left: 1px solid var(--line); }
+[dir="rtl"] .kpi { border-right: none; border-left: 1px solid var(--line); }
+[dir="rtl"] .kpi:last-child { border-left: none; }
+[dir="rtl"] .ladder__step.is-match::before { left: auto; right: 0; }
+[dir="rtl"] .run-row.is-active { border-left: none; border-right: 2px solid var(--accent); padding-left: 14px; padding-right: 12px; }
+[dir="rtl"] .run-row.is-risk { border-left: none; border-right: 2px solid var(--danger); padding-left: 14px; padding-right: 12px; }
+[dir="rtl"] .dt__table tbody tr.is-risk td:first-child { border-left: none; border-right: 2px solid var(--danger); }
+
+/* Drawer slides from left in RTL */
+[dir="rtl"] .drawer {
+  right: auto;
+  left: 0;
+  border-left: none;
+  border-right: 1px solid var(--line);
+  transform: translateX(-100%);
+}
+[dir="rtl"] .drawer-root.is-open .drawer,
+[dir="rtl"] .drawer[data-state="open"] { transform: translateX(0); }
+
+/* Toast comes from left */
+[dir="rtl"] .toast-root { right: auto; left: 16px; }
+
+/* Skip link */
+[dir="rtl"] .skip-link { left: auto; right: 8px; }
+
+/* Lifecycle stepper reverses arrow */
+[dir="rtl"] .lifecycle__step::after { content: '←'; }
+
+/* Kanban scrolls naturally; nothing to flip beyond CSS Grid auto-flip */
+
+/* Numerics, IDs, monospace stay LTR even in RTL — handled via .mono containers */
+[dir="rtl"] .mono,
+[dir="rtl"] .tnum,
+[dir="rtl"] .cell-id,
+[dir="rtl"] .run-row__id,
+[dir="rtl"] .run-row__meta,
+[dir="rtl"] .kanban__card-id,
+[dir="rtl"] .kanban__card-meta,
+[dir="rtl"] .ladder__id,
+[dir="rtl"] .scope-pill,
+[dir="rtl"] .scope-pill__sub,
+[dir="rtl"] .timeline__time,
+[dir="rtl"] .kbd {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* Arabic typography — IBM Plex Sans Arabic, no italic */
+[dir="rtl"] .serif,
+[dir="rtl"] .page-header__title,
+[dir="rtl"] .kpi__value,
+[dir="rtl"] .state__title,
+[dir="rtl"] .insight-card__value,
+[dir="rtl"] .drawer__title,
+[dir="rtl"] .modal__title {
+  font-family: 'IBM Plex Sans Arabic', var(--font-ui);
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* Crumbs separator */
+[dir="rtl"] .topbar__crumbs { border-left: none; border-right: 1px solid var(--chrome-line); margin-left: 0; margin-right: var(--s-3); padding-left: 0; padding-right: var(--s-3); }

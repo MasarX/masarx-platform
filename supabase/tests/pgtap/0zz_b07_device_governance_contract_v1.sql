@@ -14,6 +14,8 @@ LANGUAGE plpgsql
 AS $function$
 DECLARE
   v_org UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_user UUID := gen_random_uuid();
   v_device RECORD;
   v_device_id UUID;
@@ -75,8 +77,25 @@ BEGIN
     'ops_sessions revoked-device trigger exists'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'Device Governance Org', 'device-governance-' || left(v_org::text, 8));
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES (
+    v_client,
+    v_org,
+    'Device Governance Client',
+    'device-governance-client-' || left(v_client::text, 8),
+    'active'
+  );
+
+  INSERT INTO public.senders (id, client_id, name, status)
+  VALUES (v_sender, v_client, 'Device Governance Sender', 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:device-governance-fixture-bootstrap');
 
   INSERT INTO public.users (id, organization_id, email, full_name, access_scope_type)
   VALUES (v_user, v_org, 'device-governance-' || left(v_user::text, 8) || '@example.com', 'Device Governance User', 'tenant');

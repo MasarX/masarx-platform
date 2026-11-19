@@ -8,7 +8,8 @@ npm workspaces with two workspace roots: `apps/*` and `packages/*`.
 
 | Workspace | Package | Type | Port |
 |-----------|---------|------|------|
-| `apps/console` | `@masarx/console` | Next.js 16 App Router | 3001 |
+| `apps/console-v2` | `@masarx/console-v2` | Vite + React Console V2 | 5175 |
+| `apps/console` | `@masarx/console` | Legacy Next.js 16 reference | 3001 |
 | `apps/portal` | `@masarx/portal` | Next.js 16 App Router | 3002 |
 | `apps/fieldops` | `@masarx/fieldops` | Expo / React Native | -- |
 | `packages/ui` | `@masarx/ui` | Shared UI components | -- |
@@ -169,7 +170,8 @@ Exports `getPublicConfig()`, `getUiDefaults()`, `resolveUiMessages()`, UI defaul
 ## Dev Commands
 
 ```
-npm run dev:console    # Next.js dev on port 3001
+npm run dev:console    # Console V2 Vite dev on port 5175
+npm run dev:console:legacy # legacy Next.js console on port 3001
 npm run dev:portal     # Next.js dev on port 3002
 npm run dev:fieldops   # Expo start
 npm run test:ui        # Jest UI component tests

@@ -39,6 +39,7 @@ BEGIN
   SELECT settlement_batch_id INTO STRICT locked_batch FROM public.create_settlement_batch_v1(base||'{"idempotency_key":"lineage-locked"}');
   SELECT settlement_batch_id INTO STRICT approved_batch FROM public.create_settlement_batch_v1(base||'{"idempotency_key":"lineage-approved"}');
   PERFORM public.transition_settlement_batch_v1(jsonb_build_object('settlement_batch_id',locked_batch,'to_status','locked','actor_system','lineage_pgtap'));
+  PERFORM public.transition_settlement_batch_v1(jsonb_build_object('settlement_batch_id',approved_batch,'to_status','locked','actor_system','lineage_pgtap'));
   PERFORM public.transition_settlement_batch_v1(jsonb_build_object('settlement_batch_id',approved_batch,'to_status','approved','actor_system','lineage_pgtap'));
   INSERT INTO public.tasks(id,organization_id,task_type_id,resource_type,resource_id,status,priority) VALUES
     (stale,org,cashier,'settlement_batch',approved_batch,'open',50),

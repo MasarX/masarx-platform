@@ -10,27 +10,41 @@ SET search_path TO public, pgtap, extensions;
 -- -----------------------------------------------------------------------------
 -- Fixture data
 -- -----------------------------------------------------------------------------
+-- This fixture owns source-binding setup, so defer bootstrap until client/sender
+-- context exists and fail-closed plugin activation has truthful binding inputs.
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('07600000-0000-0000-0000-000000000001', 'PGTAP Geo Org 076', 'pgtap-geo-076')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.clients (id, organization_id, name, slug)
+SELECT set_config('app.organization_onboarding_source', '', true);
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
 VALUES (
   '07600000-0000-0000-0000-000000000002',
   '07600000-0000-0000-0000-000000000001',
   'PGTAP Geo Client 076',
-  'pgtap-geo-client-076'
+  'pgtap-geo-client-076',
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.senders (id, client_id, name, brand_name)
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
 VALUES (
   '07600000-0000-0000-0000-000000000003',
   '07600000-0000-0000-0000-000000000002',
   'PGTAP Geo Sender 076',
-  'PGTAP Geo Sender 076'
+  'PGTAP Geo Sender 076',
+  TRUE,
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
+
+SELECT public.bootstrap_tenant_onboarding_v1(
+  '07600000-0000-0000-0000-000000000001',
+  'pgtap:geo-coordinate-skip-reverse-local-short-code-fixture-bootstrap'
+);
 
 INSERT INTO public.addresses (
   id,
@@ -203,21 +217,24 @@ SELECT workflow_handlers.execute_geo_coordinate_v1(
 -- Second run: omit geocoding.short_code and intentionally mismatch client_id in context.
 -- Short-code presence should still be detected from the persisted address row.
 
-INSERT INTO public.clients (id, organization_id, name, slug)
+INSERT INTO public.clients (id, organization_id, name, slug, status)
 VALUES (
   '07600000-0000-0000-0000-00000000000A',
   '07600000-0000-0000-0000-000000000001',
   'PGTAP Geo Client 076 (mismatch)',
-  'pgtap-geo-client-076-mismatch'
+  'pgtap-geo-client-076-mismatch',
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO public.senders (id, client_id, name, brand_name)
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
 VALUES (
   '07600000-0000-0000-0000-00000000000B',
   '07600000-0000-0000-0000-00000000000A',
   'PGTAP Geo Sender 076 (mismatch)',
-  'PGTAP Geo Sender 076 (mismatch)'
+  'PGTAP Geo Sender 076 (mismatch)',
+  TRUE,
+  'active'
 )
 ON CONFLICT (id) DO NOTHING;
 

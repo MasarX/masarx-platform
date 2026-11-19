@@ -8,6 +8,48 @@ import { findSupabaseSessionIdentity } from "./auth-session";
 import { seedBrowserAuthSession } from "./browser-auth";
 import { resolveUsableDemoPassword } from "./demo-accounts";
 
+async function hasConsoleV2LocalStorageSession(page: Page, email: string) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) return false;
+
+  return await page
+    .evaluate((expectedEmail) => {
+      const raw = window.localStorage.getItem("masarx-console-v2-auth");
+      if (!raw) return false;
+      try {
+        const parsed = JSON.parse(raw) as {
+          access_token?: string;
+          user?: { email?: string | null } | null;
+        };
+        const sessionEmail = parsed.user?.email;
+        if (
+          typeof sessionEmail === "string" &&
+          sessionEmail.trim().toLowerCase() === expectedEmail
+        ) {
+          return true;
+        }
+
+        const accessToken = parsed.access_token;
+        const payloadPart =
+          typeof accessToken === "string" ? accessToken.split(".")[1] : null;
+        if (!payloadPart) return false;
+        const normalizedPayload = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+        const paddedPayload =
+          normalizedPayload + "=".repeat((4 - (normalizedPayload.length % 4)) % 4);
+        const payload = JSON.parse(window.atob(paddedPayload)) as {
+          email?: string | null;
+        };
+        return (
+          typeof payload.email === "string" &&
+          payload.email.trim().toLowerCase() === expectedEmail
+        );
+      } catch {
+        return false;
+      }
+    }, normalizedEmail)
+    .catch(() => false);
+}
+
 export async function signInWithPassword(
   page: Page,
   email: string,
@@ -136,7 +178,7 @@ export async function signInWithPassword(
     await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 }).catch(() => {});
 
     const signedInShell = page.locator(
-      '[data-testid="ui-context-strip-signed-in"], [data-testid$="-app-shell-sidebar"], [data-testid="navigation-list"], [data-testid$="-dashboard-ready"]',
+      '[data-testid="ui-context-strip-signed-in"], .app-shell, [data-testid$="-app-shell-sidebar"], [data-testid="navigation-list"], nav[aria-label="Primary"], [data-testid$="-dashboard-ready"]',
     );
     const shellVisible = await signedInShell
       .first()
@@ -358,12 +400,13 @@ export async function expectSignedIn(
   }
 
   const identity = findSupabaseSessionIdentity(await page.context().cookies(), email);
-  if (!identity) {
+  const hasConsoleV2Session = identity ? true : await hasConsoleV2LocalStorageSession(page, email);
+  if (!identity && !hasConsoleV2Session) {
     throw new Error(`No Supabase browser auth session found for ${email}.`);
   }
 
   const authenticatedShell = page.locator(
-    '[data-testid$="-app-shell-sidebar"], [data-testid="navigation-list"], [data-testid$="-dashboard-ready"]',
+    '.app-shell, [data-testid$="-app-shell-sidebar"], [data-testid="navigation-list"], nav[aria-label="Primary"], [data-testid$="-dashboard-ready"]',
   ).first();
   await expect(authenticatedShell).toBeVisible({ timeout: 20_000 });
 }

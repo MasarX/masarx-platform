@@ -5,9 +5,22 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(4);
 
 -- Seed minimal org + provider for outbound_calls targeting (idempotent).
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
 INSERT INTO public.organizations (id, name, slug)
 VALUES ('cccccccc-0000-0000-0000-000000000001', 'Edge Claim Org', 'edge-claim-org')
 ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+VALUES ('cccccccc-0000-0000-0000-000000000003', 'cccccccc-0000-0000-0000-000000000001', 'Edge Claim Client', 'edge-claim-client', 'active')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+VALUES ('cccccccc-0000-0000-0000-000000000004', 'cccccccc-0000-0000-0000-000000000003', 'Edge Claim Sender', 'Edge Claim Sender', TRUE, 'active')
+ON CONFLICT (id) DO NOTHING;
+
+SELECT set_config('app.organization_onboarding_source', '', true);
+SELECT public.bootstrap_tenant_onboarding_v1('cccccccc-0000-0000-0000-000000000001', 'pgtap:edge-claim-spec-guard-fixture-bootstrap');
 
 INSERT INTO public.providers (id, organization_id, name, provider_type, enabled, metadata)
 VALUES (

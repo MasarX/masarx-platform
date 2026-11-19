@@ -1,0 +1,938 @@
+/* primitives.css — Wave 0 shared primitives.
+   Class prefix `.primitive-` namespaces every selector. Reuses tokens from
+   tokens.css; introduces no new color variables. Aesthetic baseline:
+   refined-minimal, hairline borders, mono numerics, color used as signal. */
+
+
+/* =================================================================
+   1. MaintenanceCalendar — week-grid scheduler (7 cols × 24 rows)
+   ================================================================= */
+.primitive-cal {
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  overflow: hidden;
+  font-size: var(--text-xs);
+  color: var(--ink);
+}
+.primitive-cal__head {
+  display: grid;
+  grid-template-columns: 56px repeat(7, 1fr);
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-2);
+}
+.primitive-cal__head-cell {
+  padding: 8px 6px 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-right: 1px solid var(--line);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.primitive-cal__head-cell:last-child { border-right: none; }
+.primitive-cal__head-cell.is-today {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+.primitive-cal__head-day {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.primitive-cal__head-cell.is-today .primitive-cal__head-day { color: var(--accent-ink); }
+.primitive-cal__head-corner { border-right: 1px solid var(--line); background: var(--paper-2); }
+
+.primitive-cal__body {
+  position: relative;
+  display: grid;
+  grid-template-columns: 56px repeat(7, 1fr);
+  max-height: 540px;
+  overflow: auto;
+}
+.primitive-cal__hour-col {
+  border-right: 1px solid var(--line);
+  background: var(--paper-2);
+  display: flex;
+  flex-direction: column;
+}
+.primitive-cal__hour-label {
+  height: 22px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  text-align: right;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  border-bottom: 1px solid transparent;
+}
+.primitive-cal__hour-label.is-major {
+  border-bottom: 1px solid var(--line);
+}
+.primitive-cal__day-col {
+  position: relative;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+.primitive-cal__day-col:last-child { border-right: none; }
+.primitive-cal__hour-cell {
+  height: 22px;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.primitive-cal__hour-cell.is-major { border-bottom: 1px solid var(--line); }
+.primitive-cal__hour-cell:hover {
+  background: oklch(from var(--accent) l c h / 0.06);
+}
+.primitive-cal__hour-cell:focus-visible {
+  outline: none;
+  background: oklch(from var(--accent) l c h / 0.10);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.primitive-cal__windows {
+  position: absolute;
+  inset: 0 0 0 56px;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  pointer-events: none;
+}
+.primitive-cal__win-col { position: relative; }
+.primitive-cal__window {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  border-radius: var(--r-2);
+  padding: 4px 6px;
+  font-size: 10.5px;
+  line-height: 1.2;
+  font-weight: 500;
+  cursor: pointer;
+  pointer-events: auto;
+  border: 1px solid transparent;
+  background: var(--paper-3);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: filter var(--dur-fast), transform var(--dur-fast) var(--ease-out);
+}
+.primitive-cal__window:hover { filter: brightness(0.96); transform: translateY(-0.5px); }
+.primitive-cal__window--good   { background: var(--good-soft);   color: var(--good-ink);   border-color: oklch(from var(--good) l c h / 0.4); }
+.primitive-cal__window--warn   { background: var(--warn-soft);   color: var(--warn-ink);   border-color: oklch(from var(--warn) l c h / 0.4); }
+.primitive-cal__window--danger { background: var(--danger-soft); color: var(--danger-ink); border-color: oklch(from var(--danger) l c h / 0.4); }
+.primitive-cal__window--neutral { border-color: var(--line-2); }
+.primitive-cal__window-time {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  opacity: 0.75;
+  display: block;
+  margin-top: 1px;
+}
+
+
+/* =================================================================
+   2. ExpiryChip — composes `.chip` from components.css
+   (no new selectors — relies entirely on existing chip system)
+   ================================================================= */
+
+
+/* =================================================================
+   3. HoursOfServiceMeter — segmented duty-status bar
+   ================================================================= */
+.primitive-hos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--text-xs);
+}
+.primitive-hos__bar {
+  position: relative;
+  display: flex;
+  height: 14px;
+  width: 100%;
+  border-radius: var(--r-2);
+  overflow: hidden;
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+}
+.primitive-hos__seg {
+  height: 100%;
+  border-right: 1px solid oklch(from var(--paper) l c h / 0.6);
+  transition: filter var(--dur-fast);
+}
+.primitive-hos__seg:last-child { border-right: none; }
+.primitive-hos__seg:hover { filter: brightness(0.92); }
+.primitive-hos__seg--driving  { background: var(--info); }
+.primitive-hos__seg--on_duty  { background: var(--warn); }
+.primitive-hos__seg--off_duty { background: var(--ink-3); }
+.primitive-hos__seg--sleeper  { background: oklch(0.55 0.13 290); }
+.primitive-hos__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.primitive-hos__legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.primitive-hos__legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.primitive-hos__limits {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.primitive-hos__limit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.primitive-hos__limit-label {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.primitive-hos__limit-label strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+.primitive-hos__limit.is-over .primitive-hos__limit-label strong { color: var(--danger-ink); }
+.primitive-hos__limit-track {
+  height: 4px;
+  background: var(--paper-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.primitive-hos__limit-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width var(--dur-base) var(--ease-out);
+}
+.primitive-hos__limit.is-warn .primitive-hos__limit-fill { background: var(--warn); }
+.primitive-hos__limit.is-over .primitive-hos__limit-fill { background: var(--danger); }
+
+
+/* =================================================================
+   4. CoverageHeatmap — 7-day × 24-hour density grid
+   ================================================================= */
+.primitive-heat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--text-xs);
+}
+.primitive-heat__svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+}
+.primitive-heat__cell {
+  cursor: pointer;
+  transition: stroke-width var(--dur-fast);
+  stroke: var(--paper);
+  stroke-width: 1;
+}
+.primitive-heat__cell:hover { stroke: var(--ink); stroke-width: 1.5; }
+.primitive-heat__cell:focus-visible {
+  outline: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.primitive-heat__axis {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  fill: var(--ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.primitive-heat__legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.primitive-heat__legend-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--paper-3), var(--accent));
+  border: 1px solid var(--line-2);
+  max-width: 200px;
+}
+
+
+/* =================================================================
+   5. CapacityGauge — circular saturation gauge
+   ================================================================= */
+.primitive-gauge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+}
+.primitive-gauge__svg { display: block; }
+.primitive-gauge__track { fill: none; stroke: var(--paper-3); }
+.primitive-gauge__fill {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur-base) var(--ease-out), stroke var(--dur-base);
+}
+.primitive-gauge__fill--good   { stroke: var(--good); }
+.primitive-gauge__fill--warn   { stroke: var(--warn); }
+.primitive-gauge__fill--danger { stroke: var(--danger); }
+.primitive-gauge__pct {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  fill: var(--ink);
+}
+.primitive-gauge__pct--good   { fill: var(--good-ink); }
+.primitive-gauge__pct--warn   { fill: var(--warn-ink); }
+.primitive-gauge__pct--danger { fill: var(--danger-ink); }
+.primitive-gauge__sub {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  fill: var(--ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.primitive-gauge__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+  max-width: 100%;
+}
+
+
+/* =================================================================
+   6. ZoneMap — SVG polygon canvas with pan/zoom
+   ================================================================= */
+.primitive-zonemap {
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  overflow: hidden;
+}
+.primitive-zonemap__viewport {
+  position: relative;
+  width: 100%;
+  height: 360px;
+  background:
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 32px 32px,
+    var(--paper-2);
+  cursor: grab;
+  overflow: hidden;
+}
+.primitive-zonemap__viewport.is-grabbing { cursor: grabbing; }
+.primitive-zonemap__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 1;
+}
+.primitive-zonemap__svg image {
+  opacity: 0.86;
+}
+.primitive-zonemap__tile-wash {
+  fill: oklch(from var(--paper) l c h / 0.28);
+}
+.primitive-zonemap__fallback-grid line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.primitive-zonemap__attribution {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: oklch(from var(--paper) l c h / 0.88);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-decoration: none;
+  box-shadow: var(--shadow-soft);
+}
+.primitive-zonemap__attribution:hover {
+  color: var(--ink);
+}
+.primitive-zonemap__zone {
+  cursor: pointer;
+  transition: stroke-width var(--dur-fast), filter var(--dur-fast);
+}
+.primitive-zonemap__zone:hover { filter: brightness(0.95); }
+.primitive-zonemap__zone:focus-visible {
+  outline: none;
+  stroke-width: 3;
+}
+.primitive-zonemap__zone.is-selected {
+  stroke-width: 3;
+  filter: drop-shadow(0 1px 4px oklch(from var(--ink) l c h / 0.2));
+}
+.primitive-zonemap__zone--good    { fill: oklch(from var(--good)    l c h / 0.25); stroke: var(--good); }
+.primitive-zonemap__zone--warn    { fill: oklch(from var(--warn)    l c h / 0.25); stroke: var(--warn); }
+.primitive-zonemap__zone--danger  { fill: oklch(from var(--danger)  l c h / 0.25); stroke: var(--danger); }
+.primitive-zonemap__zone--neutral { fill: oklch(from var(--ink-3)   l c h / 0.20); stroke: var(--ink-3); }
+.primitive-zonemap__zone-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--ink);
+  pointer-events: none;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.primitive-zonemap__controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: 3px;
+  box-shadow: var(--shadow-soft);
+}
+.primitive-zonemap__btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.primitive-zonemap__btn:hover { background: var(--paper-3); color: var(--ink); }
+.primitive-zonemap__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.primitive-zonemap__legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.primitive-zonemap__legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+/* =================================================================
+   7. MapLibreBackdrop - free/open-source map engine layer
+   ================================================================= */
+.maplibre-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--paper-2);
+  pointer-events: none;
+  z-index: 0;
+}
+.maplibre-backdrop__canvas,
+.maplibre-backdrop__fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.maplibre-backdrop__canvas {
+  z-index: 0;
+}
+.maplibre-backdrop__fallback {
+  z-index: 1;
+}
+.maplibre-backdrop .maplibregl-canvas {
+  outline: none;
+}
+.maplibre-backdrop__policy-error {
+  position: absolute;
+  inset: 14px;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed var(--danger);
+  border-radius: var(--r-3);
+  background: oklch(from var(--paper) l c h / 0.92);
+  color: var(--danger);
+  text-align: center;
+}
+.maplibre-backdrop__policy-error small {
+  max-width: 440px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+
+/* =================================================================
+   8. GeoPointMap - OpenStreetMap point coverage canvas
+   ================================================================= */
+.geo-point-map {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 300px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  overflow: hidden;
+}
+.geo-point-map__viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: inherit;
+  overflow: hidden;
+}
+.geo-point-map__svg {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: inherit;
+  height: 100%;
+  display: block;
+}
+.geo-point-map__svg image {
+  opacity: 0.86;
+}
+.geo-point-map__tile-wash {
+  fill: oklch(from var(--paper) l c h / 0.3);
+}
+.geo-point-map__fallback-grid line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.geo-point-map__marker {
+  cursor: pointer;
+  transition: filter var(--dur-fast), opacity var(--dur-fast);
+}
+.geo-point-map__marker:focus-visible {
+  outline: none;
+  filter: drop-shadow(0 0 0.35rem oklch(from var(--accent) l c h / 0.36));
+}
+.geo-point-map__marker circle:first-child {
+  fill: var(--paper);
+  stroke: currentColor;
+  stroke-width: 3;
+}
+.geo-point-map__marker-core {
+  fill: currentColor;
+  stroke: none;
+}
+.geo-point-map__marker text {
+  fill: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  paint-order: stroke;
+  pointer-events: none;
+  stroke: var(--paper);
+  stroke-linejoin: round;
+  stroke-width: 3px;
+}
+.geo-point-map__marker:hover,
+.geo-point-map__marker.is-selected {
+  filter: drop-shadow(0 2px 6px oklch(from var(--ink) l c h / 0.2));
+}
+.geo-point-map__marker--good { color: var(--good); }
+.geo-point-map__marker--warn { color: var(--warn); }
+.geo-point-map__marker--danger { color: var(--danger); }
+.geo-point-map__marker--info { color: var(--info); }
+.geo-point-map__marker--neutral { color: var(--ink-3); }
+.geo-point-map__controls {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100% - 16px);
+}
+.geo-point-map__btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: oklch(from var(--paper) l c h / 0.92);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  box-shadow: var(--shadow-soft);
+}
+.geo-point-map__btn--reset {
+  min-width: 54px;
+}
+.geo-point-map__empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(420px, calc(100% - 48px));
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: oklch(from var(--paper) l c h / 0.9);
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  text-align: center;
+  box-shadow: var(--shadow-soft);
+}
+.geo-point-map__attribution {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 3;
+  max-width: calc(100% - 16px);
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: oklch(from var(--paper) l c h / 0.88);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-decoration: none;
+  box-shadow: var(--shadow-soft);
+}
+.geo-point-map__attribution:hover {
+  color: var(--ink);
+}
+
+
+/* =================================================================
+   9. TimelineLog — vertical event timeline
+   ================================================================= */
+.primitive-tl {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-xs);
+}
+.primitive-tl__group {
+  display: flex;
+  flex-direction: column;
+}
+.primitive-tl__group-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 14px 0 8px 32px;
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+  z-index: 1;
+}
+.primitive-tl__row {
+  position: relative;
+  padding: 8px 12px 8px 32px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: background var(--dur-fast);
+  border-radius: var(--r-2);
+}
+.primitive-tl__row:hover { background: var(--paper-3); }
+.primitive-tl__row::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.primitive-tl__group:last-child .primitive-tl__row:last-child::before {
+  bottom: 50%;
+}
+.primitive-tl__bullet {
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 2px solid var(--ink-3);
+  z-index: 1;
+}
+.primitive-tl__bullet--good    { border-color: var(--good); }
+.primitive-tl__bullet--warn    { border-color: var(--warn); }
+.primitive-tl__bullet--danger  { border-color: var(--danger); }
+.primitive-tl__bullet--neutral { border-color: var(--ink-3); }
+.primitive-tl__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 2px;
+}
+.primitive-tl__time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.primitive-tl__type {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--paper-3);
+  padding: 1px 5px;
+  border-radius: var(--r-1);
+}
+.primitive-tl__actor {
+  font-size: 11px;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.primitive-tl__summary {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.primitive-tl__expand {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.primitive-tl__row[aria-expanded="true"] .primitive-tl__expand { transform: rotate(180deg); }
+.primitive-tl__detail {
+  margin: 6px 0 4px 0;
+  padding: 8px 12px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+
+/* =================================================================
+   8. MessageThread — chat-style conversation
+   ================================================================= */
+.primitive-msg {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.primitive-msg__list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--paper-2);
+}
+.primitive-msg__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 78%;
+}
+.primitive-msg__row--operator { align-self: flex-end; flex-direction: row-reverse; }
+.primitive-msg__row--customer { align-self: flex-start; }
+.primitive-msg__row--system {
+  align-self: center;
+  max-width: 90%;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.primitive-msg__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+.primitive-msg__row--operator .primitive-msg__avatar {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-inv);
+}
+.primitive-msg__bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  border-radius: var(--r-3);
+  font-size: 13px;
+  line-height: 1.4;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  word-break: break-word;
+}
+.primitive-msg__row--operator .primitive-msg__bubble {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-color: oklch(from var(--accent) l c h / 0.25);
+  border-bottom-right-radius: var(--r-1);
+}
+.primitive-msg__row--customer .primitive-msg__bubble {
+  border-bottom-left-radius: var(--r-1);
+}
+.primitive-msg__row--system .primitive-msg__bubble {
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  padding: 2px 6px;
+}
+.primitive-msg__meta {
+  display: flex;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+.primitive-msg__author { font-weight: 500; color: var(--ink-2); }
+.primitive-msg__row--operator .primitive-msg__meta { justify-content: flex-end; }
+.primitive-msg__attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.primitive-msg__attach-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--r-1);
+  background: oklch(from var(--ink) l c h / 0.04);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.primitive-msg__attach-item:hover { background: oklch(from var(--ink) l c h / 0.08); text-decoration: none; }
+.primitive-msg__attach-item::before {
+  content: '◇';
+  color: var(--ink-3);
+  font-size: 9px;
+}
+.primitive-msg__composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  align-items: flex-end;
+}
+.primitive-msg__composer-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.primitive-msg__composer label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.primitive-msg__composer textarea {
+  resize: none;
+  min-height: 38px;
+  max-height: 120px;
+  padding: 7px 10px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  background: var(--paper-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  color: var(--ink);
+  outline: none;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+}
+.primitive-msg__composer textarea:focus {
+  border-color: var(--accent);
+  background: var(--paper);
+}
+.primitive-msg__composer-hint {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+.primitive-msg__composer-hint--error {
+  color: var(--danger);
+}

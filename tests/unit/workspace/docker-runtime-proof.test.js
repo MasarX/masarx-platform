@@ -12,6 +12,7 @@ const {
   resolveDockerDatabaseUrl,
   resolveMobileV2ProofContext,
   serviceUrl,
+  stripHtmlForVisibleText,
 } = require('../../../scripts/ops/workspace/docker-runtime-proof');
 
 describe('workspace docker runtime proof', () => {
@@ -121,6 +122,57 @@ describe('workspace docker runtime proof', () => {
         backend_wiring_ok: true,
         auth_session_ok: true,
       },
+    });
+  });
+
+  test('surface proof fails when browser proof reports stale served source', async () => {
+    global.fetch = jest.fn(async () => ({
+      status: 200,
+      text: async () => '<main>MasarX Console Dashboard Operations</main>',
+    }));
+
+    await expect(checkSurface({
+      surface: 'console-v2',
+      service: 'console-v2',
+      url: 'http://console-v2:5192',
+      requiredText: /MasarX|Console/i,
+      browserRequired: true,
+      backendReadbackRequired: true,
+      authRequired: true,
+    }, {
+      browserProof: {
+        proof_tier: 'playwright-browser-context',
+        surfaces: [{
+          surface: 'console-v2',
+          status: 'failed',
+          browser_rendered: true,
+          no_runtime_errors: true,
+          expected_visible_state: true,
+          forbidden_text_absent: true,
+          backend_wiring_ok: true,
+          auth_session_ok: true,
+          seed_disabled: true,
+          source_freshness: {
+            ok: false,
+            stale_count: 1,
+            stale_sources: [{
+              url: 'http://127.0.0.1:5192/src/lib/hosted-redirect.ts',
+              high_signal_missing_tokens_sample: ['DEFAULT_HOSTED_CONSOLE_ORIGIN'],
+            }],
+          },
+        }],
+      },
+    })).resolves.toMatchObject({
+      ok: false,
+      browser_proof: {
+        browser_evidence_present: true,
+        no_runtime_errors: false,
+        source_freshness_ok: false,
+      },
+      failure_reasons: expect.arrayContaining([
+        'browser_runtime_errors_present',
+        'served_source_stale',
+      ]),
     });
   });
 
@@ -268,6 +320,13 @@ describe('workspace docker runtime proof', () => {
   });
 
   test('surface proof ignores failure-like script source when visible text and browser proof are clean', async () => {
+    expect(stripHtmlForVisibleText(
+      'Portal <script>hidden</script > <script>hidden</script\n bar> <style>hidden</style type=text/css>' +
+      ' <noscript>hidden</noscript > <template>hidden</template data-test> Ready',
+    )).toBe('Portal Ready');
+    expect(stripHtmlForVisibleText('&amp;lt; &amp;gt; &amp;nbsp; &amp;amp; &lt;x&gt;'))
+      .toBe('&lt; &gt; &nbsp; &amp; <x>');
+
     global.fetch = jest.fn(async () => ({
       status: 200,
       text: async () => '<main>Portal</main><script>const message = "Unable to resolve Expo error copy from bundled source";</script>',
@@ -684,5 +743,58 @@ describe('workspace docker runtime proof', () => {
     });
     expect(summary.acceptance.all_surfaces_runtime_proven).toBe(false);
     expect(summary.surfaces[0].failure_reasons).toContain('missing_browser_render_evidence');
+  });
+
+  test('console-only runtime proof does not require Mobile V2 development proof', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'console-only-proof-'));
+    const services = ['console-v2'];
+    const fixture = authFixture(root, services);
+    const browserProofSummary = path.join(root, 'browser-proof.json');
+    fs.writeFileSync(browserProofSummary, JSON.stringify({
+      status: 'passed',
+      surfaces: [{
+        surface: 'console-v2',
+        status: 'passed',
+        browser_rendered: true,
+        no_runtime_errors: true,
+        expected_visible_state: true,
+        forbidden_text_absent: true,
+        backend_wiring_ok: true,
+        auth_session_ok: true,
+        seed_disabled: true,
+        source_freshness: { ok: true, stale_count: 0 },
+      }],
+    }), 'utf8');
+    const readMobileV2PolicyImpl = jest.fn();
+    global.fetch = jest.fn(async () => ({ status: 200, text: async () => '<main>MasarX Console</main>' }));
+
+    try {
+      const summary = await runDockerRuntimeProof({
+        ...fixture,
+        services,
+        browserProofSummary,
+        checkBackendImpl: async () => ({ ok: true }),
+        readMobileV2PolicyImpl,
+      }, {
+        WORKSPACE_NAME: 'wk-selection',
+        CONSOLE_PORT: '5187',
+        VITE_USE_SEED: 'false',
+        NEXT_PUBLIC_USE_SEED: 'false',
+      });
+
+      expect(summary.status).toBe('passed');
+      expect(summary.surfaces.map((surface) => surface.surface)).toEqual(services);
+      expect(summary.mobile_v2).toMatchObject({
+        status: 'not_required',
+        development_runtime_proof_required: false,
+        visible_runtime: false,
+        backend_readback: { status: 'not_required' },
+      });
+      expect(summary.acceptance.mobile_v2_development_runtime_proof).toBe('not_required');
+      expect(summary.acceptance.all_surfaces_runtime_proven).toBe(true);
+      expect(readMobileV2PolicyImpl).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

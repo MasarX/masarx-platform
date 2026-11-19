@@ -4,6 +4,7 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
+    "jsx": "react-jsx",
     "outDir": "dist"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "messages/**/*.json"],

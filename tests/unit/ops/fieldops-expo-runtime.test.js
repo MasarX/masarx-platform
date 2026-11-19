@@ -46,17 +46,17 @@ describe('FieldOps Expo runtime launcher', () => {
     expect(resolveProjectRoot({}, process.cwd())).toBe(path.resolve('apps/fieldops'));
   });
 
-  test('keeps FieldOps package scripts on the shared Expo launcher', () => {
+  test('keeps FieldOps package scripts on the approved Metro/native launchers', () => {
     const packageJson = JSON.parse(
       fs.readFileSync(path.resolve('apps/fieldops/package.json'), 'utf8'),
     );
 
     expect(packageJson.scripts).toEqual(
       expect.objectContaining({
-        start: 'node ../../scripts/ops/mobile/run-fieldops-expo.js start',
-        android: 'node ../../scripts/ops/mobile/run-fieldops-expo.js start --android',
-        ios: 'node ../../scripts/ops/mobile/run-fieldops-expo.js start --ios',
-        web: 'node ../../scripts/ops/mobile/run-fieldops-expo.js start --web',
+        start: 'node ../../scripts/ops/mobile/start-fieldops-metro.js',
+        android: 'expo run:android',
+        ios: 'expo run:ios',
+        web: 'node ../../scripts/ops/mobile/start-fieldops-metro.js --web',
       }),
     );
   });

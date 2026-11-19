@@ -7,7 +7,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(65);
+SELECT plan(67);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_bank_deposit_reconciliation_workflow_v2()
 RETURNS SETOF TEXT
@@ -17,6 +17,8 @@ DECLARE
   v_template_id UUID;
 
   v_org UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_sender UUID := gen_random_uuid();
   v_branch UUID := gen_random_uuid();
   v_bank_account UUID := gen_random_uuid();
 
@@ -100,6 +102,22 @@ BEGIN
   RETURN NEXT is((SELECT handler_key FROM public.workflow_template_steps WHERE workflow_template_id = v_template_id AND sequence_order = 2), 'task_enqueue', 'step 2 handler_key = task_enqueue');
   RETURN NEXT is((SELECT handler_key FROM public.workflow_template_steps WHERE workflow_template_id = v_template_id AND sequence_order = 3), 'task_wait', 'step 3 handler_key = task_wait');
   RETURN NEXT is((SELECT handler_key FROM public.workflow_template_steps WHERE workflow_template_id = v_template_id AND sequence_order = 4), 'bank_statement_match', 'step 4 handler_key = bank_statement_match');
+  RETURN NEXT is(
+    (SELECT metadata->>'bank_account_id_path'
+       FROM public.workflow_template_steps
+      WHERE workflow_template_id = v_template_id
+        AND sequence_order = 4),
+    '$.context.payload.bank_account_id',
+    'step 4 resolves explicit bank_account_id from workflow context payload'
+  );
+  RETURN NEXT is(
+    (SELECT metadata->>'bank_account_key_path'
+       FROM public.workflow_template_steps
+      WHERE workflow_template_id = v_template_id
+        AND sequence_order = 4),
+    '$.context.payload.bank_account_key',
+    'step 4 resolves explicit bank_account_key from workflow context payload'
+  );
   RETURN NEXT is((SELECT handler_key FROM public.workflow_template_steps WHERE workflow_template_id = v_template_id AND sequence_order = 5), 'finance_transfer', 'step 5 handler_key = finance_transfer');
   RETURN NEXT is((SELECT handler_key FROM public.workflow_template_steps WHERE workflow_template_id = v_template_id AND sequence_order = 6), 'variance_gate', 'step 6 handler_key = variance_gate');
   RETURN NEXT is((SELECT handler_key FROM public.workflow_template_steps WHERE workflow_template_id = v_template_id AND sequence_order = 7), 'settlement_batch', 'step 7 handler_key = settlement_batch');
@@ -119,8 +137,19 @@ BEGIN
     'lookup has settlement_kind=deposit'
   );
 
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'Deposit Workflow v2 Org', 'deposit-wf2-' || left(v_org::text, 8));
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES (v_client, v_org, 'Deposit Workflow v2 Client', 'deposit-wf2-client-' || left(v_client::text, 8), 'active');
+
+  INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
+  VALUES (v_sender, v_client, 'Deposit Workflow v2 Sender', 'Deposit Workflow v2 Sender', TRUE, 'active');
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
+  PERFORM public.bootstrap_tenant_onboarding_v1(v_org, 'pgtap:bank-deposit-workflow-v2-fixture-bootstrap');
 
   INSERT INTO public.branches (id, organization_id, code, name, is_active)
   VALUES (v_branch, v_org, 'b-' || left(v_branch::text, 8), 'Branch ' || left(v_branch::text, 8), TRUE);

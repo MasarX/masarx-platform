@@ -67,7 +67,7 @@ describe('dependency security foundation', () => {
     expect(root.overrides.uuid).toBe('11.1.1');
     expect(root.overrides['postcss-selector-parser@^7.0.0']).toBe('7.1.6');
     expect(root.overrides).not.toHaveProperty('postcss-selector-parser');
-    expect(root.overrides['@storybook/builder-webpack5@10.6.2']).toEqual({
+    expect(root.overrides['@storybook/builder-webpack5@10.6.x']).toEqual({
       'webpack-dev-middleware': '7.4.6',
     });
     expect(root.overrides['shell-quote']).toBe('1.12.0');
@@ -175,8 +175,13 @@ describe('dependency security foundation', () => {
     expect(versionsForLockPackage(lock, 'expo')).toEqual(['55.0.32']);
     expect(versionsForLockPackage(lock, 'expo-dev-client')).toEqual(['55.0.37']);
     expect(versionsForLockPackage(lock, 'expo-modules-core')).toEqual(['55.0.27']);
-    expect(versionsForLockPackage(lock, 'react')).toEqual(['19.2.0', '19.2.8']);
-    expect(versionsForLockPackage(lock, 'react-dom')).toEqual(['19.2.0', '19.2.8']);
+    for (const name of ['react', 'react-dom']) {
+      const consoleV2Path = `apps/console-v2/node_modules/${name}`;
+      expect(lock.packages[consoleV2Path].version).toBe('18.3.1');
+      const remainingPackages = { ...lock.packages };
+      delete remainingPackages[consoleV2Path];
+      expect(versionsForLockPackage({ packages: remainingPackages }, name)).toEqual(['19.2.0', '19.2.8']);
+    }
     expect(versionsForLockPackage(lock, 'react-native')).toEqual(['0.83.10']);
   });
 

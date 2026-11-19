@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(18);
+SELECT plan(23);
 
 SELECT has_table('public', 'mapping_operation_reports', 'mapping_operation_reports table exists');
 SELECT ok(
@@ -17,6 +17,7 @@ SELECT ok(
 );
 
 SELECT has_function('public', 'ui_upsert_mapping_artifact_v1', ARRAY['jsonb'], 'ui_upsert_mapping_artifact_v1 exists');
+SELECT has_function('public', 'ui_upsert_mapping_config_v1', ARRAY['jsonb'], 'ui_upsert_mapping_config_v1 exists');
 SELECT has_function('public', 'ui_create_mapping_operation_report_v1', ARRAY['jsonb'], 'ui_create_mapping_operation_report_v1 exists');
 SELECT has_function('api', 'ui_upsert_mapping_artifact_v1', ARRAY['jsonb'], 'api.ui_upsert_mapping_artifact_v1 exists');
 SELECT ok(
@@ -135,6 +136,99 @@ SELECT ok(
   ),
   'mapping_operation_reports insert policy exists'
 );
+
+DO $$
+DECLARE
+  v_org UUID := '00000000-0000-0000-0000-00000000c501';
+  v_foreign_org UUID := '00000000-0000-0000-0000-00000000c502';
+  v_ops UUID := '00000000-0000-0000-0000-00000000c511';
+  v_global_mapping UUID := '00000000-0000-0000-0000-00000000c521';
+  v_foreign_mapping UUID := '00000000-0000-0000-0000-00000000c522';
+BEGIN
+  EXECUTE 'SET LOCAL ROLE postgres';
+
+  INSERT INTO public.organizations (id, name, slug)
+  VALUES
+    (v_org, 'Mapping Config Scope Org', 'mapping-config-scope-' || left(v_org::text, 8)),
+    (v_foreign_org, 'Mapping Config Scope Foreign Org', 'mapping-config-scope-foreign-' || left(v_foreign_org::text, 8))
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type, access_scope_id)
+  VALUES (
+    v_ops,
+    v_org,
+    'mapping-config-scope-' || left(v_ops::text, 8) || '@example.com',
+    'Mapping Config Scope Ops',
+    'ops_admin',
+    'tenant',
+    NULL
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.mapping_configs (id, organization_id, mapping_type, mapping_key, mapping_config, mapping_version)
+  VALUES
+    (v_global_mapping, NULL, 'webhook_inbound', 'pgtap-global-service-managed', '{}'::jsonb, 1),
+    (v_foreign_mapping, v_foreign_org, 'webhook_inbound', 'pgtap-foreign-org-owned', '{}'::jsonb, 1)
+  ON CONFLICT (mapping_type, mapping_key) DO NOTHING;
+
+  PERFORM set_config('test.mapping_config_scope_ops', v_ops::text, true);
+  PERFORM set_config('test.mapping_config_scope_org', v_org::text, true);
+  PERFORM set_config('test.mapping_config_scope_global_id', v_global_mapping::text, true);
+  PERFORM set_config('test.mapping_config_scope_foreign_id', v_foreign_mapping::text, true);
+
+  EXECUTE 'RESET ROLE';
+END $$;
+
+SELECT set_config('request.jwt.claim.sub', current_setting('test.mapping_config_scope_ops'), true);
+SET LOCAL ROLE authenticated;
+
+SELECT ok(
+  (
+    SELECT (public.ui_upsert_mapping_config_v1(jsonb_build_object(
+      'mapping_type', 'webhook_inbound',
+      'mapping_key', 'pgtap-own-org-create',
+      'mapping_config', jsonb_build_object('target', 'shipments.create')
+    ))->>'ok')::bool
+  ),
+  'ui_upsert_mapping_config_v1 creates org-scoped mapping config'
+);
+
+SELECT throws_ok(
+  $$ SELECT public.ui_upsert_mapping_config_v1(jsonb_build_object(
+       'mapping_type', 'webhook_inbound',
+       'mapping_key', 'pgtap-unknown-target',
+       'mapping_config', jsonb_build_object('target', 'pgtap_target')
+     )) $$,
+  '23503',
+  NULL,
+  'ui_upsert_mapping_config_v1 rejects mapping_config.target outside mapping_target lookup'
+);
+
+SELECT throws_ok(
+  $$ SELECT public.ui_upsert_mapping_config_v1(jsonb_build_object(
+       'mapping_config_id', current_setting('test.mapping_config_scope_global_id'),
+       'mapping_type', 'webhook_inbound',
+       'mapping_key', 'pgtap-global-service-managed',
+       'mapping_config', jsonb_build_object('target', 'shipments.create')
+     )) $$,
+  '42501',
+  NULL,
+  'ui_upsert_mapping_config_v1 refuses global/shared mapping config edits'
+);
+
+SELECT throws_ok(
+  $$ SELECT public.ui_upsert_mapping_config_v1(jsonb_build_object(
+       'mapping_config_id', current_setting('test.mapping_config_scope_foreign_id'),
+       'mapping_type', 'webhook_inbound',
+       'mapping_key', 'pgtap-foreign-org-owned',
+       'mapping_config', jsonb_build_object('target', 'shipments.create')
+     )) $$,
+  '42501',
+  NULL,
+  'ui_upsert_mapping_config_v1 refuses cross-tenant mapping config edits'
+);
+
+RESET ROLE;
 
 SELECT * FROM finish();
 

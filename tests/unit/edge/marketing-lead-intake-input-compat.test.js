@@ -42,7 +42,7 @@ describe('marketing-lead-intake payload compatibility', () => {
     const js = ts.transpileModule([...declarations.values()].join('\n'), {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
     }).outputText;
-    const { toResponseBody } = await import(pathToFileURL(path.join(path.dirname(functionPath), '_shared/mod.mjs')).href);
+    const { toResponseBody } = await import(pathToFileURL(path.join(path.dirname(functionPath), '../_shared/mod.mjs')).href);
     const env = { SUPABASE_URL: 'https://fixture.invalid', DB_JWT: 'edge.fixture.jwt',
       SUPABASE_SERVICE_KEY: 'service.fixture.jwt', SUPABASE_ANON_KEY: '', EDGE_SUPABASE_SECRET_KEY: '', ...overrides };
     return new Function(...Object.keys(env), 'fetch', 'selectRpcAuthAttempts', 'toResponseBody',
@@ -79,11 +79,14 @@ describe('marketing-lead-intake payload compatibility', () => {
     await expect(invoke('marketing_lead_request_create_v1', {}, { serviceOnly: true })).rejects.toThrow('missing_supabase_credentials');
     expect(fetch).not.toHaveBeenCalled();
   });
-  test('actual marketing RPC does not retry non-auth failure', async () => {
-    const fetch = jest.fn().mockResolvedValue(new Response('{"message":"invalid input"}', { status: 422 }));
+  test.each([
+    [422, 'invalid input'],
+    [403, 'permission denied for function marketing_landing_clients_list_v1'],
+  ])('actual marketing RPC does not retry application rejection %s', async (status, message) => {
+    const fetch = jest.fn().mockResolvedValue(new Response(JSON.stringify({ message }), { status }));
     const invoke = await loadRpc(fetch);
     const result = await invoke('marketing_landing_clients_list_v1', {});
-    expect(result.response.status).toBe(422);
+    expect(result.response.status).toBe(status);
     expect(fetch).toHaveBeenCalledTimes(1);
     assertApiRequests(fetch, 'marketing_landing_clients_list_v1');
   });
@@ -111,6 +114,16 @@ describe('marketing-lead-intake payload compatibility', () => {
     expect(source).toContain('addAttempt(`service-jwt+apikey:${apiKey === anonKey ? "anon" : "service"}`, {');
     expect(source).toContain('addAttempt("service-secret-bearer+apikey", {');
     expect(source).toContain('message.includes("no api key")');
+  });
+
+  test('pins PostgREST RPC calls to the exposed api schema', () => {
+    expect(source).toContain('"accept-profile": "api"');
+    expect(source).toContain('"content-profile": "api"');
+    expect(source).toContain('fetch(`${SUPABASE_URL}/rest/v1/rpc/${rpcName}`');
+  });
+
+  test('resolves the canonical edge URL from configured runtime sources', () => {
+    expect(source).toContain('const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);');
   });
 
   test('keeps lead mutation service-only while clients may use the edge DB JWT', () => {

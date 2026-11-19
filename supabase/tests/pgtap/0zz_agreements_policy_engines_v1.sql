@@ -37,15 +37,23 @@ BEGIN
 
   -- 2026-01-21 is Wednesday (dow=3). Cutoff override of 15:00 should push the base_date to 2026-01-22.
   PERFORM set_config('platform.now_override', '2026-01-21T15:30:00Z', true);
+  PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
 
   INSERT INTO public.organizations (id, name, slug)
   VALUES (v_org, 'Agreements Engines Org', 'agreements-engines-' || left(v_org::text, 8));
+
+  PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO public.clients (id, organization_id, name, slug, status)
   VALUES (v_client, v_org, 'Agreements Engines Client', 'agreements-client-' || left(v_client::text, 8), 'active');
 
   INSERT INTO public.senders (id, client_id, name, brand_name, auto_provisioned, status)
   VALUES (v_sender, v_client, 'Agreements Engines Sender', 'Agreements Sender', TRUE, 'active');
+
+  PERFORM public.bootstrap_tenant_onboarding_v1(
+    v_org,
+    'pgtap:agreements-policy-engines-fixture-bootstrap'
+  );
 
   INSERT INTO public.zones (id, organization_id, name, slug, is_active)
   VALUES (v_zone, v_org, 'Agreements Zone', 'agreements-zone-' || left(v_zone::text, 8), TRUE);

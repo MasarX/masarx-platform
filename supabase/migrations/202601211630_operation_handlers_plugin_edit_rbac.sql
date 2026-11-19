@@ -126,7 +126,7 @@ BEGIN
     OR NEW.handler_signature IS DISTINCT FROM OLD.handler_signature
     OR NEW.handler_version IS DISTINCT FROM OLD.handler_version
   ) THEN
-    IF current_user NOT IN ('postgres', 'service_role') THEN
+    IF current_user NOT IN ('postgres', 'service_role', 'supabase_admin') THEN
       RAISE EXCEPTION 'operation_handlers identity fields are service-only'
         USING ERRCODE = '42501';
     END IF;
@@ -144,4 +144,3 @@ CREATE TRIGGER operation_handlers_restrict_identity_updates
 
 SELECT pg_advisory_unlock(hashtext('202601211630_operation_handlers_plugin_edit_rbac'));
 COMMIT;
-

@@ -2,6 +2,8 @@
 /* eslint-disable no-console */
 const path = require('path');
 const { loadEnv } = require('../../utils/load-env');
+const { resolveDatabaseUrlWithFallback } = require('../../utils/resolve-db-url');
+const { upsertSettings } = require('../../utils/settings-upsert');
 const { getProjectAuthConfig } = require('../workspace/supabase-api');
 const {
   resolveEnvironment,
@@ -16,6 +18,7 @@ const DEFAULT_SUMMARY_PATH = path.resolve(
   'tmp',
   'auth-email-url-audit-summary.json',
 );
+const AUTH_EMAIL_URL_POLICY_CATEGORY = 'auth_email_url_policy';
 const DEFAULT_AUTH_CONFIG_READ_MAX_WAIT_MS = 120_000;
 const DEFAULT_AUTH_CONFIG_READ_RETRY_DELAY_MS = 5_000;
 
@@ -91,6 +94,186 @@ function resolveReadRetryOptions(args = {}, env = process.env) {
   };
 }
 
+function normalizeStringList(values = []) {
+  const input = Array.isArray(values) ? values : [values];
+  return Array.from(
+    new Set(
+      input
+        .map((entry) => String(entry || '').trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function normalizeRepoRelativePath(filePath) {
+  const raw = String(filePath || '').trim();
+  if (!raw) return '';
+  const resolved = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+  const relative = path.relative(process.cwd(), resolved);
+  const normalized = relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+    ? relative
+    : raw;
+  return normalized.replace(/\\/g, '/');
+}
+
+function resolveAuditStatus(summary = {}) {
+  const issues = Array.isArray(summary.issues) ? summary.issues : [];
+  const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
+  if (summary.ok === false || issues.length > 0) return 'red';
+  if (warnings.length > 0) return 'yellow';
+  return 'green';
+}
+
+function buildAuthEmailPolicyMirrorEntry(summary = {}) {
+  const environment = String(summary.environment || '').trim().toLowerCase();
+  if (!environment) {
+    throw new Error('[auth-email-url-audit] Mirror payload requires summary.environment.');
+  }
+
+  const policy = summary.policy && typeof summary.policy === 'object'
+    ? summary.policy
+    : {};
+  const siteUrl = String(policy.site_url || '').trim();
+  const redirectUrls = normalizeStringList(policy.additional_redirect_urls);
+  const bannedRedirectHosts = normalizeStringList(policy.banned_redirect_hosts);
+  const sourceFile = normalizeRepoRelativePath(
+    summary.policy_path || `config/ops/auth-email-url-policy.${environment}.json`,
+  );
+  const issues = Array.isArray(summary.issues) ? summary.issues.slice() : [];
+  const warnings = Array.isArray(summary.warnings) ? summary.warnings.slice() : [];
+
+  return {
+    env: environment,
+    callback_urls: siteUrl ? [siteUrl] : [],
+    redirect_urls: redirectUrls,
+    source_file: sourceFile,
+    last_audit_at: summary.generated_at || null,
+    audit_status: resolveAuditStatus(summary),
+    policy: {
+      environment,
+      site_url: siteUrl,
+      additional_redirect_urls: redirectUrls,
+      banned_redirect_hosts: bannedRedirectHosts,
+    },
+    metadata: {
+      source: sourceFile,
+      project_ref: String(summary.project_ref || '').trim(),
+      actual: summary.actual && typeof summary.actual === 'object' ? { ...summary.actual } : {},
+      ok: summary.ok === true,
+      issues,
+      warnings,
+      read_attempts: Number(summary.read_attempts || 0),
+      read_retried: summary.read_retried === true,
+      read_retry_window_ms: Number(summary.read_retry_window_ms || 0),
+    },
+  };
+}
+
+function mergeAuthEmailUrlPolicySetting(currentValue = {}, nextEntry = {}) {
+  const environment = String(nextEntry.env || '').trim().toLowerCase();
+  if (!environment) {
+    throw new Error('[auth-email-url-audit] Mirror entry requires env.');
+  }
+
+  const base = currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)
+    ? currentValue
+    : {};
+  const existingPolicies = Array.isArray(base.policies) ? base.policies : [];
+  let replaced = false;
+  const policies = existingPolicies.map((entry) => {
+    const entryEnv = String(entry && entry.env ? entry.env : '').trim().toLowerCase();
+    if (entryEnv !== environment) return entry;
+    replaced = true;
+    return nextEntry;
+  });
+  if (!replaced) policies.push(nextEntry);
+
+  return {
+    ...base,
+    version: Number.isInteger(base.version) && base.version > 0 ? base.version : 1,
+    policies,
+  };
+}
+
+function getPgPoolCtor() {
+  try {
+    return require('pg').Pool;
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    throw new Error(`[auth-email-url-audit] Missing pg dependency required for --mirror-to-db: ${message}`);
+  }
+}
+
+async function readCurrentAuthEmailPolicySetting(db) {
+  const result = await db.query(
+    `SELECT s.cached_value
+       FROM public.settings s
+      WHERE s.category = $1
+        AND s.scope_type = 'global'
+        AND s.scope_id IS NULL
+      LIMIT 1`,
+    [AUTH_EMAIL_URL_POLICY_CATEGORY],
+  );
+  return result.rowCount > 0 && result.rows[0].cached_value
+    ? result.rows[0].cached_value
+    : {};
+}
+
+async function mirrorAuthEmailAuditToDb({
+  summary,
+  resolveDatabaseUrl = resolveDatabaseUrlWithFallback,
+  poolCtor,
+} = {}) {
+  if (!summary || typeof summary !== 'object') {
+    throw new Error('[auth-email-url-audit] summary is required for --mirror-to-db.');
+  }
+
+  const dbResolution = await resolveDatabaseUrl({
+    env: process.env,
+    logger: console,
+    label: 'auth-email-url-audit',
+    connectionTimeoutEnv: 'AUTH_EMAIL_URL_AUDIT_DB_CONNECT_TIMEOUT_MS',
+    maxWaitEnv: 'AUTH_EMAIL_URL_AUDIT_DB_CONNECT_MAX_WAIT_MS',
+    retryDelayEnv: 'AUTH_EMAIL_URL_AUDIT_DB_CONNECT_RETRY_DELAY_MS',
+  });
+
+  const Pool = poolCtor || getPgPoolCtor();
+  const pool = new Pool({ connectionString: dbResolution.dsn });
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const currentValue = await readCurrentAuthEmailPolicySetting(db);
+    const nextEntry = buildAuthEmailPolicyMirrorEntry(summary);
+    const nextValue = mergeAuthEmailUrlPolicySetting(currentValue, nextEntry);
+    const writeResult = await upsertSettings({
+      db,
+      category: AUTH_EMAIL_URL_POLICY_CATEGORY,
+      scopeType: 'global',
+      value: nextValue,
+      changeReason: `Mirror auth email URL audit result for ${nextEntry.env}`,
+    });
+    await db.query('COMMIT');
+    return {
+      category: AUTH_EMAIL_URL_POLICY_CATEGORY,
+      environment: nextEntry.env,
+      db_candidate: dbResolution.candidateName,
+      db_attempts: dbResolution.attempts,
+      settings_version_id: writeResult.settingsVersionId,
+      settings_version_number: writeResult.settingsVersionNumber,
+    };
+  } catch (error) {
+    try {
+      await db.query('ROLLBACK');
+    } catch {
+      // best-effort rollback only
+    }
+    throw error;
+  } finally {
+    db.release();
+    await pool.end();
+  }
+}
+
 function sleep(ms) {
   const n = Number(ms || 0);
   if (!n || n <= 0) return Promise.resolve();
@@ -151,6 +334,7 @@ function printUsage() {
   console.log('  --summary-out <path>          Summary output path');
   console.log('  --read-max-wait-ms <ms>       Max wait window for transient auth-config read retries');
   console.log('  --read-retry-delay-ms <ms>    Retry delay for transient auth-config read retries');
+  console.log('  --mirror-to-db                Also mirror this audit result into auth_email_url_policy settings');
   console.log('  --json                        Print JSON summary to stdout');
   console.log('  --help, -h                    Show usage');
 }
@@ -217,6 +401,11 @@ async function main() {
   const summaryPath = resolveSummaryPath(args);
   writeJson(summaryPath, summary);
 
+  if (args.mirror_to_db || args['mirror-to-db']) {
+    summary.mirror_to_db = await mirrorAuthEmailAuditToDb({ summary });
+    writeJson(summaryPath, summary);
+  }
+
   if (args.json) {
     console.log(JSON.stringify(summary, null, 2));
   } else {
@@ -249,6 +438,12 @@ module.exports = {
   resolveReadRetryOptions,
   resolveProjectRef,
   resolveSummaryPath,
+  normalizeRepoRelativePath,
+  resolveAuditStatus,
+  buildAuthEmailPolicyMirrorEntry,
+  mergeAuthEmailUrlPolicySetting,
+  readCurrentAuthEmailPolicySetting,
+  mirrorAuthEmailAuditToDb,
   isRetryableAuthConfigReadError,
   readProjectAuthConfigWithRetries,
 };

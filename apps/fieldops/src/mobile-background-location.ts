@@ -1,6 +1,5 @@
 import Constants from "expo-constants";
 import * as Location from "expo-location";
-import * as SecureStore from "expo-secure-store";
 import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 
@@ -28,6 +27,12 @@ type BackgroundLocationState = {
   maxAccuracyM: number | null;
 };
 
+type SecureStoreModule = {
+  getItemAsync: (key: string) => Promise<string | null>;
+  setItemAsync: (key: string, value: string) => Promise<void>;
+  deleteItemAsync: (key: string) => Promise<void>;
+};
+
 export type BackgroundTrackingSyncResult = {
   running: boolean;
   reason:
@@ -37,6 +42,29 @@ export type BackgroundTrackingSyncResult = {
     | "started"
     | "updated";
 };
+
+let backgroundSecureStorePromise: Promise<SecureStoreModule | null> | null = null;
+let backgroundStateBlocked = false;
+
+async function loadBackgroundSecureStore(): Promise<SecureStoreModule | null> {
+  if (backgroundSecureStorePromise) return backgroundSecureStorePromise;
+  backgroundSecureStorePromise = (async () => {
+    try {
+      const mod = (await import("expo-secure-store")) as unknown as Partial<SecureStoreModule>;
+      if (
+        typeof mod.getItemAsync !== "function" ||
+        typeof mod.setItemAsync !== "function" ||
+        typeof mod.deleteItemAsync !== "function"
+      ) {
+        return null;
+      }
+      return mod as SecureStoreModule;
+    } catch {
+      return null;
+    }
+  })();
+  return backgroundSecureStorePromise;
+}
 
 function normalizeDeviceId(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -66,10 +94,19 @@ function normalizeState(value: unknown): BackgroundLocationState {
 
 async function readBackgroundState(): Promise<BackgroundLocationState> {
   try {
-    const raw = await SecureStore.getItemAsync(BACKGROUND_LOCATION_STATE_KEY);
+    if (backgroundStateBlocked) {
+      return { deviceId: null, trackingEnabled: false, maxAccuracyM: null };
+    }
+    const secureStore = await loadBackgroundSecureStore();
+    if (!secureStore) {
+      backgroundStateBlocked = true;
+      return { deviceId: null, trackingEnabled: false, maxAccuracyM: null };
+    }
+    const raw = await secureStore.getItemAsync(BACKGROUND_LOCATION_STATE_KEY);
     if (!raw) return { deviceId: null, trackingEnabled: false, maxAccuracyM: null };
     return normalizeState(JSON.parse(raw));
   } catch (error) {
+    backgroundStateBlocked = true;
     logDebugFailure("failed to read background tracking state", error, "fieldops:background-location");
     return { deviceId: null, trackingEnabled: false, maxAccuracyM: null };
   }
@@ -77,7 +114,18 @@ async function readBackgroundState(): Promise<BackgroundLocationState> {
 
 async function writeBackgroundState(state: BackgroundLocationState): Promise<void> {
   const normalized = normalizeState(state);
-  await SecureStore.setItemAsync(BACKGROUND_LOCATION_STATE_KEY, JSON.stringify(normalized));
+  try {
+    const secureStore = await loadBackgroundSecureStore();
+    if (!secureStore) {
+      backgroundStateBlocked = true;
+      return;
+    }
+    await secureStore.setItemAsync(BACKGROUND_LOCATION_STATE_KEY, JSON.stringify(normalized));
+    backgroundStateBlocked = false;
+  } catch (error) {
+    backgroundStateBlocked = true;
+    logDebugFailure("failed to persist background tracking state", error, "fieldops:background-location");
+  }
 }
 
 function resolveLocationAccuracy(value: MobileLocationAccuracy): Location.Accuracy {

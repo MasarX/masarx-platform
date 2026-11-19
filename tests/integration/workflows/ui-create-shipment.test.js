@@ -538,7 +538,7 @@ describe("ui_create_shipment_v1", () => {
       organizationId,
       clientId,
       name: "Shipment Notification Recipient",
-      phoneNumber: "+966 55 123 4567",
+      phoneNumber: "+966551234567",
     });
     await setAuthContext(client, userId);
     const trackingNumber = `UI-COMMS-${Date.now()}`;
@@ -833,7 +833,7 @@ describe("ui_create_shipment_v1", () => {
     const carrierReferenceNumber = `UI-CARRIER-${Date.now()}`;
     const lmdSystemReference = `UI-LMD-${Date.now()}`;
     const externalReference = `UI-EXT-${Date.now()}`;
-    const recipientPhone = "+966 55 123 4567";
+    const recipientPhone = "+966551234567";
     const createResult = await client.query(
       `
         SELECT public.ui_create_shipment_v1(

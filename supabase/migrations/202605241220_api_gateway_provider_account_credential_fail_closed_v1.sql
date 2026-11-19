@@ -1,0 +1,233 @@
+BEGIN;
+
+-- API Gateway routes that declare provider_account.require_auth_config_id must
+-- stop before provider dispatch when the ladder resolves a revoked, expired, or
+-- otherwise unavailable provider_auth_configs row. The Console tester already
+-- guarded these states; this closes the external HTTP/provider-execution path.
+
+SELECT pg_advisory_lock(hashtext('202605241220_api_gateway_provider_account_credential_fail_closed_v1'));
+
+DO $patch$
+DECLARE
+  v_def text;
+  v_replacement text;
+  v_marker text := $marker$    PERFORM public.log_decision(
+      p_organization_id := v_org,
+      p_decision_category := 'settings_resolution',
+      p_resource_type := 'api_gateway_request',
+      p_resource_id := v_request_id,
+      p_decision_point := 'api_gateway_provider_account_resolved',
+      p_decision_outcome := 'resolved',$marker$;
+BEGIN
+  SELECT pg_get_functiondef('public.workflow_intake_api_gateway_v1(text,text,text,text,jsonb,jsonb)'::regprocedure)
+    INTO v_def;
+
+  IF v_def IS NULL OR btrim(v_def) = '' THEN
+    RAISE EXCEPTION 'workflow_intake_api_gateway_v1 definition not found';
+  END IF;
+
+  IF position('api_gateway_provider_account_credential_available' IN v_def) > 0 THEN
+    RAISE NOTICE 'workflow_intake_api_gateway_v1 already validates provider account credential availability';
+    RETURN;
+  END IF;
+
+  IF position(v_marker IN v_def) = 0 THEN
+    RAISE EXCEPTION 'Expected provider account resolved log marker not found in workflow_intake_api_gateway_v1';
+  END IF;
+
+  v_replacement := $replacement$    IF v_provider_account_require_auth_config_id THEN
+      IF v_provider_account_auth_config_id IS NULL THEN
+        PERFORM public.log_decision(
+          p_organization_id := v_org,
+          p_decision_category := 'settings_resolution',
+          p_resource_type := 'api_gateway_request',
+          p_resource_id := v_request_id,
+          p_decision_point := 'api_gateway_provider_account_credential_available',
+          p_decision_outcome := 'missing',
+          p_performed_by_system := 'api_gateway',
+          p_correlation_id := v_corr,
+          p_decision_inputs := jsonb_strip_nulls(jsonb_build_object(
+            'provider_id', v_provider_id,
+            'route_id', v_route_id,
+            'route_name', v_route_row.route_name,
+            'category', v_provider_account_category,
+            'require_auth_config_id', v_provider_account_require_auth_config_id
+          )),
+          p_decision_reason := 'Provider account requires auth_config_id, but ladder resolution did not return one; refusing provider dispatch.',
+          p_settings_resolution_id := v_provider_account_settings_resolution_id
+        );
+
+        INSERT INTO public.outbound_calls (
+          call_type,
+          target_type,
+          target_id,
+          method,
+          url,
+          headers,
+          body,
+          status,
+          priority,
+          max_retries,
+          scheduled_at,
+          response_status_code,
+          error_message,
+          correlation_id,
+          context,
+          created_at,
+          completed_at
+        ) VALUES (
+          'provider_api',
+          'provider',
+          v_provider_id,
+          v_upstream_method,
+          v_url,
+          '{}'::jsonb,
+          COALESCE(v_safe_body, '{}'::jsonb),
+          'permanently_failed',
+          COALESCE(NULLIF(v_policy->>'priority', '')::INT, 100),
+          0,
+          v_now,
+          424,
+          'provider_auth_config_missing',
+          v_corr,
+          jsonb_strip_nulls(jsonb_build_object(
+            'organization_id', v_org,
+            'client_id', v_client,
+            'sender_id', v_sender,
+            'source_id', v_source.id,
+            'api_gateway_request_id', v_request_id,
+            'api_gateway_route_id', v_route_id,
+            'api_gateway_route_name', v_route_row.route_name,
+            'api_gateway_path_params', v_path_params,
+            'provider_account_category', v_provider_account_category,
+            'provider_account_settings_resolution_id', v_provider_account_settings_resolution_id,
+            'auth', jsonb_build_object('required', true)
+          )),
+          v_now,
+          v_now
+        )
+        RETURNING id INTO v_outbound_id;
+
+        UPDATE public.api_gateway_requests
+           SET outbound_call_id = v_outbound_id,
+               updated_at = v_now
+         WHERE id = v_request_id;
+
+        RETURN jsonb_strip_nulls(jsonb_build_object(
+          'action', 'error',
+          'status', 424,
+          'headers', jsonb_build_object('content-type', 'application/json'),
+          'body', jsonb_build_object(
+            'error', 'provider_auth_config_missing',
+            'api_gateway_request_id', v_request_id,
+            'correlation_id', v_corr
+          ),
+          'api_gateway_request_id', v_request_id,
+          'outbound_call_id', v_outbound_id,
+          'correlation_id', v_corr
+        ));
+      ELSIF public.get_provider_auth_credentials(v_provider_account_auth_config_id) IS NULL THEN
+        PERFORM public.log_decision(
+          p_organization_id := v_org,
+          p_decision_category := 'settings_resolution',
+          p_resource_type := 'api_gateway_request',
+          p_resource_id := v_request_id,
+          p_decision_point := 'api_gateway_provider_account_credential_available',
+          p_decision_outcome := 'rejected',
+          p_performed_by_system := 'api_gateway',
+          p_correlation_id := v_corr,
+          p_decision_inputs := jsonb_strip_nulls(jsonb_build_object(
+            'provider_id', v_provider_id,
+            'route_id', v_route_id,
+            'route_name', v_route_row.route_name,
+            'category', v_provider_account_category,
+            'auth_config_id', v_provider_account_auth_config_id
+          )),
+          p_decision_reason := 'Provider account auth_config_id is revoked, expired, or unavailable; refusing provider dispatch.',
+          p_settings_resolution_id := v_provider_account_settings_resolution_id
+        );
+
+        INSERT INTO public.outbound_calls (
+          call_type,
+          target_type,
+          target_id,
+          method,
+          url,
+          headers,
+          body,
+          status,
+          priority,
+          max_retries,
+          scheduled_at,
+          response_status_code,
+          error_message,
+          correlation_id,
+          context,
+          created_at,
+          completed_at
+        ) VALUES (
+          'provider_api',
+          'provider',
+          v_provider_id,
+          v_upstream_method,
+          v_url,
+          '{}'::jsonb,
+          COALESCE(v_safe_body, '{}'::jsonb),
+          'permanently_failed',
+          COALESCE(NULLIF(v_policy->>'priority', '')::INT, 100),
+          0,
+          v_now,
+          424,
+          format('provider_auth_config_unavailable (auth_config_id=%s)', v_provider_account_auth_config_id),
+          v_corr,
+          jsonb_strip_nulls(jsonb_build_object(
+            'organization_id', v_org,
+            'client_id', v_client,
+            'sender_id', v_sender,
+            'source_id', v_source.id,
+            'api_gateway_request_id', v_request_id,
+            'api_gateway_route_id', v_route_id,
+            'api_gateway_route_name', v_route_row.route_name,
+            'api_gateway_path_params', v_path_params,
+            'provider_account_category', v_provider_account_category,
+            'provider_account_settings_resolution_id', v_provider_account_settings_resolution_id,
+            'auth', jsonb_build_object('auth_config_id', v_provider_account_auth_config_id)
+          )),
+          v_now,
+          v_now
+        )
+        RETURNING id INTO v_outbound_id;
+
+        UPDATE public.api_gateway_requests
+           SET outbound_call_id = v_outbound_id,
+               updated_at = v_now
+         WHERE id = v_request_id;
+
+        RETURN jsonb_strip_nulls(jsonb_build_object(
+          'action', 'error',
+          'status', 424,
+          'headers', jsonb_build_object('content-type', 'application/json'),
+          'body', jsonb_build_object(
+            'error', 'provider_auth_config_unavailable',
+            'api_gateway_request_id', v_request_id,
+            'correlation_id', v_corr
+          ),
+          'api_gateway_request_id', v_request_id,
+          'outbound_call_id', v_outbound_id,
+          'correlation_id', v_corr
+        ));
+      END IF;
+    END IF;
+
+$replacement$ || v_marker;
+
+  EXECUTE replace(v_def, v_marker, v_replacement);
+END;
+$patch$;
+
+COMMENT ON FUNCTION public.workflow_intake_api_gateway_v1(TEXT, TEXT, TEXT, TEXT, JSONB, JSONB)
+  IS 'API Gateway intake: resolve row-driven routes/provider accounts, fail closed for shipment-create sources missing active sender/client binding, fail closed for unavailable required provider credentials before provider dispatch, persist redacted request, queue outbound dispatch, or start workflow mode.';
+
+SELECT pg_advisory_unlock(hashtext('202605241220_api_gateway_provider_account_credential_fail_closed_v1'));
+
+COMMIT;

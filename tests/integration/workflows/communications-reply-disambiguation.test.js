@@ -115,7 +115,7 @@ describe('Communications reply disambiguation (Dialog360)', () => {
         });
         expect(authConfigId).toBeTruthy();
 
-        const recipientPhone = `9665${Math.floor(Math.random() * 90000000 + 10000000)}`;
+        const recipientPhone = `+9665${Math.floor(Math.random() * 90000000 + 10000000)}`;
         const { rows: recipientRows } = await client.query(
           `
           INSERT INTO recipients (organization_id, client_id, name, phone_number, preferred_language)
@@ -433,7 +433,7 @@ describe('Communications reply disambiguation (Dialog360)', () => {
         });
         expect(authConfigId).toBeTruthy();
 
-        const recipientPhone = `9665${Math.floor(Math.random() * 90000000 + 10000000)}`;
+        const recipientPhone = `+9665${Math.floor(Math.random() * 90000000 + 10000000)}`;
         const { rows: recipientRows } = await client.query(
           `
           INSERT INTO recipients (organization_id, client_id, name, phone_number, preferred_language)

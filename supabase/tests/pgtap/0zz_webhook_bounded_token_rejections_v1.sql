@@ -97,10 +97,26 @@ UPDATE public.webhook_sources SET enabled=FALSE WHERE id=(SELECT id FROM r08_pre
 SELECT is((SELECT count(*) FROM public.webhook_source_token_history WHERE source_id=(SELECT id FROM r08_previous_hash)
   AND retired_reason='revoked'),1::BIGINT,'enabled retirement retains revoked reason');
 UPDATE public.webhook_sources SET enabled=TRUE WHERE id=(SELECT id FROM r08_previous_hash);
-UPDATE public.webhook_sources SET enabled=FALSE,managed_metadata=COALESCE(managed_metadata,'{}'::jsonb)||'{"lifecycle":"archived"}'::jsonb
-WHERE id=(SELECT id FROM r08_previous_hash);
+DO $archive$
+DECLARE
+  v_actor UUID := gen_random_uuid();
+  v_org UUID;
+  v_source UUID;
+BEGIN
+  SELECT org_id, source_id INTO STRICT v_org, v_source FROM rejection_sources WHERE key='rotated';
+  INSERT INTO public.users(id,organization_id,email,full_name,user_type,status,access_scope_type)
+  VALUES(v_actor,v_org,v_actor::text||'@example.invalid','Archive fixture operator','ops_admin','active','tenant');
+  PERFORM set_config('request.jwt.claim.sub',v_actor::text,TRUE);
+  PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',v_actor)::text,TRUE);
+  SET LOCAL ROLE authenticated;
+  PERFORM api.ui_archive_webhook_source_v1(jsonb_build_object('source_id',v_source,'reason','Archive fixture'));
+  RESET ROLE;
+  PERFORM set_config('request.jwt.claim.sub','',TRUE);
+  PERFORM set_config('request.jwt.claims','{"role":"service_role"}',TRUE);
+END;
+$archive$;
 SELECT is((SELECT count(*) FROM public.webhook_source_token_history WHERE source_id=(SELECT id FROM r08_previous_hash)
-  AND retired_reason='archived'),1::BIGINT,'metadata archive and disable retains archived reason');
+  AND retired_reason='archived'),1::BIGINT,'authorized archive retains archived reason');
 
 SELECT public.upsert_settings_value_v1('webhook_auth_rejection_logging_policy',public.get_root_scope_type_key_v1(),NULL,
   '{"enabled":true,"max_records":1,"window_seconds":3600,"max_token_bytes":4096}',1,'Disposable exhausted budget');
