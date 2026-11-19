@@ -1631,13 +1631,11 @@
     });
   }
 
-  function focusTrackingReferenceInput() {
+  function focusTrackingReferenceInput({ preventScroll = false } = {}) {
     const input = trackLookupForm && trackLookupForm.querySelector('input[name="reference"]');
     if (!input) return;
-    window.requestAnimationFrame(() => {
-      input.focus();
-      if (typeof input.select === 'function') input.select();
-    });
+    input.focus({ preventScroll });
+    if (typeof input.select === 'function') input.select();
   }
 
   function resetTrackingFlow({ clearReference = true, scroll = false } = {}) {
@@ -1671,10 +1669,11 @@
     setTrackingStage('lookup');
     resetTurnstile();
 
-    if (scroll && lookupStage) {
-      lookupStage.scrollIntoView({ behavior: isMotionOn() ? 'smooth' : 'auto', block: 'start' });
+    const scrollTarget = scroll && lookupStage;
+    if (scrollTarget) {
+      scrollTarget.scrollIntoView({ behavior: isMotionOn() ? 'smooth' : 'auto', block: 'start' });
     }
-    focusTrackingReferenceInput();
+    focusTrackingReferenceInput({ preventScroll: Boolean(scrollTarget) });
     return true;
   }
 
