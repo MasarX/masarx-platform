@@ -281,17 +281,26 @@ SELECT client_id::text AS client_id
     (SELECT result->>'auth_token' FROM _webhook_source_upsert_result LIMIT 1)
   );
 
+-- The test runs inside the transaction that writes the new source policy.
+UPDATE public.settings_versions sv
+   SET effective_from = transaction_timestamp()
+  FROM public.settings s
+  JOIN public.webhook_sources ws ON s.scope_id = ws.id
+ WHERE sv.id = s.settings_version_id
+   AND s.category = 'webhook_ingest_policy' AND s.scope_type = 'source'
+   AND ws.source_identifier = 'console-v2-webhook-source-sender-binding';
+
 CREATE TEMP TABLE _webhook_source_plugin_policy_readback AS
 SELECT b.plugin_version_id::text AS plugin_version_id,
-       s.cached_value#>>'{workflow,intent}' AS policy_intent
+       p.policy#>>'{workflow,intent}' AS policy_intent
   FROM public.webhook_sources ws
-  LEFT JOIN public.integration_plugin_bindings b
+  JOIN public.integration_plugin_bindings b
     ON b.runtime_resource_type = 'webhook_sources'
    AND b.runtime_resource_id = ws.id AND b.enabled
    AND b.binding_type = 'webhook_source'
-  JOIN public.settings s
-    ON s.category = 'webhook_ingest_policy' AND s.scope_type = 'source' AND s.scope_id = ws.id
- WHERE ws.source_identifier = 'console-v2-webhook-source-sender-binding';
+  CROSS JOIN LATERAL public.resolve_webhook_ingest_policy(ws.id) p
+ WHERE ws.source_identifier = 'console-v2-webhook-source-sender-binding'
+   AND p.scope_type = 'source' AND p.scope_id = ws.id;
 
 SET LOCAL ROLE authenticated;
 SET LOCAL search_path TO public, pg_temp;
@@ -410,7 +419,7 @@ SELECT is(
 );
 
 SELECT is(
-  (SELECT policy_intent FROM _webhook_source_plugin_policy_readback LIMIT 1),
+  (SELECT policy_intent FROM _webhook_source_plugin_policy_readback),
   'shipment.create',
   'source upsert repairs source-level webhook ingest policy for shipment materialization'
 );

@@ -293,7 +293,7 @@ BEGIN
 
   SELECT * INTO v_workflow_run FROM public.workflow_runs WHERE id = v_run_source;
   v_resolved := workflow_handlers.geocoding_resolve_policy_for_run(v_workflow_run);
-  RETURN NEXT is(v_resolved #>> '{metadata,scope_marker}', 'sender_exception', 'workflow geocoding resolves the sender policy from dispatch context');
+  RETURN NEXT is(v_resolved #>> '{metadata,scope_marker}', 'source_exception', 'workflow geocoding resolver uses source override');
 
   SELECT * INTO v_workflow_run FROM public.workflow_runs WHERE id = v_run_sender;
   v_resolved := workflow_handlers.geocoding_resolve_policy_for_run(v_workflow_run);

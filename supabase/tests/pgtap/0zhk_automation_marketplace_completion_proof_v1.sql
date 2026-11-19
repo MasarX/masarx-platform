@@ -309,7 +309,7 @@ SELECT is((SELECT current_listing_version_id FROM public.automation_asset_instal
 SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES('plugin_source',public.integration_plugin_generate_draft_v1('SG13 rollback source','api',p_source_payload:='{"type":"object","properties":{"token":{"description":"Public tracking token","maxLength":64}}}',p_organization_id:=pg_temp.id('org_a'))) $$,'native plugin source preserves a legitimate schema member named token');
 SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES('plugin_listing',public.automation_asset_create_listing_v1('integration_plugin',(pg_temp.result('plugin_source')->>'version_id')::uuid,NULL,NULL,'private',pg_temp.manifest())) $$,'plugin source snapshots use the real authorized publication boundary');
 SELECT lives_ok($$ SELECT public.automation_asset_publish_version_v1((pg_temp.result('plugin_listing')->>'listing_version_id')::uuid) $$,'plugin publication produces a saved approved version');
-SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES('plugin_copy',public.automation_asset_install_v1((pg_temp.result('plugin_listing')->>'listing_version_id')::uuid,'tenant',pg_temp.id('org_a'))) $$,'a nonactivated plugin copy remains available even with incomplete native activation config');
+SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES('plugin_copy',public.automation_asset_install_v1((pg_temp.result('plugin_listing')->>'listing_version_id')::uuid,'tenant',pg_temp.id('org_a'))) $$,'a nonactivated plugin copy remains available before native activation');
 -- Induce a native activation failure after the install enters the real plugin lifecycle.
 RESET ROLE;
 CREATE FUNCTION pg_temp.fail_fixture_plugin_activation() RETURNS trigger
@@ -328,6 +328,42 @@ SELECT is((SELECT count(*) FROM public.automation_asset_installs WHERE listing_i
 RESET ROLE;
 DROP TRIGGER pgtap_fail_fixture_plugin_activation ON public.integration_plugins;
 SET LOCAL ROLE authenticated;
+
+-- Draft generation fills empty bindings from policy. Publish a fixture whose saved binding is empty.
+SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES(
+  'incomplete_plugin_source',public.integration_plugin_generate_draft_v1(
+    'Synthetic incomplete plugin','api',p_organization_id:=pg_temp.id('org_a')
+  )
+) $$,'draft generation prepares the incomplete activation fixture');
+RESET ROLE;
+UPDATE public.integration_plugin_versions SET workflow_binding='{}'::jsonb
+ WHERE id=(pg_temp.result('incomplete_plugin_source')->>'version_id')::uuid AND status='draft';
+SET LOCAL ROLE authenticated;
+SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES(
+  'incomplete_plugin_listing',public.automation_asset_create_listing_v1(
+    'integration_plugin',(pg_temp.result('incomplete_plugin_source')->>'version_id')::uuid,
+    NULL,NULL,'private',pg_temp.manifest()
+  )
+) $$,'marketplace snapshots the incomplete native fixture');
+SELECT lives_ok($$ SELECT public.automation_asset_publish_version_v1(
+  (pg_temp.result('incomplete_plugin_listing')->>'listing_version_id')::uuid
+) $$,'incomplete fixture can be published as a private listing');
+RESET ROLE;
+SELECT is(
+  (SELECT snapshot_payload#>'{version,workflow_binding}' FROM public.automation_asset_listing_versions
+    WHERE id=(pg_temp.result('incomplete_plugin_listing')->>'listing_version_id')::uuid),
+  '{}'::jsonb,'activation fixture has an empty native workflow binding'
+);
+SET LOCAL ROLE authenticated;
+SELECT throws_ok($$ SELECT public.automation_asset_install_v1(
+  (pg_temp.result('incomplete_plugin_listing')->>'listing_version_id')::uuid,
+  'tenant',pg_temp.id('org_a'),'{}','{}',true
+) $$,'23514','Marketplace activation failed; no install was saved','native activation rejects an empty workflow binding without injected failure');
+SELECT is(
+  (SELECT count(*) FROM public.automation_asset_installs
+    WHERE listing_id=(pg_temp.result('incomplete_plugin_listing')->>'listing_id')::uuid),
+  0::bigint,'incomplete native activation leaves no saved installation'
+);
 
 SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES('plugin_source2',public.integration_plugin_generate_draft_v1('SG13 rollback source','api',p_plugin_id:=(pg_temp.result('plugin_source')->>'plugin_id')::uuid,p_source_payload:='{"title":"Changed public schema"}',p_organization_id:=pg_temp.id('org_a'))) $$,'native source lifecycle creates the next plugin source version');
 SELECT lives_ok($$ INSERT INTO pg_temp.sg13_results VALUES('plugin_listing2',public.automation_asset_create_listing_v1('integration_plugin',(pg_temp.result('plugin_source2')->>'version_id')::uuid,NULL,NULL,'private',pg_temp.manifest(),p_listing_id:=(pg_temp.result('plugin_listing')->>'listing_id')::uuid)) $$,'plugin append preserves source plugin identity');

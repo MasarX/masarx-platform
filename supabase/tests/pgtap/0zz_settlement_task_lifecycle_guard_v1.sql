@@ -215,14 +215,14 @@ BEGIN
     format(
       $sql$
         UPDATE public.tasks
-           SET status = 'completed'
+           SET status = 'rejected'
          WHERE id = %L::uuid
       $sql$,
       v_task
     ),
     '23514',
     NULL,
-    'service role cannot directly complete a stale settlement task'
+    'stale settlement task rejection is blocked before task mutation'
   );
 
   SELECT *

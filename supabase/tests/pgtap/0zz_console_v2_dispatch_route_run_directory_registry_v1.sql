@@ -13,12 +13,26 @@ LANGUAGE plpgsql
 AS $function$
 DECLARE
   v_registry JSONB := NULL;
+  v_executor_scoped_tables regclass[];
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
   SELECT cached_value INTO STRICT v_registry
     FROM public.settings
    WHERE category = 'ui_read_registry' AND scope_type = 'global' AND scope_id IS NULL;
+
+  SELECT array_agg(p.polrelid::regclass) INTO v_executor_scoped_tables
+    FROM pg_catalog.pg_policy p
+    JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+   WHERE c.relrowsecurity
+     AND p.polcmd = 'r'
+     AND 'ui_rpc_executor'::regrole::oid = ANY(p.polroles)
+     AND pg_get_expr(p.polqual, p.polrelid) LIKE '%route_run_actor_can_read_v1(%'
+     AND (p.polrelid, p.polname) IN (
+       ('public.route_runs'::regclass, 'route_runs_select_policy'),
+       ('public.route_run_assignments'::regclass, 'route_run_assignments_select_policy'),
+       ('public.route_run_assignment_events'::regclass, 'route_run_assignment_events_select_policy')
+     );
 
   RETURN NEXT has_view('public', 'v_route_run_directory', 'public.v_route_run_directory exists');
   RETURN NEXT ok(
@@ -31,6 +45,8 @@ BEGIN
          AND item.value->>'id_column' = 'id'
          AND item.value->>'capability_read' = 'routes.read'
          AND COALESCE((item.value->>'allow_view_relation')::boolean, FALSE) IS TRUE
+         AND (item.value#>>'{scope_columns,tenant}' = 'organization_id'
+              OR 'public.route_runs'::regclass = ANY(v_executor_scoped_tables))
     ),
     'ui_read_registry exposes route_run_directory as scoped view-backed resource'
   );
@@ -42,6 +58,8 @@ BEGIN
          AND item.value->>'relation' = 'public.route_run_assignments'
          AND item.value->>'id_column' = 'id'
          AND item.value->>'capability_read' = 'routes.read'
+         AND (item.value#>>'{scope_columns,tenant}' = 'organization_id'
+              OR 'public.route_run_assignments'::regclass = ANY(v_executor_scoped_tables))
     ),
     'ui_read_registry exposes route_run_assignments for Dispatch insight rail'
   );
@@ -53,6 +71,8 @@ BEGIN
          AND item.value->>'relation' = 'public.route_run_assignment_events'
          AND item.value->>'id_column' = 'id'
          AND item.value->>'capability_read' = 'routes.read'
+         AND (item.value#>>'{scope_columns,tenant}' = 'organization_id'
+              OR 'public.route_run_assignment_events'::regclass = ANY(v_executor_scoped_tables))
     ),
     'ui_read_registry exposes route_run_assignment_events for Dispatch insight rail'
   );

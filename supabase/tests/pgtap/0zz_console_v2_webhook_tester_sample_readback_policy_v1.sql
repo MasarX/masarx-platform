@@ -188,14 +188,31 @@ SELECT is(
 
 WITH registry AS (
   SELECT resource
-  FROM jsonb_array_elements(
-    COALESCE(public.resolve_settings_merged('ui_read_registry', 'global', NULL)->'resources', '[]'::jsonb)
-  ) AS resource
-  WHERE resource->>'key' = 'webhook_inbox'
+    FROM public.settings s
+   CROSS JOIN LATERAL jsonb_array_elements(s.cached_value->'resources') AS resource
+   WHERE s.category = 'ui_read_registry'
+     AND s.scope_type = public.get_root_scope_type_key_v1()
+     AND s.scope_id IS NULL
+     AND resource->>'key' = 'webhook_inbox'
 )
 SELECT ok(
-  NOT EXISTS (SELECT 1 FROM registry),
-  'raw webhook inbox is absent from the browser read registry'
+  (SELECT count(*) FROM registry) = 1
+  AND EXISTS (
+    SELECT 1 FROM registry
+     WHERE resource->>'relation' = 'public.webhook_inbox'
+       AND resource->>'read_relation' = 'public.webhook_inbox_followup_read_v1'
+       AND resource->>'id_column' = 'id'
+       AND resource->>'capability_read' = 'webhooks.read'
+       AND resource#>>'{scope_columns,tenant}' = 'organization_id'
+       AND NOT EXISTS (
+         SELECT 1
+           FROM unnest(ARRAY['id', 'organization_id', 'webhook_source_id', 'workflow_run_id', 'idempotency_key']) AS required(key)
+          WHERE NOT COALESCE(resource->'filters' @> jsonb_build_array(
+            jsonb_build_object('key', required.key, 'column', required.key, 'op', 'eq')
+          ), FALSE)
+       )
+  ),
+  'one global webhook inbox resource preserves tenant scope, capability, and lineage filters'
 );
 
 WITH registry AS (

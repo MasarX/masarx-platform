@@ -442,6 +442,7 @@ BEGIN
          AND dp.user_id = v_invited_driver
          AND COALESCE(dp.metadata->>'marketplace_participant_request_id',
                       dp.metadata->>'marketplace_request_id') = v_driver_request::text
+         AND dp.metadata->>'source' = 'marketplace_driver_profile_from_participant_request_v1'
     ),
     'driver application approval materializes canonical fleet driver profile readback'
   );
@@ -770,7 +771,7 @@ BEGIN
 
   BEGIN
     v_result := api.ui_list_resource_v1(
-      'provider_auth_configs', jsonb_build_object('provider_id', v_provider::text), 50, 0, NULL::jsonb
+      'provider_auth_configs', '{}'::jsonb, 50, 0, NULL::jsonb
     );
     v_credential_rows := COALESCE(v_result->'rows', v_result->'items', '[]'::jsonb);
     RETURN NEXT ok(
@@ -779,6 +780,12 @@ BEGIN
         SELECT 1
           FROM jsonb_array_elements(v_credential_rows) AS row(value)
          WHERE row.value->>'id' = v_rotated_config_id::text
+      )
+      AND NOT EXISTS (
+        SELECT 1
+          FROM jsonb_array_elements(v_credential_rows) AS row(value)
+         WHERE row.value->>'provider_id' = v_other_provider::text
+            OR row.value->>'id' = v_other_config::text
       )
       AND api.ui_get_resource_v1('provider_auth_configs', v_other_config) IS NULL
       AND v_credential_rows::text NOT LIKE '%pgtap-secret-%',

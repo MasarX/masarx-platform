@@ -527,13 +527,14 @@ SELECT is(
   'decision log records HMAC validation pass for governance readback'
 );
 
-SELECT ok(
-  EXISTS (
-    SELECT 1 FROM public.webhook_inbox wi
+SELECT is(
+  (
+    SELECT wi.processing_status
+      FROM public.webhook_inbox wi
      WHERE wi.id = ((SELECT result->>'webhook_id' FROM _webhook_hmac_valid LIMIT 1))::uuid
-       AND wi.processing_status IS DISTINCT FROM 'failed'
   ),
-  'the inbox row linked to the passing HMAC decision is accepted'
+  'in_progress',
+  'accepted HMAC intake persists the in_progress inbox status'
 );
 
 SELECT is(
