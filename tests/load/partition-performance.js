@@ -103,13 +103,26 @@ export function setup() {
   const trackingPrefix = `LOAD-${runId}-`;
 
   try {
-    const orgRows = db.query('SELECT id::text AS id FROM public.organizations LIMIT 1');
+    const orgRows = db.query(
+      `SELECT o.id::text AS id
+       FROM public.organizations AS o
+       WHERE EXISTS (SELECT 1 FROM public.clients AS c WHERE c.organization_id = o.id)
+       ORDER BY o.id
+       LIMIT 1`,
+    );
     if (orgRows.length === 0) {
-      throw new Error('No organizations found. Please run migrations first.');
+      throw new Error('No organizations with clients found. Please run migrations first and seed client data.');
     }
     const orgId = orgRows[0].id;
 
-    const clientRows = db.query('SELECT id::text AS id FROM public.clients ORDER BY id LIMIT 50');
+    const clientRows = db.query(
+      `SELECT c.id::text AS id
+       FROM public.clients AS c
+       WHERE c.organization_id = $1::uuid
+       ORDER BY c.id
+       LIMIT 50`,
+      orgId,
+    );
     if (clientRows.length === 0) {
       throw new Error('No clients found. Seed data is required before running the load test.');
     }
