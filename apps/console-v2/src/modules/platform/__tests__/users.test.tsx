@@ -1102,8 +1102,11 @@ describe('UsersModule', () => {
     });
     await user.click(await screen.findByRole('button', { name: /Invite user/i }));
     const form = await screen.findByTestId('tenant-user-invite-form');
-    await user.selectOptions(within(form).getByLabelText(/^Access scope$/i), 'sender');
+    const scopeSelect = within(form).getByLabelText(/^Access scope$/i);
+    await waitFor(() => expect(scopeSelect).toBeEnabled());
+    await user.selectOptions(scopeSelect, 'sender');
     const search = await within(form).findByLabelText(/^Sender search$/i);
+    await waitFor(() => expect(search).toBeEnabled());
     expect(within(form).queryByLabelText(/^Scope ID$/i)).not.toBeInTheDocument();
     await user.type(search, 'JED');
     const senderSelect = within(form).getByLabelText(/^Sender$/i) as HTMLSelectElement;
