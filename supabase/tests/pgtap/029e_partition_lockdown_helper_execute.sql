@@ -4,7 +4,7 @@ SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SET LOCAL statement_timeout = '30s';
 SELECT plan(9);
 
--- Mutation: without the single-relation revoke, anon inherits PUBLIC EXECUTE.
+-- Mutation: inherited PUBLIC EXECUTE or a direct re-grant to anon fails this ACL assertion.
 SELECT ok(NOT has_function_privilege('anon', 'public.enforce_service_only_rls_v1(regclass)', 'EXECUTE'),
   'anon cannot execute the single-relation helper');
 -- Mutation: without the single-relation revoke, authenticated inherits PUBLIC EXECUTE.
@@ -13,7 +13,7 @@ SELECT ok(NOT has_function_privilege('authenticated', 'public.enforce_service_on
 -- Mutation: without the single-relation revoke, service_role inherits PUBLIC EXECUTE.
 SELECT ok(NOT has_function_privilege('service_role', 'public.enforce_service_only_rls_v1(regclass)', 'EXECUTE'),
   'service_role cannot execute the single-relation helper');
--- Mutation: without the partition-tree revoke, anon inherits PUBLIC EXECUTE.
+-- Mutation: inherited PUBLIC EXECUTE or a direct re-grant to anon fails this ACL assertion.
 SELECT ok(NOT has_function_privilege('anon', 'public.enforce_partition_tree_service_only_v1(regclass)', 'EXECUTE'),
   'anon cannot execute the partition-tree helper');
 -- Mutation: without the partition-tree revoke, authenticated inherits PUBLIC EXECUTE.
@@ -33,13 +33,13 @@ SELECT throws_ok(
 );
 RESET ROLE;
 
--- Mutation: without the single-relation revoke, anon also reaches the definer
--- and the same call succeeds under the function owner's privileges.
+-- Mutation: granting anon USAGE on public changes the denial to the function ACL.
+-- The privilege assertion above detects a direct EXECUTE re-grant to anon.
 SET LOCAL ROLE anon;
 SELECT throws_ok(
   $$SELECT public.enforce_service_only_rls_v1('public.finance_event_dedupe'::regclass)$$,
-  '42501', 'permission denied for function enforce_service_only_rls_v1',
-  'anon is denied at the single-relation function ACL'
+  '42501', 'permission denied for schema public',
+  'anon is denied (no USAGE on schema public)'
 );
 RESET ROLE;
 
