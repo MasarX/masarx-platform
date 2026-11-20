@@ -132,8 +132,13 @@ import {
   setMobileCrashReportingUser,
 } from "./src/mobile-crash-reporting";
 import { MobileErrorBoundary } from "./src/mobile-error-boundary";
-import { OutboxEmptyState } from "./src/screens/OutboxScreen";
-import { LocationCaptureStatus } from "./src/screens/LocationScreen";
+import { OutboxClearDeadButton, OutboxEmptyState } from "./src/screens/OutboxScreen";
+import { ShellPill } from "./src/components/ShellPill";
+import { CurrentStopBanner } from "./src/components/CurrentStopBanner";
+import { EmptyState } from "./src/components/EmptyState";
+import { MOBILE_TEST_IDS } from "./src/mobile-test-ids";
+import { useRowDirection, useTextStart } from "./src/mobile-shell-rtl";
+import { LocationScreen as LocationCaptureControls } from "./src/screens/LocationScreen";
 import { clearMobileTelemetryEvents, flushMobileTelemetryEvents } from "./src/mobile-telemetry";
 import {
   type MobileAddressPolicy,
@@ -228,8 +233,10 @@ import {
   getTokensForTheme,
   resolveAppliedFieldOpsTheme,
   type FieldOpsThemeTokens,
+  type AppliedTheme,
+  type ThemeTokens,
 } from "./src/mobile-theme";
-import { ThemeProvider, type ThemeContextValue } from "./src/mobile-theme-context";
+import { ThemeProvider, useTheme, type ThemeContextValue } from "./src/mobile-theme-context";
 import { FieldOpsDrawerCloseButton } from "./src/mobile-drawer-close-button";
 import { getFieldOpsStrings, type FieldOpsStrings } from "./src/i18n";
 import { mobileActionAccessibility, mobileSyncAccessibility } from "./src/mobile-action-accessibility";
@@ -244,6 +251,7 @@ import {
   resolveMobileRoleCode,
   resolveMobileRoleLabel,
   resolveMobileShellHeaderTitle,
+  resolveMobileShellHeaderLines,
 } from "./src/mobile-shell-header";
 import { isJwtPrivilegedRole, resolveJwtRole } from "./src/mobile-jwt";
 import { createWebKeyValueStore, createWebOutboxStore } from "./src/mobile-web-store";
@@ -276,6 +284,8 @@ const KV_KEYS = {
   simulatedSpeedKph: "simulated_speed_kph_v1",
   activeOpsSession: "fieldops_active_ops_session_v1",
 } as const;
+
+const bootErrorStrings = getFieldOpsStrings("en").errorBoundary;
 
 function readBootstrapExtraString(key: string): string | null {
   const extra = resolveExpoExtra();
@@ -1786,6 +1796,7 @@ function SignInScreen({
 
 function Bootstrap() {
   const styles = useFieldOpsStyles();
+  const i18nStrings = getFieldOpsStrings(resolveLocaleMode(Constants.expoConfig?.extra?.locale));
   const extra = React.useMemo(
     () => resolveExpoExtra((Constants.expoConfig?.extra ?? {}) as ExpoExtra),
     []
@@ -1807,7 +1818,7 @@ function Bootstrap() {
     return (
       <View style={styles.container} accessibilityRole="alert">
         <Text style={styles.title}>Fieldops</Text>
-        <Text style={styles.error}>App setup required</Text>
+        <Text style={styles.error}>{i18nStrings.bootstrap.missing_public_configuration}</Text>
         <Text style={styles.subtitle}>Ask your administrator to check the app setup.</Text>
       </View>
     );
@@ -2081,120 +2092,215 @@ function BootstrapConfigured({ publicConfig, storage }: BootstrapConfiguredProps
       });
   }, [ctxQuery.data, fieldOpsV2Authorized, outbox, outboxInitQuery.isSuccess, queryClient]);
 
-  if (!auth.ready) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.subtitle}>Loading session...</Text>
-      </View>
-    );
-  }
-
-  if (!auth.session) {
-    return (
-      <SignInScreen
-        appName={publicConfig.appName}
-        client={client}
-        methods={publicConfig.authMethods}
-        driverSignupUrl={publicConfig.driverSignupUrl}
-        locale={publicConfig.locale}
-      />
-    );
-  }
-
-  if (ctxQuery.isLoading) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.subtitle}>Bootstrapping...</Text>
-      </View>
-    );
-  }
-
-  if (ctxQuery.isError) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.error}>Failed to load app context.</Text>
-        <Text style={styles.mono}>{formatUnknownError(ctxQuery.error)}</Text>
-      </View>
-    );
-  }
-
-  if (Platform.OS === "web" && (!webScopeKey || boundWebScope !== webScopeKey)) {
-    return <View style={styles.container}><Text style={!webScopeKey ? styles.error : styles.subtitle}>
-      {!webScopeKey ? "Authenticated organization is unavailable. No offline action can be confirmed." : "Resolving authenticated offline storage..."}
-    </Text></View>;
-  }
-
-  if (outboxInitQuery.isError || cacheInitQuery.isError) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.error}>Durable offline storage is unavailable. No queued action was confirmed.</Text>
-        <Text style={styles.mono}>{formatUnknownError(outboxInitQuery.error ?? cacheInitQuery.error)}</Text>
-        <Pressable onPress={() => { void outboxInitQuery.refetch(); void cacheInitQuery.refetch(); }} accessibilityRole="button">
-          <Text>Retry storage</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  if (!ctxQuery.data) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.error}>Failed to load app context.</Text>
-        <Text style={styles.mono}>No context payload was returned.</Text>
-      </View>
-    );
-  }
-
-  if (mobileShellPolicyQuery.isLoading) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.subtitle}>Bootstrapping...</Text>
-      </View>
-    );
-  }
+  const authorizedThemeScope = Boolean(
+    auth.session && ctxQuery.data?.me?.user?.id === auth.session.user.id &&
+    fieldOpsV2Authorized && (Platform.OS !== "web" || (webScopeKey && boundWebScope === webScopeKey)),
+  );
+  const devicePolicyQuery = useQuery({
+    queryKey: ["policy", "device_policy", stableStringify(mobileShellPolicyContext)],
+    queryFn: () => resolvePolicyRow(client, "resolve_device_policy", mobileShellPolicyContext),
+    enabled: authorizedThemeScope,
+    staleTime: 5 * 60_000,
+  });
+  const displayPolicy = React.useMemo(
+    () => authorizedThemeScope
+      ? normalizeMobileDisplayPolicy(asRecord(devicePolicyQuery.data).value ?? null)
+      : normalizeMobileDisplayPolicy(null),
+    [authorizedThemeScope, devicePolicyQuery.data]
+  );
 
   return (
-    <FieldOpsV2Gate
-      enabled={fieldOpsV2Authorized}
-      disabled={(
-      <View style={styles.container}>
-        <Text style={styles.title}>{publicConfig.appName}</Text>
-        <Text style={styles.error}>{strings.bootstrap.v2Disabled}</Text>
-      </View>
-      )}
-    >
-    <BootstrapAuthed
-      key={Platform.OS === "web" ? webScopeKey : undefined}
-      ctx={ctxQuery.data}
-      sessionUserId={auth.session.user.id}
-      safeAreaInsets={safeAreaInsets}
-      publicConfig={publicConfig}
-      storage={storage}
-      client={client}
-      uiClient={uiClient}
-      executor={executor}
-      network={network}
-      outboxStore={outboxStore}
-      outbox={outbox}
-      outboxInitSuccess={outboxInitQuery.isSuccess}
-      cacheStore={cacheStore}
-      cacheInitSuccess={cacheInitQuery.isSuccess}
-      outboxCount={outboxCountQuery.data ?? 0}
-      lastSyncSuccessAt={lastSyncSuccessAt}
-      syncErrorCount={syncErrorCount}
-      syncMutation={syncMutation}
-    />
-    </FieldOpsV2Gate>
+    <MobileThemeBoot cacheStore={cacheStore} cacheReady={authorizedThemeScope && cacheInitQuery.isSuccess} displayPolicy={displayPolicy}>
+      {({ selectedThemeMode, themeTokens, appliedTheme }) => {
+      if (!auth.ready) {
+        return (
+          <View style={styles.container}>
+            <Text style={styles.title}>{publicConfig.appName}</Text>
+            <Text style={styles.subtitle}>Loading session...</Text>
+          </View>
+        );
+      }
+
+      if (!auth.session) {
+        return (
+          <SignInScreen
+            appName={publicConfig.appName}
+            client={client}
+            methods={publicConfig.authMethods}
+            driverSignupUrl={publicConfig.driverSignupUrl}
+            locale={publicConfig.locale}
+          />
+        );
+      }
+
+      if (ctxQuery.isLoading) {
+        return (
+          <View style={styles.container}>
+            <Text style={styles.title}>{publicConfig.appName}</Text>
+            <Text style={styles.subtitle}>Bootstrapping...</Text>
+          </View>
+        );
+      }
+
+      if (ctxQuery.isError) {
+        return (
+          <View style={styles.container}>
+            <Text style={styles.title}>{publicConfig.appName}</Text>
+            <Text style={styles.error}>Failed to load app context.</Text>
+            <Text style={styles.mono}>{formatUnknownError(ctxQuery.error)}</Text>
+          </View>
+        );
+      }
+
+      if (Platform.OS === "web" && (!webScopeKey || boundWebScope !== webScopeKey)) {
+        return <View style={styles.container}><Text style={!webScopeKey ? styles.error : styles.subtitle}>
+          {!webScopeKey ? "Authenticated organization is unavailable. No offline action can be confirmed." : "Resolving authenticated offline storage..."}
+        </Text></View>;
+      }
+
+      if (outboxInitQuery.isError || cacheInitQuery.isError) {
+        return (
+          <View style={styles.container}>
+            <Text style={styles.title}>{publicConfig.appName}</Text>
+            <Text style={styles.error}>Durable offline storage is unavailable. No queued action was confirmed.</Text>
+            <Text style={styles.mono}>{formatUnknownError(outboxInitQuery.error ?? cacheInitQuery.error)}</Text>
+            <Pressable onPress={() => { void outboxInitQuery.refetch(); void cacheInitQuery.refetch(); }} accessibilityRole="button">
+              <Text>Retry storage</Text>
+            </Pressable>
+          </View>
+        );
+      }
+
+      if (!ctxQuery.data) {
+        return (
+          <View style={styles.container}>
+            <Text style={styles.title}>{publicConfig.appName}</Text>
+            <Text style={styles.error}>Failed to load app context.</Text>
+            <Text style={styles.mono}>No context payload was returned.</Text>
+          </View>
+        );
+      }
+
+      if (mobileShellPolicyQuery.isLoading) {
+        return (
+          <View style={styles.container}>
+            <Text style={styles.title}>{publicConfig.appName}</Text>
+            <Text style={styles.subtitle}>Bootstrapping...</Text>
+          </View>
+        );
+      }
+
+      return (
+        <FieldOpsV2Gate
+          enabled={fieldOpsV2Authorized}
+          disabled={(
+          <View style={styles.container}>
+            <Text style={styles.title}>{publicConfig.appName}</Text>
+            <Text style={styles.error}>{strings.bootstrap.v2Disabled}</Text>
+          </View>
+          )}
+        >
+        <BootstrapAuthed
+          key={Platform.OS === "web" ? webScopeKey : undefined}
+          ctx={ctxQuery.data}
+          selectedThemeMode={selectedThemeMode}
+          themeTokens={themeTokens}
+          appliedTheme={appliedTheme}
+          displayPolicy={displayPolicy}
+          devicePolicyRow={devicePolicyQuery.data}
+          sessionUserId={auth.session.user.id}
+          safeAreaInsets={safeAreaInsets}
+          publicConfig={publicConfig}
+          storage={storage}
+          client={client}
+          uiClient={uiClient}
+          executor={executor}
+          network={network}
+          outboxStore={outboxStore}
+          outbox={outbox}
+          outboxInitSuccess={outboxInitQuery.isSuccess}
+          cacheStore={cacheStore}
+          cacheInitSuccess={cacheInitQuery.isSuccess}
+          outboxCount={outboxCountQuery.data ?? 0}
+          lastSyncSuccessAt={lastSyncSuccessAt}
+          syncErrorCount={syncErrorCount}
+          syncMutation={syncMutation}
+        />
+        </FieldOpsV2Gate>
+      );
+      }}
+    </MobileThemeBoot>
+  );
+}
+
+type MobileThemeBootProps = {
+  cacheStore: KeyValueStore;
+  cacheReady: boolean;
+  displayPolicy: MobileDisplayPolicy;
+  children: (theme: { selectedThemeMode: MobileThemeMode; themeTokens: ThemeTokens; appliedTheme: AppliedTheme }) => React.ReactNode;
+};
+
+function MobileThemeBoot({ cacheStore, cacheReady, displayPolicy, children }: MobileThemeBootProps) {
+  const queryClient = useQueryClient();
+  const systemColorScheme = useColorScheme();
+  const themeModeQuery = useQuery({
+    queryKey: ["kv", "get", KV_KEYS.themeMode, cacheReady],
+    queryFn: async () => {
+      const value = await cacheStore.get(KV_KEYS.themeMode);
+      return typeof value === "string" ? value : null;
+    },
+    enabled: cacheReady,
+    staleTime: Infinity,
+  });
+  const selectedThemeMode = React.useMemo<MobileThemeMode>(
+    () => resolveEffectiveTheme({ storedValue: themeModeQuery.data, policy: displayPolicy }),
+    [cacheReady, displayPolicy, themeModeQuery.data]
+  );
+  const appliedTheme = React.useMemo(
+    () => resolveAppliedFieldOpsTheme(selectedThemeMode, systemColorScheme),
+    [selectedThemeMode, systemColorScheme],
+  );
+  const themeTokens = React.useMemo(
+    () => getFieldOpsThemeTokens(appliedTheme, Platform.OS === "web" ? "web" : "native"),
+    [appliedTheme]
+  );
+  const styles = React.useMemo(() => createFieldOpsStyles(themeTokens), [themeTokens]);
+  const setShellThemeMode = React.useCallback(async (next: MobileThemeMode) => {
+    if (!cacheReady) return;
+    await cacheStore.set(KV_KEYS.themeMode, next);
+    void queryClient.invalidateQueries({ queryKey: ["kv", "get", KV_KEYS.themeMode] });
+  }, [cacheReady, cacheStore, queryClient]);
+  const themeContextValue = React.useMemo<ThemeContextValue>(() => ({
+    appliedTheme,
+    tokens: getTokensForTheme(appliedTheme, Platform.OS === "web" ? "web" : "native"),
+    mode: selectedThemeMode,
+    setMode: setShellThemeMode,
+  }), [appliedTheme, selectedThemeMode, setShellThemeMode]);
+  React.useEffect(() => {
+    const setColorScheme = (Appearance as unknown as { setColorScheme?: (mode: "light" | "dark" | null) => void })
+      .setColorScheme;
+    if (typeof setColorScheme !== "function") return;
+    try {
+      setColorScheme(toAppearanceColorScheme(selectedThemeMode));
+    } catch (error) {
+      logDebugFailure("failed to apply color scheme", error);
+    }
+  }, [selectedThemeMode]);
+  return (
+    <FieldOpsStylesContext.Provider value={styles}>
+      <ThemeProvider value={themeContextValue}>
+        {children({ selectedThemeMode, themeTokens: themeContextValue.tokens, appliedTheme })}
+      </ThemeProvider>
+    </FieldOpsStylesContext.Provider>
   );
 }
 
 type BootstrapAuthedProps = {
+  selectedThemeMode: MobileThemeMode;
+  themeTokens: ThemeTokens;
+  appliedTheme: AppliedTheme;
+  displayPolicy: MobileDisplayPolicy;
+  devicePolicyRow: Awaited<ReturnType<typeof resolvePolicyRow>> | undefined;
   ctx: { me: UiMe; navigation: UiNavigation };
   sessionUserId: string;
   safeAreaInsets: ReturnType<typeof useSafeAreaInsets>;
@@ -2217,9 +2323,13 @@ type BootstrapAuthedProps = {
 
 function BootstrapAuthed(props: BootstrapAuthedProps) {
   const queryClient = useQueryClient();
-  const systemColorScheme = useColorScheme();
   const {
     ctx,
+    selectedThemeMode,
+    themeTokens,
+    appliedTheme,
+    displayPolicy,
+    devicePolicyRow,
     sessionUserId,
     safeAreaInsets,
     publicConfig,
@@ -2531,13 +2641,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     staleTime: 5 * 60_000,
   });
 
-  const devicePolicyQuery = useQuery({
-    queryKey: ["policy", "device_policy", stableStringify(policyContext)],
-    queryFn: () => resolvePolicyRow(client, "resolve_device_policy", policyContext),
-    enabled: Boolean(me?.user?.id),
-    staleTime: 5 * 60_000,
-  });
-
   const navigationPolicyQuery = useQuery({
     queryKey: ["policy", "navigation_policy", stableStringify(policyContext)],
     queryFn: () => resolvePolicyRow(client, "resolve_navigation_policy", policyContext),
@@ -2678,15 +2781,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     enabled: cacheInitSuccess,
     staleTime: Infinity,
   });
-  const themeModeQuery = useQuery({
-    queryKey: ["kv", "get", KV_KEYS.themeMode],
-    queryFn: async () => {
-      const value = await cacheStore.get(KV_KEYS.themeMode);
-      return typeof value === "string" ? value : null;
-    },
-    enabled: cacheInitSuccess,
-    staleTime: Infinity,
-  });
   const activeOpsSessionQuery = useQuery({
     queryKey: ["kv", "get", KV_KEYS.activeOpsSession],
     queryFn: async () => {
@@ -2764,10 +2858,6 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const shouldShowConnectivityBanner =
     connectivityStatus === "offline" ||
     (connectivityStatus === "degraded" && mobileSyncPolicy.showDegradedBanner);
-  const displayPolicy = React.useMemo(
-    () => normalizeMobileDisplayPolicy(asRecord(devicePolicyQuery.data).value ?? null),
-    [devicePolicyQuery.data]
-  );
   const selectedLocaleMode = React.useMemo<MobileLocaleMode>(
     () => resolveEffectiveLocale({ storedValue: localeModeQuery.data, policy: displayPolicy }),
     [displayPolicy, localeModeQuery.data]
@@ -2793,38 +2883,16 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       logDebugFailure("failed to update document direction/locale", error);
     }
   }, [selectedDirectionMode, selectedLocaleMode]);
-  const selectedThemeMode = React.useMemo<MobileThemeMode>(
-    () => resolveEffectiveTheme({ storedValue: themeModeQuery.data, policy: displayPolicy }),
-    [displayPolicy, themeModeQuery.data]
-  );
-  const appliedTheme = resolveAppliedFieldOpsTheme(selectedThemeMode, systemColorScheme);
-  const themeTokens = React.useMemo(
-    () => getFieldOpsThemeTokens(appliedTheme, Platform.OS === "web" ? "web" : "native"),
-    [appliedTheme]
-  );
-  const styles = React.useMemo(() => createFieldOpsStyles(themeTokens), [themeTokens]);
-  const setThemeMode = React.useCallback(async (next: MobileThemeMode) => {
-    await cacheStore.set(KV_KEYS.themeMode, next);
-    void queryClient.invalidateQueries({ queryKey: ["kv", "get", KV_KEYS.themeMode] });
-  }, [cacheStore, queryClient]);
-  const themeContextValue = React.useMemo<ThemeContextValue>(() => ({
-    appliedTheme,
-    tokens: getTokensForTheme(appliedTheme, Platform.OS === "web" ? "web" : "native"),
-    mode: selectedThemeMode,
-    setMode: setThemeMode,
-  }), [appliedTheme, selectedThemeMode, setThemeMode]);
+  const styles = useFieldOpsStyles();
+  const { setMode: setThemeMode } = useTheme();
   const strings = React.useMemo(() => getFieldOpsStrings(selectedLocaleMode), [selectedLocaleMode]);
+  const i18nStrings = {
+    shell: { outbox_count: (count: number) => `${strings.shell.outboxLabel}: ${count}` },
+  };
+  const shellRowDirection = useRowDirection();
+  const selectedRowDirection = selectedDirectionMode === "rtl" ? "row-reverse" : "row";
+  const shellRowOverride = selectedRowDirection !== shellRowDirection ? { flexDirection: selectedRowDirection } as const : null;
   const connectivityStatusLabel = formatConnectivityStatusLabel(connectivityStatus, strings);
-  React.useEffect(() => {
-    const setColorScheme = (Appearance as unknown as { setColorScheme?: (mode: "light" | "dark" | null) => void })
-      .setColorScheme;
-    if (typeof setColorScheme !== "function") return;
-    try {
-      setColorScheme(toAppearanceColorScheme(selectedThemeMode));
-    } catch (error) {
-      logDebugFailure("failed to apply color scheme", error);
-    }
-  }, [selectedThemeMode]);
   const mobilePushPolicy = React.useMemo(
     () => normalizeMobilePushPolicy(asRecord(mobilePushPolicyQuery.data).value ?? null),
     [mobilePushPolicyQuery.data]
@@ -2838,8 +2906,8 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     [mapPolicyQuery.data]
   );
   const devicePolicy = React.useMemo(
-    () => normalizeMobileDevicePolicy(asRecord(devicePolicyQuery.data).value ?? null),
-    [devicePolicyQuery.data]
+    () => normalizeMobileDevicePolicy(asRecord(devicePolicyRow).value ?? null),
+    [devicePolicyRow]
   );
   const navigationPolicy = React.useMemo(
     () => normalizeMobileNavigationPolicy(asRecord(navigationPolicyQuery.data).value ?? null),
@@ -5278,9 +5346,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     });
   }, [activeDriverShift?.opsSessionId, cacheStore, client, effectiveOnline, queryClient, withDriverShiftLock]);
 
-  const handleSignOut = React.useCallback(() => {
+  const handleSignOut = React.useCallback((confirmedByScreen = false) => {
     void (async () => {
-      const confirmed = await confirmMobileAction({
+      const confirmed = confirmedByScreen || await confirmMobileAction({
         title: strings.confirm.signOutTitle,
         message: strings.confirm.signOutMessage,
         confirmLabel: strings.confirm.signOutButton,
@@ -5386,6 +5454,23 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   }, [isRouteSurface, isSettlementsSurface, listQuery.data?.list.items, resource, selectedStopSnapshot?.codAmount]);
   const settlementsEnabledForShell = canReadSettlements || hasCodWorkload;
 
+  const currentStopRow = (isRouteSurface ? displayedRoute.items : isTasksSurface ? listQuery.data?.list.items ?? [] : [])
+    .find((row) => ["in_progress", "active", "enroute", "arrived"].includes(extractRouteCardSnapshot(row).status?.trim().toLowerCase() ?? ""));
+  const currentStopId = currentStopRow ? pickResourceId(currentStopRow, listQuery.data?.list.keys) : null;
+  const currentStopSnapshot = currentStopRow ? extractRouteCardSnapshot(currentStopRow) : null;
+  const currentStopBannerStop = currentStopId && currentStopSnapshot ? {
+    stopId: currentStopId,
+    sequence: currentStopSnapshot.sequence,
+    customerName: currentStopSnapshot.customerName,
+    addressSummary: currentStopSnapshot.place,
+    etaMinutes: currentStopSnapshot.etaMin,
+    statusLabel: formatKeyLabel(currentStopSnapshot.status ?? ""),
+  } : null;
+  const currentStopBannerStrings = {
+    ...strings.currentStopBanner,
+    eta_minutes: (count: number) => strings.currentStopBanner.eta_minutes.replace("{n}", String(count)),
+    sequence_prefix: (count: number) => strings.currentStopBanner.sequence_prefix.replace("{n}", String(count)),
+  };
   const resourceHeaderTitle =
     selectedItem?.label ??
     (isRouteSurface ? strings.route.title : isSettlementsSurface ? strings.settlements.title : resource === "tasks" ? strings.tasks.title : resource ?? publicConfig.appName);
@@ -5452,6 +5537,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const userRoleLabel = effectiveActiveRole?.label ??
     resolveMobileRoleLabel(me?.user?.user_type ?? null);
   const userRoleCode = React.useMemo(() => resolveMobileRoleCode(userRoleLabel), [userRoleLabel]);
+  const shellHeaderLines = resolveMobileShellHeaderLines(publicConfig.appName, me?.user?.user_type ?? null);
   const shellHeaderTitle = React.useMemo(
     () => resolveMobileShellHeaderTitle(publicConfig.appName, me?.user?.user_type ?? null),
     [me?.user?.user_type, publicConfig.appName]
@@ -5484,7 +5570,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         navModalSafeAreaStyle,
       ]}
     >
-      <View style={styles.drawerHeader}>
+      <View style={[styles.drawerHeader, { flexDirection: shellRowDirection, direction: "ltr" }, shellRowOverride]}>
         <Text style={styles.drawerTitle}>Modules</Text>
         <FieldOpsDrawerCloseButton locale={selectedLocaleMode} onClose={() => setNavOpen(false)}
           style={styles.drawerClose} textStyle={styles.drawerCloseText} />
@@ -6110,49 +6196,34 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   );
 
   return (
-    <FieldOpsStylesContext.Provider value={styles}>
-    <ThemeProvider value={themeContextValue}>
       <View style={isWebPreview ? styles.webViewport : styles.pageRoot}>
         <View style={[styles.page, appDirectionStyle, isWebPreview && styles.pageWeb]}>
-        <View style={[styles.header, headerSafeAreaStyle]}>
+        <View style={[styles.header, headerSafeAreaStyle, { flexDirection: shellRowDirection, direction: "ltr" }, shellRowOverride]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open modules menu"
-          testID={FIELDOPS_NATIVE_E2E_TEST_IDS.menuToggle}
+          testID={Platform.OS === "web" ? MOBILE_TEST_IDS.shell.menuToggle : FIELDOPS_NATIVE_E2E_TEST_IDS.menuToggle}
           onPress={() => setNavOpen(true)}
           style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}
         >
           <Text style={styles.menuButtonText}>{"\u2630"}</Text>
         </Pressable>
         <View style={styles.headerText}>
-          <Text style={styles.headerTitle}>{shellHeaderTitle}</Text>
+          <Text style={styles.headerTitle} numberOfLines={2} accessibilityLabel={shellHeaderTitle}>
+            {shellHeaderLines.title}
+          </Text>
+          {shellHeaderLines.role ? <Text style={styles.headerPillText}>{shellHeaderLines.role}</Text> : null}
         </View>
-        <View style={styles.headerRight}>
-          <View
-            style={[
-              styles.headerPillRow,
-              connectivityStatus === "degraded"
-                ? styles.headerPillRowDegraded
-                : connectivityStatus === "offline"
-                  ? styles.headerPillRowOffline
-                  : styles.headerPillRowOnline,
-            ]}
-          >
-            <View
-              style={[
-                styles.headerPillDot,
-                connectivityStatus === "degraded"
-                  ? styles.headerPillDotDegraded
-                  : connectivityStatus === "offline"
-                    ? styles.headerPillDotOffline
-                    : styles.headerPillDotOnline,
-              ]}
-            />
-            <Text style={styles.headerPillText}>{connectivityStatusLabel}</Text>
-          </View>
-          <Text style={styles.headerPill}>{strings.shell.outboxLabel}: {outboxCount}</Text>
+        <View style={[styles.headerRight, { flexDirection: shellRowDirection, direction: "ltr" }, shellRowOverride]}>
+          <ShellPill
+            testID="shell-pill-connectivity"
+            dot
+            label={connectivityStatusLabel}
+            tone={connectivityStatus === "offline" ? "offline" : connectivityStatus === "degraded" ? "warning" : "positive"}
+          />
+          <ShellPill testID="shell-pill-outbox" tone="neutral" label={i18nStrings.shell.outbox_count(outboxCount)} />
           <Pressable
-            onLongPress={handleSignOut}
+            onLongPress={() => handleSignOut()}
             delayLongPress={500}
             style={({ pressed }) => [styles.avatar, pressed && styles.avatarPressed]}
             accessibilityLabel={`Role ${userRoleLabel}. Long press to sign out.`}
@@ -6195,7 +6266,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           visible={isNavVisible}
           onRequestClose={() => setNavOpen(false)}
         >
-          <View style={styles.drawerBackdrop}>
+          <View style={[styles.drawerBackdrop, { flexDirection: shellRowDirection, direction: "ltr" }, shellRowOverride]}>
             {drawerContent}
             <Pressable style={styles.drawerScrim} onPress={() => setNavOpen(false)} />
           </View>
@@ -6369,7 +6440,34 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
 
           {selectedResourceId ? (
             <View style={styles.detailWrapper}>
-              <View style={styles.detailHeader}>
+              {(isRouteSurface || isTasksSurface) &&
+                currentStopBannerStop && selectedResourceId !== currentStopBannerStop.stopId && !drivingModeLocked ? (
+                <View testID="mobile-detail-persistent-current-stop-banner">
+                  <CurrentStopBanner
+                    stop={currentStopBannerStop}
+                    strings={currentStopBannerStrings}
+                    onOpenStop={(stopId) => {
+                      if (drivingModeLocked || !resource) return;
+                      setSelectedResourceKey(resource);
+                      setSelectedResourceId(stopId);
+                      setSelectedResourceTitle(currentStopSnapshot?.customerName ?? stopId);
+                    }}
+                    onNavigateStop={() => {
+                      if (drivingModeLocked || !currentStopRow) return;
+                      const coordinates = extractCoordinates(currentStopRow);
+                      if (!coordinates) return;
+                      const url = buildNavigationUrl({
+                        provider: navigationPolicy.providerByPlatform[effectiveMobilePlatform] ?? "google_maps",
+                        platform: effectiveMobilePlatform,
+                        latitude: coordinates.latitude,
+                        longitude: coordinates.longitude,
+                      });
+                      if (url) void Linking.openURL(url).catch(() => showMobileNotice(strings.detail.address, strings.detail.addressIncomplete));
+                    }}
+                  />
+                </View>
+              ) : null}
+              <View style={[styles.detailHeader, { flexDirection: shellRowDirection, direction: "ltr" }, shellRowOverride]}>
                 <Pressable
                   onPress={() => {
                     setSelectedResourceId(null);
@@ -6866,13 +6964,13 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
                 await cacheStore.set(KV_KEYS.directionMode, next);
                 queryClient.invalidateQueries({ queryKey: ["kv", "get", KV_KEYS.directionMode] });
               }}
-              onSetThemeMode={setThemeMode}
+              onSetThemeMode={async (next) => { await setThemeMode(next); }}
               onOpenModule={(key) => {
                 openModuleByKey(key);
               }}
               onStartShift={startDriverShift}
               onEndShift={endDriverShift}
-              onSignOut={handleSignOut}
+              onSignOut={() => handleSignOut(true)}
             />
           ) : (
             <DiagnosticsScreen
@@ -7008,11 +7106,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         </ScrollView>
       )}
 
-        <StatusBar style="auto" />
+        <StatusBar style={appliedTheme === "dark" ? "light" : "dark"} />
         </View>
       </View>
-    </ThemeProvider>
-    </FieldOpsStylesContext.Provider>
   );
 }
 
@@ -7127,18 +7223,18 @@ function OutboxScreen({
       </View>
 
       <View style={styles.screenActionsRow}>
-        <Pressable
+        <OutboxClearDeadButton
+          entries={entriesQuery.data}
           onPress={clearDead}
-          {...mobileActionAccessibility(strings.actionAccessibility.busy, syncing || isClearingOutbox, syncing || isClearingOutbox)}
-          disabled={syncing || isClearingOutbox}
+          label={strings.outbox.clearDead}
+          accessibility={mobileActionAccessibility(strings.actionAccessibility.busy, syncing || isClearingOutbox, syncing || isClearingOutbox)}
           style={({ pressed }) => [
             styles.secondaryButton,
             (syncing || isClearingOutbox) && styles.primaryButtonDisabled,
             pressed && styles.navItemPressed,
           ]}
-        >
-          <Text style={styles.secondaryButtonText}>{strings.outbox.clearDead}</Text>
-        </Pressable>
+          textStyle={styles.secondaryButtonText}
+        />
         {diagnosticsEnabled ? (
           <Pressable
             onPress={clearAll}
@@ -7183,7 +7279,7 @@ function OutboxScreen({
           }}
         />
       ) : (
-        <OutboxEmptyState title={strings.outbox.empty} />
+        <OutboxEmptyState title={strings.outbox.emptyTitle} description={strings.outbox.emptyDescription} />
       )}
     </View>
   );
@@ -7670,12 +7766,13 @@ function ScanScreen({
       />
 
       {acceptedScanTypes.length ? (
-        <ScrollView horizontal contentContainerStyle={styles.chipRow}>
+        <ScrollView testID={MOBILE_TEST_IDS.scan.typeSelection} horizontal contentContainerStyle={styles.chipRow}>
           {acceptedScanTypes.slice(0, 12).map((candidate) => (
             <Pressable
               key={candidate}
               onPress={() => setScanType(candidate)}
               {...mobileActionAccessibility(scanInputHint, scanReadOnly)}
+              accessibilityState={{ selected: candidate === scanType, disabled: scanReadOnly }}
               disabled={scanReadOnly}
               style={({ pressed }) => [
                 styles.chip,
@@ -7683,7 +7780,7 @@ function ScanScreen({
                 pressed && styles.navItemPressed,
               ]}
             >
-              <Text style={styles.chipText}>{candidate}</Text>
+              <Text style={styles.chipText} numberOfLines={2}>{formatKeyLabel(candidate)}</Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -7700,13 +7797,18 @@ function ScanScreen({
               ? "Scan barcode (scanner mode)"
               : strings.scan.barcodePlaceholder
         }
-        autoCapitalize="none"
+        autoCapitalize="characters"
+        autoCorrect={false}
+        spellCheck={false}
+        keyboardType="default"
+        inputMode="text"
         onChangeText={setBarcode}
         submitBehavior={effectiveScanInputMode === "scanner" ? "submit" : "blurAndSubmit"}
         onSubmitEditing={() => {
           if (effectiveScanInputMode === "scanner" && canQueue) void queueScan();
         }}
-        accessibilityLabel={strings.scan.barcodePlaceholder}
+        accessibilityLabel="Barcode"
+        {...(strings.scan.barcodePlaceholder === "Barcode" ? {} : { accessibilityLabel: strings.scan.barcodePlaceholder })}
         accessibilityHint={scanInputHint}
         editable={!scanReadOnly}
       />
@@ -7916,6 +8018,33 @@ function LocationScreen({
   );
   const trackingEnabled = locationPolicy.enabled;
   const backgroundPolicyEnabled = trackingEnabled && locationPolicy.backgroundEnabled;
+  const backgroundUpgradeAllowed = Platform.OS !== "web" && !!deviceId &&
+    backgroundPolicyEnabled && locationPolicy.requestBackgroundPermission &&
+    backgroundTracking.reason === "background_permission_denied";
+  const upgradeBackgroundPermission: React.ComponentProps<typeof LocationCaptureControls>["onUpgrade"] = async (request) => {
+    if (!backgroundUpgradeAllowed || backgroundRecoveryRef.current || backgroundSyncing) return null;
+    backgroundRecoveryRef.current = true;
+    const generation = backgroundPolicyGenerationRef.current;
+    const isCurrent = () => generation === backgroundPolicyGenerationRef.current;
+    setBackgroundSyncing(true);
+    try {
+      const foreground = await Location.getForegroundPermissionsAsync();
+      if (!isCurrent() || foreground.status !== "granted") return null;
+      const permission = await request(isCurrent);
+      if (!permission || !isCurrent()) return null;
+      if (permission.status === "granted") {
+        const next = await syncBackgroundLocationTracking({ deviceId, policy: locationPolicy });
+        if (isCurrent()) setBackgroundTracking(next);
+      }
+      return isCurrent() ? permission : null;
+    } catch (error) {
+      logDebugFailure("failed to upgrade background location permission", error);
+      return null;
+    } finally {
+      backgroundRecoveryRef.current = false;
+      if (isCurrent()) setBackgroundSyncing(false);
+    }
+  };
 
   React.useEffect(() => {
     let cancelled = false;
@@ -8085,6 +8214,7 @@ function LocationScreen({
       }
       setPosition(next);
       onSpeedObserved?.(speedMpsToKph(next.coords.speed));
+      return next.coords.accuracy;
     } finally {
       setStatus("idle");
       captureLocationRef.current = false;
@@ -8263,7 +8393,7 @@ function LocationScreen({
         </Text>
       </View>
 
-      {(backgroundTracking.reason === "foreground_permission_denied" || backgroundTracking.reason === "background_permission_denied") ? (
+      {!backgroundUpgradeAllowed && (backgroundTracking.reason === "foreground_permission_denied" || backgroundTracking.reason === "background_permission_denied") ? (
         <Pressable
           {...mobileActionAccessibility(strings.actionAccessibility.recoverLocationHint, backgroundSyncing || !backgroundPolicyEnabled, backgroundSyncing)}
           accessibilityLabel={strings.actionAccessibility.recoverLocation}
@@ -8311,7 +8441,7 @@ function LocationScreen({
           </View>
         ) : null}
         <Text style={styles.noticeText}>Latest capture</Text>
-        <LocationCaptureStatus capturedAt={position?.timestamp} maxAccuracyM={locationPolicy.maxAccuracyM} />
+
         {position?.coords ? (
           <Text style={styles.mono}>
             lat={position.coords.latitude} lng={position.coords.longitude} acc={position.coords.accuracy ?? "?"} speed_kph={speedMpsToKph(position.coords.speed)}
@@ -8322,27 +8452,16 @@ function LocationScreen({
       </View>
 
       <View style={styles.screenActionsRow}>
-        <Pressable
-          onPress={() => {
-            void captureLocation();
-          }}
-          {...mobileActionAccessibility(status === "loading" ? strings.actionAccessibility.busy : trackingPolicyQuery.isLoading ? strings.actionAccessibility.policyLoading : trackingPolicyUnavailable ? strings.actionAccessibility.policyUnavailable : strings.actionAccessibility.policyDisabled, !trackingEnabled || trackingPolicyQuery.isLoading || trackingPolicyUnavailable || status === "loading", status === "loading")}
-          disabled={
-            !trackingEnabled ||
-            trackingPolicyQuery.isLoading ||
-            trackingPolicyUnavailable ||
-            status === "loading"
-          }
-          style={({ pressed }) => [
-            styles.secondaryButton,
-            status === "loading" && styles.primaryButtonDisabled,
-            pressed && styles.navItemPressed,
-          ]}
-        >
-          <Text style={styles.secondaryButtonText}>
-            {status === "loading" ? "Working..." : "Capture location"}
-          </Text>
-        </Pressable>
+        <LocationCaptureControls
+          locationPolicy={locationPolicy}
+          backgroundPolicyEnabled={backgroundUpgradeAllowed && !backgroundSyncing}
+          backgroundGranted={backgroundTracking.reason !== "background_permission_denied"}
+          openSystemSettingsSafe={openSystemSettingsSafe}
+          onUpgrade={upgradeBackgroundPermission}
+          onCapture={captureLocation}
+          captureButton={mobileActionAccessibility(status === "loading" ? strings.actionAccessibility.busy : trackingPolicyQuery.isLoading ? strings.actionAccessibility.policyLoading : trackingPolicyUnavailable ? strings.actionAccessibility.policyUnavailable : strings.actionAccessibility.policyDisabled, !trackingEnabled || trackingPolicyQuery.isLoading || trackingPolicyUnavailable || status === "loading", status === "loading")}
+          capturing={status === "loading"}
+        />
         <Pressable
           onPress={() => {
             void queuePing();
@@ -8676,6 +8795,7 @@ function MoreScreen({
   onSignOut: () => void;
 }) {
   const styles = useFieldOpsStyles();
+  const i18nStrings = strings;
   const speedPresets = React.useMemo(() => {
     const threshold = drivingSafetyState.thresholdKph;
     return Array.from(new Set([0, Math.max(0, threshold - 1), threshold, threshold + 10]));
@@ -8737,8 +8857,18 @@ function MoreScreen({
         <View style={[styles.screenActionsRow, { marginTop: 10 }]}>
           <Pressable
             accessibilityRole="button"
-            testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signOut}
-            onPress={onSignOut}
+            testID="mobile-sign-out"
+            {...(Platform.OS === "web" ? {} : { testID: FIELDOPS_NATIVE_E2E_TEST_IDS.signOut })}
+            onPress={() => void withPreferenceAction(async () => {
+              const confirmed = await confirmMobileAction({
+                title: i18nStrings.confirm.sign_out_title,
+                message: i18nStrings.confirm.sign_out_message,
+                confirmLabel: i18nStrings.confirm.sign_out_button,
+                cancelLabel: i18nStrings.confirm.cancel_button,
+                danger: true,
+              });
+              if (confirmed) onSignOut();
+            })}
             style={({ pressed }) => [styles.secondaryButton, pressed && styles.navItemPressed]}
           >
             <Text style={styles.secondaryButtonText}>{strings.more.signOut}</Text>
@@ -8843,7 +8973,7 @@ function MoreScreen({
 
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeText}>{strings.more.displayPreferences}</Text>
+        <Text style={styles.noticeText}>{i18nStrings.more.theme_section_title}</Text>
         <Text style={styles.noticeSubtext}>
           Locale {selectedLocaleMode.toUpperCase()} - Direction {selectedDirectionMode.toUpperCase()} -
           Theme {selectedThemeMode}
@@ -8854,7 +8984,7 @@ function MoreScreen({
             {displayPolicy.allowedLocales.map((localeMode) => (
               <Pressable
                 key={localeMode}
-                testID={`mobile-locale-${localeMode}`}
+                testID={localeMode === "en" ? "mobile-locale-switcher-en" : "mobile-locale-switcher-ar"}
                 onPress={() => void withPreferenceAction(() => onSetLocaleMode(localeMode))}
                 disabled={isApplyingSettings}
                 style={({ pressed }) => [
@@ -8865,7 +8995,7 @@ function MoreScreen({
                 ]}
               >
                 <Text style={styles.chipText}>
-                  {localeMode === "en" ? strings.more.english : strings.more.arabic}
+                  {localeMode === "en" ? i18nStrings.more.locale_en : i18nStrings.more.locale_ar}
                 </Text>
               </Pressable>
             ))}
@@ -8899,6 +9029,7 @@ function MoreScreen({
             {displayPolicy.allowedThemes.map((themeMode) => (
               <Pressable
                 key={themeMode}
+                testID={themeMode === "system" ? "mobile-theme-switcher-auto" : themeMode === "light" ? "mobile-theme-switcher-light" : "mobile-theme-switcher-dark"}
                 onPress={() => void withPreferenceAction(() => onSetThemeMode(themeMode))}
                 disabled={isApplyingSettings}
                 style={({ pressed }) => [
@@ -8910,10 +9041,10 @@ function MoreScreen({
               >
                 <Text style={styles.chipText}>
                   {themeMode === "system"
-                    ? strings.more.system
+                    ? i18nStrings.more.theme_auto
                     : themeMode === "light"
-                      ? strings.more.light
-                      : strings.more.dark}
+                      ? i18nStrings.more.theme_light
+                      : i18nStrings.more.theme_dark}
                 </Text>
               </Pressable>
             ))}
@@ -9521,7 +9652,12 @@ function RouteSurfaceDetailExtensions({
   onOpenRouteScan: () => void;
   onConfirmRouteDeparture: () => void;
 }) {
-  const styles = useFieldOpsStyles();
+  const baseStyles = useFieldOpsStyles();
+  const addressTextStart = useTextStart();
+  const styles = React.useMemo(() => ({
+    ...baseStyles,
+    addressText: [baseStyles.noticeSubtext, { textAlign: addressTextStart }],
+  }), [baseStyles, addressTextStart]);
   const stop = React.useMemo(() => extractOperationalStopSnapshot(detail), [detail]);
   const routeContext = React.useMemo(() => extractScanContext(detail, resourceId), [detail, resourceId]);
   const contacts = React.useMemo(
@@ -10217,7 +10353,7 @@ function RouteSurfaceDetailExtensions({
 
       <View style={[styles.noticeCard, { marginTop: 12 }]}>
         <Text style={styles.noticeText}>{strings.detail.address}</Text>
-        <Text style={styles.noticeSubtext}>
+        <Text style={styles.addressText}>
           {stop.fullAddress ?? strings.detail.addressIncomplete}
         </Text>
         {Platform.OS === "web" ? (
@@ -10458,6 +10594,7 @@ function ResourceListView({
   onSelectItem?: (item: Record<string, unknown>) => void;
 }) {
   const styles = useFieldOpsStyles();
+  const i18nStrings = strings;
   const mode = displayMode ?? "list";
   const openItem = React.useCallback(
     (item: Record<string, unknown>) => {
@@ -10684,7 +10821,9 @@ function ResourceListView({
           contentContainerStyle={styles.list}
           refreshing={Boolean(refreshing)}
           onRefresh={onRefresh}
-          ListEmptyComponent={<Text style={styles.subtitle}>{strings.tasks.empty}</Text>}
+          ListEmptyComponent={surfaceKind === "route" ? (
+            <EmptyState testID="mobile-route-empty" title={i18nStrings.route.empty_title} description={i18nStrings.route.empty_subtitle} />
+          ) : <Text style={styles.subtitle}>{strings.tasks.empty}</Text>}
           renderItem={({ item, index }) => {
             if (surfaceKind === "route") {
               const route = extractRouteCardSnapshot(item);
@@ -10851,13 +10990,14 @@ function ResourceListView({
 
 export default function App() {
   const systemColorScheme = useColorScheme();
-  const appTheme = resolveAppliedFieldOpsTheme("system", systemColorScheme);
+  const selectedThemeMode = "system";
+  const appliedTheme = resolveAppliedFieldOpsTheme(selectedThemeMode, systemColorScheme);
   const appStyles = React.useMemo(
     () =>
       createFieldOpsStyles(
-        getFieldOpsThemeTokens(appTheme, Platform.OS === "web" ? "web" : "native")
+        getFieldOpsThemeTokens(appliedTheme, Platform.OS === "web" ? "web" : "native")
       ),
-    [appTheme]
+    [appliedTheme]
   );
   const styles = appStyles;
   React.useEffect(() => {
@@ -10918,14 +11058,14 @@ export default function App() {
         <View style={styles.container} accessibilityRole="alert" testID="mobile-error-boundary">
           <Text style={styles.title}>
             {category === "offline" || category === "permission"
-              ? getFieldOpsStrings("en").errorBoundary[category].title
+              ? bootErrorStrings[category].title
               : "Something went wrong"}
           </Text>
           <Text style={styles.subtitle}>
             {category === "offline"
               ? "Check your connection and try again."
               : category === "permission"
-                ? getFieldOpsStrings("en").errorBoundary.permission.body
+                ? bootErrorStrings.permission.body
                 : "Please restart the app and try again."}
           </Text>
           <Pressable

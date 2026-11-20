@@ -3,7 +3,11 @@ const baseConfig = require("./jest.config.ui.js");
 module.exports = {
   ...baseConfig,
   displayName: "fieldops-ui",
-  testMatch: ["**/tests/ui/components/**/*.test.ts?(x)", "**/tests/unit/app-*.test.tsx"],
+  testMatch: [
+    "**/tests/ui/components/**/*.test.ts?(x)",
+    "**/tests/ui/fieldops-mobile-base64.test.ts",
+    "**/tests/unit/app-*.test.tsx",
+  ],
   transform: {
     ...baseConfig.transform,
     "^.+\\.(ts|tsx)$": [

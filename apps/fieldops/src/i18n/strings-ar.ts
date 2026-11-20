@@ -269,7 +269,6 @@ export const AR_STRINGS: FieldOpsStrings = {
     offline_mode: "وضع عدم الاتصال",
     connectivity_degraded: "الاتصال متدهور",
     outbox_needs_attention: "صندوق الصادر يحتاج إلى انتباه",
-    outbox_count: (n: number) => `الصادر: ${n}`,
     unavailable: "غير متاح",
     locked_while_moving: "مقفل أثناء الحركة",
     unsupported_route: "مسار التنقل غير مدعوم.",
@@ -288,8 +287,13 @@ export const AR_STRINGS: FieldOpsStrings = {
     loading: "جارٍ تحميل المهام...",
     itemsCount: (n: number) =>
       `${n} ${n === 1 ? "عنصر" : n === 2 ? "عنصران" : "عناصر"}`,
-    items_count: (n: number) =>
-      `${n} ${n === 1 ? "عنصر" : n === 2 ? "عنصران" : "عناصر"}`,
+  },
+  currentStopBanner: {
+    empty_label: "?? ???? ???? ????",
+    open_cta: "???? ??????",
+    navigate_cta: "??????",
+    eta_minutes: "{n} ?????",
+    sequence_prefix: "?????? {n}",
   },
   route: {
     departureRequest: "طلب المغادرة",
@@ -364,6 +368,8 @@ export const AR_STRINGS: FieldOpsStrings = {
   outbox: {
     title: "صندوق الصادر",
     empty: "صندوق الصادر فارغ.",
+    emptyTitle: "??? ?????? ?? ?????????",
+    emptyDescription: "???? ????????? ???? ?????? ??? ????? ??? ??? ??? ????????.",
     pending: (n: number) => `قيد الانتظار: ${n}`,
     clearDead: "مسح الإدخالات غير القابلة لإعادة المحاولة",
     clear_dead: "مسح المعلّقة",

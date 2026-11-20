@@ -268,7 +268,6 @@ export const EN_STRINGS = {
     offline_mode: "Offline mode",
     connectivity_degraded: "Connectivity degraded",
     outbox_needs_attention: "Outbox needs attention",
-    outbox_count: (n: number) => `Outbox: ${n}`,
     unavailable: "Unavailable",
     locked_while_moving: "Locked while moving",
     unsupported_route: "Unsupported navigation route.",
@@ -286,7 +285,13 @@ export const EN_STRINGS = {
     empty: "No items available.",
     loading: "Loading tasks...",
     itemsCount: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
-    items_count: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
+  },
+  currentStopBanner: {
+    empty_label: "No active stop",
+    open_cta: "Open stop",
+    navigate_cta: "Navigate",
+    eta_minutes: "{n} min",
+    sequence_prefix: "Stop {n}",
   },
   route: {
     departureRequest: "Request departure",
@@ -360,6 +365,8 @@ export const EN_STRINGS = {
   outbox: {
     title: "Outbox",
     empty: "Outbox is empty.",
+    emptyTitle: "All caught up",
+    emptyDescription: "Actions you take offline appear here until synced.",
     pending: (n: number) => `Pending: ${n}`,
     clearDead: "Clear dead",
     clear_dead: "Clear dead",
