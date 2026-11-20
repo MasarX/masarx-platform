@@ -1,8 +1,19 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   classifyError,
   MobileErrorBoundary,
   type ErrorCategory,
 } from "../../apps/fieldops/src/mobile-error-boundary";
+
+test("uses catalog text for the error fallback and retry button", () => {
+  const source = readFileSync(join(__dirname, "../../apps/fieldops/App.tsx"), "utf8");
+  const fallback = source.match(/testID="mobile-error-boundary">([\s\S]*?)<\/MobileErrorBoundary>/)?.[1];
+
+  expect(fallback).toContain(": bootErrorStrings.unknown.title}");
+  expect(fallback).toContain(": bootErrorStrings.unknown.body}");
+  expect(fallback).toContain(">{bootErrorStrings.tryAgain}</Text>");
+});
 
 test.each<[unknown, ErrorCategory]>([
   [new Error("Network unavailable"), "offline"],

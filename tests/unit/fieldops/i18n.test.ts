@@ -1,8 +1,27 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import * as ts from "typescript";
 import { AR_STRINGS, EN_STRINGS, getFieldOpsStrings } from "../../../apps/fieldops/src/i18n";
 import { resolveDirectionMode, resolveLocaleMode } from "../../../apps/fieldops/src/mobile-shell-display";
 
 test("Arabic catalog strings have no runs of replacement question marks", () => {
   expect(JSON.stringify(AR_STRINGS)).not.toMatch(/\?{2,}/);
+});
+
+test("Arabic catalog source has no replacement question marks in string literals", () => {
+  const path = join(__dirname, "../../../apps/fieldops/src/i18n/strings-ar.ts");
+  const catalog = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest);
+  const corruptLines: number[] = [];
+
+  function visit(node: ts.Node) {
+    if ((ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) && /\?{2,}/.test(node.text)) {
+      corruptLines.push(catalog.getLineAndCharacterOfPosition(node.getStart(catalog)).line + 1);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(catalog);
+  expect(corruptLines).toEqual([]);
 });
 
 describe("FieldOps locale selection", () => {

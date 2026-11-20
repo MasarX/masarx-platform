@@ -11063,21 +11063,21 @@ export default function App() {
           <Text style={styles.title}>
             {category === "offline" || category === "permission"
               ? bootErrorStrings[category].title
-              : "Something went wrong"}
+              : bootErrorStrings.unknown.title}
           </Text>
           <Text style={styles.subtitle}>
             {category === "offline"
               ? bootErrorStrings.offline.recoveryHint
               : category === "permission"
                 ? bootErrorStrings.permission.body
-                : "Please restart the app and try again."}
+                : bootErrorStrings.unknown.body}
           </Text>
           <Pressable
             accessibilityRole="button"
             onPress={retry}
             style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}
           >
-            <Text style={styles.primaryButtonText}>Try again</Text>
+            <Text style={styles.primaryButtonText}>{bootErrorStrings.tryAgain}</Text>
           </Pressable>
         </View>
       )}
