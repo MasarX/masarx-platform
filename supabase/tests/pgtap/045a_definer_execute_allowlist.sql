@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO pg_catalog, public, extensions, pgtap, pg_temp;
 
-SELECT plan(2);
+SELECT plan(6);
 
 CREATE TEMP TABLE definer_execute_allowlist (
   signature text PRIMARY KEY,
@@ -13,7 +13,7 @@ CREATE TEMP TABLE definer_execute_allowlist (
 );
 
 -- A role reachable through PUBLIC or role membership is an EXECUTE grant here.
-INSERT INTO definer_execute_allowlist (signature, roles, reason, owner) VALUES
+INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) VALUES
   ('api.acknowledge_ops_alert_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.adjust_api_gateway_rate_limit_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.apply_settlement_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -1178,49 +1178,91 @@ INSERT INTO definer_execute_allowlist (signature, roles, reason, owner) VALUES
   ('public.zone_override_requests_sync_manual_review_resolution_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.zone_update_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres');
 
+CREATE TEMP VIEW definer_execute_unlisted AS
+WITH allowed AS MATERIALIZED (
+  SELECT to_regprocedure(signature)::oid AS function_oid, roles
+  FROM pg_temp.definer_execute_allowlist
+)
+SELECT format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) AS signature,
+       caller.role_name
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+CROSS JOIN (VALUES ('anon'), ('authenticated')) AS caller(role_name)
+WHERE p.prosecdef
+  AND p.prokind <> 'p'
+  AND n.nspname IN ('public', 'api')
+  AND has_function_privilege(caller.role_name, p.oid, 'EXECUTE')
+  AND NOT EXISTS (
+    SELECT 1
+    FROM allowed
+    WHERE allowed.function_oid = p.oid
+      AND caller.role_name = ANY(allowed.roles)
+  )
+ORDER BY 1, 2;
+
+CREATE TEMP VIEW definer_execute_stale AS
+SELECT entry.signature, caller.role_name,
+       CASE
+         WHEN p.oid IS NULL THEN 'function is missing'
+         WHEN NOT p.prosecdef THEN 'function is no longer SECURITY DEFINER'
+         ELSE 'listed role has no EXECUTE'
+       END AS stale_reason
+FROM pg_temp.definer_execute_allowlist entry
+CROSS JOIN LATERAL unnest(entry.roles) AS caller(role_name)
+LEFT JOIN pg_proc p ON p.oid = to_regprocedure(entry.signature)::oid AND p.prokind <> 'p'
+WHERE p.oid IS NULL
+   OR NOT p.prosecdef
+   OR NOT has_function_privilege(caller.role_name, p.oid, 'EXECUTE')
+ORDER BY entry.signature, caller.role_name;
+
 SELECT is_empty(
-  $sql$
-    WITH allowed AS MATERIALIZED (
-      SELECT to_regprocedure(signature)::oid AS function_oid, roles
-      FROM pg_temp.definer_execute_allowlist
-    )
-    SELECT format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) AS signature,
-           caller.role_name
-    FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    CROSS JOIN (VALUES ('anon'), ('authenticated')) AS caller(role_name)
-    WHERE p.prosecdef
-      AND p.prokind <> 'p'
-      AND n.nspname IN ('public', 'api')
-      AND has_function_privilege(caller.role_name, p.oid, 'EXECUTE')
-      AND NOT EXISTS (
-        SELECT 1
-        FROM allowed
-        WHERE allowed.function_oid = p.oid
-          AND caller.role_name = ANY(allowed.roles)
-      )
-    ORDER BY 1, 2
-  $sql$,
+  'SELECT * FROM pg_temp.definer_execute_unlisted',
   'Every public or api SECURITY DEFINER EXECUTE grant to anon or authenticated is allow-listed'
 );
 
 SELECT is_empty(
-  $sql$
-    SELECT entry.signature, caller.role_name,
-           CASE
-             WHEN p.oid IS NULL THEN 'function is missing'
-             WHEN NOT p.prosecdef THEN 'function is no longer SECURITY DEFINER'
-             ELSE 'listed role has no EXECUTE'
-           END AS stale_reason
-    FROM pg_temp.definer_execute_allowlist entry
-    CROSS JOIN LATERAL unnest(entry.roles) AS caller(role_name)
-    LEFT JOIN pg_proc p ON p.oid = to_regprocedure(entry.signature)::oid AND p.prokind <> 'p'
-    WHERE p.oid IS NULL
-       OR NOT p.prosecdef
-       OR NOT has_function_privilege(caller.role_name, p.oid, 'EXECUTE')
-    ORDER BY entry.signature, caller.role_name
-  $sql$,
+  'SELECT * FROM pg_temp.definer_execute_stale',
   'Every role listed for a SECURITY DEFINER function still has EXECUTE'
+);
+
+CREATE FUNCTION public.definer_execute_guard_fixture_v1()
+RETURNS integer LANGUAGE sql SECURITY DEFINER
+SET search_path TO pg_catalog, pg_temp
+AS 'SELECT 1';
+
+REVOKE EXECUTE ON FUNCTION public.definer_execute_guard_fixture_v1() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.definer_execute_guard_fixture_v1() TO authenticated;
+
+-- Mutation: skip authenticated when enumerating callers. This assertion must fail.
+SELECT results_eq(
+  'SELECT signature COLLATE "default", role_name FROM pg_temp.definer_execute_unlisted',
+  $$VALUES ('public.definer_execute_guard_fixture_v1()', 'authenticated')$$,
+  'Planted negative detects the unlisted authenticated EXECUTE grant'
+);
+
+INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner)
+VALUES ('public.definer_execute_guard_fixture_v1()', '{anon,authenticated}', 'pgTAP fixture', current_user);
+
+-- Mutation: accept an entry if any listed role has EXECUTE. This assertion must fail.
+SELECT results_eq(
+  'SELECT * FROM pg_temp.definer_execute_stale',
+  $$VALUES ('public.definer_execute_guard_fixture_v1()', 'anon', 'listed role has no EXECUTE')$$,
+  'Planted negative detects the stale anon role despite the authenticated grant'
+);
+
+UPDATE pg_temp.definer_execute_allowlist SET roles = ARRAY['authenticated']
+WHERE signature = 'public.definer_execute_guard_fixture_v1()';
+
+-- Mutation: ignore the allow-list match. This assertion must fail.
+SELECT is_empty(
+  'SELECT * FROM pg_temp.definer_execute_unlisted',
+  'Planted positive has no unlisted EXECUTE grant once authenticated is listed'
+);
+
+-- Mutation: flag a listed role that still has EXECUTE. This assertion must fail.
+SELECT is_empty(
+  'SELECT * FROM pg_temp.definer_execute_stale',
+  'Planted positive has no stale role after removing anon from the list'
 );
 
 SELECT finish();

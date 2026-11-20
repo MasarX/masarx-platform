@@ -26,6 +26,13 @@ Pre-existing entries track grants pending remediation or follow-up review.
 
 ## pgTAP mutations
 
+Hosted pgTAP checks the real catalog first. In the same transaction it
+creates a throwaway definer with EXECUTE for `authenticated`, then verifies
+that the unlisted-grant check returns that grant and the stale-role check
+returns `anon` when both roles are listed. With only `authenticated` listed,
+both checks must return no rows. The transaction rolls back the function,
+its grants and the temporary allow-list.
+
 On a disposable database, insert a synthetic SECURITY DEFINER function in
 `public` or `api` inside the test transaction just before the assertion. Revoke
 `EXECUTE` from `PUBLIC`, `anon` and `authenticated`, then grant it to one
