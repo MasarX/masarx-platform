@@ -88,8 +88,8 @@ describe("Scan screen controls", () => {
   });
 
   describe("barcode TextInput is hardened for 1D/2D codes", () => {
-    test("barcode input declares autoCapitalize=\"characters\"", () => {
-      expect(barcodeInputBlock).toMatch(/autoCapitalize="characters"/);
+    test("barcode input declares autoCapitalize=\"none\"", () => {
+      expect(barcodeInputBlock).toMatch(/autoCapitalize="none"/);
     });
 
     test("barcode input disables autoCorrect", () => {

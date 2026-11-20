@@ -7801,7 +7801,7 @@ function ScanScreen({
               ? "Scan barcode (scanner mode)"
               : strings.scan.barcodePlaceholder
         }
-        autoCapitalize="characters"
+        autoCapitalize="none"
         autoCorrect={false}
         spellCheck={false}
         keyboardType="default"
