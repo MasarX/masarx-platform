@@ -234,7 +234,7 @@ export function createSupabaseExecutor(
         throw error;
       }
       const payload = result.data;
-      if (rpc === "ui_execute_command_v1" && payload?.ok === false) {
+      if (payload?.ok === false) {
         const { code, message } = payload.error ?? {};
         throw Object.assign(
           new Error(typeof message === "string" ? message : "Command execution was rejected."),

@@ -51,7 +51,7 @@ describe("mobile supabase executor", () => {
   test("throws when a rejected command omits its error object", async () => {
     const executor = createSupabaseExecutor(createRpcClient({ data: { ok: false }, error: null }));
 
-    await expect(executor("ui_execute_command_v1", { p_action_key: "tasks.complete" })).rejects.toMatchObject({
+    await expect(executor("ui_execute_return_to_branch_action_v1", {})).rejects.toMatchObject({
       code: "command_rejected",
       message: "Command execution was rejected.",
     });
