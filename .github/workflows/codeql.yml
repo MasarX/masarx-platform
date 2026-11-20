@@ -2,11 +2,11 @@ name: CodeQL
 
 'on':
   pull_request:
-    branches: [dev, main]
+    branches: [main]
   push:
-    branches: [dev, main]
+    branches: [main]
   merge_group:
-    branches: [dev, main]
+    branches: [main]
     types: [checks_requested]
   schedule:
     - cron: '30 4 * * 1'
@@ -37,9 +37,87 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3 (Node24)
+        env:
+          # Use full analysis to avoid saving an overlay-base cache for every main commit.
+          CODEQL_OVERLAY_DATABASE_MODE: 'none'
         with:
           languages: ${{ matrix.language }}
           build-mode: none
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3 (Node24)
         with:
           category: /language:${{ matrix.language }}
+
+  cache-maintenance:
+    name: Cap Actions cache usage
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Prune oldest caches
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I - <<'PY'
+          import json
+          import os
+          import subprocess
+          from datetime import datetime
+
+          endpoint = f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/caches"
+          pages = json.loads(subprocess.check_output([
+              "gh", "api", "--paginate", "--slurp",
+              f"{endpoint}?per_page=100&sort=last_accessed_at&direction=asc",
+          ]))
+          caches = {cache["id"]: cache for page in pages for cache in page["actions_caches"]}
+          if pages and any(page["total_count"] != len(caches) for page in pages):
+              print("::warning::Cache inventory changed while listing; skipping cleanup.", flush=True)
+              raise SystemExit(1)
+
+          newest_first = sorted(
+              caches.values(),
+              key=lambda cache: datetime.fromisoformat(cache["created_at"]),
+              reverse=True,
+          )
+          newest_by_prefix = {}
+          protected = set()
+          for cache in newest_first:
+              ref, key = cache["ref"], cache["key"]
+              if key.startswith("codeql-overlay-base-database-"):
+                  prefix = "codeql-overlay-base-database-"
+              elif key.startswith("node-cache-") and "-npm-" in key:
+                  prefix = key.partition("-npm-")[0] + "-npm-"
+              elif ref == "refs/heads/main":
+                  # Require an exact-key replacement for unfamiliar main caches.
+                  prefix = key
+              else:
+                  continue
+              created_at = datetime.fromisoformat(cache["created_at"])
+              if newest_by_prefix.setdefault((ref, prefix), created_at) == created_at:
+                  protected.add(cache["id"])
+
+          oldest_first = sorted(
+              caches.values(),
+              key=lambda cache: (datetime.fromisoformat(cache["last_accessed_at"]), cache["id"]),
+          )
+          cap = 6_000_000_000
+          total = sum(cache["size_in_bytes"] for cache in oldest_first)
+          print(f"Actions cache snapshot: {total} bytes (target below {cap})", flush=True)
+          for cache in oldest_first:
+              if total < cap:
+                  break
+              cache_id = cache["id"]
+              if cache_id in protected:
+                  continue
+              size = cache["size_in_bytes"]
+              print(f"Deleting cache {cache_id} ({size} bytes)", flush=True)
+              subprocess.run(
+                  ["gh", "api", "--method", "DELETE", "--silent", f"{endpoint}/{cache_id}"],
+                  check=True,
+              )
+              total -= size
+          if total >= cap:
+              print(f"::warning::Protected caches leave estimated usage at {total} bytes.")
+          PY
