@@ -51,11 +51,11 @@ jobs:
     name: Cap Actions cache usage
     if: github.event_name == 'schedule'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
     permissions:
       actions: write
     steps:
       - name: Prune oldest caches
+        timeout-minutes: 5
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -69,37 +69,50 @@ jobs:
           endpoint = f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/caches"
           pages = json.loads(subprocess.check_output([
               "gh", "api", "--paginate", "--slurp",
-              f"{endpoint}?per_page=100&sort=created_at&direction=desc",
+              f"{endpoint}?per_page=100&sort=last_accessed_at&direction=asc",
           ]))
           caches = {cache["id"]: cache for page in pages for cache in page["actions_caches"]}
           if pages and any(page["total_count"] != len(caches) for page in pages):
-              raise SystemExit("Cache inventory changed while listing; skipping cleanup.")
+              print("::warning::Cache inventory changed while listing; skipping cleanup.", flush=True)
+              raise SystemExit(1)
 
           newest_first = sorted(
               caches.values(),
-              key=lambda cache: (datetime.fromisoformat(cache["created_at"]), cache["id"]),
+              key=lambda cache: datetime.fromisoformat(cache["created_at"]),
               reverse=True,
           )
-          newest_npm = next((
-              cache["id"] for cache in newest_first
-              if cache["key"].startswith("node-cache-") and "-npm-" in cache["key"]
-          ), None)
-          newest_overlay = next((
-              cache["id"] for cache in newest_first
-              if cache["key"].startswith("codeql-overlay-base-database-")
-          ), None)
-          protected = {newest_npm, newest_overlay}
+          newest_by_prefix = {}
+          protected = set()
+          for cache in newest_first:
+              ref, key = cache["ref"], cache["key"]
+              if key.startswith("codeql-overlay-base-database-"):
+                  prefix = "codeql-overlay-base-database-"
+              elif key.startswith("node-cache-") and "-npm-" in key:
+                  prefix = key.partition("-npm-")[0] + "-npm-"
+              elif ref == "refs/heads/main":
+                  # Require an exact-key replacement for unfamiliar main caches.
+                  prefix = key
+              else:
+                  continue
+              created_at = datetime.fromisoformat(cache["created_at"])
+              if newest_by_prefix.setdefault((ref, prefix), created_at) == created_at:
+                  protected.add(cache["id"])
+
+          oldest_first = sorted(
+              caches.values(),
+              key=lambda cache: (datetime.fromisoformat(cache["last_accessed_at"]), cache["id"]),
+          )
           cap = 6_000_000_000
-          total = sum(cache["size_in_bytes"] for cache in newest_first)
+          total = sum(cache["size_in_bytes"] for cache in oldest_first)
           print(f"Actions cache snapshot: {total} bytes (target below {cap})", flush=True)
-          for cache in reversed(newest_first):
+          for cache in oldest_first:
               if total < cap:
                   break
               cache_id = cache["id"]
               if cache_id in protected:
                   continue
               size = cache["size_in_bytes"]
-              print(f"Would delete cache {cache_id} ({size} bytes)", flush=True)
+              print(f"Deleting cache {cache_id} ({size} bytes)", flush=True)
               subprocess.run(
                   ["gh", "api", "--method", "DELETE", "--silent", f"{endpoint}/{cache_id}"],
                   check=True,
