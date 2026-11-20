@@ -1170,7 +1170,7 @@ export function CredentialsModule() {
     );
   }
 
-  if (credDirectoryQuery.isLoading || providersQuery.isLoading) {
+  if (credDirectoryQuery.isLoading || providersQuery.isLoading || apiRoutesQuery.isLoading || providerAccountQuery.isLoading) {
     return (
       <div className="page">
         <PageHeader

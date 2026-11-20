@@ -2151,7 +2151,7 @@ function LabelDesignComposer({
           selectedShipmentBoxId={selectedPreviewShipmentBoxId}
           selectedDraftId={canWrite ? currentDraft?.id ?? (draftText.trim() ? 'unsaved-draft' : '') : ''}
           samplePayloadJson={samplePayloadText || '{}'}
-          previewResponseJson={previewResponseText || '{}'}
+          previewResponseJson={previewResponseText}
           onShipmentChange={(id) => {
             setSelectedPreviewShipmentId(id);
             setSelectedPreviewShipmentBoxId('');

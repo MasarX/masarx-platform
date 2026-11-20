@@ -238,6 +238,7 @@ const BACKEND_ONLY_ACCEPTED = Object.freeze(new Set([
   // surfaces; the native app consumes them through row-driven mobile
   // navigation/RPC policy and the console proof lives in Mobile V2 evidence.
   'cash_drop.write',
+  'kyc.write',
   'hold.read',
   'hold.write',
   'location_pings.write',      // mobile-only (Field Ops app)
