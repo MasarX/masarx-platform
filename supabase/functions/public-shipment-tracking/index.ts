@@ -213,29 +213,40 @@ Deno.serve(async (req: Request): Promise<Response> => {
     LOCAL_TRACKING_TURNSTILE_SECRET_KEY,
     EDGE_SUPABASE_SECRET_KEY,
     SUPABASE_SERVICE_KEY,
-    clientIp,
   ];
 
-  const reportInternalError = (status: number, code: string, detail: unknown, rpc?: string) => {
-    let message = typeof detail === "object" && detail !== null && "message" in detail
-      ? asString(detail.message)
-      : asString(detail);
+  const redactLogText = (detail: unknown) => {
+    let text = asString(detail);
     for (const value of sensitiveLogValues) {
       if (!value) continue;
       const formEncoded = new URLSearchParams({ value }).toString().slice("value=".length);
       const jsonEncoded = JSON.stringify(value).slice(1, -1);
       for (const sensitive of [value, formEncoded, jsonEncoded]) {
-        message = message.replaceAll(sensitive, "[redacted]");
+        text = text.replaceAll(sensitive, "[redacted]");
       }
     }
+    return text;
+  };
+
+  const reportInternalError = (status: number, code: string, detail: unknown, fields: JsonRecord = {}) => {
+    const message = typeof detail === "object" && detail !== null && "message" in detail
+      ? detail.message
+      : detail;
     logStructured("error", "public_shipment_tracking_failed", {
+      ...fields,
       service: "public-shipment-tracking",
       code,
-      message: message || code,
-      ...(rpc ? { rpc } : {}),
+      message: redactLogText(message) || code,
     });
     return json(status, { ok: false, error: { code } }, cors.headers);
   };
+
+  const rejectTurnstile = (code: string, errorCodes: unknown) =>
+    reportInternalError(400, code, null, {
+      turnstile_error_codes: Array.isArray(errorCodes)
+        ? errorCodes.filter((value) => typeof value === "string").map(redactLogText)
+        : null,
+    });
 
   let payload: JsonRecord;
   try {
@@ -246,7 +257,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const turnstileToken = asString(payload.turnstile_token);
-  sensitiveLogValues.push(turnstileToken, asString(payload.session_token));
+  sensitiveLogValues.push(
+    ...[clientIp, turnstileToken, asString(payload.session_token)].filter((value) => value.length >= 8),
+  );
 
   let serviceClient;
   try {
@@ -285,15 +298,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         })();
         const actualHost = turnstileResult.hostname.toLowerCase();
         if (expectedHost && actualHost && expectedHost !== actualHost) {
-          return json(
-            400,
-            {
-              ok: false,
-              error: { code: "turnstile_invalid" },
-              turnstile_error_codes: turnstileErrorCodes,
-            },
-            cors.headers,
-          );
+          return rejectTurnstile("turnstile_invalid", turnstileErrorCodes);
         }
       }
     } catch (error) {
@@ -301,15 +306,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (!turnstileVerified) {
-      return json(
-        400,
-        {
-          ok: false,
-          error: { code: "turnstile_required" },
-          turnstile_error_codes: turnstileErrorCodes,
-        },
-        cors.headers,
-      );
+      return rejectTurnstile("turnstile_required", turnstileErrorCodes);
     }
   }
 
@@ -328,7 +325,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: rpcData, error: rpcError } = await serviceClient.rpc(rpcName, rpcPayload);
   if (rpcError) {
-    return reportInternalError(500, "rpc_failed", rpcError, rpcName);
+    return reportInternalError(500, "rpc_failed", rpcError, {
+      rpc: rpcName,
+      rpc_error_code: redactLogText(rpcError.code),
+      details: redactLogText(rpcError.details),
+      hint: redactLogText(rpcError.hint),
+    });
   }
 
   const rpcBody = (rpcData && typeof rpcData === "object" ? rpcData : {}) as JsonRecord;

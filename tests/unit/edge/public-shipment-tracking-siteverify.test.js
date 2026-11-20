@@ -12,14 +12,17 @@ const serviceKey = 'fixture-service-key';
 const verifierSecret = 'fixture-turnstile-secret';
 const salt = 'fixture-tracking-salt';
 const ip = '203.0.113.4';
-const payload = { reference: 'FIXTURE-123', turnstile_token: '  fixture+token&value  ' };
+const turnstileToken = 'fixture+"token&value';
+const formEncodedToken = 'fixture%2B%22token%26value';
+const jsonEscapedToken = JSON.stringify(turnstileToken).slice(1, -1);
+const payload = { reference: 'FIXTURE-123', turnstile_token: `  ${turnstileToken}  ` };
 const rpcResult = { ok: true, tracking: { status: 'in_transit' } };
 const verificationRequest = [
   'https://challenges.cloudflare.com/turnstile/v0/siteverify',
   {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: 'secret=fixture-turnstile-secret&response=fixture%2Btoken%26value&remoteip=203.0.113.4',
+    body: `secret=fixture-turnstile-secret&response=${formEncodedToken}&remoteip=203.0.113.4`,
   },
 ];
 
@@ -91,7 +94,7 @@ async function expectResponse(response, log, status, body) {
   expect(JSON.parse(text)).toEqual(body);
   expect(text.includes(verifierSecret)).toBe(false);
   const output = inspect([...response.headers, ...log.mock.calls], { depth: null });
-  for (const value of [verifierSecret, serviceKey, payload.turnstile_token.trim(), ip, 'fixture%2Btoken%26value']) {
+  for (const value of [verifierSecret, serviceKey, turnstileToken, ip, formEncodedToken]) {
     expect(output.includes(value)).toBe(false);
   }
   return text;
@@ -102,6 +105,7 @@ function expectErrorLog(log, code, message, rpc) {
   const entry = JSON.parse(log.mock.calls[0][0]);
   expect([entry.level, entry.event, entry.code, entry.message, entry.rpc])
     .toEqual(['error', 'public_shipment_tracking_failed', code, message, rpc]);
+  return entry;
 }
 
 describe('public shipment tracking siteverify', () => {
@@ -118,6 +122,9 @@ describe('public shipment tracking siteverify', () => {
   test.each([
     ['success:false', () => Response.json({ success: false, 'error-codes': ['invalid-input-response'] }),
       ['invalid-input-response']],
+    ['success:false with an echoed verifier secret', () => Response.json({
+      success: false, 'error-codes': [verifierSecret],
+    }), ['[redacted]']],
     ['non-JSON HTTP 503 body', () => new Response('Service Unavailable', { status: 503 }), null],
     ['HTTP 503 with {success:true}', () => Response.json({
       success: true,
@@ -128,11 +135,10 @@ describe('public shipment tracking siteverify', () => {
     app.fetch.mockResolvedValueOnce(upstream());
     const response = await app.handler(request(payload));
 
-    await expectResponse(response, app.log, 400, {
-      ok: false,
-      error: { code: 'turnstile_required' },
-      turnstile_error_codes: errorCodes,
-    });
+    const failure = 'turnstile_required';
+    await expectResponse(response, app.log, 400, { ok: false, error: { code: failure } });
+    const entry = expectErrorLog(app.logError, failure, failure);
+    expect(entry.turnstile_error_codes).toEqual(errorCodes);
     expect(app.fetch.mock.calls).toEqual([verificationRequest]);
     expect(app.rpc).not.toHaveBeenCalled();
     expect(app.from).not.toHaveBeenCalled();
@@ -143,11 +149,10 @@ describe('public shipment tracking siteverify', () => {
     app.fetch.mockResolvedValueOnce(Response.json({ success: true, hostname: 'evil.example.invalid' }));
     const response = await app.handler(request(payload));
 
-    await expectResponse(response, app.log, 400, {
-      ok: false,
-      error: { code: 'turnstile_invalid' },
-      turnstile_error_codes: null,
-    });
+    const failure = 'turnstile_invalid';
+    await expectResponse(response, app.log, 400, { ok: false, error: { code: failure } });
+    const entry = expectErrorLog(app.logError, failure, failure);
+    expect(entry.turnstile_error_codes).toBeNull();
     expect(app.fetch.mock.calls).toEqual([verificationRequest]);
     expect(app.rpc).not.toHaveBeenCalled();
     expect(app.from).not.toHaveBeenCalled();
@@ -157,7 +162,7 @@ describe('public shipment tracking siteverify', () => {
     const app = setup();
     const message = 'siteverify unavailable';
     app.fetch.mockRejectedValueOnce(new Error(
-      `${message}: ${verifierSecret} ${serviceKey} ${payload.turnstile_token.trim()} ${ip} fixture%2Btoken%26value`,
+      `${message}: ${verifierSecret} ${serviceKey} ${turnstileToken} ${ip} ${formEncodedToken} ${jsonEscapedToken}`,
     ));
     const response = await app.handler(request(payload));
 
@@ -167,7 +172,7 @@ describe('public shipment tracking siteverify', () => {
     });
     expect(text).not.toContain(message);
     expectErrorLog(app.logError, 'turnstile_verify_failed',
-      `${message}: [redacted] [redacted] [redacted] [redacted] [redacted]`);
+      `${message}: [redacted] [redacted] [redacted] [redacted] [redacted] [redacted]`);
     expect(app.fetch.mock.calls).toEqual([verificationRequest]);
     expect(app.rpc).not.toHaveBeenCalled();
     expect(app.from).not.toHaveBeenCalled();
@@ -178,15 +183,52 @@ describe('public shipment tracking siteverify', () => {
     const message = 'fixture internal detail';
     const rpcName = 'public_tracking_lookup_v1';
     app.fetch.mockResolvedValueOnce(Response.json({ success: true, hostname: 'tracking.example.invalid' }));
-    app.rpc.mockResolvedValueOnce({ data: null, error: { message, code: 'P0001' } });
+    app.rpc.mockResolvedValueOnce({ data: null, error: {
+      message,
+      code: 'P0001',
+      details: `fixture details: ${serviceKey}`,
+      hint: `fixture hint: ${turnstileToken}`,
+    } });
     const response = await app.handler(request(payload));
 
     const text = await expectResponse(response, app.log, 500, { ok: false, error: { code: 'rpc_failed' } });
     expect(text).not.toContain(message);
     expect(text).not.toContain(rpcName);
-    expectErrorLog(app.logError, 'rpc_failed', message, rpcName);
+    const entry = expectErrorLog(app.logError, 'rpc_failed', message, rpcName);
+    expect([entry.rpc_error_code, entry.details, entry.hint])
+      .toEqual(['P0001', 'fixture details: [redacted]', 'fixture hint: [redacted]']);
     expect(app.rpc).toHaveBeenCalledTimes(1);
     expect(app.from).not.toHaveBeenCalled();
+  });
+
+  test('redacts the session token in RPC diagnostics on the session route', async () => {
+    const app = setup();
+    const sessionToken = 'sess-123';
+    const rpcName = 'public_tracking_session_v1';
+    app.rpc.mockResolvedValueOnce({ data: null, error: {
+      message: `session lookup failed: ${sessionToken}`,
+      code: sessionToken,
+    } });
+    const response = await app.handler(request({ session_token: sessionToken }, 'session'));
+
+    await expectResponse(response, app.log, 500, { ok: false, error: { code: 'rpc_failed' } });
+    const entry = expectErrorLog(app.logError, 'rpc_failed', 'session lookup failed: [redacted]', rpcName);
+    expect(entry.rpc_error_code).toBe('[redacted]');
+    expect(app.fetch).not.toHaveBeenCalled();
+    expect(app.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  test('short caller values do not erase diagnostic text', async () => {
+    const app = setup();
+    const message = 'siteverify unavailable';
+    app.fetch.mockRejectedValueOnce(new Error(message));
+    const req = request({ ...payload, turnstile_token: 'e', session_token: 'i' });
+    req.headers.set('cf-connecting-ip', 'a');
+    const response = await app.handler(req);
+
+    await expectResponse(response, app.log, 502, { ok: false, error: { code: 'turnstile_verify_failed' } });
+    expectErrorLog(app.logError, 'turnstile_verify_failed', message);
+    expect(app.rpc).not.toHaveBeenCalled();
   });
 
   test('keeps malformed request data out of diagnostics', async () => {
