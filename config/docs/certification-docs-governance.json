@@ -1,0 +1,42 @@
+{
+  "maxAgeDays": 120,
+  "registry": {
+    "path": "config/qa/flow-coverage-registry.json",
+    "requiredKeys": [
+      "registry_id",
+      "baseline_date",
+      "purpose"
+    ]
+  },
+  "formInventory": {
+    "path": "config/qa/form-contract-inventory.json",
+    "requiredKeys": [
+      "schema_version",
+      "inventory_id",
+      "inventory_status",
+      "last_updated",
+      "purpose",
+      "status_legend",
+      "entries"
+    ]
+  },
+  "matrix": {
+    "path": "docs/ops/testing/FULL-TEST-CERTIFICATION-MATRIX.md",
+    "requiredPatterns": [
+      "^# Full Test Certification Matrix$",
+      "^Baseline date: `\\d{4}-\\d{2}-\\d{2}`$",
+      "^Registry source of truth: `config/qa/flow-coverage-registry\\.json`$",
+      "contract_form_lookup_and_user_readability"
+    ]
+  },
+  "prompt": {
+    "path": "docs/ops/plans/TEST-IMPLEMENTATION-PROMPT.md",
+    "requiredPatterns": [
+      "^# MasarX Test Implementation -- Execution Briefing$",
+      "^> Generated \\d{4}-\\d{2}-\\d{2} from .+",
+      "^> This file is an execution brief and historical implementation inventory, not$",
+      "^> the certification source of truth for current completion status\\.$",
+      "^### Form Input Contract \\(Added 2026-04-16\\)$"
+    ]
+  }
+}

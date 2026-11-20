@@ -26,7 +26,7 @@ function getErrorCode(error: unknown): string | null {
   return null;
 }
 
-function isTransientNetworkError(error: unknown) {
+function isTransientNetworkError(error: unknown, depth = 0): boolean {
   const cause = error && typeof error === "object"
     ? (error as { cause?: unknown }).cause
     : undefined;
@@ -41,14 +41,15 @@ function isTransientNetworkError(error: unknown) {
   if (message.includes("eai_again")) return true;
 
   const code = getErrorCode(error);
-  if (!code) return false;
-  return [
+  if (code && [
     "UND_ERR_CONNECT_TIMEOUT",
     "ECONNRESET",
     "ETIMEDOUT",
     "ENOTFOUND",
     "EAI_AGAIN",
-  ].includes(code);
+  ].includes(code)) return true;
+
+  return !!cause && depth < 3 && isTransientNetworkError(cause, depth + 1);
 }
 
 function sleep(ms: number) {

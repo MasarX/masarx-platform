@@ -89,6 +89,8 @@
       "suite_files": [
         "tests/e2e/console-workflow-studio-smoke.spec.ts",
         "tests/e2e/portal-workflow-studio-smoke.spec.ts",
+        "tests/e2e/console-workflow-bindings.spec.ts",
+        "tests/e2e/portal-workflow-bindings.spec.ts",
         "tests/e2e/portal-recurring-shipment-template.spec.ts",
         "tests/e2e/console-workflow-request-flows.spec.ts"
       ],

@@ -28,7 +28,10 @@ if (!DATABASE_URL) {
 
 const pool = new Pool({ connectionString: DATABASE_URL });
 
-function buildShipmentOperationPolicy(deleteWindowHours = 24) {
+function buildShipmentOperationPolicy(
+  deleteWindowHours = 24,
+  addressDefaultCountryCode = "QA",
+) {
   return {
     version: 1,
     modify: {
@@ -46,6 +49,7 @@ function buildShipmentOperationPolicy(deleteWindowHours = 24) {
     },
     address: {
       allowed_statuses: ["pending"],
+      default_country_code: addressDefaultCountryCode,
     },
     reschedule: {
       allowed_statuses: ["pending"],
@@ -127,7 +131,12 @@ async function ensureFixtureSender(client, demo) {
   return senderId;
 }
 
-async function upsertPolicy(client, senderId, deleteWindowHours) {
+async function upsertPolicy(
+  client,
+  senderId,
+  deleteWindowHours,
+  addressDefaultCountryCode = "QA",
+) {
   await client.query(
     `
       select public.upsert_settings_value_v1(
@@ -139,7 +148,15 @@ async function upsertPolicy(client, senderId, deleteWindowHours) {
         'qa shipment amend/cancel playwright fixtures'
       )
     `,
-    [senderId, JSON.stringify(buildShipmentOperationPolicy(deleteWindowHours))],
+    [
+      senderId,
+      JSON.stringify(
+        buildShipmentOperationPolicy(
+          deleteWindowHours,
+          addressDefaultCountryCode,
+        ),
+      ),
+    ],
   );
 }
 
@@ -244,9 +261,15 @@ async function main() {
 
     const demo = readDemoManifest();
     const deleteWindowHours = 24;
+    const addressDefaultCountryCode = "QA";
     const summary = await withFixtureProvisionLock(client, async () => {
       const senderId = await ensureFixtureSender(client, demo);
-      await upsertPolicy(client, senderId, deleteWindowHours);
+      await upsertPolicy(
+        client,
+        senderId,
+        deleteWindowHours,
+        addressDefaultCountryCode,
+      );
 
       const runToken = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
       const now = new Date();
@@ -279,6 +302,7 @@ async function main() {
           scope_type: "sender",
           scope_id: senderId,
           delete_window_hours: deleteWindowHours,
+          address_default_country_code: addressDefaultCountryCode,
         },
         shipments: {
           cancel_allowed: await fetchShipmentSummary(client, cancelAllowedId),

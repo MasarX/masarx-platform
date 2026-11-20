@@ -118,6 +118,17 @@ for (const config of appConfigs) {
       }
 
       if (canRead) {
+        const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+        const summaryScope = page.getByTestId(`${config.testIdPrefix}-summary-scope`);
+        const scopeReference = page.getByTestId(`${config.testIdPrefix}-summary-scope-reference`);
+        const resolution = page.getByTestId(`${config.testIdPrefix}-summary-settings-resolution`);
+        await expect(summaryScope).toBeVisible();
+        await expect(summaryScope).not.toContainText(uuid);
+        await expect(resolution).toBeVisible();
+        await expect(resolution).not.toContainText(uuid);
+        if (await scopeReference.count()) {
+          await expect(scopeReference).toContainText(/^REF-/);
+        }
         const sections = page.locator("section details");
         const sectionCount = await sections.count();
         if (sectionCount === 0) {

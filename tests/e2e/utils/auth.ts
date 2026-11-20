@@ -171,7 +171,10 @@ export async function signInWithPassword(
   }> = [];
   const isDemoUser = /@demo\.local$/i.test(email);
   const recoverAuthenticatedShell = async () => {
-    const identity = findSupabaseSessionIdentity(await page.context().cookies(), email);
+    if (page.isClosed()) return false;
+    const cookies = await page.context().cookies().catch(() => null);
+    if (!cookies) return false;
+    const identity = findSupabaseSessionIdentity(cookies, email);
     if (!identity) return false;
 
     await page.waitForLoadState("domcontentloaded").catch(() => {});
@@ -193,9 +196,9 @@ export async function signInWithPassword(
     return !(await visibleAuthGate.count());
   };
   const waitForAuthGateToHide = async () => {
-    if (!(await authGate.count())) return true;
-    return await expect(authGate)
-      .toBeHidden({ timeout: 60_000 })
+    const visibleGates = page.locator('[data-testid$="-auth-required"]:visible');
+    return await expect(visibleGates)
+      .toHaveCount(0, { timeout: 60_000 })
       .then(() => true)
       .catch(() => false);
   };

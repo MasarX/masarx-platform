@@ -4,12 +4,18 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
+const ERROR_RATE_MAX = Number(__ENV.API_GATEWAY_HTTP_ERROR_RATE_MAX || 0.05);
+const DURATION_P95_MS = Number(__ENV.API_GATEWAY_HTTP_P95_MS || 1500);
+const DURATION_P99_MS = Number(__ENV.API_GATEWAY_HTTP_P99_MS || 5000);
+const ITER_SLEEP_MS = Math.max(0, Number(__ENV.API_GATEWAY_HTTP_ITER_SLEEP_MS || 50));
+
 export const options = {
   vus: Number(__ENV.API_GATEWAY_HTTP_VUS || 5),
   duration: __ENV.API_GATEWAY_HTTP_DURATION || '30s',
   thresholds: {
-    http_req_failed: ['rate<0.05'],
-    http_req_duration: ['p(95)<1500'],
+    checks: [`rate>${1 - ERROR_RATE_MAX}`],
+    http_req_failed: [`rate<${ERROR_RATE_MAX}`],
+    http_req_duration: [`p(95)<${DURATION_P95_MS}`, `p(99)<${DURATION_P99_MS}`],
   },
 };
 
@@ -70,5 +76,5 @@ export default function () {
   check(res, {
     'status is 2xx/202': (r) => [200, 201, 202].includes(r.status),
   });
-  sleep(0.05);
+  sleep(ITER_SLEEP_MS / 1000);
 }

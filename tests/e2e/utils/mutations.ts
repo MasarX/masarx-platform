@@ -5,7 +5,7 @@ type AssertE2EMutationsAllowedParams = {
   details?: string;
 };
 
-const ALLOWED_MUTATION_ENVS = new Set(["preview", "dedicated"]);
+const ALLOWED_MUTATION_ENVS = new Set(["preview", "dedicated", "local"]);
 
 function isStrictSharedEnv() {
   return isTruthy(process.env.STRICT_E2E_GATE_ENV) || isTruthy(process.env.CI);
@@ -26,7 +26,7 @@ export function assertE2EMutationsAllowed(params: AssertE2EMutationsAllowedParam
         `[e2e-mutations] ${label}: persistent mutations are disabled in strict/shared E2E runs.${suffix}`,
         "To enable mutations in an isolated environment, set:",
         "- E2E_ALLOW_MUTATIONS=1",
-        "- E2E_MUTATION_ENV=preview (or dedicated)",
+        "- E2E_MUTATION_ENV=preview, dedicated, or local",
       ].join("\n")
     );
   }
@@ -35,10 +35,9 @@ export function assertE2EMutationsAllowed(params: AssertE2EMutationsAllowedParam
   if (!ALLOWED_MUTATION_ENVS.has(mutationEnv)) {
     throw new Error(
       [
-        `[e2e-mutations] ${label}: E2E_ALLOW_MUTATIONS=1 requires E2E_MUTATION_ENV=preview|dedicated in strict/shared runs.`,
+        `[e2e-mutations] ${label}: E2E_ALLOW_MUTATIONS=1 requires E2E_MUTATION_ENV=preview|dedicated|local in strict/shared runs.`,
         `Received E2E_MUTATION_ENV=${formatMissingValue(mutationEnv)}.`,
       ].join("\n")
     );
   }
 }
-

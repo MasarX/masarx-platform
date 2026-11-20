@@ -14,6 +14,8 @@ module.exports = {
     '**/tests/unit/**/*.test.js',
     '**/tests/unit/**/*.test.ts',
     '**/tests/unit/**/*.test.tsx',
+    '**/tests/quality/**/*.test.js',
+    '**/tests/quality/**/*.test.ts',
   ],
   testPathIgnorePatterns: WORKTREE_TEMP_IGNORE_PATTERNS,
   modulePathIgnorePatterns: WORKTREE_TEMP_IGNORE_PATTERNS,

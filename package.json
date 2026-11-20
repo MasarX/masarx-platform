@@ -123,6 +123,8 @@
     "analyze:frontend": "npm --prefix apps/console run build && npm --prefix apps/portal run build && npm run check:bundle-budgets",
     "test:ui": "jest --config config/tooling/jest.config.ui.js",
     "test:ui:fieldops": "jest --config config/tooling/jest.config.ui.fieldops.js",
+    "fieldops:a11y:audit": "node scripts/qa/fieldops-a11y-audit.js",
+    "fieldops:a11y:audit:strict": "node scripts/qa/fieldops-a11y-audit.js --strict",
     "test:e2e": "playwright test",
     "test:e2e:tenant-invite": "playwright test -c playwright.tenant-invite.config.ts --project console",
     "test:e2e:fieldops": "playwright test -c playwright.fieldops.config.ts",

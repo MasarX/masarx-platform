@@ -20,21 +20,27 @@ function normalizeSameSite(
   }
 }
 
-function toPlaywrightCookie(surfaceOrigin: string, cookie: BrowserAuthCookie) {
+function toStorageCookie(surfaceOrigin: string, cookie: BrowserAuthCookie) {
+  const surface = new URL(surfaceOrigin);
+  const path = cookie.options.path ?? "/";
+  const scope = new URL(path, surface.origin);
+  if (!path.startsWith("/") || scope.origin !== surface.origin) {
+    throw new Error("Browser auth cookie path must stay on the application origin.");
+  }
   const expires =
     typeof cookie.options.maxAge === "number" && cookie.options.maxAge > 0
       ? Math.floor(Date.now() / 1000) + cookie.options.maxAge
-      : undefined;
-  const cookieUrl = new URL(cookie.options.path ?? "/", surfaceOrigin).toString();
+      : -1;
 
   return {
     name: cookie.name,
     value: cookie.value,
-    url: cookieUrl,
+    domain: surface.hostname,
+    path: scope.pathname,
     httpOnly: cookie.options.httpOnly ?? false,
-    sameSite: normalizeSameSite(cookie.options.sameSite),
-    secure: cookie.options.secure ?? surfaceOrigin.startsWith("https://"),
-    ...(typeof expires === "number" ? { expires } : null),
+    sameSite: normalizeSameSite(cookie.options.sameSite) ?? ("Lax" as const),
+    secure: cookie.options.secure ?? surface.protocol === "https:",
+    expires,
   };
 }
 
@@ -52,7 +58,7 @@ export async function seedBrowserAuthSession(params: {
     label,
   });
   await page.context().addCookies(
-    cookies.map((cookie) => toPlaywrightCookie(surfaceOrigin, cookie))
+    cookies.map((cookie) => toStorageCookie(surfaceOrigin, cookie))
   );
 }
 
@@ -69,7 +75,7 @@ export async function createBrowserAuthStorageState(params: {
     label,
   });
   return {
-    cookies: cookies.map((cookie) => toPlaywrightCookie(surfaceOrigin, cookie)),
+    cookies: cookies.map((cookie) => toStorageCookie(surfaceOrigin, cookie)),
     origins: [],
   };
 }

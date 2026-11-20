@@ -1,0 +1,664 @@
+{
+  "version": 1,
+  "purpose": "Machine-readable closure policy for the six first-class non-functional classes. This file complements config/qa/non-functional-proof-contract.json and does not replace the flow registry or certification matrix.",
+  "scope": [
+    "quality_performance_budgets",
+    "quality_load_and_concurrency",
+    "quality_security_and_access",
+    "quality_resilience_and_recovery",
+    "quality_observability_and_sla_visibility",
+    "quality_docs_and_control_plane_governance"
+  ],
+  "sources": {
+    "registry": "config/qa/flow-coverage-registry.json",
+    "matrix": "docs/ops/testing/FULL-TEST-CERTIFICATION-MATRIX.md",
+    "proof_contract": "config/qa/non-functional-proof-contract.json",
+    "inventory_script": "scripts/ops/ci/non-functional-proof.js",
+    "inventory_command": "npm run quality:proof:inventory -- --report tmp/non-functional-proof-inventory.json",
+    "strict_inventory_command": "npm run quality:proof:inventory -- --require-concrete --report tmp/non-functional-proof-inventory.json",
+    "inventory_artifact": {
+      "workflow": ".github/workflows/non-functional-proof-gate.yml",
+      "name": "non-functional-proof-inventory",
+      "path": "tmp/non-functional-proof-inventory.json",
+      "scope": "Inventory and require-concrete gate proof only; this artifact does not prove required-lane class closure."
+    },
+    "proof_plan_command": "npm run quality:proof:plan -- --require-complete --report tmp/non-functional-proof-plan.json",
+    "proof_plan_artifact": {
+      "workflow": ".github/workflows/non-functional-proof-gate.yml",
+      "name": "non-functional-proof-plan",
+      "path": "tmp/non-functional-proof-plan.json",
+      "scope": "Executable owner-suite plan derived from the non-functional registry, proof contract, and governance evidence sources. It lists commands, runtime requirements, expected evidence outputs, timeouts, and blocked suites before any class is claimed as closure evidence."
+    },
+    "runtime_evidence_command": "npm run quality:proof:runtime -- --plan tmp/non-functional-proof-plan.json --report tmp/non-functional-runtime/non-functional-runtime-evidence.json",
+    "runtime_evidence_artifact": {
+      "workflow": ".github/workflows/non-functional-proof-gate.yml",
+      "name": "non-functional-runtime-evidence",
+      "path": "tmp/non-functional-runtime/non-functional-runtime-evidence.json",
+      "scope": "Bounded runtime owner-suite execution evidence derived from the proof plan. It emits raw Jest, Playwright, FieldOps Playwright, and k6 summary paths for the suite-evidence bridge, but never emits final coverage claims directly."
+    },
+    "coverage_manifest_artifact": {
+      "workflow": ".github/workflows/non-functional-proof-gate.yml",
+      "name": "non-functional-flow-coverage-manifest",
+      "path": "tmp/non-functional-coverage/non-functional-flow-coverage-manifest.json",
+      "scope": "Registry-owned non-functional coverage manifest for preview-cloud proof-gate visibility. This manifest may remain failed until required owner suites publish same-SHA Jest, Playwright, k6, and class-gate evidence."
+    },
+    "suite_evidence_artifact": {
+      "workflow": ".github/workflows/non-functional-proof-gate.yml",
+      "name": "non-functional-suite-evidence",
+      "path": "tmp/non-functional-coverage/non-functional-suite-results.json",
+      "scope": "Suite-result bridge for real non-functional evidence files, published as its own artifact and also bundled with the non-functional flow coverage manifest. It only emits passed owner-suite evidence when a configured class proof, k6 summary, or command marker exists and passes; missing external Jest, Playwright, k6, or class evidence remains unresolved."
+    },
+    "raw_evidence_inputs": {
+      "k6_summaries_env": "FLOW_COVERAGE_K6_SUMMARIES",
+      "jest_json_env": "FLOW_COVERAGE_JEST_JSON",
+      "playwright_json_env": "FLOW_COVERAGE_PLAYWRIGHT_JSON",
+      "runtime_report_env": "FLOW_COVERAGE_RUNTIME_REPORT",
+      "command_markers": [
+        "tmp/non-functional-coverage/docs-ssot-lint-suite-marker.json",
+        "tmp/non-functional-coverage/control-plane-drift-audit-suite-marker.json"
+      ],
+      "input_contract": "Comma-separated paths are accepted. k6 inputs must be supplied explicitly through FLOW_COVERAGE_K6_SUMMARIES / --k6-summary or through a passed FLOW_COVERAGE_RUNTIME_REPORT / --runtime-report. k6 inputs may also use suite_id=path to map generic load-summary files to a specific non-functional owner suite. Stale configured tmp paths are not auto-stamped as current evidence. Missing, malformed, skipped, or failed raw inputs never create passing evidence."
+    }
+  },
+  "suite_evidence_sources": [
+    {
+      "suite_id": "quality.performance_budget_gate_proof",
+      "source": "class_proof",
+      "path": "tmp/non-functional-class-proofs/performance-budget-report.json",
+      "manifest_type": "performance-budget-report",
+      "artifacts": [
+        "performance-budget-report"
+      ],
+      "allowed_statuses": [
+        "inventory_passed_pending_lane_evidence",
+        "passed"
+      ],
+      "scope": "Class-gate proof for the performance budget class. Browser runtime evidence remains owned by the Playwright suites."
+    },
+    {
+      "suite_id": "quality.load_concurrency_gate",
+      "source": "class_proof",
+      "path": "tmp/non-functional-class-proofs/load-concurrency-report.json",
+      "manifest_type": "concurrency-report",
+      "artifacts": [
+        "concurrency-report"
+      ],
+      "allowed_statuses": [
+        "inventory_passed_pending_lane_evidence",
+        "passed"
+      ],
+      "scope": "Class-gate proof only. This does not satisfy load.webhook_ingest, load.webhook_ingest_http, quality.label_render_load, quality.public_tracking_load, or k6-summary evidence."
+    },
+    {
+      "suite_id": "quality.security_access_gate_proof",
+      "source": "class_proof",
+      "path": "tmp/non-functional-class-proofs/security-review-pack.json",
+      "manifest_type": "security-review-pack",
+      "artifacts": [
+        "security-review-pack"
+      ],
+      "allowed_statuses": [
+        "inventory_passed_pending_lane_evidence",
+        "passed"
+      ],
+      "scope": "Class-gate proof for the security and access class. Jest and pgTAP runtime evidence remains owned by security suites."
+    },
+    {
+      "suite_id": "quality.resilience_recovery_gate_proof",
+      "source": "class_proof",
+      "path": "tmp/non-functional-class-proofs/resilience-run-report.json",
+      "manifest_type": "resilience-run-report",
+      "artifacts": [
+        "resilience-run-report"
+      ],
+      "allowed_statuses": [
+        "inventory_passed_pending_lane_evidence",
+        "passed"
+      ],
+      "scope": "Class-gate proof for the resilience and recovery class. Runtime evidence remains owned by integration and FieldOps suites."
+    },
+    {
+      "suite_id": "quality.non_functional_observability_gate_proof",
+      "source": "class_proof",
+      "path": "tmp/non-functional-class-proofs/observability-manifest.json",
+      "manifest_type": "observability-manifest",
+      "artifacts": [
+        "observability-manifest"
+      ],
+      "allowed_statuses": [
+        "inventory_passed_pending_lane_evidence",
+        "passed"
+      ],
+      "scope": "Class-gate proof only. This does not satisfy integration, Playwright, or Jest observability evidence."
+    },
+    {
+      "suite_id": "quality.docs_ssot_lint",
+      "source": "command_marker",
+      "path": "tmp/non-functional-coverage/docs-ssot-lint-suite-marker.json",
+      "artifacts": [
+        "docs-lint-report"
+      ],
+      "scope": "Real command-marker evidence emitted only after npm run lint:docs:ssot exits successfully for the same checked-out SHA."
+    },
+    {
+      "suite_id": "quality.control_plane_drift_audit",
+      "source": "command_marker",
+      "path": "tmp/non-functional-coverage/control-plane-drift-audit-suite-marker.json",
+      "artifacts": [
+        "control-plane-audit-pack"
+      ],
+      "scope": "Real command-marker evidence emitted only after the control-plane drift audit completes and reports no open drift issue."
+    },
+    {
+      "suite_id": "load.webhook_ingest",
+      "source": "k6_summary",
+      "path": "tmp/non-functional-k6/webhook-ingest-summary.json",
+      "scenario_keys": [
+        "webhook-ingest"
+      ],
+      "runtime_env_defaults": {
+        "WEBHOOK_VUS": "8",
+        "WEBHOOK_DURATION": "45s",
+        "WEBHOOK_ITERATION_P95_MS": "4000",
+        "WEBHOOK_ITERATION_P99_MS": "8000",
+        "WEBHOOK_INSERT_P95_MS": "3000",
+        "WEBHOOK_CHECK_RATE": "0.98"
+      },
+      "artifacts": [
+        "k6-summary"
+      ],
+      "scope": "Real direct-DB webhook ingest k6 summary evidence. Missing file must not be treated as passed."
+    },
+    {
+      "suite_id": "load.webhook_ingest_http",
+      "source": "k6_summary",
+      "path": "tmp/non-functional-k6/webhook-ingest-http-summary.json",
+      "scenario_keys": [
+        "webhook-ingest-http"
+      ],
+      "runtime_env_defaults": {
+        "WEBHOOK_HTTP_VUS": "3",
+        "WEBHOOK_HTTP_DURATION": "45s",
+        "WEBHOOK_HTTP_WARMUP_DURATION": "10s",
+        "WEBHOOK_HTTP_STEADY_START_TIME": "15s"
+      },
+      "artifacts": [
+        "k6-summary"
+      ],
+      "scope": "Real HTTP webhook ingest k6 summary evidence. Missing file must not be treated as passed."
+    },
+    {
+      "suite_id": "quality.label_render_load",
+      "source": "k6_summary",
+      "path": "tmp/non-functional-k6/label-renderer-concurrency-summary.json",
+      "scenario_keys": [
+        "label-renderer-concurrency"
+      ],
+      "runtime_env_defaults": {
+        "LABEL_RENDERER_HTTP_VUS": "3",
+        "LABEL_RENDERER_PROVISION_JOBS": "8",
+        "LABEL_RENDERER_ITERATIONS": "8",
+        "LABEL_RENDERER_MAX_DURATION": "3m",
+        "LABEL_RENDERER_HTTP_STEADY_START_TIME": "8s"
+      },
+      "artifacts": [
+        "k6-summary"
+      ],
+      "scope": "Optional real k6 summary evidence. Missing file must not be treated as passed."
+    },
+    {
+      "suite_id": "quality.public_tracking_load",
+      "source": "k6_summary",
+      "path": "tmp/non-functional-k6/public-tracking-http-summary.json",
+      "scenario_keys": [
+        "public-tracking-http"
+      ],
+      "runtime_env_defaults": {
+        "PUBLIC_TRACKING_HTTP_VUS": "3",
+        "PUBLIC_TRACKING_HTTP_DURATION": "45s",
+        "PUBLIC_TRACKING_HTTP_WARMUP_DURATION": "10s",
+        "PUBLIC_TRACKING_HTTP_STEADY_START_TIME": "15s"
+      },
+      "artifacts": [
+        "k6-summary"
+      ],
+      "scope": "Optional real k6 summary evidence. Missing file must not be treated as passed."
+    }
+  ],
+  "terminal_rule": {
+    "terminal_state": "owned_and_passing",
+    "requires": [
+      "inventory_status=concrete",
+      "placeholder_count=0",
+      "workflow_consumer_present=true",
+      "workflow_consumer_requires_concrete=true",
+      "inventory_report_artifact_published=true",
+      "required_lane_coverage_manifest_published=true",
+      "required_lane_class_artifacts_published=true",
+      "fresh_required_lane_evidence=true"
+    ]
+  },
+  "quality_gate_schema": {
+    "threshold_fields": [
+      "metric",
+      "operator",
+      "value",
+      "evidence_artifact"
+    ],
+    "pass_condition_fields": [
+      "id",
+      "evidence_artifact",
+      "assertion"
+    ],
+    "allowed_threshold_operators": [
+      "equals",
+      "lte",
+      "gte"
+    ],
+    "placeholder_owner_threshold": {
+      "metric": "placeholder_owner_count",
+      "operator": "equals",
+      "value": 0,
+      "evidence_artifact": "coverage-manifest"
+    }
+  },
+  "classes": {
+    "quality_performance_budgets": {
+      "inventory_truth": "concrete",
+      "closure_truth": "partial",
+      "required_artifacts": [
+        "coverage-manifest",
+        "performance-budget-report",
+        "playwright-report"
+      ],
+      "explicit_gate_proof": {
+        "manifest_type": "performance-budget-report",
+        "script": "scripts/ops/quality/non-functional-class-gate-proof.js",
+        "test": "tests/quality/non-functional-performance-budget-gate-proof.test.js",
+        "command": "node scripts/ops/quality/non-functional-class-gate-proof.js --class quality_performance_budgets --out tmp/non-functional-class-proofs/performance-budget-report.json"
+      },
+      "thresholds": [
+        {
+          "metric": "coverage_manifest_missing_or_unowned_suites",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "coverage-manifest"
+        },
+        {
+          "metric": "largest_contentful_paint_ms",
+          "operator": "lte",
+          "value": 2500,
+          "evidence_artifact": "performance-budget-report"
+        },
+        {
+          "metric": "interaction_to_next_paint_ms",
+          "operator": "lte",
+          "value": 200,
+          "evidence_artifact": "performance-budget-report"
+        },
+        {
+          "metric": "cumulative_layout_shift",
+          "operator": "lte",
+          "value": 0.1,
+          "evidence_artifact": "performance-budget-report"
+        }
+      ],
+      "pass_conditions": [
+        {
+          "id": "coverage_manifest_same_sha_passed",
+          "evidence_artifact": "coverage-manifest",
+          "assertion": "Every required lane publishes same-SHA coverage with zero missing, failed, skipped, or silent-skip owner suites."
+        },
+        {
+          "id": "performance_budget_report_passed",
+          "evidence_artifact": "performance-budget-report",
+          "assertion": "The performance budget report records all declared thresholds as passed for critical web and backend paths."
+        },
+        {
+          "id": "browser_budget_report_published",
+          "evidence_artifact": "playwright-report",
+          "assertion": "The Playwright report is published for the same SHA and contains no failed or skipped required performance specs."
+        }
+      ],
+      "missing_deliverables": [
+        "required-lane coverage-manifest publication",
+        "required-lane performance-budget-report publication",
+        "required-lane playwright-report publication",
+        "fresh required-lane evidence for local-dedicated, preview-cloud, and shared-stg-readiness"
+      ],
+      "next_slice": "Publish fresh required-lane coverage-manifest, performance-budget-report, and playwright-report artifacts for the current SHA."
+    },
+    "quality_load_and_concurrency": {
+      "inventory_truth": "concrete",
+      "closure_truth": "partial",
+      "required_artifacts": [
+        "coverage-manifest",
+        "k6-summary",
+        "concurrency-report"
+      ],
+      "explicit_gate_proof": {
+        "manifest_type": "concurrency-report",
+        "script": "scripts/ops/quality/non-functional-class-gate-proof.js",
+        "test": "tests/quality/non-functional-load-concurrency-gate-proof.test.js",
+        "command": "node scripts/ops/quality/non-functional-class-gate-proof.js --class quality_load_and_concurrency --out tmp/non-functional-class-proofs/load-concurrency-report.json"
+      },
+      "thresholds": [
+        {
+          "metric": "coverage_manifest_missing_or_unowned_suites",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "coverage-manifest"
+        },
+        {
+          "metric": "http_request_failure_rate",
+          "operator": "lte",
+          "value": 0.01,
+          "evidence_artifact": "k6-summary"
+        },
+        {
+          "metric": "http_request_duration_p95_ms",
+          "operator": "lte",
+          "value": 1000,
+          "evidence_artifact": "k6-summary"
+        },
+        {
+          "metric": "duplicate_or_lost_concurrent_jobs",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "concurrency-report"
+        }
+      ],
+      "pass_conditions": [
+        {
+          "id": "coverage_manifest_same_sha_passed",
+          "evidence_artifact": "coverage-manifest",
+          "assertion": "Every required lane publishes same-SHA coverage with zero missing, failed, skipped, or silent-skip owner suites."
+        },
+        {
+          "id": "k6_summary_passed",
+          "evidence_artifact": "k6-summary",
+          "assertion": "All required k6 scenarios pass their declared error-rate and latency thresholds."
+        },
+        {
+          "id": "concurrency_report_passed",
+          "evidence_artifact": "concurrency-report",
+          "assertion": "The concurrency report proves no duplicate leases, lost jobs, or saturation breach for the required scenarios."
+        }
+      ],
+      "missing_deliverables": [
+        "required-lane coverage-manifest publication",
+        "required-lane k6-summary publication",
+        "required-lane concurrency-report publication",
+        "fresh required-lane evidence for local-dedicated, preview-cloud, and shared-stg-readiness"
+      ],
+      "next_slice": "Publish fresh required-lane coverage-manifest, k6-summary, and concurrency-report artifacts for the current SHA."
+    },
+    "quality_security_and_access": {
+      "inventory_truth": "concrete",
+      "closure_truth": "partial",
+      "required_artifacts": [
+        "coverage-manifest",
+        "security-review-pack",
+        "jest-report"
+      ],
+      "explicit_gate_proof": {
+        "manifest_type": "security-review-pack",
+        "script": "scripts/ops/quality/non-functional-class-gate-proof.js",
+        "test": "tests/quality/non-functional-security-access-gate-proof.test.js",
+        "command": "node scripts/ops/quality/non-functional-class-gate-proof.js --class quality_security_and_access --out tmp/non-functional-class-proofs/security-review-pack.json"
+      },
+      "thresholds": [
+        {
+          "metric": "coverage_manifest_missing_or_unowned_suites",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "coverage-manifest"
+        },
+        {
+          "metric": "unauthorized_access_allowed_count",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "security-review-pack"
+        },
+        {
+          "metric": "critical_or_high_security_findings",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "security-review-pack"
+        },
+        {
+          "metric": "jest_security_required_failures",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "jest-report"
+        }
+      ],
+      "pass_conditions": [
+        {
+          "id": "coverage_manifest_same_sha_passed",
+          "evidence_artifact": "coverage-manifest",
+          "assertion": "Every required lane publishes same-SHA coverage with zero missing, failed, skipped, or silent-skip owner suites."
+        },
+        {
+          "id": "security_review_pack_passed",
+          "evidence_artifact": "security-review-pack",
+          "assertion": "The security review pack records no critical/high findings and proves denied behavior for unauthorized access."
+        },
+        {
+          "id": "security_jest_report_passed",
+          "evidence_artifact": "jest-report",
+          "assertion": "The Jest report includes the required RLS and sensitive-config suites with no failed or skipped required tests."
+        }
+      ],
+      "missing_deliverables": [
+        "required-lane coverage-manifest publication",
+        "required-lane security-review-pack publication",
+        "required-lane jest-report publication",
+        "fresh required-lane evidence for local-dedicated, preview-cloud, and shared-stg-readiness"
+      ],
+      "next_slice": "Publish fresh required-lane coverage-manifest, security-review-pack, and jest-report artifacts for the current SHA."
+    },
+    "quality_resilience_and_recovery": {
+      "inventory_truth": "concrete",
+      "closure_truth": "partial",
+      "required_artifacts": [
+        "coverage-manifest",
+        "resilience-run-report",
+        "jest-report"
+      ],
+      "explicit_gate_proof": {
+        "manifest_type": "resilience-run-report",
+        "script": "scripts/ops/quality/non-functional-class-gate-proof.js",
+        "test": "tests/quality/non-functional-resilience-recovery-gate-proof.test.js",
+        "command": "node scripts/ops/quality/non-functional-class-gate-proof.js --class quality_resilience_and_recovery --out tmp/non-functional-class-proofs/resilience-run-report.json"
+      },
+      "thresholds": [
+        {
+          "metric": "coverage_manifest_missing_or_unowned_suites",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "coverage-manifest"
+        },
+        {
+          "metric": "webhook_replay_idempotency_violations",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "resilience-run-report"
+        },
+        {
+          "metric": "offline_sync_unreconciled_required_events",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "resilience-run-report"
+        },
+        {
+          "metric": "jest_resilience_required_failures",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "jest-report"
+        }
+      ],
+      "pass_conditions": [
+        {
+          "id": "coverage_manifest_same_sha_passed",
+          "evidence_artifact": "coverage-manifest",
+          "assertion": "Every required lane publishes same-SHA coverage with zero missing, failed, skipped, or silent-skip owner suites."
+        },
+        {
+          "id": "resilience_run_report_passed",
+          "evidence_artifact": "resilience-run-report",
+          "assertion": "The resilience run report proves replay, retry, outage, and offline-sync branches completed without duplicate side effects."
+        },
+        {
+          "id": "resilience_jest_report_passed",
+          "evidence_artifact": "jest-report",
+          "assertion": "The Jest report includes the required queue and replay suites with no failed or skipped required tests."
+        }
+      ],
+      "missing_deliverables": [
+        "required-lane coverage-manifest publication",
+        "required-lane resilience-run-report publication",
+        "required-lane jest-report publication",
+        "fresh required-lane evidence for local-dedicated, preview-cloud, and shared-stg-readiness"
+      ],
+      "next_slice": "Publish fresh required-lane coverage-manifest, resilience-run-report, and jest-report artifacts for the current SHA."
+    },
+    "quality_observability_and_sla_visibility": {
+      "inventory_truth": "concrete",
+      "closure_truth": "partial",
+      "required_artifacts": [
+        "coverage-manifest",
+        "observability-manifest",
+        "jest-report",
+        "playwright-report"
+      ],
+      "explicit_gate_proof": {
+        "manifest_type": "observability-manifest",
+        "script": "scripts/ops/quality/non-functional-class-gate-proof.js",
+        "test": "tests/quality/non-functional-observability-gate-proof.test.js",
+        "command": "node scripts/ops/quality/non-functional-class-gate-proof.js --class quality_observability_and_sla_visibility --out tmp/non-functional-class-proofs/observability-manifest.json"
+      },
+      "thresholds": [
+        {
+          "metric": "coverage_manifest_missing_or_unowned_suites",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "coverage-manifest"
+        },
+        {
+          "metric": "required_decision_log_gaps",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "observability-manifest"
+        },
+        {
+          "metric": "sla_breach_without_visible_alert",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "observability-manifest"
+        },
+        {
+          "metric": "required_observability_test_failures",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "jest-report"
+        }
+      ],
+      "pass_conditions": [
+        {
+          "id": "coverage_manifest_same_sha_passed",
+          "evidence_artifact": "coverage-manifest",
+          "assertion": "Every required lane publishes same-SHA coverage with zero missing, failed, skipped, or silent-skip owner suites."
+        },
+        {
+          "id": "observability_manifest_passed",
+          "evidence_artifact": "observability-manifest",
+          "assertion": "The observability manifest proves decision logs, domain events, workflow traces, audit views, alerts, and SLA visibility are present."
+        },
+        {
+          "id": "observability_jest_report_passed",
+          "evidence_artifact": "jest-report",
+          "assertion": "The Jest report includes the required observability suites with no failed or skipped required tests."
+        },
+        {
+          "id": "observability_playwright_report_passed",
+          "evidence_artifact": "playwright-report",
+          "assertion": "The Playwright report includes the required console observability flow with no failed or skipped required specs."
+        }
+      ],
+      "missing_deliverables": [
+        "required-lane coverage-manifest publication",
+        "required-lane observability-manifest publication",
+        "required-lane jest-report publication",
+        "required-lane playwright-report publication",
+        "fresh required-lane evidence for local-dedicated, preview-cloud, and shared-stg-readiness"
+      ],
+      "next_slice": "Publish fresh required-lane coverage-manifest, observability-manifest, jest-report, and playwright-report artifacts for the current SHA."
+    },
+    "quality_docs_and_control_plane_governance": {
+      "inventory_truth": "concrete",
+      "closure_truth": "partial",
+      "required_artifacts": [
+        "coverage-manifest",
+        "docs-lint-report",
+        "control-plane-audit-pack"
+      ],
+      "explicit_gate_proof": {
+        "manifest_type": "control-plane-audit-pack",
+        "script": "scripts/ops/quality/non-functional-class-gate-proof.js",
+        "test": "tests/quality/non-functional-docs-control-plane-gate-proof.test.js",
+        "command": "node scripts/ops/quality/non-functional-class-gate-proof.js --class quality_docs_and_control_plane_governance --out tmp/non-functional-class-proofs/docs-control-plane-audit-pack.json"
+      },
+      "thresholds": [
+        {
+          "metric": "coverage_manifest_missing_or_unowned_suites",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "coverage-manifest"
+        },
+        {
+          "metric": "docs_ssot_lint_failures",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "docs-lint-report"
+        },
+        {
+          "metric": "control_plane_drift_failures",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "control-plane-audit-pack"
+        },
+        {
+          "metric": "unresolved_false_coverage_claims",
+          "operator": "equals",
+          "value": 0,
+          "evidence_artifact": "control-plane-audit-pack"
+        }
+      ],
+      "pass_conditions": [
+        {
+          "id": "coverage_manifest_same_sha_passed",
+          "evidence_artifact": "coverage-manifest",
+          "assertion": "Every required lane publishes same-SHA coverage with zero missing, failed, skipped, or silent-skip owner suites."
+        },
+        {
+          "id": "docs_lint_report_passed",
+          "evidence_artifact": "docs-lint-report",
+          "assertion": "The docs lint report proves the registry, certification matrix, AGENTS guidance, and tracked docs remain aligned."
+        },
+        {
+          "id": "control_plane_audit_pack_passed",
+          "evidence_artifact": "control-plane-audit-pack",
+          "assertion": "The control-plane audit pack proves no workflow, evidence, registry, or ownership drift remains unresolved."
+        }
+      ],
+      "missing_deliverables": [
+        "required-lane coverage-manifest publication",
+        "required-lane docs-lint-report publication",
+        "required-lane control-plane-audit-pack publication",
+        "fresh required-lane evidence for local-dedicated, preview-cloud, shared-dev-readiness, and shared-stg-readiness"
+      ],
+      "next_slice": "Publish fresh required-lane coverage-manifest, docs-lint-report, and control-plane-audit-pack artifacts for the current SHA."
+    }
+  }
+}

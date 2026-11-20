@@ -12,6 +12,12 @@ export const LANDING_DRIVER_STATUS_ROUTE = `**${LANDING_DRIVER_STATUS_ENDPOINT_M
 export const LANDING_TRACKING_ENDPOINT_MOCK = "/__landing-tracking";
 export const LANDING_TRACKING_ROUTE = `**${LANDING_TRACKING_ENDPOINT_MOCK}/**`;
 
+export type SelectOptionSnapshot = {
+  value: string;
+  label: string;
+  disabled: boolean;
+};
+
 type RuntimePatchOptions = {
   appUrl?: string;
   clientsEndpoint?: string;
@@ -289,4 +295,17 @@ export async function mockTrackingEndpoint(
 
 export function getContactSubmitStateLocator(page: Page) {
   return page.locator("[data-contact-form]");
+}
+
+export async function readSelectOptions(
+  page: Page,
+  selector: string,
+): Promise<SelectOptionSnapshot[]> {
+  return page.locator(selector).locator("option").evaluateAll((options) =>
+    options.map((option) => ({
+      value: option.value,
+      label: option.textContent?.trim() ?? "",
+      disabled: option.disabled,
+    })),
+  );
 }
