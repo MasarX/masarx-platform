@@ -110,7 +110,7 @@ describe("ui resource download API client contract", () => {
       {
         method: "POST",
         headers: {
-          authorization: "Bearer workflow-token",
+          authorization: "Bearer SyntheticOnly-824f324b!",
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -152,7 +152,7 @@ describe("ui resource download API client contract", () => {
       {
         method: "POST",
         headers: {
-          authorization: "Bearer workflow-token",
+          authorization: "Bearer SyntheticOnly-824f324b!",
           "content-type": "application/json",
         },
         body: JSON.stringify({
