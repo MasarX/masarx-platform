@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { ReviewDecisionOption } from "./review-decision-options";
 import { Button } from "./button";
 import { Input } from "./input";
 import { Select } from "./select";
@@ -22,6 +23,7 @@ type MarketplaceParticipantReviewFormProps = {
   disabledMessage?: string;
   defaultInviteRedirectTo?: string | null;
   testIdPrefix: string;
+  decisionOptions?: ReviewDecisionOption[];
 };
 
 const initialState: MarketplaceParticipantReviewState = { status: "idle" };
@@ -34,9 +36,12 @@ export function MarketplaceParticipantReviewForm({
   disabledMessage,
   defaultInviteRedirectTo,
   testIdPrefix,
+  decisionOptions,
 }: MarketplaceParticipantReviewFormProps) {
   const [state, formAction, isPending] = React.useActionState(action, initialState);
   const [decision, setDecision] = React.useState("");
+  const decisionLabel = (value: string, fallback: string) =>
+    decisionOptions?.find((option) => option.value === value)?.label ?? fallback;
   const blockedMessage = disabled
     ? disabledMessage ?? "Review is blocked for this request."
     : null;
@@ -74,9 +79,9 @@ export function MarketplaceParticipantReviewForm({
           <option value="" disabled>
             Select decision
           </option>
-          <option value="approved">Approve</option>
-          <option value="rejected">Reject</option>
-          <option value="request_additional_docs">Request additional documents</option>
+          <option value="approved">{decisionLabel("approved", "Approve")}</option>
+          <option value="rejected">{decisionLabel("rejected", "Reject")}</option>
+          <option value="request_additional_docs">{decisionLabel("request_additional_docs", "Request additional documents")}</option>
         </Select>
       </label>
 

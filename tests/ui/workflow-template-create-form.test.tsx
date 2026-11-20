@@ -300,4 +300,39 @@ describe("committed template create readback", () => {
     expect(mockInvalidateWorkflowTemplates).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
   });
+  it("keeps the selected clone label user-friendly when a template is preselected", () => {
+    mockedCreateUiClient.mockReturnValue({
+      createWorkflowTemplate: jest.fn(),
+    });
+
+    renderWithIntl(
+      <WorkflowTemplateCreateForm
+        appBasePath="/console"
+        capabilities={["workflow_runs.write"]}
+        capabilityWrite="workflow_runs.write"
+        templates={[
+          {
+            id: "wf-template-456",
+            name: "Marketplace Dispute Flow",
+            status: "ready_for_publish",
+            version: 7,
+          },
+        ]}
+        initialCloneFromId="wf-template-456"
+        testIdPrefix="workflow-template-create"
+      />
+    );
+
+    const cloneSelect = screen.getByTestId(
+      "workflow-template-create-clone"
+    ) as HTMLSelectElement;
+    const selectedOption = cloneSelect.selectedOptions[0];
+
+    expect(selectedOption?.value).toBe("wf-template-456");
+    expect(selectedOption?.textContent).toBe(
+      "Marketplace Dispute Flow (Ready For Publish v7)"
+    );
+    expect(selectedOption?.textContent).not.toContain("ready_for_publish");
+    expect(selectedOption?.textContent).not.toContain("wf-template-456");
+  });
 });

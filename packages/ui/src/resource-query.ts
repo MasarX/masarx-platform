@@ -109,6 +109,42 @@ export function formatFilterOp(
   return labels[normalized] ?? normalized;
 }
 
+type NormalizedFlatValue = {
+  op?: string | null;
+  value: FilterRuleValue;
+};
+
+function normalizeDelimitedValue(value: string) {
+  const values = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return values.length > 0 ? values : null;
+}
+
+export function normalizeFlatFilterValue(value: unknown): NormalizedFlatValue | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) {
+    const normalized = value
+      .map((entry) => String(entry ?? "").trim())
+      .filter(Boolean);
+    return normalized.length > 0 ? { value: normalized } : null;
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const prefixed = /^(not[\s_-]*in|in)\s*:\s*(.*)$/i.exec(text);
+  if (!prefixed) return { value: text };
+
+  const values = normalizeDelimitedValue(prefixed[2] ?? "");
+  if (!values) return null;
+  return {
+    op: prefixed[1]?.toLowerCase().startsWith("not") ? "ne" : "eq",
+    value: values,
+  };
+}
+
 export function flattenSearchParams(params: SearchParams) {
   const entries: Array<[string, string]> = [];
   Object.entries(params).forEach(([key, raw]) => {
@@ -211,13 +247,17 @@ export function buildFilterTreeFromFlat(
   const definitionMap = new Map(
     (definitions ?? []).map((filter) => [filter.key, filter])
   );
-  const rules: FilterRule[] = Object.entries(filters).map(([key, value]) => ({
-    id: makeId(),
-    type: "rule",
-    key,
-    op: resolveDefaultOp(definitionMap.get(key)),
-    value: value,
-  }));
+  const rules = Object.entries(filters).flatMap(([key, value]): FilterRule[] => {
+    const normalized = normalizeFlatFilterValue(value);
+    if (!normalized) return [];
+    return [{
+      id: makeId(),
+      type: "rule",
+      key,
+      op: normalized.op ?? resolveDefaultOp(definitionMap.get(key)),
+      value: normalized.value,
+    }];
+  });
   return {
     id: makeId(),
     type: "group",

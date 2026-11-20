@@ -71,7 +71,7 @@ export function TableContextMenu({
         }}
         align="start"
         side="bottom"
-        className="z-[9999] min-w-[180px]"
+        className="z-[95] min-w-[180px]"
       >
         {rowHref ? (
           <>

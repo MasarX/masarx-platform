@@ -84,7 +84,7 @@ export function ResourceDetailPanel({
     return (
       <aside aria-label={title} className="h-full overflow-y-auto md:sticky md:top-4 md:max-h-[calc(100vh-6.5rem)]">
         <div className="space-y-3 rounded-xl border border-ui-accent/20 bg-ui-surface p-5 shadow-soft ring-1 ring-ui-accent/10">
-          {children}
+          {React.Children.toArray(children)}
         </div>
       </aside>
     );
@@ -100,7 +100,7 @@ export function ResourceDetailPanel({
         <DrawerHeader>
           <DrawerTitle className="sr-only">{title}</DrawerTitle>
         </DrawerHeader>
-        <div className="space-y-3">{children}</div>
+        <div className="space-y-3">{React.Children.toArray(children)}</div>
       </DrawerContent>
     </Drawer>
   );

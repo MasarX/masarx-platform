@@ -1,10 +1,11 @@
 import * as React from "react";
+import Link from "next/link";
 import { cn } from "./utils";
 import { createUiTranslator } from "./i18n";
 import { normalizePath } from "./navigation-paths";
-import { PinIcon } from "./icons";
-import { resolveSafeAppBasePath } from "./url-guard";
+import { PinIcon, SectionIcon } from "./icons";
 import { resolveNavigationDisabledReason } from "./navigation-disabled-reason";
+import { resolveSafeAppBasePath } from "./url-guard";
 
 export type NavigationItem = {
   id: string;
@@ -20,6 +21,7 @@ export type NavigationItem = {
 export type NavigationSection = {
   id: string;
   label: string;
+  icon?: string | null;
   items: NavigationItem[];
 };
 
@@ -60,19 +62,7 @@ export function isActivePath(
   return normalizedActive === normalizedHref || normalizedActive.startsWith(`${normalizedHref}/`);
 }
 
-function NavigationItemRow({
-  item,
-  activeHref,
-  basePath,
-  renderLink,
-  renderLabel,
-  favorites,
-  activeItemId,
-  onToggleFavorite,
-  onNavigate,
-  t,
-  depth
-}: {
+type NavigationItemRowProps = {
   item: NavigationItem;
   activeHref?: string;
   basePath?: string;
@@ -84,7 +74,24 @@ function NavigationItemRow({
   onNavigate?: NavigationProps["onNavigate"];
   t: ReturnType<typeof createUiTranslator>;
   depth: number;
-}) {
+};
+
+/**
+ * Memoized navigation row to prevent re-renders when sibling items change.
+ */
+const NavigationItemRow = React.memo(function NavigationItemRow({
+  item,
+  activeHref,
+  basePath,
+  renderLink,
+  renderLabel,
+  favorites,
+  activeItemId,
+  onToggleFavorite,
+  onNavigate,
+  t,
+  depth
+}: NavigationItemRowProps) {
   const isHighlighted = Boolean(activeItemId && item.id === activeItemId);
   const active = isActivePath(activeHref, item.href ?? undefined, basePath) || isHighlighted;
   const disabled = !item.href || Boolean(item.disabled_reason);
@@ -105,7 +112,7 @@ function NavigationItemRow({
     disabled && "pointer-events-none"
   );
   const labelNode = (
-    <span className="truncate">
+    <span className="truncate" title={item.label}>
       {renderLabel ? renderLabel(item, { active }) : item.label}
     </span>
   );
@@ -173,14 +180,14 @@ function NavigationItemRow({
         aria-disabled={disabled}
         data-testid={itemTestId}
       >
-        <a
+        <Link
           className={linkClass}
           href={item.href}
           aria-current={active ? "page" : undefined}
           onClick={handleNavigate}
         >
           {content}
-        </a>
+        </Link>
         {actions}
       </div>
     );
@@ -197,7 +204,7 @@ function NavigationItemRow({
       {actions}
     </div>
   );
-}
+});
 
 /**
  * Navigation list grouped by sections with active state resolution.
@@ -231,7 +238,7 @@ export function Navigation({
           </p>
           <div className="text-xs text-ui-muted">
             <p className="font-medium text-ui-muted">{t("nextStepsTitle")}</p>
-            <ul className="mt-1 list-disc space-y-1 pl-4">
+            <ul className="mt-1 list-disc space-y-1 ps-4">
               <li>{t("nextStepsRefresh")}</li>
               <li>{t("nextStepsAccess")}</li>
               <li>{t("nextStepsConnectivity")}</li>
@@ -264,7 +271,7 @@ export function Navigation({
   );
 
   return (
-    <nav className="space-y-6" data-testid="navigation-list">
+    <nav className="space-y-6" aria-label={t.has?.("mainLabel") ? t("mainLabel") : "Navigation"} data-testid="navigation-list">
       {sections.map((section) => {
         const isCollapsed = Boolean(
           collapsedSections?.includes(section.id)
@@ -282,7 +289,8 @@ export function Navigation({
             data-testid={`navigation-section-${section.id}`}
           >
             <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-medium text-ui-muted rounded px-2 py-1 bg-ui-accent-soft/[0.12]">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-ui-muted rounded px-2 py-1 bg-ui-accent-soft/[0.12]">
+                {section.icon ? <SectionIcon name={section.icon} /> : null}
                 {section.label}
               </div>
               {onToggleSection ? (

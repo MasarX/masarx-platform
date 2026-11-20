@@ -1,3 +1,4 @@
+import { resolveScopeReferenceLabel, resolveScopeSummaryLabel } from "./scope-options";
 import "server-only";
 
 import { revalidatePath } from "next/cache";
@@ -79,6 +80,7 @@ export async function WorkflowBindingsPage({
   let capabilities: string[] = [];
   let requestedScopeType = firstValue(searchParams?.scope_type) ?? null;
   let requestedScopeId = firstValue(searchParams?.scope_id) ?? null;
+  let currentScopeLabel: string | null = null;
   let bindingItems: BindingItem[] = [];
   let inventoryItems: InventoryItem[] = [];
 
@@ -87,6 +89,10 @@ export async function WorkflowBindingsPage({
     capabilities = me?.capabilities ?? [];
     requestedScopeType ||= me?.access_scope?.scope_type ?? null;
     requestedScopeId ||= me?.access_scope?.scope_id ?? null;
+    if (requestedScopeType === me?.access_scope?.scope_type &&
+        requestedScopeId === me?.access_scope?.scope_id) {
+      currentScopeLabel = me?.access_scope?.scope_label ?? null;
+    }
   } catch (error) {
     meError = formatUiError(error, "Unable to load current scope.");
   }
@@ -191,14 +197,14 @@ export async function WorkflowBindingsPage({
         >
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
             <div className="text-xs uppercase tracking-wide text-ui-muted">Scope type</div>
-            <div className="mt-1 font-medium text-ui-ink">
-              {requestedScopeType ?? "Not available"}
+            <div className="mt-1 font-medium text-ui-ink" data-testid={`${testIdPrefix}-scope-summary`}>
+              {resolveScopeSummaryLabel(requestedScopeType, currentScopeLabel, requestedScopeId) || "Not available"}
             </div>
           </div>
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
             <div className="text-xs uppercase tracking-wide text-ui-muted">Scope id</div>
-            <div className="mt-1 break-all font-medium text-ui-ink">
-              {requestedScopeId ?? "Not available"}
+            <div className="mt-1 break-all font-medium text-ui-ink" data-testid={`${testIdPrefix}-scope-reference`}>
+              {resolveScopeReferenceLabel(requestedScopeId) || "Not available"}
             </div>
           </div>
           <div className="rounded-xl border border-ui-border/60 bg-ui-surface/70 p-4">
@@ -255,6 +261,12 @@ export async function WorkflowBindingsPage({
                   const templateName = stringValue(item.workflow_template_name);
                   const resolvedScopeType = stringValue(item.resolved_scope_type);
                   const resolvedScopeId = stringValue(item.resolved_scope_id);
+                  const requestedType = stringValue(item.requested_scope_type) ?? requestedScopeType;
+                  const requestedId = stringValue(item.requested_scope_id) ?? requestedScopeId;
+                  const requestedLabel = requestedType === requestedScopeType && requestedId === requestedScopeId
+                    ? currentScopeLabel : null;
+                  const resolvedLabel = resolvedScopeType === requestedScopeType && resolvedScopeId === requestedScopeId
+                    ? currentScopeLabel : null;
                   const overridden = booleanValue(item.is_overridden_at_requested_scope);
                   const stageValue = recordValue(item.stage_value);
                   const stageEnabled = booleanValue(stageValue?.enabled);
@@ -277,10 +289,10 @@ export async function WorkflowBindingsPage({
                       </td>
                       <td className="px-3 py-4">
                         <div className="font-medium text-ui-ink">
-                          {resolvedScopeType ?? "unknown"}
+                          {resolveScopeSummaryLabel(resolvedScopeType, resolvedLabel, resolvedScopeId) || "Unknown"}
                         </div>
-                        <div className="text-xs text-ui-muted break-all">
-                          {resolvedScopeId ?? "global"}
+                        <div className="text-xs text-ui-muted">
+                          Requested: {resolveScopeSummaryLabel(requestedType, requestedLabel, requestedId) || "Unknown"}
                         </div>
                       </td>
                       <td className="px-3 py-4">

@@ -399,7 +399,8 @@
       "openMobileLabel": "فتح القائمة",
       "openMobileAria": "فتح قائمة التنقل",
       "closeMobileLabel": "إغلاق",
-      "closeMobileAria": "إغلاق قائمة التنقل"
+      "closeMobileAria": "إغلاق قائمة التنقل",
+      "mainLabel": "‏التنقل الرئيسي"
     },
     "appShell": {
       "breadcrumb": "مسار التنقل",
@@ -408,7 +409,18 @@
       "layoutFullLabel": "العرض الكامل",
       "layoutContainedLabel": "العرض المحدود",
       "layoutFullAria": "التبديل إلى العرض الكامل",
-      "layoutContainedAria": "التبديل إلى العرض المحدود"
+      "layoutContainedAria": "التبديل إلى العرض المحدود",
+      "pinLabel": "تثبيت",
+      "shortcuts": {
+        "showKeyboardShortcuts": "إظهار اختصارات لوحة المفاتيح",
+        "toggleSidebar": "تبديل الشريط الجانبي",
+        "openCommandPalette": "فتح لوحة الأوامر",
+        "goToDashboard": "الانتقال إلى لوحة المعلومات",
+        "goToShipments": "الانتقال إلى الشحنات",
+        "goToRoutes": "الانتقال إلى المسارات",
+        "createNewShipment": "إنشاء شحنة جديدة",
+        "focusTableSearch": "التركيز على بحث الجدول"
+      }
     },
     "theme": {
       "label": "‏Theme",
@@ -670,6 +682,31 @@
         },
         "readbackUnverified": "تم فتح التنزيل؛ اكتمال المعالجة الخلفية غير مؤكد",
         "readbackStopped": "آخر قراءة: {detail} لم تعد هذه اللوحة تتحقق من اكتمال المعالجة الخلفية. افتح مخرجات سير العمل للاطلاع على الحالة الحالية."
+      },
+      "clone": "Clone",
+      "bulkAction": {
+        "shipments": {
+          "updateStatus": {
+            "label": "تحديث الحالة",
+            "description": "تحديث حالة الشحنات المحددة",
+            "confirmTitle": "تأكيد تحديث الحالة",
+            "confirmDescription": "تحديث حالة {count} شحنة.",
+            "inputTitle": "الحالة الجديدة",
+            "statusLabel": "الحالة"
+          },
+          "assignRoute": {
+            "label": "تعيين إلى مسار",
+            "description": "تعيين الشحنات المحددة إلى مسار",
+            "confirmTitle": "تأكيد التعيين إلى المسار",
+            "confirmDescription": "تعيين {count} شحنة إلى المسار المحدد.",
+            "inputTitle": "المسار",
+            "routeLabel": "المسار"
+          },
+          "exportCsv": {
+            "label": "تصدير المحدد",
+            "description": "تصدير الشحنات المحددة إلى CSV"
+          }
+        }
       }
     },
     "resourceDownload": {
@@ -735,7 +772,8 @@
         "favorites": "المفضلة",
         "recents": "الأخيرة",
         "navigation": "التنقل",
-        "commands": "الأوامر"
+        "commands": "الأوامر",
+        "resources": "Resources"
       },
       "labels": {
         "navigation": "تنقل",
@@ -904,7 +942,8 @@
         "myDay": {
           "title": "يومي",
           "assigned": "{count} مُسندة إليك",
-          "unavailable": "تعذر تحميل عدد مهام المراجعة المُسندة إليك."
+          "unavailable": "تعذر تحميل عدد مهام المراجعة المُسندة إليك.",
+          "description": "Assigned task queue filtered to the current operator."
         },
         "title": "‏مركز التحكم",
         "description": "‏مسارات المشغلين، أعداد الصفوف، تغطية الأوامر، وقراءة السجلات من صفوف الواجهة.",
@@ -944,6 +983,40 @@
           "openLane": "‏فتح المسار",
           "openCommands": "‏فتح الأوامر",
           "permissionRequired": "‏صلاحية القراءة مطلوبة."
+        },
+        "records": "registry readback",
+        "status": {
+          "ready": "Ready",
+          "restricted": "Restricted",
+          "unavailable": "Unavailable"
+        },
+        "actions": {
+          "openMyDay": "Open My Day",
+          "openDecisions": "Open decisions",
+          "settings": "Request settings change",
+          "access": "Request access policy",
+          "printLabels": "Open label command",
+          "openShipments": "Open shipments"
+        },
+        "decisions": {
+          "title": "Decisions feed",
+          "description": "Manual approvals and workflow decisions awaiting action."
+        },
+        "settings": {
+          "title": "Settings-change request",
+          "description": "Workflow-backed request path for scoped settings changes."
+        },
+        "access": {
+          "title": "Access-policy request",
+          "description": "Approval-backed path for policy and capability changes."
+        },
+        "printLabels": {
+          "title": "Print-label command",
+          "description": "Command-registry entry for shipment label printing."
+        },
+        "shipments": {
+          "title": "Shipment follow-up",
+          "description": "Open shipment records for label, status, and task readback."
         }
       },
       "quickActionsTitle": "‏Quick actions",
@@ -958,7 +1031,21 @@
       "modulesEmpty": "‏Navigation modules load once capabilities are assigned.",
       "moduleUnavailable": "‏Unavailable",
       "moduleRecords": "‏{count} records",
-      "moduleOpen": "‏Open module"
+      "moduleOpen": "‏Open module",
+      "metricsTitle": "‏المؤشرات الرئيسية",
+      "metricsSubtitle": "‏ملخص المؤشرات التشغيلية.",
+      "metricsTotalShipments": "‏إجمالي الشحنات",
+      "metricsActiveDeliveries": "‏التوصيلات النشطة",
+      "metricsPendingExceptions": "‏الاستثناءات المعلقة",
+      "metricsDeliveryRate": "‏معدل التوصيل",
+      "metricsDonutTitle": "‏حالة الشحنات",
+      "metricsDonutCenter": "‏الإجمالي",
+      "metricsStatusDelivered": "‏تم التوصيل",
+      "metricsStatusInTransit": "‏قيد النقل",
+      "metricsStatusOutForDelivery": "‏في طريقه للتوصيل",
+      "metricsStatusExceptions": "‏استثناءات",
+      "metricsStatusPending": "‏معلق",
+      "metricsVsPrior": "‏مقابل السابق"
     },
     "routeOperations": {
       "unknown": "‏unknown",
@@ -1270,7 +1357,8 @@
         "manage": "إدارة الأوامر",
         "import": "استيراد",
         "importDisabled": "Import is not configured for this table yet.",
-        "importRequiresCapability": "Import requires the {capability} capability."
+        "importRequiresCapability": "Import requires the {capability} capability.",
+        "createResource": "Create {resource}"
       },
       "table": {
         "empty": "‏No records returned for this resource."
@@ -1312,10 +1400,16 @@
               "success": "تم حفظ الترتيب.",
               "error": "تعذر حفظ الترتيب."
             }
-          }
+          },
+          "emptyForResource": "No {resource} found for this record."
         },
         "tabs": {
-          "details": "التفاصيل"
+          "details": "التفاصيل",
+          "activity": "النشاط"
+        },
+        "comments": {
+          "empty": "لا توجد تعليقات بعد",
+          "emptyHint": "ستتوفر التعليقات بمجرد تفعيل ميزة التعليقات لمؤسستك."
         }
       },
       "errors": {
@@ -1335,6 +1429,19 @@
       },
       "commands": {
         "requiresCapability": "‏Requires {capability} capability."
+      },
+      "openMode": {
+        "title": "فتح",
+        "label": "فتح السجلات في",
+        "peek": "نظرة جانبية",
+        "full": "صفحة كاملة",
+        "modal": "نظرة وسطية",
+        "helper": "يتحكم في مكان فتح تفاصيل السجل عند اختيار صف."
+      },
+      "internalIds": {
+        "title": "المعرّفات الداخلية",
+        "toggle": "إظهار المعرّفات الداخلية",
+        "helper": "عرض تلميحات UUID الداخلية كبيانات وصفية ثانوية بجانب المعرّفات التجارية."
       }
     },
     "workflowStudio": {
@@ -1754,7 +1861,10 @@
                 "schedule": "جدولة",
                 "scheduleManual": "جدولة (يدوي)",
                 "workflowRunTrigger": "مشغّل تشغيل سير عمل",
-                "unknown": "غير معروف"
+                "unknown": "غير معروف",
+                "api": "API",
+                "worker": "عامل",
+                "task": "مهمة"
               },
               "fields": {
                 "runId": "مرجع النشاط",
@@ -2160,7 +2270,9 @@
         "addSort": "Add sort",
         "addSortPlaceholder": "Select a column",
         "removeChipAria": "إزالة الفلتر",
-        "clearAll": "مسح الكل"
+        "clearAll": "مسح الكل",
+        "saveFiltersAsView": "حفظ العرض",
+        "saveFiltersAsViewTitle": "حفظ الفلاتر الحالية كعرض مسمى"
       },
       "toolbar": {
         "hideView": "‏Hide view",
@@ -2329,7 +2441,12 @@
         "noColumnsHint": "‏اختر عموداً واحداً على الأقل لعرض بيانات الجدول.",
         "showColumns": "‏Show columns",
         "clearSearch": "مسح البحث",
-        "clearFilters": "مسح عوامل التصفية"
+        "clearFilters": "مسح عوامل التصفية",
+        "noResourceRecords": "‏لا توجد {resource} بعد.",
+        "noResourceRecordsHint": "‏أنشئ أول {resource} للبدء.",
+        "createResource": "‏إنشاء {resource}",
+        "noFilterResults": "‏لا توجد سجلات تطابق عوامل التصفية النشطة.",
+        "noFilterResultsHint": "‏عدّل أو امسح عوامل التصفية لإظهار السجلات المطابقة."
       },
       "group": {
         "empty": "‏Unspecified",
@@ -2841,7 +2958,8 @@
         "submitFailed": "‏Unable to submit settings request.",
         "settingsRequestRpcUnavailable": "‏Settings request service is syncing. Retry in a few seconds.",
         "unavailableTitle": "‏Settings requests are unavailable.",
-        "unavailableAction": "‏Confirm settings registry access, then refresh or sign in again."
+        "unavailableAction": "‏Confirm settings registry access, then refresh or sign in again.",
+        "scopeNotAllowed": "‏Selected scope is not available for this settings category."
       }
     },
     "settings": {},
@@ -2976,7 +3094,9 @@
         "pdfError": "‏فشل تحميل PDF: {error}",
         "zoomFit": "‏ملاءمة",
         "prevPage": "‏السابق",
-        "nextPage": "‏التالي"
+        "nextPage": "‏التالي",
+        "showDebug": "‏إظهار الاستجابة الخام (تصحيح)",
+        "hideDebug": "‏إخفاء الاستجابة الخام"
       },
       "assets": {
         "title": "‏الأصول",
@@ -3088,6 +3208,225 @@
         "key": "‏المفتاح",
         "noDifferences": "‏لم يتم العثور على اختلافات."
       }
+    },
+    "charts": {
+      "noData": "لا توجد بيانات",
+      "noDataAvailable": "لا تتوفر بيانات"
+    },
+    "shipmentStepper": {
+      "ariaLabel": "تقدم حالة الشحنة",
+      "steps": {
+        "pending": "قيد الانتظار",
+        "processing": "قيد المعالجة",
+        "inTransit": "قيد النقل",
+        "outForDelivery": "خارج للتسليم",
+        "delivered": "تم التسليم"
+      }
+    },
+    "reporting": {
+      "title": "‏التقارير والتحليلات",
+      "subtitle": "‏المقاييس التشغيلية والاتجاهات.",
+      "errors": {
+        "loadFailed": "‏تعذر تحميل بيانات التقارير."
+      },
+      "unavailableTitle": "‏التقارير غير متاحة.",
+      "emptyTitle": "‏لا توجد بيانات تقارير.",
+      "emptyDescription": "‏قم بتوصيل مصدر بيانات التقارير أو أنشئ شحنات لعرض التحليلات.",
+      "dateRangeLabel": "‏النطاق الزمني",
+      "range7d": "‏آخر 7 أيام",
+      "range30d": "‏آخر 30 يوم",
+      "range90d": "‏آخر 90 يوم",
+      "rangeAll": "‏كل الوقت",
+      "kpiTitle": "‏مؤشرات الأداء الرئيسية",
+      "kpiTotalShipments": "‏إجمالي الشحنات",
+      "kpiActiveDeliveries": "‏التوصيلات النشطة",
+      "kpiDelivered": "‏تم التوصيل",
+      "kpiPendingExceptions": "‏الاستثناءات المعلقة",
+      "kpiDeliveryRate": "‏معدل التوصيل",
+      "kpiPending": "‏قيد الانتظار",
+      "statusTitle": "‏توزيع حالة الشحنات",
+      "statusCenter": "‏الإجمالي",
+      "statusDelivered": "‏تم التوصيل",
+      "statusInTransit": "‏قيد النقل",
+      "statusOutForDelivery": "‏خارج للتوصيل",
+      "statusPending": "‏قيد الانتظار",
+      "statusExceptions": "‏استثناءات",
+      "statusCancelled": "‏ملغاة",
+      "statusReturned": "‏مرتجعة",
+      "trendTitle": "‏حجم الشحنات اليومي",
+      "exportCsv": "‏تصدير CSV"
+    },
+    "shipmentAmendCancel": {
+      "sectionTitle": "‏تعديل / إلغاء",
+      "sectionDescription": "‏يتم تطبيق قفل ما قبل الإرسال المؤقت فقط من سياسة عمليات الشحن حتى يتم اعتماد مصدر الحقيقة لتجميد المسار.",
+      "tracking": "‏التتبع",
+      "currentStatus": "‏الحالة الحالية",
+      "unknown": "‏غير معروف",
+      "lockSource": "‏مصدر القفل",
+      "modifyShipment": "‏تعديل الشحنة",
+      "serviceType": "‏نوع الخدمة",
+      "serviceLevel": "‏مستوى الخدمة",
+      "clientReference": "‏مرجع العميل",
+      "carrierReference": "‏مرجع الناقل",
+      "specialInstructions": "‏تعليمات خاصة",
+      "codAmount": "‏مبلغ الدفع عند الاستلام",
+      "metadataJson": "‏بيانات وصفية JSON",
+      "referencesJson": "‏مراجع JSON",
+      "saving": "‏جارٍ الحفظ...",
+      "applyModify": "‏تطبيق التعديل",
+      "allowedStatuses": "‏الحالات المسموحة",
+      "noStatusesConfigured": "‏لا توجد حالات مُعدَّة",
+      "reschedule": "‏إعادة الجدولة",
+      "promisedDeliveryDate": "‏تاريخ التسليم الموعود",
+      "reserveSlot": "‏حجز موعد",
+      "updateAddress": "‏تحديث العنوان",
+      "addressLine1": "‏سطر العنوان 1",
+      "addressLine2": "‏سطر العنوان 2",
+      "city": "‏المدينة",
+      "provinceRegion": "‏المنطقة / المحافظة",
+      "country": "‏الدولة",
+      "postalCode": "‏الرمز البريدي",
+      "district": "‏الحي",
+      "buildingNumber": "‏رقم المبنى",
+      "rawInputNotes": "‏إدخال مباشر / ملاحظات المشغل",
+      "additionalDirections": "‏توجيهات إضافية",
+      "applyAddressChange": "‏تطبيق تغيير العنوان",
+      "softCancelShipment": "‏إلغاء مبدئي للشحنة",
+      "reason": "‏السبب",
+      "softCancel": "‏إلغاء مبدئي",
+      "shipmentUpdated": "‏تم تحديث الشحنة.",
+      "amendCancelFailed": "‏فشل تعديل/إلغاء الشحنة",
+      "amendCancelFailedMessage": "‏فشل تعديل/إلغاء الشحنة.",
+      "unsavedWarning": "‏لديك تغييرات غير محفوظة في تعديل الشحنة. هل أنت متأكد أنك تريد المغادرة؟"
+    },
+    "shipmentCreate": {
+      "organization": "‏المنظمة",
+      "unavailable": "‏غير متاح",
+      "sessionScope": "‏نطاق الجلسة",
+      "requiresOrgSession": "‏إنشاء الشحنة يتطلب جلسة ضمن نطاق منظمة.",
+      "serviceTypeRequired": "‏نوع الخدمة مطلوب.",
+      "clientIdRequired": "‏معرّف العميل مطلوب لهذا النطاق.",
+      "noCreatePermission": "‏ليس لديك صلاحية لإنشاء شحنات.",
+      "permissionsUnavailable": "‏صلاحيات إنشاء الشحنات غير متاحة.",
+      "noCreatePermissionSurface": "‏ليس لديك صلاحية لإنشاء شحنات من هذا السطح.",
+      "permissionsUnavailableSession": "‏صلاحيات إنشاء الشحنات غير متاحة لهذه الجلسة.",
+      "shipmentCreated": "‏تم إنشاء الشحنة",
+      "existingShipmentReused": "‏تم إعادة استخدام شحنة موجودة",
+      "createFailed": "‏فشل إنشاء الشحنة",
+      "backToShipments": "‏العودة إلى الشحنات",
+      "creating": "‏جارٍ الإنشاء...",
+      "createShipment": "‏إنشاء شحنة",
+      "draftRestored": "‏تمت استعادة المسودة من جلسة سابقة.",
+      "keep": "‏الاحتفاظ",
+      "discard": "‏تجاهل",
+      "coreShipment": "‏بيانات الشحنة الأساسية",
+      "recipient": "‏المستلم",
+      "destinationAddress": "‏عنوان الوجهة",
+      "originAddress": "‏عنوان المصدر",
+      "boxes": "‏الصناديق",
+      "boxLabel": "‏صندوق {number}",
+      "remove": "‏إزالة",
+      "addBox": "‏+ إضافة صندوق",
+      "referenceNumbers": "‏أرقام المراجع",
+      "noReferences": "‏لم يتم إضافة أرقام مراجع.",
+      "addReference": "‏+ إضافة مرجع",
+      "clientScope": "‏نطاق العميل",
+      "senderScope": "‏نطاق المرسل",
+      "tenantScope": "‏نطاق المستأجر",
+      "platformScope": "‏نطاق المنصة",
+      "scopedSession": "‏جلسة محددة النطاق",
+      "fragile": "‏قابل للكسر",
+      "optional": "‏اختياري",
+      "fieldFullAddress": "‏العنوان الكامل",
+      "fieldCity": "‏المدينة",
+      "fieldProvince": "‏المنطقة",
+      "fieldCountry": "‏الدولة",
+      "fieldPostalCode": "‏الرمز البريدي",
+      "fieldBuildingNumber": "‏رقم المبنى",
+      "fieldAdditionalDirections": "‏توجيهات إضافية",
+      "fieldClient": "‏العميل",
+      "fieldSender": "‏المرسل",
+      "fieldServiceType": "‏نوع الخدمة",
+      "fieldStatus": "‏الحالة",
+      "fieldTrackingNumber": "‏رقم التتبع",
+      "fieldClientReference": "‏مرجع العميل",
+      "fieldCarrierReference": "‏مرجع الناقل",
+      "fieldName": "‏الاسم",
+      "fieldPhoneNumber": "‏رقم الهاتف",
+      "fieldEmail": "‏البريد الإلكتروني",
+      "fieldPreferredLanguage": "‏اللغة المفضلة",
+      "fieldBoxNumber": "‏رقم الصندوق",
+      "fieldWeightKg": "‏الوزن (كجم)",
+      "fieldLengthCm": "‏الطول (سم)",
+      "fieldWidthCm": "‏العرض (سم)",
+      "fieldHeightCm": "‏الارتفاع (سم)",
+      "fieldContentsDescription": "‏وصف المحتويات",
+      "fieldType": "‏النوع",
+      "fieldValue": "‏القيمة"
+    },
+    "shipmentCreatePage": {
+      "title": "‏إنشاء شحنة",
+      "description": "‏أنشئ شحنة بجميع التفاصيل — المستلم، العناوين، الصناديق، والمراجع — في نموذج واحد.",
+      "sectionTitle": "‏تفاصيل الشحنة",
+      "sectionDescription": "‏املأ الحقول الأساسية للشحنة. وسّع الأقسام الإضافية لإضافة المستلم والعناوين والصناديق وأرقام المراجع."
+    },
+    "notificationCenter": {
+      "title": "‏الإشعارات",
+      "markAllRead": "‏تحديد الكل كمقروء",
+      "noNotifications": "‏لا توجد إشعارات"
+    },
+    "keyboardShortcutsHelp": {
+      "title": "‏اختصارات لوحة المفاتيح"
+    },
+    "podViewer": {
+      "capturedAt": "‏وقت الالتقاط",
+      "receivedBy": "‏استلمه",
+      "completion": "‏الإتمام",
+      "otpVerified": "‏تحقق OTP",
+      "confirmed": "‏مؤكد",
+      "notConfirmed": "‏غير مؤكد",
+      "gpsLocation": "‏موقع GPS",
+      "accuracy": "‏{meters}م دقة",
+      "photos": "‏صور ({count})",
+      "photoAlt": "‏صورة إثبات التسليم {number}",
+      "signature": "‏التوقيع",
+      "signatureAlt": "‏توقيع التسليم",
+      "notes": "‏ملاحظات",
+      "photoEnlarged": "‏صورة إثبات التسليم مكبرة"
+    },
+    "integrationHealth": {
+      "total": "‏الإجمالي",
+      "healthy": "‏سليم",
+      "degraded": "‏متدهور",
+      "down": "‏متوقف",
+      "integration": "‏التكامل",
+      "type": "‏النوع",
+      "status": "‏الحالة",
+      "successPercent": "‏نسبة النجاح %",
+      "calls": "‏الاستدعاءات",
+      "avgResponse": "‏متوسط الاستجابة"
+    },
+    "dispatchBoard": {
+      "unassigned": "‏غير مُعيَّن",
+      "allJobsAssigned": "‏تم تعيين جميع المهام",
+      "drivers": "‏السائقون",
+      "eta": "‏الوقت المتوقع",
+      "noJobsDropHere": "‏لا توجد مهام — أسقط هنا للتعيين"
+    },
+    "commentThread": {
+      "noComments": "‏لا توجد تعليقات بعد",
+      "unknownUser": "‏غير معروف",
+      "placeholder": "‏اكتب تعليقًا...",
+      "send": "‏إرسال"
+    },
+    "onboardingChecklist": {
+      "defaultTitle": "‏البدء",
+      "allCompleted": "‏تم إكمال جميع الخطوات!",
+      "progress": "‏{completed} من {total} خطوات مكتملة",
+      "dismissAriaLabel": "‏تجاهل قائمة الإعداد"
+    },
+    "kanbanBoard": {
+      "noItems": "‏لا توجد عناصر"
     }
   }
 }

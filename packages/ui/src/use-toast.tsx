@@ -1,11 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle } from "./toast";
+import { Toast, ToastAction as ToastActionPrimitive, ToastClose, ToastDescription, ToastProvider, ToastTitle } from "./toast";
 import { createUiTranslator } from "./i18n";
 import { cn } from "./utils";
 
 export type ToastTone = "neutral" | "success" | "error" | "warning" | "info";
+
+export type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
 
 export type ToastOptions = {
   id?: string;
@@ -13,6 +18,7 @@ export type ToastOptions = {
   description?: string;
   tone?: ToastTone;
   durationMs?: number;
+  action?: ToastAction;
 };
 
 type ToastItem = ToastOptions & { id: string };
@@ -122,9 +128,20 @@ export function ToastHost({ children }: { children: React.ReactNode }) {
                 <ToastDescription>{item.description}</ToastDescription>
               ) : null}
             </div>
-            <ToastClose className="text-xs text-ui-muted">
-              {t("dismiss")}
-            </ToastClose>
+            <div className="flex items-center gap-2">
+              {item.action ? (
+                <ToastActionPrimitive
+                  altText={item.action.label}
+                  className="rounded-md bg-ui-accent px-2 py-1 text-xs font-medium text-ui-accent-ink hover:bg-ui-accent-hover"
+                  onClick={item.action.onClick}
+                >
+                  {item.action.label}
+                </ToastActionPrimitive>
+              ) : null}
+              <ToastClose className="text-xs text-ui-muted">
+                {t("dismiss")}
+              </ToastClose>
+            </div>
           </Toast>
         ))}
       </ToastContext.Provider>

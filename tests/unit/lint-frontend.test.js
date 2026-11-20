@@ -4,7 +4,8 @@ const path = require('path');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const lintScript = path.join(repoRoot, 'scripts', 'tooling', 'lint-frontend.js');
-const tmpDir = path.join(repoRoot, 'apps', 'console', 'app', '__lint_tmp__');
+const tmpParent = path.join(repoRoot, 'apps', 'console', 'app');
+let tmpDir;
 
 function runLintFrontend({ timeoutMs = 30_000, scanRoots = [tmpDir] } = {}) {
   return spawnSync(process.execPath, [lintScript, ...scanRoots], {
@@ -30,7 +31,7 @@ function createLintCase(label, ext) {
 
 describe('lint-frontend app-context imports', () => {
   beforeAll(() => {
-    fs.mkdirSync(tmpDir, { recursive: true });
+    tmpDir = fs.mkdtempSync(path.join(tmpParent, '__lint_tmp__'));
   });
 
   afterAll(() => {

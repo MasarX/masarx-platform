@@ -112,10 +112,10 @@ export function TableGroupRow({
   return (
     <tr className="border-t border-ui-border/15 bg-ui-highlight/40 text-sm font-semibold text-ui-muted transition-colors hover:bg-ui-highlight/60">
       {showRowNumbers ? (
-        <td className={cn(cellPadding, "border-r border-ui-border/15 w-10")} />
+        <td className={cn(cellPadding, "border-e border-ui-border/15 w-10")} />
       ) : null}
       {selectionEnabled ? (
-        <td className={cn(cellPadding, "border-r border-ui-border/15")} />
+        <td className={cn(cellPadding, "border-e border-ui-border/15")} />
       ) : null}
       {displayColumns.map((column, colIndex) => {
         const pinnedOffset = pinnedOffsets[column.key];
@@ -167,7 +167,7 @@ export function TableGroupRow({
               className={cn(
                 "text-xs text-ui-muted",
                 cellPadding,
-                "border-l border-ui-border/40",
+                "border-s border-ui-border/40",
                 isPinned && pinnedGroupClass,
                 isNumeric && "text-right tabular-nums"
               )}
@@ -183,7 +183,7 @@ export function TableGroupRow({
             data-pinned={isPinned ? "true" : undefined}
             className={cn(
               cellPadding,
-              "border-l border-ui-border/40",
+              "border-s border-ui-border/40",
               isPinned && pinnedGroupClass,
               isNumeric && "text-right tabular-nums"
             )}

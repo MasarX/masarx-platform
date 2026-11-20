@@ -26,9 +26,23 @@ export type ResourceColumn = {
   } | null;
 };
 
+function stripFkIdSuffix(label: string, key: string) {
+  // Strip trailing " Id" or " ID" from FK column labels
+  // (e.g. "Organization Id" -> "Organization") but not standalone "Id"/"ID".
+  if (
+    key.endsWith("_id") &&
+    key !== "id" &&
+    (label.endsWith(" Id") || label.endsWith(" ID"))
+  ) {
+    const trimmed = label.slice(0, -3).trimEnd();
+    if (trimmed) return trimmed;
+  }
+  return label;
+}
+
 export function resolveColumnLabel(column: ResourceColumn) {
   const label = typeof column.label === "string" ? column.label.trim() : "";
-  return label || labelFromKey(column.key);
+  return stripFkIdSuffix(label || labelFromKey(column.key), column.key);
 }
 
 export function resolveColumnLabelByKey(

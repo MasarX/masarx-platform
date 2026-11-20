@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+
 import type { CellDisplay } from "./cell-display";
 import type { EditConfig, InlineEditState } from "./editing";
 import type { DisplayRow } from "./row-types";
@@ -64,7 +66,7 @@ type TableDataRowProps = {
   onContextMenu?: (event: React.MouseEvent, rowId: string, rowData: Record<string, unknown>) => void;
 };
 
-export function TableDataRow({
+function TableDataRowContent({
   t,
   row,
   rowIndex,
@@ -230,7 +232,7 @@ export function TableDataRow({
       tabIndex={rowClickable ? 0 : undefined}
     >
       {selectionEnabled ? (
-        <td className={cn(cellPadding, "border-r border-ui-border/15", rowHighlightClass)}>
+        <td className={cn(cellPadding, "border-e border-ui-border/15", rowHighlightClass)}>
           <Checkbox
             aria-label={t("selection.rowAria", {
               id: rowFriendlyIdentifier ?? String(idValue ?? rowIndex),
@@ -252,7 +254,7 @@ export function TableDataRow({
         </td>
       ) : null}
       {showRowNumbers ? (
-        <td className={cn(cellPadding, "border-r border-ui-border/15 text-center text-[10px] text-ui-muted tabular-nums w-10", rowHighlightClass)}>
+        <td className={cn(cellPadding, "border-e border-ui-border/15 text-center text-[10px] text-ui-muted tabular-nums w-10", rowHighlightClass)}>
           {rowIndex + 1}
         </td>
       ) : null}
@@ -318,7 +320,7 @@ export function TableDataRow({
               t={t}
               editState={inlineEdit}
               editConfig={editConfig}
-              editLabel={editLabel}
+              editLabel={inlineEdit.editType === "uuid" ? column.label?.trim() || editLabel : editLabel}
               editPending={editPending}
               onUpdateValue={updateInlineEditValue}
               onCommit={commitInlineEdit}
@@ -397,3 +399,5 @@ export function TableDataRow({
     </tr>
   );
 }
+
+export const TableDataRow = memo(TableDataRowContent);

@@ -1,8 +1,10 @@
 import {
+  formatMachineValueLabel,
   formatDisplayIdentifierValue,
   formatIdValue,
   formatReferenceValue,
   formatResourceValue,
+  isHumanizableMachineValue,
   resolveRecordDescriptor,
 } from "../../packages/ui/src/resource-utils";
 
@@ -30,6 +32,46 @@ describe("formatResourceValue", () => {
 
   it("renders dash for missing id values", () => {
     expect(formatResourceValue(null, { renderType: "id" })).toBe("-");
+  });
+
+  it("humanizes lookup machine keys when registry labels are absent", () => {
+    expect(formatResourceValue("sender_return", { renderType: "lookup" })).toBe(
+      "Sender Return"
+    );
+    expect(
+      formatResourceValue(["sender_return", "rto_handoff"], {
+        renderType: "lookup",
+      })
+    ).toBe("Sender Return, RTO Handoff");
+  });
+
+  it("prefers registry lookup labels over machine-key fallback labels", () => {
+    expect(
+      formatResourceValue("sender_return", {
+        renderType: "lookup",
+        formatOptions: {
+          lookup_labels: {
+            sender_return: "Return to sender",
+          },
+        },
+      })
+    ).toBe("Return to sender");
+  });
+
+  it("does not expose raw UUIDs when lookup labels are missing", () => {
+    expect(
+      formatResourceValue("e5e9f2ab-303a-4e1d-9b4b-7326a4f3e25c", {
+        renderType: "lookup",
+      })
+    ).toBe("REF-E5E9E25C");
+  });
+});
+
+describe("formatMachineValueLabel", () => {
+  it("humanizes only machine-style lookup values", () => {
+    expect(isHumanizableMachineValue("sender_return")).toBe(true);
+    expect(formatMachineValueLabel("sender_return")).toBe("Sender Return");
+    expect(formatMachineValueLabel("Already friendly")).toBe("Already friendly");
   });
 });
 

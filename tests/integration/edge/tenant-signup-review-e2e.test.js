@@ -109,6 +109,33 @@ runIfEdge('tenant-signup-review edge (E2E)', () => {
     expect(legacyShape || currentShape || gatewayShape).toBe(true);
   });
 
+  test('POST with a signed-in non-reviewer returns 403', async () => {
+    const email = 'signup-non-reviewer-' + randomUUID() + '@example.com';
+    const password = randomUUID() + '!Aa1';
+    const { data: created, error: createError } = await service.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+    expect(createError).toBeNull();
+    expect(created.user?.id).toBeTruthy();
+    authUserIds.push(created.user.id);
+
+    const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+      auth: { persistSession: false },
+    });
+    const { data: signedIn, error: signInError } = await client.auth.signInWithPassword({ email, password });
+    expect(signInError).toBeNull();
+    expect(signedIn.session?.access_token).toBeTruthy();
+
+    const { status, body } = await postReview({
+      request_id: randomUUID(),
+      decision: 'rejected',
+    }, signedIn.session.access_token);
+    expect(status).toBe(403);
+    expect(body).toMatchObject({ ok: false, error: { code: 'reviewer_forbidden' } });
+  });
+
   test('platform reviewer can reject and approve tenant signup requests', async () => {
     if (!service) {
       throw new Error('service client not initialized');
@@ -328,6 +355,76 @@ runIfEdge('tenant-signup-review edge (E2E)', () => {
       expect(approvedRow.rows[0]?.review_decision).toBe('approved');
       expect(approvedRow.rows[0]?.approved_organization_id).toBe(approvedOrgId);
       expect(approvedRow.rows[0]?.approved_user_id).toBe(approvedUserId);
+
+      const approvedDetails = await db.query(
+        `SELECT last_error_code, approved_auth_user_id, invite_redirect_to
+           FROM public.tenant_signup_requests
+          WHERE id = $1::uuid`,
+        [approveRequestId],
+      );
+      expect(approvedDetails.rows[0]?.last_error_code ?? null).toBeNull();
+      expect(approvedDetails.rows[0]?.approved_auth_user_id).toBe(approvedUserId);
+      expect(approvedDetails.rows[0]?.invite_redirect_to).toBe(inviteRedirectTo);
+
+      const approvedUser = await db.query(
+        `SELECT organization_id, status, access_scope_type, access_scope_id
+           FROM public.users
+          WHERE id = $1::uuid`,
+        [approvedUserId],
+      );
+      expect(approvedUser.rows[0]?.organization_id).toBe(approvedOrgId);
+      expect(approvedUser.rows[0]?.status).toBe('active');
+      expect(approvedUser.rows[0]?.access_scope_type).toBe('tenant');
+      expect(approvedUser.rows[0]?.access_scope_id ?? null).toBeNull();
+
+      const approvedRoleAssignment = await db.query(
+        `SELECT metadata->>'source' AS source, metadata->>'request_id' AS request_id
+           FROM public.rbac_user_role_assignments
+          WHERE organization_id = $1::uuid
+            AND user_id = $2::uuid
+            AND revoked_at IS NULL
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [approvedOrgId, approvedUserId],
+      );
+      expect(approvedRoleAssignment.rows[0]?.source).toBe('tenant_signup_review_apply_v1');
+      expect(approvedRoleAssignment.rows[0]?.request_id).toBe(approveRequestId);
+
+      const workflowBindingPolicy = await db.query(
+        `SELECT settings_id, settings_version_id, scope_type, scope_id
+           FROM public.resolve_settings_row('workflow_binding_policy', 'tenant', $1::uuid)
+          LIMIT 1`,
+        [approvedOrgId],
+      );
+      expect(workflowBindingPolicy.rows[0]?.scope_type).toBe('tenant');
+      expect(workflowBindingPolicy.rows[0]?.scope_id).toBe(approvedOrgId);
+      expect(workflowBindingPolicy.rows[0]?.settings_id).toBeTruthy();
+      expect(workflowBindingPolicy.rows[0]?.settings_version_id).toBeTruthy();
+
+      const onboardingReadiness = await db.query(
+        `SELECT public.integration_plugin_baseline_readiness_v1('tenant', $1::uuid) AS readiness`,
+        [approvedOrgId],
+      );
+      const readiness =
+        onboardingReadiness.rows[0]?.readiness &&
+        typeof onboardingReadiness.rows[0].readiness === 'object'
+          ? onboardingReadiness.rows[0].readiness
+          : {};
+      const readinessItems = Array.isArray(readiness.items) ? readiness.items : [];
+
+      expect(readiness).toMatchObject({
+        status: 'ready',
+        pending_credentials_total: 1,
+      });
+      expect(readinessItems).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            plugin_key: 'baseline.provider_webhook_handoff',
+            status: 'pending_credentials',
+            task_id: expect.any(String),
+          }),
+        ]),
+      );
     } finally {
       db.release();
     }

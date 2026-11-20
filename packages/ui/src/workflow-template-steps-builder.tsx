@@ -2957,7 +2957,7 @@ export function WorkflowTemplateStepsBuilder({
                   </TooltipTrigger>
                   <TooltipContent>
                     {t("steps.builder.undo")}{" "}
-                    <span className="ml-2 font-mono text-[11px] text-ui-muted">
+                    <span className="ms-2 font-mono text-[11px] text-ui-muted">
                       {formatShortcutLabel(ORDER_UNDO_SHORTCUT)}
                     </span>
                   </TooltipContent>
@@ -2979,7 +2979,7 @@ export function WorkflowTemplateStepsBuilder({
                   </TooltipTrigger>
                   <TooltipContent>
                     {t("steps.builder.redo")}{" "}
-                    <span className="ml-2 font-mono text-[11px] text-ui-muted">
+                    <span className="ms-2 font-mono text-[11px] text-ui-muted">
                       {formatShortcutLabel(ORDER_REDO_SHORTCUT)}
                     </span>
                   </TooltipContent>
@@ -3711,7 +3711,7 @@ export function WorkflowTemplateStepsBuilder({
                   </div>
                 ) : operationMatches.matches.length > 0 ? (
                   <div className="max-h-48 overflow-y-auto">
-                    <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-ui-muted">
+                    <div className="px-2 py-1 text-[10px] font-medium tracking-wide text-ui-muted">
                       {operationName.trim()
                         ? t("steps.builder.add.matches")
                         : t("steps.builder.add.suggestions")}
@@ -4820,7 +4820,7 @@ export function WorkflowTemplateStepsBuilder({
                 </div>
               ) : paletteMatches.matches.length > 0 ? (
                 <>
-                  <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-ui-muted">
+                  <div className="px-2 py-1 text-[10px] font-medium tracking-wide text-ui-muted">
                     {paletteQuery.trim()
                       ? t("steps.builder.add.matches")
                       : t("steps.builder.add.suggestions")}
@@ -5048,7 +5048,7 @@ export function WorkflowTemplateStepsBuilder({
                     </TooltipTrigger>
                     <TooltipContent>
                       {t("steps.flow.zoom.out")}{" "}
-                      <span className="ml-2 font-mono text-[11px] text-ui-muted">
+                      <span className="ms-2 font-mono text-[11px] text-ui-muted">
                         {formatShortcutLabel(FLOW_ZOOM_OUT_SHORTCUT)}
                       </span>
                     </TooltipContent>
@@ -5072,7 +5072,7 @@ export function WorkflowTemplateStepsBuilder({
                     </TooltipTrigger>
                     <TooltipContent>
                       {t("steps.flow.zoom.reset")}{" "}
-                      <span className="ml-2 font-mono text-[11px] text-ui-muted">
+                      <span className="ms-2 font-mono text-[11px] text-ui-muted">
                         {formatShortcutLabel(FLOW_ZOOM_RESET_SHORTCUT)}
                       </span>
                     </TooltipContent>
@@ -5094,7 +5094,7 @@ export function WorkflowTemplateStepsBuilder({
                     </TooltipTrigger>
                     <TooltipContent>
                       {t("steps.flow.zoom.in")}{" "}
-                      <span className="ml-2 font-mono text-[11px] text-ui-muted">
+                      <span className="ms-2 font-mono text-[11px] text-ui-muted">
                         {formatShortcutLabel(FLOW_ZOOM_IN_SHORTCUT)}
                       </span>
                     </TooltipContent>

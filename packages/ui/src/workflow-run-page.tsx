@@ -297,19 +297,19 @@ export async function WorkflowRunPage({
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-ui-border/60 bg-ui-paper/50 p-3">
-                  <div className="text-[10px] uppercase tracking-wide text-ui-muted">
+                  <div className="text-[10px] tracking-wide text-ui-muted">
                     {t("observability.workflowRun.summary.createdAt")}
                   </div>
                   <div className="mt-1 text-sm text-ui-ink">{createdAt ?? "-"}</div>
                 </div>
                 <div className="rounded-xl border border-ui-border/60 bg-ui-paper/50 p-3">
-                  <div className="text-[10px] uppercase tracking-wide text-ui-muted">
+                  <div className="text-[10px] tracking-wide text-ui-muted">
                     {t("observability.workflowRun.summary.startedAt")}
                   </div>
                   <div className="mt-1 text-sm text-ui-ink">{startedAt ?? "-"}</div>
                 </div>
                 <div className="rounded-xl border border-ui-border/60 bg-ui-paper/50 p-3">
-                  <div className="text-[10px] uppercase tracking-wide text-ui-muted">
+                  <div className="text-[10px] tracking-wide text-ui-muted">
                     {t("observability.workflowRun.summary.completedAt")}
                   </div>
                   <div className="mt-1 text-sm text-ui-ink">{completedAt ?? "-"}</div>

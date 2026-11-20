@@ -47,7 +47,7 @@ export function CanvasLayersPanel({
 
   return (
     <div className="space-y-1" data-testid="layers-panel">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-ui-muted">
+      <p className="text-[10px] font-semibold tracking-wide text-ui-muted">
         {t("layers")}
       </p>
       <div className="max-h-48 overflow-y-auto space-y-0.5">

@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { normalizeEditOptions } from "./edit-option-utils";
 import { EmptyState } from "./empty-state";
 import { CollapsibleSection } from "./detail/collapsible-section";
 import { CopyFieldButton } from "./detail/copy-field-button";
@@ -31,6 +33,7 @@ type ResourceDetailEditableProps = {
   columns?: ResourceDetailColumn[] | null;
   showInternalIdHints?: boolean;
   resourceKey?: string | null;
+  appBasePath?: string | null;
   recordId?: string | null;
   onUpdate: (patch: Record<string, unknown>) => Promise<void>;
   testIdPrefix?: string | null;
@@ -43,6 +46,7 @@ export function ResourceDetailEditable({
   columns,
   showInternalIdHints,
   resourceKey = null,
+  appBasePath = null,
   recordId = null,
   onUpdate,
   testIdPrefix,
@@ -91,7 +95,8 @@ export function ResourceDetailEditable({
     columns,
     generalLabel,
     internalIdLabel,
-    resolvedShowInternalIdHints
+    resolvedShowInternalIdHints,
+    appBasePath
   );
 
   return (
@@ -127,10 +132,11 @@ export function ResourceDetailEditable({
               {section.entries.map((entry) => {
                 const isEditing = editingField === entry.key;
                 const column = columns?.find((c) => c.key === entry.key);
+                const editOptions = normalizeEditOptions(column?.editOptions);
                 const isEditable =
                   column?.editMode === "inline" &&
                   entry.key !== "id" &&
-                  !entry.key.endsWith("_id");
+                  (!entry.key.endsWith("_id") || editOptions.length > 0);
 
                 if (isEditing && editState) {
                   return (
@@ -140,6 +146,7 @@ export function ResourceDetailEditable({
                         label={entry.label}
                         editType={column?.editType ?? "text"}
                         value={entry.rawValue}
+                        options={editOptions}
                         saving={editState.status === "saving"}
                         error={editState.error}
                         onSave={commitEdit}
@@ -155,7 +162,11 @@ export function ResourceDetailEditable({
                       {entry.label}
                     </dt>
                     <dd className="mt-2 flex items-start gap-1 text-sm text-ui-ink" title={entry.title}>
-                      <span className="min-w-0 flex-1">{entry.displayValue}</span>
+                      <span className="min-w-0 flex-1">
+                        {entry.linkHref ? (
+                          <Link href={entry.linkHref} className="underline underline-offset-2">{entry.displayValue}</Link>
+                        ) : entry.displayValue}
+                      </span>
                       <div className="flex items-center gap-1">
                         {entry.displayValue && entry.displayValue !== "-" ? (
                           <CopyFieldButton value={entry.displayValue} label={entry.label} />

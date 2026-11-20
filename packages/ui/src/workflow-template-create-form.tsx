@@ -1,5 +1,7 @@
 "use client";
 
+import { formatMachineValueLabel } from "./resource-utils";
+
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { createUiClient, isRetriableNetworkError, isRetriableSupabaseError } from "@masarx/api";
@@ -28,6 +30,7 @@ type WorkflowTemplateCreateFormProps = {
   capabilities?: string[] | null;
   capabilityWrite?: string | null;
   templates?: WorkflowTemplateOption[] | null;
+  initialCloneFromId?: string | null;
   testIdPrefix?: string | null;
 };
 
@@ -36,6 +39,7 @@ export function WorkflowTemplateCreateForm({
   capabilities,
   capabilityWrite,
   templates,
+  initialCloneFromId,
   testIdPrefix,
 }: WorkflowTemplateCreateFormProps) {
   const t = createUiTranslator("ui.workflowStudio");
@@ -62,9 +66,13 @@ export function WorkflowTemplateCreateForm({
 
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [cloneFrom, setCloneFrom] = React.useState("");
+  const requestedClone = initialCloneFromId?.trim() || "";
+  const initialClone = templates?.some((template) => template.id === requestedClone)
+    ? requestedClone
+    : "";
+  const [cloneFrom, setCloneFrom] = React.useState(initialClone);
   const [pending, setPending] = React.useState(false);
-  const hasChanges = Boolean(name.trim() || description.trim() || cloneFrom.trim());
+  const hasChanges = Boolean(name.trim() || description.trim() || cloneFrom !== initialClone);
   useUnsavedChangesGuard({
     enabled: true,
     isSubmitting: pending,
@@ -99,7 +107,7 @@ export function WorkflowTemplateCreateForm({
       .map((entry) => ({
         id: entry.id,
         label: entry.status
-          ? `${entry.name} (${entry.status}${entry.version ? ` v${entry.version}` : ""})`
+          ? `${entry.name} (${formatMachineValueLabel(entry.status)}${entry.version ? ` v${entry.version}` : ""})`
           : entry.name,
       }))
       .filter((entry) => entry.id && entry.label);

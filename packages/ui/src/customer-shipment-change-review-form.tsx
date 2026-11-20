@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { ReviewDecisionOption } from "./review-decision-options";
 import { useRouter } from "next/navigation";
 import { createUiClient } from "@masarx/api";
 import { Button } from "./button";
@@ -25,6 +26,7 @@ type CustomerShipmentChangeReviewFormProps = {
   disabled?: boolean;
   disabledMessage?: string;
   testIdPrefix: string;
+  decisionOptions?: ReviewDecisionOption[];
 };
 
 const initialState: CustomerShipmentChangeReviewState = { status: "idle" };
@@ -70,6 +72,7 @@ export function CustomerShipmentChangeReviewForm({
   disabled,
   disabledMessage,
   testIdPrefix,
+  decisionOptions,
 }: CustomerShipmentChangeReviewFormProps) {
   const router = useRouter();
   const ui = React.useMemo(() => createUiClient(), []);
@@ -243,7 +246,7 @@ export function CustomerShipmentChangeReviewForm({
           }}
           data-testid={`${testIdPrefix}-approve`}
         >
-          {isPending ? "Applying..." : "Approve and apply"}
+          {isPending ? "Applying..." : decisionOptions?.find((option) => option.value === "approved")?.label ?? "Approve and apply"}
         </Button>
         <Button
           type="submit"
@@ -256,7 +259,7 @@ export function CustomerShipmentChangeReviewForm({
           }}
           data-testid={`${testIdPrefix}-reject`}
         >
-          Reject
+          {decisionOptions?.find((option) => option.value === "rejected")?.label ?? "Reject"}
         </Button>
         <span className="text-xs text-ui-muted">
           Approvals use the same canonical apply engine as auto-apply.

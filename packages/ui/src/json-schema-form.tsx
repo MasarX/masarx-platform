@@ -1,11 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { createUiClient } from "@masarx/api";
 import { Button } from "./button";
 import { Combobox } from "./combobox";
 import { Input } from "./input";
 import { Select } from "./select";
+import { labelFromKey } from "./resource-query";
+import { buildResourceLookupComboboxOptions, useResourceLookupOptions } from "./resource-lookup-utils";
+import { formatReferenceValue } from "./resource-utils";
 import { cn } from "./utils";
 
 type JsonSchema = Record<string, unknown>;
@@ -195,99 +197,29 @@ function normalizeOptionText(value: unknown) {
   return null;
 }
 
-function normalizeUuidish(value: string | null) {
-  if (!value) return null;
-  const trimmed = value.trim();
-  return trimmed || null;
-}
-
-function useResourceOptions(
-  config: UiResourceSelectConfig | null,
-  enabled: boolean
-): { items: { id: string; label: string }[]; loading: boolean; error: string | null } {
-  const [state, setState] = React.useState(() => ({
-    items: [] as { id: string; label: string }[],
-    loading: false,
-    error: null as string | null,
-  }));
-
-  React.useEffect(() => {
-    if (!enabled || !config) {
-      setState({ items: [], loading: false, error: null });
-      return undefined;
+function resolveEnumOptions(schema: JsonSchema) {
+  const uiLabels = normalizeObject(normalizeObject(schema["x-ui"])?.enum_labels);
+  const alternatives = ["oneOf", "anyOf"].flatMap((key) =>
+    Array.isArray(schema[key]) ? schema[key] : []
+  );
+  const alternativeLabels = new Map<string, string>();
+  for (const alternative of alternatives) {
+    const option = normalizeSchema(alternative);
+    if (!option) continue;
+    const values = resolveSchemaEnum(option);
+    const key = normalizeOptionText(option.const ?? (values?.length === 1 ? values[0] : null));
+    if (key && !alternativeLabels.has(key)) {
+      alternativeLabels.set(key, normalizeOptionText(option.title) ??
+        normalizeOptionText(normalizeObject(option["x-ui"])?.label) ?? labelFromKey(key));
     }
-
-    const ui = createUiClient();
-    let cancelled = false;
-
-    setState((current) => ({ items: current.items, loading: true, error: null }));
-
-    void (async () => {
-      try {
-        const idColumn = config.id_column?.trim() || "id";
-        const labelColumn = config.label_column?.trim() || "name";
-        const limit = Math.max(1, Math.min(500, config.limit ?? 100));
-        const result = await ui.listResource(
-          config.resource,
-          config.filters ?? {},
-          limit,
-          0,
-          { key: labelColumn, direction: "asc" }
-        );
-        if (cancelled) return;
-        const items = Array.isArray(result.items)
-          ? result.items
-              .map((row) => {
-                const record =
-                  row && typeof row === "object" && !Array.isArray(row)
-                    ? (row as Record<string, unknown>)
-                    : null;
-                if (!record) return null;
-                const id = normalizeUuidish(normalizeOptionText(record[idColumn] ?? record.id));
-                if (!id) return null;
-                const label =
-                  normalizeOptionText(record[labelColumn]) ??
-                  normalizeOptionText(record.name) ??
-                  id;
-                return { id, label };
-              })
-              .filter(
-                (item): item is { id: string; label: string } => item !== null
-              )
-          : [];
-        const seen = new Set<string>();
-        const unique = items.filter((item) => {
-          if (seen.has(item.id)) return false;
-          seen.add(item.id);
-          return true;
-        });
-        setState({ items: unique, loading: false, error: null });
-      } catch (error) {
-        if (cancelled) return;
-        const message =
-          error && typeof error === "object" && "message" in error
-            ? String((error as { message?: unknown }).message ?? "").trim()
-            : "";
-        setState({
-          items: [],
-          loading: false,
-          error: message || "Resource options unavailable.",
-        });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [config, enabled]);
-
-  return state;
-}
-
-function matchesQuery(value: string, query: string) {
-  const trimmed = query.trim().toLowerCase();
-  if (!trimmed) return true;
-  return value.toLowerCase().includes(trimmed);
+  }
+  const values = resolveSchemaEnum(schema) ?? [...alternativeLabels.keys()];
+  return values.flatMap((entry) => {
+    const value = entry === null || entry === undefined ? "" : String(entry);
+    if (!value) return [];
+    const key = value.trim();
+    return [{ value, label: normalizeOptionText(uiLabels?.[key]) ?? alternativeLabels.get(key) ?? (labelFromKey(key) || value) }];
+  });
 }
 
 function ResourceSelectField({
@@ -313,34 +245,30 @@ function ResourceSelectField({
 }) {
   const normalized =
     typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
-  const [query, setQuery] = React.useState("");
-  const options = useResourceOptions(config, !disabled);
-
-  const filtered = React.useMemo(() => {
-    if (!query.trim()) return options.items;
-    return options.items.filter(
-      (item) => matchesQuery(item.label, query) || matchesQuery(item.id, query)
-    );
-  }, [options.items, query]);
-
-  const hasSelected = normalized.trim().length > 0;
-  const selectedKnown = hasSelected
-    ? options.items.some((item) => item.id === normalized)
-    : false;
-
-  const comboboxOptions = React.useMemo(
-    () => options.items.map((item) => ({ label: item.label, value: item.id })),
-    [options.items]
-  );
+  const labelId = React.useId();
+  const resourceLookupConfig = React.useMemo(() => ({
+    resource: config.resource,
+    valueKey: config.id_column ?? "id",
+    labelKeys: config.label_column ? [config.label_column] : ["name"],
+    filters: config.filters ?? {},
+    limit: config.limit ?? 100,
+  }), [config]);
+  const options = useResourceLookupOptions(resourceLookupConfig, !disabled);
+  const comboboxOptions = buildResourceLookupComboboxOptions({
+    items: options.items,
+    selectedValue: normalized,
+    fallbackLabel: formatReferenceValue(normalized),
+  });
 
   return (
-    <div className="space-y-2">
-      <label className="text-xs font-medium text-ui-muted">
+    <div className="space-y-2" data-testid={formatTestId(testIdPrefix, path)}>
+      <span id={labelId} className="text-xs font-medium text-ui-muted">
         {label}
-        {required ? <span className="ml-1 text-ui-danger">*</span> : null}
-      </label>
+        {required ? <span className="ms-1 text-ui-danger">*</span> : null}
+      </span>
       <Combobox
         mode="single"
+        aria-labelledby={labelId}
         options={comboboxOptions}
         value={normalized}
         onChange={(next) => {
@@ -380,8 +308,8 @@ function SchemaField({
   labels: JsonSchemaFormLabels;
 }) {
   const schemaType = resolveSchemaType(schema);
-  const enumValues = resolveSchemaEnum(schema);
-  const resourceSelect = resolveResourceSelect(schema);
+  const enumOptions = resolveEnumOptions(schema);
+  const resourceSelect = React.useMemo(() => resolveResourceSelect(schema), [schema]);
   const fieldId = React.useId();
 
   if (resourceSelect) {
@@ -400,15 +328,17 @@ function SchemaField({
     );
   }
 
-  if (enumValues && enumValues.length > 0) {
+  if (enumOptions.length > 0) {
     const normalized = typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
     return (
       <div className="space-y-2">
-        <label className="text-xs font-medium text-ui-muted">
+        <label htmlFor={fieldId} className="text-xs font-medium text-ui-muted">
           {label}
-          {required ? <span className="ml-1 text-ui-danger">*</span> : null}
+          {required ? <span className="ms-1 text-ui-danger">*</span> : null}
         </label>
         <Select
+          id={fieldId}
+          required={required}
           value={normalized}
           onChange={(event) => {
             const next = event.target.value.trim();
@@ -418,20 +348,9 @@ function SchemaField({
           data-testid={formatTestId(testIdPrefix, path)}
         >
           <option value="">{required ? labels.selectRequired : labels.selectOptional}</option>
-          {enumValues.map((entry) => {
-            const optionValue =
-              typeof entry === "string"
-                ? entry
-                : entry === null || entry === undefined
-                  ? ""
-                  : String(entry);
-            if (!optionValue) return null;
-            return (
-              <option key={optionValue} value={optionValue}>
-                {optionValue}
-              </option>
-            );
-          })}
+          {enumOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
         </Select>
       </div>
     );
@@ -452,7 +371,7 @@ function SchemaField({
         <span className="space-y-1">
           <span className="block font-medium text-ui-ink">
             {label}
-            {required ? <span className="ml-1 text-ui-danger">*</span> : null}
+            {required ? <span className="ms-1 text-ui-danger">*</span> : null}
           </span>
         </span>
       </label>
@@ -469,7 +388,7 @@ function SchemaField({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <label className="text-xs font-medium text-ui-muted">
             {labelText}
-            {required ? <span className="ml-1 text-ui-danger">*</span> : null}
+            {required ? <span className="ms-1 text-ui-danger">*</span> : null}
           </label>
           <Button
             type="button"
@@ -562,7 +481,7 @@ function SchemaField({
       <div className="space-y-2">
         <div className="text-xs font-medium text-ui-muted">
           {label}
-          {required ? <span className="ml-1 text-ui-danger">*</span> : null}
+          {required ? <span className="ms-1 text-ui-danger">*</span> : null}
         </div>
         <SchemaObject
           schema={schema}
@@ -582,7 +501,7 @@ function SchemaField({
     <div className="space-y-2">
       <label htmlFor={fieldId} className="text-xs font-medium text-ui-muted">
         {label}
-        {required ? <span className="ml-1 text-ui-danger">*</span> : null}
+        {required ? <span className="ms-1 text-ui-danger">*</span> : null}
       </label>
       <Input
         id={fieldId}

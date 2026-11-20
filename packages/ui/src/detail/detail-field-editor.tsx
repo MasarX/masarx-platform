@@ -42,6 +42,7 @@ export function DetailFieldEditor({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Escape") {
       event.stopPropagation();
       onCancel();
@@ -53,7 +54,8 @@ export function DetailFieldEditor({
   };
 
   const renderInput = () => {
-    switch (editType) {
+    const resolvedType = editType === "uuid" && options.length > 0 ? "select" : editType;
+    switch (resolvedType) {
       case "boolean":
         return (
           <Checkbox

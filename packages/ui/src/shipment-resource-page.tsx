@@ -1,3 +1,4 @@
+import { ShipmentStatusStepper } from "./shipment-status-stepper";
 import "server-only";
 
 import type {
@@ -491,6 +492,7 @@ export async function ShipmentResourcePage({
           const arabic = getPublicConfig().locale.toLowerCase().startsWith("ar");
           return (
             <>
+              <ShipmentStatusStepper status={stringValue(detail.status)} testIdPrefix={testIdPrefix} />
               {handoffHref && operatorHandoff ? (
                 <Section title={handoffT("title")} description={(arabic ? operatorHandoff.descriptionAr : operatorHandoff.description) ?? handoffT("description")} testId={`${testIdPrefix}-operator-handoff`}>
                   <a href={handoffHref} className="inline-flex min-h-11 items-center gap-2 break-all rounded-md px-3 py-2 text-sm text-ui-ink underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-accent"

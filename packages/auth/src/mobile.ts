@@ -233,7 +233,15 @@ export function createSupabaseExecutor(
         }
         throw error;
       }
-      return result.data;
+      const payload = result.data;
+      if (payload?.ok === false) {
+        const { code, message } = payload.error ?? {};
+        throw Object.assign(
+          new Error(typeof message === "string" ? message : "Command execution was rejected."),
+          { code: typeof code === "string" ? code : "command_rejected" },
+        );
+      }
+      return payload;
     }
     if (transport !== "edge" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(rpc)) {
       throw new Error("Unsupported outbox transport or Edge function name.");

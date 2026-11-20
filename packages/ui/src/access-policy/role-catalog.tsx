@@ -29,6 +29,8 @@ type RoleCatalogProps = {
   roleError: string | null;
   onAddRole: () => void;
   onUpdateRole: (roleKey: string, patch: Partial<PolicyRole>) => void;
+  resolveRoleLabel?: (roleKey: string) => string;
+  resolveCapabilityLabel?: (capabilityKey: string) => string;
   onRenameRole: (roleKey: string, nextKey: string) => void;
   onToggleWildcard: (roleKey: string) => void;
   onToggleCapability: (roleKey: string, capabilityKey: string) => void;
@@ -79,6 +81,8 @@ export function RoleCatalog({
   roleError,
   onAddRole,
   onUpdateRole,
+  resolveRoleLabel,
+  resolveCapabilityLabel,
   onRenameRole,
   onToggleWildcard,
   onToggleCapability,
@@ -99,7 +103,7 @@ export function RoleCatalog({
     <div className="space-y-3 rounded-2xl border border-ui-border bg-ui-surface/70 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-xs uppercase tracking-wide text-ui-muted">
+          <div className="text-xs tracking-wide text-ui-muted">
             {t("roles.title", { count: roles.length })}
           </div>
           <div className="text-sm text-ui-muted">{t("roles.subtitle")}</div>
@@ -129,13 +133,13 @@ export function RoleCatalog({
                     : "border-ui-border bg-ui-surface/80 text-ui-muted hover:bg-ui-highlight/50 hover:text-ui-ink"
                 }`}
               >
-                <span className="font-semibold">{role.label ?? role.key}</span>
+                <span className="font-semibold">{resolveRoleLabel?.(role.key) ?? role.label ?? role.key}</span>
                 <span className="text-xs opacity-70">{role.key}</span>
               </button>
             ))
           )}
           <div className="mt-4 space-y-2 rounded-lg border border-ui-border bg-ui-surface/80 p-3">
-            <div className="text-xs uppercase tracking-wide text-ui-muted">
+            <div className="text-xs tracking-wide text-ui-muted">
               {t("roles.add.title")}
             </div>
             <Input
@@ -168,12 +172,12 @@ export function RoleCatalog({
           {selectedRole ? (
             <>
               <div className="space-y-2">
-                <div className="text-xs uppercase tracking-wide text-ui-muted">
+                <div className="text-xs tracking-wide text-ui-muted">
                   {t("roles.details.title")}
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-sm text-ui-ink">
-                    <span className="text-xs uppercase tracking-wide text-ui-muted">
+                    <span className="text-xs tracking-wide text-ui-muted">
                       {t("roles.details.key")}
                     </span>
                     <Input
@@ -185,7 +189,7 @@ export function RoleCatalog({
                     />
                   </label>
                   <label className="space-y-1 text-sm text-ui-ink">
-                    <span className="text-xs uppercase tracking-wide text-ui-muted">
+                    <span className="text-xs tracking-wide text-ui-muted">
                       {t("roles.details.label")}
                     </span>
                     <Input
@@ -200,7 +204,7 @@ export function RoleCatalog({
                   </label>
                 </div>
                 <label className="space-y-1 text-sm text-ui-ink">
-                  <span className="text-xs uppercase tracking-wide text-ui-muted">
+                  <span className="text-xs tracking-wide text-ui-muted">
                     {t("roles.details.description")}
                   </span>
                   <Input
@@ -216,7 +220,7 @@ export function RoleCatalog({
               </div>
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs uppercase tracking-wide text-ui-muted">
+                  <div className="text-xs tracking-wide text-ui-muted">
                     {t("roles.capabilities.title")}
                   </div>
                   <label className="flex items-center gap-2 text-xs text-ui-muted">
@@ -256,7 +260,7 @@ export function RoleCatalog({
                           />
                           <div>
                             <div className="font-semibold">
-                              {capability.label ?? key}
+                              {resolveCapabilityLabel?.(key) ?? capability.label ?? key}
                             </div>
                             <div className="text-xs text-ui-muted">{key}</div>
                           </div>

@@ -14,6 +14,7 @@ type SectionProps = {
   variant?: "panel" | "plain";
   collapsible?: boolean;
   defaultOpen?: boolean;
+  persistCollapse?: boolean;
   collapseKey?: string;
   testId?: string;
 };
@@ -30,14 +31,16 @@ export function Section({
   variant = "panel",
   collapsible = false,
   defaultOpen = true,
+  persistCollapse = true,
   collapseKey,
   testId,
 }: SectionProps) {
   const navigationState = useOptionalNavigationState();
-  const hasHeader = Boolean(title || description || actions);
+  const actionsPresent = React.Children.toArray(actions).length > 0;
+  const hasHeader = Boolean(title || description || actionsPresent);
   const resolvedCollapseKey = collapseKey?.trim() ?? "";
   const canPersist =
-    collapsible && hasHeader && Boolean(resolvedCollapseKey) && navigationState;
+    persistCollapse && collapsible && hasHeader && Boolean(resolvedCollapseKey) && navigationState;
   const [localOpen, setLocalOpen] = React.useState(defaultOpen);
   const navCollapsed = navigationState?.collapsedSections ?? [];
   const setCollapsedSections = navigationState?.setCollapsedSections ?? null;
@@ -96,7 +99,7 @@ export function Section({
           <div className="text-xs text-ui-muted">{description}</div>
         ) : null}
       </div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actionsPresent ? <div className="flex items-center gap-2">{actions}</div> : null}
     </div>
   ) : null;
 

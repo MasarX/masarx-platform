@@ -11,6 +11,7 @@ import { formatUiError } from "./utils";
 import { resolvePaginationSettings } from "./pagination-utils";
 import { listAllResources } from "./resource-list-utils";
 import { resolveSafeHref } from "./url-guard";
+import Link from "next/link";
 
 type WorkflowOverlapExplorerPageProps = {
   appBasePath: string;
@@ -138,7 +139,7 @@ export async function WorkflowOverlapExplorerPage({
           <div className="flex items-center gap-2">
             {openTemplatesHref ? (
               <Button asChild size="sm" variant="ghost">
-                <a href={openTemplatesHref}>{t("overlapExplorer.actions.openTemplates")}</a>
+                <Link href={openTemplatesHref}>{t("overlapExplorer.actions.openTemplates")}</Link>
               </Button>
             ) : (
               <span className="text-xs text-ui-muted">{t("overlapExplorer.actions.openTemplates")}</span>
@@ -177,7 +178,7 @@ export async function WorkflowOverlapExplorerPage({
             {checksumFilter || nameFilter ? (
               <Button asChild type="button" size="sm" variant="ghost">
                 {clearHref ? (
-                  <a href={clearHref}>{t("overlapExplorer.filters.clear")}</a>
+                  <Link href={clearHref}>{t("overlapExplorer.filters.clear")}</Link>
                 ) : (
                   <span>{t("overlapExplorer.filters.clear")}</span>
                 )}
@@ -233,7 +234,7 @@ export async function WorkflowOverlapExplorerPage({
                       const scope = [template.scopeType, template.scopeId].filter(Boolean).join(" ");
                       const workflowButton = workflowHref ? (
                         <Button asChild size="sm" variant="ghost">
-                          <a href={workflowHref}>{t("overlapExplorer.results.openWorkflow")}</a>
+                          <Link href={workflowHref}>{t("overlapExplorer.results.openWorkflow")}</Link>
                         </Button>
                       ) : (
                         <span className="text-xs text-ui-muted">

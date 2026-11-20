@@ -26,6 +26,12 @@ import { renderWithIntl } from "./test-utils";
 import { WorkflowRunTriggersPanel } from "../../packages/ui/src/workflow-run-triggers-panel";
 
 const mockedCreateUiClient = createUiClient as unknown as jest.Mock;
+const clientId = "c112a901-3e75-47d2-9022-307fa68bd400";
+const senderId = "22222222-2222-4222-8222-222222222222";
+const workflowRunStatusOptions = [
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+];
 
 describe("WorkflowRunTriggersPanel", () => {
   beforeEach(() => {
@@ -373,5 +379,170 @@ describe("typed workflow trigger RPC arguments", () => {
     expect(rpc).toHaveBeenLastCalledWith("ui_delete_workflow_run_trigger_v1", {
       p_workflow_run_trigger_id: "id", p_scope_id: "tenant",
     });
+  });
+
+  it("uses lookup-backed workflow status options in the trigger editor", async () => {
+    renderWithIntl(
+      <WorkflowRunTriggersPanel
+        workflowTemplateId="template-a"
+        incomingTriggers={[]}
+        outgoingTriggers={[
+          {
+            id: "out-1",
+            enabled: true,
+            source_workflow_template_id: "template-a",
+            target_workflow_template_id: "template-b",
+            source_statuses: ["failed"],
+          },
+        ]}
+        workflowTemplates={[
+          { id: "template-a", name: "Template A" },
+          { id: "template-b", name: "Template B" },
+        ]}
+        workflowRunStatusOptions={workflowRunStatusOptions}
+        appBasePath="/portal"
+        capabilities={["workflow_runs.write"]}
+        testIdPrefix="workflow-run-triggers"
+      />
+    );
+
+    expect(screen.getByText("Statuses: Failed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("workflow-run-triggers-outgoing-new"));
+    const sourceTemplateControl = screen.getByTestId(
+      "workflow-run-triggers-editor-source-template",
+    );
+    const targetTemplateControl = screen.getByTestId(
+      "workflow-run-triggers-editor-target-template",
+    );
+    const statusControl = screen.getByTestId("workflow-run-triggers-editor-statuses");
+
+    expect(sourceTemplateControl).toHaveDisplayValue("Template A");
+    expect(sourceTemplateControl).toHaveValue("template-a");
+    expect(within(sourceTemplateControl).getByRole("option", { name: "Template A" })).toHaveValue(
+      "template-a",
+    );
+    expect(within(sourceTemplateControl).queryByRole("option", { name: "template-a" })).toBeNull();
+    expect(within(targetTemplateControl).getByRole("option", { name: "Template B" })).toHaveValue(
+      "template-b",
+    );
+    expect(within(targetTemplateControl).queryByRole("option", { name: "template-b" })).toBeNull();
+
+    expect(statusControl.tagName).toBe("SELECT");
+    expect(statusControl).toHaveAttribute("multiple");
+    expect(within(statusControl).getByRole("option", { name: "Completed" })).toHaveValue("completed");
+    expect(within(statusControl).getByRole("option", { name: "Failed" })).toHaveValue("failed");
+    expect(within(statusControl).queryByRole("option", { name: "completed" })).toBeNull();
+    expect(within(statusControl).queryByRole("option", { name: "failed" })).toBeNull();
+    expect(screen.queryByPlaceholderText("completed, failed")).toBeNull();
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId("workflow-run-triggers-editor-context-lookups"))
+          .getAllByRole("combobox")[0],
+      ).not.toBeDisabled(),
+    );
+  });
+
+  it("uses lookup-backed context patch selectors for DB-backed trigger context", async () => {
+    const listResource = jest.fn((resource: string) => {
+      if (resource === "clients") {
+        return Promise.resolve({
+          items: [{ id: clientId, name: "Sample Organization" }],
+        });
+      }
+      if (resource === "senders") {
+        return Promise.resolve({
+          items: [{ id: senderId, name: "Main Sender" }],
+        });
+      }
+      return Promise.resolve({ items: [] });
+    });
+    const listLookupValues = jest.fn((category: string) =>
+      category === "service_type"
+        ? Promise.resolve([{ value: "same_day", label: "Same day delivery" }])
+        : Promise.resolve([]),
+    );
+
+    const createWorkflowRunTrigger = jest.fn().mockResolvedValue({ workflow_run_trigger_id: "trigger-created" });
+    mockedCreateUiClient.mockReturnValue({ listResource, listLookupValues, createWorkflowRunTrigger });
+
+    renderWithIntl(
+      <WorkflowRunTriggersPanel
+        workflowTemplateId="template-a"
+        incomingTriggers={[]}
+        outgoingTriggers={[]}
+        workflowTemplates={[
+          { id: "template-a", name: "Template A" },
+          { id: "template-b", name: "Template B" },
+        ]}
+        workflowRunStatusOptions={workflowRunStatusOptions}
+        appBasePath="/portal"
+        capabilities={["workflow_runs.write"]}
+        testIdPrefix="workflow-run-triggers"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-run-triggers-outgoing-new"));
+    await screen.findByText("Sample Organization");
+    expect(listLookupValues).toHaveBeenCalledWith("service_type");
+    expect(screen.getByText("Main Sender")).toBeInTheDocument();
+    expect(screen.getByText("Same day delivery")).toBeInTheDocument();
+    expect(screen.queryByText(clientId)).toBeNull();
+    expect(screen.queryByText(senderId)).toBeNull();
+
+    const lookupControls = screen.getByTestId("workflow-run-triggers-editor-context-lookups");
+    const [clientSelect, senderSelect, serviceTypeSelect] =
+      within(lookupControls).getAllByRole("combobox");
+    expect(within(lookupControls).getByRole("option", { name: "Sample Organization" })).toHaveValue(clientId);
+    expect(within(lookupControls).getByRole("option", { name: "Main Sender" })).toHaveValue(senderId);
+    expect(within(lookupControls).getByRole("option", { name: "Same day delivery" })).toHaveValue("same_day");
+    expect(within(lookupControls).queryByRole("option", { name: clientId })).toBeNull();
+    expect(within(lookupControls).queryByRole("option", { name: senderId })).toBeNull();
+    expect(within(lookupControls).queryByRole("option", { name: "same_day" })).toBeNull();
+    fireEvent.change(clientSelect, {
+      target: { value: clientId },
+    });
+    fireEvent.change(senderSelect, {
+      target: { value: senderId },
+    });
+    fireEvent.change(serviceTypeSelect, { target: { value: "same_day" } });
+    expect(clientSelect).toHaveValue(clientId);
+    expect(clientSelect).toHaveDisplayValue("Sample Organization");
+    expect(clientSelect).not.toHaveDisplayValue(clientId);
+    expect(senderSelect).toHaveValue(senderId);
+    expect(senderSelect).toHaveDisplayValue("Main Sender");
+    expect(senderSelect).not.toHaveDisplayValue(senderId);
+    expect(serviceTypeSelect).toHaveValue("same_day");
+    expect(serviceTypeSelect).toHaveDisplayValue("Same day delivery");
+    expect(serviceTypeSelect).not.toHaveDisplayValue("same_day");
+
+    expect(screen.getByTestId("workflow-run-triggers-editor-context-patch")).toHaveValue(
+      JSON.stringify(
+        {
+          client_id: clientId,
+          sender_id: senderId,
+          service_type: "same_day",
+        },
+        null,
+        2,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-run-triggers-editor-save"));
+
+    await waitFor(() =>
+      expect(createWorkflowRunTrigger).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceWorkflowTemplateId: "template-a",
+          targetWorkflowTemplateId: "template-b",
+          sourceStatuses: ["completed"],
+          contextPatch: {
+            client_id: clientId,
+            sender_id: senderId,
+            service_type: "same_day",
+          },
+        }),
+      ),
+    );
   });
 });

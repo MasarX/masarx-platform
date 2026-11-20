@@ -14,7 +14,7 @@ import {
   MarketplaceParticipantReviewForm,
   MarketplaceParticipantReviewState,
 } from "./marketplace-participant-review-form";
-import { formatUiError } from "./utils";
+import { formatUiError, normalizeReviewDecisionOptions } from "./utils";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -38,6 +38,10 @@ function firstValue(value: string | string[] | undefined) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : null;
+}
+
+function reviewBadgeLabel(value: string) {
+  return value.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
 function normalizeDecision(raw: string): "approved" | "rejected" | "request_additional_docs" | "" {
@@ -98,6 +102,11 @@ export async function MarketplaceParticipantRequestsPage({
   description,
 }: MarketplaceParticipantRequestsPageProps) {
   const ui = createUiServerClient();
+  const decisionRows = await ui.listLookupValues?.("marketplace_participant_request_review_decision").catch(() => []);
+  const reviewDecisionOptions = decisionRows?.length ? normalizeReviewDecisionOptions(
+    decisionRows,
+    ["approved", "rejected", "request_additional_docs"],
+  ) : [];
   let me: UiMe | null = null;
   let meError: string | null = null;
 
@@ -280,9 +289,9 @@ export async function MarketplaceParticipantRequestsPage({
           <div className="space-y-4">
             <Section title="Review status" collapsible={false}>
               <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                <Badge>{status}</Badge>
-                {participantTypeKey ? <Badge>{participantTypeKey}</Badge> : null}
-                {decision ? <Badge>{decision}</Badge> : null}
+                <Badge>{reviewBadgeLabel(status)}</Badge>
+                {participantTypeKey ? <Badge>{reviewBadgeLabel(participantTypeKey)}</Badge> : null}
+                {decision ? <Badge>{reviewBadgeLabel(decision)}</Badge> : null}
               </div>
               {reviewedAt || reviewedBy ? (
                 <p className="mt-3 text-sm text-ui-muted">
@@ -319,6 +328,7 @@ export async function MarketplaceParticipantRequestsPage({
             <Section title="Apply review" collapsible={false}>
               {canReview ? (
                 <MarketplaceParticipantReviewForm
+                  decisionOptions={reviewDecisionOptions}
                   action={submitReview}
                   requestId={detailId}
                   participantTypeKey={participantTypeKey}

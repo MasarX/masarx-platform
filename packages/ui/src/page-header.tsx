@@ -16,16 +16,19 @@ export function PageHeader({
   actions,
   eyebrow,
 }: PageHeaderProps) {
+  const eyebrowNodes = React.Children.toArray(eyebrow);
+  const actionNodes = React.Children.toArray(actions);
+
   return (
     <div className="mb-4 flex flex-wrap items-start justify-between gap-4 border-b border-ui-accent/15 pb-4">
       <div className="min-w-0">
-        {eyebrow ? (
-          <div className="text-[11px] font-medium text-ui-accent/70">{eyebrow}</div>
+        {eyebrowNodes.length > 0 ? (
+          <div className="text-[11px] font-medium text-ui-accent/70">{eyebrowNodes}</div>
         ) : null}
         <h1
           className={[
             "text-2xl font-semibold tracking-tight text-ui-ink",
-            eyebrow ? "mt-1" : "",
+            eyebrowNodes.length > 0 ? "mt-1" : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -36,7 +39,9 @@ export function PageHeader({
           <p className="mt-2 max-w-prose text-sm text-ui-muted">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex items-center gap-3">{actions}</div> : null}
+      {actionNodes.length > 0 ? (
+        <div className="flex items-center gap-3">{actionNodes}</div>
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,19 @@ import { isRetriableNetworkError, isRetriableSupabaseError } from "./retry";
 
 type RpcArgs = Record<string, unknown> | undefined;
 
+type UiLookupValue = {
+  value: string;
+  label: string;
+  description?: string | null;
+  sort_order?: number | null;
+  is_default?: boolean | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+export async function listUiLookupValues(rpc: ReturnType<typeof createRpc>, category: string) {
+  return (await rpc<UiLookupValue[] | null>("list_lookup_values_v1", { p_category: category })) ?? [];
+}
+
 const DEFAULT_RPC_RETRIES = 2;
 const DEFAULT_RPC_MIN_DELAY_MS = 150;
 const DEFAULT_RPC_MAX_DELAY_MS = 1200;

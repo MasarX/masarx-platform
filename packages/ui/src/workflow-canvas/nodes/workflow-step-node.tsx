@@ -92,7 +92,7 @@ export const WorkflowStepNode = React.memo(function WorkflowStepNode({
     >
       {/* Left accent stripe */}
       <div
-        className="absolute left-0 top-0 h-full w-1 rounded-l-2xl"
+        className="absolute start-0 top-0 h-full w-1 rounded-s-2xl"
         style={{ backgroundColor: color.accent }}
       />
 
@@ -105,7 +105,7 @@ export const WorkflowStepNode = React.memo(function WorkflowStepNode({
 
       <NodeHandle type="target" visible={selected} />
 
-      <div className="py-3.5 pl-5 pr-3.5">
+      <div className="py-3.5 ps-5 pe-3.5">
         <div className="flex items-center gap-3">
           {/* Icon circle */}
           <div

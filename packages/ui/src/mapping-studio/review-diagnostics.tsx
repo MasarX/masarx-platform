@@ -105,7 +105,7 @@ export function ReviewDiagnostics({
           {nextSteps.length === 0 ? (
             <p className="text-sm text-ui-muted">No action items remain.</p>
           ) : (
-            <ul className="list-disc space-y-2 pl-4 text-sm text-ui-muted">
+            <ul className="list-disc space-y-2 ps-4 text-sm text-ui-muted">
               {nextSteps.map((step) => (
                 <li key={step}>{step}</li>
               ))}

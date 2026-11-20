@@ -10,6 +10,10 @@ jest.mock("next/navigation", () => ({
 jest.mock("@masarx/api", () => ({
   ...jest.requireActual("@masarx/api"),
   createUiClient: () => ({
+    listLookupValues: jest.fn().mockResolvedValue([
+      { value: "completed", label: "Completed" },
+      { value: "failed", label: "Failed" },
+    ]),
     reorderResource: jest.fn(),
     updateResource: jest.fn(),
   }),

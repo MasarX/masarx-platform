@@ -35,3 +35,47 @@ test.each(["error", "success"] as const)("%s result is announced", status => {
   render(<MarketplaceParticipantReviewForm {...props} />);
   expect(screen.getByRole(status === "error" ? "alert" : "status")).toHaveTextContent("Owned review result");
 });
+
+test("marketplace participant review form renders lookup-provided decision labels", () => {
+  formState = { status: "idle", message: undefined };
+  const action = jest.fn(async () => ({ status: "success" as const }));
+  const requestId = "00000000-0000-4000-8000-000000000150";
+  const participantTypeKey = "freelancer_driver";
+
+  render(
+    <MarketplaceParticipantReviewForm
+      action={action}
+      requestId={requestId}
+      participantTypeKey={participantTypeKey}
+      decisionOptions={[
+        { value: "approved", label: "Approve verified participant" },
+        { value: "rejected", label: "Reject participant request" },
+      ]}
+      testIdPrefix="marketplace-review"
+    />,
+  );
+
+  const select = screen.getByTestId("marketplace-review-decision");
+  const form = screen.getByTestId("marketplace-review-form");
+  const hiddenRequestId = form.querySelector<HTMLInputElement>('input[name="request_id"]');
+  const hiddenParticipantType = form.querySelector<HTMLInputElement>(
+    'input[name="participant_type_key"]',
+  );
+  const approveOption = select.querySelector<HTMLOptionElement>('option[value="approved"]');
+  const rejectOption = select.querySelector<HTMLOptionElement>('option[value="rejected"]');
+
+  expect(select).toHaveTextContent("Approve verified participant");
+  expect(select).toHaveTextContent("Reject participant request");
+  expect(approveOption?.textContent).toBe("Approve verified participant");
+  expect(rejectOption?.textContent).toBe("Reject participant request");
+  expect(select).not.toHaveTextContent("approved");
+  expect(select).not.toHaveTextContent("rejected");
+  expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+  expect(screen.queryByText("Reject")).not.toBeInTheDocument();
+  expect(hiddenRequestId?.type).toBe("hidden");
+  expect(hiddenRequestId?.value).toBe(requestId);
+  expect(hiddenParticipantType?.type).toBe("hidden");
+  expect(hiddenParticipantType?.value).toBe(participantTypeKey);
+  expect(screen.queryByText(requestId)).not.toBeInTheDocument();
+  expect(screen.queryByText(participantTypeKey)).not.toBeInTheDocument();
+});

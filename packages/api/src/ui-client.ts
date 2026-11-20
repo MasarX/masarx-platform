@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createRpc } from "./rpc";
+import { createRpc, listUiLookupValues } from "./rpc";
 import { normalizeUiScopeType } from "./scope-normalize";
 import { attachMarketplaceClient } from "./marketplace-client";
 import {
@@ -203,6 +203,7 @@ export function createUiClientFromSupabase(
 
   return {
     rpc,
+    listLookupValues: (category: string) => listUiLookupValues(rpc, category),
     mappingStudio: {
       parse: (payload: Record<string, unknown>) => invokeMappingStudio("parse", payload),
       infer: (payload: Record<string, unknown>) => invokeMappingStudio("infer", payload),

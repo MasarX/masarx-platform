@@ -50,6 +50,7 @@ export function InlineEditor({
   }, []);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Escape") {
       event.stopPropagation();
       onCancel();
@@ -61,8 +62,9 @@ export function InlineEditor({
     }
   };
 
+  const hasLookupOptions = editConfig.options.length > 0;
   const uuidHint =
-    editState.editType === "uuid"
+    editState.editType === "uuid" && !hasLookupOptions
       ? t("edit.uuidHint", { label: editLabel })
       : null;
 
@@ -94,8 +96,8 @@ export function InlineEditor({
             disabled={isSaving}
             placeholder={t("edit.selectPlaceholder")}
           />
-        ) : editState.editType === "select" &&
-          (editConfig.options.length ?? 0) > 0 ? (
+        ) : (editState.editType === "select" || editState.editType === "uuid") &&
+          hasLookupOptions ? (
           <Combobox
             mode="single"
             options={editConfig.options}

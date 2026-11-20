@@ -43,7 +43,7 @@ export function TableSummaryRow({
           <td
             className={cn(
               cellPadding,
-              "border-r border-ui-border/40 bg-ui-paper/95"
+              "border-e border-ui-border/40 bg-ui-paper/95"
             )}
           />
         ) : null}
@@ -65,7 +65,7 @@ export function TableSummaryRow({
                 data-pinned={isPinned ? "true" : undefined}
                 className={cn(
                   cellPadding,
-                  "border-l border-ui-border/30 first:border-l-0",
+                  "border-s border-ui-border/30 first:border-s-0",
                   isPinned && pinnedCellClass,
                   "bg-ui-paper/95 font-medium text-ui-ink"
                 )}
@@ -104,7 +104,7 @@ export function TableSummaryRow({
               data-pinned={isPinned ? "true" : undefined}
               className={cn(
                 cellPadding,
-                "border-l border-ui-border/30 first:border-l-0",
+                "border-s border-ui-border/30 first:border-s-0",
                 isPinned && pinnedCellClass,
                 "bg-ui-paper/95",
                 isNumeric && "text-right tabular-nums"

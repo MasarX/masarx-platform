@@ -10,6 +10,7 @@ import type { BulkActionDefinition } from "./bulk-actions";
 import type { TranslateFn } from "./table/types";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import { resolveRowDisplayText } from "./i18n";
+import { resolveSafeHref } from "./url-guard";
 
 const uiDefaults = getUiDefaults();
 
@@ -47,6 +48,20 @@ const resolveDownloadAllowed = (
   downloadCapability: string | null,
   capabilitySet: Set<string>
 ) => hasCapability(capabilitySet, downloadCapability);
+
+const resolveCreateActionHref = (
+  resource: UiReadResource | null | undefined,
+  appBasePath: string
+) => {
+  const createConfig = resource?.create ?? null;
+  if (createConfig?.enabled !== true) return null;
+  const route = createConfig.route?.trim();
+  if (!route) return null;
+  return resolveSafeHref(appBasePath, route);
+};
+
+const resolveCreateCapability = (resource: UiReadResource | null | undefined) =>
+  resource?.create?.capability?.trim() || null;
 
 const resolveLabel = (command: UiCommandDefinition, locale?: string) =>
   resolveRowDisplayText(command.label?.trim() || command.key, command.label_ar, locale);
@@ -199,5 +214,30 @@ export const resolveResourceBulkActions = ({
   );
 
   output.push(...commandActionsResolved);
+  const existingKeys = new Set(output.map((a) => a.key));
+
+  // Generic clone actions are available only for resources with registry-owned
+  // create routes; write capability alone does not prove a concrete page exists.
+  const cloneKey = `${resourceKey}.clone`;
+  const createHref = resolveCreateActionHref(resource, appBasePath);
+  const writeCapability = resolveCreateCapability(resource);
+  if (!existingKeys.has(cloneKey) && createHref && writeCapability) {
+    const cloneAllowed = hasCapability(capabilitySet, writeCapability);
+    const cloneDisabledReason = cloneAllowed
+      ? null
+      : t("disabled.requiresCapability", { capability: writeCapability });
+    output.push({
+      key: cloneKey,
+      label: t("clone"),
+      description: null,
+      capability: writeCapability,
+      resourceKey,
+      href: createHref,
+      execution: { type: "navigate" },
+      disabledReason: cloneDisabledReason,
+      selection: { min_count: 1, max_count: 1, id_param: "clone_from" },
+    });
+  }
+
   return output;
 };

@@ -46,6 +46,25 @@ describe("ui-context-cache", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
+  test("bypasses cache by default outside production", async () => {
+    delete process.env.MASARX_UI_CONTEXT_CACHE_TTL_MS;
+    delete process.env.MASARX_UI_CONTEXT_CACHE_STALE_IF_ERROR_MS;
+    process.env = { ...process.env, NODE_ENV: "test" };
+    const { loadUiContextCached } = loadModule();
+
+    const load = jest
+      .fn()
+      .mockImplementationOnce(async () => makeContext("first"))
+      .mockImplementationOnce(async () => makeContext("second"));
+    const params = { appKey: "portal", accessToken: "token-dev", load };
+
+    const first = await loadUiContextCached(params);
+    const second = await loadUiContextCached(params);
+
+    expect(first).not.toEqual(second);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
   test("returns stale context on transient errors after TTL expiry", async () => {
     process.env.MASARX_UI_CONTEXT_CACHE_TTL_MS = "100";
     process.env.MASARX_UI_CONTEXT_CACHE_STALE_IF_ERROR_MS = "1000";

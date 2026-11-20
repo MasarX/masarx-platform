@@ -1,6 +1,7 @@
 import type { ResourceColumn } from "./columns";
 import type { EditConfig, InlineEditType, SelectOption } from "./editing";
 import { hasCapability } from "../capabilities";
+import { normalizeEditOptions } from "../edit-option-utils";
 
 function normalizeColumnKeyForIdHeuristic(value: string) {
   return value
@@ -42,22 +43,7 @@ function normalizeEditType(column: ResourceColumn): InlineEditType {
 }
 
 function resolveSelectOptions(column: ResourceColumn): SelectOption[] {
-  const options = Array.isArray(column.editOptions) ? column.editOptions : [];
-  return options
-    .map((option) => {
-      if (typeof option === "string" || typeof option === "number") {
-        const label = String(option);
-        return { label, value: label };
-      }
-      if (option && typeof option === "object") {
-        const label = String(option.label ?? option.value ?? "");
-        const value = String(option.value ?? option.label ?? "");
-        if (!label || !value) return null;
-        return { label, value };
-      }
-      return null;
-    })
-    .filter((option): option is SelectOption => Boolean(option));
+  return normalizeEditOptions(column.editOptions);
 }
 
 export function buildEditConfigByKey(

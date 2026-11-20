@@ -10,11 +10,25 @@ jest.mock("next-intl", () => ({
       namespace ? `${namespace}.${key}` : key,
 }));
 
+jest.mock("next/navigation", () => ({
+  usePathname: () => "/console/operations/exceptions/dispatch_exception_review",
+  useRouter: () => ({
+    back: jest.fn(),
+    forward: jest.fn(),
+    prefetch: jest.fn(),
+    push: jest.fn(),
+    replace: jest.fn(),
+    refresh: jest.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 import type { ReactElement } from "react";
 import { screen, within } from "@testing-library/react";
 import { axe } from "jest-axe";
 import { renderWithIntl } from "./test-utils";
 import { RouteOperationsWorkspacePage } from "../../packages/ui/src/route-operations-workspace-page";
+import { ResourcePage } from "../../packages/ui/src/resource-page";
 import { getVerifiedUser } from "@masarx/auth";
 import { createUiServerClient } from "@masarx/api/server";
 
@@ -36,7 +50,23 @@ function createAuthenticatedSession() {
   });
 }
 
-function createUiClientMock(resourceKeys: string[]) {
+function createUiClientMock(
+  resourceKeys: string[],
+  options: {
+    sectionId?: string;
+    sectionLabel?: string;
+    extraSections?: Array<{
+      id: string;
+      label: string;
+      items: Array<{
+        id: string;
+        label: string;
+        href: string;
+        resource: string;
+      }>;
+    }>;
+  } = {}
+) {
   const commands = resourceKeys.map((key) => ({
     key: `${key}.triage`,
     label: `triage ${key}`,
@@ -57,9 +87,10 @@ function createUiClientMock(resourceKeys: string[]) {
       navigation: {
         app: "console",
         sections: [
+          ...(options.extraSections ?? []),
           {
-            id: "operations",
-            label: "Operations",
+            id: options.sectionId ?? "operations",
+            label: options.sectionLabel ?? "Operations",
             items: resourceKeys.map((key) => ({
               id: key,
               label: key.replaceAll("_", " "),
@@ -77,6 +108,22 @@ function createUiClientMock(resourceKeys: string[]) {
         capability_read: `${key}.read`,
       })),
     }),
+    me: jest.fn().mockResolvedValue({
+      user: { id: "user-1", email: "gxhmruwnxrrgxpwtklhlhutg@example.invalid", user_type: "ops_admin" },
+      capabilities: ["tasks.read", "tasks.write", "settings.request"],
+      access_scope: {
+        scope_type: "global",
+        scope_id: "global",
+        scope_label: "Global",
+      },
+    }),
+    settingsPreview: jest.fn().mockResolvedValue(null),
+    filterOperators: jest.fn().mockResolvedValue(null),
+    tableViews: jest.fn().mockResolvedValue(null),
+    relatedResources: jest.fn().mockResolvedValue([]),
+    getResource: jest.fn().mockResolvedValue(null),
+    resourceMetrics: jest.fn().mockResolvedValue(null),
+    listLookupValues: jest.fn().mockResolvedValue([]),
     commandRegistry: jest.fn().mockResolvedValue({
       commands,
     }),
@@ -118,6 +165,49 @@ describe("ExceptionInboxWorkspacePage", () => {
     expect(screen.getAllByText("dispatch alerts").length).toBeGreaterThan(0);
     expect(screen.getAllByText("workflow exceptions").length).toBeGreaterThan(0);
     expect(screen.queryByText("shipments")).not.toBeInTheDocument();
+  });
+
+  it("uses the exceptions navigation section instead of unrelated operations lanes", async () => {
+    createAuthenticatedSession();
+    mockedCreateUiServerClient.mockReturnValue(
+      createUiClientMock(
+        ["dispatch_exception_review_mine", "unassigned_exceptions"],
+        {
+          sectionId: "exceptions",
+          sectionLabel: "Exceptions",
+          extraSections: [
+            {
+              id: "operations",
+              label: "Operations",
+              items: [
+                {
+                  id: "scan_events",
+                  label: "scan events",
+                  href: "/console/resources/scan_events",
+                  resource: "scan_events",
+                },
+              ],
+            },
+          ],
+        }
+      )
+    );
+
+    const node = await RouteOperationsWorkspacePage({
+      appBasePath: "/console",
+      appKey: "console",
+      sectionId: "exceptions",
+      resourceSelector: "exceptions",
+      workspacePathSegment: "exceptions",
+      i18nNamespace: "ui.exceptionInbox",
+      testIdPrefix: "console-exception-inbox",
+    });
+
+    renderWithIntl(node as ReactElement);
+
+    expect(screen.getAllByText("dispatch exception review mine").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("unassigned exceptions").length).toBeGreaterThan(0);
+    expect(screen.queryByText("scan events")).not.toBeInTheDocument();
   });
 
   it("detects warehouse Batch 3 exception lanes from registry metadata", async () => {
@@ -490,6 +580,96 @@ describe("ExceptionInboxWorkspacePage", () => {
         "ui.exceptionInbox.triage.matrix.unowned"
       )
     ).toBeInTheDocument();
+  });
+
+  it("renders selected exception reasons through lookup labels in table and detail", async () => {
+    createAuthenticatedSession();
+    const reviewRow = {
+      id: "task-ndr-1",
+      tracking_number: "UI-EXC-001",
+      status: "open",
+      status_reason: "no_answer",
+    };
+    const uiClient = createUiClientMock(["dispatch_exception_review"], {
+      sectionId: "exceptions",
+      sectionLabel: "Exceptions",
+    });
+    uiClient.readRegistry.mockResolvedValue({
+      resources: [
+        {
+          key: "dispatch_exception_review",
+          label: "Dispatch Exception Review",
+          relation: "public.tasks",
+          id_column: "id",
+          capability_read: "tasks.read",
+          select: ["id", "tracking_number", "status_reason"],
+          columns: [
+            {
+              key: "tracking_number",
+              label: "Tracking number",
+            },
+            {
+              key: "status_reason",
+              label: "Dispatch exception reason",
+              render_type: "lookup",
+              detail_section: "Exception",
+              format_options: {
+                lookup_category: "dispatch_exception_reason",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    uiClient.listResource.mockResolvedValue({
+      resource: "dispatch_exception_review",
+      keys: ["id", "tracking_number", "status_reason"],
+      items: [reviewRow],
+      limit: 25,
+      offset: 0,
+      total: 1,
+    });
+    uiClient.getResource.mockResolvedValue(reviewRow);
+    uiClient.listLookupValues.mockImplementation((category: string) =>
+      Promise.resolve(
+        category === "dispatch_exception_reason"
+          ? [{ value: "no_answer", label: "No Answer", metadata: {} }]
+          : []
+      )
+    );
+    mockedCreateUiServerClient.mockReturnValue(uiClient);
+
+    const node = await ResourcePage({
+      appKey: "console",
+      searchParams: { id: "task-ndr-1", detail_open: "1" },
+      resourceKey: "dispatch_exception_review",
+      appBasePath: "/console",
+      baseHref: "/console/operations/exceptions/dispatch_exception_review",
+      testIdPrefix: "console-exception-inbox-resource",
+    });
+
+    renderWithIntl(node as ReactElement);
+
+    expect(uiClient.listLookupValues).toHaveBeenCalledWith(
+      "dispatch_exception_reason"
+    );
+
+    const tableRow = screen
+      .getAllByText("UI-EXC-001")
+      .map((node) => node.closest("tr"))
+      .find((row): row is HTMLTableRowElement => Boolean(row));
+    expect(tableRow).toBeTruthy();
+    expect(within(tableRow as HTMLElement).getByText("No Answer")).toBeInTheDocument();
+    expect(
+      within(tableRow as HTMLElement).queryByText("no_answer")
+    ).not.toBeInTheDocument();
+
+    const detailSection = screen.getByTestId(
+      "console-exception-inbox-resource-detail-section-exception"
+    );
+    expect(within(detailSection).getByText("Dispatch exception reason")).toBeInTheDocument();
+    expect(within(detailSection).getByText("No Answer")).toBeInTheDocument();
+    expect(within(detailSection).queryByText("no_answer")).not.toBeInTheDocument();
   });
 
   it("shows a triage warning when command registry is unavailable", async () => {
