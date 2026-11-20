@@ -12,7 +12,6 @@ const settings = {
   SUPABASE_URL: `synthetic-url ${special}`,
   SUPABASE_SERVICE_ROLE_KEY: `synthetic-role ${special}`,
   PARTITION_DURATION: '2s',
-  XK6_SQL_VERSION: `synthetic-version ${special}`,
 };
 const summary = 'tmp/synthetic load; result.json';
 const scenarioArgs = [
@@ -27,7 +26,7 @@ const localCall = (env) => [
   { stdio: 'pipe', encoding: 'utf8', env: { ...env, DATABASE_URL: dbUrl } },
 ];
 
-async function captureSpawns(mode, { info = { status: 0 }, run = { status: 0 } } = {}) {
+async function captureSpawns(mode, { info = { status: 0 }, run = { status: 0 }, env = {} } = {}) {
   const spawnSync = jest.fn((command, [subcommand]) => {
     if (command === 'docker') return subcommand === 'info' ? info : run;
     return { status: 0 };
@@ -51,7 +50,7 @@ async function captureSpawns(mode, { info = { status: 0 }, run = { status: 0 } }
     require: (name) => modules[name],
     console: { log: jest.fn(), error: jest.fn(), warn },
     process: {
-      env: mode ? { ...settings, LOAD_TEST_DOCKER_MODE: mode } : { ...settings },
+      env: { ...settings, ...env, ...(mode ? { LOAD_TEST_DOCKER_MODE: mode } : {}) },
       argv: ['node', 'run-load-test.js', `--summary=${summary}`],
       cwd: () => projectRoot,
       platform: 'linux',
@@ -61,8 +60,11 @@ async function captureSpawns(mode, { info = { status: 0 }, run = { status: 0 } }
   return { calls: spawnSync.mock.calls, exits: exit.mock.calls, warnings: warn.mock.calls };
 }
 
-test('passes Docker env names in argv and values verbatim in the child environment', async () => {
-  const { calls, exits } = await captureSpawns('require');
+test.each([
+  ['default SQL pin', {}, 'v1.0.4'],
+  ['SQL version override', { XK6_SQL_VERSION: `synthetic-version ${special}` }, `synthetic-version ${special}`],
+])('passes Docker env names in argv and values verbatim in the child environment with %s', async (_label, env, sqlVersion) => {
+  const { calls, exits } = await captureSpawns('require', { env });
   const [, args, options] = calls.find(([command, argv]) => command === 'docker' && argv[0] === 'run');
 
   expect(exits).toStrictEqual([[0]]);
@@ -72,6 +74,7 @@ test('passes Docker env names in argv and values verbatim in the child environme
     timeout: 600000,
     env: {
       ...settings,
+      ...env,
       DATABASE_URL: dbUrl,
       LOAD_TEST_DOCKER_MODE: 'require',
       DOCKER_CONFIG: path.join(projectRoot, 'tmp', 'docker-authless'),
@@ -94,8 +97,8 @@ test('passes Docker env names in argv and values verbatim in the child environme
     'xk6 build "$1" --with "$2" --with "$3" --output /tmp/k6 && shift 3 && exec /tmp/k6 run "$@"',
     'load-test',
     'v0.57.0',
-    `github.com/grafana/xk6-sql@${settings.XK6_SQL_VERSION}`,
-    'github.com/grafana/xk6-sql-driver-postgres@v0.1.1',
+    `github.com/grafana/xk6-sql@${sqlVersion}`,
+    'github.com/grafana/xk6-sql-driver-postgres@v0.1.0',
     ...scenarioArgs,
   ]);
 });

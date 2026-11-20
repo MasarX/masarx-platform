@@ -73,8 +73,8 @@ const qa = createQaLogger({ runId: process.env.QA_RUN_ID, disabled: !process.env
 // Determinism: pin the xk6 runner + extensions by default (override via env vars).
 const xk6DockerImage = process.env.XK6_DOCKER_IMAGE || 'grafana/xk6:0.14.0';
 const xk6K6Version = process.env.XK6_K6_VERSION || 'v0.57.0';
-const xk6SqlVersion = process.env.XK6_SQL_VERSION || 'v1.0.5';
-const xk6SqlPostgresVersion = process.env.XK6_SQL_POSTGRES_VERSION || 'v0.1.1';
+const xk6SqlVersion = process.env.XK6_SQL_VERSION || 'v1.0.4';
+const xk6SqlPostgresVersion = process.env.XK6_SQL_POSTGRES_VERSION || 'v0.1.0';
 const xk6VersionOverride = process.env.XK6_VERSION || '';
 
 const resolveXk6Version = () => {
