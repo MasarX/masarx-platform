@@ -14,7 +14,7 @@
     "@masarx/config": "0.1.0",
     "@masarx/mobile-core": "0.1.0",
     "@expo/app-integrity": "~55.0.15",
-    "@maplibre/maplibre-react-native": "11.3.8",
+    "@maplibre/maplibre-react-native": "11.5.1",
     "@sentry/react-native": "~7.11.0",
     "@tanstack/react-query": "^5.45.0",
     "expo": "~55.0.32",
@@ -32,15 +32,15 @@
     "expo-sqlite": "~55.0.18",
     "expo-status-bar": "~55.0.6",
     "expo-task-manager": "~55.0.18",
-    "maplibre-gl": "6.7.0",
+    "maplibre-gl": "6.18.0",
     "pdf-lib": "^1.17.1",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.10",
-    "react-native-safe-area-context": "~5.6.2",
+    "react-native-safe-area-context": "~5.11.1",
     "react-native-url-polyfill": "^3.0.0",
-    "react-native-web": "~0.21.0",
-    "react-native-svg": "15.12.1"
+    "react-native-web": "~0.21.4",
+    "react-native-svg": "15.16.1"
   },
   "devDependencies": {
     "@types/react": "~19.2.0",

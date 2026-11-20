@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@masarx/config": "0.1.0",
-    "@supabase/ssr": "^0.9.0",
-    "@supabase/supabase-js": "^2.98.0"
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.119.0"
   },
   "description": "",
   "keywords": []
