@@ -42,6 +42,7 @@ import { Select } from "./select";
 import { TABULAR_FILE_ACCEPT, type ParsedTabularFile } from "./tabular-file";
 import { isTabularLimitError } from "./resource-import/tabular-file-limits";
 import { parseTabularFileWithWorker } from "./resource-import/tabular-file-parser-worker-client";
+import { sanitizeTargetFieldForTestId } from "./resource-import/target-field-test-id";
 import { buildHref } from "./url";
 import { resolveSafeHref, resolveTrustedExternalDataUrl } from "./url-guard";
 import { useToast } from "./use-toast";
@@ -398,13 +399,6 @@ function collectRuntimeRequiredTargets(dryRun: ResourceImportDryRunSummary | nul
   });
 
   return [...keys].sort((left, right) => left.localeCompare(right));
-}
-
-function sanitizeTargetFieldForTestId(targetField: string) {
-  return targetField
-    .replace(/\./g, "-")
-    .replace(/[^a-z0-9_-]+/gi, "-")
-    .replace(/^-+|-+$/g, "");
 }
 
 function mergeRelatedNodeContracts(

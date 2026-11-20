@@ -54,7 +54,12 @@ function coerceNonEmptyText(value: unknown): string | null {
 }
 
 function sanitizePathPart(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "artifact";
+  const sanitized = value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+  let start = 0;
+  let end = sanitized.length;
+  while (start < end && sanitized[start] === "-") start++;
+  while (end > start && sanitized[end - 1] === "-") end--;
+  return sanitized.slice(start, end) || "artifact";
 }
 
 export function readMobileV2PolicyContextId(

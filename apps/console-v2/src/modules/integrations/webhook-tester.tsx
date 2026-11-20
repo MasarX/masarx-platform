@@ -365,9 +365,17 @@ export type WebhookSampleTemplateContext = {
   recipient_email: string;
 };
 
+function trimHyphens(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === '-') start++;
+  while (end > start && value[end - 1] === '-') end--;
+  return value.slice(start, end);
+}
+
 function sampleTokenBase(idempotencyKey: string): string {
   const trimmed = idempotencyKey.trim() || `console-v2-${Date.now()}`;
-  return trimmed.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 72) || 'console-v2-sample';
+  return trimHyphens(trimmed.replace(/[^A-Za-z0-9_-]+/g, '-')).slice(0, 72) || 'console-v2-sample';
 }
 
 export function createReceiverIdempotencyKey(): string {
