@@ -31,6 +31,7 @@ function setup() {
   const createClient = jest.fn(() => ({ rpc, from }));
   const fetch = jest.fn();
   const log = jest.fn();
+  const logError = jest.fn(log);
   const env = {
     EDGE_SUPABASE_URL: serviceUrl,
     EDGE_SUPABASE_SECRET_KEY: serviceKey,
@@ -42,7 +43,7 @@ function setup() {
   const sandbox = vm.createContext({
     Request, Response, Headers, URL, URLSearchParams, TextEncoder, TextDecoder,
     Error, crypto: webcrypto, fetch,
-    console: { log, info: log, warn: log, error: log, debug: log, trace: log, dir: log },
+    console: { log, info: log, warn: log, error: logError, debug: log, trace: log, dir: log },
     Deno: { env: { get: (key) => env[key] }, serve: (fn) => { handler = fn; } },
   });
   const modules = new Map();
@@ -66,7 +67,7 @@ function setup() {
   }
 
   load(path.join(edgeRoot, 'public-shipment-tracking/index.ts'));
-  return { handler, rpc, from, createClient, fetch, log };
+  return { handler, rpc, from, createClient, fetch, log, logError };
 }
 
 function request(body, action = 'lookup') {
@@ -89,7 +90,18 @@ async function expectResponse(response, log, status, body) {
   const text = await response.text();
   expect(JSON.parse(text)).toEqual(body);
   expect(text.includes(verifierSecret)).toBe(false);
-  expect(inspect([...response.headers, ...log.mock.calls], { depth: null }).includes(verifierSecret)).toBe(false);
+  const output = inspect([...response.headers, ...log.mock.calls], { depth: null });
+  for (const value of [verifierSecret, serviceKey, payload.turnstile_token.trim(), ip, 'fixture%2Btoken%26value']) {
+    expect(output.includes(value)).toBe(false);
+  }
+  return text;
+}
+
+function expectErrorLog(log, code, message, rpc) {
+  expect(log).toHaveBeenCalledTimes(1);
+  const entry = JSON.parse(log.mock.calls[0][0]);
+  expect([entry.level, entry.event, entry.code, entry.message, entry.rpc])
+    .toEqual(['error', 'public_shipment_tracking_failed', code, message, rpc]);
 }
 
 describe('public shipment tracking siteverify', () => {
@@ -107,6 +119,10 @@ describe('public shipment tracking siteverify', () => {
     ['success:false', () => Response.json({ success: false, 'error-codes': ['invalid-input-response'] }),
       ['invalid-input-response']],
     ['non-JSON HTTP 503 body', () => new Response('Service Unavailable', { status: 503 }), null],
+    ['HTTP 503 with {success:true}', () => Response.json({
+      success: true,
+      hostname: 'tracking.example.invalid',
+    }, { status: 503 }), null],
   ])('rejects %s from siteverify without reading tracking data', async (_case, upstream, errorCodes) => {
     const app = setup();
     app.fetch.mockResolvedValueOnce(upstream());
@@ -139,16 +155,73 @@ describe('public shipment tracking siteverify', () => {
 
   test('rejects a siteverify network error without reading tracking data', async () => {
     const app = setup();
-    app.fetch.mockRejectedValueOnce(new Error('siteverify unavailable'));
+    const message = 'siteverify unavailable';
+    app.fetch.mockRejectedValueOnce(new Error(
+      `${message}: ${verifierSecret} ${serviceKey} ${payload.turnstile_token.trim()} ${ip} fixture%2Btoken%26value`,
+    ));
     const response = await app.handler(request(payload));
 
-    await expectResponse(response, app.log, 502, {
+    const text = await expectResponse(response, app.log, 502, {
       ok: false,
-      error: { code: 'turnstile_verify_failed', message: 'siteverify unavailable' },
+      error: { code: 'turnstile_verify_failed' },
     });
+    expect(text).not.toContain(message);
+    expectErrorLog(app.logError, 'turnstile_verify_failed',
+      `${message}: [redacted] [redacted] [redacted] [redacted] [redacted]`);
     expect(app.fetch.mock.calls).toEqual([verificationRequest]);
     expect(app.rpc).not.toHaveBeenCalled();
     expect(app.from).not.toHaveBeenCalled();
+  });
+
+  test('logs an RPC failure without returning the RPC name or internal detail', async () => {
+    const app = setup();
+    const message = 'fixture internal detail';
+    const rpcName = 'public_tracking_lookup_v1';
+    app.fetch.mockResolvedValueOnce(Response.json({ success: true, hostname: 'tracking.example.invalid' }));
+    app.rpc.mockResolvedValueOnce({ data: null, error: { message, code: 'P0001' } });
+    const response = await app.handler(request(payload));
+
+    const text = await expectResponse(response, app.log, 500, { ok: false, error: { code: 'rpc_failed' } });
+    expect(text).not.toContain(message);
+    expect(text).not.toContain(rpcName);
+    expectErrorLog(app.logError, 'rpc_failed', message, rpcName);
+    expect(app.rpc).toHaveBeenCalledTimes(1);
+    expect(app.from).not.toHaveBeenCalled();
+  });
+
+  test('keeps malformed request data out of diagnostics', async () => {
+    const app = setup();
+    const malformed = new Request(request(payload), { body: payload.turnstile_token.trim() });
+    const response = await app.handler(malformed);
+
+    await expectResponse(response, app.log, 400, { ok: false, error: { code: 'invalid_json' } });
+    expectErrorLog(app.logError, 'invalid_json', 'Invalid JSON payload');
+    expect(app.createClient).not.toHaveBeenCalled();
+  });
+
+  test('keeps client initialization detail server-side', async () => {
+    const app = setup();
+    const message = 'fixture client unavailable';
+    app.createClient.mockImplementationOnce(() => { throw new Error(message); });
+    const response = await app.handler(request(payload));
+
+    await expectResponse(response, app.log, 500, { ok: false, error: { code: 'server_misconfigured' } });
+    expectErrorLog(app.logError, 'server_misconfigured', message);
+    expect(app.fetch).not.toHaveBeenCalled();
+    expect(app.rpc).not.toHaveBeenCalled();
+  });
+
+  test('keeps missing IP hash prerequisites server-side', async () => {
+    const app = setup();
+    const req = request(payload);
+    req.headers.delete('cf-connecting-ip');
+    req.headers.delete('x-forwarded-for');
+    const response = await app.handler(req);
+
+    await expectResponse(response, app.log, 500, { ok: false, error: { code: 'server_misconfigured' } });
+    expectErrorLog(app.logError, 'server_misconfigured', 'ip_hash_prerequisites_missing');
+    expect(app.fetch).not.toHaveBeenCalled();
+    expect(app.rpc).not.toHaveBeenCalled();
   });
 
   test.each([
