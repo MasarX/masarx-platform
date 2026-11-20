@@ -2,7 +2,11 @@
   "ignore": [
     "^apps/(?:console|portal|fieldops)/public/maplibre-gl-(?:worker|shared)\\.mjs$"
   ],
-  "playwrightConfigs": ["playwright.config.ts", "playwright.tenant-invite.config.ts"],
+  "playwrightConfigs": [
+    "playwright.config.ts",
+    "playwright.tenant-invite.config.ts",
+    "tests/e2e/fieldops-mobile/playwright.config.ts"
+  ],
   "allow": {
     "from": [
       "^packages/ui/src/workflow-bindings-page\\.tsx$",

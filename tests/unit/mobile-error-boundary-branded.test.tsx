@@ -11,7 +11,7 @@ test.each<[unknown, ErrorCategory]>([
   ["Fetch failed after a permission check", "offline"],
   [new Error("Unexpected failure"), "unknown"],
   [null, "unknown"],
-])("categorizes errors for retry guidance", (error, category) => {
+])("categorizes errors for retry guidance (%#)", (error, category) => {
   expect(classifyError(error)).toBe(category);
 });
 

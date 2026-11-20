@@ -25,6 +25,7 @@ const MOBILE_VIEWPORT = { width: 430, height: 932 };
 
 export default defineConfig({
   testDir: __dirname,
+  testMatch: /[\\\/]fieldops-mobile[\\\/].*\.spec\.ts$/,
   // The Expo web bundle compiles + caches on first load; 180s per-test gives
   // the initial Metro build enough headroom while keeping later tests fast.
   timeout: 180_000,
