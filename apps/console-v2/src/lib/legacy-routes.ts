@@ -1,4 +1,5 @@
 import type { RoutePath } from './route-meta';
+import { trimTrailingSlashes } from './trim-trailing-slashes';
 
 const LEGACY_RESOURCE_REDIRECTS = {
   addresses: '/network/geocoding',
@@ -143,6 +144,6 @@ export function resolveLegacyConsoleResourceRoute(resource: string): RoutePath |
 }
 
 export function resolveLegacyConsoleRoute(path: string): RoutePath | null {
-  const key = path.trim().toLowerCase().replace(/\/+$/, '') || '/';
+  const key = trimTrailingSlashes(path.trim().toLowerCase()) || '/';
   return (LEGACY_CONSOLE_ROUTE_REDIRECTS as Record<string, RoutePath | undefined>)[key] ?? null;
 }
