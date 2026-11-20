@@ -12,10 +12,10 @@
  */
 /* eslint-disable no-console */
 
-const crypto = require('crypto');
 const fs = require('fs');
 const { loadEnv } = require('../utils/load-env');
 const { upsertEnvFileValues } = require('../utils/env-file');
+const { hashUrlTarget: safeHash } = require('../utils/hash-url-target');
 const {
   applyPinnedDbSelectionPreference,
   buildDbConnectionCandidates,
@@ -39,12 +39,6 @@ function getPgClientCtor() {
     throw new Error(`Missing pg dependency required for DB connectivity probe: ${message}`);
   }
   return PgClientCtor;
-}
-
-function safeHash(value) {
-  if (!value) return '';
-  const h = crypto.createHash('sha256').update(String(value)).digest('hex');
-  return h.slice(0, 12);
 }
 
 function pinSelectedDsnForDownstream(candidate, options = {}) {

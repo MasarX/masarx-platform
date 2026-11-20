@@ -11,10 +11,34 @@ const { targetBase, targetFile } = require('./target-policy.cjs');
 const { guardPlan } = require('./base-guard.cjs');
 const { changedPaths, select } = require('./changes.cjs');
 const { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory } = require('./install-policy.cjs');
+const { installCommandPatternSource } = require('./install-policy.cjs');
+const { installCommandPatternFlags } = require('./install-policy.cjs');
+const legacyShimModule = require.resolve('../ops/ci/install-unit-qualification-dependencies');
+const { legacyCmdShimTargetPatternFlags, legacyCmdShimTargetPatternSource } = require(legacyShimModule);
 const { generate } = require('./generate-migration-exceptions.cjs');
 const { rewrite, policyDecision } = require('./docker-images.cjs');
 const { sanitize, outputTail, failureDetails, environmentSecrets } = require('./diagnostics.cjs');
 const { detect } = require('./tasks.cjs');
+assert.equal(
+  installCommandPatternSource,
+  String.raw`\b(npm|pnpm|yarn)\s+(?:(?:--(?:prefix|workspace|dir|cwd|userconfig|globalconfig)\s+(?!(?:-g|--[\w=./-]+)\s)\S+|--[\w=./-]+|-g)\s+)*(?:ci|install|add|rebuild)\b`,
+  'approved install command pattern changed',
+);
+assert.ok(installCommandPatternSource.includes(String.raw`(?!(?:-g|--[\w=./-]+)\s)\S+`));
+
+assert.equal(installCommandPatternFlags, '', 'approved install command pattern flags changed');
+assert.equal(
+  fs.readFileSync(require.resolve('./install-policy.cjs'), 'utf8').split(installCommandPatternSource).length - 1,
+  1,
+  'expected exactly one install command pattern occurrence',
+);
+assert.equal(legacyCmdShimTargetPatternFlags, 'gim', 'approved legacy Windows shim target pattern flags changed');
+assert.equal(
+  fs.readFileSync(legacyShimModule, 'utf8').split(legacyCmdShimTargetPatternSource).length - 1,
+  1,
+  'expected exactly one legacy Windows shim target pattern occurrence',
+);
+
 const sensitive = ['synthetic credential with spaces', 'b'.repeat(48), 'MixedOpaqueValueWithDigits1234567890'];
 const jwt = ['eyJ' + 'h'.repeat(20), 'p'.repeat(20), 's'.repeat(20)].join('.');
 const key = 'sb_' + 'secret_' + 'synthetic';
@@ -207,6 +231,18 @@ for (const command of ['npm ci --ignore-scripts', 'npm install x --ignore-script
 assert.equal(installCommand('npm ci', true), null);
 assert.notEqual(installCommand('npm --prefix app ci'), null);
 assert.equal(installCommand('npm --prefix app ci --ignore-scripts'), null);
+for (const [command, inherited] of [
+  ['npm --cwd - install', false],
+  ['npm --prefix - ci', false],
+  ['npm --prefix -x ci', false],
+  ['npm --prefix --a$b ci', false],
+  ['yarn --cwd -app install', true],
+]) assert.equal(installCommand(command, inherited), 'install lacks script disabling');
+assert.equal(installCommand('npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund'), null);
+const repeatedInstallFlags = 'npm --cwd -g ' + '--cwd app '.repeat(5000) + 'run';
+const installPolicyStarted = performance.now();
+assert.equal(installCommand(repeatedInstallFlags), null);
+assert.ok(performance.now() - installPolicyStarted < 1000);
 for (const command of ['npm ci --ignore-scripts=false', 'NPM_CONFIG_IGNORE_SCRIPTS=false npm ci', 'npm_config_ignore_scripts=0 npm ci']) assert.notEqual(installCommand(command, true), null);
 assert.equal(checkInstallPolicy(new Map([[workflowPath, workflow]])).length, 0);
 assert.notEqual(checkInstallPolicy(new Map([[workflowPath, 'name: missing setting']])).length, 0);

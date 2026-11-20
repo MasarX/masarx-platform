@@ -56,7 +56,7 @@ function validateFieldopsExport(exportDir, fsImpl = fs) {
     }
   }
   const html = fsImpl.readFileSync(path.join(exportDir, 'index.html'), 'utf8');
-  for (const script of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+  for (const script of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi)) {
     if (!/\bsrc\s*=/i.test(script[1]) && script[2].trim() &&
         !/\btype\s*=\s*["'](?:application|text)\/(?:json|ld\+json)["']/i.test(script[1])) {
       throw new Error('FieldOps export contains inline executable scripts unsupported by its static CSP.');
