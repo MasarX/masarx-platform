@@ -64,7 +64,7 @@ export function InlineEditor({
 
   const hasLookupOptions = editConfig.options.length > 0;
   const uuidHint =
-    editState.editType === "uuid" && !hasLookupOptions
+    editState.editType === "uuid"
       ? t("edit.uuidHint", { label: editLabel })
       : null;
 

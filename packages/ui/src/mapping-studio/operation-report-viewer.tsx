@@ -63,7 +63,7 @@ export function OperationReportViewer({
     `${t("status")}: ${t(status === "succeeded" ? "succeeded" : "failed")}`,
     `${t("artifact")}: ${report.artifact_type || t("notAvailable")}`,
     `${t("activityReference")}: ${report.correlation_id || reportId || t("notAvailable")}`,
-    `${t("primaryResource")}: ${primaryType || t("notAvailable")}${primaryId ? ` (${primaryLabel})` : ""}`,
+    `${t("primaryResource")}: ${primaryType || t("notAvailable")}${primaryId ? ` (${primaryId})` : ""}`,
     ...(nextSteps.length ? [`${t("nextSteps")}: ${nextSteps.join("; ")}`] : []),
   ].join("\n");
   const reportJson = formatJsonForUi(report) ?? "null";

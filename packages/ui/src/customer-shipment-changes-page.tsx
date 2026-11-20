@@ -410,6 +410,10 @@ export async function CustomerShipmentChangesPage({
             >
               <CustomerShipmentChangeReviewForm
                 supportCaseId={detailId}
+                decisionOptions={[
+                  { value: "approved", label: "Approve and apply change" },
+                  { value: "rejected", label: "Reject customer change" },
+                ]}
                 disabled={Boolean(blockedMessage)}
                 disabledMessage={blockedMessage}
                 testIdPrefix={`${testIdPrefix}-review`}

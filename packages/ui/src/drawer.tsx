@@ -9,7 +9,7 @@ export const DrawerTrigger = Dialog.Trigger;
 export const DrawerClose = Dialog.Close;
 
 type DrawerContentProps = React.ComponentPropsWithoutRef<typeof Dialog.Content> & {
-  side?: "left" | "right";
+  side?: "left" | "right" | "start" | "end";
 };
 
 /**
@@ -27,7 +27,7 @@ export function DrawerContent({
       <Dialog.Content
         className={cn(
           "fixed inset-y-0 z-[90] w-full max-w-md overflow-y-auto border border-ui-border bg-ui-paper p-6 shadow-2xl motion-safe:animate-slide-up",
-          side === "left" ? "left-0" : "right-0",
+          { left: "left-0", right: "right-0", start: "start-0", end: "end-0" }[side],
           className
         )}
         {...props}

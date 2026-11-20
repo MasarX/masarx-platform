@@ -218,6 +218,7 @@ function MappingStudioForm({
   const [mappingRules, setMappingRules] = React.useState<StudioFieldRule[]>([]);
   const [originalMappingConfig, setOriginalMappingConfig] = React.useState<Record<string, unknown> | null>(null);
   const [requestConfigText, setRequestConfigText] = React.useState(stringifyPretty({}, "{}"));
+  const [advancedBindingOpen, setAdvancedBindingOpen] = React.useState(false);
   const [workflowBindingText, setWorkflowBindingText] = React.useState(buildInitialWorkflowBinding(initialContext));
   const templateLookup = useResourceLookupOptions(WORKFLOW_TEMPLATE_LOOKUP, artifact !== "tabular_import");
   let parsedBinding: Record<string, unknown> | null = null;
@@ -810,6 +811,27 @@ function MappingStudioForm({
             {artifact !== "tabular_import" ? (
               <div className="space-y-3">
                 <label className="space-y-2 text-sm text-ui-ink">
+                  <span>Workflow binding mode</span>
+                  <Select
+                    value={parsedBinding?.mode === "attach_existing" ? "attach_existing" : ""}
+                    disabled={!parsedBinding}
+                    onChange={(event) => {
+                      const next = { ...parsedBinding };
+                      invalidateReview();
+                      if (event.target.value === "attach_existing") {
+                        next.mode = "attach_existing";
+                      } else {
+                        delete next.mode;
+                        delete next.workflow_template_id;
+                      }
+                      setWorkflowBindingText(stringifyPretty(next, "{}"));
+                    }}
+                  >
+                    <option value="">No workflow binding</option>
+                    <option value="attach_existing">Attach existing workflow</option>
+                  </Select>
+                </label>
+                <label className="space-y-2 text-sm text-ui-ink">
                   <span>Workflow template</span>
                   <Select
                     value={bindingTemplateId}
@@ -836,9 +858,9 @@ function MappingStudioForm({
                   </Select>
                 </label>
                 {templateLookup.error ? <p role="status" className="text-xs text-ui-muted">Workflow templates are unavailable.</p> : null}
-                <details>
+                <details onToggle={(event) => setAdvancedBindingOpen(event.currentTarget.open)}>
                   <summary className="text-sm text-ui-muted">Advanced workflow binding</summary>
-                  <label className="space-y-2 text-sm text-ui-ink">
+                  {advancedBindingOpen ? <label className="space-y-2 text-sm text-ui-ink">
                     <span>Workflow binding JSON</span>
                     <Textarea
                       rows={12}
@@ -846,7 +868,7 @@ function MappingStudioForm({
                       onChange={(event) => { invalidateReview(); setWorkflowBindingText(event.target.value); }}
                       placeholder='{"mode":"attach_existing","workflow_template_id":"..."}'
                     />
-                  </label>
+                  </label> : null}
                 </details>
               </div>
             ) : null}

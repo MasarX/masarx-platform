@@ -717,6 +717,26 @@ export async function ResourcePage({
   }
 
   const columns = resolveColumns(resource, list, locale);
+  if (!deniedMessage && !errorMessage && ui.listLookupValues) {
+    const categories = new Set(
+      columns.flatMap((column) => {
+        const category = column.formatOptions?.lookup_category;
+        return typeof category === "string" && category && !column.formatOptions?.lookup_labels
+          ? [category] : [];
+      }),
+    );
+    const lookups = new Map(await Promise.all([...categories].map(async (category) => {
+      const rows = (await ui.listLookupValues(category).catch(() => [])) ?? [];
+      return [category, Object.fromEntries(rows.map(({ value, label }) => [value, label]))] as const;
+    })));
+    for (const column of columns) {
+      const category = column.formatOptions?.lookup_category;
+      const labels = typeof category === "string" ? lookups.get(category) : undefined;
+      if (labels && !column.formatOptions?.lookup_labels) {
+        column.formatOptions = { ...column.formatOptions, lookup_labels: labels };
+      }
+    }
+  }
   const title = resolveRowDisplayText(resource?.label ?? resourceKey, resource?.label_ar, locale);
   const effectiveHeaderActions =
     deniedMessage || errorMessage

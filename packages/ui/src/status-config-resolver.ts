@@ -90,7 +90,7 @@ export async function resolveStatusConfig(
 ): Promise<StatusConfig> {
   let rows: LookupValueRow[];
   try {
-    rows = await listLookupValues("shipment_status");
+    rows = (await listLookupValues("shipment_status")) ?? [];
   } catch {
     rows = [];
   }

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatMachineValueLabel } from "./resource-utils";
+
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { createUiClient, isRetriableNetworkError, isRetriableSupabaseError } from "@masarx/api";
@@ -105,7 +107,7 @@ export function WorkflowTemplateCreateForm({
       .map((entry) => ({
         id: entry.id,
         label: entry.status
-          ? `${entry.name} (${entry.status}${entry.version ? ` v${entry.version}` : ""})`
+          ? `${entry.name} (${formatMachineValueLabel(entry.status)}${entry.version ? ` v${entry.version}` : ""})`
           : entry.name,
       }))
       .filter((entry) => entry.id && entry.label);

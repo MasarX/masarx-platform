@@ -1,7 +1,4 @@
-import { normalizeReviewDecisionOptions } from "./review-decision-options";
 import "server-only";
-
-import { labelFromKey } from "./resource-query";
 
 import { createUiServerClient } from "@masarx/api/server";
 import { UiMe } from "@masarx/api";
@@ -22,7 +19,7 @@ import {
   TenantSignupRequestCreateForm,
   type TenantSignupRequestCreateState,
 } from "./tenant-signup-request-create-form";
-import { formatUiError } from "./utils";
+import { formatUiError, normalizeReviewDecisionOptions } from "./utils";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -106,9 +103,12 @@ export async function TenantSignupRequestsPage({
   description,
 }: TenantSignupRequestsPageProps) {
   const ui = createUiServerClient();
-  const decisionOptions = normalizeReviewDecisionOptions(
-    await (ui.listLookupValues?.("tenant_signup_review_decision") ?? Promise.resolve([])).catch(() => []),
-  );
+  const decisionRows = await Promise.resolve()
+    .then(() => ui.listLookupValues?.("tenant_signup_review_decision"))
+    .catch(() => []);
+  const decisionOptions = decisionRows?.length ? normalizeReviewDecisionOptions(
+    decisionRows,
+  ) : [];
   let me: UiMe | null = null;
   let meError: string | null = null;
 
@@ -358,8 +358,8 @@ export async function TenantSignupRequestsPage({
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2 text-sm text-ui-muted">
                 <span>Status</span>
-                <Badge tone={isPending ? "neutral" : "accent"}>{labelFromKey(status)}</Badge>
-                {decision ? <Badge tone="accent">{labelFromKey(decision)}</Badge> : null}
+                <Badge tone={isPending ? "neutral" : "accent"}>{status.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")}</Badge>
+                {decision ? <Badge tone="accent">{decision.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")}</Badge> : null}
                 {reviewedBy ? <span className="text-xs">Reviewer: {reviewedBy}</span> : null}
                 {reviewedAt ? <span className="text-xs">Reviewed at: {reviewedAt}</span> : null}
                 {inviteEmailSentAt ? <span className="text-xs">Invite sent: {inviteEmailSentAt}</span> : null}

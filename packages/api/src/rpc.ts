@@ -12,8 +12,8 @@ type UiLookupValue = {
   metadata?: Record<string, unknown> | null;
 };
 
-export function listUiLookupValues(rpc: ReturnType<typeof createRpc>, category: string) {
-  return rpc<UiLookupValue[]>("list_lookup_values_v1", { p_category: category });
+export async function listUiLookupValues(rpc: ReturnType<typeof createRpc>, category: string) {
+  return (await rpc<UiLookupValue[] | null>("list_lookup_values_v1", { p_category: category })) ?? [];
 }
 
 const DEFAULT_RPC_RETRIES = 2;

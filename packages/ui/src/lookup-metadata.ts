@@ -32,7 +32,7 @@ export async function fetchLookupWithMeta(
   metadataField: string,
 ): Promise<LookupValueRow[]> {
   try {
-    const rows = await client.listLookupValues(category);
+    const rows = (await client.listLookupValues(category)) ?? [];
     return rows.filter(
       (r) => r.metadata != null && metadataField in r.metadata,
     );
@@ -61,7 +61,7 @@ export async function resolveActiveRouteRunStatuses(
   client: LookupClient,
 ): Promise<ReadonlySet<string>> {
   try {
-    const rows = await client.listLookupValues("route_run_status");
+    const rows = (await client.listLookupValues("route_run_status")) ?? [];
     const withMeta = rows.filter(
       (r) => r.metadata != null && "is_terminal" in r.metadata,
     );
@@ -97,7 +97,7 @@ export async function resolveCodStatusMap(
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   try {
-    const rows = await client.listLookupValues("shipment_status");
+    const rows = (await client.listLookupValues("shipment_status")) ?? [];
     for (const row of rows) {
       const outcome = row.metadata?.delivery_outcome;
       if (typeof outcome === "string" && outcome in OUTCOME_TO_COD_STATUS) {
@@ -129,7 +129,7 @@ export async function resolveProviderSurfaceMap(
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   try {
-    const rows = await client.listLookupValues("provider_type");
+    const rows = (await client.listLookupValues("provider_type")) ?? [];
     for (const row of rows) {
       const surface = row.metadata?.integration_surface;
       if (typeof surface === "string" && surface.trim()) {
@@ -181,7 +181,7 @@ export async function resolveHealthStatusTone(
 ): Promise<string> {
   if (!healthStatus) return "degraded";
   try {
-    const rows = await client.listLookupValues("component_health_status");
+    const rows = (await client.listLookupValues("component_health_status")) ?? [];
     const withMeta = rows.filter(
       (r) => r.metadata != null && "status_tone" in r.metadata,
     );

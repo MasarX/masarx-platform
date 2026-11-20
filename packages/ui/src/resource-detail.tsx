@@ -8,6 +8,7 @@ import {
   formatDisplayIdentifierValue,
   formatIdValue,
   formatReferenceValue,
+  isHumanizableMachineValue,
   formatResourceValue,
   isUuidValue,
   resolveRecordDescriptor,
@@ -248,8 +249,13 @@ function buildDetailSections(
     ([key, value]) => {
       const column = columnMap.get(key);
       const mediaEntries = resolveMediaEntries({ value, column, key });
+      const inferredLookup =
+        (key.endsWith("_action") || key.endsWith("_actions")) &&
+        (Array.isArray(value) ? value : [value]).some(
+          (entry) => typeof entry === "string" && isHumanizableMachineValue(entry),
+        );
       const textValue = formatResourceValue(value, {
-        renderType: column?.renderType ?? null,
+        renderType: column?.renderType ?? (inferredLookup ? "lookup" : null),
         formatOptions: column?.formatOptions ?? null,
       });
       const isIdKey = key === "id" || key.endsWith("_id");
@@ -280,13 +286,8 @@ function buildDetailSections(
         : isIdKey
           ? idFallbackValue ?? textValue
           : uuidReferenceValue ?? textValue;
-      const title = displayIdentifier?.value
-        ? displayIdentifier.value
-        : isIdKey && rawIdValue && displayValue !== rawIdValue
-          ? rawIdValue
-          : isUuidLiteralValue
-            ? String(value)
-          : undefined;
+      const titleValue = displayIdentifier?.value ?? (isIdKey ? rawIdValue : "");
+      const title = titleValue && !isUuidValue(titleValue) ? titleValue : undefined;
       const internalIdHintValue = rawIdValue
         ? formatIdValue(rawIdValue)
         : isUuidLiteralValue

@@ -15,12 +15,17 @@ import {
   stringValue,
 } from "./marketplace-page-utils";
 import { formatUiError } from "./utils";
+import { labelFromKey } from "./resource-query";
 
 type MarketplaceProviderWorkboardPageProps = {
   appBasePath: string;
   baseHref: string;
   testIdPrefix: string;
 };
+
+function parseProofRequirements(value: FormDataEntryValue | null) {
+  return String(value ?? "").split(/[,\n]/u).map((entry) => entry.trim()).filter(Boolean);
+}
 
 export async function MarketplaceProviderWorkboardPage({
   appBasePath,
@@ -36,6 +41,22 @@ export async function MarketplaceProviderWorkboardPage({
   const contracts = normalizeArray(workboardRecord?.contracts);
   const workPackages = normalizeArray(workboardRecord?.work_packages);
   const availabilityWindows = normalizeArray(workboardRecord?.availability_windows);
+  const lookupValues = async (category: string) =>
+    (await ui.listLookupValues?.(category).catch(() => [])) ?? [];
+  const [currencies, serviceLevels, rateBases] = await Promise.all([
+    lookupValues("currency"),
+    lookupValues("service_level"),
+    lookupValues("marketplace_rate_basis"),
+  ]);
+  const hasOfferLookups = currencies.length > 0 && serviceLevels.length > 0 && rateBases.length > 0;
+
+  function lookupSelect(name: string, label: string, rows: typeof currencies) {
+    return {
+      name, label, kind: "select" as const, required: true,
+      options: rows.map(({ value, label }) => ({ value, label })),
+      defaultValue: (rows.find((row) => row.is_default) ?? rows[0])?.value,
+    };
+  }
 
   async function upsertAvailability(
     _prevState: MarketplaceActionFormState,
@@ -75,12 +96,37 @@ export async function MarketplaceProviderWorkboardPage({
     if (!termsResult.ok) return { status: "error", message: termsResult.message };
     const pricingResult = parseJsonValue(String(formData.get("pricing_json") ?? "{}"), {});
     if (!pricingResult.ok) return { status: "error", message: pricingResult.message };
+    let terms = normalizeObject(termsResult.value) ?? {};
+    let pricing = normalizeObject(pricingResult.value) ?? {};
+    if (formData.has("pricing_amount")) {
+      const rawAmount = String(formData.get("pricing_amount") ?? "").trim();
+      const amount = Number(rawAmount);
+      const currency = String(formData.get("pricing_currency") ?? "").trim();
+      const rateBasis = String(formData.get("rate_basis") ?? "").trim();
+      const serviceLevel = String(formData.get("service_level") ?? "").trim();
+      if (!rawAmount || !Number.isFinite(amount) || amount < 0) {
+        return { status: "error", message: "Enter a valid non-negative price." };
+      }
+      if (!currencies.some((row) => row.value === currency) ||
+          !rateBases.some((row) => row.value === rateBasis) ||
+          !serviceLevels.some((row) => row.value === serviceLevel)) {
+        return { status: "error", message: "Select a valid currency, rate basis, and service level." };
+      }
+      const requirements = parseProofRequirements(formData.get("proof_requirements"));
+      const notes = String(formData.get("terms_notes") ?? "").trim();
+      terms = {
+        service_level: serviceLevel,
+        ...(requirements.length ? { proof_requirements: requirements } : {}),
+        ...(notes ? { notes } : {}),
+      };
+      pricing = { amount, currency, rate_basis: rateBasis };
+    }
     try {
       const result = await createUiServerClient().marketplaceSubmitOffer({
         requestId,
         message: String(formData.get("message") ?? "").trim() || null,
-        terms: normalizeObject(termsResult.value) ?? {},
-        pricing: normalizeObject(pricingResult.value) ?? {},
+        terms,
+        pricing,
         metadata: { source: "portal.marketplace.provider.offer" },
       });
       if (result.ok === false) {
@@ -128,10 +174,29 @@ export async function MarketplaceProviderWorkboardPage({
     "use server";
     const proofResult = parseJsonValue(String(formData.get("proof_json") ?? "{}"), {});
     if (!proofResult.ok) return { status: "error", message: proofResult.message };
+    let proof = normalizeObject(proofResult.value) ?? {};
+    if (formData.has("proof_quality") || formData.has("feedback_score")) {
+      const quality = Number(String(formData.get("proof_quality") ?? "").trim());
+      const feedback = Number(String(formData.get("feedback_score") ?? "").trim());
+      if (!Number.isInteger(quality) || quality < 1 || quality > 5) {
+        return { status: "error", message: quality > 5 ? "Proof quality score must be at most 5." : "Proof quality score must be between 1 and 5." };
+      }
+      if (!Number.isInteger(feedback) || feedback < 1 || feedback > 5) {
+        return { status: "error", message: "Feedback score must be between 1 and 5." };
+      }
+      const requirements = parseProofRequirements(formData.get("proof_requirements"));
+      const notes = String(formData.get("completion_notes") ?? "").trim();
+      proof = {
+        proof_quality: quality,
+        feedback_score: feedback,
+        ...(requirements.length ? { proof_requirements: requirements } : {}),
+        ...(notes ? { notes } : {}),
+      };
+    }
     try {
       const result = await createUiServerClient().marketplaceCompleteWorkPackage({
         workPackageId: String(formData.get("work_package_id") ?? "").trim(),
-        proof: normalizeObject(proofResult.value) ?? {},
+        proof,
         metadata: { source: "portal.marketplace.provider.complete" },
       });
       if (result.ok === false) {
@@ -186,7 +251,7 @@ export async function MarketplaceProviderWorkboardPage({
               availabilityWindows.map((window) => (
                 <div key={stringValue(window.id) ?? "availability"} className="rounded-2xl border border-ui-border bg-ui-surface/60 p-4 text-sm text-ui-muted">
                   <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                    <Badge>{stringValue(window.availability_status) ?? "available"}</Badge>
+                    <Badge>{labelFromKey(stringValue(window.availability_status) ?? "available")}</Badge>
                   </div>
                   <div className="mt-3">{stringValue(window.starts_at) ?? ""} - {stringValue(window.ends_at) ?? ""}</div>
                 </div>
@@ -207,8 +272,8 @@ export async function MarketplaceProviderWorkboardPage({
                 <div key={requestId} className="grid gap-4 rounded-2xl border border-ui-border bg-ui-surface/60 p-4 lg:grid-cols-[1.1fr,0.9fr]">
                   <div className="space-y-3">
                     <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                      <Badge>{stringValue(request.status) ?? "published"}</Badge>
-                      {stringValue(request.request_kind_key) ? <Badge>{stringValue(request.request_kind_key)}</Badge> : null}
+                      <Badge>{labelFromKey(stringValue(request.status) ?? "published")}</Badge>
+                      {stringValue(request.request_kind_key) ? <Badge>{labelFromKey(String(request.request_kind_key))}</Badge> : null}
                     </div>
                     <div className="text-sm font-medium text-ui-ink">{stringValue(request.title) ?? requestId}</div>
                     <div className="text-sm text-ui-muted">{stringValue(request.summary) ?? "No summary recorded."}</div>
@@ -220,8 +285,17 @@ export async function MarketplaceProviderWorkboardPage({
                     fields={[
                       { name: "request_id", kind: "hidden", defaultValue: requestId },
                       { name: "message", label: "Message", kind: "textarea", rows: 3, placeholder: "Coverage, SLA, and notes" },
-                      { name: "terms_json", label: "Terms JSON", kind: "textarea", rows: 4, defaultValue: jsonTextareaValue({ service_level: "same_day" }) },
-                      { name: "pricing_json", label: "Pricing JSON", kind: "textarea", rows: 4, defaultValue: jsonTextareaValue({ amount: 0, currency: "SAR" }) },
+                      ...(hasOfferLookups ? [
+                        { name: "pricing_amount", label: "Amount", kind: "text" as const, required: true },
+                        lookupSelect("pricing_currency", "Currency", currencies),
+                        lookupSelect("rate_basis", "Rate basis", rateBases),
+                        lookupSelect("service_level", "Service level", serviceLevels),
+                        { name: "proof_requirements", label: "Proof requirements", kind: "textarea" as const },
+                        { name: "terms_notes", label: "Terms notes", kind: "textarea" as const },
+                      ] : [
+                        { name: "terms_json", label: "Terms JSON", kind: "textarea" as const, rows: 4, defaultValue: jsonTextareaValue({ service_level: "same_day" }) },
+                        { name: "pricing_json", label: "Pricing JSON", kind: "textarea" as const, rows: 4, defaultValue: jsonTextareaValue({ amount: 0, currency: "SAR" }) },
+                      ]),
                     ]}
                   />
                 </div>
@@ -241,7 +315,7 @@ export async function MarketplaceProviderWorkboardPage({
               return (
                 <div key={awardId} className="rounded-2xl border border-ui-border bg-ui-surface/60 p-4">
                   <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                    <Badge>{stringValue(award.status) ?? "pending_acceptance"}</Badge>
+                    <Badge>{labelFromKey(stringValue(award.status) ?? "pending_acceptance")}</Badge>
                   </div>
                   <div className="mt-3 text-sm text-ui-muted">{stringValue(award.award_reason) ?? "No award reason provided."}</div>
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -284,7 +358,7 @@ export async function MarketplaceProviderWorkboardPage({
                 return (
                   <div key={contractId} className="rounded-2xl border border-ui-border bg-ui-surface/60 p-4">
                     <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                      <Badge>{stringValue(contract.status) ?? "active"}</Badge>
+                      <Badge>{labelFromKey(stringValue(contract.status) ?? "active")}</Badge>
                     </div>
                     <div className="mt-3">
                       <Link className="text-sm font-medium text-ui-ink underline-offset-4 hover:underline" href={`${appBasePath}/marketplace/contracts/${contractId}`}>
@@ -307,7 +381,7 @@ export async function MarketplaceProviderWorkboardPage({
                 return (
                   <div key={workPackageId} className="rounded-2xl border border-ui-border bg-ui-surface/60 p-4">
                     <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                      <Badge>{stringValue(workPackage.status) ?? "ready"}</Badge>
+                      <Badge>{labelFromKey(stringValue(workPackage.status) ?? "ready")}</Badge>
                     </div>
                     <div className="mt-4">
                       <MarketplaceActionForm
@@ -316,7 +390,14 @@ export async function MarketplaceProviderWorkboardPage({
                         testIdPrefix={`${testIdPrefix}-complete-${workPackageId}`}
                         fields={[
                           { name: "work_package_id", kind: "hidden", defaultValue: workPackageId },
-                          { name: "proof_json", label: "Proof JSON", kind: "textarea", rows: 4, defaultValue: jsonTextareaValue({ proof_quality: 5, feedback_score: 5 }) },
+                          ...(hasOfferLookups ? [
+                            { name: "proof_requirements", label: "Proof requirements", kind: "textarea" as const },
+                            { name: "proof_quality", label: "Proof quality", defaultValue: "5", required: true },
+                            { name: "feedback_score", label: "Feedback score", defaultValue: "5", required: true },
+                            { name: "completion_notes", label: "Completion notes", kind: "textarea" as const },
+                          ] : [
+                            { name: "proof_json", label: "Proof JSON", kind: "textarea" as const, rows: 4, defaultValue: jsonTextareaValue({ proof_quality: 5, feedback_score: 5 }) },
+                          ]),
                         ]}
                       />
                     </div>

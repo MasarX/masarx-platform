@@ -145,7 +145,7 @@ export function PreviewPanel({
 
       {/* PDF Preview */}
       {!pdfBase64 ? (
-        <p className="text-sm text-ui-muted">{t.has?.("pdfEmpty") ? t("pdfEmpty") : "No PDF preview yet"}</p>
+        <p className="text-sm text-ui-muted" data-testid={`${prefix}-pdf-idle`}>{t(previewResponseJson.trim() ? "pdfUnavailable" : "pdfEmpty")}</p>
       ) : typeof window !== "undefined" && typeof window.DOMMatrix === "function" ? (
         <ErrorBoundary
           fallback={

@@ -26,7 +26,8 @@ function resolveSourceLabel(
   provenance: WorkflowRunProvenance,
   labels: WorkflowRunProvenanceLabels
 ) {
-  const triggerType = normalizeLower(provenance.triggerType ?? null);
+  const rawTriggerType = provenance.rawContext?.trigger_type;
+  const triggerType = normalizeLower(typeof rawTriggerType === "string" ? rawTriggerType : null);
   if (triggerType === "schedule") return labels.sources.schedule;
   if (triggerType === "schedule_manual") return labels.sources.scheduleManual;
   if (triggerType === "task") return labels.sources.task;

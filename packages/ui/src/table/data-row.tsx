@@ -320,7 +320,7 @@ function TableDataRowContent({
               t={t}
               editState={inlineEdit}
               editConfig={editConfig}
-              editLabel={editLabel}
+              editLabel={inlineEdit.editType === "uuid" ? column.label?.trim() || editLabel : editLabel}
               editPending={editPending}
               onUpdateValue={updateInlineEditValue}
               onCommit={commitInlineEdit}

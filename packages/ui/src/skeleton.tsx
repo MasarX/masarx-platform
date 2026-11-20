@@ -10,6 +10,8 @@ type SkeletonProps = {
 export function Skeleton({ className }: SkeletonProps) {
   return (
     <div
+      role="status"
+      aria-label="Loading"
       className={cn(
         "ui-shimmer rounded bg-ui-border/60",
         className ?? "h-4 w-full"
