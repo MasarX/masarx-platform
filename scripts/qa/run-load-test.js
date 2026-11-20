@@ -73,8 +73,8 @@ const qa = createQaLogger({ runId: process.env.QA_RUN_ID, disabled: !process.env
 // Determinism: pin the xk6 runner + extensions by default (override via env vars).
 const xk6DockerImage = process.env.XK6_DOCKER_IMAGE || 'grafana/xk6:0.14.0';
 const xk6K6Version = process.env.XK6_K6_VERSION || 'v0.57.0';
-const xk6SqlVersion = process.env.XK6_SQL_VERSION || 'v1.0.5';
-const xk6SqlPostgresVersion = process.env.XK6_SQL_POSTGRES_VERSION || 'v0.1.1';
+const xk6SqlVersion = process.env.XK6_SQL_VERSION || 'v1.0.4';
+const xk6SqlPostgresVersion = process.env.XK6_SQL_POSTGRES_VERSION || 'v0.1.0';
 const xk6VersionOverride = process.env.XK6_VERSION || '';
 
 const resolveXk6Version = () => {
@@ -467,7 +467,12 @@ function inspectDockerAvailability() {
     };
   }
 
-  const info = spawnSync('docker', ['info'], { stdio: 'pipe', encoding: 'utf8', timeout: dockerCheckTimeoutMs, env: dockerEnv });
+  const info = spawnSync('docker', ['info'], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+    timeout: dockerCheckTimeoutMs,
+    env: dockerEnv,
+  });
   const details = info.error
     ? info.error.message
     : `${info.stdout || ''}${info.stderr || ''}`.trim();
@@ -480,71 +485,28 @@ function inspectDockerAvailability() {
 
 // Preflight docker availability. GitHub-hosted CI stays fail-closed on missing
 // Docker, while self-hosted CI defaults to the existing local xk6 fallback.
-{
-  const dockerStatus = inspectDockerAvailability();
-  if (!dockerStatus.available) {
-    const details = dockerStatus.details || 'docker info failed';
-    if (loadTestDockerMode === 'require') {
-      console.error('[load-test] Docker is required for this run but is not available.');
-      if (details) console.error(details);
-      writeFailedSummary('docker_unavailable', details);
-      process.exit(1);
-    }
-    if (loadTestDockerMode === 'disable') {
-      console.warn('[load-test] Docker usage disabled by policy; using local xk6 fallback.');
-    } else {
-      console.warn('[load-test] Docker not available; using local xk6 fallback.');
-      if (details) console.warn(details);
-    }
+const dockerStatus = inspectDockerAvailability();
+if (!dockerStatus.available) {
+  const details = dockerStatus.details || 'docker info failed';
+  if (loadTestDockerMode === 'require') {
+    console.error('[load-test] Docker is required for this run but is not available.');
+    console.error(details);
+    writeFailedSummary('docker_unavailable', details);
+    process.exit(1);
+  }
+  if (loadTestDockerMode === 'disable') {
+    console.warn('[load-test] Docker usage disabled by policy; using local xk6 fallback.');
+  } else {
+    console.warn('[load-test] Docker not available; using local xk6 fallback.');
+    console.warn(details);
   }
 }
 
 validateDay1LabelJwtContract();
 ensureDay1StorageBucketsReady();
 
-const envInject = [];
-envInject.push(`DATABASE_URL="${dbUrl.replace(/"/g, '\\"')}"`);
-if (process.env.LOADTEST_DATABASE_URL) {
-  envInject.push(
-    `LOADTEST_DATABASE_URL="${(process.env.LOADTEST_DATABASE_URL || '').replace(/"/g, '\\"')}"`,
-  );
-}
-if (process.env.SUPABASE_URL) {
-  envInject.push(
-    `SUPABASE_URL="${(process.env.SUPABASE_URL || '').replace(/"/g, '\\"')}"`,
-  );
-}
-if (process.env.SUPABASE_ANON_KEY) {
-  envInject.push(
-    `SUPABASE_ANON_KEY="${(process.env.SUPABASE_ANON_KEY || '').replace(/"/g, '\\"')}"`,
-  );
-}
-if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  envInject.push(
-    `SUPABASE_SERVICE_ROLE_KEY="${(process.env.SUPABASE_SERVICE_ROLE_KEY || '').replace(
-      /"/g,
-      '\\"',
-    )}"`,
-  );
-}
-if (process.env.LABEL_RENDERER_DB_JWT) {
-  envInject.push(
-    `LABEL_RENDERER_DB_JWT="${(process.env.LABEL_RENDERER_DB_JWT || '').replace(/"/g, '\\"')}"`,
-  );
-}
-if (process.env.WEBHOOK_HTTP_TOKEN) {
-  envInject.push(
-    `WEBHOOK_HTTP_TOKEN="${(process.env.WEBHOOK_HTTP_TOKEN || '').replace(/"/g, '\\"')}"`,
-  );
-}
-
-// Build -e flags for k6 (explicit __ENV pass-through)
-const k6EnvFlags = [];
-
-// Always pass the effective DATABASE_URL (may be pooler-based) to k6.
-k6EnvFlags.push('-e', `DATABASE_URL=${dbUrl.replace(/"/g, '\\"')}`);
-
-[
+// Capture the explicit scenario settings before token provisioning.
+const localK6Settings = Object.fromEntries([
   'SUPABASE_URL',
   'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
@@ -589,25 +551,64 @@ k6EnvFlags.push('-e', `DATABASE_URL=${dbUrl.replace(/"/g, '\\"')}`);
   'DAY1_AUTO_CREATE_TENANTS',
   'DAY1_CLEANUP',
   'DAY1_CLEANUP_TENANTS',
-].forEach((key) => {
-  if (process.env[key]) {
-    k6EnvFlags.push('-e', `${key}=${process.env[key].replace(/"/g, '\\"')}`);
-  }
-});
+].flatMap((key) => (process.env[key] ? [[key, process.env[key]]] : [])));
 
-const shellCommand = [
-  `xk6 build ${xk6K6Version}`,
-  `--with github.com/grafana/xk6-sql@${xk6SqlVersion}`,
-  `--with github.com/grafana/xk6-sql-driver-postgres@${xk6SqlPostgresVersion}`,
-  '--output /tmp/k6',
-  '&&',
-  envInject.join(' '),
-  '/tmp/k6 run',
-  ...k6EnvFlags,
-  `--tag scenario=${scenario}`,
-  `--summary-export ${summaryRelative}`,
+const k6RunArgs = [
+  '--tag',
+  `scenario=${scenario}`,
+  '--summary-export',
+  summaryRelative,
   scenarioFile,
-].join(' ');
+];
+
+// Docker copies name-only -e values from its environment. k6 exposes them in __ENV.
+const dockerEnvFlags = [
+  'LOADTEST_DATABASE_URL',
+  'SUPABASE_URL',
+  'SUPABASE_ANON_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'LABEL_RENDERER_DB_JWT',
+  'WEBHOOK_HTTP_TOKEN',
+  'API_GATEWAY_BASE_URL',
+  'API_GATEWAY_HTTP_TOKEN',
+  'API_GATEWAY_HTTP_PATH',
+  'API_GATEWAY_HTTP_METHOD',
+  'API_GATEWAY_HTTP_VUS',
+  'API_GATEWAY_HTTP_DURATION',
+  'PARTITION_VUS',
+  'PARTITION_DURATION',
+  'PARTITION_P95_MS',
+  'PARTITION_CHECK_RATE',
+  'PARTITION_CLEANUP',
+  'WEBHOOK_HTTP_VUS',
+  'WEBHOOK_HTTP_DURATION',
+  'WEBHOOK_VUS',
+  'WEBHOOK_DURATION',
+  'DAY1_PROFILE',
+  'DAY1_TENANTS',
+  'DAY1_DURATION',
+  'DAY1_VUS',
+  'DAY1_SHIPMENTS_PER_ITER',
+  'DAY1_LABEL_REQUEST_RATE',
+  'DAY1_LABEL_HTTP_RETRY_ATTEMPTS',
+  'DAY1_LABEL_HTTP_RETRY_SLEEP_MS',
+  'DAY1_LABEL_HTTP_RETRY_BACKOFF_MS',
+  'DAY1_LABEL_HTTP_RETRY_BACKOFF_MULTIPLIER',
+  'DAY1_LABEL_HTTP_RETRY_MAX_SLEEP_MS',
+  'DAY1_LABEL_HTTP_RETRY_JITTER_MS',
+  'DAY1_LABEL_FAILURE_LOG_LIMIT',
+  'DAY1_ITER_SLEEP_MS',
+  'DAY1_ERROR_RATE_MAX',
+  'DAY1_SHIPMENT_P95_MS',
+  'DAY1_SHIPMENT_P99_MS',
+  'DAY1_LABEL_P95_MS',
+  'DAY1_LABEL_P99_MS',
+  'DAY1_HTTP_P95_MS',
+  'DAY1_HTTP_P99_MS',
+  'DAY1_AUTO_CREATE_TENANTS',
+  'DAY1_CLEANUP',
+  'DAY1_CLEANUP_TENANTS',
+].flatMap((key) => (dockerEnv[key] ? ['-e', key] : []));
 
 const dockerArgs = [
   'run',
@@ -621,6 +622,8 @@ const dockerArgs = [
   '-e', 'XDG_CACHE_HOME=/tmp/.cache',
   '-e', 'GOCACHE=/tmp/.cache/go-build',
   '-e', 'GOMODCACHE=/tmp/.cache/go-mod',
+  '-e', 'DATABASE_URL',
+  ...dockerEnvFlags,
   '-v',
   volumePath,
   '-w',
@@ -629,105 +632,20 @@ const dockerArgs = [
   'sh',
   xk6DockerImage,
   '-c',
-  shellCommand,
+  'xk6 build "$1" --with "$2" --with "$3" --output /tmp/k6 && shift 3 && exec /tmp/k6 run "$@"',
+  'load-test', // sh -c assigns this argument to $0.
+  xk6K6Version,
+  `github.com/grafana/xk6-sql@${xk6SqlVersion}`,
+  `github.com/grafana/xk6-sql-driver-postgres@${xk6SqlPostgresVersion}`,
+  ...k6RunArgs,
 ];
-
-function dockerAvailable() {
-  const check = spawnSync('docker', ['info'], {
-    stdio: 'ignore',
-    timeout: dockerCheckTimeoutMs,
-    env: dockerEnv,
-  });
-  if (check.error) {
-    console.warn(`[load-test] Docker check failed (${check.error.code || check.error.message}).`);
-    return false;
-  }
-  if (check.status !== 0) {
-    console.warn(`[load-test] Docker check failed (status ${check.status}).`);
-    return false;
-  }
-  return true;
-}
-
-// Also pass env directly to the container to ensure __ENV variables are visible to k6
-[
-  'DATABASE_URL',
-  'SUPABASE_URL',
-  'SUPABASE_ANON_KEY',
-  'SUPABASE_SERVICE_ROLE_KEY',
-  'LABEL_RENDERER_DB_JWT',
-  'WEBHOOK_HTTP_TOKEN',
-  'API_GATEWAY_BASE_URL',
-  'API_GATEWAY_HTTP_TOKEN',
-  'API_GATEWAY_HTTP_PATH',
-  'API_GATEWAY_HTTP_METHOD',
-  'API_GATEWAY_HTTP_VUS',
-  'API_GATEWAY_HTTP_DURATION',
-  'PARTITION_VUS',
-  'PARTITION_DURATION',
-  'PARTITION_P95_MS',
-  'PARTITION_CHECK_RATE',
-  'PARTITION_CLEANUP',
-  'WEBHOOK_HTTP_VUS',
-  'WEBHOOK_HTTP_DURATION',
-  'WEBHOOK_VUS',
-  'WEBHOOK_DURATION',
-  'DAY1_PROFILE',
-  'DAY1_TENANTS',
-  'DAY1_DURATION',
-  'DAY1_VUS',
-  'DAY1_SHIPMENTS_PER_ITER',
-  'DAY1_LABEL_REQUEST_RATE',
-  'DAY1_LABEL_HTTP_RETRY_ATTEMPTS',
-  'DAY1_LABEL_HTTP_RETRY_SLEEP_MS',
-  'DAY1_LABEL_HTTP_RETRY_BACKOFF_MS',
-  'DAY1_LABEL_HTTP_RETRY_BACKOFF_MULTIPLIER',
-  'DAY1_LABEL_HTTP_RETRY_MAX_SLEEP_MS',
-  'DAY1_LABEL_HTTP_RETRY_JITTER_MS',
-  'DAY1_LABEL_FAILURE_LOG_LIMIT',
-  'DAY1_ITER_SLEEP_MS',
-  'DAY1_ERROR_RATE_MAX',
-  'DAY1_SHIPMENT_P95_MS',
-  'DAY1_SHIPMENT_P99_MS',
-  'DAY1_LABEL_P95_MS',
-  'DAY1_LABEL_P99_MS',
-  'DAY1_HTTP_P95_MS',
-  'DAY1_HTTP_P99_MS',
-  'DAY1_AUTO_CREATE_TENANTS',
-  'DAY1_CLEANUP',
-  'DAY1_CLEANUP_TENANTS',
-].forEach((key) => {
-  if (process.env[key]) {
-    // insert before entrypoint to apply to the container env
-    const idx = dockerArgs.indexOf('--entrypoint');
-    dockerArgs.splice(idx, 0, '-e', `${key}=${process.env[key]}`);
-  }
-});
 
 console.log(`[load-test] Running ${scenario} scenario via ${scenarioFile}`);
 console.log(`[load-test] Summary export -> ${summaryRelative}`);
 console.log(`[load-test] Transcript log -> ${transcriptRelative}`);
 appendTranscript(`[load-test] scenario=${scenario} file=${scenarioFile} summary=${summaryRelative}\n`);
 
-function stripEnvFlags(flags, key) {
-  const out = [];
-  for (let i = 0; i < flags.length; i += 1) {
-    const item = flags[i];
-    if (item === '-e' && i + 1 < flags.length) {
-      const assignment = String(flags[i + 1] || '');
-      if (assignment.startsWith(`${key}=`)) {
-        i += 1;
-        continue;
-      }
-    }
-    out.push(item);
-  }
-  return out;
-}
-
 function runWithLocalXk6() {
-  console.warn('[load-test] Docker unavailable; falling back to local xk6 build (Go required).');
-
   const xk6ToolVersion = (() => {
     const explicit = process.env.XK6_TOOL_VERSION;
     if (explicit) return explicit;
@@ -772,22 +690,16 @@ function runWithLocalXk6() {
     }
   }
 
-  const localEnvFlags = stripEnvFlags(k6EnvFlags, 'DATABASE_URL');
-  localEnvFlags.push('-e', `DATABASE_URL=${dbUrl}`);
-
   console.log(`[load-test] Running k6 locally: ${path.relative(projectRoot, k6Binary)} run ${scenarioFile}`);
   const run = spawnSync(
     k6Binary,
-    [
-      'run',
-      ...localEnvFlags,
-      '--tag',
-      `scenario=${scenario}`,
-      '--summary-export',
-      summaryRelative,
-      scenarioFile,
-    ],
-    { stdio: 'pipe', encoding: 'utf8', timeout: localK6TimeoutMs },
+    ['run', ...k6RunArgs],
+    {
+      stdio: 'pipe',
+      encoding: 'utf8',
+      timeout: localK6TimeoutMs,
+      env: { ...process.env, ...localK6Settings, DATABASE_URL: dbUrl },
+    },
   );
   appendTranscript(String(run.stdout || ''));
   appendTranscript(String(run.stderr || ''));
@@ -897,38 +809,26 @@ if (scenario === 'api-gateway-http' && autoProvision && !process.env.API_GATEWAY
 requireScenarioPrerequisites();
 
 function runOnce() {
-  let runResult;
+  if (!dockerStatus.available) return runWithLocalXk6();
 
-  if (loadTestDockerMode !== 'disable' && dockerAvailable()) {
-    runResult = spawnSync('docker', dockerArgs, {
-      stdio: 'pipe',
-      encoding: 'utf8',
-      timeout: dockerTimeoutMs,
-      env: dockerEnv,
-    });
-    appendTranscript(String(runResult.stdout || ''));
-    appendTranscript(String(runResult.stderr || ''));
-    if (runResult.stdout) process.stdout.write(runResult.stdout);
-    if (runResult.stderr) process.stderr.write(runResult.stderr);
-    if (runResult.error && runResult.error.code === 'ETIMEDOUT') {
-      console.warn(`[load-test] Docker run timed out after ${dockerTimeoutMs}ms.`);
-    }
-  } else {
-    runResult = {
-      status: 1,
-      error: new Error(
-        loadTestDockerMode === 'disable' ? 'Docker disabled by policy' : 'Docker unavailable',
-      ),
-    };
+  const run = spawnSync('docker', dockerArgs, {
+    stdio: 'pipe',
+    encoding: 'utf8',
+    timeout: dockerTimeoutMs,
+    env: { ...dockerEnv, DATABASE_URL: dbUrl },
+  });
+  appendTranscript(String(run.stdout || ''));
+  appendTranscript(String(run.stderr || ''));
+  if (run.stdout) process.stdout.write(run.stdout);
+  if (run.stderr) process.stderr.write(run.stderr);
+  if (run.error?.code === 'ETIMEDOUT') {
+    console.warn(`[load-test] Docker run timed out after ${dockerTimeoutMs}ms.`);
+  } else if (run.error) {
+    console.error('[load-test] Docker run failed:', run.error.message);
   }
 
-  if (runResult.error || runResult.status !== 0) {
-    const dockerMsg = runResult.error ? runResult.error.message : `status ${runResult.status}`;
-    console.warn(`[load-test] Docker run failed (${dockerMsg}).`);
-    runResult = runWithLocalXk6();
-  }
-
-  return runResult;
+  if (run.status === 0 && !run.error) return run;
+  return { ...run, status: run.status || 1 };
 }
 
 const maxAttempts = parseInt(process.env.LOAD_TEST_MAX_ATTEMPTS || '1', 10) || 1;
