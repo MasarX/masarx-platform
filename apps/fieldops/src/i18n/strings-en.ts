@@ -569,8 +569,8 @@ export const EN_STRINGS = {
       body: "Our servers hit a snag. Give it a moment and try again. If it persists, copy the error details and contact support.",
     },
     unknown: {
-      title: "Unexpected error",
-      body: "Something unexpected happened. Try again, and if it persists, copy the error details and contact support.",
+      title: "Something went wrong",
+      body: "Please restart the app and try again.",
     },
   },
 } as const;
