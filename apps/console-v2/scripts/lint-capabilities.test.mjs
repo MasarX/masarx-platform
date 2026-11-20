@@ -51,8 +51,8 @@ describe('lint-capabilities script', () => {
 
   it('exits 0 against the real repository state (FE registry + migrations tree)', () => {
     // Default invocation — no env overrides — uses the real SSOT paths.
-    const { code, stdout } = runLint();
-    expect(code).toBe(0);
+    const { code, stdout, stderr } = runLint();
+    expect(code, `lint stdout:\n${stdout}\nstderr:\n${stderr}`).toBe(0);
     expect(stdout).toMatch(/All capabilities aligned/);
   }, 20000);
 
