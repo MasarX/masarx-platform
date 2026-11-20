@@ -1,6 +1,6 @@
 import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
-import { parseRequestBody, readEnv } from "./_shared/mod.mjs";
+import { logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -127,7 +127,7 @@ const verifyTurnstile = async (
     body: body.toString(),
   });
 
-  const data = await response.json().catch(() => null);
+  const data = response.ok ? await response.json().catch(() => null) : null;
   const success = Boolean(data && typeof data === "object" && (data as any).success === true);
   const hostname = data && typeof data === "object" ? String((data as any).hostname || "").trim() : "";
   const errorCodes = data && typeof data === "object" ? (data as any)["error-codes"] ?? null : null;
@@ -206,36 +206,81 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(415, { ok: false, error: { code: "unsupported_content_type" } }, cors.headers);
   }
 
+  // objectives:allow LOCALHOST Justification: local-only fallback client IP is required when loopback QA requests omit forwarded IP headers.
+  const clientIp = readClientIp(req) || (cors.localContext ? "127.0.0.1" : "");
+  const sensitiveLogValues = [
+    TRACKING_TURNSTILE_SECRET_KEY,
+    LOCAL_TRACKING_TURNSTILE_SECRET_KEY,
+    EDGE_SUPABASE_SECRET_KEY,
+    SUPABASE_SERVICE_KEY,
+  ];
+
+  const redactLogText = (detail: unknown) => {
+    let text = asString(detail);
+    for (const value of sensitiveLogValues) {
+      if (!value) continue;
+      const formEncoded = new URLSearchParams({ value }).toString().slice("value=".length);
+      const jsonEncoded = JSON.stringify(value).slice(1, -1);
+      for (const sensitive of [value, formEncoded, jsonEncoded]) {
+        text = text.replaceAll(sensitive, "[redacted]");
+      }
+    }
+    return text;
+  };
+
+  const reportInternalError = (status: number, code: string, detail: unknown, fields: JsonRecord = {}) => {
+    const message = typeof detail === "object" && detail !== null && "message" in detail
+      ? detail.message
+      : detail;
+    logStructured("error", "public_shipment_tracking_failed", {
+      ...fields,
+      service: "public-shipment-tracking",
+      code,
+      message: redactLogText(message) || code,
+    });
+    return json(status, { ok: false, error: { code } }, cors.headers);
+  };
+
+  const rejectTurnstile = (code: string, errorCodes: unknown) => {
+    logStructured("warn", "public_shipment_tracking_turnstile_rejected", {
+      service: "public-shipment-tracking",
+      code,
+      message: code,
+      turnstile_error_codes: Array.isArray(errorCodes)
+        ? errorCodes.filter((value) => typeof value === "string").map(redactLogText)
+        : null,
+    });
+    return json(400, { ok: false, error: { code } }, cors.headers);
+  };
+
   let payload: JsonRecord;
   try {
     payload = (await parseRequestBody(req)).json as JsonRecord;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid_json";
-    return json(400, { ok: false, error: { code: "invalid_json", message } }, cors.headers);
+  } catch {
+    // Parser errors can quote the undecoded request body.
+    return reportInternalError(400, "invalid_json", "Invalid JSON payload");
   }
+
+  const turnstileToken = asString(payload.turnstile_token);
+  if (clientIp) sensitiveLogValues.push(clientIp);
+  sensitiveLogValues.push(
+    ...[turnstileToken, asString(payload.session_token)].filter((value) => value.length >= 8),
+  );
 
   let serviceClient;
   try {
     serviceClient = createServiceClient();
   } catch (error) {
-    const message = error instanceof Error ? error.message : "missing_supabase_configuration";
-    return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
+    return reportInternalError(500, "server_misconfigured", error);
   }
 
   const effectiveIpHashSalt =
     TRACKING_IP_HASH_SALT || (cors.localContext ? LOCAL_TRACKING_IP_HASH_SALT : "");
-  // objectives:allow LOCALHOST Justification: local-only fallback client IP is required when loopback QA requests omit forwarded IP headers.
-  const clientIp = readClientIp(req) || (cors.localContext ? "127.0.0.1" : "");
   if (!clientIp || !effectiveIpHashSalt) {
-    return json(
-      500,
-      { ok: false, error: { code: "server_misconfigured", message: "ip_hash_prerequisites_missing" } },
-      cors.headers,
-    );
+    return reportInternalError(500, "server_misconfigured", "ip_hash_prerequisites_missing");
   }
 
   const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
-  const turnstileToken = asString(payload.turnstile_token);
   let turnstileVerified = false;
   let turnstileErrorCodes: unknown = null;
 
@@ -259,32 +304,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
         })();
         const actualHost = turnstileResult.hostname.toLowerCase();
         if (expectedHost && actualHost && expectedHost !== actualHost) {
-          return json(
-            400,
-            {
-              ok: false,
-              error: { code: "turnstile_invalid" },
-              turnstile_error_codes: turnstileErrorCodes,
-            },
-            cors.headers,
-          );
+          return rejectTurnstile("turnstile_invalid", turnstileErrorCodes);
         }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "turnstile_verify_failed";
-      return json(502, { ok: false, error: { code: "turnstile_verify_failed", message } }, cors.headers);
+      return reportInternalError(502, "turnstile_verify_failed", error);
     }
 
     if (!turnstileVerified) {
-      return json(
-        400,
-        {
-          ok: false,
-          error: { code: "turnstile_required" },
-          turnstile_error_codes: turnstileErrorCodes,
-        },
-        cors.headers,
-      );
+      return rejectTurnstile("turnstile_required", turnstileErrorCodes);
     }
   }
 
@@ -303,18 +331,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: rpcData, error: rpcError } = await serviceClient.rpc(rpcName, rpcPayload);
   if (rpcError) {
-    return json(
-      500,
-      {
-        ok: false,
-        error: {
-          code: "rpc_failed",
-          message: rpcError.message,
-          rpc: rpcName,
-        },
-      },
-      cors.headers,
-    );
+    return reportInternalError(500, "rpc_failed", rpcError, {
+      rpc: rpcName,
+      rpc_error_code: redactLogText(rpcError.code),
+      details: redactLogText(rpcError.details),
+      hint: redactLogText(rpcError.hint),
+    });
   }
 
   const rpcBody = (rpcData && typeof rpcData === "object" ? rpcData : {}) as JsonRecord;
