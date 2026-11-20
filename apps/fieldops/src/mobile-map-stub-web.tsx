@@ -1,4 +1,4 @@
-import React from "react";
+import type { JSX, ReactNode } from "react";
 import { View } from "react-native";
 
 // Web stub for react-native-maps.
@@ -9,7 +9,7 @@ import { View } from "react-native";
 // can keep a single render path on both platforms.
 
 type StubProps = {
-  children?: React.ReactNode;
+  children?: ReactNode;
   [key: string]: unknown;
 };
 

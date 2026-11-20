@@ -9,7 +9,7 @@ export function LocationCaptureStatus({
   maxAccuracyM,
 }: {
   capturedAt?: number;
-  maxAccuracyM: number;
+  maxAccuracyM: number | null;
 }) {
   const { tokens } = useTheme();
   const [expiredCapture, setExpiredCapture] = React.useState<number>();
@@ -31,9 +31,11 @@ export function LocationCaptureStatus({
       >
         {recent ? "Location captured recently" : "No recent location capture"}
       </Text>
-      <Text style={{ color: tokens.color.textMuted }}>
-        Required accuracy: {maxAccuracyM} m or better
-      </Text>
+      {maxAccuracyM !== null ? (
+        <Text style={{ color: tokens.color.textMuted }}>
+          Required accuracy: {maxAccuracyM} m or better
+        </Text>
+      ) : null}
     </>
   );
 }
