@@ -26,14 +26,14 @@ import { renderWithIntl } from "./test-utils";
 import { WorkflowRunTriggersPanel } from "../../packages/ui/src/workflow-run-triggers-panel";
 
 const mockedCreateUiClient = createUiClient as unknown as jest.Mock;
+const clientId = "c112a901-3e75-47d2-9022-307fa68bd400";
+const senderId = "22222222-2222-4222-8222-222222222222";
 const workflowRunStatusOptions = [
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
 ];
 
 describe("WorkflowRunTriggersPanel", () => {
-  const clientId = "c112a901-3e75-47d2-9022-307fa68bd400";
-  const senderId = "22222222-2222-4222-8222-222222222222";
   beforeEach(() => {
     jest.resetAllMocks();
     invalidateQueries.mockReset();
