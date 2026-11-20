@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 const { loadEnv } = require('../utils/load-env');
+const { withCustomerShipmentChangeFixtureLock } = require('./lib/customer-shipment-change-fixtures');
 const {
   readDemoManifest,
   ensureBasePublicTrackingFixtures,
@@ -221,7 +222,7 @@ async function main() {
     );
 
     const demo = readDemoManifest();
-    const summary = await withFixtureProvisionLock(client, async () => {
+    const provision = async () => {
       await ensureBasePublicTrackingFixtures(client, demo);
       const rescheduleFixture = await provisionRescheduleFixtureWithClient(client, 'PT-TRACK-002');
       const shipmentOne = await getShipment(client, 'PT-TRACK-001');
@@ -331,7 +332,10 @@ async function main() {
         },
         available_dates: rescheduleFixture.available_dates,
       };
-    });
+    };
+    const summary = await withCustomerShipmentChangeFixtureLock(client, () =>
+      withFixtureProvisionLock(client, provision),
+    );
 
     const outputPath = path.resolve(
       process.cwd(),

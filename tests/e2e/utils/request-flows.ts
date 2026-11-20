@@ -114,24 +114,14 @@ export async function runSettingsRequestFlow(params: {
   const previewForm = page.locator(
     `[data-testid="${testIdPrefix}-preview"]`
   );
-  if ((await previewForm.count()) > 0) {
-    await expect(previewForm).toBeVisible();
-  }
+  await expect(previewForm).toBeVisible();
+  await expect(previewForm.getByTestId(`${testIdPrefix}-preview-category`)).toHaveValue(/\S+/);
+  await expect(previewForm.getByTestId(`${testIdPrefix}-preview-scope-type`)).toHaveValue(/\S+/);
 
-  const scopeIdInput = previewForm.locator(
-    `[data-testid="${testIdPrefix}-preview-scope-id"]`
-  );
-  if ((await scopeIdInput.count()) > 0) {
-    await scopeIdInput.first().fill("00000000-0000-0000-0000-000000000000");
-  }
-
-  const previewSubmit = previewForm.locator(
-    `[data-testid="${testIdPrefix}-preview-submit"]`
-  );
-  if ((await previewSubmit.count()) > 0) {
-    await previewSubmit.first().click();
-    await expect.poll(() => page.url()).toContain("scope_id=");
-  }
+  const scopeId = "00000000-0000-0000-0000-000000000000";
+  await previewForm.getByTestId(`${testIdPrefix}-preview-scope-id`).fill(scopeId);
+  await previewForm.getByTestId(`${testIdPrefix}-preview-submit`).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("scope_id")).toBe(scopeId);
 }
 
 export async function runAccessPolicyRequestFlow(params: {
@@ -207,31 +197,8 @@ export async function runAccessPolicyRequestFlow(params: {
 
   await toggleFirstCollapsibleSection(page, testIdPrefix);
 
-  const toggle = page.locator(
-    `[data-testid="${testIdPrefix}-policy-toggle"]`
-  );
-  if ((await toggle.count()) > 0) {
-    await toggle.first().click();
-  }
-
-  const rawInput = page.locator(
-    `[data-testid="${testIdPrefix}-policy-raw"]`
-  );
-  if ((await rawInput.count()) > 0) {
-    await rawInput.first().fill("invalid");
-  }
-
-  const rawError = page.locator(
-    `[data-testid="${testIdPrefix}-policy-error"]`
-  );
-  if ((await rawError.count()) > 0) {
-    await expect(rawError).toBeVisible();
-  }
-
-  const submit = page.locator(
-    `[data-testid="${testIdPrefix}-submit"]`
-  );
-  if ((await submit.count()) > 0) {
-    await expect(submit).toBeDisabled();
-  }
+  await form.getByTestId(`${testIdPrefix}-policy-toggle`).click();
+  await form.getByTestId(`${testIdPrefix}-policy-raw`).fill("invalid");
+  await expect(form.getByTestId(`${testIdPrefix}-policy-error`)).toBeVisible();
+  await expect(form.getByTestId(`${testIdPrefix}-submit`)).toBeDisabled();
 }

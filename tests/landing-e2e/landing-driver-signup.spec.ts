@@ -6,6 +6,7 @@ import {
   mockDriverSignupEndpoint,
   mockTurnstile,
   patchRuntimeConfig,
+  readSelectOptions,
   routePayload,
   routePayloadWithDelay,
 } from "./helpers";
@@ -28,16 +29,28 @@ async function fillDriverForm(page: import("@playwright/test").Page) {
 
 test.describe("landing driver signup", () => {
   test("submits the driver application against the configured intake endpoint", async ({ page }) => {
+    let signupPayload: Record<string, unknown> | null = null;
     await patchRuntimeConfig(page, {
       driverSignupEntryKey: "fixture-driver-entry",
       driverSignupEndpoint: LANDING_DRIVER_SIGNUP_ENDPOINT_MOCK,
       driverApplicationStatusEndpoint: LANDING_DRIVER_STATUS_ENDPOINT_MOCK,
       turnstileSiteKey: "",
     });
-    await mockDriverSignupEndpoint(page, routePayload({ ok: true, application_status_token: "token-123" }, 200));
+    await mockDriverSignupEndpoint(page, async (route) => {
+      signupPayload = route.request().postDataJSON() as Record<string, unknown>;
+      await routePayload({ ok: true, application_status_token: "token-123" }, 200)(route);
+    });
     await mockDriverStatusEndpoint(page, routePayload({ ok: true, status: "pending" }, 200));
 
     await page.goto("/drivers/apply?motion=off");
+    const vehicleOptions = await readSelectOptions(page, '[data-driver-form] select[name="vehicle_type"]');
+    expect(vehicleOptions).toEqual([
+      { value: "", label: "Select vehicle type", disabled: true },
+      { value: "motorcycle", label: "Motorcycle", disabled: false },
+      { value: "car", label: "Car", disabled: false },
+      { value: "van", label: "Van", disabled: false },
+      { value: "truck", label: "Truck", disabled: false },
+    ]);
     await fillDriverForm(page);
 
     const responsePromise = page.waitForResponse((response) =>
@@ -48,6 +61,11 @@ test.describe("landing driver signup", () => {
 
     await expect(page.locator("[data-driver-status]")).toContainText("under review");
     await expect(page.locator('[data-driver-status-form] input[name="status_token"]')).toHaveValue("token-123");
+    expect(signupPayload).toMatchObject({
+      marketing: {
+        vehicle_type: "car",
+      },
+    });
     expect(response.ok()).toBeTruthy();
     expect(response.request().postDataJSON().entry_key).toBe("fixture-driver-entry");
     await captureEvidenceIfRequested(page, "landing-driver-signup.png");

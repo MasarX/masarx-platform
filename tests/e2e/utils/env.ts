@@ -79,6 +79,8 @@ export function loadE2EEnv() {
   syncDerivedEnv();
 }
 
+export const loadEnv = loadE2EEnv;
+
 export function isStrictE2EEnv() {
   loadE2EEnv();
   return isTruthy(process.env.STRICT_E2E_GATE_ENV) || isTruthy(process.env.CI);

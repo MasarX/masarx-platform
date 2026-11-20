@@ -375,12 +375,16 @@ export async function fetchResourceSampleId(params: {
   idColumn?: string | null;
   email: string;
   password: string;
+  filters?: Record<string, unknown>;
+  sort?: Record<string, unknown> | null;
 }): Promise<ResourceListResult> {
-  const { resourceKey, idColumn, email, password } = params;
+  const { resourceKey, idColumn, email, password, filters, sort } = params;
   const sample = await fetchResourceSampleRow({
     resourceKey,
     email,
     password,
+    filters,
+    sort,
   });
   if (!sample.item) return { id: null, total: sample.total };
   const idKey = (idColumn || "id").trim() || "id";
@@ -409,8 +413,10 @@ export async function fetchResourceSampleRow(params: {
   resourceKey: string;
   email: string;
   password: string;
+  filters?: Record<string, unknown>;
+  sort?: Record<string, unknown> | null;
 }): Promise<ResourceRowResult> {
-  const { resourceKey, email, password } = params;
+  const { resourceKey, email, password, filters, sort } = params;
   const supabase = await createAuthedSupabaseClient({
     email,
     password,
@@ -420,10 +426,10 @@ export async function fetchResourceSampleRow(params: {
   try {
     const { data, error } = await rpcWithRetry<any>(supabase, "ui_list_resource_v1", {
       p_resource: resourceKey,
-      p_filters: {},
+      p_filters: filters ?? {},
       p_limit: 1,
       p_offset: 0,
-      p_sort: null,
+      p_sort: sort ?? null,
     }, {
       label: `ui_list_resource_v1:${resourceKey}:${email}`,
     });

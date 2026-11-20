@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "purpose": "Deterministic local-dedicated evidence index for flow certification. Each local-dedicated registry flow is mapped to exactly one coverage manifest path so overlapping proof packs cannot double-count or hide missing same-SHA evidence.",
+  "lane": "local-dedicated",
+  "entries": [
+    {
+      "manifest_path": "tmp/qa/business-a2z-local-flow-coverage.json",
+      "lane": "local-dedicated",
+      "flow_ids": [
+        "uc_biz_001_full_delivery_lifecycle",
+        "uc_biz_002_failed_delivery_ndr_exception",
+        "uc_biz_006_marketplace_dispute_resolution",
+        "uc_biz_007_tenant_signup_and_onboarding",
+        "uc_biz_010_webhook_intake_to_shipment_creation",
+        "uc_biz_011_provider_circuit_breaker_and_failover",
+        "uc_biz_012_driver_shift_start_and_route_navigation",
+        "uc_biz_013_scan_verification_and_status_update",
+        "uc_biz_015_offline_mode_and_outbox_sync",
+        "uc_biz_016_event_driven_communication_dispatch",
+        "uc_biz_017_marketing_lead_intake",
+        "uc_biz_018_label_generation_and_print_workflow",
+        "uc_biz_019_customer_shipment_change_request",
+        "uc_biz_022_driver_onboarding_application_and_go_live",
+        "uc_biz_024_public_shipment_tracking",
+        "uc_biz_025_integration_plugin_lifecycle",
+        "uc_biz_026_tabular_import_bulk_shipment_upload",
+        "uc_cross_001_complete_delivery_lifecycle_all_surfaces",
+        "uc_cross_002_failed_delivery_ndr_reattempt_console_mobile",
+        "uc_cross_004_offline_mobile_reconnect_sync",
+        "biz_integration_recovery_and_backfill",
+        "biz_mid_route_disruption_and_handoff"
+      ]
+    },
+    {
+      "manifest_path": "tmp/qa/pickup-local-flow-coverage.json",
+      "lane": "local-dedicated",
+      "flow_ids": [
+        "uc_biz_003_pickup_wave_execution",
+        "uc_cross_003_pickup_wave_execution_console_mobile",
+        "biz_pickup_exceptions"
+      ]
+    },
+    {
+      "manifest_path": "tmp/qa/warehouse-return-finance-local-flow-coverage.json",
+      "lane": "local-dedicated",
+      "flow_ids": [
+        "uc_biz_004_return_to_origin_flow",
+        "uc_biz_005_marketplace_request_to_settlement",
+        "uc_biz_014_cod_collection_and_settlement_handover",
+        "uc_biz_021_warehouse_transfer_multi_leg_execution",
+        "uc_biz_023_bank_deposit_reconciliation",
+        "biz_multi_piece_partial_delivery_and_cod",
+        "biz_reverse_logistics_inspection_and_disposition",
+        "biz_billing_and_payout_settlement_lifecycle",
+        "biz_warehouse_discrepancy_supervisor_closeout"
+      ]
+    },
+    {
+      "manifest_path": "tmp/qa/settings-access-zone-local-flow-coverage.json",
+      "lane": "local-dedicated",
+      "flow_ids": [
+        "uc_biz_008_settings_change_with_approval_workflow",
+        "uc_biz_009_access_policy_change_request",
+        "uc_biz_020_zone_override_with_approval",
+        "biz_device_lifecycle_and_recovery"
+      ]
+    },
+    {
+      "manifest_path": "tmp/qa/contract-local-flow-coverage.json",
+      "lane": "local-dedicated",
+      "flow_ids": [
+        "contract_workflow_wrapper_base_parity",
+        "contract_workflow_engine_sequence_and_wake",
+        "contract_domain_events_manual_review_and_task_side_effects",
+        "contract_settings_lookup_and_scope_resolution",
+        "contract_edge_ingress_auth_cors_ack_idempotency",
+        "contract_label_lineage_and_download_contract",
+        "contract_mobile_attestation_ingest_outbox_idempotency",
+        "contract_integration_plugin_and_provider_control_plane",
+        "contract_ui_read_api_wrapper_parity",
+        "contract_route_run_estimate_backed_totals",
+        "contract_form_lookup_and_user_readability"
+      ]
+    },
+    {
+      "manifest_path": "tmp/non-functional-coverage/non-functional-flow-coverage-manifest.json",
+      "lane": "local-dedicated",
+      "flow_ids": [
+        "quality_performance_budgets",
+        "quality_load_and_concurrency",
+        "quality_security_and_access",
+        "quality_resilience_and_recovery",
+        "quality_observability_and_sla_visibility",
+        "quality_docs_and_control_plane_governance"
+      ]
+    }
+  ]
+}

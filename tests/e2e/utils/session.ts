@@ -86,3 +86,25 @@ export async function ensureSignedInAtUrl(params: {
   await signInIfAuthRequired({ page, authTestId, email, password, timeoutMs: 0 });
   await expectSignedIn(page, email, scopeType);
 }
+
+export async function gotoEnsuringSignedIn(params: {
+  page: Page;
+  url: string;
+  authTestId: string;
+  email: string;
+  password: string;
+  timeoutMs?: number;
+  waitUntil?: "load" | "domcontentloaded" | "networkidle" | "commit";
+}) {
+  const { page, url, authTestId, email, password, timeoutMs = 8_000,
+    waitUntil = "domcontentloaded" } = params;
+  const navigation = { waitUntil, timeout: 60_000 };
+  await page.goto(url, navigation);
+  if (await signInIfAuthRequired({ page, authTestId, email, password, timeoutMs })) {
+    await page.goto(url, navigation);
+  }
+  await assertNoContextUnavailable({ page, authTestId, label: "loading the destination" });
+  if (await shouldSignIn({ page, authTestId, timeoutMs: 0 })) {
+    throw new Error("The destination still requires sign-in.");
+  }
+}

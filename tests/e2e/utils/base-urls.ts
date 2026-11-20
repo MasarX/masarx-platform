@@ -1,6 +1,5 @@
 import { isStrictE2EEnv } from "./env";
 
-
 const DEFAULT_BASE_URLS = {
   console: "http://localhost:3001",
   portal: "http://localhost:3002",
@@ -36,7 +35,11 @@ function resolveBaseUrl(
   }
   if (opts.strict) {
     const host = String(parsed.hostname || "").toLowerCase();
-    if (host.endsWith(".local")) {
+    const explicitLocal =
+      process.env.E2E_MUTATION_ENV?.trim().toLowerCase() === "local" ||
+      process.env.E2E_STRICT_ALLOW_EXPLICIT_LOCALHOST === "1";
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(host);
+    if (host.endsWith(".local") || (loopback && !explicitLocal)) {
       throw new Error(
         `${opts.envKey} must point to a hosted URL in strict/CI E2E (got host=${host}).`
       );

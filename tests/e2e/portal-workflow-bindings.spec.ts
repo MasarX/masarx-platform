@@ -48,6 +48,15 @@ test.describe("portal workflow bindings", () => {
     await expect(
       page.locator('[data-testid="portal-workflow-bindings-scope"]').first(),
     ).toBeVisible();
+    await expect(
+      page.locator('[data-testid="portal-workflow-bindings-scope-summary"]').first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-testid="portal-workflow-bindings-scope-summary"]').first(),
+    ).not.toContainText(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+    await expect(
+      page.locator('[data-testid="portal-workflow-bindings-scope-reference"]').first(),
+    ).toContainText(/^REF-/);
     if (!(await page.locator('[data-testid="portal-workflow-bindings-bindings-table"]').count())) {
       await page.getByText("Bindings", { exact: true }).last().click();
     }
