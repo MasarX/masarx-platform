@@ -32,7 +32,7 @@ type UiLookupClient = {
     offset: number,
     sort: { key: string; direction: "asc" | "desc" },
   ) => Promise<{ items?: unknown[] }>;
-  rpc?: (name: string, args?: Record<string, unknown>) => Promise<unknown>;
+  listLookupValues?: (category: string) => Promise<unknown>;
 };
 
 type WorkflowTriggerContextPatchControlsProps = {
@@ -151,7 +151,6 @@ export async function loadWorkflowTriggerContextLookupOptions(
   ui: UiLookupClient,
 ): Promise<WorkflowTriggerContextLookupOptions> {
   const list = typeof ui.listResource === "function" ? ui.listResource.bind(ui) : null;
-  const rpc = typeof ui.rpc === "function" ? ui.rpc.bind(ui) : null;
 
   const clientsPromise = list
     ? Promise.resolve(list("clients", {}, 100, 0, { key: "name", direction: "asc" })).catch(
@@ -163,11 +162,9 @@ export async function loadWorkflowTriggerContextLookupOptions(
         () => ({ items: [] }),
       )
     : Promise.resolve({ items: [] });
-  const serviceTypesPromise = rpc
-    ? Promise.resolve(rpc("list_lookup_values_v1", { p_category: "service_type" })).catch(
-        () => [],
-      )
-    : Promise.resolve([]);
+  const serviceTypesPromise = Promise.resolve()
+    .then(() => ui.listLookupValues?.("service_type"))
+    .catch(() => []);
 
   const [clientsResult, sendersResult, serviceTypeRows] = await Promise.all([
     clientsPromise,

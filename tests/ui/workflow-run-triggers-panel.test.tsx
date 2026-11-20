@@ -231,7 +231,7 @@ describe("WorkflowRunTriggersPanel", () => {
     );
 
     await waitFor(() => expect(invalidateQueries).toHaveBeenCalled());
-    expect(screen.getByTestId("workflow-run-panel-row-out-2")).toHaveTextContent("Completed, Failed");
+    expect(screen.getByTestId("workflow-run-panel-row-out-2")).toHaveTextContent("completed, failed");
   });
 });
 
@@ -270,9 +270,7 @@ describe("workflow trigger lifecycle UI contract", () => {
   });
   afterEach(() => {
     expect(client.updateResource).not.toHaveBeenCalled();
-    for (const call of client.rpc.mock.calls) {
-      expect(call).toEqual(["list_lookup_values_v1", { p_category: "service_type" }]);
-    }
+    expect(client.rpc).not.toHaveBeenCalled();
   });
 
   it("toggle retains row identity and existing fields while consuming canonical returned fields", async () => {
@@ -287,7 +285,7 @@ describe("workflow trigger lifecycle UI contract", () => {
     }));
     const row = screen.getByTestId("life-row-trigger-1");
     await waitFor(() => expect(within(row).getByTestId("life-row-trigger-1-toggle")).toHaveTextContent("Enable"));
-    expect(row).toHaveTextContent("Completed, Failed");
+    expect(row).toHaveTextContent("completed, failed");
     expect(within(row).getByRole("link", { name: "Open fires" })).toHaveAttribute(
       "href", "/portal/resources/workflow_trigger_fires?workflow_run_trigger_id=trigger-1"
     );
@@ -310,7 +308,7 @@ describe("workflow trigger lifecycle UI contract", () => {
       contextPatch: {}, enabled: true, notes: "",
     }));
     await waitFor(() => expect(screen.queryByTestId("life-editor")).not.toBeInTheDocument());
-    expect(screen.getByTestId("life-row-trigger-1")).toHaveTextContent("Completed, Failed");
+    expect(screen.getByTestId("life-row-trigger-1")).toHaveTextContent("completed, failed");
     fireEvent.click(screen.getByTestId("life-row-trigger-1-edit"));
     expect(screen.getByTestId("life-editor-notes")).toHaveValue("");
     expect(screen.getByTestId("life-editor-context-patch")).toHaveValue(JSON.stringify({ canonical: true }, null, 2));
@@ -459,14 +457,14 @@ describe("typed workflow trigger RPC arguments", () => {
       }
       return Promise.resolve({ items: [] });
     });
-    const rpc = jest.fn((name: string) =>
-      name === "list_lookup_values_v1"
-        ? Promise.resolve([{ key: "same_day", label: "Same day delivery" }])
+    const listLookupValues = jest.fn((category: string) =>
+      category === "service_type"
+        ? Promise.resolve([{ value: "same_day", label: "Same day delivery" }])
         : Promise.resolve([]),
     );
 
     const createWorkflowRunTrigger = jest.fn().mockResolvedValue({ workflow_run_trigger_id: "trigger-created" });
-    mockedCreateUiClient.mockReturnValue({ listResource, rpc, createWorkflowRunTrigger });
+    mockedCreateUiClient.mockReturnValue({ listResource, listLookupValues, createWorkflowRunTrigger });
 
     renderWithIntl(
       <WorkflowRunTriggersPanel
@@ -486,6 +484,7 @@ describe("typed workflow trigger RPC arguments", () => {
 
     fireEvent.click(screen.getByTestId("workflow-run-triggers-outgoing-new"));
     await screen.findByText("Sample Organization");
+    expect(listLookupValues).toHaveBeenCalledWith("service_type");
     expect(screen.getByText("Main Sender")).toBeInTheDocument();
     expect(screen.getByText("Same day delivery")).toBeInTheDocument();
     expect(screen.queryByText(clientId)).toBeNull();

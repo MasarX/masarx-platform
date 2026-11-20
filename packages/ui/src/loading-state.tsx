@@ -37,19 +37,20 @@ export function LoadingState({
     >
       {showHeader ? (
         <div className="space-y-2">
-          <Skeleton className="h-7 w-2/3" />
-          <Skeleton className="h-4 w-1/2" />
+          <Skeleton aria-hidden className="h-7 w-2/3" />
+          <Skeleton aria-hidden className="h-4 w-1/2" />
         </div>
       ) : null}
       <div className="space-y-2">
         {Array.from({ length: lines }).map((_, index) => (
           <Skeleton
+            aria-hidden
             key={`loading-line-${index}`}
             className={cn("h-4", widthCycle[index % widthCycle.length])}
           />
         ))}
       </div>
-      {showBlock ? <Skeleton className={cn(blockHeight, "w-full")} /> : null}
+      {showBlock ? <Skeleton aria-hidden className={cn(blockHeight, "w-full")} /> : null}
     </div>
   );
 }

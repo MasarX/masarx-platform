@@ -234,11 +234,11 @@ export function createSupabaseExecutor(
         throw error;
       }
       const payload = result.data;
-      if (rpc === "ui_execute_command_v1" && payload?.ok === false && payload.error) {
-        const { code, message } = payload.error;
+      if (rpc === "ui_execute_command_v1" && payload?.ok === false) {
+        const { code, message } = payload.error ?? {};
         throw Object.assign(
           new Error(typeof message === "string" ? message : "Command execution was rejected."),
-          { code },
+          { code: typeof code === "string" ? code : "command_rejected" },
         );
       }
       return payload;

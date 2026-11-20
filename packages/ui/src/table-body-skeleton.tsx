@@ -28,6 +28,7 @@ export function TableBodySkeleton({
         >
           {Array.from({ length: columns }).map((_, colIdx) => (
             <Skeleton
+              aria-hidden
               key={`skel-cell-${rowIdx}-${colIdx}`}
               className={`h-4 ${widthCycle[(rowIdx + colIdx) % widthCycle.length]}`}
             />

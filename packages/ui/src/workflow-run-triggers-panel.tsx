@@ -620,7 +620,7 @@ export function WorkflowRunTriggersPanel(props: WorkflowRunTriggersPanelProps) {
 
     const statuses = normalizeStringArray(row.source_statuses);
     const statusesSummary = (statuses.length ? statuses : ["completed"])
-      .map((value) => statusesByValue.get(value) ?? labelFromKey(value)).join(", ");
+      .map((value) => statusesByValue.get(value) ?? value).join(", ");
     const createdAt = formatResourceValue(row.created_at, { renderType: "datetime" });
     const updatedAt = formatResourceValue(row.updated_at, { renderType: "datetime" });
 

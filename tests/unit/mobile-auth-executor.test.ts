@@ -47,4 +47,13 @@ describe("mobile supabase executor", () => {
       message: "Capability denied",
     });
   });
+
+  test("throws when a rejected command omits its error object", async () => {
+    const executor = createSupabaseExecutor(createRpcClient({ data: { ok: false }, error: null }));
+
+    await expect(executor("ui_execute_command_v1", { p_action_key: "tasks.complete" })).rejects.toMatchObject({
+      code: "command_rejected",
+      message: "Command execution was rejected.",
+    });
+  });
 });
