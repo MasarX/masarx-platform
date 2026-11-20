@@ -17,12 +17,20 @@ function splitPathParts(value: string): PathParts {
   return { path, search, hash };
 }
 
+function trimTrailingSlashes(value: string) {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end--;
+  }
+  return value.slice(0, end);
+}
+
 function normalizeAbsolutePath(pathValue: string) {
   const raw = String(pathValue || "").trim();
   if (!raw || raw === "/") return "/";
   const withLeadingSlash = raw.startsWith("/") ? raw : `/${raw}`;
   if (withLeadingSlash.startsWith("//")) return "/";
-  return withLeadingSlash.replace(/\/+$/g, "") || "/";
+  return trimTrailingSlashes(withLeadingSlash) || "/";
 }
 
 export function stripLegacyRootAppPrefix(pathWithSuffix: string) {
@@ -55,7 +63,7 @@ export function normalizeAppBasePath(input?: string | null) {
   if (withSlash.includes("://")) return "/";
   if (withSlash.startsWith("//")) return "/";
   if (/\s/.test(withSlash)) return "/";
-  return stripLegacyRootAppPrefix(withSlash.replace(/\/+$/g, "")) || "/";
+  return stripLegacyRootAppPrefix(trimTrailingSlashes(withSlash)) || "/";
 }
 
 export function resolveRedirectTarget(

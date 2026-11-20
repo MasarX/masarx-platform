@@ -1,5 +1,6 @@
 import type { UiTrackingRegistry } from "@masarx/api";
 import { createUiTranslator, resolveRowDisplayText } from "./i18n";
+import { trimTrailingSlashes } from "./trim-trailing-slashes";
 import { isLoopbackHostname } from "./url-guard";
 
 export type TrackingOperatorHandoff = {
@@ -85,7 +86,7 @@ export function resolveShipmentOperatorHandoffHref(
     const base = new URL(rawBase.trim());
     if (base.username || base.password || base.search || base.hash || !isSafeHandoffPath(base.pathname) ||
         (base.protocol !== "https:" && !(base.protocol === "http:" && isLoopbackHostname(base.hostname)))) return null;
-    const target = new URL(`${base.pathname.replace(/\/+$/g, "")}${handoff.path}`, base.origin);
+    const target = new URL(`${trimTrailingSlashes(base.pathname)}${handoff.path}`, base.origin);
     if (target.origin !== base.origin) return null;
     target.searchParams.set(handoff.identifierParam, identifier);
     if (handoff.tabParam && handoff.tab) target.searchParams.set(handoff.tabParam, handoff.tab);

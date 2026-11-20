@@ -4,6 +4,8 @@
 // We keep titles static (no runtime hooks here — `head()` runs during route
 // resolution, before context providers render).
 
+import { trimTrailingSlashes } from './trim-trailing-slashes';
+
 export const ROUTE_TITLES = {
   '/': 'Dashboard',
   '/operate/route-plans': 'Route plans',
@@ -141,7 +143,8 @@ function titleizeSegment(segment: string): string {
 }
 
 export function buildRouteBreadcrumbs(pathname: string): RouteBreadcrumb[] {
-  const normalized = pathname.split(/[?#]/, 1)[0]?.replace(/\/+$/, '') || '/';
+  const [path = ''] = pathname.split(/[?#]/, 1);
+  const normalized = trimTrailingSlashes(path) || '/';
   if (normalized === '/') return [{ label: ROUTE_TITLES['/'], to: '/' }];
 
   const leafPath = (normalized in ROUTE_TITLES ? normalized : null) as RoutePath | null;

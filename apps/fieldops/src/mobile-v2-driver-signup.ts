@@ -109,11 +109,19 @@ function parseJson(text: string): JsonRecord {
   }
 }
 
+function trimTrailingSlashes(value: string) {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end--;
+  }
+  return value.slice(0, end);
+}
+
 function normalizeUrl(value: unknown): string {
   const raw = trim(value);
   if (!raw) return "";
   try {
-    return new URL(raw).toString().replace(/\/+$/g, "");
+    return trimTrailingSlashes(new URL(raw).toString());
   } catch {
     return "";
   }
