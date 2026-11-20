@@ -5,14 +5,14 @@ REVOKE ALL ON FUNCTION public.marketplace_create_posted_settlement_batch_v1(uuid
 REVOKE EXECUTE ON FUNCTION public.marketplace_settlement_finalize_v1(uuid, uuid, jsonb) FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.marketplace_settlement_reverse_v1(uuid, text, jsonb) FROM PUBLIC, anon;
 
-CREATE OR REPLACE FUNCTION public.marketplace_settlement_finalize_v1(
-  p_work_package_id UUID DEFAULT NULL,
-  p_contract_id UUID DEFAULT NULL,
-  p_metadata JSONB DEFAULT '{}'::jsonb
+-- The settlement entry points call this with owner privileges after authorization.
+CREATE FUNCTION public.marketplace_post_completed_settlement_v1(
+  p_work_package_id UUID,
+  p_metadata JSONB
 )
 RETURNS JSONB
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path TO public, extensions, pg_temp
 AS $function$
 DECLARE
@@ -31,69 +31,8 @@ DECLARE
   v_requester_batch UUID;
   v_supplier_batch UUID;
 BEGIN
-  IF auth.uid() IS NULL THEN
-    RAISE EXCEPTION 'authenticated_user_required' USING ERRCODE = '42501';
-  END IF;
-
-  IF v_org_id IS NULL THEN
-    RAISE EXCEPTION 'authenticated_tenant_user_required' USING ERRCODE = '42501';
-  END IF;
-
-  IF NOT public.user_has_resource_capability_v1('marketplace_contracts', 'write') THEN
-    RAISE EXCEPTION 'marketplace_contracts.write capability required' USING ERRCODE = '42501';
-  END IF;
-
-  PERFORM public.assert_capability_v1('marketplace_contracts.write', 'tenant', v_org_id);
-
-  IF p_work_package_id IS NULL AND p_contract_id IS NULL THEN
-    RETURN jsonb_build_object('ok', FALSE, 'error', jsonb_build_object('code', 'work_package_or_contract_required'));
-  END IF;
-
-  IF p_work_package_id IS NOT NULL THEN
-    SELECT *
-      INTO v_wp
-      FROM public.marketplace_work_packages wp
-     WHERE wp.id = p_work_package_id
-       AND (
-         wp.requester_organization_id = v_org_id
-         OR wp.supplier_organization_id = v_org_id
-       )
-     FOR UPDATE;
-  ELSE
-    SELECT *
-      INTO v_contract
-      FROM public.marketplace_contracts c
-     WHERE c.id = p_contract_id
-       AND (
-         c.requester_organization_id = v_org_id
-         OR c.supplier_organization_id = v_org_id
-       )
-     FOR UPDATE;
-
-    IF v_contract.id IS NOT NULL THEN
-      SELECT *
-        INTO v_wp
-        FROM public.marketplace_work_packages wp
-       WHERE wp.contract_id = v_contract.id
-       LIMIT 1
-       FOR UPDATE;
-    END IF;
-  END IF;
-
-  IF v_wp.id IS NULL THEN
-    IF v_contract.id IS NOT NULL THEN
-      RETURN jsonb_build_object('ok', FALSE, 'error', jsonb_build_object('code', 'work_package_not_found'));
-    END IF;
-    RAISE EXCEPTION 'settlement contract access denied' USING ERRCODE = '42501';
-  END IF;
-
+  SELECT * INTO v_wp FROM public.marketplace_work_packages WHERE id = p_work_package_id FOR UPDATE;
   SELECT * INTO v_contract FROM public.marketplace_contracts WHERE id = v_wp.contract_id FOR UPDATE;
-  IF v_contract.id IS NULL OR (
-    v_org_id IS DISTINCT FROM v_contract.requester_organization_id
-    AND v_org_id IS DISTINCT FROM v_contract.supplier_organization_id
-  ) THEN
-    RAISE EXCEPTION 'settlement contract access denied' USING ERRCODE = '42501';
-  END IF;
   SELECT * INTO v_award FROM public.marketplace_awards WHERE id = v_wp.award_id FOR UPDATE;
   SELECT * INTO v_offer FROM public.marketplace_offers WHERE id = v_award.offer_id FOR UPDATE;
   SELECT * INTO v_request FROM public.marketplace_requests WHERE id = v_wp.request_id FOR UPDATE;
@@ -286,6 +225,91 @@ BEGIN
     'requester_settlement_batch_id', v_requester_batch,
     'supplier_settlement_batch_id', v_supplier_batch
   );
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.marketplace_post_completed_settlement_v1(uuid, jsonb)
+  FROM PUBLIC, anon, authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.marketplace_settlement_finalize_v1(
+  p_work_package_id UUID DEFAULT NULL,
+  p_contract_id UUID DEFAULT NULL,
+  p_metadata JSONB DEFAULT '{}'::jsonb
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $function$
+DECLARE
+  v_org_id UUID := public.current_user_org_id();
+  v_wp public.marketplace_work_packages%ROWTYPE;
+  v_contract public.marketplace_contracts%ROWTYPE;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'authenticated_user_required' USING ERRCODE = '42501';
+  END IF;
+
+  IF v_org_id IS NULL THEN
+    RAISE EXCEPTION 'authenticated_tenant_user_required' USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT public.user_has_resource_capability_v1('marketplace_contracts', 'write') THEN
+    RAISE EXCEPTION 'marketplace_contracts.write capability required' USING ERRCODE = '42501';
+  END IF;
+
+  PERFORM public.assert_capability_v1('marketplace_contracts.write', 'tenant', v_org_id);
+
+  IF p_work_package_id IS NULL AND p_contract_id IS NULL THEN
+    RETURN jsonb_build_object('ok', FALSE, 'error', jsonb_build_object('code', 'work_package_or_contract_required'));
+  END IF;
+
+  IF p_work_package_id IS NOT NULL THEN
+    SELECT *
+      INTO v_wp
+      FROM public.marketplace_work_packages wp
+     WHERE wp.id = p_work_package_id
+       AND (
+         wp.requester_organization_id = v_org_id
+         OR wp.supplier_organization_id = v_org_id
+       )
+     FOR UPDATE;
+  ELSE
+    SELECT *
+      INTO v_contract
+      FROM public.marketplace_contracts c
+     WHERE c.id = p_contract_id
+       AND (
+         c.requester_organization_id = v_org_id
+         OR c.supplier_organization_id = v_org_id
+       )
+     FOR UPDATE;
+
+    IF v_contract.id IS NOT NULL THEN
+      SELECT *
+        INTO v_wp
+        FROM public.marketplace_work_packages wp
+       WHERE wp.contract_id = v_contract.id
+       LIMIT 1
+       FOR UPDATE;
+    END IF;
+  END IF;
+
+  IF v_wp.id IS NULL THEN
+    IF v_contract.id IS NOT NULL THEN
+      RETURN jsonb_build_object('ok', FALSE, 'error', jsonb_build_object('code', 'work_package_not_found'));
+    END IF;
+    RAISE EXCEPTION 'settlement contract access denied' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT * INTO v_contract FROM public.marketplace_contracts WHERE id = v_wp.contract_id FOR UPDATE;
+  IF v_contract.id IS NULL OR (
+    v_org_id IS DISTINCT FROM v_contract.requester_organization_id
+    AND v_org_id IS DISTINCT FROM v_contract.supplier_organization_id
+  ) THEN
+    RAISE EXCEPTION 'settlement contract access denied' USING ERRCODE = '42501';
+  END IF;
+  RETURN public.marketplace_post_completed_settlement_v1(v_wp.id, p_metadata);
 END;
 $function$;
 
@@ -517,6 +541,192 @@ BEGIN
     'supplier_finance_event_id', v_supplier_finance,
     'requester_settlement_batch_id', v_requester_batch,
     'supplier_settlement_batch_id', v_supplier_batch
+  );
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.marketplace_work_package_complete_v1(
+  p_work_package_id UUID,
+  p_proof JSONB DEFAULT '{}'::jsonb,
+  p_metadata JSONB DEFAULT '{}'::jsonb
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $function$
+DECLARE
+  v_org_id UUID := public.current_user_org_id();
+  v_is_platform BOOLEAN := public.is_platform_user();
+  v_wp public.marketplace_work_packages%ROWTYPE;
+  v_contract public.marketplace_contracts%ROWTYPE;
+  v_request public.marketplace_requests%ROWTYPE;
+  v_status TEXT := 'completed';
+  v_settlement_result JSONB := '{}'::jsonb;
+  v_proof_quality NUMERIC := NULL;
+  v_feedback_score NUMERIC := NULL;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'authenticated_user_required' USING ERRCODE = '42501';
+  END IF;
+
+  IF v_org_id IS NULL AND NOT v_is_platform THEN
+    RAISE EXCEPTION 'authenticated_participant_required' USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT public.user_has_resource_capability_v1('marketplace_work_packages', 'write')
+     AND NOT public.user_has_resource_capability_v1('marketplace_contracts', 'write') THEN
+    RAISE EXCEPTION 'marketplace_work_packages.write capability required' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT *
+    INTO v_wp
+    FROM public.marketplace_work_packages wp
+   WHERE wp.id = p_work_package_id
+     AND (
+       v_is_platform
+       OR wp.requester_organization_id = v_org_id
+       OR wp.supplier_organization_id = v_org_id
+     )
+   FOR UPDATE;
+
+  IF v_wp.id IS NULL THEN
+    RETURN jsonb_build_object('ok', FALSE, 'error', jsonb_build_object('code', 'work_package_not_found'));
+  END IF;
+
+  IF v_wp.status IN ('completed', 'settled') THEN
+    RETURN jsonb_build_object('ok', TRUE, 'id', v_wp.id, 'status', v_wp.status, 'already_processed', TRUE);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+      FROM public.marketplace_disputes d
+     WHERE d.work_package_id = v_wp.id
+       AND d.status IN ('open', 'under_review')
+  ) THEN
+    RETURN jsonb_build_object('ok', FALSE, 'error', jsonb_build_object('code', 'open_dispute_exists'));
+  END IF;
+
+  IF v_wp.status NOT IN ('ready', 'materialized', 'executing', 'in_execution') THEN
+    RETURN jsonb_build_object('ok', FALSE, 'error', jsonb_build_object('code', 'work_package_not_completable'));
+  END IF;
+
+  SELECT * INTO v_contract FROM public.marketplace_contracts WHERE id = v_wp.contract_id FOR UPDATE;
+  SELECT * INTO v_request FROM public.marketplace_requests WHERE id = v_wp.request_id FOR UPDATE;
+
+  UPDATE public.marketplace_work_packages
+     SET status = 'completed',
+         completed_at = now(),
+         metadata = jsonb_set(
+           COALESCE(metadata, '{}'::jsonb) || COALESCE(p_metadata, '{}'::jsonb),
+           '{proof}',
+           COALESCE(metadata->'proof', '{}'::jsonb) || COALESCE(p_proof, '{}'::jsonb),
+           TRUE
+         ),
+         updated_at = now()
+   WHERE id = v_wp.id;
+
+  UPDATE public.marketplace_contracts
+     SET status = 'completed',
+         completed_at = now(),
+         metadata = COALESCE(metadata, '{}'::jsonb) || COALESCE(p_metadata, '{}'::jsonb),
+         updated_at = now()
+   WHERE id = v_contract.id;
+
+  UPDATE public.marketplace_requests
+     SET status = 'completed',
+         closed_at = now(),
+         metadata = COALESCE(metadata, '{}'::jsonb) || COALESCE(p_metadata, '{}'::jsonb),
+         updated_at = now()
+   WHERE id = v_request.id;
+
+  BEGIN
+    v_proof_quality := NULLIF(COALESCE(p_proof->>'proof_quality', ''), '')::numeric;
+  EXCEPTION
+    WHEN others THEN
+      v_proof_quality := NULL;
+  END;
+
+  BEGIN
+    v_feedback_score := NULLIF(COALESCE(p_proof->>'feedback_score', ''), '')::numeric;
+  EXCEPTION
+    WHEN others THEN
+      v_feedback_score := NULL;
+  END;
+
+  PERFORM public.marketplace_append_reputation_event_v1(
+    v_wp.supplier_participant_profile_id,
+    'delivery_completed',
+    'completion_rate',
+    1,
+    1,
+    'marketplace_work_package',
+    v_wp.id,
+    jsonb_build_object('contract_id', v_contract.id)
+  );
+
+  IF v_proof_quality IS NOT NULL THEN
+    PERFORM public.marketplace_append_reputation_event_v1(
+      v_wp.supplier_participant_profile_id,
+      'proof_submitted',
+      'proof_quality',
+      v_proof_quality,
+      1,
+      'marketplace_work_package',
+      v_wp.id,
+      jsonb_build_object('proof_quality', v_proof_quality)
+    );
+  END IF;
+
+  IF v_feedback_score IS NOT NULL THEN
+    PERFORM public.marketplace_append_reputation_event_v1(
+      v_wp.supplier_participant_profile_id,
+      'feedback_recorded',
+      'feedback_score',
+      v_feedback_score,
+      1,
+      'marketplace_work_package',
+      v_wp.id,
+      jsonb_build_object('feedback_score', v_feedback_score)
+    );
+  END IF;
+
+  PERFORM public.marketplace_append_event_v1(
+    COALESCE(v_org_id, v_wp.requester_organization_id),
+    'marketplace_work_package',
+    v_wp.id,
+    'work_package.completed',
+    jsonb_build_object('contract_id', v_contract.id)
+  );
+
+  IF v_contract.settlement_mode_key = 'auto_recorded_internal' THEN
+    IF v_is_platform IS TRUE
+       AND v_org_id IS DISTINCT FROM v_contract.requester_organization_id
+       AND v_org_id IS DISTINCT FROM v_contract.supplier_organization_id THEN
+      PERFORM public.assert_capability_v1('marketplace_work_packages.write', 'platform');
+      PERFORM public.assert_capability_v1('marketplace_contracts.write', 'platform');
+      v_settlement_result := public.marketplace_post_completed_settlement_v1(
+        v_wp.id,
+        jsonb_build_object('source', 'work_package_complete') || COALESCE(p_metadata, '{}'::jsonb)
+      );
+    ELSE
+      v_settlement_result := public.marketplace_settlement_finalize_v1(
+        p_work_package_id := v_wp.id,
+        p_contract_id := v_contract.id,
+        p_metadata := jsonb_build_object('source', 'work_package_complete') || COALESCE(p_metadata, '{}'::jsonb)
+      );
+    END IF;
+
+    IF COALESCE(v_settlement_result->>'status', '') = 'settled' THEN
+      v_status := 'settled';
+    END IF;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ok', TRUE,
+    'id', v_wp.id,
+    'status', v_status,
+    'settlement', COALESCE(v_settlement_result, '{}'::jsonb)
   );
 END;
 $function$;

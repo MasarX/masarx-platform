@@ -2,7 +2,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SET LOCAL statement_timeout = '30s';
-SELECT plan(9);
+SELECT plan(14);
 
 -- Mutation: restoring PUBLIC EXECUTE or granting EXECUTE to anon fails this check.
 SELECT ok(NOT has_function_privilege('anon',
@@ -27,6 +27,13 @@ SELECT throws_ok(
 );
 RESET ROLE;
 
+-- Mutation: granting a runtime role access to the owner-only posting helper fails this check.
+SELECT ok(NOT EXISTS (
+  SELECT 1 FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS runtime_role(role_name)
+  WHERE has_function_privilege(runtime_role.role_name,
+    'public.marketplace_post_completed_settlement_v1(uuid,jsonb)', 'EXECUTE')
+), 'runtime roles cannot directly execute the completion posting helper');
+
 DO $$
 DECLARE
   v_requester uuid := gen_random_uuid();
@@ -34,6 +41,8 @@ DECLARE
   v_outsider uuid := gen_random_uuid();
   v_party_user uuid := gen_random_uuid();
   v_outside_user uuid := gen_random_uuid();
+  v_platform_user uuid := gen_random_uuid();
+  v_platform_reader uuid := gen_random_uuid();
   v_profile uuid;
   v_request uuid;
   v_offer uuid;
@@ -50,42 +59,56 @@ BEGIN
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type)
   VALUES
     (v_party_user, v_requester, v_party_user::text || '@example.test', 'Settlement Party', 'ops_admin', 'active', 'tenant'),
-    (v_outside_user, v_outsider, v_outside_user::text || '@example.test', 'Settlement Non-Party', 'ops_admin', 'active', 'tenant');
+    (v_outside_user, v_outsider, v_outside_user::text || '@example.test', 'Settlement Non-Party', 'ops_admin', 'active', 'tenant'),
+    (v_platform_user, v_outsider, v_platform_user::text || '@example.test', 'Platform Operator', 'super_admin', 'active', 'platform'),
+    (v_platform_reader, v_outsider, v_platform_reader::text || '@example.test', 'Platform Reader', 'client_admin', 'active', 'platform');
 
   INSERT INTO public.marketplace_participant_profiles (organization_id, participant_type_key, display_name)
   VALUES (v_supplier, 'provider_tenant', 'Settlement Supplier')
   RETURNING id INTO v_profile;
 
-  INSERT INTO public.marketplace_requests (requester_organization_id, request_kind_key, status, title)
-  VALUES (v_requester, 'capacity_block', 'completed', 'Settlement Auth Test')
-  RETURNING id INTO v_request;
+  FOR fixture IN 1..2 LOOP
+    INSERT INTO public.marketplace_requests (requester_organization_id, request_kind_key, status, title)
+    VALUES (v_requester, 'capacity_block', CASE WHEN fixture = 1 THEN 'completed' ELSE 'in_execution' END,
+      'Settlement Auth Test')
+    RETURNING id INTO v_request;
 
-  INSERT INTO public.marketplace_offers (
-    request_id, supplier_participant_profile_id, supplier_organization_id, status, pricing
-  ) VALUES (v_request, v_profile, v_supplier, 'accepted', '{"amount":100,"currency":"SAR"}')
-  RETURNING id INTO v_offer;
+    INSERT INTO public.marketplace_offers (
+      request_id, supplier_participant_profile_id, supplier_organization_id, status, pricing
+    ) VALUES (v_request, v_profile, v_supplier, 'accepted', '{"amount":100,"currency":"SAR"}')
+    RETURNING id INTO v_offer;
 
-  INSERT INTO public.marketplace_awards (
-    request_id, offer_id, requester_organization_id, supplier_organization_id, supplier_participant_profile_id, status
-  ) VALUES (v_request, v_offer, v_requester, v_supplier, v_profile, 'materialized')
-  RETURNING id INTO v_award;
+    INSERT INTO public.marketplace_awards (
+      request_id, offer_id, requester_organization_id, supplier_organization_id, supplier_participant_profile_id, status
+    ) VALUES (v_request, v_offer, v_requester, v_supplier, v_profile, 'materialized')
+    RETURNING id INTO v_award;
 
-  INSERT INTO public.marketplace_contracts (
-    award_id, request_id, requester_organization_id, supplier_organization_id, supplier_participant_profile_id,
-    status, settlement_mode_key
-  ) VALUES (v_award, v_request, v_requester, v_supplier, v_profile, 'completed', 'auto_recorded_internal')
-  RETURNING id INTO v_contract;
+    INSERT INTO public.marketplace_contracts (
+      award_id, request_id, requester_organization_id, supplier_organization_id, supplier_participant_profile_id,
+      status, settlement_mode_key
+    ) VALUES (v_award, v_request, v_requester, v_supplier, v_profile,
+      CASE WHEN fixture = 1 THEN 'completed' ELSE 'active' END, 'auto_recorded_internal')
+    RETURNING id INTO v_contract;
 
-  INSERT INTO public.marketplace_work_packages (
-    contract_id, award_id, request_id, requester_organization_id, supplier_organization_id,
-    supplier_participant_profile_id, status
-  ) VALUES (v_contract, v_award, v_request, v_requester, v_supplier, v_profile, 'completed')
-  RETURNING id INTO v_work_package;
+    INSERT INTO public.marketplace_work_packages (
+      contract_id, award_id, request_id, requester_organization_id, supplier_organization_id,
+      supplier_participant_profile_id, status
+    ) VALUES (v_contract, v_award, v_request, v_requester, v_supplier, v_profile,
+      CASE WHEN fixture = 1 THEN 'completed' ELSE 'ready' END)
+    RETURNING id INTO v_work_package;
+
+    IF fixture = 1 THEN
+      PERFORM set_config('test.settlement_acl.contract', v_contract::text, true);
+      PERFORM set_config('test.settlement_acl.work_package', v_work_package::text, true);
+    ELSE
+      PERFORM set_config('test.settlement_acl.platform_package', v_work_package::text, true);
+    END IF;
+  END LOOP;
 
   PERFORM set_config('test.settlement_acl.party', v_party_user::text, true);
   PERFORM set_config('test.settlement_acl.outsider', v_outside_user::text, true);
-  PERFORM set_config('test.settlement_acl.contract', v_contract::text, true);
-  PERFORM set_config('test.settlement_acl.work_package', v_work_package::text, true);
+  PERFORM set_config('test.settlement_acl.platform', v_platform_user::text, true);
+  PERFORM set_config('test.settlement_acl.platform_reader', v_platform_reader::text, true);
 END;
 $$;
 
@@ -124,6 +147,42 @@ SELECT is(
 SELECT is(
   api.marketplace_settlement_reverse_v1(current_setting('test.settlement_acl.work_package')::uuid, 'Test reversal')->>'status',
   'completed', 'a contract party can reverse through the API');
+RESET ROLE;
+
+SELECT set_config('request.jwt.claim.sub', current_setting('test.settlement_acl.platform_reader'), true),
+       set_config('request.jwt.claims', jsonb_build_object('sub', current_setting('test.settlement_acl.platform_reader'), 'role', 'authenticated')::text, true);
+SET LOCAL ROLE authenticated;
+
+-- Mutation: treating platform scope as sufficient allows a reader into completion.
+SELECT throws_ok(
+  $$SELECT api.marketplace_work_package_complete_v1(current_setting('test.settlement_acl.platform_package')::uuid)$$,
+  '42501', 'marketplace_work_packages.write capability required',
+  'a platform reader cannot enter work package completion'
+);
+RESET ROLE;
+
+SELECT set_config('request.jwt.claim.sub', current_setting('test.settlement_acl.platform'), true),
+       set_config('request.jwt.claims', jsonb_build_object('sub', current_setting('test.settlement_acl.platform'), 'role', 'authenticated')::text, true);
+SET LOCAL ROLE authenticated;
+
+-- Mutation: restoring the platform bypass allows direct cross-org finalization.
+SELECT throws_ok(
+  $$SELECT api.marketplace_settlement_finalize_v1(
+    p_work_package_id := current_setting('test.settlement_acl.work_package')::uuid)$$,
+  '42501', 'settlement contract access denied', 'a platform non-party cannot finalize directly'
+);
+
+-- Mutation: restoring the platform bypass allows direct cross-org reversal.
+SELECT throws_ok(
+  $$SELECT api.marketplace_settlement_reverse_v1(current_setting('test.settlement_acl.work_package')::uuid)$$,
+  '42501', 'settlement contract access denied', 'a platform non-party cannot reverse directly'
+);
+
+-- Mutation: routing authorized platform completion through the direct party gate prevents settlement.
+SELECT is(
+  api.marketplace_work_package_complete_v1(current_setting('test.settlement_acl.platform_package')::uuid)->>'status',
+  'settled', 'a platform operator can settle by completing an internal work package'
+);
 RESET ROLE;
 
 SELECT finish();
