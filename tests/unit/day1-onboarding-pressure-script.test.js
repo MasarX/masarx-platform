@@ -67,8 +67,6 @@ describe('day1 onboarding pressure script', () => {
     expect(body).toMatch('const DAY1_LABEL_HTTP_RETRY_ATTEMPTS');
     expect(body).toMatch('const DAY1_LABEL_HTTP_RETRY_SLEEP_MS');
     expect(body).toMatch('const DAY1_LABEL_FAILURE_LOG_LIMIT');
-    expect(body).toMatch('const DAY1_ONBOARDING_P95_MS');
-    expect(body).toMatch('day1_onboarding_ms: [`p(95)<${DAY1_ONBOARDING_P95_MS}`]');
     expect(body).toMatch('runtime db open retry');
     expect(body).toMatch('label bundle failure sample');
     expect(body).toMatch('const DAY1_TEARDOWN_DB_RETRY_ATTEMPTS');

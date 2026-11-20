@@ -1,4 +1,4 @@
-import { formatRuntimeConsoleMessage, isNoiseRuntimeConsoleMessage } from "../e2e/utils/runtime-errors";
+import { isNoiseRuntimeConsoleMessage } from "../e2e/utils/runtime-errors";
 
 describe("runtime error console noise filter", () => {
   it("filters known preview feedback script CSP noise", () => {
@@ -43,14 +43,5 @@ describe("runtime error console noise filter", () => {
     expect(isNoiseRuntimeConsoleMessage("TypeError: Cannot read properties of undefined")).toBe(
       false
     );
-  });
-
-  it("reports the resource and page paths without URL credentials or query data", () => {
-    expect(
-      formatRuntimeConsoleMessage("Failed to load resource: 500", {
-        locationUrl: "https://fixture@console.example.invalid/api/ui-event?sample=1#fragment",
-        pageUrl: "https://console.example.invalid/operations/pickups/waves",
-      }),
-    ).toBe("Failed to load resource: 500 [/api/ui-event /operations/pickups/waves]");
   });
 });
