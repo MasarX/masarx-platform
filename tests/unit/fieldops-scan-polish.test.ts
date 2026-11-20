@@ -116,7 +116,7 @@ describe("Scan screen controls", () => {
     });
 
     test("barcode input exposes accessibilityLabel for screen readers", () => {
-      expect(barcodeInputBlock).toMatch(/accessibilityLabel="Barcode"/);
+      expect(barcodeInputBlock).toMatch(/accessibilityLabel=\{strings\.scan\.barcodePlaceholder\}/);
     });
   });
 

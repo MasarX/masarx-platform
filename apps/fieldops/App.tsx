@@ -7811,8 +7811,7 @@ function ScanScreen({
         onSubmitEditing={() => {
           if (effectiveScanInputMode === "scanner" && canQueue) void queueScan();
         }}
-        accessibilityLabel="Barcode"
-        {...(strings.scan.barcodePlaceholder === "Barcode" ? {} : { accessibilityLabel: strings.scan.barcodePlaceholder })}
+        accessibilityLabel={strings.scan.barcodePlaceholder}
         accessibilityHint={scanInputHint}
         editable={!scanReadOnly}
       />
