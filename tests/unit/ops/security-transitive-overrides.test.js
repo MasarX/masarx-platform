@@ -32,7 +32,7 @@ describe('security transitive overrides', () => {
     expect(root.overrides['js-yaml@^4.0.0']).toBe('4.3.2');
     expect(root.overrides['nx@22.7.12']['smol-toml']).toBe('1.9.0');
     expect(root.overrides['fast-uri']).toBe('3.1.9');
-    expect(root.overrides['node-forge']).toBe('1.4.1');
+    expect(root.overrides['node-forge']).toBe('1.4.3');
     expect(root.overrides['zod@^4.0.0']).toBe('4.6.7');
     expect(root.overrides).not.toHaveProperty('zod');
     expect(root.overrides.uuid).toBe('11.1.1');
@@ -101,7 +101,7 @@ describe('security transitive overrides', () => {
 
   test.each([
     ['axios', '1.20.0'], ['compression', '1.8.2'], ['follow-redirects', '1.16.2'], ['handlebars', '4.7.10'],
-    ['next', '16.4.5'], ['node-forge', '1.4.1'], ['shell-quote', '1.12.0'], ['smol-toml', '1.9.0'], ['source-map-js', '1.2.2'],
+    ['next', '16.4.5'], ['node-forge', '1.4.3'], ['shell-quote', '1.12.0'], ['smol-toml', '1.9.0'], ['source-map-js', '1.2.2'],
     ['undici', '6.29.1'], ['webpack-dev-middleware', '7.4.6'],
   ])('preserves every %s consumer at its supported patched floor', (packageName, floor) => {
     const versions = lockVersions(readJson('package-lock.json'), packageName);
