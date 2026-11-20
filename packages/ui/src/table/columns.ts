@@ -34,7 +34,7 @@ function stripFkIdSuffix(label: string, key: string) {
     key !== "id" &&
     (label.endsWith(" Id") || label.endsWith(" ID"))
   ) {
-    const trimmed = label.replace(/\s+I[dD]$/, "");
+    const trimmed = label.slice(0, -3).trimEnd();
     if (trimmed) return trimmed;
   }
   return label;

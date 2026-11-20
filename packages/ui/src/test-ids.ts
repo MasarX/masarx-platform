@@ -10,6 +10,9 @@ export type TestIdState =
   | "form"
   | "preview"
   | "request"
+  | "summary-scope"
+  | "summary-scope-reference"
+  | "summary-settings-resolution"
   | "command-center"
   | "metrics";
 

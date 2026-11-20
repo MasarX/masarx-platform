@@ -4,7 +4,7 @@ import {
   createServerClient,
   getVerifiedAccessToken,
 } from "@masarx/auth/server";
-import { createRpc } from "./rpc";
+import { createRpc, listUiLookupValues } from "./rpc";
 import { normalizeUiScopeType } from "./scope-normalize";
 import { attachMarketplaceClient } from "./marketplace-client";
 import {
@@ -337,6 +337,7 @@ const getUiServerClient = cache(() => {
 
   return {
     rpc,
+    listLookupValues: (category: string) => listUiLookupValues(rpc, category),
     me,
     onboardingReadiness,
     navigation,

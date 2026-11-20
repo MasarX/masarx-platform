@@ -145,15 +145,6 @@ export function normalizeFlatFilterValue(value: unknown): NormalizedFlatValue | 
   };
 }
 
-export function formatFilterOp(
-  op?: string | null,
-  labels: FilterOpLabels = FILTER_OP_LABELS
-) {
-  if (!op) return null;
-  const normalized = op.toLowerCase();
-  return labels[normalized] ?? normalized;
-}
-
 export function flattenSearchParams(params: SearchParams) {
   const entries: Array<[string, string]> = [];
   Object.entries(params).forEach(([key, raw]) => {
