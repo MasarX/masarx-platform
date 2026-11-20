@@ -1,4 +1,5 @@
 BEGIN;
+SET LOCAL lock_timeout = '10s';
 
 CREATE OR REPLACE FUNCTION public.create_feature_flag_v1(p_args jsonb)
 RETURNS jsonb

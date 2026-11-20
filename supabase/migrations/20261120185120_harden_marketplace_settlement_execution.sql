@@ -1,6 +1,9 @@
 BEGIN;
+SET LOCAL lock_timeout = '10s';
 
 REVOKE ALL ON FUNCTION public.marketplace_create_posted_settlement_batch_v1(uuid, text, uuid, uuid, timestamp with time zone, jsonb, text) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.marketplace_settlement_finalize_v1(uuid, uuid, jsonb) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.marketplace_settlement_reverse_v1(uuid, text, jsonb) FROM PUBLIC, anon;
 
 CREATE OR REPLACE FUNCTION public.marketplace_settlement_finalize_v1(
   p_work_package_id UUID DEFAULT NULL,

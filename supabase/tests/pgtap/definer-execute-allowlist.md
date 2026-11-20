@@ -92,7 +92,6 @@ grant rows labeled `unreviewed: pending audit L-secdef-misses`.
 | `public.list_usage_events_v1(uuid, text, timestamp with time zone, timestamp with time zone, integer, integer)` | authenticated | Corrected signature, original reason retained |
 | `public.marketplace_availability_upsert_v1(uuid, timestamp with time zone, timestamp with time zone, text, jsonb, jsonb)` | anon, authenticated | Corrected signature, original reason retained |
 | `public.marketplace_award_offer_v1(uuid, text, jsonb, timestamp with time zone, jsonb)` | authenticated | Corrected signature, original reason retained |
-| `public.marketplace_create_posted_settlement_batch_v1(uuid, text, uuid, uuid, timestamp with time zone, jsonb, text)` | anon, authenticated | Corrected signature, original reason retained |
 | `public.marketplace_offer_counter_v1(uuid, text, jsonb, jsonb, timestamp with time zone, jsonb)` | anon, authenticated | Corrected signature, original reason retained |
 | `public.marketplace_offer_submit_v1(uuid, text, jsonb, jsonb, timestamp with time zone, jsonb)` | authenticated | Corrected signature, original reason retained |
 | `public.marketplace_request_create_v1(text, text, text, jsonb, jsonb, jsonb, timestamp with time zone, jsonb)` | authenticated | Corrected signature, original reason retained |
