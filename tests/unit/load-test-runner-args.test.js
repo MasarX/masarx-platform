@@ -23,7 +23,7 @@ const localK6 = path.join(projectRoot, 'tmp', 'xk6', 'k6');
 const localCall = (env) => [
   localK6,
   ['run', ...scenarioArgs],
-  { stdio: 'pipe', encoding: 'utf8', env: { ...env, DATABASE_URL: dbUrl } },
+  { stdio: 'pipe', encoding: 'utf8', timeout: 600000, env: { ...env, DATABASE_URL: dbUrl } },
 ];
 
 async function captureSpawns(mode, { info = { status: 0 }, run = { status: 0 }, env = {} } = {}) {
