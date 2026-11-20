@@ -13,7 +13,7 @@ function workflowIgnore(text) {
 function installCommand(command, inherited = false) {
   const reset = /(?:NPM_CONFIG_IGNORE_SCRIPTS|npm_config_ignore_scripts)\s*(?:=|:)\s*['"]?(?:false|0)\b|--ignore-scripts[= ](?:false|0)\b/.test(command);
   if (reset && /\b(?:npm|pnpm|yarn)\b/.test(command)) return 'script-disabling override is false';
-  const manager = /\b(npm|pnpm|yarn)\s+(?:(?:--(?:prefix|workspace|dir|cwd|userconfig|globalconfig)\s+\S+|--[\w=./-]+|-g)\s+)*(?:ci|install|add|rebuild)\b/.exec(command);
+  const manager = /\b(npm|pnpm|yarn)\s+(?:(?:--(?:prefix|workspace|dir|cwd|userconfig|globalconfig)\s+(?!-)\S+|--[\w=./-]+|-g)\s+)*(?:ci|install|add|rebuild)\b/.exec(command);
   if (!manager) {
     if (/\b(?:pip3?|uv|apt(?:-get)?)\s+(?:[\w-]+\s+)*install\b/.test(command)) return 'unapproved installer';
     return null;

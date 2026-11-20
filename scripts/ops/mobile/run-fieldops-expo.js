@@ -37,7 +37,7 @@ function resolveFieldopsRepoRoot() {
 function quoteNodeOptionsValue(value) {
   const text = String(value || '');
   if (!/[\s"]/u.test(text)) return text;
-  return `"${text.replace(/"/g, '\\"')}"`;
+  return `"${text.replace(/[\\"]/g, '\\$&')}"`;
 }
 
 function appendNodeRequireOption(existingNodeOptions, requirePath) {

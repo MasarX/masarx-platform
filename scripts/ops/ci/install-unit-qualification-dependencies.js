@@ -8,7 +8,7 @@ const { spawnSync } = require('child_process');
 
 const MAX_CLI_SHIM_BYTES = 64 * 1024;
 const WINDOWS_MODERN_CMD_SHIM_TARGET_PATTERN = /^(?![ \t]*(?:@?rem(?:[ \t]|$)|::))[^"\r\n]*"%_prog%"[^\r\n]*"%dp0%[\\/]([^"\r\n]+?)"\s+%\*[ \t]*$/gim;
-const WINDOWS_LEGACY_CMD_SHIM_TARGET_PATTERN = /^(?![ \t]*(?:@?rem(?:[ \t]|$)|::))[ \t]*@?(?:"%~dp0[\\/]node\.exe"|node(?:\.exe)?)(?:[ \t]+[^"\r\n]+)*[ \t]+"%~dp0[\\/]([^"\r\n]+?)"[ \t]+%\*[ \t]*$/gim;
+const WINDOWS_LEGACY_CMD_SHIM_TARGET_PATTERN = /^(?![ \t]*(?:@?rem(?:[ \t]|$)|::))[ \t]*@?(?:"%~dp0[\\/]node\.exe"|node(?:\.exe)?)(?:[ \t]+[^"\s]+)*[ \t]+"%~dp0[\\/]([^"\r\n]+?)"[ \t]+%\*[ \t]*$/gim;
 const WINDOWS_DP0_INITIALIZER_PATTERN = /^[ \t]*@?set[ \t]+(?:"dp0=%~dp0"|dp0=%~dp0)[ \t]*$/im;
 
 const CLI_PROBE_SPECS = Object.freeze([

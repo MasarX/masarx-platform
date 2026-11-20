@@ -207,6 +207,12 @@ for (const command of ['npm ci --ignore-scripts', 'npm install x --ignore-script
 assert.equal(installCommand('npm ci', true), null);
 assert.notEqual(installCommand('npm --prefix app ci'), null);
 assert.equal(installCommand('npm --prefix app ci --ignore-scripts'), null);
+assert.equal(installCommand('npm --cwd - install'), null);
+assert.equal(installCommand('npm ci --prefix tooling/apps/deploy --ignore-scripts --no-audit --no-fund'), null);
+const repeatedInstallFlags = 'npm ' + '--cwd app '.repeat(5000) + 'ci';
+const installPolicyStarted = performance.now();
+assert.equal(installCommand(repeatedInstallFlags), 'install lacks script disabling');
+assert.ok(performance.now() - installPolicyStarted < 1000);
 for (const command of ['npm ci --ignore-scripts=false', 'NPM_CONFIG_IGNORE_SCRIPTS=false npm ci', 'npm_config_ignore_scripts=0 npm ci']) assert.notEqual(installCommand(command, true), null);
 assert.equal(checkInstallPolicy(new Map([[workflowPath, workflow]])).length, 0);
 assert.notEqual(checkInstallPolicy(new Map([[workflowPath, 'name: missing setting']])).length, 0);

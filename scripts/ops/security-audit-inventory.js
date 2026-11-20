@@ -667,7 +667,7 @@ function buildInventory({
 }
 
 function markdownEscape(value) {
-  return String(value || '').replace(/\|/g, '\\|').replace(/\n/g, ' ').trim();
+  return String(value || '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ').trim();
 }
 
 function findingsByPriority(findings) {

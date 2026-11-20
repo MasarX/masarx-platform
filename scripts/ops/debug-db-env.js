@@ -8,11 +8,17 @@
 /* eslint-disable no-console */
 const crypto = require('crypto');
 const { loadEnv } = require('../utils/load-env');
+const { hashUrlTarget } = require('../utils/hash-url-target');
 
-function safeHash(value) {
+function projectLabel(value) {
   if (!value) return '';
   const h = crypto.createHash('sha256').update(String(value)).digest('hex');
   return `${h.slice(0, 12)}…`; // short, non-reversible fingerprint
+}
+
+function urlLabel(value) {
+  const label = hashUrlTarget(value);
+  return label ? label + '…' : '';
 }
 
 function parsePostgresDsn(dsn) {
@@ -67,7 +73,7 @@ function main() {
 
   console.log('[db-debug] Supabase project');
   console.log(`  project_id: ${SUPABASE_PROJECT_ID || '<unset>'}`);
-  console.log(`  project_hash: ${safeHash(SUPABASE_PROJECT_ID || '')}`);
+  console.log(`  project_hash: ${projectLabel(SUPABASE_PROJECT_ID || '')}`);
   console.log(`  region:     ${SUPABASE_REGION || '<unset>'}`);
   let urlHost = '<unset>';
   if (SUPABASE_URL) {
@@ -79,19 +85,19 @@ function main() {
     }
   }
   console.log(`  url_host:   ${urlHost}`);
-  console.log(`  url_hash:   ${safeHash(SUPABASE_URL || '')}`);
+  console.log(`  url_hash:   ${urlLabel(SUPABASE_URL)}`);
 
   console.log('[db-debug] Direct DATABASE_URL snapshot');
   console.log(`  host:       ${direct.host || '<unset>'}`);
   console.log(`  port:       ${direct.port || '<unset>'}`);
   console.log(`  database:   ${direct.database || '<unset>'}`);
-  console.log(`  hash:       ${safeHash(DATABASE_URL_DIRECT || DATABASE_URL || '')}`);
+  console.log(`  hash:       ${urlLabel(DATABASE_URL_DIRECT || DATABASE_URL)}`);
 
   console.log('[db-debug] Pooler / CI DATABASE_URL snapshot');
   console.log(`  host:       ${SUPABASE_POOLER_HOST || pooler.host || '<unset>'}`);
   console.log(`  port:       ${SUPABASE_POOLER_PORT || pooler.port || '<unset>'}`);
   console.log(`  database:   ${pooler.database || '<unset>'}`);
-  console.log(`  hash:       ${safeHash(DATABASE_URL || '')}`);
+  console.log(`  hash:       ${urlLabel(DATABASE_URL)}`);
 }
 
 main();
