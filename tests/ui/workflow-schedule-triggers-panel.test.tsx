@@ -676,9 +676,9 @@ describe("schedule run acceptance receipt", () => {
       }
       return Promise.resolve({ items: [] });
     });
-    const rpc = jest.fn((name: string) => {
-      if (name === "list_lookup_values_v1") {
-        return Promise.resolve([{ key: "delivery", label: "Delivery" }]);
+    const listLookupValues = jest.fn((category: string) => {
+      if (category === "service_type") {
+        return Promise.resolve([{ value: "delivery", label: "Delivery" }]);
       }
       return Promise.resolve([]);
     });
@@ -688,7 +688,7 @@ describe("schedule run acceptance receipt", () => {
       createWorkflowScheduleTrigger,
       updateResource: jest.fn(),
       listResource,
-      rpc,
+      listLookupValues,
     });
 
     renderWithIntl(
@@ -707,6 +707,7 @@ describe("schedule run acceptance receipt", () => {
     const modal = await screen.findByTestId("schedule-panel-editor-modal");
     await waitFor(() => expect(listResource).toHaveBeenCalledWith("clients", {}, 100, 0, { key: "name", direction: "asc" }));
     await within(modal).findByRole("option", { name: "Sample Organization" });
+    expect(listLookupValues).toHaveBeenCalledWith("service_type");
     const clientSelect = within(modal).getByLabelText("Client") as HTMLSelectElement;
     const senderSelect = within(modal).getByLabelText("Sender") as HTMLSelectElement;
     const serviceTypeSelect = within(modal).getByLabelText("Service type") as HTMLSelectElement;
