@@ -38,9 +38,13 @@ const __test = {
 describe('ApiGatewayModule', () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.stubEnv('VITE_USE_SEED', 'true');
+    vi.stubEnv('VITE_SUPABASE_URL', '');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
     vi.useRealTimers();
   });
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.useRealTimers();
   });
 
@@ -50,7 +54,7 @@ describe('ApiGatewayModule', () => {
     // Page header text.
     await waitFor(() => {
       expect(screen.getByText('API')).toBeTruthy();
-      expect(screen.getByText('gateway')).toBeTruthy();
+      expect(screen.getByText('request intake')).toBeTruthy();
     });
     // KPI strip is mounted with 4 cards (Requests / Error rate / p95 / Rate-limited).
     await waitFor(() => {
@@ -115,6 +119,7 @@ describe('ApiGatewayModule', () => {
 
   // ── 3. Live-tail toggle starts polling (mock interval) ──────────────────
   it('starts polling on live-tail toggle and updates the live counter', async () => {
+    vi.stubEnv('VITE_API_GATEWAY_SYNTHETIC_LIVE_TAIL', 'true');
     vi.useFakeTimers({ shouldAdvanceTime: true });
     renderWithProviders(<ApiGatewayModule />, { capabilities: ['all'] });
     await waitFor(() =>
@@ -128,13 +133,13 @@ describe('ApiGatewayModule', () => {
     await vi.advanceTimersByTimeAsync(4500);
     // The "live · n new" pill should now show a positive counter.
     await waitFor(() => {
-      const livePill = screen.queryByText(/live · \d+ new/);
+      const livePill = screen.queryByText(/^Live updates: [1-9]\d* new$/);
       expect(livePill).toBeTruthy();
     });
   });
 
   // ── 4. Drawer renders headers redacted (no Authorization value visible) ─
-  it('renders the drawer with Authorization header redacted in the Request tab', async () => {
+  it('hides Authorization header details in the Request tab', async () => {
     const user = userEvent.setup();
     renderWithProviders(<ApiGatewayModule />, { capabilities: ['all'] });
     // Switch range to All so we always have rows to click on.
@@ -153,9 +158,9 @@ describe('ApiGatewayModule', () => {
     await waitFor(() => {
       expect(screen.getByTestId('api-gateway-drawer-body')).toBeTruthy();
     });
-    // The default Request tab is active — assert the headers block is mounted.
-    const headers = screen.getByTestId('api-gateway-headers-block');
-    expect(headers.textContent ?? '').toMatch(/Authorization:\s*«redacted»/);
+    // The Request tab shows the protection notice in place of raw header details.
+    const requestTab = screen.getByTestId('api-gateway-drawer-request-tab');
+    expect(within(requestTab).getByText('Sensitive request headers are hidden in this summary.')).toBeInTheDocument();
     // And the raw bearer value never appears anywhere in the drawer.
     const drawer = screen.getByTestId('api-gateway-drawer-body');
     expect(within(drawer).queryByText(/Bearer sk_live_/)).toBeNull();
@@ -167,8 +172,8 @@ describe('ApiGatewayModule', () => {
     renderWithProviders(<ApiGatewayModule />, {
       capabilities: ['api_gateway.read'], // read but not write
     });
-    await waitFor(() => expect(screen.getByText('gateway')).toBeTruthy());
-    const blockBtn = screen.getByRole('button', { name: /Block source/ });
+    await waitFor(() => expect(screen.getByText('request intake')).toBeTruthy());
+    const blockBtn = await screen.findByRole('button', { name: /Block source/ });
     const adjustBtn = screen.getByRole('button', { name: /Adjust rate limit/ });
     expect(blockBtn).toBeDisabled();
     expect(adjustBtn).toBeDisabled();
@@ -202,11 +207,17 @@ describe('ApiGatewayModule', () => {
       expect(__test.statusKind(429)).toBe('warn');
       expect(__test.statusKind(502)).toBe('danger');
     });
-    it('maps latency to chip kind', () => {
-      expect(__test.latencyKind(120)).toBe('good');
-      expect(__test.latencyKind(500)).toBe('info');
-      expect(__test.latencyKind(1500)).toBe('warn');
-      expect(__test.latencyKind(3000)).toBe('danger');
+    it('maps latency to chip kind using the resolved thresholds', () => {
+      const thresholds = {
+        latency_band_good_boundary_ms: 300,
+        latency_band_warn_ms: 900,
+        latency_band_danger_ms: 2000,
+      };
+      expect(__test.latencyKind(120, thresholds)).toBe('good');
+      expect(__test.latencyKind(500, thresholds)).toBe('info');
+      expect(__test.latencyKind(1500, thresholds)).toBe('warn');
+      expect(__test.latencyKind(3000, thresholds)).toBe('danger');
+      expect(__test.latencyKind(120, null)).toBeNull();
     });
     it('redacts sensitive headers', () => {
       expect(__test.redactHeader('Authorization', 'Bearer sk_live_xxx')).toBe('«redacted»');
@@ -235,7 +246,7 @@ describe('ApiGatewayModule', () => {
         route_id: 'rt_x',
         route_pack_id: 'rpk_public_v1',
         occurred_at: '2026-04-25T12:00:00Z',
-        headers: { Authorization: 'Bearer sk_anchor' },
+        request_headers: { Authorization: 'Bearer sk_anchor' },
         response_size_bytes: 200,
       };
       const r1 = __test.synthesizeRow(anchor, 1);
@@ -247,7 +258,7 @@ describe('ApiGatewayModule', () => {
       // Live row keeps the synthesizer marker prefix.
       expect(r1.id.startsWith('cal_live_')).toBe(true);
       // The synthesized headers always REPLACE Authorization with a live token.
-      expect((r1.headers ?? {}).Authorization).toMatch(/^Bearer sk_live_/);
+      expect(r1.request_headers.Authorization).toMatch(/^Bearer sk_live_/);
     });
   });
 });

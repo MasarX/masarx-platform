@@ -157,9 +157,13 @@ function renderPinnedSidenav() {
   });
 }
 
+function navLinkName(label: string): RegExp {
+  return new RegExp(`^${escapeRegExp(label)}(?:\\s|$)`);
+}
+
 function getNavLink(nav: HTMLElement, label: string): HTMLAnchorElement {
   return within(nav).getByRole('link', {
-    name: new RegExp(`^${escapeRegExp(label)}(?:\\s|$)`),
+    name: navLinkName(label),
   }) as HTMLAnchorElement;
 }
 
@@ -171,6 +175,24 @@ function getPinnedNavLinksByLabel(nav: HTMLElement): Map<string, HTMLAnchorEleme
       link,
     ]),
   );
+}
+
+function indexNavLinkNames(nav: HTMLElement) {
+  const names = new Map<Element, string>();
+  const links = within(nav).getAllByRole('link', {
+    name: (name, link) => {
+      if (link) names.set(link, name);
+      return true;
+    },
+  });
+  return links.map((link) => ({ link, name: names.get(link) ?? '' }));
+}
+
+function getIndexedNavLink(links: ReturnType<typeof indexNavLinkNames>, label: string): HTMLElement {
+  const matcher = navLinkName(label);
+  const matches = links.filter(({ name }) => matcher.test(name));
+  expect(matches.map(({ name }) => name), 'Pinned navigation link: ' + label).toHaveLength(1);
+  return matches[0]!.link;
 }
 
 describe('Sidenav readiness navigation contract', () => {
@@ -347,8 +369,9 @@ describe('Sidenav readiness navigation contract', () => {
     });
 
     const nav = screen.getByRole('navigation', { name: 'Primary' });
+    const links = indexNavLinkNames(nav);
     for (const { label, routePath } of WORKFLOWS_CLICK_TARGETS) {
-      const link = getNavLink(nav, label);
+      const link = getIndexedNavLink(links, label);
       expect(link).toHaveAttribute('href', routePath);
       expect(link).not.toHaveClass('is-locked');
       routerMocks.navigate.mockClear();
@@ -361,10 +384,11 @@ describe('Sidenav readiness navigation contract', () => {
     const user = userEvent.setup();
     renderPinnedSidenav();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
+    const links = indexNavLinkNames(nav);
 
     for (const { label, routePath } of OPERATE_CLICK_TARGETS) {
       routerMocks.navigate.mockClear();
-      await user.click(getNavLink(nav, label));
+      await user.click(getIndexedNavLink(links, label));
       expect(routerMocks.navigate).toHaveBeenCalledWith({ to: routePath });
     }
   });
@@ -373,10 +397,11 @@ describe('Sidenav readiness navigation contract', () => {
     const user = userEvent.setup();
     renderPinnedSidenav();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
+    const links = indexNavLinkNames(nav);
 
     for (const { label, routePath } of CUSTOMER_CLICK_TARGETS) {
       routerMocks.navigate.mockClear();
-      await user.click(getNavLink(nav, label));
+      await user.click(getIndexedNavLink(links, label));
       expect(routerMocks.navigate).toHaveBeenCalledWith({ to: routePath });
     }
   });
@@ -385,10 +410,11 @@ describe('Sidenav readiness navigation contract', () => {
     const user = userEvent.setup();
     renderPinnedSidenav();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
+    const links = indexNavLinkNames(nav);
 
     for (const { label, routePath } of WORKFLOWS_CLICK_TARGETS) {
       routerMocks.navigate.mockClear();
-      await user.click(getNavLink(nav, label));
+      await user.click(getIndexedNavLink(links, label));
       expect(routerMocks.navigate).toHaveBeenCalledWith({ to: routePath });
     }
   });
@@ -397,10 +423,11 @@ describe('Sidenav readiness navigation contract', () => {
     const user = userEvent.setup();
     renderPinnedSidenav();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
+    const links = indexNavLinkNames(nav);
 
     for (const { label, routePath } of NETWORK_CLICK_TARGETS) {
       routerMocks.navigate.mockClear();
-      await user.click(getNavLink(nav, label));
+      await user.click(getIndexedNavLink(links, label));
       expect(routerMocks.navigate).toHaveBeenCalledWith({ to: routePath });
     }
   });
@@ -409,10 +436,11 @@ describe('Sidenav readiness navigation contract', () => {
     const user = userEvent.setup();
     renderPinnedSidenav();
     const nav = screen.getByRole('navigation', { name: 'Primary' });
+    const links = indexNavLinkNames(nav);
 
     for (const { label, routePath } of PLATFORM_CLICK_TARGETS) {
       routerMocks.navigate.mockClear();
-      await user.click(getNavLink(nav, label));
+      await user.click(getIndexedNavLink(links, label));
       expect(routerMocks.navigate).toHaveBeenCalledWith({ to: routePath });
     }
   }, 15000);

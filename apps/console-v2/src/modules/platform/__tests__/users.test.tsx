@@ -1247,7 +1247,7 @@ describe('UsersModule', () => {
     expect(within(evidence).getByText(/visible\.ops@example\.com/i)).toBeInTheDocument();
     expect(within(evidence).getByText(/Email requested: true/i)).toBeInTheDocument();
     expect(within(evidence).getByText(/Sent: true/i)).toBeInTheDocument();
-    expect(within(evidence).getByText(/Redirect: https:\/\/console-dev\.masarx\.co\/auth\/callback/i)).toBeInTheDocument();
+    expect(within(evidence).getByText(/^\- Redirect: https:\/\/unjijvxjrwurjgsnokovrvom\.example\.invalid\/auth\/callback$/)).toBeInTheDocument();
   });
 
   it('Resend invite stays in the drawer and surfaces backend evidence without reload', async () => {
@@ -1346,7 +1346,7 @@ describe('UsersModule', () => {
     expect(within(evidence).getByText(/huda\.am@rashed-logistics\.example/i)).toBeInTheDocument();
     expect(within(evidence).getByText(/Email requested: true/i)).toBeInTheDocument();
     expect(within(evidence).getByText(/Sent: true/i)).toBeInTheDocument();
-    expect(within(evidence).getByText(/Redirect: https:\/\/console-dev\.masarx\.co\/auth\/callback/i)).toBeInTheDocument();
+    expect(within(evidence).getByText(/^\- Redirect: https:\/\/unjijvxjrwurjgsnokovrvom\.example\.invalid\/auth\/callback$/)).toBeInTheDocument();
     expect(within(drawer).getByTestId('users-security-actions')).toBeInTheDocument();
   });
 

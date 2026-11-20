@@ -72,7 +72,26 @@ async function openLabelDesignComposer(user: ReturnType<typeof userEvent.setup>)
 async function openSharedDesignerCodeTab(user: ReturnType<typeof userEvent.setup>) {
   const codeTab = screen.queryByTestId('label-design-shared-tab-code');
   if (codeTab) await user.click(codeTab);
-  return screen.getByLabelText(/Design JSON/i) as HTMLTextAreaElement;
+  return screen.getByLabelText('Draft JSON') as HTMLTextAreaElement;
+}
+
+async function createAndPublishSharedDesignerDraft(user: ReturnType<typeof userEvent.setup>) {
+  const composer = within(await screen.findByTestId('label-design-composer'));
+  await user.click(composer.getByRole('button', { name: 'Create draft' }));
+  const publish = composer.getByRole('button', { name: 'Publish' });
+  await waitFor(() => expect(publish).toBeEnabled());
+  await user.click(publish);
+}
+
+function mockExistingLabelDraftUpdates(drafts: api.LabelDesignDraft[]) {
+  return vi.spyOn(api, 'label_designer_update_draft').mockImplementation(async (args) => {
+    const draft = drafts.find((row) => row.id === args.draft_id);
+    if (!draft) return { ok: false, error: { code: 'draft_not_found', message: 'Draft not found' } };
+    draft.draft_value = args.draft_value ?? draft.draft_value;
+    draft.draft_name = args.draft_name ?? draft.draft_name;
+    draft.label_type = args.label_type ?? draft.label_type;
+    return { ok: true, draft };
+  });
 }
 
 async function readSharedDesignerJson(user: ReturnType<typeof userEvent.setup>) {
@@ -638,7 +657,7 @@ describe('LabelsModule', () => {
     });
     expect(blocks[1]).toMatchObject({
       type: 'barcode',
-      barcode_type: 'QR',
+      barcode_type: 'qr',
       value_path: 'barcode_value',
       fallback: 'TRACKING',
       human_readable: false,
@@ -1970,21 +1989,20 @@ describe('LabelsModule', () => {
       }
       return REAL_UI_LIST_RESOURCE(resource, opts);
     });
-    const createSpy = vi.spyOn(api, 'label_designer_create_draft').mockResolvedValue({
-      ok: true,
-      draft: {
-        id: 'draft_label_design_1',
-        organization_id: 'org_label_designer',
-        scope_type: 'tenant',
-        scope_id: 'org_label_designer',
-        label_type: 'shipping',
-        draft_name: 'shipping active design',
-        draft_value: publishedDraft.draft_value,
-        status: 'draft',
-        created_at: '2026-05-06T00:00:00Z',
-        updated_at: '2026-05-06T00:00:00Z',
-      },
-    });
+    const createdDraft: api.LabelDesignDraft = {
+      id: 'draft_label_design_1',
+      organization_id: 'org_label_designer',
+      scope_type: 'tenant',
+      scope_id: 'org_label_designer',
+      label_type: 'shipping',
+      draft_name: 'shipping active design',
+      draft_value: publishedDraft.draft_value,
+      status: 'draft',
+      created_at: '2026-05-06T00:00:00Z',
+      updated_at: '2026-05-06T00:00:00Z',
+    };
+    const createSpy = vi.spyOn(api, 'label_designer_create_draft').mockResolvedValue({ ok: true, draft: createdDraft });
+    mockExistingLabelDraftUpdates([createdDraft]);
     const validateSpy = vi.spyOn(api, 'label_designer_validate_label_design_draft').mockResolvedValue({
       ok: true,
       errors: [],
@@ -2014,7 +2032,7 @@ describe('LabelsModule', () => {
     expect(draftValue.templates.shipping.label_type).toBe('shipping');
     expect(draftValue.templates.shipping.blocks).toEqual([]);
     expect(composer.getByTestId('label-design-visual-editor')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Publish active design/i }));
+    await createAndPublishSharedDesignerDraft(user);
 
     await waitFor(() => {
       expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
@@ -2084,21 +2102,20 @@ describe('LabelsModule', () => {
       }
       return REAL_UI_LIST_RESOURCE(resource, opts);
     });
-    const createSpy = vi.spyOn(api, 'label_designer_create_draft').mockResolvedValue({
-      ok: true,
-      draft: {
-        id: 'draft_sender_label_design_1',
-        organization_id: 'org_label_designer',
-        scope_type: 'sender',
-        scope_id: 'sender_label_scope_1',
-        label_type: 'shipping',
-        draft_name: 'shipping active design',
-        draft_value: { templates: { shipping: { page: {}, blocks: [] } } },
-        status: 'draft',
-        created_at: '2026-05-23T00:00:00Z',
-        updated_at: '2026-05-23T00:00:00Z',
-      },
-    });
+    const createdDraft: api.LabelDesignDraft = {
+      id: 'draft_sender_label_design_1',
+      organization_id: 'org_label_designer',
+      scope_type: 'sender',
+      scope_id: 'sender_label_scope_1',
+      label_type: 'shipping',
+      draft_name: 'shipping active design',
+      draft_value: { templates: { shipping: { page: {}, blocks: [] } } },
+      status: 'draft',
+      created_at: '2026-05-23T00:00:00Z',
+      updated_at: '2026-05-23T00:00:00Z',
+    };
+    const createSpy = vi.spyOn(api, 'label_designer_create_draft').mockResolvedValue({ ok: true, draft: createdDraft });
+    mockExistingLabelDraftUpdates([createdDraft]);
     vi.spyOn(api, 'label_designer_validate_label_design_draft').mockResolvedValue({
       ok: true,
       errors: [],
@@ -2124,7 +2141,7 @@ describe('LabelsModule', () => {
     });
     await openLabelDesignComposer(user);
     expect(await screen.findByText(/for sender: Label Scope Sender/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Publish active design/i }));
+    await createAndPublishSharedDesignerDraft(user);
 
     await waitFor(() => {
       expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
@@ -2217,6 +2234,7 @@ describe('LabelsModule', () => {
       drafts.push(draft);
       return { ok: true, draft };
     });
+    mockExistingLabelDraftUpdates(drafts);
     vi.spyOn(api, 'label_designer_validate_label_design_draft').mockResolvedValue({
       ok: true,
       errors: [],
@@ -2271,7 +2289,7 @@ describe('LabelsModule', () => {
         block.type === 'image' && block.asset_ref === 'browser-logo' && block.value_path === 'browser-logo',
       )).toBe(true);
     });
-    await user.click(screen.getByRole('button', { name: /Publish active design/i }));
+    await createAndPublishSharedDesignerDraft(user);
 
     await waitFor(() => {
       const readbackCard = screen.getByTestId('label-design-draft-draft_label_design_live_visible');
@@ -2575,7 +2593,7 @@ describe('LabelsModule', () => {
     await user.clear(composer.getByLabelText(/Draft name/i));
     await user.type(composer.getByLabelText(/Draft name/i), 'Saved label draft');
     await user.click(composer.getByRole('button', { name: /recipient_name/i }));
-    await user.click(composer.getByRole('button', { name: /Save draft/i }));
+    await user.click(composer.getByRole('button', { name: 'Create draft' }));
 
     expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
       scope_type: 'tenant',
@@ -2709,13 +2727,13 @@ describe('LabelsModule', () => {
     const composer = within(await screen.findByTestId('label-design-composer'));
     const previewWorkbench = await screen.findByTestId('label-design-preview-workbench');
     expect(within(previewWorkbench).getByLabelText('Shipment')).toHaveValue('shp_preview_1');
-    expect(within(previewWorkbench).getByTestId('label-design-shared-preview-pdf-unavailable')).toHaveTextContent('Run preview to render PDF');
+    expect(within(previewWorkbench).getByTestId('label-design-shared-preview-pdf-idle')).toHaveTextContent(/^Run preview to render PDF$/);
     await waitFor(() => {
       expect((within(previewWorkbench).getByLabelText('Effective label design') as HTMLTextAreaElement).value).toContain('effective-design');
       expect((within(previewWorkbench).getByLabelText('Effective render policy') as HTMLTextAreaElement).value).toContain('policy-readback');
     });
 
-    await user.click(composer.getByRole('button', { name: /Load sample payload/i }));
+    await user.click(composer.getByRole('button', { name: 'Load sample data' }));
     await waitFor(() => {
       expect((within(previewWorkbench).getByTestId('label-design-shared-preview-sample-payload') as HTMLTextAreaElement).value).toContain('TRK-PREVIEW-1');
     });
@@ -2726,7 +2744,8 @@ describe('LabelsModule', () => {
 
     await user.click(composer.getByRole('button', { name: /^Preview$/i }));
     await waitFor(() => {
-      expect(within(previewWorkbench).getByTestId('label-design-shared-preview-pdf-unavailable')).toHaveTextContent('PDF preview is available in the browser');
+      expect(within(previewWorkbench).getByText('The PDF preview could not be opened. Check the preview details below.')).toBeInTheDocument();
+      expect(within(previewWorkbench).queryByTestId('label-design-shared-preview-pdf-idle')).toBeNull();
     });
     await user.click(within(previewWorkbench).getByTestId('label-design-shared-preview-toggle-preview-details'));
     expect((within(previewWorkbench).getByTestId('label-design-shared-preview-preview-response') as HTMLTextAreaElement).value).toContain('pdf_base64');
@@ -2756,7 +2775,8 @@ describe('LabelsModule', () => {
     const composer = within(await screen.findByTestId('label-design-composer'));
     expect(await screen.findByText('Label types are not configured')).toBeInTheDocument();
     expect(composer.getByLabelText('Label type')).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Publish active design/i })).toBeDisabled();
+    expect(composer.getByRole('button', { name: 'Publish' })).toBeDisabled();
+    expect(composer.getByRole('button', { name: 'Create draft' })).toBeDisabled();
     expect(createSpy).not.toHaveBeenCalled();
   });
 
@@ -2769,7 +2789,7 @@ describe('LabelsModule', () => {
 
     await openLabelDesignComposer(user);
     fireEvent.change(await openSharedDesignerCodeTab(user), { target: { value: '{bad json' } });
-    await user.click(screen.getByRole('button', { name: /Publish active design/i }));
+    await user.click(screen.getByRole('button', { name: 'Create draft' }));
 
     expect(await screen.findByText(/Label design action failed/i)).toBeInTheDocument();
     expect(createSpy).not.toHaveBeenCalled();
@@ -2789,7 +2809,7 @@ describe('LabelsModule', () => {
           templates: {
             shipping: {
               page: {},
-              blocks: [{ type: 'text', value_path: 'Example Entity ntvplorhukthpmnmvgrstqzp' }],
+              blocks: [{ type: 'text', value_path: 'shipment.tracking_number' }],
               assets: [{ asset_key: 'logo' }],
             },
           },
@@ -2809,6 +2829,6 @@ describe('LabelsModule', () => {
     expect(within(readbackCard).getByText('Tenant waybill')).toBeInTheDocument();
     expect(within(readbackCard).getByText('published')).toBeInTheDocument();
     expect(within(readbackCard).getByText('Settings sv_label_design_1')).toBeInTheDocument();
-    expect(within(readbackCard).getByText(/Blocks 1 - Assets 1 - Sample field shipment\.recipient\.name/)).toBeInTheDocument();
+    expect(within(readbackCard).getByText(/Blocks 1 - Assets 1 - Sample field shipment\.tracking_number/)).toBeInTheDocument();
   });
 });
