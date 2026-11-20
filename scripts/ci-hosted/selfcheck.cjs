@@ -9,6 +9,7 @@ const { handleRequest, handleConnect } = require('./deny-egress.cjs');
 const { exceptions, assess, objectsAt, outOfOrder, orderFloor } = require('./migrations.cjs');
 const { targetBase, targetFile } = require('./target-policy.cjs');
 const { guardPlan } = require('./base-guard.cjs');
+const { changedPaths, select } = require('./changes.cjs');
 const { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory } = require('./install-policy.cjs');
 const { generate } = require('./generate-migration-exceptions.cjs');
 const { rewrite, policyDecision } = require('./docker-images.cjs');
@@ -163,6 +164,35 @@ assert.equal(baseReads.every(args => args[0] === 'ls-tree' ? args[2] === base : 
 assert.throws(() => guardPlan('candidate.js', base, readBase));
 assert.throws(() => guardPlan('jest.cjs', 'HEAD', readBase));
 assert.throws(() => guardPlan('jest.cjs', base, () => `120000 blob ${base}\tfile\0`));
+const affected = files => Object.entries(select(files)).filter(([, enabled]) => enabled).map(([gate]) => gate);
+assert.deepEqual(affected(['README.md']), []);
+for (const file of ['docs/guides/synthetic.md', 'docs/api/openapi.json']) {
+  assert.deepEqual(affected([file]), ['unit']);
+}
+assert.deepEqual(affected(['supabase/migrations/synthetic.sql']), ['database', 'unit']);
+for (const file of ['docs/marketing/landing-v2/index.html', 'scripts/frontend/serve-landing.js']) {
+  assert.deepEqual(affected([file]), ['unit', 'build_landing', 'e2e']);
+}
+assert.deepEqual(affected(['tests/landing-e2e/synthetic.spec.ts']), ['e2e']);
+assert.deepEqual(affected(['apps/console/app/page.tsx']), ['typecheck', 'unit', 'ui', 'build_console']);
+assert.deepEqual(affected(['apps/portal/app/page.tsx']), ['typecheck', 'unit', 'ui', 'build_portal']);
+assert.deepEqual(affected(['apps/landing/src/synthetic.ts']), ['typecheck', 'unit', 'ui', 'build_landing', 'e2e']);
+assert.deepEqual(affected(['apps/fieldops/src/synthetic.ts']), ['typecheck', 'unit', 'ui', 'build_console', 'build_portal', 'build_landing']);
+assert.deepEqual(affected(['tests/unit/synthetic.test.js', 'tests/ui/synthetic.test.tsx']), ['unit', 'ui']);
+for (const file of ['unknown/path.ts', 'unknown/path.md', 'synthetic.mdx', 'apps/shared/synthetic.ts',
+  'apps/portal/package.json', 'packages/ui/src/synthetic.ts', 'packages/ui/bun.lockb',
+  'docs/synthetic/manifest.yaml', '.github/workflows/public-ci.yml', 'scripts/ci-hosted/changes.cjs', 'config/synthetic.json']) {
+  assert.deepEqual(select(['README.md', file]), select());
+}
+assert.equal(affected().length, 8);
+assert.deepEqual(changedPaths(base, (command, args) => {
+  assert.equal(command, 'git');
+  assert.deepEqual(args, ['diff', '--no-renames', '--name-only', '-z', base, 'HEAD', '--']);
+  return Buffer.from('apps/portal/app/old name.tsx\0docs/guides/new\nname.md\0');
+}), ['apps/portal/app/old name.tsx', 'docs/guides/new\nname.md']);
+assert.throws(() => changedPaths('HEAD'));
+assert.throws(() => changedPaths(base, () => Buffer.from('truncated')), /Incomplete/);
+assert.throws(() => changedPaths(base, () => Buffer.from([255, 0])));
 const workflow = "name: synthetic\nenv:\n  NPM_CONFIG_IGNORE_SCRIPTS: 'true'\njobs: {}\n";
 const workflowPath = '.github/workflows/synthetic.yml';
 const publicWorkflow = ['.github/workflows/public-ci.yml', workflow];
