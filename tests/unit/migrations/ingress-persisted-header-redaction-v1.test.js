@@ -169,8 +169,9 @@ describe('ingress persisted header and query redaction migration', () => {
     const sql = readMigration();
     expect(sql).toContain('v_query_projection TEXT;');
     expect(sql).toContain('v_url_projection TEXT;');
+    expect(sql).toMatch(/v_url_projection := public\.redact_sensitive_url\(\s*v_url,/);
     expect(sql).toContain('CREATE OR REPLACE FUNCTION public.workflow_intake_api_gateway_base_v1(');
-    expect(sql).toContain("v_url := v_url || '?' || v_query;");
+    expect(sql.match(/v_url := v_url \|\| '\?' \|\| v_query;/g)).toHaveLength(1);
     expect(sql.match(/NULLIF\(v_query_projection, ''\)/g)).toHaveLength(2);
     expect(sql).toContain("'persistence_policy_snapshot', public.ingress_header_policy_snapshot_v1(v_policy)");
     expect(sql).toContain("'upstream_url', v_url_projection");

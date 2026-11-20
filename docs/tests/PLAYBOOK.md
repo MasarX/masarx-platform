@@ -33,6 +33,18 @@
 - When debugging, prefer the RPC helpers added on 2025-10-15 (`count_api_call_log()`, `get_recent_outbound_calls(p_limit)`, `get_webhook_source_by_token(p_token)`) instead of ad-hoc SQL.
 - If duplicate webhook tests fail, confirm the `webhook_ingest_policy` ladder has either a per-source idempotency override or that the client sends `Idempotency-Key` headers (global policy uses headers by default).
 
+## Combined workflow scenarios
+
+Use an isolated test environment and one generated shipment identifier per run. Carry that identifier through each step and use it to correlate the persisted evidence.
+
+| Scenario | Steps | Evidence |
+| --- | --- | --- |
+| Synchronous intake | WH-001, WH-006, SHP-001, GEO-001, LAB-001 | One shipment, the expected HTTP acknowledgment, an address resolution result and a generated label |
+| Asynchronous intake | WH-004, WH-002, SHP-001, OUT-002 | One durable workflow across repeated requests and a callback linked to it |
+| Communications failover | COM-001, COM-002, COM-003, COM-004 | The correct locale, a recorded budget decision and a traceable failover |
+
+Use the individual scenario entries to distinguish existing automated coverage from manual verification.
+
 ## How to Read Each Scenario
 
 - Use case: behaviour being validated.
