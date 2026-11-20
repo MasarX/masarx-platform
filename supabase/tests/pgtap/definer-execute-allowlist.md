@@ -67,19 +67,19 @@ grant rows labeled `unreviewed: pending audit L-secdef-misses`.
 | `api.assign_support_case_v1(jsonb)` | authenticated | Unreviewed |
 | `api.bulk_assign_support_cases_v1(jsonb)` | authenticated | Unreviewed |
 | `api.bulk_resolve_support_cases_v1(jsonb)` | authenticated | Unreviewed |
-| `api.bulk_toggle_feature_flags_v1(jsonb)` | authenticated | Unreviewed |
+| `api.bulk_toggle_feature_flags_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
 | `api.compute_cod_payment_collection_summary_v1(uuid, uuid, text, uuid, timestamp with time zone, timestamp with time zone)` | authenticated | Corrected signature, original reason retained |
-| `api.create_feature_flag_v1(jsonb)` | authenticated | Unreviewed |
+| `api.create_feature_flag_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
 | `api.create_support_case_v1(jsonb)` | authenticated | Unreviewed |
-| `api.engage_kill_switch_v1(jsonb)` | authenticated | Unreviewed |
+| `api.engage_kill_switch_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
 | `api.integration_plugin_rotate_credentials_v1(uuid, text, jsonb, timestamp with time zone, text)` | authenticated | Unreviewed |
-| `api.release_kill_switch_v1(jsonb)` | authenticated | Unreviewed |
+| `api.release_kill_switch_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
 | `api.reopen_support_case_v1(jsonb)` | authenticated | Unreviewed |
 | `api.resolve_support_case_v1(jsonb)` | authenticated | Unreviewed |
 | `api.send_support_message_v1(jsonb)` | authenticated | Unreviewed |
-| `api.set_rollout_v1(jsonb)` | authenticated | Unreviewed |
-| `api.toggle_feature_flag_v1(jsonb)` | authenticated | Unreviewed |
-| `api.update_feature_flag_v1(jsonb)` | authenticated | Unreviewed |
+| `api.set_rollout_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
+| `api.toggle_feature_flag_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
+| `api.update_feature_flag_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
 | `api.update_support_case_v1(jsonb)` | authenticated | Unreviewed |
 | `public.build_workflow_schedule_trigger_context_v1(workflow_schedule_triggers, text, uuid, timestamp with time zone, uuid)` | anon, authenticated | Corrected signature, original reason retained |
 | `public.compute_cod_payment_collection_summary_v1(uuid, uuid, text, uuid, timestamp with time zone, timestamp with time zone)` | authenticated | Corrected signature, original reason retained |
@@ -106,3 +106,15 @@ grant rows labeled `unreviewed: pending audit L-secdef-misses`.
 | `public.ui_execute_shipment_update_geocode_v1_base(text, text, text[], text, integer, jsonb)` | authenticated | Unreviewed |
 | `public.ui_request_access_policy_change_v1(jsonb, text, uuid, text, timestamp with time zone)` | authenticated | Corrected signature, original reason retained |
 | `public.upsert_provider_usage_tracking(uuid, uuid, uuid, uuid, text, timestamp with time zone, integer, numeric)` | anon, authenticated | Corrected signature, original reason retained |
+
+## Feature flag implementation entries
+
+| Catalog signature | Roles | Disposition |
+| --- | --- | --- |
+| `public.bulk_toggle_feature_flags_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
+| `public.create_feature_flag_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
+| `public.engage_kill_switch_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
+| `public.release_kill_switch_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
+| `public.set_rollout_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
+| `public.toggle_feature_flag_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
+| `public.update_feature_flag_v1(jsonb)` | authenticated | reviewed: caller check assert_capability_v1 feature_flags.write platform scope (SEC-DEFINER-3) |
