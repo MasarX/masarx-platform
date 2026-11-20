@@ -30,7 +30,7 @@ function lines(consume) {
 }
 
 function run(command, args, { env = process.env, timeout = 600000, quiet = false, logFile, logPrefix = '', includeStderr = false,
-  onLine = () => false, idleMs = 0, idleMessage = () => 'No progress before deadline' } = {}) {
+  onLine = () => false, idleMs = 0, idleMessage = () => 'No progress before deadline', subscribeProgress } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     const secrets = environmentSecrets(env);
@@ -38,13 +38,19 @@ function run(command, args, { env = process.env, timeout = 600000, quiet = false
     const stop = reason => {
       if (stopped) return;
       stopped = reason;
+      clearTimeout(idle);
       const kill = signal => {
         try { if (process.platform === 'win32') child.kill(signal); else process.kill(-child.pid, signal); } catch {}
       };
       kill('SIGTERM');
       killTimer = setTimeout(() => kill('SIGKILL'), 5000);
     };
-    const touch = () => { clearTimeout(idle); if (idleMs) idle = setTimeout(() => stop(idleMessage()), idleMs); };
+    const touch = () => {
+      if (!idleMs || stopped) return;
+      clearTimeout(idle);
+      const progressAt = Date.now();
+      idle = setTimeout(() => stop(idleMessage(Date.now() - progressAt)), idleMs);
+    };
     const consume = line => {
       try { if (onLine(line)) touch(); } catch (error) { stop(error.message); }
       if (!quiet) {
@@ -59,10 +65,12 @@ function run(command, args, { env = process.env, timeout = 600000, quiet = false
     child.stderr.on('data', text => { stderr += text; if (includeStderr) combined += text; err.push(text); });
     const timer = setTimeout(() => stop(`Process exceeded ${timeout}ms`), timeout);
     touch();
+    const unsubscribe = idleMs ? subscribeProgress?.(touch) : undefined;
     let launchError;
     child.on('error', error => { launchError = error; });
     child.on('close', (status, signal) => {
-      clearTimeout(timer); clearTimeout(idle); clearTimeout(killTimer); out.end(); err.end();
+      unsubscribe?.(); out.end(); err.end();
+      clearTimeout(timer); clearTimeout(idle); clearTimeout(killTimer);
       if (status !== 0 || launchError || stopped) {
         const error = new Error(sanitize(stopped || launchError?.message || `${path.basename(command)} ${args[0]} failed (exit ${status})`, secrets));
         error.failure = { ...failureDetails({ status, signal, error: launchError, stdout, stderr }, secrets),

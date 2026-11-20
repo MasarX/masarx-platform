@@ -207,7 +207,8 @@ async function qualify(diagnostic) {
     integration: 'SKIPPED_BY_DESIGN: local equivalence of the integration inventory is unproved',
     serviceImagePins: pinState.qualificationOnly ? 'PIN_NEEDED' : 'resolved SHA-256 indices', imageQualificationOnly: pinState.qualificationOnly, ok: false };
   fs.mkdirSync('ci-reports', { recursive: true });
-  const checked = (command, args, commandEnv, timeout, options = {}) => run(command, args, { env: commandEnv, timeout, logFile: `ci-reports/${reportName}.log`, ...options });
+  const logFile = `ci-reports/${reportName}.log`;
+  const checked = (command, args, commandEnv, timeout, options = {}) => run(command, args, { env: commandEnv, timeout, logFile, ...options });
   const timed = (name, action) => { diagnostic.stage = name; return stage(summary, name, action); };
   try {
     diagnostic.stage = 'docker-preflight';
@@ -221,7 +222,7 @@ async function qualify(diagnostic) {
     const [dependencies, images] = await Promise.allSettled([
       stage(summary, 'npm-install', () => install((command, args) => checked(command, args, env, undefined, { logPrefix: '[npm] ' }))),
       pinState.qualificationOnly ? undefined : stage(summary, 'image-pulls', () => prepareImages(pins, {
-        env, checked, timed: (name, action) => stage(summary, name, action), summary, checkDisk: () => diskFloor(dockerRoot),
+        env, checked, timed: (name, action) => stage(summary, name, action), summary, dockerRoot, logFile, checkDisk: () => diskFloor(dockerRoot),
       })),
     ]);
     if (images.status === 'rejected') {
@@ -378,7 +379,7 @@ async function qualify(diagnostic) {
     saveFailure(diagnostic, error, environmentSecrets(env)); // Persist before stack teardown and temporary-file removal.
     if (started && diagnostic.stage === 'stack-start') {
       diagnostic.startupDiagnostics = await stage(summary, 'stack-diagnostics', () => collectStackDiagnostics({
-        project, env, dockerRoot, imagePolicy: diagnostic.imagePolicy, logFile: `ci-reports/${reportName}.log`,
+        project, env, dockerRoot, imagePolicy: diagnostic.imagePolicy, logFile,
       })).catch(diagnosticError => ({ error: sanitize(diagnosticError.message) }));
       saveFailure(diagnostic, error, environmentSecrets(env));
     }
