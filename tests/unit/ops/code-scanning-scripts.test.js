@@ -34,7 +34,7 @@ test('binds a legacy Windows shim and promptly rejects a long incomplete launche
   });
   assert.doesNotThrow(() => bind(shim));
   const started = performance.now();
-  assert.throws(() => bind('node --' + 'a'.repeat(5000)), /cli_shim_target_invalid/);
+  assert.throws(() => bind('node\t\t--' + 'a'.repeat(5000)), /cli_shim_target_invalid/);
   assert.ok(performance.now() - started < 1000);
 });
 
@@ -69,7 +69,7 @@ test('uses the same DB label after credential rotation in logs and GITHUB_ENV', 
   }
 });
 
-test('detects inline scripts with whitespace before the closing angle bracket', () => {
+test('detects inline scripts across HTML script end-tag variants', () => {
   const exportDir = path.resolve('synthetic');
   const manifest = { display: 'standalone', start_url: './', scope: './',
     icons: [{ src: './icon-192.png' }, { src: './icon-512.png' }] };
@@ -87,9 +87,13 @@ test('detects inline scripts with whitespace before the closing angle bracket', 
     ].join('\n'),
   });
   assert.doesNotThrow(() => validate('<script type="application/json">{}</script >'));
-  for (const close of ['</script >', '</SCRIPT\t>']) {
+  for (const close of ['</script >', '</script x>', '</script\n bar>', '</script foo="bar">', '</SCRIPT\t>']) {
     assert.throws(() => validate('<script>0' + close), /inline executable scripts/);
   }
+  assert.throws(
+    () => validate('<script type="application/json">{}</script x><script>evil()</script>'),
+    /inline executable scripts/,
+  );
 });
 
 test('escapes Windows path separators inside a quoted NODE_OPTIONS value', () => {
