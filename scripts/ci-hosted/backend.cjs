@@ -16,6 +16,8 @@ const { prepareImages } = require('./images.cjs');
 const { install } = require('./tasks.cjs');
 
 const root = process.cwd();
+const HOSTED_PORT_MIN = 15420;
+const HOSTED_PORT_MAX = 15431;
 const bucketSections = text => text.split(/(?=^\[)/m).filter(section => section.startsWith('[storage.buckets.')).join('\n');
 function canBindPort(port) {
   return new Promise((resolve, reject) => {
@@ -27,14 +29,32 @@ function canBindPort(port) {
 async function hostedStackPorts(probe = canBindPort) {
   // Keep Docker's published ports away from the default Linux ephemeral range.
   const ports = [];
-  for (let port = 15420; port < 15432; port++) {
+  for (let port = HOSTED_PORT_MIN; port <= HOSTED_PORT_MAX; port++) {
     if (await probe(port)) ports.push(port);
     if (ports.length === 3) {
       const [shadowPort, apiPort, dbPort] = ports;
       return { shadowPort, apiPort, dbPort };
     }
   }
-  throw new Error('Could not find three free hosted Supabase ports in 15420-15431');
+  throw new Error(`Could not find three free hosted Supabase ports in ${HOSTED_PORT_MIN}-${HOSTED_PORT_MAX}`);
+}
+async function disableHostedAutovacuum(databaseUrl, dbPort, admin, db, wait = delay) {
+  const target = new URL(databaseUrl);
+  const port = Number(target.port);
+  if (!['postgres:', 'postgresql:'].includes(target.protocol)
+    || !['127.0.0.1', 'localhost'].includes(target.hostname)
+    || port < HOSTED_PORT_MIN || port > HOSTED_PORT_MAX || port !== dbPort
+    || ['host', 'hostaddr', 'service', 'servicefile'].some(key => target.searchParams.has(key))) {
+    throw new Error('Autovacuum setup requires the disposable CI loopback database on its allocated port');
+  }
+  const reloaded = await admin("ALTER SYSTEM SET autovacuum = 'off'", 'SELECT pg_reload_conf()');
+  if (reloaded.trim() !== 't') throw new Error('Could not reload autovacuum configuration for the disposable CI database');
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const result = await db.query('SHOW autovacuum');
+    if (result.rows[0]?.autovacuum === 'off') return 'off';
+    if (attempt < 19) await wait(250);
+  }
+  throw new Error('Disposable CI database did not report autovacuum=off before migration replay');
 }
 async function waitForCronPause(db, wait = delay) {
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -267,13 +287,15 @@ async function qualify(diagnostic) {
         const before = await db.query('select count(*)::int as n from supabase_migrations.schema_migrations');
         if (before.rows[0].n !== 0) throw new Error('Database is not empty of application migrations');
       }
-      // The disposable fixture uses the registered schedules without launching background jobs.
-      const cronAdmin = (...commands) => checked('docker', ['exec', `supabase_db_${project}`, 'sh', '-ec',
+      const stackAdmin = (...commands) => checked('docker', ['exec', `supabase_db_${project}`, 'sh', '-ec',
         'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"', 'sh', '--host=127.0.0.1', '--username=supabase_admin',
         '--dbname=postgres', '--no-psqlrc', '--no-password', '--quiet', '--tuples-only', '--no-align', '--set=ON_ERROR_STOP=1',
         ...commands.flatMap(command => ['-c', command])], env, 15000, { quiet: true });
+      // Disable background ANALYZE before exposing the application migrations to this stack.
+      summary.autovacuum = await timed('autovacuum-off', () => disableHostedAutovacuum(status.DB_URL, dbPort, stackAdmin, db));
+      // The disposable fixture uses the registered schedules without launching background jobs.
       await timed('cron-pause', async () => {
-        const reloaded = await cronAdmin("ALTER SYSTEM SET cron.launch_active_jobs = 'off'", 'SELECT pg_reload_conf()');
+        const reloaded = await stackAdmin("ALTER SYSTEM SET cron.launch_active_jobs = 'off'", 'SELECT pg_reload_conf()');
         if (reloaded.trim() !== 't') throw new Error('Could not reload the pg_cron launch control');
         await waitForCronPause(db);
       });
@@ -320,7 +342,7 @@ async function qualify(diagnostic) {
       console.log(`Fresh migration replay: ${versions.length} files`);
       summary.currentMigration = null;
       diagnostic.stage = 'cron-pause-proof';
-      summary.cron = JSON.parse(await cronAdmin(`SELECT json_build_object(
+      summary.cron = JSON.parse(await stackAdmin(`SELECT json_build_object(
         'launch', current_setting('cron.launch_active_jobs'), 'logRun', current_setting('cron.log_run'),
         'active', (SELECT count(*) FROM cron.job WHERE active AND database = current_database()),
         'runs', (SELECT count(*) FROM cron.job_run_details WHERE database = current_database()))`));
@@ -405,4 +427,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum };
