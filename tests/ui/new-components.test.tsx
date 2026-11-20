@@ -6,6 +6,8 @@
 
 import * as React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { DashboardMetricsSkeleton } from "../../packages/ui/src/dashboard-metrics-skeleton";
+import { ResourceDetailSkeleton } from "../../packages/ui/src/resource-detail-skeleton";
 
 // ── Badge ──
 
@@ -67,6 +69,17 @@ describe("Skeleton", () => {
     const el = container.firstChild as HTMLElement;
     expect(el.className).toContain("h-8");
     expect(el.className).toContain("w-32");
+  });
+
+  test.each([
+    { label: "Loading metrics", Component: DashboardMetricsSkeleton },
+    { label: "Loading details", Component: ResourceDetailSkeleton },
+  ])("exposes one busy status for $label", ({ label, Component }) => {
+    render(<Component />);
+
+    const status = screen.getByRole("status", { name: label });
+    expect(status).toHaveAttribute("aria-busy", "true");
+    expect(screen.getAllByRole("status", { hidden: true })).toEqual([status]);
   });
 });
 
