@@ -87,7 +87,6 @@ if (require.main === module) {
   for (const error of errors) console.error(error);
   if (errors.length) process.exitCode = 1;
 }
-module.exports = {
-  workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory,
-  installCommandPatternSource: INSTALL_COMMAND_PATTERN.source,
-};
+module.exports = { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory };
+module.exports.installCommandPatternSource = INSTALL_COMMAND_PATTERN.source;
+module.exports.installCommandPatternFlags = INSTALL_COMMAND_PATTERN.flags;

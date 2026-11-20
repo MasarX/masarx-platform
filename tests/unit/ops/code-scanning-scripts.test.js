@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
+const { installCommandPatternFlags, installCommandPatternSource } = require('../../../scripts/ci-hosted/install-policy.cjs');
 const {
-  assertCliShimBinding, legacyCmdShimTargetPatternSource,
+  assertCliShimBinding, legacyCmdShimTargetPatternFlags, legacyCmdShimTargetPatternSource,
 } = require('../../../scripts/ops/ci/install-unit-qualification-dependencies');
 const { pinSelectedDsnForDownstream, safeHash } = require('../../../scripts/ops/db-connect-smoke');
 const { quoteNodeOptionsValue } = require('../../../scripts/ops/mobile/run-fieldops-expo');
@@ -10,12 +12,21 @@ const { validateFieldopsExport } = require('../../../scripts/ops/vercel/fieldops
 
 jest.mock('../../../scripts/utils/load-env', () => ({ loadEnv: jest.fn() }));
 
+test('pins the install command pattern flags and occurrence count', () => {
+  assert.equal(installCommandPatternFlags, '', 'approved install command pattern flags changed');
+  const source = fs.readFileSync(require.resolve('../../../scripts/ci-hosted/install-policy.cjs'), 'utf8');
+  assert.equal(source.split(installCommandPatternSource).length - 1, 1, 'expected exactly one install command pattern occurrence');
+});
+
 test('pins the legacy Windows shim target pattern', () => {
   assert.equal(
     legacyCmdShimTargetPatternSource,
     String.raw`^(?![ \t]*(?:@?rem(?:[ \t]|$)|::))[ \t]*@?(?:"%~dp0[\\/]node\.exe"|node(?:\.exe)?)(?:[ \t]+[^"\s]+)*[ \t]+"%~dp0[\\/]([^"\r\n]+?)"[ \t]+%\*[ \t]*$`,
     'approved legacy Windows shim target pattern changed',
   );
+  assert.equal(legacyCmdShimTargetPatternFlags, 'gim', 'approved legacy Windows shim target pattern flags changed');
+  const source = fs.readFileSync(require.resolve('../../../scripts/ops/ci/install-unit-qualification-dependencies'), 'utf8');
+  assert.equal(source.split(legacyCmdShimTargetPatternSource).length - 1, 1, 'expected exactly one legacy Windows shim target pattern occurrence');
   assert.ok(legacyCmdShimTargetPatternSource.includes(String.raw`(?:[ \t]+[^"\s]+)*`));
   assert.ok(!legacyCmdShimTargetPatternSource.includes(String.raw`(?:[ \t]+[^"\r\n]+)*`));
 });

@@ -10,9 +10,11 @@ const { exceptions, assess, objectsAt, outOfOrder, orderFloor } = require('./mig
 const { targetBase, targetFile } = require('./target-policy.cjs');
 const { guardPlan } = require('./base-guard.cjs');
 const { changedPaths, select } = require('./changes.cjs');
-const {
-  workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory, installCommandPatternSource,
-} = require('./install-policy.cjs');
+const { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory } = require('./install-policy.cjs');
+const { installCommandPatternSource } = require('./install-policy.cjs');
+const { installCommandPatternFlags } = require('./install-policy.cjs');
+const legacyShimModule = require.resolve('../ops/ci/install-unit-qualification-dependencies');
+const { legacyCmdShimTargetPatternFlags, legacyCmdShimTargetPatternSource } = require(legacyShimModule);
 const { generate } = require('./generate-migration-exceptions.cjs');
 const { rewrite, policyDecision } = require('./docker-images.cjs');
 const { sanitize, outputTail, failureDetails, environmentSecrets } = require('./diagnostics.cjs');
@@ -23,6 +25,19 @@ assert.equal(
   'approved install command pattern changed',
 );
 assert.ok(installCommandPatternSource.includes(String.raw`(?!(?:-g|--[\w=./-]+)\s)\S+`));
+
+assert.equal(installCommandPatternFlags, '', 'approved install command pattern flags changed');
+assert.equal(
+  fs.readFileSync(require.resolve('./install-policy.cjs'), 'utf8').split(installCommandPatternSource).length - 1,
+  1,
+  'expected exactly one install command pattern occurrence',
+);
+assert.equal(legacyCmdShimTargetPatternFlags, 'gim', 'approved legacy Windows shim target pattern flags changed');
+assert.equal(
+  fs.readFileSync(legacyShimModule, 'utf8').split(legacyCmdShimTargetPatternSource).length - 1,
+  1,
+  'expected exactly one legacy Windows shim target pattern occurrence',
+);
 
 const sensitive = ['synthetic credential with spaces', 'b'.repeat(48), 'MixedOpaqueValueWithDigits1234567890'];
 const jwt = ['eyJ' + 'h'.repeat(20), 'p'.repeat(20), 's'.repeat(20)].join('.');

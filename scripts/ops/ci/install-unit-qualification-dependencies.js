@@ -1602,6 +1602,7 @@ module.exports = {
   findLatestDebugLog,
   githubEscape,
   isPathInside,
+  legacyCmdShimTargetPatternFlags: WINDOWS_LEGACY_CMD_SHIM_TARGET_PATTERN.flags,
   legacyCmdShimTargetPatternSource: WINDOWS_LEGACY_CMD_SHIM_TARGET_PATTERN.source,
   parseLastJsonLine,
   performDependencyTreeQuarantine,
