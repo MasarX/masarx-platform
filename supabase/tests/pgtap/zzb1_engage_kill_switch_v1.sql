@@ -18,7 +18,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type, access_scope_id)
   VALUES
-    (v_ops, v_org, 'b1-eng-ops-' || left(v_ops::text, 8) || '@example.com', 'B1 Eng Ops', 'ops_admin', 'tenant', NULL),
+    (v_ops, v_org, 'b1-eng-ops-' || left(v_ops::text, 8) || '@example.com', 'B1 Eng Ops', 'ops_admin', 'platform', NULL),
     (v_sender, v_org, 'b1-eng-sender-' || left(v_sender::text, 8) || '@example.com', 'B1 Eng Sender', 'client_admin', 'tenant', NULL)
   ON CONFLICT (id) DO NOTHING;
 
