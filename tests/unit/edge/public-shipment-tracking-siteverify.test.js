@@ -35,6 +35,7 @@ function setup() {
   const fetch = jest.fn();
   const log = jest.fn();
   const logError = jest.fn(log);
+  const logWarn = jest.fn(log);
   const env = {
     EDGE_SUPABASE_URL: serviceUrl,
     EDGE_SUPABASE_SECRET_KEY: serviceKey,
@@ -46,7 +47,7 @@ function setup() {
   const sandbox = vm.createContext({
     Request, Response, Headers, URL, URLSearchParams, TextEncoder, TextDecoder,
     Error, crypto: webcrypto, fetch,
-    console: { log, info: log, warn: log, error: logError, debug: log, trace: log, dir: log },
+    console: { log, info: log, warn: logWarn, error: logError, debug: log, trace: log, dir: log },
     Deno: { env: { get: (key) => env[key] }, serve: (fn) => { handler = fn; } },
   });
   const modules = new Map();
@@ -70,7 +71,7 @@ function setup() {
   }
 
   load(path.join(edgeRoot, 'public-shipment-tracking/index.ts'));
-  return { handler, rpc, from, createClient, fetch, log, logError };
+  return { handler, rpc, from, createClient, fetch, log, logError, logWarn };
 }
 
 function request(body, action = 'lookup') {
@@ -93,10 +94,21 @@ async function expectResponse(response, log, status, body) {
   const text = await response.text();
   expect(JSON.parse(text)).toEqual(body);
   expect(text.includes(verifierSecret)).toBe(false);
-  const output = inspect([...response.headers, ...log.mock.calls], { depth: null });
+  const logValues = log.mock.calls.flat();
+  const logEntries = logValues.map((value) => {
+    if (typeof value !== 'string') return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  });
+  const output = inspect([...response.headers, ...logEntries], { depth: null });
   for (const value of [verifierSecret, serviceKey, turnstileToken, ip, formEncodedToken]) {
     expect(output.includes(value)).toBe(false);
   }
+  const rawLogText = logValues.filter((value) => typeof value === 'string').join('\n');
+  expect(rawLogText.includes(jsonEscapedToken)).toBe(false);
   return text;
 }
 
@@ -106,6 +118,15 @@ function expectErrorLog(log, code, message, rpc) {
   expect([entry.level, entry.event, entry.code, entry.message, entry.rpc])
     .toEqual(['error', 'public_shipment_tracking_failed', code, message, rpc]);
   return entry;
+}
+
+function expectRejectionLog(app, code, errorCodes) {
+  expect(app.logWarn).toHaveBeenCalledTimes(1);
+  expect(app.logError).not.toHaveBeenCalled();
+  const entry = JSON.parse(app.logWarn.mock.calls[0][0]);
+  expect([entry.level, entry.event, entry.code, entry.message, entry.turnstile_error_codes]).toEqual([
+    'warn', 'public_shipment_tracking_turnstile_rejected', code, code, errorCodes,
+  ]);
 }
 
 describe('public shipment tracking siteverify', () => {
@@ -137,8 +158,7 @@ describe('public shipment tracking siteverify', () => {
 
     const failure = 'turnstile_required';
     await expectResponse(response, app.log, 400, { ok: false, error: { code: failure } });
-    const entry = expectErrorLog(app.logError, failure, failure);
-    expect(entry.turnstile_error_codes).toEqual(errorCodes);
+    expectRejectionLog(app, failure, errorCodes);
     expect(app.fetch.mock.calls).toEqual([verificationRequest]);
     expect(app.rpc).not.toHaveBeenCalled();
     expect(app.from).not.toHaveBeenCalled();
@@ -151,8 +171,7 @@ describe('public shipment tracking siteverify', () => {
 
     const failure = 'turnstile_invalid';
     await expectResponse(response, app.log, 400, { ok: false, error: { code: failure } });
-    const entry = expectErrorLog(app.logError, failure, failure);
-    expect(entry.turnstile_error_codes).toBeNull();
+    expectRejectionLog(app, failure, null);
     expect(app.fetch.mock.calls).toEqual([verificationRequest]);
     expect(app.rpc).not.toHaveBeenCalled();
     expect(app.from).not.toHaveBeenCalled();
@@ -218,16 +237,29 @@ describe('public shipment tracking siteverify', () => {
     expect(app.rpc).toHaveBeenCalledTimes(1);
   });
 
-  test('short caller values do not erase diagnostic text', async () => {
+  test('short caller tokens do not erase diagnostic text', async () => {
     const app = setup();
     const message = 'siteverify unavailable';
     app.fetch.mockRejectedValueOnce(new Error(message));
     const req = request({ ...payload, turnstile_token: 'e', session_token: 'i' });
-    req.headers.set('cf-connecting-ip', 'a');
     const response = await app.handler(req);
 
     await expectResponse(response, app.log, 502, { ok: false, error: { code: 'turnstile_verify_failed' } });
     expectErrorLog(app.logError, 'turnstile_verify_failed', message);
+    expect(app.rpc).not.toHaveBeenCalled();
+  });
+
+  test('redacts a seven-character client IP in diagnostics', async () => {
+    const app = setup();
+    const shortIp = '2001::1';
+    app.fetch.mockRejectedValueOnce(new Error(`siteverify unavailable for ${shortIp}`));
+    const req = request(payload);
+    req.headers.set('cf-connecting-ip', shortIp);
+    const response = await app.handler(req);
+
+    await expectResponse(response, app.log, 502, { ok: false, error: { code: 'turnstile_verify_failed' } });
+    const entry = expectErrorLog(app.logError, 'turnstile_verify_failed', 'siteverify unavailable for [redacted]');
+    expect(entry.message.includes(shortIp)).toBe(false);
     expect(app.rpc).not.toHaveBeenCalled();
   });
 

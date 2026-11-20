@@ -241,12 +241,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(status, { ok: false, error: { code } }, cors.headers);
   };
 
-  const rejectTurnstile = (code: string, errorCodes: unknown) =>
-    reportInternalError(400, code, null, {
+  const rejectTurnstile = (code: string, errorCodes: unknown) => {
+    logStructured("warn", "public_shipment_tracking_turnstile_rejected", {
+      service: "public-shipment-tracking",
+      code,
+      message: code,
       turnstile_error_codes: Array.isArray(errorCodes)
         ? errorCodes.filter((value) => typeof value === "string").map(redactLogText)
         : null,
     });
+    return json(400, { ok: false, error: { code } }, cors.headers);
+  };
 
   let payload: JsonRecord;
   try {
@@ -257,8 +262,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const turnstileToken = asString(payload.turnstile_token);
+  if (clientIp) sensitiveLogValues.push(clientIp);
   sensitiveLogValues.push(
-    ...[clientIp, turnstileToken, asString(payload.session_token)].filter((value) => value.length >= 8),
+    ...[turnstileToken, asString(payload.session_token)].filter((value) => value.length >= 8),
   );
 
   let serviceClient;
