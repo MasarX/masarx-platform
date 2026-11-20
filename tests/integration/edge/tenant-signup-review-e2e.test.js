@@ -346,7 +346,6 @@ runIfEdge('tenant-signup-review edge (E2E)', () => {
 
       const approvedRow = await db.query(
         `SELECT status, review_decision, approved_organization_id, approved_user_id
-             , last_error_code, approved_auth_user_id, invite_redirect_to
            FROM public.tenant_signup_requests
           WHERE id = $1::uuid`,
         [approveRequestId],
@@ -354,11 +353,18 @@ runIfEdge('tenant-signup-review edge (E2E)', () => {
 
       expect(approvedRow.rows[0]?.status).toBe('approved');
       expect(approvedRow.rows[0]?.review_decision).toBe('approved');
-      expect(approvedRow.rows[0]?.last_error_code ?? null).toBeNull();
       expect(approvedRow.rows[0]?.approved_organization_id).toBe(approvedOrgId);
       expect(approvedRow.rows[0]?.approved_user_id).toBe(approvedUserId);
-      expect(approvedRow.rows[0]?.approved_auth_user_id).toBe(approvedUserId);
-      expect(approvedRow.rows[0]?.invite_redirect_to).toBe(inviteRedirectTo);
+
+      const approvedDetails = await db.query(
+        `SELECT last_error_code, approved_auth_user_id, invite_redirect_to
+           FROM public.tenant_signup_requests
+          WHERE id = $1::uuid`,
+        [approveRequestId],
+      );
+      expect(approvedDetails.rows[0]?.last_error_code ?? null).toBeNull();
+      expect(approvedDetails.rows[0]?.approved_auth_user_id).toBe(approvedUserId);
+      expect(approvedDetails.rows[0]?.invite_redirect_to).toBe(inviteRedirectTo);
 
       const approvedUser = await db.query(
         `SELECT organization_id, status, access_scope_type, access_scope_id

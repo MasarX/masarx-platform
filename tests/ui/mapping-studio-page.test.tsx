@@ -67,7 +67,14 @@ describe("MappingStudioPage", () => {
       ),
     );
 
-    expect(screen.queryByText("Workflow binding JSON")).toBeNull();
+    const bindingJson = screen.getByLabelText("Workflow binding JSON", { selector: "textarea", exact: true });
+    const bindingDetails = bindingJson.closest("details");
+    expect(bindingDetails).toBeInTheDocument();
+    expect(bindingDetails).not.toHaveAttribute("open");
+    expect(bindingJson).not.toBeVisible();
+    fireEvent.click(screen.getByText("Advanced workflow binding", { selector: "summary", exact: true }));
+    expect(bindingDetails).toHaveAttribute("open");
+    expect(bindingJson).toBeVisible();
     fireEvent.change(screen.getByLabelText("Workflow binding mode"), {
       target: { value: "attach_existing" },
     });
