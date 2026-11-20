@@ -15,11 +15,13 @@ CREATE TEMP TABLE definer_execute_allowlist (
 -- A role reachable through PUBLIC or role membership is an EXECUTE grant here.
 INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) VALUES
   ('api.acknowledge_ops_alert_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.add_support_tag_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.adjust_api_gateway_rate_limit_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.apply_settlement_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.assign_driver_to_vehicle_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.assign_pickup_wave_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.assign_route_run_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.assign_support_case_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.assign_task_v1(uuid,uuid,text,text)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.bank_recon_match_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.bank_recon_unmatch_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -33,6 +35,9 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('api.branch_coverage_window_upsert_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.branch_create_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.branch_update_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.bulk_assign_support_cases_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
+  ('api.bulk_resolve_support_cases_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
+  ('api.bulk_toggle_feature_flags_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.bulk_transition_tasks_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.cancel_maintenance_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.cancel_subscription_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -42,21 +47,24 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('api.client_update_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.complete_maintenance_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.compute_bank_account_balance_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
-  ('api.compute_cod_payment_collection_summary_v1(uuid,uuid,text,uuid,timestamp without time zone,timestamp without time zone)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.compute_cod_payment_collection_summary_v1(uuid, uuid, text, uuid, timestamp with time zone, timestamp with time zone)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.compute_kpi_rollup_v1(text,date,integer,uuid)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.compute_kpi_rollup_v2(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.create_alert_rule_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.create_billing_invoice_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.create_driver_compliance_event_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.create_driver_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.create_feature_flag_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.create_pickup_request_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.create_pickup_wave_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.create_support_case_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.create_vehicle_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.create_warehouse_transfer_manifest_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.delete_alert_rule_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.dispute_acknowledge_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.dispute_reject_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.dispute_resolve_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.engage_kill_switch_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.escalate_support_case_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.force_password_reset_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.grant_user_role_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -67,6 +75,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('api.integration_plugin_rollback_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.integration_plugin_rollback_v1(uuid,uuid,text)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.integration_plugin_rotate_credentials_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.integration_plugin_rotate_credentials_v1(uuid, text, jsonb, timestamp with time zone, text)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.list_delivery_slots_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.lookup_definition_create_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.lookup_value_archive_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -109,7 +118,9 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('api.register_workflow_binding_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.reject_driver_document_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.reject_settlement_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.release_kill_switch_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.remove_branch_member_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.reopen_support_case_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.request_capability_grant_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.request_label_reprint(uuid,text,uuid,text)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.request_zone_override_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -119,6 +130,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('api.resolve_ndr_branch_next_action_v1(uuid,uuid,uuid,text,text,text,text,text,text,jsonb)', '{authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('api.resolve_ndr_branch_next_action_v2(jsonb)', '{authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('api.resolve_ops_alert_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.resolve_support_case_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.respond_route_run_assignment_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.restore_driver_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.restore_vehicle_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -130,6 +142,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('api.route_plan_validate_constraints_v1(uuid)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.route_run_scan_out_reconciliation_v1(uuid)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.schedule_maintenance_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.send_support_message_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.sender_create_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.sender_reactivate_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.sender_suspend_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -138,12 +151,14 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('api.service_offering_archive_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.service_offering_toggle_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.service_offering_update_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.set_rollout_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.simulate_binding_dispatch_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.suspend_driver_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.suspend_user_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.suspend_zone_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.test_alert_rule_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.test_integration_plugin_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.toggle_feature_flag_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.transition_task_v1(uuid,text,text,jsonb,text)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.transition_warehouse_transfer_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.ui_adjust_cod_collection_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -219,6 +234,8 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('api.unassign_driver_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.update_alert_rule_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.update_billing_invoice_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
+  ('api.update_feature_flag_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
+  ('api.update_support_case_v1(jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('api.upload_driver_document_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.upload_vehicle_document_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
   ('api.user_capability_eval_for_user_v1(jsonb)', '{authenticated}', 'audit-static: API RPC by design; caller checks present', 'postgres'),
@@ -322,7 +339,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.branch_zone_unassign_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.branches_ensure_default_return_location_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.build_outbound_call_dispatch_from_operation_template_v1(uuid,jsonb,jsonb,jsonb,text)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
-  ('public.build_workflow_schedule_trigger_context_v1(workflow_schedule_triggers,text,uuid,timestamp without time zone,uuid)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
+  ('public.build_workflow_schedule_trigger_context_v1(workflow_schedule_triggers, text, uuid, timestamp with time zone, uuid)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.bulk_assign_support_cases_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.bulk_resolve_support_cases_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.bulk_toggle_feature_flags_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -351,19 +368,18 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.commercial_agreements_enforce_org_match()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.complete_fieldops_reassign_request_task_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.complete_label_job(uuid,text,text,integer,jsonb,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.complete_label_job_shipment_base_v1(uuid,text,text,integer,jsonb,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.complete_label_job_shipment_v1(uuid,text,text,integer,jsonb,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.complete_maintenance_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.complete_request_context(uuid,boolean,integer)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.compose_label_payload(uuid)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.compute_bank_account_balance_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.compute_cod_payment_collection_summary_v1(uuid,uuid,text,uuid,timestamp without time zone,timestamp without time zone)', '{authenticated}', 'pre-existing; follow-up review', 'postgres'),
-  ('public.compute_delivery_attempt_projection_v1(uuid,uuid,uuid,uuid,text,text,jsonb,timestamp without time zone)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.compute_cod_payment_collection_summary_v1(uuid, uuid, text, uuid, timestamp with time zone, timestamp with time zone)', '{authenticated}', 'pre-existing; follow-up review', 'postgres'),
+  ('public.compute_delivery_attempt_projection_v1(uuid, uuid, uuid, uuid, text, text, jsonb, timestamp with time zone)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.compute_kpi_rollup_v1(text,date,integer,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.compute_kpi_rollup_v2(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.compute_pricing_quote_v1(jsonb,jsonb)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
-  ('public.compute_shipment_promise_v1(timestamp without time zone,text,text,jsonb,date)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
-  ('public.compute_shipment_promise_v2(timestamp without time zone,text,jsonb,jsonb,date)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
+  ('public.compute_shipment_promise_v1(timestamp with time zone, text, text, jsonb, date)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
+  ('public.compute_shipment_promise_v2(timestamp with time zone, text, jsonb, jsonb, date)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.count_api_call_log()', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.count_clients()', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.count_organizations()', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
@@ -451,9 +467,9 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.integration_connection_oauth_begin_v1(uuid,text,text,text,text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.integration_connection_oauth_context_v1(uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.integration_connection_revoke_v1(uuid,text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.integration_connection_rotate_v1(uuid,jsonb,boolean,timestamp without time zone)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.integration_connection_rotate_v1(uuid, jsonb, boolean, timestamp with time zone)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.integration_connection_test_v1(uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.integration_connection_upsert_v1(uuid,text,uuid,uuid,text,text,text,jsonb,jsonb,jsonb,jsonb,text,boolean,timestamp without time zone)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.integration_connection_upsert_v1(uuid, text, uuid, uuid, text, text, text, jsonb, jsonb, jsonb, jsonb, text, boolean, timestamp with time zone)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.integration_connections_enforce_scope_org_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.integration_credential_directory_rows_v1()', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.integration_plugin_activate_v1(uuid,text,uuid,text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -478,7 +494,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.integration_plugin_resolve_policy_v1(text,uuid)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.integration_plugin_resolve_template_name_v1(jsonb)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.integration_plugin_rollback_v1(uuid,uuid,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.integration_plugin_rotate_credentials_v1(uuid,text,jsonb,timestamp without time zone,text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.integration_plugin_rotate_credentials_v1(uuid, text, jsonb, timestamp with time zone, text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.integration_plugin_scope_belongs_org_v1(text,uuid,uuid)', '{authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.integration_plugin_source_mapping_config_v1(text,jsonb,jsonb)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.integration_plugin_submit_v1(uuid,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -510,7 +526,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.list_lookup_values_catalog_json_v1(boolean)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.list_lookup_values_catalog_v1(boolean)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.list_lookup_values_v1(text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.list_usage_events_v1(uuid,text,timestamp without time zone,timestamp without time zone,integer,integer)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.list_usage_events_v1(uuid, text, timestamp with time zone, timestamp with time zone, integer, integer)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.log_decision(uuid,text,text,uuid,text,text,text,uuid,jsonb,text,uuid)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.log_decision_v1(uuid,text,text,uuid,text,text,text,uuid,jsonb,text)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.log_provider_health_from_circuit()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
@@ -533,15 +549,15 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.marketplace_application_status_v1(uuid)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.marketplace_apply_participant_request_v1(uuid,text,uuid,uuid,boolean,text,uuid,uuid,jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_assert_reviewer_v1()', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.marketplace_availability_upsert_v1(uuid,timestamp without time zone,timestamp without time zone,text,jsonb,jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.marketplace_award_offer_v1(uuid,text,jsonb,timestamp without time zone,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.marketplace_availability_upsert_v1(uuid, timestamp with time zone, timestamp with time zone, text, jsonb, jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.marketplace_award_offer_v1(uuid, text, jsonb, timestamp with time zone, jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_award_respond_v1(uuid,text,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_can_read_contract_v1(uuid,uuid)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_can_read_request_v1(uuid)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_can_read_request_v1(uuid,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_compliance_policy_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_contract_room_v1(uuid)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.marketplace_create_posted_settlement_batch_v1(uuid,text,uuid,uuid,timestamp without time zone,jsonb,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.marketplace_create_posted_settlement_batch_v1(uuid, text, uuid, uuid, timestamp with time zone, jsonb, text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_current_org_has_approved_participant_v1()', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_dispute_open_v1(uuid,uuid,text,text,text,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_dispute_resolve_v1(uuid,text,text,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -549,8 +565,8 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.marketplace_execution_policy_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_matching_suggestions_v1(uuid,integer)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.marketplace_materializer_config_v1(text)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
-  ('public.marketplace_offer_counter_v1(uuid,text,jsonb,jsonb,timestamp without time zone,jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.marketplace_offer_submit_v1(uuid,text,jsonb,jsonb,timestamp without time zone,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.marketplace_offer_counter_v1(uuid, text, jsonb, jsonb, timestamp with time zone, jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.marketplace_offer_submit_v1(uuid, text, jsonb, jsonb, timestamp with time zone, jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_offer_withdraw_v1(uuid,text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_org_has_approved_participant_v1(uuid)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.marketplace_org_match_v1(uuid)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -572,7 +588,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.marketplace_reputation_policy_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_reputation_snapshot_v1(uuid,uuid)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_request_cancel_v1(uuid,text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.marketplace_request_create_v1(text,text,text,jsonb,jsonb,jsonb,timestamp without time zone,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.marketplace_request_create_v1(text, text, text, jsonb, jsonb, jsonb, timestamp with time zone, jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_request_expire_v1(uuid,text,jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_request_kind_catalog_v1(jsonb,boolean)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_request_policy_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -669,7 +685,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.record_scan_event_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.record_scan_events_batch_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.record_vehicle_event_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.record_webhook_ack(uuid,uuid,text,integer,jsonb,jsonb,text,text,jsonb,timestamp without time zone,text,uuid,text,uuid,integer,uuid)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
+  ('public.record_webhook_ack(uuid, uuid, text, integer, jsonb, jsonb, text, text, jsonb, timestamp with time zone, text, uuid, text, uuid, integer, uuid)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.record_workflow_decision(uuid,uuid,jsonb)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.register_mobile_artifact_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.register_self_kyc_artifact_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -695,7 +711,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.request_label_reprint(uuid,text,uuid,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.request_label_reprint(uuid,uuid,text)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.request_role_is_service_v1()', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.request_settings_change_v1(text,text,uuid,jsonb,text,timestamp without time zone)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.request_settings_change_v1(text, text, uuid, jsonb, text, timestamp with time zone)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.request_zone_override_v1(uuid,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.requeue_expired_edge_jobs(integer)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.requeue_stuck_geocoding_steps(integer,integer)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
@@ -862,13 +878,14 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.simulate_binding_dispatch_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_auth_otp_v1(text,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_damage_hold_v1(uuid,text,text,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.submit_fieldops_eod_recon_v1(integer, integer, numeric, numeric, text, uuid, uuid)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('public.submit_fieldops_hold_decision_v1(uuid,text,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_incident_v1(text,uuid,text,text,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_kyc_doc_v1(text,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_kyc_vehicle_v1(text,text,text,text,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_proof_v1(uuid,text,jsonb,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_reassign_v1(uuid,uuid,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.submit_fieldops_reschedule_v1(uuid,timestamp without time zone,timestamp without time zone,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.submit_fieldops_reschedule_v1(uuid, timestamp with time zone, timestamp with time zone, text, uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_role_set_v1(text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_fieldops_vehicle_photos_v1(jsonb,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.submit_self_kyc_v1(text,jsonb,text,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -919,7 +936,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.tg_route_run_assignments_sync_stop_task_metadata_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.tg_tasks_route_stop_contact_metadata_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.toggle_feature_flag_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.touch_recipient_channel_session(uuid,text,timestamp without time zone)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
+  ('public.touch_recipient_channel_session(uuid, text, timestamp with time zone)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.tracking_sessions_enforce_org_match_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.tracking_sessions_hash_token_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.transition_ops_session_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -983,6 +1000,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.ui_execute_shipment_batch_operation_v1(text,text,text[],text,integer,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_execute_shipment_resort_v1(text,text,text[],text,integer,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_execute_shipment_update_geocode_v1(text,text,text[],text,integer,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.ui_execute_shipment_update_geocode_v1_base(text, text, text[], text, integer, jsonb)', '{authenticated}', 'unreviewed: pending audit L-secdef-misses', 'unverified'),
   ('public.ui_execute_shipment_update_geocode_v1_execution_base(text,text,text[],text,integer,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_execute_task_claim_v1(text,text,text[],text,integer,jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_execute_user_device_revoke_v1(text,text,text[],text,integer,jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -1045,7 +1063,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.ui_reorder_webhook_rule_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_repair_workflow_schedule_task_payload_v1(uuid,jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_report_route_stop_incident_v1(text,text,text[],text,integer,jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.ui_request_access_policy_change_v1(jsonb,text,uuid,text,timestamp without time zone)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.ui_request_access_policy_change_v1(jsonb, text, uuid, text, timestamp with time zone)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_request_driver_wallet_withdrawal_v1(numeric,text,text)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_request_driver_wallet_withdrawal_v2(numeric,text,text,uuid,uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.ui_request_label_generation_target_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
@@ -1110,7 +1128,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.update_user_profile_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.upload_driver_document_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.upload_vehicle_document_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
-  ('public.upsert_provider_usage_tracking(uuid,uuid,uuid,uuid,text,timestamp without time zone,integer,numeric)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
+  ('public.upsert_provider_usage_tracking(uuid, uuid, uuid, uuid, text, timestamp with time zone, integer, numeric)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.upsert_shipment_reference_number_v1(uuid,uuid,uuid,text,text,text,uuid,jsonb)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.upsert_shipment_reference_numbers_v1(uuid,uuid,uuid,jsonb,text,uuid,jsonb)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.upsert_tenant_domain_event_policy(uuid,jsonb)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
@@ -1178,6 +1196,14 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.zone_override_requests_sync_manual_review_resolution_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.zone_update_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres');
 
+-- Extension members are out of scope and are reviewed with their extensions.
+CREATE TEMP VIEW definer_execute_extension_members AS
+SELECT objid AS function_oid
+FROM pg_depend
+WHERE classid = 'pg_proc'::regclass
+  AND refclassid = 'pg_extension'::regclass
+  AND deptype = 'e';
+
 CREATE TEMP VIEW definer_execute_unlisted AS
 WITH allowed AS MATERIALIZED (
   SELECT to_regprocedure(signature)::oid AS function_oid, roles
@@ -1187,10 +1213,12 @@ SELECT format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) 
        caller.role_name
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
+LEFT JOIN pg_temp.definer_execute_extension_members member ON member.function_oid = p.oid
 CROSS JOIN (VALUES ('anon'), ('authenticated')) AS caller(role_name)
 WHERE p.prosecdef
   AND p.prokind <> 'p'
   AND n.nspname IN ('public', 'api')
+  AND member.function_oid IS NULL
   AND has_function_privilege(caller.role_name, p.oid, 'EXECUTE')
   AND NOT EXISTS (
     SELECT 1
@@ -1210,9 +1238,11 @@ SELECT entry.signature, caller.role_name,
 FROM pg_temp.definer_execute_allowlist entry
 CROSS JOIN LATERAL unnest(entry.roles) AS caller(role_name)
 LEFT JOIN pg_proc p ON p.oid = to_regprocedure(entry.signature)::oid AND p.prokind <> 'p'
-WHERE p.oid IS NULL
-   OR NOT p.prosecdef
-   OR NOT has_function_privilege(caller.role_name, p.oid, 'EXECUTE')
+LEFT JOIN pg_temp.definer_execute_extension_members member ON member.function_oid = p.oid
+WHERE member.function_oid IS NULL
+  AND (p.oid IS NULL
+       OR NOT p.prosecdef
+       OR NOT has_function_privilege(caller.role_name, p.oid, 'EXECUTE'))
 ORDER BY entry.signature, caller.role_name;
 
 SELECT is_empty(
@@ -1235,7 +1265,9 @@ GRANT EXECUTE ON FUNCTION public.definer_execute_guard_fixture_v1() TO authentic
 
 -- Mutation: skip authenticated when enumerating callers. This assertion must fail.
 SELECT results_eq(
-  'SELECT signature COLLATE "default", role_name FROM pg_temp.definer_execute_unlisted',
+  $$SELECT signature COLLATE "default", role_name
+    FROM pg_temp.definer_execute_unlisted
+    WHERE signature = 'public.definer_execute_guard_fixture_v1()'$$,
   $$VALUES ('public.definer_execute_guard_fixture_v1()', 'authenticated')$$,
   'Planted negative detects the unlisted authenticated EXECUTE grant'
 );
@@ -1245,7 +1277,8 @@ VALUES ('public.definer_execute_guard_fixture_v1()', '{anon,authenticated}', 'pg
 
 -- Mutation: accept an entry if any listed role has EXECUTE. This assertion must fail.
 SELECT results_eq(
-  'SELECT * FROM pg_temp.definer_execute_stale',
+  $$SELECT * FROM pg_temp.definer_execute_stale
+    WHERE signature = 'public.definer_execute_guard_fixture_v1()'$$,
   $$VALUES ('public.definer_execute_guard_fixture_v1()', 'anon', 'listed role has no EXECUTE')$$,
   'Planted negative detects the stale anon role despite the authenticated grant'
 );
@@ -1255,13 +1288,15 @@ WHERE signature = 'public.definer_execute_guard_fixture_v1()';
 
 -- Mutation: ignore the allow-list match. This assertion must fail.
 SELECT is_empty(
-  'SELECT * FROM pg_temp.definer_execute_unlisted',
+  $$SELECT * FROM pg_temp.definer_execute_unlisted
+    WHERE signature = 'public.definer_execute_guard_fixture_v1()'$$,
   'Planted positive has no unlisted EXECUTE grant once authenticated is listed'
 );
 
 -- Mutation: flag a listed role that still has EXECUTE. This assertion must fail.
 SELECT is_empty(
-  'SELECT * FROM pg_temp.definer_execute_stale',
+  $$SELECT * FROM pg_temp.definer_execute_stale
+    WHERE signature = 'public.definer_execute_guard_fixture_v1()'$$,
   'Planted positive has no stale role after removing anon from the list'
 );
 
