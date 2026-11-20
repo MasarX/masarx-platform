@@ -230,7 +230,7 @@ DECLARE
   v_org_id UUID := public.current_user_org_id();
   v_flag_id UUID := NULLIF(p_args->>'feature_flag_id', '')::uuid;
   v_flag_name TEXT := NULLIF(btrim(p_args->>'name'), '');
-  v_correlation_id TEXT := encode(gen_random_bytes(8), 'hex');
+  v_correlation_id UUID := gen_random_uuid();
   v_decision_id UUID := gen_random_uuid();
   v_target_enabled BOOLEAN := NULLIF(p_args->>'enabled', '')::boolean;
   v_flag public.feature_flags%ROWTYPE;
@@ -316,7 +316,7 @@ BEGIN
       'feature_flags.toggle', 'feature_flag', v_flag.id,
       'toggle_feature_flag_v1',
       CASE WHEN v_target_enabled THEN 'enabled' ELSE 'disabled' END,
-      'toggle_feature_flag_v1', v_correlation_id::uuid
+      'toggle_feature_flag_v1', v_correlation_id
     );
 
     INSERT INTO public.domain_events (
@@ -326,7 +326,7 @@ BEGIN
       CASE WHEN v_target_enabled THEN 'feature_flag.enabled' ELSE 'feature_flag.disabled' END,
       'feature_flag', v_flag.id,
       jsonb_build_object('name', v_flag.name, 'enabled', v_target_enabled),
-      v_correlation_id::uuid, 'pending'
+      v_correlation_id, 'pending'
     );
   END IF;
 
@@ -353,7 +353,7 @@ DECLARE
   v_org_id UUID := public.current_user_org_id();
   v_flag_id UUID := NULLIF(p_args->>'feature_flag_id', '')::uuid;
   v_flag_name TEXT := NULLIF(btrim(p_args->>'name'), '');
-  v_correlation_id TEXT := encode(gen_random_bytes(8), 'hex');
+  v_correlation_id UUID := gen_random_uuid();
   v_decision_id UUID := gen_random_uuid();
   v_reason TEXT := NULLIF(btrim(p_args->>'reason'), '');
   v_flag public.feature_flags%ROWTYPE;
@@ -439,7 +439,7 @@ BEGIN
       v_decision_id, COALESCE(v_org_id, v_flag.scope_id),
       'feature_flags.kill_switch', 'feature_flag', v_flag.id,
       'engage_kill_switch_v1', 'engaged', v_reason,
-      'engage_kill_switch_v1', v_correlation_id::uuid
+      'engage_kill_switch_v1', v_correlation_id
     );
 
     INSERT INTO public.domain_events (
@@ -448,7 +448,7 @@ BEGIN
       COALESCE(v_org_id, v_flag.scope_id, '00000000-0000-0000-0000-000000000000'::uuid),
       'feature_flag.kill_switch_engaged', 'feature_flag', v_flag.id,
       jsonb_build_object('reason', v_reason, 'name', v_flag.name),
-      v_correlation_id::uuid, 'pending'
+      v_correlation_id, 'pending'
     );
   END IF;
 
@@ -475,7 +475,7 @@ DECLARE
   v_org_id UUID := public.current_user_org_id();
   v_flag_id UUID := NULLIF(p_args->>'feature_flag_id', '')::uuid;
   v_flag_name TEXT := NULLIF(btrim(p_args->>'name'), '');
-  v_correlation_id TEXT := encode(gen_random_bytes(8), 'hex');
+  v_correlation_id UUID := gen_random_uuid();
   v_decision_id UUID := gen_random_uuid();
   v_reason TEXT := NULLIF(btrim(p_args->>'reason'), '');
   v_target_enabled BOOLEAN := NULLIF(p_args->>'target_enabled', '')::boolean;
@@ -578,7 +578,7 @@ BEGIN
       v_decision_id, COALESCE(v_org_id, v_flag.scope_id),
       'feature_flags.kill_switch', 'feature_flag', v_flag.id,
       'release_kill_switch_v1', 'released', v_reason,
-      'release_kill_switch_v1', v_correlation_id::uuid
+      'release_kill_switch_v1', v_correlation_id
     );
 
     INSERT INTO public.domain_events (
@@ -587,7 +587,7 @@ BEGIN
       COALESCE(v_org_id, v_flag.scope_id, '00000000-0000-0000-0000-000000000000'::uuid),
       'feature_flag.kill_switch_released', 'feature_flag', v_flag.id,
       jsonb_build_object('name', v_flag.name, 'enabled', v_target_enabled, 'rollout', v_target_rollout),
-      v_correlation_id::uuid, 'pending'
+      v_correlation_id, 'pending'
     );
   END IF;
 
@@ -614,7 +614,7 @@ DECLARE
   v_org_id UUID := public.current_user_org_id();
   v_flag_id UUID := NULLIF(p_args->>'feature_flag_id', '')::uuid;
   v_flag_name TEXT := NULLIF(btrim(p_args->>'name'), '');
-  v_correlation_id TEXT := encode(gen_random_bytes(8), 'hex');
+  v_correlation_id UUID := gen_random_uuid();
   v_decision_id UUID := gen_random_uuid();
   v_target_rollout INT := NULLIF(p_args->>'rollout_percentage', '')::int;
   v_flag public.feature_flags%ROWTYPE;
@@ -703,7 +703,7 @@ BEGIN
       v_decision_id, COALESCE(v_org_id, v_flag.scope_id),
       'feature_flags.rollout', 'feature_flag', v_flag.id,
       'set_rollout_v1', v_target_rollout::text,
-      'set_rollout_v1', v_correlation_id::uuid
+      'set_rollout_v1', v_correlation_id
     );
 
     INSERT INTO public.domain_events (
@@ -712,7 +712,7 @@ BEGIN
       COALESCE(v_org_id, v_flag.scope_id, '00000000-0000-0000-0000-000000000000'::uuid),
       'feature_flag.rollout_changed', 'feature_flag', v_flag.id,
       jsonb_build_object('name', v_flag.name, 'rollout', v_target_rollout),
-      v_correlation_id::uuid, 'pending'
+      v_correlation_id, 'pending'
     );
   END IF;
 
@@ -735,7 +735,7 @@ SET search_path TO public, extensions, pg_temp
 AS $$
 DECLARE
   v_user_id UUID := auth.uid();
-  v_correlation_id TEXT := encode(gen_random_bytes(8), 'hex');
+  v_correlation_id UUID := gen_random_uuid();
   v_flags JSONB := COALESCE(p_args->'flags', '[]'::jsonb);
   v_default_enabled BOOLEAN := NULLIF(p_args->>'enabled', '')::boolean;
   v_results JSONB := '[]'::jsonb;

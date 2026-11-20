@@ -2,7 +2,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SET LOCAL statement_timeout = '30s';
-SELECT plan(14);
+SELECT plan(15);
 
 -- Model a platform profile without an organization inside this rollback-only test.
 ALTER TABLE public.users ALTER COLUMN organization_id DROP NOT NULL;
@@ -127,6 +127,26 @@ SELECT throws_ok($$SELECT api.create_feature_flag_v1(jsonb_build_object(
   'flag_key', 'pgtap.denied.' || current_setting('test.feature_flag_gate.unprivileged')))$$,
   '42501', 'Capability denied: feature_flags.write', 'platform scope alone does not grant flag writes');
 RESET ROLE;
+
+SELECT set_config('request.jwt.claim.sub', current_setting('test.feature_flag_gate.platform'), true),
+       set_config('request.jwt.claims', jsonb_build_object('sub', current_setting('test.feature_flag_gate.platform'), 'role', 'authenticated')::text, true);
+SET LOCAL ROLE authenticated;
+SELECT set_config('test.feature_flag_gate.correlation', api.toggle_feature_flag_v1(jsonb_build_object(
+  'feature_flag_id', current_setting('test.feature_flag_gate.flag'), 'enabled', true))->>'correlation_id', true);
+RESET ROLE;
+
+-- Mutation: an eight-byte hex ID fails the UUID write, and missing or mismatched audit rows fail this check.
+SELECT ok(EXISTS (
+  SELECT 1
+  FROM public.decision_log AS decision
+  JOIN public.domain_events AS event
+    ON event.correlation_id = decision.correlation_id
+   AND event.resource_id = decision.resource_id
+  WHERE decision.resource_id = current_setting('test.feature_flag_gate.flag')::uuid
+    AND decision.decision_point = 'toggle_feature_flag_v1'
+    AND event.event_type = 'feature_flag.enabled'
+    AND decision.correlation_id = current_setting('test.feature_flag_gate.correlation')::uuid
+), 'a state-changing platform toggle writes a shared non-null UUID to both audit rows');
 
 SELECT finish();
 ROLLBACK;
