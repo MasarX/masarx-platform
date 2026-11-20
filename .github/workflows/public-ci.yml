@@ -480,7 +480,7 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs landing-e2e
       - name: Explain full-app browser exclusion
         run: |
-          printf '%s\n' 'SKIPPED_BY_DESIGN: full Console/Portal/FieldOps E2E has no proven secret-free local fixture/auth contract. The FieldOps mobile web suite runs separately with npm run test:e2e:fieldops-mobile.'
+          printf '%s\n' 'SKIPPED_BY_DESIGN: full Console/Portal/FieldOps E2E has no proven secret-free local fixture/auth contract.'
           printf '%s\n' 'Landing live edge intake remains excluded by its existing opt-in test flag; synthetic intake is the covered contract.'
 
   visual-baselines:

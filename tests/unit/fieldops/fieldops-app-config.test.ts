@@ -252,7 +252,7 @@ describe("fieldops app config", () => {
 
   test("derives production identifiers, updates URL, and project id from env", async () => {
     process.env.FIELDOPS_BUILD_PROFILE = "production";
-    process.env.NEXT_PUBLIC_FIELDOPS_APP_ID_SUFFIX = ".stg";
+    process.env.NEXT_PUBLIC_FIELDOPS_APP_ID_SUFFIX = ".preview";
     process.env.NEXT_PUBLIC_IOS_BUNDLE_IDENTIFIER_FIELDOPS = "com.masarx.fieldops";
     process.env.NEXT_PUBLIC_ANDROID_PACKAGE_FIELDOPS = "com.masarx.fieldops";
     process.env.NEXT_PUBLIC_EAS_PROJECT_ID_FIELDOPS = "7f2e4d62-0a46-40ac-8f74-c98c3e8630f7";
@@ -274,8 +274,8 @@ describe("fieldops app config", () => {
 
     expect(output.name).toBe("MasarX Field Ops");
     expect(output.slug).toBe("fieldops-eas");
-    expect(output.ios?.bundleIdentifier).toBe("com.masarx.fieldops.stg");
-    expect(output.android?.package).toBe("com.masarx.fieldops.stg");
+    expect(output.ios?.bundleIdentifier).toBe("com.masarx.fieldops.preview");
+    expect(output.android?.package).toBe("com.masarx.fieldops.preview");
     expect(output.updates?.url).toBe("https://u.expo.dev/7f2e4d62-0a46-40ac-8f74-c98c3e8630f7");
     expect((output.extra as any)?.eas?.projectId).toBe("7f2e4d62-0a46-40ac-8f74-c98c3e8630f7");
   });
