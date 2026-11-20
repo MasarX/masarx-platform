@@ -643,9 +643,11 @@ describe("mobile background location", () => {
     expect(outboxMock.enqueue).toHaveBeenCalledTimes(1);
     expect(outboxMock.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: "outbox-1",
         rpc: "record_location_ping_v1",
         args: {
           p_ping: expect.objectContaining({
+            idempotency_key: "outbox-1",
             device_id: "device-1",
             metadata: expect.objectContaining({
               app: "fieldops",
@@ -678,6 +680,61 @@ describe("mobile background location", () => {
       "background request failed",
       expect.stringContaining("=> ? "),
       "fieldops:background-location"
+    );
+  });
+
+  test("background task assigns stable idempotency keys per accepted ping and caps sync batches", async () => {
+    const loaded = loadBackgroundModule({
+      taskDefined: false,
+      sessionSequence: [true, true],
+      pendingCount: 100,
+    });
+    seedTrackingEnabledState(loaded.secureState, { maxAccuracyM: 20 });
+
+    await loaded.getTaskHandler()?.({
+      data: {
+        locations: [
+          makeLocation({
+            coords: {
+              latitude: 24.7136,
+              longitude: 46.6753,
+              accuracy: 8,
+              speed: 1,
+              heading: 90,
+            },
+          }),
+          makeLocation({
+            coords: {
+              latitude: 24.7138,
+              longitude: 46.6756,
+              accuracy: 12,
+              speed: 0,
+              heading: 180,
+            },
+          }),
+        ],
+      },
+      error: null,
+    });
+
+    expect(loaded.outboxMock.enqueue).toHaveBeenCalledTimes(2);
+    const first = loaded.outboxMock.enqueue.mock.calls[0]?.[0];
+    const second = loaded.outboxMock.enqueue.mock.calls[1]?.[0];
+    expect(first.id).toBe("outbox-1");
+    expect(first.args.p_ping.idempotency_key).toBe("outbox-1");
+    expect(second.id).toBe("outbox-2");
+    expect(second.args.p_ping.idempotency_key).toBe("outbox-2");
+    expect(second.args.p_ping.metadata).toEqual(
+      expect.objectContaining({
+        source: "mobile_background",
+        task: "fieldops-background-location-v1",
+      })
+    );
+    expect(loaded.outboxMock.sync).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        limit: 25,
+      })
     );
   });
 

@@ -1,3 +1,5 @@
+import type { FieldOpsStrings } from "./i18n";
+
 type MobileNavItemLike = {
   label?: unknown;
   disabled_reason?: unknown;
@@ -65,6 +67,26 @@ export function resolveAccessScopeSummary(input: {
   if (scopeType && scopeId) return `${scopeType}:${scopeId}`;
   if (scopeType) return scopeType;
   return "unknown";
+}
+
+export function formatAccessScopeLabel(
+  input: { scopeType: unknown; scopeId: unknown; scopeName?: unknown },
+  labels: FieldOpsStrings["accessScope"]
+): string {
+  const scopeType = normalizeLabel(input.scopeType);
+  if (!scopeType) return labels.unknown;
+
+  const scopeKey = scopeType.toLowerCase() as keyof typeof labels;
+  const typeLabel = Object.prototype.hasOwnProperty.call(labels, scopeKey)
+    ? labels[scopeKey]
+    : scopeKey.charAt(0).toUpperCase() + scopeKey.slice(1);
+  const scopeName = normalizeLabel(input.scopeName);
+  if (scopeName) return typeLabel + ": " + scopeName;
+
+  const scopeId = normalizeLabel(input.scopeId);
+  if (!scopeId) return typeLabel;
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(scopeId);
+  return typeLabel + ": " + (isUuid ? scopeId.slice(0, 8) : scopeId);
 }
 
 export function formatMobileNavDisabledReason(reason: unknown): {

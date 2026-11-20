@@ -169,8 +169,12 @@ function resolveFieldOpsRuntimeModule(moduleName) {
   return null;
 }
 
+const mobileMapStubWebPath = path.resolve(projectRoot, "src", "mobile-map-stub-web.tsx");
 const priorResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (platform === "web" && moduleName === "react-native-maps") {
+    return { type: "sourceFile", filePath: mobileMapStubWebPath };
+  }
   const fieldOpsRuntimeFile = resolveFieldOpsRuntimeModule(moduleName);
   if (fieldOpsRuntimeFile) {
     return { type: "sourceFile", filePath: fieldOpsRuntimeFile };

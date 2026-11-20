@@ -13,6 +13,7 @@ module.exports = {
   testMatch: [
     '**/tests/unit/**/*.test.js',
     '**/tests/unit/**/*.test.ts',
+    '**/tests/unit/**/*.test.tsx',
   ],
   testPathIgnorePatterns: WORKTREE_TEMP_IGNORE_PATTERNS,
   modulePathIgnorePatterns: WORKTREE_TEMP_IGNORE_PATTERNS,

@@ -70,20 +70,29 @@ if (!process.env.NEXT_PUBLIC_AUTH_METHODS) {
   process.env.NEXT_PUBLIC_AUTH_METHODS = authMethods;
 }
 
+function positiveTimeout(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const globalTimeout = positiveTimeout(process.env.FIELDOPS_E2E_GLOBAL_TIMEOUT_MS, 0);
+const jsonReport = process.env.FIELDOPS_E2E_JSON_REPORT?.trim();
+
 export default defineConfig({
   testDir: "./tests/fieldops-e2e",
   projects: runPwaSmoke ? [
     { name: "fieldops-android-web", testMatch: /pwa\.spec\.ts/, use: { ...devices["Pixel 7"] } },
     { name: "fieldops-iphone-web", testMatch: /pwa\.spec\.ts/, use: { ...devices["iPhone 13"] } },
   ] : [{ name: "fieldops", testIgnore: /pwa\.spec\.ts/, use: { browserName: "chromium" } }],
-  timeout: 90_000,
+  timeout: positiveTimeout(process.env.FIELDOPS_E2E_TEST_TIMEOUT_MS, 90_000),
+  ...(globalTimeout ? { globalTimeout } : {}),
   // Same-renderer visual baselines (mobile-v2-visual-baseline.spec.ts) live
   // under __screenshots__/ with a flat, platform-agnostic name so each is a
   // single committed reference PNG.
   snapshotPathTemplate:
     "{testDir}/__screenshots__/mobile-v2-visual-baseline/{arg}{ext}",
   expect: {
-    timeout: 15_000,
+    timeout: positiveTimeout(process.env.FIELDOPS_E2E_EXPECT_TIMEOUT_MS, 15_000),
     // Per-screen visual-parity gate: a screen must stay >95% pixel-
     // identical to its committed same-renderer baseline (≤5% of pixels
     // may drift). `threshold` is the per-pixel YIQ tolerance that absorbs
@@ -95,9 +104,10 @@ export default defineConfig({
     },
   },
   retries: 0,
-  reporter: isCi
-    ? [["html", { outputFolder: "playwright-report/fieldops", open: "never" }]]
-    : [["html", { outputFolder: "playwright-report/fieldops", open: "on-failure" }]],
+  reporter: [
+    ["html", { outputFolder: "playwright-report/fieldops", open: isCi ? "never" : "on-failure" }],
+    ...(jsonReport ? [["json", { outputFile: jsonReport }] as ["json", { outputFile: string }]] : []),
+  ],
   outputDir: "test-results/fieldops",
   use: {
     baseURL: `${resolvedBaseUrl}/`,

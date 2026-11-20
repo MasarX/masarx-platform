@@ -1,0 +1,11 @@
+{
+  "name": "eslint-plugin-fieldops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Custom ESLint rules guarding the FieldOps mobile theme SSOT. Forbids hex color, off-ramp spacing, and raw typography literals outside the canonical theme files.",
+  "main": "index.js",
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "eslint": ">=8"
+  }
+}

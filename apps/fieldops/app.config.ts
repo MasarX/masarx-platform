@@ -161,6 +161,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   type PluginEntry = NonNullable<ExpoConfig["plugins"]>[number];
   const basePlugins = (Array.isArray(config.plugins) ? [...config.plugins] : []) as PluginEntry[];
+  if (!basePlugins.some((entry) => (typeof entry === "string" ? entry : entry[0]) === "expo-dev-client")) {
+    basePlugins.push("expo-dev-client");
+  }
+
   const hasNotificationsPlugin = basePlugins.some((entry) => {
     if (typeof entry === "string") return entry === "expo-notifications";
     return Array.isArray(entry) && entry[0] === "expo-notifications";

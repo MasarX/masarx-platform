@@ -197,6 +197,7 @@ const localWebServers = shouldStartLocalServers
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: /[\\\/]fieldops-mobile[\\\/]/,
   forbidOnly: strictE2e,
   timeout: testTimeoutMs,
   expect: {

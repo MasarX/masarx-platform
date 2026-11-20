@@ -148,22 +148,28 @@ export function resolveInitialSelectedNavItemId(
     }
   }
 
-  const preferredRoute =
-    typeof preferredHref === "string" && preferredHref.trim()
-      ? parseMobileRouteFromHref(preferredHref)
-      : null;
-  if (preferredRoute) {
-    for (const section of sections) {
-      const preferredItem = findFirstEnabledNavItemByRoute(section.items, preferredRoute);
-      if (preferredItem?.id) return preferredItem.id;
-    }
-  }
+  const preferredId = resolveNavItemIdByHref(sections, preferredHref);
+  if (preferredId) return preferredId;
 
   for (const section of sections) {
     const candidate = findFirstEnabledNavItem(section.items);
     if (candidate?.id) return candidate.id;
   }
 
+  return null;
+}
+
+export function resolveNavItemIdByHref(
+  sections: UiNavigation["sections"] | null | undefined,
+  href: string | null | undefined,
+): string | null {
+  if (!Array.isArray(sections) || typeof href !== "string" || !href.trim()) return null;
+  const route = parseMobileRouteFromHref(href);
+  if (!route) return null;
+  for (const section of sections) {
+    const item = findFirstEnabledNavItemByRoute(section.items, route);
+    if (item?.id) return item.id;
+  }
   return null;
 }
 
