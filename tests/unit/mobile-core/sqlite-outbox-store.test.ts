@@ -226,7 +226,9 @@ describe("sqlite outbox store", () => {
       const [
         id,
         rpc,
+        transport,
         args_json,
+        display_json,
         status,
         created_at,
         updated_at,
@@ -242,7 +244,9 @@ describe("sqlite outbox store", () => {
       rows.set(id, {
         id,
         rpc,
+        transport,
         args_json,
+        display_json,
         status,
         created_at,
         updated_at,

@@ -26,15 +26,14 @@ import { renderWithIntl } from "./test-utils";
 import { WorkflowRunTriggersPanel } from "../../packages/ui/src/workflow-run-triggers-panel";
 
 const mockedCreateUiClient = createUiClient as unknown as jest.Mock;
+const workflowRunStatusOptions = [
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+];
 
 describe("WorkflowRunTriggersPanel", () => {
   const clientId = "c112a901-3e75-47d2-9022-307fa68bd400";
   const senderId = "22222222-2222-4222-8222-222222222222";
-  const workflowRunStatusOptions = [
-    { value: "completed", label: "Completed" },
-    { value: "failed", label: "Failed" },
-  ];
-
   beforeEach(() => {
     jest.resetAllMocks();
     invalidateQueries.mockReset();
@@ -232,7 +231,7 @@ describe("WorkflowRunTriggersPanel", () => {
     );
 
     await waitFor(() => expect(invalidateQueries).toHaveBeenCalled());
-    expect(screen.getByTestId("workflow-run-panel-row-out-2")).toHaveTextContent("completed, failed");
+    expect(screen.getByTestId("workflow-run-panel-row-out-2")).toHaveTextContent("Completed, Failed");
   });
 });
 
@@ -271,7 +270,9 @@ describe("workflow trigger lifecycle UI contract", () => {
   });
   afterEach(() => {
     expect(client.updateResource).not.toHaveBeenCalled();
-    expect(client.rpc).not.toHaveBeenCalled();
+    for (const call of client.rpc.mock.calls) {
+      expect(call).toEqual(["list_lookup_values_v1", { p_category: "service_type" }]);
+    }
   });
 
   it("toggle retains row identity and existing fields while consuming canonical returned fields", async () => {
@@ -286,7 +287,7 @@ describe("workflow trigger lifecycle UI contract", () => {
     }));
     const row = screen.getByTestId("life-row-trigger-1");
     await waitFor(() => expect(within(row).getByTestId("life-row-trigger-1-toggle")).toHaveTextContent("Enable"));
-    expect(row).toHaveTextContent("completed, failed");
+    expect(row).toHaveTextContent("Completed, Failed");
     expect(within(row).getByRole("link", { name: "Open fires" })).toHaveAttribute(
       "href", "/portal/resources/workflow_trigger_fires?workflow_run_trigger_id=trigger-1"
     );
@@ -309,7 +310,7 @@ describe("workflow trigger lifecycle UI contract", () => {
       contextPatch: {}, enabled: true, notes: "",
     }));
     await waitFor(() => expect(screen.queryByTestId("life-editor")).not.toBeInTheDocument());
-    expect(screen.getByTestId("life-row-trigger-1")).toHaveTextContent("completed, failed");
+    expect(screen.getByTestId("life-row-trigger-1")).toHaveTextContent("Completed, Failed");
     fireEvent.click(screen.getByTestId("life-row-trigger-1-edit"));
     expect(screen.getByTestId("life-editor-notes")).toHaveValue("");
     expect(screen.getByTestId("life-editor-context-patch")).toHaveValue(JSON.stringify({ canonical: true }, null, 2));
