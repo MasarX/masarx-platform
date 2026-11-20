@@ -10,11 +10,20 @@ const { exceptions, assess, objectsAt, outOfOrder, orderFloor } = require('./mig
 const { targetBase, targetFile } = require('./target-policy.cjs');
 const { guardPlan } = require('./base-guard.cjs');
 const { changedPaths, select } = require('./changes.cjs');
-const { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory } = require('./install-policy.cjs');
+const {
+  workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory, installCommandPatternSource,
+} = require('./install-policy.cjs');
 const { generate } = require('./generate-migration-exceptions.cjs');
 const { rewrite, policyDecision } = require('./docker-images.cjs');
 const { sanitize, outputTail, failureDetails, environmentSecrets } = require('./diagnostics.cjs');
 const { detect } = require('./tasks.cjs');
+assert.equal(
+  installCommandPatternSource,
+  String.raw`\b(npm|pnpm|yarn)\s+(?:(?:--(?:prefix|workspace|dir|cwd|userconfig|globalconfig)\s+(?!(?:-g|--[\w=./-]+)\s)\S+|--[\w=./-]+|-g)\s+)*(?:ci|install|add|rebuild)\b`,
+  'approved install command pattern changed',
+);
+assert.ok(installCommandPatternSource.includes(String.raw`(?!(?:-g|--[\w=./-]+)\s)\S+`));
+
 const sensitive = ['synthetic credential with spaces', 'b'.repeat(48), 'MixedOpaqueValueWithDigits1234567890'];
 const jwt = ['eyJ' + 'h'.repeat(20), 'p'.repeat(20), 's'.repeat(20)].join('.');
 const key = 'sb_' + 'secret_' + 'synthetic';

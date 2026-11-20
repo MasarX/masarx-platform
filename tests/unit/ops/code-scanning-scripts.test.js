@@ -1,12 +1,24 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { assertCliShimBinding } = require('../../../scripts/ops/ci/install-unit-qualification-dependencies');
+const {
+  assertCliShimBinding, legacyCmdShimTargetPatternSource,
+} = require('../../../scripts/ops/ci/install-unit-qualification-dependencies');
 const { pinSelectedDsnForDownstream, safeHash } = require('../../../scripts/ops/db-connect-smoke');
 const { quoteNodeOptionsValue } = require('../../../scripts/ops/mobile/run-fieldops-expo');
 const { renderPriorityMatrix } = require('../../../scripts/ops/security-audit-inventory');
 const { validateFieldopsExport } = require('../../../scripts/ops/vercel/fieldops-dev-hosting');
 
 jest.mock('../../../scripts/utils/load-env', () => ({ loadEnv: jest.fn() }));
+
+test('pins the legacy Windows shim target pattern', () => {
+  assert.equal(
+    legacyCmdShimTargetPatternSource,
+    String.raw`^(?![ \t]*(?:@?rem(?:[ \t]|$)|::))[ \t]*@?(?:"%~dp0[\\/]node\.exe"|node(?:\.exe)?)(?:[ \t]+[^"\s]+)*[ \t]+"%~dp0[\\/]([^"\r\n]+?)"[ \t]+%\*[ \t]*$`,
+    'approved legacy Windows shim target pattern changed',
+  );
+  assert.ok(legacyCmdShimTargetPatternSource.includes(String.raw`(?:[ \t]+[^"\s]+)*`));
+  assert.ok(!legacyCmdShimTargetPatternSource.includes(String.raw`(?:[ \t]+[^"\r\n]+)*`));
+});
 
 test('binds a legacy Windows shim and promptly rejects a long incomplete launcher', () => {
   const repoRoot = path.resolve('synthetic');

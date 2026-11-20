@@ -1,6 +1,9 @@
 'use strict';
 const { git } = require('./target-policy.cjs');
 
+// A token that can stand alone as a flag does not also need to be parsed as a value.
+const INSTALL_COMMAND_PATTERN = /\b(npm|pnpm|yarn)\s+(?:(?:--(?:prefix|workspace|dir|cwd|userconfig|globalconfig)\s+(?!(?:-g|--[\w=./-]+)\s)\S+|--[\w=./-]+|-g)\s+)*(?:ci|install|add|rebuild)\b/;
+
 function workflowIgnore(text) {
   const lines = text.split(/\r?\n/); let inside = false;
   for (const line of lines) {
@@ -13,8 +16,7 @@ function workflowIgnore(text) {
 function installCommand(command, inherited = false) {
   const reset = /(?:NPM_CONFIG_IGNORE_SCRIPTS|npm_config_ignore_scripts)\s*(?:=|:)\s*['"]?(?:false|0)\b|--ignore-scripts[= ](?:false|0)\b/.test(command);
   if (reset && /\b(?:npm|pnpm|yarn)\b/.test(command)) return 'script-disabling override is false';
-  // A token that can stand alone as a flag does not also need to be parsed as a value.
-  const manager = /\b(npm|pnpm|yarn)\s+(?:(?:--(?:prefix|workspace|dir|cwd|userconfig|globalconfig)\s+(?!(?:-g|--[\w=./-]+)\s)\S+|--[\w=./-]+|-g)\s+)*(?:ci|install|add|rebuild)\b/.exec(command);
+  const manager = INSTALL_COMMAND_PATTERN.exec(command);
   if (!manager) {
     if (/\b(?:pip3?|uv|apt(?:-get)?)\s+(?:[\w-]+\s+)*install\b/.test(command)) return 'unapproved installer';
     return null;
@@ -85,4 +87,7 @@ if (require.main === module) {
   for (const error of errors) console.error(error);
   if (errors.length) process.exitCode = 1;
 }
-module.exports = { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory };
+module.exports = {
+  workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory,
+  installCommandPatternSource: INSTALL_COMMAND_PATTERN.source,
+};
