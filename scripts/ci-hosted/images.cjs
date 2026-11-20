@@ -16,6 +16,18 @@ function readCommand(command, args, env) {
     (error, stdout, stderr) => resolve({ error, stdout, stderr })));
 }
 
+async function filesystemUsed(dockerRoot, env) {
+  try {
+    const { blocks, bfree, bsize } = await fs.promises.statfs(dockerRoot);
+    return (blocks - bfree) * bsize;
+  } catch (statError) {
+    const { error, stdout } = await readCommand('df', ['-B1', '--output=used', '--', dockerRoot], env);
+    const total = stdout.trim().split('\n').at(-1).trim();
+    if (/^\d+$/.test(total)) return Number(total);
+    throw new Error(`statfs: ${statError.message}; df: ${error?.code ?? error?.signal ?? 'no numeric used-byte total'}`);
+  }
+}
+
 function watchDiskGrowth(dockerRoot, env) {
   const pulls = new Set();
   let timer; let sampling; let previousBytes; let warned = false;
@@ -23,19 +35,21 @@ function watchDiskGrowth(dockerRoot, env) {
     if (sampling) return;
     sampling = true;
     try {
-      // du can still print a total when files disappear during the scan.
-      const { stdout } = await readCommand('sudo', ['-n', 'du', '-sbx', '--', dockerRoot], env);
-      const bytes = Number(/^(\d+)\t/.exec(stdout)?.[1]);
-      if (!Number.isSafeInteger(bytes)) throw new Error('Docker data-root size unavailable');
+      const bytes = await filesystemUsed(dockerRoot, env);
+      if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error('invalid used-byte total');
+      // Growth from other writers on this filesystem can also reset the idle timer.
       if (bytes > previousBytes) for (const progress of pulls) progress();
       previousBytes = bytes;
-    } catch {
-      if (!warned) console.warn('Docker data-root sampling unavailable; treating missing samples as no growth');
-      warned = true;
+    } catch (error) {
+      if (!warned) {
+        const cause = sanitize(error.message, environmentSecrets(env)).replace(/[\r\n]+/g, ' ');
+        console.warn(`Docker data-root sampling unavailable; treating missing samples as no growth: ${cause}`);
+        warned = true;
+      }
       previousBytes = undefined;
     } finally { sampling = false; }
   };
-  // The data root is shared by all concurrent pulls, so one sample serves them all.
+  // One filesystem sample serves all concurrent pulls.
   return progress => {
     pulls.add(progress);
     if (!timer) { timer = setInterval(sample, 12000); void sample(); }

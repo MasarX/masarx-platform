@@ -18,22 +18,29 @@ const { prepareImages } = require('./images.cjs');
 const PIN = { role: 'database', mirror: 'ghcr.io', image: 'example/database', digest: 'sha256:fixture', image_id: 'sha256:image', cli_tag: 'fixture' };
 const TOKEN = 'synthetic-test-credential';
 
-function setup(t, { duError = null, duHasTotal = true } = {}) {
+function setup(t, { statfsFails = false, dfError = null, dfHasTotal = true } = {}) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'] });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pull-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const logFile = path.join(dir, 'backend.log');
   const env = { FIXTURE_TOKEN: TOKEN };
-  const pulls = []; const kills = []; const diagnostics = []; const messages = [];
+  const pulls = []; const kills = []; const diagnostics = []; const messages = []; const commands = [];
   const children = new Map();
   const reference = `${PIN.mirror}/${PIN.image}@${PIN.digest}`;
   let samples = 0;
   let growth = 0;
   let diagnosticError = null;
+  t.mock.method(fs.promises, 'statfs', async directory => {
+    assert.equal(directory, '/fixture/docker');
+    samples++;
+    if (statfsFails) throw new Error('synthetic access denied');
+    return { blocks: 400, bfree: 300 - samples * growth, bsize: 4096 };
+  });
   for (const level of ['log', 'error', 'warn']) t.mock.method(console, level, text => messages.push(text));
   t.mock.method(process, 'kill', (group, signal) => children.get(-group).kill(signal));
   fixture = {
     spawn(command, args) {
+      commands.push([command, ...args]);
       assert.equal(command, 'docker');
       const child = new EventEmitter();
       child.pid = children.size + 1;
@@ -56,12 +63,12 @@ function setup(t, { duError = null, duHasTotal = true } = {}) {
       return child;
     },
     execFile(command, args, options, done) {
+      commands.push([command, ...args]);
       assert.equal(options.timeout, 5000);
-      if (args[1] === 'du') {
-        assert.deepEqual([command, ...args], ['sudo', '-n', 'du', '-sbx', '--', '/fixture/docker']);
-        samples++;
-        const stdout = duHasTotal ? `${100 + samples * growth}\t/fixture/docker\n` : '';
-        queueMicrotask(() => done(duError, stdout, ''));
+      if (command === 'df') {
+        assert.deepEqual(args, ['-B1', '--output=used', '--', '/fixture/docker']);
+        const stdout = dfHasTotal ? `       Used\n${(100 + samples * growth) * 4096}\n` : '';
+        queueMicrotask(() => done(dfError, stdout, ''));
         return;
       }
       diagnostics.push([command, ...args]);
@@ -77,7 +84,7 @@ function setup(t, { duError = null, duHasTotal = true } = {}) {
       });
     },
     async tick(ms) { t.mock.timers.tick(ms); await flush(); },
-    pulls, kills, diagnostics, messages, logFile, reference, samples: () => samples,
+    pulls, kills, diagnostics, messages, commands, logFile, reference, samples: () => samples,
     growDisk: () => { growth = 10; }, failInfo: () => { diagnosticError = { code: 1 }; },
   };
 }
@@ -129,7 +136,7 @@ test('120s of silence and no disk growth kills, captures diagnostics and retries
   await result;
 });
 
-test('shared Docker data-root growth keeps silent pulls alive', async t => {
+test('shared Docker filesystem growth keeps silent pulls alive', async t => {
   const f = setup(t);
   f.growDisk();
   const result = f.start([PIN, { ...PIN, role: 'auth', image: 'example/auth' }]);
@@ -143,8 +150,19 @@ test('shared Docker data-root growth keeps silent pulls alive', async t => {
   assert.equal(f.samples(), 17);
 });
 
+test('statfs samples the Docker filesystem without a subprocess', async t => {
+  const f = setup(t);
+  const result = f.start();
+  await flush();
+  await f.tick(12000);
+  assert.equal(f.samples(), 2);
+  assert.deepEqual(f.commands, [['docker', 'pull', '--platform', 'linux/amd64', f.reference]]);
+  f.pulls[0].finish();
+  await result;
+});
+
 test('failed disk samples leave a silent pull idle for 120s and trigger a retry', async t => {
-  const f = setup(t, { duError: { code: 1 }, duHasTotal: false });
+  const f = setup(t, { statfsFails: true, dfError: { code: 1 }, dfHasTotal: false });
   const result = f.start();
   await flush();
   for (let i = 0; i < 9; i++) await f.tick(12000);
@@ -156,16 +174,19 @@ test('failed disk samples leave a silent pull idle for 120s and trigger a retry'
   assert.deepEqual(f.pulls.map(child => child.reference), [f.reference, f.reference]);
   f.pulls[1].finish();
   await result;
-  assert.equal(f.messages.filter(message => message.includes('Docker data-root sampling unavailable')).length, 1);
+  const warnings = f.messages.filter(message => message.includes('Docker data-root sampling unavailable'));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /statfs: synthetic access denied.*df: 1/);
 });
 
-test('growing disk totals from du exit 1 keep a silent pull alive', async t => {
-  const f = setup(t, { duError: { code: 1 } });
+test('df fallback accepts growing used-byte totals even on exit 1', async t => {
+  const f = setup(t, { statfsFails: true, dfError: { code: 1 } });
   f.growDisk();
   const result = f.start();
   await flush();
   for (let i = 0; i < 16; i++) await f.tick(12000);
   assert.deepEqual(f.kills, []);
+  assert.equal(f.commands.filter(([command]) => command === 'df').length, 17);
   f.pulls[0].finish();
   await result;
 });
