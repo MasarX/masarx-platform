@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { AR_STRINGS, EN_STRINGS } from "../../apps/fieldops/src/i18n";
 
 // Verify capture guidance, recent ping state and the policy-gated location action.
 
@@ -26,8 +27,10 @@ describe("LocationScreen — foreground -> background permission upgrade CTA", (
     );
   });
 
-  test("renders the visible CTA label 'Allow background location'", () => {
-    expect(LOCATION_SCREEN_SOURCE).toContain("Allow background location");
+  test("renders the localized background permission CTA", () => {
+    expect(LOCATION_SCREEN_SOURCE).toContain(">{strings.location.allowBackground}</Text>");
+    expect(EN_STRINGS.location.allowBackground).toBe("Allow background location");
+    expect(AR_STRINGS.location.allowBackground).toMatch(/\p{Script=Arabic}/u);
   });
 
   test("CTA onPress wires through the upgrade handler and the Expo Location permission API", () => {
@@ -48,10 +51,15 @@ describe("LocationScreen — foreground -> background permission upgrade CTA", (
     // When background permission is denied + the OS suppresses the
     // request dialog, the handler must surface an "Open settings" Alert
     // so the driver always has a one-tap recovery affordance.
-    expect(LOCATION_SCREEN_SOURCE).toContain("openSystemSettingsSafe");
-    expect(LOCATION_SCREEN_SOURCE).toMatch(
-      /Background permission required[\s\S]*?Open settings/,
+    expect(LOCATION_SCREEN_SOURCE).toContain(
+      "Alert.alert(strings.location.backgroundPermissionRequired, strings.location.enableBackgroundInSettings, [",
     );
+    expect(LOCATION_SCREEN_SOURCE).toContain(
+      "{ text: strings.actionAccessibility.openSettings, onPress: () => { void openSystemSettingsSafe(); } }",
+    );
+    expect(EN_STRINGS.location.backgroundPermissionRequired).toBe("Background permission required");
+    expect(EN_STRINGS.actionAccessibility.openSettings).toBe("Open settings");
+    expect(AR_STRINGS.location.backgroundPermissionRequired).toMatch(/\p{Script=Arabic}/u);
   });
 
   test("CTA only renders when background tracking is wanted by policy AND not yet granted", () => {

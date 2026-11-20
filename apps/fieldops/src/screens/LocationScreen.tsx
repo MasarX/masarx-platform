@@ -2,6 +2,7 @@ import * as React from "react";
 import { Alert, Pressable, StyleSheet, Text, View, type PressableProps } from "react-native";
 import * as Location from "expo-location";
 
+import type { FieldOpsStrings } from "../i18n";
 import { useThemedStyles } from "../mobile-theme-context";
 import type { ThemeTokens } from "../mobile-theme";
 
@@ -25,6 +26,7 @@ export function resolveLocationAccuracyThreshold(
 type BackgroundPermission = Awaited<ReturnType<typeof Location.requestBackgroundPermissionsAsync>>;
 type RequestPermission = (isCurrent: () => boolean) => Promise<BackgroundPermission | null>;
 type LocationScreenProps = {
+  strings: FieldOpsStrings;
   locationPolicy: AccuracyPolicy;
   geofenceAccuracyThresholdM?: number;
   backgroundPolicyEnabled: boolean;
@@ -37,6 +39,7 @@ type LocationScreenProps = {
 };
 
 export function LocationScreen({
+  strings,
   locationPolicy,
   geofenceAccuracyThresholdM,
   backgroundPolicyEnabled,
@@ -71,9 +74,9 @@ export function LocationScreen({
       return Location.requestBackgroundPermissionsAsync();
     });
     if (permission && permission.status !== "granted" && !permission.canAskAgain) {
-      Alert.alert("Background permission required", "Allow background location in device settings.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Open settings", onPress: () => { void openSystemSettingsSafe(); } },
+      Alert.alert(strings.location.backgroundPermissionRequired, strings.location.enableBackgroundInSettings, [
+        { text: strings.confirm.cancelButton, style: "cancel" },
+        { text: strings.actionAccessibility.openSettings, onPress: () => { void openSystemSettingsSafe(); } },
       ]);
     }
   };
@@ -91,7 +94,7 @@ export function LocationScreen({
       {showBackgroundUpgradeCta ? (
         <Pressable testID="mobile-location-upgrade-background" style={localStyles.captureButton}
           accessibilityRole="button" onPress={() => { void handleUpgradeBackgroundPermission(); }}>
-          <Text style={localStyles.captureButtonText}>Allow background location</Text>
+          <Text style={localStyles.captureButtonText}>{strings.location.allowBackground}</Text>
         </Pressable>
       ) : null}
       <Pressable

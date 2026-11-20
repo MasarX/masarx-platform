@@ -1,6 +1,10 @@
 import { AR_STRINGS, EN_STRINGS, getFieldOpsStrings } from "../../../apps/fieldops/src/i18n";
 import { resolveDirectionMode, resolveLocaleMode } from "../../../apps/fieldops/src/mobile-shell-display";
 
+test("Arabic catalog strings have no runs of replacement question marks", () => {
+  expect(JSON.stringify(AR_STRINGS)).not.toMatch(/\?{2,}/);
+});
+
 describe("FieldOps locale selection", () => {
   test.each(["ar", " AR "])("normalizes %s to the Arabic catalog", (value) => {
     expect(getFieldOpsStrings(resolveLocaleMode(value))).toBe(AR_STRINGS);

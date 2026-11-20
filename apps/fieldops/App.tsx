@@ -209,7 +209,7 @@ import {
 import {
   formatMobileNavDisabledReason,
   hasMobileSettlementAccess,
-  resolveAccessScopeSummary,
+  formatAccessScopeLabel,
   resolveModuleLabelsFromSections,
 } from "./src/mobile-shell-access";
 import {
@@ -285,12 +285,14 @@ const KV_KEYS = {
   activeOpsSession: "fieldops_active_ops_session_v1",
 } as const;
 
-const bootErrorStrings = getFieldOpsStrings("en").errorBoundary;
-
 function readBootstrapExtraString(key: string): string | null {
   const extra = resolveExpoExtra();
   return readExtraString(extra, key) ?? null;
 }
+
+const bootErrorStrings = getFieldOpsStrings(
+  resolveLocaleMode(readBootstrapExtraString("NEXT_PUBLIC_LOCALE"))
+).errorBoundary;
 
 initMobileCrashReporting({
   dsn: readBootstrapExtraString("NEXT_PUBLIC_SENTRY_DSN"),
@@ -3000,13 +3002,9 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     () => resolveModuleLabelsFromSections(navigation.sections),
     [navigation.sections]
   );
-  const accessScopeSummary = React.useMemo(
-    () =>
-      resolveAccessScopeSummary({
-        scopeType: me?.access_scope?.scope_type,
-        scopeId: me?.access_scope?.scope_id,
-      }),
-    [me?.access_scope?.scope_id, me?.access_scope?.scope_type]
+  const accessScopeSummary = formatAccessScopeLabel(
+    { scopeType: me?.access_scope?.scope_type, scopeId: me?.access_scope?.scope_id },
+    strings.accessScope
   );
   const resourceDisplayMode = React.useMemo<"list" | "orders_map">(() => {
     if (resource !== "tasks") return "list";
@@ -8459,6 +8457,7 @@ function LocationScreen({
 
       <View style={styles.screenActionsRow}>
         <LocationCaptureControls
+          strings={strings}
           locationPolicy={locationPolicy}
           backgroundPolicyEnabled={backgroundUpgradeAllowed && !backgroundSyncing}
           backgroundGranted={backgroundTracking.reason !== "background_permission_denied"}
@@ -11069,7 +11068,7 @@ export default function App() {
           </Text>
           <Text style={styles.subtitle}>
             {category === "offline"
-              ? "Check your connection and try again."
+              ? bootErrorStrings.offline.recoveryHint
               : category === "permission"
                 ? bootErrorStrings.permission.body
                 : "Please restart the app and try again."}

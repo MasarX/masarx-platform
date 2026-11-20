@@ -288,12 +288,26 @@ export const AR_STRINGS: FieldOpsStrings = {
     itemsCount: (n: number) =>
       `${n} ${n === 1 ? "عنصر" : n === 2 ? "عنصران" : "عناصر"}`,
   },
+  accessScope: {
+    tenant: "المستأجر",
+    organization: "المؤسسة",
+    branch: "الفرع",
+    client: "العميل",
+    sender: "المرسل",
+    resource: "المورد",
+    unknown: "غير معروف",
+  },
+  location: {
+    allowBackground: "السماح بالوصول إلى الموقع في الخلفية",
+    backgroundPermissionRequired: "يلزم إذن الوصول إلى الموقع في الخلفية",
+    enableBackgroundInSettings: "اسمح بالوصول إلى الموقع في الخلفية من إعدادات الجهاز.",
+  },
   currentStopBanner: {
-    empty_label: "?? ???? ???? ????",
-    open_cta: "???? ??????",
-    navigate_cta: "??????",
-    eta_minutes: "{n} ?????",
-    sequence_prefix: "?????? {n}",
+    empty_label: "لا توجد محطة نشطة",
+    open_cta: "فتح المحطة",
+    navigate_cta: "بدء الملاحة",
+    eta_minutes: "{n} دقيقة",
+    sequence_prefix: "المحطة {n}",
   },
   route: {
     departureRequest: "طلب المغادرة",
@@ -368,8 +382,8 @@ export const AR_STRINGS: FieldOpsStrings = {
   outbox: {
     title: "صندوق الصادر",
     empty: "صندوق الصادر فارغ.",
-    emptyTitle: "??? ?????? ?? ?????????",
-    emptyDescription: "???? ????????? ???? ?????? ??? ????? ??? ??? ??? ????????.",
+    emptyTitle: "لا توجد إجراءات معلّقة",
+    emptyDescription: "تظهر هنا الإجراءات التي تنفذها دون اتصال حتى تتم مزامنتها.",
     pending: (n: number) => `قيد الانتظار: ${n}`,
     clearDead: "مسح الإدخالات غير القابلة لإعادة المحاولة",
     clear_dead: "مسح المعلّقة",
@@ -546,6 +560,7 @@ export const AR_STRINGS: FieldOpsStrings = {
     connectivityHint: "تحقق من الاتصال",
     offline: {
       title: "لا يوجد اتصال",
+      recoveryHint: "تحقق من اتصالك وحاول مرة أخرى.",
       body: "تعذر الوصول إلى الخادم. تحقق من اتصالك وحاول مرة أخرى. تم حفظ عملك محلياً.",
     },
     permission: {

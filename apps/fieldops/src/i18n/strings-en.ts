@@ -286,6 +286,20 @@ export const EN_STRINGS = {
     loading: "Loading tasks...",
     itemsCount: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
   },
+  accessScope: {
+    tenant: "Tenant",
+    organization: "Organization",
+    branch: "Branch",
+    client: "Client",
+    sender: "Sender",
+    resource: "Resource",
+    unknown: "Unknown",
+  },
+  location: {
+    allowBackground: "Allow background location",
+    backgroundPermissionRequired: "Background permission required",
+    enableBackgroundInSettings: "Allow background location in device settings.",
+  },
   currentStopBanner: {
     empty_label: "No active stop",
     open_cta: "Open stop",
@@ -543,6 +557,7 @@ export const EN_STRINGS = {
     connectivityHint: "Check your connection",
     offline: {
       title: "You're offline",
+      recoveryHint: "Check your connection and try again.",
       body: "We couldn't reach the server. Check your connection and try again. Your work is saved locally.",
     },
     permission: {
