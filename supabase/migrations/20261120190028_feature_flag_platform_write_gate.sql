@@ -702,7 +702,7 @@ BEGIN
     ) VALUES (
       v_decision_id, COALESCE(v_org_id, v_flag.scope_id),
       'feature_flags.rollout', 'feature_flag', v_flag.id,
-      'set_rollout_v1', v_target_rollout::text,
+      'set_rollout_v1', 'rollout_changed',
       'set_rollout_v1', v_correlation_id
     );
 
@@ -828,5 +828,15 @@ BEGIN
   );
 END;
 $$;
+
+REVOKE EXECUTE ON FUNCTION
+  public.create_feature_flag_v1(jsonb),
+  public.update_feature_flag_v1(jsonb),
+  public.toggle_feature_flag_v1(jsonb),
+  public.engage_kill_switch_v1(jsonb),
+  public.release_kill_switch_v1(jsonb),
+  public.set_rollout_v1(jsonb),
+  public.bulk_toggle_feature_flags_v1(jsonb)
+FROM PUBLIC, anon;
 
 COMMIT;

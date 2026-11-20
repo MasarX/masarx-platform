@@ -2,7 +2,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SET LOCAL statement_timeout = '30s';
-SELECT plan(14);
+SELECT plan(16);
 
 -- Mutation: restoring PUBLIC EXECUTE or granting EXECUTE to anon fails this check.
 SELECT ok(NOT has_function_privilege('anon',
@@ -43,6 +43,10 @@ DECLARE
   v_outside_user uuid := gen_random_uuid();
   v_platform_user uuid := gen_random_uuid();
   v_platform_reader uuid := gen_random_uuid();
+  v_completion_only uuid := gen_random_uuid();
+  v_contracts_only uuid := gen_random_uuid();
+  v_policy jsonb;
+  v_schema_version integer;
   v_profile uuid;
   v_request uuid;
   v_offer uuid;
@@ -61,7 +65,26 @@ BEGIN
     (v_party_user, v_requester, v_party_user::text || '@example.test', 'Settlement Party', 'ops_admin', 'active', 'tenant'),
     (v_outside_user, v_outsider, v_outside_user::text || '@example.test', 'Settlement Non-Party', 'ops_admin', 'active', 'tenant'),
     (v_platform_user, v_outsider, v_platform_user::text || '@example.test', 'Platform Operator', 'super_admin', 'active', 'platform'),
-    (v_platform_reader, v_outsider, v_platform_reader::text || '@example.test', 'Platform Reader', 'client_admin', 'active', 'platform');
+    (v_platform_reader, v_outsider, v_platform_reader::text || '@example.test', 'Platform Reader', 'client_admin', 'active', 'platform'),
+    (v_completion_only, v_outsider, v_completion_only::text || '@example.test', 'Platform Completion Operator', 'client_admin', 'active', 'platform'),
+    (v_contracts_only, v_outsider, v_contracts_only::text || '@example.test', 'Platform Contract Operator', 'client_admin', 'active', 'platform');
+
+  SELECT policy INTO v_policy FROM public.resolve_access_control_policy_v1('global', NULL, FALSE);
+  SELECT version INTO v_schema_version FROM public.schema_registry
+  WHERE category = 'access_control_policy' AND is_active ORDER BY version DESC LIMIT 1;
+
+  v_policy := jsonb_set(v_policy, '{roles}', (v_policy->'roles') || jsonb_build_array(
+    jsonb_build_object('key', 'test_completion_only', 'capability_keys', jsonb_build_array('marketplace_work_packages.write')),
+    jsonb_build_object('key', 'test_contracts_only', 'capability_keys', jsonb_build_array('marketplace_contracts.write'))
+  ));
+  v_policy := jsonb_set(v_policy, '{assignments}', COALESCE(v_policy->'assignments', '{}') || jsonb_build_object(
+    'user_id', COALESCE(v_policy#>'{assignments,user_id}', '{}') || jsonb_build_object(
+      v_completion_only::text, jsonb_build_array('test_completion_only'),
+      v_contracts_only::text, jsonb_build_array('test_contracts_only')
+    )
+  ));
+  PERFORM public.upsert_settings_value_v1('access_control_policy', 'global', NULL,
+    v_policy, v_schema_version, 'Rollback-only platform settlement capability fixtures');
 
   INSERT INTO public.marketplace_participant_profiles (organization_id, participant_type_key, display_name)
   VALUES (v_supplier, 'provider_tenant', 'Settlement Supplier')
@@ -109,6 +132,8 @@ BEGIN
   PERFORM set_config('test.settlement_acl.outsider', v_outside_user::text, true);
   PERFORM set_config('test.settlement_acl.platform', v_platform_user::text, true);
   PERFORM set_config('test.settlement_acl.platform_reader', v_platform_reader::text, true);
+  PERFORM set_config('test.settlement_acl.completion_only', v_completion_only::text, true);
+  PERFORM set_config('test.settlement_acl.contracts_only', v_contracts_only::text, true);
 END;
 $$;
 
@@ -158,6 +183,30 @@ SELECT throws_ok(
   $$SELECT api.marketplace_work_package_complete_v1(current_setting('test.settlement_acl.platform_package')::uuid)$$,
   '42501', 'marketplace_work_packages.write capability required',
   'a platform reader cannot enter work package completion'
+);
+RESET ROLE;
+
+SELECT set_config('request.jwt.claim.sub', current_setting('test.settlement_acl.completion_only'), true),
+       set_config('request.jwt.claims', jsonb_build_object('sub', current_setting('test.settlement_acl.completion_only'), 'role', 'authenticated')::text, true);
+SET LOCAL ROLE authenticated;
+
+-- Mutation: deleting the platform marketplace_contracts.write assert lets this actor post the settlement.
+SELECT throws_ok(
+  $$SELECT api.marketplace_work_package_complete_v1(current_setting('test.settlement_acl.platform_package')::uuid)$$,
+  '42501', 'Capability denied: marketplace_contracts.write',
+  'a platform completion operator also needs the contract write capability to auto-settle'
+);
+RESET ROLE;
+
+SELECT set_config('request.jwt.claim.sub', current_setting('test.settlement_acl.contracts_only'), true),
+       set_config('request.jwt.claims', jsonb_build_object('sub', current_setting('test.settlement_acl.contracts_only'), 'role', 'authenticated')::text, true);
+SET LOCAL ROLE authenticated;
+
+-- Mutation: deleting the platform marketplace_work_packages.write assert lets this actor post the settlement.
+SELECT throws_ok(
+  $$SELECT api.marketplace_work_package_complete_v1(current_setting('test.settlement_acl.platform_package')::uuid)$$,
+  '42501', 'Capability denied: marketplace_work_packages.write',
+  'a platform contract operator also needs the work-package write capability to auto-settle'
 );
 RESET ROLE;
 
