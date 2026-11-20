@@ -21,17 +21,10 @@ const scenarioArgs = [
   'tests/load/partition-performance.js',
 ];
 const localK6 = path.join(projectRoot, 'tmp', 'xk6', 'k6');
-const localCall = [
+const localCall = (env) => [
   localK6,
-  [
-    'run',
-    '-e', `SUPABASE_URL=${settings.SUPABASE_URL}`,
-    '-e', `SUPABASE_SERVICE_ROLE_KEY=${settings.SUPABASE_SERVICE_ROLE_KEY}`,
-    '-e', `PARTITION_DURATION=${settings.PARTITION_DURATION}`,
-    '-e', `DATABASE_URL=${dbUrl}`,
-    ...scenarioArgs,
-  ],
-  { stdio: 'pipe', encoding: 'utf8' },
+  ['run', ...scenarioArgs],
+  { stdio: 'pipe', encoding: 'utf8', env: { ...env, DATABASE_URL: dbUrl } },
 ];
 
 async function captureSpawns(mode, { info = { status: 0 }, run = { status: 0 } } = {}) {
@@ -107,10 +100,10 @@ test('passes Docker env names in argv and values verbatim in the child environme
   ]);
 });
 
-test('passes load-test settings verbatim as local k6 argv', async () => {
+test('passes local k6 settings and the effective database URL through the child environment', async () => {
   const { calls, exits, warnings } = await captureSpawns('disable');
 
-  expect(calls).toEqual([localCall]);
+  expect(calls).toEqual([localCall({ ...settings, LOAD_TEST_DOCKER_MODE: 'disable' })]);
   expect(exits).toStrictEqual([[0]]);
   expect(warnings).toStrictEqual([
     ['[load-test] Docker usage disabled by policy; using local xk6 fallback.'],
@@ -146,7 +139,7 @@ test.each([
       timeout: 10000,
       env: { ...settings, DOCKER_CONFIG: path.join(projectRoot, 'tmp', 'docker-authless') },
     }],
-    localCall,
+    localCall(settings),
   ]);
   expect(exits).toStrictEqual([[0]]);
 });

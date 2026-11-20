@@ -505,7 +505,8 @@ if (!dockerStatus.available) {
 validateDay1LabelJwtContract();
 ensureDay1StorageBucketsReady();
 
-const localK6EnvFlags = [
+// Capture the explicit scenario settings before token provisioning.
+const localK6Settings = Object.fromEntries([
   'SUPABASE_URL',
   'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
@@ -550,7 +551,7 @@ const localK6EnvFlags = [
   'DAY1_AUTO_CREATE_TENANTS',
   'DAY1_CLEANUP',
   'DAY1_CLEANUP_TENANTS',
-].flatMap((key) => (process.env[key] ? ['-e', `${key}=${process.env[key]}`] : []));
+].flatMap((key) => (process.env[key] ? [[key, process.env[key]]] : [])));
 
 const k6RunArgs = [
   '--tag',
@@ -692,8 +693,13 @@ function runWithLocalXk6() {
   console.log(`[load-test] Running k6 locally: ${path.relative(projectRoot, k6Binary)} run ${scenarioFile}`);
   const run = spawnSync(
     k6Binary,
-    ['run', ...localK6EnvFlags, '-e', `DATABASE_URL=${dbUrl}`, ...k6RunArgs],
-    { stdio: 'pipe', encoding: 'utf8', timeout: localK6TimeoutMs },
+    ['run', ...k6RunArgs],
+    {
+      stdio: 'pipe',
+      encoding: 'utf8',
+      timeout: localK6TimeoutMs,
+      env: { ...process.env, ...localK6Settings, DATABASE_URL: dbUrl },
+    },
   );
   appendTranscript(String(run.stdout || ''));
   appendTranscript(String(run.stderr || ''));
