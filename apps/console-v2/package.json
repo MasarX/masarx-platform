@@ -42,7 +42,7 @@
     "@tanstack/react-router": "^1.85.0",
     "cmdk": "^1.0.4",
     "maplibre-gl": "6.18.0",
-    "next-intl": "^4.8.3",
+    "next-intl": "^4.15.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "web-vitals": "^4.2.4"
@@ -67,7 +67,7 @@
     "jsdom": "^25.0.1",
     "msw": "^2.7.0",
     "playwright": "^1.49.0",
-    "postcss": "^8.4.38",
+    "postcss": "^8.5.33",
     "postcss-import": "^16.1.0",
     "prettier": "^3.4.2",
     "rollup-plugin-visualizer": "^5.12.0",

@@ -20,7 +20,7 @@ describe('security transitive overrides', () => {
   test('security overrides preserve direct references and compatible parent scopes', () => {
     const root = readJson('package.json');
 
-    for (const [packageName, floor] of [['postcss', '8.5.23'], ['sharp', '0.35.5']]) {
+    for (const [packageName, floor] of [['postcss', '8.5.33'], ['sharp', '0.35.5']]) {
       expect(semver.gte(root.devDependencies[packageName], floor)).toBe(true);
       expect(root.overrides[packageName]).toBe(`$${packageName}`);
     }
@@ -86,7 +86,7 @@ describe('security transitive overrides', () => {
       return major === 3 ? semver.gte(version, '3.15.2') : semver.gte(version, '4.3.2');
     })).toBe(true);
     expect(postcssVersions.length).toBeGreaterThan(0);
-    expect(postcssVersions.every(({ version }) => semver.gte(version, '8.5.23'))).toBe(true);
+    expect(postcssVersions.every(({ version }) => semver.gte(version, '8.5.33'))).toBe(true);
     expect(sharpVersions.length).toBeGreaterThan(0);
     expect(sharpVersions.every(({ version }) => semver.gte(version, '0.35.5'))).toBe(true);
     expect(smolTomlVersions.length).toBeGreaterThan(0);
@@ -101,7 +101,7 @@ describe('security transitive overrides', () => {
 
   test.each([
     ['axios', '1.20.0'], ['compression', '1.8.2'], ['follow-redirects', '1.16.2'], ['handlebars', '4.7.10'],
-    ['next', '16.4.5'], ['node-forge', '1.4.3'], ['shell-quote', '1.12.0'], ['smol-toml', '1.9.0'], ['source-map-js', '1.2.2'],
+    ['next', '16.4.6'], ['node-forge', '1.4.3'], ['shell-quote', '1.12.0'], ['smol-toml', '1.9.0'], ['source-map-js', '1.2.2'],
     ['undici', '6.29.1'], ['webpack-dev-middleware', '7.4.6'],
   ])('preserves every %s consumer at its supported patched floor', (packageName, floor) => {
     const versions = lockVersions(readJson('package-lock.json'), packageName);

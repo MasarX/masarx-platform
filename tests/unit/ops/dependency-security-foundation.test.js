@@ -28,30 +28,30 @@ describe('dependency security foundation', () => {
     const uiManifest = readJson('packages/ui/package.json');
 
     expect(consoleManifest.dependencies).toMatchObject({
-      '@swc/helpers': '0.5.23',
-      next: '16.4.5',
-      'next-intl': '4.9.2',
+      '@swc/helpers': '0.5.24',
+      next: '16.4.6',
+      'next-intl': '4.15.1',
       zod: '4.6.7',
     });
     expect(portalManifest.dependencies).toMatchObject({
-      '@swc/helpers': '0.5.23',
-      next: '16.4.5',
-      'next-intl': '4.9.2',
+      '@swc/helpers': '0.5.24',
+      next: '16.4.6',
+      'next-intl': '4.15.1',
       zod: '4.6.7',
     });
-    expect(uiManifest.peerDependencies.next).toBe('^16.4.5');
+    expect(uiManifest.peerDependencies.next).toBe('^16.4.6');
     expect(uiManifest.dependencies['@hookform/resolvers']).toBe('5.2.2');
     expect(uiManifest.dependencies.zod).toBe('4.6.7');
     expect(root.devDependencies).toMatchObject({
-      '@next/bundle-analyzer': '16.4.2',
-      '@swc/helpers': '0.5.23',
+      '@next/bundle-analyzer': '16.4.6',
+      '@swc/helpers': '0.5.24',
       '@xmldom/xmldom': '0.9.12',
-      '@next/bundle-analyzer': '16.4.2',
+      '@next/bundle-analyzer': '16.4.6',
       'brace-expansion': '2.1.7',
-      'eslint-config-next': '16.4.2',
-      esbuild: '^0.25.12',
+      'eslint-config-next': '16.4.6',
+      esbuild: '^0.28.2',
       nx: '22.7.12',
-      postcss: '8.5.23',
+      postcss: '8.5.33',
       sharp: '0.35.5',
       undici: '6.29.1',
     });
@@ -120,16 +120,16 @@ describe('dependency security foundation', () => {
   test('materializes the exact supported dependency graph in package-lock.json', () => {
     const lock = readJson('package-lock.json');
 
-    expect(lock.packages['node_modules/next'].version).toBe('16.4.5');
-    expect(lock.packages['node_modules/next-intl'].version).toBe('4.9.2');
+    expect(lock.packages['node_modules/next'].version).toBe('16.4.6');
+    expect(lock.packages['node_modules/next-intl'].version).toBe('4.15.1');
     expect(lock.packages['node_modules/nx'].version).toBe('22.7.12');
     expect(semver.satisfies(lock.packages['node_modules/postcss'].version, '^8.5.23')).toBe(true);
-    expect(versionsForLockPackage(lock, 'postcss').every((version) => semver.gte(version, '8.5.23'))).toBe(true);
+    expect(versionsForLockPackage(lock, 'postcss').every((version) => semver.gte(version, '8.5.33'))).toBe(true);
     expect(versionsForLockPackage(lock, 'sharp').every((version) => semver.gte(version, '0.35.5'))).toBe(true);
     for (const [packageName, floor] of [
       ['axios', '1.20.0'],
       ['compression', '1.8.2'],
-      ['esbuild', '0.25.12'],
+      ['esbuild', '0.28.2'],
       ['fast-uri', '3.1.9'],
       ['handlebars', '4.7.10'],
       ['postcss-selector-parser', '7.1.6'],
