@@ -143,6 +143,12 @@ describe("resolveColumnLabel", () => {
     ).toBe("Organization");
   });
 
+  it("strips extra whitespace before an FK Id suffix", () => {
+    expect(
+      resolveColumnLabel({ key: "organization_id", label: "Organization \t   Id" })
+    ).toBe("Organization");
+  });
+
   it("does not strip Id from standalone id column", () => {
     const label = resolveColumnLabel({ key: "id", label: "Id" });
     // standalone "id" key should not be stripped

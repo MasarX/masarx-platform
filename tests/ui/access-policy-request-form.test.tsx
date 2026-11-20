@@ -213,7 +213,7 @@ describe("AccessPolicyRequestForm", () => {
 });
 
 test("shows a friendly locked scope and submits canonical fields", () => {
-  render(
+  renderWithIntl(
     <AccessPolicyRequestForm
       action={async () => ({ status: "idle" })}
       testIdPrefix="example-policy"
