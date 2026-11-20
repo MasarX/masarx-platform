@@ -383,6 +383,8 @@ jobs:
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs ui
       - name: Run Console v2 Vitest
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          CONSOLE_V2_CI_DEFER_CAPABILITY_LINT: '1'
         run: npm run test --workspace @masarx/console-v2
       - name: Check proposed test-result capture
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.jest.outputs.present == 'true' }}

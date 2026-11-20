@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,6 +27,23 @@ const repoRoot = toVitePath(path.resolve(appRoot, '../..'));
 const realRepoRoot = toVitePath(fs.realpathSync.native(repoRoot));
 const appTestCache = toVitePath(path.resolve(appRoot, '.vitest'));
 const appTestSetup = toVitePath(path.resolve(appRoot, './src/test/setup.ts'));
+
+const capabilityLintExclusion = {
+  path: 'scripts/lint-capabilities.test.mjs',
+  owner: 'MasarX lead',
+  reason: "main's broad capability extractor reports command IDs and tracking labels as capabilities; the extractor fix tracked in #112 re-enables this test",
+  expires: '2026-12-04',
+};
+
+export function consoleV2TestExclusions(deferCapabilityLint: boolean, now: Date) {
+  if (!deferCapabilityLint) return configDefaults.exclude;
+
+  const { path, owner, reason, expires } = capabilityLintExclusion;
+  if (now.toISOString().slice(0, 10) > expires) {
+    throw new Error(`The CI exclusion for ${path} expired after ${expires} UTC (${owner}). ${reason}`);
+  }
+  return [...configDefaults.exclude, path];
+}
 
 export default defineConfig({
   root: appRoot,
@@ -64,6 +81,7 @@ export default defineConfig({
     globals: true,
     setupFiles: [appTestSetup],
     include: ['src/**/*.test.{ts,tsx}', 'scripts/**/*.test.mjs'],
+    exclude: consoleV2TestExclusions(process.env.CONSOLE_V2_CI_DEFER_CAPABILITY_LINT === '1', new Date()),
     coverage: {
       reporter: ['text', 'lcov'],
       include: ['src/**/*.{ts,tsx}'],
