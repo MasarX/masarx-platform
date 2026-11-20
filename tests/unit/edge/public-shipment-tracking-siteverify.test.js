@@ -124,6 +124,7 @@ function expectRejectionLog(app, code, errorCodes) {
   expect(app.logWarn).toHaveBeenCalledTimes(1);
   expect(app.logError).not.toHaveBeenCalled();
   const entry = JSON.parse(app.logWarn.mock.calls[0][0]);
+  expect(entry.rpc).toBeUndefined();
   expect([entry.level, entry.event, entry.code, entry.message, entry.turnstile_error_codes]).toEqual([
     'warn', 'public_shipment_tracking_turnstile_rejected', code, code, errorCodes,
   ]);
@@ -249,16 +250,18 @@ describe('public shipment tracking siteverify', () => {
     expect(app.rpc).not.toHaveBeenCalled();
   });
 
-  test('redacts a seven-character client IP in diagnostics', async () => {
+  test.each([
+    ['seven-character', '2001::1', 'proxy unavailable for [redacted]'],
+    ['one-character', 'x', 'pro[redacted]y unavailable for [redacted]'],
+  ])('redacts a %s client IP in diagnostics', async (_length, shortIp, message) => {
     const app = setup();
-    const shortIp = '2001::1';
-    app.fetch.mockRejectedValueOnce(new Error(`siteverify unavailable for ${shortIp}`));
+    app.fetch.mockRejectedValueOnce(new Error(`proxy unavailable for ${shortIp}`));
     const req = request(payload);
     req.headers.set('cf-connecting-ip', shortIp);
     const response = await app.handler(req);
 
     await expectResponse(response, app.log, 502, { ok: false, error: { code: 'turnstile_verify_failed' } });
-    const entry = expectErrorLog(app.logError, 'turnstile_verify_failed', 'siteverify unavailable for [redacted]');
+    const entry = expectErrorLog(app.logError, 'turnstile_verify_failed', message);
     expect(entry.message.includes(shortIp)).toBe(false);
     expect(app.rpc).not.toHaveBeenCalled();
   });
