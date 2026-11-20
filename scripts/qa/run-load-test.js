@@ -467,7 +467,12 @@ function inspectDockerAvailability() {
     };
   }
 
-  const info = spawnSync('docker', ['info'], { stdio: 'pipe', encoding: 'utf8', timeout: dockerCheckTimeoutMs, env: dockerEnv });
+  const info = spawnSync('docker', ['info'], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+    timeout: dockerCheckTimeoutMs,
+    env: dockerEnv,
+  });
   const details = info.error
     ? info.error.message
     : `${info.stdout || ''}${info.stderr || ''}`.trim();
@@ -480,22 +485,20 @@ function inspectDockerAvailability() {
 
 // Preflight docker availability. GitHub-hosted CI stays fail-closed on missing
 // Docker, while self-hosted CI defaults to the existing local xk6 fallback.
-{
-  const dockerStatus = inspectDockerAvailability();
-  if (!dockerStatus.available) {
-    const details = dockerStatus.details || 'docker info failed';
-    if (loadTestDockerMode === 'require') {
-      console.error('[load-test] Docker is required for this run but is not available.');
-      if (details) console.error(details);
-      writeFailedSummary('docker_unavailable', details);
-      process.exit(1);
-    }
-    if (loadTestDockerMode === 'disable') {
-      console.warn('[load-test] Docker usage disabled by policy; using local xk6 fallback.');
-    } else {
-      console.warn('[load-test] Docker not available; using local xk6 fallback.');
-      if (details) console.warn(details);
-    }
+const dockerStatus = inspectDockerAvailability();
+if (!dockerStatus.available) {
+  const details = dockerStatus.details || 'docker info failed';
+  if (loadTestDockerMode === 'require') {
+    console.error('[load-test] Docker is required for this run but is not available.');
+    console.error(details);
+    writeFailedSummary('docker_unavailable', details);
+    process.exit(1);
+  }
+  if (loadTestDockerMode === 'disable') {
+    console.warn('[load-test] Docker usage disabled by policy; using local xk6 fallback.');
+  } else {
+    console.warn('[load-test] Docker not available; using local xk6 fallback.');
+    console.warn(details);
   }
 }
 
@@ -557,24 +560,7 @@ const k6RunArgs = [
   scenarioFile,
 ];
 
-function dockerAvailable() {
-  const check = spawnSync('docker', ['info'], {
-    stdio: 'ignore',
-    timeout: dockerCheckTimeoutMs,
-    env: dockerEnv,
-  });
-  if (check.error) {
-    console.warn(`[load-test] Docker check failed (${check.error.code || check.error.message}).`);
-    return false;
-  }
-  if (check.status !== 0) {
-    console.warn(`[load-test] Docker check failed (status ${check.status}).`);
-    return false;
-  }
-  return true;
-}
-
-// k6 run exposes the container environment in __ENV by default.
+// Docker copies name-only -e values from its environment. k6 exposes them in __ENV.
 const dockerEnvFlags = [
   'LOADTEST_DATABASE_URL',
   'SUPABASE_URL',
@@ -621,7 +607,7 @@ const dockerEnvFlags = [
   'DAY1_AUTO_CREATE_TENANTS',
   'DAY1_CLEANUP',
   'DAY1_CLEANUP_TENANTS',
-].flatMap((key) => (process.env[key] ? ['-e', `${key}=${process.env[key]}`] : []));
+].flatMap((key) => (dockerEnv[key] ? ['-e', key] : []));
 
 const dockerArgs = [
   'run',
@@ -635,7 +621,7 @@ const dockerArgs = [
   '-e', 'XDG_CACHE_HOME=/tmp/.cache',
   '-e', 'GOCACHE=/tmp/.cache/go-build',
   '-e', 'GOMODCACHE=/tmp/.cache/go-mod',
-  '-e', `DATABASE_URL=${dbUrl}`,
+  '-e', 'DATABASE_URL',
   ...dockerEnvFlags,
   '-v',
   volumePath,
@@ -659,8 +645,6 @@ console.log(`[load-test] Transcript log -> ${transcriptRelative}`);
 appendTranscript(`[load-test] scenario=${scenario} file=${scenarioFile} summary=${summaryRelative}\n`);
 
 function runWithLocalXk6() {
-  console.warn('[load-test] Docker unavailable; falling back to local xk6 build (Go required).');
-
   const xk6ToolVersion = (() => {
     const explicit = process.env.XK6_TOOL_VERSION;
     if (explicit) return explicit;
@@ -819,38 +803,26 @@ if (scenario === 'api-gateway-http' && autoProvision && !process.env.API_GATEWAY
 requireScenarioPrerequisites();
 
 function runOnce() {
-  let runResult;
+  if (!dockerStatus.available) return runWithLocalXk6();
 
-  if (loadTestDockerMode !== 'disable' && dockerAvailable()) {
-    runResult = spawnSync('docker', dockerArgs, {
-      stdio: 'pipe',
-      encoding: 'utf8',
-      timeout: dockerTimeoutMs,
-      env: dockerEnv,
-    });
-    appendTranscript(String(runResult.stdout || ''));
-    appendTranscript(String(runResult.stderr || ''));
-    if (runResult.stdout) process.stdout.write(runResult.stdout);
-    if (runResult.stderr) process.stderr.write(runResult.stderr);
-    if (runResult.error && runResult.error.code === 'ETIMEDOUT') {
-      console.warn(`[load-test] Docker run timed out after ${dockerTimeoutMs}ms.`);
-    }
-  } else {
-    runResult = {
-      status: 1,
-      error: new Error(
-        loadTestDockerMode === 'disable' ? 'Docker disabled by policy' : 'Docker unavailable',
-      ),
-    };
+  const run = spawnSync('docker', dockerArgs, {
+    stdio: 'pipe',
+    encoding: 'utf8',
+    timeout: dockerTimeoutMs,
+    env: { ...dockerEnv, DATABASE_URL: dbUrl },
+  });
+  appendTranscript(String(run.stdout || ''));
+  appendTranscript(String(run.stderr || ''));
+  if (run.stdout) process.stdout.write(run.stdout);
+  if (run.stderr) process.stderr.write(run.stderr);
+  if (run.error?.code === 'ETIMEDOUT') {
+    console.warn(`[load-test] Docker run timed out after ${dockerTimeoutMs}ms.`);
+  } else if (run.error) {
+    console.error('[load-test] Docker run failed:', run.error.message);
   }
 
-  if (runResult.error || runResult.status !== 0) {
-    const dockerMsg = runResult.error ? runResult.error.message : `status ${runResult.status}`;
-    console.warn(`[load-test] Docker run failed (${dockerMsg}).`);
-    runResult = runWithLocalXk6();
-  }
-
-  return runResult;
+  if (run.status === 0 && !run.error) return run;
+  return { ...run, status: run.status || 1 };
 }
 
 const maxAttempts = parseInt(process.env.LOAD_TEST_MAX_ATTEMPTS || '1', 10) || 1;
