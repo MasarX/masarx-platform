@@ -502,49 +502,7 @@ function inspectDockerAvailability() {
 validateDay1LabelJwtContract();
 ensureDay1StorageBucketsReady();
 
-const envInject = [];
-envInject.push(`DATABASE_URL="${dbUrl.replace(/"/g, '\\"')}"`);
-if (process.env.LOADTEST_DATABASE_URL) {
-  envInject.push(
-    `LOADTEST_DATABASE_URL="${(process.env.LOADTEST_DATABASE_URL || '').replace(/"/g, '\\"')}"`,
-  );
-}
-if (process.env.SUPABASE_URL) {
-  envInject.push(
-    `SUPABASE_URL="${(process.env.SUPABASE_URL || '').replace(/"/g, '\\"')}"`,
-  );
-}
-if (process.env.SUPABASE_ANON_KEY) {
-  envInject.push(
-    `SUPABASE_ANON_KEY="${(process.env.SUPABASE_ANON_KEY || '').replace(/"/g, '\\"')}"`,
-  );
-}
-if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  envInject.push(
-    `SUPABASE_SERVICE_ROLE_KEY="${(process.env.SUPABASE_SERVICE_ROLE_KEY || '').replace(
-      /"/g,
-      '\\"',
-    )}"`,
-  );
-}
-if (process.env.LABEL_RENDERER_DB_JWT) {
-  envInject.push(
-    `LABEL_RENDERER_DB_JWT="${(process.env.LABEL_RENDERER_DB_JWT || '').replace(/"/g, '\\"')}"`,
-  );
-}
-if (process.env.WEBHOOK_HTTP_TOKEN) {
-  envInject.push(
-    `WEBHOOK_HTTP_TOKEN="${(process.env.WEBHOOK_HTTP_TOKEN || '').replace(/"/g, '\\"')}"`,
-  );
-}
-
-// Build -e flags for k6 (explicit __ENV pass-through)
-const k6EnvFlags = [];
-
-// Always pass the effective DATABASE_URL (may be pooler-based) to k6.
-k6EnvFlags.push('-e', `DATABASE_URL=${dbUrl.replace(/"/g, '\\"')}`);
-
-[
+const localK6EnvFlags = [
   'SUPABASE_URL',
   'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
@@ -589,47 +547,14 @@ k6EnvFlags.push('-e', `DATABASE_URL=${dbUrl.replace(/"/g, '\\"')}`);
   'DAY1_AUTO_CREATE_TENANTS',
   'DAY1_CLEANUP',
   'DAY1_CLEANUP_TENANTS',
-].forEach((key) => {
-  if (process.env[key]) {
-    k6EnvFlags.push('-e', `${key}=${process.env[key].replace(/"/g, '\\"')}`);
-  }
-});
+].flatMap((key) => (process.env[key] ? ['-e', `${key}=${process.env[key]}`] : []));
 
-const shellCommand = [
-  `xk6 build ${xk6K6Version}`,
-  `--with github.com/grafana/xk6-sql@${xk6SqlVersion}`,
-  `--with github.com/grafana/xk6-sql-driver-postgres@${xk6SqlPostgresVersion}`,
-  '--output /tmp/k6',
-  '&&',
-  envInject.join(' '),
-  '/tmp/k6 run',
-  ...k6EnvFlags,
-  `--tag scenario=${scenario}`,
-  `--summary-export ${summaryRelative}`,
+const k6RunArgs = [
+  '--tag',
+  `scenario=${scenario}`,
+  '--summary-export',
+  summaryRelative,
   scenarioFile,
-].join(' ');
-
-const dockerArgs = [
-  'run',
-  '--rm',
-  // Ensure the container user can write to the bind-mounted workspace (CI).
-  ...(process.platform === 'win32' || typeof process.getuid !== 'function' || typeof process.getgid !== 'function'
-    ? []
-    : ['--user', `${process.getuid()}:${process.getgid()}`]),
-  // Ensure Go build caches are writable when running as a non-root UID.
-  '-e', 'HOME=/tmp',
-  '-e', 'XDG_CACHE_HOME=/tmp/.cache',
-  '-e', 'GOCACHE=/tmp/.cache/go-build',
-  '-e', 'GOMODCACHE=/tmp/.cache/go-mod',
-  '-v',
-  volumePath,
-  '-w',
-  '/work',
-  '--entrypoint',
-  'sh',
-  xk6DockerImage,
-  '-c',
-  shellCommand,
 ];
 
 function dockerAvailable() {
@@ -649,9 +574,9 @@ function dockerAvailable() {
   return true;
 }
 
-// Also pass env directly to the container to ensure __ENV variables are visible to k6
-[
-  'DATABASE_URL',
+// k6 run exposes the container environment in __ENV by default.
+const dockerEnvFlags = [
+  'LOADTEST_DATABASE_URL',
   'SUPABASE_URL',
   'SUPABASE_ANON_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
@@ -696,34 +621,42 @@ function dockerAvailable() {
   'DAY1_AUTO_CREATE_TENANTS',
   'DAY1_CLEANUP',
   'DAY1_CLEANUP_TENANTS',
-].forEach((key) => {
-  if (process.env[key]) {
-    // insert before entrypoint to apply to the container env
-    const idx = dockerArgs.indexOf('--entrypoint');
-    dockerArgs.splice(idx, 0, '-e', `${key}=${process.env[key]}`);
-  }
-});
+].flatMap((key) => (process.env[key] ? ['-e', `${key}=${process.env[key]}`] : []));
+
+const dockerArgs = [
+  'run',
+  '--rm',
+  // Ensure the container user can write to the bind-mounted workspace (CI).
+  ...(process.platform === 'win32' || typeof process.getuid !== 'function' || typeof process.getgid !== 'function'
+    ? []
+    : ['--user', `${process.getuid()}:${process.getgid()}`]),
+  // Ensure Go build caches are writable when running as a non-root UID.
+  '-e', 'HOME=/tmp',
+  '-e', 'XDG_CACHE_HOME=/tmp/.cache',
+  '-e', 'GOCACHE=/tmp/.cache/go-build',
+  '-e', 'GOMODCACHE=/tmp/.cache/go-mod',
+  '-e', `DATABASE_URL=${dbUrl}`,
+  ...dockerEnvFlags,
+  '-v',
+  volumePath,
+  '-w',
+  '/work',
+  '--entrypoint',
+  'sh',
+  xk6DockerImage,
+  '-c',
+  'xk6 build "$1" --with "$2" --with "$3" --output /tmp/k6 && shift 3 && exec /tmp/k6 run "$@"',
+  'load-test', // sh -c assigns this argument to $0.
+  xk6K6Version,
+  `github.com/grafana/xk6-sql@${xk6SqlVersion}`,
+  `github.com/grafana/xk6-sql-driver-postgres@${xk6SqlPostgresVersion}`,
+  ...k6RunArgs,
+];
 
 console.log(`[load-test] Running ${scenario} scenario via ${scenarioFile}`);
 console.log(`[load-test] Summary export -> ${summaryRelative}`);
 console.log(`[load-test] Transcript log -> ${transcriptRelative}`);
 appendTranscript(`[load-test] scenario=${scenario} file=${scenarioFile} summary=${summaryRelative}\n`);
-
-function stripEnvFlags(flags, key) {
-  const out = [];
-  for (let i = 0; i < flags.length; i += 1) {
-    const item = flags[i];
-    if (item === '-e' && i + 1 < flags.length) {
-      const assignment = String(flags[i + 1] || '');
-      if (assignment.startsWith(`${key}=`)) {
-        i += 1;
-        continue;
-      }
-    }
-    out.push(item);
-  }
-  return out;
-}
 
 function runWithLocalXk6() {
   console.warn('[load-test] Docker unavailable; falling back to local xk6 build (Go required).');
@@ -772,21 +705,10 @@ function runWithLocalXk6() {
     }
   }
 
-  const localEnvFlags = stripEnvFlags(k6EnvFlags, 'DATABASE_URL');
-  localEnvFlags.push('-e', `DATABASE_URL=${dbUrl}`);
-
   console.log(`[load-test] Running k6 locally: ${path.relative(projectRoot, k6Binary)} run ${scenarioFile}`);
   const run = spawnSync(
     k6Binary,
-    [
-      'run',
-      ...localEnvFlags,
-      '--tag',
-      `scenario=${scenario}`,
-      '--summary-export',
-      summaryRelative,
-      scenarioFile,
-    ],
+    ['run', ...localK6EnvFlags, '-e', `DATABASE_URL=${dbUrl}`, ...k6RunArgs],
     { stdio: 'pipe', encoding: 'utf8', timeout: localK6TimeoutMs },
   );
   appendTranscript(String(run.stdout || ''));
