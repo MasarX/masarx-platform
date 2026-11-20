@@ -18,22 +18,21 @@ function readCommand(command, args, env) {
 
 function watchDiskGrowth(dockerRoot, env) {
   const pulls = new Set();
-  let timer; let sampling; let previousBytes; let unavailable = false;
+  let timer; let sampling; let previousBytes; let warned = false;
   const sample = async () => {
     if (sampling) return;
     sampling = true;
     try {
-      const { error, stdout } = await readCommand('sudo', ['-n', 'du', '-sbx', '--', dockerRoot], env);
+      // du can still print a total when files disappear during the scan.
+      const { stdout } = await readCommand('sudo', ['-n', 'du', '-sbx', '--', dockerRoot], env);
       const bytes = Number(/^(\d+)\t/.exec(stdout)?.[1]);
-      if (error || !Number.isSafeInteger(bytes)) throw new Error('Docker data-root size unavailable');
+      if (!Number.isSafeInteger(bytes)) throw new Error('Docker data-root size unavailable');
       if (bytes > previousBytes) for (const progress of pulls) progress();
       previousBytes = bytes;
-      unavailable = false;
     } catch {
-      if (!unavailable) console.warn('Docker data-root sampling unavailable; deferring stall detection until it resumes');
-      unavailable = true;
+      if (!warned) console.warn('Docker data-root sampling unavailable; treating missing samples as no growth');
+      warned = true;
       previousBytes = undefined;
-      for (const progress of pulls) progress();
     } finally { sampling = false; }
   };
   // The data root is shared by all concurrent pulls, so one sample serves them all.

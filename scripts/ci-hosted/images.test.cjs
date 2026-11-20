@@ -18,7 +18,7 @@ const { prepareImages } = require('./images.cjs');
 const PIN = { role: 'database', mirror: 'ghcr.io', image: 'example/database', digest: 'sha256:fixture', image_id: 'sha256:image', cli_tag: 'fixture' };
 const TOKEN = 'synthetic-test-credential';
 
-function setup(t) {
+function setup(t, { duError = null, duHasTotal = true } = {}) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'] });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pull-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -60,7 +60,8 @@ function setup(t) {
       if (args[1] === 'du') {
         assert.deepEqual([command, ...args], ['sudo', '-n', 'du', '-sbx', '--', '/fixture/docker']);
         samples++;
-        queueMicrotask(() => done(null, `${100 + samples * growth}\t/fixture/docker\n`, ''));
+        const stdout = duHasTotal ? `${100 + samples * growth}\t/fixture/docker\n` : '';
+        queueMicrotask(() => done(duError, stdout, ''));
         return;
       }
       diagnostics.push([command, ...args]);
@@ -140,6 +141,33 @@ test('shared Docker data-root growth keeps silent pulls alive', async t => {
   await result;
   await f.tick(120000);
   assert.equal(f.samples(), 17);
+});
+
+test('failed disk samples leave a silent pull idle for 120s and trigger a retry', async t => {
+  const f = setup(t, { duError: { code: 1 }, duHasTotal: false });
+  const result = f.start();
+  await flush();
+  for (let i = 0; i < 9; i++) await f.tick(12000);
+  await f.tick(11999);
+  assert.deepEqual(f.kills, []);
+  await f.tick(1);
+  assert.deepEqual(f.kills, [{ at: 120000, signal: 'SIGTERM' }]);
+  await f.tick(5000);
+  assert.deepEqual(f.pulls.map(child => child.reference), [f.reference, f.reference]);
+  f.pulls[1].finish();
+  await result;
+  assert.equal(f.messages.filter(message => message.includes('Docker data-root sampling unavailable')).length, 1);
+});
+
+test('growing disk totals from du exit 1 keep a silent pull alive', async t => {
+  const f = setup(t, { duError: { code: 1 } });
+  f.growDisk();
+  const result = f.start();
+  await flush();
+  for (let i = 0; i < 16; i++) await f.tick(12000);
+  assert.deepEqual(f.kills, []);
+  f.pulls[0].finish();
+  await result;
 });
 
 test('progressing retry is killed at the shared 600s image deadline and captures diagnostics', async t => {
