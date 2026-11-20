@@ -16,6 +16,9 @@ try {
 
 loadEnv();
 
+const DEV_ROBOTS = "noindex, nofollow";
+const DEV_ROBOTS_META = `<meta name="robots" content="${DEV_ROBOTS}">`;
+
 function minify(source, loader) {
   if (!esbuild) return source;
   try {
@@ -48,6 +51,27 @@ function normalizePathOrAbsoluteUrl(value) {
 
 function normalizeContactEndpoint(value) {
   return normalizePathOrAbsoluteUrl(value);
+}
+
+function httpOrigin(value) {
+  try {
+    const url = new URL(value);
+    if (/^https?:$/.test(url.protocol) && !url.username && !url.password) return url.origin;
+  } catch {
+    // URL parser errors can contain the configured URL.
+  }
+  return "";
+}
+
+function validateDevIntakeEndpoints(supabaseUrl, endpoints) {
+  const origin = httpOrigin(supabaseUrl);
+  if (!origin) throw new Error("NEXT_PUBLIC_SUPABASE_URL must be an absolute HTTP(S) URL for dev landing builds.");
+
+  for (const [name, value] of Object.entries(endpoints)) {
+    if (value?.trim() && httpOrigin(value) !== origin) {
+      throw new Error(`${name} must use the NEXT_PUBLIC_SUPABASE_URL origin for dev landing builds.`);
+    }
+  }
 }
 
 function endpointPathname(value) {
@@ -306,6 +330,25 @@ function copyDir(srcDir, destDir) {
 function patchHtml(html, patch) {
   let out = html;
 
+  if (patch.isDev) {
+    let formIndex = 0;
+    out = out.replace(/(<form\b[^>]*>)([\s\S]*?)<\/form>/g, (_, openingTag, contents) => {
+      const noticeId = `dev-form-notice-${++formIndex}`;
+      const describedForm = setTagAttribute(openingTag, "aria-describedby", noticeId);
+      let fields = contents.replace(/<(?:input|select|textarea|button)\b[^>]*>/, (control) => {
+        const description = control.match(/\saria-describedby="([^"]+)"/)?.[1];
+        return setTagAttribute(control, "aria-describedby", description ? `${noticeId} ${description}` : noticeId);
+      });
+      const notice = `<p id="${noticeId}" class="dev-form-notice" data-i18n="dev_form_notice"></p>`;
+      let status = "";
+      if (patch.formsDisabled) {
+        status = '<p class="dev-form-notice" data-i18n="form_status_missing_endpoint"></p>\n';
+        fields = `<fieldset class="dev-form-disabled" disabled>${fields}</fieldset>`;
+      }
+      return `<div class="dev-form-wrap">\n${status}${notice}\n${describedForm}${fields}</form>\n</div>`;
+    });
+  }
+
   // Inline scripts/event handlers break strict CSP. Keep the runtime JS responsible for behavior.
   out = out.replace(
     /<script>\s*document\.documentElement\.classList\.add\('js'\);\s*<\/script>\s*/m,
@@ -387,6 +430,7 @@ function patchHtml(html, patch) {
     `  <link rel="dns-prefetch" href="https://challenges.cloudflare.com" />`,
     `  <link rel="preconnect" href="https://challenges.cloudflare.com" crossorigin />`,
   ];
+  if (patch.isDev) headInserts.push(`  ${DEV_ROBOTS_META}`);
 
   if (patch.siteUrl) {
     const alternateEnUrl = patch.alternateEnUrl || `${patch.siteUrl}/`;
@@ -429,6 +473,7 @@ function patchHtml(html, patch) {
 }
 
 function buildHeaders({
+  isDev,
   contactEndpoint,
   tenantSignupEndpoint,
   driverSignupEndpoint,
@@ -489,6 +534,7 @@ function buildHeaders({
 
   return [
     "/*",
+    ...(isDev ? [`  X-Robots-Tag: ${DEV_ROBOTS}`] : []),
     "  Cache-Control: public, max-age=0, must-revalidate, stale-while-revalidate=60",
     "  X-Content-Type-Options: nosniff",
     "  X-Frame-Options: DENY",
@@ -548,7 +594,7 @@ function buildSitemapXml(siteUrl) {
   ].join("\n");
 }
 
-function build404Page({ cssFile, assetBasePath, siteUrl }) {
+function build404Page({ cssFile, assetBasePath, siteUrl, isDev }) {
   const homeUrl = siteUrl ? `${siteUrl}/` : "/";
   const cssHref = joinUrlPath(assetBasePath, cssFile);
   const faviconHref = joinUrlPath(assetBasePath, "brand/masarx-favicon.svg");
@@ -561,6 +607,7 @@ function build404Page({ cssFile, assetBasePath, siteUrl }) {
     '    <meta charset="utf-8" />',
     '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
     '    <meta name="color-scheme" content="light dark" />',
+    ...(isDev ? [`    ${DEV_ROBOTS_META}`] : []),
     '    <title>Page not found - MasarX</title>',
     `    <link rel="icon" href="${faviconHref}" />`,
     `    <link rel="stylesheet" href="${cssHref}" />`,
@@ -615,33 +662,52 @@ function main() {
     throw new Error(`Missing brand source directory: ${brandDir}`);
   }
 
+  const isDev = process.env.DEPLOY_ENV === "dev";
+  const intakeEndpoints = {
+    LANDING_CONTACT_ENDPOINT: process.env.LANDING_CONTACT_ENDPOINT,
+    LANDING_TENANT_SIGNUP_ENDPOINT: process.env.LANDING_TENANT_SIGNUP_ENDPOINT,
+    LANDING_DRIVER_SIGNUP_ENDPOINT: process.env.LANDING_DRIVER_SIGNUP_ENDPOINT,
+    LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT: process.env.LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT ||
+      process.env.LANDING_DRIVER_STATUS_ENDPOINT,
+    LANDING_DRIVER_APPLICATION_DOCUMENTS_ENDPOINT: process.env.LANDING_DRIVER_APPLICATION_DOCUMENTS_ENDPOINT,
+    LANDING_TRACKING_ENDPOINT: process.env.LANDING_TRACKING_ENDPOINT,
+    LANDING_CLIENTS_ENDPOINT: process.env.LANDING_CLIENTS_ENDPOINT,
+  };
+  const formsDisabled = isDev && !Object.values(intakeEndpoints).some((value) => value?.trim());
+  if (isDev && !formsDisabled) {
+    validateDevIntakeEndpoints(process.env.NEXT_PUBLIC_SUPABASE_URL, intakeEndpoints);
+  }
+
   const siteUrl = normalizeAbsoluteUrl(process.env.LANDING_SITE_URL);
   const assetBasePath = resolveAssetBasePath(siteUrl);
   const docsUrl = normalizeAbsoluteUrl(process.env.LANDING_DOCS_URL);
   const appUrl = normalizeAbsoluteUrl(process.env.LANDING_APP_URL);
-  const contactEndpoint = normalizeContactEndpoint(process.env.LANDING_CONTACT_ENDPOINT);
+  const contactEndpoint = normalizeContactEndpoint(intakeEndpoints.LANDING_CONTACT_ENDPOINT);
   const tenantSignupEndpoint = normalizeContactEndpoint(
-    process.env.LANDING_TENANT_SIGNUP_ENDPOINT
+    intakeEndpoints.LANDING_TENANT_SIGNUP_ENDPOINT
   );
   const driverSignupEntryKey = String(process.env.LANDING_DRIVER_SIGNUP_ENTRY_ID || "").trim();
   const driverSignupEndpoint = normalizeContactEndpoint(
-    process.env.LANDING_DRIVER_SIGNUP_ENDPOINT
+    intakeEndpoints.LANDING_DRIVER_SIGNUP_ENDPOINT
   );
   const driverApplicationStatusEndpoint = normalizeContactEndpoint(
-    process.env.LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT ||
-      process.env.LANDING_DRIVER_STATUS_ENDPOINT
+    intakeEndpoints.LANDING_DRIVER_APPLICATION_STATUS_ENDPOINT
   );
-  const driverApplicationDocumentsEndpoint = normalizeContactEndpoint(process.env.LANDING_DRIVER_APPLICATION_DOCUMENTS_ENDPOINT);
-  const trackingEndpoint = normalizeContactEndpoint(process.env.LANDING_TRACKING_ENDPOINT);
+  const driverApplicationDocumentsEndpoint = normalizeContactEndpoint(
+    intakeEndpoints.LANDING_DRIVER_APPLICATION_DOCUMENTS_ENDPOINT
+  );
+  const trackingEndpoint = normalizeContactEndpoint(intakeEndpoints.LANDING_TRACKING_ENDPOINT);
   const clientsEndpoint = resolveLandingClientsEndpoint(
-    process.env.LANDING_CLIENTS_ENDPOINT,
+    intakeEndpoints.LANDING_CLIENTS_ENDPOINT,
     contactEndpoint
   );
-  validateLandingRuntimeEndpoints({
-    siteUrl,
-    contactEndpoint,
-    tenantSignupEndpoint,
-  });
+  if (!formsDisabled) {
+    validateLandingRuntimeEndpoints({
+      siteUrl,
+      contactEndpoint,
+      tenantSignupEndpoint,
+    });
+  }
   const turnstileSiteKey = String(process.env.LANDING_TURNSTILE_SITE_KEY || "").trim();
   const supabaseAnonKey = String(
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "",
@@ -662,9 +728,11 @@ function main() {
 
   copyDir(brandDir, path.join(outDir, "brand"));
 
-  const cssSource = readText(path.join(srcDir, "app.css"));
+  const cssSource = readText(path.join(srcDir, "app.css")) +
+    (isDev ? "\n" + readText(path.join(srcDir, "app.dev.css")) : "");
   const appSource = readText(path.join(srcDir, "app.js"));
-  const contentSource = readText(path.join(srcDir, "content.js"));
+  const contentSource = readText(path.join(srcDir, "content.js")) +
+    (isDev ? "\n" + readText(path.join(srcDir, "content.dev.js")) : "");
   const landingCfg = extractLandingConfig(contentSource);
   const landingI18n = landingCfg.i18n || {};
   const leafletCssPath = path.join(repoRoot, "node_modules", "leaflet", "dist", "leaflet.css");
@@ -724,8 +792,10 @@ function main() {
 
   const htmlSource = readText(path.join(srcDir, "index.html"));
   const trackHtmlSource = readText(path.join(srcDir, "track.html"));
+  const devMarkup = { isDev, formsDisabled };
   const enHtml = applyStaticI18n(
     patchHtml(htmlSource, {
+      ...devMarkup,
       siteUrl,
       canonicalUrl: siteUrl ? `${siteUrl}/` : "",
       alternateEnUrl: siteUrl ? `${siteUrl}/` : "",
@@ -744,6 +814,7 @@ function main() {
 
   const arHtml = applyStaticI18n(
     patchHtml(htmlSource, {
+      ...devMarkup,
       siteUrl,
       canonicalUrl: siteUrl ? `${siteUrl}/ar/` : "",
       alternateEnUrl: siteUrl ? `${siteUrl}/` : "",
@@ -765,6 +836,7 @@ function main() {
 
   const enTrackHtml = applyStaticI18n(
     patchHtml(trackHtmlSource, {
+      ...devMarkup,
       siteUrl,
       canonicalUrl: siteUrl ? `${siteUrl}/track/` : "",
       alternateEnUrl: siteUrl ? `${siteUrl}/track/` : "",
@@ -785,6 +857,7 @@ function main() {
 
   const arTrackHtml = applyStaticI18n(
     patchHtml(trackHtmlSource, {
+      ...devMarkup,
       siteUrl,
       canonicalUrl: siteUrl ? `${siteUrl}/ar/track/` : "",
       alternateEnUrl: siteUrl ? `${siteUrl}/track/` : "",
@@ -822,6 +895,7 @@ function main() {
   writeFile(
     path.join(outDir, "_headers"),
     buildHeaders({
+      isDev,
       contactEndpoint,
       tenantSignupEndpoint,
       driverSignupEndpoint,
@@ -842,6 +916,7 @@ function main() {
 
   // 404 page (branded, matches landing design).
   const notFoundHtml = build404Page({
+    isDev,
     cssFile,
     assetBasePath,
     siteUrl,

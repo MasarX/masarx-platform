@@ -1,0 +1,13 @@
+.dev-form-notice {
+  color: var(--text);
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+}
+
+.dev-form-wrap:has(> form[hidden]) {
+  display: none;
+}
+
+.dev-form-disabled {
+  display: contents;
+}
