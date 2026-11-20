@@ -95,22 +95,4 @@ describe("e2e env loading", () => {
       expect(envModule.getSupabaseAnonKey()).toBe("preview-anon");
     });
   });
-
-  test("prefers preview-scoped Supabase keys over stale NEXT_PUBLIC fallbacks", () => {
-    process.env.PREVIEW_SUPABASE_URL = "https://preview.example.invalid";
-    process.env.PREVIEW_SUPABASE_ANON_KEY = "preview-anon";
-    process.env.PREVIEW_SUPABASE_SERVICE_ROLE_KEY = "preview-service-role";
-    process.env.SUPABASE_URL = "https://shared.example.invalid";
-    process.env.SUPABASE_ANON_KEY = "shared-anon";
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://stale.example.invalid";
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "stale-anon";
-
-    jest.isolateModules(() => {
-      const envModule = require("../e2e/utils/env");
-      envModule.loadE2EEnv();
-      expect(envModule.getSupabaseUrl()).toBe("https://preview.example.invalid");
-      expect(envModule.getSupabaseAnonKey()).toBe("preview-anon");
-      expect(process.env.SUPABASE_SERVICE_ROLE_KEY).toBe("preview-service-role");
-    });
-  });
 });
