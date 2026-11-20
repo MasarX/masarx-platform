@@ -4353,6 +4353,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       if (captureEpoch !== composerCaptureEpoch.current) return;
       setComposerCameraOpen(false);
     } catch (error) {
+      const strings = getFieldOpsStrings(selectedLocaleMode);
       if (captureEpoch === composerCaptureEpoch.current) setComposerError(composerIsSelfKyc ? strings.selfKyc.invalid : strings.pendingEvidence.failed);
     } finally {
       if (captureEpoch === composerCaptureEpoch.current) setIsCapturingComposerArtifact(false);
@@ -4360,8 +4361,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   }, [
     composerCameraPermission,
     composerIsSelfKyc,
-    strings.selfKyc,
-    strings.pendingEvidence.failed,
+    selectedLocaleMode,
     composerSupportsEvidence,
     isCapturingComposerArtifact,
     registerComposerArtifact,
@@ -4397,13 +4397,14 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       if (captureEpoch !== composerCaptureEpoch.current) return;
       clearComposerSignature();
     } catch (error) {
+      const strings = getFieldOpsStrings(selectedLocaleMode);
       if (captureEpoch === composerCaptureEpoch.current) setComposerError(strings.pendingEvidence.failed);
     } finally {
       if (captureEpoch === composerCaptureEpoch.current) setIsCapturingComposerSignature(false);
     }
   }, [
     clearComposerSignature,
-    strings.pendingEvidence.failed,
+    selectedLocaleMode,
     composerSignatureLayout,
     composerSignaturePresent,
     composerSignatureStrokes,
@@ -4427,6 +4428,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         financialAdmissionCheck?: () => boolean;
       }
     ): Promise<ActionSubmissionReceipt> => {
+      const strings = getFieldOpsStrings(selectedLocaleMode);
       if (!resource) throw new Error("Action resource is not selected.");
       const transport = command.execution?.transport ?? "rpc";
       if (transport !== "rpc" && transport !== "edge") throw new Error("Unsupported action transport.");
@@ -4582,11 +4584,12 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       cacheStore,
       completionReadbackScope,
       detailQuery.data?.detail,
-      strings,
+      selectedLocaleMode,
     ]
   );
 
   const loadFinancialTaskContext = React.useCallback(async (taskId: string, admitted: () => boolean) => {
+    const strings = getFieldOpsStrings(selectedLocaleMode);
     const captured = completionReadbackCurrent.current;
     if (!admitted() || taskId !== selectedResourceId) throw new Error(strings.financialTasks.unavailable);
     const before = await resolveVerifiedCompletionScope(client);
@@ -4598,10 +4601,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     const value = parseFinancialTaskContext(result.data, sessionUserId, composerOrganizationId ?? "", taskId);
     if (!value) throw new Error(strings.financialTasks.unavailable);
     return value;
-  }, [client, sessionUserId, completionReadbackScope, composerOrganizationId, selectedResourceId, strings.financialTasks.unavailable]);
+  }, [client, sessionUserId, completionReadbackScope, composerOrganizationId, selectedResourceId, selectedLocaleMode]);
 
   const runCommand = React.useCallback(
     async (command: UiCommandDefinition) => {
+      const strings = getFieldOpsStrings(selectedLocaleMode);
       setComposerFinancialContext(null);
       setComposerFinancialSession("");
       const admission = ++financialAdmission.current;
@@ -4651,10 +4655,11 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       const receipt = await enqueueCommand(command);
       Alert.alert(strings.alerts.actionReceiptTitle, formatMobileActionReceipt(receipt, strings));
     },
-    [strings, enqueueCommand, selectedStopSnapshot, detailQuery.data?.detail, resource, selectedResourceId, loadFinancialTaskContext]
+    [selectedLocaleMode, enqueueCommand, selectedStopSnapshot, detailQuery.data?.detail, resource, selectedResourceId, loadFinancialTaskContext]
   );
 
   const validateComposer = React.useCallback((): ComposerValidation => {
+    const strings = getFieldOpsStrings(selectedLocaleMode);
     let fields: CommandInputFieldRuntime[] = [];
     let partialDeliveryBoxNumbers: number[] | null = null;
     let completionKind: string | null = null;
@@ -4824,7 +4829,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     }
 
     return finish(null);
-  }, [composerCommand, selectedStopSnapshot, composerValues, composerIsSelfKyc, strings,
+  }, [composerCommand, selectedStopSnapshot, composerValues, composerIsSelfKyc, selectedLocaleMode,
     composerIsFinancial, composerFinancialContext, composerFinancialSession, composerFinancialAdmission, selectedResourceId,
     composerSupportsEvidence, composerSupportsPod, composerFinancialEvidence, composerEvidenceReady, composerEvidenceBusy, composerEvidenceRows,
     composerPodPolicyState.blockingMessage, composerSignatureRequired, composerSignatureArtifact,
@@ -5202,6 +5207,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
   const departureSubmitInFlight = React.useRef(false);
   const handleConfirmRouteDeparture = React.useCallback(async () => {
     if (!selectedRouteRunId || departureSubmitInFlight.current) return;
+    const strings = getFieldOpsStrings(selectedLocaleMode);
     departureSubmitInFlight.current = true;
     const epoch = completionReadbackScopeVersion();
     try {
@@ -5236,7 +5242,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     selectedRouteRunId,
     sessionUserId,
     completionReadbackScope,
-    strings,
+    selectedLocaleMode,
   ]);
 
   const handleRouteLoadAction = React.useCallback(async (input: RouteLoadActionInput) => {
