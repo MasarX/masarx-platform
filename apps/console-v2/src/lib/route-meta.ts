@@ -93,7 +93,6 @@ export const ROUTE_TITLES = {
   '/platform/imports': 'Import jobs',
   '/platform/auth-email': 'Auth email policy',
   '/platform/release-proof': 'Release proof',
-  '/platform/planning-os': 'Planning OS',
   '/platform/commands': 'Commands',
   // CLAIM-PLATFORM-ALERTS (Wave 3, Phase C) — Datadog/PagerDuty/Sentry parity
   // alerts management surface (alert_rules + alert_triggers + ops_alerts).

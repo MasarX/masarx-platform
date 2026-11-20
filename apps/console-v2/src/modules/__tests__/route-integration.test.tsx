@@ -79,7 +79,6 @@ import { LabelsModule } from '@/modules/platform/labels';
 import { WarehouseModule } from '@/modules/platform/warehouse';
 import { ImportsModule } from '@/modules/platform/imports';
 import { AuthEmailModule } from '@/modules/platform/auth-email';
-import { PlanningOsModule } from '@/modules/platform/planning-os';
 import { CommandsModule } from '@/modules/platform/commands';
 // CLAIM-PLATFORM-FLAGS (Wave 3, Phase C) — feature-flag management surface.
 import { FeatureFlagsModule } from '@/modules/platform/feature-flags';
@@ -144,7 +143,6 @@ const MODULES: ModuleEntry[] = [
   ['platform/warehouse', WarehouseModule, /warehouse|transfer|scan/i],
   ['platform/imports', ImportsModule, /import|bulk/i],
   ['platform/auth-email', AuthEmailModule, /auth|email/i],
-  ['platform/planning-os', PlanningOsModule, /planning|spec|execution|project/i],
   ['platform/commands', CommandsModule, /command|catalog/i],
   // CLAIM-PLATFORM-FLAGS (Wave 3, Phase C).
   ['platform/feature-flags', FeatureFlagsModule, /flag|feature|rollout|kill/i],

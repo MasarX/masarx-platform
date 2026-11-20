@@ -208,7 +208,6 @@ export const navigation = {
         { key: 'imports', label: 'Import jobs', icon: 'inbox', route: '/platform/imports', capability: 'imports.read' },
         { key: 'auth-email', label: 'Auth email policy', icon: 'lock', route: '/platform/auth-email', capability: 'settings.write' },
         { key: 'release-proof', label: 'Release proof', icon: 'shield', route: '/platform/release-proof', capability: 'settings.read' },
-        { key: 'planning-os', label: 'Planning OS', icon: 'kanban', route: '/platform/planning-os', capability: 'audit_log.read' },
         { key: 'commands', label: 'Commands', icon: 'cmd', route: '/platform/commands', capability: 'audit_log.read' },
         // CLAIM-PLATFORM-ALERTS (Wave 3, Phase C) — Datadog/PagerDuty/Sentry
         // parity alerts management surface. Mirrors public.alert_rules +

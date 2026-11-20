@@ -6,7 +6,7 @@
   "description": "",
   "scripts": {
     "dev": "vite --port 5175",
-    "build": "tsc -b && vite build",
+    "build": "vite build && tsc -b",
     "build:analyze": "ANALYZE=1 npm run build",
     "preview": "vite preview --port 5175",
     "typecheck": "tsc -b --noEmit",
