@@ -161,8 +161,8 @@ const resolveDashboardNavigationHref = (
   if (trimmed.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
     return null;
   }
-  const safeBase = resolveSafeAppBasePath(appBasePath);
-  if (safeBase === null || hasUnsafeDashboardPathSegment(safeBase)) return null;
+  const normalizedBase = resolveSafeAppBasePath(appBasePath);
+  if (normalizedBase === null || hasUnsafeDashboardPathSegment(normalizedBase)) return null;
   if (hasUnsafeDashboardPathSegment(trimmed)) return null;
   let parsed: URL;
   try {
@@ -170,7 +170,6 @@ const resolveDashboardNavigationHref = (
   } catch {
     return null;
   }
-  const normalizedBase = safeBase.trim().replace(/\/+$/g, "");
   if (
     normalizedBase &&
     parsed.pathname.startsWith(normalizedBase) &&

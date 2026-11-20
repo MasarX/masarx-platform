@@ -1,3 +1,5 @@
+import { trimTrailingSlashes } from "./trim-trailing-slashes";
+
 const TRUSTED_BROWSER_SCHEMES = new Set(["http:", "https:"]);
 const FALLBACK_TRUSTED_ORIGIN = "https://example.invalid";
 const URL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
@@ -177,7 +179,7 @@ export const DEFAULT_ALLOWED_DOWNLOAD_HOSTS = parseHostList(
 
 export const resolveSafeAppBasePath = (appBasePath: string) => {
   if (hasUnsafeUrlCharacters(appBasePath)) return null;
-  const base = appBasePath.trim().replace(/\/+$/g, "");
+  const base = trimTrailingSlashes(appBasePath.trim());
   if (!base || base === "/") return "";
   if (base.startsWith("//")) return null;
   if (base.includes("://")) return null;

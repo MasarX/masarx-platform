@@ -1,6 +1,8 @@
+import { trimTrailingSlashes } from "./trim-trailing-slashes";
+
 export function normalizeBasePath(basePath?: string) {
   if (!basePath) return "";
-  const trimmed = basePath.replace(/\/+$/g, "");
+  const trimmed = trimTrailingSlashes(basePath);
   if (!trimmed || trimmed === "/") return "";
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
@@ -19,8 +21,7 @@ function dedupeLeadingSegment(pathValue: string) {
     segments.splice(1, 1);
   }
   const normalized = `/${segments.join("/")}`;
-  const result = normalized === "/" ? normalized : normalized.replace(/\/+$/g, "");
-  return suffix ? `${result}${suffix}` : result;
+  return suffix ? `${normalized}${suffix}` : normalized;
 }
 
 function stripLegacyRootAppPrefix(pathValue: string) {
