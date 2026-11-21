@@ -15,6 +15,10 @@ DECLARE
   v_shipment UUID := gen_random_uuid();
   v_run UUID := gen_random_uuid();
   v_stop UUID := gen_random_uuid();
+  v_reader_role_key TEXT := gen_random_uuid()::text;
+  v_driver_role JSONB;
+  v_policy JSONB;
+  v_policy_schema INTEGER;
 BEGIN
   PERFORM set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
   INSERT INTO public.organizations (id, name, slug) VALUES
@@ -23,9 +27,27 @@ BEGIN
   PERFORM set_config('app.organization_onboarding_source', '', true);
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type) VALUES
-    (v_reader, v_org, 'returns-warehouse@example.test', 'Returns Warehouse Operator', 'warehouse_operator', 'active', 'tenant'),
+    (v_reader, v_org, 'returns-reader@example.test', 'Returns Money Driver', 'fieldops_money_driver', 'active', 'tenant'),
     (v_driver, v_org, 'returns-driver@example.test', 'Returns Money Driver', 'fieldops_money_driver', 'active', 'tenant'),
     (v_other_driver, v_other_org, 'returns-other-driver@example.test', 'Returns Driver', 'driver', 'active', 'tenant');
+
+  -- Match the writer's seeded role except for the capability under test.
+  v_policy := public.resolve_settings_merged('access_control_policy', 'tenant', v_org);
+  SELECT role INTO STRICT v_driver_role FROM jsonb_array_elements(v_policy->'roles') AS roles(role)
+  WHERE role->>'key' = 'fieldops_money_driver';
+  SELECT version INTO STRICT v_policy_schema FROM public.schema_registry
+  WHERE category = 'access_control_policy' AND is_active ORDER BY version DESC LIMIT 1;
+
+  v_policy := jsonb_set(v_policy, '{roles}', (v_policy->'roles') || jsonb_build_array(
+    v_driver_role || jsonb_build_object('key', v_reader_role_key, 'capability_keys',
+      (v_driver_role->'capability_keys') - 'returns.write')
+  ));
+  v_policy := jsonb_set(v_policy, '{assignments}', COALESCE(v_policy->'assignments', '{}') || jsonb_build_object(
+    'user_id', COALESCE(v_policy#>'{assignments,user_id}', '{}') || jsonb_build_object(
+      v_reader::text, jsonb_build_array(v_reader_role_key))
+  ));
+  PERFORM public.upsert_settings_value_v1('access_control_policy', 'tenant', v_org, v_policy,
+                                          v_policy_schema, 'Returns capability fixture');
 
   INSERT INTO public.clients (id, organization_id, name, slug)
   VALUES (v_client, v_org, 'Returns Client', 'returns-client-' || left(v_client::text, 8));
