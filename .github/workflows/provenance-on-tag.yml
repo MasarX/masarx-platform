@@ -3,12 +3,6 @@ name: Provenance on tag
 'on':
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing v* tag (select the same tag as the workflow ref)
-        type: string
-        required: true
 
 permissions:
   contents: read
@@ -42,11 +36,9 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ github.token }}
-          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
-          if [[ "$GITHUB_REF" != refs/tags/v* || "$GITHUB_REF_NAME" == */* ||
-                ( "$GITHUB_EVENT_NAME" == workflow_dispatch && "$REQUESTED_TAG" != "$GITHUB_REF_NAME" ) ]]; then
-            echo '::error::Release requires a v* tag ref matching the requested tag.'
+          if [[ "$GITHUB_REF" != refs/tags/v* || "$GITHUB_REF_NAME" == */* ]]; then
+            echo '::error::Release requires a v* tag ref.'
             exit 1
           fi
           if ! sha="$(git rev-parse --verify "$GITHUB_REF^{commit}")" ||
@@ -54,17 +46,19 @@ jobs:
             echo '::error::Release tag does not resolve to the commit that triggered this run.'
             exit 1
           fi
-          if ! git merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
-            echo "::error::Release commit $sha is not an ancestor of origin/main."
+          if ! git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$sha" > /dev/null; then
+            echo "::error::Release commit $sha is not on the first-parent history of origin/main."
             exit 1
           fi
 
-          # Bind the check to public CI so a same-name job cannot qualify a release.
+          # Public CI on pull requests can skip jobs and can use changes to the workflow from the PR.
           if ! suites="$(gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/actions/workflows/public-ci.yml/runs?head_sha=$sha&per_page=100" \
-            | jq -c '[.[].workflow_runs[].check_suite_id]')" ||
+            | jq -c '[.[].workflow_runs[]
+              | select(.event == "merge_group" or (.event == "push" and .head_branch == "main"))
+              | .check_suite_id]')" ||
              ! checks="$(gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs?check_name=ci-gate&per_page=100")"; then
+            "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs?check_name=ci-gate&filter=all&per_page=100")"; then
             echo "::error::Could not read CI check evidence for release commit $sha."
             exit 1
           fi
@@ -75,7 +69,7 @@ jobs:
             | max_by(.id)
             | .status == "completed" and .conclusion == "success"
           ' <<< "$checks" > /dev/null; then
-            echo "::error::Release requires the latest public CI ci-gate on $sha to have completed successfully."
+            echo "::error::Release requires a successful ci-gate from the latest qualifying public CI evidence on $sha."
             exit 1
           fi
           printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
@@ -113,7 +107,9 @@ jobs:
           node scripts/ci-hosted/tasks.cjs build landing
           test -s dist/landing/index.html
           mkdir release
-          tar -czf release/landing.tar.gz -C dist/landing .
+          commit_time="$(git show -s --format=%ct HEAD)"
+          tar --sort=name --mtime="@$commit_time" --owner=0 --group=0 --numeric-owner -cf - -C dist/landing . \
+            | gzip -n > release/landing.tar.gz
           (cd release && sha256sum landing.tar.gz > SHA256SUMS)
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

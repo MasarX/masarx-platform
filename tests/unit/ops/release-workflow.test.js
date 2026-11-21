@@ -7,21 +7,15 @@ const workflow = yaml.parse(body);
 const { verify, build } = workflow.jobs;
 
 describe('release workflow contract', () => {
-  test('runs on version tags and requires the same tag ref on manual runs', () => {
-    expect(workflow.on).toEqual({
-      push: { tags: ['v*'] },
-      workflow_dispatch: {
-        inputs: { tag: { description: expect.any(String), type: 'string', required: true } },
-      },
-    });
+  test('runs only on version tag pushes', () => {
+    expect(workflow.on).toEqual({ push: { tags: ['v*'] } });
+    expect(workflow.on.workflow_dispatch).toBeUndefined();
     expect(workflow.concurrency).toEqual({
       group: 'release-${{ github.ref }}',
       'cancel-in-progress': false,
     });
     const gate = verify.steps.find(step => step.id === 'verify');
-    expect(gate.env.REQUESTED_TAG).toBe('${{ inputs.tag }}');
     expect(gate.run).toContain('"$GITHUB_REF" != refs/tags/v*');
-    expect(gate.run).toContain('"$REQUESTED_TAG" != "$GITHUB_REF_NAME"');
   });
 
   test('gives the two bounded jobs only the permissions they use', () => {
@@ -35,13 +29,20 @@ describe('release workflow contract', () => {
     }
   });
 
-  test('requires a successful ci-gate from public CI on the exact main commit', () => {
+  test('requires trusted public CI on the exact first-parent main commit', () => {
     const gate = verify.steps.find(step => step.id === 'verify');
     expect(gate.run).toContain('git rev-parse --verify "$GITHUB_REF^{commit}"');
     expect(gate.run).toContain('"$sha" != "$(git rev-parse HEAD)"');
-    expect(gate.run).toContain('git merge-base --is-ancestor "$sha" refs/remotes/origin/main');
+    const firstParent = 'git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$sha"';
+    expect(gate.run).toContain(firstParent);
     expect(gate.run).toContain('actions/workflows/public-ci.yml/runs?head_sha=$sha');
-    expect(gate.run).toContain('commits/$sha/check-runs?check_name=ci-gate');
+    const eventFilter = 'select(.event == "merge_group" or (.event == "push" and .head_branch == "main"))';
+    expect(gate.run).toContain(eventFilter);
+    expect(gate.run.indexOf(firstParent)).toBeLessThan(gate.run.indexOf('gh api'));
+    expect(gate.run).toContain('max_by(.id)');
+    expect(gate.run.indexOf(eventFilter)).toBeLessThan(gate.run.indexOf('max_by(.id)'));
+    expect(gate.run).toContain('commits/$sha/check-runs?check_name=ci-gate&filter=all');
+    expect(gate.run).toContain('.app.slug == "github-actions"');
     expect(gate.run).toContain('.head_sha == $sha');
     expect(gate.run).toContain('.status == "completed" and .conclusion == "success"');
     expect(build.needs).toBe('verify');
@@ -63,8 +64,16 @@ describe('release workflow contract', () => {
     expect(publish.run).toContain('--verify-tag');
   });
 
+  test('normalizes archive order, ownership and timestamps before checksumming', () => {
+    const pack = build.steps.find(step => step.run?.includes('sha256sum landing.tar.gz'));
+    expect(pack.run).toContain('git show -s --format=%ct HEAD');
+    expect(pack.run).toContain('tar --sort=name --mtime="@$commit_time" --owner=0 --group=0 --numeric-owner');
+    expect(pack.run).toContain('gzip -n > release/landing.tar.gz');
+    expect(pack.run).toContain('sha256sum landing.tar.gz > SHA256SUMS');
+  });
+
   test('avoids deployment, environment bindings and repository secrets', () => {
-    expect(body).not.toMatch(/\b(?:deploy(?:ment)?|vercel|wrangler|secrets)\b|^\s*environment:/im);
+    expect(body).not.toMatch(/\b(?:deploy(?:ment)?|npm\s+publish|gh-pages|pages\s+deploy|vercel|cloudflare|wrangler|secrets)\b|^\s*environment:/im);
     const tokenBindings = [verify, build].flatMap(job => job.steps.map(step => step.env?.GH_TOKEN).filter(Boolean));
     expect(tokenBindings).toEqual(['${{ github.token }}', '${{ github.token }}']);
   });
