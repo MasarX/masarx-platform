@@ -476,7 +476,7 @@ describe('COD driver shift settlement workflow', () => {
     const branchId = await createBranch(organizationId);
     expect(branchId).toBeTruthy();
 
-    await seedCanonicalCodPaymentCollection({
+    const { actionId, routeStopId } = await seedCanonicalCodPaymentCollection({
       organizationId,
       branchId,
       driverUserId,
@@ -531,6 +531,21 @@ describe('COD driver shift settlement workflow', () => {
     expect(handoverTaskId).toBeTruthy();
 
     await setAuthContext(client, driverUserId);
+    expect(routeStopId).toBeTruthy();
+    expect(actionId).toBeTruthy();
+    const { rows: [stop] } = await client.query(
+      `SELECT api.resolve_fieldops_stop_detail_v1($1::uuid, 'driver', '{}'::jsonb) AS detail`,
+      [routeStopId],
+    );
+    expect(stop?.detail?.paymentCollection).toMatchObject({
+      outcome: 'collected',
+      method: 'cash',
+      expectedAmount: 100,
+      collectedAmount: 100,
+      currency: 'SAR',
+      source: 'shipment_action',
+      shipmentActionId: actionId,
+    });
     const driverShiftSessionId = await openOpsSession(
       'driver_shift',
       branchId,
@@ -620,7 +635,7 @@ describe('COD driver shift settlement workflow', () => {
 
     const { rows: financeRows } = await withFixtureAdminContext(client, () =>
       client.query(
-        `SELECT direction, amount, currency, account_type, account_id
+        `SELECT id, direction, amount, currency, account_type, account_id
            FROM finance_events
           WHERE organization_id = $1::uuid
             AND event_type = 'cod_handover'
@@ -649,14 +664,20 @@ describe('COD driver shift settlement workflow', () => {
 
     const { rows: membershipRows } = await withFixtureAdminContext(client, () =>
       client.query(
-        `SELECT COUNT(*)::int AS count
-           FROM settlement_batch_finance_events
-          WHERE organization_id = $1::uuid
-            AND settlement_batch_id = $2::uuid`,
+        `SELECT member.finance_event_id
+           FROM public.settlement_batch_finance_events member
+           JOIN public.finance_events fe
+             ON fe.id = member.finance_event_id
+            AND fe.organization_id = member.organization_id
+            AND fe.occurred_at = member.finance_occurred_at
+          WHERE member.organization_id = $1::uuid
+            AND member.settlement_batch_id = $2::uuid
+          ORDER BY fe.direction`,
         [organizationId, settlementBatchId]
       )
     );
-    expect(membershipRows[0]?.count).toBe(2);
+    expect(membershipRows.map((row) => row.finance_event_id))
+      .toEqual(financeRows.map((row) => row.id));
   });
 
   test('cod_driver_shift_settlement_v2 requires manager approval when variance exceeds policy tolerance', async () => {

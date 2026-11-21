@@ -140,6 +140,7 @@ describe('CodModule (CLAIM-FINANCE-COD — W39 closure)', () => {
 
     expect(await screen.findByText('COD summary unavailable')).toBeInTheDocument();
     expect(screen.getByText('This section could not load. Please try again or contact an administrator.')).toBeInTheDocument();
+    expect(screen.queryByText('summary projection unavailable')).not.toBeInTheDocument();
     expect(screen.queryByText('Expected')).not.toBeInTheDocument();
   });
 

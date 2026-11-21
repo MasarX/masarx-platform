@@ -1209,7 +1209,7 @@ export function BillingModule() {
         <StateView
           kind="error"
           title="Billing policy is not configured"
-          hint="The overdue-aging setting is missing. Finish billing policy setup before using this surface."
+          hint="The overdue-aging setting is missing. Ask an administrator to finish billing policy setup before using this surface."
         />
       </div>
     );

@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(6);
+SELECT plan(9);
 
 SELECT has_function(
   'public',
@@ -120,6 +120,113 @@ SELECT ok(
   ),
   'settlement batch is linked to the finance event membership table'
 );
+
+CREATE FUNCTION pg_temp.test_marketplace_finalize_after_reversal()
+RETURNS SETOF text
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_requester uuid := gen_random_uuid();
+  v_supplier uuid := gen_random_uuid();
+  v_actor uuid := gen_random_uuid();
+  v_platform_org uuid := gen_random_uuid();
+  v_platform_actor uuid := gen_random_uuid();
+  v_profile uuid := gen_random_uuid();
+  v_request uuid := gen_random_uuid();
+  v_offer uuid := gen_random_uuid();
+  v_award uuid := gen_random_uuid();
+  v_contract uuid := gen_random_uuid();
+  v_work_package uuid := gen_random_uuid();
+  v_result jsonb;
+  v_reversal_rejection CONSTANT jsonb := '{"ok":false,"error":{"code":"settlement_already_reversed"}}'::jsonb;
+BEGIN
+  INSERT INTO public.organizations (id, name, slug)
+  VALUES
+    (v_requester, 'Reversal fixture requester', 'reversal-requester-' || left(v_requester::text, 8)),
+    (v_supplier, 'Reversal fixture supplier', 'reversal-supplier-' || left(v_supplier::text, 8)),
+    (v_platform_org, 'Reversal fixture platform', 'reversal-platform-' || left(v_platform_org::text, 8));
+
+  INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type)
+  VALUES
+    (v_actor, v_requester, 'reversal-' || v_actor::text || '@example.com', 'Reversal fixture operator', 'ops_admin', 'tenant'),
+    (v_platform_actor, v_platform_org, 'reversal-' || v_platform_actor::text || '@example.com', 'Reversal fixture platform operator', 'super_admin', 'platform');
+
+  PERFORM public.provision_rbac_roles_from_templates_v1(v_requester, ARRAY['ops_admin'], v_actor);
+  INSERT INTO public.rbac_user_role_assignments (organization_id, user_id, role_id, assigned_by_user_id)
+  SELECT v_requester, v_actor, id, v_actor
+    FROM public.rbac_roles
+   WHERE organization_id = v_requester AND key = 'ops_admin';
+
+  INSERT INTO public.marketplace_participant_profiles (id, organization_id, participant_type_key, display_name)
+  VALUES (v_profile, v_supplier, 'freelancer_driver', 'Reversal fixture supplier');
+  INSERT INTO public.marketplace_requests (id, requester_organization_id, request_kind_key, title, status)
+  VALUES (v_request, v_requester, 'capacity_block', 'Reversal fixture request', 'completed');
+  INSERT INTO public.marketplace_offers (
+    id, request_id, supplier_participant_profile_id, supplier_organization_id, pricing
+  )
+  VALUES (v_offer, v_request, v_profile, v_supplier, '{"amount":91,"currency":"SAR"}');
+  INSERT INTO public.marketplace_awards (
+    id, request_id, offer_id, requester_organization_id, supplier_organization_id, supplier_participant_profile_id
+  )
+  VALUES (v_award, v_request, v_offer, v_requester, v_supplier, v_profile);
+  INSERT INTO public.marketplace_contracts (
+    id, request_id, award_id, requester_organization_id, supplier_organization_id,
+    supplier_participant_profile_id, status, settlement_mode_key
+  )
+  VALUES (v_contract, v_request, v_award, v_requester, v_supplier, v_profile, 'completed', 'auto_recorded_internal');
+  INSERT INTO public.marketplace_work_packages (
+    id, contract_id, request_id, award_id, requester_organization_id,
+    supplier_organization_id, supplier_participant_profile_id, status
+  )
+  VALUES (v_work_package, v_contract, v_request, v_award, v_requester, v_supplier, v_profile, 'completed');
+
+  PERFORM set_config('request.jwt.claim.sub', v_actor::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_actor, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+
+  v_result := public.marketplace_settlement_finalize_v1(v_work_package, v_contract);
+  IF v_result->>'status' IS DISTINCT FROM 'settled' THEN
+    RAISE EXCEPTION 'marketplace fixture did not finalize: %', v_result;
+  END IF;
+  v_result := public.marketplace_settlement_reverse_v1(v_work_package, 'Synthetic reversal');
+  IF v_result->>'status' IS DISTINCT FROM 'completed' OR v_result->>'requester_settlement_batch_id' IS NULL THEN
+    RAISE EXCEPTION 'marketplace fixture did not reverse: %', v_result;
+  END IF;
+
+  RETURN NEXT is(
+    public.marketplace_settlement_finalize_v1(v_work_package, v_contract),
+    v_reversal_rejection,
+    'a posted reversal prevents re-finalizing the marketplace work package'
+  );
+  RESET ROLE;
+
+  RETURN NEXT is(
+    public.marketplace_post_completed_settlement_v1(v_work_package, '{}'::jsonb),
+    v_reversal_rejection,
+    'the shared posting helper rejects a posted reversal before settlement'
+  );
+
+  -- Completion normally short-circuits after reversal. Reopen the rollback
+  -- fixture with the posted reversal intact to exercise the platform posting path.
+  UPDATE public.marketplace_work_packages
+     SET status = 'in_execution'
+   WHERE id = v_work_package;
+
+  PERFORM set_config('request.jwt.claim.sub', v_platform_actor::text, true);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_platform_actor, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+  v_result := api.marketplace_work_package_complete_v1(v_work_package);
+  RETURN NEXT is(
+    v_result->'settlement',
+    v_reversal_rejection,
+    'authorized non-party platform completion cannot re-post a reversed settlement'
+  );
+  RESET ROLE;
+END;
+$function$;
+
+SELECT * FROM pg_temp.test_marketplace_finalize_after_reversal();
 
 SELECT * FROM finish();
 ROLLBACK;
