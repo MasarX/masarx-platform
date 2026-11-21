@@ -329,6 +329,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       requestHeaders[normalizeHeaderKey(key)] = value;
     }
     const normalizedHeaders = requestHeaders;
+    normalizedHeaders.traceparent = trace.traceparent;
+    if (trace.tracestate && !normalizedHeaders.tracestate) {
+      normalizedHeaders.tracestate = trace.tracestate;
+    }
     let rawBody = "";
     let payload: JsonRecord = {};
     try {
@@ -348,10 +352,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     if (!normalizedHeaders["x-correlation-id"]) {
       normalizedHeaders["x-correlation-id"] = correlationId;
-    }
-    normalizedHeaders.traceparent = trace.traceparent;
-    if (trace.tracestate && !normalizedHeaders.tracestate) {
-      normalizedHeaders.tracestate = trace.tracestate;
     }
 
     const rpcAuthAttempts = INGRESS_DB_AUTH.authAttempts;

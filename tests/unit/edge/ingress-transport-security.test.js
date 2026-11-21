@@ -10,13 +10,54 @@ const loopbackHostnameContract = require("../../fixtures/loopback-hostname-contr
 
 describe("public ingress transport security", () => {
   let cors;
+  let resolveIngressDbAuth;
   let apiGatewaySource;
   let webhookReceiverSource;
 
   beforeAll(async () => {
     cors = await import(pathToFileURL(corsModulePath).href);
+    ({ resolveIngressDbAuth } = await import(new URL("./mod.mjs", pathToFileURL(corsModulePath)).href));
     apiGatewaySource = fs.readFileSync(apiGatewayPath, "utf8").replace(/\r\n/g, "\n");
     webhookReceiverSource = fs.readFileSync(webhookReceiverPath, "utf8").replace(/\r\n/g, "\n");
+  });
+
+  test("missing required DB JWT leaves ingress without a credential attempt", () => {
+    expect(resolveIngressDbAuth({
+      secretKey: "fixture-secret",
+      serviceRoleKey: "fixture-service-role",
+      requireDbJwt: "true",
+      allowServiceRoleFallback: "true",
+    }).authAttempts).toEqual([]);
+  });
+
+  test("an unset DB JWT requirement fails closed by default", () => {
+    expect(resolveIngressDbAuth({ secretKey: "x" }).authAttempts).toEqual([]);
+  });
+
+  test("a modern secret key uses only the apikey header when JWT is optional", () => {
+    const auth = resolveIngressDbAuth({
+      secretKey: "fixture-secret",
+      serviceRoleKey: "fixture-service-role",
+      requireDbJwt: "false",
+    });
+    expect(auth.authAttempts).toEqual([{
+      label: "secret_key",
+      headers: {
+        apikey: "fixture-secret",
+        "content-type": "application/json",
+        prefer: "tx=commit",
+      },
+    }]);
+  });
+
+  test("webhook parse failures carry normalized tracing metadata", () => {
+    const requestTrace = webhookReceiverSource.indexOf(
+      "normalizedHeaders.traceparent = trace.traceparent;",
+    );
+    const parseBody = webhookReceiverSource.indexOf("await parseRequestBody(req)");
+    expect(requestTrace).toBeGreaterThan(-1);
+    expect(parseBody).toBeGreaterThan(requestTrace);
+    expect(webhookReceiverSource).toContain("redactIngressForwardedHeaders(normalizedHeaders)");
   });
 
   test("shared CORS policy allows an exact configured hosted HTTPS origin", () => {

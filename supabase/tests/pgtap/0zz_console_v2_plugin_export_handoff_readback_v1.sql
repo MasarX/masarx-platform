@@ -6,7 +6,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET search_path TO public, pgtap, extensions, pg_temp;
 
-SELECT plan(26);
+SELECT plan(30);
 
 SELECT has_function(
   'public',
@@ -625,6 +625,63 @@ SELECT ok(
        AND de.correlation_id = (b.activation_payload->>'issued_token_refresh_correlation_id')::uuid
   ),
   'export handoff refresh emits workflow-engine-first domain event lineage'
+);
+
+UPDATE public.integration_plugin_bindings
+   SET activation_payload = (
+         COALESCE(activation_payload, '{}'::jsonb)
+         - 'issued_token'
+         - 'issued_token_refreshed_at'
+         - 'issued_token_refreshed_by'
+         - 'issued_token_refresh_reason'
+         - 'issued_token_refresh_correlation_id'
+       )
+ WHERE id = 'e4872250-0000-4000-8000-000000000006'::uuid;
+
+CREATE TEMP TABLE pgtap_plugin_export_handoff_missing_token_result AS
+SELECT api.integration_plugin_export_handoff_v1(
+  'e4872250-0000-4000-8000-000000000005'::uuid,
+  'https://console.example.test/'
+) AS result;
+
+SELECT ok(
+  (SELECT COALESCE(length(result->>'token'), 0) >= 32 FROM pgtap_plugin_export_handoff_missing_token_result),
+  'export handoff issues a concrete token when an enabled source binding is missing issued_token'
+);
+
+SELECT ok(
+  (
+    SELECT b.activation_payload->>'issued_token' = r.result->>'token'
+      FROM public.integration_plugin_bindings b
+      CROSS JOIN pgtap_plugin_export_handoff_missing_token_result r
+     WHERE b.id = 'e4872250-0000-4000-8000-000000000006'::uuid
+  ),
+  'export handoff writes missing-token lineage back to the plugin binding'
+);
+
+SELECT ok(
+  (
+    SELECT crypt(r.result->>'token', s.auth_token_hash) = s.auth_token_hash
+      FROM pgtap_plugin_export_handoff_missing_token_result r
+      JOIN public.webhook_sources s
+        ON s.id = 'e4872250-0000-4000-8000-000000000003'::uuid
+  ),
+  'export handoff missing-token issuance updates the canonical webhook source hash'
+);
+
+SELECT ok(
+  EXISTS (
+    SELECT 1
+      FROM public.decision_log dl
+      JOIN public.integration_plugin_bindings b
+        ON b.id = 'e4872250-0000-4000-8000-000000000006'::uuid
+     WHERE dl.resource_type = 'webhook_source'
+       AND dl.resource_id = 'e4872250-0000-4000-8000-000000000003'::uuid
+       AND dl.decision_point = 'integration_plugin_export_handoff_v1'
+       AND dl.decision_outcome = 'issued'
+       AND dl.correlation_id = (b.activation_payload->>'issued_token_refresh_correlation_id')::uuid
+  ),
+  'export handoff missing-token issuance writes decision lineage'
 );
 
 UPDATE public.webhook_sources
