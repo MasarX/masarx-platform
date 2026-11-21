@@ -6,9 +6,11 @@ SELECT plan(5);
 SET LOCAL pgtap.vendor_company_id = '999999';
 SET LOCAL pgtap.vendor_base_url = 'https://vendor.example.invalid';
 
+-- The post-migration integration fixture selects accounts through policy and has no metadata company id.
 SELECT is(
   (SELECT array_agg(DISTINCT metadata->>'company_id')
-     FROM public.providers WHERE name = 'logestechs_3pl'),
+     FROM public.providers
+    WHERE name = 'logestechs_3pl' AND metadata ? 'company_id'),
   ARRAY[current_setting('pgtap.vendor_company_id')],
   'vendor providers have a synthetic company id by default'
 );
@@ -20,14 +22,15 @@ SELECT is(
   'vendor providers have a reserved example base URL by default'
 );
 
-SELECT is(
-  (SELECT array_agg(DISTINCT operation.url_template)
-     FROM public.operation_templates AS operation
-     JOIN public.providers AS provider ON provider.id = operation.provider_id
-    WHERE provider.name = 'logestechs_3pl'
-      AND operation.operation_name = 'logestechs_create_shipment_v1'),
-  ARRAY[current_setting('pgtap.vendor_base_url') || '/api/v2/shipments'],
-  'the seeded vendor operation uses the reserved example base URL'
+-- Fresh installs have no legacy operation because its seed required an earlier provider row.
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1
+      FROM public.operation_templates
+     WHERE operation_name = 'logestechs_create_shipment_v1'
+       AND url_template IS DISTINCT FROM current_setting('pgtap.vendor_base_url') || '/api/v2/shipments'
+  ),
+  'every legacy vendor operation present uses the reserved example base URL'
 );
 
 SELECT ok(

@@ -17,14 +17,11 @@ BEGIN
          updated_at = now()
    WHERE name = 'logestechs_3pl';
 
-  -- The legacy workflow operation stores a copy of the provider URL.
-  UPDATE public.operation_templates AS operation
+  -- The legacy operation may exist on upgrades where its original provider was already seeded.
+  UPDATE public.operation_templates
      SET url_template = v_base_url || '/api/v2/shipments',
          updated_at = now()
-    FROM public.providers AS provider
-   WHERE operation.provider_id = provider.id
-     AND provider.name = 'logestechs_3pl'
-     AND operation.operation_name = 'logestechs_create_shipment_v1';
+   WHERE operation_name = 'logestechs_create_shipment_v1';
 
   -- Match the seeded global version and leave separately configured account versions intact.
   WITH repaired_versions AS (

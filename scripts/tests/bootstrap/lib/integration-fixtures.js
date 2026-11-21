@@ -2,6 +2,7 @@
 /* eslint-disable no-console */
 const { randomUUID } = require('crypto');
 const { Client } = require('pg');
+const { baseUrl: VENDOR_BASE_URL } = require('../../../../tests/fixtures/carrier/vendor-account.synthetic.json');
 const { loadEnv } = require('../../../utils/load-env');
 const {
   isRetryableDbConnectError,
@@ -1390,7 +1391,7 @@ async function ensureIntegrationFixtures(options = {}) {
       providerType: '3pl',
       priorityRank: 1,
       metadata: {
-        base_url: 'https://api.logestechs.com',
+        base_url: VENDOR_BASE_URL,
       },
     });
     await ensureProvider(client, {
