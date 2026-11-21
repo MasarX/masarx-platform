@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const yaml = require('yaml');
 
-const body = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/release.yml'), 'utf8');
+const body = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/tag-provenance.yml'), 'utf8');
 const workflow = yaml.parse(body);
 const { verify, build } = workflow.jobs;
 
