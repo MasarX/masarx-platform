@@ -1,4 +1,4 @@
-name: Tag provenance
+name: Provenance on tag
 
 'on':
   push:
