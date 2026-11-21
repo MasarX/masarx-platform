@@ -1,4 +1,4 @@
-const { migrationDiff, orderViolations } = require('../../../scripts/ci-hosted/migrations.cjs');
+const { assess, migrationDiff, orderViolations } = require('../../../scripts/ci-hosted/migrations.cjs');
 
 const directory = 'supabase/migrations/';
 const base = 'a'.repeat(40);
@@ -38,11 +38,17 @@ test('ignores a modified migration for ordering', () => {
   expect(fixture([['M', latest]]).messages).toEqual([]);
 });
 
-test('ignores changes under archive', () => {
+test.each(['A', 'M', 'D'])('ignores archive change %s for ordering and rejects it for append-only', (status) => {
   const archived = `${directory}archive/fixtures/20260101000000_old.sql`;
-  const { changes, messages } = fixture([['A', archived], ['M', archived]]);
-  expect(changes).toEqual([]);
+  const { baseFiles, changes, messages } = fixture([[status, archived]]);
+  const objects = new Map([[archived, { mode: '100644' }]]);
   expect(messages).toEqual([]);
+  expect(assess(baseFiles, changes, new Map(), objects).failed).toEqual([`${status}: ${archived}`]);
+});
+
+test('rejects a 12-digit addition that sorts before the 14-digit base stamp', () => {
+  const shorter = `${directory}202601020000_shorter.sql`;
+  expect(fixture([['A', shorter]]).messages).toEqual([violation(shorter)]);
 });
 
 test('names only the out-of-order addition in a mixed diff', () => {

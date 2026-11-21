@@ -37,7 +37,7 @@ function orderFloor(baseFiles) {
 function orderViolations(baseFiles, changes) {
   const { stamp, latest } = orderFloor(baseFiles);
   return changes.flatMap(([status, file]) => {
-    if (status !== 'A' || !file.startsWith(prefix)) return [];
+    if (status !== 'A' || !file.startsWith(prefix) || file.startsWith(`${prefix}archive/`)) return [];
     const version = filename.exec(file.slice(prefix.length))?.[1];
     if (!version || version > stamp) return [];
     return [`Migration order violation for ${file}. Base latest is ${prefix}${latest}. To fix it, re-stamp after ${stamp}.`];
@@ -100,10 +100,7 @@ function migrationDiff(base, read = git) {
   const fields = read(['diff', '--no-renames', '--name-status', '-z', base, 'HEAD', '--', prefix]).split('\0').filter(Boolean);
   if (fields.length % 2) throw new Error('Malformed migration diff');
   const changes = [];
-  for (let i = 0; i < fields.length; i += 2) {
-    const file = fields[i + 1];
-    if (!file.startsWith(`${prefix}archive/`)) changes.push([fields[i], file]);
-  }
+  for (let i = 0; i < fields.length; i += 2) changes.push([fields[i], fields[i + 1]]);
   return { baseFiles, changes };
 }
 function main() {
