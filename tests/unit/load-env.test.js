@@ -235,6 +235,33 @@ describe('load-env precedence and overrides', () => {
     expect(fs.readdirSync(repo)).toEqual([]);
   });
 
+  test('uses a cloud example only in tests and preserves a configured URL', () => {
+    const repo = makeTempRepo();
+    const cloudFile = path.join(repo, 'config', 'env', '.env.cloud');
+    fs.renameSync(cloudFile, `${cloudFile}.example`);
+    fs.writeFileSync(`${cloudFile}.example`, 'SUPABASE_URL=<your-project-ref>\n', 'utf8');
+    process.chdir(repo);
+    delete process.env.SUPABASE_URL;
+
+    process.env.NODE_ENV = 'production';
+    load();
+    expect(process.env.SUPABASE_URL).toBeUndefined();
+
+    process.env.NODE_ENV = 'test';
+    process.env.ENV_FILE = cloudFile;
+    process.env.ENV_FILE_OVERRIDE = '1';
+    load();
+    expect(process.env.SUPABASE_URL).toBe('https://example.invalid');
+
+    process.env.SUPABASE_URL = 'https://injected.example.invalid';
+    load();
+    expect(process.env.SUPABASE_URL).toBe('https://injected.example.invalid');
+
+    process.env.SUPABASE_URL = '';
+    load();
+    expect(process.env.SUPABASE_URL).toBe('');
+  });
+
   test('falls back to the Node stdlib parser when dotenv is unavailable', () => {
     const repo = makeTempRepo('https://stdlib-fallback.supabase.co');
     process.chdir(repo);
