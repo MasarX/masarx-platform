@@ -103,6 +103,16 @@ import {
   projectWebhookSourceDirectory as _projectWebhookSourceDirectory,
 } from './data-source/integration-directory-projections';
 import {
+  assertLogisticsCustomerMigrationConfigEvidence,
+  assertLogisticsCustomerMigrationResultEvidence,
+  isPersistedLogisticsCustomerMigrationOutcome,
+  isPersistedLogisticsCustomerMigrationValidationFailure,
+  type LogisticsCustomerMigrationArgs,
+  type LogisticsCustomerMigrationConfigArgs,
+  type LogisticsCustomerMigrationConfigResult,
+  type LogisticsCustomerMigrationResult,
+} from './data-source/customer-logistics-migration';
+import {
   CAP,
   LEGACY_WILDCARD_CAPABILITY,
   WILDCARD_CAPABILITY,
@@ -117,6 +127,12 @@ export type {
   RunWebhookReceiverTestArgs,
   RunWebhookReceiverTestResult,
 } from './data-source/external-intake-readback';
+export type {
+  LogisticsCustomerMigrationArgs,
+  LogisticsCustomerMigrationConfigArgs,
+  LogisticsCustomerMigrationConfigResult,
+  LogisticsCustomerMigrationResult,
+} from './data-source/customer-logistics-migration';
 
 const seed: any = seedNamespace;
 
@@ -17119,6 +17135,86 @@ async function integrationPluginMutation(
 
 export const integration_plugin_generate_draft_v1 = (args: IntegrationPluginGenerateDraftArgs) =>
   integrationPluginMutation('integration_plugin_generate_draft_v1', args);
+
+export async function ui_upsert_logistics_customer_migration_config_v1(
+  args: LogisticsCustomerMigrationConfigArgs,
+): Promise<LogisticsCustomerMigrationConfigResult> {
+  const rpcName = 'ui_upsert_logistics_customer_migration_config_v1';
+  const live = await liveRpc<LogisticsCustomerMigrationConfigResult>(rpcName, { p_args: args });
+  if (!live) throw new Error(`${rpcName} requires a live backend`);
+
+  const result = requireLiveRpcRecord(
+    live.data,
+    `${rpcName} returned no backend outcome`,
+  ) as LogisticsCustomerMigrationConfigResult;
+  const outcomeError = backendOutcomeError(result, 'Customer migration config was rejected by the backend');
+  if (outcomeError) throw outcomeError;
+  assertLogisticsCustomerMigrationConfigEvidence(result);
+  await Promise.all([
+    requireLiveResourceReadback('logistics_migration_sources', result.source_id, rpcName),
+    requireLiveResourceReadback('logistics_migration_profiles', result.profile_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_directory', result.plugin_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_versions', result.plugin_version_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_bindings', result.plugin_binding_id, rpcName),
+    requireLiveResourceReadback('decision_log', result.decision_log_id, rpcName),
+  ]);
+  return result;
+}
+
+export async function ui_execute_logistics_customer_migration_v1(
+  args: LogisticsCustomerMigrationArgs,
+): Promise<LogisticsCustomerMigrationResult> {
+  const rpcName = 'ui_execute_logistics_customer_migration_v1';
+  const live = await liveRpc<LogisticsCustomerMigrationResult>(rpcName, { p_args: args });
+  if (!live) throw new Error(`${rpcName} requires a live backend`);
+
+  const result = requireLiveRpcRecord(
+    live.data,
+    `${rpcName} returned no backend outcome`,
+  ) as LogisticsCustomerMigrationResult;
+  if (
+    !isPersistedLogisticsCustomerMigrationValidationFailure(result)
+    && !isPersistedLogisticsCustomerMigrationOutcome(result)
+  ) {
+    const outcomeError = backendOutcomeError(result, 'Customer migration was rejected by the backend');
+    if (outcomeError) throw outcomeError;
+  }
+  assertLogisticsCustomerMigrationResultEvidence(result);
+
+  const readbacks: Array<Promise<ResourceRow>> = [
+    requireLiveResourceReadback('logistics_migration_requests', result.request_id, rpcName),
+    requireLiveResourceReadback('import_jobs', result.import_job_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_directory', result.plugin_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_versions', result.plugin_version_id, rpcName),
+    requireLiveResourceReadback('integration_plugin_bindings', result.plugin_binding_id, rpcName),
+  ];
+  if (result.workflow_run_id) {
+    readbacks.push(requireLiveResourceReadback('workflow_run_directory', result.workflow_run_id, rpcName));
+  }
+  if (result.decision_log_id) {
+    readbacks.push(requireLiveResourceReadback('decision_log', result.decision_log_id, rpcName));
+  }
+  if (result.imported_client_id) {
+    readbacks.push(requireLiveResourceReadback('clients', result.imported_client_id, rpcName));
+  }
+  for (const recipientId of result.imported_recipient_ids ?? []) {
+    if (recipientId) {
+      readbacks.push(requireLiveResourceReadback('recipients', String(recipientId), rpcName));
+    }
+  }
+  for (const itemId of result.migration_item_ids ?? []) {
+    if (itemId) {
+      readbacks.push(requireLiveResourceReadback('logistics_migration_items', String(itemId), rpcName));
+    }
+  }
+  for (const eventId of result.domain_event_ids ?? []) {
+    if (eventId) {
+      readbacks.push(requireLiveResourceReadback('recent_workflow_events', String(eventId), rpcName));
+    }
+  }
+  await Promise.all(readbacks);
+  return result;
+}
 export const integration_plugin_rollback_v1 = (args: {
   plugin_id: string;
   target_plugin_version_id?: string | null;
@@ -23934,6 +24030,8 @@ export const api = {
   ui_execute_provider_circuit_reset_v1,
   ui_execute_provider_circuit_probe_v1,
   integration_plugin_generate_draft_v1, integration_plugin_rollback_v1, plugin_deactivate_v1,
+  ui_upsert_logistics_customer_migration_config_v1,
+  ui_execute_logistics_customer_migration_v1,
   integration_plugin_export_handoff_v1,
   // W9-2 — plugin lifecycle Submit/Approve/Activate/Set-binding canonical shims
   plugin_submit_v1, plugin_approve_v1, plugin_activate_v1, plugin_set_binding_v1,

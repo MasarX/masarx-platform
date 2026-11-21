@@ -69,6 +69,7 @@ export const ROUTE_TITLES = {
   '/integrations/health': 'Provider health',
   '/integrations/webhook-tester': 'Test webhook intake',
   '/integrations/credentials': 'Provider credentials',
+  '/integrations/customer-migration': 'Customer migration',
   '/integrations/intake': 'Inbound requests',
   '/integrations/sources': 'Sources & tokens',
   '/insights/reporting': 'Reporting',

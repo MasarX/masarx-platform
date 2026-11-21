@@ -96,6 +96,7 @@ export const ROUTE_ICONS = {
   '/workflows/review-queue': 'check',
   '/workflows/queue': 'check',
   '/integrations/catalog': 'grid',
+  '/integrations/customer-migration': 'upload',
   '/integrations/plugin-studio': 'edit',
   '/integrations/mapping': 'git',
   '/integrations/health': 'cloud',
@@ -205,6 +206,7 @@ function wasRouteNormalized(rawRoute: string, normalizedRoute: string): boolean 
 
 const CANONICAL_ROUTE_LABELS = new Set<RoutePath>([
   '/integrations/credentials',
+  '/integrations/customer-migration',
   '/integrations/intake',
   '/integrations/mapping',
   '/integrations/sources',
@@ -216,6 +218,7 @@ const CANONICAL_ROUTE_CAPABILITIES: Partial<Record<RoutePath, string>> = {
   '/operate/dispatch': 'routes.read',
   '/platform/access': 'access_policy.read',
   '/integrations/catalog': 'integration_plugins.read',
+  '/integrations/customer-migration': 'integration_plugins.read',
   '/integrations/intake': 'webhooks.read',
   '/integrations/plugin-studio': 'integration_plugins.write',
 };

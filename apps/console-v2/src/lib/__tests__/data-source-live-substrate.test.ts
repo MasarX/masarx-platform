@@ -89,6 +89,110 @@ describe('data-source live backend substrate', () => {
     });
   });
 
+  it('requires canonical plugin version and binding readback after customer migration config', async () => {
+    const result = {
+      ok: true,
+      source_id: '00000000-0000-4000-8000-000000071101',
+      profile_id: '00000000-0000-4000-8000-000000071102',
+      plugin_id: '00000000-0000-4000-8000-000000071103',
+      plugin_version_id: '00000000-0000-4000-8000-000000071104',
+      plugin_binding_id: '00000000-0000-4000-8000-000000071105',
+      decision_log_id: '00000000-0000-4000-8000-000000071106',
+      profile_config_sha256: 'a'.repeat(64),
+      status: 'configured',
+    };
+
+    mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'ui_upsert_logistics_customer_migration_config_v1') {
+        return { data: result, error: null };
+      }
+      if (name === 'ui_get_resource_v1') {
+        return { data: { id: args.p_id }, error: null };
+      }
+      throw new Error(`unexpected RPC ${name}`);
+    });
+
+    const ds = await import('../data-source');
+    await ds.ui_upsert_logistics_customer_migration_config_v1({
+      display_name: 'Example Source Provider',
+      mapping_rules: { version: 1 },
+    });
+
+    const resources = mocks.rpc.mock.calls
+      .filter(([name]) => name === 'ui_get_resource_v1')
+      .map(([, args]) => args.p_resource);
+    expect(resources).toEqual(expect.arrayContaining([
+      'logistics_migration_sources',
+      'logistics_migration_profiles',
+      'integration_plugin_directory',
+      'integration_plugin_versions',
+      'integration_plugin_bindings',
+      'decision_log',
+    ]));
+  });
+
+  it('reads back import, workflow, plugin, recipient, item, decision, and event lineage through capability-aligned resources', async () => {
+    const result = {
+      ok: true,
+      request_id: '00000000-0000-4000-8000-000000071201',
+      import_job_id: '00000000-0000-4000-8000-000000071201',
+      request_key: 'legacy:batch-1',
+      status: 'completed',
+      mode: 'execute',
+      plugin_id: '00000000-0000-4000-8000-000000071202',
+      plugin_version_id: '00000000-0000-4000-8000-000000071203',
+      plugin_binding_id: '00000000-0000-4000-8000-000000071204',
+      imported_client_id: '00000000-0000-4000-8000-000000071205',
+      imported_recipient_ids: ['00000000-0000-4000-8000-000000071206'],
+      workflow_run_id: '00000000-0000-4000-8000-000000071207',
+      decision_log_id: '00000000-0000-4000-8000-000000071208',
+      domain_event_ids: ['00000000-0000-4000-8000-000000071209'],
+      migration_item_ids: ['00000000-0000-4000-8000-000000071210'],
+      validation_summary: { ok: true, errors: [] },
+      result_summary: { imported_clients: 1, imported_recipients: 1 },
+      redaction_summary: { payload_sample: 'not_stored' },
+      idempotency_reused: false,
+    };
+
+    mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'ui_execute_logistics_customer_migration_v1') {
+        return { data: result, error: null };
+      }
+      if (name === 'ui_get_resource_v1') {
+        return { data: { id: args.p_id }, error: null };
+      }
+      throw new Error(`unexpected RPC ${name}`);
+    });
+
+    const ds = await import('../data-source');
+    await ds.ui_execute_logistics_customer_migration_v1({
+      source_id: '00000000-0000-4000-8000-000000071211',
+      profile_id: '00000000-0000-4000-8000-000000071212',
+      external_batch_id: 'batch-1',
+      payload: { account: { name: 'Client' } },
+      dry_run: false,
+    });
+
+    const resources = mocks.rpc.mock.calls
+      .filter(([name]) => name === 'ui_get_resource_v1')
+      .map(([, args]) => args.p_resource);
+    expect(resources).toEqual(expect.arrayContaining([
+      'logistics_migration_requests',
+      'import_jobs',
+      'integration_plugin_directory',
+      'integration_plugin_versions',
+      'integration_plugin_bindings',
+      'workflow_run_directory',
+      'decision_log',
+      'clients',
+      'recipients',
+      'logistics_migration_items',
+      'recent_workflow_events',
+    ]));
+    expect(resources).not.toContain('workflow_runs');
+    expect(resources).not.toContain('domain_events');
+  });
+
   it('keeps modify audit source outside shipment changes for amend/cancel RPCs', async () => {
     mocks.rpc
       .mockResolvedValueOnce({

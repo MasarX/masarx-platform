@@ -2568,6 +2568,14 @@ export interface IntegrationPluginGenerateDraftArgs extends Record<string, unkno
 }
 export const integration_plugin_generate_draft_v1 = (args: IntegrationPluginGenerateDraftArgs) =>
   ds.integration_plugin_generate_draft_v1(args);
+export type LogisticsCustomerMigrationConfigArgs = import('./data-source').LogisticsCustomerMigrationConfigArgs;
+export type LogisticsCustomerMigrationConfigResult = import('./data-source').LogisticsCustomerMigrationConfigResult;
+export type LogisticsCustomerMigrationArgs = import('./data-source').LogisticsCustomerMigrationArgs;
+export type LogisticsCustomerMigrationResult = import('./data-source').LogisticsCustomerMigrationResult;
+export const ui_upsert_logistics_customer_migration_config_v1 = (args: LogisticsCustomerMigrationConfigArgs) =>
+  ds.ui_upsert_logistics_customer_migration_config_v1(args) as Promise<LogisticsCustomerMigrationConfigResult>;
+export const ui_execute_logistics_customer_migration_v1 = (args: LogisticsCustomerMigrationArgs) =>
+  ds.ui_execute_logistics_customer_migration_v1(args) as Promise<LogisticsCustomerMigrationResult>;
 export const integration_plugin_rollback_v1 = (args: {
   plugin_id: string;
   target_plugin_version_id?: string | null;
@@ -3335,6 +3343,8 @@ export const api = {
   ui_execute_provider_circuit_reset_v1,
   ui_execute_provider_circuit_probe_v1,
   integration_plugin_generate_draft_v1, integration_plugin_rollback_v1, plugin_deactivate_v1,
+  ui_upsert_logistics_customer_migration_config_v1,
+  ui_execute_logistics_customer_migration_v1,
   integration_plugin_export_handoff_v1,
   webhook_inbox_replay_v1, ui_retry_webhook_inbox_as_new_intake_v1, webhook_inbox_force_status_v1,
   // Phase C5 — WORKFLOWS (templates / bindings / review)
