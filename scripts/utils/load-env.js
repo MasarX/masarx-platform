@@ -55,17 +55,20 @@ function preferIpv4First() {
 /**
  * Load environment variables for tests and QA scripts.
  * Order of precedence:
- *   1. Value already in process.env (never overridden)
+ *   1. Value already in process.env (unless ENV_FILE_OVERRIDE is enabled)
  *   2. Explicit ENV_FILE path via process.env.ENV_FILE
  *   3. config/env/.env.cloud
  *   4. config/env/.env.local
  *   5. config/env/.env
  *   6. .env in repo root
+ *   7. A cloud example file as a test-only fallback
  */
 function loadEnv() {
   preferIpv4First();
   const repoRoot = process.cwd();
   const envDir = path.join(repoRoot, 'config', 'env');
+  const cloudFile = path.join(envDir, '.env.cloud');
+  let exampleFile = `${cloudFile}.example`;
 
   let explicitFile = process.env.ENV_FILE;
   if (explicitFile) {
@@ -89,6 +92,9 @@ function loadEnv() {
         }
       } else {
         console.warn(`[load-env] Explicit ENV_FILE not found at ${resolved}, falling back.`);
+        if (path.basename(resolved) === '.env.cloud') {
+          exampleFile = `${resolved}.example`;
+        }
       }
     } catch (error) {
       console.warn(`[load-env] Failed to load explicit ENV_FILE=${explicitFile}: ${error.message}`);
@@ -96,7 +102,7 @@ function loadEnv() {
   }
 
   const candidates = [
-    path.join(envDir, '.env.cloud'),
+    cloudFile,
     path.join(envDir, '.env.local'),
     path.join(envDir, '.env'),
     path.join(repoRoot, '.env'),
@@ -109,6 +115,19 @@ function loadEnv() {
       }
     } catch (error) {
       console.warn(`[load-env] Failed to process ${candidate}: ${error.message}`);
+    }
+  }
+
+  if (process.env.NODE_ENV === 'test' && process.env.SUPABASE_URL === undefined
+      && !fs.existsSync(cloudFile) && fs.existsSync(exampleFile)) {
+    try {
+      loadConfiguredEnvFile(exampleFile);
+      const url = process.env.SUPABASE_URL;
+      if (!url || url.includes('<your-project-ref>')) {
+        process.env.SUPABASE_URL = 'https://example.invalid';
+      }
+    } catch (error) {
+      console.warn(`[load-env] Failed to process cloud example: ${error.message}`);
     }
   }
 }
