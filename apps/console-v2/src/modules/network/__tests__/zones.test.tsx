@@ -194,7 +194,9 @@ describe('ZonesModule (CLAIM-NETWORK-ZONES)', () => {
     );
     await user.click(screen.getByRole('button', { name: 'New zone' }));
     await user.type(await screen.findByPlaceholderText('e.g. Riyadh East'), 'A2Z Coverage Zone');
-    await user.selectOptions(await screen.findByLabelText('Initial branch coverage'), 'br_a2z_coverage');
+    const branchPicker = screen.getByLabelText('Initial branch coverage');
+    await within(branchPicker).findByRole('option', { name: 'A2Z Riyadh Branch (A2Z-RUH)' });
+    await user.selectOptions(branchPicker, 'br_a2z_coverage');
     await user.click(await screen.findByRole('button', { name: 'Submit' }));
 
     await waitFor(() => expect(createSpy).toHaveBeenCalledWith(

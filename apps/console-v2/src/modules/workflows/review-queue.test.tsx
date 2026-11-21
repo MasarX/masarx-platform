@@ -14,6 +14,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
 import { ReviewQueueModule } from './review-queue';
 import * as apiMod from '@/lib/api';
+import { qk } from '@/lib/queries';
 import * as toastStore from '@/components/toastStore';
 import { typedSpy, type TypedSpy } from '@/test/helpers/typed-spy';
 
@@ -523,10 +524,14 @@ describe('ReviewQueueModule', () => {
     });
 
     try {
-      await mountAndWait();
+      const { queryClient } = await mountAndWait();
       await activateTask(user, 'TSK-2902');
+      await waitFor(() => {
+        const users = queryClient.getQueryData<{ rows: { id: string }[] }>(qk.list('users'));
+        expect(users?.rows).toEqual(expect.arrayContaining([expect.objectContaining({ id: pickedAssignee })]));
+      });
       await user.click(screen.getByRole('button', { name: /^\+ Assign$/i }));
-      await user.selectOptions(await screen.findByRole('combobox', { name: /Assign review task user/i }), pickedAssignee);
+      await user.selectOptions(screen.getByRole('combobox', { name: /Assign review task user/i }), pickedAssignee);
       await user.click(screen.getByRole('button', { name: /^Assign$/i }));
 
       await waitFor(() => {

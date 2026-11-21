@@ -2257,8 +2257,12 @@ describe('ImportsModule (W16-5)', () => {
     expectImportLabel('Client', 'resource-import-studio-client');
     expectImportLabel('Sender', 'resource-import-studio-sender');
     expectImportLabel('File', 'resource-import-studio-file');
-    await user.selectOptions(await screen.findByLabelText(/Import client/i), 'client_scope_1');
-    await user.selectOptions(await screen.findByLabelText(/Import sender/i), 'sender_scope_1');
+    const clientPicker = screen.getByLabelText(/Import client/i);
+    await waitFor(() => expect(clientPicker).toBeEnabled());
+    await user.selectOptions(clientPicker, 'client_scope_1');
+    const senderPicker = screen.getByLabelText(/Import sender/i);
+    await waitFor(() => expect(senderPicker).toBeEnabled());
+    await user.selectOptions(senderPicker, 'sender_scope_1');
     const file = csvImportFile('tracking_number\nMX-1\n');
     await user.upload(await screen.findByLabelText(/CSV\/XLS\/XLSX file/i), file);
     await user.click(screen.getByRole('button', { name: /^Prepare file$/i }));

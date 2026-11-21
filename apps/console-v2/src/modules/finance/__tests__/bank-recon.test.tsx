@@ -206,6 +206,14 @@ function renderBankRecon(capabilities = ['finance.read', 'finance.write']) {
   return renderWithProviders(<BankReconModule />, { capabilities });
 }
 
+function findMatchPicker(name: 'Statement line' | 'Reconciliation target', value: string) {
+  return waitFor(() => {
+    const picker = screen.getByRole('combobox', { name }) as HTMLSelectElement;
+    expect(Array.from(picker.options, (option) => option.value)).toContain(value);
+    return picker;
+  });
+}
+
 async function waitForLookups(category: string) {
   const deadline = Date.now() + 1000;
   while (getLookups(category).length === 0 && Date.now() < deadline) {
@@ -688,12 +696,8 @@ describe('BankReconModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     const openItems = await screen.findByRole('button', { name: 'Open items' });
     await user.click(openItems);
 
-    const statementSelect = await screen.findByRole('combobox', {
-      name: 'Statement line',
-    });
-    const targetSelect = await screen.findByRole('combobox', {
-      name: 'Reconciliation target',
-    });
+    const statementSelect = await findMatchPicker('Statement line', 'fe_bs_1');
+    const targetSelect = await findMatchPicker('Reconciliation target', 'settlement_batch:sb_4519');
     const tryMatch = await screen.findByRole('button', { name: 'Try match' });
 
     expect(statementSelect).toHaveValue('');
@@ -745,14 +749,10 @@ describe('BankReconModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     const cards = document.querySelectorAll('.card');
     await user.click(cards[0] as HTMLElement);
     await user.click(await screen.findByRole('button', { name: 'Open items' }));
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Statement line' }),
-      'fe_bs_1',
-    );
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Reconciliation target' }),
-      'settlement_batch:sb_4519',
-    );
+    const statementSelect = await findMatchPicker('Statement line', 'fe_bs_1');
+    const targetSelect = await findMatchPicker('Reconciliation target', 'settlement_batch:sb_4519');
+    await user.selectOptions(statementSelect, 'fe_bs_1');
+    await user.selectOptions(targetSelect, 'settlement_batch:sb_4519');
     await user.click(await screen.findByRole('button', { name: 'Try match' }));
 
     expect(spy).not.toHaveBeenCalled();
@@ -795,12 +795,8 @@ describe('BankReconModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     await user.click(cards[0] as HTMLElement);
     await user.click(await screen.findByRole('button', { name: 'Open items' }));
 
-    const statementSelect = await screen.findByRole('combobox', {
-      name: 'Statement line',
-    });
-    const targetSelect = await screen.findByRole('combobox', {
-      name: 'Reconciliation target',
-    });
+    const statementSelect = await findMatchPicker('Statement line', 'fe_bs_1');
+    const targetSelect = await findMatchPicker('Reconciliation target', 'billing_invoice:inv_paid_bank_recon_1');
     await user.selectOptions(statementSelect, 'fe_bs_1');
 
     expect(targetSelect).toBeEnabled();
@@ -834,9 +830,7 @@ describe('BankReconModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     await user.click(cards[0] as HTMLElement);
     const openItems = await screen.findByRole('button', { name: 'Open items' });
     await user.click(openItems);
-    const statementSelect = await screen.findByRole('combobox', {
-      name: 'Statement line',
-    });
+    const statementSelect = await findMatchPicker('Statement line', 'fe_bs_1');
     const targetSelect = await screen.findByRole('combobox', {
       name: 'Reconciliation target',
     });
@@ -914,14 +908,10 @@ describe('BankReconModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     const cards = document.querySelectorAll('.card');
     await user.click(cards[0] as HTMLElement);
     await user.click(await screen.findByRole('button', { name: 'Open items' }));
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Statement line' }),
-      'fe_bs_1',
-    );
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Reconciliation target' }),
-      'settlement_batch:sb_4521',
-    );
+    const statementSelect = await findMatchPicker('Statement line', 'fe_bs_1');
+    const targetSelect = await findMatchPicker('Reconciliation target', 'settlement_batch:sb_4521');
+    await user.selectOptions(statementSelect, 'fe_bs_1');
+    await user.selectOptions(targetSelect, 'settlement_batch:sb_4521');
     await user.click(await screen.findByRole('button', { name: 'Try match' }));
 
     await waitFor(() => {
@@ -996,10 +986,8 @@ describe('BankReconModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     expect(await screen.findByRole('option', { name: /Billing invoice INV-BANK-RECON-1/i })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /INV-BANK-RECON-ISSUED/i })).not.toBeInTheDocument();
 
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Statement line' }),
-      'fe_bs_1',
-    );
+    const statementSelect = await findMatchPicker('Statement line', 'fe_bs_1');
+    await user.selectOptions(statementSelect, 'fe_bs_1');
     await user.selectOptions(targetSelect, 'billing_invoice:inv_paid_bank_recon_1');
     await user.click(await screen.findByRole('button', { name: 'Try match' }));
 
@@ -1428,14 +1416,10 @@ describe('BankReconModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     expect(unmatchSpy).not.toHaveBeenCalled();
 
     await user.click(await screen.findByRole('button', { name: 'Open items' }));
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Statement line' }),
-      'fe_bs_1',
-    );
-    await user.selectOptions(
-      await screen.findByRole('combobox', { name: 'Reconciliation target' }),
-      'settlement_batch:sb_4519',
-    );
+    const statementSelect = await findMatchPicker('Statement line', 'fe_bs_1');
+    const targetSelect = await findMatchPicker('Reconciliation target', 'settlement_batch:sb_4519');
+    await user.selectOptions(statementSelect, 'fe_bs_1');
+    await user.selectOptions(targetSelect, 'settlement_batch:sb_4519');
     const tryMatch = await screen.findByRole('button', {
       name: /Try match.*Finance update permission required/i,
     });
