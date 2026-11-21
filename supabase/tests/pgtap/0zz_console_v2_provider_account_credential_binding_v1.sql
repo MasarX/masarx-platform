@@ -7,6 +7,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(22);
+SET LOCAL pgtap.vendor_company_id = '999999';
 
 CREATE OR REPLACE FUNCTION pg_temp.test_provider_account_credential_binding_v1()
 RETURNS SETOF TEXT
@@ -298,7 +299,7 @@ BEGIN
     'route_path', '/api/ship/request/by-email',
     'organization_id', v_org,
     'scope_type', 'tenant',
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'credentials', jsonb_build_object(
       'username', 'pgtap-logestechs-user',
       'password', 'pgtap-logestechs-password'
@@ -345,7 +346,7 @@ BEGIN
 
   RETURN NEXT ok(
     v_settings_row.id IS NOT NULL
-    AND v_settings_row.cached_value->>'company_id' = '362'
+    AND v_settings_row.cached_value->>'company_id' = current_setting('pgtap.vendor_company_id')
     AND NULLIF(v_settings_row.cached_value->>'auth_config_id', '')::uuid = v_config_id,
     'binding RPC writes tenant logestechs_v2_account setting with company_id and auth_config_id'
   );
@@ -381,7 +382,7 @@ BEGIN
        WHERE v.id = v_config_id
          AND v.organization_id = v_org
          AND v.provider_account_category = 'logestechs_v2_account'
-         AND v.company_id = '362'
+         AND v.company_id = current_setting('pgtap.vendor_company_id')
          AND v.auth_type = 'basic_auth'
     ),
     'credential directory exposes tenant-bound global API route credential readback'
@@ -418,7 +419,7 @@ BEGIN
     v_settings_row.cached_value ? 'auth_config_id'
     AND v_settings_row.cached_value->'auth_config_id' = 'null'::jsonb
     AND COALESCE((v_settings_row.cached_value->>'enabled')::boolean, TRUE) = FALSE
-    AND v_settings_row.cached_value->>'company_id' = '362',
+    AND v_settings_row.cached_value->>'company_id' = current_setting('pgtap.vendor_company_id'),
     'unbind RPC writes explicit null auth_config_id override while preserving company_id'
   );
 
@@ -445,7 +446,7 @@ BEGIN
     $$ SELECT api.ui_bind_provider_account_credential_v1(jsonb_build_object(
          'route_method', 'POST',
          'route_path', '/api/ship/request/by-email',
-         'company_id', '362',
+         'company_id', current_setting('pgtap.vendor_company_id'),
          'credentials', jsonb_build_object('username', 'missing-password')
        )) $$,
     '23502',
@@ -458,7 +459,7 @@ BEGIN
          'route_method', 'POST',
          'route_path', '/api/ship/request/by-email',
          'provider_account_category', 'wrong_provider_account_category',
-         'company_id', '362',
+         'company_id', current_setting('pgtap.vendor_company_id'),
          'credentials', jsonb_build_object('username', 'conflict', 'password', 'conflict')
        )) $$,
     '23514',
@@ -472,7 +473,7 @@ BEGIN
            'route_method', 'POST',
            'route_path', '/api/ship/request/by-email',
            'provider_id', %L,
-           'company_id', '362',
+           'company_id', current_setting('pgtap.vendor_company_id'),
            'credentials', jsonb_build_object('username', 'conflict', 'password', 'conflict')
          )) $$,
       v_wrong_provider::text
@@ -489,7 +490,7 @@ BEGIN
            'route_path', '/api/ship/request/by-email',
            'organization_id', %L,
            'scope_type', 'tenant',
-           'company_id', '362',
+           'company_id', current_setting('pgtap.vendor_company_id'),
            'auth_config_id', %L
          )) $$,
       v_org::text,
@@ -507,7 +508,7 @@ BEGIN
            'route_path', '/api/ship/request/by-email',
            'organization_id', %L,
            'scope_type', 'tenant',
-           'company_id', '362',
+           'company_id', current_setting('pgtap.vendor_company_id'),
            'credentials', jsonb_build_object('username', 'cross-tenant', 'password', 'blocked')
          )) $$,
       v_other_org::text

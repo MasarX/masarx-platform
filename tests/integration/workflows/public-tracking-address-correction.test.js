@@ -7,6 +7,7 @@ const {
   createSender,
   createShipment,
 } = require('../helpers/tenant-utils');
+const { companyId: VENDOR_COMPANY_ID } = require('../../fixtures/carrier/vendor-account.synthetic.json');
 
 loadEnv();
 
@@ -424,7 +425,7 @@ async function seedProviderGatewayLinkage(client, fixture, route) {
   const settingsVersionId = randomUUID();
   const accountValue = {
     auth_config_id: providerAuthConfigId,
-    company_id: '362',
+    company_id: VENDOR_COMPANY_ID,
     enabled: true,
   };
 
@@ -532,7 +533,7 @@ async function seedProviderGatewayLinkage(client, fixture, route) {
       sourceId,
       randomUUID(),
       route.id,
-      `/api/guests/362/packages/${providerShipmentId}`,
+      `/api/guests/${VENDOR_COMPANY_ID}/packages/${providerShipmentId}`,
     ]
   );
 
@@ -749,10 +750,10 @@ describe('public tracking address correction active-route propagation', () => {
       );
       expect(gatewayRows.rows).toHaveLength(1);
       expect(gatewayRows.rows[0].path).toBe(
-        `/api/guests/362/packages/${providerLinkage.providerShipmentId}`
+        `/api/guests/${VENDOR_COMPANY_ID}/packages/${providerLinkage.providerShipmentId}`
       );
       expect(gatewayRows.rows[0].target_id).toBe(route.provider_id);
-      expect(gatewayRows.rows[0].headers['company-id']).toBe('362');
+      expect(gatewayRows.rows[0].headers['company-id']).toBe(VENDOR_COMPANY_ID);
       expect(gatewayRows.rows[0].body.destinationAddress).toMatchObject({
         addressLine1: 'Tower 8, new service road',
         addressLine2: 'Dock 3',
@@ -763,7 +764,7 @@ describe('public tracking address correction active-route propagation', () => {
         nationalAddress: 'NEWA7788',
       });
       expect(gatewayRows.rows[0].context.api_gateway_path_params).toMatchObject({
-        companyId: '362',
+        companyId: VENDOR_COMPANY_ID,
         shipmentId: providerLinkage.providerShipmentId,
       });
       expect(gatewayRows.rows[0].context.auth.auth_config_id).toBeTruthy();

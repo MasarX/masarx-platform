@@ -4,6 +4,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SELECT plan(15);
+SET LOCAL pgtap.vendor_company_id = '999999';
 
 SELECT public.create_next_partitions();
 
@@ -180,7 +181,7 @@ BEGIN
     1,
     jsonb_build_object(
       'auth_config_id', '11110000-0000-0000-0000-000000000055',
-      'company_id', '362',
+      'company_id', current_setting('pgtap.vendor_company_id'),
       'enabled', TRUE
     ),
     1,
@@ -207,7 +208,7 @@ BEGIN
     '77770000-0000-0000-0000-000000000055',
     jsonb_build_object(
       'auth_config_id', '11110000-0000-0000-0000-000000000055',
-      'company_id', '362',
+      'company_id', current_setting('pgtap.vendor_company_id'),
       'enabled', TRUE
     ),
     now()
@@ -316,7 +317,7 @@ $$;
 CREATE TEMP TABLE tmp_uc178_update_resolve AS
 SELECT public.resolve_api_route_v1(
   'PUT',
-  '/api/guests/362/packages/SHIP055',
+  format('/api/guests/%s/packages/SHIP055', current_setting('pgtap.vendor_company_id')),
   'aaaa0000-0000-0000-0000-000000000055',
   'bbbb0000-0000-0000-0000-000000000055',
   'cccc0000-0000-0000-0000-000000000055',
@@ -326,7 +327,7 @@ SELECT public.resolve_api_route_v1(
 CREATE TEMP TABLE tmp_uc178_cancel_resolve AS
 SELECT public.resolve_api_route_v1(
   'PUT',
-  '/api/guests/362/packages/SHIP055/cancel',
+  format('/api/guests/%s/packages/SHIP055/cancel', current_setting('pgtap.vendor_company_id')),
   'aaaa0000-0000-0000-0000-000000000055',
   'bbbb0000-0000-0000-0000-000000000055',
   'cccc0000-0000-0000-0000-000000000055',
@@ -337,7 +338,7 @@ CREATE TEMP TABLE tmp_uc178_update_intake AS
 SELECT public.workflow_intake_api_gateway_v1(
   'token-api-gateway-055',
   'PUT',
-  '/api/guests/362/packages/SHIP055',
+  format('/api/guests/%s/packages/SHIP055', current_setting('pgtap.vendor_company_id')),
   '',
   jsonb_build_object(
     'content-type', 'application/json',

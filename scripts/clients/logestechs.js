@@ -9,7 +9,6 @@ if (!fetchImpl) {
   throw new Error('[logestechs-client] Global fetch is not available. Upgrade to Node 18+.');
 }
 
-const DEFAULT_BASE_URL = 'https://apisv2.logestechs.com';
 const PROVIDER_NAME = 'logestechs_3pl';
 const PROVIDER_DEFAULTS_CATEGORY = 'provider_defaults';
 
@@ -148,8 +147,14 @@ const fetchConfigFromDatabase = async () => {
       defaults.company_id;
     const companyId = Number.isFinite(Number(companyIdRaw)) ? Number(companyIdRaw) : 1;
 
+    const baseUrl =
+      process.env.LOGESTECHS_BASE_URL?.trim() || metadata.base_url?.trim() || metadata.baseUrl?.trim();
+    if (!baseUrl) {
+      throw new Error('[logestechs-client] Set LOGESTECHS_BASE_URL or configure providers.metadata.base_url.');
+    }
+
     return {
-      baseUrl: metadata.base_url ?? metadata.baseUrl ?? DEFAULT_BASE_URL,
+      baseUrl: baseUrl.replace(/\/+$/, ''),
       companyId: companyId > 0 ? companyId : 1,
       username,
       password,

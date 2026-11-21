@@ -4,6 +4,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SELECT plan(9);
+SET LOCAL pgtap.vendor_company_id = '999999';
 
 SELECT public.create_next_partitions();
 
@@ -88,7 +89,7 @@ CREATE TEMP TABLE tmp_api_gateway_update_guard AS
 SELECT public.workflow_intake_api_gateway_v1(
   'token-api-gateway-mutation-650',
   'PUT',
-  '/api/guests/362/packages/SHIP-MUT-GUARD-650',
+  format('/api/guests/%s/packages/SHIP-MUT-GUARD-650', current_setting('pgtap.vendor_company_id')),
   '',
   jsonb_build_object(
     'content-type', 'application/json',
@@ -102,7 +103,7 @@ CREATE TEMP TABLE tmp_api_gateway_cancel_guard AS
 SELECT public.workflow_intake_api_gateway_v1(
   'token-api-gateway-mutation-650',
   'PUT',
-  '/api/guests/362/packages/SHIP-MUT-GUARD-650/cancel',
+  format('/api/guests/%s/packages/SHIP-MUT-GUARD-650/cancel', current_setting('pgtap.vendor_company_id')),
   '',
   jsonb_build_object(
     'content-type', 'application/json',
@@ -142,7 +143,7 @@ SELECT ok(
       FROM public.api_gateway_requests agr
      WHERE agr.source_id = '65000000-0000-4000-8000-000000000002'::uuid
        AND agr.method = 'PUT'
-       AND agr.path = '/api/guests/362/packages/SHIP-MUT-GUARD-650'
+       AND agr.path = format('/api/guests/%s/packages/SHIP-MUT-GUARD-650', current_setting('pgtap.vendor_company_id'))
        AND agr.sender_id IS NULL
        AND agr.client_id IS NULL
   ),
@@ -155,7 +156,7 @@ SELECT is(
       FROM public.decision_log dl
      WHERE dl.resource_type = 'api_gateway_request'
        AND dl.decision_point = 'api_gateway_source_sender_client_checked'
-       AND dl.decision_inputs->>'path' = '/api/guests/362/packages/SHIP-MUT-GUARD-650'
+       AND dl.decision_inputs->>'path' = format('/api/guests/%s/packages/SHIP-MUT-GUARD-650', current_setting('pgtap.vendor_company_id'))
      ORDER BY dl.timestamp DESC
      LIMIT 1
   ),
