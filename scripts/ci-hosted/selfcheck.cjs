@@ -209,6 +209,22 @@ for (const file of ['unknown/path.ts', 'unknown/path.md', 'synthetic.mdx', 'apps
   assert.deepEqual(select(['README.md', file]), select());
 }
 assert.equal(affected().length, 8);
+const cdWorkflows = ['.github/workflows/deploy.yml', '.github/workflows/provenance-on-tag.yml'];
+const cdTests = ['tests/unit/ops/dev-db-dry-run-workflow.test.js', 'tests/unit/ops/release-workflow.test.js'];
+const cdChanges = [...cdWorkflows, ...cdTests];
+assert.deepEqual(select(cdChanges, 'pull_request'), { ...select(), database: false });
+assert.deepEqual(select(cdChanges, 'merge_group'), select());
+assert.deepEqual(select(cdTests, 'pull_request'), select(['tests/unit/synthetic.test.js']));
+for (const file of [
+  '.github/workflows/public-ci.yml', '.github/workflows/verify-prebuilt.yml', 'CODEOWNERS',
+  'scripts/ci-hosted/changes.cjs', 'supabase/migrations/synthetic.sql', 'package-lock.json',
+  'tests/unit/ops/synthetic.test.js', 'docs/guides/synthetic.md', 'apps/console/app/page.tsx',
+]) {
+  assert.deepEqual(select([...cdChanges, file], 'pull_request'), select(), file);
+  assert.equal(select([...cdTests, file], 'pull_request').database, true, file);
+}
+assert.deepEqual(affected([]), []);
+assert.deepEqual(select([], 'merge_group'), select());
 assert.deepEqual(changedPaths(base, (command, args) => {
   assert.equal(command, 'git');
   assert.deepEqual(args, ['diff', '--no-renames', '--name-only', '-z', base, 'HEAD', '--']);
