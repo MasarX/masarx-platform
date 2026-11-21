@@ -115,7 +115,12 @@ describe('release admission behavior', () => {
     }
   });
 
-  const testJq = jq(['--version']).error?.code === 'ENOENT' ? test.skip : test;
+  const jqMissing = jq(['--version']).error?.code === 'ENOENT';
+  if (jqMissing && process.env.CI !== undefined) {
+    throw new Error('jq is required on PATH for release admission tests in CI.');
+  }
+  if (jqMissing) console.warn('Skipping release admission jq tests because jq is missing from PATH.');
+  const testJq = jqMissing ? test.skip : test;
   const sha = 'a'.repeat(40);
   const mergeGroup = { event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1-fixture', head_sha: sha, check_suite_id: 11 };
   const newer = { ...mergeGroup, check_suite_id: 12 };
@@ -133,7 +138,7 @@ describe('release admission behavior', () => {
     ['empty evidence', [], [], false],
     ['pending gate', [mergeGroup], [{ ...success, status: 'in_progress', conclusion: null }], false],
     ['failed gate', [mergeGroup], [{ ...success, conclusion: 'failure' }], false],
-    ['newer failure over older success', [newer, mergeGroup], [newerFailure, success], false],
+    ['newer failure over older success', [mergeGroup, newer], [success, newerFailure], false],
     ['merge-group success on the tagged SHA', [mergeGroup], [success], true],
     ['push to main success', [{ ...mergeGroup, event: 'push', head_branch: 'main' }], [success], true],
     ['merge-group success on a different queue', [{ ...mergeGroup, head_branch: 'gh-readonly-queue/dev/pr-1-fixture' }], [success], false],
