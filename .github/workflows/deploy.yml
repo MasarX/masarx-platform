@@ -37,7 +37,8 @@ jobs:
   database:
     if: github.event_name == 'push' || inputs.mode == 'deploy'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # shortcut: Allow time for the first full apply, then set the steady-state limit from the measured first-deploy time.
+    timeout-minutes: &dev-db-deploy-timeout-minutes 180
     environment: dev
     concurrency:
       group: deploy-dev-database
@@ -137,6 +138,8 @@ jobs:
     runs-on: ubuntu-24.04
     environment: dev
     timeout-minutes: 90
+    env:
+      DEV_DB_DEPLOY_TIMEOUT_MINUTES: *dev-db-deploy-timeout-minutes
     concurrency:
       group: dev-db-dry-run
       cancel-in-progress: false
@@ -224,7 +227,8 @@ jobs:
           const count = hasPlan ? migrations.length : 'Unknown';
           const first = hasPlan ? migrationName(migrations[0]) : 'Unknown';
           const last = hasPlan ? migrationName(migrations.at(-1)) : 'Unknown';
-          const overLimit = Number(elapsed) > 2700;
+          const timeoutMinutes = Number(process.env.DEV_DB_DEPLOY_TIMEOUT_MINUTES);
+          const overLimit = Number(elapsed) > timeoutMinutes * 60;
           const order = [outOfOrder && 'out-of-order', missingLocal && 'missing-local'].filter(Boolean).join(',')
             || (hasPlan ? 'none' : 'unknown');
           const summary = [
@@ -234,8 +238,8 @@ jobs:
             `- Last migration: ${last}`,
             `- Elapsed seconds (link and dry run): ${elapsed}`,
           ];
-          console.log(`dry-run: migrations=${count} first=${first.replaceAll('`', '')} last=${last.replaceAll('`', '')} order=${order} elapsed=${elapsed}s over_45_min=${overLimit}`);
-          if (overLimit) summary.push('- The operation exceeded the 45-minute DEV database deploy job limit.');
+          console.log(`dry-run: migrations=${count} first=${first.replaceAll('`', '')} last=${last.replaceAll('`', '')} order=${order} elapsed=${elapsed}s over_${timeoutMinutes}_min=${overLimit}`);
+          if (overLimit) summary.push(`- The operation exceeded the ${timeoutMinutes}-minute DEV database deploy job limit.`);
           if (outOfOrder) {
             summary.push('- Out of order: local migrations are missing from the remote migration history before its latest applied migration.');
             const migrationPath = 'supabase/migrations/';
