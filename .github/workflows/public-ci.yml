@@ -282,6 +282,16 @@ jobs:
         env:
           NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
         run: node scripts/ci-hosted/tasks.cjs install
+      - name: Check deploy edge preparation
+        if: steps.subject.outputs.present == 'true'
+        run: |
+          if git diff --quiet --no-renames "$LOCAL_GATE_BASE_SHA" HEAD -- \
+            .github/workflows/deploy.yml .github/workflows/public-ci.yml \
+            package.json package-lock.json scripts/ci-hosted/tasks.cjs scripts/edge supabase/functions; then
+            exit 0
+          fi
+          npm run edge:sync-shared
+          npm run edge:prepare-resource-import-exceljs
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint

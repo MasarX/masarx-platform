@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const semver = require('semver');
 const ts = require('typescript');
 
+const ESBUILD_VERSION_RANGE = '^0.25.0 || ^0.28.2';
 const DIRECTORY = 'supabase/functions/resource-import-studio/_vendor';
 const FILES = ['exceljs.mjs', 'exceljs.d.mts', 'exceljs-types.d.ts', 'THIRD-PARTY-NOTICES.txt'];
 const DECLARATIONS = 'export { Workbook } from "./exceljs-types.js";\nexport type { Worksheet } from "./exceljs-types.js";\n';
@@ -97,7 +98,7 @@ function readArtifact(repoRoot) {
   if (manifest.schema !== 'masarx.resource-import-exceljs.v1'
     || manifest.package_lock_sha256 !== sha256(lockBytes)
     || manifest.generator_sha256 !== sha256(readRegular(__filename))
-    || !semver.satisfies(manifest.esbuild_version, '^0.25.0')) throw new Error('Artifact generation inputs are stale');
+    || !semver.satisfies(manifest.esbuild_version, ESBUILD_VERSION_RANGE)) throw new Error('Artifact generation inputs are stale');
   validatePackages(manifest.packages, JSON.parse(lockBytes));
   if (!Array.isArray(manifest.inputs) || !manifest.inputs.length || manifest.inputs.some(input =>
     !/^node_modules\//.test(input.path) || input.path.split('/').includes('..') || !/^[a-f0-9]{64}$/.test(input.sha256))
@@ -140,7 +141,7 @@ async function generate(repoRoot) {
   const lockBytes = readRegular(path.join(root, 'package-lock.json'));
   const lock = JSON.parse(lockBytes);
   const esbuild = require(require.resolve('esbuild', { paths: [root] }));
-  if (!semver.satisfies(esbuild.version, '^0.25.0') || lock.packages['node_modules/esbuild'].version !== esbuild.version) {
+  if (!semver.satisfies(esbuild.version, ESBUILD_VERSION_RANGE) || lock.packages['node_modules/esbuild']?.version !== esbuild.version) {
     throw new Error('Install the qualified esbuild lock graph before generation');
   }
   const excelRoot = path.dirname(require.resolve('exceljs/package.json', { paths: [root] }));

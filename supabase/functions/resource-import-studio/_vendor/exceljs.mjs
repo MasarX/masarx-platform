@@ -12,7 +12,11 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
 var __commonJS = (cb, mod) => function __require2() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -6923,16 +6927,17 @@ var require_utils = __commonJS({
       if (typeof input === "string") {
         return "string";
       }
-      if (Object.prototype.toString.call(input) === "[object Array]") {
+      var proto = Object.prototype.toString.call(input);
+      if (proto === "[object Array]") {
         return "array";
       }
       if (support.nodebuffer && nodejsUtils.isBuffer(input)) {
         return "nodebuffer";
       }
-      if (support.uint8array && input instanceof Uint8Array) {
+      if (support.uint8array && proto === "[object Uint8Array]") {
         return "uint8array";
       }
-      if (support.arraybuffer && input instanceof ArrayBuffer) {
+      if (support.arraybuffer && proto === "[object ArrayBuffer]") {
         return "arraybuffer";
       }
     };
@@ -6977,20 +6982,27 @@ var require_utils = __commonJS({
     exports.prepareContent = function(name, inputData, isBinary, isOptimizedBinaryString, isBase64) {
       var promise = external.Promise.resolve(inputData).then(function(data) {
         var isBlob = support.blob && (data instanceof Blob || ["[object File]", "[object Blob]"].indexOf(Object.prototype.toString.call(data)) !== -1);
-        if (isBlob && typeof FileReader !== "undefined") {
-          return new external.Promise(function(resolve, reject) {
-            var reader = new FileReader();
-            reader.onload = function(e) {
-              resolve(e.target.result);
-            };
-            reader.onerror = function(e) {
-              reject(e.target.error);
-            };
-            reader.readAsArrayBuffer(data);
-          });
-        } else {
-          return data;
+        if (isBlob) {
+          if (typeof Blob.prototype.arrayBuffer !== "undefined") {
+            return data.arrayBuffer();
+          } else if (typeof FileReader !== "undefined") {
+            return new external.Promise(function(resolve, reject) {
+              var reader = new FileReader();
+              reader.onload = function(e) {
+                resolve(e.target.result);
+              };
+              reader.onerror = function(e) {
+                reject(e.target.error);
+              };
+              reader.readAsArrayBuffer(data);
+            });
+          } else {
+            return external.Promise.reject(
+              new Error(name + " is a Blob, but we have no way of reading it.")
+            );
+          }
         }
+        return data;
       });
       return promise.then(function(data) {
         var dataType = exports.getTypeOf(data);
@@ -13759,7 +13771,7 @@ var require_lib3 = __commonJS({
     JSZip.prototype.loadAsync = require_load();
     JSZip.support = require_support();
     JSZip.defaults = require_defaults();
-    JSZip.version = "3.10.1";
+    JSZip.version = "3.10.2";
     JSZip.loadAsync = function(content, options) {
       return new JSZip().loadAsync(content, options);
     };
@@ -15210,13 +15222,13 @@ var require_async_iterator = __commonJS({
       return (hint === "string" ? String : Number)(input);
     }
     var finished = require_end_of_stream();
-    var kLastResolve = Symbol("lastResolve");
-    var kLastReject = Symbol("lastReject");
-    var kError = Symbol("error");
-    var kEnded = Symbol("ended");
-    var kLastPromise = Symbol("lastPromise");
-    var kHandlePromise = Symbol("handlePromise");
-    var kStream = Symbol("stream");
+    var kLastResolve = /* @__PURE__ */ Symbol("lastResolve");
+    var kLastReject = /* @__PURE__ */ Symbol("lastReject");
+    var kError = /* @__PURE__ */ Symbol("error");
+    var kEnded = /* @__PURE__ */ Symbol("ended");
+    var kLastPromise = /* @__PURE__ */ Symbol("lastPromise");
+    var kHandlePromise = /* @__PURE__ */ Symbol("handlePromise");
+    var kStream = /* @__PURE__ */ Symbol("stream");
     function createIterResult(value, done) {
       return {
         value,

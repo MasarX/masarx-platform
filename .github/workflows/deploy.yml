@@ -71,8 +71,9 @@ jobs:
         with:
           node-version: '24.22.1'
           package-manager-cache: false
-      - name: Install locked dependencies
+      - name: Install locked edge dependencies
         if: steps.guard.outputs.configured == 'true'
+        working-directory: ${{ github.workspace }}
         run: |
           for attempt in 1 2 3; do npm ci --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done

@@ -196,7 +196,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 
 
-Package: jszip@3.10.1
+Package: jszip@3.10.2
 License metadata: "(MIT OR GPL-3.0-or-later)"
 LICENSE.markdown:
 JSZip is dual licensed. At your choice you may use it under the MIT license *or* the GPLv3
