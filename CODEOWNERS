@@ -6,6 +6,7 @@
 /config/edge/functions.json           @MasarX/platform-ops
 /tooling/                             @MasarX/platform-ops
 /supabase/config.toml                 @MasarX/platform-ops
+/supabase/migrations/                 @MasarX/platform-ops
 
 # Helpers the hosted database jobs load
 /scripts/ops/ci/                      @MasarX/platform-ops

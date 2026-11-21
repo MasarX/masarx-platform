@@ -218,7 +218,13 @@ jobs:
               base="$GROUP_BASE" ;;
             *) printf '%s\n' 'Skipped by design: append-only diff runs on pull_request and merge_group.'; exit 0 ;;
           esac
-          node scripts/ci-hosted/base-guard.cjs migrations.cjs "$base"
+          result=0
+          node scripts/ci-hosted/base-guard.cjs migrations.cjs "$base" || result=$?
+          # Exercise checker updates before they land on the base branch.
+          if ! git diff --quiet "$base" HEAD -- scripts/ci-hosted/migrations.cjs; then
+            node scripts/ci-hosted/migrations.cjs "$base"
+          fi
+          exit "$result"
       - name: Check candidate install policy with base code
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
