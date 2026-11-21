@@ -37,7 +37,8 @@ jobs:
   database:
     if: github.event_name == 'push' || inputs.mode == 'deploy'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # shortcut: Allow time for the first full apply, then set the steady-state limit from the measured first-deploy time.
+    timeout-minutes: &dev-db-deploy-timeout-minutes 180
     environment: dev
     concurrency:
       group: deploy-dev-database
@@ -137,6 +138,8 @@ jobs:
     runs-on: ubuntu-24.04
     environment: dev
     timeout-minutes: 90
+    env:
+      DEV_DB_DEPLOY_TIMEOUT_MINUTES: *dev-db-deploy-timeout-minutes
     concurrency:
       group: dev-db-dry-run
       cancel-in-progress: false
@@ -221,20 +224,29 @@ jobs:
             if (!/^\d+_[a-z0-9_.-]+\.sql$/i.test(name) || masked.some(value => value && name.includes(value))) return 'Redacted';
             return `\`${name}\``;
           }
+          const count = hasPlan ? migrations.length : 'Unknown';
+          const first = hasPlan ? migrationName(migrations[0]) : 'Unknown';
+          const last = hasPlan ? migrationName(migrations.at(-1)) : 'Unknown';
+          const timeoutMinutes = Number(process.env.DEV_DB_DEPLOY_TIMEOUT_MINUTES);
+          const overLimit = Number(elapsed) > timeoutMinutes * 60;
+          const order = [outOfOrder && 'out-of-order', missingLocal && 'missing-local'].filter(Boolean).join(',')
+            || (hasPlan ? 'none' : 'unknown');
           const summary = [
             '## DEV database dry run', '',
-            `- Migrations that would be applied: ${hasPlan ? migrations.length : 'Unknown'}`,
-            `- First migration: ${hasPlan ? migrationName(migrations[0]) : 'Unknown'}`,
-            `- Last migration: ${hasPlan ? migrationName(migrations.at(-1)) : 'Unknown'}`,
+            `- Migrations that would be applied: ${count}`,
+            `- First migration: ${first}`,
+            `- Last migration: ${last}`,
             `- Elapsed seconds (link and dry run): ${elapsed}`,
           ];
-          if (Number(elapsed) > 2700) summary.push('- The operation exceeded the 45-minute DEV database deploy job limit.');
+          console.log(`dry-run: migrations=${count} first=${first.replaceAll('`', '')} last=${last.replaceAll('`', '')} order=${order} elapsed=${elapsed}s over_${timeoutMinutes}_min=${overLimit}`);
+          if (overLimit) summary.push(`- The operation exceeded the ${timeoutMinutes}-minute DEV database deploy job limit.`);
           if (outOfOrder) {
             summary.push('- Out of order: local migrations are missing from the remote migration history before its latest applied migration.');
             const migrationPath = 'supabase/migrations/';
-            for (const line of lines.filter(line => line.startsWith(migrationPath))) {
-              summary.push(`  - ${migrationName(line.slice(migrationPath.length))}`);
-            }
+            const names = lines.filter(line => line.startsWith(migrationPath))
+              .map(line => migrationName(line.slice(migrationPath.length)));
+            for (const name of names) summary.push(`  - ${name}`);
+            if (names.length) console.log(`dry-run: out_of_order=${names.join(',').replaceAll('`', '')}`);
           }
           if (missingLocal) summary.push('- Remote migration versions are missing from the local migrations directory.');
           if (hasPlan && !outOfOrder && !missingLocal) summary.push('- Migration history findings: none reported by the CLI.');
