@@ -1,13 +1,30 @@
 #!/usr/bin/env node
-const { Pool } = require('pg');
 const { loadEnv } = require('../utils/load-env');
-const { upsertSettings } = require('../utils/settings-upsert');
 const {
   parsePositiveInt,
   resolveDsnCandidates,
   runConnectivitySmoke,
   shouldSyncTenantNotFoundOnPreviewEnv,
 } = require('./db-connect-smoke');
+
+const INVOKE_URL_KEYS = [
+  'LABEL_PROVIDER_INVOKE_URL',
+  'LABEL_RENDERER_INVOKE_URL',
+  'LABEL_PROVIDER_INVOKE_BASE_URL',
+  'LABEL_RENDERER_INVOKE_BASE_URL',
+  'LABEL_PROVIDER_INVOKE_URL_BASE',
+  'EDGE_SUPABASE_URL',
+  'SUPABASE_URL',
+];
+const INVOKE_SECRET_KEYS = [
+  'LABEL_PROVIDER_INVOKE_SECRET',
+  'LABEL_RENDERER_BENCHMARK_AUTH_JWT',
+  'LABEL_RENDERER_DB_JWT',
+  'LABEL_RENDERER_TOKEN',
+  'SUPABASE_SECRET_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'SERVICE_ROLE_KEY',
+];
 
 function resolveDbCandidatePolicy(env = process.env, explicitPolicy = '') {
   const requestedPolicy = String(explicitPolicy || '').trim();
@@ -47,40 +64,40 @@ async function resolveDbCandidate(options = {}) {
 }
 
 function resolveLabelProviderInvokeUrl(env = process.env) {
-  const key = [
-    'LABEL_PROVIDER_INVOKE_URL',
-    'LABEL_RENDERER_INVOKE_URL',
-    'EDGE_SUPABASE_URL',
-    'SUPABASE_URL',
-  ].find((name) => String(env[name] || '').trim());
+  const key = INVOKE_URL_KEYS.find((name) => String(env[name] || '').trim());
   if (!key) return '';
 
   const value = String(env[key]).trim().replace(/\/+$/, '');
-  const url = URL.parse(value);
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    url = null;
+  }
   if (!url || !/^https?:\/\//i.test(value) || !url.hostname
     || url.username || url.password || /[\s\\?#]/.test(value)) {
     throw new Error(`${key} must be an absolute HTTP(S) URL without credentials, query, or fragment`);
   }
-  return key.startsWith('LABEL_') ? value : `${value}/functions/v1/label-renderer`;
+  return key === 'LABEL_PROVIDER_INVOKE_URL' || key === 'LABEL_RENDERER_INVOKE_URL'
+    ? value
+    : `${value}/functions/v1/label-renderer`;
 }
 
 async function main() {
+  const { Pool } = require('pg');
+  const { upsertSettings } = require('../utils/settings-upsert');
   loadEnv();
   const { DATABASE_URL } = process.env;
-  const SECRET =
-    process.env.LABEL_PROVIDER_INVOKE_SECRET ||
-    process.env.LABEL_RENDERER_BENCHMARK_AUTH_JWT ||
-    process.env.LABEL_RENDERER_DB_JWT ||
-    process.env.LABEL_RENDERER_TOKEN ||
-    process.env.SUPABASE_SECRET_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SERVICE_ROLE_KEY;
+  const secretKey = INVOKE_SECRET_KEYS.find((name) => process.env[name]);
+  const SECRET = secretKey ? process.env[secretKey] : undefined;
 
   if (!DATABASE_URL) throw new Error('DATABASE_URL is required');
   const invokeUrl = resolveLabelProviderInvokeUrl(process.env);
   if (!invokeUrl || !SECRET) {
     throw new Error(
-      'LABEL_PROVIDER_INVOKE_URL/LABEL_RENDERER_INVOKE_URL/EDGE_SUPABASE_URL/SUPABASE_URL and LABEL_RENDERER_TOKEN/SERVICE_ROLE required',
+      'A label renderer invoke URL or base URL and a renderer credential are required. '
+      + 'URL variables: ' + INVOKE_URL_KEYS.join(', ') + '. '
+      + 'Credential variables: ' + INVOKE_SECRET_KEYS.join(', ') + '.',
     );
   }
 
