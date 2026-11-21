@@ -1,8 +1,8 @@
 {
   "schema": "masarx.resource-import-exceljs.v1",
-  "package_lock_sha256": "f01009080012d7ffeb4d3a8b96ee8e63ed54f290884b08e8e68c1d72a63d3990",
-  "generator_sha256": "d734d0f0c38267402fa1e28132ccc7df098b4832d375eb918a6687a5a3a8da2a",
-  "esbuild_version": "0.25.12",
+  "package_lock_sha256": "a199a2ed709a64fa802c6e473099f42c9f658d60c8e4c21ef251aa3bc487bcaa",
+  "generator_sha256": "93173aa65ac38d17938264824de924f8454c4d2658513cea0b454453f30ae59a",
+  "esbuild_version": "0.28.2",
   "packages": [
     {
       "name": "@fast-csv/format",
@@ -62,10 +62,10 @@
     },
     {
       "name": "jszip",
-      "version": "3.10.1",
+      "version": "3.10.2",
       "lock_path": "node_modules/jszip",
-      "integrity": "sha512-xXDvecyTpGLrqFrvkrUSoxxfJI5AH7U8zxxtVclpsUtMCq4JQ290LY8AW5c7Ggnr/Y/oK+bQMbqK2qmtk3pN4g==",
-      "resolved": "https://registry.npmjs.org/jszip/-/jszip-3.10.1.tgz"
+      "integrity": "sha512-3l+rb15IOWtUhU0H5MFqES/T6Kh7abYwjosBey/vD6hDt8zoEffkSC5Ws5SGtgVw3gBx2NEbhTeSW1+kWkpyTQ==",
+      "resolved": "https://registry.npmjs.org/jszip/-/jszip-3.10.2.tgz"
     },
     {
       "name": "isarray",
@@ -972,7 +972,7 @@
     },
     {
       "path": "node_modules/jszip/lib/index.js",
-      "sha256": "0fdb844fcdd6fd8ce8ced5e20b37cdabb629b4c155a1d3fb5df29c69eeb4f228"
+      "sha256": "32bd1c5286b33626d1b34e07ab8d09d3d2f67152850b2e4ba6449d80d974db1b"
     },
     {
       "path": "node_modules/jszip/lib/load.js",
@@ -1056,7 +1056,7 @@
     },
     {
       "path": "node_modules/jszip/lib/utils.js",
-      "sha256": "c77e896a1e47b44939e9dcdc2e05275fd83c1d69ee252089f9a1f44ba8c5cd1d"
+      "sha256": "82538b268e385eabde80d549606ded6d31ec9af7afcf567c6ae708366abe8550"
     },
     {
       "path": "node_modules/jszip/lib/zipEntries.js",
@@ -1400,9 +1400,9 @@
     }
   ],
   "files": {
-    "exceljs.mjs": "e894df86f55d5035e43340bc86914d36df56439a6368b6cb8bbd847cef042019",
+    "exceljs.mjs": "adedb51837a6c46fddd63f252323af969882161c1b22c64fa8ba7913af8e7dfc",
     "exceljs.d.mts": "bd79028994a71eb77c3d4ed3d47bb4632a47e5751afdaeaba4e82df314b9cedd",
     "exceljs-types.d.ts": "d10d70b4fe21847c61cb0ab72b60162d2cc23ef64e5606822d110cce2dbc9dd8",
-    "THIRD-PARTY-NOTICES.txt": "033eccd30a79cceb6290e1375a22f95a22e7cc4f71ecce6c8b95239672b55c15"
+    "THIRD-PARTY-NOTICES.txt": "fd1d16231304f6b98cfb8f81097b3ff69e53dcaba8fe18ad63b9fd6390f8c690"
   }
 }
