@@ -1,10 +1,23 @@
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const yaml = require('yaml');
 
 const body = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/provenance-on-tag.yml'), 'utf8');
 const workflow = yaml.parse(body);
 const { verify, build } = workflow.jobs;
+const gate = verify.steps.find(step => step.id === 'verify').run;
+
+function git(repo, ...args) {
+  const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8', timeout: 10000, windowsHide: true });
+  if (result.status !== 0) throw new Error(result.error?.message || result.stderr.trim());
+  return result.stdout.trim();
+}
+
+function jq(args, input) {
+  return spawnSync('jq', args, { input, encoding: 'utf8', timeout: 10000, windowsHide: true });
+}
 
 describe('release workflow contract', () => {
   test('runs only on version tag pushes', () => {
@@ -14,8 +27,7 @@ describe('release workflow contract', () => {
       group: 'release-${{ github.ref }}',
       'cancel-in-progress': false,
     });
-    const gate = verify.steps.find(step => step.id === 'verify');
-    expect(gate.run).toContain('"$GITHUB_REF" != refs/tags/v*');
+    expect(gate).toContain('"$GITHUB_REF" != refs/tags/v*');
   });
 
   test('gives the two bounded jobs only the permissions they use', () => {
@@ -29,22 +41,11 @@ describe('release workflow contract', () => {
     }
   });
 
-  test('requires trusted public CI on the exact first-parent main commit', () => {
-    const gate = verify.steps.find(step => step.id === 'verify');
-    expect(gate.run).toContain('git rev-parse --verify "$GITHUB_REF^{commit}"');
-    expect(gate.run).toContain('"$sha" != "$(git rev-parse HEAD)"');
-    const firstParent = 'git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$sha"';
-    expect(gate.run).toContain(firstParent);
-    expect(gate.run).toContain('actions/workflows/public-ci.yml/runs?head_sha=$sha');
-    const eventFilter = 'select(.event == "merge_group" or (.event == "push" and .head_branch == "main"))';
-    expect(gate.run).toContain(eventFilter);
-    expect(gate.run.indexOf(firstParent)).toBeLessThan(gate.run.indexOf('gh api'));
-    expect(gate.run).toContain('max_by(.id)');
-    expect(gate.run.indexOf(eventFilter)).toBeLessThan(gate.run.indexOf('max_by(.id)'));
-    expect(gate.run).toContain('commits/$sha/check-runs?check_name=ci-gate&filter=all');
-    expect(gate.run).toContain('.app.slug == "github-actions"');
-    expect(gate.run).toContain('.head_sha == $sha');
-    expect(gate.run).toContain('.status == "completed" and .conclusion == "success"');
+  test('binds the build and public CI queries to the verified tag commit', () => {
+    expect(gate).toContain('git rev-parse --verify "$GITHUB_REF^{commit}"');
+    expect(gate).toContain('"$sha" != "$(git rev-parse HEAD)"');
+    expect(gate).toContain('actions/workflows/public-ci.yml/runs?head_sha=$sha');
+    expect(gate).toContain('commits/$sha/check-runs?check_name=ci-gate&filter=all');
     expect(build.needs).toBe('verify');
     expect(build.steps[0].with.ref).toBe('${{ needs.verify.outputs.sha }}');
   });
@@ -76,5 +77,81 @@ describe('release workflow contract', () => {
     expect(body).not.toMatch(/\b(?:deploy(?:ment)?|npm\s+publish|gh-pages|pages\s+deploy|vercel|cloudflare|wrangler|secrets)\b|^\s*environment:/im);
     const tokenBindings = [verify, build].flatMap(job => job.steps.map(step => step.env?.GH_TOKEN).filter(Boolean));
     expect(tokenBindings).toEqual(['${{ github.token }}', '${{ github.token }}']);
+  });
+});
+
+describe('release admission behavior', () => {
+  test('accepts the main merge commit and rejects its PR-branch parent', () => {
+    const command = gate.match(/^if ! (.+); then\n +echo .*first-parent history/m)?.[1];
+    expect(command).toBeDefined();
+    const temp = fs.realpathSync(os.tmpdir());
+    const repo = fs.mkdtempSync(path.join(temp, 'masarx-release-gate-'));
+    try {
+      git(repo, 'init', '--initial-branch=main');
+      git(repo, 'config', 'user.name', 'Release gate test');
+      git(repo, 'config', 'user.email', 'release-fixture@example.invalid');
+      git(repo, 'config', 'commit.gpgsign', 'false');
+      git(repo, 'commit', '--allow-empty', '-m', 'base');
+      git(repo, 'switch', '-c', 'pr-branch');
+      git(repo, 'commit', '--allow-empty', '-m', 'PR commit');
+      const pr = git(repo, 'rev-parse', 'HEAD');
+      git(repo, 'switch', 'main');
+      git(repo, 'merge', '--no-ff', 'pr-branch', '-m', 'merge PR branch');
+      const main = git(repo, 'rev-parse', 'HEAD');
+      expect(git(repo, 'rev-parse', 'HEAD^2')).toBe(pr);
+      git(repo, 'update-ref', 'refs/remotes/origin/main', main);
+
+      const bash = process.platform === 'win32'
+        ? path.resolve(git(repo, '--exec-path'), '../../../bin/bash.exe')
+        : 'bash';
+      const run = sha => spawnSync(bash, ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', command], {
+        cwd: repo, env: { ...process.env, sha }, encoding: 'utf8', timeout: 10000, windowsHide: true,
+      });
+      expect(run(main)).toMatchObject({ status: 0, stderr: '' });
+      expect(run(pr)).toMatchObject({ status: 1, stderr: '' });
+    } finally {
+      expect(path.dirname(fs.realpathSync(repo))).toBe(temp);
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  const testJq = jq(['--version']).error?.code === 'ENOENT' ? test.skip : test;
+  const sha = 'a'.repeat(40);
+  const mergeGroup = { event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1-fixture', head_sha: sha, check_suite_id: 11 };
+  const newer = { ...mergeGroup, check_suite_id: 12 };
+  const pullRequest = { ...newer, event: 'pull_request', head_branch: 'pr-branch' };
+  const differentSha = { ...mergeGroup, head_sha: 'b'.repeat(40) };
+  const success = {
+    id: 1, name: 'ci-gate', head_sha: sha, app: { slug: 'github-actions' },
+    check_suite: { id: mergeGroup.check_suite_id }, status: 'completed', conclusion: 'success',
+  };
+  const newerFailure = { ...success, id: 2, check_suite: { id: newer.check_suite_id }, conclusion: 'failure' };
+
+  testJq.each([
+    ['pull-request-only success', [pullRequest], [{ ...newerFailure, conclusion: 'success' }], false],
+    ['merge-group success for a different SHA', [differentSha], [{ ...success, head_sha: differentSha.head_sha }], false],
+    ['empty evidence', [], [], false],
+    ['pending gate', [mergeGroup], [{ ...success, status: 'in_progress', conclusion: null }], false],
+    ['failed gate', [mergeGroup], [{ ...success, conclusion: 'failure' }], false],
+    ['newer failure over older success', [newer, mergeGroup], [newerFailure, success], false],
+    ['merge-group success on the tagged SHA', [mergeGroup], [success], true],
+    ['push to main success', [{ ...mergeGroup, event: 'push', head_branch: 'main' }], [success], true],
+    ['merge-group success on a different queue', [{ ...mergeGroup, head_branch: 'gh-readonly-queue/dev/pr-1-fixture' }], [success], false],
+    ['merge-group success with a missing queue', [{ ...mergeGroup, head_branch: null }], [success], false],
+    ['push to a different branch', [{ ...mergeGroup, event: 'push', head_branch: 'dev' }], [success], false],
+    ['wrong GitHub App', [mergeGroup], [{ ...success, app: { slug: 'fixture' } }], false],
+    ['newer PR failure alongside trusted success', [pullRequest, mergeGroup], [newerFailure, success], true],
+  ])('evaluates %s with the workflow jq filters', (_label, runs, checks, accepted) => {
+    const suiteFilter = gate.match(/\| jq -c '([\s\S]*?)'/)?.[1];
+    const checkFilter = gate.match(/if ! jq -e [^'\n]*'([\s\S]*?)'/)?.[1];
+    expect(suiteFilter).toBeDefined();
+    expect(checkFilter).toBeDefined();
+
+    const suites = jq(['-c', suiteFilter], JSON.stringify([{ workflow_runs: runs }]));
+    expect(suites).toMatchObject({ status: 0, stderr: '' });
+    const result = jq(['-e', '--arg', 'sha', sha, '--argjson', 'suites', suites.stdout.trim(), checkFilter],
+      JSON.stringify([{ check_runs: checks }]));
+    expect(result).toMatchObject({ status: accepted ? 0 : 1, stderr: '' });
+    expect(JSON.parse(result.stdout)).toBe(accepted);
   });
 });
