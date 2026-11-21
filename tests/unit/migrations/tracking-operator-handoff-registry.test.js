@@ -16,6 +16,7 @@ test('scoped handoff defaults retain tenant overrides, temporal history and publ
   const defaults = JSON.parse(sql.match(/\$handoff_value\$([\s\S]*?)\$handoff_value\$/)[1]);
   expect(schema.required).toBeUndefined();
   expect(schema.properties.route_targets.properties.console.properties.path.type).toBe('string');
+  expect(schema.properties.label_ar.type).toBe('string');
   expect(defaults).toMatchObject({ enabled: true, identifier_param: 'focus',
     identifier_source: 'tracking_number', tab_param: 'tab', tab: 'timeline',
     route_targets: { console: { path: '/operate/shipments' } } });
