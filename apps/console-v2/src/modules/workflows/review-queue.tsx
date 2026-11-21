@@ -2506,7 +2506,7 @@ export function ReviewQueueModule() {
                     <button
                       type="button"
                       className="btn btn--sm btn--ghost"
-                      disabled={!canWriteTasks}
+                      disabled={!canWriteTasks || usersQuery.isPending}
                       title={canWriteTasks ? 'Assign task' : 'Task update permission required'}
                       onClick={() => openAssignPicker(t)}
                     >

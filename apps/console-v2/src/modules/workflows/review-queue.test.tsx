@@ -9,7 +9,7 @@
 //     the toolbar where the "Snoozed" filter chip would falsely match).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
 import { ReviewQueueModule } from './review-queue';
@@ -477,6 +477,84 @@ describe('ReviewQueueModule', () => {
     }
   });
 
+  it('keeps + Assign disabled while users load and reports a settled user-list error', async () => {
+    const user = userEvent.setup();
+    const realTasks = apiMod.listTasks;
+    const realList = apiMod.ui_list_resource_v1;
+    const tasksSpy = vi.spyOn(apiMod, 'listTasks').mockImplementation(async (filters) => {
+      const rows = await realTasks(filters);
+      return rows.map((row) => row.id === 'tsk_2902'
+        ? { ...row, status: 'open', assigned_to: null }
+        : row);
+    });
+    let finishUsers!: () => void;
+    const pendingUsers = new Promise<void>((resolve) => { finishUsers = resolve; });
+    const listSpy = vi.spyOn(apiMod, 'ui_list_resource_v1').mockImplementation(async (resource, opts) => {
+      if (resource === 'users') {
+        await pendingUsers;
+        throw new Error('Users request failed');
+      }
+      return realList(resource, opts);
+    });
+
+    try {
+      await mountAndWait();
+      await activateTask(user, 'TSK-2902');
+      const assignButton = screen.getByRole('button', { name: /^\+ Assign$/i });
+      expect(assignButton).toBeDisabled();
+      await user.click(assignButton);
+      expect(screen.queryByText('User selection is not available')).not.toBeInTheDocument();
+
+      finishUsers();
+      await waitFor(() => expect(assignButton).toBeEnabled());
+      await user.click(assignButton);
+      expect(screen.getByText('User selection is not available')).toBeInTheDocument();
+    } finally {
+      finishUsers();
+      listSpy.mockRestore();
+      tasksSpy.mockRestore();
+    }
+  });
+
+  it('opens the Assign picker with cached users after a failed background refetch', async () => {
+    const user = userEvent.setup();
+    const realTasks = apiMod.listTasks;
+    const realList = apiMod.ui_list_resource_v1;
+    let failUsers = false;
+    const tasksSpy = vi.spyOn(apiMod, 'listTasks').mockImplementation(async (filters) => {
+      const rows = await realTasks(filters);
+      return rows.map((row) => row.id === 'tsk_2902'
+        ? { ...row, status: 'open', assigned_to: null }
+        : row);
+    });
+    const listSpy = vi.spyOn(apiMod, 'ui_list_resource_v1').mockImplementation(async (resource, opts) => {
+      if (resource === 'users' && failUsers) throw new Error('Users refetch failed');
+      return realList(resource, opts);
+    });
+
+    try {
+      const { queryClient } = await mountAndWait();
+      const usersQuery = { queryKey: qk.list('users'), exact: true };
+      await act(async () => {
+        await queryClient.refetchQueries(usersQuery, { cancelRefetch: false, throwOnError: true });
+      });
+
+      failUsers = true;
+      await act(async () => {
+        await expect(queryClient.refetchQueries(usersQuery, { throwOnError: true })).rejects.toThrow('Users refetch failed');
+      });
+
+      await activateTask(user, 'TSK-2902');
+      await user.click(screen.getByRole('button', { name: /^\+ Assign$/i }));
+      expect(screen.queryByText('User selection is not available')).not.toBeInTheDocument();
+      const picker = screen.getByRole('combobox', { name: /Assign review task user/i });
+      expect(within(picker).getByRole('option', { name: /usr_ops_admin_layla/i })).toBeInTheDocument();
+    } finally {
+      listSpy.mockRestore();
+      tasksSpy.mockRestore();
+    }
+  });
+
   it('reconciles single task Assign picker visibility from assign_task_v1 backend readback', async () => {
     const user = userEvent.setup();
     const realTasks = apiMod.listTasks;
@@ -524,13 +602,11 @@ describe('ReviewQueueModule', () => {
     });
 
     try {
-      const { queryClient } = await mountAndWait();
+      await mountAndWait();
       await activateTask(user, 'TSK-2902');
-      await waitFor(() => {
-        const users = queryClient.getQueryData<{ rows: { id: string }[] }>(qk.list('users'));
-        expect(users?.rows).toEqual(expect.arrayContaining([expect.objectContaining({ id: pickedAssignee })]));
-      });
-      await user.click(screen.getByRole('button', { name: /^\+ Assign$/i }));
+      const assignButton = screen.getByRole('button', { name: /^\+ Assign$/i });
+      await waitFor(() => expect(assignButton).toBeEnabled());
+      await user.click(assignButton);
       await user.selectOptions(screen.getByRole('combobox', { name: /Assign review task user/i }), pickedAssignee);
       await user.click(screen.getByRole('button', { name: /^Assign$/i }));
 
