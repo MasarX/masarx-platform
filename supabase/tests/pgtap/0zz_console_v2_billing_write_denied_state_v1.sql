@@ -10,16 +10,16 @@ SELECT plan(35);
 
 DO $$
 DECLARE
-  v_org UUID := '00000000-0000-0000-0000-00000000d7a0';
-  v_client UUID := '00000000-0000-0000-0000-00000000d7a1';
-  v_limited_user UUID := '00000000-0000-0000-0000-00000000d7a2';
-  v_ops_user UUID := '00000000-0000-0000-0000-00000000d7a3';
-  v_update_invoice UUID := '00000000-0000-0000-0000-00000000d7a4';
-  v_void_invoice UUID := '00000000-0000-0000-0000-00000000d7a5';
-  v_send_invoice UUID := '00000000-0000-0000-0000-00000000d7a6';
-  v_refund_invoice UUID := '00000000-0000-0000-0000-00000000d7a7';
-  v_subscription UUID := '00000000-0000-0000-0000-00000000d7a8';
-  v_bulk_invoice UUID := '00000000-0000-0000-0000-00000000d7a9';
+  v_org UUID := gen_random_uuid();
+  v_client UUID := gen_random_uuid();
+  v_limited_user UUID := gen_random_uuid();
+  v_ops_user UUID := gen_random_uuid();
+  v_update_invoice UUID := gen_random_uuid();
+  v_void_invoice UUID := gen_random_uuid();
+  v_send_invoice UUID := gen_random_uuid();
+  v_refund_invoice UUID := gen_random_uuid();
+  v_subscription UUID := gen_random_uuid();
+  v_bulk_invoice UUID := gen_random_uuid();
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -106,9 +106,6 @@ BEGIN
       version = EXCLUDED.version,
       metadata = EXCLUDED.metadata,
       updated_at = now();
-
-  DELETE FROM public.billing_invoice_events
-  WHERE invoice_id IN (v_update_invoice, v_void_invoice, v_send_invoice, v_refund_invoice, v_bulk_invoice);
 
   DELETE FROM public.subscription_events
   WHERE subscription_id = v_subscription;

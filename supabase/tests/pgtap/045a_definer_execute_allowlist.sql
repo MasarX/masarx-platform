@@ -582,7 +582,6 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.marketplace_provider_opt_in_v1(text,jsonb,jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_provider_workboard_v1(boolean)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_provision_freelancer_driver_fleet_profile_v1(uuid,uuid,jsonb)', '{authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
-  ('public.marketplace_record_finance_event_v1(uuid,text,text,numeric,text,text,uuid,jsonb,text)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
   ('public.marketplace_refresh_reputation_snapshots_for_visible_v1(uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_reputation_policy_v1(jsonb)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.marketplace_reputation_snapshot_v1(uuid,uuid)', '{anon,authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),

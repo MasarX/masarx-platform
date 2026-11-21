@@ -1530,7 +1530,7 @@ export function BankReconModule() {
         <StateView
           kind="error"
           title="Bank reconciliation policy is not configured"
-          hint="Suspense aging, open-item warning, or match-window settings are missing. Finish bank reconciliation policy setup before using this surface."
+          hint="Suspense aging, open-item warning, or match-window settings are missing. Ask an administrator to finish bank reconciliation policy setup before using this surface."
         />
       </div>
     );

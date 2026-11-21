@@ -6,28 +6,28 @@ SELECT plan(15);
 
 DO $$
 DECLARE
-  v_org uuid := '00000000-0000-0000-0000-00000000c580';
-  v_client uuid := '00000000-0000-0000-0000-00000000c581';
-  v_invoice uuid := '00000000-0000-0000-0000-00000000c582';
-  v_paid_invoice uuid := '00000000-0000-0000-0000-00000000c583';
-  v_ops uuid := '00000000-0000-0000-0000-00000000c584';
-  v_viewer uuid := '00000000-0000-0000-0000-00000000c585';
-  v_amount_invoice uuid := '00000000-0000-0000-0000-00000000c586';
+  v_org uuid := gen_random_uuid();
+  v_client uuid := gen_random_uuid();
+  v_invoice uuid := gen_random_uuid();
+  v_paid_invoice uuid := gen_random_uuid();
+  v_ops uuid := gen_random_uuid();
+  v_viewer uuid := gen_random_uuid();
+  v_amount_invoice uuid := gen_random_uuid();
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
   INSERT INTO public.organizations (id, name, slug)
-  VALUES (v_org, 'Console Billing Payment Org', 'console-billing-payment-org')
+  VALUES (v_org, 'Console Billing Payment Org', 'console-billing-payment-org-' || left(v_org::text, 8))
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.clients (id, organization_id, name, slug)
-  VALUES (v_client, v_org, 'Console Billing Payment Client', 'console-billing-payment-client')
+  VALUES (v_client, v_org, 'Console Billing Payment Client', 'console-billing-payment-client-' || left(v_client::text, 8))
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, access_scope_type, access_scope_id)
   VALUES
-    (v_ops, v_org, 'console-billing-payment-ops@example.com', 'Console Billing Payment Ops', 'ops_admin', 'tenant', NULL),
-    (v_viewer, v_org, 'console-billing-payment-viewer@example.com', 'Console Billing Payment Viewer', 'billing_viewer', 'tenant', NULL)
+    (v_ops, v_org, 'console-billing-payment-ops-' || v_ops::text || '@example.com', 'Console Billing Payment Ops', 'ops_admin', 'tenant', NULL),
+    (v_viewer, v_org, 'console-billing-payment-viewer-' || v_viewer::text || '@example.com', 'Console Billing Payment Viewer', 'billing_viewer', 'tenant', NULL)
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.billing_invoices (
@@ -64,8 +64,6 @@ BEGIN
       metadata = EXCLUDED.metadata,
       updated_at = now();
 
-  DELETE FROM public.billing_invoice_events
-  WHERE invoice_id IN (v_invoice, v_paid_invoice, v_amount_invoice);
   DELETE FROM public.decision_log
   WHERE resource_id IN (v_invoice, v_paid_invoice, v_amount_invoice)
     AND resource_type = 'billing_invoice';

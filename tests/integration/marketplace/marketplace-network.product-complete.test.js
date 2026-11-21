@@ -7,6 +7,7 @@ const {
   createOrganization,
   createUser,
   setAuthContext,
+  withFixtureAdminContext,
 } = require("../helpers/tenant-utils");
 
 function parseResult(rowValue, label) {
@@ -30,7 +31,7 @@ describe("marketplace network product-complete lifecycle", () => {
     await pool.end().catch(() => {});
   });
 
-  test("shipment-batch request runs through workboard, workspace, contract room, settlement, and token status", async () => {
+  test("shipment-batch request runs through workboard, workspace, contract room, settlement reversal, and token status", async () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -398,6 +399,106 @@ describe("marketplace network product-complete lifecycle", () => {
         [workPackageId],
       );
       expect(workPackageRow.rows[0]?.status).toBe("settled");
+
+      const originalSettlement = settlementWorkspace.work_package.metadata.settlement;
+      expect(originalSettlement).toMatchObject({ amount: 1450, currency: "SAR" });
+
+      const reversalReason = "Reverse the synthetic shipment batch";
+      const reversal = await callMarketplace(
+        client,
+        `SELECT public.marketplace_settlement_reverse_v1($1::uuid, $2::text) AS result`,
+        [workPackageId, reversalReason],
+        "marketplace_settlement_reverse_v1",
+      );
+      expect(reversal).toMatchObject({ ok: true, id: workPackageId, status: "completed" });
+
+      const reversedWorkspace = await callMarketplace(
+        client,
+        `SELECT public.marketplace_settlement_workspace_v1($1::uuid, $2::uuid) AS result`,
+        [contractId, workPackageId],
+        "marketplace_settlement_workspace_v1 after reversal",
+      );
+      expect(reversedWorkspace).toMatchObject({
+        ok: true,
+        contract: { id: contractId, status: "completed" },
+        work_package: {
+          id: workPackageId,
+          status: "completed",
+          metadata: {
+            settlement: originalSettlement,
+            settlement_reversal: {
+              reason: reversalReason,
+              requester_finance_event_id: reversal.requester_finance_event_id,
+              supplier_finance_event_id: reversal.supplier_finance_event_id,
+              requester_settlement_batch_id: reversal.requester_settlement_batch_id,
+              supplier_settlement_batch_id: reversal.supplier_settlement_batch_id,
+            },
+          },
+        },
+      });
+
+      const { rows: ledger } = await withFixtureAdminContext(client, () => client.query(
+        `SELECT sb.id AS batch_id, sb.kind, sb.status, fe.id AS finance_event_id,
+                fe.organization_id, fe.event_type, fe.direction, fe.amount::text, fe.currency
+           FROM public.settlement_batches sb
+           JOIN public.settlement_batch_finance_events member
+             ON member.settlement_batch_id = sb.id AND member.organization_id = sb.organization_id
+           JOIN public.finance_events fe
+             ON fe.id = member.finance_event_id AND fe.organization_id = member.organization_id
+            AND fe.occurred_at = member.finance_occurred_at
+          WHERE sb.subject_type = 'marketplace_contract' AND sb.subject_id = $1::uuid
+            AND fe.subject_type = 'marketplace_contract' AND fe.subject_id = sb.subject_id
+            AND fe.metadata->>'marketplace_work_package_id' = $2`,
+        [contractId, workPackageId],
+      ));
+      expect(ledger).toHaveLength(4);
+      for (const [receipt, phase, payableDirection, receivableDirection] of [
+        [originalSettlement, "recorded", "debit", "credit"],
+        [reversal, "reversal", "credit", "debit"],
+      ]) {
+        expect(ledger).toContainEqual({
+          batch_id: receipt.requester_settlement_batch_id,
+          kind: "billing",
+          status: "posted",
+          finance_event_id: receipt.requester_finance_event_id,
+          organization_id: requesterOrg.id,
+          event_type: `marketplace_payable_${phase}`,
+          direction: payableDirection,
+          amount: "1450",
+          currency: "SAR",
+        });
+        expect(ledger).toContainEqual({
+          batch_id: receipt.supplier_settlement_batch_id,
+          kind: "payout",
+          status: "posted",
+          finance_event_id: receipt.supplier_finance_event_id,
+          organization_id: supplierOrg.id,
+          event_type: `marketplace_receivable_${phase}`,
+          direction: receivableDirection,
+          amount: "1450",
+          currency: "SAR",
+        });
+      }
+
+      for (const side of ["requester", "supplier"]) {
+        const posted = ledger.find((event) => event.finance_event_id === originalSettlement[side + "_finance_event_id"]);
+        const reversed = ledger.find((event) => event.finance_event_id === reversal[side + "_finance_event_id"]);
+        expect(posted.amount).toBe(String(originalSettlement.amount));
+        expect(reversed.amount).toBe(posted.amount);
+      }
+
+      const outsideOrg = await createOrganization(client, "Marketplace Outside Tenant");
+      const outsideUserId = await createUser(
+        client, outsideOrg.id, `marketplace-outside-${outsideOrg.id}@example.com`, { userType: "ops_admin" },
+      );
+      await setAuthContext(client, outsideUserId);
+      const hiddenWorkspace = await callMarketplace(
+        client,
+        `SELECT public.marketplace_settlement_workspace_v1($1::uuid, $2::uuid) AS result`,
+        [contractId, workPackageId],
+        "marketplace_settlement_workspace_v1 outside tenant",
+      );
+      expect(hiddenWorkspace).toEqual({ ok: false, error: { code: "contract_not_found" } });
     } finally {
       await client.query("ROLLBACK");
       client.release();

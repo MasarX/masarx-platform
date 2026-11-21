@@ -263,6 +263,21 @@
       "file": "supabase/migrations/202607031430_dispatch_route_scanout_ui_read_registry_v1.sql",
       "sha256": "94ca24aeb285640118b3cc4a7169a73317692600bd91483de0e8039aa8134b80",
       "reason": "Reconciles catalog-selected api contract views for the public user-facing registry while preserving specialized projections and application-role privileges."
+    },
+    {
+      "file": "supabase/migrations/20261121022924_finance_ledger_service_write_guards_v1.sql",
+      "sha256": "75424631ce775bc39d0cf7f7033a5716edd1843cdc1b5f7523d40bab3c891216",
+      "reason": "Line 12 revokes UPDATE, DELETE and TRUNCATE from service_role on public.finance_events and the descendants returned by pg_partition_tree for that root."
+    },
+    {
+      "file": "supabase/migrations/20261121022925_finance_ledger_immutability.sql",
+      "sha256": "d3e793924114cec72f75d317055c75e2e3d02fc9a0da3ab745bbec12c0d34157",
+      "reason": "Lines 44, 46-48 and 81 enable RLS, revoke the PUBLIC, anon and authenticated table grants, and ensure a service policy on the catalog relation passed to the owner-only enforce_service_only_rls_v1 helper. The migration backfills the public.finance_events tree. Runtime partition maintenance passes new public leaves. Lines 50-51 limit service_role to SELECT and INSERT on finance-tree relations. Line 69 retains the pre-existing GRANT ALL behavior for non-finance relations selected by the owner. Lines 104 and 110 install row-mutation and truncate guards on public.settlement_events, public.settlement_batch_finance_events and public.billing_invoice_events."
+    },
+    {
+      "file": "supabase/migrations/20261121022928_keep_ledger_grants_append_only.sql",
+      "sha256": "2c1774a1cdb250ddd37bd543bca4d7fa96c0aebd7deb57218f9a5416505248cb",
+      "reason": "Lines 28, 30-32 and 71 enable RLS, revoke the PUBLIC, anon and authenticated table grants, and ensure a service policy on the catalog relation passed to the owner-only enforce_service_only_rls_v1 helper. Runtime partition maintenance passes new public leaves. Lines 40-41 limit service_role to SELECT and INSERT on the public.finance_events tree, public.finance_event_dedupe, public.settlement_events, public.settlement_batch_finance_events and public.billing_invoice_events. Line 59 retains the pre-existing GRANT ALL behavior for other relations selected by the owner."
     }
   ]
 }

@@ -7,7 +7,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(67);
+SELECT plan(68);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_bank_deposit_reconciliation_workflow_v2()
 RETURNS SETOF TEXT
@@ -609,6 +609,27 @@ BEGIN
 
   RETURN NEXT is((SELECT workflow_status FROM public.workflow_runs WHERE id = v_run_b), 'completed', 'scenario B: workflow_runs.workflow_status is completed');
   RETURN NEXT is((SELECT status FROM public.settlement_batches WHERE id = v_settlement_batch_id), 'approved', 'scenario B: settlement batch status is approved');
+
+  SELECT context INTO v_ctx FROM public.workflow_runs WHERE id = v_run_b;
+  RETURN NEXT is(
+    (SELECT jsonb_agg(
+       jsonb_build_array(fe.id, fe.event_type, fe.direction, fe.amount, fe.currency, fe.account_type, fe.account_id)
+       ORDER BY fe.event_type, fe.direction
+     )
+       FROM public.settlement_batch_finance_events member
+       JOIN public.finance_events fe
+         ON fe.id = member.finance_event_id
+        AND fe.organization_id = member.organization_id
+        AND fe.occurred_at = member.finance_occurred_at
+      WHERE member.organization_id = v_org
+        AND member.settlement_batch_id = v_settlement_batch_id),
+    jsonb_build_array(
+      jsonb_build_array(v_stmt_finance_event_id, 'bank_statement', 'in', 90, 'SAR', 'bank_account', v_bank_account),
+      jsonb_build_array(v_ctx #>> '{deposit_transfer,to_finance_event_id}', 'deposit', 'in', 90, 'SAR', 'bank_account', v_bank_account),
+      jsonb_build_array(v_ctx #>> '{deposit_transfer,from_finance_event_id}', 'deposit', 'out', 90, 'SAR', 'branch', v_branch)
+    ),
+    'approved variance batch contains the exact statement and balanced transfer'
+  );
 
   RETURN;
 END;

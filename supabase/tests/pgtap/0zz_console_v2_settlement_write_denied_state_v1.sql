@@ -10,14 +10,14 @@ SELECT plan(22);
 
 DO $$
 DECLARE
-  v_org UUID := '00000000-0000-0000-0000-00000000d6a0';
-  v_branch UUID := '00000000-0000-0000-0000-00000000d6a1';
-  v_limited_user UUID := '00000000-0000-0000-0000-00000000d6a2';
-  v_ops_user UUID := '00000000-0000-0000-0000-00000000d6a3';
-  v_transition_batch UUID := '00000000-0000-0000-0000-00000000d6a4';
-  v_apply_batch UUID := '00000000-0000-0000-0000-00000000d6a5';
-  v_reject_batch UUID := '00000000-0000-0000-0000-00000000d6a6';
-  v_api_transition_batch UUID := '00000000-0000-0000-0000-00000000d6a7';
+  v_org UUID := gen_random_uuid();
+  v_branch UUID := gen_random_uuid();
+  v_limited_user UUID := gen_random_uuid();
+  v_ops_user UUID := gen_random_uuid();
+  v_transition_batch UUID := gen_random_uuid();
+  v_apply_batch UUID := gen_random_uuid();
+  v_reject_batch UUID := gen_random_uuid();
+  v_api_transition_batch UUID := gen_random_uuid();
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
 
@@ -68,12 +68,6 @@ BEGIN
       version = EXCLUDED.version,
       metadata = EXCLUDED.metadata,
       updated_at = now();
-
-  DELETE FROM public.settlement_events
-  WHERE settlement_batch_id IN (v_transition_batch, v_apply_batch, v_reject_batch, v_api_transition_batch);
-
-  DELETE FROM public.settlement_batch_finance_events
-  WHERE settlement_batch_id IN (v_transition_batch, v_apply_batch, v_reject_batch, v_api_transition_batch);
 
   DELETE FROM public.decision_log
   WHERE organization_id = v_org
