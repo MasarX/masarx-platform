@@ -15,6 +15,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -85,7 +88,6 @@ jobs:
       attestations: write
     env:
       CI: 'true'
-      NPM_CONFIG_IGNORE_SCRIPTS: 'true'
       ENV_FILE: /dev/null
       ENV_FILE_APPEND: '0'
       ENV_FILE_OVERRIDE: '0'
