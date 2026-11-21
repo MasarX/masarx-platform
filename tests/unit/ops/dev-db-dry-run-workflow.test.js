@@ -90,6 +90,7 @@ test('copies the deploy CLI pin and link command, and always pushes with dry-run
 function summarize(output, status, elapsed, stage = 'dry-run') {
   const write = jest.fn();
   const error = jest.fn();
+  const log = jest.fn();
   const process = {
     argv: ['node', '-', 'output', stage, String(status), String(elapsed)],
     env: {
@@ -101,15 +102,15 @@ function summarize(output, status, elapsed, stage = 'dry-run') {
   const script = measure.run.split("<<'NODE'\n")[1].split('\nNODE\n')[0];
   runInNewContext(script, {
     require: () => ({ readFileSync: () => output, appendFileSync: write }),
-    console: { error },
+    console: { error, log },
     process,
   }, { timeout: 1000 });
   expect(write).toHaveBeenCalledWith('summary', expect.any(String));
-  return { text: write.mock.calls[0][1], errors: error.mock.calls.flat().join('\n'), code: process.exitCode };
+  return { text: write.mock.calls[0][1], errors: error.mock.calls.flat().join('\n'), logs: log.mock.calls.flat(), code: process.exitCode };
 }
 
 test('summarizes the pending migration range and flags a run over 45 minutes', () => {
-  const { text, code } = summarize([
+  const { text, logs, code } = summarize([
     'Connecting to remote database...',
     'Would push these migrations:',
     ' • 20260101000000_first.sql',
@@ -121,6 +122,9 @@ test('summarizes the pending migration range and flags a run over 45 minutes', (
   expect(text).toContain('Last migration: `20260103000000_last.sql`');
   expect(text).toContain('Elapsed seconds (link and dry run): 2701');
   expect(text).toContain('exceeded the 45-minute');
+  expect(logs).toEqual([
+    'dry-run: migrations=3 first=20260101000000_first.sql last=20260103000000_last.sql order=none elapsed=2701s over_45_min=true',
+  ]);
   expect(code).toBeUndefined();
 });
 
@@ -130,10 +134,24 @@ test('reports a confirmed empty plan and rejects an unrecognized success respons
   expect(empty.text).toContain('First migration: None');
   expect(empty.text).toContain('Last migration: None');
   expect(empty.text).not.toContain('exceeded the 45-minute');
+  expect(empty.logs).toEqual(['dry-run: migrations=0 first=None last=None order=none elapsed=2700s over_45_min=false']);
   expect(empty.code).toBeUndefined();
   const unknown = summarize('Unexpected output\n', 0, 2);
   expect(unknown.text).toContain('Migrations that would be applied: Unknown');
+  expect(unknown.logs).toEqual(['dry-run: migrations=Unknown first=Unknown last=Unknown order=unknown elapsed=2s over_45_min=false']);
   expect(unknown.code).toBe(1);
+});
+
+test('logs the same redacted migration range as the summary', () => {
+  const { text, errors, logs } = summarize([
+    'Would push these migrations:',
+    ` • 20260101000000_${fixtureRef}.sql`,
+    ' • 20260102000000_fake-password.sql',
+    'Connecting to db.example.test...',
+  ].join('\n'), 0, 7);
+  expect(text).toContain('First migration: Redacted\n- Last migration: Redacted');
+  expect(logs).toEqual(['dry-run: migrations=2 first=Redacted last=Redacted order=none elapsed=7s over_45_min=false']);
+  expect([text, errors, ...logs].join('\n')).not.toMatch(new RegExp(`${fixtureRef}|fake-password|db\\.example\\.test`));
 });
 
 test('reports out-of-order migration details without emitting project identifiers or secrets', () => {
@@ -147,9 +165,14 @@ test('reports out-of-order migration details without emitting project identifier
   ].join('\n'), 1, 3);
   expect(result.text).toContain('Migrations that would be applied: Unknown');
   expect(result.text).toContain('Out of order');
-  expect(result.text).toContain('20260101000000_older.sql');
-  expect(result.text + result.errors).not.toContain(fixtureRef);
-  expect(result.text + result.errors).not.toMatch(/fake-password|https:\/\//);
+  expect(result.text).toContain('  - `20260101000000_older.sql`\n  - Redacted\n  - Redacted');
+  expect(result.logs).toEqual([
+    'dry-run: migrations=Unknown first=Unknown last=Unknown order=out-of-order elapsed=3s over_45_min=false',
+    'dry-run: out_of_order=20260101000000_older.sql,Redacted,Redacted',
+  ]);
+  const output = [result.text, result.errors, ...result.logs].join('\n');
+  expect(output).not.toContain(fixtureRef);
+  expect(output).not.toMatch(/fake-password|https:\/\//);
   expect(result.code).toBe(1);
 });
 
@@ -157,6 +180,7 @@ test('reports missing local migration history and records link failures separate
   const missing = summarize('Remote migration versions not found in local migrations directory.\n', 1, 8);
   expect(missing.text).toContain('Remote migration versions are missing from the local migrations directory.');
   expect(missing.text).toContain('Migrations that would be applied: Unknown');
+  expect(missing.logs).toEqual(['dry-run: migrations=Unknown first=Unknown last=Unknown order=missing-local elapsed=8s over_45_min=false']);
   expect(missing.code).toBe(1);
   const link = summarize('', 2, 4, 'link');
   expect(link.text).toContain('Link failed.');
