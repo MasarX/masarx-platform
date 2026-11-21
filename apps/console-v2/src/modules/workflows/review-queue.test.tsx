@@ -1353,6 +1353,63 @@ describe('ReviewQueueModule', () => {
       }
     });
 
+    it('disables Bulk Reassign until the initial users request settles', async () => {
+      const user = userEvent.setup();
+      const realList = apiMod.ui_list_resource_v1;
+      let releaseUsers!: () => void;
+      const usersPending = new Promise<void>((resolve) => { releaseUsers = resolve; });
+      const listSpy = vi.spyOn(apiMod, 'ui_list_resource_v1').mockImplementation(async (resource, opts) => {
+        if (resource === 'users') await usersPending;
+        return realList(resource, opts);
+      });
+
+      try {
+        await mountAndWait();
+        await selectVisibleTasks(user, 2);
+
+        const reassign = within(bulkBar()).getByRole('button', { name: /^Reassign$/i });
+        expect(reassign).toBeDisabled();
+        await user.click(reassign);
+        expect(screen.queryByText(/User selection is not available/i)).not.toBeInTheDocument();
+
+        releaseUsers();
+        await waitFor(() => expect(reassign).toBeEnabled());
+      } finally {
+        releaseUsers();
+        listSpy.mockRestore();
+      }
+    });
+
+    it('opens Bulk Reassign with cached users after a users refetch fails', async () => {
+      const user = userEvent.setup();
+      const { queryClient } = await mountAndWait();
+      await selectVisibleTasks(user, 2);
+
+      const reassign = within(bulkBar()).getByRole('button', { name: /^Reassign$/i });
+      await waitFor(() => expect(reassign).toBeEnabled());
+
+      const realList = apiMod.ui_list_resource_v1;
+      const refetchError = new Error('Users refetch failed');
+      const listSpy = vi.spyOn(apiMod, 'ui_list_resource_v1').mockImplementation(async (resource, opts) => {
+        if (resource === 'users') throw refetchError;
+        return realList(resource, opts);
+      });
+
+      try {
+        await act(async () => {
+          await expect(queryClient.refetchQueries({ queryKey: qk.list('users'), exact: true }, { throwOnError: true }))
+            .rejects.toThrow(refetchError);
+        });
+
+        await user.click(reassign);
+        const picker = await screen.findByRole('combobox', { name: /Reassign selected review tasks user/i });
+        expect(within(picker).getByRole('option', { name: /usr_admin_rashed/i })).toBeInTheDocument();
+        expect(screen.queryByText(/User selection is not available/i)).not.toBeInTheDocument();
+      } finally {
+        listSpy.mockRestore();
+      }
+    });
+
     it('Bulk Reassign shows backend task and task-event readback after refetch', async () => {
       const user = userEvent.setup();
       const realTasks = apiMod.listTasks;
@@ -1381,7 +1438,9 @@ describe('ReviewQueueModule', () => {
         await mountAndWait();
         const selectedTaskIds = await selectVisibleTasks(user, 2);
 
-        await user.click(within(bulkBar()).getByRole('button', { name: /^Reassign$/i }));
+        const reassign = within(bulkBar()).getByRole('button', { name: /^Reassign$/i });
+        await waitFor(() => expect(reassign).toBeEnabled());
+        await user.click(reassign);
         await user.click(await screen.findByRole('button', { name: /^Reassign$/i }));
 
         await waitFor(() => {

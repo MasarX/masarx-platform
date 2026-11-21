@@ -2702,6 +2702,7 @@ export function ReviewQueueModule() {
             iconName="shuffle"
             kind="ghost"
             capability={CAP.TASKS_WRITE}
+            disabled={usersQuery.isPending}
             onClick={() => bulkReassign()}
           />
           <button
