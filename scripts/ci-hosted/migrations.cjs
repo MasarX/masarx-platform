@@ -2,7 +2,7 @@
 const crypto = require('node:crypto');
 const { git, targetFile } = require('./target-policy.cjs');
 const prefix = 'supabase/migrations/';
-const filename = /^\d+_[a-zA-Z0-9_.-]+\.sql$/;
+const filename = /^(\d+)_[a-zA-Z0-9_.-]+\.sql$/;
 function expiryDate(value, now = new Date()) {
   const date = new Date(value);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value
@@ -30,8 +30,18 @@ function exceptions(text, now = new Date()) {
 function orderFloor(baseFiles) {
   const names = baseFiles.filter(file => file.startsWith(prefix) && filename.test(file.slice(prefix.length))).map(file => file.slice(prefix.length));
   const stamps = names.map(name => name.split('_')[0]);
-  return { numeric: stamps.reduce((max, stamp) => BigInt(stamp) > max ? BigInt(stamp) : max, -1n),
-    stamp: stamps.reduce((max, stamp) => stamp > max ? stamp : max, ''), name: names.reduce((max, name) => name > max ? name : max, '') };
+  const stamp = stamps.reduce((max, version) => version > max ? version : max, '');
+  return { numeric: stamps.reduce((max, version) => BigInt(version) > max ? BigInt(version) : max, -1n), stamp,
+    name: names.reduce((max, name) => name > max ? name : max, ''), latest: names.find(name => name.startsWith(`${stamp}_`)) };
+}
+function orderViolations(baseFiles, changes) {
+  const { stamp, latest } = orderFloor(baseFiles);
+  return changes.flatMap(([status, file]) => {
+    if (status !== 'A' || !file.startsWith(prefix)) return [];
+    const version = filename.exec(file.slice(prefix.length))?.[1];
+    if (!version || version > stamp) return [];
+    return [`Migration order violation for ${file}. Base latest is ${prefix}${latest}. To fix it, re-stamp after ${stamp}.`];
+  });
 }
 function outOfOrder(name, floor) {
   if (!filename.test(name)) return true;
@@ -84,14 +94,24 @@ function objectsAt(revision, changes, read = git) {
   }
   return objects;
 }
-function main() {
-  const base = process.argv[2];
+function migrationDiff(base, read = git) {
   if (!/^[a-f0-9]{40}$/.test(base || '')) throw new Error('Invalid migration base SHA');
-  const baseFiles = git(['ls-tree', '-r', '--name-only', '-z', base, '--', prefix]).split('\0').filter(Boolean);
-  const fields = git(['diff', '--no-renames', '--name-status', '-z', base, 'HEAD', '--', prefix]).split('\0').filter(Boolean);
+  const baseFiles = read(['ls-tree', '-r', '--name-only', '-z', base, '--', prefix]).split('\0').filter(Boolean);
+  const fields = read(['diff', '--no-renames', '--name-status', '-z', base, 'HEAD', '--', prefix]).split('\0').filter(Boolean);
   if (fields.length % 2) throw new Error('Malformed migration diff');
   const changes = [];
-  for (let i = 0; i < fields.length; i += 2) changes.push([fields[i], fields[i + 1]]);
+  for (let i = 0; i < fields.length; i += 2) {
+    const file = fields[i + 1];
+    if (!file.startsWith(`${prefix}archive/`)) changes.push([fields[i], file]);
+  }
+  return { baseFiles, changes };
+}
+function main() {
+  const base = process.argv[2];
+  const { baseFiles, changes } = migrationDiff(base);
+  const violations = orderViolations(baseFiles, changes);
+  for (const message of violations) console.error(message);
+  if (violations.length) throw new Error('Migration order check failed');
   const allowed = exceptions(targetFile('config/ci/migration-append-only-exceptions.txt', base));
   const verdict = assess(baseFiles, changes, allowed, objectsAt('HEAD', changes));
   for (const file of verdict.tolerated) console.log(`TOLERATED content-bound migration exception from target: ${file}`);
@@ -100,4 +120,4 @@ function main() {
   console.log('PASS: migration order, plain-file modes and expiring content-bound exceptions');
 }
 if (require.main === module) { try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; } }
-module.exports = { exceptions, assess, objectsAt, orderFloor, outOfOrder, expiryDate };
+module.exports = { exceptions, assess, objectsAt, orderFloor, outOfOrder, expiryDate, migrationDiff, orderViolations };
