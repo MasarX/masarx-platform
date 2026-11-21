@@ -2,6 +2,7 @@ const { Pool } = require('pg');
 const { randomUUID } = require('crypto');
 const { loadEnv } = require('../../../scripts/utils/load-env');
 const { createWorkflowContext } = require('../helpers/tenant-utils');
+const { companyId: VENDOR_COMPANY_ID } = require('../../fixtures/carrier/vendor-account.synthetic.json');
 
 loadEnv();
 
@@ -27,9 +28,10 @@ async function clearPolicyCache(client, category) {
 
 async function resolveCanonicalUpdateRoute(client) {
   const { rows } = await client.query(
-    `SELECT r.id, r.provider_id, r.route_name
+    `SELECT r.id, r.provider_id, r.route_name, rtrim(provider.metadata->>'base_url', '/') AS base_url
        FROM public.api_routes r
        JOIN public.api_route_packs p ON p.id = r.pack_id
+       JOIN public.providers provider ON provider.id = r.provider_id
       WHERE p.name = 'logestechs_v2_mirror'
         AND upper(r.method) = 'PUT'
         AND r.path_template = '/api/guests/{companyId}/packages/{shipmentId}'
@@ -181,7 +183,7 @@ async function seedGatewaySource(client, { orgId, clientId, senderId, sourceId, 
       sourceId,
       JSON.stringify({
         auth_config_id: providerAuthConfigId,
-        company_id: '362',
+        company_id: VENDOR_COMPANY_ID,
         enabled: true,
       }),
     ],
@@ -211,7 +213,7 @@ async function seedGatewaySource(client, { orgId, clientId, senderId, sourceId, 
       settingsVersionId,
       JSON.stringify({
         auth_config_id: providerAuthConfigId,
-        company_id: '362',
+        company_id: VENDOR_COMPANY_ID,
         enabled: true,
       }),
     ],
@@ -356,7 +358,7 @@ async function intakeProviderUpdate(client, { sourceToken, shipmentId, requestBo
         jsonb_build_object('content-type', 'application/json', 'x-webhook-token', $1::text),
         $3::jsonb
       ) AS result`,
-    [sourceToken, `/api/guests/362/packages/${shipmentId}`, JSON.stringify(requestBody)],
+    [sourceToken, `/api/guests/${VENDOR_COMPANY_ID}/packages/${shipmentId}`, JSON.stringify(requestBody)],
   );
 
   return rows[0].result;
@@ -444,12 +446,13 @@ describe('API gateway provider update postprocess', () => {
     const outboundCallId = await materializeAcceptedAsyncOutbound(client, intakeResult);
 
     const { rows: requestRows } = await client.query(
-      `SELECT route_id
+      `SELECT route_id, path
          FROM public.api_gateway_requests
         WHERE id = $1::uuid`,
       [intakeResult.api_gateway_request_id],
     );
     expect(requestRows[0].route_id).toBe(route.id);
+    expect(requestRows[0].path).toBe(`/api/guests/${VENDOR_COMPANY_ID}/packages/${externalShipmentId}`);
 
     const { rows: outboundRows } = await client.query(
       `SELECT method, url, body
@@ -459,7 +462,7 @@ describe('API gateway provider update postprocess', () => {
     );
     expect(outboundRows[0]).toMatchObject({
       method: 'PUT',
-      url: `https://apisv2.logestechs.com/api/guests/362/packages/${externalShipmentId}`,
+      url: `${route.base_url}/api/guests/${VENDOR_COMPANY_ID}/packages/${externalShipmentId}`,
     });
     expect(outboundRows[0].body.email).toBeUndefined();
     expect(outboundRows[0].body.password).toBeUndefined();

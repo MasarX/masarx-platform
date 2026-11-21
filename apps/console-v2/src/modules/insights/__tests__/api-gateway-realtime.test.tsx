@@ -31,6 +31,7 @@ import { screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { renderWithProviders } from '@/test/render';
 import { ApiGatewayModule } from '../api-gateway';
 import * as api from '@/lib/api';
+import vendorAccount from '../../../../../../tests/fixtures/carrier/vendor-account.synthetic.json';
 import {
   isRealtimeEnabled,
   isSyntheticLiveTailAllowed,
@@ -174,7 +175,7 @@ describe('api-gateway · realtime live-tail (Phase F)', () => {
           },
           logestechs_v2_account: {
             enabled: true,
-            company_id: '362',
+            company_id: vendorAccount.companyId,
             auth_config_id: 'auth_logestechs_demo',
           },
         };

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import vendorAccount from '../../../../../tests/fixtures/carrier/vendor-account.synthetic.json';
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
@@ -2496,7 +2497,7 @@ describe('data-source live backend substrate', () => {
       route_path: '/api/ship/request/by-email',
       organization_id: '00000000-0000-4000-8000-000000000120',
       scope_type: 'tenant',
-      company_id: '362',
+      company_id: vendorAccount.companyId,
       auth_type: 'basic_auth',
       credentials: { username: 'api-user', password: 'api-pass' },
     });
@@ -2508,7 +2509,7 @@ describe('data-source live backend substrate', () => {
         route_path: '/api/ship/request/by-email',
         organization_id: '00000000-0000-4000-8000-000000000120',
         scope_type: 'tenant',
-        company_id: '362',
+        company_id: vendorAccount.companyId,
         auth_type: 'basic_auth',
         credentials: { username: 'api-user', password: 'api-pass' },
       },
@@ -2541,7 +2542,7 @@ describe('data-source live backend substrate', () => {
       route_path: '/api/ship/request/by-email',
       organization_id: '00000000-0000-4000-8000-000000000120',
       scope_type: 'tenant',
-      company_id: '362',
+      company_id: vendorAccount.companyId,
       auth_type: 'basic_auth',
       credentials: { username: 'api-user', password: 'api-pass' },
     })).rejects.toThrow(
@@ -2575,7 +2576,7 @@ describe('data-source live backend substrate', () => {
       route_path: '/api/ship/request/by-email',
       organization_id: '00000000-0000-4000-8000-000000000120',
       scope_type: 'tenant',
-      company_id: '362',
+      company_id: vendorAccount.companyId,
       auth_type: 'basic_auth',
       credentials: { username: 'api-user', password: 'api-pass' },
     })).rejects.toThrow(/credential secret fields/);
@@ -2601,7 +2602,7 @@ describe('data-source live backend substrate', () => {
           value: {
             enabled: false,
             auth_config_id: null,
-            company_id: '362',
+            company_id: vendorAccount.companyId,
           },
           scope_type: 'tenant',
           scope_id: '00000000-0000-4000-8000-000000000120',
@@ -2661,7 +2662,7 @@ describe('data-source live backend substrate', () => {
           value: {
             enabled: true,
             auth_config_id: '00000000-0000-4000-8000-000000000118',
-            company_id: '362',
+            company_id: vendorAccount.companyId,
           },
           scope_type: 'tenant',
           scope_id: '00000000-0000-4000-8000-000000000120',

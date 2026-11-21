@@ -5,6 +5,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SELECT plan(70);
+SET LOCAL pgtap.vendor_company_id = '999999';
 
 -- Ensure time partitions exist for decision_log/settings_resolution_log inserts.
 SELECT public.create_next_partitions();
@@ -21,29 +22,29 @@ SELECT is(
 
 SELECT ok(
   NOT public.api_gateway_sanitize_outbound_headers_v1(
-    '{"apikey":"anon","x-api-key":"client","x-client-info":"console","idempotency-key":"idem","x-idempotency-key":"xidem","x-webhook-token":"secret","company-id":"362","x-correlation-id":"corr","content-type":"application/json"}'::jsonb
+    format('{"apikey":"anon","x-api-key":"client","x-client-info":"console","idempotency-key":"idem","x-idempotency-key":"xidem","x-webhook-token":"secret","company-id":"%s","x-correlation-id":"corr","content-type":"application/json"}', current_setting('pgtap.vendor_company_id'))::jsonb
   ) ?| ARRAY['apikey','x-api-key','x-client-info','idempotency-key','x-idempotency-key','x-webhook-token'],
   'api_gateway_sanitize_outbound_headers_v1 strips gateway/runtime headers'
 );
 
 SELECT ok(
   NOT public.api_gateway_sanitize_outbound_headers_v1(
-    '{"origin":"http://127.0.0.1:5175","referer":"http://127.0.0.1:5175/","sec-ch-ua":"Chromium","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"Windows","accept":"*/*","accept-language":"en-US","company-id":"362","x-correlation-id":"corr","content-type":"application/json"}'::jsonb
+    format('{"origin":"http://127.0.0.1:5175","referer":"http://127.0.0.1:5175/","sec-ch-ua":"Chromium","sec-ch-ua-mobile":"?0","sec-ch-ua-platform":"Windows","accept":"*/*","accept-language":"en-US","company-id":"%s","x-correlation-id":"corr","content-type":"application/json"}', current_setting('pgtap.vendor_company_id'))::jsonb
   ) ?| ARRAY['origin','referer','sec-ch-ua','sec-ch-ua-mobile','sec-ch-ua-platform','accept','accept-language'],
   'api_gateway_sanitize_outbound_headers_v1 strips browser-origin headers from Console tester calls'
 );
 
 SELECT is(
   public.api_gateway_sanitize_outbound_headers_v1(
-    '{"apikey":"anon","company-id":"362","x-correlation-id":"corr","content-type":"application/json"}'::jsonb
+    format('{"apikey":"anon","company-id":"%s","x-correlation-id":"corr","content-type":"application/json"}', current_setting('pgtap.vendor_company_id'))::jsonb
   )->>'company-id',
-  '362',
+  current_setting('pgtap.vendor_company_id'),
   'api_gateway_sanitize_outbound_headers_v1 preserves provider company-id'
 );
 
 SELECT ok(
   NOT public.api_gateway_sanitize_outbound_headers_v1(
-    '{"apikey":"anon","company-id":"362","x-correlation-id":"corr","content-type":"application/json"}'::jsonb
+    format('{"apikey":"anon","company-id":"%s","x-correlation-id":"corr","content-type":"application/json"}', current_setting('pgtap.vendor_company_id'))::jsonb
   ) ? 'x-correlation-id',
   'api_gateway_sanitize_outbound_headers_v1 strips gateway correlation header before provider dispatch'
 );
@@ -64,7 +65,7 @@ SELECT ok(
 
 SELECT ok(
   NOT public.api_gateway_sanitize_outbound_headers_v1(
-    '{"x-masarx-replay-of":"req-api-gateway-original","company-id":"362","content-type":"application/json"}'::jsonb
+    format('{"x-masarx-replay-of":"req-api-gateway-original","company-id":"%s","content-type":"application/json"}', current_setting('pgtap.vendor_company_id'))::jsonb
   ) ? 'x-masarx-replay-of',
   'api_gateway_sanitize_outbound_headers_v1 strips internal replay lineage before provider dispatch'
 );
@@ -321,7 +322,7 @@ VALUES (
   1,
   jsonb_build_object(
     'auth_config_id', '11110000-0000-0000-0000-000000000049',
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'enabled', TRUE
   ),
   1,
@@ -348,7 +349,7 @@ VALUES (
   '77770000-0000-0000-0000-000000000049',
   jsonb_build_object(
     'auth_config_id', '11110000-0000-0000-0000-000000000049',
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'enabled', TRUE
   ),
   now()
@@ -535,7 +536,7 @@ SELECT is(
 SELECT is(
   (public.resolve_api_route_v1(
     'PUT',
-    '/api/guests/362/packages/SHIP049/cancel',
+    format('/api/guests/%s/packages/SHIP049/cancel', current_setting('pgtap.vendor_company_id')),
     'aaaa0000-0000-0000-0000-000000000049',
     'bbbb0000-0000-0000-0000-000000000049',
     'cccc0000-0000-0000-0000-000000000049',
@@ -548,13 +549,13 @@ SELECT is(
 SELECT is(
   (public.resolve_api_route_v1(
     'PUT',
-    '/api/guests/362/packages/SHIP049/cancel',
+    format('/api/guests/%s/packages/SHIP049/cancel', current_setting('pgtap.vendor_company_id')),
     'aaaa0000-0000-0000-0000-000000000049',
     'bbbb0000-0000-0000-0000-000000000049',
     'cccc0000-0000-0000-0000-000000000049',
     'eeee0000-0000-0000-0000-000000000049'
   )->'path_params'->>'companyId'),
-  '362',
+  current_setting('pgtap.vendor_company_id'),
   'resolve_api_route_v1 extracts companyId param'
 );
 
@@ -1106,7 +1107,7 @@ SELECT is(
     FROM public.outbound_calls oc
     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake)
   ),
-  '362',
+  current_setting('pgtap.vendor_company_id'),
   'workflow_intake_api_gateway_v1 applies policy header overrides (company-id)'
 );
 
@@ -1293,7 +1294,7 @@ SELECT is(
 UPDATE public.settings_versions_p0
    SET value = jsonb_build_object(
        'auth_config_id', '11110000-0000-0000-0000-000000000051',
-       'company_id', '362',
+       'company_id', current_setting('pgtap.vendor_company_id'),
        'enabled', TRUE
      )
  WHERE id = '77770000-0000-0000-0000-000000000049'
@@ -1302,7 +1303,7 @@ UPDATE public.settings_versions_p0
 UPDATE public.settings
    SET cached_value = jsonb_build_object(
        'auth_config_id', '11110000-0000-0000-0000-000000000051',
-       'company_id', '362',
+       'company_id', current_setting('pgtap.vendor_company_id'),
        'enabled', TRUE
      ),
        last_updated = now()
@@ -1376,7 +1377,7 @@ SELECT ok(
 UPDATE public.settings_versions_p0
    SET value = jsonb_build_object(
        'auth_config_id', '11110000-0000-0000-0000-000000000049',
-       'company_id', '362',
+       'company_id', current_setting('pgtap.vendor_company_id'),
        'enabled', TRUE
      )
  WHERE id = '77770000-0000-0000-0000-000000000049'
@@ -1385,7 +1386,7 @@ UPDATE public.settings_versions_p0
 UPDATE public.settings
    SET cached_value = jsonb_build_object(
        'auth_config_id', '11110000-0000-0000-0000-000000000049',
-       'company_id', '362',
+       'company_id', current_setting('pgtap.vendor_company_id'),
        'enabled', TRUE
      ),
        last_updated = now()
@@ -1503,7 +1504,7 @@ VALUES (
   'eeee0000-0000-0000-0000-000000000050',
   1,
   jsonb_build_object(
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'enabled', TRUE
   ),
   1,
@@ -1529,7 +1530,7 @@ VALUES (
   'eeee0000-0000-0000-0000-000000000050',
   '77770000-0000-0000-0000-000000000050',
   jsonb_build_object(
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'enabled', TRUE
   ),
   now()
@@ -1696,7 +1697,7 @@ VALUES (
   'cccc0000-0000-0000-0000-000000000049',
   1,
   jsonb_build_object(
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'enabled', TRUE
   ),
   1,
@@ -1722,7 +1723,7 @@ VALUES (
   'cccc0000-0000-0000-0000-000000000049',
   '77771000-0000-0000-0000-000000000051',
   jsonb_build_object(
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'enabled', TRUE
   ),
   now()
@@ -1760,7 +1761,7 @@ SELECT is(
     FROM public.outbound_calls oc
     WHERE oc.id = (SELECT (result->>'outbound_call_id')::uuid FROM tmp_api_gateway_intake_merged_provider_account)
   ),
-  '362',
+  current_setting('pgtap.vendor_company_id'),
   'merged provider account keeps sender-scoped company-id for dispatch'
 );
 

@@ -4,6 +4,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 SELECT plan(6);
+SET LOCAL pgtap.vendor_company_id = '999999';
 
 -- Ensure time partitions exist for decision_log/settings_resolution_log inserts (handler uses decision logging).
 SELECT public.create_next_partitions();
@@ -324,7 +325,7 @@ BEGIN
     '77770000-0000-0000-0000-000000000053',
     v_cancel_route_id,
     'PUT',
-    '/api/guests/362/packages/CANCEL-053/cancel',
+    format('/api/guests/%s/packages/CANCEL-053/cancel', current_setting('pgtap.vendor_company_id')),
     NULL,
     '{}'::jsonb,
     '{}'::jsonb,
@@ -359,7 +360,7 @@ BEGIN
     'provider',
     v_provider_id,
     'PUT',
-    'https://example.test/api/guests/362/packages/CANCEL-053/cancel',
+    format('https://example.test/api/guests/%s/packages/CANCEL-053/cancel', current_setting('pgtap.vendor_company_id')),
     '{}'::jsonb,
     '{}'::jsonb,
     'completed',
@@ -373,7 +374,7 @@ BEGIN
       'api_gateway_request_id', v_request_id,
       'api_gateway_route_id', v_cancel_route_id,
       'api_gateway_path_params', jsonb_build_object(
-        'companyId', '362',
+        'companyId', current_setting('pgtap.vendor_company_id'),
         'shipmentId', 'CANCEL-053'
       )
     )),

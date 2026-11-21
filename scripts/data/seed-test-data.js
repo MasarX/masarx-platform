@@ -32,6 +32,7 @@ const {
   loadSeedServiceTypes,
   loadSeedShipmentStatuses,
 } = require('./seed-lookup-values');
+const { companyId: VENDOR_COMPANY_ID, baseUrl: VENDOR_BASE_URL } = require('../../tests/fixtures/carrier/vendor-account.synthetic.json');
 
 // Ensure ENV_FILE and other .env files are honoured so DATABASE_URL
 // is available when running from local-verify.
@@ -1133,8 +1134,8 @@ const providers = [
     name: 'logestechs_3pl',
     type: 'delivery',
     metadata: {
-      base_url: 'https://apisv2.logestechs.com',
-      company_id: '362'
+      base_url: VENDOR_BASE_URL,
+      company_id: VENDOR_COMPANY_ID
     }
   }
 ].map((provider) => ({
@@ -1728,7 +1729,7 @@ async function seedWorkflowOrchestration(client) {
     WITH logestechs_provider AS (
         SELECT
             id,
-            COALESCE(metadata->>'base_url', 'https://apisv2.logestechs.com') AS base_url
+            COALESCE(metadata->>'base_url', '${VENDOR_BASE_URL}') AS base_url
         FROM providers
         WHERE name = 'logestechs_3pl'
         LIMIT 1

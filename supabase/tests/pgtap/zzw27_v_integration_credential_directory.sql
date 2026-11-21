@@ -5,6 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(11);
+SET LOCAL pgtap.vendor_company_id = '999999';
 
 -- 1) View exists
 SELECT has_view(
@@ -194,7 +195,7 @@ DECLARE
   v_mapping UUID := '00000000-0000-0000-0000-00000027d106';
   v_value JSONB := jsonb_build_object(
     'enabled', true,
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'auth_config_id', v_pac::text
   );
 BEGIN
@@ -269,7 +270,7 @@ SELECT ok(
      WHERE id = '00000000-0000-0000-0000-00000027d103'::uuid
        AND organization_id = '00000000-0000-0000-0000-00000027d101'::uuid
        AND provider_account_category = 'logestechs_v2_account'
-       AND company_id = '362'
+       AND company_id = current_setting('pgtap.vendor_company_id')
        AND bound_scope_type = 'source'
        AND bound_scope_id = '00000000-0000-0000-0000-00000027d104'::uuid
        AND status = 'expired'
@@ -291,7 +292,7 @@ DECLARE
   v_mapping UUID := '00000000-0000-0000-0000-00000027d206';
   v_value JSONB := jsonb_build_object(
     'enabled', true,
-    'company_id', '362',
+    'company_id', current_setting('pgtap.vendor_company_id'),
     'auth_config_id', v_pac::text
   );
 BEGIN
@@ -366,7 +367,7 @@ SELECT ok(
      WHERE id = '00000000-0000-0000-0000-00000027d203'::uuid
        AND organization_id = '00000000-0000-0000-0000-00000027d201'::uuid
        AND provider_account_category = 'logestechs_v2_account'
-       AND company_id = '362'
+       AND company_id = current_setting('pgtap.vendor_company_id')
        AND bound_scope_type = 'source'
        AND bound_scope_id = '00000000-0000-0000-0000-00000027d204'::uuid
        AND status = 'revoked'

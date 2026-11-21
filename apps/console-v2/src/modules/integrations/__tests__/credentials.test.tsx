@@ -23,6 +23,7 @@ import * as apiMod from '@/lib/api';
 import * as toastStore from '@/components/toastStore';
 import { typedSpy, type TypedSpy } from '@/test/helpers/typed-spy';
 import type { ListResult } from '@/types/domain';
+import vendorAccount from '../../../../../../tests/fixtures/carrier/vendor-account.synthetic.json';
 
 describe('CredentialsModule (Phase C5 wiring)', () => {
   // W56-E — typed spy helper preserves the precise MockInstance shape returned
@@ -723,7 +724,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
 
     const form = await screen.findByTestId('provider-account-binding-form');
     expect(form).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: '362' } });
+    fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: vendorAccount.companyId } });
     fireEvent.change(screen.getByLabelText(/Basic Auth credentials/i), {
       target: { value: '{"username":"unit-api-user","password":"unit-api-pass"}' },
     });
@@ -753,7 +754,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
       route_path: '/api/ship/request/by-email',
       organization_id: 'org_launch',
       scope_type: 'tenant',
-      company_id: '362',
+      company_id: vendorAccount.companyId,
       auth_type: 'basic_auth',
       provider_account_category: 'logestechs_v2_account',
       reason: 'first tenant API shipment intake setup',
@@ -899,7 +900,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
       expect(within(status).getByText('Credential missing')).toBeInTheDocument();
       await user.click(within(status).getByRole('button', { name: /Set account/i }));
       await screen.findByTestId('provider-account-binding-form');
-      fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: '362' } });
+      fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: vendorAccount.companyId } });
       fireEvent.change(screen.getByLabelText(/Basic Auth credentials/i), {
         target: { value: '{"username":"unit-api-user","password":"unit-api-pass"}' },
       });
@@ -924,7 +925,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
           provider_account_category: 'logestechs_v2_account',
           organization_id: 'org_launch',
           scope_type: 'tenant',
-          company_id: '362',
+          company_id: vendorAccount.companyId,
           auth_type: 'basic_auth',
           credentials: { username: 'unit-api-user', password: 'unit-api-pass' },
           reason: 'first tenant API shipment intake setup',
@@ -942,7 +943,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
     const user = userEvent.setup();
     window.history.replaceState(null, '', '/integrations/credentials');
     let boundAuthConfigId = 'auth_cfg_delivery_bound';
-    let boundCompanyId = '362';
+    let boundCompanyId = vendorAccount.companyId;
     const credentials: Array<Record<string, unknown>> = [
       {
         id: 'auth_cfg_delivery_bound',
@@ -1096,7 +1097,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
           provider_account_category: 'logestechs_v2_account',
           organization_id: 'org_launch',
           scope_type: 'tenant',
-          company_id: '362',
+          company_id: vendorAccount.companyId,
           reason: 'readiness lifecycle unbind proof',
         }),
       );
@@ -1171,7 +1172,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
       await user.click(await screen.findByRole('button', { name: /Set delivery API account|Update delivery API account/i }));
 
       await screen.findByTestId('provider-account-binding-form');
-      fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: '362' } });
+      fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: vendorAccount.companyId } });
       fireEvent.change(screen.getByLabelText(/Basic Auth credentials/i), {
         target: { value: '{"username":"unit-api-user","password":"unit-api-pass"}' },
       });
@@ -1252,7 +1253,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
       await user.click(await screen.findByRole('button', { name: /Set delivery API account|Update delivery API account/i }));
 
       await screen.findByTestId('provider-account-binding-form');
-      fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: 'CUSTOM-362' } });
+      fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: `CUSTOM-${vendorAccount.companyId}` } });
       fireEvent.change(screen.getByLabelText(/Basic Auth credentials/i), {
         target: { value: '{"username":"custom-api-user","password":"custom-api-pass"}' },
       });
@@ -1271,7 +1272,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
         route_id: 'rt_custom_ship_create',
         route_path: '/api/custom/shipments',
         provider_account_category: 'custom_delivery_account',
-        company_id: 'CUSTOM-362',
+        company_id: `CUSTOM-${vendorAccount.companyId}`,
       }));
     } finally {
       listSpy.mockRestore();
@@ -1371,7 +1372,7 @@ describe('CredentialsModule (Phase C5 wiring)', () => {
 
     await user.click(await screen.findByRole('button', { name: /Set delivery API account|Update delivery API account/i }));
     await screen.findByTestId('provider-account-binding-form');
-    fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: '362' } });
+    fireEvent.change(screen.getByLabelText(/Company ID/i), { target: { value: vendorAccount.companyId } });
     fireEvent.change(screen.getByLabelText(/Basic Auth credentials/i), {
       target: { value: '{"username":"unit-api-user"}' },
     });
