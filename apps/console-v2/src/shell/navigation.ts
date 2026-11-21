@@ -122,7 +122,6 @@ export const ROUTE_ICONS = {
   '/platform/imports': 'inbox',
   '/platform/auth-email': 'lock',
   '/platform/release-proof': 'shield',
-  '/platform/planning-os': 'kanban',
   '/platform/commands': 'cmd',
   '/platform/alerts': 'bell',
   '/platform/feature-flags': 'flag',

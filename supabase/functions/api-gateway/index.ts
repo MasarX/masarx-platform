@@ -28,6 +28,7 @@ const API_GATEWAY_CORS_HEADERS = [
   "x-api-key",
   "x-client-info",
   "x-correlation-id",
+  "x-masarx-replay-of",
   "x-request-id",
   "x-webhook-token",
 ];

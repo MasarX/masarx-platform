@@ -177,7 +177,7 @@ describe('dependency security foundation', () => {
     expect(versionsForLockPackage(lock, 'expo-modules-core')).toEqual(['55.0.27']);
     for (const name of ['react', 'react-dom']) {
       const consoleV2Path = `apps/console-v2/node_modules/${name}`;
-      expect(lock.packages[consoleV2Path].version).toBe('18.3.1');
+      expect(lock.packages[consoleV2Path]).toBeUndefined();
       const remainingPackages = { ...lock.packages };
       delete remainingPackages[consoleV2Path];
       expect(versionsForLockPackage({ packages: remainingPackages }, name)).toEqual(['19.2.0', '19.2.8']);

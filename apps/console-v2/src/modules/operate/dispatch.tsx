@@ -1372,31 +1372,6 @@ export function DispatchModule() {
     }
     return m;
   }, [shipments]);
-  const dispatchMapAddressIds = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          (stopsData?.rows ?? [])
-            .map((stop) => shipmentAddressById.get(stop.shipment_id))
-            .filter((id): id is string => Boolean(id)),
-        ),
-      ).sort(),
-    [shipmentAddressById, stopsData?.rows],
-  );
-  const dispatchMapGeocodeFilters = useMemo(
-    () => dispatchMapAddressIds.map((address_id) => ({ address_id })),
-    [dispatchMapAddressIds],
-  );
-  const geocodesQuery = useResourceListsByFilters<RouteStopMapGeocode>(
-    'geocodes',
-    dispatchMapGeocodeFilters,
-    { page_size: 5 },
-    readQueryOptions,
-  );
-  const geocodes = useMemo<RouteStopMapGeocode[]>(
-    () => geocodesQuery.data?.rows ?? [],
-    [geocodesQuery.data?.rows],
-  );
   const basketsQuery = useCompleteResourceList<BasketLookupRow>('baskets', undefined, readQueryOptions);
   const basketItemsQuery = useCompleteResourceList<BasketItemLookupRow>(
     'basket_items',
@@ -1698,7 +1673,36 @@ export function DispatchModule() {
     () => routeStopPodProofRequirements(podPolicyQuery.data?.value),
     [podPolicyQuery.data?.value],
   );
-  const activeStops = stops.filter((s) => s.route_run_id === activeRunId);
+  const activeStops = useMemo(
+    () => stops.filter((stop) => stop.route_run_id === activeRunId),
+    [stops, activeRunId],
+  );
+  // The map only displays the selected run, so resolve its stop addresses.
+  const dispatchMapAddressIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          activeStops
+            .map((stop) => shipmentAddressById.get(stop.shipment_id))
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ).sort(),
+    [shipmentAddressById, activeStops],
+  );
+  const dispatchMapGeocodeFilters = useMemo(
+    () => dispatchMapAddressIds.map((address_id) => ({ address_id })),
+    [dispatchMapAddressIds],
+  );
+  const geocodesQuery = useResourceListsByFilters<RouteStopMapGeocode>(
+    'geocodes',
+    dispatchMapGeocodeFilters,
+    { page_size: 5 },
+    readQueryOptions,
+  );
+  const geocodes = useMemo<RouteStopMapGeocode[]>(
+    () => geocodesQuery.data?.rows ?? [],
+    [geocodesQuery.data?.rows],
+  );
   const activeRunDirectoryStopCount =
     typeof activeRunDirectory?.stop_count === 'number' ? activeRunDirectory.stop_count : null;
   const activeRunObservedStopCount = activeRun ? (stopsCountByRunId.get(activeRun.id) ?? activeStops.length) : 0;

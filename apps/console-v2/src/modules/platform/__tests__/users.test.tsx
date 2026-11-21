@@ -1102,8 +1102,11 @@ describe('UsersModule', () => {
     });
     await user.click(await screen.findByRole('button', { name: /Invite user/i }));
     const form = await screen.findByTestId('tenant-user-invite-form');
-    await user.selectOptions(within(form).getByLabelText(/^Access scope$/i), 'sender');
+    const scopeSelect = within(form).getByLabelText(/^Access scope$/i);
+    await waitFor(() => expect(scopeSelect).toBeEnabled());
+    await user.selectOptions(scopeSelect, 'sender');
     const search = await within(form).findByLabelText(/^Sender search$/i);
+    await waitFor(() => expect(search).toBeEnabled());
     expect(within(form).queryByLabelText(/^Scope ID$/i)).not.toBeInTheDocument();
     await user.type(search, 'JED');
     const senderSelect = within(form).getByLabelText(/^Sender$/i) as HTMLSelectElement;
@@ -1247,7 +1250,7 @@ describe('UsersModule', () => {
     expect(within(evidence).getByText(/visible\.ops@example\.com/i)).toBeInTheDocument();
     expect(within(evidence).getByText(/Email requested: true/i)).toBeInTheDocument();
     expect(within(evidence).getByText(/Sent: true/i)).toBeInTheDocument();
-    expect(within(evidence).getByText(/Redirect: https:\/\/console-dev\.masarx\.co\/auth\/callback/i)).toBeInTheDocument();
+    expect(within(evidence).getByText(/^\- Redirect: https:\/\/unjijvxjrwurjgsnokovrvom\.example\.invalid\/auth\/callback$/)).toBeInTheDocument();
   });
 
   it('Resend invite stays in the drawer and surfaces backend evidence without reload', async () => {
@@ -1346,7 +1349,7 @@ describe('UsersModule', () => {
     expect(within(evidence).getByText(/huda\.am@rashed-logistics\.example/i)).toBeInTheDocument();
     expect(within(evidence).getByText(/Email requested: true/i)).toBeInTheDocument();
     expect(within(evidence).getByText(/Sent: true/i)).toBeInTheDocument();
-    expect(within(evidence).getByText(/Redirect: https:\/\/console-dev\.masarx\.co\/auth\/callback/i)).toBeInTheDocument();
+    expect(within(evidence).getByText(/^\- Redirect: https:\/\/unjijvxjrwurjgsnokovrvom\.example\.invalid\/auth\/callback$/)).toBeInTheDocument();
     expect(within(drawer).getByTestId('users-security-actions')).toBeInTheDocument();
   });
 

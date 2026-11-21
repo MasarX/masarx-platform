@@ -73,7 +73,7 @@ const router = createRouter({
       <StateView
         kind="error"
         title="This page failed to load"
-        hint={error?.message || 'An error occurred rendering this route.'}
+        hint={error instanceof Error && error.message ? error.message : 'An error occurred rendering this route.'}
         action={<Button label="Retry" iconName="refresh" kind="primary" onClick={reset} />}
       />
     </div>

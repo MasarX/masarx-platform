@@ -103,7 +103,6 @@ const ROUTES = [
   ['platform-imports', '/platform/imports'],
   ['platform-onboarding-readiness', '/platform/onboarding-readiness'],
   ['platform-auth-email', '/platform/auth-email'],
-  ['platform-planning-os', '/platform/planning-os'],
   ['platform-release-proof', '/platform/release-proof'],
   ['platform-commands', '/platform/commands'],
   // CLAIM-PLATFORM-ALERTS (Wave 3, Phase C) — alerts management surface.

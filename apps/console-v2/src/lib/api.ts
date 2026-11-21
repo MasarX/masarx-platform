@@ -1287,11 +1287,10 @@ export const resource_import_studio_cancel_v1 = (
 //   • src/modules/operate/exceptions.tsx           → useResourceList('shipments') + 'task_events'
 //   • src/modules/operate/shipments.tsx            → useResourceList('clients' / 'senders' / 'recipients' / 'addresses' / 'shipment_boxes' / 'scan_events' / 'labels' / 'comms_attempts')
 //   • src/modules/platform/auth-email.tsx          → useResourceList('auth_email_url_policy')
-//   • src/modules/platform/planning-os.tsx         → useResourceList('planning_os_project_items' / 'planning_os_execution_cards')
 //   • src/modules/platform/warehouse.tsx           → useResourceList('warehouse_transfer_summary' / 'warehouse_transfer_items' / 'warehouse_checkpoint_scans' / 'tasks')
 //
 // New registry entries added in W56-B-2 (mirroring the W54-F pattern):
-// `cod_entries`, `planning_os_project_items`, `planning_os_execution_cards`,
+// `cod_entries`,
 // `auth_email_url_policy`, `warehouse_transfer_items`,
 // `warehouse_checkpoint_scans`. Each is declared in `seed-raw/registry.js`
 // (`ui_read_registry`) with a canonical

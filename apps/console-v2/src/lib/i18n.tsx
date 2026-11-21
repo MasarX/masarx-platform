@@ -1,6 +1,7 @@
 // i18n.tsx — EN + AR with RTL logic flip. Uses dot-paths into the catalog;
 // missing keys return the path so they're easy to spot in screenshots.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { NextIntlClientProvider } from 'next-intl';
 // @ts-expect-error JS catalogs without types
 import { en } from './seed-raw/i18n/en.js';
 // @ts-expect-error JS catalogs without types
@@ -110,7 +111,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [locale, dir, t, fmtDateTime, fmtCurrency, fmtNumber]
   );
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={value}>
+      <NextIntlClientProvider locale={locale}>{children}</NextIntlClientProvider>
+    </Ctx.Provider>
+  );
 }
 
 export function useI18n() {

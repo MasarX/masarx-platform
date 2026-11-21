@@ -1597,7 +1597,7 @@ describe('OrganizationsModule', () => {
     const drawer = await screen.findByTestId('org-signup-drawer');
     const activation = within(drawer).getByTestId('org-signup-activation-status');
     expect(within(activation).getByText(/Sent/i)).toBeInTheDocument();
-    expect(within(activation).getByText(/console-dev\.masarx\.co\/onboarding/i)).toBeInTheDocument();
+    expect(within(activation).getByText('https://unjijvxjrwurjgsnokovrvom.example.invalid/onboarding')).toBeInTheDocument();
 
     await user.click(within(drawer).getByRole('button', { name: /Open readiness/i }));
 
@@ -1737,7 +1737,7 @@ describe('OrganizationsModule', () => {
     await user.click(row);
     const drawer = await screen.findByTestId('org-signup-drawer');
     const history = within(drawer).getByTestId('org-signup-decision-history');
-    expect(history.textContent).toMatch(/admin@masarx\.sa/);
+    expect(history.textContent).toMatch(/fixture-contact-04@example\.com/);
     expect(history.textContent).toMatch(/KYC complete/);
     expect(history.textContent).toMatch(/Organization ready/i);
     expect(history.textContent).toMatch(/Ref ISTICS/i);

@@ -17,6 +17,15 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
 import { DispatchModule } from '@/modules/operate/dispatch';
 import * as api from '@/lib/api';
+import { ui_get_resource_v1, ui_list_resource_complete } from '@/lib/data-source';
+
+function pageActions(container: HTMLElement) {
+  return within(container.querySelector<HTMLElement>('.page-header__actions')!);
+}
+
+function stopActions() {
+  return within(screen.getByText('Stop sequence').closest<HTMLElement>('.pane__header')!);
+}
 
 beforeEach(() => {
   window.history.pushState(null, '', '/operate/dispatch');
@@ -66,14 +75,17 @@ describe('DispatchModule', () => {
     const user = userEvent.setup();
     const reconcileSpy = vi.spyOn(api, 'route_run_scan_out_reconciliation_v1');
     try {
-      renderWithProviders(<DispatchModule />, { capabilities: ['routes.read'] });
-      await waitFor(() => {
-        expect(document.querySelector('.run-row.is-active')).not.toBeNull();
+      const { container } = renderWithProviders(<DispatchModule />, { capabilities: ['routes.read'] });
+      const activeRun = await waitFor(() => {
+        const row = container.querySelector<HTMLElement>('.run-row.is-active');
+        expect(row).not.toBeNull();
+        return row!;
       });
-      const reconcile = screen.getByRole('button', { name: /Reconcile scan-out/ });
-      const confirm = screen.getByRole('button', { name: /Confirm departure/ });
-      const assignDriver = screen.getAllByRole('button', { name: /Assign driver/i })[0];
-      const reassign = screen.getByRole('button', { name: /Reassign/ });
+      const actions = pageActions(container);
+      const reconcile = actions.getByRole('button', { name: /Reconcile scan-out/ });
+      const confirm = actions.getByRole('button', { name: /Confirm departure/ });
+      const assignDriver = within(activeRun).getByRole('button', { name: /Assign driver/i });
+      const reassign = stopActions().getByRole('button', { name: /Reassign/ });
 
       expect(reconcile).toBeDisabled();
       expect(confirm).toBeDisabled();
@@ -90,20 +102,21 @@ describe('DispatchModule', () => {
   });
 
   it('disables `Confirm departure` when routes.write exists without tasks.complete', async () => {
-    renderWithProviders(<DispatchModule />, { capabilities: ['routes.read', 'routes.write'] });
+    const { container } = renderWithProviders(<DispatchModule />, { capabilities: ['routes.read', 'routes.write'] });
     await waitFor(() => {
       expect(document.querySelector('.run-row.is-active')).not.toBeNull();
     });
-    const reconcile = screen.getByRole('button', { name: /Reconcile scan-out/ });
-    const confirm = screen.getByRole('button', { name: /Confirm departure/ });
+    const actions = pageActions(container);
+    const reconcile = actions.getByRole('button', { name: /Reconcile scan-out/ });
+    const confirm = actions.getByRole('button', { name: /Confirm departure/ });
     expect(reconcile).not.toBeDisabled();
     expect(confirm).toBeDisabled();
     expect(screen.getAllByText(/Task completion permission required/i).length).toBeGreaterThan(0);
   });
 
   it('disables `Confirm departure` when tasks.complete exists without routes.write', () => {
-    renderWithProviders(<DispatchModule />, { capabilities: ['routes.read', 'tasks.complete'] });
-    const confirm = screen.getByRole('button', { name: /Confirm departure/ });
+    const { container } = renderWithProviders(<DispatchModule />, { capabilities: ['routes.read', 'tasks.complete'] });
+    const confirm = pageActions(container).getByRole('button', { name: /Confirm departure/ });
     expect(confirm).toBeDisabled();
     expect(screen.getAllByText(/Route update permission required/i).length).toBeGreaterThan(0);
   });
@@ -120,12 +133,12 @@ describe('DispatchModule', () => {
         run_id: 'rr_test',
       });
     try {
-      const { queryClient } = renderWithProviders(<DispatchModule />, { capabilities: ['all'] });
+      const { container, queryClient } = renderWithProviders(<DispatchModule />, { capabilities: ['all'] });
       await waitFor(() => {
         expect(document.querySelector('.run-row.is-active')).not.toBeNull();
       });
       const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-      await user.click(screen.getByRole('button', { name: /Reconcile scan-out/ }));
+      await user.click(pageActions(container).getByRole('button', { name: /Reconcile scan-out/ }));
       await waitFor(() => {
         const calls = invalidate.mock.calls.map(([arg]) => JSON.stringify(arg));
         expect(calls.some((call) => call.includes('"route_runs"'))).toBe(true);
@@ -141,11 +154,12 @@ describe('DispatchModule', () => {
     const user = userEvent.setup();
     const listSpy = vi.spyOn(api, 'ui_list_resource_complete');
     try {
-      renderWithProviders(<DispatchModule />, { capabilities: ['all'] });
+      const { container } = renderWithProviders(<DispatchModule />, { capabilities: ['all'] });
       await waitFor(() => {
         expect(document.querySelector('.run-row')).not.toBeNull();
       });
-      const refresh = screen.getByRole('button', { name: /^Refresh$/i });
+      const runsHeader = container.querySelector('#dispatch-pane-runs-title')!.closest<HTMLElement>('.pane__header')!;
+      const refresh = within(runsHeader).getByRole('button', { name: /^Refresh$/i });
       await waitFor(() => {
         expect(refresh).not.toBeDisabled();
       });
@@ -170,8 +184,6 @@ describe('DispatchModule', () => {
 
   it('builds vehicle scanner matches from backend vehicle_directory reads and refetches the selected drawer', async () => {
     const user = userEvent.setup();
-    const realCompleteList = api.ui_list_resource_complete;
-    const realGetResource = api.ui_get_resource_v1;
     const listVehicle = {
       id: 'veh_van_118',
       organization_id: 'org_rashed',
@@ -190,25 +202,28 @@ describe('DispatchModule', () => {
       if (resource === 'vehicle_directory') {
         return { rows: [listVehicle], total: 1, page: 0, page_size: 100 };
       }
-      return realCompleteList(resource, opts);
+      return ui_list_resource_complete(resource, opts);
     });
     const getSpy = vi.spyOn(api, 'ui_get_resource_v1').mockImplementation(async (resource: string, id: string) => {
       if (resource === 'vehicle_directory' && id === 'veh_van_118') return detailVehicle;
-      return realGetResource(resource, id);
+      return ui_get_resource_v1(resource, id);
     });
 
     try {
       renderWithProviders(<DispatchModule />, { capabilities: ['all'] });
-      const scanner = await screen.findByTestId('ops-scanner-input');
+      const scannerPanel = within(await screen.findByTestId('ops-scanner-panel'));
+      const scanner = scannerPanel.getByTestId('ops-scanner-input');
       await waitFor(() => {
         expect(listSpy.mock.calls.some(([resource]) => resource === 'vehicle_directory')).toBe(true);
       });
 
       await user.type(scanner, 'BACKEND-VHL-001');
-      await waitFor(() => {
-        expect(screen.getByTestId('ops-scanner-match')).toHaveTextContent('Vehicle');
+      const match = await waitFor(() => {
+        const result = scannerPanel.getByTestId('ops-scanner-match');
+        expect(result).toHaveTextContent('Vehicle');
+        return result;
       });
-      await user.click(screen.getByRole('button', { name: /Open Vehicle context BACKEND-VHL-001/i }));
+      await user.click(within(match).getByRole('button', { name: /Open Vehicle context BACKEND-VHL-001/i }));
 
       const drawer = await screen.findByTestId('dispatch-vehicle-context-drawer');
       await waitFor(() => {
@@ -224,8 +239,6 @@ describe('DispatchModule', () => {
 
   it('builds basket scanner matches from backend basket reads and refetches the selected drawer', async () => {
     const user = userEvent.setup();
-    const realCompleteList = api.ui_list_resource_complete;
-    const realGetResource = api.ui_get_resource_v1;
     const listBasket = {
       id: 'bsk_ruh_north_001',
       organization_id: 'org_rashed',
@@ -248,25 +261,28 @@ describe('DispatchModule', () => {
       if (resource === 'baskets') {
         return { rows: [listBasket], total: 1, page: 0, page_size: 100 };
       }
-      return realCompleteList(resource, opts);
+      return ui_list_resource_complete(resource, opts);
     });
     const getSpy = vi.spyOn(api, 'ui_get_resource_v1').mockImplementation(async (resource: string, id: string) => {
       if (resource === 'baskets' && id === 'bsk_ruh_north_001') return detailBasket;
-      return realGetResource(resource, id);
+      return ui_get_resource_v1(resource, id);
     });
 
     try {
       renderWithProviders(<DispatchModule />, { capabilities: ['all'] });
-      const scanner = await screen.findByTestId('ops-scanner-input');
+      const scannerPanel = within(await screen.findByTestId('ops-scanner-panel'));
+      const scanner = scannerPanel.getByTestId('ops-scanner-input');
       await waitFor(() => {
         expect(listSpy.mock.calls.some(([resource]) => resource === 'baskets')).toBe(true);
       });
 
       await user.type(scanner, 'BASKET-BACKEND-SCAN');
-      await waitFor(() => {
-        expect(screen.getByTestId('ops-scanner-match')).toHaveTextContent('Basket');
+      const match = await waitFor(() => {
+        const result = scannerPanel.getByTestId('ops-scanner-match');
+        expect(result).toHaveTextContent('Basket');
+        return result;
       });
-      await user.click(screen.getByRole('button', { name: /Open Basket context Backend list basket/i }));
+      await user.click(within(match).getByRole('button', { name: /Open Basket context Backend list basket/i }));
 
       const drawer = await screen.findByTestId('dispatch-basket-context-drawer');
       await waitFor(() => {
@@ -286,7 +302,7 @@ describe('DispatchModule', () => {
     await waitFor(() => {
       expect(document.querySelectorAll('.dnd-stop').length).toBeGreaterThan(0);
     });
-    const reassignBtn = screen.getByRole('button', { name: /Reassign/ });
+    const reassignBtn = stopActions().getByRole('button', { name: /Reassign/ });
     expect(reassignBtn).toBeDisabled();
 
     // Select one stop.
@@ -294,7 +310,7 @@ describe('DispatchModule', () => {
     expect(firstStopCheckbox).not.toBeNull();
     await user.click(firstStopCheckbox);
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Reassign · 1/ })).not.toBeDisabled();
+      expect(stopActions().getByRole('button', { name: /Reassign · 1/ })).not.toBeDisabled();
     });
   });
 
@@ -307,9 +323,9 @@ describe('DispatchModule', () => {
     const checkbox = document.querySelector('.dnd-stop input[type="checkbox"]') as HTMLInputElement;
     await user.click(checkbox);
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Reassign · 1/ })).not.toBeDisabled();
+      expect(stopActions().getByRole('button', { name: /Reassign · 1/ })).not.toBeDisabled();
     });
-    await user.click(screen.getByRole('button', { name: /Reassign · 1/ }));
+    await user.click(stopActions().getByRole('button', { name: /Reassign · 1/ }));
     await waitFor(() => {
       expect(document.querySelector('.palette')).not.toBeNull();
     });

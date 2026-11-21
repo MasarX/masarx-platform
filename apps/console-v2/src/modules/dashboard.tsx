@@ -1065,7 +1065,6 @@ function CommandRow({ cmd }: { cmd: CommandRegistryRow }) {
 }
 
 function PlanningOsWidget() {
-  const go = useConsoleNavigator();
   const [cards, setCards] = useState<Array<{ issue_number: number; title: string; status: string }> | null>(null);
   useEffect(() => {
     (async () => {
@@ -1082,10 +1081,7 @@ function PlanningOsWidget() {
         <div
           key={c.issue_number}
           className="card"
-          style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-          onClick={() => {
-            go('/platform/planning-os');
-          }}
+          style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
           <Chip size="xs" label={`#${c.issue_number}`} />
           <span style={{ flex: 1, fontSize: '12px' }}>{c.title}</span>

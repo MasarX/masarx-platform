@@ -20493,7 +20493,6 @@ export async function runApiGatewayRequestTest(
   headers['x-webhook-token'] = token;
   headers['x-correlation-id'] = correlationId;
   headers['idempotency-key'] = idempotencyKey;
-  headers['x-idempotency-key'] = idempotencyKey;
   const replayOf = asNonEmptyString(args.replay_of);
   if (replayOf) {
     headers['x-masarx-replay-of'] = replayOf;

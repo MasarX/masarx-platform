@@ -369,17 +369,25 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
-      - name: Detect subject
-        id: subject
+      - name: Detect Jest subject
+        id: jest
         run: node scripts/ci-hosted/tasks.cjs detect ui
+      - name: Select required workspace
+        id: subject
+        run: printf '%s\n' 'present=true' >> "$GITHUB_OUTPUT"
       - *setup_npm
       - *restore_npm
       - *install_locked
       - name: Run subject
-        if: steps.subject.outputs.present == 'true'
+        if: steps.jest.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs ui
+      - name: Run Console v2 Vitest
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          CONSOLE_V2_CI_DEFER_CAPABILITY_LINT: '1'
+        run: npm run test --workspace @masarx/console-v2
       - name: Check proposed test-result capture
-        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.subject.outputs.present == 'true' }}
+        if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.jest.outputs.present == 'true' }}
         env:
           JEST_DIAGNOSTIC_PROPOSAL: '1'
         run: |
