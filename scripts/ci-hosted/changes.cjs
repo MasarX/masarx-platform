@@ -3,6 +3,12 @@ const { execFileSync } = require('node:child_process');
 
 const gates = ['database', 'typecheck', 'unit', 'ui', 'build_console', 'build_portal', 'build_landing', 'e2e'];
 const state = value => Object.fromEntries(gates.map(gate => [gate, value]));
+const cdPaths = new Set([
+  '.github/workflows/deploy.yml',
+  '.github/workflows/provenance-on-tag.yml',
+  'tests/unit/ops/dev-db-dry-run-workflow.test.js',
+  'tests/unit/ops/release-workflow.test.js',
+]);
 const sharedInputs = [
   /^(?:\.github|scripts\/ci-hosted|config|packages)\/|(?:^|\/)\.yarn\//,
   /(?:^|\/)(?:[^/]*manifest[^/]*\.(?:jsonc?|ya?ml|toml|xml)|(?:package|project|deno|composer)\.jsonc?|[^/]+\.webmanifest)$/i,
@@ -10,11 +16,14 @@ const sharedInputs = [
   /(?:^|\/)(?:\.npmrc|\.yarnrc(?:\.[^/]+)?|\.pnpmfile\.[^/]+|\.gitattributes|cargo\.toml|pyproject\.toml|requirements[^/]*\.txt|gemfile|go\.(?:mod|sum))$/i,
 ];
 
-function select(files) {
-  if (!files) return state(true);
+function select(files, event = 'pull_request') {
+  if (!files || event !== 'pull_request') return state(true);
+  const cdFiles = files.filter(file => cdPaths.has(file)).length;
+  const cdOnly = cdFiles > 0 && cdFiles === files.length;
   const affected = state(false);
+  affected.database = cdFiles > 0 && !cdOnly;
   for (const file of files) {
-    if (sharedInputs.some(pattern => pattern.test(file))) return state(true);
+    if (sharedInputs.some(pattern => pattern.test(file))) return { ...state(true), database: !cdOnly };
     if (file.startsWith('supabase/')) affected.database = affected.unit = true;
     else if (file.startsWith('apps/')) {
       const [, app] = file.split('/');
@@ -49,6 +58,8 @@ if (require.main === module) {
   let files;
   try { files = changedPaths(process.argv[2]); }
   catch { console.error('Changed paths unavailable; running every job.'); }
-  for (const [gate, enabled] of Object.entries(select(files))) console.log(`${gate}=${enabled}`);
+  for (const [gate, enabled] of Object.entries(select(files, process.env.GITHUB_EVENT_NAME))) {
+    console.log(`${gate}=${enabled}`);
+  }
 }
 module.exports = { changedPaths, select };
