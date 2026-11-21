@@ -137,6 +137,9 @@ jobs:
     runs-on: ubuntu-24.04
     environment: dev
     timeout-minutes: 90
+    concurrency:
+      group: dev-db-dry-run
+      cancel-in-progress: false
     steps:
       - name: Guard dry-run configuration
         id: guard

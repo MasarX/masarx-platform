@@ -20,6 +20,8 @@ test('runs one manual dry-run job in dev with only read access and pinned GitHub
   expect(job.permissions).toBeUndefined();
   expect(job.environment).toBe('dev');
   expect(job['timeout-minutes']).toBeGreaterThan(45);
+  expect(job.concurrency).toEqual({ group: 'dev-db-dry-run', 'cancel-in-progress': false });
+  expect(job.concurrency.group).not.toBe(workflow.jobs.database.concurrency.group);
   expect(job.steps.filter(step => step.uses).map(step => step.uses)).toEqual([
     expect.stringMatching(/^actions\/checkout@[a-f0-9]{40}$/),
   ]);
@@ -50,6 +52,20 @@ test('rejects other modes and masks the dispatch ref before exporting it', () =>
   expect(measure.if).toBeUndefined();
 });
 
+test('accepts only project refs with exactly 20 lowercase letters', () => {
+  const [, encodedPattern] = job.steps[0].run.match(/select\(test\(("(?:\\.|[^"\\])*")\)\)/);
+  const jqPattern = JSON.parse(encodedPattern);
+  // Translate jq's absolute anchors for JavaScript, including the final newline case.
+  const projectRef = new RegExp(jqPattern.replace(/^\\A/, '^').replace(/\\z$/, '(?![\\s\\S])'), 'u');
+  expect(fixtureRef).toMatch(projectRef);
+  for (const invalid of [
+    fixtureRef.slice(1), `${fixtureRef}u`, fixtureRef.toUpperCase(), `${fixtureRef.slice(1)}1`,
+    `https://${fixtureRef}.supabase.co`, `${fixtureRef}\n`,
+  ]) {
+    expect(invalid).not.toMatch(projectRef);
+  }
+});
+
 test('copies the deploy CLI pin and link command, and always pushes with dry-run enabled', () => {
   const deploy = workflow.jobs.database;
   const deployInstall = deploy.steps.find(step => step.name === 'Prepare edge packages and pinned CLI');
@@ -64,7 +80,9 @@ test('copies the deploy CLI pin and link command, and always pushes with dry-run
   expect(measure.run).toContain('unset SUPABASE_JWT_SECRET');
   expect(measure.run).toContain('export SUPABASE_PROJECT_REF="$DEV_DRY_RUN_PROJECT_REF"');
   expect(measure.run).toMatch(/if \[\[ -z "\$SUPABASE_ACCESS_TOKEN" \|\| -z "\$SUPABASE_DB_PASSWORD" \]\]; then\n[^\n]+\n\s+exit 1/);
-  const pushes = job.steps.flatMap(step => (step.run || '').split('\n'))
+  const commands = job.steps.map(step => step.run || '').join('\n');
+  expect(commands).not.toMatch(/\b(?:db\s+reset|migration\s+repair)\b|--include-(?:seed|all|roles)\b/);
+  const pushes = commands.split('\n')
     .map(line => line.trim()).filter(line => /\bdb\s+push\b/.test(line));
   expect(pushes).toEqual(['"$cli" db push --dry-run --linked > "$output" 2>&1 || status=$?']);
 });
