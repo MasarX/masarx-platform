@@ -1064,8 +1064,11 @@ describe('UsersModule', () => {
     await user.click(await screen.findByRole('button', { name: /Invite user/i }));
     const form = await screen.findByTestId('tenant-user-invite-form');
     const scopeSelect = within(form).getByLabelText(/^Access scope$/i) as HTMLSelectElement;
+    await waitFor(() => expect(scopeSelect).toBeEnabled());
     await user.selectOptions(scopeSelect, 'client');
-    const search = await within(form).findByLabelText(/^Client search$/i);
+    await waitFor(() => expect(scopeSelect).toHaveValue('client'));
+    const search = within(form).getByLabelText(/^Client search$/i);
+    await waitFor(() => expect(search).toBeEnabled());
     expect(within(form).queryByLabelText(/^Scope ID$/i)).not.toBeInTheDocument();
     await user.type(search, 'Exampleparcel');
     const clientSelect = within(form).getByLabelText(/^Client$/i) as HTMLSelectElement;
@@ -1236,7 +1239,7 @@ describe('UsersModule', () => {
     await user.click(within(form).getByRole('button', { name: /Send invite/i }));
 
     await waitFor(() => expect(spy).toHaveBeenCalled());
-    const invitedRow = await screen.findByText(/visible\.ops@example\.com/i);
+    const invitedRow = await screen.findByText(/visible\.ops@example\.com/i, { selector: 'td' });
     expect(invitedRow.closest('tr')).toHaveTextContent(/invited/i);
     await waitFor(() => {
       expect(screen.queryByTestId('tenant-user-invite-form')).toBeNull();

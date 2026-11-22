@@ -509,7 +509,9 @@ describe('SettlementsModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     await user.click(screen.getByRole('button', { name: 'New batch' }));
     const openButton = await screen.findByRole('button', { name: 'Open batch' });
     expect(openButton).toBeDisabled();
-    await user.selectOptions(await screen.findByLabelText('Driver'), 'usr_driver_1');
+    const driverPicker = screen.getByLabelText('Driver');
+    await waitFor(() => expect(driverPicker).toBeEnabled());
+    await user.selectOptions(driverPicker, 'usr_driver_1');
     await user.click(openButton);
 
     await waitFor(() => {
@@ -543,11 +545,15 @@ describe('SettlementsModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     expect(await screen.findByLabelText('Driver')).toBeInTheDocument();
     expect(screen.queryByLabelText('Client')).not.toBeInTheDocument();
 
-    await user.selectOptions(await screen.findByLabelText('Scope'), 'client_cycle');
-    expect(await screen.findByLabelText('Client')).toBeInTheDocument();
+    const scopePicker = screen.getByLabelText('Scope');
+    await user.selectOptions(scopePicker, 'client_cycle');
+    await waitFor(() => expect(scopePicker).toHaveValue('client_cycle'));
+    const clientPicker = screen.getByLabelText('Client');
+    expect(clientPicker).toBeInTheDocument();
     expect(screen.queryByLabelText('Driver')).not.toBeInTheDocument();
 
-    await user.selectOptions(await screen.findByLabelText('Client'), 'cl_retail');
+    await waitFor(() => expect(clientPicker).toBeEnabled());
+    await user.selectOptions(clientPicker, 'cl_retail');
     const openButton = await screen.findByRole('button', { name: 'Open batch' });
     expect(openButton).toBeEnabled();
   });
@@ -565,8 +571,11 @@ describe('SettlementsModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'New batch' }));
-    await user.selectOptions(await screen.findByLabelText('Scope'), 'branch_day');
-    const branchPicker = await screen.findByLabelText('Branch');
+    const scopePicker = screen.getByLabelText('Scope');
+    await user.selectOptions(scopePicker, 'branch_day');
+    await waitFor(() => expect(scopePicker).toHaveValue('branch_day'));
+    const branchPicker = screen.getByLabelText('Branch');
+    await waitFor(() => expect(branchPicker).toBeEnabled());
 
     expect(branchPicker).toHaveTextContent('Riyadh branch - RUH');
     expect(branchPicker).not.toHaveTextContent('Other tenant branch');
@@ -661,7 +670,9 @@ describe('SettlementsModule (CLAIM-FINANCE-WIRING — Phase B5/C4)', () => {
     await user.click(await screen.findByRole('button', { name: 'New batch' }));
     await screen.findByLabelText('Kind');
     await screen.findByLabelText('Scope');
-    await user.selectOptions(await screen.findByLabelText('Driver'), 'usr_driver_1');
+    const driverPicker = screen.getByLabelText('Driver');
+    await waitFor(() => expect(driverPicker).toBeEnabled());
+    await user.selectOptions(driverPicker, 'usr_driver_1');
     await user.click(await screen.findByRole('button', { name: 'Open batch' }));
 
     await waitFor(() => {

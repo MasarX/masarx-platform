@@ -1985,12 +1985,13 @@ describe('ImportsModule (W16-5)', () => {
     });
 
     await user.click(await screen.findByRole('button', { name: /^Upload file$/i }));
-    await user.type(
-      await screen.findByLabelText(/Paste CSV content/i),
-      'tracking_number,recipient_name,address_line_1\nMX-PASTE-1,Noura Paste,King Fahd Road\n',
-    );
-    await user.type(await screen.findByLabelText(/Pasted CSV file name/i), 'shipments-pasted-live.csv');
-    await user.click(screen.getByRole('button', { name: /^Prepare file$/i }));
+    await user.click(await screen.findByLabelText(/Paste CSV content/i));
+    await user.paste('tracking_number,recipient_name,address_line_1\nMX-PASTE-1,Noura Paste,King Fahd Road\n');
+    await user.click(screen.getByLabelText(/Pasted CSV file name/i));
+    await user.paste('shipments-pasted-live.csv');
+    const prepareButton = screen.getByRole('button', { name: /^Prepare file$/i });
+    await waitFor(() => expect(prepareButton).toBeEnabled());
+    await user.click(prepareButton);
 
     await waitFor(() => expect(prepareSpy).toHaveBeenCalled());
     const preparedFile = prepareSpy.mock.calls[0]?.[0]?.file;
@@ -2257,8 +2258,12 @@ describe('ImportsModule (W16-5)', () => {
     expectImportLabel('Client', 'resource-import-studio-client');
     expectImportLabel('Sender', 'resource-import-studio-sender');
     expectImportLabel('File', 'resource-import-studio-file');
-    await user.selectOptions(await screen.findByLabelText(/Import client/i), 'client_scope_1');
-    await user.selectOptions(await screen.findByLabelText(/Import sender/i), 'sender_scope_1');
+    const clientPicker = screen.getByLabelText(/Import client/i);
+    await waitFor(() => expect(clientPicker).toBeEnabled());
+    await user.selectOptions(clientPicker, 'client_scope_1');
+    const senderPicker = screen.getByLabelText(/Import sender/i);
+    await waitFor(() => expect(senderPicker).toBeEnabled());
+    await user.selectOptions(senderPicker, 'sender_scope_1');
     const file = csvImportFile('tracking_number\nMX-1\n');
     await user.upload(await screen.findByLabelText(/CSV\/XLS\/XLSX file/i), file);
     await user.click(screen.getByRole('button', { name: /^Prepare file$/i }));
