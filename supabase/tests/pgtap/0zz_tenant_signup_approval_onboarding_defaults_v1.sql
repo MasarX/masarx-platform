@@ -6,7 +6,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(57);
+SELECT plan(59);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_tenant_signup_approval_onboarding_defaults_v1()
 RETURNS SETOF TEXT
@@ -439,6 +439,16 @@ BEGIN
     true
   );
   EXECUTE 'SET LOCAL ROLE authenticated';
+
+  RETURN NEXT is(
+    api.tenant_signup_request_approved_summary_v1(v_isolation_req_a)->>'approved_organization_id',
+    v_isolation_org_a::text, 'the approved requester can read its own summary through the API'
+  );
+  RETURN NEXT throws_ok(
+    format('SELECT api.tenant_signup_request_approved_summary_v1(%L::uuid)', v_isolation_req_b),
+    '42501', 'tenant_signup_request_approved_summary_forbidden',
+    'the approved requester cannot read another tenant signup summary'
+  );
 
   v_isolation_list := public.ui_list_resource_v1('organizations', '{}'::jsonb, 50, 0, NULL::jsonb);
 
