@@ -1,9 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-wrapper=$(dirname "$0")/supabase-db-push.sh
+cd "$(dirname "$0")/../.."
 fixture=$(mktemp -d)
-trap 'rm -rf "$fixture"' EXIT
+trap 'rm -f "$fixture"/{supabase,push.sh,calls,waits,out,db-push.log}; rmdir "$fixture"' EXIT
+
+# Exercise the workflow's actual pipeline, including pipefail and PIPESTATUS.
+{
+  cat <<'EOF'
+set -euo pipefail
+cli=$1
+deploy_temp=$2
+EOF
+  awk '
+    /^          export NO_COLOR=1$/ { capture = 1 }
+    capture && /^          "\$cli" secrets set / { exit }
+    capture { print }
+  ' .github/workflows/deploy.yml
+} > "$fixture/push.sh"
 
 cat > "$fixture/supabase" <<'EOF'
 #!/usr/bin/env bash
@@ -35,10 +49,10 @@ export -f sleep
 export CALLS="$fixture/calls" WAITS="$fixture/waits"
 
 check() {
-  local label=$1 first=$2 second=$3 expected_status=$4 expected_calls=$5 status=0
+  local label=$1 first=$2 second=$3 expected_status=$4 expected_calls=$5 temp_dir=${6:-$fixture} status=0
   printf '0\n' > "$CALLS"
   : > "$WAITS"
-  FIRST_SQLSTATE=$first SECOND_SQLSTATE=$second bash "$wrapper" "$fixture/supabase" > "$fixture/out" 2>&1 || status=$?
+  FIRST_SQLSTATE=$first SECOND_SQLSTATE=$second bash "$fixture/push.sh" "$fixture/supabase" "$temp_dir" > "$fixture/out" 2>&1 || status=$?
   if [[ $status != "$expected_status" || $(<"$CALLS") != "$expected_calls" ]]; then
     cat "$fixture/out" >&2
     printf '%s failed (status %s, calls %s)\n' "$label" "$status" "$(<"$CALLS")" >&2
@@ -63,3 +77,4 @@ check '40P01 twice' 40P01 40P01 23 2
 check 'other error with code in printed statement' 23505 ok 23 1
 check '55P03 then success' 55P03 ok 0 2
 check '55P03 twice' 55P03 55P03 23 2
+check 'log capture failure' 40P01 ok 1 1 "$fixture/missing"

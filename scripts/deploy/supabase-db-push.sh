@@ -2,18 +2,12 @@
 set -euo pipefail
 
 cli=$1
-output=$(mktemp)
-trap 'rm -f "$output"' EXIT
+output=$2
+push_status=$3
+log_status=$4
 
-export NO_COLOR=1
-if "$cli" db push --linked --yes 2>&1 | tee "$output"; then
-  exit 0
-else
-  statuses=("${PIPESTATUS[@]}")
-fi
-
-if (( statuses[1] != 0 )); then
-  exit "${statuses[1]}"
+if (( log_status != 0 )); then
+  exit "$log_status"
 fi
 
 # Match the CLI error header before any printed detail or failed SQL.
@@ -31,7 +25,7 @@ failure=$(awk '
     exit
   }
 ' "$output")
-[[ -n "$failure" ]] || exit "${statuses[0]}"
+[[ -n "$failure" ]] || exit "$push_status"
 
 printf '::warning::Supabase db push failed with %s. Retrying once in 5 seconds.\n' "$failure"
 sleep 5

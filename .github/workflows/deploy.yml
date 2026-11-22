@@ -111,8 +111,9 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          secret_file="$(mktemp)"
-          trap 'rm -f "$secret_file"' EXIT
+          deploy_temp="$(mktemp -d)"
+          trap 'rm -f "$deploy_temp/edge.env" "$deploy_temp/db-push.log"; rmdir "$deploy_temp"' EXIT
+          secret_file="$deploy_temp/edge.env"
           export EDGE_SECRET_FILE="$secret_file"
           node <<'NODE'
           const fs = require('node:fs');
@@ -125,7 +126,9 @@ jobs:
           NODE
           cli="$RUNNER_TEMP/deploy-tools/supabase"
           "$cli" link --project-ref "$SUPABASE_PROJECT_REF" --yes
-          bash scripts/deploy/supabase-db-push.sh "$cli"
+          export NO_COLOR=1
+          "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
+            bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}"
           "$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
