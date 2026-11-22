@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getNavigation } from '@/lib/api';
 import { loadNavigation } from './navigation';
 
 vi.mock('@/lib/api', () => ({
@@ -166,6 +167,39 @@ describe('loadNavigation', () => {
     expect(itemsByRoute.get('/integrations/catalog')?.capabilities).toEqual(['integration_plugins.read']);
     expect(itemsByRoute.get('/integrations/plugin-studio')?.capability).toBe('integration_plugins.write');
     expect(itemsByRoute.get('/integrations/plugin-studio')?.capabilities).toEqual(['integration_plugins.write']);
+  });
+
+  it('groups Customer migration with plugin routes and enforces its canonical capability', () => {
+    vi.mocked(getNavigation).mockReturnValueOnce({
+      groups: [{
+        id: 'integrations',
+        label: 'Integrations',
+        items: [
+          { key: 'catalog', route: '/integrations/catalog', label: 'Plugin catalog' },
+          {
+            key: 'customer-migration',
+            route: '/integrations/customer-migration',
+            label: 'Legacy customer import',
+            capability: 'integrations.read',
+          },
+          { key: 'studio', route: '/integrations/plugin-studio', label: 'Plugin studio' },
+        ],
+      }],
+    });
+
+    const externalIntake = loadNavigation().groups.find((group) => group.id === 'integrations');
+    expect(externalIntake?.label).toBe('External Intake');
+    expect(externalIntake?.items.map((item) => item.routePath)).toEqual([
+      '/integrations/catalog',
+      '/integrations/customer-migration',
+      '/integrations/plugin-studio',
+    ]);
+    expect(externalIntake?.items[1]).toMatchObject({
+      label: 'Customer migration',
+      iconName: 'upload',
+      capability: 'integration_plugins.read',
+      capabilities: ['integration_plugins.read'],
+    });
   });
 
   it('keeps Dispatch discoverable for read-only route operators when registry metadata drifts', () => {

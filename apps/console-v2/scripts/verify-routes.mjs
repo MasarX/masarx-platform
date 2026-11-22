@@ -78,6 +78,7 @@ const ROUTES = [
   ['wf-bindings', '/workflows/bindings'],
   ['wf-review-queue', '/workflows/review-queue'],
   ['int-catalog', '/integrations/catalog'],
+  ['int-customer-migration', '/integrations/customer-migration'],
   // INTEGRATIONS P0 (Wave 12 W12-2) — 4-stage authoring loop wired to the
   // `integration-plugin-studio` edge function (parse|infer|preview|save).
   ['int-plugin-studio', '/integrations/plugin-studio'],
