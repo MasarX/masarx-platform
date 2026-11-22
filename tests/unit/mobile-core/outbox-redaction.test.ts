@@ -130,9 +130,73 @@ function redactFirstFollowup(value: string) {
   return redacted.replace(/eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/, "[JWT_REDACTED]") + "…[truncated]";
 }
 
-test("retains historical secret coverage across 24,000 seeded inputs", () => {
-  const start = performance.now();
-  let seed = 0x7b3a54c1;
+function redactSecondFollowup(value: string) {
+  const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
+  let end = MAX_ERROR_TEXT_LENGTH;
+  const lastKept = value.charCodeAt(end - 1);
+  if (truncated && lastKept >= 0xd800 && lastKept <= 0xdbff) end -= 1;
+
+  const redacted = value.slice(0, end)
+    .replace(/Bearer(?:\s+|%20|:\s*)[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/Basic\s+[A-Za-z0-9+/=]+/gi, "Basic [REDACTED]")
+    // Consume other key-shaped runs whole so the lookahead never restarts at each hyphen.
+    .replace(
+      /((?:%26|\b|(?=-|%2d))(?=(?:[a-z0-9_-]|%2d)*(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt))(?:[a-z0-9_-]|%2d)+["']?)(?:(\s*[:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)|((?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*)(%22(?:(?!%22)[\s\S])*(?:%22|$)|(?:(?!%26)[^\s&,}])+))|(?:[a-z0-9_-]|%2d)+/gi,
+      (_match, key, separator, encodedSeparator, encodedValue?: string) => {
+        if (key === undefined) return _match;
+        const jwtOnly = encodedValue?.replace(JWT_PATTERN, "[JWT_REDACTED]") === "[JWT_REDACTED]";
+        return key + (separator ?? encodedSeparator) + (jwtOnly ? "[JWT_REDACTED]" : "[REDACTED]");
+      },
+    )
+    .replace(JWT_PATTERN, "[JWT_REDACTED]");
+  if (!truncated) return redacted;
+
+  // A JWT split by the cap may be missing the segments required by the normal matcher.
+  return redacted.replace(/eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/, "[JWT_REDACTED]") + "…[truncated]";
+}
+
+function redactThirdFollowup(value: string) {
+  const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
+  let end = MAX_ERROR_TEXT_LENGTH;
+  const lastKept = value.charCodeAt(end - 1);
+  if (truncated && lastKept >= 0xd800 && lastKept <= 0xdbff) end -= 1;
+
+  const redacted = value.slice(0, end)
+    .replace(/Bearer(?:\s+|%20|:\s*)[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/Basic\s+(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+/]{8,}={0,2}(?![A-Za-z0-9+/=])/gi, "Basic [REDACTED]")
+    // Consume other key-shaped runs whole so the lookahead never restarts at each hyphen.
+    .replace(
+      /((?:%26|%20|\b|(?=-|%2d))(?=(?:[a-z0-9_-]|%2d)*(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt))(?:[a-z0-9_-]|%2d)+["']?)(?:(\s*[:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)|((?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*)(%22(?:(?!%26|&|%22(?=%26|[&\s,}]|$))[\s\S])*(?:%22(?=%26|[&\s,}]|$)|(?=%26|&|$))|(?:(?!%26|%20(?=[a-z0-9_-]+\s*(?:%3[ad]|[:=])))[^\s&,}])+))|(?:[a-z0-9_-]|%2d)+/gi,
+      (_match, key, separator, encodedSeparator, encodedValue?: string) => {
+        if (key === undefined) return _match;
+        const jwtOnly = encodedValue?.replace(JWT_PATTERN, "[JWT_REDACTED]") === "[JWT_REDACTED]";
+        return key + (separator ?? encodedSeparator) + (jwtOnly ? "[JWT_REDACTED]" : "[REDACTED]");
+      },
+    )
+    .replace(JWT_PATTERN, "[JWT_REDACTED]");
+  if (!truncated) return redacted;
+
+  // A JWT split by the cap may be missing the segments required by the normal matcher.
+  return redacted.replace(/eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/, "[JWT_REDACTED]") + "…[truncated]";
+}
+
+test.each([
+  ["Authorization: Basic YWJjOmRlZg==", ["YWJjOmRlZg=="]],
+  ["proxy-authorization: Basic YWJjOmRlZg==", ["YWJjOmRlZg=="]],
+  ['curl -H "Authorization: Basic YWJjOmRlZg=="', ["YWJjOmRlZg=="]],
+  ["token=x/Basic YWJjOmRlZg==", ["YWJjOmRlZg=="]],
+  ["authorization: Bearer: X==", ["X=="]],
+  ["access_token%20%3D%20Bearer: X==", ["X=="]],
+  ["token%3Dabc%20QW42329KZ449 = fixtureTail", ["QW42329KZ449"]],
+  ["token=fixtureFirst%26api-key\t=\tfixtureNext", ["fixtureFirst", "fixtureNext"]],
+  ["token=fixtureFirst%26password\t=\tfixtureNext", ["fixtureFirst", "fixtureNext"]],
+])("redacts overlapping values in %s", (input, secrets) => {
+  const result = redactOutboxErrorText(input);
+  expect(result).toContain("[REDACTED]");
+  for (const secret of secrets) expect(result).not.toContain(secret);
+});
+
+function checkHistoricalCoverage(seed: number, count: number) {
   function pick<T>(values: readonly T[]) {
     seed ^= seed << 13;
     seed ^= seed >>> 17;
@@ -140,36 +204,43 @@ test("retains historical secret coverage across 24,000 seeded inputs", () => {
     return values[(seed >>> 0) % values.length];
   }
 
-  const keys = ["token", "password", "prefixJwtSuffix", "x-api-key", "api%2Dkey", '"client_secret"', "authorization", "x-request-id", "state"];
-  const separators = ["=", ": ", " = ", "%3D", "%3a", "%253D", "%20%3D%20"];
+  const keys = ["token", "password", "prefixJwtSuffix", "x-api-key", "api%2Dkey", '"client_secret"', "Authorization", "proxy-authorization", "jwt"];
+  const separators = ["=", ": ", " = ", "\t=\t", "%3D", "%3a", "%253D", "%20%3D%20"];
   const quotes = ['"', "'", "%22", ""];
-  const joins = ["&", "%26", "%20", " ", '", "'];
-  const markers = ["fixtureAlpha1", "fixtureBeta2", "fixtureGamma3", "fixtureDelta4"];
+  const joins = ["&", "%26", "%26%26", "%20", "\t", " ", '", "'];
+  const fixtures = ["fixtureAlpha1", "fixtureBeta2", "fixtureGamma3", "fixtureDelta4"];
+  const frozen = [redactB22, redactFirstFollowup, redactSecondFollowup, redactThirdFollowup];
   let checkedSecrets = 0;
   let leaks = 0;
   let firstLeak: { input: string; marker: string; actual: string } | undefined;
-  for (let index = 0; index < 24000; index += 1) {
-    const field = (marker: string) => {
+  for (let index = 0; index < count; index += 1) {
+    const field = (fixture: string) => {
       const quote = pick(quotes);
-      return pick(keys) + pick(separators) + quote + marker + pick([quote, ""]);
+      const scheme = pick(["", "", "", "Basic ", "Bearer ", "Bearer:", "Bearer%20"]);
+      return pick(keys) + pick(separators) + quote + scheme + fixture + pick([quote, ""]);
     };
-    const first = field(markers[0]);
-    const next = field(markers[1]);
-    const bearer = "Bearer" + pick([" ", "%20", ":"]) + markers[2];
-    const jwt = "eyJ" + markers[3] + ".fixture.signature";
-    const input = pick(["", "next=%2Fcb%3F", "{", "prefix-"]) + first
-      + pick(joins) + next + pick(joins) + pick([bearer, jwt, bearer + pick(joins) + jwt]);
-    const oldResults = [redactB22(input), redactFirstFollowup(input)];
+    const first = field(fixtures[0]);
+    const next = field(fixtures[1]);
+    const scheme = pick(["Basic ", "Bearer ", "Bearer%20", "Bearer:"]) + fixtures[2];
+    const jwt = "eyJ" + fixtures[3] + ".fixture.signature";
+    const input = pick(["", "next=%2Fcb%3F", "{", "prefix-", 'curl -H "']) + first
+      + pick(joins) + next + pick(joins) + pick([scheme, jwt, scheme + pick(joins) + jwt]);
+    const oldResults = frozen.map((redact) => redact(input));
     const actual = redactOutboxErrorText(input);
-    for (const marker of markers) {
-      if (!input.includes(marker) || oldResults.every((result) => result.includes(marker))) continue;
+    for (const fixture of fixtures) {
+      if (!input.includes(fixture) || oldResults.every((result) => result.includes(fixture))) continue;
       checkedSecrets += 1;
-      if (!actual.includes(marker)) continue;
+      if (!actual.includes(fixture)) continue;
       leaks += 1;
-      firstLeak ??= { input, marker, actual };
+      firstLeak ??= { input, marker: fixture, actual };
     }
   }
+  return { checkedSecrets, leaks, firstLeak };
+}
 
+test("retains historical secret coverage across 24,000 seeded inputs", () => {
+  const start = performance.now();
+  const { checkedSecrets, leaks, firstLeak } = checkHistoricalCoverage(0x7b3a54c1, 24000);
   expect(checkedSecrets).toBeGreaterThan(24000);
   expect({ leaks, firstLeak }).toEqual({ leaks: 0, firstLeak: undefined });
   expect(performance.now() - start).toBeLessThan(3000);

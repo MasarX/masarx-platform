@@ -125,98 +125,100 @@ function serializeError(error: unknown) {
 
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
 const KEY_CHAR = String.raw`(?:[a-z0-9_-]|%2d)`;
-const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt))${KEY_CHAR}+["']?`;
+const KEYWORD = String.raw`(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt)`;
+const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+["']?`;
 const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
-const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}(?:\s*[:=]|${ENCODED_SEPARATOR})`;
+const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
+const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
 const KEY_BOUNDARY = String.raw`(?:%26|%20|\b|(?=-|%2d))`;
-// Skip markers and consume other key-shaped runs whole to avoid restarting at each hyphen.
 const MARKER_OR_KEY_RUN = String.raw`\[(?:JWT_)?REDACTED\]|${KEY_CHAR}+`;
-const PLAIN_CREDENTIAL = new RegExp(
-  String.raw`(${KEY_BOUNDARY}${SENSITIVE_KEY}\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)|${MARKER_OR_KEY_RUN}`, "gi",
-);
+const PLAIN_VALUE = String.raw`"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+`;
 const ENCODED_QUOTED_VALUE = String.raw`%22(?:(?!%26|&|%22(?=%26|[&\s,}]|$))[\s\S])*(?:%22(?=%26|[&\s,}]|$)|(?=%26|&|$))`;
 const ENCODED_UNQUOTED_VALUE = String.raw`(?:(?!%26|%20(?=${NEXT_SENSITIVE_KEY}))[^\s&,}])+`;
-const ENCODED_CREDENTIAL = new RegExp(
-  String.raw`(${KEY_BOUNDARY}${SENSITIVE_KEY}${ENCODED_SEPARATOR})(${ENCODED_QUOTED_VALUE}|${ENCODED_UNQUOTED_VALUE})|${MARKER_OR_KEY_RUN}`, "gi",
-);
-const EXTRA_BEARER = new RegExp(
-  String.raw`Bearer(?:%20|:\s*)(?!${NEXT_SENSITIVE_KEY})(?:(?!%26|%20)[A-Za-z0-9._~+/=-])+`, "gi",
-);
+// Older encoded values can include a prefixed key. Preserve only bare key syntax at a
+// recognized separator, and still collect the following value with its own matcher.
+const LEGACY_ENCODED_VALUE = String.raw`(?:(?!%26|%20(?=${KEYWORD}${KEY_SEPARATOR}))[^\s&,}])+`;
 
-type RedactionText = { text: string; offsets: number[] };
-
-function redactMatches(
-  { text, offsets }: RedactionText,
-  pattern: RegExp,
-  marker: string,
-  credential = false,
-): RedactionText {
-  let cursor = 0;
-  let result = "";
-  const remaining: number[] = [];
-  for (const match of text.matchAll(pattern)) {
-    if (credential && match[1] === undefined) continue;
-    const prefix = credential ? match[1] : "";
-    const replacement = match[2] === "[JWT_REDACTED]" ? match[2] : marker;
-    result += text.slice(cursor, match.index) + prefix + replacement;
-    remaining.push(...offsets.slice(cursor, match.index));
-    for (let index = 0; index < prefix.length + replacement.length; index += 1) remaining.push(-1);
-    cursor = match.index + match[0].length;
-  }
-  if (cursor === 0) return { text, offsets };
-  remaining.push(...offsets.slice(cursor));
-  return { text: result + text.slice(cursor), offsets: remaining };
+function credentialPattern(prefix: string, value: string, skip = MARKER_OR_KEY_RUN) {
+  // Consume only the prefix so a separate credential can start inside a matched value.
+  return new RegExp(String.raw`(?=(${prefix})(${value}))\1|${skip}`, "gi");
 }
 
-// Record first-follow-up value spans before another pass can hide their opening delimiter.
-const FIRST_FOLLOWUP_CREDENTIAL = /((?:%26|\b|(?=-))(?=[a-z0-9_-]*(?:api[_-]?key|token|authorization|password|secret|jwt))[a-z0-9_-]+["']?\s*)(?:([:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)|(%3[ad]\s*)(?:(?!%26)[^\s&,}])+)|[a-z0-9_-]+/gi;
+const CREDENTIAL_PATTERNS = [
+  credentialPattern(
+    String.raw`\b(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*[:=]\s*`,
+    PLAIN_VALUE,
+    String.raw`\[(?:JWT_)?REDACTED\]|[a-z0-9_]+`,
+  ),
+  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
+  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}${ENCODED_SEPARATOR}`, String.raw`${ENCODED_QUOTED_VALUE}|${ENCODED_UNQUOTED_VALUE}`),
+  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}%3[ad]\s*`, LEGACY_ENCODED_VALUE),
+];
+const BEARER = new RegExp(
+  String.raw`Bearer(?:\s+([A-Za-z0-9._~+/=-]+)|(?:%20|:\s*)(?!${NEXT_SENSITIVE_KEY})([A-Za-z0-9._~+/=-]+))`, "gi",
+);
+const BASIC = /Basic\s+([A-Za-z0-9+/]{8,}={0,2})(?![A-Za-z0-9+/=])/gi;
+const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+
+type RedactionSpan = { start: number; end: number; prefix?: string };
 
 export function redactOutboxErrorText(value: string) {
   const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
   let end = MAX_ERROR_TEXT_LENGTH;
   const lastKept = value.charCodeAt(end - 1);
   if (truncated && lastKept >= 0xd800 && lastKept <= 0xdbff) end -= 1;
+  const text = value.slice(0, end);
 
-  const text = value.slice(0, end)
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]");
-  const covered = new Uint8Array(text.length);
-  for (const match of text.matchAll(FIRST_FOLLOWUP_CREDENTIAL)) {
-    if (match[1] === undefined) continue;
-    const prefixLength = match[1].length + (match[2] ?? match[3]).length;
-    covered.fill(1, match.index + prefixLength, match.index + match[0].length);
+  const spans: RedactionSpan[] = [];
+  for (const pattern of CREDENTIAL_PATTERNS) {
+    for (const match of text.matchAll(pattern)) {
+      if (match[2] === undefined) continue;
+      const start = match.index + match[1].length;
+      spans.push({ start, end: start + match[2].length });
+    }
+  }
+  for (const match of text.matchAll(BEARER)) {
+    spans.push({ start: match.index, end: match.index + match[0].length, prefix: "Bearer " });
+  }
+  for (const match of text.matchAll(BASIC)) {
+    const credential = match[1];
+    if (/[0-9+/=]/.test(credential) || (/[A-Z]/.test(credential) && /[a-z]/.test(credential))) {
+      spans.push({ start: match.index, end: match.index + match[0].length, prefix: "Basic " });
+    }
   }
 
-  // Apply B22's original credential and JWT replacements before extending coverage.
-  let redacted = redactMatches(
-    { text, offsets: Array.from({ length: text.length }, (_, index) => index) },
-    /(\b(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*[:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)/gi, "[REDACTED]", true,
-  );
-  redacted = redactMatches(redacted, /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[JWT_REDACTED]");
-  redacted = redactMatches(redacted, ENCODED_CREDENTIAL, "[REDACTED]", true);
-  redacted = redactMatches(redacted, PLAIN_CREDENTIAL, "[REDACTED]", true);
-  redacted = redactMatches(redacted, EXTRA_BEARER, "Bearer [REDACTED]");
+  const jwtEnds = new Map<number, number>();
+  for (const match of text.matchAll(JWT)) {
+    const jwtEnd = match.index + match[0].length;
+    jwtEnds.set(match.index, jwtEnd);
+    spans.push({ start: match.index, end: jwtEnd });
+  }
+  if (truncated) {
+    const basicTail = /Basic\s+\S+$/i.exec(text);
+    if (basicTail) spans.push({ start: basicTail.index, end: text.length, prefix: "Basic " });
+    const jwtTail = /eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/.exec(text);
+    if (jwtTail) {
+      jwtEnds.set(jwtTail.index, text.length);
+      spans.push({ start: jwtTail.index, end: text.length });
+    }
+  }
 
-  // Keep the recognized field prefixes and mask historical value characters still present.
+  // Merge overlapping spans only. A delimiter between two values stays in the output.
+  spans.sort((left, right) => left.start - right.start || Number(!!left.prefix) - Number(!!right.prefix));
+  let cursor = 0;
   let output = "";
-  let inCoveredRun = false;
-  for (let index = 0; index < redacted.text.length; index += 1) {
-    const isCovered = covered[redacted.offsets[index]] === 1;
-    if (!isCovered) output += redacted.text[index];
-    else if (!inCoveredRun) output += "[REDACTED]";
-    inCoveredRun = isCovered;
+  for (let index = 0; index < spans.length; index += 1) {
+    const { start, prefix } = spans[index];
+    let spanEnd = spans[index].end;
+    while (index + 1 < spans.length && spans[index + 1].start < spanEnd) {
+      index += 1;
+      spanEnd = Math.max(spanEnd, spans[index].end);
+    }
+    const marker = jwtEnds.get(start) === spanEnd ? "[JWT_REDACTED]" : "[REDACTED]";
+    output += text.slice(cursor, start) + (prefix ?? "") + marker;
+    cursor = spanEnd;
   }
-
-  output = output.replace(/Basic\s+([A-Za-z0-9+/]{8,}={0,2})(?![A-Za-z0-9+/=])/gi, (match, credential: string) =>
-    /[0-9+/=]/.test(credential) || (/[A-Z]/.test(credential) && /[a-z]/.test(credential))
-      ? "Basic [REDACTED]"
-      : match,
-  );
-  if (!truncated) return output;
-
-  return output
-    .replace(/Basic\s+\S+$/i, "Basic [REDACTED]")
-    // A JWT split by the cap may be missing the segments required by the normal matcher.
-    .replace(/eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/, "[JWT_REDACTED]") + "\u2026[truncated]";
+  return output + text.slice(cursor) + (truncated ? "\u2026[truncated]" : "");
 }
 
 export type OutboxSyncOptions = {
