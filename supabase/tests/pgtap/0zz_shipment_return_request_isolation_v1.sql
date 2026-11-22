@@ -2,7 +2,7 @@ BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(19);
+SELECT plan(34);
 
 CREATE FUNCTION pg_temp.check_shipment_return_request_isolation()
 RETURNS SETOF TEXT
@@ -25,6 +25,9 @@ DECLARE
   v_first_status TEXT;
   v_open_status TEXT;
   v_terminal_status TEXT;
+  v_previous_run UUID;
+  v_retry_run UUID;
+  v_implicit_runs BIGINT := 1;
   v_replay JSONB;
   v_refused JSONB;
 BEGIN
@@ -118,7 +121,7 @@ BEGIN
     'the second tenant creates and reads its own run when both use the same key'
   );
 
-  FOREACH v_open_status IN ARRAY ARRAY['pending', 'in_progress'] LOOP
+  FOREACH v_open_status IN ARRAY ARRAY['pending', 'in_progress', 'running', 'continue'] LOOP
     UPDATE public.workflow_runs SET workflow_status = v_open_status, completed_at = NULL
      WHERE id = v_runs[2];
     EXECUTE 'SET LOCAL ROLE authenticated';
@@ -139,7 +142,7 @@ BEGIN
   END LOOP;
 
   FOREACH v_terminal_status IN ARRAY ARRAY[
-    'failed', 'cancelled', 'stopped', 'skipped', 'timed_out'
+    'failed', 'cancelled', 'canceled', 'stopped', 'skipped', 'timed_out', 'timeout'
   ] LOOP
     UPDATE public.workflow_runs SET workflow_status = v_terminal_status WHERE id = v_runs[2];
     EXECUTE 'SET LOCAL ROLE authenticated';
@@ -154,30 +157,83 @@ BEGIN
     );
   END LOOP;
 
-  UPDATE public.workflow_runs SET workflow_status = 'completed', completed_at = now()
-   WHERE id = v_runs[2];
-  EXECUTE 'SET LOCAL ROLE authenticated';
-  v_replay := api.shipment_return_request_v1(v_input);
-  v_refused := api.shipment_return_request_v1(v_input || jsonb_build_object('idempotency_key', gen_random_uuid()));
-  EXECUTE 'RESET ROLE';
+  FOREACH v_terminal_status IN ARRAY ARRAY['completed', 'succeeded'] LOOP
+    UPDATE public.workflow_runs SET workflow_status = v_terminal_status, completed_at = now()
+     WHERE id = v_runs[2];
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_replay := api.shipment_return_request_v1(v_input);
+    v_refused := api.shipment_return_request_v1(v_input || jsonb_build_object('idempotency_key', gen_random_uuid()));
+    EXECUTE 'RESET ROLE';
 
-  RETURN NEXT ok(
-    v_replay->>'ok' = 'true' AND v_replay->>'already_processed' = 'true'
-    AND (v_replay->>'workflow_run_id')::UUID = v_runs[2] AND v_replay->>'workflow_status' = 'completed',
-    'the same shipment and key replay the completed run'
-  );
-  RETURN NEXT ok(
-    v_refused->>'ok' = 'false' AND v_refused#>>'{error,code}' = 'shipment_return_already_completed'
-    AND v_refused#>>'{error,message}' = 'A return for this shipment has already been completed'
-    AND NOT (v_refused ? 'workflow_run_id'),
-    'a new key is refused after a return for the same shipment completes'
-  );
+    RETURN NEXT ok(
+      v_replay->>'ok' = 'true' AND v_replay->>'already_processed' = 'true'
+      AND (v_replay->>'workflow_run_id')::UUID = v_runs[2] AND v_replay->>'workflow_status' = v_terminal_status,
+      'the same shipment and explicit key replay the completed run: ' || v_terminal_status
+    );
+    RETURN NEXT ok(
+      v_refused->>'ok' = 'false' AND v_refused#>>'{error,code}' = 'shipment_return_already_completed'
+      AND v_refused#>>'{error,message}' = 'A return for this shipment has already been completed'
+      AND NOT (v_refused ? 'workflow_run_id'),
+      'a new key is refused after a return for the same shipment completes: ' || v_terminal_status
+    );
+  END LOOP;
 
   RETURN NEXT is((SELECT COUNT(*) FROM public.workflow_runs
                    WHERE workflow_template_id = v_template
                      AND context->>'original_shipment_id' = v_shipments[2]::text
                      AND context->>'organization_id' = v_orgs[2]::text),
                  1::bigint, 'replay and rejection create no additional workflow run');
+
+  PERFORM set_config('request.jwt.claim.sub', v_actors[1]::text, TRUE);
+  PERFORM set_config('request.jwt.claims', jsonb_build_object(
+    'role', 'authenticated', 'sub', v_actors[1], 'organization_id', v_orgs[1], 'access_scope_type', 'tenant'
+  )::text, TRUE);
+  v_input := jsonb_build_object('shipment_id', v_shipments[1], 'operation', 'return', 'surface', 'console', 'reason', 'Requested return');
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_result := api.shipment_return_request_v1(v_input);
+  EXECUTE 'RESET ROLE';
+  v_retry_run := (v_result->>'workflow_run_id')::UUID;
+
+  FOREACH v_terminal_status IN ARRAY ARRAY['failed', 'cancelled'] LOOP
+    v_previous_run := v_retry_run;
+    UPDATE public.workflow_runs SET workflow_status = v_terminal_status WHERE id = v_previous_run;
+
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_result := api.shipment_return_request_v1(v_input);
+    EXECUTE 'RESET ROLE';
+    v_retry_run := (v_result->>'workflow_run_id')::UUID;
+    RETURN NEXT ok(
+      v_result->>'ok' = 'true' AND NOT (v_result ? 'already_processed')
+      AND v_previous_run IS NOT NULL AND v_retry_run <> v_previous_run,
+      'the same implicit input starts a replacement run after ' || v_terminal_status
+    );
+
+    UPDATE public.workflow_runs SET workflow_status = 'pending', completed_at = NULL WHERE id = v_retry_run;
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_replay := api.shipment_return_request_v1(v_input);
+    EXECUTE 'RESET ROLE';
+    RETURN NEXT ok(
+      v_replay->>'ok' = 'true' AND v_replay->>'already_processed' = 'true'
+      AND (v_replay->>'workflow_run_id')::UUID = v_retry_run,
+      'the identical implicit retry replays the replacement run after ' || v_terminal_status
+    );
+    v_implicit_runs := v_implicit_runs + 1;
+    RETURN NEXT is((SELECT COUNT(*) FROM public.workflow_runs
+                     WHERE workflow_template_id = v_template AND id <> v_runs[1]
+                       AND context->>'original_shipment_id' = v_shipments[1]::text
+                       AND context->>'organization_id' = v_orgs[1]::text),
+                   v_implicit_runs, 'the implicit retry adds exactly one run after ' || v_terminal_status);
+  END LOOP;
+
+  UPDATE public.workflow_runs SET workflow_status = 'completed', completed_at = now() WHERE id = v_retry_run;
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_refused := api.shipment_return_request_v1(v_input);
+  EXECUTE 'RESET ROLE';
+  RETURN NEXT ok(
+    v_refused->>'ok' = 'false' AND v_refused#>>'{error,code}' = 'shipment_return_already_completed'
+    AND NOT (v_refused ? 'workflow_run_id'),
+    'an implicit retry is refused after the replacement return is completed'
+  );
 END;
 $fixture$;
 

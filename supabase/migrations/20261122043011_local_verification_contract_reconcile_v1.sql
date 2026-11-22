@@ -111,7 +111,7 @@ BEGIN
       IF v_resource->>'key' = 'branches' THEN
         v_resource := COALESCE(v_resource, '{}'::jsonb)
           || jsonb_build_object(
-            'capability_read', COALESCE(NULLIF(v_resource->>'capability_read', ''), 'shipments.read')
+            'capability_read', COALESCE(NULLIF(v_resource->>'capability_read', ''), 'branches.read')
           );
       END IF;
 

@@ -334,11 +334,14 @@ DECLARE
   v_target RECORD;
   v_policy JSONB := '{}'::jsonb;
   v_guard JSONB := '{}'::jsonb;
-  v_idempotency_key TEXT := NULL;
+  v_explicit_key TEXT := NULLIF(btrim(v_input->>'idempotency_key'), '');
+  v_idempotency_key TEXT := v_explicit_key;
   v_audit_actor JSONB := '{}'::jsonb;
   v_template_name TEXT := NULL;
   v_template_id UUID := NULL;
   v_existing_run RECORD;
+  v_open_statuses CONSTANT TEXT[] := ARRAY['pending', 'in_progress', 'running', 'continue'];
+  v_completed_statuses CONSTANT TEXT[] := ARRAY['completed', 'succeeded'];
   v_unsuccessful_statuses CONSTANT TEXT[] := ARRAY[
     'failed', 'cancelled', 'canceled', 'stopped', 'skipped', 'timed_out', 'timeout'
   ];
@@ -448,7 +451,6 @@ BEGIN
     );
   END IF;
 
-  v_idempotency_key := NULLIF(btrim(COALESCE(v_input->>'idempotency_key', '')), '');
   IF v_idempotency_key IS NULL THEN
     v_idempotency_key := encode(
       digest(
@@ -473,6 +475,23 @@ BEGIN
     encode(digest(lower(v_idempotency_key), 'sha256'), 'hex')
   );
 
+  IF v_explicit_key IS NULL THEN
+    -- Pin the attempt before waiting on the lock so concurrent callers that
+    -- saw the same failure use the same key even if the retry fails inline.
+    WITH RECURSIVE attempts(engine_key, depth) AS (
+      SELECT v_idempotency_key, 0
+      UNION ALL
+      SELECT v_idempotency_key || ':' || wr.id::text, a.depth + 1
+        FROM attempts a
+        JOIN public.workflow_runs wr
+          ON wr.workflow_template_id = v_template_id AND wr.idempotency_key = a.engine_key
+       WHERE wr.context->>'original_shipment_id' = v_shipment_id::text
+         AND wr.context->>'organization_id' = v_target.organization_id::text
+         AND wr.workflow_status = ANY (v_unsuccessful_statuses)
+    )
+    SELECT engine_key INTO v_idempotency_key FROM attempts ORDER BY depth DESC LIMIT 1;
+  END IF;
+
   -- Serialize replay and return admission for this shipment.
   PERFORM pg_advisory_xact_lock(hashtextextended('shipment_return:' || v_shipment_id::text, 0));
 
@@ -486,7 +505,8 @@ BEGIN
    ORDER BY wr.created_at DESC, wr.id DESC
    LIMIT 1;
 
-  IF v_existing_run.id IS NOT NULL THEN
+  IF v_existing_run.id IS NOT NULL
+     AND (v_explicit_key IS NOT NULL OR NOT (v_existing_run.workflow_status = ANY (v_completed_statuses))) THEN
     IF v_existing_run.workflow_status = ANY (v_unsuccessful_statuses) THEN
       RETURN jsonb_build_object(
         'ok', FALSE,
@@ -541,7 +561,7 @@ BEGIN
      WHERE wt.name = v_template_name
        AND wr.context->>'original_shipment_id' = v_shipment_id::text
        AND wr.context->>'organization_id' = v_target.organization_id::text
-       AND wr.workflow_status IN ('pending', 'in_progress', 'running')
+       AND wr.workflow_status = ANY (v_open_statuses)
   ) THEN
     RETURN jsonb_build_object(
       'ok', FALSE,
@@ -557,7 +577,7 @@ BEGIN
      WHERE wt.name = v_template_name
        AND wr.context->>'original_shipment_id' = v_shipment_id::text
        AND wr.context->>'organization_id' = v_target.organization_id::text
-       AND wr.workflow_status = 'completed'
+       AND wr.workflow_status = ANY (v_completed_statuses)
   ) THEN
     RETURN jsonb_build_object(
       'ok', FALSE,

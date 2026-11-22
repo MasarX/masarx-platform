@@ -123,8 +123,8 @@ SET search_path TO public, extensions, pg_temp
 AS $function$
 DECLARE
   r RECORD;
+  v_guard RECORD;
   v_rel REGCLASS;
-  v_ledger_guarded BOOLEAN;
   v_default_timeout BOOLEAN := current_setting('lock_timeout') = '0';
 BEGIN
   IF p_table_schema IS DISTINCT FROM 'public' THEN
@@ -151,54 +151,59 @@ BEGIN
       CONTINUE;
     END IF;
 
-    -- Preserve the canonical ledger guards and their 2F003 contract. Finance
-    -- installs its row and truncate guards on every writable leaf partition.
-    SELECT COALESCE(bool_and((
-      SELECT COUNT(*) = 2
-        FROM pg_catalog.pg_trigger t
-       WHERE t.tgrelid = relations.relid
-         AND t.tgfoid = 'public.immutable_ledger_block_mutation_trg_v1()'::regprocedure
-         AND t.tgname IN ('trg_ledger_immutable_rows_v1', 'trg_ledger_immutable_truncate_v1')
-         AND t.tgenabled IN ('O', 'A')
-    )), FALSE)
-      INTO v_ledger_guarded
-      FROM (
-        SELECT v_rel AS relid
-         WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_partitioned_table WHERE partrelid = v_rel)
-        UNION ALL
-        SELECT relid FROM pg_catalog.pg_partition_tree(v_rel) WHERE isleaf AND relid <> v_rel
-      ) AS relations
-     WHERE r.mutation_policy = 'append_only';
+    row_guard_action := CASE WHEN r.mutation_policy = 'append_only' THEN 'existing' ELSE 'dropped' END;
+    truncate_guard_action := row_guard_action;
 
-    IF r.mutation_policy = 'append_only' AND NOT v_ledger_guarded THEN
-      EXECUTE format(
-        'CREATE OR REPLACE TRIGGER trg_table_contracts_append_only_row_guard BEFORE UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION public.reject_append_only_table_mutation_v1()',
-        v_rel
-      );
-      EXECUTE format(
-        'CREATE OR REPLACE TRIGGER trg_table_contracts_append_only_truncate_guard BEFORE TRUNCATE ON %s FOR EACH STATEMENT EXECUTE FUNCTION public.reject_append_only_table_mutation_v1()',
-        v_rel
-      );
-      row_guard_action := 'created';
-      truncate_guard_action := 'created';
-    ELSE
-      IF EXISTS (
-        SELECT 1 FROM pg_catalog.pg_trigger
-         WHERE tgrelid = v_rel AND tgname = 'trg_table_contracts_append_only_row_guard'
-           AND NOT tgisinternal AND tgparentid = 0
+    -- Leaf-local guards survive partition detach. Statement triggers on the
+    -- root alone cannot block TRUNCATE issued directly against a leaf.
+    FOR v_guard IN
+      WITH relations AS (
+        SELECT v_rel AS relid, relkind = 'r' AS isleaf, 0 AS depth
+          FROM pg_catalog.pg_class WHERE oid = v_rel
+        UNION ALL
+        SELECT relid, isleaf, level
+          FROM pg_catalog.pg_partition_tree(v_rel) WHERE isleaf AND relid <> v_rel
+      ), guards AS (
+        SELECT relid, isleaf, depth, kind, events, trigger_level,
+               'trg_table_contracts_append_only_' || kind || '_guard' AS guard_name,
+               EXISTS (
+                 SELECT FROM pg_catalog.pg_trigger t
+                  WHERE t.tgrelid = relid AND t.tgname = canonical_name
+                    AND t.tgfoid = 'public.immutable_ledger_block_mutation_trg_v1()'::regprocedure
+                    AND t.tgenabled IN ('O', 'A')
+               ) AS canonical
+          FROM relations
+         CROSS JOIN (VALUES
+           ('row', 'UPDATE OR DELETE', 'ROW', 'trg_ledger_immutable_rows_v1'),
+           ('truncate', 'TRUNCATE', 'STATEMENT', 'trg_ledger_immutable_truncate_v1')
+         ) AS kinds(kind, events, trigger_level, canonical_name)
+      )
+      SELECT *, NOT canonical AND (isleaf OR (
+               kind = 'truncate' AND NOT COALESCE(
+                 bool_and(canonical) FILTER (WHERE isleaf) OVER (PARTITION BY kind), FALSE
+               )
+             )) AS needs_guard
+        FROM guards
+       ORDER BY depth, kind
+    LOOP
+      IF r.mutation_policy = 'append_only' AND v_guard.needs_guard THEN
+        EXECUTE format(
+          'CREATE OR REPLACE TRIGGER %I BEFORE %s ON %s FOR EACH %s EXECUTE FUNCTION public.reject_append_only_table_mutation_v1()',
+          v_guard.guard_name, v_guard.events, v_guard.relid, v_guard.trigger_level
+        );
+        IF v_guard.kind = 'row' THEN
+          row_guard_action := 'created';
+        ELSE
+          truncate_guard_action := 'created';
+        END IF;
+      ELSIF EXISTS (
+        SELECT FROM pg_catalog.pg_trigger t
+         WHERE t.tgrelid = v_guard.relid AND t.tgname = v_guard.guard_name
+           AND NOT t.tgisinternal AND t.tgparentid = 0
       ) THEN
-        EXECUTE format('DROP TRIGGER trg_table_contracts_append_only_row_guard ON %s', v_rel);
+        EXECUTE format('DROP TRIGGER %I ON %s', v_guard.guard_name, v_guard.relid);
       END IF;
-      IF EXISTS (
-        SELECT 1 FROM pg_catalog.pg_trigger
-         WHERE tgrelid = v_rel AND tgname = 'trg_table_contracts_append_only_truncate_guard'
-           AND NOT tgisinternal AND tgparentid = 0
-      ) THEN
-        EXECUTE format('DROP TRIGGER trg_table_contracts_append_only_truncate_guard ON %s', v_rel);
-      END IF;
-      row_guard_action := CASE WHEN v_ledger_guarded THEN 'existing' ELSE 'dropped' END;
-      truncate_guard_action := row_guard_action;
-    END IF;
+    END LOOP;
 
     table_schema := r.table_schema;
     table_name := r.table_name;
