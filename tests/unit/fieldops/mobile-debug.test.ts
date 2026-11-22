@@ -46,6 +46,19 @@ describe("mobile debug helpers", () => {
     expect(result).not.toMatch(/synthetic|fixture/);
   });
 
+  test.each([
+    ["provider_token", "ya29.abc"],
+    ["provider_refresh_token", "abc"],
+    ["id_token", "abc"],
+    ["sessiontoken", "abc"],
+    ["x_apikey", "abc"],
+  ])("redacts %s in debug messages and stacks", (key, value) => {
+    const raw = `${key}=${value}`;
+    const result = normalizeDebugMessage(new Error(raw));
+    expect(result).toContain(`${key}=[REDACTED]`);
+    expect(result).not.toContain(raw);
+  });
+
   test("builds structured payload without leaking raw object identity", () => {
     const payload = buildDebugFailurePayload("failed sync", { reason: "disk full" }, "fieldops:background-location");
 

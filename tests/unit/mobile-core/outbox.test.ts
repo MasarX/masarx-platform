@@ -284,6 +284,23 @@ test("historical diagnostic sanitizer consumes escaped and unterminated quoted v
   }
 });
 
+test.each([
+  ["provider_token", "ya29.abc"],
+  ["provider_refresh_token", "abc"],
+  ["id_token", "abc"],
+  ["sessiontoken", "abc"],
+  ["x_apikey", "abc"],
+])("redacts %s and preserves neighboring fields", (key, value) => {
+  const { redactOutboxErrorText } = require("@masarx/mobile-core");
+  expect(redactOutboxErrorText(`status=visible ${key}=${value}`)).toBe(`status=visible ${key}=[REDACTED]`);
+});
+
+test("redacts suffixed credential keys with quoted values", () => {
+  const { redactOutboxErrorText } = require("@masarx/mobile-core");
+  const source = JSON.stringify({ apiKeyValue: 'synthetic "fixture"', status: 503 });
+  expect(redactOutboxErrorText(source)).toBe('{"apiKeyValue":[REDACTED],"status":503}');
+});
+
 test("client display labels never enter RPC or Edge executor arguments", async () => {
   const store = createMemoryOutboxStore();
   const outbox = createOutbox(store);
