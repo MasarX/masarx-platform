@@ -103,6 +103,9 @@ test.each([
   expect(stored).not.toContain(alphaMarker);
 });
 
+const shortHexSuffix = "ab".repeat(7) + "c";
+const hexSuffix = shortHexSuffix + "d";
+
 test.each([
   ...[
     "saml_response", "SAML_RESPONSE", "saml-response", "saml.response", "SAMLart", "service.saml.request",
@@ -111,8 +114,21 @@ test.each([
     "db_url", "DATABASE_URI", "SQLALCHEMY_DATABASE_URI", "SQLAlchemy_URI", "redis_url", "mongo_uri", "conn", "conn_str",
     "connstr", "connectionstring", "dsn", "rabbitBrokerUri", "seed_phrase", "recovery_phrase", "passphrase",
     "sharedaccesssignature", "SharedAccessSignature",
+    "totpcode", "TOTPCODE", "mfacode", "verificationcode", "recoverycode", "recoverycodes",
+    "backupcode", "backupcodes", "devicecode", "usercode", "workflowverificationstepcode",
+    "dburl", "databaseuri", "sqlalchemydatabaseuri", "redisurl", "mongouri", "seedphrase", "recoveryphrase",
+    "remember", "rememberme", "remember-me", "rememberMe", `remember_web_${hexSuffix}`,
+    "csrf", "xsrf", "crumb", "Jenkins-Crumb", "antiforgery", "aspxauth", ".AspNetCore.Identity.Application",
+    ".aspnetcore.Custom", "authtok", "bindpw", "rootpw", "masterauth", "sess", "koa.sess", "express:sess",
+    "oauth2_proxy", "proxy_oauth2_custom", "oobcode", "GITHUB_PAT", "GH_PAT", "GITLAB_PAT", "GLPAT_PAT",
+    "dockerconfigjson", `wordpress_logged_in_${hexSuffix}`, `wordpress_sec_${hexSuffix}`,
+    `SESS${hexSuffix}`, `SSESS${hexSuffix}`, "CASTGC", `castgc${hexSuffix}`,
+    "iPlanetDirectoryPro", `iplanetdirectorypro${hexSuffix}`,
   ].map(key => [`${key}=${alphaMarker}`, withheld]),
-  ...["JSESSIONID", "jsessionid", "/app;jsessionid", "custom-session_id", "vendor-sess-id"].map(key => [
+  ...[
+    "JSESSIONID", "jsessionid", "/app;jsessionid", "custom-session_id", "vendor-sess-id",
+    "sessionsso", "jsessionidsso", "smsession", `ASPSESSIONID${hexSuffix}`,
+  ].map(key => [
     `${key}=${alphaMarker}`, /session/i.test(key) ? `${withheld} (auth)` : withheld,
   ]),
   ...[
@@ -197,6 +213,7 @@ test.each([
   "keyboard=enabled", "code=409", '{"code":"PGRST301"}', "HTTP \u0664\u0660\u0669",
   "nonce=missing ticket=missing seed=missing code=missing",
   "device_code_state=missing redis_region=missing",
+  `pat=missing support_pat=missing SESS${shortHexSuffix}=missing`,
 ])("preserves ordinary diagnostic text %s", async input => {
   expect(redactOutboxErrorText(input)).toBe(input);
   const outbox = createOutbox(createMemoryOutboxStore());

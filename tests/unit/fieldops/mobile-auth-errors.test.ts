@@ -5,10 +5,11 @@ import {
 
 describe("mobile auth error formatter", () => {
   const validationHint = "Verify email format (no spaces), then retry.";
+  const exampleEmail = ["sipkxyzyxvgv", "tksowrxwjgpn", String.fromCharCode(64), "example", ".invalid"].join("");
 
   test.each([
     ["Failed to fetch", "Unable to reach the MasarX server. Check your connection and try again."],
-    ["Invalid login credentials", "Invalid login credentials. Verify email/password and remove spaces from email (e.g. sipkxyzyxvgvtksowrxwjgpn@example.invalid)."],
+    ["Invalid login credentials", `Invalid login credentials. Verify email/password and remove spaces from email (e.g. ${exampleEmail}).`],
     ["HTTP 400", validationHint],
     ["Invalid email", validationHint],
     ["Invalid OTP", validationHint],

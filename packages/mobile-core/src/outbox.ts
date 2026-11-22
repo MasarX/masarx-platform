@@ -446,9 +446,13 @@ const NORMALIZATION_REMOVALS = /[\p{M}\p{Cf}\u115f\u1160\u3164\uffa0\u2800]|(?![
 const SENSITIVE_TERM = /password|secret|token|credential|connectionstring|databaseurl/;
 const SENSITIVE_COMPONENT = /^(?:pass|passwd|password|passcode|pwd|pw|pin|otp|secret|token|key|apikey|auth|credentials?|signature|sig|session|sid|sessid|cookies?|bearer|jwt|private|authorization|unauthorized|authentication|(?:un)?authenticated|passphrase|sessionids?|privatekey|accesskey|verifier|assertion|saml(?:response|art)?|creds|hmac|whsec|mnemonic|jwk|sas|dsn|sharedaccesssignature)$/i;
 const SENSITIVE_SUFFIX = /(?:pass|passwd|key|secret|token|pin|otp|sessid)$/i;
-const CODE_COMPONENT = /^(?:otp|totp|hotp|mfa|2fa|verification|verify|recovery|backup|device|user|auth|authorization|reset|sms|email|login|pairing)$/;
-const CONNECTION_COMPONENT = /^(?:db|database|redis|mongo|mongodb|postgres|pg|mysql|amqp|rabbit|broker|cache|sqlalchemy|jdbc)$/i;
-const PHRASE_COMPONENT = /^(?:seed|recovery|pass|secret)$/;
+const CODE_QUALIFIER = /otp|mfa|2fa|verification|verify|recovery|backup|device|user|auth|reset|sms|email|login|pairing/;
+const CONNECTION_QUALIFIER = /db|database|redis|mongo|postgres|pg|mysql|amqp|rabbit|broker|cache|sqlalchemy|jdbc/;
+const PHRASE_QUALIFIER = /seed|recovery|pass|secret/;
+const PHRASE_COMPONENT = new RegExp(`^(?:${PHRASE_QUALIFIER.source})$`);
+const STACK_KEY = /^(?:remember(?:me)?|csrf|xsrf|crumb|antiforgery|aspxauth|authtok|bindpw|rootpw|masterauth|sessionsso|jsessionidsso|smsession|oobcode|dockerconfigjson)$/;
+const STACK_KEY_PREFIX = /^(?:\.aspnetcore\.|wordpress_(?:logged_in|sec)_|aspsessionid|s?sess[0-9a-f]{16}|castgc|iplanetdirectorypro)/;
+const PAT_PROVIDER = /^(?:github|gh|gitlab|glpat)$/;
 const ORDINARY_WORD = /^(?:monkey|compass)$/i;
 const LEET_LETTERS: Record<string, string> = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t" };
 const URL_USERINFO = /(?:[\\/]{2}|:\\+)[^/\\?#@\s]+@/;
@@ -478,19 +482,24 @@ function hasSensitiveTerm(text: string) {
     return true;
   }
   // Scanning identifiers independently of their separators covers quotes and whitespace.
-  for (const [identifier] of text.matchAll(/[a-z0-9]+(?:[_.-]+[a-z0-9]+)*/gi)) {
-    const segments = identifier.split(/[_.-]+/);
-    if (segments.some(segment => SENSITIVE_COMPONENT.test(segment))) return true;
-    const components = identifier === identifier.toLowerCase() ? segments : identifier
+  for (const [identifier] of text.matchAll(/\.?[a-z0-9]+(?:[_.-]+[a-z0-9]+)*/gi)) {
+    const lower = identifier.toLowerCase();
+    if (STACK_KEY_PREFIX.test(lower)) return true;
+    const segments = lower.split(/[_.-]+/);
+    const components = identifier === lower ? segments : identifier
       .replace(/(^|[_.-])2[fF][aA](?=[_.A-Z-]|$)/g, (_match, boundary) => `${boundary}2fa`)
       .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
       .replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[_. -]+/);
-    if (components !== segments && components.some(component => SENSITIVE_COMPONENT.test(component))) return true;
-    const joined = components.join("");
+    const parts = components === segments ? segments : segments.concat(components);
+    if (parts.some(part => part === "sess" || SENSITIVE_COMPONENT.test(part) || STACK_KEY.test(part))) return true;
+    const joined = segments.join("");
+    if (STACK_KEY.test(joined) || (joined.includes("oauth2") && joined.includes("proxy"))) return true;
+    if (parts.includes("pat") && parts.some(part => PAT_PROVIDER.test(part))) return true;
     if (/(?:sessionid|sid)$/.test(joined) || /^(?:conn|connstr|connectionstring|dsn)$/.test(joined)) return true;
-    if (/^codes?$/.test(components.at(-1) ?? "") && components.some(component => CODE_COMPONENT.test(component))) return true;
-    if (/(?:url|uri)$/.test(joined) && (components.some(component => CONNECTION_COMPONENT.test(component))
-      || (components !== segments && segments.some(segment => CONNECTION_COMPONENT.test(segment))))) return true;
+    const codeStart = joined.search(/codes?$/);
+    if (codeStart >= 0 && CODE_QUALIFIER.test(joined.slice(0, codeStart))) return true;
+    if (/(?:url|uri)$/.test(joined) && CONNECTION_QUALIFIER.test(joined.slice(0, -3))) return true;
+    if (joined.endsWith("phrase") && PHRASE_QUALIFIER.test(joined.slice(0, -6))) return true;
     if (components.includes("phrase") && components.some(component => PHRASE_COMPONENT.test(component))) return true;
     const lastSegment = segments.at(-1) ?? "";
     if (SENSITIVE_SUFFIX.test(lastSegment) && !ORDINARY_WORD.test(lastSegment)) return true;
