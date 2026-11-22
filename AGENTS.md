@@ -7,6 +7,8 @@
 - Environments: [delivery environments](DELIVERY.md#environments).
 - Release plan: [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
 - Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX Design"
+- UI project: yes
+- Other repos: none
 - Other definition files: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md)
 
 ## Product and current goal
