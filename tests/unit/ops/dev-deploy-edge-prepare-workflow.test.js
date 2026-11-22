@@ -74,7 +74,10 @@ test('deploy writes the dedicated credential without logging it and gates functi
   expect(options).toEqual({ mode: 0o600 });
   const token = contents.match(/^MARKETING_DB_JWT=(.+)$/m)[1];
   expect(realGenerator.isJwtSignedWithSecret(token, 'signing-fixture')).toBe(true);
-  expect(JSON.stringify(console.log.mock.calls)).not.toContain(token);
+  const maskCommand = ['::add-mask::' + token];
+  expect(console.log.mock.calls.filter(call => call.includes(maskCommand[0]))).toEqual([maskCommand]);
+  const ordinaryOutput = console.log.mock.calls.filter(([line]) => !line.startsWith('::add-mask::'));
+  expect(JSON.stringify(ordinaryOutput)).not.toContain(token);
   expect(console.error).not.toHaveBeenCalled();
   expect(run).toMatch(/secrets set[^\n]+\n} >\/dev\/null 2>&1 \|\| \{\n\s+echo '[^']*MARKETING_DB_JWT\.'\n\s+exit 1/);
   expect(run.indexOf('secrets list')).toBeGreaterThan(run.indexOf('secrets set'));

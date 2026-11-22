@@ -134,9 +134,7 @@ jobs:
             console.error('::error::Failed to mint MARKETING_DB_JWT with the edge_marketing_role claim.');
             process.exit(1);
           }
-          for (const [key, value] of Object.entries(bundle)) {
-            if (key !== 'marketing_db_jwt') console.log('::add-mask::' + value);
-          }
+          for (const value of Object.values(bundle)) console.log('::add-mask::' + value);
           fs.writeFileSync(process.env.EDGE_SECRET_FILE, Object.entries(bundle)
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
             + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n', { mode: 0o600 });
