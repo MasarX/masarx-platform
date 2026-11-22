@@ -3,7 +3,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(69);
+SELECT plan(70);
 
 SELECT has_table('public', 'logistics_migration_sources', 'migration sources table exists');
 SELECT has_table('public', 'logistics_migration_profiles', 'migration profiles table exists');
@@ -456,7 +456,7 @@ SELECT set_config(
       'contacts', jsonb_build_array(jsonb_build_object(
         'legacy_ref', 'FIXTURE-R-CONFLICT',
         'full_name', 'Example Conflict Recipient',
-        'mobile', '+12025550103'
+        'mobile', current_setting('test.migration_payload')::jsonb#>>'{contacts,0,mobile}'
       ))
     )
   ))::text,
@@ -886,6 +886,19 @@ SELECT ok(
   NOT (current_setting('test.migration_target_conflict')::jsonb->>'ok')::BOOLEAN
   AND current_setting('test.migration_target_conflict')::jsonb#>>'{error,code}' = 'validation_failed',
   'stored fail-closed conflict policy rejects an existing recipient phone'
+);
+
+SELECT ok(
+  (SELECT count(*) = 1 FROM public.recipients r
+    WHERE r.organization_id = current_setting('test.migration_org')::UUID
+      AND r.phone_number = current_setting('test.migration_payload')::jsonb#>>'{contacts,0,mobile}')
+  AND NOT EXISTS (
+    SELECT 1 FROM public.logistics_migration_items i
+     WHERE i.import_job_id = (current_setting('test.migration_target_conflict')::jsonb->>'import_job_id')::UUID
+       AND i.target_type = 'recipient'
+       AND i.target_id IS NOT NULL
+  ),
+  'recipient phone conflict leaves only the original recipient and no imported recipient target'
 );
 
 SELECT ok(
