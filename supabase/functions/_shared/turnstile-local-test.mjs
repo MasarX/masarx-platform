@@ -2,6 +2,35 @@ export const LOCAL_MARKETING_TURNSTILE_TEST_SECRET =
   "EXAMPLE_PASSWORD";
 export const LOCAL_MARKETING_TURNSTILE_TEST_TOKEN = "EXAMPLE_PASSWORD";
 
+export function isTurnstileTestSecret(secret) {
+  return /^[123]x0{31}AA$/.test(secret);
+}
+
+export function turnstileHostnameFailure(hostname, origin) {
+  const actual = typeof hostname === "string" ? hostname.trim().toLowerCase() : "";
+  if (!actual) return "hostname_missing";
+
+  let expected;
+  try {
+    expected = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return "origin_hostname_missing";
+  }
+  if (!expected) return "origin_hostname_missing";
+  return expected === actual ? null : "hostname_mismatch";
+}
+
+const siteverifyErrorCodes = new Set([
+  "invalid-input-response",
+  "bad-request",
+]);
+
+export function sanitizeTurnstileErrorCodes(codes) {
+  return Array.isArray(codes)
+    ? codes.slice(0, 10).map((code) => siteverifyErrorCodes.has(code) ? code : "[redacted]")
+    : null;
+}
+
 export async function verifyMarketingTurnstile({
   token,
   secret,
@@ -27,6 +56,10 @@ export async function verifyMarketingTurnstile({
     return { success: true, hostname: normalizedRequestHostname, errorCodes: null };
   }
 
+  if (localContext !== true && isTurnstileTestSecret(secret)) {
+    throw new Error("turnstile_testing_key_refused");
+  }
+
   const body = new URLSearchParams();
   body.set("secret", secret);
   body.set("response", token);
@@ -41,10 +74,12 @@ export async function verifyMarketingTurnstile({
     },
   );
 
-  const data = await response.json().catch(() => null);
+  const data = response.ok === false ? null : await response.json().catch(() => null);
+  if (localContext !== true && data?.metadata?.result_with_testing_key === true) {
+    throw new Error("turnstile_testing_key_refused");
+  }
   const success = Boolean(data && typeof data === "object" && data.success === true);
-  const hostname =
-    data && typeof data === "object" ? String(data.hostname || "").trim() : "";
+  const hostname = typeof data?.hostname === "string" ? data.hostname.trim() : "";
   const errorCodes =
     data && typeof data === "object" ? (data["error-codes"] ?? null) : null;
   return { success, hostname, errorCodes };
