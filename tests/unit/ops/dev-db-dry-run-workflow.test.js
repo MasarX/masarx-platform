@@ -14,10 +14,10 @@ test('runs one manual dry-run job in dev with only read access and pinned GitHub
   expect(workflow.on.push).toEqual({ branches: ['main'] });
   expect(job.if).toBe("github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'");
   const inputs = workflow.on.workflow_dispatch.inputs;
-  expect(inputs.mode).toMatchObject({ type: 'choice', required: true, default: 'deploy', options: ['deploy', 'dry-run'] });
+  expect(inputs.mode).toMatchObject({ type: 'choice', required: true, default: 'deploy', options: ['deploy', 'dry-run', 'api-schemas'] });
   expect(inputs.project_ref).toMatchObject({ type: 'string' });
   expect(workflow.permissions).toEqual({ contents: 'read' });
-  expect(Object.keys(workflow.jobs)).toHaveLength(7);
+  expect(Object.keys(workflow.jobs)).toHaveLength(8);
   expect(job.permissions).toBeUndefined();
   expect(job.environment).toBe('dev');
   expect(job['timeout-minutes']).toBeGreaterThan(45);
