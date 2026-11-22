@@ -94,6 +94,7 @@ BEGIN
     VALUES (v_template, 'workflow_geocoding_maintenance_' || v_template::text, 1, 'active', 'tenant', v_org);
     INSERT INTO public.workflow_template_steps (id, workflow_template_id, sequence_order, operation_name, transition_condition, handler_key, handler_version, enabled)
     VALUES (v_template_step, v_template, 1, 'dispatch_provider', 'always', 'provider_dispatch', 'v1', true);
+    PERFORM set_config('app.workflow_run_id', v_run::text, true);
     INSERT INTO public.workflow_runs (id, workflow_template_id, workflow_template_version, entry_point, workflow_status, context)
     VALUES (v_run, v_template, 1, 'pgtap', 'in_progress', jsonb_build_object('organization_id', v_org, 'client_id', v_client));
     INSERT INTO public.workflow_run_steps (id, workflow_run_id, workflow_template_step_id, sequence_order, step_status, operation_name, handler_key, handler_version, max_retries, retry_attempt, operation_started_at)
