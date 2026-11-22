@@ -113,4 +113,15 @@ describe("getVerifiedAccessToken", () => {
     });
     expect(result.error?.message).toBe("verified_access_token_user_mismatch");
   });
+
+  test("does not verify a user when the session lookup rejects", async () => {
+    const sessionError = new Error("Session fixture unavailable");
+    const getSession = jest.fn().mockRejectedValue(sessionError);
+    const getUser = jest.fn();
+    activeAuthClient = { getSession, getUser };
+
+    await expect(getVerifiedAccessToken({ allowCookieSet: false })).rejects.toBe(sessionError);
+    expect(getSession).toHaveBeenCalledTimes(1);
+    expect(getUser).not.toHaveBeenCalled();
+  });
 });

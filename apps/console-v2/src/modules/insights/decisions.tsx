@@ -188,7 +188,7 @@ export function DecisionsModule() {
   // through the canonical settings ladder. Strict no-fallback: when the
   // policy is missing the live tail retains only the latest single row so the
   // gap is observable but the buffer does not silently exhaust memory.
-  const liveTailPolicyResolution = useResolveSettings('live_tail_policy', undefined);
+  const liveTailPolicyResolution = useResolveSettings('live_tail_policy', undefined, { enabled: canRead });
   const liveTailBufferSize = (liveTailPolicyResolution.data?.value as
     | { decisions_buffer_size?: number }
     | undefined)?.decisions_buffer_size;
@@ -210,7 +210,7 @@ export function DecisionsModule() {
   }, [search.scope]);
 
   const filters = useMemo(() => (category ? { category } : undefined), [category]);
-  const { data, isLoading, isError } = useDecisionLog(filters);
+  const { data, isLoading, isError } = useDecisionLog(filters, { enabled: canRead });
 
   // W30 — paired projection view `public.v_decision_log_directory`
   // (supabase/migrations/202604302810_v_decision_log_directory.sql) projects
@@ -218,7 +218,11 @@ export function DecisionsModule() {
   // scope_category / winning_settings_id / winning_version per decision row.
   // Consumed additively as a header summary chip source — the canonical
   // SSOT seam stays `useDecisionLog`.
-  const directoryQuery = useResourceList<DecisionLogDirectoryRow>('decision_log_directory');
+  const directoryQuery = useResourceList<DecisionLogDirectoryRow>(
+    'decision_log_directory',
+    undefined,
+    { enabled: canRead },
+  );
   const directory = useMemo(
     () => directoryQuery.data?.rows ?? [],
     [directoryQuery.data],
@@ -251,7 +255,7 @@ export function DecisionsModule() {
   // wiring stays zero-hardcoded and mirrors the api-gateway Phase F2
   // pattern 1:1.
   useEffect(() => {
-    if (!liveOn) return undefined;
+    if (!canRead || !liveOn) return undefined;
 
     // W-Cycle-E2 (P2 #9) — buffer cap resolves through canonical
     // `live_tail_policy.decisions_buffer_size`. When missing, the buffer
@@ -300,7 +304,7 @@ export function DecisionsModule() {
         /* swallow — subscriber teardown should never throw */
       }
     };
-  }, [liveOn, liveTailBufferSize]);
+  }, [canRead, liveOn, liveTailBufferSize]);
 
   // Reset the live counter when the live toggle changes.
   const liveStartedRef = useRef(false);

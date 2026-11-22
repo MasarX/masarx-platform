@@ -46,6 +46,7 @@ import {
   useReplayWebhookInbox,
   useForceWebhookInboxStatus,
   useUpsertMappingArtifact,
+  usePromoteMappingVersion,
   useDeleteMappingConfig,
   useUpsertProviderAuthConfig,
   useBindProviderAccountCredential,
@@ -161,6 +162,14 @@ describe('lib/queries', () => {
     expect(['success', 'error']).toContain(result.current.status);
   });
 
+  it('useDecisionLog stays idle when the caller disables the query', () => {
+    const { result } = renderHook(() => useDecisionLog(undefined, { enabled: false }), {
+      wrapper: wrapper(client),
+    });
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(result.current.isFetched).toBe(false);
+  });
+
   it('useDecisionLog returns an array', async () => {
     const { result } = renderHook(() => useDecisionLog({ limit: 5 }), {
       wrapper: wrapper(client),
@@ -204,6 +213,16 @@ describe('lib/queries', () => {
       settings_resolution_id: expect.any(String),
       ladder_path: expect.any(Array),
     });
+  });
+
+  it('useResolveSettings stays idle without a category even when enabled', () => {
+    const { result } = renderHook(
+      () => useResolveSettings('', undefined, { enabled: true }),
+      { wrapper: wrapper(client) },
+    );
+
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(result.current.isFetched).toBe(false);
   });
 
   it('useResolveSettings can be disabled until live auth is ready', () => {
@@ -1286,6 +1305,66 @@ describe('lib/queries', () => {
     expect(calls).toContainEqual(['lists_by_filters', 'mapping_config_directory']);
     upsertSpy.mockRestore();
     invalidateSpy.mockRestore();
+  });
+
+  it.each(['save', 'promote'] as const)('completes %s while refreshing mapping and bound intake reads', async (action) => {
+    const longLivedClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: Infinity, staleTime: 0 },
+        mutations: { retry: false },
+      },
+    });
+    let finishRefresh!: () => void;
+    const pendingRefresh = new Promise<void>((resolve) => { finishRefresh = resolve; });
+    const invalidateSpy = vi.spyOn(longLivedClient, 'invalidateQueries').mockReturnValue(pendingRefresh);
+    const upsertSpy = vi.spyOn(api, 'ui_upsert_mapping_artifact_v1').mockResolvedValue({
+      ok: true,
+      mapping_config_id: 'mcfg_live',
+      correlation_id: 'cor_mapping_live',
+    } as never);
+
+    const promoteSpy = vi.spyOn(api, 'mapping_config_promote_v1').mockResolvedValue({
+      ok: true,
+      mapping_config_id: 'mcfg_live',
+      promoted_to_version: 2,
+    } as never);
+    const { result } = renderHook(() => ({
+      save: useUpsertMappingArtifact(),
+      promote: usePromoteMappingVersion(),
+    }), {
+      wrapper: wrapper(longLivedClient),
+    });
+
+    try {
+      act(() => {
+        if (action === 'promote') {
+          result.current.promote.mutate({ mapping_config_id: 'mcfg_live' });
+          return;
+        }
+        result.current.save.mutate({
+          artifact: 'mapping_config',
+          mapping_config_id: 'mcfg_live',
+          mapping_type: 'webhook_inbound',
+          mapping_key: 'live.mapping',
+          mapping_config: { target: 'shipments.create' },
+        });
+      });
+      await waitFor(() => expect(result.current[action].isSuccess).toBe(true));
+
+      const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+      for (const resource of [
+        'mapping_configs', 'mapping_config_directory', 'webhook_sources',
+        'webhook_source_directory', 'webhook_rules', 'api_routes',
+      ]) {
+        expect(calls).toContainEqual(['list', resource]);
+        expect(calls).toContainEqual(['lists_by_filters', resource]);
+      }
+    } finally {
+      finishRefresh();
+      upsertSpy.mockRestore();
+      promoteSpy.mockRestore();
+      invalidateSpy.mockRestore();
+    }
   });
 
   it('useDeleteMappingConfig refreshes filtered mapping config and directory reads', async () => {

@@ -646,13 +646,13 @@ export function IntakeModule() {
     'workflow_run_directory',
     workflowRunFilters,
     { page_size: 1 },
-    { enabled: canRead && canReadWorkflows && workflowRunFilters.length > 0 },
+    { enabled: canRead && canReadWorkflows && workflowRunFilters.length > 0, retry: false },
   );
   const eventsQuery = useResourceListsByFilters<DomainEventLite>(
     'domain_events',
     workflowRunFilters.map((filter) => ({ workflow_run_id: filter.id })),
     { page_size: 25 },
-    { enabled: canRead && canReadWorkflows && workflowRunFilters.length > 0 },
+    { enabled: canRead && canReadWorkflows && workflowRunFilters.length > 0, retry: false },
   );
   const refreshWebhookInbox = useCallback(async () => {
     const [directoryReadback, focusedReadback] = await Promise.all([

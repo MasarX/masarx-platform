@@ -153,7 +153,7 @@ export function useResourceListsByFilters<T = Record<string, unknown>>(
   resource: string,
   filters: Array<Record<string, unknown>>,
   opts?: Omit<api.ListOpts, 'filter'>,
-  queryOpts?: { enabled?: boolean },
+  queryOpts?: { enabled?: boolean; retry?: UseQueryOptions<ListResult<T>>['retry'] },
 ) {
   const normalizedFilters = filters.filter((filter) => Object.keys(filter).length > 0);
   const enabled = (queryOpts?.enabled ?? true) && normalizedFilters.length > 0;
@@ -188,6 +188,7 @@ export function useResourceListsByFilters<T = Record<string, unknown>>(
         page_size: rows.length,
       };
     },
+    ...queryOpts,
     enabled,
   });
 }
@@ -267,10 +268,14 @@ export function useShipmentOperationOptions(shipmentId: string | undefined) {
   });
 }
 
-export function useDecisionLog(filters?: { category?: string; limit?: number }) {
+export function useDecisionLog(
+  filters?: { category?: string; limit?: number },
+  options?: { enabled?: boolean },
+) {
   return useQuery<DecisionLogEntry[]>({
     queryKey: qk.decisionLog(filters),
     queryFn: () => api.listDecisionLog(filters),
+    ...options,
   });
 }
 export function useResolutionLog(filters?: { category?: string; limit?: number }) {
@@ -306,8 +311,8 @@ export function useResolveSettings(
   return useQuery<SettingsResolution>({
     queryKey: qk.resolveSettings(category, scope),
     queryFn: () => api.resolveSettings(category, scope),
-    enabled: Boolean(category) && (queryOpts?.enabled ?? true),
     ...queryOpts,
+    enabled: Boolean(category) && (queryOpts?.enabled ?? true),
   });
 }
 
@@ -3043,13 +3048,20 @@ export function useRotateWebhookSourceToken() {
 }
 
 // INTEGRATIONS — Mapping Studio (Create / Edit / Promote-version)
+const MAPPING_PROFILE_READBACK_RESOURCES = [
+  'mapping_configs',
+  'mapping_config_directory',
+  'webhook_sources',
+  'webhook_source_directory',
+  'webhook_rules',
+  'api_routes',
+];
+
 export function useUpsertMappingArtifact() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.UpsertMappingArtifactArgs) => api.ui_upsert_mapping_artifact_v1(args),
-    onSuccess: () => {
-      invalidateListQueries(qc, ['mapping_configs', 'mapping_config_directory']);
-    },
+    onSuccess: () => invalidateListQueries(qc, MAPPING_PROFILE_READBACK_RESOURCES),
   });
 }
 export function useDeleteMappingConfig() {
@@ -3076,9 +3088,7 @@ export function usePromoteMappingVersion() {
   return useMutation({
     mutationFn: (args: { mapping_config_id: string; target_version?: number }) =>
       api.mapping_config_promote_v1(args),
-    onSuccess: () => {
-      invalidateListQueries(qc, ['mapping_configs', 'mapping_config_directory']);
-    },
+    onSuccess: () => invalidateListQueries(qc, MAPPING_PROFILE_READBACK_RESOURCES),
   });
 }
 

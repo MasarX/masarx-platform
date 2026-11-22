@@ -108,7 +108,7 @@ export function AuditModule() {
   } = useResourceList<AuditTableChangeRow>(
     'audit_table_changes',
     { page_size: 100 },
-    { retry: false }, // capability denial should surface immediately
+    { enabled: canRead, retry: false },
   );
   const drawer = useDrawer();
 

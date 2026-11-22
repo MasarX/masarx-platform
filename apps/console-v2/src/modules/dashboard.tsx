@@ -30,7 +30,7 @@ import { pushToast } from '@/components/toastStore';
 import { useIdentity, useCapability } from '@/lib/identity';
 import { useI18n } from '@/lib/i18n';
 import * as api from '@/lib/api';
-import { formatCapabilityRequirement, formatCapabilityTitle } from '@/lib/capabilities';
+import { CAP, formatCapabilityRequirement, formatCapabilityTitle } from '@/lib/capabilities';
 import { isShipmentRisk } from './operate/shipments';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 
@@ -702,8 +702,11 @@ function ActivityFeedWidget({ config }: { config: Record<string, unknown> }) {
   const cfg = config as { source?: string; limit?: number };
   const limit = cfg.limit || 10;
   const { fmtDateTime } = useI18n();
+  const canReadDecisionLog = useCapability(CAP.OBSERVABILITY_READ);
 
-  if (cfg.source === 'decision_log') return <DecisionLogFeed limit={limit} fmtDateTime={fmtDateTime} />;
+  if (cfg.source === 'decision_log' && canReadDecisionLog) {
+    return <DecisionLogFeed limit={limit} fmtDateTime={fmtDateTime} />;
+  }
   if (cfg.source === 'audit_log') return <AuditLogFeed limit={limit} fmtDateTime={fmtDateTime} />;
   if (cfg.source === 'webhook_inbox') return <WebhookInboxFeed limit={limit} fmtDateTime={fmtDateTime} />;
   return null;

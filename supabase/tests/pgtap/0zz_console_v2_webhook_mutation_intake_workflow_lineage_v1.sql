@@ -5,7 +5,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(28);
+SELECT plan(29);
 
 SET search_path TO public, pgtap, extensions, pg_temp;
 
@@ -421,6 +421,24 @@ SELECT is(
   ),
   'shipment_reschedule_v1',
   'reschedule webhook mutation starts shipment_reschedule_v1 follow-up workflow'
+);
+
+SELECT results_eq(
+  $$
+    SELECT r.mutation, dir.followup_workflow_run_id, dir.followup_workflow_status::TEXT
+      FROM _mutation_results r
+      JOIN public.v_webhook_inbox_directory dir
+        ON dir.id = (r.result->>'webhook_id')::UUID
+     ORDER BY r.mutation
+  $$,
+  $$
+    SELECT r.mutation, wr.id, wr.workflow_status::TEXT
+      FROM _mutation_results r
+      JOIN public.workflow_runs wr
+        ON wr.id = (r.result->>'followup_workflow_run_id')::UUID
+     ORDER BY r.mutation
+  $$,
+  'cancel and reschedule directory rows expose the persisted follow-up workflow'
 );
 
 SELECT ok(
