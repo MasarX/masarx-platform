@@ -1,3 +1,9 @@
+import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
+
+export function marketplaceReferenceLabel(kind: string, value: unknown, label: unknown) {
+  return stringValue(label) ?? (buildLookupFriendlyLabel(kind, value) || null);
+}
+
 export function normalizeObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

@@ -23,6 +23,7 @@ import { useReadRegistry } from "./read-registry-client";
 import { copyTextToClipboard } from "./clipboard";
 import { isTrustedUrl, resolveBaseOrigin } from "./url-guard";
 import { reportUiEvent } from "./reporting";
+import { clearFormDrafts } from "./use-form-draft";
 
 type ContextStripProps = {
   organizationId?: string | null;
@@ -286,10 +287,15 @@ export function ContextStrip({
   );
   const safeScopeRequestHrefWithRequestId =
     safeScopeRequestNavigation?.href ?? null;
+  React.useEffect(() => {
+    if (userId === null && signOutHref === null) clearFormDrafts();
+  }, [userId, signOutHref]);
+
   const handleSignOut = React.useCallback(() => {
     if (!safeSignOutNavigation) {
       return;
     }
+    clearFormDrafts();
     reportUiEvent({
       type: "ui.context_strip.sign_out.start",
       timestamp: new Date().toISOString(),

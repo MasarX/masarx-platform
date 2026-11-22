@@ -13,6 +13,7 @@ import {
   ShipmentCurrentValues,
 } from "./shipment-amend-cancel-form";
 import { Button } from "./button";
+import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
 import { formatUiError } from "./utils";
 import { getShipmentModifyAllowedFields } from "./shipment-amend-cancel-policy";
 import { resolveSafeHref } from "./url-guard";
@@ -358,14 +359,15 @@ export async function ShipmentAmendCancelPage({
   const payload = recordValue(data);
   const options = normalizeOptions(payload);
   const currentValues = normalizeCurrentValues(recordValue(payload?.current_values));
-  const trackingNumber = currentValues.trackingNumber ?? shipmentId;
+  const trackingNumber = String(currentValues.trackingNumber ?? "").trim();
+  const shipmentIdentifier = trackingNumber || buildLookupFriendlyLabel("Shipment", shipmentId);
 
   return (
     <PageContainer className="space-y-6">
       <PageHeader
         title="Shipment amend / cancel"
         description="Submit one authenticated shipment mutation. The engine stays canonical and the temporary lock comes only from shipment_operation_policy."
-        eyebrow={trackingNumber}
+        eyebrow={shipmentIdentifier}
         actions={
           shipmentsHref ? (
             <Button asChild variant="soft" size="sm">

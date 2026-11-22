@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   createUiClient,
   type UiScope,
+  type UiScopeOption,
   type UiCreateShipmentResult,
 } from "@masarx/api";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
@@ -12,6 +13,7 @@ import { Button } from "./button";
 import { Input } from "./input";
 import { Select } from "./select";
 import { useToast } from "./use-toast";
+import { resolveOrganizationDisplayLabel, resolveScopeDisplayLabel } from "./shipment-create-lookup-options";
 import { formatUiError } from "./utils";
 import { resolveUiRpcTimeoutMs, withTimeout } from "./promise-timeout";
 import { useUnsavedChangesGuard } from "./use-unsaved-changes";
@@ -24,6 +26,8 @@ type ShipmentManualCreateFormProps = {
   requirePersistedReadback?: boolean;
   returnTo?: string | null;
   organizationId?: string | null;
+  organizationName?: string | null;
+  scopeOptions?: UiScopeOption[] | null;
   accessScope?: UiScope | null;
   capabilities?: string[] | null;
   capabilityWrite?: string | null;
@@ -75,6 +79,8 @@ export function ShipmentManualCreateForm({
   requirePersistedReadback = false,
   returnTo,
   organizationId,
+  organizationName,
+  scopeOptions,
   accessScope,
   capabilities,
   capabilityWrite,
@@ -306,6 +312,7 @@ export function ShipmentManualCreateForm({
     trackingNumber,
   ]);
 
+  const displayScope = resolveScopeDisplayLabel(accessScope, scopeOptions);
   const showClientField = scopeType !== "client" && scopeType !== "sender";
   const showSenderField = scopeType !== "sender";
 
@@ -315,14 +322,14 @@ export function ShipmentManualCreateForm({
         <div>
           <div className="text-xs uppercase tracking-wide text-ui-muted/70">Organization</div>
           <div data-testid={`${resolvedTestIdPrefix}-organization`}>
-            {organizationId?.trim() || "Unavailable"}
+            {resolveOrganizationDisplayLabel({ organizationId, organizationName }) || "Unavailable"}
           </div>
         </div>
         <div>
           <div className="text-xs uppercase tracking-wide text-ui-muted/70">Session scope</div>
           <div data-testid={`${resolvedTestIdPrefix}-scope`}>
             {scopeLabel(accessScope)}
-            {scopeId ? ` - ${scopeId}` : ""}
+            {displayScope ? ` - ${displayScope}` : ""}
           </div>
         </div>
       </div>

@@ -39,6 +39,8 @@ import { PageHeader } from "./page-header";
 import { PageContainer } from "./page-container";
 import { Section } from "./section";
 import { formatReferenceValue } from "./resource-utils";
+import { fetchResourceMetrics } from "./metrics-fetch";
+import { DashboardMetricsPanel } from "./dashboard-metrics-panel";
 import { formatUiError, cn } from "./utils";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import { resolveSafeAppBasePath, resolveSafeHref } from "./url-guard";
@@ -108,6 +110,12 @@ const formatValue = (
   if (!value) return t("unknown");
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : t("unknown");
+};
+
+const stringValue = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 };
 
 const formatCount = (value: number | null | undefined) => {
@@ -208,8 +216,10 @@ function resolveScopeLabel(
   const scope = me?.access_scope;
   const scopeType = normalizeUiScopeType(scope?.scope_type ?? null);
   if (!scopeType) return t("unknown");
-  const labelRaw = scope?.scope_label ?? scope?.scope_id ?? "";
-  const label = typeof labelRaw === "string" ? labelRaw.trim() : "";
+  const scopeId = stringValue(scope?.scope_id);
+  const label =
+    stringValue(scope?.scope_label) ??
+    (scopeId ? formatReferenceValue(scopeId) : null);
   if (scopeType === "global" && !label) return scopeType;
   return t("scopeLabel", { scopeType, scopeLabel: formatValue(label, t) });
 }
@@ -281,55 +291,6 @@ function normalizeDashboardResourceKey(resourceKey?: string | null) {
       ? resourceKey.trim().toLowerCase()
       : "";
   return normalized || null;
-}
-
-async function resolveResourceCounts(
-  ui: ReturnType<typeof createUiServerClient>,
-  resourceKeys: string[],
-) {
-  const counts = new Map<string, number | null>();
-  if (resourceKeys.length === 0) return counts;
-
-  const applyCount = (
-    resource: string | null | undefined,
-    total: number | null | undefined,
-  ) => {
-    const resourceKey = normalizeDashboardResourceKey(resource);
-    if (!resourceKey) return;
-    counts.set(
-      resourceKey,
-      Number.isFinite(total as number) ? Number(total) : null,
-    );
-  };
-
-  try {
-    const aggregated = await ui.dashboardMetrics(resourceKeys);
-    if (Array.isArray(aggregated?.metrics) && aggregated.metrics.length > 0) {
-      aggregated.metrics.forEach((metric) => {
-        applyCount(metric.resource, metric.total ?? null);
-      });
-      resourceKeys.forEach((resourceKey) => {
-        if (!counts.has(resourceKey)) counts.set(resourceKey, null);
-      });
-      return counts;
-    }
-  } catch {
-    // Fall back to per-resource listing.
-  }
-
-  await Promise.all(
-    resourceKeys.map(async (resourceKey) => {
-      try {
-        const list = await ui.listResource(resourceKey, {}, 1, 0, null);
-        const total =
-          typeof list.total === "number" ? list.total : list.items.length;
-        applyCount(resourceKey, total);
-      } catch {
-        counts.set(resourceKey, null);
-      }
-    }),
-  );
-  return counts;
 }
 
 function filterReadableMetricResourceKeys(
@@ -489,7 +450,7 @@ export async function DashboardPage({
   const readAssignedReviews =
     Boolean(userId) && metricResourceKeys.includes("manual_review_tasks");
   const [resourceCounts, shipmentReporting, assignedReviewCount] = await Promise.all([
-    resolveResourceCounts(ui, metricResourceKeys),
+    fetchResourceMetrics(ui, metricResourceKeys),
     resolveShipmentReporting(dashboardConfig.shipmentReporting, appKey, readRegistry, capabilities, ui.resourceMetrics),
     readAssignedReviews
       ? ui
@@ -582,17 +543,14 @@ export async function DashboardPage({
             {shipmentReporting.unavailable ? (
               <p role="status" className="text-sm text-ui-muted">{t("reporting.partial")}</p>
             ) : null}
-            <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {shipmentReporting.cards.map((card) => (
-                <div key={card.key} className="rounded-lg border border-ui-border/60 p-4">
-                  <dt className="text-sm text-ui-muted">{t(`reporting.${card.key}`)}</dt>
-                  <dd className="text-2xl font-semibold">
-                    {card.value === null ? t("reporting.unavailable")
-                      : card.percent ? `${card.value}%` : card.value.toLocaleString(locale)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
+            <DashboardMetricsPanel
+              kpis={shipmentReporting.cards.map((card) => ({
+                title: t(`reporting.${card.key}`),
+                value: card.value === null ? t("reporting.unavailable")
+                  : card.percent ? `${card.value}%` : card.value.toLocaleString(locale),
+              }))}
+              donutData={[]}
+            />
             {shipmentReporting.statuses.length > 0 ? (
               <>
                 <h3 className="mt-4 font-semibold">{t("reporting.breakdown")}</h3>

@@ -5,7 +5,7 @@ import { createUiServerClient } from "@masarx/api/server";
 import { Badge } from "./badge";
 import { PageHeader } from "./page-header";
 import { Section } from "./section";
-import { normalizeArray, normalizeObject, stringValue } from "./marketplace-page-utils";
+import { marketplaceReferenceLabel, normalizeArray, normalizeObject, stringValue } from "./marketplace-page-utils";
 
 type MarketplacePrivatePoolsPageProps = {
   appBasePath: string;
@@ -71,13 +71,13 @@ export async function MarketplacePrivatePoolsPage({
                       {stringValue(entry.request_kind_key) ? <Badge>{stringValue(entry.request_kind_key)}</Badge> : null}
                     </div>
                     <div className="text-sm font-medium text-ui-ink">
-                      {stringValue(entry.request_title) ?? (requestId || "Marketplace request")}
+                      {marketplaceReferenceLabel("Request", requestId, entry.request_title) ?? "Marketplace request"}
                     </div>
                     <div className="text-sm text-ui-muted">
-                      Requester: {stringValue(entry.requester_organization_name) ?? stringValue(entry.requester_organization_id) ?? "Unknown requester"}
+                      Requester: {marketplaceReferenceLabel("Organization", entry.requester_organization_id, entry.requester_organization_name) ?? "Unknown requester"}
                     </div>
                     <div className="text-sm text-ui-muted">
-                      Supplier: {stringValue(entry.supplier_organization_name) ?? (supplierOrganizationId || "Unknown supplier")}
+                      Supplier: {marketplaceReferenceLabel("Organization", supplierOrganizationId, entry.supplier_organization_name) ?? "Unknown supplier"}
                     </div>
                   </div>
                   <div className="flex items-start justify-start lg:justify-end">

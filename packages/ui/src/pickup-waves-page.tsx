@@ -3,6 +3,7 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { createUiServerClient } from "@masarx/api/server";
 import { Badge } from "./badge";
+import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
 import { ContextNotice } from "./context-notice";
 import { EmptyState } from "./empty-state";
 import { PageContainer } from "./page-container";
@@ -351,7 +352,7 @@ export async function PickupWavesPage({
                     <Badge tone="accent">{`${shipments.length} shipment${shipments.length === 1 ? "" : "s"}`}</Badge>
                   </div>
                   <div className="mt-3 text-sm font-medium text-ui-ink">
-                    {routeRunId}
+                    {stringValue(row.name) ?? buildLookupFriendlyLabel("Route", routeRunId)}
                   </div>
                   <div className="mt-2 text-sm text-ui-muted">
                     {formatDateTimeRange(

@@ -1,4 +1,5 @@
 "use client";
+import { resolveLookupOptionLabel } from "./lookup-friendly-label";
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
@@ -375,7 +376,7 @@ export function AccessPolicyEditor({
           setConfirmAction({
             type: "role",
             key: role.key,
-            label: role.label ?? role.key,
+            label: resolveLookupOptionLabel(role.key, role.label),
           })
         }
       />
@@ -394,7 +395,7 @@ export function AccessPolicyEditor({
           setConfirmAction({
             type: "capability",
             key: capability.key,
-            label: capability.label ?? capability.key,
+            label: resolveLookupOptionLabel(capability.key, capability.label),
           })
         }
       />

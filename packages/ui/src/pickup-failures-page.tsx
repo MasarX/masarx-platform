@@ -2,6 +2,7 @@ import "server-only";
 
 import { createUiServerClient } from "@masarx/api/server";
 import { Badge } from "./badge";
+import { resolveLookupOptionLabel } from "./lookup-friendly-label";
 import { ContextNotice } from "./context-notice";
 import { EmptyState } from "./empty-state";
 import { PageContainer } from "./page-container";
@@ -118,8 +119,8 @@ export async function PickupFailuresPage({
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     {formatStatusBadge(stringValue(row.status))}
-                    {stringValue(row.failure_reason) ? (
-                      <Badge tone="danger">{stringValue(row.failure_reason) ?? ""}</Badge>
+                    {stringValue(row.failure_reason) || stringValue(row.failure_reason_label) ? (
+                      <Badge tone="danger">{resolveLookupOptionLabel(row.failure_reason, row.failure_reason_label)}</Badge>
                     ) : null}
                     {tasks.length > 0 ? (
                       <Badge tone="warning">{`${tasks.length} follow-up task${tasks.length === 1 ? "" : "s"}`}</Badge>
