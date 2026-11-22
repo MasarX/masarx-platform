@@ -73,11 +73,12 @@ async function evaluate(get, env, record) {
         const path = `/actions/runs/${run.id}/attempts/${attempt}/jobs?`;
         for await (const job of pages(get, path, 'jobs')) {
           if (job.name !== 'database' || job.status !== 'completed') continue;
-          const steps = Array.isArray(job.steps) ? job.steps : [];
-          const marker = steps.find(step => step.name === attemptMarker);
-          const legacy = steps.find(step => step.name === legacyDeploy);
+          // Missing step data cannot rule out an apply attempt.
+          const steps = Array.isArray(job.steps) ? job.steps : undefined;
+          const marker = steps?.find(step => step.name === attemptMarker);
+          const legacy = steps?.find(step => step.name === legacyDeploy);
           // Cancellation can prevent the marker from running after the combined step starts.
-          const attempted = ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
+          const attempted = !steps || ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
             || marker?.conclusion === 'success' || (!marker && legacy?.conclusion === 'failure');
           if (!attempted) continue;
 
@@ -159,8 +160,14 @@ async function guard(env, fetchRequest = fetch) {
       signal: AbortSignal.timeout(15_000),
     });
     if (allowNotFound && response.status === 404) return undefined;
-    if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status} for ${path.split('?')[0]}`);
-    return response.json();
+    const endpoint = path.split('?')[0];
+    if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status} for ${endpoint}`);
+    try {
+      return await response.json();
+    } catch (error) {
+      if (error?.name === 'SyntaxError') throw new Error(`invalid JSON from ${endpoint}`);
+      throw error;
+    }
   };
   const record = decision => {
     appendFileSync(env.GITHUB_STEP_SUMMARY, `- ${decision}\n`);
