@@ -23,7 +23,7 @@ function makeRun(id, count, skipped = 0) {
   };
 }
 
-function harness(runs, once = true) {
+function harness(runs, once = true, runId) {
   const locks = new Set();
   const events = [];
   const state = { runs, noProgress: false, cancel: false, processError: false, uploadError: false };
@@ -32,8 +32,9 @@ function harness(runs, once = true) {
     events.push(name);
     if (name === 'register_artifact_v1') return { data: { artifact_id: 'error-artifact' }, error: null };
     if (name === 'ui_create_mapping_operation_report_v1') return { data: { id: 'fallback-report' }, error: null };
-    if (name === 'claim_next_tabular_import_task_v1') {
-      const run = runs.find((item) => ['open', 'queued'].includes(item.task_status) && ['queued', 'processing'].includes(item.status));
+    if (name === 'claim_next_tabular_import_task_v1' || name === 'claim_tabular_import_task_v1') {
+      const run = runs.find((item) => (!args.p_run_id || item.id === args.p_run_id)
+        && ['open', 'queued'].includes(item.task_status) && ['queued', 'processing'].includes(item.status));
       if (!run) return { data: null, error: null };
       run.task_status = 'in_progress';
       run.status = 'processing';
@@ -95,7 +96,7 @@ function harness(runs, once = true) {
     };
   }
   const trace = jest.fn();
-  const worker = vm.runInNewContext(`${source.slice(0, source.indexOf('\nmain().catch'))}\n({ main, processClaim, finalizeRun });`, {
+  const worker = vm.runInNewContext(`${source.slice(0, source.indexOf('\nmain().catch'))}\n({ main, processClaim, finalizeRun, buildErrorCsv });`, {
     require: (name) => {
       if (name === 'pg') return { Client: function () { return pgClient(); } };
       if (name === '@supabase/supabase-js') return { createClient: () => ({ rpc, storage: { from: () => ({ upload }) } }) };
@@ -103,11 +104,30 @@ function harness(runs, once = true) {
       if (name === '../utils/trace-context') return { resolveExecutionContext: () => ({ correlationId: 'correlation' }), buildTraceHeaders: () => ({}), emitTraceWithContext: trace };
       throw new Error(`Unexpected dependency ${name}`);
     },
-    process: { env: { SUPABASE_URL: 'https://example.test', SUPABASE_SECRET_KEY: 'synthetic', DATABASE_URL: 'synthetic' }, argv: ['node', 'worker', ...(once ? ['--once'] : [])], pid: 1 },
+    process: {
+      env: { SUPABASE_URL: 'https://example.test', SUPABASE_SECRET_KEY: 'synthetic', DATABASE_URL: 'synthetic' },
+      argv: ['node', 'worker', ...(once ? ['--once'] : []), ...(runId ? ['--run-id', runId] : [])],
+      pid: 1,
+    },
     Buffer, console, setTimeout,
   });
   return { worker, state, rpc, upload, links, queries, events, trace, pgClient };
 }
+
+test.each([
+  ['=HYPERLINK("https://example.test","Open")', "\"'=HYPERLINK(\"\"https://example.test\"\",\"\"Open\"\")\""],
+  ['+1', "'+1"],
+  ['-2', "'-2"],
+  ['@x', "'@x"],
+  ['\tSample', "'\tSample"],
+  ['\rSample', "\"'\rSample\""],
+])('neutralizes spreadsheet formulas in error export cells (%#)', (value, expected) => {
+  const { worker } = harness([]);
+  const run = { summary: { headers: ['Value'] } };
+  const rows = [{ row_number: 1, original_row: { Value: value } }];
+
+  expect(worker.buildErrorCsv(run, rows)).toContain(`\n${expected},1,`);
+});
 
 test('one owned claim drains 501 rows across canonical snapshots without a remaining property', async () => {
   const run = makeRun('large', 501);
@@ -122,6 +142,38 @@ test('one owned claim drains 501 rows across canonical snapshots without a remai
   expect(run.task_status).toBe('completed');
   expect(h.rpc.mock.calls.filter(([name]) => name === 'process_tabular_import_run_v1')).toHaveLength(4);
   expect(h.rpc.mock.calls.filter(([name]) => name === 'claim_next_tabular_import_task_v1')).toHaveLength(1);
+});
+
+test('an exact run skips an earlier queued run', async () => {
+  const earlier = makeRun('earlier', 1);
+  const target = makeRun('ac59b6cf-e2d2-4fb8-98bf-187ccffccc86', 1);
+  const h = harness([earlier, target], true, target.id);
+
+  await h.worker.main();
+
+  expect(h.rpc).toHaveBeenNthCalledWith(1, 'claim_tabular_import_task_v1',
+    { p_worker_id: 'tabular-import-worker-1', p_run_id: target.id });
+  expect(target.status).toBe('completed');
+  expect(earlier.status).toBe('queued');
+});
+
+test('an unavailable exact run leaves unrelated terminal exports alone', async () => {
+  const earlier = makeRun('earlier', 0, 1);
+  const h = harness([earlier], true, 'ac59b6cf-e2d2-4fb8-98bf-187ccffccc86');
+  await h.rpc('process_tabular_import_run_v1', { p_run_id: earlier.id });
+
+  await expect(h.worker.main()).rejects.toThrow('The requested import run is neither claimable nor ready to finalize.');
+  expect(h.upload).not.toHaveBeenCalled();
+  expect(earlier.error_artifact_id).toBeUndefined();
+});
+
+test('a mismatched claim is rejected before it can run or finalize', async () => {
+  const h = harness([], true, 'ac59b6cf-e2d2-4fb8-98bf-187ccffccc86');
+  h.rpc.mockResolvedValueOnce({ data: { run_id: 'unrelated' }, error: null });
+
+  await expect(h.worker.main()).rejects.toThrow('The worker claim returned a different import run.');
+  expect(h.rpc).toHaveBeenCalledTimes(1);
+  expect(h.upload).not.toHaveBeenCalled();
 });
 
 test('a small skipped-row kickoff gets its export on the idle path without processing again', async () => {

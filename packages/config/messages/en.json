@@ -153,6 +153,9 @@
       }
     },
     "tabularFile": {
+      "previewColumnCount": "Showing {shown} of {total} columns",
+      "previewShowFirstColumns": "Show first {count} columns",
+      "previewShowAllColumns": "Show all columns",
       "fileSize": "Choose a file no larger than 10 MiB.",
       "rows": "The file exceeds 10,000 data rows. Split it into smaller files.",
       "columns": "The file exceeds 256 columns.",

@@ -2432,7 +2432,12 @@ export function ResourceImportPage({
             title="Spreadsheet preview"
             description="The importer automatically inspects headers and sample rows before it stages the dry-run."
           >
-            <SpreadsheetPreview columns={parsedFile.headers} sampleRows={parsedFile.rows.slice(0, 20)} />
+            <SpreadsheetPreview
+              columns={parsedFile.headers}
+              sampleRows={parsedFile.rows}
+              columnLimit={presentation === "drawer" ? 12 : 20}
+              sampleRowLimit={presentation === "drawer" ? 4 : 5}
+            />
           </Section>
         </React.Suspense>
       ) : null}
