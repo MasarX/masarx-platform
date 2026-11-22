@@ -18,6 +18,7 @@ type MarketplaceRequestCreatePageProps = {
   requestsHref: string;
   testIdPrefix: string;
   actionSource?: string;
+  privatePoolLookup?: boolean;
 };
 
 function normalizeObject(value: unknown): Record<string, unknown> | null {
@@ -88,6 +89,7 @@ export async function MarketplaceRequestCreatePage({
   requestsHref,
   testIdPrefix,
   actionSource = "portal.marketplace.request_create",
+  privatePoolLookup = false,
 }: MarketplaceRequestCreatePageProps) {
   const ui = createUiServerClient();
   const me = await ui.me().catch(() => null);
@@ -99,7 +101,7 @@ export async function MarketplaceRequestCreatePage({
       },
       includeInactive: false,
     }).catch(() => null),
-    loadPrivatePoolOptions(ui),
+    privatePoolLookup ? loadPrivatePoolOptions(ui) : undefined,
   ]);
 
   const requestKinds = normalizeRequestKinds(catalog);
@@ -139,20 +141,25 @@ export async function MarketplaceRequestCreatePage({
       return { status: "error", message: "Payload must be a JSON object." };
     }
 
-    if (privatePoolCsv) {
-      return { status: "error", message: "Private pool selection must come from the canonical lookup." };
-    }
-    const selection = parseJsonValue(String(formData.get("private_pool_json") ?? ""), []);
-    if (!selection.ok || !Array.isArray(selection.value)
-        || selection.value.some((value) => typeof value !== "string" || !value.trim())) {
-      return { status: "error", message: "Private pool selection is invalid." };
-    }
-    const privatePool = [...new Set(selection.value.map((value: string) => value.trim()))];
-    if (privatePool.length) {
-      const visibleIds = new Set((await loadPrivatePoolOptions(uiAction)).map(({ organizationId }) => organizationId));
-      if (privatePool.some((id) => !visibleIds.has(id))) {
+    let privatePool: string[];
+    if (privatePoolLookup) {
+      if (privatePoolCsv) {
         return { status: "error", message: "Private pool selection must come from the canonical lookup." };
       }
+      const selection = parseJsonValue(String(formData.get("private_pool_json") ?? ""), []);
+      if (!selection.ok || !Array.isArray(selection.value)
+          || selection.value.some((value) => typeof value !== "string" || !value.trim())) {
+        return { status: "error", message: "Private pool selection is invalid." };
+      }
+      privatePool = [...new Set(selection.value.map((value: string) => value.trim()))];
+      if (privatePool.length) {
+        const visibleIds = new Set((await loadPrivatePoolOptions(uiAction)).map(({ organizationId }) => organizationId));
+        if (privatePool.some((id) => !visibleIds.has(id))) {
+          return { status: "error", message: "Private pool selection must come from the canonical lookup." };
+        }
+      }
+    } else {
+      privatePool = privatePoolCsv.split(",").map((entry) => entry.trim()).filter(Boolean);
     }
 
     let createResult: Record<string, unknown>;

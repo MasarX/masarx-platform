@@ -7,5 +7,6 @@ export default withConsoleConfig(({ appBasePath }) => (
     requestsHref={`${appBasePath}/marketplace/requests`}
     testIdPrefix="console-marketplace-request-create"
     actionSource="console.marketplace.request_create"
+    privatePoolLookup
   />
 ));

@@ -23,6 +23,13 @@ jest.mock("@masarx/api/server", () => ({
 }));
 
 const mockedCreateUiServerClient = createUiServerClient as jest.Mock;
+const consolePage = {
+  appBasePath: "/console",
+  requestsHref: "/console/marketplace/requests",
+  testIdPrefix: "console-marketplace-request-create",
+  actionSource: "console.marketplace.request_create",
+  privatePoolLookup: true,
+};
 
 function buildUiClientMock() {
   return {
@@ -77,11 +84,7 @@ describe("MarketplaceRequestCreatePage", () => {
     const uiClient = buildUiClientMock();
     mockedCreateUiServerClient.mockReturnValue(uiClient);
 
-    const node = await MarketplaceRequestCreatePage({
-      appBasePath: "/portal",
-      requestsHref: "/portal/marketplace/requests",
-      testIdPrefix: "portal-marketplace-request-create",
-    });
+    const node = await MarketplaceRequestCreatePage(consolePage);
 
     render(node as React.ReactElement);
 
@@ -110,11 +113,7 @@ describe("MarketplaceRequestCreatePage", () => {
     const uiClient = buildUiClientMock();
     mockedCreateUiServerClient.mockReturnValue(uiClient);
 
-    const node = await MarketplaceRequestCreatePage({
-      appBasePath: "/portal",
-      requestsHref: "/portal/marketplace/requests",
-      testIdPrefix: "portal-marketplace-request-create",
-    });
+    const node = await MarketplaceRequestCreatePage(consolePage);
 
     render(node as React.ReactElement);
     expect(capturedMarketplaceCreateAction).not.toBeNull();
@@ -134,7 +133,7 @@ describe("MarketplaceRequestCreatePage", () => {
         title: "Private pool request",
         privatePool: ["org-fast", "org-blue"],
         metadata: expect.objectContaining({
-          source: "portal.marketplace.request_create",
+          source: consolePage.actionSource,
         }),
       }),
     );
@@ -144,12 +143,7 @@ describe("MarketplaceRequestCreatePage", () => {
     const uiClient = buildUiClientMock();
     mockedCreateUiServerClient.mockReturnValue(uiClient);
 
-    const node = await MarketplaceRequestCreatePage({
-      appBasePath: "/console",
-      requestsHref: "/console/marketplace/requests",
-      testIdPrefix: "console-marketplace-request-create",
-      actionSource: "console.marketplace.request_create",
-    });
+    const node = await MarketplaceRequestCreatePage(consolePage);
 
     render(node as React.ReactElement);
     expect(capturedMarketplaceCreateAction).not.toBeNull();
@@ -172,25 +166,24 @@ describe("MarketplaceRequestCreatePage", () => {
     );
   });
 
-  it("fails closed when a legacy free-text private-pool csv payload is submitted", async () => {
+  it.each([
+    ["private_pool_csv", "org-fast,org-blue"],
+    ["private_pool_json", '["org-outside"]'],
+  ])("rejects unapproved organizations submitted through %s", async (name, value) => {
     const uiClient = buildUiClientMock();
     mockedCreateUiServerClient.mockReturnValue(uiClient);
 
-    const node = await MarketplaceRequestCreatePage({
-      appBasePath: "/portal",
-      requestsHref: "/portal/marketplace/requests",
-      testIdPrefix: "portal-marketplace-request-create",
-    });
+    const node = await MarketplaceRequestCreatePage(consolePage);
 
     render(node as React.ReactElement);
     expect(capturedMarketplaceCreateAction).not.toBeNull();
 
     const formData = new FormData();
     formData.set("request_kind_key", "capacity_block");
-    formData.set("title", "Legacy csv request");
+    formData.set("title", "Invalid private pool request");
     formData.set("summary", "Should fail closed.");
     formData.set("payload_json", "{}");
-    formData.set("private_pool_csv", "org-fast,org-blue");
+    formData.set(name, value);
 
     const result = await capturedMarketplaceCreateAction?.({ status: "idle" }, formData);
 

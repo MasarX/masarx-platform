@@ -47,7 +47,7 @@ function normalizeObject(value: unknown): Record<string, unknown> {
 export function MarketplaceRequestCreateForm({
   action,
   requestKinds,
-  privatePoolOptions = [],
+  privatePoolOptions,
   defaultKindKey,
   testIdPrefix,
 }: MarketplaceRequestCreateFormProps) {
@@ -103,7 +103,6 @@ export function MarketplaceRequestCreateForm({
   return (
     <form action={formAction} className="space-y-6" data-testid={`${testIdPrefix}-form`}>
       <input type="hidden" name="payload_json" value={JSON.stringify(payload ?? {})} />
-      <input type="hidden" name="private_pool_json" value={JSON.stringify(privatePoolIds)} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <label className="space-y-2 text-sm text-ui-ink">
@@ -152,17 +151,33 @@ export function MarketplaceRequestCreateForm({
         />
       </label>
 
-      <fieldset className="space-y-2 text-sm text-ui-ink" data-testid={`${testIdPrefix}-private-pool`}>
-        <legend className="text-xs tracking-wide text-ui-muted">Private pool organizations</legend>
-        <RelationField
-          mode="multi"
-          value={privatePoolIds}
-          onChange={(value) => setPrivatePoolIds(Array.isArray(value) ? value : [])}
-          options={privatePoolOptions.map(({ organizationId, label }) => ({ value: organizationId, label }))}
-          disabled={isPending || privatePoolOptions.length === 0}
-          placeholder="Select visible marketplace suppliers"
-        />
-      </fieldset>
+      {privatePoolOptions ? (
+        <fieldset className="space-y-2 text-sm text-ui-ink" data-testid={`${testIdPrefix}-private-pool`}>
+          <legend className="text-xs tracking-wide text-ui-muted">Private pool organizations</legend>
+          <input type="hidden" name="private_pool_json" value={JSON.stringify(privatePoolIds)} />
+          <RelationField
+            mode="multi"
+            value={privatePoolIds}
+            onChange={(value) => setPrivatePoolIds(Array.isArray(value) ? value : [])}
+            options={privatePoolOptions.map(({ organizationId, label }) => ({ value: organizationId, label }))}
+            disabled={isPending || privatePoolOptions.length === 0}
+            placeholder="Select visible marketplace suppliers"
+          />
+        </fieldset>
+      ) : (
+        <label className="space-y-2 text-sm text-ui-ink">
+          <span className="text-xs uppercase tracking-wide text-ui-muted">
+            Private pool organization IDs
+          </span>
+          <Textarea
+            name="private_pool_csv"
+            rows={3}
+            placeholder="org-id-1, org-id-2"
+            disabled={isPending}
+            data-testid={`${testIdPrefix}-private-pool`}
+          />
+        </label>
+      )}
 
       <div className="space-y-3">
         <div className="text-xs uppercase tracking-wide text-ui-muted">
