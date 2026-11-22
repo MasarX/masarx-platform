@@ -13,7 +13,6 @@ name: CodeQL
 
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
   group: codeql-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
@@ -27,6 +26,9 @@ jobs:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
