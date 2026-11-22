@@ -454,6 +454,7 @@ const DATABASE_URL_PROSE = /\bd[a4]t[a4]b[a4][s5][e3][\s+/*\u00b7]*url\b/i;
 const PHRASE_QUALIFIER = /seed|recovery|pass|secret/;
 const PHRASE_COMPONENT = new RegExp(`^(?:${PHRASE_QUALIFIER.source})$`);
 const STACK_KEY = /^(?:remember(?:me)?|csrf|xsrf|crumb|antiforgery|aspxauth|authtok|bindpw|rootpw|masterauth|sessionsso|jsessionidsso|smsession|oobcode|dockerconfigjson)$/;
+// Split the redaction term because client lint forbids the literal role name.
 const JOINED_PRIVILEGED_ROLE = "service" + "role";
 const STACK_KEY_PREFIX = /^(?:\.aspnetcore\.|wordpress_(?:logged_in|sec)_|aspsessionid|s?sess[0-9a-f]{16}|castgc|iplanetdirectorypro)/;
 const PAT_PROVIDER = /^(?:github|gh|gitlab|glpat)$/;
@@ -500,8 +501,7 @@ function hasSensitiveTerm(text: string) {
     if (parts.some(part => part === "sess" || SENSITIVE_COMPONENT.test(part) || STACK_KEY.test(part))) return true;
     const joined = segments.join("");
     if (STACK_KEY.test(joined) || (joined.includes("oauth2") && joined.includes("proxy"))) return true;
-    if (parts.includes(JOINED_PRIVILEGED_ROLE) || joined.endsWith(JOINED_PRIVILEGED_ROLE) ||
-        components.some((component, index) => component === "service" && components[index + 1] === "role")) return true;
+    if (parts.includes(JOINED_PRIVILEGED_ROLE) || joined === JOINED_PRIVILEGED_ROLE) return true;
     if (parts.includes("pat") && parts.some(part => PAT_PROVIDER.test(part))) return true;
     if (joined.endsWith("sid") || /^(?:conn|connstr|connectionstring|dsn)$/.test(joined)) return true;
     if (SENSITIVE_SUFFIX.test(joined) && !ORDINARY_WORD.test(segments.at(-1) ?? "")) return true;
