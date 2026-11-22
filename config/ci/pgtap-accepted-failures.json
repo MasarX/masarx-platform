@@ -14,17 +14,17 @@
       "request-id sequence has no PUBLIC ACL",
       "executor cannot advance or reset request identities"
     ],
-    "reason": "Supabase-owned pg_net extension grants (tables and request-id sequence) cannot be changed per project; secret-bearing dispatch moves to the trusted-worker path",
-    "owner": "repository lead",
-    "expires": "2026-12-01"
+    "reason": "Accept only the verified, non-grantable supabase_admin grants to PUBLIC that the project role cannot revoke. Scope is limited to SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on the two pg_net tables and SELECT, USAGE and UPDATE on the request-id sequence. Approval requires evidence that net and cron remain outside the Data API, that clients and the executor have no unrestricted SQL or RPC path to the objects, and that credential-bearing dispatch uses the trusted worker. SQL-capable roles with schema access remain a residual risk. The Delivery Lead owns the exception and will recheck it by 2027-02-28, or sooner after a platform or extension upgrade or a change to schema exposure or role membership. The recheck must be tracked by a board item due 2027-02-28.",
+    "owner": "Delivery Lead",
+    "expires": "2027-02-28"
   },
   {
     "file": "0zz_extension_public_acl_v1.sql",
     "assertions": [
       "cron history retains no effective executor writes"
     ],
-    "reason": "Supabase-owned default grant on cron.job_run_details (grantor supabase_admin); not revocable by project migrations",
-    "owner": "repository lead",
-    "expires": "2026-12-01"
+    "reason": "Accept only the verified, non-grantable supabase_admin grants to PUBLIC that the project role cannot revoke. Scope is limited to DELETE on cron.job_run_details. Approval requires evidence that net and cron remain outside the Data API, that clients and the executor have no unrestricted SQL or RPC path to the objects, and that credential-bearing dispatch uses the trusted worker. SQL-capable roles with schema access remain a residual risk. The Delivery Lead owns the exception and will recheck it by 2027-02-28, or sooner after a platform or extension upgrade or a change to schema exposure or role membership. The recheck must be tracked by a board item due 2027-02-28.",
+    "owner": "Delivery Lead",
+    "expires": "2027-02-28"
   }
 ]
