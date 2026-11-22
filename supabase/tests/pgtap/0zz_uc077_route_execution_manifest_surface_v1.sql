@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(53);
+SELECT plan(55);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_uc077_route_execution_manifest_surface_v1()
 RETURNS SETOF TEXT
@@ -74,6 +74,10 @@ BEGIN
   RETURN NEXT has_view('public', 'route_runs_visible_v1', 'public.route_runs_visible_v1 exists');
   RETURN NEXT has_view('public', 'route_stops_visible_v1', 'public.route_stops_visible_v1 exists');
   RETURN NEXT ok(has_table_privilege('authenticated', 'api.route_runs', 'SELECT'), 'authenticated can select api.route_runs');
+  RETURN NEXT ok(NOT has_table_privilege('anon', 'api.route_runs', 'SELECT'), 'anonymous callers cannot select api.route_runs');
+  RETURN NEXT ok((SELECT COALESCE('security_invoker=true' = ANY(reloptions), FALSE)
+    FROM pg_catalog.pg_class WHERE oid = 'api.route_runs'::regclass),
+    'the live route projection runs with the caller security context');
   RETURN NEXT ok(has_table_privilege('authenticated', 'api.route_stops', 'SELECT'), 'authenticated can select api.route_stops');
   RETURN NEXT ok(has_function_privilege('authenticated', 'public.ui_route_run_assignment_projection_v1(uuid)', 'EXECUTE'), 'authenticated can execute ui_route_run_assignment_projection_v1');
   RETURN NEXT ok(has_function_privilege('authenticated', 'public.ui_route_run_execution_manifest_v1(uuid)', 'EXECUTE'), 'authenticated can execute ui_route_run_execution_manifest_v1');

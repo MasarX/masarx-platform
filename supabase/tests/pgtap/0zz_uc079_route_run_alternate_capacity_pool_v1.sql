@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(16);
+SELECT plan(22);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_uc079_route_run_alternate_capacity_pool_v1()
 RETURNS SETOF TEXT
@@ -35,6 +35,15 @@ BEGIN
   RETURN NEXT has_function('public', 'route_assignment_policy_default_v1', ARRAY[]::TEXT[], 'public.route_assignment_policy_default_v1 exists');
   RETURN NEXT has_function('public', 'route_assignment_policy_resolve_v1', ARRAY['jsonb'], 'public.route_assignment_policy_resolve_v1 exists');
   RETURN NEXT has_function('public', 'route_run_resolve_alternate_capacity_v1', ARRAY['uuid'], 'public.route_run_resolve_alternate_capacity_v1 exists');
+  RETURN NEXT is(public.route_assignment_policy_default_v1()#>>'{alternate_capacity,enabled}', 'false',
+    'automatic capacity is disabled in the SQL default');
+  RETURN NEXT is((SELECT examples FROM public.schema_registry
+    WHERE category = 'route_assignment_policy' AND version = 1),
+    jsonb_build_array(public.route_assignment_policy_default_v1()),
+    'the settings editor example uses the disabled SQL default');
+  RETURN NEXT is((SELECT cached_value#>>'{alternate_capacity,enabled}' FROM public.settings
+    WHERE category = 'route_assignment_policy' AND scope_type = 'global' AND scope_id IS NULL), 'false',
+    'the published global setting is disabled');
   RETURN NEXT ok(
     EXISTS (
       SELECT 1
@@ -174,6 +183,25 @@ BEGIN
        true
      )
    WHERE id = v_route.route_run_id;
+
+  PERFORM public.upsert_settings_value_v1(
+    'route_assignment_policy', 'global', NULL, '{"alternate_capacity":{"enabled":true}}'::jsonb,
+    1, 'Exercise a legacy global setting'
+  );
+  RETURN NEXT is((SELECT value#>>'{alternate_capacity,enabled}'
+    FROM public.route_assignment_policy_resolve_v1(jsonb_build_object('organization_id', v_org))), 'false',
+    'a legacy global opt-in cannot enable automatic capacity');
+
+  PERFORM public.upsert_settings_value_v1(
+    'route_assignment_policy', 'tenant', v_org, '{"alternate_capacity":{"enabled":true}}'::jsonb,
+    1, 'Opt the synthetic tenant into automatic capacity'
+  );
+  RETURN NEXT is((SELECT value#>>'{alternate_capacity,enabled}'
+    FROM public.route_assignment_policy_resolve_v1(jsonb_build_object('organization_id', v_org))), 'true',
+    'an explicit tenant setting enables automatic capacity');
+  RETURN NEXT is((SELECT value#>>'{alternate_capacity,enabled}'
+    FROM public.route_assignment_policy_resolve_v1(jsonb_build_object('organization_id', v_supplier_org))), 'false',
+    'another tenant cannot inherit the explicit opt-in');
 
   PERFORM set_config('request.jwt.claim.sub', v_operator::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_operator::text, 'role', 'authenticated')::text, true);
