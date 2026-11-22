@@ -111,17 +111,21 @@ jobs:
             renderer_unreadable pooler
           fi
           ca_file="$(mktemp)"
-          trap 'rm -f "$ca_file"' EXIT
+          psql_stderr=''
+          trap 'rm -f "$ca_file" "$psql_stderr"' EXIT
           if ! curl --fail --silent --max-time 20 --output "$ca_file" \
               https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt ||
             ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
               sha256sum --check --status; then
             renderer_unreadable ca
           fi
-          if ! claims="$(
+          psql_stderr="$(mktemp)"
+          psql_status=0
+          claims="$(
             PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
               PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
-              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 2>/dev/null <<'SQL'
+              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 2>"$psql_stderr" <<'SQL'
+          \set VERBOSITY sqlstate
           BEGIN READ ONLY;
           SET LOCAL statement_timeout = '8s';
           SET LOCAL search_path = pg_catalog;
@@ -148,8 +152,13 @@ jobs:
           ) FROM claims;
           COMMIT;
           SQL
-          )"; then
-            renderer_unreadable query
+          )" || psql_status=$?
+          if (( psql_status != 0 )); then
+            sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
+            if [[ -n "$sqlstate" ]]; then
+              renderer_unreadable "sqlstate-$sqlstate"
+            fi
+            renderer_unreadable "psql-exit-$psql_status"
           fi
           if ! lines="$(jq -ers '
             def epoch: strings | test("\\A[0-9]+\\z");
@@ -169,6 +178,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: dev
+    concurrency:
+      group: dev-renderer-jwt-mint
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
@@ -194,18 +206,29 @@ jobs:
           renderer_temp="$(mktemp -d)"
           export RENDERER_TOKEN_FILE="$renderer_temp/renderer.jwt"
           ca_file="$renderer_temp/root.crt"
-          trap 'rm -f "$RENDERER_TOKEN_FILE" "$ca_file"; rmdir "$renderer_temp"' EXIT
+          psql_stderr="$renderer_temp/psql.stderr"
+          trap 'rm -f "$RENDERER_TOKEN_FILE" "$ca_file" "$psql_stderr"; rmdir "$renderer_temp"' EXIT
           RENDERER_IAT="$(date +%s)"
           export RENDERER_IAT RENDERER_EXP="$((RENDERER_IAT + 7 * 24 * 60 * 60))"
           node <<'NODE'
           const { writeFileSync } = require('node:fs');
           const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
           const nowSec = Number(process.env.RENDERER_IAT);
-          const ttlSec = Number(process.env.RENDERER_EXP) - nowSec;
+          const expiresAt = Number(process.env.RENDERER_EXP);
           const { label_renderer_db_jwt: token } = buildEdgeDbJwtBundle({
-            secret: process.env.SUPABASE_JWT_SECRET, nowSec, ttlSec,
+            secret: process.env.SUPABASE_JWT_SECRET, nowSec, ttlSec: expiresAt - nowSec,
           });
           console.log('::add-mask::' + token);
+          try {
+            const { role, aud, sub, iat, exp } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+            if (role !== 'edge_label_renderer_role' || aud !== 'authenticated' || sub !== 'edge-function' ||
+                iat !== nowSec || exp !== expiresAt) {
+              throw new Error();
+            }
+          } catch {
+            console.error('::error::Minted renderer JWT claims verification failed.');
+            process.exit(1);
+          }
           writeFileSync(process.env.RENDERER_TOKEN_FILE, token, { mode: 0o600, flag: 'wx' });
           NODE
           unset SUPABASE_JWT_SECRET
@@ -229,10 +252,12 @@ jobs:
             exit 1
           fi
 
-          if ! claims="$(
+          psql_status=0
+          claims="$(
             PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
               PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
-              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 2>/dev/null <<'SQL'
+              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 2>"$psql_stderr" <<'SQL'
+          \set VERBOSITY sqlstate
           \set renderer_jwt `cat "$RENDERER_TOKEN_FILE"`
           BEGIN ISOLATION LEVEL SERIALIZABLE;
           SET LOCAL statement_timeout = '8s';
@@ -267,8 +292,14 @@ jobs:
           COMMIT;
           \echo :renderer_payload :renderer_digest
           SQL
-          )"; then
-            echo '::error::Renderer Vault credential update or readback failed.'
+          )" || psql_status=$?
+          if (( psql_status != 0 )); then
+            sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
+            reason="psql-exit-$psql_status"
+            if [[ -n "$sqlstate" ]]; then
+              reason="sqlstate-$sqlstate"
+            fi
+            printf 'renderer_jwt_mint=FAILED reason=%s\n' "$reason" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           printf '%s\n' "$claims" | node -e '
@@ -278,8 +309,7 @@ jobs:
               const [payload, digest] = readFileSync(0, "utf8").trim().split(" ");
               const { role, iat, exp } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
               const expectedDigest = createHash("sha256").update(readFileSync(process.env.RENDERER_TOKEN_FILE)).digest("hex");
-              if (role !== "edge_label_renderer_role" || iat !== Number(process.env.RENDERER_IAT) ||
-                  exp !== Number(process.env.RENDERER_EXP) || digest !== expectedDigest) {
+              if (digest !== expectedDigest) {
                 throw new Error();
               }
               console.log("renderer_jwt_role=" + role);
