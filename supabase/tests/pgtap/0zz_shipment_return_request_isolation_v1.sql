@@ -2,7 +2,7 @@ BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(10);
+SELECT plan(17);
 
 CREATE FUNCTION pg_temp.check_shipment_return_request_isolation()
 RETURNS SETOF TEXT
@@ -23,6 +23,7 @@ DECLARE
   v_input JSONB;
   v_result JSONB;
   v_first_status TEXT;
+  v_terminal_status TEXT;
   v_replay JSONB;
   v_refused JSONB;
 BEGIN
@@ -133,6 +134,23 @@ BEGIN
     AND NOT (v_refused ? 'workflow_run_id'),
     'a new key is refused while a return for the same shipment is open'
   );
+
+  FOREACH v_terminal_status IN ARRAY ARRAY[
+    'failed', 'cancelled', 'canceled', 'stopped', 'skipped', 'timed_out', 'timeout'
+  ] LOOP
+    UPDATE public.workflow_runs SET workflow_status = v_terminal_status WHERE id = v_runs[2];
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_replay := api.shipment_return_request_v1(v_input);
+    EXECUTE 'RESET ROLE';
+    RETURN NEXT ok(
+      v_replay->>'ok' = 'false' AND NOT (v_replay ? 'already_processed')
+      AND v_replay->>'workflow_status' = v_terminal_status
+      AND (v_replay->>'workflow_run_id')::UUID = v_runs[2]
+      AND v_replay#>>'{error,code}' = 'shipment_return_failed',
+      'same-key replay reports the unsuccessful workflow status: ' || v_terminal_status
+    );
+  END LOOP;
+
   RETURN NEXT is((SELECT COUNT(*) FROM public.workflow_runs
                    WHERE workflow_template_id = v_template
                      AND context->>'original_shipment_id' = v_shipments[2]::text

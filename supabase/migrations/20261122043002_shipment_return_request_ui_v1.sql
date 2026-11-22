@@ -339,6 +339,9 @@ DECLARE
   v_template_name TEXT := NULL;
   v_template_id UUID := NULL;
   v_existing_run RECORD;
+  v_unsuccessful_statuses CONSTANT TEXT[] := ARRAY[
+    'failed', 'cancelled', 'canceled', 'stopped', 'skipped', 'timed_out', 'timeout'
+  ];
   v_context JSONB := '{}'::jsonb;
   v_run_id UUID := NULL;
   v_progress JSONB := '{}'::jsonb;
@@ -484,6 +487,18 @@ BEGIN
    LIMIT 1;
 
   IF v_existing_run.id IS NOT NULL THEN
+    IF v_existing_run.workflow_status = ANY (v_unsuccessful_statuses) THEN
+      RETURN jsonb_build_object(
+        'ok', FALSE,
+        'original_shipment_id', v_shipment_id,
+        'operation', 'return',
+        'workflow_run_id', v_existing_run.id,
+        'workflow_status', v_existing_run.workflow_status,
+        'error', jsonb_build_object('code', 'shipment_return_failed'),
+        'lock_state', v_guard
+      );
+    END IF;
+
     SELECT s.id, s.tracking_number, s.status
       INTO v_return_shipment
       FROM public.shipments s
@@ -678,7 +693,7 @@ BEGIN
    ORDER BY s.created_at DESC, s.id DESC
    LIMIT 1;
 
-  IF v_workflow_status IN ('failed', 'blocked', 'cancelled') THEN
+  IF v_workflow_status = ANY (v_unsuccessful_statuses) THEN
     RETURN jsonb_strip_nulls(
       jsonb_build_object(
         'ok',
