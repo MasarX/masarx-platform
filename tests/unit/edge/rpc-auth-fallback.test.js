@@ -65,6 +65,24 @@ describe("edge rpc auth fallback", () => {
   });
 
 
+  test("requires a scoped database credential unless the fallback is explicitly enabled", () => {
+    const serviceRoleKey = fakeJwt("service_role");
+    const dbJwt = fakeJwt("edge_api_gateway_role");
+    const broadCredentials = { serviceRoleKey, allowServiceRoleFallback: "1" };
+
+    const missingScopedJwt = shared.resolveIngressDbAuth(broadCredentials);
+    expect(missingScopedJwt.authAttempts).toEqual([]);
+    expect(missingScopedJwt.internalJwt).toBe("");
+
+    const scoped = shared.resolveIngressDbAuth({ ...broadCredentials, dbJwt });
+    expect(scoped.authAttempts.map(({ label }) => label)).toEqual(["db_jwt"]);
+    expect(scoped.internalJwt).toBe(dbJwt);
+
+    const fallback = shared.resolveIngressDbAuth({ ...broadCredentials, requireDbJwt: "0" });
+    expect(fallback.authAttempts.map(({ label }) => label)).toEqual(["service_role_jwt"]);
+    expect(fallback.internalJwt).toBe(serviceRoleKey);
+  });
+
   test.each([401, 403])("classifies only explicit auth codes at HTTP %s", (status) => {
     for (const code of ["PGRST301", "PGRST302", "PGRST303"]) {
       expect(shared.isRetryableRpcAuthError(status, { code })).toBe(true);
