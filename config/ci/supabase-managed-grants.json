@@ -283,6 +283,11 @@
       "file": "supabase/migrations/20261122043000_append_only_ledger_table_contracts_v1.sql",
       "sha256": "a22581e0a27af3de0a4cf724cc5b94acd8af5f655fcb91bf594db0a75a147388",
       "reason": "Reconciles row and truncate guards only on catalog-resolved public application tables. Preserves canonical ledger guards and drops only existing local table-contract guards when redundant or mutable. No privilege changes are dynamic."
+    },
+    {
+      "file": "supabase/migrations/20261122045000_extension_acl_revoke_v1.sql",
+      "sha256": "1a2708cfdb510a34f93e8ecf93fccfbb067f9e62d91a85d2684700f50a3eb00e",
+      "reason": "Issue #138 narrows ACLs on two pg_net tables, their request-id sequence and cron history using seven object-specific revokes. Preserves dispatcher, worker and maintenance access."
     }
   ]
 }
