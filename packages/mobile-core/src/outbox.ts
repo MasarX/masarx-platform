@@ -126,18 +126,20 @@ function serializeError(error: unknown) {
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
 const KEY_CHAR = String.raw`(?:[a-z0-9_-]|%2d)`;
 const KEYWORD = String.raw`(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt)`;
-const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+["']?`;
+const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+(?:["']|%22)?`;
 const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
 const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
 const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
 const KEY_BOUNDARY = String.raw`(?:%26|%20|\b|(?=-|%2d))`;
 const MARKER_OR_KEY_RUN = String.raw`\[(?:JWT_)?REDACTED\]|${KEY_CHAR}+`;
-const PLAIN_VALUE = String.raw`"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+`;
-const ENCODED_QUOTED_VALUE = String.raw`%22(?:(?!%26|&|%22(?=%26|[&\s,}]|$))[\s\S])*(?:%22(?=%26|[&\s,}]|$)|(?=%26|&|$))`;
-const ENCODED_UNQUOTED_VALUE = String.raw`(?:(?!%26|%20(?=${NEXT_SENSITIVE_KEY}))[^\s&,}])+`;
+const VALUE_DELIMITER = String.raw`%26|%7d|[&\s,}]|$`;
+const PLAIN_QUOTE_TAIL = String.raw`(?:(?!${VALUE_DELIMITER})[\s\S])*`;
+const PLAIN_VALUE = String.raw`"(?:\\[\s\S]|[^"\\])*(?:"|$)${PLAIN_QUOTE_TAIL}|'(?:\\[\s\S]|[^'\\])*(?:'|$)${PLAIN_QUOTE_TAIL}|[^\s&,}]+`;
+const ENCODED_QUOTED_VALUE = String.raw`%22(?:(?!%26|%7d|&|%22(?=${VALUE_DELIMITER}))[\s\S])*(?:%22(?=${VALUE_DELIMITER})|(?=%26|%7d|&|$))`;
+const ENCODED_UNQUOTED_VALUE = String.raw`(?:(?!%26|%7d|%20(?=${NEXT_SENSITIVE_KEY}))[^\s&,}])+`;
 // Older encoded values can include a prefixed key. Preserve only bare key syntax at a
 // recognized separator, and still collect the following value with its own matcher.
-const LEGACY_ENCODED_VALUE = String.raw`(?:(?!%26|%20(?=${KEYWORD}${KEY_SEPARATOR}))[^\s&,}])+`;
+const LEGACY_ENCODED_VALUE = String.raw`(?:(?!%26|%7d|%20(?=${KEYWORD}${KEY_SEPARATOR}))[^\s&,}])+`;
 
 function credentialPattern(prefix: string, value: string, skip = MARKER_OR_KEY_RUN) {
   // Consume only the prefix so a separate credential can start inside a matched value.
@@ -154,10 +156,13 @@ const CREDENTIAL_PATTERNS = [
   credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}${ENCODED_SEPARATOR}`, String.raw`${ENCODED_QUOTED_VALUE}|${ENCODED_UNQUOTED_VALUE}`),
   credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}%3[ad]\s*`, LEGACY_ENCODED_VALUE),
 ];
-const BEARER = new RegExp(
-  String.raw`Bearer(?:\s+([A-Za-z0-9._~+/=-]+)|(?:%20|:\s*)(?!${NEXT_SENSITIVE_KEY})([A-Za-z0-9._~+/=-]+))`, "gi",
+const AUTHORIZATION_SCHEME = new RegExp(
+  String.raw`(?:%22|%20|\b)(?:proxy(?:-|%2d))?authorization(?:["']|%22)?${KEY_SEPARATOR}(?:\s|%20)*(?:["']|%22)?(?=Basic(?:\s|%20))`, "gi",
 );
-const BASIC = /Basic\s+([A-Za-z0-9+/]{8,}={0,2})(?![A-Za-z0-9+/=])/gi;
+const SCHEME = new RegExp(
+  String.raw`(?=(Bearer\s+|Bearer(?:%20|:\s*)(?!${NEXT_SENSITIVE_KEY})|Basic(?:\s+|%20))([A-Za-z0-9._~+/=-]+))\1`, "gi",
+);
+const BASIC_CREDENTIAL = /^[A-Za-z0-9+/]{8,}={0,2}$/;
 const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
 type RedactionSpan = { start: number; end: number; prefix?: string };
@@ -177,14 +182,20 @@ export function redactOutboxErrorText(value: string) {
       spans.push({ start, end: start + match[2].length });
     }
   }
-  for (const match of text.matchAll(BEARER)) {
-    spans.push({ start: match.index, end: match.index + match[0].length, prefix: "Bearer " });
-  }
-  for (const match of text.matchAll(BASIC)) {
-    const credential = match[1];
-    if (/[0-9+/=]/.test(credential) || (/[A-Z]/.test(credential) && /[a-z]/.test(credential))) {
-      spans.push({ start: match.index, end: match.index + match[0].length, prefix: "Basic " });
-    }
+  const authorizationSchemes = new Set(
+    Array.from(text.matchAll(AUTHORIZATION_SCHEME), (match) => match.index + match[0].length),
+  );
+  let schemeChainEnd = 0;
+  for (const match of text.matchAll(SCHEME)) {
+    const credential = match[2];
+    const basic = match[1].toLowerCase().startsWith("basic");
+    const plausible = BASIC_CREDENTIAL.test(credential)
+      && (/[0-9+/=]/.test(credential) || (/[A-Z]/.test(credential) && /[a-z]/.test(credential)));
+    if (basic && !plausible && !authorizationSchemes.has(match.index) && match.index >= schemeChainEnd) continue;
+
+    const schemeEnd = match.index + match[1].length + credential.length;
+    spans.push({ start: match.index, end: schemeEnd, prefix: basic ? "Basic " : "Bearer " });
+    schemeChainEnd = Math.max(schemeChainEnd, schemeEnd);
   }
 
   const jwtEnds = new Map<number, number>();
