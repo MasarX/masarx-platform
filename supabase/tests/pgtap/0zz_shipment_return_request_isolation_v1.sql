@@ -13,7 +13,7 @@ DECLARE
   v_actors UUID[] := ARRAY[gen_random_uuid(), gen_random_uuid()];
   v_shipments UUID[] := ARRAY[gen_random_uuid(), gen_random_uuid()];
   v_runs UUID[] := ARRAY[NULL::UUID, NULL::UUID];
-  v_template UUID := gen_random_uuid();
+  v_template UUID;
   v_key TEXT := gen_random_uuid()::text;
   v_client UUID;
   v_sender UUID;
@@ -23,10 +23,11 @@ DECLARE
   v_replay JSONB;
   v_refused JSONB;
 BEGIN
-  -- Keep the real start/progress path while removing unrelated workflow effects.
-  INSERT INTO public.workflow_templates (id, name, status, version, scope_type)
-  SELECT v_template, 'shipment_return_v1', 'active', COALESCE(MAX(version), 0) + 1, 'global'
-    FROM public.workflow_templates WHERE name = 'shipment_return_v1';
+  -- Use the seeded, uniquely named template, with its steps disabled until rollback.
+  SELECT id INTO STRICT v_template FROM public.workflow_templates
+   WHERE name = 'shipment_return_v1' AND status = 'active' AND scope_type = 'global';
+  UPDATE public.workflow_template_steps SET enabled = FALSE
+   WHERE workflow_template_id = v_template AND enabled;
 
   FOR i IN 1..2 LOOP
     v_client := gen_random_uuid();
@@ -41,7 +42,9 @@ BEGIN
     VALUES (v_actors[i], v_orgs[i], v_actors[i] || '@example.test', 'Return test operator', 'ops_admin', 'active', 'tenant');
     INSERT INTO public.shipments (id, organization_id, client_id, sender_id, tracking_number, service_type, status)
     VALUES (v_shipments[i], v_orgs[i], v_client, v_sender, 'RETURN-TEST-' || v_shipments[i], 'delivery', 'delivered');
+  END LOOP;
 
+  FOR i IN 1..2 LOOP
     PERFORM set_config('request.jwt.claim.sub', v_actors[i]::text, TRUE);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
     PERFORM set_config('request.jwt.claims', jsonb_build_object(
