@@ -1,5 +1,6 @@
 /** Expose branded empty-state copy and bounded outbox diagnostics to the screen. */
 
+import { redactDisplayErrorText } from "../mobile-display-error";
 import { formatRelativeAge } from "../mobile-outbox-aging";
 
 export const IDEMPOTENCY_KEY_TAIL_LENGTH = 8;
@@ -20,7 +21,7 @@ export function shortIdempotencyKey(value: unknown): string | null {
 
 export function truncateError(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
+  const trimmed = redactDisplayErrorText(value).trim();
   if (!trimmed) return null;
   return trimmed.length <= LAST_ERROR_TRUNCATE_LENGTH
     ? trimmed

@@ -13,6 +13,7 @@
 // the inline fail-reason flow (filterPodFailReasons / resolvePodSubmitGate).
 
 import * as React from "react";
+import { redactDisplayErrorText } from "./mobile-display-error";
 import {
   ActivityIndicator,
   LayoutChangeEvent,
@@ -292,7 +293,10 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
       replaceArtifact(artifact);
       return artifact;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to register POD artifact.";
+      const message = redactDisplayErrorText(
+        error instanceof Error ? error.message : undefined,
+        "Unable to register POD artifact.",
+      );
       setCaptureError(message);
       throw error;
     } finally {
@@ -351,7 +355,10 @@ export function MobileV2PodScreen(props: MobileV2PodScreenProps): React.ReactEle
       }
       setCameraCapture(null);
     } catch (error) {
-      setCaptureError(error instanceof Error ? error.message : "Unable to capture POD evidence.");
+      setCaptureError(redactDisplayErrorText(
+        error instanceof Error ? error.message : undefined,
+        "Unable to capture POD evidence.",
+      ));
     }
   }, [cameraCapture, capturingKind, registerArtifact]);
 

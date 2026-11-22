@@ -8,6 +8,7 @@
 // callback; submit is gated until all 4 are present.
 
 import * as React from "react";
+import { redactDisplayErrorText } from "./mobile-display-error";
 import {
   ActivityIndicator,
   Pressable,
@@ -185,7 +186,10 @@ export function MobileV2KycVehiclePhotosScreen(
       });
       setCameraAngle(null);
     } catch (error) {
-      setCameraError(error instanceof Error ? error.message : "Unable to capture vehicle evidence.");
+      setCameraError(redactDisplayErrorText(
+        error instanceof Error ? error.message : undefined,
+        "Unable to capture vehicle evidence.",
+      ));
     }
   }, [busy, cameraAngle, props]);
 
