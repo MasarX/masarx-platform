@@ -8,6 +8,7 @@ RETURNS SETOF TEXT
 LANGUAGE plpgsql
 AS $test$
 DECLARE
+    v_test_search_path TEXT := current_setting('search_path');
     v_org UUID := gen_random_uuid();
     v_client UUID := gen_random_uuid();
     v_provider UUID := gen_random_uuid();
@@ -80,10 +81,11 @@ BEGIN
         v_run_id := gen_random_uuid();
         v_step_id := gen_random_uuid();
         INSERT INTO public.addresses (
-            id, organization_id, client_id, raw_input, line1, validation_status
+            id, organization_id, client_id, raw_input, line1, city, province, validation_status
         ) VALUES (
             v_address, v_org, v_client, '{}',
             CASE WHEN v_fallback THEN 'Synthetic Dispatch Lane' END,
+            'Example City', 'Example Province',
             'pending'
         );
 
@@ -114,6 +116,8 @@ BEGIN
         PERFORM set_config('platform.workflow_engine', '1', true);
         PERFORM set_config('platform.workflow_run_step_id', v_step_id::text, true);
         v_response := workflow_handlers.execute_provider_dispatch_v1(v_step, v_run);
+        -- The dispatcher changes the session search path that pgTAP uses.
+        PERFORM set_config('search_path', v_test_search_path, true);
         SELECT * INTO v_job FROM public.outbound_calls
         WHERE id = (v_response.operation_result->>'outbound_call_id')::UUID;
 
