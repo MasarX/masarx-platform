@@ -38,6 +38,17 @@ test('keeps deploy and its summary on push and on the normal dispatch mode', () 
   }
 });
 
+test('runs the configuration readout only on manual dispatch in dev with read access', () => {
+  const readout = workflow.jobs['api-schemas'];
+  const renderer = readout.steps.find(step => step.name === 'Read renderer JWT claims');
+  expect(readout.if).toBe("github.event_name == 'workflow_dispatch' && inputs.mode == 'api-schemas'");
+  expect(readout.environment).toBe('dev');
+  expect(readout['timeout-minutes']).toBe(10);
+  expect(workflow.permissions).toEqual({ contents: 'read' });
+  expect(readout.permissions).toBeUndefined();
+  expect(renderer.run).toMatch(/\bpsql\b[^\n]* 2>\/dev\/null <<'SQL'/);
+});
+
 test('rejects other modes and masks the dispatch ref before exporting it', () => {
   const guard = job.steps[0];
   expect(guard.id).toBe('guard');

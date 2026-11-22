@@ -40,6 +40,7 @@ jobs:
   api-schemas:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'api-schemas'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment: dev
     steps:
       - name: Read configured API schemas
@@ -73,9 +74,12 @@ jobs:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           set -euo pipefail
+          renderer_unreadable() {
+            printf 'renderer_jwt=UNREADABLE reason=%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
           if [[ -z "$PGPASSWORD" ]]; then
-            printf '::notice::Renderer JWT readout skipped. DEV database password is unavailable.\n'
-            exit 0
+            renderer_unreadable no-password
           fi
           # Discover the primary pooler through the same lookup used by the deploy connection.
           if ! pooler="$(
@@ -86,8 +90,7 @@ jobs:
                 | select(length == 1) | .[0].db_host | strings
                 | select(test("\\Aaws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com\\z"))' 2>/dev/null
           )"; then
-            printf '::notice::Renderer JWT readout skipped. DEV primary pooler is unavailable.\n'
-            exit 0
+            renderer_unreadable pooler
           fi
           ca_file="$(mktemp)"
           trap 'rm -f "$ca_file"' EXIT
@@ -95,8 +98,7 @@ jobs:
               https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt ||
             ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
               sha256sum --check --status; then
-            printf '::notice::Renderer JWT readout skipped. The DEV database CA could not be verified.\n'
-            exit 0
+            renderer_unreadable ca
           fi
           if ! claims="$(
             PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
@@ -129,8 +131,7 @@ jobs:
           COMMIT;
           SQL
           )"; then
-            printf '::notice::Renderer JWT readout skipped. DEV database connection or provider lookup failed.\n'
-            exit 0
+            renderer_unreadable query
           fi
           if ! lines="$(jq -ers '
             def epoch: strings | test("\\A[0-9]+\\z");
@@ -139,10 +140,9 @@ jobs:
                 and (contains(env.SUPABASE_PROJECT_REF) | not))
                 and (.iat | epoch) and ((.exp == "none") or (.exp | epoch)) and (.count | epoch))
             | "renderer_jwt_role=\(.role)", "renderer_jwt_iat=\(.iat)",
-              "renderer_jwt_exp=\(.exp)", "renderer_jwt_count=\(.count)"
+              "renderer_jwt_exp=\(.exp)", "label_provider_vault_count=\(.count)"
           ' <<< "$claims" 2>/dev/null)"; then
-            printf '::notice::Renderer JWT readout skipped. Active provider claims are unavailable or invalid.\n'
-            exit 0
+            renderer_unreadable validate
           fi
           printf '%s\n' "$lines" | tee -a "$GITHUB_STEP_SUMMARY"
 
