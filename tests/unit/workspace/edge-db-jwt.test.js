@@ -56,7 +56,7 @@ describe('edge-db-jwt', () => {
 
   test('builds a signed database JWT for the dedicated marketing role', () => {
     const secret = 'marketing-bundle-fixture';
-    const { marketing_db_jwt: token } = buildEdgeDbJwtBundle({ secret, nowSec: 1, ttlSec: 2 });
+    const { marketing_db_jwt: token } = buildEdgeDbJwtBundle({ secret, nowSec: 1, ttlSec: 2, includeMarketing: true });
     expect(isJwtSignedWithSecret(token, secret)).toBe(true);
     expect(JSON.parse(decodeBase64Url(token.split('.')[1]))).toMatchObject({
       role: 'edge_marketing_role',

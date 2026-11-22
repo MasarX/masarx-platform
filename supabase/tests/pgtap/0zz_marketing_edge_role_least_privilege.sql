@@ -56,7 +56,7 @@ SELECT is_empty($$
          OR has_any_column_privilege('edge_marketing_role', c.oid, 'SELECT,INSERT,UPDATE'))
 $$, 'marketing role has no effective direct data privileges in public');
 
-SET LOCAL SESSION AUTHORIZATION authenticator;
+GRANT edge_marketing_role TO current_user WITH INHERIT FALSE, SET TRUE;
 SET LOCAL ROLE edge_marketing_role;
 SELECT set_config('request.jwt.claims', '{"role":"edge_marketing_role"}', true);
 
@@ -98,7 +98,6 @@ BEGIN
 END;
 $$;
 RESET ROLE;
-RESET SESSION AUTHORIZATION;
 
 SELECT ok((current_setting('test.marketing_b28_lead')::jsonb->>'ok')::boolean
   AND current_setting('test.marketing_b28_lead')::jsonb->>'task_id' IS NOT NULL,

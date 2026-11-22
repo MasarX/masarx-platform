@@ -143,14 +143,16 @@ function createEdgeDbJwt({ secret, role, nowSec, ttlSec, issuer }) {
   });
 }
 
-function buildEdgeDbJwtBundle({ secret, nowSec, ttlSec, issuer } = {}) {
+function buildEdgeDbJwtBundle({ secret, nowSec, ttlSec, issuer, includeMarketing = false } = {}) {
   if (!secret) return null;
   return {
     webhook_db_jwt: createEdgeDbJwt({ secret, role: 'edge_webhook_role', nowSec, ttlSec, issuer }),
     api_caller_db_jwt: createEdgeDbJwt({ secret, role: 'edge_api_caller_role', nowSec, ttlSec, issuer }),
     api_gateway_db_jwt: createEdgeDbJwt({ secret, role: 'edge_api_gateway_role', nowSec, ttlSec, issuer }),
     label_renderer_db_jwt: createEdgeDbJwt({ secret, role: 'edge_label_renderer_role', nowSec, ttlSec, issuer }),
-    marketing_db_jwt: createEdgeDbJwt({ secret, role: 'edge_marketing_role', nowSec, ttlSec, issuer }),
+    ...(includeMarketing && {
+      marketing_db_jwt: createEdgeDbJwt({ secret, role: 'edge_marketing_role', nowSec, ttlSec, issuer }),
+    }),
   };
 }
 

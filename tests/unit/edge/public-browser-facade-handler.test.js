@@ -257,7 +257,8 @@ describe.each(facades)('%s browser-only CORS entrypoint', (name, envKey) => {
   });
 
   test('accepted hosted POST retains current RPC and service-key/API-schema path', async () => {
-    const app = loadHandler(name);
+    const dedicatedToken = ['e30', Buffer.from(JSON.stringify({ role: 'edge_marketing_role' })).toString('base64url'), 'fixture'].join('.');
+    const app = loadHandler(name, name === 'marketing-lead-intake' ? { env: { MARKETING_DB_JWT: dedicatedToken } } : {});
     const response = await app.handler(request(name));
     expect(response.status).toBe(200);
     expect(response.headers.get('access-control-allow-origin')).toBe(HOSTED);
@@ -265,7 +266,7 @@ describe.each(facades)('%s browser-only CORS entrypoint', (name, envKey) => {
     if (name === 'marketing-lead-intake') {
       const call = app.calls.find(call => call.kind === 'fetch');
       expect(call.url).toContain('/marketing_lead_request_create_v1');
-      expect(call.options.headers.authorization).toBe('Bearer sb_secret_fixture');
+      expect(call.options.headers.authorization).toBe(`Bearer ${dedicatedToken}`);
     } else {
       expect(app.clients[0][2]).toMatchObject({ db: { schema: 'api' }, global: { headers: { apikey: 'sb_secret_fixture' } } });
       expect(app.calls.some(call => call.kind === 'rpc')).toBe(true);

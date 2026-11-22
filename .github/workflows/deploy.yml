@@ -122,8 +122,21 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
-          const bundle = buildEdgeDbJwtBundle({ secret: process.env.SUPABASE_JWT_SECRET });
-          for (const value of Object.values(bundle)) console.log('::add-mask::' + value);
+          const bundle = buildEdgeDbJwtBundle({ secret: process.env.SUPABASE_JWT_SECRET, includeMarketing: true });
+          const token = bundle?.marketing_db_jwt;
+          let role;
+          try {
+            role = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).role;
+          } catch {
+            // Report the contract failure without printing the credential.
+          }
+          if (role !== 'edge_marketing_role') {
+            console.error('::error::Failed to mint MARKETING_DB_JWT with the edge_marketing_role claim.');
+            process.exit(1);
+          }
+          for (const [key, value] of Object.entries(bundle)) {
+            if (key !== 'marketing_db_jwt') console.log('::add-mask::' + value);
+          }
           fs.writeFileSync(process.env.EDGE_SECRET_FILE, Object.entries(bundle)
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
             + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n', { mode: 0o600 });
@@ -134,7 +147,17 @@ jobs:
           export NO_COLOR=1
           "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
             bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}"
+          {
           "$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
+          } >/dev/null 2>&1 || {
+            echo '::error::Failed to set the edge secrets, including MARKETING_DB_JWT.'
+            exit 1
+          }
+          if ! "$cli" secrets list --project-ref "$SUPABASE_PROJECT_REF" --output json 2>/dev/null |
+            node -e 'const list = JSON.parse(require("node:fs").readFileSync(0, "utf8")); if (!list.some(entry => entry.name === "MARKETING_DB_JWT")) process.exit(1)' 2>/dev/null; then
+            echo '::error::MARKETING_DB_JWT was not confirmed in the deployed edge secrets.'
+            exit 1
+          fi
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi

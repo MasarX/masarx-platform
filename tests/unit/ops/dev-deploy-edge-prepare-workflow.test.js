@@ -35,3 +35,49 @@ test('runs the deploy edge commands after the locked install in the existing CI 
   expect(steps.indexOf(install)).toBeLessThan(steps.indexOf(check));
   expect(edgeCommands(check)).toEqual(edgeCommands(prepare));
 });
+
+test.each([
+  ['missing bundle', null],
+  ['missing token', {}],
+  ['empty token', { marketing_db_jwt: '' }],
+  ['wrong role', { marketing_db_jwt: `e30.${Buffer.from('{"role":"service_role"}').toString('base64url')}.fixture` }],
+])('deploy aborts before writing secrets for %s', (_label, bundle) => {
+  const code = deploy.jobs.database.steps.find(step => step.id === 'deploy').run
+    .match(/node <<'NODE'\n([\s\S]*?)\nNODE/)[1];
+  const writeFileSync = jest.fn();
+  const buildEdgeDbJwtBundle = jest.fn(() => bundle);
+  const console = { log: jest.fn(), error: jest.fn() };
+  const aborted = new Error('deploy aborted');
+  const runtime = { env: { SUPABASE_JWT_SECRET: 'signing-fixture' }, exit: jest.fn(() => { throw aborted; }) };
+  const dependencies = name => name === 'node:fs' ? { writeFileSync } : { buildEdgeDbJwtBundle };
+
+  expect(() => new Function('require', 'console', 'process', code)(dependencies, console, runtime)).toThrow(aborted);
+  expect(buildEdgeDbJwtBundle).toHaveBeenCalledWith({ secret: 'signing-fixture', includeMarketing: true });
+  expect(runtime.exit).toHaveBeenCalledWith(1);
+  expect(console.error).toHaveBeenCalledWith('::error::Failed to mint MARKETING_DB_JWT with the edge_marketing_role claim.');
+  expect(console.log).not.toHaveBeenCalled();
+  expect(writeFileSync).not.toHaveBeenCalled();
+});
+
+test('deploy writes the dedicated credential without logging it and gates function deployment on secret verification', () => {
+  const run = deploy.jobs.database.steps.find(step => step.id === 'deploy').run;
+  const code = run.match(/node <<'NODE'\n([\s\S]*?)\nNODE/)[1];
+  const writeFileSync = jest.fn();
+  const console = { log: jest.fn(), error: jest.fn() };
+  const runtime = { env: { SUPABASE_JWT_SECRET: 'signing-fixture', EDGE_SECRET_FILE: 'fixture.env' } };
+  const realGenerator = require('../../../scripts/ops/workspace/edge-db-jwt');
+  const dependencies = name => name === 'node:fs' ? { writeFileSync } : realGenerator;
+  new Function('require', 'console', 'process', code)(dependencies, console, runtime);
+
+  const [file, contents, options] = writeFileSync.mock.calls[0];
+  expect(file).toBe('fixture.env');
+  expect(options).toEqual({ mode: 0o600 });
+  const token = contents.match(/^MARKETING_DB_JWT=(.+)$/m)[1];
+  expect(realGenerator.isJwtSignedWithSecret(token, 'signing-fixture')).toBe(true);
+  expect(JSON.stringify(console.log.mock.calls)).not.toContain(token);
+  expect(console.error).not.toHaveBeenCalled();
+  expect(run).toMatch(/secrets set[^\n]+\n} >\/dev\/null 2>&1 \|\| \{\n\s+echo '[^']*MARKETING_DB_JWT\.'\n\s+exit 1/);
+  expect(run.indexOf('secrets list')).toBeGreaterThan(run.indexOf('secrets set'));
+  expect(run.indexOf('secrets list')).toBeLessThan(run.indexOf('functions deploy'));
+  expect(run).toContain('::error::MARKETING_DB_JWT was not confirmed in the deployed edge secrets.');
+});

@@ -237,3 +237,67 @@ describe('marketing-lead-intake payload compatibility', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe('marketing database credential boundary', () => {
+  const hosted = 'https://landing.example.test';
+  const local = 'http://127.0.0.1:5199';
+  const serviceSecret = 'sb_secret_marketing_fixture';
+  let compiled;
+  let modules;
+
+  beforeAll(async () => {
+    const ts = require('typescript');
+    const root = path.join(__dirname, '../../../supabase/functions/marketing-lead-intake');
+    compiled = ts.transpileModule(fs.readFileSync(path.join(root, 'index.ts'), 'utf8'), {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    }).outputText;
+    const names = ['./_shared/cors.mjs', './_shared/mod.mjs', './_shared/turnstile-local-test.mjs', './rpc-auth.mjs'];
+    modules = Object.fromEntries(await Promise.all(names.map(async name => [
+      name, await import(pathToFileURL(path.resolve(root, name)).href),
+    ])));
+  });
+
+  function loadHandler() {
+    const env = {
+      EDGE_SUPABASE_URL: 'https://db.example.test',
+      EDGE_SUPABASE_ANON_KEY: 'fixture.anon.jwt',
+      EDGE_SUPABASE_SECRET_KEY: serviceSecret,
+      MARKETING_CORS_ALLOW_ORIGINS: hosted,
+      PUBLIC_EDGE_LOCAL_CORS_ALLOW_ORIGINS: local,
+      PUBLIC_EDGE_LOCAL_QA_ENABLED: '1',
+    };
+    const net = jest.fn().mockResolvedValue(new Response('[]'));
+    const console = { warn: jest.fn(), error: jest.fn() };
+    const mod = { ...modules['./_shared/mod.mjs'], readEnv: jest.fn((key, aliases = []) =>
+      [key, ...aliases].map(name => env[name]).find(Boolean) || '') };
+    let handler;
+    new Function('exports', 'require', 'Deno', 'fetch', 'console', compiled)(
+      {}, name => name === './_shared/mod.mjs' ? mod : modules[name],
+      { serve: value => { handler = value; } }, net, console,
+    );
+    return { handler, net, console };
+  }
+
+  test('local loopback clients can use legacy credentials and warn without logging the secret', async () => {
+    const { handler, net, console } = loadHandler();
+    const response = await handler(new Request('http://127.0.0.1:54321/functions/v1/marketing-lead-intake/clients', {
+      headers: { origin: local },
+    }));
+    expect(response.status).toBe(200);
+    expect(net).toHaveBeenCalledTimes(1);
+    expect(net.mock.calls[0][1].headers.authorization).toBe(`Bearer ${serviceSecret}`);
+    expect(console.warn.mock.calls).toEqual([['[marketing-lead-intake] using local database credential fallback']]);
+  });
+
+  test.each(['GET', 'POST'])('hosted %s fails closed without a token despite loopback forwarding headers', async method => {
+    const { handler, net, console } = loadHandler();
+    const suffix = method === 'GET' ? '/clients' : '';
+    const response = await handler(new Request(`https://edge.example.test/functions/v1/marketing-lead-intake${suffix}`, {
+      method, headers: { origin: hosted, 'x-forwarded-host': 'localhost', 'x-forwarded-for': '127.0.0.1' },
+    }));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, error: { code: 'server_misconfigured' } });
+    expect(net).not.toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+});

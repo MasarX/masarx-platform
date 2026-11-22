@@ -291,6 +291,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   if (!cors.ok) return json(cors.status, cors.body, cors.headers);
 
+  if (!MARKETING_DB_JWT) {
+    if (!cors.localContext) {
+      return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
+    }
+    console.warn("[marketing-lead-intake] using local database credential fallback");
+  }
+
   if (isClientsFeedRequest) {
     if (req.method !== "GET") {
       return json(405, { ok: false, error: { code: "method_not_allowed" } }, cors.headers);
