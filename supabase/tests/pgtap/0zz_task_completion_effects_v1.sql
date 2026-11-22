@@ -6,7 +6,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(40);
+SELECT plan(41);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_task_completion_effects_v1()
 RETURNS SETOF TEXT
@@ -227,7 +227,7 @@ BEGIN
 
   SELECT task_event_id
     INTO v_task_done_event_id
-    FROM public.transition_task_v1(
+    FROM api.transition_task_v1(
       p_task_id := v_task_id,
       p_to_status := 'completed',
       p_status_reason := 'rescheduled',
@@ -236,9 +236,23 @@ BEGIN
     )
    LIMIT 1;
 
-  RETURN NEXT ok(v_task_done_event_id IS NOT NULL, 'operator transitions follow-up task to completed');
+  RETURN NEXT ok(v_task_done_event_id IS NOT NULL, 'api transition completes the operator follow-up task');
 
   EXECUTE 'SET LOCAL ROLE postgres';
+
+  RETURN NEXT ok(
+    EXISTS (
+      SELECT 1
+      FROM public.tasks t
+      JOIN public.task_events e ON e.task_id = t.id
+      WHERE t.id = v_task_id
+        AND t.organization_id = v_org
+        AND t.status = 'completed'
+        AND e.id = v_task_done_event_id
+        AND e.to_status = 'completed'
+    ),
+    'api transition result identifies the persisted task completion event'
+  );
 
   SELECT id, workflow_run_id
     INTO v_domain_event_id, v_domain_event_run_id
