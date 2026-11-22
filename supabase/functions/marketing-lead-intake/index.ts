@@ -291,10 +291,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   if (!cors.ok) return json(cors.status, cors.body, cors.headers);
 
+  if ((typeof DB_JWT !== "string" && !DB_JWT.marketing) || (!MARKETING_DB_JWT && !cors.localContext)) {
+    return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
+  }
   if (!MARKETING_DB_JWT) {
-    if (!cors.localContext) {
-      return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
-    }
     console.warn("[marketing-lead-intake] using local database credential fallback");
   }
 

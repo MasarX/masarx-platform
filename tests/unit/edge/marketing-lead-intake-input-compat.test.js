@@ -257,11 +257,12 @@ describe('marketing database credential boundary', () => {
     ])));
   });
 
-  function loadHandler() {
+  function loadHandler(marketingToken = "") {
     const env = {
       EDGE_SUPABASE_URL: 'https://db.example.test',
       EDGE_SUPABASE_ANON_KEY: 'fixture.anon.jwt',
       EDGE_SUPABASE_SECRET_KEY: serviceSecret,
+      MARKETING_DB_JWT: marketingToken,
       MARKETING_CORS_ALLOW_ORIGINS: hosted,
       PUBLIC_EDGE_LOCAL_CORS_ALLOW_ORIGINS: local,
       PUBLIC_EDGE_LOCAL_QA_ENABLED: '1',
@@ -294,6 +295,18 @@ describe('marketing database credential boundary', () => {
     const suffix = method === 'GET' ? '/clients' : '';
     const response = await handler(new Request(`https://edge.example.test/functions/v1/marketing-lead-intake${suffix}`, {
       method, headers: { origin: hosted, 'x-forwarded-host': 'localhost', 'x-forwarded-for': '127.0.0.1' },
+    }));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, error: { code: 'server_misconfigured' } });
+    expect(net).not.toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  test('hosted requests with a wrong-role token fail closed', async () => {
+    const payload = Buffer.from(JSON.stringify({ role: 'service_role' })).toString('base64url');
+    const { handler, net, console } = loadHandler(['e30', payload, 'fixture'].join('.'));
+    const response = await handler(new Request('https://edge.example.test/functions/v1/marketing-lead-intake/clients', {
+      headers: { origin: hosted },
     }));
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ ok: false, error: { code: 'server_misconfigured' } });
