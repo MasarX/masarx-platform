@@ -875,6 +875,13 @@ SELECT ok(
   'exact duplicate execution reuses the canonical job'
 );
 
+SELECT diag('Customer migration target conflict result: ' || jsonb_build_object(
+  'ok', result->'ok',
+  'code', result#>>'{error,code}',
+  'message', COALESCE(result#>>'{error,message}', result#>>'{workflow_progress,error}')
+)::TEXT)
+FROM (SELECT current_setting('test.migration_target_conflict')::jsonb AS result) conflict;
+
 SELECT ok(
   NOT (current_setting('test.migration_target_conflict')::jsonb->>'ok')::BOOLEAN
   AND current_setting('test.migration_target_conflict')::jsonb#>>'{error,code}' = 'validation_failed',
