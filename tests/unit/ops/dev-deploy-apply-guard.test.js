@@ -75,6 +75,9 @@ test.each([
   ['replacement was cancelled', {
     env: { GITHUB_SHA: stale }, newer: { ...inProgress, status: 'completed', conclusion: 'cancelled' },
   }, 'refused', `G1: superseding run 43 for ${tip} was cancelled; dispatch expected_sha=${tip}`],
+  ['dev replacement was cancelled', {
+    newerDev: { ...inProgress, status: 'completed', conclusion: 'cancelled' },
+  }, 'refused', `G1: superseding run 43 for ${devTip} was cancelled; promote dev to main, then dispatch expected_sha=${tip}`],
   ['red with an older re-arm', { previous: 'failure', env: { DEV_DB_REARMED_AT: '2025-12-31T00:00:00Z' } },
     'refused', 'G2: previous apply failed at run 42; re-arm required'],
   ['red with an equal re-arm', { previous: 'failure', env: { DEV_DB_REARMED_AT: failedAt } },
@@ -136,6 +139,27 @@ test.each(['main', 'dev'])('a later failed rerun on %s takes precedence over a n
   expect(decisions).toContain('G2: previous apply failed at run 42; re-arm required');
   expect(get).toHaveBeenCalledWith(expect.stringContaining('/actions/runs/43/attempts/1/jobs'));
   expect(get).toHaveBeenCalledWith(expect.stringContaining('/actions/runs/42/attempts/1/jobs'));
+});
+
+test.each([
+  ['success ties failure', { conclusion: 'failure', completed_at: later }, 'refused',
+    'G2: previous apply failed at run 42; re-arm required'],
+  ['success follows failure', { conclusion: 'failure', completed_at: failedAt }, 'allow',
+    'G2: previous apply at run 41 concluded success'],
+  ['steps omitted', { conclusion: 'failure', completed_at: later, steps: undefined }, 'allow',
+    'G2: previous apply at run 41 concluded success'],
+  ['steps is not an array', { conclusion: 'failure', completed_at: later, steps: {} }, 'allow',
+    'G2: previous apply at run 41 concluded success'],
+])('%s', async (_label, failedJob, expected, decision) => {
+  const { result, decisions } = await fixture({ history: {
+    runs: { main: [{ id: 42, run_attempt: 1 }, { id: 41, run_attempt: 1 }], dev: [] },
+    jobs: {
+      '/actions/runs/42/attempts/1/jobs': failedJob,
+      '/actions/runs/41/attempts/1/jobs': { conclusion: 'success', completed_at: later },
+    },
+  } });
+  expect(result).toBe(expected);
+  expect(decisions).toContain(decision);
 });
 
 test('refuses when the GitHub result cap prevents a complete history scan', async () => {

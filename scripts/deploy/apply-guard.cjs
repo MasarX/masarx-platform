@@ -26,18 +26,20 @@ async function evaluate(get, env, record) {
     const devTip = (await get('/git/ref/heads/dev')).object.sha;
     if (!/^[0-9a-f]{40}$/.test(devTip)) throw new Error('Invalid dev tip');
     let replacement;
+    // Both branches share the database, so a newer dev push can supersede a main push.
     for (const [branch, sha] of Object.entries({ main: tip, dev: devTip })) {
       if (env.GITHUB_SHA === sha) continue;
       for await (const run of pages(get, `${workflow}?branch=${branch}&event=push&head_sha=${sha}`, 'workflow_runs')) {
         if (run.run_number > Number(env.RUN_NUMBER) && (!replacement || run.run_number > replacement.run_number)) {
-          replacement = { ...run, sha };
+          replacement = { ...run, sha, branch };
         }
       }
     }
     if (replacement) {
-      const { id, sha, status, conclusion } = replacement;
+      const { id, sha, status, conclusion, branch } = replacement;
       if (status === 'completed' && !['success', 'failure'].includes(conclusion)) {
-        record(`G1: superseding run ${id} for ${sha} was ${conclusion}; dispatch expected_sha=${tip}`);
+        const recovery = branch === 'dev' ? 'promote dev to main, then dispatch' : 'dispatch';
+        record(`G1: superseding run ${id} for ${sha} was ${conclusion}; ${recovery} expected_sha=${tip}`);
         return 'refused';
       }
       record(`G1: superseded by ${sha}`);
@@ -65,8 +67,9 @@ async function evaluate(get, env, record) {
         const path = `/actions/runs/${run.id}/attempts/${attempt}/jobs?`;
         for await (const job of pages(get, path, 'jobs')) {
           if (job.name !== 'database' || job.status !== 'completed') continue;
-          const marker = job.steps.find(step => step.name === attemptMarker);
-          const legacy = job.steps.find(step => step.name === legacyDeploy);
+          const steps = Array.isArray(job.steps) ? job.steps : [];
+          const marker = steps.find(step => step.name === attemptMarker);
+          const legacy = steps.find(step => step.name === legacyDeploy);
           // Cancellation can prevent the marker from running after the combined step starts.
           const attempted = ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
             || marker?.conclusion === 'success' || (!marker && legacy?.conclusion === 'failure');
