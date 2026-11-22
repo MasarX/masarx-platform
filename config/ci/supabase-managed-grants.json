@@ -281,8 +281,8 @@
     },
     {
       "file": "supabase/migrations/20261122043000_append_only_ledger_table_contracts_v1.sql",
-      "sha256": "b2f95bb3de0eddaf805f8bcbade520a9e5fd988007f5ebb5ce680c9b36badd87",
-      "reason": "Reconciles row and truncate guards only on catalog-resolved public application tables. Replaces only for append-only contracts and drops only existing local B26 guards when the contract is mutable. No privilege changes are dynamic."
+      "sha256": "949301db331904bdf9adcbda7472f3569b8ce7137fddab983ce58523289748bf",
+      "reason": "Reconciles row and truncate guards only on catalog-resolved public application tables. Preserves canonical ledger guards and drops only existing local table-contract guards when redundant or mutable. No privilege changes are dynamic."
     }
   ]
 }

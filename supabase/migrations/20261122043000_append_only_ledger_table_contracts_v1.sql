@@ -44,7 +44,7 @@ SELECT ld.id, v.value, v.label, v.description, v.sort_order, v.is_default, v.met
   CROSS JOIN (
     VALUES
       ('mutable', 'Mutable', 'Normal table mutation behavior is allowed.', 10, TRUE, '{}'::jsonb),
-      ('append_only', 'Append only', 'UPDATE, DELETE, and TRUNCATE are denied by table-contract guards.', 20, FALSE, '{}'::jsonb)
+      ('append_only', 'Append only', 'UPDATE, DELETE, and TRUNCATE are denied by mutation guards.', 20, FALSE, '{}'::jsonb)
   ) AS v(value, label, description, sort_order, is_default, metadata)
  WHERE ld.category = 'table_contract_mutation_policy'
 ON CONFLICT (lookup_definition_id, value) DO UPDATE
@@ -58,7 +58,7 @@ ON CONFLICT (lookup_definition_id, value) DO UPDATE
        updated_at = now();
 
 COMMENT ON COLUMN public.table_contracts.mutation_policy IS
-  'Row-driven mutation policy for table_contracts: mutable allows normal table behavior; append_only denies UPDATE/DELETE/TRUNCATE through the append-only guard trigger.';
+  'Row-driven mutation policy for table_contracts: append_only requires guards against UPDATE, DELETE, and TRUNCATE.';
 
 CREATE OR REPLACE FUNCTION public.enforce_table_contract_mutation_policy_lookup_v1()
 RETURNS trigger
@@ -124,6 +124,7 @@ AS $function$
 DECLARE
   r RECORD;
   v_rel REGCLASS;
+  v_ledger_guarded BOOLEAN;
   v_default_timeout BOOLEAN := current_setting('lock_timeout') = '0';
 BEGIN
   IF p_table_schema IS DISTINCT FROM 'public' THEN
@@ -150,7 +151,26 @@ BEGIN
       CONTINUE;
     END IF;
 
-    IF r.mutation_policy = 'append_only' THEN
+    -- Preserve the canonical ledger guards and their 2F003 contract. Finance
+    -- installs its row and truncate guards on every writable leaf partition.
+    SELECT COALESCE(bool_and((
+      SELECT COUNT(*) = 2
+        FROM pg_catalog.pg_trigger t
+       WHERE t.tgrelid = relations.relid
+         AND t.tgfoid = 'public.immutable_ledger_block_mutation_trg_v1()'::regprocedure
+         AND t.tgname IN ('trg_ledger_immutable_rows_v1', 'trg_ledger_immutable_truncate_v1')
+         AND t.tgenabled IN ('O', 'A')
+    )), FALSE)
+      INTO v_ledger_guarded
+      FROM (
+        SELECT v_rel AS relid
+         WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_partitioned_table WHERE partrelid = v_rel)
+        UNION ALL
+        SELECT relid FROM pg_catalog.pg_partition_tree(v_rel) WHERE isleaf AND relid <> v_rel
+      ) AS relations
+     WHERE r.mutation_policy = 'append_only';
+
+    IF r.mutation_policy = 'append_only' AND NOT v_ledger_guarded THEN
       EXECUTE format(
         'CREATE OR REPLACE TRIGGER trg_table_contracts_append_only_row_guard BEFORE UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION public.reject_append_only_table_mutation_v1()',
         v_rel
@@ -176,8 +196,8 @@ BEGIN
       ) THEN
         EXECUTE format('DROP TRIGGER trg_table_contracts_append_only_truncate_guard ON %s', v_rel);
       END IF;
-      row_guard_action := 'dropped';
-      truncate_guard_action := 'dropped';
+      row_guard_action := CASE WHEN v_ledger_guarded THEN 'existing' ELSE 'dropped' END;
+      truncate_guard_action := row_guard_action;
     END IF;
 
     table_schema := r.table_schema;
@@ -201,9 +221,9 @@ GRANT EXECUTE ON FUNCTION public.apply_append_only_table_contracts_v1(TEXT) TO s
 UPDATE public.table_contracts
    SET mutation_policy = 'append_only',
        notes = CASE
-         WHEN notes IS NULL OR btrim(notes) = '' THEN 'Append-only ledger; direct UPDATE/DELETE/TRUNCATE denied by table_contracts.'
+         WHEN notes IS NULL OR btrim(notes) = '' THEN 'Append-only ledger; direct UPDATE/DELETE/TRUNCATE denied.'
          WHEN notes ILIKE '%append-only%' THEN notes
-         ELSE notes || ' Append-only mutation guard enforced by table_contracts.'
+         ELSE notes || ' Append-only mutation guard enforced.'
        END,
        updated_at = now()
  WHERE table_schema = 'public'
