@@ -128,11 +128,18 @@ const JWT_PATTERN = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
 export function redactOutboxErrorText(value: string) {
   const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
-  const redacted = value.slice(0, MAX_ERROR_TEXT_LENGTH)
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+  let end = MAX_ERROR_TEXT_LENGTH;
+  const lastKept = value.charCodeAt(end - 1);
+  if (truncated && lastKept >= 0xd800 && lastKept <= 0xdbff) end -= 1;
+
+  const redacted = value.slice(0, end)
+    .replace(/Bearer(?:\s+|%20|:\s*)[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(/Basic\s+[A-Za-z0-9+/=]+/gi, "Basic [REDACTED]")
+    // Consume other key-shaped runs whole so the lookahead never restarts at each hyphen.
     .replace(
-      /((?:%26|\b)(?=[a-z0-9_-]*(?:api[_-]?key|token|authorization|password|secret|jwt))[a-z0-9_-]+["']?\s*)(?:([:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)|(%3[ad]\s*)((?:(?!%26)[^\s&,}])+))/gi,
+      /((?:%26|\b|(?=-|%2d))(?=(?:[a-z0-9_-]|%2d)*(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt))(?:[a-z0-9_-]|%2d)+["']?)(?:(\s*[:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)|((?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*)(%22(?:(?!%22)[\s\S])*(?:%22|$)|(?:(?!%26)[^\s&,}])+))|(?:[a-z0-9_-]|%2d)+/gi,
       (_match, key, separator, encodedSeparator, encodedValue?: string) => {
+        if (key === undefined) return _match;
         const jwtOnly = encodedValue?.replace(JWT_PATTERN, "[JWT_REDACTED]") === "[JWT_REDACTED]";
         return key + (separator ?? encodedSeparator) + (jwtOnly ? "[JWT_REDACTED]" : "[REDACTED]");
       },
