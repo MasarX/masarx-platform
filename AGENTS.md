@@ -4,25 +4,16 @@
 
 - Repository: https://github.com/MasarX/masarx-platform · main branch: main
 - Board (private): https://github.com/orgs/MasarX/projects/9 · Project brief: the board README
-- Environments: [delivery environments](DELIVERY.md#environments).
+- Environments: `ci` and `dev` are active. `stg` and `prod` are configured. See [delivery environments](DELIVERY.md#environments).
 - Release plan: [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
 - Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX Design"
 - UI project: yes
 - Other repos: none
-- Other definition files: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md)
+- Links: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md), the portfolio engineering standard and the portfolio orchestration skill.
 
 ## Product and current goal
 
 MasarX helps delivery teams manage shipments and coordinate integrations, warehouse activity, field execution and customer communication. The first staging release serves delivery operators, field teams and customers who need shipment status and delivery options. See `docs/product/mission.md` for the product mission.
-
-## Commands
-
-- Set up: use the Node.js version in `.nvmrc` and run `npm ci --ignore-scripts` at the repository root.
-- Run locally: `npm run dev:console:v2`, `npm run dev:console`, `npm run dev:portal`, `npm run dev:fieldops` or `npm run dev:landing`. See `docs/guides/LOCAL_SETUP.md` for backend setup.
-- Affected tests: run `npm run ci:local:impact -- --base-ref origin/main` against the intended base, substituting its ref when needed. The `ci` workflow in `.github/workflows/public-ci.yml` selects affected jobs for pull requests.
-- Full tests: the same workflow runs the full hosted CI graph on `merge_group`. Use `npm run ci:local:strict` for strict local qualification. See `docs/guides/TESTING_GUIDE.md` for the suite commands and backend requirements.
-- pgTAP: `npm run test:pgtap` uses `psql` and a configured, isolated PostgreSQL test database with the Supabase schema and fixtures. Verify the target before running database tests.
-- Lint: `npm run lint:frontend`, `npm run lint:structure`, `npm run lint:commands`, `npm run lint:docs:ssot`, `npm run lint:db` and `npm run lint:db:managed-grants`. Select the checks that cover the change.
 
 ## Architecture and single sources
 
@@ -36,6 +27,18 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 - `supabase/tests/pgtap/` contains database contract tests. `scripts/tests/run-pgtap-cloud.js` is the runner behind the root pgTAP script.
 - `scripts/` contains tooling for setup, CI, testing and deployment. `scripts/ci-hosted/changes.cjs` defines hosted CI change selection.
 - `tests/` contains application tests by suite. `config/ci/test-impact-map.json` defines test impact mapping.
+
+## Commands
+
+- Set up: use the Node.js version in `.nvmrc` and run `npm ci --ignore-scripts` at the repository root.
+- Lint: `npm run lint:frontend`, `npm run lint:structure`, `npm run lint:commands`, `npm run lint:docs:ssot`, `npm run lint:db` and `npm run lint:db:managed-grants`. Select the checks that cover the change.
+- Format Console V2: `npm --prefix apps/console-v2 run format`.
+- Typecheck: `npm run typecheck:frontend`, `npm --prefix apps/console-v2 run typecheck`, or `npm run typecheck:fieldops`.
+- Affected tests: run `npm run ci:local:impact -- --base-ref origin/main` against the intended base, substituting its ref when needed. The `ci` workflow in `.github/workflows/public-ci.yml` selects affected jobs for pull requests.
+- Full tests: the same workflow runs the full hosted CI graph on `merge_group`. Use `npm run ci:local:strict` for strict local qualification. See `docs/guides/TESTING_GUIDE.md` for the suite commands and backend requirements.
+- pgTAP: `npm run test:pgtap` uses `psql` and a configured, isolated PostgreSQL test database with the Supabase schema and fixtures. Verify the target before running database tests.
+- Build: run `npm run build` in the Console, Console V2 or Portal app directory, or `npm run build:landing` at the root.
+- Run locally: `npm run dev:console:v2`, `npm run dev:console`, `npm run dev:portal`, `npm run dev:fieldops` or `npm run dev:landing`. See `docs/guides/LOCAL_SETUP.md` for backend setup.
 
 ## Must-follow coding rules
 
@@ -58,6 +61,7 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 ## Data safety
 
 - Migrations are append-only. Never edit or delete a landed migration. Follow the [migration stamp and re-stamp rules](DELIVERY.md#branching-and-merging).
+- Keep each release's database schema usable by the previous release's code. Ship drops, renames and narrowing changes only after an earlier release removes the code's use of the old schema shape.
 - For a database function change, write a new migration with `CREATE OR REPLACE`. Start from the live catalog body using `pg_get_functiondef`, or the catalog after replaying `main` from zero. The original migration is historical. Preserve later fixes.
 - Give new tables explicit `REVOKE` and `GRANT` statements and enable RLS with scoped policies. Give new functions explicit `REVOKE` and `GRANT` statements and verify their row access. State the effective grants for each new or changed function, such as `service_role` only.
 - In migration PRs, list each `GRANT`, `REVOKE`, `ALTER DEFAULT PRIVILEGES` and `CREATE POLICY` by object, privilege or policy scope, and role. Reject broad schema grants, default-privilege changes, loop grants and changes to extension-managed privileges.
@@ -69,6 +73,6 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 
 - Keep personal names, customer identifiers, real data, hosts, IPs, private paths, project references, email addresses, account IDs and secrets out of public text, code, fixtures, logs, commits, issues and pull requests.
 - Generate credential-shaped fixtures at runtime from synthetic values. Never commit literal credential-shaped fixtures. Keep environment files and real credentials out of version control.
-- Run one fast local privacy screen for secrets, names and hosts on the exact candidate diff before pushing, and on PR, issue and comment text before posting. Include the PR title, body and branch when screening a PR. Stop on findings.
+- Before pushing, screen the exact candidate diff, commit messages and identities for secrets, names and hosts. Screen PR, issue and comment text before posting or editing it. Include the PR title, body and branch when screening a PR. Stop on any finding.
 - GitHub secret scanning and push protection are enabled. Never weaken either control.
 - Gap: A pre-push hook and a required CI check are still pending.

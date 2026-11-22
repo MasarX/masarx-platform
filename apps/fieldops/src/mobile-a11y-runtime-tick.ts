@@ -26,6 +26,8 @@
  * platform-agnostic lets us unit-test the timing contract in isolation.
  */
 
+import { redactOutboxErrorText } from "@masarx/mobile-core";
+
 export type A11yRuntimeTickOptions = {
   /**
    * Interval between audit ticks in milliseconds. Defaults to 30_000
@@ -106,7 +108,8 @@ export function startA11yRuntimeTick(
       // Swallow — but surface in dev console so engineers still see it.
       try {
         // eslint-disable-next-line no-console
-        console.warn("[a11y-runtime-tick] audit threw", error);
+        const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        console.warn("[a11y-runtime-tick] audit threw", redactOutboxErrorText(message));
       } catch {
         // Even console.warn might fail in some test envs; ignore.
       }

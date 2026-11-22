@@ -6,6 +6,7 @@
 // resolves the severities registry from `mobile_damage_severity_policy`.
 
 import * as React from "react";
+import { redactDisplayErrorText } from "./mobile-display-error";
 import {
   Pressable,
   Text,
@@ -192,7 +193,10 @@ export function MobileV2DamageHoldSheet(
       }));
       setCameraOpen(false);
     } catch (error) {
-      setCameraError(error instanceof Error ? error.message : "Unable to capture damage evidence.");
+      setCameraError(redactDisplayErrorText(
+        error instanceof Error ? error.message : undefined,
+        "Unable to capture damage evidence.",
+      ));
     }
   }, [busy, props]);
 

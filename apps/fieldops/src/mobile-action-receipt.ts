@@ -1,5 +1,7 @@
 import type { OutboxEntry, OutboxSyncResult } from "@masarx/mobile-core";
 
+import { redactDisplayErrorText } from "./mobile-display-error";
+
 export type ActionSubmissionStatus =
   | "synced"
   | "queued_offline"
@@ -9,7 +11,7 @@ export type ActionSubmissionStatus =
 type QueueEntrySummary = Pick<OutboxEntry, "status" | "last_error"> | null | undefined;
 
 function normalizeQueueErrorDetail(value: string | null | undefined) {
-  const firstLine = String(value || "")
+  const firstLine = redactDisplayErrorText(value ?? undefined, "")
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .find(Boolean);

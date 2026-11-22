@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/react-native";
 
 import type { MobileRequestFailureContext } from "@masarx/auth/mobile";
+import { redactOutboxErrorText } from "@masarx/mobile-core";
 
 import { normalizeDebugMessage } from "./mobile-debug";
 
@@ -25,32 +26,35 @@ function coerceString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-function redactSensitive(input: string): string {
-  return input
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-    .replace(
-      /(apikey|api_key|token|access_token|refresh_token|authorization)=([A-Za-z0-9._-]+)/gi,
-      "$1=[REDACTED]"
-    )
-    .replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, "[JWT_REDACTED]");
+function redactDiagnosticValue(value: unknown, depth: number): unknown {
+  if (typeof value === "string") return redactOutboxErrorText(value);
+  if (value instanceof Error) return normalizeDebugMessage(value);
+  if (!value || typeof value !== "object") return value;
+  // Match Sentry's normalization depth so raw nested console arguments cannot bypass the hook.
+  if (depth === 0) return Array.isArray(value) ? "[Array]" : "[Object]";
+  if (Array.isArray(value)) return value.map((item) => redactDiagnosticValue(item, depth - 1));
+  return redactDiagnosticData(value as Record<string, unknown>, depth - 1);
 }
 
-function redactBreadcrumb(breadcrumb: Sentry.Breadcrumb): Sentry.Breadcrumb | null {
+function redactDiagnosticData(data: Record<string, unknown>, depth = 2): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(data)
+      .filter(([key]) => !/token|secret|password|authorization/i.test(key))
+      .map(([key, value]) => [key, redactDiagnosticValue(value, depth)])
+  );
+}
+
+function redactBreadcrumb(breadcrumb: Sentry.Breadcrumb): Sentry.Breadcrumb {
   if (!breadcrumb) return breadcrumb;
   const next: Sentry.Breadcrumb = { ...breadcrumb };
   if (typeof next.message === "string") {
-    next.message = redactSensitive(next.message);
+    next.message = redactOutboxErrorText(next.message);
   }
   if (typeof next.category === "string" && /auth/i.test(next.category)) {
     next.data = {};
   }
   if (next.data && typeof next.data === "object") {
-    const redacted: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(next.data as Record<string, unknown>)) {
-      if (/token|secret|password|authorization/i.test(key)) continue;
-      redacted[key] = typeof value === "string" ? redactSensitive(value) : value;
-    }
-    next.data = redacted;
+    next.data = redactDiagnosticData(next.data);
   }
   return next;
 }
@@ -62,22 +66,25 @@ function redactErrorEvent(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
     // Never send request headers/cookies/body.
     const { url, method } = next.request;
     next.request = {
-      ...(url ? { url } : {}),
-      ...(method ? { method } : {}),
+      ...(url ? { url: redactOutboxErrorText(url) } : {}),
+      ...(method ? { method: redactOutboxErrorText(method) } : {}),
     };
   }
 
   if (typeof next.message === "string") {
-    next.message = redactSensitive(next.message);
+    next.message = redactOutboxErrorText(next.message);
   }
+
+  if (next.breadcrumbs) next.breadcrumbs = next.breadcrumbs.map(redactBreadcrumb);
+  if (next.extra) next.extra = redactDiagnosticData(next.extra);
 
   if (next.exception?.values) {
     next.exception = {
       ...next.exception,
       values: next.exception.values.map((value) => {
         const updated = { ...value };
-        if (typeof updated.value === "string") updated.value = redactSensitive(updated.value);
-        if (typeof updated.type === "string") updated.type = redactSensitive(updated.type);
+        if (typeof updated.value === "string") updated.value = redactOutboxErrorText(updated.value);
+        if (typeof updated.type === "string") updated.type = redactOutboxErrorText(updated.type);
         return updated;
       }),
     };
@@ -106,7 +113,7 @@ export function initMobileCrashReporting(params: MobileCrashReportingInitParams)
     enableNative: true,
     enableAutoSessionTracking: true,
     beforeBreadcrumb: redactBreadcrumb,
-    beforeSend: (event: Sentry.ErrorEvent) => redactErrorEvent(event),
+    beforeSend: redactErrorEvent,
   });
 
   Sentry.setTag("surface", "fieldops");
@@ -141,7 +148,7 @@ export function addMobileNetworkFailureBreadcrumb(context: MobileRequestFailureC
       statusText: context.statusText ?? null,
       correlationId: context.correlationId,
       traceparent: context.traceparent,
-      ...(context.error ? { error: redactSensitive(context.error) } : {}),
+      ...(context.error ? { error: redactOutboxErrorText(context.error) } : {}),
     },
   });
 }
