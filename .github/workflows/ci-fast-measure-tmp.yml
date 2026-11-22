@@ -1,0 +1,406 @@
+name: CI fast measurement
+
+'on':
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-fast-measure-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  full:
+    if: github.head_ref == 'ci/fast-measure' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      MEASURE_CACHE: ${{ runner.temp }}/ci-fast-measure
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          filter: blob:none
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Record inputs
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p ci-fast-evidence "$MEASURE_CACHE"
+          jq -n --arg head "$PR_HEAD" --arg base "$PR_BASE" \
+            --arg commit "$(git rev-parse HEAD)" --arg tree "$(git rev-parse HEAD^{tree})" \
+            --argjson cores "$(nproc)" --argjson memoryKiB "$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)" \
+            '{head:$head,base:$base,commit:$commit,tree:$tree,cores:$cores,memoryKiB:$memoryKiB}' \
+            | tee ci-fast-evidence/inputs.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Compute content keys
+        id: keys
+        run: |
+          pins=config/ci/hosted-supabase-images.json
+          for set in full minimal; do
+            test "$set" = full && role='.' || role='map(select(.role=="database"))'
+            digest=$(jq -cr "$role | sort_by(.role) | map([.digest,.image_id,.cli_tag])" "$pins" | sha256sum | cut -d' ' -f1)
+            echo "$set=ci-fast-image-v1-$set-$digest-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          done
+          hash=$(git rev-parse HEAD:supabase/migrations)
+          echo "database=ci-fast-db-v1-$hash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Measure full
+        run: node scripts/ci-hosted/ci-fast-measure.cjs full
+      - name: Start cache clock (save full)
+        id: start_save_full
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+      - name: Cache save (full)
+        id: cache_save_full
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MEASURE_CACHE }}/full.tar.zst
+          key: ${{ steps.keys.outputs.full }}
+      - name: Record cache time (save full)
+        if: always() && steps.start_save_full.outcome == 'success'
+        env:
+          START_MS: ${{ steps.start_save_full.outputs.ms }}
+          CACHE_OUTCOME: ${{ steps.cache_save_full.outcome }}
+          CACHE_HIT: ${{ steps.cache_save_full.outputs.cache-hit }}
+        run: |
+          elapsed=$(( $(date +%s%3N) - START_MS ))
+          bytes=$(du -sb "$MEASURE_CACHE/full.tar.zst" 2>/dev/null | cut -f1 || true)
+          jq -n --arg action 'save' --arg set 'full' --arg outcome "$CACHE_OUTCOME" \
+            --arg hit "$CACHE_HIT" --argjson elapsed "$elapsed" --argjson bytes "${bytes:-null}" \
+            '{action:$action,set:$set,outcome:$outcome,cacheHit:$hit,seconds:($elapsed/1000),archiveBytes:$bytes}' \
+            | tee ci-fast-evidence/cache-save-full.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Install locked dependencies
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Measure build
+        run: node scripts/ci-hosted/ci-fast-measure.cjs build
+      - name: Start cache clock (save database)
+        id: start_save_database
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+      - name: Cache save (database)
+        id: cache_save_database
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MEASURE_CACHE }}/database
+          key: ${{ steps.keys.outputs.database }}
+      - name: Record cache time (save database)
+        if: always() && steps.start_save_database.outcome == 'success'
+        env:
+          START_MS: ${{ steps.start_save_database.outputs.ms }}
+          CACHE_OUTCOME: ${{ steps.cache_save_database.outcome }}
+          CACHE_HIT: ${{ steps.cache_save_database.outputs.cache-hit }}
+        run: |
+          elapsed=$(( $(date +%s%3N) - START_MS ))
+          bytes=$(du -sb "$MEASURE_CACHE/database" 2>/dev/null | cut -f1 || true)
+          jq -n --arg action 'save' --arg set 'database' --arg outcome "$CACHE_OUTCOME" \
+            --arg hit "$CACHE_HIT" --argjson elapsed "$elapsed" --argjson bytes "${bytes:-null}" \
+            '{action:$action,set:$set,outcome:$outcome,cacheHit:$hit,seconds:($elapsed/1000),archiveBytes:$bytes}' \
+            | tee ci-fast-evidence/cache-save-database.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-fast-full
+          path: ci-fast-evidence/
+          retention-days: 5
+  minimal:
+    if: github.head_ref == 'ci/fast-measure' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      MEASURE_CACHE: ${{ runner.temp }}/ci-fast-measure
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          filter: blob:none
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Record inputs
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p ci-fast-evidence "$MEASURE_CACHE"
+          jq -n --arg head "$PR_HEAD" --arg base "$PR_BASE" \
+            --arg commit "$(git rev-parse HEAD)" --arg tree "$(git rev-parse HEAD^{tree})" \
+            --argjson cores "$(nproc)" --argjson memoryKiB "$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)" \
+            '{head:$head,base:$base,commit:$commit,tree:$tree,cores:$cores,memoryKiB:$memoryKiB}' \
+            | tee ci-fast-evidence/inputs.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Compute content keys
+        id: keys
+        run: |
+          pins=config/ci/hosted-supabase-images.json
+          for set in full minimal; do
+            test "$set" = full && role='.' || role='map(select(.role=="database"))'
+            digest=$(jq -cr "$role | sort_by(.role) | map([.digest,.image_id,.cli_tag])" "$pins" | sha256sum | cut -d' ' -f1)
+            echo "$set=ci-fast-image-v1-$set-$digest-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          done
+          hash=$(git rev-parse HEAD:supabase/migrations)
+          echo "database=ci-fast-db-v1-$hash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Measure minimal
+        run: node scripts/ci-hosted/ci-fast-measure.cjs minimal
+      - name: Start cache clock (save minimal)
+        id: start_save_minimal
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+      - name: Cache save (minimal)
+        id: cache_save_minimal
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MEASURE_CACHE }}/minimal.tar.zst
+          key: ${{ steps.keys.outputs.minimal }}
+      - name: Record cache time (save minimal)
+        if: always() && steps.start_save_minimal.outcome == 'success'
+        env:
+          START_MS: ${{ steps.start_save_minimal.outputs.ms }}
+          CACHE_OUTCOME: ${{ steps.cache_save_minimal.outcome }}
+          CACHE_HIT: ${{ steps.cache_save_minimal.outputs.cache-hit }}
+        run: |
+          elapsed=$(( $(date +%s%3N) - START_MS ))
+          bytes=$(du -sb "$MEASURE_CACHE/minimal.tar.zst" 2>/dev/null | cut -f1 || true)
+          jq -n --arg action 'save' --arg set 'minimal' --arg outcome "$CACHE_OUTCOME" \
+            --arg hit "$CACHE_HIT" --argjson elapsed "$elapsed" --argjson bytes "${bytes:-null}" \
+            '{action:$action,set:$set,outcome:$outcome,cacheHit:$hit,seconds:($elapsed/1000),archiveBytes:$bytes}' \
+            | tee ci-fast-evidence/cache-save-minimal.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Install locked dependencies
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Measure minimal-db
+        run: node scripts/ci-hosted/ci-fast-measure.cjs minimal-db
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-fast-minimal
+          path: ci-fast-evidence/
+          retention-days: 5
+  restore:
+    if: github.head_ref == 'ci/fast-measure' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [full, minimal]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      MEASURE_CACHE: ${{ runner.temp }}/ci-fast-measure
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          filter: blob:none
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Record inputs
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p ci-fast-evidence "$MEASURE_CACHE"
+          jq -n --arg head "$PR_HEAD" --arg base "$PR_BASE" \
+            --arg commit "$(git rev-parse HEAD)" --arg tree "$(git rev-parse HEAD^{tree})" \
+            --argjson cores "$(nproc)" --argjson memoryKiB "$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)" \
+            '{head:$head,base:$base,commit:$commit,tree:$tree,cores:$cores,memoryKiB:$memoryKiB}' \
+            | tee ci-fast-evidence/inputs.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Compute content keys
+        id: keys
+        run: |
+          pins=config/ci/hosted-supabase-images.json
+          for set in full minimal; do
+            test "$set" = full && role='.' || role='map(select(.role=="database"))'
+            digest=$(jq -cr "$role | sort_by(.role) | map([.digest,.image_id,.cli_tag])" "$pins" | sha256sum | cut -d' ' -f1)
+            echo "$set=ci-fast-image-v1-$set-$digest-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          done
+          hash=$(git rev-parse HEAD:supabase/migrations)
+          echo "database=ci-fast-db-v1-$hash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Start cache clock (restore minimal)
+        id: start_restore_minimal
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+      - name: Cache restore (minimal)
+        id: cache_restore_minimal
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MEASURE_CACHE }}/minimal.tar.zst
+          key: ${{ steps.keys.outputs.minimal }}
+          fail-on-cache-miss: true
+      - name: Record cache time (restore minimal)
+        if: always() && steps.start_restore_minimal.outcome == 'success'
+        env:
+          START_MS: ${{ steps.start_restore_minimal.outputs.ms }}
+          CACHE_OUTCOME: ${{ steps.cache_restore_minimal.outcome }}
+          CACHE_HIT: ${{ steps.cache_restore_minimal.outputs.cache-hit }}
+        run: |
+          elapsed=$(( $(date +%s%3N) - START_MS ))
+          bytes=$(du -sb "$MEASURE_CACHE/minimal.tar.zst" 2>/dev/null | cut -f1 || true)
+          jq -n --arg action 'restore' --arg set 'minimal' --arg outcome "$CACHE_OUTCOME" \
+            --arg hit "$CACHE_HIT" --argjson elapsed "$elapsed" --argjson bytes "${bytes:-null}" \
+            '{action:$action,set:$set,outcome:$outcome,cacheHit:$hit,seconds:($elapsed/1000),archiveBytes:$bytes}' \
+            | tee ci-fast-evidence/cache-restore-minimal.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Start cache clock (restore full)
+        id: start_restore_full
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+      - name: Cache restore (full)
+        id: cache_restore_full
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MEASURE_CACHE }}/full.tar.zst
+          key: ${{ steps.keys.outputs.full }}
+          fail-on-cache-miss: true
+      - name: Record cache time (restore full)
+        if: always() && steps.start_restore_full.outcome == 'success'
+        env:
+          START_MS: ${{ steps.start_restore_full.outputs.ms }}
+          CACHE_OUTCOME: ${{ steps.cache_restore_full.outcome }}
+          CACHE_HIT: ${{ steps.cache_restore_full.outputs.cache-hit }}
+        run: |
+          elapsed=$(( $(date +%s%3N) - START_MS ))
+          bytes=$(du -sb "$MEASURE_CACHE/full.tar.zst" 2>/dev/null | cut -f1 || true)
+          jq -n --arg action 'restore' --arg set 'full' --arg outcome "$CACHE_OUTCOME" \
+            --arg hit "$CACHE_HIT" --argjson elapsed "$elapsed" --argjson bytes "${bytes:-null}" \
+            '{action:$action,set:$set,outcome:$outcome,cacheHit:$hit,seconds:($elapsed/1000),archiveBytes:$bytes}' \
+            | tee ci-fast-evidence/cache-restore-full.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Start cache clock (restore database)
+        id: start_restore_database
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+      - name: Cache restore (database)
+        id: cache_restore_database
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MEASURE_CACHE }}/database
+          key: ${{ steps.keys.outputs.database }}
+          fail-on-cache-miss: true
+      - name: Record cache time (restore database)
+        if: always() && steps.start_restore_database.outcome == 'success'
+        env:
+          START_MS: ${{ steps.start_restore_database.outputs.ms }}
+          CACHE_OUTCOME: ${{ steps.cache_restore_database.outcome }}
+          CACHE_HIT: ${{ steps.cache_restore_database.outputs.cache-hit }}
+        run: |
+          elapsed=$(( $(date +%s%3N) - START_MS ))
+          bytes=$(du -sb "$MEASURE_CACHE/database" 2>/dev/null | cut -f1 || true)
+          jq -n --arg action 'restore' --arg set 'database' --arg outcome "$CACHE_OUTCOME" \
+            --arg hit "$CACHE_HIT" --argjson elapsed "$elapsed" --argjson bytes "${bytes:-null}" \
+            '{action:$action,set:$set,outcome:$outcome,cacheHit:$hit,seconds:($elapsed/1000),archiveBytes:$bytes}' \
+            | tee ci-fast-evidence/cache-restore-database.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Install locked dependencies
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Measure restore
+        run: node scripts/ci-hosted/ci-fast-measure.cjs restore
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-fast-restore
+          path: ci-fast-evidence/
+          retention-days: 5
+  hidden:
+    if: github.head_ref == 'ci/fast-measure' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: full
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      MEASURE_CACHE: ${{ runner.temp }}/ci-fast-measure
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          filter: blob:none
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Record inputs
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p ci-fast-evidence "$MEASURE_CACHE"
+          jq -n --arg head "$PR_HEAD" --arg base "$PR_BASE" \
+            --arg commit "$(git rev-parse HEAD)" --arg tree "$(git rev-parse HEAD^{tree})" \
+            --argjson cores "$(nproc)" --argjson memoryKiB "$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)" \
+            '{head:$head,base:$base,commit:$commit,tree:$tree,cores:$cores,memoryKiB:$memoryKiB}' \
+            | tee ci-fast-evidence/inputs.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Compute content keys
+        id: keys
+        run: |
+          pins=config/ci/hosted-supabase-images.json
+          for set in full minimal; do
+            test "$set" = full && role='.' || role='map(select(.role=="database"))'
+            digest=$(jq -cr "$role | sort_by(.role) | map([.digest,.image_id,.cli_tag])" "$pins" | sha256sum | cut -d' ' -f1)
+            echo "$set=ci-fast-image-v1-$set-$digest-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          done
+          hash=$(git rev-parse HEAD:supabase/migrations)
+          echo "database=ci-fast-db-v1-$hash-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Start cache clock (restore full)
+        id: start_restore_full
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+      - name: Cache restore (full)
+        id: cache_restore_full
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MEASURE_CACHE }}/full.tar.zst
+          key: ${{ steps.keys.outputs.full }}
+          fail-on-cache-miss: true
+      - name: Record cache time (restore full)
+        if: always() && steps.start_restore_full.outcome == 'success'
+        env:
+          START_MS: ${{ steps.start_restore_full.outputs.ms }}
+          CACHE_OUTCOME: ${{ steps.cache_restore_full.outcome }}
+          CACHE_HIT: ${{ steps.cache_restore_full.outputs.cache-hit }}
+        run: |
+          elapsed=$(( $(date +%s%3N) - START_MS ))
+          bytes=$(du -sb "$MEASURE_CACHE/full.tar.zst" 2>/dev/null | cut -f1 || true)
+          jq -n --arg action 'restore' --arg set 'full' --arg outcome "$CACHE_OUTCOME" \
+            --arg hit "$CACHE_HIT" --argjson elapsed "$elapsed" --argjson bytes "${bytes:-null}" \
+            '{action:$action,set:$set,outcome:$outcome,cacheHit:$hit,seconds:($elapsed/1000),archiveBytes:$bytes}' \
+            | tee ci-fast-evidence/cache-restore-full.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Start cache clock (restore database)
+        id: start_restore_database
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
+      - name: Cache restore (database)
+        id: cache_restore_database
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MEASURE_CACHE }}/database
+          key: ${{ steps.keys.outputs.database }}
+          fail-on-cache-miss: true
+      - name: Record cache time (restore database)
+        if: always() && steps.start_restore_database.outcome == 'success'
+        env:
+          START_MS: ${{ steps.start_restore_database.outputs.ms }}
+          CACHE_OUTCOME: ${{ steps.cache_restore_database.outcome }}
+          CACHE_HIT: ${{ steps.cache_restore_database.outputs.cache-hit }}
+        run: |
+          elapsed=$(( $(date +%s%3N) - START_MS ))
+          bytes=$(du -sb "$MEASURE_CACHE/database" 2>/dev/null | cut -f1 || true)
+          jq -n --arg action 'restore' --arg set 'database' --arg outcome "$CACHE_OUTCOME" \
+            --arg hit "$CACHE_HIT" --argjson elapsed "$elapsed" --argjson bytes "${bytes:-null}" \
+            '{action:$action,set:$set,outcome:$outcome,cacheHit:$hit,seconds:($elapsed/1000),archiveBytes:$bytes}' \
+            | tee ci-fast-evidence/cache-restore-database.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Install locked dependencies
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Measure hidden
+        run: node scripts/ci-hosted/ci-fast-measure.cjs hidden
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-fast-hidden
+          path: ci-fast-evidence/
+          retention-days: 5

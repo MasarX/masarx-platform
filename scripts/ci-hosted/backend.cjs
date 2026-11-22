@@ -173,7 +173,7 @@ async function backendLint(summary, commands, execute, file = 'ci-reports/db-lin
     });
   } catch (error) { lint.ok = false; lint.failure ||= sanitize(error.message); console.error(sanitize(error.message)); }
 }
-async function qualify(diagnostic) {
+async function qualify(diagnostic, measurement) {
   const pins = JSON.parse(fs.readFileSync('config/ci/hosted-supabase-images.json', 'utf8'));
   const pinState = imagePreflight(completePins(pins) ? '' : mainSwitch(), process.env.GITHUB_EVENT_NAME, new Date(), process.env.GITHUB_REF, pins);
   diagnostic.imagePolicy = { mode: pinState.qualificationOnly ? 'qualification-only' : 'digest-pinned', decision: 'not_started', allowed: 0, denied: 0, denials: [] };
@@ -220,8 +220,8 @@ async function qualify(diagnostic) {
     }
     diagnostic.stage = 'prepare-inputs';
     const [dependencies, images] = await Promise.allSettled([
-      stage(summary, 'npm-install', () => install((command, args) => checked(command, args, env, undefined, { logPrefix: '[npm] ' }))),
-      pinState.qualificationOnly ? undefined : stage(summary, 'image-pulls', () => prepareImages(pins, {
+      measurement?.installed ? undefined : stage(summary, 'npm-install', () => install((command, args) => checked(command, args, env, undefined, { logPrefix: '[npm] ' }))),
+      pinState.qualificationOnly ? undefined : stage(summary, 'image-pulls', () => (measurement?.images || prepareImages)(pins, {
         env, checked, timed: (name, action) => stage(summary, name, action), summary, dockerRoot, logFile, checkDisk: () => diskFloor(dockerRoot),
       })),
     ]);
@@ -256,20 +256,21 @@ async function qualify(diagnostic) {
     fs.mkdirSync(path.join(sb, 'migrations'));
     diagnostic.stage = 'stack-configuration';
     const originalConfig = fs.readFileSync('supabase/config.toml', 'utf8');
-    const buckets = bucketSections(originalConfig);
+    const buckets = measurement?.minimal ? '' : bucketSections(originalConfig);
+    const exclude = measurement?.minimal ? [...lane.exclude, 'gotrue', 'storage-api', 'kong'] : lane.exclude;
     summary.stackPorts = await hostedStackPorts();
     const { shadowPort, apiPort, dbPort } = summary.stackPorts;
     fs.writeFileSync(path.join(sb, 'config.toml'), [
-      `project_id = "${project}"`, '[api]', 'enabled = true', `port = ${apiPort}`, 'schemas = ["api"]',
+      `project_id = "${project}"`, '[api]', `enabled = ${!measurement?.minimal}`, `port = ${apiPort}`, 'schemas = ["api"]',
       'extra_search_path = ["public", "extensions"]', '[db]', `port = ${dbPort}`,
       `shadow_port = ${shadowPort}`, `major_version = ${major}`, '[db.seed]', 'enabled = false',
-      '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', 'enabled = true',
-      'site_url = "http://127.0.0.1:3001"', '[storage]', 'enabled = true', '', buckets,
+      '[studio]', 'enabled = false', '[analytics]', 'enabled = false', '[auth]', `enabled = ${!measurement?.minimal}`,
+      'site_url = "http://127.0.0.1:3001"', '[storage]', `enabled = ${!measurement?.minimal}`, '', buckets,
     ].join('\n'), { mode: 0o600 });
     diagnostic.stage = 'stack-start';
     started = true; // A partial start must also be stopped.
-    console.log(`Stack service exclusions: ${lane.exclude.join(',')}`);
-    await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 6 * 60000));
+    console.log(`Stack service exclusions: ${exclude.join(',')}`);
+    await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', exclude.join(',')], cliEnv, 6 * 60000));
     diagnostic.stage = 'stack-status';
     const status = JSON.parse(await checked(cli, ['status', '--workdir', temp, '-o', 'json'], cliEnv, undefined, { quiet: true }));
     if (!status.DB_URL) throw new Error('Local stack did not provide DB_URL');
@@ -282,6 +283,7 @@ async function qualify(diagnostic) {
     const { Client } = require('pg');
     const db = new Client({ connectionString: env.DATABASE_URL, connectionTimeoutMillis: 15000, query_timeout: 15000 });
     await db.connect();
+    let dbClosed = false;
     try {
       const history = await db.query("select to_regclass('supabase_migrations.schema_migrations') as history");
       if (history.rows[0].history) {
@@ -300,12 +302,21 @@ async function qualify(diagnostic) {
         if (reloaded.trim() !== 't') throw new Error('Could not reload the pg_cron launch control');
         await waitForCronPause(db);
       });
-      const versions = migrationInventory(fs.readdirSync('supabase/migrations'));
+      if (measurement?.beforeReplay) {
+        if (measurement.beforeOnly) {
+          dbClosed = true;
+          await db.end();
+        }
+        await measurement.beforeReplay({ cli, cliEnv, temp, project, checked, timed, summary });
+        if (measurement.beforeOnly) { summary.ok = true; return; }
+      }
+      const migrationDirectory = measurement?.migrationDirectory || path.join(root, 'supabase/migrations');
+      const versions = migrationInventory(fs.readdirSync(migrationDirectory));
       fs.rmdirSync(path.join(sb, 'migrations'));
-      fs.symlinkSync(path.join(root, 'supabase/migrations'), path.join(sb, 'migrations'), 'dir');
+      fs.symlinkSync(migrationDirectory, path.join(sb, 'migrations'), 'dir');
       diskFloor(dockerRoot);
       // The pinned CLI reuses one connection and batches statements per file, retaining migration history.
-      const files = fs.readdirSync('supabase/migrations').filter(name => name.endsWith('.sql')).sort();
+      const files = fs.readdirSync(migrationDirectory).filter(name => name.endsWith('.sql')).sort();
       const progress = migrationProgress(files, summary);
       let migrationError;
       try {
@@ -351,7 +362,12 @@ async function qualify(diagnostic) {
         throw new Error('pg_cron launch isolation failed during migration replay');
       }
       console.log(`Migration cron isolation: ${JSON.stringify(summary.cron)}`);
-    } finally { await db.end(); }
+    } finally { if (!dbClosed) await db.end(); }
+    if (measurement?.afterReplay) {
+      await measurement.afterReplay({ cli, cliEnv, temp, project, checked, timed, summary });
+      summary.ok = true;
+      return;
+    }
     if (shard) {
       const databasePin = pins.find(pin => pin.role === 'database');
       local.writePsqlWrapper(bin, databasePin.runtimeId);
@@ -428,4 +444,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum };
+module.exports = { qualify, bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum };
