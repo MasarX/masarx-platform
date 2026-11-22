@@ -152,24 +152,107 @@ test.each([
   expect(stored).not.toContain(alphaMarker);
 });
 
-test("scans 8 KiB of credential-family near matches with linear work", () => {
+const credentialSuffixKeys = [
+  "codeverifier", "clientassertion", "oauthverifier", "samlassertion", "setcookie", "proxyauthorization",
+  "proxyauth", "basicauth", "httpauth", "authcookie", "sessioncookie", "sentrydsn", "expopublicsentrydsn",
+  "xsentryauth", "dbpwd", "postgrespwd", "xmsxsignature", "xhubsignature", "xsignature", "webhooksignature",
+  ["x", "masarx", "deprecated", "auth"].join(""),
+  ...["cookies", "sig", "passwd", "pass", "password", "passphrase", "secret", "token", "tokens", "credential",
+    "credentials", "key", "apikey", "pin", "otp", "sessid", "sessionid", "jwt"].map(suffix => `x${suffix}`),
+];
+const newCredentialKeys = [
+  ...credentialSuffixKeys.flatMap(key => [key, key.toUpperCase()]),
+  "POSTGRES_URL_NON_POOLING", "postgres_url_non_pooling", "postgres-url-non-pooling", "postgres.url.non.pooling",
+  "postgresUrlNonPooling", "PostgresURLNonPooling", "primaryMongoUriReadOnly", "postgresurlnonpooling",
+  "POSTGRESURLNONPOOLING", "POSTGRESURL", "postgresurl", "database url", "database+url", "d4t4b4seurl",
+  "sqlAlchemyUri", "SQLAlchemyUri", "postgreSQLUrl", "mySQLUrl",
+  "service_role", "SERVICE_ROLE", "serviceRole",
+];
+
+async function expectWithheldThroughSync(input: string, error: unknown = input) {
+  expect(redactOutboxErrorText(input)).toBe(withheld);
+  const outbox = createOutbox(createMemoryOutboxStore());
+  const { id } = await outbox.enqueue({ rpc: "record_action", args: {} });
+  await outbox.sync(async () => { throw error; });
+  const stored = (await outbox.get(id))?.last_error;
+  expect(stored).toMatch(/^\[REDACTED: message withheld\](?: \(auth\))?$/);
+  expect(stored).not.toContain(alphaMarker);
+}
+
+test.each(newCredentialKeys)("withholds the value of %s across separators, quotes and encodings", async key => {
+  const json = JSON.stringify({ [key]: alphaMarker });
+  const inputs = [
+    ...["=", ": ", " => ", " := ", " ", "\t"].map(separator => `${key}${separator}${alphaMarker}`),
+    `'${key}' = '${alphaMarker}'`, `"${key}" "${alphaMarker}"`, json, JSON.stringify(json),
+    json.replace(/"/g, () => String.raw`\u0022`), json.replace(/"/g, "&quot;").replace(":", "&#58;"),
+    `${key}&#61;${alphaMarker}`, `${key}&#x3d;${alphaMarker}`,
+  ];
+  for (let input of inputs) {
+    for (let depth = 0; depth <= 8; depth += 1) {
+      await expectWithheldThroughSync(input);
+      input = encodeURIComponent(input);
+    }
+  }
+});
+
+const callbackUrl = ["masarx", "://", "callback"].join("");
+const oauthResponses = [
+  { code: alphaMarker, state: "waiting" },
+  { state: "waiting", code: alphaMarker },
+  { code: alphaMarker, code_verifier: betaMarker },
+];
+const oauthResponseWithQuotes = {
+  code: alphaMarker, detail: 'Escaped ", "quotes"', state: "waiting",
+};
+
+test.each([
+  JSON.stringify(oauthResponseWithQuotes),
+  encodeURIComponent(JSON.stringify(oauthResponseWithQuotes)),
+])("withholds authorization codes beside escaped JSON values (%#)", async input => {
+  await expectWithheldThroughSync(input);
+});
+
+test.each([
+  ...["?", "?other=value&", "#", "#other=value&"].map(query => `${callbackUrl}${query}code=${alphaMarker}`),
+  ...["?", "&", "#"].map(query => `${query}code=${alphaMarker}`),
+  ...oauthResponses.flatMap(response => [
+    JSON.stringify(response), JSON.stringify(JSON.stringify(response)), JSON.stringify({ response }),
+    JSON.stringify({ response: JSON.stringify(response) }),
+    JSON.stringify(response).replace(/"/g, () => String.raw`\u0022`),
+    JSON.stringify(response).replace(/"/g, "&quot;"),
+  ]),
+])("withholds authorization codes in callbacks and OAuth response objects (%#)", async input => {
+  for (let depth = 0; depth <= 8; depth += 1) {
+    await expectWithheldThroughSync(input);
+    input = encodeURIComponent(input);
+  }
+});
+
+test.each(oauthResponses)("withholds authorization codes when sync receives an OAuth response object (%#)",
+  async response => expectWithheldThroughSync(JSON.stringify(response), response));
+
+function countRegexSteps(input: string) {
   const exec = RegExp.prototype.exec;
+  let steps = 0;
+  const spy = jest.spyOn(RegExp.prototype, "exec").mockImplementation(function (this: RegExp, value: string) {
+    const match = exec.call(this, value);
+    steps += 1 + (this.global ? (match?.[0].length ?? 0) : 0);
+    return match;
+  });
+  let output: string;
+  try { output = redactOutboxErrorText(input); }
+  finally { spy.mockRestore(); }
+  expect(output).toBe(input);
+  return steps;
+}
+
+test("scans 8 KiB of credential-family near matches with linear work", () => {
   function countSteps(size: number) {
     const repeats = Math.floor((size - 64) / 18);
     const input = ["x:".repeat(repeats) + atSign, "abc-".repeat(repeats) + "code",
       "def-".repeat(repeats) + "uri", "ghi-".repeat(repeats) + "phrase",
       "word".repeat(repeats) + atSign + "host"].join(" ").padEnd(size);
-    let steps = 0;
-    const spy = jest.spyOn(RegExp.prototype, "exec").mockImplementation(function (this: RegExp, value: string) {
-      const match = exec.call(this, value);
-      steps += 1 + (this.global ? (match?.[0].length ?? 0) : 0);
-      return match;
-    });
-    let output: string;
-    try { output = redactOutboxErrorText(input); }
-    finally { spy.mockRestore(); }
-    expect(output).toBe(input);
-    return steps;
+    return countRegexSteps(input);
   }
   const half = countSteps(4096);
   expect(half).toBeGreaterThan(0);
@@ -209,8 +292,14 @@ test("retains the PostgreSQL 23505 category when the key diagnostic is withheld"
 test.each([
   "\u062a\u0639\u0630\u0631 \u062d\u0641\u0638 \u0627\u0644\u0637\u0644\u0628",
   "تَعَذَّرَ حِفْظُ الطَّلَبِ",
-  "shipping label failed", "Author not found", "compass heading", "monkey nearby", "Request timed out",
+  "shipping label failed", "Author not found", "Authors not found", "compass heading", "monkey nearby", "Request timed out",
   "keyboard=enabled", "code=409", '{"code":"PGRST301"}', "HTTP \u0664\u0660\u0669",
+  "feedbackUrl=missing", "sandboxUrl=missing", "upgradeUrl=missing", "metadataBaseUrl=missing", "code=missing",
+  '{"code":"PGRST301","detail":{"state":"waiting"}}',
+  '{"state":"waiting","detail":{"code":"PGRST301"}}',
+  '{"code":"PGRST301","detail":"state: waiting"}',
+  JSON.stringify({ code: "PGRST301", detail: JSON.stringify({ state: "waiting" }) }),
+  JSON.stringify({ code: "PGRST301", detail: 'Escaped ", "state": "waiting"' }),
   "nonce=missing ticket=missing seed=missing code=missing",
   "device_code_state=missing redis_region=missing",
   `pat=missing support_pat=missing SESS${shortHexSuffix}=missing`,
@@ -297,12 +386,11 @@ test.each([
   expect(redactOutboxErrorText(input)).toBe(expected);
 });
 
-test("processes 8 KiB of repeated x- in under 20 ms", () => {
+test("processes 8 KiB of repeated x- with bounded scan steps", () => {
   const input = "x-".repeat(4096);
-  const start = performance.now();
-  const output = redactOutboxErrorText(input);
-  expect(performance.now() - start).toBeLessThan(20);
-  expect(output).toBe(input);
+  const half = countRegexSteps(input.slice(0, input.length / 2));
+  expect(half).toBeGreaterThan(0);
+  expect(countRegexSteps(input)).toBeLessThanOrEqual(half * 3);
 });
 
 test.each([8191, 8192])("withholds a message with an emoji at index %i", index => {

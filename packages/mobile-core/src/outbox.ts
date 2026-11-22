@@ -443,14 +443,17 @@ const ARABIC_RANGES = String.raw`\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\
 const ARABIC_BLOCK = new RegExp(`[${ARABIC_RANGES}]`, "u");
 const OUTSIDE_ALLOWED_CHARACTERS = new RegExp(String.raw`[^\t\n\r\x20-\x7e${ARABIC_RANGES}]`, "u");
 const NORMALIZATION_REMOVALS = /[\p{M}\p{Cf}\u115f\u1160\u3164\uffa0\u2800]|(?![\t\n\r])\p{Cc}/gu;
-const SENSITIVE_TERM = /password|secret|token|credential|connectionstring|databaseurl/;
+const SENSITIVE_TERM = /password|secret|token|credential|connectionstring/;
 const SENSITIVE_COMPONENT = /^(?:pass|passwd|password|passcode|pwd|pw|pin|otp|secret|token|key|apikey|auth|credentials?|signature|sig|session|sid|sessid|cookies?|bearer|jwt|private|authorization|unauthorized|authentication|(?:un)?authenticated|passphrase|sessionids?|privatekey|accesskey|verifier|assertion|saml(?:response|art)?|creds|hmac|whsec|mnemonic|jwk|sas|dsn|sharedaccesssignature)$/i;
-const SENSITIVE_SUFFIX = /(?:pass|passwd|key|secret|token|pin|otp|sessid)$/i;
+const SENSITIVE_SUFFIX = /(?:verifier|assertion|cookies?|authorization|auth|dsn|signature|sig|pwd|passwd|pass|password|passphrase|secret|tokens?|credentials?|key|pin|otp|sessid|sessionid|jwt)$/;
 const CODE_QUALIFIER = /otp|mfa|2fa|verification|verify|recovery|backup|device|user|auth|reset|sms|email|login|pairing/;
-const CONNECTION_QUALIFIER = /db|database|redis|mongo|postgres|pg|mysql|amqp|rabbit|broker|cache|sqlalchemy|jdbc/;
+const CONNECTION_QUALIFIER = /db|database|redis|mongo(?:db)?|postgres(?:ql)?|pg|mysql|amqp|rabbit(?:mq)?|broker|cache|sqlalchemy|jdbc/;
+const CONNECTION_COMPONENT = new RegExp(`^(?:${CONNECTION_QUALIFIER.source})$`);
+const JOINED_CONNECTION = new RegExp(`(?:${CONNECTION_QUALIFIER.source})(?:url|uri)`);
+const DATABASE_URL_PROSE = /\bd[a4]t[a4]b[a4][s5][e3][\s+/*\u00b7]*url\b/i;
 const PHRASE_QUALIFIER = /seed|recovery|pass|secret/;
 const PHRASE_COMPONENT = new RegExp(`^(?:${PHRASE_QUALIFIER.source})$`);
-const STACK_KEY = /^(?:remember(?:me)?|csrf|xsrf|crumb|antiforgery|aspxauth|authtok|bindpw|rootpw|masterauth|sessionsso|jsessionidsso|smsession|oobcode|dockerconfigjson)$/;
+const STACK_KEY = /^(?:remember(?:me)?|csrf|xsrf|crumb|antiforgery|aspxauth|authtok|bindpw|rootpw|masterauth|sessionsso|jsessionidsso|smsession|oobcode|dockerconfigjson|servicerole)$/;
 const STACK_KEY_PREFIX = /^(?:\.aspnetcore\.|wordpress_(?:logged_in|sec)_|aspsessionid|s?sess[0-9a-f]{16}|castgc|iplanetdirectorypro)/;
 const PAT_PROVIDER = /^(?:github|gh|gitlab|glpat)$/;
 const ORDINARY_WORD = /^(?:monkey|compass)$/i;
@@ -478,16 +481,18 @@ function hasUserinfo(text: string) {
 
 function hasSensitiveTerm(text: string) {
   const compact = text.toLowerCase().replace(/[-_.\s+/*\u00b7]/g, "");
-  if (SENSITIVE_TERM.test(compact) || SENSITIVE_TERM.test(compact.replace(/[013457]/g, digit => LEET_LETTERS[digit] ?? digit))) {
+  if (SENSITIVE_TERM.test(compact) || DATABASE_URL_PROSE.test(text) ||
+      SENSITIVE_TERM.test(compact.replace(/[013457]/g, digit => LEET_LETTERS[digit] ?? digit))) {
     return true;
   }
   // Scanning identifiers independently of their separators covers quotes and whitespace.
-  for (const [identifier] of text.matchAll(/\.?[a-z0-9]+(?:[_.-]+[a-z0-9]+)*/gi)) {
+  for (const [match, identifier] of text.matchAll(/\.?([a-z0-9]+(?:[_.-]+[a-z0-9]+)*)/gi)) {
+    if (STACK_KEY_PREFIX.test(match.toLowerCase())) return true;
     const lower = identifier.toLowerCase();
-    if (STACK_KEY_PREFIX.test(lower)) return true;
     const segments = lower.split(/[_.-]+/);
     const components = identifier === lower ? segments : identifier
       .replace(/(^|[_.-])2[fF][aA](?=[_.A-Z-]|$)/g, (_match, boundary) => `${boundary}2fa`)
+      .replace(/sqlalchemy|postgresql|mysql/gi, name => name[0] + name.slice(1).toLowerCase())
       .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
       .replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[_. -]+/);
     const parts = components === segments ? segments : segments.concat(components);
@@ -495,29 +500,83 @@ function hasSensitiveTerm(text: string) {
     const joined = segments.join("");
     if (STACK_KEY.test(joined) || (joined.includes("oauth2") && joined.includes("proxy"))) return true;
     if (parts.includes("pat") && parts.some(part => PAT_PROVIDER.test(part))) return true;
-    if (/(?:sessionid|sid)$/.test(joined) || /^(?:conn|connstr|connectionstring|dsn)$/.test(joined)) return true;
+    if (joined.endsWith("sid") || /^(?:conn|connstr|connectionstring|dsn)$/.test(joined)) return true;
+    if (SENSITIVE_SUFFIX.test(joined) && !ORDINARY_WORD.test(segments.at(-1) ?? "")) return true;
     const codeStart = joined.search(/codes?$/);
     if (codeStart >= 0 && CODE_QUALIFIER.test(joined.slice(0, codeStart))) return true;
-    if (/(?:url|uri)$/.test(joined) && CONNECTION_QUALIFIER.test(joined.slice(0, -3))) return true;
+    if ((components.includes("url") || components.includes("uri")) &&
+        components.some(component => CONNECTION_COMPONENT.test(component))) return true;
+    if (components.length === 1 && (JOINED_CONNECTION.test(joined) ||
+        (/(?:url|uri)$/.test(joined) && CONNECTION_QUALIFIER.test(joined.slice(0, -3))))) return true;
     if (joined.endsWith("phrase") && PHRASE_QUALIFIER.test(joined.slice(0, -6))) return true;
     if (components.includes("phrase") && components.some(component => PHRASE_COMPONENT.test(component))) return true;
-    const lastSegment = segments.at(-1) ?? "";
-    if (SENSITIVE_SUFFIX.test(lastSegment) && !ORDINARY_WORD.test(lastSegment)) return true;
+  }
+  return false;
+}
+
+function readOAuthJson(text: string, depth = 0): boolean | undefined {
+  if (!/^\s*[[{"]/.test(text) || !/\bcode\b/i.test(text)) return undefined;
+  let found = false;
+  try {
+    JSON.parse(text, (_key, value: unknown) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const fields = Object.keys(value).map(key => key.toLowerCase());
+        found ||= fields.includes("code") && (fields.includes("state") || fields.includes("code_verifier"));
+      } else if (typeof value === "string" && depth < MAX_ERROR_DECODE_PASSES) {
+        found ||= readOAuthJson(value, depth + 1) ?? hasEmbeddedOAuthJson(value);
+      }
+      return value;
+    });
+    return found;
+  } catch {
+    return undefined;
+  }
+}
+
+function hasEmbeddedOAuthJson(text: string) {
+  if (!/"code"\s*:/i.test(text)) return false;
+
+  const containers: (Set<string> | null)[] = [];
+  let previous = "";
+  // Decoding a serialized object can leave an extra quote around its braces.
+  const tokens = /"(?=\s*{\s*")|(})"(?=\s*[,}\]]|$)|"((?:[^"\\]|\\[\s\S])*)"(\s*:)?|[{}[\],]|[^\s"{}[\],]+/g;
+  for (const [match, closingBrace, key, colon] of text.matchAll(tokens)) {
+    const token = closingBrace ?? match;
+    if (token === "{") containers.push(new Set());
+    else if (token === "[") containers.push(null);
+    else if (token === "}" || token === "]") containers.pop();
+    else if (colon && (previous === "{" || previous === ",")) {
+      const fields = containers.at(-1);
+      const field = key.toLowerCase();
+      if (fields && /^(?:code|state|code_verifier)$/.test(field)) {
+        fields.add(field);
+        if (fields.has("code") && fields.size > 1) return true;
+      }
+    }
+    previous = token;
   }
   return false;
 }
 
 function shouldWithholdError(output: string) {
   let text = output.replace(/\[(?:JWT_)?REDACTED\]/g, "[]");
+  let parsedOAuthJson = false;
   for (let pass = 0; pass < MAX_ERROR_DECODE_PASSES; pass += 1) {
     // Check before decoding reserved URL characters that can be part of a password.
     if (hasUserinfo(text)) return true;
-    const next = text
+    const percentDecoded = text
       .replace(/%u([\da-f]{4})/gi, (_escape, unicode) => String.fromCharCode(parseInt(unicode, 16)))
       .replace(PERCENT_CHARACTER, (escape) => {
         try { return decodeURIComponent(escape); }
         catch { return escape; }
-      })
+      });
+    // Read structured JSON before decoding escapes that could look like field delimiters.
+    if (!parsedOAuthJson) {
+      const found = readOAuthJson(text) ?? (percentDecoded !== text ? readOAuthJson(percentDecoded) : undefined);
+      if (found) return true;
+      parsedOAuthJson = found === false;
+    }
+    const next = percentDecoded
       .replace(/\\(?:u(?:([\da-f]{4})|\{([\da-f]{1,6})\})|x([\da-f]{2})|([0-7]{3})|(["'\\/]))/gi,
         (escape, unicode, codePoint, byte, octal, literal) => {
           if (literal !== undefined) return literal;
@@ -537,7 +596,8 @@ function shouldWithholdError(output: string) {
       const normalized = decomposed.replace(NORMALIZATION_REMOVALS, "");
       if (OUTSIDE_ALLOWED_CHARACTERS.test(normalized) || UNKNOWN_NAMED_ENTITY.test(normalized)) return true;
       if (normalized.split(/\s+/).some(token => /[a-z]/i.test(token) && ARABIC_BLOCK.test(token))) return true;
-      if (hasUserinfo(normalized) || hasSensitiveTerm(normalized)) return true;
+      if (hasUserinfo(normalized) || hasSensitiveTerm(normalized) || /[?&#]code=/i.test(normalized) ||
+          (!parsedOAuthJson && hasEmbeddedOAuthJson(normalized))) return true;
       // An unrecognized escape can also be a path separator before a key, as in \token.
       const withoutEscapes = normalized.replace(/\\[\s\S]/g, "");
       if (withoutEscapes !== normalized && (hasUserinfo(withoutEscapes) || hasSensitiveTerm(withoutEscapes))) return true;
