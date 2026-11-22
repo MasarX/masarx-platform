@@ -8,6 +8,7 @@
 BEGIN;
 SELECT pg_advisory_xact_lock(hashtext('20261122029007_public_tracking_request_order_sequence_v1'));
 SET LOCAL search_path TO public, extensions, pg_temp;
+SET LOCAL lock_timeout = '5s';
 
 CREATE SEQUENCE public.public_tracking_request_order_seq;
 REVOKE ALL ON SEQUENCE public.public_tracking_request_order_seq FROM PUBLIC, anon, authenticated;
