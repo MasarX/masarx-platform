@@ -1933,6 +1933,10 @@ describe('BillingModule — Phase B5/C4 mutation wiring', () => {
       expect((clientSelect as HTMLSelectElement).value).toBeTruthy();
     });
     const createBtn = await screen.findByRole('button', { name: 'Create draft' });
+    await waitFor(() => {
+      expect(screen.getByLabelText('Currency')).toHaveValue('SAR');
+      expect(createBtn).toBeEnabled();
+    });
     await user.click(createBtn);
 
     await waitFor(() => {
@@ -2091,6 +2095,10 @@ describe('BillingModule — Phase B5/C4 mutation wiring', () => {
     const clientSelect = await screen.findByLabelText('Client');
     await waitFor(() => {
       expect((clientSelect as HTMLSelectElement).value).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText('Currency')).toHaveValue('SAR');
+      expect(screen.getByRole('button', { name: 'Create draft' })).toBeEnabled();
     });
     await user.click(await screen.findByRole('button', { name: 'Create draft' }));
 
