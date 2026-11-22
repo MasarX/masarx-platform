@@ -4,25 +4,16 @@
 
 - Repository: https://github.com/MasarX/masarx-platform · main branch: main
 - Board (private): https://github.com/orgs/MasarX/projects/9 · Project brief: the board README
-- Environments: [delivery environments](DELIVERY.md#environments).
-- Release plan: [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
+- Environments: `ci` and `dev` are active. `stg` and `prod` are configured. See [delivery environments](DELIVERY.md#environments).
+- Release plan: v0.1.0 is current and v0.2.0 is next. See [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
 - Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX Design"
 - UI project: yes
 - Other repos: none
-- Other definition files: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md)
+- Links: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md), the portfolio engineering standard and the portfolio orchestration skill.
 
 ## Product and current goal
 
 MasarX helps delivery teams manage shipments and coordinate integrations, warehouse activity, field execution and customer communication. The first staging release serves delivery operators, field teams and customers who need shipment status and delivery options. See `docs/product/mission.md` for the product mission.
-
-## Commands
-
-- Set up: use the Node.js version in `.nvmrc` and run `npm ci --ignore-scripts` at the repository root.
-- Run locally: `npm run dev:console:v2`, `npm run dev:console`, `npm run dev:portal`, `npm run dev:fieldops` or `npm run dev:landing`. See `docs/guides/LOCAL_SETUP.md` for backend setup.
-- Affected tests: run `npm run ci:local:impact -- --base-ref origin/main` against the intended base, substituting its ref when needed. The `ci` workflow in `.github/workflows/public-ci.yml` selects affected jobs for pull requests.
-- Full tests: the same workflow runs the full hosted CI graph on `merge_group`. Use `npm run ci:local:strict` for strict local qualification. See `docs/guides/TESTING_GUIDE.md` for the suite commands and backend requirements.
-- pgTAP: `npm run test:pgtap` uses `psql` and a configured, isolated PostgreSQL test database with the Supabase schema and fixtures. Verify the target before running database tests.
-- Lint: `npm run lint:frontend`, `npm run lint:structure`, `npm run lint:commands`, `npm run lint:docs:ssot`, `npm run lint:db` and `npm run lint:db:managed-grants`. Select the checks that cover the change.
 
 ## Architecture and single sources
 
@@ -36,6 +27,18 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 - `supabase/tests/pgtap/` contains database contract tests. `scripts/tests/run-pgtap-cloud.js` is the runner behind the root pgTAP script.
 - `scripts/` contains tooling for setup, CI, testing and deployment. `scripts/ci-hosted/changes.cjs` defines hosted CI change selection.
 - `tests/` contains application tests by suite. `config/ci/test-impact-map.json` defines test impact mapping.
+
+## Commands
+
+- Set up: use the Node.js version in `.nvmrc` and run `npm ci --ignore-scripts` at the repository root.
+- Lint: `npm run lint:frontend`, `npm run lint:structure`, `npm run lint:commands`, `npm run lint:docs:ssot`, `npm run lint:db` and `npm run lint:db:managed-grants`. Select the checks that cover the change.
+- Format Console V2: `npm --prefix apps/console-v2 run format`.
+- Typecheck: `npm run typecheck:frontend`, `npm --prefix apps/console-v2 run typecheck`, or `npm run typecheck:fieldops`.
+- Affected tests: run `npm run ci:local:impact -- --base-ref origin/main` against the intended base, substituting its ref when needed. The `ci` workflow in `.github/workflows/public-ci.yml` selects affected jobs for pull requests.
+- Full tests: the same workflow runs the full hosted CI graph on `merge_group`. Use `npm run ci:local:strict` for strict local qualification. See `docs/guides/TESTING_GUIDE.md` for the suite commands and backend requirements.
+- pgTAP: `npm run test:pgtap` uses `psql` and a configured, isolated PostgreSQL test database with the Supabase schema and fixtures. Verify the target before running database tests.
+- Build: run `npm run build` in the Console, Console V2 or Portal app directory, or `npm run build:landing` at the root.
+- Run locally: `npm run dev:console:v2`, `npm run dev:console`, `npm run dev:portal`, `npm run dev:fieldops` or `npm run dev:landing`. See `docs/guides/LOCAL_SETUP.md` for backend setup.
 
 ## Must-follow coding rules
 
