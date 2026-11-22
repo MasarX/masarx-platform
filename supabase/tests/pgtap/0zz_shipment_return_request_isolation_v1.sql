@@ -2,7 +2,7 @@ BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(6);
+SELECT plan(10);
 
 CREATE FUNCTION pg_temp.check_shipment_return_request_isolation()
 RETURNS SETOF TEXT
@@ -17,6 +17,9 @@ DECLARE
   v_key TEXT := gen_random_uuid()::text;
   v_client UUID;
   v_sender UUID;
+  v_other_client UUID := gen_random_uuid();
+  v_client_actor UUID := gen_random_uuid();
+  v_actor RECORD;
   v_input JSONB;
   v_result JSONB;
   v_first_status TEXT;
@@ -42,6 +45,37 @@ BEGIN
     VALUES (v_actors[i], v_orgs[i], v_actors[i] || '@example.test', 'Return test operator', 'ops_admin', 'active', 'tenant');
     INSERT INTO public.shipments (id, organization_id, client_id, sender_id, tracking_number, service_type, status)
     VALUES (v_shipments[i], v_orgs[i], v_client, v_sender, 'RETURN-TEST-' || v_shipments[i], 'delivery', 'delivered');
+  END LOOP;
+
+  INSERT INTO public.clients (id, organization_id, name, slug, status)
+  VALUES (v_other_client, v_orgs[1], 'Return test client', 'return-test-' || v_other_client, 'active');
+  INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type, access_scope_id)
+  VALUES (v_client_actor, v_orgs[1], v_client_actor || '@example.test', 'Return test operator', 'ops_admin', 'active', 'client', v_other_client);
+
+  FOR v_actor IN
+    SELECT * FROM (VALUES
+      (v_actors[2], v_orgs[2], 'tenant', 'cross-tenant'),
+      (v_client_actor, v_orgs[1], 'client', 'cross-client')
+    ) AS callers(user_id, organization_id, scope_type, boundary)
+  LOOP
+    PERFORM set_config('request.jwt.claim.sub', v_actor.user_id::text, TRUE);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', TRUE);
+    PERFORM set_config('request.jwt.claims', jsonb_build_object(
+      'role', 'authenticated', 'sub', v_actor.user_id, 'organization_id', v_actor.organization_id,
+      'access_scope_type', v_actor.scope_type
+    )::text, TRUE);
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    RETURN NEXT throws_ok(
+      format('SELECT public.shipment_return_request_v1(%L::jsonb)',
+        jsonb_build_object('shipment_id', v_shipments[1], 'operation', 'return')),
+      '42501',
+      format('shipment amend/cancel forbidden or shipment not found: %s', v_shipments[1]),
+      v_actor.boundary || ' caller is denied by shipment scope'
+    );
+    EXECUTE 'RESET ROLE';
+    RETURN NEXT is((SELECT COUNT(*) FROM public.workflow_runs
+                     WHERE context->>'original_shipment_id' = v_shipments[1]::text),
+                   0::bigint, v_actor.boundary || ' refusal creates no workflow run for the target shipment');
   END LOOP;
 
   FOR i IN 1..2 LOOP
