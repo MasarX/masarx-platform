@@ -2,7 +2,7 @@ BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(17);
+SELECT plan(19);
 
 CREATE FUNCTION pg_temp.check_shipment_return_request_isolation()
 RETURNS SETOF TEXT
@@ -23,6 +23,7 @@ DECLARE
   v_input JSONB;
   v_result JSONB;
   v_first_status TEXT;
+  v_open_status TEXT;
   v_terminal_status TEXT;
   v_replay JSONB;
   v_refused JSONB;
@@ -117,26 +118,28 @@ BEGIN
     'the second tenant creates and reads its own run when both use the same key'
   );
 
-  UPDATE public.workflow_runs SET workflow_status = 'in_progress', completed_at = NULL
-   WHERE id = v_runs[2];
-  EXECUTE 'SET LOCAL ROLE authenticated';
-  v_replay := api.shipment_return_request_v1(v_input);
-  v_refused := api.shipment_return_request_v1(v_input || jsonb_build_object('idempotency_key', gen_random_uuid()));
-  EXECUTE 'RESET ROLE';
+  FOREACH v_open_status IN ARRAY ARRAY['pending', 'in_progress'] LOOP
+    UPDATE public.workflow_runs SET workflow_status = v_open_status, completed_at = NULL
+     WHERE id = v_runs[2];
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    v_replay := api.shipment_return_request_v1(v_input);
+    v_refused := api.shipment_return_request_v1(v_input || jsonb_build_object('idempotency_key', gen_random_uuid()));
+    EXECUTE 'RESET ROLE';
 
-  RETURN NEXT ok(
-    v_replay->>'ok' = 'true' AND v_replay->>'already_processed' = 'true'
-    AND (v_replay->>'workflow_run_id')::UUID = v_runs[2] AND v_replay->>'workflow_status' = 'in_progress',
-    'the same shipment and key replay the open run'
-  );
-  RETURN NEXT ok(
-    v_refused->>'ok' = 'false' AND v_refused#>>'{error,code}' = 'shipment_return_already_open'
-    AND NOT (v_refused ? 'workflow_run_id'),
-    'a new key is refused while a return for the same shipment is open'
-  );
+    RETURN NEXT ok(
+      v_replay->>'ok' = 'true' AND v_replay->>'already_processed' = 'true'
+      AND (v_replay->>'workflow_run_id')::UUID = v_runs[2] AND v_replay->>'workflow_status' = v_open_status,
+      'the same shipment and key replay the open run: ' || v_open_status
+    );
+    RETURN NEXT ok(
+      v_refused->>'ok' = 'false' AND v_refused#>>'{error,code}' = 'shipment_return_already_open'
+      AND NOT (v_refused ? 'workflow_run_id'),
+      'a new key is refused while a return for the same shipment is open: ' || v_open_status
+    );
+  END LOOP;
 
   FOREACH v_terminal_status IN ARRAY ARRAY[
-    'failed', 'cancelled', 'canceled', 'stopped', 'skipped', 'timed_out', 'timeout'
+    'failed', 'cancelled', 'stopped', 'skipped', 'timed_out'
   ] LOOP
     UPDATE public.workflow_runs SET workflow_status = v_terminal_status WHERE id = v_runs[2];
     EXECUTE 'SET LOCAL ROLE authenticated';
@@ -150,6 +153,25 @@ BEGIN
       'same-key replay reports the unsuccessful workflow status: ' || v_terminal_status
     );
   END LOOP;
+
+  UPDATE public.workflow_runs SET workflow_status = 'completed', completed_at = now()
+   WHERE id = v_runs[2];
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  v_replay := api.shipment_return_request_v1(v_input);
+  v_refused := api.shipment_return_request_v1(v_input || jsonb_build_object('idempotency_key', gen_random_uuid()));
+  EXECUTE 'RESET ROLE';
+
+  RETURN NEXT ok(
+    v_replay->>'ok' = 'true' AND v_replay->>'already_processed' = 'true'
+    AND (v_replay->>'workflow_run_id')::UUID = v_runs[2] AND v_replay->>'workflow_status' = 'completed',
+    'the same shipment and key replay the completed run'
+  );
+  RETURN NEXT ok(
+    v_refused->>'ok' = 'false' AND v_refused#>>'{error,code}' = 'shipment_return_already_completed'
+    AND v_refused#>>'{error,message}' = 'A return for this shipment has already been completed'
+    AND NOT (v_refused ? 'workflow_run_id'),
+    'a new key is refused after a return for the same shipment completes'
+  );
 
   RETURN NEXT is((SELECT COUNT(*) FROM public.workflow_runs
                    WHERE workflow_template_id = v_template

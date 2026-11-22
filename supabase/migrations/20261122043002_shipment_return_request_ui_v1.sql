@@ -473,7 +473,7 @@ BEGIN
     encode(digest(lower(v_idempotency_key), 'sha256'), 'hex')
   );
 
-  -- Serialize replay and open-run admission for this shipment.
+  -- Serialize replay and return admission for this shipment.
   PERFORM pg_advisory_xact_lock(hashtextextended('shipment_return:' || v_shipment_id::text, 0));
 
   SELECT wr.id, wr.workflow_status
@@ -546,6 +546,25 @@ BEGIN
     RETURN jsonb_build_object(
       'ok', FALSE,
       'error', jsonb_build_object('code', 'shipment_return_already_open')
+    );
+  END IF;
+
+  -- A run can complete between checks, so check completion after open runs.
+  IF EXISTS (
+    SELECT 1
+      FROM public.workflow_runs wr
+      JOIN public.workflow_templates wt ON wt.id = wr.workflow_template_id
+     WHERE wt.name = v_template_name
+       AND wr.context->>'original_shipment_id' = v_shipment_id::text
+       AND wr.context->>'organization_id' = v_target.organization_id::text
+       AND wr.workflow_status = 'completed'
+  ) THEN
+    RETURN jsonb_build_object(
+      'ok', FALSE,
+      'error', jsonb_build_object(
+        'code', 'shipment_return_already_completed',
+        'message', 'A return for this shipment has already been completed'
+      )
     );
   END IF;
 
