@@ -301,6 +301,22 @@ test("redacts suffixed credential keys with quoted values", () => {
   expect(redactOutboxErrorText(source)).toBe('{"apiKeyValue":[REDACTED],"status":503}');
 });
 
+test.each([
+  ["encoded access token", "redirect_to=https%3A%2F%2Fapp%2Fcb%23access_token%3D"],
+  ["encoded ID token", "next=%2Fcb%3Fid_token%3D"],
+  ["underscore prefix", "x_"],
+  ["letter prefix", "abc"],
+])("redacts a JWT (%s)", (_label, prefix) => {
+  const { redactOutboxErrorText } = require("@masarx/mobile-core");
+  expect(redactOutboxErrorText(`${prefix}eyJfixture.payload.signature-%26status%3Dok`))
+    .toBe(`${prefix}[JWT_REDACTED]%26status%3Dok`);
+});
+
+test("redacts an attached Bearer credential", () => {
+  const { redactOutboxErrorText } = require("@masarx/mobile-core");
+  expect(redactOutboxErrorText("xBearer abc status=ok")).toBe("xBearer [REDACTED] status=ok");
+});
+
 test("client display labels never enter RPC or Edge executor arguments", async () => {
   const store = createMemoryOutboxStore();
   const outbox = createOutbox(store);
