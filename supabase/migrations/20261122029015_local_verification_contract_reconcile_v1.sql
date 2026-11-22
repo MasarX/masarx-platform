@@ -36,12 +36,11 @@ SELECT ld.id, v.value, v.label, v.description, v.sort_order, v.is_default, '{}':
   FROM public.lookup_definitions ld
   CROSS JOIN (
     VALUES
-      ('pending', 'Pending', 'Task has been created and is awaiting work.', 10, TRUE),
+      ('pending', 'Pending', 'Task has been created and is awaiting work.', 10, FALSE),
       ('assigned', 'Assigned', 'Task has an assigned owner.', 20, FALSE),
       ('in_progress', 'In progress', 'Task work has started.', 30, FALSE),
-      ('blocked', 'Blocked', 'Task cannot progress until a dependency clears.', 40, FALSE),
       ('completed', 'Completed', 'Task finished successfully.', 50, FALSE),
-      ('canceled', 'Canceled', 'Task was canceled before completion.', 60, FALSE)
+      ('cancelled', 'Cancelled', 'Task was cancelled before completion.', 60, FALSE)
   ) AS v(value, label, description, sort_order, is_default)
  WHERE ld.category = 'task_status'
 ON CONFLICT (lookup_definition_id, value) DO NOTHING;

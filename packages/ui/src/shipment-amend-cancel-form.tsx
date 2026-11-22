@@ -455,14 +455,14 @@ export function ShipmentAmendCancelForm({
                   disabled={submissionLocked || returnState?.allowed !== true}
                   data-testid={`${testIdPrefix}-return-submit`}
                 >
-                  {isPending ? "Saving..." : t("returnToOrigin")}
+                  {isPending ? t("saving") : t("returnToOrigin")}
                 </Button>
                 <span className="text-xs text-ui-muted">
-                  Allowed statuses: {formatStatuses(returnState?.allowed_statuses)}
+                  {t("allowedStatuses")}: {formatStatuses(returnState?.allowed_statuses)}
                 </span>
               </div>
               {returnBlocked ? (
-                <div className="rounded-xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted">
+                <div role="status" className="rounded-xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted">
                   {returnBlocked}
                 </div>
               ) : null}

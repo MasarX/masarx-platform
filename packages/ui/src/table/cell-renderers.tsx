@@ -3,20 +3,11 @@ import { resolveTagColor } from "../tag-colors";
 import { resolveStatusIcon } from "../status-icon";
 import type { ResourceColumn } from "./columns";
 
-function humanizeTagValue(value: string) {
-  const label = value
-    .split(/[_-]+/)
-    .filter(Boolean)
-    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
-    .join(" ");
-  return label || value;
-}
-
 export function CellSelectTag({ value }: { value: string }) {
   if (!value) return null;
   const color = resolveTagColor(value);
   const statusIcon = resolveStatusIcon(value);
-  const label = humanizeTagValue(value);
+  const label = value === "return_to_origin" ? "Return To Origin" : value;
   return (
     <span
       className={cn(

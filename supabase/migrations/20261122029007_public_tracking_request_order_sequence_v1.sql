@@ -79,10 +79,7 @@ BEGIN
 END;
 $function$;
 
-DROP TRIGGER IF EXISTS trg_support_cases_public_tracking_request_order_v1
-  ON public.support_cases;
-
-CREATE TRIGGER trg_support_cases_public_tracking_request_order_v1
+CREATE OR REPLACE TRIGGER trg_support_cases_public_tracking_request_order_v1
 BEFORE INSERT ON public.support_cases
 FOR EACH ROW
 EXECUTE FUNCTION public.set_public_tracking_request_order_v1();

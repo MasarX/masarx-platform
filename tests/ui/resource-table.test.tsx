@@ -94,12 +94,16 @@ test("resource table humanizes lookup-style badge values", () => {
         { key: "tracking_number", label: "Tracking" },
         { key: "shipment_status", label: "Shipment status", renderType: "select" },
       ]}
-      items={[{ tracking_number: "RTO-001", shipment_status: "return_to_origin" }]}
+      items={[
+        { tracking_number: "RTO-001", shipment_status: "return_to_origin" },
+        { tracking_number: "OTHER-001", shipment_status: "ready_for_sorting" },
+      ]}
     />
   );
 
   expectTextVisible("Return To Origin");
   expectTextHidden("return_to_origin");
+  expectTextVisible("ready_for_sorting");
 });
 
 test("resource table expands rows to show detail panel", () => {

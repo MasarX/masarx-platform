@@ -281,8 +281,8 @@
     },
     {
       "file": "supabase/migrations/20261122029000_append_only_ledger_table_contracts_v1.sql",
-      "sha256": "a26f0377a4735c95dccd56697ee0ff5aea05129af1d3a4eb7f0a359c32e5a684",
-      "reason": "The two dynamic CREATE TRIGGER statements install row and truncate immutability guards only on catalog-resolved public application tables selected by the mutation policy. No privilege changes are dynamic."
+      "sha256": "b2f95bb3de0eddaf805f8bcbade520a9e5fd988007f5ebb5ce680c9b36badd87",
+      "reason": "Reconciles row and truncate guards only on catalog-resolved public application tables. Replaces only for append-only contracts and drops only existing local B26 guards when the contract is mutable. No privilege changes are dynamic."
     }
   ]
 }

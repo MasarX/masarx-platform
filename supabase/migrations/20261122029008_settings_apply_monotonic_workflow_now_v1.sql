@@ -1,8 +1,6 @@
 -- Migration: Preserve settings apply monotonic closeout with workflow time
--- Why:
---   - 202604121730 made prior settings_versions closeout monotonic.
---   - 202604150500 later switched the handler to workflow_now() but regressed
---     that monotonic effective_until guard.
+-- Preserve the monotonic effective_until guard from
+-- 202604121730_settings_versions_monotonic_closeout_v1 while switching the handler to workflow_now().
 
 BEGIN;
 SELECT pg_advisory_xact_lock(hashtext('20261122029008_settings_apply_monotonic_workflow_now_v1'));

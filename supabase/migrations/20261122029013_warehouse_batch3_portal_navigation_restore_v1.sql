@@ -19,8 +19,6 @@ DECLARE
   v_section JSONB;
   v_items JSONB;
   v_has_operations BOOLEAN;
-  v_existing_ids TEXT[];
-  v_candidate JSONB;
   v_portal_items JSONB := jsonb_build_array(
     jsonb_build_object(
       'id', 'portal-warehouse-transfers',
@@ -69,11 +67,16 @@ BEGIN
       v_source_sections := '[]'::jsonb;
     END IF;
 
-    SELECT COALESCE(array_agg(DISTINCT item.value->>'id'), ARRAY[]::TEXT[])
-      INTO v_existing_ids
-      FROM jsonb_array_elements(v_source_sections) AS section(value)
-      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(section.value->'items', '[]'::jsonb)) AS item(value)
-     WHERE NULLIF(btrim(COALESCE(item.value->>'id', '')), '') IS NOT NULL;
+    SELECT COALESCE(jsonb_agg(candidate.value ORDER BY candidate.ordinal), '[]'::jsonb)
+      INTO v_items
+      FROM jsonb_array_elements(v_portal_items) WITH ORDINALITY AS candidate(value, ordinal)
+     WHERE NOT EXISTS (
+       SELECT FROM jsonb_array_elements(v_source_sections) AS section(value)
+       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(section.value->'items', '[]'::jsonb)) AS item(value)
+       WHERE item.value->>'resource' = candidate.value->>'resource'
+          OR item.value->>'id' = candidate.value->>'id'
+     );
+    IF v_items = '[]'::jsonb THEN CONTINUE; END IF;
 
     v_sections := '[]'::jsonb;
     v_has_operations := FALSE;
@@ -84,19 +87,7 @@ BEGIN
     LOOP
       IF v_section->>'id' = 'operations' THEN
         v_has_operations := TRUE;
-        v_items := COALESCE(v_section->'items', '[]'::jsonb);
-
-        FOR v_candidate IN
-          SELECT value
-          FROM jsonb_array_elements(v_portal_items) AS value
-        LOOP
-          IF NOT (COALESCE(v_candidate->>'id', '') = ANY(v_existing_ids)) THEN
-            v_items := v_items || jsonb_build_array(v_candidate);
-            v_existing_ids := v_existing_ids || COALESCE(v_candidate->>'id', '');
-          END IF;
-        END LOOP;
-
-        v_section := jsonb_set(v_section, '{items}', v_items, TRUE);
+        v_section := jsonb_set(v_section, '{items}', COALESCE(v_section->'items', '[]'::jsonb) || v_items, TRUE);
       END IF;
 
       v_sections := v_sections || jsonb_build_array(v_section);
@@ -106,11 +97,11 @@ BEGIN
       IF jsonb_array_length(v_sections) > 0 AND (v_sections->0->>'id') = 'home' THEN
         v_sections := jsonb_build_array(
           v_sections->0,
-          jsonb_build_object('id', 'operations', 'label', 'Operations', 'items', v_portal_items)
+          jsonb_build_object('id', 'operations', 'label', 'Operations', 'items', v_items)
         ) || (v_sections - 0);
       ELSE
         v_sections := jsonb_build_array(
-          jsonb_build_object('id', 'operations', 'label', 'Operations', 'items', v_portal_items)
+          jsonb_build_object('id', 'operations', 'label', 'Operations', 'items', v_items)
         ) || v_sections;
       END IF;
     END IF;

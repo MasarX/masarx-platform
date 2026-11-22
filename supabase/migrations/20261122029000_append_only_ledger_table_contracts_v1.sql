@@ -9,7 +9,7 @@
 BEGIN;
 SELECT pg_advisory_xact_lock(hashtext('20261122029000_append_only_ledger_table_contracts_v1'));
 SET LOCAL search_path TO public, extensions, pg_temp;
-SET LOCAL lock_timeout = '30s';
+SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE public.table_contracts
   ADD COLUMN IF NOT EXISTS mutation_policy TEXT NOT NULL DEFAULT 'mutable';
@@ -87,8 +87,7 @@ $function$;
 COMMENT ON FUNCTION public.enforce_table_contract_mutation_policy_lookup_v1() IS
   'Validates table_contracts.mutation_policy against row-driven table_contract_mutation_policy lookup values.';
 
-DROP TRIGGER IF EXISTS trg_table_contracts_mutation_policy_lookup_v1 ON public.table_contracts;
-CREATE TRIGGER trg_table_contracts_mutation_policy_lookup_v1
+CREATE OR REPLACE TRIGGER trg_table_contracts_mutation_policy_lookup_v1
   BEFORE INSERT OR UPDATE OF mutation_policy ON public.table_contracts
   FOR EACH ROW
   EXECUTE FUNCTION public.enforce_table_contract_mutation_policy_lookup_v1();
@@ -125,10 +124,15 @@ AS $function$
 DECLARE
   r RECORD;
   v_rel REGCLASS;
+  v_default_timeout BOOLEAN := current_setting('lock_timeout') = '0';
 BEGIN
   IF p_table_schema IS DISTINCT FROM 'public' THEN
     RAISE EXCEPTION 'Append-only table contracts are supported only in the public schema'
       USING ERRCODE = '22023';
+  END IF;
+
+  IF v_default_timeout THEN
+    SET LOCAL lock_timeout = '5s';
   END IF;
 
   FOR r IN
@@ -146,27 +150,32 @@ BEGIN
       CONTINUE;
     END IF;
 
-    EXECUTE format(
-      'DROP TRIGGER IF EXISTS trg_table_contracts_append_only_row_guard ON %s',
-      v_rel
-    );
-    EXECUTE format(
-      'DROP TRIGGER IF EXISTS trg_table_contracts_append_only_truncate_guard ON %s',
-      v_rel
-    );
-
     IF r.mutation_policy = 'append_only' THEN
       EXECUTE format(
-        'CREATE TRIGGER trg_table_contracts_append_only_row_guard BEFORE UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION public.reject_append_only_table_mutation_v1()',
+        'CREATE OR REPLACE TRIGGER trg_table_contracts_append_only_row_guard BEFORE UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION public.reject_append_only_table_mutation_v1()',
         v_rel
       );
       EXECUTE format(
-        'CREATE TRIGGER trg_table_contracts_append_only_truncate_guard BEFORE TRUNCATE ON %s FOR EACH STATEMENT EXECUTE FUNCTION public.reject_append_only_table_mutation_v1()',
+        'CREATE OR REPLACE TRIGGER trg_table_contracts_append_only_truncate_guard BEFORE TRUNCATE ON %s FOR EACH STATEMENT EXECUTE FUNCTION public.reject_append_only_table_mutation_v1()',
         v_rel
       );
       row_guard_action := 'created';
       truncate_guard_action := 'created';
     ELSE
+      IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_trigger
+         WHERE tgrelid = v_rel AND tgname = 'trg_table_contracts_append_only_row_guard'
+           AND NOT tgisinternal AND tgparentid = 0
+      ) THEN
+        EXECUTE format('DROP TRIGGER trg_table_contracts_append_only_row_guard ON %s', v_rel);
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_trigger
+         WHERE tgrelid = v_rel AND tgname = 'trg_table_contracts_append_only_truncate_guard'
+           AND NOT tgisinternal AND tgparentid = 0
+      ) THEN
+        EXECUTE format('DROP TRIGGER trg_table_contracts_append_only_truncate_guard ON %s', v_rel);
+      END IF;
       row_guard_action := 'dropped';
       truncate_guard_action := 'dropped';
     END IF;
@@ -176,6 +185,10 @@ BEGIN
     mutation_policy := r.mutation_policy;
     RETURN NEXT;
   END LOOP;
+
+  IF v_default_timeout THEN
+    SET LOCAL lock_timeout = '0';
+  END IF;
 END;
 $function$;
 

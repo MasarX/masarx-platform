@@ -462,11 +462,24 @@ BEGIN
     );
   END IF;
 
+  -- The workflow engine deduplicates by (template, key).
+  v_idempotency_key := format(
+    'shipment_return:%s:%s:%s',
+    v_target.organization_id,
+    v_shipment_id,
+    encode(digest(lower(v_idempotency_key), 'sha256'), 'hex')
+  );
+
+  -- Serialize replay and open-run admission for this shipment.
+  PERFORM pg_advisory_xact_lock(hashtextextended('shipment_return:' || v_shipment_id::text, 0));
+
   SELECT wr.id, wr.workflow_status
     INTO v_existing_run
     FROM public.workflow_runs wr
    WHERE wr.workflow_template_id = v_template_id
-     AND wr.context->>'idempotency_key' = v_idempotency_key
+     AND wr.idempotency_key = v_idempotency_key
+     AND wr.context->>'original_shipment_id' = v_shipment_id::text
+     AND wr.context->>'organization_id' = v_target.organization_id::text
    ORDER BY wr.created_at DESC, wr.id DESC
    LIMIT 1;
 
@@ -503,6 +516,21 @@ BEGIN
         'lock_state',
         v_guard
       )
+    );
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+      FROM public.workflow_runs wr
+      JOIN public.workflow_templates wt ON wt.id = wr.workflow_template_id
+     WHERE wt.name = v_template_name
+       AND wr.context->>'original_shipment_id' = v_shipment_id::text
+       AND wr.context->>'organization_id' = v_target.organization_id::text
+       AND wr.workflow_status IN ('pending', 'in_progress', 'waiting')
+  ) THEN
+    RETURN jsonb_build_object(
+      'ok', FALSE,
+      'error', jsonb_build_object('code', 'shipment_return_already_open')
     );
   END IF;
 
@@ -603,6 +631,15 @@ BEGIN
   );
 
   v_run_id := public.start_workflow_run(v_template_id, v_context);
+  IF NOT EXISTS (
+    SELECT 1 FROM public.workflow_runs wr
+     WHERE wr.id = v_run_id
+       AND wr.context->>'original_shipment_id' = v_shipment_id::text
+       AND wr.context->>'organization_id' = v_target.organization_id::text
+  ) THEN
+    RAISE EXCEPTION 'Shipment return workflow scope mismatch' USING ERRCODE = '42501';
+  END IF;
+
   BEGIN
     v_progress := public.progress_workflow_run_until_wait_v1(v_run_id, v_inline_explicit_input, 2000, 12);
     v_inline_attempts := COALESCE((v_progress->>'attempts')::INTEGER, 0);
