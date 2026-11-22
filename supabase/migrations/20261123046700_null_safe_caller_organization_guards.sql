@@ -413,7 +413,7 @@ SET search_path TO public, extensions, pg_temp
 AS $$
 DECLARE
   v_user_id UUID := auth.uid();
-  v_correlation_id TEXT := encode(gen_random_bytes(8), 'hex');
+  v_correlation_id TEXT := gen_random_uuid()::text;
   v_decision_id UUID := gen_random_uuid();
   v_version_id UUID;
   v_enabled BOOLEAN;
