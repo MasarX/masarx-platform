@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const { loadEnv } = require('../../../scripts/utils/load-env');
 const {
   applySetting,
+  createOrganization,
   createUser,
   setAuthContext,
   setFixtureAdminContext,
@@ -1642,11 +1643,7 @@ describe('zones + baskets workflow handlers', () => {
     expect(exceptionRow.actual_zone_id).toBe(zoneBId);
     expect(exceptionRow.expected_zone_id).toBe(zoneAId);
 
-    await setAuthContext(client, requesterUserId);
-
-    const {
-      rows: [requestRow],
-    } = await client.query(
+    const requestOverride = () => client.query(
       `SELECT *
          FROM public.request_zone_override_v1($1::uuid, $2::jsonb)`,
       [
@@ -1657,6 +1654,26 @@ describe('zones + baskets workflow handlers', () => {
         }),
       ]
     );
+
+    const { id: foreignOrgId } = await createOrganization(client, 'Synthetic Foreign Zone Tenant');
+    const foreignUserId = await createUser(client, foreignOrgId, `zone-${randomUUID()}@example.invalid`, {
+      fullName: 'Synthetic Foreign Zone Operator',
+    });
+
+    await client.query('SAVEPOINT foreign_zone_override');
+    try {
+      await setAuthContext(client, foreignUserId);
+      await expect(requestOverride()).rejects.toMatchObject({
+        code: '42501',
+        message: expect.stringContaining('is outside current tenant scope'),
+      });
+    } finally {
+      await client.query('ROLLBACK TO SAVEPOINT foreign_zone_override');
+      await client.query('RELEASE SAVEPOINT foreign_zone_override');
+    }
+
+    await setAuthContext(client, requesterUserId);
+    const { rows: [requestRow] } = await requestOverride();
 
     expect(requestRow.request_id).toBeTruthy();
     expect(requestRow.workflow_run_id).toBeTruthy();
