@@ -10,7 +10,7 @@ const belongsToStack = (row, project) => String(row.Names || '').split(',').some
 async function captureDatabaseLog({ project, env, logFile, execute = run }) {
   const secrets = environmentSecrets(env);
   try {
-    const logs = await execute('docker', ['logs', '--timestamps', `supabase_db_${project}`], {
+    const logs = await execute('docker', ['logs', '--tail', '20000', '--timestamps', `supabase_db_${project}`], {
       env, timeout: 10000, quiet: true, includeStderr: true, printQuietFailure: false,
     });
     fs.writeFileSync(logFile, sanitize(logs, secrets));

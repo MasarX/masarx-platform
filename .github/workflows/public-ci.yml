@@ -54,6 +54,8 @@ jobs:
     outputs:
       present: ${{ steps.subject.outputs.present }}
     steps:
+      - name: Record database job start
+        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}
@@ -110,6 +112,8 @@ jobs:
       PGTAP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
       PGTAP_WORKERS: ${{ vars.PGTAP_WORKERS || 'nproc' }}
     steps:
+      - name: Record database job start
+        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
           ref: ${{ github.sha }}

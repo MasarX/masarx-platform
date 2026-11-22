@@ -113,6 +113,15 @@ const PGTAP_MEMORY_FLOOR = 2 * 2 ** 30;
 const PGTAP_WORKER_HEADROOM = 512 * 2 ** 20;
 const PGTAP_WORKER_CAP = 4;
 const PGTAP_TIMEOUT = 18 * 60000;
+const DATABASE_JOB_TIMEOUT = 20 * 60000;
+const LOG_CAPTURE_MARGIN = 120000;
+
+function pgtapDeadline(shardStartedAt, jobStartedAt) {
+  const shardDeadline = shardStartedAt + PGTAP_TIMEOUT;
+  const jobStartedAtMs = Number(jobStartedAt) * 1000;
+  if (!Number.isSafeInteger(jobStartedAtMs) || jobStartedAtMs <= 0) return shardDeadline;
+  return Math.min(shardDeadline, jobStartedAtMs + DATABASE_JOB_TIMEOUT - LOG_CAPTURE_MARGIN);
+}
 
 function hostedWorkerLimit(value, cores) {
   if (value === 'nproc') return Math.min(cores, PGTAP_WORKER_CAP);
@@ -128,13 +137,7 @@ function hostedWorkerCount(requested, available) {
   return fit;
 }
 
-async function runHostedShard({ selected, checked, testEnv, admin, summary, dockerRoot, project, logFile }) {
-  const deadline = Date.now() + PGTAP_TIMEOUT;
-  const remaining = () => {
-    const milliseconds = deadline - Date.now();
-    if (milliseconds < 1) throw new Error('pgTAP shard exceeded its 18-minute execution budget');
-    return milliseconds;
-  };
+async function runHostedShard({ selected, checked, testEnv, admin, summary, dockerRoot, project, logFile, remaining }) {
   const runSerial = () => checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], testEnv, remaining());
   const cores = Number((await checked('nproc', [], testEnv, Math.min(15000, remaining()), { quiet: true })).trim());
   if (!Number.isSafeInteger(cores) || cores < 1) throw new Error('Invalid hosted runner core count');
@@ -519,10 +522,19 @@ async function qualify(diagnostic) {
       const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, dbPort, selected);
       diskFloor(dockerRoot);
       summary.pgtap = 'running';
-      await timed(`pgtap:${shard}`, () => disposableShard && workers !== '1'
-        ? runHostedShard({ selected, checked, testEnv: { ...testEnv, PGTAP_WORKERS: workers }, summary, dockerRoot, project, logFile,
-          admin: (timeout, ...commands) => stackAdminFor('template1', timeout, ...commands) })
-        : checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], testEnv, PGTAP_TIMEOUT));
+      await timed(`pgtap:${shard}`, () => {
+        // Leave time to collect and upload the server log before the job times out.
+        const deadline = pgtapDeadline(Date.now(), env.JOB_STARTED_AT);
+        const remaining = () => {
+          const milliseconds = deadline - Date.now();
+          if (milliseconds < 1) throw new Error('pgTAP shard exceeded its execution deadline');
+          return milliseconds;
+        };
+        return disposableShard && workers !== '1'
+          ? runHostedShard({ selected, checked, testEnv: { ...testEnv, PGTAP_WORKERS: workers }, summary, dockerRoot, project, logFile,
+            remaining, admin: (timeout, ...commands) => stackAdminFor('template1', timeout, ...commands) })
+          : checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], testEnv, remaining());
+      });
       const rows = JSON.parse(fs.readFileSync('ci-reports/pgtap-files.json', 'utf8'));
       if (JSON.stringify(rows.map(row => row.file)) !== JSON.stringify(selected) || rows.some(row => row.status !== 'passed')) throw new Error('Incomplete pgTAP shard results');
       summary.pgtap = 'passed';
@@ -595,4 +607,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, pgtapDeadline };
