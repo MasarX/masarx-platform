@@ -110,6 +110,12 @@ BEGIN
   INSERT INTO public.clients (id, organization_id, name, slug, status)
   VALUES (v_client, v_org, 'UC079 Client', 'uc079-client-' || left(v_client::text, 8), 'active');
 
+  -- Simulate a client policy materialized before onboarding exclusions.
+  PERFORM public.upsert_settings_value_v1(
+    'route_assignment_policy', 'client', v_client, '{"alternate_capacity":{"enabled":false}}'::jsonb,
+    1, 'Seed legacy materialized client policy'
+  );
+
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type)
   VALUES (v_operator, v_org, 'uc079-ops-' || left(v_operator::text, 8) || '@example.com', 'UC079 Ops', 'ops_admin', 'active', 'tenant');
 
