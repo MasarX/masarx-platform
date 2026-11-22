@@ -4,7 +4,7 @@
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(71);
+SELECT plan(72);
 
 -- 1) Existence + RLS posture
 SELECT has_table('public', 'tracking_sessions', 'tracking_sessions table exists');
@@ -291,6 +291,12 @@ BEGIN
   PERFORM is((SELECT COUNT(*)::INT FROM public.route_plans), 1, 'tenant user can read route_plans');
   PERFORM is((SELECT COUNT(*)::INT FROM public.route_plan_events), 1, 'tenant user can read route_plan_events');
 END $$;
+
+SELECT is(
+  (SELECT mutation_policy FROM public.table_contracts WHERE table_schema = 'public' AND table_name = 'billing_invoice_events'),
+  'append_only',
+  'billing_invoice_events is marked append_only in table_contracts'
+);
 
 SELECT finish();
 ROLLBACK;

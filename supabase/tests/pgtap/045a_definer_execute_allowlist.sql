@@ -869,6 +869,7 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.settlement_summary_variance_flag_v1(uuid,uuid,numeric)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.shipment_amend_cancel_options_v1(uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.shipment_amend_cancel_v1(jsonb)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
+  ('public.shipment_return_request_v1(jsonb)', '{authenticated}', 'Scoped shipment mutation and return workflow admission', 'postgres'),
   ('public.shipment_apply_destination_address_change_v1(jsonb)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.shipments_apply_service_offering_context_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
   ('public.should_skip_outbound_call_for_opt_out(text,uuid,jsonb)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),

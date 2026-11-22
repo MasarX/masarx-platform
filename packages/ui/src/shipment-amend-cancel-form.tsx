@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "./button";
 import { Input } from "./input";
 import { Section } from "./section";
@@ -27,6 +28,7 @@ export type ShipmentAmendCancelOptions = {
     reschedule?: OperationState | null;
     address?: OperationState | null;
     cancel?: OperationState | null;
+    return?: OperationState | null;
   } | null;
   policy?: {
     delete_window_hours?: number | null;
@@ -109,6 +111,9 @@ export function ShipmentAmendCancelForm({
   const rescheduleState = options.operations?.reschedule ?? null;
   const addressState = options.operations?.address ?? null;
   const cancelState = options.operations?.cancel ?? null;
+  const returnState = options.operations?.return ?? null;
+  const t = useTranslations("ui.shipmentAmendCancel");
+  const returnBlocked = returnState && blockedMessage("return", returnState, options);
 
   return (
     <div className="space-y-4" data-testid={`${testIdPrefix}-panel`}>
@@ -428,6 +433,41 @@ export function ShipmentAmendCancelForm({
               </div>
             ) : null}
           </form>
+
+          {returnState ? (
+            <form action={formAction} className="space-y-3" data-testid={`${testIdPrefix}-return-form`}>
+              <input type="hidden" name="shipment_id" value={shipmentId} />
+              <input type="hidden" name="operation" value="return" />
+              <div className="text-sm font-semibold text-ui-ink">{t("returnToOriginShipment")}</div>
+              <label className="space-y-1 text-sm text-ui-ink">
+                <span className="text-xs uppercase tracking-wide text-ui-muted">{t("returnReason")}</span>
+                <Textarea
+                  name="return_reason"
+                  rows={3}
+                  disabled={submissionLocked || returnState?.allowed !== true}
+                  data-testid={`${testIdPrefix}-return-reason`}
+                />
+              </label>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  type="submit"
+                  variant="soft"
+                  disabled={submissionLocked || returnState?.allowed !== true}
+                  data-testid={`${testIdPrefix}-return-submit`}
+                >
+                  {isPending ? "Saving..." : t("returnToOrigin")}
+                </Button>
+                <span className="text-xs text-ui-muted">
+                  Allowed statuses: {formatStatuses(returnState?.allowed_statuses)}
+                </span>
+              </div>
+              {returnBlocked ? (
+                <div className="rounded-xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted">
+                  {returnBlocked}
+                </div>
+              ) : null}
+            </form>
+          ) : null}
 
           {state.status === "error" ? (
             <div

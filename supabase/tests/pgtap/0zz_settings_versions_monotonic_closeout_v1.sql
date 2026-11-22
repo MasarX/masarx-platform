@@ -6,21 +6,24 @@ SELECT plan(4);
 
 SET search_path TO public, pgtap, extensions;
 
-DO $$
+CREATE FUNCTION pg_temp.settings_versions_monotonic_closeout_checks()
+RETURNS SETOF TEXT
+LANGUAGE plpgsql
+AS $$
 DECLARE
   v_def_apply TEXT;
   v_def_upsert TEXT;
   v_initial RECORD;
 BEGIN
   v_def_apply := pg_get_functiondef('workflow_handlers.execute_settings_apply_v1(workflow_run_steps,workflow_runs,jsonb)'::regprocedure);
-  PERFORM ok(
+  RETURN NEXT ok(
     position('GREATEST(' IN v_def_apply) > 0
       AND position('effective_from + INTERVAL ''1 microsecond''' IN v_def_apply) > 0,
     'execute_settings_apply_v1 keeps prior settings_versions closeout monotonic'
   );
 
   v_def_upsert := pg_get_functiondef('public.upsert_settings_value_v1(text,text,uuid,jsonb,integer,text)'::regprocedure);
-  PERFORM ok(
+  RETURN NEXT ok(
     position('GREATEST(' IN v_def_upsert) > 0
       AND position('effective_from + INTERVAL ''1 microsecond''' IN v_def_upsert) > 0,
     'upsert_settings_value_v1 keeps prior settings_versions closeout monotonic'
@@ -51,7 +54,7 @@ BEGIN
     'monotonic-closeout verify'
   );
 
-  PERFORM ok(
+  RETURN NEXT ok(
     EXISTS (
       SELECT 1
         FROM public.settings_versions
@@ -61,7 +64,7 @@ BEGIN
     'upsert_settings_value_v1 never closes a current settings_versions row at or before effective_from'
   );
 
-  PERFORM is(
+  RETURN NEXT is(
     (
       SELECT COUNT(*)
         FROM public.settings_versions
@@ -76,6 +79,7 @@ BEGIN
 END
 $$;
 
+SELECT * FROM pg_temp.settings_versions_monotonic_closeout_checks();
 SELECT * FROM finish();
 
 ROLLBACK;

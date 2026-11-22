@@ -37,3 +37,7 @@ export function parseJsonValue(
     return { ok: false, message: "Invalid JSON payload." };
   }
 }
+
+export function marketplaceOrganizationLabel(...values: unknown[]) {
+  return Array.from(new Set(values.map(stringValue).filter(Boolean))).join(" | ") || null;
+}

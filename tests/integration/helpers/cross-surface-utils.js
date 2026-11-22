@@ -403,6 +403,222 @@ async function createShipmentViaTabularImport(client, input) {
   };
 }
 
+async function createShipmentViaWebhookIntake(client, input) {
+  const { upsertWebhookPolicy } = require('../../utils/policies');
+  await setServiceContext(client, input.organizationId, input.userId);
+
+  const suffix = `${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+  const mappingId = randomUUID();
+  const sourceId = randomUUID();
+  const token = input.token || `token-cross-surface-webhook-${suffix}`;
+  const sourceIdentifier = input.sourceIdentifier || `cross-surface-webhook-${suffix}`;
+  const eventId = input.eventId || `evt-cross-surface-webhook-${suffix}`;
+
+  const { rows: templateRows } = await client.query(
+    `SELECT id
+       FROM public.workflow_templates
+      WHERE name = $1
+      ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, updated_at DESC NULLS LAST
+      LIMIT 1`,
+    [input.followupTemplateName || 'async_provider_dispatch_v1'],
+  );
+  const followupTemplateId = templateRows[0]?.id ?? null;
+  if (!followupTemplateId) {
+    throw new Error('async_provider_dispatch_v1 workflow template is required for webhook shipment creation proof');
+  }
+
+  await client.query(
+    `INSERT INTO public.mapping_configs (
+       id,
+       mapping_type,
+       mapping_key,
+       mapping_config,
+       mapping_version,
+       notes
+     )
+     VALUES (
+       $1::uuid,
+       'webhook_inbound',
+       $2::text,
+       $3::jsonb,
+       1,
+       'cross-surface webhook shipment creation proof'
+     )`,
+    [
+      mappingId,
+      `${sourceIdentifier}::shipment.created`,
+      JSON.stringify({
+        description: 'Cross-surface webhook shipment creation proof mapping',
+        external_id_path: 'event.id',
+        context_patch: {},
+      }),
+    ],
+  );
+
+  await client.query(
+    `INSERT INTO public.webhook_sources (
+       id,
+       organization_id,
+       source_identifier,
+       name,
+       provider_type,
+       auth_token,
+       mapping_config_id,
+       sender_id,
+       rate_limit_per_hour,
+       enabled
+     )
+     VALUES (
+       $1::uuid,
+       $2::uuid,
+       $3::text,
+       $4::text,
+       'provider',
+       $5::text,
+       $6::uuid,
+       $7::uuid,
+       1000,
+       TRUE
+     )`,
+    [
+      sourceId,
+      input.organizationId,
+      sourceIdentifier,
+      input.sourceName || 'Cross Surface Webhook Source',
+      token,
+      mappingId,
+      input.senderId,
+    ],
+  );
+
+  await upsertWebhookPolicy(
+    'source',
+    sourceId,
+    {
+      version: 1,
+      ack: {
+        mode: 'accepted_async',
+        default_headers: {
+          'cache-control': 'no-store',
+        },
+      },
+      validation: {
+        idempotency: {
+          header: 'Idempotency-Key',
+          body_path: 'event.id',
+          required: true,
+        },
+      },
+      workflow: {
+        intent: 'shipment.create',
+        template_id: followupTemplateId,
+        launch_mode: 'in_background',
+        context_patch: {
+          service_type: input.serviceType || 'delivery',
+          initial_status: input.initialStatus || 'pending',
+          source_origin: 'webhook',
+        },
+      },
+      logging: {
+        decision_point: 'workflow_intake_ack',
+      },
+    },
+    'cross-surface webhook shipment creation proof',
+    client,
+  );
+
+  const payload = {
+    event: {
+      id: eventId,
+      type: 'shipment.created',
+    },
+    shipment: {
+      client_reference_number:
+        input.clientReferenceNumber
+        || `CS-WH-REF-${Date.now()}-${randomBytes(2).toString('hex').toUpperCase()}`,
+      service_type: input.serviceType || 'delivery',
+      source: 'integration.cross-surface-delivery',
+      source_origin: 'webhook',
+    },
+  };
+  const headers = {
+    'content-type': 'application/json',
+    'idempotency-key': eventId,
+  };
+  const rawBody = JSON.stringify(payload);
+
+  const { rows } = await client.query(
+    `SELECT public.workflow_intake_webhook(
+       $1::text,
+       $2::jsonb,
+       $3::text,
+       $4::jsonb
+     ) AS response`,
+    [token, JSON.stringify(headers), rawBody, JSON.stringify(payload)],
+  );
+  const response = parseRpcResult(rows[0]?.response, 'workflow_intake_webhook');
+  if (Number(response.status) >= 400) {
+    throw new Error(`workflow_intake_webhook failed: ${JSON.stringify(response)}`);
+  }
+
+  const plannedResource = response.body?.resource || {};
+  const plannedShipmentId = plannedResource.id ?? null;
+  const plannedTrackingNumber = plannedResource.tracking_number ?? null;
+  const followupWorkflowRunId = response.followup_workflow_run_id || response.body?.followup_workflow_run_id || null;
+  if (!followupWorkflowRunId) {
+    throw new Error(`workflow_intake_webhook did not return a follow-up workflow run: ${JSON.stringify(response)}`);
+  }
+  if (!plannedShipmentId || !plannedTrackingNumber) {
+    throw new Error(`workflow_intake_webhook did not return a planned shipment resource: ${JSON.stringify(response)}`);
+  }
+
+  let shipmentRow = null;
+  let lastProgressResult = null;
+  for (let attempt = 0; attempt < Number(input.maxProgressAttempts || 8); attempt += 1) {
+    const { rows: shipmentRows } = await client.query(
+      `SELECT id, tracking_number, metadata
+         FROM public.shipments
+        WHERE id = $1::uuid
+           OR tracking_upper = upper($2::text)
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [plannedShipmentId, plannedTrackingNumber],
+    );
+    shipmentRow = shipmentRows[0] ?? null;
+    if (shipmentRow?.id) break;
+
+    const { rows: progressRows } = await client.query(
+      `SELECT public.progress_workflow_run($1::uuid) AS result`,
+      [followupWorkflowRunId],
+    );
+    lastProgressResult = progressRows[0]?.result ?? null;
+    if (lastProgressResult?.status === 'failed') {
+      throw new Error(
+        `webhook follow-up workflow ${followupWorkflowRunId} failed before shipment creation: ${JSON.stringify(lastProgressResult)}`,
+      );
+    }
+  }
+
+  if (!shipmentRow?.id) {
+    throw new Error(
+      `webhook follow-up workflow ${followupWorkflowRunId} did not materialize shipment ${plannedShipmentId}; last progress result ${JSON.stringify(lastProgressResult)}`,
+    );
+  }
+
+  return {
+    shipmentId: shipmentRow.id,
+    workflowRunId: followupWorkflowRunId,
+    intakeWorkflowRunId: response.workflow_run_id || response.body?.workflow_run_id || null,
+    webhookId: response.webhook_id || null,
+    correlationId: response.correlation_id || response.body?.correlation_id || null,
+    trackingNumber: shipmentRow.tracking_number,
+    plannedShipmentId,
+    plannedTrackingNumber,
+    response,
+    result: shipmentRow,
+  };
+}
+
 async function seedRouteRunWorkflowForShipment(client, input) {
   const { startWorkflowRun } = getWorkflowHelpers();
   await setServiceContext(client, input.organizationId, input.userId);
@@ -723,6 +939,7 @@ module.exports = {
   createCrossSurfaceActors,
   createShipmentViaTabularImport,
   createShipmentViaUi,
+  createShipmentViaWebhookIntake,
   fetchLookupValue,
   fetchLookupValues,
   getShipmentTimeline,

@@ -46,6 +46,14 @@ function isIdLikeColumnKey(value: string) {
   return suffix === "id" || suffix === "uuid";
 }
 
+function isLookupLikeColumnKey(value: string) {
+  const normalized = normalizeColumnKeyForRenderHeuristic(value);
+  if (!normalized) return false;
+  const tokens = normalized.split("_").filter(Boolean);
+  const suffix = tokens[tokens.length - 1] ?? "";
+  return tokens.length > 1 && ["status", "state", "action"].includes(suffix);
+}
+
 function resolveInferredRenderType(
   columnKey: string,
   configuredRenderType: string | null | undefined
@@ -54,6 +62,7 @@ function resolveInferredRenderType(
     ? configuredRenderType.trim()
     : "";
   if (configured) return configured;
+  if (isLookupLikeColumnKey(columnKey)) return "select";
   return isIdLikeColumnKey(columnKey) ? "id" : null;
 }
 

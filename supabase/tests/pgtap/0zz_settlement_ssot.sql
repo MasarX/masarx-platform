@@ -7,7 +7,18 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(25);
+SELECT plan(27);
+
+SELECT is(
+  (SELECT mutation_policy FROM public.table_contracts WHERE table_schema = 'public' AND table_name = 'settlement_events'),
+  'append_only',
+  'settlement_events is marked append_only in table_contracts'
+);
+SELECT is(
+  (SELECT mutation_policy FROM public.table_contracts WHERE table_schema = 'public' AND table_name = 'settlement_batch_finance_events'),
+  'append_only',
+  'settlement_batch_finance_events is marked append_only in table_contracts'
+);
 
 -- Service-only RPCs should not be executable by authenticated.
 SELECT ok(

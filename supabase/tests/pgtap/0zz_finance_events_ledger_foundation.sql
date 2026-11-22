@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(72);
+SELECT plan(76);
 
 SELECT has_table('public', 'finance_events', 'finance_events table exists');
 SELECT has_table('public', 'finance_event_dedupe', 'finance_event_dedupe table exists');
@@ -39,6 +39,30 @@ SELECT ok(EXISTS(
 ), 'settlement_policy global settings seeded');
 
 SELECT has_function('public', 'record_finance_event_v1', ARRAY['jsonb'], 'record_finance_event_v1(jsonb) exists');
+
+SELECT has_column('public', 'table_contracts', 'mutation_policy', 'table_contracts has mutation_policy for append-only guards');
+SELECT is(
+  (
+    SELECT mutation_policy
+    FROM public.table_contracts
+    WHERE table_schema = 'public'
+      AND table_name = 'finance_events'
+  ),
+  'append_only',
+  'finance_events is marked append_only in table_contracts'
+);
+SELECT ok(EXISTS(
+  SELECT 1
+  FROM pg_trigger
+  WHERE tgrelid = 'public.finance_events'::regclass
+    AND tgname = 'trg_table_contracts_append_only_row_guard'
+), 'finance_events has append-only row guard trigger');
+SELECT ok(EXISTS(
+  SELECT 1
+  FROM pg_trigger
+  WHERE tgrelid = 'public.finance_events'::regclass
+    AND tgname = 'trg_table_contracts_append_only_truncate_guard'
+), 'finance_events has append-only truncate guard trigger');
 
 -- Fixture: ensure an organization exists for FK constraints.
 INSERT INTO public.organizations (id, name, slug, timezone, locale, billing_status)

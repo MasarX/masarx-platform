@@ -574,3 +574,28 @@ test("resource page renders a missing-record message when detail resolves null",
 
   expect(screen.getByText("Record not found.")).toBeInTheDocument();
 });
+
+test("resolveColumns renders status-like list fields as lookup selections", () => {
+  const columns = resolveColumns(
+    { key: "return_to_branch_shipments", relation: "return_to_branch_shipments" },
+    {
+      resource: "return_to_branch_shipments",
+      keys: ["tracking_number", "shipment_status", "next_action"],
+      items: [
+        {
+          tracking_number: "RTO-001",
+          shipment_status: "return_to_origin",
+          next_action: "sender_return",
+        },
+      ],
+      limit: 25,
+      offset: 0,
+    },
+  );
+
+  expect(columns).toEqual([
+    { key: "tracking_number", label: "Tracking Number" },
+    { key: "shipment_status", label: "Shipment Status", renderType: "select" },
+    { key: "next_action", label: "Next Action", renderType: "select" },
+  ]);
+});

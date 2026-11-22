@@ -8,13 +8,16 @@ import {
   MarketplaceRequestCreateForm,
   MarketplaceRequestCreateState,
   type MarketplaceRequestKindOption,
+  type MarketplacePrivatePoolOption,
 } from "./marketplace-request-create-form";
+import { marketplaceOrganizationLabel, stringValue } from "./marketplace-page-utils";
 import { formatUiError } from "./utils";
 
 type MarketplaceRequestCreatePageProps = {
   appBasePath: string;
   requestsHref: string;
   testIdPrefix: string;
+  actionSource?: string;
 };
 
 function normalizeObject(value: unknown): Record<string, unknown> | null {
@@ -67,22 +70,37 @@ function normalizeRequestKinds(catalog: Record<string, unknown> | null): Marketp
   return out;
 }
 
+async function loadPrivatePoolOptions(ui: ReturnType<typeof createUiServerClient>) {
+  const list = await ui.listResource("marketplace_participants", {}, 200, 0, null).catch(() => null);
+  const options = new Map<string, MarketplacePrivatePoolOption>();
+  for (const item of list?.items ?? []) {
+    const organizationId = stringValue(item.organization_id);
+    const label = marketplaceOrganizationLabel(
+      item.display_name, item.organization_name ?? item.name, item.organization_slug,
+    );
+    if (organizationId && label) options.set(organizationId, { organizationId, label });
+  }
+  return Array.from(options.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
+
 export async function MarketplaceRequestCreatePage({
   appBasePath,
   requestsHref,
   testIdPrefix,
+  actionSource = "portal.marketplace.request_create",
 }: MarketplaceRequestCreatePageProps) {
   const ui = createUiServerClient();
   const me = await ui.me().catch(() => null);
   const contextOrgId = me?.org?.id ?? null;
-  const catalog = await ui
-    .marketplaceRequestKindCatalog({
+  const [catalog, privatePoolOptions] = await Promise.all([
+    ui.marketplaceRequestKindCatalog({
       context: {
         organization_id: contextOrgId,
       },
       includeInactive: false,
-    })
-    .catch(() => null);
+    }).catch(() => null),
+    loadPrivatePoolOptions(ui),
+  ]);
 
   const requestKinds = normalizeRequestKinds(catalog);
   const defaultKindKey = requestKinds[0]?.kindKey ?? null;
@@ -121,12 +139,21 @@ export async function MarketplaceRequestCreatePage({
       return { status: "error", message: "Payload must be a JSON object." };
     }
 
-    const privatePool = privatePoolCsv
-      ? privatePoolCsv
-          .split(",")
-          .map((entry) => entry.trim())
-          .filter(Boolean)
-      : [];
+    if (privatePoolCsv) {
+      return { status: "error", message: "Private pool selection must come from the canonical lookup." };
+    }
+    const selection = parseJsonValue(String(formData.get("private_pool_json") ?? ""), []);
+    if (!selection.ok || !Array.isArray(selection.value)
+        || selection.value.some((value) => typeof value !== "string" || !value.trim())) {
+      return { status: "error", message: "Private pool selection is invalid." };
+    }
+    const privatePool = [...new Set(selection.value.map((value: string) => value.trim()))];
+    if (privatePool.length) {
+      const visibleIds = new Set((await loadPrivatePoolOptions(uiAction)).map(({ organizationId }) => organizationId));
+      if (privatePool.some((id) => !visibleIds.has(id))) {
+        return { status: "error", message: "Private pool selection must come from the canonical lookup." };
+      }
+    }
 
     let createResult: Record<string, unknown>;
     try {
@@ -138,7 +165,7 @@ export async function MarketplaceRequestCreatePage({
         items: [],
         privatePool,
         metadata: {
-          source: "portal.marketplace.request_create",
+          source: actionSource,
           app_base_path: appBasePath,
         },
       });
@@ -207,6 +234,7 @@ export async function MarketplaceRequestCreatePage({
         <MarketplaceRequestCreateForm
           action={submitRequest}
           requestKinds={requestKinds}
+          privatePoolOptions={privatePoolOptions}
           defaultKindKey={defaultKindKey}
           testIdPrefix={testIdPrefix}
         />

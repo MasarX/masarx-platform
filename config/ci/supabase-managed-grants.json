@@ -278,6 +278,11 @@
       "file": "supabase/migrations/20261121022928_keep_ledger_grants_append_only.sql",
       "sha256": "2c1774a1cdb250ddd37bd543bca4d7fa96c0aebd7deb57218f9a5416505248cb",
       "reason": "Lines 28, 30-32 and 71 enable RLS, revoke the PUBLIC, anon and authenticated table grants, and ensure a service policy on the catalog relation passed to the owner-only enforce_service_only_rls_v1 helper. Runtime partition maintenance passes new public leaves. Lines 40-41 limit service_role to SELECT and INSERT on the public.finance_events tree, public.finance_event_dedupe, public.settlement_events, public.settlement_batch_finance_events and public.billing_invoice_events. Line 59 retains the pre-existing GRANT ALL behavior for other relations selected by the owner."
+    },
+    {
+      "file": "supabase/migrations/20261122029000_append_only_ledger_table_contracts_v1.sql",
+      "sha256": "a26f0377a4735c95dccd56697ee0ff5aea05129af1d3a4eb7f0a359c32e5a684",
+      "reason": "The two dynamic CREATE TRIGGER statements install row and truncate immutability guards only on catalog-resolved public application tables selected by the mutation policy. No privilege changes are dynamic."
     }
   ]
 }

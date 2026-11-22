@@ -927,6 +927,12 @@ const PAYMENT_COLLECTION_FIELD_KEYS = new Set([
   "payment_receipt_context",
 ]);
 
+const PICKUP_LIKE_STOP_KINDS = new Set(["pickup", "rto", "return_to_origin"]);
+
+function isPickupLikeStopKind(kind: string | null | undefined) {
+  return PICKUP_LIKE_STOP_KINDS.has(String(kind ?? "").trim().toLowerCase());
+}
+
 function isPaymentCollectionFieldKey(key: string) {
   return PAYMENT_COLLECTION_FIELD_KEYS.has(key);
 }
@@ -943,8 +949,7 @@ function resolveCommandInputFields(
   const schema = coerceCommandInputSchema(command.execution?.input_schema);
   const rawFields = Array.isArray(schema?.fields) ? schema.fields : [];
   const out: CommandInputFieldRuntime[] = [];
-  const stopKind = String(stopSnapshot?.kind ?? "").trim().toLowerCase();
-  const isPickupStop = stopKind === "pickup";
+  const isPickupStop = isPickupLikeStopKind(stopSnapshot?.kind);
   const supportsCodPaymentCollection = !isPickupStop && (stopSnapshot?.codAmount ?? 0) > 0;
 
   for (const rawField of rawFields) {
@@ -1101,7 +1106,7 @@ function resolveCommandInputFields(
 }
 
 function isPickupStopSnapshot(stopSnapshot: ReturnType<typeof extractOperationalStopSnapshot> | null) {
-  return String(stopSnapshot?.kind ?? "").trim().toLowerCase() === "pickup";
+  return isPickupLikeStopKind(stopSnapshot?.kind);
 }
 
 function resolveComposerCommandCopy(

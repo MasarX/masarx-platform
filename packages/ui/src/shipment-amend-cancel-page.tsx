@@ -155,6 +155,7 @@ function messageForOperation(operation: string, payload: Record<string, unknown>
     if (operation === "reschedule") return "Shipment reschedule completed.";
     if (operation === "address") return "Shipment address update completed.";
     if (operation === "cancel") return "Shipment soft-cancel completed.";
+    if (operation === "return") return "Shipment return request completed.";
   }
   if (workflowRunId) {
     return `Shipment change queued in workflow run ${workflowRunId}.`;
@@ -234,12 +235,15 @@ export async function ShipmentAmendCancelPage({
         input.address = address;
       } else if (operation === "cancel") {
         input.reason = trimOrNull(formData.get("cancel_reason"));
+      } else if (operation === "return") {
+        input.reason = trimOrNull(formData.get("return_reason"));
       } else {
         return { status: "error", message: "Choose a valid shipment operation." };
       }
 
       requestStarted = true;
-      const { data, error } = await client.rpc("shipment_amend_cancel_v1", {
+      const rpcName = operation === "return" ? "shipment_return_request_v1" : "shipment_amend_cancel_v1";
+      const { data, error } = await client.rpc(rpcName, {
         p_input: input,
       });
 

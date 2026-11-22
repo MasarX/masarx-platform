@@ -87,6 +87,21 @@ test("resource table renders rows and links when configured", () => {
   );
 });
 
+test("resource table humanizes lookup-style badge values", () => {
+  renderWithIntl(
+    <ResourceTable
+      columns={[
+        { key: "tracking_number", label: "Tracking" },
+        { key: "shipment_status", label: "Shipment status", renderType: "select" },
+      ]}
+      items={[{ tracking_number: "RTO-001", shipment_status: "return_to_origin" }]}
+    />
+  );
+
+  expectTextVisible("Return To Origin");
+  expectTextHidden("return_to_origin");
+});
+
 test("resource table expands rows to show detail panel", () => {
   renderWithIntl(
     <ResourceTable

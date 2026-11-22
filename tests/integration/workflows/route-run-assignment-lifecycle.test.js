@@ -14,6 +14,14 @@ const {
   setServiceContext: setCanonicalServiceContext,
 } = require('../helpers/tenant-utils');
 
+const {
+  completeRouteStopTask,
+  fetchLookupValues,
+  openDriverShiftSession,
+  registerMobileArtifact,
+  transitionTaskAsUser,
+} = require('../helpers/cross-surface-utils');
+
 const pool = new Pool({ connectionString: DATABASE_URL });
 
 describe('UC076 route run assignment lifecycle foundation', () => {
@@ -338,6 +346,28 @@ describe('UC076 route run assignment lifecycle foundation', () => {
       [resourceKey, JSON.stringify(filters)]
     );
     return rows[0]?.payload ?? null;
+  }
+
+  async function listRouteStopExecutionTasks(routeRunId) {
+    const { rows } = await client.query(
+      `SELECT
+          rs.id AS route_stop_id,
+          rs.shipment_id,
+          rs.sequence_order,
+          t.id AS task_id,
+          t.assigned_to
+         FROM public.route_stops rs
+         JOIN public.tasks t
+           ON t.resource_id = rs.id
+          AND t.resource_type = 'route_stop'
+         JOIN public.task_types tt
+           ON tt.id = t.task_type_id
+          AND tt.key = 'route_stop_execute'
+        WHERE rs.route_run_id = $1::uuid
+        ORDER BY rs.sequence_order, rs.created_at, rs.id`,
+      [routeRunId]
+    );
+    return rows;
   }
 
   async function attachShipmentContactData(adminClient, seed) {
@@ -1971,5 +2001,308 @@ describe('UC076 route run assignment lifecycle foundation', () => {
 
     const visibleOpsStops = await listVisibleResource('route_stops');
     expect(visibleOpsStops?.items).toHaveLength(3);
+  });
+
+  it('carries a breakdown handoff shipment through replacement-driver POD and COD completion', async () => {
+    const seed = await seedRouteRun();
+    await withFixtureAdminContext(client, (db) => attachShipmentContactData(db, seed));
+    const codShipment = seed.shipments[0];
+
+    await setServiceContext(seed.operatorId, seed.organizationId);
+    await withFixtureAdminContext(client, (db) => db.query(
+      `UPDATE public.shipments
+          SET cod_amount = 150,
+              cod_currency = 'SAR',
+              metadata = jsonb_strip_nulls(
+                COALESCE(metadata, '{}'::jsonb)
+                || jsonb_build_object(
+                  'source', 'integration.route-run-assignment-lifecycle',
+                  'handoff_reason', 'vehicle_breakdown',
+                  'cod_amount', 150,
+                  'cod_currency', 'SAR'
+                )
+              ),
+              updated_at = now()
+        WHERE id = $1::uuid
+          AND client_id = $2::uuid`,
+      [codShipment.id, seed.clientId]
+    ));
+
+    await setAuthContext(client, seed.operatorId);
+    await client.query(
+      `SELECT api.ui_execute_route_run_assign_v1($1, $2, $3::text[], $4, $5, $6::jsonb)`,
+      [
+        'routes.assign',
+        'routes',
+        [seed.routeRunId],
+        seed.routeRunId,
+        1,
+        JSON.stringify({
+          driver_user_id: seed.driverId,
+          vehicle_id: seed.vehicleId,
+          idempotency_key: `uc078-cod-base-${randomUUID()}`,
+        }),
+      ]
+    );
+
+    await respondToRouteRunAssignment(
+      seed,
+      'route_runs.acknowledge_assignment',
+      {},
+      `route-run-ack-cod-${randomUUID()}`
+    );
+    await respondToRouteRunAssignment(
+      seed,
+      'route_runs.accept_assignment',
+      {},
+      `route-run-accept-cod-${randomUUID()}`
+    );
+    await setServiceContext(seed.operatorId, seed.organizationId);
+    await client.query(
+      `UPDATE public.route_runs
+          SET status = 'in_progress',
+              started_at = COALESCE(started_at, now())
+        WHERE id = $1::uuid`,
+      [seed.routeRunId]
+    );
+
+    await setAuthContext(client, seed.operatorId);
+    const { rows: reassignRows } = await client.query(
+      `SELECT api.ui_execute_route_run_assign_v1($1, $2, $3::text[], $4, $5, $6::jsonb) AS payload`,
+      [
+        'routes.reassign',
+        'routes',
+        [seed.routeRunId],
+        seed.routeRunId,
+        1,
+        JSON.stringify({
+          driver_user_id: seed.secondaryDriverId,
+          vehicle_id: seed.secondaryVehicleId,
+          reassignment_reason: 'Vehicle breakdown replacement completion',
+          idempotency_key: `uc078-cod-handoff-${randomUUID()}`,
+        }),
+      ]
+    );
+    expect(reassignRows[0]?.payload?.items?.[0]?.driver_user_id).toBe(
+      seed.secondaryDriverId
+    );
+
+    await setAuthContext(client, seed.secondaryDriverId);
+    const replacementManifest = await listVisibleResource('route_stops', {
+      route_run_id: seed.routeRunId,
+    });
+    expect(replacementManifest?.items).toHaveLength(2);
+    replacementManifest?.items?.forEach((item) => {
+      expect(item?.driver_user_id).toBe(seed.secondaryDriverId);
+    });
+
+    await setServiceContext(seed.operatorId, seed.organizationId);
+    const [
+      attemptOutcomes,
+      completionKinds,
+      handoverModes,
+      paymentOutcomes,
+      paymentMethods,
+    ] = await Promise.all([
+      fetchLookupValues(client, 'attempt_outcome'),
+      fetchLookupValues(client, 'delivery_completion_kind'),
+      fetchLookupValues(client, 'delivery_handover_mode'),
+      fetchLookupValues(client, 'payment_collection_outcome'),
+      fetchLookupValues(client, 'payment_collection_method'),
+    ]);
+    const deliveredOutcome = requireLookupValue(
+      attemptOutcomes,
+      'delivered',
+      'attempt_outcome'
+    );
+    const fullCompletionKind = requireLookupValue(
+      completionKinds,
+      'full',
+      'delivery_completion_kind'
+    );
+    const namedRecipientMode = requireLookupValue(
+      handoverModes,
+      'named_recipient',
+      'delivery_handover_mode'
+    );
+    const collectedOutcome = requireLookupValue(
+      paymentOutcomes,
+      'collected',
+      'payment_collection_outcome'
+    );
+    const cashMethod = requireLookupValue(
+      paymentMethods,
+      'cash',
+      'payment_collection_method'
+    );
+
+    const routeStopTasks = await listRouteStopExecutionTasks(seed.routeRunId);
+    expect(routeStopTasks).toHaveLength(2);
+    routeStopTasks.forEach((task) => {
+      expect(task.assigned_to).toBe(seed.secondaryDriverId);
+    });
+
+    const driverShiftId = await openDriverShiftSession(client, {
+      organizationId: seed.organizationId,
+      userId: seed.secondaryDriverId,
+      branchId: seed.branchId,
+      metadata: {
+        source: 'integration.route-run-assignment-lifecycle',
+        handoff_reason: 'vehicle_breakdown',
+      },
+    });
+
+    for (const task of routeStopTasks) {
+      await transitionTaskAsUser(client, {
+        organizationId: seed.organizationId,
+        userId: seed.secondaryDriverId,
+        taskId: task.task_id,
+        toStatus: 'in_progress',
+        statusReason: 'en_route',
+        payload: {
+          ops_session_id: driverShiftId,
+          source: 'integration.route-run-assignment-lifecycle',
+        },
+      });
+      await transitionTaskAsUser(client, {
+        organizationId: seed.organizationId,
+        userId: seed.secondaryDriverId,
+        taskId: task.task_id,
+        toStatus: 'in_progress',
+        statusReason: 'arrived',
+        payload: {
+          ops_session_id: driverShiftId,
+          source: 'integration.route-run-assignment-lifecycle',
+        },
+      });
+
+      const signatureArtifactId = await registerMobileArtifact(client, {
+        organizationId: seed.organizationId,
+        userId: seed.secondaryDriverId,
+        taskId: task.task_id,
+        artifactKind: 'signature',
+        metadata: {
+          source: 'integration.route-run-assignment-lifecycle',
+          route_stop_id: task.route_stop_id,
+          handoff_reason: 'vehicle_breakdown',
+        },
+      });
+      const photoArtifactId = await registerMobileArtifact(client, {
+        organizationId: seed.organizationId,
+        userId: seed.secondaryDriverId,
+        taskId: task.task_id,
+        artifactKind: 'photo',
+        metadata: {
+          source: 'integration.route-run-assignment-lifecycle',
+          route_stop_id: task.route_stop_id,
+          handoff_reason: 'vehicle_breakdown',
+        },
+      });
+
+      const isCodStop = task.shipment_id === codShipment.id;
+      await completeRouteStopTask(client, {
+        organizationId: seed.organizationId,
+        userId: seed.secondaryDriverId,
+        taskId: task.task_id,
+        routeStopId: task.route_stop_id,
+        outcomeReason: deliveredOutcome,
+        payload: {
+          ops_session_id: driverShiftId,
+          handover_mode: namedRecipientMode,
+          recipient_name: 'UC078 Replacement Recipient',
+          recipient_class: 'customer',
+          completion_kind: fullCompletionKind,
+          completion_notes: 'Replacement driver completed the handoff stop.',
+          signature_artifact_id: signatureArtifactId,
+          artifact_ids: [signatureArtifactId, photoArtifactId],
+          ...(isCodStop
+            ? {
+                payment_outcome: collectedOutcome,
+                payment_method: cashMethod,
+                payment_amount: 150,
+                payment_receipt_context: 'UC078-HANDOFF-COD-150',
+                delivery_completion: {
+                  completion_kind: fullCompletionKind,
+                  payment_collection: {
+                    outcome: collectedOutcome,
+                    method: cashMethod,
+                    expected_amount: 150,
+                    collected_amount: 150,
+                    currency_code: 'SAR',
+                    receipt_context: 'UC078-HANDOFF-COD-150',
+                  },
+                },
+              }
+            : {
+                delivery_completion: {
+                  completion_kind: fullCompletionKind,
+                },
+              }),
+          pod: {
+            captured_at: new Date().toISOString(),
+            geostamp: {
+              latitude: 24.7136,
+              longitude: 46.6753,
+              accuracy_m: 9,
+            },
+            signature_artifact_id: signatureArtifactId,
+            artifact_ids: [signatureArtifactId, photoArtifactId],
+          },
+          source: 'integration.route-run-assignment-lifecycle',
+          handoff_reason: 'vehicle_breakdown',
+          run: randomUUID(),
+        },
+      });
+    }
+
+    await setServiceContext(seed.operatorId, seed.organizationId);
+    const { rows: routeRows } = await client.query(
+      `SELECT status
+         FROM public.route_runs
+        WHERE id = $1::uuid`,
+      [seed.routeRunId]
+    );
+    expect(routeRows[0]?.status).toBe('completed');
+
+    const { rows: codShipmentRows } = await client.query(
+      `SELECT status
+         FROM public.shipments
+        WHERE id = $1::uuid
+          AND client_id = $2::uuid`,
+      [codShipment.id, seed.clientId]
+    );
+    expect(codShipmentRows[0]?.status).toBe(deliveredOutcome);
+
+    const { rows: codActionRows } = await client.query(
+      `SELECT performed_by_user_id,
+              delivery_completion_kind,
+              payment_collection_outcome,
+              payment_collection_method,
+              payment_collected_amount::numeric AS payment_collected_amount,
+              action_data
+         FROM public.shipment_actions
+        WHERE shipment_id = $1::uuid
+        ORDER BY timestamp DESC, created_at DESC, id DESC
+        LIMIT 1`,
+      [codShipment.id]
+    );
+    expect(codActionRows[0]?.performed_by_user_id).toBe(seed.secondaryDriverId);
+    expect(codActionRows[0]?.delivery_completion_kind).toBe(fullCompletionKind);
+    expect(codActionRows[0]?.payment_collection_outcome).toBe(collectedOutcome);
+    expect(codActionRows[0]?.payment_collection_method).toBe(cashMethod);
+    expect(Number(codActionRows[0]?.payment_collected_amount)).toBe(150);
+    expect(
+      codActionRows[0]?.action_data?.delivery_completion?.payment_collection?.expected_amount
+    ).toBe(150);
+
+    await setAuthContext(client, seed.driverId);
+    const originalDriverRoutes = await listVisibleResource('routes');
+    expect(originalDriverRoutes?.items || []).toHaveLength(0);
+
+    await setAuthContext(client, seed.secondaryDriverId);
+    const replacementDriverRoutes = await listVisibleResource('routes');
+    expect(replacementDriverRoutes?.items?.map((item) => item?.id)).toEqual([
+      seed.routeRunId,
+    ]);
   });
 });

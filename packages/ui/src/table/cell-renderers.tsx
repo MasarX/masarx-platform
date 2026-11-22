@@ -3,10 +3,20 @@ import { resolveTagColor } from "../tag-colors";
 import { resolveStatusIcon } from "../status-icon";
 import type { ResourceColumn } from "./columns";
 
+function humanizeTagValue(value: string) {
+  const label = value
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
+  return label || value;
+}
+
 export function CellSelectTag({ value }: { value: string }) {
   if (!value) return null;
   const color = resolveTagColor(value);
   const statusIcon = resolveStatusIcon(value);
+  const label = humanizeTagValue(value);
   return (
     <span
       className={cn(
@@ -16,7 +26,7 @@ export function CellSelectTag({ value }: { value: string }) {
       )}
     >
       {statusIcon ? <span className="shrink-0 [&>svg]:h-2.5 [&>svg]:w-2.5" aria-hidden>{statusIcon.icon}</span> : null}
-      {value}
+      {label}
     </span>
   );
 }
@@ -55,7 +65,7 @@ export function resolveRenderType(column: ResourceColumn): string {
     column.renderType ?? column.editType ?? ""
   ).toLowerCase();
   if (raw.includes("bool")) return "boolean";
-  if (raw.includes("select") || raw.includes("enum")) return "select";
+  if (raw.includes("select") || raw.includes("enum") || raw.includes("badge")) return "select";
   if (raw === "id" || raw.includes("uuid")) return "id";
   if (raw.includes("date") && raw.includes("time")) return "datetime";
   if (raw.includes("date")) return "date";

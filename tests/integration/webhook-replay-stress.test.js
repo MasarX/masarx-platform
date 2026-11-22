@@ -292,6 +292,20 @@ describe('Webhook replay stress (basic source)', () => {
     expect(history.filter((row) => row.response_outcome === 'response_replayed'))
       .toHaveLength(duplicates.length);
 
+    const { rows: latestRows } = await pool.query(
+      `SELECT response_outcome, http_status_code, http_body, idempotency_key
+         FROM public.webhook_response_latest
+        WHERE webhook_inbox_id = $1`,
+      [rows[0].id],
+    );
+    expect(latestRows).toHaveLength(1);
+    expect(latestRows[0]).toMatchObject({
+      response_outcome: 'response_replayed',
+      http_status_code: first.response.status,
+      idempotency_key: idempotencyKey,
+    });
+    expect(semanticAckBody(latestRows[0].http_body)).toEqual(semanticAckBody(first.body));
+
     const { rows: decisionRows } = await pool.query(
       `SELECT decision_outcome, decision_inputs
          FROM decision_log
