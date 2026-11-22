@@ -126,7 +126,7 @@ function serializeError(error: unknown) {
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
 const KEY_CHAR = String.raw`(?:[a-z0-9_-]|%2d)`;
 const KEYWORD = String.raw`(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt)`;
-const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+(?:["']|%22){0,2}`;
+const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+(?:["']|%22)*`;
 const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
 const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
 const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
@@ -137,7 +137,8 @@ const PLAIN_QUOTE_TAIL = String.raw`(?:(?!${VALUE_DELIMITER})[\s\S])*`;
 const PLAIN_VALUE = String.raw`"(?:\\[\s\S]|[^"\\])*(?:"|$)${PLAIN_QUOTE_TAIL}|'(?:\\[\s\S]|[^'\\])*(?:'|$)${PLAIN_QUOTE_TAIL}|[^\s&,}]+`;
 // A closed quote can contain %26. Fall back to the parameter boundary for an
 // unclosed quote, and let a following quoted credential match independently.
-const ENCODED_QUOTED_VALUE = String.raw`%22(?:(?:(?!%7d|&|%26(?=${NEXT_SENSITIVE_KEY}%22)|%22(?=${VALUE_DELIMITER}))[\s\S])*%22(?=${VALUE_DELIMITER})|(?:(?!%26|%7d|&)[\s\S])*)`;
+const ENCODED_QUOTE_DELIMITER = String.raw`${VALUE_DELIMITER}|%2c|%5d|[)/"]`;
+const CLOSED_ENCODED_QUOTE = String.raw`(?:(?!%7d|&|%26(?=${NEXT_SENSITIVE_KEY}%22)|%22(?=${ENCODED_QUOTE_DELIMITER}))[\s\S])*%22(?=${ENCODED_QUOTE_DELIMITER})`;
 const ENCODED_UNQUOTED_VALUE = String.raw`(?:(?!%26|%7d|%20(?=${NEXT_SENSITIVE_KEY}))[^\s&,}])+`;
 // Older encoded values can include a prefixed key. Preserve only bare key syntax at a
 // recognized separator, and still collect the following value with its own matcher.
@@ -148,6 +149,15 @@ function credentialPattern(prefix: string, value: string, skip = MARKER_OR_KEY_R
   return new RegExp(String.raw`(?=(${prefix})(${value}))\1|${skip}`, "gi");
 }
 
+function encodedCredentialPattern(unclosedQuote: string) {
+  return credentialPattern(
+    String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}${ENCODED_SEPARATOR}`,
+    String.raw`%22(?:${CLOSED_ENCODED_QUOTE}|${unclosedQuote})|${ENCODED_UNQUOTED_VALUE}`,
+  );
+}
+
+const ENCODED_CREDENTIAL = encodedCredentialPattern(String.raw`(?:(?!%26|%7d|&)[\s\S])*`);
+const TRUNCATED_ENCODED_CREDENTIAL = encodedCredentialPattern(String.raw`[\s\S]*$`);
 const CREDENTIAL_PATTERNS = [
   credentialPattern(
     String.raw`\b(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*[:=]\s*`,
@@ -155,7 +165,6 @@ const CREDENTIAL_PATTERNS = [
     String.raw`\[(?:JWT_)?REDACTED\]|[a-z0-9_]+`,
   ),
   credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
-  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}${ENCODED_SEPARATOR}`, String.raw`${ENCODED_QUOTED_VALUE}|${ENCODED_UNQUOTED_VALUE}`),
   credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}%3[ad]\s*`, LEGACY_ENCODED_VALUE),
 ];
 const AUTHORIZATION_SCHEME = new RegExp(
@@ -177,7 +186,8 @@ export function redactOutboxErrorText(value: string) {
   const text = value.slice(0, end);
 
   const spans: RedactionSpan[] = [];
-  for (const pattern of CREDENTIAL_PATTERNS) {
+  const encodedCredential = truncated ? TRUNCATED_ENCODED_CREDENTIAL : ENCODED_CREDENTIAL;
+  for (const pattern of [...CREDENTIAL_PATTERNS, encodedCredential]) {
     for (const match of text.matchAll(pattern)) {
       if (match[2] === undefined) continue;
       const start = match.index + match[1].length;
