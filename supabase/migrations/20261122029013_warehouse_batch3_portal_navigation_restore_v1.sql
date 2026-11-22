@@ -85,7 +85,7 @@ BEGIN
       SELECT value
       FROM jsonb_array_elements(v_source_sections) AS value
     LOOP
-      IF v_section->>'id' = 'operations' THEN
+      IF NOT v_has_operations AND v_section->>'id' = 'operations' THEN
         v_has_operations := TRUE;
         v_section := jsonb_set(v_section, '{items}', COALESCE(v_section->'items', '[]'::jsonb) || v_items, TRUE);
       END IF;
