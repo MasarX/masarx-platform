@@ -1,3 +1,4 @@
+import { redactOutboxErrorText } from "@masarx/mobile-core";
 import type { OutboxEntry, OutboxSyncResult } from "@masarx/mobile-core";
 
 export type ActionSubmissionStatus =
@@ -9,7 +10,7 @@ export type ActionSubmissionStatus =
 type QueueEntrySummary = Pick<OutboxEntry, "status" | "last_error"> | null | undefined;
 
 function normalizeQueueErrorDetail(value: string | null | undefined) {
-  const firstLine = String(value || "")
+  const firstLine = redactOutboxErrorText(value || "")
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .find(Boolean);

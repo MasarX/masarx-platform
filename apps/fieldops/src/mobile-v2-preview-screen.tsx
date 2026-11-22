@@ -13,6 +13,7 @@
 // UUID must guard against fixture identifiers (see `isMobileV2PersistedUuid`).
 
 import * as React from "react";
+import { redactOutboxErrorText } from "@masarx/mobile-core";
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
@@ -547,7 +548,7 @@ function formatMobileV2UserError(error: unknown, fallback: string): string {
   ) {
     return fallback;
   }
-  return raw;
+  return redactOutboxErrorText(raw);
 }
 
 function buildMobileV2CodLedgerStops(
@@ -1647,7 +1648,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
       } catch (err) {
         setToast({
           id: `trip-stage-err-${Date.now()}`,
-          message: err instanceof Error ? err.message : "Trip stage advancement failed",
+          message: err instanceof Error ? redactOutboxErrorText(err.message) : "Trip stage advancement failed",
           kind: "danger",
         });
       } finally {
@@ -1725,7 +1726,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
           } catch (err) {
             setToast({
               id: `route-departure-err-${Date.now()}`,
-              message: err instanceof Error ? err.message : "Departure blocked",
+              message: err instanceof Error ? redactOutboxErrorText(err.message) : "Departure blocked",
               kind: "danger",
             });
           } finally {
@@ -1987,7 +1988,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
         } catch (err) {
           setToast({
             id: `pickup-closeout-err-${Date.now()}`,
-            message: err instanceof Error ? err.message : "Pickup closeout failed",
+            message: err instanceof Error ? redactOutboxErrorText(err.message) : "Pickup closeout failed",
             kind: "danger",
           });
         } finally {
@@ -5093,7 +5094,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                         id: `rto-readback-err-${Date.now()}`,
                         message:
                           err instanceof Error
-                            ? err.message
+                            ? redactOutboxErrorText(err.message)
                             : "Return saved, but confirmation failed",
                         kind: "danger",
                       });
@@ -6003,7 +6004,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                   } catch (err) {
                     setToast({
                       id: `route-load-err-${Date.now()}`,
-                      message: err instanceof Error ? err.message : "Route load scan failed",
+                      message: err instanceof Error ? redactOutboxErrorText(err.message) : "Route load scan failed",
                       kind: "danger",
                     });
                   } finally {
@@ -6093,7 +6094,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                 .catch((err: unknown) => {
                   setToast({
                     id: `loader-err-${Date.now()}`,
-                    message: err instanceof Error ? err.message : "Loader submit failed",
+                    message: err instanceof Error ? redactOutboxErrorText(err.message) : "Loader submit failed",
                     kind: "danger",
                   });
                 });
@@ -6786,7 +6787,7 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
               setIncidentStatement("");
               setIncidentStopId(null);
             } catch (err) {
-              const message = err instanceof Error ? err.message : "Incident report failed";
+              const message = err instanceof Error ? redactOutboxErrorText(err.message) : "Incident report failed";
               setIncidentVerifiedReadback(null);
               setIncidentReadbackError(message);
               setToast({

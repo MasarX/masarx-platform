@@ -8,6 +8,7 @@
 // callback; submit is gated until all 4 are present.
 
 import * as React from "react";
+import { redactOutboxErrorText } from "@masarx/mobile-core";
 import {
   ActivityIndicator,
   Pressable,
@@ -185,7 +186,7 @@ export function MobileV2KycVehiclePhotosScreen(
       });
       setCameraAngle(null);
     } catch (error) {
-      setCameraError(error instanceof Error ? error.message : "Unable to capture vehicle evidence.");
+      setCameraError(error instanceof Error ? redactOutboxErrorText(error.message) : "Unable to capture vehicle evidence.");
     }
   }, [busy, cameraAngle, props]);
 

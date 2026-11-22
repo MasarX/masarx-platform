@@ -1,3 +1,4 @@
+import { redactOutboxErrorText } from "@masarx/mobile-core";
 import type {
   MobileV2MapLocationReadback,
   MobileV2MapStop,
@@ -38,7 +39,7 @@ export const MOBILE_V2_ROUTE_MAP_LAST_KNOWN_POSITION_OPTIONS = Object.freeze({
 
 export function formatMobileV2RouteMapLocationError(error: unknown): string {
   return error instanceof Error && error.message.trim() !== ""
-    ? error.message
+    ? redactOutboxErrorText(error.message)
     : "Unable to save location";
 }
 

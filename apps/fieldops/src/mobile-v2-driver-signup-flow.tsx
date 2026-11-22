@@ -1,4 +1,5 @@
 import * as React from "react";
+import { redactOutboxErrorText } from "@masarx/mobile-core";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 
 import {
@@ -36,7 +37,7 @@ export type MobileV2DriverSignupFlowProps = {
 };
 
 function formatError(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (error instanceof Error && error.message.trim()) return redactOutboxErrorText(error.message.trim());
   return "driver_signup_failed";
 }
 

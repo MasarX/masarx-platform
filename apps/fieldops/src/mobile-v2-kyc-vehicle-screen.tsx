@@ -8,6 +8,7 @@
 // VIN >= 8, istimara not pending).
 
 import * as React from "react";
+import { redactOutboxErrorText } from "@masarx/mobile-core";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -141,7 +142,7 @@ export function MobileV2KycVehicleScreen(
       });
       setCameraOpen(false);
     } catch (error) {
-      setCameraError(error instanceof Error ? error.message : "Unable to capture Istimara evidence.");
+      setCameraError(error instanceof Error ? redactOutboxErrorText(error.message) : "Unable to capture Istimara evidence.");
     }
   }, [busy, props]);
   const statusTone =

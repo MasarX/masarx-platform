@@ -21,6 +21,8 @@
 // All helpers are pure; safe to import from any RN target (Web / iOS /
 // Android via Hermes).
 
+import { redactOutboxErrorText } from "@masarx/mobile-core";
+
 /** RFC 4122 UUID v4 string. */
 export type MobileV2Uuid = string;
 
@@ -116,10 +118,14 @@ export function emitMobileV2TraceEvent(
   // without losing them in development. Single-line JSON keeps the stream
   // grep-friendly.
   try {
+    const message = fields.message;
+    const safeFields = typeof message === "string"
+      ? { ...fields, message: redactOutboxErrorText(message) }
+      : fields;
     // eslint-disable-next-line no-console
     console.debug(
       "MV2-RPC",
-      JSON.stringify({ step, ...fields, ts: new Date().toISOString() }),
+      JSON.stringify({ step, ...safeFields, ts: new Date().toISOString() }),
     );
   } catch {
     /* never propagate a logging failure into the caller */

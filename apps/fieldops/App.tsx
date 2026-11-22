@@ -118,12 +118,12 @@ import {
   resolvePreferredAuthMethod,
 } from "./src/mobile-auth-methods";
 import { formatAuthErrorMessage } from "./src/mobile-auth-errors";
+import { formatUnknownError, readRawErrorText } from "./src/mobile-display-error";
 import {
   installGlobalCrashHandler,
   installUnhandledRejectionHandler,
   logDebugFailure,
   logMobileRequestTrace,
-  normalizeDebugMessage,
 } from "./src/mobile-debug";
 import {
   addMobileNetworkFailureBreadcrumb,
@@ -374,29 +374,6 @@ function showMobileNotice(title: string, message: string) {
   Alert.alert(safeTitle, safeMessage ? safeMessage : undefined);
 }
 
-function formatUnknownError(error: unknown): string {
-  if (!error) return "Unknown error";
-  if (typeof error === "string") return error.trim() || "Unknown error";
-  if (error instanceof Error) return error.message || "Unknown error";
-  if (typeof error === "object") {
-    const record = error as Record<string, unknown>;
-    const message = coerceValueText(record.message);
-    const details = coerceValueText(record.details);
-    const hint = coerceValueText(record.hint);
-    const code = coerceValueText(record.code);
-    const parts = [message, details, hint].filter(Boolean) as string[];
-    if (parts.length) {
-      return code ? `[${code}] ${parts.join(" - ")}` : parts.join(" - ");
-    }
-    try {
-      return JSON.stringify(record);
-    } catch {
-      return String(record);
-    }
-  }
-  return String(error);
-}
-
 function resolveErrorCode(error: unknown): string | null {
   const record = asRecord(error);
   const code = coerceValueText(record.code);
@@ -406,7 +383,7 @@ function resolveErrorCode(error: unknown): string | null {
 function isUnsupportedResourceError(error: unknown, resourceKey: string) {
   const code = resolveErrorCode(error);
   if (code !== "P0001") return false;
-  const message = formatUnknownError(error).toLowerCase();
+  const message = readRawErrorText(error).toLowerCase();
   return message.includes("unknown resource") && message.includes(resourceKey.toLowerCase());
 }
 
@@ -4831,7 +4808,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       } catch (error) {
         return finish(
           error instanceof Error && String(error.message || "").trim()
-            ? error.message
+            ? redactOutboxErrorText(error.message)
             : "Partial delivery box numbers are invalid."
         );
       }
@@ -5081,7 +5058,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
       if (submitEpoch !== composerCaptureEpoch.current) return;
       setComposerError(
         composerIsSelfKyc ? strings.selfKyc.invalid : error instanceof Error && String(error.message || "").trim()
-          ? error.message
+          ? redactOutboxErrorText(error.message)
           : "Unable to queue action with provided input."
       );
       setComposerSubmitting(false);
@@ -7552,7 +7529,7 @@ function ScanScreen({
       } catch (error) {
         const message =
           error instanceof Error && error.message
-            ? error.message
+            ? redactOutboxErrorText(error.message)
             : "Attestation failed. Retry while online.";
         Alert.alert("Attestation required", message);
         return;
@@ -8306,7 +8283,7 @@ function LocationScreen({
       } catch (error) {
         const message =
           error instanceof Error && error.message
-            ? error.message
+            ? redactOutboxErrorText(error.message)
             : "Attestation failed. Retry while online.";
         Alert.alert("Attestation required", message);
         return;
