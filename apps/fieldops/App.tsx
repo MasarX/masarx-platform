@@ -5,7 +5,7 @@ import { buildMobileMapListEntries, buildMobileRealMapModel } from "./src/mobile
 import { assertMobileCommandSelection, hasMobileCommandDisabledState, validateMobileComposerNumberValue,
   isMobileOutboxSyncBatchSuccessful, describeMobileActionReceiptStatus, formatMobileActionReceipt,
   describeMobileOutboxEntry, type MobileActionReceipt } from "./src/mobile-action-feedback";
-import { redactOutboxErrorText, normalizeOutboxDisplay } from "@masarx/mobile-core";
+import { normalizeOutboxDisplay } from "@masarx/mobile-core";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
@@ -118,7 +118,7 @@ import {
   resolvePreferredAuthMethod,
 } from "./src/mobile-auth-methods";
 import { formatAuthErrorMessage } from "./src/mobile-auth-errors";
-import { formatUnknownError, readRawErrorText } from "./src/mobile-display-error";
+import { formatUnknownError, readRawErrorText, redactDisplayErrorText } from "./src/mobile-display-error";
 import {
   installGlobalCrashHandler,
   installUnhandledRejectionHandler,
@@ -4806,11 +4806,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
           packageCount: selectedStopSnapshot?.packageCount ?? null,
         });
       } catch (error) {
-        return finish(
-          error instanceof Error && String(error.message || "").trim()
-            ? redactOutboxErrorText(error.message)
-            : "Partial delivery box numbers are invalid."
-        );
+        return finish(redactDisplayErrorText(
+          error instanceof Error && String(error.message || "").trim() ? error.message : undefined,
+          "Partial delivery box numbers are invalid.",
+        ));
       }
     } else {
       optional.add("partial");
@@ -5057,9 +5056,10 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
     } catch (error) {
       if (submitEpoch !== composerCaptureEpoch.current) return;
       setComposerError(
-        composerIsSelfKyc ? strings.selfKyc.invalid : error instanceof Error && String(error.message || "").trim()
-          ? redactOutboxErrorText(error.message)
-          : "Unable to queue action with provided input."
+        composerIsSelfKyc ? strings.selfKyc.invalid : redactDisplayErrorText(
+          error instanceof Error && String(error.message || "").trim() ? error.message : undefined,
+          "Unable to queue action with provided input.",
+        )
       );
       setComposerSubmitting(false);
     } finally {
@@ -5217,7 +5217,7 @@ function BootstrapAuthed(props: BootstrapAuthedProps) {
         entry.status === "dead" ? strings.route.departureReview : strings.route.departureRequestExplanation);
     } catch (error) {
       logDebugFailure("failed to queue route departure", error);
-      Alert.alert(strings.route.departureBlocked, formatUnknownError(error));
+      Alert.alert(strings.route.departureBlocked, formatUnknownError(error, strings.route.departureReview));
     } finally {
       departureSubmitInFlight.current = false;
     }
@@ -7266,7 +7266,7 @@ function OutboxScreen({
                 <Text style={styles.noticeSubtext}>{feedback.detail}</Text>
                 {feedback.lines.map((line) => <Text key={line} style={styles.noticeSubtext}>{line}</Text>)}
                 {diagnosticsEnabled && item.last_error ? (
-                  <Text style={styles.mono} numberOfLines={6}>{redactOutboxErrorText(item.last_error)}</Text>
+                  <Text style={styles.mono} numberOfLines={6}>{redactDisplayErrorText(item.last_error)}</Text>
                 ) : null}
               </View>
             );
@@ -7527,10 +7527,10 @@ function ScanScreen({
           source: "mobile",
         });
       } catch (error) {
-        const message =
-          error instanceof Error && error.message
-            ? redactOutboxErrorText(error.message)
-            : "Attestation failed. Retry while online.";
+        const message = redactDisplayErrorText(
+          error instanceof Error && error.message ? error.message : undefined,
+          "Attestation failed. Retry while online.",
+        );
         Alert.alert("Attestation required", message);
         return;
       }
@@ -8281,10 +8281,10 @@ function LocationScreen({
           source: "mobile",
         });
       } catch (error) {
-        const message =
-          error instanceof Error && error.message
-            ? redactOutboxErrorText(error.message)
-            : "Attestation failed. Retry while online.";
+        const message = redactDisplayErrorText(
+          error instanceof Error && error.message ? error.message : undefined,
+          "Attestation failed. Retry while online.",
+        );
         Alert.alert("Attestation required", message);
         return;
       }

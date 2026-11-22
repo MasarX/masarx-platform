@@ -26,6 +26,15 @@ export function readRawErrorText(error: unknown): string {
   return String(error);
 }
 
-export function formatUnknownError(error: unknown): string {
-  return redactOutboxErrorText(readRawErrorText(error));
+export function redactDisplayErrorText(
+  message: string | undefined,
+  fallback = "Unable to complete this action. Try again.",
+): string {
+  if (message === undefined) return fallback;
+  const redacted = redactOutboxErrorText(message);
+  return redacted.startsWith("[REDACTED: message withheld]") ? fallback : redacted;
+}
+
+export function formatUnknownError(error: unknown, fallback?: string): string {
+  return redactDisplayErrorText(readRawErrorText(error), fallback);
 }

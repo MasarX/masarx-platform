@@ -9,7 +9,7 @@
 // the source DocCard primitive.
 
 import * as React from "react";
-import { redactOutboxErrorText } from "@masarx/mobile-core";
+import { redactDisplayErrorText } from "./mobile-display-error";
 import {
   ActivityIndicator,
   ScrollView,
@@ -260,7 +260,10 @@ export function MobileV2KycDocsScreen(
       });
       setCameraDocKey(null);
     } catch (error) {
-      setCameraError(error instanceof Error ? redactOutboxErrorText(error.message) : "Unable to capture identity evidence.");
+      setCameraError(redactDisplayErrorText(
+        error instanceof Error ? error.message : undefined,
+        "Unable to capture identity evidence.",
+      ));
     }
   }, [busy, cameraDocKey, props]);
 

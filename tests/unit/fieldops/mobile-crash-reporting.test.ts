@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 type CrashModule = typeof import("../../../apps/fieldops/src/mobile-crash-reporting");
 
 type SentryMock = {
@@ -63,6 +65,8 @@ describe("mobile crash reporting", () => {
 
   test("initializes in production and redacts sensitive payloads", () => {
     const { mod, sentry } = loadCrashModule(false);
+    const marker = randomUUID();
+    const authorization = "Authorization=" + "Bearer " + marker;
 
     expect(
       mod.initMobileCrashReporting({
@@ -78,32 +82,34 @@ describe("mobile crash reporting", () => {
     const options = sentry.init.mock.calls[0]?.[0] || {};
     const beforeSend = options.beforeSend as (event: Record<string, unknown>) => Record<string, unknown>;
     const event = beforeSend({
-      message: "Authorization=Bearer abc.def.ghi token=secret",
+      message: authorization + " token=" + marker,
       request: {
         url: "https://example.com",
         method: "POST",
-        headers: { authorization: "Bearer secret" },
+        headers: { authorization: "Bearer " + marker },
         data: { payload: true },
       },
       exception: {
-        values: [{ type: "AuthError", value: "refresh_token=xyz" }],
+        values: [{ type: "AuthError", value: "refresh_token=" + marker }],
       },
     });
 
     expect(event.request).toEqual({ url: "https://example.com", method: "POST" });
-    expect(String(event.message)).not.toContain("secret");
-    expect(String((event as any).exception.values[0].value)).toContain("[REDACTED]");
+    expect(JSON.stringify(event)).not.toContain(marker);
+    expect(event.message).toMatch(/\[REDACTED/);
+    expect((event as any).exception.values[0].value).toMatch(/\[REDACTED/);
 
     const beforeBreadcrumb = options.beforeBreadcrumb as (breadcrumb: Record<string, unknown>) => Record<string, unknown>;
     const breadcrumb = beforeBreadcrumb({
       category: "auth.session",
-      message: "Authorization=Bearer abc.def.ghi",
+      message: authorization,
       data: {
-        token: "secret-token",
+        token: marker,
         safe: "ok",
       },
     });
-    expect(String(breadcrumb.message || "")).toContain("[REDACTED]");
+    expect(JSON.stringify(breadcrumb)).not.toContain(marker);
+    expect(breadcrumb.message).toMatch(/\[REDACTED/);
     expect(breadcrumb.data).toEqual({});
 
     expect(
@@ -137,6 +143,7 @@ describe("mobile crash reporting", () => {
 
   test("adds redacted network breadcrumbs and captures exceptions when enabled", () => {
     const { mod, sentry } = loadCrashModule(false);
+    const marker = randomUUID();
 
     mod.initMobileCrashReporting({ dsn: "https://dsn.example/1" });
 
@@ -147,13 +154,14 @@ describe("mobile crash reporting", () => {
       statusText: "Unauthorized",
       correlationId: "cid-1",
       traceparent: "tp-1",
-      error: "Bearer top.secret.token",
+      error: "Bearer " + marker,
     });
 
     expect(sentry.addBreadcrumb).toHaveBeenCalledTimes(1);
     const breadcrumb = sentry.addBreadcrumb.mock.calls[0]?.[0] || {};
     expect(breadcrumb.category).toBe("http");
-    expect(String(breadcrumb.data?.error || "")).toContain("[REDACTED]");
+    expect(breadcrumb.data?.error).not.toContain(marker);
+    expect(breadcrumb.data?.error).toMatch(/\[REDACTED/);
 
     mod.setMobileCrashReportingUser({ id: "u-1", email: "driver@example.com" });
     mod.captureMobileException(new Error("boom"), { feature: "location" }, { surface: "mobile" });

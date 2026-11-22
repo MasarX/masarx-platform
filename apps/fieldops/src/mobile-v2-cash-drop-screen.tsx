@@ -9,7 +9,7 @@
 // supply expectedSar (resolver output) so no SAR is hardcoded.
 
 import * as React from "react";
-import { redactOutboxErrorText } from "@masarx/mobile-core";
+import { redactDisplayErrorText } from "./mobile-display-error";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -173,7 +173,10 @@ export function MobileV2CashDropScreen(
       });
       setCameraOpen(false);
     } catch (error) {
-      setCameraError(error instanceof Error ? redactOutboxErrorText(error.message) : "Unable to capture cash-drop evidence.");
+      setCameraError(redactDisplayErrorText(
+        error instanceof Error ? error.message : undefined,
+        "Unable to capture cash-drop evidence.",
+      ));
     }
   }, [captureBusy, props]);
 

@@ -7,7 +7,7 @@
 // via props (zero-hardcoding for stamps).
 
 import * as React from "react";
-import { redactOutboxErrorText } from "@masarx/mobile-core";
+import { redactDisplayErrorText } from "./mobile-display-error";
 import {
   ActivityIndicator,
   Pressable,
@@ -165,7 +165,10 @@ export function MobileV2CleaningScreen(
       });
       setCameraOpen(false);
     } catch (error) {
-      setCameraError(error instanceof Error ? redactOutboxErrorText(error.message) : "Unable to capture cleaning evidence.");
+      setCameraError(redactDisplayErrorText(
+        error instanceof Error ? error.message : undefined,
+        "Unable to capture cleaning evidence.",
+      ));
     }
   }, [busy, props]);
 
