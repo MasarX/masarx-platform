@@ -1,7 +1,7 @@
 import { turnstileHostnameFailure, verifyMarketingTurnstile } from "./_shared/turnstile-local-test.mjs";
 import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
-import { parseRequestBody, readEnv } from "./_shared/mod.mjs";
+import { logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import {
   approveTenantSignupRequest,
   asString,
@@ -134,9 +134,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let payload: IntakePayload;
   try {
     payload = (await parseRequestBody(req)).json as IntakePayload;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid_json";
-    return json(400, { ok: false, error: { code: "invalid_json", message } }, cors.headers);
+  } catch {
+    logStructured("error", "tenant_signup_intake_failed", { stage: "parse_body" });
+    return json(400, { ok: false, error: { code: "invalid_json" } }, cors.headers);
   }
 
   const email = asString(payload?.email).toLowerCase();
@@ -156,9 +156,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let serviceClient;
   try {
     serviceClient = createServiceClient();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "missing_supabase_configuration";
-    return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
+  } catch {
+    logStructured("error", "tenant_signup_intake_failed", { stage: "service_client" });
+    return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
   }
 
   // Local QA observation only: never log request data or alter operation results.
@@ -181,9 +181,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let policy: JsonRecord;
   try {
     policy = await observe("policy", () => loadTenantSignupPolicy(serviceClient));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "policy_load_failed";
-    return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
+  } catch {
+    logStructured("error", "tenant_signup_intake_failed", { stage: "load_policy" });
+    return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
   }
 
   if (!policyBool(policy, ["enabled"], false)) {
@@ -199,7 +199,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!clientIp || !effectiveIpHashSalt) {
     return json(
       500,
-      { ok: false, error: { code: "server_misconfigured", message: "ip_hash_prerequisites_missing" } },
+      { ok: false, error: { code: "server_misconfigured" } },
       cors.headers,
     );
   }
@@ -259,13 +259,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   ));
 
   if (rpcError) {
+    logStructured("error", "tenant_signup_intake_failed", { stage: "intake_rpc" });
     return json(
       500,
       {
         ok: false,
         error: {
           code: "rpc_failed",
-          message: rpcError.message,
         },
       },
       cors.headers,
@@ -276,11 +276,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (rpcBody.ok === false) {
     const errorObj = (rpcBody.error && typeof rpcBody.error === "object" ? rpcBody.error : {}) as JsonRecord;
     const code = asString(errorObj.code);
+    logStructured("error", "tenant_signup_intake_failed", { stage: "intake_rpc" });
     return json(
       mapRpcErrorToStatus(code),
-      {
-        ...rpcBody,
-      },
+      { ok: false, error: code ? { code } : {} },
       cors.headers,
     );
   }

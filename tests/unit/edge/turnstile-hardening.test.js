@@ -72,7 +72,7 @@ function setup(secret = 'fixture-secret', handlerName = 'public-shipment-trackin
   }
 
   load(path.join(edgeRoot, handlerName, 'index.ts'));
-  return { handler, rpc, fetch };
+  return { handler, rpc, fetch, createClient, logError };
 }
 
 function request(route = 'public-shipment-tracking/lookup', origin = allowedOrigin) {
@@ -203,3 +203,60 @@ test.each(['marketing-lead-intake', 'tenant-signup-intake'])(
     expect(app.fetch).toHaveBeenCalledWith(siteverifyUrl, expect.any(Object));
   },
 );
+
+
+describe.each(['marketing-lead-intake', ...signupHandlers])('%s public failure bodies', (name) => {
+  const detail = 'fixture internal detail';
+
+  test('returns a generic invalid_json body', async () => {
+    const app = setup('fixture-secret', name);
+    const malformed = new Request(request(name), { body: detail });
+    const response = await app.handler(malformed);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: { code: 'invalid_json' } });
+    expect(app.logError.mock.calls.flat().join(' ')).not.toContain(detail);
+    expect(app.logError.mock.calls.some(([line]) => JSON.parse(line.startsWith("{") ? line : "{}").stage === 'parse_body')).toBe(true);
+  });
+
+  test('returns a generic server_misconfigured body', async () => {
+    const app = setup('fixture-secret', name);
+    if (name === 'marketing-lead-intake') {
+      app.fetch.mockResolvedValueOnce(Response.json({ success: true, hostname: 'tracking.example.invalid' }));
+      app.fetch.mockRejectedValue(new Error(detail));
+    } else {
+      app.createClient.mockImplementation(() => { throw new Error(detail); });
+    }
+
+    const response = await app.handler(request(name));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ ok: false, error: { code: 'server_misconfigured' } });
+    expect(app.logError.mock.calls.flat().join(' ')).not.toContain(detail);
+    const stage = name === 'marketing-lead-intake' ? 'intake_rpc' : 'service_client';
+    expect(app.logError.mock.calls.some(([line]) => JSON.parse(line.startsWith("{") ? line : "{}").stage === stage)).toBe(true);
+  });
+
+  test('keeps the RPC error code and status without the RPC message', async () => {
+    const app = setup('fixture-secret', name);
+    app.fetch.mockResolvedValueOnce(Response.json({ success: true, hostname: 'tracking.example.invalid' }));
+    if (name === 'marketing-lead-intake') {
+      app.fetch.mockResolvedValueOnce(Response.json({ message: detail }, { status: 500 }));
+    } else {
+      const loadEntryOrPolicy = app.rpc.getMockImplementation();
+      app.rpc.mockImplementation((rpcName) => rpcName.endsWith('_create_v1')
+        ? { data: null, error: { message: detail } }
+        : loadEntryOrPolicy(rpcName));
+    }
+
+    const response = await app.handler(request(name));
+    const expectedErrors = {
+      'marketing-lead-intake': { code: 'rpc_failed', rpc_status: 500 },
+      'driver-signup-intake': { code: 'request_failed' },
+      'tenant-signup-intake': { code: 'rpc_failed' },
+    };
+    expect(response.status).toBe(name === 'driver-signup-intake' ? 400 : 500);
+    expect(await response.json()).toEqual({ ok: false, error: expectedErrors[name] });
+    expect(app.logError.mock.calls.flat().join(' ')).not.toContain(detail);
+    expect(app.logError.mock.calls.some(([line]) => JSON.parse(line.startsWith("{") ? line : "{}").stage === 'intake_rpc')).toBe(true);
+  });
+});

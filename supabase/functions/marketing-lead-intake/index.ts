@@ -1,5 +1,5 @@
 import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
-import { parseRequestBody, readEnv, toResponseBody } from "./_shared/mod.mjs";
+import { logStructured, parseRequestBody, readEnv, toResponseBody } from "./_shared/mod.mjs";
 import { selectRpcAuthAttempts } from "./rpc-auth.mjs";
 import {
   LOCAL_MARKETING_TURNSTILE_TEST_SECRET,
@@ -299,15 +299,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       clientsRpc = await invokeRpcWithAuthFallback("marketing_landing_clients_list_v1", {
         p_locale: locale || null,
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
+    } catch {
+      logStructured("error", "marketing_lead_intake_failed", { stage: "clients_rpc" });
+      return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
     }
 
     const rpcResponse = clientsRpc.response;
     const rpcBody = clientsRpc.body;
     if (!rpcResponse.ok) {
-      const message = extractRpcMessage(rpcBody) || null;
+      logStructured("error", "marketing_lead_intake_failed", { stage: "clients_rpc" });
       return json(
         500,
         {
@@ -315,7 +315,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
           error: {
             code: "clients_rpc_failed",
             rpc_status: rpcResponse.status,
-            rpc_message: message ?? rpcResponse.statusText,
           },
         },
         cors.headers,
@@ -338,8 +337,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let payload: IntakePayload;
   try {
     payload = (await parseRequestBody(req)).json as IntakePayload;
-  } catch (e) {
-    return json(400, { ok: false, error: { code: "invalid_json", message: e.message } }, cors.headers);
+  } catch {
+    logStructured("error", "marketing_lead_intake_failed", { stage: "parse_body" });
+    return json(400, { ok: false, error: { code: "invalid_json" } }, cors.headers);
   }
 
   const email = asString(payload?.email);
@@ -363,12 +363,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // objectives:allow LOCALHOST Justification: local-only fallback client IP is required when Docker loopback strips forwarded IP headers during isolated QA.
   const clientIp = readClientIp(req) || (cors.localContext ? "127.0.0.1" : "");
   if (!clientIp) {
-    return json(500, { ok: false, error: { code: "server_misconfigured", message: "client_ip_missing" } }, cors.headers);
+    return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
   }
   const effectiveIpHashSalt =
     MARKETING_IP_HASH_SALT || (cors.localContext ? LOCAL_MARKETING_IP_HASH_SALT : "");
   if (!effectiveIpHashSalt) {
-    return json(500, { ok: false, error: { code: "server_misconfigured", message: "ip_hash_salt_missing" } }, cors.headers);
+    return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
   }
   const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
 
@@ -418,15 +418,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       p_ip_hash: ipHash || null,
       p_turnstile_verified: turnstileVerified,
     }, { serviceOnly: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return json(500, { ok: false, error: { code: "server_misconfigured", message } }, cors.headers);
+  } catch {
+    logStructured("error", "marketing_lead_intake_failed", { stage: "intake_rpc" });
+    return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
   }
 
   const rpcResponse = leadRpc.response;
   const rpcBody = leadRpc.body;
   if (!rpcResponse.ok || !rpcBody) {
-    const message = extractRpcMessage(rpcBody) || null;
+    logStructured("error", "marketing_lead_intake_failed", { stage: "intake_rpc" });
     return json(
       500,
       {
@@ -434,7 +434,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
         error: {
           code: "rpc_failed",
           rpc_status: rpcResponse.status,
-          rpc_message: message ?? rpcResponse.statusText,
         },
       },
       cors.headers,
@@ -447,10 +446,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (ok === false) {
       const err = bodyObj.error;
       const code = err && typeof err === "object" && "code" in err ? asString((err as any).code) : "";
+      logStructured("error", "marketing_lead_intake_failed", { stage: "intake_rpc" });
       const status = mapRpcErrorToStatus(code);
       return json(
         status,
-        { ...(bodyObj as JsonRecord) },
+        { ok: false, error: code ? { code } : {} },
         cors.headers,
       );
     }
