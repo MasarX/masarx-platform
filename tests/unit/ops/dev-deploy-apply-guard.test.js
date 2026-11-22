@@ -152,7 +152,7 @@ test.each([
     'G2: previous apply at run 41 concluded success'],
 ])('%s', async (_label, failedJob, expected, decision) => {
   const { result, decisions } = await fixture({ history: {
-    runs: { main: [{ id: 42, run_attempt: 1 }, { id: 41, run_attempt: 1 }], dev: [] },
+    runs: { main: [{ id: 41, run_attempt: 1 }, { id: 42, run_attempt: 1 }], dev: [] },
     jobs: {
       '/actions/runs/42/attempts/1/jobs': failedJob,
       '/actions/runs/41/attempts/1/jobs': { conclusion: 'success', completed_at: later },
