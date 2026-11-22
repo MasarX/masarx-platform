@@ -187,20 +187,64 @@ test('refuses when the GitHub result cap prevents a complete history scan', asyn
   }
 });
 
-test.each(['HTTP error', 'network error'])('fails closed on %s without publishing a deployment output', async error => {
+test('a missing dev ref skips dev supersession but scans dev apply history', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-guard-'));
   const env = {
+    GITHUB_API_URL: 'https://example.test', GITHUB_REPOSITORY: 'example/repo',
+    GITHUB_EVENT_NAME: 'push', GITHUB_SHA: tip,
+    GITHUB_STEP_SUMMARY: path.join(dir, 'summary'), GITHUB_OUTPUT: path.join(dir, 'output'),
+  };
+  const fetchRequest = jest.fn()
+    .mockResolvedValueOnce(Response.json({ object: { sha: tip } }))
+    .mockResolvedValueOnce(new Response(null, { status: 404 }))
+    .mockResolvedValueOnce(Response.json({ workflow_runs: [] }))
+    .mockResolvedValueOnce(Response.json({ workflow_runs: [{ id: 42, run_attempt: 1 }] }))
+    .mockResolvedValueOnce(Response.json({ jobs: [{
+      name: 'database', status: 'completed', conclusion: 'success', completed_at: failedAt,
+      steps: [{ name: marker, conclusion: 'success' }],
+    }] }));
+  const reportDecision = jest.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    await expect(guard(env, fetchRequest)).resolves.toBe(0);
+    expect(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8')).toBe('superseded=false\n');
+    const summary = fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8');
+    expect(summary).toContain('G1: no superseding push');
+    expect(summary).toContain('G2: previous apply at run 42 concluded success');
+    const branchQueries = fetchRequest.mock.calls.map(([url]) => new URL(url).searchParams).filter(params => params.has('branch'));
+    expect(branchQueries.map(params => params.get('branch'))).toEqual(['main', 'dev']);
+    expect(branchQueries.every(params => params.has('created'))).toBe(true);
+  } finally {
+    reportDecision.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  ['HTTP error', false, new Response(null, { status: 503 }), 'GitHub API returned HTTP 503 for /git/ref/heads/main'],
+  ['missing main ref', false, new Response(null, { status: 404 }), 'GitHub API returned HTTP 404 for /git/ref/heads/main'],
+  ['dev ref HTTP 500', true, new Response(null, { status: 500 }), 'GitHub API returned HTTP 500 for /git/ref/heads/dev'],
+  ['malformed dev SHA', true, Response.json({ object: { sha: [devTip] } }), 'Invalid dev tip'],
+  ['network error', false, null, 'Connection failed for [redacted]'],
+])('fails closed on %s without publishing a deployment output', async (_label, push, response, detail) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-guard-'));
+  const env = {
+    GH_TOKEN: ['example', 'value'].join('-'),
+    GITHUB_EVENT_NAME: push ? 'push' : 'workflow_dispatch', GITHUB_SHA: tip,
     GITHUB_STEP_SUMMARY: path.join(dir, 'summary'),
     GITHUB_OUTPUT: path.join(dir, 'output'),
   };
-  const fetchRequest = error === 'HTTP error'
-    ? jest.fn().mockResolvedValue({ ok: false, status: 503 })
-    : jest.fn().mockRejectedValue(new Error('Connection failed'));
+  const fetchRequest = jest.fn();
+  if (push) fetchRequest.mockResolvedValueOnce(Response.json({ object: { sha: tip } }));
+  if (response) fetchRequest.mockResolvedValueOnce(response);
+  else fetchRequest.mockRejectedValueOnce(new Error('Connection failed for ' + env.GH_TOKEN));
   const reportError = jest.spyOn(console, 'error').mockImplementation(() => {});
   try {
     await expect(guard(env, fetchRequest)).resolves.toBe(1);
+    expect(fetchRequest).toHaveBeenCalledTimes(push ? 2 : 1);
     expect(fs.existsSync(env.GITHUB_OUTPUT)).toBe(false);
-    expect(fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8')).toContain('Guard could not verify GitHub deployment state');
+    const message = `Guard could not verify GitHub deployment state: ${detail}`;
+    expect(fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8')).toBe(`## DEV database guard\n\n- ${message}\n`);
+    expect(reportError).toHaveBeenCalledWith(`::error::${message}`);
   } finally {
     reportError.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

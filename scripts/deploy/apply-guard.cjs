@@ -19,15 +19,21 @@ async function* pages(get, path, field) {
 }
 
 async function evaluate(get, env, record) {
-  const tip = (await get('/git/ref/heads/main')).object.sha;
-  if (!/^[0-9a-f]{40}$/.test(tip)) throw new Error('Invalid main tip');
+  const shaPattern = /^[0-9a-f]{40}$/;
+  const tip = (await get('/git/ref/heads/main'))?.object?.sha;
+  if (typeof tip !== 'string' || !shaPattern.test(tip)) throw new Error('Invalid main tip');
 
   if (env.GITHUB_EVENT_NAME === 'push') {
-    const devTip = (await get('/git/ref/heads/dev')).object.sha;
-    if (!/^[0-9a-f]{40}$/.test(devTip)) throw new Error('Invalid dev tip');
-    let replacement;
     // Both branches share the database, so a newer dev push can supersede a main push.
-    for (const [branch, sha] of Object.entries({ main: tip, dev: devTip })) {
+    const tips = { main: tip };
+    const devRef = await get('/git/ref/heads/dev', { allowNotFound: true });
+    if (devRef !== undefined) {
+      const devTip = devRef?.object?.sha;
+      if (typeof devTip !== 'string' || !shaPattern.test(devTip)) throw new Error('Invalid dev tip');
+      tips.dev = devTip;
+    }
+    let replacement;
+    for (const [branch, sha] of Object.entries(tips)) {
       if (env.GITHUB_SHA === sha) continue;
       for await (const run of pages(get, `${workflow}?branch=${branch}&event=push&head_sha=${sha}`, 'workflow_runs')) {
         if (run.run_number > Number(env.RUN_NUMBER) && (!replacement || run.run_number > replacement.run_number)) {
@@ -146,13 +152,14 @@ function summarize(log, status, elapsed, env) {
 }
 
 async function guard(env, fetchRequest = fetch) {
-  const get = async path => {
+  const get = async (path, { allowNotFound = false } = {}) => {
     const response = await fetchRequest(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`, {
       headers: { Authorization: 'Bearer ' + env.GH_TOKEN, Accept: 'application/vnd.github+json' },
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status}`);
+    if (allowNotFound && response.status === 404) return undefined;
+    if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status} for ${path.split('?')[0]}`);
     return response.json();
   };
   const record = decision => {
@@ -166,11 +173,11 @@ async function guard(env, fetchRequest = fetch) {
     appendFileSync(env.GITHUB_OUTPUT, `superseded=${result === 'superseded'}\n`);
     return 0;
   } catch (error) {
-    const message = error instanceof HistoryLimitError
-      ? 'Guard could not verify GitHub deployment state: history scan limit reached'
-      : 'Guard could not verify GitHub deployment state';
+    const detail = error instanceof HistoryLimitError ? 'history scan limit reached' : error?.message || 'unknown error';
+    const redacted = env.GH_TOKEN ? detail.replaceAll(env.GH_TOKEN, '[redacted]') : detail;
+    const message = `Guard could not verify GitHub deployment state: ${redacted.replace(/[\r\n]+/g, ' ')}`;
     appendFileSync(env.GITHUB_STEP_SUMMARY, `- ${message}\n`);
-    console.error(`::error::${message}`);
+    console.error(`::error::${message.replaceAll('%', '%25')}`);
     return 1;
   }
 }
