@@ -64,3 +64,20 @@ test("drops an emoji when the cap would split its surrogate pair", () => {
   const prefix = " ".repeat(8191);
   expect(redactOutboxErrorText(prefix + "\u{1F600}")).toBe(prefix + "\u2026[truncated]");
 });
+
+test.each([
+  ["password%3D%22a b token=%22SECRET", "password%3D[REDACTED]"],
+  ["token%3D%22abc%26jwt%3D%22SECRET%22%26state%3Dok", "token%3D[REDACTED]%26jwt%3D[REDACTED]%26state%3Dok"],
+  ["token%3D%22%22SECRET", "token%3D[REDACTED]"],
+  ["token%3D%22x%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
+  ["token%3D%22a b%22%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
+  ["token%3Dabc%20password = SECRET", "token%3D[REDACTED]%20password = [REDACTED]"],
+  ["token%3Dabc%20password: SECRET", "token%3D[REDACTED]%20password: [REDACTED]"],
+  ["token%3Da%20b", "token%3D[REDACTED]"],
+  ["Basic validation failed", "Basic validation failed"],
+  ["Basic auth required", "Basic auth required"],
+  ["Basic plan expired", "Basic plan expired"],
+  ["x-request-id%3D1", "x-request-id%3D1"],
+])("keeps credential boundaries in %s", (input, expected) => {
+  expect(redactOutboxErrorText(input)).toBe(expected);
+});
