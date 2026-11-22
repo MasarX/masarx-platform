@@ -9,7 +9,7 @@ The Delivery Lead owns this file. Change it through a reviewed PR.
 - Keep one migration item and one non-migration item in progress at a time.
 - Risk paths in [AGENTS.md](AGENTS.md#risk-paths-need-one-independent-review-before-landing) require one independent full-diff review recorded against the exact head, plus green CI. There are no code-owner or lead approval lines: GitHub requires zero approving reviews for attributed PRs and code-owner review is off. GitHub can require an extra approval for unattributed changes.
 - The tree-publisher App authors commits and pushes branches.
-- Merging. The merge queue is the only path to merge. Green required PR checks and any applicable risk-path review are the only gates for queue entry. The App enqueues the PR with `expectedHeadOid` set to the qualified SHA. Keep auto-merge off. If a PR's head moves or a review sends it back, disable auto-merge if set, dequeue the PR (`dequeuePullRequest`), and confirm no queue entry remains. Before relying on a queue entry, check that its head equals the qualified SHA.
+- Merging. The merge queue is the only path to merge. Queue entry needs green required PR checks, any applicable risk-path review and the PR's issue reference (`Closes #n` or `Refs #n`); no approval step is added. The App enqueues the PR with `expectedHeadOid` set to the reviewed SHA. Keep auto-merge off. If a PR's head moves or a review sends it back, disable auto-merge if set, dequeue the PR (`dequeuePullRequest`), and confirm no queue entry remains. Before relying on a queue entry, check that its head equals the reviewed SHA.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. A rename-only re-stamp needs no new review. Compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. Record the existing review against the resulting SHA. The append-only and ordering gate is in `scripts/ci-hosted/migrations.cjs`.
 
 ## Checks
@@ -56,9 +56,9 @@ The Delivery Lead owns this file. Change it through a reviewed PR.
 - Gap: The repository still needs production deploy automation. Production stays paused.
 - Follow the [owner approval rules](AGENTS.md#must-follow-coding-rules) for release and deploy work. Require a verified production backup before every production deploy. Keep the previous version ready for rollback, check health after deploy and roll back immediately on failure.
 - Releases through a checking gate are gated, not approved per change: the gate is reviewed once and gets one GO; after that, each change that passes it releases automatically with an audit row. A new kind of change needs a new GO.
-- The audit row for each routine deploy is the deploy workflow's run summary: the apply guard's G1-G3 decisions and the G4 apply summary.
+- The audit row for each routine DEV deploy is the deploy workflow's run summary, which includes the apply guard's G1-G3 decisions, the G4 apply summary and the summary job's per-surface results table.
 - Deploy-gate approval and routine dev/staging deploys follow the cross-project rule in the Portfolio brief.
-- Production has no approved gate yet, so every production deploy still needs the owner's explicit yes.
+- A production gate's GO is the owner's yes. No production gate is approved yet, so every production deploy needs the owner's explicit yes.
 
 ## Hotfixes
 
