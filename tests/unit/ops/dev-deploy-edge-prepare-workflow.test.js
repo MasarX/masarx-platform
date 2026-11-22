@@ -79,7 +79,13 @@ test('deploy writes the dedicated credential without logging it and gates functi
   const ordinaryOutput = console.log.mock.calls.filter(([line]) => !line.startsWith('::add-mask::'));
   expect(JSON.stringify(ordinaryOutput)).not.toContain(token);
   expect(console.error).not.toHaveBeenCalled();
-  expect(run).toMatch(/secrets set[^\n]+\n} >\/dev\/null 2>&1 \|\| \{\n\s+echo '[^']*MARKETING_DB_JWT\.'\n\s+exit 1/);
+  expect(run).toContain([
+    'exec 3>&1 4>&2 >/dev/null 2>&1',
+    '"$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"',
+    'exec 1>&3 2>&4 3>&- 4>&-',
+    'trap - ERR',
+  ].join('\n'));
+  expect(run.indexOf('trap - ERR')).toBeLessThan(run.indexOf('secrets list'));
   expect(run.indexOf('secrets list')).toBeGreaterThan(run.indexOf('secrets set'));
   expect(run.indexOf('secrets list')).toBeLessThan(run.indexOf('functions deploy'));
   expect(run).toContain('::error::Marketing token verification failed.');
