@@ -68,15 +68,18 @@ jobs:
             echo '::notice::database skipped: not configured'
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        if: steps.guard.outputs.configured == 'true'
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        if: steps.guard.outputs.configured == 'true'
         with:
           node-version: '24.22.1'
           package-manager-cache: false
       - name: Guard database apply
         id: apply_guard
+        if: steps.guard.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_NUMBER: ${{ github.run_number }}
@@ -114,7 +117,7 @@ jobs:
           PY
       - name: Apply migrations and deploy registered edge functions
         id: deploy
-        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outputs.superseded == 'false'
+        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outcome == 'success' && steps.apply_guard.outputs.superseded == 'false'
         env: &dev-database-env
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

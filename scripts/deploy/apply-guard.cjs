@@ -3,13 +3,19 @@ const { appendFileSync, readFileSync } = require('node:fs');
 const workflow = '/actions/workflows/deploy.yml/runs';
 const attemptMarker = 'Record database push attempt';
 const legacyDeploy = 'Apply migrations and deploy registered edge functions';
+const historyWindow = 30 * 24 * 60 * 60 * 1000;
+const deploymentBranches = ['main', 'dev'];
+class HistoryLimitError extends Error {}
 
 async function* pages(get, path, field) {
-  for (let page = 1; ; page++) {
-    const rows = (await get(`${path}&per_page=100&page=${page}`))[field];
+  for (let page = 1; page <= 10; page++) {
+    const result = await get(`${path}&per_page=100&page=${page}`);
+    if (result.total_count >= 1000) throw new HistoryLimitError();
+    const rows = result[field];
     yield* rows;
     if (rows.length < 100) return;
   }
+  throw new HistoryLimitError();
 }
 
 async function evaluate(get, env, record) {
@@ -17,17 +23,25 @@ async function evaluate(get, env, record) {
   if (!/^[0-9a-f]{40}$/.test(tip)) throw new Error('Invalid main tip');
 
   if (env.GITHUB_EVENT_NAME === 'push') {
-    if (env.GITHUB_SHA !== tip) {
-      for await (const run of pages(get, `${workflow}?branch=main&event=push&head_sha=${tip}`, 'workflow_runs')) {
-        if (run.run_number > Number(env.RUN_NUMBER)) {
-          if (run.status === 'completed' && !['success', 'failure'].includes(run.conclusion)) {
-            record(`G1: superseding run ${run.id} for ${tip} was ${run.conclusion}; dispatch expected_sha=${tip}`);
-            return 'refused';
-          }
-          record(`G1: superseded by ${tip}`);
-          return 'superseded';
+    const devTip = (await get('/git/ref/heads/dev')).object.sha;
+    if (!/^[0-9a-f]{40}$/.test(devTip)) throw new Error('Invalid dev tip');
+    let replacement;
+    for (const [branch, sha] of Object.entries({ main: tip, dev: devTip })) {
+      if (env.GITHUB_SHA === sha) continue;
+      for await (const run of pages(get, `${workflow}?branch=${branch}&event=push&head_sha=${sha}`, 'workflow_runs')) {
+        if (run.run_number > Number(env.RUN_NUMBER) && (!replacement || run.run_number > replacement.run_number)) {
+          replacement = { ...run, sha };
         }
       }
+    }
+    if (replacement) {
+      const { id, sha, status, conclusion } = replacement;
+      if (status === 'completed' && !['success', 'failure'].includes(conclusion)) {
+        record(`G1: superseding run ${id} for ${sha} was ${conclusion}; dispatch expected_sha=${tip}`);
+        return 'refused';
+      }
+      record(`G1: superseded by ${sha}`);
+      return 'superseded';
     }
     record('G1: no superseding push');
     record('G3: not applicable to push');
@@ -40,36 +54,48 @@ async function evaluate(get, env, record) {
     record('G3: dispatch SHA matched');
   }
 
-  for await (const run of pages(get, `${workflow}?branch=main`, 'workflow_runs')) {
-    for (let attempt = run.run_attempt; attempt >= 1; attempt--) {
-      if (String(run.id) === env.GITHUB_RUN_ID && attempt >= Number(env.GITHUB_RUN_ATTEMPT)) continue;
-      const path = `/actions/runs/${run.id}/attempts/${attempt}/jobs?`;
-      for await (const job of pages(get, path, 'jobs')) {
-        if (job.name !== 'database' || job.status !== 'completed') continue;
-        const marker = job.steps.find(step => step.name === attemptMarker);
-        const legacy = job.steps.find(step => step.name === legacyDeploy);
-        // Cancellation can prevent the marker from running after the combined step starts.
-        const attempted = ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
-          || marker?.conclusion === 'success' || (!marker && legacy?.conclusion === 'failure');
-        if (!attempted) continue;
+  const now = Date.now();
+  const isoSecond = time => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const created = encodeURIComponent(`${isoSecond(now - historyWindow)}..${isoSecond(now)}`);
+  let latest;
+  for (const branch of deploymentBranches) {
+    for await (const run of pages(get, `${workflow}?branch=${branch}&created=${created}`, 'workflow_runs')) {
+      for (let attempt = run.run_attempt; attempt >= 1; attempt--) {
+        if (String(run.id) === env.GITHUB_RUN_ID && attempt >= Number(env.GITHUB_RUN_ATTEMPT)) continue;
+        const path = `/actions/runs/${run.id}/attempts/${attempt}/jobs?`;
+        for await (const job of pages(get, path, 'jobs')) {
+          if (job.name !== 'database' || job.status !== 'completed') continue;
+          const marker = job.steps.find(step => step.name === attemptMarker);
+          const legacy = job.steps.find(step => step.name === legacyDeploy);
+          // Cancellation can prevent the marker from running after the combined step starts.
+          const attempted = ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
+            || marker?.conclusion === 'success' || (!marker && legacy?.conclusion === 'failure');
+          if (!attempted) continue;
 
-        if (job.conclusion !== 'success') {
-          const rearmed = env.DEV_DB_REARMED_AT;
-          const rearmedAt = Date.parse(rearmed);
-          if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(rearmed ?? '') ||
-              !(rearmedAt > Date.parse(job.completed_at) && rearmedAt <= Date.now())) {
-            record(`G2: previous apply failed at run ${run.id}; re-arm required`);
-            return 'refused';
+          const completedAt = Date.parse(job.completed_at);
+          if (!Number.isFinite(completedAt)) throw new Error('Invalid database completion time');
+          if (!latest || completedAt > latest.completedAt ||
+              (completedAt === latest.completedAt && job.conclusion !== 'success')) {
+            latest = { id: run.id, conclusion: job.conclusion, completedAt };
           }
-          record(`G2: re-armed after run ${run.id}`);
-        } else {
-          record(`G2: previous apply at run ${run.id} concluded ${job.conclusion}`);
         }
-        return 'allow';
       }
     }
   }
-  record('G2: no previous apply found');
+  if (!latest) {
+    record('G2: no previous apply found');
+  } else if (latest.conclusion === 'success') {
+    record(`G2: previous apply at run ${latest.id} concluded success`);
+  } else {
+    const rearmed = env.DEV_DB_REARMED_AT;
+    const rearmedAt = Date.parse(rearmed);
+    if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(rearmed ?? '') ||
+        !(rearmedAt > latest.completedAt && rearmedAt <= now)) {
+      record(`G2: previous apply failed at run ${latest.id}; re-arm required`);
+      return 'refused';
+    }
+    record(`G2: re-armed after run ${latest.id}`);
+  }
   return 'allow';
 }
 
@@ -133,10 +159,13 @@ async function guard(env, fetchRequest = fetch) {
   appendFileSync(env.GITHUB_STEP_SUMMARY, '## DEV database guard\n\n');
   try {
     const result = await evaluate(get, env, record);
+    if (result === 'refused') return 1;
     appendFileSync(env.GITHUB_OUTPUT, `superseded=${result === 'superseded'}\n`);
-    return result === 'refused' ? 1 : 0;
-  } catch {
-    const message = 'Guard could not verify GitHub deployment state';
+    return 0;
+  } catch (error) {
+    const message = error instanceof HistoryLimitError
+      ? 'Guard could not verify GitHub deployment state: history scan limit reached'
+      : 'Guard could not verify GitHub deployment state';
     appendFileSync(env.GITHUB_STEP_SUMMARY, `- ${message}\n`);
     console.error(`::error::${message}`);
     return 1;
