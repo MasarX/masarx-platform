@@ -12,6 +12,7 @@ DECLARE
     v_client UUID := gen_random_uuid();
     v_provider UUID := gen_random_uuid();
     v_provider_name TEXT := 'geocode-test-' || v_provider::text;
+    v_mapping_id UUID := gen_random_uuid();
     v_template UUID := gen_random_uuid();
     v_template_step UUID := gen_random_uuid();
     v_address UUID;
@@ -40,13 +41,17 @@ BEGIN
     INSERT INTO public.providers (id, organization_id, name, provider_type, enabled, priority_rank, health_status)
     VALUES (v_provider, v_org, v_provider_name, 'geocoding', true, 100, 'healthy');
 
+    INSERT INTO public.mapping_configs (id, mapping_type, mapping_key, mapping_config, mapping_version)
+    VALUES (v_mapping_id, 'provider_response', 'pgtap-geocoding-dispatch-' || v_mapping_id::text, '{}'::jsonb, 1);
+
     INSERT INTO public.operation_templates (
-        provider_id, operation_name, method, url_template, headers_template, handler_key, handler_version, metadata
+        provider_id, operation_name, method, url_template, headers_template, mapping_config_id,
+        handler_key, handler_version, metadata
     ) VALUES
         (v_provider, 'geocoding_fixture_forward', 'GET', 'https://geocoding.example.invalid/forward',
-            '{}'::jsonb, 'outbound_http', 'v1', '{"operation_role":"geocoding_forward"}'::jsonb),
+            '{}'::jsonb, v_mapping_id, 'outbound_http', 'v1', '{"operation_role":"geocoding_forward"}'::jsonb),
         (v_provider, 'geocoding_fixture_reverse', 'GET', 'https://geocoding.example.invalid/reverse',
-            '{}'::jsonb, 'outbound_http', 'v1',
+            '{}'::jsonb, v_mapping_id, 'outbound_http', 'v1',
             '{"operation_role":"geocoding_reverse","url_query_mapping":[{"param":"at","value_path":"$.coordinates"}]}'::jsonb);
 
     SELECT s.cached_value, sv.schema_version
