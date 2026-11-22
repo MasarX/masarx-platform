@@ -126,7 +126,7 @@ function serializeError(error: unknown) {
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
 const KEY_CHAR = String.raw`(?:[a-z0-9_-]|%2d)`;
 const KEYWORD = String.raw`(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt)`;
-const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+(?:["']|%22)?`;
+const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+(?:["']|%22){0,2}`;
 const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
 const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
 const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
@@ -135,7 +135,9 @@ const MARKER_OR_KEY_RUN = String.raw`\[(?:JWT_)?REDACTED\]|${KEY_CHAR}+`;
 const VALUE_DELIMITER = String.raw`%26|%7d|[&\s,}]|$`;
 const PLAIN_QUOTE_TAIL = String.raw`(?:(?!${VALUE_DELIMITER})[\s\S])*`;
 const PLAIN_VALUE = String.raw`"(?:\\[\s\S]|[^"\\])*(?:"|$)${PLAIN_QUOTE_TAIL}|'(?:\\[\s\S]|[^'\\])*(?:'|$)${PLAIN_QUOTE_TAIL}|[^\s&,}]+`;
-const ENCODED_QUOTED_VALUE = String.raw`%22(?:(?!%26|%7d|&|%22(?=${VALUE_DELIMITER}))[\s\S])*(?:%22(?=${VALUE_DELIMITER})|(?=%26|%7d|&|$))`;
+// A closed quote can contain %26. Fall back to the parameter boundary for an
+// unclosed quote, and let a following quoted credential match independently.
+const ENCODED_QUOTED_VALUE = String.raw`%22(?:(?:(?!%7d|&|%26(?=${NEXT_SENSITIVE_KEY}%22)|%22(?=${VALUE_DELIMITER}))[\s\S])*%22(?=${VALUE_DELIMITER})|(?:(?!%26|%7d|&)[\s\S])*)`;
 const ENCODED_UNQUOTED_VALUE = String.raw`(?:(?!%26|%7d|%20(?=${NEXT_SENSITIVE_KEY}))[^\s&,}])+`;
 // Older encoded values can include a prefixed key. Preserve only bare key syntax at a
 // recognized separator, and still collect the following value with its own matcher.
@@ -162,7 +164,7 @@ const AUTHORIZATION_SCHEME = new RegExp(
 const SCHEME = new RegExp(
   String.raw`(?=(Bearer\s+|Bearer(?:%20|:\s*)(?!${NEXT_SENSITIVE_KEY})|Basic(?:\s+|%20))([A-Za-z0-9._~+/=-]+))\1`, "gi",
 );
-const BASIC_CREDENTIAL = /^[A-Za-z0-9+/]{8,}={0,2}$/;
+const BASIC_CREDENTIAL = /^[A-Za-z0-9+/]{8,}={0,2}/;
 const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
 type RedactionSpan = { start: number; end: number; prefix?: string };
@@ -187,15 +189,17 @@ export function redactOutboxErrorText(value: string) {
   );
   let schemeChainEnd = 0;
   for (const match of text.matchAll(SCHEME)) {
-    const credential = match[2];
     const basic = match[1].toLowerCase().startsWith("basic");
-    const plausible = BASIC_CREDENTIAL.test(credential)
-      && (/[0-9+/=]/.test(credential) || (/[A-Z]/.test(credential) && /[a-z]/.test(credential)));
-    if (basic && !plausible && !authorizationSchemes.has(match.index) && match.index >= schemeChainEnd) continue;
+    let credential = match[2];
+    if (basic && !authorizationSchemes.has(match.index) && match.index >= schemeChainEnd) {
+      const leading = BASIC_CREDENTIAL.exec(credential)?.[0];
+      if (!leading || !(/[0-9+/=]/.test(leading) || (/[A-Z]/.test(leading) && /[a-z]/.test(leading)))) continue;
+      credential = leading;
+    }
 
-    const schemeEnd = match.index + match[1].length + credential.length;
-    spans.push({ start: match.index, end: schemeEnd, prefix: basic ? "Basic " : "Bearer " });
-    schemeChainEnd = Math.max(schemeChainEnd, schemeEnd);
+    const valueStart = match.index + match[1].length;
+    spans.push({ start: match.index, end: valueStart + credential.length, prefix: basic ? "Basic " : "Bearer " });
+    schemeChainEnd = Math.max(schemeChainEnd, valueStart + match[2].length);
   }
 
   const jwtEnds = new Map<number, number>();

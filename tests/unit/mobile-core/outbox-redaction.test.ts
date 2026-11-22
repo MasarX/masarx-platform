@@ -314,6 +314,28 @@ test.each([
   expect(result).not.toContain(secret);
 });
 
+test.each([
+  ["Basic YWJjOmRlZg==.", ["YWJjOmRlZg=="]],
+  ["Basic YWJjOmRlZg==-", ["YWJjOmRlZg=="]],
+  ["Basic QUFBQUFB1_x", ["QUFBQUFB1"]],
+  ["Basic QUFBQUFB1~x", ["QUFBQUFB1"]],
+  ["Basic YWJjOmRlZg===", ["YWJjOmRlZg=="]],
+  ["Basic QUFBQUFB1.Basic SECRET1", ["QUFBQUFB1", "SECRET1"]],
+  ["password: basic QFJBVZQ968QX98_x", ["QFJBVZQ968QX98"]],
+  ["token%3Dabc%7D%22password%22%22%3A%22SECRET1", ["abc", "SECRET1"]],
+  ['token%3Dabc%7D"password"":"SECRET1"', ["abc", "SECRET1"]],
+  ["token%3Dabc%7D'password'%22%3ASECRET1", ["abc", "SECRET1"]],
+])("redacts credential prefixes and doubled quotes in %s", (input, secrets) => {
+  const result = redactOutboxErrorText(input);
+  expect(result).toContain("[REDACTED]");
+  for (const secret of secrets) expect(result).not.toContain(secret);
+});
+
+test("redacts %26 inside a closed encoded quote and preserves the next parameter", () => {
+  expect(redactOutboxErrorText("token%3D%22X%26Y%22%26state%3Dok"))
+    .toBe("token%3D[REDACTED]%26state%3Dok");
+});
+
 function checkHistoricalCoverage(seed: number, count: number) {
   function pick<T>(values: readonly T[]) {
     seed ^= seed << 13;
@@ -351,7 +373,15 @@ function checkHistoricalCoverage(seed: number, count: number) {
     const authorization = pick(["Authorization: Basic ", "proxy-authorization:\tbasic ", "%22authorization%22%3A%22Basic%20"])
       + singleCase + pick(["", "%22"]);
     const encodedJson = "%7B%22access_token%22%3A%22" + fixtures[1] + "%22%7D";
-    const input = pick([standard, standard, standard, chained + pick(joins) + next, authorization + " " + encodedJson]);
+    const basicEnded = "Basic " + fixtures[0] + pick([".", "-", "_", "~", "==="]);
+    const basicChain = "Basic " + fixtures[0] + ".Basic " + fixtures[1];
+    const doubledKey = pick(['%22password%22%22', '"password""', "'password'%22"]);
+    const doubledValue = "token%3Dabc%7D" + doubledKey + pick([":", "%3A", "="]) + fixtures[1];
+    const encodedQuote = "token%3D%22" + fixtures[0] + "%26" + fixtures[1] + "%22%26state%3Dok";
+    const input = pick([
+      standard, standard, standard, chained + pick(joins) + next, authorization + " " + encodedJson,
+      basicEnded, basicChain, doubledValue, encodedQuote,
+    ]);
     const oldResults = frozen.map((redact) => redact(input));
     const actual = redactOutboxErrorText(input);
     for (const fixture of [...fixtures, singleCase]) {
