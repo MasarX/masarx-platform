@@ -126,7 +126,7 @@ export async function approveResourceImport(page: Page) {
   expect(result?.run?.id).toBe(requestedRunId);
   expect(result?.run?.organization_id).toMatch(/^[0-9a-f-]{36}$/i);
   expect(["queued", "processing", "completed"]).toContain(result?.run?.status);
-  if (result.run.status !== "completed") runTabularImportWorkerOnce({ runId: requestedRunId });
+  if (result.run.status !== "completed") runTabularImportWorkerOnce();
   return { id: requestedRunId, organization_id: result.run.organization_id, scope_context: result.run.scope_context } as ImportRunIdentity;
 }
 
