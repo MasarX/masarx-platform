@@ -1147,7 +1147,6 @@ INSERT INTO pg_temp.definer_execute_allowlist (signature, roles, reason, owner) 
   ('public.webhook_replay_protection_check(uuid,jsonb,jsonb,jsonb)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.webhook_source_directory_policy_summary_v1(uuid)', '{authenticated}', 'audit-static: authenticated-executable; caller checks present', 'postgres'),
   ('public.webhook_sources_enforce_mapping_config_org_match_v1()', '{anon,authenticated}', 'audit-static: trigger function (not directly callable)', 'postgres'),
-  ('public.worker_action_call_supplier_api(uuid,jsonb,jsonb)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.worker_action_geocode_enrich(uuid,jsonb,jsonb)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.worker_action_mark_communication_reply(uuid,jsonb,jsonb)', '{anon,authenticated}', 'pre-existing; remediation S3-S6', 'postgres'),
   ('public.workflow_binding_dispatch_step_result_v1(jsonb)', '{anon,authenticated}', 'pre-existing; follow-up review', 'postgres'),
