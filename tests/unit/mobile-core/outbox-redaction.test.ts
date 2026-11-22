@@ -452,6 +452,94 @@ test("redacts credentials nested in serialized error messages", () => {
   expect(redactOutboxErrorText(JSON.stringify(error))).toBe(expected);
 });
 
+const structuredJsonForms = [
+  ["plain JSON", (text: string) => text],
+  ...escapedJsonForms,
+  ["Unicode quote escapes", (text: string) => text.replace(/"/g, () => String.raw`\u0022`)],
+] as const;
+
+test.each(structuredJsonForms)("redacts bare values and entire collections in %s", (_label, transform) => {
+  const cases = [
+    ["pin_token", String(Number([123, 456, 789].join("")))],
+    ["pin_token", JSON.stringify(true)],
+    ["pin_token", JSON.stringify(false)],
+    ["pin_token", JSON.stringify(null)],
+    ["pin_token", alphaMarker],
+    ["secret", JSON.stringify({ value: alphaMarker })],
+    ["api_key", JSON.stringify(["x", alphaMarker])],
+    ["password", JSON.stringify(["x y", alphaMarker + " z"])],
+    ["password", JSON.stringify([{ details: [alphaMarker + '" ], } & \\', false, { x: 1 }] }])],
+  ];
+  for (const [key, value] of cases) {
+    const prefix = transform(`{${JSON.stringify(key)}:`);
+    const suffix = transform(',"status":503}');
+    expect(redactOutboxErrorText(prefix + transform(value) + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+  }
+});
+
+test("redacts an unterminated or mismatched collection through the end", () => {
+  const prefix = escapeJsonPayload('{"secret":');
+  for (const suffix of ["", "]"]) {
+    const value = escapeJsonPayload(`{"value":${JSON.stringify(alphaMarker)}${suffix}`);
+    expect(redactOutboxErrorText(prefix + value)).toBe(prefix + "[REDACTED]");
+  }
+});
+
+test.each([true, false])("redacts a mixed-quoting collection with an escaped key set to %s", (escapeKey) => {
+  const key = JSON.stringify("private_key");
+  const value = JSON.stringify({ value: ["] } & " + alphaMarker, { content: betaMarker + '" \\' }] });
+  const prefix = `{${escapeKey ? escapeJsonPayload(key) : key}:`;
+  const suffix = ',"status":503}';
+  expect(redactOutboxErrorText(prefix + (escapeKey ? value : escapeJsonPayload(value)) + suffix))
+    .toBe(prefix + "[REDACTED]" + suffix);
+});
+
+test.each([
+  ["token: ", shortFixture, "; retry=3 status=503"],
+  ["secret=", lowerX, " keepme"],
+])("preserves diagnostics after the escaped quote in %s", (prefix, value, suffix) => {
+  const input = prefix + escapeJsonPayload(JSON.stringify(value)) + suffix;
+  expect(redactOutboxErrorText(input)).toBe(prefix + "[REDACTED]" + suffix);
+});
+
+test.each(structuredJsonForms)("redacts additional sensitive keys in %s", (_label, transform) => {
+  for (const key of [
+    "passwd", "PWD", "Cookie", "Set-Cookie", "credential", "SESSION_ID", "private_key", "api key",
+    "x-auth-cookie", "session-id", "PRIVATE-KEY", "API KEY",
+  ]) {
+    const prefix = transform(`{${JSON.stringify(key)}:`);
+    const suffix = transform(',"status":503}');
+    expect(redactOutboxErrorText(prefix + transform(JSON.stringify(alphaMarker)) + suffix))
+      .toBe(prefix + "[REDACTED]" + suffix);
+  }
+});
+
+test("preserves cookies policy prose and similarly named diagnostic fields", () => {
+  const input = 'cookies policy: accepted {"cookies":4,"cookiePolicy":"accepted","credentialsMode":"omit"}';
+  expect(redactOutboxErrorText(input)).toBe(input);
+});
+
+test("processes 8 KiB of nested escaped credential fields in under 50 ms", () => {
+  const prefix = escapeJsonPayload('{"password":');
+  const nested = escapeJsonPayload('{"api_key":[');
+  const tail = escapeJsonPayload(JSON.stringify(alphaMarker));
+  const depth = Math.floor((8192 - prefix.length - tail.length) / nested.length);
+  const input = (prefix + nested.repeat(depth) + tail).padEnd(8192, " ");
+
+  const start = performance.now();
+  const output = redactOutboxErrorText(input);
+  expect(performance.now() - start).toBeLessThan(50);
+  expect(output).toBe(prefix + "[REDACTED]");
+});
+
+test("processes 8 KiB of repeated cookie-like key segments in under 50 ms", () => {
+  const input = "cookie-".repeat(1170) + "ok";
+  const start = performance.now();
+  const output = redactOutboxErrorText(input);
+  expect(performance.now() - start).toBeLessThan(50);
+  expect(output).toBe(input);
+});
+
 test("caps a 1 MiB unterminated escaped value with deeper quotes in under 200 ms", () => {
   const prefix = escapeJsonPayload('{"password":');
   const openQuote = escapeJsonPayload('"');
@@ -519,6 +607,23 @@ function checkHistoricalCoverage(seed: number, count: number, includeEscapedJson
       : historical;
     const oldResults = frozen.map((redact) => redact(input));
     const actual = redactOutboxErrorText(input);
+    if (includeEscapedJson) {
+      const structuredTransform = structuredJsonForms[index % structuredJsonForms.length][1];
+      const endings = ['"', '\\', '", & ', ']}{[;=', "%26%5D", '" } \\'];
+      const hostile = escapedFixture + endings[Math.floor(index / 24) % endings.length];
+      const values = [
+        hostile, { value: hostile, number: index }, [hostile, index, [true, { value: hostile }, null]],
+      ];
+      const json = JSON.stringify({
+        secret: values[Math.floor(index / structuredJsonForms.length) % values.length],
+        pin_token: index, credential: false, session_id: null, status: 503,
+      });
+      const expected = structuredTransform('{"secret":') + "[REDACTED]"
+        + structuredTransform(',"pin_token":') + "[REDACTED]" + structuredTransform(',"credential":') + "[REDACTED]"
+        + structuredTransform(',"session_id":') + "[REDACTED]" + structuredTransform(',"status":503}');
+      const historicalOutput = actual.slice(actual.indexOf(" & ") + 3);
+      expect(redactOutboxErrorText(structuredTransform(json) + " & " + historical)).toBe(expected + " & " + historicalOutput);
+    }
     for (const fixture of [...fixtures, singleCase, escapedFixture]) {
       if (!input.includes(fixture)) continue;
       if (fixture !== escapedFixture && oldResults.every((result) => result.includes(fixture))) continue;

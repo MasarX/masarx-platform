@@ -124,18 +124,28 @@ function serializeError(error: unknown) {
 }
 
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
-const KEY_CHAR = String.raw`(?:[a-z0-9_-]|%2d)`;
-const KEYWORD = String.raw`(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt)`;
-const SENSITIVE_KEY_NAME = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+`;
+const KEY_JOIN = String.raw`(?:[_-]|%2d)`;
+const KEY_CHAR = String.raw`(?:[a-z0-9]|${KEY_JOIN})`;
+const SPACED_API_KEY = String.raw`api(?: |%(?:25)?20)key`;
+const LEGACY_KEYWORD = String.raw`(?:api${KEY_JOIN}?key|token|authorization|password|secret|jwt)`;
+const EXTRA_KEYWORD = String.raw`(?:passwd|pwd|(?:set${KEY_JOIN})?cookie|credential|session${KEY_JOIN}?id|private${KEY_JOIN}?key)`;
+const KEYWORD = String.raw`(?:${LEGACY_KEYWORD}|${EXTRA_KEYWORD}|${SPACED_API_KEY})`;
+// Short names like cookie and pwd must cover a whole key segment.
+const SENSITIVE_KEY_NAME = String.raw`(?:${KEY_CHAR}*${SPACED_API_KEY}${KEY_CHAR}*|(?=${KEY_CHAR}*${LEGACY_KEYWORD}|(?:${KEY_CHAR}*${KEY_JOIN})?${EXTRA_KEYWORD}(?![a-z0-9]))${KEY_CHAR}+)`;
 const SENSITIVE_KEY = String.raw`${SENSITIVE_KEY_NAME}(?:["']|%22)*`;
 const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
 const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
 const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
-const KEY_BOUNDARY = String.raw`(?:%26|%20|\b|(?=-|%2d))`;
+const KEY_BOUNDARY = String.raw`(?:%26|%20|%(?:25)?22|\b|(?=-|%2d))`;
 const MARKER_OR_KEY_RUN = String.raw`\[(?:JWT_)?REDACTED\]|${KEY_CHAR}+`;
 const VALUE_DELIMITER = String.raw`%26|%7d|[&\s,}]|$`;
+const JSON_BACKSLASH = String.raw`(?:\\|%(?:25)?5c)`;
+const JSON_QUOTE = String.raw`(?:"|%(?:25)?22)`;
+const ESCAPED_JSON_QUOTE = String.raw`${JSON_BACKSLASH}+(?:${JSON_QUOTE}|u0022)`;
+const JSON_COLLECTION_OPEN = String.raw`(?:[\[{]|%(?:25)?(?:7b|5b))`;
+const SCANNED_JSON_VALUE = String.raw`(?:${ESCAPED_JSON_QUOTE}|${JSON_COLLECTION_OPEN})`;
 const PLAIN_QUOTE_TAIL = String.raw`(?:(?!${VALUE_DELIMITER})[\s\S])*`;
-const PLAIN_VALUE = String.raw`"(?:\\[\s\S]|[^"\\])*(?:"|$)${PLAIN_QUOTE_TAIL}|'(?:\\[\s\S]|[^'\\])*(?:'|$)${PLAIN_QUOTE_TAIL}|[^\s&,}]+`;
+const PLAIN_VALUE = String.raw`(?!${SCANNED_JSON_VALUE})(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)${PLAIN_QUOTE_TAIL}|'(?:\\[\s\S]|[^'\\])*(?:'|$)${PLAIN_QUOTE_TAIL}|[^\s&,}]+)`;
 // A closed quote can contain %26. Fall back to the parameter boundary for an
 // unclosed quote, and let a following quoted credential match independently.
 const ENCODED_QUOTE_DELIMITER = String.raw`${VALUE_DELIMITER}|%2c|%5d|[)/"]`;
@@ -153,7 +163,7 @@ function credentialPattern(prefix: string, value: string, skip = MARKER_OR_KEY_R
 function encodedCredentialPattern(unclosedQuote: string) {
   return credentialPattern(
     String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}${ENCODED_SEPARATOR}`,
-    String.raw`%22(?:${CLOSED_ENCODED_QUOTE}|${unclosedQuote})|${ENCODED_UNQUOTED_VALUE}`,
+    String.raw`(?!${SCANNED_JSON_VALUE})(?:%22(?:${CLOSED_ENCODED_QUOTE}|${unclosedQuote})|${ENCODED_UNQUOTED_VALUE})`,
   );
 }
 
@@ -166,23 +176,26 @@ const CREDENTIAL_PATTERNS = [
     String.raw`\[(?:JWT_)?REDACTED\]|[a-z0-9_]+`,
   ),
   credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
-  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}%3[ad]\s*`, LEGACY_ENCODED_VALUE),
+  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}%3[ad]\s*`, String.raw`(?!${SCANNED_JSON_VALUE})${LEGACY_ENCODED_VALUE}`),
 ];
-const JSON_BACKSLASH = String.raw`(?:\\|%(?:25)?5c)`;
-const JSON_QUOTE = String.raw`(?:"|%(?:25)?22)`;
-const ESCAPED_JSON_QUOTE = String.raw`${JSON_BACKSLASH}+${JSON_QUOTE}`;
 const JSON_SPACE = String.raw`(?:\s|%(?:25)?20)*`;
 const JSON_SEPARATOR = String.raw`${JSON_SPACE}(?:[:=]|%(?:25)?3[ad])${JSON_SPACE}`;
-const JSON_KEY = String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY_NAME}(?:["']|%(?:25)?22)*`;
+const JSON_KEY = String.raw`(?:${ESCAPED_JSON_QUOTE}|${KEY_BOUNDARY})${SENSITIVE_KEY_NAME}(?:["']|%(?:25)?22)*`;
 const ANY_JSON_QUOTE = String.raw`(?:${ESCAPED_JSON_QUOTE}|${JSON_QUOTE})`;
-const ESCAPED_JSON_FIELD = new RegExp(
-  String.raw`(${JSON_KEY}(?:${ESCAPED_JSON_QUOTE}${ANY_JSON_QUOTE}*${JSON_SEPARATOR}(?=${ANY_JSON_QUOTE})`
-    + String.raw`|${JSON_SEPARATOR}(?=${ESCAPED_JSON_QUOTE})))|${MARKER_OR_KEY_RUN}`,
+const JSON_FIELD = new RegExp(
+  String.raw`(${JSON_KEY}(?:${ESCAPED_JSON_QUOTE}${ANY_JSON_QUOTE}*${JSON_SEPARATOR}`
+    + String.raw`|${JSON_SEPARATOR}(?=${SCANNED_JSON_VALUE})))|${MARKER_OR_KEY_RUN}|${JSON_BACKSLASH}+`,
   "gi",
 );
 // Consume runs of the same backslash spelling even when no quote follows.
-const JSON_QUOTE_TOKEN = new RegExp(String.raw`((${JSON_BACKSLASH})\2*)(${JSON_QUOTE})?|(${JSON_QUOTE})`, "gi");
-const JSON_VALUE_END = new RegExp(String.raw`${JSON_SPACE}(?:[,}\]&)/"]|%(?:25)?(?:2c|7d|5d|26|22)|$)`, "iy");
+const QUOTE_TOKEN = String.raw`((${JSON_BACKSLASH})\2*)(${JSON_QUOTE}|u0022)?|(${JSON_QUOTE})`;
+const JSON_QUOTE_TOKEN = new RegExp(QUOTE_TOKEN, "gi");
+const JSON_SYNTAX_TOKEN = new RegExp(String.raw`${QUOTE_TOKEN}|([\[\]{}]|%(?:25)?(?:[57][bd]))`, "gi");
+const JSON_VALUE_QUOTE = new RegExp(ANY_JSON_QUOTE, "iy");
+const JSON_VALUE_COLLECTION = new RegExp(JSON_COLLECTION_OPEN, "iy");
+const JSON_BARE_END = /[\s,}\]&]|%(?:25)?(?:20|2c|7d|5d|26)/gi;
+const JSON_VALUE_END = /[\s;,}\]&)/"]|%(?:25)?(?:20|2c|7d|5d|26|22)|$/iy;
+const COLLECTION_CLOSERS: Record<string, string> = { "[": "]", "{": "}", "5b": "5d", "7b": "7d" };
 const AUTHORIZATION_SCHEME = new RegExp(
   String.raw`(?:%22|%20|\b)(?:proxy(?:-|%2d))?authorization(?:["']|%22)?${KEY_SEPARATOR}(?:\s|%20)*(?:["']|%22)?(?=Basic(?:\s|%20))`, "gi",
 );
@@ -194,10 +207,63 @@ const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
 type RedactionSpan = { start: number; end: number; prefix?: string };
 
-function collectEscapedJsonSpans(text: string, spans: RedactionSpan[]) {
+function quoteKey(match: RegExpExecArray, quote: string, closing = false) {
+  const slash = match[2] ?? "";
+  const backslashes = slash ? (match[1]?.length ?? 0) / slash.length : 0;
+  const spelling = quote.toLowerCase();
+  // Paired backslashes are content at each escape layer.
+  const depth = !closing ? backslashes
+    : spelling === "u0022" ? backslashes & -backslashes
+    : backslashes & ~(backslashes + 1);
+  return `${depth}:${depth ? slash.toLowerCase() : ""}${spelling}`;
+}
+
+function findCollectionEnd(text: string, start: number, opening: string) {
+  const expected = [COLLECTION_CLOSERS[opening.slice(-2).toLowerCase()]];
+  let openQuote: string | undefined;
+  JSON_SYNTAX_TOKEN.lastIndex = start + opening.length;
+  for (let match; (match = JSON_SYNTAX_TOKEN.exec(text));) {
+    const quote = match[3] ?? match[4];
+    if (quote !== undefined) {
+      if (openQuote === undefined) openQuote = quoteKey(match, quote);
+      else if (quoteKey(match, quote, true) === openQuote) openQuote = undefined;
+    } else if (openQuote === undefined && match[5]?.length === opening.length) {
+      const bracket = match[5].slice(-2).toLowerCase();
+      const closer = COLLECTION_CLOSERS[bracket];
+      if (closer) expected.push(closer);
+      else if (expected.pop() !== bracket) break;
+      else if (expected.length === 0) return JSON_SYNTAX_TOKEN.lastIndex;
+    }
+  }
+  // A malformed or truncated collection may still contain credential text.
+  return text.length;
+}
+
+function collectJsonSpans(text: string, spans: RedactionSpan[]) {
   const valueStarts = new Set<number>();
-  for (const match of text.matchAll(ESCAPED_JSON_FIELD)) {
-    if (match[1] !== undefined) valueStarts.add(match.index + match[1].length);
+  let collectionEnd = 0;
+  let bareEnd = 0;
+  for (const match of text.matchAll(JSON_FIELD)) {
+    if (match[1] === undefined) continue;
+    const start = match.index + match[1].length;
+    if (start < collectionEnd) continue;
+
+    JSON_VALUE_COLLECTION.lastIndex = start;
+    JSON_VALUE_QUOTE.lastIndex = start;
+    const opening = JSON_VALUE_COLLECTION.exec(text)?.[0];
+    if (opening) {
+      collectionEnd = findCollectionEnd(text, start, opening);
+      spans.push({ start, end: collectionEnd });
+    } else if (JSON_VALUE_QUOTE.test(text)) {
+      valueStarts.add(start);
+    } else {
+      // Overlapping bare values share the same next delimiter.
+      if (start >= bareEnd) {
+        JSON_BARE_END.lastIndex = start;
+        bareEnd = JSON_BARE_END.exec(text)?.index ?? text.length;
+      }
+      if (bareEnd > start) spans.push({ start, end: bareEnd });
+    }
   }
   if (valueStarts.size === 0) return;
 
@@ -211,14 +277,8 @@ function collectEscapedJsonSpans(text: string, spans: RedactionSpan[]) {
     runEnd = quote === undefined ? end : -1;
     if (quote === undefined) continue;
 
-    const slash = match[2] ?? "";
-    const backslashes = slash ? match[1].length / slash.length : 0;
-    const openKey = `${backslashes}:${slash}${quote}`.toLowerCase();
-    // At each JSON layer, paired backslashes are content. The trailing binary ones
-    // count the escaping of the quote itself after those pairs are removed.
-    const closingDepth = backslashes & ~(backslashes + 1);
-    const closingKey = openValues.has(openKey)
-      ? openKey : `${closingDepth}:${closingDepth ? slash : ""}${quote}`.toLowerCase();
+    const openKey = quoteKey(match, quote);
+    const closingKey = openValues.has(openKey) ? openKey : quoteKey(match, quote, true);
     const start = openValues.get(closingKey);
     JSON_VALUE_END.lastIndex = end;
     if (start !== undefined && JSON_VALUE_END.test(text)) {
@@ -246,7 +306,7 @@ export function redactOutboxErrorText(value: string) {
       spans.push({ start, end: start + match[2].length });
     }
   }
-  collectEscapedJsonSpans(text, spans);
+  collectJsonSpans(text, spans);
   const authorizationSchemes = new Set(
     Array.from(text.matchAll(AUTHORIZATION_SCHEME), (match) => match.index + match[0].length),
   );
