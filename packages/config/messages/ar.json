@@ -153,6 +153,9 @@
       }
     },
     "tabularFile": {
+      "previewColumnCount": "عرض {shown} من أصل {total} عمودًا",
+      "previewShowFirstColumns": "عرض أول {count} عمود",
+      "previewShowAllColumns": "عرض كل الأعمدة",
       "fileSize": "اختر ملفًا لا يزيد حجمه عن 10 ميبيبايت.",
       "rows": "يتجاوز الملف 10,000 صف بيانات. قسّمه إلى ملفات أصغر.",
       "columns": "يتجاوز الملف 256 عمودًا.",

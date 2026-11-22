@@ -36,6 +36,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const isJwtLike = (value) => String(value || '').trim().split('.').length === 3;
 
 const once = hasFlag('--once');
+const runId = getArg('--run-id')?.toLowerCase() ?? null;
+if (hasFlag('--run-id') && (!once || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(runId ?? ''))) {
+  throw new Error('The --run-id option requires --once and a valid run UUID.');
+}
 const workerId = getArg('--worker-id', process.env.TABULAR_IMPORT_WORKER_ID || `tabular-import-worker-${process.pid}`);
 const pollMs = Number.parseInt(getArg('--poll-ms', process.env.TABULAR_IMPORT_WORKER_POLL_MS || '3000'), 10) || 3000;
 const batchSize = Number.parseInt(getArg('--batch-size', process.env.TABULAR_IMPORT_WORKER_BATCH_SIZE || ''), 10) || null;
@@ -59,8 +63,9 @@ const firstRecord = (value) => {
 };
 
 const csvEscape = (value) => {
-  if (value === null || value === undefined) return '';
-  const raw = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (value == null) return '';
+  let raw = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (/^[=+\-@\t\r]/.test(raw)) raw = "'" + raw;
   if (/[",\n\r]/.test(raw)) {
     return `"${raw.replace(/"/g, '""')}"`;
   }
@@ -373,12 +378,22 @@ const main = async () => {
   try {
     await pgClient.query(`select set_config('request.correlation_id', $1, false)`, [ctx.correlationId]);
     while (true) {
-      const claim = toRecord(await rpc('claim_next_tabular_import_task_v1', {
+      const claim = toRecord(await rpc(runId ? 'claim_tabular_import_task_v1' : 'claim_next_tabular_import_task_v1', {
         p_worker_id: workerId,
+        ...(runId ? { p_run_id: runId } : {}),
       }));
 
+      if (runId && claim && claim.run_id !== runId) {
+        throw new Error('The worker claim returned a different import run.');
+      }
       if (!claim) {
         // Kickoff can finish a run before its worker claims the task.
+        if (runId) {
+          if (!await finalizeRun({ runId, pgClient })) {
+            throw new Error('The requested import run is neither claimable nor ready to finalize.');
+          }
+          break;
+        }
         let finalized = null;
         try {
           finalized = await finalizeRun({ pgClient });
@@ -414,6 +429,7 @@ const main = async () => {
             error_message: finalizeError instanceof Error ? finalizeError.message : String(finalizeError),
           });
         }
+        if (runId) throw error;
       }
 
       if (once) break;

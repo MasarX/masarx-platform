@@ -1626,8 +1626,8 @@ describeIfDb("mapping studio runtime save", () => {
     await setServiceContext(client, userId, orgId);
 
     const claimResult = await client.query(
-      `SELECT public.claim_next_tabular_import_task_v1($1::text) AS claim`,
-      ["integration-worker"],
+      `SELECT api.claim_tabular_import_task_v1($1::uuid, $2::text) AS claim`,
+      [runId, "integration-worker"],
     );
 
     expect(claimResult.rows[0].claim).toEqual(

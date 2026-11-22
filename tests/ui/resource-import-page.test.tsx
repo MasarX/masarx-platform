@@ -1,9 +1,10 @@
 import * as React from "react";
 import { renderWithIntl } from "./test-utils";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import en from "../../packages/config/messages/en.json";
 import ar from "../../packages/config/messages/ar.json";
 import { ResourceImportPage } from "../../packages/ui/src/resource-import-page";
+import { SpreadsheetPreview } from "../../packages/ui/src/mapping-studio/spreadsheet-preview";
 import { createUiClient } from "@masarx/api";
 import { ToastHost } from "../../packages/ui/src/use-toast";
 
@@ -77,6 +78,32 @@ function deferred<T>() {
   const promise = new Promise<T>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise; });
   return { promise, resolve, reject };
 }
+
+test("bounds the spreadsheet preview initially and lets users inspect every column", () => {
+  renderWithIntl(
+    <SpreadsheetPreview
+      columns={["Reference", "Status", "Notes"]}
+      sampleRows={[
+        { Reference: "Sample 1", Status: "Ready", Notes: "First note" },
+        { Reference: "Sample 2", Status: "Pending", Notes: "Second note" },
+      ]}
+      columnLimit={2}
+      sampleRowLimit={1}
+    />,
+  );
+
+  const preview = screen.getByRole("region", { name: "Spreadsheet preview" });
+  expect(preview).toHaveAttribute("tabindex", "0");
+  expect(within(preview).getAllByRole("columnheader")).toHaveLength(2);
+  expect(screen.queryByText("Sample 2")).not.toBeInTheDocument();
+  const disclosure = screen.getByRole("button", { name: "Show all columns" });
+  expect(disclosure).toHaveAttribute("aria-controls", preview.id);
+  fireEvent.click(disclosure);
+  expect(screen.getByRole("columnheader", { name: "Notes" })).toBeInTheDocument();
+  expect(screen.getByText("First note")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show first 2 columns" }));
+  expect(screen.queryByRole("columnheader", { name: "Notes" })).not.toBeInTheDocument();
+});
 
 describe("ResourceImportPage", () => {
   const uiClient = {

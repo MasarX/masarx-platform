@@ -63,8 +63,15 @@ describe("tabular file previews", () => {
     expect(parsed.rows[19]).toEqual({ "External ID": "ext-20", Status: "active" });
     expect(parsed.selectedSheet).toBe(format === "xlsx" ? "Selected" : "Sheet1");
     expect(parsed.workbookSheets).toEqual(format === "xlsx" ? ["Visible", "Selected"] : ["Sheet1"]);
-    const file = { name: `orders.${format}`, arrayBuffer: async () => buffer } as File;
+    const text = jest.fn(() => { throw new Error("Preview must not buffer input as text"); });
+    const file = {
+      name: `orders.${format}`,
+      size: buffer.byteLength,
+      arrayBuffer: async () => buffer,
+      text,
+    } as unknown as File;
     await expect(parseTabularFile(file, "Selected")).resolves.toEqual(parsed);
+    expect(text).not.toHaveBeenCalled();
   });
 
   test.each(["", "External ID,Status\n"])("empty buffered input stays empty (%p)", async (csv) => {

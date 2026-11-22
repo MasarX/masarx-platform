@@ -73,23 +73,36 @@ export async function uploadCsv(
   });
 }
 
-export function runTabularImportWorkerOnce() {
+export const DEFAULT_TABULAR_IMPORT_WORKER_ONCE_TIMEOUT_MS = 120_000;
+
+export function runTabularImportWorkerOnce({
+  runId,
+  timeoutMs = Number(process.env.TABULAR_IMPORT_WORKER_ONCE_TIMEOUT_MS),
+}: { runId?: string; timeoutMs?: number } = {}) {
   const envFile =
     process.env.ENV_FILE && process.env.ENV_FILE.trim()
       ? process.env.ENV_FILE
       : path.join("config", "env", ".env.local");
-  execFileSync(
-    process.execPath,
-    ["scripts/workers/tabular-import-worker.js", "--once"],
-    {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        ENV_FILE: envFile,
+  const timeout = Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 2_147_483_647
+    ? timeoutMs
+    : DEFAULT_TABULAR_IMPORT_WORKER_ONCE_TIMEOUT_MS;
+  try {
+    execFileSync(
+      process.execPath,
+      ["scripts/workers/tabular-import-worker.js", "--once", ...(runId ? ["--run-id", runId] : [])],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, ENV_FILE: envFile },
+        stdio: "inherit",
+        timeout,
       },
-      stdio: "inherit",
+    );
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ETIMEDOUT") {
+      throw new Error(`Tabular import worker --once exceeded its ${timeout}ms timeout.`, { cause: error });
     }
-  );
+    throw error;
+  }
 }
 
 export async function approveResourceImport(page: Page) {
