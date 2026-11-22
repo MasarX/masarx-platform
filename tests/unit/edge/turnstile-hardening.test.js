@@ -7,10 +7,27 @@ const { pathToFileURL } = require('node:url');
 
 const edgeRoot = path.resolve(__dirname, '../../../supabase/functions');
 const allowedOrigin = 'https://tracking.example.invalid';
+const siteverifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const signupHandlers = ['driver-signup-intake', 'tenant-signup-intake'];
 
 function setup(secret = 'fixture-secret', handlerName = 'public-shipment-tracking') {
   let handler;
-  const rpc = jest.fn();
+  const rpc = jest.fn(async (name) => {
+    switch (name) {
+      case 'marketplace_public_entry_resolve_v1':
+        return { data: {
+          ok: true, organization_id: '11111111-2222-4333-8444-555555555555',
+          organization_slug: 'fixture-org',
+        }, error: null };
+      case 'marketplace_compliance_policy_v1':
+      case 'tenant_signup_policy_v1':
+        return { data: { enabled: true, turnstile: { required: true } }, error: null };
+      case 'tenant_signup_request_create_v1':
+        return { data: { ok: true, status: 'under_review' }, error: null };
+      default:
+        throw new Error('Unexpected fixture RPC: ' + name);
+    }
+  });
   const from = jest.fn();
   const createClient = jest.fn(() => ({ rpc, from }));
   const fetch = jest.fn();
@@ -30,7 +47,7 @@ function setup(secret = 'fixture-secret', handlerName = 'public-shipment-trackin
   };
   const sandbox = vm.createContext({
     Request, Response, Headers, URL, URLSearchParams, TextEncoder, TextDecoder,
-    Error, crypto: webcrypto, fetch,
+    Error, crypto: webcrypto, fetch, performance,
     console: { log, info: log, warn: logWarn, error: logError, debug: log, trace: log, dir: log },
     Deno: { env: { get: (key) => env[key] }, serve: (fn) => { handler = fn; } },
   });
@@ -69,6 +86,7 @@ function request(route = 'public-shipment-tracking/lookup', origin = allowedOrig
     },
     body: JSON.stringify({
       email: 'fixture@example.invalid', company: 'Fixture Company',
+      full_name: 'Fixture Person', organization_name: 'Fixture Company', entry_key: 'fixture-entry',
       reference: 'FIXTURE-123', turnstile_token: 'fixture-token',
     }),
   });
@@ -127,3 +145,61 @@ test.each([
   expect(await response.json()).toEqual({ ok: false, error: { code: 'turnstile_verify_failed' } });
   expect(app.rpc).not.toHaveBeenCalled();
 });
+
+describe.each(signupHandlers)('%s Turnstile admission', (name) => {
+  test('rejects an empty Siteverify hostname before persistence', async () => {
+    const app = setup('fixture-secret', name);
+    app.fetch.mockResolvedValueOnce(Response.json({ success: true, hostname: '' }));
+
+    const response = await app.handler(request(name));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ ok: false, error: { code: 'turnstile_invalid' } });
+    expect(app.fetch).toHaveBeenCalledWith(siteverifyUrl, expect.any(Object));
+    expect(app.rpc.mock.calls.every(([rpcName]) => !rpcName.endsWith('_create_v1'))).toBe(true);
+  });
+
+  test.each(['secret', 'metadata'])('refuses nonlocal testing %s', async (material) => {
+    const testSecret = material === 'secret';
+    const secret = testSecret ? `1x${'0'.repeat(31)}AA` : 'fixture-secret';
+    const app = setup(secret, name);
+    app.fetch.mockResolvedValueOnce(Response.json({
+      success: true, hostname: 'tracking.example.invalid',
+      metadata: { result_with_testing_key: !testSecret },
+    }));
+
+    const response = await app.handler(request(name));
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ ok: false, error: { code: 'turnstile_verify_failed' } });
+    expect(app.fetch).toHaveBeenCalledTimes(testSecret ? 0 : 1);
+    expect(app.rpc.mock.calls.every(([rpcName]) => !rpcName.endsWith('_create_v1'))).toBe(true);
+  });
+
+  test('returns only the fixed 502 body when Siteverify throws', async () => {
+    const app = setup('fixture-secret', name);
+    app.fetch.mockRejectedValueOnce(new Error('private fixture detail'));
+
+    const response = await app.handler(request(name));
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ ok: false, error: { code: 'turnstile_verify_failed' } });
+    expect(app.fetch).toHaveBeenCalledWith(siteverifyUrl, expect.any(Object));
+    expect(app.rpc.mock.calls.every(([rpcName]) => !rpcName.endsWith('_create_v1'))).toBe(true);
+  });
+});
+
+test.each(['marketing-lead-intake', 'tenant-signup-intake'])(
+  '%s omits Siteverify error codes from the successful intake body', async (name) => {
+    const app = setup('fixture-secret', name);
+    app.fetch.mockResolvedValueOnce(Response.json({
+      success: true, hostname: 'tracking.example.invalid',
+      'error-codes': ['fixture-provider-detail'],
+    }));
+    if (name === 'marketing-lead-intake') app.fetch.mockResolvedValueOnce(Response.json({ ok: true }));
+
+    const response = await app.handler(request(name));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ ok: true });
+    expect(body).not.toHaveProperty('turnstile_error_codes');
+    expect(app.fetch).toHaveBeenCalledWith(siteverifyUrl, expect.any(Object));
+  },
+);
