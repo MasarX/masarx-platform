@@ -12,6 +12,7 @@ const rendererClaims = workflow.jobs['api-schemas'].steps.find(step => step.name
 const rendererMint = workflow.jobs['renderer-jwt-mint'];
 const rotate = rendererMint.steps.find(step => step.name === 'Rotate the DEV renderer invoke credential');
 const fixtureRef = 'abcdefghijklmnopqrst';
+const tenantStates = ['ready', 'placeholder_url', 'missing_url', 'missing_secret_ref', 'secret_unreadable', 'pin_mismatch', 'placeholder_secret'];
 
 test('runs one manual dry-run job in dev with only read access and pinned GitHub actions', () => {
   expect(workflow.on.push).toEqual({ branches: ['main'] });
@@ -52,7 +53,7 @@ test('runs the configuration readout only on manual dispatch in dev with read ac
   expect(rendererClaims.run).toContain('renderer_unreadable "psql-exit-$psql_status"');
 });
 
-test('shares one read-only renderer state query with only an allowlisted token as output', () => {
+test('shares one read-only renderer state query and opts in to tenant counts only for claims', () => {
   const { RENDERER_CONFIG_STATE_SQL: sql, RENDERER_CONFIG_STATE_PATTERN: pattern } = rendererClaims.env;
   expect(rotate.env.RENDERER_CONFIG_STATE_SQL).toBe(sql);
   expect(rotate.env.RENDERER_CONFIG_STATE_PATTERN).toBe(pattern);
@@ -64,12 +65,44 @@ test('shares one read-only renderer state query with only an allowlisted token a
     'BEGIN READ ONLY;',
     "SET LOCAL statement_timeout = '8s';",
     'SET LOCAL search_path = pg_catalog;',
+    '\\if :{?renderer_count_tenants}',
+    "SET LOCAL renderer.count_tenants = 'on';",
+    '\\else',
+    "SET LOCAL renderer.count_tenants = 'off';",
+    '\\endif',
     "SELECT 'renderer_config_state=' || current_setting('renderer.config_state');",
+    '\\if :{?renderer_count_tenants}',
+    "SELECT 'renderer_tenant_states=' || string_agg(",
+    "  label || ':' || COALESCE(current_setting('renderer.tenant_counts')::jsonb->>label, '0'),",
+    "  ',' ORDER BY position)",
+    `FROM unnest(ARRAY[${tenantStates.slice(0, 4).map(state => `'${state}'`).join(', ')},`,
+    `  ${tenantStates.slice(4).map(state => `'${state}'`).join(', ')}]) WITH ORDINALITY AS labels(label, position);`,
+    '\\endif',
     'COMMIT;',
     '',
   ].join('\n'));
-  expect(sql).not.toMatch(/\bRAISE\b|^\\|resolve_label_(?:renderer_invoke_config|provider_invoke_secret)_v1/m);
+  expect(sql).not.toMatch(/\bRAISE\b|resolve_label_(?:renderer_invoke_config|provider_invoke_secret)_v1/m);
   expect(sql).toContain("PERFORM set_config('renderer.config_state', state, true);");
+  expect(sql).toContain([
+    '    SELECT s.cached_value, false',
+    '    FROM public.settings s',
+    "    WHERE current_setting('renderer.count_tenants') = 'on'",
+    "      AND s.category = 'label_provider' AND s.scope_type = 'tenant' AND s.scope_id IS NOT NULL",
+  ].join('\n'));
+  expect(sql).toContain('to_jsonb(COALESCE((tenant_counts->>state)::bigint, 0) + 1)');
+});
+
+test('accepts only fixed tenant state labels and unsigned integer counts in the readout', () => {
+  const pattern = rendererClaims.env.RENDERER_TENANT_STATES_PATTERN;
+  expect(pattern).toBe(`^renderer_tenant_states=${tenantStates.map(state => `${state}:[0-9]+`).join(',')}$`);
+  const valid = `renderer_tenant_states=${tenantStates.map((state, index) => `${state}:${index * 10}`).join(',')}`;
+  const readout = new RegExp(pattern);
+  expect(valid).toMatch(readout);
+  for (const count of ['-1', '1.5', 'hidden-value']) {
+    expect(valid.replace('ready:0', `ready:${count}`)).not.toMatch(readout);
+  }
+  expect(valid.replace('ready:0', 'unknown:0')).not.toMatch(readout);
+  expect(`${valid}\nother_line`).not.toMatch(readout);
 });
 
 test.each([
@@ -80,12 +113,22 @@ test.each([
     '  *) exit 1 ;;',
     'esac',
   ].join('\n')],
-])('prints the validated renderer state before the %s gate and any resolver call', (_name, step, fail, gate) => {
-  expect(step.run).toMatch(/\bpsql -X -w -A -q -t -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate 2>"\$psql_stderr"/);
+])('prints the validated renderer readout before the %s gate and any resolver call', (name, step, fail, gate) => {
+  const countsTenants = name === 'claims';
+  const psql = 'psql -X -w -A -q -t -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate';
+  expect(step.run).toContain(`${psql}${countsTenants ? ' "$@"' : ''} 2>"$psql_stderr"`);
   const readAndGate = [
-    'renderer_state="$(renderer_psql <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"',
+    ...(countsTenants ? [
+      'renderer_states="$(renderer_psql -v renderer_count_tenants=on <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"',
+      'renderer_state="${renderer_states%%$\'\\n\'*}"',
+      'renderer_tenant_states="${renderer_states#*$\'\\n\'}"',
+    ] : ['renderer_state="$(renderer_psql <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"']),
     `[[ "$renderer_state" =~ $RENDERER_CONFIG_STATE_PATTERN ]] || ${fail} state`,
     "printf '%s\\n' \"$renderer_state\" | tee -a \"$GITHUB_STEP_SUMMARY\"",
+    ...(countsTenants ? [
+      '[[ "$renderer_tenant_states" =~ $RENDERER_TENANT_STATES_PATTERN ]] || renderer_unreadable tenant-states',
+      "printf '%s\\n' \"$renderer_tenant_states\" | tee -a \"$GITHUB_STEP_SUMMARY\"",
+    ] : []),
     gate,
   ].join('\n');
   expect(step.run).toContain(readAndGate);

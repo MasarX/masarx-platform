@@ -91,57 +91,89 @@ jobs:
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           RENDERER_CONFIG_STATE_PATTERN: &renderer-config-state-pattern '^renderer_config_state=(missing_settings|missing_url|placeholder_url|missing_secret_ref|secret_unreadable|pin_mismatch|placeholder_secret|ready)$'
+          RENDERER_TENANT_STATES_PATTERN: '^renderer_tenant_states=ready:[0-9]+,placeholder_url:[0-9]+,missing_url:[0-9]+,missing_secret_ref:[0-9]+,secret_unreadable:[0-9]+,pin_mismatch:[0-9]+,placeholder_secret:[0-9]+$'
           RENDERER_CONFIG_STATE_SQL: &renderer-config-state-sql |
             BEGIN READ ONLY;
             SET LOCAL statement_timeout = '8s';
             SET LOCAL search_path = pg_catalog;
-            -- Mirror the global renderer and Vault credential checks without invoking either resolver.
+            \if :{?renderer_count_tenants}
+            SET LOCAL renderer.count_tenants = 'on';
+            \else
+            SET LOCAL renderer.count_tenants = 'off';
+            \endif
+            -- Classify provider zero in each settings row without invoking the credential resolvers.
             DO $renderer_state$
             DECLARE
-              settings jsonb := public.resolve_settings('label_provider', 'global', NULL::uuid);
-              provider jsonb := COALESCE(settings->'providers'->0, '{}'::jsonb);
-              invoke_url text := NULLIF(provider->>'invoke_url', '');
+              settings jsonb;
+              is_global boolean;
+              provider jsonb;
+              invoke_url text;
               secret_id uuid;
               metadata jsonb;
               state text;
+              tenant_counts jsonb := '{}'::jsonb;
             BEGIN
-              IF settings IS NULL THEN
-                state := 'missing_settings';
-              ELSIF invoke_url IS NULL THEN
-                state := 'missing_url';
-              ELSIF invoke_url LIKE ('https://' || 'example' || '.%') THEN
-                state := 'placeholder_url';
-              ELSIF provider#>>'{invoke_secret_ref,type}' IS DISTINCT FROM 'SecretRef'
-                OR pg_input_is_valid(provider#>>'{invoke_secret_ref,id}', 'uuid') IS NOT TRUE THEN
-                state := 'missing_secret_ref';
-              ELSE
-                BEGIN
-                  secret_id := (provider#>>'{invoke_secret_ref,id}')::uuid;
-                  SELECT s.description::jsonb INTO metadata
-                  FROM vault.secrets s
-                  WHERE s.id = secret_id AND starts_with(s.name, 'label_provider/');
-                  IF NOT FOUND THEN
+              FOR settings, is_global IN
+                SELECT public.resolve_settings('label_provider', 'global', NULL::uuid), true
+                UNION ALL
+                SELECT s.cached_value, false
+                FROM public.settings s
+                WHERE current_setting('renderer.count_tenants') = 'on'
+                  AND s.category = 'label_provider' AND s.scope_type = 'tenant' AND s.scope_id IS NOT NULL
+              LOOP
+                provider := COALESCE(settings->'providers'->0, '{}'::jsonb);
+                invoke_url := NULLIF(provider->>'invoke_url', '');
+                IF settings IS NULL THEN
+                  state := 'missing_settings';
+                ELSIF invoke_url IS NULL THEN
+                  state := 'missing_url';
+                ELSIF invoke_url LIKE ('https://' || 'example' || '.%') THEN
+                  state := 'placeholder_url';
+                ELSIF provider#>>'{invoke_secret_ref,type}' IS DISTINCT FROM 'SecretRef'
+                  OR pg_input_is_valid(provider#>>'{invoke_secret_ref,id}', 'uuid') IS NOT TRUE THEN
+                  state := 'missing_secret_ref';
+                ELSE
+                  BEGIN
+                    secret_id := (provider#>>'{invoke_secret_ref,id}')::uuid;
+                    SELECT s.description::jsonb INTO metadata
+                    FROM vault.secrets s
+                    WHERE s.id = secret_id AND starts_with(s.name, 'label_provider/');
+                    IF NOT FOUND THEN
+                      state := 'secret_unreadable';
+                    ELSIF (NOT (metadata ? 'pinned_invoke_url')
+                      OR metadata->>'pinned_invoke_url' = invoke_url) IS NOT TRUE THEN
+                      state := 'pin_mismatch';
+                    ELSE
+                      SELECT CASE
+                        WHEN d.decrypted_secret IS NULL THEN 'secret_unreadable'
+                        WHEN d.decrypted_secret = 'EXAMPLE_PASSWORD' THEN 'placeholder_secret'
+                        ELSE 'ready'
+                      END INTO state
+                      FROM vault.decrypted_secrets d WHERE d.id = secret_id;
+                      state := COALESCE(state, 'secret_unreadable');
+                    END IF;
+                  EXCEPTION WHEN OTHERS THEN
                     state := 'secret_unreadable';
-                  ELSIF (NOT (metadata ? 'pinned_invoke_url')
-                    OR metadata->>'pinned_invoke_url' = invoke_url) IS NOT TRUE THEN
-                    state := 'pin_mismatch';
-                  ELSE
-                    SELECT CASE
-                      WHEN d.decrypted_secret IS NULL THEN 'secret_unreadable'
-                      WHEN d.decrypted_secret = 'EXAMPLE_PASSWORD' THEN 'placeholder_secret'
-                      ELSE 'ready'
-                    END INTO state
-                    FROM vault.decrypted_secrets d WHERE d.id = secret_id;
-                    state := COALESCE(state, 'secret_unreadable');
-                  END IF;
-                EXCEPTION WHEN OTHERS THEN
-                  state := 'secret_unreadable';
-                END;
-              END IF;
-              PERFORM set_config('renderer.config_state', state, true);
+                  END;
+                END IF;
+                IF is_global THEN
+                  PERFORM set_config('renderer.config_state', state, true);
+                ELSE
+                  tenant_counts := jsonb_set(tenant_counts, ARRAY[state],
+                    to_jsonb(COALESCE((tenant_counts->>state)::bigint, 0) + 1));
+                END IF;
+              END LOOP;
+              PERFORM set_config('renderer.tenant_counts', tenant_counts::text, true);
             END;
             $renderer_state$;
             SELECT 'renderer_config_state=' || current_setting('renderer.config_state');
+            \if :{?renderer_count_tenants}
+            SELECT 'renderer_tenant_states=' || string_agg(
+              label || ':' || COALESCE(current_setting('renderer.tenant_counts')::jsonb->>label, '0'),
+              ',' ORDER BY position)
+            FROM unnest(ARRAY['ready', 'placeholder_url', 'missing_url', 'missing_secret_ref',
+              'secret_unreadable', 'pin_mismatch', 'placeholder_secret']) WITH ORDINALITY AS labels(label, position);
+            \endif
             COMMIT;
         run: |
           set -euo pipefail
@@ -176,7 +208,7 @@ jobs:
           renderer_psql() {
             PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
               PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
-              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate 2>"$psql_stderr"
+              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate "$@" 2>"$psql_stderr"
           }
           renderer_query_failed() {
             local psql_status="$1" sqlstate
@@ -186,9 +218,13 @@ jobs:
             fi
             renderer_unreadable "psql-exit-$psql_status"
           }
-          renderer_state="$(renderer_psql <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"
+          renderer_states="$(renderer_psql -v renderer_count_tenants=on <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"
+          renderer_state="${renderer_states%%$'\n'*}"
+          renderer_tenant_states="${renderer_states#*$'\n'}"
           [[ "$renderer_state" =~ $RENDERER_CONFIG_STATE_PATTERN ]] || renderer_unreadable state
           printf '%s\n' "$renderer_state" | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ "$renderer_tenant_states" =~ $RENDERER_TENANT_STATES_PATTERN ]] || renderer_unreadable tenant-states
+          printf '%s\n' "$renderer_tenant_states" | tee -a "$GITHUB_STEP_SUMMARY"
           [[ "$renderer_state" == renderer_config_state=ready ]] || exit 1
 
           claims="$(renderer_psql <<'SQL'
