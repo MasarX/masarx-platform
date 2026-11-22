@@ -1,4 +1,4 @@
-import { verifyMarketingTurnstile } from "./_shared/turnstile-local-test.mjs";
+import { turnstileHostnameFailure, verifyMarketingTurnstile } from "./_shared/turnstile-local-test.mjs";
 import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { parseRequestBody, readEnv } from "./_shared/mod.mjs";
@@ -207,7 +207,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
 
   let turnstileVerified = false;
-  let turnstileErrorCodes: unknown = null;
   const effectiveTurnstileSecret =
     TENANT_SIGNUP_TURNSTILE_SECRET_KEY ||
     (cors.localContext ? LOCAL_TENANT_SIGNUP_TURNSTILE_SECRET_KEY : "");
@@ -215,33 +214,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (turnstileToken) {
     try {
       const turnstileResult = await observe("turnstile", () => verifyMarketingTurnstile({ token: turnstileToken, secret: effectiveTurnstileSecret, localContext: cors.localContext, requestHostname: new URL(req.url).hostname, clientIp }));
-      turnstileVerified = turnstileResult.success;
-      turnstileErrorCodes = turnstileResult.errorCodes;
-
-      if (turnstileResult.success && turnstileResult.hostname) {
-        const expectedHost = (() => {
-          try {
-            return new URL(cors.origin).hostname.toLowerCase();
-          } catch {
-            return "";
-          }
-        })();
-        const actualHost = turnstileResult.hostname.toLowerCase();
-        if (expectedHost && actualHost && expectedHost !== actualHost) {
-          return json(
-            400,
-            {
-              ok: false,
-              error: { code: "turnstile_invalid" },
-              turnstile_error_codes: turnstileErrorCodes,
-            },
-            cors.headers,
-          );
-        }
+      if (turnstileResult.success && turnstileHostnameFailure(turnstileResult.hostname, cors.origin)) {
+        return json(400, { ok: false, error: { code: "turnstile_invalid" } }, cors.headers);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "turnstile_verify_failed";
-      return json(502, { ok: false, error: { code: "turnstile_verify_failed", message } }, cors.headers);
+      turnstileVerified = turnstileResult.success;
+    } catch {
+      return json(502, { ok: false, error: { code: "turnstile_verify_failed" } }, cors.headers);
     }
   }
 
@@ -251,7 +229,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       {
         ok: false,
         error: { code: "turnstile_required" },
-        turnstile_error_codes: turnstileErrorCodes,
       },
       cors.headers,
     );
@@ -303,7 +280,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       mapRpcErrorToStatus(code),
       {
         ...rpcBody,
-        turnstile_error_codes: turnstileErrorCodes,
       },
       cors.headers,
     );
@@ -342,7 +318,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       queue_status: queueStatus,
       auto_approve: autoApprove,
       auto_approve_applied: autoApprove && autoApproveResult?.ok === true,
-      turnstile_error_codes: turnstileErrorCodes,
     },
     cors.headers,
   );

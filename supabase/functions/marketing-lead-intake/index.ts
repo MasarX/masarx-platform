@@ -3,6 +3,7 @@ import { parseRequestBody, readEnv, toResponseBody } from "./_shared/mod.mjs";
 import { selectRpcAuthAttempts } from "./rpc-auth.mjs";
 import {
   LOCAL_MARKETING_TURNSTILE_TEST_SECRET,
+  turnstileHostnameFailure,
   verifyMarketingTurnstile,
 } from "./_shared/turnstile-local-test.mjs";
 
@@ -372,8 +373,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
 
   let turnstileVerified = false;
-  let turnstileHostname = "";
-  let turnstileErrorCodes: unknown = null;
   const effectiveTurnstileSecret =
     TURNSTILE_SECRET_KEY || (cors.localContext ? LOCAL_MARKETING_TURNSTILE_TEST_SECRET : "");
 
@@ -389,29 +388,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         requestHostname: requestUrl.hostname,
         clientIp,
       });
-      turnstileVerified = res.success;
-      turnstileHostname = res.hostname;
-      turnstileErrorCodes = res.errorCodes;
-      if (turnstileVerified && turnstileHostname) {
-        const expectedHost = (() => {
-          try {
-            return new URL(origin).hostname.toLowerCase();
-          } catch {
-            return "";
-          }
-        })();
-        const actualHost = turnstileHostname.toLowerCase();
-        if (expectedHost && actualHost && expectedHost !== actualHost) {
-          return json(
-            400,
-            { ok: false, error: { code: "turnstile_invalid" }, turnstile_error_codes: turnstileErrorCodes },
-            cors.headers,
-          );
-        }
+      if (res.success && turnstileHostnameFailure(res.hostname, origin)) {
+        return json(400, { ok: false, error: { code: "turnstile_invalid" } }, cors.headers);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      return json(502, { ok: false, error: { code: "turnstile_verify_failed", message } }, cors.headers);
+      turnstileVerified = res.success;
+    } catch {
+      return json(502, { ok: false, error: { code: "turnstile_verify_failed" } }, cors.headers);
     }
   }
 
@@ -453,7 +435,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
           code: "rpc_failed",
           rpc_status: rpcResponse.status,
           rpc_message: message ?? rpcResponse.statusText,
-          turnstile_error_codes: turnstileErrorCodes,
         },
       },
       cors.headers,
@@ -469,13 +450,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const status = mapRpcErrorToStatus(code);
       return json(
         status,
-        { ...(bodyObj as JsonRecord), turnstile_error_codes: turnstileErrorCodes },
+        { ...(bodyObj as JsonRecord) },
         cors.headers,
       );
     }
 
-    return json(200, { ...(bodyObj as JsonRecord), turnstile_error_codes: turnstileErrorCodes }, cors.headers);
+    return json(200, { ...(bodyObj as JsonRecord) }, cors.headers);
   }
 
-  return json(200, { ok: true, result: rpcBody, turnstile_error_codes: turnstileErrorCodes }, cors.headers);
+  return json(200, { ok: true, result: rpcBody }, cors.headers);
 });
