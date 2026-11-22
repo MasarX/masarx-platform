@@ -82,5 +82,29 @@ test('deploy writes the dedicated credential without logging it and gates functi
   expect(run).toMatch(/secrets set[^\n]+\n} >\/dev\/null 2>&1 \|\| \{\n\s+echo '[^']*MARKETING_DB_JWT\.'\n\s+exit 1/);
   expect(run.indexOf('secrets list')).toBeGreaterThan(run.indexOf('secrets set'));
   expect(run.indexOf('secrets list')).toBeLessThan(run.indexOf('functions deploy'));
-  expect(run).toContain('::error::Marketing token is missing from the secret list.');
+  expect(run).toContain('::error::Marketing token verification failed.');
+});
+
+
+test.each(['match', 'stale', 'missing'])('deploy checks the listed marketing token digest: %s', state => {
+  const run = deploy.jobs.database.steps.find(step => step.id === 'deploy').run;
+  const code = run.match(/secrets list[^\n]+\|\n\s+node -e '([\s\S]+?)' 2>\/dev\/null/)[1];
+  const crypto = require('node:crypto');
+  const token = 'fixture.token.signature';
+  const digest = crypto.createHash('sha256').update(token).digest('hex');
+  const listed = state === 'missing' ? [] : [{
+    name: 'MARKETING_DB_JWT',
+    value: state === 'match' ? digest : '0'.repeat(64),
+  }];
+  const readFileSync = source => source === 0 ? JSON.stringify(listed) : `MARKETING_DB_JWT=${token}\n`;
+  const dependencies = name => name === 'node:fs' ? { readFileSync } : crypto;
+  const aborted = new Error('verification failed');
+  const runtime = { env: { EDGE_SECRET_FILE: 'fixture.env' }, exit: jest.fn(() => { throw aborted; }) };
+  const verify = () => new Function('require', 'process', code)(dependencies, runtime);
+  if (state === 'match') {
+    expect(verify).not.toThrow();
+  } else {
+    expect(verify).toThrow(aborted);
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+  }
 });
