@@ -46,7 +46,7 @@ The Delivery Lead owns this file. Change it through a reviewed PR.
 
 ## Deploys
 
-- DEV deploys run from main only. `.github/workflows/deploy.yml` runs in GitHub Actions and supports manual deployment and database dry runs.
+- DEV deploys run from main only. `.github/workflows/deploy.yml` supports manual deployment, database dry runs and `renderer-jwt-mint` to rotate the DEV renderer invoke credential.
 - The database job serializes applies in one concurrency group with cancellation disabled. Its configuration guard checks that the deployment is configured. The database merge gate is hosted from-zero replay plus pgTAP. Verify the DEV apply after every migration merge and retain the merged SHA, deploy result and applied migration evidence.
 - The M6 DEV apply guards are active in `scripts/deploy/apply-guard.cjs` and the deploy workflow.
   - G1: skip a superseded push when a newer deploy run targets the current tip of `main`. Refuse the apply if the replacing run ended without success or failure.
