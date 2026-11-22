@@ -410,7 +410,61 @@ test("redacts an encoded quoted value whose closing quote crosses the cap", () =
   }
 });
 
-function checkHistoricalCoverage(seed: number, count: number) {
+function escapeJsonPayload(text: string) {
+  return JSON.stringify(text).slice(1, -1);
+}
+
+const escapedJsonForms = [
+  ["escaped JSON", escapeJsonPayload],
+  ["URL-encoded escaped JSON", (text: string) => encodeURIComponent(escapeJsonPayload(text))],
+  ["double URL-encoded escaped JSON", (text: string) => encodeURIComponent(encodeURIComponent(escapeJsonPayload(text)))],
+  ["twice-escaped JSON", (text: string) => escapeJsonPayload(escapeJsonPayload(text))],
+  ["escaped JSON with encoded backslashes", (text: string) => escapeJsonPayload(text).replace(/\\/g, "%5c")],
+  ["escaped JSON with encoded quotes", (text: string) => escapeJsonPayload(text).replace(/"/g, "%22")],
+] as const;
+
+test.each(escapedJsonForms)("redacts a complete credential value in %s", (_label, transform) => {
+  const key = "password";
+  const credential = [alphaMarker, '"', ", & ", betaMarker, "%5C%22, ", gammaMarker, "\\"].join("");
+  const json = JSON.stringify({ [key]: credential, status: 503 });
+  const prefix = transform(`{${JSON.stringify(key)}:`);
+  const suffix = transform(',"status":503}');
+
+  expect(redactOutboxErrorText(transform(json))).toBe(prefix + "[REDACTED]" + suffix);
+});
+
+test.each([true, false])("redacts mixed quoting with an escaped key set to %s", (escapeKey) => {
+  const key = JSON.stringify("access_token");
+  const credential = [firstFragment, nextFragment].join(" & ");
+  const rawValue = JSON.stringify(credential);
+  const prefix = `{${escapeKey ? escapeJsonPayload(key) : key}:`;
+  const value = escapeKey ? rawValue : escapeJsonPayload(rawValue);
+  const suffix = ',"status":503}';
+
+  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+});
+
+test("redacts credentials nested in serialized error messages", () => {
+  const error = { message: JSON.stringify({ password: alphaMarker, token: betaMarker, status: 503 }) };
+  const expected = `{"message":"${escapeJsonPayload('{"password":')}[REDACTED]`
+    + `${escapeJsonPayload(',"token":')}[REDACTED]${escapeJsonPayload(',"status":503}')}"}`;
+
+  expect(redactOutboxErrorText(JSON.stringify(error))).toBe(expected);
+});
+
+test("caps a 1 MiB unterminated escaped value with deeper quotes in under 200 ms", () => {
+  const prefix = escapeJsonPayload('{"password":');
+  const openQuote = escapeJsonPayload('"');
+  const innerQuote = escapeJsonPayload(openQuote);
+  const input = prefix + openQuote + (innerQuote + " " + alphaMarker).repeat(64) + "\\".repeat(1024 * 1024);
+
+  const start = performance.now();
+  const output = redactOutboxErrorText(input);
+  expect(performance.now() - start).toBeLessThan(200);
+  expect(output).toBe(prefix + "[REDACTED]…[truncated]");
+});
+
+function checkHistoricalCoverage(seed: number, count: number, includeEscapedJson = false) {
   function pick<T>(values: readonly T[]) {
     seed ^= seed << 13;
     seed ^= seed >>> 17;
@@ -454,14 +508,20 @@ function checkHistoricalCoverage(seed: number, count: number) {
     for (let quote = 0; quote < quoteCount; quote += 1) quotedKey += pick(['%22', '"', "'"]);
     const quotedKeyValue = "token%3D" + shortFixture + "%7D" + quotedKey + pick([":", "%3A", "="]) + fixtures[1];
     const encodedQuote = "token%3D%22" + fixtures[0] + "%26" + fixtures[1] + "%22%26state%3Dok";
-    const input = pick([
+    const historical = pick([
       standard, standard, standard, chained + pick(joins) + next, authorization + " " + encodedJson,
       basicEnded, basicChain, quotedKeyValue, encodedQuote,
     ]);
+    const escapedFixture = fixtureWord + "Escaped" + index;
+    const transform = escapedJsonForms[index % escapedJsonForms.length][1];
+    const input = includeEscapedJson
+      ? transform(JSON.stringify({ password: escapedFixture })) + " & " + historical
+      : historical;
     const oldResults = frozen.map((redact) => redact(input));
     const actual = redactOutboxErrorText(input);
-    for (const fixture of [...fixtures, singleCase]) {
-      if (!input.includes(fixture) || oldResults.every((result) => result.includes(fixture))) continue;
+    for (const fixture of [...fixtures, singleCase, escapedFixture]) {
+      if (!input.includes(fixture)) continue;
+      if (fixture !== escapedFixture && oldResults.every((result) => result.includes(fixture))) continue;
       checkedSecrets += 1;
       if (!actual.includes(fixture)) continue;
       leaks += 1;
@@ -474,5 +534,11 @@ function checkHistoricalCoverage(seed: number, count: number) {
 test("retains historical secret coverage across 4,000 seeded inputs", () => {
   const { checkedSecrets, leaks, firstLeak } = checkHistoricalCoverage(0x7b3a54c1, 4000);
   expect(checkedSecrets).toBeGreaterThan(4000);
+  expect({ leaks, firstLeak }).toEqual({ leaks: 0, firstLeak: undefined });
+}, 10000);
+
+test("retains historical coverage alongside escaped JSON across 1,000 seeded inputs", () => {
+  const { checkedSecrets, leaks, firstLeak } = checkHistoricalCoverage(0x7b3a54c1, 1000, true);
+  expect(checkedSecrets).toBeGreaterThan(2000);
   expect({ leaks, firstLeak }).toEqual({ leaks: 0, firstLeak: undefined });
 }, 10000);

@@ -126,7 +126,8 @@ function serializeError(error: unknown) {
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
 const KEY_CHAR = String.raw`(?:[a-z0-9_-]|%2d)`;
 const KEYWORD = String.raw`(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt)`;
-const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+(?:["']|%22)*`;
+const SENSITIVE_KEY_NAME = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+`;
+const SENSITIVE_KEY = String.raw`${SENSITIVE_KEY_NAME}(?:["']|%22)*`;
 const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
 const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
 const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
@@ -167,6 +168,21 @@ const CREDENTIAL_PATTERNS = [
   credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
   credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}%3[ad]\s*`, LEGACY_ENCODED_VALUE),
 ];
+const JSON_BACKSLASH = String.raw`(?:\\|%(?:25)?5c)`;
+const JSON_QUOTE = String.raw`(?:"|%(?:25)?22)`;
+const ESCAPED_JSON_QUOTE = String.raw`${JSON_BACKSLASH}+${JSON_QUOTE}`;
+const JSON_SPACE = String.raw`(?:\s|%(?:25)?20)*`;
+const JSON_SEPARATOR = String.raw`${JSON_SPACE}(?:[:=]|%(?:25)?3[ad])${JSON_SPACE}`;
+const JSON_KEY = String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY_NAME}(?:["']|%(?:25)?22)*`;
+const ANY_JSON_QUOTE = String.raw`(?:${ESCAPED_JSON_QUOTE}|${JSON_QUOTE})`;
+const ESCAPED_JSON_FIELD = new RegExp(
+  String.raw`(${JSON_KEY}(?:${ESCAPED_JSON_QUOTE}${ANY_JSON_QUOTE}*${JSON_SEPARATOR}(?=${ANY_JSON_QUOTE})`
+    + String.raw`|${JSON_SEPARATOR}(?=${ESCAPED_JSON_QUOTE})))|${MARKER_OR_KEY_RUN}`,
+  "gi",
+);
+// Consume runs of the same backslash spelling even when no quote follows.
+const JSON_QUOTE_TOKEN = new RegExp(String.raw`((${JSON_BACKSLASH})\2*)(${JSON_QUOTE})?|(${JSON_QUOTE})`, "gi");
+const JSON_VALUE_END = new RegExp(String.raw`${JSON_SPACE}(?:[,}\]&)/"]|%(?:25)?(?:2c|7d|5d|26|22)|$)`, "iy");
 const AUTHORIZATION_SCHEME = new RegExp(
   String.raw`(?:%22|%20|\b)(?:proxy(?:-|%2d))?authorization(?:["']|%22)?${KEY_SEPARATOR}(?:\s|%20)*(?:["']|%22)?(?=Basic(?:\s|%20))`, "gi",
 );
@@ -177,6 +193,42 @@ const BASIC_CREDENTIAL = /^[A-Za-z0-9+/]{8,}={0,2}/;
 const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
 type RedactionSpan = { start: number; end: number; prefix?: string };
+
+function collectEscapedJsonSpans(text: string, spans: RedactionSpan[]) {
+  const valueStarts = new Set<number>();
+  for (const match of text.matchAll(ESCAPED_JSON_FIELD)) {
+    if (match[1] !== undefined) valueStarts.add(match.index + match[1].length);
+  }
+  if (valueStarts.size === 0) return;
+
+  const openValues = new Map<string, number>();
+  let runStart = 0;
+  let runEnd = -1;
+  for (const match of text.matchAll(JSON_QUOTE_TOKEN)) {
+    if (match.index !== runEnd) runStart = match.index;
+    const end = match.index + match[0].length;
+    const quote = match[3] ?? match[4];
+    runEnd = quote === undefined ? end : -1;
+    if (quote === undefined) continue;
+
+    const slash = match[2] ?? "";
+    const backslashes = slash ? match[1].length / slash.length : 0;
+    const openKey = `${backslashes}:${slash}${quote}`.toLowerCase();
+    // At each JSON layer, paired backslashes are content. The trailing binary ones
+    // count the escaping of the quote itself after those pairs are removed.
+    const closingDepth = backslashes & ~(backslashes + 1);
+    const closingKey = openValues.has(openKey)
+      ? openKey : `${closingDepth}:${closingDepth ? slash : ""}${quote}`.toLowerCase();
+    const start = openValues.get(closingKey);
+    JSON_VALUE_END.lastIndex = end;
+    if (start !== undefined && JSON_VALUE_END.test(text)) {
+      spans.push({ start, end });
+      openValues.delete(closingKey);
+    }
+    if (valueStarts.has(runStart) && !openValues.has(openKey)) openValues.set(openKey, runStart);
+  }
+  for (const start of openValues.values()) spans.push({ start, end: text.length });
+}
 
 export function redactOutboxErrorText(value: string) {
   const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
@@ -194,6 +246,7 @@ export function redactOutboxErrorText(value: string) {
       spans.push({ start, end: start + match[2].length });
     }
   }
+  collectEscapedJsonSpans(text, spans);
   const authorizationSchemes = new Set(
     Array.from(text.matchAll(AUTHORIZATION_SCHEME), (match) => match.index + match[0].length),
   );
