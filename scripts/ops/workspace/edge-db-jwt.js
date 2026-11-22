@@ -150,6 +150,7 @@ function buildEdgeDbJwtBundle({ secret, nowSec, ttlSec, issuer } = {}) {
     api_caller_db_jwt: createEdgeDbJwt({ secret, role: 'edge_api_caller_role', nowSec, ttlSec, issuer }),
     api_gateway_db_jwt: createEdgeDbJwt({ secret, role: 'edge_api_gateway_role', nowSec, ttlSec, issuer }),
     label_renderer_db_jwt: createEdgeDbJwt({ secret, role: 'edge_label_renderer_role', nowSec, ttlSec, issuer }),
+    marketing_db_jwt: createEdgeDbJwt({ secret, role: 'edge_marketing_role', nowSec, ttlSec, issuer }),
   };
 }
 
