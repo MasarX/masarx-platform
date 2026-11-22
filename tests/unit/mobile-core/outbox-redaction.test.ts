@@ -70,7 +70,24 @@ test.each([
   `key: ${alphaMarker}`,
   `user:${alphaMarker}@example.invalid`,
   `http:\u2044\u2044u:${alphaMarker}@example.invalid`,
-])("withholds the R9 fixture through redaction and outbox sync (%#)", async input => {
+  ...[
+    "code_verifier", "?code=x&code_verifier", "CODE_VERIFIER", "code-verifier",
+    "client_assertion", "SAMLResponse", "creds", "hmac", "whsec", "mnemonic", "jwk", "sas", "dsn",
+    "DATABASE_URL", "databaseUrl", "connection_string", "connectionString", "ConnectionString",
+    "contraseña",
+  ].map(key => `${key}=${alphaMarker}`),
+  `codeVerifier: '${alphaMarker}'`,
+  `{"code_verifier":"${alphaMarker}"}`,
+  `{&quot;code_verifier&quot;:&quot;${alphaMarker}&quot;}`,
+  `code_verifier%25253D${alphaMarker}`,
+  `şifre: ${alphaMarker}`,
+  ...[
+    "upload failed café ", "Échec ", "ñ ", "à ", "Å ", "İ ", "² ",
+    "ｆａｉｌ ", "ﬁle missing ", "Request failed:\u00a0", "\u2003", "upload\u200bfailed ",
+    "\u00ad", "\ufeff ", "\u0301 ", "\u3164 ", "fail\u2800 ",
+    "upload failed caf%C3%A9 ", "Request failed:&nbsp;", "\\ufeff ",
+  ].map(prefix => prefix + alphaMarker),
+])("withholds the input through redaction and outbox sync (%#)", async input => {
   const output = redactOutboxErrorText(input);
   expect(output).toBe(withheld);
   expect(output).not.toContain(alphaMarker);
@@ -116,10 +133,16 @@ test("retains the PostgreSQL 23505 category when the key diagnostic is withheld"
 
 test.each([
   "\u062a\u0639\u0630\u0631 \u062d\u0641\u0638 \u0627\u0644\u0637\u0644\u0628",
+  "تَعَذَّرَ حِفْظُ الطَّلَبِ",
   "shipping label failed", "Author not found", "compass heading", "monkey nearby", "Request timed out",
   "keyboard=enabled", "code=409", '{"code":"PGRST301"}', "HTTP \u0664\u0660\u0669",
-])("preserves ordinary diagnostic text %s", input => {
+  "nonce=missing ticket=missing seed=missing code=missing",
+])("preserves ordinary diagnostic text %s", async input => {
   expect(redactOutboxErrorText(input)).toBe(input);
+  const outbox = createOutbox(createMemoryOutboxStore());
+  const { id } = await outbox.enqueue({ rpc: "record_action", args: {} });
+  await outbox.sync(async () => { throw input; });
+  expect((await outbox.get(id))?.last_error).toBe(input);
 });
 
 test.each(["Lookup key missing", "sort_key=name", "lookup-key=name"])(
@@ -205,9 +228,8 @@ test("processes 8 KiB of repeated x- in under 20 ms", () => {
   expect(output).toBe(input);
 });
 
-test("drops an emoji when the cap would split its surrogate pair", () => {
-  const prefix = " ".repeat(8191);
-  expect(redactOutboxErrorText(prefix + "\u{1F600}")).toBe(prefix + "\u2026[truncated]");
+test.each([8191, 8192])("withholds a message with an emoji at index %i", index => {
+  expect(redactOutboxErrorText(" ".repeat(index) + "\u{1F600}")).toBe(withheld);
 });
 
 test.each([

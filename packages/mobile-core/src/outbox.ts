@@ -439,12 +439,12 @@ const HTML_ENTITIES: Record<string, string> = {
 };
 const MAX_ERROR_DECODE_PASSES = 8;
 const NESTED_PERCENT = new RegExp(`%(?:25){${MAX_ERROR_DECODE_PASSES}}`);
-const ARABIC_RANGES = String.raw`\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff`;
+const ARABIC_RANGES = String.raw`\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufefe`;
 const ARABIC_BLOCK = new RegExp(`[${ARABIC_RANGES}]`, "u");
 const OUTSIDE_ALLOWED_CHARACTERS = new RegExp(String.raw`[^\t\n\r\x20-\x7e${ARABIC_RANGES}]`, "u");
 const NORMALIZATION_REMOVALS = /[\p{M}\p{Cf}\u115f\u1160\u3164\uffa0\u2800]|(?![\t\n\r])\p{Cc}/gu;
-const SENSITIVE_TERM = /password|secret|token|credential/;
-const SENSITIVE_COMPONENT = /^(?:pass|passwd|password|passcode|pwd|pw|pin|otp|secret|token|key|apikey|auth|credentials?|signature|sig|session|sessid|cookies?|bearer|jwt|private|authorization|unauthorized|authentication|(?:un)?authenticated|passphrase|sessionids?|privatekey|accesskey)$/i;
+const SENSITIVE_TERM = /password|secret|token|credential|connectionstring|databaseurl/;
+const SENSITIVE_COMPONENT = /^(?:pass|passwd|password|passcode|pwd|pw|pin|otp|secret|token|key|apikey|auth|credentials?|signature|sig|session|sessid|cookies?|bearer|jwt|private|authorization|unauthorized|authentication|(?:un)?authenticated|passphrase|sessionids?|privatekey|accesskey|verifier|assertion|samlresponse|creds|hmac|whsec|mnemonic|jwk|sas|dsn)$/i;
 const SENSITIVE_SUFFIX = /(?:pass|passwd|key|secret|token|pin|otp|sessid)$/i;
 const ORDINARY_WORD = /^(?:monkey|compass)$/i;
 const LEET_LETTERS: Record<string, string> = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t" };
@@ -508,6 +508,7 @@ function shouldWithholdError(output: string) {
           return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
         });
     if (next === text) {
+      if (OUTSIDE_ALLOWED_CHARACTERS.test(text)) return true;
       const decomposed = text.normalize("NFKD");
       const normalized = decomposed.replace(NORMALIZATION_REMOVALS, "");
       if (OUTSIDE_ALLOWED_CHARACTERS.test(normalized) || UNKNOWN_NAMED_ENTITY.test(normalized)) return true;
@@ -527,11 +528,9 @@ function shouldWithholdError(output: string) {
 
 export function redactOutboxErrorText(value: string) {
   if (Object.values(WITHHELD_ERRORS).some(message => message === value)) return value;
+  if (OUTSIDE_ALLOWED_CHARACTERS.test(value)) return WITHHELD_MESSAGE;
   const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
-  let end = MAX_ERROR_TEXT_LENGTH;
-  const lastKept = value.charCodeAt(end - 1);
-  if (truncated && lastKept >= 0xd800 && lastKept <= 0xdbff) end -= 1;
-  const text = value.slice(0, end);
+  const text = value.slice(0, MAX_ERROR_TEXT_LENGTH);
   // Every layer changes the check view, so this prefix alone exhausts the decode budget.
   if (NESTED_PERCENT.test(text)) return WITHHELD_MESSAGE;
 
