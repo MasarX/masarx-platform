@@ -1,5 +1,7 @@
+import { redactOutboxErrorText } from "@masarx/mobile-core";
+
 export function formatAuthErrorMessage(error: unknown, normalizedEmail: string): string {
-  const base = String((error as { message?: unknown })?.message || error || "Unknown error");
+  const base = redactOutboxErrorText(String((error as { message?: unknown })?.message || error || "Unknown error"));
 
   if (/failed to fetch|network request failed|fetch failed/i.test(base)) {
     return "Unable to reach the MasarX server. Check your connection and try again.";

@@ -197,6 +197,7 @@ import {
 } from "./src/mobile-shell-driving-safety";
 import {
   type MobileScanInputMode,
+  normalizeScanBarcode,
   resolveAllowedScanInputModes,
   resolveEffectiveScanInputMode,
 } from "./src/mobile-shell-scan-input";
@@ -1711,8 +1712,10 @@ function SignInScreen({
           testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInEmail}
           style={styles.input}
           value={email}
+          autoComplete={method === "password" ? "username" : "email"}
           autoCapitalize="none"
           autoCorrect={false}
+          spellCheck={false}
           keyboardType="email-address"
           placeholder={strings.auth.emailPlaceholder}
           onChangeText={(nextEmail) => {
@@ -1728,6 +1731,10 @@ function SignInScreen({
             style={styles.input}
             value={password}
             secureTextEntry
+            autoComplete="current-password"
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
             placeholder={strings.auth.passwordPlaceholder}
             onChangeText={(nextPassword) => {
               setPassword(nextPassword);
@@ -1744,6 +1751,7 @@ function SignInScreen({
             value={otpCode}
             placeholder={strings.auth.codePlaceholder}
             keyboardType="number-pad"
+            autoComplete="one-time-code"
             onChangeText={(nextCode) => {
               setOtpCode(nextCode);
               setErrorMessage(null);
@@ -7492,13 +7500,14 @@ function ScanScreen({
         ? strings.actionAccessibility.policyDisabled
         : drivingModeLocked ? strings.scan.drivingLocked : strings.actionAccessibility.scanReady;
   const canQueue = Boolean(
-    deviceId && barcode.trim() && scanType.trim() && scanEnabled && !drivingModeLocked && !isQueueingScan
+    deviceId && normalizeScanBarcode(barcode) && scanType.trim() && scanEnabled && !drivingModeLocked && !isQueueingScan
   );
   const canOpenCamera =
     effectiveScanInputMode === "camera" && scanEnabled && !drivingModeLocked;
 
-  const queueScan = async () => {
-    if (isQueueingScanRef.current) return;
+  const queueScan = async (value = barcode) => {
+    const scannedBarcode = normalizeScanBarcode(value);
+    if (!scannedBarcode || !scanType.trim() || isQueueingScanRef.current) return;
     isQueueingScanRef.current = true;
     setIsQueueingScan(true);
 
@@ -7550,7 +7559,7 @@ function ScanScreen({
         Alert.alert(strings.scan.returnUnavailable, strings.scan.returnVerifyOnline);
         return;
       }
-      const pending = returnIntake ? { actor: actorId, scope: returnScope, queueId: id, barcode: barcode.trim() } : null;
+      const pending = returnIntake ? { actor: actorId, scope: returnScope, queueId: id, barcode: scannedBarcode } : null;
       if (pending) {
         try {
           await rememberPendingReturnScan(cacheStore, pending);
@@ -7567,7 +7576,7 @@ function ScanScreen({
           p_scan: {
             idempotency_key: id,
             scan_type: scanType.trim().toLowerCase(),
-            barcode: barcode.trim(),
+            barcode: scannedBarcode,
             device_id: deviceId,
             ...(scanContext?.routeRunId ? { route_run_id: scanContext.routeRunId } : {}),
             ...(scanContext?.routeStopId ? { route_stop_id: scanContext.routeStopId } : {}),
@@ -7615,7 +7624,7 @@ function ScanScreen({
       setBarcode("");
       setLastQueuedScan({
         id,
-        barcode: barcode.trim(),
+        barcode: scannedBarcode,
         scanType: scanType.trim().toLowerCase(),
         contextLabel: scanContext?.label ?? null,
         queuedAt: new Date().toISOString(),
@@ -7808,8 +7817,15 @@ function ScanScreen({
         inputMode="text"
         onChangeText={setBarcode}
         submitBehavior={effectiveScanInputMode === "scanner" ? "submit" : "blurAndSubmit"}
-        onSubmitEditing={() => {
-          if (effectiveScanInputMode === "scanner" && canQueue) void queueScan();
+        onSubmitEditing={({ nativeEvent }) => {
+          if (scanReadOnly) return;
+          const submitted = nativeEvent.text;
+          // A scanner can submit before the controlled input reflects the full barcode.
+          if (typeof submitted !== "string" || submitted === barcode) {
+            if (effectiveScanInputMode === "scanner" && canQueue) void queueScan();
+          } else if (effectiveScanInputMode === "scanner" && deviceId) {
+            void queueScan(submitted);
+          }
         }}
         accessibilityLabel={strings.scan.barcodePlaceholder}
         accessibilityHint={scanInputHint}

@@ -1,6 +1,7 @@
 import {
   defaultScanInputModeForPlatform,
   defaultScanInputModesForPlatform,
+  normalizeScanBarcode,
   resolveAllowedScanInputModes,
   resolveEffectiveScanInputMode,
 } from "../../../apps/fieldops/src/mobile-shell-scan-input";
@@ -24,6 +25,22 @@ describe("mobile shell scan input helpers", () => {
     expect(defaultScanInputModeForPlatform("android")).toBe("camera");
     expect(defaultScanInputModeForPlatform("ios")).toBe("camera");
     expect(defaultScanInputModeForPlatform("scanner")).toBe("scanner");
+  });
+
+  test("scanner submit prefers the completed native value when input state lags", () => {
+    const source = fs.readFileSync(path.resolve("apps/fieldops/App.tsx"), "utf8");
+    const start = source.indexOf("        ref={barcodeInputRef}");
+    const input = source.slice(start, source.indexOf("      <View style={styles.screenActionsRow}", start));
+
+    expect(input).toMatch(/onSubmitEditing=\{\(\{ nativeEvent \}\) => \{\s*if \(scanReadOnly\) return;\s*const submitted = nativeEvent\.text;/);
+    expect(input).toMatch(/if \(typeof submitted !== "string" \|\| submitted === barcode\)[\s\S]*?else if \(effectiveScanInputMode === "scanner" && deviceId\) \{\s*void queueScan\(submitted\);/);
+    expect(source).toContain('const scannedBarcode = normalizeScanBarcode(value);');
+  });
+
+  test("normalizes scanner framing while preserving case and interior separators", () => {
+    expect(normalizeScanBarcode("  Synthetic\u001dBox-01\u0000\t\r\n")).toBe("Synthetic\u001dBox-01");
+    expect(normalizeScanBarcode("\u0002\u0000 Synthetic\u001dBox-01\u0003\r\n")).toBe("Synthetic\u001dBox-01");
+    expect(normalizeScanBarcode("\u0000\r\n")).toBe("");
   });
 
   test("default allowed modes are platform aware", () => {

@@ -284,6 +284,39 @@ test("historical diagnostic sanitizer consumes escaped and unterminated quoted v
   }
 });
 
+test.each([
+  ["provider_token", "ya29.abc"],
+  ["provider_refresh_token", "abc"],
+  ["id_token", "abc"],
+  ["sessiontoken", "abc"],
+  ["x_apikey", "abc"],
+])("redacts %s and preserves neighboring fields", (key, value) => {
+  const { redactOutboxErrorText } = require("@masarx/mobile-core");
+  expect(redactOutboxErrorText(`status=visible ${key}=${value}`)).toBe(`status=visible ${key}=[REDACTED]`);
+});
+
+test("redacts suffixed credential keys with quoted values", () => {
+  const { redactOutboxErrorText } = require("@masarx/mobile-core");
+  const source = JSON.stringify({ apiKeyValue: 'synthetic "fixture"', status: 503 });
+  expect(redactOutboxErrorText(source)).toBe('{"apiKeyValue":[REDACTED],"status":503}');
+});
+
+test.each([
+  ["encoded access token", "redirect_to=https%3A%2F%2Fapp%2Fcb%23access_token%3D"],
+  ["encoded ID token", "next=%2Fcb%3Fid_token%3D"],
+  ["underscore prefix", "x_"],
+  ["letter prefix", "abc"],
+])("redacts a JWT (%s)", (_label, prefix) => {
+  const { redactOutboxErrorText } = require("@masarx/mobile-core");
+  expect(redactOutboxErrorText(`${prefix}eyJfixture.payload.signature-%26status%3Dok`))
+    .toBe(`${prefix}[JWT_REDACTED]%26status%3Dok`);
+});
+
+test("redacts an attached Bearer credential", () => {
+  const { redactOutboxErrorText } = require("@masarx/mobile-core");
+  expect(redactOutboxErrorText("xBearer abc status=ok")).toBe("xBearer [REDACTED] status=ok");
+});
+
 test("client display labels never enter RPC or Edge executor arguments", async () => {
   const store = createMemoryOutboxStore();
   const outbox = createOutbox(store);
