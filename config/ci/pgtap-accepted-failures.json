@@ -14,7 +14,7 @@
       "request-id sequence has no PUBLIC ACL",
       "executor cannot advance or reset request identities"
     ],
-    "reason": "Accept only the verified, non-grantable supabase_admin grants to PUBLIC that the project role cannot revoke. Scope is limited to SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on the two pg_net tables and SELECT, USAGE and UPDATE on the request-id sequence. The net and cron schemas stay outside the Data API (met). Clients and the executor have no unrestricted SQL or RPC path to these objects (met after the function privilege tightening in #189, #192 and #196). Credential-bearing dispatch must avoid pg_net (OPEN, tracked by a follow-up due 2026-11-28). SQL-capable roles with schema access remain a residual risk. The Delivery Lead owns this exception and rechecks it when the follow-up lands or by 2026-11-28.",
+    "reason": "Accept only the verified, non-grantable supabase_admin grants to PUBLIC that the project role cannot revoke. Scope is limited to SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on the two pg_net tables and SELECT, USAGE and UPDATE on the request-id sequence. The net and cron schemas stay outside the Data API (met). Clients and the executor have no unrestricted SQL or RPC path to these objects (met after the function privilege tightening in #189, #192, #196 and #201). Credential-bearing dispatch must avoid pg_net (OPEN, tracked by a follow-up due 2026-11-28). SQL-capable roles with schema access remain a residual risk. The Delivery Lead owns this exception and rechecks it when the follow-up lands or by 2026-11-28.",
     "owner": "Delivery Lead",
     "expires": "2026-11-28"
   },
@@ -23,7 +23,7 @@
     "assertions": [
       "cron history retains no effective executor writes"
     ],
-    "reason": "Accept only the verified, non-grantable supabase_admin grants to PUBLIC that the project role cannot revoke. Scope is limited to DELETE on cron.job_run_details. The net and cron schemas stay outside the Data API (met). Clients and the executor have no unrestricted SQL or RPC path to these objects (met after the function privilege tightening in #189, #192 and #196). Credential-bearing dispatch must avoid pg_net (OPEN, tracked by a follow-up due 2026-11-28). SQL-capable roles with schema access remain a residual risk. The Delivery Lead owns this exception and rechecks it when the follow-up lands or by 2026-11-28.",
+    "reason": "Accept only the verified, non-grantable supabase_admin grants to PUBLIC that the project role cannot revoke. Scope is limited to DELETE on cron.job_run_details. The net and cron schemas stay outside the Data API (met). Clients and the executor have no unrestricted SQL or RPC path to these objects (met after the function privilege tightening in #189, #192, #196 and #201). Credential-bearing dispatch must avoid pg_net (OPEN, tracked by a follow-up due 2026-11-28). SQL-capable roles with schema access remain a residual risk. The Delivery Lead owns this exception and rechecks it when the follow-up lands or by 2026-11-28.",
     "owner": "Delivery Lead",
     "expires": "2026-11-28"
   }
