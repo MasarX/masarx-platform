@@ -444,8 +444,11 @@ const ARABIC_BLOCK = new RegExp(`[${ARABIC_RANGES}]`, "u");
 const OUTSIDE_ALLOWED_CHARACTERS = new RegExp(String.raw`[^\t\n\r\x20-\x7e${ARABIC_RANGES}]`, "u");
 const NORMALIZATION_REMOVALS = /[\p{M}\p{Cf}\u115f\u1160\u3164\uffa0\u2800]|(?![\t\n\r])\p{Cc}/gu;
 const SENSITIVE_TERM = /password|secret|token|credential|connectionstring|databaseurl/;
-const SENSITIVE_COMPONENT = /^(?:pass|passwd|password|passcode|pwd|pw|pin|otp|secret|token|key|apikey|auth|credentials?|signature|sig|session|sessid|cookies?|bearer|jwt|private|authorization|unauthorized|authentication|(?:un)?authenticated|passphrase|sessionids?|privatekey|accesskey|verifier|assertion|samlresponse|creds|hmac|whsec|mnemonic|jwk|sas|dsn)$/i;
+const SENSITIVE_COMPONENT = /^(?:pass|passwd|password|passcode|pwd|pw|pin|otp|secret|token|key|apikey|auth|credentials?|signature|sig|session|sid|sessid|cookies?|bearer|jwt|private|authorization|unauthorized|authentication|(?:un)?authenticated|passphrase|sessionids?|privatekey|accesskey|verifier|assertion|saml(?:response|art)?|creds|hmac|whsec|mnemonic|jwk|sas|dsn|sharedaccesssignature)$/i;
 const SENSITIVE_SUFFIX = /(?:pass|passwd|key|secret|token|pin|otp|sessid)$/i;
+const CODE_COMPONENT = /^(?:otp|totp|hotp|mfa|2fa|verification|verify|recovery|backup|device|user|auth|authorization|reset|sms|email|login|pairing)$/;
+const CONNECTION_COMPONENT = /^(?:db|database|redis|mongo|mongodb|postgres|pg|mysql|amqp|rabbit|broker|cache|sqlalchemy|jdbc)$/i;
+const PHRASE_COMPONENT = /^(?:seed|recovery|pass|secret)$/;
 const ORDINARY_WORD = /^(?:monkey|compass)$/i;
 const LEET_LETTERS: Record<string, string> = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t" };
 const URL_USERINFO = /(?:[\\/]{2}|:\\+)[^/\\?#@\s]+@/;
@@ -455,6 +458,13 @@ const UNKNOWN_NAMED_ENTITY = /&[a-z][a-z0-9]*;/i;
 function hasUserinfo(text: string) {
   if (!text.includes("@")) return false;
   if (URL_USERINFO.test(text)) return true;
+  // Consume each run once, including near matches without an authority suffix.
+  for (const { 0: token, index } of text.matchAll(/[^\s/@]+/g)) {
+    const end = index + token.length;
+    if (text[end] !== "@" || !/\S/.test(text.charAt(end + 1))) continue;
+    const colon = token.indexOf(":", 1);
+    if (colon >= 0 && colon < token.length - 1) return true;
+  }
   for (const { 0: prefix, index } of text.matchAll(/\b\w+:[^\s@]+/g)) {
     BARE_USERINFO_HOST.lastIndex = index + prefix.length;
     if (BARE_USERINFO_HOST.test(text)) return true;
@@ -469,16 +479,21 @@ function hasSensitiveTerm(text: string) {
   }
   // Scanning identifiers independently of their separators covers quotes and whitespace.
   for (const [identifier] of text.matchAll(/[a-z0-9]+(?:[_.-]+[a-z0-9]+)*/gi)) {
-    if (/^connect\.sid$/i.test(identifier)) return true;
-    const components = identifier.split(/[_.-]/);
-    for (const component of components) {
-      if (SENSITIVE_COMPONENT.test(component)) return true;
-      const words = component.replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
-        .replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
-      if (words.some(word => SENSITIVE_COMPONENT.test(word))) return true;
-    }
-    const lastWord = components.at(-1) ?? "";
-    if (SENSITIVE_SUFFIX.test(lastWord) && !ORDINARY_WORD.test(lastWord)) return true;
+    const segments = identifier.split(/[_.-]+/);
+    if (segments.some(segment => SENSITIVE_COMPONENT.test(segment))) return true;
+    const components = identifier === identifier.toLowerCase() ? segments : identifier
+      .replace(/(^|[_.-])2[fF][aA](?=[_.A-Z-]|$)/g, (_match, boundary) => `${boundary}2fa`)
+      .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[_. -]+/);
+    if (components !== segments && components.some(component => SENSITIVE_COMPONENT.test(component))) return true;
+    const joined = components.join("");
+    if (/(?:sessionid|sid)$/.test(joined) || /^(?:conn|connstr|connectionstring|dsn)$/.test(joined)) return true;
+    if (/^codes?$/.test(components.at(-1) ?? "") && components.some(component => CODE_COMPONENT.test(component))) return true;
+    if (/(?:url|uri)$/.test(joined) && (components.some(component => CONNECTION_COMPONENT.test(component))
+      || (components !== segments && segments.some(segment => CONNECTION_COMPONENT.test(segment))))) return true;
+    if (components.includes("phrase") && components.some(component => PHRASE_COMPONENT.test(component))) return true;
+    const lastSegment = segments.at(-1) ?? "";
+    if (SENSITIVE_SUFFIX.test(lastSegment) && !ORDINARY_WORD.test(lastSegment)) return true;
   }
   return false;
 }

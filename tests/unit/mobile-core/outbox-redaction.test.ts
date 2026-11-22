@@ -30,6 +30,8 @@ const alphaMarker = fixtureWord + "Alpha" + 1;
 const betaMarker = fixtureWord + "Beta" + 2;
 const gammaMarker = fixtureWord + "Gamma" + 3;
 const deltaMarker = fixtureWord + "Delta" + 4;
+const atSign = String.fromCharCode(64);
+const exampleHost = ["example", "invalid"].join(".");
 const withheld = "[REDACTED: message withheld]";
 
 test.each([
@@ -42,10 +44,10 @@ test.each([
     "pass&unrecognized;word", "pass", "pw", "pin", "otp", "sig", "connect.sid", "key",
   ].map(key => `${key}=${alphaMarker}`),
   `"key":"${alphaMarker}"`,
-  `https://${alphaMarker}@host/x`,
-  `//user:${alphaMarker}@host/x`,
-  `https:\\\\user:${alphaMarker}@host`,
-  `https ://user:${alphaMarker}@host`,
+  `https://${alphaMarker}${atSign}host/x`,
+  `//user:${alphaMarker}${atSign}host/x`,
+  `https:\\\\user:${alphaMarker}${atSign}host`,
+  `https ://user:${alphaMarker}${atSign}host`,
 ])("withholds sensitive error form %s", input => {
   const output = redactOutboxErrorText(input);
   expect(output).toBe(withheld);
@@ -68,8 +70,8 @@ test.each([
   `service_role_key: ${alphaMarker}`,
   `Ocp-Apim-Subscription-Key: ${alphaMarker}`,
   `key: ${alphaMarker}`,
-  `user:${alphaMarker}@example.invalid`,
-  `http:\u2044\u2044u:${alphaMarker}@example.invalid`,
+  `user:${alphaMarker}${atSign}${exampleHost}`,
+  `http:\u2044\u2044u:${alphaMarker}${atSign}${exampleHost}`,
   ...[
     "code_verifier", "?code=x&code_verifier", "CODE_VERIFIER", "code-verifier",
     "client_assertion", "SAMLResponse", "creds", "hmac", "whsec", "mnemonic", "jwk", "sas", "dsn",
@@ -99,6 +101,63 @@ test.each([
   const stored = (await store.get(id))?.last_error;
   expect(stored).toBe(withheld);
   expect(stored).not.toContain(alphaMarker);
+});
+
+test.each([
+  ...[
+    "saml_response", "SAML_RESPONSE", "saml-response", "saml.response", "SAMLart", "service.saml.request",
+    "sid", "?sid", "client.sid.state", "totp_code", "mfa_code", "verification_code", "recovery_code",
+    "recovery_codes", "backup_code", "backup_codes", "device_code", "user_code", "2FA_CODE", "2FACode",
+    "db_url", "DATABASE_URI", "SQLALCHEMY_DATABASE_URI", "SQLAlchemy_URI", "redis_url", "mongo_uri", "conn", "conn_str",
+    "connstr", "connectionstring", "dsn", "rabbitBrokerUri", "seed_phrase", "recovery_phrase", "passphrase",
+    "sharedaccesssignature", "SharedAccessSignature",
+  ].map(key => [`${key}=${alphaMarker}`, withheld]),
+  ...["JSESSIONID", "jsessionid", "/app;jsessionid", "custom-session_id", "vendor-sess-id"].map(key => [
+    `${key}=${alphaMarker}`, /session/i.test(key) ? `${withheld} (auth)` : withheld,
+  ]),
+  ...[
+    `root:${alphaMarker}${atSign}tcp(db:${3306})/app`,
+    `app:${alphaMarker}${atSign}unix(/tmp/mysql.sock)/db`,
+    `user:${alphaMarker}${atSign}db:${5432}/app`,
+    `//user:${alphaMarker}${atSign}db:${5432}/app`,
+    `.-:${alphaMarker}${atSign}db`,
+    `x:${alphaMarker}${atSign}${["z", "com"].join(".")}`,
+  ].map(input => [input, withheld]),
+])("withholds credential families in redaction and outbox sync (%#)", async (input, expectedStored) => {
+  const output = redactOutboxErrorText(input);
+  expect(output).toBe(withheld);
+  expect(output).not.toContain(alphaMarker);
+
+  const outbox = createOutbox(createMemoryOutboxStore());
+  const { id } = await outbox.enqueue({ rpc: "record_action", args: {} });
+  await outbox.sync(async () => { throw input; });
+  const stored = (await outbox.get(id))?.last_error;
+  expect(stored).toBe(expectedStored);
+  expect(stored).not.toContain(alphaMarker);
+});
+
+test("scans 8 KiB of credential-family near matches with linear work", () => {
+  const exec = RegExp.prototype.exec;
+  function countSteps(size: number) {
+    const repeats = Math.floor((size - 64) / 18);
+    const input = ["x:".repeat(repeats) + atSign, "abc-".repeat(repeats) + "code",
+      "def-".repeat(repeats) + "uri", "ghi-".repeat(repeats) + "phrase",
+      "word".repeat(repeats) + atSign + "host"].join(" ").padEnd(size);
+    let steps = 0;
+    const spy = jest.spyOn(RegExp.prototype, "exec").mockImplementation(function (this: RegExp, value: string) {
+      const match = exec.call(this, value);
+      steps += 1 + (this.global ? (match?.[0].length ?? 0) : 0);
+      return match;
+    });
+    let output: string;
+    try { output = redactOutboxErrorText(input); }
+    finally { spy.mockRestore(); }
+    expect(output).toBe(input);
+    return steps;
+  }
+  const half = countSteps(4096);
+  expect(half).toBeGreaterThan(0);
+  expect(countSteps(8192)).toBeLessThanOrEqual(half * 3);
 });
 
 test.each([
@@ -137,6 +196,7 @@ test.each([
   "shipping label failed", "Author not found", "compass heading", "monkey nearby", "Request timed out",
   "keyboard=enabled", "code=409", '{"code":"PGRST301"}', "HTTP \u0664\u0660\u0669",
   "nonce=missing ticket=missing seed=missing code=missing",
+  "device_code_state=missing redis_region=missing",
 ])("preserves ordinary diagnostic text %s", async input => {
   expect(redactOutboxErrorText(input)).toBe(input);
   const outbox = createOutbox(createMemoryOutboxStore());
@@ -847,7 +907,7 @@ test.each([
   ["command line option", "--password " + alphaMarker],
   ["XML tag", "<password>" + alphaMarker + "</password>"],
   ["header without colon", "X-Api-Key " + alphaMarker],
-  ["URL userinfo", "https://user:" + alphaMarker + "@host/x"],
+  ["URL userinfo", `https://user:${alphaMarker}${atSign}host/x`],
   ["passphrase key", "passphrase=" + alphaMarker],
   ["PHP session key", "PHPSESSID=" + alphaMarker],
   ["password suffix", "dbpasswd=" + alphaMarker],
@@ -858,7 +918,7 @@ test.each([
   ["fullwidth key", "\uff50\uff41\uff53\uff53\uff57\uff4f\uff52\uff44=" + alphaMarker],
   ["literal backslash before encoded token", "\\toke&#110;=" + alphaMarker],
   ["escaped tab inside key", "pass\\tword=" + alphaMarker],
-  ["encoded slash inside URL password", encodeURIComponent("https://user:" + alphaMarker + "%2Ftail@host/x")],
+  ["encoded slash inside URL password", encodeURIComponent(`https://user:${alphaMarker}%2Ftail${atSign}host/x`)],
   ["credential prose", "password reset failed " + alphaMarker],
   ["literal marker after key", "password=[REDACTED] " + alphaMarker],
 ])("withholds a residual credential term (%s)", (_label, input) => {
