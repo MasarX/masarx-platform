@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(22);
+SELECT plan(23);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_uc079_route_run_alternate_capacity_pool_v1()
 RETURNS SETOF TEXT
@@ -202,6 +202,19 @@ BEGIN
   RETURN NEXT is((SELECT value#>>'{alternate_capacity,enabled}'
     FROM public.route_assignment_policy_resolve_v1(jsonb_build_object('organization_id', v_supplier_org))), 'false',
     'another tenant cannot inherit the explicit opt-in');
+
+  RETURN NEXT is(
+    (SELECT jsonb_build_array(scope_type, scope_id, value#>'{alternate_capacity,enabled}')
+       FROM public.route_assignment_policy_resolve_v1(
+         jsonb_build_object('organization_id', v_org, 'client_id', v_client, 'resource_id', v_branch)
+       )),
+    jsonb_build_array('client', v_client, false),
+    'the client onboarding default wins over a later tenant opt-in'
+  );
+  PERFORM public.upsert_settings_value_v1(
+    'route_assignment_policy', 'client', v_client, '{"alternate_capacity":{"enabled":true}}'::jsonb,
+    1, 'Opt the synthetic route client into automatic capacity'
+  );
 
   PERFORM set_config('request.jwt.claim.sub', v_operator::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_operator::text, 'role', 'authenticated')::text, true);

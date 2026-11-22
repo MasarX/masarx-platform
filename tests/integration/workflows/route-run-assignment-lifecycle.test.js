@@ -213,13 +213,14 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     return rows[0]?.id ?? null;
   }
 
-  async function enableAlternateCapacity(organizationId) {
+  async function enableAlternateCapacity(organizationId, clientId) {
     await client.query(
       `SELECT public.upsert_settings_value_v1(
-         'route_assignment_policy', 'tenant', $1::uuid,
+         'route_assignment_policy', scopes.scope_type, scopes.scope_id,
          '{"alternate_capacity":{"enabled":true}}'::jsonb, 1, 'Opt in for route assignment fixture'
-       )`,
-      [organizationId]
+       )
+       FROM (VALUES ('tenant', $1::uuid), ('client', $2::uuid)) AS scopes(scope_type, scope_id)`,
+      [organizationId, clientId]
     );
   }
 
@@ -1497,7 +1498,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     const supplierOrg = await createOrganization(client, 'UC079 Alternate Capacity Supplier');
 
     await setServiceContext(seed.operatorId, seed.organizationId);
-    await enableAlternateCapacity(seed.organizationId);
+    await enableAlternateCapacity(seed.organizationId, seed.clientId);
     const marketplaceRequestId = await seedMarketplacePrivatePoolRequest(
       seed.organizationId,
       supplierOrg.id
@@ -1617,7 +1618,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     const supplierOrg = await createOrganization(client, 'UC079 Outside Supplier');
 
     await setServiceContext(seed.operatorId, seed.organizationId);
-    await enableAlternateCapacity(seed.organizationId);
+    await enableAlternateCapacity(seed.organizationId, seed.clientId);
     const marketplaceRequestId = await seedMarketplacePrivatePoolRequest(
       outsiderRequester.id,
       supplierOrg.id
@@ -1652,7 +1653,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     const supplierOrg = await createOrganization(client, 'UC079 Hidden Alternate Capacity Supplier');
 
     await setServiceContext(seed.operatorId, seed.organizationId);
-    await enableAlternateCapacity(seed.organizationId);
+    await enableAlternateCapacity(seed.organizationId, seed.clientId);
     const marketplaceRequestId = await seedMarketplacePrivatePoolRequest(
       seed.organizationId,
       supplierOrg.id
