@@ -14,10 +14,10 @@ test('runs one manual dry-run job in dev with only read access and pinned GitHub
   expect(workflow.on.push).toEqual({ branches: ['main'] });
   expect(job.if).toBe("github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'");
   const inputs = workflow.on.workflow_dispatch.inputs;
-  expect(inputs.mode).toMatchObject({ type: 'choice', required: true, default: 'deploy', options: ['deploy', 'dry-run'] });
+  expect(inputs.mode).toMatchObject({ type: 'choice', required: true, default: 'deploy', options: ['deploy', 'dry-run', 'api-schemas'] });
   expect(inputs.project_ref).toMatchObject({ type: 'string' });
   expect(workflow.permissions).toEqual({ contents: 'read' });
-  expect(Object.keys(workflow.jobs)).toHaveLength(7);
+  expect(Object.keys(workflow.jobs)).toHaveLength(8);
   expect(job.permissions).toBeUndefined();
   expect(job.environment).toBe('dev');
   expect(job['timeout-minutes']).toBeGreaterThan(45);
@@ -36,6 +36,17 @@ test('keeps deploy and its summary on push and on the normal dispatch mode', () 
     expect(workflow.jobs[target].needs).toBe('database');
     expect(workflow.jobs[target].if).toContain("needs.database.result == 'success'");
   }
+});
+
+test('runs the configuration readout only on manual dispatch in dev with read access', () => {
+  const readout = workflow.jobs['api-schemas'];
+  const renderer = readout.steps.find(step => step.name === 'Read renderer JWT claims');
+  expect(readout.if).toBe("github.event_name == 'workflow_dispatch' && inputs.mode == 'api-schemas'");
+  expect(readout.environment).toBe('dev');
+  expect(readout['timeout-minutes']).toBe(10);
+  expect(workflow.permissions).toEqual({ contents: 'read' });
+  expect(readout.permissions).toBeUndefined();
+  expect(renderer.run).toMatch(/\bpsql\b[^\n]* 2>\/dev\/null <<'SQL'/);
 });
 
 test('rejects other modes and masks the dispatch ref before exporting it', () => {
