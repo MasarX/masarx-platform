@@ -124,6 +124,7 @@ function serializeError(error: unknown) {
 }
 
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
+const WITHHELD_MESSAGE = "[REDACTED: message withheld]";
 const KEY_JOIN = String.raw`(?:[_-]|%2d)`;
 const KEY_CHAR = String.raw`(?:[a-z0-9]|${KEY_JOIN})`;
 const KEY_SPACE = String.raw`(?: |%(?:25)?20)`;
@@ -148,11 +149,16 @@ const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
 const LINE_ESCAPE_CODE = String.raw`(?:[nr]|u(?:000[ad]|202[89]))`;
 const SPACE_ESCAPE_CODE = String.raw`(?:${LINE_ESCAPE_CODE}|${HORIZONTAL_SPACE_ESCAPE}|[fb]|u000[8bc])`;
 const ENCODED_CONTROL_SPACE = String.raw`%(?:25)*0[89abcd]`;
-// Consume the escape code with its backslashes so it cannot become part of the next key.
-const ESCAPED_SPACE = String.raw`(?:${JSON_BACKSLASH}+${SPACE_ESCAPE_CODE}|${ENCODED_CONTROL_SPACE})`;
-const KEY_BOUNDARY = String.raw`(?:${ESCAPED_SPACE}|%(?:25)?(?:26|20|22)|\b|(?=-|%2d))`;
-const MARKER_OR_KEY_RUN = String.raw`\[(?:JWT_)?REDACTED\]|${ESCAPED_SPACE}|${JSON_BACKSLASH}+|${KEY_CHAR}+`;
-const VALUE_DELIMITER = String.raw`%26|%7d|[&\s,}]|${ESCAPED_SPACE}|$`;
+const ODD_BACKSLASHES = String.raw`${JSON_BACKSLASH}(?:${JSON_BACKSLASH}${JSON_BACKSLASH})*`;
+const ESCAPED_SPACE = String.raw`(?:${ODD_BACKSLASHES}(?!token)${SPACE_ESCAPE_CODE}|${ENCODED_CONTROL_SPACE})`;
+// A key can follow whitespace escaped by an enclosing JSON layer, or a literal path separator.
+const ESCAPED_KEY_BOUNDARY = String.raw`${JSON_BACKSLASH}+(?:(?!token)${SPACE_ESCAPE_CODE})?`;
+const ENCODED_KEY_BOUNDARY = String.raw`%(?:25)*(?:c2%(?:25)*a0|[012][0-9a-f]|3[a-f]|40|5[b-e]|60|7[b-f])`;
+const KEY_BOUNDARY = String.raw`(?:${ESCAPED_KEY_BOUNDARY}|${ENCODED_CONTROL_SPACE}|${ENCODED_KEY_BOUNDARY}|\b|(?=-|%2d))`;
+const MARKER_OR_KEY_RUN = String.raw`\[(?:JWT_)?REDACTED\]|${ESCAPED_KEY_BOUNDARY}|${ENCODED_CONTROL_SPACE}|${KEY_CHAR}+`;
+// Serialized log lines can carry a newline from an inner JSON layer.
+const VALUE_SPACE = String.raw`(?:${ESCAPED_SPACE}|${JSON_BACKSLASH}+${LINE_ESCAPE_CODE})`;
+const VALUE_DELIMITER = String.raw`%26|%7d|[&\s,}]|${VALUE_SPACE}|$`;
 const JSON_QUOTE = String.raw`(?:"|%(?:25)?22)`;
 const ESCAPED_JSON_QUOTE = String.raw`${JSON_BACKSLASH}+(?:${JSON_QUOTE}|u0022)`;
 const ANY_JSON_QUOTE = String.raw`(?:${ESCAPED_JSON_QUOTE}|${JSON_QUOTE})`;
@@ -160,7 +166,9 @@ const JSON_COLLECTION_OPEN = String.raw`(?:[\[{]|%(?:25)?(?:7b|5b))`;
 const SCANNED_JSON_VALUE = String.raw`(?:${ESCAPED_JSON_QUOTE}|%2522|${JSON_COLLECTION_OPEN})`;
 const JSON_SPACE = String.raw`(?:\s|%(?:25)?20)*`;
 const JSON_FIELD_END = String.raw`(?:[,}\]]|%(?:25)?(?:2c|7d|5d))`;
-const BARE_VALUE_PART = String.raw`(?!${ESCAPED_SPACE}|${ANY_JSON_QUOTE}${JSON_SPACE}${JSON_FIELD_END})(?:${JSON_BACKSLASH}+|[^\s\x08&,}])`;
+const BARE_VALUE_PART = String.raw`(?!${VALUE_SPACE}|${ANY_JSON_QUOTE}${JSON_SPACE}${JSON_FIELD_END})(?:${JSON_BACKSLASH}+|[^\s\x08&,}])`;
+const ESCAPED_KEY_PREFIX = new RegExp(String.raw`^(?:${JSON_BACKSLASH}+(?!token)${SPACE_ESCAPE_CODE}|${ENCODED_CONTROL_SPACE})`, "i");
+const EVEN_LINE_ESCAPE = new RegExp(String.raw`(?:${JSON_BACKSLASH}${JSON_BACKSLASH})+${LINE_ESCAPE_CODE}`, "iy");
 const PLAIN_QUOTE_TAIL = String.raw`(?:(?!${VALUE_DELIMITER})(?:${JSON_BACKSLASH}+|[\s\S]))*`;
 const PLAIN_VALUE = String.raw`(?!${SCANNED_JSON_VALUE})(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)${PLAIN_QUOTE_TAIL}|'(?:\\[\s\S]|[^'\\])*(?:'|$)${PLAIN_QUOTE_TAIL}|(?:${BARE_VALUE_PART})+)`;
 // A closed quote can contain %26. Fall back to the parameter boundary for an
@@ -190,7 +198,7 @@ const CREDENTIAL_PATTERNS = [
   credentialPattern(
     String.raw`${KEY_BOUNDARY}(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*[:=]\s*`,
     PLAIN_VALUE,
-    String.raw`\[(?:JWT_)?REDACTED\]|${ESCAPED_SPACE}|${JSON_BACKSLASH}+|[a-z0-9_]+`,
+    String.raw`\[(?:JWT_)?REDACTED\]|${ESCAPED_KEY_BOUNDARY}|${ENCODED_CONTROL_SPACE}|[a-z0-9_]+`,
   ),
   credentialPattern(String.raw`${KEY_BOUNDARY}${NOT_COOKIE_HEADER}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
   credentialPattern(
@@ -225,8 +233,8 @@ const JSON_SCALAR = new RegExp(
 const JSON_SYNTAX_TOKEN = new RegExp(String.raw`${QUOTE_TOKEN}|([\[\]{}]|%(?:25)?(?:[57][bd]))`, "gi");
 const JSON_VALUE_QUOTE = new RegExp(ANY_JSON_QUOTE, "iy");
 const JSON_VALUE_COLLECTION = new RegExp(JSON_COLLECTION_OPEN, "iy");
-const JSON_BARE_END = new RegExp(String.raw`([\s,}\]&]|%(?:25)?(?:20|2c|7d|5d|26)|${ESCAPED_SPACE})|${JSON_BACKSLASH}+`, "gi");
-const JSON_VALUE_END = new RegExp(String.raw`[\s;,}\]&)/"]|%(?:25)?(?:20|2c|7d|5d|26|22)|${ESCAPED_SPACE}|$`, "iy");
+const JSON_BARE_END = new RegExp(String.raw`([\s,}\]&]|%(?:25)?(?:20|2c|7d|5d|26)|${VALUE_SPACE})|${JSON_BACKSLASH}+`, "gi");
+const JSON_VALUE_END = new RegExp(String.raw`[\s;,}\]&)/"]|%(?:25)?(?:20|2c|7d|5d|26|22)|${VALUE_SPACE}|$`, "iy");
 const COLLECTION_CLOSERS: Record<string, string> = { "[": "]", "{": "}", "5b": "5d", "7b": "7d" };
 const AUTHORIZATION_SCHEME = new RegExp(
   String.raw`(${KEY_BOUNDARY}(?:proxy(?:-|%2d))?authorization(?:["']|%22)?${KEY_SEPARATOR}(?:\s|%20)*(?:["']|%22)?)(?=Basic(?:\s|%20))|${JSON_BACKSLASH}+`, "gi",
@@ -238,6 +246,12 @@ const BASIC_CREDENTIAL = /^[A-Za-z0-9+/]{8,}={0,2}/;
 const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
 type RedactionSpan = { start: number; end: number; prefix?: string; cookie?: true };
+
+function hasAmbiguousLineTail(text: string, end: number, key: string) {
+  // An escaped key boundary establishes the layered log format for this field.
+  EVEN_LINE_ESCAPE.lastIndex = end;
+  return EVEN_LINE_ESCAPE.test(text) && !ESCAPED_KEY_PREFIX.test(key);
+}
 
 function quoteKey(match: RegExpExecArray, quote: string, closing = false) {
   const slash = match[2] ?? "";
@@ -371,6 +385,7 @@ function collectJsonSpans(text: string, spans: RedactionSpan[]) {
         let delimiter = JSON_BARE_END.exec(text);
         while (delimiter && !delimiter[1]) delimiter = JSON_BARE_END.exec(text);
         bareEnd = delimiter?.index ?? text.length;
+        if (hasAmbiguousLineTail(text, bareEnd, match[1])) return true;
       }
       if (bareEnd > start) spans.push({ start, end: bareEnd });
     }
@@ -400,6 +415,52 @@ function collectJsonSpans(text: string, spans: RedactionSpan[]) {
   for (const start of openValues.values()) spans.push({ start, end: text.length });
 }
 
+const PERCENT_CHARACTER = /%(?:[0-7][\da-f]|(?:c[2-9a-f]|d[\da-f])%[89ab][\da-f]|e[\da-f](?:%[89ab][\da-f]){2}|f[0-4](?:%[89ab][\da-f]){3})/gi;
+const JSON_ESCAPES: Record<string, string> = { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };
+const HTML_ENTITIES: Record<string, string> = { quot: '"', apos: "'", amp: "&", lt: "<", gt: ">", nbsp: "\u00a0" };
+const NORMALIZED_ASSIGNMENT = /([a-z0-9_-]+)(?:\s+(key|ids?)\b)?["']*\s*[:=]\s*|[a-z0-9_-]+/gi;
+const NORMALIZED_SENSITIVE_KEY = new RegExp(`^(?:${SENSITIVE_KEY_NAME}|${COOKIE_HEADER_KEY})$`, "i");
+const REDACTED_VALUE = String.raw`(?:(?:Basic|Bearer)\s+)?\[(?:JWT_)?REDACTED\]`;
+const SAFE_VALUE = new RegExp(
+  String.raw`(?:(?:(['"])(?:${REDACTED_VALUE})?\1|${REDACTED_VALUE})(?=$|[\s,;&}\])/"'])|(?=$|[,;&}\])]))`, "iy",
+);
+
+function decodeUpToThreeTimes(text: string, decode: (input: string) => string) {
+  for (let round = 0; round < 3; round += 1) {
+    const next = decode(text);
+    if (next === text) break;
+    text = next;
+  }
+  return text;
+}
+
+function hasUnredactedAssignment(output: string) {
+  // Decode individual characters so malformed escapes cannot hide a later valid one.
+  const percentDecoded = decodeUpToThreeTimes(output, (text) => text.replace(PERCENT_CHARACTER, (escape) => {
+    try { return decodeURIComponent(escape); }
+    catch { return escape; }
+  }));
+  const jsonDecoded = decodeUpToThreeTimes(percentDecoded, (text) =>
+    text.replace(/\\(?:u([0-9a-fA-F]{4})|(["\\/bfnrt]))/g, (escape, hex: string | undefined, code: string, offset: number) => {
+      if (code === "t" && text.slice(offset + 2, offset + 6).toLowerCase() === "oken") return escape;
+      return hex === undefined ? JSON_ESCAPES[code] : String.fromCharCode(parseInt(hex, 16));
+    }));
+  const normalized = decodeUpToThreeTimes(jsonDecoded, (text) =>
+    text.replace(/&(?:(quot|apos|amp|lt|gt|nbsp)|#(x[\da-f]+|\d+));/gi, (entity, name: string | undefined, number: string) => {
+      if (name !== undefined) return HTML_ENTITIES[name.toLowerCase()];
+      const value = number[0].toLowerCase() === "x" ? parseInt(number.slice(1), 16) : Number(number);
+      return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
+    }));
+
+  for (const match of normalized.matchAll(NORMALIZED_ASSIGNMENT)) {
+    const [, key, suffix] = match;
+    if (key === undefined || !NORMALIZED_SENSITIVE_KEY.test(suffix ? `${key} ${suffix}` : key)) continue;
+    SAFE_VALUE.lastIndex = match.index + match[0].length;
+    if (!SAFE_VALUE.test(normalized)) return true;
+  }
+  return false;
+}
+
 export function redactOutboxErrorText(value: string) {
   const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
   let end = MAX_ERROR_TEXT_LENGTH;
@@ -408,16 +469,20 @@ export function redactOutboxErrorText(value: string) {
   const text = value.slice(0, end);
 
   const spans: RedactionSpan[] = [];
+  const credentialStarts = new Set<number>();
   collectCookieSpans(text, spans);
   const encodedCredential = truncated ? TRUNCATED_ENCODED_CREDENTIAL : ENCODED_CREDENTIAL;
   for (const pattern of [...CREDENTIAL_PATTERNS, encodedCredential]) {
     for (const match of text.matchAll(pattern)) {
       if (match[2] === undefined) continue;
       const start = match.index + match[1].length;
-      spans.push({ start, end: start + match[2].length });
+      credentialStarts.add(start);
+      const end = start + match[2].length;
+      if (!/^(?:["']|%22)/i.test(match[2]) && hasAmbiguousLineTail(text, end, match[1])) return WITHHELD_MESSAGE;
+      spans.push({ start, end });
     }
   }
-  collectJsonSpans(text, spans);
+  if (collectJsonSpans(text, spans)) return WITHHELD_MESSAGE;
   const authorizationSchemes = new Set<number>();
   for (const match of text.matchAll(AUTHORIZATION_SCHEME)) {
     if (match[1] !== undefined) authorizationSchemes.add(match.index + match[1].length);
@@ -426,7 +491,7 @@ export function redactOutboxErrorText(value: string) {
   for (const match of text.matchAll(SCHEME)) {
     const basic = match[1].toLowerCase().startsWith("basic");
     let credential = match[2];
-    if (basic && !authorizationSchemes.has(match.index) && match.index >= schemeChainEnd) {
+    if (basic && !authorizationSchemes.has(match.index) && !credentialStarts.has(match.index) && match.index >= schemeChainEnd) {
       const leading = BASIC_CREDENTIAL.exec(credential)?.[0];
       if (!leading || !(/[0-9+/=]/.test(leading) || (/[A-Z]/.test(leading) && /[a-z]/.test(leading)))) continue;
       credential = leading;
@@ -472,7 +537,9 @@ export function redactOutboxErrorText(value: string) {
     output += text.slice(cursor, start) + (prefix ?? "") + marker;
     cursor = spanEnd;
   }
-  return output + text.slice(cursor) + (truncated ? "\u2026[truncated]" : "");
+  output += text.slice(cursor);
+  if (hasUnredactedAssignment(output)) return WITHHELD_MESSAGE;
+  return output + (truncated ? "\u2026[truncated]" : "");
 }
 
 export type OutboxSyncOptions = {

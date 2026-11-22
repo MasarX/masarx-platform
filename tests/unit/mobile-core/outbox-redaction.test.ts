@@ -624,9 +624,12 @@ test.each(["\u00a0", "\u2003", "\u202f", "\\u00a0", "\\u2003", "\\t"])(
   },
 );
 
-test.each([encodeURIComponent, (text: string) => encodeURIComponent(encodeURIComponent(text))])(
-  "preserves the raw query parameter after an encoded cookie header",
-  (encode) => {
+test.each([
+  ["once", encodeURIComponent],
+  ["twice", (text: string) => encodeURIComponent(encodeURIComponent(text))],
+] as const)(
+  "preserves the raw query parameter after a cookie header encoded %s",
+  (_depth, encode) => {
     const prefix = "q=1&h=" + encode("Cookie: ");
     const suffix = "&keep=1";
     const input = prefix + encode("a=1; sid=" + alphaMarker) + suffix;
@@ -651,6 +654,84 @@ test.each(boundaryForms)(
 
 test("preserves cookies policy prose and similarly named diagnostic fields", () => {
   const input = 'cookies policy: accepted {"cookiePolicy":"accepted","credentialsMode":"omit"}';
+  expect(redactOutboxErrorText(input)).toBe(input);
+});
+
+const boundaryMarker = ["Zq", "Mark"].join("");
+const pathWithCredential = "C:\\tmp\\token=" + boundaryMarker;
+const serializedPath = JSON.stringify({ path: pathWithCredential });
+
+test.each([
+  ["literal path", pathWithCredential],
+  ["single backslash", "at \\token: " + boundaryMarker],
+  ["plural after backslash", "\\tokens=" + boundaryMarker],
+  ["serialized path", serializedPath],
+  ["escaped serialized path", escapeJsonPayload(serializedPath)],
+  ["encoded serialized path", encodeURIComponent(serializedPath)],
+  ["backslash in JSON key", JSON.stringify({ "a\\token": boundaryMarker })],
+  ["embedded URL", "next=" + encodeURIComponent("https://h/login?pwd=" + boundaryMarker + "&keep=1")],
+  ["encoded comma", encodeURIComponent("a=1,session_id=" + boundaryMarker)],
+  ["encoded pipe", encodeURIComponent("x|passwd: " + boundaryMarker)],
+  ["raw URL with encoded question mark", "https://h/r%3Fpwd=" + boundaryMarker],
+  ["raw assignment after encoded comma", "a=1%2Csession_id=" + boundaryMarker],
+  ["named HTML quotes", "{&quot;password&quot;:&quot;" + boundaryMarker + "&quot;}"],
+  ["numeric HTML quotes", "{&#34;pwd&#34;:&#x27;" + boundaryMarker + "&#x27;}"],
+])("removes the synthetic credential behind a %s boundary", (_label, input) => {
+  expect(redactOutboxErrorText(input)).not.toContain(boundaryMarker);
+});
+
+test.each(["%3F", "%2C", "%3B", "%7C", "%2F", "%3D", "%26", "%C2%A0"])(
+  "redacts a short key after encoded punctuation %s at four depths",
+  (punctuation) => {
+    for (let depth = 1; depth <= 4; depth += 1) {
+      const prefix = "diagnostic" + punctuation + "pwd=";
+      expect(redactOutboxErrorText(prefix + boundaryMarker)).toBe(prefix + "[REDACTED]");
+      punctuation = encodeURIComponent(punctuation);
+    }
+  },
+);
+
+test.each(["t", "n", "r", "u0009"])("only treats an odd backslash run before %s as a bare-value escape", (code) => {
+  const value = boundaryMarker + "\\\\" + code + boundaryMarker;
+  expect(redactOutboxErrorText("password=" + value)).not.toContain(boundaryMarker);
+  const suffix = "\\" + code + "status=503";
+  expect(redactOutboxErrorText("password=" + boundaryMarker + suffix)).toBe("password=[REDACTED]" + suffix);
+});
+
+test("withholds 50 encoded assignments that survive span redaction", () => {
+  const keys = ["password", "pwd", "session ids", "set-cookie", "HTTP_COOKIE"];
+  const transforms = [
+    (text: string) => text,
+    (text: string) => escapeJsonPayload(escapeJsonPayload(text)),
+    (text: string) => "%FF%broken " + encodeURIComponent(text),
+    (text: string) => encodeURIComponent(encodeURIComponent(encodeURIComponent(escapeJsonPayload(escapeJsonPayload(text))))),
+    (text: string) => encodeURIComponent(text.replace(/&/g, "&amp;")),
+  ];
+  for (const key of keys) {
+    for (const transform of transforms) {
+      for (const separator of ["&#58;", "&#x3d;"]) {
+        const hiddenKey = Array.from(key, (character) => `&#${character.charCodeAt(0)};`).join("");
+        const input = transform(`{\\u0022${hiddenKey}\\u0022${separator}&#x27;${boundaryMarker}&#x27;}`);
+        const output = redactOutboxErrorText(input);
+        expect(output).not.toContain(boundaryMarker);
+        expect(output).toBe("[REDACTED: message withheld]");
+      }
+    }
+  }
+});
+
+test("withholds a path assignment whose key and separator require percent decoding", () => {
+  const input = String.raw`C:\tmp\%2574oken%253D` + boundaryMarker;
+  expect(redactOutboxErrorText(input)).toBe("[REDACTED: message withheld]");
+});
+
+test.each([
+  "cookies policy",
+  "status=503 retry=3 path=C:\\tmp\\logs",
+  "next=https%3A%2F%2Fexample.invalid%2F%3Fstatus%3D503",
+  "{&quot;cookiePolicy&quot;:&quot;accepted&quot;}",
+  "password=",
+])("keeps a diagnostic without a credential unchanged (%#)", (input) => {
   expect(redactOutboxErrorText(input)).toBe(input);
 });
 
