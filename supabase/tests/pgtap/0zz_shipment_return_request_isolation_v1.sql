@@ -82,7 +82,7 @@ BEGIN
     'the second tenant creates and reads its own run when both use the same key'
   );
 
-  UPDATE public.workflow_runs SET workflow_status = 'waiting', completed_at = NULL
+  UPDATE public.workflow_runs SET workflow_status = 'in_progress', completed_at = NULL
    WHERE id = v_runs[2];
   EXECUTE 'SET LOCAL ROLE authenticated';
   v_replay := api.shipment_return_request_v1(v_input);
@@ -91,7 +91,7 @@ BEGIN
 
   RETURN NEXT ok(
     v_replay->>'ok' = 'true' AND v_replay->>'already_processed' = 'true'
-    AND (v_replay->>'workflow_run_id')::UUID = v_runs[2] AND v_replay->>'workflow_status' = 'waiting',
+    AND (v_replay->>'workflow_run_id')::UUID = v_runs[2] AND v_replay->>'workflow_status' = 'in_progress',
     'the same shipment and key replay the open run'
   );
   RETURN NEXT ok(

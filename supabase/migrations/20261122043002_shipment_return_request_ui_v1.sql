@@ -526,7 +526,7 @@ BEGIN
      WHERE wt.name = v_template_name
        AND wr.context->>'original_shipment_id' = v_shipment_id::text
        AND wr.context->>'organization_id' = v_target.organization_id::text
-       AND wr.workflow_status IN ('pending', 'in_progress', 'waiting')
+       AND wr.workflow_status IN ('pending', 'in_progress', 'running')
   ) THEN
     RETURN jsonb_build_object(
       'ok', FALSE,
