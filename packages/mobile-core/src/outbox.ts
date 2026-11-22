@@ -123,11 +123,25 @@ function serializeError(error: unknown) {
   return redactOutboxErrorText(value);
 }
 
+const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
+const JWT_PATTERN = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+
 export function redactOutboxErrorText(value: string) {
-  return value
+  const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
+  const redacted = value.slice(0, MAX_ERROR_TEXT_LENGTH)
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
-    .replace(/(\b(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*[:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)/gi, "$1[REDACTED]")
-    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[JWT_REDACTED]");
+    .replace(
+      /((?:%26|\b)(?=[a-z0-9_-]*(?:api[_-]?key|token|authorization|password|secret|jwt))[a-z0-9_-]+["']?\s*)(?:([:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)|(%3[ad]\s*)((?:(?!%26)[^\s&,}])+))/gi,
+      (_match, key, separator, encodedSeparator, encodedValue?: string) => {
+        const jwtOnly = encodedValue?.replace(JWT_PATTERN, "[JWT_REDACTED]") === "[JWT_REDACTED]";
+        return key + (separator ?? encodedSeparator) + (jwtOnly ? "[JWT_REDACTED]" : "[REDACTED]");
+      },
+    )
+    .replace(JWT_PATTERN, "[JWT_REDACTED]");
+  if (!truncated) return redacted;
+
+  // A JWT split by the cap may be missing the segments required by the normal matcher.
+  return redacted.replace(/eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/, "[JWT_REDACTED]") + "…[truncated]";
 }
 
 export type OutboxSyncOptions = {
