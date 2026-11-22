@@ -41,6 +41,12 @@ function databaseResult(build, shards, inventory, env = process.env, entries = [
     && expected.every((file, index) => file === selected[index]);
   ok = ok && coverage;
   lines.push('', `pgTAP coverage: ${coverage ? 'PASS' : 'FAIL'} (${selected.length} selected, ${expected.length} expected)`);
+  const executedCoverage = coverage && shards.every(shard => Array.isArray(shard.selected) && Array.isArray(shard.files)
+    && shard.selected.length === shard.files.length
+    && shard.files.every((row, index) => row?.status === 'passed' && row.file === shard.selected[index]));
+  ok = ok && executedCoverage;
+  const executed = shards.reduce((total, shard) => total + (Array.isArray(shard.files) ? shard.files.length : 0), 0);
+  lines.push(`pgTAP executed coverage: ${executedCoverage ? 'PASS' : 'FAIL'} (${executed} executed, ${expected.length} expected)`);
   for (const shard of shards) {
     if (shard.failure) lines.push('', `${cell(shard.shard)}: ${cell(shard.failure.message)}`);
     for (const file of shard.files || []) if (file.status === 'failed') {

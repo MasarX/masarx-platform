@@ -6,8 +6,8 @@ const path = require('node:path');
 const { isBuiltin } = require('node:module');
 const { spawnSync } = require('node:child_process');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
-const { migrationProgress, completePins, backendLint, waitForCronPause, hostedStackPorts } = require('./backend.cjs');
-const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
+const { migrationProgress, completePins, backendLint, waitForCronPause, hostedStackPorts, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases } = require('./backend.cjs');
+const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 const { seconds } = require('./pgtap-timings.json');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
@@ -17,6 +17,7 @@ const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stac
 const { checkTransport } = require('./docker-selfcheck.cjs');
 const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
 const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
+const { runHostedPgtap } = require('../ops/ci/cloud-pool-db-local-pgtap.js');
 const { databaseResult, PGTAP_SHARD_COUNT } = require('./database-result.cjs');
 
 const shardIndices = Array.from({ length: PGTAP_SHARD_COUNT }, (_, index) => index + 1);
@@ -312,15 +313,110 @@ async function main() {
     fs.writeFileSync(lintFile, JSON.stringify({ ok: true, findings: [], ignored: 0 }));
     await backendLint(lintReport, [{ script: 'lint:db' }], async () => {}, lintFile);
     assert.equal(lintReport.lint.ok, true);
+    const gib = 2 ** 30;
+    assert.equal(hostedWorkerCount(4, 4 * gib), 4);
+    assert.equal(hostedWorkerCount(4, 3 * gib), 2);
+    assert.throws(() => hostedWorkerCount(4, 2 * gib), /insufficient memory for 4 workers/);
+    assert.equal(hostedWorkerLimit('nproc', 6), 4);
+    assert.equal(hostedWorkerLimit('3', 2), 2);
+    assert.equal(hostedWorkerLimit('1', 6), 1);
+    assert.throws(() => hostedWorkerLimit('0', 4), /Invalid PGTAP_WORKERS/);
+    const cloneCommands = [];
+    const clones = [];
+    await assert.rejects(cloneHostedDatabases(async (...commands) => {
+      cloneCommands.push(...commands);
+      if (commands[0].includes('json_build_object')) return JSON.stringify({ owner: 'synthetic', limit: -1, explicitAcl: false });
+      if (commands[0].includes('pg_terminate_backend')) return 't';
+      if (commands[0].startsWith('CREATE DATABASE pgtap_worker_2')) throw new Error('synthetic clone failure');
+      return '[]';
+    }, ['pgtap_worker_1', 'pgtap_worker_2'], clones), /synthetic clone failure/);
+    assert.deepEqual(clones, ['pgtap_worker_1']);
+    assert.equal(cloneCommands[1], 'ALTER DATABASE postgres ALLOW_CONNECTIONS false');
+    assert.match(cloneCommands[3], /TEMPLATE postgres STRATEGY FILE_COPY/);
+    assert.equal(cloneCommands.at(-1), 'ALTER DATABASE postgres ALLOW_CONNECTIONS true');
+    const syntheticSql = {
+      'autocommit.sql': 'INSERT INTO fixture VALUES (1); BEGIN; ROLLBACK;',
+      'open.sql': 'BEGIN; SELECT 1;',
+      'canonical.sql': 'BEGIN; SELECT current_database(); ROLLBACK;',
+      'parallel.sql': '/* block */\n-- comment\nBEGIN; SELECT 1; ROLLBACK;',
+      'search-path.sql': 'SET search_path TO public, extensions;\nBEGIN; SELECT 1; ROLLBACK;',
+      'mutation-before-begin.sql': 'SET search_path TO public; INSERT INTO fixture VALUES (1); BEGIN; ROLLBACK;',
+      'committed.sql': 'BEGIN; SELECT 1; COMMIT; BEGIN; SELECT 2; ROLLBACK;',
+      'ended.sql': 'BEGIN; SELECT 1; END WORK; BEGIN; ROLLBACK;',
+      'chained.sql': 'BEGIN; ROLLBACK AND CHAIN; INSERT INTO fixture VALUES (1); ROLLBACK;',
+      'cron.sql': 'BEGIN; SELECT "cron" . schedule(); ROLLBACK;',
+      'net.sql': 'BEGIN; SELECT "net" . http_post(); ROLLBACK;',
+      'advisory.sql': 'BEGIN; DO $$ BEGIN PERFORM pg_try_advisory_xact_lock(1); END; $$; ROLLBACK;',
+      'table-lock.sql': 'BEGIN; LOCK /* session */ TABLE fixture; ROLLBACK;',
+      'role.sql': 'BEGIN; ALTER /* shared catalog */ ROLE synthetic NOLOGIN; ROLLBACK;',
+      'role-grant.sql': 'BEGIN; GRANT synthetic TO another_role; ROLLBACK;',
+      'catalog.sql': 'BEGIN; SELECT count(*) FROM pg_roles; ROLLBACK;',
+      'psql.sql': 'BEGIN;\n\\gexec\nROLLBACK;',
+    };
+    const syntheticFiles = ['00_enable_pgtap.sql', ...Object.keys(syntheticSql)];
+    assert.deepEqual(hostedBatches(syntheticFiles, 4, file => syntheticSql[file]), {
+      setup: ['00_enable_pgtap.sql'],
+      serial: ['autocommit.sql', 'open.sql', 'canonical.sql', 'mutation-before-begin.sql', 'committed.sql', 'ended.sql', 'chained.sql',
+        'cron.sql', 'net.sql', 'advisory.sql', 'table-lock.sql', 'role.sql', 'role-grant.sql', 'catalog.sql', 'psql.sql'],
+      workers: [['parallel.sql'], ['search-path.sql']],
+    });
+    assert.deepEqual(hostedBatches(syntheticFiles, 1, () => assert.fail('serial mode must not read SQL')), {
+      setup: [], serial: [], workers: [syntheticFiles],
+    });
+    let checkedFiles = 0;
+    let pinnedFiles = 0;
+    let sharedFiles = 0;
+    const actualShards = plan(names);
+    const mustPin = /\b(?:cron\b|pg_net\b|net"?\s*\.|pg_(?:try_)?advisory_\w+|lock\s+table\b)/i;
+    for (const selected of actualShards) {
+      const shared = [];
+      const { setup, serial, workers } = hostedBatches(selected, 4, file => {
+        if (++checkedFiles % 50 === 0 && process.memoryUsage.rss() > 8 * gib) throw new Error('pgTAP assignment selfcheck exceeded 8 GiB');
+        const sql = fs.readFileSync(path.join('supabase/tests/pgtap', file), 'utf8');
+        if (mustPin.test(sql) || file === '0zz_label_metrics_events.sql') shared.push(file);
+        return sql;
+      });
+      assert.deepEqual([...setup, ...serial, ...workers.flat()].sort(), selected);
+      assert.ok(shared.every(file => serial.includes(file)), 'shared-state files must run on worker zero');
+      assert.ok(workers.every(files => files.every((file, index) => index === 0 || weight(files[index - 1]) >= weight(file))));
+      pinnedFiles += setup.length + serial.length;
+      sharedFiles += shared.length;
+    }
+    console.log(`PASS: pgTAP worker assignment across ${actualShards.length} shards, ${names.length} files, ${pinnedFiles} pinned (${sharedFiles} shared-state census), ${names.length - pinnedFiles} clone-eligible, ${syntheticFiles.length} synthetic files`);
+    const hosted = { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', PGTAP_WORKERS: 'nproc', PGTAP_SHARD: '1/6',
+      PGTAP_RETRY_DEADLOCKS: '0' };
+    const hostedOptions = { projectId: `hosted-${'a'.repeat(16)}`, database: 'pgtap_worker_1' };
+    for (const env of [{}, { ...hosted, GITHUB_ACTIONS: 'false' }, { ...hosted, RUNNER_ENVIRONMENT: 'local' },
+      { ...hosted, PGTAP_RETRY_DEADLOCKS: '1' }, { ...hosted, PGTAP_SHARD: '' }]) {
+      await assert.rejects(runHostedPgtap({ ...hostedOptions, env }), /requires a disposable workflow shard/);
+    }
+    await assert.rejects(runHostedPgtap({ ...hostedOptions, env: hosted, database: 'unrelated' }), /requires a disposable workflow shard/);
+    await assert.rejects(runHostedPgtap({ ...hostedOptions, env: { ...hosted, DATABASE_URL: `${databaseUrl}?dbname=postgres` } }), /requires the assigned database URL/);
     const aggregateEnv = { BUILD_RESULT: 'success', DATABASE_PRESENT: 'true', PGTAP_RESULT: 'success', GITHUB_SHA: 'a'.repeat(40) };
     const built = { sha: aggregateEnv.GITHUB_SHA, ok: true, migrations: 2324, migrationTotal: 2324,
       migrationFailed: 0, migrationNotRun: 0, lint: { ok: true, findings: [], ignored: 0 } };
-    const shardReports = shardIndices.map(index => ({ sha: aggregateEnv.GITHUB_SHA, shard: shardId(index),
-      migrations: 2324, migrationFailed: 0, migrationNotRun: 0,
-      ok: true, run: 1, passed: 1, failed: 0, selected: [`${index - 1}_synthetic.sql`], notRun: [], files: [] }));
+    const shardReports = shardIndices.map(index => {
+      const file = `${index - 1}_synthetic.sql`;
+      return { sha: aggregateEnv.GITHUB_SHA, shard: shardId(index), migrations: 2324, migrationFailed: 0, migrationNotRun: 0,
+        ok: true, run: 1, passed: 1, failed: 0, selected: [file], notRun: [], files: [{ file, status: 'passed' }] };
+    });
     const inventory = shardReports.flatMap(shard => shard.selected).reverse();
     const result = (build, shards, env = aggregateEnv) => databaseResult(build, shards, inventory, env);
     assert.equal(result(built, shardReports).ok, true);
+    assert.match(result(built, shardReports).markdown, /pgTAP executed coverage: PASS/);
+    const [executed] = shardReports[0].files;
+    for (const [label, files] of [
+      ['missing', []],
+      ['duplicate', [shardReports[2].files[0]]],
+      ['extra', [executed, { ...executed, file: 'extra.sql' }]],
+      ['failed', [{ ...executed, status: 'failed' }]],
+    ]) {
+      const invalid = result(built, [{ ...shardReports[0], files }, ...shardReports.slice(1)]);
+      assert.equal(invalid.ok, false, label);
+      assert.match(invalid.markdown, /pgTAP executed coverage: FAIL/, label);
+    }
+    const [firstShard, secondShard, ...otherShards] = shardReports;
+    assert.equal(result(built, [{ ...firstShard, files: secondShard.files }, { ...secondShard, files: firstShard.files }, ...otherShards]).ok, false);
     const miscoverage = [shardReports[1].selected[0], 'unexpected.sql'];
     for (const file of miscoverage) {
       const wrongFiles = [{ ...shardReports[0], selected: [file] }, ...shardReports.slice(1)];

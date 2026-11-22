@@ -7,7 +7,6 @@
 // capability probe, serialized per-file execution) with lane-specific proofs instead of the shared-host
 // workspace lease: there is no lease-owned workspace config, lifecycle lock or ownership state on this VM.
 const { spawnSync } = require('child_process');
-const runner = require('../../tests/run-pgtap-cloud');
 
 // objectives:allow LOCALHOST Justification: the lane accepts only the loopback config.toml db port.
 const LOOPBACK = new Set(['127.0.0.1', 'localhost']);
@@ -40,13 +39,32 @@ function laneQualificationOptions({ env = process.env, projectId, dbPort, spawn 
   };
 }
 
-async function runFullPgtap({
-  env = process.env, projectId, dbPort, spawn = spawnSync,
-  qualify = runner.withFullLocalQualification, runSuite = runner.runSuite,
-  resolveCandidates = runner.resolveDatabaseUrlCandidates,
-} = {}) {
+async function runFullPgtap(options = {}) {
+  const runner = require('../../tests/run-pgtap-cloud');
+  const { env = process.env, projectId, dbPort, spawn = spawnSync,
+    qualify = runner.withFullLocalQualification, runSuite = runner.runSuite,
+    resolveCandidates = runner.resolveDatabaseUrlCandidates } = options;
   const candidates = await resolveCandidates(env);
   return qualify(candidates, () => runSuite(candidates, true, env), laneQualificationOptions({ env, projectId, dbPort, spawn }));
+}
+
+async function runHostedPgtap({ env, projectId, dbPort, database, runSuite }) {
+  if (env.GITHUB_ACTIONS !== 'true' || env.RUNNER_ENVIRONMENT !== 'github-hosted'
+    || !env.PGTAP_SHARD || env.PGTAP_RETRY_DEADLOCKS !== '0'
+    || !/^hosted-[a-f0-9]{16}$/.test(projectId) || !/^(postgres|pgtap_worker_[1-3])$/.test(database)) {
+    throw new Error('Hosted pgTAP requires a disposable workflow shard');
+  }
+  const target = new URL(env.DATABASE_URL);
+  if (!['postgres:', 'postgresql:'].includes(target.protocol)
+    || ['host', 'hostaddr', 'port', 'dbname', 'service', 'servicefile'].some(key => target.searchParams.has(key))) {
+    throw new Error('Hosted pgTAP requires the assigned database URL');
+  }
+  const runner = require('../../tests/run-pgtap-cloud');
+  // A worker has exactly one assigned database, with no DSN fallback on SQL or connection errors.
+  const candidates = [{ name: 'DATABASE_URL_DIRECT', dsn: target.href }];
+  return runner.withFullLocalQualification(candidates, () => runSuite(candidates, true, env), {
+    ...laneQualificationOptions({ env, projectId, dbPort }), hostedDatabase: database,
+  });
 }
 
 if (require.main === module) {
@@ -56,4 +74,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { plainCliDatabaseIdentity, laneQualificationOptions, runFullPgtap };
+module.exports = { plainCliDatabaseIdentity, laneQualificationOptions, runFullPgtap, runHostedPgtap };
