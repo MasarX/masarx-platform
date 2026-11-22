@@ -578,6 +578,77 @@ test.each(structuredJsonForms)("redacts additional sensitive keys in %s", (_labe
   }
 });
 
+const cookieHeaderKeys = [
+  "Cookie", "cookies", "Set-Cookie", "HTTP_COOKIE", "x-cookie", "request_cookie", "cookie-header", "upstream-set-cookie",
+];
+const boundaryForms = [...structuredJsonForms, ["URL-encoded JSON", encodeURIComponent] as const];
+
+test.each(boundaryForms)(
+  "redacts keys after escape boundaries in %s",
+  (_label, transform) => {
+    const keys = [
+      "apiKey", "api_key", "api-key", "api key", "token", "authorization", "password", "secret", "jwt",
+      "passwd", "pwd", "session_id", "sessionId", "session_ids", "session id", "session ids",
+      "private_key", "privateKey", "credential", "credentials", ...cookieHeaderKeys,
+    ];
+    const escapes = ["\n", "\t", "\r", "\f", "\b", "\\n", "\\u00a0", "\\u0009", "%0A", "%0D", "%09", "%250A"];
+    for (const key of keys) {
+      const cookie = cookieHeaderKeys.includes(key);
+      const value = cookie ? "a=1; sid=" + alphaMarker : alphaMarker;
+      const separator = cookie && key !== "HTTP_COOKIE" ? ": " : "=";
+      for (const escape of escapes) {
+        const log = "line1" + escape + key + separator;
+        const json = '{"log":"' + escapeJsonPayload(log);
+        for (const [before, after] of [
+          [log, "\nkeep line"], [json, String.raw`\nkeep line","status":503}`], [json, '","status":503}'],
+        ] as const) {
+          const prefix = transform(before);
+          const suffix = transform(after);
+          expect(redactOutboxErrorText(prefix + transform(value) + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+        }
+      }
+    }
+  },
+);
+
+test.each(cookieHeaderKeys)("redacts every pair in the %s header", (key) => {
+  const prefix = key + "=";
+  expect(redactOutboxErrorText(prefix + "a=1; sid=" + alphaMarker)).toBe(prefix + "[REDACTED]");
+});
+
+test.each(["\u00a0", "\u2003", "\u202f", "\\u00a0", "\\u2003", "\\t"])(
+  "redacts a cookie header with space %j before the colon",
+  (space) => {
+    const prefix = `Cookie${space}: `;
+    expect(redactOutboxErrorText(prefix + "a=1; sid=" + alphaMarker)).toBe(prefix + "[REDACTED]");
+  },
+);
+
+test.each([encodeURIComponent, (text: string) => encodeURIComponent(encodeURIComponent(text))])(
+  "preserves the raw query parameter after an encoded cookie header",
+  (encode) => {
+    const prefix = "q=1&h=" + encode("Cookie: ");
+    const suffix = "&keep=1";
+    const input = prefix + encode("a=1; sid=" + alphaMarker) + suffix;
+    expect(redactOutboxErrorText(input)).toBe(prefix + "[REDACTED]" + suffix);
+  },
+);
+
+test.each(boundaryForms)(
+  "only redacts the cookie scalar in %s",
+  (_label, transform) => {
+    const input = '{"cookies":4,"cookiePolicy":"accepted","status":503}';
+    expect(redactOutboxErrorText(transform(input)))
+      .toBe(transform('{"cookies":') + "[REDACTED]" + transform(',"cookiePolicy":"accepted","status":503}'));
+    for (const scalar of ["true", "false", "null", "-1.4e+21"]) {
+      for (const [prefix, suffix] of [['{"cookies":', '}'], ['[{"request_cookie":', '}]'], ['"cookies":', ']']]) {
+        expect(redactOutboxErrorText(transform(prefix + scalar + suffix)))
+          .toBe(transform(prefix) + "[REDACTED]" + transform(suffix));
+      }
+    }
+  },
+);
+
 test("preserves cookies policy prose and similarly named diagnostic fields", () => {
   const input = 'cookies policy: accepted {"cookiePolicy":"accepted","credentialsMode":"omit"}';
   expect(redactOutboxErrorText(input)).toBe(input);
@@ -630,6 +701,18 @@ test("processes 8 KiB of repeated plural keys in under 50 ms", () => {
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(50);
   expect(output).toBe(input);
+});
+
+test("processes 8 KiB of escape-prefixed keys in under 50 ms", () => {
+  const keys = String.raw`\nCookie: a=1; sid=` + alphaMarker + String.raw`\n\tprivate_key=` + betaMarker
+    + String.raw`\r%250Asession_id=` + gammaMarker + String.raw`\nkeep line`;
+  const expected = String.raw`\nCookie: [REDACTED]\n\tprivate_key=[REDACTED]\r%250Asession_id=[REDACTED]\nkeep line`;
+  const repeats = Math.floor(8192 / keys.length);
+  const input = keys.repeat(repeats).padEnd(8192);
+  const start = performance.now();
+  const output = redactOutboxErrorText(input);
+  expect(performance.now() - start).toBeLessThan(50);
+  expect(output).toBe(expected.repeat(repeats) + " ".repeat(8192 - repeats * keys.length));
 });
 
 test("caps a 1 MiB unterminated escaped value with deeper quotes in under 200 ms", () => {
