@@ -6,14 +6,14 @@ const path = require('node:path');
 const { isBuiltin } = require('node:module');
 const { spawnSync } = require('node:child_process');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
-const { migrationProgress, completePins, backendLint, waitForCronPause, hostedStackPorts, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases } = require('./backend.cjs');
+const { migrationProgress, completePins, backendLint, waitForCronPause, hostedStackPorts, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, pgtapDeadline } = require('./backend.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 const { seconds } = require('./pgtap-timings.json');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
 const { prepareImages } = require('./images.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
-const { collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
 const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
 const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
@@ -22,6 +22,100 @@ const { databaseResult, PGTAP_SHARD_COUNT } = require('./database-result.cjs');
 
 const shardIndices = Array.from({ length: PGTAP_SHARD_COUNT }, (_, index) => index + 1);
 const shardId = index => `${index}/${PGTAP_SHARD_COUNT}`;
+
+async function checkDatabaseLog(temp) {
+  const workflow = fs.readFileSync('.github/workflows/public-ci.yml', 'utf8').replace(/\r\n/g, '\n');
+  const jobStartedAt = 1800000000;
+  const jobStartedAtMs = jobStartedAt * 1000;
+  const shardStartedAt = jobStartedAtMs + 240000;
+  for (const jobId of ['database-build', 'database-pgtap']) {
+    const job = workflow.split(`\n  ${jobId}:\n`)[1]?.split(/\n  \S/)[0] || '';
+    const jobTimeoutMinutes = Number(job.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
+    assert.equal(pgtapDeadline(shardStartedAt, String(jobStartedAt)), jobStartedAtMs + jobTimeoutMinutes * 60000 - 120000, jobId);
+    assert.match(job, /steps:\n      - name: Record database job start\n        run: echo "JOB_STARTED_AT=\$\(date \+%s\)" >> "\$GITHUB_ENV"\n/, jobId);
+    assert.match(job, /id: qualification\n +if: steps\.subject\.outputs\.present == 'true'\n +run: node scripts\/ci-hosted\/backend\.cjs\n/, jobId);
+    assert.match(job, /- name: Upload Postgres server log\n +if: \$\{\{ !cancelled\(\) && steps\.qualification\.outputs\.postgres_log == 'true' \}\}\n +uses: actions\/upload-artifact@[a-f0-9]{40}/, jobId);
+    assert.match(job, /path: ci-reports\/postgres-server\.log\n +if-no-files-found: ignore\n +retention-days: 1\n/, jobId);
+  }
+  assert.equal(pgtapDeadline(shardStartedAt, String(jobStartedAt + 300)), shardStartedAt + 1080000, 'never widen the shard timeout');
+  assert.equal(pgtapDeadline(shardStartedAt), shardStartedAt + 1080000, 'local callers keep the shard timeout');
+  assert.equal(pgtapDeadline(shardStartedAt, 'invalid'), shardStartedAt + 1080000, 'ignore an invalid job timestamp');
+  console.log('PASS: pgTAP reserves a two-minute capture margin and never extends its existing budget');
+  const backend = fs.readFileSync(require.resolve('./backend.cjs'), 'utf8');
+  const qualify = backend.split('async function qualify(')[1].split('function saveFailure(')[0];
+  const parallel = backend.split('async function runHostedShard(')[1].split('async function recordMigrationDeadlock(')[0];
+  assert.match(qualify, /ok: false \}/);
+  assert.match(qualify, /await timed\('migrations',[\s\S]*?migrationError = error;[\s\S]*?throw error;/, 'from-zero migration failure');
+  assert.match(qualify, /await timed\(`pgtap:\$\{shard\}`,[\s\S]*?pgtapDeadline\(Date\.now\(\), env\.JOB_STARTED_AT\)[\s\S]*?\? runHostedShard\([\s\S]*?remaining, admin:[\s\S]*?: checked\(process\.execPath, \['scripts\/ci-hosted\/pgtap\.cjs'\], testEnv, remaining\(\)\);/, 'serial and parallel share the deadline');
+  assert.match(parallel, /const runSerial = \(\) => checked\(process\.execPath, \['scripts\/ci-hosted\/pgtap\.cjs'\], testEnv, remaining\(\)\)/, 'serial fallback');
+  assert.match(parallel, /await cloneHostedDatabases\(cloneAdmin, databases, created,[\s\S]*?\} finally \{/, 'clone creation failure');
+  assert.match(parallel, /await checked\(process\.execPath,[\s\S]*?\}, remaining\(\), \{ logFile: groupLog \}\)/, 'worker execution deadline');
+  assert.match(parallel, /results = await Promise\.allSettled\(workers\.map\([\s\S]*?Promise\.allSettled\(\[execute\('worker-0-serial', serial\)\]\);\s+const failures = \[setupResult, \.\.\.results, serialResult\]\.filter\(result => result\.status === 'rejected'\);\s+if \(failures\.length\) throw failures\[0\]\.reason;/, 'worker and pinned-phase rejections');
+  assert.match(qualify, /if \(JSON\.stringify\(rows\.map[\s\S]*?throw new Error\('Incomplete pgTAP shard results'\);\s+summary\.pgtap = 'passed';\s+summary\.ok = true;/, 'shard success marker follows result validation');
+  assert.match(qualify, /await backendLint\([\s\S]*?summary\.ok = summary\.lint\.ok;/, 'build success marker follows lint result');
+  assert.match(qualify, /throw error;\s+\} finally \{\s+(?:\/\/[^\r\n]*\s+)?if \(started && \(!summary\.ok \|\| diagnostic\.failure\)\) \{\s+await captureDatabaseLog\(\{ project, env, logFile: 'ci-reports\/postgres-server\.log' \}\);\s+\}[\s\S]*?timed\('stack-stop'/, 'capture before stack teardown on failure only');
+  assert.equal(qualify.match(/captureDatabaseLog\(/g).length, 1);
+  console.log('PASS: build, serial, clone, worker exit, worker deadline and pinned-phase failures reach the capture guard');
+
+  const project = `hosted-${'a'.repeat(16)}`;
+  const secret = ['synthetic', 'private', 'value'].join(' ');
+  const env = { SYNTHETIC_PASSWORD: secret, GITHUB_OUTPUT: path.join(temp, 'github-output') };
+  const logFile = path.join(temp, 'postgres-server.log');
+  const auth = 'Bearer ' + ['synthetic', 'fixture'].join('-');
+  const sample = (...parts) => ['synthetic', ...parts, 'value'].join('-');
+  const quote = value => `'${value.replaceAll("'", "''")}'`;
+  const redacted = quote('[REDACTED]');
+  const statement = '2026-01-01 00:00:00 UTC [42] STATEMENT:  ';
+  const sqlCases = [
+    [`CREATE ROLE example WITH LOGIN PASSWORD ${quote(sample("a'b"))};`, `CREATE ROLE example WITH LOGIN PASSWORD ${redacted};`],
+    [`ALTER USER "example user" VALID UNTIL 'infinity' PASSWORD E'${sample('escape')}\\'more';`, `ALTER USER "example user" VALID UNTIL 'infinity' PASSWORD ${redacted};`],
+    [`SELECT vault.create_secret(${quote(sample('vault'))}, 'example');`, `SELECT vault.create_secret(${redacted}, ${redacted});`],
+    [`SELECT vault.update_secret(gen_random_uuid(), new_secret => ${quote(sample('update'))});`, 'SELECT vault.update_secret(gen_random_uuid(), new_secret => [REDACTED]);'],
+    [`SELECT crypt(${quote(sample('crypt', 'x, y (z)'))}, gen_salt('bf'));`, `SELECT crypt(${redacted}, gen_salt(${redacted}));`],
+    [`SELECT pgp_sym_encrypt(convert_from(data, 'UTF8'), $$${sample('cipher')}$$);`, `SELECT pgp_sym_encrypt(convert_from(data, ${redacted}), ${redacted});`],
+    ...['request.jwt.claims', 'app.claims', 'app.jwt', 'app.token', 'app.secret', 'app.password'].map(setting => [
+      `SELECT set_config('${setting}', ${quote(sample(setting))}::text, false);`,
+      `SELECT set_config('${setting}', ${redacted}::text, false);`,
+    ]),
+    ["SELECT set_config('application_name', 'test suite', false);", "SELECT set_config('application_name', 'test suite', false);"],
+    ["SELECT 'ordinary literal';", "SELECT 'ordinary literal';"],
+  ].map(([raw, clean]) => [statement + raw, statement + clean]);
+  sqlCases.push(
+    [`DETAIL:  parameters: $1 = ${quote(sample("a'b"))}, $2 = ${quote(sample('line\n\tbreak'))}, $3 = NULL`, 'DETAIL:  parameters: [REDACTED]'],
+    ['2026-01-01 00:00:00 UTC [42] ERROR:  password authentication failed', '2026-01-01 00:00:00 UTC [42] ERROR:  password authentication failed'],
+  );
+  const suffix = `early database log\n${'notice\n'.repeat(90)}${'界'.repeat(6000)}\n::warning::recovery started ${secret} ${auth}\n`;
+  const rawLog = `${sqlCases.map(([raw]) => raw).join('\n')}\n${suffix}`;
+  const printed = [];
+  const captures = [];
+  const warnings = [];
+  const unavailableLog = path.join(temp, 'unavailable.log');
+  const log = console.log;
+  const warn = console.warn;
+  try {
+    console.log = message => printed.push(message);
+    console.warn = message => warnings.push(message);
+    await captureDatabaseLog({ project, env, logFile, execute: async (command, args, options) => {
+      captures.push({ command, args, options });
+      return rawLog;
+    } });
+    await captureDatabaseLog({ project, env, logFile: unavailableLog, execute: async () => { throw new Error(`unavailable ${secret}`); } });
+  } finally { console.log = log; console.warn = warn; }
+  assert.deepEqual(captures, [{ command: 'docker', args: ['logs', '--tail', '20000', '--timestamps', `supabase_db_${project}`],
+    options: { env, timeout: 10000, quiet: true, includeStderr: true, printQuietFailure: false } }]);
+  assert.equal(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8'), 'postgres_log=true\n');
+  assert.equal(fs.existsSync(unavailableLog), false);
+  assert.deepEqual(warnings, ['Could not capture Postgres server log: unavailable [REDACTED]']);
+  const expectedLog = `${sqlCases.map(([, clean]) => clean).join('\n')}\n${suffix.replace(secret, '[REDACTED]').replace(auth, '[REDACTED_AUTH]')}`;
+  assert.equal(fs.readFileSync(logFile, 'utf8'), expectedLog);
+  assert.equal(printed.length, 1);
+  assert.match(printed[0], /\n\| ::warning::recovery started \[REDACTED\] \[REDACTED_AUTH\]$/);
+  assert.ok(!printed[0].includes('early database log') && !printed[0].includes(secret) && !printed[0].includes(auth));
+  const printedLines = printed[0].split('\n').slice(1);
+  assert.ok(printedLines.length <= 80 && Buffer.byteLength(printedLines.map(line => line.slice(2)).join('\n')) <= 16384);
+  assert.ok(!printed[0].includes('\uFFFD'), 'UTF-8 tail begins at a character boundary');
+  console.log(`PASS: ${sqlCases.length} Postgres log cases, 20,000-line capture cap and an 80-line, 16 KiB printed tail`);
+}
 
 function checkDatabaseInputs() {
   const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -264,6 +358,7 @@ async function main() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'database-selfcheck-'));
   const originalSummary = process.env.GITHUB_STEP_SUMMARY;
   try {
+    await checkDatabaseLog(temp);
     const lintEnv = { SUPABASE_CLI_BIN: 'synthetic-cli', DATABASE_URL: `postgresql://postgres:synthetic-password@127.0.0.1:${dbPort}/postgres`,
       SYNTHETIC_TOKEN: 'synthetic-hidden', PATH: process.env.PATH };
     const command = invocation(lintEnv);
