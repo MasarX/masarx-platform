@@ -21,8 +21,8 @@ export function turnstileHostnameFailure(hostname, origin) {
 }
 
 const siteverifyErrorCodes = new Set([
-  "missing-input-secret", "invalid-input-secret", "missing-input-response",
-  "invalid-input-response", "bad-request", "timeout-or-duplicate", "internal-error",
+  "invalid-input-response",
+  "bad-request",
 ]);
 
 export function sanitizeTurnstileErrorCodes(codes) {
