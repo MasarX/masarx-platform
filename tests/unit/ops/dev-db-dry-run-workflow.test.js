@@ -11,7 +11,7 @@ const measure = job.steps.find(step => step.id === 'measure');
 const fixtureRef = 'abcdefghijklmnopqrst';
 
 test('runs one manual dry-run job in dev with only read access and pinned GitHub actions', () => {
-  expect(workflow.on.push).toEqual({ branches: ['dev', 'main'] });
+  expect(workflow.on.push).toEqual({ branches: ['main'] });
   expect(job.if).toBe("github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'");
   const inputs = workflow.on.workflow_dispatch.inputs;
   expect(inputs.mode).toMatchObject({ type: 'choice', required: true, default: 'deploy', options: ['deploy', 'dry-run'] });
