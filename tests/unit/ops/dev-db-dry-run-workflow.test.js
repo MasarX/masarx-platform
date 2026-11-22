@@ -8,6 +8,7 @@ const workflowSource = fs.readFileSync(path.join(workflowDir, 'deploy.yml'), 'ut
 const workflow = yaml.parse(workflowSource);
 const job = workflow.jobs['database-dry-run'];
 const measure = job.steps.find(step => step.id === 'measure');
+const rendererClaims = workflow.jobs['api-schemas'].steps.find(step => step.name === 'Read renderer JWT claims');
 const rendererMint = workflow.jobs['renderer-jwt-mint'];
 const rotate = rendererMint.steps.find(step => step.name === 'Rotate the DEV renderer invoke credential');
 const fixtureRef = 'abcdefghijklmnopqrst';
@@ -42,15 +43,55 @@ test('keeps deploy and its summary on push and on the normal dispatch mode', () 
 
 test('runs the configuration readout only on manual dispatch in dev with read access', () => {
   const readout = workflow.jobs['api-schemas'];
-  const renderer = readout.steps.find(step => step.name === 'Read renderer JWT claims');
   expect(readout.if).toBe("github.event_name == 'workflow_dispatch' && inputs.mode == 'api-schemas'");
   expect(readout.environment).toBe('dev');
   expect(readout['timeout-minutes']).toBe(10);
   expect(workflow.permissions).toEqual({ contents: 'read' });
   expect(readout.permissions).toBeUndefined();
-  expect(renderer.run).toMatch(/\bpsql\b[^\n]* 2>"\$psql_stderr" <<'SQL'\n\\set VERBOSITY sqlstate/);
-  expect(renderer.run).toContain('renderer_unreadable "sqlstate-$sqlstate"');
-  expect(renderer.run).toContain('renderer_unreadable "psql-exit-$psql_status"');
+  expect(rendererClaims.run).toContain('renderer_unreadable "sqlstate-$sqlstate"');
+  expect(rendererClaims.run).toContain('renderer_unreadable "psql-exit-$psql_status"');
+});
+
+test('shares one read-only renderer state query with only an allowlisted token as output', () => {
+  const { RENDERER_CONFIG_STATE_SQL: sql, RENDERER_CONFIG_STATE_PATTERN: pattern } = rendererClaims.env;
+  expect(rotate.env.RENDERER_CONFIG_STATE_SQL).toBe(sql);
+  expect(rotate.env.RENDERER_CONFIG_STATE_PATTERN).toBe(pattern);
+  const states = ['missing_settings', 'missing_url', 'placeholder_url', 'missing_secret_ref', 'secret_unreadable', 'pin_mismatch', 'placeholder_secret', 'ready'];
+  expect(pattern).toBe(`^renderer_config_state=(${states.join('|')})$`);
+  const sqlStates = [...sql.matchAll(/(?:state :=|THEN|ELSE) '([a-z_]+)'/g)].map(([, state]) => state);
+  expect([...new Set(sqlStates)].sort()).toEqual(states.sort());
+  expect(sql.replace(/^--.*\n/gm, '').replace(/DO \$renderer_state\$\n[\s\S]+?\n\$renderer_state\$;\n/, '')).toBe([
+    'BEGIN READ ONLY;',
+    "SET LOCAL statement_timeout = '8s';",
+    'SET LOCAL search_path = pg_catalog;',
+    "SELECT 'renderer_config_state=' || current_setting('renderer.config_state');",
+    'COMMIT;',
+    '',
+  ].join('\n'));
+  expect(sql).not.toMatch(/\bRAISE\b|^\\|resolve_label_(?:renderer_invoke_config|provider_invoke_secret)_v1/m);
+  expect(sql).toContain("PERFORM set_config('renderer.config_state', state, true);");
+});
+
+test.each([
+  ['claims', rendererClaims, 'renderer_unreadable', '[[ "$renderer_state" == renderer_config_state=ready ]] || exit 1'],
+  ['mint', rotate, 'renderer_mint_failed', [
+    'case "$renderer_state" in',
+    '  renderer_config_state=ready|renderer_config_state=placeholder_secret) ;;',
+    '  *) exit 1 ;;',
+    'esac',
+  ].join('\n')],
+])('prints the validated renderer state before the %s gate and any resolver call', (_name, step, fail, gate) => {
+  expect(step.run).toMatch(/\bpsql -X -w -A -q -t -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate 2>"\$psql_stderr"/);
+  const readAndGate = [
+    'renderer_state="$(renderer_psql <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"',
+    `[[ "$renderer_state" =~ $RENDERER_CONFIG_STATE_PATTERN ]] || ${fail} state`,
+    "printf '%s\\n' \"$renderer_state\" | tee -a \"$GITHUB_STEP_SUMMARY\"",
+    gate,
+  ].join('\n');
+  expect(step.run).toContain(readAndGate);
+  const gateEnd = step.run.indexOf(readAndGate) + readAndGate.length;
+  expect(step.run.slice(0, gateEnd)).not.toMatch(/resolve_label_(?:renderer_invoke_config|provider_invoke_secret)_v1|vault\.update_secret|node <<'NODE'/);
+  expect(step.run.slice(gateEnd)).toMatch(/claims="\$\(renderer_psql <<'SQL'\n[\s\S]+public\.resolve_label_renderer_invoke_config_v1/);
 });
 
 test('gates renderer JWT minting to main in dev with read access and independent concurrency', () => {
@@ -65,7 +106,9 @@ test('fixes the TTL, masks the JWT before reading or storing it, and clears the 
   expect(Object.keys(workflow.on.workflow_dispatch.inputs).sort()).toEqual(['environment', 'expected_sha', 'mode', 'project_ref']);
   expect(rotate.run).toContain('RENDERER_EXP="$((RENDERER_IAT + 7 * 24 * 60 * 60))"');
   expect(rotate.run).toMatch(/::add-mask::[\s\S]+token\.split\([\s\S]+writeFileSync\(process\.env\.RENDERER_TOKEN_FILE/);
-  expect(rotate.run).toMatch(/\nNODE\nunset SUPABASE_JWT_SECRET\n[\s\S]+timeout 20s psql/);
+  expect(rotate.run).toMatch(/renderer_signing_secret="\$SUPABASE_JWT_SECRET"\nunset SUPABASE_JWT_SECRET\numask 077/);
+  expect(rotate.run).toContain("SUPABASE_JWT_SECRET=\"$renderer_signing_secret\" node <<'NODE'");
+  expect(rotate.run).toMatch(/\nNODE\nunset renderer_signing_secret\n\nclaims="\$\(renderer_psql/);
   expect(rendererMint.steps.map(step => step.run || '').join('\n')).not.toMatch(/\bset\s+(?:-[a-z]*x[a-z]*\b|-o\s+xtrace\b)/);
 });
 
@@ -108,11 +151,30 @@ test.each([
 
 test('keeps renderer Vault readback atomic and reports only the database failure code', () => {
   expect(rotate.run).toMatch(/umask 077\n[\s\S]+psql_stderr="\$renderer_temp\/psql.stderr"\ntrap '[^\n]+"\$psql_stderr"/);
-  expect(rotate.run).toMatch(/\bpsql\b[^\n]* 2>"\$psql_stderr" <<'SQL'\n\\set VERBOSITY sqlstate/);
-  expect(rotate.run).toMatch(/FROM active WHERE jwt = \$1::text\n\\bind :renderer_jwt\n\\gset\nCOMMIT;/);
+  const sql = rotate.run.split("<<'SQL'\n")[1].split('\nSQL\n')[0];
+  expect(sql).toContain('BEGIN ISOLATION LEVEL SERIALIZABLE;');
+  expect(sql).toContain([
+    "SELECT public.resolve_settings('label_provider', 'global', NULL::uuid)->'providers'->0 AS value",
+    ')',
+    'SELECT s.id AS renderer_secret_id',
+    'FROM provider p',
+    "JOIN vault.secrets s ON s.id = (p.value#>>'{invoke_secret_ref,id}')::uuid",
+    "WHERE p.value#>>'{invoke_secret_ref,type}' = 'SecretRef'",
+    "  AND starts_with(s.name, 'label_provider/')",
+    `  AND NULLIF(p.value->>'invoke_url', '') NOT LIKE (${["'https://'", "'example'", "'.%'"].join(' || ')})`,
+    '  AND public.resolve_label_provider_invoke_secret_v1(p.value) <> $1::text',
+    '\\bind :renderer_jwt',
+    '\\gset',
+    '',
+    "SELECT vault.update_secret(:'renderer_secret_id'::uuid, $1::text)",
+    '\\bind :renderer_jwt',
+    '\\g /dev/null',
+  ].join('\n'));
+  expect(sql).toMatch(/\\g \/dev\/null\n[\s\S]+SELECT public\.resolve_label_renderer_invoke_config_v1\(NULL::uuid\)->>'invoke_secret' AS jwt\n[\s\S]+FROM active WHERE jwt = \$1::text\n\\bind :renderer_jwt\n\\gset\nCOMMIT;\n\\echo :renderer_payload :renderer_digest$/);
+  expect(sql.match(/resolve_label_renderer_invoke_config_v1/g)).toHaveLength(1);
   expect(rotate.run).toContain('renderer_jwt_mint=FAILED reason=%s');
-  expect(rotate.run).toContain('reason="sqlstate-$sqlstate"');
-  expect(rotate.run).toContain('reason="psql-exit-$psql_status"');
+  expect(rotate.run).toContain('renderer_mint_failed "sqlstate-$sqlstate"');
+  expect(rotate.run).toContain('renderer_mint_failed "psql-exit-$psql_status"');
 });
 
 test('rejects other modes and masks the dispatch ref before exporting it', () => {
