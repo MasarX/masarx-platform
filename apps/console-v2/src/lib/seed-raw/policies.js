@@ -64,7 +64,7 @@ export const settings_versions = [
   // operate/shipments.tsx CommsTab "Send now" button. Replaces inline
   // `channel: 'sms'` literal. The first allowed channel is the FE default
   // when the recipient does not yet expose a `preferred_channel` projection.
-  { id: 'sv_090', category: 'communication_policy', scope_type: 'global', scope_id: 'global', value: { templates: ['delivery_eta', 'support_contact'], support_contacts: { tier: 'tenant', phone: '+9661112223344' }, allowed_channels: ['sms', 'whatsapp', 'email', 'voice'] }, version: 2, status: 'active' },
+  { id: 'sv_090', category: 'communication_policy', scope_type: 'global', scope_id: 'global', value: { templates: ['delivery_eta', 'support_contact'], support_contacts: { tier: 'tenant', phone: '+447 70 090 0132' }, allowed_channels: ['sms', 'whatsapp', 'email', 'voice'] }, version: 2, status: 'active' },
 
   // driver_safety_policy — adds hos_limits for the HoursOfServiceMeter
   // primitive (W24d closure: removed in-component DEFAULT_LIMITS fallback).
