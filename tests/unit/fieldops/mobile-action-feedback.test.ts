@@ -49,7 +49,7 @@ test.each([
   [new Error("Request to api/auth timed out"), "unavailable", `${withheld} (network)`],
   [new Error(`Permission denied; password=${marker}`), "permission", `${withheld} (permission)`],
   [new Error(`409 state changed; password=${marker}`), "conflict", `${withheld} (conflict)`],
-] as const)("serializes %j with safe %s feedback", async (error, key, expected) => {
+] as const)("serializes %p with safe %s feedback", async (error, key, expected) => {
   const strings = getFieldOpsStrings("en");
   const outbox = createOutbox(createMemoryOutboxStore());
   await outbox.init();
