@@ -2111,6 +2111,7 @@ BEGIN
     v_workflow_template_id,
     jsonb_build_object(
       'trigger_source', 'manual',
+      'organization_id', v_org,
       'import_job_id', v_import_job_id,
       'source_id', v_source.id,
       'profile_id', v_profile.id,

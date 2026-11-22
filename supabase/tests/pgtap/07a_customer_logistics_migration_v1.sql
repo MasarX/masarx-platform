@@ -771,6 +771,14 @@ SELECT ok(
   'config save rejects invalid stored execution limits'
 );
 
+SELECT diag('Customer migration preview failure: ' || jsonb_strip_nulls(jsonb_build_object(
+  'code', result#>>'{error,code}',
+  'sqlstate', result#>>'{error,sqlstate}',
+  'message', COALESCE(result#>>'{error,message}', result#>>'{workflow_progress,error}')
+))::TEXT)
+FROM (SELECT current_setting('test.migration_preview_result')::jsonb AS result) preview
+WHERE result->>'ok' IS DISTINCT FROM 'true';
+
 SELECT is((current_setting('test.migration_preview_result')::jsonb->>'ok')::BOOLEAN, TRUE, 'preview succeeds');
 SELECT is(current_setting('test.migration_preview_result')::jsonb->>'status', 'queued', 'valid preview leaves canonical import job queued');
 SELECT ok(
