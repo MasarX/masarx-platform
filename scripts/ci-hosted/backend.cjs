@@ -10,7 +10,7 @@ const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
 const { collectStackDiagnostics } = require('./stack-diagnostics.cjs');
-const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
+const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 
 const { prepareImages } = require('./images.cjs');
 const { install } = require('./tasks.cjs');
@@ -66,6 +66,159 @@ async function waitForCronPause(db, wait = delay) {
   }
   throw new Error('pg_cron did not acknowledge the launch pause');
 }
+
+async function cloneHostedDatabases(admin, databases, created, restore = admin) {
+  if (!databases.length) return;
+  const { owner, limit, explicitAcl } = JSON.parse(await admin(`SELECT json_build_object(
+    'owner', quote_ident(pg_get_userbyid(datdba)), 'limit', datconnlimit, 'explicitAcl', datacl IS NOT NULL)
+    FROM pg_database WHERE datname = 'postgres'`));
+  try {
+    await admin('ALTER DATABASE postgres ALLOW_CONNECTIONS false');
+    const live = (await admin("SELECT bool_and(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'postgres'")).trim();
+    if (live && live !== 't') throw new Error('Could not release connections to the migrated template');
+    for (const database of databases) {
+      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY FILE_COPY OWNER ${owner} CONNECTION LIMIT ${limit}`);
+      created.push(database);
+      if (explicitAcl) {
+        const grants = JSON.parse(await admin(`SELECT coalesce(json_agg(format('GRANT %s ON DATABASE %I TO %s%s',
+          privilege_type, '${database}', CASE WHEN grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(grantee)) END,
+          CASE WHEN is_grantable THEN ' WITH GRANT OPTION' ELSE '' END)), '[]')
+          FROM pg_database CROSS JOIN LATERAL aclexplode(datacl) WHERE datname = 'postgres'`));
+        await admin(`REVOKE ALL ON DATABASE ${database} FROM PUBLIC, ${owner}`, ...grants);
+      }
+      const settings = JSON.parse(await admin(`SELECT coalesce(json_agg(json_build_array(
+        format('SELECT set_config(%L, %L, false)', split_part(setting, '=', 1), substr(setting, strpos(setting, '=') + 1)),
+        CASE WHEN setrole = 0 THEN format('ALTER DATABASE %I SET %I FROM CURRENT', '${database}', split_part(setting, '=', 1))
+        ELSE format('ALTER ROLE %I IN DATABASE %I SET %I FROM CURRENT', pg_get_userbyid(setrole), '${database}',
+          split_part(setting, '=', 1)) END)), '[]')
+        FROM pg_db_role_setting CROSS JOIN LATERAL unnest(setconfig) AS setting
+        WHERE setdatabase = (SELECT oid FROM pg_database WHERE datname = 'postgres')`));
+      if (settings.length) await admin(...settings.flat());
+    }
+  } finally {
+    await restore('ALTER DATABASE postgres ALLOW_CONNECTIONS true');
+  }
+}
+
+function availableMemory() {
+  const match = /^MemAvailable:\s+(\d+) kB$/m.exec(fs.readFileSync('/proc/meminfo', 'utf8'));
+  if (!match) throw new Error('Hosted runner did not report MemAvailable');
+  return Number(match[1]) * 1024;
+}
+
+// On the standard 16 GB runner, reserve 2 GiB for the OS, Docker and the
+// running database stack, then budget another 512 MiB of headroom per worker.
+// This is a conservative admission budget; the sampled minimum validates it in CI.
+const PGTAP_MEMORY_FLOOR = 2 * 2 ** 30;
+const PGTAP_WORKER_HEADROOM = 512 * 2 ** 20;
+const PGTAP_WORKER_CAP = 4;
+const PGTAP_TIMEOUT = 18 * 60000;
+
+function hostedWorkerLimit(value, cores) {
+  if (value === 'nproc') return Math.min(cores, PGTAP_WORKER_CAP);
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error('Invalid PGTAP_WORKERS; use nproc or a positive integer');
+  return Math.min(cores, PGTAP_WORKER_CAP, Number(value));
+}
+
+function hostedWorkerCount(requested, available) {
+  const fit = Math.min(requested, Math.max(0, Math.floor((available - PGTAP_MEMORY_FLOOR) / PGTAP_WORKER_HEADROOM)));
+  if (requested && !fit) {
+    throw new Error(`insufficient memory for ${requested} workers: ${available} bytes available; at least ${PGTAP_MEMORY_FLOOR + PGTAP_WORKER_HEADROOM} required for one`);
+  }
+  return fit;
+}
+
+async function runHostedShard({ selected, checked, testEnv, admin, summary, dockerRoot, project, logFile }) {
+  const deadline = Date.now() + PGTAP_TIMEOUT;
+  const remaining = () => {
+    const milliseconds = deadline - Date.now();
+    if (milliseconds < 1) throw new Error('pgTAP shard exceeded its 18-minute execution budget');
+    return milliseconds;
+  };
+  const runSerial = () => checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], testEnv, remaining());
+  const cores = Number((await checked('nproc', [], testEnv, Math.min(15000, remaining()), { quiet: true })).trim());
+  if (!Number.isSafeInteger(cores) || cores < 1) throw new Error('Invalid hosted runner core count');
+  const requested = hostedWorkerLimit(testEnv.PGTAP_WORKERS, cores);
+  if (requested === 1) return runSerial();
+  let minAvailableBytes = availableMemory();
+  const count = hostedWorkerCount(requested, minAvailableBytes);
+  if (count === 1) return runSerial();
+  const { setup, serial, workers } = hostedBatches(selected, count);
+  if (workers.length < 2) return runSerial();
+  const databases = workers.slice(1).map((_, index) => `pgtap_worker_${index + 1}`);
+  console.log(`pgTAP chose ${workers.length} workers from ${requested} requested on ${cores} cores with ${minAvailableBytes} bytes available`);
+  const groups = [];
+  const created = [];
+  const report = 'ci-reports/pgtap-files.json';
+  const execute = async (group, files, database = 'postgres', prepareOnly = false) => {
+    if (!files.length) return;
+    const groupReport = `ci-reports/pgtap-${group}.json`;
+    const groupLog = `ci-reports/pgtap-${group}.log`;
+    fs.rmSync(groupReport, { force: true });
+    fs.writeFileSync(groupLog, '');
+    groups.push({ group, files: prepareOnly ? [] : files, groupReport, groupLog });
+    const url = new URL(testEnv.DATABASE_URL);
+    url.pathname = `/${database}`;
+    const dsn = url.href;
+    await checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], {
+      ...testEnv, DATABASE_URL: dsn, DATABASE_URL_DIRECT: dsn, DATABASE_URL_POOLER: '', PG_CONN_STRING: '',
+      PGTAP_HOSTED_GROUP: group, PGTAP_HOSTED_PREPARE_ONLY: prepareOnly ? '1' : '0',
+      PGTAP_ONLY_FILES: files.join(','),
+    }, remaining(), { logFile: groupLog });
+  };
+  fs.rmSync(report, { force: true });
+  const memory = setInterval(() => { minAvailableBytes = Math.min(minAvailableBytes, availableMemory()); }, 1000);
+  try {
+    const [setupResult] = await Promise.allSettled([execute('setup', setup.length ? setup : selected.slice(0, 1), 'postgres', !setup.length)]);
+    if (setupResult.status === 'rejected' && !fs.existsSync('ci-reports/pgtap-setup.json')) throw setupResult.reason;
+    const cloneAdmin = (...commands) => admin(Math.min(15000, remaining()), ...commands);
+    const migratedDatabaseBytes = Number((await cloneAdmin("SELECT pg_database_size('postgres')")).trim());
+    if (!Number.isSafeInteger(migratedDatabaseBytes) || migratedDatabaseBytes < 1) throw new Error('Could not measure migrated database size');
+    summary.migratedDatabaseBytes = migratedDatabaseBytes;
+    console.log(`Migrated database size: ${migratedDatabaseBytes} bytes`);
+    diskFloor(dockerRoot, databases.length * migratedDatabaseBytes);
+    const services = (await checked('docker', ['ps', '--filter', `label=com.supabase.cli.project=${project}`, '--format', '{{.Names}}'],
+      testEnv, Math.min(15000, remaining()), { quiet: true })).trim().split(/\s+/)
+      .filter(name => name && name !== `supabase_db_${project}`);
+    let results;
+    try {
+      try {
+        if (services.length) await checked('docker', ['stop', ...services], testEnv, Math.min(15000, remaining()));
+        await cloneHostedDatabases(cloneAdmin, databases, created, command => admin(15000, command));
+      } finally {
+        if (services.length) await checked('docker', ['start', ...services], testEnv, 15000);
+      }
+      diskFloor(dockerRoot);
+      results = await Promise.allSettled(workers.map((files, index) => execute(`worker-${index}`, files, index === 0 ? 'postgres' : databases[index - 1])));
+    } finally {
+      if (created.length) await admin(15000, ...created.map(database => `DROP DATABASE ${database} WITH (FORCE)`));
+    }
+    // Shared state and database catalog assertions see only the canonical database and no concurrent tests.
+    const [serialResult] = await Promise.allSettled([execute('worker-0-serial', serial)]);
+    const failures = [setupResult, ...results, serialResult].filter(result => result.status === 'rejected');
+    if (failures.length) throw failures[0].reason;
+  } finally {
+    clearInterval(memory);
+    minAvailableBytes = Math.min(minAvailableBytes, availableMemory());
+    summary.workerMemory = { cores, workers: workers.length, totalBytes: os.totalmem(), minAvailableBytes, floorBytes: PGTAP_MEMORY_FLOOR };
+    console.log(`pgTAP worker memory: ${JSON.stringify(summary.workerMemory)}`);
+    const rows = groups.flatMap(({ group, files, groupReport, groupLog }) => {
+      fs.appendFileSync(logFile, fs.readFileSync(groupLog));
+      const actual = fs.existsSync(groupReport) ? JSON.parse(fs.readFileSync(groupReport, 'utf8')) : [];
+      if (actual.some((row, index) => row?.file !== files[index])) throw new Error(`Unexpected pgTAP file in ${group}`);
+      console.log(`pgTAP ${group}: ${actual.length}/${files.length} files executed: ${actual.map(row => row.file).join(', ')}`);
+      return actual;
+    });
+    const order = new Map(selected.map((file, index) => [file, index]));
+    fs.writeFileSync(report, JSON.stringify(rows.sort((a, b) => order.get(a.file) - order.get(b.file)), null, 2));
+    fs.writeFileSync('ci-reports/pgtap-timings.json', JSON.stringify({
+      measuredDateUtc: new Date().toISOString().slice(0, 10), runCount: 1,
+      seconds: Object.fromEntries(rows.map(row => [row.file, row.durationMs / 1000])),
+    }, null, 2));
+    console.log(`pgTAP shard: ${rows.length}/${selected.length} files executed`);
+  }
+  if (minAvailableBytes < PGTAP_MEMORY_FLOOR) throw new Error(`pgTAP OOM risk: available memory fell to ${minAvailableBytes} bytes below the ${PGTAP_MEMORY_FLOOR}-byte floor`);
+}
 async function recordMigrationDeadlock(error, db, readLogs, diagnostic) {
   const output = error.failure?.output || '';
   if (!output.includes('(SQLSTATE 40P01)')) return;
@@ -106,11 +259,15 @@ function migrationProgress(files, summary, every = 50, now = Date.now) {
     return index > 1;
   } };
 }
-function diskFloor(directory) {
+function diskFloor(directory, cloneBytes = 0) {
   const stat = fs.statfsSync(directory);
   const free = Number(stat.bavail) * Number(stat.bsize);
   console.log(`Disk free GiB: ${(free / 2 ** 30).toFixed(2)}`);
-  if (free < 6 * 2 ** 30) throw new Error('Less than 6 GiB free; backend qualification blocked');
+  const required = 6 * 2 ** 30 + cloneBytes;
+  if (free < required) {
+    if (cloneBytes) throw new Error(`Insufficient disk for pgTAP clones: ${free} bytes free; ${cloneBytes} bytes for copies plus a 6 GiB reserve required`);
+    throw new Error('Less than 6 GiB free; backend qualification blocked');
+  }
 }
 function completePins(pins) {
   const expected = { database: 'supabase/postgres', auth: 'supabase/gotrue', storage: 'supabase/storage-api', gateway: 'supabase/kong', realtime: 'supabase/realtime' };
@@ -179,6 +336,9 @@ async function qualify(diagnostic) {
   diagnostic.imagePolicy = { mode: pinState.qualificationOnly ? 'qualification-only' : 'digest-pinned', decision: 'not_started', allowed: 0, denied: 0, denials: [] };
   if (process.argv[2] === 'preflight') return;
   const shard = process.env.PGTAP_SHARD;
+  const disposableShard = shard && process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted';
+  const workers = process.env.PGTAP_WORKERS || 'nproc';
+  if (disposableShard) hostedWorkerLimit(workers, PGTAP_WORKER_CAP);
   const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard) : undefined;
   if (shard && fs.existsSync('supabase/tests/pgtap/.pgtap-skip.json')) {
     const skip = JSON.parse(fs.readFileSync('supabase/tests/pgtap/.pgtap-skip.json', 'utf8'));
@@ -281,6 +441,10 @@ async function qualify(diagnostic) {
     diagnostic.stage = 'database-connect';
     const { Client } = require('pg');
     const db = new Client({ connectionString: env.DATABASE_URL, connectionTimeoutMillis: 15000, query_timeout: 15000 });
+    const stackAdminFor = (database, timeout, ...commands) => checked('docker', ['exec', `supabase_db_${project}`, 'sh', '-ec',
+      'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"', 'sh', '--host=127.0.0.1', '--username=supabase_admin',
+      `--dbname=${database}`, '--no-psqlrc', '--no-password', '--quiet', '--tuples-only', '--no-align', '--set=ON_ERROR_STOP=1',
+      ...commands.flatMap(command => ['-c', command])], env, timeout, { quiet: true });
     await db.connect();
     try {
       const history = await db.query("select to_regclass('supabase_migrations.schema_migrations') as history");
@@ -288,10 +452,7 @@ async function qualify(diagnostic) {
         const before = await db.query('select count(*)::int as n from supabase_migrations.schema_migrations');
         if (before.rows[0].n !== 0) throw new Error('Database is not empty of application migrations');
       }
-      const stackAdmin = (...commands) => checked('docker', ['exec', `supabase_db_${project}`, 'sh', '-ec',
-        'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"', 'sh', '--host=127.0.0.1', '--username=supabase_admin',
-        '--dbname=postgres', '--no-psqlrc', '--no-password', '--quiet', '--tuples-only', '--no-align', '--set=ON_ERROR_STOP=1',
-        ...commands.flatMap(command => ['-c', command])], env, 15000, { quiet: true });
+      const stackAdmin = (...commands) => stackAdminFor('postgres', 15000, ...commands);
       // Disable background ANALYZE before exposing the application migrations to this stack.
       summary.autovacuum = await timed('autovacuum-off', () => disableHostedAutovacuum(status.DB_URL, dbPort, stackAdmin, db));
       // The disposable fixture uses the registered schedules without launching background jobs.
@@ -358,7 +519,10 @@ async function qualify(diagnostic) {
       const testEnv = shardEnvironment(env, local.loadBackendLocalPgtapEnv(), project, dbPort, selected);
       diskFloor(dockerRoot);
       summary.pgtap = 'running';
-      await timed(`pgtap:${shard}`, () => checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], testEnv, 18 * 60000));
+      await timed(`pgtap:${shard}`, () => disposableShard && workers !== '1'
+        ? runHostedShard({ selected, checked, testEnv: { ...testEnv, PGTAP_WORKERS: workers }, summary, dockerRoot, project, logFile,
+          admin: (timeout, ...commands) => stackAdminFor('template1', timeout, ...commands) })
+        : checked(process.execPath, ['scripts/ci-hosted/pgtap.cjs'], testEnv, PGTAP_TIMEOUT));
       const rows = JSON.parse(fs.readFileSync('ci-reports/pgtap-files.json', 'utf8'));
       if (JSON.stringify(rows.map(row => row.file)) !== JSON.stringify(selected) || rows.some(row => row.status !== 'passed')) throw new Error('Incomplete pgTAP shard results');
       summary.pgtap = 'passed';
@@ -386,7 +550,6 @@ async function qualify(diagnostic) {
     throw error;
   } finally {
     // Each pgTAP job on a GitHub-hosted runner owns a disposable VM.
-    const disposableShard = shard && process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted';
     if (started && disposableShard) console.log('Stack stop delegated to GitHub-hosted VM teardown');
     if (started && !disposableShard) {
       try { await timed('stack-stop', () => checked(cli, ['stop', '--workdir', temp, '--no-backup'], cliEnv, 120000)); }
@@ -428,4 +591,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases };

@@ -99,6 +99,7 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6]
     env:
       PGTAP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+      PGTAP_WORKERS: ${{ vars.PGTAP_WORKERS || 'nproc' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
         with:
@@ -125,6 +126,7 @@ jobs:
             ci-reports/pgtap.json
             ci-reports/pgtap-diagnostic.json
             ci-reports/pgtap-files.json
+            ci-reports/pgtap-timings.json
             ci-reports/pgtap.log
           if-no-files-found: warn
           retention-days: 1

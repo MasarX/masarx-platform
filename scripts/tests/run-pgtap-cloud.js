@@ -981,7 +981,7 @@ async function withFullLocalQualification(candidates, run, options = {}) {
   try {
     for (const candidate of candidates) {
       const identity = identify(workspaceId, candidate.dsn, { cwd, env });
-      if (identity.database !== 'postgres') fail('canonical_postgres_database_required');
+      if (identity.database !== (options.hostedDatabase ?? 'postgres')) fail('canonical_postgres_database_required');
     }
     const ownership = inspect(workspaceId, { cwd, env });
     assertMutation(ownership, 'pgtap-full-local');
@@ -1252,78 +1252,80 @@ async function runSuite(dbCandidates, fullLocal = false, env = process.env, repo
   let activePsqlCandidate = waitForDatabaseReadyWithFallback(dbCandidates, dbReadyTimeoutSeconds);
   let libpqDatabaseUrl = activePsqlCandidate.dsn;
   console.log('[pgTAP] Database ready via', activePsqlCandidate.name);
-  if (!/^(1|true|yes)$/i.test(String(env.PGTAP_SKIP_FIXTURE_BOOTSTRAP || '').trim())) {
-    runFixtureBootstrapScript(
-      path.join('scripts', 'tests', 'bootstrap', 'seed-pgtap-fixtures.js'),
-      { ...(fullLocal ? { ...env, ENV_FILE: os.devNull, ENV_FILE_OVERRIDE: '0', ENV_FILE_APPEND: '0' } : {}), DATABASE_URL: libpqDatabaseUrl },
-    );
-  }
-  console.log('[pgTAP] Ensuring pgTAP extension is available...');
-  {
-    const initAttempt = runPsqlWithCandidateFallback(
-      dbCandidates,
-      (candidateDsn) => [
-        '--set',
-        'ON_ERROR_STOP=1',
-        '--no-psqlrc',
-        '--dbname',
-        candidateDsn,
-        '-c',
-        'CREATE EXTENSION IF NOT EXISTS pgtap;',
-      ],
-      'extension initializer',
-      { preferredCandidateName: activePsqlCandidate.name },
-    );
-    activePsqlCandidate = initAttempt.candidate;
-    libpqDatabaseUrl = activePsqlCandidate.dsn;
-  }
+  if (!reporter?.prepared) {
+    if (!/^(1|true|yes)$/i.test(String(env.PGTAP_SKIP_FIXTURE_BOOTSTRAP || '').trim())) {
+      runFixtureBootstrapScript(
+        path.join('scripts', 'tests', 'bootstrap', 'seed-pgtap-fixtures.js'),
+        { ...(fullLocal ? { ...env, ENV_FILE: os.devNull, ENV_FILE_OVERRIDE: '0', ENV_FILE_APPEND: '0' } : {}), DATABASE_URL: libpqDatabaseUrl },
+      );
+    }
+    console.log('[pgTAP] Ensuring pgTAP extension is available...');
+    {
+      const initAttempt = runPsqlWithCandidateFallback(
+        dbCandidates,
+        (candidateDsn) => [
+          '--set',
+          'ON_ERROR_STOP=1',
+          '--no-psqlrc',
+          '--dbname',
+          candidateDsn,
+          '-c',
+          'CREATE EXTENSION IF NOT EXISTS pgtap;',
+        ],
+        'extension initializer',
+        { preferredCandidateName: activePsqlCandidate.name },
+      );
+      activePsqlCandidate = initAttempt.candidate;
+      libpqDatabaseUrl = activePsqlCandidate.dsn;
+    }
 
-  // Ensure tests can resolve functions from the extensions schema (pgTAP installed there)
-  {
-    const searchPathAttempt = runPsqlWithCandidateFallback(
-      dbCandidates,
-      (candidateDsn) => [
-        '--set',
-        'ON_ERROR_STOP=1',
-        '--no-psqlrc',
-        '--dbname',
-        candidateDsn,
-        '-c',
-        `SET statement_timeout TO ${statementTimeoutMs}`,
-        '-c',
-        'SET jit = off',
-        '-c',
-        'SET search_path TO public, extensions, pgtap, pg_temp',
-      ],
-      'session search_path setup',
-      { preferredCandidateName: activePsqlCandidate.name },
-    );
-    activePsqlCandidate = searchPathAttempt.candidate;
-    libpqDatabaseUrl = activePsqlCandidate.dsn;
-  }
+    // Ensure tests can resolve functions from the extensions schema (pgTAP installed there)
+    {
+      const searchPathAttempt = runPsqlWithCandidateFallback(
+        dbCandidates,
+        (candidateDsn) => [
+          '--set',
+          'ON_ERROR_STOP=1',
+          '--no-psqlrc',
+          '--dbname',
+          candidateDsn,
+          '-c',
+          `SET statement_timeout TO ${statementTimeoutMs}`,
+          '-c',
+          'SET jit = off',
+          '-c',
+          'SET search_path TO public, extensions, pgtap, pg_temp',
+        ],
+        'session search_path setup',
+        { preferredCandidateName: activePsqlCandidate.name },
+      );
+      activePsqlCandidate = searchPathAttempt.candidate;
+      libpqDatabaseUrl = activePsqlCandidate.dsn;
+    }
 
-  console.log('[pgTAP] Ensuring partitions ahead are present...');
-  {
-    const partitionAttempt = runPsqlWithCandidateFallback(
-      dbCandidates,
-      (candidateDsn) => [
-        '--set',
-        'ON_ERROR_STOP=1',
-        '--no-psqlrc',
-        '--dbname',
-        candidateDsn,
-        '-c',
-        `SET statement_timeout TO ${bootstrapStatementTimeoutMs}`,
-        '-c',
-        'SELECT COUNT(*) FROM public.create_next_partitions();',
-      ],
-      'partition bootstrap',
-      { preferredCandidateName: activePsqlCandidate.name },
-    );
-    activePsqlCandidate = partitionAttempt.candidate;
-    libpqDatabaseUrl = activePsqlCandidate.dsn;
+    console.log('[pgTAP] Ensuring partitions ahead are present...');
+    {
+      const partitionAttempt = runPsqlWithCandidateFallback(
+        dbCandidates,
+        (candidateDsn) => [
+          '--set',
+          'ON_ERROR_STOP=1',
+          '--no-psqlrc',
+          '--dbname',
+          candidateDsn,
+          '-c',
+          `SET statement_timeout TO ${bootstrapStatementTimeoutMs}`,
+          '-c',
+          'SELECT COUNT(*) FROM public.create_next_partitions();',
+        ],
+        'partition bootstrap',
+        { preferredCandidateName: activePsqlCandidate.name },
+      );
+      activePsqlCandidate = partitionAttempt.candidate;
+      libpqDatabaseUrl = activePsqlCandidate.dsn;
+    }
   }
-
+  if (reporter?.prepareOnly) return;
   console.log(`[pgTAP] Executing ${tapFiles.length} pgTAP files from ${testsDir}`);
   if (skipList.length) {
     console.log('[pgTAP] Skipping files (deprecated):', skipList.join(', '));
