@@ -4,7 +4,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(49);
+SELECT plan(55);
 
 -- Ensure time partitions exist for decision_log/settings_resolution_log inserts (handler uses decision logging).
 SELECT public.create_next_partitions();
@@ -768,6 +768,53 @@ SELECT is(
   'postprocess maps pkg.quantity to box_count'
 );
 
+SELECT ok(
+  NOT has_function_privilege('anon', 'public.ensure_shipment_boxes(uuid,integer)', 'EXECUTE'),
+  'anonymous callers cannot execute the canonical box writer directly'
+);
+
+SELECT ok(
+  NOT has_function_privilege('authenticated', 'public.ensure_shipment_boxes(uuid,integer)', 'EXECUTE'),
+  'authenticated callers cannot execute the canonical box writer directly'
+);
+
+CREATE TEMP TABLE tmp_gateway_boxes AS
+SELECT b.*
+FROM public.ensure_shipment_boxes(
+  (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+) b;
+
+SELECT is(
+  (SELECT array_agg(box_number ORDER BY box_number) FROM tmp_gateway_boxes),
+  ARRAY[1, 2],
+  'canonical box writer uses the mapped shipment quantity'
+);
+
+SELECT is(
+  (
+    SELECT count(*)
+    FROM tmp_gateway_boxes b
+    JOIN public.shipment_boxes sb ON sb.id = b.shipment_box_id
+    JOIN public.shipments s ON s.id = sb.shipment_id
+    WHERE s.id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+      AND sb.organization_id = s.organization_id
+      AND sb.client_id = s.client_id
+  ),
+  2::bigint,
+  'canonical boxes inherit the materialized shipment scope'
+);
+
+SELECT is(
+  (
+    SELECT array_agg(b.shipment_box_id ORDER BY b.box_number)
+    FROM public.ensure_shipment_boxes(
+      (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess)
+    ) b
+  ),
+  (SELECT array_agg(shipment_box_id ORDER BY box_number) FROM tmp_gateway_boxes),
+  'repeated box materialization preserves box identity'
+);
+
 SELECT is(
   (
     SELECT special_instructions
@@ -1032,6 +1079,16 @@ SELECT is(
   ),
   '600',
   'postprocess maps COD amount fallback to pkg.cod when toCollectFromReceiver is missing'
+);
+
+SELECT is(
+  (
+    SELECT service_type
+    FROM public.shipments
+    WHERE id = (SELECT (result->'postprocess'->>'shipment_id')::uuid FROM tmp_gateway_postprocess_cod)
+  ),
+  'delivery',
+  'cash on delivery keeps the delivery service type'
 );
 
 -- ----------------------------------------------------------------------------
