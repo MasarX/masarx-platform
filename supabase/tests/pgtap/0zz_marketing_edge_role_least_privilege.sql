@@ -1,3 +1,4 @@
+-- Catalog-only ACL and custody checks. Hosted function tests cover intake execution.
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
@@ -49,76 +50,91 @@ SELECT ok(NOT pg_has_role('edge_marketing_role', 'service_role', 'MEMBER')
   'marketing and service roles have no membership in each other and marketing cannot assume authenticated');
 
 SELECT is_empty($$
+  SELECT roleid::regrole
+  FROM pg_auth_members
+  WHERE member = 'edge_marketing_role'::regrole
+$$, 'marketing role is not a member of any role');
+
+SELECT is_empty($$
   WITH application_relations AS MATERIALIZED (
-    SELECT c.oid, c.relname
+    SELECT c.oid, n.nspname, c.relname
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+    WHERE n.nspname IN ('public', 'api') AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
       AND NOT EXISTS (
         SELECT FROM pg_depend d
         WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
       )
   )
-  SELECT relname
+  SELECT nspname, relname, NULL::name AS column_name, privilege
   FROM application_relations
-  WHERE has_table_privilege('edge_marketing_role', oid, 'SELECT,INSERT,UPDATE,DELETE')
-     OR has_any_column_privilege('edge_marketing_role', oid, 'SELECT,INSERT,UPDATE')
-$$, 'marketing role has no effective direct data privileges in public application relations');
+  CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) AS p(privilege)
+  WHERE has_table_privilege('edge_marketing_role', oid, privilege)
+    AND NOT has_table_privilege('public', oid, privilege)
+  UNION ALL
+  SELECT r.nspname, r.relname, a.attname, privilege
+  FROM application_relations r JOIN pg_attribute a ON a.attrelid = r.oid
+  CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE']) AS p(privilege)
+  WHERE a.attnum > 0 AND NOT a.attisdropped
+    AND has_column_privilege('edge_marketing_role', r.oid, a.attnum, privilege)
+    AND NOT has_column_privilege('public', r.oid, a.attnum, privilege)
+$$, 'marketing role has no application table or column privileges beyond PUBLIC');
 
-GRANT edge_marketing_role TO current_user WITH INHERIT FALSE, SET TRUE;
-SET LOCAL ROLE edge_marketing_role;
-SELECT set_config('request.jwt.claims', '{"role":"edge_marketing_role"}', true);
+SELECT ok(bool_and(has_function_privilege('edge_marketing_role', signature, 'EXECUTE')),
+  'marketing role can execute all four intake functions')
+FROM (VALUES
+  ('api.marketing_lead_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)'),
+  ('public.marketing_lead_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)'),
+  ('api.marketing_landing_clients_list_v1(text)'),
+  ('public.marketing_landing_clients_list_v1(text)')
+) AS intake(signature);
 
-DO $$
-DECLARE
-  lead jsonb;
-  probe text;
-  refused int := 0;
-BEGIN
-  lead := api.marketing_lead_request_create_v1(
-    'b28-lead@example.test', 'Marketing role fixture', p_turnstile_verified => true
-  );
-  PERFORM set_config('test.marketing_b28_lead', lead::text, true);
-  PERFORM api.marketing_landing_clients_list_v1('en');
+SELECT is_empty($$
+  SELECT p.oid::regprocedure
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname IN ('public', 'api')
+    AND p.oid NOT IN (
+      'api.marketing_lead_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)'::regprocedure,
+      'public.marketing_lead_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)'::regprocedure,
+      'api.marketing_landing_clients_list_v1(text)'::regprocedure,
+      'public.marketing_landing_clients_list_v1(text)'::regprocedure
+    )
+    AND NOT EXISTS (
+      SELECT FROM pg_depend d
+      WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+    )
+    AND has_function_privilege('edge_marketing_role', p.oid, 'EXECUTE')
+    AND NOT has_function_privilege('public', p.oid, 'EXECUTE')
+$$, 'marketing role has no other application function execution privileges beyond PUBLIC');
 
-  FOREACH probe IN ARRAY ARRAY[
-    'SELECT id FROM public.marketing_demo_requests',
-    'INSERT INTO public.marketing_demo_requests DEFAULT VALUES',
-    'UPDATE public.marketing_demo_requests SET id = id WHERE false',
-    'DELETE FROM public.marketing_demo_requests WHERE false',
-    'SELECT id FROM public.clients',
-    'INSERT INTO public.clients DEFAULT VALUES',
-    'UPDATE public.clients SET id = id WHERE false',
-    'DELETE FROM public.clients WHERE false',
-    'SELECT id FROM public.tasks',
-    'INSERT INTO public.tasks DEFAULT VALUES',
-    'UPDATE public.tasks SET id = id WHERE false',
-    'DELETE FROM public.tasks WHERE false',
-    'SELECT api.tenant_signup_policy_v1()',
-    'SELECT public.create_task_system_v1(''{}''::jsonb)'
-  ] LOOP
-    BEGIN
-      EXECUTE probe;
-    EXCEPTION WHEN insufficient_privilege THEN
-      refused := refused + 1;
-    END;
-  END LOOP;
-  PERFORM set_config('test.marketing_b28_refused', refused::text, true);
-END;
-$$;
-RESET ROLE;
-
-SELECT ok((current_setting('test.marketing_b28_lead')::jsonb->>'ok')::boolean
-  AND current_setting('test.marketing_b28_lead')::jsonb->>'task_id' IS NOT NULL,
-  'marketing role can submit a lead and create its follow-up');
-SELECT ok(EXISTS (
-  SELECT FROM public.marketing_demo_requests
-  WHERE id = (current_setting('test.marketing_b28_lead')::jsonb->>'id')::uuid
-    AND email = 'b28-lead@example.test'
-), 'the marketing RPC inserted the expected intake row');
-SELECT is(current_setting('test.marketing_b28_refused')::int, 14,
-  'direct SELECT, INSERT, UPDATE, DELETE and unrelated RPCs fail with SQLSTATE 42501');
-SELECT is(current_setting('request.jwt.claims')::jsonb->>'role', 'edge_marketing_role',
-  'the follow-up dispatch restores the request role claim');
+SELECT results_eq($$
+  WITH direct_grants AS (
+    SELECT 'relation' AS kind, c.oid AS object_id, a.*
+    FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
+    UNION ALL
+    SELECT 'column', c.attrelid, a.*
+    FROM pg_attribute c CROSS JOIN LATERAL aclexplode(c.attacl) a
+    UNION ALL
+    SELECT 'routine', p.oid, a.*
+    FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+    UNION ALL
+    SELECT 'schema', n.oid, a.*
+    FROM pg_namespace n CROSS JOIN LATERAL aclexplode(n.nspacl) a
+  )
+  SELECT kind, object_id, privilege_type, is_grantable
+  FROM direct_grants
+  WHERE grantee = 'edge_marketing_role'::regrole
+  ORDER BY 1, 2, 3, 4
+$$, $$
+  SELECT * FROM (VALUES
+    ('schema', 'api'::regnamespace::oid, 'USAGE', false),
+    ('schema', 'public'::regnamespace::oid, 'USAGE', false),
+    ('routine', 'api.marketing_lead_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)'::regprocedure::oid, 'EXECUTE', false),
+    ('routine', 'public.marketing_lead_request_create_v1(text,text,text,text,text,text,text,text,text,jsonb,text,boolean)'::regprocedure::oid, 'EXECUTE', false),
+    ('routine', 'api.marketing_landing_clients_list_v1(text)'::regprocedure::oid, 'EXECUTE', false),
+    ('routine', 'public.marketing_landing_clients_list_v1(text)'::regprocedure::oid, 'EXECUTE', false)
+  ) AS expected(kind, object_id, privilege_type, is_grantable)
+  ORDER BY 1, 2, 3, 4
+$$, 'marketing role has exactly two direct schema grants and four direct function grants');
 
 SELECT finish();
 ROLLBACK;
