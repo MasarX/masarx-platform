@@ -123,11 +123,127 @@ function serializeError(error: unknown) {
   return redactOutboxErrorText(value);
 }
 
+const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
+const KEY_CHAR = String.raw`(?:[a-z0-9_-]|%2d)`;
+const KEYWORD = String.raw`(?:api(?:[_-]|%2d)?key|token|authorization|password|secret|jwt)`;
+const SENSITIVE_KEY = String.raw`(?=${KEY_CHAR}*${KEYWORD})${KEY_CHAR}+(?:["']|%22)*`;
+const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
+const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
+const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
+const KEY_BOUNDARY = String.raw`(?:%26|%20|\b|(?=-|%2d))`;
+const MARKER_OR_KEY_RUN = String.raw`\[(?:JWT_)?REDACTED\]|${KEY_CHAR}+`;
+const VALUE_DELIMITER = String.raw`%26|%7d|[&\s,}]|$`;
+const PLAIN_QUOTE_TAIL = String.raw`(?:(?!${VALUE_DELIMITER})[\s\S])*`;
+const PLAIN_VALUE = String.raw`"(?:\\[\s\S]|[^"\\])*(?:"|$)${PLAIN_QUOTE_TAIL}|'(?:\\[\s\S]|[^'\\])*(?:'|$)${PLAIN_QUOTE_TAIL}|[^\s&,}]+`;
+// A closed quote can contain %26. Fall back to the parameter boundary for an
+// unclosed quote, and let a following quoted credential match independently.
+const ENCODED_QUOTE_DELIMITER = String.raw`${VALUE_DELIMITER}|%2c|%5d|[)/"]`;
+const CLOSED_ENCODED_QUOTE = String.raw`(?:(?!%7d|&|%26(?=${NEXT_SENSITIVE_KEY}%22)|%22(?=${ENCODED_QUOTE_DELIMITER}))[\s\S])*%22(?=${ENCODED_QUOTE_DELIMITER})`;
+const ENCODED_UNQUOTED_VALUE = String.raw`(?:(?!%26|%7d|%20(?=${NEXT_SENSITIVE_KEY}))[^\s&,}])+`;
+// Older encoded values can include a prefixed key. Preserve only bare key syntax at a
+// recognized separator, and still collect the following value with its own matcher.
+const LEGACY_ENCODED_VALUE = String.raw`(?:(?!%26|%7d|%20(?=${KEYWORD}${KEY_SEPARATOR}))[^\s&,}])+`;
+
+function credentialPattern(prefix: string, value: string, skip = MARKER_OR_KEY_RUN) {
+  // Consume only the prefix so a separate credential can start inside a matched value.
+  return new RegExp(String.raw`(?=(${prefix})(${value}))\1|${skip}`, "gi");
+}
+
+function encodedCredentialPattern(unclosedQuote: string) {
+  return credentialPattern(
+    String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}${ENCODED_SEPARATOR}`,
+    String.raw`%22(?:${CLOSED_ENCODED_QUOTE}|${unclosedQuote})|${ENCODED_UNQUOTED_VALUE}`,
+  );
+}
+
+const ENCODED_CREDENTIAL = encodedCredentialPattern(String.raw`(?:(?!%26|%7d|&)[\s\S])*`);
+const TRUNCATED_ENCODED_CREDENTIAL = encodedCredentialPattern(String.raw`[\s\S]*$`);
+const CREDENTIAL_PATTERNS = [
+  credentialPattern(
+    String.raw`\b(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*[:=]\s*`,
+    PLAIN_VALUE,
+    String.raw`\[(?:JWT_)?REDACTED\]|[a-z0-9_]+`,
+  ),
+  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
+  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}%3[ad]\s*`, LEGACY_ENCODED_VALUE),
+];
+const AUTHORIZATION_SCHEME = new RegExp(
+  String.raw`(?:%22|%20|\b)(?:proxy(?:-|%2d))?authorization(?:["']|%22)?${KEY_SEPARATOR}(?:\s|%20)*(?:["']|%22)?(?=Basic(?:\s|%20))`, "gi",
+);
+const SCHEME = new RegExp(
+  String.raw`(?=(Bearer\s+|Bearer(?:%20|:\s*)(?!${NEXT_SENSITIVE_KEY})|Basic(?:\s+|%20))([A-Za-z0-9._~+/=-]+))\1`, "gi",
+);
+const BASIC_CREDENTIAL = /^[A-Za-z0-9+/]{8,}={0,2}/;
+const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+
+type RedactionSpan = { start: number; end: number; prefix?: string };
+
 export function redactOutboxErrorText(value: string) {
-  return value
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
-    .replace(/(\b(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*[:=]\s*)(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|[^\s&,}]+)/gi, "$1[REDACTED]")
-    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[JWT_REDACTED]");
+  const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
+  let end = MAX_ERROR_TEXT_LENGTH;
+  const lastKept = value.charCodeAt(end - 1);
+  if (truncated && lastKept >= 0xd800 && lastKept <= 0xdbff) end -= 1;
+  const text = value.slice(0, end);
+
+  const spans: RedactionSpan[] = [];
+  const encodedCredential = truncated ? TRUNCATED_ENCODED_CREDENTIAL : ENCODED_CREDENTIAL;
+  for (const pattern of [...CREDENTIAL_PATTERNS, encodedCredential]) {
+    for (const match of text.matchAll(pattern)) {
+      if (match[2] === undefined) continue;
+      const start = match.index + match[1].length;
+      spans.push({ start, end: start + match[2].length });
+    }
+  }
+  const authorizationSchemes = new Set(
+    Array.from(text.matchAll(AUTHORIZATION_SCHEME), (match) => match.index + match[0].length),
+  );
+  let schemeChainEnd = 0;
+  for (const match of text.matchAll(SCHEME)) {
+    const basic = match[1].toLowerCase().startsWith("basic");
+    let credential = match[2];
+    if (basic && !authorizationSchemes.has(match.index) && match.index >= schemeChainEnd) {
+      const leading = BASIC_CREDENTIAL.exec(credential)?.[0];
+      if (!leading || !(/[0-9+/=]/.test(leading) || (/[A-Z]/.test(leading) && /[a-z]/.test(leading)))) continue;
+      credential = leading;
+    }
+
+    const valueStart = match.index + match[1].length;
+    spans.push({ start: match.index, end: valueStart + credential.length, prefix: basic ? "Basic " : "Bearer " });
+    schemeChainEnd = Math.max(schemeChainEnd, valueStart + match[2].length);
+  }
+
+  const jwtEnds = new Map<number, number>();
+  for (const match of text.matchAll(JWT)) {
+    const jwtEnd = match.index + match[0].length;
+    jwtEnds.set(match.index, jwtEnd);
+    spans.push({ start: match.index, end: jwtEnd });
+  }
+  if (truncated) {
+    const basicTail = /Basic\s+\S+$/i.exec(text);
+    if (basicTail) spans.push({ start: basicTail.index, end: text.length, prefix: "Basic " });
+    const jwtTail = /eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/.exec(text);
+    if (jwtTail) {
+      jwtEnds.set(jwtTail.index, text.length);
+      spans.push({ start: jwtTail.index, end: text.length });
+    }
+  }
+
+  // Merge overlapping spans only. A delimiter between two values stays in the output.
+  spans.sort((left, right) => left.start - right.start || Number(!!left.prefix) - Number(!!right.prefix));
+  let cursor = 0;
+  let output = "";
+  for (let index = 0; index < spans.length; index += 1) {
+    const { start, prefix } = spans[index];
+    let spanEnd = spans[index].end;
+    while (index + 1 < spans.length && spans[index + 1].start < spanEnd) {
+      index += 1;
+      spanEnd = Math.max(spanEnd, spans[index].end);
+    }
+    const marker = jwtEnds.get(start) === spanEnd ? "[JWT_REDACTED]" : "[REDACTED]";
+    output += text.slice(cursor, start) + (prefix ?? "") + marker;
+    cursor = spanEnd;
+  }
+  return output + text.slice(cursor) + (truncated ? "\u2026[truncated]" : "");
 }
 
 export type OutboxSyncOptions = {
