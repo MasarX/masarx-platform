@@ -125,7 +125,7 @@ jobs:
           NODE
           cli="$RUNNER_TEMP/deploy-tools/supabase"
           "$cli" link --project-ref "$SUPABASE_PROJECT_REF" --yes
-          "$cli" db push --linked --yes
+          bash scripts/deploy/supabase-db-push.sh "$cli"
           "$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
