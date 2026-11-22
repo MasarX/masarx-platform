@@ -28,6 +28,11 @@ describe("mobile auth methods", () => {
     expect(resolvePreferredAuthMethod(["magic_link", "password"])).toBe("password");
   });
 
+  test("keeps valid sign-in methods when a policy array contains malformed entries", () => {
+    expect(normalizeAuthMethods([null, { method: "magic_link" }, " magic_link ", 42])).toEqual(["magic_link"]);
+    expect(normalizeAuthMethods([null, 42])).toEqual(["password"]);
+  });
+
   test("uses first method when password is unavailable", () => {
     expect(resolvePreferredAuthMethod(["magic_link"])).toBe("magic_link");
   });

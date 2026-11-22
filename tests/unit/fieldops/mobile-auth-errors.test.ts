@@ -27,6 +27,15 @@ describe("mobile auth error formatter", () => {
     );
   });
 
+  test("redacts credential-shaped fields while keeping the validation hint", () => {
+    const error = new Error('Invalid token Bearer synthetic-example refresh_token="synthetic value"');
+    const formatted = formatAuthErrorMessage(error, "fixture-user@example.invalid");
+    expect(formatted).toContain("Bearer [REDACTED]");
+    expect(formatted).toContain("refresh_token=[REDACTED]");
+    expect(formatted).toContain("Verify email format");
+    expect(formatted).not.toContain("synthetic");
+  });
+
   test("maps TypeError: Failed to fetch to a user-friendly message", () => {
     expect(
       formatAuthErrorMessage(new TypeError("Failed to fetch"), "sroquvhuzhkomlopinuzvjim@example.invalid")

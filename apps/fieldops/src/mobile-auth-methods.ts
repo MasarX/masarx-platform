@@ -7,10 +7,10 @@ export function normalizeAuthEmail(value: string): string {
     .toLowerCase();
 }
 
-export function normalizeAuthMethods(methods: string[] | null | undefined): AuthMethod[] {
+export function normalizeAuthMethods(methods: unknown): AuthMethod[] {
   if (!Array.isArray(methods)) return ["password"];
   const normalized = methods
-    .map((method) => method.trim().toLowerCase())
+    .map((method) => (typeof method === "string" ? method.trim().toLowerCase() : ""))
     .filter((method): method is AuthMethod => method === "magic_link" || method === "password");
   const unique = Array.from(new Set(normalized));
   return unique.length ? unique : ["password"];

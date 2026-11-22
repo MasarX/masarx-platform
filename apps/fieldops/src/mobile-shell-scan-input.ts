@@ -2,6 +2,11 @@ import type { MobilePlatform } from "./mobile-shell-policy";
 
 export type MobileScanInputMode = "camera" | "scanner";
 
+export function normalizeScanBarcode(value: string): string {
+  // Scanner prefixes and suffixes are transport framing. Keep separators inside the barcode.
+  return value.replace(/^[\u0000-\u001f\u007f\s]+|[\u0000-\u001f\u007f\s]+$/gu, "");
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;

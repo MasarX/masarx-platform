@@ -39,6 +39,13 @@ describe("mobile debug helpers", () => {
     expect(normalized).toEqual('{"reason":"network","status":503}');
   });
 
+  test("redacts quoted credential fields in structured debug payloads", () => {
+    const result = normalizeDebugMessage({ refresh_token: 'synthetic "fixture"', status: 503 });
+    expect(result).toContain("[REDACTED]");
+    expect(result).toContain('"status":503');
+    expect(result).not.toMatch(/synthetic|fixture/);
+  });
+
   test("builds structured payload without leaking raw object identity", () => {
     const payload = buildDebugFailurePayload("failed sync", { reason: "disk full" }, "fieldops:background-location");
 

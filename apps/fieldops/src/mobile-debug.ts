@@ -1,3 +1,4 @@
+import { redactOutboxErrorText } from "@masarx/mobile-core";
 import { bufferMobileTelemetryEvent } from "./mobile-telemetry";
 
 const MOBILE_DEBUG_FAILURE_EVENT = "mobile.debug_failure";
@@ -42,28 +43,18 @@ export type MobileCrashContext = {
   details?: unknown;
 };
 
-function redactSensitive(input: string): string {
-  return input
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED]")
-    .replace(
-      /(apikey|api_key|token|access_token|refresh_token|authorization)=([A-Za-z0-9._-]+)/gi,
-      "$1=[REDACTED]"
-    )
-    .replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, "[JWT_REDACTED]");
-}
-
 export function normalizeDebugMessage(error: unknown): string {
   if (error instanceof Error) {
-    return redactSensitive(`${error.message}${error.stack ? `\n${error.stack}` : ""}`);
+    return redactOutboxErrorText(`${error.message}${error.stack ? `\n${error.stack}` : ""}`);
   }
   if (error && typeof error === "object") {
     try {
-      return redactSensitive(JSON.stringify(error));
+      return redactOutboxErrorText(JSON.stringify(error));
     } catch {
-      return redactSensitive(String(error));
+      return redactOutboxErrorText(String(error));
     }
   }
-  return redactSensitive(String(error));
+  return redactOutboxErrorText(String(error));
 }
 
 export function buildDebugFailurePayload(
