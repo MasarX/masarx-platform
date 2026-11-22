@@ -35,6 +35,7 @@ const ensureRendererDeps = (): Promise<void> => {
   return rendererDepsPromise;
 };
 import { readEnv } from "./_shared/mod.mjs";
+import { resolveCorsPolicy } from "./_shared/cors.mjs";
 import { authorizeLabelRendererRequest, resolveLabelRendererOperation } from "./auth.mjs";
 import { BARCODE_MAX_CHARS, canonicalBarcodeType, encodeAdditionalBarcode, rotateBarcodePoint } from "./barcode.ts";
 import { executeHotpathRpc, hotpathModeEnabled } from "../_shared/db-hotpath.ts";
@@ -5973,16 +5974,6 @@ const handleBundleRequest = async (
   return returnBundleResponse(200, responseBody);
 };
 
-const buildCorsHeaders = (req: Request): Record<string, string> => {
-  const origin = req.headers.get("origin") ?? "*";
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    Vary: "Origin",
-  };
-};
-
 const withCors = (res: Response, corsHeaders: Record<string, string>) => {
   const headers = new Headers(res.headers);
   Object.entries(corsHeaders).forEach(([key, value]) => {
@@ -5993,7 +5984,11 @@ const withCors = (res: Response, corsHeaders: Record<string, string>) => {
 };
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  const corsHeaders = buildCorsHeaders(req);
+  const { headers: corsHeaders } = resolveCorsPolicy(req, {
+    hostedAllowedOrigins: readEnv("LABEL_RENDERER_CORS_ALLOW_ORIGINS"),
+    localAllowedOrigins: readEnv("PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS"),
+    allowedMethods: "POST, OPTIONS",
+  });
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
