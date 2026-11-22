@@ -1,25 +1,29 @@
+# MasarX: delivery
+
+The Delivery Lead owns this file. Change it through a reviewed PR.
+
 Follows engineering standard 2026-11-22 v1.2.
 
 ## Branching and merging
 
 - The `main` queue permits one concurrent build. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
-- The manual merge hold is retired. The DEV apply guard (G1–G3) protects database applies.
-- Apply the exact-head review to the risk paths in [AGENTS.md](AGENTS.md#risk-paths-need-one-independent-review-before-landing). GitHub can require an extra approval for unattributed changes.
+- The manual merge hold is retired. The DEV apply guard (G1–G3) protects DEV database applies.
+- Changes on the risk paths in [AGENTS.md](AGENTS.md#risk-paths-need-one-independent-review-before-landing) need green CI and one independent review of the full diff, recorded on the PR against its exact head. No code-owner or lead approval is required. GitHub can require an extra approval for unattributed changes.
 - The tree-publisher App authors commits and pushes branches.
-- Before enqueueing, verify the required checks and any applicable risk-path review for the exact PR head and the PR's issue reference (`Closes #n` or `Refs #n`). The App sets `expectedHeadOid` to the reviewed SHA. Keep auto-merge off. If the head moves or a review sends the PR back, disable auto-merge if set, dequeue it (`dequeuePullRequest`), and confirm no queue entry remains. Verify the queued head still matches the reviewed SHA.
+- The merge queue is the only path to merge. Before enqueueing, verify the required checks and any applicable risk-path review for the exact PR head and the PR's issue reference (`Closes #n` or `Refs #n`). The App sets `expectedHeadOid` to the reviewed SHA. Keep auto-merge off. If the head moves or a review sends the PR back, disable auto-merge if set, dequeue it (`dequeuePullRequest`), and confirm no queue entry remains. Verify the queued head still matches the reviewed SHA.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. A rename-only re-stamp needs no new review. Compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. Record the existing review against the resulting SHA. The append-only and ordering gate is in [migrations.cjs](scripts/ci-hosted/migrations.cjs).
 
 ## Checks
 
 | Workflow | Work | Job limits (minutes) |
 | --- | --- | --- |
-| [CI](.github/workflows/public-ci.yml) | PR static checks and affected database, typecheck, Jest, UI, build and Landing E2E jobs. The base version of [changes.cjs](scripts/ci-hosted/changes.cjs) owns the shared inputs and fallback. [selfcheck.cjs](scripts/ci-hosted/selfcheck.cjs) checks its routing. The merge group runs the full hosted suite on the combined tree. Dependency review is PR-only. Manual dispatch can regenerate visual baselines. `ci-gate` aggregates the job results. | Database build and pgTAP 20 each, database result and append-only 5 each, lint/typecheck/unit/UI 20 each, Console and Portal/Landing builds 35 each, Landing E2E 30, visual baselines 60, dependency review and gate 5 each. |
+| [CI](.github/workflows/public-ci.yml) | PR static checks and affected database, lint, typecheck, Jest, UI, build and Landing E2E jobs. The base version of [changes.cjs](scripts/ci-hosted/changes.cjs) owns the shared inputs and fallback. [selfcheck.cjs](scripts/ci-hosted/selfcheck.cjs) checks its routing. The merge group runs the full hosted suite on the combined tree. Dependency review is PR-only. Manual dispatch can regenerate visual baselines. `ci-gate` aggregates the job results. | Database build and pgTAP 20 each, database result and append-only 5 each, lint/typecheck/unit/UI 20 each, Console and Portal/Landing builds 35 each, Landing E2E 30, visual baselines 60, dependency review and gate 5 each. |
 | [CodeQL](.github/workflows/codeql.yml) | Scans JavaScript/TypeScript and Actions on PRs into `main`, queue groups and `main` pushes. The Monday schedule also prunes Actions caches. | Analysis 20. Cache pruning has a 5-minute step limit. |
 | [Verify prebuilt](.github/workflows/verify-prebuilt.yml) | Checks the Console and Portal prebuilt packaging contract on matching PR paths. | 15. |
 | [Deploy DEV](.github/workflows/deploy.yml) | Applies the database, deploys registered Edge Functions and deploys Console, Portal, Landing and ingress. Manual modes also support a database dry run and API schema diagnostics. | API schemas 10, database 180, dry run 90, Console and Portal 35 each, Landing 20, ingress 15, summary 5. |
 | [Provenance on tag](.github/workflows/provenance-on-tag.yml) | Verifies the tagged commit and builds, attests and publishes the static Landing archive. | Verify 10, build and publish 20. |
 
-- Use at most 20 jobs per CI run. The hosted browser suite covers Landing E2E. Full Console, Portal and FieldOps journeys need separate qualification.
+- CI runs only on free GitHub-hosted runners. Get the owner's approval before spending money or using a paid service. Use at most 20 jobs per CI run. The hosted browser suite covers Landing E2E. Full Console, Portal and FieldOps journeys need separate qualification.
 - PR wall time uses the workflow start and the `ci-gate` result timestamps. Track p50 and p90 on the project board's CI-FAST item. Timing-weighted pgTAP shards were the first change ([#173](https://github.com/MasarX/masarx-platform/pull/173)).
 - Keep queue-entry-to-completion wall time under 25 minutes. Track PR-open-to-merge time alongside PR wall time and queue wall time. Use a ±10% tolerance for timing comparisons unless the repository defines another tolerance.
 - Use GitHub Actions job durations and counts for runner-minutes and job count. [hosted-usage-report.js](scripts/ops/ci/hosted-usage-report.js) summarizes runner usage exports. Gap: Standalone budgets for runner-minutes and time to merge are undefined.
@@ -28,6 +32,8 @@ Follows engineering standard 2026-11-22 v1.2.
 ## Test policy
 
 - Test every affected layer and land security tests with their code. Preserve product guards when fixing tests. Trunk tests can change only under a recorded exception decided by the Master. A replaced test keeps every assertion or records which design decision retired it.
+- Fix failures at their source. New failures block landing. Never rerun an unchanged failure or use retries, skips or longer timeouts to turn a failing check green. The existing exceptions are listed under [Deviations](#deviations).
+- Use local services and mocks for routine tests. The cloud qualification checks are listed under [Deviations](#deviations).
 - Hosted Jest ([jest.cjs](scripts/ci-hosted/jest.cjs)) reads the target-base known-failure baseline at `config/ci/known-failures.txt`. A missing baseline is empty. The file is absent on `main`. A candidate can retain or remove target-base entries.
 - Only `npm run verify:cloud:e2e-gate` reads the [UI flake quarantine](config/ci/ui-flake-quarantine.json) for its cloud E2E summary outside hosted CI. Each entry carries an owner and expiry (`burn_down_by`).
 - [database-result.cjs](scripts/ci-hosted/database-result.cjs) requires all six pgTAP shards and an exact count and name match against the SQL test inventory. [database-selfcheck.cjs](scripts/ci-hosted/database-selfcheck.cjs) probes missing and incorrect coverage.
@@ -54,32 +60,34 @@ Follows engineering standard 2026-11-22 v1.2.
   - G2: Stop applies if the latest attempt in the 30-day history was unsuccessful, until `DEV_DB_REARMED_AT` is set to a valid timestamp later than that attempt's completion and no later than the current time. Treat a completed database job with missing step records as a possible apply attempt.
   - G3: Before a manual apply, require `expected_sha`, the run SHA and the current `main` tip to match.
   - G4: Once apply starts, write a sanitized apply summary on exit, including failure, and remove the temporary environment file and raw apply log.
-- The routine DEV deploy audit row is the workflow run summary. It includes the G1–G3 guard decisions, the G4 apply summary and the final job's per-surface results table. Gate review and routine DEV and staging deployments follow the portfolio orchestration skill.
-- Production automation and gate approval are pending. Require the owner's explicit yes and a verified production backup before every production deploy. Keep the previous version ready, check health after deploy and roll back immediately on failure.
+- Review each release gate once and record its GO. The Portfolio Lead gives the GO for non-production gates. Once approved, the gate releases each passing change automatically and writes an audit row. A new kind of change needs a new GO.
+- The routine DEV deploy audit row is the workflow run summary. It includes the G1–G3 guard decisions, the G4 apply summary and the final job's per-surface results table.
+- The owner gives the GO for a production gate. No production gate is approved yet, so every production deploy needs the owner's explicit yes. Verify a production backup before every production deploy. Keep the previous version ready, check health after deploy and roll back immediately on failure.
 - Gap: No production rollback command or staging/production deploy audit row is defined.
 
 ## Security
 
 - The Delivery Lead acts on Dependabot, code scanning and secret scanning alerts from both default and generic patterns. Open an issue the same day for a new high or critical finding. [dependabot.yml](.github/dependabot.yml) configures weekly grouped npm and Actions updates.
-- The local privacy deny check follows [AGENTS.md](AGENTS.md#privacy). It screens added content, paths, commit messages and identities, binary names and hashes, and PR text. Use it before pushing or opening or editing a PR. Proceed only on exit zero with a final line ending in `COMPLETE`.
+- Follow the [privacy screening rules](AGENTS.md#privacy) before pushing or posting public text.
 
 ## Deviations
 
 | Engineering standard rule | Reason for the deviation | Review date |
 | --- | --- | --- |
-| §1 Configurable environments and operational limits | [apply-guard.cjs](scripts/deploy/apply-guard.cjs) sets the DEV history window in code. The deploy workflow selects a fixed `dev` environment. | 2026-12-15 |
-| §§2, 6 Staging deployment and rollback rehearsal | The `stg` environment is configured. [Deploy DEV](.github/workflows/deploy.yml) supports DEV only, so the staging gate and rehearsal evidence are pending. | 2026-11-24 |
-| §§2, 6 Production deployment and rollback | The `prod` environment is configured. Production automation, the deploy gate and the rollback command are pending. | 2026-11-29 |
-| §2 Build and attest once on `main`, verify and record the same digest at each deployment | [Deploy DEV](.github/workflows/deploy.yml) builds from source inside its environment-specific jobs. [Provenance on tag](.github/workflows/provenance-on-tag.yml) builds and attests a separate static Landing archive. The deploy workflow does not verify an attestation or record a promoted digest. | 2026-11-24 |
-| §3 Queue merge method | The active `main` ruleset uses `MERGE` with `ALLGREEN` and one concurrent build. | 2026-12-15 |
-| §3 Zero required human approvals | The active ruleset requires zero approving reviews and disables code-owner review. Its extra approval option for unattributed changes is enabled. | 2026-12-15 |
-| §3 Annotated version and release-candidate tags | [Provenance on tag](.github/workflows/provenance-on-tag.yml) accepts `v*`, dereferences to a commit and uses the same release path for all accepted tags. It does not enforce annotation, exact version syntax or a distinct release-candidate path. The live creation and immutability rulesets are active. | 2026-11-24 |
-| §§2, 4 Full CI on pushes to `main` | [Public CI](.github/workflows/public-ci.yml) runs the full graph on merge groups and has no push trigger. The main push workflows are DEV deploy and CodeQL. | 2026-12-15 |
-| §4 PR feedback and full queue suite timing | The November first-attempt sample missed the PR p50 and p95 targets and the merge-group p50 target. The project tracks PR wall time at p50/p90 and queue-entry wall time. Timing-weighted pgTAP was the first improvement. | 2026-12-15 |
-| §4 Job time limits based on a recorded p95 sample | The workflows set the limits listed above. The CodeQL cache-maintenance job sets only a step timeout. Calibration samples and the monthly ratchet review are unverified. | 2026-12-15 |
-| §4 Read-only top-level workflow permissions | [CodeQL](.github/workflows/codeql.yml) grants `security-events: write` at workflow scope. The other four workflows use top-level `contents: read`. | 2026-12-15 |
-| §4 Sharding by measured file times | pgTAP uses recorded timings and verifies executed coverage. The two [Unit Jest](.github/workflows/public-ci.yml) shards use Jest's default sharding. | 2026-12-15 |
-| §4 Test-file guard across suites | The enumerated execution guard covers pgTAP. The [integration Jest suite](config/tooling/jest.config.js) and the non-Landing browser suites have separate qualification commands. The hosted workflow has no inventory or allowlist gate covering every test file. | 2026-12-15 |
-| §4 Retries and red-test handling | Hosted CI, prebuilt verification and DEV deployment retry dependency setup. The separate cloud E2E gate retries classified infrastructure failures and has a quarantine mechanism. Hosted Jest retains target-base known-failure handling even though `main` has no baseline. | 2026-12-15 |
-| §4 Local hooks and CI privacy enforcement on every push and merge group | The local privacy screen is an explicit step. The repository has no configured pre-commit or pre-push hook and no privacy-deny producer in the hosted workflows. | 2026-12-15 |
-| §§1, 8 UI page budgets | [DESIGN.md](DESIGN.md#speed) defines a time-to-usable method. Its per-screen budget table is still TBD and does not set LCP or INP budgets. | 2026-12-15 |
+| §1 Configurable environments and operational limits | The deploy workflow needs a configurable environment selector, and [apply-guard.cjs](scripts/deploy/apply-guard.cjs) needs a configurable DEV history window before the workflow can reuse the guard across environments. | 2026-12-15 |
+| §§2, 6 Staging deployment and rollback rehearsal | Staging needs a deploy gate that can run a rollback rehearsal and retain its evidence. GO: Portfolio Lead 2026-11-22, review 2026-11-29. Accepted only while production stays paused; the production rollback command and a rehearsed staging rollback must exist before the first production deploy ([#200](https://github.com/MasarX/masarx-platform/issues/200)). | 2026-11-29 |
+| §§2, 6 Production deployment and rollback | The production deploy gate, rollback command and audit recording still need implementation. GO: Portfolio Lead 2026-11-22, review 2026-11-29. Accepted only while production stays paused; the production rollback command and a rehearsed staging rollback must exist before the first production deploy ([#200](https://github.com/MasarX/masarx-platform/issues/200)). | 2026-11-29 |
+| §2 Build and attest once on `main`, verify and record the same digest at each deployment | [Deploy DEV](.github/workflows/deploy.yml) still needs to consume, verify and record main-build artifacts. The separate [tag workflow](.github/workflows/provenance-on-tag.yml) supplies an attested archive for Landing only. | 2026-11-24 |
+| §3 Queue merge method | The move from `MERGE` to `SQUASH` needs a change to the `main` queue ruleset. | 2026-12-15 |
+| §3 Zero required human approvals | The ruleset still needs to turn off `require_extra_approval_for_unattributed_changes: true`. | 2026-12-15 |
+| §3 Annotated version and release-candidate tags | The [tag workflow](.github/workflows/provenance-on-tag.yml) needs checks for annotation and exact version syntax and a separate release-candidate path before it can treat the two tag types differently. | 2026-11-24 |
+| §§2, 4 Full CI on pushes to `main` | [Public CI](.github/workflows/public-ci.yml) exercises the full graph on the queue's combined tree before merge. A full suite after merge would repeat that coverage. | 2026-12-15 |
+| §4 PR feedback and full queue suite timing | The November first-attempt sample missed both PR targets and the merge-group p50 target. More speed work is needed beyond timing-weighted pgTAP shards. | 2026-12-15 |
+| §4 Job time limits based on a recorded p95 sample | Job limits still need recorded p95 samples and a monthly review. CodeQL cache maintenance also needs a job-level limit. | 2026-12-15 |
+| §4 Read-only top-level workflow permissions | [CodeQL](.github/workflows/codeql.yml) needs write access to upload its results. Move that grant to the analysis job to make the workflow default read-only. | 2026-12-15 |
+| §4 Sharding by measured file times | The [Unit Jest](.github/workflows/public-ci.yml) jobs need per-file timing data and a shard plan that uses it. | 2026-12-15 |
+| §4 Test-file guard across suites | The pgTAP inventory covers SQL tests. Repository-wide coverage needs inventories for [Jest](config/tooling/jest.config.js) and the separately run browser suites. | 2026-12-15 |
+| §4 Retries and red-test handling | Dependency setup in hosted CI, prebuilt verification and DEV deployment retries transient setup failures. Cloud E2E retries classified infrastructure failures and quarantines registered flakes while their owners work on fixes. Hosted Jest honors the target-base list so existing failures on other bases can be tracked while they are fixed. | 2026-12-15 |
+| §4 Tests use local services and mocks only | These checks qualify deployed services on cloud test targets. [`npm run test:pgtap`](package.json#L13) can read `DATABASE_URL` from `.env.cloud` for [pgTAP](scripts/tests/run-pgtap-cloud.js#L5-L7). [`npm run verify:cloud:e2e-gate`](package.json#L27) checks [cloud endpoints](scripts/ops/assert-cloud-env.js#L243-L268) before running post-deploy E2E. | 2026-12-15 |
+| §4 Local hooks and CI privacy enforcement on every push and merge group | Staged-file lint and formatting and the privacy screen still need shared hook wiring. Push and merge-group workflows need a privacy check job to enforce the screen in CI. | 2026-12-15 |
+| §§1, 8 UI page budgets | [DESIGN.md](DESIGN.md#speed) supplies a time-to-usable method. The budget table still needs per-screen LCP and INP targets. | 2026-12-15 |

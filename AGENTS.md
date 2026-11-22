@@ -5,7 +5,7 @@
 - Repository: https://github.com/MasarX/masarx-platform · main branch: main
 - Board (private): https://github.com/orgs/MasarX/projects/9 · Project brief: the board README
 - Environments: `ci` and `dev` are active. `stg` and `prod` are configured. See [delivery environments](DELIVERY.md#environments).
-- Release plan: v0.1.0 is current and v0.2.0 is next. See [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
+- Release plan: [repository milestones](https://github.com/MasarX/masarx-platform/milestones).
 - Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX Design"
 - UI project: yes
 - Other repos: none
@@ -72,6 +72,6 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 
 - Keep personal names, customer identifiers, real data, hosts, IPs, private paths, project references, email addresses, account IDs and secrets out of public text, code, fixtures, logs, commits, issues and pull requests.
 - Generate credential-shaped fixtures at runtime from synthetic values. Never commit literal credential-shaped fixtures. Keep environment files and real credentials out of version control.
-- Run one fast local privacy screen for secrets, names and hosts on the exact candidate diff before pushing, and on PR, issue and comment text before posting. Include the PR title, body and branch when screening a PR. Stop on findings.
+- Before pushing, screen the exact candidate diff, commit messages and identities for secrets, names and hosts. Screen PR, issue and comment text before posting or editing it. Include the PR title, body and branch when screening a PR. Stop on any finding.
 - GitHub secret scanning and push protection are enabled. Never weaken either control.
 - Gap: A pre-push hook and a required CI check are still pending.
