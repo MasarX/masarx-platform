@@ -1,0 +1,58 @@
+name: Console v2 flake proof
+
+'on':
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: console-v2-flake-proof-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  proof:
+    if: github.head_ref == 'test/console-v2-billing-readiness'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: Restore npm cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/npm-cache
+          key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+      - name: Locked dependency installation
+        env:
+          NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Run 20 sequential readiness rounds
+        shell: bash
+        env:
+          CONSOLE_V2_CI_DEFER_CAPABILITY_LINT: '1'
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          file=src/modules/finance/__tests__/billing.test.tsx
+          test -f "apps/console-v2/$file"
+          printf 'PR head %s\nTested commit %s\nTested tree %s\n' \
+            "$PR_HEAD_SHA" "$(git rev-parse HEAD)" "$(git rev-parse 'HEAD^{tree}')" |
+            tee -a "$GITHUB_STEP_SUMMARY"
+          for ((round = 1; round <= 20; round++)); do
+            printf 'Round %d of 20\n' "$round"
+            npm run test --workspace @masarx/console-v2 -- \
+              --bail=1 --retry=0 --reporter=default "$file"
+          done
