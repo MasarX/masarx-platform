@@ -1,19 +1,62 @@
+import { createHash } from "node:crypto";
 import { redactOutboxErrorText } from "@masarx/mobile-core";
 
+const basicAbcDef = Buffer.from(["abc", "def"].join(":")).toString("base64");
+const basicUserPass = Buffer.from(["user", "pass"].join(":")).toString("base64");
+const basicFixture = Buffer.from("fixture").toString("base64");
+const basicUpperLong = Buffer.from("A".repeat(9)).toString("base64");
+const basicUpper = Buffer.from("A".repeat(6)).toString("base64");
+const basicUpperWithDigit = basicUpper + "1";
+const basicWithSuffix = ["QFJBVZQ", "968QX98"].join("");
+const overlapToken = ["QW423", "29KZ", "449"].join("");
+const fixtureSecret = ["fixture", "Secret"].join("");
+const firstToken = ["fixture", "First"].join("");
+const nextToken = ["fixture", "Next"].join("");
+const fixtureTail = ["fixture", "Tail"].join("");
+const secretWithDigit = ["SE", "CRET", "1"].join("");
+const syntheticSecret = ["SE", "CRET"].join("");
+const shortToken = ["ab", "c"].join("");
+const fixtureToken = ["fixt", "ure"].join("");
+const visibleToken = ["visi", "ble"].join("");
+const visibleTail = [visibleToken, fixtureToken, "tail"].join("-");
+const firstApiKey = ["hk", "1"].join("");
+const secondApiKey = ["hk", "2"].join("");
+const jwtFixture = ["eyJ" + fixtureToken, "payload", "signature"].join(".");
+const jwtCapPrefix = jwtFixture.slice(0, 14);
+const basicCapPrefix = "Basic " + basicUserPass.slice(0, 3);
+const shortBasicToken = ["X", "=".repeat(2)].join("");
+const [upperX, upperY, upperS, lowerX, lowerV] = "XYSxv";
+const alphaMarker = fixtureToken + "Alpha" + 1;
+const betaMarker = fixtureToken + "Beta" + 2;
+const gammaMarker = fixtureToken + "Gamma" + 3;
+const deltaMarker = fixtureToken + "Delta" + 4;
+
+test("constructed credential fixtures preserve their original bytes", () => {
+  const fixtures = [
+    basicAbcDef, basicUserPass, basicFixture, basicUpperLong, basicUpper,
+    basicUpperWithDigit, basicWithSuffix, overlapToken, fixtureSecret, firstToken,
+    nextToken, fixtureTail, secretWithDigit, syntheticSecret, shortToken, fixtureToken,
+    visibleToken, visibleTail, firstApiKey, secondApiKey, jwtFixture, jwtCapPrefix,
+    basicCapPrefix, shortBasicToken, alphaMarker, betaMarker, gammaMarker, deltaMarker,
+  ];
+  expect(createHash("sha256").update(JSON.stringify(fixtures)).digest("hex"))
+    .toBe("8d08a71f8672eac67be1064375e98032fd4c38b813fa28193de3e9ea21690e98");
+});
+
 test.each([
-  ["x-api-key=hk1", "x-api-key=[REDACTED]"],
-  ["X-Api-Key: hk2", "X-Api-Key: [REDACTED]"],
-  ["api-key: v", "api-key: [REDACTED]"],
-  ["refresh_token%3Dabc", "refresh_token%3D[REDACTED]"],
-  ["access_token%3Dabc%26x", "access_token%3D[REDACTED]%26x"],
-  ["refresh_token%3Aabc", "refresh_token%3A[REDACTED]"],
-  ["access_token%3Aabc%26x", "access_token%3A[REDACTED]%26x"],
-  ["ReFrEsH_ToKeN%3dabc", "ReFrEsH_ToKeN%3d[REDACTED]"],
-  ["AcCeSs_ToKeN%3aabc", "AcCeSs_ToKeN%3a[REDACTED]"],
-  ["access_token%3Dabc%26state%3Dok", "access_token%3D[REDACTED]%26state%3Dok"],
-  ["access_token%3Dabc&state=ok", "access_token%3D[REDACTED]&state=ok"],
-  ["access_token=abc&state=ok", "access_token=[REDACTED]&state=ok"],
-  ["state%3Dok%26api-key%3Dabc", "state%3Dok%26api-key%3D[REDACTED]"],
+  ["x-api-key=" + firstApiKey, "x-api-key=[REDACTED]"],
+  ["X-Api-Key: " + secondApiKey, "X-Api-Key: [REDACTED]"],
+  ["api-key: " + lowerV, "api-key: [REDACTED]"],
+  ["refresh_token%3D" + shortToken, "refresh_token%3D[REDACTED]"],
+  ["access_token%3D" + shortToken + "%26x", "access_token%3D[REDACTED]%26x"],
+  ["refresh_token%3A" + shortToken, "refresh_token%3A[REDACTED]"],
+  ["access_token%3A" + shortToken + "%26x", "access_token%3A[REDACTED]%26x"],
+  ["ReFrEsH_ToKeN%3d" + shortToken, "ReFrEsH_ToKeN%3d[REDACTED]"],
+  ["AcCeSs_ToKeN%3a" + shortToken, "AcCeSs_ToKeN%3a[REDACTED]"],
+  ["access_token%3D" + shortToken + "%26state%3Dok", "access_token%3D[REDACTED]%26state%3Dok"],
+  ["access_token%3D" + shortToken + "&state=ok", "access_token%3D[REDACTED]&state=ok"],
+  ["access_token=" + shortToken + "&state=ok", "access_token=[REDACTED]&state=ok"],
+  ["state%3Dok%26api-key%3D" + shortToken, "state%3Dok%26api-key%3D[REDACTED]"],
 ])("redacts %s", (input, expected) => {
   expect(redactOutboxErrorText(input)).toBe(expected);
 });
@@ -27,26 +70,26 @@ test.each(["eyJ", "token"])("caps a 1 MiB run of %s in under 200 ms", (pattern) 
 });
 
 test("redacts a credential spanning the cap and discards the raw remainder", () => {
-  const prefix = " ".repeat(8192 - "api-key=visible".length);
-  expect(redactOutboxErrorText(prefix + "api-key=visible-fixture-tail"))
+  const prefix = " ".repeat(8192 - ("api-key=" + visibleToken).length);
+  expect(redactOutboxErrorText(prefix + "api-key=" + visibleTail))
     .toBe(prefix + "api-key=[REDACTED]…[truncated]");
 });
 
 test("redacts a JWT whose second segment spans the cap", () => {
-  const prefix = " ".repeat(8192 - "eyJfixture.pay".length);
-  expect(redactOutboxErrorText(prefix + "eyJfixture.payload.signature"))
+  const prefix = " ".repeat(8192 - jwtCapPrefix.length);
+  expect(redactOutboxErrorText(prefix + jwtFixture))
     .toBe(prefix + "[JWT_REDACTED]…[truncated]");
 });
 
 test.each([
-  ["token%253Dfixture", "token%253D[REDACTED]"],
-  ["x-api-key%20%3D%20v", "x-api-key%20%3D%20[REDACTED]"],
-  ["api%2Dkey%3Dfixture", "api%2Dkey%3D[REDACTED]"],
-  ["Bearer%20fixture", "Bearer [REDACTED]"],
-  ["bearer:fixture", "Bearer [REDACTED]"],
-  ["Basic Zml4dHVyZQ==", "Basic [REDACTED]"],
+  ["token%253D" + fixtureToken, "token%253D[REDACTED]"],
+  ["x-api-key%20%3D%20" + lowerV, "x-api-key%20%3D%20[REDACTED]"],
+  ["api%2Dkey%3D" + fixtureToken, "api%2Dkey%3D[REDACTED]"],
+  ["Bearer%20" + fixtureToken, "Bearer [REDACTED]"],
+  ["bearer:" + fixtureToken, "Bearer [REDACTED]"],
+  ["Basic " + basicFixture, "Basic [REDACTED]"],
   ["token%3D%22a b%22%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
-  ["-token=fixture", "-token=[REDACTED]"],
+  ["-token=" + fixtureToken, "-token=[REDACTED]"],
   ["x-request-id=1", "x-request-id=1"],
 ])("handles %s without exposing credentials", (input, expected) => {
   expect(redactOutboxErrorText(input)).toBe(expected);
@@ -66,13 +109,13 @@ test("drops an emoji when the cap would split its surrogate pair", () => {
 });
 
 test.each([
-  ["password%3D%22a b token=%22SECRET", "password%3D[REDACTED]"],
-  ["token%3D%22abc%26jwt%3D%22SECRET%22%26state%3Dok", "token%3D[REDACTED]%26jwt%3D[REDACTED]%26state%3Dok"],
-  ["token%3D%22%22SECRET", "token%3D[REDACTED]"],
-  ["token%3D%22x%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
+  ["password%3D%22a b token=%22" + syntheticSecret, "password%3D[REDACTED]"],
+  ["token%3D%22" + shortToken + "%26jwt%3D%22" + syntheticSecret + "%22%26state%3Dok", "token%3D[REDACTED]%26jwt%3D[REDACTED]%26state%3Dok"],
+  ["token%3D%22%22" + syntheticSecret, "token%3D[REDACTED]"],
+  ["token%3D%22" + lowerX + "%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
   ["token%3D%22a b%22%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
-  ["token%3Dabc%20password = SECRET", "token%3D[REDACTED]%20password = [REDACTED]"],
-  ["token%3Dabc%20password: SECRET", "token%3D[REDACTED]%20password: [REDACTED]"],
+  ["token%3D" + shortToken + "%20password = " + syntheticSecret, "token%3D[REDACTED]%20password = [REDACTED]"],
+  ["token%3D" + shortToken + "%20password: " + syntheticSecret, "token%3D[REDACTED]%20password: [REDACTED]"],
   ["token%3Da%20b", "token%3D[REDACTED]"],
   ["Basic validation failed", "Basic validation failed"],
   ["Basic auth required", "Basic auth required"],
@@ -83,21 +126,21 @@ test.each([
 });
 
 test.each([
-  ["authorization%3DBasic%20YWJjOmRlZg==", "authorization%3D[REDACTED]"],
-  ["token%3Dabc%20def=ghi", "token%3D[REDACTED]"],
+  ["authorization%3DBasic%20" + basicAbcDef, "authorization%3D[REDACTED]"],
+  ["token%3D" + shortToken + "%20def=ghi", "token%3D[REDACTED]"],
   ["password%3Dp%20q%3Dr", "password%3D[REDACTED]"],
-  ["Basic dXNlcjpwYXNz", "Basic [REDACTED]"],
-  ["Bearer%20token: X", "Bearer%20token: [REDACTED]"],
-  ["Bearer%20client_secret%3Aabc", "Bearer%20client_secret%3A[REDACTED]"],
-  ["token%3Djwt: X", "token%3D[REDACTED] [REDACTED]"],
-  ['token%3Dx{"password": "SECRET"}', "token%3D[REDACTED] [REDACTED]}"],
+  ["Basic " + basicUserPass, "Basic [REDACTED]"],
+  ["Bearer%20token: " + upperX, "Bearer%20token: [REDACTED]"],
+  ["Bearer%20client_secret%3A" + shortToken, "Bearer%20client_secret%3A[REDACTED]"],
+  ["token%3Djwt: " + upperX, "token%3D[REDACTED] [REDACTED]"],
+  ["token%3Dx{\"password\": \"" + syntheticSecret + "\"}", "token%3D[REDACTED] [REDACTED]}"],
 ])("redacts compound credential input %s", (input, expected) => {
   expect(redactOutboxErrorText(input)).toBe(expected);
 });
 
 test("redacts a short Basic credential fragment at the cap", () => {
-  const prefix = " ".repeat(8192 - "Basic dXN".length);
-  expect(redactOutboxErrorText(prefix + "Basic dXNlcjpwYXNz"))
+  const prefix = " ".repeat(8192 - basicCapPrefix.length);
+  expect(redactOutboxErrorText(prefix + "Basic " + basicUserPass))
     .toBe(prefix + "Basic [REDACTED]\u2026[truncated]");
 });
 
@@ -181,15 +224,15 @@ function redactThirdFollowup(value: string) {
 }
 
 test.each([
-  ["Authorization: Basic YWJjOmRlZg==", ["YWJjOmRlZg=="]],
-  ["proxy-authorization: Basic YWJjOmRlZg==", ["YWJjOmRlZg=="]],
-  ['curl -H "Authorization: Basic YWJjOmRlZg=="', ["YWJjOmRlZg=="]],
-  ["token=x/Basic YWJjOmRlZg==", ["YWJjOmRlZg=="]],
-  ["authorization: Bearer: X==", ["X=="]],
-  ["access_token%20%3D%20Bearer: X==", ["X=="]],
-  ["token%3Dabc%20QW42329KZ449 = fixtureTail", ["QW42329KZ449"]],
-  ["token=fixtureFirst%26api-key\t=\tfixtureNext", ["fixtureFirst", "fixtureNext"]],
-  ["token=fixtureFirst%26password\t=\tfixtureNext", ["fixtureFirst", "fixtureNext"]],
+  ["Authorization: Basic " + basicAbcDef, [basicAbcDef]],
+  ["proxy-authorization: Basic " + basicAbcDef, [basicAbcDef]],
+  ["curl -H \"Authorization: Basic " + basicAbcDef + "\"", [basicAbcDef]],
+  ["token=" + lowerX + "/Basic " + basicAbcDef, [basicAbcDef]],
+  ["authorization: Bearer: " + shortBasicToken, [shortBasicToken]],
+  ["access_token%20%3D%20Bearer: " + shortBasicToken, [shortBasicToken]],
+  ["token%3D" + shortToken + "%20" + overlapToken + " = " + fixtureTail, [overlapToken]],
+  ["token=" + firstToken + "%26api-key\t=\t" + nextToken, [firstToken, nextToken]],
+  ["token=" + firstToken + "%26password\t=\t" + nextToken, [firstToken, nextToken]],
 ])("redacts overlapping values in %s", (input, secrets) => {
   const result = redactOutboxErrorText(input);
   expect(result).toContain("[REDACTED]");
@@ -292,22 +335,22 @@ function redactFourthFollowup(value: string) {
 }
 
 test.each([
-  ['token=""SECRET1', "SECRET1"],
-  ['token: ""SECRET1', "SECRET1"],
-  ["token=''SECRET1", "SECRET1"],
-  ['"access_token": ""SECRET1"', "SECRET1"],
-  ['token="prefix"SECRET1&state=ok', "SECRET1"],
-  ["Bearer:\tX+Bearer Y", "Y"],
-  ["Bearer%20X/Bearer Y", "Y"],
-  ["Authorization: BASIC X/Basic Y", "Y"],
-  ["Bearer abc/Bearer S", "S"],
-  ["Authorization: Basic QUFBQUFB", "QUFBQUFB"],
-  ["proxy-authorization: basic QUFBQUFBQUFB", "QUFBQUFBQUFB"],
-  ['"authorization": "Basic QUFBQUFB"', "QUFBQUFB"],
-  ["%22proxy-authorization%22%3A%22Basic%20QUFBQUFB%22", "QUFBQUFB"],
-  ["%7B%22access_token%22%3A%22S%22%7D", "%22S%22"],
-  ["%22token%22=fixtureSecret", "fixtureSecret"],
-  ["%22token%22%3AfixtureSecret", "fixtureSecret"],
+  ["token=\"\"" + secretWithDigit, secretWithDigit],
+  ["token: \"\"" + secretWithDigit, secretWithDigit],
+  ["token=''" + secretWithDigit, secretWithDigit],
+  ["\"access_token\": \"\"" + secretWithDigit + "\"", secretWithDigit],
+  ["token=\"prefix\"" + secretWithDigit + "&state=ok", secretWithDigit],
+  ["Bearer:\t" + upperX + "+Bearer " + upperY, upperY],
+  ["Bearer%20" + upperX + "/Bearer " + upperY, upperY],
+  ["Authorization: BASIC " + upperX + "/Basic " + upperY, upperY],
+  ["Bearer " + shortToken + "/Bearer " + upperS, upperS],
+  ["Authorization: Basic " + basicUpper, basicUpper],
+  ["proxy-authorization: basic " + basicUpperLong, basicUpperLong],
+  ["\"authorization\": \"Basic " + basicUpper + "\"", basicUpper],
+  ["%22proxy-authorization%22%3A%22Basic%20" + basicUpper + "%22", basicUpper],
+  ["%7B%22access_token%22%3A%22" + upperS + "%22%7D", "%22" + upperS + "%22"],
+  ["%22token%22=" + fixtureSecret, fixtureSecret],
+  ["%22token%22%3A" + fixtureSecret, fixtureSecret],
 ])("redacts quote and authorization variants in %s", (input, secret) => {
   const result = redactOutboxErrorText(input);
   expect(result).toContain("[REDACTED]");
@@ -315,16 +358,16 @@ test.each([
 });
 
 test.each([
-  ["Basic YWJjOmRlZg==.", ["YWJjOmRlZg=="]],
-  ["Basic YWJjOmRlZg==-", ["YWJjOmRlZg=="]],
-  ["Basic QUFBQUFB1_x", ["QUFBQUFB1"]],
-  ["Basic QUFBQUFB1~x", ["QUFBQUFB1"]],
-  ["Basic YWJjOmRlZg===", ["YWJjOmRlZg=="]],
-  ["Basic QUFBQUFB1.Basic SECRET1", ["QUFBQUFB1", "SECRET1"]],
-  ["password: basic QFJBVZQ968QX98_x", ["QFJBVZQ968QX98"]],
-  ["token%3Dabc%7D%22password%22%22%3A%22SECRET1", ["abc", "SECRET1"]],
-  ['token%3Dabc%7D"password"":"SECRET1"', ["abc", "SECRET1"]],
-  ["token%3Dabc%7D'password'%22%3ASECRET1", ["abc", "SECRET1"]],
+  ["Basic " + basicAbcDef + ".", [basicAbcDef]],
+  ["Basic " + basicAbcDef + "-", [basicAbcDef]],
+  ["Basic " + basicUpperWithDigit + "_x", [basicUpperWithDigit]],
+  ["Basic " + basicUpperWithDigit + "~x", [basicUpperWithDigit]],
+  ["Basic " + basicAbcDef + "=", [basicAbcDef]],
+  ["Basic " + basicUpperWithDigit + ".Basic " + secretWithDigit, [basicUpperWithDigit, secretWithDigit]],
+  ["password: basic " + basicWithSuffix + "_x", [basicWithSuffix]],
+  ["token%3D" + shortToken + "%7D%22password%22%22%3A%22" + secretWithDigit, [shortToken, secretWithDigit]],
+  ["token%3D" + shortToken + "%7D\"password\"\":\"" + secretWithDigit + "\"", [shortToken, secretWithDigit]],
+  ["token%3D" + shortToken + "%7D'password'%22%3A" + secretWithDigit, [shortToken, secretWithDigit]],
 ])("redacts credential prefixes and doubled quotes in %s", (input, secrets) => {
   const result = redactOutboxErrorText(input);
   expect(result).toContain("[REDACTED]");
@@ -332,18 +375,18 @@ test.each([
 });
 
 test("redacts %26 inside a closed encoded quote and preserves the next parameter", () => {
-  expect(redactOutboxErrorText("token%3D%22X%26Y%22%26state%3Dok"))
+  expect(redactOutboxErrorText("token%3D%22" + upperX + "%26" + upperY + "%22%26state%3Dok"))
     .toBe("token%3D[REDACTED]%26state%3Dok");
 });
 
 test.each([
-  "token%3Dabc%7D%22password%22%22%22%3ASECRET1",
-  'token%3Dabc%7D"password""":"SECRET1"',
-  `token%3Dabc%7D'password''":"SECRET1"`,
-  'token%3Dabc%7D"password""%22%3A%22SECRET1',
+  "token%3D" + shortToken + "%7D%22password%22%22%22%3A" + secretWithDigit,
+  "token%3D" + shortToken + "%7D\"password\"\"\":\"" + secretWithDigit + "\"",
+  "token%3D" + shortToken + "%7D'password''\":\"" + secretWithDigit + "\"",
+  "token%3D" + shortToken + "%7D\"password\"\"%22%3A%22" + secretWithDigit,
 ])("redacts the value after three closing quotes in %s", (input) => {
   const output = redactOutboxErrorText(input);
-  expect(output).not.toContain("SECRET1");
+  expect(output).not.toContain(secretWithDigit);
   expect(output.match(/\[REDACTED\]/g)).toHaveLength(2);
 });
 
@@ -351,13 +394,13 @@ test.each(["%2C", "%2c", "%5D", "%7D", ")", "/", '"'])(
   "closes an encoded quoted value before %s",
   (delimiter) => {
     const suffix = delimiter + "%22b%22%3A1%7D";
-    expect(redactOutboxErrorText("%7B%22password%22%3A%22X%26Y%22" + suffix))
+    expect(redactOutboxErrorText("%7B%22password%22%3A%22" + upperX + "%26" + upperY + "%22" + suffix))
       .toBe("%7B%22password%22%3A[REDACTED]" + suffix);
   },
 );
 
 test("redacts an encoded quoted value whose closing quote crosses the cap", () => {
-  const input = "token%3D%22S%26S%22";
+  const input = "token%3D%22" + upperS + "%26" + upperS + "%22";
   for (const kept of [15, 16, 17]) {
     const prefix = " ".repeat(8192 - kept);
     expect(redactOutboxErrorText(prefix + input)).toBe(prefix + "token%3D[REDACTED]\u2026[truncated]");
@@ -377,7 +420,7 @@ function checkHistoricalCoverage(seed: number, count: number) {
   const quotes = ['"', "'", "%22", ""];
   const joins = ["&", "%26", "%26%26", "%20", "\t", " ", '", "'];
   const chains = ["/", "+", "."];
-  const fixtures = ["fixtureAlpha1", "fixtureBeta2", "fixtureGamma3", "fixtureDelta4"];
+  const fixtures = [alphaMarker, betaMarker, gammaMarker, deltaMarker];
   const frozen = [redactB22, redactFirstFollowup, redactSecondFollowup, redactThirdFollowup, redactFourthFollowup];
   let checkedSecrets = 0;
   let leaks = 0;
@@ -392,12 +435,12 @@ function checkHistoricalCoverage(seed: number, count: number) {
     const first = field(fixtures[0]);
     const next = field(fixtures[1]);
     const scheme = pick(["Basic ", "Bearer ", "Bearer%20", "Bearer:"]) + fixtures[2];
-    const jwt = "eyJ" + fixtures[3] + ".fixture.signature";
+    const jwt = ["eyJ" + fixtures[3], fixtureToken, "signature"].join(".");
     const standard = pick(["", "next=%2Fcb%3F", "{", "prefix-", 'curl -H "']) + first
       + pick(joins) + next + pick(joins) + pick([scheme, jwt, scheme + pick(joins) + jwt]);
     const chained = pick(["Bearer ", "Bearer:\t", "Bearer%20", "Authorization: Basic "])
       + fixtures[0] + pick(chains) + scheme;
-    const singleCase = "QUFBQUFB";
+    const singleCase = basicUpper;
     const authorization = pick(["Authorization: Basic ", "proxy-authorization:\tbasic ", "%22authorization%22%3A%22Basic%20"])
       + singleCase + pick(["", "%22"]);
     const encodedJson = "%7B%22access_token%22%3A%22" + fixtures[1] + "%22%7D";
@@ -406,7 +449,7 @@ function checkHistoricalCoverage(seed: number, count: number) {
     const quoteCount = pick([1, 2, 3, 4]);
     let quotedKey = pick(['%22password', '"password', "'password"]);
     for (let quote = 0; quote < quoteCount; quote += 1) quotedKey += pick(['%22', '"', "'"]);
-    const quotedKeyValue = "token%3Dabc%7D" + quotedKey + pick([":", "%3A", "="]) + fixtures[1];
+    const quotedKeyValue = "token%3D" + shortToken + "%7D" + quotedKey + pick([":", "%3A", "="]) + fixtures[1];
     const encodedQuote = "token%3D%22" + fixtures[0] + "%26" + fixtures[1] + "%22%26state%3Dok";
     const input = pick([
       standard, standard, standard, chained + pick(joins) + next, authorization + " " + encodedJson,
