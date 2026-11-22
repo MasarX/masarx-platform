@@ -202,8 +202,9 @@ describe('CustomerMigrationModule', () => {
         }),
       }));
     });
-    expect(await screen.findByText(/configured/i)).toBeInTheDocument();
+    expect(await screen.findByText(`Decision: ${configResult.decision_log_id}`)).toBeInTheDocument();
     expect(screen.getByText(/customer-logistics-migration/i)).toBeInTheDocument();
+    expect(screen.getByText('Plugin status: active')).toBeInTheDocument();
     expect(screen.getByText(/Onboarding readiness: Ready/i)).toBeInTheDocument();
 
     const previewButton = screen.getByRole('button', { name: /^Preview$/i });

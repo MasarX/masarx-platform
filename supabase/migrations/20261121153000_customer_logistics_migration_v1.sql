@@ -8,6 +8,30 @@ SELECT pg_advisory_xact_lock(hashtext('20261119050000_customer_logistics_migrati
 SET LOCAL search_path TO public, extensions, pg_temp;
 SET LOCAL lock_timeout = '30s';
 
+INSERT INTO public.lookup_definitions (category, description, owner_role, approval_policy, is_mutable)
+VALUES
+  ('logistics_migration_source_status', 'Customer migration source lifecycle', 'engineering', 'tier_1', FALSE),
+  ('logistics_migration_item_target_type', 'Customer migration item target type', 'engineering', 'tier_1', FALSE),
+  ('logistics_migration_item_status', 'Customer migration item result status', 'engineering', 'tier_1', FALSE)
+ON CONFLICT (category) DO NOTHING;
+
+INSERT INTO public.lookup_values (lookup_definition_id, value, label, sort_order, is_default, status)
+SELECT d.id, v.value, v.label, v.sort_order, v.is_default, 'active'
+FROM public.lookup_definitions d
+JOIN (VALUES
+  ('decision_category', 'imports.validate', 'Import validation', 1910, FALSE),
+  ('decision_category', 'imports.execute', 'Import execution', 1920, FALSE),
+  ('decision_category', 'imports.idempotency', 'Import identity check', 1930, FALSE),
+  ('logistics_migration_source_status', 'active', 'Active', 10, TRUE),
+  ('logistics_migration_source_status', 'archived', 'Archived', 20, FALSE),
+  ('logistics_migration_item_target_type', 'client', 'Client', 10, FALSE),
+  ('logistics_migration_item_target_type', 'recipient', 'Recipient', 20, FALSE),
+  ('logistics_migration_item_status', 'would_create', 'Would create', 10, FALSE),
+  ('logistics_migration_item_status', 'created', 'Created', 20, FALSE),
+  ('logistics_migration_item_status', 'failed', 'Failed', 30, FALSE)
+) AS v(category, value, label, sort_order, is_default) ON d.category = v.category
+ON CONFLICT (lookup_definition_id, value) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS public.logistics_migration_sources (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
@@ -24,8 +48,7 @@ CREATE TABLE IF NOT EXISTS public.logistics_migration_sources (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (organization_id, source_key),
-  CONSTRAINT logistics_migration_sources_key_check CHECK (source_key ~ '^[a-z0-9][a-z0-9_-]*$'),
-  CONSTRAINT logistics_migration_sources_status_check CHECK (status IN ('active', 'archived'))
+  CONSTRAINT logistics_migration_sources_key_check CHECK (source_key ~ '^[a-z0-9][a-z0-9_-]*$')
 );
 
 CREATE TABLE IF NOT EXISTS public.logistics_migration_profiles (
@@ -86,15 +109,40 @@ CREATE TABLE IF NOT EXISTS public.logistics_migration_items (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (import_job_id, item_key),
-  CONSTRAINT logistics_migration_items_key_check CHECK (btrim(item_key) <> ''),
-  CONSTRAINT logistics_migration_items_target_check CHECK (target_type IN ('client','recipient')),
-  CONSTRAINT logistics_migration_items_status_check CHECK (status IN ('would_create','created','failed'))
+  CONSTRAINT logistics_migration_items_key_check CHECK (btrim(item_key) <> '')
 );
 
+INSERT INTO public.lookup_column_contracts (table_schema, table_name, column_name, lookup_category)
+VALUES
+  ('public', 'logistics_migration_sources', 'status', 'logistics_migration_source_status'),
+  ('public', 'logistics_migration_items', 'target_type', 'logistics_migration_item_target_type'),
+  ('public', 'logistics_migration_items', 'status', 'logistics_migration_item_status')
+ON CONFLICT ON CONSTRAINT lookup_column_contracts_unique DO NOTHING;
+
+-- Use the canonical trigger names so later lookup reconciliation can replace them.
+CREATE TRIGGER trg_lookup_contract_5f0d45dd7a94
+BEFORE INSERT OR UPDATE OF status ON public.logistics_migration_sources
+FOR EACH ROW EXECUTE FUNCTION public.enforce_lookup_column_contracts();
+CREATE TRIGGER trg_lookup_contract_ea1c5e9186d8
+BEFORE INSERT OR UPDATE OF status, target_type ON public.logistics_migration_items
+FOR EACH ROW EXECUTE FUNCTION public.enforce_lookup_column_contracts();
+
 CREATE INDEX IF NOT EXISTS idx_lms_org_status ON public.logistics_migration_sources(organization_id, status);
+CREATE INDEX IF NOT EXISTS idx_lms_plugin ON public.logistics_migration_sources(plugin_id);
+CREATE INDEX IF NOT EXISTS idx_lms_plugin_binding ON public.logistics_migration_sources(plugin_binding_id);
 CREATE INDEX IF NOT EXISTS idx_lmp_org_source_status ON public.logistics_migration_profiles(organization_id, source_id, status);
+CREATE INDEX IF NOT EXISTS idx_lmp_source ON public.logistics_migration_profiles(source_id);
 CREATE INDEX IF NOT EXISTS idx_lmr_org_updated ON public.logistics_migration_requests(organization_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_lmr_source ON public.logistics_migration_requests(source_id);
+CREATE INDEX IF NOT EXISTS idx_lmr_profile ON public.logistics_migration_requests(profile_id);
+CREATE INDEX IF NOT EXISTS idx_lmr_plugin ON public.logistics_migration_requests(plugin_id);
+CREATE INDEX IF NOT EXISTS idx_lmr_plugin_version ON public.logistics_migration_requests(plugin_version_id);
+CREATE INDEX IF NOT EXISTS idx_lmr_plugin_binding ON public.logistics_migration_requests(plugin_binding_id);
+CREATE INDEX IF NOT EXISTS idx_lmr_imported_client ON public.logistics_migration_requests(imported_client_id);
+CREATE INDEX IF NOT EXISTS idx_lmr_preview_workflow_run ON public.logistics_migration_requests(preview_workflow_run_id);
+CREATE INDEX IF NOT EXISTS idx_lmr_execution_workflow_run ON public.logistics_migration_requests(execution_workflow_run_id);
 CREATE INDEX IF NOT EXISTS idx_lmi_import_job ON public.logistics_migration_items(import_job_id);
+CREATE INDEX IF NOT EXISTS idx_lmi_org ON public.logistics_migration_items(organization_id);
 
 ALTER TABLE public.logistics_migration_sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.logistics_migration_profiles ENABLE ROW LEVEL SECURITY;
@@ -145,14 +193,27 @@ FOR SELECT TO authenticated, ui_rpc_executor USING (
       AND public.user_has_capability_v1('recipients.read', 'tenant', organization_id))
 );
 
-REVOKE ALL ON public.logistics_migration_sources FROM PUBLIC, anon, authenticated, ui_rpc_executor;
+REVOKE ALL ON public.logistics_migration_sources FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 GRANT SELECT ON public.logistics_migration_sources TO authenticated, service_role, ui_rpc_executor;
-REVOKE ALL ON public.logistics_migration_profiles FROM PUBLIC, anon, authenticated, ui_rpc_executor;
+REVOKE ALL ON public.logistics_migration_profiles FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 GRANT SELECT ON public.logistics_migration_profiles TO authenticated, service_role, ui_rpc_executor;
-REVOKE ALL ON public.logistics_migration_requests FROM PUBLIC, anon, authenticated, ui_rpc_executor;
+REVOKE ALL ON public.logistics_migration_requests FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 GRANT SELECT ON public.logistics_migration_requests TO authenticated, service_role, ui_rpc_executor;
-REVOKE ALL ON public.logistics_migration_items FROM PUBLIC, anon, authenticated, ui_rpc_executor;
+REVOKE ALL ON public.logistics_migration_items FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 GRANT SELECT ON public.logistics_migration_items TO authenticated, service_role, ui_rpc_executor;
+
+CREATE POLICY ui_rpc_executor_trusted ON public.logistics_migration_sources FOR ALL TO ui_rpc_executor
+USING (public.is_platform_user() OR public.ui_rpc_request_is_service_v1())
+WITH CHECK (public.is_platform_user() OR public.ui_rpc_request_is_service_v1());
+CREATE POLICY ui_rpc_executor_trusted ON public.logistics_migration_profiles FOR ALL TO ui_rpc_executor
+USING (public.is_platform_user() OR public.ui_rpc_request_is_service_v1())
+WITH CHECK (public.is_platform_user() OR public.ui_rpc_request_is_service_v1());
+CREATE POLICY ui_rpc_executor_trusted ON public.logistics_migration_requests FOR ALL TO ui_rpc_executor
+USING (public.is_platform_user() OR public.ui_rpc_request_is_service_v1())
+WITH CHECK (public.is_platform_user() OR public.ui_rpc_request_is_service_v1());
+CREATE POLICY ui_rpc_executor_trusted ON public.logistics_migration_items FOR ALL TO ui_rpc_executor
+USING (public.is_platform_user() OR public.ui_rpc_request_is_service_v1())
+WITH CHECK (public.is_platform_user() OR public.ui_rpc_request_is_service_v1());
 
 DO $contracts$
 BEGIN
@@ -244,11 +305,11 @@ SELECT r.import_job_id AS id, r.import_job_id, r.organization_id, r.source_id,
        AND i.target_type = 'recipient'
   ) recipients ON TRUE;
 
-REVOKE ALL ON public.v_logistics_migration_source_directory FROM PUBLIC, anon, authenticated, ui_rpc_executor;
+REVOKE ALL ON public.v_logistics_migration_source_directory FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 GRANT SELECT ON public.v_logistics_migration_source_directory TO authenticated, service_role, ui_rpc_executor;
-REVOKE ALL ON public.v_logistics_migration_profile_directory FROM PUBLIC, anon, authenticated, ui_rpc_executor;
+REVOKE ALL ON public.v_logistics_migration_profile_directory FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 GRANT SELECT ON public.v_logistics_migration_profile_directory TO authenticated, service_role, ui_rpc_executor;
-REVOKE ALL ON public.v_logistics_migration_request_directory FROM PUBLIC, anon, authenticated, ui_rpc_executor;
+REVOKE ALL ON public.v_logistics_migration_request_directory FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 GRANT SELECT ON public.v_logistics_migration_request_directory TO authenticated, service_role, ui_rpc_executor;
 
 CREATE OR REPLACE FUNCTION public.safe_jsonpath_query_array_v1(
@@ -842,8 +903,8 @@ BEGIN
      OR v_binding.scope_id IS DISTINCT FROM v_request.organization_id
      OR v_binding.binding_type IS DISTINCT FROM 'api_route'
      OR v_binding.enabled IS NOT TRUE
-     OR v_runtime_run.entry_point IS DISTINCT FROM 'console'
-     OR COALESCE(v_runtime_run.context->>'trigger_source', '') <> 'console'
+     OR v_runtime_run.entry_point IS DISTINCT FROM 'manual'
+     OR COALESCE(v_runtime_run.context->>'trigger_source', '') <> 'manual'
      OR COALESCE(v_runtime_run.context->>'source_id', '') <> v_request.source_id::TEXT
      OR COALESCE(v_runtime_run.context->>'profile_id', '') <> v_request.profile_id::TEXT
      OR COALESCE(v_runtime_run.context->>'plugin_id', '') <> v_request.plugin_id::TEXT
@@ -2049,7 +2110,7 @@ BEGIN
   v_workflow_run_id := public.start_workflow_run(
     v_workflow_template_id,
     jsonb_build_object(
-      'trigger_source', 'console',
+      'trigger_source', 'manual',
       'import_job_id', v_import_job_id,
       'source_id', v_source.id,
       'profile_id', v_profile.id,
@@ -2255,6 +2316,19 @@ $function$;
 
 CREATE SCHEMA IF NOT EXISTS api;
 
+CREATE VIEW api.logistics_migration_sources WITH (security_invoker = true) AS
+SELECT * FROM public.logistics_migration_sources;
+CREATE VIEW api.logistics_migration_profiles WITH (security_invoker = true) AS
+SELECT * FROM public.logistics_migration_profiles;
+CREATE VIEW api.logistics_migration_requests WITH (security_invoker = true) AS
+SELECT * FROM public.logistics_migration_requests;
+CREATE VIEW api.logistics_migration_items WITH (security_invoker = true) AS
+SELECT * FROM public.logistics_migration_items;
+REVOKE ALL ON api.logistics_migration_sources, api.logistics_migration_profiles,
+  api.logistics_migration_requests, api.logistics_migration_items FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+GRANT SELECT ON api.logistics_migration_sources, api.logistics_migration_profiles,
+  api.logistics_migration_requests, api.logistics_migration_items TO authenticated, service_role;
+
 CREATE OR REPLACE FUNCTION api.ui_upsert_logistics_customer_migration_config_v1(p_args JSONB)
 RETURNS JSONB
 LANGUAGE sql
@@ -2385,6 +2459,65 @@ BEGIN
       OR cache_key LIKE 'ui_list_resource:%logistics_migration%';
 END;
 $registry$;
+
+-- Extend the sealed executor receipt with only the new migration relations.
+DO $receipt$
+DECLARE
+  prior_seal TEXT;
+  prior_before JSONB;
+  prior_after JSONB;
+  added JSONB;
+  current_plan JSONB;
+  expected_after JSONB;
+  digest TEXT;
+BEGIN
+  LOCK TABLE public.marketplace_review_readback_state_v1 IN EXCLUSIVE MODE;
+  IF (SELECT relowner FROM pg_class WHERE oid = 'public.marketplace_review_readback_state_v1'::regclass)
+      IS DISTINCT FROM current_user::regrole::oid THEN
+    RAISE EXCEPTION 'Customer migration receipt requires the existing receipt owner' USING ERRCODE = '42501';
+  END IF;
+  prior_seal := obj_description('public.marketplace_review_readback_state_v1'::regclass, 'pg_class');
+  SELECT encode(pg_catalog.sha256(convert_to(jsonb_object_agg(key, value ORDER BY key)::text, 'UTF8')), 'hex')
+    INTO digest FROM public.marketplace_review_readback_state_v1;
+  IF prior_seal IS DISTINCT FROM 'marketplace_review_readback_state_v1:sha256:' || digest THEN
+    RAISE EXCEPTION 'Marketplace predecessor receipt integrity mismatch';
+  END IF;
+
+  SELECT value INTO STRICT prior_before FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_before';
+  SELECT value INTO STRICT prior_after FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_after';
+  SELECT jsonb_agg(jsonb_build_object('object_kind', 'relation', 'object_id', oid,
+    'privilege', 'SELECT', 'column_name', NULL) ORDER BY oid) INTO added
+  FROM unnest(ARRAY[
+    'public.logistics_migration_sources'::regclass::oid,
+    'public.logistics_migration_profiles'::regclass::oid,
+    'public.logistics_migration_requests'::regclass::oid,
+    'public.logistics_migration_items'::regclass::oid,
+    'public.v_logistics_migration_source_directory'::regclass::oid,
+    'public.v_logistics_migration_profile_directory'::regclass::oid,
+    'public.v_logistics_migration_request_directory'::regclass::oid
+  ]) AS relations(oid);
+  SELECT jsonb_agg(to_jsonb(p) ORDER BY object_kind, object_id, privilege, column_name) INTO current_plan
+  FROM public.ui_rpc_executor_privilege_plan_v1() p;
+  SELECT jsonb_agg(entry ORDER BY entry->>'object_kind', (entry->>'object_id')::oid,
+    entry->>'privilege', entry->>'column_name') INTO expected_after
+  FROM jsonb_array_elements(prior_after || added) entry;
+  IF current_plan IS DISTINCT FROM expected_after THEN
+    RAISE EXCEPTION 'Unexpected executor plan delta for customer migration';
+  END IF;
+
+  INSERT INTO public.marketplace_review_readback_state_v1(key, value) VALUES ('customer_migration_extension_v1',
+    jsonb_build_object('predecessor_seal', prior_seal, 'plan_before', prior_before, 'plan_after', prior_after, 'added', added));
+  -- Both sides gain the shared relations while the marketplace-only delta stays intact.
+  UPDATE public.marketplace_review_readback_state_v1 SET value = (
+    SELECT jsonb_agg(entry ORDER BY entry->>'object_kind', (entry->>'object_id')::oid,
+      entry->>'privilege', entry->>'column_name') FROM jsonb_array_elements(value || added) entry
+  ) WHERE key IN ('plan_before', 'plan_after');
+  SELECT encode(pg_catalog.sha256(convert_to(jsonb_object_agg(key, value ORDER BY key)::text, 'UTF8')), 'hex')
+    INTO digest FROM public.marketplace_review_readback_state_v1;
+  EXECUTE format('COMMENT ON TABLE public.marketplace_review_readback_state_v1 IS %L',
+    'marketplace_review_readback_state_v1:sha256:' || digest);
+END;
+$receipt$;
 
 DO $navigation$
 DECLARE
