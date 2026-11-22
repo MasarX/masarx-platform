@@ -135,7 +135,8 @@ const HORIZONTAL_SPACE_ESCAPE = String.raw`(?:t|u(?:0009|00[2a]0|1680|200[0-9a]|
 const COOKIE_KEY = String.raw`(?:set${KEY_JOIN})?cookies?`;
 const COOKIE_HEADER_KEY = String.raw`(?=(?:${KEY_CHAR}*${KEY_JOIN})?cookie(?:s(?!${KEY_CHAR})|(?![a-z0-9])))${KEY_CHAR}+`;
 const COOKIE_SPACE = String.raw`(?:[^\S\r\n\u2028\u2029]|%(?:25)?(?:09|20)|${JSON_BACKSLASH}+${HORIZONTAL_SPACE_ESCAPE})*`;
-const COOKIE_SEPARATOR = String.raw`${COOKIE_SPACE}(?:[:=]|%(?:25)?3[ad])`;
+const PLAIN_KEY_SEPARATOR = String.raw`(?:=>|:=|[:=])`;
+const COOKIE_SEPARATOR = String.raw`${COOKIE_SPACE}(?:${PLAIN_KEY_SEPARATOR}|%(?:25)?3[ad])`;
 const NOT_COOKIE_HEADER = String.raw`(?!${COOKIE_HEADER_KEY}${COOKIE_SEPARATOR})`;
 const EXTRA_KEYWORD = String.raw`(?:passwd|pwd|${COOKIE_KEY}|session${KEY_JOIN}?ids?|private${KEY_JOIN}?key)`;
 const KEYWORD = String.raw`(?:${LEGACY_KEYWORD}|${EXTRA_KEYWORD}|credentials?|${SPACED_KEY})`;
@@ -144,7 +145,7 @@ const SENSITIVE_KEY_NAME = String.raw`(?:${KEY_CHAR}*${SPACED_KEY}${KEY_CHAR}*|(
 const SENSITIVE_KEY = String.raw`${SENSITIVE_KEY_NAME}(?:["']|%22)*`;
 const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
 const NOT_ENCODED_COOKIE_FIELD = String.raw`(?!${COOKIE_HEADER_KEY}(?:["']|%22)+${ENCODED_SEPARATOR}%22)`;
-const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
+const KEY_SEPARATOR = String.raw`(?:\s*${PLAIN_KEY_SEPARATOR}|${ENCODED_SEPARATOR})`;
 const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
 const LINE_ESCAPE_CODE = String.raw`(?:[nr]|u(?:000[ad]|202[89]))`;
 const SPACE_ESCAPE_CODE = String.raw`(?:${LINE_ESCAPE_CODE}|${HORIZONTAL_SPACE_ESCAPE}|[fb]|u000[8bc])`;
@@ -196,17 +197,17 @@ const ENCODED_CREDENTIAL = encodedCredentialPattern(String.raw`(?:(?!%26|%7d|&)[
 const TRUNCATED_ENCODED_CREDENTIAL = encodedCredentialPattern(String.raw`[\s\S]*$`);
 const CREDENTIAL_PATTERNS = [
   credentialPattern(
-    String.raw`${KEY_BOUNDARY}(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*[:=]\s*`,
+    String.raw`${KEY_BOUNDARY}(?=[a-z0-9_]*(?:api_?key|token|authorization|password|secret|jwt))[a-z0-9_]+["']?\s*${PLAIN_KEY_SEPARATOR}\s*`,
     PLAIN_VALUE,
     String.raw`\[(?:JWT_)?REDACTED\]|${ESCAPED_KEY_BOUNDARY}|${ENCODED_CONTROL_SPACE}|[a-z0-9_]+`,
   ),
-  credentialPattern(String.raw`${KEY_BOUNDARY}${NOT_COOKIE_HEADER}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
+  credentialPattern(String.raw`${KEY_BOUNDARY}${NOT_COOKIE_HEADER}${SENSITIVE_KEY}\s*${PLAIN_KEY_SEPARATOR}\s*`, PLAIN_VALUE),
   credentialPattern(
     String.raw`${KEY_BOUNDARY}${NOT_COOKIE_HEADER}${NOT_ENCODED_COOKIE_FIELD}${SENSITIVE_KEY}%3[ad]\s*`,
     String.raw`(?!${SCANNED_JSON_VALUE})${LEGACY_ENCODED_VALUE}`,
   ),
 ];
-const JSON_SEPARATOR = String.raw`${JSON_SPACE}(?:[:=]|%(?:25)?3[ad])${JSON_SPACE}`;
+const JSON_SEPARATOR = String.raw`${JSON_SPACE}(?:${PLAIN_KEY_SEPARATOR}|%(?:25)?3[ad])${JSON_SPACE}`;
 const JSON_KEY = String.raw`(?:${ESCAPED_JSON_QUOTE}|${KEY_BOUNDARY})${NOT_COOKIE_HEADER}${SENSITIVE_KEY_NAME}(?:["']|%(?:25)?22)*`;
 const JSON_FIELD = new RegExp(
   String.raw`(${JSON_KEY}(?:${ESCAPED_JSON_QUOTE}${ANY_JSON_QUOTE}*${JSON_SEPARATOR}`
@@ -416,49 +417,45 @@ function collectJsonSpans(text: string, spans: RedactionSpan[]) {
 }
 
 const PERCENT_CHARACTER = /%(?:[0-7][\da-f]|(?:c[2-9a-f]|d[\da-f])%[89ab][\da-f]|e[\da-f](?:%[89ab][\da-f]){2}|f[0-4](?:%[89ab][\da-f]){3})/gi;
-const JSON_ESCAPES: Record<string, string> = { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };
-const HTML_ENTITIES: Record<string, string> = { quot: '"', apos: "'", amp: "&", lt: "<", gt: ">", nbsp: "\u00a0" };
-const NORMALIZED_ASSIGNMENT = /([a-z0-9_-]+)(?:\s+(key|ids?)\b)?["']*\s*[:=]\s*|[a-z0-9_-]+/gi;
-const NORMALIZED_SENSITIVE_KEY = new RegExp(`^(?:${SENSITIVE_KEY_NAME}|${COOKIE_HEADER_KEY})$`, "i");
-const REDACTED_VALUE = String.raw`(?:(?:Basic|Bearer)\s+)?\[(?:JWT_)?REDACTED\]`;
-const SAFE_VALUE = new RegExp(
-  String.raw`(?:(?:(['"])(?:${REDACTED_VALUE})?\1|${REDACTED_VALUE})(?=$|[\s,;&}\])/"'])|(?=$|[,;&}\])]))`, "iy",
-);
+const HTML_ENTITIES: Record<string, string> = {
+  quot: '"', apos: "'", amp: "&", lt: "<", gt: ">", nbsp: "\u00a0", equals: "=", colon: ":",
+};
+const MAX_ERROR_DECODE_PASSES = 8;
+// Substrings also cover forms like authorization, x-api-key, and PHPSESSID.
+const SENSITIVE_TERM = /apikey|token|password|secret|jwt|passwd|pwd|cookie|sessionid|privatekey|credential|passphrase|sessid|auth|signature|accesskey|bearer/;
+const URL_USERINFO = /(?:^|[^a-z\d+.-])[a-z][a-z\d+.-]*:\/\/[^:/?#@\s]*:[^/?#@\s]*@/i;
 
-function decodeUpToThreeTimes(text: string, decode: (input: string) => string) {
-  for (let round = 0; round < 3; round += 1) {
-    const next = decode(text);
-    if (next === text) break;
+function shouldWithholdError(output: string) {
+  let text = output.replace(/\[(?:JWT_)?REDACTED\]/g, "[]");
+  for (let pass = 0; pass < MAX_ERROR_DECODE_PASSES; pass += 1) {
+    // Check before decoding reserved URL characters that can be part of a password.
+    if (URL_USERINFO.test(text)) return true;
+    const next = text
+      .replace(PERCENT_CHARACTER, (escape) => {
+        try { return decodeURIComponent(escape); }
+        catch { return escape; }
+      })
+      .replace(/\\(?:u(?:([\da-f]{4})|\{([\da-f]{1,6})\})|x([\da-f]{2})|(["'\\/]))/gi,
+        (escape, unicode, codePoint, byte, literal) => {
+          if (literal !== undefined) return literal;
+          const value = parseInt(unicode ?? codePoint ?? byte, 16);
+          return value <= 0x10ffff ? String.fromCodePoint(value) : escape;
+        })
+      .replace(/&(quot|apos|amp|lt|gt|nbsp|equals|colon);|&#(x[\da-f]+|\d+);?/gi, (entity, name, number) => {
+        if (name !== undefined) return HTML_ENTITIES[name.toLowerCase()];
+        const value = number[0].toLowerCase() === "x" ? parseInt(number.slice(1), 16) : Number(number);
+        return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
+      });
+    if (next === text) {
+      const normalized = text.normalize("NFKC").replace(/\p{Cf}/gu, "").toLowerCase();
+      // A control escape can also be literal text at the start of a key, as in \token.
+      const compact = normalized.replace(/[-_.\s]/g, "");
+      const decodedControls = normalized.replace(/\\[bfnrtv]/g, "").replace(/[-_.\s]/g, "");
+      return URL_USERINFO.test(normalized) || SENSITIVE_TERM.test(compact) || SENSITIVE_TERM.test(decodedControls);
+    }
     text = next;
   }
-  return text;
-}
-
-function hasUnredactedAssignment(output: string) {
-  // Decode individual characters so malformed escapes cannot hide a later valid one.
-  const percentDecoded = decodeUpToThreeTimes(output, (text) => text.replace(PERCENT_CHARACTER, (escape) => {
-    try { return decodeURIComponent(escape); }
-    catch { return escape; }
-  }));
-  const jsonDecoded = decodeUpToThreeTimes(percentDecoded, (text) =>
-    text.replace(/\\(?:u([0-9a-fA-F]{4})|(["\\/bfnrt]))/g, (escape, hex: string | undefined, code: string, offset: number) => {
-      if (code === "t" && text.slice(offset + 2, offset + 6).toLowerCase() === "oken") return escape;
-      return hex === undefined ? JSON_ESCAPES[code] : String.fromCharCode(parseInt(hex, 16));
-    }));
-  const normalized = decodeUpToThreeTimes(jsonDecoded, (text) =>
-    text.replace(/&(?:(quot|apos|amp|lt|gt|nbsp)|#(x[\da-f]+|\d+));/gi, (entity, name: string | undefined, number: string) => {
-      if (name !== undefined) return HTML_ENTITIES[name.toLowerCase()];
-      const value = number[0].toLowerCase() === "x" ? parseInt(number.slice(1), 16) : Number(number);
-      return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
-    }));
-
-  for (const match of normalized.matchAll(NORMALIZED_ASSIGNMENT)) {
-    const [, key, suffix] = match;
-    if (key === undefined || !NORMALIZED_SENSITIVE_KEY.test(suffix ? `${key} ${suffix}` : key)) continue;
-    SAFE_VALUE.lastIndex = match.index + match[0].length;
-    if (!SAFE_VALUE.test(normalized)) return true;
-  }
-  return false;
+  return true;
 }
 
 export function redactOutboxErrorText(value: string) {
@@ -538,7 +535,7 @@ export function redactOutboxErrorText(value: string) {
     cursor = spanEnd;
   }
   output += text.slice(cursor);
-  if (hasUnredactedAssignment(output)) return WITHHELD_MESSAGE;
+  if (shouldWithholdError(output)) return WITHHELD_MESSAGE;
   return output + (truncated ? "\u2026[truncated]" : "");
 }
 

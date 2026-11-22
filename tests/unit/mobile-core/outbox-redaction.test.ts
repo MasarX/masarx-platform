@@ -29,6 +29,7 @@ const alphaMarker = fixtureWord + "Alpha" + 1;
 const betaMarker = fixtureWord + "Beta" + 2;
 const gammaMarker = fixtureWord + "Gamma" + 3;
 const deltaMarker = fixtureWord + "Delta" + 4;
+const withheld = "[REDACTED: message withheld]";
 
 test("constructed credential fixtures preserve their original bytes", () => {
   const fixtures = [
@@ -47,19 +48,19 @@ test("constructed credential fixtures preserve their original bytes", () => {
 });
 
 test.each([
-  ["x-api-key=" + fixtureA, "x-api-key=[REDACTED]"],
-  ["X-Api-Key: " + fixtureB, "X-Api-Key: [REDACTED]"],
-  ["api-key: " + lowerV, "api-key: [REDACTED]"],
-  ["refresh_token%3D" + shortFixture, "refresh_token%3D[REDACTED]"],
-  ["access_token%3D" + shortFixture + "%26x", "access_token%3D[REDACTED]%26x"],
-  ["refresh_token%3A" + shortFixture, "refresh_token%3A[REDACTED]"],
-  ["access_token%3A" + shortFixture + "%26x", "access_token%3A[REDACTED]%26x"],
-  ["ReFrEsH_ToKeN%3d" + shortFixture, "ReFrEsH_ToKeN%3d[REDACTED]"],
-  ["AcCeSs_ToKeN%3a" + shortFixture, "AcCeSs_ToKeN%3a[REDACTED]"],
-  ["access_token%3D" + shortFixture + "%26state%3Dok", "access_token%3D[REDACTED]%26state%3Dok"],
-  ["access_token%3D" + shortFixture + "&state=ok", "access_token%3D[REDACTED]&state=ok"],
-  ["access_token=" + shortFixture + "&state=ok", "access_token=[REDACTED]&state=ok"],
-  ["state%3Dok%26api-key%3D" + shortFixture, "state%3Dok%26api-key%3D[REDACTED]"],
+  ["x-api-key=" + fixtureA, withheld],
+  ["X-Api-Key: " + fixtureB, withheld],
+  ["api-key: " + lowerV, withheld],
+  ["refresh_token%3D" + shortFixture, withheld],
+  ["access_token%3D" + shortFixture + "%26x", withheld],
+  ["refresh_token%3A" + shortFixture, withheld],
+  ["access_token%3A" + shortFixture + "%26x", withheld],
+  ["ReFrEsH_ToKeN%3d" + shortFixture, withheld],
+  ["AcCeSs_ToKeN%3a" + shortFixture, withheld],
+  ["access_token%3D" + shortFixture + "%26state%3Dok", withheld],
+  ["access_token%3D" + shortFixture + "&state=ok", withheld],
+  ["access_token=" + shortFixture + "&state=ok", withheld],
+  ["state%3Dok%26api-key%3D" + shortFixture, withheld],
 ])("redacts %s", (input, expected) => {
   expect(redactOutboxErrorText(input)).toBe(expected);
 });
@@ -69,13 +70,14 @@ test.each(["eyJ", "token"])("caps a 1 MiB run of %s in under 200 ms", (pattern) 
   const start = performance.now();
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(200);
-  expect(output.endsWith("…[truncated]")).toBe(true);
+  if (pattern === "token") expect(output).toBe(withheld);
+  else expect(output.endsWith("…[truncated]")).toBe(true);
 });
 
 test("redacts a credential spanning the cap and discards the raw remainder", () => {
   const prefix = " ".repeat(8192 - ("api-key=" + capFragment).length);
   expect(redactOutboxErrorText(prefix + "api-key=" + visibleTail))
-    .toBe(prefix + "api-key=[REDACTED]…[truncated]");
+    .toBe(withheld);
 });
 
 test("redacts a JWT whose second segment spans the cap", () => {
@@ -85,14 +87,14 @@ test("redacts a JWT whose second segment spans the cap", () => {
 });
 
 test.each([
-  ["token%253D" + fixtureWord, "token%253D[REDACTED]"],
-  ["x-api-key%20%3D%20" + lowerV, "x-api-key%20%3D%20[REDACTED]"],
-  ["api%2Dkey%3D" + fixtureWord, "api%2Dkey%3D[REDACTED]"],
-  ["Bearer%20" + fixtureWord, "Bearer [REDACTED]"],
-  ["bearer:" + fixtureWord, "Bearer [REDACTED]"],
+  ["token%253D" + fixtureWord, withheld],
+  ["x-api-key%20%3D%20" + lowerV, withheld],
+  ["api%2Dkey%3D" + fixtureWord, withheld],
+  ["Bearer%20" + fixtureWord, withheld],
+  ["bearer:" + fixtureWord, withheld],
   ["Basic " + basicFixture, "Basic [REDACTED]"],
-  ["token%3D%22a b%22%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
-  ["-token=" + fixtureWord, "-token=[REDACTED]"],
+  ["token%3D%22a b%22%26state%3Dok", withheld],
+  ["-token=" + fixtureWord, withheld],
   ["x-request-id=1", "x-request-id=1"],
 ])("handles %s without exposing credentials", (input, expected) => {
   expect(redactOutboxErrorText(input)).toBe(expected);
@@ -112,16 +114,16 @@ test("drops an emoji when the cap would split its surrogate pair", () => {
 });
 
 test.each([
-  ["password%3D%22a b token=%22" + uppercaseFixture, "password%3D[REDACTED]"],
-  ["token%3D%22" + shortFixture + "%26jwt%3D%22" + uppercaseFixture + "%22%26state%3Dok", "token%3D[REDACTED]%26jwt%3D[REDACTED]%26state%3Dok"],
-  ["token%3D%22%22" + uppercaseFixture, "token%3D[REDACTED]"],
-  ["token%3D%22" + lowerX + "%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
-  ["token%3D%22a b%22%26state%3Dok", "token%3D[REDACTED]%26state%3Dok"],
-  ["token%3D" + shortFixture + "%20password = " + uppercaseFixture, "token%3D[REDACTED]%20password = [REDACTED]"],
-  ["token%3D" + shortFixture + "%20password: " + uppercaseFixture, "token%3D[REDACTED]%20password: [REDACTED]"],
-  ["token%3Da%20b", "token%3D[REDACTED]"],
+  ["password%3D%22a b token=%22" + uppercaseFixture, withheld],
+  ["token%3D%22" + shortFixture + "%26jwt%3D%22" + uppercaseFixture + "%22%26state%3Dok", withheld],
+  ["token%3D%22%22" + uppercaseFixture, withheld],
+  ["token%3D%22" + lowerX + "%26state%3Dok", withheld],
+  ["token%3D%22a b%22%26state%3Dok", withheld],
+  ["token%3D" + shortFixture + "%20password = " + uppercaseFixture, withheld],
+  ["token%3D" + shortFixture + "%20password: " + uppercaseFixture, withheld],
+  ["token%3Da%20b", withheld],
   ["Basic validation failed", "Basic validation failed"],
-  ["Basic auth required", "Basic auth required"],
+  ["Basic auth required", withheld],
   ["Basic plan expired", "Basic plan expired"],
   ["x-request-id%3D1", "x-request-id%3D1"],
 ])("keeps credential boundaries in %s", (input, expected) => {
@@ -129,14 +131,14 @@ test.each([
 });
 
 test.each([
-  ["authorization%3DBasic%20" + base64PairA, "authorization%3D[REDACTED]"],
-  ["token%3D" + shortFixture + "%20def=ghi", "token%3D[REDACTED]"],
-  ["password%3Dp%20q%3Dr", "password%3D[REDACTED]"],
+  ["authorization%3DBasic%20" + base64PairA, withheld],
+  ["token%3D" + shortFixture + "%20def=ghi", withheld],
+  ["password%3Dp%20q%3Dr", withheld],
   ["Basic " + base64PairB, "Basic [REDACTED]"],
-  ["Bearer%20token: " + upperX, "Bearer%20token: [REDACTED]"],
-  ["Bearer%20client_secret%3A" + shortFixture, "Bearer%20client_secret%3A[REDACTED]"],
-  ["token%3Djwt: " + upperX, "token%3D[REDACTED] [REDACTED]"],
-  ["token%3Dx{\"password\": \"" + uppercaseFixture + "\"}", "token%3D[REDACTED] [REDACTED]}"],
+  ["Bearer%20token: " + upperX, withheld],
+  ["Bearer%20client_secret%3A" + shortFixture, withheld],
+  ["token%3Djwt: " + upperX, withheld],
+  ["token%3Dx{\"password\": \"" + uppercaseFixture + "\"}", withheld],
 ])("redacts compound credential input %s", (input, expected) => {
   expect(redactOutboxErrorText(input)).toBe(expected);
 });
@@ -238,7 +240,7 @@ test.each([
   ["token=" + firstFragment + "%26password\t=\t" + nextFragment, [firstFragment, nextFragment]],
 ])("redacts overlapping values in %s", (input, secrets) => {
   const result = redactOutboxErrorText(input);
-  expect(result).toContain("[REDACTED]");
+  expect(result).toBe(withheld);
   for (const secret of secrets) expect(result).not.toContain(secret);
 });
 
@@ -356,7 +358,7 @@ test.each([
   ["%22token%22%3A" + mixedCaseFixture, mixedCaseFixture],
 ])("redacts quote and authorization variants in %s", (input, secret) => {
   const result = redactOutboxErrorText(input);
-  expect(result).toContain("[REDACTED]");
+  expect(result).toBe(withheld);
   expect(result).not.toContain(secret);
 });
 
@@ -373,13 +375,14 @@ test.each([
   ["token%3D" + shortFixture + "%7D'password'%22%3A" + uppercaseWithDigit, [shortFixture, uppercaseWithDigit]],
 ])("redacts credential prefixes and doubled quotes in %s", (input, secrets) => {
   const result = redactOutboxErrorText(input);
-  expect(result).toContain("[REDACTED]");
+  if (input.startsWith("Basic ")) expect(result).toContain("[REDACTED]");
+  else expect(result).toBe(withheld);
   for (const secret of secrets) expect(result).not.toContain(secret);
 });
 
-test("redacts %26 inside a closed encoded quote and preserves the next parameter", () => {
+test("withholds a credential containing %26 in a closed encoded quote", () => {
   expect(redactOutboxErrorText("token%3D%22" + upperX + "%26" + upperY + "%22%26state%3Dok"))
-    .toBe("token%3D[REDACTED]%26state%3Dok");
+    .toBe(withheld);
 });
 
 test.each([
@@ -390,7 +393,7 @@ test.each([
 ])("redacts the value after three closing quotes in %s", (input) => {
   const output = redactOutboxErrorText(input);
   expect(output).not.toContain(uppercaseWithDigit);
-  expect(output.match(/\[REDACTED\]/g)).toHaveLength(2);
+  expect(output).toBe(withheld);
 });
 
 test.each(["%2C", "%2c", "%5D", "%7D", ")", "/", '"'])(
@@ -398,7 +401,7 @@ test.each(["%2C", "%2c", "%5D", "%7D", ")", "/", '"'])(
   (delimiter) => {
     const suffix = delimiter + "%22b%22%3A1%7D";
     expect(redactOutboxErrorText("%7B%22password%22%3A%22" + upperX + "%26" + upperY + "%22" + suffix))
-      .toBe("%7B%22password%22%3A[REDACTED]" + suffix);
+      .toBe(withheld);
   },
 );
 
@@ -406,7 +409,7 @@ test("redacts an encoded quoted value whose closing quote crosses the cap", () =
   const input = "token%3D%22" + upperS + "%26" + upperS + "%22";
   for (const kept of [15, 16, 17]) {
     const prefix = " ".repeat(8192 - kept);
-    expect(redactOutboxErrorText(prefix + input)).toBe(prefix + "token%3D[REDACTED]\u2026[truncated]");
+    expect(redactOutboxErrorText(prefix + input)).toBe(withheld);
   }
 });
 
@@ -427,10 +430,8 @@ test.each(escapedJsonForms)("redacts a complete credential value in %s", (_label
   const key = "password";
   const credential = [alphaMarker, '"', ", & ", betaMarker, "%5C%22, ", gammaMarker, "\\"].join("");
   const json = JSON.stringify({ [key]: credential, status: 503 });
-  const prefix = transform(`{${JSON.stringify(key)}:`);
-  const suffix = transform(',"status":503}');
 
-  expect(redactOutboxErrorText(transform(json))).toBe(prefix + "[REDACTED]" + suffix);
+  expect(redactOutboxErrorText(transform(json))).toBe(withheld);
 });
 
 test.each([true, false])("redacts mixed quoting with an escaped key set to %s", (escapeKey) => {
@@ -441,15 +442,12 @@ test.each([true, false])("redacts mixed quoting with an escaped key set to %s", 
   const value = escapeKey ? rawValue : escapeJsonPayload(rawValue);
   const suffix = ',"status":503}';
 
-  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(withheld);
 });
 
 test("redacts credentials nested in serialized error messages", () => {
   const error = { message: JSON.stringify({ password: alphaMarker, token: betaMarker, status: 503 }) };
-  const expected = `{"message":"${escapeJsonPayload('{"password":')}[REDACTED]`
-    + `${escapeJsonPayload(',"token":')}[REDACTED]${escapeJsonPayload(',"status":503}')}"}`;
-
-  expect(redactOutboxErrorText(JSON.stringify(error))).toBe(expected);
+  expect(redactOutboxErrorText(JSON.stringify(error))).toBe(withheld);
 });
 
 const structuredJsonForms = [
@@ -469,35 +467,35 @@ test.each([
   ["before an encoded newline", "cOoKiE%3A%20", "a%3D1%3B%20sid%3D" + alphaMarker, "%0Astatus%3A503"],
   ["encoded literal percent", "Cookie%3A%20", encodeURIComponent("a=%0A; sid=" + alphaMarker), "%0Astatus%3A503"],
 ])("redacts the entire cookie header in %s", (_label, prefix, value, suffix) => {
-  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(withheld);
 });
 
 test.each(structuredJsonForms)("redacts cookie headers within %s", (_label, transform) => {
   const prefix = transform('{"error":"Cookie: ');
   const suffix = transform('","status":503}');
   expect(redactOutboxErrorText(prefix + transform("a=1; sid=" + alphaMarker) + suffix))
-    .toBe(prefix + "[REDACTED]" + suffix);
+    .toBe(withheld);
 
   const request = transform('{"error":"request Cookie: ');
   expect(redactOutboxErrorText(request + transform("theme=dark; connect.sid=" + alphaMarker) + suffix))
-    .toBe(request + "[REDACTED]" + suffix);
+    .toBe(withheld);
 
   const pairs = escapeJsonPayload('theme="dark"; connect.sid=' + alphaMarker + "; token=" + betaMarker);
   expect(redactOutboxErrorText(request + transform(pairs) + suffix))
-    .toBe(request + "[REDACTED]" + suffix);
+    .toBe(withheld);
 
   const nextLine = transform('\\nrequest complete","status":503}');
   expect(redactOutboxErrorText(prefix + transform("a=1; sid=" + alphaMarker) + nextLine))
-    .toBe(prefix + "[REDACTED]" + nextLine);
+    .toBe(withheld);
 
   const field = transform('{"Set-Cookie":');
   const cookie = JSON.stringify("theme=dark; Path=/, sid=" + alphaMarker + "; Path=/");
   const fieldSuffix = transform(',"status":503}');
-  expect(redactOutboxErrorText(field + transform(cookie) + fieldSuffix)).toBe(field + "[REDACTED]" + fieldSuffix);
+  expect(redactOutboxErrorText(field + transform(cookie) + fieldSuffix)).toBe(withheld);
 
   const bareField = transform('"Cookie": ');
   expect(redactOutboxErrorText(bareField + transform("a=1; sid=" + alphaMarker)))
-    .toBe(bareField + "[REDACTED]");
+    .toBe(withheld);
 });
 
 test.each([
@@ -507,7 +505,7 @@ test.each([
   const prefix = transform('{"Cookie":');
   const value = transform(JSON.stringify("a=1; sid=" + alphaMarker));
   const suffix = transform(',"status":503}');
-  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(withheld);
 });
 
 test.each(structuredJsonForms)("redacts plural and spaced credential keys in %s", (_label, transform) => {
@@ -515,10 +513,8 @@ test.each(structuredJsonForms)("redacts plural and spaced credential keys in %s"
     ["credentials", alphaMarker], ["clientCredential", alphaMarker], ["cookies", "sid=" + alphaMarker],
     ["session id", alphaMarker], ["session_ids", alphaMarker], ["session ids", alphaMarker],
   ]) {
-    const prefix = transform(`{${JSON.stringify(key)}:`);
-    const suffix = transform(',"status":503}');
     const input = transform(JSON.stringify({ [key]: value, status: 503 }));
-    expect(redactOutboxErrorText(input)).toBe(prefix + "[REDACTED]" + suffix);
+    expect(redactOutboxErrorText(input)).toBe(withheld);
   }
 });
 
@@ -537,7 +533,7 @@ test.each(structuredJsonForms)("redacts bare values and entire collections in %s
   for (const [key, value] of cases) {
     const prefix = transform(`{${JSON.stringify(key)}:`);
     const suffix = transform(',"status":503}');
-    expect(redactOutboxErrorText(prefix + transform(value) + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+    expect(redactOutboxErrorText(prefix + transform(value) + suffix)).toBe(withheld);
   }
 });
 
@@ -545,7 +541,7 @@ test("redacts an unterminated or mismatched collection through the end", () => {
   const prefix = escapeJsonPayload('{"secret":');
   for (const suffix of ["", "]"]) {
     const value = escapeJsonPayload(`{"value":${JSON.stringify(alphaMarker)}${suffix}`);
-    expect(redactOutboxErrorText(prefix + value)).toBe(prefix + "[REDACTED]");
+    expect(redactOutboxErrorText(prefix + value)).toBe(withheld);
   }
 });
 
@@ -555,15 +551,15 @@ test.each([true, false])("redacts a mixed-quoting collection with an escaped key
   const prefix = `{${escapeKey ? escapeJsonPayload(key) : key}:`;
   const suffix = ',"status":503}';
   expect(redactOutboxErrorText(prefix + (escapeKey ? value : escapeJsonPayload(value)) + suffix))
-    .toBe(prefix + "[REDACTED]" + suffix);
+    .toBe(withheld);
 });
 
 test.each([
   ["token: ", shortFixture, "; retry=3 status=503"],
   ["secret=", lowerX, " keepme"],
-])("preserves diagnostics after the escaped quote in %s", (prefix, value, suffix) => {
+])("withholds credentials even with diagnostics after the escaped quote in %s", (prefix, value, suffix) => {
   const input = prefix + escapeJsonPayload(JSON.stringify(value)) + suffix;
-  expect(redactOutboxErrorText(input)).toBe(prefix + "[REDACTED]" + suffix);
+  expect(redactOutboxErrorText(input)).toBe(withheld);
 });
 
 test.each(structuredJsonForms)("redacts additional sensitive keys in %s", (_label, transform) => {
@@ -574,7 +570,7 @@ test.each(structuredJsonForms)("redacts additional sensitive keys in %s", (_labe
     const prefix = transform(`{${JSON.stringify(key)}:`);
     const suffix = transform(',"status":503}');
     expect(redactOutboxErrorText(prefix + transform(JSON.stringify(alphaMarker)) + suffix))
-      .toBe(prefix + "[REDACTED]" + suffix);
+      .toBe(withheld);
   }
 });
 
@@ -604,7 +600,7 @@ test.each(boundaryForms)(
         ] as const) {
           const prefix = transform(before);
           const suffix = transform(after);
-          expect(redactOutboxErrorText(prefix + transform(value) + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+          expect(redactOutboxErrorText(prefix + transform(value) + suffix)).toBe(withheld);
         }
       }
     }
@@ -613,14 +609,14 @@ test.each(boundaryForms)(
 
 test.each(cookieHeaderKeys)("redacts every pair in the %s header", (key) => {
   const prefix = key + "=";
-  expect(redactOutboxErrorText(prefix + "a=1; sid=" + alphaMarker)).toBe(prefix + "[REDACTED]");
+  expect(redactOutboxErrorText(prefix + "a=1; sid=" + alphaMarker)).toBe(withheld);
 });
 
 test.each(["\u00a0", "\u2003", "\u202f", "\\u00a0", "\\u2003", "\\t"])(
   "redacts a cookie header with space %j before the colon",
   (space) => {
     const prefix = `Cookie${space}: `;
-    expect(redactOutboxErrorText(prefix + "a=1; sid=" + alphaMarker)).toBe(prefix + "[REDACTED]");
+    expect(redactOutboxErrorText(prefix + "a=1; sid=" + alphaMarker)).toBe(withheld);
   },
 );
 
@@ -628,33 +624,33 @@ test.each([
   ["once", encodeURIComponent],
   ["twice", (text: string) => encodeURIComponent(encodeURIComponent(text))],
 ] as const)(
-  "preserves the raw query parameter after a cookie header encoded %s",
+  "withholds the raw query parameter with a cookie header encoded %s",
   (_depth, encode) => {
     const prefix = "q=1&h=" + encode("Cookie: ");
     const suffix = "&keep=1";
     const input = prefix + encode("a=1; sid=" + alphaMarker) + suffix;
-    expect(redactOutboxErrorText(input)).toBe(prefix + "[REDACTED]" + suffix);
+    expect(redactOutboxErrorText(input)).toBe(withheld);
   },
 );
 
 test.each(boundaryForms)(
-  "only redacts the cookie scalar in %s",
+  "withholds a message with a cookie scalar in %s",
   (_label, transform) => {
     const input = '{"cookies":4,"cookiePolicy":"accepted","status":503}';
     expect(redactOutboxErrorText(transform(input)))
-      .toBe(transform('{"cookies":') + "[REDACTED]" + transform(',"cookiePolicy":"accepted","status":503}'));
+      .toBe(withheld);
     for (const scalar of ["true", "false", "null", "-1.4e+21"]) {
       for (const [prefix, suffix] of [['{"cookies":', '}'], ['[{"request_cookie":', '}]'], ['"cookies":', ']']]) {
         expect(redactOutboxErrorText(transform(prefix + scalar + suffix)))
-          .toBe(transform(prefix) + "[REDACTED]" + transform(suffix));
+          .toBe(withheld);
       }
     }
   },
 );
 
-test("preserves cookies policy prose and similarly named diagnostic fields", () => {
+test("withholds cookies policy prose and similarly named diagnostic fields", () => {
   const input = 'cookies policy: accepted {"cookiePolicy":"accepted","credentialsMode":"omit"}';
-  expect(redactOutboxErrorText(input)).toBe(input);
+  expect(redactOutboxErrorText(input)).toBe(withheld);
 });
 
 const boundaryMarker = ["Zq", "Mark"].join("");
@@ -685,7 +681,7 @@ test.each(["%3F", "%2C", "%3B", "%7C", "%2F", "%3D", "%26", "%C2%A0"])(
   (punctuation) => {
     for (let depth = 1; depth <= 4; depth += 1) {
       const prefix = "diagnostic" + punctuation + "pwd=";
-      expect(redactOutboxErrorText(prefix + boundaryMarker)).toBe(prefix + "[REDACTED]");
+      expect(redactOutboxErrorText(prefix + boundaryMarker)).toBe(withheld);
       punctuation = encodeURIComponent(punctuation);
     }
   },
@@ -695,7 +691,74 @@ test.each(["t", "n", "r", "u0009"])("only treats an odd backslash run before %s 
   const value = boundaryMarker + "\\\\" + code + boundaryMarker;
   expect(redactOutboxErrorText("password=" + value)).not.toContain(boundaryMarker);
   const suffix = "\\" + code + "status=503";
-  expect(redactOutboxErrorText("password=" + boundaryMarker + suffix)).toBe("password=[REDACTED]" + suffix);
+  expect(redactOutboxErrorText("password=" + boundaryMarker + suffix)).toBe(withheld);
+});
+
+const encodeEquals = (depth: number) => "%" + "25".repeat(depth - 1) + "3D";
+test.each([
+  ["JSON-style hash rocket", '{"password" => "' + alphaMarker + '"}'],
+  ["symbol key and hash rocket", "{:password => '" + alphaMarker + "'}"],
+  ["array and hash rocket", "array('password' => '" + alphaMarker + "')"],
+  ["bare hash rocket", "password => " + alphaMarker],
+  ["colon equals", "password := " + alphaMarker],
+  ["Bearer tail after semicolon", "Authorization: Bearer " + shortFixture + ";" + alphaMarker],
+  ["escaped JSON tail after slash", '{\\"password\\":\\"x\\"/' + alphaMarker + '\\"}'],
+  ["escaped JSON tail after parenthesis", '{\\"password\\":\\"x\\")' + alphaMarker + '\\"}'],
+  ["comma before value", "password=," + alphaMarker],
+  ["brace before value", "password=}" + alphaMarker],
+  ["four percent layers", "password" + encodeEquals(4) + alphaMarker],
+  ["five percent layers", "password" + encodeEquals(5) + alphaMarker],
+  ["backslash run", "password" + "\\".repeat(8) + "u003d" + alphaMarker],
+  ["JS-escaped percent", "password\\u00253d" + alphaMarker],
+  ["HTML-escaped percent", "password&#37;3d" + alphaMarker],
+  ["percent-wrapped HTML percent", encodeURIComponent("password&#37;3d" + alphaMarker)],
+  ["HTML-escaped backslash", "password&#92;u003d" + alphaMarker],
+  ["nested ampersands", "password&amp;amp;amp;#61;" + alphaMarker],
+  ["numeric entity without a semicolon", "password&#61" + alphaMarker],
+  ["named equals entity", "password&equals;" + alphaMarker],
+  ["named colon entity", "password&colon;" + alphaMarker],
+  ["JS byte escape", "password\\x3d" + alphaMarker],
+  ["JS code point escape", "password\\u{3d}" + alphaMarker],
+  ["fullwidth equals", "password\uff1d" + alphaMarker],
+  ["fullwidth colon", "password\uff1a" + alphaMarker],
+  ["format character inside key", "pass\u200bword=" + alphaMarker],
+  ["prose separator", "password is " + alphaMarker],
+  ["arrow separator", "password -> " + alphaMarker],
+  ["tab separator", "password\t" + alphaMarker],
+  ["command line option", "--password " + alphaMarker],
+  ["XML tag", "<password>" + alphaMarker + "</password>"],
+  ["header without colon", "X-Api-Key " + alphaMarker],
+  ["URL userinfo", "https://user:" + alphaMarker + "@host/x"],
+  ["passphrase key", "passphrase=" + alphaMarker],
+  ["PHP session key", "PHPSESSID=" + alphaMarker],
+  ["password suffix", "dbpasswd=" + alphaMarker],
+  ["auth key", "auth=" + alphaMarker],
+  ["signature key", "signature=" + alphaMarker],
+  ["access key", "access_key=" + alphaMarker],
+  ["split key and mixed encoding", encodeURIComponent("&#92;u0070a.s_s-&#119;or\\u{64}&equals;" + alphaMarker)],
+  ["fullwidth key", "\uff50\uff41\uff53\uff53\uff57\uff4f\uff52\uff44=" + alphaMarker],
+  ["literal backslash before encoded token", "\\toke&#110;=" + alphaMarker],
+  ["escaped tab inside key", "pass\\tword=" + alphaMarker],
+  ["encoded slash inside URL password", encodeURIComponent("https://user:" + alphaMarker + "%2Ftail@host/x")],
+  ["credential prose", "password reset failed " + alphaMarker],
+  ["literal marker after key", "password=[REDACTED] " + alphaMarker],
+])("withholds a residual credential term (%s)", (_label, input) => {
+  const output = redactOutboxErrorText(input);
+  expect(output).toBe(withheld);
+  expect(output).not.toContain(alphaMarker);
+});
+
+test("withholds an 8 KiB input after eight changing decode passes", () => {
+  const nested = "%" + "25".repeat(16) + "61";
+  const copies = Math.floor(8192 / nested.length);
+  const input = nested.repeat(copies).padEnd(8192);
+  const decode = jest.spyOn(globalThis, "decodeURIComponent");
+  try {
+    expect(redactOutboxErrorText(input)).toBe(withheld);
+    expect(decode).toHaveBeenCalledTimes(8 * copies);
+  } finally {
+    decode.mockRestore();
+  }
 });
 
 test("withholds 50 encoded assignments that survive span redaction", () => {
@@ -726,21 +789,21 @@ test("withholds a path assignment whose key and separator require percent decodi
 });
 
 test.each([
-  "cookies policy",
-  "status=503 retry=3 path=C:\\tmp\\logs",
-  "next=https%3A%2F%2Fexample.invalid%2F%3Fstatus%3D503",
-  "{&quot;cookiePolicy&quot;:&quot;accepted&quot;}",
-  "password=",
-])("keeps a diagnostic without a credential unchanged (%#)", (input) => {
-  expect(redactOutboxErrorText(input)).toBe(input);
+  ["cookies policy", withheld],
+  ["status=503 retry=3 path=C:\\tmp\\logs"],
+  ["next=https%3A%2F%2Fexample.invalid%2F%3Fstatus%3D503"],
+  ["{&quot;cookiePolicy&quot;:&quot;accepted&quot;}", withheld],
+  ["password=", withheld],
+])("keeps a diagnostic only if it has no credential term (%#)", (input, expected = input) => {
+  expect(redactOutboxErrorText(input)).toBe(expected);
 });
 
 test.each([
   "the cookie was rejected", "credentialsProvider", "credential provider chain",
   JSON.stringify({ credentialsProvider: "runtime" }),
 ])(
-  "preserves diagnostic prose %s", (input) => {
-    expect(redactOutboxErrorText(input)).toBe(input);
+  "withholds diagnostic prose %s containing a credential term", (input) => {
+    expect(redactOutboxErrorText(input)).toBe(withheld);
   },
 );
 
@@ -754,7 +817,7 @@ test("processes 8 KiB of nested escaped credential fields in under 50 ms", () =>
   const start = performance.now();
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(50);
-  expect(output).toBe(prefix + "[REDACTED]");
+  expect(output).toBe(withheld);
 });
 
 test("processes 8 KiB of repeated cookie-like key segments in under 50 ms", () => {
@@ -762,7 +825,7 @@ test("processes 8 KiB of repeated cookie-like key segments in under 50 ms", () =
   const start = performance.now();
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(50);
-  expect(output).toBe(input);
+  expect(output).toBe(withheld);
 });
 
 test("processes an 8 KiB multi-pair cookie header in under 50 ms", () => {
@@ -773,7 +836,7 @@ test("processes an 8 KiB multi-pair cookie header in under 50 ms", () => {
   const start = performance.now();
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(50);
-  expect(output).toBe(prefix + "[REDACTED]");
+  expect(output).toBe(withheld);
 });
 
 test("processes 8 KiB of repeated plural keys in under 50 ms", () => {
@@ -781,19 +844,18 @@ test("processes 8 KiB of repeated plural keys in under 50 ms", () => {
   const start = performance.now();
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(50);
-  expect(output).toBe(input);
+  expect(output).toBe(withheld);
 });
 
 test("processes 8 KiB of escape-prefixed keys in under 50 ms", () => {
   const keys = String.raw`\nCookie: a=1; sid=` + alphaMarker + String.raw`\n\tprivate_key=` + betaMarker
     + String.raw`\r%250Asession_id=` + gammaMarker + String.raw`\nkeep line`;
-  const expected = String.raw`\nCookie: [REDACTED]\n\tprivate_key=[REDACTED]\r%250Asession_id=[REDACTED]\nkeep line`;
   const repeats = Math.floor(8192 / keys.length);
   const input = keys.repeat(repeats).padEnd(8192);
   const start = performance.now();
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(50);
-  expect(output).toBe(expected.repeat(repeats) + " ".repeat(8192 - repeats * keys.length));
+  expect(output).toBe(withheld);
 });
 
 test("caps a 1 MiB unterminated escaped value with deeper quotes in under 200 ms", () => {
@@ -805,7 +867,7 @@ test("caps a 1 MiB unterminated escaped value with deeper quotes in under 200 ms
   const start = performance.now();
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(200);
-  expect(output).toBe(prefix + "[REDACTED]…[truncated]");
+  expect(output).toBe(withheld);
 });
 
 function checkHistoricalCoverage(seed: number, count: number, includeEscapedJson = false) {
@@ -877,12 +939,7 @@ function checkHistoricalCoverage(seed: number, count: number, includeEscapedJson
         secret: values[Math.floor(index / structuredJsonForms.length) % values.length],
         pin_token: index, credential: false, session_id: null, [pluralKey]: hostile, error: header + headerValue, status: 503,
       });
-      const expected = structuredTransform('{"secret":') + "[REDACTED]"
-        + structuredTransform(',"pin_token":') + "[REDACTED]" + structuredTransform(',"credential":') + "[REDACTED]"
-        + structuredTransform(',"session_id":') + "[REDACTED]" + structuredTransform(`,${JSON.stringify(pluralKey)}:`) + "[REDACTED]"
-        + structuredTransform(`,"error":"${header}`) + "[REDACTED]" + structuredTransform('","status":503}');
-      const historicalOutput = actual.slice(actual.indexOf(" & ") + 3);
-      expect(redactOutboxErrorText(structuredTransform(json) + " & " + historical)).toBe(expected + " & " + historicalOutput);
+      expect(redactOutboxErrorText(structuredTransform(json) + " & " + historical)).toBe(withheld);
     }
     for (const fixture of [...fixtures, singleCase, escapedFixture]) {
       if (!input.includes(fixture)) continue;
