@@ -122,7 +122,18 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
-          const bundle = buildEdgeDbJwtBundle({ secret: process.env.SUPABASE_JWT_SECRET });
+          const bundle = buildEdgeDbJwtBundle({ secret: process.env.SUPABASE_JWT_SECRET, includeMarketing: true });
+          const token = bundle?.marketing_db_jwt;
+          let role;
+          try {
+            role = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).role;
+          } catch {
+            // Report the contract failure without printing the credential.
+          }
+          if (role !== 'edge_marketing_role') {
+            console.error('::error::Failed to mint MARKETING_DB_JWT with the edge_marketing_role claim.');
+            process.exit(1);
+          }
           for (const value of Object.values(bundle)) console.log('::add-mask::' + value);
           fs.writeFileSync(process.env.EDGE_SECRET_FILE, Object.entries(bundle)
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
@@ -134,7 +145,24 @@ jobs:
           export NO_COLOR=1
           "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
             bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}"
+          trap 'exec 1>&3 2>&4 3>&- 4>&-; echo "::error::Edge secret update failed" >&2' ERR
+          exec 3>&1 4>&2 >/dev/null 2>&1
           "$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
+          exec 1>&3 2>&4 3>&- 4>&-
+          trap - ERR
+          if ! "$cli" secrets list --project-ref "$SUPABASE_PROJECT_REF" --output json 2>/dev/null |
+            node -e '
+              const { readFileSync } = require("node:fs");
+              const { createHash } = require("node:crypto");
+              const list = JSON.parse(readFileSync(0, "utf8"));
+              const token = readFileSync(process.env.EDGE_SECRET_FILE, "utf8").match(/^MARKETING_DB_JWT=(.+)$/m)?.[1];
+              if (!token) process.exit(1);
+              const expected = createHash("sha256").update(token).digest("hex");
+              if (list.find(entry => entry.name === "MARKETING_DB_JWT")?.value !== expected) process.exit(1);
+            ' 2>/dev/null; then
+            echo '::error::Marketing token verification failed.'
+            exit 1
+          fi
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi

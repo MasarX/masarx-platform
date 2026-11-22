@@ -1,5 +1,5 @@
 import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
-import { logStructured, parseRequestBody, readEnv, toResponseBody } from "./_shared/mod.mjs";
+import { decodeJwtPayload, logStructured, parseRequestBody, readEnv, toResponseBody } from "./_shared/mod.mjs";
 import { selectRpcAuthAttempts } from "./rpc-auth.mjs";
 import {
   LOCAL_MARKETING_TURNSTILE_TEST_SECRET,
@@ -25,13 +25,10 @@ const SUPABASE_SERVICE_KEY = readEnv("EDGE_SUPABASE_SERVICE_ROLE_KEY", [
 const EDGE_SUPABASE_SECRET_KEY = readEnv("EDGE_SUPABASE_SECRET_KEY", [
   "SUPABASE_SECRET_KEY",
 ]);
-const RAW_DB_JWT = readEnv("MARKETING_DB_JWT", ["API_GATEWAY_DB_JWT", "EDGE_DB_JWT"]);
-const DB_JWT = RAW_DB_JWT && RAW_DB_JWT.split(".").length === 3 ? RAW_DB_JWT : "";
-if (RAW_DB_JWT && !DB_JWT) {
-  console.warn(
-    "[marketing-lead-intake] ignoring invalid MARKETING_DB_JWT shape; expected JWT with 3 segments",
-  );
-}
+const MARKETING_DB_JWT = readEnv("MARKETING_DB_JWT");
+const DB_JWT = MARKETING_DB_JWT
+  ? { marketing: decodeJwtPayload(MARKETING_DB_JWT)?.role === "edge_marketing_role" ? MARKETING_DB_JWT : "" }
+  : readEnv("API_GATEWAY_DB_JWT", ["EDGE_DB_JWT"]);
 
 const TURNSTILE_SECRET_KEY = readEnv("MARKETING_TURNSTILE_SECRET_KEY", [
   "TURNSTILE_SECRET_KEY",
@@ -80,6 +77,12 @@ type RpcAttempt = {
 };
 
 const buildRpcAuthAttempts = (): RpcAttempt[] => {
+  if (typeof DB_JWT !== "string") {
+    if (!DB_JWT.marketing) return [];
+    const headers: Record<string, string> = { authorization: `Bearer ${DB_JWT.marketing}` };
+    if (SUPABASE_ANON_KEY) headers.apikey = SUPABASE_ANON_KEY;
+    return [{ label: "marketing-db-jwt", headers }];
+  }
   const attempts: RpcAttempt[] = [];
   const dedupe = new Set<string>();
   const dbJwt = isJwtLike(DB_JWT) ? DB_JWT : "";
@@ -287,6 +290,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   if (!cors.ok) return json(cors.status, cors.body, cors.headers);
+
+  if ((typeof DB_JWT !== "string" && !DB_JWT.marketing) || (!MARKETING_DB_JWT && !cors.localContext)) {
+    return json(500, { ok: false, error: { code: "server_misconfigured" } }, cors.headers);
+  }
+  if (!MARKETING_DB_JWT) {
+    console.warn("[marketing-lead-intake] using local database credential fallback");
+  }
 
   if (isClientsFeedRequest) {
     if (req.method !== "GET") {
