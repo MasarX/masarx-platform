@@ -108,6 +108,10 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
           SUPABASE_PROJECT_REF: ${{ inputs.mode != 'dry-run' && vars.SUPABASE_PROJECT_REF || '' }}
+          API_GATEWAY_CORS_ALLOW_ORIGINS: ${{ vars.API_GATEWAY_CORS_ALLOW_ORIGINS }}
+          LABEL_RENDERER_CORS_ALLOW_ORIGINS: ${{ vars.LABEL_RENDERER_CORS_ALLOW_ORIGINS }}
+          LANDING_CORS_ALLOW_ORIGINS: ${{ vars.LANDING_CORS_ALLOW_ORIGINS }}
+          PUBLIC_TRACKING_CORS_ALLOW_ORIGINS: ${{ vars.PUBLIC_TRACKING_CORS_ALLOW_ORIGINS }}
         run: |
           set -euo pipefail
           umask 077
@@ -123,6 +127,7 @@ jobs:
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
             + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n', { mode: 0o600 });
           NODE
+          node scripts/deploy/append-function-cors.mjs
           cli="$RUNNER_TEMP/deploy-tools/supabase"
           "$cli" link --project-ref "$SUPABASE_PROJECT_REF" --yes
           "$cli" db push --linked --yes
