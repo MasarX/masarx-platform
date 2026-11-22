@@ -9,6 +9,7 @@ const stale = 'b'.repeat(40);
 const devTip = 'c'.repeat(40);
 const failedAt = '2026-01-01T00:00:00Z';
 const later = '2026-01-01T00:00:01Z';
+const latest = '2026-01-01T00:00:02Z';
 const marker = 'Record database push attempt';
 const legacyStep = 'Apply migrations and deploy registered edge functions';
 const inProgress = { id: 43, run_number: 10, status: 'in_progress' };
@@ -75,6 +76,9 @@ test.each([
   ['replacement was cancelled', {
     env: { GITHUB_SHA: stale }, newer: { ...inProgress, status: 'completed', conclusion: 'cancelled' },
   }, 'refused', `G1: superseding run 43 for ${tip} was cancelled; dispatch expected_sha=${tip}`],
+  ['dev replacement was cancelled', {
+    newerDev: { ...inProgress, status: 'completed', conclusion: 'cancelled' },
+  }, 'refused', `G1: superseding run 43 for ${devTip} was cancelled; promote dev to main, then dispatch expected_sha=${tip}`],
   ['red with an older re-arm', { previous: 'failure', env: { DEV_DB_REARMED_AT: '2025-12-31T00:00:00Z' } },
     'refused', 'G2: previous apply failed at run 42; re-arm required'],
   ['red with an equal re-arm', { previous: 'failure', env: { DEV_DB_REARMED_AT: failedAt } },
@@ -138,6 +142,33 @@ test.each(['main', 'dev'])('a later failed rerun on %s takes precedence over a n
   expect(get).toHaveBeenCalledWith(expect.stringContaining('/actions/runs/42/attempts/1/jobs'));
 });
 
+test.each([
+  ['success ties failure', { conclusion: 'failure', completed_at: later }, 'refused',
+    'G2: previous apply failed at run 42; re-arm required'],
+  ['success follows failure', { conclusion: 'failure', completed_at: failedAt }, 'allow',
+    'G2: previous apply at run 41 concluded success'],
+  ['steps omitted', { conclusion: 'failure', completed_at: latest, steps: undefined }, 'refused',
+    'G2: previous apply failed at run 42; re-arm required'],
+  ['steps is not an array', { conclusion: 'failure', completed_at: latest, steps: {} }, 'refused',
+    'G2: previous apply failed at run 42; re-arm required'],
+  ['malformed steps on a successful job', { conclusion: 'success', completed_at: latest, steps: {} }, 'allow',
+    'G2: previous apply at run 42 concluded success'],
+  ['empty steps on a failed job', { conclusion: 'failure', completed_at: latest, steps: [] }, 'allow',
+    'G2: previous apply at run 41 concluded success'],
+  ['malformed steps on a failed job after re-arm', { conclusion: 'failure', completed_at: latest, steps: {} }, 'allow',
+    'G2: re-armed after run 42', { DEV_DB_REARMED_AT: '2026-01-01T00:00:03Z' }],
+])('%s', async (_label, job, expected, decision, env = {}) => {
+  const { result, decisions } = await fixture({ env, history: {
+    runs: { main: [{ id: 41, run_attempt: 1 }, { id: 42, run_attempt: 1 }], dev: [] },
+    jobs: {
+      '/actions/runs/42/attempts/1/jobs': job,
+      '/actions/runs/41/attempts/1/jobs': { conclusion: 'success', completed_at: later },
+    },
+  } });
+  expect(result).toBe(expected);
+  expect(decisions).toContain(decision);
+});
+
 test('refuses when the GitHub result cap prevents a complete history scan', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-guard-'));
   const env = {
@@ -163,20 +194,112 @@ test('refuses when the GitHub result cap prevents a complete history scan', asyn
   }
 });
 
-test.each(['HTTP error', 'network error'])('fails closed on %s without publishing a deployment output', async error => {
+test.each([
+  ['at the main tip', tip, []],
+  ['behind the main tip without a newer run', stale, []],
+  ['behind the main tip with a newer run', stale, [inProgress]],
+])('checks main supersession when dev is missing and the push is %s', async (_label, sha, replacements) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-guard-'));
   const env = {
-    GITHUB_STEP_SUMMARY: path.join(dir, 'summary'),
-    GITHUB_OUTPUT: path.join(dir, 'output'),
+    GITHUB_API_URL: 'https://example.test', GITHUB_REPOSITORY: 'example/repo',
+    GITHUB_EVENT_NAME: 'push', GITHUB_SHA: sha, RUN_NUMBER: '9',
+    GITHUB_STEP_SUMMARY: path.join(dir, 'summary'), GITHUB_OUTPUT: path.join(dir, 'output'),
   };
-  const fetchRequest = error === 'HTTP error'
-    ? jest.fn().mockResolvedValue({ ok: false, status: 503 })
-    : jest.fn().mockRejectedValue(new Error('Connection failed'));
+  const fetchRequest = jest.fn()
+    .mockResolvedValueOnce(Response.json({ object: { sha: tip } }))
+    .mockResolvedValueOnce(new Response(null, { status: 404 }));
+  if (sha !== tip) fetchRequest.mockResolvedValueOnce(Response.json({ workflow_runs: replacements }));
+  fetchRequest
+    .mockResolvedValueOnce(Response.json({ workflow_runs: [] }))
+    .mockResolvedValueOnce(Response.json({ workflow_runs: [{ id: 42, run_attempt: 1 }] }))
+    .mockResolvedValueOnce(Response.json({ jobs: [{
+      name: 'database', status: 'completed', conclusion: 'success', completed_at: failedAt,
+      steps: [{ name: marker, conclusion: 'success' }],
+    }] }));
+  const reportDecision = jest.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const superseded = replacements.length > 0;
+    await expect(guard(env, fetchRequest)).resolves.toBe(0);
+    expect(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8')).toBe(`superseded=${superseded}\n`);
+    const summary = fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8');
+    const branchQueries = fetchRequest.mock.calls.map(([url]) => new URL(url).searchParams).filter(params => params.has('branch'));
+    if (sha !== tip) {
+      const mainQuery = branchQueries.shift();
+      expect(mainQuery.get('branch')).toBe('main');
+      expect(mainQuery.get('event')).toBe('push');
+      expect(mainQuery.get('head_sha')).toBe(tip);
+    }
+    if (superseded) {
+      expect(summary).toContain(`G1: superseded by ${tip}`);
+      expect(summary).not.toContain('G2:');
+      expect(branchQueries).toEqual([]);
+    } else {
+      expect(summary).toContain('G1: no superseding push');
+      expect(summary).toContain('G2: previous apply at run 42 concluded success');
+      expect(branchQueries.map(params => params.get('branch'))).toEqual(['main', 'dev']);
+      expect(branchQueries.every(params => params.has('created'))).toBe(true);
+    }
+  } finally {
+    reportDecision.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fails closed on invalid JSON without publishing the response body or query', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-guard-'));
+  const env = {
+    GITHUB_API_URL: 'https://example.test', GITHUB_REPOSITORY: 'example/repo',
+    GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_SHA: tip, EXPECTED_SHA: tip,
+    GITHUB_STEP_SUMMARY: path.join(dir, 'summary'), GITHUB_OUTPUT: path.join(dir, 'output'),
+  };
+  const body = 'unexpected response content';
+  const fetchRequest = jest.fn()
+    .mockResolvedValueOnce(Response.json({ object: { sha: tip } }))
+    .mockResolvedValueOnce(new Response(body));
   const reportError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  const reportDecision = jest.spyOn(console, 'log').mockImplementation(() => {});
   try {
     await expect(guard(env, fetchRequest)).resolves.toBe(1);
     expect(fs.existsSync(env.GITHUB_OUTPUT)).toBe(false);
-    expect(fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8')).toContain('Guard could not verify GitHub deployment state');
+    expect(fetchRequest.mock.calls[1][0]).toContain('?branch=main&created=');
+    const message = 'Guard could not verify GitHub deployment state: invalid JSON from /actions/workflows/deploy.yml/runs';
+    const summary = fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8');
+    expect(summary).toContain(`- ${message}\n`);
+    expect(summary).not.toContain(body);
+    expect(reportError.mock.calls).toEqual([[`::error::${message}`]]);
+  } finally {
+    reportError.mockRestore();
+    reportDecision.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  ['HTTP error', false, new Response(null, { status: 503 }), 'GitHub API returned HTTP 503 for /git/ref/heads/main'],
+  ['missing main ref', false, new Response(null, { status: 404 }), 'GitHub API returned HTTP 404 for /git/ref/heads/main'],
+  ['dev ref HTTP 500', true, new Response(null, { status: 500 }), 'GitHub API returned HTTP 500 for /git/ref/heads/dev'],
+  ['malformed dev SHA', true, Response.json({ object: { sha: [devTip] } }), 'Invalid dev tip'],
+  ['network error', false, null, 'Connection failed for [redacted]'],
+])('fails closed on %s without publishing a deployment output', async (_label, push, response, detail) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-guard-'));
+  const env = {
+    GH_TOKEN: ['example', 'value'].join('-'),
+    GITHUB_EVENT_NAME: push ? 'push' : 'workflow_dispatch', GITHUB_SHA: tip,
+    GITHUB_STEP_SUMMARY: path.join(dir, 'summary'),
+    GITHUB_OUTPUT: path.join(dir, 'output'),
+  };
+  const fetchRequest = jest.fn();
+  if (push) fetchRequest.mockResolvedValueOnce(Response.json({ object: { sha: tip } }));
+  if (response) fetchRequest.mockResolvedValueOnce(response);
+  else fetchRequest.mockRejectedValueOnce(new Error('Connection failed for ' + env.GH_TOKEN));
+  const reportError = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    await expect(guard(env, fetchRequest)).resolves.toBe(1);
+    expect(fetchRequest).toHaveBeenCalledTimes(push ? 2 : 1);
+    expect(fs.existsSync(env.GITHUB_OUTPUT)).toBe(false);
+    const message = `Guard could not verify GitHub deployment state: ${detail}`;
+    expect(fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8')).toBe(`## DEV database guard\n\n- ${message}\n`);
+    expect(reportError).toHaveBeenCalledWith(`::error::${message}`);
   } finally {
     reportError.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

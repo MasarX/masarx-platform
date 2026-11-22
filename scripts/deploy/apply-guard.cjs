@@ -19,25 +19,33 @@ async function* pages(get, path, field) {
 }
 
 async function evaluate(get, env, record) {
-  const tip = (await get('/git/ref/heads/main')).object.sha;
-  if (!/^[0-9a-f]{40}$/.test(tip)) throw new Error('Invalid main tip');
+  const shaPattern = /^[0-9a-f]{40}$/;
+  const tip = (await get('/git/ref/heads/main'))?.object?.sha;
+  if (typeof tip !== 'string' || !shaPattern.test(tip)) throw new Error('Invalid main tip');
 
   if (env.GITHUB_EVENT_NAME === 'push') {
-    const devTip = (await get('/git/ref/heads/dev')).object.sha;
-    if (!/^[0-9a-f]{40}$/.test(devTip)) throw new Error('Invalid dev tip');
+    // Both branches share the database, so a newer dev push can supersede a main push.
+    const tips = { main: tip };
+    const devRef = await get('/git/ref/heads/dev', { allowNotFound: true });
+    if (devRef !== undefined) {
+      const devTip = devRef?.object?.sha;
+      if (typeof devTip !== 'string' || !shaPattern.test(devTip)) throw new Error('Invalid dev tip');
+      tips.dev = devTip;
+    }
     let replacement;
-    for (const [branch, sha] of Object.entries({ main: tip, dev: devTip })) {
+    for (const [branch, sha] of Object.entries(tips)) {
       if (env.GITHUB_SHA === sha) continue;
       for await (const run of pages(get, `${workflow}?branch=${branch}&event=push&head_sha=${sha}`, 'workflow_runs')) {
         if (run.run_number > Number(env.RUN_NUMBER) && (!replacement || run.run_number > replacement.run_number)) {
-          replacement = { ...run, sha };
+          replacement = { ...run, sha, branch };
         }
       }
     }
     if (replacement) {
-      const { id, sha, status, conclusion } = replacement;
+      const { id, sha, status, conclusion, branch } = replacement;
       if (status === 'completed' && !['success', 'failure'].includes(conclusion)) {
-        record(`G1: superseding run ${id} for ${sha} was ${conclusion}; dispatch expected_sha=${tip}`);
+        const recovery = branch === 'dev' ? 'promote dev to main, then dispatch' : 'dispatch';
+        record(`G1: superseding run ${id} for ${sha} was ${conclusion}; ${recovery} expected_sha=${tip}`);
         return 'refused';
       }
       record(`G1: superseded by ${sha}`);
@@ -65,10 +73,12 @@ async function evaluate(get, env, record) {
         const path = `/actions/runs/${run.id}/attempts/${attempt}/jobs?`;
         for await (const job of pages(get, path, 'jobs')) {
           if (job.name !== 'database' || job.status !== 'completed') continue;
-          const marker = job.steps.find(step => step.name === attemptMarker);
-          const legacy = job.steps.find(step => step.name === legacyDeploy);
+          // Missing step data cannot rule out an apply attempt.
+          const steps = Array.isArray(job.steps) ? job.steps : undefined;
+          const marker = steps?.find(step => step.name === attemptMarker);
+          const legacy = steps?.find(step => step.name === legacyDeploy);
           // Cancellation can prevent the marker from running after the combined step starts.
-          const attempted = ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
+          const attempted = !steps || ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
             || marker?.conclusion === 'success' || (!marker && legacy?.conclusion === 'failure');
           if (!attempted) continue;
 
@@ -143,14 +153,21 @@ function summarize(log, status, elapsed, env) {
 }
 
 async function guard(env, fetchRequest = fetch) {
-  const get = async path => {
+  const get = async (path, { allowNotFound = false } = {}) => {
     const response = await fetchRequest(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`, {
       headers: { Authorization: 'Bearer ' + env.GH_TOKEN, Accept: 'application/vnd.github+json' },
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status}`);
-    return response.json();
+    if (allowNotFound && response.status === 404) return undefined;
+    const endpoint = path.split('?')[0];
+    if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status} for ${endpoint}`);
+    try {
+      return await response.json();
+    } catch (error) {
+      if (error?.name === 'SyntaxError') throw new Error(`invalid JSON from ${endpoint}`);
+      throw error;
+    }
   };
   const record = decision => {
     appendFileSync(env.GITHUB_STEP_SUMMARY, `- ${decision}\n`);
@@ -163,11 +180,11 @@ async function guard(env, fetchRequest = fetch) {
     appendFileSync(env.GITHUB_OUTPUT, `superseded=${result === 'superseded'}\n`);
     return 0;
   } catch (error) {
-    const message = error instanceof HistoryLimitError
-      ? 'Guard could not verify GitHub deployment state: history scan limit reached'
-      : 'Guard could not verify GitHub deployment state';
+    const detail = error instanceof HistoryLimitError ? 'history scan limit reached' : error?.message || 'unknown error';
+    const redacted = env.GH_TOKEN ? detail.replaceAll(env.GH_TOKEN, '[redacted]') : detail;
+    const message = `Guard could not verify GitHub deployment state: ${redacted.replace(/[\r\n]+/g, ' ')}`;
     appendFileSync(env.GITHUB_STEP_SUMMARY, `- ${message}\n`);
-    console.error(`::error::${message}`);
+    console.error(`::error::${message.replaceAll('%', '%25')}`);
     return 1;
   }
 }
