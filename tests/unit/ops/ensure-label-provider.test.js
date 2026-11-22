@@ -91,6 +91,13 @@ describe('ensure-label-provider', () => {
     [{ EDGE_SUPABASE_URL: 'http://[::1]:57429' }, 'http://[::1]:57429/functions/v1/label-renderer'],
     [{ LABEL_PROVIDER_INVOKE_URL: 'http://edge.test/custom' }, 'http://edge.test/custom'],
     [{ LABEL_RENDERER_INVOKE_URL: 'https://renderer.test/custom' }, 'https://renderer.test/custom'],
+    [{
+      LABEL_PROVIDER_INVOKE_BASE_URL: 'https://renderer.example.test/gateway/',
+      LABEL_RENDERER_INVOKE_BASE_URL: 'https://other.example.test',
+      EDGE_SUPABASE_URL: 'https://edge.example.test',
+    }, 'https://renderer.example.test/gateway/functions/v1/label-renderer'],
+    [{ LABEL_RENDERER_INVOKE_BASE_URL: 'https://renderer.example.test' }, 'https://renderer.example.test/functions/v1/label-renderer'],
+    [{ LABEL_PROVIDER_INVOKE_URL_BASE: 'https://renderer.example.test' }, 'https://renderer.example.test/functions/v1/label-renderer'],
     [{ LABEL_PROVIDER_INVOKE_URL: ' ', EDGE_SUPABASE_URL: '', SUPABASE_URL: 'https://public.test' }, 'https://public.test/functions/v1/label-renderer'],
     [{}, ''],
   ])('resolves invoke URL precedence and trailing slashes: %p', (env, expected) => {
@@ -100,6 +107,9 @@ describe('ensure-label-provider', () => {
   test.each([
     'LABEL_PROVIDER_INVOKE_URL',
     'LABEL_RENDERER_INVOKE_URL',
+    'LABEL_PROVIDER_INVOKE_BASE_URL',
+    'LABEL_RENDERER_INVOKE_BASE_URL',
+    'LABEL_PROVIDER_INVOKE_URL_BASE',
     'EDGE_SUPABASE_URL',
     'SUPABASE_URL',
   ])('rejects an invalid selected %s instead of falling back', (key) => {

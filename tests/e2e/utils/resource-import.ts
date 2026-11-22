@@ -22,6 +22,7 @@ type DemoClient = {
 
 type DemoManifest = {
   clients?: DemoClient[];
+  senders?: { id?: string; sender_name?: string }[];
 };
 
 function readDemoManifest(): DemoManifest {
