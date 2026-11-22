@@ -2,7 +2,7 @@
 
 The Delivery Lead owns this file. Change it through a reviewed PR.
 
-Follows engineering standard 2026-11-22 v1.2.
+Follows engineering standard v1.4 (2026-11-22).
 
 ## Branching and merging
 
@@ -86,7 +86,6 @@ Follows engineering standard 2026-11-22 v1.2.
 | §4 PR feedback and full queue suite timing | The November first-attempt sample missed both PR targets and the merge-group p50 target. More speed work is needed beyond timing-weighted pgTAP shards. | 2026-12-15 |
 | §4 CI timing measurement | [PR wall time](#checks) reports p50 and p90 from workflow start to `ci-gate` completion. Calculate p50 and p95 from first-attempt PR runs for the daily report and compare them with the PR feedback targets. The current timestamps leave waiting time, setup time and time to mergeable unreported. Collect job creation and start times for waiting, step timings for setup, and the last required check's completion time for time to mergeable. CodeQL is often the last check. | 2026-12-15 |
 | §4 Job time limits based on a recorded p95 sample | Job limits still need recorded p95 samples and a monthly review. CodeQL cache maintenance also needs a job-level limit. | 2026-12-15 |
-| §4 Read-only top-level workflow permissions | [CodeQL](.github/workflows/codeql.yml) needs write access to upload its results. Move that grant to the analysis job to make the workflow default read-only. | 2026-12-15 |
 | §4 Sharding by measured file times | The [Unit Jest](.github/workflows/public-ci.yml) jobs need per-file timing data and a shard plan that uses it. | 2026-12-15 |
 | §4 Test-file guard across suites | The pgTAP inventory covers SQL tests. Repository-wide coverage needs inventories for [Jest](config/tooling/jest.config.js) and the separately run browser suites. | 2026-12-15 |
 | §4 Retries and red-test handling | Dependency setup can fail when the network or package registry is unavailable, and cloud E2E can fail when its test infrastructure is unavailable. Removing those retries requires cached installs and a self-contained E2E target. [Console V2 Playwright E2E](apps/console-v2/playwright.e2e.config.ts#L44-L66) uses `retries: 1` for Vite dev-server and HMR timing in mock mode on a local dev server. To remove it, serve a production build in mock mode and wait for the expected UI state. [FieldOps mobile Playwright E2E](tests/e2e/fieldops-mobile/playwright.config.ts#L29-L36) uses `retries: isCi ? 2 : 0` with a [local base URL by default](tests/e2e/fieldops-mobile/playwright.config.ts#L14). To remove the CI retries, serve a prebuilt Expo web bundle and wait for app readiness and the expected UI state. The UI quarantine and target-base Jest list still cover known failures that need fixes. | 2026-12-15 |
