@@ -45,7 +45,12 @@ function setup(secret = 'fixture-secret', handlerName = 'public-shipment-trackin
     PUBLIC_TRACKING_IP_HASH_SALT: "fixture-tracking-salt",
     PUBLIC_TRACKING_RPC_SCHEMA: 'fixture_tracking',
   };
+  if (handlerName === 'marketing-lead-intake') {
+    const payload = Buffer.from(JSON.stringify({ role: 'edge_marketing_role' })).toString('base64url');
+    env.MARKETING_DB_JWT = ['e30', payload, 'fixture'].join('.');
+  }
   const sandbox = vm.createContext({
+    atob,
     Request, Response, Headers, URL, URLSearchParams, TextEncoder, TextDecoder,
     Error, crypto: webcrypto, fetch, performance,
     console: { log, info: log, warn: logWarn, error: logError, debug: log, trace: log, dir: log },
