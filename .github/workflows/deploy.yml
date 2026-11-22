@@ -155,7 +155,7 @@ jobs:
           }
           if ! "$cli" secrets list --project-ref "$SUPABASE_PROJECT_REF" --output json 2>/dev/null |
             node -e 'const list = JSON.parse(require("node:fs").readFileSync(0, "utf8")); if (!list.some(entry => entry.name === "MARKETING_DB_JWT")) process.exit(1)' 2>/dev/null; then
-            echo '::error::MARKETING_DB_JWT was not confirmed in the deployed edge secrets.'
+            echo '::error::Marketing token is missing from the secret list.'
             exit 1
           fi
           while IFS=$'\t' read -r function_name auth_mode; do

@@ -79,5 +79,5 @@ test('deploy writes the dedicated credential without logging it and gates functi
   expect(run).toMatch(/secrets set[^\n]+\n} >\/dev\/null 2>&1 \|\| \{\n\s+echo '[^']*MARKETING_DB_JWT\.'\n\s+exit 1/);
   expect(run.indexOf('secrets list')).toBeGreaterThan(run.indexOf('secrets set'));
   expect(run.indexOf('secrets list')).toBeLessThan(run.indexOf('functions deploy'));
-  expect(run).toContain('::error::MARKETING_DB_JWT was not confirmed in the deployed edge secrets.');
+  expect(run).toContain('::error::Marketing token is missing from the secret list.');
 });
