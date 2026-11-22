@@ -4,6 +4,7 @@ import { Badge } from "../badge";
 import { Button } from "../button";
 import { Checkbox } from "../checkbox";
 import { Input } from "../input";
+import { resolveLookupOptionLabel } from "../lookup-friendly-label";
 import { Select } from "../select";
 import type {
   AccessPolicyTranslator,
@@ -87,7 +88,7 @@ export function AssignmentsPanel({
                         onUpdateAssignment(userType, role.key, event.target.checked)
                       }
                     />
-                    <span>{role.label ?? role.key}</span>
+                    <span>{resolveLookupOptionLabel(role.key, role.label)}</span>
                   </label>
                 ))}
               </div>
@@ -121,7 +122,7 @@ export function AssignmentsPanel({
             <option value="">{t("assignments.userRolePlaceholder")}</option>
             {roles.map((role) => (
               <option key={role.key} value={role.key}>
-                {role.label ?? role.key}
+                {resolveLookupOptionLabel(role.key, role.label)}
               </option>
             ))}
           </Select>

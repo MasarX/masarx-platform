@@ -3,6 +3,7 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { createUiServerClient } from "@masarx/api/server";
 import { Badge } from "./badge";
+import { resolveLookupOptionLabel } from "./lookup-friendly-label";
 import { PageHeader } from "./page-header";
 import { Section } from "./section";
 import { MarketplaceActionForm, MarketplaceActionFormState } from "./marketplace-action-form";
@@ -169,8 +170,8 @@ export async function MarketplaceContractRoomPage({
                 <div key={workPackageId} className="grid gap-4 rounded-2xl border border-ui-border bg-ui-surface/60 p-4 lg:grid-cols-[1fr,0.8fr,0.8fr]">
                   <div className="space-y-3">
                     <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                      <Badge>{stringValue(workPackage.status) ?? "ready"}</Badge>
-                      {stringValue(workPackage.materializer_key) ? <Badge>{stringValue(workPackage.materializer_key)}</Badge> : null}
+                      <Badge>{resolveLookupOptionLabel(workPackage.status, workPackage.status_label) || "Ready"}</Badge>
+                      {stringValue(workPackage.materializer_key) ? <Badge>{resolveLookupOptionLabel(workPackage.materializer_key, workPackage.materializer_label)}</Badge> : null}
                     </div>
                     {renderJson(workPackage.summary)}
                   </div>

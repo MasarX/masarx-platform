@@ -6,6 +6,7 @@ import { createUiServerClient } from "@masarx/api/server";
 import type { PickupLookupOption } from "./pickup-operations-form";
 import { Badge } from "./badge";
 import { Button } from "./button";
+import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
 import { formatUiError } from "./utils";
 import { normalizeObject, stringValue } from "./pickup-operations-utils";
 
@@ -46,7 +47,7 @@ export async function loadPickupRelationshipOptions(resource: "clients" | "sende
   try {
     const result = await ui.listResource(resource, clientId ? { client_id: clientId } : {}, 200, 0);
     const options = result.items.map((row) => ({
-      value: String(row.id), label: String(row.name || row.brand_name || row.slug || row.code || row.id),
+      value: String(row.id), label: String(row.name || row.brand_name || row.slug || row.code || buildLookupFriendlyLabel("Reference", row.id)),
       groupValue: typeof row.client_id === "string" ? row.client_id : typeof row.organization_id === "string" ? row.organization_id : null,
     }));
     return { options, error: null };
@@ -58,14 +59,14 @@ export async function loadPickupRelationshipOptions(resource: "clients" | "sende
 
 export function pickupRelationshipLabel(options: PickupLookupOption[], value: unknown) {
   const id = stringValue(value);
-  return options.find((option) => option.value === id)?.label ?? id;
+  return options.find((option) => option.value === id)?.label ?? buildLookupFriendlyLabel("Reference", id);
 }
 
 export function buildPickupRequestOptions(rows: Record<string, unknown>[]): PickupLookupOption[] {
   return rows.flatMap((row) => {
     const value = stringValue(row.shipment_id);
     if (!value) return [];
-    return [{ value, label: stringValue(row.tracking_number) || stringValue(row.client_reference_number) || value,
+    return [{ value, label: stringValue(row.tracking_number) || stringValue(row.client_reference_number) || stringValue(row.carrier_reference_number) || buildLookupFriendlyLabel("Shipment", value),
       searchText: [row.tracking_number, row.client_reference_number, row.carrier_reference_number].filter(Boolean).join(" ") }];
   });
 }

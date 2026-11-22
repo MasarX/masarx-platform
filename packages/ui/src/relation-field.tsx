@@ -15,6 +15,7 @@ export type RelationFieldProps = {
   onCreateOption?: (label: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  ariaLabel?: string;
   className?: string;
 };
 
@@ -32,6 +33,7 @@ export function RelationField({
   onCreateOption,
   disabled,
   placeholder,
+  ariaLabel,
   className,
 }: RelationFieldProps) {
   const serverSearch = useComboboxSearch({
@@ -68,6 +70,7 @@ export function RelationField({
       onCreateOption={onCreateOption}
       disabled={disabled}
       placeholder={placeholder}
+      ariaLabel={ariaLabel}
       className={className}
     />
   );

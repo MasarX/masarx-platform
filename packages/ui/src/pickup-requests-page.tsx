@@ -30,6 +30,7 @@ import {
 import { buildTestId } from "./test-ids";
 import { extractCapabilityDeniedKey, formatUiError } from "./utils";
 import { hasCapability, resolveCapabilitySet } from "./capabilities";
+import { buildLookupFriendlyLabel, resolveLookupOptionLabel } from "./lookup-friendly-label";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 type PickupRow = Record<string, unknown>;
@@ -340,7 +341,8 @@ export async function PickupRequestsPage({
                   <div className="mt-3 text-sm font-medium text-ui-ink">
                     {stringValue(row.client_reference_number) ??
                       stringValue(row.carrier_reference_number) ??
-                      shipmentId}
+                      stringValue(row.tracking_number) ??
+                      buildLookupFriendlyLabel("Shipment", shipmentId)}
                   </div>
                   <div className="mt-2 text-sm text-ui-muted">
                     {formatPickupAddress(originAddress) ?? "No origin address captured."}
@@ -364,7 +366,7 @@ export async function PickupRequestsPage({
                       ["Driver", stringValue(row.driver_label) ?? stringValue(row.driver_user_id)],
                       ["Vehicle", stringValue(row.vehicle_label) ?? stringValue(row.vehicle_id)],
                       ["Failed at", formatDateTime(row.failed_at, me?.locale, me?.timezone)],
-                      ["Failure reason", stringValue(row.failure_reason)],
+                      ["Failure reason", resolveLookupOptionLabel(row.failure_reason, row.failure_reason_label)],
                     ])}
                   </div>
                   {pickupRequest ? (

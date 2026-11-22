@@ -303,7 +303,7 @@ export function createUiClientFromSupabase(
     dashboardConfig: () => rpc<UiDashboardConfig>("ui_dashboard_config_v1"),
     dashboardMetrics: (resources: string[]) =>
       rpc<UiDashboardMetrics>("ui_dashboard_metrics_v1", {
-        p_resources: resources,
+        p_resources: [...new Set(resources.map((resource) => resource.trim()).filter(Boolean))],
       }),
     filterOperators: () => rpc<UiFilterOperators>("ui_filter_operators_v1"),
     filterDistinctValues: (params: {

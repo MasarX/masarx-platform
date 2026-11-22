@@ -66,6 +66,8 @@ export async function ShipmentManualCreatePage({
           requirePersistedReadback={requirePersistedReadback}
           returnTo={returnTo}
           organizationId={me?.org?.id ?? null}
+          organizationName={me?.org?.name ?? null}
+          scopeOptions={registry?.scopes ?? null}
           accessScope={me?.access_scope ?? null}
           capabilities={me?.capabilities ?? null}
           capabilityWrite={shipmentsResource?.capability_write ?? null}
