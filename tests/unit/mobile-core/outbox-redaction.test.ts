@@ -458,6 +458,70 @@ const structuredJsonForms = [
   ["Unicode quote escapes", (text: string) => text.replace(/"/g, () => String.raw`\u0022`)],
 ] as const;
 
+test.each([
+  ["lowercase", "cookie: ", "theme=dark; sid=" + alphaMarker, ""],
+  ["three pairs", "Cookie: ", "a=1; b=2; sid=" + alphaMarker, ""],
+  ["before CRLF", "Cookie: ", "a=1; b=2; sid=" + alphaMarker, "\r\nstatus: 503"],
+  ["Set-Cookie attributes", "Set-Cookie: ", "theme=dark; Path=/, sid=" + alphaMarker + "; Path=/", ""],
+  ["single-quoted argument", "curl -H 'Cookie: ", "a=1; sid=" + alphaMarker, "' --verbose"],
+  ["quoted pair", "Cookie: ", 'a="one"; sid=' + alphaMarker, ""],
+  ["literal encoded newline", "Cookie: ", "a=%0A; sid=" + alphaMarker, ""],
+  ["before an encoded newline", "cOoKiE%3A%20", "a%3D1%3B%20sid%3D" + alphaMarker, "%0Astatus%3A503"],
+  ["encoded literal percent", "Cookie%3A%20", encodeURIComponent("a=%0A; sid=" + alphaMarker), "%0Astatus%3A503"],
+])("redacts the entire cookie header in %s", (_label, prefix, value, suffix) => {
+  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+});
+
+test.each(structuredJsonForms)("redacts cookie headers within %s", (_label, transform) => {
+  const prefix = transform('{"error":"Cookie: ');
+  const suffix = transform('","status":503}');
+  expect(redactOutboxErrorText(prefix + transform("a=1; sid=" + alphaMarker) + suffix))
+    .toBe(prefix + "[REDACTED]" + suffix);
+
+  const request = transform('{"error":"request Cookie: ');
+  expect(redactOutboxErrorText(request + transform("theme=dark; connect.sid=" + alphaMarker) + suffix))
+    .toBe(request + "[REDACTED]" + suffix);
+
+  const pairs = escapeJsonPayload('theme="dark"; connect.sid=' + alphaMarker + "; token=" + betaMarker);
+  expect(redactOutboxErrorText(request + transform(pairs) + suffix))
+    .toBe(request + "[REDACTED]" + suffix);
+
+  const nextLine = transform('\\nrequest complete","status":503}');
+  expect(redactOutboxErrorText(prefix + transform("a=1; sid=" + alphaMarker) + nextLine))
+    .toBe(prefix + "[REDACTED]" + nextLine);
+
+  const field = transform('{"Set-Cookie":');
+  const cookie = JSON.stringify("theme=dark; Path=/, sid=" + alphaMarker + "; Path=/");
+  const fieldSuffix = transform(',"status":503}');
+  expect(redactOutboxErrorText(field + transform(cookie) + fieldSuffix)).toBe(field + "[REDACTED]" + fieldSuffix);
+
+  const bareField = transform('"Cookie": ');
+  expect(redactOutboxErrorText(bareField + transform("a=1; sid=" + alphaMarker)))
+    .toBe(bareField + "[REDACTED]");
+});
+
+test.each([
+  ["once", encodeURIComponent],
+  ["twice", (text: string) => encodeURIComponent(encodeURIComponent(text))],
+] as const)("redacts a JSON cookie field URL-encoded %s", (_label, transform) => {
+  const prefix = transform('{"Cookie":');
+  const value = transform(JSON.stringify("a=1; sid=" + alphaMarker));
+  const suffix = transform(',"status":503}');
+  expect(redactOutboxErrorText(prefix + value + suffix)).toBe(prefix + "[REDACTED]" + suffix);
+});
+
+test.each(structuredJsonForms)("redacts plural and spaced credential keys in %s", (_label, transform) => {
+  for (const [key, value] of [
+    ["credentials", alphaMarker], ["clientCredential", alphaMarker], ["cookies", "sid=" + alphaMarker],
+    ["session id", alphaMarker], ["session_ids", alphaMarker], ["session ids", alphaMarker],
+  ]) {
+    const prefix = transform(`{${JSON.stringify(key)}:`);
+    const suffix = transform(',"status":503}');
+    const input = transform(JSON.stringify({ [key]: value, status: 503 }));
+    expect(redactOutboxErrorText(input)).toBe(prefix + "[REDACTED]" + suffix);
+  }
+});
+
 test.each(structuredJsonForms)("redacts bare values and entire collections in %s", (_label, transform) => {
   const cases = [
     ["pin_token", String(Number([123, 456, 789].join("")))],
@@ -515,9 +579,18 @@ test.each(structuredJsonForms)("redacts additional sensitive keys in %s", (_labe
 });
 
 test("preserves cookies policy prose and similarly named diagnostic fields", () => {
-  const input = 'cookies policy: accepted {"cookies":4,"cookiePolicy":"accepted","credentialsMode":"omit"}';
+  const input = 'cookies policy: accepted {"cookiePolicy":"accepted","credentialsMode":"omit"}';
   expect(redactOutboxErrorText(input)).toBe(input);
 });
+
+test.each([
+  "the cookie was rejected", "credentialsProvider", "credential provider chain",
+  JSON.stringify({ credentialsProvider: "runtime" }),
+])(
+  "preserves diagnostic prose %s", (input) => {
+    expect(redactOutboxErrorText(input)).toBe(input);
+  },
+);
 
 test("processes 8 KiB of nested escaped credential fields in under 50 ms", () => {
   const prefix = escapeJsonPayload('{"password":');
@@ -534,6 +607,25 @@ test("processes 8 KiB of nested escaped credential fields in under 50 ms", () =>
 
 test("processes 8 KiB of repeated cookie-like key segments in under 50 ms", () => {
   const input = "cookie-".repeat(1170) + "ok";
+  const start = performance.now();
+  const output = redactOutboxErrorText(input);
+  expect(performance.now() - start).toBeLessThan(50);
+  expect(output).toBe(input);
+});
+
+test("processes an 8 KiB multi-pair cookie header in under 50 ms", () => {
+  const prefix = "Cookie: ";
+  const pairs = "a=1; ".repeat(Math.ceil(8192 / 5));
+  const tail = "sid=" + alphaMarker;
+  const input = prefix + pairs.slice(0, 8192 - prefix.length - tail.length) + tail;
+  const start = performance.now();
+  const output = redactOutboxErrorText(input);
+  expect(performance.now() - start).toBeLessThan(50);
+  expect(output).toBe(prefix + "[REDACTED]");
+});
+
+test("processes 8 KiB of repeated plural keys in under 50 ms", () => {
+  const input = "credentials cookies session_ids ".repeat(256).slice(0, 8192);
   const start = performance.now();
   const output = redactOutboxErrorText(input);
   expect(performance.now() - start).toBeLessThan(50);
@@ -614,13 +706,17 @@ function checkHistoricalCoverage(seed: number, count: number, includeEscapedJson
       const values = [
         hostile, { value: hostile, number: index }, [hostile, index, [true, { value: hostile }, null]],
       ];
+      const pluralKey = ["credentials", "cookies", "session ids"][Math.floor(index / 4) % 3];
+      const header = ["Cookie", "Set-Cookie"][index % 2] + ": ";
+      const headerValue = "theme=dark; a=1; sid=" + hostile;
       const json = JSON.stringify({
         secret: values[Math.floor(index / structuredJsonForms.length) % values.length],
-        pin_token: index, credential: false, session_id: null, status: 503,
+        pin_token: index, credential: false, session_id: null, [pluralKey]: hostile, error: header + headerValue, status: 503,
       });
       const expected = structuredTransform('{"secret":') + "[REDACTED]"
         + structuredTransform(',"pin_token":') + "[REDACTED]" + structuredTransform(',"credential":') + "[REDACTED]"
-        + structuredTransform(',"session_id":') + "[REDACTED]" + structuredTransform(',"status":503}');
+        + structuredTransform(',"session_id":') + "[REDACTED]" + structuredTransform(`,${JSON.stringify(pluralKey)}:`) + "[REDACTED]"
+        + structuredTransform(`,"error":"${header}`) + "[REDACTED]" + structuredTransform('","status":503}');
       const historicalOutput = actual.slice(actual.indexOf(" & ") + 3);
       expect(redactOutboxErrorText(structuredTransform(json) + " & " + historical)).toBe(expected + " & " + historicalOutput);
     }

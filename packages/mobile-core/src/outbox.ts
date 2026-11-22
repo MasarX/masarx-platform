@@ -126,14 +126,20 @@ function serializeError(error: unknown) {
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
 const KEY_JOIN = String.raw`(?:[_-]|%2d)`;
 const KEY_CHAR = String.raw`(?:[a-z0-9]|${KEY_JOIN})`;
-const SPACED_API_KEY = String.raw`api(?: |%(?:25)?20)key`;
+const KEY_SPACE = String.raw`(?: |%(?:25)?20)`;
+const SPACED_KEY = String.raw`(?:api${KEY_SPACE}key|session${KEY_SPACE}ids?)`;
 const LEGACY_KEYWORD = String.raw`(?:api${KEY_JOIN}?key|token|authorization|password|secret|jwt)`;
-const EXTRA_KEYWORD = String.raw`(?:passwd|pwd|(?:set${KEY_JOIN})?cookie|credential|session${KEY_JOIN}?id|private${KEY_JOIN}?key)`;
-const KEYWORD = String.raw`(?:${LEGACY_KEYWORD}|${EXTRA_KEYWORD}|${SPACED_API_KEY})`;
+const COOKIE_KEY = String.raw`(?:set${KEY_JOIN})?cookies?`;
+const COOKIE_SPACE = String.raw`(?:[\t ]|%(?:25)?20)*`;
+const COOKIE_SEPARATOR = String.raw`${COOKIE_SPACE}(?:[:=]|%(?:25)?3[ad])`;
+const NOT_COOKIE_HEADER = String.raw`(?!${COOKIE_KEY}${COOKIE_SEPARATOR})`;
+const EXTRA_KEYWORD = String.raw`(?:passwd|pwd|${COOKIE_KEY}|session${KEY_JOIN}?ids?|private${KEY_JOIN}?key)`;
+const KEYWORD = String.raw`(?:${LEGACY_KEYWORD}|${EXTRA_KEYWORD}|credentials?|${SPACED_KEY})`;
 // Short names like cookie and pwd must cover a whole key segment.
-const SENSITIVE_KEY_NAME = String.raw`(?:${KEY_CHAR}*${SPACED_API_KEY}${KEY_CHAR}*|(?=${KEY_CHAR}*${LEGACY_KEYWORD}|(?:${KEY_CHAR}*${KEY_JOIN})?${EXTRA_KEYWORD}(?![a-z0-9]))${KEY_CHAR}+)`;
+const SENSITIVE_KEY_NAME = String.raw`(?:${KEY_CHAR}*${SPACED_KEY}${KEY_CHAR}*|(?=${KEY_CHAR}*${LEGACY_KEYWORD}|(?:${KEY_CHAR}*credentials?|(?:${KEY_CHAR}*${KEY_JOIN})?${EXTRA_KEYWORD})(?![a-z0-9]))${KEY_CHAR}+)`;
 const SENSITIVE_KEY = String.raw`${SENSITIVE_KEY_NAME}(?:["']|%22)*`;
 const ENCODED_SEPARATOR = String.raw`(?:\s|%20)*%(?:25)?3[ad](?:\s|%20)*`;
+const NOT_ENCODED_COOKIE_FIELD = String.raw`(?!${COOKIE_KEY}(?:["']|%22)+${ENCODED_SEPARATOR}%22)`;
 const KEY_SEPARATOR = String.raw`(?:\s*[:=]|${ENCODED_SEPARATOR})`;
 const NEXT_SENSITIVE_KEY = String.raw`${SENSITIVE_KEY}${KEY_SEPARATOR}`;
 const KEY_BOUNDARY = String.raw`(?:%26|%20|%(?:25)?22|\b|(?=-|%2d))`;
@@ -143,7 +149,7 @@ const JSON_BACKSLASH = String.raw`(?:\\|%(?:25)?5c)`;
 const JSON_QUOTE = String.raw`(?:"|%(?:25)?22)`;
 const ESCAPED_JSON_QUOTE = String.raw`${JSON_BACKSLASH}+(?:${JSON_QUOTE}|u0022)`;
 const JSON_COLLECTION_OPEN = String.raw`(?:[\[{]|%(?:25)?(?:7b|5b))`;
-const SCANNED_JSON_VALUE = String.raw`(?:${ESCAPED_JSON_QUOTE}|${JSON_COLLECTION_OPEN})`;
+const SCANNED_JSON_VALUE = String.raw`(?:${ESCAPED_JSON_QUOTE}|%2522|${JSON_COLLECTION_OPEN})`;
 const PLAIN_QUOTE_TAIL = String.raw`(?:(?!${VALUE_DELIMITER})[\s\S])*`;
 const PLAIN_VALUE = String.raw`(?!${SCANNED_JSON_VALUE})(?:"(?:\\[\s\S]|[^"\\])*(?:"|$)${PLAIN_QUOTE_TAIL}|'(?:\\[\s\S]|[^'\\])*(?:'|$)${PLAIN_QUOTE_TAIL}|[^\s&,}]+)`;
 // A closed quote can contain %26. Fall back to the parameter boundary for an
@@ -162,7 +168,7 @@ function credentialPattern(prefix: string, value: string, skip = MARKER_OR_KEY_R
 
 function encodedCredentialPattern(unclosedQuote: string) {
   return credentialPattern(
-    String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}${ENCODED_SEPARATOR}`,
+    String.raw`${KEY_BOUNDARY}${NOT_COOKIE_HEADER}${SENSITIVE_KEY}${ENCODED_SEPARATOR}`,
     String.raw`(?!${SCANNED_JSON_VALUE})(?:%22(?:${CLOSED_ENCODED_QUOTE}|${unclosedQuote})|${ENCODED_UNQUOTED_VALUE})`,
   );
 }
@@ -175,12 +181,15 @@ const CREDENTIAL_PATTERNS = [
     PLAIN_VALUE,
     String.raw`\[(?:JWT_)?REDACTED\]|[a-z0-9_]+`,
   ),
-  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
-  credentialPattern(String.raw`${KEY_BOUNDARY}${SENSITIVE_KEY}%3[ad]\s*`, String.raw`(?!${SCANNED_JSON_VALUE})${LEGACY_ENCODED_VALUE}`),
+  credentialPattern(String.raw`${KEY_BOUNDARY}${NOT_COOKIE_HEADER}${SENSITIVE_KEY}\s*[:=]\s*`, PLAIN_VALUE),
+  credentialPattern(
+    String.raw`${KEY_BOUNDARY}${NOT_COOKIE_HEADER}${NOT_ENCODED_COOKIE_FIELD}${SENSITIVE_KEY}%3[ad]\s*`,
+    String.raw`(?!${SCANNED_JSON_VALUE})${LEGACY_ENCODED_VALUE}`,
+  ),
 ];
 const JSON_SPACE = String.raw`(?:\s|%(?:25)?20)*`;
 const JSON_SEPARATOR = String.raw`${JSON_SPACE}(?:[:=]|%(?:25)?3[ad])${JSON_SPACE}`;
-const JSON_KEY = String.raw`(?:${ESCAPED_JSON_QUOTE}|${KEY_BOUNDARY})${SENSITIVE_KEY_NAME}(?:["']|%(?:25)?22)*`;
+const JSON_KEY = String.raw`(?:${ESCAPED_JSON_QUOTE}|${KEY_BOUNDARY})${NOT_COOKIE_HEADER}${SENSITIVE_KEY_NAME}(?:["']|%(?:25)?22)*`;
 const ANY_JSON_QUOTE = String.raw`(?:${ESCAPED_JSON_QUOTE}|${JSON_QUOTE})`;
 const JSON_FIELD = new RegExp(
   String.raw`(${JSON_KEY}(?:${ESCAPED_JSON_QUOTE}${ANY_JSON_QUOTE}*${JSON_SEPARATOR}`
@@ -190,6 +199,13 @@ const JSON_FIELD = new RegExp(
 // Consume runs of the same backslash spelling even when no quote follows.
 const QUOTE_TOKEN = String.raw`((${JSON_BACKSLASH})\2*)(${JSON_QUOTE}|u0022)?|(${JSON_QUOTE})`;
 const JSON_QUOTE_TOKEN = new RegExp(QUOTE_TOKEN, "gi");
+const COOKIE_KEY_QUOTE = String.raw`(?:${ANY_JSON_QUOTE}|')`;
+const COOKIE_HEADER_PROBE = new RegExp(String.raw`${COOKIE_KEY}${COOKIE_KEY_QUOTE}?${COOKIE_SEPARATOR}`, "i");
+const COOKIE_TOKEN = new RegExp(
+  String.raw`${QUOTE_TOKEN}|${COOKIE_KEY}(${COOKIE_KEY_QUOTE})?(${COOKIE_SEPARATOR})(${COOKIE_SPACE})`
+    + String.raw`|([\r\n\u2028\u2029]|%(?:25)?0[ad])|(')|%(?:25)?[a-f0-9]{2}|${MARKER_OR_KEY_RUN}`,
+  "gi",
+);
 const JSON_SYNTAX_TOKEN = new RegExp(String.raw`${QUOTE_TOKEN}|([\[\]{}]|%(?:25)?(?:[57][bd]))`, "gi");
 const JSON_VALUE_QUOTE = new RegExp(ANY_JSON_QUOTE, "iy");
 const JSON_VALUE_COLLECTION = new RegExp(JSON_COLLECTION_OPEN, "iy");
@@ -205,7 +221,7 @@ const SCHEME = new RegExp(
 const BASIC_CREDENTIAL = /^[A-Za-z0-9+/]{8,}={0,2}/;
 const JWT = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 
-type RedactionSpan = { start: number; end: number; prefix?: string };
+type RedactionSpan = { start: number; end: number; prefix?: string; cookie?: true };
 
 function quoteKey(match: RegExpExecArray, quote: string, closing = false) {
   const slash = match[2] ?? "";
@@ -216,6 +232,72 @@ function quoteKey(match: RegExpExecArray, quote: string, closing = false) {
     : spelling === "u0022" ? backslashes & -backslashes
     : backslashes & ~(backslashes + 1);
   return `${depth}:${depth ? slash.toLowerCase() : ""}${spelling}`;
+}
+
+function collectCookieSpans(text: string, spans: RedactionSpan[]) {
+  if (!COOKIE_HEADER_PROBE.test(text)) return;
+
+  // Track enclosing quotes before a header starts so quoted cookie pairs stay inside it.
+  const quotes: { key: string; token: string; lineDepth: number }[] = [];
+  let header: { start: number; space: string; encoding: number } | undefined;
+  const finish = (end: number) => {
+    if (header && header.start + header.space.length < end) {
+      spans.push({ start: header.start, end, prefix: header.space, cookie: true });
+    }
+    header = undefined;
+  };
+
+  for (const match of text.matchAll(COOKIE_TOKEN)) {
+    const end = match.index + match[0].length;
+    const [, slashRun = "", slash = "", escapedQuote, rawQuote, keyQuote, separator, space = "", line, apostrophe] = match;
+    const quote = escapedQuote ?? rawQuote ?? apostrophe;
+    const depth = slash ? slashRun.length / slash.length : 0;
+    if (separator) {
+      if (keyQuote) {
+        const keyEnd = quotes[quotes.length - 1];
+        if (keyEnd?.token === keyQuote.toLowerCase()) {
+          quotes.pop();
+          if (header) {
+            finish(end - keyQuote.length - separator.length - space.length);
+            continue;
+          }
+        }
+        JSON_VALUE_QUOTE.lastIndex = end;
+        JSON_VALUE_COLLECTION.lastIndex = end;
+        if (JSON_VALUE_QUOTE.test(text) || JSON_VALUE_COLLECTION.test(text) || text[end] === "'") continue;
+      }
+      header ??= {
+        start: end - space.length,
+        space,
+        encoding: /%(?:25)?3[ad]$/i.exec(separator)?.[0].length ?? 0,
+      };
+    } else if (line) {
+      if (line.length === 1 || line.length === header?.encoding) finish(match.index);
+    } else if (quote) {
+      if (quote === "'" && /[a-z0-9]/i.test(text[match.index - 1] ?? "") && /[a-z0-9]/i.test(text[end] ?? "")) continue;
+      const key = quote === "'" ? quote : quoteKey(match, quote, true);
+      let index = quotes.length - 1;
+      while (index >= 0 && quotes[index]?.key !== key) index -= 1;
+      const closing = quotes[index];
+      if (closing) {
+        finish(end - closing.token.length);
+        quotes.length = index;
+      } else if (!header) {
+        quotes.push({
+          key: quote === "'" ? quote : quoteKey(match, quote),
+          token: match[0].toLowerCase(),
+          lineDepth: quote.toLowerCase() === "u0022" ? depth : depth + 1,
+        });
+      }
+    } else if (header && depth && /^[nr]/i.test(text[end] ?? "")) {
+      const open = quotes[quotes.length - 1];
+      // At each JSON escape layer, paired backslashes are literal content.
+      if (open && open.key !== "'" && depth % (2 * open.lineDepth) === open.lineDepth) {
+        finish(end - open.lineDepth * slash.length);
+      }
+    }
+  }
+  finish(text.length);
 }
 
 function findCollectionEnd(text: string, start: number, opening: string) {
@@ -298,6 +380,7 @@ export function redactOutboxErrorText(value: string) {
   const text = value.slice(0, end);
 
   const spans: RedactionSpan[] = [];
+  collectCookieSpans(text, spans);
   const encodedCredential = truncated ? TRUNCATED_ENCODED_CREDENTIAL : ENCODED_CREDENTIAL;
   for (const pattern of [...CREDENTIAL_PATTERNS, encodedCredential]) {
     for (const match of text.matchAll(pattern)) {
@@ -342,15 +425,19 @@ export function redactOutboxErrorText(value: string) {
   }
 
   // Merge overlapping spans only. A delimiter between two values stays in the output.
-  spans.sort((left, right) => left.start - right.start || Number(!!left.prefix) - Number(!!right.prefix));
+  spans.sort((left, right) => left.start - right.start || Number(!!right.cookie) - Number(!!left.cookie)
+    || Number(!!left.prefix) - Number(!!right.prefix));
   let cursor = 0;
   let output = "";
-  for (let index = 0; index < spans.length; index += 1) {
-    const { start, prefix } = spans[index];
-    let spanEnd = spans[index].end;
-    while (index + 1 < spans.length && spans[index + 1].start < spanEnd) {
-      index += 1;
-      spanEnd = Math.max(spanEnd, spans[index].end);
+  for (let index = 0, span; (span = spans[index]); index += 1) {
+    const { start, prefix, end, cookie } = span;
+    let spanEnd = end;
+    let cookieEnd = cookie ? end : 0;
+    for (let next; (next = spans[index + 1]) && next.start < spanEnd; index += 1) {
+      // A pair inside a cookie header cannot extend past the header's closing delimiter.
+      if (next.start < cookieEnd) continue;
+      if (next.cookie) cookieEnd = next.end;
+      spanEnd = Math.max(spanEnd, next.end);
     }
     const marker = jwtEnds.get(start) === spanEnd ? "[JWT_REDACTED]" : "[REDACTED]";
     output += text.slice(cursor, start) + (prefix ?? "") + marker;
