@@ -126,7 +126,7 @@ const matchesDomainDenyPattern = (host, pattern) => {
   return normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`);
 };
 
-export const canonicalizeHttpsUrl = (value) => {
+export const canonicalizeHttpsUrl = (value, httpAllowedHost) => {
   let parsed;
   try {
     parsed = new URL(String(value || ""));
@@ -134,13 +134,16 @@ export const canonicalizeHttpsUrl = (value) => {
     throw new EgressPolicyError("Egress policy violation: invalid URL");
   }
 
-  if (parsed.protocol.toLowerCase() !== "https:") {
-    throw new EgressPolicyError("Egress policy violation: only https:// targets are allowed");
+  const host = normaliseHostname(parsed.hostname);
+  const allowedHttp = parsed.protocol === "http:" && httpAllowedHost &&
+    host === normaliseHostname(httpAllowedHost) && !isIpLiteral(host);
+  if (parsed.protocol !== "https:" && !allowedHttp) {
+    throw new EgressPolicyError("Egress policy violation: only https:// or the approved HTTP hostname is allowed");
   }
   if (parsed.username || parsed.password) {
     throw new EgressPolicyError("Egress policy violation: URL userinfo is not allowed");
   }
-  if (!normaliseHostname(parsed.hostname)) {
+  if (!host) {
     throw new EgressPolicyError("Egress policy violation: target hostname is missing");
   }
   parsed.hash = "";
@@ -292,6 +295,7 @@ export const executeBoundedEgress = async ({
   body,
   timeoutMs,
   policy,
+  httpAllowedHost,
   resolveDns,
   directFetch = fetch,
   guardedFetch,
@@ -299,12 +303,12 @@ export const executeBoundedEgress = async ({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 }) => {
+  let currentUrl = canonicalizeHttpsUrl(url, httpAllowedHost);
   const totalTimeoutMs = Math.max(Number(timeoutMs) || 0, 1);
   const startedAt = now();
   const controller = new AbortController();
   const timer = setTimer(() => controller.abort(new DOMException("Egress deadline exceeded", "TimeoutError")), totalTimeoutMs);
   const visited = new Set();
-  let currentUrl = canonicalizeHttpsUrl(url);
   let currentMethod = String(method || "POST").toUpperCase();
   let currentBody = body;
   let currentHeaders = new Headers(headers || {});
@@ -372,7 +376,7 @@ export const executeBoundedEgress = async ({
         throw new EgressPolicyError(`Egress policy violation: redirect limit ${maxRedirects} exceeded`);
       }
 
-      const nextUrl = canonicalizeHttpsUrl(new URL(location, currentUrl).href);
+      const nextUrl = canonicalizeHttpsUrl(new URL(location, currentUrl).href, httpAllowedHost);
       if (nextUrl.origin !== currentUrl.origin) {
         currentHeaders = retainCrossOriginSafeHeaders(currentHeaders);
       }

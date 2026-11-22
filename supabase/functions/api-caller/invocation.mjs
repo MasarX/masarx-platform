@@ -1,5 +1,5 @@
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const FORBIDDEN_OVERRIDE_KEYS = Object.freeze(["url", "method", "headers", "body"]);
+const FORBIDDEN_OVERRIDE_KEYS = Object.freeze(["url", "method", "headers", "body", "http_allowed_host"]);
 const JOB_KEYS = new Set(["job_id", "timeout_seconds"]);
 const BATCH_KEYS = new Set(["batch", "concurrency"]);
 
@@ -163,6 +163,7 @@ export const mergeServerDispatch = (spec, invocation = {}) => {
 
   return {
     url: spec?.url,
+    ...(typeof spec?.http_allowed_host === "string" ? { http_allowed_host: spec.http_allowed_host } : {}),
     method: spec?.method || "POST",
     headers: spec?.headers && Object.keys(spec.headers).length ? { ...spec.headers } : undefined,
     body: spec?.body ?? {},

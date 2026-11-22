@@ -17,6 +17,7 @@ type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface CallRequest {
   url?: string;
+  http_allowed_host?: string;
   method?: HttpMethod;
   headers?: Record<string, string>;
   body?: unknown;
@@ -312,6 +313,7 @@ const runFetch = async (
     body: requestBody.body,
     timeoutMs,
     policy: egressPolicy,
+    httpAllowedHost: payload.http_allowed_host,
     resolveDns: resolveDnsForEgress,
     guardedFetch: GUARDED_EGRESS_PROXY_URL || GUARDED_EGRESS_PROXY_USERNAME || GUARDED_EGRESS_PROXY_PASSWORD
       ? guardedProxyFetch

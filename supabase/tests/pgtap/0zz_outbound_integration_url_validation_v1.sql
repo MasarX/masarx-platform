@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
-SELECT no_plan();
+SELECT plan(107);
 
 SELECT ok(NOT public.outbound_url_allowed_v1(url), 'rejects ' || kind)
 FROM (VALUES
@@ -47,6 +47,13 @@ FROM (VALUES
   ('mapped public IPv4 literal', format('https://[::ffff:%s]', concat_ws('.', 8, 8, 8, 8)))
 ) AS cases(kind, url);
 
+SELECT ok(NOT public.outbound_url_allowed_v1(
+  'http://' || concat_ws('.', 127, 0, 0, 1), jsonb_build_array(concat_ws('.', 127, 0, 0, 1))),
+  'a listed IP literal cannot use HTTP');
+SELECT ok(NOT public.outbound_url_allowed_v1(
+  'http://fixture.' || 'local', jsonb_build_array('fixture.' || 'local')),
+  'a listed local hostname cannot use HTTP');
+
 SELECT is(
   public.outbound_dispatch_headers_v1('https://example.com',
     jsonb_build_object('Accept', 'application/json', 'D360-API-KEY', 'fixture',
@@ -64,10 +71,16 @@ SELECT ok(NOT has_function_privilege(role_name, signature, 'EXECUTE'),
   role_name || ' cannot execute ' || signature)
 FROM unnest(ARRAY['anon','authenticated','service_role','ui_rpc_executor']) AS roles(role_name)
 CROSS JOIN unnest(ARRAY[
-  'public.outbound_url_allowed_v1(text)',
+  'public.outbound_url_allowed_v1(text,jsonb)',
+  'public.outbound_placeholder_url_v1(text)',
+  'public.outbound_dns_hostname_v1(text)',
+  'public.outbound_http_allowed_hosts_v1(uuid)',
+  'public.outbound_job_http_allowed_hosts_v1(uuid)',
+  'public.validate_outbound_http_hosts_write_v1()',
+  'public.mark_outbound_url_invalid_v1(uuid,text)',
   'public.filter_outbound_headers_v1(jsonb)',
   'public.validate_outbound_integration_write_v1()',
-  'public.outbound_dispatch_headers_v1(text,jsonb)'
+  'public.outbound_dispatch_headers_v1(text,jsonb,uuid)'
 ]) AS functions(signature);
 
 SELECT public.create_next_partitions();
@@ -78,6 +91,8 @@ SELECT gen_random_uuid() AS org, gen_random_uuid() AS actor, gen_random_uuid() A
        gen_random_uuid() AS run_step, gen_random_uuid() AS template, gen_random_uuid() AS template_step,
        gen_random_uuid() AS plugin, gen_random_uuid() AS version,
        gen_random_uuid() AS bad_edge_job, gen_random_uuid() AS good_edge_job,
+       gen_random_uuid() AS bad_batch_job, gen_random_uuid() AS good_batch_job,
+       gen_random_uuid() AS bad_inline_job,
        'url-validation-' || gen_random_uuid() AS workflow;
 GRANT SELECT ON outbound_validation_ids TO authenticated;
 
@@ -112,6 +127,39 @@ BEGIN
 END;
 $policy$;
 
+SELECT public.upsert_settings_value_v1(
+  'integration_plugin_egress_policy', 'tenant', org,
+  jsonb_build_object(
+    'version', 1, 'enforce_https_only', true, 'block_private_networks', true,
+    'http_allowed_hosts', jsonb_build_array('approved.example.test'),
+    'allowed_methods', jsonb_build_array('GET', 'POST', 'PUT', 'PATCH', 'DELETE'),
+    'max_payload_bytes', 262144, 'max_timeout_seconds', 60, 'follow_redirects', false,
+    'header_allowlist', jsonb_build_array('accept', 'content-type', 'authorization', 'x-api-key', 'user-agent')
+  ), 1, 'Outbound URL validation policy fixture')
+FROM outbound_validation_ids;
+
+SELECT throws_ok(
+  $sql$UPDATE public.settings
+       SET cached_value = cached_value || '{"http_allowed_hosts":["*.example.test"]}'::jsonb
+       WHERE category = 'integration_plugin_egress_policy' AND scope_type = 'tenant'
+         AND scope_id = (SELECT org FROM outbound_validation_ids)$sql$,
+  '22023', 'outbound_http_allowed_hosts_invalid', 'active policy writes reject wildcard hosts'
+);
+SELECT throws_ok(
+  $sql$UPDATE public.settings_versions
+       SET value = jsonb_set(value, '{http_allowed_hosts}', jsonb_build_array(concat_ws('.', 8, 8, 8, 8)))
+       WHERE category = 'integration_plugin_egress_policy' AND scope_type = 'tenant'
+         AND scope_id = (SELECT org FROM outbound_validation_ids)$sql$,
+  '22023', 'outbound_http_allowed_hosts_invalid', 'policy version writes reject IP literals'
+);
+SELECT throws_ok(
+  $sql$UPDATE public.settings
+       SET cached_value = jsonb_set(cached_value, '{http_allowed_hosts}', jsonb_build_array('fixture.' || 'internal'))
+       WHERE category = 'integration_plugin_egress_policy' AND scope_type = 'tenant'
+         AND scope_id = (SELECT org FROM outbound_validation_ids)$sql$,
+  '22023', 'outbound_http_allowed_hosts_invalid', 'policy writes reject internal names'
+);
+
 INSERT INTO public.providers (id, organization_id, name, provider_type)
 SELECT provider, org, 'Outbound validation provider', 'http' FROM outbound_validation_ids;
 
@@ -143,21 +191,49 @@ SELECT set_config('app.workflow_run_id', run::text, true),
 FROM outbound_validation_ids;
 
 SELECT throws_ok(
-  $INSERT INTO public.outbound_calls(call_type, target_type, target_id, method, url)
+  $$INSERT INTO public.outbound_calls(call_type, target_type, target_id, method, url)
     SELECT 'provider_api', 'provider', provider, 'POST', 'http://example.test/path'
     FROM outbound_validation_ids$$,
-  '22023', 'outbound_url_invalid', 'queue inserts validate stored URLs'
+  '22023', 'outbound_url_invalid', 'queue inserts reject unlisted HTTP URLs'
+);
+SELECT throws_ok(
+  $$INSERT INTO public.outbound_calls(call_type, target_type, target_id, method, url)
+    SELECT 'provider_api', 'provider', provider, 'POST', 'ftp://example.test/path'
+    FROM outbound_validation_ids$$,
+  '22023', 'outbound_url_invalid', 'queue rejects unrecognized schemes'
+);
+SELECT throws_ok(
+  $$UPDATE public.operation_templates SET url_template = 'workflow://example.test/operation'
+    WHERE id = (SELECT operation FROM outbound_validation_ids)$$,
+  '22023', 'outbound_url_invalid', 'templates reject non-internal workflow URLs'
+);
+SELECT lives_ok(
+  $$UPDATE public.operation_templates SET url_template = 'workflow://internal/outbound_validation'
+    WHERE id = (SELECT operation FROM outbound_validation_ids)$$,
+  'the internal workflow catalog URL can be saved'
+);
+SELECT lives_ok(
+  $$UPDATE public.operation_templates SET url_template = 'http://approved.example.test/template'
+    WHERE id = (SELECT operation FROM outbound_validation_ids)$$,
+  'the listed HTTP hostname can be saved in a template with HTTPS as the default'
+);
+SELECT lives_ok(
+  $$INSERT INTO public.outbound_calls(call_type, target_type, target_id, method, url, status)
+    SELECT 'provider_api', 'provider', provider, 'POST', placeholder, 'completed'
+    FROM outbound_validation_ids
+    CROSS JOIN (VALUES ('comms://sms'), ('geocode://provider'), ('workflow://internal/outbound_validation')) t(placeholder)$$,
+  'comms, geocode and internal workflow placeholders can be saved'
 );
 
 INSERT INTO public.outbound_calls (id, call_type, target_type, target_id, method, url, status, scheduled_at, context)
-SELECT job, 'provider_api', provider, 'POST', 'https://example.test/queued', 'pending_edge', now(),
+SELECT job, 'provider_api', 'provider', provider, 'POST', stored_url, 'pending_edge', now(),
        jsonb_build_object('organization_id', org, 'edge_dispatch',
          jsonb_build_object('url', url, 'headers', '{"accept":"application/json","host":"fixture"}'::jsonb))
 FROM outbound_validation_ids
 CROSS JOIN LATERAL (VALUES
-  (bad_edge_job, 'http://example.test/edge'),
-  (good_edge_job, 'https://example.test/edge')
-) AS edge(job, url);
+  (bad_edge_job, 'comms://sms', 'comms://sms'),
+  (good_edge_job, 'http://approved.example.test/queued', 'http://approved.example.test/edge')
+) AS edge(job, stored_url, url);
 
 SELECT throws_ok(
   $$UPDATE public.outbound_calls SET url = 'http://example.test/path'
@@ -166,15 +242,77 @@ SELECT throws_ok(
 );
 
 SELECT is(public.get_claimed_edge_job_call_spec_v1(claim.job_id, claim.lease_token), NULL::jsonb,
-          'an invalid saved Edge dispatch is blocked even when the queue URL is allowed')
+          'the Edge claim refuses a saved placeholder as a rendered URL')
 FROM outbound_validation_ids ids
 CROSS JOIN LATERAL public.claim_edge_job_by_id_v1(ids.bad_edge_job) AS claim;
 SELECT is(oc.error_message, 'outbound_url_invalid', 'Edge records the stable rejection code')
 FROM public.outbound_calls oc JOIN outbound_validation_ids ids ON oc.id = ids.bad_edge_job;
-SELECT is(public.get_claimed_edge_job_call_spec_v1(claim.job_id, claim.lease_token)->'headers',
-          '{"accept":"application/json"}'::jsonb, 'Edge handoff drops a disallowed saved header')
+CREATE TEMP TABLE outbound_validation_edge_spec AS
+SELECT public.get_claimed_edge_job_call_spec_v1(claim.job_id, claim.lease_token) AS spec
 FROM outbound_validation_ids ids
 CROSS JOIN LATERAL public.claim_edge_job_by_id_v1(ids.good_edge_job) AS claim;
+SELECT is(spec->'headers', '{"accept":"application/json"}'::jsonb, 'Edge drops a disallowed header')
+FROM outbound_validation_edge_spec;
+SELECT is(spec->>'url', 'http://approved.example.test/edge', 'Edge accepts the exact listed HTTP hostname')
+FROM outbound_validation_edge_spec;
+SELECT is(spec->>'http_allowed_host', 'approved.example.test', 'Edge gets only the approved hostname')
+FROM outbound_validation_edge_spec;
+
+INSERT INTO public.outbound_calls (id, call_type, target_type, target_id, method, url, status, priority, context)
+SELECT job, 'provider_api', 'provider', provider, 'POST', url, 'pending', priority,
+       jsonb_build_object('organization_id', org)
+FROM outbound_validation_ids
+CROSS JOIN LATERAL (VALUES
+  (bad_batch_job, 'comms://sms', 100),
+  (good_batch_job, 'https://example.test/batch', 90),
+  (bad_inline_job, 'geocode://provider', 80)
+) AS batch(job, url, priority);
+
+CREATE TEMP TABLE outbound_validation_dispatches (url text);
+CREATE OR REPLACE FUNCTION public.call_api(
+  p_url text, p_method text DEFAULT 'POST', p_headers jsonb DEFAULT '{}',
+  p_body jsonb DEFAULT '{}', p_timeout_seconds integer DEFAULT NULL
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO public, extensions, pg_temp AS $mock$
+BEGIN
+  INSERT INTO pg_temp.outbound_validation_dispatches VALUES (p_url);
+  RETURN '{"status":202,"completed":false,"request_id":209}'::jsonb;
+END;
+$mock$;
+
+CREATE OR REPLACE FUNCTION public.claim_pending_jobs(p_batch_size integer)
+RETURNS TABLE(job_id uuid, call_type text, target_type text, target_id uuid, method text, url text,
+              headers jsonb, body jsonb, priority integer, retry_count integer, max_retries integer,
+              correlation_id uuid, shipment_id uuid, context jsonb)
+LANGUAGE sql SECURITY DEFINER SET search_path TO public, extensions, pg_temp AS $mock$
+  WITH claimed AS (
+    UPDATE public.outbound_calls oc SET lease_expires_at = now() + interval '30 seconds'
+    FROM pg_temp.outbound_validation_ids ids
+    WHERE oc.id IN (ids.bad_batch_job, ids.good_batch_job) AND oc.status = 'pending'
+    RETURNING oc.*
+  )
+  SELECT oc.id, oc.call_type, oc.target_type, oc.target_id, oc.method, oc.url,
+         oc.headers, oc.body, oc.priority, oc.retry_count, oc.max_retries,
+         oc.correlation_id, oc.shipment_id, oc.context
+  FROM claimed oc ORDER BY oc.priority DESC;
+$mock$;
+
+SELECT set_config('app.force_worker', 'outbound_worker', true);
+SELECT is(public.run_outbound_worker()->>'status', 'completed', 'worker completes a mixed batch');
+SELECT is(oc.status, 'permanently_failed', 'the placeholder failure is terminal')
+FROM public.outbound_calls oc JOIN outbound_validation_ids ids ON oc.id = ids.bad_batch_job;
+SELECT is(oc.error_message, 'outbound_url_invalid', 'the worker records the stable invalid-URL code')
+FROM public.outbound_calls oc JOIN outbound_validation_ids ids ON oc.id = ids.bad_batch_job;
+SELECT results_eq(
+  $$SELECT url FROM outbound_validation_dispatches$$,
+  $$VALUES ('https://example.test/batch'::text)$$,
+  'the placeholder never reaches call_api and the valid row in the same batch dispatches'
+);
+SELECT is(public.dispatch_outbound_call_inline(bad_inline_job,
+    '{"timeout_seconds":1,"poll_max_seconds":0,"poll_interval_ms":50,"pending_reschedule_seconds":60,"lease_seconds":60}') ->> 'reason',
+  'outbound_url_invalid', 'inline dispatch returns the stable rejection without raising')
+FROM outbound_validation_ids;
+SELECT is(oc.status, 'permanently_failed', 'the inline rejection is terminal')
+FROM public.outbound_calls oc JOIN outbound_validation_ids ids ON oc.id = ids.bad_inline_job;
 
 INSERT INTO public.integration_plugins (id, organization_id, plugin_key, name, plugin_kind)
 SELECT plugin, org, 'url-validation-' || plugin, 'Outbound validation plugin', 'api'

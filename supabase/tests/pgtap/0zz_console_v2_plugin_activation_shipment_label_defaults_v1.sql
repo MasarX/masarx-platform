@@ -253,7 +253,7 @@ VALUES (
   1,
   'approved',
   'curl',
-  jsonb_build_object('curl', 'curl https://vendor.example.test/v1/orders'),
+  jsonb_build_object('curl', 'curl http://provider.example.test/v1/orders'),
   '{}'::jsonb,
   jsonb_build_object(
     'route',
@@ -262,7 +262,7 @@ VALUES (
       'path_template', '/plugin-label-defaults/orders',
       'upstream_method', 'POST',
       'upstream_path_template', '/v1/orders',
-      'upstream_base_url', 'https://vendor.example.test'
+      'upstream_base_url', 'http://provider.example.test'
     )
   ),
   '{}'::jsonb,
@@ -271,7 +271,7 @@ VALUES (
     jsonb_build_object(
       'operation_name', 'forward_event',
       'method', 'POST',
-      'url_template', 'https://vendor.example.test/v1/orders',
+      'url_template', 'http://provider.example.test/v1/orders',
       'headers_template', jsonb_build_object('content-type', 'application/json'),
       'body_template', jsonb_build_object('payload', '$.payload'),
       'request_mappings', jsonb_build_object('body', jsonb_build_object('payload', '$.payload')),
@@ -391,7 +391,7 @@ SELECT is(
       JOIN public.providers p
         ON p.id = (r.result->>'provider_id')::uuid
   ),
-  'https://vendor.example.test',
+  'http://provider.example.test',
   'activation materializes provider base_url from operator-authored source URL'
 );
 

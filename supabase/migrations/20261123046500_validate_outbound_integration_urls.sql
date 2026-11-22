@@ -3,7 +3,77 @@ BEGIN;
 
 SET LOCAL lock_timeout = '30s';
 
-CREATE FUNCTION public.outbound_url_allowed_v1(p_url text)
+CREATE FUNCTION public.outbound_placeholder_url_v1(p_url text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+STRICT
+SET search_path TO pg_catalog, pg_temp
+AS $function$
+  SELECT p_url COLLATE "C" ~ '^(?:(?:comms|geocode)://[a-z0-9_-]+|workflow://internal/[a-z0-9_.-]+)$';
+$function$;
+
+CREATE FUNCTION public.outbound_dns_hostname_v1(p_host text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+STRICT
+SET search_path TO pg_catalog, pg_temp
+AS $function$
+  SELECT length(p_host) <= 253
+     AND p_host COLLATE "C" ~* '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+     AND p_host COLLATE "C" !~* ('(^|\.)([0-9]+|0x[0-9a-f]*|local|internal|local' || 'host)$');
+$function$;
+
+CREATE FUNCTION public.outbound_http_allowed_hosts_v1(p_organization_id uuid)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SET search_path TO pg_catalog, pg_temp
+AS $function$
+  SELECT cached_value->'http_allowed_hosts'
+    FROM public.settings
+   WHERE category = 'integration_plugin_egress_policy'
+     AND scope_type = 'tenant'
+     AND scope_id = p_organization_id;
+$function$;
+
+CREATE FUNCTION public.outbound_job_http_allowed_hosts_v1(p_job_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SET search_path TO pg_catalog, pg_temp
+AS $function$
+BEGIN
+  RETURN public.outbound_http_allowed_hosts_v1(public.resolve_organization_id_strict('outbound_call', p_job_id));
+EXCEPTION
+  WHEN raise_exception THEN
+    RETURN NULL;
+END;
+$function$;
+
+CREATE FUNCTION public.validate_outbound_http_hosts_write_v1()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO pg_catalog, pg_temp
+AS $function$
+DECLARE
+  v_hosts jsonb := (to_jsonb(NEW)->TG_ARGV[0])->'http_allowed_hosts';
+BEGIN
+  IF v_hosts IS NOT NULL AND (
+    jsonb_typeof(v_hosts) <> 'array' OR EXISTS (
+      SELECT 1
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(v_hosts) = 'array' THEN v_hosts ELSE '[]'::jsonb END) AS e(host)
+       WHERE jsonb_typeof(host) <> 'string' OR NOT public.outbound_dns_hostname_v1(host #>> '{}')
+    )
+  ) THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'outbound_http_allowed_hosts_invalid';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE FUNCTION public.outbound_url_allowed_v1(p_url text, p_http_hosts jsonb DEFAULT NULL)
 RETURNS boolean
 LANGUAGE plpgsql
 IMMUTABLE
@@ -18,14 +88,28 @@ BEGIN
     RETURN false;
   END IF;
 
-  -- Require a static, unescaped HTTPS authority. Only the path and query may be templated.
+  -- Require a static, unescaped HTTP(S) authority. Only the path and query may be templated.
   v_authority := regexp_match(p_url COLLATE "C",
-    '^https://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?(?:[/?#]|$)', 'i');
+    '^https?://(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::([0-9]{1,5}))?(?:[/?#]|$)', 'i');
   IF v_authority IS NULL OR v_authority[2]::integer NOT BETWEEN 1 AND 65535 THEN
     RETURN false;
   END IF;
 
   v_host := lower(rtrim(v_authority[1] COLLATE "C", '.'));
+  IF p_url COLLATE "C" ~* '^http://' THEN
+    -- A tenant may opt an exact DNS hostname into HTTP. Peer checks require the egress proxy (#211).
+    RETURN length(v_authority[1]) <= 254
+       AND v_authority[1] !~ '\.\.$'
+       AND public.outbound_dns_hostname_v1(v_host)
+       AND EXISTS (
+         SELECT 1
+           FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_http_hosts) = 'array'
+                                          THEN p_http_hosts ELSE '[]'::jsonb END) AS e(host)
+          WHERE jsonb_typeof(host) = 'string'
+            AND lower((host #>> '{}') COLLATE "C") = v_host
+       );
+  END IF;
+
   IF left(v_host, 1) = '[' THEN
     v_address := trim(both '[]' FROM v_host)::inet;
     IF family(v_address) <> 6 THEN
@@ -47,8 +131,7 @@ BEGIN
     -- Reject noncanonical numeric hosts and resolver-local names.
     RETURN length(v_authority[1]) <= 254
        AND v_authority[1] !~ '\.\.$'
-       AND v_host COLLATE "C" ~ '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
-       AND v_host !~ ('(^|\.)([0-9]+|0x[0-9a-f]*|local|internal|local' || 'host)$');
+       AND public.outbound_dns_hostname_v1(v_host);
   END IF;
 
   RETURN NOT (v_address <<= ANY (ARRAY[
@@ -84,26 +167,47 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO pg_catalog, pg_temp
 AS $function$
+DECLARE
+  v_url text;
+  v_hosts jsonb;
 BEGIN
   IF TG_RELID = 'public.operation_templates'::regclass THEN
-    IF (TG_OP = 'INSERT' OR NEW.url_template IS DISTINCT FROM OLD.url_template)
-       AND NOT public.outbound_url_allowed_v1(NEW.url_template) THEN
-      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'outbound_url_invalid';
-    END IF;
     IF (TG_OP = 'INSERT' OR NEW.headers_template IS DISTINCT FROM OLD.headers_template)
        AND NEW.headers_template IS NOT NULL
        AND NEW.headers_template <> public.filter_outbound_headers_v1(NEW.headers_template) THEN
       RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'outbound_headers_invalid';
     END IF;
-  ELSIF (TG_OP = 'INSERT' OR NEW.url IS DISTINCT FROM OLD.url)
-        AND NOT public.outbound_url_allowed_v1(NEW.url) THEN
+    IF TG_OP = 'UPDATE' AND NEW.url_template IS NOT DISTINCT FROM OLD.url_template
+       AND NEW.provider_id IS NOT DISTINCT FROM OLD.provider_id THEN
+      RETURN NEW;
+    END IF;
+    v_url := NEW.url_template;
+    IF v_url COLLATE "C" ~* '^http://' THEN
+      SELECT public.outbound_http_allowed_hosts_v1(p.organization_id)
+        INTO v_hosts FROM public.providers p WHERE p.id = NEW.provider_id;
+    END IF;
+  ELSE
+    IF TG_OP = 'UPDATE' AND NEW.url IS NOT DISTINCT FROM OLD.url
+       AND NEW.target_type IS NOT DISTINCT FROM OLD.target_type
+       AND NEW.target_id IS NOT DISTINCT FROM OLD.target_id
+       AND NEW.shipment_id IS NOT DISTINCT FROM OLD.shipment_id THEN
+      RETURN NEW;
+    END IF;
+    v_url := NEW.url;
+    IF v_url COLLATE "C" ~* '^http://' THEN
+      v_hosts := public.outbound_job_http_allowed_hosts_v1(NEW.id);
+    END IF;
+  END IF;
+
+  IF NOT COALESCE(public.outbound_placeholder_url_v1(v_url), false)
+     AND NOT public.outbound_url_allowed_v1(v_url, v_hosts) THEN
     RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'outbound_url_invalid';
   END IF;
   RETURN NEW;
 END;
 $function$;
 
-CREATE FUNCTION public.outbound_dispatch_headers_v1(p_url text, p_headers jsonb)
+CREATE FUNCTION public.outbound_dispatch_headers_v1(p_url text, p_headers jsonb, p_job_id uuid DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql
 SET search_path TO pg_catalog, pg_temp
@@ -113,7 +217,9 @@ DECLARE
 BEGIN
   -- pg_net follows redirects and cannot validate DNS answers or the connected peer.
   -- See #211 for requiring guarded Edge proxy dispatch.
-  IF NOT public.outbound_url_allowed_v1(p_url) THEN
+  IF NOT public.outbound_url_allowed_v1(p_url,
+    CASE WHEN p_url COLLATE "C" ~* '^http://' THEN public.outbound_job_http_allowed_hosts_v1(p_job_id) END
+  ) THEN
     RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'outbound_url_invalid';
   END IF;
 
@@ -125,10 +231,39 @@ BEGIN
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.outbound_url_allowed_v1(text) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+CREATE FUNCTION public.mark_outbound_url_invalid_v1(p_job_id uuid, p_executor text)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path TO pg_catalog, pg_temp
+AS $function$
+BEGIN
+  UPDATE public.outbound_calls
+     SET status = 'permanently_failed',
+         error_message = 'outbound_url_invalid',
+         completed_at = now(),
+         lease_expires_at = NULL,
+         edge_lease_token = NULL,
+         context = context - 'edge_dispatch' - 'async_request_id'
+   WHERE id = p_job_id;
+  BEGIN
+    PERFORM public.finalize_outbound_workflow_step_v1(p_job_id, p_executor);
+  EXCEPTION
+    WHEN OTHERS THEN
+      RAISE WARNING 'outbound_url_invalid_workflow_finalization_failed';
+  END;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.outbound_placeholder_url_v1(text) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+REVOKE ALL ON FUNCTION public.outbound_dns_hostname_v1(text) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+REVOKE ALL ON FUNCTION public.outbound_http_allowed_hosts_v1(uuid) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+REVOKE ALL ON FUNCTION public.outbound_job_http_allowed_hosts_v1(uuid) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+REVOKE ALL ON FUNCTION public.validate_outbound_http_hosts_write_v1() FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+REVOKE ALL ON FUNCTION public.mark_outbound_url_invalid_v1(uuid, text) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+REVOKE ALL ON FUNCTION public.outbound_url_allowed_v1(text, jsonb) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 REVOKE ALL ON FUNCTION public.filter_outbound_headers_v1(jsonb) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 REVOKE ALL ON FUNCTION public.validate_outbound_integration_write_v1() FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
-REVOKE ALL ON FUNCTION public.outbound_dispatch_headers_v1(text, jsonb) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
+REVOKE ALL ON FUNCTION public.outbound_dispatch_headers_v1(text, jsonb, uuid) FROM PUBLIC, anon, authenticated, service_role, ui_rpc_executor;
 
 CREATE OR REPLACE FUNCTION public.run_outbound_worker()
  RETURNS json
@@ -144,6 +279,7 @@ DECLARE
     v_job RECORD;
     v_org UUID;
     v_spec JSONB;
+    v_dispatch_headers JSONB;
     v_result JSONB;
     v_status INT;
     v_completed BOOLEAN;
@@ -476,10 +612,22 @@ BEGIN
 
             -- First attempt: build call spec and dispatch via call_api (pg_net).
             v_spec := public.get_job_call_spec(v_job.job_id);
+            BEGIN
+                v_dispatch_headers := public.outbound_dispatch_headers_v1(v_spec->>'url', v_spec->'headers', v_job.job_id);
+            EXCEPTION
+                WHEN invalid_parameter_value THEN
+                    IF SQLERRM <> 'outbound_url_invalid' THEN
+                        RAISE;
+                    END IF;
+                    PERFORM public.mark_outbound_url_invalid_v1(v_job.job_id, 'outbound_worker');
+                    v_error := TRUE;
+                    v_items_processed := v_items_processed + 1;
+                    CONTINUE;
+            END;
             v_result := public.call_api(
                 v_spec->>'url',
                 COALESCE(v_spec->>'method', 'POST'),
-                public.outbound_dispatch_headers_v1(v_spec->>'url', v_spec->'headers'),
+                v_dispatch_headers,
                 COALESCE(v_spec->'body', '{}'::jsonb),
                 NULL
             );
@@ -715,6 +863,7 @@ DECLARE
     v_org UUID;
     v_optout JSONB;
     v_spec JSONB;
+    v_dispatch_headers JSONB;
     v_result JSONB := NULL;
     v_status INT := 0;
     v_completed BOOLEAN := FALSE;
@@ -879,10 +1028,20 @@ BEGIN
     IF NOT v_completed AND v_request_id IS NULL THEN
         -- Dispatch a new HTTP request and optionally wait within the policy budget.
         v_spec := public.get_job_call_spec(p_job_id);
+        BEGIN
+            v_dispatch_headers := public.outbound_dispatch_headers_v1(v_spec->>'url', v_spec->'headers', p_job_id);
+        EXCEPTION
+            WHEN invalid_parameter_value THEN
+                IF SQLERRM <> 'outbound_url_invalid' THEN
+                    RAISE;
+                END IF;
+                PERFORM public.mark_outbound_url_invalid_v1(p_job_id, v_performed_by_system);
+                RETURN jsonb_build_object('status', 'failed', 'job_id', p_job_id, 'reason', 'outbound_url_invalid');
+        END;
         v_result := public.call_api(
             v_spec->>'url',
             COALESCE(v_spec->>'method', 'POST'),
-            public.outbound_dispatch_headers_v1(v_spec->>'url', v_spec->'headers'),
+            v_dispatch_headers,
             COALESCE(v_spec->'body', '{}'::jsonb),
             v_timeout_seconds
         );
@@ -1130,7 +1289,8 @@ BEGIN
       'url', COALESCE(v_job.context #>> '{edge_dispatch,url}', v_spec->>'url'),
       'headers', public.outbound_dispatch_headers_v1(
         COALESCE(v_job.context #>> '{edge_dispatch,url}', v_spec->>'url'),
-        COALESCE(v_job.context #> '{edge_dispatch,headers}', v_spec->'headers')
+        COALESCE(v_job.context #> '{edge_dispatch,headers}', v_spec->'headers'),
+        p_job_id
       )
     );
   EXCEPTION
@@ -1154,22 +1314,26 @@ BEGIN
 
       v_org_text := COALESCE(v_job.context->>'organization_id', '');
       IF v_org_text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
-        PERFORM public.log_decision(
-          p_organization_id := v_org_text::UUID,
-          p_decision_category := 'outbound_call',
-          p_resource_type := 'outbound_call',
-          p_resource_id := p_job_id,
-          p_decision_point := 'edge_claim_spec',
-          p_decision_outcome := 'permanently_failed',
-          p_performed_by_system := 'get_claimed_edge_job_call_spec_v1',
-          p_correlation_id := NULL,
-          p_decision_inputs := jsonb_strip_nulls(jsonb_build_object(
-            'call_type', v_job.call_type,
-            'reason', 'spec_resolution_failed',
-            'error', v_error
-          )),
-          p_decision_reason := 'Claimed Edge job has an invalid call specification.'
-        );
+        BEGIN
+          PERFORM public.log_decision(
+            p_organization_id := v_org_text::UUID,
+            p_decision_category := 'outbound_call',
+            p_resource_type := 'outbound_call',
+            p_resource_id := p_job_id,
+            p_decision_point := 'edge_claim_spec',
+            p_decision_outcome := 'permanently_failed',
+            p_performed_by_system := 'get_claimed_edge_job_call_spec_v1',
+            p_correlation_id := NULL,
+            p_decision_inputs := jsonb_strip_nulls(jsonb_build_object(
+              'call_type', v_job.call_type,
+              'reason', 'spec_resolution_failed',
+              'error', v_error
+            )),
+            p_decision_reason := 'Claimed Edge job has an invalid call specification.'
+          );
+        EXCEPTION WHEN OTHERS THEN
+          RAISE WARNING 'outbound_edge_claim_spec_audit_failed';
+        END;
       END IF;
       RETURN NULL;
   END;
@@ -1184,7 +1348,10 @@ BEGIN
       NULLIF(v_spec->>'timeout_seconds', '')::INT,
       30
     )
-  );
+  ) || CASE WHEN v_spec->>'url' COLLATE "C" ~* '^http://' THEN
+    jsonb_build_object('http_allowed_host',
+      substring(lower((v_spec->>'url') COLLATE "C") FROM '^http://([a-z0-9.-]+)'))
+  ELSE '{}'::jsonb END;
 END;
 $function$;
 
@@ -1195,27 +1362,45 @@ DECLARE
   v_template_headers bigint;
   v_queued_urls bigint;
 BEGIN
-  SELECT count(*) FILTER (WHERE url_template <> 'workflow://internal/' || operation_name
-                            AND NOT public.outbound_url_allowed_v1(url_template)),
-         count(*) FILTER (WHERE headers_template <> public.filter_outbound_headers_v1(headers_template))
+  SELECT count(*) FILTER (
+           WHERE NOT public.outbound_placeholder_url_v1(ot.url_template)
+             AND NOT public.outbound_url_allowed_v1(ot.url_template,
+               CASE WHEN ot.url_template COLLATE "C" ~* '^http://'
+                    THEN public.outbound_http_allowed_hosts_v1(p.organization_id) END
+             )),
+         count(*) FILTER (WHERE ot.headers_template <> public.filter_outbound_headers_v1(ot.headers_template))
     INTO v_template_urls, v_template_headers
-    FROM public.operation_templates;
+    FROM public.operation_templates ot JOIN public.providers p ON p.id = ot.provider_id;
   SELECT count(*) INTO v_queued_urls
-    FROM public.outbound_calls WHERE NOT public.outbound_url_allowed_v1(url);
+    FROM public.outbound_calls oc
+   WHERE NOT public.outbound_placeholder_url_v1(oc.url)
+     AND NOT public.outbound_url_allowed_v1(oc.url,
+       CASE WHEN oc.url COLLATE "C" ~* '^http://' THEN public.outbound_job_http_allowed_hosts_v1(oc.id) END
+     );
   RAISE NOTICE 'Outbound validation inventory: template URLs %, template headers %, queue URLs %',
     v_template_urls, v_template_headers, v_queued_urls;
 END;
 $report$;
 
+CREATE TRIGGER validate_outbound_http_hosts_current_v1
+  BEFORE INSERT OR UPDATE OF category, cached_value ON public.settings
+  FOR EACH ROW WHEN (NEW.category = 'integration_plugin_egress_policy')
+  EXECUTE FUNCTION public.validate_outbound_http_hosts_write_v1('cached_value');
+
+CREATE TRIGGER validate_outbound_http_hosts_version_v1
+  BEFORE INSERT OR UPDATE OF category, value ON public.settings_versions
+  FOR EACH ROW WHEN (NEW.category = 'integration_plugin_egress_policy')
+  EXECUTE FUNCTION public.validate_outbound_http_hosts_write_v1('value');
+
 CREATE TRIGGER validate_outbound_integration_template_v1
-  BEFORE INSERT OR UPDATE OF url_template, headers_template ON public.operation_templates
+  AFTER INSERT OR UPDATE OF provider_id, url_template, headers_template ON public.operation_templates
   FOR EACH ROW EXECUTE FUNCTION public.validate_outbound_integration_write_v1();
 
 CREATE TRIGGER validate_outbound_integration_queue_v1
-  BEFORE INSERT OR UPDATE OF url ON public.outbound_calls
+  AFTER INSERT OR UPDATE OF url, target_type, target_id, shipment_id ON public.outbound_calls
   FOR EACH ROW EXECUTE FUNCTION public.validate_outbound_integration_write_v1();
 
-COMMENT ON FUNCTION public.outbound_dispatch_headers_v1(text, jsonb) IS
+COMMENT ON FUNCTION public.outbound_dispatch_headers_v1(text, jsonb, uuid) IS
   'Checks the initial rendered URL and filters outbound headers. Route hostname traffic through the Edge guarded egress proxy to validate and pin the connected address for every request and redirect. The pg_net path does not check DNS answers or redirect destinations.';
 
 COMMIT;

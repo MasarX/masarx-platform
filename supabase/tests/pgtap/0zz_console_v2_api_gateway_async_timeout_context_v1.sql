@@ -33,7 +33,7 @@ VALUES (
   true,
   100,
   'healthy',
-  '{"base_url":"https://vendor.example.test"}'::jsonb
+  '{"base_url":"http://rvzwwjlztwwisjthghnipgjr.example.invalid:49956"}'::jsonb
 )
 ON CONFLICT (id) DO UPDATE
 SET metadata = EXCLUDED.metadata,
@@ -125,7 +125,7 @@ VALUES (
   'provider',
   '86c82571-b9c6-4fc9-bbb3-f99f8553d6f6'::uuid,
   'POST',
-  'https://vendor.example.test/provider/timeout',
+  'https://rvzwwjlztwwisjthghnipgjr.example.invalid:49956/provider/timeout',
   '{}'::jsonb,
   '{}'::jsonb,
   'pending_edge',
