@@ -71,4 +71,28 @@ describe('dispatch route scanout blocked departure readback schema migration', (
     expect(sql).toContain("readback_field.field_value->>'key' = 'error_message'");
     expect(sql).toContain("'error.message'");
   });
+
+  test('locks and checks route ownership before reconciling, replaying or recording departure', () => {
+    const sql = readFile(path.join(path.dirname(migrationPath), '20261008120000_fieldops_offline_departure_serialization_v1.sql'));
+    const orderedSteps = [
+      'FOR UPDATE OF rr',
+      'v_route_run.organization_id IS DISTINCT FROM v_org_id',
+      'public.route_run_scan_out_reconciliation_v1(v_route_run.id)',
+      "v_scan_out->>'ready_for_departure'",
+      "v_existing_departure := COALESCE(v_route_run.metadata->'route_departure'",
+      'UPDATE public.route_runs rr',
+    ].map((step) => sql.indexOf(step));
+
+    expect(orderedSteps[0]).toBeGreaterThan(-1);
+    for (let index = 1; index < orderedSteps.length; index += 1) {
+      expect(orderedSteps[index]).toBeGreaterThan(orderedSteps[index - 1]);
+    }
+    const blocked = sql.slice(orderedSteps[3], orderedSteps[4]);
+    expect(blocked).toContain('IS DISTINCT FROM TRUE');
+    expect(blocked).toContain("USING ERRCODE = '23514'");
+    const replay = sql.slice(orderedSteps[4], orderedSteps[5]);
+    expect(replay).toContain("'route_departure', v_existing_departure");
+    expect(replay).toContain("'scan_out', v_scan_out");
+    expect(replay).toMatch(/RETURN\s+jsonb_/);
+  });
 });

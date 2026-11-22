@@ -23,7 +23,7 @@ export const settings_versions = [
   { id: 'sv_002', category: 'pod.required_evidence', scope_type: 'client', scope_id: 'cl_exampleparcel_ksa', value: ['photo'], effective_from: '2026-02-15', version: 3, status: 'active' },
 
   // route_assignment_policy
-  { id: 'sv_010', category: 'route_assignment_policy', scope_type: 'global', scope_id: 'global', value: { default_capacity: 20, prefer_internal: true, allow_partner_handoff: true }, version: 4, status: 'active' },
+  { id: 'sv_010', category: 'route_assignment_policy', scope_type: 'global', scope_id: 'global', value: { default_capacity: 20, prefer_internal: true, allow_partner_handoff: true, alternate_capacity: { enabled: false } }, version: 4, status: 'active' },
   { id: 'sv_011', category: 'route_assignment_policy', scope_type: 'tenant', scope_id: 'org_rashed', value: { default_capacity: 22, prefer_internal: true, allow_partner_handoff: true, partner_pools: ['pool_exampledepot', 'pool_examplecourier'] }, version: 2, status: 'active' },
 
   // dispatch_policy

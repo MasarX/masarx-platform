@@ -213,6 +213,16 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     return rows[0]?.id ?? null;
   }
 
+  async function enableAlternateCapacity(organizationId) {
+    await client.query(
+      `SELECT public.upsert_settings_value_v1(
+         'route_assignment_policy', 'tenant', $1::uuid,
+         '{"alternate_capacity":{"enabled":true}}'::jsonb, 1, 'Opt in for route assignment fixture'
+       )`,
+      [organizationId]
+    );
+  }
+
   async function setRouteRunAlternateCapacityMetadata(routeRunId, demandClass, marketplaceRequestId) {
     await client.query(
       `UPDATE public.route_runs
@@ -1456,11 +1466,38 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     }
   });
 
+  it('rejects alternate capacity assignment without a scoped opt-in', async () => {
+    const seed = await seedRouteRun();
+    const supplierOrg = await createOrganization(client, 'UC079 Default Capacity Supplier');
+
+    await setServiceContext(seed.operatorId, seed.organizationId);
+    const marketplaceRequestId = await seedMarketplacePrivatePoolRequest(
+      seed.organizationId,
+      supplierOrg.id
+    );
+    await setRouteRunAlternateCapacityMetadata(seed.routeRunId, 'express', marketplaceRequestId);
+
+    await setAuthContext(client, seed.operatorId);
+    await expect(
+      client.query(
+        `SELECT api.ui_execute_route_run_assign_v1(
+           'routes.assign', 'routes', ARRAY[$1::text], $1::text, 1,
+           '{"use_alternate_capacity":true}'::jsonb
+         )`,
+        [seed.routeRunId]
+      )
+    ).rejects.toMatchObject({
+      code: '23514',
+      message: `route_run_resolve_alternate_capacity_v1 alternate capacity is disabled for route_run ${seed.routeRunId}`,
+    });
+  });
+
   it('assigns an express route run through the alternate capacity pool path and exposes it through the browser-safe route API', async () => {
     const seed = await seedRouteRun();
     const supplierOrg = await createOrganization(client, 'UC079 Alternate Capacity Supplier');
 
     await setServiceContext(seed.operatorId, seed.organizationId);
+    await enableAlternateCapacity(seed.organizationId);
     const marketplaceRequestId = await seedMarketplacePrivatePoolRequest(
       seed.organizationId,
       supplierOrg.id
@@ -1580,6 +1617,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     const supplierOrg = await createOrganization(client, 'UC079 Outside Supplier');
 
     await setServiceContext(seed.operatorId, seed.organizationId);
+    await enableAlternateCapacity(seed.organizationId);
     const marketplaceRequestId = await seedMarketplacePrivatePoolRequest(
       outsiderRequester.id,
       supplierOrg.id
@@ -1614,6 +1652,7 @@ describe('UC076 route run assignment lifecycle foundation', () => {
     const supplierOrg = await createOrganization(client, 'UC079 Hidden Alternate Capacity Supplier');
 
     await setServiceContext(seed.operatorId, seed.organizationId);
+    await enableAlternateCapacity(seed.organizationId);
     const marketplaceRequestId = await seedMarketplacePrivatePoolRequest(
       seed.organizationId,
       supplierOrg.id
