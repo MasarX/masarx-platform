@@ -236,6 +236,9 @@ jobs:
           node scripts/ci-hosted/shard-selfcheck.cjs
           node scripts/ci-hosted/database-selfcheck.cjs
           node --test scripts/ci-hosted/images.test.cjs
+      - name: Check deploy branch references
+        timeout-minutes: 1
+        run: node scripts/ci-hosted/deploy-branch-refs.cjs
 
   lint:
     name: Lint
