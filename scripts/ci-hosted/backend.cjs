@@ -294,11 +294,23 @@ async function qualify(diagnostic) {
         ...commands.flatMap(command => ['-c', command])], env, 15000, { quiet: true });
       // Disable background ANALYZE before exposing the application migrations to this stack.
       summary.autovacuum = await timed('autovacuum-off', () => disableHostedAutovacuum(status.DB_URL, dbPort, stackAdmin, db));
-      // The disposable fixture uses the registered schedules without launching background jobs.
-      await timed('cron-pause', async () => {
-        const reloaded = await stackAdmin("ALTER SYSTEM SET cron.launch_active_jobs = 'off'", 'SELECT pg_reload_conf()');
-        if (reloaded.trim() !== 't') throw new Error('Could not reload the pg_cron launch control');
+      await timed('database-settings', async () => {
+        const settings = [
+          'fsync', // Avoid flushing database files to durable storage.
+          'synchronous_commit', // Avoid waiting for WAL to flush on each commit.
+          'full_page_writes', // Avoid crash-recovery page images in WAL.
+        ];
+        // These settings live only in this disposable container; it is never used for crash recovery.
+        const reloaded = await stackAdmin(...settings.map(name => `ALTER SYSTEM SET ${name} = 'off'`),
+          "ALTER SYSTEM SET cron.launch_active_jobs = 'off'", 'SELECT pg_reload_conf()');
+        if (reloaded.trim() !== 't') throw new Error('Could not reload disposable database settings');
         await waitForCronPause(db);
+        const { rows } = await db.query('SELECT name, setting FROM pg_settings WHERE name = ANY($1::text[])', [settings]);
+        if (rows.length !== settings.length || rows.some(row => row.setting !== 'off')) {
+          throw new Error('Disposable database durability settings did not take effect before replay');
+        }
+        summary.durability = Object.fromEntries(rows.map(row => [row.name, row.setting]));
+        console.log(`Disposable database durability: ${JSON.stringify(summary.durability)}`);
       });
       const versions = migrationInventory(fs.readdirSync('supabase/migrations'));
       fs.rmdirSync(path.join(sb, 'migrations'));
