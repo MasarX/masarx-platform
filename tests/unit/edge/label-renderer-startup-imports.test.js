@@ -10,10 +10,15 @@ const heavy = [
   pdfSpecifier, 'npm:qrcode-generator@1.5.2',
   'npm:@pdf-lib/fontkit@1.1.1', 'npm:bidi-js@1.0.3', 'npm:bwip-js@4.11.2',
 ];
+let cors;
+
+beforeAll(async () => {
+  cors = await import('../../../supabase/functions/_shared/cors.mjs');
+});
 
 // Execute the real entrypoint and private construction boundaries with substituted
 // external modules. This is isolate-loading proof, not native JWT/PDF/DB proof.
-function loadRenderer({ pdfLoad, bidiFailure } = {}) {
+function loadRenderer({ pdfLoad, bidiFailure, env = {} } = {}) {
   const imports = [];
   const reachedPdf = new Error('fixture reached PDF construction');
   const createPdf = jest.fn(() => { throw reachedPdf; });
@@ -45,7 +50,8 @@ function loadRenderer({ pdfLoad, bidiFailure } = {}) {
     'npm:@supabase/supabase-js@2.111.0': { createClient: jest.fn(() => {
       throw new Error('unexpected database access');
     }) },
-    './_shared/mod.mjs': { readEnv: () => '' },
+    './_shared/mod.mjs': { readEnv: key => env[key] ?? '' },
+    './_shared/cors.mjs': cors,
     './auth.mjs': { authorizeLabelRendererRequest: authorize, resolveLabelRendererOperation: () => 'jobs' },
     '../_shared/db-hotpath.ts': { executeHotpathRpc: jest.fn(), hotpathModeEnabled: () => false },
     '../_shared/label-storage-url.ts': require('../../../supabase/functions/_shared/label-storage-url'),
@@ -65,6 +71,59 @@ function loadRenderer({ pdfLoad, bidiFailure } = {}) {
   }, module, module.exports);
   return { api: module.exports, handler, imports, createPdf, bidiFactory, reachedPdf, authorize };
 }
+
+describe('label renderer CORS', () => {
+  const endpoint = 'https://edge.example.test/functions/v1/label-renderer';
+  const allowedOrigin = 'https://designer.example.test';
+  const unlistedOrigin = 'https://unlisted.example.test';
+  const hostedEnv = { LABEL_RENDERER_CORS_ALLOW_ORIGINS: allowedOrigin };
+
+  test.each([
+    [allowedOrigin, allowedOrigin],
+    [unlistedOrigin, null],
+    [null, null],
+  ])('sets ACAO on POST according to Origin %s', async (origin, allowOrigin) => {
+    const { handler } = loadRenderer({ env: hostedEnv });
+    const headers = new Headers({ 'content-type': 'application/json' });
+    if (origin) headers.set('origin', origin);
+    const response = await handler(new Request(endpoint, { method: 'POST', headers, body: '{}' }));
+    expect(response.status).toBe(401);
+    expect(response.headers.get('access-control-allow-origin')).toBe(allowOrigin);
+    expect(response.headers.get('vary').split(', ')).toContain('Origin');
+  });
+
+  test.each([
+    ['listed origin', hostedEnv, allowedOrigin, allowedOrigin],
+    ['unlisted origin', hostedEnv, unlistedOrigin, null],
+    ['missing allowlist', {}, allowedOrigin, null],
+  ])('returns an empty 204 preflight for %s', async (_case, env, origin, allowOrigin) => {
+    const { handler } = loadRenderer({ env });
+    const allowHeaders = 'authorization, x-client-info, apikey, content-type';
+    const response = await handler(new Request(endpoint, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': allowHeaders,
+      },
+    }));
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe('');
+    expect(response.headers.get('access-control-allow-origin')).toBe(allowOrigin);
+    expect(response.headers.get('access-control-allow-headers')).toBe(allowOrigin ? allowHeaders : null);
+    expect(response.headers.get('access-control-allow-methods')).toBe(allowOrigin ? 'POST, OPTIONS' : null);
+  });
+
+  test('uses local QA origins only on a loopback endpoint', async () => {
+    const origin = 'http://localhost:3000';
+    const { handler } = loadRenderer({ env: { PUBLIC_INGRESS_LOCAL_CORS_ALLOW_ORIGINS: origin } });
+    const init = { method: 'OPTIONS', headers: { origin } };
+    const local = await handler(new Request('http://localhost:54321/functions/v1/label-renderer', init));
+    const hosted = await handler(new Request(endpoint, init));
+    expect(local.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(hosted.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});
 
 describe('label renderer lazy dependency startup', () => {
   test('module registration, OPTIONS and generic unauthenticated denial do not load renderer dependencies', async () => {
