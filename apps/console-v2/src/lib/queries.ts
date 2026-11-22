@@ -188,8 +188,8 @@ export function useResourceListsByFilters<T = Record<string, unknown>>(
         page_size: rows.length,
       };
     },
+    ...queryOpts,
     enabled,
-    retry: queryOpts?.retry,
   });
 }
 
@@ -275,7 +275,7 @@ export function useDecisionLog(
   return useQuery<DecisionLogEntry[]>({
     queryKey: qk.decisionLog(filters),
     queryFn: () => api.listDecisionLog(filters),
-    enabled: options?.enabled,
+    ...options,
   });
 }
 export function useResolutionLog(filters?: { category?: string; limit?: number }) {
@@ -3513,7 +3513,7 @@ export function useCreateZone() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.ZoneCreateArgs) => api.zone_create_v1(args),
-    onSuccess: () => invalidateListQueries(qc, ['zones', 'zone_summary', 'zone_districts']),
+    onSuccess: () => void invalidateListQueries(qc, ['zones', 'zone_summary', 'zone_districts']),
   });
 }
 export function useRequestZoneOverride() {
@@ -3666,21 +3666,21 @@ export function useCreateBranch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.BranchCreateArgs) => api.branch_create_v1(args),
-    onSuccess: () => invalidateListQueries(qc, ['branches', 'branch_summary']),
+    onSuccess: () => void invalidateListQueries(qc, ['branches', 'branch_summary']),
   });
 }
 export function useUpdateBranch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.BranchUpdateArgs) => api.branch_update_v1(args),
-    onSuccess: () => invalidateListQueries(qc, ['branches', 'branch_summary']),
+    onSuccess: () => void invalidateListQueries(qc, ['branches', 'branch_summary']),
   });
 }
 export function useMarkBranchOos() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.BranchMarkOosArgs) => api.branch_mark_oos_v1(args),
-    onSuccess: () => invalidateListQueries(qc, ['branches', 'branch_summary']),
+    onSuccess: () => void invalidateListQueries(qc, ['branches', 'branch_summary']),
   });
 }
 export function useAssignBranchZone() {

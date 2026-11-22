@@ -215,6 +215,16 @@ describe('lib/queries', () => {
     });
   });
 
+  it('useResolveSettings stays idle without a category even when enabled', () => {
+    const { result } = renderHook(
+      () => useResolveSettings('', undefined, { enabled: true }),
+      { wrapper: wrapper(client) },
+    );
+
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(result.current.isFetched).toBe(false);
+  });
+
   it('useResolveSettings can be disabled until live auth is ready', () => {
     const spy = vi.spyOn(api, 'resolveSettings');
     const { result } = renderHook(
