@@ -158,10 +158,12 @@ jobs:
           printf 'attempted=true\n' >> "$GITHUB_OUTPUT"
           SECONDS=0
           apply_status=1
-          trap 'if [[ -f "$deploy_temp/db-push.log" ]]; then
-            node scripts/deploy/apply-guard.cjs summarize "$deploy_temp/db-push.log" "$apply_status" "${apply_elapsed:-$SECONDS}"
+          trap 'rm -f "$deploy_temp/edge.env"
+          if [[ -f "$deploy_temp/db-push.log" ]]; then
+            node scripts/deploy/apply-guard.cjs summarize "$deploy_temp/db-push.log" "$apply_status" "${apply_elapsed:-$SECONDS}" ||
+              echo "::warning::Could not write database apply evidence"
           fi
-          rm -f "$deploy_temp/edge.env" "$deploy_temp/db-push.log"; rmdir "$deploy_temp"' EXIT
+          rm -f "$deploy_temp/db-push.log"; rmdir "$deploy_temp"' EXIT
           export NO_COLOR=1
           "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
             bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}" 2>&1 | tee -a "$deploy_temp/db-push.log"

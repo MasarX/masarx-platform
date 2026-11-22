@@ -20,6 +20,10 @@ async function evaluate(get, env, record) {
     if (env.GITHUB_SHA !== tip) {
       for await (const run of pages(get, `${workflow}?branch=main&event=push&head_sha=${tip}`, 'workflow_runs')) {
         if (run.run_number > Number(env.RUN_NUMBER)) {
+          if (run.status === 'completed' && !['success', 'failure'].includes(run.conclusion)) {
+            record(`G1: superseding run ${run.id} for ${tip} was ${run.conclusion}; dispatch expected_sha=${tip}`);
+            return 'refused';
+          }
           record(`G1: superseded by ${tip}`);
           return 'superseded';
         }
@@ -44,15 +48,16 @@ async function evaluate(get, env, record) {
         if (job.name !== 'database' || job.status !== 'completed') continue;
         const marker = job.steps.find(step => step.name === attemptMarker);
         const legacy = job.steps.find(step => step.name === legacyDeploy);
-        // Pre-guard runs only expose the combined apply and edge step.
-        const attempted = marker ? marker.conclusion === 'success'
-          : legacy && ['success', 'failure'].includes(legacy.conclusion);
+        // Cancellation can prevent the marker from running after the combined step starts.
+        const attempted = ['success', 'cancelled', 'timed_out'].includes(legacy?.conclusion)
+          || marker?.conclusion === 'success' || (!marker && legacy?.conclusion === 'failure');
         if (!attempted) continue;
 
-        if (job.conclusion === 'failure') {
+        if (job.conclusion !== 'success') {
           const rearmed = env.DEV_DB_REARMED_AT;
+          const rearmedAt = Date.parse(rearmed);
           if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(rearmed ?? '') ||
-              !(Date.parse(rearmed) > Date.parse(job.completed_at))) {
+              !(rearmedAt > Date.parse(job.completed_at) && rearmedAt <= Date.now())) {
             record(`G2: previous apply failed at run ${run.id}; re-arm required`);
             return 'refused';
           }
@@ -111,9 +116,9 @@ function summarize(log, status, elapsed, env) {
   ].join('\n');
 }
 
-async function main(env) {
+async function guard(env, fetchRequest = fetch) {
   const get = async path => {
-    const response = await fetch(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`, {
+    const response = await fetchRequest(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`, {
       headers: { Authorization: 'Bearer ' + env.GH_TOKEN, Accept: 'application/vnd.github+json' },
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
@@ -126,9 +131,16 @@ async function main(env) {
     console.log(decision);
   };
   appendFileSync(env.GITHUB_STEP_SUMMARY, '## DEV database guard\n\n');
-  const result = await evaluate(get, env, record);
-  appendFileSync(env.GITHUB_OUTPUT, `superseded=${result === 'superseded'}\n`);
-  if (result === 'refused') process.exitCode = 1;
+  try {
+    const result = await evaluate(get, env, record);
+    appendFileSync(env.GITHUB_OUTPUT, `superseded=${result === 'superseded'}\n`);
+    return result === 'refused' ? 1 : 0;
+  } catch {
+    const message = 'Guard could not verify GitHub deployment state';
+    appendFileSync(env.GITHUB_STEP_SUMMARY, `- ${message}\n`);
+    console.error(`::error::${message}`);
+    return 1;
+  }
 }
 
 if (require.main === module) {
@@ -136,13 +148,8 @@ if (require.main === module) {
   if (mode === 'summarize') {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, summarize(readFileSync(log, 'utf8'), status, elapsed, process.env));
   } else {
-    main(process.env).catch(() => {
-      const message = 'Guard could not verify GitHub deployment state';
-      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- ${message}\n`);
-      console.error(`::error::${message}`);
-      process.exitCode = 1;
-    });
+    guard(process.env).then(status => { process.exitCode = status; });
   }
 }
 
-module.exports = { evaluate, summarize };
+module.exports = { evaluate, guard, summarize };
