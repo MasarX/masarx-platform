@@ -90,6 +90,59 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          RENDERER_CONFIG_STATE_PATTERN: &renderer-config-state-pattern '^renderer_config_state=(missing_settings|missing_url|placeholder_url|missing_secret_ref|secret_unreadable|pin_mismatch|placeholder_secret|ready)$'
+          RENDERER_CONFIG_STATE_SQL: &renderer-config-state-sql |
+            BEGIN READ ONLY;
+            SET LOCAL statement_timeout = '8s';
+            SET LOCAL search_path = pg_catalog;
+            -- Mirror the global renderer and Vault credential checks without invoking either resolver.
+            DO $renderer_state$
+            DECLARE
+              settings jsonb := public.resolve_settings('label_provider', 'global', NULL::uuid);
+              provider jsonb := COALESCE(settings->'providers'->0, '{}'::jsonb);
+              invoke_url text := NULLIF(provider->>'invoke_url', '');
+              secret_id uuid;
+              metadata jsonb;
+              state text;
+            BEGIN
+              IF settings IS NULL THEN
+                state := 'missing_settings';
+              ELSIF invoke_url IS NULL THEN
+                state := 'missing_url';
+              ELSIF invoke_url LIKE ('https://' || 'example' || '.%') THEN
+                state := 'placeholder_url';
+              ELSIF provider#>>'{invoke_secret_ref,type}' IS DISTINCT FROM 'SecretRef'
+                OR pg_input_is_valid(provider#>>'{invoke_secret_ref,id}', 'uuid') IS NOT TRUE THEN
+                state := 'missing_secret_ref';
+              ELSE
+                BEGIN
+                  secret_id := (provider#>>'{invoke_secret_ref,id}')::uuid;
+                  SELECT s.description::jsonb INTO metadata
+                  FROM vault.secrets s
+                  WHERE s.id = secret_id AND starts_with(s.name, 'label_provider/');
+                  IF NOT FOUND THEN
+                    state := 'secret_unreadable';
+                  ELSIF (NOT (metadata ? 'pinned_invoke_url')
+                    OR metadata->>'pinned_invoke_url' = invoke_url) IS NOT TRUE THEN
+                    state := 'pin_mismatch';
+                  ELSE
+                    SELECT CASE
+                      WHEN d.decrypted_secret IS NULL THEN 'secret_unreadable'
+                      WHEN d.decrypted_secret = 'EXAMPLE_PASSWORD' THEN 'placeholder_secret'
+                      ELSE 'ready'
+                    END INTO state
+                    FROM vault.decrypted_secrets d WHERE d.id = secret_id;
+                    state := COALESCE(state, 'secret_unreadable');
+                  END IF;
+                EXCEPTION WHEN OTHERS THEN
+                  state := 'secret_unreadable';
+                END;
+              END IF;
+              PERFORM set_config('renderer.config_state', state, true);
+            END;
+            $renderer_state$;
+            SELECT 'renderer_config_state=' || current_setting('renderer.config_state');
+            COMMIT;
         run: |
           set -euo pipefail
           renderer_unreadable() {
@@ -120,12 +173,25 @@ jobs:
             renderer_unreadable ca
           fi
           psql_stderr="$(mktemp)"
-          psql_status=0
-          claims="$(
+          renderer_psql() {
             PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
               PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
-              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 2>"$psql_stderr" <<'SQL'
-          \set VERBOSITY sqlstate
+              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate 2>"$psql_stderr"
+          }
+          renderer_query_failed() {
+            local psql_status="$1" sqlstate
+            sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
+            if [[ -n "$sqlstate" ]]; then
+              renderer_unreadable "sqlstate-$sqlstate"
+            fi
+            renderer_unreadable "psql-exit-$psql_status"
+          }
+          renderer_state="$(renderer_psql <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"
+          [[ "$renderer_state" =~ $RENDERER_CONFIG_STATE_PATTERN ]] || renderer_unreadable state
+          printf '%s\n' "$renderer_state" | tee -a "$GITHUB_STEP_SUMMARY"
+          [[ "$renderer_state" == renderer_config_state=ready ]] || exit 1
+
+          claims="$(renderer_psql <<'SQL'
           BEGIN READ ONLY;
           SET LOCAL statement_timeout = '8s';
           SET LOCAL search_path = pg_catalog;
@@ -152,14 +218,7 @@ jobs:
           ) FROM claims;
           COMMIT;
           SQL
-          )" || psql_status=$?
-          if (( psql_status != 0 )); then
-            sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
-            if [[ -n "$sqlstate" ]]; then
-              renderer_unreadable "sqlstate-$sqlstate"
-            fi
-            renderer_unreadable "psql-exit-$psql_status"
-          fi
+          )" || renderer_query_failed "$?"
           if ! lines="$(jq -ers '
             def epoch: strings | test("\\A[0-9]+\\z");
             select(length == 1) | .[0]
@@ -196,21 +255,69 @@ jobs:
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
+          RENDERER_CONFIG_STATE_PATTERN: *renderer-config-state-pattern
+          RENDERER_CONFIG_STATE_SQL: *renderer-config-state-sql
         run: |
           set -euo pipefail
           if [[ ! "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ || -z "$SUPABASE_ACCESS_TOKEN" || -z "$PGPASSWORD" || -z "$SUPABASE_JWT_SECRET" ]]; then
             echo '::error::Renderer credential rotation requires the DEV database configuration.'
             exit 1
           fi
+          renderer_signing_secret="$SUPABASE_JWT_SECRET"
+          unset SUPABASE_JWT_SECRET
           umask 077
           renderer_temp="$(mktemp -d)"
           export RENDERER_TOKEN_FILE="$renderer_temp/renderer.jwt"
           ca_file="$renderer_temp/root.crt"
           psql_stderr="$renderer_temp/psql.stderr"
           trap 'rm -f "$RENDERER_TOKEN_FILE" "$ca_file" "$psql_stderr"; rmdir "$renderer_temp"' EXIT
+          if ! pooler="$(
+            printf 'Authorization: Bearer %s\n' "$SUPABASE_ACCESS_TOKEN" |
+              curl --fail --silent --max-time 20 --header @- \
+                "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/config/database/pooler" |
+              jq -ers 'select(length == 1) | .[0] | map(select(.database_type == "PRIMARY"))
+                | select(length == 1) | .[0].db_host | strings
+                | select(test("\\Aaws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com\\z"))' 2>/dev/null
+          )"; then
+            echo '::error::Could not identify the DEV database pooler.'
+            exit 1
+          fi
+          if ! curl --fail --silent --max-time 20 --output "$ca_file" \
+              https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt ||
+            ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
+              sha256sum --check --status; then
+            echo '::error::Could not verify the database CA certificate.'
+            exit 1
+          fi
+
+          renderer_psql() {
+            PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
+              PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
+              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate 2>"$psql_stderr"
+          }
+          renderer_mint_failed() {
+            printf 'renderer_jwt_mint=FAILED reason=%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          renderer_query_failed() {
+            local psql_status="$1" sqlstate
+            sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
+            if [[ -n "$sqlstate" ]]; then
+              renderer_mint_failed "sqlstate-$sqlstate"
+            fi
+            renderer_mint_failed "psql-exit-$psql_status"
+          }
+          renderer_state="$(renderer_psql <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"
+          [[ "$renderer_state" =~ $RENDERER_CONFIG_STATE_PATTERN ]] || renderer_mint_failed state
+          printf '%s\n' "$renderer_state" | tee -a "$GITHUB_STEP_SUMMARY"
+          case "$renderer_state" in
+            renderer_config_state=ready|renderer_config_state=placeholder_secret) ;;
+            *) exit 1 ;;
+          esac
+
           RENDERER_IAT="$(date +%s)"
           export RENDERER_IAT RENDERER_EXP="$((RENDERER_IAT + 7 * 24 * 60 * 60))"
-          node <<'NODE'
+          SUPABASE_JWT_SECRET="$renderer_signing_secret" node <<'NODE'
           const { writeFileSync } = require('node:fs');
           const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
           const nowSec = Number(process.env.RENDERER_IAT);
@@ -231,33 +338,9 @@ jobs:
           }
           writeFileSync(process.env.RENDERER_TOKEN_FILE, token, { mode: 0o600, flag: 'wx' });
           NODE
-          unset SUPABASE_JWT_SECRET
+          unset renderer_signing_secret
 
-          if ! pooler="$(
-            printf 'Authorization: Bearer %s\n' "$SUPABASE_ACCESS_TOKEN" |
-              curl --fail --silent --max-time 20 --header @- \
-                "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/config/database/pooler" |
-              jq -ers 'select(length == 1) | .[0] | map(select(.database_type == "PRIMARY"))
-                | select(length == 1) | .[0].db_host | strings
-                | select(test("\\Aaws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com\\z"))' 2>/dev/null
-          )"; then
-            echo '::error::Could not identify the DEV database pooler.'
-            exit 1
-          fi
-          if ! curl --fail --silent --max-time 20 --output "$ca_file" \
-              https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt ||
-            ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
-              sha256sum --check --status; then
-            echo '::error::Could not verify the database CA certificate.'
-            exit 1
-          fi
-
-          psql_status=0
-          claims="$(
-            PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
-              PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
-              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 2>"$psql_stderr" <<'SQL'
-          \set VERBOSITY sqlstate
+          claims="$(renderer_psql <<'SQL'
           \set renderer_jwt `cat "$RENDERER_TOKEN_FILE"`
           BEGIN ISOLATION LEVEL SERIALIZABLE;
           SET LOCAL statement_timeout = '8s';
@@ -272,7 +355,8 @@ jobs:
           JOIN vault.secrets s ON s.id = (p.value#>>'{invoke_secret_ref,id}')::uuid
           WHERE p.value#>>'{invoke_secret_ref,type}' = 'SecretRef'
             AND starts_with(s.name, 'label_provider/')
-            AND public.resolve_label_renderer_invoke_config_v1(NULL::uuid)->>'invoke_secret' <> $1::text
+            AND NULLIF(p.value->>'invoke_url', '') NOT LIKE ('https://' || 'example' || '.%')
+            AND public.resolve_label_provider_invoke_secret_v1(p.value) <> $1::text
           \bind :renderer_jwt
           \gset
 
@@ -292,16 +376,7 @@ jobs:
           COMMIT;
           \echo :renderer_payload :renderer_digest
           SQL
-          )" || psql_status=$?
-          if (( psql_status != 0 )); then
-            sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
-            reason="psql-exit-$psql_status"
-            if [[ -n "$sqlstate" ]]; then
-              reason="sqlstate-$sqlstate"
-            fi
-            printf 'renderer_jwt_mint=FAILED reason=%s\n' "$reason" | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
+          )" || renderer_query_failed "$?"
           printf '%s\n' "$claims" | node -e '
             const { readFileSync } = require("node:fs");
             const { createHash } = require("node:crypto");
