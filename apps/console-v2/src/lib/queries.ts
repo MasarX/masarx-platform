@@ -643,12 +643,10 @@ export function useUpdateBasket() {
 }
 
 function invalidateListQueries(qc: QueryClient, resources: string[]) {
-  return Promise.all(
-    resources.flatMap((resource) => [
-      qc.invalidateQueries({ queryKey: ['list', resource] }),
-      qc.invalidateQueries({ queryKey: ['lists_by_filters', resource] }),
-    ]),
-  );
+  for (const resource of resources) {
+    qc.invalidateQueries({ queryKey: ['list', resource] });
+    qc.invalidateQueries({ queryKey: ['lists_by_filters', resource] });
+  }
 }
 
 const SHIPMENT_OPERATION_READBACK_RESOURCES = [
@@ -3513,7 +3511,7 @@ export function useCreateZone() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.ZoneCreateArgs) => api.zone_create_v1(args),
-    onSuccess: () => void invalidateListQueries(qc, ['zones', 'zone_summary', 'zone_districts']),
+    onSuccess: () => invalidateListQueries(qc, ['zones', 'zone_summary', 'zone_districts']),
   });
 }
 export function useRequestZoneOverride() {
@@ -3666,21 +3664,21 @@ export function useCreateBranch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.BranchCreateArgs) => api.branch_create_v1(args),
-    onSuccess: () => void invalidateListQueries(qc, ['branches', 'branch_summary']),
+    onSuccess: () => invalidateListQueries(qc, ['branches', 'branch_summary']),
   });
 }
 export function useUpdateBranch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.BranchUpdateArgs) => api.branch_update_v1(args),
-    onSuccess: () => void invalidateListQueries(qc, ['branches', 'branch_summary']),
+    onSuccess: () => invalidateListQueries(qc, ['branches', 'branch_summary']),
   });
 }
 export function useMarkBranchOos() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: api.BranchMarkOosArgs) => api.branch_mark_oos_v1(args),
-    onSuccess: () => void invalidateListQueries(qc, ['branches', 'branch_summary']),
+    onSuccess: () => invalidateListQueries(qc, ['branches', 'branch_summary']),
   });
 }
 export function useAssignBranchZone() {

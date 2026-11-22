@@ -1307,14 +1307,16 @@ describe('lib/queries', () => {
     invalidateSpy.mockRestore();
   });
 
-  it.each(['save', 'promote'] as const)('refreshes mapping and bound intake reads on %s', async (action) => {
+  it.each(['save', 'promote'] as const)('completes %s while refreshing mapping and bound intake reads', async (action) => {
     const longLivedClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false, gcTime: Infinity, staleTime: 0 },
         mutations: { retry: false },
       },
     });
-    const invalidateSpy = vi.spyOn(longLivedClient, 'invalidateQueries');
+    let finishRefresh!: () => void;
+    const pendingRefresh = new Promise<void>((resolve) => { finishRefresh = resolve; });
+    const invalidateSpy = vi.spyOn(longLivedClient, 'invalidateQueries').mockReturnValue(pendingRefresh);
     const upsertSpy = vi.spyOn(api, 'ui_upsert_mapping_artifact_v1').mockResolvedValue({
       ok: true,
       mapping_config_id: 'mcfg_live',
@@ -1333,31 +1335,36 @@ describe('lib/queries', () => {
       wrapper: wrapper(longLivedClient),
     });
 
-    await act(async () => {
-      if (action === 'promote') {
-        await result.current.promote.mutateAsync({ mapping_config_id: 'mcfg_live' });
-        return;
-      }
-      await result.current.save.mutateAsync({
-        artifact: 'mapping_config',
-        mapping_config_id: 'mcfg_live',
-        mapping_type: 'webhook_inbound',
-        mapping_key: 'live.mapping',
-        mapping_config: { target: 'shipments.create' },
+    try {
+      act(() => {
+        if (action === 'promote') {
+          result.current.promote.mutate({ mapping_config_id: 'mcfg_live' });
+          return;
+        }
+        result.current.save.mutate({
+          artifact: 'mapping_config',
+          mapping_config_id: 'mcfg_live',
+          mapping_type: 'webhook_inbound',
+          mapping_key: 'live.mapping',
+          mapping_config: { target: 'shipments.create' },
+        });
       });
-    });
+      await waitFor(() => expect(result.current[action].isSuccess).toBe(true));
 
-    const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
-    for (const resource of [
-      'mapping_configs', 'mapping_config_directory', 'webhook_sources',
-      'webhook_source_directory', 'webhook_rules', 'api_routes',
-    ]) {
-      expect(calls).toContainEqual(['list', resource]);
-      expect(calls).toContainEqual(['lists_by_filters', resource]);
+      const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+      for (const resource of [
+        'mapping_configs', 'mapping_config_directory', 'webhook_sources',
+        'webhook_source_directory', 'webhook_rules', 'api_routes',
+      ]) {
+        expect(calls).toContainEqual(['list', resource]);
+        expect(calls).toContainEqual(['lists_by_filters', resource]);
+      }
+    } finally {
+      finishRefresh();
+      upsertSpy.mockRestore();
+      promoteSpy.mockRestore();
+      invalidateSpy.mockRestore();
     }
-    upsertSpy.mockRestore();
-    promoteSpy.mockRestore();
-    invalidateSpy.mockRestore();
   });
 
   it('useDeleteMappingConfig refreshes filtered mapping config and directory reads', async () => {
