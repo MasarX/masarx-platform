@@ -64,6 +64,24 @@ describe('marketing-lead-intake payload compatibility', () => {
     assertApiRequests(fetch, 'marketing_lead_request_create_v1');
     expect(fetch.mock.calls[0][1].headers.authorization).toBe('Bearer service.fixture.jwt');
   });
+  test.each([
+    ['marketing_lead_request_create_v1', { serviceOnly: true }],
+    ['marketing_landing_clients_list_v1', {}],
+  ])('dedicated marketing auth never retries %s with service credentials', async (rpc, options) => {
+    const fetch = jest.fn().mockResolvedValue(new Response('{"message":"invalid signature"}', { status: 401 }));
+    const invoke = await loadRpc(fetch, {
+      DB_JWT: { marketing: 'marketing.fixture.jwt' },
+      SUPABASE_ANON_KEY: 'public-fixture-key',
+    });
+    expect((await invoke(rpc, {}, options)).response.status).toBe(401);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    assertApiRequests(fetch, rpc);
+    expect(fetch.mock.calls[0][1].headers).toMatchObject({
+      authorization: 'Bearer marketing.fixture.jwt',
+      apikey: 'public-fixture-key',
+    });
+  });
+
   test('actual marketing read retains API profiles across auth fallback', async () => {
     const fetch = jest.fn().mockResolvedValueOnce(new Response('{"message":"invalid signature"}', { status: 401 }))
       .mockResolvedValueOnce(new Response('{}', { status: 200 }));
