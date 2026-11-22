@@ -22,7 +22,8 @@ SET search_path TO pg_catalog, pg_temp
 AS $function$
   SELECT length(p_host) <= 253
      AND p_host COLLATE "C" ~* '^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
-     AND p_host COLLATE "C" !~* ('(^|\.)([0-9]+|0x[0-9a-f]*|local|internal|local' || 'host)$');
+     AND p_host COLLATE "C" !~* '(^|\.)xn--'
+     AND p_host COLLATE "C" !~* ('(^|\.)([0-9]+|0x[0-9a-f]*|local|internal|home[.]arpa|local' || 'host)$');
 $function$;
 
 CREATE FUNCTION public.outbound_http_allowed_hosts_v1(p_organization_id uuid)
@@ -1332,6 +1333,10 @@ BEGIN
             p_decision_reason := 'Claimed Edge job has an invalid call specification.'
           );
         EXCEPTION WHEN OTHERS THEN
+          IF v_error <> 'outbound_url_invalid' THEN
+            RAISE;
+          END IF;
+          -- Preserve the terminal URL rejection if its audit insert fails.
           RAISE WARNING 'outbound_edge_claim_spec_audit_failed';
         END;
       END IF;

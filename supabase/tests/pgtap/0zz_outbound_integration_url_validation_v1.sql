@@ -1,7 +1,7 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
-SELECT plan(107);
+SELECT plan(111);
 
 SELECT ok(NOT public.outbound_url_allowed_v1(url), 'rejects ' || kind)
 FROM (VALUES
@@ -31,6 +31,8 @@ FROM (VALUES
   ('loopback hostname', 'https://' || 'local' || 'host'),
   ('local domain', 'https://fixture.' || 'local'),
   ('internal domain', 'https://fixture.' || 'internal'),
+  ('home network suffix', 'https://fixture.' || 'home' || '.arpa'),
+  ('punycode label inside hostname', 'https://fixture.XN--bcher-kva.example.test'),
   ('absolute loopback hostname suffix', 'https://FIXTURE.' || upper('local' || 'host') || '.'),
   ('escaped authority', 'https://fixture%2eexample.test'),
   ('authority template', 'https://{{host}}/path'),
@@ -153,12 +155,17 @@ SELECT throws_ok(
   '22023', 'outbound_http_allowed_hosts_invalid', 'policy version writes reject IP literals'
 );
 SELECT throws_ok(
-  $sql$UPDATE public.settings
-       SET cached_value = jsonb_set(cached_value, '{http_allowed_hosts}', jsonb_build_array('fixture.' || 'internal'))
+  format($sql$UPDATE public.settings
+       SET cached_value = jsonb_set(cached_value, '{http_allowed_hosts}', jsonb_build_array(%L::text))
        WHERE category = 'integration_plugin_egress_policy' AND scope_type = 'tenant'
-         AND scope_id = (SELECT org FROM outbound_validation_ids)$sql$,
-  '22023', 'outbound_http_allowed_hosts_invalid', 'policy writes reject internal names'
-);
+         AND scope_id = (SELECT org FROM outbound_validation_ids)$sql$, host),
+  '22023', 'outbound_http_allowed_hosts_invalid', 'policy writes reject ' || kind
+)
+FROM (VALUES
+  ('internal names', 'fixture.' || 'internal'),
+  ('the home network domain', 'home' || '.arpa'),
+  ('punycode labels inside hostnames', 'fixture.XN--bcher-kva.example.test')
+) AS cases(kind, host);
 
 INSERT INTO public.providers (id, organization_id, name, provider_type)
 SELECT provider, org, 'Outbound validation provider', 'http' FROM outbound_validation_ids;
@@ -172,6 +179,12 @@ SELECT operation, provider, 'outbound_validation', 'POST', 'https://example.test
        '{"content-type":"application/json"}', 'outbound_http', 'v1', 'provider_api', mapping
 FROM outbound_validation_ids;
 
+SELECT set_config('app.workflow_run_id', run::text, true),
+       set_config('app.workflow_run_step_id', run_step::text, true),
+       set_config('masarx.workflow_run_step_id', run_step::text, true),
+       set_config('masarx.workflow_engine', '1', true)
+FROM outbound_validation_ids;
+
 INSERT INTO public.workflow_templates (id, name, version, status, scope_type, scope_id)
 SELECT template, workflow, 1, 'active', 'tenant', org FROM outbound_validation_ids;
 INSERT INTO public.workflow_template_steps
@@ -183,12 +196,6 @@ SELECT run, template, 1, 'test', 'pending', jsonb_build_object('organization_id'
 INSERT INTO public.workflow_run_steps
   (id, workflow_run_id, workflow_template_step_id, sequence_order, step_status, operation_name, handler_key, handler_version, max_retries)
 SELECT run_step, run, template_step, 1, 'pending', 'outbound_http', 'outbound_http', 'v1', 1 FROM outbound_validation_ids;
-
-SELECT set_config('app.workflow_run_id', run::text, true),
-       set_config('app.workflow_run_step_id', run_step::text, true),
-       set_config('masarx.workflow_run_step_id', run_step::text, true),
-       set_config('masarx.workflow_engine', '1', true)
-FROM outbound_validation_ids;
 
 SELECT throws_ok(
   $$INSERT INTO public.outbound_calls(call_type, target_type, target_id, method, url)
