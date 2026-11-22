@@ -11,6 +11,24 @@ export function formatAuthErrorMessage(error: unknown): string {
     return "Invalid login credentials. Verify email/password and remove spaces from email (e.g. sipkxyzyxvgvtksowrxwjgpn@example.invalid).";
   }
 
+  if (/\bemail not confirmed\b/i.test(message)) {
+    return "Email not confirmed. Check your inbox for the confirmation email, then retry.";
+  }
+
+  if (/\bemail rate limit exceeded\b/i.test(message)) {
+    return "Email rate limit exceeded. Wait before requesting another email.";
+  }
+
+  if (/\btoken has expired or is invalid\b/i.test(message)) {
+    return "Token has expired or is invalid. Request a new link or code, then retry.";
+  }
+
+  const passwordMinimum = /\bpassword should be at least\b(?: ([0-9]{1,3}) characters\b)?/i.exec(message);
+  if (passwordMinimum) {
+    const hint = "Choose a longer password and try again.";
+    return passwordMinimum[1] ? `Password should be at least ${passwordMinimum[1]} characters. ${hint}` : hint;
+  }
+
   if (/400|email|otp|token/i.test(message)) {
     return "Verify email format (no spaces), then retry.";
   }

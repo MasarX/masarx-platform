@@ -1,7 +1,8 @@
-import type { OutboxEntry } from "@masarx/mobile-core";
+import { createOutbox, redactOutboxErrorText, type OutboxEntry } from "@masarx/mobile-core";
 import { getFieldOpsStrings } from "../../../apps/fieldops/src/i18n";
 import { describeMobileOutboxEntry, formatMobileActionReceipt, describeMobileActionReceiptStatus,
   isMobileOutboxSyncBatchSuccessful } from "../../../apps/fieldops/src/mobile-action-feedback";
+import { createMemoryOutboxStore } from "../mobile-core/memory-outbox-fixture";
 
 const entry: OutboxEntry = {
   id: "queue-a", rpc: "ui_execute_command_v1", args: { p_action_key: "route_stops.arrived", p_selection_id: "stop-a" },
@@ -37,12 +38,38 @@ test.each([
   expect(result.lines).toContain(strings.actionFeedback.queueReference("queue-a"));
 });
 
+const withheld = "[REDACTED: message withheld]";
+const marker = ["sample", "value"].join("-");
+
+test.each([
+  [new Error("JWT expired"), "auth", `${withheld} (auth)`],
+  [{ code: "PGRST301" }, "auth", '{"code":"PGRST301"}'],
+  [{ code: "PGRST303", details: `password=${marker}` }, "auth", `${withheld} (auth)`],
+  [new Error("401 Unauthorized"), "auth", `${withheld} (auth)`],
+  [new Error("Request to api/auth timed out"), "unavailable", `${withheld} (network)`],
+  [new Error(`Permission denied; password=${marker}`), "permission", `${withheld} (permission)`],
+  [new Error(`409 state changed; password=${marker}`), "conflict", `${withheld} (conflict)`],
+] as const)("serializes %j with safe %s feedback", async (error, key, expected) => {
+  const strings = getFieldOpsStrings("en");
+  const outbox = createOutbox(createMemoryOutboxStore());
+  await outbox.init();
+  const { id } = await outbox.enqueue({ rpc: entry.rpc, args: entry.args });
+  await outbox.sync(async () => { throw error; });
+
+  const stored = (await outbox.get(id))!;
+  expect(stored).toMatchObject({ status: "failed", last_error: expected });
+  expect(redactOutboxErrorText(stored.last_error!)).toBe(expected);
+  expect(describeMobileOutboxEntry(stored, strings)).toMatchObject({
+    status: strings.actionFeedback[key], detail: strings.actionFeedback[`${key}Detail`],
+  });
+});
+
 test("explicit label and multiselection precedence preserve context without exposing raw errors", () => {
-  const result = describeMobileOutboxEntry({ ...entry, status: "failed", last_error: "password=do-not-display",
+  const result = describeMobileOutboxEntry({ ...entry, status: "failed", last_error: `password=${marker}`,
     args: { p_action_label: "Deliver", p_selection_count: 2, p_selection_id: "single-stale" } }, getFieldOpsStrings("en"));
   expect(result.title).toBe("Deliver");
   expect(result.targetLabel).toBe("2 selected records");
-  expect(JSON.stringify(result)).not.toContain("do-not-display");
+  expect(JSON.stringify(result)).not.toContain(marker);
 });
 
 test.each([{ attempted: 0, succeeded: 0, failed: 0, dead: 0 }, undefined, null, { attempted: NaN }, { attempted: -1 }, { attempted: 1, succeeded: 2, failed: 0, dead: 0 }])(

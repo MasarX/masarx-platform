@@ -120,11 +120,27 @@ function serializeError(error: unknown) {
     try { value = JSON.stringify(error) ?? String(error); }
     catch { value = String(error); }
   }
-  return redactOutboxErrorText(value);
+  const category = classifyOutboxErrorText((error instanceof Error ? error.message : value).slice(0, MAX_ERROR_TEXT_LENGTH));
+  const safe = redactOutboxErrorText(value);
+  return category && safe === WITHHELD_MESSAGE ? WITHHELD_ERRORS[category] : safe;
 }
 
 const MAX_ERROR_TEXT_LENGTH = 8 * 1024;
 const WITHHELD_MESSAGE = "[REDACTED: message withheld]";
+const WITHHELD_ERRORS = {
+  auth: `${WITHHELD_MESSAGE} (auth)`,
+  permission: `${WITHHELD_MESSAGE} (permission)`,
+  conflict: `${WITHHELD_MESSAGE} (conflict)`,
+  network: `${WITHHELD_MESSAGE} (network)`,
+} as const;
+
+export function classifyOutboxErrorText(value: string) {
+  if (value === WITHHELD_ERRORS.auth || /401|jwt|not authenticated|unauthenticated|unauthorized|session|\bpgrst30[13]\b/i.test(value)) return "auth";
+  if (value === WITHHELD_ERRORS.permission || /42501|403|forbidden|permission denied|insufficient[_ ]privilege|rls/i.test(value)) return "permission";
+  if (value === WITHHELD_ERRORS.conflict || /409|23505|40001|conflict|stale state|state changed|state transition|already completed|already closed|already synced|not pending|not current/i.test(value)) return "conflict";
+  if (value === WITHHELD_ERRORS.network || /api\/auth|backend unavailable|backend_not_ready|connection refused|econnrefused|failed to fetch|network request failed|startup_pending|db.only|timed out/i.test(value)) return "network";
+  return null;
+}
 const KEY_JOIN = String.raw`(?:[_-]|%2d)`;
 const KEY_CHAR = String.raw`(?:[a-z0-9]|${KEY_JOIN})`;
 const KEY_SPACE = String.raw`(?: |%(?:25)?20)`;
@@ -419,11 +435,23 @@ function collectJsonSpans(text: string, spans: RedactionSpan[]) {
 const PERCENT_CHARACTER = /%(?:[0-7][\da-f]|(?:c[2-9a-f]|d[\da-f])%[89ab][\da-f]|e[\da-f](?:%[89ab][\da-f]){2}|f[0-4](?:%[89ab][\da-f]){3})/gi;
 const HTML_ENTITIES: Record<string, string> = {
   quot: '"', apos: "'", amp: "&", lt: "<", gt: ">", nbsp: "\u00a0", equals: "=", colon: ":",
+  shy: "\u00ad", zerowidthspace: "\u200b",
 };
 const MAX_ERROR_DECODE_PASSES = 8;
 // Substrings also cover forms like authorization, x-api-key, and PHPSESSID.
 const SENSITIVE_TERM = /apikey|token|password|secret|jwt|passwd|pwd|cookie|sessionid|privatekey|credential|passphrase|sessid|auth|signature|accesskey|bearer/;
-const URL_USERINFO = /(?:^|[^a-z\d+.-])[a-z][a-z\d+.-]*:\/\/[^:/?#@\s]*:[^/?#@\s]*@/i;
+const SHORT_KEY_ASSIGNMENT = /(?:^|[^\p{L}\p{N}_.-])(?:(?:pass|pw|pin|otp|sig|connect\.sid)\s*[:=]|key\s*=|["'](?:pass|pw|pin|otp|sig|connect\.sid|key)["']\s*[:=])/u;
+const URL_USERINFO = /(?:[\\/]{2}|:\\+)[^/\\?#@\s]+@/;
+const UNKNOWN_NAMED_ENTITY = /&[a-z][a-z0-9]*;/i;
+const CONFUSABLE_LETTER = /[\p{Script=Cyrillic}\p{Script=Greek}\u0250-\u02af\u1d00-\u1dbf\ua730-\ua731\uab30-\uab6f]/u;
+
+function hasConfusableWord(text: string) {
+  if (!CONFUSABLE_LETTER.test(text)) return false;
+  for (const [word] of text.matchAll(/[\p{L}\p{N}_]+/gu)) {
+    if (/\p{Script=Latin}/u.test(word) && CONFUSABLE_LETTER.test(word)) return true;
+  }
+  return false;
+}
 
 function shouldWithholdError(output: string) {
   let text = output.replace(/\[(?:JWT_)?REDACTED\]/g, "[]");
@@ -441,17 +469,21 @@ function shouldWithholdError(output: string) {
           const value = parseInt(unicode ?? codePoint ?? byte, 16);
           return value <= 0x10ffff ? String.fromCodePoint(value) : escape;
         })
-      .replace(/&(quot|apos|amp|lt|gt|nbsp|equals|colon);|&#(x[\da-f]+|\d+);?/gi, (entity, name, number) => {
+      .replace(/&(quot|apos|amp|lt|gt|nbsp|equals|colon|shy|zerowidthspace);|&#(x[\da-f]+|\d+);?/gi, (entity, name, number) => {
         if (name !== undefined) return HTML_ENTITIES[name.toLowerCase()];
         const value = number[0].toLowerCase() === "x" ? parseInt(number.slice(1), 16) : Number(number);
         return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
       });
     if (next === text) {
-      const normalized = text.normalize("NFKC").replace(/\p{Cf}/gu, "").toLowerCase();
+      const normalized = text.normalize("NFKD")
+        .replace(/[\p{M}\p{Cf}\u115f\u1160\u3164\uffa0\u2800]|(?![\t\n\r])\p{Cc}/gu, "")
+        .toLowerCase();
       // A control escape can also be literal text at the start of a key, as in \token.
-      const compact = normalized.replace(/[-_.\s]/g, "");
-      const decodedControls = normalized.replace(/\\[bfnrtv]/g, "").replace(/[-_.\s]/g, "");
-      return URL_USERINFO.test(normalized) || SENSITIVE_TERM.test(compact) || SENSITIVE_TERM.test(decodedControls);
+      const decodedControls = normalized.replace(/\\[bfnrtv]/g, "");
+      return URL_USERINFO.test(normalized) || UNKNOWN_NAMED_ENTITY.test(normalized) || hasConfusableWord(normalized)
+        || SHORT_KEY_ASSIGNMENT.test(normalized) || SHORT_KEY_ASSIGNMENT.test(decodedControls)
+        || SENSITIVE_TERM.test(normalized.replace(/[-_.\s]/g, ""))
+        || SENSITIVE_TERM.test(decodedControls.replace(/[-_.\s]/g, ""));
     }
     text = next;
   }
@@ -459,6 +491,7 @@ function shouldWithholdError(output: string) {
 }
 
 export function redactOutboxErrorText(value: string) {
+  if (Object.values(WITHHELD_ERRORS).some(message => message === value)) return value;
   const truncated = value.length > MAX_ERROR_TEXT_LENGTH;
   let end = MAX_ERROR_TEXT_LENGTH;
   const lastKept = value.charCodeAt(end - 1);

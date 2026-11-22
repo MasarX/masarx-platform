@@ -13,6 +13,14 @@ describe("mobile auth error formatter", () => {
     ["Invalid email", validationHint],
     ["Invalid OTP", validationHint],
     ["Invalid token", validationHint],
+    ["email NOT confirmed", "Email not confirmed. Check your inbox for the confirmation email, then retry."],
+    ["Email rate limit exceeded", "Email rate limit exceeded. Wait before requesting another email."],
+    ["Token has expired or is invalid", "Token has expired or is invalid. Request a new link or code, then retry."],
+    ["Password should be at least 8 characters", "Password should be at least 8 characters. Choose a longer password and try again."],
+    ["Password should be at least 128 characters", "Password should be at least 128 characters. Choose a longer password and try again."],
+    ["Password should be at least 1024 characters", "Choose a longer password and try again."],
+    ["Password should be at least \u0668 characters", "Choose a longer password and try again."],
+    ["Password should be at least 8.5 characters", "Choose a longer password and try again."],
     ["Service unavailable", "[REDACTED: message withheld]"],
   ])("formats %s without exposing the credential value", (message, expected) => {
     const marker = ["sample", "value"].join("-");

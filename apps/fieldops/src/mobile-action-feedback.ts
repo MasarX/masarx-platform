@@ -1,6 +1,6 @@
 import type { UiCommandDefinition } from "@masarx/api";
 import type { OutboxEntry, OutboxSyncResult } from "@masarx/mobile-core";
-import { normalizeOutboxDisplay } from "@masarx/mobile-core";
+import { classifyOutboxErrorText, normalizeOutboxDisplay } from "@masarx/mobile-core";
 import type { FieldOpsStrings } from "./i18n";
 
 const text = (value: unknown): string => typeof value === "string" ? value.trim() : "";
@@ -107,22 +107,19 @@ export function describeMobileOutboxEntry(entry: OutboxEntry, strings: FieldOpsS
   const count = typeof args.p_selection_count === "number" && Number.isFinite(args.p_selection_count)
     ? Math.max(0, Math.floor(args.p_selection_count)) : 0;
   const targetLabel = display?.targetLabel || displayTarget || (count > 1 ? copy.selectedCount(count) : contextTarget || copy.noTarget);
-  const error = text(entry.last_error).toLowerCase();
-  const auth = /401|jwt|not authenticated|unauthenticated|unauthorized|session/.test(error);
-  const permission = /42501|403|forbidden|permission denied|insufficient[_ ]privilege|rls/.test(error);
-  const unavailable = /api\/auth|backend unavailable|backend_not_ready|connection refused|econnrefused|failed to fetch|network request failed|startup_pending|db.only|timed out/.test(error);
-  const conflict = /409|23505|40001|conflict|stale state|state changed|state transition|already completed|already closed|already synced|not pending|not current/.test(error);
+  const error = text(entry.last_error);
+  const category = classifyOutboxErrorText(error);
   let status = copy.unknown, detail = copy.unknownDetail;
   if (entry.status === "queued") { status = copy.queued; detail = copy.queuedDetail; }
   else if (entry.status === "in_flight") { status = copy.inFlight; detail = copy.inFlightDetail; }
   else if (entry.status === "succeeded") { status = copy.synced; detail = copy.syncedReceipt; }
   else if (entry.status === "failed" || entry.status === "dead") {
-    if (auth) { status = copy.auth; detail = copy.authDetail; }
-    else if (permission) { status = copy.permission; detail = copy.permissionDetail; }
-    else if (conflict) { status = copy.conflict; detail = copy.conflictDetail; }
-    else if (unavailable) { status = copy.unavailable; detail = copy.unavailableDetail; }
+    if (category === "auth") { status = copy.auth; detail = copy.authDetail; }
+    else if (category === "permission") { status = copy.permission; detail = copy.permissionDetail; }
+    else if (category === "conflict") { status = copy.conflict; detail = copy.conflictDetail; }
+    else if (category === "network") { status = copy.unavailable; detail = copy.unavailableDetail; }
     else if (entry.status === "dead") { status = copy.dead; detail = copy.deadDetail; }
-    else if (error.includes("recovered stale")) { status = copy.recovered; detail = copy.recoveredDetail; }
+    else if (/recovered stale/i.test(error)) { status = copy.recovered; detail = copy.recoveredDetail; }
     else { status = copy.retry; detail = entry.next_attempt_at ? copy.retryAt(entry.next_attempt_at) : copy.retryDetail; }
   }
   if (entry.status === "dead") detail = copy.deadDetail;

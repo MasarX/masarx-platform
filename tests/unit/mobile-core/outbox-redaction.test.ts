@@ -31,6 +31,33 @@ const gammaMarker = fixtureWord + "Gamma" + 3;
 const deltaMarker = fixtureWord + "Delta" + 4;
 const withheld = "[REDACTED: message withheld]";
 
+test.each([
+  ...[
+    "pass\u034fword", "pass\ufe0fword", "pass\u180bword", "pa\u0301ssword", "pas\u0336sword",
+    "p\u0430ssword", "t\u043eken", "s\u0435cret", "t\u03bfken", "p\\u0430ssword",
+    "p&#1072;ssword", "p%D0%B0ssword", "\u1d18\u1d00\ua731\ua731\u1d21\u1d0f\u0280\u1d05",
+    "pass\u0000word", "pass\u0007word", "pass\u3164word", "pass\u115fword", "pass\u2800word",
+    "pass\u1160word", "pass\uffa0word", "pass&shy;word", "pass&ZeroWidthSpace;word",
+    "pass&unrecognized;word", "pass", "pw", "pin", "otp", "sig", "connect.sid", "key",
+  ].map(key => `${key}=${alphaMarker}`),
+  `"key":"${alphaMarker}"`,
+  `https://${alphaMarker}@host/x`,
+  `//user:${alphaMarker}@host/x`,
+  `https:\\\\user:${alphaMarker}@host`,
+  `https ://user:${alphaMarker}@host`,
+])("withholds sensitive error form %s", input => {
+  const output = redactOutboxErrorText(input);
+  expect(output).toBe(withheld);
+  expect(output).not.toContain(alphaMarker);
+});
+
+test.each([
+  "\u062a\u0639\u0630\u0631 \u062d\u0641\u0638 \u0627\u0644\u0637\u0644\u0628",
+  "Lookup key missing", "keyboard=enabled", "sort_key=name", "lookup-key=name", "code=409", '{"code":"PGRST301"}',
+])("preserves ordinary diagnostic text %s", input => {
+  expect(redactOutboxErrorText(input)).toBe(input);
+});
+
 test("constructed credential fixtures preserve their original bytes", () => {
   const fixtures = [
     base64PairA, base64PairB, basicFixture, basicUpperLong, basicUpper,
