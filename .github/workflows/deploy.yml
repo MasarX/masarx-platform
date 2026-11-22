@@ -16,6 +16,9 @@ name: Deploy dev
         required: true
         default: deploy
         options: [deploy, dry-run]
+      expected_sha:
+        description: Full main commit SHA (required in deploy mode)
+        type: string
       project_ref:
         description: DEV Supabase project ref (required in dry-run mode before the deploy variable is set)
         type: string
@@ -37,6 +40,9 @@ jobs:
   database:
     if: github.event_name == 'push' || inputs.mode == 'deploy'
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
     # shortcut: Allow time for the first full apply, then set the steady-state limit from the measured first-deploy time.
     timeout-minutes: &dev-db-deploy-timeout-minutes 180
     environment: dev
@@ -44,7 +50,7 @@ jobs:
       group: deploy-dev-database
       cancel-in-progress: false
     outputs:
-      url: ${{ steps.deploy.outputs.url }}
+      superseded: ${{ steps.apply_guard.outputs.superseded }}
       configured: ${{ steps.guard.outputs.configured }}
       not_configured: ${{ steps.guard.outputs.configured == 'false' }}
     steps:
@@ -62,23 +68,29 @@ jobs:
             echo '::notice::database skipped: not configured'
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
-        if: steps.guard.outputs.configured == 'true'
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
-        if: steps.guard.outputs.configured == 'true'
         with:
           node-version: '24.22.1'
           package-manager-cache: false
+      - name: Guard database apply
+        id: apply_guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.run_number }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          DEV_DB_REARMED_AT: ${{ vars.DEV_DB_REARMED_AT }}
+        run: node scripts/deploy/apply-guard.cjs
       - name: Install locked edge dependencies
-        if: steps.guard.outputs.configured == 'true'
+        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outputs.superseded == 'false'
         working-directory: ${{ github.workspace }}
         run: |
           for attempt in 1 2 3; do npm ci --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Prepare edge packages and pinned CLI
-        if: steps.guard.outputs.configured == 'true'
+        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outputs.superseded == 'false'
         run: |
           npm run edge:sync-shared
           npm run edge:prepare-resource-import-exceljs
@@ -102,7 +114,7 @@ jobs:
           PY
       - name: Apply migrations and deploy registered edge functions
         id: deploy
-        if: steps.guard.outputs.configured == 'true'
+        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outputs.superseded == 'false'
         env: &dev-database-env
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -114,6 +126,7 @@ jobs:
           PUBLIC_TRACKING_CORS_ALLOW_ORIGINS: ${{ vars.PUBLIC_TRACKING_CORS_ALLOW_ORIGINS }}
         run: |
           set -euo pipefail
+          printf '::add-mask::%s\n' "$SUPABASE_PROJECT_REF"
           umask 077
           deploy_temp="$(mktemp -d)"
           trap 'rm -f "$deploy_temp/edge.env" "$deploy_temp/db-push.log"; rmdir "$deploy_temp"' EXIT
@@ -142,9 +155,18 @@ jobs:
           node scripts/deploy/append-function-cors.mjs
           cli="$RUNNER_TEMP/deploy-tools/supabase"
           "$cli" link --project-ref "$SUPABASE_PROJECT_REF" --yes
+          printf 'attempted=true\n' >> "$GITHUB_OUTPUT"
+          SECONDS=0
+          apply_status=1
+          trap 'if [[ -f "$deploy_temp/db-push.log" ]]; then
+            node scripts/deploy/apply-guard.cjs summarize "$deploy_temp/db-push.log" "$apply_status" "${apply_elapsed:-$SECONDS}"
+          fi
+          rm -f "$deploy_temp/edge.env" "$deploy_temp/db-push.log"; rmdir "$deploy_temp"' EXIT
           export NO_COLOR=1
           "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
-            bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}"
+            bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}" 2>&1 | tee -a "$deploy_temp/db-push.log"
+          apply_status=0
+          apply_elapsed=$SECONDS
           trap 'exec 1>&3 2>&4 3>&- 4>&-; echo "::error::Edge secret update failed" >&2' ERR
           exec 3>&1 4>&2 >/dev/null 2>&1
           "$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
@@ -168,7 +190,9 @@ jobs:
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi
             "$cli" functions deploy "$function_name" --project-ref "$SUPABASE_PROJECT_REF" --use-api "${flags[@]}"
           done < edge-deploy.tsv
-          printf 'url=https://%s.supabase.co\n' "$SUPABASE_PROJECT_REF" >> "$GITHUB_OUTPUT"
+      - name: Record database push attempt
+        if: ${{ always() && steps.deploy.outputs.attempted == 'true' }}
+        run: echo 'Database push started'
 
   database-dry-run:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
@@ -300,7 +324,7 @@ jobs:
 
   console:
     needs: database
-    if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
+    if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment: dev
@@ -385,7 +409,7 @@ jobs:
 
   portal:
     needs: database
-    if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
+    if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     environment: dev
@@ -470,7 +494,7 @@ jobs:
 
   landing:
     needs: database
-    if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
+    if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: dev
@@ -549,7 +573,7 @@ jobs:
 
   ingress:
     needs: database
-    if: ${{ !cancelled() && needs.database.result == 'success' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
+    if: ${{ !cancelled() && needs.database.result == 'success' && needs.database.outputs.superseded != 'true' && (needs.database.outputs.configured == 'true' || needs.database.outputs.not_configured == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: dev
@@ -648,7 +672,9 @@ jobs:
               for name, job in json.loads(os.environ['RESULTS']).items():
                   outputs = job.get('outputs', {})
                   result = job['result']
-                  if outputs.get('configured') == 'false':
+                  if outputs.get('superseded') == 'true':
+                      result = 'skipped: superseded'
+                  elif outputs.get('configured') == 'false':
                       result = 'skipped: not configured'
                   summary.write(f"| {name} | {result} | {outputs.get('url') or '?'} |\n")
           PY
