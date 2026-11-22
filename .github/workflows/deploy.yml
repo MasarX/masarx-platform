@@ -2,7 +2,7 @@ name: Deploy dev
 
 'on':
   push:
-    branches: [dev, main]
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -60,8 +60,8 @@ jobs:
           CONFIGURED: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' && secrets.SUPABASE_DB_PASSWORD != '' && secrets.SUPABASE_JWT_SECRET != '' && vars.SUPABASE_PROJECT_REF != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
-            dev:refs/heads/dev|dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+            dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
           esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
@@ -346,8 +346,8 @@ jobs:
           CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_PROJECT_ID_CONSOLE != '' && vars.NEXT_PUBLIC_SUPABASE_URL != '' && vars.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
-            dev:refs/heads/dev|dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+            dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
           esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
@@ -431,8 +431,8 @@ jobs:
           CONFIGURED: ${{ secrets.VERCEL_TOKEN != '' && vars.VERCEL_ORG_ID != '' && vars.VERCEL_PROJECT_ID_PORTAL != '' && vars.NEXT_PUBLIC_SUPABASE_URL != '' && vars.NEXT_PUBLIC_SUPABASE_ANON_KEY != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
-            dev:refs/heads/dev|dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+            dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
           esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
@@ -516,8 +516,8 @@ jobs:
           CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CLOUDFLARE_PAGES_PROJECT_LANDING != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
-            dev:refs/heads/dev|dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+            dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
           esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
@@ -595,8 +595,8 @@ jobs:
           CONFIGURED: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.SUPABASE_PROJECT_REF != '' && vars.CORS_ALLOW_ORIGIN != '' }}
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
-            dev:refs/heads/dev|dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+            dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
           esac
           printf 'configured=%s\n' "$CONFIGURED" >> "$GITHUB_OUTPUT"
           if [[ "$CONFIGURED" != true ]]; then
@@ -663,8 +663,8 @@ jobs:
       - name: Guard deployment ref
         run: |
           case "$DEPLOY_ENV:$GITHUB_REF" in
-            dev:refs/heads/dev|dev:refs/heads/main) ;;
-            *) echo '::error::Deployment requires the dev environment and a dev or main branch ref'; exit 1 ;;
+            dev:refs/heads/main) ;;
+            *) echo '::error::Deployment requires the dev environment and the main branch ref'; exit 1 ;;
           esac
       - name: Report deployment URLs and outcomes
         env:

@@ -24,31 +24,21 @@ async function evaluate(get, env, record) {
   if (typeof tip !== 'string' || !shaPattern.test(tip)) throw new Error('Invalid main tip');
 
   if (env.GITHUB_EVENT_NAME === 'push') {
-    // Both branches share the database, so a newer dev push can supersede a main push.
-    const tips = { main: tip };
-    const devRef = await get('/git/ref/heads/dev', { allowNotFound: true });
-    if (devRef !== undefined) {
-      const devTip = devRef?.object?.sha;
-      if (typeof devTip !== 'string' || !shaPattern.test(devTip)) throw new Error('Invalid dev tip');
-      tips.dev = devTip;
-    }
     let replacement;
-    for (const [branch, sha] of Object.entries(tips)) {
-      if (env.GITHUB_SHA === sha) continue;
-      for await (const run of pages(get, `${workflow}?branch=${branch}&event=push&head_sha=${sha}`, 'workflow_runs')) {
+    if (env.GITHUB_SHA !== tip) {
+      for await (const run of pages(get, `${workflow}?branch=main&event=push&head_sha=${tip}`, 'workflow_runs')) {
         if (run.run_number > Number(env.RUN_NUMBER) && (!replacement || run.run_number > replacement.run_number)) {
-          replacement = { ...run, sha, branch };
+          replacement = run;
         }
       }
     }
     if (replacement) {
-      const { id, sha, status, conclusion, branch } = replacement;
+      const { id, status, conclusion } = replacement;
       if (status === 'completed' && !['success', 'failure'].includes(conclusion)) {
-        const recovery = branch === 'dev' ? 'promote dev to main, then dispatch' : 'dispatch';
-        record(`G1: superseding run ${id} for ${sha} was ${conclusion}; ${recovery} expected_sha=${tip}`);
+        record(`G1: superseding run ${id} for ${tip} was ${conclusion}; dispatch expected_sha=${tip}`);
         return 'refused';
       }
-      record(`G1: superseded by ${sha}`);
+      record(`G1: superseded by ${tip}`);
       return 'superseded';
     }
     record('G1: no superseding push');
@@ -153,13 +143,12 @@ function summarize(log, status, elapsed, env) {
 }
 
 async function guard(env, fetchRequest = fetch) {
-  const get = async (path, { allowNotFound = false } = {}) => {
+  const get = async path => {
     const response = await fetchRequest(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`, {
       headers: { Authorization: 'Bearer ' + env.GH_TOKEN, Accept: 'application/vnd.github+json' },
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
     });
-    if (allowNotFound && response.status === 404) return undefined;
     const endpoint = path.split('?')[0];
     if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status} for ${endpoint}`);
     try {
