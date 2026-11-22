@@ -29,7 +29,7 @@ function lines(consume) {
   }, end() { if (pending) consume(pending); pending = ''; } };
 }
 
-function run(command, args, { env = process.env, timeout = 600000, quiet = false, logFile, logPrefix = '', includeStderr = false,
+function run(command, args, { env = process.env, timeout = 600000, quiet = false, printQuietFailure = true, logFile, logPrefix = '', includeStderr = false,
   onLine = () => false, idleMs = 0, idleMessage = () => 'No progress before deadline', subscribeProgress } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
@@ -76,7 +76,7 @@ function run(command, args, { env = process.env, timeout = 600000, quiet = false
         error.failure = { ...failureDetails({ status, signal, error: launchError, stdout, stderr }, secrets),
           timeout: Boolean(stopped), output: sanitize(`${stdout}\n${stderr}`, secrets) };
         // Quiet machine-readable output is still available, redacted and complete, on failure.
-        if (quiet) console.error(error.failure.output);
+        if (quiet && printQuietFailure) console.error(error.failure.output);
         reject(error);
       } else resolve(includeStderr ? combined : stdout);
     });

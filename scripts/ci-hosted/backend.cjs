@@ -9,7 +9,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
-const { collectStackDiagnostics } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, collectStackDiagnostics } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 
 const { prepareImages } = require('./images.cjs');
@@ -549,6 +549,10 @@ async function qualify(diagnostic) {
     }
     throw error;
   } finally {
+    // The build reports lint failures to the aggregate job without throwing.
+    if (started && (!summary.ok || diagnostic.failure)) {
+      await captureDatabaseLog({ project, env, logFile: 'ci-reports/postgres-server.log' });
+    }
     // Each pgTAP job on a GitHub-hosted runner owns a disposable VM.
     if (started && disposableShard) console.log('Stack stop delegated to GitHub-hosted VM teardown');
     if (started && !disposableShard) {

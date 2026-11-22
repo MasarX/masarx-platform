@@ -1,11 +1,27 @@
 'use strict';
 const fs = require('node:fs');
 const { run } = require('./process.cjs');
-const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
+const { sanitize, environmentSecrets, outputTail } = require('./diagnostics.cjs');
 
 const imagePrefix = image => String(image || '').replace(/(sha256:[a-f0-9]{12})[a-f0-9]+/g, '$1');
 const belongsToStack = (row, project) => String(row.Names || '').split(',').some(name => name.endsWith(`_${project}`))
   || String(row.Labels || '').split(',').includes(`com.supabase.cli.project=${project}`);
+
+async function captureDatabaseLog({ project, env, logFile, execute = run }) {
+  const secrets = environmentSecrets(env);
+  try {
+    const logs = await execute('docker', ['logs', '--timestamps', `supabase_db_${project}`], {
+      env, timeout: 10000, quiet: true, includeStderr: true, printQuietFailure: false,
+    });
+    fs.writeFileSync(logFile, sanitize(logs, secrets));
+    if (env.GITHUB_OUTPUT) fs.appendFileSync(env.GITHUB_OUTPUT, 'postgres_log=true\n');
+    const tail = outputTail(logs, secrets).trimEnd().replace(/\r/g, '');
+    // Prefix each line so runner commands in server output are inert.
+    if (tail) console.log(`Postgres server log tail:\n${tail.split('\n').map(line => `| ${line}`).join('\n')}`);
+  } catch (error) {
+    console.warn(`Could not capture Postgres server log: ${sanitize(error.message, secrets)}`);
+  }
+}
 
 async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy = {}, logFile, execute = run }) {
   const report = { containers: [], logs: [], unhealthy: [], errors: [], imagePolicy };
@@ -61,4 +77,4 @@ async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy =
   return report;
 }
 
-module.exports = { collectStackDiagnostics, imagePrefix, belongsToStack };
+module.exports = { captureDatabaseLog, collectStackDiagnostics, imagePrefix, belongsToStack };

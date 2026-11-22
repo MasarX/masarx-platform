@@ -71,8 +71,17 @@ jobs:
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs preflight
       - name: Run subject
+        id: qualification
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
+      - name: Upload Postgres server log
+        if: ${{ !cancelled() && steps.qualification.outputs.postgres_log == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: backend-postgres-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-reports/postgres-server.log
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Upload backend-summary
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
@@ -115,8 +124,17 @@ jobs:
           node-version: '24.22.1'
           package-manager-cache: false
       - name: Build database from zero and run pgTAP shard
+        id: qualification
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
+      - name: Upload Postgres server log
+        if: ${{ !cancelled() && steps.qualification.outputs.postgres_log == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: pgtap-postgres-log-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-reports/postgres-server.log
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Upload pgTAP summary
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
