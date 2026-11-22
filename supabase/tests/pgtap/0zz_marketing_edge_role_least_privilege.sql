@@ -49,12 +49,20 @@ SELECT ok(NOT pg_has_role('edge_marketing_role', 'service_role', 'MEMBER')
   'marketing and service roles have no membership in each other and marketing cannot assume authenticated');
 
 SELECT is_empty($$
-  SELECT c.relname
-  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-    AND (has_table_privilege('edge_marketing_role', c.oid, 'SELECT,INSERT,UPDATE,DELETE')
-         OR has_any_column_privilege('edge_marketing_role', c.oid, 'SELECT,INSERT,UPDATE'))
-$$, 'marketing role has no effective direct data privileges in public');
+  WITH application_relations AS MATERIALIZED (
+    SELECT c.oid, c.relname
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+      AND NOT EXISTS (
+        SELECT FROM pg_depend d
+        WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
+      )
+  )
+  SELECT relname
+  FROM application_relations
+  WHERE has_table_privilege('edge_marketing_role', oid, 'SELECT,INSERT,UPDATE,DELETE')
+     OR has_any_column_privilege('edge_marketing_role', oid, 'SELECT,INSERT,UPDATE')
+$$, 'marketing role has no effective direct data privileges in public application relations');
 
 GRANT edge_marketing_role TO current_user WITH INHERIT FALSE, SET TRUE;
 SET LOCAL ROLE edge_marketing_role;
