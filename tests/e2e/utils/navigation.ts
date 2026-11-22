@@ -94,9 +94,14 @@ export function normalizeResourceHref(
  */
 export async function discoverResourcePath(
   app: AppName,
+  resourceKey?: string,
 ): Promise<string | null> {
   const sections = await fetchNavigationSections(app);
   const resourceRoutes = extractResourceRoutes(sections);
+  const requestedResource = resourceKey?.trim();
+  if (requestedResource) {
+    return normalizeResourceHref(app, resourceRoutes.find((item) => item.resource === requestedResource)?.href);
+  }
   const canonicalShipmentsRoute = resourceRoutes.find(
     (item) =>
       item.resource === "shipments" || item.href === "/resources/shipments"

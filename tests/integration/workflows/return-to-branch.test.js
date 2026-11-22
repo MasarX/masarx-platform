@@ -169,6 +169,91 @@ describe('Return-to-branch intake and visibility', () => {
     return rows[0]?.task_id ?? null;
   }
 
+  test('shipment_return_request_v1 starts shipment_return_v1 from the original shipment policy context', async () => {
+    const { id: organizationId } = await createOrganization(client, 'Shipment Return Request UI Org');
+    const { id: clientId } = await createClient(client, organizationId, 'Shipment Return Request UI Client');
+    const senderId = await createSender(client, clientId, 'Shipment Return Request UI Sender');
+    const userId = await createUser(
+      client,
+      organizationId,
+      `shipment-return-request-${randomUUID().slice(0, 8)}@example.com`,
+      { accessScopeType: 'tenant', userType: 'ops_admin' }
+    );
+    const originalShipment = await createShipment(client, {
+      organizationId,
+      clientId,
+      status: 'delivered'
+    });
+    await attachSenderToShipment(originalShipment.id, senderId);
+
+    await setAuthContext(client, userId, {
+      organization_id: organizationId,
+      access_scope_type: 'tenant',
+      access_scope_id: organizationId
+    });
+    const { rows: resultRows } = await client.query(
+      `SELECT public.shipment_return_request_v1($1::jsonb) AS result`,
+      [
+        JSON.stringify({
+          shipment_id: originalShipment.id,
+          operation: 'return',
+          surface: 'console',
+          reason: 'integration return request proof'
+        })
+      ]
+    );
+    const result = resultRows[0]?.result ?? null;
+    expect(result).toMatchObject({
+      ok: true,
+      original_shipment_id: originalShipment.id,
+      operation: 'return',
+      workflow_status: 'completed',
+      return_status: 'pending'
+    });
+    expect(result?.return_shipment_id).toBeTruthy();
+    expect(result?.workflow_run_id).toBeTruthy();
+
+    const { rows: shipmentRows } = await client.query(
+      `SELECT id,
+              service_type,
+              status,
+              metadata
+         FROM public.shipments
+        WHERE id = $1::uuid
+          AND client_id = $2::uuid
+        LIMIT 1`,
+      [result.return_shipment_id, clientId]
+    );
+    expect(shipmentRows).toHaveLength(1);
+    expect(shipmentRows[0]).toMatchObject({
+      id: result.return_shipment_id,
+      service_type: 'pickup',
+      status: 'pending'
+    });
+    expect(shipmentRows[0]?.metadata?.workflow_run_id).toBe(result.workflow_run_id);
+    expect(shipmentRows[0]?.metadata?.original_shipment_id).toBe(originalShipment.id);
+
+    const { rows: taskRows } = await client.query(
+      `SELECT t.id,
+              t.resource_id,
+              tt.key AS task_type_key
+         FROM public.tasks t
+         JOIN public.task_types tt ON tt.id = t.task_type_id
+        WHERE t.organization_id = $1::uuid
+          AND t.resource_type = 'shipment'
+          AND t.resource_id = $2::uuid
+          AND tt.key = 'dispatch_return_pickup'
+        ORDER BY t.created_at DESC
+        LIMIT 1`,
+      [organizationId, result.return_shipment_id]
+    );
+    expect(taskRows).toHaveLength(1);
+    expect(taskRows[0]).toMatchObject({
+      resource_id: result.return_shipment_id,
+      task_type_key: 'dispatch_return_pickup'
+    });
+  });
+
   test('returned-to-branch API projection preserves service authenticated and anon boundaries across tenants', async () => {
     const fixtures = [];
     for (const suffix of ['a', 'b']) {

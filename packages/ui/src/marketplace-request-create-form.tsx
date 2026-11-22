@@ -4,6 +4,7 @@ import * as React from "react";
 import { Button } from "./button";
 import { Input } from "./input";
 import { JsonSchemaForm } from "./json-schema-form";
+import { RelationField } from "./relation-field";
 import { Select } from "./select";
 import { Textarea } from "./textarea";
 
@@ -22,12 +23,15 @@ export type MarketplaceRequestKindOption = {
   uiConfig?: Record<string, unknown> | null;
 };
 
+export type MarketplacePrivatePoolOption = { organizationId: string; label: string };
+
 type MarketplaceRequestCreateFormProps = {
   action: (
     prevState: MarketplaceRequestCreateState,
     formData: FormData,
   ) => Promise<MarketplaceRequestCreateState>;
   requestKinds: MarketplaceRequestKindOption[];
+  privatePoolOptions?: MarketplacePrivatePoolOption[];
   defaultKindKey?: string | null;
   testIdPrefix: string;
 };
@@ -43,6 +47,7 @@ function normalizeObject(value: unknown): Record<string, unknown> {
 export function MarketplaceRequestCreateForm({
   action,
   requestKinds,
+  privatePoolOptions,
   defaultKindKey,
   testIdPrefix,
 }: MarketplaceRequestCreateFormProps) {
@@ -51,6 +56,7 @@ export function MarketplaceRequestCreateForm({
     defaultKindKey || requestKinds[0]?.kindKey || "",
   );
   const [payload, setPayload] = React.useState<unknown>({});
+  const [privatePoolIds, setPrivatePoolIds] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     if (!kindKey && requestKinds[0]?.kindKey) {
@@ -145,18 +151,33 @@ export function MarketplaceRequestCreateForm({
         />
       </label>
 
-      <label className="space-y-2 text-sm text-ui-ink">
-        <span className="text-xs uppercase tracking-wide text-ui-muted">
-          Private pool organization IDs
-        </span>
-        <Textarea
-          name="private_pool_csv"
-          rows={3}
-          placeholder="org-id-1, org-id-2"
-          disabled={isPending}
-          data-testid={`${testIdPrefix}-private-pool`}
-        />
-      </label>
+      {privatePoolOptions ? (
+        <fieldset className="space-y-2 text-sm text-ui-ink" data-testid={`${testIdPrefix}-private-pool`}>
+          <legend className="text-xs tracking-wide text-ui-muted">Private pool organizations</legend>
+          <input type="hidden" name="private_pool_json" value={JSON.stringify(privatePoolIds)} />
+          <RelationField
+            mode="multi"
+            value={privatePoolIds}
+            onChange={(value) => setPrivatePoolIds(Array.isArray(value) ? value : [])}
+            options={privatePoolOptions.map(({ organizationId, label }) => ({ value: organizationId, label }))}
+            disabled={isPending || privatePoolOptions.length === 0}
+            placeholder="Select visible marketplace suppliers"
+          />
+        </fieldset>
+      ) : (
+        <label className="space-y-2 text-sm text-ui-ink">
+          <span className="text-xs uppercase tracking-wide text-ui-muted">
+            Private pool organization IDs
+          </span>
+          <Textarea
+            name="private_pool_csv"
+            rows={3}
+            placeholder="org-id-1, org-id-2"
+            disabled={isPending}
+            data-testid={`${testIdPrefix}-private-pool`}
+          />
+        </label>
+      )}
 
       <div className="space-y-3">
         <div className="text-xs uppercase tracking-wide text-ui-muted">

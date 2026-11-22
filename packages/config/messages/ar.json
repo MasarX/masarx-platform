@@ -3299,6 +3299,9 @@
       "softCancel": "‏إلغاء مبدئي",
       "shipmentUpdated": "‏تم تحديث الشحنة.",
       "amendCancelFailed": "‏فشل تعديل/إلغاء الشحنة",
+      "returnToOriginShipment": "إرجاع الشحنة إلى المنشأ",
+      "returnReason": "سبب الإرجاع",
+      "returnToOrigin": "بدء الإرجاع",
       "amendCancelFailedMessage": "‏فشل تعديل/إلغاء الشحنة.",
       "unsavedWarning": "‏لديك تغييرات غير محفوظة في تعديل الشحنة. هل أنت متأكد أنك تريد المغادرة؟"
     },

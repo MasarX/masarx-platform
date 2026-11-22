@@ -66,6 +66,30 @@ test("manual review resolve form emits submit telemetry", () => {
   );
 });
 
+test("manual review outcome uses labels while notes stay an approved free-text exception", () => {
+  formState = { status: "idle", message: undefined };
+  render(
+    <ManualReviewResolveForm
+      action={async () => ({ status: "success" as const })}
+      taskId="task-1"
+      testIdPrefix="manual-review-readable"
+    />
+  );
+
+  const outcome = screen.getByTestId("manual-review-readable-outcome") as HTMLSelectElement;
+  const notes = screen.getByTestId("manual-review-readable-notes") as HTMLTextAreaElement;
+
+  expect(outcome.tagName).toBe("SELECT");
+  expect(outcome).toHaveDisplayValue("outcome.placeholder");
+
+  fireEvent.change(outcome, { target: { value: "approved" } });
+  expect(outcome.value).toBe("approved");
+  expect(outcome.selectedOptions[0]?.text).toBe("outcome.approved");
+  expect(outcome.selectedOptions[0]?.text).not.toBe("approved");
+  expect(notes.tagName).toBe("TEXTAREA");
+  expect(notes.name).toBe("resolution_notes");
+});
+
 test("manual review resolve form emits result telemetry on error", () => {
   formState = { status: "idle", message: undefined };
   const action = jest.fn(async () => ({ status: "error" as const }));

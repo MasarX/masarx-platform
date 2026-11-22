@@ -3299,6 +3299,9 @@
       "softCancel": "Soft-cancel",
       "shipmentUpdated": "Shipment updated.",
       "amendCancelFailed": "Shipment amend/cancel failed",
+      "returnToOriginShipment": "Return to origin",
+      "returnReason": "Return reason",
+      "returnToOrigin": "Start return",
       "amendCancelFailedMessage": "Shipment amend/cancel failed.",
       "unsavedWarning": "You have unsaved shipment amendment changes. Are you sure you want to leave?"
     },

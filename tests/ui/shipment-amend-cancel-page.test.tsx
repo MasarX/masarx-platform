@@ -116,6 +116,56 @@ describe("ShipmentAmendCancelPage", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/portal/operations/shipment-amend-cancel");
   });
 
+  it("serializes return requests through the dedicated workflow-backed RPC", async () => {
+    const rpcMock = jest.fn(async (name: string) => {
+      if (name === "shipment_amend_cancel_options_v1") {
+        return { data: { operations: { return: { allowed: true } } }, error: null };
+      }
+      if (name === "shipment_return_request_v1") {
+        return { data: { ok: true, workflow_status: "completed", workflow_run_id: "run-1" }, error: null };
+      }
+      throw new Error("Unexpected RPC: " + name);
+    });
+    const schemaMock = jest.fn(() => ({ rpc: rpcMock }));
+    createServerClientMock.mockReturnValue({ schema: schemaMock });
+    const shipmentId = "4d1fbd36-6b6e-4c35-acc4-5e3ad9043830";
+    const tree = await ShipmentAmendCancelPage({
+      appKey: "portal",
+      appBasePath: "/portal",
+      baseHref: "/portal/operations/shipment-amend-cancel",
+      searchParams: { shipment_id: shipmentId },
+      testIdPrefix: "portal-shipment-amend-cancel",
+    });
+    const form = findElement(tree, (element) => element.type === ShipmentAmendCancelFormMock);
+    expect(form).toBeTruthy();
+    const { action } = form!.props as React.ComponentProps<typeof ShipmentAmendCancelForm>;
+
+    expect(action).toEqual(expect.any(Function));
+
+    const formData = new FormData();
+    formData.set("shipment_id", shipmentId);
+    formData.set("operation", "return");
+    formData.set("return_reason", "customer requested return to origin");
+
+    await expect(action!({ status: "idle" }, formData)).resolves.toEqual(
+      expect.objectContaining({
+        status: "success",
+        message: "Shipment return request completed.",
+      }),
+    );
+
+    expect(schemaMock).toHaveBeenCalledTimes(2);
+    expect(rpcMock).toHaveBeenCalledWith("shipment_return_request_v1", {
+      p_input: expect.objectContaining({
+        shipment_id: shipmentId,
+        operation: "return",
+        surface: "portal",
+        reason: "customer requested return to origin",
+      }),
+    });
+    expect(revalidatePathMock).toHaveBeenCalledWith("/portal/operations/shipment-amend-cancel");
+  });
+
   it("reports a queued workflow as a successful submission", async () => {
     const rpcMock = jest.fn(async (name: string) => {
       if (name === "shipment_amend_cancel_options_v1") {

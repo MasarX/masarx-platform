@@ -9,11 +9,14 @@ import { Section } from "./section";
 import { MarketplaceActionForm, MarketplaceActionFormState } from "./marketplace-action-form";
 import {
   jsonTextareaValue,
+  marketplaceOrganizationLabel,
   normalizeArray,
   normalizeObject,
   parseJsonValue,
   stringValue,
 } from "./marketplace-page-utils";
+import { labelFromKey } from "./resource-query";
+import { formatReferenceValue } from "./resource-utils";
 import { formatUiError } from "./utils";
 
 type MarketplaceRequestWorkspacePageProps = {
@@ -21,6 +24,7 @@ type MarketplaceRequestWorkspacePageProps = {
   requestsHref: string;
   requestId: string;
   testIdPrefix: string;
+  actionSourcePrefix?: string;
 };
 
 function renderJson(value: unknown) {
@@ -31,14 +35,81 @@ function renderJson(value: unknown) {
   );
 }
 
+function friendlyLabel(value: unknown) {
+  const raw = stringValue(value);
+  return raw ? labelFromKey(raw) : null;
+}
+
+type LookupOption = { value: string; label: string; isDefault: boolean };
+
+function normalizeLookupOptions(value: unknown): LookupOption[] {
+  if (!Array.isArray(value)) return [];
+  const options: LookupOption[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const record = normalizeObject(entry);
+    const optionValue = stringValue(record?.value);
+    if (!optionValue || seen.has(optionValue)) continue;
+    seen.add(optionValue);
+    options.push({
+      value: optionValue,
+      label: stringValue(record?.label) ?? friendlyLabel(optionValue) ?? optionValue,
+      isDefault: Boolean(record?.is_default),
+    });
+  }
+  return options;
+}
+
+function resolveLookupLabel(options: LookupOption[], value: unknown) {
+  const normalized = stringValue(value);
+  if (!normalized) return null;
+  return options.find((option) => option.value === normalized)?.label ?? friendlyLabel(normalized);
+}
+
+function buildReleaseStateOptions(options: LookupOption[], currentValue: string | null) {
+  if (!currentValue || options.some((option) => option.value === currentValue)) {
+    return options;
+  }
+  return [
+    {
+      value: currentValue,
+      label: resolveLookupLabel(options, currentValue) ?? currentValue,
+      isDefault: options.length === 0,
+    },
+    ...options,
+  ];
+}
+
+function resolveReleaseStateValue(options: LookupOption[], currentValue: string | null) {
+  if (currentValue) return currentValue;
+  return options.find((option) => option.isDefault)?.value ?? options[0]?.value ?? "";
+}
+
+function supplierLabel(row: Record<string, unknown>) {
+  return marketplaceOrganizationLabel(
+    row.supplier_display_name, row.supplier_organization_name, row.supplier_organization_slug,
+  );
+}
+
+function workPackageLabel(row: Record<string, unknown>) {
+  const summary = normalizeObject(row.summary);
+  const title = stringValue(row.label ?? row.title) ?? stringValue(summary?.title ?? summary?.label);
+  const id = stringValue(row.id);
+  return title ?? (id ? "Work Package " + formatReferenceValue(id) : "Work Package");
+}
+
 export async function MarketplaceRequestWorkspacePage({
   appBasePath,
   requestsHref,
   requestId,
   testIdPrefix,
+  actionSourcePrefix = "portal.marketplace.request_workspace",
 }: MarketplaceRequestWorkspacePageProps) {
   const ui = createUiServerClient();
-  const workspace = await ui.marketplaceRequestWorkspace({ requestId }).catch(() => null);
+  const [workspace, releaseStateLookupRows] = await Promise.all([
+    ui.marketplaceRequestWorkspace({ requestId }).catch(() => null),
+    ui.listLookupValues("marketplace_request_release_state").catch(() => []),
+  ]);
   const workspaceRecord = normalizeObject(workspace);
   const workspaceError = normalizeObject(workspaceRecord?.error);
   const request = normalizeObject(workspaceRecord?.request);
@@ -59,7 +130,7 @@ export async function MarketplaceRequestWorkspacePage({
       const result = await createUiServerClient().marketplaceRequestRelease({
         requestId,
         releaseState,
-        metadata: { source: "portal.marketplace.request_workspace.release" },
+        metadata: { source: `${actionSourcePrefix}.release` },
       });
       if (result.ok === false) {
         const error = normalizeObject(result.error);
@@ -91,7 +162,7 @@ export async function MarketplaceRequestWorkspacePage({
         message: String(formData.get("message") ?? "").trim() || null,
         terms: normalizeObject(termsResult.value) ?? {},
         pricing: normalizeObject(pricingResult.value) ?? {},
-        metadata: { source: "portal.marketplace.request_workspace.counter" },
+        metadata: { source: `${actionSourcePrefix}.counter` },
       });
       if (result.ok === false) {
         const error = normalizeObject(result.error);
@@ -119,7 +190,7 @@ export async function MarketplaceRequestWorkspacePage({
         offerId,
         awardReason: String(formData.get("award_reason") ?? "").trim() || null,
         awardTerms: normalizeObject(termsResult.value) ?? {},
-        metadata: { source: "portal.marketplace.request_workspace.award" },
+        metadata: { source: `${actionSourcePrefix}.award` },
       });
       if (result.ok === false) {
         const error = normalizeObject(result.error);
@@ -152,8 +223,17 @@ export async function MarketplaceRequestWorkspacePage({
   }
 
   const title = stringValue(request.title) ?? requestId;
-  const status = stringValue(request.status) ?? "unknown";
-  const releaseState = stringValue(request.release_state) ?? "private_pool";
+  const status = friendlyLabel(request.status) ?? "Unknown";
+  const releaseStateLookupOptions = buildReleaseStateOptions(
+    normalizeLookupOptions(releaseStateLookupRows),
+    stringValue(request.release_state),
+  );
+  const releaseState = resolveReleaseStateValue(
+    releaseStateLookupOptions,
+    stringValue(request.release_state),
+  );
+  const releaseStateLabel = resolveLookupLabel(releaseStateLookupOptions, releaseState);
+  const requestKindLabel = stringValue(requestKind?.label) ?? friendlyLabel(request.request_kind_key);
 
   return (
     <div className="space-y-6" data-testid={`${testIdPrefix}-ready`}>
@@ -165,9 +245,8 @@ export async function MarketplaceRequestWorkspacePage({
       <Section title="Request overview" collapsible={false}>
         <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
           <Badge>{status}</Badge>
-          {stringValue(request.request_kind_key) ? <Badge>{stringValue(request.request_kind_key)}</Badge> : null}
-          {releaseState ? <Badge>{releaseState}</Badge> : null}
-          {stringValue(requestKind?.label) ? <Badge>{stringValue(requestKind?.label)}</Badge> : null}
+          {requestKindLabel ? <Badge>{requestKindLabel}</Badge> : null}
+          {releaseStateLabel ? <Badge>{releaseStateLabel}</Badge> : null}
         </div>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <div className="space-y-3">
@@ -184,11 +263,7 @@ export async function MarketplaceRequestWorkspacePage({
                 label: "Release state",
                 kind: "select",
                 defaultValue: releaseState,
-                options: [
-                  { label: "Private pool", value: "private_pool" },
-                  { label: "Curated network", value: "curated_network" },
-                  { label: "Public", value: "public" },
-                ],
+                options: releaseStateLookupOptions.map(({ label, value }) => ({ label, value })),
               },
             ]}
           />
@@ -203,7 +278,7 @@ export async function MarketplaceRequestWorkspacePage({
             {privatePool.map((entry) => (
               <div key={`${requestId}-${stringValue(entry.supplier_organization_id) ?? "pool"}`} className="rounded-2xl border border-ui-border bg-ui-surface/60 p-4 text-sm text-ui-muted">
                 <div className="font-medium text-ui-ink">Supplier organization</div>
-                <div>{stringValue(entry.supplier_organization_id) ?? "Unknown supplier"}</div>
+                <div>{supplierLabel(entry) ?? "Unknown supplier"}</div>
               </div>
             ))}
           </div>
@@ -217,12 +292,13 @@ export async function MarketplaceRequestWorkspacePage({
           <div className="grid gap-4">
             {offers.map((offer) => {
               const offerId = stringValue(offer.id) ?? "offer";
+              const supplier = supplierLabel(offer);
               return (
                 <div key={offerId} className="grid gap-4 rounded-2xl border border-ui-border bg-ui-surface/60 p-4 lg:grid-cols-[1.1fr,0.9fr,0.9fr]">
                   <div className="space-y-3">
                     <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                      <Badge>{stringValue(offer.status) ?? "submitted"}</Badge>
-                      {stringValue(offer.supplier_organization_id) ? <Badge>{stringValue(offer.supplier_organization_id)}</Badge> : null}
+                      <Badge>{friendlyLabel(offer.status) ?? "submitted"}</Badge>
+                      {supplier ? <Badge>{supplier}</Badge> : null}
                     </div>
                     <div className="text-sm text-ui-muted">{stringValue(offer.message) ?? "No offer message provided."}</div>
                     {renderJson(offer.pricing)}
@@ -267,8 +343,8 @@ export async function MarketplaceRequestWorkspacePage({
                 return (
                   <div key={contractId} className="rounded-2xl border border-ui-border bg-ui-surface/60 p-4">
                     <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                      <Badge>{stringValue(contract.status) ?? "pending"}</Badge>
-                      {stringValue(contract.settlement_mode_key) ? <Badge>{stringValue(contract.settlement_mode_key)}</Badge> : null}
+                      <Badge>{friendlyLabel(contract.status) ?? "pending"}</Badge>
+                      {friendlyLabel(contract.settlement_mode_key) ? <Badge>{friendlyLabel(contract.settlement_mode_key)}</Badge> : null}
                     </div>
                     <div className="mt-3">
                       <Link className="text-sm font-medium text-ui-ink underline-offset-4 hover:underline" href={`${appBasePath}/marketplace/contracts/${contractId}`}>
@@ -288,10 +364,10 @@ export async function MarketplaceRequestWorkspacePage({
               workPackages.map((workPackage) => (
                 <div key={stringValue(workPackage.id) ?? "wp"} className="rounded-2xl border border-ui-border bg-ui-surface/60 p-4 text-sm text-ui-muted">
                   <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                    <Badge>{stringValue(workPackage.status) ?? "unknown"}</Badge>
-                    {stringValue(workPackage.materializer_key) ? <Badge>{stringValue(workPackage.materializer_key)}</Badge> : null}
+                    <Badge>{friendlyLabel(workPackage.status) ?? "unknown"}</Badge>
+                    {friendlyLabel(workPackage.materializer_key) ? <Badge>{friendlyLabel(workPackage.materializer_key)}</Badge> : null}
                   </div>
-                  <div className="mt-3">{stringValue(workPackage.id) ?? "Unknown work package"}</div>
+                  <div className="mt-3">{workPackageLabel(workPackage)}</div>
                 </div>
               ))
             )}
@@ -307,8 +383,8 @@ export async function MarketplaceRequestWorkspacePage({
             {disputes.map((dispute) => (
               <div key={stringValue(dispute.id) ?? "dispute"} className="rounded-2xl border border-ui-border bg-ui-surface/60 p-4 text-sm text-ui-muted">
                 <div className="flex flex-wrap gap-2 text-xs text-ui-muted">
-                  <Badge>{stringValue(dispute.status) ?? "open"}</Badge>
-                  {stringValue(dispute.category) ? <Badge>{stringValue(dispute.category)}</Badge> : null}
+                  <Badge>{friendlyLabel(dispute.status) ?? "open"}</Badge>
+                  {friendlyLabel(dispute.category) ? <Badge>{friendlyLabel(dispute.category)}</Badge> : null}
                 </div>
                 <div className="mt-3 font-medium text-ui-ink">{stringValue(dispute.title) ?? "Untitled dispute"}</div>
                 <div className="mt-2">{stringValue(dispute.description) ?? "No dispute description recorded."}</div>

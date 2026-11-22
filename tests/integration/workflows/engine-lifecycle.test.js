@@ -14,11 +14,137 @@ describe('workflow engine lifecycle semantics', () => {
   });
 
   const workflowRunIds = [];
+  const workflowTemplateIds = [];
   const insertedSettings = [];
   let templateId = null;
   let templateName = null;
   let organizationId = null;
   let clientId = null;
+
+  async function createWorkflowTemplate({ name, description, steps }) {
+    const { rows: templateRows } = await pool.query(
+      `
+        INSERT INTO workflow_templates (
+          name, description, version, status, scope_type, scope_id, created_at, updated_at
+        )
+        VALUES ($1, $2, 1, 'active', 'global', NULL, now(), now())
+        RETURNING id
+      `,
+      [name, description],
+    );
+
+    const workflowTemplateId = templateRows[0].id;
+    workflowTemplateIds.push(workflowTemplateId);
+
+    for (const step of steps) {
+      await pool.query(
+        `
+          INSERT INTO workflow_template_steps (
+            workflow_template_id,
+            sequence_order,
+            operation_name,
+            operation_settings_category,
+            transition_condition,
+            metadata,
+            handler_key,
+            handler_version,
+            enabled,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            $1::uuid,
+            $2::int,
+            $3::text,
+            $4::text,
+            $5::text,
+            $6::jsonb,
+            $7::text,
+            $8::text,
+            $9::boolean,
+            now(),
+            now()
+          )
+        `,
+        [
+          workflowTemplateId,
+          step.sequenceOrder,
+          step.operationName,
+          step.operationSettingsCategory ?? 'workflow',
+          step.transitionCondition ?? 'always',
+          JSON.stringify(step.metadata ?? {}),
+          step.handlerKey ?? 'workflow_control',
+          step.handlerVersion ?? 'v1',
+          step.enabled ?? true,
+        ],
+      );
+    }
+
+    return workflowTemplateId;
+  }
+
+  async function startWorkflowRun(contextOverrides = {}, workflowTemplateId = templateId) {
+    const workflowContext = {
+      organization_id: organizationId,
+      client_id: clientId,
+      tracking_scope_type: 'client',
+      tracking_scope_id: clientId,
+      ...contextOverrides,
+    };
+
+    const { rows } = await pool.query(
+      'SELECT public.start_workflow_run($1::uuid, $2::jsonb) AS run_id',
+      [workflowTemplateId, workflowContext],
+    );
+    const runId = rows[0].run_id;
+    workflowRunIds.push(runId);
+    return runId;
+  }
+
+  async function progressWorkflow(functionName, runId, operationResult = {}) {
+    if (!['progress_workflow_run', 'progress_workflow_run_base'].includes(functionName)) {
+      throw new Error(`Unsupported workflow function: ${functionName}`);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT public.${functionName}($1::uuid, $2::jsonb) AS result`,
+      [runId, JSON.stringify(operationResult)],
+    );
+
+    return rows[0]?.result ?? null;
+  }
+
+  async function readWorkflowState(runId) {
+    const { rows: workflowRows } = await pool.query(
+      `
+        SELECT workflow_status, current_step_id, completed_at, context, failure_reason, last_error
+        FROM public.workflow_runs
+        WHERE id = $1::uuid
+      `,
+      [runId],
+    );
+
+    const { rows: stepRows } = await pool.query(
+      `
+        SELECT
+          sequence_order,
+          operation_name,
+          step_status,
+          handler_key,
+          decision_log_id,
+          operation_result
+        FROM public.workflow_run_steps
+        WHERE workflow_run_id = $1::uuid
+        ORDER BY sequence_order ASC
+      `,
+      [runId],
+    );
+
+    return {
+      ...(workflowRows[0] ?? {}),
+      steps: stepRows,
+    };
+  }
 
   beforeAll(async () => {
     organizationId = randomUUID();
@@ -141,14 +267,14 @@ describe('workflow engine lifecycle semantics', () => {
         );
       }
 
-      if (templateId) {
+      for (const cleanupTemplateId of new Set([templateId, ...workflowTemplateIds].filter(Boolean))) {
         await pool.query(
           `DELETE FROM workflow_template_steps WHERE workflow_template_id = $1`,
-          [templateId],
+          [cleanupTemplateId],
         );
         await pool.query(
           `DELETE FROM workflow_templates WHERE id = $1`,
-          [templateId],
+          [cleanupTemplateId],
         );
       }
       if (insertedSettings.length) {
@@ -316,5 +442,283 @@ describe('workflow engine lifecycle semantics', () => {
     expect(finalRun.workflow_status).toBe('completed');
     expect(finalRun.current_step_id).toBeNull();
     expect(finalRun.completed_at).toBeTruthy();
+  });
+
+  test('progress_workflow_run matches progress_workflow_run_base on the normal delegation path', async () => {
+    const wrapperRunId = await startWorkflowRun();
+    const baseRunId = await startWorkflowRun();
+
+    const wrapperResult = await progressWorkflow('progress_workflow_run', wrapperRunId, {});
+    const baseResult = await progressWorkflow('progress_workflow_run_base', baseRunId, {});
+
+    expect(normalizeProgressResult(wrapperResult)).toEqual(normalizeProgressResult(baseResult));
+    expect(wrapperResult.step_id).toBeTruthy();
+    expect(baseResult.step_id).toBeTruthy();
+
+    const wrapperState = await readWorkflowState(wrapperRunId);
+    const baseState = await readWorkflowState(baseRunId);
+
+    for (const workflowState of [wrapperState, baseState]) {
+      expect(workflowState.workflow_status).toBe('in_progress');
+      expect(workflowState.current_step_id).toBeTruthy();
+      expect(workflowState.completed_at).toBeNull();
+      expect(workflowState.context?.planned_tracking_number).toMatch(/^[A-Z0-9-]+$/);
+      expect(workflowState.steps).toHaveLength(1);
+      expect(workflowState.steps[0].step_status).toBe('completed');
+      expect(workflowState.steps[0].operation_result?.planned_tracking_number).toBe(
+        workflowState.context.planned_tracking_number,
+      );
+    }
+
+    expect(summarizeWorkflowSteps(wrapperState)).toEqual(summarizeWorkflowSteps(baseState));
+
+    const wrapperFinalizeResult = await progressWorkflow('progress_workflow_run', wrapperRunId, {});
+    const baseFinalizeResult = await progressWorkflow('progress_workflow_run_base', baseRunId, {});
+
+    expect(normalizeProgressResult(wrapperFinalizeResult)).toEqual(normalizeProgressResult(baseFinalizeResult));
+
+    const finalWrapperState = await readWorkflowState(wrapperRunId);
+    const finalBaseState = await readWorkflowState(baseRunId);
+
+    for (const workflowState of [finalWrapperState, finalBaseState]) {
+      expect(workflowState.workflow_status).toBe('completed');
+      expect(workflowState.current_step_id).toBeNull();
+      expect(workflowState.completed_at).toBeTruthy();
+      expect(workflowState.context?.planned_tracking_number).toMatch(/^[A-Z0-9-]+$/);
+      expect(workflowState.steps).toHaveLength(1);
+      expect(workflowState.steps[0].step_status).toBe('completed');
+    }
+  });
+
+  test('progress_workflow_run only executes the earliest pending step and wakes it with explicit input', async () => {
+    const sequenceTemplateId = await createWorkflowTemplate({
+      name: `pgtemp_engine_lifecycle_sequence_wake_${Date.now()}`,
+      description: 'Temporary template for sequence gate and explicit wake integration test',
+      steps: [
+        {
+          sequenceOrder: 0,
+          operationName: 'reserve_identifiers_delayed_first',
+          operationSettingsCategory: 'workflow',
+          transitionCondition: 'always',
+          metadata: {
+            stage: 'delayed_first',
+            resource_type: 'shipment',
+            tracking_scope_type: 'client',
+            tracking_scope_id: clientId,
+          },
+          handlerKey: 'reserve_shipment_identifiers',
+          handlerVersion: 'v1',
+          enabled: true,
+        },
+        {
+          sequenceOrder: 1,
+          operationName: 'reserve_identifiers_due_second',
+          operationSettingsCategory: 'workflow',
+          transitionCondition: 'always',
+          metadata: {
+            stage: 'due_second',
+            resource_type: 'shipment',
+            tracking_scope_type: 'client',
+            tracking_scope_id: clientId,
+          },
+          handlerKey: 'reserve_shipment_identifiers',
+          handlerVersion: 'v1',
+          enabled: true,
+        },
+      ],
+    });
+
+    const runId = await startWorkflowRun({}, sequenceTemplateId);
+
+    await pool.query(
+      `
+        UPDATE public.workflow_runs
+        SET workflow_status = 'pending',
+            current_step_id = NULL,
+            completed_at = NULL,
+            started_at = NULL,
+            context = jsonb_build_object(
+              'organization_id', $2::uuid,
+              'client_id', $3::uuid,
+              'tracking_scope_type', 'client',
+              'tracking_scope_id', $3::uuid
+            ),
+            updated_at = now()
+        WHERE id = $1::uuid
+      `,
+      [runId, organizationId, clientId],
+    );
+
+    await pool.query(
+      `
+        UPDATE public.workflow_run_steps
+        SET step_status = 'pending',
+            run_at = CASE
+              WHEN sequence_order = 0 THEN now() + interval '1 hour'
+              ELSE now() - interval '1 minute'
+            END,
+            operation_started_at = NULL,
+            operation_completed_at = NULL,
+            duration_ms = NULL,
+            operation_result = NULL,
+            decision_log_id = NULL,
+            last_error = NULL,
+            updated_at = now()
+        WHERE workflow_run_id = $1::uuid
+      `,
+      [runId],
+    );
+
+    const passiveResult = await progressWorkflow('progress_workflow_run', runId, {});
+    expect(passiveResult.status).toBe('waiting');
+    expect(passiveResult.next_run_at).toBeTruthy();
+    expect(new Date(passiveResult.next_run_at).getTime()).toBeGreaterThan(Date.now() + 30 * 60 * 1000);
+
+    const passiveState = await readWorkflowState(runId);
+    expect(passiveState.steps.map((step) => step.step_status)).toEqual(['pending', 'pending']);
+    expect(passiveState.steps.map((step) => step.has_operation_result ?? step.operation_result != null)).toEqual([
+      false,
+      false,
+    ]);
+
+    const explicitWakeResult = await progressWorkflow('progress_workflow_run', runId, {
+      wake_reason: 'operator_input',
+      source: 'engine_lifecycle_contract',
+    });
+    expect(normalizeProgressResult(explicitWakeResult)).toEqual({
+      status: 'completed',
+      reason: null,
+      handler_key: 'reserve_shipment_identifiers',
+      in_progress_operation: null,
+      has_step_reference: true,
+      has_next_run_at: false,
+      skipped: false,
+    });
+
+    const wakeState = await readWorkflowState(runId);
+    expect(wakeState.workflow_status).toBe('in_progress');
+    expect(wakeState.current_step_id).toBeTruthy();
+    expect(wakeState.steps.map((step) => step.step_status)).toEqual(['completed', 'pending']);
+    expect(wakeState.steps[0].operation_result?.planned_tracking_number).toMatch(/^[A-Z0-9-]+$/);
+    expect(wakeState.steps[1].operation_result).toBeNull();
+
+    const dueSecondResult = await progressWorkflow('progress_workflow_run', runId, {});
+    expect(normalizeProgressResult(dueSecondResult)).toEqual({
+      status: 'completed',
+      reason: null,
+      handler_key: 'reserve_shipment_identifiers',
+      in_progress_operation: null,
+      has_step_reference: true,
+      has_next_run_at: false,
+      skipped: false,
+    });
+
+    const dueSecondState = await readWorkflowState(runId);
+    expect(dueSecondState.workflow_status).toBe('in_progress');
+    expect(dueSecondState.steps.map((step) => step.step_status)).toEqual(['completed', 'completed']);
+    expect(dueSecondState.steps[1].operation_result?.planned_tracking_number).toMatch(/^[A-Z0-9-]+$/);
+
+    const finalizeResult = await progressWorkflow('progress_workflow_run', runId, {});
+    expect(finalizeResult.status).toBe('completed');
+
+    const finalState = await readWorkflowState(runId);
+    expect(finalState.workflow_status).toBe('completed');
+    expect(finalState.current_step_id).toBeNull();
+    expect(finalState.completed_at).toBeTruthy();
+  });
+
+  test('progress_workflow_run reopens completed runs that still have pending steps before delegating to base', async () => {
+    const reopenTemplateId = await createWorkflowTemplate({
+      name: `pgtemp_engine_lifecycle_reopen_${Date.now()}`,
+      description: 'Temporary template for reopen-pending workflow integration test',
+      steps: [
+        {
+          sequenceOrder: 0,
+          operationName: 'reserve_identifiers',
+          operationSettingsCategory: 'workflow',
+          transitionCondition: 'always',
+          metadata: {
+            stage: 'preclose',
+            resource_type: 'shipment',
+            tracking_scope_type: 'client',
+            tracking_scope_id: clientId,
+          },
+          handlerKey: 'reserve_shipment_identifiers',
+          handlerVersion: 'v1',
+          enabled: true,
+        },
+        {
+          sequenceOrder: 1,
+          operationName: 'reserve_identifiers',
+          operationSettingsCategory: 'workflow',
+          transitionCondition: 'always',
+          metadata: {
+            stage: 'pending',
+            resource_type: 'shipment',
+            tracking_scope_type: 'client',
+            tracking_scope_id: clientId,
+          },
+          handlerKey: 'reserve_shipment_identifiers',
+          handlerVersion: 'v1',
+          enabled: true,
+        },
+      ],
+    });
+
+    const runId = await startWorkflowRun({}, reopenTemplateId);
+
+    const firstBaseResult = await progressWorkflow('progress_workflow_run_base', runId, {});
+    expect(firstBaseResult.status).toBe('completed');
+
+    const midRunState = await readWorkflowState(runId);
+    expect(midRunState.workflow_status).toBe('in_progress');
+    expect(midRunState.steps.map((step) => step.step_status)).toEqual(['completed', 'pending']);
+
+    await pool.query(
+      `
+        UPDATE public.workflow_runs
+        SET workflow_status = 'completed',
+            current_step_id = NULL,
+            completed_at = now(),
+            updated_at = now()
+        WHERE id = $1::uuid
+      `,
+      [runId],
+    );
+
+    const reopenResult = await progressWorkflow('progress_workflow_run', runId, {});
+    expect(normalizeProgressResult(reopenResult)).toEqual({
+      status: 'completed',
+      reason: null,
+      handler_key: 'reserve_shipment_identifiers',
+      in_progress_operation: null,
+      has_step_reference: true,
+      has_next_run_at: false,
+      skipped: false,
+    });
+
+    const postReopenState = await readWorkflowState(runId);
+    expect(postReopenState.workflow_status).toBe('in_progress');
+    expect(postReopenState.current_step_id).toBeTruthy();
+    expect(postReopenState.completed_at).toBeNull();
+    expect(postReopenState.steps.map((step) => step.step_status)).toEqual(['completed', 'completed']);
+    expect(postReopenState.steps[1].operation_result?.planned_tracking_number).toMatch(/^[A-Z0-9-]+$/);
+
+    const finalizeResult = await progressWorkflow('progress_workflow_run', runId, {});
+    expect(normalizeProgressResult(finalizeResult)).toEqual({
+      status: 'completed',
+      reason: null,
+      handler_key: null,
+      in_progress_operation: null,
+      has_step_reference: false,
+      has_next_run_at: false,
+      skipped: false,
+    });
+
+    const finalRunState = await readWorkflowState(runId);
+    expect(finalRunState.workflow_status).toBe('completed');
+    expect(finalRunState.current_step_id).toBeNull();
+    expect(finalRunState.completed_at).toBeTruthy();
+    expect(finalRunState.steps.map((step) => step.step_status)).toEqual(['completed', 'completed']);
   });
 });

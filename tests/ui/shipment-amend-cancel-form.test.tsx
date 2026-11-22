@@ -137,6 +137,7 @@ describe("ShipmentAmendCancelForm", () => {
             reschedule: { allowed: true, allowed_statuses: ["pending"] },
             address: { allowed: true, allowed_statuses: ["pending"] },
             cancel: { allowed: true, allowed_statuses: ["pending"], window_hours: 24 },
+            return: { allowed: true, allowed_statuses: ["delivered", "delivery_failed"] },
           },
         }}
         currentValues={{
@@ -148,6 +149,7 @@ describe("ShipmentAmendCancelForm", () => {
     );
 
     expect(screen.getByTestId("shipment-amend-cancel-cancel-submit")).toBeEnabled();
+    expect(screen.getByTestId("shipment-amend-cancel-return-submit")).toBeEnabled();
     expect(screen.getByText("Tracking:")).toBeInTheDocument();
   });
 

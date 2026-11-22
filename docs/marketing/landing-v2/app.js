@@ -1927,6 +1927,12 @@
 
     renderTrackingTimeline(timeline);
     renderTrackingDates(actions?.reschedule || {});
+    const request = tracking?.request;
+    if (typeof request?.outcome === 'string' && request.outcome.trim()) {
+      setTrackingRequestBanner(request.outcome, request);
+    } else {
+      clearTrackingRequestBanner();
+    }
   }
 
   function captureTrackingRequestDraft(kind) {
@@ -2634,6 +2640,12 @@
       }, request.controller);
       if (!isCurrentTrackingRequest(request)) return;
       if (!response.ok || !data || data.ok === false) {
+        if (data?.error?.code === 'invalid_session') {
+          saveTrackingSession('');
+          resetTrackingFlow({ clearReference: false });
+          setTrackingStatus(trackLookupStatus, 'track_status_invalid_session', 'error');
+          return;
+        }
         setOwnedTrackingRequestStatus(request, resolveTrackingErrorKey(data?.error?.code), 'error');
         return;
       }
