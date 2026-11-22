@@ -57,8 +57,7 @@ jobs:
             dev:refs/heads/main) ;;
             *) schema_unreadable input ;;
           esac
-          if [[ ! "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ ||
-            ! "$SUPABASE_ACCESS_TOKEN" =~ ^[A-Za-z0-9._~+/-]+=*$ ]]; then
+          if [[ ! "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ || -z "$SUPABASE_ACCESS_TOKEN" ]]; then
             schema_unreadable input
           fi
           response_file="$(mktemp)"
