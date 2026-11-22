@@ -1,21 +1,39 @@
 import { redactOutboxErrorText } from "@masarx/mobile-core";
 
-export function formatAuthErrorMessage(error: unknown, normalizedEmail: string): string {
-  const base = redactOutboxErrorText(String((error as { message?: unknown })?.message || error || "Unknown error"));
+export function formatAuthErrorMessage(error: unknown): string {
+  const message = String((error as { message?: unknown })?.message || error || "Unknown error");
 
-  if (/failed to fetch|network request failed|fetch failed/i.test(base)) {
+  if (/failed to fetch|network request failed|fetch failed/i.test(message)) {
     return "Unable to reach the MasarX server. Check your connection and try again.";
   }
 
-  if (/invalid login credentials/i.test(base)) {
-    return `${base}. Verify email/password and remove spaces from email (e.g. ${normalizedEmail || "sipkxyzyxvgvtksowrxwjgpn@example.invalid"}).`;
+  if (/invalid login credentials/i.test(message)) {
+    return "Invalid login credentials. Verify email/password and remove spaces from email (e.g. sipkxyzyxvgvtksowrxwjgpn@example.invalid).";
   }
 
-  if (/400|email|otp|token/i.test(base)) {
-    return `${base}. Verify email format (no spaces), then retry.`;
+  if (/\bemail not confirmed\b/i.test(message)) {
+    return "Email not confirmed. Check your inbox for the confirmation email, then retry.";
   }
 
-  return base;
+  if (/\bemail rate limit exceeded\b/i.test(message)) {
+    return "Email rate limit exceeded. Wait before requesting another email.";
+  }
+
+  if (/\btoken has expired or is invalid\b/i.test(message)) {
+    return "Token has expired or is invalid. Request a new link or code, then retry.";
+  }
+
+  const passwordMinimum = /\bpassword should be at least\b(?: ([0-9]{1,3}) characters\b)?/i.exec(message);
+  if (passwordMinimum) {
+    const hint = "Choose a longer password and try again.";
+    return passwordMinimum[1] ? `Password should be at least ${passwordMinimum[1]} characters. ${hint}` : hint;
+  }
+
+  if (/400|email|otp|token/i.test(message)) {
+    return "Verify email format (no spaces), then retry.";
+  }
+
+  return redactOutboxErrorText(message);
 }
 
 /**

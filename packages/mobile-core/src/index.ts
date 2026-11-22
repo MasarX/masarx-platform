@@ -25,6 +25,7 @@ export {
   normalizeOutboxLimit,
   normalizeOutboxDuration,
   redactOutboxErrorText,
+  classifyOutboxErrorText,
   createOutbox,
   createOutboxId,
   createOutboxNow,

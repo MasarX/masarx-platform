@@ -4,42 +4,34 @@ import {
 } from "../../../apps/fieldops/src/mobile-auth-errors";
 
 describe("mobile auth error formatter", () => {
-  test("adds credentials hint for invalid login errors", () => {
-    expect(
-      formatAuthErrorMessage(
-        new Error("Invalid login credentials"),
-        "sroquvhuzhkomlopinuzvjim@example.invalid"
-      )
-    ).toBe(
-      "Invalid login credentials. Verify email/password and remove spaces from email (e.g. sroquvhuzhkomlopinuzvjim@example.invalid)."
-    );
+  const validationHint = "Verify email format (no spaces), then retry.";
+  const exampleEmail = ["sipkxyzyxvgv", "tksowrxwjgpn", String.fromCharCode(64), "example", ".invalid"].join("");
+
+  test.each([
+    ["Failed to fetch", "Unable to reach the MasarX server. Check your connection and try again."],
+    ["Invalid login credentials", `Invalid login credentials. Verify email/password and remove spaces from email (e.g. ${exampleEmail}).`],
+    ["HTTP 400", validationHint],
+    ["Invalid email", validationHint],
+    ["Invalid OTP", validationHint],
+    ["Invalid token", validationHint],
+    ["email NOT confirmed", "Email not confirmed. Check your inbox for the confirmation email, then retry."],
+    ["Email rate limit exceeded", "Email rate limit exceeded. Wait before requesting another email."],
+    ["Token has expired or is invalid", "Token has expired or is invalid. Request a new link or code, then retry."],
+    ["Password should be at least 8 characters", "Password should be at least 8 characters. Choose a longer password and try again."],
+    ["Password should be at least 128 characters", "Password should be at least 128 characters. Choose a longer password and try again."],
+    ["Password should be at least 1024 characters", "Choose a longer password and try again."],
+    ["Password should be at least \u0668 characters", "Choose a longer password and try again."],
+    ["Password should be at least 8.5 characters", "Choose a longer password and try again."],
+    ["Service unavailable", "[REDACTED: message withheld]"],
+  ])("formats %s without exposing the credential value", (message, expected) => {
+    const marker = ["sample", "value"].join("-");
+    const formatted = formatAuthErrorMessage(new Error(`${message} password=${marker}`));
+    expect(formatted).toBe(expected);
+    expect(formatted).not.toContain(marker);
   });
 
-  test("adds email format hint for token-like validation errors", () => {
-    expect(formatAuthErrorMessage(new Error("Invalid email"), "sroquvhuzhkomlopinuzvjim@example.invalid")).toBe(
-      "Invalid email. Verify email format (no spaces), then retry."
-    );
-  });
-
-  test("falls back to raw error message", () => {
-    expect(formatAuthErrorMessage("service unavailable", "sroquvhuzhkomlopinuzvjim@example.invalid")).toBe(
-      "service unavailable"
-    );
-  });
-
-  test("redacts credential-shaped fields while keeping the validation hint", () => {
-    const error = new Error('Invalid token Bearer synthetic-example refresh_token="synthetic value"');
-    const formatted = formatAuthErrorMessage(error, "fixture-user@example.invalid");
-    expect(formatted).toContain("Bearer [REDACTED]");
-    expect(formatted).toContain("refresh_token=[REDACTED]");
-    expect(formatted).toContain("Verify email format");
-    expect(formatted).not.toContain("synthetic");
-  });
-
-  test("maps TypeError: Failed to fetch to a user-friendly message", () => {
-    expect(
-      formatAuthErrorMessage(new TypeError("Failed to fetch"), "sroquvhuzhkomlopinuzvjim@example.invalid")
-    ).toBe("Unable to reach the MasarX server. Check your connection and try again.");
+  test("preserves a safe fallback message", () => {
+    expect(formatAuthErrorMessage("service unavailable")).toBe("service unavailable");
   });
 });
 

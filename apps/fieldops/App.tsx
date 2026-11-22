@@ -1548,12 +1548,12 @@ function SignInScreen({
 
   const reportSubmissionFailure = React.useCallback(
     (error: unknown) => {
-      const nextMessage = formatAuthErrorMessage(error, normalizedEmail);
+      const nextMessage = formatAuthErrorMessage(error);
       setErrorMessage(nextMessage);
       logDebugFailure("failed to authenticate", error);
       Alert.alert(strings.auth.signInFailed, nextMessage);
     },
-    [normalizedEmail]
+    [strings.auth.signInFailed]
   );
 
   const handleSendOtp = async () => {
@@ -1564,7 +1564,7 @@ function SignInScreen({
         email: normalizedEmail,
       });
       if (error) {
-        const nextMessage = formatAuthErrorMessage(error, normalizedEmail);
+        const nextMessage = formatAuthErrorMessage(error);
         setErrorMessage(nextMessage);
         Alert.alert(strings.auth.signInFailed, nextMessage);
         return;
@@ -1585,7 +1585,7 @@ function SignInScreen({
         type: "email",
       });
       if (error) {
-        const nextMessage = formatAuthErrorMessage(error, normalizedEmail);
+        const nextMessage = formatAuthErrorMessage(error);
         setErrorMessage(nextMessage);
         Alert.alert(strings.auth.signInFailed, nextMessage);
         return;
@@ -1606,7 +1606,7 @@ function SignInScreen({
         password,
       });
       if (error) {
-        const nextMessage = formatAuthErrorMessage(error, normalizedEmail);
+        const nextMessage = formatAuthErrorMessage(error);
         setErrorMessage(nextMessage);
         Alert.alert("Sign-in failed", nextMessage);
         return;
