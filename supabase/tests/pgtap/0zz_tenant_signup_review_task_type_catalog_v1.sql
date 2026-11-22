@@ -6,7 +6,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(10);
+SELECT plan(16);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_tenant_signup_review_task_type_catalog_v1()
 RETURNS SETOF TEXT
@@ -18,6 +18,7 @@ DECLARE
   v_created record;
   v_create jsonb;
   v_review jsonb;
+  v_review_retry jsonb;
   v_req_id uuid;
 BEGIN
   EXECUTE 'SET LOCAL ROLE postgres';
@@ -170,6 +171,22 @@ BEGIN
     'tenant_signup_review_apply_v1 rejection succeeds with task closeout'
   );
 
+  RETURN NEXT ok(EXISTS (
+    SELECT 1
+    FROM public.task_events e
+    JOIN public.tasks t ON t.id = e.task_id AND t.organization_id = e.organization_id
+    WHERE t.resource_type = 'tenant_signup_request' AND t.resource_id = v_req_id
+      AND e.id::text = v_review#>>'{task_closeout,task_event_id}'
+      AND e.decision_log_id::text = v_review#>>'{task_closeout,decision_log_id}'
+      AND e.to_status = 'completed'
+  ), 'the review result identifies its persisted task closeout event and decision');
+
+  RETURN NEXT ok(
+    v_review#>'{task_closeout,task_event_ids}' @> jsonb_build_array(v_review#>>'{task_closeout,task_event_id}')
+    AND v_review#>'{task_closeout,decision_log_ids}' @> jsonb_build_array(v_review#>>'{task_closeout,decision_log_id}'),
+    'the singular evidence IDs are members of the full closeout ID lists'
+  );
+
   RETURN NEXT ok(
     EXISTS (
       SELECT 1
@@ -183,6 +200,33 @@ BEGIN
     ),
     'tenant_signup_review task is completed when review decision is applied'
   );
+
+  RETURN NEXT is((
+    SELECT count(*)
+      FROM public.task_events e
+      JOIN public.tasks t ON t.id = e.task_id AND t.organization_id = e.organization_id
+     WHERE t.resource_type = 'tenant_signup_request' AND t.resource_id = v_req_id
+       AND e.event_type = 'status_changed' AND e.to_status = 'completed'
+  ), 1::bigint, 'the first review writes one task closeout event');
+
+  v_review_retry := public.tenant_signup_review_apply_v1(
+    p_request_id := v_req_id,
+    p_decision := 'rejected',
+    p_decision_reason := 'pgtap task closeout rejection'
+  );
+  RETURN NEXT ok(
+    v_review_retry->'ok' = 'true'::jsonb
+    AND v_review_retry->'already_processed' = 'true'::jsonb
+    AND NOT (v_review_retry ? 'task_closeout'),
+    'repeating the same review returns the existing result without task closeout'
+  );
+  RETURN NEXT is((
+    SELECT count(*)
+      FROM public.task_events e
+      JOIN public.tasks t ON t.id = e.task_id AND t.organization_id = e.organization_id
+     WHERE t.resource_type = 'tenant_signup_request' AND t.resource_id = v_req_id
+       AND e.event_type = 'status_changed' AND e.to_status = 'completed'
+  ), 1::bigint, 'the repeated review leaves exactly one task closeout event');
 
   RETURN NEXT ok(
     NOT EXISTS (
@@ -199,6 +243,15 @@ END;
 $function$;
 
 SELECT * FROM pg_temp.test_tenant_signup_review_task_type_catalog_v1();
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.role', 'service_role', true);
+SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
+SELECT throws_ok(
+  $$SELECT public.tenant_signup_review_closeout_tasks_v1(NULL, 'rejected')$$,
+  '42501', NULL, 'an authenticated caller with forged claims cannot close out review tasks'
+);
+RESET ROLE;
 
 SELECT * FROM finish();
 

@@ -87,6 +87,43 @@ test.describe("landing tenant signup intake", () => {
     await expect(page.locator("[data-tenant-signup-status]")).toContainText("Reference: tsr-e2e");
   });
 
+  test("keeps tenant signup single-flight until it receives the request reference", async ({ page }) => {
+    let signupCalls = 0;
+    let contactCalls = 0;
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const requestId = "tsr-submit-guard";
+    await patchRuntimeConfig(page, {
+      contactEndpoint: LANDING_CONTACT_ENDPOINT_MOCK,
+      tenantSignupEndpoint: LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
+      turnstileSiteKey: "",
+    });
+    await page.route(LANDING_CONTACT_ROUTE, async (route) => {
+      contactCalls += 1;
+      await routePayload({ ok: true }, 200)(route);
+    });
+    await page.route(LANDING_TENANT_SIGNUP_ROUTE, async (route) => {
+      signupCalls += 1;
+      await pending;
+      await routePayload({ ok: true, request_id: requestId }, 200)(route);
+    });
+    await page.goto("/?motion=off");
+    await fillTenantSignupForm(page);
+    const submit = page.locator("[data-tenant-signup-submit]");
+    try {
+      await submit.click();
+      await expect(submit).toBeDisabled();
+      await expect.poll(() => signupCalls).toBe(1);
+      await page.locator("[data-contact-form]").evaluate((form) => (form as HTMLFormElement).requestSubmit());
+    } finally {
+      release();
+    }
+    await expect(page.locator("[data-tenant-signup-status]")).toContainText(requestId);
+    await expect(submit).toBeEnabled();
+    expect(signupCalls).toBe(1);
+    expect(contactCalls).toBe(0);
+  });
+
   test("shows Arabic request reference after tenant signup success", async ({ page }) => {
     await patchRuntimeConfig(page, {
       tenantSignupEndpoint: LANDING_TENANT_SIGNUP_ENDPOINT_MOCK,
