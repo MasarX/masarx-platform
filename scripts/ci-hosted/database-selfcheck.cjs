@@ -8,6 +8,7 @@ const { spawnSync } = require('node:child_process');
 const { retry, run, stage, lines, writeReport } = require('./process.cjs');
 const { migrationProgress, completePins, backendLint, waitForCronPause, hostedStackPorts } = require('./backend.cjs');
 const { shardFiles, shardEnvironment, shardResults } = require('./pgtap.cjs');
+const { seconds } = require('./pgtap-timings.json');
 const { checkInstallPolicy } = require('./install-policy.cjs');
 const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
 const { prepareImages } = require('./images.cjs');
@@ -212,14 +213,28 @@ async function main() {
   assert.equal(progress.currentMigration, files[1]);
   assert.throws(() => tracker.line(`Applying migration ${files[1]}...`), /Unexpected migration order/);
   const names = fs.readdirSync('supabase/tests/pgtap').filter(file => /\.sql$/i.test(file)).sort();
-  const shards = shardIndices.map(index => shardFiles([...names].reverse(), shardId(index)));
-  for (const [index, files] of shards.entries()) {
-    assert.deepEqual(files, names.filter((_, offset) => offset % PGTAP_SHARD_COUNT === index));
-  }
-  assert.deepEqual(shards.flat().sort(), names);
-  assert.equal(new Set(shards.flat()).size, names.length);
+  const unknown = 'synthetic-unmeasured.sql';
+  assert.equal(Object.hasOwn(seconds, unknown), false);
+  const inventoryWithUnknown = [...names, unknown];
+  const plan = inventory => shardIndices.map(index => shardFiles(inventory, shardId(index)));
+  assert.deepEqual(plan(names).flat().sort(), names);
+  const shards = plan(inventoryWithUnknown);
+  assert.deepEqual(shards, plan([...inventoryWithUnknown].reverse()));
+  assert.deepEqual(shards.flat().sort(), [...inventoryWithUnknown].sort());
+  for (const shard of shards) assert.deepEqual(shard, [...shard].sort());
+
+  const measured = Object.entries(seconds).sort((a, b) => a[1] - b[1]);
+  assert.ok(measured.length && measured.every(([, time]) => Number.isFinite(time) && time > 0));
+  const median = (measured[Math.floor((measured.length - 1) / 2)][1] + measured[Math.floor(measured.length / 2)][1]) / 2;
+  const weight = file => seconds[file] ?? median;
+  const sum = files => files.reduce((total, file) => total + weight(file), 0);
+  const limit = Math.max(...inventoryWithUnknown.map(weight)) + sum(inventoryWithUnknown) / PGTAP_SHARD_COUNT * 1.1;
+  assert.ok(shards.every(shard => sum(shard) <= limit), 'every pgTAP shard stays within the timing bound');
+  const [faster] = measured.findLast(([, time]) => time < median);
+  const [slower] = measured.find(([, time]) => time > median);
+  assert.deepEqual(shardFiles([faster, unknown, slower], '2/3'), [unknown]);
   const mixedCase = ['a.SQL', 'b.sQl', 'c.sql', 'ignored.txt'];
-  assert.deepEqual(Array.from({ length: 3 }, (_, index) => shardFiles(mixedCase, `${index + 1}/3`)).flat().sort(), mixedCase.slice(0, 3));
+  assert.deepEqual(Array.from({ length: 3 }, (_, index) => shardFiles(mixedCase, `${index + 1}/3`)), mixedCase.slice(0, 3).map(file => [file]));
   for (const invalid of [shardId(0), shardId(PGTAP_SHARD_COUNT + 1), '1/0', '1/65', `${shardId(1)} extra`]) assert.throws(() => shardFiles(names, invalid));
   assert.throws(() => shardFiles(['../escape.sql'], '1/1'));
   assert.throws(() => shardFiles(['one.sql', 'one.sql'], '1/1'));
