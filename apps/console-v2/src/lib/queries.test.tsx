@@ -1270,6 +1270,43 @@ describe('lib/queries', () => {
     invalidateSpy.mockRestore();
   });
 
+  it('useUpsertMappingArtifact refreshes filtered mapping config and directory reads', async () => {
+    const longLivedClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: Infinity, staleTime: 0 },
+        mutations: { retry: false },
+      },
+    });
+    const invalidateSpy = vi.spyOn(longLivedClient, 'invalidateQueries');
+    const upsertSpy = vi.spyOn(api, 'ui_upsert_mapping_artifact_v1').mockResolvedValue({
+      ok: true,
+      mapping_config_id: 'mcfg_live',
+      correlation_id: 'cor_mapping_live',
+    } as never);
+
+    const { result } = renderHook(() => useUpsertMappingArtifact(), {
+      wrapper: wrapper(longLivedClient),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        artifact: 'mapping_config',
+        mapping_config_id: 'mcfg_live',
+        mapping_type: 'webhook_inbound',
+        mapping_key: 'live.mapping',
+        mapping_config: { target: 'shipments.create' },
+      });
+    });
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(calls).toContainEqual(['list', 'mapping_configs']);
+    expect(calls).toContainEqual(['lists_by_filters', 'mapping_configs']);
+    expect(calls).toContainEqual(['list', 'mapping_config_directory']);
+    expect(calls).toContainEqual(['lists_by_filters', 'mapping_config_directory']);
+    upsertSpy.mockRestore();
+    invalidateSpy.mockRestore();
+  });
+
   it.each(['save', 'promote'] as const)('refreshes mapping and bound intake reads on %s', async (action) => {
     const longLivedClient = new QueryClient({
       defaultOptions: {
