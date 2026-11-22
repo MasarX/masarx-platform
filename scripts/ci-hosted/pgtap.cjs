@@ -3,15 +3,31 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { loadExceptions, assessFile } = require('./pgtap-exceptions.cjs');
 const { sanitize } = require('./diagnostics.cjs');
+const { seconds } = require('./pgtap-timings.json');
+
+// Refresh when the gap between the slowest and fastest pgTAP shards exceeds about 30 s.
+// Record per-file median seconds from the durationMs fields in green six-shard pgTAP artifacts.
+const weights = new Map(Object.entries(seconds).map(([file, time]) => [file, Math.round(time * 1000)]));
+const sortedWeights = [...weights.values()].sort((a, b) => a - b);
+const middle = Math.floor(sortedWeights.length / 2);
+const medianWeight = sortedWeights.length % 2 ? sortedWeights[middle] : (sortedWeights[middle - 1] + sortedWeights[middle]) / 2;
 
 function shardFiles(files, value) {
   const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value || '');
   if (!match || +match[1] > +match[2] || +match[2] > 64) throw new Error('Invalid pgTAP shard');
   const names = files.filter(file => file.toLowerCase().endsWith('.sql')).sort();
   if (!names.length || new Set(names).size !== names.length || names.some(file => !/^[a-zA-Z0-9_.-]+\.sql$/i.test(file))) throw new Error('Missing or malformed pgTAP inventory');
-  const selected = names.filter((_, index) => index % +match[2] === +match[1] - 1);
+  const shards = Array.from({ length: +match[2] }, () => ({ files: [], load: 0 }));
+  // Stable sorting keeps file ties alphabetical. The first lightest shard wins load ties.
+  const ordered = names.map(file => ({ file, weight: weights.get(file) ?? medianWeight })).sort((a, b) => b.weight - a.weight);
+  for (const { file, weight } of ordered) {
+    const lightest = shards.reduce((best, shard) => shard.load < best.load ? shard : best);
+    lightest.files.push(file);
+    lightest.load += weight;
+  }
+  const selected = shards[+match[1] - 1].files;
   if (!selected.length) throw new Error('Empty pgTAP shard');
-  return selected;
+  return selected.sort();
 }
 
 function shardEnvironment(env, contract, project, dbPort, selected) {
