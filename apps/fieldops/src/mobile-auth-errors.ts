@@ -1,21 +1,21 @@
 import { redactOutboxErrorText } from "@masarx/mobile-core";
 
-export function formatAuthErrorMessage(error: unknown, normalizedEmail: string): string {
-  const base = redactOutboxErrorText(String((error as { message?: unknown })?.message || error || "Unknown error"));
+export function formatAuthErrorMessage(error: unknown): string {
+  const message = String((error as { message?: unknown })?.message || error || "Unknown error");
 
-  if (/failed to fetch|network request failed|fetch failed/i.test(base)) {
+  if (/failed to fetch|network request failed|fetch failed/i.test(message)) {
     return "Unable to reach the MasarX server. Check your connection and try again.";
   }
 
-  if (/invalid login credentials/i.test(base)) {
-    return `${base}. Verify email/password and remove spaces from email (e.g. ${normalizedEmail || "sipkxyzyxvgvtksowrxwjgpn@example.invalid"}).`;
+  if (/invalid login credentials/i.test(message)) {
+    return "Invalid login credentials. Verify email/password and remove spaces from email (e.g. sipkxyzyxvgvtksowrxwjgpn@example.invalid).";
   }
 
-  if (/400|email|otp|token/i.test(base)) {
-    return `${base}. Verify email format (no spaces), then retry.`;
+  if (/400|email|otp|token/i.test(message)) {
+    return "Verify email format (no spaces), then retry.";
   }
 
-  return base;
+  return redactOutboxErrorText(message);
 }
 
 /**

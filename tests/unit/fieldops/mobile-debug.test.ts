@@ -12,6 +12,8 @@ function isConsoleWarnMocked(): jest.SpiedFunction<typeof console.warn> {
 }
 
 describe("mobile debug helpers", () => {
+  const withheld = "[REDACTED: message withheld]";
+
   test("request trace uses the existing bounded telemetry buffer without raw extras", async () => {
     const telemetry = require("../../../apps/fieldops/src/mobile-telemetry");
     const record = jest.spyOn(telemetry, "bufferMobileTelemetryEvent").mockResolvedValue(undefined);
@@ -30,8 +32,10 @@ describe("mobile debug helpers", () => {
     } finally { record.mockRestore(); }
   });
   test("normalizes Error objects with stack when available", () => {
-    const normalized = normalizeDebugMessage(new Error("auth timeout"));
-    expect(normalized).toContain("auth timeout");
+    const error = new Error("request timed out");
+    error.stack = "Error: request timed out\n    at task (app.js:1:1)";
+    expect(normalizeDebugMessage(error)).toBe(`${error.message}\n${error.stack}`);
+    expect(normalizeDebugMessage(new Error("auth timeout"))).toBe(withheld);
   });
 
   test("normalizes plain object payloads with safe fallback", () => {
@@ -39,32 +43,32 @@ describe("mobile debug helpers", () => {
     expect(normalized).toEqual('{"reason":"network","status":503}');
   });
 
-  test("redacts quoted credential fields in structured debug payloads", () => {
+  test("withholds quoted credential fields in structured debug payloads", () => {
     const result = normalizeDebugMessage({ refresh_token: 'synthetic "fixture"', status: 503 });
-    expect(result).toContain("[REDACTED]");
-    expect(result).toContain('"status":503');
+    expect(result).toBe(withheld);
     expect(result).not.toMatch(/synthetic|fixture/);
   });
 
   test.each([
-    ["provider_token", "ya29.abc"],
+    ["provider_token", ["ya29", "abc"].join(".")],
     ["provider_refresh_token", "abc"],
     ["id_token", "abc"],
     ["sessiontoken", "abc"],
     ["x_apikey", "abc"],
-  ])("redacts %s in debug messages and stacks", (key, value) => {
+  ])("withholds %s in debug messages and stacks", (key, value) => {
     const raw = `${key}=${value}`;
     const result = normalizeDebugMessage(new Error(raw));
-    expect(result).toContain(`${key}=[REDACTED]`);
+    expect(result).toBe(withheld);
     expect(result).not.toContain(raw);
   });
 
-  test("redacts encoded redirect JWTs and attached Bearer credentials from errors and stacks", () => {
-    const jwt = "eyJfixture.payload.signature-";
-    const result = normalizeDebugMessage(new Error(`next=%2Fcb%3Fid_token%3D${jwt} xBearer abc`));
-    expect(result).toContain("next=%2Fcb%3Fid_token%3D[JWT_REDACTED] xBearer [REDACTED]");
+  test("withholds encoded redirect JWTs and attached Bearer credentials from errors and stacks", () => {
+    const jwt = ["eyJfixture", "payload", "signature-"].join(".");
+    const bearer = ["xBearer", "abc"].join(" ");
+    const result = normalizeDebugMessage(new Error(`next=%2Fcb%3Fid_token%3D${jwt} ${bearer}`));
+    expect(result).toBe(withheld);
     expect(result).not.toContain(jwt);
-    expect(result).not.toContain("xBearer abc");
+    expect(result).not.toContain(bearer);
   });
 
   test("builds structured payload without leaking raw object identity", () => {
