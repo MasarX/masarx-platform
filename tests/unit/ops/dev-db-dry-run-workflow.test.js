@@ -8,16 +8,18 @@ const workflowSource = fs.readFileSync(path.join(workflowDir, 'deploy.yml'), 'ut
 const workflow = yaml.parse(workflowSource);
 const job = workflow.jobs['database-dry-run'];
 const measure = job.steps.find(step => step.id === 'measure');
+const rendererMint = workflow.jobs['renderer-jwt-mint'];
+const rotate = rendererMint.steps.find(step => step.name === 'Rotate the DEV renderer invoke credential');
 const fixtureRef = 'abcdefghijklmnopqrst';
 
 test('runs one manual dry-run job in dev with only read access and pinned GitHub actions', () => {
   expect(workflow.on.push).toEqual({ branches: ['main'] });
   expect(job.if).toBe("github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'");
   const inputs = workflow.on.workflow_dispatch.inputs;
-  expect(inputs.mode).toMatchObject({ type: 'choice', required: true, default: 'deploy', options: ['deploy', 'dry-run', 'api-schemas'] });
+  expect(inputs.mode).toMatchObject({ type: 'choice', required: true, default: 'deploy', options: ['deploy', 'dry-run', 'api-schemas', 'renderer-jwt-mint'] });
   expect(inputs.project_ref).toMatchObject({ type: 'string' });
   expect(workflow.permissions).toEqual({ contents: 'read' });
-  expect(Object.keys(workflow.jobs)).toHaveLength(8);
+  expect(Object.keys(workflow.jobs)).toHaveLength(9);
   expect(job.permissions).toBeUndefined();
   expect(job.environment).toBe('dev');
   expect(job['timeout-minutes']).toBeGreaterThan(45);
@@ -46,7 +48,71 @@ test('runs the configuration readout only on manual dispatch in dev with read ac
   expect(readout['timeout-minutes']).toBe(10);
   expect(workflow.permissions).toEqual({ contents: 'read' });
   expect(readout.permissions).toBeUndefined();
-  expect(renderer.run).toMatch(/\bpsql\b[^\n]* 2>\/dev\/null <<'SQL'/);
+  expect(renderer.run).toMatch(/\bpsql\b[^\n]* 2>"\$psql_stderr" <<'SQL'\n\\set VERBOSITY sqlstate/);
+  expect(renderer.run).toContain('renderer_unreadable "sqlstate-$sqlstate"');
+  expect(renderer.run).toContain('renderer_unreadable "psql-exit-$psql_status"');
+});
+
+test('gates renderer JWT minting to main in dev with read access and independent concurrency', () => {
+  expect(rendererMint.if).toBe("github.event_name == 'workflow_dispatch' && inputs.mode == 'renderer-jwt-mint' && inputs.environment == 'dev' && github.ref == 'refs/heads/main'");
+  expect(rendererMint.environment).toBe('dev');
+  expect(rendererMint.permissions).toBeUndefined();
+  expect(rendererMint.concurrency).toEqual({ group: 'dev-renderer-jwt-mint', 'cancel-in-progress': false });
+  expect(rendererMint.concurrency.group).not.toBe(workflow.jobs.database.concurrency.group);
+});
+
+test('fixes the TTL, masks the JWT before reading or storing it, and clears the signing secret before psql', () => {
+  expect(Object.keys(workflow.on.workflow_dispatch.inputs).sort()).toEqual(['environment', 'expected_sha', 'mode', 'project_ref']);
+  expect(rotate.run).toContain('RENDERER_EXP="$((RENDERER_IAT + 7 * 24 * 60 * 60))"');
+  expect(rotate.run).toMatch(/::add-mask::[\s\S]+token\.split\([\s\S]+writeFileSync\(process\.env\.RENDERER_TOKEN_FILE/);
+  expect(rotate.run).toMatch(/\nNODE\nunset SUPABASE_JWT_SECRET\n[\s\S]+timeout 20s psql/);
+  expect(rendererMint.steps.map(step => step.run || '').join('\n')).not.toMatch(/\bset\s+(?:-[a-z]*x[a-z]*\b|-o\s+xtrace\b)/);
+});
+
+test.each([
+  ['valid claims', {}],
+  ['wrong role', { role: 'service_role' }],
+  ['wrong audience', { aud: 'anonymous' }],
+  ['wrong subject', { sub: 'other-function' }],
+  ['wrong expiry', { exp: 1 }],
+])('checks %s before writing the renderer JWT', (_label, overrides) => {
+  const nowSec = 1800000000;
+  const ttlSec = 604800;
+  const claims = { role: 'edge_label_renderer_role', aud: 'authenticated', sub: 'edge-function', iat: nowSec, exp: nowSec + ttlSec, ...overrides };
+  const token = `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`;
+  const buildEdgeDbJwtBundle = jest.fn(() => ({ label_renderer_db_jwt: token }));
+  const writeFileSync = jest.fn();
+  const console = { log: jest.fn(), error: jest.fn() };
+  const context = {
+    Buffer,
+    console,
+    require: name => name === 'node:fs' ? { writeFileSync } : { buildEdgeDbJwtBundle },
+    process: {
+      env: { RENDERER_IAT: String(nowSec), RENDERER_EXP: String(nowSec + ttlSec), SUPABASE_JWT_SECRET: 'synthetic', RENDERER_TOKEN_FILE: 'renderer.jwt' },
+      exit: status => { throw new Error(`exit ${status}`); },
+    },
+  };
+  const script = rotate.run.split("<<'NODE'\n")[1].split('\nNODE\n')[0];
+  const mint = () => runInNewContext(script, context, { timeout: 1000 });
+  if (Object.keys(overrides).length) {
+    expect(mint).toThrow('exit 1');
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith('::error::Minted renderer JWT claims verification failed.');
+  } else {
+    mint();
+    expect(writeFileSync).toHaveBeenCalledWith('renderer.jwt', token, { mode: 0o600, flag: 'wx' });
+  }
+  expect(console.log).toHaveBeenCalledWith('::add-mask::' + token);
+  expect(buildEdgeDbJwtBundle).toHaveBeenCalledWith({ secret: 'synthetic', nowSec, ttlSec });
+});
+
+test('keeps renderer Vault readback atomic and reports only the database failure code', () => {
+  expect(rotate.run).toMatch(/umask 077\n[\s\S]+psql_stderr="\$renderer_temp\/psql.stderr"\ntrap '[^\n]+"\$psql_stderr"/);
+  expect(rotate.run).toMatch(/\bpsql\b[^\n]* 2>"\$psql_stderr" <<'SQL'\n\\set VERBOSITY sqlstate/);
+  expect(rotate.run).toMatch(/FROM active WHERE jwt = \$1::text\n\\bind :renderer_jwt\n\\gset\nCOMMIT;/);
+  expect(rotate.run).toContain('renderer_jwt_mint=FAILED reason=%s');
+  expect(rotate.run).toContain('reason="sqlstate-$sqlstate"');
+  expect(rotate.run).toContain('reason="psql-exit-$psql_status"');
 });
 
 test('rejects other modes and masks the dispatch ref before exporting it', () => {
