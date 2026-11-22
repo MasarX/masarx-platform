@@ -435,20 +435,50 @@ function collectJsonSpans(text: string, spans: RedactionSpan[]) {
 const PERCENT_CHARACTER = /%(?:[0-7][\da-f]|(?:c[2-9a-f]|d[\da-f])%[89ab][\da-f]|e[\da-f](?:%[89ab][\da-f]){2}|f[0-4](?:%[89ab][\da-f]){3})/gi;
 const HTML_ENTITIES: Record<string, string> = {
   quot: '"', apos: "'", amp: "&", lt: "<", gt: ">", nbsp: "\u00a0", equals: "=", colon: ":",
-  shy: "\u00ad", zerowidthspace: "\u200b",
+  shy: "\u00ad", copy: "\u00a9", reg: "\u00ae", zerowidthspace: "\u200b",
 };
 const MAX_ERROR_DECODE_PASSES = 8;
-// Substrings also cover forms like authorization, x-api-key, and PHPSESSID.
-const SENSITIVE_TERM = /apikey|token|password|secret|jwt|passwd|pwd|cookie|sessionid|privatekey|credential|passphrase|sessid|auth|signature|accesskey|bearer/;
-const SHORT_KEY_ASSIGNMENT = /(?:^|[^\p{L}\p{N}_.-])(?:(?:pass|pw|pin|otp|sig|connect\.sid)\s*[:=]|key\s*=|["'](?:pass|pw|pin|otp|sig|connect\.sid|key)["']\s*[:=])/u;
+const NESTED_PERCENT = new RegExp(`%(?:25){${MAX_ERROR_DECODE_PASSES}}`);
+const ARABIC_RANGES = String.raw`\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff`;
+const ARABIC_BLOCK = new RegExp(`[${ARABIC_RANGES}]`, "u");
+const OUTSIDE_ALLOWED_CHARACTERS = new RegExp(String.raw`[^\t\n\r\x20-\x7e${ARABIC_RANGES}]`, "u");
+const NORMALIZATION_REMOVALS = /[\p{M}\p{Cf}\u115f\u1160\u3164\uffa0\u2800]|(?![\t\n\r])\p{Cc}/gu;
+const SENSITIVE_TERM = /password|secret|token|credential/;
+const SENSITIVE_COMPONENT = /^(?:pass|passwd|password|passcode|pwd|pw|pin|otp|secret|token|key|apikey|auth|credentials?|signature|sig|session|sessid|cookies?|bearer|jwt|private|authorization|unauthorized|authentication|(?:un)?authenticated|passphrase|sessionids?|privatekey|accesskey)$/i;
+const SENSITIVE_SUFFIX = /(?:pass|passwd|key|secret|token|pin|otp|sessid)$/i;
+const ORDINARY_WORD = /^(?:monkey|compass)$/i;
+const LEET_LETTERS: Record<string, string> = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t" };
 const URL_USERINFO = /(?:[\\/]{2}|:\\+)[^/\\?#@\s]+@/;
+const BARE_USERINFO_HOST = /@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/iy;
 const UNKNOWN_NAMED_ENTITY = /&[a-z][a-z0-9]*;/i;
-const CONFUSABLE_LETTER = /[\p{Script=Cyrillic}\p{Script=Greek}\u0250-\u02af\u1d00-\u1dbf\ua730-\ua731\uab30-\uab6f]/u;
 
-function hasConfusableWord(text: string) {
-  if (!CONFUSABLE_LETTER.test(text)) return false;
-  for (const [word] of text.matchAll(/[\p{L}\p{N}_]+/gu)) {
-    if (/\p{Script=Latin}/u.test(word) && CONFUSABLE_LETTER.test(word)) return true;
+function hasUserinfo(text: string) {
+  if (!text.includes("@")) return false;
+  if (URL_USERINFO.test(text)) return true;
+  for (const { 0: prefix, index } of text.matchAll(/\b\w+:[^\s@]+/g)) {
+    BARE_USERINFO_HOST.lastIndex = index + prefix.length;
+    if (BARE_USERINFO_HOST.test(text)) return true;
+  }
+  return false;
+}
+
+function hasSensitiveTerm(text: string) {
+  const compact = text.toLowerCase().replace(/[-_.\s+/*\u00b7]/g, "");
+  if (SENSITIVE_TERM.test(compact) || SENSITIVE_TERM.test(compact.replace(/[013457]/g, digit => LEET_LETTERS[digit] ?? digit))) {
+    return true;
+  }
+  // Scanning identifiers independently of their separators covers quotes and whitespace.
+  for (const [identifier] of text.matchAll(/[a-z0-9]+(?:[_.-]+[a-z0-9]+)*/gi)) {
+    if (/^connect\.sid$/i.test(identifier)) return true;
+    const components = identifier.split(/[_.-]/);
+    for (const component of components) {
+      if (SENSITIVE_COMPONENT.test(component)) return true;
+      const words = component.replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
+      if (words.some(word => SENSITIVE_COMPONENT.test(word))) return true;
+    }
+    const lastWord = components.at(-1) ?? "";
+    if (SENSITIVE_SUFFIX.test(lastWord) && !ORDINARY_WORD.test(lastWord)) return true;
   }
   return false;
 }
@@ -457,33 +487,38 @@ function shouldWithholdError(output: string) {
   let text = output.replace(/\[(?:JWT_)?REDACTED\]/g, "[]");
   for (let pass = 0; pass < MAX_ERROR_DECODE_PASSES; pass += 1) {
     // Check before decoding reserved URL characters that can be part of a password.
-    if (URL_USERINFO.test(text)) return true;
+    if (hasUserinfo(text)) return true;
     const next = text
+      .replace(/%u([\da-f]{4})/gi, (_escape, unicode) => String.fromCharCode(parseInt(unicode, 16)))
       .replace(PERCENT_CHARACTER, (escape) => {
         try { return decodeURIComponent(escape); }
         catch { return escape; }
       })
-      .replace(/\\(?:u(?:([\da-f]{4})|\{([\da-f]{1,6})\})|x([\da-f]{2})|(["'\\/]))/gi,
-        (escape, unicode, codePoint, byte, literal) => {
+      .replace(/\\(?:u(?:([\da-f]{4})|\{([\da-f]{1,6})\})|x([\da-f]{2})|([0-7]{3})|(["'\\/]))/gi,
+        (escape, unicode, codePoint, byte, octal, literal) => {
           if (literal !== undefined) return literal;
-          const value = parseInt(unicode ?? codePoint ?? byte, 16);
+          const value = octal === undefined ? parseInt(unicode ?? codePoint ?? byte, 16) : parseInt(octal, 8);
           return value <= 0x10ffff ? String.fromCodePoint(value) : escape;
         })
-      .replace(/&(quot|apos|amp|lt|gt|nbsp|equals|colon|shy|zerowidthspace);|&#(x[\da-f]+|\d+);?/gi, (entity, name, number) => {
-        if (name !== undefined) return HTML_ENTITIES[name.toLowerCase()];
-        const value = number[0].toLowerCase() === "x" ? parseInt(number.slice(1), 16) : Number(number);
-        return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
-      });
+      .replace(/&(?:(quot|amp|lt|gt|nbsp|shy|copy|reg);?|(apos|equals|colon|zerowidthspace);)|&#(x[\da-f]+|\d+);?/gi,
+        (entity, legacyName, fullName, number) => {
+          const name = legacyName ?? fullName;
+          if (name !== undefined) return HTML_ENTITIES[name.toLowerCase()];
+          const value = number[0].toLowerCase() === "x" ? parseInt(number.slice(1), 16) : Number(number);
+          return value <= 0x10ffff ? String.fromCodePoint(value) : entity;
+        });
     if (next === text) {
-      const normalized = text.normalize("NFKD")
-        .replace(/[\p{M}\p{Cf}\u115f\u1160\u3164\uffa0\u2800]|(?![\t\n\r])\p{Cc}/gu, "")
-        .toLowerCase();
-      // A control escape can also be literal text at the start of a key, as in \token.
-      const decodedControls = normalized.replace(/\\[bfnrtv]/g, "");
-      return URL_USERINFO.test(normalized) || UNKNOWN_NAMED_ENTITY.test(normalized) || hasConfusableWord(normalized)
-        || SHORT_KEY_ASSIGNMENT.test(normalized) || SHORT_KEY_ASSIGNMENT.test(decodedControls)
-        || SENSITIVE_TERM.test(normalized.replace(/[-_.\s]/g, ""))
-        || SENSITIVE_TERM.test(decodedControls.replace(/[-_.\s]/g, ""));
+      const decomposed = text.normalize("NFKD");
+      const normalized = decomposed.replace(NORMALIZATION_REMOVALS, "");
+      if (OUTSIDE_ALLOWED_CHARACTERS.test(normalized) || UNKNOWN_NAMED_ENTITY.test(normalized)) return true;
+      if (normalized.split(/\s+/).some(token => /[a-z]/i.test(token) && ARABIC_BLOCK.test(token))) return true;
+      if (hasUserinfo(normalized) || hasSensitiveTerm(normalized)) return true;
+      // An unrecognized escape can also be a path separator before a key, as in \token.
+      const withoutEscapes = normalized.replace(/\\[\s\S]/g, "");
+      if (withoutEscapes !== normalized && (hasUserinfo(withoutEscapes) || hasSensitiveTerm(withoutEscapes))) return true;
+      // Log control characters can be identifier boundaries as well as obfuscation inside a key.
+      const withBoundaries = decomposed.replace(/\\[bfnrtv]|\p{Cc}/gu, " ").replace(NORMALIZATION_REMOVALS, "");
+      return withBoundaries !== normalized && hasSensitiveTerm(withBoundaries);
     }
     text = next;
   }
@@ -497,6 +532,8 @@ export function redactOutboxErrorText(value: string) {
   const lastKept = value.charCodeAt(end - 1);
   if (truncated && lastKept >= 0xd800 && lastKept <= 0xdbff) end -= 1;
   const text = value.slice(0, end);
+  // Every layer changes the check view, so this prefix alone exhausts the decode budget.
+  if (NESTED_PERCENT.test(text)) return WITHHELD_MESSAGE;
 
   const spans: RedactionSpan[] = [];
   const credentialStarts = new Set<number>();

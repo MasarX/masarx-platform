@@ -1,4 +1,5 @@
-import { redactOutboxErrorText } from "@masarx/mobile-core";
+import { createOutbox, redactOutboxErrorText } from "@masarx/mobile-core";
+import { createMemoryOutboxStore } from "./memory-outbox-fixture";
 
 const base64PairA = Buffer.from(["abc", "def"].join(":")).toString("base64");
 const base64PairB = Buffer.from(["user", "pass"].join(":")).toString("base64");
@@ -52,11 +53,80 @@ test.each([
 });
 
 test.each([
+  ...[
+    "DB_PASS", "smtp_pass", "smtp.pass", "user_pin", "pin_code", "otp_code", "passcode",
+    "SUPABASE_SERVICE_ROLE_KEY", "client_key", "subscription_key",
+    "passw\u0585rd", "t\u0585ken", "\u13a2OKEN", "\u13da\u13ac\u13df\u13a1\u13ac\u13a2",
+    "passw\u2c9frd", "\ua4d1\ua4ee\ua4e2\ua4e2\ua4ea\ua4f3\ua4e3\ua4d3",
+    "credent\u0131al", "s\u0131gnature", "ap\u0131_key", "to\u0138en", "passw\u0665rd",
+    "\u0410\u0420\u0406_\u041a\u0415\u0423", "\u0408\u051c\u0422", "\u0422\u041e\u041a\u0415\u039d",
+    "\u0420\u0410\u0405\u0405\u051c\u041e\u13a1\u13a0", "\u0440-assword", "\u0440.assword",
+    "\u0440 assword", "\u062e\u0637\u0623 passw\u0585rd",
+    "pass+word", "pass/word", "pass*word", "pass\u00b7word", "passw0rd", "pass&shy word",
+    "p%u0061ssword", "p\\141ssword", "pass\\aword", "pass\\0word", "pass\\eword",
+  ].map(key => `${key}=${alphaMarker}`),
+  `service_role_key: ${alphaMarker}`,
+  `Ocp-Apim-Subscription-Key: ${alphaMarker}`,
+  `key: ${alphaMarker}`,
+  `user:${alphaMarker}@example.invalid`,
+  `http:\u2044\u2044u:${alphaMarker}@example.invalid`,
+])("withholds the R9 fixture through redaction and outbox sync (%#)", async input => {
+  const output = redactOutboxErrorText(input);
+  expect(output).toBe(withheld);
+  expect(output).not.toContain(alphaMarker);
+
+  const store = createMemoryOutboxStore();
+  const outbox = createOutbox(store);
+  const { id } = await outbox.enqueue({ rpc: "record_action", args: {} });
+  await outbox.sync(async () => { throw input; });
+  const stored = (await store.get(id))?.last_error;
+  expect(stored).toBe(withheld);
+  expect(stored).not.toContain(alphaMarker);
+});
+
+test.each([
+  `"devicePin" => "${alphaMarker}"`,
+  `'userPinCode' := '${alphaMarker}'`,
+  `custompass ${alphaMarker}`,
+  `"client_key" "${alphaMarker}"`,
+  `"key: "`,
+  `event\u0664=${alphaMarker}`,
+  `label\u060c=${alphaMarker}`,
+  `label=\u03a9 ${alphaMarker}`,
+  `label=\u00b5s ${alphaMarker}`,
+  `label=&copy ${alphaMarker}`,
+  `label=&reg ${alphaMarker}`,
+  `pass&nbspword=${alphaMarker}`,
+  `pass&ZeroWidthSpace;word=${alphaMarker}`,
+  `&ltkey&gt = ${alphaMarker}`,
+  `&quotuserPin&quot=&amp${alphaMarker}`,
+])("withholds an identifier, character, or entity form (%#)", input => {
+  expect(redactOutboxErrorText(input)).toBe(withheld);
+});
+
+test("retains the PostgreSQL 23505 category when the key diagnostic is withheld", async () => {
+  const message = "duplicate key value violates unique constraint";
+  expect(redactOutboxErrorText(message)).toBe(withheld);
+  const store = createMemoryOutboxStore();
+  const outbox = createOutbox(store);
+  const { id } = await outbox.enqueue({ rpc: "record_action", args: {} });
+  await outbox.sync(async () => { throw { code: "23505", message }; });
+  expect((await store.get(id))?.last_error).toBe(`${withheld} (conflict)`);
+});
+
+test.each([
   "\u062a\u0639\u0630\u0631 \u062d\u0641\u0638 \u0627\u0644\u0637\u0644\u0628",
-  "Lookup key missing", "keyboard=enabled", "sort_key=name", "lookup-key=name", "code=409", '{"code":"PGRST301"}',
+  "shipping label failed", "Author not found", "compass heading", "monkey nearby", "Request timed out",
+  "keyboard=enabled", "code=409", '{"code":"PGRST301"}', "HTTP \u0664\u0660\u0669",
 ])("preserves ordinary diagnostic text %s", input => {
   expect(redactOutboxErrorText(input)).toBe(input);
 });
+
+test.each(["Lookup key missing", "sort_key=name", "lookup-key=name"])(
+  "withholds a diagnostic containing the key component (%s)", input => {
+    expect(redactOutboxErrorText(input)).toBe(withheld);
+  },
+);
 
 test("constructed credential fixtures preserve their original bytes", () => {
   const fixtures = [
@@ -776,7 +846,7 @@ test.each([
 });
 
 test("withholds an 8 KiB input after eight changing decode passes", () => {
-  const nested = "%" + "25".repeat(16) + "61";
+  const nested = "%" + "25".repeat(7) + "61";
   const copies = Math.floor(8192 / nested.length);
   const input = nested.repeat(copies).padEnd(8192);
   const decode = jest.spyOn(globalThis, "decodeURIComponent");
@@ -786,6 +856,21 @@ test("withholds an 8 KiB input after eight changing decode passes", () => {
   } finally {
     decode.mockRestore();
   }
+});
+
+test("rejects a deep percent run without entering the span scans", () => {
+  const input = "%" + "25".repeat(4000) + "41";
+  const matchAll = jest.spyOn(String.prototype, "matchAll");
+  let steps: number;
+  let output: string;
+  try {
+    output = redactOutboxErrorText(input);
+    steps = matchAll.mock.calls.length;
+  } finally {
+    matchAll.mockRestore();
+  }
+  expect(steps).toBe(0);
+  expect(output).toBe(withheld);
 });
 
 test("withholds 50 encoded assignments that survive span redaction", () => {
