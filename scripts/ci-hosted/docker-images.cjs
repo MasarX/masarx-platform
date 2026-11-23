@@ -28,7 +28,7 @@ function inspectedImage(route) {
   const parts = route.split('/');
   return parts[1] === 'images' && parts.length > 3 && parts.at(-1) === 'json' ? parts.slice(2, -1).join('/') : null;
 }
-function rewrite(method, url, body, pins) {
+function rewrite(method, url, body, pins, initContainer) {
   const route = dockerPath(url);
   if (route === '/images/create') throw new Error('CLI image pulls are forbidden; images must already be pulled by digest');
   if (!['GET', 'HEAD'].includes(method) && /^\/(?:build|commit|images|plugins)(?:\/|$)/.test(route)) {
@@ -43,13 +43,26 @@ function rewrite(method, url, body, pins) {
     const config = JSON.parse(body.toString('utf8'));
     if (Object.keys(config).filter(key => key.toLowerCase() === 'image').length !== 1) throw new Error('Ambiguous Docker Image key');
     config.Image = pinnedReference(config.Image, pins);
+    if (initContainer && new URL(url, 'http://localhost').searchParams.get('name') === initContainer) {
+      const database = pins.find(pin => pin.role === 'database');
+      if (!database || config.Image !== pinnedReference(database.image, pins)) throw new Error('Docker init requires the reviewed database image');
+      const { HostConfig } = config;
+      if (!HostConfig || typeof HostConfig !== 'object' || Array.isArray(HostConfig)
+        || Object.keys(config).some(key => key !== 'HostConfig' && key.toLowerCase() === 'hostconfig')
+        || Object.keys(HostConfig).some(key => key !== 'Init' && key.toLowerCase() === 'init')) {
+        throw new Error('Invalid Docker HostConfig for database init');
+      }
+      // Docker's init reaps abandoned healthcheck processes before Postgres can see their exits.
+      HostConfig.Init = true;
+    }
     body = Buffer.from(JSON.stringify(config));
   }
   return { url, body };
 }
 function policyDecision(error, method, url) {
   const reasons = ['CLI image pulls are forbidden; images must already be pulled by digest', 'Image is outside the reviewed digest set', 'Docker request exceeds bound',
-    'Docker image-mutating endpoints are forbidden', 'Ambiguous Docker Image key'];
+    'Docker image-mutating endpoints are forbidden', 'Ambiguous Docker Image key',
+    'Docker init requires the reviewed database image', 'Invalid Docker HostConfig for database init'];
   return { decision: error ? 'denied' : 'allowed',
     operation: /\/images\/create/.test(url) ? 'image-pull' : /\/images\//.test(url) ? 'image-inspect' : method === 'POST' && /\/containers\/create/.test(url) ? 'container-create' : 'request',
     reason: error ? (reasons.includes(error.message) ? error.message : 'Malformed Docker policy request') : 'Reviewed digest policy satisfied',
@@ -78,7 +91,7 @@ function imageRequest(method, url, body, pins) {
       reviewed: Boolean(reference), ...(reference ? { reference: reference.replace(/(sha256:[a-f0-9]{12})[a-f0-9]+/g, '$1') } : {}) };
   } catch { return null; }
 }
-function createGuard(pins, socketPath, policyFile) {
+function createGuard(pins, socketPath, policyFile, initContainer) {
   const policy = { decision: 'enforcing', allowed: 0, denied: 0, denials: [], imageRequests: [], requests: [] };
   const persist = () => {
     for (const request of policy.requests) if (!request.endedAt) request.durationMs = Date.now() - Date.parse(request.startedAt);
@@ -115,7 +128,7 @@ function createGuard(pins, socketPath, policyFile) {
       const chunks = []; let length = 0;
       for await (const chunk of request) { length += chunk.length; if (length > 8 * 1024 * 1024) throw new Error('Docker request exceeds bound'); chunks.push(chunk); }
       body = Buffer.concat(chunks);
-      const result = rewrite(request.method, request.url, body, pins);
+      const result = rewrite(request.method, request.url, body, pins, initContainer);
       const trace = record(null, request.method, request.url, body);
       const headers = { ...request.headers };
       delete headers['transfer-encoding']; headers['content-length'] = result.body.length;
@@ -187,11 +200,11 @@ function createGuard(pins, socketPath, policyFile) {
   });
   return server;
 }
-function start(pins, socketPath, policyFile) {
-  const server = createGuard(pins, socketPath, policyFile);
+function start(pins, socketPath, policyFile, initContainer) {
+  const server = createGuard(pins, socketPath, policyFile, initContainer);
   server.listen(0, '127.0.0.1', () => process.send?.({ port: server.address().port }));
   process.on('disconnect', () => process.exit(0));
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
 }
-if (require.main === module) start(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), process.argv[3], process.argv[4]);
+if (require.main === module) start(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), ...process.argv.slice(3));
 module.exports = { rewrite, pinnedReference, policyDecision, imageRequest, createGuard };
