@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(48);
+SELECT plan(53);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_run_assignment_lifecycle_foundation_v1()
 RETURNS SETOF TEXT
@@ -17,11 +17,15 @@ DECLARE
   v_commands JSONB := NULL;
   v_navigation JSONB := NULL;
   v_org UUID := gen_random_uuid();
+  v_other_org UUID := gen_random_uuid();
   v_branch UUID := gen_random_uuid();
   v_client UUID := gen_random_uuid();
   v_operator UUID := gen_random_uuid();
+  v_other_operator UUID := gen_random_uuid();
   v_driver UUID := gen_random_uuid();
   v_vehicle UUID := gen_random_uuid();
+  v_other_driver UUID := gen_random_uuid();
+  v_other_vehicle UUID := gen_random_uuid();
   v_route RECORD;
   v_route_two RECORD;
   v_assign_result JSONB := NULL;
@@ -46,6 +50,12 @@ BEGIN
   RETURN NEXT has_function('public', 'assign_route_run_v1', ARRAY['jsonb'], 'public.assign_route_run_v1 exists');
   RETURN NEXT has_function('public', 'ui_execute_route_run_assign_v1', ARRAY['text','text','text[]','text','integer','jsonb'], 'public.ui_execute_route_run_assign_v1 exists');
   RETURN NEXT has_function('api', 'ui_execute_route_run_assign_v1', ARRAY['text','text','text[]','text','integer','jsonb'], 'api.ui_execute_route_run_assign_v1 exists');
+  RETURN NEXT ok(
+    has_function_privilege('service_role', 'public.assign_task_system_v1(uuid,uuid,text,text,text)', 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', 'public.assign_task_system_v1(uuid,uuid,text,text,text)', 'EXECUTE')
+    AND NOT has_function_privilege('anon', 'public.assign_task_system_v1(uuid,uuid,text,text,text)', 'EXECUTE'),
+    'route follow-up task assignment stays service-only'
+  );
   RETURN NEXT ok(has_function_privilege('authenticated', 'api.ui_execute_route_run_assign_v1(text, text, text[], text, integer, jsonb)', 'EXECUTE'), 'authenticated can execute api.ui_execute_route_run_assign_v1');
   RETURN NEXT ok(has_table_privilege('authenticated', 'api.route_runs', 'SELECT'), 'authenticated can select api.route_runs');
   RETURN NEXT is(v_access#>>'{resource_map,routes,read}', 'routes.read', 'resource_map wires routes.read');
@@ -205,7 +215,9 @@ BEGIN
   );
 
   INSERT INTO public.organizations (id, name, slug)
-  VALUES (v_org, 'UC076 pgTap Org', 'uc076-pgtap-' || left(v_org::text, 8));
+  VALUES
+    (v_org, 'UC076 pgTap Org', 'uc076-pgtap-' || left(v_org::text, 8)),
+    (v_other_org, 'Other Route Fixture', 'route-fixture-' || v_other_org::text);
 
   INSERT INTO public.branches (id, organization_id, code, name, timezone)
   VALUES (v_branch, v_org, 'uc076', 'UC076 Branch', 'Asia/Riyadh');
@@ -218,8 +230,14 @@ BEGIN
     (v_operator, v_org, 'uc076-ops-' || left(v_operator::text, 8) || '@example.com', 'UC076 Ops', 'ops_admin', 'active', 'tenant'),
     (v_driver, v_org, 'uc076-driver-' || left(v_driver::text, 8) || '@example.com', 'UC076 Driver', 'driver', 'active', 'tenant');
 
+  INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type)
+  VALUES (v_other_driver, v_other_org, 'route-' || v_other_driver::text || chr(64) || concat_ws('.', 'example', 'invalid'),
+      'Other Fixture Driver', 'driver', 'active', 'tenant');
+
   INSERT INTO public.vehicles (id, organization_id, plate_number, status, is_active)
-  VALUES (v_vehicle, v_org, 'UC076-' || upper(left(v_vehicle::text, 6)), 'active', TRUE);
+  VALUES
+    (v_vehicle, v_org, 'UC076-' || upper(left(v_vehicle::text, 6)), 'active', TRUE),
+    (v_other_vehicle, v_other_org, 'TEST-' || upper(left(v_other_vehicle::text, 6)), 'active', TRUE);
 
   INSERT INTO public.shipments (organization_id, client_id, tracking_number, service_type, status)
   VALUES
@@ -286,6 +304,23 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_operator::text, 'role', 'authenticated')::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   EXECUTE 'SET LOCAL ROLE authenticated';
+
+  RETURN NEXT throws_ok(
+    format($sql$
+      SELECT api.ui_execute_route_run_assign_v1(
+        'routes.assign', 'routes', ARRAY[%L], %L, 1, jsonb_build_object('driver_user_id', %L, 'vehicle_id', %L)
+      )
+    $sql$, v_route.route_run_id, v_route.route_run_id, v_other_driver, v_vehicle),
+    '42501', NULL, 'route assignment denies an active driver from another tenant'
+  );
+  RETURN NEXT throws_ok(
+    format($sql$
+      SELECT api.ui_execute_route_run_assign_v1(
+        'routes.assign', 'routes', ARRAY[%L], %L, 1, jsonb_build_object('driver_user_id', %L, 'vehicle_id', %L)
+      )
+    $sql$, v_route.route_run_id, v_route.route_run_id, v_driver, v_other_vehicle),
+    '42501', NULL, 'route assignment denies an active vehicle from another tenant'
+  );
 
   v_assign_result := api.ui_execute_route_run_assign_v1(
     'routes.assign',
@@ -470,6 +505,21 @@ BEGIN
       v_route_two.route_run_id, v_partner_result#>>'{items,0,route_run_assignment_id}',
       v_partner_result#>>'{items,0,assignment_version}'),
     '42501', NULL, 'driver cannot read back another executor route assignment'
+  );
+
+  EXECUTE 'SET LOCAL ROLE postgres';
+  INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type)
+  VALUES (v_other_operator, v_other_org, 'route-' || v_other_operator::text || chr(64) || concat_ws('.', 'example', 'invalid'),
+          'Other Fixture Operator', 'ops_admin', 'active', 'tenant');
+  PERFORM set_config('request.jwt.claim.sub', v_other_operator::text, true);
+  PERFORM set_config('request.jwt.claims', json_build_object('sub', v_other_operator::text, 'role', 'authenticated')::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  RETURN NEXT ok(public.user_has_permission_v1('routes.read', v_other_org) IS TRUE,
+                 'the foreign operator has route read authority in its own tenant');
+  RETURN NEXT throws_ok(
+    format('SELECT api.ui_route_run_assignment_readback_v1(%L::uuid,%L::uuid,%L::integer)',
+      v_route.route_run_id, v_assignment_id, v_assignment_version),
+    '42501', NULL, 'a foreign tenant operator cannot read the exact assignment event'
   );
 
   EXECUTE 'SET LOCAL ROLE postgres';

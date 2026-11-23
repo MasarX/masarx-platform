@@ -17,6 +17,7 @@ describe('pickup wave relationship scope', () => {
       ? { branches: [], drivers: [{ value: 'driver-a', label: 'Actor tenant driver' }], vehicles: [], partners: [] }
       : { 'route:route-b': { driver_label: 'Correct route driver' } });
     renderWithIntl(await PickupWavesPage({ appKey: 'console', appBasePath: '/console', searchParams: {}, testIdPrefix: 'pickup' }));
+    expect(screen.getByText('Select pickup requests from the ledger or enter authorized shipment IDs directly.')).toBeInTheDocument();
     expect(screen.getByText('Correct route driver')).toBeInTheDocument();
     const driver = within(screen.getByTestId('pickup-assign-driver-route-b-driver_user_id')).getByRole('combobox', { name: 'Driver' });
     fireEvent.keyDown(driver, { key: 'Enter' });

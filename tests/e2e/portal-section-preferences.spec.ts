@@ -8,9 +8,8 @@ import { waitForCollapsedSectionPersisted } from "./utils/navigation-state";
 const demoContext = loadDemoContext();
 
 test.describe("portal section preferences", () => {
-  test.skip(!demoContext.available, demoContext.reason ?? "Demo accounts missing.");
-
   test("dashboard section collapse persists per user", async ({ page }, testInfo) => {
+    if (!demoContext.available) throw new Error(demoContext.reason ?? "Portal identity fixtures are missing.");
     // Keep stricter lane limits; never inherit a whole-job timeout for this one test.
     test.setTimeout(Math.min(testInfo.timeout || 90_000, 90_000));
     const basePath = getPortalBasePath();
@@ -18,10 +17,9 @@ test.describe("portal section preferences", () => {
       ["client", "sender"].includes(user.scope_type ?? "")
     );
     const primaryUser = users.find((user) => user.user_type === "client_admin") ?? users[0];
-    const secondaryUser = users.find((user) => user.email !== primaryUser?.email) ?? users[1];
+    const secondaryUser = users.find((user) => user.email.toLowerCase() !== primaryUser?.email.toLowerCase());
     if (!primaryUser || !secondaryUser) {
-      test.skip(true, "Requires at least two portal demo users.");
-      return;
+      throw new Error("Requires at least two distinct Portal fixture users.");
     }
 
     await test.step("primary seeded user's dashboard is ready", async () => {

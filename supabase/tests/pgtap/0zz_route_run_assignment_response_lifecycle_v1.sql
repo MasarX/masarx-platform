@@ -5,7 +5,7 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(26);
+SELECT plan(28);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_run_assignment_response_lifecycle_v1()
 RETURNS SETOF TEXT
@@ -440,6 +440,37 @@ END;
 $function$;
 
 SELECT * FROM pg_temp.test_route_run_assignment_response_lifecycle_v1();
+
+RESET ROLE;
+CREATE TEMP TABLE assignment_response_fixture (
+  assignment_status TEXT,
+  responded_by_user_id UUID,
+  acknowledged_at TIMESTAMPTZ,
+  accepted_at TIMESTAMPTZ,
+  refused_at TIMESTAMPTZ,
+  refusal_reason TEXT,
+  response_notes TEXT,
+  response_metadata JSONB
+);
+CREATE TRIGGER normalize_response
+  BEFORE INSERT OR UPDATE ON assignment_response_fixture
+  FOR EACH ROW EXECUTE FUNCTION public.route_run_assignments_normalize_response_state_v1();
+
+INSERT INTO assignment_response_fixture (assignment_status) VALUES ('assigned');
+UPDATE assignment_response_fixture
+SET assignment_status = 'refused', response_notes = 'Previous reply', response_metadata = '{"sample":true}';
+UPDATE assignment_response_fixture SET assignment_status = 'assigned';
+SELECT ok(
+  (SELECT response_notes IS NULL AND response_metadata = '{}'::jsonb FROM assignment_response_fixture),
+  'reassignment clears the previous driver response'
+);
+
+UPDATE assignment_response_fixture SET response_notes = 'Assigned row note', response_metadata = '{"sample":false}';
+SELECT ok(
+  (SELECT response_notes = 'Assigned row note' AND response_metadata = '{"sample":false}'::jsonb
+   FROM assignment_response_fixture),
+  'an update that keeps the assigned state preserves existing normalization behavior'
+);
 
 SELECT * FROM finish();
 

@@ -1059,6 +1059,13 @@ describeIfDb('Warehouse transfer execute workflow v1', () => {
       unmanifested_shipment_count: 0,
       reconcile_notes: 'manifest short after recount',
     });
+    expect(reconcileResult.workflow_run_id).toBe(runId);
+    await setServiceContext(organizationId, userId);
+    await progressUntil(runId, (result) => result.status === 'pending');
+    const approvalTaskId = await getTaskIdByKey(organizationId, transferId, 'warehouse_supervisor_approval');
+    expect(approvalTaskId).toBeTruthy();
+    expect(approvalTaskId).not.toBe(reconcileTaskId);
+    expect((await getWarehouseTransfer(transferId)).status).toBe('received');
   });
 
   test('transition_warehouse_transfer_v1 rejects receive before in_transit', async () => {
