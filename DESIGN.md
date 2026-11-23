@@ -147,7 +147,7 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 ### New screens
 
 - Build a mockup from the real app components before implementing a new screen.
-- Obtain Design lead review of the mockup before sending it to the owner.
+- The Design lead approves the mockup. No other review or owner sign-off is needed.
 
 ### Screen coverage
 
@@ -177,11 +177,11 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 
 ### Review and sweeps
 
-- Have the Design lead sweep the screens changed by each development deploy against this file.
 - Have the Design lead run one daily sweep across roles, viewports, themes and states.
 - File each finding as an issue and revert a change that breaks a critical user journey.
-- Delegate the hands-on checks the owner would do and deliver screenshots, timings and a short visual report.
+- Delegate the hands-on checks to a worker that returns only the findings.
 - Sweep signed-in screens on dev only with the [synthetic sweep accounts](DELIVERY.md#signed-in-dev-sweep) and keep credentials out of logs, captures and issues.
+- Design changes, including UI, mockups, `DESIGN.md` and sweep findings, get no independent review, and green CI is enough. A change to which personal data a screen shows, or to whom, is high risk and gets one review under the engineering standard's high-risk rule.
 
 ### Changing this file
 
