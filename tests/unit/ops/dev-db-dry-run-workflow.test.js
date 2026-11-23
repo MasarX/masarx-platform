@@ -19,7 +19,17 @@ test('runs one manual dry-run job in dev with only read access and pinned GitHub
   expect(inputs.mode).toMatchObject({ type: 'choice', required: true, default: 'deploy', options: ['deploy', 'dry-run', 'api-schemas'] });
   expect(inputs.project_ref).toMatchObject({ type: 'string' });
   expect(workflow.permissions).toEqual({ contents: 'read' });
-  expect(Object.keys(workflow.jobs)).toHaveLength(8);
+  expect(Object.keys(workflow.jobs).sort()).toEqual([
+    'api-schemas',
+    'console',
+    'database',
+    'database-dry-run',
+    'e2e-report',
+    'ingress',
+    'landing',
+    'portal',
+    'summary',
+  ]);
   expect(job.permissions).toBeUndefined();
   expect(job.environment).toBe('dev');
   expect(job['timeout-minutes']).toBeGreaterThan(45);
