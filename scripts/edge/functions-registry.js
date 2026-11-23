@@ -28,12 +28,17 @@ function loadRegistry(registryPath = DEFAULT_REGISTRY_PATH) {
     }
     const authMode = String(item.auth_mode || item.authMode || 'supabase_jwt').trim().toLowerCase();
     const enabled = item.enabled !== false;
-    return { name, authMode, enabled };
+    return { name, authMode, enabled, ...('environments' in item && { environments: item.environments }) };
   });
 }
 
-function planDeploy(entries) {
-  const enabled = entries.filter((e) => e.enabled);
+function functionsForDeploy(entries, environment) {
+  return entries.filter(entry => entry.enabled === true && (!('environments' in entry) ||
+    (Array.isArray(entry.environments) && entry.environments.includes(environment))));
+}
+
+function planDeploy(entries, environment) {
+  const enabled = functionsForDeploy(entries, environment);
   const withJwt = [];
   const noVerifyJwt = [];
   for (const entry of enabled) {
@@ -50,7 +55,7 @@ function planDeploy(entries) {
 if (require.main === module) {
   try {
     const entries = loadRegistry();
-    const { withJwt, noVerifyJwt } = planDeploy(entries);
+    const { withJwt, noVerifyJwt } = planDeploy(entries, process.env.DEPLOY_ENV);
     console.log(
       '[edge/functions-registry] withJwt:',
       withJwt.map((f) => f.name).join(', ') || '(none)',
@@ -68,6 +73,7 @@ if (require.main === module) {
 module.exports = {
   DEFAULT_REGISTRY_PATH,
   loadRegistry,
+  functionsForDeploy,
   planDeploy,
 };
 

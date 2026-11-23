@@ -686,18 +686,20 @@ jobs:
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
           printf '5b3031cb297d51b25be4c284e4c852254460ec722ec221d3b81b07d55acfd158  %s\n' "$archive" | sha256sum --check
           tar -xzf "$archive" -C "$RUNNER_TEMP/deploy-tools" supabase
-          python3 - <<'PY'
-          import json, re
-          from pathlib import Path
-          functions = json.loads(Path('config/edge/functions.json').read_text())['functions']
-          enabled = [f for f in functions if f.get('enabled') is True]
-          assert enabled and len({f['name'] for f in enabled}) == len(enabled)
-          for f in enabled:
-              assert re.fullmatch(r'[a-z0-9-]+', f['name'])
-              assert f['auth_mode'] in {'supabase_jwt', 'public_no_jwt'}
-              assert Path('supabase/functions', f['name'], 'index.ts').is_file()
-          Path('edge-deploy.tsv').write_text(''.join(f"{f['name']}\t{f['auth_mode']}\n" for f in enabled))
-          PY
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { statSync, writeFileSync } = require('node:fs');
+          const { functions } = require('./config/edge/functions.json');
+          const { functionsForDeploy } = require('./scripts/edge/functions-registry');
+          const enabled = functionsForDeploy(functions, process.env.DEPLOY_ENV);
+          assert.ok(enabled.length && new Set(enabled.map(f => f.name)).size === enabled.length);
+          for (const { name, auth_mode } of enabled) {
+            assert.ok(typeof name === 'string' && /^[a-z0-9-]+$/.test(name));
+            assert.ok(['supabase_jwt', 'public_no_jwt'].includes(auth_mode));
+            assert.ok(statSync(`supabase/functions/${name}/index.ts`).isFile());
+          }
+          writeFileSync('edge-deploy.tsv', enabled.map(f => `${f.name}\t${f.auth_mode}\n`).join(''));
+          NODE
       - name: Verify Edge frozen lock
         id: edge_lock
         if: *prepare-dev-edge
