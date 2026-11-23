@@ -1,5 +1,7 @@
 import { decodeJwtPayload, extractToken, getJwtRole, validateInternalEdgeClaims } from "./_shared/mod.mjs";
 
+const RENDERER_TOKEN_HEADER = "x-masarx-renderer-token";
+
 // Preserve the renderer's dispatch precedence and legacy job payload default.
 export const resolveLabelRendererOperation = (payload) => {
   if (payload && typeof payload === "object") {
@@ -10,7 +12,9 @@ export const resolveLabelRendererOperation = (payload) => {
 };
 
 export const authorizeLabelRendererRequest = (req, operation, options = {}) => {
-  const token = extractToken(req, { prefer: "authorization", allowWebhookHeader: false, allowQueryParam: false });
+  const token = options.rendererTokenOnly
+    ? req.headers.get(RENDERER_TOKEN_HEADER)
+    : extractToken(req, { prefer: "authorization", allowWebhookHeader: false, allowQueryParam: false });
   const role = getJwtRole(token);
   if (!token || !role) {
     return { ok: false, status: 401, message: "Missing or invalid Authorization token" };
@@ -36,8 +40,8 @@ const rejected = { ok: false, status: 401, message: "Invalid renderer invocation
 
 export async function verifyLabelRendererToken(req, signingKey, now = Math.floor(Date.now() / 1000)) {
   if (!signingKey) return { ok: false, status: 503, message: "Renderer signing key is unavailable" };
-  const parts = /^Bearer ([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/i.exec(
-    req.headers.get("authorization") ?? "",
+  const parts = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(
+    req.headers.get(RENDERER_TOKEN_HEADER) ?? "",
   );
   if (!parts) return rejected;
 

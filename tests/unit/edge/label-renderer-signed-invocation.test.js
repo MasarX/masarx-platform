@@ -1,16 +1,21 @@
 const { createHmac, randomBytes, randomUUID } = require('node:crypto');
 const { readFileSync, readdirSync } = require('node:fs');
 const { join, resolve } = require('node:path');
+const { buildSupabaseApiKeys } = require('../../../scripts/ops/workspace/edge-db-jwt');
 
 const endpoint = new URL('/functions/v1/label-renderer', ['https://renderer', 'example', 'test'].join('.'));
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
 const key = randomBytes(32).toString('hex');
+const anonKey = buildSupabaseApiKeys({ secret: randomBytes(32) }).anon;
+const tokenHeader = 'x-masarx-renderer-token';
 const now = 2_000_000_000;
+let authorize;
 let verify;
 let sign;
 
 beforeAll(async () => {
-  ({ verifyLabelRendererToken: verify } = await import('../../../supabase/functions/label-renderer/auth.mjs'));
+  ({ authorizeLabelRendererRequest: authorize, verifyLabelRendererToken: verify } =
+    await import('../../../supabase/functions/label-renderer/auth.mjs'));
   ({ authorizeRendererSend: sign } = await import('../../../supabase/functions/api-caller/renderer-auth.mjs'));
 });
 
@@ -20,13 +25,26 @@ function request({ claims = {}, alg = 'HS256', signingKey = key } = {}) {
     iat: now, exp: now + 60, jti: randomUUID(), ...claims });
   const unsigned = `${header}.${payload}`;
   const signature = createHmac('sha256', signingKey).update(unsigned).digest('base64url');
-  return new Request(endpoint, { method: 'POST', headers: { authorization: `Bearer ${unsigned}.${signature}` } });
+  return new Request(endpoint, {
+    method: 'POST', headers: { authorization: `Bearer ${anonKey}`, [tokenHeader]: `${unsigned}.${signature}` },
+  });
 }
 
-test('accepts a fresh token produced by api-caller', async () => {
-  const dispatch = await sign({ url: endpoint.href }, endpoint.href, key);
-  await expect(verify(new Request(endpoint, { method: 'POST', headers: dispatch.headers }), key))
-    .resolves.toEqual({ ok: true });
+test.each(['jobs', 'print', 'bundle'])('accepts the dedicated api-caller token for %s', async (operation) => {
+  const dispatch = await sign({ url: endpoint.href }, endpoint.href, key, anonKey);
+  const req = new Request(endpoint, { method: 'POST', headers: dispatch.headers });
+  expect(req.headers.get('authorization')).toBe(`Bearer ${anonKey}`);
+  expect(authorize(req, operation, { requireDbJwt: true, rendererTokenOnly: true })).toMatchObject({ ok: true });
+  await expect(verify(req, key)).resolves.toEqual({ ok: true });
+});
+
+test.each(['jobs', 'print', 'bundle'])('does not use the gateway bearer to authorize %s', async (operation) => {
+  const signedToken = request().headers.get(tokenHeader);
+  for (const bearer of [anonKey, signedToken]) {
+    const req = new Request(endpoint, { headers: { authorization: `Bearer ${bearer}` } });
+    expect(authorize(req, operation, { requireDbJwt: true, rendererTokenOnly: true }).ok).toBe(false);
+    await expect(verify(req, key, now)).resolves.toMatchObject({ ok: false, status: 401 });
+  }
 });
 
 test.each([

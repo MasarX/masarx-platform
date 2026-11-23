@@ -1,9 +1,13 @@
+import { decodeJwtPayload } from "./_shared/mod.mjs";
+
+export const RENDERER_TOKEN_HEADER = "x-masarx-renderer-token";
+
 const encodeBase64Url = (value) => btoa(String.fromCharCode(...value))
   .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
 const utf8 = new TextEncoder();
 
-export async function authorizeRendererSend(dispatch, rendererEndpoint, signingSecret) {
+export async function authorizeRendererSend(dispatch, rendererEndpoint, signingSecret, anonKey) {
   const expected = new URL(rendererEndpoint);
   const destination = new URL(dispatch.url);
   if (expected.protocol !== "https:" || !expected.pathname.endsWith("/functions/v1/label-renderer") ||
@@ -12,6 +16,10 @@ export async function authorizeRendererSend(dispatch, rendererEndpoint, signingS
     throw new Error("renderer_endpoint_not_authorized");
   }
   if (!signingSecret) throw new Error("renderer_signer_unavailable");
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(anonKey ?? "") ||
+      decodeJwtPayload(anonKey)?.role !== "anon") {
+    throw new Error("renderer_gateway_anon_jwt_required");
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const claims = {
@@ -35,7 +43,8 @@ export async function authorizeRendererSend(dispatch, rendererEndpoint, signingS
     ...dispatch,
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${unsigned}.${encodeBase64Url(new Uint8Array(signature))}`,
+      authorization: `Bearer ${anonKey}`,
+      [RENDERER_TOKEN_HEADER]: `${unsigned}.${encodeBase64Url(new Uint8Array(signature))}`,
     },
   };
 }

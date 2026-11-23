@@ -6016,6 +6016,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const operation = resolveLabelRendererOperation(payload);
     const authorization = authorizeLabelRendererRequest(req, operation, {
       requireDbJwt: true,
+      rendererTokenOnly: true,
     });
     if (!authorization.ok) {
       return withCors(new Response(JSON.stringify({ error: authorization.message }), {

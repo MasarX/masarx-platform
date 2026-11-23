@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { authorizeApiCallerOperation, authorizeEdgeRequest } from "./auth.mjs";
 import { executeBoundedEgress } from "./egress.mjs";
 import { createGuardedProxyFetch } from "./proxy.mjs";
-import { authorizeRendererSend } from "./renderer-auth.mjs";
+import { authorizeRendererSend, RENDERER_TOKEN_HEADER } from "./renderer-auth.mjs";
 import {
   buildCompactBatchResponse,
   compactBatchJobResult,
@@ -409,7 +409,7 @@ const executeClaimedJob = async (
           block_private_networks: true,
           domain_allowlist: [new URL(RENDERER_ENDPOINT).hostname],
           allowed_methods: ["POST"],
-          header_allowlist: ["authorization", "content-type"],
+          header_allowlist: ["authorization", "content-type", RENDERER_TOKEN_HEADER],
           follow_redirects: false,
         },
       }
@@ -420,6 +420,7 @@ const executeClaimedJob = async (
         mergedDispatch,
         RENDERER_ENDPOINT,
         readEnv("LABEL_RENDERER_SIGNING_KEY"),
+        SUPABASE_ANON_KEY,
       )
       : mergedDispatch;
     callResult = await runFetch(sendDispatch, egressEnvelope);

@@ -3,9 +3,11 @@ const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const { runInNewContext } = require('node:vm');
 const ts = require('typescript');
+const { buildSupabaseApiKeys } = require('../../../scripts/ops/workspace/edge-db-jwt');
 
 const endpoint = ['https://renderer', 'example', 'test'].join('.') + '/functions/v1/label-renderer';
-const tokenFrom = (dispatch) => dispatch.headers.authorization.split(' ')[1];
+const anonKey = buildSupabaseApiKeys({ secret: randomBytes(32) }).anon;
+const tokenFrom = (dispatch) => dispatch.headers['x-masarx-renderer-token'];
 const decode = (part) => JSON.parse(Buffer.from(part, 'base64url').toString());
 let authorizeRendererSend;
 let invocation;
@@ -18,13 +20,14 @@ beforeAll(async () => {
 test('signs a distinct renderer JWT for each send with a 60-second lifetime', async () => {
   const secret = randomBytes(32).toString('hex');
   const spec = { url: endpoint, method: 'POST', headers: {} };
-  const first = tokenFrom(await authorizeRendererSend(spec, endpoint, secret));
-  const second = tokenFrom(await authorizeRendererSend(spec, endpoint, secret));
-  expect(second).not.toBe(first);
+  const first = await authorizeRendererSend(spec, endpoint, secret, anonKey);
+  const second = await authorizeRendererSend(spec, endpoint, secret, anonKey);
+  expect(tokenFrom(second)).not.toBe(tokenFrom(first));
   expect(spec.headers).toEqual({});
 
-  for (const jwt of [first, second]) {
-    const [header, payload, signature] = jwt.split('.');
+  for (const dispatch of [first, second]) {
+    expect(dispatch.headers.authorization).toBe(`Bearer ${anonKey}`);
+    const [header, payload, signature] = tokenFrom(dispatch).split('.');
     expect(decode(header)).toEqual({ alg: 'HS256', typ: 'JWT' });
     const claims = decode(payload);
     expect(claims).toMatchObject({ role: 'edge_label_renderer_role', aud: 'authenticated', sub: 'edge-function' });
@@ -36,10 +39,17 @@ test('signs a distinct renderer JWT for each send with a 60-second lifetime', as
 test('refuses any different endpoint and fails closed without the server signing secret', async () => {
   const secret = randomBytes(32).toString('hex');
   const differentOrigin = endpoint.replace('renderer', 'second');
-  await expect(authorizeRendererSend({ url: differentOrigin }, endpoint, secret)).rejects.toThrow('renderer_endpoint_not_authorized');
-  await expect(authorizeRendererSend({ url: `${endpoint}?other=1` }, endpoint, secret)).rejects.toThrow('renderer_endpoint_not_authorized');
-  await expect(authorizeRendererSend({ url: endpoint }, endpoint, '')).rejects.toThrow('renderer_signer_unavailable');
+  await expect(authorizeRendererSend({ url: differentOrigin }, endpoint, secret, anonKey)).rejects.toThrow('renderer_endpoint_not_authorized');
+  await expect(authorizeRendererSend({ url: `${endpoint}?other=1` }, endpoint, secret, anonKey)).rejects.toThrow('renderer_endpoint_not_authorized');
+  await expect(authorizeRendererSend({ url: endpoint }, endpoint, '', anonKey)).rejects.toThrow('renderer_signer_unavailable');
 });
+
+test.each(['', `sb_publishable_${randomBytes(8).toString('hex')}`, buildSupabaseApiKeys({ secret: randomBytes(32) }).service])(
+  'requires a legacy anon JWT for the gateway', async (gatewayKey) => {
+    await expect(authorizeRendererSend({ url: endpoint }, endpoint, randomBytes(32).toString('hex'), gatewayKey))
+      .rejects.toThrow('renderer_gateway_anon_jwt_required');
+  },
+);
 
 const source = readFileSync(resolve(__dirname, '../../../supabase/functions/api-caller/index.ts'), 'utf8');
 const { outputText } = ts.transpileModule(`${source}\nmodule.exports = { executeClaimedJobById };`, {
@@ -62,17 +72,20 @@ function loadWorker({ stale = false } = {}) {
     './auth.mjs': {},
     './invocation.mjs': invocation,
     './proxy.mjs': { createGuardedProxyFetch: () => undefined },
-    './renderer-auth.mjs': { authorizeRendererSend: async (...args) => {
-      calls.push({ name: 'mint' });
-      return authorizeRendererSend(...args);
-    } },
+    './renderer-auth.mjs': {
+      RENDERER_TOKEN_HEADER: 'x-masarx-renderer-token',
+      authorizeRendererSend: async (...args) => {
+        calls.push({ name: 'mint' });
+        return authorizeRendererSend(...args);
+      },
+    },
     './egress.mjs': { executeBoundedEgress: async (args) => {
       calls.push({ name: 'send', args });
       return { status: 200, completed: true, headers: {}, body: { ok: true }, latency_ms: 1 };
     } },
     './_shared/mod.mjs': { readEnv: (key) => ({
       EDGE_SUPABASE_URL: new URL(endpoint).origin,
-      EDGE_SUPABASE_ANON_KEY: 'fixture',
+      EDGE_SUPABASE_ANON_KEY: anonKey,
       API_CALLER_DB_JWT: ['header', 'payload', 'signature'].join('.'),
       LABEL_RENDERER_SIGNING_KEY: randomBytes(32).toString('hex'),
     })[key] ?? '' },
@@ -95,6 +108,8 @@ test('resolves under the lease, renews ownership, and uses the token only for tr
   ]);
   expect(calls[0].args).toEqual({ p_job_id: jobId, p_lease_token: lease });
   expect(calls[3].args.policy.followRedirects).toBe(false);
+  expect(calls[3].args.policy.headerAllowlist).toContain('x-masarx-renderer-token');
+  expect(calls[3].args.headers.authorization).toBe(`Bearer ${anonKey}`);
   expect(spec.headers).toEqual({});
   expect(JSON.stringify(result)).not.toContain(tokenFrom(calls[3].args));
 });
