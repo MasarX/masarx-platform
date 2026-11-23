@@ -54,13 +54,11 @@ sync_endpoint() (
         | select(test("\\Aaws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com\\z"))' 2>/dev/null
   )" || return 1
   relay_temp="$(mktemp -d 2>/dev/null)" || return 1
-  ca_file="$relay_temp/root.crt"
+  ca_file="$(dirname -- "${BASH_SOURCE[0]}")/../../config/certs/supabase-prod-ca-2021.crt"
   psql_stderr="$relay_temp/psql.stderr"
-  trap 'rm -f "$ca_file" "$psql_stderr"; rmdir "$relay_temp"' EXIT
-  curl --fail --silent --max-time 20 --output "$ca_file" \
-    https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt &&
-    printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
-      sha256sum --check --status || return 1
+  trap 'rm -f "$psql_stderr"; rmdir "$relay_temp"' EXIT
+  printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
+    sha256sum --check --status 2>/dev/null || return 1
 
   state="$(relay_policy_status)" || return 1
   case "$state" in

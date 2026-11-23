@@ -84,6 +84,11 @@ jobs:
             schema_unreadable parse
           fi
           printf '%s\n' "$schemas" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Read renderer JWT claims
         if: ${{ !cancelled() }}
         env:
@@ -199,16 +204,13 @@ jobs:
           )"; then
             renderer_unreadable pooler
           fi
-          ca_file="$(mktemp)"
-          psql_stderr=''
-          trap 'rm -f "$ca_file" "$psql_stderr"' EXIT
-          if ! curl --fail --silent --max-time 20 --output "$ca_file" \
-              https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt ||
-            ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
-              sha256sum --check --status; then
+          ca_file="config/certs/supabase-prod-ca-2021.crt"
+          if ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
+              sha256sum --check --status 2>/dev/null; then
             renderer_unreadable ca
           fi
           psql_stderr="$(mktemp)"
+          trap 'rm -f "$psql_stderr"' EXIT
           renderer_psql() {
             PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
               PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
@@ -482,9 +484,9 @@ jobs:
           umask 077
           renderer_temp="$(mktemp -d)"
           export RENDERER_TOKEN_FILE="$renderer_temp/renderer.jwt"
-          ca_file="$renderer_temp/root.crt"
+          ca_file="config/certs/supabase-prod-ca-2021.crt"
           psql_stderr="$renderer_temp/psql.stderr"
-          trap 'rm -f "$RENDERER_TOKEN_FILE" "$ca_file" "$psql_stderr"; rmdir "$renderer_temp"' EXIT
+          trap 'rm -f "$RENDERER_TOKEN_FILE" "$psql_stderr"; rmdir "$renderer_temp"' EXIT
           if ! pooler="$(
             printf 'Authorization: Bearer %s\n' "$SUPABASE_ACCESS_TOKEN" |
               curl --fail --silent --max-time 20 --header @- \
@@ -496,10 +498,8 @@ jobs:
             echo '::error::Could not identify the DEV database pooler.'
             exit 1
           fi
-          if ! curl --fail --silent --max-time 20 --output "$ca_file" \
-              https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt ||
-            ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
-              sha256sum --check --status; then
+          if ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
+              sha256sum --check --status 2>/dev/null; then
             echo '::error::Could not verify the database CA certificate.'
             exit 1
           fi
