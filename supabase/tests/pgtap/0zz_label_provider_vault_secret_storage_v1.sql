@@ -117,8 +117,9 @@ SELECT ok(NOT has_function_privilege(role,signature,'EXECUTE'), role || ' denied
 FROM unnest(ARRAY['anon','authenticated']) role CROSS JOIN unnest(ARRAY[
   'public.label_provider_seal_value_v1(jsonb,text,uuid,jsonb)', 'public.resolve_label_provider_invoke_secret_v1(jsonb)',
   'public.upsert_label_provider_settings_v1(text,uuid,jsonb,text)']) signature;
-SELECT ok(position('public.resolve_label_provider_invoke_secret_v1' IN pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure)) > 0,
-  'cron guard reads the canonical Vault credential path');
+SELECT ok(position('public.resolve_label_renderer_edge_config_v1' IN pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure)) > 0
+  AND position('public.resolve_label_provider_invoke_secret_v1' IN pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure)) = 0,
+  'cron guard checks the pinned renderer reference without reading a credential');
 SELECT ok(position('public.invoke_label_renderer(integer,jsonb)' IN pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure)) > 0,
   'cron guard checks the current renderer dispatch signature');
 SELECT public.upsert_label_provider_settings_v1('tenant',foreign_org,

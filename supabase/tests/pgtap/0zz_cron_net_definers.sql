@@ -44,7 +44,9 @@ UPDATE public.settings SET cached_value = jsonb_set(cached_value, '{providers}',
 WHERE category = 'label_provider' AND scope_type = 'global' AND scope_id IS NULL;
 
 UPDATE public.cron_config SET enabled = true, last_run_at = NULL
-WHERE worker_name IN ('ops_sweeper_worker', 'edge_api_caller_worker');
+WHERE worker_name = 'ops_sweeper_worker';
+UPDATE public.cron_config SET last_run_at = NULL
+WHERE worker_name = 'edge_api_caller_worker';
 
 WITH tick AS MATERIALIZED (SELECT public.run_ops_sweeper_worker()::jsonb AS result)
 SELECT is(result #>> '{results,0,result,created}', '1', 'sweeper dispatches the cron reconciliation handler') FROM tick
@@ -56,16 +58,12 @@ SELECT ok(EXISTS (
     AND command = 'SELECT public.run_cache_cleanup_worker();' AND username = current_user
 ), 'sweeper registers the fixture job as the scheduler owner');
 
--- Supply a batch response without invoking the external worker.
-CREATE OR REPLACE FUNCTION public.run_api_caller_batch(p_batch integer DEFAULT NULL)
-RETURNS jsonb LANGUAGE sql SECURITY DEFINER
-SET search_path TO public, extensions, pg_temp
-AS $$ SELECT '{"status":"fixture"}'::jsonb $$;
+SELECT ok(NOT EXISTS (SELECT FROM cron.job WHERE jobname = 'api_caller_batch_tick' AND active)
+          AND public.run_edge_api_caller_worker()->>'reason' = 'Worker disabled in cron_config',
+          'the SQL tick is paused and its routine cannot dispatch through the cron path');
 
-SELECT is(public.run_edge_api_caller_worker() #>> '{result,status}', 'fixture',
-          'edge caller tick reaches the batch dispatcher under the scheduler role');
-
-SELECT is(last_run_at, now(), worker_name || ' updates its cadence through the shared helper')
+SELECT is(last_run_at, CASE WHEN worker_name = 'ops_sweeper_worker' THEN now() END,
+          worker_name || ' cadence follows its live or paused state')
 FROM public.cron_config WHERE worker_name IN ('ops_sweeper_worker', 'edge_api_caller_worker');
 
 -- Reuse a completed transport fixture across the polling callers.

@@ -60,23 +60,21 @@ describe('label renderer tenant provider scope', () => {
     expect(privilegeMigration).toContain('TO edge_label_renderer_role;');
   });
 
-  test('keeps the effective tenant-scoped invocation asynchronous', () => {
-    expect(effectiveInvokeMigrationName).toBe(
-      '20260920005000_label_renderer_async_dispatch_restore_v1.sql',
-    );
-    const identityIndex = effectiveInvokeMigration.indexOf(
+  test('queues tenant-scoped render work for the leased Edge worker', () => {
+    expect(effectiveInvokeMigrationName > '20260920005000_label_renderer_async_dispatch_restore_v1.sql').toBe(true);
+    const invokeStart = effectiveInvokeMigration.indexOf('CREATE OR REPLACE FUNCTION public.invoke_label_renderer(');
+    const invoke = effectiveInvokeMigration.slice(invokeStart, effectiveInvokeMigration.indexOf('\n$$;', invokeStart));
+    const identityIndex = invoke.indexOf(
       'public.resolve_label_renderer_organization_id_v1(v_body)',
     );
-    const providerIndex = effectiveInvokeMigration.indexOf(
-      'public.resolve_label_renderer_invoke_config_v1(v_org_id)',
-    );
-    const dispatchIndex = effectiveInvokeMigration.indexOf(
-      'public.dispatch_api_request_v1(',
+    const enqueueIndex = invoke.indexOf('public.enqueue_label_renderer_edge_v1(v_org_id, v_body)');
+    const helper = effectiveInvokeMigration.slice(
+      effectiveInvokeMigration.indexOf('CREATE FUNCTION public.enqueue_label_renderer_edge_v1('), invokeStart,
     );
     expect(identityIndex).toBeGreaterThan(-1);
-    expect(providerIndex).toBeGreaterThan(identityIndex);
-    expect(dispatchIndex).toBeGreaterThan(providerIndex);
-    expect(effectiveInvokeMigration).not.toContain('public.call_api_wait(');
-    expect(effectiveInvokeMigration).toContain("'completed', FALSE");
+    expect(enqueueIndex).toBeGreaterThan(identityIndex);
+    expect(helper).toMatch(/resolve_label_renderer_edge_config_v1[\s\S]+INSERT INTO public\.outbound_calls[\s\S]+renderer_credential_ref[\s\S]+'pending_edge'/);
+    expect(invoke + helper).not.toMatch(/public\.(?:dispatch_api_request_v1|call_api|call_api_wait)\(/);
+    expect(helper).toMatch(/'completed', FALSE, 'request_id', v_request_id, 'edge_job_id', v_job_id/);
   });
 });

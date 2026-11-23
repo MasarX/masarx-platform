@@ -60,7 +60,8 @@ BEGIN
  status,priority,retry_count,max_retries,scheduled_at,created_at,correlation_id,context)
  VALUES(v_job,'provider_api','provider',v_provider,'POST',
  'https://example.test/f267/'||v_job,
- '{"authorization":"fixture-private","content-type":"application/json"}',
+  CASE WHEN p_poll THEN '{"authorization":"fixture-private","content-type":"application/json"}'::jsonb
+       ELSE '{"content-type":"application/json"}'::jsonb END,
  jsonb_build_object('marker',v_job), 'pending',100,0,1,now()-interval '1 minute',now(),
  v_correlation,CASE WHEN p_poll THEN '{"async_request_id":267}'::jsonb ELSE '{}'::jsonb END);
  PERFORM set_config('f267.job',v_job::text,true);
