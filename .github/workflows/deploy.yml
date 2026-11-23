@@ -355,7 +355,7 @@ jobs:
           export RENDERER_IAT RENDERER_EXP="$((RENDERER_IAT + 7 * 24 * 60 * 60))"
           SUPABASE_JWT_SECRET="$renderer_signing_secret" node <<'NODE'
           const { writeFileSync } = require('node:fs');
-          const { buildEdgeDbJwtBundle, createEdgeDbJwt } = require('./scripts/ops/workspace/edge-db-jwt');
+          const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
           const nowSec = Number(process.env.RENDERER_IAT);
           const expiresAt = Number(process.env.RENDERER_EXP);
           const { label_renderer_db_jwt: token } = buildEdgeDbJwtBundle({
@@ -533,7 +533,6 @@ jobs:
           export EDGE_SECRET_FILE="$secret_file"
           node <<'NODE'
           const fs = require('node:fs');
-          const { createHmac } = require('node:crypto');
           const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
           const bundle = buildEdgeDbJwtBundle({ secret: process.env.SUPABASE_JWT_SECRET, includeMarketing: true });
           const token = bundle?.marketing_db_jwt;
@@ -548,17 +547,28 @@ jobs:
             process.exit(1);
           }
           for (const value of Object.values(bundle)) console.log('::add-mask::' + value);
-          const rendererKey = createHmac('sha256', process.env.SUPABASE_JWT_SECRET)
-            .update('masarx-renderer-sign-v1').digest('hex');
-          const rendererGatewayJwt = createEdgeDbJwt({
-            secret: process.env.SUPABASE_JWT_SECRET, role: 'edge_renderer_gateway_role',
-          });
           fs.writeFileSync(process.env.EDGE_SECRET_FILE, Object.entries(bundle)
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
-            + `LABEL_RENDERER_SIGNING_KEY=${rendererKey}\n`
-            + `LABEL_RENDERER_GATEWAY_JWT=${rendererGatewayJwt}\n`
             + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n', { mode: 0o600 });
           NODE
+          if ! node <<'RENDERER_MINT' 2>/dev/null
+          const { appendFileSync } = require('node:fs');
+          const { createHmac } = require('node:crypto');
+          const { createEdgeDbJwt } = require('./scripts/ops/workspace/edge-db-jwt');
+          const secret = process.env.SUPABASE_JWT_SECRET;
+          if (!secret) process.exit(1);
+          const key = createHmac('sha256', secret).update('masarx-renderer-sign-v1').digest('hex');
+          console.log('::add-mask::' + key);
+          const gatewayJwt = createEdgeDbJwt({ secret, role: 'edge_renderer_gateway_role' });
+          if (!gatewayJwt) process.exit(1);
+          console.log('::add-mask::' + gatewayJwt);
+          appendFileSync(process.env.EDGE_SECRET_FILE,
+            `LABEL_RENDERER_SIGNING_KEY=${key}\nLABEL_RENDERER_GATEWAY_JWT=${gatewayJwt}\n`, { mode: 0o600 });
+          RENDERER_MINT
+          then
+            echo '::error::Renderer credentials could not be written.'
+            exit 1
+          fi
           node scripts/deploy/append-function-cors.mjs
           cli="$RUNNER_TEMP/deploy-tools/supabase"
           "$cli" link --project-ref "$SUPABASE_PROJECT_REF" --yes
@@ -586,15 +596,28 @@ jobs:
               const { readFileSync } = require("node:fs");
               const { createHash } = require("node:crypto");
               const list = JSON.parse(readFileSync(0, "utf8"));
-              const source = readFileSync(process.env.EDGE_SECRET_FILE, "utf8");
-              for (const name of ["MARKETING_DB_JWT", "LABEL_RENDERER_SIGNING_KEY", "LABEL_RENDERER_GATEWAY_JWT"]) {
-                const value = source.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1];
-                if (!value) process.exit(1);
-                const expected = createHash("sha256").update(value).digest("hex");
-                if (list.find(entry => entry.name === name)?.value !== expected) process.exit(1);
+              const token = readFileSync(process.env.EDGE_SECRET_FILE, "utf8").match(/^MARKETING_DB_JWT=(.+)$/m)?.[1];
+              if (!token) process.exit(1);
+              const expected = createHash("sha256").update(token).digest("hex");
+              if (list.find(entry => entry.name === "MARKETING_DB_JWT")?.value !== expected) process.exit(1);
+            ' 2>/dev/null; then
+            echo '::error::Marketing token verification failed.'
+            exit 1
+          fi
+          if ! "$cli" secrets list --project-ref "$SUPABASE_PROJECT_REF" --output json 2>/dev/null |
+            node -e '
+              const { readFileSync } = require("node:fs");
+              const { createHash } = require("node:crypto");
+              const listed = JSON.parse(readFileSync(0, "utf8"));
+              const local = readFileSync(process.env.EDGE_SECRET_FILE, "utf8");
+              for (const name of ["LABEL_RENDERER_SIGNING_KEY", "LABEL_RENDERER_GATEWAY_JWT"]) {
+                const value = local.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1];
+                if (!value || listed.find(entry => entry.name === name)?.value !== createHash("sha256").update(value).digest("hex")) {
+                  process.exit(1);
+                }
               }
             ' 2>/dev/null; then
-            echo '::error::Edge secret digest verification failed.'
+            echo '::error::Renderer credential digest verification failed.'
             exit 1
           fi
           while IFS=$'\t' read -r function_name auth_mode; do

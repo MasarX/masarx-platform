@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(13);
+SELECT plan(14);
 SELECT public.create_next_partitions();
 SELECT set_config('app.force_worker', 'outbound_worker', true);
 SELECT ok(NOT EXISTS (SELECT FROM cron.job WHERE jobname = 'api_caller_batch_tick'),
@@ -16,9 +16,12 @@ INSERT INTO public.organizations (id, name, slug)
 SELECT org, 'Outbound refusal fixture', 'outbound-refusal-' || org FROM outbound_refusal_fixture;
 INSERT INTO public.providers (id, organization_id, name, provider_type)
 SELECT provider, org, 'Outbound refusal provider', 'http' FROM outbound_refusal_fixture;
-UPDATE public.settings SET cached_value = COALESCE(cached_value, '{}'::jsonb)
-  || jsonb_build_object('enabled', true, 'endpoint_url', (SELECT url FROM outbound_refusal_fixture))
-WHERE category = 'edge_dispatch_policy' AND scope_type = 'global' AND scope_id IS NULL;
+SELECT public.upsert_settings_value_v1('edge_dispatch_policy', public.get_root_scope_type_key_v1(), NULL,
+  jsonb_build_object('enabled', true, 'endpoint_url', url || 'functions/v1/api-caller'),
+  1, 'Synthetic Edge dispatch fixture') FROM outbound_refusal_fixture;
+SELECT ok(public.resolve_settings('edge_dispatch_policy', public.get_root_scope_type_key_v1(), NULL)
+  @> jsonb_build_object('enabled', true, 'endpoint_url', url || 'functions/v1/api-caller'),
+  'the effective policy enables Edge dispatch for the two controls') FROM outbound_refusal_fixture;
 UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
 WHERE status IN ('pending', 'pending_edge', 'failed') AND scheduled_at <= now();
 
@@ -63,11 +66,14 @@ SELECT ok((SELECT array_agg(job_id ORDER BY job_id) FROM outbound_refusal_leases
   = (SELECT array_agg(job ORDER BY job) FROM outbound_refusal_jobs WHERE NOT refuses),
   'the leased claimant gets exactly the two controls with tokens');
 SELECT ok(public.get_claimed_edge_job_call_spec_v1(job_id, lease_token) @> jsonb_build_object(
-  'url', url || job_id, 'method', 'POST', 'body', jsonb_build_object('marker', job_id)),
-  'the lease resolves the exact queued credential-free request')
-FROM outbound_refusal_leases CROSS JOIN outbound_refusal_fixture;
+  'url', url || job_id, 'method', 'POST', 'body', jsonb_build_object('marker', job_id),
+  'headers', jsonb_build_object('accept', 'application/json', 'company-id', provider::text, 'x-client-id', org::text)),
+  j.lane || ' lease resolves the exact queued credential-free request')
+FROM outbound_refusal_leases l JOIN outbound_refusal_jobs j ON j.job = l.job_id
+CROSS JOIN outbound_refusal_fixture ORDER BY j.lane;
 SELECT public.mark_claimed_edge_job_success_v1(job_id, lease_token, 200, '{}', '{"ok":true}', 1)
 FROM outbound_refusal_leases;
+SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SELECT ok((SELECT count(*) FROM public.outbound_calls o JOIN outbound_refusal_jobs j ON o.id = j.job
   WHERE NOT j.refuses AND o.status = 'completed' AND o.retry_count = 0 AND o.edge_lease_token IS NULL) = 2,
   'both controls complete on the leased Edge path');

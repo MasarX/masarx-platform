@@ -478,11 +478,20 @@ BEGIN
   END IF;
 
   -- Keep transport settlement independent from the renderer's owning-step callback.
-  SELECT wt.* INTO STRICT v_template
+  SELECT wt.* INTO v_template
     FROM public.resolve_settings_row_from_context('workflow_defaults',
       jsonb_strip_nulls(jsonb_build_object('organization_id', p_organization_id))) d
     JOIN public.workflow_templates wt ON wt.id = NULLIF(d.value->>'legacy_outbound_template_id', '')::uuid
    WHERE wt.status = 'active';
+  IF NOT FOUND THEN
+    -- The built-in wrapper also covers fresh installs without a configured override.
+    SELECT wt.* INTO STRICT v_template
+      FROM public.workflow_templates wt
+     WHERE wt.name = 'outbound_wrapper_v1' AND wt.status = 'active'
+       AND wt.scope_type = public.get_root_scope_type_key_v1() AND wt.scope_id IS NULL
+     ORDER BY wt.version DESC, wt.id
+     LIMIT 1;
+  END IF;
   SELECT s.* INTO STRICT v_template_step
     FROM public.workflow_template_steps s
    WHERE s.workflow_template_id = v_template.id AND s.enabled

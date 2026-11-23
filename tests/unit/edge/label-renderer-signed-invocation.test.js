@@ -59,9 +59,15 @@ test.each([
   ['wrong issuer', { claims: { iss: 'fixture' } }],
   ['expired', { claims: { iat: now - 60, exp: now } }],
   ['TTL over 60 seconds', { claims: { exp: now + 61 } }],
-  ['future issuance', { claims: { iat: now + 1 } }],
+  ['expiry before issuance within the skew window', { claims: { iat: now + 5, exp: now + 4 } }],
+  ['issuance more than five seconds ahead', { claims: { iat: now + 6, exp: now + 66 } }],
 ])('rejects %s', async (_label, options) => {
   await expect(verify(request(options), key, now)).resolves.toMatchObject({ ok: false, status: 401 });
+});
+
+test('accepts a five-second issuance skew with an unexpired 60-second token', async () => {
+  await expect(verify(request({ claims: { iat: now + 5, exp: now + 65 } }), key, now))
+    .resolves.toEqual({ ok: true });
 });
 
 test('rejects a repeated jti even on a freshly signed token', async () => {

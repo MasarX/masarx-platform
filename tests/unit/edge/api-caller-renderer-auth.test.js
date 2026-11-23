@@ -47,8 +47,13 @@ test('refuses any different endpoint and fails closed without the server signing
   await expect(authorizeRendererSend({ url: endpoint }, endpoint, '', gatewayJwt)).rejects.toThrow('renderer_signer_unavailable');
 });
 
-test.each(['', publicKeys.anon, publicKeys.service, apiCallerJwt])(
-  'requires the gateway-only JWT', async (gatewayKey) => {
+test.each([
+  ['a missing JWT', ''],
+  ['the anon JWT', publicKeys.anon],
+  ['the service-role JWT', publicKeys.service],
+  ['the api-caller DB JWT', apiCallerJwt],
+])(
+  'rejects %s as the gateway credential', async (_case, gatewayKey) => {
     await expect(authorizeRendererSend({ url: endpoint }, endpoint, randomBytes(32).toString('hex'), gatewayKey))
       .rejects.toThrow('renderer_gateway_jwt_required');
   },

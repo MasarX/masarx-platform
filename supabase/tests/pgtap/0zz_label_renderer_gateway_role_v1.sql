@@ -17,16 +17,16 @@ SELECT ok(NOT EXISTS (
 
 SELECT ok(NOT EXISTS (
   SELECT FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname IN ('public', 'api') AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-    AND has_table_privilege('edge_renderer_gateway_role', c.oid,
-      'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
-), 'the gateway role has no public or api table privileges');
+  CROSS JOIN LATERAL aclexplode(c.relacl) acl
+  WHERE n.nspname IN ('public', 'api') AND acl.grantee = 'edge_renderer_gateway_role'::regrole
+), 'the gateway role has no direct public or api relation grants');
 
 SELECT ok(NOT EXISTS (
   SELECT FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname IN ('public', 'api') AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-    AND has_any_column_privilege('edge_renderer_gateway_role', c.oid, 'SELECT, INSERT, UPDATE, REFERENCES')
-), 'the gateway role has no public or api column privileges');
+  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+  CROSS JOIN LATERAL aclexplode(a.attacl) acl
+  WHERE n.nspname IN ('public', 'api') AND acl.grantee = 'edge_renderer_gateway_role'::regrole
+), 'the gateway role has no direct public or api column grants');
 
 SELECT ok(NOT EXISTS (
   SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace

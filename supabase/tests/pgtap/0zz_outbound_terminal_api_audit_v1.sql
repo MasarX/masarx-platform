@@ -119,6 +119,7 @@ BEGIN
     PERFORM public.mark_claimed_edge_job_failure_v1(v_job,v_claim.lease_token,p_status,
       v_response->'headers',v_response->'body','controlled failure',15);
    END IF;
+   PERFORM set_config('search_path','public,extensions,pgtap,pg_temp',true);
    RETURN NEXT ok(EXISTS(SELECT FROM public.outbound_calls WHERE id=v_job
     AND status IN ('completed','failed','permanently_failed','pending_edge')
     AND lease_expires_at IS NULL AND edge_lease_token IS NULL),v_label||' finalization releases the lease');
@@ -284,6 +285,7 @@ BEGIN
   p_lane||' obtains the failing-audit job spec under its lease');
  INSERT INTO pg_temp.f267_calls(kind) VALUES ('edge-send');
  PERFORM public.mark_claimed_edge_job_success_v1(v_job,v_claim.lease_token,200,'{}','{}',1);
+ PERFORM set_config('search_path','public,extensions,pgtap,pg_temp',true);
  RETURN NEXT ok(EXISTS(SELECT 1 FROM public.outbound_calls WHERE id=v_job AND status='completed'
  AND retry_count=0 AND lease_expires_at IS NULL),p_lane||' audit failure cannot requeue');
  SELECT count(*) INTO v_dispatch FROM pg_temp.f267_calls WHERE kind='dispatch';

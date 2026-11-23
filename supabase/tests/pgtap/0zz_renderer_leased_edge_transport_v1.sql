@@ -27,6 +27,9 @@ SELECT public.upsert_label_provider_settings_v1('global', NULL, jsonb_build_obje
   jsonb_build_array(jsonb_build_object('name', 'renderer-fixture', 'invoke_url', endpoint,
     'invoke_secret', credential))), 'Renderer transport fixture') FROM renderer_transport_case;
 
+-- Replay must dispatch with the built-in wrapper even without a settings override.
+UPDATE public.settings SET cached_value = cached_value - 'legacy_outbound_template_id'
+WHERE category = 'workflow_defaults';
 UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
 WHERE status IN ('pending', 'pending_edge', 'failed') AND scheduled_at <= now();
 CREATE TEMP TABLE renderer_receipts AS
@@ -42,7 +45,7 @@ SELECT ok(receipt @> '{"status":202,"completed":false}'::jsonb AND receipt ? 'ed
 SELECT ok(o.renderer_credential_ref IS NOT NULL AND o.headers = '{}'::jsonb
         AND position(f.credential IN to_jsonb(o)::text) = 0,
           r.mode || ' retains only the bound credential reference')
-FROM renderer_receipts r JOIN public.outbound_calls o ON o.id = (r.receipt->>'edge_job_id')::uuid
+FROM renderer_receipts r LEFT JOIN public.outbound_calls o ON o.id = (r.receipt->>'edge_job_id')::uuid
 CROSS JOIN renderer_transport_case f;
 
 UPDATE public.settings SET cached_value = jsonb_set(cached_value, '{enabled}', 'false'::jsonb)

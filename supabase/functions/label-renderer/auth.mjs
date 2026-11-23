@@ -52,7 +52,8 @@ export async function verifyLabelRendererToken(req, signingKey, now = Math.floor
     if (claims?.iss !== "supabase" || claims.role !== "edge_label_renderer_role" ||
         claims.aud !== "authenticated" || claims.sub !== "edge-function" ||
         !Number.isSafeInteger(claims.iat) || !Number.isSafeInteger(claims.exp) ||
-        claims.iat > now || claims.exp <= now || claims.exp - claims.iat > 60 ||
+        claims.iat > now + 5 || claims.exp <= now ||
+        claims.exp <= claims.iat || claims.exp - claims.iat > 60 ||
         typeof claims.jti !== "string" ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(claims.jti)) {
       return rejected;
