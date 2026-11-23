@@ -68,16 +68,20 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 
 Personal data handled by MasarX includes:
 
-- Staff, tenant users, drivers, senders and recipients, including names, employee and contractor identifiers, account and role identifiers, phone numbers, email addresses and shipment contact details.
-- Pickup and delivery addresses, delivery instructions, geocodes, tracking sessions and access history, and time-stamped driver location data.
-- Driver application and verification records, government ID numbers (national ID or residence permit numbers), driving licence numbers and expiry dates, vehicle plates, uploaded documents, and proof of delivery such as signatures, photos and recipient details.
+- Staff, tenant users and invitees, drivers, senders, recipients and customer contacts, including names, employee and contractor identifiers, account and role identifiers, memberships, phone numbers and email addresses.
+- People who request a demo or apply for a tenant account, including names, email addresses, phone numbers, request and review notes, referral and campaign details, and IP hashes.
+- Senders and recipients, including shipment contact details, pickup and delivery addresses and instructions, geocodes, shipment and label identifiers, tracking sessions and access history, return records, and delivery proof such as signatures, photos and recipient identity checks.
+- Driver applicants and drivers undergoing verification, including government ID numbers (national ID or residence permit numbers), driving licence numbers and expiry dates, uploaded documents, and vehicle plates, identification numbers and registration documents.
 - Third-party emergency contacts for drivers, including names and phone numbers.
-- Driver health data, including medical certificates and medical incident reports.
-- Driver qualifications, duty records, performance and compliance history, including skills, hours of service, duty status, customer ratings, compliance events and compliance scores.
-- Bank account and IBAN details, cash-on-delivery amounts and collections, and payment and settlement records.
-- Support case records and message bodies, and customer feedback such as ratings, Net Promoter Scores (NPS) and free-text comments.
-- Device and app identifiers, push tokens, platform and version metadata, IP addresses, user agents and audit records of user actions.
-- Communication preferences and opt-outs, and contact or delivery details in communications, imports and integration payloads.
+- Driver health data, including medical certificates and pre-shift health declarations.
+- Field incident reporters and affected people, including statements, photos, locations and severity for collisions, medical emergencies, theft or robbery, customer complaints, breakdowns and damage.
+- Drivers and other operations staff, including qualifications, skills, shifts, hours of service, duty status, route and vehicle assignments, inspection and scan records, time-stamped location data, customer ratings, and performance and compliance events and scores.
+- Customers, payees and account holders, including bank account and IBAN details and hashes, cash-on-delivery amounts and collections, and agreement, subscription, invoice, payment and settlement records.
+- Support requesters and feedback respondents, including case details, attachments, message bodies, ratings, Net Promoter Scores (NPS) and free-text comments.
+- People who access the service, including invitation, sign-in, password reset and session records, device and app identifiers, device verification records, push tokens, platform and version metadata, IP addresses and hashes, user agents, and audit records of user actions and changes.
+- People who send or receive communications or whose records go through imports, integrations or workflows, including contact and delivery details, communication preferences and opt-outs, and personal data carried in messages, requests, responses and associated metadata.
+- Marketplace applicants and participants, including legal and display names, contact details, memberships, document references and verification evidence, reviewer notes, offers and agreements, dispute titles, descriptions and resolutions, and ratings and reputation records.
+- Contributors who publish or review automation assets, plan work or run tests, including account identifiers, assignments, submissions, review notes and evidence.
 
 Keep real data in approved production databases, identity services, private object storage and protected backups. Limit any copies in approved integrations or on devices to what the feature needs. Restrict access by role and tenant. Use structured logs with request or trace IDs and identify people and records only by opaque IDs. Keep personal values, documents, payloads and tokens out of logs and fixtures. Generate consistent synthetic data for tests and examples.
 
