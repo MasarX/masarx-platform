@@ -16,6 +16,9 @@ name: DEV outbound probe
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   probe:
     if: github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && github.ref == 'refs/heads/main'
