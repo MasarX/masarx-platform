@@ -50,8 +50,4 @@ BEGIN
 END;
 $function$;
 
--- Restate the existing PUBLIC entry. CREATE OR REPLACE retains owner and role-specific entries.
-REVOKE ALL ON FUNCTION public.route_run_assignments_normalize_response_state_v1() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.route_run_assignments_normalize_response_state_v1() TO PUBLIC;
-
 COMMIT;
