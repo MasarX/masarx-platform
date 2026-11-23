@@ -427,7 +427,7 @@ async function main() {
     }, ['pgtap_worker_1', 'pgtap_worker_2'], clones), /synthetic clone failure/);
     assert.deepEqual(clones, ['pgtap_worker_1']);
     assert.equal(cloneCommands[1], 'ALTER DATABASE postgres ALLOW_CONNECTIONS false');
-    assert.match(cloneCommands[3], /TEMPLATE postgres STRATEGY FILE_COPY/);
+    assert.match(cloneCommands[3], /TEMPLATE postgres STRATEGY WAL_LOG/);
     assert.equal(cloneCommands.at(-1), 'ALTER DATABASE postgres ALLOW_CONNECTIONS true');
     const syntheticSql = {
       'autocommit.sql': 'INSERT INTO fixture VALUES (1); BEGIN; ROLLBACK;',

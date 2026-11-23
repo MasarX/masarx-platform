@@ -6,10 +6,13 @@ jest.mock("next-intl", () => ({
       namespace ? `${namespace}.${key}` : key,
   createTranslator:
     ({ namespace }: { namespace?: string } = {}) =>
-    (key: string) =>
-      namespace ? `${namespace}.${key}` : key,
+    (key: string, values?: Record<string, unknown>) => {
+      const label = namespace ? `${namespace}.${key}` : key;
+      return key === "scopeLabel" && values ? `${label}:${values.scopeLabel}` : label;
+    },
 }));
 
+import { randomUUID } from "node:crypto";
 import type { ReactElement } from "react";
 import { screen } from "@testing-library/react";
 import { axe } from "jest-axe";
@@ -36,7 +39,7 @@ function createAuthenticatedSession() {
   });
 }
 
-function createUiClientMock() {
+function createUiClientMock(accessScope = { scope_type: "global", scope_id: "global", scope_label: "Global" as string | null }) {
   const commands = [
     {
       key: "routes.dispatch",
@@ -78,11 +81,7 @@ function createUiClientMock() {
     context: jest.fn().mockResolvedValue({
       me: {
         user: { id: "user-1", email: "gxhmruwnxrrgxpwtklhlhutg@example.invalid", user_type: "ops_admin" },
-        access_scope: {
-          scope_type: "global",
-          scope_id: "global",
-          scope_label: "Global",
-        },
+        access_scope: accessScope,
       },
       navigation: {
         app: "console",
@@ -333,6 +332,23 @@ describe("RouteOperationsWorkspacePage", () => {
     );
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it("shows a readable reference when the selected tenant has no label", async () => {
+    createAuthenticatedSession();
+    const tenantId = randomUUID();
+    const maskedId = `${tenantId.slice(0, 4)}${tenantId.slice(-4)}`.toUpperCase();
+    mockedCreateUiServerClient.mockReturnValue(createUiClientMock({
+      scope_type: "tenant", scope_id: tenantId, scope_label: null,
+    }));
+
+    const node = await RouteOperationsWorkspacePage({
+      appBasePath: "/console", appKey: "console", testIdPrefix: "console-route-operations",
+    });
+    renderWithIntl(node as ReactElement);
+
+    expect(screen.getByText(`ui.routeOperations.scopeLabel:Tenant REF-${maskedId}`)).toBeInTheDocument();
+    expect(screen.queryByText(tenantId)).not.toBeInTheDocument();
   });
 
   it("shows invalid-lane notice when requested lane is not in workspace", async () => {

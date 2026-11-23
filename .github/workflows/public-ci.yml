@@ -309,6 +309,15 @@ jobs:
         env:
           NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
         run: node scripts/ci-hosted/tasks.cjs install
+      - name: Verify Edge npm import lock
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]] &&
+             git diff --quiet --no-renames "$LOCAL_GATE_BASE_SHA" HEAD -- \
+               supabase/functions supabase/config.toml package.json package-lock.json deno.lock scripts/edge .github/workflows/public-ci.yml; then
+            printf '%s\n' 'Edge npm import lock inputs are unchanged.'
+            exit 0
+          fi
+          node scripts/edge/verify-npm-import-lock.js
       - name: Check deploy edge preparation
         if: steps.subject.outputs.present == 'true'
         run: |

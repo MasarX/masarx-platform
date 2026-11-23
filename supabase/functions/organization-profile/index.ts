@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { extractToken, readEnv } from "./_shared/mod.mjs";
 import { resolveCorsPolicy } from "./_shared/cors.mjs";
 import { MAX_LOGO_BYTES, validatedLogoContentType } from "./_shared/raster-images.mjs";

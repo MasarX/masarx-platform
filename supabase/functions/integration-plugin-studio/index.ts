@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { previewRuntimeMapping } from "./studio-mapping-preview.mjs";
 import { submitStudioTest } from "./studio-test-submit.mjs";
 import { readStudioTest } from "./studio-test-readback.mjs";

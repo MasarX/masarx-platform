@@ -12,7 +12,8 @@ DECLARE
 BEGIN
   SELECT resolve_settings('edge_dispatch_policy', 'global', NULL) INTO v_policy;
 
-  IF NULLIF((v_policy->>'endpoint_url')::text, '') IS NULL THEN
+  IF NULLIF((v_policy->>'endpoint_url')::text, '') IS NULL
+     OR v_policy->'enabled' IS DISTINCT FROM 'true'::jsonb THEN
     v_version := COALESCE((
       SELECT MAX(version)
       FROM public.settings_versions
@@ -230,7 +231,7 @@ WITH policy AS (
     value,
     target.id AS target_id,
     NULLIF((value->>'endpoint_url')::text, '') IS NOT NULL AS has_endpoint,
-    COALESCE((value->>'enabled')::boolean, TRUE) AS edge_enabled
+    COALESCE((value->>'enabled')::boolean, FALSE) AS edge_enabled
   FROM policy, target
 )
 SELECT CASE
@@ -254,7 +255,7 @@ WITH policy AS (
     value,
     target.id AS target_id,
     NULLIF((value->>'endpoint_url')::text, '') IS NOT NULL AS has_endpoint,
-    COALESCE((value->>'enabled')::boolean, TRUE) AS edge_enabled
+    COALESCE((value->>'enabled')::boolean, FALSE) AS edge_enabled
   FROM policy, target
 )
 SELECT CASE

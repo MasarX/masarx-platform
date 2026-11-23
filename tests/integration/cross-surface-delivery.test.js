@@ -1,5 +1,5 @@
 const { Pool } = require('pg');
-const { randomBytes } = require('crypto');
+const { randomBytes, randomUUID } = require('crypto');
 
 const { loadEnv } = require('../../scripts/utils/load-env');
 const { requireEnv } = require('../utils/test-env');
@@ -300,6 +300,59 @@ describe('cross-surface delivery flow', () => {
 
   afterAll(async () => {
     await pool.end();
+  });
+
+  test('shipment intake, assigned driver manifest and Portal timeline agree on one shipment', async () => {
+    const { createUser, setAuthContext } = require('./helpers/tenant-utils');
+    const owner = await createCrossSurfaceActors(client, 'Delivery Fixture');
+    const foreign = await createCrossSurfaceActors(client, 'Other Delivery Fixture');
+    const provisionPortalReader = (actors) => createUser(
+      client,
+      actors.organizationId,
+      [`reader-${randomUUID()}`, ['example', 'invalid'].join('.')].join('@'),
+      { accessScopeType: 'client', accessScopeId: actors.clientId, userType: 'client_admin' },
+    );
+    const ownerReader = await provisionPortalReader(owner);
+    const foreignReader = await provisionPortalReader(foreign);
+    const shipment = await createShipmentViaUi(client, { ...owner, userId: owner.operatorUserId });
+    const foreignShipment = await createShipmentViaUi(client, { ...foreign, userId: foreign.operatorUserId });
+    expect(shipment.result.status).toBe('shipment_created');
+    expect(foreignShipment.result.status).toBe('shipment_created');
+
+    const route = await seedRouteRunWorkflowForShipment(client, {
+      ...owner, shipmentId: shipment.shipmentId, userId: owner.operatorUserId,
+    });
+    expect(route.routeStopTaskId).toBeTruthy();
+    const assigned = await assignRouteRunToDriver(client, { ...owner, ...route, userId: owner.operatorUserId });
+    expect(assigned.status).toBe('assigned');
+
+    await openDriverShiftSession(client, { ...owner, userId: owner.driverUserId });
+    const { rows: [readback] } = await client.query(
+      'SELECT api.ui_route_run_execution_manifest_v1($1::uuid) AS manifest',
+      [route.routeRunId],
+    );
+    expect(readback.manifest).toMatchObject({
+      route_run_id: route.routeRunId,
+      route_assignment: { driver_user_id: owner.driverUserId },
+    });
+    expect(readback.manifest.stops).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        route_stop_id: route.routeStopId,
+        shipment_id: shipment.shipmentId,
+        task: expect.objectContaining({ task_id: route.routeStopTaskId, assigned_to: owner.driverUserId }),
+      }),
+    ]));
+
+    const timeline = (shipmentId) => client.query(
+      'SELECT api.ui_get_shipment_timeline_v1($1::uuid) AS timeline',
+      [shipmentId],
+    );
+    await setAuthContext(client, ownerReader);
+    expect((await timeline(shipment.shipmentId)).rows[0].timeline.shipment_id).toBe(shipment.shipmentId);
+    await setAuthContext(client, foreignReader);
+    expect((await timeline(foreignShipment.shipmentId)).rows[0].timeline.shipment_id)
+      .toBe(foreignShipment.shipmentId);
+    await expect(timeline(shipment.shipmentId)).rejects.toThrow(/not found or inaccessible/i);
   });
 
   test('console shipment creation, driver delivery completion, and portal verification stay aligned', async () => {

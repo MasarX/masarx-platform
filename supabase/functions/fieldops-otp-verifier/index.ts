@@ -45,7 +45,7 @@
 // fail-closed which keeps production tenants on the DB-side `test`
 // provider until OTP rollout is explicitly approved.
 
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { buildCorsHeaders, withCorsJson } from "../_shared/cors.mjs";
 
 type VerifyBody = {

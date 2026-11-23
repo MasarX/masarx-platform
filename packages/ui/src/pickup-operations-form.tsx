@@ -288,6 +288,7 @@ export function PickupMutationForm({
 
       {validationError || state.status === "error" ? (
         <div
+          role="alert"
           className="rounded-2xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted"
           data-testid={`${testIdPrefix}-error`}
         >
@@ -297,6 +298,7 @@ export function PickupMutationForm({
 
       {state.status === "success" ? (
         <div
+          role="status"
           className="rounded-2xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-ink"
           data-testid={`${testIdPrefix}-success`}
         >

@@ -8,7 +8,7 @@ const source = fs.readFileSync(filename, 'utf8');
 const pdfSpecifier = 'npm:pdf-lib@1.17.1';
 const heavy = [
   pdfSpecifier, 'npm:qrcode-generator@1.5.2',
-  'npm:@pdf-lib/fontkit@1.1.1', 'npm:bidi-js@1.0.3', 'npm:bwip-js@4.11.2',
+  'npm:@pdf-lib/fontkit@1.1.1', 'npm:bidi-js@1.1.0', 'npm:bwip-js@4.11.2',
 ];
 let cors;
 
@@ -47,7 +47,7 @@ function loadRenderer({ pdfLoad, bidiFailure, env = {} } = {}) {
     StandardFonts: { Helvetica: 'Helvetica', HelveticaBold: 'HelveticaBold' },
   };
   const mocks = {
-    'npm:@supabase/supabase-js@2.111.0': { createClient: jest.fn(() => {
+    'npm:@supabase/supabase-js@2.119.0': { createClient: jest.fn(() => {
       throw new Error('unexpected database access');
     }) },
     './_shared/mod.mjs': { readEnv: key => env[key] ?? '' },
@@ -59,7 +59,7 @@ function loadRenderer({ pdfLoad, bidiFailure, env = {} } = {}) {
     [pdfSpecifier]: pdf,
     'npm:qrcode-generator@1.5.2': { default: jest.fn() },
     'npm:@pdf-lib/fontkit@1.1.1': { default: {} },
-    'npm:bidi-js@1.0.3': { default: bidiFactory },
+    'npm:bidi-js@1.1.0': { default: bidiFactory },
   };
   execute(specifier => {
     if (heavy.includes(specifier)) imports.push(specifier);

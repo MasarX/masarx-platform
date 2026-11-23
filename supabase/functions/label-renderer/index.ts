@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 type PdfModule = typeof import("npm:pdf-lib@1.17.1");
 type PDFDocument = import("npm:pdf-lib@1.17.1").PDFDocument;
 let PDFDocument: PdfModule["PDFDocument"];
@@ -8,7 +8,7 @@ let degrees: PdfModule["degrees"];
 let qrcode: typeof import("npm:qrcode-generator@1.5.2").default;
 let bwip: typeof import("npm:bwip-js@4.11.2").default;
 let fontkit: typeof import("npm:@pdf-lib/fontkit@1.1.1").default;
-let bidi: ReturnType<typeof import("npm:bidi-js@1.0.3").default>;
+let bidi: ReturnType<typeof import("npm:bidi-js@1.1.0").default>;
 let rendererDepsPromise: Promise<void> | undefined;
 
 // Share one load (including a rejected load) per isolate; never partially render.
@@ -18,7 +18,7 @@ const ensureRendererDeps = (): Promise<void> => {
       import("npm:pdf-lib@1.17.1"),
       import("npm:qrcode-generator@1.5.2"),
       import("npm:@pdf-lib/fontkit@1.1.1"),
-      import("npm:bidi-js@1.0.3"),
+      import("npm:bidi-js@1.1.0"),
       import("npm:bwip-js@4.11.2"),
     ]).then(([pdf, qr, fonts, bidiModule, bwipModule]) => {
       const loadedBidi = bidiModule.default();

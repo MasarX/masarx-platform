@@ -1,6 +1,6 @@
-import JSZip from "npm:jszip@3.10.1";
+import JSZip from "npm:jszip@3.10.2";
 import { ImportLimitError, matrixToTabularData, assertMatrixDimensions, assertRequestSize, assertUploadSize, assertXlsxExpansionLimits, parseBoundedCsv } from "./upload-limits.ts";
-import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { Workbook, type Worksheet } from "./_vendor/exceljs.mjs";
 import {
   ImportPreparationError,

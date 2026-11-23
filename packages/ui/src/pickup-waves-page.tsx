@@ -277,7 +277,7 @@ export async function PickupWavesPage({
             submitLabel="Create pickup wave"
             pendingLabel="Creating..."
             testIdPrefix={`${testIdPrefix}-create`}
-            helperText="Paste shipment ids from the request ledger as comma-separated values or a JSON array."
+            helperText="Select pickup requests from the ledger or enter authorized shipment IDs directly."
             fields={[
               {
                 name: "organization_id",

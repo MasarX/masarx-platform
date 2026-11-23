@@ -39,6 +39,7 @@ describe("PickupMutationForm same-context outcome state", () => {
     view.rerender(form());
 
     expect(screen.getByTestId("pickup-error")).toHaveTextContent("Please retry");
+    expect(screen.getByRole("alert")).toHaveTextContent("Please retry");
     expect(screen.getByTestId("pickup-reference")).toHaveValue("typed reference");
     expect(screen.getByTestId("pickup-notes")).toHaveValue("typed notes");
     expect(screen.getByTestId("pickup-status")).toHaveValue("active");
@@ -55,6 +56,7 @@ describe("PickupMutationForm same-context outcome state", () => {
     view.rerender(form());
 
     expect(screen.getByTestId("pickup-success")).toHaveTextContent("Saved");
+    expect(screen.getByRole("status")).toHaveTextContent("Saved");
     expect(screen.getByTestId("pickup-reference")).toHaveValue("initial reference");
     expect(screen.getByTestId("pickup-notes")).toHaveValue("initial notes");
     expect(screen.getByTestId("pickup-status")).toHaveValue("planned");
@@ -77,11 +79,14 @@ describe("PickupMutationForm readable relationships", () => {
     const view = renderWithIntl(relations());
     fireEvent.click(within(screen.getByTestId("relations-client_id")).getByRole("combobox"));
     fireEvent.click(screen.getByRole("option", { name: "Client B" }));
+    expect(within(screen.getByTestId("relations-client_id")).getByRole("combobox")).toHaveTextContent("Client B");
     expect(view.container.querySelector('input[name="client_id"]')).toHaveValue("client-b");
     expect(view.container.querySelector('input[name="sender_id"]')).toHaveValue("");
     fireEvent.click(within(screen.getByTestId("relations-shipment_ids")).getByRole("combobox"));
     fireEvent.click(screen.getByRole("option", { name: "TRACK-001" }));
     expect(view.container.querySelector('input[name="shipment_ids"]')).toHaveValue("shipment-a");
+    expect(new FormData(screen.getByTestId("relations-form") as HTMLFormElement).getAll("shipment_ids"))
+      .toEqual(["shipment-a"]);
     fireEvent.submit(screen.getByTestId("relations-form"));
     formState = { status: "error", message: "Capacity changed" };
     view.rerender(relations());

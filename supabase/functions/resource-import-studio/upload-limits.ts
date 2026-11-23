@@ -176,7 +176,7 @@ export function createTabularGuards() {
       const totals = { rows: 0, cells: 0, elements: 0, rangeCells: 0 };
       for (const entry of entries) {
         if (entry.dir) continue;
-        // JSZip 3.10.1 exposes this lazy method at runtime but omits it from its typings.
+        // JSZip exposes this lazy method at runtime but omits it from its typings.
         const stream = (entry as unknown as { internalStream(type: "uint8array"): EntryStream }).internalStream("uint8array");
         const decoder = new TextDecoder();
         const name = (entry as { name?: string }).name ?? "";

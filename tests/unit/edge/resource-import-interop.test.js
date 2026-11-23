@@ -94,9 +94,9 @@ test('resource import executes XLSX prepare with the pinned vendored Workbook', 
   await module.link((specifier) => {
     if (specifier === './_vendor/exceljs.mjs') return excelModule;
     if (builtins.has(specifier)) return builtins.get(specifier);
-    if (specifier === 'npm:jszip@3.10.1') return zipModule;
+    if (specifier === 'npm:jszip@3.10.2') return zipModule;
     if (specifier === './upload-limits.ts') return limitsModule;
-    if (specifier === 'npm:@supabase/supabase-js@2.111.0') return sdkModule;
+    if (specifier === 'npm:@supabase/supabase-js@2.119.0') return sdkModule;
     if (specifier === './_shared/mod.mjs') return sharedModule;
     if (specifier === './preparation.ts') return preparationModule;
     throw new Error(`Unexpected import: ${specifier}`);

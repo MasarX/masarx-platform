@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '@/test/render';
-import { DispatchModule } from '@/modules/operate/dispatch';
+import { DispatchModule, routeRunAssignTargetForDriver } from '@/modules/operate/dispatch';
 import * as api from '@/lib/api';
 import { ui_get_resource_v1, ui_list_resource_complete } from '@/lib/data-source';
 
@@ -37,6 +37,13 @@ afterEach(() => {
 });
 
 describe('DispatchModule', () => {
+  it('sends the selected tenant and the active vehicle with the driver assignment', () => {
+    expect(routeRunAssignTargetForDriver({ id: 'test-driver', vehicle_id: 'test-vehicle' }, 'test-tenant'))
+      .toEqual({ driver_user_id: 'test-driver', vehicle_id: 'test-vehicle', organization_id: 'test-tenant' });
+    expect(routeRunAssignTargetForDriver({ id: 'test-driver', vehicle_id: null }, 'test-tenant'))
+      .toEqual({ driver_user_id: 'test-driver', organization_id: 'test-tenant' });
+  });
+
   it('mounts with the page header and KPI strip', async () => {
     renderWithProviders(<DispatchModule />, { capabilities: ['all'] });
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();

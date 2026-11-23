@@ -178,9 +178,13 @@ jobs:
         run: |
           set -euo pipefail
           renderer_unreadable() {
-            printf 'renderer_jwt=UNREADABLE reason=%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"
+            printf '%s=UNREADABLE reason=%s\n' "${2:-renderer_jwt}" "$1" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           }
+          case "$DEPLOY_ENV:$GITHUB_REF" in
+            dev:refs/heads/main) ;;
+            *) renderer_unreadable input outbound_wake ;;
+          esac
           if [[ -z "$PGPASSWORD" ]]; then
             renderer_unreadable no-password
           fi
@@ -212,12 +216,130 @@ jobs:
           }
           renderer_query_failed() {
             local psql_status="$1" sqlstate
+            shift
             sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
             if [[ -n "$sqlstate" ]]; then
-              renderer_unreadable "sqlstate-$sqlstate"
+              renderer_unreadable "sqlstate-$sqlstate" "$@"
             fi
-            renderer_unreadable "psql-exit-$psql_status"
+            renderer_unreadable "psql-exit-$psql_status" "$@"
           }
+
+          wake_metrics="$(renderer_psql <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SET LOCAL statement_timeout = '8s';
+          SET LOCAL search_path = pg_catalog;
+          WITH sweep AS (
+            SELECT jobid, active, schedule FROM cron.job
+            WHERE jobname = 'outbound_wake_sweep'
+            ORDER BY jobid DESC LIMIT 1
+          ), sweep_runs AS (
+            SELECT d.status FROM cron.job_run_details d JOIN sweep s USING (jobid)
+            ORDER BY d.runid DESC LIMIT 10
+          ), leased_finalizations AS NOT MATERIALIZED (
+            -- Terminal queue rows have already cleared the lease token.
+            SELECT pk->>'id' AS call_id, row_new->>'status' AS status, created_at
+            FROM public.audit_table_changes
+            WHERE schema_name = 'public' AND table_name = 'outbound_calls' AND op = 'UPDATE'
+              AND row_old->>'status' = 'in_progress_edge' AND row_old->>'edge_lease_token' IS NOT NULL
+              AND row_new->>'status' IN ('completed', 'failed', 'permanently_failed')
+          ), queue AS (
+            SELECT q.status, q.updated_at, q.scheduled_at, q.lease_expires_at, q.edge_lease_token,
+              EXISTS (
+                SELECT 1 FROM leased_finalizations f
+                WHERE f.call_id = q.id::text AND f.status = q.status
+                  AND f.created_at = q.updated_at
+              ) AS edge_finalized
+            FROM public.outbound_calls q
+            WHERE q.status = 'pending_edge'
+              OR (q.status IN ('in_progress_edge', 'completed', 'failed', 'permanently_failed')
+                AND q.updated_at >= now() - interval '60 minutes')
+          )
+          SELECT to_jsonb(metrics) FROM (
+            SELECT (
+              -- The gate reserves a slot even when the queue is idle.
+              SELECT floor(extract(epoch FROM now() - last_run_at))::bigint
+              FROM public.cron_config WHERE worker_name = 'outbound_wake_relay'
+            ) AS gate_slot_age_seconds,
+            coalesce((SELECT active FROM sweep), false) AS cron_active,
+            (SELECT schedule FROM sweep) AS cron_schedule,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'starting') AS cron_starting_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'connecting') AS cron_connecting_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'sending') AS cron_sending_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'running') AS cron_running_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'succeeded') AS cron_succeeded_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'failed') AS cron_failed_count,
+            (SELECT count(*) FROM sweep_runs WHERE status IS NULL OR status NOT IN
+              ('starting', 'connecting', 'sending', 'running', 'succeeded', 'failed')) AS cron_other_count,
+            count(*) FILTER (WHERE status = 'pending_edge'
+              AND updated_at >= now() - interval '60 minutes') AS edge_pending_60m_count,
+            count(*) FILTER (WHERE status = 'in_progress_edge' AND edge_lease_token IS NOT NULL) AS edge_leased_60m_count,
+            count(*) FILTER (WHERE status = 'completed' AND edge_finalized) AS edge_completed_60m_count,
+            count(*) FILTER (WHERE status IN ('failed', 'permanently_failed') AND edge_finalized) AS edge_failed_60m_count,
+            count(*) FILTER (WHERE status = 'pending_edge' AND scheduled_at < now() - interval '120 seconds'
+              AND (lease_expires_at IS NULL OR lease_expires_at < now())) AS edge_pending_due_over_120s_count,
+            (
+              SELECT floor(extract(epoch FROM now() - created_at))::bigint
+              FROM leased_finalizations WHERE status = 'completed'
+              ORDER BY created_at DESC LIMIT 1
+            ) AS edge_last_success_age_seconds
+            FROM queue
+          ) metrics;
+          COMMIT;
+          SQL
+          )" || renderer_query_failed "$?" outbound_wake
+          if ! wake_readout="$(jq -ces '
+            def integer: type == "number" and floor == .;
+            def cron_field: "(?:[0-9*/,-]|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|mon|tue|wed|thu|fri|sat|sun)+";
+            def schedule: . == null or (type == "string" and length <= 128 and (
+              test("\\A(?:" + cron_field + "[ \\t]+){4}" + cron_field + "\\z"; "i")
+              or test("\\A(?:[1-9][0-9]? seconds|@(?:yearly|annually|monthly|weekly|daily|midnight|hourly))\\z"; "i")));
+            select(length == 1) | .[0] | select(type == "object" and length == 16)
+            | select(all(to_entries[];
+                if .key == "cron_active" then .value | type == "boolean"
+                elif .key == "cron_schedule" then .value | schedule
+                elif .key | endswith("_age_seconds") then .value | . == null or integer
+                elif .key | endswith("_count") then .value | integer and . >= 0
+                else false end))
+          ' <<< "$wake_metrics" 2>/dev/null)"; then
+            renderer_unreadable validate outbound_wake
+          fi
+          printf 'outbound_wake=%s\n' "$wake_readout" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          wake_policy="$(renderer_psql <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SET LOCAL statement_timeout = '8s';
+          SET LOCAL search_path = pg_catalog;
+          SELECT jsonb_build_object(
+            'policy_endpoint_present', NULLIF(btrim(state.endpoint), '') IS NOT NULL,
+            'policy_endpoint_matches_relay', state.endpoint_matches,
+            'relay_blocked_with_pending_work_count', (
+              SELECT count(*) FROM public.ops_alerts
+              WHERE organization_id = public.marketplace_system_org_id_v1()
+                AND alert_type = 'outbound_wake_relay_blocked'
+                AND created_at >= now() - interval '60 minutes'
+            ),
+            'blocked', state.blocked_with_pending_work
+          ) FROM public.outbound_wake_relay_state_v1() state;
+          COMMIT;
+          SQL
+          )" || renderer_query_failed "$?" outbound_wake_policy
+          if ! wake_policy_readout="$(jq -ces '
+            select(length == 1) | .[0] | select(type == "object")
+            | select(keys == ["blocked", "policy_endpoint_matches_relay", "policy_endpoint_present",
+                "relay_blocked_with_pending_work_count"])
+            | select((.blocked | type == "boolean")
+                and (.policy_endpoint_matches_relay | type == "boolean")
+                and (.policy_endpoint_present | type == "boolean")
+                and (.relay_blocked_with_pending_work_count | type == "number" and floor == . and . >= 0))
+          ' <<< "$wake_policy" 2>/dev/null)"; then
+            renderer_unreadable validate outbound_wake_policy
+          fi
+          printf 'outbound_wake_policy=%s\n' "$(jq -c 'del(.blocked)' <<< "$wake_policy_readout")" | tee -a "$GITHUB_STEP_SUMMARY"
+          if jq -e '.blocked' <<< "$wake_policy_readout" >/dev/null; then
+            printf 'outbound_wake_policy=BLOCKED pending Edge work cannot be woken by the relay\n' | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
           renderer_states="$(renderer_psql -v renderer_count_tenants=on <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"
           renderer_state="${renderer_states%%$'\n'*}"
           renderer_tenant_states="${renderer_states#*$'\n'}"
@@ -483,13 +605,22 @@ jobs:
           DEV_DB_REARMED_AT: ${{ vars.DEV_DB_REARMED_AT }}
         run: node scripts/deploy/apply-guard.cjs
       - name: Install locked edge dependencies
-        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outputs.superseded == 'false'
+        if: &prepare-dev-edge steps.guard.outputs.configured == 'true' && steps.apply_guard.outputs.superseded == 'false'
         working-directory: ${{ github.workspace }}
         run: |
           for attempt in 1 2 3; do npm ci --ignore-scripts --no-audit --no-fund && break
             [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
+      - name: Install pinned Deno
+        if: *prepare-dev-edge
+        run: &install-deno |
+          mkdir -p "$RUNNER_TEMP/edge-tools"
+          archive="$RUNNER_TEMP/deno.zip"
+          curl --fail --silent --show-error --location https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip --output "$archive"
+          printf '394f07f4da2bebe6ce6f1e7ce0fa16429b29b08c35e3fac3fe25972676dff4b2  %s\n' "$archive" | sha256sum --check
+          unzip -q "$archive" deno -d "$RUNNER_TEMP/edge-tools"
+          printf '%s\n' "$RUNNER_TEMP/edge-tools" >> "$GITHUB_PATH"
       - name: Prepare edge packages and pinned CLI
-        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outputs.superseded == 'false'
+        if: *prepare-dev-edge
         run: |
           npm run edge:sync-shared
           npm run edge:prepare-resource-import-exceljs
@@ -511,9 +642,13 @@ jobs:
               assert Path('supabase/functions', f['name'], 'index.ts').is_file()
           Path('edge-deploy.tsv').write_text(''.join(f"{f['name']}\t{f['auth_mode']}\n" for f in enabled))
           PY
+      - name: Verify Edge frozen lock
+        id: edge_lock
+        if: *prepare-dev-edge
+        run: &verify-edge-lock node scripts/edge/verify-frozen-lock.cjs
       - name: Apply migrations and deploy registered edge functions
         id: deploy
-        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outcome == 'success' && steps.apply_guard.outputs.superseded == 'false'
+        if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outcome == 'success' && steps.apply_guard.outputs.superseded == 'false' && steps.edge_lock.outcome == 'success'
         env: &dev-database-env
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -586,6 +721,7 @@ jobs:
             bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}" 2>&1 | tee -a "$deploy_temp/db-push.log"
           apply_status=0
           apply_elapsed=$SECONDS
+          bash scripts/deploy/sync-outbound-wake-endpoint.sh
           trap 'exec 1>&3 2>&4 3>&- 4>&-; echo "::error::Edge secret update failed" >&2' ERR
           exec 3>&1 4>&2 >/dev/null 2>&1
           "$cli" secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$secret_file"
@@ -666,6 +802,26 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Install pinned Node.js for Edge preparation
+        run: |
+          version="$(cat .nvmrc)"
+          archive="$RUNNER_TEMP/node.tar.xz"
+          mkdir -p "$RUNNER_TEMP/edge-node"
+          curl --fail --silent --show-error --location "https://nodejs.org/dist/v$version/node-v$version-linux-x64.tar.xz" --output "$archive"
+          printf '6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6  %s\n' "$archive" | sha256sum --check
+          tar -xJf "$archive" -C "$RUNNER_TEMP/edge-node" --strip-components=1
+          printf '%s\n' "$RUNNER_TEMP/edge-node/bin" >> "$GITHUB_PATH"
+      - name: Install pinned Deno
+        run: *install-deno
+      - name: Prepare edge packages
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run edge:sync-shared
+          npm run edge:prepare-resource-import-exceljs
+      - name: Verify Edge frozen lock
+        run: *verify-edge-lock
+      - name: Self-check Edge frozen lock drift
+        run: node node_modules/jest/bin/jest.js --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js --reporters=default
       - name: Install pinned Supabase CLI
         run: |
           mkdir -p "$RUNNER_TEMP/deploy-tools"
