@@ -1,0 +1,72 @@
+name: DEV browser report
+
+'on':
+  workflow_run:
+    workflows: [Deploy dev]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  dev-e2e-report:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: dev
+      deployment: false
+    concurrency:
+      group: dev-e2e-report
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Install lockfile-selected Chromium
+        run: node scripts/ci-hosted/tasks.cjs browser-install
+      - name: Run anonymous Console and Portal specs
+        env:
+          CONSOLE_BASE_URL: ${{ vars.CONSOLE_BASE_URL }}
+          PORTAL_BASE_URL: ${{ vars.PORTAL_BASE_URL }}
+          E2E_REQUIRE_BASE_URLS: 'true'
+        # Only the custom reporter may publish Playwright output.
+        run: node node_modules/@playwright/test/cli.js test --config playwright.dev-report.config.ts > /dev/null 2>&1
+      - name: Verify a redacted report was produced
+        id: report
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [[ ! -s "$RUNNER_TEMP/dev-e2e-report.json" ]]; then
+            printf '%s\n' '## DEV browser report' '' 'No spec results were produced. Check the setup steps and the DEV target configuration.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Upload redacted Playwright report
+        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: dev-e2e-playwright-report
+          path: ${{ runner.temp }}/dev-e2e-report.json
+          if-no-files-found: error
+          retention-days: 1
