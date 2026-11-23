@@ -78,7 +78,7 @@ describe('outbound wake relay', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(due ? 2 : 1);
   });
 
-  test('uses shared admission for overlapping wakes and a later empty sweep', async () => {
+  test('uses shared admission for overlapping wakes and an early minute sweep', async () => {
     const fetchImpl = jest.fn()
       .mockResolvedValueOnce(Response.json(true))
       .mockResolvedValueOnce(Response.json(false))
@@ -94,13 +94,13 @@ describe('outbound wake relay', () => {
     const isDispatch = ([url]) => url.endsWith('/api-caller');
     expect(fetchImpl.mock.calls.filter(isDispatch)).toHaveLength(1);
 
-    jest.advanceTimersByTime(60_000);
+    jest.advanceTimersByTime(58_000);
     second.handler(sweepSignal());
     await Promise.all(second.tasks);
     expect(fetchImpl.mock.calls.filter(isDispatch)).toHaveLength(2);
   });
 
-  test.each([true, false])('suppresses local admission attempts for 60 seconds when admitted = %s', async (admitted) => {
+  test.each([true, false])('suppresses local admission attempts for 55 seconds when admitted = %s', async (admitted) => {
     const fetchImpl = jest.fn(async url => url.endsWith('/api-caller') ? new Response() : Response.json(admitted));
     const { handler, tasks } = setup(fetchImpl);
     const signal = () => new Request(baseUrl, { method: 'POST' });
@@ -108,7 +108,7 @@ describe('outbound wake relay', () => {
     handler(signal());
     handler(signal());
     await Promise.all(tasks);
-    jest.advanceTimersByTime(59_999);
+    jest.advanceTimersByTime(54_999);
     const skipped = handler(signal());
     expect([skipped.status, [...skipped.headers], await skipped.text()]).toEqual([202, [], '']);
     expect(tasks).toHaveLength(1);

@@ -1,5 +1,8 @@
 import { MAX_BATCH_SIZE } from "../api-caller/invocation.mjs";
 
+// Leave five seconds for delivery jitter between minute sweeps.
+const ADMISSION_GAP_MS = 55_000;
+
 export function createOutboundWakeHandler({ supabaseUrl, anonKey, dbJwt, waitUntil, fetchImpl = fetch }) {
   const baseUrl = supabaseUrl.replace(/\/+$/, "");
   const configured = baseUrl && anonKey && dbJwt.split(".").length === 3;
@@ -47,7 +50,7 @@ export function createOutboundWakeHandler({ supabaseUrl, anonKey, dbJwt, waitUnt
       const now = performance.now();
       if (now >= nextAdmissionAt) {
         // The database still decides admission across instances.
-        nextAdmissionAt = now + 60_000;
+        nextAdmissionAt = now + ADMISSION_GAP_MS;
         waitUntil(wake());
       }
     }

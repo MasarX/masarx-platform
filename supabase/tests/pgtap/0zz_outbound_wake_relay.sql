@@ -8,17 +8,17 @@ SELECT is(has_function_privilege(role_name, 'api.try_start_outbound_wake_v1()', 
 FROM (VALUES ('anon'), ('authenticated'), ('service_role'), ('edge_api_caller_role')) AS roles(role_name);
 
 SELECT ok(EXISTS (
-  SELECT 1 FROM cron.job WHERE jobname = 'outbound_wake_sweep' AND active AND schedule = '*/3 * * * *'
-), 'sweep runs every three minutes even without traffic');
+  SELECT 1 FROM cron.job WHERE jobname = 'outbound_wake_sweep' AND active AND schedule = '* * * * *'
+), 'sweep runs every minute even without traffic');
 
-SELECT is(interval_seconds, 60, 'one wake slot per rolling minute')
+SELECT is(interval_seconds, 55, '55-second wake gap leaves room for schedule jitter')
 FROM public.cron_config WHERE worker_name = 'outbound_wake_relay';
 
-UPDATE public.cron_config SET last_run_at = clock_timestamp() - interval '55 seconds'
+UPDATE public.cron_config SET last_run_at = clock_timestamp() - interval '50 seconds'
 WHERE worker_name = 'outbound_wake_relay';
 SELECT is(api.try_start_outbound_wake_v1(), FALSE, 'coalesces a wake inside the interval');
 
-UPDATE public.cron_config SET last_run_at = now() - interval '61 seconds'
+UPDATE public.cron_config SET last_run_at = clock_timestamp() - interval '56 seconds'
 WHERE worker_name = 'outbound_wake_relay';
 DO $$ BEGIN PERFORM api.try_start_outbound_wake_v1(); END $$;
 SELECT ok(last_run_at >= now(), 'reserves a new slot after the interval, including when idle')

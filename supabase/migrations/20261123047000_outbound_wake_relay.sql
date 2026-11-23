@@ -1,11 +1,19 @@
 BEGIN;
 
 INSERT INTO public.worker_registry (worker_name, worker_type, description, schedule)
-VALUES ('outbound_wake_relay', 'outbound', 'Wakes the leased outbound queue.', '*/3 * * * *');
+VALUES ('outbound_wake_relay', 'outbound', 'Wakes the leased outbound queue.', '* * * * *');
 
--- Match the worker tick: one bounded batch per rolling minute, up to 10 sequential leased jobs.
-INSERT INTO public.cron_config (worker_name, interval_seconds, batch_size, notes)
-VALUES ('outbound_wake_relay', 60, 10, 'Minimum time between queue wake attempts.');
+-- The sweep can start one bounded batch of up to 10 sequential leased jobs per minute.
+-- Producer wakes join the same admission gate after 2b.
+DO $cadence$
+DECLARE
+  -- Leave five seconds for delivery jitter between minute sweeps.
+  admission_gap_seconds CONSTANT INTEGER := 55;
+BEGIN
+  INSERT INTO public.cron_config (worker_name, interval_seconds, batch_size, notes)
+  VALUES ('outbound_wake_relay', admission_gap_seconds, 10, 'Minimum time between queue wake attempts.');
+END;
+$cadence$;
 
 CREATE FUNCTION api.try_start_outbound_wake_v1()
 RETURNS BOOLEAN
