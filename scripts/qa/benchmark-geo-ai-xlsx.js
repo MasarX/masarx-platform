@@ -5,12 +5,12 @@
  * Runs the production Geo AI address extraction path end-to-end:
  *   start_workflow_run(workflow_geocoding_standard) ->
  *   progress_workflow_run(...) ->
- *   get_job_call_spec(outbound_id) -> fetch(spec) ->
- *   mark_outbound_call_success/failure(...)
+ *   claim_edge_job_by_id_v1(outbound_id) -> get_claimed_edge_job_call_spec_v1(...) ->
+ *   fetch(spec) -> mark_claimed_edge_job_success_v1 / mark_claimed_edge_job_failure_v1
  *
  * This is intentionally row-driven:
  * - Which AI/provider runs is determined by `geocoding_policy.address_normalization.ai_extract`.
- * - HTTP specs come from `operation_templates` via `get_job_call_spec`.
+ * - HTTP specs come from `operation_templates` and resolve only under the benchmark's lease.
  *
  * Safety:
  * - Never prints auth headers / API keys.
@@ -531,7 +531,7 @@ async function callHttpSpecWithRetries(spec, opts = {}) {
   return last;
 }
 
-async function markOutboundCallResult(client, outboundId, result) {
+async function markOutboundCallResult(client, outboundId, leaseToken, result) {
   const responseJson =
     result && result.body
       ? result.body
@@ -542,34 +542,39 @@ async function markOutboundCallResult(client, outboundId, result) {
   if (result.status >= 200 && result.status < 300) {
     await client.query(
       `
-        SELECT public.mark_outbound_call_success(
+        SELECT public.mark_claimed_edge_job_success_v1(
           $1::uuid,
-          $2::int,
+          $2::uuid,
+          $3::int,
           '{}'::jsonb,
-          $3::jsonb,
-          $4::int
+          $4::jsonb,
+          $5::int
         )
       `,
-      [outboundId, result.status, responseJson, result.durationMs],
+      [outboundId, leaseToken, result.status, responseJson, result.durationMs],
     );
     return;
   }
 
   await client.query(
     `
-      SELECT public.mark_outbound_call_failure(
+      SELECT public.mark_claimed_edge_job_failure_v1(
         $1::uuid,
-        $2::int,
+        $2::uuid,
+        $3::int,
         '{}'::jsonb,
-        $3::jsonb,
-        $4::text
+        $4::jsonb,
+        $5::text,
+        $6::int
       )
     `,
     [
       outboundId,
+      leaseToken,
       result.status,
       responseJson,
       `http_${result.status}`,
+      result.durationMs,
     ],
   );
 }
@@ -700,12 +705,30 @@ async function runBenchmarkCase(
       'ai_extract_address',
     );
 
-    const { rows: specRows } = await client.query(
-      `SELECT get_job_call_spec($1::uuid) AS spec`,
+    if (outbound.status === 'pending') {
+      const { rows: [{ handoff }] } = await client.query(
+        `SELECT public.dispatch_outbound_call_inline($1::uuid, $2::jsonb) AS handoff`,
+        [outbound.id, JSON.stringify({
+          timeout_seconds: 30,
+          poll_max_seconds: 0,
+          poll_interval_ms: 50,
+          pending_reschedule_seconds: 30,
+          lease_seconds: 30,
+        })],
+      );
+      if (handoff?.http_status !== 202) throw new Error('Outbound call was not handed off to Edge');
+    }
+
+    const { rows: [{ lease_token: leaseToken }] } = await client.query(
+      `SELECT lease_token FROM public.claim_edge_job_by_id_v1($1::uuid)`,
       [outbound.id],
     );
+    const { rows: specRows } = await client.query(
+      `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec`,
+      [outbound.id, leaseToken],
+    );
     const spec = specRows[0]?.spec;
-    if (!spec) throw new Error('get_job_call_spec returned empty spec for outbound call');
+    if (!spec) throw new Error('The leased outbound call has no dispatch spec');
 
     const httpResult = await callHttpSpecWithRetries(spec, {
       maxAttempts: process.env.GEO_AI_BENCH_HTTP_MAX_ATTEMPTS,
@@ -713,7 +736,7 @@ async function runBenchmarkCase(
     });
 
     if (!httpResult) throw new Error('HTTP call returned empty result');
-    await markOutboundCallResult(client, outbound.id, httpResult);
+    await markOutboundCallResult(client, outbound.id, leaseToken, httpResult);
 
     const actual = await fetchAddressFields(client, addressId, ctx.client_id);
     const evaluation = evaluateCase(caseItem, actual, policy, tokenMaps);

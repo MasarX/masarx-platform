@@ -288,7 +288,7 @@ SELECT ok(result->>'status' = 'completed' AND result->>'items_processed' = '1'
   AND EXISTS (SELECT FROM public.outbound_calls o WHERE o.id = ids.bad_batch_job
     AND o.status = 'permanently_failed' AND NOT (o.context ? 'edge_dispatch') AND o.lease_expires_at IS NULL),
   'worker hands off exactly the rendered request and settles the placeholder before a generic claim')
-FROM outbound_validation_worker_result CROSS JOIN outbound_validation_ids;
+FROM outbound_validation_worker_result CROSS JOIN outbound_validation_ids ids;
 SELECT is(oc.status, 'permanently_failed', 'the placeholder failure is terminal')
 FROM public.outbound_calls oc JOIN outbound_validation_ids ids ON oc.id = ids.bad_batch_job;
 SELECT is(oc.error_message, 'outbound_url_invalid', 'the worker records the stable invalid-URL code')

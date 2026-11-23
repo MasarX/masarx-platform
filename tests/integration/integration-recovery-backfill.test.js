@@ -384,7 +384,7 @@ describeIfDb('integration recovery and provider backfill', () => {
     const expiredAuthId = await insertProviderAuth(
       client,
       primaryProviderId,
-      'expired-token',
+      randomUUID(),
       '2024-01-01T00:00:00.000Z',
     );
     const driftedMappingId = await insertMappingConfig(
@@ -475,18 +475,22 @@ describeIfDb('integration recovery and provider backfill', () => {
     expect(preRepairSpec).toBeNull();
 
     const { rows: postClaimRows } = await client.query(
-      `SELECT status, retry_count, lease_expires_at, completed_at, response_status_code, url, target_id, context
+      `SELECT status, retry_count, lease_expires_at, edge_lease_token, completed_at, response_status_code,
+              scheduled_at > now() AS retry_deferred, error_message, url, target_id, context
          FROM public.outbound_calls
         WHERE id = $1::uuid`,
       [workflow.jobId],
     );
     expect(postClaimRows).toHaveLength(1);
     expect(postClaimRows[0]).toMatchObject({
-      status: 'permanently_failed',
+      status: 'pending_edge',
       retry_count: 0,
       lease_expires_at: null,
-      completed_at: expect.any(Date),
+      edge_lease_token: null,
+      completed_at: null,
       response_status_code: null,
+      retry_deferred: true,
+      error_message: 'credential_expired',
       url: 'https://stale-recovery.masarx.test/packages',
       target_id: primaryProviderId,
     });
@@ -546,7 +550,7 @@ describeIfDb('integration recovery and provider backfill', () => {
     const expiredAuthId = await insertProviderAuth(
       client,
       primaryProviderId,
-      'expired-token',
+      randomUUID(),
       '2024-01-01T00:00:00.000Z',
     );
     const recoveredCredential = randomUUID();
@@ -619,6 +623,42 @@ describeIfDb('integration recovery and provider backfill', () => {
     );
     expect(expiredCredentialRows).toHaveLength(1);
     expect(expiredCredentialRows[0].is_expired).toBe(true);
+
+    await client.query(
+      `UPDATE public.outbound_calls
+         SET status = 'pending', scheduled_at = now(), lease_expires_at = NULL
+       WHERE id = $1::uuid`,
+      [workflow.jobId],
+    );
+    const { rows: [{ handoff }] } = await client.query(
+      `SELECT public.dispatch_outbound_call_inline($1::uuid, $2::jsonb) AS handoff`,
+      [workflow.jobId, JSON.stringify({
+        timeout_seconds: 5,
+        poll_max_seconds: 0,
+        poll_interval_ms: 50,
+        pending_reschedule_seconds: 30,
+        lease_seconds: 30,
+      })],
+    );
+    expect(handoff).toMatchObject({ status: 'pending', job_id: workflow.jobId, http_status: 202 });
+
+    const { rows: [expiredClaim] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [workflow.jobId],
+    );
+    expect(expiredClaim).toEqual({ job_id: workflow.jobId, lease_token: expect.any(String) });
+    const { rows: [{ spec: expiredSpec }] } = await client.query(
+      `SELECT api.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec`,
+      [expiredClaim.job_id, expiredClaim.lease_token],
+    );
+    expect(expiredSpec).toBeNull();
+
+    await client.query('SAVEPOINT before_early_credential_retry');
+    await expect(client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [workflow.jobId],
+    )).rejects.toThrow('is not claimable');
+    await client.query('ROLLBACK TO SAVEPOINT before_early_credential_retry');
 
     const failedCredentialReport = await createMappingReport(client, {
       organizationId: organization.id,
@@ -702,27 +742,17 @@ describeIfDb('integration recovery and provider backfill', () => {
 
     await client.query(
       `UPDATE public.outbound_calls
-         SET status = 'pending', scheduled_at = now(), lease_expires_at = NULL
+         SET scheduled_at = now()
        WHERE id = $1::uuid`,
       [workflow.jobId],
     );
-    const { rows: [{ handoff }] } = await client.query(
-      `SELECT public.dispatch_outbound_call_inline($1::uuid, $2::jsonb) AS handoff`,
-      [workflow.jobId, JSON.stringify({
-        timeout_seconds: 5,
-        poll_max_seconds: 0,
-        poll_interval_ms: 50,
-        pending_reschedule_seconds: 30,
-        lease_seconds: 30,
-      })],
-    );
-    expect(handoff).toMatchObject({ status: 'pending', job_id: workflow.jobId, http_status: 202 });
 
     const { rows: [initialClaim] } = await client.query(
       `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
       [workflow.jobId],
     );
     expect(initialClaim).toEqual({ job_id: workflow.jobId, lease_token: expect.any(String) });
+    expect(initialClaim.lease_token).not.toBe(expiredClaim.lease_token);
     const { rows: [{ spec: primarySpec, stored: primaryStored }] } = await client.query(
       `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec,
               row_to_json(o) AS stored FROM public.outbound_calls o WHERE o.id = $1::uuid`,

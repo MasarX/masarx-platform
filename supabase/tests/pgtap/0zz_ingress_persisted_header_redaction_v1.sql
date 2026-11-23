@@ -5,7 +5,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
 
-SELECT plan(146);
+SELECT plan(147);
 
 SELECT ok(
   (SELECT p.prosecdef AND ARRAY(
@@ -661,9 +661,11 @@ SELECT ok(
   AND NOT has_function_privilege('authenticated', 'public.get_job_call_spec_without_ingress_vault_v1(uuid)', 'EXECUTE')
   AND NOT has_function_privilege('service_role', 'public.get_job_call_spec_without_ingress_vault_v1(uuid)', 'EXECUTE')
   AND NOT has_function_privilege('edge_api_caller_role', 'public.get_job_call_spec_without_ingress_vault_v1(uuid)', 'EXECUTE')
-  AND has_function_privilege('service_role', 'public.get_job_call_spec(uuid)', 'EXECUTE')
-  AND has_function_privilege('edge_api_caller_role', 'public.get_job_call_spec(uuid)', 'EXECUTE'),
-  'only the canonical dispatch wrapper retains service and edge execution privilege'
+  AND NOT has_function_privilege('service_role', 'public.get_job_call_spec(uuid)', 'EXECUTE')
+  AND NOT has_function_privilege('edge_api_caller_role', 'public.get_job_call_spec(uuid)', 'EXECUTE')
+  AND has_function_privilege('service_role', 'public.get_claimed_edge_job_call_spec_v1(uuid,uuid)', 'EXECUTE')
+  AND has_function_privilege('edge_api_caller_role', 'public.get_claimed_edge_job_call_spec_v1(uuid,uuid)', 'EXECUTE'),
+  'service and Edge can reach the dispatch wrapper only through the leased spec'
 );
 
 SELECT ok(
@@ -1186,6 +1188,14 @@ UPDATE public.outbound_calls
        edge_lease_token = 'f9000000-0000-0000-0000-000000001902'::UUID,
        lease_expires_at = now() + interval '5 minutes'
  WHERE id = 'f5000000-0000-0000-0000-000000001902';
+
+SET LOCAL ROLE edge_api_caller_role;
+SELECT throws_ok(
+  $$SELECT api.get_claimed_edge_job_call_spec_v1('f5000000-0000-0000-0000-000000001902', NULL)$$,
+  'P0001', 'get_claimed_edge_job_call_spec_v1: active lease for job f5000000-0000-0000-0000-000000001902 not found',
+  'the Edge API caller cannot resolve a protected execution URL without presenting its active lease'
+);
+RESET ROLE;
 
 SELECT ok(
   (SELECT url FROM public.outbound_calls WHERE id = 'f5000000-0000-0000-0000-000000001902')

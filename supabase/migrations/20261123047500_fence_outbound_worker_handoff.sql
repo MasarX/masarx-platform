@@ -32,6 +32,35 @@ REVOKE EXECUTE ON FUNCTION public.log_api_call_event(uuid, jsonb, jsonb, integer
 REVOKE EXECUTE ON FUNCTION api.log_api_call_event(uuid, jsonb, jsonb, integer, integer, text)
   FROM edge_api_caller_role;
 
+-- Keep the resolver internal to the leased spec, including the ingress Vault wrapper.
+REVOKE EXECUTE ON FUNCTION public.get_job_call_spec(uuid)
+  FROM PUBLIC, anon, authenticated, authenticator, service_role, ui_rpc_executor,
+       edge_api_caller_role, edge_api_gateway_role, edge_webhook_role, edge_label_renderer_role,
+       edge_marketing_role, edge_renderer_gateway_role, label_renderer_role, geocoding_worker_role;
+REVOKE EXECUTE ON FUNCTION api.get_job_call_spec(uuid)
+  FROM PUBLIC, anon, authenticated, authenticator, service_role, ui_rpc_executor,
+       edge_api_caller_role, edge_api_gateway_role, edge_webhook_role, edge_label_renderer_role,
+       edge_marketing_role, edge_renderer_gateway_role, label_renderer_role, geocoding_worker_role;
+
+-- Classify expiry at the effective credential selection site, preserving its existing error contract.
+DO $expiry$
+DECLARE
+  v_definition text := pg_get_functiondef('public.get_job_call_spec_without_ingress_vault_v1(uuid)'::regprocedure);
+  v_anchor constant text := $anchor$RAISE EXCEPTION 'get_job_call_spec: credentials_missing (auth_config_id=% job_id=%)', v_auth_config_id, p_job_id;$anchor$;
+BEGIN
+  IF cardinality(string_to_array(v_definition, v_anchor)) <> 2 THEN
+    RAISE EXCEPTION 'Expected one missing-credential guard in the outbound spec resolver';
+  END IF;
+  EXECUTE replace(v_definition, v_anchor, $replacement$
+        RAISE EXCEPTION 'get_job_call_spec: credentials_missing (auth_config_id=% job_id=%)', v_auth_config_id, p_job_id
+          USING DETAIL = CASE WHEN EXISTS (
+            SELECT 1 FROM public.provider_auth_configs pac
+             WHERE pac.id = v_auth_config_id AND pac.expires_at <= now()
+               AND NOT COALESCE((pac.credentials->>'revoked')::boolean, false)
+          ) THEN 'credential_expired' ELSE '' END;$replacement$);
+END;
+$expiry$;
+
 CREATE OR REPLACE FUNCTION public.claim_pending_jobs(
     p_batch_size INT
 )
@@ -270,6 +299,7 @@ DECLARE
   v_spec JSONB;
   v_dispatch JSONB;
   v_error TEXT;
+  v_credential_expired BOOLEAN;
   v_org_text TEXT;
 BEGIN
   SELECT oc.call_type, oc.url, oc.headers, oc.body, oc.renderer_credential_ref,
@@ -322,16 +352,20 @@ BEGIN
     );
   EXCEPTION
     WHEN others THEN
+      GET STACKED DIAGNOSTICS v_error = PG_EXCEPTION_DETAIL;
+      v_credential_expired := SQLSTATE = 'P0001' AND v_error = 'credential_expired';
       -- Resolver errors can contain request data. Persist only stable category codes.
       v_error := CASE
+        WHEN v_credential_expired THEN 'credential_expired'
         WHEN SQLERRM IN ('outbound_url_invalid', 'label_renderer_configuration_changed') THEN SQLERRM
         ELSE 'outbound_spec_resolution_failed'
       END;
       UPDATE public.outbound_calls oc
       SET
-        status = 'permanently_failed',
+        status = CASE WHEN v_credential_expired THEN 'pending_edge' ELSE 'permanently_failed' END,
+        scheduled_at = CASE WHEN v_credential_expired THEN now() + interval '1 minute' ELSE oc.scheduled_at END,
         error_message = v_error,
-        completed_at = now(),
+        completed_at = CASE WHEN NOT v_credential_expired THEN now() END,
         lease_expires_at = NULL,
         edge_lease_token = NULL
       WHERE oc.id = p_job_id
@@ -341,6 +375,10 @@ BEGIN
 
       IF NOT FOUND THEN
         RAISE EXCEPTION 'get_claimed_edge_job_call_spec_v1: lease for job % changed during spec resolution', p_job_id;
+      END IF;
+
+      IF v_credential_expired THEN
+        RETURN NULL;
       END IF;
 
       v_org_text := COALESCE(v_job.context->>'organization_id', '');
