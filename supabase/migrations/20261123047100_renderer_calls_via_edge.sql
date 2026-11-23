@@ -26,8 +26,8 @@ BEGIN
     INTO v_safe
     FROM jsonb_each(v_headers) AS h(name, value)
    WHERE lower(h.name COLLATE "C") IN (
-     'accept', 'accept-language', 'content-type', 'idempotency-key', 'user-agent',
-     'x-correlation-id', 'x-idempotency-key', 'x-request-id', 'traceparent', 'tracestate'
+     'accept', 'accept-language', 'company-id', 'content-type', 'idempotency-key', 'user-agent',
+     'x-client-id', 'x-correlation-id', 'x-idempotency-key', 'x-request-id', 'traceparent', 'tracestate'
    )
      AND jsonb_typeof(h.value) = 'string'
      AND (h.value #>> '{}') !~ '[[:cntrl:]]';
@@ -608,10 +608,7 @@ BEGIN
     v_print_payload := v_print_payload->'print';
   END IF;
 
-  v_org_id := COALESCE(
-    NULLIF(v_print_payload->>'organization_id', '')::uuid,
-    NULLIF(p_payload->>'organization_id', '')::uuid
-  );
+  v_org_id := public.resolve_label_renderer_organization_id_v1(p_payload);
   IF v_org_id IS NULL THEN
     RAISE EXCEPTION 'invoke_label_renderer_print_sync_v1 requires organization_id in payload';
   END IF;
@@ -1250,6 +1247,13 @@ BEGIN
     RETURN;
   END IF;
 
+  BEGIN
+    PERFORM public.log_api_call_event(p_job_id, '{}'::jsonb,
+      jsonb_build_object('headers', p_headers, 'body', p_body), p_status_code, p_latency_ms);
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'outbound_api_audit_failed';
+  END;
+
   PERFORM public.mark_outbound_call_success(
     p_job_id,
     p_status_code,
@@ -1260,13 +1264,14 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.mark_claimed_edge_job_failure_v1(
+CREATE FUNCTION public.mark_claimed_edge_job_failure_v1(
   p_job_id UUID,
   p_lease_token UUID,
   p_status_code INT,
   p_headers JSONB,
   p_body JSONB,
-  p_error TEXT
+  p_error TEXT,
+  p_latency_ms INT
 )
 RETURNS VOID
 LANGUAGE plpgsql
@@ -1300,6 +1305,14 @@ BEGIN
     RETURN;
   END IF;
 
+  -- The failure policy may retarget the canonical request before scheduling a retry.
+  BEGIN
+    PERFORM public.log_api_call_event(p_job_id, '{}'::jsonb,
+      jsonb_build_object('headers', p_headers, 'body', p_body), p_status_code, p_latency_ms, 'outbound_call_failed');
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'outbound_api_audit_failed';
+  END;
+
   PERFORM public.mark_outbound_call_failure(
     p_job_id,
     p_status_code,
@@ -1309,6 +1322,31 @@ BEGIN
   );
 END;
 $function$;
+
+CREATE OR REPLACE FUNCTION public.mark_claimed_edge_job_failure_v1(
+  p_job_id UUID, p_lease_token UUID, p_status_code INT, p_headers JSONB, p_body JSONB, p_error TEXT
+)
+RETURNS VOID
+LANGUAGE sql SECURITY DEFINER
+SET search_path TO public, pg_temp
+AS $function$
+  SELECT public.mark_claimed_edge_job_failure_v1(p_job_id, p_lease_token, p_status_code, p_headers, p_body, p_error, NULL);
+$function$;
+
+CREATE FUNCTION api.mark_claimed_edge_job_failure_v1(
+  p_job_id UUID, p_lease_token UUID, p_status_code INT, p_headers JSONB, p_body JSONB, p_error TEXT, p_latency_ms INT
+)
+RETURNS VOID
+LANGUAGE sql
+SET search_path TO api, public, extensions, pg_temp
+AS $function$
+  SELECT public.mark_claimed_edge_job_failure_v1(p_job_id, p_lease_token, p_status_code, p_headers, p_body, p_error, p_latency_ms);
+$function$;
+
+REVOKE ALL ON FUNCTION public.mark_claimed_edge_job_failure_v1(uuid, uuid, int, jsonb, jsonb, text, int),
+  api.mark_claimed_edge_job_failure_v1(uuid, uuid, int, jsonb, jsonb, text, int) FROM PUBLIC, anon, authenticated, ui_rpc_executor;
+GRANT EXECUTE ON FUNCTION public.mark_claimed_edge_job_failure_v1(uuid, uuid, int, jsonb, jsonb, text, int),
+  api.mark_claimed_edge_job_failure_v1(uuid, uuid, int, jsonb, jsonb, text, int) TO service_role, edge_api_caller_role;
 
 CREATE OR REPLACE FUNCTION public.ops_sweeper_label_renderer_cron_guard(p_task JSONB)
 RETURNS JSONB
@@ -1388,7 +1426,18 @@ BEGIN
    LIMIT 1;
 
   v_batch_size := GREATEST(COALESCE(v_batch_size, 10), 1);
-  v_command := format('SELECT public.invoke_label_renderer(%s,NULL::jsonb);', v_batch_size);
+  v_command := format($cron$
+    SELECT public.invoke_label_renderer(%s,NULL::jsonb)
+    WHERE EXISTS (
+      SELECT 1 FROM public.label_jobs lj
+      LEFT JOIN LATERAL public.resolve_settings_row_from_context('label_print_policy',
+        jsonb_strip_nulls(jsonb_build_object('organization_id', lj.organization_id, 'client_id', lj.client_id))) policy
+        ON lj.requested_source = 'label_print_sync'
+      WHERE lj.status = 'pending' AND lj.scheduled_at <= now() AND lj.attempts < lj.max_attempts
+        AND (lj.requested_source IS DISTINCT FROM 'label_print_sync'
+          OR lj.created_at <= now() - make_interval(secs => GREATEST(
+            COALESCE(NULLIF(policy.value->>'print_sync_worker_grace_seconds', '')::integer, 0), 0)))
+    );$cron$, v_batch_size);
 
   SELECT j.jobid, j.schedule, j.command
     INTO v_cron
@@ -2254,6 +2303,16 @@ BEGIN
 
         v_status := COALESCE((v_result->>'status')::INT, 0);
         v_completed := COALESCE((v_result->>'completed')::BOOLEAN, FALSE);
+
+        IF v_result ? 'edge_dispatch' THEN
+            UPDATE public.outbound_calls
+               SET status = 'pending_edge', scheduled_at = now(), lease_expires_at = NULL,
+                   context = jsonb_set(COALESCE(context, '{}'::jsonb) - 'async_request_id',
+                     '{edge_dispatch}', v_result->'edge_dispatch', true)
+             WHERE id = p_job_id;
+            RETURN jsonb_build_object('status', 'pending', 'job_id', p_job_id,
+                'http_status', v_status, 'completed', FALSE);
+        END IF;
 
         IF NOT v_completed THEN
             BEGIN

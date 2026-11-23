@@ -351,35 +351,6 @@ const getJobConcurrencyDefault = () => {
   return clampInt(raw, MAX_BATCH_CONCURRENCY, 1, MAX_BATCH_CONCURRENCY);
 };
 
-const logApiCall = async (
-  client: ReturnType<typeof createClient>,
-  jobId: string,
-  requestPayload: CallRequest,
-  responsePayload: CallResponse,
-  errorMessage?: string | null,
-) => {
-  const { error } = await client.rpc("log_api_call_event", {
-    p_job_id: jobId,
-    p_request: {
-      url: requestPayload.url ?? null,
-      method: requestPayload.method ?? "POST",
-      headers: requestPayload.headers ?? {},
-      body: requestPayload.body ?? {},
-      timeout_seconds: requestPayload.timeout_seconds ?? 30,
-    },
-    p_response: {
-      headers: responsePayload.headers ?? {},
-      body: responsePayload.body ?? null,
-    },
-    p_status: responsePayload.status,
-    p_latency_ms: responsePayload.latency_ms,
-    p_error: errorMessage ?? responsePayload.error ?? null,
-  });
-  if (error) {
-    throw new Error(`log_api_call_event failed for job ${jobId}: ${error.message}`);
-  }
-};
-
 const resolveJobEgressPolicy = async (
   client: ReturnType<typeof createClient>,
   jobId: string,
@@ -492,6 +463,7 @@ const executeClaimedJob = async (
       p_headers: callResult.headers,
       p_body: callResult.body,
       p_error: dispatchError ?? callResult.error ?? `HTTP ${callResult.status}`,
+      p_latency_ms: callResult.latency_ms,
     });
     if (failureError) {
       throw new Error(
@@ -499,8 +471,6 @@ const executeClaimedJob = async (
       );
     }
   }
-
-  if (!isRenderer) await logApiCall(client, jobId, mergedDispatch, callResult, dispatchError);
 
   return { job_id: jobId, result: callResult, success: isSuccess };
 };

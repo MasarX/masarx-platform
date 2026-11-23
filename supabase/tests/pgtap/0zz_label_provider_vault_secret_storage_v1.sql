@@ -47,9 +47,16 @@ SELECT lives_ok($q$SELECT public.upsert_label_provider_settings_v1('global',NULL
   'real service writer stores the global renderer credential');
 SELECT is(public.resolve_label_renderer_invoke_config_v1(org)->>'invoke_secret', 'synthetic-label-global-credential',
   'service resolves the global Vault credential for tenant fallback') FROM label_vault_fixture;
-SELECT is(public.resolve_label_renderer_invoke_request_v1(1,jsonb_build_object('organization_id',org))#>>'{headers,authorization}',
-  'Bearer synthetic-label-global-credential', 'request resolver builds authorization from Vault') FROM label_vault_fixture;
 RESET ROLE;
+CREATE TEMP TABLE label_vault_edge_receipt AS
+SELECT org, public.invoke_label_renderer(1,jsonb_build_object('organization_id',org)) AS receipt
+FROM label_vault_fixture;
+SELECT ok(r.receipt @> '{"status":202,"completed":false}'::jsonb AND oc.status='pending_edge'
+   AND oc.url=v.description::jsonb->>'pinned_invoke_url' AND oc.headers='{}'::jsonb
+   AND NOT EXISTS(SELECT FROM net.http_request_queue WHERE id=(r.receipt->>'request_id')::bigint),
+   'enqueue binds the endpoint and Vault reference with a credential-free receipt')
+FROM label_vault_edge_receipt r LEFT JOIN public.outbound_calls oc ON oc.id=(r.receipt->>'edge_job_id')::uuid
+LEFT JOIN vault.secrets v ON v.id=oc.renderer_credential_ref;
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.settings_versions WHERE category = 'label_provider'
   AND position('synthetic-label-global-credential' IN value::text) > 0), 'global credential never enters any settings version');
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.settings WHERE category = 'label_provider'
@@ -118,8 +125,11 @@ FROM unnest(ARRAY['anon','authenticated']) role CROSS JOIN unnest(ARRAY[
   'public.label_provider_seal_value_v1(jsonb,text,uuid,jsonb)', 'public.resolve_label_provider_invoke_secret_v1(jsonb)',
   'public.upsert_label_provider_settings_v1(text,uuid,jsonb,text)']) signature;
 SELECT ok(position('public.resolve_label_renderer_edge_config_v1' IN pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure)) > 0
-  AND position('public.resolve_label_provider_invoke_secret_v1' IN pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure)) = 0,
-  'cron guard checks the pinned renderer reference without reading a credential');
+  AND position('public.resolve_label_renderer_edge_config_v1' IN pg_get_functiondef('public.enqueue_label_renderer_edge_v1(uuid,jsonb)'::regprocedure)) > 0
+  AND NOT EXISTS (SELECT FROM (VALUES ('public.ops_sweeper_label_renderer_cron_guard(jsonb)'),
+    ('public.enqueue_label_renderer_edge_v1(uuid,jsonb)'), ('public.resolve_label_renderer_edge_config_v1(uuid)')) f(signature)
+    WHERE pg_get_functiondef(f.signature::regprocedure) ~ 'decrypted_secret|resolve_label_provider_invoke_secret_v1'),
+  'the cron guard and enqueue use the pinned renderer reference without decrypting');
 SELECT ok(position('public.invoke_label_renderer(integer,jsonb)' IN pg_get_functiondef('public.ops_sweeper_label_renderer_cron_guard(jsonb)'::regprocedure)) > 0,
   'cron guard checks the current renderer dispatch signature');
 SELECT public.upsert_label_provider_settings_v1('tenant',foreign_org,
@@ -135,9 +145,14 @@ FROM label_vault_fixture f JOIN public.settings s ON s.category = 'label_provide
 SELECT throws_ok(format('SELECT public.resolve_label_renderer_invoke_config_v1(%L::uuid)',foreign_org), 'P0001',
   'resolve_label_renderer_invoke_config_v1: invoke_secret missing in label_provider configuration',
   'synchronous resolver withholds the pinned credential even after global rotation') FROM label_vault_fixture;
-SELECT throws_ok(format('SELECT public.resolve_label_renderer_invoke_request_v1(1,jsonb_build_object(%L,%L))','organization_id',foreign_org), 'P0001',
-  'resolve_label_renderer_invoke_request_v1: invoke_secret missing in label_provider configuration',
-  'asynchronous resolver withholds the pinned credential even after global rotation') FROM label_vault_fixture;
+CREATE TEMP TABLE label_vault_rejected AS
+SELECT (SELECT count(*) FROM public.outbound_calls) AS edge_count,
+  (SELECT count(*) FROM net.http_request_queue) AS transport_count;
+SELECT is(public.invoke_label_renderer(1,jsonb_build_object('organization_id',foreign_org)) #>> '{body,reason}',
+  'pin_mismatch', 'the new enqueue refuses to redirect the old reference after rotation') FROM label_vault_fixture;
+SELECT ok(edge_count=(SELECT count(*) FROM public.outbound_calls)
+  AND transport_count=(SELECT count(*) FROM net.http_request_queue),
+  'rejected enqueue creates neither an Edge job nor a transport row') FROM label_vault_rejected;
 UPDATE public.settings SET cached_value = jsonb_set(cached_value,'{providers,0,invoke_secret}',
   '"synthetic-label-cache-only-credential"'::jsonb)
 WHERE category = 'label_provider' AND scope_type = 'tenant' AND scope_id = (SELECT org FROM label_vault_fixture);

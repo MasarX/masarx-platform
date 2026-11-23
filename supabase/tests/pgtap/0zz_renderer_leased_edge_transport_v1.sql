@@ -82,13 +82,23 @@ CROSS JOIN unnest(ARRAY['AUTHORIZATION', 'Cookie', 'Proxy-Authorization', 'X-API
 SELECT is((SELECT count(*) FROM net.http_request_queue), initial_net_rows,
   'renderer calls and credential refusals create zero pg_net rows') FROM renderer_transport_case;
 
-CREATE TEMP TABLE renderer_transport_control AS
-SELECT public.dispatch_api_request_v1(endpoint, 'GET',
-  '{"Accept":"application/json","X-Unlisted":"drop"}'::jsonb, '{}'::jsonb, 1) AS request_id
-FROM renderer_transport_case;
-SELECT is(q.headers, '{"Accept":"application/json"}'::jsonb,
-          'credential-free control reaches pg_net with only the approved header')
-FROM net.http_request_queue q JOIN renderer_transport_control c ON q.id = c.request_id;
+UPDATE public.label_jobs SET scheduled_at = now() + interval '100 years'
+WHERE status = 'pending' AND scheduled_at <= now();
+SELECT is(public.ops_sweeper_label_renderer_cron_guard('{}')->>'status', 'enabled',
+  'the renderer is configured and the cron guard enables its tick');
+CREATE TEMP TABLE renderer_idle_counts AS SELECT
+  (SELECT count(*) FROM public.workflow_runs) AS runs,
+  (SELECT count(*) FROM public.workflow_run_steps) AS steps,
+  (SELECT count(*) FROM public.outbound_calls) AS calls;
+DO $tick$
+BEGIN
+  EXECUTE (SELECT command FROM cron.job WHERE jobname = 'label_renderer_dispatch');
+END;
+$tick$;
+SELECT ok(runs = (SELECT count(*) FROM public.workflow_runs)
+  AND steps = (SELECT count(*) FROM public.workflow_run_steps)
+  AND calls = (SELECT count(*) FROM public.outbound_calls),
+  'an idle configured cron tick writes no workflow run, step, or outbound job') FROM renderer_idle_counts;
 
 SELECT * FROM finish();
 ROLLBACK;

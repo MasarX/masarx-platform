@@ -52,7 +52,8 @@ SET search_path TO public,extensions,pgtap,pg_temp AS $$
 DECLARE
  v_job UUID:=gen_random_uuid(); v_correlation UUID:=gen_random_uuid();
  v_org UUID; v_provider UUID; v_result JSONB; v_count INT; v_label TEXT;
- v_before INT; v_after INT;
+ v_before INT; v_after INT; v_polls INT; v_sends INT; v_claims INT;
+ v_claim RECORD; v_spec JSONB; v_response JSONB; v_url TEXT;
 BEGIN
  SELECT org,provider INTO v_org,v_provider FROM pg_temp.f267_ids;
  v_label:=p_lane || '/' || CASE WHEN p_poll THEN 'poll' ELSE 'direct' END || '/' || p_status;
@@ -60,8 +61,7 @@ BEGIN
  status,priority,retry_count,max_retries,scheduled_at,created_at,correlation_id,context)
  VALUES(v_job,'provider_api','provider',v_provider,'POST',
  'https://example.test/f267/'||v_job,
-  CASE WHEN p_poll THEN '{"authorization":"fixture-private","content-type":"application/json"}'::jsonb
-       ELSE '{"content-type":"application/json"}'::jsonb END,
+ '{"authorization":"fixture-private","content-type":"application/json"}',
  jsonb_build_object('marker',v_job), 'pending',100,0,1,now()-interval '1 minute',now(),
  v_correlation,CASE WHEN p_poll THEN '{"async_request_id":267}'::jsonb ELSE '{}'::jsonb END);
  PERFORM set_config('f267.job',v_job::text,true);
@@ -70,6 +70,17 @@ BEGIN
  'body',jsonb_build_object('ok',p_status BETWEEN 200 AND 299,'password','fixture-body-private'),
  'latency_ms',15)::text,true);
  SELECT count(*) INTO v_before FROM pg_temp.f267_calls WHERE kind='dispatch';
+ SELECT count(*) INTO v_polls FROM pg_temp.f267_calls WHERE kind='poll' AND request_id=267;
+ SELECT count(*) INTO v_sends FROM pg_temp.f267_calls WHERE kind='edge-send';
+ SELECT url INTO STRICT v_url FROM public.outbound_calls WHERE id=v_job;
+ v_response:=current_setting('f267.response')::jsonb;
+ IF NOT p_poll THEN
+  -- Seeded requests keep their historical authorization header. A fresh SQL handoff cannot carry one.
+  UPDATE public.outbound_calls SET headers=headers-'authorization' WHERE id=v_job;
+  PERFORM set_config('f267.response',jsonb_build_object('status',202,'completed',false,
+   'edge_dispatch',(SELECT jsonb_build_object('url',url,'method',method,'headers',headers,'body',body)
+    FROM public.outbound_calls WHERE id=v_job))::text,true);
+ END IF;
  IF p_lane='worker' THEN
    v_result:=public.run_outbound_worker()::jsonb;
  ELSE
@@ -79,12 +90,50 @@ BEGIN
  -- Product dispatch delegates set a session search_path; restore only the TAP caller context.
  PERFORM set_config('search_path','public,extensions,pgtap,pg_temp',true);
  SELECT count(*) INTO v_after FROM pg_temp.f267_calls WHERE kind='dispatch';
- RETURN NEXT ok(v_result->>'status'=CASE WHEN p_lane='worker' OR (p_completed AND p_status BETWEEN 200 AND 299)
- THEN 'completed' WHEN p_completed THEN 'failed' ELSE 'pending' END,v_label||' returns canonical outcome');
+ RETURN NEXT ok(v_result->>'status'=CASE WHEN p_lane='worker' THEN 'completed'
+  WHEN NOT p_poll OR NOT p_completed THEN 'pending'
+  WHEN p_status BETWEEN 200 AND 299 THEN 'completed' ELSE 'failed' END,v_label||' returns canonical outcome');
+ IF NOT p_poll THEN
+  RETURN NEXT ok(EXISTS(SELECT FROM public.outbound_calls WHERE id=v_job AND status='pending_edge'
+    AND lease_expires_at IS NULL AND context ? 'edge_dispatch' AND NOT (context ? 'async_request_id')),
+    v_label||' hands off the exact job');
+  RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='edge-send'),v_sends,
+    v_label||' enqueue does not send');
+  RETURN NEXT is((SELECT count(*)::int FROM public.api_call_log WHERE correlation_id=v_correlation),0,
+    v_label||' enqueue does not create a terminal audit');
+  -- Keep the transaction's real bounded claimant deterministic across earlier cases and seed data.
+  UPDATE public.outbound_calls SET scheduled_at=now()+interval '100 years'
+   WHERE id<>v_job AND status IN ('pending_edge','failed') AND scheduled_at<=now();
+  SELECT * INTO STRICT v_claim FROM public.claim_pending_edge_job_ids_v1(1);
+  RETURN NEXT ok(v_claim.job_id=v_job AND v_claim.lease_token IS NOT NULL,v_label||' claims just the handoff');
+  v_spec:=public.get_claimed_edge_job_call_spec_v1(v_job,v_claim.lease_token);
+  RETURN NEXT ok(v_spec @> jsonb_build_object('method','POST','body',jsonb_build_object('marker',v_job)),
+    v_label||' resolves the attempted request through its lease');
+  IF p_completed THEN
+   INSERT INTO pg_temp.f267_calls(kind) VALUES ('edge-send');
+   IF p_status BETWEEN 200 AND 299 THEN
+    PERFORM public.mark_claimed_edge_job_success_v1(v_job,v_claim.lease_token,p_status,
+      v_response->'headers',v_response->'body',15);
+   ELSE
+    PERFORM public.mark_claimed_edge_job_failure_v1(v_job,v_claim.lease_token,p_status,
+      v_response->'headers',v_response->'body','controlled failure',15);
+   END IF;
+   RETURN NEXT ok(EXISTS(SELECT FROM public.outbound_calls WHERE id=v_job
+    AND status IN ('completed','failed','permanently_failed','pending_edge')
+    AND lease_expires_at IS NULL AND edge_lease_token IS NULL),v_label||' finalization releases the lease');
+  END IF;
+  RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='edge-send'),
+    v_sends+CASE WHEN p_completed THEN 1 ELSE 0 END,v_label||' counts controlled sends');
+ END IF;
+ RETURN NEXT is((SELECT count(*)::int FROM net.http_request_queue WHERE url=v_url),0,
+   v_label||' produces no new pg_net request');
  SELECT count(*) INTO v_count FROM public.api_call_log WHERE correlation_id=v_correlation;
  RETURN NEXT is(v_count,CASE WHEN p_completed THEN 1 ELSE 0 END,v_label||' terminal-only audit count');
  IF p_poll THEN
-  RETURN NEXT is(v_after,v_before,v_label||' reuses existing request without dispatch');
+  RETURN NEXT ok(v_after=v_before
+    AND (SELECT count(*) FROM pg_temp.f267_calls WHERE kind='poll' AND request_id=267)>v_polls
+    AND EXISTS(SELECT FROM public.outbound_calls WHERE id=v_job AND status<>'pending_edge'
+      AND NOT (context ? 'edge_dispatch')),v_label||' polls the seeded request without a new send or Edge enqueue');
  END IF;
  IF p_completed THEN
   RETURN NEXT ok(EXISTS(SELECT 1 FROM public.api_call_log WHERE correlation_id=v_correlation
@@ -106,6 +155,15 @@ BEGIN
   ELSE PERFORM public.dispatch_outbound_call_inline(v_job,
     '{"timeout_seconds":1,"poll_max_seconds":0,"poll_interval_ms":50,"pending_reschedule_seconds":60,"lease_seconds":60}'); END IF;
   PERFORM set_config('search_path','public,extensions,pgtap,pg_temp',true);
+  IF NOT p_poll THEN
+   SELECT count(*) INTO v_claims FROM public.claim_pending_edge_job_ids_v1(1);
+   RETURN NEXT is(v_claims,0,v_label||' cannot claim a completed job again');
+   RETURN NEXT throws_ok(format('SELECT public.mark_claimed_edge_job_success_v1(%L,%L,200,%L,%L,15)',
+    v_job,v_claim.lease_token,'{}','{}'),'P0001',
+    format('mark_claimed_edge_job_success_v1: active lease for job %s not found',v_job),v_label||' stale finalization is refused');
+   RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='edge-send'),v_sends+1,
+    v_label||' a second attempt cannot send again');
+  END IF;
   RETURN NEXT is((SELECT count(*)::int FROM public.api_call_log WHERE correlation_id=v_correlation),1,
    v_label||' repeated terminal invocation cannot duplicate audit');
   RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='dispatch'),v_after,
@@ -117,15 +175,19 @@ BEGIN
     v_label||' pending retains request identity and releases lease');
   -- Advance only this fixture's due time; transport completion remains supplied by the existing poll seam.
   UPDATE public.outbound_calls SET scheduled_at=now()-interval '1 second' WHERE id=v_job;
+  SELECT count(*) INTO v_polls FROM pg_temp.f267_calls WHERE kind='poll' AND request_id=267;
   PERFORM set_config('f267.response','{"status":200,"completed":true,"headers":{},"body":{}}',true);
   v_result:=public.dispatch_outbound_call_inline(v_job,
     '{"timeout_seconds":1,"poll_max_seconds":0,"poll_interval_ms":50,"pending_reschedule_seconds":60,"lease_seconds":60}');
   PERFORM set_config('search_path','public,extensions,pgtap,pg_temp',true);
   RETURN NEXT is(v_result->>'status','completed',v_label||' later same request completes');
-  RETURN NEXT ok(NOT EXISTS(SELECT 1 FROM pg_temp.f267_calls WHERE kind='poll'
-    AND request_id IS DISTINCT FROM 267::bigint),v_label||' polling keeps exact request id');
-  RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='dispatch'),v_before,
-    v_label||' later completion does not dispatch again');
+  RETURN NEXT ok((SELECT count(*) FROM pg_temp.f267_calls WHERE kind='poll' AND request_id=267)>v_polls
+    AND NOT EXISTS(SELECT 1 FROM pg_temp.f267_calls WHERE kind='poll' AND request_id IS DISTINCT FROM 267::bigint),
+    v_label||' later completion polls the exact seeded request');
+  RETURN NEXT ok((SELECT count(*) FROM pg_temp.f267_calls WHERE kind='dispatch')=v_before
+    AND NOT EXISTS(SELECT FROM net.http_request_queue WHERE url=v_url)
+    AND EXISTS(SELECT FROM public.outbound_calls WHERE id=v_job AND status='completed' AND NOT (context ? 'edge_dispatch')),
+    v_label||' later completion creates no transport row or Edge enqueue');
   RETURN NEXT is((SELECT count(*)::int FROM public.api_call_log WHERE correlation_id=v_correlation),1,
     v_label||' only later terminal completion is audited');
   RETURN NEXT ok(EXISTS(SELECT 1 FROM public.outbound_calls WHERE id=v_job AND status='completed'
@@ -186,19 +248,38 @@ CREATE OR REPLACE FUNCTION public.log_api_call_event(p_job_id UUID,p_request JSO
 BEGIN RAISE EXCEPTION 'fixture-sink-private'; END;
 $$;
 CREATE FUNCTION pg_temp.f267_sink_case(p_lane TEXT) RETURNS SETOF TEXT LANGUAGE plpgsql AS $$
-DECLARE v_job UUID:=gen_random_uuid();v_result JSONB;v_dispatch INT;
+DECLARE v_job UUID:=gen_random_uuid();v_result JSONB;v_dispatch INT;v_claim RECORD;
+ v_sends INT;v_correlation UUID:=gen_random_uuid();v_url TEXT;
 BEGIN
  INSERT INTO public.outbound_calls(id,call_type,target_type,target_id,method,url,headers,body,
  status,priority,retry_count,max_retries,scheduled_at,created_at)
  SELECT v_job,'provider_api','provider',provider,'POST','https://example.test/f267-sink',
  '{}','{}','pending',100,0,1,now()-interval '1 minute',now() FROM pg_temp.f267_ids;
  PERFORM set_config('f267.job',v_job::text,true);
- PERFORM set_config('f267.response','{"status":200,"completed":true,"headers":{},"body":{},"latency_ms":1}',true);
+ UPDATE public.outbound_calls SET correlation_id=v_correlation WHERE id=v_job RETURNING url INTO v_url;
+ PERFORM set_config('f267.response',jsonb_build_object('status',202,'completed',false,
+  'edge_dispatch',(SELECT jsonb_build_object('url',url,'method',method,'headers',headers,'body',body)
+    FROM public.outbound_calls WHERE id=v_job))::text,true);
+ SELECT count(*) INTO v_sends FROM pg_temp.f267_calls WHERE kind='edge-send';
  IF p_lane='worker' THEN v_result:=public.run_outbound_worker()::jsonb;
  ELSE v_result:=public.dispatch_outbound_call_inline(v_job,
  '{"timeout_seconds":1,"poll_max_seconds":0,"poll_interval_ms":50,"pending_reschedule_seconds":60,"lease_seconds":60}'); END IF;
  PERFORM set_config('search_path','public,extensions,pgtap,pg_temp',true);
- RETURN NEXT ok(v_result->>'status'='completed',p_lane||' audit failure preserves completed result');
+ RETURN NEXT ok(v_result->>'status'=CASE WHEN p_lane='worker' THEN 'completed' ELSE 'pending' END
+  AND EXISTS(SELECT FROM public.outbound_calls WHERE id=v_job AND status='pending_edge'),
+  p_lane||' audit failure fixture reaches Edge');
+ RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='edge-send'),v_sends,
+  p_lane||' enqueue created no sends');
+ RETURN NEXT is((SELECT count(*)::int FROM public.api_call_log WHERE correlation_id=v_correlation),0,
+  p_lane||' enqueue created no audit');
+ UPDATE public.outbound_calls SET scheduled_at=now()+interval '100 years'
+ WHERE id<>v_job AND status IN ('pending_edge','failed') AND scheduled_at<=now();
+ SELECT * INTO STRICT v_claim FROM public.claim_pending_edge_job_ids_v1(1);
+ RETURN NEXT ok(v_claim.job_id=v_job AND v_claim.lease_token IS NOT NULL
+  AND public.get_claimed_edge_job_call_spec_v1(v_job,v_claim.lease_token)->>'method'='POST',
+  p_lane||' obtains the failing-audit job spec under its lease');
+ INSERT INTO pg_temp.f267_calls(kind) VALUES ('edge-send');
+ PERFORM public.mark_claimed_edge_job_success_v1(v_job,v_claim.lease_token,200,'{}','{}',1);
  RETURN NEXT ok(EXISTS(SELECT 1 FROM public.outbound_calls WHERE id=v_job AND status='completed'
  AND retry_count=0 AND lease_expires_at IS NULL),p_lane||' audit failure cannot requeue');
  SELECT count(*) INTO v_dispatch FROM pg_temp.f267_calls WHERE kind='dispatch';
@@ -208,6 +289,14 @@ BEGIN
  PERFORM set_config('search_path','public,extensions,pgtap,pg_temp',true);
  RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='dispatch'),v_dispatch,
  p_lane||' failed audit does not authorize resend');
+ RETURN NEXT is((SELECT count(*)::int FROM public.claim_pending_edge_job_ids_v1(1)),0,
+  p_lane||' audit failure cannot authorize a new claim');
+ RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='edge-send'),v_sends+1,
+  p_lane||' audit failure leaves exactly one send');
+ RETURN NEXT is((SELECT count(*)::int FROM public.api_call_log WHERE correlation_id=v_correlation),0,
+  p_lane||' the failed audit sink leaves no row');
+ RETURN NEXT ok(NOT EXISTS(SELECT FROM net.http_request_queue WHERE url=v_url),
+  p_lane||' the failed audit sink creates no transport row');
 END;
 $$;
 SELECT * FROM pg_temp.f267_sink_case('worker');
