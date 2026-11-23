@@ -1,5 +1,26 @@
 BEGIN;
 
+DO $edge_default$
+DECLARE
+  v_signature regprocedure;
+  v_definition text;
+  v_default CONSTANT text := $old$->>'enabled', '')::BOOLEAN, TRUE)$old$;
+BEGIN
+  FOREACH v_signature IN ARRAY ARRAY[
+    'public.resolve_edge_dispatch_enabled_v1()'::regprocedure,
+    'public.call_api(text,text,jsonb,jsonb,integer)'::regprocedure,
+    'public.call_api_wait(text,text,jsonb,jsonb,integer,integer)'::regprocedure
+  ] LOOP
+    v_definition := pg_catalog.pg_get_functiondef(v_signature);
+    IF cardinality(string_to_array(v_definition, v_default)) IS DISTINCT FROM 2 THEN
+      RAISE EXCEPTION 'Expected one implicit Edge dispatch default in %', v_signature;
+    END IF;
+    -- The catalog definition uses CREATE OR REPLACE, preserving owner and ACL.
+    EXECUTE replace(v_definition, v_default, replace(v_default, 'TRUE', 'FALSE'));
+  END LOOP;
+END;
+$edge_default$;
+
 CREATE FUNCTION public.outbound_wake_relay_state_v1()
 RETURNS TABLE (endpoint text, endpoint_matches boolean, dispatch_enabled boolean, blocked_with_pending_work boolean)
 LANGUAGE sql
@@ -17,7 +38,7 @@ AS $function$
   SELECT endpoint, endpoint_matches, dispatch_enabled,
          CASE WHEN endpoint_matches AND dispatch_enabled THEN false ELSE EXISTS (
            SELECT 1 FROM public.outbound_calls
-           WHERE status = 'pending_edge'
+           WHERE (status = 'pending_edge' AND (scheduled_at <= now() OR scheduled_at IS NULL))
               OR (status = 'failed' AND scheduled_at <= now() AND retry_count < max_retries
                   AND (lease_expires_at IS NULL OR lease_expires_at < now()))
          ) END

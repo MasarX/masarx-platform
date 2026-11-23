@@ -8,14 +8,19 @@ relay_psql() {
     timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1
 }
 
-relay_endpoint_matches() {
+relay_policy_status() {
   relay_psql <<'SQL'
 \getenv endpoint OUTBOUND_WAKE_ENDPOINT
 BEGIN TRANSACTION READ ONLY;
 SET LOCAL statement_timeout = '8s';
 SET LOCAL search_path = pg_catalog;
 SET LOCAL log_parameter_max_length_on_error = 0;
-SELECT COALESCE(public.resolve_settings('edge_dispatch_policy', 'global', NULL)->>'endpoint_url' = $1::text, false)
+WITH policy AS MATERIALIZED (
+  SELECT public.resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
+)
+SELECT COALESCE(value->>'endpoint_url' = $1::text, false),
+       COALESCE(jsonb_typeof(value->'enabled') = 'boolean', false)
+FROM policy
 \bind :endpoint
 \g
 COMMIT;
@@ -40,10 +45,10 @@ sync_endpoint() (
     printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
       sha256sum --check --status || return 1
 
-  matches="$(relay_endpoint_matches)" || return 1
-  case "$matches" in
-    t) return 0 ;;
-    f) ;;
+  state="$(relay_policy_status)" || return 1
+  case "$state" in
+    't|t') printf '%s\n' "$state"; return 0 ;;
+    't|f'|'f|t'|'f|f') ;;
     *) return 1 ;;
   esac
   relay_psql >/dev/null <<'SQL' || return 1
@@ -53,24 +58,32 @@ SET LOCAL statement_timeout = '8s';
 SET LOCAL search_path = pg_catalog;
 SET LOCAL log_parameter_max_length_on_error = 0;
 WITH policy AS MATERIALIZED (
-  SELECT public.resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
+  SELECT COALESCE(public.resolve_settings('edge_dispatch_policy', 'global', NULL), '{}'::jsonb) AS value
 ), changed AS MATERIALIZED (
-  SELECT value FROM policy WHERE value->>'endpoint_url' IS DISTINCT FROM $1::text
+  SELECT value FROM policy
+  WHERE jsonb_typeof(value) = 'object'
+    AND (NOT (value ? 'enabled') OR jsonb_typeof(value->'enabled') = 'boolean')
+    AND (value->>'endpoint_url' IS DISTINCT FROM $1::text OR NOT (value ? 'enabled'))
 )
 SELECT 1 FROM changed
 CROSS JOIN LATERAL public.upsert_settings_value_v1('edge_dispatch_policy', 'global', NULL,
-  jsonb_set(COALESCE(changed.value, '{}'::jsonb), '{endpoint_url}', to_jsonb($1::text)),
+  jsonb_build_object('enabled', false) || changed.value || jsonb_build_object('endpoint_url', $1::text),
   1, 'Sync outbound wake endpoint from deploy configuration');
 \bind :endpoint
 \g
 COMMIT;
 SQL
-  matches="$(relay_endpoint_matches)" && [[ "$matches" == t ]]
+  relay_policy_status
 )
 
-if sync_endpoint 2>/dev/null; then
-  printf 'endpoint_matches_expected=true\n'
-else
-  printf 'endpoint_matches_expected=false\n'
-  exit 1
+endpoint_matches_expected=false
+enabled_explicit=false
+if state="$(sync_endpoint 2>/dev/null)"; then
+  case "$state" in
+    't|t') endpoint_matches_expected=true; enabled_explicit=true ;;
+    't|f') endpoint_matches_expected=true ;;
+    'f|t') enabled_explicit=true ;;
+  esac
 fi
+printf 'endpoint_matches_expected=%s\nenabled_explicit=%s\n' "$endpoint_matches_expected" "$enabled_explicit"
+[[ "$endpoint_matches_expected" == true && "$enabled_explicit" == true ]]

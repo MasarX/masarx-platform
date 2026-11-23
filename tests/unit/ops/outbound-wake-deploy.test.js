@@ -75,10 +75,15 @@ function runPolicyReadout(input) {
 }
 
 test.each([
-  ['already matches', 't', 't', 0, ['read', 'endpoint_matches_expected=true']],
-  ['differs, then matches', 'f', 't', 0, ['read', 'write', 'read', 'endpoint_matches_expected=true']],
-  ['read-back differs', 'f', 'f', 1, ['read', 'write', 'read', 'endpoint_matches_expected=false']],
-])('deploy sync handles %s', (_name, before, after, status, output) => {
+  ['already matches', 't', 'false', '', null, true, true],
+  ['missing policy', 'f', 'absent', '', 'false', true, true],
+  ['matching endpoint without enabled', 't', 'absent', '', 'false', true, true],
+  ['keeps explicit true', 'f', 'true', '', 'true', true, true],
+  ['keeps explicit false', 'f', 'false', '', 'false', true, true],
+  ['read-back endpoint differs', 'f', 'true', 'f|t', 'true', false, true],
+  ['read-back enabled is absent', 'f', 'absent', 't|f', 'false', true, false],
+  ['refuses malformed explicit enabled', 'f', 'invalid', '', null, false, false],
+])('deploy sync handles %s', (_name, before, enabled, after, writtenValue, matches, explicit) => {
   expect(deploy.indexOf(deployCommand)).toBeGreaterThan(deploy.indexOf('"$cli" db push --linked'));
   expect(deploy.indexOf(deployCommand)).toBeLessThan(deploy.indexOf('"$cli" functions deploy'));
   const ref = randomUUID().replace(/-/g, '').slice(0, 20).replace(/[0-9]/g, 'x');
@@ -99,12 +104,25 @@ test.each([
       sql=$(cat)
       [[ "$OUTBOUND_WAKE_ENDPOINT" == "$EXPECTED_ENDPOINT" && "$PGHOST" == "$POOLER_HOST" ]] || return 1
       if [[ "$sql" == *public.upsert_settings_value_v1* ]]; then
-        [[ "$sql" == *"IS DISTINCT FROM"* && "$sql" == *jsonb_set* ]] || return 1
-        printf 'write\n' >&3
-        printf 'changed\n' > "$written"
+        [[ "$sql" == *"IS DISTINCT FROM \\$1::text OR NOT (value ? 'enabled')"* &&
+           "$sql" == *"NOT (value ? 'enabled') OR jsonb_typeof(value->'enabled') = 'boolean'"* &&
+           "$sql" == *"jsonb_build_object('enabled', false) || changed.value || jsonb_build_object('endpoint_url',"* ]] || return 1
+        case "$BEFORE_ENABLED" in
+          absent) printf 'false\n' > "$written" ;;
+          true|false) printf '%s\n' "$BEFORE_ENABLED" > "$written" ;;
+          *) return 0 ;;
+        esac
+        printf 'write:%s\n' "$(cat "$written")" >&3
       elif [[ "$sql" == *public.resolve_settings* && "$sql" == *"READ ONLY"* ]]; then
+        [[ "$sql" == *"jsonb_typeof(value->'enabled') = 'boolean'"* ]] || return 1
         printf 'read\n' >&3
-        if [[ -s "$written" ]]; then printf '%s\n' "$AFTER"; else printf '%s\n' "$BEFORE"; fi
+        if [[ -s "$written" ]]; then
+          printf '%s\n' "\${AFTER:-t|t}"
+        elif [[ "$BEFORE_ENABLED" == true || "$BEFORE_ENABLED" == false ]]; then
+          printf '%s|t\n' "$BEFORE"
+        else
+          printf '%s|f\n' "$BEFORE"
+        fi
       else
         return 1
       fi
@@ -118,7 +136,12 @@ test.each([
     POOLER_HOST: ['aws-0-ci', 'pooler', 'supabase', 'com'].join('.'),
     EXPECTED_ENDPOINT: `https://${[ref, 'supabase', 'co'].join('.')}/functions/v1/api-caller`,
     BEFORE: before,
+    BEFORE_ENABLED: enabled,
     AFTER: after,
   });
-  expect(result).toEqual({ status, stdout: `${output.join('\n')}\n`, stderr: '' });
+  const output = ['read'];
+  if (writtenValue !== null) output.push(`write:${writtenValue}`, 'read');
+  if (enabled === 'invalid') output.push('read');
+  output.push(`endpoint_matches_expected=${matches}`, `enabled_explicit=${explicit}`);
+  expect(result).toEqual({ status: matches && explicit ? 0 : 1, stdout: `${output.join('\n')}\n`, stderr: '' });
 });
