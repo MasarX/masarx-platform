@@ -171,8 +171,11 @@ describe('api-caller bounded batch lease ownership contract', () => {
   });
 
   test('only fenced finalizers write leased Edge terminal audits', () => {
-    const transport = fs.readFileSync(path.join(root,
-      'supabase/migrations/20261123047100_renderer_calls_via_edge.sql'), 'utf8');
+    const migrationDir = path.join(root, 'supabase/migrations');
+    const matches = fs.readdirSync(migrationDir)
+      .filter((name) => name.endsWith('_renderer_calls_via_edge.sql'));
+    expect(matches).toHaveLength(1);
+    const transport = fs.readFileSync(path.join(migrationDir, matches[0]), 'utf8');
     const auditWriters = [...transport.matchAll(/^CREATE (?:OR REPLACE )?FUNCTION (?:public|api)\.(\w+)\([\s\S]+?\bAS (\$\w*\$)([\s\S]+?)^\2;/gim)]
       .filter(([, , , body]) => body.includes('PERFORM public.log_api_call_event('));
     expect(auditWriters.map(([, name]) => name)).toEqual([
