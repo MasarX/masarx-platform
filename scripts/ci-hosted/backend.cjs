@@ -364,12 +364,14 @@ function imagePreflight(text, event, now = new Date(), ref = process.env.GITHUB_
   console.log('::warning title=Unpinned qualification only::Protected main permits temporary tag pulls; this is not digest-pinned acceptance.');
   return { qualificationOnly: true };
 }
-async function imageGuard(pins, file, env) {
+async function imageGuard(pins, file, env, initContainer) {
   const policyFile = `${file}.policy.json`;
   const host = env.DOCKER_HOST || 'unix:///var/run/docker.sock';
   if (!host.startsWith('unix://')) throw new Error('Digest guard requires the hosted Unix Docker socket');
   fs.writeFileSync(file, JSON.stringify(pins), { mode: 0o600 });
-  const child = fork('scripts/ci-hosted/docker-images.cjs', [file, host.slice(7), policyFile], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const args = [file, host.slice(7), policyFile];
+  if (initContainer) args.push(initContainer);
+  const child = fork('scripts/ci-hosted/docker-images.cjs', args, { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   try {
     const port = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Digest guard startup timed out')), 10000);
@@ -380,6 +382,11 @@ async function imageGuard(pins, file, env) {
     return { child, policyFile, env: { ...env, DOCKER_HOST: `tcp://127.0.0.1:${port}`, DOCKER_TLS_VERIFY: '', DOCKER_CERT_PATH: '',
       SUPABASE_INTERNAL_IMAGE_REGISTRY: 'public.ecr.aws' } };
   } catch (error) { child.kill(); throw error; }
+}
+async function verifyHostedDatabaseInit(checked, env, container) {
+  const pid1 = (await checked('docker', ['exec', container, 'cat', '/proc/1/comm'], env, 10000, { quiet: true })).trim();
+  if (pid1 !== 'docker-init') throw new Error('Hosted pgTAP database requires docker-init as PID 1');
+  return pid1;
 }
 async function backendLint(summary, commands, execute, file = 'ci-reports/db-lint.json') {
   const lint = summary.lint = { ok: true, commands: [], findings: [] };
@@ -409,6 +416,7 @@ async function qualify(diagnostic) {
   if (process.argv[2] === 'preflight') return;
   const shard = process.env.PGTAP_SHARD;
   const disposableShard = isHostedPgtap(process.env);
+  if (disposableShard && pinState.qualificationOnly) throw new Error('Hosted pgTAP database init requires the digest-pinned Docker guard');
   const workers = process.env.PGTAP_WORKERS || 'nproc';
   if (disposableShard) hostedWorkerLimit(workers, PGTAP_WORKER_CAP);
   const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard) : undefined;
@@ -430,6 +438,7 @@ async function qualify(diagnostic) {
   const bin = path.join(temp, 'bin');
   fs.mkdirSync(bin);
   const project = `hosted-${crypto.randomBytes(8).toString('hex')}`;
+  const databaseContainer = `supabase_db_${project}`;
   const env = { ...process.env, ENV_FILE: os.devNull, ENV_FILE_OVERRIDE: '0', ENV_FILE_APPEND: '0',
     QA_RUN_ID: '', NX_DAEMON: 'false', PATH: `${bin}${path.delimiter}${process.env.PATH}` };
   const cli = path.join(bin, 'supabase');
@@ -468,7 +477,7 @@ async function qualify(diagnostic) {
     if (!pinState.qualificationOnly) {
       diskFloor(dockerRoot);
       diagnostic.stage = 'image-guard';
-      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env);
+      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env, disposableShard ? databaseContainer : undefined);
       cliEnv = guard.env;
     }
     diagnostic.stage = 'cli-download';
@@ -502,6 +511,9 @@ async function qualify(diagnostic) {
     started = true; // A partial start must also be stopped.
     console.log(`Stack service exclusions: ${lane.exclude.join(',')}`);
     await timed('stack-start', () => checked(cli, ['start', '--debug', '--workdir', temp, '-x', lane.exclude.join(',')], cliEnv, 6 * 60000));
+    if (disposableShard) {
+      summary.databasePid1 = await timed('database-init', () => verifyHostedDatabaseInit(checked, env, databaseContainer));
+    }
     diagnostic.stage = 'stack-status';
     const status = JSON.parse(await checked(cli, ['status', '--workdir', temp, '-o', 'json'], cliEnv, undefined, { quiet: true }));
     if (!status.DB_URL) throw new Error('Local stack did not provide DB_URL');
@@ -513,7 +525,7 @@ async function qualify(diagnostic) {
     diagnostic.stage = 'database-connect';
     const { Client } = require('pg');
     const db = new Client({ connectionString: env.DATABASE_URL, connectionTimeoutMillis: 15000, query_timeout: 15000 });
-    const stackAdminFor = (database, timeout, ...commands) => checked('docker', ['exec', `supabase_db_${project}`, 'sh', '-ec',
+    const stackAdminFor = (database, timeout, ...commands) => checked('docker', ['exec', databaseContainer, 'sh', '-ec',
       'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"', 'sh', '--host=127.0.0.1', '--username=supabase_admin',
       `--dbname=${database}`, '--no-psqlrc', '--no-password', '--quiet', '--tuples-only', '--no-align', '--set=ON_ERROR_STOP=1',
       ...commands.flatMap(command => ['-c', command])], env, timeout, { quiet: true });
@@ -544,7 +556,7 @@ async function qualify(diagnostic) {
         }));
       } catch (error) {
         migrationError = error;
-        await recordMigrationDeadlock(error, db, () => checked('docker', ['logs', '--tail', '300', `supabase_db_${project}`], env, 10000,
+        await recordMigrationDeadlock(error, db, () => checked('docker', ['logs', '--tail', '300', databaseContainer], env, 10000,
           { quiet: true, includeStderr: true }), diagnostic);
         throw error;
       }
@@ -672,4 +684,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, withHostedCloneIsolation, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, withHostedCloneIsolation, pgtapDeadline };
