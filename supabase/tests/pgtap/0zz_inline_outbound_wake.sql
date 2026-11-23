@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(16);
+SELECT plan(27);
 
 CREATE TEMP TABLE inline_wake_fixture AS SELECT
   gen_random_uuid() AS org, gen_random_uuid() AS provider,
@@ -15,7 +15,8 @@ SELECT provider, org, 'Inline wake fixture provider', 'http' FROM inline_wake_fi
 
 CREATE TEMP TABLE inline_wake_jobs AS
 SELECT lane, gen_random_uuid() AS job
-FROM (VALUES ('first'), ('within'), ('after'), ('disabled'), ('invalid'), ('failure')) AS lanes(lane);
+FROM (VALUES ('first'), ('within'), ('after'), ('disabled'), ('invalid'), ('failure'),
+  ('reply-first'), ('reply-within'), ('reply-disabled'), ('reply-invalid'), ('reply-failure')) AS lanes(lane);
 INSERT INTO public.outbound_calls
   (id, call_type, target_type, target_id, method, url, status, scheduled_at, context)
 SELECT job, 'provider_api', 'provider', provider, 'POST', origin || '/' || job, 'pending', now(),
@@ -59,7 +60,9 @@ SELECT is(api.try_start_inline_outbound_wake_v1(), NULL::integer, 'the inline ad
 SELECT ok(has_function_privilege('edge_api_caller_role', 'api.try_start_inline_outbound_wake_v1()', 'EXECUTE')
   AND NOT has_function_privilege('anon', 'api.try_start_inline_outbound_wake_v1()', 'EXECUTE')
   AND NOT has_function_privilege('authenticated', 'api.try_start_inline_outbound_wake_v1()', 'EXECUTE')
-  AND NOT has_function_privilege('service_role', 'public.post_outbound_wake_v1(text,boolean)', 'EXECUTE'),
+  AND NOT has_function_privilege('service_role', 'public.post_outbound_wake_v1(text,boolean)', 'EXECUTE')
+  AND NOT has_function_privilege('service_role', 'public.try_post_inline_outbound_wake_v1()', 'EXECUTE')
+  AND NOT has_function_privilege('edge_api_caller_role', 'public.try_post_inline_outbound_wake_v1()', 'EXECUTE'),
   'inline wake transport remains owner-only and admission is denied to browser roles');
 
 DO $$ BEGIN
@@ -90,6 +93,61 @@ SELECT is(pg_temp.inline_wake_queue_count(), 2::bigint, 'an inline handoff with 
 
 UPDATE public.settings s SET cached_value = jsonb_set(s.cached_value, '{endpoint_url}', to_jsonb(f.origin || '/functions/v1/api-caller'))
 FROM inline_wake_fixture f WHERE s.category = 'edge_dispatch_policy' AND s.scope_type = 'global' AND s.scope_id IS NULL;
+
+-- Supply an already queued job from the core while exercising the real reply dispatch wrapper.
+CREATE OR REPLACE FUNCTION public.send_comms_reply_core(
+  p_webhook_id uuid, p_webhook_source_id uuid, p_comm jsonb, p_organization_id uuid
+)
+RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path TO public, extensions, pg_temp AS $fixture$
+  SELECT jsonb_build_object('queued', true, 'outbound_call_id', p_webhook_id);
+$fixture$;
+
+SELECT public.upsert_settings_value_v1('comms_reply_policy', 'global', NULL,
+  '{"enabled":true,"dispatch":{"mode":"edge","timeout_seconds":10}}'::jsonb,
+  1, 'Inline wake fixture');
+
+CREATE FUNCTION pg_temp.inline_wake_reply_handed_off(p_lane text)
+RETURNS boolean LANGUAGE plpgsql AS $fixture$
+DECLARE
+  v_job uuid;
+  v_org uuid;
+  v_result jsonb;
+BEGIN
+  SELECT job, org INTO STRICT v_job, v_org
+  FROM pg_temp.inline_wake_jobs CROSS JOIN pg_temp.inline_wake_fixture WHERE lane = p_lane;
+  v_result := public.send_comms_reply(v_job, NULL, '{}'::jsonb, v_org);
+  RETURN v_result IS NOT DISTINCT FROM jsonb_build_object(
+    'queued', true, 'outbound_call_id', v_job, 'dispatch_mode', 'edge',
+    'dispatch', jsonb_build_object('status', 'queued', 'mode', 'edge', 'timeout_seconds', 10)
+  ) AND EXISTS (SELECT 1 FROM public.outbound_calls WHERE id = v_job AND status = 'pending_edge');
+END;
+$fixture$;
+
+UPDATE public.cron_config SET inline_wake_not_before = NULL, inline_wake_pending = false
+WHERE worker_name = 'outbound_wake_relay';
+SELECT ok(pg_temp.inline_wake_reply_handed_off('reply-first'), 'edge-mode reply preserves its result and hands off the job');
+SELECT is((SELECT count(*) FROM net.http_request_queue q CROSS JOIN inline_wake_fixture f
+  WHERE q.url = f.origin || '/functions/v1/outbound-wake?inline=1'),
+  3::bigint, 'first edge-mode reply queues exactly one wake');
+
+UPDATE public.cron_config SET inline_wake_not_before = clock_timestamp() + interval '2 seconds'
+WHERE worker_name = 'outbound_wake_relay' AND inline_wake_not_before IS NOT NULL;
+SELECT ok(pg_temp.inline_wake_reply_handed_off('reply-within'), 'a coalesced edge-mode reply still hands off its job');
+SELECT is(pg_temp.inline_wake_queue_count(), 3::bigint, 'a second edge-mode reply inside the window queues no extra wake');
+
+UPDATE public.cron_config SET inline_wake_not_before = NULL WHERE worker_name = 'outbound_wake_relay';
+UPDATE public.settings SET cached_value = jsonb_set(cached_value, '{enabled}', 'false')
+WHERE category = 'edge_dispatch_policy' AND scope_type = 'global' AND scope_id IS NULL;
+SELECT ok(pg_temp.inline_wake_reply_handed_off('reply-disabled'), 'edge-mode reply hands off its job with Edge dispatch disabled');
+SELECT is(pg_temp.inline_wake_queue_count(), 3::bigint, 'an edge-mode reply with dispatch disabled queues no wake');
+
+UPDATE public.settings s SET cached_value = s.cached_value || jsonb_build_object('enabled', true, 'endpoint_url', f.origin || '/other')
+FROM inline_wake_fixture f WHERE s.category = 'edge_dispatch_policy' AND s.scope_type = 'global' AND s.scope_id IS NULL;
+SELECT ok(pg_temp.inline_wake_reply_handed_off('reply-invalid'), 'edge-mode reply hands off its job with a mismatched endpoint');
+SELECT is(pg_temp.inline_wake_queue_count(), 3::bigint, 'an edge-mode reply with a mismatched endpoint queues no wake');
+
+UPDATE public.settings s SET cached_value = jsonb_set(s.cached_value, '{endpoint_url}', to_jsonb(f.origin || '/functions/v1/api-caller'))
+FROM inline_wake_fixture f WHERE s.category = 'edge_dispatch_policy' AND s.scope_type = 'global' AND s.scope_id IS NULL;
 CREATE TEMP SEQUENCE inline_wake_failure_attempt;
 CREATE OR REPLACE FUNCTION public.post_outbound_wake_v1(p_endpoint text, p_inline boolean)
 RETURNS void LANGUAGE plpgsql AS $fixture$
@@ -105,7 +163,10 @@ SELECT ok(is_called, 'the failing inline wake was attempted') FROM pg_temp.inlin
 SELECT ok(o.status = 'pending_edge' AND o.lease_expires_at IS NULL AND o.edge_lease_token IS NULL,
   'wake failure leaves a claimable handoff for the minute sweep')
 FROM public.outbound_calls o JOIN inline_wake_jobs j ON j.job = o.id WHERE j.lane = 'failure';
-SELECT is(pg_temp.inline_wake_queue_count(), 2::bigint, 'the failed inline wake adds no queued request');
+SELECT is(pg_temp.inline_wake_queue_count(), 3::bigint, 'the failed inline wake adds no queued request');
+SELECT ok(pg_temp.inline_wake_reply_handed_off('reply-failure'), 'wake failure preserves the edge-mode reply result and handoff');
+SELECT is(last_value, 2::bigint, 'the reply also attempted the failing wake') FROM pg_temp.inline_wake_failure_attempt;
+SELECT is(pg_temp.inline_wake_queue_count(), 3::bigint, 'the failed reply wake adds no queued request');
 
 SELECT * FROM finish();
 ROLLBACK;

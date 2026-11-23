@@ -36,6 +36,23 @@ $function$;
 REVOKE EXECUTE ON FUNCTION public.post_outbound_wake_v1(text, boolean)
   FROM PUBLIC, anon, authenticated, service_role, edge_api_caller_role, ui_rpc_executor;
 
+CREATE FUNCTION public.try_post_inline_outbound_wake_v1()
+RETURNS void
+LANGUAGE plpgsql
+SET search_path TO pg_catalog, pg_temp
+AS $function$
+BEGIN
+  PERFORM public.post_outbound_wake_v1(endpoint, true)
+  FROM public.outbound_wake_relay_state_v1()
+  WHERE endpoint_matches AND dispatch_enabled;
+EXCEPTION WHEN others THEN
+  RAISE WARNING 'outbound_inline_wake_enqueue_failed';
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.try_post_inline_outbound_wake_v1()
+  FROM PUBLIC, anon, authenticated, service_role, edge_api_caller_role, ui_rpc_executor;
+
 CREATE FUNCTION api.try_start_inline_outbound_wake_v1()
 RETURNS integer
 LANGUAGE plpgsql
@@ -94,13 +111,7 @@ DECLARE
             p_job_id, v_job.method, v_dispatch_headers, v_timeout_seconds
         );$old$;
   v_wake CONSTANT text := $new$
-        BEGIN
-            PERFORM public.post_outbound_wake_v1(endpoint, true)
-            FROM public.outbound_wake_relay_state_v1()
-            WHERE endpoint_matches AND dispatch_enabled;
-        EXCEPTION WHEN others THEN
-            RAISE WARNING 'outbound_inline_wake_enqueue_failed';
-        END;$new$;
+        PERFORM public.try_post_inline_outbound_wake_v1();$new$;
 BEGIN
   IF cardinality(string_to_array(v_definition, v_handoff)) IS DISTINCT FROM 2 THEN
     RAISE EXCEPTION 'Expected one inline handoff call';
@@ -112,5 +123,22 @@ $patch$;
 REVOKE EXECUTE ON FUNCTION public.dispatch_outbound_call_inline(uuid, jsonb)
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.dispatch_outbound_call_inline(uuid, jsonb) TO service_role;
+
+DO $patch$
+DECLARE
+  v_definition text := pg_get_functiondef('public.send_comms_reply(uuid,uuid,jsonb,uuid)'::regprocedure);
+  v_handoff CONSTANT text := $old$       WHERE oc.id = v_outbound_call_id;$old$;
+  v_wake CONSTANT text := $new$
+
+      IF FOUND THEN
+        PERFORM public.try_post_inline_outbound_wake_v1();
+      END IF;$new$;
+BEGIN
+  IF cardinality(string_to_array(v_definition, v_handoff)) IS DISTINCT FROM 2 THEN
+    RAISE EXCEPTION 'Expected one edge-mode reply handoff';
+  END IF;
+  EXECUTE replace(v_definition, v_handoff, v_handoff || v_wake);
+END;
+$patch$;
 
 COMMIT;
