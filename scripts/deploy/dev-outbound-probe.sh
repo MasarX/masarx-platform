@@ -37,18 +37,25 @@ probe_psql() {
 
 enqueue_sql() {
   cat <<'SQL'
+\echo ready
 BEGIN;
 SET LOCAL statement_timeout = '8s';
 SET LOCAL search_path = pg_catalog;
-SELECT COALESCE(public.resolve_edge_dispatch_enabled_v1() AND
-  public.resolve_settings('edge_dispatch_policy', 'global', NULL)->>'endpoint_url' = :'probe_base' || '/api-caller',
-  false) AS ready
+WITH policy AS (
+  SELECT public.resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
+)
+SELECT COALESCE(value->'enabled' = 'true'::jsonb AND
+  value->>'endpoint_url' = :'probe_base' || '/api-caller', false) AS ready
+FROM policy
 \gset
 \if :ready
 \else
+  \echo not_ready
+  ROLLBACK;
   \quit
 \endif
 
+\echo fixture
 -- Keep the synthetic fixture and its tagged jobs for audit. Enqueues use the normal workflow guards.
 INSERT INTO public.organizations (name, slug)
 VALUES ('DEV outbound probe', :'probe_marker' || '-' || :'probe_run')
@@ -62,8 +69,8 @@ INSERT INTO public.mapping_configs (organization_id, mapping_type, mapping_key, 
 VALUES (:'org_id', 'provider_response', :'probe_marker' || '-' || :'probe_run', '{}')
 RETURNING id AS mapping_id
 \gset
-INSERT INTO public.operation_templates (provider_id, operation_name, method, url_template, mapping_config_id)
-VALUES (:'provider_id', :'probe_marker', 'GET', :'probe_base' || '/outbound-probe-ack', :'mapping_id')
+INSERT INTO public.operation_templates (provider_id, operation_name, method, url_template, mapping_config_id, handler_key)
+VALUES (:'provider_id', :'probe_marker', 'GET', :'probe_base' || '/outbound-probe-ack', :'mapping_id', 'outbound_http')
 RETURNING id AS operation_id
 \gset
 COMMIT;
@@ -72,9 +79,9 @@ SQL
   local i
   for ((i = 0; i <= probe_count; i++)); do
     if ((i == 0)); then
-      printf '\\set lane relay\n'
+      printf '\\echo enqueue_relay\n\\set lane relay\n'
     else
-      printf '\\set lane inline\n'
+      printf '\\echo enqueue_inline\n\\set lane inline\n'
     fi
     cat <<'SQL'
 BEGIN;
@@ -86,20 +93,26 @@ SELECT public.enqueue_outbound_call_from_operation_template_v1(:'operation_id'::
   :'lane' = 'inline' AS use_inline
 \gset
 \if :use_inline
+  \echo handoff
+  -- This probe measures the Edge handoff. Disable extra SQL response polling.
   SELECT public.dispatch_outbound_call_inline(:'job_id'::uuid,
-    public.resolve_settings('comms_reply_policy', 'global', NULL)->'dispatch') AS dispatch_result
+    jsonb_build_object(
+      'timeout_seconds', public.resolve_settings('api_caller_policy', 'global', NULL)->'default_timeout_seconds',
+      'poll_max_seconds', 0, 'poll_interval_ms', 200, 'pending_reschedule_seconds', 30, 'lease_seconds', 30
+    )) AS dispatch_result
   \gset
   SELECT status = 'pending_edge' AS handed_off FROM public.outbound_calls WHERE id = :'job_id'::uuid
   \gset
   \if :handed_off
   \else
+    ROLLBACK;
     \quit
   \endif
 \endif
 COMMIT;
 SQL
   done
-  printf "SELECT 'ready';\n"
+  printf '\\echo complete\n'
 }
 
 read_probe() {
@@ -160,7 +173,14 @@ COMMIT;
 SQL
 }
 
-enqueue_result="$(enqueue_sql | probe_psql 60s -v "probe_base=$probe_base")" || enqueue_result=''
+enqueue_status=0
+enqueue_output="$(enqueue_sql | probe_psql 60s -v "probe_base=$probe_base")" || enqueue_status=$?
+setup_stage=ready
+while IFS= read -r stage; do
+  case "$stage" in
+    ready|not_ready|fixture|enqueue_relay|enqueue_inline|handoff|complete) setup_stage="$stage" ;;
+  esac
+done <<< "$enqueue_output"
 # Leave room for the last sleep and query within the 10-minute wait.
 deadline=$((SECONDS + 575))
 count='(0|[1-9][0-9]?)'
@@ -171,13 +191,14 @@ while :; do
   [[ "$metrics" =~ $metrics_pattern ]] || exit 1
   IFS='|' read -r enqueued completed failed pending relay inline edge inline_p50 inline_p95 edge_p50 edge_p95 \
     proxy_unavailable proxy_misconfigured proxy_request_failed failed_other <<< "$metrics"
-  if [[ "$enqueue_result" != ready || "$pending" == 0 ]] || ((SECONDS >= deadline)); then
+  if [[ "$setup_stage" != complete || "$pending" == 0 ]] || ((enqueue_status != 0 || SECONDS >= deadline)); then
     break
   fi
   sleep 10
 done
 
 {
+  printf 'probe_setup_stage=%s\n' "$setup_stage"
   printf 'probe_enqueued=%s\nprobe_completed=%s\nprobe_failed=%s\nprobe_pending=%s\n' \
     "$enqueued" "$completed" "$failed" "$pending"
   printf 'probe_relay_completed=%s\nprobe_inline_samples=%s\nprobe_edge_samples=%s\n' "$relay" "$inline" "$edge"
@@ -187,4 +208,4 @@ done
     "$proxy_unavailable" "$proxy_misconfigured" "$proxy_request_failed" "$failed_other"
 } | tee -a "$GITHUB_STEP_SUMMARY"
 
-[[ "$enqueue_result" == ready ]] && ((enqueued == probe_count + 1 && completed >= 1 && relay >= 1 && inline >= 20))
+[[ "$setup_stage" == complete ]] && ((enqueue_status == 0 && enqueued == probe_count + 1 && completed >= 1 && relay >= 1 && inline >= 20))

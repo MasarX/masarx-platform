@@ -21,7 +21,8 @@ const metricNames = [
   'probe_failed_egress_proxy_unavailable', 'probe_failed_egress_proxy_misconfigured',
   'probe_failed_egress_proxy_request_failed', 'probe_failed_other',
 ];
-const output = metrics => metrics.split('|').map((value, i) => metricNames[i] + '=' + (value || 'null') + '\n').join('');
+const output = (metrics, stage = 'complete') => 'probe_setup_stage=' + stage + '\n' +
+  metrics.split('|').map((value, i) => metricNames[i] + '=' + (value || 'null') + '\n').join('');
 
 test('dispatch requires dev and main and shares the database apply concurrency group', () => {
   expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch']);
@@ -82,11 +83,15 @@ psql() {
     [[ "$(grep -Fc 'COMMIT;' <<< "$sql")" == "$((EXPECTED_INLINE + 2))" ]] || return 96
     [[ "$sql" == *public.dispatch_outbound_call_inline* && "$sql" == *'probe_marker'* ]] || return 97
     [[ "$sql" == *'/outbound-probe-ack'* && "$sql" != *'INSERT INTO public.outbound_calls'* ]] || return 98
-    if [[ -n "$ENQUEUE_FAILURE" ]]; then
+    [[ "$sql" == *'mapping_config_id, handler_key)'* && "$sql" == *"'outbound_http')"* ]] || return 100
+    [[ "$sql" == *"value->'enabled' = 'true'::jsonb"* && "$sql" == *"'poll_max_seconds', 0"* ]] || return 101
+    grep -Fq "\\echo $SETUP_STAGE" <<< "$sql" || return 102
+    printf 'ready\n%s\n' "$SETUP_STAGE"
+    if [[ "$SETUP_STAGE" == fixture || "$SETUP_STAGE" == handoff ]]; then
+      printf '%s\n' "$EXPECTED_BASE"
       printf '%s\n' "$EXPECTED_BASE" >&2
       return 3
     fi
-    printf 'ready\n'
   else
     [[ "$sql" == *'BEGIN READ ONLY'* && "$sql" == *"a.row_old->>'status' = 'in_progress_edge'"* &&
        "$sql" == *"a.row_old->>'edge_lease_token' IS NOT NULL"* ]] || return 99
@@ -103,7 +108,7 @@ source scripts/deploy/dev-outbound-probe.sh
       SUPABASE_ACCESS_TOKEN: 'access-fixture', SUPABASE_DB_PASSWORD: 'password-fixture',
       MOCK_POOLER: ['aws-0-ci', 'pooler', 'supabase', 'com'].join('.'),
       EXPECTED_BASE: 'https://' + [fixtureRef, 'supabase', 'co'].join('.') + '/functions/v1',
-      EXPECTED_INLINE: '20', METRICS: completedMetrics, ENQUEUE_FAILURE: '', AFTER_WAIT: completedMetrics,
+      EXPECTED_INLINE: '20', METRICS: completedMetrics, SETUP_STAGE: 'complete', AFTER_WAIT: completedMetrics,
       ...env,
     },
     encoding: 'utf8', timeout: 10000, windowsHide: true,
@@ -143,7 +148,14 @@ test('waits for pending work to complete before reporting', () => {
 
 test('reports partial writes without disclosing a database failure', () => {
   const metrics = '1|1|0|0|1|0|1|||192|192|0|0|0|0';
-  expect(runProbe({ ENQUEUE_FAILURE: '1', METRICS: metrics })).toEqual({ status: 1, stdout: output(metrics), stderr: '' });
+  expect(runProbe({ SETUP_STAGE: 'handoff', METRICS: metrics }))
+    .toEqual({ status: 1, stdout: output(metrics, 'handoff'), stderr: '' });
+});
+
+test.each(['not_ready', 'fixture'])('reports setup stopping at %s with zero enqueues', stage => {
+  const metrics = '0|0|0|0|0|0|0|||||0|0|0|0';
+  expect(runProbe({ SETUP_STAGE: stage, METRICS: metrics }))
+    .toEqual({ status: 1, stdout: output(metrics, stage), stderr: '' });
 });
 
 test('rejects mixed or unexpectedly shaped database output', () => {
