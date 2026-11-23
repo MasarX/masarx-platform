@@ -6,6 +6,11 @@
       "enabled": true
     },
     {
+      "name": "outbound-wake",
+      "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
       "name": "webhook-receiver",
       "auth_mode": "public_no_jwt",
       "enabled": true
