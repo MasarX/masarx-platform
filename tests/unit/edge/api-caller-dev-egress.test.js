@@ -214,7 +214,7 @@ test('DEV deploy writes the environment marker and verifies its digest before up
   const verifier = [...run.matchAll(/secrets list[^\n]+\|\n\s+node -e '([\s\S]+?)' 2>\/dev\/null/g)].at(-1);
   expect(verifier.index).toBeLessThan(run.indexOf('functions deploy'));
   const digest = value => createHash('sha256').update(value).digest('hex');
-  const credentials = ['LABEL_RENDERER_SIGNING_KEY', 'LABEL_RENDERER_GATEWAY_JWT'];
+  const credentials = ['LABEL_RENDERER_SIGNING_KEY', 'LABEL_RENDERER_GATEWAY_JWT', 'EDGE_INTERNAL_CALLER_ROLES'];
   const local = [...credentials.map(name => `${name}=fixture`), 'EDGE_ENVIRONMENT=dev'].join('\n');
   const listed = credentials.map(name => ({ name, value: digest('fixture') }));
   const verify = (environment, marker) => {

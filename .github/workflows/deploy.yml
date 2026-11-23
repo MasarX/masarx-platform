@@ -814,7 +814,8 @@ jobs:
           for (const value of Object.values(bundle)) console.log('::add-mask::' + value);
           fs.writeFileSync(process.env.EDGE_SECRET_FILE, Object.entries(bundle)
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
-            + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n', { mode: 0o600 });
+            + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n'
+            + 'EDGE_INTERNAL_CALLER_ROLES=edge_api_gateway_role,edge_webhook_role,edge_api_caller_role\n', { mode: 0o600 });
           NODE
           if ! node <<'RENDERER_MINT' 2>/dev/null
           const { appendFileSync } = require('node:fs');
@@ -880,7 +881,7 @@ jobs:
               const listed = JSON.parse(readFileSync(0, "utf8"));
               const local = readFileSync(process.env.EDGE_SECRET_FILE, "utf8");
               const names = ["LABEL_RENDERER_SIGNING_KEY", "LABEL_RENDERER_GATEWAY_JWT"];
-              if (process.env.DEPLOY_ENV === "dev") names.push("EDGE_ENVIRONMENT");
+              if (process.env.DEPLOY_ENV === "dev") names.push("EDGE_ENVIRONMENT", "EDGE_INTERNAL_CALLER_ROLES");
               for (const name of names) {
                 const value = local.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1];
                 if (!value || listed.find(entry => entry.name === name)?.value !== createHash("sha256").update(value).digest("hex")) {
