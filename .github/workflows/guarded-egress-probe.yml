@@ -30,6 +30,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           package-manager-cache: false
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do npm ci --ignore-scripts --no-audit --no-fund && break
+            [[ "$attempt" == 3 ]] && exit 1; sleep "$((attempt * 2))"; done
       - name: Verify the guarded proxy
         shell: bash
         env:

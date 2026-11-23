@@ -129,6 +129,19 @@ test('guarded proxy proof is manual, main-only and bound to the selected dev or 
   expect(step.run).toContain('node scripts/deploy/guarded-egress.cjs probe');
 });
 
+test('guarded proxy workflow installs locked dependencies before the probe without a step environment', () => {
+  const steps = probe.jobs.probe.steps;
+  const installIndex = steps.findIndex(step => step.run?.includes('npm ci --ignore-scripts --no-audit --no-fund'));
+  const probeIndex = steps.findIndex(step => step.run?.includes('node scripts/deploy/guarded-egress.cjs probe'));
+  expect(installIndex).toBeGreaterThanOrEqual(0);
+  expect(installIndex).toBeLessThan(probeIndex);
+  expect(steps[installIndex].env).toBeUndefined();
+});
+
+test('guarded proxy workflow passes the hosted install policy', () => {
+  expect(runNode(['scripts/ci-hosted/install-policy.cjs'], {})).toMatchObject({ status: 0 });
+});
+
 test('guarded proxy proof skips network checks only for dev_direct and emits fixed output', () => {
   expect(write('dev', {}, 'probe')).toEqual({ status: 0, stdout: 'egress_mode=dev_direct\n', stderr: '' });
   expect(write('stg', {}, 'probe')).toEqual({ status: 1, stdout: 'egress_mode=missing\n', stderr: '' });
