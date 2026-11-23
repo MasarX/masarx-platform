@@ -36,7 +36,7 @@ const ensureRendererDeps = (): Promise<void> => {
 };
 import { readEnv } from "./_shared/mod.mjs";
 import { resolveCorsPolicy } from "./_shared/cors.mjs";
-import { authorizeLabelRendererRequest, resolveLabelRendererOperation } from "./auth.mjs";
+import { authorizeLabelRendererRequest, resolveLabelRendererOperation, verifyLabelRendererToken } from "./auth.mjs";
 import { BARCODE_MAX_CHARS, canonicalBarcodeType, encodeAdditionalBarcode, rotateBarcodePoint } from "./barcode.ts";
 import { executeHotpathRpc, hotpathModeEnabled } from "../_shared/db-hotpath.ts";
 import { projectSignedStorageUrlForResponse } from "../_shared/label-storage-url.ts";
@@ -6015,11 +6015,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const operation = resolveLabelRendererOperation(payload);
     const authorization = authorizeLabelRendererRequest(req, operation, {
-      requireDbJwt: readEnv("EDGE_REQUIRE_DB_JWT").trim() === "1",
+      requireDbJwt: true,
+      rendererTokenOnly: true,
     });
     if (!authorization.ok) {
       return withCors(new Response(JSON.stringify({ error: authorization.message }), {
         status: authorization.status,
+        headers: { "content-type": "application/json" },
+      }), corsHeaders);
+    }
+    const verification = await verifyLabelRendererToken(req, readEnv("LABEL_RENDERER_SIGNING_KEY"));
+    if (!verification.ok) {
+      return withCors(new Response(JSON.stringify({ error: verification.message }), {
+        status: verification.status,
         headers: { "content-type": "application/json" },
       }), corsHeaders);
     }

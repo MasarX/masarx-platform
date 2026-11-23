@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { authorizeApiCallerOperation, authorizeEdgeRequest } from "./auth.mjs";
 import { executeBoundedEgress } from "./egress.mjs";
 import { createGuardedProxyFetch } from "./proxy.mjs";
+import { authorizeRendererSend, RENDERER_TOKEN_HEADER } from "./renderer-auth.mjs";
 import {
   buildCompactBatchResponse,
   compactBatchJobResult,
@@ -17,6 +18,7 @@ type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface CallRequest {
   url?: string;
+  renderer_credential_ref?: string;
   http_allowed_host?: string;
   method?: HttpMethod;
   headers?: Record<string, string>;
@@ -77,6 +79,8 @@ const denoNetwork = Deno as unknown as DenoNetworkRuntime;
 const textEncoder = new TextEncoder();
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
+const RENDERER_ENDPOINT = readEnv("LABEL_RENDERER_INVOKE_URL") ||
+  `${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/label-renderer`;
 const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
 const RAW_EDGE_DB_JWT = readEnv("API_CALLER_DB_JWT", []);
 const EDGE_DB_JWT = RAW_EDGE_DB_JWT && RAW_EDGE_DB_JWT.split(".").length === 3
@@ -347,35 +351,6 @@ const getJobConcurrencyDefault = () => {
   return clampInt(raw, MAX_BATCH_CONCURRENCY, 1, MAX_BATCH_CONCURRENCY);
 };
 
-const logApiCall = async (
-  client: ReturnType<typeof createClient>,
-  jobId: string,
-  requestPayload: CallRequest,
-  responsePayload: CallResponse,
-  errorMessage?: string | null,
-) => {
-  const { error } = await client.rpc("log_api_call_event", {
-    p_job_id: jobId,
-    p_request: {
-      url: requestPayload.url ?? null,
-      method: requestPayload.method ?? "POST",
-      headers: requestPayload.headers ?? {},
-      body: requestPayload.body ?? {},
-      timeout_seconds: requestPayload.timeout_seconds ?? 30,
-    },
-    p_response: {
-      headers: responsePayload.headers ?? {},
-      body: responsePayload.body ?? null,
-    },
-    p_status: responsePayload.status,
-    p_latency_ms: responsePayload.latency_ms,
-    p_error: errorMessage ?? responsePayload.error ?? null,
-  });
-  if (error) {
-    throw new Error(`log_api_call_event failed for job ${jobId}: ${error.message}`);
-  }
-};
-
 const resolveJobEgressPolicy = async (
   client: ReturnType<typeof createClient>,
   jobId: string,
@@ -422,11 +397,33 @@ const executeClaimedJob = async (
 
   let callResult: CallResponse;
   let dispatchError: string | undefined;
+  const isRenderer = typeof dispatch.renderer_credential_ref === "string";
 
   try {
-    const egressEnvelope = await resolveJobEgressPolicy(client, jobId);
+    const egressEnvelope = isRenderer
+      ? {
+        enforce: true,
+        policy: {
+          transport_mode: "guarded_proxy",
+          enforce_https_only: true,
+          block_private_networks: true,
+          domain_allowlist: [new URL(RENDERER_ENDPOINT).hostname],
+          allowed_methods: ["POST"],
+          header_allowlist: ["authorization", "content-type", RENDERER_TOKEN_HEADER],
+          follow_redirects: false,
+        },
+      }
+      : await resolveJobEgressPolicy(client, jobId);
     await renewClaimedLease(client, jobId, leaseToken);
-    callResult = await runFetch(mergedDispatch, egressEnvelope);
+    const sendDispatch = isRenderer
+      ? await authorizeRendererSend(
+        mergedDispatch,
+        RENDERER_ENDPOINT,
+        readEnv("LABEL_RENDERER_SIGNING_KEY"),
+        readEnv("LABEL_RENDERER_GATEWAY_JWT"),
+      )
+      : mergedDispatch;
+    callResult = await runFetch(sendDispatch, egressEnvelope);
   } catch (err) {
     dispatchError = err instanceof Error ? err.message : "Unknown error";
     callResult = {
@@ -437,6 +434,11 @@ const executeClaimedJob = async (
       latency_ms: 0,
       error: dispatchError,
     };
+  }
+
+  if (isRenderer && (callResult.status === 401 || callResult.status === 403)) {
+    callResult = { ...callResult, error: "renderer_gateway_rejected" };
+    console.error("[api-caller] renderer_gateway_rejected");
   }
 
   // Refresh again after the bounded network operation so even a near-600-second
@@ -467,6 +469,7 @@ const executeClaimedJob = async (
       p_headers: callResult.headers,
       p_body: callResult.body,
       p_error: dispatchError ?? callResult.error ?? `HTTP ${callResult.status}`,
+      p_latency_ms: callResult.latency_ms,
     });
     if (failureError) {
       throw new Error(
@@ -474,8 +477,6 @@ const executeClaimedJob = async (
       );
     }
   }
-
-  await logApiCall(client, jobId, mergedDispatch, callResult, dispatchError);
 
   return { job_id: jobId, result: callResult, success: isSuccess };
 };
