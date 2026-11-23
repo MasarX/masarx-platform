@@ -5,6 +5,9 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
+/* Trunk plan before the five B13 assertions:
+SELECT plan(48);
+*/
 SELECT plan(53);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_run_assignment_lifecycle_foundation_v1()
@@ -28,6 +31,7 @@ DECLARE
   v_other_vehicle UUID := gen_random_uuid();
   v_route RECORD;
   v_route_two RECORD;
+  v_other_route UUID := gen_random_uuid();
   v_assign_result JSONB := NULL;
   v_assign_replay JSONB := NULL;
   v_partner_result JSONB := NULL;
@@ -215,9 +219,10 @@ BEGIN
   );
 
   INSERT INTO public.organizations (id, name, slug)
-  VALUES
-    (v_org, 'UC076 pgTap Org', 'uc076-pgtap-' || left(v_org::text, 8)),
-    (v_other_org, 'Other Route Fixture', 'route-fixture-' || v_other_org::text);
+  VALUES (v_org, 'UC076 pgTap Org', 'uc076-pgtap-' || left(v_org::text, 8));
+
+  INSERT INTO public.organizations (id, name, slug)
+  VALUES (v_other_org, 'Other Route Fixture', 'route-fixture-' || v_other_org::text);
 
   INSERT INTO public.branches (id, organization_id, code, name, timezone)
   VALUES (v_branch, v_org, 'uc076', 'UC076 Branch', 'Asia/Riyadh');
@@ -235,9 +240,10 @@ BEGIN
       'Other Fixture Driver', 'driver', 'active', 'tenant');
 
   INSERT INTO public.vehicles (id, organization_id, plate_number, status, is_active)
-  VALUES
-    (v_vehicle, v_org, 'UC076-' || upper(left(v_vehicle::text, 6)), 'active', TRUE),
-    (v_other_vehicle, v_other_org, 'TEST-' || upper(left(v_other_vehicle::text, 6)), 'active', TRUE);
+  VALUES (v_vehicle, v_org, 'UC076-' || upper(left(v_vehicle::text, 6)), 'active', TRUE);
+
+  INSERT INTO public.vehicles (id, organization_id, plate_number, status, is_active)
+  VALUES (v_other_vehicle, v_other_org, 'TEST-' || upper(left(v_other_vehicle::text, 6)), 'active', TRUE);
 
   INSERT INTO public.shipments (organization_id, client_id, tracking_number, service_type, status)
   VALUES
@@ -511,15 +517,23 @@ BEGIN
   INSERT INTO public.users (id, organization_id, email, full_name, user_type, status, access_scope_type)
   VALUES (v_other_operator, v_other_org, 'route-' || v_other_operator::text || chr(64) || concat_ws('.', 'example', 'invalid'),
           'Other Fixture Operator', 'ops_admin', 'active', 'tenant');
+  INSERT INTO public.route_runs (id, organization_id)
+  VALUES (v_other_route, v_other_org);
+
   PERFORM set_config('request.jwt.claim.sub', v_other_operator::text, true);
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_other_operator::text, 'role', 'authenticated')::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   EXECUTE 'SET LOCAL ROLE authenticated';
-  RETURN NEXT ok(public.user_has_permission_v1('routes.read', v_other_org) IS TRUE,
-                 'the foreign operator has route read authority in its own tenant');
+  RETURN NEXT is(
+    public.ui_get_resource_v1('routes', v_other_route)->>'id',
+    v_other_route::text,
+    'the foreign operator has route read authority in its own tenant'
+  );
   RETURN NEXT throws_ok(
     format('SELECT api.ui_route_run_assignment_readback_v1(%L::uuid,%L::uuid,%L::integer)',
       v_route.route_run_id, v_assignment_id, v_assignment_version),
-    '42501', NULL, 'a foreign tenant operator cannot read the exact assignment event'
+    '42501', format('route %s is not visible for assignment readback', v_route.route_run_id),
+    'a foreign tenant operator cannot read the exact assignment event'
   );
 
   EXECUTE 'SET LOCAL ROLE postgres';
