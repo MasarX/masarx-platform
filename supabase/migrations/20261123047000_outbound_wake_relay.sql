@@ -3,10 +3,9 @@ BEGIN;
 INSERT INTO public.worker_registry (worker_name, worker_type, description, schedule)
 VALUES ('outbound_wake_relay', 'outbound', 'Wakes the leased outbound queue.', '*/3 * * * *');
 
--- A single job normally has a 30-second timeout and a default policy ceiling of 60 seconds.
--- A 60-second gap gives a rolling cap of one start per minute across Edge instances.
+-- Match the worker tick: one bounded batch per rolling minute, up to 10 sequential leased jobs.
 INSERT INTO public.cron_config (worker_name, interval_seconds, batch_size, notes)
-VALUES ('outbound_wake_relay', 60, 1, 'Minimum time between queue wake attempts.');
+VALUES ('outbound_wake_relay', 60, 10, 'Minimum time between queue wake attempts.');
 
 CREATE FUNCTION api.try_start_outbound_wake_v1()
 RETURNS BOOLEAN

@@ -20,6 +20,9 @@ describe('outbound wake relay', () => {
     ({ createOutboundWakeHandler } = await import(modulePath));
   });
 
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
   function setup(fetchImpl, options = {}) {
     const tasks = [];
     const handler = createOutboundWakeHandler({
@@ -56,7 +59,7 @@ describe('outbound wake relay', () => {
         },
       })],
       [`${baseUrl}/functions/v1/api-caller`, expect.objectContaining({
-        method: 'POST', redirect: 'error', body: '{"batch":1}',
+        method: 'POST', redirect: 'error', body: '{"batch":10}',
         headers: { authorization: `Bearer ${dbJwt}`, 'content-type': 'application/json' },
       })],
     ]);
@@ -91,9 +94,31 @@ describe('outbound wake relay', () => {
     const isDispatch = ([url]) => url.endsWith('/api-caller');
     expect(fetchImpl.mock.calls.filter(isDispatch)).toHaveLength(1);
 
+    jest.advanceTimersByTime(60_000);
     second.handler(sweepSignal());
     await Promise.all(second.tasks);
     expect(fetchImpl.mock.calls.filter(isDispatch)).toHaveLength(2);
+  });
+
+  test.each([true, false])('suppresses local admission attempts for 60 seconds when admitted = %s', async (admitted) => {
+    const fetchImpl = jest.fn(async url => url.endsWith('/api-caller') ? new Response() : Response.json(admitted));
+    const { handler, tasks } = setup(fetchImpl);
+    const signal = () => new Request(baseUrl, { method: 'POST' });
+
+    handler(signal());
+    handler(signal());
+    await Promise.all(tasks);
+    jest.advanceTimersByTime(59_999);
+    const skipped = handler(signal());
+    expect([skipped.status, [...skipped.headers], await skipped.text()]).toEqual([202, [], '']);
+    expect(tasks).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(admitted ? 2 : 1);
+
+    jest.advanceTimersByTime(1);
+    handler(signal());
+    await Promise.all(tasks);
+    expect(tasks).toHaveLength(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(admitted ? 4 : 2);
   });
 
   test('ignores non-POST requests without changing the response', async () => {

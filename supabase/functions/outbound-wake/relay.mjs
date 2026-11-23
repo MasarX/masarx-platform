@@ -1,6 +1,9 @@
+import { MAX_BATCH_SIZE } from "../api-caller/invocation.mjs";
+
 export function createOutboundWakeHandler({ supabaseUrl, anonKey, dbJwt, waitUntil, fetchImpl = fetch }) {
   const baseUrl = supabaseUrl.replace(/\/+$/, "");
   const configured = baseUrl && anonKey && dbJwt.split(".").length === 3;
+  let nextAdmissionAt = 0;
   if (!configured) console.warn("[outbound-wake] missing server configuration");
 
   async function wake() {
@@ -27,7 +30,7 @@ export function createOutboundWakeHandler({ supabaseUrl, anonKey, dbJwt, waitUnt
       const worker = await fetchImpl(`${baseUrl}/functions/v1/api-caller`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ batch: 1 }),
+        body: JSON.stringify({ batch: MAX_BATCH_SIZE }),
         redirect: "error",
         // Bound the hop to the existing job lease window.
         signal: AbortSignal.timeout(720_000),
@@ -40,7 +43,14 @@ export function createOutboundWakeHandler({ supabaseUrl, anonKey, dbJwt, waitUnt
   }
 
   return (request) => {
-    if (configured && request.method === "POST") waitUntil(wake());
+    if (configured && request.method === "POST") {
+      const now = performance.now();
+      if (now >= nextAdmissionAt) {
+        // The database still decides admission across instances.
+        nextAdmissionAt = now + 60_000;
+        waitUntil(wake());
+      }
+    }
     return new Response(null, { status: 202 });
   };
 }
