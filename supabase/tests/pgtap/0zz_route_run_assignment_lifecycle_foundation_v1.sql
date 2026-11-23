@@ -5,9 +5,6 @@ SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
-/* Trunk plan before the five B13 assertions:
-SELECT plan(48);
-*/
 SELECT plan(53);
 
 CREATE OR REPLACE FUNCTION pg_temp.test_route_run_assignment_lifecycle_foundation_v1()
