@@ -897,7 +897,7 @@ jobs:
       group: deploy-dev-console
       cancel-in-progress: false
     outputs:
-      url: ${{ steps.deploy.outputs.url }}
+      preview_origin: ${{ steps.deploy.outputs.preview_origin }}
       configured: ${{ steps.guard.outputs.configured }}
     steps:
       - name: Guard configuration
@@ -970,7 +970,7 @@ jobs:
           set -euo pipefail
           url="$("$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" deploy --prebuilt --yes)"
           [[ "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]
-          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
+          printf '%s' "$url" | node scripts/ci-hosted/dev-e2e-previews.cjs capture
 
   portal:
     needs: database
@@ -982,7 +982,7 @@ jobs:
       group: deploy-dev-portal
       cancel-in-progress: false
     outputs:
-      url: ${{ steps.deploy.outputs.url }}
+      preview_origin: ${{ steps.deploy.outputs.preview_origin }}
       configured: ${{ steps.guard.outputs.configured }}
     steps:
       - name: Guard configuration
@@ -1055,7 +1055,69 @@ jobs:
           set -euo pipefail
           url="$("$GITHUB_WORKSPACE/tooling/apps/deploy/node_modules/.bin/vercel" deploy --prebuilt --yes)"
           [[ "$url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]
-          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
+          printf '%s' "$url" | node scripts/ci-hosted/dev-e2e-previews.cjs capture
+
+  e2e-report:
+    needs: [console, portal]
+    if: >-
+      success() && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy'))
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: dev
+      deployment: false
+    concurrency:
+      group: dev-e2e-report
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Check anonymous preview access
+        id: previews
+        env:
+          CONSOLE_BASE_URL: ${{ needs.console.outputs.preview_origin }}
+          PORTAL_BASE_URL: ${{ needs.portal.outputs.preview_origin }}
+        run: node scripts/ci-hosted/dev-e2e-previews.cjs probe
+      - name: Install locked dependencies
+        if: steps.previews.outputs.ready == 'true'
+        run: node scripts/ci-hosted/tasks.cjs install
+      - name: Install lockfile-selected Chromium
+        if: steps.previews.outputs.ready == 'true'
+        run: node scripts/ci-hosted/tasks.cjs browser-install
+      - name: Run anonymous Console and Portal specs
+        if: steps.previews.outputs.ready == 'true'
+        env:
+          CONSOLE_BASE_URL: ${{ needs.console.outputs.preview_origin }}
+          PORTAL_BASE_URL: ${{ needs.portal.outputs.preview_origin }}
+          E2E_REQUIRE_BASE_URLS: 'true'
+        # Only the custom reporter may publish Playwright output.
+        run: node node_modules/@playwright/test/cli.js test --config playwright.dev-report.config.ts > /dev/null 2>&1
+      - name: Verify a redacted report was produced
+        id: report
+        if: ${{ !cancelled() && (steps.previews.outputs.ready == 'true' || steps.previews.outcome == 'skipped') }}
+        run: |
+          if [[ ! -s "$RUNNER_TEMP/dev-e2e-report.json" ]]; then
+            printf '%s\n' '## DEV browser report' '' 'No spec results were produced. Check the report setup steps.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Upload redacted Playwright report
+        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: dev-e2e-playwright-report
+          path: ${{ runner.temp }}/dev-e2e-report.json
+          if-no-files-found: error
+          retention-days: 1
 
   landing:
     needs: database
@@ -1241,5 +1303,6 @@ jobs:
                       result = 'skipped: superseded'
                   elif outputs.get('configured') == 'false':
                       result = 'skipped: not configured'
-                  summary.write(f"| {name} | {result} | {outputs.get('url') or '?'} |\n")
+                  url = 'See deploy log' if outputs.get('preview_origin') else outputs.get('url') or '?'
+                  summary.write(f"| {name} | {result} | {url} |\n")
           PY
