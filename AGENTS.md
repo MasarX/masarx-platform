@@ -9,7 +9,7 @@
 - Leads (thread titles): "MasarX Master", "MasarX Delivery", "MasarX Design"
 - UI project: yes
 - Other repos: none
-- Links: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md) and the portfolio orchestration skill. This project follows the portfolio engineering standard v1.10.
+- Links: [DELIVERY.md](DELIVERY.md), [DESIGN.md](DESIGN.md), the portfolio engineering standard and the portfolio orchestration skill.
 
 ## Product and current goal
 
@@ -68,15 +68,20 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 
 Personal data handled by MasarX includes:
 
-- Staff, tenant users, drivers, senders and recipients, including names, account and role identifiers, phone numbers, email addresses and shipment contact details.
-- Pickup and delivery addresses, delivery instructions, geocodes, tracking sessions and time-stamped driver location data.
-- Driver application records, government ID numbers (national ID or residence permit numbers), driving licence numbers, vehicle plates, uploaded documents, and proof of delivery such as signatures, photos and recipient details.
-- Bank account and IBAN details, and cash-on-delivery amounts and collections.
-- Device and app identifiers, push tokens, platform and version metadata, IP addresses and user agents, and contact or delivery details in communications, imports and integration payloads.
+- Staff, tenant users, drivers, senders and recipients, including names, employee and contractor identifiers, account and role identifiers, phone numbers, email addresses and shipment contact details.
+- Pickup and delivery addresses, delivery instructions, geocodes, tracking sessions and access history, and time-stamped driver location data.
+- Driver application and verification records, government ID numbers (national ID or residence permit numbers), driving licence numbers and expiry dates, vehicle plates, uploaded documents, and proof of delivery such as signatures, photos and recipient details.
+- Third-party emergency contacts for drivers, including names and phone numbers.
+- Driver health data, including medical certificates and medical incident reports.
+- Driver qualifications, duty records, performance and compliance history, including skills, hours of service, duty status, customer ratings, compliance events and compliance scores.
+- Bank account and IBAN details, cash-on-delivery amounts and collections, and payment and settlement records.
+- Support case records and message bodies, and customer feedback such as ratings, Net Promoter Scores (NPS) and free-text comments.
+- Device and app identifiers, push tokens, platform and version metadata, IP addresses, user agents and audit records of user actions.
+- Communication preferences and opt-outs, and contact or delivery details in communications, imports and integration payloads.
 
 Keep real data in approved production databases, identity services, private object storage and protected backups. Limit any copies in approved integrations or on devices to what the feature needs. Restrict access by role and tenant. Use structured logs with request or trace IDs and identify people and records only by opaque IDs. Keep personal values, documents, payloads and tokens out of logs and fixtures. Generate consistent synthetic data for tests and examples.
 
-Use the configured [location partition purge](supabase/migrations/202601251050_location_pings_v1.sql), [tracking session expiry](supabase/migrations/202601311700_tracking_sessions_foundation_v1.sql), [communications cleanup](supabase/migrations/202512141730_cache_cleanup_comms_retention.sql) and [operational record purge](supabase/migrations/20261105000300_purge_log_retention_progress_bound_v1.sql) for their respective records. Before using other personal data in production, document an approved retention period and verify deletion or anonymization from active stores, including attached objects. Include backup expiry and account for restored copies. See [issue #295](https://github.com/MasarX/masarx-platform/issues/295) for the outstanding work on retention periods and deletion mechanisms for each personal-data category.
+Use the configured [location partition purge](supabase/migrations/202601251090_telemetry_partitioning_config_restore_v1.sql), [communications session and rate-limit cleanup](supabase/migrations/202512280020_cache_cleanup_worker_webhook_nonce.sql) and [operational record purge](supabase/migrations/20261114121100_database_lint_functions_v1.sql) for their respective records. [Public tracking sessions](supabase/migrations/202603061345_public_tracking_policy_and_service_v1.sql) use `expires_at` to end access. Expired rows remain stored. [Issue #295](https://github.com/MasarX/masarx-platform/issues/295) tracks the missing purge and the outstanding retention and deletion work for each personal-data category. Before using other personal data in production, document an approved retention period and verify deletion or anonymization from active stores, including attached objects. Include backup expiry and account for restored copies.
 
 - Migrations are append-only. Never edit or delete a landed migration. Follow the [migration stamp and re-stamp rules](DELIVERY.md#branching-and-merging).
 - Keep each release's database schema usable by the previous release's code. Ship drops, renames and narrowing changes only after an earlier release removes the code's use of the old schema shape.
@@ -89,7 +94,7 @@ Use the configured [location partition purge](supabase/migrations/202601251050_l
 
 ## Privacy
 
-- Keep personal names, customer identifiers and images, real data, internal hosts and addresses, IPs, private paths and instructions, project references, email addresses, account IDs and other account details, and credentials out of public material. Keep secrets out of chats, logs and source repositories. During research, use authorized read-only access and leave any credential you discover unused.
+- Keep personal names, customer identifiers and images, real data, our hosts, IPs, internal machine, agent and tool names, private paths and instructions, project references, email addresses, account IDs and other account details, and credentials out of public material. Keep secrets out of chats, logs and source repositories. During research, use authorized read-only access and leave any credential you discover unused.
 - Generate credential-shaped fixtures at runtime from synthetic values. Never commit literal credential-shaped fixtures. Keep environment files and real credentials out of version control.
 - Verify that the commits you create use GitHub no-reply addresses for both author and committer. Keep attribution trailers, private names and private tooling details out of commit messages. Keep generated dependencies out of Git and verify licensing before adding third-party material. Check restored content line by line before it returns to the public tree.
 - Before pushing, screen the exact candidate: each new commit's message and identities, paths, added content, binary names and hashes, and the branch name. Screen PR titles and bodies and issue or comment text before publishing or editing. Stop on a hit or push refusal and report the rule and affected path privately. Keep secret scanning and push protection enabled. Follow the [exposure response](DELIVERY.md#security).
