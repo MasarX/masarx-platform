@@ -67,6 +67,21 @@ async function waitForCronPause(db, wait = delay) {
   throw new Error('pg_cron did not acknowledge the launch pause');
 }
 
+async function configureHostedDatabase(admin, db, logConnections) {
+  const commands = ["ALTER SYSTEM SET cron.launch_active_jobs = 'off'"];
+  if (logConnections) {
+    commands.push(
+      'ALTER SYSTEM SET log_connections = on',
+      'ALTER SYSTEM SET log_disconnections = on',
+      "ALTER SYSTEM SET log_line_prefix = '%h %m [%p] %b %qapp=%a user=%u db=%d '",
+    );
+  }
+  // Each ALTER SYSTEM needs its own psql -c to stay outside a transaction block.
+  const reloaded = await admin(...commands, 'SELECT pg_reload_conf()');
+  if (reloaded.trim() !== 't') throw new Error('Could not reload the disposable CI database configuration');
+  await waitForCronPause(db);
+}
+
 async function cloneHostedDatabases(admin, databases, created, restore = admin) {
   if (!databases.length) return;
   const { owner, limit, explicitAcl } = JSON.parse(await admin(`SELECT json_build_object(
@@ -77,7 +92,7 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin) 
     const live = (await admin("SELECT bool_and(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'postgres'")).trim();
     if (live && live !== 't') throw new Error('Could not release connections to the migrated template');
     for (const database of databases) {
-      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY FILE_COPY OWNER ${owner} CONNECTION LIMIT ${limit}`);
+      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY WAL_LOG OWNER ${owner} CONNECTION LIMIT ${limit}`);
       created.push(database);
       if (explicitAcl) {
         const grants = JSON.parse(await admin(`SELECT coalesce(json_agg(format('GRANT %s ON DATABASE %I TO %s%s',
@@ -459,11 +474,7 @@ async function qualify(diagnostic) {
       // Disable background ANALYZE before exposing the application migrations to this stack.
       summary.autovacuum = await timed('autovacuum-off', () => disableHostedAutovacuum(status.DB_URL, dbPort, stackAdmin, db));
       // The disposable fixture uses the registered schedules without launching background jobs.
-      await timed('cron-pause', async () => {
-        const reloaded = await stackAdmin("ALTER SYSTEM SET cron.launch_active_jobs = 'off'", 'SELECT pg_reload_conf()');
-        if (reloaded.trim() !== 't') throw new Error('Could not reload the pg_cron launch control');
-        await waitForCronPause(db);
-      });
+      await timed('cron-pause', () => configureHostedDatabase(stackAdmin, db, disposableShard));
       const versions = migrationInventory(fs.readdirSync('supabase/migrations'));
       fs.rmdirSync(path.join(sb, 'migrations'));
       fs.symlinkSync(path.join(root, 'supabase/migrations'), path.join(sb, 'migrations'), 'dir');
@@ -607,4 +618,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, pgtapDeadline };
