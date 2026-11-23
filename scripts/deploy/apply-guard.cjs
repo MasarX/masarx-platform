@@ -174,10 +174,10 @@ async function guard(env, fetchRequest = fetch) {
       }
       if (!reason) {
         const { status } = response;
-        if (attempt === maxAttempts || (status !== 429 && !(status >= 500 && status < 600))) {
+        if (attempt === maxAttempts || status !== 429) {
           throw new Error(`GitHub API returned HTTP ${status} for ${endpoint}`);
         }
-        reason = `http-${status}`;
+        reason = 'http-429';
         void response.body?.cancel().catch(() => {});
       }
       console.log(`guard_api_retry attempt=${attempt + 1} reason=${reason}`);

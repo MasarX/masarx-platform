@@ -44,7 +44,6 @@ test.each([
     const cause = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
     throw new TypeError('fetch failed', { cause });
   }, 'network'],
-  ['HTTP 503', () => new Response('server error', { status: 503 }), 'http-503'],
   ['HTTP 429', () => new Response(null, { status: 429, headers: { 'Retry-After': '3600' } }), 'http-429'],
   ['a request AbortError', () => { throw new DOMException('request aborted', 'AbortError'); }, 'timeout'],
   ['a request TimeoutError', () => { throw new DOMException('request timed out', 'TimeoutError'); }, 'timeout'],
@@ -110,7 +109,7 @@ test('fails closed after three dropped requests with three seconds of total back
   expect(console.error.mock.calls).toEqual([[`::error::${message}`]]);
 });
 
-test.each([403, 404, 408])('fails closed on HTTP %i without retrying the GET', async status => {
+test.each([403, 404, 408, 503])('fails closed on HTTP %i after one GET', async status => {
   const fetchRequest = jest.fn().mockResolvedValue(new Response(null, {
     status, headers: { 'Retry-After': '1' },
   }));
