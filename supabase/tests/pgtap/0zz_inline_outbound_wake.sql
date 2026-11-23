@@ -52,7 +52,9 @@ SELECT ok(EXISTS (
 ), 'inline producer sends only the fixed signal and empty wake envelope');
 
 SELECT is(api.try_start_outbound_wake_v1(), false, 'inline fixture holds the ordinary sweep slot');
-SELECT ok(api.try_start_inline_outbound_wake_v1() BETWEEN 0 AND 2000, 'a producer reservation has its own admission and coalescing deadline');
+WITH admission AS MATERIALIZED (SELECT api.try_start_inline_outbound_wake_v1() AS wait_ms)
+SELECT ok((wait_ms BETWEEN 0 AND 2000) IS TRUE,
+  'a producer reservation has its own admission and coalescing deadline') FROM admission;
 SELECT is(api.try_start_inline_outbound_wake_v1(), NULL::integer, 'the inline admission slot cannot be spent twice');
 SELECT ok(has_function_privilege('edge_api_caller_role', 'api.try_start_inline_outbound_wake_v1()', 'EXECUTE')
   AND NOT has_function_privilege('anon', 'api.try_start_inline_outbound_wake_v1()', 'EXECUTE')
