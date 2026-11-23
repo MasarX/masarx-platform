@@ -243,7 +243,6 @@ BEGIN
     lease_expires_at = now() + interval '12 minutes',
     edge_lease_token = v_lease_token
   WHERE oc.id = p_job_id
-    AND public.outbound_placeholder_url_v1(oc.url) IS NOT TRUE
     AND oc.status IN ('pending_edge', 'failed')
     AND oc.scheduled_at <= now()
     AND (oc.lease_expires_at IS NULL OR oc.lease_expires_at < now())
@@ -269,10 +268,12 @@ AS $function$
 DECLARE
   v_job RECORD;
   v_spec JSONB;
+  v_dispatch JSONB;
   v_error TEXT;
   v_org_text TEXT;
 BEGIN
-  SELECT oc.call_type, oc.url, oc.body, oc.renderer_credential_ref, COALESCE(oc.context, '{}'::jsonb) AS context
+  SELECT oc.call_type, oc.url, oc.headers, oc.body, oc.renderer_credential_ref,
+    COALESCE(oc.context, '{}'::jsonb) AS context
   INTO v_job
   FROM public.outbound_calls oc
   WHERE oc.id = p_job_id
@@ -286,6 +287,10 @@ BEGIN
   END IF;
 
   BEGIN
+    IF public.outbound_placeholder_url_v1(v_job.url) THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'outbound_url_invalid';
+    END IF;
+
     IF v_job.renderer_credential_ref IS NOT NULL THEN
       v_spec := public.resolve_label_renderer_edge_config_v1(NULLIF(v_job.context->>'organization_id', '')::uuid);
       IF v_spec->>'state' <> 'ready'
@@ -300,11 +305,18 @@ BEGIN
       );
     END IF;
     v_spec := public.get_job_call_spec(p_job_id);
+    v_dispatch := COALESCE(v_job.context->'edge_dispatch', '{}'::jsonb);
+    -- Keep a credential-enriched spec together, including its vetted destination.
+    IF (v_spec->>'url') IS DISTINCT FROM v_job.url
+       OR (v_spec->'headers') IS DISTINCT FROM COALESCE(v_job.headers, '{}'::jsonb)
+       OR (v_spec->'body') IS DISTINCT FROM COALESCE(v_job.body, '{}'::jsonb) THEN
+      v_dispatch := jsonb_build_object('timeout_seconds', v_dispatch->'timeout_seconds');
+    END IF;
     v_spec := v_spec || jsonb_build_object(
-      'url', COALESCE(v_job.context #>> '{edge_dispatch,url}', v_spec->>'url'),
+      'url', COALESCE(v_dispatch->>'url', v_spec->>'url'),
       'headers', public.outbound_dispatch_headers_v1(
-        COALESCE(v_job.context #>> '{edge_dispatch,url}', v_spec->>'url'),
-        COALESCE(v_job.context #> '{edge_dispatch,headers}', v_spec->'headers'),
+        COALESCE(v_dispatch->>'url', v_spec->>'url'),
+        COALESCE(v_dispatch->'headers', v_spec->'headers'),
         p_job_id
       )
     );
@@ -363,11 +375,11 @@ BEGIN
 
   RETURN jsonb_build_object(
     'url', v_spec->>'url',
-    'method', COALESCE(upper((v_job.context->'edge_dispatch')->>'method'), upper(v_spec->>'method'), 'POST'),
+    'method', COALESCE(upper(v_dispatch->>'method'), upper(v_spec->>'method'), 'POST'),
     'headers', v_spec->'headers',
-    'body', COALESCE((v_job.context->'edge_dispatch')->'body', v_spec->'body', '{}'::jsonb),
+    'body', COALESCE(v_dispatch->'body', v_spec->'body', '{}'::jsonb),
     'timeout_seconds', COALESCE(
-      NULLIF((v_job.context->'edge_dispatch')->>'timeout_seconds', '')::INT,
+      NULLIF(v_dispatch->>'timeout_seconds', '')::INT,
       NULLIF(v_spec->>'timeout_seconds', '')::INT,
       30
     )
@@ -503,7 +515,6 @@ DECLARE
     v_error BOOLEAN := FALSE;
     v_job RECORD;
     v_org UUID;
-    v_spec JSONB;
     v_dispatch_headers JSONB;
     v_edge_dispatch JSONB;
     v_status INT;
@@ -835,10 +846,9 @@ BEGIN
                 CONTINUE;
             END IF;
 
-            -- Validate fresh work before the fenced Edge handoff.
-            v_spec := public.get_job_call_spec(v_job.job_id);
+            -- Validate the queued request without opening its credential references.
             BEGIN
-                v_dispatch_headers := public.outbound_dispatch_headers_v1(v_spec->>'url', v_spec->'headers', v_job.job_id);
+                v_dispatch_headers := public.outbound_dispatch_headers_v1(v_job.url, v_job.headers, v_job.job_id);
             EXCEPTION
                 WHEN invalid_parameter_value THEN
                     IF SQLERRM <> 'outbound_url_invalid' THEN
@@ -850,8 +860,8 @@ BEGIN
                     CONTINUE;
             END;
             BEGIN
-              -- Check the original spec before any application header filter can hide a credential.
-              PERFORM public.sql_transport_headers_v1(v_spec->'headers');
+              -- Reject raw credential headers even if the application header filter drops them.
+              PERFORM public.sql_transport_headers_v1(v_job.headers);
             EXCEPTION WHEN invalid_parameter_value THEN
               IF SQLERRM <> 'outbound_credential_headers_refused' THEN RAISE; END IF;
                 PERFORM public.fail_sql_outbound_credential_job_v1(v_job.job_id, 'outbound_worker');
@@ -860,7 +870,7 @@ BEGIN
                 CONTINUE;
             END;
             v_edge_dispatch := public.handoff_outbound_call_to_edge_v1(
-                v_job.job_id, v_spec->>'method', v_dispatch_headers, NULL
+                v_job.job_id, v_job.method, v_dispatch_headers, NULL
             );
 
             PERFORM public.log_decision(
@@ -936,7 +946,6 @@ DECLARE
     v_job public.outbound_calls%ROWTYPE;
     v_org UUID;
     v_optout JSONB;
-    v_spec JSONB;
     v_dispatch_headers JSONB;
     v_result JSONB := NULL;
     v_status INT := 0;
@@ -1100,10 +1109,9 @@ BEGIN
     END IF;
 
     IF NOT v_completed AND v_request_id IS NULL THEN
-        -- Validate fresh work before handing it to the fenced Edge claimant.
-        v_spec := public.get_job_call_spec(p_job_id);
+        -- Validate the queued request without opening its credential references.
         BEGIN
-            v_dispatch_headers := public.outbound_dispatch_headers_v1(v_spec->>'url', v_spec->'headers', p_job_id);
+            v_dispatch_headers := public.outbound_dispatch_headers_v1(v_job.url, v_job.headers, p_job_id);
         EXCEPTION
             WHEN invalid_parameter_value THEN
                 IF SQLERRM <> 'outbound_url_invalid' THEN
@@ -1113,15 +1121,15 @@ BEGIN
                 RETURN jsonb_build_object('status', 'failed', 'job_id', p_job_id, 'reason', 'outbound_url_invalid');
         END;
         BEGIN
-          -- Check the original spec before any application header filter can hide a credential.
-          PERFORM public.sql_transport_headers_v1(v_spec->'headers');
+          -- Reject raw credential headers even if the application header filter drops them.
+          PERFORM public.sql_transport_headers_v1(v_job.headers);
         EXCEPTION WHEN invalid_parameter_value THEN
           IF SQLERRM <> 'outbound_credential_headers_refused' THEN RAISE; END IF;
             PERFORM public.fail_sql_outbound_credential_job_v1(p_job_id, v_performed_by_system);
             RETURN jsonb_build_object('status', 'failed', 'job_id', p_job_id, 'reason', 'outbound_credential_headers_refused');
         END;
         PERFORM public.handoff_outbound_call_to_edge_v1(
-            p_job_id, v_spec->>'method', v_dispatch_headers, v_timeout_seconds
+            p_job_id, v_job.method, v_dispatch_headers, v_timeout_seconds
         );
         RETURN jsonb_build_object('status', 'pending', 'job_id', p_job_id,
             'http_status', 202, 'completed', FALSE);

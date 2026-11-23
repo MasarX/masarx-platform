@@ -700,6 +700,24 @@ describeIfDb('integration recovery and provider backfill', () => {
     expect(recoveredMappingReport.status).toBe('succeeded');
     expect(recoveredMappingReport.result_payload.external_status).toBe('accepted_for_backfill');
 
+    await client.query(
+      `UPDATE public.outbound_calls
+         SET status = 'pending', scheduled_at = now(), lease_expires_at = NULL
+       WHERE id = $1::uuid`,
+      [workflow.jobId],
+    );
+    const { rows: [{ handoff }] } = await client.query(
+      `SELECT public.dispatch_outbound_call_inline($1::uuid, $2::jsonb) AS handoff`,
+      [workflow.jobId, JSON.stringify({
+        timeout_seconds: 5,
+        poll_max_seconds: 0,
+        poll_interval_ms: 50,
+        pending_reschedule_seconds: 30,
+        lease_seconds: 30,
+      })],
+    );
+    expect(handoff).toMatchObject({ status: 'pending', job_id: workflow.jobId, http_status: 202 });
+
     const { rows: [initialClaim] } = await client.query(
       `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
       [workflow.jobId],
@@ -714,7 +732,13 @@ describeIfDb('integration recovery and provider backfill', () => {
       url: `https://${['primary-recovery', 'masarx', 'test'].join('.')}/packages`,
       headers: { authorization: `Bearer ${recoveredCredential}` },
     });
+    expect(primaryStored.context.edge_dispatch).toEqual({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      timeout_seconds: 5,
+    });
     for (const secret of [recoveredCredential, secondaryCredential]) {
+      expect(JSON.stringify(handoff)).not.toContain(secret);
       expect(JSON.stringify(initialClaim)).not.toContain(secret);
       expect(JSON.stringify(primaryStored)).not.toContain(secret);
     }

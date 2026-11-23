@@ -25,7 +25,7 @@ SELECT ok(public.resolve_settings('edge_dispatch_policy', 'global', NULL)
   @> jsonb_build_object('enabled', true, 'endpoint_url', origin || '/functions/v1/api-caller'),
   'edge dispatch fixture selects its exact enabled endpoint') FROM pgtap_edge_policy_fixture;
 SELECT ok(EXISTS (SELECT FROM public.clients c WHERE c.id = f.client AND c.organization_id = f.org),
-  'the Edge dispatch fixture owns its exact client') FROM pgtap_edge_worker_fixture;
+  'the Edge dispatch fixture owns its exact client') FROM pgtap_edge_worker_fixture f;
 
 SELECT set_config('app.workflow_run_id', 'd8300000-0000-0000-0000-000000000084', true);
 SELECT set_config('app.workflow_run_step_id', 'd8300000-0000-0000-0000-000000000085', true);

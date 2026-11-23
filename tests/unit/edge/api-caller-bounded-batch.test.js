@@ -217,12 +217,16 @@ describe('api-caller bounded batch lease ownership contract', () => {
       const body = bodies.get(name);
       expect(body).toContain('public.handoff_outbound_call_to_edge_v1(');
       expect(body).toContain('public.check_async_response(');
+      expect(body).toContain('public.sql_transport_headers_v1(v_job.headers)');
+      expect(body).not.toContain('public.get_job_call_spec(');
       expect(body).not.toMatch(/public\.(?:call_api(?:_wait)?|dispatch_api_request_v1)\(/);
     }
     const handoff = bodies.get('handoff_outbound_call_to_edge_v1');
     expect(handoff).toMatch(/'headers', public\.sql_transport_headers_v1\(p_headers\)[\s\S]+SET status = 'pending_edge'/);
     expect(effective).toMatch(/claim_pending_edge_job_ids_v1\(p_batch INT DEFAULT 1\)\s+RETURNS TABLE \(job_id UUID, lease_token UUID\)/);
     expect(bodies.get('claim_pending_edge_job_ids_v1')).toMatch(/edge_lease_token = v_lease_token[\s\S]+lease_token := v_lease_token;/);
+    const spec = bodies.get('get_claimed_edge_job_call_spec_v1');
+    expect(spec).toMatch(/oc\.edge_lease_token = p_lease_token[\s\S]+oc\.lease_expires_at > now\(\)[\s\S]+FOR UPDATE;[\s\S]+v_spec := public\.get_job_call_spec\(p_job_id\)/);
     expect(bodies.get('claim_pending_edge_jobs')).toMatch(/BEGIN[\s\S]+\bRETURN;\s*END;\s*$/);
     expect(bodies.get('claim_pending_edge_jobs')).not.toMatch(/outbound_calls|RETURN (?:NEXT|QUERY)/);
     for (const schema of ['public', 'api']) {

@@ -534,10 +534,9 @@ SELECT ok(
   AND EXISTS (SELECT FROM pgtap_comms_reply_edge_lease l JOIN public.outbound_calls o ON o.id = l.job_id
     WHERE l.job_id = c.outbound_call_id AND l.lease_token = o.edge_lease_token
       AND o.status = 'in_progress_edge' AND o.lease_expires_at > now()
-      AND NOT (public.redact_sensitive_headers(o.headers) IS DISTINCT FROM o.headers)
+      AND o.headers = '{"Content-Type":"application/json"}'::jsonb
       AND NOT (o.context ? 'async_request_id')
-      AND NOT (public.redact_sensitive_headers(o.context #> '{edge_dispatch,headers}')
-        IS DISTINCT FROM COALESCE(o.context #> '{edge_dispatch,headers}', '{}'::jsonb))),
+      AND NOT ((o.context->'edge_dispatch') ? 'headers')),
   'the exact reply is leased without the SQL tick, a transport row or persisted credential headers')
 FROM pgtap_comms_reply_edge_ctx c;
 SELECT finish();
