@@ -467,6 +467,8 @@ DECLARE
   v_run_id uuid := gen_random_uuid();
   v_step_id uuid := gen_random_uuid();
   v_request_id bigint;
+  v_bridge_template_id CONSTANT uuid := '99990000-0000-0000-0000-000000350000';
+  v_bridge_step_id CONSTANT uuid := '99990000-0000-0000-0000-000000350101';
   v_template public.workflow_templates%ROWTYPE;
   v_template_step public.workflow_template_steps%ROWTYPE;
   v_prior_run text := current_setting('app.workflow_run_id', true);
@@ -481,22 +483,26 @@ BEGIN
   SELECT wt.* INTO v_template
     FROM public.resolve_settings_row_from_context('workflow_defaults',
       jsonb_strip_nulls(jsonb_build_object('organization_id', p_organization_id))) d
-    JOIN public.workflow_templates wt ON wt.id = NULLIF(d.value->>'legacy_outbound_template_id', '')::uuid
-   WHERE wt.status = 'active';
-  IF NOT FOUND THEN
-    -- The built-in wrapper also covers fresh installs without a configured override.
-    SELECT wt.* INTO STRICT v_template
-      FROM public.workflow_templates wt
-     WHERE wt.name = 'outbound_wrapper_v1' AND wt.status = 'active'
-       AND wt.scope_type = public.get_root_scope_type_key_v1() AND wt.scope_id IS NULL
-     ORDER BY wt.version DESC, wt.id
-     LIMIT 1;
-  END IF;
-  SELECT s.* INTO STRICT v_template_step
-    FROM public.workflow_template_steps s
-   WHERE s.workflow_template_id = v_template.id AND s.enabled
-   ORDER BY s.sequence_order, s.id
+    JOIN public.workflow_templates wt ON wt.id = CASE
+      WHEN pg_input_is_valid(d.value->>'legacy_outbound_template_id', 'uuid')
+      THEN (d.value->>'legacy_outbound_template_id')::uuid END
+   WHERE wt.status = 'active'
+   ORDER BY wt.updated_at DESC
    LIMIT 1;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'label_renderer_workflow_template_unavailable' USING ERRCODE = '55000';
+  END IF;
+
+  -- Match ensure_outbound_call_has_step for the bridge, whose synthetic step is never run.
+  SELECT s.* INTO v_template_step
+    FROM public.workflow_template_steps s
+   WHERE s.workflow_template_id = v_template.id
+     AND CASE WHEN v_template.id = v_bridge_template_id THEN s.id = v_bridge_step_id ELSE s.enabled END
+   ORDER BY s.sequence_order, s.updated_at DESC
+   LIMIT 1;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'label_renderer_workflow_step_unavailable' USING ERRCODE = '55000';
+  END IF;
 
   PERFORM set_config('app.workflow_run_id', v_run_id::text, true);
   PERFORM set_config('app.workflow_run_step_id', v_step_id::text, true);

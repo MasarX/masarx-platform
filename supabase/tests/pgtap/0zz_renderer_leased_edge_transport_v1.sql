@@ -27,9 +27,6 @@ SELECT public.upsert_label_provider_settings_v1('global', NULL, jsonb_build_obje
   jsonb_build_array(jsonb_build_object('name', 'renderer-fixture', 'invoke_url', endpoint,
     'invoke_secret', credential))), 'Renderer transport fixture') FROM renderer_transport_case;
 
--- Replay must dispatch with the built-in wrapper even without a settings override.
-UPDATE public.settings SET cached_value = cached_value - 'legacy_outbound_template_id'
-WHERE category = 'workflow_defaults';
 UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
 WHERE status IN ('pending', 'pending_edge', 'failed') AND scheduled_at <= now();
 CREATE TEMP TABLE renderer_receipts AS
@@ -42,6 +39,13 @@ SELECT 'print', public.invoke_label_renderer_print_sync_v1(gen_random_uuid(), ge
 
 SELECT ok(receipt @> '{"status":202,"completed":false}'::jsonb AND receipt ? 'edge_job_id',
   mode || ' returns an async Edge receipt') FROM renderer_receipts;
+SELECT ok(w.step_status = 'completed' AND s.operation_name = 'legacy_outbound_job'
+          AND NOT s.enabled AND t.name = 'outbound_wrapper_v1',
+  r.mode || ' links to the disabled outbound bridge step without executing it')
+FROM renderer_receipts r LEFT JOIN public.outbound_calls o ON o.id = (r.receipt->>'edge_job_id')::uuid
+LEFT JOIN public.workflow_run_steps w ON w.id = o.workflow_run_step_id
+LEFT JOIN public.workflow_template_steps s ON s.id = w.workflow_template_step_id
+LEFT JOIN public.workflow_templates t ON t.id = s.workflow_template_id;
 SELECT ok(o.renderer_credential_ref IS NOT NULL AND o.headers = '{}'::jsonb
         AND position(f.credential IN to_jsonb(o)::text) = 0,
           r.mode || ' retains only the bound credential reference')
@@ -118,6 +122,15 @@ SELECT ok(runs = (SELECT count(*) FROM public.workflow_runs)
   AND steps = (SELECT count(*) FROM public.workflow_run_steps)
   AND calls = (SELECT count(*) FROM public.outbound_calls),
   'an idle configured cron tick writes no workflow run, step, or outbound job') FROM renderer_idle_counts;
+
+UPDATE public.settings SET cached_value = cached_value - 'legacy_outbound_template_id'
+WHERE category = 'workflow_defaults';
+SELECT throws_ok('SELECT public.invoke_label_renderer(1)', '55000',
+  'label_renderer_workflow_template_unavailable', 'a missing wrapper setting refuses to enqueue');
+SELECT ok(runs = (SELECT count(*) FROM public.workflow_runs)
+  AND steps = (SELECT count(*) FROM public.workflow_run_steps)
+  AND calls = (SELECT count(*) FROM public.outbound_calls),
+  'a missing wrapper setting leaves no workflow run, step, or outbound job') FROM renderer_idle_counts;
 
 SELECT * FROM finish();
 ROLLBACK;
