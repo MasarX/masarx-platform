@@ -144,7 +144,9 @@ BEGIN
   v_replay RECORD;
   v_system_scan_fields CONSTANT TEXT[] := ARRAY[
     'source', 'action_key', 'phase', 'warehouse_transfer_id', 'task_id', 'notes',
-    'checkpoint_key', 'checkpoint_sequence', 'checkpoint_scope', 'decision_log_id'
+    'checkpoint_key', 'checkpoint_sequence', 'checkpoint_scope', 'decision_log_id',
+    -- tg_enforce_mobile_attestation_ingest_v1 also overwrites these keys on insert.
+    'app', '__attestation_source'
   ];$$));
   v_definition := replace(v_definition, v_mutation_start, v_replay || v_mutation_start);
   v_definition := replace(v_definition, v_transition_start, v_key_conflict || v_transition_start);
