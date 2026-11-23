@@ -67,6 +67,21 @@ async function waitForCronPause(db, wait = delay) {
   throw new Error('pg_cron did not acknowledge the launch pause');
 }
 
+async function configureHostedDatabase(admin, db, logConnections) {
+  const commands = ["ALTER SYSTEM SET cron.launch_active_jobs = 'off'"];
+  if (logConnections) {
+    commands.push(
+      'ALTER SYSTEM SET log_connections = on',
+      'ALTER SYSTEM SET log_disconnections = on',
+      "ALTER SYSTEM SET log_line_prefix = '%h %m [%p] %b %qapp=%a user=%u db=%d '",
+    );
+  }
+  // Each ALTER SYSTEM needs its own psql -c to stay outside a transaction block.
+  const reloaded = await admin(...commands, 'SELECT pg_reload_conf()');
+  if (reloaded.trim() !== 't') throw new Error('Could not reload the disposable CI database configuration');
+  await waitForCronPause(db);
+}
+
 async function cloneHostedDatabases(admin, databases, created, restore = admin) {
   if (!databases.length) return;
   const { owner, limit, explicitAcl } = JSON.parse(await admin(`SELECT json_build_object(
@@ -295,13 +310,12 @@ function imagePreflight(text, event, now = new Date(), ref = process.env.GITHUB_
   console.log('::warning title=Unpinned qualification only::Protected main permits temporary tag pulls; this is not digest-pinned acceptance.');
   return { qualificationOnly: true };
 }
-async function imageGuard(pins, file, env, logConnectionsFor = '') {
+async function imageGuard(pins, file, env) {
   const policyFile = `${file}.policy.json`;
   const host = env.DOCKER_HOST || 'unix:///var/run/docker.sock';
   if (!host.startsWith('unix://')) throw new Error('Digest guard requires the hosted Unix Docker socket');
   fs.writeFileSync(file, JSON.stringify(pins), { mode: 0o600 });
-  const child = fork('scripts/ci-hosted/docker-images.cjs', [file, host.slice(7), policyFile, logConnectionsFor],
-    { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const child = fork('scripts/ci-hosted/docker-images.cjs', [file, host.slice(7), policyFile], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   try {
     const port = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Digest guard startup timed out')), 10000);
@@ -400,7 +414,7 @@ async function qualify(diagnostic) {
     if (!pinState.qualificationOnly) {
       diskFloor(dockerRoot);
       diagnostic.stage = 'image-guard';
-      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env, disposableShard ? `supabase_db_${project}` : '');
+      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env);
       cliEnv = guard.env;
     }
     diagnostic.stage = 'cli-download';
@@ -460,11 +474,7 @@ async function qualify(diagnostic) {
       // Disable background ANALYZE before exposing the application migrations to this stack.
       summary.autovacuum = await timed('autovacuum-off', () => disableHostedAutovacuum(status.DB_URL, dbPort, stackAdmin, db));
       // The disposable fixture uses the registered schedules without launching background jobs.
-      await timed('cron-pause', async () => {
-        const reloaded = await stackAdmin("ALTER SYSTEM SET cron.launch_active_jobs = 'off'", 'SELECT pg_reload_conf()');
-        if (reloaded.trim() !== 't') throw new Error('Could not reload the pg_cron launch control');
-        await waitForCronPause(db);
-      });
+      await timed('cron-pause', () => configureHostedDatabase(stackAdmin, db, disposableShard));
       const versions = migrationInventory(fs.readdirSync('supabase/migrations'));
       fs.rmdirSync(path.join(sb, 'migrations'));
       fs.symlinkSync(path.join(root, 'supabase/migrations'), path.join(sb, 'migrations'), 'dir');
@@ -608,4 +618,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, pgtapDeadline };
