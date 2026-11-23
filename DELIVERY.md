@@ -1,6 +1,6 @@
 # MasarX: delivery
 
-The Delivery Lead owns this file. Change it through a reviewed PR.
+The Delivery Lead owns this file.
 
 Follows engineering standard v1.10.
 
@@ -8,10 +8,12 @@ Follows engineering standard v1.10.
 
 - The `main` queue permits one concurrent build. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
 - The manual merge hold is retired. The DEV apply guard (G1–G3) protects DEV database applies.
-- Changes on the risk paths in [AGENTS.md](AGENTS.md#risk-paths-need-one-independent-review-before-landing) need green CI and one independent review of the full diff, recorded on the PR against its exact head. No code-owner or lead approval is required. GitHub can require an extra approval for unattributed changes.
+- Workers push their own topic branches and open PRs under the project's agent identity. Each PR names its issue (`Closes #n` or `Refs #n`).
 - Use the approved tree-publisher App helper for authenticated GitHub work. If the helper fails, stop and report it to Delivery. Keep installation tokens and signing material out of output and shared artifacts. The owner login is reserved for approved settings changes and release tags.
-- Leave queue admission and merging to the Delivery Lead unless your task explicitly authorizes them for the PR. Push changes through topic branches. Never force-push, rewrite public history or push directly to `main`. Change repository or organization settings only through an approved packet naming the exact setting and target value. Record the before and after values.
-- Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. Before enqueueing, verify the required checks and any applicable risk-path review for the exact PR head and the PR's issue reference (`Closes #n` or `Refs #n`). The App sets `expectedHeadOid` to the reviewed SHA. Keep auto-merge off. If the head moves or a review sends the PR back, disable auto-merge if set, dequeue it (`dequeuePullRequest`), and confirm no queue entry remains. Verify the queued head still matches the reviewed SHA.
+- Never force-push, rewrite public history or push directly to `main`. Change repository or organization settings only through an approved packet naming the exact setting and target value. Record the before and after values.
+- A PR that touches none of the [risk paths in AGENTS.md](AGENTS.md#risk-paths-high-risk-only-need-one-independent-review-before-landing) merges on green CI. The worker opens it ready and immediately enables auto-merge with `enablePullRequestAutoMerge`, using `SQUASH` and setting `expectedHeadOid` to the PR head.
+- A high-risk change gets one independent review of the full diff in parallel with CI. The worker enables auto-merge using the same settings once the reviewer's verdict comment names the current PR head SHA. Keep that head fixed while auto-merge is on. If another push is needed, turn auto-merge off first. Tests check fixes and later pushes. Only a fix or later push that touches a risk path needs a new verdict.
+- Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. The Delivery Lead owns the merge queue, CI health and speed, releases, deploys, rollback and alerts.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. A rename-only re-stamp needs no new review. Compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. Record the existing review against the resulting SHA. The append-only and ordering gate is in [migrations.cjs](scripts/ci-hosted/migrations.cjs).
 
 ## Checks
