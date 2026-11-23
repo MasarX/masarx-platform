@@ -74,7 +74,7 @@ function loadWorker({ stale = false } = {}) {
       EDGE_SUPABASE_URL: new URL(endpoint).origin,
       EDGE_SUPABASE_ANON_KEY: 'fixture',
       API_CALLER_DB_JWT: ['header', 'payload', 'signature'].join('.'),
-      SUPABASE_JWT_SECRET: randomBytes(32).toString('hex'),
+      LABEL_RENDERER_SIGNING_KEY: randomBytes(32).toString('hex'),
     })[key] ?? '' },
   };
   runInNewContext(outputText, {

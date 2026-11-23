@@ -419,7 +419,7 @@ const executeClaimedJob = async (
       ? await authorizeRendererSend(
         mergedDispatch,
         RENDERER_ENDPOINT,
-        readEnv("SUPABASE_JWT_SECRET"),
+        readEnv("LABEL_RENDERER_SIGNING_KEY"),
       )
       : mergedDispatch;
     callResult = await runFetch(sendDispatch, egressEnvelope);

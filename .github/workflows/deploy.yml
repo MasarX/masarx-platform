@@ -533,6 +533,7 @@ jobs:
           export EDGE_SECRET_FILE="$secret_file"
           node <<'NODE'
           const fs = require('node:fs');
+          const { createHmac } = require('node:crypto');
           const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
           const bundle = buildEdgeDbJwtBundle({ secret: process.env.SUPABASE_JWT_SECRET, includeMarketing: true });
           const token = bundle?.marketing_db_jwt;
@@ -547,8 +548,11 @@ jobs:
             process.exit(1);
           }
           for (const value of Object.values(bundle)) console.log('::add-mask::' + value);
+          const rendererKey = createHmac('sha256', process.env.SUPABASE_JWT_SECRET)
+            .update('masarx-renderer-sign-v1').digest('hex');
           fs.writeFileSync(process.env.EDGE_SECRET_FILE, Object.entries(bundle)
             .map(([key, value]) => `${key.toUpperCase()}=${value}\n`).join('')
+            + `LABEL_RENDERER_SIGNING_KEY=${rendererKey}\n`
             + 'EDGE_REQUIRE_DB_JWT=1\nEDGE_ALLOW_SERVICE_ROLE_FALLBACK=0\n', { mode: 0o600 });
           NODE
           node scripts/deploy/append-function-cors.mjs
@@ -578,12 +582,15 @@ jobs:
               const { readFileSync } = require("node:fs");
               const { createHash } = require("node:crypto");
               const list = JSON.parse(readFileSync(0, "utf8"));
-              const token = readFileSync(process.env.EDGE_SECRET_FILE, "utf8").match(/^MARKETING_DB_JWT=(.+)$/m)?.[1];
-              if (!token) process.exit(1);
-              const expected = createHash("sha256").update(token).digest("hex");
-              if (list.find(entry => entry.name === "MARKETING_DB_JWT")?.value !== expected) process.exit(1);
+              const source = readFileSync(process.env.EDGE_SECRET_FILE, "utf8");
+              for (const name of ["MARKETING_DB_JWT", "LABEL_RENDERER_SIGNING_KEY"]) {
+                const value = source.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1];
+                if (!value) process.exit(1);
+                const expected = createHash("sha256").update(value).digest("hex");
+                if (list.find(entry => entry.name === name)?.value !== expected) process.exit(1);
+              }
             ' 2>/dev/null; then
-            echo '::error::Marketing token verification failed.'
+            echo '::error::Edge secret digest verification failed.'
             exit 1
           fi
           while IFS=$'\t' read -r function_name auth_mode; do

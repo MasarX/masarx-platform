@@ -17,7 +17,7 @@
     },
     {
       "name": "label-renderer",
-      "auth_mode": "supabase_jwt",
+      "auth_mode": "public_no_jwt",
       "enabled": true
     },
     {

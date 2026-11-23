@@ -55,6 +55,8 @@ Follows engineering standard v1.4 (2026-11-22).
 
 ## Deploys
 
+The v0.2.0 production deploy plan uses the same renderer signing key derivation as DEV, HMAC-SHA256 of the production project JWT secret with the versioned `masarx-renderer-sign-v1` label. The operator runs the derivation on the operator machine and installs the key in the production Edge secret store. Production signing material stays on the server and never enters GitHub.
+
 - DEV deploys run from `main` only. The database job serializes applies in one concurrency group with cancellation disabled. Its configuration guard checks whether deployment is configured. The database merge gate is hosted from-zero replay plus pgTAP. Verify the DEV apply after every migration merge and retain the merged SHA, deploy result and applied migration evidence.
 - The M6 DEV apply guards are active in [apply-guard.cjs](scripts/deploy/apply-guard.cjs) and the deploy workflow.
   - G1: Skip a superseded push when a newer deploy run targets the current tip of `main`. Refuse the apply if the replacing run ended without success or failure.
