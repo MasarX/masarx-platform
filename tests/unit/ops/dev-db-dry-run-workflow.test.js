@@ -53,6 +53,47 @@ test('runs the configuration readout only on manual dispatch in dev with read ac
   expect(rendererClaims.run).toContain('renderer_unreadable "psql-exit-$psql_status"');
 });
 
+test('runs the outbound wake readout as one fixed read-only query', () => {
+  const [, sql] = rendererClaims.run.match(/wake_metrics="\$\(renderer_psql <<'SQL'\n([\s\S]+?)\nSQL\n\)" \|\| renderer_query_failed "\$\?" outbound_wake\n/);
+  const statements = sql.replace(/--[^\n]*|'(?:''|[^'])*'/g, '').split(';').slice(0, -1);
+  expect(statements.map(statement => statement.trim().split(/\s+/)[0])).toEqual([
+    'BEGIN', 'SET', 'SET', 'WITH', 'COMMIT',
+  ]);
+  expect(sql).toMatch(/^BEGIN TRANSACTION READ ONLY;\nSET LOCAL statement_timeout = '8s';\nSET LOCAL search_path = pg_catalog;/);
+  expect(sql).toMatch(/\nCOMMIT;$/);
+  expect(statements.join(' ')).not.toMatch(/\\|\b(?:INSERT|UPDATE|DELETE|ALTER|CREATE|GRANT|MERGE|TRUNCATE|COPY|CALL|DO|INTO|LOCK)\b|\bFOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE)\b/i);
+  const calls = [...statements[3].matchAll(/\b([\w.]+)\s*\(/g)].map(([, name]) => name.toLowerCase());
+  expect([...new Set(calls)].sort()).toEqual([
+    'and', 'as', 'coalesce', 'count', 'exists', 'extract', 'filter', 'floor', 'from',
+    'in', 'materialized', 'now', 'or', 'select', 'to_jsonb', 'using',
+  ]);
+});
+
+test('projects only outbound wake counts, ages, the active flag and the cron schedule', () => {
+  const [, projection] = rendererClaims.run.match(/SELECT to_jsonb\(metrics\) FROM \(\n  SELECT ([\s\S]+?)\n  FROM queue\n\) metrics;/);
+  const columns = projection.split(/\s+AS ([a-z_0-9]+)(?:,\s*|$)/);
+  expect(columns.pop()).toBe('');
+  const fields = Object.fromEntries(columns.filter((_, index) => index % 2 === 1)
+    .map((name, index) => [name, columns[index * 2]]));
+  expect(Object.keys(fields)).toEqual([
+    'gate_slot_age_seconds', 'cron_active', 'cron_schedule', 'cron_starting_count',
+    'cron_connecting_count', 'cron_sending_count', 'cron_running_count', 'cron_succeeded_count',
+    'cron_failed_count', 'cron_other_count', 'edge_pending_60m_count', 'edge_leased_60m_count',
+    'edge_completed_60m_count', 'edge_failed_60m_count', 'edge_pending_due_over_120s_count',
+    'edge_last_success_age_seconds',
+  ]);
+  for (const [name, expression] of Object.entries(fields)) {
+    if (name.endsWith('_count')) {
+      expect(expression).toMatch(/^(?:\(SELECT count\(\*\) FROM sweep_runs WHERE |count\(\*\) FILTER \(WHERE )[\s\S]+\)$/);
+    }
+  }
+  expect(fields.gate_slot_age_seconds).toContain('SELECT floor(extract(epoch FROM now() - last_run_at))::bigint');
+  expect(fields.edge_last_success_age_seconds).toContain('SELECT floor(extract(epoch FROM now() - created_at))::bigint');
+  expect(fields.cron_active).toBe('coalesce((SELECT active FROM sweep), false)');
+  expect(fields.cron_schedule).toBe('(SELECT schedule FROM sweep)');
+  expect(rendererClaims.run).toMatch(/if ! wake_readout="\$\(jq -ces '[\s\S]+?' <<< "\$wake_metrics" 2>\/dev\/null\)"; then\n  renderer_unreadable validate outbound_wake\nfi\nprintf 'outbound_wake=%s\\n' "\$wake_readout" \| tee -a "\$GITHUB_STEP_SUMMARY"/);
+});
+
 test('shares one read-only renderer state query and opts in to tenant counts only for claims', () => {
   const { RENDERER_CONFIG_STATE_SQL: sql, RENDERER_CONFIG_STATE_PATTERN: pattern } = rendererClaims.env;
   expect(rotate.env.RENDERER_CONFIG_STATE_SQL).toBe(sql);

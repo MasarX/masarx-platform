@@ -178,9 +178,13 @@ jobs:
         run: |
           set -euo pipefail
           renderer_unreadable() {
-            printf 'renderer_jwt=UNREADABLE reason=%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"
+            printf '%s=UNREADABLE reason=%s\n' "${2:-renderer_jwt}" "$1" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           }
+          case "$DEPLOY_ENV:$GITHUB_REF" in
+            dev:refs/heads/main) ;;
+            *) renderer_unreadable input outbound_wake ;;
+          esac
           if [[ -z "$PGPASSWORD" ]]; then
             renderer_unreadable no-password
           fi
@@ -212,12 +216,95 @@ jobs:
           }
           renderer_query_failed() {
             local psql_status="$1" sqlstate
+            shift
             sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
             if [[ -n "$sqlstate" ]]; then
-              renderer_unreadable "sqlstate-$sqlstate"
+              renderer_unreadable "sqlstate-$sqlstate" "$@"
             fi
-            renderer_unreadable "psql-exit-$psql_status"
+            renderer_unreadable "psql-exit-$psql_status" "$@"
           }
+
+          wake_metrics="$(renderer_psql <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SET LOCAL statement_timeout = '8s';
+          SET LOCAL search_path = pg_catalog;
+          WITH sweep AS (
+            SELECT jobid, active, schedule FROM cron.job
+            WHERE jobname = 'outbound_wake_sweep'
+            ORDER BY jobid DESC LIMIT 1
+          ), sweep_runs AS (
+            SELECT d.status FROM cron.job_run_details d JOIN sweep s USING (jobid)
+            ORDER BY d.runid DESC LIMIT 10
+          ), leased_finalizations AS NOT MATERIALIZED (
+            -- Terminal queue rows have already cleared the lease token.
+            SELECT pk->>'id' AS call_id, row_new->>'status' AS status, created_at
+            FROM public.audit_table_changes
+            WHERE schema_name = 'public' AND table_name = 'outbound_calls' AND op = 'UPDATE'
+              AND row_old->>'status' = 'in_progress_edge' AND row_old->>'edge_lease_token' IS NOT NULL
+              AND row_new->>'status' IN ('completed', 'failed', 'permanently_failed')
+          ), queue AS (
+            SELECT q.status, q.updated_at, q.scheduled_at, q.lease_expires_at, q.edge_lease_token,
+              EXISTS (
+                SELECT 1 FROM leased_finalizations f
+                WHERE f.call_id = q.id::text AND f.status = q.status
+                  AND f.created_at = q.updated_at
+              ) AS edge_finalized
+            FROM public.outbound_calls q
+            WHERE q.status = 'pending_edge'
+              OR (q.status IN ('in_progress_edge', 'completed', 'failed', 'permanently_failed')
+                AND q.updated_at >= now() - interval '60 minutes')
+          )
+          SELECT to_jsonb(metrics) FROM (
+            SELECT (
+              -- The gate reserves a slot even when the queue is idle.
+              SELECT floor(extract(epoch FROM now() - last_run_at))::bigint
+              FROM public.cron_config WHERE worker_name = 'outbound_wake_relay'
+            ) AS gate_slot_age_seconds,
+            coalesce((SELECT active FROM sweep), false) AS cron_active,
+            (SELECT schedule FROM sweep) AS cron_schedule,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'starting') AS cron_starting_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'connecting') AS cron_connecting_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'sending') AS cron_sending_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'running') AS cron_running_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'succeeded') AS cron_succeeded_count,
+            (SELECT count(*) FROM sweep_runs WHERE status = 'failed') AS cron_failed_count,
+            (SELECT count(*) FROM sweep_runs WHERE status IS NULL OR status NOT IN
+              ('starting', 'connecting', 'sending', 'running', 'succeeded', 'failed')) AS cron_other_count,
+            count(*) FILTER (WHERE status = 'pending_edge'
+              AND updated_at >= now() - interval '60 minutes') AS edge_pending_60m_count,
+            count(*) FILTER (WHERE status = 'in_progress_edge' AND edge_lease_token IS NOT NULL) AS edge_leased_60m_count,
+            count(*) FILTER (WHERE status = 'completed' AND edge_finalized) AS edge_completed_60m_count,
+            count(*) FILTER (WHERE status IN ('failed', 'permanently_failed') AND edge_finalized) AS edge_failed_60m_count,
+            count(*) FILTER (WHERE status = 'pending_edge' AND scheduled_at < now() - interval '120 seconds'
+              AND (lease_expires_at IS NULL OR lease_expires_at < now())) AS edge_pending_due_over_120s_count,
+            (
+              SELECT floor(extract(epoch FROM now() - created_at))::bigint
+              FROM leased_finalizations WHERE status = 'completed'
+              ORDER BY created_at DESC LIMIT 1
+            ) AS edge_last_success_age_seconds
+            FROM queue
+          ) metrics;
+          COMMIT;
+          SQL
+          )" || renderer_query_failed "$?" outbound_wake
+          if ! wake_readout="$(jq -ces '
+            def integer: type == "number" and floor == .;
+            def cron_field: "(?:[0-9*/,-]|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|mon|tue|wed|thu|fri|sat|sun)+";
+            def schedule: . == null or (type == "string" and length <= 128 and (
+              test("\\A(?:" + cron_field + "[ \\t]+){4}" + cron_field + "\\z"; "i")
+              or test("\\A(?:[1-9][0-9]? seconds|@(?:yearly|annually|monthly|weekly|daily|midnight|hourly))\\z"; "i")));
+            select(length == 1) | .[0] | select(type == "object" and length == 16)
+            | select(all(to_entries[];
+                if .key == "cron_active" then .value | type == "boolean"
+                elif .key == "cron_schedule" then .value | schedule
+                elif .key | endswith("_age_seconds") then .value | . == null or integer
+                elif .key | endswith("_count") then .value | integer and . >= 0
+                else false end))
+          ' <<< "$wake_metrics" 2>/dev/null)"; then
+            renderer_unreadable validate outbound_wake
+          fi
+          printf 'outbound_wake=%s\n' "$wake_readout" | tee -a "$GITHUB_STEP_SUMMARY"
+
           renderer_states="$(renderer_psql -v renderer_count_tenants=on <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"
           renderer_state="${renderer_states%%$'\n'*}"
           renderer_tenant_states="${renderer_states#*$'\n'}"
