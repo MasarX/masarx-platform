@@ -179,7 +179,7 @@
     "autoprefixer": "^10.6.2",
     "bidi-js": "^1.1.0",
     "brace-expansion": "2.1.7",
-    "cross-env": "^7.0.3",
+    "cross-env": "^10.1.0",
     "esbuild": "^0.28.2",
     "eslint": "^9.39.3",
     "eslint-config-next": "16.4.6",
