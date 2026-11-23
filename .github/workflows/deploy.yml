@@ -224,6 +224,62 @@ jobs:
             renderer_unreadable "psql-exit-$psql_status" "$@"
           }
 
+          if backlog_metrics="$(renderer_psql <<'SQL'
+          BEGIN TRANSACTION READ ONLY;
+          SET LOCAL statement_timeout = '8s';
+          SET LOCAL search_path = pg_catalog;
+          WITH backlog AS (
+            SELECT p.provider_type, oc.status,
+              -- Classify only reserved test destinations using the queued URL or its Edge override.
+              CASE WHEN COALESCE(
+                CASE WHEN oc.renderer_credential_ref IS NULL THEN oc.context #>> '{edge_dispatch,url}' END,
+                CASE WHEN oc.execution_url_vault_id IS NULL THEN oc.url END)
+                ~* '^https?://(?:[a-z0-9-]+[.])*(?:[a-z0-9-]+[.](?:invalid|test|example)|example[.](?:com|net|org))[.]?(?::[0-9]+)?(?:[/?#]|$)'
+                THEN 'sandbox' ELSE 'unknown' END AS target_class
+            FROM public.outbound_calls oc
+            LEFT JOIN public.providers p ON oc.target_type = 'provider' AND oc.target_id = p.id
+              AND oc.renderer_credential_ref IS NULL
+            -- Count all queued Edge work and mirror the leased claimant's due checks for failures.
+            WHERE oc.status = 'pending_edge'
+              OR (oc.status = 'failed'
+                AND oc.scheduled_at <= now()
+                AND (oc.lease_expires_at IS NULL OR oc.lease_expires_at < now())
+                AND oc.retry_count < oc.max_retries)
+          ), counts AS (
+            SELECT provider_type, target_class,
+              count(*) FILTER (WHERE status = 'failed') AS due_failed_count,
+              count(*) FILTER (WHERE status = 'pending_edge') AS pending_edge_count
+            FROM backlog
+            GROUP BY provider_type, target_class
+          )
+          SELECT COALESCE(jsonb_agg(to_jsonb(counts)), '[]'::jsonb) FROM counts;
+          COMMIT;
+          SQL
+          )"; then
+            if backlog_readout="$(jq -ces '
+              def valid_counts: all(.due_failed_count, .pending_edge_count;
+                type == "number" and . >= 0 and . <= 9007199254740991 and floor == .);
+              # Publish only fixed provider categories, since identifier syntax alone allows private values.
+              def safe_provider: if type == "string" and test("\\A(?:3pl|ai|comms|delivery|geocoding|http|payment|routing|sms|webhook)\\z")
+                then . else "other" end;
+              select(length == 1) | .[0] | select(type == "array")
+              | select(all(.[]; type == "object"
+                  and keys == ["due_failed_count", "pending_edge_count", "provider_type", "target_class"]
+                  and (.target_class == "sandbox" or .target_class == "unknown") and valid_counts))
+              | map(.provider_type |= safe_provider)
+              | group_by([.provider_type, .target_class])
+              | map(.[0] + {due_failed_count: (map(.due_failed_count) | add),
+                  pending_edge_count: (map(.pending_edge_count) | add)})
+              | select(all(.[]; valid_counts))
+            ' <<< "$backlog_metrics" 2>/dev/null)"; then
+              printf 'outbound_backlog=%s\n' "$backlog_readout" | tee -a "$GITHUB_STEP_SUMMARY" || :
+            else
+              (renderer_unreadable validate outbound_backlog) || :
+            fi
+          else
+            (renderer_query_failed "$?" outbound_backlog) || :
+          fi
+
           wake_metrics="$(renderer_psql <<'SQL'
           BEGIN TRANSACTION READ ONLY;
           SET LOCAL statement_timeout = '8s';
