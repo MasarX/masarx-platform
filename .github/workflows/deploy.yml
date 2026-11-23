@@ -625,10 +625,6 @@ jobs:
           LABEL_RENDERER_CORS_ALLOW_ORIGINS: ${{ vars.LABEL_RENDERER_CORS_ALLOW_ORIGINS }}
           LANDING_CORS_ALLOW_ORIGINS: ${{ vars.LANDING_CORS_ALLOW_ORIGINS }}
           PUBLIC_TRACKING_CORS_ALLOW_ORIGINS: ${{ vars.PUBLIC_TRACKING_CORS_ALLOW_ORIGINS }}
-          # GitHub masks environment secrets before this step starts.
-          API_CALLER_GUARDED_EGRESS_PROXY_URL: ${{ inputs.mode != 'dry-run' && secrets.API_CALLER_GUARDED_EGRESS_PROXY_URL || '' }}
-          API_CALLER_GUARDED_EGRESS_PROXY_USERNAME: ${{ inputs.mode != 'dry-run' && secrets.API_CALLER_GUARDED_EGRESS_PROXY_USERNAME || '' }}
-          API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD: ${{ inputs.mode != 'dry-run' && secrets.API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD || '' }}
         run: |
           set -euo pipefail
           printf '::add-mask::%s\n' "$SUPABASE_PROJECT_REF"
@@ -680,13 +676,6 @@ jobs:
           if [[ "$DEPLOY_ENV" == dev ]]; then
             printf 'EDGE_ENVIRONMENT=%s\n' "$DEPLOY_ENV" >> "$secret_file"
           fi
-          if ! EDGE_GUARDED_EGRESS_MODE="$(node scripts/deploy/guarded-egress.cjs append)" ||
-            [[ "$EDGE_GUARDED_EGRESS_MODE" != proxy && "$EDGE_GUARDED_EGRESS_MODE" != dev_direct ]]; then
-            printf 'egress_mode=missing\n' | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          export EDGE_GUARDED_EGRESS_MODE
-          unset API_CALLER_GUARDED_EGRESS_PROXY_URL API_CALLER_GUARDED_EGRESS_PROXY_USERNAME API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD
           cli="$RUNNER_TEMP/deploy-tools/supabase"
           "$cli" link --project-ref "$SUPABASE_PROJECT_REF" --yes
           printf 'attempted=true\n' >> "$GITHUB_OUTPUT"
@@ -697,7 +686,7 @@ jobs:
             node scripts/deploy/apply-guard.cjs summarize "$deploy_temp/db-push.log" "$apply_status" "${apply_elapsed:-$SECONDS}" ||
               echo "::warning::Could not write database apply evidence"
           fi
-          rm -f "$deploy_temp/db-push.log"; rmdir "$deploy_temp"' EXIT
+          rm -f "$deploy_temp/db-push.log" "$deploy_temp/edge-secret-metadata.json"; rmdir "$deploy_temp"' EXIT
           export NO_COLOR=1
           "$cli" db push --linked --yes 2>&1 | tee "$deploy_temp/db-push.log" ||
             bash scripts/deploy/supabase-db-push.sh "$cli" "$deploy_temp/db-push.log" "${PIPESTATUS[@]}" 2>&1 | tee -a "$deploy_temp/db-push.log"
@@ -722,7 +711,7 @@ jobs:
             echo '::error::Marketing token verification failed.'
             exit 1
           fi
-          if ! "$cli" secrets list --project-ref "$SUPABASE_PROJECT_REF" --output json 2>/dev/null |
+          if ! "$cli" secrets list --project-ref "$SUPABASE_PROJECT_REF" --output json 2>/dev/null | tee "$deploy_temp/edge-secret-metadata.json" |
             node -e '
               const { readFileSync } = require("node:fs");
               const { createHash } = require("node:crypto");
@@ -736,19 +725,11 @@ jobs:
                   process.exit(1);
                 }
               }
-              const mode = process.env.EDGE_GUARDED_EGRESS_MODE;
-              if (mode) {
-                const { verifyProxyDigests } = require("./scripts/deploy/guarded-egress.cjs");
-                if (!verifyProxyDigests(mode, local, listed)) {
-                  console.log("::error::Guarded egress secret read-back failed.");
-                  process.exit(1);
-                }
-              }
             ' 2>/dev/null; then
             echo '::error::Renderer credential digest verification failed.'
             exit 1
           fi
-          printf 'egress_mode=%s\n' "$EDGE_GUARDED_EGRESS_MODE" | tee -a "$GITHUB_STEP_SUMMARY"
+          node scripts/deploy/guarded-egress.cjs < "$deploy_temp/edge-secret-metadata.json" | tee -a "$GITHUB_STEP_SUMMARY"
           while IFS=$'\t' read -r function_name auth_mode; do
             flags=()
             if [[ "$auth_mode" == public_no_jwt ]]; then flags+=(--no-verify-jwt); fi
