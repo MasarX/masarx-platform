@@ -15,6 +15,16 @@ test("button shows loading state with aria-busy", () => {
   expect(button).toHaveAttribute("aria-busy", "true");
 });
 
+test("button loading spinner only spins when motion is allowed", () => {
+  render(<Button loading>Save</Button>);
+  const button = screen.getByRole("button", { name: "Save" });
+  const spinner = button.querySelector("span");
+  expect(spinner).toHaveClass("motion-safe:animate-spin");
+  expect(spinner).not.toHaveClass("animate-spin");
+  expect(button).toHaveAttribute("aria-busy", "true");
+  expect(button).toBeDisabled();
+});
+
 test("badge renders accent tone", () => {
   render(<Badge tone="accent">New</Badge>);
   const badge = screen.getByText("New");
