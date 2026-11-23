@@ -77,7 +77,7 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin) 
     const live = (await admin("SELECT bool_and(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'postgres'")).trim();
     if (live && live !== 't') throw new Error('Could not release connections to the migrated template');
     for (const database of databases) {
-      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY FILE_COPY OWNER ${owner} CONNECTION LIMIT ${limit}`);
+      await admin(`CREATE DATABASE ${database} TEMPLATE postgres STRATEGY WAL_LOG OWNER ${owner} CONNECTION LIMIT ${limit}`);
       created.push(database);
       if (explicitAcl) {
         const grants = JSON.parse(await admin(`SELECT coalesce(json_agg(format('GRANT %s ON DATABASE %I TO %s%s',
@@ -295,12 +295,13 @@ function imagePreflight(text, event, now = new Date(), ref = process.env.GITHUB_
   console.log('::warning title=Unpinned qualification only::Protected main permits temporary tag pulls; this is not digest-pinned acceptance.');
   return { qualificationOnly: true };
 }
-async function imageGuard(pins, file, env) {
+async function imageGuard(pins, file, env, logConnectionsFor = '') {
   const policyFile = `${file}.policy.json`;
   const host = env.DOCKER_HOST || 'unix:///var/run/docker.sock';
   if (!host.startsWith('unix://')) throw new Error('Digest guard requires the hosted Unix Docker socket');
   fs.writeFileSync(file, JSON.stringify(pins), { mode: 0o600 });
-  const child = fork('scripts/ci-hosted/docker-images.cjs', [file, host.slice(7), policyFile], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const child = fork('scripts/ci-hosted/docker-images.cjs', [file, host.slice(7), policyFile, logConnectionsFor],
+    { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   try {
     const port = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Digest guard startup timed out')), 10000);
@@ -399,7 +400,7 @@ async function qualify(diagnostic) {
     if (!pinState.qualificationOnly) {
       diskFloor(dockerRoot);
       diagnostic.stage = 'image-guard';
-      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env);
+      guard = await imageGuard(pins, path.join(temp, 'runtime-image-pins.json'), env, disposableShard ? `supabase_db_${project}` : '');
       cliEnv = guard.env;
     }
     diagnostic.stage = 'cli-download';
