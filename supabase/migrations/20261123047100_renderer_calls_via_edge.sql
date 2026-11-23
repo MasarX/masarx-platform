@@ -758,44 +758,14 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO public, extensions, pg_temp
 AS $$
-DECLARE
-    v_edge_ready BOOLEAN := FALSE;
-    v_edge_settings JSONB;
-    v_endpoint_url TEXT;
-    v_edge_jwt_present BOOLEAN := FALSE;
-    v_edge_enabled BOOLEAN := TRUE;
 BEGIN
-    v_edge_ready := to_regprocedure('public.run_api_caller_batch(int)') IS NOT NULL;
-
-    v_edge_settings := resolve_settings('edge_dispatch_policy', 'global', NULL);
-    v_endpoint_url := NULLIF(COALESCE(v_edge_settings->>'endpoint_url', ''), '');
-    BEGIN
-      v_edge_enabled := COALESCE(NULLIF(v_edge_settings->>'enabled', '')::BOOLEAN, TRUE);
-    EXCEPTION
-      WHEN others THEN
-        v_edge_enabled := TRUE;
-    END;
-
-    SELECT EXISTS (
-      SELECT 1
-        FROM public.providers p
-        JOIN public.provider_auth_configs pac ON pac.provider_id = p.id
-       WHERE p.name = 'edge_api_caller'
-         AND NULLIF(COALESCE(pac.credentials->>'shared_secret', ''), '') IS NOT NULL
-    ) INTO v_edge_jwt_present;
-
-    v_edge_ready := v_edge_ready AND v_edge_enabled AND v_endpoint_url IS NOT NULL AND v_edge_jwt_present;
-
     RETURN QUERY
     UPDATE public.outbound_calls AS oc
        SET lease_expires_at = now() + interval '30 seconds'
      WHERE oc.id IN (
         SELECT oc2.id
           FROM public.outbound_calls oc2
-         WHERE (
-               oc2.status = 'pending'
-               OR (NOT v_edge_ready AND oc2.status = 'pending_edge')
-         )
+         WHERE oc2.status = 'pending'
            AND oc2.renderer_credential_ref IS NULL
            AND oc2.scheduled_at <= now()
            AND (oc2.lease_expires_at IS NULL OR oc2.lease_expires_at < now())
@@ -2523,13 +2493,14 @@ EXCEPTION
 END;
 $function$;
 
--- The credential-free relay now owns wakeups. Keep the old tick disabled until it is retired.
-UPDATE public.cron_config
-   SET enabled = false
- WHERE worker_name = 'edge_api_caller_worker';
-
-SELECT cron.alter_job(jobid, active := false)
+-- The credential-free relay now owns wakeups. The reconciler rejects absent routines.
+SELECT cron.unschedule(jobname)
 FROM cron.job
-WHERE jobname = 'api_caller_batch_tick' AND active;
+WHERE jobname = 'api_caller_batch_tick'
+   OR command ~* '\m(run_edge_api_caller_worker|run_api_caller_batch)\M';
+
+DELETE FROM public.cron_config WHERE worker_name = 'edge_api_caller_worker';
+DROP FUNCTION IF EXISTS public.run_edge_api_caller_worker();
+DROP FUNCTION IF EXISTS public.run_api_caller_batch(integer);
 
 COMMIT;

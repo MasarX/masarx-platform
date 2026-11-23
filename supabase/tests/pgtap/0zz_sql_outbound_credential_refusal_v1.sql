@@ -1,9 +1,11 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(12);
+SELECT plan(13);
 SELECT public.create_next_partitions();
 SELECT set_config('app.force_worker', 'outbound_worker', true);
+SELECT ok(NOT EXISTS (SELECT FROM cron.job WHERE jobname = 'api_caller_batch_tick'),
+  'the old SQL tick is absent before either control is queued');
 
 CREATE TEMP TABLE outbound_refusal_fixture AS SELECT gen_random_uuid() AS org,
   gen_random_uuid() AS provider, concat('https', '://', 'egress', '.', 'example', '.', 'test', '/') AS url,

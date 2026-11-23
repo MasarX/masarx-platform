@@ -3,7 +3,7 @@ SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(32);
 
-SELECT is(has_function_privilege(role_name, signature, 'EXECUTE'),
+SELECT is(COALESCE(has_function_privilege(role_name, to_regprocedure(signature), 'EXECUTE'), false),
           role_name = 'service_role' AND service_polling,
           format('%s execute privilege on %s', role_name, signature))
 FROM (VALUES
@@ -27,9 +27,17 @@ SELECT ok(EXISTS (
 ), tick.jobname || ' keeps its command and scheduler role privileges')
 FROM (VALUES
   ('ops_sweeper_tick', 'SELECT public.run_ops_sweeper_worker();', 'public.run_ops_sweeper_worker()'),
-  ('api_caller_batch_tick', 'SELECT public.run_edge_api_caller_worker();', 'public.run_edge_api_caller_worker()'),
   ('workflow_engine_tick', 'CALL public.run_workflow_engine_worker_batch_v1();', 'public.run_workflow_engine_worker_batch_v1()')
 ) AS tick(jobname, command, signature);
+SELECT ok(NOT EXISTS (SELECT FROM cron.job WHERE jobname = 'api_caller_batch_tick')
+  AND NOT EXISTS (
+    SELECT FROM (VALUES ('public.run_edge_api_caller_worker()'), ('public.run_api_caller_batch(integer)')) f(signature)
+    JOIN pg_proc p ON p.oid = to_regprocedure(f.signature)
+    WHERE EXISTS (SELECT FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+      WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE')
+    OR EXISTS (SELECT FROM (VALUES ('anon'), ('authenticated'), ('service_role'), (current_user::text)) r(name)
+      WHERE has_function_privilege(r.name, p.oid, 'EXECUTE'))
+  ), 'the shared-secret job is absent and neither routine is executable by a caller or the scheduler');
 
 UPDATE public.settings
 SET cached_value = '{"enabled":true,"tasks":[
@@ -44,9 +52,7 @@ UPDATE public.settings SET cached_value = jsonb_set(cached_value, '{providers}',
 WHERE category = 'label_provider' AND scope_type = 'global' AND scope_id IS NULL;
 
 UPDATE public.cron_config SET enabled = true, last_run_at = NULL
-WHERE worker_name = 'ops_sweeper_worker';
-UPDATE public.cron_config SET last_run_at = NULL
-WHERE worker_name = 'edge_api_caller_worker';
+WHERE worker_name IN ('ops_sweeper_worker', 'edge_api_caller_worker');
 
 WITH tick AS MATERIALIZED (SELECT public.run_ops_sweeper_worker()::jsonb AS result)
 SELECT is(result #>> '{results,0,result,created}', '1', 'sweeper dispatches the cron reconciliation handler') FROM tick
@@ -58,13 +64,21 @@ SELECT ok(EXISTS (
     AND command = 'SELECT public.run_cache_cleanup_worker();' AND username = current_user
 ), 'sweeper registers the fixture job as the scheduler owner');
 
-SELECT ok(NOT EXISTS (SELECT FROM cron.job WHERE jobname = 'api_caller_batch_tick' AND active)
-          AND public.run_edge_api_caller_worker()->>'reason' = 'Worker disabled in cron_config',
-          'the SQL tick is paused and its routine cannot dispatch through the cron path');
+CREATE TEMP TABLE retired_reconciliation AS SELECT public.ops_sweeper_ensure_cron_jobs(
+  '{"arguments":{"jobs":[
+    {"jobname":"retired-worker-reconcile-fixture","schedule":"* * * * *","worker_name":"edge_api_caller_worker"},
+    {"jobname":"retired-batch-reconcile-fixture","schedule":"* * * * *","function_name":"run_api_caller_batch",
+     "args":[1],"arg_types":["integer"]}
+  ]}}'::jsonb) AS result;
+SELECT ok(result @> '{"created":0,"updated":0,"errors":2}'::jsonb
+  AND NOT EXISTS (SELECT FROM cron.job WHERE
+    command ~* '\m(run_edge_api_caller_worker|run_api_caller_batch)\M'),
+  'reconciliation cannot recreate either retired dispatcher under an alternate name') FROM retired_reconciliation;
 
-SELECT is(last_run_at, CASE WHEN worker_name = 'ops_sweeper_worker' THEN now() END,
-          worker_name || ' cadence follows its live or paused state')
-FROM public.cron_config WHERE worker_name IN ('ops_sweeper_worker', 'edge_api_caller_worker');
+SELECT is((SELECT last_run_at FROM public.cron_config WHERE worker_name = 'ops_sweeper_worker'), now(),
+  'the sweeper still advances its cadence');
+SELECT ok(NOT EXISTS (SELECT FROM public.cron_config WHERE worker_name = 'edge_api_caller_worker'),
+  'the retired cadence stays absent');
 
 -- Reuse a completed transport fixture across the polling callers.
 INSERT INTO net._http_response (id, status_code, headers, content, created)

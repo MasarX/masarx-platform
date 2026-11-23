@@ -16,7 +16,6 @@ CREATE TEMP TABLE worker_tick_acl (
 );
 
 INSERT INTO worker_tick_acl VALUES
-  ('public.run_api_caller_batch(integer)', 'api_caller_batch_tick', 'edge_api_caller_worker'),
   ('public.run_ops_maintenance_worker()', 'ops_maintenance_tick', 'ops_maintenance_worker'),
   ('public.ensure_audit_triggers()', 'audit_ensure_triggers', NULL),
   ('public.run_campaign_enrollment_worker()', 'campaign_enrollment_worker_tick', 'campaign_enrollment_worker'),
@@ -37,12 +36,19 @@ SELECT ok(NOT EXISTS (
 ), 'PUBLIC lacks EXECUTE on ' || tick.signature)
 FROM worker_tick_acl AS tick
 JOIN pg_proc AS proc ON proc.oid = tick.signature::regprocedure;
+SELECT ok(to_regprocedure('public.run_api_caller_batch(integer)') IS NULL
+  AND to_regprocedure('public.run_edge_api_caller_worker()') IS NULL,
+  'both retired entry points are absent, including for PUBLIC');
 
 SELECT is(has_function_privilege(role_name, signature, 'EXECUTE'),
           role_name = 'authenticated' AND signature = 'public.run_outbound_worker()',
           format('%s EXECUTE on %s', role_name, signature))
 FROM worker_tick_acl
 CROSS JOIN (VALUES ('anon'), ('authenticated')) AS roles(role_name);
+SELECT ok(NOT COALESCE(has_function_privilege(role_name, to_regprocedure('public.run_api_caller_batch(integer)'), 'EXECUTE'), false)
+  AND NOT COALESCE(has_function_privilege(role_name, to_regprocedure('public.run_edge_api_caller_worker()'), 'EXECUTE'), false),
+  role_name || ' cannot execute either retired dispatcher')
+FROM (VALUES ('anon'), ('authenticated')) AS roles(role_name);
 
 SELECT ok(has_function_privilege('service_role', 'public.run_outbound_worker()', 'EXECUTE'),
           'service_role retains outbound tick access');
@@ -57,10 +63,11 @@ SELECT ok(EXISTS (
                       END
     AND job.username = current_user
     AND has_function_privilege(job.username, tick.signature, 'EXECUTE')
-    AND (tick.worker_name IS DISTINCT FROM 'edge_api_caller_worker'
-         OR has_function_privilege(job.username, 'public.run_edge_api_caller_worker()', 'EXECUTE'))
 ), tick.job_name || ' retains its command and scheduler privileges')
 FROM worker_tick_acl AS tick;
+SELECT ok(NOT EXISTS (SELECT FROM cron.job WHERE jobname = 'api_caller_batch_tick'
+  OR command ~* '\m(run_edge_api_caller_worker|run_api_caller_batch)\M'),
+  'no cron job under any name targets the retired dispatchers');
 
 -- Exercise scheduler entry points without processing work or dispatching requests.
 UPDATE public.cron_config
@@ -72,6 +79,11 @@ SELECT results_eq(format('SELECT public.run_%s()->>''reason''', worker_name),
                   job_name || ' reaches its cadence check as postgres')
 FROM worker_tick_acl
 WHERE worker_name IS NOT NULL;
+SELECT ok(NOT EXISTS (
+  SELECT FROM (VALUES (current_user::text), ('service_role')) r(name)
+  CROSS JOIN (VALUES ('public.run_api_caller_batch(integer)'), ('public.run_edge_api_caller_worker()')) f(signature)
+  WHERE has_function_privilege(r.name, to_regprocedure(f.signature), 'EXECUTE')
+), 'the scheduler and service role cannot enter either retired dispatcher');
 
 SET LOCAL ROLE authenticated;
 SELECT is(public.run_outbound_worker()->>'reason', 'Worker disabled in cron_config',
