@@ -9,7 +9,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { targetFile, git } = require('./target-policy.cjs');
 const { sanitize, environmentSecrets } = require('./diagnostics.cjs');
 const { run, stage, writeReport } = require('./process.cjs');
-const { captureDatabaseLog, collectStackDiagnostics } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, collectStackDiagnostics, isHostedPgtap } = require('./stack-diagnostics.cjs');
 const { shardFiles, shardEnvironment, shardResults, hostedBatches } = require('./pgtap.cjs');
 
 const { prepareImages } = require('./images.cjs');
@@ -82,6 +82,17 @@ async function configureHostedDatabase(admin, db, logConnections) {
   await waitForCronPause(db);
 }
 
+async function reloadHostedCloneLogging(admin, command, level) {
+  if ((await admin(command, 'SELECT pg_reload_conf()')).trim() !== 't') {
+    throw new Error('Could not reload Postgres clone logging');
+  }
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if ((await admin('SHOW log_min_messages')).trim() === level) return;
+    if (attempt < 19) await delay(250);
+  }
+  throw new Error(`Postgres clone logging did not reach ${level}`);
+}
+
 async function cloneHostedDatabases(admin, databases, created, restore = admin) {
   if (!databases.length) return;
   const { owner, limit, explicitAcl } = JSON.parse(await admin(`SELECT json_build_object(
@@ -112,6 +123,46 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin) 
     }
   } finally {
     await restore('ALTER DATABASE postgres ALLOW_CONNECTIONS true');
+  }
+}
+
+async function withHostedCloneIsolation(admin, restore, clone) {
+  const { rolconnlimit, rolsuper, logLevel, restoreLogging } = JSON.parse(await admin(`SELECT json_build_object(
+    'rolconnlimit', rolconnlimit, 'rolsuper', rolsuper, 'logLevel', setting,
+    'restoreLogging', CASE WHEN sourcefile = current_setting('data_directory') || '/postgresql.auto.conf'
+      THEN format('ALTER SYSTEM SET log_min_messages = %L', setting) ELSE 'ALTER SYSTEM RESET log_min_messages' END)
+    FROM pg_roles CROSS JOIN pg_settings WHERE rolname = 'postgres' AND name = 'log_min_messages'`));
+  if (rolsuper) throw new Error('Cannot isolate the hosted pgTAP clone: the postgres role is a superuser');
+  if (!Number.isInteger(rolconnlimit) || rolsuper !== false) throw new Error('Missing pre-clone postgres role settings');
+  const errors = [];
+  const attemptRestore = async step => {
+    try { await step(); } catch (error) { errors.push(error); }
+  };
+  let cloneError;
+  let loggingChanged = false;
+  try {
+    // Reject the Docker health probe before it can block on the template database lock.
+    await admin('ALTER ROLE postgres CONNECTION LIMIT 0');
+    // DEBUG2 records postmaster forks by PID.
+    loggingChanged = true;
+    await reloadHostedCloneLogging(admin, "ALTER SYSTEM SET log_min_messages = 'debug2'", 'debug2');
+    // Retain any template reopen error without overriding the original clone error.
+    await clone(command => attemptRestore(() => restore(command)));
+  } catch (error) {
+    cloneError = error;
+    throw error;
+  } finally {
+    await attemptRestore(async () => {
+      const restoredLimit = await restore(`ALTER ROLE postgres CONNECTION LIMIT ${rolconnlimit}`,
+        "SELECT rolconnlimit FROM pg_roles WHERE rolname = 'postgres'");
+      if (restoredLimit.trim() !== String(rolconnlimit)) throw new Error('Postgres did not restore the postgres role connection limit');
+    });
+    if (loggingChanged) await attemptRestore(() => reloadHostedCloneLogging(restore, restoreLogging, logLevel));
+    if (errors.length) {
+      const restoreError = errors.length === 1 ? errors[0] : new AggregateError(errors, 'Postgres clone restoration failed');
+      if (!cloneError) throw restoreError;
+      cloneError.restoreError = restoreError;
+    }
   }
 }
 
@@ -198,11 +249,14 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
     const services = (await checked('docker', ['ps', '--filter', `label=com.supabase.cli.project=${project}`, '--format', '{{.Names}}'],
       testEnv, Math.min(15000, remaining()), { quiet: true })).trim().split(/\s+/)
       .filter(name => name && name !== `supabase_db_${project}`);
+    const restoreAdmin = (...commands) => admin(15000, ...commands);
     let results;
     try {
       try {
         if (services.length) await checked('docker', ['stop', ...services], testEnv, Math.min(15000, remaining()));
-        await cloneHostedDatabases(cloneAdmin, databases, created, command => admin(15000, command));
+        await withHostedCloneIsolation(cloneAdmin, restoreAdmin, async restoreTemplate => {
+          await cloneHostedDatabases(cloneAdmin, databases, created, restoreTemplate);
+        });
       } finally {
         if (services.length) await checked('docker', ['start', ...services], testEnv, 15000);
       }
@@ -354,7 +408,7 @@ async function qualify(diagnostic) {
   diagnostic.imagePolicy = { mode: pinState.qualificationOnly ? 'qualification-only' : 'digest-pinned', decision: 'not_started', allowed: 0, denied: 0, denials: [] };
   if (process.argv[2] === 'preflight') return;
   const shard = process.env.PGTAP_SHARD;
-  const disposableShard = shard && process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted';
+  const disposableShard = isHostedPgtap(process.env);
   const workers = process.env.PGTAP_WORKERS || 'nproc';
   if (disposableShard) hostedWorkerLimit(workers, PGTAP_WORKER_CAP);
   const selected = shard ? shardFiles(fs.readdirSync('supabase/tests/pgtap'), shard) : undefined;
@@ -618,4 +672,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, withHostedCloneIsolation, pgtapDeadline };
