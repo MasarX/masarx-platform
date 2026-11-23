@@ -53,16 +53,16 @@ MasarX helps delivery teams manage shipments and coordinate integrations, wareho
 - Follow [DESIGN.md](DESIGN.md) for UI changes. Use translation catalogs and cover Arabic, right-to-left layouts and WCAG 2.2 AA.
 - The owner's approval is required only for production deployments, spending money or using paid services, access only the owner can grant, destructive operations on real data, and making private things public.
 
-## Risk paths (need one independent review before landing)
+## Risk paths (high risk only: need one independent review before landing)
 
-- Apply the [risk-path review rule](DELIVERY.md#branching-and-merging) to changes on these paths.
-- Safety and privacy rules: `AGENTS.md` and `DELIVERY.md`.
-- Ownership and pipeline gates: `/CODEOWNERS`, `/.github/`, `/scripts/ci-hosted/`, `/config/ci/`, `/scripts/ops/ci/`, `/tooling/`.
-- Database, Edge and deployment: `/supabase/migrations/`, `/supabase/config.toml`, `/config/edge/functions.json`, `/scripts/tests/run-pgtap-cloud.js`, `/scripts/deploy/` and production configuration.
-- Environment and diagnostics: `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js`, `/scripts/utils/pg-candidates.js`, `/scripts/utils/pg-hostaddr.js`, `/scripts/qa/qa-log.js`.
-- Dependency and install controls: `**/package.json`, `**/package-lock.json`, `/deno.lock`, `**/npm-shrinkwrap.json`, `**/yarn.lock`, `**/pnpm-lock.yaml`, `**/pnpm-workspace.yaml`, `**/bun.lock*`, `**/.yarn/`, `**/.npmrc`, `**/.yarnrc*`, `**/.pnpmfile.*`, `**/.gitattributes`, `**/node_modules/`.
-- Auth, permissions and privacy: `apps/console/app/auth/`, `apps/console/app/access-policy/`, `apps/portal/app/auth/`, `apps/portal/app/access-policy/`, `apps/console-v2/src/routes/auth/`, `apps/shared/security-middleware.ts`, `supabase/functions/` and SQL grants and row-level security.
-- Data deletion and retention: purge functions and migrations, `scripts/ops/workspace/destroy.js` and `scripts/ops/workspace/delete-branch.js`.
+A change needs the [independent review](DELIVERY.md#branching-and-merging) only when it touches one of these paths, because a mistake there is irreversible, silent or public. Nothing else gets the review: docs, `DESIGN.md`, `AGENTS.md` and `DELIVERY.md`, presentation-only UI, tests, refactors, dependency version bumps and lockfiles, `package.json` outside its `scripts`, and DEV or staging-only fixes. One review per change, with no repeat rounds: a fix to a finding, or any push after the verdict, is checked by tests and needs a new review only if it touches a path below.
+
+- Data loss: `/supabase/migrations/`, purge and retention functions, `scripts/ops/workspace/destroy.js`, `scripts/ops/workspace/delete-branch.js`, and the database-target selection in `/scripts/utils/pg-candidates.js` and `/scripts/utils/pg-hostaddr.js`.
+- Data exposure: `apps/console/app/auth/`, `apps/console/app/access-policy/`, `apps/portal/app/auth/`, `apps/portal/app/access-policy/`, `apps/console-v2/src/routes/auth/`, `apps/shared/security-middleware.ts`, `supabase/functions/`, SQL grants and row-level security, any UI or API change to which personal data is shown, and to whom, and any change that makes something public or opens network or access-control exposure.
+- Money rules: cash-on-delivery amounts, collections and payouts, wherever they live.
+- Secrets and logs: `/scripts/utils/load-env.js`, `/scripts/utils/env-file.js` and `/scripts/qa/qa-log.js`.
+- Merge gates: `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and the `scripts` entries of `package.json` files that CI runs.
+- Production configuration and deploys: `/scripts/deploy/`, `/supabase/config.toml` and `/config/edge/functions.json`.
 
 ## Data safety
 
