@@ -572,43 +572,27 @@ describeIfDb('Outbound queue edge lifecycle', () => {
       [jobId]
     );
 
-    const { rows: claimRows } = await client.query(
-      `SELECT * FROM claim_pending_edge_jobs($1)`,
-      [5]
+    const { rows: [claim] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [jobId],
     );
-    // In shared/tested environments, other pending_edge jobs may exist.
-    // Assert our job is included and has a valid dispatch payload.
-    expect(claimRows.length).toBeGreaterThanOrEqual(1);
-    const myRow = claimRows.find((r) => r.job_id === jobId);
-    expect(myRow).toBeTruthy();
-    expect(myRow.dispatch).toBeTruthy();
-    expect(myRow.dispatch.url).toBeTruthy();
-    expect(myRow.dispatch.method).toBeTruthy();
+    expect(claim).toEqual({ job_id: jobId, lease_token: expect.any(String) });
 
-    const { rows: leasedRows } = await client.query(
-      `SELECT status, lease_expires_at FROM outbound_calls WHERE id = $1::uuid`,
-      [jobId]
+    const { rows: [leased] } = await client.query(
+      `SELECT status, edge_lease_token, lease_expires_at > now() AS active, url, method
+         FROM outbound_calls WHERE id = $1::uuid`,
+      [jobId],
     );
-    expect(leasedRows[0].status).toBe('in_progress_edge');
-    expect(leasedRows[0].lease_expires_at).not.toBeNull();
+    expect(leased).toMatchObject({ status: 'in_progress_edge', active: true, edge_lease_token: claim.lease_token });
+    const { rows: [{ spec }] } = await client.query(
+      `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec`,
+      [jobId, claim.lease_token],
+    );
+    expect(spec).toMatchObject({ url: leased.url, method: leased.method });
 
     await client.query(
-      `
-        SELECT mark_outbound_call_success(
-          $1::uuid,
-          $2,
-          $3::jsonb,
-          $4::jsonb,
-          $5
-        )
-      `,
-      [
-        jobId,
-        200,
-        JSON.stringify({ 'content-type': 'application/json' }),
-        JSON.stringify({ ok: true }),
-        150,
-      ]
+      `SELECT public.mark_claimed_edge_job_success_v1($1::uuid, $2::uuid, 200, $3::jsonb, $4::jsonb, 150)`,
+      [jobId, claim.lease_token, JSON.stringify({ 'content-type': 'application/json' }), JSON.stringify({ ok: true })],
     );
 
     const { rows: completedRows } = await client.query(
@@ -839,29 +823,16 @@ describeIfDb('Outbound queue edge lifecycle', () => {
       [jobId]
     );
 
-    const { rows: claimRows } = await client.query(
-      `SELECT * FROM claim_pending_edge_jobs($1)`,
-      [5]
+    const { rows: [firstClaim] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [jobId],
     );
-    expect(claimRows.some((row) => row.job_id === jobId)).toBe(true);
+    expect(firstClaim).toEqual({ job_id: jobId, lease_token: expect.any(String) });
 
     await client.query(
-      `
-        SELECT mark_outbound_call_failure(
-          $1::uuid,
-          $2,
-          $3::jsonb,
-          $4::jsonb,
-          $5
-        )
-      `,
-      [
-        jobId,
-        503,
-        JSON.stringify({ 'content-type': 'application/json', 'retry-after': '60' }),
-        JSON.stringify({ error: 'temporary upstream failure' }),
-        'temporary upstream failure',
-      ]
+      `SELECT public.mark_claimed_edge_job_failure_v1($1::uuid, $2::uuid, 503, $3::jsonb, $4::jsonb, $5, 0)`,
+      [jobId, firstClaim.lease_token, JSON.stringify({ 'content-type': 'application/json', 'retry-after': '60' }),
+        JSON.stringify({ error: 'temporary upstream failure' }), 'temporary upstream failure'],
     );
 
     const { rows: failedRows } = await client.query(
@@ -890,10 +861,9 @@ describeIfDb('Outbound queue edge lifecycle', () => {
     expect(firstFailureDecision.decision_inputs?.permanent).toBe(false);
 
     const { rows: prematureClaimRows } = await client.query(
-      `SELECT * FROM claim_pending_edge_jobs($1)`,
-      [5]
+      `SELECT * FROM public.claim_pending_edge_job_ids_v1(1)`,
     );
-    expect(prematureClaimRows.some((row) => row.job_id === jobId)).toBe(false);
+    expect(prematureClaimRows.find((row) => row.job_id === jobId)).toBeUndefined();
 
     await client.query(
       `
@@ -904,29 +874,23 @@ describeIfDb('Outbound queue edge lifecycle', () => {
       `,
       [jobId]
     );
-    const { rows: reclaimedRows } = await client.query(
-      `SELECT * FROM claim_pending_edge_jobs($1)`,
-      [5]
+    const { rows: [reclaimed] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [jobId],
     );
-    expect(reclaimedRows.some((row) => row.job_id === jobId)).toBe(true);
+    expect(reclaimed).toEqual({ job_id: jobId, lease_token: expect.any(String) });
+    expect(reclaimed.lease_token).not.toBe(firstClaim.lease_token);
+    await client.query('SAVEPOINT stale_outbound_lease');
+    await expect(client.query(
+      `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid)`,
+      [jobId, firstClaim.lease_token],
+    )).rejects.toThrow('active lease');
+    await client.query('ROLLBACK TO SAVEPOINT stale_outbound_lease');
 
     await client.query(
-      `
-        SELECT mark_outbound_call_failure(
-          $1::uuid,
-          $2,
-          $3::jsonb,
-          $4::jsonb,
-          $5
-        )
-      `,
-      [
-        jobId,
-        400,
-        JSON.stringify({ 'content-type': 'application/json' }),
-        JSON.stringify({ error: 'permanent client error' }),
-        'permanent client error',
-      ]
+      `SELECT public.mark_claimed_edge_job_failure_v1($1::uuid, $2::uuid, 400, $3::jsonb, $4::jsonb, $5, 0)`,
+      [jobId, reclaimed.lease_token, JSON.stringify({ 'content-type': 'application/json' }),
+        JSON.stringify({ error: 'permanent client error' }), 'permanent client error'],
     );
 
     const { rows: terminalRows } = await client.query(
@@ -1060,14 +1024,16 @@ describeIfDb('Outbound queue edge lifecycle', () => {
     expect(failoverDecisionRows).toHaveLength(1);
     expect(failoverDecisionRows[0].decision_outcome).toBe('failed_over');
 
-    const { rows: claimRows } = await client.query(
-      `SELECT * FROM claim_pending_edge_jobs($1)`,
-      [5],
+    const { rows: [claim] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [scenario.jobId],
     );
-    const claimedRow = claimRows.find((row) => row.job_id === scenario.jobId);
-    expect(claimedRow).toBeTruthy();
-    expect(claimedRow.dispatch.url).toBe(scenario.secondaryUrl);
-    expect(claimedRow.dispatch.method).toBe('POST');
+    expect(claim).toEqual({ job_id: scenario.jobId, lease_token: expect.any(String) });
+    const { rows: [{ spec }] } = await client.query(
+      `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec`,
+      [claim.job_id, claim.lease_token],
+    );
+    expect(spec).toMatchObject({ url: scenario.secondaryUrl, method: 'POST' });
   });
 
   test('blocks failover when no alternate provider exists and keeps the original job row', async () => {

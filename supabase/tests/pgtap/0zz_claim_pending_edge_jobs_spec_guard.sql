@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(4);
+SELECT plan(6);
 
 -- Seed minimal org + provider for outbound_calls targeting (idempotent).
 SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
@@ -194,11 +194,14 @@ SET status = EXCLUDED.status,
     context = EXCLUDED.context,
     workflow_run_step_id = EXCLUDED.workflow_run_step_id;
 
--- Act: claim a batch. The function must NOT raise, must permanently_fail the bad job, and must claim the good job.
-SELECT ok(
-  EXISTS(SELECT 1 FROM public.claim_pending_edge_jobs(10) WHERE job_id = 'cccccccc-0000-0000-0000-000000000011'),
-  'claim_pending_edge_jobs claims a valid job even when another job has invalid auth/spec'
-);
+CREATE TEMP TABLE pgtap_bad_edge_claim AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+CREATE TEMP TABLE pgtap_bad_edge_spec AS
+SELECT job_id, lease_token, public.get_claimed_edge_job_call_spec_v1(job_id, lease_token) AS spec
+FROM pgtap_bad_edge_claim;
+SELECT ok(EXISTS (SELECT FROM pgtap_bad_edge_spec
+  WHERE job_id = 'cccccccc-0000-0000-0000-000000000010' AND lease_token IS NOT NULL AND spec IS NULL),
+  'the bounded claimant acquires the invalid job but its owned spec fails closed');
+CREATE TEMP TABLE pgtap_good_edge_claim AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
 
 SELECT is(
   (SELECT status FROM public.outbound_calls WHERE id = 'cccccccc-0000-0000-0000-000000000010'),
@@ -206,11 +209,12 @@ SELECT is(
   'invalid job is marked permanently_failed instead of crashing the batch'
 );
 
-SELECT is(
-  (SELECT status FROM public.outbound_calls WHERE id = 'cccccccc-0000-0000-0000-000000000011'),
-  'in_progress_edge',
-  'valid job is moved to in_progress_edge'
-);
+SELECT ok(EXISTS (
+  SELECT FROM pgtap_good_edge_claim l JOIN public.outbound_calls o ON o.id = l.job_id
+  WHERE l.job_id = 'cccccccc-0000-0000-0000-000000000011' AND o.status = 'in_progress_edge'
+    AND o.edge_lease_token = l.lease_token
+    AND public.get_claimed_edge_job_call_spec_v1(l.job_id, l.lease_token)->>'url' = o.url
+), 'the next claim resolves the valid job under its own active token');
 
 -- Optional: decision_log entry exists for the spec failure (org-scoped).
 SELECT ok(
@@ -222,9 +226,21 @@ SELECT ok(
       AND resource_id = 'cccccccc-0000-0000-0000-000000000010'
       AND decision_point = 'edge_claim_spec'
       AND decision_outcome = 'permanently_failed'
+      AND decision_inputs->>'reason' = 'spec_resolution_failed'
+      AND decision_inputs->>'error' = 'outbound_spec_resolution_failed'
+      AND NOT (decision_inputs ?| ARRAY['headers','authorization','token','url'])
   ),
   'spec failure is logged to decision_log for audit/alerting'
 );
+
+SELECT throws_ok(format('SELECT public.get_claimed_edge_job_call_spec_v1(%L::uuid,%L::uuid)', job_id, gen_random_uuid()),
+  'P0001', format('get_claimed_edge_job_call_spec_v1: active lease for job %s not found', job_id),
+  'an unrelated token cannot resolve the valid job') FROM pgtap_good_edge_claim;
+UPDATE public.outbound_calls o SET lease_expires_at = now() - interval '1 second'
+FROM pgtap_good_edge_claim l WHERE o.id = l.job_id;
+SELECT throws_ok(format('SELECT public.get_claimed_edge_job_call_spec_v1(%L::uuid,%L::uuid)', job_id, lease_token),
+  'P0001', format('get_claimed_edge_job_call_spec_v1: active lease for job %s not found', job_id),
+  'the original token cannot resolve the job after expiry') FROM pgtap_good_edge_claim;
 
 SELECT finish();
 

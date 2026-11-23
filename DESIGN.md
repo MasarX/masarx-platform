@@ -181,6 +181,7 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 - Have the Design lead run one daily sweep across roles, viewports, themes and states.
 - File each finding as an issue and revert a change that breaks a critical user journey.
 - Delegate the hands-on checks the owner would do and deliver screenshots, timings and a short visual report.
+- Sweep signed-in screens on dev only with the [synthetic sweep accounts](DELIVERY.md#signed-in-dev-sweep) and keep credentials out of logs, captures and issues.
 
 ### Changing this file
 

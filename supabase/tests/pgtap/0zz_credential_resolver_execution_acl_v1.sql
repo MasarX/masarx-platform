@@ -28,8 +28,12 @@ INSERT INTO credential_acl_cases VALUES
     'SELECT public.resolve_settings_merged(NULL::text,NULL::text,NULL::uuid)', ARRAY['service_role','label_renderer_role','edge_label_renderer_role']),
   ('api.resolve_settings_merged(text,text,uuid)',
     'SELECT api.resolve_settings_merged(NULL::text,NULL::text,NULL::uuid)', ARRAY['service_role','label_renderer_role','edge_label_renderer_role']),
-  ('public.get_job_call_spec(uuid)', 'SELECT public.get_job_call_spec(NULL::uuid)', ARRAY['service_role','edge_api_caller_role']),
-  ('api.get_job_call_spec(uuid)', 'SELECT api.get_job_call_spec(NULL::uuid)', ARRAY['service_role','edge_api_caller_role']),
+  ('public.get_job_call_spec(uuid)', 'SELECT public.get_job_call_spec(NULL::uuid)', ARRAY[]::text[]),
+  ('api.get_job_call_spec(uuid)', 'SELECT api.get_job_call_spec(NULL::uuid)', ARRAY[]::text[]),
+  ('public.get_claimed_edge_job_call_spec_v1(uuid,uuid)', 'SELECT public.get_claimed_edge_job_call_spec_v1(NULL::uuid,NULL::uuid)',
+    ARRAY['service_role','edge_api_caller_role']),
+  ('api.get_claimed_edge_job_call_spec_v1(uuid,uuid)', 'SELECT api.get_claimed_edge_job_call_spec_v1(NULL::uuid,NULL::uuid)',
+    ARRAY['service_role','edge_api_caller_role']),
   ('public.get_job_call_spec_without_ingress_vault_v1(uuid)',
     'SELECT public.get_job_call_spec_without_ingress_vault_v1(NULL::uuid)', ARRAY[]::text[]),
   ('public.integration_studio_test_material_v1(uuid,uuid,text)',
@@ -82,6 +86,16 @@ ORDER BY signature, runtime_role;
 SELECT ok(NOT has_function_privilege('service_role',
   'public.get_job_call_spec_without_ingress_vault_v1(uuid)', 'EXECUTE'),
   'the wrapped implementation remains owner-only');
+
+SELECT ok(NOT has_function_privilege(r.oid, c.signature, 'EXECUTE'),
+  r.rolname || ' cannot execute the unfenced spec path ' || c.signature)
+FROM credential_acl_cases c CROSS JOIN pg_roles r
+WHERE c.signature IN ('public.get_job_call_spec(uuid)', 'api.get_job_call_spec(uuid)',
+                      'public.get_job_call_spec_without_ingress_vault_v1(uuid)')
+  AND (r.rolname LIKE 'edge\_%\_role' OR r.rolname IN (
+    'authenticator','service_role','ui_rpc_executor','label_renderer_role','geocoding_worker_role'
+  ))
+ORDER BY c.signature, r.rolname;
 
 -- Exercise the two raw resolvers under each existing runtime role without secret fixtures.
 CREATE FUNCTION pg_temp.check_credential_runtime_calls() RETURNS SETOF TEXT

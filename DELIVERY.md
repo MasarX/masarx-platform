@@ -48,6 +48,16 @@ Follows engineering standard v1.4 (2026-11-22).
 - `prod` is configured for production data and approved releases. Production deployments are paused.
 - Keep each environment's data separate. Use generated fixtures for tests.
 
+### Signed-in DEV sweep
+
+Dispatch [DEV design sweep users](.github/workflows/dev-sweep-users.yml) from `main` with `environment=dev`. Each successful dispatch refreshes the passwords for all three accounts. Use the successful run ID before the encrypted artifact expires after one day.
+
+Run `node scripts/dev/fetch-sweep-credentials.mjs --run <id> --key <path> --out <path>` with an authorized GitHub CLI and OpenSSL on `PATH`. Set `GH_CLI` to the GitHub CLI executable if needed. Choose a new output file outside Git worktrees, feed it directly to the sweep runner and remove it after the sweep. Keep credential entry and the file out of logs, captures and issues.
+
+The sweep covers the deployed Console and Portal from the `console` and `portal` jobs in [Deploy DEV](.github/workflows/deploy.yml). Sign in with the normal email and password forms. Start at the Console dashboard with `finance_viewer` and Portal Shipments with `sender_user`.
+
+Use the synthetic tenant's read-only `dispatcher` account for Console `/operations/pickups/waves`, `/operations/pickups/requests`, `/operations/routes` and `/resources/warehouse_transfers/new`. The pickup ledgers and route workspace can be reviewed in read-only mode. The transfer manifest form renders with its lookup inputs disabled. Sweep the available states without submitting forms. The [role configuration](config/dev/sweep-roles.json) lists the allowed permissions.
+
 ## Releases
 
 - The tag workflow verifies first-parent history on `main` and qualifying exact-SHA `ci-gate` evidence before building and attesting the static Landing archive. It publishes the archive and checksums to the GitHub Release with static artifact notes. The Delivery Lead updates those notes from the milestone's closed issues and then closes the milestone.

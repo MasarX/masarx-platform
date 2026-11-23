@@ -14,7 +14,12 @@ SELECT ok(NOT has_function_privilege('anon', 'public.get_webhook_edge_dispatch_j
 SELECT ok(NOT has_function_privilege('authenticated', 'public.get_webhook_edge_dispatch_jobs(uuid)', 'EXECUTE'), 'authenticated cannot EXECUTE get_webhook_edge_dispatch_jobs(uuid)');
 
 -- Edge API Caller Role
-SELECT ok(has_function_privilege('edge_api_caller_role', 'public.get_job_call_spec(uuid)', 'EXECUTE'), 'edge_api_caller_role can EXECUTE get_job_call_spec(uuid)');
+SELECT ok(
+  NOT has_function_privilege('edge_api_caller_role', 'public.get_job_call_spec(uuid)', 'EXECUTE')
+  AND NOT has_function_privilege('edge_api_caller_role', 'api.get_job_call_spec(uuid)', 'EXECUTE')
+  AND has_function_privilege('edge_api_caller_role', 'api.get_claimed_edge_job_call_spec_v1(uuid,uuid)', 'EXECUTE'),
+  'the Edge API caller can execute the leased spec wrapper only'
+);
 SELECT ok(has_function_privilege('edge_api_caller_role', 'public.mark_outbound_call_success(uuid, integer, jsonb, jsonb, integer)', 'EXECUTE'), 'edge_api_caller_role can EXECUTE mark_outbound_call_success');
 SELECT ok(NOT has_function_privilege('anon', 'public.get_job_call_spec(uuid)', 'EXECUTE'), 'anon cannot EXECUTE get_job_call_spec(uuid)');
 SELECT ok(NOT has_function_privilege('authenticated', 'public.get_job_call_spec(uuid)', 'EXECUTE'), 'authenticated cannot EXECUTE get_job_call_spec(uuid)');

@@ -10,6 +10,9 @@ DECLARE
   org UUID:=gen_random_uuid(); provider_a UUID:=gen_random_uuid(); provider_b UUID:=gen_random_uuid();
   legacy_a UUID:=gen_random_uuid(); legacy_b UUID:=gen_random_uuid(); job UUID:=gen_random_uuid();
   connection UUID; owned_a UUID; owned_b UUID; result JSONB; definition TEXT; query TEXT; implicit_count INT;
+  lease_token UUID:=gen_random_uuid(); leased_header TEXT;
+  service_probe CONSTANT TEXT :=
+    'DO $probe$ BEGIN SET LOCAL ROLE service_role; PERFORM %s; RESET ROLE; END; $probe$';
 BEGIN
   PERFORM set_config('request.jwt.claims','{"role":"service_role"}',TRUE);
   PERFORM set_config('request.jwt.claim.role','service_role',TRUE);
@@ -29,6 +32,28 @@ BEGIN
     VALUES(job,'provider_api','provider',provider_a,'POST','https://provider.example.invalid/operation','{}','{}',
       '{"auth":{"mode":"api_key_header","auth_type":"api_key","header":"x-api-key","credential_key":"api_key"}}');
   RETURN NEXT is(public.get_job_call_spec(job)#>>'{headers,x-api-key}','synthetic-legacy-a','actual ingress-wrapped dispatch ignores newer owned credentials implicitly');
+
+  UPDATE public.outbound_calls
+  SET status='in_progress_edge', edge_lease_token=lease_token, lease_expires_at=now()-INTERVAL '1 second'
+  WHERE id=job;
+  RETURN NEXT throws_ok(format(service_probe,format('public.get_job_call_spec(%L::uuid)',job)),'42501',NULL,
+    'service_role cannot execute the retired public outbound spec');
+  RETURN NEXT throws_ok(format(service_probe,format('api.get_job_call_spec(%L::uuid)',job)),'42501',NULL,
+    'service_role cannot execute the retired API outbound spec');
+  RETURN NEXT throws_ok(format(service_probe,format('api.get_claimed_edge_job_call_spec_v1(%L::uuid,%L::uuid)',job,lease_token)),
+    'P0001',format('get_claimed_edge_job_call_spec_v1: active lease for job %s not found',job),
+    'service_role cannot resolve marketplace credentials with an expired lease token');
+
+  UPDATE public.outbound_calls SET lease_expires_at=now()+INTERVAL '5 minutes' WHERE id=job;
+  RETURN NEXT throws_ok(format(service_probe,format('api.get_claimed_edge_job_call_spec_v1(%L::uuid,%L::uuid)',job,job)),
+    'P0001',format('get_claimed_edge_job_call_spec_v1: active lease for job %s not found',job),
+    'service_role cannot resolve marketplace credentials with a mismatched lease token');
+  SET LOCAL ROLE service_role;
+  leased_header:=api.get_claimed_edge_job_call_spec_v1(job,lease_token)#>>'{headers,x-api-key}';
+  RESET ROLE;
+  RETURN NEXT is(leased_header,public.get_job_call_spec(job)#>>'{headers,x-api-key}',
+    'service_role resolves the same marketplace credential through the fenced API with the active lease');
+
   UPDATE public.outbound_calls SET context=jsonb_set(context,'{auth,auth_config_id}',to_jsonb(owned_a::text),TRUE) WHERE id=job;
   RETURN NEXT is(public.get_job_call_spec(job)#>>'{headers,x-api-key}','synthetic-owned-a','explicit installer-owned credential selection still works');
   PERFORM public.integration_connection_rotate_v1(connection,'{"api_key":"synthetic-rotated"}',FALSE,NULL);
@@ -60,6 +85,10 @@ END;
 $test$;
 SELECT * FROM pg_temp.marketplace_auth_isolation();
 SELECT ok(pg_get_functiondef('public.get_job_call_spec(uuid)'::regprocedure) LIKE '%get_job_call_spec_without_ingress_vault_v1%','current ingress wrapper remains in place');
-SELECT ok(has_function_privilege('service_role','public.get_job_call_spec(uuid)','EXECUTE') AND NOT has_function_privilege('authenticated','public.get_job_call_spec(uuid)','EXECUTE'),'existing dispatch grants stay service-only');
+SELECT ok(
+  NOT has_function_privilege('service_role','public.get_job_call_spec(uuid)','EXECUTE')
+  AND NOT has_function_privilege('service_role','api.get_job_call_spec(uuid)','EXECUTE')
+  AND NOT has_function_privilege('authenticated','public.get_job_call_spec(uuid)','EXECUTE'),
+  'unfenced marketplace dispatch grants exclude service_role and authenticated');
 SELECT * FROM finish();
 ROLLBACK;
