@@ -275,45 +275,35 @@ CROSS JOIN LATERAL (VALUES
   (bad_inline_job, 'geocode://provider', 80)
 ) AS batch(job, url, priority);
 
-CREATE TEMP TABLE outbound_validation_dispatches (url text);
-CREATE OR REPLACE FUNCTION public.call_api(
-  p_url text, p_method text DEFAULT 'POST', p_headers jsonb DEFAULT '{}',
-  p_body jsonb DEFAULT '{}', p_timeout_seconds integer DEFAULT NULL
-) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO public, extensions, pg_temp AS $mock$
-BEGIN
-  INSERT INTO pg_temp.outbound_validation_dispatches VALUES (p_url);
-  RETURN '{"status":202,"completed":false,"request_id":209}'::jsonb;
-END;
-$mock$;
-
-CREATE OR REPLACE FUNCTION public.claim_pending_jobs(p_batch_size integer)
-RETURNS TABLE(job_id uuid, call_type text, target_type text, target_id uuid, method text, url text,
-              headers jsonb, body jsonb, priority integer, retry_count integer, max_retries integer,
-              correlation_id uuid, shipment_id uuid, context jsonb)
-LANGUAGE sql SECURITY DEFINER SET search_path TO public, extensions, pg_temp AS $mock$
-  WITH claimed AS (
-    UPDATE public.outbound_calls oc SET lease_expires_at = now() + interval '30 seconds'
-    FROM pg_temp.outbound_validation_ids ids
-    WHERE oc.id IN (ids.bad_batch_job, ids.good_batch_job) AND oc.status = 'pending'
-    RETURNING oc.*
-  )
-  SELECT oc.id, oc.call_type, oc.target_type, oc.target_id, oc.method, oc.url,
-         oc.headers, oc.body, oc.priority, oc.retry_count, oc.max_retries,
-         oc.correlation_id, oc.shipment_id, oc.context
-  FROM claimed oc ORDER BY oc.priority DESC;
-$mock$;
+UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
+WHERE id NOT IN (SELECT bad_batch_job FROM outbound_validation_ids UNION ALL SELECT good_batch_job FROM outbound_validation_ids)
+  AND status IN ('pending', 'pending_edge', 'failed') AND scheduled_at <= now();
+CREATE TEMP TABLE outbound_validation_net_baseline AS SELECT count(*) AS total FROM net.http_request_queue;
 
 SELECT set_config('app.force_worker', 'outbound_worker', true);
-SELECT is(public.run_outbound_worker()->>'status', 'completed', 'worker completes a mixed batch');
+CREATE TEMP TABLE outbound_validation_worker_result AS SELECT public.run_outbound_worker() AS result;
+SELECT ok(result->>'status' = 'completed' AND result->>'items_processed' = '1'
+  AND EXISTS (SELECT FROM public.outbound_calls o WHERE o.id = ids.good_batch_job
+    AND o.status = 'pending_edge' AND o.edge_lease_token IS NULL AND o.context ? 'edge_dispatch')
+  AND EXISTS (SELECT FROM public.outbound_calls o WHERE o.id = ids.bad_batch_job
+    AND o.status = 'permanently_failed' AND NOT (o.context ? 'edge_dispatch') AND o.lease_expires_at IS NULL),
+  'worker hands off exactly the rendered request and settles the placeholder before a generic claim')
+FROM outbound_validation_worker_result CROSS JOIN outbound_validation_ids ids;
 SELECT is(oc.status, 'permanently_failed', 'the placeholder failure is terminal')
 FROM public.outbound_calls oc JOIN outbound_validation_ids ids ON oc.id = ids.bad_batch_job;
 SELECT is(oc.error_message, 'outbound_url_invalid', 'the worker records the stable invalid-URL code')
 FROM public.outbound_calls oc JOIN outbound_validation_ids ids ON oc.id = ids.bad_batch_job;
-SELECT results_eq(
-  $$SELECT url FROM outbound_validation_dispatches$$,
-  $$VALUES ('https://example.test/batch'::text)$$,
-  'the placeholder never reaches call_api and the valid row in the same batch dispatches'
-);
+CREATE TEMP TABLE outbound_validation_batch_claim AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+SELECT ok(
+  (SELECT array_agg(job_id) FROM outbound_validation_batch_claim WHERE lease_token IS NOT NULL) = ARRAY[ids.good_batch_job]
+  AND EXISTS (SELECT FROM outbound_validation_batch_claim l
+    WHERE public.get_claimed_edge_job_call_spec_v1(l.job_id, l.lease_token)->>'url'
+          = (SELECT url FROM public.outbound_calls WHERE id = ids.good_batch_job))
+  AND (SELECT count(*) FROM net.http_request_queue) = (SELECT total FROM outbound_validation_net_baseline),
+  'only the valid job has a lease and neither worker job creates a pg_net row')
+FROM outbound_validation_ids ids;
+UPDATE public.outbound_calls o SET scheduled_at = now()
+FROM outbound_validation_ids ids WHERE o.id = ids.bad_inline_job;
 SELECT is(public.dispatch_outbound_call_inline(bad_inline_job,
     '{"timeout_seconds":1,"poll_max_seconds":0,"poll_interval_ms":50,"pending_reschedule_seconds":60,"lease_seconds":60}') ->> 'reason',
   'outbound_url_invalid', 'inline dispatch returns the stable rejection without raising')

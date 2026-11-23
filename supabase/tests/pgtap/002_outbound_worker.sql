@@ -11,12 +11,12 @@ SELECT plan(17);
 
 SELECT has_role('edge_api_caller_role');
 SELECT ok(
-    has_function_privilege('edge_api_caller_role', 'public.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
-    'edge_api_caller_role can execute public.log_api_call_event'
+    NOT has_function_privilege('edge_api_caller_role', 'public.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
+    'edge_api_caller_role cannot execute public.log_api_call_event'
 );
 SELECT ok(
-    has_function_privilege('edge_api_caller_role', 'api.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
-    'edge_api_caller_role can execute api.log_api_call_event'
+    NOT has_function_privilege('edge_api_caller_role', 'api.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
+    'edge_api_caller_role cannot execute api.log_api_call_event'
 );
 SELECT ok(
     NOT has_function_privilege('anon', 'public.log_api_call_event(uuid,jsonb,jsonb,int,int,text)', 'EXECUTE'),
@@ -211,19 +211,29 @@ INSERT INTO outbound_calls (
     'ffffffff-0000-0000-0000-000000000101'
 ) ON CONFLICT (id) DO NOTHING;
 
--- Reset throttle and execute worker to process the pending call
+-- Isolate the due credential-free fixture from other runnable jobs.
+UPDATE outbound_calls SET scheduled_at = now() + interval '100 years'
+WHERE id <> 'ffffffff-0000-0000-0000-000000000002' AND status IN ('pending', 'pending_edge', 'failed')
+  AND scheduled_at <= now();
 UPDATE cron_config SET last_run_at = NULL WHERE worker_name = 'outbound_worker';
-
-SELECT is(
-    (SELECT (run_outbound_worker())->>'status'),
-    'completed',
-    'Outbound worker returns completed after attempting HTTP request'
+CREATE TEMP TABLE pgtap_outbound_worker_result AS SELECT run_outbound_worker() AS result;
+SELECT ok(
+    (SELECT result->>'status' = 'completed' AND result->>'items_processed' = '1' FROM pgtap_outbound_worker_result)
+    AND EXISTS (SELECT 1 FROM outbound_calls WHERE id = 'ffffffff-0000-0000-0000-000000000002'
+      AND status = 'pending_edge' AND edge_lease_token IS NULL AND NOT (context ? 'async_request_id')),
+    'Outbound worker hands off the exact credential-free fixture'
 );
 
+CREATE TEMP TABLE pgtap_outbound_worker_claim AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+SELECT public.mark_claimed_edge_job_success_v1(job_id, lease_token, 200, '{}', '{"ok":true}', 1)
+FROM pgtap_outbound_worker_claim;
+SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
 SELECT ok(
-    (SELECT status FROM outbound_calls WHERE id = 'ffffffff-0000-0000-0000-000000000002')
-    IN ('failed', 'pending', 'pending_edge'),
-  'Outbound call marked for retry, async polling, or edge dispatch when in-database HTTP execution unavailable'
+    EXISTS (SELECT FROM pgtap_outbound_worker_claim
+      WHERE job_id = 'ffffffff-0000-0000-0000-000000000002' AND lease_token IS NOT NULL)
+    AND EXISTS (SELECT FROM outbound_calls WHERE id = 'ffffffff-0000-0000-0000-000000000002'
+      AND status = 'completed' AND response_status_code = 200 AND edge_lease_token IS NULL),
+    'The exact credential-free job completes through its Edge lease'
 );
 
 -- Async polling guard: when async_request_id exists, worker must poll net._http_response

@@ -98,11 +98,15 @@ FROM public.ops_alerts WHERE alert_type = 'outbound_wake_relay_blocked'
   AND organization_id = public.marketplace_system_org_id_v1() AND message = alert_type AND details IS NULL;
 
 -- Stub only the network transport so the real claim and worker can run without sending HTTP.
+CREATE TEMP TABLE wake_sql_transports (url text);
 CREATE OR REPLACE FUNCTION public.dispatch_api_request_v1(
   p_url text, p_method text DEFAULT 'POST', p_headers jsonb DEFAULT '{}'::jsonb,
   p_body jsonb DEFAULT '{}'::jsonb, p_timeout_seconds integer DEFAULT NULL
 ) RETURNS bigint LANGUAGE sql SECURITY DEFINER SET search_path TO public, extensions, pg_temp
-AS $mock$ SELECT -1::bigint $mock$;
+AS $mock$
+  INSERT INTO pg_temp.wake_sql_transports VALUES (p_url);
+  SELECT -1::bigint
+$mock$;
 
 CREATE FUNCTION pg_temp.check_edge_dispatch_disabled(p_case text)
 RETURNS SETOF text LANGUAGE plpgsql AS $test$
@@ -110,6 +114,8 @@ DECLARE
   v_fixture pg_temp.wake_fixture%ROWTYPE;
   v_minute CONSTANT timestamptz := date_trunc('minute', statement_timestamp(), 'UTC');
   v_result jsonb;
+  v_transport_count bigint;
+  v_net_count bigint;
 BEGIN
   SELECT * INTO STRICT v_fixture FROM pg_temp.wake_fixture;
   RETURN NEXT is(public.resolve_edge_dispatch_enabled_v1(), false, p_case || ': resolver defaults to disabled');
@@ -150,11 +156,22 @@ BEGIN
       context = context - 'async_request_id' - 'edge_dispatch'
   WHERE id = v_fixture.job;
   PERFORM set_config('app.force_worker', 'outbound_worker', true);
+  SELECT count(*) INTO v_transport_count FROM pg_temp.wake_sql_transports;
+  SELECT count(*) INTO v_net_count FROM net.http_request_queue;
+  DELETE FROM public.ops_alerts
+  WHERE organization_id = public.marketplace_system_org_id_v1()
+    AND created_at = v_minute AND alert_type = 'outbound_wake_relay_blocked';
   PERFORM public.run_outbound_worker();
+  PERFORM public.run_outbound_wake_sweep_v1();
   RETURN NEXT ok(EXISTS (
-    SELECT 1 FROM public.outbound_calls WHERE id = v_fixture.job AND status = 'pending'
-      AND context->>'async_request_id' = '-1' AND NOT (context ? 'edge_dispatch')
-  ), p_case || ': worker keeps the job on the SQL polling path');
+    SELECT 1 FROM public.outbound_calls WHERE id = v_fixture.job AND status = 'pending_edge' AND lease_expires_at IS NULL
+      AND (context ? 'edge_dispatch') AND NOT (context ? 'async_request_id')
+  ) AND (SELECT count(*) FROM pg_temp.wake_sql_transports) = v_transport_count
+    AND (SELECT count(*) FROM net.http_request_queue) = v_net_count
+    AND (SELECT count(*) FROM public.ops_alerts
+      WHERE organization_id = public.marketplace_system_org_id_v1() AND created_at = v_minute
+        AND alert_type = 'outbound_wake_relay_blocked') = 1,
+    p_case || ': the worker queues for Edge and a blocked sweep raises one signal without SQL transport');
 END;
 $test$;
 

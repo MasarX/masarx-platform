@@ -15,7 +15,7 @@ name: Deploy dev
         type: choice
         required: true
         default: deploy
-        options: [deploy, dry-run, api-schemas, renderer-jwt-mint]
+        options: [deploy, dry-run, api-schemas]
       expected_sha:
         description: Full main commit SHA (required in deploy mode)
         type: string
@@ -95,9 +95,9 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          RENDERER_CONFIG_STATE_PATTERN: &renderer-config-state-pattern '^renderer_config_state=(missing_settings|missing_url|placeholder_url|missing_secret_ref|secret_unreadable|pin_mismatch|placeholder_secret|ready)$'
+          RENDERER_CONFIG_STATE_PATTERN: '^renderer_config_state=(missing_settings|missing_url|placeholder_url|missing_secret_ref|secret_unreadable|pin_mismatch|placeholder_secret|ready)$'
           RENDERER_TENANT_STATES_PATTERN: '^renderer_tenant_states=ready:[0-9]+,placeholder_url:[0-9]+,missing_url:[0-9]+,missing_secret_ref:[0-9]+,secret_unreadable:[0-9]+,pin_mismatch:[0-9]+,placeholder_secret:[0-9]+$'
-          RENDERER_CONFIG_STATE_SQL: &renderer-config-state-sql |
+          RENDERER_CONFIG_STATE_SQL: |
             BEGIN READ ONLY;
             SET LOCAL statement_timeout = '8s';
             SET LOCAL search_path = pg_catalog;
@@ -447,169 +447,6 @@ jobs:
             renderer_unreadable validate
           fi
           printf '%s\n' "$lines" | tee -a "$GITHUB_STEP_SUMMARY"
-
-  renderer-jwt-mint:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'renderer-jwt-mint' && inputs.environment == 'dev' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    environment: dev
-    concurrency:
-      group: dev-renderer-jwt-mint
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
-        with:
-          node-version: '24.22.1'
-          package-manager-cache: false
-      - name: Rotate the DEV renderer invoke credential
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
-          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
-          RENDERER_CONFIG_STATE_PATTERN: *renderer-config-state-pattern
-          RENDERER_CONFIG_STATE_SQL: *renderer-config-state-sql
-        run: |
-          set -euo pipefail
-          if [[ ! "$SUPABASE_PROJECT_REF" =~ ^[a-z]{20}$ || -z "$SUPABASE_ACCESS_TOKEN" || -z "$PGPASSWORD" || -z "$SUPABASE_JWT_SECRET" ]]; then
-            echo '::error::Renderer credential rotation requires the DEV database configuration.'
-            exit 1
-          fi
-          renderer_signing_secret="$SUPABASE_JWT_SECRET"
-          unset SUPABASE_JWT_SECRET
-          umask 077
-          renderer_temp="$(mktemp -d)"
-          export RENDERER_TOKEN_FILE="$renderer_temp/renderer.jwt"
-          ca_file="config/certs/supabase-prod-ca-2021.crt"
-          psql_stderr="$renderer_temp/psql.stderr"
-          trap 'rm -f "$RENDERER_TOKEN_FILE" "$psql_stderr"; rmdir "$renderer_temp"' EXIT
-          if ! pooler="$(
-            printf 'Authorization: Bearer %s\n' "$SUPABASE_ACCESS_TOKEN" |
-              curl --fail --silent --max-time 20 --header @- \
-                "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/config/database/pooler" |
-              jq -ers 'select(length == 1) | .[0] | map(select(.database_type == "PRIMARY"))
-                | select(length == 1) | .[0].db_host | strings
-                | select(test("\\Aaws-[0-9]+-[a-z0-9-]+\\.pooler\\.supabase\\.com\\z"))' 2>/dev/null
-          )"; then
-            echo '::error::Could not identify the DEV database pooler.'
-            exit 1
-          fi
-          if ! printf '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7  %s\n' "$ca_file" |
-              sha256sum --check --status 2>/dev/null; then
-            echo '::error::Could not verify the database CA certificate.'
-            exit 1
-          fi
-
-          renderer_psql() {
-            PGHOST="$pooler" PGPORT=5432 PGDATABASE=postgres PGUSER="postgres.$SUPABASE_PROJECT_REF" \
-              PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file" PGGSSENCMODE=disable PGCONNECT_TIMEOUT=8 \
-              timeout 20s psql -X -w -A -q -t -v ON_ERROR_STOP=1 -v VERBOSITY=sqlstate 2>"$psql_stderr"
-          }
-          renderer_mint_failed() {
-            printf 'renderer_jwt_mint=FAILED reason=%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 1
-          }
-          renderer_query_failed() {
-            local psql_status="$1" sqlstate
-            sqlstate="$(LC_ALL=C sed -nE '/^(ERROR|FATAL):  [0-9A-Z]{5}$/ { s/^.*:  //; p; q; }' "$psql_stderr" 2>/dev/null)" || sqlstate=''
-            if [[ -n "$sqlstate" ]]; then
-              renderer_mint_failed "sqlstate-$sqlstate"
-            fi
-            renderer_mint_failed "psql-exit-$psql_status"
-          }
-          renderer_state="$(renderer_psql <<< "$RENDERER_CONFIG_STATE_SQL")" || renderer_query_failed "$?"
-          [[ "$renderer_state" =~ $RENDERER_CONFIG_STATE_PATTERN ]] || renderer_mint_failed state
-          printf '%s\n' "$renderer_state" | tee -a "$GITHUB_STEP_SUMMARY"
-          case "$renderer_state" in
-            renderer_config_state=ready|renderer_config_state=placeholder_secret) ;;
-            *) exit 1 ;;
-          esac
-
-          RENDERER_IAT="$(date +%s)"
-          export RENDERER_IAT RENDERER_EXP="$((RENDERER_IAT + 7 * 24 * 60 * 60))"
-          SUPABASE_JWT_SECRET="$renderer_signing_secret" node <<'NODE'
-          const { writeFileSync } = require('node:fs');
-          const { buildEdgeDbJwtBundle } = require('./scripts/ops/workspace/edge-db-jwt');
-          const nowSec = Number(process.env.RENDERER_IAT);
-          const expiresAt = Number(process.env.RENDERER_EXP);
-          const { label_renderer_db_jwt: token } = buildEdgeDbJwtBundle({
-            secret: process.env.SUPABASE_JWT_SECRET, nowSec, ttlSec: expiresAt - nowSec,
-          });
-          console.log('::add-mask::' + token);
-          try {
-            const { role, aud, sub, iat, exp } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
-            if (role !== 'edge_label_renderer_role' || aud !== 'authenticated' || sub !== 'edge-function' ||
-                iat !== nowSec || exp !== expiresAt) {
-              throw new Error();
-            }
-          } catch {
-            console.error('::error::Minted renderer JWT claims verification failed.');
-            process.exit(1);
-          }
-          writeFileSync(process.env.RENDERER_TOKEN_FILE, token, { mode: 0o600, flag: 'wx' });
-          NODE
-          unset renderer_signing_secret
-
-          claims="$(renderer_psql <<'SQL'
-          \set renderer_jwt `cat "$RENDERER_TOKEN_FILE"`
-          BEGIN ISOLATION LEVEL SERIALIZABLE;
-          SET LOCAL statement_timeout = '8s';
-          SET LOCAL search_path = pg_catalog;
-          SET LOCAL log_parameter_max_length_on_error = 0;
-          -- The resolver uses provider zero from the global settings for a NULL organization.
-          WITH provider AS (
-            SELECT public.resolve_settings('label_provider', 'global', NULL::uuid)->'providers'->0 AS value
-          )
-          SELECT s.id AS renderer_secret_id
-          FROM provider p
-          JOIN vault.secrets s ON s.id = (p.value#>>'{invoke_secret_ref,id}')::uuid
-          WHERE p.value#>>'{invoke_secret_ref,type}' = 'SecretRef'
-            AND starts_with(s.name, 'label_provider/')
-            AND NULLIF(p.value->>'invoke_url', '') NOT LIKE ('https://' || 'example' || '.%')
-            AND public.resolve_label_provider_invoke_secret_v1(p.value) <> $1::text
-          \bind :renderer_jwt
-          \gset
-
-          SELECT vault.update_secret(:'renderer_secret_id'::uuid, $1::text)
-          \bind :renderer_jwt
-          \g /dev/null
-
-          -- A zero-row readback makes \gset fail and rolls back the update.
-          WITH active AS MATERIALIZED (
-            SELECT public.resolve_label_renderer_invoke_config_v1(NULL::uuid)->>'invoke_secret' AS jwt
-          )
-          SELECT split_part(jwt, '.', 2) AS renderer_payload,
-                 encode(sha256(convert_to(jwt, 'UTF8')), 'hex') AS renderer_digest
-          FROM active WHERE jwt = $1::text
-          \bind :renderer_jwt
-          \gset
-          COMMIT;
-          \echo :renderer_payload :renderer_digest
-          SQL
-          )" || renderer_query_failed "$?"
-          printf '%s\n' "$claims" | node -e '
-            const { readFileSync } = require("node:fs");
-            const { createHash } = require("node:crypto");
-            try {
-              const [payload, digest] = readFileSync(0, "utf8").trim().split(" ");
-              const { role, iat, exp } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-              const expectedDigest = createHash("sha256").update(readFileSync(process.env.RENDERER_TOKEN_FILE)).digest("hex");
-              if (digest !== expectedDigest) {
-                throw new Error();
-              }
-              console.log("renderer_jwt_role=" + role);
-              console.log("renderer_jwt_iat=" + iat);
-              console.log("renderer_jwt_exp=" + exp);
-              console.log("renderer_jwt_sha256_prefix=" + digest.slice(0, 8));
-            } catch {
-              console.error("::error::Renderer JWT verification failed.");
-              process.exitCode = 1;
-            }
-          ' | tee -a "$GITHUB_STEP_SUMMARY"
 
   database:
     if: github.event_name == 'push' || inputs.mode == 'deploy'

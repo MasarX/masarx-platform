@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(11);
+SELECT plan(12);
 
 SELECT ok(
   EXISTS (
@@ -207,26 +207,24 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
-SELECT public.claim_pending_edge_jobs(1);
-
-SELECT is(
-  (SELECT status FROM public.outbound_calls WHERE id = 'bbbbbbbb-0000-0000-0000-000000000010'),
-  'pending_edge',
-  'claim_pending_edge_jobs does not claim pending_edge jobs before scheduled_at'
+UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
+WHERE id <> 'bbbbbbbb-0000-0000-0000-000000000010' AND status IN ('pending_edge','failed') AND scheduled_at <= now();
+SELECT ok(
+  NOT EXISTS (SELECT FROM public.claim_pending_edge_job_ids_v1(1))
+  AND EXISTS (SELECT FROM public.outbound_calls WHERE id = 'bbbbbbbb-0000-0000-0000-000000000010'
+    AND status = 'pending_edge' AND edge_lease_token IS NULL),
+  'the bounded claim returns no ID or token before the job is due'
 );
 
--- Due pending_edge job should be claimed (highest priority wins).
-UPDATE public.outbound_calls
-   SET scheduled_at = now() - interval '1 minute'
- WHERE id = 'bbbbbbbb-0000-0000-0000-000000000010';
-
-SELECT public.claim_pending_edge_jobs(10);
-
-SELECT is(
-  (SELECT status FROM public.outbound_calls WHERE id = 'bbbbbbbb-0000-0000-0000-000000000010'),
-  'in_progress_edge',
-  'claim_pending_edge_jobs claims due pending_edge jobs'
-);
+UPDATE public.outbound_calls SET scheduled_at = now() - interval '1 minute' WHERE id = 'bbbbbbbb-0000-0000-0000-000000000010';
+CREATE TEMP TABLE pgtap_retry_first_lease AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+SELECT ok(EXISTS (SELECT FROM pgtap_retry_first_lease l JOIN public.outbound_calls o ON o.id = l.job_id
+  WHERE l.job_id = 'bbbbbbbb-0000-0000-0000-000000000010' AND o.status = 'in_progress_edge'
+    AND l.lease_token = o.edge_lease_token AND o.lease_expires_at > now()),
+  'the bounded claimant returns the exact due job with an active lease');
+SELECT public.mark_claimed_edge_job_failure_v1(job_id, lease_token, 503, '{}', '{}', 'controlled retry', 1)
+FROM pgtap_retry_first_lease;
+SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
 
 -- Failed jobs (retry scheduled) should also be claimable by edge when due.
 INSERT INTO public.outbound_calls (
@@ -255,13 +253,20 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
-SELECT public.claim_pending_edge_jobs(10);
-
-SELECT is(
-  (SELECT status FROM public.outbound_calls WHERE id = 'bbbbbbbb-0000-0000-0000-000000000011'),
-  'in_progress_edge',
-  'claim_pending_edge_jobs claims due failed jobs (retry scheduled)'
+CREATE TEMP TABLE pgtap_retry_failed_control AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+UPDATE public.outbound_calls SET scheduled_at = now() - interval '1 minute' WHERE id = 'bbbbbbbb-0000-0000-0000-000000000010';
+CREATE TEMP TABLE pgtap_retry_second_lease AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+SELECT ok(
+  EXISTS (SELECT FROM pgtap_retry_failed_control WHERE job_id = 'bbbbbbbb-0000-0000-0000-000000000011' AND lease_token IS NOT NULL)
+  AND EXISTS (SELECT FROM pgtap_retry_first_lease first JOIN pgtap_retry_second_lease second USING (job_id)
+    JOIN public.outbound_calls o ON o.id = first.job_id
+    WHERE o.status = 'in_progress_edge' AND o.edge_lease_token = second.lease_token
+      AND second.lease_token <> first.lease_token),
+  'the due failed control claims and a re-claimed job receives a fresh token'
 );
+SELECT throws_ok(format('SELECT public.get_claimed_edge_job_call_spec_v1(%L::uuid,%L::uuid)', job_id, lease_token),
+  'P0001', format('get_claimed_edge_job_call_spec_v1: active lease for job %s not found', job_id),
+  'the previous token cannot resolve the retried job') FROM pgtap_retry_first_lease;
 
 -- Override global outbound_retry_policy deterministically for the remaining assertions.
 WITH payload AS (

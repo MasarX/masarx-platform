@@ -16,6 +16,12 @@ INSERT INTO label_http_cases VALUES
  ('explicit-error', '{"completed":true,"status":200,"body":{"error":"renderer_failure"}}', true);
 CREATE TEMP TABLE label_http_calls (kind text, request_id bigint, payload jsonb);
 
+-- Preserve the actual receipt and readback routines for the post-compatibility lane.
+CREATE TEMP TABLE label_http_live_functions AS
+SELECT pg_get_functiondef(signature) AS definition
+FROM unnest(ARRAY['public.check_async_response(bigint)'::regprocedure,
+  'public.invoke_label_renderer_print_sync_v1(uuid,uuid,jsonb)'::regprocedure]) signatures(signature);
+
 CREATE OR REPLACE FUNCTION public.check_async_response(p_request_id bigint)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO public, extensions, pg_temp AS $$
@@ -70,6 +76,14 @@ DECLARE
   v_http_error boolean;
   v_count int;
   v_sequence int := 0;
+  v_receipt jsonb;
+  v_claim record;
+  v_count_jobs int;
+  v_net_rows bigint;
+  v_marker text := gen_random_uuid()::text;
+  v_request_id bigint;
+  v_job_id uuid;
+  v_provider_body jsonb;
 BEGIN
   -- Exercise the real fresh-scope resolver: no rows means no downloadable artifact.
   v_step.id := gen_random_uuid();
@@ -180,6 +194,70 @@ BEGIN
       SELECT count(*) INTO v_count FROM pg_temp.label_http_calls WHERE kind = 'dispatch';
       RETURN NEXT is(v_count, 0, v_label || ' UI never redispatches');
     END LOOP;
+  END LOOP;
+  FOR v_payload IN SELECT to_jsonb(definition) FROM pg_temp.label_http_live_functions LOOP
+    EXECUTE v_payload #>> '{}';
+  END LOOP;
+  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM public.upsert_label_provider_settings_v1('global', NULL, jsonb_build_object('version', 1, 'providers',
+    jsonb_build_array(jsonb_build_object('name', 'renderer-receipt-fixture',
+      'invoke_url', concat('https://', gen_random_uuid(), '.', 'invalid', '/functions/v1/label-renderer'),
+      'invoke_secret', encode(gen_random_bytes(20), 'hex')))), 'Synthetic receipt fixture');
+  SELECT count(*) INTO v_net_rows FROM net.http_request_queue;
+
+  FOR v_case IN SELECT * FROM pg_temp.label_http_cases WHERE name IN ('worker-limit', 'success', 'incomplete') LOOP
+    v_label := 'edge-receipt/' || v_case.name;
+    v_run := NULL;
+    v_run.id := gen_random_uuid();
+    v_step.id := gen_random_uuid();
+    v_receipt := public.invoke_label_renderer_print_sync_v1(v_run.id, v_step.id,
+      jsonb_build_object('organization_id', v_org));
+    v_request_id := (v_receipt->>'request_id')::bigint;
+    v_job_id := (v_receipt->>'edge_job_id')::uuid;
+    RETURN NEXT ok(v_receipt @> '{"status":202,"completed":false}'::jsonb AND EXISTS (
+      SELECT FROM public.outbound_calls o WHERE o.id = v_job_id AND o.renderer_request_id = v_request_id
+        AND o.status = 'pending_edge'), v_label || ' creates the exact durable receipt');
+    SELECT * INTO STRICT v_claim FROM public.claim_edge_job_by_id_v1(v_job_id);
+    v_provider_body := CASE WHEN v_case.failed THEN jsonb_build_object('error',v_marker) ELSE v_case.envelope->'body' END;
+    IF v_case.failed THEN
+      PERFORM public.mark_claimed_edge_job_failure_v1(v_job_id, v_claim.lease_token,
+        (v_case.envelope->>'status')::int, '{}', v_provider_body, 'renderer_request_failed', 1);
+    ELSIF (v_case.envelope->>'completed')::boolean THEN
+      PERFORM public.mark_claimed_edge_job_success_v1(v_job_id, v_claim.lease_token,
+        (v_case.envelope->>'status')::int, '{}', v_provider_body, 1);
+    END IF;
+
+    v_run.metadata := '{}'::jsonb;
+    v_run.context := jsonb_build_object('organization_id', v_org, 'label_print',
+      jsonb_build_object('organization_id', v_org, 'policy', '{}'::jsonb,
+        'targets', jsonb_build_array(jsonb_build_object('shipment_id', gen_random_uuid())),
+        'execute_async', jsonb_build_object('request_id', v_request_id)));
+    SELECT count(*) INTO v_count_jobs FROM public.outbound_calls WHERE renderer_request_id IS NOT NULL;
+    SELECT to_jsonb(workflow_handlers.execute_label_print_execute_v1(v_step, v_run, '{}'::jsonb))
+      INTO v_result;
+    PERFORM set_config('search_path','public,extensions,pgtap,pg_temp',true);
+    RETURN NEXT is(v_result->>'status', CASE WHEN v_case.failed THEN 'failed' ELSE 'pending' END,
+      v_label || ' has the compatibility lane outcome');
+    IF v_case.failed THEN
+      RETURN NEXT is(v_result #> '{operation_result,execute}', jsonb_build_object('status', 'failed',
+        'error', 'label_print_execute_http_error', 'http_status', (v_case.envelope->>'status')::int),
+        v_label || ' readback redacts the provider response');
+      RETURN NEXT ok(position(v_marker IN v_result::text) = 0, v_label || ' does not expose the provider marker');
+    ELSE
+      IF (v_case.envelope->>'completed')::boolean THEN
+        RETURN NEXT is(v_result #> '{operation_result,execute}', v_provider_body,
+          v_label || ' retains the successful renderer body');
+      END IF;
+      RETURN NEXT ok((v_result->>'retry_attempt')::int = 3
+        AND (v_result #>> '{context_patch,label_print,execute_async,request_id}')::bigint = v_request_id,
+        v_label || ' keeps the exact receipt and bounded retry attempt');
+    END IF;
+    RETURN NEXT ok((SELECT count(*) FROM public.outbound_calls WHERE renderer_request_id IS NOT NULL) = v_count_jobs
+      AND (SELECT count(*) FROM net.http_request_queue) = v_net_rows
+      AND EXISTS (SELECT FROM public.outbound_calls WHERE id = v_job_id AND renderer_request_id = v_request_id),
+      v_label || ' reads back the same job without a new dispatch');
   END LOOP;
 END;
 $test$;

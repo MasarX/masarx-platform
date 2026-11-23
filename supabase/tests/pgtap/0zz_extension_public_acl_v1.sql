@@ -48,25 +48,39 @@ SELECT lives_ok('DELETE FROM cron.job_run_details WHERE FALSE','cron maintenance
 
 -- Queued requests stay uncommitted and are rolled back: no actual outbound HTTP is sent.
 CREATE FUNCTION pg_temp.check_extension_dispatch_consumers() RETURNS SETOF text LANGUAGE plpgsql AS $consumers$
-DECLARE v_method text; v_id bigint; v_error text;
+DECLARE
+  v_method text; v_id bigint; v_error text;
+  v_url text := concat('http', '://', '127', '.0.0.', '1', ':9/extension-acl-fixture');
+  v_headers jsonb := '{"accept":"application/json","x-request-id":"fixture"}';
 BEGIN
   FOREACH v_method IN ARRAY ARRAY['GET','POST','DELETE','PUT','PATCH'] LOOP
     v_id:=NULL; v_error:=NULL;
     SET LOCAL ROLE service_role;
     BEGIN
-      v_id:=public.dispatch_api_request_v1('http://127.0.0.1:9/extension-acl-fixture',v_method,
-        '{}'::jsonb,'{}'::jsonb,1);
+      v_id:=public.dispatch_api_request_v1(v_url,v_method,
+        v_headers,'{}'::jsonb,1);
       PERFORM public.check_async_response(v_id);
     EXCEPTION WHEN OTHERS THEN v_error:=SQLSTATE || ': ' || SQLERRM;
     END;
     RESET ROLE;
     RETURN NEXT ok(v_id IS NOT NULL AND v_error IS NULL,
       'service canonical ' || v_method || ' dispatch and response lookup survive PUBLIC revoke' || COALESCE(': ' || v_error,''));
-    RETURN NEXT ok(EXISTS(SELECT 1 FROM net.http_request_queue WHERE id=v_id),
-      v_method || ' reaches the real pg_net queue through the definer owner');
+    RETURN NEXT ok(EXISTS(SELECT 1 FROM net.http_request_queue WHERE id=v_id
+      AND method = CASE WHEN v_method IN ('PUT','PATCH') THEN 'POST' ELSE v_method END
+      AND headers - 'Content-Type' - 'content-type' = v_headers ||
+        CASE WHEN v_method IN ('PUT','PATCH') THEN jsonb_build_object('X-HTTP-Method-Override', v_method)
+             ELSE '{}'::jsonb END),
+      v_method || ' reaches pg_net with exactly the allowed fixture headers');
   END LOOP;
 END;
 $consumers$;
 SELECT * FROM pg_temp.check_extension_dispatch_consumers();
+CREATE TEMP TABLE extension_dispatch_baseline AS SELECT count(*) AS total FROM net.http_request_queue;
+SELECT throws_ok(format('SELECT public.dispatch_api_request_v1(%L, %L, %L::jsonb, %L::jsonb, 1)',
+    concat('http', '://', '127', '.0.0.', '1', ':9/extension-acl-refusal'), 'POST',
+    jsonb_build_object('authorization', gen_random_uuid()::text), '{}'),
+  '22023', 'outbound_credential_headers_refused', 'the definer transport refuses credential headers');
+SELECT is((SELECT count(*) FROM net.http_request_queue), total,
+  'the rejected credential creates no pg_net request') FROM extension_dispatch_baseline;
 SELECT finish();
 ROLLBACK;
