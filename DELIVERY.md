@@ -51,6 +51,8 @@ Follows engineering standard v1.4 (2026-11-22).
 
 - The tag workflow verifies first-parent history on `main` and qualifying exact-SHA `ci-gate` evidence before building and attesting the static Landing archive. It publishes the archive and checksums to the GitHub Release with static artifact notes. The Delivery Lead updates those notes from the milestone's closed issues and then closes the milestone.
 - GitHub's active `release-tags-create` and `release-tags-immutable` rulesets restrict tag creation and protect `v*` tags from updates and deletion.
+- The owner creates annotated release tags (`vX.Y.Z` and `vX.Y.Z-rc.N`) using the login allowed by `release-tags-create` (organization admin). Agents never create release tags with the App.
+- Before creating a tag, verify against GitHub that the commit is in the first-parent history of `main` and that a `ci-gate` check run succeeded on that exact SHA. After creating the tag, read back the tag ref, the annotated tag object it points to, and the commit the tag object points to.
 - For a hotfix, cut from the deployed tag, test the fix, get the owner's explicit approval before a production deploy, and merge the deployed fix forward through the protected PR path.
 
 ## Deploys
