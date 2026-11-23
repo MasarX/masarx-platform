@@ -1,6 +1,9 @@
 -- Keep renderer credentials in the leased Edge worker.
 BEGIN;
 
+-- The Edge gateway verifies this JWT without assuming a database role.
+CREATE ROLE edge_renderer_gateway_role NOLOGIN NOINHERIT;
+
 CREATE FUNCTION public.sql_transport_headers_v1(p_headers jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql IMMUTABLE

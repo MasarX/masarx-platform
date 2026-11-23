@@ -420,7 +420,7 @@ const executeClaimedJob = async (
         mergedDispatch,
         RENDERER_ENDPOINT,
         readEnv("LABEL_RENDERER_SIGNING_KEY"),
-        SUPABASE_ANON_KEY,
+        readEnv("LABEL_RENDERER_GATEWAY_JWT"),
       )
       : mergedDispatch;
     callResult = await runFetch(sendDispatch, egressEnvelope);
@@ -434,6 +434,11 @@ const executeClaimedJob = async (
       latency_ms: 0,
       error: dispatchError,
     };
+  }
+
+  if (isRenderer && (callResult.status === 401 || callResult.status === 403)) {
+    callResult = { ...callResult, error: "renderer_gateway_rejected" };
+    console.error("[api-caller] renderer_gateway_rejected");
   }
 
   // Refresh again after the bounded network operation so even a near-600-second

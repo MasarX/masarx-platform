@@ -71,6 +71,22 @@ FROM renderer_leases;
 SELECT is(public.check_async_response(request_id)->'body', '{"ok":true}'::jsonb,
   mode || ' readback returns the settled Edge response') FROM renderer_leases;
 
+CREATE TEMP TABLE renderer_rejected_receipts AS
+SELECT code, public.invoke_label_renderer(1) AS receipt FROM (VALUES (401), (403)) statuses(code);
+CREATE TEMP TABLE renderer_rejected_leases AS
+SELECT r.code, claim.* FROM renderer_rejected_receipts r
+CROSS JOIN LATERAL public.claim_edge_job_by_id_v1((r.receipt->>'edge_job_id')::uuid) claim;
+SELECT public.mark_claimed_edge_job_failure_v1(job_id, lease_token, code, '{}', '{}', 'renderer_gateway_rejected', 1)
+FROM renderer_rejected_leases;
+SELECT ok(o.status = 'permanently_failed' AND o.error_message = 'renderer_gateway_rejected'
+  AND o.response_status_code = l.code AND o.retry_count = 0 AND o.completed_at IS NOT NULL
+  AND o.lease_expires_at IS NULL AND o.edge_lease_token IS NULL,
+  l.code || ' rejects the renderer invocation permanently and clears its lease')
+FROM renderer_rejected_leases l JOIN public.outbound_calls o ON o.id = l.job_id;
+SELECT throws_ok(format('SELECT public.claim_edge_job_by_id_v1(%L::uuid)', job_id), 'P0001',
+  format('claim_edge_job_by_id_v1: outbound call %s is not claimable', job_id),
+  code || ' cannot be claimed again') FROM renderer_rejected_leases;
+
 SELECT throws_ok(format('SELECT public.%I(%L, %L, %L::jsonb, %L::jsonb, 1%s)',
     transport, endpoint, 'POST', jsonb_build_object(header, credential), '{}',
     CASE WHEN transport = 'call_api_wait' THEN ', 1' ELSE '' END), '22023',

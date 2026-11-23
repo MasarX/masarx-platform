@@ -7,7 +7,7 @@ const encodeBase64Url = (value) => btoa(String.fromCharCode(...value))
 
 const utf8 = new TextEncoder();
 
-export async function authorizeRendererSend(dispatch, rendererEndpoint, signingSecret, anonKey) {
+export async function authorizeRendererSend(dispatch, rendererEndpoint, signingSecret, gatewayJwt) {
   const expected = new URL(rendererEndpoint);
   const destination = new URL(dispatch.url);
   if (expected.protocol !== "https:" || !expected.pathname.endsWith("/functions/v1/label-renderer") ||
@@ -16,9 +16,9 @@ export async function authorizeRendererSend(dispatch, rendererEndpoint, signingS
     throw new Error("renderer_endpoint_not_authorized");
   }
   if (!signingSecret) throw new Error("renderer_signer_unavailable");
-  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(anonKey ?? "") ||
-      decodeJwtPayload(anonKey)?.role !== "anon") {
-    throw new Error("renderer_gateway_anon_jwt_required");
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(gatewayJwt ?? "") ||
+      decodeJwtPayload(gatewayJwt)?.role !== "edge_renderer_gateway_role") {
+    throw new Error("renderer_gateway_jwt_required");
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -43,7 +43,7 @@ export async function authorizeRendererSend(dispatch, rendererEndpoint, signingS
     ...dispatch,
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${anonKey}`,
+      authorization: `Bearer ${gatewayJwt}`,
       [RENDERER_TOKEN_HEADER]: `${unsigned}.${encodeBase64Url(new Uint8Array(signature))}`,
     },
   };

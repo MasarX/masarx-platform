@@ -1,12 +1,14 @@
 const { createHmac, randomBytes, randomUUID } = require('node:crypto');
 const { readFileSync, readdirSync } = require('node:fs');
 const { join, resolve } = require('node:path');
-const { buildSupabaseApiKeys } = require('../../../scripts/ops/workspace/edge-db-jwt');
+const { createEdgeDbJwt, buildSupabaseApiKeys } = require('../../../scripts/ops/workspace/edge-db-jwt');
 
 const endpoint = new URL('/functions/v1/label-renderer', ['https://renderer', 'example', 'test'].join('.'));
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
 const key = randomBytes(32).toString('hex');
-const anonKey = buildSupabaseApiKeys({ secret: randomBytes(32) }).anon;
+const projectSecret = randomBytes(32);
+const anonKey = buildSupabaseApiKeys({ secret: projectSecret }).anon;
+const gatewayJwt = createEdgeDbJwt({ secret: projectSecret, role: 'edge_renderer_gateway_role' });
 const tokenHeader = 'x-masarx-renderer-token';
 const now = 2_000_000_000;
 let authorize;
@@ -26,21 +28,21 @@ function request({ claims = {}, alg = 'HS256', signingKey = key } = {}) {
   const unsigned = `${header}.${payload}`;
   const signature = createHmac('sha256', signingKey).update(unsigned).digest('base64url');
   return new Request(endpoint, {
-    method: 'POST', headers: { authorization: `Bearer ${anonKey}`, [tokenHeader]: `${unsigned}.${signature}` },
+    method: 'POST', headers: { authorization: `Bearer ${gatewayJwt}`, [tokenHeader]: `${unsigned}.${signature}` },
   });
 }
 
 test.each(['jobs', 'print', 'bundle'])('accepts the dedicated api-caller token for %s', async (operation) => {
-  const dispatch = await sign({ url: endpoint.href }, endpoint.href, key, anonKey);
+  const dispatch = await sign({ url: endpoint.href }, endpoint.href, key, gatewayJwt);
   const req = new Request(endpoint, { method: 'POST', headers: dispatch.headers });
-  expect(req.headers.get('authorization')).toBe(`Bearer ${anonKey}`);
+  expect(req.headers.get('authorization')).toBe(`Bearer ${gatewayJwt}`);
   expect(authorize(req, operation, { requireDbJwt: true, rendererTokenOnly: true })).toMatchObject({ ok: true });
   await expect(verify(req, key)).resolves.toEqual({ ok: true });
 });
 
 test.each(['jobs', 'print', 'bundle'])('does not use the gateway bearer to authorize %s', async (operation) => {
   const signedToken = request().headers.get(tokenHeader);
-  for (const bearer of [anonKey, signedToken]) {
+  for (const bearer of [gatewayJwt, anonKey, signedToken]) {
     const req = new Request(endpoint, { headers: { authorization: `Bearer ${bearer}` } });
     expect(authorize(req, operation, { requireDbJwt: true, rendererTokenOnly: true }).ok).toBe(false);
     await expect(verify(req, key, now)).resolves.toMatchObject({ ok: false, status: 401 });
@@ -73,13 +75,14 @@ test('fails closed when the signing key is unavailable', async () => {
   await expect(verify(request(), '', now)).resolves.toMatchObject({ ok: false, status: 503 });
 });
 
-test('only api-caller and label-renderer reference the signing key in Edge code', () => {
+test.each([
+  ['LABEL_RENDERER_SIGNING_KEY', ['api-caller/index.ts', 'label-renderer/index.ts']],
+  ['LABEL_RENDERER_GATEWAY_JWT', ['api-caller/index.ts']],
+])('limits Edge references to %s', (name, allowedFiles) => {
   const root = resolve(__dirname, '../../../supabase/functions');
   const references = readdirSync(root, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name))
-    .filter((file) => readFileSync(file).includes('LABEL_RENDERER_SIGNING_KEY'));
-  expect(references.sort()).toEqual([
-    join(root, 'api-caller/index.ts'), join(root, 'label-renderer/index.ts'),
-  ]);
+    .filter((file) => readFileSync(file).includes(name));
+  expect(references.sort()).toEqual(allowedFiles.map((file) => join(root, file)));
 });
