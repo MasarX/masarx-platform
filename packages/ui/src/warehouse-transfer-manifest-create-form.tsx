@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { z } from "zod";
 import {
   createUiClient,
   isRetriableNetworkError,
@@ -9,6 +10,7 @@ import {
   type UiScope,
 } from "@masarx/api";
 import { Button } from "./button";
+import { hasCapability, resolveCapabilitySet } from "./capabilities";
 import { Input } from "./input";
 import { Textarea } from "./textarea";
 import { RelationField } from "./relation-field";
@@ -17,6 +19,14 @@ import { useToast } from "./use-toast";
 import { formatUiError } from "./utils";
 import { isTimeoutError, resolveUiRpcTimeoutMs, withTimeout } from "./promise-timeout";
 import { useUnsavedChangesGuard } from "./use-unsaved-changes";
+import { resolveBaseOrigin, resolveSafeHref } from "./url-guard";
+
+const INVALID_DISPATCH_TIME = "Enter the planned dispatch time as an ISO 8601 date and time with Z or a UTC offset.";
+const INVALID_RECEIVE_TIME = "Enter the planned receive time as an ISO 8601 date and time with Z or a UTC offset.";
+const RECEIVE_BEFORE_DISPATCH = "Planned receive time must be at or after planned dispatch time.";
+const plannedTimestamp = z.iso.datetime({ offset: true });
+
+type ManifestError = { message: string; input?: React.RefObject<HTMLInputElement | null> };
 
 type WarehouseTransferManifestCreateFormProps = {
   appBasePath: string;
@@ -30,14 +40,13 @@ type WarehouseTransferManifestCreateFormProps = {
 
 function normalizeReturnTo(value: string | null | undefined, fallback: string) {
   const trimmed = value?.trim() ?? "";
-  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
-    return fallback;
-  }
-  return trimmed;
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return fallback;
+  const href = resolveSafeHref("", trimmed);
+  return href && !href.startsWith("//") ? href : fallback;
 }
 
 function buildTransferDetailHref(returnTo: string, transferId: string) {
-  const url = new URL(returnTo, "https://ouikyoqziionthjyllvrvqmh.example.invalid");
+  const url = new URL(returnTo, resolveBaseOrigin());
   url.searchParams.set("id", transferId);
   url.searchParams.set("detail_open", "1");
   return `${url.pathname}${url.search}${url.hash}`;
@@ -68,8 +77,12 @@ function mergeSelectedOptions(options: LookupOption[], previous: LookupOption[],
   )];
 }
 
+function parsePlannedTimestamp(value: string) {
+  return plannedTimestamp.safeParse(value).success ? Date.parse(value) : Number.NaN;
+}
+
 function toLocalDateTime(value: string) {
-  const date = new Date(value);
+  const date = new Date(parsePlannedTimestamp(value.trim()));
   if (!Number.isFinite(date.getTime())) return "";
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
@@ -104,26 +117,42 @@ export function WarehouseTransferManifestCreateForm({
   const { toast } = useToast();
   const scopeId = String(accessScope?.scope_id ?? "").trim();
   const resolvedTestIdPrefix = testIdPrefix?.trim() || "warehouse-transfer-manifest-create";
-  const fallbackReturnTo = `${appBasePath}/resources/warehouse_transfers`;
+  const transferListPath = "/resources/warehouse_transfers";
+  const fallbackReturnTo = normalizeReturnTo(
+    resolveSafeHref(appBasePath, transferListPath),
+    transferListPath,
+  );
   const normalizedReturnTo = React.useMemo(
     () => normalizeReturnTo(returnTo, fallbackReturnTo),
     [fallbackReturnTo, returnTo]
   );
   const resolvedCapabilityWrite = capabilityWrite?.trim() ?? "";
   const canCreate =
-    Array.isArray(capabilities) &&
     resolvedCapabilityWrite.length > 0 &&
-    capabilities.includes(resolvedCapabilityWrite);
+    hasCapability(resolveCapabilitySet(capabilities), resolvedCapabilityWrite);
   const canResolvePermissions = resolvedCapabilityWrite.length > 0;
 
   const [transferCode, setTransferCode] = React.useState("");
   const [fromBranchId, setFromBranchId] = React.useState("");
   const [toBranchId, setToBranchId] = React.useState("");
-  const [plannedDispatchAt, setPlannedDispatchAt] = React.useState("");
-  const [plannedReceiveAt, setPlannedReceiveAt] = React.useState("");
+  const [plannedDispatch, setPlannedDispatch] = React.useState({ value: "", raw: false });
+  const [plannedReceive, setPlannedReceive] = React.useState({ value: "", raw: false });
+  const dispatchInputRef = React.useRef<HTMLInputElement>(null);
+  const receiveInputRef = React.useRef<HTMLInputElement>(null);
+  const rawDispatchInputRef = React.useRef<HTMLInputElement>(null);
+  const rawReceiveInputRef = React.useRef<HTMLInputElement>(null);
+  const errorId = React.useId();
   const [shipmentIdsText, setShipmentIdsText] = React.useState("");
-  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<ManifestError | null>(null);
   const [pending, setPending] = React.useState(false);
+
+  React.useLayoutEffect(() => {
+    const input = error?.input?.current;
+    if (!input) return;
+    const details = input.closest("details");
+    if (details) details.open = true;
+    input.focus();
+  }, [error]);
 
   const shipmentIds = React.useMemo(() => parseShipmentIds(shipmentIdsText), [shipmentIdsText]);
   const [branchOptions, setBranchOptions] = React.useState<LookupOption[]>([]);
@@ -146,8 +175,8 @@ export function WarehouseTransferManifestCreateForm({
     transferCode.trim() ||
       fromBranchId.trim() ||
       toBranchId.trim() ||
-      plannedDispatchAt.trim() ||
-      plannedReceiveAt.trim() ||
+      plannedDispatch.value.trim() ||
+      plannedReceive.value.trim() ||
       shipmentIdsText.trim()
   );
 
@@ -176,30 +205,45 @@ export function WarehouseTransferManifestCreateForm({
 
   const handleSubmit = React.useCallback(async () => {
     if (pending) return;
-    setErrorMessage(null);
+    setError(null);
 
     if (!organizationId?.trim()) {
-      setErrorMessage("Warehouse transfer manifest create requires an organization-scoped session.");
+      setError({ message: "Warehouse transfer manifest create requires an organization-scoped session." });
       return;
     }
     if (!transferCode.trim()) {
-      setErrorMessage("Transfer code is required.");
+      setError({ message: "Transfer code is required." });
       return;
     }
     if (!fromBranchId.trim() || !toBranchId.trim()) {
-      setErrorMessage("From branch ID and to branch ID are required.");
+      setError({ message: "From branch ID and to branch ID are required." });
       return;
     }
     if (shipmentIds.length < 1) {
-      setErrorMessage("At least one shipment ID is required.");
+      setError({ message: "At least one shipment ID is required." });
       return;
     }
     if (!canCreate) {
-      setErrorMessage(
-        canResolvePermissions
+      setError({
+        message: canResolvePermissions
           ? "You do not have permission to create warehouse transfers."
-          : "Warehouse transfer create permissions are unavailable."
-      );
+          : "Warehouse transfer create permissions are unavailable.",
+      });
+      return;
+    }
+    const dispatchTime = plannedDispatch.value.trim();
+    const receiveTime = plannedReceive.value.trim();
+    const dispatchMillis = parsePlannedTimestamp(dispatchTime);
+    const receiveMillis = parsePlannedTimestamp(receiveTime);
+    if (dispatchTime && Number.isNaN(dispatchMillis)) {
+      setError({ message: INVALID_DISPATCH_TIME, input: plannedDispatch.raw ? rawDispatchInputRef : dispatchInputRef });
+      return;
+    }
+    if ((receiveTime && Number.isNaN(receiveMillis)) || receiveMillis < dispatchMillis) {
+      setError({
+        message: Number.isNaN(receiveMillis) ? INVALID_RECEIVE_TIME : RECEIVE_BEFORE_DISPATCH,
+        input: plannedReceive.raw ? rawReceiveInputRef : receiveInputRef,
+      });
       return;
     }
 
@@ -212,8 +256,8 @@ export function WarehouseTransferManifestCreateForm({
         fromBranchId: fromBranchId.trim(),
         toBranchId: toBranchId.trim(),
         shipmentIds,
-        plannedDispatchAt: plannedDispatchAt.trim() || null,
-        plannedReceiveAt: plannedReceiveAt.trim() || null,
+        plannedDispatchAt: dispatchTime || null,
+        plannedReceiveAt: receiveTime || null,
         metadata: {
           source: "ui.transfer_manifest_create",
           app_base_path: appBasePath,
@@ -254,7 +298,7 @@ export function WarehouseTransferManifestCreateForm({
       router.push(buildTransferDetailHref(normalizedReturnTo, transferId));
     } catch (error) {
       const message = formatUiError(error, "Warehouse transfer manifest create failed.");
-      setErrorMessage(message);
+      setError({ message });
       toast({
         tone: "error",
         title: "Transfer manifest create failed",
@@ -272,8 +316,8 @@ export function WarehouseTransferManifestCreateForm({
     normalizedReturnTo,
     organizationId,
     pending,
-    plannedDispatchAt,
-    plannedReceiveAt,
+    plannedDispatch,
+    plannedReceive,
     router,
     shipmentIds,
     shouldRetry,
@@ -354,13 +398,17 @@ export function WarehouseTransferManifestCreateForm({
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-2 text-sm text-ui-ink">
           <span>Planned dispatch time (local)</span>
-          <Input type="datetime-local" value={toLocalDateTime(plannedDispatchAt)}
-            onChange={(event) => setPlannedDispatchAt(fromLocalDateTime(event.target.value))} disabled={pending} />
+          <Input ref={dispatchInputRef} type="datetime-local" value={toLocalDateTime(plannedDispatch.value)}
+            invalid={error?.input === dispatchInputRef}
+            aria-describedby={error?.input === dispatchInputRef ? errorId : undefined}
+            onChange={(event) => setPlannedDispatch({ value: fromLocalDateTime(event.target.value), raw: false })} disabled={pending} />
         </label>
         <label className="space-y-2 text-sm text-ui-ink">
           <span>Planned receipt time (local)</span>
-          <Input type="datetime-local" value={toLocalDateTime(plannedReceiveAt)}
-            onChange={(event) => setPlannedReceiveAt(fromLocalDateTime(event.target.value))} disabled={pending} />
+          <Input ref={receiveInputRef} type="datetime-local" value={toLocalDateTime(plannedReceive.value)}
+            invalid={error?.input === receiveInputRef}
+            aria-describedby={error?.input === receiveInputRef ? errorId : undefined}
+            onChange={(event) => setPlannedReceive({ value: fromLocalDateTime(event.target.value), raw: false })} disabled={pending} />
         </label>
       </div>
 
@@ -405,8 +453,11 @@ export function WarehouseTransferManifestCreateForm({
               Planned dispatch at
             </span>
             <Input
-              value={plannedDispatchAt}
-              onChange={(event) => setPlannedDispatchAt(event.target.value)}
+              ref={rawDispatchInputRef}
+              value={plannedDispatch.value}
+              invalid={error?.input === rawDispatchInputRef}
+              aria-describedby={error?.input === rawDispatchInputRef ? errorId : undefined}
+              onChange={(event) => setPlannedDispatch({ value: event.target.value, raw: true })}
               placeholder="2026-04-05T08:00:00Z"
               disabled={pending}
               data-testid={`${resolvedTestIdPrefix}-planned-dispatch-at`}
@@ -418,8 +469,11 @@ export function WarehouseTransferManifestCreateForm({
               Planned receive at
             </span>
             <Input
-              value={plannedReceiveAt}
-              onChange={(event) => setPlannedReceiveAt(event.target.value)}
+              ref={rawReceiveInputRef}
+              value={plannedReceive.value}
+              invalid={error?.input === rawReceiveInputRef}
+              aria-describedby={error?.input === rawReceiveInputRef ? errorId : undefined}
+              onChange={(event) => setPlannedReceive({ value: event.target.value, raw: true })}
               placeholder="2026-04-05T12:00:00Z"
               disabled={pending}
               data-testid={`${resolvedTestIdPrefix}-planned-receive-at`}
@@ -442,12 +496,14 @@ export function WarehouseTransferManifestCreateForm({
         </label>
       </details>
 
-      {errorMessage ? (
+      {error ? (
         <div
           className="rounded-2xl border border-ui-border bg-ui-surface/80 p-3 text-sm text-ui-muted"
           data-testid={`${resolvedTestIdPrefix}-error`}
+          id={errorId}
+          role="alert"
         >
-          {errorMessage}
+          {error.message}
         </div>
       ) : null}
 
