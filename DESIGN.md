@@ -181,14 +181,7 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 - Have the Design lead run one daily sweep across roles, viewports, themes and states.
 - File each finding as an issue and revert a change that breaks a critical user journey.
 - Delegate the hands-on checks the owner would do and deliver screenshots, timings and a short visual report.
-
-#### Signed-in DEV sweep
-
-Dispatch [DEV design sweep users](.github/workflows/dev-sweep-users.yml) from `main` with `environment=dev`. Use the successful run ID before the encrypted artifact expires after one day. Each dispatch rotates both passwords.
-
-Run `node scripts/dev/fetch-sweep-credentials.mjs --run <id> --key <path> --out <path>` with an authorized GitHub CLI and OpenSSL on `PATH`. Set `GH_CLI` to the GitHub CLI executable if needed. Choose a new output file outside Git worktrees, feed it directly to the sweep runner and remove it after the sweep.
-
-Use the normal email and password forms. Start at Console V2 Finance and the Console dashboard with `finance_viewer`, and Portal Shipments with `sender_user`. Use the [reviewed roles](config/dev/sweep-roles.json) to see which screens each account can read. Keep credential entry and the credential file out of sweep logs and captures.
+- Sweep signed-in screens on dev only with the [synthetic sweep accounts](DELIVERY.md#signed-in-dev-sweep) and keep credentials out of logs, captures and issues.
 
 ### Changing this file
 

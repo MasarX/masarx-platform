@@ -8,5 +8,11 @@
     "scope": "sender",
     "required": ["shipments.read", "senders.read"],
     "optional": ["recipients.read", "addresses.read", "labels.read", "labels.download", "label_design.read", "console_metadata.read"]
+  },
+  "dispatcher": {
+    "scope": "tenant",
+    "required": ["shipments.read", "route_plans.read", "routes.read", "warehouse_transfers.read"],
+    "optional": [],
+    "provisionTenantRole": true
   }
 }

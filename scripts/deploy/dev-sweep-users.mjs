@@ -31,7 +31,7 @@ async function request(url, headers, reason, method = 'GET', body) {
       redirect: 'error',
       signal: AbortSignal.timeout(25_000),
     });
-    if (response.ok) return await response.json();
+    if (response.ok) return method === 'DELETE' ? null : await response.json();
   } catch {
     // Provider errors can contain configuration, identities or request data.
   }
@@ -68,8 +68,35 @@ function ensureFixture(query, suffix, organizationId, senderId) {
   [`design-sweep-${suffix}`, `Design sweep ${suffix}`, organizationId, senderId], 'fixture_write');
 }
 
-async function ensureMembership(query, identity) {
-  const { id, email, organizationId, key, scope, scopeId, required, optional } = identity;
+function ensureTenantRole(query, organizationId, key, capabilities) {
+  // Add the role only to the synthetic tenant and preserve inherited policy.
+  return query(`
+    WITH role_patch AS (
+      SELECT COALESCE(scoped.cached_value, '{}'::jsonb)
+          || CASE WHEN scoped.cached_value ? 'roles' THEN '{}'::jsonb
+                  ELSE '{"roles__merge_strategy":"append"}'::jsonb END
+          || jsonb_build_object('roles', COALESCE(scoped.cached_value->'roles', '[]'::jsonb) || $2::jsonb) AS value,
+        inherited.schema_version
+      FROM public.resolve_access_control_policy_v1('tenant', $1::uuid, false) AS effective
+      JOIN public.settings_versions inherited ON inherited.id = effective.settings_version_id
+      LEFT JOIN public.settings scoped ON scoped.category = 'access_control_policy'
+        AND scoped.scope_type = 'tenant' AND scoped.scope_id = $1::uuid
+      WHERE jsonb_typeof(effective.policy->'roles') = 'array'
+        AND COALESCE(jsonb_typeof(scoped.cached_value), 'object') = 'object'
+        AND COALESCE(jsonb_typeof(scoped.cached_value->'roles'), 'array') = 'array'
+        AND NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements(effective.policy->'roles') AS existing
+          WHERE existing->>'key' = $3
+        )
+    )
+    SELECT saved.settings_id FROM role_patch
+    CROSS JOIN LATERAL public.upsert_settings_value_v1(
+      'access_control_policy', 'tenant', $1::uuid, role_patch.value,
+      role_patch.schema_version, 'Provision synthetic DEV sweep reader'
+    ) AS saved`, [organizationId, JSON.stringify([{ key, capability_keys: capabilities }]), key], 'tenant_role_write');
+}
+
+async function checkRolePolicy(query, { id, organizationId, key, scope, scopeId, required, optional }) {
   const [policy] = await query(`
     SELECT roles, public.resolve_capabilities_v1(policy, roles) AS capabilities
       FROM public.resolve_access_control_policy_v1($1, $2::uuid, false)
@@ -80,7 +107,9 @@ async function ensureMembership(query, identity) {
   requireSweep(policy?.roles?.length === 1 && policy.roles[0] === key &&
     Array.isArray(policy.capabilities) && required.every(cap => policy.capabilities.includes(cap)) &&
     policy.capabilities.every(cap => required.includes(cap) || optional.includes(cap)), 'role_policy');
+}
 
+async function ensureMembership(query, { id, email, organizationId, key, scope, scopeId }) {
   // ui_me_v1 resolves this scoped user_type through access_control_policy.
   const rows = await query(`
     WITH inserted AS (
@@ -111,8 +140,11 @@ export async function provisionSweep(env) {
   const certificate = new X509Certificate(readFileSync(recipient));
   requireSweep(certificate.fingerprint256 === env.SWEEP_RECIPIENT_SHA256, 'recipient_fingerprint');
   const roleKeys = Object.keys(roles);
-  requireSweep(roleKeys.length > 0 && roleKeys.every(key => /^[a-z_]+$/.test(key) &&
-    !/admin|owner|service|platform/.test(key) && ['tenant', 'sender'].includes(roles[key].scope)), 'role_configuration');
+  requireSweep(roleKeys.length > 0 && Object.entries(roles).every(([key, role]) =>
+    /^[a-z_]+$/.test(key) && !/admin|owner|service|platform/.test(key) &&
+    ['tenant', 'sender'].includes(role.scope) &&
+    (!role.provisionTenantRole || role.scope === 'tenant') &&
+    [...role.required, ...role.optional].every(cap => /^(?:[a-z_]+\.read|labels\.download)$/.test(cap))), 'role_configuration');
 
   const token = env.SUPABASE_ACCESS_TOKEN;
   mask(token);
@@ -147,6 +179,7 @@ export async function provisionSweep(env) {
 
   const credentials = {};
   for (const [key, role] of Object.entries(roles)) {
+    if (role.provisionTenantRole) await ensureTenantRole(query, organizationId, key, role.required);
     const email = `${key}-${suffix}@${['sweep', 'invalid'].join('.')}`;
     const password = `${randomBytes(32).toString('base64url')}aA0!`;
     mask(email);
@@ -165,9 +198,16 @@ export async function provisionSweep(env) {
     requireSweep(uuid.test(user?.id) && user.role === 'authenticated' &&
       (prior || (user.email === email && user.app_metadata?.[marker] === key)), 'identity_response');
 
-    await ensureMembership(query, {
+    const identity = {
       ...role, id: user.id, email, organizationId, key, scopeId: role.scope === 'sender' ? senderId : null,
-    });
+    };
+    try {
+      await checkRolePolicy(query, identity);
+    } catch (error) {
+      if (!prior) await request(`${authUsers}/${user.id}`, authHeaders, 'identity_cleanup', 'DELETE');
+      throw error;
+    }
+    await ensureMembership(query, identity);
     if (prior) {
       const updated = await request(`${authUsers}/${user.id}`, authHeaders, 'password_rotate', 'PUT', { password });
       const rotated = updated?.user ?? updated;
