@@ -77,8 +77,26 @@ SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 SELECT ok((SELECT count(*) FROM public.outbound_calls o JOIN outbound_refusal_jobs j ON o.id = j.job
   WHERE NOT j.refuses AND o.status = 'completed' AND o.retry_count = 0 AND o.edge_lease_token IS NULL) = 2,
   'both controls complete on the leased Edge path');
-SELECT is((SELECT count(*) FROM net.http_request_queue), net_rows, 'the mixed lanes create zero pg_net rows')
-FROM outbound_refusal_fixture;
+WITH new_requests AS (
+  SELECT q.* FROM net.http_request_queue q ORDER BY q.id
+  OFFSET (SELECT net_rows FROM outbound_refusal_fixture)
+)
+SELECT ok((SELECT count(*) FROM new_requests) = 1 AND EXISTS (
+  SELECT FROM new_requests q
+  WHERE q.url = f.url || 'functions/v1/outbound-wake?inline=1' AND q.method = 'POST'
+    -- pg_net can supply a JSON Content-Type for an empty input header map.
+    AND q.headers IN ('{}'::jsonb, '{"Content-Type":"application/json"}'::jsonb,
+      '{"content-type":"application/json"}'::jsonb)
+    AND q.body = convert_to('{}', 'UTF8')
+) AND NOT EXISTS (
+  SELECT FROM outbound_refusal_jobs j JOIN public.outbound_calls o ON o.id = j.job
+  CROSS JOIN new_requests q
+  WHERE q.url = o.url OR q.headers ?| ARRAY(SELECT jsonb_object_keys(o.headers))
+) AND NOT EXISTS (
+  SELECT FROM new_requests q CROSS JOIN LATERAL jsonb_object_keys(q.headers) AS h(name)
+  WHERE lower(h.name) IN ('authorization', 'apikey', 'x-api-key', 'cookie')
+), 'the mixed lanes queue exactly one relay wake without job URLs, job headers or credentials')
+FROM outbound_refusal_fixture f;
 
 SELECT * FROM finish();
 ROLLBACK;
