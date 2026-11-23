@@ -30,10 +30,12 @@ SELECT ok(NOT EXISTS (
 
 SELECT ok(NOT EXISTS (
   SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  CROSS JOIN pg_roles r
   WHERE n.nspname IN ('public', 'api')
-    AND has_schema_privilege('edge_renderer_gateway_role', n.oid, 'USAGE')
-    AND has_function_privilege('edge_renderer_gateway_role', p.oid, 'EXECUTE')
-), 'the gateway role has no callable public or api functions');
+    AND r.rolname = 'edge_renderer_gateway_role'
+    AND ((has_schema_privilege(r.oid, n.oid, 'USAGE') AND has_function_privilege(r.oid, p.oid, 'EXECUTE'))
+      OR EXISTS (SELECT FROM aclexplode(p.proacl) a WHERE a.grantee = r.oid AND a.privilege_type = 'EXECUTE'))
+), 'the gateway role has no public or api routine grants or callable routines');
 
 SELECT * FROM finish();
 ROLLBACK;
