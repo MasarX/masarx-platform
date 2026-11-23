@@ -2,14 +2,15 @@
 
 The Delivery Lead owns this file. Change it through a reviewed PR.
 
-Follows engineering standard v1.4 (2026-11-22).
+Follows engineering standard v1.10.
 
 ## Branching and merging
 
 - The `main` queue permits one concurrent build. Use it without admission caps, drains or bypasses. Keep one migration item and one non-migration item in progress at a time.
 - The manual merge hold is retired. The DEV apply guard (G1–G3) protects DEV database applies.
 - Changes on the risk paths in [AGENTS.md](AGENTS.md#risk-paths-need-one-independent-review-before-landing) need green CI and one independent review of the full diff, recorded on the PR against its exact head. No code-owner or lead approval is required. GitHub can require an extra approval for unattributed changes.
-- The tree-publisher App authors commits and pushes branches.
+- Use the approved tree-publisher App helper for authenticated GitHub work. If the helper fails, stop and report it to Delivery. Keep installation tokens and signing material out of output and shared artifacts. The owner login is reserved for approved settings changes and release tags.
+- Leave queue admission and merging to the Delivery Lead unless your task explicitly authorizes them for the PR. Push changes through topic branches. Never force-push, rewrite public history or push directly to `main`. Change repository or organization settings only through an approved packet naming the exact setting and target value. Record the before and after values.
 - Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. Before enqueueing, verify the required checks and any applicable risk-path review for the exact PR head and the PR's issue reference (`Closes #n` or `Refs #n`). The App sets `expectedHeadOid` to the reviewed SHA. Keep auto-merge off. If the head moves or a review sends the PR back, disable auto-merge if set, dequeue it (`dequeuePullRequest`), and confirm no queue entry remains. Verify the queued head still matches the reviewed SHA.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. A rename-only re-stamp needs no new review. Compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. Record the existing review against the resulting SHA. The append-only and ordering gate is in [migrations.cjs](scripts/ci-hosted/migrations.cjs).
 
@@ -22,6 +23,8 @@ Follows engineering standard v1.4 (2026-11-22).
 | [Verify prebuilt](.github/workflows/verify-prebuilt.yml) | Checks the Console and Portal prebuilt packaging contract on matching PR paths. | 15. |
 | [Deploy DEV](.github/workflows/deploy.yml) | Applies the database, deploys registered Edge Functions and deploys Console, Portal, Landing and ingress. Manual modes also support a database dry run and API schema diagnostics. The manual DEV-only `renderer-jwt-mint` mode rotates the renderer invoke credential with a fixed 7-day token. | API schemas 10, renderer JWT mint 10, database 180, dry run 90, Console and Portal 35 each, Landing 20, ingress 15, summary 5. |
 | [DEV outbound probe](.github/workflows/dev-outbound-probe.yml) | Measures synthetic outbound dispatch and counts failures by fixed reason. | 12, including up to 10 minutes for queued work. |
+| [DEV design sweep users](.github/workflows/dev-sweep-users.yml) | Refreshes the synthetic sign-in accounts and delivers the encrypted credential artifact described under [Signed-in DEV sweep](#signed-in-dev-sweep). | 5. |
+| [Guarded egress probe](.github/workflows/guarded-egress-probe.yml) | Manual DEV and staging diagnostic that currently reports `not_configured`. | 5. |
 | [Provenance on tag](.github/workflows/provenance-on-tag.yml) | Verifies the tagged commit and builds, attests and publishes the static Landing archive. | Verify 10, build and publish 20. |
 
 - Set job and step limits from measured run and job timings, plus a margin.
@@ -30,10 +33,11 @@ Follows engineering standard v1.4 (2026-11-22).
 - Keep queue-entry-to-completion wall time under 25 minutes. Track PR-open-to-merge time alongside PR wall time and queue wall time. Use a ±10% tolerance for timing comparisons unless the repository defines another tolerance.
 - Use GitHub Actions job durations and counts for runner-minutes and job count. [hosted-usage-report.js](scripts/ops/ci/hosted-usage-report.js) summarizes runner usage exports. Gap: Standalone budgets for runner-minutes and time to merge are undefined.
 - Measure product speed in a browser on production-class hardware against a written usable state. Before tuning a slow action, capture its request waterfall and client and server timings.
+- Before replacing a CI tool, compare both tools on the same inputs and record any lost coverage. If a change leaves `main` or the queue red for 30 minutes, revert it through the protected PR path. Track flaky tests as high-priority bugs and fix or revert the cause.
 
 ## Test policy
 
-- Test every affected layer and land security tests with their code. Preserve product guards when fixing tests. Trunk tests can change only under a recorded exception decided by the Master. A replaced test keeps every assertion or records which design decision retired it.
+- Test each changed behavior with a regression that fails before the fix. Use unit tests for logic, integration tests for affected database, queue and API boundaries, and end-to-end tests for core user jobs. Freeze clocks and wait for observable state. Preserve product guards when fixing tests. Trunk test edits need a recorded Master exception. A replacement preserves the existing assertions or identifies the design decision that retired them. Removal also requires two weeks of evidence that the test only detects change. Keep authorization, privacy, migration and concurrency tests.
 - Fix failures at their source. New failures block landing. Never rerun an unchanged failure or use retries, skips or longer timeouts to turn a failing check green. The existing exceptions are listed under [Deviations](#deviations).
 - Use local services and mocks for routine tests. The cloud qualification checks are listed under [Deviations](#deviations).
 - Hosted Jest ([jest.cjs](scripts/ci-hosted/jest.cjs)) reads the target-base known-failure baseline at `config/ci/known-failures.txt`. A missing baseline is empty. The file is absent on `main`. A candidate can retain or remove target-base entries.
@@ -79,13 +83,14 @@ The v0.2.0 production deploy plan uses the same renderer signing key derivation 
   - G4: Once apply starts, write a sanitized apply summary on exit, including failure, and remove the temporary environment file and raw apply log.
 - Review each release gate once and record its GO. The Portfolio Lead gives the GO for non-production gates. Once approved, the gate releases each passing change automatically and writes an audit row. A new kind of change needs a new GO.
 - The routine DEV deploy audit row is the workflow run summary. It includes the G1–G3 guard decisions, the G4 apply summary and the final job's per-surface results table.
-- The owner gives the GO for a production gate. No production gate is approved yet, so every production deploy needs the owner's explicit yes. Verify a production backup before every production deploy. Keep the previous version ready, check health after deploy and roll back immediately on failure.
+- Each production deploy requires the owner's explicit approval. Production deployments are paused while its gate is being built. Verify a production backup before every production deploy. Keep the previous version ready, check health after deploy and roll back immediately on failure.
 - Gap: No production rollback command or staging/production deploy audit row is defined.
 
 ## Security
 
-- The Delivery Lead acts on Dependabot, code scanning and secret scanning alerts from both default and generic patterns. Open an issue the same day for a new high or critical finding. [dependabot.yml](.github/dependabot.yml) configures weekly grouped npm and Actions updates.
+- The Delivery Lead acts on Dependabot, code scanning and secret scanning alerts from both default and generic patterns. Record new high or critical findings the same day. Report vulnerabilities through the repository's private reporting channel. [dependabot.yml](.github/dependabot.yml) configures weekly grouped npm and Actions updates.
 - Follow the [privacy screening rules](AGENTS.md#privacy) before pushing or posting public text.
+- Treat a privacy hit on pushed material as an exposure. Revoke and rotate exposed credentials immediately through the authorized owner. Escalate exposed personal data, customer data, hosts or internal names to the owner as a private blocker and propose a remedy. Leave any history rewrite or cache purge to the authorized incident response.
 
 ## Deviations
 
@@ -103,7 +108,11 @@ The v0.2.0 production deploy plan uses the same renderer signing key derivation 
 | §4 Job time limits based on a recorded p95 sample | Job limits still need recorded p95 samples and a monthly review. CodeQL cache maintenance also needs a job-level limit. | 2026-12-15 |
 | §4 Sharding by measured file times | The [Unit Jest](.github/workflows/public-ci.yml) jobs need per-file timing data and a shard plan that uses it. | 2026-12-15 |
 | §4 Test-file guard across suites | The pgTAP inventory covers SQL tests. Repository-wide coverage needs inventories for [Jest](config/tooling/jest.config.js) and the separately run browser suites. | 2026-12-15 |
-| §4 Retries and red-test handling | Dependency setup can fail when the network or package registry is unavailable, and cloud E2E can fail when its test infrastructure is unavailable. Removing those retries requires cached installs and a self-contained E2E target. [Console V2 Playwright E2E](apps/console-v2/playwright.e2e.config.ts#L44-L66) uses `retries: 1` for Vite dev-server and HMR timing in mock mode on a local dev server. To remove it, serve a production build in mock mode and wait for the expected UI state. [FieldOps mobile Playwright E2E](tests/e2e/fieldops-mobile/playwright.config.ts#L29-L36) uses `retries: isCi ? 2 : 0` with a [local base URL by default](tests/e2e/fieldops-mobile/playwright.config.ts#L14). To remove the CI retries, serve a prebuilt Expo web bundle and wait for app readiness and the expected UI state. The UI quarantine and target-base Jest list still cover known failures that need fixes. | 2026-12-15 |
+| Code and design · Retries and red-test handling | Hosted database setup still retries [image pulls](scripts/ci-hosted/images.cjs). [Console V2 Playwright E2E](apps/console-v2/playwright.e2e.config.ts#L44-L66) retries on the local mock server, and [FieldOps Playwright E2E](tests/e2e/fieldops-mobile/playwright.config.ts#L29-L36) retries in CI mode. Qualify image setup without retries and use prebuilt app servers with readiness checks for those browser suites. The UI quarantine is empty, and `main` has no hosted Jest known-failure baseline. | 2026-12-15 |
 | §4 Tests use local services and mocks only | These checks qualify deployed services on cloud test targets. [`npm run test:pgtap`](package.json#L13) can read `DATABASE_URL` from `.env.cloud` for [pgTAP](scripts/tests/run-pgtap-cloud.js#L5-L7). [`npm run verify:cloud:e2e-gate`](package.json#L27) checks [cloud endpoints](scripts/ops/assert-cloud-env.js#L243-L268) before running post-deploy E2E. | 2026-12-15 |
 | §4 Local hooks and CI privacy enforcement on every push and merge group | Staged-file lint and formatting and the privacy screen still need shared hook wiring. Push and merge-group workflows need a privacy check job to enforce the screen in CI. | 2026-12-15 |
 | §§1, 8 UI page budgets | [DESIGN.md](DESIGN.md#speed) supplies a time-to-usable method. The budget table still needs per-screen LCP and INP targets. | 2026-12-15 |
+| Design principles · Required format checks | The required lint job and app-level format scripts cover different scopes. Add one lint and format path per language to the required CI job. | 2026-12-15 |
+| Code and design · Deterministic tests and coverage reporting | Some browser checks still use fixed sleeps, and the unit-test configuration declares coverage thresholds. Replace sleeps with state-based waits and verify report-only coverage before changing enforcement. | 2026-12-15 |
+| Environments · Environment names | GitHub calls the staging and production environments `stg` and `prod`. Their protected environment policies are configured under those identifiers. | 2026-12-15 |
+| Branches, merging and releases · Branch lifecycle | GitHub deletes merged branches automatically. Delivery still needs first-push age reporting to enforce the PR deadline and a recorded process for stale branches without PRs. | 2026-12-04 |
