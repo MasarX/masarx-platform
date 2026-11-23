@@ -83,7 +83,13 @@ function loadWorker({ env = {}, answers = { A: [publicIpv4], AAAA: [] }, spec = 
 const dev = { EDGE_ENVIRONMENT: 'dev' };
 const bypassLog = 'egress_proxy_bypassed_dev';
 
-test.each(['stg', 'prod', undefined, 'unknown', ' dev '])('requires the proxy in environment %s', async environment => {
+test.each([
+  ['STG', 'stg'],
+  ['PROD', 'prod'],
+  ['unset', undefined],
+  ['unrecognized', 'unknown'],
+  ['whitespace-padded DEV', ' dev '],
+])('requires the proxy for environment case %s', async (_label, environment) => {
   const worker = loadWorker({ env: { EDGE_ENVIRONMENT: environment } });
   const { status, data } = await worker.invoke();
   expect(status).toBe(502);
@@ -102,9 +108,9 @@ test('uses the configured proxy in DEV', async () => {
 });
 
 test.each([
-  { API_CALLER_GUARDED_EGRESS_PROXY_URL: '' },
-  { API_CALLER_GUARDED_EGRESS_PROXY_USERNAME: ['fixture', 'user'].join('-') },
-])('requires a working proxy when any proxy setting is present', async settings => {
+  ['empty proxy URL', { API_CALLER_GUARDED_EGRESS_PROXY_URL: '' }],
+  ['username only', { API_CALLER_GUARDED_EGRESS_PROXY_USERNAME: ['fixture', 'user'].join('-') }],
+])('requires a working proxy when any proxy setting is present (%s)', async (_label, settings) => {
   const worker = loadWorker({ env: { ...dev, ...settings } });
   expect((await worker.invoke()).status).toBe(502);
   expect(worker.fetch).not.toHaveBeenCalled();
@@ -124,24 +130,24 @@ test('checks both DNS families and logs one fixed code before direct dispatch in
 });
 
 test.each([
-  [10, 1, 2, 3].join('.'),
-  [172, 16, 1, 2].join('.'),
-  [192, 168, 1, 2].join('.'),
-  loopbackIpv4,
-  [169, 254, 10, 1].join('.'),
-  [169, 254, 169, 254].join('.'),
-  [100, 64, 0, 1].join('.'),
-  [0, 0, 0, 0].join('.'),
-  [224, 0, 0, 1].join('.'),
-  ['fc00', '', '1'].join(':'),
-  ['fd00', 'ec2', '', '254'].join(':'),
-  ['fe80', '', '1'].join(':'),
-  ['', '', '1'].join(':'),
-  ['', '', ''].join(':'),
-  ['ff02', '', '1'].join(':'),
-  ['', '', 'ffff', loopbackIpv4].join(':'),
-  ['', '', 'ffff', publicIpv4].join(':'),
-])('refuses a DNS answer containing %s in DEV', async address => {
+  ['IPv4 private 10/8', [10, 1, 2, 3].join('.')],
+  ['IPv4 private /12', [172, 16, 1, 2].join('.')],
+  ['IPv4 private /16', [192, 168, 1, 2].join('.')],
+  ['IPv4 loopback', loopbackIpv4],
+  ['IPv4 link-local', [169, 254, 10, 1].join('.')],
+  ['IPv4 metadata', [169, 254, 169, 254].join('.')],
+  ['IPv4 shared address space', [100, 64, 0, 1].join('.')],
+  ['IPv4 unspecified', [0, 0, 0, 0].join('.')],
+  ['IPv4 multicast', [224, 0, 0, 1].join('.')],
+  ['IPv6 unique-local', ['fc00', '', '1'].join(':')],
+  ['IPv6 metadata', ['fd00', 'ec2', '', '254'].join(':')],
+  ['IPv6 link-local', ['fe80', '', '1'].join(':')],
+  ['IPv6 loopback', ['', '', '1'].join(':')],
+  ['IPv6 unspecified', ['', '', ''].join(':')],
+  ['IPv6 multicast', ['ff02', '', '1'].join(':')],
+  ['IPv4-mapped loopback', ['', '', 'ffff', loopbackIpv4].join(':')],
+  ['IPv4-mapped public address', ['', '', 'ffff', publicIpv4].join(':')],
+])('refuses a DNS answer containing %s in DEV', async (_label, address) => {
   const answers = address.includes(':') ? { A: [], AAAA: [address] } : { A: [address], AAAA: [] };
   const worker = loadWorker({ env: dev, answers });
   const { status, data } = await worker.invoke();
@@ -152,10 +158,10 @@ test.each([
 });
 
 test.each([
-  [{ A: [publicIpv4], AAAA: [['fd00', '', '1'].join(':')] }, 'non-public address'],
-  [{ A: [publicIpv4], AAAA: new Error('DNS failure') }, 'AAAA DNS lookup failed'],
-  [{ A: [], AAAA: [] }, 'DNS produced no addresses'],
-])('refuses DEV DNS answers that fail validation', async (answers, message) => {
+  ['public IPv4 and unique-local IPv6', { A: [publicIpv4], AAAA: [['fd00', '', '1'].join(':')] }, 'non-public address'],
+  ['AAAA lookup error', { A: [publicIpv4], AAAA: new Error('DNS failure') }, 'AAAA DNS lookup failed'],
+  ['no address records', { A: [], AAAA: [] }, 'DNS produced no addresses'],
+])('refuses DEV DNS answers that fail validation (%s)', async (_label, answers, message) => {
   const worker = loadWorker({ env: dev, answers });
   const { status, data } = await worker.invoke();
   expect(status).toBe(502);
