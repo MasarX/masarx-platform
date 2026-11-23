@@ -1,0 +1,44 @@
+name: DEV outbound probe
+
+'on':
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        type: choice
+        required: true
+        options: [dev]
+      probe_count:
+        description: Inline-dispatched samples (20–50), plus one relay control
+        type: number
+        default: 20
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment: dev
+    concurrency:
+      group: deploy-dev-database
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Measure the DEV outbound probe
+        shell: bash
+        env:
+          DEPLOY_ENV: ${{ inputs.environment }}
+          PROBE_COUNT: ${{ inputs.probe_count }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: bash scripts/deploy/dev-outbound-probe.sh

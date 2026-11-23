@@ -41,6 +41,12 @@
       "enabled": true
     },
     {
+      "name": "outbound-probe-ack",
+      "auth_mode": "public_no_jwt",
+      "enabled": true,
+      "environments": ["dev"]
+    },
+    {
       "name": "api-gateway",
       "auth_mode": "public_no_jwt",
       "enabled": true
