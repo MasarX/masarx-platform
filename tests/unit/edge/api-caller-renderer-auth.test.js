@@ -60,6 +60,9 @@ test.each([
 );
 
 const source = readFileSync(resolve(__dirname, '../../../supabase/functions/api-caller/index.ts'), 'utf8');
+const supabaseImport = ts.preProcessFile(source, true).importedFiles
+  .find(({ fileName }) => fileName.startsWith('npm:@supabase/supabase-js@'));
+if (!supabaseImport) throw new Error('api-caller must import the Supabase client');
 const { outputText } = ts.transpileModule(`${source}\nmodule.exports = { executeClaimedJobById };`, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 });
@@ -77,7 +80,7 @@ function loadWorker({ stale = false, responseStatus = 200 } = {}) {
   };
   const edgeModule = { exports: {} };
   const deps = {
-    'npm:@supabase/supabase-js@2.111.0': { createClient: () => ({ rpc }) },
+    [supabaseImport.fileName]: { createClient: () => ({ rpc }) },
     './auth.mjs': {},
     './invocation.mjs': invocation,
     './proxy.mjs': { createGuardedProxyFetch: () => undefined },
