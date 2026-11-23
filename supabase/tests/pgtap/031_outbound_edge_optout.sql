@@ -238,12 +238,23 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- Claim should skip opted-out comms_whatsapp jobs (no dispatch rows returned).
-SELECT is(
-  (SELECT count(*) FROM public.claim_pending_edge_jobs(10) WHERE job_id = 'cccccccc-0000-0000-0000-000000000035'),
-  0::bigint,
-  'claim_pending_edge_jobs skips opted-out comms_whatsapp jobs'
-);
+-- An eligible control shares the actual bounded claimant with the opted-out job.
+CREATE TEMP TABLE pgtap_optout_control AS SELECT gen_random_uuid() AS id;
+INSERT INTO public.outbound_calls (id, call_type, target_type, target_id, method, url, headers, body,
+  status, priority, retry_count, max_retries, scheduled_at, context, workflow_run_step_id)
+SELECT c.id, 'provider_api', o.target_type, o.target_id, o.method, o.url, '{}', '{}',
+  'pending_edge', o.priority - 1, 0, o.max_retries, o.scheduled_at,
+  jsonb_build_object('organization_id', o.context->>'organization_id'), o.workflow_run_step_id
+FROM pgtap_optout_control c CROSS JOIN public.outbound_calls o
+WHERE o.id = 'cccccccc-0000-0000-0000-000000000035';
+CREATE TEMP TABLE pgtap_optout_claims AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+INSERT INTO pgtap_optout_claims SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+SELECT ok(
+  (SELECT array_agg(job_id) FROM pgtap_optout_claims WHERE lease_token IS NOT NULL) = ARRAY[c.id]
+  AND EXISTS (SELECT FROM public.outbound_calls o WHERE o.id = 'cccccccc-0000-0000-0000-000000000035'
+    AND o.edge_lease_token IS NULL AND o.response_status_code IS NULL),
+  'only the eligible control gets a lease and the opted-out job cannot send'
+) FROM pgtap_optout_control c;
 
 SELECT is(
   (SELECT status FROM public.outbound_calls WHERE id = 'cccccccc-0000-0000-0000-000000000035'),
@@ -263,6 +274,8 @@ SELECT ok(
     FROM public.decision_log
     WHERE resource_type = 'outbound_call'
       AND resource_id = 'cccccccc-0000-0000-0000-000000000035'
+      AND organization_id = 'cccccccc-0000-0000-0000-000000000031'
+      AND decision_inputs->>'reason' = 'recipient_opted_out'
       AND decision_point = 'opt_out_enforcement'
       AND decision_outcome = 'skipped'
   ),

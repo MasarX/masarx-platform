@@ -98,8 +98,8 @@ BEGIN
   RETURN NEXT ok(EXISTS(SELECT FROM public.outbound_calls WHERE id=v_job AND status='pending_edge'
     AND lease_expires_at IS NULL AND context ? 'edge_dispatch' AND NOT (context ? 'async_request_id')),
     v_label||' hands off the exact job');
-  RETURN NEXT is((SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='edge-send'),v_sends,
-    v_label||' enqueue does not send');
+  RETURN NEXT ok(v_after=v_before AND (SELECT count(*)::int FROM pg_temp.f267_calls WHERE kind='edge-send')=v_sends,
+    v_label||' enqueue calls neither SQL transport nor the controlled Edge sender');
   RETURN NEXT is((SELECT count(*)::int FROM public.api_call_log WHERE correlation_id=v_correlation),0,
     v_label||' enqueue does not create a terminal audit');
   -- Keep the transaction's real bounded claimant deterministic across earlier cases and seed data.

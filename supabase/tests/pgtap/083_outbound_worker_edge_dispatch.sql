@@ -4,83 +4,28 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 SELECT plan(4);
 
-DO $$
-DECLARE
-  v_policy JSONB;
-  v_version INTEGER;
-  v_settings_version_id UUID;
-BEGIN
-  SELECT resolve_settings('edge_dispatch_policy', 'global', NULL) INTO v_policy;
+CREATE TEMP TABLE pgtap_edge_policy_fixture AS
+SELECT ('https://' || gen_random_uuid() || '.' || 'invalid') AS origin;
+SELECT public.upsert_settings_value_v1('edge_dispatch_policy', 'global', NULL,
+  jsonb_build_object('enabled', true, 'endpoint_url', origin || '/functions/v1/api-caller'),
+  1, 'Synthetic Edge contract fixture')
+FROM pgtap_edge_policy_fixture;
 
-  IF NULLIF((v_policy->>'endpoint_url')::text, '') IS NULL
-     OR v_policy->'enabled' IS DISTINCT FROM 'true'::jsonb THEN
-    v_version := COALESCE((
-      SELECT MAX(version)
-      FROM public.settings_versions
-      WHERE category = 'edge_dispatch_policy'
-        AND scope_type = 'global'
-        AND scope_id IS NULL
-    ), 0) + 1;
-
-    v_settings_version_id := gen_random_uuid();
-    v_policy := jsonb_build_object(
-      'enabled', true,
-      'endpoint_url', 'https://edge-dispatch.example.invalid/functions/v1/api-caller',
-      'batch_size', 10,
-      'dispatch_timeout_ms', 3000
-    );
-
-    INSERT INTO public.settings_versions (
-      id, category, scope_type, scope_id, version, value, approved_at, change_reason
-    )
-    VALUES (
-      v_settings_version_id,
-      'edge_dispatch_policy',
-      'global',
-      NULL,
-      v_version,
-      v_policy,
-      now(),
-      'pgtap fixture: edge dispatch policy'
-    );
-
-    INSERT INTO public.settings (
-      id, category, scope_type, scope_id, settings_version_id, cached_value, last_updated
-    )
-    VALUES (
-      gen_random_uuid(),
-      'edge_dispatch_policy',
-      'global',
-      NULL,
-      v_settings_version_id,
-      v_policy,
-      now()
-    )
-    ON CONFLICT (category, scope_type, scope_hash)
-    DO UPDATE
-      SET settings_version_id = EXCLUDED.settings_version_id,
-          cached_value = EXCLUDED.cached_value,
-          last_updated = now();
-  END IF;
-END $$;
-
-WITH policy AS (
-  SELECT resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
-)
-SELECT ok(
-  NULLIF((value->>'endpoint_url')::text, '') IS NOT NULL,
-  'edge_dispatch_policy endpoint_url configured'
-)
-FROM policy;
-
-WITH target AS (
-  SELECT id FROM clients ORDER BY created_at ASC LIMIT 1
-)
-SELECT ok(
-  id IS NOT NULL,
-  'client available for outbound call test'
-)
-FROM target;
+CREATE TEMP TABLE pgtap_edge_worker_fixture AS
+SELECT gen_random_uuid() AS org, gen_random_uuid() AS client,
+       gen_random_uuid() AS job, (SELECT origin || '/worker' FROM pgtap_edge_policy_fixture) AS url;
+SELECT set_config('app.organization_onboarding_source', 'provision_demo_accounts_v1', true);
+INSERT INTO public.organizations (id, name, slug)
+SELECT org, 'Outbound worker organization', 'outbound-worker-' || org FROM pgtap_edge_worker_fixture;
+SELECT set_config('app.organization_onboarding_source', '', true);
+INSERT INTO public.clients (id, organization_id, name, slug, status)
+SELECT client, org, 'Outbound worker client', 'outbound-client-' || client, 'active'
+FROM pgtap_edge_worker_fixture;
+SELECT ok(public.resolve_settings('edge_dispatch_policy', 'global', NULL)
+  @> jsonb_build_object('enabled', true, 'endpoint_url', origin || '/functions/v1/api-caller'),
+  'edge dispatch fixture selects its exact enabled endpoint') FROM pgtap_edge_policy_fixture;
+SELECT ok(EXISTS (SELECT FROM public.clients c WHERE c.id = f.client AND c.organization_id = f.org),
+  'the Edge dispatch fixture owns its exact client') FROM pgtap_edge_worker_fixture;
 
 SELECT set_config('app.workflow_run_id', 'd8300000-0000-0000-0000-000000000084', true);
 SELECT set_config('app.workflow_run_step_id', 'd8300000-0000-0000-0000-000000000085', true);
@@ -176,9 +121,6 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
-WITH target AS (
-  SELECT id FROM clients ORDER BY created_at ASC LIMIT 1
-)
 INSERT INTO outbound_calls (
   id,
   call_type,
@@ -195,84 +137,51 @@ INSERT INTO outbound_calls (
   workflow_run_step_id
 )
 SELECT
-  'd8300000-0000-0000-0000-000000000086',
+  job,
   'provider_api',
   'client',
-  target.id,
+  client,
   'GET',
-  'https://example.com',
-  '{}'::jsonb,
+  url,
+  '{"accept":"application/json"}'::jsonb,
   '{}'::jsonb,
   'pending',
   1000000,
   1,
   now() - interval '1 minute',
   'd8300000-0000-0000-0000-000000000085'
-FROM target
+FROM pgtap_edge_worker_fixture
 ON CONFLICT (id) DO UPDATE
 SET status = EXCLUDED.status,
     scheduled_at = EXCLUDED.scheduled_at,
     workflow_run_step_id = EXCLUDED.workflow_run_step_id;
 
-DO $$
-BEGIN
-  IF NULLIF((resolve_settings('edge_dispatch_policy', 'global', NULL)->>'endpoint_url')::text, '') IS NOT NULL
-     AND (SELECT id FROM clients ORDER BY created_at ASC LIMIT 1) IS NOT NULL THEN
-    PERFORM public.run_outbound_worker();
-  END IF;
-END $$;
+UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
+WHERE id <> (SELECT job FROM pgtap_edge_worker_fixture)
+  AND status IN ('pending', 'pending_edge', 'failed') AND scheduled_at <= now();
+CREATE TEMP TABLE pgtap_edge_worker_baseline AS SELECT count(*) AS total FROM net.http_request_queue;
+CREATE TEMP TABLE pgtap_edge_worker_result AS SELECT public.run_outbound_worker() AS result;
+SELECT ok(result->>'status' = 'completed' AND result->>'items_processed' = '1'
+  AND EXISTS (SELECT FROM public.outbound_calls o WHERE o.id = f.job
+    AND o.status = 'pending_edge' AND o.lease_expires_at IS NULL AND o.edge_lease_token IS NULL
+    AND o.headers = '{"accept":"application/json"}'::jsonb
+    AND o.context->'edge_dispatch' @> '{"method":"GET","headers":{"accept":"application/json"}}'::jsonb
+    AND NOT (o.context->'edge_dispatch' ?| ARRAY['url','body','authorization'])
+    AND NOT (o.context ? 'async_request_id')),
+  'the actual worker hands off exactly its job with safe metadata')
+FROM pgtap_edge_worker_result CROSS JOIN pgtap_edge_worker_fixture f;
 
-WITH policy AS (
-  SELECT resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
-), target AS (
-  SELECT id FROM clients ORDER BY created_at ASC LIMIT 1
-), readiness AS (
-  SELECT
-    value,
-    target.id AS target_id,
-    NULLIF((value->>'endpoint_url')::text, '') IS NOT NULL AS has_endpoint,
-    COALESCE((value->>'enabled')::boolean, FALSE) AS edge_enabled
-  FROM policy, target
-)
-SELECT CASE
-  WHEN target_id IS NULL OR NOT (has_endpoint AND edge_enabled) THEN
-    skip('edge dispatch disabled or client missing', 1)
-  ELSE
-    is(
-      (SELECT status FROM outbound_calls WHERE id = 'd8300000-0000-0000-0000-000000000086'),
-      'pending_edge',
-      'run_outbound_worker sets pending_edge'
-    )
-END
-FROM readiness;
-
-WITH policy AS (
-  SELECT resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
-), target AS (
-  SELECT id FROM clients ORDER BY created_at ASC LIMIT 1
-), readiness AS (
-  SELECT
-    value,
-    target.id AS target_id,
-    NULLIF((value->>'endpoint_url')::text, '') IS NOT NULL AS has_endpoint,
-    COALESCE((value->>'enabled')::boolean, FALSE) AS edge_enabled
-  FROM policy, target
-)
-SELECT CASE
-  WHEN target_id IS NULL OR NOT (has_endpoint AND edge_enabled) THEN
-    skip('edge dispatch disabled or client missing', 1)
-  ELSE
-    ok(
-      EXISTS (
-        SELECT 1
-        FROM outbound_calls
-        WHERE id = 'd8300000-0000-0000-0000-000000000086'
-          AND context ? 'edge_dispatch'
-      ),
-      'edge dispatch context recorded'
-    )
-END
-FROM readiness;
+CREATE TEMP TABLE pgtap_edge_worker_claim AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+SELECT ok(
+  (SELECT count(*) FROM net.http_request_queue) = (SELECT total FROM pgtap_edge_worker_baseline)
+  AND NOT EXISTS (SELECT FROM cron.job WHERE jobname = 'api_caller_batch_tick'
+    OR command ~* '\m(run_edge_api_caller_worker|run_api_caller_batch)\M')
+  AND (SELECT array_agg(job_id) FROM pgtap_edge_worker_claim WHERE lease_token IS NOT NULL) = ARRAY[f.job]
+  AND EXISTS (SELECT FROM pgtap_edge_worker_claim l
+    WHERE public.get_claimed_edge_job_call_spec_v1(l.job_id, l.lease_token)
+      @> jsonb_build_object('url', f.url, 'method', 'GET', 'headers', '{"accept":"application/json"}'::jsonb)),
+  'the exact handoff claims successfully with the tick absent and no pg_net request')
+FROM pgtap_edge_worker_fixture f;
 
 SELECT * FROM finish();
 ROLLBACK;

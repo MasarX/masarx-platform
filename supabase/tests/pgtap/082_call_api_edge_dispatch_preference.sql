@@ -1,90 +1,44 @@
 -- Plan: PLAN-202601-demo-speed-here-failfast / Step: S04
 -- Purpose: call_api prefers edge dispatch when edge_dispatch_policy is enabled.
 BEGIN;
-SELECT plan(2);
+SELECT plan(4);
 
-DO $$
-DECLARE
-  v_policy JSONB;
-  v_version INTEGER;
-  v_settings_version_id UUID;
-BEGIN
-  SELECT resolve_settings('edge_dispatch_policy', 'global', NULL) INTO v_policy;
+CREATE TEMP TABLE pgtap_edge_policy_fixture AS
+SELECT ('https://' || gen_random_uuid() || '.' || 'invalid') AS origin;
+SELECT public.upsert_settings_value_v1('edge_dispatch_policy', 'global', NULL,
+  jsonb_build_object('enabled', true, 'endpoint_url', origin || '/functions/v1/api-caller'),
+  1, 'Synthetic Edge contract fixture')
+FROM pgtap_edge_policy_fixture;
 
-  IF NULLIF((v_policy->>'endpoint_url')::text, '') IS NULL
-     OR v_policy->'enabled' IS DISTINCT FROM 'true'::jsonb THEN
-    v_version := COALESCE((
-      SELECT MAX(version)
-      FROM public.settings_versions
-      WHERE category = 'edge_dispatch_policy'
-        AND scope_type = 'global'
-        AND scope_id IS NULL
-    ), 0) + 1;
+CREATE TEMP TABLE pgtap_edge_call_counts AS
+SELECT (SELECT count(*) FROM net.http_request_queue) AS transport, (SELECT count(*) FROM public.outbound_calls) AS jobs;
+SELECT ok(public.resolve_settings('edge_dispatch_policy', 'global', NULL)
+  @> jsonb_build_object('enabled', true, 'endpoint_url', origin || '/functions/v1/api-caller'),
+  'the effective Edge policy is explicitly enabled for the exact fixture') FROM pgtap_edge_policy_fixture;
 
-    v_settings_version_id := gen_random_uuid();
-    v_policy := jsonb_build_object(
-      'enabled', true,
-      'endpoint_url', 'https://edge-dispatch.example.invalid/functions/v1/api-caller',
-      'batch_size', 10,
-      'dispatch_timeout_ms', 3000
-    );
+SELECT ok(public.call_api(origin, 'GET', '{"accept":"application/json","x-client-id":"fixture"}', '{}', 1)
+  @> jsonb_build_object('status', 202, 'completed', false, 'edge_dispatch', jsonb_build_object(
+    'url', origin, 'method', 'GET', 'headers', '{"accept":"application/json","x-client-id":"fixture"}'::jsonb)),
+  'call_api returns edge_dispatch with the exact approved credential-free headers when enabled')
+FROM pgtap_edge_policy_fixture;
 
-    INSERT INTO public.settings_versions (
-      id, category, scope_type, scope_id, version, value, approved_at, change_reason
-    )
-    VALUES (
-      v_settings_version_id,
-      'edge_dispatch_policy',
-      'global',
-      NULL,
-      v_version,
-      v_policy,
-      now(),
-      'pgtap fixture: edge dispatch policy'
-    );
-
-    INSERT INTO public.settings (
-      id, category, scope_type, scope_id, settings_version_id, cached_value, last_updated
-    )
-    VALUES (
-      gen_random_uuid(),
-      'edge_dispatch_policy',
-      'global',
-      NULL,
-      v_settings_version_id,
-      v_policy,
-      now()
-    )
-    ON CONFLICT (category, scope_type, scope_hash)
-    DO UPDATE
-      SET settings_version_id = EXCLUDED.settings_version_id,
-          cached_value = EXCLUDED.cached_value,
-          last_updated = now();
-  END IF;
+SELECT throws_ok(format('SELECT public.call_api(%L, %L, %L::jsonb, %L::jsonb, 1)',
+    origin, 'GET', jsonb_build_object('authorization', gen_random_uuid()::text), '{}'),
+  '22023', 'outbound_credential_headers_refused', 'enabled call refuses credential headers before handoff')
+FROM pgtap_edge_policy_fixture;
+UPDATE public.settings SET cached_value = jsonb_set(cached_value, '{enabled}', 'false')
+WHERE category = 'edge_dispatch_policy' AND scope_type = 'global' AND scope_id IS NULL;
+DO $$ BEGIN
+  PERFORM public.call_api(origin, 'GET', jsonb_build_object('x-api-key', gen_random_uuid()::text), '{}', 1)
+  FROM pg_temp.pgtap_edge_policy_fixture;
+  RAISE EXCEPTION 'the disabled fixture accepted a credential header';
+EXCEPTION WHEN invalid_parameter_value THEN
+  IF SQLERRM <> 'outbound_credential_headers_refused' THEN RAISE; END IF;
 END $$;
-
-WITH policy AS (
-  SELECT resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
-)
-SELECT ok(
-  NULLIF((value->>'endpoint_url')::text, '') IS NOT NULL,
-  'edge_dispatch_policy endpoint_url configured'
-)
-FROM policy;
-
-WITH policy AS (
-  SELECT resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
-)
-SELECT CASE
-  WHEN NULLIF((value->>'endpoint_url')::text, '') IS NULL THEN
-    skip('edge_dispatch_policy missing', 1)
-  ELSE
-    ok(
-      (public.call_api('https://example.com', 'GET', '{}'::jsonb, '{}'::jsonb, 1) ? 'edge_dispatch'),
-      'call_api returns edge_dispatch when enabled'
-    )
-END
-FROM policy;
+SELECT ok((SELECT count(*) FROM net.http_request_queue) = transport
+  AND (SELECT count(*) FROM public.outbound_calls) = jobs,
+  'credential refusal under either policy creates neither a transport request nor a queued job')
+FROM pgtap_edge_call_counts;
 
 SELECT * FROM finish();
 ROLLBACK;

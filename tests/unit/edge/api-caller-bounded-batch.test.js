@@ -205,6 +205,33 @@ describe('api-caller bounded batch lease ownership contract', () => {
     expect(edgeSource).not.toContain('client.rpc("mark_outbound_call_failure"');
   });
 
+  test('the effective outbound handoff and the legacy claimant use only the lease contract', () => {
+    const directory = path.join(root, 'supabase/migrations');
+    const names = fs.readdirSync(directory).filter(name => name.endsWith('_fence_outbound_worker_handoff.sql'));
+    expect(names).toHaveLength(1);
+    const effective = fs.readFileSync(path.join(directory, names[0]), 'utf8');
+    const bodies = new Map([...effective.matchAll(
+      /^CREATE OR REPLACE FUNCTION public\.(\w+)\([\s\S]*?\bAS (\$\w*\$)([\s\S]*?)^\2;/gm,
+    )].map(([, name, , body]) => [name, body]));
+    for (const name of ['run_outbound_worker', 'dispatch_outbound_call_inline']) {
+      const body = bodies.get(name);
+      expect(body).toContain('public.handoff_outbound_call_to_edge_v1(');
+      expect(body).toContain('public.check_async_response(');
+      expect(body).not.toMatch(/public\.(?:call_api(?:_wait)?|dispatch_api_request_v1)\(/);
+    }
+    const handoff = bodies.get('handoff_outbound_call_to_edge_v1');
+    expect(handoff).toMatch(/'headers', public\.sql_transport_headers_v1\(p_headers\)[\s\S]+SET status = 'pending_edge'/);
+    expect(effective).toMatch(/claim_pending_edge_job_ids_v1\(p_batch INT DEFAULT 1\)\s+RETURNS TABLE \(job_id UUID, lease_token UUID\)/);
+    expect(bodies.get('claim_pending_edge_job_ids_v1')).toMatch(/edge_lease_token = v_lease_token[\s\S]+lease_token := v_lease_token;/);
+    expect(bodies.get('claim_pending_edge_jobs')).toMatch(/BEGIN[\s\S]+\bRETURN;\s*END;\s*$/);
+    expect(bodies.get('claim_pending_edge_jobs')).not.toMatch(/outbound_calls|RETURN (?:NEXT|QUERY)/);
+    for (const schema of ['public', 'api']) {
+      expect(effective).toMatch(new RegExp(
+        `REVOKE EXECUTE ON FUNCTION ${schema}\\.log_api_call_event\\([^)]*\\)\\s+FROM edge_api_caller_role;`,
+      ));
+    }
+  });
+
   test('runtime claims one, executes one, then claims the next without preclaiming', () => {
     const batchStart = edgeSource.indexOf('const processBatch = async');
     const batchEnd = edgeSource.indexOf('\nDeno.serve(', batchStart);

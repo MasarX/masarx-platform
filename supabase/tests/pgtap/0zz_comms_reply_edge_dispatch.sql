@@ -2,7 +2,7 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
-SELECT plan(6);
+SELECT plan(7);
 
 -- Seed workflow context so outbound_calls inserts satisfy engine guards.
 SELECT set_config('app.workflow_run_id', 'dddd0cd0-0000-0000-0000-0000000000cd', true);
@@ -466,6 +466,7 @@ WITH src AS (
 )
 SELECT 1 FROM version_row;
 
+CREATE TEMP TABLE pgtap_comms_edge_net_baseline AS SELECT count(*) AS total FROM net.http_request_queue;
 CREATE TEMP TABLE pgtap_comms_reply_edge_ctx (
   queued BOOLEAN,
   outbound_call_id UUID,
@@ -522,6 +523,23 @@ SELECT ok(
   'edge dispatch writes outbound_calls.context.edge_dispatch (immediate + timeout)'
 );
 
+UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
+WHERE id <> (SELECT outbound_call_id FROM pgtap_comms_reply_edge_ctx)
+  AND status IN ('pending', 'pending_edge', 'failed') AND scheduled_at <= now();
+CREATE TEMP TABLE pgtap_comms_reply_edge_lease AS SELECT * FROM public.claim_pending_edge_job_ids_v1(1);
+SELECT ok(
+  NOT EXISTS (SELECT FROM cron.job WHERE jobname = 'api_caller_batch_tick'
+    OR command ~* '\m(run_edge_api_caller_worker|run_api_caller_batch)\M')
+  AND (SELECT count(*) FROM net.http_request_queue) = (SELECT total FROM pgtap_comms_edge_net_baseline)
+  AND EXISTS (SELECT FROM pgtap_comms_reply_edge_lease l JOIN public.outbound_calls o ON o.id = l.job_id
+    WHERE l.job_id = c.outbound_call_id AND l.lease_token = o.edge_lease_token
+      AND o.status = 'in_progress_edge' AND o.lease_expires_at > now()
+      AND NOT (public.redact_sensitive_headers(o.headers) IS DISTINCT FROM o.headers)
+      AND NOT (o.context ? 'async_request_id')
+      AND NOT (public.redact_sensitive_headers(o.context #> '{edge_dispatch,headers}')
+        IS DISTINCT FROM COALESCE(o.context #> '{edge_dispatch,headers}', '{}'::jsonb))),
+  'the exact reply is leased without the SQL tick, a transport row or persisted credential headers')
+FROM pgtap_comms_reply_edge_ctx c;
 SELECT finish();
 
 ROLLBACK;

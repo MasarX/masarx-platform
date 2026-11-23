@@ -463,12 +463,16 @@ describeIfDb('integration recovery and provider backfill', () => {
     });
     expect(baselineRows[0].context.operation_template_id).toBe(operationTemplateId);
 
-    const { rows: claimRows } = await client.query(
-      `SELECT * FROM public.claim_pending_edge_jobs($1)`,
-      [10],
+    const { rows: [preRepairClaim] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [workflow.jobId],
     );
-    const preRepairClaim = claimRows.find((row) => row.job_id === workflow.jobId);
-    expect(preRepairClaim).toBeFalsy();
+    expect(preRepairClaim).toEqual({ job_id: workflow.jobId, lease_token: expect.any(String) });
+    const { rows: [{ spec: preRepairSpec }] } = await client.query(
+      `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec`,
+      [preRepairClaim.job_id, preRepairClaim.lease_token],
+    );
+    expect(preRepairSpec).toBeNull();
 
     const { rows: postClaimRows } = await client.query(
       `SELECT status, retry_count, lease_expires_at, completed_at, response_status_code, url, target_id, context
@@ -478,10 +482,10 @@ describeIfDb('integration recovery and provider backfill', () => {
     );
     expect(postClaimRows).toHaveLength(1);
     expect(postClaimRows[0]).toMatchObject({
-      status: 'pending_edge',
+      status: 'permanently_failed',
       retry_count: 0,
       lease_expires_at: null,
-      completed_at: null,
+      completed_at: expect.any(Date),
       response_status_code: null,
       url: 'https://stale-recovery.masarx.test/packages',
       target_id: primaryProviderId,
@@ -545,17 +549,20 @@ describeIfDb('integration recovery and provider backfill', () => {
       'expired-token',
       '2024-01-01T00:00:00.000Z',
     );
+    const recoveredCredential = randomUUID();
+    const secondaryCredential = randomUUID();
+    const leaseExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const recoveredAuthId = await insertProviderAuth(
       client,
       primaryProviderId,
-      'recovered-token',
-      '2027-01-01T00:00:00.000Z',
+      recoveredCredential,
+      leaseExpiry,
     );
     const secondaryAuthId = await insertProviderAuth(
       client,
       secondaryProviderId,
-      'secondary-token',
-      '2027-01-01T00:00:00.000Z',
+      secondaryCredential,
+      leaseExpiry,
     );
 
     const driftedMappingId = await insertMappingConfig(
@@ -693,30 +700,34 @@ describeIfDb('integration recovery and provider backfill', () => {
     expect(recoveredMappingReport.status).toBe('succeeded');
     expect(recoveredMappingReport.result_payload.external_status).toBe('accepted_for_backfill');
 
-    const { rows: initialClaimRows } = await client.query(
-      `SELECT * FROM public.claim_pending_edge_jobs($1)`,
-      [5],
+    const { rows: [initialClaim] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [workflow.jobId],
     );
-    const initialClaim = initialClaimRows.find((row) => row.job_id === workflow.jobId);
-    expect(initialClaim).toBeTruthy();
-    expect(initialClaim.dispatch.url).toBe('https://primary-recovery.masarx.test/packages');
-    expect(initialClaim.dispatch.headers.authorization).toBe('Bearer recovered-token');
+    expect(initialClaim).toEqual({ job_id: workflow.jobId, lease_token: expect.any(String) });
+    const { rows: [{ spec: primarySpec, stored: primaryStored }] } = await client.query(
+      `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec,
+              row_to_json(o) AS stored FROM public.outbound_calls o WHERE o.id = $1::uuid`,
+      [initialClaim.job_id, initialClaim.lease_token],
+    );
+    expect(primarySpec).toMatchObject({
+      url: `https://${['primary-recovery', 'masarx', 'test'].join('.')}/packages`,
+      headers: { authorization: `Bearer ${recoveredCredential}` },
+    });
+    for (const secret of [recoveredCredential, secondaryCredential]) {
+      expect(JSON.stringify(initialClaim)).not.toContain(secret);
+      expect(JSON.stringify(primaryStored)).not.toContain(secret);
+    }
 
     await client.query(
-      `SELECT public.mark_outbound_call_failure_v2(
-         $1::uuid,
-         503,
-         $2::jsonb,
-         $3::jsonb,
-         'provider outage during backfill',
-         'integration.recovery_backfill',
-         $4::uuid
+      `SELECT public.mark_claimed_edge_job_failure_v1(
+         $1::uuid, $2::uuid, 503, $3::jsonb, $4::jsonb, 'provider outage during backfill', 0
        )`,
       [
         workflow.jobId,
+        initialClaim.lease_token,
         JSON.stringify({ 'content-type': 'application/json' }),
         JSON.stringify({ error: 'provider_outage' }),
-        correlationId,
       ],
     );
 
@@ -742,25 +753,30 @@ describeIfDb('integration recovery and provider backfill', () => {
       [workflow.jobId],
     );
 
-    const { rows: backfillClaimRows } = await client.query(
-      `SELECT * FROM public.claim_pending_edge_jobs($1)`,
-      [5],
+    const { rows: [backfillClaim] } = await client.query(
+      `SELECT * FROM public.claim_edge_job_by_id_v1($1::uuid)`,
+      [workflow.jobId],
     );
-    const backfillClaim = backfillClaimRows.find((row) => row.job_id === workflow.jobId);
-    expect(backfillClaim).toBeTruthy();
-    expect(backfillClaim.dispatch.url).toBe('https://secondary-recovery.masarx.test/packages');
-    expect(backfillClaim.dispatch.headers.authorization).toBe('Bearer secondary-token');
+    expect(backfillClaim).toEqual({ job_id: workflow.jobId, lease_token: expect.any(String) });
+    const { rows: [{ spec: secondarySpec, stored: secondaryStored }] } = await client.query(
+      `SELECT public.get_claimed_edge_job_call_spec_v1($1::uuid, $2::uuid) AS spec,
+              row_to_json(o) AS stored FROM public.outbound_calls o WHERE o.id = $1::uuid`,
+      [backfillClaim.job_id, backfillClaim.lease_token],
+    );
+    expect(secondarySpec).toMatchObject({
+      url: `https://${['secondary-recovery', 'masarx', 'test'].join('.')}/packages`,
+      headers: { authorization: `Bearer ${secondaryCredential}` },
+    });
+    for (const secret of [recoveredCredential, secondaryCredential]) {
+      expect(JSON.stringify(backfillClaim)).not.toContain(secret);
+      expect(JSON.stringify(secondaryStored)).not.toContain(secret);
+    }
 
     await client.query(
-      `SELECT public.mark_outbound_call_success(
-         $1::uuid,
-         200,
-         $2::jsonb,
-         $3::jsonb,
-         118
-       )`,
+      `SELECT public.mark_claimed_edge_job_success_v1($1::uuid, $2::uuid, 200, $3::jsonb, $4::jsonb, 118)`,
       [
         workflow.jobId,
+        backfillClaim.lease_token,
         JSON.stringify({ 'content-type': 'application/json' }),
         JSON.stringify({ ok: true, backfilled: true }),
       ],
