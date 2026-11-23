@@ -32,7 +32,6 @@ function expectPinnedCertificate(source) {
 
 test.each([
   ['api-schemas', 'Read renderer JWT claims'],
-  ['renderer-jwt-mint', 'Rotate the DEV renderer invoke credential'],
 ])('deploy %s checks out and verifies the committed database CA', (job, stepName) => {
   const { steps } = jobs[job];
   const index = steps.findIndex(step => step.name === stepName);

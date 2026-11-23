@@ -1189,13 +1189,19 @@ UPDATE public.outbound_calls
        lease_expires_at = now() + interval '5 minutes'
  WHERE id = 'f5000000-0000-0000-0000-000000001902';
 
-SET LOCAL ROLE edge_api_caller_role;
 SELECT throws_ok(
-  $$SELECT api.get_claimed_edge_job_call_spec_v1('f5000000-0000-0000-0000-000000001902', NULL)$$,
+  $sql$
+    DO $call$
+    BEGIN
+      SET LOCAL ROLE edge_api_caller_role;
+      PERFORM api.get_claimed_edge_job_call_spec_v1('f5000000-0000-0000-0000-000000001902'::uuid, NULL::uuid);
+      RESET ROLE;
+    END;
+    $call$;
+  $sql$::text,
   'P0001', 'get_claimed_edge_job_call_spec_v1: active lease for job f5000000-0000-0000-0000-000000001902 not found',
   'the Edge API caller cannot resolve a protected execution URL without presenting its active lease'
 );
-RESET ROLE;
 
 SELECT ok(
   (SELECT url FROM public.outbound_calls WHERE id = 'f5000000-0000-0000-0000-000000001902')
