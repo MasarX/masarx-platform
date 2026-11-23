@@ -157,7 +157,6 @@ describe('api-caller bounded batch lease ownership contract', () => {
       'claim_edge_job_by_id_v1',
       'claim_pending_edge_job_ids_v1',
       'get_claimed_edge_job_call_spec_v1',
-      'log_api_call_event',
       'mark_claimed_edge_job_failure_v1',
       'mark_claimed_edge_job_success_v1',
       'renew_claimed_edge_job_lease_v1',
@@ -168,6 +167,25 @@ describe('api-caller bounded batch lease ownership contract', () => {
     for (const rpcName of uniqueRuntimeRpcNames) {
       expect(migration).toContain(`CREATE OR REPLACE FUNCTION api.${rpcName}`);
       expect(migration).toMatch(new RegExp(`'api\\.${rpcName}\\([^']*\\)'`));
+    }
+  });
+
+  test('only fenced finalizers write leased Edge terminal audits', () => {
+    const transport = fs.readFileSync(path.join(root,
+      'supabase/migrations/20261123047100_renderer_calls_via_edge.sql'), 'utf8');
+    const auditWriters = [...transport.matchAll(/^CREATE (?:OR REPLACE )?FUNCTION (?:public|api)\.(\w+)\([\s\S]+?\bAS (\$\w*\$)([\s\S]+?)^\2;/gim)]
+      .filter(([, , , body]) => body.includes('PERFORM public.log_api_call_event('));
+    expect(auditWriters.map(([, name]) => name)).toEqual([
+      'mark_claimed_edge_job_success_v1',
+      'mark_claimed_edge_job_failure_v1',
+      'run_outbound_worker',
+      'dispatch_outbound_call_inline',
+    ]);
+    for (const [, name, , body] of auditWriters.slice(0, 2)) {
+      expect(body).toMatch(/oc\.id = p_job_id[\s\S]+oc\.status = 'in_progress_edge'[\s\S]+oc\.edge_lease_token = p_lease_token[\s\S]+oc\.lease_expires_at > now\(\)[\s\S]+FOR UPDATE;[\s\S]+IF NOT FOUND THEN\s+RAISE EXCEPTION[\s\S]+PERFORM public\.log_api_call_event\(/);
+      expect(body.match(/PERFORM public\.log_api_call_event\(/g)).toHaveLength(1);
+      expect(body.indexOf('PERFORM public.log_api_call_event('))
+        .toBeLessThan(body.indexOf(`PERFORM public.mark_outbound_call_${name.includes('_success_') ? 'success' : 'failure'}(`));
     }
   });
 
