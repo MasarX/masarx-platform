@@ -21,12 +21,17 @@ UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
 WHERE status IN ('pending', 'pending_edge', 'failed') AND scheduled_at <= now();
 CREATE TEMP TABLE retired_sql_claim_fixture AS
 SELECT gen_random_uuid() AS sql_job, gen_random_uuid() AS edge_job, gen_random_uuid() AS target,
+  gen_random_uuid() AS org,
   concat('https', '://', 'egress', '.', 'example', '.', 'test', '/') AS url;
-INSERT INTO public.outbound_calls (id, call_type, target_type, target_id, method, url, status, scheduled_at)
-SELECT sql_job, 'provider_api', 'provider', target, 'POST', url || sql_job, 'pending', now()
+INSERT INTO public.organizations (id, name, slug)
+SELECT org, 'Retired SQL claim fixture', 'retired-sql-claim-' || org FROM retired_sql_claim_fixture;
+INSERT INTO public.providers (id, organization_id, name, provider_type)
+SELECT target, org, 'Retired SQL claim provider', 'http' FROM retired_sql_claim_fixture;
+INSERT INTO public.outbound_calls (id, call_type, target_type, target_id, method, url, status, scheduled_at, context)
+SELECT sql_job, 'provider_api', 'provider', target, 'POST', url || sql_job, 'pending', now(), jsonb_build_object('organization_id', org)
 FROM retired_sql_claim_fixture
 UNION ALL
-SELECT edge_job, 'provider_api', 'provider', target, 'POST', url || edge_job, 'pending_edge', now()
+SELECT edge_job, 'provider_api', 'provider', target, 'POST', url || edge_job, 'pending_edge', now(), jsonb_build_object('organization_id', org)
 FROM retired_sql_claim_fixture;
 
 CREATE TEMP TABLE retired_sql_claim AS SELECT job_id FROM public.claim_pending_jobs(10);
