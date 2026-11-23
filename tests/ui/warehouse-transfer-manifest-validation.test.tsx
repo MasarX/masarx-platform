@@ -95,14 +95,23 @@ test.each([
   expect(screen.getByTestId("warehouse-transfer-manifest-create-organization")).toHaveTextContent("Example Tenant");
   expect(screen.getByTestId("warehouse-transfer-manifest-create-shipment-count")).toHaveTextContent("1 shipment");
   await user.type(screen.getByLabelText("Transfer code"), "EXAMPLE-TRANSFER");
-  fireEvent.change(screen.getByTestId("warehouse-transfer-manifest-create-planned-dispatch-at"), {
-    target: { value: "invalid timestamp" },
-  });
+  const timestampSummary = screen.getByText("Enter record IDs and timestamps", { selector: "summary" });
+  const rawDispatch = screen.getByTestId("warehouse-transfer-manifest-create-planned-dispatch-at");
+  const localDispatch = screen.getByLabelText("Planned dispatch time (local)");
+  await user.click(timestampSummary);
+  fireEvent.change(rawDispatch, { target: { value: "invalid timestamp" } });
+  await user.click(timestampSummary);
+  expect(timestampSummary.closest("details")).not.toHaveAttribute("open");
   await user.click(screen.getByRole("button", { name: "Create transfer manifest" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("Enter a valid planned dispatch time.");
+  expect(screen.getByRole("alert")).toHaveTextContent("ISO 8601 date and time with Z or a UTC offset");
+  expect(timestampSummary.closest("details")).toHaveAttribute("open");
+  expect(rawDispatch).toHaveFocus();
+  expect(rawDispatch).toHaveAttribute("aria-invalid", "true");
+  expect(rawDispatch).toHaveAccessibleDescription(/ISO 8601/);
+  expect(localDispatch).not.toHaveAttribute("aria-invalid");
   expect(createWarehouseTransferManifest).not.toHaveBeenCalled();
 
-  fireEvent.change(screen.getByLabelText("Planned dispatch time (local)"), { target: { value: "2026-01-12T12:00" } });
+  fireEvent.change(localDispatch, { target: { value: "2026-01-12T12:00" } });
   const receipt = screen.getByLabelText("Planned receipt time (local)");
   fireEvent.change(receipt, { target: { value: "2026-01-12T08:00" } });
   await user.click(screen.getByRole("button", { name: "Create transfer manifest" }));
@@ -120,3 +129,39 @@ test.each([
   })));
   await waitFor(() => expect(push).toHaveBeenCalledWith(expectedHref));
 });
+
+test.each(["1", "2026-04-05T12:00:00", "2026-02-30T12:00:00Z"])(
+  "rejects an invalid raw receipt timestamp (%s) and accepts an explicit offset",
+  async (invalidTimestamp) => {
+    const user = userEvent.setup();
+    createWarehouseTransferManifest.mockResolvedValue({ transfer_id: "transfer-a" });
+    renderWithIntl(
+      <WarehouseTransferManifestCreateForm
+        appBasePath="/portal"
+        organizationId={randomUUID()}
+        capabilities={["*"]}
+        capabilityWrite="warehouse_transfers.write"
+      />
+    );
+
+    await user.click(screen.getByText("Enter record IDs and timestamps", { selector: "summary" }));
+    await user.type(screen.getByLabelText("Transfer code"), "EXAMPLE-TRANSFER");
+    fireEvent.change(screen.getByLabelText("From branch ID"), { target: { value: "branch-a" } });
+    fireEvent.change(screen.getByLabelText("To branch ID"), { target: { value: "branch-b" } });
+    fireEvent.change(screen.getByLabelText("Shipment IDs"), { target: { value: "shipment-a" } });
+    const rawReceipt = screen.getByLabelText("Planned receive at");
+    const submit = screen.getByRole("button", { name: "Create transfer manifest" });
+    fireEvent.change(rawReceipt, { target: { value: invalidTimestamp } });
+    await user.click(submit);
+    expect(rawReceipt).toHaveAccessibleDescription(/planned receive time.*ISO 8601.*UTC offset/);
+    expect(rawReceipt).toHaveFocus();
+    expect(createWarehouseTransferManifest).not.toHaveBeenCalled();
+
+    const validTimestamp = "2026-04-05T12:00:00+03:00";
+    fireEvent.change(rawReceipt, { target: { value: validTimestamp } });
+    await user.click(submit);
+    await waitFor(() => expect(createWarehouseTransferManifest).toHaveBeenCalledWith(expect.objectContaining({
+      plannedReceiveAt: validTimestamp,
+    })));
+  }
+);
