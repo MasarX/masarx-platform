@@ -157,7 +157,11 @@ function verifyEdgeConfigs(functionsRoot, configFiles) {
       if (name === 'import_map') throw new Error('supabase/config.toml: import_map is forbidden in Edge configuration');
       if (name === 'entrypoint' && value !== '') {
         if (typeof value !== 'string') throw new Error('supabase/config.toml: entrypoint must be a path string');
-        assertInsideFunctionsRoot(functionsRoot, path.resolve(supabaseRoot, value), 'supabase/config.toml: entrypoint');
+        const entrypoint = path.resolve(supabaseRoot, value);
+        assertInsideFunctionsRoot(functionsRoot, entrypoint, 'supabase/config.toml: entrypoint');
+        if (!EDGE_SOURCE_EXTENSIONS.has(path.extname(entrypoint).toLowerCase())) {
+          throw new Error('supabase/config.toml: entrypoint must use a scanned Edge source extension');
+        }
       }
       if (value && typeof value === 'object') visit(value);
     }
@@ -181,8 +185,11 @@ function collectModuleSpecifiers(functionsRoot, sourceFiles) {
   for (const filePath of resolveSourceFiles(functionsRoot, sourceFiles)) {
     const file = path.relative(functionsRoot, filePath).replace(/\\/g, '/');
     const fileUrl = pathToFileURL(filePath);
-    const source = ts.createSourceFile(file, fs.readFileSync(filePath, 'utf8'), ts.ScriptTarget.Latest);
+    const source = ts.createSourceFile(file, fs.readFileSync(filePath, 'utf8'), ts.ScriptTarget.Latest, true);
     if (source.parseDiagnostics.length) throw new Error(`${file}: cannot parse Edge source`);
+    for (const match of source.text.matchAll(/@jsxImportSource(?:Types)?\b/g)) {
+      if (ts.isInComment(source, match.index)) throw new Error(`${file}: ${match[0]} pragma is forbidden`);
+    }
 
     const record = (literal) => {
       if (!literal || !ts.isStringLiteralLike(literal)) {

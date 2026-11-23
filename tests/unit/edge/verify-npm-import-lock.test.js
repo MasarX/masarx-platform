@@ -61,6 +61,10 @@ test('accepts a pin with matching npm and Deno resolutions and integrity', () =>
   const result = runVerifier(version, version, integrity, {
     'supabase/config.toml': '# import_map = "./fixture.json"\n[functions.test-function]\nentrypoint = "functions/test-function/index.ts"\n',
     'supabase/functions/test-function/deno.jsonc': '{ // "imports": {}\n "deploy": {"verify_jwt": true},\n}',
+    'supabase/functions/test-function/note.tsx': [
+      'export const note = "/** @jsxImportSource fixture */";',
+      'export const element = <div>/* @jsxImportSourceTypes fixture */</div>;',
+    ].join('\n'),
     'supabase/functions/test-function/index.ts': [
       '// import "jsr:@fixture/unused";',
       'import "./source/dependency.ts";',
@@ -162,6 +166,25 @@ test.each([
   }, `test-function/_vendor/index.ts: npm:${packageName}@^1.2.0`],
 ])('rejects review regression %s', (_case, files, reason, link = undefined) => {
   const result = runVerifier(version, version, integrity, files, {}, link);
+  expect({ status: result.status, stderr: result.stderr }).toEqual({
+    status: 1,
+    stderr: expect.stringContaining(reason),
+  });
+});
+
+test.each([
+  ['a JSX runtime pragma', {
+    'supabase/functions/test-function/runtime.tsx': '/** @jsxImportSource npm:preact@^10.0.0 */\nexport const element = <div />;',
+  }, 'test-function/runtime.tsx: @jsxImportSource pragma is forbidden'],
+  ['an inline JSX types pragma', {
+    'supabase/functions/test-function/types.jsx': 'export /* @jsxImportSourceTypes npm:preact@^10.0.0 */ const element = <div />;',
+  }, 'test-function/types.jsx: @jsxImportSourceTypes pragma is forbidden'],
+  ['an entrypoint with an unscanned extension', {
+    'supabase/config.toml': '[functions.test-function]\nentrypoint = "functions/test-function/index.txt"\n',
+    'supabase/functions/test-function/index.txt': 'export {};',
+  }, 'supabase/config.toml: entrypoint must use a scanned Edge source extension'],
+])('rejects follow-up regression %s', (_case, files, reason) => {
+  const result = runVerifier(version, version, integrity, files);
   expect({ status: result.status, stderr: result.stderr }).toEqual({
     status: 1,
     stderr: expect.stringContaining(reason),
