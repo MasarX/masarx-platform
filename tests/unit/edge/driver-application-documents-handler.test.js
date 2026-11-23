@@ -40,7 +40,7 @@ function load(name, scenario = {}) {
     if (!compiled.has(file)) compiled.set(file, ts.transpileModule(fs.readFileSync(file, 'utf8'), { fileName: file.replace(/\.mjs$/, '.ts'),
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
     const fn = vm.runInContext('(function(require,exports){' + compiled.get(file) + '\n})', sandbox);
-    fn(spec => spec === 'npm:@supabase/supabase-js@2.111.0' ? { createClient: (_url, _key, options) => { calls.push(['client', options]); return client; } }
+    fn(spec => spec === 'npm:@supabase/supabase-js@2.119.0' ? { createClient: (_url, _key, options) => { calls.push(['client', options]); return client; } }
       : moduleAt(path.resolve(path.dirname(file), spec)), exports);
     return exports;
   }

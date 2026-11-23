@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { DOMParser } from "npm:@xmldom/xmldom@0.9.12";
 import { isPngContainer, isJpegContainer } from "./_shared/raster-images.mjs";
 import { extractToken, logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";

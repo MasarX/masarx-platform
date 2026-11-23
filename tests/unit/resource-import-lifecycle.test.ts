@@ -155,8 +155,8 @@ function harness(kind: string) {
   }
   const env: Record<string, string> = { EDGE_SUPABASE_URL: 'https://example.test', EDGE_SUPABASE_ANON_KEY: 'test-anon', EDGE_SUPABASE_SECRET_KEY: 'test-service', SUPABASE_SECRET_KEY: 'test-service' };
   const dependencies: Dependencies = {
-    jszip: { default: JSZip }, 'npm:jszip@3.10.1': { default: JSZip },
-    'npm:@supabase/supabase-js@2.111.0': { createClient: (_url: string, _key: string, options: { global: { headers: Record<string, string> } }) => options.global.headers.Authorization ? userClient : serviceClient },
+    jszip: { default: JSZip }, 'npm:jszip@3.10.2': { default: JSZip },
+    'npm:@supabase/supabase-js@2.119.0': { createClient: (_url: string, _key: string, options: { global: { headers: Record<string, string> } }) => options.global.headers.Authorization ? userClient : serviceClient },
     './_vendor/exceljs.mjs': { Workbook: TracedWorkbook },
     './_shared/mod.mjs': {
       readEnv: (key: string, fallbacks: string[] = []) => [key, ...fallbacks].map((entry) => env[entry]).find(Boolean) || '',

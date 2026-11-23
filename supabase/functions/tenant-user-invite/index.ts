@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@^2.45.4";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import { normalizeHostedRedirectUrl } from "./_shared/tenant_signup.ts";
 

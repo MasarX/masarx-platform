@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { extractToken, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
 const url = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);

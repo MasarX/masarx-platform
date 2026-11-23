@@ -93,7 +93,7 @@ function loadHandler(name, { env = {}, createResult = {}, approvalResult = {}, p
     const compiled = compiledCache.get(resolved);
     const execute = vm.runInContext('(function(require,module,exports){\n' + compiled + '\n})', sandbox, { filename: resolved, timeout: 1000 });
     execute(specifier => {
-      if (specifier === 'npm:@supabase/supabase-js@2.111.0') return {
+      if (specifier === 'npm:@supabase/supabase-js@2.119.0') return {
         createClient: (...args) => { clients.push(args); return serviceClient; },
       };
       if (!specifier.startsWith('.')) throw new Error('Unexpected external module: ' + specifier);

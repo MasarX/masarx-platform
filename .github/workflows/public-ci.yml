@@ -319,6 +319,15 @@ jobs:
           fi
           npm run edge:sync-shared
           npm run edge:prepare-resource-import-exceljs
+      - name: Verify Edge npm import lock
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]] &&
+             git diff --quiet --no-renames "$LOCAL_GATE_BASE_SHA" HEAD -- \
+               supabase/functions package.json package-lock.json deno.lock scripts/edge .github/workflows/public-ci.yml; then
+            printf '%s\n' 'Edge npm import lock inputs are unchanged.'
+            exit 0
+          fi
+          node scripts/edge/verify-npm-import-lock.js
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs lint
