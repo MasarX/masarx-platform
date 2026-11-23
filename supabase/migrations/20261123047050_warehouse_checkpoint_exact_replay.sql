@@ -164,11 +164,14 @@ DECLARE
   v_commands JSONB;
 BEGIN
   FOR v_row IN
-    SELECT s.id, s.settings_version_id, sv.value
+    SELECT s.id AS settings_id, s.settings_version_id, s.category,
+           s.scope_type, s.scope_id, s.scope_hash, sv.schema_version, sv.value
       FROM public.settings s
-      JOIN public.settings_versions sv ON sv.id = s.settings_version_id
+      JOIN public.settings_versions sv
+        ON sv.id = s.settings_version_id AND sv.scope_hash = s.scope_hash
      WHERE s.category = 'ui_command_registry'
        AND jsonb_typeof(sv.value->'commands') = 'array'
+     FOR UPDATE OF s, sv
   LOOP
     SELECT COALESCE(jsonb_agg(
       CASE WHEN command->>'key' IN ('warehouse_transfers.scan_departure', 'warehouse_transfers.scan_arrival')
@@ -186,18 +189,35 @@ BEGIN
       FROM jsonb_array_elements(v_row.value->'commands') WITH ORDINALITY AS commands(command, command_order);
 
     IF v_commands IS DISTINCT FROM v_row.value->'commands' THEN
-      UPDATE public.settings_versions
-         SET value = jsonb_set(v_row.value, '{commands}', v_commands, FALSE),
-             version = version + 1,
-             change_reason = 'Use the managed scanner for warehouse checkpoint commands.',
-             approved_at = public.workflow_now(),
-             effective_from = public.workflow_now()
-       WHERE id = v_row.settings_version_id;
-
-      UPDATE public.settings
-         SET cached_value = jsonb_set(v_row.value, '{commands}', v_commands, FALSE),
-             last_updated = public.workflow_now()
-       WHERE id = v_row.id;
+      WITH closed AS (
+        UPDATE public.settings_versions
+           SET effective_until = GREATEST(clock_timestamp(), effective_from + INTERVAL '1 microsecond'),
+               updated_at = clock_timestamp()
+         WHERE id = v_row.settings_version_id
+           AND scope_hash = v_row.scope_hash AND effective_until IS NULL
+        RETURNING id
+      ), inserted AS (
+        INSERT INTO public.settings_versions (
+          id, category, scope_type, scope_id, scope_hash, version, value,
+          schema_version, change_reason, approved_at, effective_from
+        )
+        SELECT gen_random_uuid(), v_row.category, v_row.scope_type, v_row.scope_id, v_row.scope_hash,
+          (SELECT COALESCE(MAX(candidate.version), 0) + 1 FROM public.settings_versions candidate
+            WHERE candidate.category = v_row.category AND candidate.scope_type = v_row.scope_type
+              AND candidate.scope_hash = v_row.scope_hash),
+          jsonb_set(v_row.value, '{commands}', v_commands, FALSE), v_row.schema_version,
+          'Use the managed scanner for warehouse checkpoint commands.', clock_timestamp(), clock_timestamp()
+          FROM closed
+        RETURNING id, value
+      )
+      UPDATE public.settings s
+         SET settings_version_id = inserted.id, cached_value = inserted.value, last_updated = clock_timestamp()
+        FROM inserted
+       WHERE s.id = v_row.settings_id AND s.settings_version_id = v_row.settings_version_id;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'failed to promote ui_command_registry settings pair %/%',
+          v_row.settings_id, v_row.settings_version_id;
+      END IF;
     END IF;
   END LOOP;
 END;

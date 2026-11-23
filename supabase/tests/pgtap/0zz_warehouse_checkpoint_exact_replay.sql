@@ -1,7 +1,7 @@
 SET search_path TO public, pgtap, extensions, pg_temp;
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(9);
+SELECT plan(13);
 
 CREATE FUNCTION pg_temp.check_warehouse_checkpoint_exact_replay()
 RETURNS SETOF TEXT
@@ -26,6 +26,9 @@ DECLARE
   v_departure JSONB;
   v_arrival JSONB;
   v_replay JSONB;
+  v_registry RECORD;
+  v_other_commands CONSTANT JSONPATH := '$.commands[*] ? (!exists(@.key) ||
+    (@.key != "warehouse_transfers.scan_departure" && @.key != "warehouse_transfers.scan_arrival"))';
   v_call TEXT := 'SELECT api.ui_execute_warehouse_transfer_checkpoint_v1(%L, ''warehouse_transfers'', NULL, %L, 1, %L)';
 BEGIN
   INSERT INTO public.organizations (id, name, slug, billing_status)
@@ -135,6 +138,36 @@ BEGIN
       AND command#>'{execution,input_schema,fields}' @> '[{"key":"ops_session_id"}]'
       AND NOT command#>'{execution,input_schema,fields}' @> '[{"key":"device_id"}]'
   ), 2::bigint, 'both commands keep the ops session field and use the managed scanner');
+
+  SELECT s.cached_value, active.value AS current_value, active.change_reason AS current_reason,
+         active.approved_at, active.effective_until AS current_end, active.schema_version,
+         prior.value AS prior_value, prior.change_reason AS prior_reason, prior.effective_from AS prior_start,
+         prior.effective_until AS prior_end, prior.schema_version AS prior_schema_version
+    INTO v_registry
+    FROM public.settings s
+    JOIN public.settings_versions active ON active.id = s.settings_version_id AND active.scope_hash = s.scope_hash
+    LEFT JOIN LATERAL (
+      SELECT sv.value, sv.change_reason, sv.effective_from, sv.effective_until, sv.schema_version
+        FROM public.settings_versions sv
+       WHERE sv.category = s.category AND sv.scope_type = s.scope_type AND sv.scope_hash = s.scope_hash
+         AND sv.version < active.version AND sv.approved_at IS NOT NULL
+       ORDER BY sv.version DESC
+       LIMIT 1
+    ) prior ON TRUE
+   WHERE s.category = 'ui_command_registry' AND s.scope_type = 'global';
+
+  RETURN NEXT ok(v_registry.prior_end > v_registry.prior_start
+    AND v_registry.prior_reason = 'Add provider credential retirement action'
+    AND v_registry.prior_schema_version = v_registry.schema_version,
+    'the closed registry predecessor retains its original reason and schema version');
+  RETURN NEXT ok(v_registry.current_end IS NULL AND v_registry.approved_at IS NOT NULL
+    AND v_registry.current_reason = 'Use the managed scanner for warehouse checkpoint commands.',
+    'the settings pointer references the approved open managed-scanner version');
+  RETURN NEXT ok(v_registry.cached_value = v_registry.current_value,
+    'the registry cache equals the current version');
+  RETURN NEXT ok(jsonb_path_query_array(v_registry.current_value, v_other_commands)
+    = jsonb_path_query_array(v_registry.prior_value, v_other_commands),
+    'all other commands retain their content and order');
 END;
 $test$;
 
