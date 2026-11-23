@@ -161,10 +161,10 @@ BEGIN
         v_edge_settings := resolve_settings('edge_dispatch_policy', 'global', NULL);
         v_edge_url := NULLIF(COALESCE(v_edge_settings->>'endpoint_url', ''), '');
         BEGIN
-            v_edge_enabled := COALESCE(NULLIF(v_edge_settings->>'enabled', '')::BOOLEAN, TRUE);
+            v_edge_enabled := COALESCE(NULLIF(v_edge_settings->>'enabled', '')::BOOLEAN, FALSE);
         EXCEPTION
             WHEN others THEN
-                v_edge_enabled := TRUE;
+                v_edge_enabled := FALSE;
         END;
     EXCEPTION
         WHEN others THEN
@@ -304,10 +304,10 @@ BEGIN
         v_edge_settings := resolve_settings('edge_dispatch_policy', 'global', NULL);
         v_edge_url := NULLIF(COALESCE(v_edge_settings->>'endpoint_url', ''), '');
         BEGIN
-            v_edge_enabled := COALESCE(NULLIF(v_edge_settings->>'enabled', '')::BOOLEAN, TRUE);
+            v_edge_enabled := COALESCE(NULLIF(v_edge_settings->>'enabled', '')::BOOLEAN, FALSE);
         EXCEPTION
             WHEN others THEN
-                v_edge_enabled := TRUE;
+                v_edge_enabled := FALSE;
         END;
     EXCEPTION
         WHEN others THEN
@@ -788,6 +788,9 @@ SECURITY DEFINER
 SET search_path TO public, extensions, pg_temp
 AS $$
 BEGIN
+    -- Keep the fail-closed policy read. Either setting leaves pending_edge to the leased claimant.
+    PERFORM public.resolve_edge_dispatch_enabled_v1();
+
     RETURN QUERY
     UPDATE public.outbound_calls AS oc
        SET lease_expires_at = now() + interval '30 seconds'

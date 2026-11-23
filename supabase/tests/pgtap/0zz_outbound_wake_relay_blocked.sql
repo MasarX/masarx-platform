@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(25);
+SELECT plan(31);
 
 SELECT ok(EXISTS (
   SELECT 1 FROM cron.job j
@@ -108,6 +108,7 @@ CREATE FUNCTION pg_temp.check_edge_dispatch_disabled(p_case text)
 RETURNS SETOF text LANGUAGE plpgsql AS $test$
 DECLARE
   v_fixture pg_temp.wake_fixture%ROWTYPE;
+  v_minute CONSTANT timestamptz := date_trunc('minute', statement_timestamp(), 'UTC');
   v_result jsonb;
 BEGIN
   SELECT * INTO STRICT v_fixture FROM pg_temp.wake_fixture;
@@ -116,9 +117,26 @@ BEGIN
   UPDATE public.outbound_calls
   SET status = 'pending_edge', scheduled_at = now(), lease_expires_at = NULL
   WHERE id = v_fixture.job;
-  RETURN NEXT ok(EXISTS (
+  RETURN NEXT ok(NOT EXISTS (
     SELECT 1 FROM public.claim_pending_jobs(1) WHERE job_id = v_fixture.job
-  ), p_case || ': SQL claim leases the due pending_edge job');
+  ), p_case || ': SQL claim leaves the due pending_edge job for Edge');
+
+  -- A previous case may have raised the same alarm in this minute.
+  DELETE FROM public.ops_alerts
+  WHERE organization_id = public.marketplace_system_org_id_v1()
+    AND created_at = v_minute AND alert_type = 'outbound_wake_relay_blocked';
+  PERFORM public.run_outbound_wake_sweep_v1();
+  PERFORM public.run_outbound_wake_sweep_v1();
+  RETURN NEXT is((
+    SELECT count(*) FROM public.ops_alerts
+    WHERE organization_id = public.marketplace_system_org_id_v1()
+      AND created_at = v_minute AND alert_type = 'outbound_wake_relay_blocked'
+  ), 1::bigint, p_case || ': due pending_edge work emits one blocked relay alarm per minute');
+
+  RETURN NEXT ok(EXISTS (
+    SELECT 1 FROM public.claim_pending_edge_job_ids_v1(1)
+    WHERE job_id = v_fixture.job AND lease_token IS NOT NULL
+  ), p_case || ': Edge claims the exact due pending_edge job with a lease');
 
   v_result := public.call_api(v_fixture.origin, p_timeout_seconds => 1);
   RETURN NEXT ok(NOT (v_result ? 'edge_dispatch') AND v_result->>'request_id' = '-1',
