@@ -1,0 +1,49 @@
+name: DEV design sweep users
+
+'on':
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        type: choice
+        required: true
+        options: [dev]
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
+jobs:
+  provision:
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && github.ref == 'refs/heads/main' && github.repository == 'MasarX/masarx-platform'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: dev
+    concurrency:
+      group: deploy-dev-database
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Provision and encrypt sweep credentials
+        env:
+          DEPLOY_ENV: ${{ inputs.environment }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SWEEP_RECIPIENT_SHA256: '4D:68:AE:46:F3:73:91:F6:97:84:A6:4B:5A:CE:05:45:FC:7E:F8:18:7C:C5:6A:62:2E:C5:DC:4D:C7:64:65:FE'
+        run: node scripts/deploy/dev-sweep-users.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
+        with:
+          name: dev-sweep-credentials
+          path: ${{ runner.temp }}/dev-sweep-credentials.cms
+          if-no-files-found: error
+          retention-days: 1
