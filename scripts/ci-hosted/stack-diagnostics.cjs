@@ -6,13 +6,16 @@ const { sanitize, environmentSecrets, outputTail } = require('./diagnostics.cjs'
 const imagePrefix = image => String(image || '').replace(/(sha256:[a-f0-9]{12})[a-f0-9]+/g, '$1');
 const belongsToStack = (row, project) => String(row.Names || '').split(',').some(name => name.endsWith(`_${project}`))
   || String(row.Labels || '').split(',').includes(`com.supabase.cli.project=${project}`);
+const isHostedPgtap = env => Boolean(env.PGTAP_SHARD) && env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted';
 
 async function captureDatabaseLog({ project, env, logFile, execute = run }) {
   const secrets = environmentSecrets(env);
+  const container = `supabase_db_${project}`;
+  const fullLog = isHostedPgtap(env);
+  const options = { env, timeout: 10000, quiet: true, includeStderr: true, printQuietFailure: false };
   try {
-    const logs = await execute('docker', ['logs', '--tail', '20000', '--timestamps', `supabase_db_${project}`], {
-      env, timeout: 10000, quiet: true, includeStderr: true, printQuietFailure: false,
-    });
+    const tailLimit = fullLog ? [] : ['--tail', '20000'];
+    const logs = await execute('docker', ['logs', ...tailLimit, '--timestamps', container], options);
     fs.writeFileSync(logFile, sanitize(logs, secrets));
     if (env.GITHUB_OUTPUT) fs.appendFileSync(env.GITHUB_OUTPUT, 'postgres_log=true\n');
     const tail = outputTail(logs, secrets).trimEnd().replace(/\r/g, '');
@@ -20,6 +23,19 @@ async function captureDatabaseLog({ project, env, logFile, execute = run }) {
     if (tail) console.log(`Postgres server log tail:\n${tail.split('\n').map(line => `| ${line}`).join('\n')}`);
   } catch (error) {
     console.warn(`Could not capture Postgres server log: ${sanitize(error.message, secrets)}`);
+  }
+  if (fullLog) {
+    try {
+      // Record only timestamps and exit codes. Probe output may contain connection data.
+      const health = await execute('docker', ['inspect', '--format',
+        '{{with .State.Health}}{{range .Log}}{{.Start.UnixNano}} {{.End.UnixNano}} {{.ExitCode}}{{println}}{{end}}{{end}}',
+        container], options);
+      for (const row of health.trim().split('\n').filter(line => /^\d+ \d+ -?\d+$/.test(line))) {
+        console.log(`Postgres health probe (start ns, end ns, exit code) ${row}`);
+      }
+    } catch (error) {
+      console.warn(`Could not capture Postgres probe exit timing: ${sanitize(error.message, secrets)}`);
+    }
   }
 }
 
@@ -77,4 +93,4 @@ async function collectStackDiagnostics({ project, env, dockerRoot, imagePolicy =
   return report;
 }
 
-module.exports = { captureDatabaseLog, collectStackDiagnostics, imagePrefix, belongsToStack };
+module.exports = { captureDatabaseLog, collectStackDiagnostics, imagePrefix, belongsToStack, isHostedPgtap };
