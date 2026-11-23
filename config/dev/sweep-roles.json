@@ -1,0 +1,12 @@
+{
+  "finance_viewer": {
+    "scope": "tenant",
+    "required": ["console_metadata.read", "finance.read", "cod.read", "settlements.read"],
+    "optional": []
+  },
+  "sender_user": {
+    "scope": "sender",
+    "required": ["shipments.read", "senders.read"],
+    "optional": ["recipients.read", "addresses.read", "labels.read", "labels.download", "label_design.read", "console_metadata.read"]
+  }
+}

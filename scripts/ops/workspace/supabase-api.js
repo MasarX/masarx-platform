@@ -2556,6 +2556,7 @@ async function ensureProject(opts) {
 }
 
 module.exports = {
+  getSupabaseMgmtUrl,
   inspectOwnedPreviewWorkspace,
   createProject,
   createBranch,
