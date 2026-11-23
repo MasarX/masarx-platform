@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(17);
+SELECT plan(25);
 
 SELECT ok(EXISTS (
   SELECT 1 FROM cron.job j
@@ -45,6 +45,15 @@ INSERT INTO public.outbound_calls (id, call_type, target_type, target_id, method
 SELECT job, 'provider_api', 'provider', provider, 'POST', origin || '/fixture', 'pending_edge',
        jsonb_build_object('organization_id', org), run_step FROM wake_fixture;
 
+-- Readiness checks the legacy credential column. Use a generated marker in this rollback-only fixture.
+INSERT INTO public.provider_auth_configs (provider_id, auth_type, credentials)
+SELECT id, 'shared_secret', jsonb_build_object('shared_secret', gen_random_uuid()::text)
+FROM public.providers WHERE name = 'edge_api_caller' LIMIT 1;
+
+UPDATE public.outbound_calls SET scheduled_at = now() + interval '1 day'
+WHERE id <> (SELECT job FROM wake_fixture) AND status IN ('pending', 'pending_edge', 'failed')
+  AND (scheduled_at <= now() OR scheduled_at IS NULL);
+
 DO $$ BEGIN
   PERFORM public.upsert_settings_value_v1('edge_dispatch_policy', 'global', NULL,
     jsonb_build_object('endpoint_url', origin || '/functions/v1/api-caller', 'enabled', true), 1, 'wake fixture')
@@ -58,11 +67,15 @@ WHERE q.url = f.origin || '/functions/v1/outbound-wake' AND q.method = 'POST'
   AND q.headers - 'Content-Type' - 'content-type' = '{}'::jsonb AND convert_from(q.body, 'UTF8')::jsonb = '{}'::jsonb;
 SELECT is(count(*), 0::bigint, 'matching policy emits no blocked signal')
 FROM public.ops_alerts WHERE alert_type = 'outbound_wake_relay_blocked';
+SELECT ok(NOT EXISTS (
+  SELECT 1 FROM public.claim_pending_jobs(1) c WHERE c.job_id = f.job
+), 'explicitly enabled Edge dispatch keeps the due pending_edge job off the SQL claim')
+FROM wake_fixture f;
 
 UPDATE public.settings s SET cached_value = jsonb_set(s.cached_value, '{endpoint_url}', to_jsonb(f.origin || '/other'))
 FROM wake_fixture f WHERE s.category = 'edge_dispatch_policy' AND s.scope_type = 'global' AND s.scope_id IS NULL;
 UPDATE public.outbound_calls SET scheduled_at = now() + interval '1 day'
-WHERE status IN ('pending_edge', 'failed') AND (scheduled_at <= now() OR scheduled_at IS NULL);
+WHERE id = (SELECT job FROM wake_fixture);
 SELECT ok(NOT endpoint_matches AND NOT blocked_with_pending_work, 'future-scheduled work does not block the readout')
 FROM public.outbound_wake_relay_state_v1();
 
@@ -84,19 +97,7 @@ SELECT is(count(*), 1::bigint, 'blocked sweeps emit one fixed-code signal for th
 FROM public.ops_alerts WHERE alert_type = 'outbound_wake_relay_blocked'
   AND organization_id = public.marketplace_system_org_id_v1() AND message = alert_type AND details IS NULL;
 
--- Isolate the worker claim and stub only the network transport. The real callers follow their polling path.
-CREATE OR REPLACE FUNCTION public.claim_pending_jobs(p_batch_size integer)
-RETURNS TABLE(job_id uuid, call_type text, target_type text, target_id uuid, method text, url text,
-              headers jsonb, body jsonb, priority integer, retry_count integer, max_retries integer,
-              correlation_id uuid, shipment_id uuid, context jsonb)
-LANGUAGE sql SECURITY DEFINER SET search_path TO public, extensions, pg_temp AS $mock$
-  SELECT oc.id, oc.call_type, oc.target_type, oc.target_id, oc.method, oc.url,
-         oc.headers, oc.body, oc.priority, oc.retry_count, oc.max_retries,
-         oc.correlation_id, oc.shipment_id, oc.context
-  FROM public.outbound_calls oc JOIN pg_temp.wake_fixture f ON oc.id = f.job
-  WHERE oc.status = 'pending' AND oc.scheduled_at <= now();
-$mock$;
-
+-- Stub only the network transport so the real claim and worker can run without sending HTTP.
 CREATE OR REPLACE FUNCTION public.dispatch_api_request_v1(
   p_url text, p_method text DEFAULT 'POST', p_headers jsonb DEFAULT '{}'::jsonb,
   p_body jsonb DEFAULT '{}'::jsonb, p_timeout_seconds integer DEFAULT NULL
@@ -111,6 +112,13 @@ DECLARE
 BEGIN
   SELECT * INTO STRICT v_fixture FROM pg_temp.wake_fixture;
   RETURN NEXT is(public.resolve_edge_dispatch_enabled_v1(), false, p_case || ': resolver defaults to disabled');
+
+  UPDATE public.outbound_calls
+  SET status = 'pending_edge', scheduled_at = now(), lease_expires_at = NULL
+  WHERE id = v_fixture.job;
+  RETURN NEXT ok(EXISTS (
+    SELECT 1 FROM public.claim_pending_jobs(1) WHERE job_id = v_fixture.job
+  ), p_case || ': SQL claim leases the due pending_edge job');
 
   v_result := public.call_api(v_fixture.origin, p_timeout_seconds => 1);
   RETURN NEXT ok(NOT (v_result ? 'edge_dispatch') AND v_result->>'request_id' = '-1',
@@ -141,6 +149,10 @@ DO $$ BEGIN
   FROM wake_fixture;
 END $$;
 SELECT * FROM pg_temp.check_edge_dispatch_disabled('missing enabled key');
+
+UPDATE public.settings SET cached_value = cached_value || jsonb_build_object('enabled', 'maybe')
+WHERE category = 'edge_dispatch_policy' AND scope_type = 'global' AND scope_id IS NULL;
+SELECT * FROM pg_temp.check_edge_dispatch_disabled('malformed enabled value');
 
 SELECT * FROM finish();
 ROLLBACK;

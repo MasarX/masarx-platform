@@ -5,18 +5,28 @@ DECLARE
   v_signature regprocedure;
   v_definition text;
   v_default CONSTANT text := $old$->>'enabled', '')::BOOLEAN, TRUE)$old$;
+  v_fallback text;
 BEGIN
   FOREACH v_signature IN ARRAY ARRAY[
     'public.resolve_edge_dispatch_enabled_v1()'::regprocedure,
     'public.call_api(text,text,jsonb,jsonb,integer)'::regprocedure,
-    'public.call_api_wait(text,text,jsonb,jsonb,integer,integer)'::regprocedure
+    'public.call_api_wait(text,text,jsonb,jsonb,integer,integer)'::regprocedure,
+    'public.claim_pending_jobs(integer)'::regprocedure
   ] LOOP
     v_definition := pg_catalog.pg_get_functiondef(v_signature);
+    v_fallback := CASE v_signature
+      WHEN 'public.resolve_edge_dispatch_enabled_v1()'::regprocedure THEN 'v_enabled := TRUE;'
+      ELSE 'v_edge_enabled := TRUE;'
+    END;
     IF cardinality(string_to_array(v_definition, v_default)) IS DISTINCT FROM 2 THEN
       RAISE EXCEPTION 'Expected one implicit Edge dispatch default in %', v_signature;
     END IF;
+    IF cardinality(string_to_array(v_definition, v_fallback)) IS DISTINCT FROM 2 THEN
+      RAISE EXCEPTION 'Expected one invalid Edge dispatch fallback in %', v_signature;
+    END IF;
     -- The catalog definition uses CREATE OR REPLACE, preserving owner and ACL.
-    EXECUTE replace(v_definition, v_default, replace(v_default, 'TRUE', 'FALSE'));
+    v_definition := replace(v_definition, v_default, replace(v_default, 'TRUE', 'FALSE'));
+    EXECUTE replace(v_definition, v_fallback, replace(v_fallback, 'TRUE', 'FALSE'));
   END LOOP;
 END;
 $edge_default$;
