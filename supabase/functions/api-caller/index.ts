@@ -90,9 +90,16 @@ if (RAW_EDGE_DB_JWT && !EDGE_DB_JWT) {
   console.warn("[api-caller] ignoring invalid API_CALLER_DB_JWT shape; expected JWT with 3 segments");
 }
 const EDGE_REQUIRE_DB_JWT = readEnv("EDGE_REQUIRE_DB_JWT", []) === "1";
-const GUARDED_EGRESS_PROXY_URL = readEnv("API_CALLER_GUARDED_EGRESS_PROXY_URL", []);
-const GUARDED_EGRESS_PROXY_USERNAME = readEnv("API_CALLER_GUARDED_EGRESS_PROXY_USERNAME", []);
-const GUARDED_EGRESS_PROXY_PASSWORD = readEnv("API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD", []);
+const GUARDED_EGRESS_PROXY_ENV = {
+  url: "API_CALLER_GUARDED_EGRESS_PROXY_URL",
+  username: "API_CALLER_GUARDED_EGRESS_PROXY_USERNAME",
+  password: "API_CALLER_GUARDED_EGRESS_PROXY_PASSWORD",
+};
+const GUARDED_EGRESS_PROXY_URL = readEnv(GUARDED_EGRESS_PROXY_ENV.url, []);
+const GUARDED_EGRESS_PROXY_USERNAME = readEnv(GUARDED_EGRESS_PROXY_ENV.username, []);
+const GUARDED_EGRESS_PROXY_PASSWORD = readEnv(GUARDED_EGRESS_PROXY_ENV.password, []);
+const ALLOW_DEV_DIRECT_EGRESS = Deno.env?.get("EDGE_ENVIRONMENT") === "dev" &&
+  Object.values(GUARDED_EGRESS_PROXY_ENV).every((key) => Deno.env.get(key) === undefined);
 let supabase = null as ReturnType<typeof createClient> | null;
 if (SUPABASE_URL && SUPABASE_ANON_KEY && EDGE_DB_JWT) {
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -319,6 +326,7 @@ const runFetch = async (
     policy: egressPolicy,
     httpAllowedHost: payload.http_allowed_host,
     resolveDns: resolveDnsForEgress,
+    allowDevDirectEgress: ALLOW_DEV_DIRECT_EGRESS,
     guardedFetch: GUARDED_EGRESS_PROXY_URL || GUARDED_EGRESS_PROXY_USERNAME || GUARDED_EGRESS_PROXY_PASSWORD
       ? guardedProxyFetch
       : undefined,

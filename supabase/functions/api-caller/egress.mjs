@@ -175,7 +175,7 @@ const assertDomainPolicy = (url, policy) => {
   }
 };
 
-const resolvePublicAddresses = async (hostname, resolveDns, signal) => {
+const resolvePublicAddresses = async (hostname, resolveDns, signal, allowMissingRecord = false) => {
   const host = normaliseHostname(hostname);
   if (isIpLiteral(host)) {
     if (!isPublicIpAddress(host)) {
@@ -191,7 +191,9 @@ const resolvePublicAddresses = async (hostname, resolveDns, signal) => {
     let values;
     try {
       values = await resolveDns(host, recordType, { signal });
-    } catch (_error) {
+    } catch (error) {
+      // Deno reports a missing A or AAAA record as NotFound. An address is still required below.
+      if (allowMissingRecord && error?.name === "NotFound") return [];
       throw new EgressPolicyError(
         `Egress policy violation: ${recordType} DNS lookup failed (${host})`,
       );
@@ -299,6 +301,7 @@ export const executeBoundedEgress = async ({
   resolveDns,
   directFetch = fetch,
   guardedFetch,
+  allowDevDirectEgress = false,
   now = () => performance.now(),
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -314,6 +317,8 @@ export const executeBoundedEgress = async ({
   let currentHeaders = new Headers(headers || {});
   const maxRedirects = Math.max(Math.min(Number(policy.maxRedirects) || 0, 10), 0);
   const maxResponseBytes = Math.max(Number(policy.maxResponseBytes) || 1_048_576, 1);
+  const proxyRequired = policy.transportMode === "guarded_proxy";
+  const bypassProxy = proxyRequired && typeof guardedFetch !== "function" && allowDevDirectEgress;
 
   try {
     for (let redirectCount = 0; ; redirectCount += 1) {
@@ -333,13 +338,13 @@ export const executeBoundedEgress = async ({
         // Direct transport is safe only for public IP literals because native Deno fetch does
         // not expose a hostname-to-peer pinning hook. Hostnames require the guarded boundary.
         await resolvePublicAddresses(currentUrl.hostname, resolveDns, controller.signal);
-      } else if (policy.transportMode === "guarded_proxy") {
-        if (typeof guardedFetch !== "function") {
+      } else if (proxyRequired) {
+        if (!bypassProxy && typeof guardedFetch !== "function") {
           throw new EgressPolicyError("Egress policy violation: guarded proxy transport is unavailable");
         }
         // This lookup is an additional fail-closed check. The guarded transport remains the
         // authoritative boundary that must validate and pin the address it actually connects to.
-        await resolvePublicAddresses(currentUrl.hostname, resolveDns, controller.signal);
+        await resolvePublicAddresses(currentUrl.hostname, resolveDns, controller.signal, bypassProxy);
       } else {
         throw new EgressPolicyError("Egress policy violation: unsupported transport mode");
       }
@@ -350,7 +355,12 @@ export const executeBoundedEgress = async ({
       }
       visited.add(visitKey);
 
-      const fetchImpl = policy.transportMode === "guarded_proxy" ? guardedFetch : directFetch;
+      const fetchImpl = proxyRequired && !bypassProxy ? guardedFetch : directFetch;
+      if (bypassProxy) {
+        controller.signal.throwIfAborted();
+        // shortcut: fetch resolves again after validation, use a peer-pinning client when Edge supports one.
+        console.warn("egress_proxy_bypassed_dev");
+      }
       const response = await fetchImpl(currentUrl.href, {
         method: currentMethod,
         headers: headersToRecord(currentHeaders),
@@ -360,7 +370,7 @@ export const executeBoundedEgress = async ({
       });
 
       const location = response.headers.get("location");
-      if (!policy.followRedirects || !location || !REDIRECT_STATUSES.has(response.status)) {
+      if (bypassProxy || !policy.followRedirects || !location || !REDIRECT_STATUSES.has(response.status)) {
         const responseBody = await readBoundedBody(response, maxResponseBytes, controller.signal);
         return {
           status: response.status,

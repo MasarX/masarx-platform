@@ -764,6 +764,9 @@ jobs:
             exit 1
           fi
           node scripts/deploy/append-function-cors.mjs
+          if [[ "$DEPLOY_ENV" == dev ]]; then
+            printf 'EDGE_ENVIRONMENT=%s\n' "$DEPLOY_ENV" >> "$secret_file"
+          fi
           cli="$RUNNER_TEMP/deploy-tools/supabase"
           "$cli" link --project-ref "$SUPABASE_PROJECT_REF" --yes
           printf 'attempted=true\n' >> "$GITHUB_OUTPUT"
@@ -805,7 +808,9 @@ jobs:
               const { createHash } = require("node:crypto");
               const listed = JSON.parse(readFileSync(0, "utf8"));
               const local = readFileSync(process.env.EDGE_SECRET_FILE, "utf8");
-              for (const name of ["LABEL_RENDERER_SIGNING_KEY", "LABEL_RENDERER_GATEWAY_JWT"]) {
+              const names = ["LABEL_RENDERER_SIGNING_KEY", "LABEL_RENDERER_GATEWAY_JWT"];
+              if (process.env.DEPLOY_ENV === "dev") names.push("EDGE_ENVIRONMENT");
+              for (const name of names) {
                 const value = local.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1];
                 if (!value || listed.find(entry => entry.name === name)?.value !== createHash("sha256").update(value).digest("hex")) {
                   process.exit(1);
