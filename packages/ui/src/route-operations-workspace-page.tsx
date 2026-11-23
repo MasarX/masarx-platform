@@ -23,6 +23,8 @@ import { Section } from "./section";
 import { createUiTranslator } from "./i18n";
 import type { NavigationItem, NavigationSection } from "./navigation";
 import { normalizeAppHref } from "./navigation-paths";
+import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
+import { isUuidValue } from "./resource-utils";
 import { buildTestId } from "./test-ids";
 import { buildHref } from "./url";
 import { formatUiError } from "./utils";
@@ -340,8 +342,10 @@ function resolveScopeLabel(me: UiMe | null, t: ReturnType<typeof createUiTransla
   const scope = me?.access_scope;
   const scopeType = normalizeUiScopeType(scope?.scope_type ?? null);
   if (!scopeType) return t("unknown");
-  const scopeLabelRaw = scope?.scope_label ?? scope?.scope_id ?? "";
-  const scopeLabel = typeof scopeLabelRaw === "string" ? scopeLabelRaw.trim() : "";
+  const label = typeof scope?.scope_label === "string" ? scope.scope_label.trim() : "";
+  const id = typeof scope?.scope_id === "string" ? scope.scope_id.trim() : "";
+  const fallback = scopeType !== "global" && isUuidValue(id) ? buildLookupFriendlyLabel(scopeType, id) : id;
+  const scopeLabel = label || fallback;
   if (scopeType === "global" && !scopeLabel) return scopeType;
   return t("scopeLabel", { scopeType, scopeLabel: scopeLabel || t("unknown") });
 }
