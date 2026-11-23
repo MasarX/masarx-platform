@@ -12,6 +12,8 @@ SELECT ok(EXISTS (SELECT 1 FROM public.settings WHERE category = 'label_provider
 
 CREATE TEMP TABLE label_vault_fixture AS SELECT gen_random_uuid() org, gen_random_uuid() foreign_org,
   gen_random_uuid() actor, public.get_root_scope_type_key_v1() root_scope;
+\ir helpers/diag-232-renderer.sql
+
 GRANT SELECT ON label_vault_fixture TO authenticated, service_role;
 CREATE TEMP TABLE label_requests(kind TEXT, version UUID, event UUID);
 GRANT INSERT, SELECT ON label_requests TO authenticated;
@@ -45,11 +47,13 @@ SET LOCAL ROLE service_role;
 SELECT lives_ok($q$SELECT public.upsert_label_provider_settings_v1('global',NULL,
   '{"version":1,"providers":[{"name":"synthetic","invoke_url":"https://renderer.example.test/functions/v1/label-renderer","invoke_secret":"synthetic-label-global-credential","timeout_ms":15000}]}', 'Synthetic global renderer')$q$,
   'real service writer stores the global renderer credential');
-SELECT is(public.resolve_label_renderer_invoke_config_v1(org)->>'invoke_secret', 'synthetic-label-global-credential',
+SELECT ok((pg_temp.d232_return('vault.resolve_inherited_invoke_config',
+  public.resolve_label_renderer_invoke_config_v1(org))->>'invoke_secret' = 'synthetic-label-global-credential') IS TRUE,
   'service resolves the global Vault credential for tenant fallback') FROM label_vault_fixture;
 RESET ROLE;
 CREATE TEMP TABLE label_vault_edge_receipt AS
-SELECT org, public.invoke_label_renderer(1,jsonb_build_object('organization_id',org)) AS receipt
+SELECT org, pg_temp.d232_probe('vault.invoke_tenant', org,
+  $$public.invoke_label_renderer(1, jsonb_build_object('organization_id', $1))$$) AS receipt
 FROM label_vault_fixture;
 SELECT ok(r.receipt @> '{"status":202,"completed":false}'::jsonb AND oc.status='pending_edge'
    AND oc.url=c.config->>'url' AND oc.renderer_credential_ref=(c.config->>'renderer_credential_ref')::uuid
@@ -57,8 +61,8 @@ SELECT ok(r.receipt @> '{"status":202,"completed":false}'::jsonb AND oc.status='
    AND NOT EXISTS(SELECT FROM net.http_request_queue WHERE id=(r.receipt->>'request_id')::bigint),
    'enqueue binds the endpoint and Vault reference with a credential-free receipt')
 FROM label_vault_edge_receipt r CROSS JOIN LATERAL
-  (SELECT public.resolve_label_renderer_edge_config_v1(r.org) AS config) c
-LEFT JOIN public.outbound_calls oc ON oc.id=(r.receipt->>'edge_job_id')::uuid
+  (SELECT pg_temp.d232_config('vault.readback', r.org) AS config) c
+LEFT JOIN LATERAL pg_temp.d232_job('vault.tenant', r.receipt) oc ON true
 LEFT JOIN vault.secrets v ON v.id=oc.renderer_credential_ref;
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.settings_versions WHERE category = 'label_provider'
   AND position('synthetic-label-global-credential' IN value::text) > 0), 'global credential never enters any settings version');
@@ -151,7 +155,8 @@ SELECT throws_ok(format('SELECT public.resolve_label_renderer_invoke_config_v1(%
 CREATE TEMP TABLE label_vault_rejected AS
 SELECT (SELECT count(*) FROM public.outbound_calls) AS edge_count,
   (SELECT count(*) FROM net.http_request_queue) AS transport_count;
-SELECT is(public.invoke_label_renderer(1,jsonb_build_object('organization_id',foreign_org)) #>> '{body,reason}',
+SELECT is(pg_temp.d232_probe('vault.invoke_rejected_pin', foreign_org,
+  $$public.invoke_label_renderer(1, jsonb_build_object('organization_id', $1))$$) #>> '{body,reason}',
   'pin_mismatch', 'the new enqueue refuses to redirect the old reference after rotation') FROM label_vault_fixture;
 SELECT ok(edge_count=(SELECT count(*) FROM public.outbound_calls)
   AND transport_count=(SELECT count(*) FROM net.http_request_queue),
@@ -159,13 +164,14 @@ SELECT ok(edge_count=(SELECT count(*) FROM public.outbound_calls)
 SELECT ok(l.lease_token IS NOT NULL AND public.get_claimed_edge_job_call_spec_v1(l.job_id,l.lease_token) IS NULL,
   'a queued reference obtained before rotation no longer resolves under its lease')
 FROM label_vault_edge_receipt r
-LEFT JOIN LATERAL public.claim_edge_job_by_id_v1((r.receipt->>'edge_job_id')::uuid) l ON true;
+LEFT JOIN LATERAL pg_temp.d232_claim('vault.tenant', r.receipt) l ON true;
 UPDATE public.settings SET cached_value = jsonb_set(cached_value,'{providers,0,invoke_secret}',
   '"synthetic-label-cache-only-credential"'::jsonb)
 WHERE category = 'label_provider' AND scope_type = 'tenant' AND scope_id = (SELECT org FROM label_vault_fixture);
 UPDATE public.settings_versions SET value = value WHERE category = 'label_provider';
 UPDATE public.settings SET cached_value = cached_value WHERE category = 'label_provider';
-SELECT is(public.resolve_label_renderer_invoke_config_v1(org)->>'invoke_secret','synthetic-label-cache-only-credential',
+SELECT ok((pg_temp.d232_return('vault.resolve_cache_only_invoke_config',
+  public.resolve_label_renderer_invoke_config_v1(org))->>'invoke_secret' = 'synthetic-label-cache-only-credential') IS TRUE,
   'conversion preserves an active cache credential that differs from its historical version') FROM label_vault_fixture;
 SELECT ok(NOT jsonb_path_exists(cached_value,'$.**.invoke_secret'), 'cache-only credential is sealed rather than overwritten')
 FROM public.settings WHERE category = 'label_provider' AND scope_type = 'tenant' AND scope_id = (SELECT org FROM label_vault_fixture);

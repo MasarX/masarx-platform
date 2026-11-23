@@ -9,13 +9,16 @@ SELECT gen_random_uuid() AS org, encode(gen_random_bytes(20), 'hex') AS credenti
        concat('https', '://', 'example', '.', 'test', '/functions/v1/label-renderer') AS placeholder,
        (SELECT count(*) FROM net.http_request_queue) AS initial_net_rows;
 
+\ir helpers/diag-232-renderer.sql
+
 SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
 SELECT set_config('request.jwt.claim.role', 'service_role', true);
 SELECT public.upsert_label_provider_settings_v1('global', NULL, jsonb_build_object('version', 1, 'providers',
   jsonb_build_array(jsonb_build_object('name', 'renderer-fixture', 'invoke_url', placeholder,
     'invoke_secret', credential))), 'Renderer transport fixture') FROM renderer_transport_case;
 
-SELECT is(public.invoke_label_renderer(1, NULL) #>> '{body,reason}', 'placeholder_url',
+SELECT is(pg_temp.d232_probe('transport.invoke_placeholder', NULL,
+  'public.invoke_label_renderer(1, NULL)') #>> '{body,reason}', 'placeholder_url',
   'placeholder returns a stable unavailable state');
 SELECT ok(NOT EXISTS (SELECT FROM public.outbound_calls WHERE renderer_request_id IS NOT NULL),
   'placeholder leaves the renderer queue empty');
@@ -33,19 +36,22 @@ WHERE category = 'workflow_defaults';
 UPDATE public.outbound_calls SET scheduled_at = now() + interval '100 years'
 WHERE status IN ('pending', 'pending_edge', 'failed') AND scheduled_at <= now();
 CREATE TEMP TABLE renderer_receipts AS
-SELECT 'jobs' AS mode, public.invoke_label_renderer(1) AS receipt
+SELECT 'jobs' AS mode, pg_temp.d232_probe('transport.invoke_jobs', NULL,
+  'public.invoke_label_renderer(1)') AS receipt
 UNION ALL
-SELECT 'payload' AS mode, public.invoke_label_renderer(1, '{}'::jsonb) AS receipt
+SELECT 'payload', pg_temp.d232_probe('transport.invoke_payload', NULL,
+  $$public.invoke_label_renderer(1, '{}'::jsonb)$$)
 UNION ALL
-SELECT 'print', public.invoke_label_renderer_print_sync_v1(gen_random_uuid(), gen_random_uuid(),
-  jsonb_build_object('organization_id', org)) FROM renderer_transport_case;
+SELECT 'print', pg_temp.d232_probe('transport.print_sync', org,
+  $$public.invoke_label_renderer_print_sync_v1(gen_random_uuid(), gen_random_uuid(),
+    jsonb_build_object('organization_id', $1))$$) FROM renderer_transport_case;
 
 SELECT ok(receipt @> '{"status":202,"completed":false}'::jsonb AND receipt ? 'edge_job_id',
   mode || ' returns an async Edge receipt') FROM renderer_receipts;
 SELECT ok(o.renderer_credential_ref IS NOT NULL AND o.headers = '{}'::jsonb
         AND position(f.credential IN to_jsonb(o)::text) = 0,
           r.mode || ' retains only the bound credential reference')
-FROM renderer_receipts r LEFT JOIN public.outbound_calls o ON o.id = (r.receipt->>'edge_job_id')::uuid
+FROM renderer_receipts r LEFT JOIN LATERAL pg_temp.d232_job('transport.' || r.mode, r.receipt) o ON true
 CROSS JOIN renderer_transport_case f;
 
 UPDATE public.settings SET cached_value = jsonb_set(cached_value, '{enabled}', 'false'::jsonb)
@@ -57,7 +63,9 @@ SELECT is((SELECT count(*) FROM public.claim_pending_edge_jobs(10)), 0::bigint,
 
 CREATE TEMP TABLE renderer_leases AS
 SELECT r.mode, (r.receipt->>'request_id')::bigint AS request_id, claim.*
-FROM renderer_receipts r CROSS JOIN LATERAL public.claim_edge_job_by_id_v1((r.receipt->>'edge_job_id')::uuid) claim;
+FROM renderer_receipts r CROSS JOIN LATERAL pg_temp.d232_claim('transport.' || r.mode, r.receipt) claim;
+SELECT is((SELECT count(*) FROM renderer_leases), (SELECT count(*) FROM renderer_receipts),
+  'each renderer receipt acquires its Edge lease');
 SELECT throws_ok(format('SELECT public.get_claimed_edge_job_call_spec_v1(%L::uuid, %L::uuid)', job_id, gen_random_uuid()),
   'P0001', format('get_claimed_edge_job_call_spec_v1: active lease for job %s not found', job_id),
   mode || ' wrong lease cannot obtain a spec') FROM renderer_leases;
@@ -75,10 +83,13 @@ SELECT is(public.check_async_response(request_id)->'body', '{"ok":true}'::jsonb,
   mode || ' readback returns the settled Edge response') FROM renderer_leases;
 
 CREATE TEMP TABLE renderer_rejected_receipts AS
-SELECT code, public.invoke_label_renderer(1) AS receipt FROM (VALUES (401), (403)) statuses(code);
+SELECT code, pg_temp.d232_probe('transport.invoke_rejected_' || code, NULL,
+  'public.invoke_label_renderer(1)') AS receipt FROM (VALUES (401), (403)) statuses(code);
 CREATE TEMP TABLE renderer_rejected_leases AS
 SELECT r.code, claim.* FROM renderer_rejected_receipts r
-CROSS JOIN LATERAL public.claim_edge_job_by_id_v1((r.receipt->>'edge_job_id')::uuid) claim;
+CROSS JOIN LATERAL pg_temp.d232_claim('transport.rejected_' || r.code, r.receipt) claim;
+SELECT is((SELECT count(*) FROM renderer_rejected_leases), (SELECT count(*) FROM renderer_rejected_receipts),
+  'each rejection fixture acquires its Edge lease');
 SELECT public.mark_claimed_edge_job_failure_v1(job_id, lease_token, code, '{}', '{}', 'renderer_gateway_rejected', 1)
 FROM renderer_rejected_leases;
 SELECT ok(o.status = 'permanently_failed' AND o.error_message = 'renderer_gateway_rejected'
@@ -103,18 +114,28 @@ SELECT is((SELECT count(*) FROM net.http_request_queue), initial_net_rows,
 
 UPDATE public.label_jobs SET scheduled_at = now() + interval '100 years'
 WHERE status = 'pending' AND scheduled_at <= now();
-SELECT is(public.ops_sweeper_label_renderer_cron_guard('{}')->>'status', 'enabled',
+SELECT is(pg_temp.d232_probe('transport.cron_guard', NULL,
+  $$public.ops_sweeper_label_renderer_cron_guard('{}')$$)->>'status', 'enabled',
   'the renderer is configured and the cron guard enables its tick');
 CREATE TEMP TABLE renderer_idle_counts AS SELECT
   (SELECT count(*) FROM public.workflow_runs) AS runs,
   (SELECT count(*) FROM public.workflow_run_steps) AS steps,
-  (SELECT count(*) FROM public.outbound_calls) AS calls;
+  (SELECT count(*) FROM public.outbound_calls) AS calls,
+  false AS tick_completed;
 DO $tick$
+DECLARE
+  receipt jsonb;
+  error_context text;
 BEGIN
-  EXECUTE (SELECT command FROM cron.job WHERE jobname = 'label_renderer_dispatch');
+  EXECUTE (SELECT command FROM cron.job WHERE jobname = 'label_renderer_dispatch') INTO receipt;
+  PERFORM pg_temp.d232_return('transport.cron_tick', receipt);
+  UPDATE renderer_idle_counts SET tick_completed = true;
+EXCEPTION WHEN OTHERS THEN
+  GET STACKED DIAGNOSTICS error_context = PG_EXCEPTION_CONTEXT;
+  PERFORM pg_temp.d232_error('transport.cron_tick', SQLSTATE, error_context);
 END;
 $tick$;
-SELECT ok(runs = (SELECT count(*) FROM public.workflow_runs)
+SELECT ok(tick_completed AND runs = (SELECT count(*) FROM public.workflow_runs)
   AND steps = (SELECT count(*) FROM public.workflow_run_steps)
   AND calls = (SELECT count(*) FROM public.outbound_calls),
   'an idle configured cron tick writes no workflow run, step, or outbound job') FROM renderer_idle_counts;
