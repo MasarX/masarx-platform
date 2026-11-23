@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.111.0";
 import { authorizeApiCallerOperation, authorizeEdgeRequest } from "./auth.mjs";
 import { executeBoundedEgress } from "./egress.mjs";
 import { createGuardedProxyFetch } from "./proxy.mjs";
+import { authorizeRendererSend } from "./renderer-auth.mjs";
 import {
   buildCompactBatchResponse,
   compactBatchJobResult,
@@ -17,6 +18,7 @@ type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface CallRequest {
   url?: string;
+  renderer_credential_ref?: string;
   http_allowed_host?: string;
   method?: HttpMethod;
   headers?: Record<string, string>;
@@ -77,6 +79,8 @@ const denoNetwork = Deno as unknown as DenoNetworkRuntime;
 const textEncoder = new TextEncoder();
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
+const RENDERER_ENDPOINT = readEnv("LABEL_RENDERER_INVOKE_URL") ||
+  `${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/label-renderer`;
 const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
 const RAW_EDGE_DB_JWT = readEnv("API_CALLER_DB_JWT", []);
 const EDGE_DB_JWT = RAW_EDGE_DB_JWT && RAW_EDGE_DB_JWT.split(".").length === 3
@@ -422,11 +426,32 @@ const executeClaimedJob = async (
 
   let callResult: CallResponse;
   let dispatchError: string | undefined;
+  const isRenderer = typeof dispatch.renderer_credential_ref === "string";
 
   try {
-    const egressEnvelope = await resolveJobEgressPolicy(client, jobId);
+    const egressEnvelope = isRenderer
+      ? {
+        enforce: true,
+        policy: {
+          transport_mode: "guarded_proxy",
+          enforce_https_only: true,
+          block_private_networks: true,
+          domain_allowlist: [new URL(RENDERER_ENDPOINT).hostname],
+          allowed_methods: ["POST"],
+          header_allowlist: ["authorization", "content-type"],
+          follow_redirects: false,
+        },
+      }
+      : await resolveJobEgressPolicy(client, jobId);
     await renewClaimedLease(client, jobId, leaseToken);
-    callResult = await runFetch(mergedDispatch, egressEnvelope);
+    const sendDispatch = isRenderer
+      ? await authorizeRendererSend(
+        mergedDispatch,
+        RENDERER_ENDPOINT,
+        readEnv("SUPABASE_JWT_SECRET"),
+      )
+      : mergedDispatch;
+    callResult = await runFetch(sendDispatch, egressEnvelope);
   } catch (err) {
     dispatchError = err instanceof Error ? err.message : "Unknown error";
     callResult = {
@@ -475,7 +500,7 @@ const executeClaimedJob = async (
     }
   }
 
-  await logApiCall(client, jobId, mergedDispatch, callResult, dispatchError);
+  if (!isRenderer) await logApiCall(client, jobId, mergedDispatch, callResult, dispatchError);
 
   return { job_id: jobId, result: callResult, success: isSuccess };
 };
