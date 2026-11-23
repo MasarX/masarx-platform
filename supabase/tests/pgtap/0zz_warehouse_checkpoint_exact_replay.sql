@@ -110,9 +110,9 @@ BEGIN
   RETURN NEXT throws_like(format(v_call, 'warehouse_transfers.scan_departure', v_transfer,
     jsonb_set(v_departure_params, '{metadata,station}', '"inbound"')),
     '%departure only supports draft warehouse_transfers%', 'changed departure metadata cannot replay');
-  RETURN NEXT throws_like(format(v_call, 'warehouse_transfers.scan_arrival', v_transfer,
+  RETURN NEXT throws_ok(format(v_call, 'warehouse_transfers.scan_arrival', v_transfer,
     v_arrival_params || jsonb_build_object('idempotency_key', v_departure_key)),
-    '%idempotency key belongs to another scan%', 'arrival cannot consume the departure key');
+    '23514', 'Warehouse checkpoint idempotency key belongs to another scan', 'arrival cannot consume the departure key');
 
   EXECUTE format(v_call, 'warehouse_transfers.scan_arrival', v_transfer, v_arrival_params) INTO v_arrival;
   RETURN NEXT ok(v_arrival @> '{"scan_created":true,"transfer_status":"received"}',

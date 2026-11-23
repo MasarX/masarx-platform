@@ -44,7 +44,7 @@ DECLARE
     END;
 
     SELECT t.id AS task_id, te.id AS task_event_id, se.id AS scan_event_id,
-           t.workflow_run_id, wr.workflow_status
+           wr.id AS workflow_run_id, wr.workflow_status
       INTO v_replay
       FROM public.tasks t
       JOIN public.task_types tt ON tt.id = t.task_type_id
@@ -56,7 +56,8 @@ DECLARE
        AND se.id::text = te.payload->>'scan_event_id'
        AND se.organization_id = t.organization_id
        AND se.warehouse_transfer_id = t.resource_id
-      JOIN public.workflow_runs wr ON wr.id = t.workflow_run_id
+      -- The enqueue handler records the transfer workflow as the task's parent.
+      JOIN public.workflow_runs wr ON wr.id::text = t.metadata->>'parent_workflow_run_id'
       JOIN public.workflow_templates wt ON wt.id = wr.workflow_template_id
      WHERE t.organization_id = v_transfer.organization_id
        AND t.resource_type = 'warehouse_transfer'
@@ -118,7 +119,7 @@ DECLARE
   END checkpoint_replay;
 
 $$;
-  v_key_conflict text := $$  IF NOT v_scan_created AND NULLIF(btrim(v_params->>'idempotency_key'), '') IS NOT NULL THEN
+  v_key_conflict text := $$  IF NOT v_scan_created THEN
     RAISE EXCEPTION 'Warehouse checkpoint idempotency key belongs to another scan' USING ERRCODE = '23514';
   END IF;
 
