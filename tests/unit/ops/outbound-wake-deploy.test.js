@@ -83,7 +83,9 @@ test.each([
   ['read-back endpoint differs', 'f', 'true', 'f|t', 'true', false, true],
   ['read-back enabled is absent', 'f', 'absent', 't|f', 'false', true, false],
   ['refuses malformed explicit enabled', 'f', 'invalid', '', null, false, false],
-])('deploy sync handles %s', (_name, before, enabled, after, writtenValue, matches, explicit) => {
+  ['write SQLSTATE', 'f', 'absent', '', null, false, false, 'sqlstate-40001'],
+  ['client failure without SQLSTATE', 'f', 'absent', '', null, false, false, 'psql-exit-2'],
+])('deploy sync handles %s', (_name, before, enabled, after, writtenValue, matches, explicit, psqlError = '') => {
   expect(deploy.indexOf(deployCommand)).toBeGreaterThan(deploy.indexOf('"$cli" db push --linked'));
   expect(deploy.indexOf(deployCommand)).toBeLessThan(deploy.indexOf('"$cli" functions deploy'));
   const ref = randomUUID().replace(/-/g, '').slice(0, 20).replace(/[0-9]/g, 'x');
@@ -100,13 +102,27 @@ test.each([
     sha256sum() { cat >/dev/null; }
     timeout() { shift; "$@"; }
     psql() {
-      local sql
+      local sql query
       sql=$(cat)
       [[ "$OUTBOUND_WAKE_ENDPOINT" == "$EXPECTED_ENDPOINT" && "$PGHOST" == "$POOLER_HOST" ]] || return 1
+      # psql sends a semicolon-terminated query before the next \\bind can bind $1.
+      query=\${sql%$'\\n\\\\bind :endpoint\\n\\\\g\\nCOMMIT;'}
+      if [[ "$query" == "$sql" || "$query" == *';' ]]; then
+        printf 'ERROR:  42P02\\n' >&2
+        return 3
+      fi
       if [[ "$sql" == *public.upsert_settings_value_v1* ]]; then
         [[ "$sql" == *"IS DISTINCT FROM \\$1::text OR NOT (value ? 'enabled')"* &&
            "$sql" == *"NOT (value ? 'enabled') OR jsonb_typeof(value->'enabled') = 'boolean'"* &&
            "$sql" == *"jsonb_build_object('enabled', false) || changed.value || jsonb_build_object('endpoint_url',"* ]] || return 1
+        if [[ -n "$PSQL_ERROR" ]]; then
+          printf 'ERROR:  XX000 endpoint=%s password=%s\\n' "$OUTBOUND_WAKE_ENDPOINT" "$PGPASSWORD" >&2
+          if [[ "$PSQL_ERROR" == sqlstate-* && " $* " == *' -v VERBOSITY=sqlstate '* ]]; then
+            printf 'ERROR:  %s\\n' "\${PSQL_ERROR#sqlstate-}" >&2
+            return 3
+          fi
+          return 2
+        fi
         case "$BEFORE_ENABLED" in
           absent) printf 'false\n' > "$written" ;;
           true|false) printf '%s\n' "$BEFORE_ENABLED" > "$written" ;;
@@ -138,10 +154,15 @@ test.each([
     BEFORE: before,
     BEFORE_ENABLED: enabled,
     AFTER: after,
+    PSQL_ERROR: psqlError,
   });
   const output = ['read'];
   if (writtenValue !== null) output.push(`write:${writtenValue}`, 'read');
   if (enabled === 'invalid') output.push('read');
   output.push(`endpoint_matches_expected=${matches}`, `enabled_explicit=${explicit}`);
-  expect(result).toEqual({ status: matches && explicit ? 0 : 1, stdout: `${output.join('\n')}\n`, stderr: '' });
+  expect(result).toEqual({
+    status: matches && explicit ? 0 : 1,
+    stdout: `${output.join('\n')}\n`,
+    stderr: psqlError ? `outbound_wake_sync=FAILED reason=${psqlError}\n` : '',
+  });
 });
