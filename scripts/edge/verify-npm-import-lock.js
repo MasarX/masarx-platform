@@ -5,8 +5,10 @@ const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
 const { spawnSync } = require('child_process');
+const { fileURLToPath, pathToFileURL } = require('url');
 const ts = require('typescript');
 const { parse: parseToml } = require('smol-toml');
+const { DIRECTORY, FILES, readArtifact } = require('./prepare-resource-import-exceljs');
 
 const OFFLINE_EDGE_CACHE_SOURCE_FILES = [
   'label-renderer/index.ts',
@@ -17,7 +19,8 @@ const OFFLINE_EDGE_CACHE_SOURCE_FILES = [
 ];
 const EDGE_SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
 const EDGE_DENO_CONFIGS = new Set(['deno.json', 'deno.jsonc']);
-const EXCELJS_VENDOR_DIRECTORY = 'resource-import-studio/_vendor';
+const EXCELJS_FUNCTION_ENTRY = 'resource-import-studio/index.ts';
+const EXCELJS_VENDOR_FILES = new Set(FILES.map((file) => path.posix.relative('supabase/functions', path.posix.join(DIRECTORY, file))));
 const EDGE_CACHE_RECEIPT_SCHEMA = 'masarx.edge-runtime-cache-materialization.v1';
 const EDGE_RUNTIME_IMAGE_PATTERN = /^public\.ecr\.aws\/supabase\/edge-runtime:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/;
 const DOCKER_PROXY_FIELDS = [
@@ -57,56 +60,115 @@ function compareBytewise(left, right) {
   return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
 }
 
+function rejectEdgeLink(file) {
+  throw new Error(`${file || '.'}: symlinks and reparse points are forbidden in supabase/functions`);
+}
+
+function verifyWindowsReparsePoints(functionsRoot) {
+  if (process.platform !== 'win32') return;
+  // Node recognizes symlinks and junctions. Windows also exposes other reparse tags.
+  const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const check = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', `
+    $ErrorActionPreference = 'Stop'
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    function Check-EdgePath([string] $entryPath) {
+      $attributes = [IO.File]::GetAttributes($entryPath)
+      if ($attributes -band [IO.FileAttributes]::ReparsePoint) {
+        [Console]::WriteLine($entryPath)
+        exit 2
+      }
+      if ($attributes -band [IO.FileAttributes]::Directory) {
+        foreach ($child in [IO.Directory]::EnumerateFileSystemEntries($entryPath)) { Check-EdgePath $child }
+      }
+    }
+    Check-EdgePath $env:MASARX_EDGE_FUNCTIONS_ROOT
+  `], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 30_000,
+    env: { ...process.env, MASARX_EDGE_FUNCTIONS_ROOT: path.resolve(functionsRoot) },
+  });
+  if (check.status === 2) rejectEdgeLink(path.relative(functionsRoot, check.stdout.trimEnd()).split(path.sep).join('/'));
+  if (check.status !== 0) throw new Error('supabase/functions: could not verify Windows reparse points');
+}
+
 function discoverEdgeFiles(functionsRoot) {
+  if (fs.lstatSync(functionsRoot).isSymbolicLink()) rejectEdgeLink('.');
+  verifyWindowsReparsePoints(functionsRoot);
+
   const sourceFiles = [];
   const configFiles = [];
   const walk = (directory, prefix = '') => {
     const entries = fs.readdirSync(directory, { withFileTypes: true });
     for (const entry of entries) {
       const relativePath = path.posix.join(prefix, entry.name);
+      if (entry.isSymbolicLink()) rejectEdgeLink(relativePath);
+      const name = entry.name.toLowerCase();
+      if (name === 'import_map.json') throw new Error(`${relativePath}: import_map.json is forbidden in Edge configuration`);
       if (entry.isDirectory()) {
-        if (relativePath !== EXCELJS_VENDOR_DIRECTORY) walk(path.join(directory, entry.name), relativePath);
-      } else if (entry.isFile() && EDGE_SOURCE_EXTENSIONS.has(path.extname(entry.name))) {
-        sourceFiles.push(relativePath);
-      } else if (entry.isFile() && EDGE_DENO_CONFIGS.has(entry.name)) {
-        configFiles.push(relativePath);
+        walk(path.join(directory, entry.name), relativePath);
+      } else if (entry.isFile()) {
+        if (EDGE_DENO_CONFIGS.has(name)) configFiles.push(relativePath);
+        if (EDGE_SOURCE_EXTENSIONS.has(path.extname(name))) sourceFiles.push(relativePath);
       }
     }
   };
   walk(functionsRoot);
-  return { sourceFiles: sourceFiles.sort(compareBytewise), configFiles: configFiles.sort(compareBytewise) };
+  const scannedSources = sourceFiles.includes(EXCELJS_FUNCTION_ENTRY)
+    ? sourceFiles.filter((file) => !EXCELJS_VENDOR_FILES.has(file)) : sourceFiles;
+  return { sourceFiles: scannedSources.sort(compareBytewise), configFiles: configFiles.sort(compareBytewise) };
 }
 
 function discoverEdgeSourceFiles(functionsRoot) {
   return discoverEdgeFiles(functionsRoot).sourceFiles;
 }
 
-function verifyNoEdgeImportMaps(functionsRoot, configFiles) {
+function assertInsideFunctionsRoot(functionsRoot, target, label) {
+  const relative = path.relative(functionsRoot, target);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`${label} must resolve inside supabase/functions`);
+  }
+}
+
+function verifyEdgeConfigs(functionsRoot, configFiles) {
   for (const file of configFiles) {
-    const { config, error } = ts.parseConfigFileTextToJson(file, fs.readFileSync(path.join(functionsRoot, file), 'utf8'));
-    if (error || !config || typeof config !== 'object' || Array.isArray(config)) {
+    const source = ts.parseJsonText(file, fs.readFileSync(path.join(functionsRoot, file), 'utf8'));
+    const config = source.statements[0]?.expression;
+    const diagnostics = [...source.parseDiagnostics];
+    ts.convertToObject(source, diagnostics);
+    if (diagnostics.length || !config || !ts.isObjectLiteralExpression(config)) {
       throw new Error(`${file}: invalid Deno configuration`);
     }
-    for (const key of ['imports', 'importMap', 'scopes']) {
-      if (Object.hasOwn(config, key)) throw new Error(`${file}: ${key} is forbidden in Edge configuration`);
+    for (const { name } of config.properties) {
+      if (name.text !== 'deploy') throw new Error(`${file}: ${name.text} is forbidden in Edge configuration; only deploy is allowed`);
     }
   }
 
+  const supabaseRoot = path.dirname(functionsRoot);
   let config;
   try {
-    config = parseToml(fs.readFileSync(path.join(functionsRoot, '..', 'config.toml'), 'utf8'));
+    config = parseToml(fs.readFileSync(path.join(supabaseRoot, 'config.toml'), 'utf8'));
   } catch {
     throw new Error('supabase/config.toml: must be readable and valid TOML');
   }
-  if (Object.hasOwn(config, 'import_map')
-    || Object.values(config.functions ?? {}).some((fn) => Object.hasOwn(fn, 'import_map'))) {
-    throw new Error('supabase/config.toml: import_map is forbidden in Edge configuration');
-  }
+  const visit = (table) => {
+    for (const [key, value] of Object.entries(table)) {
+      const name = key.toLowerCase();
+      if (name === 'import_map') throw new Error('supabase/config.toml: import_map is forbidden in Edge configuration');
+      if (name === 'entrypoint' && value !== '') {
+        if (typeof value !== 'string') throw new Error('supabase/config.toml: entrypoint must be a path string');
+        assertInsideFunctionsRoot(functionsRoot, path.resolve(supabaseRoot, value), 'supabase/config.toml: entrypoint');
+      }
+      if (value && typeof value === 'object') visit(value);
+    }
+  };
+  visit(config);
 }
 
 function resolveSourceFiles(functionsRoot, sourceFiles = OFFLINE_EDGE_CACHE_SOURCE_FILES) {
   return sourceFiles.map((relativePath) => {
-    const filePath = path.join(functionsRoot, relativePath);
+    const filePath = path.resolve(functionsRoot, relativePath);
+    assertInsideFunctionsRoot(functionsRoot, filePath, 'Edge dependency root');
     if (!fs.statSync(filePath).isFile()) {
       throw new Error('Edge dependency root is not a file: ' + relativePath);
     }
@@ -118,6 +180,7 @@ function collectModuleSpecifiers(functionsRoot, sourceFiles) {
   const imports = [];
   for (const filePath of resolveSourceFiles(functionsRoot, sourceFiles)) {
     const file = path.relative(functionsRoot, filePath).replace(/\\/g, '/');
+    const fileUrl = pathToFileURL(filePath);
     const source = ts.createSourceFile(file, fs.readFileSync(filePath, 'utf8'), ts.ScriptTarget.Latest);
     if (source.parseDiagnostics.length) throw new Error(`${file}: cannot parse Edge source`);
 
@@ -127,7 +190,15 @@ function collectModuleSpecifiers(functionsRoot, sourceFiles) {
       }
       const specifier = literal.text;
       if (specifier.startsWith('jsr:')) throw new Error(`${file}: JSR imports are forbidden`);
-      if (!/^(?:npm:|node:|https?:\/\/|\.{1,2}\/)/.test(specifier)) {
+      if (/^\.{1,2}\//.test(specifier)) {
+        let target;
+        try {
+          target = fileURLToPath(new URL(specifier, fileUrl));
+        } catch {
+          throw new Error(`${file}: invalid relative import path`);
+        }
+        assertInsideFunctionsRoot(functionsRoot, target, `${file}: relative import`);
+      } else if (!/^(?:npm:|node:|https?:\/\/)/.test(specifier)) {
         throw new Error(`${file}: bare or unsupported module specifier; use a relative path or an explicit npm:, node:, or remote URL import`);
       }
       imports.push({ file, specifier });
@@ -198,8 +269,8 @@ function buildEdgeRuntimeCacheContract({ functionsRoot, lockPath, denoLockPath, 
   const missingRemoteRoots = remoteRoots.filter((specifier) => !denoLock?.remote?.[specifier]);
   const syntheticSource = specifiers.map((specifier) => `import ${JSON.stringify(specifier)};`).join('\n') + '\n';
   const selectedSources = sourceFiles || OFFLINE_EDGE_CACHE_SOURCE_FILES;
-  const vendoredArtifacts = selectedSources.includes('resource-import-studio/index.ts')
-    ? [require('./prepare-resource-import-exceljs').readArtifact(path.resolve(functionsRoot, '..', '..'))] : [];
+  const vendoredArtifacts = selectedSources.includes(EXCELJS_FUNCTION_ENTRY)
+    ? [readArtifact(path.resolve(functionsRoot, '..', '..'))] : [];
 
   const contract = {
     schema: 'masarx.edge-runtime-cache-contract.v1',
@@ -674,7 +745,7 @@ function verifyEdgeImportLock() {
   const lockPath = path.join(repoRoot, 'package-lock.json');
   const denoLockPath = path.join(repoRoot, 'deno.lock');
   const { sourceFiles, configFiles } = discoverEdgeFiles(functionsRoot);
-  verifyNoEdgeImportMaps(functionsRoot, configFiles);
+  verifyEdgeConfigs(functionsRoot, configFiles);
   const { imports, missing, missingFromDenoLock, versionMismatches, missingIntegrity } = verifyNpmImportsInLock({
     functionsRoot,
     lockPath,
