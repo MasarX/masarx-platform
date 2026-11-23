@@ -1,4 +1,5 @@
 const { appendFileSync, readFileSync } = require('node:fs');
+const { RETRYABLE_NETWORK_ERROR_CODES } = require('../ops/ci/github-api-retry');
 
 const workflow = '/actions/workflows/deploy.yml/runs';
 const attemptMarker = 'Record database push attempt';
@@ -144,18 +145,43 @@ function summarize(log, status, elapsed, env) {
 
 async function guard(env, fetchRequest = fetch) {
   const get = async path => {
-    const response = await fetchRequest(`${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`, {
-      headers: { Authorization: 'Bearer ' + env.GH_TOKEN, Accept: 'application/vnd.github+json' },
-      redirect: 'error',
-      signal: AbortSignal.timeout(15_000),
-    });
+    const url = `${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}${path}`;
     const endpoint = path.split('?')[0];
-    if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status} for ${endpoint}`);
-    try {
-      return await response.json();
-    } catch (error) {
-      if (error?.name === 'SyntaxError') throw new Error(`invalid JSON from ${endpoint}`);
-      throw error;
+    const maxAttempts = 3;
+    for (let attempt = 1; ; attempt++) {
+      let response;
+      let reason;
+      try {
+        response = await fetchRequest(url, {
+          method: 'GET',
+          headers: { Authorization: 'Bearer ' + env.GH_TOKEN, Accept: 'application/vnd.github+json' },
+          redirect: 'error',
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (response.ok) return await response.json();
+      } catch (error) {
+        if (response?.ok && error?.name === 'SyntaxError') throw new Error(`invalid JSON from ${endpoint}`);
+        if (attempt === maxAttempts) throw error;
+        if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+          reason = 'timeout';
+        } else if (RETRYABLE_NETWORK_ERROR_CODES.has(error?.cause?.code ?? error?.code) ||
+          error?.message === 'terminated' || error?.message === 'socket hang up' ||
+          (error?.message === 'fetch failed' && !error.cause)) {
+          reason = 'network';
+        } else {
+          throw error;
+        }
+      }
+      if (!reason) {
+        const { status } = response;
+        if (attempt === maxAttempts || status !== 429) {
+          throw new Error(`GitHub API returned HTTP ${status} for ${endpoint}`);
+        }
+        reason = 'http-429';
+        void response.body?.cancel().catch(() => {});
+      }
+      console.log(`guard_api_retry attempt=${attempt + 1} reason=${reason}`);
+      await new Promise(resolve => setTimeout(resolve, attempt * 1_000));
     }
   };
   const record = decision => {
