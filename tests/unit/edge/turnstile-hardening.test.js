@@ -68,7 +68,7 @@ function setup(secret = 'fixture-secret', handlerName = 'public-shipment-trackin
     });
     const execute = vm.runInContext(`(function(require, module, exports) {\n${outputText}\n})`, sandbox, { filename });
     execute((specifier) => {
-      if (specifier === 'npm:@supabase/supabase-js@2.111.0') return { createClient };
+      if (specifier === 'npm:@supabase/supabase-js@2.119.0') return { createClient };
       if (!specifier.startsWith('.')) throw new Error(`Unexpected edge import: ${specifier}`);
       const local = specifier.startsWith('./_shared/') ? edgeRoot : path.dirname(filename);
       return load(path.resolve(local, specifier));

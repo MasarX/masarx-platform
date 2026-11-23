@@ -35,7 +35,7 @@ function handler(options = {}) {
     exports: {}, Response, Request, Headers, console,
     Deno: { serve: (fn) => { serve = fn; } },
     require: (name) => {
-      if (name === 'npm:@supabase/supabase-js@2.111.0') return { createClient };
+      if (name === 'npm:@supabase/supabase-js@2.119.0') return { createClient };
       if (name === './_shared/mod.mjs') return {
         readEnv: (primary, fallbacks = []) => [primary, ...fallbacks].map((k) => env[k]).find(Boolean) || '',
         extractToken: (req) => req.headers.get('authorization')?.replace(/^Bearer /, '') || '',

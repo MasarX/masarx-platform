@@ -9,10 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const {
-  buildEdgeRuntimeCacheContract,
-  verifyNpmImportsInLock,
-} = require('./verify-npm-import-lock');
+const { verifyEdgeImportLock } = require('./verify-npm-import-lock');
 
 const functionsRoot = path.join(__dirname, '..', '..', 'supabase', 'functions');
 const sharedSource = path.join(functionsRoot, '_shared');
@@ -57,7 +54,6 @@ const targets = fs.readdirSync(functionsRoot, { withFileTypes: true })
 
 if (targets.length === 0) {
   console.warn('[edge:verify-shared] No edge function folders detected.');
-  process.exit(0);
 }
 
 targets.forEach((entry) => {
@@ -91,46 +87,5 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-const lockResult = verifyNpmImportsInLock({
-  functionsRoot,
-  lockPath: path.join(__dirname, '..', '..', 'package-lock.json'),
-  denoLockPath: path.join(__dirname, '..', '..', 'deno.lock'),
-});
-if (lockResult.missing.length > 0) {
-  console.error('[edge:verify-shared] Edge npm imports missing from package-lock.json:');
-  lockResult.missing.forEach((entry) => console.error(`- ${entry.file}: ${entry.specifier}`));
-  process.exit(1);
-}
-if (lockResult.missingFromDenoLock.length > 0) {
-  console.error('[edge:verify-shared] Edge npm imports missing from deno.lock:');
-  lockResult.missingFromDenoLock.forEach((entry) => console.error(`- ${entry.file}: ${entry.specifier}`));
-  process.exit(1);
-}
-if (lockResult.versionMismatches.length > 0) {
-  console.error('[edge:verify-shared] Edge npm imports are not pinned to package-lock.json:');
-  lockResult.versionMismatches.forEach((entry) => console.error(`- ${entry.file}: ${entry.specifier}`));
-  process.exit(1);
-}
-if (lockResult.missingIntegrity.length > 0) {
-  console.error('[edge:verify-shared] Edge npm imports lack exact registry integrity:');
-  lockResult.missingIntegrity.forEach((entry) => console.error(`- ${entry.file}: ${entry.specifier}`));
-  process.exit(1);
-}
-const cacheContract = buildEdgeRuntimeCacheContract({
-  functionsRoot,
-  lockPath: path.join(__dirname, '..', '..', 'package-lock.json'),
-  denoLockPath: path.join(__dirname, '..', '..', 'deno.lock'),
-});
-if (cacheContract.missing_remote_roots.length > 0) {
-  console.error('[edge:verify-shared] Edge remote imports are missing from deno.lock:');
-  cacheContract.missing_remote_roots.forEach((specifier) => console.error(`- ${specifier}`));
-  process.exit(1);
-}
-
+verifyEdgeImportLock();
 console.log('[edge:verify-shared] All edge functions bundle the expected _shared payload.');
-console.log(
-  `[edge:verify-shared] ${lockResult.imports.length} Edge npm imports are exact-version and integrity bound.`,
-);
-console.log(
-  `[edge:verify-shared] Offline cache contract binds ${cacheContract.specifiers.length} external roots (${cacheContract.synthetic_source_sha256}).`,
-);

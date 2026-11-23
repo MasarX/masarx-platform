@@ -249,15 +249,6 @@ function main() {
         .join(', ')}`,
     );
   }
-  const skipFixtureBootstrap = isTruthy(runtimeEnv.INTEGRATION_SKIP_FIXTURE_BOOTSTRAP);
-
-  if (!skipFixtureBootstrap) {
-    runNodeScript(path.join('scripts', 'tests', 'bootstrap', 'seed-integration-fixtures.js'), {
-      env: executionEnv,
-      label: 'integration-fixture-bootstrap',
-    });
-  }
-
   if (!isTruthy(executionEnv.INTEGRATION_SKIP_EDGE_SHARED_SYNC)) {
     runNodeScript(path.join('scripts', 'edge', 'sync-shared.js'), {
       env: executionEnv,
@@ -266,6 +257,18 @@ function main() {
     runNodeScript(path.join('scripts', 'edge', 'verify-shared.js'), {
       env: executionEnv,
       label: 'edge:verify-shared',
+    });
+  } else {
+    runNodeScript(path.join('scripts', 'edge', 'verify-npm-import-lock.js'), {
+      env: executionEnv,
+      label: 'edge:verify-npm-import-lock',
+    });
+  }
+
+  if (!isTruthy(runtimeEnv.INTEGRATION_SKIP_FIXTURE_BOOTSTRAP)) {
+    runNodeScript(path.join('scripts', 'tests', 'bootstrap', 'seed-integration-fixtures.js'), {
+      env: executionEnv,
+      label: 'integration-fixture-bootstrap',
     });
   }
 

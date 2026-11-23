@@ -1,6 +1,6 @@
 import { turnstileHostnameFailure, verifyMarketingTurnstile } from "./_shared/turnstile-local-test.mjs";
 import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
-import { createClient } from "npm:@supabase/supabase-js@2.111.0";
+import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 import {
   asString,

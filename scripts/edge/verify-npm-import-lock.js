@@ -12,8 +12,8 @@ const OFFLINE_EDGE_CACHE_SOURCE_FILES = [
   'api-caller/index.ts',
   'organization-profile/index.ts',
 ];
-const EDGE_SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const EXCLUDED_EDGE_SOURCE_DIRECTORIES = new Set(['.cache', 'cache', 'generated']);
+const EDGE_SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
+const EXCLUDED_EDGE_SOURCE_DIRECTORIES = new Set(['cache', 'generated', '_vendor']);
 const EDGE_CACHE_RECEIPT_SCHEMA = 'masarx.edge-runtime-cache-materialization.v1';
 const EDGE_RUNTIME_IMAGE_PATTERN = /^public\.ecr\.aws\/supabase\/edge-runtime:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/;
 const DOCKER_PROXY_FIELDS = [
@@ -58,15 +58,15 @@ function compareBytewise(left, right) {
 
 function discoverEdgeSourceFiles(functionsRoot) {
   const sourceFiles = [];
-  const walkShared = (directory, prefix) => {
+  const walk = (directory, prefix) => {
     const entries = fs.readdirSync(directory, { withFileTypes: true })
       .sort((left, right) => compareBytewise(left.name, right.name));
     for (const entry of entries) {
-      if (EXCLUDED_EDGE_SOURCE_DIRECTORIES.has(entry.name)) continue;
       const relativePath = path.posix.join(prefix, entry.name);
       const absolutePath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        walkShared(absolutePath, relativePath);
+        if (entry.name.startsWith('.') || EXCLUDED_EDGE_SOURCE_DIRECTORIES.has(entry.name) || entry.name === '_shared') continue;
+        walk(absolutePath, relativePath);
       } else if (entry.isFile() && EDGE_SOURCE_EXTENSIONS.has(path.extname(entry.name))) {
         sourceFiles.push(relativePath);
       }
@@ -77,14 +77,7 @@ function discoverEdgeSourceFiles(functionsRoot) {
     .sort((left, right) => compareBytewise(left.name, right.name));
   for (const entry of entries) {
     if (!entry.isDirectory() || EXCLUDED_EDGE_SOURCE_DIRECTORIES.has(entry.name) || entry.name.startsWith('.')) continue;
-    if (entry.name === '_shared') {
-      walkShared(path.join(functionsRoot, entry.name), entry.name);
-      continue;
-    }
-    const entrypoints = fs.readdirSync(path.join(functionsRoot, entry.name), { withFileTypes: true })
-      .filter((candidate) => candidate.isFile() && candidate.name.startsWith('index.'))
-      .sort((left, right) => compareBytewise(left.name, right.name));
-    for (const entrypoint of entrypoints) sourceFiles.push(path.posix.join(entry.name, entrypoint.name));
+    walk(path.join(functionsRoot, entry.name), entry.name);
   }
   return sourceFiles.sort(compareBytewise);
 }
@@ -612,28 +605,33 @@ function verifyNpmImportsInLock({ functionsRoot, lockPath, denoLockPath, sourceF
   const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
   const packages = lock && typeof lock.packages === 'object' && lock.packages ? lock.packages : {};
   const denoLock = JSON.parse(fs.readFileSync(denoLockPath, 'utf8'));
-  const denoDependencies = new Set(
-    denoLock?.workspace?.packageJson?.dependencies instanceof Array
-      ? denoLock.workspace.packageJson.dependencies
-      : [],
-  );
+  const denoResolution = ({ packageName, requestedVersion }) =>
+    denoLock.specifiers?.[`npm:${packageName}@${requestedVersion}`];
+  const denoPackage = (entry) => denoLock.npm?.[`${entry.packageName}@${denoResolution(entry)}`];
   const imports = collectNpmImports(functionsRoot, sourceFiles ?? discoverEdgeSourceFiles(functionsRoot));
   const missing = imports.filter(({ packageName }) => !packages[`node_modules/${packageName}`]);
-  const missingFromDenoLock = imports.filter(({ specifier }) => !denoDependencies.has(specifier));
-  const versionMismatches = imports.filter(({ packageName, requestedVersion }) => {
-    if (!requestedVersion) return true;
+  const missingFromDenoLock = imports.filter((entry) => !denoPackage(entry));
+  const versionMismatches = imports.flatMap((entry) => {
+    const { packageName, requestedVersion } = entry;
     const lockedVersion = String(packages[`node_modules/${packageName}`]?.version || '').trim();
-    return lockedVersion !== requestedVersion;
+    // Deno appends peer dependency information to some resolutions.
+    const resolution = denoResolution(entry);
+    if (requestedVersion && requestedVersion === lockedVersion && (!resolution || resolution.split('_', 1)[0] === lockedVersion)) {
+      return [];
+    }
+    return [{ ...entry, lockedVersion, resolution }];
   });
-  const missingIntegrity = imports.filter(({ packageName }) => {
-    const entry = packages[`node_modules/${packageName}`];
-    return !String(entry?.resolved || '').startsWith('https://registry.npmjs.org/') ||
-      !String(entry?.integrity || '').startsWith('sha512-');
+  const missingIntegrity = imports.filter((entry) => {
+    const npm = packages[`node_modules/${entry.packageName}`];
+    const deno = denoPackage(entry);
+    return !String(npm?.resolved || '').startsWith('https://registry.npmjs.org/') ||
+      !String(npm?.integrity || '').startsWith('sha512-') ||
+      (deno && deno.integrity !== npm.integrity);
   });
   return { imports, missing, missingFromDenoLock, versionMismatches, missingIntegrity };
 }
 
-function main() {
+function verifyEdgeImportLock() {
   const repoRoot = path.join(__dirname, '..', '..');
   const functionsRoot = path.join(repoRoot, 'supabase', 'functions');
   const lockPath = path.join(repoRoot, 'package-lock.json');
@@ -651,6 +649,14 @@ function main() {
     process.exit(1);
   }
 
+  if (versionMismatches.length > 0) {
+    console.error('[edge:verify-npm-import-lock] Edge npm imports are not pinned to package-lock.json:');
+    for (const entry of versionMismatches) {
+      console.error(`- ${entry.file}: ${entry.specifier} (package-lock=${entry.lockedVersion}, deno.lock=${entry.resolution || 'missing'})`);
+    }
+    process.exit(1);
+  }
+
   if (missingFromDenoLock.length > 0) {
     console.error('[edge:verify-npm-import-lock] Edge npm imports missing from deno.lock:');
     for (const entry of missingFromDenoLock) {
@@ -659,17 +665,8 @@ function main() {
     process.exit(1);
   }
 
-  if (versionMismatches.length > 0) {
-    console.error('[edge:verify-npm-import-lock] Edge npm imports are not pinned to package-lock.json:');
-    for (const entry of versionMismatches) {
-      const lockedVersion = lockVersionForPackage(lockPath, entry.packageName);
-      console.error(`- ${entry.file}: ${entry.specifier} (package-lock=${lockedVersion || 'missing'})`);
-    }
-    process.exit(1);
-  }
-
   if (missingIntegrity.length > 0) {
-    console.error('[edge:verify-npm-import-lock] Edge npm imports lack exact registry integrity:');
+    console.error('[edge:verify-npm-import-lock] Edge npm imports lack matching registry integrity:');
     for (const entry of missingIntegrity) {
       console.error(`- ${entry.file}: ${entry.specifier}`);
     }
@@ -693,12 +690,7 @@ function main() {
   );
 }
 
-function lockVersionForPackage(lockPath, packageName) {
-  const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
-  return String(lock?.packages?.[`node_modules/${packageName}`]?.version || '').trim();
-}
-
-if (require.main === module) main();
+if (require.main === module) verifyEdgeImportLock();
 
 module.exports = {
   buildEdgeRuntimeCacheContract,
@@ -711,5 +703,6 @@ module.exports = {
   resolveEdgeRuntimeCacheImage,
   packageNameFromSpecifier,
   parseNpmSpecifier,
+  verifyEdgeImportLock,
   verifyNpmImportsInLock,
 };
