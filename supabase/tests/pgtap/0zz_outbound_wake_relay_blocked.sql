@@ -26,12 +26,6 @@ SELECT template, 'outbound_wake_' || template, 1, 'active', 'tenant', org FROM w
 INSERT INTO public.workflow_template_steps
   (id, workflow_template_id, sequence_order, operation_name, transition_condition, handler_key, handler_version)
 SELECT template_step, template, 1, 'outbound_http', 'always', 'outbound_http', 'v1' FROM wake_fixture;
-INSERT INTO public.workflow_runs
-  (id, workflow_template_id, workflow_template_version, entry_point, workflow_status, context)
-SELECT run, template, 1, 'test', 'pending', jsonb_build_object('organization_id', org) FROM wake_fixture;
-INSERT INTO public.workflow_run_steps
-  (id, workflow_run_id, workflow_template_step_id, sequence_order, step_status, operation_name, handler_key, handler_version, max_retries)
-SELECT run_step, run, template_step, 1, 'pending', 'outbound_http', 'outbound_http', 'v1', 1 FROM wake_fixture;
 DO $$ BEGIN
   PERFORM set_config('app.workflow_run_id', run::text, true),
           set_config('app.workflow_run_step_id', run_step::text, true),
@@ -39,6 +33,12 @@ DO $$ BEGIN
           set_config('masarx.workflow_engine', '1', true)
   FROM wake_fixture;
 END $$;
+INSERT INTO public.workflow_runs
+  (id, workflow_template_id, workflow_template_version, entry_point, workflow_status, context)
+SELECT run, template, 1, 'test', 'pending', jsonb_build_object('organization_id', org) FROM wake_fixture;
+INSERT INTO public.workflow_run_steps
+  (id, workflow_run_id, workflow_template_step_id, sequence_order, step_status, operation_name, handler_key, handler_version, max_retries)
+SELECT run_step, run, template_step, 1, 'pending', 'outbound_http', 'outbound_http', 'v1', 1 FROM wake_fixture;
 INSERT INTO public.outbound_calls (id, call_type, target_type, target_id, method, url, status, context, workflow_run_step_id)
 SELECT job, 'provider_api', 'provider', gen_random_uuid(), 'POST', origin || '/fixture', 'pending_edge',
        jsonb_build_object('organization_id', org), run_step FROM wake_fixture;
