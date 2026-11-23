@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { cloneHostedDatabases } = require('../../../scripts/ci-hosted/backend.cjs');
+const { cloneHostedDatabases, withHostedCloneIsolation } = require('../../../scripts/ci-hosted/backend.cjs');
 const { captureDatabaseLog } = require('../../../scripts/ci-hosted/stack-diagnostics.cjs');
 
 const worker = 'pgtap_worker_1';
@@ -12,12 +12,12 @@ const reopen = 'ALTER DATABASE postgres ALLOW_CONNECTIONS true';
 const restoreRole = 'ALTER ROLE postgres CONNECTION LIMIT 7';
 const readLimit = "SELECT rolconnlimit FROM pg_roles WHERE rolname = 'postgres'";
 
-function cloneFixture({ rolsuper = false, cloneError, restoredLimit = '7' } = {}) {
+function cloneFixture({ rolsuper = false, cloneError, reopenError, restoredLimit = '7' } = {}) {
   const admin = jest.fn(async (sql, next) => {
-    if (sql.includes('FROM pg_roles')) return JSON.stringify({ rolconnlimit: 7, rolsuper });
-    if (sql.includes('FROM pg_database CROSS JOIN pg_settings')) {
-      return JSON.stringify({ owner: 'postgres', limit: -1, explicitAcl: false, logLevel: 'warning', restoreLogging: logReset });
+    if (sql.includes('FROM pg_roles CROSS JOIN pg_settings')) {
+      return JSON.stringify({ rolconnlimit: 7, rolsuper, logLevel: 'warning', restoreLogging: logReset });
     }
+    if (sql.includes('FROM pg_database WHERE')) return JSON.stringify({ owner: 'postgres', limit: -1, explicitAcl: false });
     if (sql.includes('pg_terminate_backend') || next === reload) return 't';
     if (sql === showLogging) return 'debug2';
     if (sql.includes('FROM pg_db_role_setting')) return '[]';
@@ -25,13 +25,16 @@ function cloneFixture({ rolsuper = false, cloneError, restoredLimit = '7' } = {}
     return '';
   });
   const restore = jest.fn(async (sql, next) => {
+    if (sql === reopen && reopenError) throw reopenError;
     if (next === readLimit) return restoredLimit;
     if (next === reload) return 't';
     if (sql === showLogging) return 'warning';
     return '';
   });
   const created = [];
-  return { admin, restore, created, clone: () => cloneHostedDatabases(admin, [worker], created, restore) };
+  const clone = () => withHostedCloneIsolation(admin, restore, restoreTemplate =>
+    cloneHostedDatabases(admin, [worker], created, restoreTemplate));
+  return { admin, restore, created, clone };
 }
 
 const restoreCalls = [[reopen], [restoreRole, readLimit], [logReset, reload], [showLogging]];
@@ -40,18 +43,19 @@ test('rejects new postgres probe connections before closing and cloning the temp
   const { admin, restore, created, clone } = cloneFixture();
   await clone();
   expect(admin.mock.calls).toEqual([
-    [expect.stringMatching(/'rolconnlimit', rolconnlimit, 'rolsuper', rolsuper.*FROM pg_roles/)],
-    [expect.stringContaining('FROM pg_database CROSS JOIN pg_settings')],
+    [expect.stringContaining('FROM pg_roles CROSS JOIN pg_settings')],
     ['ALTER ROLE postgres CONNECTION LIMIT 0'],
-    ['ALTER DATABASE postgres ALLOW_CONNECTIONS false'],
     ["ALTER SYSTEM SET log_min_messages = 'debug2'", reload],
     [showLogging],
+    [expect.stringContaining('FROM pg_database WHERE')],
+    ['ALTER DATABASE postgres ALLOW_CONNECTIONS false'],
     [expect.stringContaining('pg_terminate_backend')],
     [`CREATE DATABASE ${worker} TEMPLATE postgres STRATEGY WAL_LOG OWNER postgres CONNECTION LIMIT -1`],
     [expect.stringContaining('FROM pg_db_role_setting')],
   ]);
   expect(created).toEqual([worker]);
   expect(restore.mock.calls).toEqual(restoreCalls);
+  expect(restore.mock.invocationCallOrder[0]).toBeGreaterThan(admin.mock.invocationCallOrder.at(-1));
 });
 
 test('restores the template and postgres role after a failed hosted WAL clone', async () => {
@@ -70,6 +74,15 @@ test('keeps the hosted clone error when verification finds an unrestored role li
   expect(restore.mock.calls).toEqual(restoreCalls);
 });
 
+test('preserves the hosted clone error and finishes cleanup when reopening the template fails', async () => {
+  const cloneError = new Error('synthetic WAL clone failure');
+  const reopenError = new Error('synthetic template reopen failure');
+  const { restore, clone } = cloneFixture({ cloneError, reopenError });
+  await expect(clone()).rejects.toBe(cloneError);
+  expect(cloneError.restoreError).toBe(reopenError);
+  expect(restore.mock.calls).toEqual(restoreCalls);
+});
+
 test('fails an otherwise successful hosted clone if the postgres role limit was not restored', async () => {
   const { clone } = cloneFixture({ restoredLimit: '0' });
   await expect(clone()).rejects.toThrow('did not restore the postgres role connection limit');
@@ -85,6 +98,8 @@ test('refuses a hosted clone when the postgres role can bypass its connection li
 test('keeps hosted pgTAP cloning free of database restarts and worker-setting changes', () => {
   const source = fs.readFileSync(require.resolve('../../../scripts/ci-hosted/backend.cjs'), 'utf8');
   expect(source).not.toMatch(/\['restart'|max_worker_processes|until pg_isready/);
+  expect(source).toMatch(/name !== `supabase_db_\$\{project\}`/);
+  expect(source).toMatch(/await withHostedCloneIsolation\(cloneAdmin, restoreAdmin, async restoreTemplate => \{\s+await cloneHostedDatabases\(cloneAdmin, databases, created, restoreTemplate\)/);
 });
 
 test('writes uncapped redacted hosted pgTAP logs to the one-day artifact path', async () => {

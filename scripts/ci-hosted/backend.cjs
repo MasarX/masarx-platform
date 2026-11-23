@@ -95,24 +95,11 @@ async function reloadHostedCloneLogging(admin, command, level) {
 
 async function cloneHostedDatabases(admin, databases, created, restore = admin) {
   if (!databases.length) return;
-  const { rolconnlimit, rolsuper } = JSON.parse(await admin(`SELECT json_build_object(
-    'rolconnlimit', rolconnlimit, 'rolsuper', rolsuper) FROM pg_roles WHERE rolname = 'postgres'`));
-  if (rolsuper) throw new Error('Cannot isolate the hosted pgTAP clone: the postgres role is a superuser');
-  if (!Number.isInteger(rolconnlimit) || rolsuper !== false) throw new Error('Missing pre-clone postgres role settings');
-  const { owner, limit, explicitAcl, logLevel, restoreLogging } = JSON.parse(await admin(`SELECT json_build_object(
-    'owner', quote_ident(pg_get_userbyid(datdba)), 'limit', datconnlimit, 'explicitAcl', datacl IS NOT NULL,
-    'logLevel', setting, 'restoreLogging', CASE WHEN sourcefile = current_setting('data_directory') || '/postgresql.auto.conf'
-      THEN format('ALTER SYSTEM SET log_min_messages = %L', setting) ELSE 'ALTER SYSTEM RESET log_min_messages' END)
-    FROM pg_database CROSS JOIN pg_settings WHERE datname = 'postgres' AND name = 'log_min_messages'`));
-  let cloneError;
-  let loggingChanged = false;
+  const { owner, limit, explicitAcl } = JSON.parse(await admin(`SELECT json_build_object(
+    'owner', quote_ident(pg_get_userbyid(datdba)), 'limit', datconnlimit, 'explicitAcl', datacl IS NOT NULL)
+    FROM pg_database WHERE datname = 'postgres'`));
   try {
-    // Reject the Docker health probe before it can block on the template database lock.
-    await admin('ALTER ROLE postgres CONNECTION LIMIT 0');
     await admin('ALTER DATABASE postgres ALLOW_CONNECTIONS false');
-    // DEBUG2 records postmaster forks by PID.
-    loggingChanged = true;
-    await reloadHostedCloneLogging(admin, "ALTER SYSTEM SET log_min_messages = 'debug2'", 'debug2');
     const live = (await admin("SELECT bool_and(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE datname = 'postgres'")).trim();
     if (live && live !== 't') throw new Error('Could not release connections to the migrated template');
     for (const database of databases) {
@@ -134,23 +121,43 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin) 
         WHERE setdatabase = (SELECT oid FROM pg_database WHERE datname = 'postgres')`));
       if (settings.length) await admin(...settings.flat());
     }
+  } finally {
+    await restore('ALTER DATABASE postgres ALLOW_CONNECTIONS true');
+  }
+}
+
+async function withHostedCloneIsolation(admin, restore, clone) {
+  const { rolconnlimit, rolsuper, logLevel, restoreLogging } = JSON.parse(await admin(`SELECT json_build_object(
+    'rolconnlimit', rolconnlimit, 'rolsuper', rolsuper, 'logLevel', setting,
+    'restoreLogging', CASE WHEN sourcefile = current_setting('data_directory') || '/postgresql.auto.conf'
+      THEN format('ALTER SYSTEM SET log_min_messages = %L', setting) ELSE 'ALTER SYSTEM RESET log_min_messages' END)
+    FROM pg_roles CROSS JOIN pg_settings WHERE rolname = 'postgres' AND name = 'log_min_messages'`));
+  if (rolsuper) throw new Error('Cannot isolate the hosted pgTAP clone: the postgres role is a superuser');
+  if (!Number.isInteger(rolconnlimit) || rolsuper !== false) throw new Error('Missing pre-clone postgres role settings');
+  const errors = [];
+  const attemptRestore = async step => {
+    try { await step(); } catch (error) { errors.push(error); }
+  };
+  let cloneError;
+  let loggingChanged = false;
+  try {
+    // Reject the Docker health probe before it can block on the template database lock.
+    await admin('ALTER ROLE postgres CONNECTION LIMIT 0');
+    // DEBUG2 records postmaster forks by PID.
+    loggingChanged = true;
+    await reloadHostedCloneLogging(admin, "ALTER SYSTEM SET log_min_messages = 'debug2'", 'debug2');
+    // Retain any template reopen error without overriding the original clone error.
+    await clone(command => attemptRestore(() => restore(command)));
   } catch (error) {
     cloneError = error;
     throw error;
   } finally {
-    const restoreSteps = [
-      () => restore('ALTER DATABASE postgres ALLOW_CONNECTIONS true'),
-      async () => {
-        const restoredLimit = await restore(`ALTER ROLE postgres CONNECTION LIMIT ${rolconnlimit}`,
-          "SELECT rolconnlimit FROM pg_roles WHERE rolname = 'postgres'");
-        if (restoredLimit.trim() !== String(rolconnlimit)) throw new Error('Postgres did not restore the postgres role connection limit');
-      },
-    ];
-    if (loggingChanged) restoreSteps.push(() => reloadHostedCloneLogging(restore, restoreLogging, logLevel));
-    const errors = [];
-    for (const step of restoreSteps) {
-      try { await step(); } catch (error) { errors.push(error); }
-    }
+    await attemptRestore(async () => {
+      const restoredLimit = await restore(`ALTER ROLE postgres CONNECTION LIMIT ${rolconnlimit}`,
+        "SELECT rolconnlimit FROM pg_roles WHERE rolname = 'postgres'");
+      if (restoredLimit.trim() !== String(rolconnlimit)) throw new Error('Postgres did not restore the postgres role connection limit');
+    });
+    if (loggingChanged) await attemptRestore(() => reloadHostedCloneLogging(restore, restoreLogging, logLevel));
     if (errors.length) {
       const restoreError = errors.length === 1 ? errors[0] : new AggregateError(errors, 'Postgres clone restoration failed');
       if (!cloneError) throw restoreError;
@@ -247,7 +254,9 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
     try {
       try {
         if (services.length) await checked('docker', ['stop', ...services], testEnv, Math.min(15000, remaining()));
-        await cloneHostedDatabases(cloneAdmin, databases, created, restoreAdmin);
+        await withHostedCloneIsolation(cloneAdmin, restoreAdmin, async restoreTemplate => {
+          await cloneHostedDatabases(cloneAdmin, databases, created, restoreTemplate);
+        });
       } finally {
         if (services.length) await checked('docker', ['start', ...services], testEnv, 15000);
       }
@@ -663,4 +672,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, withHostedCloneIsolation, pgtapDeadline };
