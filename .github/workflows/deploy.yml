@@ -706,6 +706,7 @@ jobs:
         id: deploy
         if: steps.guard.outputs.configured == 'true' && steps.apply_guard.outcome == 'success' && steps.apply_guard.outputs.superseded == 'false' && steps.edge_lock.outcome == 'success'
         env: &dev-database-env
+          EDGE_DISPATCH_ENABLED: ${{ env.DEPLOY_ENV == 'dev' && 'true' || 'false' }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}

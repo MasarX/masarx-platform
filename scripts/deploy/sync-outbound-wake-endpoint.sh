@@ -20,6 +20,7 @@ relay_psql() {
 relay_policy_status() {
   relay_psql <<'SQL'
 \getenv endpoint OUTBOUND_WAKE_ENDPOINT
+\getenv desired_enabled EDGE_DISPATCH_ENABLED
 BEGIN TRANSACTION READ ONLY;
 SET LOCAL statement_timeout = '8s';
 SET LOCAL search_path = pg_catalog;
@@ -28,15 +29,20 @@ WITH policy AS MATERIALIZED (
   SELECT public.resolve_settings('edge_dispatch_policy', 'global', NULL) AS value
 )
 SELECT COALESCE(value->>'endpoint_url' = $1::text, false),
-       COALESCE(jsonb_typeof(value->'enabled') = 'boolean', false)
+       COALESCE(value->'enabled' = to_jsonb($2::boolean), false)
 FROM policy
-\bind :endpoint
+\bind :endpoint :desired_enabled
 \g
 COMMIT;
 SQL
 }
 
 sync_endpoint() (
+  export EDGE_DISPATCH_ENABLED="${EDGE_DISPATCH_ENABLED-false}"
+  case "$EDGE_DISPATCH_ENABLED" in
+    true|false) ;;
+    *) return 1 ;;
+  esac
   [[ "${SUPABASE_PROJECT_REF:-}" =~ ^[a-z]{20}$ && -n "${SUPABASE_ACCESS_TOKEN:-}" && -n "${SUPABASE_DB_PASSWORD:-}" ]] || return 1
   export OUTBOUND_WAKE_ENDPOINT="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/api-caller"
   pooler="$(
@@ -64,24 +70,25 @@ sync_endpoint() (
   esac
   relay_psql >/dev/null <<'SQL' || return 1
 \getenv endpoint OUTBOUND_WAKE_ENDPOINT
+\getenv desired_enabled EDGE_DISPATCH_ENABLED
 BEGIN ISOLATION LEVEL SERIALIZABLE;
 SET LOCAL statement_timeout = '8s';
 SET LOCAL search_path = pg_catalog;
 SET LOCAL log_parameter_max_length_on_error = 0;
--- Leave this statement open so psql binds $1 before sending it with \g.
+-- Leave this statement open so psql binds the parameters before sending it with \g.
 WITH policy AS MATERIALIZED (
   SELECT COALESCE(public.resolve_settings('edge_dispatch_policy', 'global', NULL), '{}'::jsonb) AS value
 ), changed AS MATERIALIZED (
   SELECT value FROM policy
   WHERE jsonb_typeof(value) = 'object'
     AND (NOT (value ? 'enabled') OR jsonb_typeof(value->'enabled') = 'boolean')
-    AND (value->>'endpoint_url' IS DISTINCT FROM $1::text OR NOT (value ? 'enabled'))
+    AND (value->>'endpoint_url' IS DISTINCT FROM $1::text OR value->'enabled' IS DISTINCT FROM to_jsonb($2::boolean))
 )
 SELECT 1 FROM changed
 CROSS JOIN LATERAL public.upsert_settings_value_v1('edge_dispatch_policy', 'global', NULL,
-  jsonb_build_object('enabled', false) || changed.value || jsonb_build_object('endpoint_url', $1::text),
+  changed.value || jsonb_build_object('endpoint_url', $1::text, 'enabled', $2::boolean),
   1, 'Sync outbound wake endpoint from deploy configuration')
-\bind :endpoint
+\bind :endpoint :desired_enabled
 \g
 COMMIT;
 SQL
@@ -89,13 +96,13 @@ SQL
 )
 
 endpoint_matches_expected=false
-enabled_explicit=false
+enabled_matches_expected=false
 if state="$(sync_endpoint)"; then
   case "$state" in
-    't|t') endpoint_matches_expected=true; enabled_explicit=true ;;
+    't|t') endpoint_matches_expected=true; enabled_matches_expected=true ;;
     't|f') endpoint_matches_expected=true ;;
-    'f|t') enabled_explicit=true ;;
+    'f|t') enabled_matches_expected=true ;;
   esac
 fi
-printf 'endpoint_matches_expected=%s\nenabled_explicit=%s\n' "$endpoint_matches_expected" "$enabled_explicit"
-[[ "$endpoint_matches_expected" == true && "$enabled_explicit" == true ]]
+printf 'endpoint_matches_expected=%s\nenabled_matches_expected=%s\n' "$endpoint_matches_expected" "$enabled_matches_expected"
+[[ "$endpoint_matches_expected" == true && "$enabled_matches_expected" == true ]]
