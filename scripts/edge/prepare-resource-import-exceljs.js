@@ -203,4 +203,4 @@ if (require.main === module) generate(path.join(__dirname, '..', '..')).then(val
   console.log(`ExcelJS artifact verified: ${value.files['exceljs.mjs']}`);
 }).catch(error => { console.error(error.message); process.exitCode = 1; });
 
-module.exports = { generate, readArtifact, publishArtifact, validateBundle, validatePackages, collectNotices, DECLARATIONS };
+module.exports = { generate, readArtifact, publishArtifact, validateBundle, validatePackages, collectNotices, DECLARATIONS, FILES, DIRECTORY };
