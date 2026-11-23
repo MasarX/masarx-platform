@@ -323,7 +323,7 @@ jobs:
         run: |
           if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]] &&
              git diff --quiet --no-renames "$LOCAL_GATE_BASE_SHA" HEAD -- \
-               supabase/functions package.json package-lock.json deno.lock scripts/edge .github/workflows/public-ci.yml; then
+               supabase/functions supabase/config.toml package.json package-lock.json deno.lock scripts/edge .github/workflows/public-ci.yml; then
             printf '%s\n' 'Edge npm import lock inputs are unchanged.'
             exit 0
           fi
