@@ -52,7 +52,8 @@ SET search_path TO public,extensions,pgtap,pg_temp AS $$
 DECLARE
  v_job UUID:=gen_random_uuid(); v_correlation UUID:=gen_random_uuid();
  v_org UUID; v_provider UUID; v_result JSONB; v_count INT; v_label TEXT;
- v_before INT; v_after INT; v_polls INT; v_sends INT; v_claims INT;
+ v_before INT; v_after INT;
+ v_polls INT; v_sends INT; v_claims INT;
  v_claim RECORD; v_spec JSONB; v_response JSONB; v_url TEXT;
 BEGIN
  SELECT org,provider INTO v_org,v_provider FROM pg_temp.f267_ids;
@@ -233,7 +234,10 @@ BEGIN
  RETURN NEXT ok(EXISTS(SELECT 1 FROM public.outbound_calls oc,pg_temp.f267_ids ids
  WHERE oc.id=current_setting('f267.job')::uuid AND oc.target_id=ids.successor
  AND oc.method='PUT' AND oc.url='https://example.test/f267-successor'
- AND oc.body->>'marker'='successor' AND oc.headers->>'content-type'='text/plain'),
+ AND oc.body->>'marker'='successor' AND oc.headers->>'content-type'='text/plain'
+ AND (SELECT count(*) FROM public.api_call_log l WHERE l.correlation_id=oc.correlation_id
+   AND l.provider_id=ids.provider AND l.method='POST' AND l.request_body->>'marker'=oc.id::text)=1
+ AND NOT EXISTS(SELECT FROM public.api_call_log l WHERE l.correlation_id=oc.correlation_id AND l.provider_id=ids.successor)),
  p_lane||CASE WHEN p_poll THEN '/poll' ELSE '/direct' END||' failure actually retargeted provider and request after attempted audit');
 END;
 $$;
@@ -248,8 +252,8 @@ CREATE OR REPLACE FUNCTION public.log_api_call_event(p_job_id UUID,p_request JSO
 BEGIN RAISE EXCEPTION 'fixture-sink-private'; END;
 $$;
 CREATE FUNCTION pg_temp.f267_sink_case(p_lane TEXT) RETURNS SETOF TEXT LANGUAGE plpgsql AS $$
-DECLARE v_job UUID:=gen_random_uuid();v_result JSONB;v_dispatch INT;v_claim RECORD;
- v_sends INT;v_correlation UUID:=gen_random_uuid();v_url TEXT;
+DECLARE v_job UUID:=gen_random_uuid();v_result JSONB;v_dispatch INT;
+ v_claim RECORD;v_sends INT;v_correlation UUID:=gen_random_uuid();v_url TEXT;
 BEGIN
  INSERT INTO public.outbound_calls(id,call_type,target_type,target_id,method,url,headers,body,
  status,priority,retry_count,max_retries,scheduled_at,created_at)

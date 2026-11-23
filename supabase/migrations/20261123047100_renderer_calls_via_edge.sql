@@ -428,7 +428,18 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM vault.secrets s
     WHERE s.id = v_ref AND starts_with(s.name, 'label_provider/')
-      AND s.description::jsonb->>'pinned_invoke_url' = v_url
+      -- Older Vault rows only had an explicit pin for copied global credentials.
+      AND COALESCE(s.description::jsonb->>'pinned_invoke_url', (
+        SELECT p.value->>'invoke_url'
+        FROM public.settings_versions sv
+        CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sv.value->'providers') = 'array'
+          THEN sv.value->'providers' ELSE '[]'::jsonb END) WITH ORDINALITY p(value, ordinal)
+        WHERE sv.category = 'label_provider'
+          AND starts_with(s.name, 'label_provider/' || sv.scope_type || '/' || COALESCE(sv.scope_id::text, 'global') || '/')
+          AND p.value#>>'{invoke_secret_ref,id}' = v_ref::text
+        ORDER BY sv.version, sv.created_at, sv.id, p.ordinal
+        LIMIT 1
+      )) = v_url
   ) THEN
     RETURN jsonb_build_object('state', 'pin_mismatch');
   END IF;

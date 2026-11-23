@@ -52,10 +52,13 @@ CREATE TEMP TABLE label_vault_edge_receipt AS
 SELECT org, public.invoke_label_renderer(1,jsonb_build_object('organization_id',org)) AS receipt
 FROM label_vault_fixture;
 SELECT ok(r.receipt @> '{"status":202,"completed":false}'::jsonb AND oc.status='pending_edge'
-   AND oc.url=v.description::jsonb->>'pinned_invoke_url' AND oc.headers='{}'::jsonb
+   AND oc.url=c.config->>'url' AND oc.renderer_credential_ref=(c.config->>'renderer_credential_ref')::uuid
+   AND oc.headers='{}'::jsonb AND v.id IS NOT NULL AND NOT (c.config ? 'invoke_secret')
    AND NOT EXISTS(SELECT FROM net.http_request_queue WHERE id=(r.receipt->>'request_id')::bigint),
    'enqueue binds the endpoint and Vault reference with a credential-free receipt')
-FROM label_vault_edge_receipt r LEFT JOIN public.outbound_calls oc ON oc.id=(r.receipt->>'edge_job_id')::uuid
+FROM label_vault_edge_receipt r CROSS JOIN LATERAL
+  (SELECT public.resolve_label_renderer_edge_config_v1(r.org) AS config) c
+LEFT JOIN public.outbound_calls oc ON oc.id=(r.receipt->>'edge_job_id')::uuid
 LEFT JOIN vault.secrets v ON v.id=oc.renderer_credential_ref;
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.settings_versions WHERE category = 'label_provider'
   AND position('synthetic-label-global-credential' IN value::text) > 0), 'global credential never enters any settings version');
@@ -153,6 +156,10 @@ SELECT is(public.invoke_label_renderer(1,jsonb_build_object('organization_id',fo
 SELECT ok(edge_count=(SELECT count(*) FROM public.outbound_calls)
   AND transport_count=(SELECT count(*) FROM net.http_request_queue),
   'rejected enqueue creates neither an Edge job nor a transport row') FROM label_vault_rejected;
+SELECT ok(l.lease_token IS NOT NULL AND public.get_claimed_edge_job_call_spec_v1(l.job_id,l.lease_token) IS NULL,
+  'a queued reference obtained before rotation no longer resolves under its lease')
+FROM label_vault_edge_receipt r
+LEFT JOIN LATERAL public.claim_edge_job_by_id_v1((r.receipt->>'edge_job_id')::uuid) l ON true;
 UPDATE public.settings SET cached_value = jsonb_set(cached_value,'{providers,0,invoke_secret}',
   '"synthetic-label-cache-only-credential"'::jsonb)
 WHERE category = 'label_provider' AND scope_type = 'tenant' AND scope_id = (SELECT org FROM label_vault_fixture);
