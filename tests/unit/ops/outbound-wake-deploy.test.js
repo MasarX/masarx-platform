@@ -7,7 +7,7 @@ const yaml = require('yaml');
 const root = path.resolve(__dirname, '../../..');
 const workflow = yaml.parse(fs.readFileSync(path.join(root, '.github/workflows/deploy.yml'), 'utf8'));
 const readout = workflow.jobs['api-schemas'].steps.find(step => step.name === 'Read renderer JWT claims').run;
-const deploy = workflow.jobs.database.steps.find(step => step.id === 'deploy').run;
+const deploy = workflow.jobs.database.steps.find(step => step.id === 'deploy');
 const deployCommand = 'bash scripts/deploy/sync-outbound-wake-endpoint.sh';
 
 function runBash(script, env) {
@@ -74,20 +74,29 @@ function runPolicyReadout(input) {
   `, { POLICY_FIXTURE: input, GITHUB_STEP_SUMMARY: '/dev/null' });
 }
 
+test('deploy enables dispatch for DEV only and syncs between migrations and Edge deploy', () => {
+  expect(deploy.env.EDGE_DISPATCH_ENABLED).toBe("${{ env.DEPLOY_ENV == 'dev' && 'true' || 'false' }}");
+  expect(deploy.run.indexOf(deployCommand)).toBeGreaterThan(deploy.run.indexOf('"$cli" db push --linked'));
+  expect(deploy.run.indexOf(deployCommand)).toBeLessThan(deploy.run.indexOf('"$cli" functions deploy'));
+});
+
 test.each([
-  ['already matches', 't', 'false', '', null, true, true],
-  ['missing policy', 'f', 'absent', '', 'false', true, true],
-  ['matching endpoint without enabled', 't', 'absent', '', 'false', true, true],
-  ['keeps explicit true', 'f', 'true', '', 'true', true, true],
-  ['keeps explicit false', 'f', 'false', '', 'false', true, true],
-  ['read-back endpoint differs', 'f', 'true', 'f|t', 'true', false, true],
-  ['read-back enabled is absent', 'f', 'absent', 't|f', 'false', true, false],
-  ['refuses malformed explicit enabled', 'f', 'invalid', '', null, false, false],
-  ['write SQLSTATE', 'f', 'absent', '', null, false, false, 'sqlstate-40001'],
-  ['client failure without SQLSTATE', 'f', 'absent', '', null, false, false, 'psql-exit-2'],
-])('deploy sync handles %s', (_name, before, enabled, after, writtenValue, matches, explicit, psqlError = '') => {
-  expect(deploy.indexOf(deployCommand)).toBeGreaterThan(deploy.indexOf('"$cli" db push --linked'));
-  expect(deploy.indexOf(deployCommand)).toBeLessThan(deploy.indexOf('"$cli" functions deploy'));
+  ['sets true for missing policy', 'true', 'f', 'absent', '', 'true', true, true],
+  ['keeps matching true', 'true', 't', 'true', '', null, true, true],
+  ['keeps matching false', 'false', 't', 'false', '', null, true, true],
+  ['sets false when unset', undefined, 't', 'absent', '', 'false', true, true],
+  ['replaces false with desired true', 'true', 't', 'false', '', 'true', true, true],
+  ['replaces true with desired false', 'false', 't', 'true', '', 'false', true, true],
+  ['keeps desired true when only the endpoint changes', 'true', 'f', 'true', '', 'true', true, true],
+  ['keeps desired false when only the endpoint changes', 'false', 'f', 'false', '', 'false', true, true],
+  ['read-back endpoint differs', 'true', 'f', 'absent', 'f|t', 'true', false, true],
+  ['read-back enabled differs', 'true', 'f', 'false', 't|f', 'true', true, false],
+  ['read-back enabled is absent', 'false', 'f', 'absent', 't|f', 'false', true, false],
+  ['refuses malformed explicit enabled', 'true', 'f', 'invalid', '', null, false, false],
+  ['refuses invalid desired enabled', 'invalid', null, 'absent', '', null, false, false],
+  ['write SQLSTATE', 'true', 'f', 'absent', '', null, false, false, 'sqlstate-40001'],
+  ['client failure without SQLSTATE', 'false', 'f', 'absent', '', null, false, false, 'psql-exit-2'],
+])('deploy sync handles %s', (_name, desired, before, enabled, after, writtenValue, endpointMatches, enabledMatches, psqlError = '') => {
   const ref = randomUUID().replace(/-/g, '').slice(0, 20).replace(/[0-9]/g, 'x');
   const result = runBash(`set -euo pipefail
     exec 3>&1
@@ -104,17 +113,20 @@ test.each([
     psql() {
       local sql query
       sql=$(cat)
-      [[ "$OUTBOUND_WAKE_ENDPOINT" == "$EXPECTED_ENDPOINT" && "$PGHOST" == "$POOLER_HOST" ]] || return 1
-      # psql sends a semicolon-terminated query before the next \\bind can bind $1.
-      query=\${sql%$'\\n\\\\bind :endpoint\\n\\\\g\\nCOMMIT;'}
+      [[ "$OUTBOUND_WAKE_ENDPOINT" == "$EXPECTED_ENDPOINT" && "$PGHOST" == "$POOLER_HOST" &&
+         "$EDGE_DISPATCH_ENABLED" == "$EXPECTED_ENABLED" &&
+         "$sql" == *'\\getenv endpoint OUTBOUND_WAKE_ENDPOINT'* &&
+         "$sql" == *'\\getenv desired_enabled EDGE_DISPATCH_ENABLED'* ]] || return 1
+      # psql sends a semicolon-terminated query before the next \\bind can bind its parameters.
+      query=\${sql%$'\\n\\\\bind :endpoint :desired_enabled\\n\\\\g\\nCOMMIT;'}
       if [[ "$query" == "$sql" || "$query" == *';' ]]; then
         printf 'ERROR:  42P02\\n' >&2
         return 3
       fi
       if [[ "$sql" == *public.upsert_settings_value_v1* ]]; then
-        [[ "$sql" == *"IS DISTINCT FROM \\$1::text OR NOT (value ? 'enabled')"* &&
+        [[ "$sql" == *"value->>'endpoint_url' IS DISTINCT FROM \\$1::text OR value->'enabled' IS DISTINCT FROM to_jsonb(\\$2::boolean)"* &&
            "$sql" == *"NOT (value ? 'enabled') OR jsonb_typeof(value->'enabled') = 'boolean'"* &&
-           "$sql" == *"jsonb_build_object('enabled', false) || changed.value || jsonb_build_object('endpoint_url',"* ]] || return 1
+           "$sql" == *"changed.value || jsonb_build_object('endpoint_url', \\$1::text, 'enabled', \\$2::boolean)"* ]] || return 1
         if [[ -n "$PSQL_ERROR" ]]; then
           printf 'ERROR:  XX000 endpoint=%s password=%s\\n' "$OUTBOUND_WAKE_ENDPOINT" "$PGPASSWORD" >&2
           if [[ "$PSQL_ERROR" == sqlstate-* && " $* " == *' -v VERBOSITY=sqlstate '* ]]; then
@@ -123,18 +135,17 @@ test.each([
           fi
           return 2
         fi
-        case "$BEFORE_ENABLED" in
-          absent) printf 'false\n' > "$written" ;;
-          true|false) printf '%s\n' "$BEFORE_ENABLED" > "$written" ;;
-          *) return 0 ;;
-        esac
-        printf 'write:%s\n' "$(cat "$written")" >&3
+        if [[ "$BEFORE_ENABLED" != invalid && ( "$BEFORE" != t || "$BEFORE_ENABLED" != "$EDGE_DISPATCH_ENABLED" ) ]]; then
+          printf '%s\n' "$EDGE_DISPATCH_ENABLED" > "$written"
+          printf 'write:%s\n' "$EDGE_DISPATCH_ENABLED" >&3
+        fi
       elif [[ "$sql" == *public.resolve_settings* && "$sql" == *"READ ONLY"* ]]; then
-        [[ "$sql" == *"jsonb_typeof(value->'enabled') = 'boolean'"* ]] || return 1
+        [[ "$sql" == *"value->>'endpoint_url' = \\$1::text"* &&
+           "$sql" == *"value->'enabled' = to_jsonb(\\$2::boolean)"* ]] || return 1
         printf 'read\n' >&3
         if [[ -s "$written" ]]; then
           printf '%s\n' "\${AFTER:-t|t}"
-        elif [[ "$BEFORE_ENABLED" == true || "$BEFORE_ENABLED" == false ]]; then
+        elif [[ "$BEFORE_ENABLED" == "$EDGE_DISPATCH_ENABLED" ]]; then
           printf '%s|t\n' "$BEFORE"
         else
           printf '%s|f\n' "$BEFORE"
@@ -151,17 +162,19 @@ test.each([
     SUPABASE_DB_PASSWORD: randomUUID(),
     POOLER_HOST: ['aws-0-ci', 'pooler', 'supabase', 'com'].join('.'),
     EXPECTED_ENDPOINT: `https://${[ref, 'supabase', 'co'].join('.')}/functions/v1/api-caller`,
+    EDGE_DISPATCH_ENABLED: desired,
+    EXPECTED_ENABLED: desired ?? 'false',
     BEFORE: before,
     BEFORE_ENABLED: enabled,
     AFTER: after,
     PSQL_ERROR: psqlError,
   });
-  const output = ['read'];
+  const output = before ? ['read'] : [];
   if (writtenValue !== null) output.push(`write:${writtenValue}`, 'read');
   if (enabled === 'invalid') output.push('read');
-  output.push(`endpoint_matches_expected=${matches}`, `enabled_explicit=${explicit}`);
+  output.push(`endpoint_matches_expected=${endpointMatches}`, `enabled_matches_expected=${enabledMatches}`);
   expect(result).toEqual({
-    status: matches && explicit ? 0 : 1,
+    status: endpointMatches && enabledMatches ? 0 : 1,
     stdout: `${output.join('\n')}\n`,
     stderr: psqlError ? `outbound_wake_sync=FAILED reason=${psqlError}\n` : '',
   });
