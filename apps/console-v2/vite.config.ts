@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { TanStackRouterVite } from '@tanstack/router-vite-plugin';
 import { visualizer } from 'rollup-plugin-visualizer';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { resolveDevServerAllowedHosts } from './dev-server-allowed-hosts';
@@ -24,6 +25,13 @@ export default defineConfig(({ mode }) => {
   const analyze = env.ANALYZE === '1' || process.env.ANALYZE === '1';
   const seedMode = process.env.VITE_USE_SEED ?? env.VITE_USE_SEED;
   const seedEnabled = seedMode !== 'false';
+  // Console V2 uses the shared UI for label design. All other screens use its own catalogs.
+  const sharedUiMessages = Object.fromEntries(['en', 'ar'].map((locale) => {
+    const catalogPath = path.resolve(__dirname, '../../packages/config/messages', `${locale}.json`);
+    const { ui } = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    if (!ui?.labelDesigner) throw new Error(`Missing labelDesigner messages in ${locale}`);
+    return [locale, { ui: { labelDesigner: ui.labelDesigner } }];
+  }));
 
   return {
     root: __dirname,
@@ -53,6 +61,7 @@ export default defineConfig(({ mode }) => {
     // Stringified per Vite's define contract.
     define: {
       __SEED_ENABLED__: JSON.stringify(seedEnabled),
+      __UI_MESSAGE_CATALOGS__: JSON.stringify(JSON.stringify(sharedUiMessages)),
     },
     resolve: {
       alias: [
