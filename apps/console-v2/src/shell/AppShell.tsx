@@ -19,6 +19,7 @@ import { resolveLegacyHashNavigation } from '@/lib/legacy-hash-navigation';
 import { usePalette, type OpenPaletteOptions } from '@/hooks/useOverlay';
 import { formatCapabilityRequirement } from '@/lib/capabilities';
 import { useIdentity } from '@/lib/identity';
+import { useT } from '@/lib/i18n';
 import * as api from '@/lib/api';
 import {
   DEFAULT_NOTIFICATIONS,
@@ -113,6 +114,7 @@ export function AppShell({
   const commandPaletteOpenRef = useRef(false);
   const commandPaletteSessionRef = useRef(0);
   const identity = useIdentity();
+  const t = useT();
   const { hasCapability, isAuthenticated, isAuthLoading } = identity;
 
   const [flyoutGroup, setFlyoutGroup] = useState<NavSection | null>(null);
@@ -269,7 +271,7 @@ export function AppShell({
         return {
           label: item.label,
           key: item.routePath,
-          meta: allowed ? 'Open module workflow' : navItemAccessLabel(item),
+          meta: allowed ? t('shell.palette.openModule') : navItemAccessLabel(item, t),
           section: group.label,
           disabled: !allowed,
           value: { routePath: item.routePath } satisfies ShellPaletteValue,
@@ -287,7 +289,7 @@ export function AppShell({
       .map((row: unknown) => (row && typeof row === 'object' ? (row as ShellCommandRegistryRow) : null))
       .filter((row): row is ShellCommandRegistryRow => row !== null && Boolean(row.label || row.key));
     return {
-      placeholder: 'Search modules and commands...',
+      placeholder: t('shell.paletteSearch'),
       items: [
         ...navItems,
         ...commandRows.map((row) => {
@@ -298,11 +300,11 @@ export function AppShell({
             label: String(row.label ?? row.key),
             key: String(row.key ?? row.label),
             meta: missingCapability
-              ? formatCapabilityRequirement(capability)
+              ? formatCapabilityRequirement(capability, t)
               : routePath
-                ? 'Open module workflow'
-                : 'Open from a module row',
-            section: row.section ?? 'Commands',
+                ? t('shell.palette.openModule')
+                : t('shell.palette.openFromRow'),
+            section: row.section ?? t('shell.palette.commands'),
             disabled: !routePath || missingCapability,
             value: {
               routePath,
@@ -331,10 +333,10 @@ export function AppShell({
           void router.navigate({ to: value.routePath as never });
           return;
         }
-        onToast?.('This action needs a selected record. Open the matching module first.', 'info');
+        onToast?.(t('shell.palette.needsRecord'), 'info');
       },
     };
-  }, [hasCapability, identity, onToast, router]);
+  }, [hasCapability, identity, onToast, router, t]);
 
   const openCommandPalette = useCallback(() => {
     if (onOpenCommandPalette) {
@@ -405,7 +407,7 @@ export function AppShell({
   return (
     <AppGuard>
       <a className="skip-link" href="#main">
-        Skip to main content
+        {t('app.skip')}
       </a>
 
       <div

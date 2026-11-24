@@ -29,6 +29,8 @@
 //   * keeps seed-raw alignment enforced in tests/lint instead of importing
 //     seed-raw into production source.
 
+import { englishT, fill, type Translate } from './i18n';
+
 /**
  * Named const accessors for every capability the console-v2 FE reads.
  *
@@ -219,96 +221,36 @@ export function hasWildcardCapability(
   return false;
 }
 
-const CAPABILITY_LABEL_OVERRIDES: Record<string, string> = Object.freeze({
-  'access_policy.read': 'access policy',
-  'access_policy.approve': 'access approval',
-  'agreements.write': 'service level management',
-  'alerts.write': 'alert update',
-  'api_gateway.read': 'API gateway',
-  'api_gateway.write': 'API gateway update',
-  'audit_log.read': 'audit activity',
-  'branches.write': 'branch update',
-  'billing.write': 'billing update',
-  'clients.read': 'client access',
-  'clients.write': 'client update',
-  'cod.read': 'COD',
-  'devices.write': 'device management',
-  'disputes.write': 'dispute update',
-  'finance.read': 'finance access',
-  'finance.write': 'finance update',
-  'feature_flags.read': 'feature flag',
-  'feature_flags.write': 'feature flag update',
-  'fleet.write': 'fleet update',
-  'imports.read': 'import access',
-  'imports.write': 'import update',
-  'integrations.write': 'integration update',
-  'integration_plugins.read': 'integration plugin',
-  'integration_plugins.write': 'integration plugin update',
-  'integration_plugins.test': 'integration plugin test',
-  'integration_plugins.approve': 'integration plugin approval',
-  'integration_plugins.activate': 'integration plugin activation',
-  'invoices.refund': 'invoice refund',
-  'invoices.send': 'invoice send',
-  'lookups.read': 'lookup access',
-  'lookups.write': 'lookup update',
-  'marketplace_participant_requests.read': 'partner application',
-  'marketplace_participant_requests.review': 'partner application review',
-  'recipients.read': 'recipient access',
-  'recipients.write': 'recipient update',
-  'routes.write': 'route update',
-  'routes.scan_load': 'route scan-out',
-  'routes.confirm_departure': 'route departure confirmation',
-  'route_plans.read': 'route plan',
-  'route_plans.write': 'route plan update',
-  'senders.read': 'sender access',
-  'senders.write': 'sender update',
-  'service_offerings.read': 'service offering',
-  'service_offerings.write': 'service offering update',
-  'settlements.read': 'settlement',
-  'settlements.write': 'settlement update',
-  'settings.read': 'settings access',
-  'shipments.read': 'shipment access',
-  'shipments.write': 'shipment update',
-  'support.write': 'support update',
-  'tenant_signup_requests.read': 'tenant signup',
-  'tenant_signup_requests.review': 'tenant signup review',
-  'tasks.complete': 'task completion',
-  'tasks.write': 'task update',
-  'user_devices.read': 'device access',
-  'user_devices.write': 'device revocation',
-  'users.read': 'user access',
-  'users.manage': 'user management',
-  'webhooks.write': 'webhook update',
-  'workflows.write': 'workflow update',
-});
 
 function titleCasePhrase(value: string): string {
   return value.replace(/\b[a-z]/g, (match) => match.toUpperCase());
 }
 
+// Labels come from the capabilities catalog (lib/seed-raw/i18n/areas/capabilities.ts).
+// A key the catalog does not name falls back to its own words. `t` defaults to English
+// for code outside React; components pass the active-locale `t`.
 export function formatCapabilityLabel(
   capability: string | null | undefined,
   options: { titleCase?: boolean } = {},
+  t: Translate = englishT,
 ): string {
   const raw = String(capability ?? '').trim();
-  if (!raw) return options.titleCase ? 'Permission' : 'permission';
-  const override = CAPABILITY_LABEL_OVERRIDES[raw];
-  const phrase =
-    override ??
-    raw
-      .split('.')
-      .map((part) => part.replace(/_/g, ' '))
-      .filter(Boolean)
-      .join(' ');
+  if (!raw) return t(options.titleCase ? 'capabilities.fallbackTitle' : 'capabilities.fallback');
+  const derived = raw
+    .split('.')
+    .map((part) => part.replace(/_/g, ' '))
+    .filter(Boolean)
+    .join(' ');
+  const phrase = raw.split('.').length === 2 ? t(`capabilities.labels.${raw}`, derived) : derived;
   return options.titleCase ? titleCasePhrase(phrase) : phrase;
 }
 
-export function formatCapabilityRequirement(capability: string | null | undefined): string {
-  return `${formatCapabilityLabel(capability, { titleCase: true })} permission required`;
+export function formatCapabilityRequirement(capability: string | null | undefined, t: Translate = englishT): string {
+  return fill(t('capabilities.required'), { label: formatCapabilityLabel(capability, { titleCase: true }, t) });
 }
 
-export function formatCapabilityTitle(capability: string | null | undefined): string {
-  return `Requires ${formatCapabilityLabel(capability)} permission`;
+export function formatCapabilityTitle(capability: string | null | undefined, t: Translate = englishT): string {
+  return fill(t('capabilities.requires'), { label: formatCapabilityLabel(capability, {}, t) });
 }
 
 /**

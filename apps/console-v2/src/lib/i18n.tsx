@@ -17,11 +17,42 @@ interface I18nCtx {
   toggleLocale: () => void;
   t: (path: string, fallback?: string) => string;
   fmtDateTime: (iso: string | number | Date) => string;
+  /** Clock time (hours, minutes, seconds) in the app locale. */
+  fmtTime: (iso: string | number | Date) => string;
   fmtCurrency: (amount: number, currency?: string) => string;
   fmtNumber: (n: number, opts?: Intl.NumberFormatOptions) => string;
 }
 
-const CATALOGS: Record<Locale, Catalog> = { en: en as Catalog, ar: ar as Catalog };
+/** The Arabic half of an area catalog must have exactly the English keys. */
+export type CatalogShape<T> = { [K in keyof T]: T[K] extends string ? string : CatalogShape<T[K]> };
+
+// Area catalogs: one file per UI area, each exporting `en` and `ar`, so parallel changes touch separate files.
+const AREA_CATALOGS = import.meta.glob<{ en: Catalog; ar: Catalog }>('./seed-raw/i18n/areas/*.ts', { eager: true });
+
+/** Adds an area's keys to a catalog; a key defined twice is an error, so each string has one source. */
+function mergeArea(target: Catalog, area: Catalog, source: string, path = ''): void {
+  for (const [key, value] of Object.entries(area)) {
+    const at = path ? `${path}.${key}` : key;
+    const existing = target[key];
+    if (value && typeof value === 'object') {
+      if (existing === undefined) target[key] = {};
+      else if (typeof existing !== 'object') throw new Error(`i18n key ${at} in ${source} is already a string`);
+      mergeArea(target[key] as Catalog, value as Catalog, source, at);
+    } else if (existing !== undefined) {
+      throw new Error(`i18n key ${at} in ${source} is already defined`);
+    } else {
+      target[key] = value;
+    }
+  }
+}
+
+function buildCatalog(base: Catalog, locale: Locale): Catalog {
+  const catalog = structuredClone(base);
+  for (const [source, area] of Object.entries(AREA_CATALOGS)) mergeArea(catalog, area[locale], source);
+  return catalog;
+}
+
+const CATALOGS: Record<Locale, Catalog> = { en: buildCatalog(en as Catalog, 'en'), ar: buildCatalog(ar as Catalog, 'ar') };
 
 // The console has no session-wide tenant display zone, so dates show in the
 // user's own zone. This is the single place to change that default.
@@ -79,6 +110,17 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     },
     [intlLocale]
   );
+  const fmtTime = useCallback(
+    (iso: string | number | Date) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      return new Intl.DateTimeFormat(intlLocale, {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        timeZone: DISPLAY_TIME_ZONE,
+      }).format(d);
+    },
+    [intlLocale]
+  );
   const fmtCurrency = useCallback(
     (amount: number, currency?: string) => {
       const numericAmount = Number.isFinite(amount) ? amount : 0;
@@ -117,10 +159,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       toggleLocale: () => setLocaleState((l) => (l === 'en' ? 'ar' : 'en')),
       t,
       fmtDateTime,
+      fmtTime,
       fmtCurrency,
       fmtNumber,
     }),
-    [locale, dir, t, fmtDateTime, fmtCurrency, fmtNumber]
+    [locale, dir, t, fmtDateTime, fmtTime, fmtCurrency, fmtNumber]
   );
 
   return (
@@ -134,4 +177,20 @@ export function useI18n() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error('useI18n outside I18nProvider');
   return ctx;
+}
+
+/** Catalog lookup signature shared by `t`, `useT()` and `englishT`. */
+export type Translate = I18nCtx['t'];
+
+/** English catalog lookup for code that runs outside React, such as drawer spec builders. */
+export const englishT = (path: string, fallback?: string) => lookup(CATALOGS.en!, path) ?? fallback ?? path;
+
+/** Catalog lookup for shared components that may render outside I18nProvider; there it reads the English catalog. */
+export function useT(): I18nCtx['t'] {
+  return useContext(Ctx)?.t ?? englishT;
+}
+
+/** Fills `{name}` placeholders in a catalog string; unknown names stay visible. */
+export function fill(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in values ? String(values[name]) : match));
 }
