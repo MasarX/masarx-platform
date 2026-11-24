@@ -46,6 +46,7 @@ function NavItemLink({
   onClick?: () => void;
 }) {
   const navigateTo = useConsoleNavigator();
+  const t = useT();
   const className = ['nav-item', active ? 'is-active' : '', allowed ? '' : 'is-locked']
     .filter(Boolean)
     .join(' ');
@@ -188,6 +189,7 @@ export function SidenavFlyout({
   const location = useLocation();
   const navigateTo = useConsoleNavigator();
   const identity = useIdentity();
+  const t = useT();
   if (!group || !anchorRect) return null;
   const currentRoute = location.pathname || '/';
   const viewportHeight = typeof window === 'undefined' ? 720 : window.innerHeight;
