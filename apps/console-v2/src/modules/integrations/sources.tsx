@@ -57,6 +57,7 @@ import {
   ExternalIntakeWorkspaceToolbar,
   externalIntakeTargetPath,
 } from './ExternalIntakeWorkspaceToolbar';
+import { fill, useI18n } from '@/lib/i18n';
 
 // ─── Strict canonical lookup row resolver (NO fallback constants) ─────────
 // AGENTS.md §2 + §4: provider chip tone resolves through canonical
@@ -180,8 +181,9 @@ interface IntegrationCredentialOptionRow extends Record<string, unknown> {
 }
 
 function ProviderChip({ value }: { value: string }) {
+  const { t } = useI18n();
   const r = lookupRow('webhook_provider_type', value);
-  if (!r) return <Chip label={`Unknown provider: ${value}`} kind="danger" size="xs" />;
+  if (!r) return <Chip label={fill(t('integrationsSources.providerChip.unknownProvider'), { value: String(value) })} kind="danger" size="xs" />;
   return <Chip label={r.label} kind={r.tone as ChipKind} size="xs" />;
 }
 
@@ -351,8 +353,9 @@ function enabledStateKey(value: boolean): string {
   return value ? onKey : offKey;
 }
 function EnabledChip({ value }: { value: boolean }) {
+  const { t } = useI18n();
   const row = lookupRow('enabled_state', enabledStateKey(value));
-  if (!row) return <Chip label="Unknown enabled state" kind="danger" size="xs" />;
+  if (!row) return <Chip label={t('integrationsSources.enabledChip.unknownEnabledState')} kind="danger" size="xs" />;
   return <Chip label={row.label ?? row.value} kind={(row.tone as ChipKind) ?? 'neutral'} size="xs" />;
 }
 
@@ -402,11 +405,12 @@ function deriveHealthStateKey(isHealthy: boolean, errorCount24h: number): string
   return errorCount24h > 0 ? erroringRow?.value ?? '' : idleRow?.value ?? '';
 }
 function HealthChip({ isHealthy, errorCount24h }: { isHealthy: boolean; errorCount24h: number }) {
+  const { t } = useI18n();
   const healthState = deriveHealthStateKey(isHealthy, errorCount24h);
   const row = lookupRow('webhook_source_health', healthState);
   if (!row)
     return (
-      <Chip label="Unknown source health" kind="danger" size="xs" />
+      <Chip label={t('integrationsSources.healthChip.unknownSourceHealth')} kind="danger" size="xs" />
     );
   return <Chip label={row.label ?? row.value} kind={(row.tone as ChipKind) ?? 'neutral'} size="xs" />;
 }
@@ -448,12 +452,14 @@ function isArchivedSource(row: WebhookSourceRow | WebhookSourceDirectoryRow): bo
 }
 
 function SourceLifecycleChip({ row }: { row: WebhookSourceRow | WebhookSourceDirectoryRow }) {
+  const { t } = useI18n();
   return isArchivedSource(row)
-    ? <Chip label="Archived" kind="warn" size="xs" />
-    : <Chip label="Open" kind="good" size="xs" />;
+    ? <Chip label={t('integrationsSources.sourceLifecycleChip.archived')} kind="warn" size="xs" />
+    : <Chip label={t('integrationsSources.sourceLifecycleChip.open')} kind="good" size="xs" />;
 }
 
 export function SourcesModule() {
+  const { t } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const navigate = useConsoleNavigator();
@@ -515,7 +521,7 @@ export function SourcesModule() {
       source_name: sourceName,
     });
     if (!stashed) {
-      pushToast('Token handoff is unavailable in this browser session. Copy the token manually.', 'warn');
+      pushToast(t('integrationsSources.sourcesModule.tokenHandoffIsUnavailable'), 'warn');
       return;
     }
     modal.close();
@@ -524,16 +530,16 @@ export function SourcesModule() {
 
   function openOneTimeTokenModal(sourceName: string, token: string, tokenStatus?: string, sourceId?: string | null) {
     modal.open({
-      title: `Rotated token - ${sourceName}`,
+      title: fill(t('integrationsSources.sourcesModule.rotatedToken'), { sourceName: String(sourceName) }),
       body: (
         <div className="card" style={{ background: 'var(--paper-2)' }}>
-          <div className="eyebrow">One-time source token</div>
+          <div className="eyebrow">{t('integrationsSources.sourcesModule.oneTimeSourceToken')}</div>
           <p className="state__hint" style={{ margin: '4px 0 8px' }}>
-            Use this once in External Intake &gt; Test webhook intake or API request intake. It will not be shown again.
+            {t('integrationsSources.sourcesModule.useThisOnce')}
           </p>
           {tokenStatus ? (
             <p className="state__hint" style={{ margin: '0 0 8px' }}>
-              Token state: {tokenStatus}
+              {fill(t('integrationsSources.sourcesModule.tokenState'), { tokenStatus: String(tokenStatus) })}
             </p>
           ) : null}
           <code className="mono" style={{ wordBreak: 'break-all' }}>{token}</code>
@@ -542,18 +548,18 @@ export function SourcesModule() {
       footer: (
         <>
           <Button
-            label="Use in Test webhook intake"
+            label={t('integrationsSources.sourcesModule.useInTestWebhook')}
             iconName="webhook"
             kind="ghost"
             onClick={() => applyTokenToTester('webhook-tester', token, sourceName, sourceId)}
           />
           <Button
-            label="Use in API request intake"
+            label={t('integrationsSources.sourcesModule.useInApiRequest')}
             iconName="plug"
             kind="ghost"
             onClick={() => applyTokenToTester('api-gateway', token, sourceName, sourceId)}
           />
-          <Button label="Done" kind="primary" onClick={() => modal.close()} />
+          <Button label={t('integrationsSources.sourcesModule.done')} kind="primary" onClick={() => modal.close()} />
         </>
       ),
     });
@@ -571,7 +577,7 @@ export function SourcesModule() {
     if (mintedToken) {
       openOneTimeTokenModal(row.name, mintedToken, authTokenStatusLabel(directory), row.id);
     }
-    pushToast(`Rotated · ${row.name}`, 'good');
+    pushToast(fill(t('integrationsSources.sourcesModule.rotated'), { name: String(row.name) }), 'good');
   }
 
   const rawSources = useMemo(
@@ -652,6 +658,7 @@ export function SourcesModule() {
 
   function openSourceForm(row?: WebhookSourceRow) {
     function SourceForm() {
+      const { t } = useI18n();
       const formId = useId();
       const displayNameId = `${formId}-display-name`;
       const sourceReferenceId = `${formId}-source-reference`;
@@ -797,7 +804,7 @@ export function SourcesModule() {
             modal.close();
           }
           pushToast(
-            row ? `Updated · ${name}` : `Created intake source · ${name}`,
+            row ? fill(t('integrationsSources.sourceForm.updated'), { name: String(name) }) : fill(t('integrationsSources.sourceForm.createdIntakeSource'), { name: String(name) }),
             'good',
           );
         } catch (e) {
@@ -811,8 +818,8 @@ export function SourcesModule() {
         <>
           <p className="state__hint">
             {row
-          ? 'Edits are dispatched through the canonical source toggle path.'
-          : 'New sources are created through the canonical webhook-source upsert path.'}
+          ? t('integrationsSources.sourceForm.editsAreDispatchedThrough')
+          : t('integrationsSources.sourceForm.newSourcesAreCreated')}
           </p>
           <div
             style={{
@@ -824,36 +831,36 @@ export function SourcesModule() {
               marginTop: '12px',
             }}
           >
-            <label className="mono" htmlFor={displayNameId}>Display name</label>
+            <label className="mono" htmlFor={displayNameId}>{t('integrationsSources.sourceForm.displayName')}</label>
             <input
               id={displayNameId}
-              aria-label="Intake source display name"
+              aria-label={t('integrationsSources.sourceForm.intakeSourceDisplayName')}
               className="dt-inline-input"
               type="text"
-              placeholder="e.g. Exampleparcel KSA production"
+              placeholder={t('integrationsSources.sourceForm.eGExampleparcelKsa')}
               value={formState.name ?? ''}
               onChange={(e) => update('name', e.target.value)}
             />
-            <label className="mono" htmlFor={sourceReferenceId}>Source reference</label>
+            <label className="mono" htmlFor={sourceReferenceId}>{t('integrationsSources.sourceForm.sourceReference')}</label>
             <div style={{ display: 'grid', gap: '6px' }}>
               <input
                 id={sourceReferenceId}
-                aria-label="Intake source reference"
+                aria-label={t('integrationsSources.sourceForm.intakeSourceReference')}
                 aria-describedby={sourceReferenceHintId}
                 className="dt-inline-input"
                 type="text"
-                placeholder="e.g. exampleparcel-ksa-prod"
+                placeholder={t('integrationsSources.sourceForm.eGExampleparcelKsa2')}
                 value={formState.source_identifier ?? ''}
                 onChange={(e) => update('source_identifier', e.target.value)}
               />
               <p id={sourceReferenceHintId} className="state__hint" style={{ margin: 0 }}>
-                Stable source reference used when partners send intake requests.
+                {t('integrationsSources.sourceForm.stableSourceReferenceUsed')}
               </p>
             </div>
-            <label className="mono" htmlFor={providerId}>Provider</label>
+            <label className="mono" htmlFor={providerId}>{t('integrationsSources.sourceForm.provider')}</label>
             <select
               id={providerId}
-              aria-label="Intake source provider"
+              aria-label={t('integrationsSources.sourceForm.intakeSourceProvider')}
               className="dt-inline-input"
               value={formState.provider_type ?? canonicalDefaultProvider}
               onChange={(e) =>
@@ -866,11 +873,11 @@ export function SourcesModule() {
                 </option>
               ))}
             </select>
-            <label className="mono" htmlFor={mappingId}>Mapping profile</label>
+            <label className="mono" htmlFor={mappingId}>{t('integrationsSources.sourceForm.mappingProfile')}</label>
             <div style={{ display: 'grid', gap: '6px' }}>
               <select
                 id={mappingId}
-                aria-label="Intake source mapping profile"
+                aria-label={t('integrationsSources.sourceForm.intakeSourceMappingProfile')}
                 className="dt-inline-input"
                 value={formState.mapping_config_id ?? ''}
                 onChange={(e) => update('mapping_config_id', e.target.value)}
@@ -885,21 +892,21 @@ export function SourcesModule() {
               {formMappingOptions.length === 0 ? (
                 <StateView
                   kind="error"
-                  title="No source-bindable mapping profile"
-                  hint="Activate an intake plugin binding before creating an intake source."
+                  title={t('integrationsSources.sourceForm.noSourceBindableMapping')}
+                  hint={t('integrationsSources.sourceForm.activateAnIntakePlugin')}
                 />
               ) : null}
             </div>
-            <label className="mono" htmlFor={senderId}>Shipment sender</label>
+            <label className="mono" htmlFor={senderId}>{t('integrationsSources.sourceForm.shipmentSender')}</label>
             <div style={{ display: 'grid', gap: '6px' }}>
               <select
                 id={senderId}
-                aria-label="Intake source shipment sender"
+                aria-label={t('integrationsSources.sourceForm.intakeSourceShipmentSender')}
                 className="dt-inline-input"
                 value={formState.sender_id ?? ''}
                 onChange={(e) => update('sender_id', e.target.value || null)}
               >
-                <option value="">No shipment sender</option>
+                <option value="">{t('integrationsSources.sourceForm.noShipmentSender')}</option>
                 {senderOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {senderOptionLabel(option)}
@@ -908,14 +915,14 @@ export function SourcesModule() {
               </select>
               {senderRequired ? (
                 <p className="state__hint" style={{ margin: 0 }}>
-                  Required for shipment-create mappings so intake resolves the client and materializes shipments.
+                  {t('integrationsSources.sourceForm.requiredForShipmentCreate')}
                 </p>
               ) : null}
             </div>
-            <label className="mono" htmlFor={rateLimitId}>Rate limit / hr</label>
+            <label className="mono" htmlFor={rateLimitId}>{t('integrationsSources.sourceForm.rateLimitHr')}</label>
             <input
               id={rateLimitId}
-              aria-label="Intake source hourly rate limit"
+              aria-label={t('integrationsSources.sourceForm.intakeSourceHourlyRate')}
               className="dt-inline-input"
               type="number"
               value={formState.rate_limit_per_hour ?? ''}
@@ -927,12 +934,12 @@ export function SourcesModule() {
                 );
               }}
             />
-            <span className="mono" id={enabledLabelId}>Enabled</span>
+            <span className="mono" id={enabledLabelId}>{t('integrationsSources.sourceForm.enabled')}</span>
             <div style={{ display: 'grid', gap: '6px' }}>
               <div
                 id={enabledId}
                 role="radiogroup"
-                aria-label="Intake source enabled state"
+                aria-label={t('integrationsSources.sourceForm.intakeSourceEnabledState')}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: enabledOptions.length > 1 ? `repeat(${enabledOptions.length}, minmax(0, 1fr))` : '1fr',
@@ -958,16 +965,16 @@ export function SourcesModule() {
               {enabledOptions.length === 0 ? (
                 <StateView
                   kind="error"
-                  title="Enabled-state lookup missing"
-                  hint="Enabled-state options are not configured. Finish intake source setup before saving source state."
+                  title={t('integrationsSources.sourceForm.enabledStateLookupMissing')}
+                  hint={t('integrationsSources.sourceForm.enabledStateOptionsAre')}
                 />
               ) : null}
             </div>
-            <label className="mono" htmlFor={hmacModeId}>Receiver auth</label>
+            <label className="mono" htmlFor={hmacModeId}>{t('integrationsSources.sourceForm.receiverAuth')}</label>
             <select
               id={hmacModeId}
               className="dt-inline-input"
-              aria-label="Intake source HMAC validation"
+              aria-label={t('integrationsSources.sourceForm.intakeSourceHmacValidation')}
               value={hmacEnabled ? 'hmac' : 'token'}
               onChange={(e) => {
                 const nextEnabled = e.target.value === 'hmac';
@@ -977,20 +984,20 @@ export function SourcesModule() {
                 }
               }}
             >
-              <option value="token">Token only</option>
-              <option value="hmac">Token + HMAC signature</option>
+              <option value="token">{t('integrationsSources.sourceForm.tokenOnly')}</option>
+              <option value="hmac">{t('integrationsSources.sourceForm.tokenHmacSignature')}</option>
             </select>
-            <label className="mono" htmlFor={hmacCredentialId}>HMAC credential</label>
+            <label className="mono" htmlFor={hmacCredentialId}>{t('integrationsSources.sourceForm.hmacCredential')}</label>
             <div style={{ display: 'grid', gap: '6px' }}>
               <select
                 id={hmacCredentialId}
                 className="dt-inline-input"
-                aria-label="Intake source HMAC credential"
+                aria-label={t('integrationsSources.sourceForm.intakeSourceHmacCredential')}
                 value={formState.hmac_auth_config_id ?? ''}
                 onChange={(e) => update('hmac_auth_config_id', e.target.value || null)}
                 disabled={!hmacEnabled || hmacCredentialOptions.length === 0}
               >
-                <option value="">No HMAC credential</option>
+                <option value="">{t('integrationsSources.sourceForm.noHmacCredential')}</option>
                 {hmacCredentialOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {hmacCredentialOptionLabel(option)}
@@ -1000,18 +1007,18 @@ export function SourcesModule() {
               {hmacEnabled && hmacCredentialOptions.length === 0 ? (
                 <StateView
                   kind="error"
-                  title="No HMAC credential"
-                  hint="Create an HMAC provider credential before requiring receiver signatures."
+                  title={t('integrationsSources.sourceForm.noHmacCredential')}
+                  hint={t('integrationsSources.sourceForm.createAnHmacProvider')}
                 />
               ) : null}
             </div>
-            <label className="mono" htmlFor={hmacHeaderId}>Signature header</label>
+            <label className="mono" htmlFor={hmacHeaderId}>{t('integrationsSources.sourceForm.signatureHeader')}</label>
             <input
               id={hmacHeaderId}
-              aria-label="Intake source HMAC signature header"
+              aria-label={t('integrationsSources.sourceForm.intakeSourceHmacSignature')}
               className="dt-inline-input"
               type="text"
-              placeholder="x-signature"
+              placeholder={t('integrationsSources.sourceForm.xSignature')}
               value={formState.hmac_header ?? ''}
               onChange={(e) => update('hmac_header', e.target.value)}
               disabled={!hmacEnabled}
@@ -1022,20 +1029,20 @@ export function SourcesModule() {
           </div>
           {oneTimeToken ? (
             <div className="card" style={{ background: 'var(--paper-2)', marginTop: '10px' }}>
-              <div className="eyebrow">One-time source token</div>
+              <div className="eyebrow">{t('integrationsSources.sourceForm.oneTimeSourceToken')}</div>
               <p className="state__hint" style={{ margin: '4px 0 8px' }}>
-                Use this once in External Intake &gt; Test webhook intake or API request intake. It will not be shown again.
+                {t('integrationsSources.sourcesModule.useThisOnce')}
               </p>
               <code className="mono" style={{ wordBreak: 'break-all' }}>{oneTimeToken}</code>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
                 <Button
-                  label="Use in Test webhook intake"
+                  label={t('integrationsSources.sourceForm.useInTestWebhook')}
                   iconName="webhook"
                   kind="ghost"
                   onClick={() => applyTokenToTester('webhook-tester', oneTimeToken, oneTimeSourceName, oneTimeSourceId)}
                 />
                 <Button
-                  label="Use in API request intake"
+                  label={t('integrationsSources.sourceForm.useInApiRequest')}
                   iconName="plug"
                   kind="ghost"
                   onClick={() => applyTokenToTester('api-gateway', oneTimeToken, oneTimeSourceName, oneTimeSourceId)}
@@ -1044,9 +1051,9 @@ export function SourcesModule() {
             </div>
           ) : null}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label={oneTimeToken ? 'Done' : 'Cancel'} kind="ghost" onClick={() => modal.close()} disabled={submitting} />
+            <Button label={oneTimeToken ? t('integrationsSources.sourceForm.done') : t('integrationsSources.sourceForm.cancel')} kind="ghost" onClick={() => modal.close()} disabled={submitting} />
             <Button
-              label={submitting ? 'Saving…' : row ? 'Save' : 'Create'}
+              label={submitting ? t('integrationsSources.sourceForm.saving') : row ? t('integrationsSources.sourceForm.save') : t('integrationsSources.sourceForm.create')}
               kind="primary"
               capability={CAP.WEBHOOKS_WRITE}
               onClick={submit}
@@ -1056,16 +1063,17 @@ export function SourcesModule() {
         </>
       );
     }
-    modal.open({ title: row ? `Edit · ${row.name}` : 'New intake source', body: <SourceForm /> });
+    modal.open({ title: row ? fill(t('integrationsSources.sourcesModule.edit'), { name: String(row.name) }) : t('integrationsSources.sourcesModule.newIntakeSource'), body: <SourceForm /> });
   }
 
   function openArchiveSourceModal(row: WebhookSourceRow) {
     function ArchiveSourceForm() {
+      const { t } = useI18n();
       const [reason, setReason] = useState('');
       return (
         <div>
           <p className="state__hint">
-            Archiving keeps source history visible, disables intake, and records the operator reason.
+            {t('integrationsSources.archiveSourceForm.archivingKeepsSourceHistory')}
           </p>
           <div
             style={{
@@ -1077,35 +1085,35 @@ export function SourcesModule() {
               marginTop: 8,
             }}
           >
-            <label className="mono" htmlFor="webhook-source-archive-reason">Reason</label>
+            <label className="mono" htmlFor="webhook-source-archive-reason">{t('integrationsSources.archiveSourceForm.reason')}</label>
             <input
               id="webhook-source-archive-reason"
               className="dt-inline-input"
-              placeholder="e.g. Tenant moved to a new integration source"
+              placeholder={t('integrationsSources.archiveSourceForm.eGTenantMoved')}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-            <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+            <Button label={t('integrationsSources.archiveSourceForm.cancel')} kind="ghost" onClick={() => modal.close()} />
             <Button
-              label="Archive source"
+              label={t('integrationsSources.archiveSourceForm.archiveSource')}
               iconName="trash"
               kind="danger"
               capability={CAP.WEBHOOKS_WRITE}
               onClick={async () => {
                 const trimmedReason = reason.trim();
                 if (!trimmedReason) {
-                  pushToast('Archive reason is required', 'warn');
+                  pushToast(t('integrationsSources.archiveSourceForm.archiveReasonIsRequired'), 'warn');
                   return;
                 }
                 try {
                   await archiveSource.mutateAsync({ source_id: row.id, reason: trimmedReason });
                   await requireWebhookSourceStateReadback(row.id, { enabled: false, archived: true });
                   modal.close();
-                  pushToast(`Archived · ${row.name}`, 'warn');
+                  pushToast(fill(t('integrationsSources.archiveSourceForm.archived'), { name: String(row.name) }), 'warn');
                 } catch (e) {
-                  pushToast(`Archive failed · ${(e as Error)?.message ?? ''}`, 'danger');
+                  pushToast(fill(t('integrationsSources.archiveSourceForm.archiveFailed'), { value: String((e as Error)?.message ?? '') }), 'danger');
                 }
               }}
             />
@@ -1113,7 +1121,7 @@ export function SourcesModule() {
         </div>
       );
     }
-    modal.open({ title: `Archive · ${row.name}`, body: <ArchiveSourceForm /> });
+    modal.open({ title: fill(t('integrationsSources.sourcesModule.archive'), { name: String(row.name) }), body: <ArchiveSourceForm /> });
   }
 
   function openSourceDrawer(row: WebhookSourceRow, projectionOverride?: WebhookSourceDirectoryRow) {
@@ -1129,100 +1137,100 @@ export function SourcesModule() {
       ? `Token status confirmed: ${tokenStatus}`
       : 'Token status confirmation pending';
     const summaryRows: KvRow[] = [
-      { key: 'name', label: 'Name', value: row.name },
-      { key: 'id', label: 'Source confirmation', value: row.id ? 'Available' : '—' },
-      { key: 'source_id', label: 'Source ID', value: row.id, mono: true },
-      { key: 'source_identifier', label: 'Source reference', value: operatorReference('Source', row.source_identifier), mono: true },
+      { key: 'name', label: t('integrationsSources.sourcesModule.name'), value: row.name },
+      { key: 'id', label: t('integrationsSources.sourcesModule.sourceConfirmation'), value: row.id ? 'Available' : '—' },
+      { key: 'source_id', label: t('integrationsSources.sourcesModule.sourceId'), value: row.id, mono: true },
+      { key: 'source_identifier', label: t('integrationsSources.sourcesModule.sourceReference'), value: operatorReference('Source', row.source_identifier), mono: true },
       {
         key: 'provider_type',
-        label: 'Provider',
+        label: t('integrationsSources.sourcesModule.provider'),
         value: providerLabel(row.provider_type),
       },
       {
         key: 'auth_token_status',
-        label: 'Auth token status',
+        label: t('integrationsSources.sourcesModule.authTokenStatus'),
         value: tokenStatus,
       },
       {
         key: 'hmac_validation',
-        label: 'Receiver auth',
+        label: t('integrationsSources.sourcesModule.receiverAuth'),
         value: hmacValidationLabel(row as WebhookSourceRow & WebhookSourceDirectoryRow),
       },
       {
         key: 'mapping_config_id',
-        label: 'Mapping',
+        label: t('integrationsSources.sourcesModule.mapping'),
         value: row.mapping_config_id
           ? sourceMappingLabel(row.mapping_config_id, row as WebhookSourceRow & WebhookSourceDirectoryRow, mappingOptionsById)
           : '—',
       },
       {
         key: 'sender_id',
-        label: 'Shipment sender',
+        label: t('integrationsSources.sourcesModule.shipmentSender'),
         value: sourceSenderLabel(row as WebhookSourceRow & WebhookSourceDirectoryRow),
       },
       {
         key: 'rate_limit_per_hour',
-        label: 'Rate / hr',
+        label: t('integrationsSources.sourcesModule.rateHr'),
         value: row.rate_limit_per_hour != null ? String(row.rate_limit_per_hour) : '—',
         mono: true,
       },
       {
         key: 'enabled',
-        label: 'Enabled',
+        label: t('integrationsSources.sourcesModule.enabled'),
         value: enabledLabel(row.enabled),
       },
       {
         key: 'lifecycle',
-        label: 'Lifecycle',
+        label: t('integrationsSources.sourcesModule.lifecycle'),
         value: isArchivedSource(row) ? 'Archived' : 'Open',
       },
       ...(isArchivedSource(row)
         ? [
             {
               key: 'archived_at',
-              label: 'Archived at',
+              label: t('integrationsSources.sourcesModule.archivedAt'),
               value: sourceArchivedAt(row) ? new Date(sourceArchivedAt(row) as string).toLocaleString() : '—',
               mono: true,
             },
             {
               key: 'archive_reason',
-              label: 'Archive reason',
+              label: t('integrationsSources.sourcesModule.archiveReason'),
               value: sourceArchiveReason(row) ?? '—',
             },
           ] satisfies KvRow[]
         : []),
       {
         key: 'health',
-        label: 'Health',
+        label: t('integrationsSources.sourcesModule.health'),
         value: healthLabel(isHealthy, errorCount24h),
       },
       {
         key: 'event_count_24h',
-        label: 'Events 24h',
+        label: t('integrationsSources.sourcesModule.events24h'),
         value: String(eventCount24h),
         mono: true,
       },
       {
         key: 'error_count_24h',
-        label: 'Errors 24h',
+        label: t('integrationsSources.sourcesModule.errors24h'),
         value: String(errorCount24h),
         mono: true,
       },
       {
         key: 'rule_count',
-        label: 'Routing rules',
+        label: t('integrationsSources.sourcesModule.routingRules'),
         value: `${activeRuleCount} active · ${ruleCount} total`,
         mono: true,
       },
       {
         key: 'last_event_at',
-        label: 'Last event',
+        label: t('integrationsSources.sourcesModule.lastEvent'),
         value: row.last_event_at ? new Date(row.last_event_at).toLocaleString() : '—',
         mono: true,
       },
       {
         key: 'last_event_status',
-        label: 'Last status',
+        label: t('integrationsSources.sourcesModule.lastStatus'),
         value: proj?.last_event_status ?? '—',
         mono: true,
       },
@@ -1233,7 +1241,7 @@ export function SourcesModule() {
       deepLink: `/integrations/sources?focus=${row.id}`,
       body: (
         <div className="rail-body" style={{ padding: '0 0 8px' }}>
-          <h4 className="eyebrow">Intake source</h4>
+          <h4 className="eyebrow">{t('integrationsSources.sourcesModule.intakeSource')}</h4>
           <KvGrid rows={summaryRows} />
           <p
             className="state__hint"
@@ -1247,7 +1255,7 @@ export function SourcesModule() {
       footer: (
         <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
           <Button
-            label="Rotate token"
+            label={t('integrationsSources.sourcesModule.rotateToken')}
             iconName="refresh"
             kind="ghost"
             capability={CAP.WEBHOOKS_WRITE}
@@ -1256,13 +1264,13 @@ export function SourcesModule() {
               try {
                 await rotateSourceToken(row, { refreshDrawer: true });
               } catch (e) {
-                pushToast(`Rotate failed · ${(e as Error)?.message ?? ''}`, 'danger');
+                pushToast(fill(t('integrationsSources.sourcesModule.rotateFailed'), { value: String((e as Error)?.message ?? '') }), 'danger');
               }
             }}
           />
           <div style={{ flex: 1 }} />
           <Button
-            label="Archive"
+            label={t('integrationsSources.sourcesModule.archive2')}
             iconName="trash"
             kind="danger"
             capability={CAP.WEBHOOKS_WRITE}
@@ -1273,7 +1281,7 @@ export function SourcesModule() {
             }}
           />
           <Button
-            label="Edit"
+            label={t('integrationsSources.sourcesModule.edit2')}
             iconName="edit"
             kind="primary"
             capability={CAP.WEBHOOKS_WRITE}
@@ -1307,10 +1315,10 @@ export function SourcesModule() {
   }, [sources]);
 
   const COLUMNS: Array<DataTableColumn<WebhookSourceRow>> = [
-    { key: 'name', label: 'Name', sortable: true },
+    { key: 'name', label: t('integrationsSources.sourcesModule.name'), sortable: true },
     {
       key: 'source_identifier',
-      label: 'Source reference',
+      label: t('integrationsSources.sourcesModule.sourceReference'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -1318,14 +1326,14 @@ export function SourcesModule() {
     },
     {
       key: 'provider_type',
-      label: 'Provider',
+      label: t('integrationsSources.sourcesModule.provider'),
       filterable: true,
       sortable: true,
       render: (raw) => <ProviderChip value={String(raw)} />,
     },
     {
       key: 'mapping_config_id',
-      label: 'Mapping',
+      label: t('integrationsSources.sourcesModule.mapping'),
       render: (raw, row) => {
         const v = String(raw ?? '');
         if (!v) return <span style={{ color: 'var(--ink-3)' }}>—</span>;
@@ -1347,26 +1355,26 @@ export function SourcesModule() {
     },
     {
       key: 'sender_id',
-      label: 'Sender / client',
+      label: t('integrationsSources.sourcesModule.senderClient'),
       render: (_raw, row) => sourceSenderLabel(row as WebhookSourceRow & WebhookSourceDirectoryRow),
     },
-    { key: 'rate_limit_per_hour', label: 'Rate / hr', align: 'right', mono: true, sortable: true },
+    { key: 'rate_limit_per_hour', label: t('integrationsSources.sourcesModule.rateHr'), align: 'right', mono: true, sortable: true },
     {
       key: 'enabled',
-      label: 'Enabled',
+      label: t('integrationsSources.sourcesModule.enabled'),
       filterable: true,
       sortable: true,
       render: (raw) => <EnabledChip value={!!raw} />,
     },
     {
       key: 'lifecycle_state',
-      label: 'Lifecycle',
+      label: t('integrationsSources.sourcesModule.lifecycle'),
       filterable: true,
       render: (_raw, row) => <SourceLifecycleChip row={row as WebhookSourceRow & WebhookSourceDirectoryRow} />,
     },
     {
       key: 'hmac_enabled',
-      label: 'Receiver auth',
+      label: t('integrationsSources.sourcesModule.receiverAuth'),
       filterable: true,
       render: (_raw, row) => (
         <HmacValidationChip row={row as WebhookSourceRow & WebhookSourceDirectoryRow} />
@@ -1374,7 +1382,7 @@ export function SourcesModule() {
     },
     {
       key: 'auth_token_masked',
-      label: 'Token',
+      label: t('integrationsSources.sourcesModule.token'),
       filterable: true,
       render: (_raw, row) => (
         <Chip
@@ -1390,7 +1398,7 @@ export function SourcesModule() {
     // available.
     {
       key: 'is_healthy',
-      label: 'Healthy',
+      label: t('integrationsSources.sourcesModule.healthy'),
       filterable: true,
       sortable: true,
       render: (raw, row) => {
@@ -1400,7 +1408,7 @@ export function SourcesModule() {
     },
     {
       key: 'event_count_24h',
-      label: 'Events 24h',
+      label: t('integrationsSources.sourcesModule.events24h'),
       align: 'right',
       mono: true,
       sortable: true,
@@ -1408,7 +1416,7 @@ export function SourcesModule() {
     },
     {
       key: 'error_count_24h',
-      label: 'Errors 24h',
+      label: t('integrationsSources.sourcesModule.errors24h'),
       align: 'right',
       mono: true,
       sortable: true,
@@ -1416,19 +1424,19 @@ export function SourcesModule() {
     },
     {
       key: 'rule_count',
-      label: 'Rules',
+      label: t('integrationsSources.sourcesModule.rules'),
       align: 'right',
       mono: true,
       sortable: true,
       type: 'number',
     },
-    { key: 'last_event_at', label: 'Last event', format: 'datetime', sortable: true },
+    { key: 'last_event_at', label: t('integrationsSources.sourcesModule.lastEvent'), format: 'datetime', sortable: true },
   ];
 
   const ROW_ACTIONS: Array<DataTableAction<WebhookSourceRow>> = [
-    { label: 'Open detail', icon: 'eye', onClick: openSourceDrawer },
+    { label: t('integrationsSources.sourcesModule.openDetail'), icon: 'eye', onClick: openSourceDrawer },
     {
-      label: 'Edit',
+      label: t('integrationsSources.sourcesModule.edit2'),
       icon: 'edit',
       kind: 'primary',
       capability: CAP.WEBHOOKS_WRITE,
@@ -1437,7 +1445,7 @@ export function SourcesModule() {
       onClick: openSourceForm,
     },
     {
-      label: 'Rotate token',
+      label: t('integrationsSources.sourcesModule.rotateToken'),
       icon: 'refresh',
       capability: CAP.WEBHOOKS_WRITE,
       disabled: (row) => isArchivedSource(row),
@@ -1446,12 +1454,12 @@ export function SourcesModule() {
         try {
           await rotateSourceToken(row);
         } catch (e) {
-          pushToast(`Rotate failed · ${(e as Error)?.message ?? ''}`, 'danger');
+          pushToast(fill(t('integrationsSources.sourcesModule.rotateFailed'), { value: String((e as Error)?.message ?? '') }), 'danger');
         }
       },
     },
     {
-      label: 'Toggle enabled',
+      label: t('integrationsSources.sourcesModule.toggleEnabled'),
       icon: 'bolt',
       capability: CAP.WEBHOOKS_WRITE,
       disabled: (row) => isArchivedSource(row),
@@ -1470,12 +1478,12 @@ export function SourcesModule() {
             nextEnabled ? 'good' : 'warn',
           );
         } catch (e) {
-          pushToast(`Toggle failed · ${(e as Error)?.message ?? ''}`, 'danger');
+          pushToast(fill(t('integrationsSources.sourcesModule.toggleFailed'), { value: String((e as Error)?.message ?? '') }), 'danger');
         }
       },
     },
     {
-      label: 'Archive source',
+      label: t('integrationsSources.sourcesModule.archiveSource'),
       icon: 'trash',
       kind: 'danger',
       capability: CAP.WEBHOOKS_WRITE,
@@ -1489,15 +1497,15 @@ export function SourcesModule() {
       <div className="page">
         <PageHeader
           moduleKey="integrations-sources"
-          eyebrow="External intake"
-          titleAccent="Sources"
-          titlePlain="& tokens"
+          eyebrow={t('integrationsSources.sourcesModule.externalIntake')}
+          titleAccent={t('integrationsSources.sourcesModule.titleAccent')}
+          titlePlain={t('integrationsSources.sourcesModule.titlePlain')}
           pills={[]}
         />
         <StateView
           kind="denied"
           capability={CAP.WEBHOOKS_READ}
-          hint="You do not have permission to view intake sources."
+          hint={t('integrationsSources.sourcesModule.youDoNotHave')}
         />
       </div>
     );
@@ -1508,9 +1516,9 @@ export function SourcesModule() {
       <div className="page">
         <PageHeader
           moduleKey="integrations-sources"
-          eyebrow="External intake"
-          titleAccent="Sources"
-          titlePlain="& tokens"
+          eyebrow={t('integrationsSources.sourcesModule.externalIntake')}
+          titleAccent={t('integrationsSources.sourcesModule.titleAccent')}
+          titlePlain={t('integrationsSources.sourcesModule.titlePlain')}
           pills={[]}
         />
         <StateView kind="loading" />
@@ -1523,9 +1531,9 @@ export function SourcesModule() {
       <div className="page">
         <PageHeader
           moduleKey="integrations-sources"
-          eyebrow="External intake"
-          titleAccent="Sources"
-          titlePlain="& tokens"
+          eyebrow={t('integrationsSources.sourcesModule.externalIntake')}
+          titleAccent={t('integrationsSources.sourcesModule.titleAccent')}
+          titlePlain={t('integrationsSources.sourcesModule.titlePlain')}
           pills={[]}
         />
         <StateView kind="error" hint={String(sourcesQuery.error)} />
@@ -1535,28 +1543,28 @@ export function SourcesModule() {
 
   const pills: ReactNode[] = [
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-    <Chip key="reg" size="xs" label="Source list" />,
+    <Chip key="reg" size="xs" label={t('integrationsSources.sourcesModule.sourceList')} />,
     <Chip
       key="dir"
       size="xs"
-      label="Health summary"
+      label={t('integrationsSources.sourcesModule.healthSummary')}
       kind="info"
     />,
-    <Chip key="rls" size="xs" label="Access controlled" kind="info" />,
+    <Chip key="rls" size="xs" label={t('integrationsSources.sourcesModule.accessControlled')} kind="info" />,
   ];
 
   return (
     <div className="page">
       <PageHeader
         moduleKey="integrations-sources"
-        eyebrow="External intake"
-        titleAccent="Sources"
-        titlePlain="& tokens"
+        eyebrow={t('integrationsSources.sourcesModule.externalIntake')}
+        titleAccent={t('integrationsSources.sourcesModule.titleAccent')}
+        titlePlain={t('integrationsSources.sourcesModule.titlePlain')}
         pills={pills}
         actions={[
           <Button
             key="new"
-            label="New intake source"
+            label={t('integrationsSources.sourcesModule.newIntakeSource')}
             iconName="plus"
             kind="primary"
             capability={CAP.WEBHOOKS_WRITE}

@@ -38,6 +38,7 @@ import {
   deriveLastRotatedAt,
 } from './_credentials/derive';
 import { ExternalIntakeWorkspaceToolbar } from './ExternalIntakeWorkspaceToolbar';
+import { fill, useI18n } from '@/lib/i18n';
 
 interface ProviderAuthConfigRaw extends Record<string, unknown> {
   id: string;
@@ -141,11 +142,12 @@ function _legacyDeriveLastRotatedAt(row: { last_rotated_at?: string; created_at?
 // strictly through the `provider_auth_status` lookup category. Missing rows
 // surface a danger-toned `(missing)` chip rather than a silent neutral default.
 function CredStatusChip({ value }: { value: string }) {
+  const { t } = useI18n();
   const row = lookupRow('provider_auth_status', value);
   return row ? (
     <Chip label={row.label} kind={row.tone as ChipKind} size="xs" />
   ) : (
-    <Chip label={`Unknown credential status: ${value}`} kind="danger" size="xs" />
+    <Chip label={fill(t('integrationsCredentials.credStatusChip.unknownCredentialStatus'), { value: String(value) })} kind="danger" size="xs" />
   );
 }
 
@@ -273,6 +275,7 @@ function toDatetimeLocal(value?: string | null): string {
 }
 
 export function CredentialsModule() {
+  const { t } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const { scope } = useIdentity();
@@ -469,12 +472,12 @@ export function CredentialsModule() {
           }
           credentials = parsed as Record<string, unknown>;
         } catch (error) {
-          pushToast(`Credentials JSON - ${(error as Error).message || 'Credential details are invalid.'}`, 'danger');
+          pushToast(fill(t('integrationsCredentials.credentialsModule.credentialsJson'), { value: String((error as Error).message || 'Credential details are invalid.') }), 'danger');
           return;
         }
       }
       if (!row && !credentials) {
-        pushToast('Credential details are required for new credentials.', 'danger');
+        pushToast(t('integrationsCredentials.credentialsModule.credentialDetailsAreRequired'), 'danger');
         return;
       }
 
@@ -486,19 +489,19 @@ export function CredentialsModule() {
           ...(credentials ? { credentials } : {}),
           ...(expiresAt || !row ? { expires_at: expiresAt ? new Date(expiresAt).toISOString() : null } : {}),
         });
-        pushToast(`Credential ${row ? 'updated' : 'created'}`, 'good');
+        pushToast(fill(t('integrationsCredentials.credentialsModule.credential'), { value: String(row ? 'updated' : 'created') }), 'good');
         modal.close();
       } catch (error) {
-        pushToast(`Credential save failed - ${(error as Error)?.message ?? ''}`, 'danger');
+        pushToast(fill(t('integrationsCredentials.credentialsModule.credentialSaveFailed'), { value: String((error as Error)?.message ?? '') }), 'danger');
       }
     }
 
     modal.open({
-      title: row ? 'Edit credential' : 'New credential',
+      title: row ? t('integrationsCredentials.credentialsModule.editCredential') : t('integrationsCredentials.credentialsModule.newCredential'),
       body: (
         <form id="provider-auth-config-form" data-testid="provider-auth-config-form" onSubmit={submit} className="form-grid">
           <label className="field">
-            <span className="field__label">Provider</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.provider')}</span>
             <select name="provider_id" defaultValue={defaultProviderId} required>
               {providers.map((provider) => (
                 <option key={provider.id} value={provider.id}>
@@ -508,7 +511,7 @@ export function CredentialsModule() {
             </select>
           </label>
           <label className="field">
-            <span className="field__label">Auth type</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.authType')}</span>
             <select name="auth_type" defaultValue={defaultAuthType} required>
               {authTypes.map((item) => (
                 <option key={item.value} value={item.value}>
@@ -518,36 +521,36 @@ export function CredentialsModule() {
             </select>
           </label>
           <label className="field">
-            <span className="field__label">Credential details</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.credentialDetails')}</span>
             <textarea
               name="credentials"
               rows={6}
-              placeholder={'{\n  "api_key": "..."\n}'}
+              placeholder={t('integrationsCredentials.credentialsModule.text')}
               required={!row}
             />
           </label>
           <label className="field">
-            <span className="field__label">Expires at</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.expiresAt')}</span>
             <input name="expires_at" type="datetime-local" defaultValue={toDatetimeLocal(row?.expires_at)} />
           </label>
         </form>
       ),
       footer: (
         <>
-          <Button size="sm" kind="ghost" onClick={() => modal.close()}>Cancel</Button>
+          <Button size="sm" kind="ghost" onClick={() => modal.close()}>{t('integrationsCredentials.credentialsModule.cancel')}</Button>
           <Button
             size="sm"
             kind="primary"
             disabled={upsertCreds.isPending || providers.length === 0 || authTypes.length === 0}
             capability={CAP.INTEGRATION_PLUGINS_WRITE}
             className="provider-auth-config-save"
-            ariaLabel="Save credential"
+            ariaLabel={t('integrationsCredentials.credentialsModule.saveCredential')}
             onClick={() => {
               const form = document.getElementById('provider-auth-config-form') as HTMLFormElement | null;
               form?.requestSubmit();
             }}
           >
-            {upsertCreds.isPending ? 'Saving' : 'Save credential'}
+            {upsertCreds.isPending ? t('integrationsCredentials.credentialsModule.saving') : t('integrationsCredentials.credentialsModule.saveCredential')}
           </Button>
         </>
       ),
@@ -569,15 +572,15 @@ export function CredentialsModule() {
       let credentials: Record<string, unknown>;
 
       if (!selectedRoute) {
-        pushToast('Choose an API gateway route with provider-account policy before binding credentials.', 'danger');
+        pushToast(t('integrationsCredentials.credentialsModule.chooseAnApiGateway'), 'danger');
         return;
       }
       if (!companyId) {
-        pushToast('Company ID is required for the delivery API account.', 'danger');
+        pushToast(t('integrationsCredentials.credentialsModule.companyIdIsRequired'), 'danger');
         return;
       }
       if (!credentialsText) {
-        pushToast('Basic Auth username and password are required for the delivery API account.', 'danger');
+        pushToast(t('integrationsCredentials.credentialsModule.basicAuthUsernameAnd'), 'danger');
         return;
       }
 
@@ -588,12 +591,12 @@ export function CredentialsModule() {
         }
         credentials = parsed as Record<string, unknown>;
       } catch (error) {
-        pushToast((error as Error).message || 'Delivery API credential details are invalid.', 'danger');
+        pushToast((error as Error).message || t('integrationsCredentials.credentialsModule.deliveryApiCredentialDetails'), 'danger');
         return;
       }
 
       if (!credentials.username || !credentials.password) {
-        pushToast('Delivery API Basic Auth requires username and password.', 'danger');
+        pushToast(t('integrationsCredentials.credentialsModule.deliveryApiBasicAuth'), 'danger');
         return;
       }
 
@@ -611,19 +614,19 @@ export function CredentialsModule() {
           ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
           reason: reason || 'Console V2 delivery API account binding',
         });
-        pushToast('Delivery API account bound', 'good');
+        pushToast(t('integrationsCredentials.credentialsModule.deliveryApiAccountBound'), 'good');
         modal.close();
       } catch (error) {
-        pushToast(`Delivery API account binding failed - ${(error as Error)?.message ?? ''}`, 'danger');
+        pushToast(fill(t('integrationsCredentials.credentialsModule.deliveryApiAccountBinding'), { value: String((error as Error)?.message ?? '') }), 'danger');
       }
     }
 
     modal.open({
-      title: providerAccountBound ? 'Update delivery API account' : 'Set delivery API account',
+      title: providerAccountBound ? t('integrationsCredentials.credentialsModule.updateDeliveryApiAccount') : t('integrationsCredentials.credentialsModule.setDeliveryApiAccount'),
       body: (
         <form id="provider-account-binding-form" data-testid="provider-account-binding-form" onSubmit={submit} className="form-grid">
           <label className="field">
-            <span className="field__label">API route</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.apiRoute')}</span>
             <select
               name="route_id"
               defaultValue={selectedProviderAccountRoute?.id ?? ''}
@@ -639,43 +642,43 @@ export function CredentialsModule() {
             </select>
           </label>
           <label className="field">
-            <span className="field__label">Company ID</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.companyId')}</span>
             <input name="company_id" defaultValue={providerAccountCompanyId} required />
           </label>
           <label className="field">
-            <span className="field__label">Basic Auth credentials</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.basicAuthCredentials')}</span>
             <textarea
               name="credentials"
               rows={6}
-              placeholder={'{\n  "username": "account@example.com",\n  "password": "..."\n}'}
+              placeholder={t('integrationsCredentials.credentialsModule.text2')}
               required
             />
           </label>
           <label className="field">
-            <span className="field__label">Expires at</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.expiresAt')}</span>
             <input name="expires_at" type="datetime-local" />
           </label>
           <label className="field">
-            <span className="field__label">Change reason</span>
-            <input name="reason" placeholder="First tenant API shipment intake setup" />
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.changeReason')}</span>
+            <input name="reason" placeholder={t('integrationsCredentials.credentialsModule.firstTenantApiShipment')} />
           </label>
         </form>
       ),
       footer: (
         <>
-          <Button size="sm" kind="ghost" onClick={() => modal.close()}>Cancel</Button>
+          <Button size="sm" kind="ghost" onClick={() => modal.close()}>{t('integrationsCredentials.credentialsModule.cancel')}</Button>
           <Button
             size="sm"
             kind="primary"
             disabled={bindProviderAccount.isPending || providerAccountRoutes.length === 0}
             capability={CAP.INTEGRATION_PLUGINS_WRITE}
-            ariaLabel="Bind delivery API account"
+            ariaLabel={t('integrationsCredentials.credentialsModule.bindDeliveryApiAccount')}
             onClick={() => {
               const form = document.getElementById('provider-account-binding-form') as HTMLFormElement | null;
               form?.requestSubmit();
             }}
           >
-            {bindProviderAccount.isPending ? 'Binding' : 'Bind delivery API account'}
+            {bindProviderAccount.isPending ? t('integrationsCredentials.credentialsModule.binding') : t('integrationsCredentials.credentialsModule.bindDeliveryApiAccount')}
           </Button>
         </>
       ),
@@ -684,7 +687,7 @@ export function CredentialsModule() {
 
   function openDeliveryApiAccountUnbind() {
     if (!selectedProviderAccountRoute) {
-      pushToast('Choose an API gateway route with provider-account policy before unbinding credentials.', 'danger');
+      pushToast(t('integrationsCredentials.credentialsModule.chooseAnApiGateway2'), 'danger');
       return;
     }
 
@@ -693,7 +696,7 @@ export function CredentialsModule() {
       const data = new FormData(event.currentTarget);
       const reason = String(data.get('reason') ?? '').trim();
       if (!reason) {
-        pushToast('Unbind reason is required.', 'danger');
+        pushToast(t('integrationsCredentials.credentialsModule.unbindReasonIsRequired'), 'danger');
         return;
       }
 
@@ -708,44 +711,44 @@ export function CredentialsModule() {
           ...(providerAccountCompanyId ? { company_id: providerAccountCompanyId } : {}),
           reason,
         });
-        pushToast('Delivery API account unbound', 'warn');
+        pushToast(t('integrationsCredentials.credentialsModule.deliveryApiAccountUnbound'), 'warn');
         modal.close();
       } catch (error) {
-        pushToast(`Delivery API account unbind failed - ${(error as Error)?.message ?? ''}`, 'danger');
+        pushToast(fill(t('integrationsCredentials.credentialsModule.deliveryApiAccountUnbind'), { value: String((error as Error)?.message ?? '') }), 'danger');
       }
     }
 
     modal.open({
-      title: 'Unbind delivery API account',
+      title: t('integrationsCredentials.credentialsModule.unbindDeliveryApiAccount'),
       body: (
         <form id="provider-account-unbind-form" data-testid="provider-account-unbind-form" onSubmit={submit} className="form-grid">
           <div className="state state--warn">
-            <div className="state__title">Provider dispatch for this API route will stop until a credential is rebound.</div>
+            <div className="state__title">{t('integrationsCredentials.credentialsModule.providerDispatchForThis')}</div>
             <div className="state__hint mono">
               {selectedProviderAccountRoute.method} {selectedProviderAccountRoute.path}
             </div>
           </div>
           <label className="field">
-            <span className="field__label">Unbind reason</span>
-            <input name="reason" placeholder="Credential retired for this account" required />
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.unbindReason')}</span>
+            <input name="reason" placeholder={t('integrationsCredentials.credentialsModule.credentialRetiredForThis')} required />
           </label>
         </form>
       ),
       footer: (
         <>
-          <Button size="sm" kind="ghost" onClick={() => modal.close()}>Cancel</Button>
+          <Button size="sm" kind="ghost" onClick={() => modal.close()}>{t('integrationsCredentials.credentialsModule.cancel')}</Button>
           <Button
             size="sm"
             kind="danger"
             disabled={unbindProviderAccount.isPending}
             capability={CAP.INTEGRATION_PLUGINS_WRITE}
-            ariaLabel="Unbind delivery API account"
+            ariaLabel={t('integrationsCredentials.credentialsModule.unbindDeliveryApiAccount')}
             onClick={() => {
               const form = document.getElementById('provider-account-unbind-form') as HTMLFormElement | null;
               form?.requestSubmit();
             }}
           >
-            {unbindProviderAccount.isPending ? 'Unbinding' : 'Unbind delivery API account'}
+            {unbindProviderAccount.isPending ? t('integrationsCredentials.credentialsModule.unbinding') : t('integrationsCredentials.credentialsModule.unbindDeliveryApiAccount')}
           </Button>
         </>
       ),
@@ -770,13 +773,13 @@ export function CredentialsModule() {
           }
           credentials = parsed as Record<string, unknown>;
         } catch (error) {
-          pushToast((error as Error).message || 'Replacement credential details are invalid.', 'danger');
+          pushToast((error as Error).message || t('integrationsCredentials.credentialsModule.replacementCredentialDetailsAre'), 'danger');
           return;
         }
       }
 
       if (!credentials && !vaultId) {
-        pushToast('Replacement credential details or a vault reference is required.', 'danger');
+        pushToast(t('integrationsCredentials.credentialsModule.replacementCredentialDetailsOr'), 'danger');
         return;
       }
 
@@ -789,54 +792,54 @@ export function CredentialsModule() {
           ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
           ...(reason ? { reason } : {}),
         });
-        pushToast(`Rotated credential ${row.id}`, 'good');
+        pushToast(fill(t('integrationsCredentials.credentialsModule.rotatedCredential'), { id: String(row.id) }), 'good');
         modal.close();
       } catch (err) {
-        pushToast(`Rotate failed - ${(err as Error)?.message ?? ''}`, 'danger');
+        pushToast(fill(t('integrationsCredentials.credentialsModule.rotateFailed'), { value: String((err as Error)?.message ?? '') }), 'danger');
       }
     }
 
     modal.open({
-      title: 'Rotate credential',
+      title: t('integrationsCredentials.credentialsModule.rotateCredential'),
       body: (
         <form id="provider-auth-config-rotate-form" data-testid="provider-auth-config-rotate-form" onSubmit={submit} className="form-grid">
           <label className="field">
-            <span className="field__label">Replacement credential details</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.replacementCredentialDetails')}</span>
             <textarea
               name="credentials"
               rows={6}
-              placeholder={'{\n  "api_key": "replacement-key"\n}'}
+              placeholder={t('integrationsCredentials.credentialsModule.text3')}
             />
           </label>
           <label className="field">
-            <span className="field__label">Credential vault reference</span>
-            <input name="credentials_vault_id" placeholder="vault://provider/credential/version" />
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.credentialVaultReference')}</span>
+            <input name="credentials_vault_id" placeholder={t('integrationsCredentials.credentialsModule.vaultProviderCredentialVersion')} />
           </label>
           <label className="field">
-            <span className="field__label">Expires at</span>
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.expiresAt')}</span>
             <input name="expires_at" type="datetime-local" defaultValue={toDatetimeLocal(row.expires_at)} />
           </label>
           <label className="field">
-            <span className="field__label">Rotation reason</span>
-            <input name="reason" placeholder="Scheduled rotation" />
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.rotationReason')}</span>
+            <input name="reason" placeholder={t('integrationsCredentials.credentialsModule.scheduledRotation')} />
           </label>
         </form>
       ),
       footer: (
         <>
-          <Button size="sm" kind="ghost" onClick={() => modal.close()}>Cancel</Button>
+          <Button size="sm" kind="ghost" onClick={() => modal.close()}>{t('integrationsCredentials.credentialsModule.cancel')}</Button>
           <Button
             size="sm"
             kind="primary"
             disabled={rotateCreds.isPending}
             capability={CAP.INTEGRATION_PLUGINS_WRITE}
-            ariaLabel="Rotate credential"
+            ariaLabel={t('integrationsCredentials.credentialsModule.rotateCredential')}
             onClick={() => {
               const form = document.getElementById('provider-auth-config-rotate-form') as HTMLFormElement | null;
               form?.requestSubmit();
             }}
           >
-            {rotateCreds.isPending ? 'Rotating' : 'Rotate credential'}
+            {rotateCreds.isPending ? t('integrationsCredentials.credentialsModule.rotating') : t('integrationsCredentials.credentialsModule.rotateCredential')}
           </Button>
         </>
       ),
@@ -850,7 +853,7 @@ export function CredentialsModule() {
   function openCredentialRevokeDialog(rows: ProviderAuthConfig[]) {
     const revocableRows = rows.filter((row) => !isCredentialRevoked(row));
     if (!revocableRows.length) {
-      pushToast('Selected credentials are already revoked.', 'warn');
+      pushToast(t('integrationsCredentials.credentialsModule.selectedCredentialsAreAlready'), 'warn');
       return;
     }
 
@@ -859,7 +862,7 @@ export function CredentialsModule() {
       const data = new FormData(event.currentTarget);
       const reason = String(data.get('reason') ?? '').trim();
       if (!reason) {
-        pushToast('Revoke reason is required.', 'danger');
+        pushToast(t('integrationsCredentials.credentialsModule.revokeReasonIsRequired'), 'danger');
         return;
       }
 
@@ -875,9 +878,9 @@ export function CredentialsModule() {
       pushToast(
         rows.length === 1
           ? ok === 1
-            ? `Revoked · ${rows[0]!.id}`
-            : `Revoke failed · ${rows[0]!.id}`
-          : `Revoked ${ok}/${rows.length} credentials`,
+            ? fill(t('integrationsCredentials.credentialsModule.revoked'), { id: String(rows[0]!.id) })
+            : fill(t('integrationsCredentials.credentialsModule.revokeFailed'), { id: String(rows[0]!.id) })
+          : fill(t('integrationsCredentials.credentialsModule.revokedCredentials'), { ok: String(ok), length: String(rows.length) }),
         ok === rows.length ? 'warn' : 'danger',
       );
       if (ok > 0) modal.close();
@@ -889,32 +892,32 @@ export function CredentialsModule() {
       body: (
         <form id="provider-auth-config-revoke-form" data-testid="provider-auth-config-revoke-form" onSubmit={submit} className="form-grid">
           <div className="state state--warn">
-            <div className="state__title">Revocation disables live provider operations using the selected credential.</div>
+            <div className="state__title">{t('integrationsCredentials.credentialsModule.revocationDisablesLiveProvider')}</div>
             <div className="state__hint mono">
-              {rows.length === 1 ? rows[0]!.id : `${rows.length} selected credentials`}
+              {rows.length === 1 ? rows[0]!.id : fill(t('integrationsCredentials.credentialsModule.selectedCredentials'), { length: String(rows.length) })}
             </div>
           </div>
           <label className="field">
-            <span className="field__label">Revoke reason</span>
-            <input name="reason" placeholder="Rotated into a replacement credential" required />
+            <span className="field__label">{t('integrationsCredentials.credentialsModule.revokeReason')}</span>
+            <input name="reason" placeholder={t('integrationsCredentials.credentialsModule.rotatedIntoAReplacement')} required />
           </label>
         </form>
       ),
       footer: (
         <>
-          <Button size="sm" kind="ghost" onClick={() => modal.close()}>Cancel</Button>
+          <Button size="sm" kind="ghost" onClick={() => modal.close()}>{t('integrationsCredentials.credentialsModule.cancel')}</Button>
           <Button
             size="sm"
             kind="danger"
             disabled={revokeCreds.isPending}
             capability={CAP.INTEGRATION_PLUGINS_WRITE}
-            ariaLabel="Revoke credential"
+            ariaLabel={t('integrationsCredentials.credentialsModule.revokeCredential')}
             onClick={() => {
               const form = document.getElementById('provider-auth-config-revoke-form') as HTMLFormElement | null;
               form?.requestSubmit();
             }}
           >
-            {revokeCreds.isPending ? 'Revoking' : 'Revoke credential'}
+            {revokeCreds.isPending ? t('integrationsCredentials.credentialsModule.revoking') : t('integrationsCredentials.credentialsModule.revokeCredential')}
           </Button>
         </>
       ),
@@ -926,21 +929,21 @@ export function CredentialsModule() {
     const providerName = row.provider_label ?? provider?.name ?? row.provider_id;
     const revoked = isCredentialRevoked(row);
     drawer.open({
-      title: `${providerName} · rotation history`,
+      title: fill(t('integrationsCredentials.credentialsModule.rotationHistory'), { providerName: String(providerName) }),
       size: 'lg',
       body: (
         <div>
           <div className="kvgrid">
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Config ID</span>
+              <span className="kvgrid__key mono">{t('integrationsCredentials.credentialsModule.configId')}</span>
               <span className="kvgrid__val mono">{row.id}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Provider</span>
+              <span className="kvgrid__key mono">{t('integrationsCredentials.credentialsModule.provider')}</span>
               <span className="kvgrid__val">{providerName}</span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Auth type</span>
+              <span className="kvgrid__key mono">{t('integrationsCredentials.credentialsModule.authType')}</span>
               <span className="kvgrid__val">
                 {(() => {
                   // Cycle E P2 #18 closure (AGENTS.md §2 ZERO HARDCODING +
@@ -951,46 +954,46 @@ export function CredentialsModule() {
                   return r ? (
                     <Chip label={r.label ?? row.auth_type} kind={r.tone as ChipKind} size="xs" />
                   ) : (
-                    <Chip label={`Unknown auth type: ${row.auth_type}`} kind="danger" size="xs" />
+                    <Chip label={fill(t('integrationsCredentials.credentialsModule.unknownAuthType'), { auth_type: String(row.auth_type) })} kind="danger" size="xs" />
                   );
                 })()}
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Status</span>
+              <span className="kvgrid__key mono">{t('integrationsCredentials.credentialsModule.status')}</span>
               <span className="kvgrid__val">
                 <CredStatusChip value={row.status} />
-                <span className="chip chip--xs" style={{ marginInlineStart: '6px' }} title="Calculated from credential expiry">calculated</span>
+                <span className="chip chip--xs" style={{ marginInlineStart: '6px' }} title={t('integrationsCredentials.credentialsModule.calculatedFromCredentialExpiry')}>{t('integrationsCredentials.credentialsModule.calculated')}</span>
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Last rotated</span>
+              <span className="kvgrid__key mono">{t('integrationsCredentials.credentialsModule.lastRotated')}</span>
               <span className="kvgrid__val mono">
                 {row.last_rotated_at ? new Date(row.last_rotated_at).toLocaleString() : '—'}
               </span>
             </div>
             <div className="kvgrid__row">
-              <span className="kvgrid__key mono">Expires</span>
+              <span className="kvgrid__key mono">{t('integrationsCredentials.credentialsModule.expires')}</span>
               <span className="kvgrid__val mono">
                 {row.expires_at ? new Date(row.expires_at).toLocaleString() : '—'}
               </span>
             </div>
           </div>
           <div className="section-eyebrow">
-            Rotation history
-            <span className="chip chip--xs" style={{ marginInlineStart: '8px' }} title="Summarized from available credential lifecycle timestamps">calculated</span>
+            {t('integrationsCredentials.credentialsModule.rotationHistory2')}
+            <span className="chip chip--xs" style={{ marginInlineStart: '8px' }} title={t('integrationsCredentials.credentialsModule.summarizedFromAvailableCredential')}>{t('integrationsCredentials.credentialsModule.calculated')}</span>
           </div>
           <div className="timeline" style={{ padding: '0 14px 14px' }}>
             <div className="timeline__row">
               <span className="timeline__node" />
-              <span className="timeline__time mono">now</span>
+              <span className="timeline__time mono">{t('integrationsCredentials.credentialsModule.now')}</span>
               <div className="timeline__body">
-                <div className="timeline__action">{revoked ? 'revoked' : 'current'}</div>
+                <div className="timeline__action">{revoked ? t('integrationsCredentials.credentialsModule.revoked2') : t('integrationsCredentials.credentialsModule.current')}</div>
                 {revoked ? (
-                  <div className="timeline__detail">Revoked credential - provider operations disabled</div>
+                  <div className="timeline__detail">{t('integrationsCredentials.credentialsModule.revokedCredentialProviderOperations')}</div>
                 ) : (
                   <div className="timeline__detail">
-                  Active credential · expires {row.expires_at ? new Date(row.expires_at).toLocaleDateString() : '—'}
+                  {fill(t('integrationsCredentials.credentialsModule.activeCredentialExpires'), { value: String(row.expires_at ? new Date(row.expires_at).toLocaleDateString() : '—') })}
                   </div>
                 )}
               </div>
@@ -1001,18 +1004,18 @@ export function CredentialsModule() {
                 {row.last_rotated_at ? new Date(row.last_rotated_at).toLocaleDateString() : '—'}
               </span>
               <div className="timeline__body">
-                <div className="timeline__action">rotated</div>
+                <div className="timeline__action">{t('integrationsCredentials.credentialsModule.rotated')}</div>
                 <div className="timeline__detail">
-                  Last rotation is calculated from the available credential timeline.
+                  {t('integrationsCredentials.credentialsModule.lastRotationIsCalculated')}
                 </div>
               </div>
             </div>
             <div className="timeline__row">
               <span className="timeline__node" />
-              <span className="timeline__time mono">created</span>
+              <span className="timeline__time mono">{t('integrationsCredentials.credentialsModule.created')}</span>
               <div className="timeline__body">
-                <div className="timeline__action">issued</div>
-                <div className="timeline__detail">Initial credential issued at config creation</div>
+                <div className="timeline__action">{t('integrationsCredentials.credentialsModule.issued')}</div>
+                <div className="timeline__detail">{t('integrationsCredentials.credentialsModule.initialCredentialIssuedAt')}</div>
               </div>
             </div>
           </div>
@@ -1022,10 +1025,10 @@ export function CredentialsModule() {
   }
 
   const COLUMNS: Array<DataTableColumn<ProviderAuthConfig>> = [
-    { key: 'id', label: 'Credential', mono: true, sortable: true },
+    { key: 'id', label: t('integrationsCredentials.credentialsModule.credential2'), mono: true, sortable: true },
     {
       key: 'provider_id',
-      label: 'Provider',
+      label: t('integrationsCredentials.credentialsModule.provider'),
       mono: true,
       sortable: true,
       filterable: true,
@@ -1046,7 +1049,7 @@ export function CredentialsModule() {
     },
     {
       key: 'auth_type',
-      label: 'Auth type',
+      label: t('integrationsCredentials.credentialsModule.authType'),
       sortable: true,
       filterable: true,
       // Cycle E P2 #18 closure: tone resolves through canonical
@@ -1058,13 +1061,13 @@ export function CredentialsModule() {
         return r ? (
           <Chip label={r.label ?? v} kind={r.tone as ChipKind} size="xs" />
         ) : (
-          <Chip label={`Unknown auth type: ${v}`} kind="danger" size="xs" />
+          <Chip label={fill(t('integrationsCredentials.credentialsModule.unknownAuthType2'), { v: String(v) })} kind="danger" size="xs" />
         );
       },
     },
     {
       key: 'status',
-      label: 'Status',
+      label: t('integrationsCredentials.credentialsModule.status'),
       sortable: true,
       filterable: true,
       render: (raw) => {
@@ -1077,7 +1080,7 @@ export function CredentialsModule() {
     // expires_at is null.
     {
       key: 'days_until_expiry',
-      label: 'Days left',
+      label: t('integrationsCredentials.credentialsModule.daysLeft'),
       align: 'right',
       mono: true,
       sortable: true,
@@ -1103,20 +1106,20 @@ export function CredentialsModule() {
         return <Chip label={String(n)} kind={tone} size="xs" />;
       },
     },
-    { key: 'last_rotated_at', label: 'Last rotated', format: 'datetime', sortable: true },
-    { key: 'expires_at', label: 'Expires', format: 'datetime', sortable: true },
+    { key: 'last_rotated_at', label: t('integrationsCredentials.credentialsModule.lastRotated'), format: 'datetime', sortable: true },
+    { key: 'expires_at', label: t('integrationsCredentials.credentialsModule.expires'), format: 'datetime', sortable: true },
   ];
 
   const ROW_ACTIONS: Array<DataTableAction<ProviderAuthConfig>> = [
     {
-      label: 'Edit credential',
+      label: t('integrationsCredentials.credentialsModule.editCredential'),
       icon: 'edit',
       capability: CAP.INTEGRATION_PLUGINS_WRITE,
       hidden: isCredentialRevoked,
       onClick: (row) => openCredentialEditor(row),
     },
     {
-      label: 'Rotate',
+      label: t('integrationsCredentials.credentialsModule.rotate'),
       icon: 'refresh',
       kind: 'primary',
       capability: CAP.INTEGRATION_PLUGINS_WRITE,
@@ -1124,12 +1127,12 @@ export function CredentialsModule() {
       onClick: (row) => openCredentialRotation(row),
     },
     {
-      label: 'View rotation history',
+      label: t('integrationsCredentials.credentialsModule.viewRotationHistory'),
       icon: 'history',
       onClick: (row) => openRotationHistory(row),
     },
     {
-      label: 'Revoke',
+      label: t('integrationsCredentials.credentialsModule.revoke'),
       icon: 'lock',
       kind: 'danger',
       capability: CAP.INTEGRATION_PLUGINS_WRITE,
@@ -1140,7 +1143,7 @@ export function CredentialsModule() {
 
   const BULK_ACTIONS: Array<DataTableBulkAction<ProviderAuthConfig>> = [
     {
-      label: 'Revoke selected',
+      label: t('integrationsCredentials.credentialsModule.revokeSelected'),
       icon: 'lock',
       kind: 'danger',
       capability: CAP.INTEGRATION_PLUGINS_WRITE,
@@ -1153,18 +1156,18 @@ export function CredentialsModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-credentials"
-          eyebrow="External intake"
-          titleAccent="Provider"
-          titlePlain="credentials"
+          eyebrow={t('integrationsCredentials.credentialsModule.externalIntake')}
+          titleAccent={t('integrationsCredentials.credentialsModule.titleAccent')}
+          titlePlain={t('integrationsCredentials.credentialsModule.titlePlain')}
           pills={[
-            <span key="src" className="chip chip--xs mono">Provider credential vault</span>,
-            <span key="dir" className="chip chip--xs mono">Credential health directory</span>,
+            <span key="src" className="chip chip--xs mono">{t('integrationsCredentials.credentialsModule.providerCredentialVault')}</span>,
+            <span key="dir" className="chip chip--xs mono">{t('integrationsCredentials.credentialsModule.credentialHealthDirectory')}</span>,
           ]}
         />
         <StateView
           kind="denied"
           capability={CAP.PROVIDER_AUTH_READ}
-          hint="You do not have permission to view provider credentials."
+          hint={t('integrationsCredentials.credentialsModule.youDoNotHave')}
         />
       </div>
     );
@@ -1175,12 +1178,12 @@ export function CredentialsModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-credentials"
-          eyebrow="External intake"
-          titleAccent="Provider"
-          titlePlain="credentials"
+          eyebrow={t('integrationsCredentials.credentialsModule.externalIntake')}
+          titleAccent={t('integrationsCredentials.credentialsModule.titleAccent')}
+          titlePlain={t('integrationsCredentials.credentialsModule.titlePlain')}
           pills={[
-            <span key="src" className="chip chip--xs mono">Provider credential vault</span>,
-            <span key="dir" className="chip chip--xs mono">Credential health directory</span>,
+            <span key="src" className="chip chip--xs mono">{t('integrationsCredentials.credentialsModule.providerCredentialVault')}</span>,
+            <span key="dir" className="chip chip--xs mono">{t('integrationsCredentials.credentialsModule.credentialHealthDirectory')}</span>,
           ]}
         />
         <StateView kind="loading" />
@@ -1193,9 +1196,9 @@ export function CredentialsModule() {
       <div className="page">
         <PageHeader
           moduleKey="int-credentials"
-          eyebrow="External intake"
-          titleAccent="Provider"
-          titlePlain="credentials"
+          eyebrow={t('integrationsCredentials.credentialsModule.externalIntake')}
+          titleAccent={t('integrationsCredentials.credentialsModule.titleAccent')}
+          titlePlain={t('integrationsCredentials.credentialsModule.titlePlain')}
           pills={[]}
         />
         <StateView kind="error" hint={String(credDirectoryQuery.error)} />
@@ -1207,13 +1210,13 @@ export function CredentialsModule() {
     <div className="page">
       <PageHeader
         moduleKey="int-credentials"
-        eyebrow="External intake"
-        titleAccent="Provider"
-        titlePlain="credentials"
+        eyebrow={t('integrationsCredentials.credentialsModule.externalIntake')}
+        titleAccent={t('integrationsCredentials.credentialsModule.titleAccent')}
+        titlePlain={t('integrationsCredentials.credentialsModule.titlePlain')}
         pills={[
           <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
-          <span key="src" className="chip chip--xs mono">Provider credential vault</span>,
-          <span key="dir" className="chip chip--xs mono">Credential health directory</span>,
+          <span key="src" className="chip chip--xs mono">{t('integrationsCredentials.credentialsModule.providerCredentialVault')}</span>,
+          <span key="dir" className="chip chip--xs mono">{t('integrationsCredentials.credentialsModule.credentialHealthDirectory')}</span>,
         ]}
         actions={[
           <Button
@@ -1226,7 +1229,7 @@ export function CredentialsModule() {
             title={providerAccountRouteBlockedReason}
             onClick={openDeliveryApiAccountBinding}
           >
-            {providerAccountBound ? 'Update delivery API account' : 'Set delivery API account'}
+            {providerAccountBound ? t('integrationsCredentials.credentialsModule.updateDeliveryApiAccount') : t('integrationsCredentials.credentialsModule.setDeliveryApiAccount')}
           </Button>,
           <Button
             key="new"
@@ -1238,7 +1241,7 @@ export function CredentialsModule() {
             title={createDisabledReason}
             onClick={() => openCredentialEditor()}
           >
-            New credential
+            {t('integrationsCredentials.credentialsModule.newCredential')}
           </Button>,
         ]}
       />
@@ -1258,23 +1261,23 @@ export function CredentialsModule() {
         }}
       >
         <div>
-          <div className="section-eyebrow" style={{ padding: 0 }}>API shipment intake account</div>
+          <div className="section-eyebrow" style={{ padding: 0 }}>{t('integrationsCredentials.credentialsModule.apiShipmentIntakeAccount')}</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
             <Chip
-              label={providerAccountBound ? 'Credential bound' : 'Credential missing'}
+              label={providerAccountBound ? t('integrationsCredentials.credentialsModule.credentialBound') : t('integrationsCredentials.credentialsModule.credentialMissing')}
               kind={providerAccountBound ? 'good' : 'warn'}
               size="xs"
             />
             <span className="chip chip--xs mono">
               {selectedProviderAccountRoute
                 ? `${selectedProviderAccountRoute.method} ${selectedProviderAccountRoute.path}`
-                : 'API route policy missing'}
+                : t('integrationsCredentials.credentialsModule.apiRoutePolicyMissing')}
             </span>
             {providerAccountSettingsCategory ? (
               <span className="chip chip--xs mono">{providerAccountSettingsCategory}</span>
             ) : null}
             {providerAccountCompanyId ? (
-              <span className="chip chip--xs">Company account linked</span>
+              <span className="chip chip--xs">{t('integrationsCredentials.credentialsModule.companyAccountLinked')}</span>
             ) : null}
             {providerAccountCredential?.provider_label ? (
               <span className="chip chip--xs mono">{providerAccountCredential.provider_label}</span>
@@ -1282,10 +1285,10 @@ export function CredentialsModule() {
             {providerAccountCredential?.status ? (
               <CredStatusChip value={providerAccountCredential.status} />
             ) : providerAccountBound ? (
-              <Chip label="Credential confirmation pending" kind="warn" size="xs" />
+              <Chip label={t('integrationsCredentials.credentialsModule.credentialConfirmationPending')} kind="warn" size="xs" />
             ) : null}
             {providerAccountBound ? (
-              <span className="chip chip--xs">Credential selected</span>
+              <span className="chip chip--xs">{t('integrationsCredentials.credentialsModule.credentialSelected')}</span>
             ) : null}
           </div>
         </div>
@@ -1299,7 +1302,7 @@ export function CredentialsModule() {
             title={providerAccountRouteBlockedReason}
             onClick={openDeliveryApiAccountBinding}
           >
-            {providerAccountBound ? 'Update account' : 'Set account'}
+            {providerAccountBound ? t('integrationsCredentials.credentialsModule.updateAccount') : t('integrationsCredentials.credentialsModule.setAccount')}
           </Button>
           {providerAccountBound ? (
             <Button
@@ -1311,7 +1314,7 @@ export function CredentialsModule() {
               title={providerAccountRouteBlockedReason}
               onClick={openDeliveryApiAccountUnbind}
             >
-              Unbind account
+              {t('integrationsCredentials.credentialsModule.unbindAccount')}
             </Button>
           ) : null}
         </div>
@@ -1319,8 +1322,8 @@ export function CredentialsModule() {
       {providerSetupBlocked ? (
         <StateView
           kind="empty"
-          title="Provider catalog needs onboarding"
-          hint="Credentials are attached to provider catalog rows. Complete tenant provider setup so this tenant can configure webhook, routing, comms, payment, and delivery credentials."
+          title={t('integrationsCredentials.credentialsModule.providerCatalogNeedsOnboarding')}
+          hint={t('integrationsCredentials.credentialsModule.credentialsAreAttachedTo')}
           action={(
             <Button
               size="sm"
@@ -1328,7 +1331,7 @@ export function CredentialsModule() {
               iconName="check"
               onClick={navigateToReadiness}
             >
-              Open setup
+              {t('integrationsCredentials.credentialsModule.openSetup')}
             </Button>
           )}
         />
