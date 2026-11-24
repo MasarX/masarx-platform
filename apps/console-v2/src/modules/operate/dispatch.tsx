@@ -27,6 +27,16 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { Chip, type ChipKind } from '@/components/Chip';
+import {
+  ConflictProvider,
+  ConflictSlot,
+  ConflictToast,
+  LiveChip,
+  NewRowsStrip,
+  StaleBanner,
+  StaleLabel,
+  useWritePause,
+} from '@/components/LiveStatus';
 import { ScopePill } from '@/components/ScopePill';
 import { LadderViz } from '@/components/LadderViz';
 import { PageHeader } from '@/components/PageHeader';
@@ -72,6 +82,7 @@ import { useDrawer, useModal } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { useI18n } from '@/lib/i18n';
+import { useEditConflict, useHeldRows, useLiveConnection } from '@/lib/live-connection';
 import {
   getCommandRegistry,
   getLookups,
@@ -1287,6 +1298,18 @@ export function DispatchModule() {
   const stopsQuery = useCompleteResourceList<RouteStopRow>('route_stops', undefined, readQueryOptions);
   const { data: runsData, isLoading: runsLoading } = runsQuery;
   const { data: stopsData, isLoading: stopsLoading } = stopsQuery;
+  const live = useLiveConnection({
+    topic: 'routes',
+    enabled: canRead && !runsQuery.isError && !stopsQuery.isError,
+    dataUpdatedAt: Math.max(runsQuery.dataUpdatedAt, stopsQuery.dataUpdatedAt),
+  });
+  const writePause = useWritePause(live);
+  // Stop closeout edit: the stop row as it was when the form opened (#405 conflict toast).
+  const [closeoutBaseline, setCloseoutBaseline] = useState<RouteStopRow | null>(null);
+  const closeoutCurrent = closeoutBaseline
+    ? (stopsData?.rows.find((row) => row.id === closeoutBaseline.id) ?? null)
+    : null;
+  const closeoutConflict = useEditConflict(closeoutBaseline, closeoutCurrent, live.state);
   // W24 — additive directory projection. The canonical SSOT remains the
   // `route_runs` + `route_stops` reads above; this read enriches the
   // surface with branch/driver/vehicle labels, derived counters, and the
@@ -1434,6 +1457,7 @@ export function DispatchModule() {
   // without a full refetch round-trip. Rollback handlers come from the
   // mutation flow (optimistic move + revert on error).
   const [runs, setRuns] = useState<RouteRunRow[]>([]);
+  const heldRuns = useHeldRows(runs, (run) => run.id);
   const [stops, setStops] = useState<RouteStopRow[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [dndOver, setDndOver] = useState<string | null>(null);
@@ -3073,10 +3097,13 @@ export function DispatchModule() {
       }
       applyProofFile(kind, file);
     };
+    setCloseoutBaseline(stopsData?.rows.find((row) => row.id === stop.id) ?? null);
     modal.open({
       title: `Close stop - stop ${stop.sequence_order}`,
+      onClose: () => setCloseoutBaseline(null),
       body: (
         <div data-testid="route-stop-closeout-modal">
+          <ConflictSlot />
           <p className="state__hint" style={{ margin: '0 0 10px' }}>
             Complete the stop with proof, delivery outcome, and COD collection details.
           </p>
@@ -3571,6 +3598,7 @@ export function DispatchModule() {
                   },
                 });
                 await assertRouteStopCloseoutReadback(stop, task);
+                setCloseoutBaseline(null);
                 await refreshDispatchFromCanonical({ throwOnError: true });
                 pushToast(`Stop closeout saved - ${task.task_id ?? task.id} - ${nextStatus}`, 'good');
                 modal.close();
@@ -3591,6 +3619,7 @@ export function DispatchModule() {
     // for dispatch (route runs scope at tenant via current_user_org_id()).
     // `scopeId` is identity-derived. See shipments.tsx top-of-file ScopePill SSOT
     // note. The dynamic policy-resolved pill below uses `routePolicy.resolved_from`.
+    <LiveChip key="live" live={live} />,
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
     activeRun ? (
       <Chip key="run" size="xs" kind="info" label={<span className="mono">{routeRunLabel(activeRun.id)}</span>} />
@@ -3694,6 +3723,7 @@ export function DispatchModule() {
             capability={CAP.ROUTES_WRITE}
             disabled={scanOutReconciliationDisabled}
             title={scanOutReconciliationDisabledReason}
+            pausedReasonId={writePause.reasonId}
             onClick={handleReconcileScanOut}
           />,
           <Button
@@ -3704,10 +3734,13 @@ export function DispatchModule() {
             capabilities={[CAP.ROUTES_WRITE, CAP.TASKS_COMPLETE]}
             disabled={confirmDepartureDisabled}
             title={activeRunLifecycleDisabledReason ?? departureGateHint}
+            pausedReasonId={writePause.reasonId}
             onClick={handleConfirmDeparture}
           />,
-        ]}
+          writePause.reason,
+        ].filter(Boolean)}
       />
+      <StaleBanner live={live} />
 
       {/* KPI strip — driven by useDashboardKpis */}
       <div className="kpi-strip">
@@ -3754,8 +3787,10 @@ export function DispatchModule() {
                 <Icon name="refresh" size={12} />
               </button>
             </div>
+            <StaleLabel live={live} />
+            <NewRowsStrip count={heldRuns.newCount} path="live.newRuns" onShow={heldRuns.show} />
             <div className="pane__body" role="region" aria-labelledby="dispatch-pane-runs-title" tabIndex={0}>
-              {runs.map((r) => {
+              {heldRuns.visible.map((r) => {
                 const tone = statusTone('route_run_status', r.status) as
                   | 'good' | 'warn' | 'danger' | 'info' | 'neutral';
                 // W24 — Resolve through `v_route_run_directory` projection
@@ -3773,6 +3808,8 @@ export function DispatchModule() {
                 const cls = ['run-row'];
                 if (r.id === activeRunId) cls.push('is-active');
                 if (dndOver === r.id) cls.push('dnd-over');
+                const runUpdated = heldRuns.updated.has(r.id);
+                if (runUpdated) cls.push('is-updated');
                 const runLifecycleDisabledReason = dispatchLifecycleDisabledReasonForRun(r);
                 const activeAssignment = assignmentByRunId.get(r.id);
                 const alternateCapacity = routeRunAlternateCapacityRequest(r);
@@ -3824,6 +3861,7 @@ export function DispatchModule() {
                       <span className="run-row__driver">{driverLabel}</span>
                       <div style={{ flex: 1 }} />
                       {partnerOwned ? <Chip size="xs" kind="info" label="partner" /> : null}
+                      {runUpdated ? <Chip size="xs" kind="info" label={t('live.updated')} /> : null}
                       <Chip size="xs" kind={tone} label={statusLabel('route_run_status', r.status)} />
                       {canMoveSelectedHere ? (
                         <Button
@@ -4333,7 +4371,22 @@ export function DispatchModule() {
       )}
 
       {drawer.node}
-      {modal.node}
+      <ConflictProvider
+        value={
+          closeoutConflict.conflict ? (
+            <ConflictToast
+              title={t('live.conflict.stopTitle')}
+              onReview={() => {
+                closeoutConflict.dismiss();
+                modal.close();
+              }}
+              onKeep={closeoutConflict.dismiss}
+            />
+          ) : null
+        }
+      >
+        {modal.node}
+      </ConflictProvider>
       {picker?.kind === 'bulk' ? (
         <ReferencePicker
           open

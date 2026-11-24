@@ -23,6 +23,10 @@ interface I18nCtx {
   fmtDateTime: (iso: string | number | Date) => string;
   fmtCurrency: (amount: number, currency?: string) => string;
   fmtNumber: (n: number, opts?: Intl.NumberFormatOptions) => string;
+  /** Hour and minute in the display time zone. */
+  fmtTime: (iso: string | number | Date) => string;
+  /** Plural message: `path.<Intl.PluralRules category>` (else `path.other`) with `{count}` filled in. */
+  tCount: (path: string, count: number) => string;
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: en as Catalog, ar: ar as Catalog };
@@ -127,6 +131,23 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     [intlLocale]
   );
 
+  const fmtTime = useCallback(
+    (iso: string | number | Date) => {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      return new Intl.DateTimeFormat(intlLocale, { hour: 'numeric', minute: '2-digit', timeZone }).format(d);
+    },
+    [intlLocale, timeZone]
+  );
+  const tCount = useCallback(
+    (path: string, count: number) => {
+      const category = new Intl.PluralRules(intlLocale).select(count);
+      const message = lookup(CATALOGS[locale]!, `${path}.${category}`) ?? t(`${path}.other`);
+      return message.replace('{count}', fmtNumber(count));
+    },
+    [intlLocale, locale, t, fmtNumber]
+  );
+
   const value = useMemo<I18nCtx>(
     () => ({
       locale,
@@ -138,8 +159,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       fmtDateTime,
       fmtCurrency,
       fmtNumber,
+      fmtTime,
+      tCount,
     }),
-    [locale, dir, t, timeZone, fmtDateTime, fmtCurrency, fmtNumber]
+    [locale, dir, t, timeZone, fmtDateTime, fmtCurrency, fmtNumber, fmtTime, tCount]
   );
 
   return (

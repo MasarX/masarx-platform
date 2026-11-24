@@ -27,6 +27,8 @@ import { useDrawer } from '@/hooks/useOverlay';
 import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { CAP } from '@/lib/capabilities';
+import { useLiveConnection } from '@/lib/live-connection';
+import { LiveChip, StaleBanner, StaleLabel } from '@/components/LiveStatus';
 import type { SettingsResolution } from '@/types/domain';
 
 // Wave 6 schema-drift remediation (OPERATIONS Sections 13, 14, 15):
@@ -236,7 +238,14 @@ export function TrackingMapModule() {
   // the canonical proposeSettingsChange RPC (resolves through ladder).
   // Backed by `proposeSettingsChange('map_policy', { tenant_id }, value)`.
   const proposeSettings = useProposeSettingsChange();
-  const { data: shipmentsData, isLoading: shipmentsLoading } = useResourceList<ShipmentRow>('shipments', tenantListOpts);
+  const {
+    data: shipmentsData,
+    isLoading: shipmentsLoading,
+    error: shipmentsError,
+    dataUpdatedAt: shipmentsUpdatedAt,
+  } = useResourceList<ShipmentRow>('shipments', tenantListOpts);
+  // #405 — the tracking map follows the routes channel (courier and stop movement).
+  const live = useLiveConnection({ topic: 'routes', enabled: canRead && !shipmentsError, dataUpdatedAt: shipmentsUpdatedAt });
   const { data: geocodesData, isLoading: geocodesLoading } = useResourceList<GeocodeRow>('geocodes', tenantListOpts);
   const { data: hubsData } = useResourceList<HubRow>('hubs', tenantListOpts);
   // W34c — canonical district label projection. Replaces the prior inline
@@ -428,6 +437,7 @@ export function TrackingMapModule() {
 
   const policyResolved: SettingsResolution | undefined = policy;
   const pills: ReactNode[] = [
+    <LiveChip key="live" live={live} />,
     <ScopePill
       key="scope"
       scopeType={policyResolved?.resolved_from ?? 'global'}
@@ -547,6 +557,7 @@ export function TrackingMapModule() {
           />,
         ]}
       />
+      <StaleBanner live={live} />
 
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 380px', minHeight: 0, overflow: 'hidden' }}>
         <div className="map-canvas" style={{ position: 'relative' }}>
@@ -750,6 +761,7 @@ export function TrackingMapModule() {
         {/* Sidebar — clickable shipment cards open the decision-trail drawer */}
         <div style={{ borderLeft: '1px solid var(--line)', overflow: 'auto', background: 'var(--paper)' }}>
           <div className="section-eyebrow">Shipments in view</div>
+          <StaleLabel live={live} />
           {shipments.slice(0, 18).map((s) => {
             // W38 closure - prefer canonical v_shipment_directory join,
             // fall back to base row destination_city for legacy seed

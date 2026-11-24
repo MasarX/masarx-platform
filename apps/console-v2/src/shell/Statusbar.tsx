@@ -9,10 +9,19 @@ import { CAP } from '@/lib/capabilities';
 import { useCapability, useIdentity } from '@/lib/identity';
 import * as api from '@/lib/api';
 import { useResourceList, useTasks } from '@/lib/queries';
+import { useLiveStatus, type LiveState } from '@/lib/live-connection';
 import type { DecisionLogEntry, ScopeType } from '@/types/domain';
 
 /** Cap the rolling decision_log buffer; latest entry is what shows in the cell. */
 const MAX_RECENT = 5;
+
+const LIVE_TONE: Record<LiveState, string | undefined> = {
+  syncing: 'warn',
+  live: 'good',
+  reconnecting: 'warn',
+  offline: 'danger',
+  polling: undefined,
+};
 
 // SCHEMA-DRIFT NOTE (Wave 11 / W11-5 — see __audit__/SCHEMA-DRIFT/INSIGHTS.md §6):
 // `resolved_from` is NOT a direct column on `public.decision_log`. It is
@@ -263,8 +272,11 @@ export function Statusbar({
 
   const tenantShort = scope?.tenant?.label?.split(' ')[0] ?? 'Tenant';
   const latest: DecisionLogRecent | undefined = state.recent[0];
-  const secondsSinceSync = state.lastSync
-    ? Math.max(0, Math.floor((Date.now() - state.lastSync) / 1000))
+  // A live page's connection hook is the one clock for "synced" (#405).
+  const liveStatus = useLiveStatus();
+  const lastSync = liveStatus?.syncedAt || state.lastSync;
+  const secondsSinceSync = lastSync
+    ? Math.max(0, Math.floor((Date.now() - lastSync) / 1000))
     : null;
 
   const navigateTo = (path: string) => {
@@ -380,6 +392,14 @@ export function Statusbar({
           {metrics.ndrTasks} NDR · {metrics.atRiskTasks} at-risk
         </span>
       </button>
+
+      {liveStatus ? (
+        // aria-hidden: the page's LiveChip is the only connection live region.
+        <span className="status-seg" aria-hidden="true" data-testid="statusbar-realtime">
+          <span className="status-seg__dot" data-tone={LIVE_TONE[liveStatus.state]} />
+          <span className="status-seg__value">{t(`live.statusbar.${liveStatus.state}`)}</span>
+        </span>
+      ) : null}
 
       <button
         className="status-seg"

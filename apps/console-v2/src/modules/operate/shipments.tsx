@@ -71,6 +71,8 @@ import {
 } from '@/lib/queries';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { useI18n } from '@/lib/i18n';
+import { useHeldRows, useLiveConnection } from '@/lib/live-connection';
+import { LiveChip, NewRowsStrip, StaleBanner, StaleLabel, useWritePause } from '@/components/LiveStatus';
 import * as api from '@/lib/api';
 import { getLookups, lookupRow } from '@/lib/api';
 import { CAP } from '@/lib/capabilities';
@@ -1426,7 +1428,13 @@ export function ShipmentsModule() {
   }, [tenantId, clientParam, senderParam, recipientParam]);
   const readQueryOptions = useMemo(() => ({ enabled: canRead }), [canRead]);
 
-  const { data, isLoading, error: shipmentsError } = useResourceList<Shipment>('shipments', shipmentListOpts, readQueryOptions);
+  const { data, isLoading, error: shipmentsError, dataUpdatedAt: shipmentsUpdatedAt } = useResourceList<Shipment>(
+    'shipments',
+    shipmentListOpts,
+    readQueryOptions,
+  );
+  const live = useLiveConnection({ topic: 'shipments', enabled: canRead && !shipmentsError, dataUpdatedAt: shipmentsUpdatedAt });
+  const writePause = useWritePause(live);
   // W24 — additive directory projection. Canonical SSOT remains
   // `shipments`; this read enriches the drawer with FE-shaped projections
   // (destination_city / counterparty labels / per-shipment derived
@@ -1509,6 +1517,10 @@ export function ShipmentsModule() {
     const exists = shipments.some((shipment) => shipment.id === focusedShipmentFromLookup.id);
     return exists ? shipments : [focusedShipmentFromLookup, ...shipments];
   }, [focusedShipmentFromLookup, shipments]);
+  const heldShipments = useHeldRows(visibleShipments, (shipment) => shipment.id, {
+    resetKey: JSON.stringify(shipmentListOpts ?? null),
+    pinnedId: (focusedShipmentFromList ?? focusedShipmentFromLookup)?.id ?? null,
+  });
   const openedFocusRef = useRef<string | null>(null);
 
   async function refetchShipmentOperationViews(shipmentIds: string | string[]) {
@@ -3241,6 +3253,7 @@ export function ShipmentsModule() {
   }
 
   const pills: ReactNode[] = [
+    <LiveChip key="live" live={live} />,
     <ScopePill
       key="scope"
       scopeType={scope.client?.id ? 'client' : 'tenant'}
@@ -3292,6 +3305,7 @@ export function ShipmentsModule() {
             iconName="edit"
             kind="ghost"
             capability={CAP.SHIPMENTS_WRITE}
+            pausedReasonId={writePause.reasonId}
             onClick={() => {
               go('/operate/amend-cancel');
             }}
@@ -3302,10 +3316,13 @@ export function ShipmentsModule() {
             iconName="plus"
             kind="primary"
             capability={CAP.SHIPMENTS_WRITE}
+            pausedReasonId={writePause.reasonId}
             onClick={openCreateShipmentModal}
           />,
-        ]}
+          writePause.reason,
+        ].filter(Boolean)}
       />
+      <StaleBanner live={live} />
 
       {isLoading ? (
         <StateView kind="loading" />
@@ -3317,9 +3334,12 @@ export function ShipmentsModule() {
           hint={(shipmentsError as Error).message}
         />
       ) : (
+        <>
+        <StaleLabel live={live} />
+        <NewRowsStrip count={heldShipments.newCount} path="live.newShipments" onShow={heldShipments.show} />
         <DataTable<Shipment>
           columns={columns}
-          rows={visibleShipments}
+          rows={heldShipments.visible}
           viewKey="shipments"
           entityKind="shipment"
           searchKeys={[
@@ -3331,10 +3351,13 @@ export function ShipmentsModule() {
             'destination_city',
           ]}
           onRowClick={openShipmentDrawer}
-          getRowClass={(r) => (isShipmentRisk(r) ? 'is-risk' : undefined)}
+          getRowClass={(r) =>
+            [isShipmentRisk(r) ? 'is-risk' : '', heldShipments.updated.has(r.id) ? 'is-updated' : ''].filter(Boolean).join(' ') ||
+            undefined
+          }
           rowDeepLink={(r) => `/operate/shipments?focus=${encodeURIComponent(r.id)}`}
           onCellEdit={
-            canWrite
+            canWrite && live.state !== 'offline'
               ? async (row, key, newValue) => {
                   await amend.mutateAsync({
                     shipmentId: row.id,
@@ -3520,6 +3543,7 @@ export function ShipmentsModule() {
             },
           ]}
         />
+        </>
       )}
 
       {drawer.node}
