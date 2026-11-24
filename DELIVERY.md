@@ -41,11 +41,21 @@ Follows engineering standard v1.10.
 ## Test policy
 
 - Test each changed behavior with a regression that fails before the fix. Use unit tests for logic, integration tests for affected database, queue and API boundaries, and end-to-end tests for core user jobs. Freeze clocks and wait for observable state. Preserve product guards when fixing tests. Trunk test edits need a recorded Master exception. A replacement preserves the existing assertions or identifies the design decision that retired them. Removal also requires two weeks of evidence that the test only detects change. Keep authorization, privacy, migration and concurrency tests.
+- Add property and edge-case tests for code that accepts untrusted or varied input. Exercise parsers, limits, boundaries, time zones and daylight saving transitions where they apply.
+- For every bug that reached `main`, add its failing case as a regression test or a row in the project's golden cases.
 - Fix failures at their source. New failures block landing. Never rerun an unchanged failure or use retries, skips or longer timeouts to turn a failing check green. The existing exceptions are listed under [Deviations](#deviations).
 - Use local services and mocks for routine tests. The cloud qualification checks are listed under [Deviations](#deviations).
 - Hosted Jest ([jest.cjs](scripts/ci-hosted/jest.cjs)) reads the target-base known-failure baseline at `config/ci/known-failures.txt`. A missing baseline is empty. The file is absent on `main`. A candidate can retain or remove target-base entries.
 - Only `npm run verify:cloud:e2e-gate` reads the [UI flake quarantine](config/ci/ui-flake-quarantine.json) for its cloud E2E summary outside hosted CI. Each entry carries an owner and expiry (`burn_down_by`).
 - [database-result.cjs](scripts/ci-hosted/database-result.cjs) requires all six pgTAP shards and an exact count and name match against the SQL test inventory. [database-selfcheck.cjs](scripts/ci-hosted/database-selfcheck.cjs) probes missing and incorrect coverage.
+
+### Nightly full suite
+
+The **Servers nightly host** runs [nightly-full.sh](scripts/ci/nightly-full.sh) at **00:30 UTC** daily under the same lock used for manual runs. The timer checks out public `main` anonymously and removes the checkout after copying the test result and log. The nightly never gates merges.
+
+Use the Node version in `.nvmrc`, the Supabase CLI and Docker for disposable local PostgreSQL, Auth, REST, Storage and Edge services. The suite generates local fixtures and tears down the stack. It runs the existing Jest, Vitest, pgTAP and Playwright suites and enables long property runs. [Nightly exclusions](config/ci/nightly-out-of-scope.json) identify coverage that needs deployed endpoints or real provider credentials. Each exclusion appears in `result.json` and has no effect on its outcome.
+
+Servers delivers each run's private `result.json` and `nightly.log` under its UTC date. Delivery runs [nightly-report.cjs](scripts/ci/nightly-report.cjs) with the delivered results directory through the issue-scoped App. Set `GITHUB_REPOSITORY` and `NIGHTLY_DENY_CHECK` for the App-side repository and privacy queue. If needed, set `NIGHTLY_DENY_BASH` to the shell that runs the checker. The reporter files one Bug per title for a red or error result, or a result missing at 06:00 UTC. Only screened failure markers and publishable test names go into the issue. Use `--dry-run` to inspect the proposed issues.
 
 ## Environments
 

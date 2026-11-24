@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Deployed full-app browser tests",
+    "reason": "Requires deployed application endpoints and environment-specific test identities.",
+    "covered_by": "Post-deploy browser work tracked in #130."
+  },
+  {
+    "name": "Deployed API and Edge tests",
+    "reason": "Requires deployed function endpoints and environment-specific test identities.",
+    "covered_by": "Post-deploy API work tracked in #133."
+  },
+  {
+    "name": "Live third-party logistics adapter tests",
+    "reason": "Requires real logistics provider endpoints and credentials.",
+    "covered_by": "Opt-in provider tests in tests/integration.",
+    "flags": ["RUN_LIVE_3PL_TESTS"]
+  },
+  {
+    "name": "Live geocoding adapter tests",
+    "reason": "Requires real geocoding endpoints and credentials.",
+    "covered_by": "Opt-in geocoding tests in tests/integration.",
+    "flags": ["RUN_LIVE_GEOCODING_TESTS"]
+  },
+  {
+    "name": "Live communications adapter tests",
+    "reason": "Requires real communications provider endpoints and credentials.",
+    "covered_by": "Opt-in communications tests in tests/integration.",
+    "flags": ["RUN_LIVE_COMMS_TESTS"]
+  },
+  {
+    "name": "Live webhook acceptance tests",
+    "reason": "Requires a deployed webhook endpoint.",
+    "covered_by": "Opt-in webhook acceptance tests in tests/integration.",
+    "flags": ["RUN_LIVE_WEBHOOK_TESTS"]
+  },
+  {
+    "name": "Deployed pitch smoke tests",
+    "reason": "Requires a deployed demo target and test identities.",
+    "covered_by": "Opt-in pitch smoke tests in tests/integration/pitch.",
+    "flags": ["RUN_LIVE_PITCH_TESTS"]
+  }
+]
