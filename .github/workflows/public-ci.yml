@@ -606,7 +606,7 @@ jobs:
         run: node scripts/ci-hosted/tasks.cjs build landing
 
   e2e:
-    name: Landing E2E and Console V2 axe (full-app E2E excluded)
+    name: Landing and Console V2 browser tests
     needs: append-only
     if: ${{ !cancelled() && (needs.append-only.result != 'success' || needs.append-only.outputs.e2e != 'false') }}
     runs-on: ubuntu-24.04
@@ -644,6 +644,9 @@ jobs:
         env:
           A11Y_EVIDENCE_DIR: test-results/console-a11y/evidence
         run: node scripts/ci-hosted/tasks.cjs console-a11y
+      - name: Run Console V2 seed-mode E2E
+        if: ${{ !cancelled() && steps.console.outputs.present == 'true' }}
+        run: node scripts/ci-hosted/tasks.cjs console-seed
       - *timing_report
       - name: Upload Console V2 axe evidence
         if: ${{ !cancelled() && steps.console_a11y.outcome != 'skipped' }}

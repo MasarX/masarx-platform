@@ -52,12 +52,11 @@
   },
   {
     "match": [
-      "apps/console-v2/playwright.e2e.config.ts",
-      "apps/console-v2/package.json#test:e2e:console*",
-      "apps/console-v2/tests/e2e/**/*.spec.ts"
+      "apps/console-v2/package.json#test:e2e:console:live*",
+      "apps/console-v2/tests/e2e/console.label-designer.e2e.spec.ts"
     ],
     "owner": "MasarX QA",
-    "reason": "The Console V2 E2E configuration needs seed and live fixtures, local app startup and a separately provisioned backend for live readiness.",
+    "reason": "Console V2 live-readiness scenarios need a separately provisioned backend and role fixtures.",
     "expires": "2026-12-15"
   },
   {

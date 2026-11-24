@@ -131,7 +131,8 @@ function ciCoverage(files) {
   covered.add('playwright.landing.config.ts');
   covered.add(workspace + '/playwright.a11y.config.ts');
   addScripts('package.json', ['test:e2e:landing']);
-  addScripts(workspace + '/package.json', ['test:a11y']);
+  covered.add(workspace + '/playwright.e2e.config.ts');
+  addScripts(workspace + '/package.json', ['test:a11y', 'test:e2e:console', 'test:e2e:console:seed']);
 
   const devConfig = 'playwright.dev-report.config.ts';
   ciStep(deploy, 'e2e-report', 'node node_modules/@playwright/test/cli.js test --config ' + devConfig + ' > /dev/null 2>&1');

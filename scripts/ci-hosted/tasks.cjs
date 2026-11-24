@@ -9,6 +9,7 @@ const root = process.cwd();
 const browserSuites = {
   'landing-e2e': 'scripts/ci-hosted/playwright.landing.config.cjs',
   'console-a11y': 'scripts/ci-hosted/playwright.console-a11y.config.cjs',
+  'console-seed': 'scripts/ci-hosted/playwright.console-seed.config.cjs',
 };
 const exists = file => fs.existsSync(path.join(root, file));
 const read = file => JSON.parse(fs.readFileSync(path.join(root, file), 'utf8'));
