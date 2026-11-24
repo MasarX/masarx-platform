@@ -23,15 +23,15 @@ Both `globals.css` files import the shared stylesheet. Both Tailwind configs ext
 | `paper`, `surface`, `highlight` | `250 251 254`, `255 255 255`, `238 241 250` | `11 17 33`, `17 24 42`, `30 41 66` | `packages/ui/src/styles.css` |
 | `ink`, `muted`, `border` | `15 23 42`, `71 85 105`, `226 232 240` | `241 245 249`, `148 163 184`, `45 55 80` | `packages/ui/src/styles.css` |
 | `accent`, `accent-hover`, `accent-ink`, `accent-soft` | `79 70 229`, `67 56 202`, `255 255 255`, `224 231 255` | `129 140 248`, `165 180 252`, `11 17 33`, `30 27 75` | `packages/ui/src/styles.css` |
-| `success`, `warning`, `danger`, `danger-ink`, `info` | `34 139 89`, `194 120 0`, `204 43 43`, `255 255 255`, `59 130 246` | `54 158 107`, `221 139 76`, `231 78 78`, `255 255 255`, `96 165 250` | `packages/ui/src/styles.css` |
+| `success`, `warning`, `danger`, `danger-ink`, `info` | `2 121 73`, `151 92 1`, `200 38 39`, `255 255 255`, `28 100 213` | `54 158 107`, `221 139 76`, `241 88 86`, `11 17 33`, `96 165 250` | `packages/ui/src/styles.css` |
 | `shadow-rgb`, `shadow-pinned` opacity, `glow-accent` opacity | `15 23 42`, `0.12`, `0.18` | `0 0 0`, `0.35`, `0.25` | `packages/ui/src/styles.css` |
 | `--table-*` overlays | `row-separator` uses border at 15%, `header-bg` highlight at 40%, `hover-bg` ink at 3%, `selected-bg` accent at 5% | 20%, 50%, 4%, 8% respectively | `packages/ui/src/styles.css` |
 
 | `--tag-*` color | Light background / text | Dark background / text | Source |
 | --- | --- | --- | --- |
-| `gray`, `brown`, `orange` | `#f1f1ef / #787774`, `#f4eeee / #976d57`, `#fbecdd / #d9730d` | `#373737 / #b0afac`, `#3e2f2a / #c49a82`, `#46300e / #e8944a` | `packages/ui/src/styles.css` |
-| `yellow`, `green`, `blue` | `#fbf3db / #cb912f`, `#e6f5e4 / #448361`, `#e1eefa / #527cca` | `#3d3415 / #ddb561`, `#1e3a28 / #6db48a`, `#1d2d44 / #7da3e0` | `packages/ui/src/styles.css` |
-| `purple`, `pink`, `red` | `#eee5f8 / #9065b0`, `#f9e4ee / #c14c8a`, `#fce4e4 / #c4554d` | `#302440 / #b28fd0`, `#3e1e30 / #d97aad`, `#3e1e1e / #df8079` | `packages/ui/src/styles.css` |
+| `gray`, `brown`, `orange` | `#f1f1ef / #6d6c69`, `#f4eeee / #8b624c`, `#fbecdd / #a55604` | `#373737 / #b0afac`, `#3e2f2a / #c49a82`, `#46300e / #e8944a` | `packages/ui/src/styles.css` |
+| `yellow`, `green`, `blue` | `#fbf3db / #946400`, `#e6f5e4 / #397857`, `#e1eefa / #3f68b4` | `#3d3415 / #ddb561`, `#1e3a28 / #6db48a`, `#1d2d44 / #7da3e0` | `packages/ui/src/styles.css` |
+| `purple`, `pink`, `red` | `#eee5f8 / #80559f`, `#f9e4ee / #af3c7b`, `#fce4e4 / #b1443d` | `#302440 / #b28fd0`, `#3e1e30 / #d97aad`, `#3e1e1e / #df8079` | `packages/ui/src/styles.css` |
 
 | Token area | Shipped values | Source |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ Both `globals.css` files import the shared stylesheet. Both Tailwind configs ext
 | Token suffixes or names, in order | Light OKLCH channels | Dark OKLCH channels | Source |
 | --- | --- | --- | --- |
 | `paper`, `paper-2`, `paper-3`, `paper-raise` | `0.992 0.003 80`, `0.978 0.004 80`, `0.962 0.005 80`, `1 0 0` | `0.16 0.008 250`, `0.13 0.008 250`, `0.11 0.008 250`, `0.19 0.009 250` | `apps/console-v2/src/styles/tokens.css` |
-| `ink`, `ink-2`, `ink-3`, `ink-inv` | `0.20 0.012 250`, `0.38 0.012 250`, `0.46 0.012 250`, `0.99 0 0` | `0.92 0.005 250`, `0.74 0.008 250`, `0.58 0.008 250`, `0.10 0.008 250` | `apps/console-v2/src/styles/tokens.css` |
+| `ink`, `ink-2`, `ink-3`, `ink-inv` | `0.20 0.012 250`, `0.38 0.012 250`, `0.46 0.012 250`, `0.99 0 0` | `0.92 0.005 250`, `0.74 0.008 250`, `0.60 0.008 250`, `0.10 0.008 250` | `apps/console-v2/src/styles/tokens.css` |
 | `line`, `line-2`, `line-strong` | `0.91 0.005 80`, `0.86 0.006 80`, `0.78 0.008 80` | `0.26 0.010 250`, `0.32 0.010 250`, `0.42 0.012 250` | `apps/console-v2/src/styles/tokens.css` |
 | `accent`, `accent-soft`, `accent-ink` | `0.45 0.13 158`, `0.94 0.05 158`, `0.32 0.10 158` | `0.68 0.13 158`, `0.28 0.06 158`, `0.85 0.12 158` | `apps/console-v2/src/styles/tokens.css` |
 | `warn`, `warn-soft`, `warn-ink` | `0.68 0.14 60`, `0.96 0.05 80`, `0.40 0.12 60` | `0.78 0.14 70`, `0.30 0.08 70`, `0.88 0.12 70` | `apps/console-v2/src/styles/tokens.css` |
@@ -132,7 +132,7 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 | Focus and landmarks | Shared buttons/fields use visible focus rings, and the shared shell provides a skip link. V2 uses `:focus-visible` with `--focus-ring` and a skip link to main. Landing has a skip link and visible button/map focus outlines. `packages/ui/src/button.tsx`, `packages/ui/src/form-classes.ts`, `packages/ui/src/app-shell.tsx`, `apps/console-v2/src/styles/base.css`, `apps/console-v2/src/shell/AppShell.tsx`, `docs/marketing/landing-v2/index.html`, `docs/marketing/landing-v2/app.css` |
 | Labels and announcements | Shared fields wire invalid/error descriptions and the combobox exposes expanded and active-option state. Shared loading and empty views use polite status. V2 labels table selection/actions and announces toasts. Landing uses labels, navigation `aria-expanded` and polite form status. `packages/ui/src/input.tsx`, `packages/ui/src/combobox.tsx`, `packages/ui/src/loading-state.tsx`, `packages/ui/src/empty-state.tsx`, `apps/console-v2/src/components/DataTable.tsx`, `apps/console-v2/src/components/Toast.tsx`, `docs/marketing/landing-v2/index.html`, `docs/marketing/landing-v2/app.js` |
 | Keyboard | Radix-backed dialogs/drawers provide keyboard dismissal and focus management. Shared shortcuts ignore editable targets and IME composition. V2 uses keyboard navigation in the command palette. Landing's expanded tracking map handles Escape, sets initial focus and restores focus on close. `packages/ui/src/modal.tsx`, `packages/ui/src/drawer.tsx`, `packages/ui/src/hooks/use-keyboard-shortcuts.ts`, `apps/console-v2/src/components/Palette.tsx`, `docs/marketing/landing-v2/app.js` |
-| Contrast | Shared controls pair semantic foreground and surface tokens. V2's light `--ink-3` and `--accent` declarations document contrast-driven darkening. These are source-level treatments for specific pairs. `packages/ui/src/styles.css`, `packages/ui/src/button.tsx`, `apps/console-v2/src/styles/tokens.css` |
+| Contrast | Shared controls pair semantic foreground and surface tokens. `tests/unit/design-token-contrast.test.js` reads the shared UI, Console V2 and landing token files and requires 4.5:1 for each text pair and 3:1 for focus rings in both themes, including status badges on their 12% tint and the `--tag-*` pairs. `packages/ui/src/styles.css`, `apps/console-v2/src/styles/tokens.css`, `docs/marketing/landing-v2/app.css` |
 | Reduced motion | Shared overlays use `motion-safe` and shared shimmer stops under reduced motion. V2 reduces animation and transition duration to 0.001ms and disables smooth scrolling under reduced motion. Landing disables motion via its attribute and OS media query. `packages/ui/src/modal.tsx`, `packages/ui/src/drawer.tsx`, `packages/ui/src/styles.css`, `apps/console-v2/src/styles/tokens.css`, `docs/marketing/landing-v2/app.css` |
 | Lint | The root uses Next.js core-web-vitals and TypeScript presets. V2 has a separate TypeScript and React hooks config. FieldOps TSX has warning-level rules for hex colors outside theme files, off-scale spacing literals and raw typography literals. `eslint.config.mjs`, `apps/console-v2/eslint.config.js`, `config/tooling/eslint.fieldops.js` |
 
