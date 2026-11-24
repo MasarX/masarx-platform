@@ -126,6 +126,12 @@ async function cloneHostedDatabases(admin, databases, created, restore = admin) 
   }
 }
 
+function timeHostedCloneCommand(summary, admin, ...commands) {
+  const clone = /^CREATE DATABASE (pgtap_worker_\d+) TEMPLATE /.exec(commands[0]);
+  if (!clone) return admin(...commands);
+  return stage(summary, `database-clone:${clone[1]}`, () => admin(...commands));
+}
+
 async function withHostedCloneIsolation(admin, restore, clone) {
   const { rolconnlimit, rolsuper, logLevel, restoreLogging } = JSON.parse(await admin(`SELECT json_build_object(
     'rolconnlimit', rolconnlimit, 'rolsuper', rolsuper, 'logLevel', setting,
@@ -240,7 +246,8 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
   try {
     const [setupResult] = await Promise.allSettled([execute('setup', setup.length ? setup : selected.slice(0, 1), 'postgres', !setup.length)]);
     if (setupResult.status === 'rejected' && !fs.existsSync('ci-reports/pgtap-setup.json')) throw setupResult.reason;
-    const cloneAdmin = (...commands) => admin(Math.min(15000, remaining()), ...commands);
+    const boundedAdmin = (...commands) => admin(Math.min(15000, remaining()), ...commands);
+    const cloneAdmin = (...commands) => timeHostedCloneCommand(summary, boundedAdmin, ...commands);
     const migratedDatabaseBytes = Number((await cloneAdmin("SELECT pg_database_size('postgres')")).trim());
     if (!Number.isSafeInteger(migratedDatabaseBytes) || migratedDatabaseBytes < 1) throw new Error('Could not measure migrated database size');
     summary.migratedDatabaseBytes = migratedDatabaseBytes;
@@ -263,7 +270,8 @@ async function runHostedShard({ selected, checked, testEnv, admin, summary, dock
       diskFloor(dockerRoot);
       results = await Promise.allSettled(workers.map((files, index) => execute(`worker-${index}`, files, index === 0 ? 'postgres' : databases[index - 1])));
     } finally {
-      if (created.length) await admin(15000, ...created.map(database => `DROP DATABASE ${database} WITH (FORCE)`));
+      if (created.length) await stage(summary, 'database-clone-cleanup', () =>
+        admin(15000, ...created.map(database => `DROP DATABASE ${database} WITH (FORCE)`)));
     }
     // Shared state and database catalog assertions see only the canonical database and no concurrent tests.
     const [serialResult] = await Promise.allSettled([execute('worker-0-serial', serial)]);
@@ -693,4 +701,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(sanitize(error.message)); process.exitCode = 1; });
-module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, withHostedCloneIsolation, pgtapDeadline };
+module.exports = { bucketSections, migrationInventory, imagePreflight, completePins, mainSwitch, imageGuard, verifyHostedDatabaseInit, migrationProgress, diskFloor, backendLint, waitForCronPause, configureHostedDatabase, hostedStackPorts, disableHostedAutovacuum, hostedWorkerCount, hostedWorkerLimit, cloneHostedDatabases, timeHostedCloneCommand, withHostedCloneIsolation, pgtapDeadline };

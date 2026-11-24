@@ -34,7 +34,7 @@ Follows engineering standard v1.10.
 - PR wall time uses the workflow start and the `ci-gate` result timestamps. Track p50 and p90 on the project board's CI-FAST item. Timing-weighted pgTAP shards were the first change ([#173](https://github.com/MasarX/masarx-platform/pull/173)).
 - Keep queue-entry-to-completion wall time under 25 minutes. Track PR-open-to-merge time alongside PR wall time and queue wall time. Use a ±10% tolerance for timing comparisons unless the repository defines another tolerance.
 - Use GitHub Actions job durations and counts for runner-minutes and job count. [hosted-usage-report.js](scripts/ops/ci/hosted-usage-report.js) summarizes runner usage exports. Gap: Standalone budgets for runner-minutes and time to merge are undefined.
-- CI job summaries show phase durations and whether the npm cache restored when the job uses it. Use the GitHub Actions job duration for dependency review and total wall time.
+- CI job summaries show phase durations and whether the npm cache restored when the job uses it. Parallel pgTAP reports each template clone and the cleanup batch. Use the GitHub Actions job duration for dependency review and total wall time.
 - Measure product speed in a browser on production-class hardware against a written usable state. Before tuning a slow action, capture its request waterfall and client and server timings.
 - Before replacing a CI tool, compare both tools on the same inputs and record any lost coverage. If a change leaves `main` or the queue red for 30 minutes, revert it through the protected PR path. Track flaky tests as high-priority bugs and fix or revert the cause.
 
