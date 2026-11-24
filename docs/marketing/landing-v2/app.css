@@ -1264,7 +1264,7 @@ html.js[data-motion="on"] .cap-card.is-card-visible .cap-svg .draw-line {
 }
 
 /* --- Motion off: immediate visibility --- */
-html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
+html[data-motion="off"], html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
   scroll-behavior: auto !important;
   transition: none !important;
   animation: none !important;
