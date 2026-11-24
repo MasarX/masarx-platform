@@ -551,8 +551,12 @@ jobs:
       - *timing_install
       - *install_locked
       - *timing_work
+      - name: Install lockfile-selected Chromium
+        run: node scripts/ci-hosted/tasks.cjs browser-install
+      - name: Build and measure Console V2
+        run: node scripts/ci-hosted/tasks.cjs console-v2-speed
       - name: Build present console
-        if: steps.subject.outputs.present == 'true'
+        if: ${{ !cancelled() && steps.subject.outputs.present == 'true' && steps.install.outcome == 'success' }}
         run: node scripts/ci-hosted/tasks.cjs build apps/console
 
   build-portal-landing:
@@ -587,8 +591,13 @@ jobs:
       - *timing_install
       - *install_locked
       - *timing_work
+      - name: Install lockfile-selected Chromium
+        if: steps.subject.outputs.portal == 'true'
+        run: node scripts/ci-hosted/tasks.cjs browser-install
       - name: Build present portal
         if: steps.subject.outputs.portal == 'true'
+        env:
+          CI_PORTAL_SPEED: '1'
         run: node scripts/ci-hosted/tasks.cjs build apps/portal
       - name: Build present landing
         if: ${{ !cancelled() && steps.subject.outputs.landing == 'true' && steps.install.outcome == 'success' }}
