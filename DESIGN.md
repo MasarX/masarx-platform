@@ -173,20 +173,20 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 - Write a definition of usable for each screen that names what must be visible and interactive and what may still show “updating.”
 - Measure time to usable in the browser on production-class hardware, and agree a tolerance for each number.
 - Time user journeys and compare each result with the previous measurement under the same conditions.
-- This table is the one source of the budgets. Rows that name `landing-speed-p75` are measured by [that spec](tests/landing-e2e/landing-speed-p75.spec.ts), which reads the targets and tolerance from the row and fails a p75 above them. A [docs test](tests/unit/design-speed-table.test.js) fails on a TBD or unparseable row.
+- This table is the one source of the budgets. The named specs read the targets and tolerance from their rows and fail when p75 exceeds a target plus tolerance. The Console V2 and Portal build jobs print a result for each route. A [docs test](tests/unit/design-speed-table.test.js) fails on a TBD or unparseable row.
 
 | Screen | Visible and interactive at usable | May still show “updating” | Target time to usable | Agreed tolerance | Timed journey and previous result |
 | --- | --- | --- | --- | --- | --- |
 | Landing `/` | Hero heading, primary navigation, language and theme toggles, and the hero calls to action | Nothing; the page is static | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `landing-speed-p75` in Landing E2E: 5 cold loads at 1440 wide, motion off, then Tab and a heading click. Previous result: the last CI run's evidence JSON. |
 | Public tracking `/track/` | Page heading, the tracking reference field and the Continue button | The lookup result, which loads only after a request | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `landing-speed-p75` in Landing E2E: 5 cold loads at 1440 wide, motion off, then Tab and a heading click. Previous result: the last CI run's evidence JSON. |
-| Console V2 Dashboard `/` | Top bar, navigation and the widget grid frames | Widget figures until their reads return | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | Load, Tab and a heading click on a production build. Not measured in CI yet (#388). |
-| Console V2 Shipments `/operate/shipments` | Top bar, filters and the table header | Table rows until the list read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | Load, Tab and a heading click on a production build. Not measured in CI yet (#388). |
-| Console V2 Dispatch `/operate/dispatch` | Top bar and the route board columns | Stop cards until the dispatch read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | Load, Tab and a heading click on a production build. Not measured in CI yet (#388). |
-| Console V2 Exceptions `/operate/exceptions` | Top bar, filters and the queue header | Queue rows until the exceptions read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | Load, Tab and a heading click on a production build. Not measured in CI yet (#388). |
-| Console V2 Pickups `/operate/pickups` | Top bar, filters and the table header | Table rows until the pickups read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | Load, Tab and a heading click on a production build. Not measured in CI yet (#388). |
-| Console V2 Tracking map `/operate/tracking-map` | Top bar, the map frame and the shipment list | Map tiles and positions until they load | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | Load, Tab and a heading click on a production build. Not measured in CI yet (#388). |
-| Console V2 COD `/finance/cod` | Top bar, summary frames and the table header | Amounts and rows until the COD reads return | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | Load, Tab and a heading click on a production build. Not measured in CI yet (#388). |
-| Portal tracking `/tracking` | Page heading and the shipment search field | Results until the search read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | Load, Tab and a heading click on a production build. Not measured in CI yet (#388). |
+| Console V2 Dashboard `/` | Top bar, navigation and the widget grid frames | Widget figures until their reads return | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `console-v2-speed-p75` in the Console build job. Five cold production loads, then Tab and a heading click. The previous result is in the last CI run log. |
+| Console V2 Shipments `/operate/shipments` | Top bar, filters and the table header | Table rows until the list read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `console-v2-speed-p75` in the Console build job. Five cold production loads, then Tab and a heading click. The previous result is in the last CI run log. |
+| Console V2 Dispatch `/operate/dispatch` | Top bar and the route board columns | Stop cards until the dispatch read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `console-v2-speed-p75` in the Console build job. Five cold production loads, then Tab and a heading click. The previous result is in the last CI run log. |
+| Console V2 Exceptions `/operate/exceptions` | Top bar, filters and the queue header | Queue rows until the exceptions read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `console-v2-speed-p75` in the Console build job. Five cold production loads, then Tab and a heading click. The previous result is in the last CI run log. |
+| Console V2 Pickups `/operate/pickups` | Top bar, filters and the table header | Table rows until the pickups read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `console-v2-speed-p75` in the Console build job. Five cold production loads, then Tab and a heading click. The previous result is in the last CI run log. |
+| Console V2 Tracking map `/operate/tracking-map` | Top bar, the map frame and the shipment list | Map tiles and positions until they load | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `console-v2-speed-p75` in the Console build job. Five cold production loads, then Tab and a heading click. The previous result is in the last CI run log. |
+| Console V2 COD `/finance/cod` | Top bar, summary frames and the table header | Amounts and rows until the COD reads return | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `console-v2-speed-p75` in the Console build job. Five cold production loads, then Tab and a heading click. The previous result is in the last CI run log. |
+| Portal tracking `/tracking` | Page heading and the shipment search field | Results until the search read returns | LCP ≤ 2.5 s, INP ≤ 200 ms at p75 | +10% | `portal-speed-p75` in the Portal build job. Five cold production loads, then Tab and a heading click. The previous result is in the last CI run log. |
 
 ### Where UI is verified
 
@@ -196,7 +196,6 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
   - The ESLint configs in section 8 (Lint). No CI task runs ESLint. [#431](https://github.com/MasarX/masarx-platform/issues/431)
   - Accessibility of Console, Console V2 and portal screens: rendered contrast, tab order and 24 by 24 pixel targets. Landing E2E covers only landing and public tracking, and CI does not run `tests/e2e`. [#301](https://github.com/MasarX/masarx-platform/issues/301), [#270](https://github.com/MasarX/masarx-platform/issues/270)
   - Screen coverage and daily sweep captures of signed-in screens. Visual baselines run only on manual dispatch. [#432](https://github.com/MasarX/masarx-platform/issues/432)
-  - Time to usable for Console V2 and portal screens (Speed). [#388](https://github.com/MasarX/masarx-platform/issues/388)
 
 ### Review and sweeps
 

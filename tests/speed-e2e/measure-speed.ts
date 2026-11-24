@@ -1,13 +1,14 @@
 import { writeFileSync } from "node:fs";
-import { errors, expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { readSpeedBudgets } from "../../scripts/frontend/design-speed-budgets.cjs";
 
 const RUNS = 5;
 const VIEWPORT = { width: 1440, height: 900 };
 const EVENT_TIMING_FLOOR_MS = 16;
-// shortcut: draft bounds from #301, replace with DESIGN.md rows and parser when #390 lands
-const LIMIT = { lcpMs: 2750, inpMs: 220 };
+const EVENT_TIMING_WINDOW_MS = 2000;
 
 type Metrics = { lcpMs: number; inpMs: number };
+type Budget = Metrics & { screen: string; route: string; toleranceRatio: number; spec: string | null };
 type Observations = { lcpMs: number; inpMs: number; trustedClick: boolean; clickMeasured: boolean };
 type SpeedWindow = Window & { speedObservations: Observations };
 
@@ -16,10 +17,28 @@ function p75(values: number[]): number {
 }
 
 export function measureSpeed(
-  screen: string,
-  route: string,
-  ready: (page: Page) => Promise<void>,
+  spec: string,
+  routes: string[],
+  ready: (page: Page, route: string) => Promise<void>,
 ) {
+  const rows: Budget[] = readSpeedBudgets();
+  const budgets = rows.filter((row) => row.spec === spec);
+  expect(budgets.map((budget) => budget.route).sort(), spec + " routes in DESIGN.md")
+    .toEqual([...routes].sort());
+  for (const budget of budgets) {
+    measureRoute(budget, ready);
+  }
+}
+
+function measureRoute(
+  { screen, route, lcpMs, inpMs, toleranceRatio }: Budget,
+  ready: (page: Page, route: string) => Promise<void>,
+) {
+  const budget = { lcpMs, inpMs, toleranceRatio };
+  const limit = {
+    lcpMs: Math.round(lcpMs * (1 + toleranceRatio)),
+    inpMs: Math.round(inpMs * (1 + toleranceRatio)),
+  };
   test(`speed p75: ${screen}`, async ({ browser, baseURL }, testInfo) => {
     const runs: Metrics[] = [];
     for (let i = 0; i < RUNS; i += 1) {
@@ -57,18 +76,17 @@ export function measureSpeed(
         await expect(page).toHaveURL(new URL(route, baseURL).href);
         expect(await page.evaluate(() => PerformanceObserver.supportedEntryTypes))
           .toEqual(expect.arrayContaining(["largest-contentful-paint", "event"]));
-        await ready(page);
+        await ready(page, route);
         const heading = page.getByRole("main").getByRole("heading", { level: 1 }).first();
         await expect(heading).toBeVisible();
         await page.waitForFunction(() => (window as SpeedWindow).speedObservations.lcpMs > 0);
 
         await page.keyboard.press("Tab");
         await heading.click();
-        // Chromium only reports interactions at or above the Event Timing floor.
-        await page.waitForFunction(() => (window as SpeedWindow).speedObservations.clickMeasured,
-          null, { timeout: 2000 }).catch((error: unknown) => {
-          if (!(error instanceof errors.TimeoutError)) throw error;
-        });
+        // Chromium omits sub-floor entries, so a sample can finish without a click entry.
+        const deadline = await page.evaluate((windowMs) => performance.now() + windowMs, EVENT_TIMING_WINDOW_MS);
+        await page.waitForFunction((until) =>
+          (window as SpeedWindow).speedObservations.clickMeasured || performance.now() >= until, deadline);
         const { lcpMs, inpMs, trustedClick } = await page.evaluate(() => (window as SpeedWindow).speedObservations);
         expect(trustedClick, `trusted click on ${route} run ${i + 1}`).toBe(true);
         runs.push({ lcpMs: Math.round(lcpMs), inpMs: inpMs || EVENT_TIMING_FLOOR_MS });
@@ -78,10 +96,14 @@ export function measureSpeed(
     }
 
     const result = { lcpMs: p75(runs.map(run => run.lcpMs)), inpMs: p75(runs.map(run => run.inpMs)) };
-    const evidence = JSON.stringify({ screen, route, viewport: VIEWPORT, runs, p75: result, limit: LIMIT });
-    writeFileSync(testInfo.outputPath("speed-p75.json"), evidence + "\n");
-    console.log(evidence);
-    expect.soft(result.lcpMs, `LCP p75 on ${screen}`).toBeLessThanOrEqual(LIMIT.lcpMs);
-    expect(result.inpMs, `INP p75 on ${screen}`).toBeLessThanOrEqual(LIMIT.inpMs);
+    const passed = result.lcpMs <= limit.lcpMs && result.inpMs <= limit.inpMs;
+    const summary = {
+      screen, route, viewport: VIEWPORT, sampleCount: runs.length, p75: result, budget, limit,
+      status: passed ? "PASS" : "FAIL",
+    };
+    console.log(JSON.stringify(summary));
+    writeFileSync(testInfo.outputPath("speed-p75.json"), JSON.stringify({ ...summary, runs }) + "\n");
+    expect.soft(result.lcpMs, `LCP p75 on ${screen}`).toBeLessThanOrEqual(limit.lcpMs);
+    expect(result.inpMs, `INP p75 on ${screen}`).toBeLessThanOrEqual(limit.inpMs);
   });
 }
