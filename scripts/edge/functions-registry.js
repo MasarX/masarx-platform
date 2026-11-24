@@ -21,7 +21,7 @@ function loadRegistry(registryPath = DEFAULT_REGISTRY_PATH) {
   if (!items) {
     throw new Error('[edge/functions-registry] Expected an array or { functions: [...] }');
   }
-  const entries = items.map((item) => {
+  return items.map((item) => {
     const name = String(item.name || '').trim();
     if (!name) {
       throw new Error('[edge/functions-registry] Function entry missing name');
@@ -30,18 +30,6 @@ function loadRegistry(registryPath = DEFAULT_REGISTRY_PATH) {
     const enabled = item.enabled !== false;
     return { name, authMode, enabled, ...('environments' in item && { environments: item.environments }) };
   });
-  if (resolved === DEFAULT_REGISTRY_PATH) {
-    const functionsRoot = path.join(__dirname, '..', '..', 'supabase', 'functions');
-    const registered = new Set(entries.map(({ name }) => name));
-    const missing = fs.readdirSync(functionsRoot, { withFileTypes: true })
-      .filter(entry => entry.isDirectory() && !entry.name.startsWith('_') && !registered.has(entry.name))
-      .map(entry => entry.name)
-      .sort();
-    if (missing.length) {
-      throw new Error(`[edge/functions-registry] Missing from config/edge/functions.json: ${missing.join(', ')}`);
-    }
-  }
-  return entries;
 }
 
 function functionsForDeploy(entries, environment) {

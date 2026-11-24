@@ -82,11 +82,6 @@
       "enabled": true
     },
     {
-      "name": "integration-plugin-studio",
-      "auth_mode": "supabase_jwt",
-      "enabled": true
-    },
-    {
       "name": "resource-import-studio",
       "auth_mode": "public_no_jwt",
       "enabled": true
@@ -114,6 +109,11 @@
     {
       "name": "tenant-user-invite",
       "auth_mode": "public_no_jwt",
+      "enabled": true
+    },
+    {
+      "name": "integration-plugin-studio",
+      "auth_mode": "supabase_jwt",
       "enabled": true
     }
   ]
