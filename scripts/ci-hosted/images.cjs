@@ -90,7 +90,8 @@ async function prepareImages(pins, { env, checked, timed, summary, wait, dockerR
   const results = await Promise.allSettled(pins.map(async pin => {
     checkDisk();
     const served = pin.mirror;
-    const reference = `${served}/${pin.image}@${pin.digest}`;
+    const tag = served === 'public.ecr.aws' ? `:${pin.tag}` : '';
+    const reference = `${served}/${pin.image}${tag}@${pin.digest}`;
     const label = `image-pull:${pin.role}:${served}`;
     const deadline = Date.now() + PULL_BUDGET_MS;
     const budgetMessage = `Image pull ${pin.image} exceeded its ${PULL_BUDGET_MS / 1000}s overall budget`;
