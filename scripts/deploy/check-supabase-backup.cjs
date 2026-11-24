@@ -19,7 +19,7 @@ function latestBackup(inventory, now, maxAgeHours) {
     }
     if (newest === null || timestamp > newest) newest = timestamp;
   }
-  if (newest === null || now - newest > maxAgeHours * 3_600_000) {
+  if (newest === null || now - newest >= maxAgeHours * 3_600_000) {
     throw new Error('no fresh completed backup');
   }
   return new Date(newest).toISOString();

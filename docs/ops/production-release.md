@@ -55,7 +55,7 @@ For each deployable, take `ARTIFACT`, `ARTIFACT_SHA256` and `MAIN_BUILD_WORKFLOW
 
 ## Check the backup and apply
 
-Before each production deployment, use the tagged checkout and the production project binding from the private target configuration. The apply checks require the latest Production preflight for the exact tag and SHA to have completed successfully. Record the emitted `production_preflight_run` ID with the release evidence. `BACKUP_MAX_AGE_HOURS` is the approved maximum recovery-point age. The token on stdin needs Supabase Management API `backups_read` access to the selected project. The checker requires a fresh completed provider backup record. Retain its UTC timestamp with the release audit evidence and check the separately recorded restore rehearsal before continuing. [Backup listing API](https://supabase.com/docs/reference/api/v1-list-all-backups)
+Before each production deployment, use the tagged checkout and the production project binding from the private target configuration. The apply checks require the latest Production preflight for the exact tag and SHA to have completed successfully. Record the emitted `production_preflight_run` ID with the release evidence. `BACKUP_MAX_AGE_HOURS` is the approved recovery-point age limit. The token on stdin needs Supabase Management API `backups_read` access to the selected project. The checker requires a completed provider backup younger than the age limit. Retain its UTC timestamp with the release audit evidence and check the separately recorded restore rehearsal before continuing. [Backup listing API](https://supabase.com/docs/reference/api/v1-list-all-backups)
 
 ```bash
 set -euo pipefail

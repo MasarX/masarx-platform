@@ -17,14 +17,14 @@ const backup = {
   inserted_at: '2026-01-01T12:00:00.000000+00:00',
 };
 
-test('accepts the newest completed restore point on the freshness boundary', async () => {
+test('accepts the newest completed restore point inside the freshness limit', async () => {
   const inventory = { backups: [
     { ...backup, status: 'IN_PROGRESS', inserted_at: '2026-01-02T11:59:00Z' },
-    backup,
+    { ...backup, inserted_at: '2026-01-01T12:00:01.000000+00:00' },
     { ...backup, inserted_at: '2025-12-31T12:00:00Z' },
   ] };
   const request = jest.fn().mockResolvedValue({ ok: true, json: async () => inventory });
-  await expect(checkBackup({ ...backupInput, request })).resolves.toBe('2026-01-01T12:00:00.000Z');
+  await expect(checkBackup({ ...backupInput, request })).resolves.toBe('2026-01-01T12:00:01.000Z');
 });
 
 test.each([
@@ -32,6 +32,7 @@ test.each([
   ['empty inventory', { backups: [] }, 'no fresh completed backup'],
   ['no completed backup', { backups: [{ ...backup, status: 'FAILED' }] }, 'no fresh completed backup'],
   ['stale backup', { backups: [{ ...backup, inserted_at: '2026-01-01T11:59:59Z' }] }, 'no fresh completed backup'],
+  ['backup exactly at the freshness limit', { backups: [backup] }, 'no fresh completed backup'],
   ['malformed timestamp', { backups: [{ ...backup, inserted_at: '2026-02-30T00:00:00Z' }] }, 'invalid completed backup record'],
   ['future timestamp', { backups: [{ ...backup, inserted_at: '2026-01-02T12:00:01Z' }] }, 'invalid completed backup record'],
   ['non-UTC offset', { backups: [{ ...backup, inserted_at: '2026-01-01T16:00:00+03:00' }] }, 'invalid completed backup record'],
