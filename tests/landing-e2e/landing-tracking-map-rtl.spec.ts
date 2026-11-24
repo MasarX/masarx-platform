@@ -46,20 +46,28 @@ async function openResults(page: Page, path: string) {
   await expect(page.locator('[data-track-stage="results"]')).toBeVisible();
 }
 
-// True when the focused element is the top hit at one of five sample points of its on-screen box.
-function focusedIsVisible(page: Page) {
+// Visible when the focused element is the top hit at one of five sample points of its on-screen box.
+// The result also names the focused element, its box and each hit, so a failure shows what covers it.
+function focusedVisibility(page: Page) {
   return page.evaluate(() => {
+    const name = (n: Element | null) => (n ? `${n.tagName.toLowerCase()}.${[...n.classList].join(".")}` : "none");
     const el = document.activeElement as HTMLElement;
     const r = el.getBoundingClientRect();
     const left = Math.max(r.left, 0);
     const top = Math.max(r.top, 0);
     const width = Math.min(r.right, innerWidth) - left;
     const height = Math.min(r.bottom, innerHeight) - top;
-    return width > 0 && height > 0 && [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]
-      .some(([fx, fy]) => {
-        const hit = document.elementFromPoint(left + width * fx, top + height * fy);
-        return !!hit && (hit === el || el.contains(hit));
-      });
+    const hits = width > 0 && height > 0
+      ? [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]
+        .map(([fx, fy]) => document.elementFromPoint(left + width * fx, top + height * fy))
+      : [];
+    return {
+      visible: hits.some((hit) => !!hit && (hit === el || el.contains(hit))),
+      focused: name(el),
+      box: [r.left, r.top, r.width, r.height].map(Math.round),
+      viewport: [innerWidth, innerHeight],
+      hits: hits.map(name),
+    };
   });
 }
 
@@ -76,7 +84,8 @@ for (const path of ["/track/", "/ar/track/"]) {
       const picker = page.locator("[data-track-map-picker]");
       for (const control of [".leaflet-control-zoom-in", ".leaflet-control-zoom-out"]) {
         await picker.locator(control).focus();
-        expect(await focusedIsVisible(page), `${control} is hidden when focused`).toBe(true);
+        const result = await focusedVisibility(page);
+        expect(result.visible, `${control} is hidden when focused: ${JSON.stringify(result)}`).toBe(true);
       }
     });
   }
