@@ -52,7 +52,7 @@ import { hostedInviteRedirect } from '../hosted-redirect';
 import { SEED_MODE_ENABLED } from '../seed-loader';
 import { getSupabaseClient } from '../supabase';
 import { asNonEmptyString, type ResourceRow } from './shared';
-import { type UiOnboardingReadiness } from '.../types/domain';
+import type { UiOnboardingReadiness } from '../../types/domain';
 
 export async function rbac_create_role_v1(
   args: Record<string, unknown>,
