@@ -20,6 +20,14 @@ name: Verify Console V2 Worker
 permissions:
   contents: read
 
+concurrency:
+  group: console-v2-worker-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   console-v2-worker:
     runs-on: ubuntu-24.04

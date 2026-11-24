@@ -103,8 +103,8 @@ function buildCsp({
   nonce = "",
   trustedExternalDataOrigins = process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS,
   mapTileOrigins = process.env.NEXT_PUBLIC_UI_MAP_TILE_ORIGINS,
-  fontStylesheetOrigins,
-  fontAssetOrigins,
+  fontStylesheetOrigins = "",
+  fontAssetOrigins = "",
   sameOriginWorkers = false,
 }) {
   const supabaseOrigin = normalizeOrigin(supabaseUrl);
@@ -203,9 +203,9 @@ function buildSecurityHeaders({
   nonce = "",
   trustedExternalDataOrigins = process.env.NEXT_PUBLIC_UI_TRUSTED_EXTERNAL_DATA_ORIGINS,
   mapTileOrigins = process.env.NEXT_PUBLIC_UI_MAP_TILE_ORIGINS,
-  fontStylesheetOrigins,
-  fontAssetOrigins,
-  sameOriginWorkers,
+  fontStylesheetOrigins = "",
+  fontAssetOrigins = "",
+  sameOriginWorkers = false,
 }) {
   return [
     {

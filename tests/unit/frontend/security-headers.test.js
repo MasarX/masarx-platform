@@ -116,6 +116,26 @@ describe('apps/shared/security-headers', () => {
     expect(csp.has('upgrade-insecure-requests')).toBe(true);
   });
 
+  test('buildCsp preserves the default style, font and worker directives', () => {
+    const csp = parseCsp(buildCsp({ nodeEnv: 'production' }));
+    expect(csp.get('style-src')).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(csp.get('font-src')).toEqual(["'self'", 'data:']);
+    expect(csp.has('worker-src')).toBe(false);
+  });
+
+  test('buildCsp adds only exact HTTPS font origins and opts in to same-origin workers', () => {
+    const invalid = 'http://cleartext.example.test,https://path.example.test/fonts,https://*.example.test';
+    const csp = parseCsp(buildCsp({
+      nodeEnv: 'production',
+      fontStylesheetOrigins: `https://styles.example.test/,${invalid}`,
+      fontAssetOrigins: `https://fonts.example.test:8443,${invalid}`,
+      sameOriginWorkers: true,
+    }));
+    expect(csp.get('style-src')).toEqual(["'self'", "'unsafe-inline'", 'https://styles.example.test']);
+    expect(csp.get('font-src')).toEqual(["'self'", 'data:', 'https://fonts.example.test:8443']);
+    expect(csp.get('worker-src')).toEqual(["'self'"]);
+  });
+
   test('map raster fetch admission is explicit and does not widen image-only origins', () => {
     const csp = parseCsp(buildCsp({ supabaseUrl: '', nodeEnv: 'production',
       trustedExternalDataOrigins: 'https://images.example.test',
