@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AuthMfa } from '@masarx/ui/auth-mfa';
 import { Button } from '@/components/Button';
 import { StateView } from '@/components/StateView';
 import {
@@ -8,9 +9,9 @@ import {
   rememberConsoleAuthRedirect,
   sendConsoleMagicLink,
   signInConsoleWithPassword,
+  signOutConsole,
 } from '@/lib/auth';
 import { useIdentity } from '@/lib/identity';
-import { pushToast } from '@/components/toastStore';
 
 function redirectToStoredTarget() {
   if (typeof window === 'undefined') return;
@@ -56,7 +57,6 @@ export function LoginModule() {
     try {
       await signInConsoleWithPassword({ email, password });
       await identity.refreshSession();
-      pushToast('Signed in', 'good');
       redirectToStoredTarget();
     } catch (error) {
       setMessage((error as Error).message || 'Sign-in failed');
@@ -86,6 +86,19 @@ export function LoginModule() {
           kind="error"
           title="Console sign-in is not ready"
           hint="The production sign-in connection is not available for this environment. Ask a platform administrator to finish setup before operators use this route."
+        />
+      </main>
+    );
+  }
+
+  const authClient = identity.authStatus === 'mfa_required' ? getConsoleAuthClient() : null;
+  if (authClient) {
+    return (
+      <main className="page" data-testid="login-module" style={{ padding: 24 }}>
+        <AuthMfa
+          mfa={authClient.auth.mfa}
+          onVerified={identity.refreshSession}
+          onSignOut={signOutConsole}
         />
       </main>
     );

@@ -345,6 +345,21 @@
           "signInFailed": "Sign-in failed. Try again or contact support."
         }
       },
+      "mfa": {
+        "title": "التحقق بتطبيق المصادقة",
+        "description": "استخدم تطبيق المصادقة للمتابعة.",
+        "continue": "متابعة",
+        "setupInstructions": "امسح رمز الاستجابة السريعة في تطبيق المصادقة، ثم أدخل الرمز الذي ينشئه التطبيق.",
+        "qrLabel": "رمز الاستجابة السريعة لإعداد المصادقة",
+        "manualKey": "مفتاح الإعداد اليدوي",
+        "factorLabel": "تطبيق المصادقة",
+        "codeLabel": "رمز المصادقة المكوّن من ستة أرقام",
+        "verify": "تحقق",
+        "signOut": "تسجيل الخروج",
+        "setupFailed": "تعذّر إعداد تطبيق المصادقة. حاول مرة أخرى.",
+        "verificationFailed": "تعذّر التحقق. أدخل رمزًا جديدًا وحاول مرة أخرى.",
+        "signOutFailed": "تعذّر تسجيل الخروج. حاول مرة أخرى."
+      },
       "gate": {
         "contextError": "‏Failed to load UI context.",
         "authRequiredTitle": "‏{appLabel} access requires authentication.",

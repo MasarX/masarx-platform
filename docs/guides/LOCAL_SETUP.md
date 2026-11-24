@@ -14,6 +14,8 @@ Run the application you are changing from the repository root.
 
 Use separate backend configuration for each isolated checkout. Verify the configured database and API target before seeding data, applying migrations, or running integration tests. The [testing guide](TESTING_GUIDE.md) identifies which suites require a backend.
 
+Privileged test accounts use an authenticator app in Console V2, Console, and Portal. Sign in, then use the setup QR code or manual key to add the account to the authenticator. Enter the six-digit code to finish setup or verify a subsequent sign-in. The Supabase Auth [configuration](../../supabase/config.toml) sets the password minimum for new and changed passwords.
+
 ## Local label rendering over HTTP
 
 Set `EDGE_ENVIRONMENT=local` and `LABEL_RENDERER_INVOKE_URL` in the local Edge runtime. In the isolated database, have a database superuser set `app.local_label_renderer_url` to the same exact URL with `ALTER DATABASE <local_database> SET app.local_label_renderer_url = '<local_invoke_url>'`. Use that URL in the global `label_provider` settings and configure the signing key and gateway JWT for the local project. The URL must end in `/functions/v1/label-renderer`. Set this database parameter before running `0zz_label_renderer_url_policy_v1.sql` locally.

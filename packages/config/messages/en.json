@@ -345,6 +345,21 @@
           "signInFailed": "Sign-in failed. Try again or contact support."
         }
       },
+      "mfa": {
+        "title": "Authenticator verification",
+        "description": "Use an authenticator app to continue.",
+        "continue": "Continue",
+        "setupInstructions": "Scan this QR code in your authenticator app, then enter the code it generates.",
+        "qrLabel": "Authenticator setup QR code",
+        "manualKey": "Manual setup key",
+        "factorLabel": "Authenticator",
+        "codeLabel": "Six-digit authenticator code",
+        "verify": "Verify",
+        "signOut": "Sign out",
+        "setupFailed": "The authenticator could not be prepared. Try again.",
+        "verificationFailed": "Verification failed. Enter a fresh code and try again.",
+        "signOutFailed": "Sign-out failed. Try again."
+      },
       "gate": {
         "contextError": "Failed to load UI context.",
         "authRequiredTitle": "{appLabel} access requires authentication.",

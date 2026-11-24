@@ -20,6 +20,7 @@ export const CONSOLE_AUTH_REDIRECT_STORAGE_KEY = 'console-v2.auth.redirect-to';
 export type ConsoleAuthStatus =
   | 'loading'
   | 'authenticated'
+  | 'mfa_required'
   | 'unauthenticated'
   | 'error';
 

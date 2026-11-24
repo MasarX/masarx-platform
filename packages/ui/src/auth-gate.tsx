@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Section } from "./section";
-import { AuthSignIn } from "./auth-sign-in";
+import { AuthMfaSignIn, AuthSignIn } from "./auth-sign-in";
+import { isMfaRequired } from "./auth-assurance";
 import { ErrorReload } from "./error-reload";
 import { buildTestId } from "./test-ids";
 import { formatUiError, getUiErrorMessage } from "./utils";
@@ -118,6 +119,13 @@ export function AuthGate({
   appBasePath,
   forceAuth,
 }: AuthGateProps) {
+  if (isMfaRequired(contextError)) {
+    return (
+      <Section>
+        <AuthMfaSignIn />
+      </Section>
+    );
+  }
   const t = createUiTranslator("ui.auth.gate");
   const contextMessage = getUiErrorMessage(contextError);
   const errorMessage = contextError
