@@ -13,6 +13,7 @@
 | Shipments restricted by client | `npm run test:integration` (rls-policies) | `tests/integration/rls-policies.test.js` |
 | Settings ladder resolution | `npm run test:integration` (settings-resolution) | `tests/integration/settings-resolution.test.js` |
 | Webhook policy scope selection | `npm test` (webhook-ingest suite) | Duplicate/HMAC tests exercise source vs global policy resolution |
+| Tenant signup reversal | Hosted pgTAP | [Approval reversal](../../../supabase/tests/pgtap/0zz_tenant_signup_approval_reversal.sql) verifies service-only admission and suspension only for organizations created by the reversed approval |
 
 ## Manual Queries
 
