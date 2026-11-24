@@ -392,8 +392,7 @@ jobs:
           bash scripts/edge/verify-frozen-manifest.sh "$EDGE_FROZEN_WORKDIR"
           env -u EDGE_FROZEN_WORKDIR node --experimental-vm-modules node_modules/jest/bin/jest.js \
             --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js
-          EDGE_FROZEN_WORKDIR=.edge-frozen node --experimental-vm-modules node_modules/jest/bin/jest.js \
-            --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js
+          EDGE_FROZEN_WORKDIR=.edge-frozen node scripts/edge/check-bundle-lock-drift.cjs
           printf 'void import("npm:qrcode-generator@1.5.2");\n' > "$RUNNER_TEMP/leak.ts"
           if (cd "$RUNNER_TEMP" && DENO_DIR="$RUNNER_TEMP/leak-cache" deno cache --no-config --no-lock --no-remote --no-npm --node-modules-dir=none ./leak.ts) > "$RUNNER_TEMP/leak.log" 2>&1; then
             echo '::error::The offline Edge check accepted a dynamic npm import.'
