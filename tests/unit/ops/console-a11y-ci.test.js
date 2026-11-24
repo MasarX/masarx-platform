@@ -5,12 +5,12 @@ const yaml = require('yaml');
 
 const root = path.resolve(__dirname, '../../..');
 const workflow = yaml.parse(fs.readFileSync(path.join(root, '.github/workflows/public-ci.yml'), 'utf8'));
+const steps = workflow.jobs.e2e.steps;
+const run = steps.find((step) => step.id === 'console_a11y');
+process.env.A11Y_EVIDENCE_DIR = run.env.A11Y_EVIDENCE_DIR;
 const config = require(path.join(root, 'scripts/ci-hosted/playwright.console-a11y.config.cjs'));
 
 describe('Console V2 accessibility in hosted CI', () => {
-  const steps = workflow.jobs.e2e.steps;
-  const run = steps.find((step) => step.id === 'console_a11y');
-
   test('the browser job runs the suite without continue-on-error', () => {
     expect(run.run).toBe('node scripts/ci-hosted/tasks.cjs console-a11y');
     expect(run['continue-on-error']).toBeUndefined();
@@ -18,6 +18,12 @@ describe('Console V2 accessibility in hosted CI', () => {
     expect(steps.find((step) => step.id === 'console').run).toBe('node scripts/ci-hosted/tasks.cjs detect apps/console-v2');
     const upload = steps.find((step) => step.name === 'Upload Console V2 axe evidence');
     expect(upload.with.path).toBe(run.env.A11Y_EVIDENCE_DIR);
+    expect(upload.with['if-no-files-found']).toBe('error');
+  });
+
+  test('the config writes its JSON report into the uploaded evidence folder', () => {
+    const json = config.reporter.find(([name]) => name === 'json');
+    expect(path.dirname(json[1].outputFile)).toBe(path.join(root, run.env.A11Y_EVIDENCE_DIR));
   });
 
   test('the config targets the Console V2 suite on a seed-mode local server with no retries', () => {

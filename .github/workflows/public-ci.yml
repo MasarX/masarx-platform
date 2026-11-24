@@ -640,7 +640,7 @@ jobs:
         with:
           name: console-a11y-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/console-a11y/evidence
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
           include-hidden-files: false
       - name: Explain full-app browser exclusion
