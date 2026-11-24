@@ -16,12 +16,15 @@ Follows engineering standard v1.10.
 - Changes to `main` merge only through the merge queue, using `SQUASH`. The required checks are `ci-gate` and CodeQL code scanning. CodeQL alerts of high severity or above block merging. The Delivery Lead owns the merge queue, CI health and speed, releases, deploys, rollback and alerts.
 - At push time, assign a fresh migration timestamp block above the newest migration on `main` and keep its files in landing order. A rename-only re-stamp needs no new review. Compare the pre-stamp and re-stamped commits. Verify every migration is `R100` in `git diff -M --name-status` and has zero content lines in `git diff -M --numstat`. Record the existing review against the resulting SHA. The append-only and ordering gate is in [migrations.cjs](scripts/ci-hosted/migrations.cjs).
 
+- Use the independent review comment as the queue admission record. Include the verdict, full commit SHA, reviewer model and a public-safe summary of findings.
+
 ## Checks
 
 | Workflow | Work | Job limits (minutes) |
 | --- | --- | --- |
 | [CI](.github/workflows/public-ci.yml) | PR static checks and affected database, lint, typecheck, Jest, UI, build and Landing E2E jobs. The base version of [changes.cjs](scripts/ci-hosted/changes.cjs) owns the shared inputs and fallback. [selfcheck.cjs](scripts/ci-hosted/selfcheck.cjs) checks its routing. Prove affected-job selection when changing it by hiding a representative change from the selector once and confirming CI reports the missed coverage. The merge group runs the full hosted suite on the combined tree. Dependency review is PR-only. Manual dispatch can regenerate visual baselines. `ci-gate` aggregates the job results. | Database build and pgTAP 20 each, database result and append-only 5 each, lint/typecheck/unit/UI 20 each, Console and Portal/Landing builds 35 each, Landing E2E 30, visual baselines 60, dependency review and gate 5 each. |
 | [CodeQL](.github/workflows/codeql.yml) | Scans JavaScript/TypeScript and Actions on PRs into `main`, queue groups and `main` pushes. The Monday schedule also prunes Actions caches. | Analysis 20. Cache pruning has a 5-minute step limit. |
+| [Warm CI npm cache](.github/workflows/warm-ci-npm-cache.yml) | Saves the npm download cache on `main` when the root lockfile or cache workflow changes. CI jobs restore it from the default branch. | 3. |
 | [Verify prebuilt](.github/workflows/verify-prebuilt.yml) | Checks the Console and Portal prebuilt packaging contract on matching PR paths. | 15. |
 | [Deploy DEV](.github/workflows/deploy.yml) | `deploy` applies the database and deploys registered Edge Functions, Console, Portal, Landing and ingress. Manual `dry-run` checks the database apply and `api-schemas` reports API schema diagnostics. The report-only `e2e-report` job checks anonymous Console and Portal flows after both apps deploy when their previews allow access. | API schemas 10, database 180, dry run 90, Console and Portal 35 each, Landing 20, ingress 15, summary 5. |
 | [DEV outbound probe](.github/workflows/dev-outbound-probe.yml) | Measures synthetic outbound dispatch and counts failures by fixed reason. | 12, including up to 10 minutes for queued work. |
@@ -46,6 +49,7 @@ Follows engineering standard v1.10.
 - Hosted Jest ([jest.cjs](scripts/ci-hosted/jest.cjs)) reads the target-base known-failure baseline at `config/ci/known-failures.txt`. A missing baseline is empty. The file is absent on `main`. A candidate can retain or remove target-base entries.
 - Only `npm run verify:cloud:e2e-gate` reads the [UI flake quarantine](config/ci/ui-flake-quarantine.json) for its cloud E2E summary outside hosted CI. Each entry carries an owner and expiry (`burn_down_by`).
 - [database-result.cjs](scripts/ci-hosted/database-result.cjs) requires all six pgTAP shards and an exact count and name match against the SQL test inventory. [database-selfcheck.cjs](scripts/ci-hosted/database-selfcheck.cjs) probes missing and incorrect coverage.
+- The digest-pinned Docker guard enables and verifies `docker-init` for the from-zero database build and pgTAP shards on GitHub-hosted runners.
 
 ## Environments
 
