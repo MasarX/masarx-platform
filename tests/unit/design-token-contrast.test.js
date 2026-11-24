@@ -138,6 +138,9 @@ const SURFACES = [
       ['--muted', ['--surface', '--bg'], TEXT, 'secondary card text'],
       ['--muted', ['--surface-strong'], TEXT, 'secondary text on solid surface'],
       ['--btn-primary-text', ['--brand'], TEXT, 'primary button'],
+      ['--brand-text', ['--surface', '--bg'], TEXT, 'brand text on card (#423)'],
+      ['--brand-text', ['--brand@0.03', '--surface', '--bg'], TEXT, 'brand heading on highlighted card (#423)'],
+      ['--brand-text', ['--surface-strong'], TEXT, 'brand text on solid surface'],
     ],
   },
 ];
