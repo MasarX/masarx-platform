@@ -1,5 +1,6 @@
 // Console V2 theme follows the shared contract (#162 slice 1): system/light/dark,
 // one storage key, system by default, live OS changes. Density stays local.
+import { StrictMode } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { THEME_STORAGE_KEY as SHARED_THEME_STORAGE_KEY } from '@masarx/ui/theme';
@@ -131,6 +132,35 @@ describe('Console V2 theme', () => {
     expect(root().dataset.theme).toBe('dark');
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
     expect(localStorage.getItem('console-v2.theme')).toBeNull();
+  });
+
+  // main.tsx mounts under StrictMode, which runs effects twice in development (#593).
+  it('keeps a stored theme and migrates the old key under a StrictMode mount', () => {
+    localStorage.setItem('console-v2.theme', 'dark');
+    const first = render(
+      <StrictMode>
+        <ThemeProvider>
+          <Probe />
+        </ThemeProvider>
+      </StrictMode>,
+    );
+    expect(screen.getByTestId('theme')).toHaveTextContent('dark');
+    expect(root().dataset.theme).toBe('dark');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+    expect(localStorage.getItem('console-v2.theme')).toBeNull();
+    first.unmount();
+
+    // A later visit reads the shared key alone.
+    render(
+      <StrictMode>
+        <ThemeProvider>
+          <Probe />
+        </ThemeProvider>
+      </StrictMode>,
+    );
+    expect(screen.getByTestId('theme')).toHaveTextContent('dark');
+    expect(root().dataset.theme).toBe('dark');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
   });
 
   it('keeps an existing shared choice over the old key', () => {
