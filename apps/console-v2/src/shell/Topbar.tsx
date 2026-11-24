@@ -112,21 +112,28 @@ export function Topbar({
         id="cmd-trigger"
         className="cmd-trigger"
         type="button"
-        aria-label="Open command palette"
+        // WCAG 2.5.3: the accessible name starts with the visible placeholder text.
+        aria-label="Search shipments, plans, drivers, settings…"
+        aria-haspopup="dialog"
+        aria-keyshortcuts="Meta+K Control+K"
         onClick={onOpenPalette}
       >
         <span className="cmd-trigger__icon" aria-hidden="true">
           <Icon name="search" size={12} />
         </span>
         <span className="cmd-trigger__placeholder">Search shipments, plans, drivers, settings…</span>
-        <Kbd>⌘K</Kbd>
+        <span aria-hidden="true">
+          <Kbd>⌘K</Kbd>
+        </span>
       </button>
 
       <div
         className="topbar__scope"
         tabIndex={0}
         role="button"
-        aria-label="Active scope (click to switch)"
+        // WCAG 2.5.3: the name comes from the visible scope; the hint is a description.
+        aria-haspopup="dialog"
+        title="Switch scope"
         onClick={onOpenScopePalette}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -135,9 +142,9 @@ export function Topbar({
           }
         }}
       >
-        <span className="scope-pill__rank">T</span>
+        <span className="scope-pill__rank" aria-hidden="true">T</span>
         <span className="scope-pill__name">{tenantLabel}</span>
-        <span className="scope-sep">·</span>
+        <span className="scope-sep" aria-hidden="true">·</span>
         <span className="scope-pill__sub mono">{subLabel}</span>
       </div>
 
@@ -157,7 +164,8 @@ export function Topbar({
         <button
           className="icon-btn"
           type="button"
-          aria-label="Toggle language"
+          // WCAG 2.5.3: the name starts with the visible AR/EN label.
+          aria-label={locale === 'en' ? 'AR, switch to Arabic' : 'EN, switch to English'}
           onClick={toggleLocale}
         >
           {locale === 'en' ? 'AR' : 'EN'}
