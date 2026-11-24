@@ -226,7 +226,16 @@
   "integrationHealth": {
     "title": "Integration Health",
     "description": "Monitor integration uptime, success rates, and response times",
-    "empty": "No provider integrations found. Providers will appear here once configured."
+    "empty": "No provider integrations found. Providers will appear here once configured.",
+    "error": {
+      "title": "Integration health could not load.",
+      "description": "The provider read failed. Try again, and check the connection if it keeps failing.",
+      "retry": "Try again"
+    },
+    "denied": {
+      "title": "You do not have access to integration health.",
+      "description": "Ask an admin to grant read access to providers."
+    }
   },
   "onboarding": {
     "steps": {
