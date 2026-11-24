@@ -53,7 +53,7 @@ const uiClient = {
 };
 
 function renderPage() {
-  return renderWithIntl(<ResourceImportPage appBasePath="/console" initialResourceKey="recipients" />, arabic);
+  return renderWithIntl(<ResourceImportPage appBasePath="/console" initialResourceKey="recipients" initialReturnTo="/console/resources/recipients" />, arabic);
 }
 
 beforeEach(() => {
