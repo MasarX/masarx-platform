@@ -15,7 +15,7 @@ function consoleRuntimeChunk(id: string): string | undefined {
   // and keep the auth client separate from its protocol and storage helpers.
   const supabasePackage = id.match(/\/node_modules\/@supabase\/([^/]+)\//)?.[1];
   if (supabasePackage) {
-    if (id.endsWith('/auth-js/dist/module/GoTrueClient.js')) return 'supabase-auth-client';
+    if (id.endsWith('/auth-js/src/GoTrueClient.ts')) return 'supabase-auth-client';
     return `supabase-${supabasePackage}`;
   }
 
@@ -30,7 +30,7 @@ function consoleRuntimeChunk(id: string): string | undefined {
 // boolean compile-time constant `__SEED_ENABLED__` so Rollup can see a
 // literal `if (false) { ... }` branch around the seed dynamic import in
 // `src/lib/seed-loader.ts` and dead-code-eliminate it cleanly.
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   const npmPackageJson = process.env.npm_package_json;
   const logicalPackageRoot =
     npmPackageJson && path.basename(path.dirname(npmPackageJson)) === 'console-v2'
@@ -81,6 +81,10 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       alias: [
+        // Compile the SDK's published Auth sources with the app's ES2022 target.
+        ...(command === 'build'
+          ? [{ find: /^@supabase\/auth-js$/, replacement: '@supabase/auth-js/src/index.ts' }]
+          : []),
         { find: '@', replacement: path.resolve(__dirname, './src') },
         {
           find: /^@masarx\/config$/,

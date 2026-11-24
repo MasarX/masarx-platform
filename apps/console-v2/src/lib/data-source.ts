@@ -59,7 +59,8 @@ import { getSupabaseClient } from './supabase';
 import { isShipmentCreateIntent } from './webhook-intents';
 import { hostedInviteRedirect } from './hosted-redirect';
 import { normalizeShipmentTimelineRows, type ShipmentTimelineRow } from './shipment-timeline';
-import { asNonEmptyString, type ResourceRow } from './data-source/shared';
+import type { IntegrationPluginMutationOptions } from './data-source/integrations';
+import { asNonEmptyString, booleanReadback, type ResourceRow } from './data-source/shared';
 import {
   API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_INTERVAL_MS,
   API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_TIMEOUT_MS,
@@ -8578,34 +8579,6 @@ export function assertLiveUserScopeReadback(
   }
 }
 
-export async function requireLiveUserDeviceRevokeReadback(
-  rpcName: string,
-  deviceId: string,
-  revokedReason?: string | null,
-): Promise<{
-  device: Record<string, unknown>;
-  summary: Record<string, unknown>;
-}> {
-  const device = await requireLiveResourceReadback('user_devices', deviceId, rpcName);
-  const summary = await requireLiveResourceReadback('user_device_summary', deviceId, rpcName);
-  const readbacks = [device, summary];
-  for (const row of readbacks) {
-    const revokedAt = asNonEmptyString(row.revoked_at);
-    const isRevoked = row.is_revoked === true || Boolean(revokedAt);
-    if (!isRevoked) {
-      throw new Error(`${rpcName} backend readback device ${deviceId} is not revoked`);
-    }
-  }
-  const expectedReason = asNonEmptyString(revokedReason);
-  if (expectedReason) {
-    const readbackReason = asNonEmptyString(summary.revoked_reason) ?? asNonEmptyString(device.revoked_reason);
-    if (readbackReason !== expectedReason) {
-      throw new Error(`${rpcName} backend readback missing device revocation reason`);
-    }
-  }
-  return { device, summary };
-}
-
 async function requireLiveUserSessionRevocationReadback(
   rpcName: string,
   targetUserId: string,
@@ -8650,303 +8623,6 @@ async function requireLiveUserSessionRevocationReadback(
     }
   }
   return revoked;
-}
-
-export async function requireLiveUserSecurityActionReadback(
-  rpcName: string,
-  targetUserId: string,
-  decisionPoint: string,
-  result: Record<string, unknown>,
-  actionReason: string | null | undefined,
-  expected?: {
-    roleKey?: string | null;
-    assignmentId?: string | null;
-    inviteEmail?: string | null;
-    inviteEmailSent?: boolean | null;
-    sendInviteEmailRequested?: boolean | null;
-    inviteRedirectTo?: string | null;
-  },
-): Promise<Record<string, unknown>> {
-  const expectedIntentId = asNonEmptyString(result.password_reset_intent_id);
-  const expectedDecisionId = asNonEmptyString(result.settings_resolution_id);
-  const expectedCorrelationId = asNonEmptyString(result.correlation_id);
-  const expectedRoleKey = asNonEmptyString(expected?.roleKey);
-  const expectedAssignmentId = asNonEmptyString(expected?.assignmentId);
-  const expectedInviteEmail = asNonEmptyString(expected?.inviteEmail)?.toLowerCase();
-  const expectedInviteEmailSent = expected?.inviteEmailSent;
-  const expectedSendInviteEmailRequested = expected?.sendInviteEmailRequested;
-  const expectedInviteRedirectTo = expected?.inviteRedirectTo;
-  const inviteRedirectMatchesReadback = (readbackValue: string | null | undefined) => {
-    if (expectedInviteRedirectTo === undefined) return true;
-    if (expectedInviteRedirectTo === null) return readbackValue == null;
-    if (readbackValue === expectedInviteRedirectTo) return true;
-    const normalizeRootUrl = (value: string | null | undefined) => {
-      const raw = asNonEmptyString(value);
-      if (!raw) return null;
-      try {
-        const parsed = new URL(raw);
-        if (parsed.pathname === '/' && !parsed.search && !parsed.hash) return parsed.origin;
-      } catch {
-        return raw;
-      }
-      return raw;
-    };
-    return normalizeRootUrl(readbackValue) === normalizeRootUrl(expectedInviteRedirectTo);
-  };
-  const hasOwn = (record: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(record, key);
-  const boolMatches = (value: unknown, expectedValue: boolean | null | undefined) => {
-    if (expectedValue == null) return true;
-    if (typeof value === 'boolean') return value === expectedValue;
-    const raw = asNonEmptyString(value)?.toLowerCase();
-    if (raw === 'true' || raw === 't' || raw === '1' || raw === 'yes') return expectedValue === true;
-    if (raw === 'false' || raw === 'f' || raw === '0' || raw === 'no') return expectedValue === false;
-    return false;
-  };
-  let match: Record<string, unknown> | undefined;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const live = await liveRpc<Record<string, unknown>>('ui_list_user_security_actions_v1', {
-      p_target_user_id: targetUserId,
-      p_limit: 5,
-    });
-    if (!live) throw new Error(`${rpcName} user security action readback requires a live backend`);
-    const rows = normalizeLiveListResult<Record<string, unknown>>(live.data, 0, 5).rows;
-    match = rows.find((row) => {
-      const inputs = objectRecord(row.decision_inputs);
-      const intentId =
-        asNonEmptyString(row.password_reset_intent_id) ??
-        asNonEmptyString(inputs.password_reset_intent_id);
-      const targetMatches =
-        asNonEmptyString(row.resource_id) === targetUserId ||
-        asNonEmptyString(inputs.target_user_id) === targetUserId;
-      const pointMatches = asNonEmptyString(row.decision_point) === decisionPoint;
-      const intentMatches = !expectedIntentId || intentId === expectedIntentId;
-      const decisionMatches = !expectedDecisionId || asNonEmptyString(row.id) === expectedDecisionId;
-      const correlationMatches = !expectedCorrelationId || asNonEmptyString(row.correlation_id) === expectedCorrelationId;
-      const roleKey =
-        asNonEmptyString(row.role_key) ??
-        asNonEmptyString(inputs.role_key);
-      const readbackAssignmentId =
-        asNonEmptyString(inputs.rbac_user_role_assignment_id) ??
-        asNonEmptyString(inputs.user_role_assignment_id) ??
-        asNonEmptyString(inputs.assignment_id);
-      const resourceType = asNonEmptyString(row.resource_type);
-      const resourceId = asNonEmptyString(row.resource_id);
-      const rowCarriesAssignmentResource =
-        resourceType === 'rbac_user_role_assignment' ||
-        resourceType === 'user_role_assignment' ||
-        resourceType === 'role_assignment';
-      const assignmentMatches =
-        !expectedAssignmentId ||
-        readbackAssignmentId === expectedAssignmentId ||
-        (rowCarriesAssignmentResource && resourceId === expectedAssignmentId) ||
-        (!readbackAssignmentId && !rowCarriesAssignmentResource);
-      const roleMatches = !expectedRoleKey || roleKey === expectedRoleKey;
-      const inviteEmail =
-        asNonEmptyString(row.invite_email)?.toLowerCase() ??
-        asNonEmptyString(inputs.email)?.toLowerCase();
-      const inviteEmailMatches = !expectedInviteEmail || inviteEmail === expectedInviteEmail;
-      const inviteEmailSentMatches = boolMatches(
-        row.invite_email_sent ?? inputs.invite_email_sent,
-        expectedInviteEmailSent,
-      );
-      const sendInviteEmailMatches = boolMatches(
-        row.send_invite_email_requested ?? inputs.send_invite_email_requested,
-        expectedSendInviteEmailRequested,
-      );
-      const readbackRedirect =
-        asNonEmptyString(row.invite_redirect_to) ??
-        asNonEmptyString(inputs.invite_redirect_to);
-      const inviteRedirectRecorded =
-        hasOwn(inputs, 'invite_redirect_to') ||
-        asNonEmptyString(row.invite_redirect_to) != null;
-      const inviteRedirectMatches =
-        expectedInviteRedirectTo === undefined ||
-        (expectedInviteRedirectTo === null
-          ? inviteRedirectRecorded && readbackRedirect == null
-          : inviteRedirectMatchesReadback(readbackRedirect));
-      return targetMatches &&
-        pointMatches &&
-        intentMatches &&
-        decisionMatches &&
-        correlationMatches &&
-        assignmentMatches &&
-        roleMatches &&
-        inviteEmailMatches &&
-        inviteEmailSentMatches &&
-        sendInviteEmailMatches &&
-        inviteRedirectMatches;
-    });
-    if (match) break;
-    if (attempt < 4) await sleep(300);
-  }
-  if (!match) {
-    throw new Error(`${rpcName} backend readback missing user security action`);
-  }
-  const expectedReason = asNonEmptyString(actionReason);
-  if (expectedReason) {
-    const inputs = objectRecord(match.decision_inputs);
-    const readbackReason =
-      asNonEmptyString(match.action_reason) ??
-      asNonEmptyString(match.decision_reason) ??
-      asNonEmptyString(inputs.reason);
-    if (readbackReason !== expectedReason) {
-      throw new Error(`${rpcName} backend readback missing persisted action reason`);
-    }
-  }
-  return match;
-}
-
-export async function requireLiveUserRoleAssignmentReadback(
-  rpcName: string,
-  targetUserId: string,
-  roleKey?: string | null,
-  assignmentId?: string | null,
-  directory?: Record<string, unknown> | null,
-  expectedStatus: 'active' | 'revoked' = 'active',
-): Promise<void> {
-  const normalizedRoleKey = asNonEmptyString(roleKey);
-  await requireLiveRbacAssignmentReadback(rpcName, {
-    assignmentId,
-    targetUserId,
-    roleKey: normalizedRoleKey,
-    expectedStatus,
-  });
-  if (normalizedRoleKey && directory) {
-    const activeRoleKeys = Array.isArray(directory.active_role_keys)
-      ? directory.active_role_keys.map((value) => String(value))
-      : [];
-    if (expectedStatus === 'active' && activeRoleKeys.length > 0 && !activeRoleKeys.includes(normalizedRoleKey)) {
-      throw new Error(`${rpcName} backend readback missing active role ${normalizedRoleKey}`);
-    }
-    if (expectedStatus === 'revoked' && activeRoleKeys.includes(normalizedRoleKey)) {
-      throw new Error(`${rpcName} backend readback still has active role ${normalizedRoleKey}`);
-    }
-  }
-}
-
-export async function requireLiveRbacRoleReadback(
-  rpcName: string,
-  roleId: string,
-  options: {
-    args?: Record<string, unknown>;
-    assertMutableFields?: boolean;
-    requireInactive?: boolean;
-    requireAssignmentsRevoked?: boolean;
-  } = {},
-): Promise<{
-  role: Record<string, unknown>;
-  summary: Record<string, unknown>;
-}> {
-  const role = await requireLiveResourceReadback('rbac_roles', roleId, rpcName);
-  const summary = await requireLiveResourceReadback('rbac_role_summary', roleId, rpcName);
-  const args = options.args ?? {};
-  const expectedOrganizationId = asNonEmptyString(args.organization_id);
-  if (expectedOrganizationId) assertReadbackValue(role.organization_id, expectedOrganizationId, 'rbac_roles.organization_id', rpcName);
-
-  const expectedKey = asNonEmptyString(args.key);
-  if (expectedKey) assertReadbackValue(role.key, expectedKey, 'rbac_roles.key', rpcName);
-
-  if (options.assertMutableFields) {
-    const expectedName = asNonEmptyString(args.name);
-    if (expectedName) assertReadbackValue(role.name, expectedName, 'rbac_roles.name', rpcName);
-    if (Object.prototype.hasOwnProperty.call(args, 'description')) {
-      assertReadbackValue(
-        role.description ?? null,
-        asNonEmptyString(args.description),
-        'rbac_roles.description',
-        rpcName,
-      );
-    }
-    if (Object.prototype.hasOwnProperty.call(args, 'is_active')) {
-      assertReadbackValue(Boolean(role.is_active), Boolean(args.is_active), 'rbac_roles.is_active', rpcName);
-    }
-  }
-
-  if (options.requireInactive) {
-    if (role.is_active !== false || summary.is_active !== false) {
-      throw new Error(`${rpcName} backend readback role ${roleId} is still active`);
-    }
-  }
-
-  if (options.requireAssignmentsRevoked) {
-    const assignments = await readLiveResourceListReadback('rbac_user_role_assignments', { role_id: roleId }, rpcName);
-    const active = assignments.filter((row) => !asNonEmptyString(row.revoked_at));
-    if (active.length > 0) {
-      throw new Error(`${rpcName} backend readback role ${roleId} still has active assignments`);
-    }
-  }
-
-  return { role, summary };
-}
-
-export async function requireLiveRbacAssignmentReadback(
-  rpcName: string,
-  {
-    assignmentId,
-    targetUserId,
-    roleId,
-    roleKey,
-    expectedStatus,
-  }: {
-    assignmentId?: string | null;
-    targetUserId?: string | null;
-    roleId?: string | null;
-    roleKey?: string | null;
-    expectedStatus?: 'active' | 'revoked';
-  },
-): Promise<void> {
-  const normalizedAssignmentId = asNonEmptyString(assignmentId);
-  const normalizedTargetUserId = asNonEmptyString(targetUserId);
-  const normalizedRoleId = asNonEmptyString(roleId);
-  const normalizedRoleKey = asNonEmptyString(roleKey);
-  let assignmentRows: Array<Record<string, unknown>> = [];
-  if (normalizedAssignmentId) {
-    assignmentRows = [
-      await requireLiveResourceReadback('rbac_user_role_assignments', normalizedAssignmentId, rpcName),
-    ];
-  } else if (normalizedTargetUserId) {
-    assignmentRows = await readLiveResourceListReadback(
-      'rbac_user_role_assignments',
-      { user_id: normalizedTargetUserId },
-      rpcName,
-    );
-  } else {
-    throw new Error(`${rpcName} backend readback missing rbac assignment target`);
-  }
-
-  const scopedRows = assignmentRows.filter((row) => {
-    const roleIdMatches = !normalizedRoleId || asNonEmptyString(row.role_id) === normalizedRoleId;
-    const roleKeyMatches = !normalizedRoleKey || asNonEmptyString(row.role_key) === normalizedRoleKey;
-    return roleIdMatches && roleKeyMatches;
-  });
-
-  if (expectedStatus === 'active') {
-    const active = scopedRows.find((row) => !asNonEmptyString(row.revoked_at));
-    if (!active) {
-      throw new Error(`${rpcName} backend readback missing active rbac assignment`);
-    }
-  } else if (expectedStatus === 'revoked') {
-    const active = scopedRows.find((row) => !asNonEmptyString(row.revoked_at));
-    if (active) {
-      throw new Error(`${rpcName} backend readback assignment ${active.id ?? normalizedAssignmentId ?? normalizedTargetUserId} is still active`);
-    }
-  } else if (scopedRows.length === 0) {
-    throw new Error(`${rpcName} backend readback missing rbac assignment`);
-  }
-
-  for (const row of scopedRows) {
-    if (normalizedTargetUserId) assertReadbackValue(row.user_id, normalizedTargetUserId, 'rbac_user_role_assignments.user_id', rpcName);
-    if (normalizedRoleId) assertReadbackValue(row.role_id, normalizedRoleId, 'rbac_user_role_assignments.role_id', rpcName);
-    if (normalizedRoleKey) assertReadbackValue(row.role_key, normalizedRoleKey, 'rbac_user_role_assignments.role_key', rpcName);
-  }
-
-  const readbackRoleId =
-    assignmentRows
-      .map((row) => asNonEmptyString(row.role_id) ?? asNonEmptyString(row.rbac_role_id))
-      .find(Boolean) ?? normalizedRoleId ?? null;
-  if (readbackRoleId) {
-    await requireLiveRbacRoleReadback(rpcName, readbackRoleId);
-  }
 }
 
 // ----------- Warehouse -----------
@@ -9421,102 +9097,6 @@ export interface RbacTemplateProvisionMutationResult extends Record<string, unkn
   settings_resolution_id?: string;
 }
 
-function normalizeRbacTemplateProvisionRoles(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): RbacTemplateProvisionRoleResult[] {
-  const rows = Array.isArray(rec.rbac_roles)
-    ? (rec.rbac_roles as RbacTemplateProvisionRoleResult[])
-    : [];
-  if (rows.length > 0) return rows;
-  const roleId =
-    asNonEmptyString(rec.rbac_role_id) ??
-    asNonEmptyString(rec.role_id) ??
-    asNonEmptyString(rec.id);
-  if (!roleId) return [];
-  const templateKey =
-    asNonEmptyString(args.template_key) ??
-    (Array.isArray(args.template_keys)
-      ? args.template_keys.map(asNonEmptyString).find(Boolean)
-      : null);
-  return [{ role_id: roleId, template_key: templateKey ?? null }];
-}
-
-function normalizeRbacPermissionValues(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => asNonEmptyString(item))
-    .filter((item): item is string => Boolean(item))
-    .map((item) => item.trim())
-    .sort((a, b) => a.localeCompare(b));
-}
-
-async function requireLiveRbacTemplatePermissionReadback(
-  rpcName: string,
-  templateKey: string,
-  roleSummary: Record<string, unknown>,
-): Promise<void> {
-  const templateRows = await requireLiveResourceListReadback(
-    'rbac_role_templates',
-    { key: templateKey },
-    rpcName,
-  );
-  const template = templateRows.find((row) => asNonEmptyString(row.key) === templateKey);
-  if (!template) {
-    throw new Error(`${rpcName} backend readback missing rbac_role_templates:${templateKey}`);
-  }
-
-  const expectedValues = normalizeRbacPermissionValues(template.permission_values);
-  const actualValues = normalizeRbacPermissionValues(roleSummary.permission_values);
-  const expectedCount =
-    typeof template.permission_count === 'number'
-      ? template.permission_count
-      : expectedValues.length;
-  const actualCount =
-    typeof roleSummary.permission_count === 'number'
-      ? roleSummary.permission_count
-      : actualValues.length;
-  if (expectedCount > 0 && actualCount < expectedCount) {
-    throw new Error(`${rpcName} backend readback role ${templateKey} has fewer permissions than its template`);
-  }
-  if (expectedValues.length > 0) {
-    const actualSet = new Set(actualValues);
-    const missing = expectedValues.filter((permission) => !actualSet.has(permission));
-    if (missing.length > 0) {
-      throw new Error(`${rpcName} backend readback role ${templateKey} missing template permissions: ${missing.join(', ')}`);
-    }
-  }
-}
-
-async function requireLiveRbacTemplateProvisionReadback(
-  rpcName: string,
-  result: Record<string, unknown>,
-  args: Record<string, unknown>,
-): Promise<void> {
-  const roles = normalizeRbacTemplateProvisionRoles(result, args);
-  if (roles.length === 0) {
-    throw new Error(`${rpcName} did not return provisioned RBAC role evidence`);
-  }
-
-  for (const provisioned of roles) {
-    const roleId =
-      asNonEmptyString(provisioned.role_id) ??
-      asNonEmptyString(provisioned.rbac_role_id);
-    if (!roleId) {
-      throw new Error(`${rpcName} did not return provisioned RBAC role id`);
-    }
-    const { role, summary } = await requireLiveRbacRoleReadback(rpcName, roleId);
-    const templateKey = asNonEmptyString(provisioned.template_key);
-    if (templateKey) {
-      const roleKey = asNonEmptyString(role.key) ?? asNonEmptyString(summary.key);
-      if (roleKey !== templateKey) {
-        throw new Error(`${rpcName} backend readback role ${roleId} did not match template ${templateKey}`);
-      }
-      await requireLiveRbacTemplatePermissionReadback(rpcName, templateKey, summary);
-    }
-  }
-}
-
 export async function rbac_create_role_v1(
   args: Record<string, unknown>,
 ): Promise<RbacRoleMutationResult> {
@@ -9555,6 +9135,7 @@ export async function rbac_revoke_role_v1(
 export async function provision_rbac_roles_from_templates_v1(
   args: Record<string, unknown>,
 ): Promise<RbacTemplateProvisionMutationResult> {
+  const { requireLiveRbacTemplateProvisionReadback } = await import('./data-source/platform');
   const result = await phaseC6Rpc('provision_rbac_roles_from_templates_v1', args, 'rbac_role');
   if (liveRpcTarget()) {
     await requireLiveRbacTemplateProvisionReadback(
@@ -11140,126 +10721,12 @@ export interface ArchiveWebhookSourceArgs extends Record<string, unknown> {
   source_id: string;
   reason: string;
 }
-function resolveWebhookSourceId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string | null {
-  return asNonEmptyString(rec.webhook_source_id)
-    ?? asNonEmptyString(rec.source_id)
-    ?? asNonEmptyString(rec.id)
-    ?? asNonEmptyString(args.webhook_source_id)
-    ?? asNonEmptyString(args.source_id);
-}
-
-function booleanReadback(value: unknown): boolean | null {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase();
-    if (['true', 't', '1', 'yes', 'enabled'].includes(normalized)) return true;
-    if (['false', 'f', '0', 'no', 'disabled'].includes(normalized)) return false;
-  }
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-  return null;
-}
-
-function requireWebhookSourceFieldReadback(
-  row: Record<string, unknown>,
-  field: string,
-  expected: unknown,
-  rpcName: string,
-): void {
-  if (expected === undefined) return;
-  const actual = row[field];
-  if (field === 'rate_limit_per_hour' && (expected === null || expected === '')) {
-    const actualNumber = typeof actual === 'number' ? actual : Number(actual);
-    if (!Number.isFinite(actualNumber) || actualNumber < 1) {
-      throw new Error(`${rpcName} backend readback did not resolve intake source ${field}`);
-    }
-    return;
-  }
-  if (field === 'enabled') {
-    const actualBool = booleanReadback(actual);
-    if (actualBool !== Boolean(expected)) {
-      throw new Error(`${rpcName} backend readback did not reflect intake source enabled state`);
-    }
-    return;
-  }
-  if (expected === null || expected === '') {
-    if (actual != null && String(actual).trim() !== '') {
-      throw new Error(`${rpcName} backend readback did not clear intake source ${field}`);
-    }
-    return;
-  }
-  if (field === 'rate_limit_per_hour') {
-    const actualNumber = typeof actual === 'number' ? actual : Number(actual);
-    if (!Number.isFinite(actualNumber) || actualNumber !== Number(expected)) {
-      throw new Error(`${rpcName} backend readback did not reflect intake source ${field}`);
-    }
-    return;
-  }
-  const actualString = asNonEmptyString(actual);
-  if (actualString !== String(expected).trim()) {
-    throw new Error(`${rpcName} backend readback did not reflect intake source ${field}`);
-  }
-}
-
-function requireWebhookSourceMutationReadback(
-  sourceReadback: Record<string, unknown>,
-  directoryReadback: Record<string, unknown>,
-  args: Record<string, unknown>,
-  result: Record<string, unknown>,
-  rpcName: string,
-): void {
-  for (const field of [
-    'name',
-    'source_identifier',
-    'provider_type',
-    'mapping_config_id',
-    'sender_id',
-    'rate_limit_per_hour',
-    'enabled',
-  ]) {
-    if (Object.prototype.hasOwnProperty.call(args, field)) {
-      requireWebhookSourceFieldReadback(sourceReadback, field, args[field], rpcName);
-      requireWebhookSourceFieldReadback(directoryReadback, field, args[field], rpcName);
-    }
-  }
-  if (asNonEmptyString(result.auth_token) && !asNonEmptyString(directoryReadback.auth_token_masked)) {
-    throw new Error(`${rpcName} backend readback did not expose redacted intake source token state`);
-  }
-}
-
-function webhookSourceArchivedAt(row: Record<string, unknown>): string | null {
-  return asNonEmptyString(row.archived_at)
-    ?? asNonEmptyString(objectRecord(row.managed_metadata).archived_at);
-}
-
-function requireWebhookSourceArchiveReadback(
-  sourceReadback: Record<string, unknown>,
-  directoryReadback: Record<string, unknown>,
-  rpcName: string,
-): void {
-  for (const row of [sourceReadback, directoryReadback]) {
-    const enabled = booleanReadback(row.enabled);
-    if (enabled !== false) {
-      throw new Error(`${rpcName} backend readback did not disable archived intake source`);
-    }
-    const metadata = objectRecord(row.managed_metadata);
-    const lifecycleState = asNonEmptyString(row.lifecycle_state)
-      ?? asNonEmptyString(metadata.lifecycle);
-    if (lifecycleState !== 'archived' && !webhookSourceArchivedAt(row)) {
-      throw new Error(`${rpcName} backend readback did not expose intake source archive metadata`);
-    }
-  }
-}
-
 async function webhookSourceMutation(
   rpcName: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
+  const { resolveWebhookSourceId, requireWebhookSourceMutationReadback } =
+    await import('./data-source/integrations');
   const result = await phaseC6Rpc(rpcName, args, 'webhook_source');
   if (liveRpcTarget()) {
     const sourceId = resolveWebhookSourceId(result, args);
@@ -11276,6 +10743,8 @@ export const ui_upsert_webhook_source_v1 = (args: UpsertWebhookSourceArgs) =>
 export const ui_rotate_webhook_source_token_v1 = (args: { source_id: string }) =>
   webhookSourceMutation('ui_rotate_webhook_source_token_v1', args);
 export async function ui_archive_webhook_source_v1(args: ArchiveWebhookSourceArgs) {
+  const { resolveWebhookSourceId, requireWebhookSourceArchiveReadback } =
+    await import('./data-source/integrations');
   const result = await phaseC6Rpc('ui_archive_webhook_source_v1', args, 'webhook_source');
   if (liveRpcTarget()) {
     const sourceId = resolveWebhookSourceId(result, args);
@@ -11439,69 +10908,12 @@ export type UnbindProviderAccountCredentialArgs = Pick<
   | 'reason'
   | 'notes'
 >;
-export function resolveProviderAuthConfigId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string | null {
-  return asNonEmptyString(rec.provider_auth_config_id)
-    ?? asNonEmptyString(rec.auth_config_id)
-    ?? asNonEmptyString(rec.config_id)
-    ?? asNonEmptyString(rec.id)
-    ?? asNonEmptyString(args.provider_auth_config_id)
-    ?? asNonEmptyString(args.auth_config_id)
-    ?? asNonEmptyString(args.config_id);
-}
-
-export function requireProviderAuthConfigDirectoryReadback(
-  row: Record<string, unknown>,
-  args: Record<string, unknown>,
-  rpcName: string,
-  expectedConfigId: string,
-): void {
-  if (asNonEmptyString(row.id) !== expectedConfigId) {
-    throw new Error(`${rpcName} backend readback did not reflect provider_auth_config_id`);
-  }
-  if (
-    Object.prototype.hasOwnProperty.call(row, 'credentials') ||
-    Object.prototype.hasOwnProperty.call(row, 'credentials_vault_id')
-  ) {
-    throw new Error(`${rpcName} backend readback exposed credential secret fields`);
-  }
-  const expectedProvider = asNonEmptyString(args.provider_id);
-  if (expectedProvider && asNonEmptyString(row.provider_id) !== expectedProvider) {
-    throw new Error(`${rpcName} backend readback did not reflect provider_id`);
-  }
-  const expectedAuthType = asNonEmptyString(args.auth_type);
-  if (expectedAuthType && asNonEmptyString(row.auth_type) !== expectedAuthType) {
-    throw new Error(`${rpcName} backend readback did not reflect auth_type`);
-  }
-  if (rpcName === 'ui_revoke_provider_auth_config_v1') {
-    const status = asNonEmptyString(row.status);
-    if (status !== 'revoked') {
-      throw new Error(`${rpcName} backend readback did not reflect revoked status`);
-    }
-  }
-}
-
 async function providerAuthConfigMutation(
   rpcName: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const live = await livePArgsMutationResult(rpcName, args, [
-    'provider_auth_config_id',
-    'auth_config_id',
-    'config_id',
-    'id',
-  ]);
-  if (live) {
-    const configId = resolveProviderAuthConfigId(live, args);
-    if (!configId) throw new Error(`${rpcName} did not return provider_auth_config_id`);
-    const readback = await requireLiveResourceReadback('integration_credential_directory', configId, rpcName);
-    requireProviderAuthConfigDirectoryReadback(readback, args, rpcName, configId);
-    return { ...live, provider_auth_config_id: configId };
-  }
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'provider_auth_config');
+  const adapter = await import('./data-source/integrations');
+  return adapter.providerAuthConfigMutation(rpcName, args);
 }
 
 export const ui_upsert_provider_auth_config_v1 = (args: UpsertProviderAuthConfigArgs) =>
@@ -11546,152 +10958,13 @@ export interface IntegrationPluginGenerateDraftArgs extends Record<string, unkno
   vendor?: string;
 }
 
-function resolveIntegrationPluginId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-  versionRow?: Record<string, unknown> | null,
-): string | null {
-  return asNonEmptyString(rec.integration_plugin_id)
-    ?? asNonEmptyString(rec.plugin_id)
-    ?? asNonEmptyString(args.integration_plugin_id)
-    ?? asNonEmptyString(args.plugin_id)
-    ?? asNonEmptyString(versionRow?.plugin_id);
-}
-
-function resolveIntegrationPluginVersionId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string | null {
-  return asNonEmptyString(rec.integration_plugin_version_id)
-    ?? asNonEmptyString(rec.plugin_version_id)
-    ?? asNonEmptyString(rec.version_id)
-    ?? asNonEmptyString(rec.to_plugin_version_id)
-    ?? asNonEmptyString(args.integration_plugin_version_id)
-    ?? asNonEmptyString(args.plugin_version_id)
-    ?? asNonEmptyString(args.target_plugin_version_id);
-}
-
-async function requireLiveIntegrationPluginReadback(
-  rpcName: string,
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-  options: {
-    approvalAction?: string | null;
-    requireBinding?: boolean;
-    requireBindingChangeCount?: boolean;
-    allowVersionless?: boolean;
-  } = {},
-): Promise<void> {
-  const versionId = resolveIntegrationPluginVersionId(rec, args);
-  let versionRow: Record<string, unknown> | null = null;
-  if (versionId) {
-    versionRow = await requireLiveResourceReadback('integration_plugin_versions', versionId, rpcName);
-  } else if (!options.allowVersionless) {
-    throw new Error(`${rpcName} did not return integration_plugin_version_id`);
-  }
-
-  const pluginId = resolveIntegrationPluginId(rec, args, versionRow);
-  if (!pluginId) throw new Error(`${rpcName} did not return integration_plugin_id`);
-  await requireLiveResourceReadback('integration_plugins', pluginId, rpcName);
-  await requireLiveResourceReadback('integration_plugin_directory', pluginId, rpcName);
-
-  const action = asNonEmptyString(options.approvalAction);
-  if (versionId && action && !rec.already_processed) {
-    await requireLiveResourceListReadback(
-      'integration_plugin_approval_events',
-      { plugin_version_id: versionId, action },
-      rpcName,
-    );
-  }
-
-  if (versionId && options.requireBinding) {
-    const bindingRows = await requireLiveResourceListReadback(
-      'integration_plugin_bindings',
-      { plugin_version_id: versionId },
-      rpcName,
-    );
-    const expectedBindingEnabled = Object.prototype.hasOwnProperty.call(args, 'enabled')
-      ? args.enabled
-      : args.expected_binding_enabled;
-    if (
-      Object.prototype.hasOwnProperty.call(args, 'enabled')
-      || Object.prototype.hasOwnProperty.call(args, 'expected_binding_enabled')
-    ) {
-      const expectedEnabled = booleanReadback(expectedBindingEnabled);
-      if (expectedEnabled === null) {
-        throw new Error(`${rpcName} requires boolean binding enabled readback expectation`);
-      }
-      const expectedScopeType = asNonEmptyString(args.scope_type)?.toLowerCase() ?? null;
-      const expectedScopeId = asNonEmptyString(args.scope_id);
-      const scopedRows = bindingRows.filter((row) => {
-        const rowScopeType = asNonEmptyString(row.scope_type)?.toLowerCase() ?? null;
-        const rowScopeId = asNonEmptyString(row.scope_id);
-        return (!expectedScopeType || rowScopeType === expectedScopeType)
-          && (!expectedScopeId || rowScopeId === expectedScopeId);
-      });
-      if (scopedRows.length === 0) {
-        throw new Error(`${rpcName} backend readback missing scoped integration_plugin_bindings`);
-      }
-      const mismatched = scopedRows.find((row) => booleanReadback(row.enabled) !== expectedEnabled);
-      if (mismatched) {
-        throw new Error(`${rpcName} backend readback did not reflect integration_plugin_bindings.enabled=${expectedEnabled}`);
-      }
-      const changedCount = Number(rec.changed_count ?? 0);
-      if (
-        expectedEnabled === false
-        && options.requireBindingChangeCount !== false
-        && scopedRows.length > 0
-        && changedCount <= 0
-      ) {
-        throw new Error(`${rpcName} backend readback reported no binding changes`);
-      }
-    }
-  }
-}
-
 async function integrationPluginMutation(
   rpcName: string,
   args: Record<string, unknown>,
-  options?: {
-    approvalAction?: string | null;
-    requireBinding?: boolean;
-    requireBindingChangeCount?: boolean;
-    allowVersionless?: boolean;
-    fallbackResourceKey?: string;
-  },
+  options?: IntegrationPluginMutationOptions,
 ): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>>(rpcName, { p_args: args });
-  if (live) {
-    const rec = requireLiveRpcRecord(live.data, `${rpcName} returned no backend outcome`);
-    const lifecycleAction = asNonEmptyString(options?.approvalAction)?.toLowerCase() ?? null;
-    const returnedStatus = asNonEmptyString(rec.status)?.toLowerCase() ?? null;
-    const expectedRejectedDecision =
-      rpcName === 'plugin_approve_v1'
-      && lifecycleAction === 'rejected'
-      && returnedStatus === 'rejected'
-      && rec.ok !== false;
-    const outcomeError = expectedRejectedDecision
-      ? null
-      : backendOutcomeError(rec, `${rpcName} was rejected by the backend`);
-    if (outcomeError) throw outcomeError;
-    requireLiveEvidence(rec, [
-      'integration_plugin_id',
-      'plugin_id',
-      'integration_plugin_version_id',
-      'plugin_version_id',
-      'version_id',
-      'to_plugin_version_id',
-      'status',
-      'changed_count',
-      'already_processed',
-      'correlation_id',
-      'settings_resolution_id',
-    ], `${rpcName} did not return backend plugin evidence`);
-    await requireLiveIntegrationPluginReadback(rpcName, rec, args, options);
-    return rec;
-  }
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, options?.fallbackResourceKey ?? 'integration_plugin');
+  const adapter = await import('./data-source/integrations');
+  return adapter.integrationPluginMutation(rpcName, args, options);
 }
 
 export const integration_plugin_generate_draft_v1 = (args: IntegrationPluginGenerateDraftArgs) =>
@@ -12646,44 +11919,8 @@ export async function request_label_reprint(
   label_job_id?: string | null;
   new_version_id?: string | null;
 }> {
-  const live = await liveRpc<unknown>('request_label_reprint', {
-    p_label_id: labelId,
-    p_reprint_reason: reason,
-    p_actor_id: null,
-    p_requested_source: 'console-v2',
-  });
-  if (live) {
-    const rec = live.data && typeof live.data === 'object'
-      ? live.data as Record<string, unknown>
-      : null;
-    const labelJobId =
-      asNonEmptyString(live.data) ??
-      asNonEmptyString(rec?.label_job_id) ??
-      asNonEmptyString(rec?.job_id) ??
-      asNonEmptyString(rec?.id);
-    const labelVersionId =
-      asNonEmptyString(rec?.new_version_id) ??
-      asNonEmptyString(rec?.label_version_id);
-    const evidenceId = labelJobId ?? labelVersionId;
-    if (!evidenceId) {
-      throw new Error('Label reprint did not return a label job or version id');
-    }
-    await requireLabelReprintReadback(labelId, {
-      versionId: labelVersionId,
-      jobId: labelJobId,
-      backendId: evidenceId,
-    });
-    return {
-      ok: true,
-      label_id: labelId,
-      reason,
-      label_job_id: labelJobId ?? null,
-      new_version_id: labelVersionId ?? null,
-    };
-  }
-
-  await sleep(120);
-  return { ok: true, label_id: labelId, reason, label_job_id: 'ljob_' + Date.now(), new_version_id: null };
+  const adapter = await import('./data-source/labels');
+  return adapter.request_label_reprint(labelId, { reason });
 }
 
 export interface TargetLabelRequestArgs extends Record<string, unknown> {
@@ -12766,86 +12003,12 @@ export async function ui_request_label_generation_target_v1(
   };
 }
 
-async function requireLabelReprintReadback(
-  labelId: string,
-  ids: { versionId?: string | null; jobId?: string | null; backendId?: string | null },
-): Promise<void> {
-  const candidates: Array<{ resource: 'label_versions' | 'label_jobs'; id: string }> = [];
-  const pushCandidate = (resource: 'label_versions' | 'label_jobs', id?: string | null) => {
-    const normalized = asNonEmptyString(id);
-    if (!normalized) return;
-    if (candidates.some((candidate) => candidate.resource === resource && candidate.id === normalized)) return;
-    candidates.push({ resource, id: normalized });
-  };
-
-  pushCandidate('label_versions', ids.versionId);
-  pushCandidate('label_jobs', ids.jobId);
-  pushCandidate('label_versions', ids.backendId);
-  pushCandidate('label_jobs', ids.backendId);
-
-  let lastError: unknown = null;
-  for (const candidate of candidates) {
-    try {
-      const row = await ui_get_resource_v1<Record<string, unknown>>(candidate.resource, candidate.id);
-      if (!row) continue;
-      const rowLabelId = asNonEmptyString(row.label_id);
-      if (rowLabelId && rowLabelId !== labelId) {
-        throw new Error(`Label reprint ${candidate.resource} readback belongs to ${rowLabelId}, expected ${labelId}`);
-      }
-      const metadata = objectRecord(row.target_metadata);
-      const sourceArtifactId =
-        asNonEmptyString(metadata.source_label_artifact_id) ??
-        asNonEmptyString(metadata.label_artifact_id);
-      if (!rowLabelId && sourceArtifactId && sourceArtifactId !== labelId) {
-        throw new Error(`Label reprint ${candidate.resource} readback belongs to artifact ${sourceArtifactId}, expected ${labelId}`);
-      }
-      return;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  const suffix = lastError instanceof Error && lastError.message ? `: ${lastError.message}` : '';
-  throw new Error(`Label reprint backend readback missing label_jobs or label_versions${suffix}`);
-}
-
-// W54-F — typed adapter for the canonical complete_label_job seam. Live mode
-// routes through `phaseC6Rpc('complete_label_job', payload, 'label_jobs')`;
-// the in-memory branch returns a deterministic envelope so unit tests can
-// assert on the FE-shaped contract without an environment dependency.
 export interface CompleteLabelJobResult extends Record<string, unknown> {
   ok: true;
   label_job_id: string;
   status: 'completed';
   correlation_id: string;
   settings_resolution_id?: string;
-}
-
-async function requireLiveCompleteLabelJobReadback(
-  jobId: string,
-  result: Record<string, unknown>,
-): Promise<void> {
-  const labelJobId = asNonEmptyString(result.label_job_id) ?? asNonEmptyString(result.job_id) ?? jobId;
-  const job = await requireLiveResourceReadback('label_jobs', labelJobId, 'complete_label_job');
-  const status = (asNonEmptyString(job.status) ?? asNonEmptyString(result.status) ?? '').toLowerCase();
-  const labelId = asNonEmptyString(job.label_id) ?? asNonEmptyString(result.label_id);
-  const shipmentId = asNonEmptyString(job.shipment_id);
-  const targetType = asNonEmptyString(job.target_type);
-
-  if (!['completed', 'succeeded', 'success'].includes(status)) return;
-  if (!labelId) {
-    throw new Error('complete_label_job backend readback missing label identity');
-  }
-
-  if (shipmentId) {
-    await requireLiveResourceReadback('labels', labelId, 'complete_label_job');
-    await requireLiveResourceListReadback('label_versions', { label_job_id: labelJobId }, 'complete_label_job');
-    return;
-  }
-
-  if (targetType) {
-    await requireLiveResourceReadback('label_artifacts', labelId, 'complete_label_job');
-  }
 }
 
 export async function complete_label_job(
@@ -12855,6 +12018,7 @@ export async function complete_label_job(
   const args = { label_job_id: jobId, ...(payload as Record<string, unknown> | undefined) };
   const client = getSupabaseClient();
   if (client) {
+    const { requireLiveCompleteLabelJobReadback } = await import('./data-source/labels');
     const result = await phaseC6Rpc('complete_label_job', args, 'label_jobs');
     await requireLiveCompleteLabelJobReadback(jobId, result);
     return result as CompleteLabelJobResult;
@@ -13076,6 +12240,7 @@ export async function revoke_session_v1(
   const reason = asNonEmptyString(args.reason);
   if (!reason) throw new Error('revoke_session_v1 requires reason');
   const rpcArgs = { ...args, reason };
+  const { requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
   const result = await phaseC6Rpc('revoke_session_v1', rpcArgs, 'revocation_audit');
   if (liveRpcTarget()) {
     await requireLiveUserSessionRevocationReadback(
@@ -13183,6 +12348,7 @@ export interface DataSourceGrantUserRoleArgs extends Record<string, unknown> {
 export async function grant_user_role_v1(
   args: DataSourceGrantUserRoleArgs,
 ): Promise<Record<string, unknown>> {
+  const { requireLiveUserRoleAssignmentReadback, requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
   const result = await phaseC6Rpc('grant_user_role_v1', args, 'user_role_assignment');
   const { directory } = await requireLiveUserLifecycleReadback('grant_user_role_v1', args.target_user_id);
   const assignmentId =
@@ -13219,6 +12385,7 @@ export interface DataSourceRevokeUserRoleArgs extends Record<string, unknown> {
 export async function revoke_user_role_v1(
   args: DataSourceRevokeUserRoleArgs,
 ): Promise<Record<string, unknown>> {
+  const { requireLiveUserRoleAssignmentReadback, requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
   const result = await phaseC6Rpc('revoke_user_role_v1', args, 'user_role_assignment');
   const { directory } = await requireLiveUserLifecycleReadback('revoke_user_role_v1', args.target_user_id);
   const assignmentId =
@@ -13257,6 +12424,7 @@ export async function suspend_user_v1(
   const targetUserId = asNonEmptyString(args.target_user_id) ?? asNonEmptyString(args.user_id);
   if (!targetUserId) throw new Error('suspend_user_v1 requires target_user_id');
   const rpcArgs = { ...args, target_user_id: targetUserId };
+  const { requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
   const result = await phaseC6Rpc('suspend_user_v1', rpcArgs, 'user');
   const readback = await requireLiveUserLifecycleReadback('suspend_user_v1', targetUserId);
   if (liveRpcTarget()) {
@@ -13300,6 +12468,7 @@ export async function reactivate_user_v1(
   const targetUserId = asNonEmptyString(args.target_user_id) ?? asNonEmptyString(args.user_id);
   if (!targetUserId) throw new Error('reactivate_user_v1 requires target_user_id');
   const rpcArgs = { ...args, target_user_id: targetUserId };
+  const { requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
   const result = await phaseC6Rpc('reactivate_user_v1', rpcArgs, 'user');
   const readback = await requireLiveUserLifecycleReadback('reactivate_user_v1', targetUserId);
   if (liveRpcTarget()) {
@@ -13341,6 +12510,7 @@ export async function force_password_reset_v1(
   const reason = asNonEmptyString(args.reason);
   if (!reason) throw new Error('force_password_reset_v1 requires reason');
   const rpcArgs = { ...args, reason };
+  const { requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
   const result = await phaseC6Rpc('force_password_reset_v1', rpcArgs, 'user');
   await requireLiveUserLifecycleReadback('force_password_reset_v1', rpcArgs.target_user_id);
   if (liveRpcTarget()) {

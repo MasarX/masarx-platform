@@ -6,12 +6,12 @@ import {
   livePArgsMutationResult,
   liveRpc,
   nextResourceId,
+  objectRecord,
   readLiveResourceListReadback,
   requireLiveEvidence,
+  requireLiveResourceListReadback,
   requireLiveResourceReadback,
   requireLiveRpcRecord,
-  requireProviderAuthConfigDirectoryReadback,
-  resolveProviderAuthConfigId,
   resolveSettings,
   sleep,
   ui_list_resource_v1,
@@ -30,6 +30,7 @@ import {
 } from './customer-logistics-migration';
 import {
   asNonEmptyString,
+  booleanReadback,
   type ResourceRow,
 } from './shared';
 
@@ -453,4 +454,321 @@ export async function integration_plugin_export_handoff_v1(
     ],
     sample_curl: `curl -X POST "${args.base_url ?? '{{BASE_URL}}'}/functions/v1/webhook-receiver" -H "authorization: Bearer {{TOKEN}}" -H "content-type: application/json" -d '{}'`,
   };
+}
+
+function resolveProviderAuthConfigId(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string | null {
+  return asNonEmptyString(rec.provider_auth_config_id)
+    ?? asNonEmptyString(rec.auth_config_id)
+    ?? asNonEmptyString(rec.config_id)
+    ?? asNonEmptyString(rec.id)
+    ?? asNonEmptyString(args.provider_auth_config_id)
+    ?? asNonEmptyString(args.auth_config_id)
+    ?? asNonEmptyString(args.config_id);
+}
+
+function requireProviderAuthConfigDirectoryReadback(
+  row: Record<string, unknown>,
+  args: Record<string, unknown>,
+  rpcName: string,
+  expectedConfigId: string,
+): void {
+  if (asNonEmptyString(row.id) !== expectedConfigId) {
+    throw new Error(`${rpcName} backend readback did not reflect provider_auth_config_id`);
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(row, 'credentials') ||
+    Object.prototype.hasOwnProperty.call(row, 'credentials_vault_id')
+  ) {
+    throw new Error(`${rpcName} backend readback exposed credential secret fields`);
+  }
+  const expectedProvider = asNonEmptyString(args.provider_id);
+  if (expectedProvider && asNonEmptyString(row.provider_id) !== expectedProvider) {
+    throw new Error(`${rpcName} backend readback did not reflect provider_id`);
+  }
+  const expectedAuthType = asNonEmptyString(args.auth_type);
+  if (expectedAuthType && asNonEmptyString(row.auth_type) !== expectedAuthType) {
+    throw new Error(`${rpcName} backend readback did not reflect auth_type`);
+  }
+  if (rpcName === 'ui_revoke_provider_auth_config_v1') {
+    const status = asNonEmptyString(row.status);
+    if (status !== 'revoked') {
+      throw new Error(`${rpcName} backend readback did not reflect revoked status`);
+    }
+  }
+}
+
+export async function providerAuthConfigMutation(
+  rpcName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const live = await livePArgsMutationResult(rpcName, args, [
+    'provider_auth_config_id',
+    'auth_config_id',
+    'config_id',
+    'id',
+  ]);
+  if (live) {
+    const configId = resolveProviderAuthConfigId(live, args);
+    if (!configId) throw new Error(`${rpcName} did not return provider_auth_config_id`);
+    const readback = await requireLiveResourceReadback('integration_credential_directory', configId, rpcName);
+    requireProviderAuthConfigDirectoryReadback(readback, args, rpcName, configId);
+    return { ...live, provider_auth_config_id: configId };
+  }
+  await sleep(60);
+  return buildMutationFallbackEnvelope(args, 'provider_auth_config');
+}
+
+function resolveIntegrationPluginId(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+  versionRow?: Record<string, unknown> | null,
+): string | null {
+  return asNonEmptyString(rec.integration_plugin_id)
+    ?? asNonEmptyString(rec.plugin_id)
+    ?? asNonEmptyString(args.integration_plugin_id)
+    ?? asNonEmptyString(args.plugin_id)
+    ?? asNonEmptyString(versionRow?.plugin_id);
+}
+
+function resolveIntegrationPluginVersionId(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string | null {
+  return asNonEmptyString(rec.integration_plugin_version_id)
+    ?? asNonEmptyString(rec.plugin_version_id)
+    ?? asNonEmptyString(rec.version_id)
+    ?? asNonEmptyString(rec.to_plugin_version_id)
+    ?? asNonEmptyString(args.integration_plugin_version_id)
+    ?? asNonEmptyString(args.plugin_version_id)
+    ?? asNonEmptyString(args.target_plugin_version_id);
+}
+
+async function requireLiveIntegrationPluginReadback(
+  rpcName: string,
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+  options: {
+    approvalAction?: string | null;
+    requireBinding?: boolean;
+    requireBindingChangeCount?: boolean;
+    allowVersionless?: boolean;
+  } = {},
+): Promise<void> {
+  const versionId = resolveIntegrationPluginVersionId(rec, args);
+  let versionRow: Record<string, unknown> | null = null;
+  if (versionId) {
+    versionRow = await requireLiveResourceReadback('integration_plugin_versions', versionId, rpcName);
+  } else if (!options.allowVersionless) {
+    throw new Error(`${rpcName} did not return integration_plugin_version_id`);
+  }
+
+  const pluginId = resolveIntegrationPluginId(rec, args, versionRow);
+  if (!pluginId) throw new Error(`${rpcName} did not return integration_plugin_id`);
+  await requireLiveResourceReadback('integration_plugins', pluginId, rpcName);
+  await requireLiveResourceReadback('integration_plugin_directory', pluginId, rpcName);
+
+  const action = asNonEmptyString(options.approvalAction);
+  if (versionId && action && !rec.already_processed) {
+    await requireLiveResourceListReadback(
+      'integration_plugin_approval_events',
+      { plugin_version_id: versionId, action },
+      rpcName,
+    );
+  }
+
+  if (versionId && options.requireBinding) {
+    const bindingRows = await requireLiveResourceListReadback(
+      'integration_plugin_bindings',
+      { plugin_version_id: versionId },
+      rpcName,
+    );
+    const expectedBindingEnabled = Object.prototype.hasOwnProperty.call(args, 'enabled')
+      ? args.enabled
+      : args.expected_binding_enabled;
+    if (
+      Object.prototype.hasOwnProperty.call(args, 'enabled')
+      || Object.prototype.hasOwnProperty.call(args, 'expected_binding_enabled')
+    ) {
+      const expectedEnabled = booleanReadback(expectedBindingEnabled);
+      if (expectedEnabled === null) {
+        throw new Error(`${rpcName} requires boolean binding enabled readback expectation`);
+      }
+      const expectedScopeType = asNonEmptyString(args.scope_type)?.toLowerCase() ?? null;
+      const expectedScopeId = asNonEmptyString(args.scope_id);
+      const scopedRows = bindingRows.filter((row) => {
+        const rowScopeType = asNonEmptyString(row.scope_type)?.toLowerCase() ?? null;
+        const rowScopeId = asNonEmptyString(row.scope_id);
+        return (!expectedScopeType || rowScopeType === expectedScopeType)
+          && (!expectedScopeId || rowScopeId === expectedScopeId);
+      });
+      if (scopedRows.length === 0) {
+        throw new Error(`${rpcName} backend readback missing scoped integration_plugin_bindings`);
+      }
+      const mismatched = scopedRows.find((row) => booleanReadback(row.enabled) !== expectedEnabled);
+      if (mismatched) {
+        throw new Error(`${rpcName} backend readback did not reflect integration_plugin_bindings.enabled=${expectedEnabled}`);
+      }
+      const changedCount = Number(rec.changed_count ?? 0);
+      if (
+        expectedEnabled === false
+        && options.requireBindingChangeCount !== false
+        && scopedRows.length > 0
+        && changedCount <= 0
+      ) {
+        throw new Error(`${rpcName} backend readback reported no binding changes`);
+      }
+    }
+  }
+}
+
+export interface IntegrationPluginMutationOptions {
+  approvalAction?: string | null;
+  requireBinding?: boolean;
+  requireBindingChangeCount?: boolean;
+  allowVersionless?: boolean;
+  fallbackResourceKey?: string;
+}
+
+export async function integrationPluginMutation(
+  rpcName: string,
+  args: Record<string, unknown>,
+  options?: IntegrationPluginMutationOptions,
+): Promise<Record<string, unknown>> {
+  const live = await liveRpc<Record<string, unknown>>(rpcName, { p_args: args });
+  if (live) {
+    const rec = requireLiveRpcRecord(live.data, `${rpcName} returned no backend outcome`);
+    const lifecycleAction = asNonEmptyString(options?.approvalAction)?.toLowerCase() ?? null;
+    const returnedStatus = asNonEmptyString(rec.status)?.toLowerCase() ?? null;
+    const expectedRejectedDecision =
+      rpcName === 'plugin_approve_v1'
+      && lifecycleAction === 'rejected'
+      && returnedStatus === 'rejected'
+      && rec.ok !== false;
+    const outcomeError = expectedRejectedDecision
+      ? null
+      : backendOutcomeError(rec, `${rpcName} was rejected by the backend`);
+    if (outcomeError) throw outcomeError;
+    requireLiveEvidence(rec, [
+      'integration_plugin_id',
+      'plugin_id',
+      'integration_plugin_version_id',
+      'plugin_version_id',
+      'version_id',
+      'to_plugin_version_id',
+      'status',
+      'changed_count',
+      'already_processed',
+      'correlation_id',
+      'settings_resolution_id',
+    ], `${rpcName} did not return backend plugin evidence`);
+    await requireLiveIntegrationPluginReadback(rpcName, rec, args, options);
+    return rec;
+  }
+  await sleep(60);
+  return buildMutationFallbackEnvelope(args, options?.fallbackResourceKey ?? 'integration_plugin');
+}
+
+export function resolveWebhookSourceId(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string | null {
+  return asNonEmptyString(rec.webhook_source_id)
+    ?? asNonEmptyString(rec.source_id)
+    ?? asNonEmptyString(rec.id)
+    ?? asNonEmptyString(args.webhook_source_id)
+    ?? asNonEmptyString(args.source_id);
+}
+
+function requireWebhookSourceFieldReadback(
+  row: Record<string, unknown>,
+  field: string,
+  expected: unknown,
+  rpcName: string,
+): void {
+  if (expected === undefined) return;
+  const actual = row[field];
+  if (field === 'rate_limit_per_hour' && (expected === null || expected === '')) {
+    const actualNumber = typeof actual === 'number' ? actual : Number(actual);
+    if (!Number.isFinite(actualNumber) || actualNumber < 1) {
+      throw new Error(`${rpcName} backend readback did not resolve intake source ${field}`);
+    }
+    return;
+  }
+  if (field === 'enabled') {
+    const actualBool = booleanReadback(actual);
+    if (actualBool !== Boolean(expected)) {
+      throw new Error(`${rpcName} backend readback did not reflect intake source enabled state`);
+    }
+    return;
+  }
+  if (expected === null || expected === '') {
+    if (actual != null && String(actual).trim() !== '') {
+      throw new Error(`${rpcName} backend readback did not clear intake source ${field}`);
+    }
+    return;
+  }
+  if (field === 'rate_limit_per_hour') {
+    const actualNumber = typeof actual === 'number' ? actual : Number(actual);
+    if (!Number.isFinite(actualNumber) || actualNumber !== Number(expected)) {
+      throw new Error(`${rpcName} backend readback did not reflect intake source ${field}`);
+    }
+    return;
+  }
+  const actualString = asNonEmptyString(actual);
+  if (actualString !== String(expected).trim()) {
+    throw new Error(`${rpcName} backend readback did not reflect intake source ${field}`);
+  }
+}
+
+export function requireWebhookSourceMutationReadback(
+  sourceReadback: Record<string, unknown>,
+  directoryReadback: Record<string, unknown>,
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+  rpcName: string,
+): void {
+  for (const field of [
+    'name',
+    'source_identifier',
+    'provider_type',
+    'mapping_config_id',
+    'sender_id',
+    'rate_limit_per_hour',
+    'enabled',
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(args, field)) {
+      requireWebhookSourceFieldReadback(sourceReadback, field, args[field], rpcName);
+      requireWebhookSourceFieldReadback(directoryReadback, field, args[field], rpcName);
+    }
+  }
+  if (asNonEmptyString(result.auth_token) && !asNonEmptyString(directoryReadback.auth_token_masked)) {
+    throw new Error(`${rpcName} backend readback did not expose redacted intake source token state`);
+  }
+}
+
+function webhookSourceArchivedAt(row: Record<string, unknown>): string | null {
+  return asNonEmptyString(row.archived_at)
+    ?? asNonEmptyString(objectRecord(row.managed_metadata).archived_at);
+}
+
+export function requireWebhookSourceArchiveReadback(
+  sourceReadback: Record<string, unknown>,
+  directoryReadback: Record<string, unknown>,
+  rpcName: string,
+): void {
+  for (const row of [sourceReadback, directoryReadback]) {
+    const enabled = booleanReadback(row.enabled);
+    if (enabled !== false) {
+      throw new Error(`${rpcName} backend readback did not disable archived intake source`);
+    }
+    const metadata = objectRecord(row.managed_metadata);
+    const lifecycleState = asNonEmptyString(row.lifecycle_state)
+      ?? asNonEmptyString(metadata.lifecycle);
+    if (lifecycleState !== 'archived' && !webhookSourceArchivedAt(row)) {
+      throw new Error(`${rpcName} backend readback did not expose intake source archive metadata`);
+    }
+  }
 }

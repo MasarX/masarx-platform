@@ -18,20 +18,18 @@ import {
   normalizeLiveListResult,
   objectRecord,
   type RbacRoleMutationResult,
+  type RbacTemplateProvisionRoleResult,
   type RbacUserRoleAssignmentMutationResult,
   readFunctionErrorMessage,
+  readLiveResourceListReadback,
   requireFunctionMutationResult,
   requireLiveDomainEvidence,
   requireLiveEvidence,
   requireLiveMutationResult,
-  requireLiveRbacAssignmentReadback,
-  requireLiveRbacRoleReadback,
+  requireLiveResourceListReadback,
   requireLiveResourceReadback,
   requireLiveStringField,
-  requireLiveUserDeviceRevokeReadback,
   requireLiveUserLifecycleReadback,
-  requireLiveUserRoleAssignmentReadback,
-  requireLiveUserSecurityActionReadback,
   RESOURCE_DATA,
   seed,
   sleep,
@@ -1024,4 +1022,425 @@ export async function ui_list_user_security_actions_v1(
     .sort((a, b) => String(b.timestamp ?? '').localeCompare(String(a.timestamp ?? '')))
     .slice(0, limit);
   return { rows, total: rows.length, page: 0, page_size: limit };
+}
+
+async function requireLiveUserDeviceRevokeReadback(
+  rpcName: string,
+  deviceId: string,
+  revokedReason?: string | null,
+): Promise<{
+  device: Record<string, unknown>;
+  summary: Record<string, unknown>;
+}> {
+  const device = await requireLiveResourceReadback('user_devices', deviceId, rpcName);
+  const summary = await requireLiveResourceReadback('user_device_summary', deviceId, rpcName);
+  const readbacks = [device, summary];
+  for (const row of readbacks) {
+    const revokedAt = asNonEmptyString(row.revoked_at);
+    const isRevoked = row.is_revoked === true || Boolean(revokedAt);
+    if (!isRevoked) {
+      throw new Error(`${rpcName} backend readback device ${deviceId} is not revoked`);
+    }
+  }
+  const expectedReason = asNonEmptyString(revokedReason);
+  if (expectedReason) {
+    const readbackReason = asNonEmptyString(summary.revoked_reason) ?? asNonEmptyString(device.revoked_reason);
+    if (readbackReason !== expectedReason) {
+      throw new Error(`${rpcName} backend readback missing device revocation reason`);
+    }
+  }
+  return { device, summary };
+}
+
+export async function requireLiveUserSecurityActionReadback(
+  rpcName: string,
+  targetUserId: string,
+  decisionPoint: string,
+  result: Record<string, unknown>,
+  actionReason: string | null | undefined,
+  expected?: {
+    roleKey?: string | null;
+    assignmentId?: string | null;
+    inviteEmail?: string | null;
+    inviteEmailSent?: boolean | null;
+    sendInviteEmailRequested?: boolean | null;
+    inviteRedirectTo?: string | null;
+  },
+): Promise<Record<string, unknown>> {
+  const expectedIntentId = asNonEmptyString(result.password_reset_intent_id);
+  const expectedDecisionId = asNonEmptyString(result.settings_resolution_id);
+  const expectedCorrelationId = asNonEmptyString(result.correlation_id);
+  const expectedRoleKey = asNonEmptyString(expected?.roleKey);
+  const expectedAssignmentId = asNonEmptyString(expected?.assignmentId);
+  const expectedInviteEmail = asNonEmptyString(expected?.inviteEmail)?.toLowerCase();
+  const expectedInviteEmailSent = expected?.inviteEmailSent;
+  const expectedSendInviteEmailRequested = expected?.sendInviteEmailRequested;
+  const expectedInviteRedirectTo = expected?.inviteRedirectTo;
+  const inviteRedirectMatchesReadback = (readbackValue: string | null | undefined) => {
+    if (expectedInviteRedirectTo === undefined) return true;
+    if (expectedInviteRedirectTo === null) return readbackValue == null;
+    if (readbackValue === expectedInviteRedirectTo) return true;
+    const normalizeRootUrl = (value: string | null | undefined) => {
+      const raw = asNonEmptyString(value);
+      if (!raw) return null;
+      try {
+        const parsed = new URL(raw);
+        if (parsed.pathname === '/' && !parsed.search && !parsed.hash) return parsed.origin;
+      } catch {
+        return raw;
+      }
+      return raw;
+    };
+    return normalizeRootUrl(readbackValue) === normalizeRootUrl(expectedInviteRedirectTo);
+  };
+  const hasOwn = (record: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(record, key);
+  const boolMatches = (value: unknown, expectedValue: boolean | null | undefined) => {
+    if (expectedValue == null) return true;
+    if (typeof value === 'boolean') return value === expectedValue;
+    const raw = asNonEmptyString(value)?.toLowerCase();
+    if (raw === 'true' || raw === 't' || raw === '1' || raw === 'yes') return expectedValue === true;
+    if (raw === 'false' || raw === 'f' || raw === '0' || raw === 'no') return expectedValue === false;
+    return false;
+  };
+  let match: Record<string, unknown> | undefined;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const live = await liveRpc<Record<string, unknown>>('ui_list_user_security_actions_v1', {
+      p_target_user_id: targetUserId,
+      p_limit: 5,
+    });
+    if (!live) throw new Error(`${rpcName} user security action readback requires a live backend`);
+    const rows = normalizeLiveListResult<Record<string, unknown>>(live.data, 0, 5).rows;
+    match = rows.find((row) => {
+      const inputs = objectRecord(row.decision_inputs);
+      const intentId =
+        asNonEmptyString(row.password_reset_intent_id) ??
+        asNonEmptyString(inputs.password_reset_intent_id);
+      const targetMatches =
+        asNonEmptyString(row.resource_id) === targetUserId ||
+        asNonEmptyString(inputs.target_user_id) === targetUserId;
+      const pointMatches = asNonEmptyString(row.decision_point) === decisionPoint;
+      const intentMatches = !expectedIntentId || intentId === expectedIntentId;
+      const decisionMatches = !expectedDecisionId || asNonEmptyString(row.id) === expectedDecisionId;
+      const correlationMatches = !expectedCorrelationId || asNonEmptyString(row.correlation_id) === expectedCorrelationId;
+      const roleKey =
+        asNonEmptyString(row.role_key) ??
+        asNonEmptyString(inputs.role_key);
+      const readbackAssignmentId =
+        asNonEmptyString(inputs.rbac_user_role_assignment_id) ??
+        asNonEmptyString(inputs.user_role_assignment_id) ??
+        asNonEmptyString(inputs.assignment_id);
+      const resourceType = asNonEmptyString(row.resource_type);
+      const resourceId = asNonEmptyString(row.resource_id);
+      const rowCarriesAssignmentResource =
+        resourceType === 'rbac_user_role_assignment' ||
+        resourceType === 'user_role_assignment' ||
+        resourceType === 'role_assignment';
+      const assignmentMatches =
+        !expectedAssignmentId ||
+        readbackAssignmentId === expectedAssignmentId ||
+        (rowCarriesAssignmentResource && resourceId === expectedAssignmentId) ||
+        (!readbackAssignmentId && !rowCarriesAssignmentResource);
+      const roleMatches = !expectedRoleKey || roleKey === expectedRoleKey;
+      const inviteEmail =
+        asNonEmptyString(row.invite_email)?.toLowerCase() ??
+        asNonEmptyString(inputs.email)?.toLowerCase();
+      const inviteEmailMatches = !expectedInviteEmail || inviteEmail === expectedInviteEmail;
+      const inviteEmailSentMatches = boolMatches(
+        row.invite_email_sent ?? inputs.invite_email_sent,
+        expectedInviteEmailSent,
+      );
+      const sendInviteEmailMatches = boolMatches(
+        row.send_invite_email_requested ?? inputs.send_invite_email_requested,
+        expectedSendInviteEmailRequested,
+      );
+      const readbackRedirect =
+        asNonEmptyString(row.invite_redirect_to) ??
+        asNonEmptyString(inputs.invite_redirect_to);
+      const inviteRedirectRecorded =
+        hasOwn(inputs, 'invite_redirect_to') ||
+        asNonEmptyString(row.invite_redirect_to) != null;
+      const inviteRedirectMatches =
+        expectedInviteRedirectTo === undefined ||
+        (expectedInviteRedirectTo === null
+          ? inviteRedirectRecorded && readbackRedirect == null
+          : inviteRedirectMatchesReadback(readbackRedirect));
+      return targetMatches &&
+        pointMatches &&
+        intentMatches &&
+        decisionMatches &&
+        correlationMatches &&
+        assignmentMatches &&
+        roleMatches &&
+        inviteEmailMatches &&
+        inviteEmailSentMatches &&
+        sendInviteEmailMatches &&
+        inviteRedirectMatches;
+    });
+    if (match) break;
+    if (attempt < 4) await sleep(300);
+  }
+  if (!match) {
+    throw new Error(`${rpcName} backend readback missing user security action`);
+  }
+  const expectedReason = asNonEmptyString(actionReason);
+  if (expectedReason) {
+    const inputs = objectRecord(match.decision_inputs);
+    const readbackReason =
+      asNonEmptyString(match.action_reason) ??
+      asNonEmptyString(match.decision_reason) ??
+      asNonEmptyString(inputs.reason);
+    if (readbackReason !== expectedReason) {
+      throw new Error(`${rpcName} backend readback missing persisted action reason`);
+    }
+  }
+  return match;
+}
+
+export async function requireLiveUserRoleAssignmentReadback(
+  rpcName: string,
+  targetUserId: string,
+  roleKey?: string | null,
+  assignmentId?: string | null,
+  directory?: Record<string, unknown> | null,
+  expectedStatus: 'active' | 'revoked' = 'active',
+): Promise<void> {
+  const normalizedRoleKey = asNonEmptyString(roleKey);
+  await requireLiveRbacAssignmentReadback(rpcName, {
+    assignmentId,
+    targetUserId,
+    roleKey: normalizedRoleKey,
+    expectedStatus,
+  });
+  if (normalizedRoleKey && directory) {
+    const activeRoleKeys = Array.isArray(directory.active_role_keys)
+      ? directory.active_role_keys.map((value) => String(value))
+      : [];
+    if (expectedStatus === 'active' && activeRoleKeys.length > 0 && !activeRoleKeys.includes(normalizedRoleKey)) {
+      throw new Error(`${rpcName} backend readback missing active role ${normalizedRoleKey}`);
+    }
+    if (expectedStatus === 'revoked' && activeRoleKeys.includes(normalizedRoleKey)) {
+      throw new Error(`${rpcName} backend readback still has active role ${normalizedRoleKey}`);
+    }
+  }
+}
+
+async function requireLiveRbacRoleReadback(
+  rpcName: string,
+  roleId: string,
+  options: {
+    args?: Record<string, unknown>;
+    assertMutableFields?: boolean;
+    requireInactive?: boolean;
+    requireAssignmentsRevoked?: boolean;
+  } = {},
+): Promise<{
+  role: Record<string, unknown>;
+  summary: Record<string, unknown>;
+}> {
+  const role = await requireLiveResourceReadback('rbac_roles', roleId, rpcName);
+  const summary = await requireLiveResourceReadback('rbac_role_summary', roleId, rpcName);
+  const args = options.args ?? {};
+  const expectedOrganizationId = asNonEmptyString(args.organization_id);
+  if (expectedOrganizationId) assertReadbackValue(role.organization_id, expectedOrganizationId, 'rbac_roles.organization_id', rpcName);
+
+  const expectedKey = asNonEmptyString(args.key);
+  if (expectedKey) assertReadbackValue(role.key, expectedKey, 'rbac_roles.key', rpcName);
+
+  if (options.assertMutableFields) {
+    const expectedName = asNonEmptyString(args.name);
+    if (expectedName) assertReadbackValue(role.name, expectedName, 'rbac_roles.name', rpcName);
+    if (Object.prototype.hasOwnProperty.call(args, 'description')) {
+      assertReadbackValue(
+        role.description ?? null,
+        asNonEmptyString(args.description),
+        'rbac_roles.description',
+        rpcName,
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(args, 'is_active')) {
+      assertReadbackValue(Boolean(role.is_active), Boolean(args.is_active), 'rbac_roles.is_active', rpcName);
+    }
+  }
+
+  if (options.requireInactive) {
+    if (role.is_active !== false || summary.is_active !== false) {
+      throw new Error(`${rpcName} backend readback role ${roleId} is still active`);
+    }
+  }
+
+  if (options.requireAssignmentsRevoked) {
+    const assignments = await readLiveResourceListReadback('rbac_user_role_assignments', { role_id: roleId }, rpcName);
+    const active = assignments.filter((row) => !asNonEmptyString(row.revoked_at));
+    if (active.length > 0) {
+      throw new Error(`${rpcName} backend readback role ${roleId} still has active assignments`);
+    }
+  }
+
+  return { role, summary };
+}
+
+async function requireLiveRbacAssignmentReadback(
+  rpcName: string,
+  {
+    assignmentId,
+    targetUserId,
+    roleId,
+    roleKey,
+    expectedStatus,
+  }: {
+    assignmentId?: string | null;
+    targetUserId?: string | null;
+    roleId?: string | null;
+    roleKey?: string | null;
+    expectedStatus?: 'active' | 'revoked';
+  },
+): Promise<void> {
+  const normalizedAssignmentId = asNonEmptyString(assignmentId);
+  const normalizedTargetUserId = asNonEmptyString(targetUserId);
+  const normalizedRoleId = asNonEmptyString(roleId);
+  const normalizedRoleKey = asNonEmptyString(roleKey);
+  let assignmentRows: Array<Record<string, unknown>> = [];
+  if (normalizedAssignmentId) {
+    assignmentRows = [
+      await requireLiveResourceReadback('rbac_user_role_assignments', normalizedAssignmentId, rpcName),
+    ];
+  } else if (normalizedTargetUserId) {
+    assignmentRows = await readLiveResourceListReadback(
+      'rbac_user_role_assignments',
+      { user_id: normalizedTargetUserId },
+      rpcName,
+    );
+  } else {
+    throw new Error(`${rpcName} backend readback missing rbac assignment target`);
+  }
+
+  const scopedRows = assignmentRows.filter((row) => {
+    const roleIdMatches = !normalizedRoleId || asNonEmptyString(row.role_id) === normalizedRoleId;
+    const roleKeyMatches = !normalizedRoleKey || asNonEmptyString(row.role_key) === normalizedRoleKey;
+    return roleIdMatches && roleKeyMatches;
+  });
+
+  if (expectedStatus === 'active') {
+    const active = scopedRows.find((row) => !asNonEmptyString(row.revoked_at));
+    if (!active) {
+      throw new Error(`${rpcName} backend readback missing active rbac assignment`);
+    }
+  } else if (expectedStatus === 'revoked') {
+    const active = scopedRows.find((row) => !asNonEmptyString(row.revoked_at));
+    if (active) {
+      throw new Error(`${rpcName} backend readback assignment ${active.id ?? normalizedAssignmentId ?? normalizedTargetUserId} is still active`);
+    }
+  } else if (scopedRows.length === 0) {
+    throw new Error(`${rpcName} backend readback missing rbac assignment`);
+  }
+
+  for (const row of scopedRows) {
+    if (normalizedTargetUserId) assertReadbackValue(row.user_id, normalizedTargetUserId, 'rbac_user_role_assignments.user_id', rpcName);
+    if (normalizedRoleId) assertReadbackValue(row.role_id, normalizedRoleId, 'rbac_user_role_assignments.role_id', rpcName);
+    if (normalizedRoleKey) assertReadbackValue(row.role_key, normalizedRoleKey, 'rbac_user_role_assignments.role_key', rpcName);
+  }
+
+  const readbackRoleId =
+    assignmentRows
+      .map((row) => asNonEmptyString(row.role_id) ?? asNonEmptyString(row.rbac_role_id))
+      .find(Boolean) ?? normalizedRoleId ?? null;
+  if (readbackRoleId) {
+    await requireLiveRbacRoleReadback(rpcName, readbackRoleId);
+  }
+}
+
+function normalizeRbacTemplateProvisionRoles(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+): RbacTemplateProvisionRoleResult[] {
+  const rows = Array.isArray(rec.rbac_roles)
+    ? (rec.rbac_roles as RbacTemplateProvisionRoleResult[])
+    : [];
+  if (rows.length > 0) return rows;
+  const roleId =
+    asNonEmptyString(rec.rbac_role_id) ??
+    asNonEmptyString(rec.role_id) ??
+    asNonEmptyString(rec.id);
+  if (!roleId) return [];
+  const templateKey =
+    asNonEmptyString(args.template_key) ??
+    (Array.isArray(args.template_keys)
+      ? args.template_keys.map(asNonEmptyString).find(Boolean)
+      : null);
+  return [{ role_id: roleId, template_key: templateKey ?? null }];
+}
+
+function normalizeRbacPermissionValues(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asNonEmptyString(item))
+    .filter((item): item is string => Boolean(item))
+    .map((item) => item.trim())
+    .sort((a, b) => a.localeCompare(b));
+}
+
+async function requireLiveRbacTemplatePermissionReadback(
+  rpcName: string,
+  templateKey: string,
+  roleSummary: Record<string, unknown>,
+): Promise<void> {
+  const templateRows = await requireLiveResourceListReadback(
+    'rbac_role_templates',
+    { key: templateKey },
+    rpcName,
+  );
+  const template = templateRows.find((row) => asNonEmptyString(row.key) === templateKey);
+  if (!template) {
+    throw new Error(`${rpcName} backend readback missing rbac_role_templates:${templateKey}`);
+  }
+
+  const expectedValues = normalizeRbacPermissionValues(template.permission_values);
+  const actualValues = normalizeRbacPermissionValues(roleSummary.permission_values);
+  const expectedCount =
+    typeof template.permission_count === 'number'
+      ? template.permission_count
+      : expectedValues.length;
+  const actualCount =
+    typeof roleSummary.permission_count === 'number'
+      ? roleSummary.permission_count
+      : actualValues.length;
+  if (expectedCount > 0 && actualCount < expectedCount) {
+    throw new Error(`${rpcName} backend readback role ${templateKey} has fewer permissions than its template`);
+  }
+  if (expectedValues.length > 0) {
+    const actualSet = new Set(actualValues);
+    const missing = expectedValues.filter((permission) => !actualSet.has(permission));
+    if (missing.length > 0) {
+      throw new Error(`${rpcName} backend readback role ${templateKey} missing template permissions: ${missing.join(', ')}`);
+    }
+  }
+}
+
+export async function requireLiveRbacTemplateProvisionReadback(
+  rpcName: string,
+  result: Record<string, unknown>,
+  args: Record<string, unknown>,
+): Promise<void> {
+  const roles = normalizeRbacTemplateProvisionRoles(result, args);
+  if (roles.length === 0) {
+    throw new Error(`${rpcName} did not return provisioned RBAC role evidence`);
+  }
+
+  for (const provisioned of roles) {
+    const roleId =
+      asNonEmptyString(provisioned.role_id) ??
+      asNonEmptyString(provisioned.rbac_role_id);
+    if (!roleId) {
+      throw new Error(`${rpcName} did not return provisioned RBAC role id`);
+    }
+    const { role, summary } = await requireLiveRbacRoleReadback(rpcName, roleId);
+    const templateKey = asNonEmptyString(provisioned.template_key);
+    if (templateKey) {
+      const roleKey = asNonEmptyString(role.key) ?? asNonEmptyString(summary.key);
+      if (roleKey !== templateKey) {
+        throw new Error(`${rpcName} backend readback role ${roleId} did not match template ${templateKey}`);
+      }
+      await requireLiveRbacTemplatePermissionReadback(rpcName, templateKey, summary);
+    }
+  }
 }

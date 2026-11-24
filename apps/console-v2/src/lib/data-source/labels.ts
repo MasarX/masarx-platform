@@ -30,9 +30,12 @@ import {
   requireLiveLabelDraftResult,
   requireLiveLabelPublishResult,
   requireLiveLabelValidationResult,
+  requireLiveResourceListReadback,
+  requireLiveResourceReadback,
   requireLiveRpcRecord,
   sleep,
   state,
+  ui_get_resource_v1,
 } from '../data-source';
 import { getSupabaseClient } from '../supabase';
 import { asNonEmptyString } from './shared';
@@ -674,4 +677,128 @@ export async function label_designer_preview_label_design_draft(
     },
     validation: { ok: true, errors: [] },
   };
+}
+
+async function requireLabelReprintReadback(
+  labelId: string,
+  ids: { versionId?: string | null; jobId?: string | null; backendId?: string | null },
+): Promise<void> {
+  const candidates: Array<{ resource: 'label_versions' | 'label_jobs'; id: string }> = [];
+  const pushCandidate = (resource: 'label_versions' | 'label_jobs', id?: string | null) => {
+    const normalized = asNonEmptyString(id);
+    if (!normalized) return;
+    if (candidates.some((candidate) => candidate.resource === resource && candidate.id === normalized)) return;
+    candidates.push({ resource, id: normalized });
+  };
+
+  pushCandidate('label_versions', ids.versionId);
+  pushCandidate('label_jobs', ids.jobId);
+  pushCandidate('label_versions', ids.backendId);
+  pushCandidate('label_jobs', ids.backendId);
+
+  let lastError: unknown = null;
+  for (const candidate of candidates) {
+    try {
+      const row = await ui_get_resource_v1<Record<string, unknown>>(candidate.resource, candidate.id);
+      if (!row) continue;
+      const rowLabelId = asNonEmptyString(row.label_id);
+      if (rowLabelId && rowLabelId !== labelId) {
+        throw new Error(`Label reprint ${candidate.resource} readback belongs to ${rowLabelId}, expected ${labelId}`);
+      }
+      const metadata = objectRecord(row.target_metadata);
+      const sourceArtifactId =
+        asNonEmptyString(metadata.source_label_artifact_id) ??
+        asNonEmptyString(metadata.label_artifact_id);
+      if (!rowLabelId && sourceArtifactId && sourceArtifactId !== labelId) {
+        throw new Error(`Label reprint ${candidate.resource} readback belongs to artifact ${sourceArtifactId}, expected ${labelId}`);
+      }
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  const suffix = lastError instanceof Error && lastError.message ? `: ${lastError.message}` : '';
+  throw new Error(`Label reprint backend readback missing label_jobs or label_versions${suffix}`);
+}
+
+// W54-F — typed adapter for the canonical complete_label_job seam. Live mode
+// routes through `phaseC6Rpc('complete_label_job', payload, 'label_jobs')`;
+// the in-memory branch returns a deterministic envelope so unit tests can
+// assert on the FE-shaped contract without an environment dependency.
+export async function request_label_reprint(
+  labelId: string,
+  { reason }: { reason: string },
+): Promise<{
+  ok: true;
+  label_id: string;
+  reason: string;
+  label_job_id?: string | null;
+  new_version_id?: string | null;
+}> {
+  const live = await liveRpc<unknown>('request_label_reprint', {
+    p_label_id: labelId,
+    p_reprint_reason: reason,
+    p_actor_id: null,
+    p_requested_source: 'console-v2',
+  });
+  if (live) {
+    const rec = live.data && typeof live.data === 'object'
+      ? live.data as Record<string, unknown>
+      : null;
+    const labelJobId =
+      asNonEmptyString(live.data) ??
+      asNonEmptyString(rec?.label_job_id) ??
+      asNonEmptyString(rec?.job_id) ??
+      asNonEmptyString(rec?.id);
+    const labelVersionId =
+      asNonEmptyString(rec?.new_version_id) ??
+      asNonEmptyString(rec?.label_version_id);
+    const evidenceId = labelJobId ?? labelVersionId;
+    if (!evidenceId) {
+      throw new Error('Label reprint did not return a label job or version id');
+    }
+    await requireLabelReprintReadback(labelId, {
+      versionId: labelVersionId,
+      jobId: labelJobId,
+      backendId: evidenceId,
+    });
+    return {
+      ok: true,
+      label_id: labelId,
+      reason,
+      label_job_id: labelJobId ?? null,
+      new_version_id: labelVersionId ?? null,
+    };
+  }
+
+  await sleep(120);
+  return { ok: true, label_id: labelId, reason, label_job_id: 'ljob_' + Date.now(), new_version_id: null };
+}
+
+export async function requireLiveCompleteLabelJobReadback(
+  jobId: string,
+  result: Record<string, unknown>,
+): Promise<void> {
+  const labelJobId = asNonEmptyString(result.label_job_id) ?? asNonEmptyString(result.job_id) ?? jobId;
+  const job = await requireLiveResourceReadback('label_jobs', labelJobId, 'complete_label_job');
+  const status = (asNonEmptyString(job.status) ?? asNonEmptyString(result.status) ?? '').toLowerCase();
+  const labelId = asNonEmptyString(job.label_id) ?? asNonEmptyString(result.label_id);
+  const shipmentId = asNonEmptyString(job.shipment_id);
+  const targetType = asNonEmptyString(job.target_type);
+
+  if (!['completed', 'succeeded', 'success'].includes(status)) return;
+  if (!labelId) {
+    throw new Error('complete_label_job backend readback missing label identity');
+  }
+
+  if (shipmentId) {
+    await requireLiveResourceReadback('labels', labelId, 'complete_label_job');
+    await requireLiveResourceListReadback('label_versions', { label_job_id: labelJobId }, 'complete_label_job');
+    return;
+  }
+
+  if (targetType) {
+    await requireLiveResourceReadback('label_artifacts', labelId, 'complete_label_job');
+  }
 }
