@@ -70,6 +70,8 @@ Both `globals.css` files import the shared stylesheet. Both Tailwind configs ext
 
 ### Landing and public tracking
 
+The landing build prepends the shared `--ui-*` declarations, and only those, to `app.css`. `--bg` aliases `paper`, `--text` aliases `ink`, `--brand` aliases the light `accent`, and light `--surface-strong` aliases `surface`, all with unchanged values. The other values below differ from the shared tokens and form the one landing override at the top of `app.css`: `--muted`, dark `--surface-strong` and `--brand`, `--accent`, `--accent-2`, the translucent `--surface`, the 12/16/20/28px radii and the system font stacks. `scripts/frontend/build-landing.js`, `scripts/frontend/landing-shared-tokens.js`, `docs/marketing/landing-v2/app.css`
+
 | Token area | Shipped values | Source |
 | --- | --- | --- |
 | Brand | `--brand` `#4F46E5`, `--accent` `#818CF8`, `--accent-2` `#10B981` and `--btn-primary-text` `#ffffff` under `data-variant="ai"` in both themes. | `docs/marketing/landing-v2/app.css`, `docs/marketing/landing-v2/index.html`, `docs/marketing/landing-v2/track.html` |
