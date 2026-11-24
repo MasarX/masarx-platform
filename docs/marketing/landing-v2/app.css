@@ -372,7 +372,8 @@ html[data-motion="off"] [data-tilt] { transform: none; }
 }
 
 /* --- Sections --- */
-.section { padding: clamp(72px, 8vw, 140px) 0; content-visibility: auto; contain-intrinsic-size: auto 600px; }
+/* No content-visibility: skipped sections swap a 600px placeholder for their real height after a focus or fragment scroll, moving the target off screen (#626). */
+.section { padding: clamp(72px, 8vw, 140px) 0; }
 .section h2 { margin: 0; font-size: clamp(26px, 2.5vw, 36px); letter-spacing: -0.03em; }
 [data-driver-review-note] { white-space: pre-wrap; overflow-wrap: anywhere; }
 .lead { margin: 12px 0 0; color: var(--muted); max-width: 72ch; line-height: 1.6; font-size: 17px; }
