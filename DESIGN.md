@@ -132,6 +132,7 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 | Focus and landmarks | Shared buttons/fields use visible focus rings, and the shared shell provides a skip link. V2 uses `:focus-visible` with `--focus-ring` and a skip link to main. Landing has a skip link and visible button/map focus outlines. `packages/ui/src/button.tsx`, `packages/ui/src/form-classes.ts`, `packages/ui/src/app-shell.tsx`, `apps/console-v2/src/styles/base.css`, `apps/console-v2/src/shell/AppShell.tsx`, `docs/marketing/landing-v2/index.html`, `docs/marketing/landing-v2/app.css` |
 | Labels and announcements | Shared fields wire invalid/error descriptions and the combobox exposes expanded and active-option state. Shared loading and empty views use polite status. V2 labels table selection/actions and announces toasts. Landing uses labels, navigation `aria-expanded` and polite form status. `packages/ui/src/input.tsx`, `packages/ui/src/combobox.tsx`, `packages/ui/src/loading-state.tsx`, `packages/ui/src/empty-state.tsx`, `apps/console-v2/src/components/DataTable.tsx`, `apps/console-v2/src/components/Toast.tsx`, `docs/marketing/landing-v2/index.html`, `docs/marketing/landing-v2/app.js` |
 | Keyboard | Radix-backed dialogs/drawers provide keyboard dismissal and focus management. Shared shortcuts ignore editable targets and IME composition. V2 uses keyboard navigation in the command palette. Landing's expanded tracking map handles Escape, sets initial focus and restores focus on close. `packages/ui/src/modal.tsx`, `packages/ui/src/drawer.tsx`, `packages/ui/src/hooks/use-keyboard-shortcuts.ts`, `apps/console-v2/src/components/Palette.tsx`, `docs/marketing/landing-v2/app.js` |
+| Target size | V2 compact icon buttons (table row actions, table group menu, dashboard widget edit actions) are 24 by 24 CSS px, the WCAG 2.2 AA 2.5.8 minimum. `apps/console-v2/tests/a11y/target-size.a11y.spec.ts` measures the rendered row and widget actions. |
 | Contrast | Shared controls pair semantic foreground and surface tokens. `tests/unit/design-token-contrast.test.js` reads the shared UI, Console V2 and landing token files and requires 4.5:1 for each text pair and 3:1 for focus rings in both themes, including status badges on their 12% tint and the `--tag-*` pairs. `packages/ui/src/styles.css`, `apps/console-v2/src/styles/tokens.css`, `docs/marketing/landing-v2/app.css` |
 | Reduced motion | Shared overlays use `motion-safe` and shared shimmer stops under reduced motion. V2 reduces animation and transition duration to 0.001ms and disables smooth scrolling under reduced motion. Landing disables motion via its attribute and OS media query. `packages/ui/src/modal.tsx`, `packages/ui/src/drawer.tsx`, `packages/ui/src/styles.css`, `apps/console-v2/src/styles/tokens.css`, `docs/marketing/landing-v2/app.css` |
 | Lint | The root uses Next.js core-web-vitals and TypeScript presets. V2 has a separate TypeScript and React hooks config. FieldOps TSX has warning-level rules for hex colors outside theme files, off-scale spacing literals and raw typography literals. The i18n literal guard fails a unit test on English JSX text, user-facing props, toasts and error setters in Console V2, shared UI, FieldOps and the Next.js apps beyond its baseline, which lists each remaining file with a count that may only fall. Mark a deliberate literal, such as a brand name, with `i18n-literal-ok` on its line. `eslint.config.mjs`, `apps/console-v2/eslint.config.js`, `config/tooling/eslint.fieldops.js`, `scripts/tooling/i18n-literal-guard.js`, `scripts/tooling/i18n-literal-baseline.txt`, `tests/unit/i18n-literal-guard.test.js` |
@@ -175,11 +176,21 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 | --- | --- | --- | --- | --- | --- |
 | TBD per screen | TBD | TBD | TBD | TBD | TBD |
 
+### Where UI is verified
+
+- Verify UI changes in CI or from preview artifacts, never by local runs or renders. This covers tests, lint, type checks, builds, screenshots, accessibility scans, speed measurements and sweep captures.
+- When a check named in this file has no CI job yet, add the job to the workflow in the PR that relies on it.
+- These checks named in this file have no CI job yet:
+  - The ESLint configs in section 8 (Lint). No CI task runs ESLint. [#431](https://github.com/MasarX/masarx-platform/issues/431)
+  - Accessibility of Console, Console V2 and portal screens: rendered contrast, tab order and 24 by 24 pixel targets. Landing E2E covers only landing and public tracking, and CI does not run `tests/e2e`. [#301](https://github.com/MasarX/masarx-platform/issues/301), [#270](https://github.com/MasarX/masarx-platform/issues/270)
+  - Screen coverage and daily sweep captures of signed-in screens. Visual baselines run only on manual dispatch. [#432](https://github.com/MasarX/masarx-platform/issues/432)
+  - Time to usable for Console V2 and portal screens (Speed). [#388](https://github.com/MasarX/masarx-platform/issues/388)
+
 ### Review and sweeps
 
 - Have the Design lead run one daily sweep across roles, viewports, themes and states.
 - File each finding as an issue and revert a change that breaks a critical user journey.
-- Delegate the hands-on checks to a worker that returns only the findings.
+- Delegate the hands-on checks to a worker that reads the CI and preview artifacts and returns only the findings.
 - Sweep signed-in screens on dev only with the [synthetic sweep accounts](DELIVERY.md#signed-in-dev-sweep) and keep credentials out of logs, captures and issues.
 - Design changes, including UI, i18n, mockups, `DESIGN.md`, tests and sweep findings, get no review. The Design lead's thread opens each PR and merges it on green required CI. A change to which personal data a screen shows, or to whom, is high risk and gets one review under the engineering standard's high-risk rule.
 

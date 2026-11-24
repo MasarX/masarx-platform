@@ -3,8 +3,8 @@
 const ISOLATED = 'bdi, [dir="ltr"], [lang="en"], code, kbd, .kbd, [translate="no"], script, style';
 const TEXT_ATTRIBUTES = ['aria-label', 'title', 'placeholder', 'alt'];
 const LATIN_WORD = /[A-Za-z]{2,}/;
-// Key names and file formats that Arabic copy keeps in Latin letters.
-const TECHNICAL_TOKENS = ['Esc', 'Ctrl', 'CSV'];
+// Key names, file formats and language codes (the visible AR/EN toggle) that Arabic copy keeps in Latin letters.
+const TECHNICAL_TOKENS = ['Esc', 'Ctrl', 'CSV', 'AR', 'EN'];
 
 /** Lists text nodes and text attributes with Latin words outside isolated runs; `allow` names data the test supplied. */
 export function findUntranslated(root: Element = document.body, allow: readonly string[] = []): string[] {

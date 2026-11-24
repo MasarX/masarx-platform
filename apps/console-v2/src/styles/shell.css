@@ -647,7 +647,7 @@
 }
 .status-seg--env:hover { background: oklch(from var(--accent) calc(l - 0.1) c h); }
 .status-seg--env .status-seg__dot { background: var(--ink-inv); }
-.status-seg--env .status-seg__label { color: var(--ink-inv); opacity: 0.85; }
+.status-seg--env .status-seg__label { color: var(--ink-inv); opacity: 1; } /* full ink keeps 4.5:1 at 9.5px */
 .status-seg--env .status-seg__value { color: var(--ink-inv); font-weight: 600; }
 .status-seg--env .status-seg__sep { color: var(--ink-inv); opacity: 0.5; }
 
