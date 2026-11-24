@@ -84,6 +84,15 @@ function resolve(spec, vars, base) {
 
 const TAG_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
 
+// #443: inside Console V2 the studio's ui-accent* utilities resolve to the Console V2 tokens its Tailwind config names.
+const STUDIO_CONFIG = 'apps/console-v2/tailwind.config.cjs';
+const STUDIO_ACCENT = Object.fromEntries(
+  [...fs.readFileSync(path.join(ROOT, STUDIO_CONFIG), 'utf8').matchAll(/"(ui-accent[\w-]*)":\s*v2\("(--[\w-]+)"\)/g)].map(
+    (m) => [m[1], m[2]]
+  )
+);
+const studio = (name) => STUDIO_ACCENT[name] ?? `missing ${name} in ${STUDIO_CONFIG}`;
+
 // [foreground, background stack (top first), minimum, where it is used]
 const SURFACES = [
   {
@@ -122,6 +131,19 @@ const SURFACES = [
       ['--chrome-ink-soft', ['--chrome'], TEXT, 'top bar secondary text'],
       ['--rail-ink', ['--rail-bg'], TEXT, 'navigation rail'],
       ['--accent', ['--paper'], BOUNDARY, 'focus ring'],
+    ],
+  },
+  {
+    // The studio paints Console V2 accents over the shared --ui-* surfaces it imports. Accent text at 4.5:1 also covers its 3:1 focus ring and borders.
+    name: 'Console V2 label designer studio',
+    file: ['apps/console-v2/src/styles/tokens.css', 'packages/ui/src/tokens.css'],
+    themes: { light: [':root', ':root[data-theme="light"]'], dark: [':root', ':root[data-theme="dark"]'] },
+    pairs: [
+      ...['--ui-surface', '--ui-paper', '--paper'].map((bg) => [studio('ui-accent'), [bg], TEXT, `accent text and tabs on ${bg}`]),
+      [studio('ui-accent-ink'), [studio('ui-accent')], TEXT, 'solid button'],
+      [studio('ui-accent-ink'), [studio('ui-accent-hover')], TEXT, 'solid button hover'],
+      ...['0.5', '0.8'].map((a) => [studio('ui-accent'), [`${studio('ui-accent-soft')}@${a}`, '--ui-surface'], TEXT, `ghost button at ${a}`]),
+      ['--ui-ink', [studio('ui-accent-soft')], TEXT, 'accent badge and selected option'],
     ],
   },
   {
@@ -173,5 +195,13 @@ describe('design token contrast (WCAG 2.2 AA)', () => {
     );
     expect(imports).toContain('packages/ui/src/tokens.css');
     expect(css.match(/--ui-[\w-]+\s*:/g)).toBeNull();
+    // Inside Console V2 its accent comes from Console V2's accent family, never the shared indigo.
+    expect(css.match(/var\(--ui-accent/g)).toBeNull();
+    expect(STUDIO_ACCENT).toEqual({
+      'ui-accent': '--accent',
+      'ui-accent-hover': '--accent-ink',
+      'ui-accent-ink': '--ink-inv',
+      'ui-accent-soft': '--accent-soft',
+    });
   });
 });

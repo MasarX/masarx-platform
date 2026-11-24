@@ -1,4 +1,4 @@
-/* The studio reads the shared --ui-* tokens; never redeclare them here (#443). */
+/* The studio reads the shared --ui-* tokens; never redeclare them here. Its accent is Console V2's --accent family, mapped in tailwind.config.cjs (#443). */
 @import '../../../../packages/ui/src/tokens.css';
 @tailwind utilities;
 
@@ -67,13 +67,13 @@
 .label-designer-studio .bg-ui-surface { background: rgb(var(--ui-surface)); }
 .label-designer-studio .bg-ui-paper\/80 { background: rgb(var(--ui-paper) / 0.8); }
 .label-designer-studio .bg-ui-highlight\/70 { background: rgb(var(--ui-highlight) / 0.7); }
-.label-designer-studio .bg-ui-accent { background: rgb(var(--ui-accent)); }
-.label-designer-studio .bg-ui-accent-soft\/50 { background: rgb(var(--ui-accent-soft) / 0.5); }
+.label-designer-studio .bg-ui-accent { background: var(--accent); }
+.label-designer-studio .bg-ui-accent-soft\/50 { background: color-mix(in oklab, var(--accent-soft) 50%, transparent); }
 .label-designer-studio .bg-ui-danger\/5 { background: rgb(var(--ui-danger) / 0.05); }
 .label-designer-studio .text-ui-ink { color: rgb(var(--ui-ink)); }
 .label-designer-studio .text-ui-muted { color: rgb(var(--ui-muted)); }
-.label-designer-studio .text-ui-accent { color: rgb(var(--ui-accent)); }
-.label-designer-studio .text-ui-accent-ink { color: rgb(var(--ui-accent-ink)); }
+.label-designer-studio .text-ui-accent { color: var(--accent); }
+.label-designer-studio .text-ui-accent-ink { color: var(--ink-inv); }
 .label-designer-studio .text-ui-danger { color: rgb(var(--ui-danger)); }
 .label-designer-studio .shadow-sm { box-shadow: 0 1px 2px rgb(15 23 42 / 0.08); }
 .label-designer-studio .overflow-auto { overflow: auto; }
