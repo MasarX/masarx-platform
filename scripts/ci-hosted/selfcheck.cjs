@@ -12,6 +12,7 @@ const { exceptions, assess, objectsAt, outOfOrder, orderFloor } = require('./mig
 const { targetBase, targetFile } = require('./target-policy.cjs');
 const { guardPlan } = require('./base-guard.cjs');
 const { changedPaths, select } = require('./changes.cjs');
+const { DEFAULT_CONFIG_PATH, runLint } = require('../tooling/docs-ssot-lint.js');
 const { workflowIgnore, installCommand, checkInstallPolicy, enforceWorkflowInventory } = require('./install-policy.cjs');
 const { installCommandPatternSource } = require('./install-policy.cjs');
 const { installCommandPatternFlags } = require('./install-policy.cjs');
@@ -315,6 +316,31 @@ assert.ok(
   lintCalls.some(([command, action, script]) => command === 'npm' && action === 'run' && script === 'lint:docs:ssot'),
   'Hosted Lint must run npm run lint:docs:ssot',
 );
+assert.equal(
+  require('../../package.json').scripts['lint:docs:ssot'],
+  'node scripts/tooling/docs-ssot-lint.js',
+  'lint:docs:ssot must run the docs SSOT checker',
+);
+
+const docsLintRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hosted-docs-ssot-selfcheck-'));
+try {
+  const registry = path.join(docsLintRoot, DEFAULT_CONFIG_PATH);
+  fs.mkdirSync(path.dirname(registry), { recursive: true });
+  fs.writeFileSync(registry, JSON.stringify({ docs: [] }));
+  assert.deepEqual(runLint({ rootDir: docsLintRoot }).issues, ['critical_docs_registry_empty']);
+
+  const docs = ['DELIVERY.md', 'DESIGN.md'].map(doc => ({ path: doc, checkLinks: true }));
+  for (const doc of docs) fs.writeFileSync(path.join(docsLintRoot, doc.path), '# Fixture\n');
+  fs.writeFileSync(registry, JSON.stringify({ docs }));
+  assert.deepEqual(runLint({ rootDir: docsLintRoot }).issues, [
+    'missing_required_link_check "AGENTS.md"',
+    'missing_required_link_check "docs/product/mission.md"',
+    'missing_required_link_check "docs/guides/TESTING_GUIDE.md"',
+    'missing_required_link_check "docs/guides/LOCAL_SETUP.md"',
+  ]);
+} finally {
+  fs.rmSync(docsLintRoot, { recursive: true, force: true });
+}
 
 const emptyRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hosted-result-selfcheck-'));
 try {

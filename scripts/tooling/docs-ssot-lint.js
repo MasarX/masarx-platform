@@ -4,7 +4,14 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_CONFIG_PATH = 'config/docs/ssot-critical-docs.json';
-const REQUIRED_DOCS = ['AGENTS.md', 'DELIVERY.md', 'DESIGN.md'];
+const REQUIRED_DOCS = [
+  'AGENTS.md',
+  'DELIVERY.md',
+  'DESIGN.md',
+  'docs/product/mission.md',
+  'docs/guides/TESTING_GUIDE.md',
+  'docs/guides/LOCAL_SETUP.md',
+];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function readJson(filePath) {
