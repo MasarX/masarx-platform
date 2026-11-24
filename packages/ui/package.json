@@ -76,7 +76,7 @@
     "clsx": "^2.1.0",
     "date-fns": "^4.4.0",
     "jszip": "3.10.2",
-    "maplibre-gl": "6.18.0",
+    "maplibre-gl": "6.19.0",
     "react-colorful": "^5.8.1",
     "react-day-picker": "^10.0.1",
     "react-hook-form": "^7.92.0",
