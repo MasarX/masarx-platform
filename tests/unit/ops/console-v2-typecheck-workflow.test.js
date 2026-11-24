@@ -12,8 +12,10 @@ describe('Console V2 typecheck in CI', () => {
     expect(workflow.jobs.typecheck.steps.at(-1).run).toContain('node scripts/ci-hosted/tasks.cjs typecheck apps/console-v2 || result=$?');
   });
 
-  test('tasks.cjs runs the Console V2 tsc script for that subject', () => {
-    expect(tasks).toContain("if (subject === 'apps/console-v2') return npmScript('typecheck', subject);");
+  test('tasks.cjs generates the route tree, then runs the Console V2 tsc script', () => {
+    expect(tasks).toContain("if (subject === 'apps/console-v2') {");
+    expect(tasks).toContain("await new Generator({ config: getConfig({}, appRoot), root: appRoot }).run();");
+    expect(tasks).toContain("return npmScript('typecheck', subject);");
     const manifest = JSON.parse(fs.readFileSync(path.join(root, 'apps/console-v2/package.json'), 'utf8'));
     expect(manifest.scripts.typecheck).toBe('tsc -b --noEmit');
   });
