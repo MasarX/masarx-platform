@@ -774,6 +774,8 @@ export function TrackingMapModule() {
               aria-label={`Open ${s.tracking_number}, ${detail}`}
             >
               <div className="mono" style={{ fontWeight: 600 }}>{s.tracking_number}</div>
+              {/* The space keeps the two lines separate words in the visible text axe compares. */}
+              {' '}
               <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
                 {detail}
               </div>
