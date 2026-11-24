@@ -237,8 +237,12 @@ BEGIN
     RAISE EXCEPTION 'public tracking session return contract changed';
   END IF;
   EXECUTE replace(v_definition, v_return, $replacement$
+  -- Use tenant policy because onboarding copies defaults into client and sender rows.
   v_payload := jsonb_set(v_payload, '{live_delivery}', COALESCE(
-    public.public_tracking_live_payload_v1(v_session.id, v_policy), 'null'::jsonb
+    public.public_tracking_live_payload_v1(
+      v_session.id,
+      public.public_tracking_policy_v1(jsonb_build_object('organization_id', v_session.organization_id))
+    ), 'null'::jsonb
   ));
   RETURN jsonb_build_object('ok', TRUE, 'tracking', v_payload);
 $replacement$);
