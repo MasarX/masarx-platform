@@ -72,7 +72,7 @@ The owner's rule (24 Nov): critical means production, secrets, real data, making
 - Host, network and firewall: public ingress routes, CORS, token rules and rewrites in `tooling/apps/api-ingress-worker/`, the egress proxy and its allowlists, servers, DNS and firewall rules. Egress controls include `supabase/functions/api-caller/egress.mjs`, `supabase/functions/api-caller/proxy.mjs`, `supabase/migrations/20261123046800_validate_outbound_integration_urls.sql` and `scripts/ops/verify-api-caller-guarded-egress-proxy.js`.
 - Repo settings and release gates: rulesets and repository settings, the privacy deny check, `/CODEOWNERS`, `/.github/`, `/scripts/ci-hosted/`, `/config/ci/` (including the quarantine and accepted-failure lists), `/scripts/ops/ci/`, `/scripts/tests/run-pgtap-cloud.js`, and scripts CI or deploy workflows run directly or through `package.json` script entries. This includes `scripts/edge/verify-frozen-lock.cjs`, `scripts/edge/verify-npm-import-lock.js` and `scripts/ops/vercel/validate-build.js`. Deleting, skipping or weakening a test, including pgTAP authorization and contract tests, or changing the test-file guard allowlist is critical.
 
-Documentation edits are critical as release-gate changes only when they change a gate's enforced configuration.
+Documentation changes that alter a manual or automated merge or deploy gate, or who must review or approve a change, are critical.
 
 **Not critical on their own.** Dependencies and lockfiles, internal tools under `/tooling/` outside the public ingress worker, money rules, and added or changed tests that preserve existing checks. Spending money still requires the owner's approval.
 
