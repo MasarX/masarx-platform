@@ -165,9 +165,10 @@ function formatNumberValue(value: unknown, options?: Record<string, unknown> | n
     const key = `${uiDefaults.locale}:${serializeFormatOptions(options)}`;
     const cached = NUMBER_FORMATTER_CACHE.get(key);
     if (cached) return cached.format(value);
+    // Intl.NumberFormat throws on null options; pass undefined so plain number columns format.
     const formatter = new Intl.NumberFormat(
       uiDefaults.locale,
-      options as Intl.NumberFormatOptions
+      (options ?? undefined) as Intl.NumberFormatOptions | undefined
     );
     NUMBER_FORMATTER_CACHE.set(key, formatter);
     return formatter.format(value);
