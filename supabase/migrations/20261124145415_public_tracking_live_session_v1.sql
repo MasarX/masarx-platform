@@ -227,7 +227,7 @@ RETURNS jsonb
 LANGUAGE sql
 SECURITY DEFINER
 SET search_path TO public, extensions, pg_temp
-AS $ SELECT public.public_tracking_session_v1(p_input) $;
+AS $function$ SELECT public.public_tracking_session_v1(p_input) $function$;
 
 REVOKE ALL ON FUNCTION api.public_tracking_live_session_v1(jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION api.public_tracking_live_session_v1(jsonb) TO service_role;
