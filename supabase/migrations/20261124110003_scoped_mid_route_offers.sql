@@ -34,11 +34,11 @@ CREATE POLICY mid_route_stop_injections_service ON public.mid_route_stop_injecti
   FOR ALL TO service_role USING (TRUE) WITH CHECK (TRUE);
 
 CREATE FUNCTION api.pending_mid_route_stops_v1(p_route_id uuid)
-RETURNS TABLE (stop_id uuid, injected_at timestamptz, position jsonb, reason text)
+RETURNS TABLE (stop_id uuid, injected_at timestamptz, "position" jsonb, reason text)
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path TO pg_catalog, pg_temp
 AS $function$
-  SELECT e.stop_id, e.injected_at, e.position, e.reason
+  SELECT e.stop_id, e.injected_at, e."position", e.reason
     FROM public.mid_route_stop_injections e
     JOIN public.route_runs r ON r.id = e.route_id
     JOIN public.route_stops s ON s.id = e.stop_id AND s.organization_id = r.organization_id

@@ -229,11 +229,7 @@ BEGIN
   END IF;
 END;
 $role$;
-GRANT contactless_pod_intake TO authenticator WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT USAGE ON SCHEMA api TO contactless_pod_intake;
-REVOKE EXECUTE ON FUNCTION api.mint_contactless_pod_token_v1(uuid),
-  api.register_mobile_artifact_v1(jsonb), api.ui_get_shipment_pod_asset_download_v1(uuid, uuid),
-  api.tenant_signup_policy_v1() FROM contactless_pod_intake;
+-- Enable gateway membership and API schema usage together after verifying the effective API allowlist.
 GRANT EXECUTE ON FUNCTION api.begin_contactless_pod_attempt_v1(text) TO contactless_pod_intake;
 GRANT EXECUTE ON FUNCTION api.submit_contactless_pod_v1(text, uuid, text, integer) TO contactless_pod_intake;
 

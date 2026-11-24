@@ -1,7 +1,10 @@
 BEGIN;
 SET LOCAL search_path TO public, extensions, pg_temp;
-SELECT plan(4);
+SELECT plan(5);
 
+SELECT is((SELECT proargnames[2:5] FROM pg_proc WHERE oid = 'api.pending_mid_route_stops_v1(uuid)'::regprocedure),
+  ARRAY['stop_id', 'injected_at', 'position', 'reason']::text[],
+  'mid-route offers retain the position field for existing callers');
 SELECT is((SELECT count(*) FROM api.pending_mid_route_stops_v1(NULL)), 0::bigint,
   'an offer read without an assigned route returns no rows');
 SELECT ok(NOT has_table_privilege('authenticated', 'public.mid_route_stop_injections', 'SELECT'),

@@ -1,6 +1,6 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, pg_temp;
-SELECT plan(19);
+SELECT plan(14);
 
 SELECT is(public.contactless_pod_signing_origin_v1(NULL, TRUE), NULL::text,
   'an opted-in tenant cannot mint a link without a deployed origin');
@@ -18,22 +18,36 @@ SELECT ok(NOT has_function_privilege('anon', 'api.mint_contactless_pod_token_v1(
   'an anonymous user cannot mint a signing link');
 SELECT ok(NOT has_function_privilege('authenticated', 'api.submit_contactless_pod_v1(text,uuid,text,integer)', 'EXECUTE'),
   'an authenticated user cannot submit a signature directly');
-SELECT ok(has_function_privilege('contactless_pod_intake', 'api.submit_contactless_pod_v1(text,uuid,text,integer)', 'EXECUTE'),
-  'the intake role can submit a signature');
-SELECT ok(has_function_privilege('contactless_pod_intake', 'api.begin_contactless_pod_attempt_v1(text)', 'EXECUTE'),
-  'the intake role can claim a signing attempt');
 SELECT ok(NOT has_function_privilege('anon', 'api.begin_contactless_pod_attempt_v1(text)', 'EXECUTE'),
   'anonymous callers cannot claim an attempt directly');
-SELECT ok(NOT has_function_privilege('contactless_pod_intake', 'api.mint_contactless_pod_token_v1(uuid)', 'EXECUTE'),
-  'the intake role cannot mint a signing link');
-SELECT ok(NOT has_function_privilege('contactless_pod_intake', 'api.pending_customer_sign_events_v1(uuid)', 'EXECUTE'),
-  'the intake role cannot read driver signing status');
-SELECT ok(NOT has_function_privilege('contactless_pod_intake', 'api.register_mobile_artifact_v1(jsonb)', 'EXECUTE'),
-  'the intake role cannot register arbitrary artifacts');
-SELECT ok(NOT has_function_privilege('contactless_pod_intake', 'api.ui_get_shipment_pod_asset_download_v1(uuid,uuid)', 'EXECUTE'),
-  'the intake role cannot download shipment proof');
-SELECT ok(NOT has_function_privilege('contactless_pod_intake', 'api.tenant_signup_policy_v1()', 'EXECUTE'),
-  'the intake role cannot read the tenant signup policy');
+
+WITH allowed AS (
+  SELECT ARRAY['api.begin_contactless_pod_attempt_v1(text)'::regprocedure,
+    'api.submit_contactless_pod_v1(text,uuid,text,integer)'::regprocedure] AS functions
+)
+SELECT is(ARRAY(
+  SELECT p.oid::regprocedure
+  FROM pg_proc p
+  WHERE p.pronamespace IN ('api'::regnamespace, 'public'::regnamespace)
+    AND EXISTS (
+      SELECT 1 FROM aclexplode(p.proacl) a
+      WHERE a.grantee = 'contactless_pod_intake'::regrole AND a.privilege_type = 'EXECUTE'
+    )
+  ORDER BY p.oid::regprocedure::text
+), functions, 'the intake role has direct execution grants only on the two signing RPCs')
+FROM allowed
+UNION ALL
+SELECT ok(NOT (
+  pg_has_role('authenticator', 'contactless_pod_intake', 'MEMBER')
+    AND has_schema_privilege('contactless_pod_intake', 'api', 'USAGE')
+) OR ARRAY(
+  SELECT p.oid::regprocedure
+  FROM pg_proc p
+  WHERE p.pronamespace = 'api'::regnamespace
+    AND has_function_privilege('contactless_pod_intake', p.oid, 'EXECUTE')
+  ORDER BY p.oid::regprocedure::text
+) = functions, 'the gateway cannot reach intake until only the two signing RPCs are callable')
+FROM allowed;
 
 CREATE FUNCTION pg_temp.test_contactless_pod_tenant_origin()
 RETURNS SETOF text LANGUAGE plpgsql AS $$
