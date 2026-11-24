@@ -10,6 +10,9 @@ name: Warm CI npm cache
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+
 jobs:
   warm:
     runs-on: ubuntu-24.04
