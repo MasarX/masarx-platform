@@ -13,7 +13,7 @@ const { checkInstallPolicy } = require('./install-policy.cjs');
 const { loadExceptions, assessFile, exceptionEvidence } = require('./pgtap-exceptions.cjs');
 const { prepareImages } = require('./images.cjs');
 const { imageRequest, rewrite } = require('./docker-images.cjs');
-const { captureDatabaseLog, collectStackDiagnostics, belongsToStack, imagePrefix } = require('./stack-diagnostics.cjs');
+const { captureDatabaseLog, collectStackDiagnostics, belongsToStack, imagePrefix, needsHostedDatabaseInit } = require('./stack-diagnostics.cjs');
 const { checkTransport } = require('./docker-selfcheck.cjs');
 const { migrationIssues, invocation, lintResult } = require('./db-lint.cjs');
 const { loadBackendLocalPreSuiteCommands, loadBackendLocalPgtapEnv, writePsqlWrapper } = require('../ops/ci/cloud-pool-db-local.js');
@@ -28,15 +28,23 @@ async function checkDatabaseLog(temp) {
   const jobStartedAt = 1800000000;
   const jobStartedAtMs = jobStartedAt * 1000;
   const shardStartedAt = jobStartedAtMs + 240000;
+  const hostedBuilds = [];
   for (const jobId of ['database-build', 'database-pgtap']) {
     const job = workflow.split(`\n  ${jobId}:\n`)[1]?.split(/\n  \S/)[0] || '';
     const jobTimeoutMinutes = Number(job.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
     assert.equal(pgtapDeadline(shardStartedAt, String(jobStartedAt)), jobStartedAtMs + jobTimeoutMinutes * 60000 - 120000, jobId);
     assert.match(job, /steps:\n      - name: Record database job start\n        run: echo "JOB_STARTED_AT=\$\(date \+%s\)" >> "\$GITHUB_ENV"\n/, jobId);
     assert.match(job, /id: qualification\n +if: steps\.subject\.outputs\.present == 'true'\n +run: node scripts\/ci-hosted\/backend\.cjs\n/, jobId);
+    if (!/^      PGTAP_SHARD:/m.test(job)) hostedBuilds.push(jobId);
     assert.match(job, /- name: Upload Postgres server log\n +if: \$\{\{ !cancelled\(\) && steps\.qualification\.outputs\.postgres_log == 'true' \}\}\n +uses: actions\/upload-artifact@[a-f0-9]{40}/, jobId);
     assert.match(job, /path: ci-reports\/postgres-server\.log\n +if-no-files-found: ignore\n +retention-days: 1\n/, jobId);
   }
+  assert.deepEqual(hostedBuilds, ['database-build']);
+  assert.equal(needsHostedDatabaseInit({
+    GITHUB_ACTIONS: 'true',
+    RUNNER_ENVIRONMENT: 'github-hosted',
+    GITHUB_JOB: hostedBuilds[0],
+  }), true, 'the from-zero workflow job enables database init without a shard');
   assert.equal(pgtapDeadline(shardStartedAt, String(jobStartedAt + 300)), shardStartedAt + 1080000, 'never widen the shard timeout');
   assert.equal(pgtapDeadline(shardStartedAt), shardStartedAt + 1080000, 'local callers keep the shard timeout');
   assert.equal(pgtapDeadline(shardStartedAt, 'invalid'), shardStartedAt + 1080000, 'ignore an invalid job timestamp');

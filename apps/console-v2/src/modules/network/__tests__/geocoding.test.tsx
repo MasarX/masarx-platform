@@ -309,7 +309,9 @@ describe('GeocodingModule (claim H)', () => {
     await waitFor(() => expect(screen.getByText('Policy updates')).toBeInTheDocument());
     expect(document.body).not.toHaveTextContent('MapGeocodingPolicyApplyReadback20260530');
 
+    expect(screen.getByRole('button', { name: /Configure Geocoding/i })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: /Configure Geocoding/i }));
+    expect(await screen.findByRole('dialog', { name: /Configure Geocoding/i })).toBeVisible();
     const form = await screen.findByTestId('change-request-form');
     expect(form).toHaveTextContent('Saves approved categories immediately');
     const textarea = form.querySelector('textarea') as HTMLTextAreaElement | null;
