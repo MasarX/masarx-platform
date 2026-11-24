@@ -30,7 +30,8 @@ for (const budget of budgets) {
     await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
     // Buffered PerformanceObservers, set up before any page script runs.
     await page.addInitScript((floorMs: number) => {
-      const vitals = { lcp: [] as number[], inp: undefined as number | undefined };
+      type InpPart = { event: string; target: string; inputDelay: number; processing: number; presentation: number };
+      const vitals = { lcp: [] as number[], inp: undefined as number | undefined, inpPart: undefined as InpPart | undefined };
       (window as unknown as { __vitals: typeof vitals }).__vitals = vitals;
       new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) vitals.lcp.push(entry.startTime);
@@ -38,7 +39,16 @@ for (const budget of budgets) {
       // INP of one interaction is its longest event duration (Event Timing, interactions only).
       new PerformanceObserver((list) => {
         for (const entry of list.getEntries() as PerformanceEventTiming[]) {
-          if (entry.interactionId) vitals.inp = Math.max(vitals.inp ?? 0, entry.duration);
+          if (!entry.interactionId || entry.duration <= (vitals.inp ?? 0)) continue;
+          vitals.inp = entry.duration;
+          // Where the time goes, so a miss says whether it is script work or rendering.
+          vitals.inpPart = {
+            event: entry.name,
+            target: (entry.target as Element | null)?.tagName ?? "",
+            inputDelay: Math.round(entry.processingStart - entry.startTime),
+            processing: Math.round(entry.processingEnd - entry.processingStart),
+            presentation: Math.round(entry.startTime + entry.duration - entry.processingEnd),
+          };
         }
       }).observe({ type: "event", buffered: true, durationThreshold: floorMs } as PerformanceObserverInit);
     }, EVENT_TIMING_FLOOR_MS);
@@ -49,7 +59,7 @@ for (const budget of budgets) {
         paints: performance.getEntriesByType("paint").map((e) => e.name),
       }));
 
-    const runs: { lcpMs: number; inpMs: number }[] = [];
+    const runs: { lcpMs: number; inpMs: number; inpPart?: unknown }[] = [];
     for (let i = 0; i < RUNS; i += 1) {
       await page.goto(`${budget.route}?motion=off`, { waitUntil: "load" });
       const heading = page.locator("h1").first();
@@ -66,10 +76,10 @@ for (const budget of budgets) {
       const reported = await page
         .waitForFunction(() => (window as any).__vitals.inp !== undefined, null, { timeout: 2000 })
         .then(() => true, () => false);
-      const inpMs = reported
-        ? await page.evaluate(() => (window as any).__vitals.inp as number)
-        : EVENT_TIMING_FLOOR_MS;
-      runs.push({ lcpMs: Math.round(lcpMs), inpMs: Math.round(inpMs) });
+      const inp = reported
+        ? await page.evaluate(() => ({ ms: (window as any).__vitals.inp as number, part: (window as any).__vitals.inpPart }))
+        : { ms: EVENT_TIMING_FLOOR_MS, part: undefined };
+      runs.push({ lcpMs: Math.round(lcpMs), inpMs: Math.round(inp.ms), inpPart: inp.part });
     }
 
     const result = { lcpMs: p75(runs.map((r) => r.lcpMs)), inpMs: p75(runs.map((r) => r.inpMs)) };
@@ -97,6 +107,6 @@ for (const budget of budgets) {
     );
 
     expect(result.lcpMs, `LCP p75 on ${budget.route} (runs ${runs.map((r) => r.lcpMs).join(", ")})`).toBeLessThanOrEqual(limit.lcpMs);
-    expect(result.inpMs, `INP p75 on ${budget.route} (runs ${runs.map((r) => r.inpMs).join(", ")})`).toBeLessThanOrEqual(limit.inpMs);
+    expect(result.inpMs, `INP p75 on ${budget.route} (runs ${JSON.stringify(runs.map((r) => ({ ms: r.inpMs, ...(r.inpPart as object) })))})`).toBeLessThanOrEqual(limit.inpMs);
   });
 }
