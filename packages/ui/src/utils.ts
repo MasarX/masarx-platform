@@ -43,7 +43,7 @@ const TECHNICAL_UI_ERROR_PATTERN = /\b(?:backend|read[-_\s]?back|event[-_\s]?rea
 
 export function formatUiError(error: unknown, fallback: string) {
   const message = sanitizeUiError(getUiErrorMessage(error));
-  if (!message) return fallback;
+  if (!message || isAuthorizationUiError(error)) return fallback;
   if (!TECHNICAL_UI_ERROR_PATTERN.test(message)) return message;
   // Retain blocked-state classification without exposing the diagnostic suffix.
   if (isCapabilityDeniedMessage(message)) {
@@ -75,6 +75,20 @@ export function isCapabilityDeniedMessage(message: string | null): boolean {
     normalized.includes("missing required capability") ||
     normalized.includes("permission denied for capability")
   );
+}
+
+const AUTHORIZATION_UI_ERROR_CODES = new Set(["42501", "PGRST301", "PGRST302"]);
+const AUTHORIZATION_UI_ERROR_PATTERN =
+  /\bpermission denied for (?:table|function|schema|relation|view|sequence|column)\b|\bjwt\b|\bnot authenticated\b/i;
+
+// Database permission or session failures; capability denials keep their own blocked state.
+export function isAuthorizationUiError(error: unknown): boolean {
+  const message = getUiErrorMessage(error);
+  if (isCapabilityDeniedMessage(message)) return false;
+  if (message && AUTHORIZATION_UI_ERROR_PATTERN.test(message)) return true;
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return code != null && AUTHORIZATION_UI_ERROR_CODES.has(String(code).trim().toUpperCase());
 }
 
 function normalizeCapabilityKeyCandidate(value: string | null): string | null {

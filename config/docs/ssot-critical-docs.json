@@ -1,4 +1,9 @@
 {
   "maxAgeDays": 120,
-  "docs": []
+  "docs": [
+    { "path": "AGENTS.md", "checkLinks": true },
+    { "path": "DELIVERY.md", "checkLinks": true },
+    { "path": "DESIGN.md", "checkLinks": true },
+    { "path": "docs/frontend/TESTING.md", "checkLinks": true }
+  ]
 }

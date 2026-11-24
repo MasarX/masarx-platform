@@ -50,7 +50,7 @@ async function main() {
   if (command === 'detect') return detect(subject);
   if (command === 'install') return install(checked);
   if (command === 'lint') {
-    for (const name of ['lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
+    for (const name of ['lint:docs:ssot', 'lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
       npmScript(name);
     }
     if (exists('supabase/migrations')) {
@@ -94,9 +94,10 @@ async function main() {
     npmScript('build', 'apps/console-v2');
     return appSpeed('console-v2');
   }
-  if (command === 'browser-install' || command === 'landing-e2e') {
+  const suites = { 'landing-e2e': 'landing', 'console-a11y': 'console-a11y' };
+  if (command === 'browser-install' || suites[command]) {
     const args = command === 'browser-install' ? ['install', '--with-deps', 'chromium']
-      : ['test', '-c', 'scripts/ci-hosted/playwright.landing.config.cjs'];
+      : ['test', '-c', `scripts/ci-hosted/playwright.${suites[command]}.config.cjs`];
     return run(process.execPath, [require.resolve('@playwright/test/cli'), ...args]);
   }
   if (command === 'visual' || command === 'visual-preflight') {
