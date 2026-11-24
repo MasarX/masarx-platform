@@ -142,12 +142,6 @@ function liveBackendUnavailableError(adapterName: string): Error {
   );
 }
 
-function assertSeedFallbackAllowed(adapterName: string): void {
-  if (!SEED_MODE_ENABLED) {
-    throw liveBackendUnavailableError(adapterName);
-  }
-}
-
 // ----------- Mutable runtime store (in-memory) -----------
 interface EvidenceCallback {
   (entry: Record<string, unknown>): void;
@@ -5977,7 +5971,7 @@ async function liveRpc<T = unknown>(
 ): Promise<{ data: T | null } | null> {
   const target = liveRpcTarget();
   if (!target) {
-    assertSeedFallbackAllowed(`RPC ${rpcName}`);
+    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError(`RPC ${rpcName}`);
     return null;
   }
   const { data, error } = await target.rpc<T>(rpcName, args);
@@ -8015,7 +8009,7 @@ export function streamEvidence(callback: EvidenceCallback): () => void {
     };
   }
 
-  assertSeedFallbackAllowed('streamEvidence');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('streamEvidence');
   state.evidence_subscribers.add(callback);
   // Emit the last few decisions immediately
   ((seed.decision_log as Record<string, unknown>[]) ?? [])
@@ -8112,7 +8106,7 @@ export function resolve_driver_hours_of_service_v1(
     );
     return SEED_MODE_ENABLED ? map[driver_id] ?? null : null;
   }
-  assertSeedFallbackAllowed('RPC resolve_driver_hours_of_service_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC resolve_driver_hours_of_service_v1');
   return map[driver_id] ?? null;
 }
 
@@ -8128,7 +8122,7 @@ export async function read_driver_hours_of_service_v1(
     liveMetadataCache.driverHoursOfService[driver_id] = live;
     return SEED_MODE_ENABLED ? live ?? map[driver_id] ?? null : live;
   }
-  assertSeedFallbackAllowed('RPC resolve_driver_hours_of_service_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC resolve_driver_hours_of_service_v1');
   const value = map[driver_id] ?? null;
   liveMetadataCache.driverHoursOfService[driver_id] = value;
   return value;
@@ -8320,7 +8314,7 @@ export async function transition_task_v1(
     return { ok: true, task: normalizeTaskListRow(task), task_event_id: taskEventId };
   }
 
-  assertSeedFallbackAllowed('transition_task_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('transition_task_v1');
   await sleep(80);
   const tasks = seed.tasks as Array<Record<string, unknown> & { id: string; status: string }>;
   const task = tasks.find((t) => t.id === taskId);
@@ -8387,7 +8381,7 @@ export async function resolve_manual_review_task_v1(
     return row;
   }
 
-  assertSeedFallbackAllowed('resolve_manual_review_task_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resolve_manual_review_task_v1');
   await sleep(60);
   const seedRows = (seed as { manual_review_tasks?: Array<Record<string, unknown> & { id: string }> }).manual_review_tasks ?? [];
   const task = seedRows.find((t) => t.id === taskId);
@@ -8516,7 +8510,7 @@ export async function open_ops_session_v1(args: OpenOpsSessionArgs): Promise<Ope
     };
   }
 
-  assertSeedFallbackAllowed('open_ops_session_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('open_ops_session_v1');
   return {
     ops_session_id: `ops_${sessionType}_${Date.now().toString(36)}`,
     created: true,
@@ -8870,7 +8864,7 @@ export async function ui_create_shipment_v1(
     return result;
   }
 
-  assertSeedFallbackAllowed('ui_create_shipment_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_create_shipment_v1');
   await sleep(120);
   return seedCreateManualShipmentResult(args, dryRun);
 }
@@ -10037,7 +10031,7 @@ export async function ui_update_basket_state_v1(
     return phaseC6Rpc('ui_update_basket_state_v1', args, 'basket');
   }
 
-  assertSeedFallbackAllowed('ui_update_basket_state_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_update_basket_state_v1');
   await sleep(60);
   const basketId = String(args.basket_id ?? args.id ?? '').trim();
   const nextState = String(args.state ?? args.new_state ?? '').trim();
@@ -11925,7 +11919,7 @@ export async function ui_request_warehouse_scan_correction_v1(
     return row;
   }
 
-  assertSeedFallbackAllowed('ui_request_warehouse_scan_correction_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_request_warehouse_scan_correction_v1');
   await sleep(70);
   const taskId = `tsk_scan_corr_${Date.now()}`;
   const scans = seed.warehouse_checkpoint_scans as Array<Record<string, unknown>>;
@@ -12206,7 +12200,7 @@ async function phaseC6Rpc(
     const evidenceKeys = resourceKeyHint ? [`${resourceKeyHint}_id`, 'id'] : [];
     return requireLiveMutationResult(data, rpcName, evidenceKeys);
   }
-  assertSeedFallbackAllowed(`RPC ${rpcName}`);
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError(`RPC ${rpcName}`);
   await sleep(60);
   // Mirror the canonical envelope; surface the inferred resource id when the
   // caller passed one (so optimistic UI can echo it). Unknown ids are minted.
@@ -12225,7 +12219,7 @@ async function phaseC6ApiRpc(
     const evidenceKeys = resourceKeyHint ? [`${resourceKeyHint}_id`, 'id'] : [];
     return requireLiveMutationResult(data, rpcName, evidenceKeys);
   }
-  assertSeedFallbackAllowed(`RPC ${rpcName}`);
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError(`RPC ${rpcName}`);
   await sleep(60);
   const idKey = resourceKeyHint ? `${resourceKeyHint}_id` : null;
   const passedId = idKey ? (args[idKey] as string | undefined) : undefined;
@@ -12690,7 +12684,7 @@ export async function create_warehouse_transfer_manifest_v1(
     };
   }
 
-  assertSeedFallbackAllowed('create_warehouse_transfer_manifest_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('create_warehouse_transfer_manifest_v1');
   await sleep(80);
   const transferCode =
     asNonEmptyString(args.transfer_code) ?? `WTR-${Date.now().toString(36).toUpperCase()}`;
@@ -13815,7 +13809,7 @@ export async function tenant_signup_review_apply_v1(
     };
   }
 
-  assertSeedFallbackAllowed('tenant_signup_review_apply_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('tenant_signup_review_apply_v1');
   await sleep(60);
   return buildEnvelope(buildTenantSignupReviewSeedResult(requestId, decision));
 }
@@ -13890,7 +13884,7 @@ export async function tenant_signup_console_request_v1(
     };
   }
 
-  assertSeedFallbackAllowed('tenant_signup_console_request_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('tenant_signup_console_request_v1');
   await sleep(60);
   const requests = (seed as { tenant_signup_requests?: Array<Record<string, unknown>> }).tenant_signup_requests ?? [];
   const requestId = `tsr_console_${Date.now()}`;
@@ -14075,7 +14069,7 @@ export async function ui_update_organization_profile_v1(
     return { ...result, ...envelope, ok: true, organization_id: returnedOrganizationId, readback };
   }
 
-  assertSeedFallbackAllowed('ui_update_organization_profile_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_update_organization_profile_v1');
   await sleep(60);
   const organizations = (seed as { organizations?: Array<Record<string, unknown>> }).organizations ?? [];
   const target = organizations.find((row) => row.id === organizationId);
@@ -14254,7 +14248,7 @@ export async function tenant_user_invite_v1(
     };
   }
 
-  assertSeedFallbackAllowed('tenant_user_invite_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('tenant_user_invite_v1');
   await sleep(60);
   const users = (seed as { users?: Array<Record<string, unknown>> }).users ?? [];
   const organizationId =
@@ -14731,7 +14725,7 @@ export async function public_tracking_review_request_v1(
       'outcome',
     ]);
   }
-  assertSeedFallbackAllowed('RPC public_tracking_review_request_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC public_tracking_review_request_v1');
   await sleep(60);
   const decision = String(args.decision ?? '').toLowerCase();
   const outcome = decision.startsWith('reject') ? 'rejected' : 'applied';
@@ -14948,28 +14942,28 @@ async function liveFinanceMutationResult(
 export async function apply_settlement_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const live = await liveFinanceMutationResult('apply_settlement_v1', args, ['settlement_batch_id', 'id'], 'settlement_batch');
   if (live) return live;
-  assertSeedFallbackAllowed('RPC apply_settlement_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC apply_settlement_v1');
   await sleep(60);
   return buildMutationFallbackEnvelope(args, 'settlement_batch');
 }
 export async function reject_settlement_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const live = await liveFinanceMutationResult('reject_settlement_v1', args, ['settlement_batch_id', 'id'], 'settlement_batch');
   if (live) return live;
-  assertSeedFallbackAllowed('RPC reject_settlement_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC reject_settlement_v1');
   await sleep(60);
   return buildMutationFallbackEnvelope(args, 'settlement_batch');
 }
 export async function ui_create_settlement_batch_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const live = await liveFinanceMutationResult('ui_create_settlement_batch_v1', args, ['settlement_batch_id', 'id'], 'settlement_batch');
   if (live) return live;
-  assertSeedFallbackAllowed('RPC ui_create_settlement_batch_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_create_settlement_batch_v1');
   await sleep(60);
   return buildMutationFallbackEnvelope(args, 'settlement_batch');
 }
 export async function ui_transition_settlement_batch_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const live = await liveFinanceMutationResult('ui_transition_settlement_batch_v1', args, ['settlement_batch_id', 'id'], 'settlement_batch');
   if (live) return live;
-  assertSeedFallbackAllowed('RPC ui_transition_settlement_batch_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_transition_settlement_batch_v1');
   await sleep(60);
   return buildMutationFallbackEnvelope(args, 'settlement_batch');
 }
@@ -14982,7 +14976,7 @@ export async function ui_record_cod_remittance_v1(args: Record<string, unknown>)
     'settlement_event_id',
   ]);
   if (live) return live;
-  assertSeedFallbackAllowed('RPC ui_record_cod_remittance_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_record_cod_remittance_v1');
   await sleep(60);
   return buildMutationFallbackEnvelope(args, 'finance_event');
 }
@@ -14993,7 +14987,7 @@ export async function ui_adjust_cod_collection_v1(args: Record<string, unknown>)
     'settlement_event_id',
   ]);
   if (live) return live;
-  assertSeedFallbackAllowed('RPC ui_adjust_cod_collection_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_adjust_cod_collection_v1');
   await sleep(60);
   return buildMutationFallbackEnvelope(args, 'finance_event');
 }
@@ -15005,7 +14999,7 @@ export async function ui_reverse_finance_event_v1(args: Record<string, unknown>)
     'id',
   ], 'finance_event');
   if (live) return live;
-  assertSeedFallbackAllowed('RPC ui_reverse_finance_event_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('RPC ui_reverse_finance_event_v1');
   await sleep(60);
   return buildMutationFallbackEnvelope(args, 'finance_event');
 }
@@ -15804,7 +15798,7 @@ export async function marketplace_participant_request_review_apply_v1(
     });
   }
 
-  assertSeedFallbackAllowed('marketplace_participant_request_review_apply_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('marketplace_participant_request_review_apply_v1');
   await sleep(60);
   return buildEnvelope({
     marketplace_participant_request_id: requestId,
@@ -18899,7 +18893,7 @@ export async function ui_request_label_generation_target_v1(
     } as TargetLabelRequestResult;
   }
 
-  assertSeedFallbackAllowed('ui_request_label_generation_target_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_request_label_generation_target_v1');
   await sleep(80);
   return {
     ok: true,
@@ -19006,7 +19000,7 @@ export async function complete_label_job(
     await requireLiveCompleteLabelJobReadback(jobId, result);
     return result as CompleteLabelJobResult;
   }
-  assertSeedFallbackAllowed('complete_label_job');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('complete_label_job');
   await sleep(80);
   return {
     ok: true,
@@ -20564,7 +20558,7 @@ export async function runApiGatewayRequestTest(
   const idempotencyKey = asNonEmptyString(args.idempotency_key) ?? correlationId;
   const client = getSupabaseClient();
   if (!client) {
-    assertSeedFallbackAllowed('edge api-gateway');
+    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('edge api-gateway');
     return buildApiGatewaySyntheticResult(
       {
         ...args,
@@ -20753,7 +20747,7 @@ export async function runWebhookReceiverTest(
   const signature = asNonEmptyString(args.signature);
   const client = getSupabaseClient();
   if (!client) {
-    assertSeedFallbackAllowed('edge webhook-receiver');
+    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('edge webhook-receiver');
     return buildWebhookReceiverSyntheticResult({ ...args, idempotency_key: idempotencyKey }, nextCorrelationId);
   }
 
@@ -21310,7 +21304,7 @@ async function invokeStudioStage<TBody extends Record<string, unknown>, TResult>
 ): Promise<TResult | null> {
   const client = getSupabaseClient();
   if (!client) {
-    assertSeedFallbackAllowed(`edge ${PLUGIN_STUDIO_FN}/${stage}`);
+    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError(`edge ${PLUGIN_STUDIO_FN}/${stage}`);
     return null;
   }
   // Edge fn resolves the endpoint from the URL path. Supabase JS client builds
@@ -21903,7 +21897,7 @@ export async function resource_import_studio_prepare_v1(
     return mergeResourceImportPrepareReadback(data, readback);
   }
 
-  assertSeedFallbackAllowed('resource_import_studio_prepare_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resource_import_studio_prepare_v1');
   await sleep(140);
   let rowCount = 0;
   try {
@@ -21957,7 +21951,7 @@ export async function resource_import_studio_start_v1(
     return data;
   }
 
-  assertSeedFallbackAllowed('resource_import_studio_start_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resource_import_studio_start_v1');
   await sleep(120);
   return {
     ok: true,
@@ -21999,7 +21993,7 @@ export async function resource_import_studio_cancel_v1(
     return data;
   }
 
-  assertSeedFallbackAllowed('resource_import_studio_cancel_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resource_import_studio_cancel_v1');
   await sleep(80);
   const now = new Date().toISOString();
   return {
@@ -22071,7 +22065,7 @@ export async function resolve_resource_download_url_v1(
     };
   }
 
-  assertSeedFallbackAllowed('resolve_resource_download_url_v1');
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resolve_resource_download_url_v1');
   throw new Error('resolve_resource_download_url_v1 requires a live backend download service');
 }
 
