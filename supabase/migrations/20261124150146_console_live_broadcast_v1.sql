@@ -90,6 +90,7 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.console_live_publish_v1() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.console_live_publish_v1() TO service_role;
+GRANT EXECUTE ON FUNCTION public.console_live_publish_v1() TO ui_rpc_executor;
 
 CREATE TRIGGER trg_console_live_shipments
 AFTER INSERT OR UPDATE OR DELETE ON public.shipments
@@ -114,5 +115,56 @@ FOR EACH ROW EXECUTE FUNCTION public.console_live_publish_v1('routes');
 CREATE TRIGGER trg_console_live_location_pings
 AFTER INSERT ON public.location_pings
 FOR EACH ROW EXECUTE FUNCTION public.console_live_publish_v1('routes');
+
+-- Extend the sealed executor receipt with the shared trigger function.
+DO $receipt$
+DECLARE
+  prior_seal TEXT;
+  prior_before JSONB;
+  prior_after JSONB;
+  added JSONB;
+  current_plan JSONB;
+  expected_after JSONB;
+  digest TEXT;
+BEGIN
+  LOCK TABLE public.marketplace_review_readback_state_v1 IN EXCLUSIVE MODE;
+  IF (SELECT relowner FROM pg_class WHERE oid = 'public.marketplace_review_readback_state_v1'::regclass)
+      IS DISTINCT FROM current_user::regrole::oid THEN
+    RAISE EXCEPTION 'Console live receipt requires the existing receipt owner' USING ERRCODE = '42501';
+  END IF;
+  prior_seal := obj_description('public.marketplace_review_readback_state_v1'::regclass, 'pg_class');
+  SELECT encode(pg_catalog.sha256(convert_to(jsonb_object_agg(key, value ORDER BY key)::text, 'UTF8')), 'hex')
+    INTO digest FROM public.marketplace_review_readback_state_v1;
+  IF prior_seal IS DISTINCT FROM 'marketplace_review_readback_state_v1:sha256:' || digest THEN
+    RAISE EXCEPTION 'Marketplace predecessor receipt integrity mismatch';
+  END IF;
+
+  SELECT value INTO STRICT prior_before FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_before';
+  SELECT value INTO STRICT prior_after FROM public.marketplace_review_readback_state_v1 WHERE key = 'plan_after';
+  added := jsonb_build_array(jsonb_build_object('object_kind', 'function',
+    'object_id', 'public.console_live_publish_v1()'::regprocedure::oid,
+    'privilege', 'EXECUTE', 'column_name', NULL));
+  SELECT jsonb_agg(to_jsonb(p) ORDER BY object_kind, object_id, privilege, column_name) INTO current_plan
+  FROM public.ui_rpc_executor_privilege_plan_v1() p;
+  SELECT jsonb_agg(entry ORDER BY entry->>'object_kind', (entry->>'object_id')::oid,
+    entry->>'privilege', entry->>'column_name') INTO expected_after
+  FROM jsonb_array_elements(prior_after || added) entry;
+  IF current_plan IS DISTINCT FROM expected_after THEN
+    RAISE EXCEPTION 'Unexpected executor plan delta for Console live broadcasts';
+  END IF;
+
+  INSERT INTO public.marketplace_review_readback_state_v1(key, value) VALUES ('console_live_broadcast_extension_v1',
+    jsonb_build_object('predecessor_seal', prior_seal, 'plan_before', prior_before, 'plan_after', prior_after, 'added', added));
+  -- Both snapshots need the shared function to preserve the marketplace-only delta.
+  UPDATE public.marketplace_review_readback_state_v1 SET value = (
+    SELECT jsonb_agg(entry ORDER BY entry->>'object_kind', (entry->>'object_id')::oid,
+      entry->>'privilege', entry->>'column_name') FROM jsonb_array_elements(value || added) entry
+  ) WHERE key IN ('plan_before', 'plan_after');
+  SELECT encode(pg_catalog.sha256(convert_to(jsonb_object_agg(key, value ORDER BY key)::text, 'UTF8')), 'hex')
+    INTO digest FROM public.marketplace_review_readback_state_v1;
+  EXECUTE format('COMMENT ON TABLE public.marketplace_review_readback_state_v1 IS %L',
+    'marketplace_review_readback_state_v1:sha256:' || digest);
+END;
+$receipt$;
 
 COMMIT;

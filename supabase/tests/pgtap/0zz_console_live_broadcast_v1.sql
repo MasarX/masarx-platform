@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(16);
+SELECT plan(17);
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'realtime.messages'::regclass),
   'Realtime uses row-level security');
@@ -79,7 +79,8 @@ BEGIN
   PERFORM set_config('realtime.topic', v_routes, true);
   RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_routes), 1,
     'a tenant-wide operator can receive route changes');
-  RETURN NEXT throws_ok(v_publish_routes, '42501', NULL,
+  RETURN NEXT throws_ok(v_publish_routes, '42501',
+    'new row violates row-level security policy for table "messages"',
     'an authenticated tenant member cannot publish Console invalidations');
   PERFORM set_config('realtime.topic', v_shipments, true);
   RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_shipments), 1,
@@ -92,6 +93,9 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', v_other_actor::text, true);
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_other_actor, 'role', 'authenticated')::text, true);
   SET LOCAL ROLE authenticated;
+  PERFORM set_config('realtime.topic', v_shipments, true);
+  RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_shipments), 0,
+    'second tenant cannot receive shipment changes from the first tenant');
   PERFORM set_config('realtime.topic', v_routes, true);
   RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_routes), 0,
     'second tenant receives nothing from the first tenant');
@@ -132,7 +136,8 @@ BEGIN
   PERFORM set_config('realtime.topic', v_routes, true);
   RETURN NEXT is((SELECT count(*)::int FROM realtime.messages WHERE topic = v_routes), 0,
     'an anonymous actor receives no tenant invalidations');
-  RETURN NEXT throws_ok(v_publish_routes, '42501', NULL,
+  RETURN NEXT throws_ok(v_publish_routes, '42501',
+    'new row violates row-level security policy for table "messages"',
     'an anonymous actor cannot publish Console invalidations');
   RESET ROLE;
 END;
