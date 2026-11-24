@@ -23,9 +23,9 @@ function readBlock(css, selector) {
   return vars;
 }
 
-// Each theme is the cascade of its selectors, later blocks winning.
+// Each theme is the cascade of its selectors, later blocks winning. `file` may list several files in import order.
 function loadTheme(file, selectors) {
-  const css = fs.readFileSync(path.join(ROOT, file), 'utf8');
+  const css = [].concat(file).map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
   return Object.assign({}, ...selectors.map((s) => readBlock(css, s)));
 }
 
@@ -88,7 +88,7 @@ const TAG_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purpl
 const SURFACES = [
   {
     name: 'shared UI',
-    file: 'packages/ui/src/styles.css',
+    file: ['packages/ui/src/tokens.css', 'packages/ui/src/styles.css'],
     themes: { light: [':root'], dark: [':root', ':root[data-theme="dark"]'] },
     pairs: [
       ['--ui-ink', ['--ui-surface'], TEXT, 'body text'],
@@ -162,5 +162,16 @@ describe('design token contrast (WCAG 2.2 AA)', () => {
 
   test.each(cases.map((c) => [c.label, c]))('%s', (_label, { ratio, min }) => {
     expect(ratio).toBeGreaterThanOrEqual(min);
+  });
+
+  // #443: the Console V2 label designer must read the shared --ui-* tokens checked above, not a stale copy.
+  test('the label designer studio imports the shared tokens and redeclares none', () => {
+    const file = 'apps/console-v2/src/styles/label-designer-shared.css';
+    const css = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    const imports = [...css.matchAll(/@import\s+['"]([^'"]+)['"]/g)].map((m) =>
+      path.relative(ROOT, path.resolve(path.dirname(path.join(ROOT, file)), m[1])).split(path.sep).join('/')
+    );
+    expect(imports).toContain('packages/ui/src/tokens.css');
+    expect(css.match(/--ui-[\w-]+\s*:/g)).toBeNull();
   });
 });

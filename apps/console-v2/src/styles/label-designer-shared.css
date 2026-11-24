@@ -1,36 +1,6 @@
+/* The studio reads the shared --ui-* tokens; never redeclare them here (#443). */
+@import '../../../../packages/ui/src/tokens.css';
 @tailwind utilities;
-
-.label-designer-studio {
-  --ui-paper: 250 251 254;
-  --ui-surface: 255 255 255;
-  --ui-highlight: 242 245 248;
-  --ui-ink: 30 38 50;
-  --ui-muted: 82 94 111;
-  --ui-border: 213 219 228;
-  --ui-accent: 20 120 90;
-  --ui-accent-hover: 16 96 72;
-  --ui-accent-ink: 255 255 255;
-  --ui-accent-soft: 224 244 237;
-  --ui-success: 34 139 89;
-  --ui-warning: 194 120 0;
-  --ui-danger: 204 43 43;
-}
-
-:root[data-theme="dark"] .label-designer-studio {
-  --ui-paper: 24 30 39;
-  --ui-surface: 30 37 48;
-  --ui-highlight: 42 51 65;
-  --ui-ink: 233 238 245;
-  --ui-muted: 164 174 188;
-  --ui-border: 68 78 94;
-  --ui-accent: 54 158 107;
-  --ui-accent-hover: 72 178 126;
-  --ui-accent-ink: 8 18 14;
-  --ui-accent-soft: 24 64 50;
-  --ui-success: 54 158 107;
-  --ui-warning: 221 139 76;
-  --ui-danger: 231 78 78;
-}
 
 .label-designer-studio [data-testid$="-canvas-viewport"] {
   min-height: 520px;
