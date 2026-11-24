@@ -22,6 +22,16 @@ interface I18nCtx {
 }
 
 const CATALOGS: Record<Locale, Catalog> = { en: en as Catalog, ar: ar as Catalog };
+
+// The console has no session-wide tenant display zone, so dates show in the
+// user's own zone. This is the single place to change that default.
+export const DISPLAY_TIME_ZONE = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// The user's preferred regional variant of the active language (en-GB, ar-EG),
+// else the bare language tag.
+export function resolveIntlLocale(locale: Locale, preferred: readonly string[] = navigator.languages ?? []): string {
+  return preferred.find((tag) => tag.toLowerCase().split('-')[0] === locale) ?? locale;
+}
 const Ctx = createContext<I18nCtx | null>(null);
 
 function lookup(catalog: Catalog, path: string): string | undefined {
@@ -40,6 +50,7 @@ function lookup(catalog: Catalog, path: string): string | undefined {
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(() => (localStorage.getItem('console-v2.locale') as Locale) || 'en');
   const dir = locale === 'ar' ? 'rtl' : 'ltr';
+  const intlLocale = useMemo(() => resolveIntlLocale(locale), [locale]);
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -61,11 +72,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     (iso: string | number | Date) => {
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) return '—';
-      return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-SA' : 'en-US', {
+      return new Intl.DateTimeFormat(intlLocale, {
         month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+        timeZone: DISPLAY_TIME_ZONE,
       }).format(d);
     },
-    [locale]
+    [intlLocale]
   );
   const fmtCurrency = useCallback(
     (amount: number, currency?: string) => {
@@ -78,23 +90,23 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       // without an ISO suffix — visible to operators as a bare value
       // rather than a silent locale default.
       if (!currency) {
-        return new Intl.NumberFormat(locale === 'ar' ? 'ar-SA' : 'en-US', {
+        return new Intl.NumberFormat(intlLocale, {
           minimumFractionDigits: fractionDigits,
           maximumFractionDigits: fractionDigits,
         }).format(numericAmount);
       }
-      return new Intl.NumberFormat(locale === 'ar' ? 'ar-SA' : 'en-US', {
+      return new Intl.NumberFormat(intlLocale, {
         style: 'currency',
         currency,
         minimumFractionDigits: fractionDigits,
         maximumFractionDigits: fractionDigits,
       }).format(numericAmount);
     },
-    [locale]
+    [intlLocale]
   );
   const fmtNumber = useCallback(
-    (n: number, opts?: Intl.NumberFormatOptions) => new Intl.NumberFormat(locale === 'ar' ? 'ar-SA' : 'en-US', opts).format(n),
-    [locale]
+    (n: number, opts?: Intl.NumberFormatOptions) => new Intl.NumberFormat(intlLocale, opts).format(n),
+    [intlLocale]
   );
 
   const value = useMemo<I18nCtx>(

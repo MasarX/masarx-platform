@@ -46,7 +46,11 @@
 
   const query = new URLSearchParams(window.location.search);
   const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const prefersDarkTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  // Same key and values as packages/ui/src/theme.tsx: "light" or "dark" is an
+  // explicit choice; no stored value means follow the OS (system mode).
+  const THEME_STORAGE_KEY = 'masarx-ui-theme';
+  const LEGACY_THEME_STORAGE_KEY = 'masarx_theme';
+  const colorSchemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
   const knownMotions = new Set(['on', 'off']);
   const knownThemes = new Set(['light', 'dark']);
   const knownLangs = new Set(['en', 'ar']);
@@ -484,10 +488,20 @@
     } catch { /* Storage can be unavailable; keep the current in-memory state. */ }
   }
 
-  function setTheme(theme) {
-    const next = knownThemes.has(theme) ? theme : (prefersDarkTheme ? 'dark' : 'light');
+  let themeMode = 'system';
+
+  function resolveSystemTheme() {
+    return colorSchemeQuery && colorSchemeQuery.matches ? 'dark' : 'light';
+  }
+
+  function setTheme(mode) {
+    themeMode = knownThemes.has(mode) ? mode : 'system';
+    writeStorageValue('localStorage', THEME_STORAGE_KEY, themeMode === 'system' ? '' : themeMode);
+    applyTheme(themeMode === 'system' ? resolveSystemTheme() : themeMode);
+  }
+
+  function applyTheme(next) {
     root.dataset.theme = next;
-    writeStorageValue('localStorage', 'masarx_theme', next);
 
     const lang = root.lang || 'en';
     if (themeToggle) {
@@ -2825,11 +2839,18 @@
     || root.dataset.motion
     || (prefersReducedMotion ? 'off' : 'on');
 
-  const initialTheme =
-    (query.get('theme') && knownThemes.has(query.get('theme')) && query.get('theme'))
-    || readStorageValue('localStorage', 'masarx_theme')
-    || root.dataset.theme
-    || (prefersDarkTheme ? 'dark' : 'light');
+  function readInitialTheme() {
+    const fromQuery = query.get('theme');
+    if (knownThemes.has(fromQuery)) return fromQuery;
+    const stored = readStorageValue('localStorage', THEME_STORAGE_KEY);
+    if (knownThemes.has(stored)) return stored;
+    // Move a choice saved under the old landing key once, then drop that key.
+    const legacy = readStorageValue('localStorage', LEGACY_THEME_STORAGE_KEY);
+    if (legacy) writeStorageValue('localStorage', LEGACY_THEME_STORAGE_KEY, '');
+    return knownThemes.has(legacy) ? legacy : 'system';
+  }
+
+  const initialTheme = readInitialTheme();
 
   const initialLang =
     pathLang
@@ -2837,6 +2858,13 @@
     || 'en';
 
   setTheme(initialTheme);
+  if (colorSchemeQuery) {
+    const onColorSchemeChange = () => {
+      if (themeMode === 'system') applyTheme(resolveSystemTheme());
+    };
+    if (colorSchemeQuery.addEventListener) colorSchemeQuery.addEventListener('change', onColorSchemeChange);
+    else if (colorSchemeQuery.addListener) colorSchemeQuery.addListener(onColorSchemeChange);
+  }
   setMotion(initialMotion);
   setLang(initialLang);
 

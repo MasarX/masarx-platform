@@ -107,10 +107,10 @@
 }
 .kpi {
   padding: 10px 14px;
-  border-right: 1px solid var(--line);
+  border-inline-end: 1px solid var(--line);
   position: relative;
 }
-.kpi:last-child { border-right: none; }
+.kpi:last-child { border-inline-end: none; }
 .kpi__label {
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -575,7 +575,7 @@
   background: var(--accent-soft);
 }
 .dt__table tbody tr.is-risk td:first-child {
-  border-left: 2px solid var(--danger);
+  border-inline-start: 2px solid var(--danger);
 }
 .dt__table .cell-id {
   font-family: var(--font-mono);
@@ -867,12 +867,12 @@
 .drawer {
   position: absolute;
   top: 0;
-  right: 0;
+  inset-inline-end: 0;
   bottom: 0;
   width: 480px;
   max-width: 92vw;
   background: var(--paper);
-  border-left: 1px solid var(--line);
+  border-inline-start: 1px solid var(--line);
   box-shadow: var(--shadow-pop);
   transform: translateX(100%);
   transition: transform var(--dur-drawer) var(--ease-out);
@@ -1080,7 +1080,7 @@
 .toast-root {
   position: fixed;
   bottom: calc(var(--evidence-h) + 12px);
-  right: 16px;
+  inset-inline-end: 16px;
   z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
