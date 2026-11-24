@@ -1,12 +1,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 import { readSpeedBudgets } from "../../scripts/frontend/design-speed-budgets.cjs";
 
 // LCP and INP at p75 for the DESIGN.md speed rows that name this spec (#301).
 // Budgets and tolerance come from the table; each screen's runs are written as evidence JSON.
 const RUNS = 5;
-const VITALS_SCRIPT = join(dirname(require.resolve("web-vitals")), "web-vitals.iife.js");
 const EVIDENCE_DIR = process.env.SPEED_EVIDENCE_DIR || join("test-results", "speed-evidence");
 // Event Timing does not report interactions under 16 ms, so such a run counts at that floor.
 const EVENT_TIMING_FLOOR_MS = 16;
@@ -29,19 +28,26 @@ for (const budget of budgets) {
     // Every run is a cold load: no HTTP or memory cache between runs.
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
-    await page.addInitScript({ path: VITALS_SCRIPT });
-    await page.addInitScript(() => {
-      const w = window as unknown as {
-        __vitals: Record<string, number>;
-        webVitals: { onLCP: Function; onINP: Function };
-      };
-      w.__vitals = {};
-      const keep = (metric: { name: string; value: number }) => {
-        w.__vitals[metric.name] = metric.value;
-      };
-      w.webVitals.onLCP(keep, { reportAllChanges: true });
-      w.webVitals.onINP(keep, { reportAllChanges: true, durationThreshold: 16 });
-    });
+    // Buffered PerformanceObservers, set up before any page script runs.
+    await page.addInitScript((floorMs: number) => {
+      const vitals = { lcp: [] as number[], inp: undefined as number | undefined };
+      (window as unknown as { __vitals: typeof vitals }).__vitals = vitals;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) vitals.lcp.push(entry.startTime);
+      }).observe({ type: "largest-contentful-paint", buffered: true });
+      // INP of one interaction is its longest event duration (Event Timing, interactions only).
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries() as PerformanceEventTiming[]) {
+          if (entry.interactionId) vitals.inp = Math.max(vitals.inp ?? 0, entry.duration);
+        }
+      }).observe({ type: "event", buffered: true, durationThreshold: floorMs } as PerformanceObserverInit);
+    }, EVENT_TIMING_FLOOR_MS);
+    const diagnostics = () =>
+      page.evaluate(() => ({
+        visibility: document.visibilityState,
+        supported: PerformanceObserver.supportedEntryTypes,
+        paints: performance.getEntriesByType("paint").map((e) => e.name),
+      }));
 
     const runs: { lcpMs: number; inpMs: number }[] = [];
     for (let i = 0; i < RUNS; i += 1) {
@@ -49,16 +55,19 @@ for (const budget of budgets) {
       const heading = page.locator("h1").first();
       await expect(heading).toBeVisible();
       // LCP stops at the first input, so read it before the journey's interactions.
-      await page.waitForFunction(() => (window as any).__vitals.LCP !== undefined);
-      const lcpMs = await page.evaluate(() => (window as any).__vitals.LCP as number);
+      const lcpSeen = await page
+        .waitForFunction(() => (window as any).__vitals.lcp.length > 0, null, { timeout: 15000 })
+        .then(() => true, () => false);
+      expect(lcpSeen, `no LCP entry on ${budget.route} run ${i + 1}: ${JSON.stringify(await diagnostics())}`).toBe(true);
+      const lcpMs = await page.evaluate(() => (window as any).__vitals.lcp.at(-1) as number);
 
       await page.keyboard.press("Tab");
       await heading.click();
       const reported = await page
-        .waitForFunction(() => (window as any).__vitals.INP !== undefined, null, { timeout: 2000 })
+        .waitForFunction(() => (window as any).__vitals.inp !== undefined, null, { timeout: 2000 })
         .then(() => true, () => false);
       const inpMs = reported
-        ? await page.evaluate(() => (window as any).__vitals.INP as number)
+        ? await page.evaluate(() => (window as any).__vitals.inp as number)
         : EVENT_TIMING_FLOOR_MS;
       runs.push({ lcpMs: Math.round(lcpMs), inpMs: Math.round(inpMs) });
     }
