@@ -6,6 +6,7 @@ import {
   type BranchMutationResult,
   type BranchZoneMutationResult,
   buildEnvelope,
+  buildMutationFallbackEnvelope,
   liveBackendUnavailableError,
   livePArgsMutationResult,
   liveRpc,
@@ -656,3 +657,214 @@ export async function branch_coverage_window_upsert_v1(
     already_processed: false,
   }) as BranchCoverageWindowMutationResult;
 }
+
+// NETWORK/marketplace
+//
+// Marketplace RPCs predate the shared Phase C6 `(p_args jsonb)` contract and
+// expose named Postgres parameters through the api schema. Keep the mapping
+// here explicit so live Console V2 calls exercise the real RPC signatures.
+async function marketplaceNamedRpc(
+  rpcName: string,
+  rpcArgs: Record<string, unknown>,
+  fallbackArgs: Record<string, unknown>,
+  resourceKeyHint?: string,
+): Promise<Record<string, unknown>> {
+  const live = await liveRpc<Record<string, unknown>>(rpcName, rpcArgs);
+  if (live) {
+    const evidenceKeys = resourceKeyHint ? [`${resourceKeyHint}_id`, 'id', 'refreshed_count'] : ['refreshed_count'];
+    const rec = requireLiveMutationResult(
+      live.data,
+      rpcName,
+      evidenceKeys,
+    );
+    requireLiveDomainEvidence(rec, rpcName, evidenceKeys, resourceKeyHint ?? 'marketplace mutation');
+    return rec;
+  }
+  await sleep(60);
+  return buildMutationFallbackEnvelope(fallbackArgs, resourceKeyHint);
+}
+
+function metadataWithReason(args: Record<string, unknown>): Record<string, unknown> {
+  const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
+    ? { ...(args.metadata as Record<string, unknown>) }
+    : {};
+  const reason = asNonEmptyString(args.reason);
+  if (reason && metadata.reason === undefined) metadata.reason = reason;
+  return metadata;
+}
+
+function normalizeMarketplaceAwardDecision(args: Record<string, unknown>): string | null {
+  const raw = asNonEmptyString(args.decision) ?? asNonEmptyString(args.response);
+  const value = raw?.toLowerCase();
+  if (!value) return null;
+  if (value === 'accept' || value === 'accepted' || value === 'approve' || value === 'approved') {
+    return 'approve';
+  }
+  if (
+    value === 'reject' ||
+    value === 'rejected' ||
+    value === 'cancel' ||
+    value === 'cancelled' ||
+    value === 'canceled'
+  ) {
+    return 'reject';
+  }
+  return value;
+}
+
+export const marketplace_offer_submit_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_offer_submit_v1',
+    {
+      p_request_id: args.request_id,
+      p_message: asNonEmptyString(args.message) ?? null,
+      p_terms: args.terms ?? {},
+      p_pricing: args.pricing ?? {},
+      p_expires_at: args.expires_at ?? null,
+      p_metadata: args.metadata ?? {},
+    },
+    args,
+    'marketplace_offer',
+  );
+
+export const marketplace_offer_withdraw_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_offer_withdraw_v1',
+    {
+      p_offer_id: args.offer_id,
+      p_reason: asNonEmptyString(args.reason) ?? null,
+    },
+    args,
+    'marketplace_offer',
+  );
+
+export const marketplace_award_offer_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_award_offer_v1',
+    {
+      p_offer_id: args.offer_id,
+      p_award_reason: asNonEmptyString(args.award_reason) ?? asNonEmptyString(args.reason) ?? null,
+      p_award_terms: args.award_terms ?? {},
+      p_expires_at: args.expires_at ?? null,
+      p_metadata: args.metadata ?? {},
+    },
+    args,
+    'marketplace_award',
+  );
+
+export const marketplace_award_respond_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_award_respond_v1',
+    {
+      p_award_id: args.award_id,
+      p_decision: normalizeMarketplaceAwardDecision(args),
+      p_metadata: metadataWithReason(args),
+    },
+    args,
+    'marketplace_award',
+  );
+
+export const marketplace_request_create_v1 = (args: Record<string, unknown>) => {
+  const details = args.request_details && typeof args.request_details === 'object'
+    ? (args.request_details as Record<string, unknown>)
+    : {};
+  const title =
+    asNonEmptyString(args.title) ??
+    asNonEmptyString(details.title) ??
+    asNonEmptyString(details.lane) ??
+    asNonEmptyString(args.request_kind_key) ??
+    asNonEmptyString(args.request_kind) ??
+    'Marketplace request';
+  return marketplaceNamedRpc(
+    'marketplace_request_create_v1',
+    {
+      p_request_kind_key: args.request_kind_key ?? args.request_kind,
+      p_title: title,
+      p_summary: asNonEmptyString(args.summary) ?? null,
+      p_request_details: args.request_details ?? {},
+      p_items: args.items ?? args.request_items ?? [],
+      p_private_pool: args.private_pool ?? [],
+      p_expires_at: args.expires_at ?? null,
+      p_metadata: args.metadata ?? {},
+    },
+    args,
+    'marketplace_request',
+  );
+};
+
+export const marketplace_request_publish_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_request_publish_v1',
+    {
+      p_request_id: args.request_id,
+      p_release_state: asNonEmptyString(args.release_state) ?? null,
+    },
+    args,
+    'marketplace_request',
+  );
+
+export const marketplace_request_cancel_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_request_cancel_v1',
+    {
+      p_request_id: args.request_id,
+      p_reason: asNonEmptyString(args.reason) ?? null,
+    },
+    args,
+    'marketplace_request',
+  );
+
+export const marketplace_dispute_open_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_dispute_open_v1',
+    {
+      p_contract_id: args.contract_id ?? null,
+      p_work_package_id: args.work_package_id ?? null,
+      p_title: asNonEmptyString(args.title) ?? null,
+      p_description: asNonEmptyString(args.description) ?? null,
+      p_category: asNonEmptyString(args.category) ?? 'general',
+      p_metadata: {
+        ...metadataWithReason(args),
+        ...(args.request_id ? { request_id: args.request_id } : {}),
+      },
+    },
+    args,
+    'marketplace_dispute',
+  );
+
+export const marketplace_dispute_resolve_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_dispute_resolve_v1',
+    {
+      p_dispute_id: args.dispute_id,
+      p_resolution: args.resolution,
+      p_status: asNonEmptyString(args.status) ?? 'resolved',
+      p_metadata: args.metadata ?? {},
+    },
+    args,
+    'marketplace_dispute',
+  );
+
+export const marketplace_work_package_materialize_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_work_package_materialize_v1',
+    {
+      p_work_package_id: args.work_package_id ?? null,
+      p_award_id: args.award_id ?? null,
+      p_execution_ref: args.execution_ref ?? {},
+      p_summary: args.summary ?? {},
+      p_metadata: args.metadata ?? {},
+    },
+    args,
+    'marketplace_work_package',
+  );
+
+export const marketplace_refresh_reputation_snapshot_v1 = (args: Record<string, unknown>) =>
+  marketplaceNamedRpc(
+    'marketplace_refresh_reputation_snapshots_for_visible_v1',
+    {
+      p_participant_profile_id: args.participant_profile_id ?? null,
+    },
+    args,
+    'marketplace_reputation_snapshot',
+  );

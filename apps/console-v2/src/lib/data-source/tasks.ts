@@ -1,5 +1,6 @@
 import {
   type AssignTaskArgs,
+  type BulkTransitionTasksArgs,
   compactRecord,
   finalizeRouteStopCloseoutEvent,
   firstRpcRow,
@@ -10,6 +11,7 @@ import {
   objectRecord,
   type OpenOpsSessionArgs,
   type OpenOpsSessionResult,
+  phaseC6Rpc,
   requireLiveMutationResult,
   requireLiveResourceListReadback,
   requireLiveResourceReadback,
@@ -320,3 +322,59 @@ export async function open_ops_session_v1(args: OpenOpsSessionArgs): Promise<Ope
     created: true,
   };
 }
+
+async function requireLiveBulkTaskTransitionReadback(
+  result: Record<string, unknown>,
+  args: BulkTransitionTasksArgs,
+): Promise<void> {
+  const expectedPayload = args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload)
+    ? args.payload
+    : null;
+  const outcomes = Array.isArray(result.outcomes)
+    ? result.outcomes.filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+    : [];
+  const taskIdsFromArgs = Array.isArray(args.task_ids)
+    ? args.task_ids.map((id) => asNonEmptyString(id)).filter((id): id is string => !!id)
+    : [];
+  const successful = outcomes
+    .filter((row) => row.ok !== false)
+    .map((row) => ({
+      taskId: asNonEmptyString(row.task_id) ?? asNonEmptyString(row.id),
+      taskEventId: asNonEmptyString(row.task_event_id),
+    }))
+    .filter((row): row is { taskId: string; taskEventId: string | null } => !!row.taskId);
+
+  const tasksToVerify = successful.length > 0
+    ? successful
+    : taskIdsFromArgs.map((taskId) => ({ taskId, taskEventId: null }));
+
+  if (tasksToVerify.length === 0) {
+    throw new Error('bulk_transition_tasks_v1 did not return backend task transition evidence');
+  }
+
+  await Promise.all(tasksToVerify.map(async ({ taskId, taskEventId }) => {
+    await requireLiveResourceReadback('tasks', taskId, 'bulk_transition_tasks_v1');
+    const taskEvents = taskEventId
+      ? [await requireLiveResourceReadback('task_events', taskEventId, 'bulk_transition_tasks_v1')]
+      : await requireLiveResourceListReadback('task_events', { task_id: taskId }, 'bulk_transition_tasks_v1');
+    if (expectedPayload && Object.keys(expectedPayload).length > 0) {
+      const event = taskEvents.find((row) => String(row.task_id ?? '') === taskId) ?? taskEvents[0];
+      const eventPayload = event && typeof event.payload === 'object' && !Array.isArray(event.payload)
+        ? event.payload as Record<string, unknown>
+        : {};
+      for (const [key, value] of Object.entries(expectedPayload)) {
+        if (JSON.stringify(eventPayload[key] ?? null) !== JSON.stringify(value ?? null)) {
+          throw new Error(`bulk_transition_tasks_v1 backend task_event payload mismatch for ${taskId}:${key}`);
+        }
+      }
+    }
+  }));
+}
+
+export const bulk_transition_tasks_v1 = async (args: BulkTransitionTasksArgs) => {
+  const result = await phaseC6Rpc('bulk_transition_tasks_v1', args);
+  if (liveRpcTarget()) {
+    await requireLiveBulkTaskTransitionReadback(result, args);
+  }
+  return result;
+};

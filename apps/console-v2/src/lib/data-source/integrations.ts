@@ -1,22 +1,39 @@
 import {
+  type AdjustApiGatewayRateLimitArgs,
+  type ArchiveWebhookSourceArgs,
   backendOutcomeError,
   type BindProviderAccountCredentialArgs,
+  type BlockApiGatewaySourceArgs,
   buildMutationFallbackEnvelope,
   type IntegrationPluginExportHandoffArgs,
+  type IntegrationPluginGenerateDraftArgs,
   livePArgsMutationResult,
   liveRpc,
+  liveRpcTarget,
   nextResourceId,
   objectRecord,
+  phaseC6Rpc,
+  type PluginActivateArgs,
+  type PluginApproveArgs,
+  type PluginSetBindingArgs,
+  type PluginSubmitArgs,
   readLiveResourceListReadback,
   requireLiveEvidence,
   requireLiveResourceListReadback,
   requireLiveResourceReadback,
   requireLiveRpcRecord,
+  requireLiveStringField,
   resolveSettings,
   sleep,
   ui_list_resource_v1,
   type UnbindProviderAccountCredentialArgs,
   type UpsertApiGatewayRouteMappingArgs,
+  type UpsertMappingArtifactArgs,
+  type UpsertProviderAuthConfigArgs,
+  type UpsertWebhookSourceArgs,
+  type WebhookInboxForceStatusArgs,
+  type WebhookInboxReplayArgs,
+  type WebhookInboxRetryAsNewIntakeArgs,
 } from '../data-source';
 import {
   assertLogisticsCustomerMigrationConfigEvidence,
@@ -28,11 +45,7 @@ import {
   type LogisticsCustomerMigrationConfigResult,
   type LogisticsCustomerMigrationResult,
 } from './customer-logistics-migration';
-import {
-  asNonEmptyString,
-  booleanReadback,
-  type ResourceRow,
-} from './shared';
+import { asNonEmptyString, booleanReadback, type ResourceRow } from './shared';
 
 export async function ui_delete_mapping_config_v1(
   args: { mapping_config_id: string },
@@ -772,3 +785,373 @@ export function requireWebhookSourceArchiveReadback(
     }
   }
 }
+
+function resolveApiGatewaySourceId(
+  result: Record<string, unknown>,
+  args: Record<string, unknown>,
+  rpcName: string,
+): string {
+  return requireLiveStringField(
+    { ...args, ...result },
+    ['source_id', 'webhook_source_id', 'id'],
+    `${rpcName} did not return source_id`,
+  );
+}
+
+function requireApiGatewayBooleanReadback(
+  row: Record<string, unknown>,
+  field: string,
+  expected: boolean,
+  rpcName: string,
+  projection: string,
+): void {
+  const actual = booleanReadback(row[field]);
+  if (actual !== expected) {
+    throw new Error(`${rpcName} backend readback did not reflect ${projection}.${field}`);
+  }
+}
+
+function requireApiGatewayNumberReadback(
+  row: Record<string, unknown>,
+  field: string,
+  expected: number,
+  rpcName: string,
+  projection: string,
+): void {
+  const actual = Number(row[field]);
+  if (!Number.isFinite(actual) || actual !== expected) {
+    throw new Error(`${rpcName} backend readback did not reflect ${projection}.${field}`);
+  }
+}
+
+async function requireApiGatewaySourceReadback(
+  rpcName: string,
+  sourceId: string,
+  expected: { enabled?: boolean; rateLimitPerHour?: number },
+): Promise<void> {
+  const source = await requireLiveResourceReadback('webhook_sources', sourceId, rpcName);
+  if (expected.enabled !== undefined) {
+    requireApiGatewayBooleanReadback(source, 'enabled', expected.enabled, rpcName, 'webhook_sources');
+  }
+  if (expected.rateLimitPerHour !== undefined) {
+    requireApiGatewayNumberReadback(
+      source,
+      'rate_limit_per_hour',
+      expected.rateLimitPerHour,
+      rpcName,
+      'webhook_sources',
+    );
+  }
+
+  const directoryRows = await requireLiveResourceListReadback(
+    'webhook_source_directory',
+    { id: sourceId },
+    rpcName,
+  );
+  const directory = directoryRows.find((row) => asNonEmptyString(row.id) === sourceId) ?? directoryRows[0]!;
+
+  if (expected.enabled !== undefined) {
+    requireApiGatewayBooleanReadback(
+      directory,
+      'enabled',
+      expected.enabled,
+      rpcName,
+      'webhook_source_directory',
+    );
+  }
+  if (expected.rateLimitPerHour !== undefined) {
+    requireApiGatewayNumberReadback(
+      directory,
+      'rate_limit_per_hour',
+      expected.rateLimitPerHour,
+      rpcName,
+      'webhook_source_directory',
+    );
+  }
+}
+
+async function requireApiGatewayRateLimitSummaryReadback(
+  sourceId: string,
+  expectedLimitPerHour: number,
+  rpcName: string,
+): Promise<void> {
+  const summaryRows = await requireLiveResourceListReadback(
+    'api_gateway_rate_limits_summary',
+    { source_id: sourceId },
+    rpcName,
+  );
+  const summary = summaryRows.find((row) => asNonEmptyString(row.source_id) === sourceId) ?? summaryRows[0]!;
+  requireApiGatewayNumberReadback(
+    summary,
+    'limit_per_hour',
+    expectedLimitPerHour,
+    rpcName,
+    'api_gateway_rate_limits_summary',
+  );
+  const expectedLimitPerMin = Math.floor(expectedLimitPerHour / 60);
+  requireApiGatewayNumberReadback(
+    summary,
+    'limit_per_min',
+    expectedLimitPerMin,
+    rpcName,
+    'api_gateway_rate_limits_summary',
+  );
+}
+
+export async function block_api_gateway_source_v1(
+  args: BlockApiGatewaySourceArgs,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('block_api_gateway_source_v1', args, 'source');
+  if (liveRpcTarget()) {
+    const sourceId = resolveApiGatewaySourceId(result, args, 'block_api_gateway_source_v1');
+    await requireApiGatewaySourceReadback('block_api_gateway_source_v1', sourceId, {
+      enabled: false,
+    });
+  }
+  return result;
+}
+
+function expectedApiGatewayLimitPerHour(args: AdjustApiGatewayRateLimitArgs): number {
+  const perHour = Number(args.limit_per_hour);
+  if (Number.isFinite(perHour)) return perHour;
+  const perMin = Number(args.limit_per_min);
+  if (Number.isFinite(perMin)) return perMin * 60;
+  throw new Error('adjust_api_gateway_rate_limit_v1 requires limit_per_hour or limit_per_min');
+}
+
+export async function adjust_api_gateway_rate_limit_v1(
+  args: AdjustApiGatewayRateLimitArgs,
+): Promise<Record<string, unknown>> {
+  const expectedLimitPerHour = expectedApiGatewayLimitPerHour(args);
+  const result = await phaseC6Rpc('adjust_api_gateway_rate_limit_v1', args, 'source');
+  if (liveRpcTarget()) {
+    const sourceId = resolveApiGatewaySourceId(result, args, 'adjust_api_gateway_rate_limit_v1');
+    await requireApiGatewaySourceReadback('adjust_api_gateway_rate_limit_v1', sourceId, {
+      rateLimitPerHour: expectedLimitPerHour,
+    });
+    await requireApiGatewayRateLimitSummaryReadback(
+      sourceId,
+      expectedLimitPerHour,
+      'adjust_api_gateway_rate_limit_v1',
+    );
+  }
+  return result;
+}
+
+async function webhookSourceMutation(
+  rpcName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc(rpcName, args, 'webhook_source');
+  if (liveRpcTarget()) {
+    const sourceId = resolveWebhookSourceId(result, args);
+    if (!sourceId) throw new Error(`${rpcName} did not return webhook_source_id`);
+    const sourceReadback = await requireLiveResourceReadback('webhook_sources', sourceId, rpcName);
+    const directoryReadback = await requireLiveResourceReadback('webhook_source_directory', sourceId, rpcName);
+    requireWebhookSourceMutationReadback(sourceReadback, directoryReadback, args, result, rpcName);
+  }
+  return result;
+}
+
+export const ui_upsert_webhook_source_v1 = (args: UpsertWebhookSourceArgs) =>
+  webhookSourceMutation('ui_upsert_webhook_source_v1', args);
+
+export const ui_rotate_webhook_source_token_v1 = (args: { source_id: string }) =>
+  webhookSourceMutation('ui_rotate_webhook_source_token_v1', args);
+
+export async function ui_archive_webhook_source_v1(args: ArchiveWebhookSourceArgs) {
+  const result = await phaseC6Rpc('ui_archive_webhook_source_v1', args, 'webhook_source');
+  if (liveRpcTarget()) {
+    const sourceId = resolveWebhookSourceId(result, args);
+    if (!sourceId) throw new Error('ui_archive_webhook_source_v1 did not return webhook_source_id');
+    const sourceReadback = await requireLiveResourceReadback('webhook_sources', sourceId, 'ui_archive_webhook_source_v1');
+    const directoryReadback = await requireLiveResourceReadback('webhook_source_directory', sourceId, 'ui_archive_webhook_source_v1');
+    requireWebhookSourceArchiveReadback(sourceReadback, directoryReadback, 'ui_archive_webhook_source_v1');
+  }
+  return result;
+}
+
+export async function ui_upsert_mapping_artifact_v1(
+  args: UpsertMappingArtifactArgs,
+): Promise<Record<string, unknown>> {
+  const live = await liveRpc<Record<string, unknown>>('ui_upsert_mapping_artifact_v1', {
+    p_artifact: args,
+  });
+  if (live) {
+    const rec = requireLiveRpcRecord(live.data, 'ui_upsert_mapping_artifact_v1 returned no backend outcome');
+    const outcomeError = backendOutcomeError(rec, 'ui_upsert_mapping_artifact_v1 was rejected by the backend');
+    if (outcomeError) throw outcomeError;
+    requireLiveEvidence(rec, [
+      'mapping_config_id',
+      'mapping_artifact_id',
+      'artifact_id',
+      'id',
+    ], 'ui_upsert_mapping_artifact_v1 did not return backend mapping artifact evidence');
+    const mappingConfigId =
+      asNonEmptyString(rec.mapping_config_id) ??
+      asNonEmptyString(args.mapping_config_id);
+    if (!mappingConfigId) throw new Error('ui_upsert_mapping_artifact_v1 did not return mapping_config_id');
+    await requireLiveResourceReadback('mapping_configs', mappingConfigId, 'ui_upsert_mapping_artifact_v1');
+    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'ui_upsert_mapping_artifact_v1');
+    return rec;
+  }
+
+  await sleep(60);
+  return buildMutationFallbackEnvelope(args, 'mapping_config');
+}
+
+export async function ui_create_mapping_operation_report_v1(
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const live = await liveRpc<Record<string, unknown>>('ui_create_mapping_operation_report_v1', {
+    p_report: args,
+  });
+  if (live) {
+    const rec = requireLiveRpcRecord(live.data, 'ui_create_mapping_operation_report_v1 returned no backend outcome');
+    const outcomeError = backendOutcomeError(rec, 'ui_create_mapping_operation_report_v1 was rejected by the backend');
+    if (outcomeError) throw outcomeError;
+    requireLiveEvidence(rec, [
+      'mapping_operation_report_id',
+      'operation_report_id',
+      'report_id',
+      'id',
+    ], 'ui_create_mapping_operation_report_v1 did not return backend report evidence');
+    const reportId =
+      asNonEmptyString(rec.mapping_operation_report_id) ??
+      asNonEmptyString(rec.operation_report_id) ??
+      asNonEmptyString(rec.report_id) ??
+      asNonEmptyString(rec.id);
+    if (!reportId) throw new Error('ui_create_mapping_operation_report_v1 did not return mapping_operation_report_id');
+    await requireLiveResourceReadback('mapping_operation_reports', reportId, 'ui_create_mapping_operation_report_v1');
+    return rec;
+  }
+
+  await sleep(60);
+  return buildMutationFallbackEnvelope(args, 'mapping_operation_report');
+}
+
+export async function mapping_config_promote_v1(
+  args: { mapping_config_id: string; target_version?: number },
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('mapping_config_promote_v1', args, 'mapping_config');
+  if (liveRpcTarget()) {
+    const mappingConfigId =
+      asNonEmptyString(result.mapping_config_id) ??
+      asNonEmptyString(result.id) ??
+      asNonEmptyString(args.mapping_config_id);
+    if (!mappingConfigId) throw new Error('mapping_config_promote_v1 did not return mapping_config_id');
+    await requireLiveResourceReadback('mapping_configs', mappingConfigId, 'mapping_config_promote_v1');
+    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'mapping_config_promote_v1');
+  }
+  return result;
+}
+
+export const ui_upsert_provider_auth_config_v1 = (args: UpsertProviderAuthConfigArgs) =>
+  providerAuthConfigMutation('ui_upsert_provider_auth_config_v1', args);
+
+export const ui_revoke_provider_auth_config_v1 = (args: { config_id: string; reason?: string | null }) =>
+  providerAuthConfigMutation('ui_revoke_provider_auth_config_v1', args);
+
+export const integration_plugin_rotate_credentials_v1 = (args: Record<string, unknown>) =>
+  providerAuthConfigMutation('integration_plugin_rotate_credentials_v1', args);
+
+export const integration_plugin_generate_draft_v1 = (args: IntegrationPluginGenerateDraftArgs) =>
+  integrationPluginMutation('integration_plugin_generate_draft_v1', args);
+
+export const integration_plugin_rollback_v1 = (args: {
+  plugin_id: string;
+  target_plugin_version_id?: string | null;
+  reason?: string | null;
+}) =>
+  integrationPluginMutation('integration_plugin_rollback_v1', args, {
+    approvalAction: 'rolled_back',
+    requireBinding: true,
+  });
+
+export const plugin_deactivate_v1 = (args: {
+  plugin_id: string;
+  plugin_version_id?: string | null;
+  reason?: string | null;
+}) =>
+  integrationPluginMutation('plugin_deactivate_v1', {
+    ...args,
+    expected_binding_enabled: false,
+  }, {
+    approvalAction: 'deactivated',
+    requireBinding: true,
+    requireBindingChangeCount: false,
+    fallbackResourceKey: 'integration_plugin',
+  });
+
+export const plugin_submit_v1 = (args: PluginSubmitArgs) =>
+  integrationPluginMutation('plugin_submit_v1', args, {
+    approvalAction: 'submitted',
+    fallbackResourceKey: 'integration_plugin_version',
+  });
+
+export const plugin_approve_v1 = (args: PluginApproveArgs) =>
+  integrationPluginMutation('plugin_approve_v1', args, {
+    approvalAction: args.decision,
+    fallbackResourceKey: 'integration_plugin_version',
+  });
+
+export const plugin_activate_v1 = (args: PluginActivateArgs) =>
+  integrationPluginMutation('plugin_activate_v1', args, {
+    requireBinding: true,
+    fallbackResourceKey: 'integration_plugin_version',
+  });
+
+export const plugin_set_binding_v1 = (args: PluginSetBindingArgs) =>
+  integrationPluginMutation('plugin_set_binding_v1', args, {
+    requireBinding: true,
+    fallbackResourceKey: 'integration_plugin_version',
+  });
+
+function resolveWebhookInboxId(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string | null {
+  return asNonEmptyString(rec.webhook_inbox_id)
+    ?? asNonEmptyString(rec.inbox_id)
+    ?? asNonEmptyString(rec.id)
+    ?? asNonEmptyString(args.webhook_inbox_id)
+    ?? asNonEmptyString(args.inbox_id);
+}
+
+async function webhookInboxMutation(
+  rpcName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc(rpcName, args, 'webhook_inbox');
+  if (liveRpcTarget()) {
+    const inboxId = resolveWebhookInboxId(result, args);
+    if (!inboxId) throw new Error(`${rpcName} did not return webhook_inbox_id`);
+    await requireLiveResourceReadback('webhook_inbox', inboxId, rpcName);
+    await requireLiveResourceReadback('webhook_inbox_directory', inboxId, rpcName);
+  }
+  return result;
+}
+
+export const webhook_inbox_replay_v1 = (args: WebhookInboxReplayArgs) =>
+  webhookInboxMutation('webhook_inbox_replay_v1', args);
+
+export const ui_retry_webhook_inbox_as_new_intake_v1 = async (
+  args: WebhookInboxRetryAsNewIntakeArgs,
+) => {
+  const result = await phaseC6Rpc('ui_retry_webhook_inbox_as_new_intake_v1', args, 'webhook_inbox');
+  if (liveRpcTarget()) {
+    const originalInboxId = asNonEmptyString(result.webhook_inbox_id) ?? asNonEmptyString(args.webhook_inbox_id);
+    if (!originalInboxId) throw new Error('ui_retry_webhook_inbox_as_new_intake_v1 did not return webhook_inbox_id');
+    await requireLiveResourceReadback('webhook_inbox', originalInboxId, 'ui_retry_webhook_inbox_as_new_intake_v1');
+    await requireLiveResourceReadback('webhook_inbox_directory', originalInboxId, 'ui_retry_webhook_inbox_as_new_intake_v1');
+    const newInboxId = asNonEmptyString(result.new_webhook_inbox_id);
+    if (newInboxId) {
+      await requireLiveResourceReadback('webhook_inbox', newInboxId, 'ui_retry_webhook_inbox_as_new_intake_v1');
+      await requireLiveResourceReadback('webhook_inbox_directory', newInboxId, 'ui_retry_webhook_inbox_as_new_intake_v1');
+    }
+  }
+  return result;
+};
+
+export const webhook_inbox_force_status_v1 = (args: WebhookInboxForceStatusArgs) =>
+  webhookInboxMutation('webhook_inbox_force_status_v1', args);

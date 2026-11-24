@@ -7,9 +7,11 @@ import {
   LIVE_MUTATION_EVIDENCE_KEYS,
   liveBackendUnavailableError,
   liveRpc,
+  liveRpcTarget,
   lookupCommandContractRow,
   normalizeDeliverySlotWindow,
   objectRecord,
+  phaseC6Rpc,
   requireLiveEvidence,
   requireLiveMutationResult,
   requireLiveNumberField,
@@ -27,6 +29,7 @@ import {
 import { coordinatePairFromUnknown } from '../geo-coordinates';
 import { SEED_MODE_ENABLED } from '../seed-loader';
 import { asNonEmptyString } from './shared';
+import { normalizeShipmentTimelineRows, type ShipmentTimelineRow } from '../shipment-timeline';
 
 function normalizeUiCreateShipmentResult(
   rec: Record<string, unknown>,
@@ -1081,4 +1084,131 @@ export async function list_delivery_slots_v1(
     ];
   }
   return DELIVERY_SLOT_CATALOG;
+}
+
+export async function ui_get_shipment_timeline_v1(shipmentId: string): Promise<ShipmentTimelineRow[]> {
+  const live = await liveRpc('ui_get_shipment_timeline_v1', {
+    p_shipment_id: shipmentId,
+  });
+  if (live) return normalizeShipmentTimelineRows(live.data);
+
+  await sleep(60);
+  return normalizeShipmentTimelineRows(seed.shipmentTimeline(shipmentId));
+}
+
+// W13-5 — operator-initiated comms attempt enqueue. Closes OPERATIONS D3 §3
+// (CommsTab "Send now" orphan-toast). Routes to canonical
+// `public.enqueue_comms_attempt_v1(p_args jsonb)` migration when supabase
+// client is configured; otherwise returns the canonical envelope shape so the
+// FE swap is a single env-flip away. Policy gate is
+// `communication_policy.allow_operator_initiated_send` (see migration
+// 202604280200_enqueue_comms_attempt_v1.sql for canonical RPC contract).
+export async function enqueue_comms_attempt_v1(
+  args: {
+    shipment_id: string;
+    channel: string;
+    template_id?: string;
+    recipient_override?: Record<string, unknown>;
+  },
+): Promise<{
+  ok: true;
+  comms_attempt_id: string;
+  shipment_id: string;
+  channel: string;
+  template_id: string | null;
+  status: 'queued';
+  correlation_id: string;
+  settings_resolution_id: string;
+}> {
+  const liveMode = Boolean(liveRpcTarget());
+  const result = await phaseC6Rpc('enqueue_comms_attempt_v1', args, 'comms_attempt');
+  if (liveMode) {
+    const attemptId =
+      asNonEmptyString(result.comms_attempt_id) ??
+      asNonEmptyString(result.id);
+    if (!attemptId) {
+      throw new Error('enqueue_comms_attempt_v1 did not return comms_attempt_id');
+    }
+    await requireLiveResourceReadback('comms_attempts', attemptId, 'enqueue_comms_attempt_v1');
+    await requireLiveResourceReadback('shipments', args.shipment_id, 'enqueue_comms_attempt_v1');
+  }
+  if ((result as { ok?: boolean }).ok === undefined) {
+    // phaseC6Rpc seed envelope path — supplement seam-shape fields the FE
+    // surfaces in toasts (`shipment_id`, `channel`, `status`).
+    return {
+      ok: true,
+      comms_attempt_id: (result as { comms_attempt_id?: string }).comms_attempt_id ?? 'cma_' + Math.floor(Math.random() * 90000),
+      shipment_id: args.shipment_id,
+      channel: args.channel,
+      template_id: args.template_id ?? null,
+      status: 'queued',
+      correlation_id: (result as { correlation_id?: string }).correlation_id ?? '0x' + Math.random().toString(16).slice(2, 10),
+      settings_resolution_id: (result as { settings_resolution_id?: string }).settings_resolution_id ?? 'srlv_' + Math.floor(Math.random() * 9000),
+    };
+  }
+  return result as {
+    ok: true;
+    comms_attempt_id: string;
+    shipment_id: string;
+    channel: string;
+    template_id: string | null;
+    status: 'queued';
+    correlation_id: string;
+    settings_resolution_id: string;
+  };
+}
+
+export async function reserve_delivery_slot_v1({
+  slot_date,
+  shipment_id,
+  window_id,
+  ...rest
+}: {
+  slot_date: string;
+  shipment_id?: string;
+  window_id?: string;
+  [key: string]: unknown;
+}): Promise<{ ok: true; slot_date: string; shipment_id?: string; window_id?: string; reserved_at: string }> {
+  const clientId = (rest.client_id as string | undefined) ?? await getLiveShipmentClientId(shipment_id);
+  let windowStart = rest.window_start_local as string | undefined;
+  let windowEnd = rest.window_end_local as string | undefined;
+  if (window_id && shipment_id && clientId && (!windowStart || !windowEnd)) {
+    const windows = await list_delivery_slots_v1({ shipment_id, client_id: clientId, slot_date });
+    const selected = windows.find((window) => window.window_id === window_id);
+    windowStart = selected?.window_start_local ?? windowStart;
+    windowEnd = selected?.window_end_local ?? windowEnd;
+  }
+  const live = await liveRpc<Record<string, unknown>>('reserve_delivery_slot_v1', {
+    p_input: {
+      ...rest,
+      shipment_id,
+      client_id: clientId,
+      slot_date,
+      window_id,
+      window_start_local: windowStart,
+      window_end_local: windowEnd,
+      performed_by_system: rest.performed_by_system ?? 'console-v2',
+    },
+  });
+  if (live) {
+    const rec = requireLiveMutationResult(live.data, 'reserve_delivery_slot_v1', [
+      'reservation_id',
+      'slot_reservation_id',
+      'reserved_at',
+      'shipment_id',
+      'action_id',
+    ]);
+    const reservedAt = asNonEmptyString(rec.reserved_at ?? rec.applied_at ?? rec.created_at) ?? '';
+    return {
+      ok: true,
+      slot_date,
+      shipment_id,
+      window_id,
+      reserved_at: reservedAt,
+      ...rec,
+    } as { ok: true; slot_date: string; shipment_id?: string; window_id?: string; reserved_at: string };
+  }
+
+  await sleep(80);
+  return { ok: true, slot_date, shipment_id, window_id, reserved_at: new Date().toISOString() };
 }

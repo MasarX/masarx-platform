@@ -1,20 +1,29 @@
 import { translateAdapterMessage } from '../i18n';
 import {
   _runStepCache,
+  type CreateWorkflowTemplateStepArgs,
+  type DeleteWorkflowTemplateStepArgs,
+  type DuplicateWorkflowTemplateStepArgs,
   firstRpcRow,
   liveRpc,
+  liveRpcTarget,
   loadLiveWorkflowTemplateId,
   looksLikeUuid,
+  phaseC6Rpc,
   requireLiveMutationResult,
+  requireLiveResourceAbsenceReadback,
   requireLiveResourceListReadback,
   requireLiveResourceReadback,
   requireLiveStringField,
+  type RestoreWorkflowTemplateArgs,
+  type RestoreWorkflowTemplateResult,
   seed,
   sleep,
   type SyntheticRunStep,
   ui_list_resource_v1,
   type UiLogEventOptions,
   type UiLogEventResult,
+  type UpdateWorkflowTemplateStepArgs,
   type WorkflowRunStartContext,
   type WorkflowRunTriggerCreateResult,
   type WorkflowRunTriggerDeleteResult,
@@ -22,9 +31,10 @@ import {
   type WorkflowScheduleCreateResult,
   type WorkflowScheduleRunNowResult,
   type WorkflowScheduleTaskPayloadRepairResult,
+  type WorkflowTemplateStepMutationResult,
 } from '../data-source';
 import { getSupabaseClient } from '../supabase';
-import { asNonEmptyString } from './shared';
+import { asNonEmptyString, booleanReadback } from './shared';
 
 function normalizeUiLogEventPayload(eventJson: unknown): Record<string, unknown> {
   const source: Record<string, unknown> = eventJson && typeof eventJson === 'object' && !Array.isArray(eventJson)
@@ -1021,3 +1031,134 @@ export async function close_workflow_run(
   await sleep(80);
   return { ok: true, workflow_run_id: runId, workflow_status: status, closed_at: new Date().toISOString() };
 }
+
+function numberReadback(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+export const restore_workflow_template_v1 = async (
+  args: RestoreWorkflowTemplateArgs,
+): Promise<RestoreWorkflowTemplateResult> => {
+  const result = await phaseC6Rpc(
+    'restore_workflow_template_v1',
+    args,
+    'workflow_template',
+  ) as RestoreWorkflowTemplateResult;
+  if (liveRpcTarget()) {
+    const templateId =
+      asNonEmptyString(result.workflow_template_id)
+      ?? asNonEmptyString(args.workflow_template_id);
+    if (!templateId) throw new Error('restore_workflow_template_v1 did not return workflow_template_id');
+    await requireLiveResourceReadback('workflow_templates', templateId, 'restore_workflow_template_v1');
+    const directory = await requireLiveResourceReadback(
+      'workflow_template_directory',
+      templateId,
+      'restore_workflow_template_v1',
+    );
+    const expectedCount = numberReadback(result.restored_step_count);
+    const actualCount = numberReadback(directory.step_count);
+    if (expectedCount != null && actualCount !== expectedCount) {
+      throw new Error('restore_workflow_template_v1 backend readback step count mismatch');
+    }
+  }
+  return result;
+};
+
+function workflowTemplateStepResultId(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string | null {
+  return asNonEmptyString(rec.workflow_template_step_id)
+    ?? asNonEmptyString(rec.step_id)
+    ?? asNonEmptyString(args.workflow_template_step_id)
+    ?? asNonEmptyString(args.step_id);
+}
+
+function workflowTemplateStepTemplateId(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string | null {
+  return asNonEmptyString(rec.workflow_template_id)
+    ?? asNonEmptyString(rec.template_id)
+    ?? asNonEmptyString(args.workflow_template_id)
+    ?? asNonEmptyString(args.template_id);
+}
+
+function requireWorkflowTemplateStepReadback(
+  row: Record<string, unknown>,
+  expectedStepId: string,
+  expectedTemplateId: string | null,
+  rpcName: string,
+): void {
+  if (asNonEmptyString(row.id) !== expectedStepId) {
+    throw new Error(`${rpcName} backend readback returned the wrong workflow_template_step`);
+  }
+  if (expectedTemplateId && asNonEmptyString(row.workflow_template_id) !== expectedTemplateId) {
+    throw new Error(`${rpcName} backend readback returned a step outside the workflow template`);
+  }
+}
+
+async function workflowTemplateStepMutation(
+  rpcName: string,
+  args: Record<string, unknown>,
+): Promise<WorkflowTemplateStepMutationResult> {
+  const result = await phaseC6Rpc(
+    rpcName,
+    args,
+    'workflow_template_step',
+  ) as WorkflowTemplateStepMutationResult;
+  if (liveRpcTarget()) {
+    const stepId = workflowTemplateStepResultId(result, args);
+    const templateId = workflowTemplateStepTemplateId(result, args);
+    if (!stepId) throw new Error(`${rpcName} did not return workflow_template_step_id`);
+    if (!templateId) throw new Error(`${rpcName} did not return workflow_template_id`);
+
+    await requireLiveResourceReadback('workflow_templates', templateId, rpcName);
+    await requireLiveResourceReadback('workflow_template_directory', templateId, rpcName);
+
+    if (result.deleted === true && result.soft_deleted !== true) {
+      await requireLiveResourceAbsenceReadback(
+        'workflow_template_steps',
+        { id: stepId },
+        rpcName,
+        `workflow_template_steps:${stepId}`,
+      );
+    } else {
+      const stepReadback = await requireLiveResourceReadback(
+        'workflow_template_steps',
+        stepId,
+        rpcName,
+      );
+      requireWorkflowTemplateStepReadback(stepReadback, stepId, templateId, rpcName);
+      if (result.soft_deleted === true && booleanReadback(stepReadback.enabled) !== false) {
+        throw new Error(`${rpcName} backend readback did not reflect soft-deleted step state`);
+      }
+    }
+  }
+  return result;
+}
+
+export const ui_create_workflow_template_step_v1 = (
+  args: CreateWorkflowTemplateStepArgs,
+): Promise<WorkflowTemplateStepMutationResult> =>
+  workflowTemplateStepMutation('ui_create_workflow_template_step_v1', args);
+
+export const ui_update_workflow_template_step_v1 = (
+  args: UpdateWorkflowTemplateStepArgs,
+): Promise<WorkflowTemplateStepMutationResult> =>
+  workflowTemplateStepMutation('ui_update_workflow_template_step_v1', args);
+
+export const ui_duplicate_workflow_template_step_v1 = (
+  args: DuplicateWorkflowTemplateStepArgs,
+): Promise<WorkflowTemplateStepMutationResult> =>
+  workflowTemplateStepMutation('ui_duplicate_workflow_template_step_v1', args);
+
+export const ui_delete_workflow_template_step_v1 = (
+  args: DeleteWorkflowTemplateStepArgs,
+): Promise<WorkflowTemplateStepMutationResult> =>
+  workflowTemplateStepMutation('ui_delete_workflow_template_step_v1', args);

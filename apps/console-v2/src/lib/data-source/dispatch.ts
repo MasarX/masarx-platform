@@ -19,6 +19,7 @@ import {
   normalizeDispatchResolutionLiveResult,
   normalizeLiveListResult,
   objectRecord,
+  phaseC6Rpc,
   pickupFailuresSeed,
   pickupRequestsSeed,
   pickupWavesSeed,
@@ -27,7 +28,6 @@ import {
   requireLiveNumberField,
   requireLiveResourceListReadback,
   requireLiveResourceReadback,
-  requireLiveRouteRunAssignmentReadback,
   requireLiveRpcRecord,
   requireLiveStringField,
   RESOURCE_DATA,
@@ -44,6 +44,7 @@ import {
   state,
   ui_get_resource_v1,
   type WarehouseScanCorrectionRequestArgs,
+  type WarehouseTransferExecuteResult,
   type WarehouseTransferManifestCreateResult,
   type WarehouseTransferUiActionResult,
 } from '../data-source';
@@ -2015,4 +2016,89 @@ export async function ui_execute_warehouse_transfer_reconcile_v1(
     count: 1,
     status: 'task_completed',
   };
+}
+
+export async function requireLiveRouteRunAssignmentReadback(
+  rpcName: string,
+  runId: string,
+  rec: Record<string, unknown>,
+): Promise<void> {
+  await requireLiveResourceReadback('route_runs', runId, rpcName);
+  const assignmentId = asNonEmptyString(rec.route_run_assignment_id) ?? asNonEmptyString(rec.assignment_id);
+  if (assignmentId) {
+    await requireLiveResourceReadback('route_run_assignments', assignmentId, rpcName);
+  } else {
+    await requireLiveResourceListReadback('route_run_assignments', { route_run_id: runId }, rpcName);
+  }
+  const eventId =
+    asNonEmptyString(rec.route_run_assignment_event_id) ??
+    asNonEmptyString(rec.assignment_event_id) ??
+    asNonEmptyString(rec.event_id);
+  if (eventId) {
+    await requireLiveResourceReadback('route_run_assignment_events', eventId, rpcName);
+  } else {
+    await requireLiveResourceListReadback('route_run_assignment_events', { route_run_id: runId }, rpcName);
+  }
+}
+
+// ----------- Baskets -----------
+//
+// Dedicated Console V2 basket transition seam. Reads use the registry-backed
+// public.baskets / basket_items / basket_transitions resources; writes route
+// through ui_update_basket_state_v1 so the state update is centralized and the
+// DB trigger records the append-only transition ledger.
+export async function ui_update_basket_state_v1(
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const client = getSupabaseClient();
+  if (client) {
+    return phaseC6Rpc('ui_update_basket_state_v1', args, 'basket');
+  }
+
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_update_basket_state_v1');
+  await sleep(60);
+  const basketId = String(args.basket_id ?? args.id ?? '').trim();
+  const nextState = String(args.state ?? args.new_state ?? '').trim();
+  if (!basketId) throw new Error('ui_update_basket_state_v1 requires basket_id');
+  if (!nextState) throw new Error('ui_update_basket_state_v1 requires state');
+
+  const baskets = (seed as { baskets?: Array<Record<string, unknown>> }).baskets ?? [];
+  const basket = baskets.find((row) => row.id === basketId);
+  if (!basket) throw new Error(`basket_not_found:${basketId}`);
+
+  const previousState = basket.state ?? null;
+  const now = new Date().toISOString();
+  basket.state = nextState;
+  basket.updated_at = now;
+  basket.version = Number(basket.version ?? 1) + 1;
+
+  const transitions = (seed as { basket_transitions?: Array<Record<string, unknown>> }).basket_transitions;
+  const transitionId = nextResourceId('basket_transition');
+  if (Array.isArray(transitions)) {
+    transitions.unshift({
+      id: transitionId,
+      basket_id: basketId,
+      previous_state: previousState,
+      new_state: nextState,
+      changed_at: now,
+      changed_by: state.user.id,
+      notes: typeof args.reason === 'string' ? args.reason : null,
+    });
+  }
+
+  return buildEnvelope({
+    basket_id: basketId,
+    previous_state: previousState,
+    new_state: nextState,
+    state: nextState,
+    transition_id: transitionId,
+    transitioned_at: now,
+  });
+}
+
+export async function warehouse_transfer_execute_v1(
+  payload: Record<string, unknown> = {},
+): Promise<WarehouseTransferExecuteResult> {
+  const result = await phaseC6Rpc('warehouse_transfer_execute_v1', payload, 'warehouse_transfer');
+  return result as WarehouseTransferExecuteResult;
 }

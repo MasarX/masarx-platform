@@ -3,10 +3,11 @@ import {
   type EdgeStudioErrorEnvelope,
   hasConsoleLiveBackend,
   liveBackendUnavailableError,
+  liveRpcTarget,
   nextCorrelationId,
   objectRecord,
+  phaseC6Rpc,
   readFunctionErrorMessage,
-  requireLiveImportJobReadback,
   requireLiveResourceReadback,
   RESOURCE_IMPORT_PREPARE_READBACK_COUNT_KEYS,
   RESOURCE_IMPORT_PREPARE_READBACK_SUMMARY_KEYS,
@@ -396,4 +397,74 @@ export async function resolve_resource_download_url_v1(
 
   if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('resolve_resource_download_url_v1');
   throw new Error('resolve_resource_download_url_v1 requires a live backend download service');
+}
+
+// PLATFORM/imports — W16-5. Canonical write RPCs replacing the PREVIEW chip.
+// Migrations of record:
+//   • import_job_create_v1   202604301905
+//   • import_job_cancel_v1   202604301905
+// Both RPCs accept a single jsonb envelope (`p_args`) and return the canonical
+// envelope `{ ok, import_job_id, status, correlation_id, settings_resolution_id }`.
+export async function requireLiveImportJobReadback(
+  rpcName: string,
+  importJobId: string,
+  expected?: { status?: string; cancelledReason?: string },
+): Promise<void> {
+  const job = await requireLiveResourceReadback('import_jobs', importJobId, rpcName);
+  if (expected?.status && String(job.status ?? '') !== expected.status) {
+    throw new Error(`${rpcName} backend readback status mismatch for import_jobs:${importJobId}`);
+  }
+  if (expected?.cancelledReason !== undefined) {
+    const jobReason = String(job.cancelled_reason ?? '').trim();
+    if (jobReason !== expected.cancelledReason) {
+      throw new Error(`${rpcName} backend readback cancellation reason mismatch for import_jobs:${importJobId}`);
+    }
+  }
+  const directory = await requireLiveResourceReadback('import_job_directory', importJobId, rpcName);
+  if (expected?.status && String(directory.status ?? '') !== expected.status) {
+    throw new Error(`${rpcName} backend readback status mismatch for import_job_directory:${importJobId}`);
+  }
+  if (expected?.cancelledReason !== undefined) {
+    const directoryReason = String(directory.cancelled_reason ?? '').trim();
+    if (directoryReason !== expected.cancelledReason) {
+      throw new Error(`${rpcName} backend readback cancellation reason mismatch for import_job_directory:${importJobId}`);
+    }
+  }
+}
+
+function resolveImportJobId(
+  rec: Record<string, unknown>,
+  args: Record<string, unknown>,
+): string | null {
+  return asNonEmptyString(rec.import_job_id)
+    ?? asNonEmptyString(rec.job_id)
+    ?? asNonEmptyString(rec.id)
+    ?? asNonEmptyString(args.import_job_id)
+    ?? asNonEmptyString(args.job_id)
+    ?? asNonEmptyString(args.id);
+}
+
+export async function import_job_create_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('import_job_create_v1', args, 'import_job');
+  if (liveRpcTarget()) {
+    const importJobId = resolveImportJobId(result, args);
+    if (!importJobId) throw new Error('import_job_create_v1 did not return import_job_id');
+    await requireLiveImportJobReadback('import_job_create_v1', importJobId);
+  }
+  return result;
+}
+
+export async function import_job_cancel_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const reason = asNonEmptyString(args.reason);
+  if (!reason) throw new Error('import_job_cancel_v1 requires cancellation reason');
+  const result = await phaseC6Rpc('import_job_cancel_v1', args, 'import_job');
+  if (liveRpcTarget()) {
+    const importJobId = resolveImportJobId(result, args);
+    if (!importJobId) throw new Error('import_job_cancel_v1 did not return import_job_id');
+    await requireLiveImportJobReadback('import_job_cancel_v1', importJobId, {
+      status: 'cancelled',
+      cancelledReason: reason,
+    });
+  }
+  return result;
 }

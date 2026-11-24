@@ -56,46 +56,9 @@
 // existing call sites continue to compile unchanged.
 import { seed as seedNamespace, SEED_MODE_ENABLED } from './seed-loader';
 import { getSupabaseClient } from './supabase';
-import { isShipmentCreateIntent } from './webhook-intents';
 import { hostedInviteRedirect } from './hosted-redirect';
-import { normalizeShipmentTimelineRows, type ShipmentTimelineRow } from './shipment-timeline';
 import type { IntegrationPluginMutationOptions } from './data-source/integrations';
-import { asNonEmptyString, booleanReadback, type ResourceRow } from './data-source/shared';
-import {
-  API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_INTERVAL_MS,
-  API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_TIMEOUT_MS,
-  API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE,
-  API_GATEWAY_EDGE_INVOKE_TIMEOUT_MS,
-  API_GATEWAY_REQUEST_READBACK_AFTER_INVOKE_TIMEOUT_MS,
-  API_GATEWAY_REQUEST_READBACK_INTERVAL_MS,
-  API_GATEWAY_REQUEST_READBACK_TIMEOUT_MS,
-  API_GATEWAY_TERMINAL_SETTLE_AFTER_FIRST_READBACK_MS,
-  apiGatewayAuthRejectionMessage,
-  apiGatewayEdgeAuthErrorMessage,
-  type ApiGatewayInvokeMethod,
-  apiGatewayReadbackOccurredAfter,
-  apiGatewayReadbackTerminal,
-  assertApiGatewaySelectedSourceMatchesReadback,
-  buildApiGatewayRequestResult,
-  buildApiGatewaySyntheticResult,
-  buildWebhookReceiverSyntheticResult,
-  buildWebhookReceiverTestResult,
-  findNestedNumber,
-  findNestedString,
-  normalizeApiGatewayMethod,
-  type RunApiGatewayRequestTestArgs,
-  type RunApiGatewayRequestTestResult,
-  type RunWebhookReceiverTestArgs,
-  type RunWebhookReceiverTestResult,
-  splitApiGatewayPath,
-  WEBHOOK_RECEIVER_AUTH_REJECTION_READBACK_INTERVAL_MS,
-  WEBHOOK_RECEIVER_AUTH_REJECTION_READBACK_TIMEOUT_MS,
-  WEBHOOK_RECEIVER_EDGE_INVOKE_TIMEOUT_MS,
-  WEBHOOK_RECEIVER_READBACK_AFTER_INVOKE_TIMEOUT_MS,
-  WEBHOOK_RECEIVER_READBACK_INTERVAL_MS,
-  WEBHOOK_RECEIVER_TERMINAL_READBACK_TIMEOUT_MS,
-  withApiGatewayInvokeTimeout,
-} from './data-source/external-intake-readback';
+import { asNonEmptyString, type ResourceRow } from './data-source/shared';
 import {
   projectIntegrationCredentialDirectory as _projectIntegrationCredentialDirectory,
   projectMappingConfigDirectory as _projectMappingConfigDirectory,
@@ -103,18 +66,38 @@ import {
   projectWebhookSourceDirectory as _projectWebhookSourceDirectory,
 } from './data-source/integration-directory-projections';
 import {
-  type LogisticsCustomerMigrationArgs,
-  type LogisticsCustomerMigrationConfigArgs,
-  type LogisticsCustomerMigrationConfigResult,
-  type LogisticsCustomerMigrationResult,
-} from './data-source/customer-logistics-migration';
-import {
   LEGACY_WILDCARD_CAPABILITY,
   WILDCARD_CAPABILITY,
   hasWildcardCapability,
   isWildcardCapability,
 } from './capabilities';
-import type { UiOnboardingReadiness } from '../types/domain';
+
+// Keep the feature import inside the call so a failed load cannot follow a write.
+function lazyAdapter<Module, Args extends unknown[], Result>(
+  load: () => Promise<Module>,
+  select: (adapter: Module) => (...args: Args) => Promise<Result>,
+): (...args: Args) => Promise<Result> {
+  return async (...args) => select(await load())(...args);
+}
+
+const loadInsightsAdapter = () => import('./data-source/insights');
+const loadSettingsAdapter = () => import('./data-source/settings');
+const loadFleetAdapter = () => import('./data-source/fleet');
+const loadTasksAdapter = () => import('./data-source/tasks');
+const loadShipmentsAdapter = () => import('./data-source/shipments');
+const loadDispatchAdapter = () => import('./data-source/dispatch');
+const loadPlatformAdapter = () => import('./data-source/platform');
+const loadFinanceAdapter = () => import('./data-source/finance');
+const loadNetworkAdapter = () => import('./data-source/network');
+const loadIntegrationsAdapter = () => import('./data-source/integrations');
+const loadLabelsAdapter = () => import('./data-source/labels');
+const loadWorkflowsAdapter = () => import('./data-source/workflows');
+const loadExternalIntakeAdapter = () => import('./data-source/external-intake');
+const loadPluginStudioAdapter = () => import('./data-source/plugin-studio');
+const loadResourceImportAdapter = () => import('./data-source/resource-import');
+const loadCustomersAdapter = () => import('./data-source/customers');
+const loadCatalogAdapter = () => import('./data-source/catalog');
+const loadCommandsAdapter = () => import('./data-source/commands');
 
 export type {
   RunApiGatewayRequestTestArgs,
@@ -6624,142 +6607,14 @@ export async function ui_resource_metrics_v1(key: string, _opts: ListOpts = {}):
   return { total: list.length };
 }
 
-function normalizeReadinessScopeType(scopeType?: string | null): UiOnboardingReadiness['scope_type'] {
-  if (scopeType === 'global' || scopeType === 'tenant' || scopeType === 'client' || scopeType === 'sender') {
-    return scopeType;
-  }
-  return 'tenant';
-}
+export const ui_get_onboarding_readiness_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.ui_get_onboarding_readiness_v1);
 
-function buildSeedOnboardingReadiness(
-  scopeType?: string | null,
-  scopeId?: string | null,
-): UiOnboardingReadiness {
-  const normalizedScopeType = normalizeReadinessScopeType(scopeType);
-  const settingsRows = ((seed.settings_category_registry ?? []) as unknown[]).filter(Boolean);
-  const workflowRows = ((seed.workflow_bindings ?? []) as unknown[]).filter(Boolean);
-  const pluginRows = ((seed.integration_plugins ?? []) as Array<Record<string, unknown>>).filter(Boolean);
-  const pluginItems = pluginRows.map((plugin) => ({
-    plugin_key: String(plugin.plugin_key ?? plugin.key ?? plugin.id ?? 'plugin'),
-    plugin_name: String(plugin.name ?? plugin.plugin_name ?? plugin.plugin_key ?? plugin.id ?? 'Plugin'),
-    status: String(plugin.status ?? 'healthy'),
-    activation_mode: String(plugin.activation_mode ?? plugin.mode ?? 'auto_activate'),
-    enabled: typeof plugin.enabled === 'boolean' ? plugin.enabled : true,
-    credentials_status: String(plugin.credentials_status ?? 'healthy'),
-    blocking: false,
-  }));
+export const ui_execute_onboarding_bootstrap_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.ui_execute_onboarding_bootstrap_v1);
 
-  return {
-    scope_type: normalizedScopeType,
-    scope_id: scopeId ?? (normalizedScopeType === 'tenant' ? state.user.organization_id : null),
-    organization_id: state.user.organization_id || null,
-    generated_at: new Date().toISOString(),
-    overall_status: 'healthy',
-    healthy: true,
-    settings_defaults: {
-      status: 'healthy',
-      healthy: true,
-      required_count: settingsRows.length,
-      present_count: settingsRows.length,
-      missing_categories: [],
-    },
-    workflow_bindings: {
-      status: 'healthy',
-      healthy: true,
-      baseline_profile: 'default',
-      required_count: workflowRows.length,
-      present_count: workflowRows.length,
-      missing_stages: [],
-    },
-    integration_plugins: {
-      status: 'healthy',
-      healthy: true,
-      baseline_profile: 'default',
-      required_count: pluginItems.length,
-      healthy_count: pluginItems.length,
-      pending_credentials_count: 0,
-      blocking_count: 0,
-      items: pluginItems,
-    },
-    blocking_findings: [],
-  };
-}
-
-export async function ui_get_onboarding_readiness_v1(
-  argsOrScopeType?: { scope_type?: string | null; scope_id?: string | null } | string | null,
-  scopeIdArg?: string | null,
-): Promise<UiOnboardingReadiness> {
-  const scopeType =
-    typeof argsOrScopeType === 'object' && argsOrScopeType !== null
-      ? argsOrScopeType.scope_type
-      : argsOrScopeType;
-  const scopeId =
-    typeof argsOrScopeType === 'object' && argsOrScopeType !== null
-      ? argsOrScopeType.scope_id
-      : scopeIdArg;
-  const live = await liveRpc<UiOnboardingReadiness>('ui_get_onboarding_readiness_v1', {
-    p_scope_type: normalizeReadinessScopeType(scopeType),
-    p_scope_id: scopeId ?? null,
-  });
-  if (live) {
-    if (!live.data) throw new Error('ui_get_onboarding_readiness_v1 returned no readiness snapshot');
-    return live.data;
-  }
-
-  await sleep(30);
-  return buildSeedOnboardingReadiness(scopeType, scopeId);
-}
-
-export async function ui_execute_onboarding_bootstrap_v1(args: {
-  scope_type?: string | null;
-  scope_id?: string | null;
-}): Promise<Record<string, unknown>> {
-  const scopeType = normalizeReadinessScopeType(args.scope_type);
-  const scopeId = asNonEmptyString(args.scope_id);
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_onboarding_bootstrap_v1', {
-    p_scope_type: scopeType,
-    p_scope_id: scopeId,
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'ui_execute_onboarding_bootstrap_v1', [
-      'readiness',
-      'bootstrap_run_id',
-      'workflow_run_id',
-    ]);
-    return {
-      ...rec,
-      ok: true,
-      scope_type: String(rec.scope_type ?? scopeType),
-      scope_id: String(rec.scope_id ?? scopeId),
-    };
-  }
-
-  await sleep(30);
-  return {
-    ok: true,
-    scope_type: scopeType,
-    scope_id: scopeId,
-    readiness: buildSeedOnboardingReadiness(scopeType, scopeId),
-  };
-}
-
-export async function ui_get_shipment_timeline_v1(shipmentId: string): Promise<ShipmentTimelineRow[]> {
-  const live = await liveRpc('ui_get_shipment_timeline_v1', {
-    p_shipment_id: shipmentId,
-  });
-  if (live) return normalizeShipmentTimelineRows(live.data);
-
-  await sleep(60);
-  return normalizeShipmentTimelineRows(seed.shipmentTimeline(shipmentId));
-}
+export const ui_get_shipment_timeline_v1 = /* @__PURE__ */ lazyAdapter(loadShipmentsAdapter, adapter => adapter.ui_get_shipment_timeline_v1);
 
 // ----------- Dashboard projection (mirrors a planned api.ui_resource_metrics_v1('dashboard_kpis')) -----------
-export async function dashboardKpis(): Promise<
-  Array<{ label: string; key: string; value: number | string; delta?: string; tone?: string; spark?: number[] }>
-> {
-  const { dashboardKpis } = await import('./data-source/insights');
-  return dashboardKpis();
-}
+export const dashboardKpis = /* @__PURE__ */ lazyAdapter(loadInsightsAdapter, adapter => adapter.dashboardKpis);
 
 // ----------- KPI rollup resolver (Phase F1 / CLAIM-INSIGHTS-REPORTING) -----------
 //
@@ -6797,12 +6652,7 @@ export interface ComputeKpiRollupArgs {
   scope?: { organization_id?: string | null } | null;
 }
 
-export async function compute_kpi_rollup_v1(
-  args: ComputeKpiRollupArgs,
-): Promise<KpiRollupResolution> {
-  const { compute_kpi_rollup_v1 } = await import('./data-source/insights');
-  return compute_kpi_rollup_v1(args);
-}
+export const compute_kpi_rollup_v1 = /* @__PURE__ */ lazyAdapter(loadInsightsAdapter, adapter => adapter.compute_kpi_rollup_v1);
 
 // ----------- Bank account balance projection (W11-1 / W8-4 paired) -----------
 //
@@ -6837,12 +6687,7 @@ export interface ComputeBankAccountBalanceArgs {
   bank_account_id: string;
 }
 
-export async function compute_bank_account_balance_v1(
-  args: ComputeBankAccountBalanceArgs,
-): Promise<BankAccountBalanceResult> {
-  const { compute_bank_account_balance_v1 } = await import('./data-source/insights');
-  return compute_bank_account_balance_v1(args);
-}
+export const compute_bank_account_balance_v1 = /* @__PURE__ */ lazyAdapter(loadInsightsAdapter, adapter => adapter.compute_bank_account_balance_v1);
 
 // ----------- Settings + ladder -----------
 export interface SettingsResolutionResult {
@@ -6880,7 +6725,7 @@ export async function resolveSettings(
   category: string,
   scopeContext: Record<string, unknown> = state.scope,
 ): Promise<SettingsResolutionResult> {
-  const { resolveSettings } = await import('./data-source/settings');
+  const { resolveSettings } = await loadSettingsAdapter();
   return resolveSettings(category, scopeContext);
 }
 
@@ -6892,7 +6737,7 @@ export async function resolveMobilePolicy(
   category: string,
   scopeContext: Record<string, unknown> = state.scope,
 ): Promise<MobilePolicyResolutionResult | null> {
-  const { resolveMobilePolicy } = await import('./data-source/settings');
+  const { resolveMobilePolicy } = await loadSettingsAdapter();
   return resolveMobilePolicy(category, scopeContext);
 }
 
@@ -6924,7 +6769,7 @@ export interface AccessPolicyResolutionResult {
 export async function resolve_access_control_policy_v1(
   args: { scope_type?: string; scope_id?: string | null } = {},
 ): Promise<AccessPolicyResolutionResult> {
-  const { resolve_access_control_policy_v1 } = await import('./data-source/settings');
+  const { resolve_access_control_policy_v1 } = await loadSettingsAdapter();
   return resolve_access_control_policy_v1(args);
 }
 
@@ -6969,12 +6814,7 @@ export interface UserCapabilityEvalArgs {
   user_id?: string;
 }
 
-export async function user_capability_eval_v1(
-  args: UserCapabilityEvalArgs,
-): Promise<UserCapabilityEvalResult> {
-  const { user_capability_eval_v1 } = await import('./data-source/settings');
-  return user_capability_eval_v1(args);
-}
+export const user_capability_eval_v1 = /* @__PURE__ */ lazyAdapter(loadSettingsAdapter, adapter => adapter.user_capability_eval_v1);
 
 export async function proposeSettingsChange(
   category: string,
@@ -6989,7 +6829,7 @@ export async function proposeSettingsChange(
   dry_run: boolean;
   justification: string | null;
 }> {
-  const { proposeSettingsChange } = await import('./data-source/settings');
+  const { proposeSettingsChange } = await loadSettingsAdapter();
   return proposeSettingsChange(category, scope, value, opts);
 }
 
@@ -7012,7 +6852,7 @@ export async function applySettingsValue(
   value: unknown,
   opts: { justification?: string } = {},
 ): Promise<ApplySettingsValueResult> {
-  const { applySettingsValue } = await import('./data-source/settings');
+  const { applySettingsValue } = await loadSettingsAdapter();
   return applySettingsValue(category, scope, value, opts);
 }
 
@@ -7054,15 +6894,15 @@ export async function listDecisionLog(filters: LogFilter = {}): Promise<Record<s
 }
 
 export async function listResolutionLog(filters: LogFilter = {}): Promise<Record<string, unknown>[]> {
-  const { listResolutionLog } = await import('./data-source/insights');
+  const { listResolutionLog } = await loadInsightsAdapter();
   return listResolutionLog(filters);
 }
 export async function listAuditLog(filters: { limit?: number } = {}): Promise<Record<string, unknown>[]> {
-  const { listAuditLog } = await import('./data-source/insights');
+  const { listAuditLog } = await loadInsightsAdapter();
   return listAuditLog(filters);
 }
 export async function listUiEventLog(filters: { limit?: number } = {}): Promise<Record<string, unknown>[]> {
-  const { listUiEventLog } = await import('./data-source/insights');
+  const { listUiEventLog } = await loadInsightsAdapter();
   return listUiEventLog(filters);
 }
 
@@ -7241,12 +7081,7 @@ export function resolve_driver_hours_of_service_v1(
   return map[driver_id] ?? null;
 }
 
-export async function read_driver_hours_of_service_v1(
-  driver_id: string,
-): Promise<DriverHoursOfServiceRecord | null> {
-  const { read_driver_hours_of_service_v1 } = await import('./data-source/fleet');
-  return read_driver_hours_of_service_v1(driver_id);
-}
+export const read_driver_hours_of_service_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.read_driver_hours_of_service_v1);
 
 // ----------- Zone performance metrics (canonical accessor) ------------
 // W54-E — replaces the direct `seed-raw/network-zones.js` import in
@@ -7322,24 +7157,12 @@ export function resolve_workflow_template_id_v1(template_key: string): string | 
 export type TaskFilter = { task_type?: string; assigned_to?: string; at_risk?: boolean };
 
 export async function listTasks(filters: TaskFilter = {}): Promise<Record<string, unknown>[]> {
-  const { listTasks } = await import('./data-source/tasks');
+  const { listTasks } = await loadTasksAdapter();
   return listTasks(filters);
 }
-export async function transition_task_v1(
-  taskId: string,
-  transition: { next_status?: string; payload?: Record<string, unknown>; [k: string]: unknown },
-): Promise<{ ok: true; task: Record<string, unknown> | undefined; task_event_id?: string | null }> {
-  const { transition_task_v1 } = await import('./data-source/tasks');
-  return transition_task_v1(taskId, transition);
-}
+export const transition_task_v1 = /* @__PURE__ */ lazyAdapter(loadTasksAdapter, adapter => adapter.transition_task_v1);
 
-export async function resolve_manual_review_task_v1(
-  taskId: string,
-  resolution: { resolution_outcome?: string; resolution_notes?: string | null },
-): Promise<Record<string, unknown>> {
-  const { resolve_manual_review_task_v1 } = await import('./data-source/tasks');
-  return resolve_manual_review_task_v1(taskId, resolution);
-}
+export const resolve_manual_review_task_v1 = /* @__PURE__ */ lazyAdapter(loadTasksAdapter, adapter => adapter.resolve_manual_review_task_v1);
 
 export interface AssignTaskArgs extends Record<string, unknown> {
   task_id: string;
@@ -7361,17 +7184,9 @@ export interface OpenOpsSessionResult extends Record<string, unknown> {
   created: boolean;
 }
 
-export async function assign_task_v1(
-  args: AssignTaskArgs,
-): Promise<{ task_id: string; task_event_id: string | null; task?: Record<string, unknown> }> {
-  const { assign_task_v1 } = await import('./data-source/tasks');
-  return assign_task_v1(args);
-}
+export const assign_task_v1 = /* @__PURE__ */ lazyAdapter(loadTasksAdapter, adapter => adapter.assign_task_v1);
 
-export async function open_ops_session_v1(args: OpenOpsSessionArgs): Promise<OpenOpsSessionResult> {
-  const { open_ops_session_v1 } = await import('./data-source/tasks');
-  return open_ops_session_v1(args);
-}
+export const open_ops_session_v1 = /* @__PURE__ */ lazyAdapter(loadTasksAdapter, adapter => adapter.open_ops_session_v1);
 
 // ----------- Shipments -----------
 export interface UiCreateShipmentArgs extends Record<string, unknown> {
@@ -7412,12 +7227,7 @@ export interface UiCreateShipmentResult extends Record<string, unknown> {
   dry_run?: boolean;
 }
 
-export async function ui_create_shipment_v1(
-  args: UiCreateShipmentArgs,
-): Promise<UiCreateShipmentResult> {
-  const { ui_create_shipment_v1 } = await import('./data-source/shipments');
-  return ui_create_shipment_v1(args);
-}
+export const ui_create_shipment_v1 = /* @__PURE__ */ lazyAdapter(loadShipmentsAdapter, adapter => adapter.ui_create_shipment_v1);
 
 export async function shipment_amend_cancel_v1(
   shipmentId: string,
@@ -7434,16 +7244,11 @@ export async function shipment_amend_cancel_v1(
   diff: Record<string, unknown> | null;
   settings_resolution_id: string;
 }> {
-  const { shipment_amend_cancel_v1 } = await import('./data-source/shipments');
+  const { shipment_amend_cancel_v1 } = await loadShipmentsAdapter();
   return shipment_amend_cancel_v1(shipmentId, op, payload, opts);
 }
 
-export async function shipment_amend_cancel_options_v1(
-  shipmentId: string,
-): Promise<Record<string, unknown>> {
-  const { shipment_amend_cancel_options_v1 } = await import('./data-source/shipments');
-  return shipment_amend_cancel_options_v1(shipmentId);
-}
+export const shipment_amend_cancel_options_v1 = /* @__PURE__ */ lazyAdapter(loadShipmentsAdapter, adapter => adapter.shipment_amend_cancel_options_v1);
 export interface ShipmentResortResult extends Record<string, unknown> {
   ok: true;
   status?: string;
@@ -7490,7 +7295,7 @@ function backendFailureText(value: unknown): string {
   }
 }
 
-function backendReadbackFailureError(rec: Record<string, unknown>, fallback: string): Error | null {
+export function backendReadbackFailureError(rec: Record<string, unknown>, fallback: string): Error | null {
   const status = (
     asNonEmptyString(rec.workflow_status) ??
     asNonEmptyString(rec.status) ??
@@ -7663,25 +7468,7 @@ export function requireLiveLabelDraftResult(data: unknown, rpcName: string): Lab
   return rec as LabelDesignerDraftMutationResult;
 }
 
-export async function requireLiveLabelDraftMutationReadback(
-  result: LabelDesignerDraftMutationResult,
-  rpcName: string,
-): Promise<LabelDesignerDraftMutationResult> {
-  if (result.ok === false) return result;
-  const draft = result.draft;
-  const draftId = asNonEmptyString(draft?.id) ?? asNonEmptyString(result.draft_id);
-  const scopeType = draft?.scope_type;
-  const scopeId = asNonEmptyString(draft?.scope_id);
-  if (!draftId || !scopeType || !scopeId) {
-    throw new Error(`${rpcName} did not return draft scope for backend readback`);
-  }
-  const readback = await label_designer_list_drafts(scopeType, scopeId);
-  const readbackDraft = readback.drafts.find((row) => row.id === draftId);
-  if (!readbackDraft) {
-    throw new Error(`${rpcName} backend draft list readback missing draft`);
-  }
-  return { ...result, draft: readbackDraft };
-}
+export const requireLiveLabelDraftMutationReadback = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.requireLiveLabelDraftMutationReadback);
 
 export function requireLiveLabelValidationResult(data: unknown): LabelDesignerDraftValidationResult {
   const rec = requireLiveRpcRecord(
@@ -7794,33 +7581,9 @@ export const SA_SHORT_ADDRESS_READBACK_KEYS = [
   'shortCode',
 ] as const;
 
-export async function requireLiveRouteRunAssignmentReadback(
-  rpcName: string,
-  runId: string,
-  rec: Record<string, unknown>,
-): Promise<void> {
-  await requireLiveResourceReadback('route_runs', runId, rpcName);
-  const assignmentId = asNonEmptyString(rec.route_run_assignment_id) ?? asNonEmptyString(rec.assignment_id);
-  if (assignmentId) {
-    await requireLiveResourceReadback('route_run_assignments', assignmentId, rpcName);
-  } else {
-    await requireLiveResourceListReadback('route_run_assignments', { route_run_id: runId }, rpcName);
-  }
-  const eventId =
-    asNonEmptyString(rec.route_run_assignment_event_id) ??
-    asNonEmptyString(rec.assignment_event_id) ??
-    asNonEmptyString(rec.event_id);
-  if (eventId) {
-    await requireLiveResourceReadback('route_run_assignment_events', eventId, rpcName);
-  } else {
-    await requireLiveResourceListReadback('route_run_assignment_events', { route_run_id: runId }, rpcName);
-  }
-}
+export const requireLiveRouteRunAssignmentReadback = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.requireLiveRouteRunAssignmentReadback);
 
-export async function ui_execute_shipment_resort_v1(shipmentId: string): Promise<ShipmentResortResult> {
-  const { ui_execute_shipment_resort_v1 } = await import('./data-source/shipments');
-  return ui_execute_shipment_resort_v1(shipmentId);
-}
+export const ui_execute_shipment_resort_v1 = /* @__PURE__ */ lazyAdapter(loadShipmentsAdapter, adapter => adapter.ui_execute_shipment_resort_v1);
 
 export interface ShipmentUpdateGeocodeResult extends Record<string, unknown> {
   ok: true;
@@ -7836,135 +7599,22 @@ export async function ui_execute_shipment_update_geocode_v1(
   shipmentId: string,
   params: Record<string, unknown> = {},
 ): Promise<ShipmentUpdateGeocodeResult> {
-  const { ui_execute_shipment_update_geocode_v1 } = await import('./data-source/shipments');
+  const { ui_execute_shipment_update_geocode_v1 } = await loadShipmentsAdapter();
   return ui_execute_shipment_update_geocode_v1(shipmentId, params);
 }
 
-// W13-5 — operator-initiated comms attempt enqueue. Closes OPERATIONS D3 §3
-// (CommsTab "Send now" orphan-toast). Routes to canonical
-// `public.enqueue_comms_attempt_v1(p_args jsonb)` migration when supabase
-// client is configured; otherwise returns the canonical envelope shape so the
-// FE swap is a single env-flip away. Policy gate is
-// `communication_policy.allow_operator_initiated_send` (see migration
-// 202604280200_enqueue_comms_attempt_v1.sql for canonical RPC contract).
-export async function enqueue_comms_attempt_v1(
-  args: {
-    shipment_id: string;
-    channel: string;
-    template_id?: string;
-    recipient_override?: Record<string, unknown>;
-  },
-): Promise<{
-  ok: true;
-  comms_attempt_id: string;
-  shipment_id: string;
-  channel: string;
-  template_id: string | null;
-  status: 'queued';
-  correlation_id: string;
-  settings_resolution_id: string;
-}> {
-  const liveMode = Boolean(liveRpcTarget());
-  const result = await phaseC6Rpc('enqueue_comms_attempt_v1', args, 'comms_attempt');
-  if (liveMode) {
-    const attemptId =
-      asNonEmptyString(result.comms_attempt_id) ??
-      asNonEmptyString(result.id);
-    if (!attemptId) {
-      throw new Error('enqueue_comms_attempt_v1 did not return comms_attempt_id');
-    }
-    await requireLiveResourceReadback('comms_attempts', attemptId, 'enqueue_comms_attempt_v1');
-    await requireLiveResourceReadback('shipments', args.shipment_id, 'enqueue_comms_attempt_v1');
-  }
-  if ((result as { ok?: boolean }).ok === undefined) {
-    // phaseC6Rpc seed envelope path — supplement seam-shape fields the FE
-    // surfaces in toasts (`shipment_id`, `channel`, `status`).
-    return {
-      ok: true,
-      comms_attempt_id: (result as { comms_attempt_id?: string }).comms_attempt_id ?? 'cma_' + Math.floor(Math.random() * 90000),
-      shipment_id: args.shipment_id,
-      channel: args.channel,
-      template_id: args.template_id ?? null,
-      status: 'queued',
-      correlation_id: (result as { correlation_id?: string }).correlation_id ?? '0x' + Math.random().toString(16).slice(2, 10),
-      settings_resolution_id: (result as { settings_resolution_id?: string }).settings_resolution_id ?? 'srlv_' + Math.floor(Math.random() * 9000),
-    };
-  }
-  return result as {
-    ok: true;
-    comms_attempt_id: string;
-    shipment_id: string;
-    channel: string;
-    template_id: string | null;
-    status: 'queued';
-    correlation_id: string;
-    settings_resolution_id: string;
-  };
-}
+export const enqueue_comms_attempt_v1 = /* @__PURE__ */ lazyAdapter(loadShipmentsAdapter, adapter => adapter.enqueue_comms_attempt_v1);
 export async function ui_execute_shipment_batch_operation_v1(
   ids: string[],
   op: string,
   payload: Record<string, unknown>,
   opts: { dryRun?: boolean } = {},
 ): Promise<{ ok: true; count: number; op: string; dry_run: boolean }> {
-  const { ui_execute_shipment_batch_operation_v1 } = await import('./data-source/shipments');
+  const { ui_execute_shipment_batch_operation_v1 } = await loadShipmentsAdapter();
   return ui_execute_shipment_batch_operation_v1(ids, op, payload, opts);
 }
 
-// ----------- Baskets -----------
-//
-// Dedicated Console V2 basket transition seam. Reads use the registry-backed
-// public.baskets / basket_items / basket_transitions resources; writes route
-// through ui_update_basket_state_v1 so the state update is centralized and the
-// DB trigger records the append-only transition ledger.
-export async function ui_update_basket_state_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const client = getSupabaseClient();
-  if (client) {
-    return phaseC6Rpc('ui_update_basket_state_v1', args, 'basket');
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_update_basket_state_v1');
-  await sleep(60);
-  const basketId = String(args.basket_id ?? args.id ?? '').trim();
-  const nextState = String(args.state ?? args.new_state ?? '').trim();
-  if (!basketId) throw new Error('ui_update_basket_state_v1 requires basket_id');
-  if (!nextState) throw new Error('ui_update_basket_state_v1 requires state');
-
-  const baskets = (seed as { baskets?: Array<Record<string, unknown>> }).baskets ?? [];
-  const basket = baskets.find((row) => row.id === basketId);
-  if (!basket) throw new Error(`basket_not_found:${basketId}`);
-
-  const previousState = basket.state ?? null;
-  const now = new Date().toISOString();
-  basket.state = nextState;
-  basket.updated_at = now;
-  basket.version = Number(basket.version ?? 1) + 1;
-
-  const transitions = (seed as { basket_transitions?: Array<Record<string, unknown>> }).basket_transitions;
-  const transitionId = nextResourceId('basket_transition');
-  if (Array.isArray(transitions)) {
-    transitions.unshift({
-      id: transitionId,
-      basket_id: basketId,
-      previous_state: previousState,
-      new_state: nextState,
-      changed_at: now,
-      changed_by: state.user.id,
-      notes: typeof args.reason === 'string' ? args.reason : null,
-    });
-  }
-
-  return buildEnvelope({
-    basket_id: basketId,
-    previous_state: previousState,
-    new_state: nextState,
-    state: nextState,
-    transition_id: transitionId,
-    transitioned_at: now,
-  });
-}
+export const ui_update_basket_state_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_update_basket_state_v1);
 
 export interface BasketCreateMutationResult extends Record<string, unknown> {
   ok: true;
@@ -7986,19 +7636,9 @@ export interface BasketUpdateMutationResult extends Record<string, unknown> {
   settings_resolution_id?: string;
 }
 
-export async function basket_create_v1(
-  args: Record<string, unknown>,
-): Promise<BasketCreateMutationResult> {
-  const { basket_create_v1 } = await import('./data-source/dispatch');
-  return basket_create_v1(args);
-}
+export const basket_create_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.basket_create_v1);
 
-export async function basket_update_v1(
-  args: Record<string, unknown>,
-): Promise<BasketUpdateMutationResult> {
-  const { basket_update_v1 } = await import('./data-source/dispatch');
-  return basket_update_v1(args);
-}
+export const basket_update_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.basket_update_v1);
 
 export interface RoutePlanCreateInput {
   organization_id?: string | null;
@@ -8008,29 +7648,11 @@ export interface RoutePlanCreateInput {
   constraints?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
-export async function ui_create_route_plan_v1(
-  input: RoutePlanCreateInput,
-): Promise<{ ok: true; route_plan_id: string; status: string; plan_id: string }> {
-  const { ui_create_route_plan_v1 } = await import('./data-source/dispatch');
-  return ui_create_route_plan_v1(input);
-}
+export const ui_create_route_plan_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_create_route_plan_v1);
 
-export async function ui_solve_route_plan_v1(planId: string): Promise<{ ok: true; plan_id: string; status: string }> {
-  const { ui_solve_route_plan_v1 } = await import('./data-source/dispatch');
-  return ui_solve_route_plan_v1(planId);
-}
-export async function ui_freeze_route_plan_v1(
-  planId: string,
-): Promise<{ ok: true; plan_id: string; status: string; constraint_validation: { fail_count: number } }> {
-  const { ui_freeze_route_plan_v1 } = await import('./data-source/dispatch');
-  return ui_freeze_route_plan_v1(planId);
-}
-export async function ui_publish_route_plan_v1(
-  planId: string,
-): Promise<{ ok: true; plan_id: string; execution_pack_hash: string }> {
-  const { ui_publish_route_plan_v1 } = await import('./data-source/dispatch');
-  return ui_publish_route_plan_v1(planId);
-}
+export const ui_solve_route_plan_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_solve_route_plan_v1);
+export const ui_freeze_route_plan_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_freeze_route_plan_v1);
+export const ui_publish_route_plan_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_publish_route_plan_v1);
 
 export interface RoutePlanExecutionPack extends Record<string, unknown> {
   route_plan_id?: string;
@@ -8039,18 +7661,8 @@ export interface RoutePlanExecutionPack extends Record<string, unknown> {
   shipment_count?: number;
 }
 
-export async function ui_route_plan_execution_pack_v1(
-  planId: string,
-): Promise<RoutePlanExecutionPack | null> {
-  const { ui_route_plan_execution_pack_v1 } = await import('./data-source/dispatch');
-  return ui_route_plan_execution_pack_v1(planId);
-}
-export async function ui_apply_route_plan_v1(
-  planId: string,
-): Promise<{ ok: true; plan_id: string; status: string; runs_materialized: number }> {
-  const { ui_apply_route_plan_v1 } = await import('./data-source/dispatch');
-  return ui_apply_route_plan_v1(planId);
-}
+export const ui_route_plan_execution_pack_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_route_plan_execution_pack_v1);
+export const ui_apply_route_plan_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_apply_route_plan_v1);
 
 export interface RoutePlanRebalanceInput {
   source_route_plan_id: string;
@@ -8060,12 +7672,7 @@ export interface RoutePlanRebalanceInput {
   idempotency_key?: string | null;
   metadata?: Record<string, unknown>;
 }
-export async function ui_rebalance_route_plan_v1(
-  input: RoutePlanRebalanceInput,
-): Promise<{ ok: true; plan_id: string; moves_applied: number }> {
-  const { ui_rebalance_route_plan_v1 } = await import('./data-source/dispatch');
-  return ui_rebalance_route_plan_v1(input);
-}
+export const ui_rebalance_route_plan_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_rebalance_route_plan_v1);
 
 export interface RoutePlanConstraintCheck {
   name: string;
@@ -8075,12 +7682,7 @@ export interface RoutePlanConstraintCheck {
   detail?: string;
 }
 
-export async function route_plan_validate_constraints_v1(
-  planId: string,
-): Promise<{ ok: true; plan_id: string; fail_count: number; items: RoutePlanConstraintCheck[] }> {
-  const { route_plan_validate_constraints_v1 } = await import('./data-source/dispatch');
-  return route_plan_validate_constraints_v1(planId);
-}
+export const route_plan_validate_constraints_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.route_plan_validate_constraints_v1);
 
 export interface RouteRunAssignTarget {
   organization_id?: string;
@@ -8119,20 +7721,14 @@ export interface RouteRunAssignmentResponseResult extends Record<string, unknown
   created?: boolean;
 }
 
-export async function ui_execute_route_run_assign_v1(
-  runId: string,
-  target: RouteRunAssignTarget | unknown,
-): Promise<{ ok: true; run_id: string; target: RouteRunAssignTarget | unknown }> {
-  const { ui_execute_route_run_assign_v1 } = await import('./data-source/dispatch');
-  return ui_execute_route_run_assign_v1(runId, target);
-}
+export const ui_execute_route_run_assign_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_execute_route_run_assign_v1);
 
 export async function ui_execute_route_run_assignment_response_v1(
   runId: string,
   actionKey: string,
   params: RouteRunAssignmentResponseParams = {},
 ): Promise<RouteRunAssignmentResponseResult> {
-  const { ui_execute_route_run_assignment_response_v1 } = await import('./data-source/dispatch');
+  const { ui_execute_route_run_assignment_response_v1 } = await loadDispatchAdapter();
   return ui_execute_route_run_assignment_response_v1(runId, actionKey, params);
 }
 
@@ -8146,68 +7742,18 @@ export interface RouteStopReassignTarget {
   reassignment_reason?: string;
   metadata?: Record<string, unknown>;
 }
-export async function ui_execute_route_stop_reassign_v1(
-  stopIds: string[],
-  target: RouteStopReassignTarget | unknown,
-): Promise<{ ok: true; count: number; target: RouteStopReassignTarget | unknown; assignment_status: string }> {
-  const { ui_execute_route_stop_reassign_v1 } = await import('./data-source/dispatch');
-  return ui_execute_route_stop_reassign_v1(stopIds, target);
-}
-export async function ui_confirm_route_run_departure_v1(
-  runId: string,
-): Promise<{ ok: true; departure_confirmed_at: string; run_id: string }> {
-  const { ui_confirm_route_run_departure_v1 } = await import('./data-source/dispatch');
-  return ui_confirm_route_run_departure_v1(runId);
-}
-export async function route_run_scan_out_reconciliation_v1(
-  runId: string,
-): Promise<{ ok: true; expected: number; scanned: number; discrepancies: string[]; run_id: string }> {
-  const { route_run_scan_out_reconciliation_v1 } = await import('./data-source/dispatch');
-  return route_run_scan_out_reconciliation_v1(runId);
-}
+export const ui_execute_route_stop_reassign_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_execute_route_stop_reassign_v1);
+export const ui_confirm_route_run_departure_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_confirm_route_run_departure_v1);
+export const route_run_scan_out_reconciliation_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.route_run_scan_out_reconciliation_v1);
 
-export async function pickup_requests_list_v1(
-  filter?: unknown,
-): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-  const { pickup_requests_list_v1 } = await import('./data-source/dispatch');
-  return pickup_requests_list_v1(filter);
-}
-export async function pickup_waves_list_v1(
-  filter?: unknown,
-): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-  const { pickup_waves_list_v1 } = await import('./data-source/dispatch');
-  return pickup_waves_list_v1(filter);
-}
-export async function pickup_failures_list_v1(
-  filter?: unknown,
-): Promise<{ rows: Record<string, unknown>[]; total: number }> {
-  const { pickup_failures_list_v1 } = await import('./data-source/dispatch');
-  return pickup_failures_list_v1(filter);
-}
+export const pickup_requests_list_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.pickup_requests_list_v1);
+export const pickup_waves_list_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.pickup_waves_list_v1);
+export const pickup_failures_list_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.pickup_failures_list_v1);
 
-export async function create_pickup_request_v1(payload: unknown): Promise<{
-  ok: true;
-  shipment_id: string;
-  tracking_number?: string;
-  created?: boolean;
-  operation?: string;
-  [key: string]: unknown;
-}> {
-  const { create_pickup_request_v1 } = await import('./data-source/dispatch');
-  return create_pickup_request_v1(payload);
-}
+export const create_pickup_request_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.create_pickup_request_v1);
 
-export async function create_pickup_wave_v1(payload: unknown): Promise<{ ok: true; wave_id: string }> {
-  const { create_pickup_wave_v1 } = await import('./data-source/dispatch');
-  return create_pickup_wave_v1(payload);
-}
-export async function assign_pickup_wave_v1(
-  waveId: string,
-  target: unknown,
-): Promise<{ ok: true; wave_id: string; target: unknown }> {
-  const { assign_pickup_wave_v1 } = await import('./data-source/dispatch');
-  return assign_pickup_wave_v1(waveId, target);
-}
+export const create_pickup_wave_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.create_pickup_wave_v1);
+export const assign_pickup_wave_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.assign_pickup_wave_v1);
 
 // ----------- NDR / Exceptions -----------
 // Canonical 6-arg signature per migration
@@ -8331,7 +7877,7 @@ export async function ui_execute_dispatch_exception_resolution_v1(
   apply_status: 'preview' | 'completed' | 'scheduled' | 'pending_review' | 'blocked' | 'mixed';
   results: Array<{ task_id: string; outcome: string; [k: string]: unknown }>;
 }> {
-  const { ui_execute_dispatch_exception_resolution_v1 } = await import('./data-source/dispatch');
+  const { ui_execute_dispatch_exception_resolution_v1 } = await loadDispatchAdapter();
   return ui_execute_dispatch_exception_resolution_v1(taskId, resolution, opts);
 }
 
@@ -8343,19 +7889,9 @@ export interface WarehouseScanCorrectionRequestArgs {
   metadata?: Record<string, unknown>;
 }
 
-export async function ui_request_warehouse_scan_correction_v1(
-  args: WarehouseScanCorrectionRequestArgs,
-): Promise<Record<string, unknown>> {
-  const { ui_request_warehouse_scan_correction_v1 } = await import('./data-source/dispatch');
-  return ui_request_warehouse_scan_correction_v1(args);
-}
+export const ui_request_warehouse_scan_correction_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_request_warehouse_scan_correction_v1);
 
-export async function record_scan_event_v1(
-  payload: Record<string, unknown>,
-): Promise<{ ok: true; scan_event_id: string; created?: boolean }> {
-  const { record_scan_event_v1 } = await import('./data-source/dispatch');
-  return record_scan_event_v1(payload);
-}
+export const record_scan_event_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.record_scan_event_v1);
 export const return_to_branch_shipments_v1 = {
   async list(_filter?: unknown): Promise<Record<string, unknown>[]> {
     const pageSize = 100;
@@ -8403,7 +7939,7 @@ export interface NdrBranchNextActionArgs {
 export async function resolve_ndr_branch_next_action_v1(
   args: NdrBranchNextActionArgs = {},
 ): Promise<string> {
-  const { resolve_ndr_branch_next_action_v1 } = await import('./data-source/dispatch');
+  const { resolve_ndr_branch_next_action_v1 } = await loadDispatchAdapter();
   return resolve_ndr_branch_next_action_v1(args);
 }
 
@@ -8500,7 +8036,7 @@ export function buildMutationFallbackEnvelope(
  * cache invalidation behave identically across modes. To keep zero
  * redundancy we route every C6 RPC through this single function.
  */
-async function phaseC6Rpc(
+export async function phaseC6Rpc(
   rpcName: string,
   args: Record<string, unknown>,
   resourceKeyHint?: string,
@@ -8519,7 +8055,7 @@ async function phaseC6Rpc(
   return buildMutationFallbackEnvelope(args, resourceKeyHint);
 }
 
-async function phaseC6ApiRpc(
+export async function phaseC6ApiRpc(
   rpcName: string,
   args: Record<string, unknown>,
   resourceKeyHint?: string,
@@ -8542,18 +8078,7 @@ async function phaseC6ApiRpc(
   return buildEnvelope(extras);
 }
 
-export async function requireLiveUserLifecycleReadback(
-  rpcName: string,
-  targetUserId: string,
-): Promise<{
-  user: Record<string, unknown> | null;
-  directory: Record<string, unknown> | null;
-}> {
-  if (!liveRpcTarget()) return { user: null, directory: null };
-  const user = await requireLiveResourceReadback('users', targetUserId, rpcName);
-  const directory = await requireLiveResourceReadback('user_directory', targetUserId, rpcName);
-  return { user, directory };
-}
+export const requireLiveUserLifecycleReadback = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.requireLiveUserLifecycleReadback);
 
 export function assertLiveUserScopeReadback(
   rpcName: string,
@@ -8579,52 +8104,6 @@ export function assertLiveUserScopeReadback(
   }
 }
 
-async function requireLiveUserSessionRevocationReadback(
-  rpcName: string,
-  targetUserId: string,
-  sessionId: string | null | undefined,
-  result: Record<string, unknown>,
-  revokedReason: string | null | undefined,
-): Promise<Record<string, unknown>> {
-  const normalizedSessionId = asNonEmptyString(sessionId);
-  const live = await liveRpc<Record<string, unknown>>('ui_list_user_sessions_v1', {
-    p_target_user_id: targetUserId,
-    p_limit: 50,
-  });
-  if (!live) throw new Error(`${rpcName} session readback requires a live backend`);
-  const rows = normalizeLiveListResult<Record<string, unknown>>(live.data, 0, 50).rows;
-  const revocationAuditId = asNonEmptyString(result.revocation_audit_id);
-  const candidates = rows.filter((row) => {
-    const userMatches = asNonEmptyString(row.user_id) === targetUserId;
-    const sessionMatches = !normalizedSessionId || asNonEmptyString(row.id) === normalizedSessionId;
-    return userMatches && sessionMatches;
-  });
-  const revoked = candidates.find((row) => {
-    const status = asNonEmptyString(row.revocation_status);
-    const auditMatches = !revocationAuditId || asNonEmptyString(row.revocation_audit_id) === revocationAuditId;
-    return Boolean(status) && auditMatches;
-  });
-  if (!revoked) {
-    throw new Error(`${rpcName} backend readback missing revoked session evidence`);
-  }
-  const status = asNonEmptyString(revoked.revocation_status)?.toLowerCase();
-  if (status === 'failed') {
-    throw new Error(`${rpcName} backend readback session revocation failed`);
-  }
-  const expectedReason = asNonEmptyString(revokedReason);
-  if (expectedReason) {
-    const metadata = objectRecord(revoked.metadata);
-    const readbackReason =
-      asNonEmptyString(revoked.revocation_reason) ??
-      asNonEmptyString(revoked.reason) ??
-      asNonEmptyString(metadata.reason);
-    if (readbackReason !== expectedReason) {
-      throw new Error(`${rpcName} backend readback missing persisted revocation reason`);
-    }
-  }
-  return revoked;
-}
-
 // ----------- Warehouse -----------
 //
 // Canonical RPC `public.warehouse_transfer_execute_v1(p_args jsonb)` —
@@ -8644,18 +8123,9 @@ export interface WarehouseTransferManifestCreateResult extends Record<string, un
   created: boolean;
   item_count: number;
 }
-export async function create_warehouse_transfer_manifest_v1(
-  args: Record<string, unknown>,
-): Promise<WarehouseTransferManifestCreateResult> {
-  const { create_warehouse_transfer_manifest_v1 } = await import('./data-source/dispatch');
-  return create_warehouse_transfer_manifest_v1(args);
-}
-export async function warehouse_transfer_execute_v1(
-  payload: Record<string, unknown> = {},
-): Promise<WarehouseTransferExecuteResult> {
-  const result = await phaseC6Rpc('warehouse_transfer_execute_v1', payload, 'warehouse_transfer');
-  return result as WarehouseTransferExecuteResult;
-}
+export const create_warehouse_transfer_manifest_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.create_warehouse_transfer_manifest_v1);
+
+export const warehouse_transfer_execute_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.warehouse_transfer_execute_v1);
 // W35e-4 — Aligned to canonical jsonb envelope per
 // supabase/migrations/202601261740_warehouse_transfer_reconcile_finalize_v1.sql.
 // Live mode routes through the api-schema `transition_warehouse_transfer_v1`
@@ -8664,12 +8134,7 @@ export async function warehouse_transfer_execute_v1(
 // In-memory seed mode keeps the legacy minimal stub shape so existing tests
 // continue to assert on adapter input only (warehouse.test.tsx W35e-4 spies
 // on the adapter call, not on its return shape).
-export async function transition_warehouse_transfer_v1(
-  args: { warehouse_transfer_id: string; to_status: string; [k: string]: unknown },
-): Promise<{ ok: true; warehouse_transfer_id: string; to_status: string; [k: string]: unknown }> {
-  const { transition_warehouse_transfer_v1 } = await import('./data-source/dispatch');
-  return transition_warehouse_transfer_v1(args);
-}
+export const transition_warehouse_transfer_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.transition_warehouse_transfer_v1);
 
 export interface WarehouseTransferUiActionResult extends Record<string, unknown> {
   ok: true;
@@ -8679,71 +8144,27 @@ export interface WarehouseTransferUiActionResult extends Record<string, unknown>
   count: number;
 }
 
-export async function ui_execute_warehouse_transfer_dispatch_v1(
-  args: { warehouse_transfer_id: string; params?: Record<string, unknown> },
-): Promise<WarehouseTransferUiActionResult> {
-  const { ui_execute_warehouse_transfer_dispatch_v1 } = await import('./data-source/dispatch');
-  return ui_execute_warehouse_transfer_dispatch_v1(args);
-}
+export const ui_execute_warehouse_transfer_dispatch_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_execute_warehouse_transfer_dispatch_v1);
 
-export async function ui_execute_warehouse_transfer_checkpoint_v1(
-  args: {
-    action_key: 'warehouse_transfers.scan_departure' | 'warehouse_transfers.scan_arrival';
-    warehouse_transfer_id: string;
-    barcode: string;
-    handling_unit_code?: string | null;
-    device_id?: string | null;
-    ops_session_id?: string | null;
-    notes?: string | null;
-  },
-): Promise<WarehouseTransferUiActionResult> {
-  const { ui_execute_warehouse_transfer_checkpoint_v1 } = await import('./data-source/dispatch');
-  return ui_execute_warehouse_transfer_checkpoint_v1(args);
-}
+export const ui_execute_warehouse_transfer_checkpoint_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_execute_warehouse_transfer_checkpoint_v1);
 
-export async function ui_execute_warehouse_transfer_reconcile_v1(
-  args: {
-    warehouse_transfer_id: string;
-    received_shipment_count: number;
-    damaged_shipment_count?: number;
-    missing_shipment_count?: number;
-    unmanifested_shipment_count?: number;
-    reconcile_notes?: string | null;
-  },
-): Promise<WarehouseTransferUiActionResult> {
-  const { ui_execute_warehouse_transfer_reconcile_v1 } = await import('./data-source/dispatch');
-  return ui_execute_warehouse_transfer_reconcile_v1(args);
-}
+export const ui_execute_warehouse_transfer_reconcile_v1 = /* @__PURE__ */ lazyAdapter(loadDispatchAdapter, adapter => adapter.ui_execute_warehouse_transfer_reconcile_v1);
 
-// ----------- Phase C6 PLATFORM mutations (alerts, feature flags, access, organizations) -----------
+export const create_alert_rule_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.create_alert_rule_v1);
 
-// PLATFORM/alerts
-export const create_alert_rule_v1 = (args: Record<string, unknown>) =>
-  phaseC6Rpc('create_alert_rule_v1', args, 'alert_rule');
-export const update_alert_rule_v1 = (args: Record<string, unknown>) =>
-  phaseC6Rpc('update_alert_rule_v1', args, 'alert_rule');
-export const pause_alert_rule_v1 = (args: Record<string, unknown>) =>
-  phaseC6Rpc('pause_alert_rule_v1', args, 'alert_rule');
-export const resume_alert_rule_v1 = (args: Record<string, unknown>) =>
-  phaseC6Rpc('resume_alert_rule_v1', args, 'alert_rule');
-export const delete_alert_rule_v1 = (args: Record<string, unknown>) =>
-  phaseC6Rpc('delete_alert_rule_v1', args, 'alert_rule');
-export const test_alert_rule_v1 = (args: Record<string, unknown>) =>
-  phaseC6Rpc('test_alert_rule_v1', args, 'alert_rule');
+export const update_alert_rule_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.update_alert_rule_v1);
 
-export async function acknowledge_ops_alert_v1(args: Record<string, unknown>) {
-  const { requireLiveOpsAlertReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('acknowledge_ops_alert_v1', args, 'ops_alert');
-  await requireLiveOpsAlertReadback('acknowledge_ops_alert_v1', args, result, 'acknowledged_at');
-  return result;
-}
+export const pause_alert_rule_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.pause_alert_rule_v1);
 
-export async function resolve_ops_alert_v1(args: Record<string, unknown>) {
-  const { requireLiveOpsAlertReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('resolve_ops_alert_v1', args, 'ops_alert');
-  await requireLiveOpsAlertReadback('resolve_ops_alert_v1', args, result, 'resolved_at');
-  return result;
-}
+export const resume_alert_rule_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.resume_alert_rule_v1);
+
+export const delete_alert_rule_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.delete_alert_rule_v1);
+
+export const test_alert_rule_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.test_alert_rule_v1);
+
+export const acknowledge_ops_alert_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.acknowledge_ops_alert_v1);
+
+export const resolve_ops_alert_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.resolve_ops_alert_v1);
 
 // PLATFORM/feature flags
 export const create_feature_flag_v1 = (args: Record<string, unknown>) =>
@@ -8761,97 +8182,15 @@ export const set_rollout_v1 = (args: Record<string, unknown>) =>
 export const bulk_toggle_feature_flags_v1 = (args: Record<string, unknown>) =>
   phaseC6Rpc('bulk_toggle_feature_flags_v1', args);
 
-// PLATFORM/access — replaces PREVIEW chip
-export async function request_capability_grant_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { requireLiveCapabilityGrantReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('request_capability_grant_v1', args, 'capability_grant_request');
-  requireLiveCapabilityGrantReadback(args, result);
-  return result;
-}
+export const request_capability_grant_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.request_capability_grant_v1);
 
-export async function ui_review_capability_grant_request_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { requireLiveCapabilityGrantReviewReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc(
-    'ui_review_capability_grant_request_v1',
-    args,
-    'capability_grant_request',
-  );
-  await requireLiveCapabilityGrantReviewReadback(args, result);
-  return result;
-}
+export const ui_review_capability_grant_request_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.ui_review_capability_grant_request_v1);
 
-// PLATFORM/imports — W16-5. Canonical write RPCs replacing the PREVIEW chip.
-// Migrations of record:
-//   • import_job_create_v1   202604301905
-//   • import_job_cancel_v1   202604301905
-// Both RPCs accept a single jsonb envelope (`p_args`) and return the canonical
-// envelope `{ ok, import_job_id, status, correlation_id, settings_resolution_id }`.
-export async function requireLiveImportJobReadback(
-  rpcName: string,
-  importJobId: string,
-  expected?: { status?: string; cancelledReason?: string },
-): Promise<void> {
-  const job = await requireLiveResourceReadback('import_jobs', importJobId, rpcName);
-  if (expected?.status && String(job.status ?? '') !== expected.status) {
-    throw new Error(`${rpcName} backend readback status mismatch for import_jobs:${importJobId}`);
-  }
-  if (expected?.cancelledReason !== undefined) {
-    const jobReason = String(job.cancelled_reason ?? '').trim();
-    if (jobReason !== expected.cancelledReason) {
-      throw new Error(`${rpcName} backend readback cancellation reason mismatch for import_jobs:${importJobId}`);
-    }
-  }
-  const directory = await requireLiveResourceReadback('import_job_directory', importJobId, rpcName);
-  if (expected?.status && String(directory.status ?? '') !== expected.status) {
-    throw new Error(`${rpcName} backend readback status mismatch for import_job_directory:${importJobId}`);
-  }
-  if (expected?.cancelledReason !== undefined) {
-    const directoryReason = String(directory.cancelled_reason ?? '').trim();
-    if (directoryReason !== expected.cancelledReason) {
-      throw new Error(`${rpcName} backend readback cancellation reason mismatch for import_job_directory:${importJobId}`);
-    }
-  }
-}
+export const requireLiveImportJobReadback = /* @__PURE__ */ lazyAdapter(loadResourceImportAdapter, adapter => adapter.requireLiveImportJobReadback);
 
-function resolveImportJobId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string | null {
-  return asNonEmptyString(rec.import_job_id)
-    ?? asNonEmptyString(rec.job_id)
-    ?? asNonEmptyString(rec.id)
-    ?? asNonEmptyString(args.import_job_id)
-    ?? asNonEmptyString(args.job_id)
-    ?? asNonEmptyString(args.id);
-}
+export const import_job_create_v1 = /* @__PURE__ */ lazyAdapter(loadResourceImportAdapter, adapter => adapter.import_job_create_v1);
 
-export async function import_job_create_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc('import_job_create_v1', args, 'import_job');
-  if (liveRpcTarget()) {
-    const importJobId = resolveImportJobId(result, args);
-    if (!importJobId) throw new Error('import_job_create_v1 did not return import_job_id');
-    await requireLiveImportJobReadback('import_job_create_v1', importJobId);
-  }
-  return result;
-}
-export async function import_job_cancel_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const reason = asNonEmptyString(args.reason);
-  if (!reason) throw new Error('import_job_cancel_v1 requires cancellation reason');
-  const result = await phaseC6Rpc('import_job_cancel_v1', args, 'import_job');
-  if (liveRpcTarget()) {
-    const importJobId = resolveImportJobId(result, args);
-    if (!importJobId) throw new Error('import_job_cancel_v1 did not return import_job_id');
-    await requireLiveImportJobReadback('import_job_cancel_v1', importJobId, {
-      status: 'cancelled',
-      cancelledReason: reason,
-    });
-  }
-  return result;
-}
+export const import_job_cancel_v1 = /* @__PURE__ */ lazyAdapter(loadResourceImportAdapter, adapter => adapter.import_job_cancel_v1);
 
 // PLATFORM/access — RBAC role-management lifecycle (Phase E3 / IDENTITY P0).
 // All five mutation RPCs are now SHIPPED canonical:
@@ -8904,55 +8243,17 @@ export interface RbacTemplateProvisionMutationResult extends Record<string, unkn
   settings_resolution_id?: string;
 }
 
-export async function rbac_create_role_v1(
-  args: Record<string, unknown>,
-): Promise<RbacRoleMutationResult> {
-  const { rbac_create_role_v1 } = await import('./data-source/platform');
-  return rbac_create_role_v1(args);
-}
+export const rbac_create_role_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.rbac_create_role_v1);
 
-export async function rbac_update_role_v1(
-  args: Record<string, unknown>,
-): Promise<RbacRoleMutationResult> {
-  const { rbac_update_role_v1 } = await import('./data-source/platform');
-  return rbac_update_role_v1(args);
-}
+export const rbac_update_role_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.rbac_update_role_v1);
 
-export async function rbac_delete_role_v1(
-  args: Record<string, unknown>,
-): Promise<RbacRoleMutationResult> {
-  const { rbac_delete_role_v1 } = await import('./data-source/platform');
-  return rbac_delete_role_v1(args);
-}
+export const rbac_delete_role_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.rbac_delete_role_v1);
 
-export async function rbac_grant_role_v1(
-  args: Record<string, unknown>,
-): Promise<RbacUserRoleAssignmentMutationResult> {
-  const { rbac_grant_role_v1 } = await import('./data-source/platform');
-  return rbac_grant_role_v1(args);
-}
+export const rbac_grant_role_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.rbac_grant_role_v1);
 
-export async function rbac_revoke_role_v1(
-  args: Record<string, unknown>,
-): Promise<RbacUserRoleAssignmentMutationResult> {
-  const { rbac_revoke_role_v1 } = await import('./data-source/platform');
-  return rbac_revoke_role_v1(args);
-}
+export const rbac_revoke_role_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.rbac_revoke_role_v1);
 
-export async function provision_rbac_roles_from_templates_v1(
-  args: Record<string, unknown>,
-): Promise<RbacTemplateProvisionMutationResult> {
-  const { requireLiveRbacTemplateProvisionReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('provision_rbac_roles_from_templates_v1', args, 'rbac_role');
-  if (liveRpcTarget()) {
-    await requireLiveRbacTemplateProvisionReadback(
-      'provision_rbac_roles_from_templates_v1',
-      result,
-      args,
-    );
-  }
-  return result as RbacTemplateProvisionMutationResult;
-}
+export const provision_rbac_roles_from_templates_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.provision_rbac_roles_from_templates_v1);
 
 // PLATFORM/organizations — live Console review must enter through the browser-safe
 // `tenant-signup-review` edge function. Approval needs the edge helper because it
@@ -9027,12 +8328,7 @@ export function requireFunctionMutationResult(
 export const TENANT_SIGNUP_REVIEW_READBACK_ATTEMPTS = 10;
 export const TENANT_SIGNUP_REVIEW_READBACK_DELAY_MS = 250;
 
-export async function tenant_signup_review_apply_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { tenant_signup_review_apply_v1 } = await import('./data-source/platform');
-  return tenant_signup_review_apply_v1(args);
-}
+export const tenant_signup_review_apply_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.tenant_signup_review_apply_v1);
 
 export interface DataSourceTenantSignupConsoleRequestArgs extends Record<string, unknown> {
   email: string;
@@ -9045,12 +8341,7 @@ export interface DataSourceTenantSignupConsoleRequestArgs extends Record<string,
   locale?: string | null;
 }
 
-export async function tenant_signup_console_request_v1(
-  args: DataSourceTenantSignupConsoleRequestArgs,
-): Promise<Record<string, unknown>> {
-  const { tenant_signup_console_request_v1 } = await import('./data-source/platform');
-  return tenant_signup_console_request_v1(args);
-}
+export const tenant_signup_console_request_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.tenant_signup_console_request_v1);
 
 export interface DataSourceOrganizationProfileUpdateArgs extends Record<string, unknown> {
   organization_id: string;
@@ -9081,12 +8372,7 @@ export function assertReadbackValue(
   }
 }
 
-export async function ui_update_organization_profile_v1(
-  args: DataSourceOrganizationProfileUpdateArgs,
-): Promise<Record<string, unknown>> {
-  const { ui_update_organization_profile_v1 } = await import('./data-source/platform');
-  return ui_update_organization_profile_v1(args);
-}
+export const ui_update_organization_profile_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.ui_update_organization_profile_v1);
 
 export interface DataSourceTenantUserInviteArgs extends Record<string, unknown> {
   email: string;
@@ -9104,22 +8390,17 @@ export interface DataSourceTenantUserInviteArgs extends Record<string, unknown> 
 export async function ui_list_tenant_invitable_roles_v1(
   args: { organization_id?: string | null } = {},
 ): Promise<ListResult<ResourceRow>> {
-  const { ui_list_tenant_invitable_roles_v1 } = await import('./data-source/platform');
+  const { ui_list_tenant_invitable_roles_v1 } = await loadPlatformAdapter();
   return ui_list_tenant_invitable_roles_v1(args);
 }
 
-export async function tenant_user_invite_v1(
-  args: DataSourceTenantUserInviteArgs,
-): Promise<Record<string, unknown>> {
-  const { tenant_user_invite_v1 } = await import('./data-source/platform');
-  return tenant_user_invite_v1(args);
-}
+export const tenant_user_invite_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.tenant_user_invite_v1);
 
 // ----------- Phase C6 FLEET mutations (vehicles + drivers) -----------
 
 // FLEET/vehicles
 export const create_vehicle_v1 = (args: Record<string, unknown>): Promise<Record<string, unknown>> => (async () => {
-  const { confirmVehicleCreation } = await import('./data-source/fleet');
+  const { confirmVehicleCreation } = await loadFleetAdapter();
   const result = await phaseC6Rpc('create_vehicle_v1', args, 'vehicle');
   if (liveRpcTarget()) {
     await confirmVehicleCreation(args, result);
@@ -9127,144 +8408,45 @@ export const create_vehicle_v1 = (args: Record<string, unknown>): Promise<Record
   return result;
 })();
 export const upload_vehicle_document_v1 = (args: Record<string, unknown>): Promise<Record<string, unknown>> => (async () => {
-  const { confirmVehicleDocumentUpload } = await import('./data-source/fleet');
+  const { confirmVehicleDocumentUpload } = await loadFleetAdapter();
   const result = await phaseC6Rpc('upload_vehicle_document_v1', args, 'vehicle_document');
   if (liveRpcTarget()) {
     await confirmVehicleDocumentUpload(args, result);
   }
   return result;
 })();
-export async function assign_driver_to_vehicle_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { confirmVehicleAssignment } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc('assign_driver_to_vehicle_v1', args, 'vehicle_assignment');
-  if (liveRpcTarget()) {
-    await confirmVehicleAssignment(args, result);
-  }
-  return result;
-}
-export async function unassign_driver_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { confirmVehicleUnassignment } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc('unassign_driver_v1', args, 'vehicle_assignment');
-  if (liveRpcTarget()) {
-    await confirmVehicleUnassignment(args, result);
-  }
-  return result;
-}
-export async function mark_vehicle_oos_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { confirmVehicleOutOfService } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc('mark_vehicle_oos_v1', args, 'vehicle');
-  if (liveRpcTarget()) {
-    await confirmVehicleOutOfService(args, result);
-  }
-  return result;
-}
-export async function restore_vehicle_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { confirmVehicleRestoration } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc('restore_vehicle_v1', args, 'vehicle');
-  if (liveRpcTarget()) {
-    await confirmVehicleRestoration(args, result);
-  }
-  return result;
-}
-async function vehicleMaintenanceMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { confirmVehicleMaintenance } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc(rpcName, args, 'maintenance_window');
-  if (liveRpcTarget()) {
-    await confirmVehicleMaintenance(rpcName, args, result);
-  }
-  return result;
-}
 
-export const schedule_maintenance_v1 = (args: Record<string, unknown>) =>
-  vehicleMaintenanceMutation('schedule_maintenance_v1', args);
-export const complete_maintenance_v1 = (args: Record<string, unknown>) =>
-  vehicleMaintenanceMutation('complete_maintenance_v1', args);
-export const cancel_maintenance_v1 = (args: Record<string, unknown>) =>
-  vehicleMaintenanceMutation('cancel_maintenance_v1', args);
-export async function record_vehicle_event_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { confirmVehicleEvent } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc('record_vehicle_event_v1', args, 'vehicle_event');
-  if (liveRpcTarget()) {
-    await confirmVehicleEvent(args, result);
-  }
-  return result;
-}
+export const assign_driver_to_vehicle_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.assign_driver_to_vehicle_v1);
 
-// FLEET/drivers
-export async function create_driver_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { confirmDriverCreation } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc('create_driver_v1', args, 'driver_profile');
-  if (liveRpcTarget()) {
-    await confirmDriverCreation(result);
-  }
-  return result;
-}
-export async function upload_driver_document_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { confirmDriverDocumentUpload } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc('upload_driver_document_v1', args, 'driver_document');
-  if (liveRpcTarget()) {
-    await confirmDriverDocumentUpload(result);
-  }
-  return result;
-}
-async function driverProfileStatusMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { confirmDriverStatus } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc(rpcName, args, 'driver');
-  if (liveRpcTarget()) {
-    await confirmDriverStatus(rpcName, args, result);
-  }
-  return result;
-}
+export const unassign_driver_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.unassign_driver_v1);
 
-export const suspend_driver_v1 = (args: Record<string, unknown>) =>
-  driverProfileStatusMutation('suspend_driver_v1', args);
-export const restore_driver_v1 = (args: Record<string, unknown>) =>
-  driverProfileStatusMutation('restore_driver_v1', args);
+export const mark_vehicle_oos_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.mark_vehicle_oos_v1);
 
-async function driverDocumentMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { confirmDriverDocumentStatus } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc(rpcName, args, 'driver_document');
-  if (liveRpcTarget()) {
-    await confirmDriverDocumentStatus(rpcName, args, result);
-  }
-  return result;
-}
+export const restore_vehicle_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.restore_vehicle_v1);
 
-export const verify_driver_document_v1 = (args: Record<string, unknown>) =>
-  driverDocumentMutation('verify_driver_document_v1', args);
-export const reject_driver_document_v1 = (args: Record<string, unknown>) =>
-  driverDocumentMutation('reject_driver_document_v1', args);
-export async function create_driver_compliance_event_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { confirmDriverComplianceEvent } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc('create_driver_compliance_event_v1', args, 'driver_compliance_event');
-  if (liveRpcTarget()) {
-    await confirmDriverComplianceEvent(args, result);
-  }
-  return result;
-}
-export async function record_hours_of_service_segment_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { confirmDriverHoursOfServiceSegment } = await import('./data-source/fleet');
-  const result = await phaseC6Rpc(
-    'record_hours_of_service_segment_v1',
-    args,
-    'driver_hours_of_service',
-  );
-  if (liveRpcTarget()) {
-    await confirmDriverHoursOfServiceSegment(args, result);
-  }
-  return result;
-}
+export const schedule_maintenance_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.schedule_maintenance_v1);
+
+export const complete_maintenance_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.complete_maintenance_v1);
+
+export const cancel_maintenance_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.cancel_maintenance_v1);
+
+export const record_vehicle_event_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.record_vehicle_event_v1);
+
+export const create_driver_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.create_driver_v1);
+
+export const upload_driver_document_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.upload_driver_document_v1);
+
+export const suspend_driver_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.suspend_driver_v1);
+
+export const restore_driver_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.restore_driver_v1);
+
+export const verify_driver_document_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.verify_driver_document_v1);
+
+export const reject_driver_document_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.reject_driver_document_v1);
+
+export const create_driver_compliance_event_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.create_driver_compliance_event_v1);
+
+export const record_hours_of_service_segment_v1 = /* @__PURE__ */ lazyAdapter(loadFleetAdapter, adapter => adapter.record_hours_of_service_segment_v1);
 
 // ----------- Phase C6 SUPPORT mutations (cases + messages) -----------
 //
@@ -9295,310 +8477,51 @@ export const send_support_message_v1 = (args: Record<string, unknown>) =>
   phaseC6Rpc('send_support_message_v1', args, 'support_message');
 export const add_support_tag_v1 = (args: Record<string, unknown>) =>
   phaseC6Rpc('add_support_tag_v1', args, 'support_case');
-export async function public_tracking_review_request_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { public_tracking_review_request_v1 } = await import('./data-source/platform');
-  return public_tracking_review_request_v1(args);
-}
+export const public_tracking_review_request_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.public_tracking_review_request_v1);
 
-// ----------- Phase B5/C4 FINANCE mutations -----------
-//
-// Each RPC accepts a single jsonb envelope `p_args` and returns
-//   { ok, <resource>_id, correlation_id, settings_resolution_id, ... }.
-// All flow through the canonical phaseC6Rpc helper for zero-redundancy
-// (the helper is named after C6 only because it landed first; the envelope
-// shape is the same across B-suite jsonb RPCs, by design).
-//
-// Migrations of record (verified):
-//   • create_billing_invoice_v1     202604281010
-//   • update_billing_invoice_v1     202604281020
-//   • void_billing_invoice_v1       202604281030
-//   • billing_invoice_send_v1       202604281040
-//   • billing_invoice_refund_v1     202604281050
-//   • apply_settlement_v1           202604281060
-//   • reject_settlement_v1          202604281070
-//   • bank_recon_match_v1           202604281080
-//   • bank_recon_unmatch_v1         202604281090
-//   • dispute_resolve_v1            202604281100
-//   • dispute_reject_v1             202604281110
-//   • cancel_subscription_v1        202604281120
-//
-// Capability split (mirror of B5 access_control_policy registration in
-// 202604281000_phase_b5_finance_caps_v1.sql):
-//   • billing.write     — create / update / void / cancel_subscription
-//   • invoices.send     — send (broadcast)
-//   • invoices.refund   — refund
-//   • settlements.write — apply / reject
-//   • finance.write     — bank_recon_match / unmatch (reuse canonical RBAC)
-//   • disputes.write    — dispute_resolve / dispute_reject (NEW per B5)
+export const create_billing_invoice_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.create_billing_invoice_v1);
 
-// FINANCE — billing invoices
-function compactStringIds(values: unknown[]): string[] {
-  return Array.from(new Set(values.flatMap((value) => {
-    if (Array.isArray(value)) {
-      return value.map((item) => asNonEmptyString(item)).filter((item): item is string => Boolean(item));
-    }
-    const id = asNonEmptyString(value);
-    return id ? [id] : [];
-  })));
-}
+export const update_billing_invoice_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.update_billing_invoice_v1);
 
-function resolveBillingInvoiceIds(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string[] {
-  const rowIds = Array.isArray(rec.results)
-    ? rec.results.flatMap((row) => {
-      const rowRec = objectRecord(row);
-      const result = objectRecord(rowRec.result);
-      return [
-        asNonEmptyString(rowRec.billing_invoice_id),
-        asNonEmptyString(result.billing_invoice_id),
-        asNonEmptyString(result.id),
-      ];
-    })
-    : [];
-  return compactStringIds([
-    rec.billing_invoice_id,
-    rec.invoice_id,
-    rec.id,
-    args.billing_invoice_id,
-    args.invoice_id,
-    args.billing_invoice_ids,
-    args.invoice_ids,
-    rowIds,
-  ]);
-}
+export const void_billing_invoice_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.void_billing_invoice_v1);
 
-async function requireLiveBillingInvoiceReadback(
-  rpcName: string,
-  billingInvoiceIds: string[],
-): Promise<void> {
-  if (billingInvoiceIds.length === 0) {
-    throw new Error(`${rpcName} did not return billing_invoice_id`);
-  }
-  for (const billingInvoiceId of billingInvoiceIds) {
-    await requireLiveResourceReadback('billing_invoices', billingInvoiceId, rpcName);
-    await requireLiveResourceReadback('billing_invoice_directory', billingInvoiceId, rpcName);
-  }
-}
+export const billing_invoice_send_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.billing_invoice_send_v1);
 
-async function billingInvoiceMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc(rpcName, args, 'billing_invoice');
-  if (liveRpcTarget()) {
-    await requireLiveBillingInvoiceReadback(rpcName, resolveBillingInvoiceIds(result, args));
-  }
-  return result;
-}
+export const ui_bulk_billing_invoice_send_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_bulk_billing_invoice_send_v1);
 
-export const create_billing_invoice_v1 = (args: Record<string, unknown>) =>
-  billingInvoiceMutation('create_billing_invoice_v1', args);
-export const update_billing_invoice_v1 = (args: Record<string, unknown>) =>
-  billingInvoiceMutation('update_billing_invoice_v1', args);
-export const void_billing_invoice_v1 = (args: Record<string, unknown>) =>
-  billingInvoiceMutation('void_billing_invoice_v1', args);
-export const billing_invoice_send_v1 = (args: Record<string, unknown>) =>
-  billingInvoiceMutation('billing_invoice_send_v1', args);
-export async function ui_bulk_billing_invoice_send_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const result = await phaseC6ApiRpc('ui_bulk_billing_invoice_send_v1', args);
-  if (liveRpcTarget()) {
-    await requireLiveBillingInvoiceReadback('ui_bulk_billing_invoice_send_v1', resolveBillingInvoiceIds(result, args));
-  }
-  return result;
-}
-export const billing_invoice_refund_v1 = (args: Record<string, unknown>) =>
-  billingInvoiceMutation('billing_invoice_refund_v1', args);
-export const billing_invoice_mark_paid_v1 = (args: Record<string, unknown>) =>
-  billingInvoiceMutation('billing_invoice_mark_paid_v1', args);
+export const billing_invoice_refund_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.billing_invoice_refund_v1);
 
-async function requireLiveSubscriptionReadback(
-  rpcName: string,
-  subscriptionId: string,
-  eventId?: string | null,
-): Promise<void> {
-  await requireLiveResourceReadback('subscriptions', subscriptionId, rpcName);
-  const normalizedEventId = asNonEmptyString(eventId);
-  if (normalizedEventId) {
-    await requireLiveResourceReadback('subscription_events', normalizedEventId, rpcName);
-  }
-}
+export const billing_invoice_mark_paid_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.billing_invoice_mark_paid_v1);
 
-export async function cancel_subscription_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc('cancel_subscription_v1', args, 'subscription');
-  if (liveRpcTarget()) {
-    const subscriptionId =
-      asNonEmptyString(result.subscription_id) ??
-      asNonEmptyString(result.id) ??
-      asNonEmptyString(args.subscription_id);
-    if (!subscriptionId) throw new Error('cancel_subscription_v1 did not return subscription_id');
-    await requireLiveSubscriptionReadback(
-      'cancel_subscription_v1',
-      subscriptionId,
-      asNonEmptyString(result.subscription_event_id) ?? asNonEmptyString(result.event_id),
-    );
-  }
-  return result;
-}
+export const cancel_subscription_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.cancel_subscription_v1);
 
-export async function requireLiveFinanceEventReadback(
-  rpcName: string,
-  financeEventId: string,
-): Promise<void> {
-  await requireLiveResourceReadback('finance_events_ledger', financeEventId, rpcName);
-}
+export const requireLiveFinanceEventReadback = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.requireLiveFinanceEventReadback);
 
-export async function apply_settlement_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { apply_settlement_v1 } = await import('./data-source/finance');
-  return apply_settlement_v1(args);
-}
-export async function reject_settlement_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { reject_settlement_v1 } = await import('./data-source/finance');
-  return reject_settlement_v1(args);
-}
-export async function ui_create_settlement_batch_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { ui_create_settlement_batch_v1 } = await import('./data-source/finance');
-  return ui_create_settlement_batch_v1(args);
-}
-export async function ui_transition_settlement_batch_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { ui_transition_settlement_batch_v1 } = await import('./data-source/finance');
-  return ui_transition_settlement_batch_v1(args);
-}
-export async function ui_record_cod_remittance_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { ui_record_cod_remittance_v1 } = await import('./data-source/finance');
-  return ui_record_cod_remittance_v1(args);
-}
-export async function ui_adjust_cod_collection_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { ui_adjust_cod_collection_v1 } = await import('./data-source/finance');
-  return ui_adjust_cod_collection_v1(args);
-}
-export async function ui_reverse_finance_event_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { ui_reverse_finance_event_v1 } = await import('./data-source/finance');
-  return ui_reverse_finance_event_v1(args);
-}
+export const apply_settlement_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.apply_settlement_v1);
+export const reject_settlement_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.reject_settlement_v1);
+export const ui_create_settlement_batch_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_create_settlement_batch_v1);
+export const ui_transition_settlement_batch_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_transition_settlement_batch_v1);
+export const ui_record_cod_remittance_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_record_cod_remittance_v1);
+export const ui_adjust_cod_collection_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_adjust_cod_collection_v1);
+export const ui_reverse_finance_event_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_reverse_finance_event_v1);
 
-// FINANCE — bank reconciliation
-async function bankReconMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc(rpcName, args, 'bank_recon_match');
-  if (liveRpcTarget()) {
-    const matchId =
-      asNonEmptyString(result.bank_recon_match_id) ??
-      asNonEmptyString(result.match_id) ??
-      asNonEmptyString(result.id) ??
-      asNonEmptyString(args.bank_recon_match_id);
-    if (!matchId) throw new Error(`${rpcName} did not return bank_recon_match_id`);
-    await requireLiveResourceReadback('bank_recon_matches', matchId, rpcName);
-    const financeEventId =
-      asNonEmptyString(result.finance_event_id) ??
-      asNonEmptyString(args.bank_statement_event_id);
-    if (financeEventId) {
-      await requireLiveFinanceEventReadback(rpcName, financeEventId);
-    }
-  }
-  return result;
-}
+export const bank_recon_match_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.bank_recon_match_v1);
 
-export const bank_recon_match_v1 = (args: Record<string, unknown>) =>
-  bankReconMutation('bank_recon_match_v1', args);
-export const bank_recon_unmatch_v1 = (args: Record<string, unknown>) =>
-  bankReconMutation('bank_recon_unmatch_v1', args);
-export async function ui_record_bank_statement_event_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const result = await phaseC6ApiRpc('ui_record_bank_statement_event_v1', args, 'finance_event');
-  if (liveRpcTarget()) {
-    const financeEventId =
-      asNonEmptyString(result.finance_event_id) ??
-      asNonEmptyString(result.id);
-    if (!financeEventId) throw new Error('ui_record_bank_statement_event_v1 did not return finance_event_id');
-    await requireLiveFinanceEventReadback('ui_record_bank_statement_event_v1', financeEventId);
-    await requireLiveResourceReadback('finance_events_bank_statement', financeEventId, 'ui_record_bank_statement_event_v1');
-  }
-  return result;
-}
+export const bank_recon_unmatch_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.bank_recon_unmatch_v1);
 
-// FINANCE — disputes (FINANCE namespace; distinct from MARKETPLACE)
-export async function ui_create_bank_account_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const result = await phaseC6ApiRpc('ui_create_bank_account_v1', args, 'bank_account');
-  if (liveRpcTarget()) {
-    const bankAccountId =
-      asNonEmptyString(result.bank_account_id) ??
-      asNonEmptyString(result.id);
-    if (!bankAccountId) throw new Error('ui_create_bank_account_v1 did not return bank_account_id');
-    await requireLiveResourceReadback('bank_accounts', bankAccountId, 'ui_create_bank_account_v1');
-  }
-  return result;
-}
+export const ui_record_bank_statement_event_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_record_bank_statement_event_v1);
 
-function resolveDisputeIds(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string[] {
-  const rowIds = Array.isArray(rec.results)
-    ? rec.results.flatMap((row) => {
-      const rowRec = objectRecord(row);
-      const result = objectRecord(rowRec.result);
-      return [
-        asNonEmptyString(rowRec.dispute_id),
-        asNonEmptyString(result.dispute_id),
-        asNonEmptyString(result.id),
-      ];
-    })
-    : [];
-  return compactStringIds([
-    rec.dispute_id,
-    rec.id,
-    args.dispute_id,
-    args.dispute_ids,
-    rowIds,
-  ]);
-}
+export const ui_create_bank_account_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_create_bank_account_v1);
 
-async function requireLiveDisputeReadback(
-  rpcName: string,
-  disputeIds: string[],
-): Promise<void> {
-  if (disputeIds.length === 0) throw new Error(`${rpcName} did not return dispute_id`);
-  for (const disputeId of disputeIds) {
-    await requireLiveResourceReadback('marketplace_disputes', disputeId, rpcName);
-    await requireLiveResourceReadback('dispute_directory', disputeId, rpcName);
-  }
-}
+export const dispute_resolve_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.dispute_resolve_v1);
 
-async function disputeMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc(rpcName, args, 'dispute');
-  if (liveRpcTarget()) {
-    await requireLiveDisputeReadback(rpcName, resolveDisputeIds(result, args));
-  }
-  return result;
-}
+export const dispute_reject_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.dispute_reject_v1);
 
-export const dispute_resolve_v1 = (args: Record<string, unknown>) =>
-  disputeMutation('dispute_resolve_v1', args);
-export const dispute_reject_v1 = (args: Record<string, unknown>) =>
-  disputeMutation('dispute_reject_v1', args);
-export async function ui_bulk_dispute_action_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const result = await phaseC6ApiRpc('ui_bulk_dispute_action_v1', args);
-  if (liveRpcTarget()) {
-    await requireLiveDisputeReadback('ui_bulk_dispute_action_v1', resolveDisputeIds(result, args));
-  }
-  return result;
-}
-// W8-4 / W9-3 — non-terminal dispute lifecycle (acknowledge + escalate).
-// Migrations: 202604301140 (acknowledge) + 202604301150 (escalate).
-// Same `phaseC6Rpc` substrate as resolve/reject so the seam stays uniform;
-// `marketplace_disputes` invalidation flows through the queries.ts hook layer.
-export const dispute_acknowledge_v1 = (args: Record<string, unknown>) =>
-  disputeMutation('dispute_acknowledge_v1', args);
-export const dispute_escalate_v1 = (args: Record<string, unknown>) =>
-  disputeMutation('dispute_escalate_v1', args);
+export const ui_bulk_dispute_action_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.ui_bulk_dispute_action_v1);
+
+export const dispute_acknowledge_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.dispute_acknowledge_v1);
+
+export const dispute_escalate_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.dispute_escalate_v1);
 
 // ----------- Phase C2 NETWORK mutations (zones / marketplace / branches) -----------
 //
@@ -9657,12 +8580,7 @@ export interface ZoneCreateResult extends Record<string, unknown> {
   settings_resolution_id?: string;
 }
 
-export async function zone_create_v1(
-  args: Record<string, unknown>,
-): Promise<ZoneCreateResult> {
-  const { zone_create_v1 } = await import('./data-source/network');
-  return zone_create_v1(args);
-}
+export const zone_create_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.zone_create_v1);
 
 export interface ZoneProfileMutationResult extends Record<string, unknown> {
   ok: true;
@@ -9676,19 +8594,9 @@ export interface ZoneProfileMutationResult extends Record<string, unknown> {
   decision_log_id?: string | null;
 }
 
-export async function zone_update_v1(
-  args: Record<string, unknown>,
-): Promise<ZoneProfileMutationResult> {
-  const { zone_update_v1 } = await import('./data-source/network');
-  return zone_update_v1(args);
-}
+export const zone_update_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.zone_update_v1);
 
-export async function zone_delete_v1(
-  args: Record<string, unknown>,
-): Promise<ZoneProfileMutationResult> {
-  const { zone_delete_v1 } = await import('./data-source/network');
-  return zone_delete_v1(args);
-}
+export const zone_delete_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.zone_delete_v1);
 
 export interface ZoneDistrictMutationResult extends Record<string, unknown> {
   ok: true;
@@ -9698,240 +8606,36 @@ export interface ZoneDistrictMutationResult extends Record<string, unknown> {
   settings_resolution_id?: string;
 }
 
-export async function zone_district_add_v1(
-  args: Record<string, unknown>,
-): Promise<ZoneDistrictMutationResult> {
-  const { zone_district_add_v1 } = await import('./data-source/network');
-  return zone_district_add_v1(args);
-}
+export const zone_district_add_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.zone_district_add_v1);
 
-export async function zone_district_remove_v1(
-  args: Record<string, unknown>,
-): Promise<ZoneDistrictMutationResult> {
-  const { zone_district_remove_v1 } = await import('./data-source/network');
-  return zone_district_remove_v1(args);
-}
+export const zone_district_remove_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.zone_district_remove_v1);
 
-// NETWORK/marketplace
-//
-// Marketplace RPCs predate the shared Phase C6 `(p_args jsonb)` contract and
-// expose named Postgres parameters through the api schema. Keep the mapping
-// here explicit so live Console V2 calls exercise the real RPC signatures.
-async function marketplaceNamedRpc(
-  rpcName: string,
-  rpcArgs: Record<string, unknown>,
-  fallbackArgs: Record<string, unknown>,
-  resourceKeyHint?: string,
-): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>>(rpcName, rpcArgs);
-  if (live) {
-    const evidenceKeys = resourceKeyHint ? [`${resourceKeyHint}_id`, 'id', 'refreshed_count'] : ['refreshed_count'];
-    const rec = requireLiveMutationResult(
-      live.data,
-      rpcName,
-      evidenceKeys,
-    );
-    requireLiveDomainEvidence(rec, rpcName, evidenceKeys, resourceKeyHint ?? 'marketplace mutation');
-    return rec;
-  }
-  await sleep(60);
-  return buildMutationFallbackEnvelope(fallbackArgs, resourceKeyHint);
-}
+export const marketplace_offer_submit_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_offer_submit_v1);
 
-function metadataWithReason(args: Record<string, unknown>): Record<string, unknown> {
-  const metadata = args.metadata && typeof args.metadata === 'object' && !Array.isArray(args.metadata)
-    ? { ...(args.metadata as Record<string, unknown>) }
-    : {};
-  const reason = asNonEmptyString(args.reason);
-  if (reason && metadata.reason === undefined) metadata.reason = reason;
-  return metadata;
-}
+export const marketplace_offer_withdraw_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_offer_withdraw_v1);
 
-function normalizeMarketplaceAwardDecision(args: Record<string, unknown>): string | null {
-  const raw = asNonEmptyString(args.decision) ?? asNonEmptyString(args.response);
-  const value = raw?.toLowerCase();
-  if (!value) return null;
-  if (value === 'accept' || value === 'accepted' || value === 'approve' || value === 'approved') {
-    return 'approve';
-  }
-  if (
-    value === 'reject' ||
-    value === 'rejected' ||
-    value === 'cancel' ||
-    value === 'cancelled' ||
-    value === 'canceled'
-  ) {
-    return 'reject';
-  }
-  return value;
-}
+export const marketplace_award_offer_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_award_offer_v1);
 
-export const marketplace_offer_submit_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_offer_submit_v1',
-    {
-      p_request_id: args.request_id,
-      p_message: asNonEmptyString(args.message) ?? null,
-      p_terms: args.terms ?? {},
-      p_pricing: args.pricing ?? {},
-      p_expires_at: args.expires_at ?? null,
-      p_metadata: args.metadata ?? {},
-    },
-    args,
-    'marketplace_offer',
-  );
+export const marketplace_award_respond_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_award_respond_v1);
 
-export const marketplace_offer_withdraw_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_offer_withdraw_v1',
-    {
-      p_offer_id: args.offer_id,
-      p_reason: asNonEmptyString(args.reason) ?? null,
-    },
-    args,
-    'marketplace_offer',
-  );
+export const marketplace_request_create_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_request_create_v1);
 
-export const marketplace_award_offer_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_award_offer_v1',
-    {
-      p_offer_id: args.offer_id,
-      p_award_reason: asNonEmptyString(args.award_reason) ?? asNonEmptyString(args.reason) ?? null,
-      p_award_terms: args.award_terms ?? {},
-      p_expires_at: args.expires_at ?? null,
-      p_metadata: args.metadata ?? {},
-    },
-    args,
-    'marketplace_award',
-  );
+export const marketplace_request_publish_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_request_publish_v1);
 
-export const marketplace_award_respond_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_award_respond_v1',
-    {
-      p_award_id: args.award_id,
-      p_decision: normalizeMarketplaceAwardDecision(args),
-      p_metadata: metadataWithReason(args),
-    },
-    args,
-    'marketplace_award',
-  );
+export const marketplace_request_cancel_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_request_cancel_v1);
 
-export const marketplace_request_create_v1 = (args: Record<string, unknown>) => {
-  const details = args.request_details && typeof args.request_details === 'object'
-    ? (args.request_details as Record<string, unknown>)
-    : {};
-  const title =
-    asNonEmptyString(args.title) ??
-    asNonEmptyString(details.title) ??
-    asNonEmptyString(details.lane) ??
-    asNonEmptyString(args.request_kind_key) ??
-    asNonEmptyString(args.request_kind) ??
-    'Marketplace request';
-  return marketplaceNamedRpc(
-    'marketplace_request_create_v1',
-    {
-      p_request_kind_key: args.request_kind_key ?? args.request_kind,
-      p_title: title,
-      p_summary: asNonEmptyString(args.summary) ?? null,
-      p_request_details: args.request_details ?? {},
-      p_items: args.items ?? args.request_items ?? [],
-      p_private_pool: args.private_pool ?? [],
-      p_expires_at: args.expires_at ?? null,
-      p_metadata: args.metadata ?? {},
-    },
-    args,
-    'marketplace_request',
-  );
-};
+export const marketplace_dispute_open_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_dispute_open_v1);
 
-export const marketplace_request_publish_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_request_publish_v1',
-    {
-      p_request_id: args.request_id,
-      p_release_state: asNonEmptyString(args.release_state) ?? null,
-    },
-    args,
-    'marketplace_request',
-  );
+export const marketplace_dispute_resolve_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_dispute_resolve_v1);
 
-export const marketplace_request_cancel_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_request_cancel_v1',
-    {
-      p_request_id: args.request_id,
-      p_reason: asNonEmptyString(args.reason) ?? null,
-    },
-    args,
-    'marketplace_request',
-  );
-
-export const marketplace_dispute_open_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_dispute_open_v1',
-    {
-      p_contract_id: args.contract_id ?? null,
-      p_work_package_id: args.work_package_id ?? null,
-      p_title: asNonEmptyString(args.title) ?? null,
-      p_description: asNonEmptyString(args.description) ?? null,
-      p_category: asNonEmptyString(args.category) ?? 'general',
-      p_metadata: {
-        ...metadataWithReason(args),
-        ...(args.request_id ? { request_id: args.request_id } : {}),
-      },
-    },
-    args,
-    'marketplace_dispute',
-  );
-
-export const marketplace_dispute_resolve_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_dispute_resolve_v1',
-    {
-      p_dispute_id: args.dispute_id,
-      p_resolution: args.resolution,
-      p_status: asNonEmptyString(args.status) ?? 'resolved',
-      p_metadata: args.metadata ?? {},
-    },
-    args,
-    'marketplace_dispute',
-  );
-
-export const marketplace_work_package_materialize_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_work_package_materialize_v1',
-    {
-      p_work_package_id: args.work_package_id ?? null,
-      p_award_id: args.award_id ?? null,
-      p_execution_ref: args.execution_ref ?? {},
-      p_summary: args.summary ?? {},
-      p_metadata: args.metadata ?? {},
-    },
-    args,
-    'marketplace_work_package',
-  );
+export const marketplace_work_package_materialize_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_work_package_materialize_v1);
 
 export const PARTICIPANT_REVIEW_READBACK_ATTEMPTS = 10;
 export const PARTICIPANT_REVIEW_READBACK_DELAY_MS = 250;
 
-export async function marketplace_participant_request_review_apply_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { marketplace_participant_request_review_apply_v1 } = await import('./data-source/network');
-  return marketplace_participant_request_review_apply_v1(args);
-}
+export const marketplace_participant_request_review_apply_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_participant_request_review_apply_v1);
 
-export const marketplace_refresh_reputation_snapshot_v1 = (args: Record<string, unknown>) =>
-  marketplaceNamedRpc(
-    'marketplace_refresh_reputation_snapshots_for_visible_v1',
-    {
-      p_participant_profile_id: args.participant_profile_id ?? null,
-    },
-    args,
-    'marketplace_reputation_snapshot',
-  );
+export const marketplace_refresh_reputation_snapshot_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.marketplace_refresh_reputation_snapshot_v1);
 
 // NETWORK/branches — canonical write RPCs SHIPPED in W8-1 + W9-1 migrations:
 //   - branch_create_v1                  202604300210
@@ -9957,19 +8661,9 @@ export interface BranchMutationResult extends Record<string, unknown> {
   settings_resolution_id?: string;
 }
 
-export async function branch_create_v1(
-  args: Record<string, unknown>,
-): Promise<BranchMutationResult> {
-  const { branch_create_v1 } = await import('./data-source/network');
-  return branch_create_v1(args);
-}
+export const branch_create_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.branch_create_v1);
 
-export async function branch_update_v1(
-  args: Record<string, unknown>,
-): Promise<BranchMutationResult> {
-  const { branch_update_v1 } = await import('./data-source/network');
-  return branch_update_v1(args);
-}
+export const branch_update_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.branch_update_v1);
 
 export interface BranchMarkOosResult extends Record<string, unknown> {
   ok: true;
@@ -9981,12 +8675,7 @@ export interface BranchMarkOosResult extends Record<string, unknown> {
   settings_resolution_id?: string;
 }
 
-export async function branch_mark_oos_v1(
-  args: Record<string, unknown>,
-): Promise<BranchMarkOosResult> {
-  const { branch_mark_oos_v1 } = await import('./data-source/network');
-  return branch_mark_oos_v1(args);
-}
+export const branch_mark_oos_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.branch_mark_oos_v1);
 
 export interface BranchZoneMutationResult extends Record<string, unknown> {
   ok: true;
@@ -9996,19 +8685,9 @@ export interface BranchZoneMutationResult extends Record<string, unknown> {
   settings_resolution_id?: string;
 }
 
-export async function branch_zone_assign_v1(
-  args: Record<string, unknown>,
-): Promise<BranchZoneMutationResult> {
-  const { branch_zone_assign_v1 } = await import('./data-source/network');
-  return branch_zone_assign_v1(args);
-}
+export const branch_zone_assign_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.branch_zone_assign_v1);
 
-export async function branch_zone_unassign_v1(
-  args: Record<string, unknown>,
-): Promise<BranchZoneMutationResult> {
-  const { branch_zone_unassign_v1 } = await import('./data-source/network');
-  return branch_zone_unassign_v1(args);
-}
+export const branch_zone_unassign_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.branch_zone_unassign_v1);
 
 export interface BranchMembershipMutationResult extends Record<string, unknown> {
   ok: true;
@@ -10018,19 +8697,9 @@ export interface BranchMembershipMutationResult extends Record<string, unknown> 
   settings_resolution_id?: string;
 }
 
-export async function add_branch_member_v1(
-  args: Record<string, unknown>,
-): Promise<BranchMembershipMutationResult> {
-  const { add_branch_member_v1 } = await import('./data-source/network');
-  return add_branch_member_v1(args);
-}
+export const add_branch_member_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.add_branch_member_v1);
 
-export async function remove_branch_member_v1(
-  args: Record<string, unknown>,
-): Promise<BranchMembershipMutationResult> {
-  const { remove_branch_member_v1 } = await import('./data-source/network');
-  return remove_branch_member_v1(args);
-}
+export const remove_branch_member_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.remove_branch_member_v1);
 
 export interface BranchCapacityWindowMutationResult extends Record<string, unknown> {
   ok: true;
@@ -10040,12 +8709,7 @@ export interface BranchCapacityWindowMutationResult extends Record<string, unkno
   settings_resolution_id?: string;
 }
 
-export async function branch_capacity_window_set_v1(
-  args: Record<string, unknown>,
-): Promise<BranchCapacityWindowMutationResult> {
-  const { branch_capacity_window_set_v1 } = await import('./data-source/network');
-  return branch_capacity_window_set_v1(args);
-}
+export const branch_capacity_window_set_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.branch_capacity_window_set_v1);
 
 export interface BranchCoverageWindowMutationResult extends Record<string, unknown> {
   ok: true;
@@ -10056,12 +8720,7 @@ export interface BranchCoverageWindowMutationResult extends Record<string, unkno
   settings_resolution_id?: string;
 }
 
-export async function branch_coverage_window_upsert_v1(
-  args: Record<string, unknown>,
-): Promise<BranchCoverageWindowMutationResult> {
-  const { branch_coverage_window_upsert_v1 } = await import('./data-source/network');
-  return branch_coverage_window_upsert_v1(args);
-}
+export const branch_coverage_window_upsert_v1 = /* @__PURE__ */ lazyAdapter(loadNetworkAdapter, adapter => adapter.branch_coverage_window_upsert_v1);
 
 // ----------- INSIGHTS / API gateway operational write RPCs -----------
 //
@@ -10081,130 +8740,7 @@ export interface BlockApiGatewaySourceArgs extends Record<string, unknown> {
   metadata?: Record<string, unknown>;
 }
 
-function resolveApiGatewaySourceId(
-  result: Record<string, unknown>,
-  args: Record<string, unknown>,
-  rpcName: string,
-): string {
-  return requireLiveStringField(
-    { ...args, ...result },
-    ['source_id', 'webhook_source_id', 'id'],
-    `${rpcName} did not return source_id`,
-  );
-}
-
-function requireApiGatewayBooleanReadback(
-  row: Record<string, unknown>,
-  field: string,
-  expected: boolean,
-  rpcName: string,
-  projection: string,
-): void {
-  const actual = booleanReadback(row[field]);
-  if (actual !== expected) {
-    throw new Error(`${rpcName} backend readback did not reflect ${projection}.${field}`);
-  }
-}
-
-function requireApiGatewayNumberReadback(
-  row: Record<string, unknown>,
-  field: string,
-  expected: number,
-  rpcName: string,
-  projection: string,
-): void {
-  const actual = Number(row[field]);
-  if (!Number.isFinite(actual) || actual !== expected) {
-    throw new Error(`${rpcName} backend readback did not reflect ${projection}.${field}`);
-  }
-}
-
-async function requireApiGatewaySourceReadback(
-  rpcName: string,
-  sourceId: string,
-  expected: { enabled?: boolean; rateLimitPerHour?: number },
-): Promise<void> {
-  const source = await requireLiveResourceReadback('webhook_sources', sourceId, rpcName);
-  if (expected.enabled !== undefined) {
-    requireApiGatewayBooleanReadback(source, 'enabled', expected.enabled, rpcName, 'webhook_sources');
-  }
-  if (expected.rateLimitPerHour !== undefined) {
-    requireApiGatewayNumberReadback(
-      source,
-      'rate_limit_per_hour',
-      expected.rateLimitPerHour,
-      rpcName,
-      'webhook_sources',
-    );
-  }
-
-  const directoryRows = await requireLiveResourceListReadback(
-    'webhook_source_directory',
-    { id: sourceId },
-    rpcName,
-  );
-  const directory = directoryRows.find((row) => asNonEmptyString(row.id) === sourceId) ?? directoryRows[0]!;
-
-  if (expected.enabled !== undefined) {
-    requireApiGatewayBooleanReadback(
-      directory,
-      'enabled',
-      expected.enabled,
-      rpcName,
-      'webhook_source_directory',
-    );
-  }
-  if (expected.rateLimitPerHour !== undefined) {
-    requireApiGatewayNumberReadback(
-      directory,
-      'rate_limit_per_hour',
-      expected.rateLimitPerHour,
-      rpcName,
-      'webhook_source_directory',
-    );
-  }
-}
-
-async function requireApiGatewayRateLimitSummaryReadback(
-  sourceId: string,
-  expectedLimitPerHour: number,
-  rpcName: string,
-): Promise<void> {
-  const summaryRows = await requireLiveResourceListReadback(
-    'api_gateway_rate_limits_summary',
-    { source_id: sourceId },
-    rpcName,
-  );
-  const summary = summaryRows.find((row) => asNonEmptyString(row.source_id) === sourceId) ?? summaryRows[0]!;
-  requireApiGatewayNumberReadback(
-    summary,
-    'limit_per_hour',
-    expectedLimitPerHour,
-    rpcName,
-    'api_gateway_rate_limits_summary',
-  );
-  const expectedLimitPerMin = Math.floor(expectedLimitPerHour / 60);
-  requireApiGatewayNumberReadback(
-    summary,
-    'limit_per_min',
-    expectedLimitPerMin,
-    rpcName,
-    'api_gateway_rate_limits_summary',
-  );
-}
-
-export async function block_api_gateway_source_v1(
-  args: BlockApiGatewaySourceArgs,
-): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc('block_api_gateway_source_v1', args, 'source');
-  if (liveRpcTarget()) {
-    const sourceId = resolveApiGatewaySourceId(result, args, 'block_api_gateway_source_v1');
-    await requireApiGatewaySourceReadback('block_api_gateway_source_v1', sourceId, {
-      enabled: false,
-    });
-  }
-  return result;
-}
+export const block_api_gateway_source_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.block_api_gateway_source_v1);
 
 export interface AdjustApiGatewayRateLimitArgs extends Record<string, unknown> {
   source_id: string;
@@ -10218,32 +8754,7 @@ export interface AdjustApiGatewayRateLimitArgs extends Record<string, unknown> {
   metadata?: Record<string, unknown>;
 }
 
-function expectedApiGatewayLimitPerHour(args: AdjustApiGatewayRateLimitArgs): number {
-  const perHour = Number(args.limit_per_hour);
-  if (Number.isFinite(perHour)) return perHour;
-  const perMin = Number(args.limit_per_min);
-  if (Number.isFinite(perMin)) return perMin * 60;
-  throw new Error('adjust_api_gateway_rate_limit_v1 requires limit_per_hour or limit_per_min');
-}
-
-export async function adjust_api_gateway_rate_limit_v1(
-  args: AdjustApiGatewayRateLimitArgs,
-): Promise<Record<string, unknown>> {
-  const expectedLimitPerHour = expectedApiGatewayLimitPerHour(args);
-  const result = await phaseC6Rpc('adjust_api_gateway_rate_limit_v1', args, 'source');
-  if (liveRpcTarget()) {
-    const sourceId = resolveApiGatewaySourceId(result, args, 'adjust_api_gateway_rate_limit_v1');
-    await requireApiGatewaySourceReadback('adjust_api_gateway_rate_limit_v1', sourceId, {
-      rateLimitPerHour: expectedLimitPerHour,
-    });
-    await requireApiGatewayRateLimitSummaryReadback(
-      sourceId,
-      expectedLimitPerHour,
-      'adjust_api_gateway_rate_limit_v1',
-    );
-  }
-  return result;
-}
+export const adjust_api_gateway_rate_limit_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.adjust_api_gateway_rate_limit_v1);
 
 // ----------- Phase C5 INTEGRATIONS + WORKFLOWS mutations -----------
 //
@@ -10297,40 +8808,12 @@ export interface ArchiveWebhookSourceArgs extends Record<string, unknown> {
   source_id: string;
   reason: string;
 }
-async function webhookSourceMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { resolveWebhookSourceId, requireWebhookSourceMutationReadback } =
-    await import('./data-source/integrations');
-  const result = await phaseC6Rpc(rpcName, args, 'webhook_source');
-  if (liveRpcTarget()) {
-    const sourceId = resolveWebhookSourceId(result, args);
-    if (!sourceId) throw new Error(`${rpcName} did not return webhook_source_id`);
-    const sourceReadback = await requireLiveResourceReadback('webhook_sources', sourceId, rpcName);
-    const directoryReadback = await requireLiveResourceReadback('webhook_source_directory', sourceId, rpcName);
-    requireWebhookSourceMutationReadback(sourceReadback, directoryReadback, args, result, rpcName);
-  }
-  return result;
-}
 
-export const ui_upsert_webhook_source_v1 = (args: UpsertWebhookSourceArgs) =>
-  webhookSourceMutation('ui_upsert_webhook_source_v1', args);
-export const ui_rotate_webhook_source_token_v1 = (args: { source_id: string }) =>
-  webhookSourceMutation('ui_rotate_webhook_source_token_v1', args);
-export async function ui_archive_webhook_source_v1(args: ArchiveWebhookSourceArgs) {
-  const { resolveWebhookSourceId, requireWebhookSourceArchiveReadback } =
-    await import('./data-source/integrations');
-  const result = await phaseC6Rpc('ui_archive_webhook_source_v1', args, 'webhook_source');
-  if (liveRpcTarget()) {
-    const sourceId = resolveWebhookSourceId(result, args);
-    if (!sourceId) throw new Error('ui_archive_webhook_source_v1 did not return webhook_source_id');
-    const sourceReadback = await requireLiveResourceReadback('webhook_sources', sourceId, 'ui_archive_webhook_source_v1');
-    const directoryReadback = await requireLiveResourceReadback('webhook_source_directory', sourceId, 'ui_archive_webhook_source_v1');
-    requireWebhookSourceArchiveReadback(sourceReadback, directoryReadback, 'ui_archive_webhook_source_v1');
-  }
-  return result;
-}
+export const ui_upsert_webhook_source_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_upsert_webhook_source_v1);
+
+export const ui_rotate_webhook_source_token_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_rotate_webhook_source_token_v1);
+
+export const ui_archive_webhook_source_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_archive_webhook_source_v1);
 
 // INTEGRATIONS — Mapping Studio (Create/Edit/Promote-version)
 export interface UpsertMappingArtifactArgs extends Record<string, unknown> {
@@ -10347,97 +8830,15 @@ export interface UpsertApiGatewayRouteMappingArgs extends Record<string, unknown
   organization_id?: string | null;
   target?: string | null;
 }
-export async function ui_upsert_mapping_artifact_v1(
-  args: UpsertMappingArtifactArgs,
-): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>>('ui_upsert_mapping_artifact_v1', {
-    p_artifact: args,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(live.data, 'ui_upsert_mapping_artifact_v1 returned no backend outcome');
-    const outcomeError = backendOutcomeError(rec, 'ui_upsert_mapping_artifact_v1 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    requireLiveEvidence(rec, [
-      'mapping_config_id',
-      'mapping_artifact_id',
-      'artifact_id',
-      'id',
-    ], 'ui_upsert_mapping_artifact_v1 did not return backend mapping artifact evidence');
-    const mappingConfigId =
-      asNonEmptyString(rec.mapping_config_id) ??
-      asNonEmptyString(args.mapping_config_id);
-    if (!mappingConfigId) throw new Error('ui_upsert_mapping_artifact_v1 did not return mapping_config_id');
-    await requireLiveResourceReadback('mapping_configs', mappingConfigId, 'ui_upsert_mapping_artifact_v1');
-    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'ui_upsert_mapping_artifact_v1');
-    return rec;
-  }
 
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'mapping_config');
-}
-export async function ui_delete_mapping_config_v1(
-  args: { mapping_config_id: string },
-): Promise<Record<string, unknown>> {
-  const { ui_delete_mapping_config_v1 } = await import('./data-source/integrations');
-  return ui_delete_mapping_config_v1(args);
-}
-export async function ui_upsert_api_gateway_route_mapping_v1(
-  args: UpsertApiGatewayRouteMappingArgs,
-): Promise<Record<string, unknown>> {
-  const { ui_upsert_api_gateway_route_mapping_v1 } = await import('./data-source/integrations');
-  return ui_upsert_api_gateway_route_mapping_v1(args);
-}
-export async function ui_create_mapping_operation_report_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const live = await liveRpc<Record<string, unknown>>('ui_create_mapping_operation_report_v1', {
-    p_report: args,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(live.data, 'ui_create_mapping_operation_report_v1 returned no backend outcome');
-    const outcomeError = backendOutcomeError(rec, 'ui_create_mapping_operation_report_v1 was rejected by the backend');
-    if (outcomeError) throw outcomeError;
-    requireLiveEvidence(rec, [
-      'mapping_operation_report_id',
-      'operation_report_id',
-      'report_id',
-      'id',
-    ], 'ui_create_mapping_operation_report_v1 did not return backend report evidence');
-    const reportId =
-      asNonEmptyString(rec.mapping_operation_report_id) ??
-      asNonEmptyString(rec.operation_report_id) ??
-      asNonEmptyString(rec.report_id) ??
-      asNonEmptyString(rec.id);
-    if (!reportId) throw new Error('ui_create_mapping_operation_report_v1 did not return mapping_operation_report_id');
-    await requireLiveResourceReadback('mapping_operation_reports', reportId, 'ui_create_mapping_operation_report_v1');
-    return rec;
-  }
+export const ui_upsert_mapping_artifact_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_upsert_mapping_artifact_v1);
+export const ui_delete_mapping_config_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_delete_mapping_config_v1);
+export const ui_upsert_api_gateway_route_mapping_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_upsert_api_gateway_route_mapping_v1);
 
-  await sleep(60);
-  return buildMutationFallbackEnvelope(args, 'mapping_operation_report');
-}
-export async function mapping_config_promote_v1(
-  args: { mapping_config_id: string; target_version?: number },
-): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc('mapping_config_promote_v1', args, 'mapping_config');
-  if (liveRpcTarget()) {
-    const mappingConfigId =
-      asNonEmptyString(result.mapping_config_id) ??
-      asNonEmptyString(result.id) ??
-      asNonEmptyString(args.mapping_config_id);
-    if (!mappingConfigId) throw new Error('mapping_config_promote_v1 did not return mapping_config_id');
-    await requireLiveResourceReadback('mapping_configs', mappingConfigId, 'mapping_config_promote_v1');
-    await requireLiveResourceReadback('mapping_config_directory', mappingConfigId, 'mapping_config_promote_v1');
-  }
-  return result;
-}
-export async function ui_test_mapping_config_v1(
-  mappingConfigId: string,
-  payload: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { ui_test_mapping_config_v1 } = await import('./data-source/integrations');
-  return ui_test_mapping_config_v1(mappingConfigId, payload);
-}
+export const ui_create_mapping_operation_report_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_create_mapping_operation_report_v1);
+
+export const mapping_config_promote_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.mapping_config_promote_v1);
+export const ui_test_mapping_config_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_test_mapping_config_v1);
 
 // INTEGRATIONS — provider_auth_configs (Create/Update/Rotate/Revoke)
 export interface UpsertProviderAuthConfigArgs extends Record<string, unknown> {
@@ -10488,42 +8889,21 @@ async function providerAuthConfigMutation(
   rpcName: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const adapter = await import('./data-source/integrations');
+  const adapter = await loadIntegrationsAdapter();
   return adapter.providerAuthConfigMutation(rpcName, args);
 }
 
-export const ui_upsert_provider_auth_config_v1 = (args: UpsertProviderAuthConfigArgs) =>
-  providerAuthConfigMutation('ui_upsert_provider_auth_config_v1', args);
-export async function ui_bind_provider_account_credential_v1(
-  args: BindProviderAccountCredentialArgs,
-): Promise<Record<string, unknown>> {
-  const { ui_bind_provider_account_credential_v1 } = await import('./data-source/integrations');
-  return ui_bind_provider_account_credential_v1(args);
-}
-export async function ui_unbind_provider_account_credential_v1(
-  args: UnbindProviderAccountCredentialArgs,
-): Promise<Record<string, unknown>> {
-  const { ui_unbind_provider_account_credential_v1 } = await import('./data-source/integrations');
-  return ui_unbind_provider_account_credential_v1(args);
-}
-export const ui_revoke_provider_auth_config_v1 = (args: { config_id: string; reason?: string | null }) =>
-  providerAuthConfigMutation('ui_revoke_provider_auth_config_v1', args);
-export const integration_plugin_rotate_credentials_v1 = (args: Record<string, unknown>) =>
-  providerAuthConfigMutation('integration_plugin_rotate_credentials_v1', args);
+export const ui_upsert_provider_auth_config_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_upsert_provider_auth_config_v1);
+export const ui_bind_provider_account_credential_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_bind_provider_account_credential_v1);
+export const ui_unbind_provider_account_credential_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_unbind_provider_account_credential_v1);
 
-export async function ui_execute_provider_circuit_reset_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { ui_execute_provider_circuit_reset_v1 } = await import('./data-source/integrations');
-  return ui_execute_provider_circuit_reset_v1(args);
-}
+export const ui_revoke_provider_auth_config_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_revoke_provider_auth_config_v1);
 
-export async function ui_execute_provider_circuit_probe_v1(
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const { ui_execute_provider_circuit_probe_v1 } = await import('./data-source/integrations');
-  return ui_execute_provider_circuit_probe_v1(args);
-}
+export const integration_plugin_rotate_credentials_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.integration_plugin_rotate_credentials_v1);
+
+export const ui_execute_provider_circuit_reset_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_execute_provider_circuit_reset_v1);
+
+export const ui_execute_provider_circuit_probe_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_execute_provider_circuit_probe_v1);
 
 // INTEGRATIONS — integration_plugins catalog (Install/Rollback)
 export interface IntegrationPluginGenerateDraftArgs extends Record<string, unknown> {
@@ -10539,62 +8919,26 @@ async function integrationPluginMutation(
   args: Record<string, unknown>,
   options?: IntegrationPluginMutationOptions,
 ): Promise<Record<string, unknown>> {
-  const adapter = await import('./data-source/integrations');
+  const adapter = await loadIntegrationsAdapter();
   return adapter.integrationPluginMutation(rpcName, args, options);
 }
 
-export const integration_plugin_generate_draft_v1 = (args: IntegrationPluginGenerateDraftArgs) =>
-  integrationPluginMutation('integration_plugin_generate_draft_v1', args);
+export const integration_plugin_generate_draft_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.integration_plugin_generate_draft_v1);
 
-export async function ui_upsert_logistics_customer_migration_config_v1(
-  args: LogisticsCustomerMigrationConfigArgs,
-): Promise<LogisticsCustomerMigrationConfigResult> {
-  const { ui_upsert_logistics_customer_migration_config_v1 } = await import('./data-source/integrations');
-  return ui_upsert_logistics_customer_migration_config_v1(args);
-}
+export const ui_upsert_logistics_customer_migration_config_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_upsert_logistics_customer_migration_config_v1);
 
-export async function ui_execute_logistics_customer_migration_v1(
-  args: LogisticsCustomerMigrationArgs,
-): Promise<LogisticsCustomerMigrationResult> {
-  const { ui_execute_logistics_customer_migration_v1 } = await import('./data-source/integrations');
-  return ui_execute_logistics_customer_migration_v1(args);
-}
-export const integration_plugin_rollback_v1 = (args: {
-  plugin_id: string;
-  target_plugin_version_id?: string | null;
-  reason?: string | null;
-}) =>
-  integrationPluginMutation('integration_plugin_rollback_v1', args, {
-    approvalAction: 'rolled_back',
-    requireBinding: true,
-  });
+export const ui_execute_logistics_customer_migration_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_execute_logistics_customer_migration_v1);
 
-export const plugin_deactivate_v1 = (args: {
-  plugin_id: string;
-  plugin_version_id?: string | null;
-  reason?: string | null;
-}) =>
-  integrationPluginMutation('plugin_deactivate_v1', {
-    ...args,
-    expected_binding_enabled: false,
-  }, {
-    approvalAction: 'deactivated',
-    requireBinding: true,
-    requireBindingChangeCount: false,
-    fallbackResourceKey: 'integration_plugin',
-  });
+export const integration_plugin_rollback_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.integration_plugin_rollback_v1);
+
+export const plugin_deactivate_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.plugin_deactivate_v1);
 
 export interface IntegrationPluginExportHandoffArgs extends Record<string, unknown> {
   plugin_version_id: string;
   base_url?: string | null;
 }
 
-export async function integration_plugin_export_handoff_v1(
-  args: IntegrationPluginExportHandoffArgs,
-): Promise<Record<string, unknown>> {
-  const { integration_plugin_export_handoff_v1 } = await import('./data-source/integrations');
-  return integration_plugin_export_handoff_v1(args);
-}
+export const integration_plugin_export_handoff_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.integration_plugin_export_handoff_v1);
 
 // INTEGRATIONS — plugin lifecycle Submit/Approve/Activate/Set-binding (W9-2)
 //
@@ -10615,22 +8959,16 @@ export interface PluginSubmitArgs extends Record<string, unknown> {
   plugin_version_id: string;
   reason?: string | null;
 }
-export const plugin_submit_v1 = (args: PluginSubmitArgs) =>
-  integrationPluginMutation('plugin_submit_v1', args, {
-    approvalAction: 'submitted',
-    fallbackResourceKey: 'integration_plugin_version',
-  });
+
+export const plugin_submit_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.plugin_submit_v1);
 
 export interface PluginApproveArgs extends Record<string, unknown> {
   plugin_version_id: string;
   decision: 'approved' | 'rejected';
   reason?: string | null;
 }
-export const plugin_approve_v1 = (args: PluginApproveArgs) =>
-  integrationPluginMutation('plugin_approve_v1', args, {
-    approvalAction: args.decision,
-    fallbackResourceKey: 'integration_plugin_version',
-  });
+
+export const plugin_approve_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.plugin_approve_v1);
 
 export interface PluginActivateArgs extends Record<string, unknown> {
   plugin_version_id: string;
@@ -10638,11 +8976,8 @@ export interface PluginActivateArgs extends Record<string, unknown> {
   scope_id?: string | null;
   reason?: string | null;
 }
-export const plugin_activate_v1 = (args: PluginActivateArgs) =>
-  integrationPluginMutation('plugin_activate_v1', args, {
-    requireBinding: true,
-    fallbackResourceKey: 'integration_plugin_version',
-  });
+
+export const plugin_activate_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.plugin_activate_v1);
 
 export interface PluginSetBindingArgs extends Record<string, unknown> {
   plugin_version_id: string;
@@ -10650,11 +8985,8 @@ export interface PluginSetBindingArgs extends Record<string, unknown> {
   scope_type?: string | null;
   scope_id?: string | null;
 }
-export const plugin_set_binding_v1 = (args: PluginSetBindingArgs) =>
-  integrationPluginMutation('plugin_set_binding_v1', args, {
-    requireBinding: true,
-    fallbackResourceKey: 'integration_plugin_version',
-  });
+
+export const plugin_set_binding_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.plugin_set_binding_v1);
 
 // INTEGRATIONS — webhook_inbox replay + force-status
 //
@@ -10667,54 +8999,14 @@ export interface WebhookInboxReplayArgs extends Record<string, unknown> {
   webhook_inbox_id?: string;
   reason?: string | null;
 }
-function resolveWebhookInboxId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string | null {
-  return asNonEmptyString(rec.webhook_inbox_id)
-    ?? asNonEmptyString(rec.inbox_id)
-    ?? asNonEmptyString(rec.id)
-    ?? asNonEmptyString(args.webhook_inbox_id)
-    ?? asNonEmptyString(args.inbox_id);
-}
 
-async function webhookInboxMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const result = await phaseC6Rpc(rpcName, args, 'webhook_inbox');
-  if (liveRpcTarget()) {
-    const inboxId = resolveWebhookInboxId(result, args);
-    if (!inboxId) throw new Error(`${rpcName} did not return webhook_inbox_id`);
-    await requireLiveResourceReadback('webhook_inbox', inboxId, rpcName);
-    await requireLiveResourceReadback('webhook_inbox_directory', inboxId, rpcName);
-  }
-  return result;
-}
-
-export const webhook_inbox_replay_v1 = (args: WebhookInboxReplayArgs) =>
-  webhookInboxMutation('webhook_inbox_replay_v1', args);
+export const webhook_inbox_replay_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.webhook_inbox_replay_v1);
 export interface WebhookInboxRetryAsNewIntakeArgs extends Record<string, unknown> {
   webhook_inbox_id: string;
   reason?: string | null;
 }
-export const ui_retry_webhook_inbox_as_new_intake_v1 = async (
-  args: WebhookInboxRetryAsNewIntakeArgs,
-) => {
-  const result = await phaseC6Rpc('ui_retry_webhook_inbox_as_new_intake_v1', args, 'webhook_inbox');
-  if (liveRpcTarget()) {
-    const originalInboxId = asNonEmptyString(result.webhook_inbox_id) ?? asNonEmptyString(args.webhook_inbox_id);
-    if (!originalInboxId) throw new Error('ui_retry_webhook_inbox_as_new_intake_v1 did not return webhook_inbox_id');
-    await requireLiveResourceReadback('webhook_inbox', originalInboxId, 'ui_retry_webhook_inbox_as_new_intake_v1');
-    await requireLiveResourceReadback('webhook_inbox_directory', originalInboxId, 'ui_retry_webhook_inbox_as_new_intake_v1');
-    const newInboxId = asNonEmptyString(result.new_webhook_inbox_id);
-    if (newInboxId) {
-      await requireLiveResourceReadback('webhook_inbox', newInboxId, 'ui_retry_webhook_inbox_as_new_intake_v1');
-      await requireLiveResourceReadback('webhook_inbox_directory', newInboxId, 'ui_retry_webhook_inbox_as_new_intake_v1');
-    }
-  }
-  return result;
-};
+
+export const ui_retry_webhook_inbox_as_new_intake_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.ui_retry_webhook_inbox_as_new_intake_v1);
 export interface WebhookInboxForceStatusArgs extends Record<string, unknown> {
   inbox_id?: string;
   webhook_inbox_id?: string;
@@ -10722,8 +9014,8 @@ export interface WebhookInboxForceStatusArgs extends Record<string, unknown> {
   target_status?: string;
   reason?: string | null;
 }
-export const webhook_inbox_force_status_v1 = (args: WebhookInboxForceStatusArgs) =>
-  webhookInboxMutation('webhook_inbox_force_status_v1', args);
+
+export const webhook_inbox_force_status_v1 = /* @__PURE__ */ lazyAdapter(loadIntegrationsAdapter, adapter => adapter.webhook_inbox_force_status_v1);
 
 // WORKFLOWS — templates lifecycle (Create/Activate/Deactivate)
 export interface CreateWorkflowTemplateArgs extends Record<string, unknown> {
@@ -10790,41 +9082,8 @@ export interface RestoreWorkflowTemplateResult extends Record<string, unknown> {
   correlation_id?: string | null;
   settings_resolution_id?: string | null;
 }
-function numberReadback(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-export const restore_workflow_template_v1 = async (
-  args: RestoreWorkflowTemplateArgs,
-): Promise<RestoreWorkflowTemplateResult> => {
-  const result = await phaseC6Rpc(
-    'restore_workflow_template_v1',
-    args,
-    'workflow_template',
-  ) as RestoreWorkflowTemplateResult;
-  if (liveRpcTarget()) {
-    const templateId =
-      asNonEmptyString(result.workflow_template_id)
-      ?? asNonEmptyString(args.workflow_template_id);
-    if (!templateId) throw new Error('restore_workflow_template_v1 did not return workflow_template_id');
-    await requireLiveResourceReadback('workflow_templates', templateId, 'restore_workflow_template_v1');
-    const directory = await requireLiveResourceReadback(
-      'workflow_template_directory',
-      templateId,
-      'restore_workflow_template_v1',
-    );
-    const expectedCount = numberReadback(result.restored_step_count);
-    const actualCount = numberReadback(directory.step_count);
-    if (expectedCount != null && actualCount !== expectedCount) {
-      throw new Error('restore_workflow_template_v1 backend readback step count mismatch');
-    }
-  }
-  return result;
-};
+
+export const restore_workflow_template_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.restore_workflow_template_v1);
 
 export interface WorkflowTemplateStepMutationResult extends Record<string, unknown> {
   ok: true;
@@ -10854,96 +9113,13 @@ export interface DeleteWorkflowTemplateStepArgs extends Record<string, unknown> 
   reason?: string;
 }
 
-function workflowTemplateStepResultId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string | null {
-  return asNonEmptyString(rec.workflow_template_step_id)
-    ?? asNonEmptyString(rec.step_id)
-    ?? asNonEmptyString(args.workflow_template_step_id)
-    ?? asNonEmptyString(args.step_id);
-}
+export const ui_create_workflow_template_step_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_create_workflow_template_step_v1);
 
-function workflowTemplateStepTemplateId(
-  rec: Record<string, unknown>,
-  args: Record<string, unknown>,
-): string | null {
-  return asNonEmptyString(rec.workflow_template_id)
-    ?? asNonEmptyString(rec.template_id)
-    ?? asNonEmptyString(args.workflow_template_id)
-    ?? asNonEmptyString(args.template_id);
-}
+export const ui_update_workflow_template_step_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_update_workflow_template_step_v1);
 
-function requireWorkflowTemplateStepReadback(
-  row: Record<string, unknown>,
-  expectedStepId: string,
-  expectedTemplateId: string | null,
-  rpcName: string,
-): void {
-  if (asNonEmptyString(row.id) !== expectedStepId) {
-    throw new Error(`${rpcName} backend readback returned the wrong workflow_template_step`);
-  }
-  if (expectedTemplateId && asNonEmptyString(row.workflow_template_id) !== expectedTemplateId) {
-    throw new Error(`${rpcName} backend readback returned a step outside the workflow template`);
-  }
-}
+export const ui_duplicate_workflow_template_step_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_duplicate_workflow_template_step_v1);
 
-async function workflowTemplateStepMutation(
-  rpcName: string,
-  args: Record<string, unknown>,
-): Promise<WorkflowTemplateStepMutationResult> {
-  const result = await phaseC6Rpc(
-    rpcName,
-    args,
-    'workflow_template_step',
-  ) as WorkflowTemplateStepMutationResult;
-  if (liveRpcTarget()) {
-    const stepId = workflowTemplateStepResultId(result, args);
-    const templateId = workflowTemplateStepTemplateId(result, args);
-    if (!stepId) throw new Error(`${rpcName} did not return workflow_template_step_id`);
-    if (!templateId) throw new Error(`${rpcName} did not return workflow_template_id`);
-
-    await requireLiveResourceReadback('workflow_templates', templateId, rpcName);
-    await requireLiveResourceReadback('workflow_template_directory', templateId, rpcName);
-
-    if (result.deleted === true && result.soft_deleted !== true) {
-      await requireLiveResourceAbsenceReadback(
-        'workflow_template_steps',
-        { id: stepId },
-        rpcName,
-        `workflow_template_steps:${stepId}`,
-      );
-    } else {
-      const stepReadback = await requireLiveResourceReadback(
-        'workflow_template_steps',
-        stepId,
-        rpcName,
-      );
-      requireWorkflowTemplateStepReadback(stepReadback, stepId, templateId, rpcName);
-      if (result.soft_deleted === true && booleanReadback(stepReadback.enabled) !== false) {
-        throw new Error(`${rpcName} backend readback did not reflect soft-deleted step state`);
-      }
-    }
-  }
-  return result;
-}
-
-export const ui_create_workflow_template_step_v1 = (
-  args: CreateWorkflowTemplateStepArgs,
-): Promise<WorkflowTemplateStepMutationResult> =>
-  workflowTemplateStepMutation('ui_create_workflow_template_step_v1', args);
-export const ui_update_workflow_template_step_v1 = (
-  args: UpdateWorkflowTemplateStepArgs,
-): Promise<WorkflowTemplateStepMutationResult> =>
-  workflowTemplateStepMutation('ui_update_workflow_template_step_v1', args);
-export const ui_duplicate_workflow_template_step_v1 = (
-  args: DuplicateWorkflowTemplateStepArgs,
-): Promise<WorkflowTemplateStepMutationResult> =>
-  workflowTemplateStepMutation('ui_duplicate_workflow_template_step_v1', args);
-export const ui_delete_workflow_template_step_v1 = (
-  args: DeleteWorkflowTemplateStepArgs,
-): Promise<WorkflowTemplateStepMutationResult> =>
-  workflowTemplateStepMutation('ui_delete_workflow_template_step_v1', args);
+export const ui_delete_workflow_template_step_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_delete_workflow_template_step_v1);
 
 // WORKFLOWS — bindings lifecycle (Register/Simulate)
 //
@@ -11004,61 +9180,8 @@ export interface BulkTransitionTasksArgs extends Record<string, unknown> {
   payload?: Record<string, unknown>;
   action_kind?: string;
 }
-async function requireLiveBulkTaskTransitionReadback(
-  result: Record<string, unknown>,
-  args: BulkTransitionTasksArgs,
-): Promise<void> {
-  const expectedPayload = args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload)
-    ? args.payload
-    : null;
-  const outcomes = Array.isArray(result.outcomes)
-    ? result.outcomes.filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
-    : [];
-  const taskIdsFromArgs = Array.isArray(args.task_ids)
-    ? args.task_ids.map((id) => asNonEmptyString(id)).filter((id): id is string => !!id)
-    : [];
-  const successful = outcomes
-    .filter((row) => row.ok !== false)
-    .map((row) => ({
-      taskId: asNonEmptyString(row.task_id) ?? asNonEmptyString(row.id),
-      taskEventId: asNonEmptyString(row.task_event_id),
-    }))
-    .filter((row): row is { taskId: string; taskEventId: string | null } => !!row.taskId);
 
-  const tasksToVerify = successful.length > 0
-    ? successful
-    : taskIdsFromArgs.map((taskId) => ({ taskId, taskEventId: null }));
-
-  if (tasksToVerify.length === 0) {
-    throw new Error('bulk_transition_tasks_v1 did not return backend task transition evidence');
-  }
-
-  await Promise.all(tasksToVerify.map(async ({ taskId, taskEventId }) => {
-    await requireLiveResourceReadback('tasks', taskId, 'bulk_transition_tasks_v1');
-    const taskEvents = taskEventId
-      ? [await requireLiveResourceReadback('task_events', taskEventId, 'bulk_transition_tasks_v1')]
-      : await requireLiveResourceListReadback('task_events', { task_id: taskId }, 'bulk_transition_tasks_v1');
-    if (expectedPayload && Object.keys(expectedPayload).length > 0) {
-      const event = taskEvents.find((row) => String(row.task_id ?? '') === taskId) ?? taskEvents[0];
-      const eventPayload = event && typeof event.payload === 'object' && !Array.isArray(event.payload)
-        ? event.payload as Record<string, unknown>
-        : {};
-      for (const [key, value] of Object.entries(expectedPayload)) {
-        if (JSON.stringify(eventPayload[key] ?? null) !== JSON.stringify(value ?? null)) {
-          throw new Error(`bulk_transition_tasks_v1 backend task_event payload mismatch for ${taskId}:${key}`);
-        }
-      }
-    }
-  }));
-}
-
-export const bulk_transition_tasks_v1 = async (args: BulkTransitionTasksArgs) => {
-  const result = await phaseC6Rpc('bulk_transition_tasks_v1', args);
-  if (liveRpcTarget()) {
-    await requireLiveBulkTaskTransitionReadback(result, args);
-  }
-  return result;
-};
+export const bulk_transition_tasks_v1 = /* @__PURE__ */ lazyAdapter(loadTasksAdapter, adapter => adapter.bulk_transition_tasks_v1);
 
 // ----------- Delivery slots -----------
 // CLAIM-LIFECYCLE-LINK Gap 2: extend the synthetic adapter so each window
@@ -11087,78 +9210,12 @@ export const DELIVERY_SLOT_CATALOG: DeliverySlotWindow[] = [
   { window_id: 'win_2026_04_28_pm', slot_date: '2026-04-28', window_start_local: '16:00', window_end_local: '18:00', remaining: 7 },
 ];
 
-export async function list_delivery_slots_v1(
-  args?: { shipment_id?: string; slot_date?: string } | unknown,
-): Promise<DeliverySlotWindow[]> {
-  const { list_delivery_slots_v1 } = await import('./data-source/shipments');
-  return list_delivery_slots_v1(args);
-}
-export async function reserve_delivery_slot_v1({
-  slot_date,
-  shipment_id,
-  window_id,
-  ...rest
-}: {
-  slot_date: string;
-  shipment_id?: string;
-  window_id?: string;
-  [key: string]: unknown;
-}): Promise<{ ok: true; slot_date: string; shipment_id?: string; window_id?: string; reserved_at: string }> {
-  const clientId = (rest.client_id as string | undefined) ?? await getLiveShipmentClientId(shipment_id);
-  let windowStart = rest.window_start_local as string | undefined;
-  let windowEnd = rest.window_end_local as string | undefined;
-  if (window_id && shipment_id && clientId && (!windowStart || !windowEnd)) {
-    const windows = await list_delivery_slots_v1({ shipment_id, client_id: clientId, slot_date });
-    const selected = windows.find((window) => window.window_id === window_id);
-    windowStart = selected?.window_start_local ?? windowStart;
-    windowEnd = selected?.window_end_local ?? windowEnd;
-  }
-  const live = await liveRpc<Record<string, unknown>>('reserve_delivery_slot_v1', {
-    p_input: {
-      ...rest,
-      shipment_id,
-      client_id: clientId,
-      slot_date,
-      window_id,
-      window_start_local: windowStart,
-      window_end_local: windowEnd,
-      performed_by_system: rest.performed_by_system ?? 'console-v2',
-    },
-  });
-  if (live) {
-    const rec = requireLiveMutationResult(live.data, 'reserve_delivery_slot_v1', [
-      'reservation_id',
-      'slot_reservation_id',
-      'reserved_at',
-      'shipment_id',
-      'action_id',
-    ]);
-    const reservedAt = asNonEmptyString(rec.reserved_at ?? rec.applied_at ?? rec.created_at) ?? '';
-    return {
-      ok: true,
-      slot_date,
-      shipment_id,
-      window_id,
-      reserved_at: reservedAt,
-      ...rec,
-    } as { ok: true; slot_date: string; shipment_id?: string; window_id?: string; reserved_at: string };
-  }
+export const list_delivery_slots_v1 = /* @__PURE__ */ lazyAdapter(loadShipmentsAdapter, adapter => adapter.list_delivery_slots_v1);
 
-  await sleep(80);
-  return { ok: true, slot_date, shipment_id, window_id, reserved_at: new Date().toISOString() };
-}
+export const reserve_delivery_slot_v1 = /* @__PURE__ */ lazyAdapter(loadShipmentsAdapter, adapter => adapter.reserve_delivery_slot_v1);
 
 // ----------- COD / Settlements -----------
-export async function compute_cod_payment_collection_summary_v1(scope?: unknown): Promise<{
-  scope: unknown;
-  expected: number;
-  collected: number;
-  remitted: number;
-  variance: number;
-}> {
-  const { compute_cod_payment_collection_summary_v1 } = await import('./data-source/finance');
-  return compute_cod_payment_collection_summary_v1(scope);
-}
+export const compute_cod_payment_collection_summary_v1 = /* @__PURE__ */ lazyAdapter(loadFinanceAdapter, adapter => adapter.compute_cod_payment_collection_summary_v1);
 
 // ----------- Labels -----------
 export type LabelDesignScopeType = 'tenant' | 'client' | 'sender';
@@ -11326,164 +9383,41 @@ export function assertLabelDesignScope(scopeType: string, scopeId: string): asse
   }
 }
 
-export async function label_designer_list_drafts(
-  scopeType: LabelDesignScopeType,
-  scopeId: string,
-): Promise<LabelDesignerDraftListResult> {
-  const { label_designer_list_drafts } = await import('./data-source/labels');
-  return label_designer_list_drafts(scopeType, scopeId);
-}
+export const label_designer_list_drafts = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_list_drafts);
 
-export async function label_designer_get_field_catalog(
-  scopeType: LabelDesignScopeType,
-  scopeId: string,
-): Promise<LabelDesignerFieldCatalogResult> {
-  const { label_designer_get_field_catalog } = await import('./data-source/labels');
-  return label_designer_get_field_catalog(scopeType, scopeId);
-}
+export const label_designer_get_field_catalog = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_get_field_catalog);
 
-async function labelDesignerEffectiveConfigRpc(
-  rpcName: string,
-  scopeType: LabelDesignScopeType,
-  scopeId: string,
-): Promise<LabelDesignerEffectiveConfigResult> {
-  assertLabelDesignScope(scopeType, scopeId);
-  const live = await liveRpc<LabelDesignerEffectiveConfigResult>(rpcName, {
-    p_scope_type: scopeType,
-    p_scope_id: scopeId,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      `${rpcName} returned no backend effective config`,
-    );
-    const value = rec.value && typeof rec.value === 'object' && !Array.isArray(rec.value)
-      ? rec.value as Record<string, unknown>
-      : {};
-    return { ...rec, ok: rec.ok !== false, value };
-  }
+export const label_designer_get_effective_label_design = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_get_effective_label_design);
 
-  await sleep(30);
-  return { ok: true, value: {} };
-}
+export const label_designer_get_effective_label_render_policy = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_get_effective_label_render_policy);
 
-export const label_designer_get_effective_label_design = (
-  scopeType: LabelDesignScopeType,
-  scopeId: string,
-): Promise<LabelDesignerEffectiveConfigResult> =>
-  labelDesignerEffectiveConfigRpc('label_designer_get_effective_label_design', scopeType, scopeId);
+export const label_designer_get_effective_label_print_profile = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_get_effective_label_print_profile);
 
-export const label_designer_get_effective_label_render_policy = (
-  scopeType: LabelDesignScopeType,
-  scopeId: string,
-): Promise<LabelDesignerEffectiveConfigResult> =>
-  labelDesignerEffectiveConfigRpc('label_designer_get_effective_label_render_policy', scopeType, scopeId);
+export const label_designer_get_label_media_catalog = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_get_label_media_catalog);
 
-export const label_designer_get_effective_label_print_profile = (
-  scopeType: LabelDesignScopeType,
-  scopeId: string,
-): Promise<LabelDesignerEffectiveConfigResult> =>
-  labelDesignerEffectiveConfigRpc('label_designer_get_effective_label_print_profile', scopeType, scopeId);
+export const ui_label_renderer_readiness_v1 = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.ui_label_renderer_readiness_v1);
 
-export const label_designer_get_label_media_catalog = (
-  scopeType: LabelDesignScopeType,
-  scopeId: string,
-): Promise<LabelDesignerEffectiveConfigResult> =>
-  labelDesignerEffectiveConfigRpc('label_designer_get_label_media_catalog', scopeType, scopeId);
+export const ui_record_label_printer_certification_v1 = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.ui_record_label_printer_certification_v1);
 
-export async function ui_label_renderer_readiness_v1(
-  scopeType: LabelDesignScopeType,
-  scopeId: string,
-): Promise<LabelRendererReadinessResult> {
-  const { ui_label_renderer_readiness_v1 } = await import('./data-source/labels');
-  return ui_label_renderer_readiness_v1(scopeType, scopeId);
-}
+export const label_designer_get_sample_payload = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_get_sample_payload);
 
-export async function ui_record_label_printer_certification_v1(
-  args: LabelPrinterCertificationArgs,
-): Promise<LabelPrinterCertificationResult> {
-  const { ui_record_label_printer_certification_v1 } = await import('./data-source/labels');
-  return ui_record_label_printer_certification_v1(args);
-}
+export const label_designer_create_draft = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_create_draft);
 
-export async function label_designer_get_sample_payload(args: {
-  shipment_id: string;
-  shipment_box_id?: string | null;
-}): Promise<LabelDesignerSamplePayloadResult> {
-  const { label_designer_get_sample_payload } = await import('./data-source/labels');
-  return label_designer_get_sample_payload(args);
-}
+export const label_designer_update_draft = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_update_draft);
 
-export async function label_designer_create_draft(args: {
-  scope_type: LabelDesignScopeType;
-  scope_id: string;
-  label_type?: string;
-  draft_name?: string | null;
-  draft_value: Record<string, unknown>;
-}): Promise<LabelDesignerDraftMutationResult> {
-  const { label_designer_create_draft } = await import('./data-source/labels');
-  return label_designer_create_draft(args);
-}
+export const label_designer_archive_draft = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_archive_draft);
 
-export async function label_designer_update_draft(args: {
-  draft_id: string;
-  label_type?: string | null;
-  draft_name?: string | null;
-  draft_value?: Record<string, unknown> | null;
-}): Promise<LabelDesignerDraftMutationResult> {
-  const { label_designer_update_draft } = await import('./data-source/labels');
-  return label_designer_update_draft(args);
-}
+export const label_designer_validate_label_design_draft = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_validate_label_design_draft);
 
-export async function label_designer_archive_draft(args: {
-  draft_id: string;
-  archive_reason?: string | null;
-}): Promise<LabelDesignerDraftMutationResult> {
-  const { label_designer_archive_draft } = await import('./data-source/labels');
-  return label_designer_archive_draft(args);
-}
+export const label_designer_publish_label_design_draft = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_publish_label_design_draft);
 
-export async function label_designer_validate_label_design_draft(
-  draftId: string,
-): Promise<LabelDesignerDraftValidationResult> {
-  const { label_designer_validate_label_design_draft } = await import('./data-source/labels');
-  return label_designer_validate_label_design_draft(draftId);
-}
+export const label_designer_list_assets = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_list_assets);
 
-export async function label_designer_publish_label_design_draft(
-  draftId: string,
-  changeReason?: string | null,
-  readbackScope?: { scopeType?: string | null; scopeId?: string | null },
-): Promise<LabelDesignerDraftPublishResult> {
-  const { label_designer_publish_label_design_draft } = await import('./data-source/labels');
-  return label_designer_publish_label_design_draft(draftId, changeReason, readbackScope);
-}
+export const label_designer_upload_asset = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_upload_asset);
 
-export async function label_designer_list_assets(): Promise<LabelDesignerAssetListResult> {
-  const { label_designer_list_assets } = await import('./data-source/labels');
-  return label_designer_list_assets();
-}
+export const label_designer_delete_asset = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_delete_asset);
 
-export async function label_designer_upload_asset(
-  args: LabelDesignerAssetUploadArgs,
-): Promise<LabelDesignerAssetUploadResult> {
-  const { label_designer_upload_asset } = await import('./data-source/labels');
-  return label_designer_upload_asset(args);
-}
-
-export async function label_designer_delete_asset(
-  path: string,
-): Promise<{ ok: boolean; path?: string; error?: Record<string, unknown> }> {
-  const { label_designer_delete_asset } = await import('./data-source/labels');
-  return label_designer_delete_asset(path);
-}
-
-export async function label_designer_preview_label_design_draft(
-  args: LabelDesignerPreviewArgs,
-): Promise<LabelDesignerPreviewResult> {
-  const { label_designer_preview_label_design_draft } = await import('./data-source/labels');
-  return label_designer_preview_label_design_draft(args);
-}
+export const label_designer_preview_label_design_draft = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.label_designer_preview_label_design_draft);
 
 export async function request_label_reprint(
   labelId: string,
@@ -11495,7 +9429,7 @@ export async function request_label_reprint(
   label_job_id?: string | null;
   new_version_id?: string | null;
 }> {
-  const adapter = await import('./data-source/labels');
+  const adapter = await loadLabelsAdapter();
   return adapter.request_label_reprint(labelId, { reason });
 }
 
@@ -11520,64 +9454,7 @@ export interface TargetLabelRequestResult extends Record<string, unknown> {
   job?: Record<string, unknown> | null;
 }
 
-export async function ui_request_label_generation_target_v1(
-  args: TargetLabelRequestArgs,
-): Promise<TargetLabelRequestResult> {
-  const targetId = asNonEmptyString(args.target_id);
-  const targetType = asNonEmptyString(args.target_type);
-  if (!targetType) throw new Error('Target label type is required');
-  if (!targetId) throw new Error('Target label id is required');
-
-  const client = getSupabaseClient();
-  if (client) {
-    const result = await phaseC6Rpc('ui_request_label_generation_target_v1', {
-      ...args,
-      target_type: targetType,
-      target_id: targetId,
-      requested_source: asNonEmptyString(args.requested_source) ?? 'console-v2',
-    }, 'label_job');
-    const labelJobId =
-      asNonEmptyString(result.label_job_id) ??
-      asNonEmptyString(result.id) ??
-      asNonEmptyString((result.job as Record<string, unknown> | undefined)?.id);
-    if (!labelJobId) throw new Error('Target label request did not return a label job id');
-
-    const job = await requireLiveResourceReadback('label_jobs', labelJobId, 'ui_request_label_generation_target_v1');
-    const readbackTargetId = asNonEmptyString(job.target_id);
-    const readbackTargetType = asNonEmptyString(job.target_type);
-    if (readbackTargetId !== targetId) {
-      throw new Error(`Target label job readback belongs to ${readbackTargetId ?? 'unknown'}, expected ${targetId}`);
-    }
-    if (!readbackTargetType) {
-      throw new Error('Target label job readback missing target_type');
-    }
-
-    return {
-      ok: true,
-      label_job_id: labelJobId,
-      target_type: readbackTargetType,
-      target_id: readbackTargetId,
-      target_box_id: asNonEmptyString(job.target_box_id),
-      label_type: asNonEmptyString(job.label_type),
-      status: asNonEmptyString(job.status),
-      job,
-      ...result,
-    } as TargetLabelRequestResult;
-  }
-
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_request_label_generation_target_v1');
-  await sleep(80);
-  return {
-    ok: true,
-    label_job_id: 'ljob_target_' + Date.now(),
-    target_type: targetType,
-    target_id: targetId,
-    target_box_id: asNonEmptyString(args.target_box_id),
-    label_type: asNonEmptyString(args.label_type) ?? null,
-    status: 'pending',
-    job: null,
-  };
-}
+export const ui_request_label_generation_target_v1 = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.ui_request_label_generation_target_v1);
 
 export interface CompleteLabelJobResult extends Record<string, unknown> {
   ok: true;
@@ -11587,27 +9464,7 @@ export interface CompleteLabelJobResult extends Record<string, unknown> {
   settings_resolution_id?: string;
 }
 
-export async function complete_label_job(
-  jobId: string,
-  payload: unknown,
-): Promise<CompleteLabelJobResult> {
-  const args = { label_job_id: jobId, ...(payload as Record<string, unknown> | undefined) };
-  const client = getSupabaseClient();
-  if (client) {
-    const { requireLiveCompleteLabelJobReadback } = await import('./data-source/labels');
-    const result = await phaseC6Rpc('complete_label_job', args, 'label_jobs');
-    await requireLiveCompleteLabelJobReadback(jobId, result);
-    return result as CompleteLabelJobResult;
-  }
-  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('complete_label_job');
-  await sleep(80);
-  return {
-    ok: true,
-    label_job_id: jobId,
-    status: 'completed',
-    correlation_id: 'corr_' + Date.now(),
-  };
-}
+export const complete_label_job = /* @__PURE__ */ lazyAdapter(loadLabelsAdapter, adapter => adapter.complete_label_job);
 
 // W54-F — typed adapter for the canonical ui_log_event_v1 telemetry seam.
 // Live mode routes through `client.rpc('ui_log_event_v1', { p_event, p_app })`
@@ -11628,7 +9485,7 @@ export async function ui_log_event_v1(
   app: string = 'console',
   options: UiLogEventOptions = {},
 ): Promise<UiLogEventResult> {
-  const { ui_log_event_v1 } = await import('./data-source/workflows');
+  const { ui_log_event_v1 } = await loadWorkflowsAdapter();
   return ui_log_event_v1(eventJson, app, options);
 }
 
@@ -11706,64 +9563,21 @@ export interface WorkflowScheduleTaskPayloadRepairResult extends Record<string, 
   context_patch?: Record<string, unknown> | null;
 }
 
-export async function ui_create_workflow_schedule_trigger_v1(args: {
-  workflow_template_id: string;
-  schedule: Record<string, unknown>;
-  context_patch?: Record<string, unknown>;
-  enabled?: boolean;
-  notes?: string | null;
-}): Promise<WorkflowScheduleCreateResult> {
-  const { ui_create_workflow_schedule_trigger_v1 } = await import('./data-source/workflows');
-  return ui_create_workflow_schedule_trigger_v1(args);
-}
+export const ui_create_workflow_schedule_trigger_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_create_workflow_schedule_trigger_v1);
 
-export async function ui_create_workflow_run_trigger_v1(args: {
-  source_workflow_template_id: string;
-  target_workflow_template_id: string;
-  source_statuses?: string[] | null;
-  context_patch?: Record<string, unknown>;
-  enabled?: boolean;
-  notes?: string | null;
-  scope_id?: string | null;
-}): Promise<WorkflowRunTriggerCreateResult> {
-  const { ui_create_workflow_run_trigger_v1 } = await import('./data-source/workflows');
-  return ui_create_workflow_run_trigger_v1(args);
-}
+export const ui_create_workflow_run_trigger_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_create_workflow_run_trigger_v1);
 
-export async function ui_update_workflow_run_trigger_v1(args: {
-  workflow_run_trigger_id: string;
-  source_workflow_template_id?: string | null;
-  target_workflow_template_id?: string | null;
-  source_statuses?: string[] | null;
-  context_patch?: Record<string, unknown>;
-  enabled?: boolean;
-  notes?: string | null;
-  scope_id?: string | null;
-}): Promise<WorkflowRunTriggerUpdateResult> {
-  const { ui_update_workflow_run_trigger_v1 } = await import('./data-source/workflows');
-  return ui_update_workflow_run_trigger_v1(args);
-}
+export const ui_update_workflow_run_trigger_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_update_workflow_run_trigger_v1);
 
-export async function ui_delete_workflow_run_trigger_v1(
-  workflowRunTriggerId: string,
-  scopeIdArg?: string | null,
-): Promise<WorkflowRunTriggerDeleteResult> {
-  const { ui_delete_workflow_run_trigger_v1 } = await import('./data-source/workflows');
-  return ui_delete_workflow_run_trigger_v1(workflowRunTriggerId, scopeIdArg);
-}
+export const ui_delete_workflow_run_trigger_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_delete_workflow_run_trigger_v1);
 
-export async function ui_run_workflow_schedule_trigger_v1(
-  workflowScheduleTriggerId: string,
-): Promise<WorkflowScheduleRunNowResult> {
-  const { ui_run_workflow_schedule_trigger_v1 } = await import('./data-source/workflows');
-  return ui_run_workflow_schedule_trigger_v1(workflowScheduleTriggerId);
-}
+export const ui_run_workflow_schedule_trigger_v1 = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.ui_run_workflow_schedule_trigger_v1);
 
 export async function ui_repair_workflow_schedule_task_payload_v1(
   workflowScheduleTriggerId: string,
   taskPayload: Record<string, unknown> = {},
 ): Promise<WorkflowScheduleTaskPayloadRepairResult> {
-  const { ui_repair_workflow_schedule_task_payload_v1 } = await import('./data-source/workflows');
+  const { ui_repair_workflow_schedule_task_payload_v1 } = await loadWorkflowsAdapter();
   return ui_repair_workflow_schedule_task_payload_v1(workflowScheduleTriggerId, taskPayload);
 }
 
@@ -11779,13 +9593,7 @@ export interface UserDeviceRevokeResult extends Record<string, unknown> {
   items?: Array<Record<string, unknown>>;
 }
 
-export async function ui_execute_user_device_revoke_v1(
-  deviceId: string,
-  revokedReason: string,
-): Promise<UserDeviceRevokeResult> {
-  const { ui_execute_user_device_revoke_v1 } = await import('./data-source/platform');
-  return ui_execute_user_device_revoke_v1(deviceId, revokedReason);
-}
+export const ui_execute_user_device_revoke_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.ui_execute_user_device_revoke_v1);
 
 // ----------- Identity / sessions (Phase E2) -----------
 //
@@ -11810,57 +9618,8 @@ export interface DataSourceRevokeSessionArgs extends Record<string, unknown> {
   session_id?: string | null;
   reason: string;
 }
-export async function revoke_session_v1(
-  args: DataSourceRevokeSessionArgs,
-): Promise<Record<string, unknown>> {
-  const reason = asNonEmptyString(args.reason);
-  if (!reason) throw new Error('revoke_session_v1 requires reason');
-  const rpcArgs = { ...args, reason };
-  const { requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('revoke_session_v1', rpcArgs, 'revocation_audit');
-  if (liveRpcTarget()) {
-    await requireLiveUserSessionRevocationReadback(
-      'revoke_session_v1',
-      rpcArgs.target_user_id,
-      rpcArgs.session_id,
-      result,
-      reason,
-    );
-    await requireLiveUserSecurityActionReadback(
-      'revoke_session_v1',
-      rpcArgs.target_user_id,
-      'revoke_session_v1',
-      result,
-      reason,
-    );
-  }
-  // Live mode owns mutation server-side. In-memory mode marks the local seed
-  // with the same pending revocation evidence returned by the backend-backed
-  // session readback RPC; auth session termination is out-of-band.
-  const client = getSupabaseClient();
-  if (!client) {
-    const targetUserId = rpcArgs.target_user_id;
-    const sessionId = rpcArgs.session_id;
-    const sessions = (seed as { user_sessions?: Array<Record<string, unknown>> })
-      .user_sessions;
-    if (Array.isArray(sessions)) {
-      const now = new Date().toISOString();
-      sessions.forEach((row) => {
-        if (row.user_id !== targetUserId) return;
-        if (sessionId != null && row.id !== sessionId) return;
-        row.revocation_status = 'pending';
-        row.revocation_reason = reason;
-        row.revocation_requested_at = now;
-      });
-    }
-  }
-  return {
-    ok: true,
-    target_user_id: rpcArgs.target_user_id,
-    status: 'pending',
-    ...result,
-  };
-}
+
+export const revoke_session_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.revoke_session_v1);
 
 export interface UserSessionRow extends Record<string, unknown> {
   id: string;
@@ -11888,7 +9647,7 @@ export async function ui_list_user_sessions_v1(
   targetUserId?: string | null,
   limit = 50,
 ): Promise<ListResult<UserSessionRow>> {
-  const { ui_list_user_sessions_v1 } = await import('./data-source/platform');
+  const { ui_list_user_sessions_v1 } = await loadPlatformAdapter();
   return ui_list_user_sessions_v1(targetUserId, limit);
 }
 
@@ -11921,36 +9680,8 @@ export interface DataSourceGrantUserRoleArgs extends Record<string, unknown> {
   reason?: string;
   organization_id?: string;
 }
-export async function grant_user_role_v1(
-  args: DataSourceGrantUserRoleArgs,
-): Promise<Record<string, unknown>> {
-  const { requireLiveUserRoleAssignmentReadback, requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('grant_user_role_v1', args, 'user_role_assignment');
-  const { directory } = await requireLiveUserLifecycleReadback('grant_user_role_v1', args.target_user_id);
-  const assignmentId =
-    asNonEmptyString(result.rbac_user_role_assignment_id) ??
-    asNonEmptyString(result.user_role_assignment_id) ??
-    asNonEmptyString(result.assignment_id);
-  await requireLiveUserRoleAssignmentReadback(
-    'grant_user_role_v1',
-    args.target_user_id,
-    args.role_key,
-    assignmentId,
-    directory,
-    'active',
-  );
-  if (liveRpcTarget()) {
-    await requireLiveUserSecurityActionReadback(
-      'grant_user_role_v1',
-      args.target_user_id,
-      'grant_user_role_v1',
-      result,
-      args.reason,
-      { roleKey: args.role_key, assignmentId },
-    );
-  }
-  return { ok: true, target_user_id: args.target_user_id, role_key: args.role_key, ...result };
-}
+
+export const grant_user_role_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.grant_user_role_v1);
 
 export interface DataSourceRevokeUserRoleArgs extends Record<string, unknown> {
   target_user_id: string;
@@ -11958,148 +9689,32 @@ export interface DataSourceRevokeUserRoleArgs extends Record<string, unknown> {
   reason?: string;
   organization_id?: string;
 }
-export async function revoke_user_role_v1(
-  args: DataSourceRevokeUserRoleArgs,
-): Promise<Record<string, unknown>> {
-  const { requireLiveUserRoleAssignmentReadback, requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('revoke_user_role_v1', args, 'user_role_assignment');
-  const { directory } = await requireLiveUserLifecycleReadback('revoke_user_role_v1', args.target_user_id);
-  const assignmentId =
-    asNonEmptyString(result.rbac_user_role_assignment_id) ??
-    asNonEmptyString(result.user_role_assignment_id) ??
-    asNonEmptyString(result.assignment_id);
-  await requireLiveUserRoleAssignmentReadback(
-    'revoke_user_role_v1',
-    args.target_user_id,
-    args.role_key,
-    assignmentId,
-    directory,
-    'revoked',
-  );
-  if (liveRpcTarget()) {
-    await requireLiveUserSecurityActionReadback(
-      'revoke_user_role_v1',
-      args.target_user_id,
-      'revoke_user_role_v1',
-      result,
-      args.reason,
-      { roleKey: args.role_key, assignmentId },
-    );
-  }
-  return { ok: true, target_user_id: args.target_user_id, role_key: args.role_key, ...result };
-}
+
+export const revoke_user_role_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.revoke_user_role_v1);
 
 export interface DataSourceSuspendUserArgs extends Record<string, unknown> {
   target_user_id?: string;
   user_id?: string;
   reason?: string;
 }
-export async function suspend_user_v1(
-  args: DataSourceSuspendUserArgs,
-): Promise<Record<string, unknown>> {
-  const targetUserId = asNonEmptyString(args.target_user_id) ?? asNonEmptyString(args.user_id);
-  if (!targetUserId) throw new Error('suspend_user_v1 requires target_user_id');
-  const rpcArgs = { ...args, target_user_id: targetUserId };
-  const { requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('suspend_user_v1', rpcArgs, 'user');
-  const readback = await requireLiveUserLifecycleReadback('suspend_user_v1', targetUserId);
-  if (liveRpcTarget()) {
-    await requireLiveUserSecurityActionReadback(
-      'suspend_user_v1',
-      targetUserId,
-      'suspend_user_v1',
-      result,
-      rpcArgs.reason,
-    );
-  }
-  // In-memory mode: mirror canonical `users.status='suspended'` so the optimistic
-  // refresh + AppGuard suspended-branch check stays consistent without round-trip.
-  const client = getSupabaseClient();
-  if (!client) {
-    const users = (seed as { users?: Array<Record<string, unknown>> }).users;
-    if (Array.isArray(users)) {
-      const target = users.find((u) => u.id === targetUserId);
-      if (target) target.status = 'suspended';
-    }
-  }
-  if (readback.user) {
-    return {
-      ok: true,
-      target_user_id: targetUserId,
-      ...result,
-      status: readback.user.status ?? result.status,
-    };
-  }
-  return { ok: true, target_user_id: targetUserId, status: 'suspended', ...result };
-}
+
+export const suspend_user_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.suspend_user_v1);
 
 export interface DataSourceReactivateUserArgs extends Record<string, unknown> {
   target_user_id?: string;
   user_id?: string;
   reason?: string;
 }
-export async function reactivate_user_v1(
-  args: DataSourceReactivateUserArgs,
-): Promise<Record<string, unknown>> {
-  const targetUserId = asNonEmptyString(args.target_user_id) ?? asNonEmptyString(args.user_id);
-  if (!targetUserId) throw new Error('reactivate_user_v1 requires target_user_id');
-  const rpcArgs = { ...args, target_user_id: targetUserId };
-  const { requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('reactivate_user_v1', rpcArgs, 'user');
-  const readback = await requireLiveUserLifecycleReadback('reactivate_user_v1', targetUserId);
-  if (liveRpcTarget()) {
-    await requireLiveUserSecurityActionReadback(
-      'reactivate_user_v1',
-      targetUserId,
-      'reactivate_user_v1',
-      result,
-      rpcArgs.reason,
-    );
-  }
-  const client = getSupabaseClient();
-  if (!client) {
-    const users = (seed as { users?: Array<Record<string, unknown>> }).users;
-    if (Array.isArray(users)) {
-      const target = users.find((u) => u.id === targetUserId);
-      if (target) target.status = 'active';
-    }
-  }
-  if (readback.user) {
-    return {
-      ok: true,
-      target_user_id: targetUserId,
-      ...result,
-      status: readback.user.status ?? result.status,
-    };
-  }
-  return { ok: true, target_user_id: targetUserId, status: 'active', ...result };
-}
+
+export const reactivate_user_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.reactivate_user_v1);
 
 export interface DataSourceForcePasswordResetArgs extends Record<string, unknown> {
   target_user_id: string;
   email?: string;
   reason: string;
 }
-export async function force_password_reset_v1(
-  args: DataSourceForcePasswordResetArgs,
-): Promise<Record<string, unknown>> {
-  const reason = asNonEmptyString(args.reason);
-  if (!reason) throw new Error('force_password_reset_v1 requires reason');
-  const rpcArgs = { ...args, reason };
-  const { requireLiveUserSecurityActionReadback } = await import('./data-source/platform');
-  const result = await phaseC6Rpc('force_password_reset_v1', rpcArgs, 'user');
-  await requireLiveUserLifecycleReadback('force_password_reset_v1', rpcArgs.target_user_id);
-  if (liveRpcTarget()) {
-    await requireLiveUserSecurityActionReadback(
-      'force_password_reset_v1',
-      rpcArgs.target_user_id,
-      'force_password_reset_v1',
-      result,
-      reason,
-    );
-  }
-  return { ok: true, target_user_id: rpcArgs.target_user_id, ...result };
-}
+
+export const force_password_reset_v1 = /* @__PURE__ */ lazyAdapter(loadPlatformAdapter, adapter => adapter.force_password_reset_v1);
 
 export interface UserSecurityActionRow extends Record<string, unknown> {
   id: string;
@@ -12131,7 +9746,7 @@ export async function ui_list_user_security_actions_v1(
   targetUserId: string,
   limit = 10,
 ): Promise<ListResult<UserSecurityActionRow>> {
-  const { ui_list_user_security_actions_v1 } = await import('./data-source/platform');
+  const { ui_list_user_security_actions_v1 } = await loadPlatformAdapter();
   return ui_list_user_security_actions_v1(targetUserId, limit);
 }
 
@@ -12158,862 +9773,11 @@ export interface RunPluginTestResult extends Record<string, unknown> {
   correlation_id?: string;
   settings_resolution_id?: string;
 }
-export async function runPluginTest(
-  pluginId: string,
-  payload: unknown,
-  pluginVersionId?: string | null,
-): Promise<RunPluginTestResult> {
-  const { runPluginTest } = await import('./data-source/external-intake');
-  return runPluginTest(pluginId, payload, pluginVersionId);
-}
+export const runPluginTest = /* @__PURE__ */ lazyAdapter(loadExternalIntakeAdapter, adapter => adapter.runPluginTest);
 
-async function readApiGatewayRequestTestReadback(
-  filters: Array<Record<string, unknown>>,
-): Promise<ResourceRow | null> {
-  for (const filter of filters) {
-    const rows = await readLiveResourceListReadback('api_gateway_requests', filter, 'api-gateway');
-    const row = rows[0];
-    if (row) return row;
-  }
-  return null;
-}
+export const runApiGatewayRequestTest = /* @__PURE__ */ lazyAdapter(loadExternalIntakeAdapter, adapter => adapter.runApiGatewayRequestTest);
 
-async function readApiGatewayAuthRejectionReadback(
-  args: {
-    correlationId: string;
-    method: string;
-    path: string;
-    startedAtMs: number;
-    allowRecentFallback?: boolean;
-  },
-): Promise<ResourceRow | null> {
-  const correlationRows = await readLiveResourceListReadback(
-    'api_gateway_auth_rejections',
-    { correlation_id: args.correlationId },
-    'api-gateway',
-  );
-  const correlationRow = correlationRows.find((row) => apiGatewayReadbackOccurredAfter(row, args.startedAtMs));
-  if (correlationRow) return correlationRow;
-
-  if (!args.allowRecentFallback) return null;
-
-  const invalidTokenRows = await readLiveResourceListReadback(
-    'api_gateway_auth_rejections',
-    { failure_code: 'invalid_token' },
-    'api-gateway',
-  );
-  const normalizedMethod = args.method.toUpperCase();
-  return invalidTokenRows.find((row) => {
-    const rowMethod = asNonEmptyString(row.method)?.toUpperCase();
-    const rowPath = asNonEmptyString(row.path);
-    return (
-      apiGatewayReadbackOccurredAfter(row, args.startedAtMs) &&
-      (!rowMethod || rowMethod === normalizedMethod) &&
-      (!rowPath || rowPath === args.path)
-    );
-  }) ?? null;
-}
-
-async function readWebhookReceiverAuthRejectionReadback(
-  args: {
-    correlationId: string;
-    idempotencyKey: string;
-    startedAtMs: number;
-  },
-): Promise<ResourceRow | null> {
-  const filters: Array<Record<string, unknown>> = [
-    { correlation_id: args.correlationId },
-    args.correlationId !== args.idempotencyKey ? { correlation_id: args.idempotencyKey } : null,
-    { request_id: args.idempotencyKey },
-  ].filter(Boolean) as Array<Record<string, unknown>>;
-  for (const filter of filters) {
-    const rows = await readLiveResourceListReadback('webhook_auth_rejections', filter, 'webhook-receiver');
-    const row = rows.find((candidate) => apiGatewayReadbackOccurredAfter(candidate, args.startedAtMs));
-    if (row) return row;
-  }
-  return null;
-}
-
-async function readWebhookReceiverAuthRejectionUntil(
-  args: {
-    correlationId: string;
-    idempotencyKey: string;
-    startedAtMs: number;
-  },
-): Promise<ResourceRow | null> {
-  const deadline = performance.now() + WEBHOOK_RECEIVER_AUTH_REJECTION_READBACK_TIMEOUT_MS;
-  while (performance.now() <= deadline) {
-    try {
-      const row = await readWebhookReceiverAuthRejectionReadback(args);
-      if (row) return row;
-    } catch {
-      // Older deployments may not expose webhook_auth_rejections yet. Keep the
-      // canonical inbox readback path authoritative for non-auth failures.
-      return null;
-    }
-    if (performance.now() >= deadline) break;
-    await sleep(WEBHOOK_RECEIVER_AUTH_REJECTION_READBACK_INTERVAL_MS);
-  }
-  return null;
-}
-
-function apiGatewayDirectFetchConfig(): { baseUrl: string; anonKey: string } | null {
-  if (import.meta.env.MODE === 'test' && import.meta.env.VITE_API_GATEWAY_DIRECT_FETCH_TEST !== '1') {
-    return null;
-  }
-  const baseUrl = asNonEmptyString(import.meta.env.VITE_SUPABASE_URL)?.replace(/\/+$/, '');
-  const anonKey = asNonEmptyString(import.meta.env.VITE_SUPABASE_ANON_KEY);
-  if (!baseUrl || !anonKey || typeof fetch !== 'function') return null;
-  return { baseUrl, anonKey };
-}
-
-function webhookReceiverDirectFetchConfig(): { baseUrl: string; anonKey: string } | null {
-  if (import.meta.env.MODE === 'test' && import.meta.env.VITE_WEBHOOK_RECEIVER_DIRECT_FETCH_TEST !== '1') {
-    return null;
-  }
-  const baseUrl = asNonEmptyString(import.meta.env.VITE_SUPABASE_URL)?.replace(/\/+$/, '');
-  const anonKey = asNonEmptyString(import.meta.env.VITE_SUPABASE_ANON_KEY);
-  if (!baseUrl || !anonKey || typeof fetch !== 'function') return null;
-  return { baseUrl, anonKey };
-}
-
-async function invokeApiGatewayEdge(
-  client: NonNullable<ReturnType<typeof getSupabaseClient>>,
-  invokeName: string,
-  args: {
-    method: ApiGatewayInvokeMethod;
-    payload: Record<string, unknown>;
-    headers: Record<string, string>;
-  },
-): Promise<{ data: Record<string, unknown>; error: { message?: string } | null }> {
-  const directConfig = apiGatewayDirectFetchConfig();
-  if (!directConfig) {
-    const { data, error } = await withApiGatewayInvokeTimeout(
-      client.functions.invoke<Record<string, unknown>>(invokeName, {
-        method: args.method,
-        body: args.method === 'GET' ? undefined : args.payload,
-        headers: args.headers,
-      }),
-    );
-    return { data: objectRecord(data), error };
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_GATEWAY_EDGE_INVOKE_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${directConfig.baseUrl}/functions/v1/${invokeName}`, {
-      method: args.method,
-      headers: {
-        ...args.headers,
-        apikey: directConfig.anonKey,
-        authorization: `Bearer ${directConfig.anonKey}`,
-        'content-type': 'application/json',
-        'x-client-info': 'console-v2',
-      },
-      body: args.method === 'GET' ? undefined : JSON.stringify(args.payload),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let data: Record<string, unknown> = {};
-    if (text.trim()) {
-      try {
-        data = objectRecord(JSON.parse(text));
-      } catch {
-        data = { message: text };
-      }
-    }
-    if (!response.ok) {
-      const message =
-        findNestedString(data, ['message', 'error', 'code', 'failure_code']) ??
-        `api-gateway failed with HTTP ${response.status}`;
-      return {
-        data: {
-          ...data,
-          status: response.status,
-          status_code: response.status,
-        },
-        error: { message },
-      };
-    }
-    return { data, error: null };
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error(API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function invokeWebhookReceiverEdge(
-  client: NonNullable<ReturnType<typeof getSupabaseClient>>,
-  args: {
-    payload: Record<string, unknown>;
-    headers: Record<string, string>;
-  },
-): Promise<{ data: Record<string, unknown> | null; error: { message?: string } | null }> {
-  const directConfig = webhookReceiverDirectFetchConfig();
-  if (!directConfig) {
-    const { data, error } = await client.functions.invoke<Record<string, unknown>>('webhook-receiver', {
-      body: args.payload,
-      headers: args.headers,
-    });
-    return { data: objectRecord(data), error };
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_RECEIVER_EDGE_INVOKE_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${directConfig.baseUrl}/functions/v1/webhook-receiver`, {
-      method: 'POST',
-      headers: {
-        ...args.headers,
-        apikey: directConfig.anonKey,
-        authorization: `Bearer ${directConfig.anonKey}`,
-        'content-type': 'application/json',
-        'x-client-info': 'console-v2',
-      },
-      body: JSON.stringify(args.payload),
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    let data: Record<string, unknown> = {};
-    if (text.trim()) {
-      try {
-        data = objectRecord(JSON.parse(text));
-      } catch {
-        data = { message: text };
-      }
-    }
-    if (!response.ok) {
-      const message =
-        findNestedString(data, ['response_reason', 'ack_reason', 'reason', 'message', 'error', 'code', 'failure_code']) ??
-        `webhook-receiver failed with HTTP ${response.status}`;
-      return {
-        data: {
-          ...data,
-          status: response.status,
-          status_code: response.status,
-          http_status: response.status,
-        },
-        error: { message },
-      };
-    }
-    return { data, error: null };
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      return { data: null, error: null };
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function waitForApiGatewayInvokeOrAuthRejection(
-  invokePromise: Promise<{ data: Record<string, unknown>; error: { message?: string } | null }>,
-  args: {
-    correlationId: string;
-    method: ApiGatewayInvokeMethod;
-    path: string;
-    startedAtMs: number;
-  },
-): Promise<
-  | { type: 'invoke'; result: { data: Record<string, unknown>; error: { message?: string } | null } }
-  | { type: 'auth_rejection'; row: ResourceRow }
-> {
-  const wrapped = invokePromise.then(
-    (result) => ({ status: 'fulfilled' as const, result }),
-    (error) => ({ status: 'rejected' as const, error }),
-  );
-  const deadline = performance.now() + API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_TIMEOUT_MS;
-  while (performance.now() <= deadline) {
-    const settled = await Promise.race([
-      wrapped,
-      sleep(API_GATEWAY_AUTH_REJECTION_QUICK_READBACK_INTERVAL_MS).then(() => null),
-    ]);
-    if (settled) {
-      if (settled.status === 'fulfilled') {
-        return { type: 'invoke', result: settled.result };
-      }
-      throw settled.error;
-    }
-    try {
-      const authRejection = await readApiGatewayAuthRejectionReadback({
-        correlationId: args.correlationId,
-        method: args.method,
-        path: args.path,
-        startedAtMs: args.startedAtMs,
-      });
-      if (authRejection) return { type: 'auth_rejection', row: authRejection };
-    } catch {
-      // Some older API lanes may not expose the rejection projection yet. Keep
-      // the main invoke/request readback path authoritative in that case.
-    }
-  }
-  throw new Error(API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE);
-}
-
-export async function runApiGatewayRequestTest(
-  args: RunApiGatewayRequestTestArgs,
-): Promise<RunApiGatewayRequestTestResult> {
-  const token = asNonEmptyString(args.auth_token);
-  if (!token) throw new Error('API Gateway source token is required');
-  const { path, query } = splitApiGatewayPath(args.path, args.query_string);
-  const method = normalizeApiGatewayMethod(args.method);
-  const correlationId =
-    asNonEmptyString(args.correlation_id) ??
-    asNonEmptyString(args.idempotency_key) ??
-    `console-api-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const idempotencyKey = asNonEmptyString(args.idempotency_key) ?? correlationId;
-  const client = getSupabaseClient();
-  if (!client) {
-    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('edge api-gateway');
-    return buildApiGatewaySyntheticResult(
-      {
-        ...args,
-        method,
-        path,
-        query_string: query,
-        correlation_id: correlationId,
-        idempotency_key: idempotencyKey,
-      },
-      nextCorrelationId,
-    );
-  }
-
-  const operatorHeaders = objectRecord(args.headers);
-  const headers: Record<string, string> = {};
-  for (const [key, value] of Object.entries(operatorHeaders)) {
-    const normalizedKey = key.trim();
-    if (!normalizedKey || value == null) continue;
-    if (normalizedKey.toLowerCase() === 'content-type') continue;
-    headers[normalizedKey] = String(value);
-  }
-  headers['x-webhook-token'] = token;
-  headers['x-correlation-id'] = correlationId;
-  headers['idempotency-key'] = idempotencyKey;
-  const replayOf = asNonEmptyString(args.replay_of);
-  if (replayOf) {
-    headers['x-masarx-replay-of'] = replayOf;
-  }
-
-  const invokeName = `api-gateway${path}${query ? `?${query}` : ''}`;
-  const payload = args.payload ?? {};
-  const startedAtMs = Date.now();
-  let response: Record<string, unknown> = {};
-  let invokeErrorMessage: string | null = null;
-  try {
-    const invokePromise = withApiGatewayInvokeTimeout(
-      invokeApiGatewayEdge(client, invokeName, { method, payload, headers }),
-    );
-    const invokeOutcome = await waitForApiGatewayInvokeOrAuthRejection(invokePromise, {
-      correlationId,
-      method,
-      path,
-      startedAtMs,
-    });
-    if (invokeOutcome.type === 'auth_rejection') {
-      assertApiGatewaySelectedSourceMatchesReadback(args, invokeOutcome.row);
-      throw new Error(apiGatewayAuthRejectionMessage(invokeOutcome.row));
-    }
-    const { data, error } = invokeOutcome.result;
-    if (error) {
-      invokeErrorMessage = await readFunctionErrorMessage(error, 'api-gateway failed');
-      response = { ...objectRecord(data), error: invokeErrorMessage };
-    } else {
-      response = objectRecord(data);
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('API Gateway auth rejected by backend readback')) {
-      throw err;
-    }
-    invokeErrorMessage = err instanceof Error ? err.message : API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE;
-    response = { error: invokeErrorMessage };
-  }
-
-  const responseRequestId = findNestedString(response, ['api_gateway_request_id', 'request_id']);
-  const responseCorrelationId = findNestedString(response, ['correlation_id']) ?? correlationId;
-  const filters = [
-    responseRequestId ? { request_id: responseRequestId } : null,
-    { correlation_id: responseCorrelationId },
-    responseCorrelationId !== correlationId ? { correlation_id: correlationId } : null,
-  ].filter(Boolean) as Array<Record<string, unknown>>;
-
-  const expectShipment = args.expect_shipment !== false;
-  const responseIsEmpty = Object.keys(response).length === 0;
-  const responseStatus = findNestedNumber(response, ['status', 'status_code', 'http_status']);
-  const responseHasErrorSignal =
-    Boolean(findNestedString(response, ['error', 'code', 'message', 'failure_code'])) ||
-    (responseStatus != null && responseStatus >= 400);
-  if (invokeErrorMessage || responseIsEmpty || (!responseRequestId && responseHasErrorSignal)) {
-    try {
-      const exactAuthRejection = await readApiGatewayAuthRejectionReadback({
-        correlationId: responseCorrelationId,
-        method,
-        path,
-        startedAtMs,
-      });
-      if (exactAuthRejection) {
-        assertApiGatewaySelectedSourceMatchesReadback(args, exactAuthRejection);
-        throw new Error(apiGatewayAuthRejectionMessage(exactAuthRejection));
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('API Gateway auth rejected by backend readback')) {
-        throw err;
-      }
-      // Older deployments may not expose api_gateway_auth_rejections yet.
-      // Continue to the canonical request readback path when that projection
-      // is unavailable instead of failing unrelated successful tests.
-    }
-    const edgeAuthMessage = apiGatewayEdgeAuthErrorMessage(response, invokeErrorMessage);
-    if (edgeAuthMessage) {
-      throw new Error(edgeAuthMessage);
-    }
-  }
-  if (invokeErrorMessage) {
-    try {
-      const authRejection = await readApiGatewayAuthRejectionReadback({
-        correlationId: responseCorrelationId,
-        method,
-        path,
-        startedAtMs,
-        allowRecentFallback: true,
-      });
-      if (authRejection) {
-        assertApiGatewaySelectedSourceMatchesReadback(args, authRejection);
-        throw new Error(apiGatewayAuthRejectionMessage(authRejection));
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('API Gateway auth rejected by backend readback')) {
-        throw err;
-      }
-      // If the auth-rejection projection is temporarily unavailable, keep the
-      // canonical request-readback wait below so non-auth failures still settle.
-    }
-  }
-  const readbackTimeoutMs = invokeErrorMessage === API_GATEWAY_EDGE_INVOKE_TIMEOUT_MESSAGE
-    ? API_GATEWAY_REQUEST_READBACK_AFTER_INVOKE_TIMEOUT_MS
-    : API_GATEWAY_REQUEST_READBACK_TIMEOUT_MS;
-  const deadline = performance.now() + readbackTimeoutMs;
-  let readback: ResourceRow | null = null;
-  let firstReadbackAt: number | null = null;
-  while (performance.now() <= deadline) {
-    readback = await readApiGatewayRequestTestReadback(filters);
-    if (readback && apiGatewayReadbackTerminal(readback, expectShipment)) break;
-    if (readback) {
-      firstReadbackAt ??= performance.now();
-      if (performance.now() - firstReadbackAt >= API_GATEWAY_TERMINAL_SETTLE_AFTER_FIRST_READBACK_MS) break;
-    }
-    if (performance.now() >= deadline) break;
-    await sleep(API_GATEWAY_REQUEST_READBACK_INTERVAL_MS);
-  }
-
-  if (!readback) {
-    if (invokeErrorMessage) throw new Error(invokeErrorMessage);
-    throw new Error('api-gateway request did not produce backend request readback');
-  }
-  assertApiGatewaySelectedSourceMatchesReadback(args, readback);
-
-  const result = buildApiGatewayRequestResult(
-    {
-      ...args,
-      method,
-      path,
-      query_string: query,
-      correlation_id: responseCorrelationId,
-      idempotency_key: idempotencyKey,
-    },
-    response,
-    readback,
-    { invokeErrorMessage },
-  );
-  if (result.shipment_id) {
-    await requireLiveResourceReadback('shipments', result.shipment_id, 'api-gateway');
-    await requireLiveResourceReadback('shipment_directory', result.shipment_id, 'api-gateway');
-  }
-  if (expectShipment && result.intake_state === 'shipment_materialized' && !result.shipment_id) {
-    throw new Error('api-gateway materialized shipment without canonical shipment readback');
-  }
-  return result;
-}
-
-export async function runWebhookReceiverTest(
-  args: RunWebhookReceiverTestArgs,
-): Promise<RunWebhookReceiverTestResult> {
-  const token = asNonEmptyString(args.auth_token);
-  if (!token) throw new Error('Intake source token is required');
-  const payload: Record<string, unknown> =
-    args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload)
-      ? args.payload as Record<string, unknown>
-      : {};
-  const fallbackUuid = (): string => {
-    const timestampHex = Date.now().toString(16).padStart(12, '0').slice(-12);
-    const randomHex = Math.random().toString(16).slice(2).padEnd(20, '0').slice(0, 20);
-    return `${timestampHex.slice(0, 8)}-${timestampHex.slice(8, 12)}-4${randomHex.slice(0, 3)}-8${randomHex.slice(3, 6)}-${randomHex.slice(6, 18)}`;
-  };
-  const idempotencyKey =
-    asNonEmptyString(args.idempotency_key) ?? globalThis.crypto?.randomUUID?.() ?? fallbackUuid();
-  const signature = asNonEmptyString(args.signature);
-  const client = getSupabaseClient();
-  if (!client) {
-    if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('edge webhook-receiver');
-    return buildWebhookReceiverSyntheticResult({ ...args, idempotency_key: idempotencyKey }, nextCorrelationId);
-  }
-
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    'x-webhook-token': token,
-    'idempotency-key': idempotencyKey,
-    'x-correlation-id': idempotencyKey,
-  };
-  if (signature) headers['x-signature'] = signature;
-
-  const startedAt = performance.now();
-  const invokeResult = await Promise.race([
-    invokeWebhookReceiverEdge(client, { payload, headers }).then((result) => ({ ...result, timed_out: false as const })),
-    sleep(WEBHOOK_RECEIVER_EDGE_INVOKE_TIMEOUT_MS).then(() => ({
-      data: null,
-      error: null,
-      timed_out: true as const,
-    })),
-  ]);
-  const invokeErrorMessage = invokeResult.error
-    ? await readFunctionErrorMessage(invokeResult.error, 'webhook-receiver failed')
-    : null;
-  const response = invokeErrorMessage
-    ? {
-        ...objectRecord(invokeResult.data),
-        accepted: false,
-        error: invokeErrorMessage,
-        ack_reason:
-          findNestedString(invokeResult.data, ['response_reason', 'ack_reason', 'reason', 'message', 'error', 'code', 'failure_code']) ??
-          invokeErrorMessage,
-        response_outcome:
-          findNestedString(invokeResult.data, ['response_outcome']) ?? 'response_failed',
-        idempotency_key: idempotencyKey,
-      }
-    : invokeResult.timed_out
-    ? {
-        accepted: true,
-        invoke_timeout: true,
-        idempotency_key: idempotencyKey,
-        message: 'webhook-receiver edge invocation timed out; using canonical inbox readback',
-      }
-    : objectRecord(invokeResult.data);
-  let workflowRunId = findNestedString(response, ['workflow_run_id']);
-  const followupWorkflowRunId = findNestedString(response, ['followup_workflow_run_id']);
-  const correlationId = findNestedString(response, ['correlation_id']) ?? idempotencyKey;
-  let ackOutcome = findNestedString(response, ['ack_outcome']);
-  let responseOutcome =
-    findNestedString(response, ['response_outcome']) ??
-    (response.accepted === true || findNestedString(response, ['status']) === 'accepted_async'
-      ? 'accepted'
-      : null);
-  let ackStatusCode = findNestedNumber(response, ['ack_status_code', 'status_code']);
-  let ackReason = findNestedString(response, ['ack_reason']);
-  let webhookId = findNestedString(response, ['webhook_id']);
-  let canonicalIntent = findNestedString(response, ['canonical_intent']);
-  let authRejectionId: string | null = null;
-  let authRejectionFailureCode: string | null = null;
-  let authRejectionFailureMessage: string | null = null;
-  let authRejectionHttpStatus: number | null = null;
-  let authRejectionSourceLabel: string | null = null;
-  let authRejectionSourceIdentifier: string | null = null;
-  let authRejectionSourceResolved: boolean | null = null;
-  let authRejectionTokenFingerprint: string | null = null;
-  let authRejectionRejectionClass: string | null = null;
-
-  let workflowSteps: ResourceRow[] = [];
-  let shipmentId: string | null = null;
-  let trackingNumber = findNestedString(response, ['tracking_number', 'planned_tracking_number']);
-  let webhookProcessingStatus: string | null = null;
-  let sourceLabel: string | null = null;
-  let sourceIdentifier: string | null = null;
-  let providerTypeLabel: string | null = null;
-  let mappingConfigId: string | null = null;
-  let mappingLabel: string | null = null;
-  let mappingTarget: string | null = null;
-  let mappingVersion: number | null = null;
-  let mappingRulesCount: number | null = null;
-  let errorMessage: string | null = invokeErrorMessage;
-  let isTerminal: boolean | null = null;
-  let isActionable: boolean | null = null;
-  const applyWebhookDirectoryReadback = (row: ResourceRow): void => {
-    const rowIsTerminal = typeof row.is_terminal === 'boolean' ? row.is_terminal : null;
-    webhookId = webhookId ?? asNonEmptyString(row.id);
-    workflowRunId = workflowRunId ?? asNonEmptyString(row.workflow_run_id);
-    canonicalIntent = canonicalIntent ?? asNonEmptyString(row.canonical_intent);
-    trackingNumber = trackingNumber ?? asNonEmptyString(row.tracking_number);
-    ackOutcome = asNonEmptyString(row.ack_outcome) ?? ackOutcome;
-    responseOutcome = asNonEmptyString(row.response_outcome) ?? responseOutcome;
-    ackStatusCode = findNestedNumber(row, ['ack_status_code', 'response_status_code', 'status_code']) ?? ackStatusCode;
-    ackReason = asNonEmptyString(row.ack_reason) ?? asNonEmptyString(row.response_reason) ?? ackReason;
-    webhookProcessingStatus = asNonEmptyString(row.processing_status);
-    sourceLabel = asNonEmptyString(row.source_label);
-    sourceIdentifier = asNonEmptyString(row.source_identifier);
-    providerTypeLabel = asNonEmptyString(row.provider_type_label);
-    mappingConfigId = asNonEmptyString(row.mapping_config_id);
-    mappingLabel = asNonEmptyString(row.mapping_label);
-    mappingTarget = asNonEmptyString(row.mapping_target);
-    mappingVersion = typeof row.mapping_version === 'number' ? row.mapping_version : null;
-    mappingRulesCount = typeof row.mapping_rules_count === 'number' ? row.mapping_rules_count : null;
-    errorMessage = asNonEmptyString(row.error_message);
-    isTerminal = rowIsTerminal;
-    isActionable = typeof row.is_actionable === 'boolean' ? row.is_actionable : null;
-    if (rowIsTerminal === true) {
-      shipmentId = shipmentId ?? asNonEmptyString(row.shipment_id);
-    }
-  };
-  const readWebhookDirectory = async (
-    filters: Array<Record<string, unknown>>,
-  ): Promise<boolean> => {
-    for (const filter of filters) {
-      const readback = await ui_list_resource_v1<ResourceRow>('webhook_inbox_directory', {
-        filter,
-        page_size: 1,
-      });
-      const row = readback.rows[0];
-      if (!row) continue;
-      applyWebhookDirectoryReadback(row);
-      return true;
-    }
-    return false;
-  };
-  const readWebhookDirectoryUntil = async (
-    filters: Array<Record<string, unknown>>,
-    timeoutMs: number,
-    requireWorkflowRun = false,
-  ): Promise<boolean> => {
-    const deadline = performance.now() + timeoutMs;
-    while (performance.now() <= deadline) {
-      const found = await readWebhookDirectory(filters);
-      if (found && (!requireWorkflowRun || Boolean(workflowRunId))) return true;
-      if (performance.now() >= deadline) break;
-      await sleep(WEBHOOK_RECEIVER_READBACK_INTERVAL_MS);
-    }
-    return false;
-  };
-  const isWebhookReceiverTerminalFailure = (status: string | null): boolean => {
-    const value = String(status ?? '').trim().toLowerCase();
-    return (
-      value.includes('fail') ||
-      value === 'error' ||
-      value === 'errored' ||
-      value === 'rejected' ||
-      value === 'dead_lettered'
-    );
-  };
-  const applyWebhookAuthRejectionReadback = (row: ResourceRow): void => {
-    authRejectionId = asNonEmptyString(row.id);
-    authRejectionFailureCode = asNonEmptyString(row.failure_code);
-    authRejectionFailureMessage = asNonEmptyString(row.failure_message);
-    authRejectionHttpStatus = findNestedNumber(row, ['http_status']);
-    authRejectionSourceLabel = asNonEmptyString(row.source_label);
-    authRejectionSourceIdentifier = asNonEmptyString(row.source_identifier);
-    authRejectionSourceResolved = typeof row.source_resolved === 'boolean' ? row.source_resolved : null;
-    authRejectionTokenFingerprint = asNonEmptyString(row.token_fingerprint);
-    authRejectionRejectionClass = asNonEmptyString(row.rejection_class);
-    ackOutcome = 'auth_rejected';
-    responseOutcome = 'auth_rejected';
-    ackStatusCode = ackStatusCode ?? authRejectionHttpStatus ?? 401;
-    ackReason = ackReason ?? authRejectionFailureMessage ?? authRejectionFailureCode ?? 'auth_rejected';
-    errorMessage = errorMessage ?? authRejectionFailureMessage ?? authRejectionFailureCode;
-    sourceLabel = sourceLabel ?? authRejectionSourceLabel;
-    sourceIdentifier = sourceIdentifier ?? authRejectionSourceIdentifier;
-    webhookProcessingStatus = webhookProcessingStatus ?? 'auth_rejected';
-    isTerminal = true;
-    isActionable = false;
-  };
-  const responseStatus = findNestedNumber(response, ['status', 'status_code', 'http_status']);
-  const edgeRejectedWithoutLineage =
-    !workflowRunId &&
-    typeof responseStatus === 'number' &&
-    responseStatus >= 400 &&
-    responseStatus < 500;
-  const responseHasAuthSignal =
-    Boolean(invokeErrorMessage) ||
-    responseStatus === 401 ||
-    responseStatus === 403 ||
-    /unauthorized|invalid_token|forbidden|auth/i.test(
-      [
-        findNestedString(response, ['error', 'message', 'code', 'failure_code']),
-        invokeErrorMessage,
-      ].filter(Boolean).join(' '),
-    );
-  if (responseHasAuthSignal && !workflowRunId && !edgeRejectedWithoutLineage) {
-    const authRejection = await readWebhookReceiverAuthRejectionUntil({
-      correlationId,
-      idempotencyKey,
-      startedAtMs: startedAt,
-    });
-    if (authRejection) {
-      applyWebhookAuthRejectionReadback(authRejection);
-    }
-  }
-  if (edgeRejectedWithoutLineage && !authRejectionId) {
-    ackOutcome = ackOutcome ?? 'response_failed';
-    responseOutcome = responseOutcome ?? 'response_failed';
-    ackStatusCode = ackStatusCode ?? responseStatus;
-    ackReason =
-      ackReason ??
-      findNestedString(response, ['response_reason', 'ack_reason', 'reason', 'message', 'error', 'code', 'failure_code']) ??
-      invokeErrorMessage ??
-      `webhook-receiver failed with HTTP ${responseStatus}`;
-    errorMessage = errorMessage ?? ackReason;
-    webhookProcessingStatus = webhookProcessingStatus ?? 'response_failed';
-    isTerminal = true;
-    isActionable = false;
-  }
-  if (!workflowRunId) {
-    const foundReplayReadback = authRejectionId || edgeRejectedWithoutLineage
-      ? false
-      : await readWebhookDirectoryUntil(
-          [
-            webhookId ? { id: webhookId } : null,
-            { idempotency_key: idempotencyKey },
-            { correlation_id: correlationId },
-          ].filter(Boolean) as Array<Record<string, unknown>>,
-          WEBHOOK_RECEIVER_READBACK_AFTER_INVOKE_TIMEOUT_MS,
-          false,
-        );
-    const terminalFailureWithoutWorkflow =
-      foundReplayReadback &&
-      isTerminal === true &&
-      isWebhookReceiverTerminalFailure(webhookProcessingStatus);
-    const terminalAuthRejectionWithoutWorkflow = Boolean(authRejectionId);
-    if (
-      (!foundReplayReadback || !workflowRunId) &&
-      !terminalFailureWithoutWorkflow &&
-      !terminalAuthRejectionWithoutWorkflow &&
-      !edgeRejectedWithoutLineage
-    ) {
-      throw new Error(invokeErrorMessage ?? 'webhook-receiver did not return workflow_run_id evidence');
-    }
-  }
-  try {
-    const workflowIds = Array.from(new Set([workflowRunId, followupWorkflowRunId].filter(Boolean)));
-    const stepResults = await Promise.all(
-      workflowIds.map((id) =>
-        ui_list_resource_v1<ResourceRow>('workflow_run_steps', {
-          filter: { workflow_run_id: id },
-          page_size: 50,
-        }),
-      ),
-    );
-    workflowSteps = stepResults.flatMap((result) => result.rows);
-    trackingNumber = trackingNumber ?? findNestedString(workflowSteps, ['tracking_number', 'planned_tracking_number']);
-  } catch {
-    // The receiver evidence is still useful; the UI will show that step/shipment
-    // readback is pending rather than treating the edge call as full readiness.
-  }
-  if (!authRejectionId && workflowRunId) {
-    await readWebhookDirectory([
-      webhookId ? { id: webhookId } : null,
-      { workflow_run_id: workflowRunId },
-      { idempotency_key: idempotencyKey },
-      { correlation_id: correlationId },
-    ].filter(Boolean) as Array<Record<string, unknown>>);
-  }
-  const webhookPayloadIntent = findNestedString(payload, ['event_type', 'type', 'intent', 'target']);
-  const shipmentCreateReadbackRequired = [canonicalIntent, mappingTarget, webhookPayloadIntent]
-    .some((value) => isShipmentCreateIntent(value));
-  const shouldPollShipmentCreateTerminalReadback = !Object.is(isTerminal, false);
-  try {
-    const readDirectoryOnce = async (): Promise<boolean> => {
-      const readbackFilters = [
-        webhookId ? { id: webhookId } : null,
-        workflowRunId ? { workflow_run_id: workflowRunId } : null,
-        { idempotency_key: idempotencyKey },
-        { correlation_id: correlationId },
-      ].filter(Boolean) as Array<Record<string, unknown>>;
-      const found = await readWebhookDirectory(readbackFilters);
-      return found && (isTerminal === true || Boolean(shipmentId));
-    };
-    if (!authRejectionId && !edgeRejectedWithoutLineage && shipmentCreateReadbackRequired && shouldPollShipmentCreateTerminalReadback) {
-      const deadline = performance.now() + WEBHOOK_RECEIVER_TERMINAL_READBACK_TIMEOUT_MS;
-      do {
-        const complete = await readDirectoryOnce();
-        if (complete) break;
-        if (performance.now() >= deadline) break;
-        await sleep(WEBHOOK_RECEIVER_READBACK_INTERVAL_MS);
-      } while (!shipmentId || isTerminal !== true);
-    }
-  } catch {
-    // Keep the receiver result visible; missing directory readback prevents
-    // production readiness proof and is surfaced as pending UI evidence.
-  }
-
-  const shipmentCreateTerminalFailure = isWebhookReceiverTerminalFailure(webhookProcessingStatus);
-  if (shipmentCreateReadbackRequired && shipmentCreateTerminalFailure) {
-    shipmentId = null;
-    trackingNumber = null;
-  }
-
-  if (!shipmentId && isTerminal === true && trackingNumber && !shipmentCreateTerminalFailure) {
-    try {
-      const readback = await ui_list_resource_v1<ResourceRow>('shipment_directory', {
-        filter: { identifier: trackingNumber },
-        page_size: 1,
-      });
-      const row = readback.rows[0];
-      shipmentId = asNonEmptyString(row?.id) ?? asNonEmptyString(row?.shipment_id) ?? shipmentId;
-    } catch {
-      // Tracking-only evidence keeps the receiver result visible, but the
-      // shipment action remains disabled until a canonical id can be read.
-    }
-  }
-
-  if (shipmentId) {
-    await requireLiveResourceReadback('shipments', shipmentId, 'webhook-receiver');
-    await requireLiveResourceReadback('shipment_directory', shipmentId, 'webhook-receiver');
-  }
-
-  if (shipmentCreateReadbackRequired && !authRejectionId && isTerminal === true && !shipmentId && !shipmentCreateTerminalFailure) {
-    throw new Error('webhook-receiver completed shipment.create without shipment readback');
-  }
-
-  return buildWebhookReceiverTestResult({
-    receiverStatus: ackStatusCode ?? 200,
-    durationMs: Math.round(performance.now() - startedAt),
-    correlationId,
-    idempotencyKey,
-    ackOutcome,
-    responseOutcome,
-    ackStatusCode,
-    ackReason,
-    workflowRunId,
-    followupWorkflowRunId,
-    webhookId,
-    canonicalIntent,
-    webhookProcessingStatus,
-    sourceLabel,
-    sourceIdentifier,
-    providerTypeLabel,
-    mappingConfigId,
-    mappingLabel,
-    mappingTarget,
-    mappingVersion,
-    mappingRulesCount,
-    errorMessage,
-    isTerminal,
-    isActionable,
-    shipmentId,
-    trackingNumber,
-    authRejectionId,
-    authRejectionFailureCode,
-    authRejectionFailureMessage,
-    authRejectionHttpStatus,
-    authRejectionSourceLabel,
-    authRejectionSourceIdentifier,
-    authRejectionSourceResolved,
-    authRejectionTokenFingerprint,
-    authRejectionRejectionClass,
-    response,
-    workflowSteps,
-  });
-}
+export const runWebhookReceiverTest = /* @__PURE__ */ lazyAdapter(loadExternalIntakeAdapter, adapter => adapter.runWebhookReceiverTest);
 
 // ----------- Plugin Studio 4-stage authoring loop -----------
 //
@@ -13180,35 +9944,20 @@ export const PLUGIN_STUDIO_FN = 'integration-plugin-studio';
  * and produces an initial deterministic mapping suggestion. Optionally persists
  * a draft plugin version when `persist_draft=true`.
  */
-export async function plugin_studio_parse_v1(
-  args: PluginStudioParseArgs,
-): Promise<PluginStudioParseResult> {
-  const { plugin_studio_parse_v1 } = await import('./data-source/plugin-studio');
-  return plugin_studio_parse_v1(args);
-}
+export const plugin_studio_parse_v1 = /* @__PURE__ */ lazyAdapter(loadPluginStudioAdapter, adapter => adapter.plugin_studio_parse_v1);
 
 /**
  * Stage 2 — `infer`. Takes a normalized contract (or raw source) and produces a
  * mapping suggestion plus outbound operation suggestions for API plugins.
  */
-export async function plugin_studio_infer_v1(
-  args: PluginStudioInferArgs,
-): Promise<PluginStudioInferResult> {
-  const { plugin_studio_infer_v1 } = await import('./data-source/plugin-studio');
-  return plugin_studio_infer_v1(args);
-}
+export const plugin_studio_infer_v1 = /* @__PURE__ */ lazyAdapter(loadPluginStudioAdapter, adapter => adapter.plugin_studio_infer_v1);
 
 /**
  * Stage 3 — `preview`. Validates a candidate mapping against the target schema,
  * resolves egress/header policy, returns blocking/non-blocking diagnostics,
  * coercions, and the recommended save mode (direct vs draft).
  */
-export async function plugin_studio_preview_v1(
-  args: PluginStudioPreviewArgs,
-): Promise<PluginStudioPreviewResult> {
-  const { plugin_studio_preview_v1 } = await import('./data-source/plugin-studio');
-  return plugin_studio_preview_v1(args);
-}
+export const plugin_studio_preview_v1 = /* @__PURE__ */ lazyAdapter(loadPluginStudioAdapter, adapter => adapter.plugin_studio_preview_v1);
 
 /**
  * Stage 4 — `save`. Persists the artifact (draft for `integration_plugin` via
@@ -13220,12 +9969,7 @@ export async function plugin_studio_preview_v1(
  * (the edge fn returns 400/403 with a structured error envelope which is
  * surfaced as `Error.message` here).
  */
-export async function plugin_studio_save_v1(
-  args: PluginStudioSaveArgs,
-): Promise<PluginStudioSaveResult> {
-  const { plugin_studio_save_v1 } = await import('./data-source/plugin-studio');
-  return plugin_studio_save_v1(args);
-}
+export const plugin_studio_save_v1 = /* @__PURE__ */ lazyAdapter(loadPluginStudioAdapter, adapter => adapter.plugin_studio_save_v1);
 
 // ----------- Resource Import Studio file pipeline -----------
 //
@@ -13310,26 +10054,11 @@ export const RESOURCE_IMPORT_PREPARE_READBACK_SUMMARY_KEYS = [
   'scope_context',
 ] as const;
 
-export async function resource_import_studio_prepare_v1(
-  args: ResourceImportStudioPrepareArgs,
-): Promise<ResourceImportStudioPrepareResult> {
-  const { resource_import_studio_prepare_v1 } = await import('./data-source/resource-import');
-  return resource_import_studio_prepare_v1(args);
-}
+export const resource_import_studio_prepare_v1 = /* @__PURE__ */ lazyAdapter(loadResourceImportAdapter, adapter => adapter.resource_import_studio_prepare_v1);
 
-export async function resource_import_studio_start_v1(
-  args: ResourceImportStudioStartArgs,
-): Promise<ResourceImportStudioStartResult> {
-  const { resource_import_studio_start_v1 } = await import('./data-source/resource-import');
-  return resource_import_studio_start_v1(args);
-}
+export const resource_import_studio_start_v1 = /* @__PURE__ */ lazyAdapter(loadResourceImportAdapter, adapter => adapter.resource_import_studio_start_v1);
 
-export async function resource_import_studio_cancel_v1(
-  args: ResourceImportStudioCancelArgs,
-): Promise<ResourceImportStudioCancelResult> {
-  const { resource_import_studio_cancel_v1 } = await import('./data-source/resource-import');
-  return resource_import_studio_cancel_v1(args);
-}
+export const resource_import_studio_cancel_v1 = /* @__PURE__ */ lazyAdapter(loadResourceImportAdapter, adapter => adapter.resource_import_studio_cancel_v1);
 
 export type ResourceDownloadResource =
   | 'labels'
@@ -13353,12 +10082,7 @@ export interface ResourceDownloadUrlResult extends Record<string, unknown> {
   mime_type?: string | null;
 }
 
-export async function resolve_resource_download_url_v1(
-  args: ResourceDownloadUrlArgs,
-): Promise<ResourceDownloadUrlResult> {
-  const { resolve_resource_download_url_v1 } = await import('./data-source/resource-import');
-  return resolve_resource_download_url_v1(args);
-}
+export const resolve_resource_download_url_v1 = /* @__PURE__ */ lazyAdapter(loadResourceImportAdapter, adapter => adapter.resolve_resource_download_url_v1);
 
 // ----------- Workflow runs (canonical RPCs) -----------
 // Real backend RPCs (verified): public.start_workflow_run(uuid, jsonb) RETURNS uuid;
@@ -13408,7 +10132,7 @@ export async function start_workflow_run(
   started_at: string;
   canonical_entrypoint: 'progress_workflow_run';
 }> {
-  const { start_workflow_run } = await import('./data-source/workflows');
+  const { start_workflow_run } = await loadWorkflowsAdapter();
   return start_workflow_run(templateId, context);
 }
 
@@ -13420,22 +10144,7 @@ export async function start_workflow_run(
  * as `manual_override` / `reopen_pending` / `retry` / `pause` / `resume` ride
  * through the same RPC — no separate functions exist.
  */
-export async function progress_workflow_run(
-  runId: string,
-  payload?: unknown,
-  action?: 'progress' | 'manual_override' | 'reopen_pending' | 'retry' | 'pause' | 'resume',
-): Promise<{
-  ok: true;
-  workflow_run_id: string;
-  workflow_status: 'completed' | 'failed' | 'in_progress' | 'pending' | 'paused';
-  duration_ms: number;
-  steps: SyntheticRunStep[];
-  payload?: unknown;
-  action?: typeof action;
-}> {
-  const { progress_workflow_run } = await import('./data-source/workflows');
-  return progress_workflow_run(runId, payload, action);
-}
+export const progress_workflow_run = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.progress_workflow_run);
 
 export async function progress_workflow_run_until_wait_v1(
   runId: string,
@@ -13449,17 +10158,11 @@ export async function progress_workflow_run_until_wait_v1(
   steps: SyntheticRunStep[];
   payload?: unknown;
 }> {
-  const { progress_workflow_run_until_wait_v1 } = await import('./data-source/workflows');
+  const { progress_workflow_run_until_wait_v1 } = await loadWorkflowsAdapter();
   return progress_workflow_run_until_wait_v1(runId, payload, opts);
 }
 
-export async function progress_workflow_run_base(
-  runId: string,
-  payload?: unknown,
-): Promise<{ ok: true; workflow_run_id: string; payload?: unknown }> {
-  const { progress_workflow_run_base } = await import('./data-source/workflows');
-  return progress_workflow_run_base(runId, payload);
-}
+export const progress_workflow_run_base = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.progress_workflow_run_base);
 
 /**
  * Mirrors `public.close_workflow_run(uuid, text) RETURNS void`.
@@ -13467,13 +10170,7 @@ export async function progress_workflow_run_base(
  * the in-memory adapter; on Supabase swap, derive `closed_at` from a follow-up
  * `ui_list_resource_v1('workflow_runs', { filter: { id }})` read.
  */
-export async function close_workflow_run(
-  runId: string,
-  status: 'completed' | 'failed' | 'cancelled',
-): Promise<{ ok: true; workflow_run_id: string; workflow_status: typeof status; closed_at: string }> {
-  const { close_workflow_run } = await import('./data-source/workflows');
-  return close_workflow_run(runId, status);
-}
+export const close_workflow_run = /* @__PURE__ */ lazyAdapter(loadWorkflowsAdapter, adapter => adapter.close_workflow_run);
 
 // Operation templates type — kept exported for module typing convenience.
 // Backed by `ui_list_resource_v1('operation_templates')` (sourced from the
@@ -13501,15 +10198,7 @@ export interface OperationTemplate extends Record<string, unknown> {
 // The legacy `{ spans: [...] }` shape (REAUDIT INSIGHTS §D3) is retired —
 // the FE consumer now reads observability_events directly and treats each
 // event as a timeline row.
-export async function ui_get_trace_v1(correlationId: string): Promise<{
-  correlation_id: string;
-  observability_events: Array<Record<string, unknown>>;
-  domain_events: Array<Record<string, unknown>>;
-  workflow_runs: Array<Record<string, unknown>>;
-}> {
-  const { ui_get_trace_v1 } = await import('./data-source/insights');
-  return ui_get_trace_v1(correlationId);
-}
+export const ui_get_trace_v1 = /* @__PURE__ */ lazyAdapter(loadInsightsAdapter, adapter => adapter.ui_get_trace_v1);
 
 // ----------- Planning OS -----------
 export async function listProjectItems(): Promise<unknown> {
@@ -13578,37 +10267,13 @@ export function nextCorrelationIdHex(): string {
   return Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
 }
 
-export async function client_suspend_v1(args: {
-  client_id: string;
-  organization_id?: string;
-  reason?: string;
-}): Promise<ClientLifecycleResult> {
-  const { client_suspend_v1 } = await import('./data-source/customers');
-  return client_suspend_v1(args);
-}
+export const client_suspend_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.client_suspend_v1);
 
-export async function client_reactivate_v1(args: {
-  client_id: string;
-  organization_id?: string;
-}): Promise<ClientLifecycleResult> {
-  const { client_reactivate_v1 } = await import('./data-source/customers');
-  return client_reactivate_v1(args);
-}
+export const client_reactivate_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.client_reactivate_v1);
 
-export async function sender_suspend_v1(args: {
-  sender_id: string;
-  reason?: string;
-}): Promise<SenderLifecycleResult> {
-  const { sender_suspend_v1 } = await import('./data-source/customers');
-  return sender_suspend_v1(args);
-}
+export const sender_suspend_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.sender_suspend_v1);
 
-export async function sender_reactivate_v1(args: {
-  sender_id: string;
-}): Promise<SenderLifecycleResult> {
-  const { sender_reactivate_v1 } = await import('./data-source/customers');
-  return sender_reactivate_v1(args);
-}
+export const sender_reactivate_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.sender_reactivate_v1);
 
 // ----------- Wave 6: Customers create/update RPCs -----------
 //
@@ -13668,99 +10333,19 @@ export interface RecipientDeleteResult {
   settings_resolution_id: string;
 }
 
-export async function client_create_v1(args: {
-  name: string;
-  slug: string;
-  sla_tier?: string;
-  account_manager_id?: string | null;
-  contract_start_date?: string | null;
-  contract_end_date?: string | null;
-  organization_id?: string;
-  settings_override?: Record<string, unknown> | null;
-}): Promise<ClientCreateResult> {
-  const { client_create_v1 } = await import('./data-source/customers');
-  return client_create_v1(args);
-}
+export const client_create_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.client_create_v1);
 
-export async function client_update_v1(args: {
-  client_id: string;
-  organization_id?: string;
-  patch?: Record<string, unknown>;
-  name?: string;
-  sla_tier?: string;
-  account_manager_id?: string | null;
-  contract_start_date?: string | null;
-  contract_end_date?: string | null;
-  billing_settings?: Record<string, unknown> | null;
-  settings_override?: Record<string, unknown> | null;
-}): Promise<ClientUpdateResult> {
-  const { client_update_v1 } = await import('./data-source/customers');
-  return client_update_v1(args);
-}
+export const client_update_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.client_update_v1);
 
-export async function sender_create_v1(args: {
-  client_id: string;
-  name: string;
-  brand_name?: string;
-  auto_recreate?: boolean;
-  settings_override?: Record<string, unknown> | null;
-}): Promise<SenderCreateResult> {
-  const { sender_create_v1 } = await import('./data-source/customers');
-  return sender_create_v1(args);
-}
+export const sender_create_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.sender_create_v1);
 
-export async function sender_update_v1(args: {
-  sender_id: string;
-  name?: string;
-  brand_name?: string | null;
-  auto_recreate?: boolean;
-  warehouse_address_id?: string | null;
-  settings_override?: Record<string, unknown> | null;
-}): Promise<SenderUpdateResult> {
-  const { sender_update_v1 } = await import('./data-source/customers');
-  return sender_update_v1(args);
-}
+export const sender_update_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.sender_update_v1);
 
-export async function recipient_create_v1(args: {
-  client_id: string;
-  name: string;
-  phone_number: string;
-  email?: string | null;
-  external_id?: string | null;
-  preferred_language?: string;
-  preferred_comm_channel?: string;
-  quiet_hours_start?: string | null;
-  quiet_hours_end?: string | null;
-  communication_preferences?: Record<string, unknown> | null;
-  organization_id?: string;
-}): Promise<RecipientCreateResult> {
-  const { recipient_create_v1 } = await import('./data-source/customers');
-  return recipient_create_v1(args);
-}
+export const recipient_create_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.recipient_create_v1);
 
-export async function recipient_update_v1(args: {
-  recipient_id: string;
-  name?: string;
-  phone_number?: string;
-  email?: string | null;
-  external_id?: string | null;
-  preferred_language?: string;
-  preferred_comm_channel?: string;
-  quiet_hours_start?: string | null;
-  quiet_hours_end?: string | null;
-  communication_preferences?: Record<string, unknown> | null;
-}): Promise<RecipientUpdateResult> {
-  const { recipient_update_v1 } = await import('./data-source/customers');
-  return recipient_update_v1(args);
-}
+export const recipient_update_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.recipient_update_v1);
 
-export async function recipient_delete_v1(args: {
-  recipient_id: string;
-  reason?: string;
-}): Promise<RecipientDeleteResult> {
-  const { recipient_delete_v1 } = await import('./data-source/customers');
-  return recipient_delete_v1(args);
-}
+export const recipient_delete_v1 = /* @__PURE__ */ lazyAdapter(loadCustomersAdapter, adapter => adapter.recipient_delete_v1);
 
 // ----------- Phase B6: Catalog service offering RPCs -----------
 //
@@ -13789,68 +10374,17 @@ export interface ServiceLevelMutationResult {
   settings_resolution_id: string;
 }
 
-export async function service_offering_create_v1(args: {
-  service_level_id: string;
-  branch_id?: string | null;
-  zone_id?: string | null;
-  priority?: number;
-  metadata?: Record<string, unknown>;
-}): Promise<ServiceOfferingMutationResult> {
-  const { service_offering_create_v1 } = await import('./data-source/catalog');
-  return service_offering_create_v1(args);
-}
+export const service_offering_create_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.service_offering_create_v1);
 
-export async function service_offering_update_v1(args: {
-  service_offering_id: string;
-  zone_id?: string | null;
-  priority?: number;
-  effective_from?: string;
-  effective_to?: string | null;
-  is_active?: boolean;
-  metadata?: Record<string, unknown>;
-  price?: { base_price: number; currency: string };
-}): Promise<ServiceOfferingMutationResult> {
-  const { service_offering_update_v1 } = await import('./data-source/catalog');
-  return service_offering_update_v1(args);
-}
+export const service_offering_update_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.service_offering_update_v1);
 
-export async function service_offering_archive_v1(args: {
-  service_offering_id: string;
-  reason?: string;
-}): Promise<ServiceOfferingMutationResult> {
-  const { service_offering_archive_v1 } = await import('./data-source/catalog');
-  return service_offering_archive_v1(args);
-}
+export const service_offering_archive_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.service_offering_archive_v1);
 
-export async function service_offering_toggle_v1(args: {
-  service_offering_id: string;
-  is_active?: boolean;
-}): Promise<ServiceOfferingMutationResult> {
-  const { service_offering_toggle_v1 } = await import('./data-source/catalog');
-  return service_offering_toggle_v1(args);
-}
+export const service_offering_toggle_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.service_offering_toggle_v1);
 
-export async function service_level_create_v1(args: {
-  key: string;
-  name: string;
-  description?: string;
-  metadata?: Record<string, unknown>;
-  organization_id?: string;
-}): Promise<ServiceLevelMutationResult> {
-  const { service_level_create_v1 } = await import('./data-source/catalog');
-  return service_level_create_v1(args);
-}
+export const service_level_create_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.service_level_create_v1);
 
-export async function service_level_update_v1(args: {
-  service_level_id: string;
-  name?: string;
-  description?: string;
-  is_active?: boolean;
-  metadata?: Record<string, unknown>;
-}): Promise<ServiceLevelMutationResult> {
-  const { service_level_update_v1 } = await import('./data-source/catalog');
-  return service_level_update_v1(args);
-}
+export const service_level_update_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.service_level_update_v1);
 
 // ----------- Phase B6: Catalog lookup RPCs -----------
 //
@@ -13880,199 +10414,17 @@ export interface LookupValueMutationResult {
   settings_resolution_id: string;
 }
 
-export async function lookup_definition_create_v1(args: {
-  category: string;
-  description?: string;
-  owner_role?: string;
-  approval_policy?: string;
-  is_mutable?: boolean;
-  scope_type?: string;
-  organization_id?: string;
-}): Promise<LookupDefinitionMutationResult> {
-  const { lookup_definition_create_v1 } = await import('./data-source/catalog');
-  return lookup_definition_create_v1(args);
-}
+export const lookup_definition_create_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.lookup_definition_create_v1);
 
-export async function lookup_value_create_v1(args: {
-  lookup_definition_id?: string;
-  category?: string;
-  value: string;
-  label: string;
-  description?: string;
-  sort_order?: number;
-  metadata?: Record<string, unknown>;
-  status?: 'draft' | 'active' | 'archived';
-}): Promise<LookupValueMutationResult> {
-  const { lookup_value_create_v1 } = await import('./data-source/catalog');
-  return lookup_value_create_v1(args);
-}
+export const lookup_value_create_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.lookup_value_create_v1);
 
-export async function lookup_value_update_v1(args: {
-  lookup_value_id: string;
-  label?: string;
-  description?: string;
-  sort_order?: number;
-  is_default?: boolean;
-  metadata?: Record<string, unknown>;
-}): Promise<LookupValueMutationResult> {
-  const { lookup_value_update_v1 } = await import('./data-source/catalog');
-  return lookup_value_update_v1(args);
-}
+export const lookup_value_update_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.lookup_value_update_v1);
 
-export async function lookup_value_archive_v1(args: {
-  lookup_value_id: string;
-  reason?: string;
-}): Promise<LookupValueMutationResult> {
-  const { lookup_value_archive_v1 } = await import('./data-source/catalog');
-  return lookup_value_archive_v1(args);
-}
+export const lookup_value_archive_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.lookup_value_archive_v1);
 
-export async function lookup_value_promote_v1(args: {
-  lookup_value_id: string;
-  effective_from?: string;
-  effective_until?: string | null;
-}): Promise<LookupValueMutationResult> {
-  const { lookup_value_promote_v1 } = await import('./data-source/catalog');
-  return lookup_value_promote_v1(args);
-}
+export const lookup_value_promote_v1 = /* @__PURE__ */ lazyAdapter(loadCatalogAdapter, adapter => adapter.lookup_value_promote_v1);
 
-// ----------- Generic command runner -----------
-function commandParamsRecord(params: unknown, dryRun: boolean): Record<string, unknown> {
-  const base: Record<string, unknown> = params && typeof params === 'object' && !Array.isArray(params)
-    ? { ...(params as Record<string, unknown>) }
-    : params === undefined
-      ? {}
-      : { value: params };
-  if (base.dry_run === undefined) base.dry_run = dryRun;
-  return base;
-}
-
-function commandSelectionIds(params: Record<string, unknown>): string[] {
-  const raw = params.selected_ids ?? params.selection_ids ?? params.ids;
-  if (Array.isArray(raw)) {
-    return raw
-      .map((item) => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean);
-  }
-  const single = asNonEmptyString(params.selection_id ?? params.selected_id ?? params.id);
-  return single ? [single] : [];
-}
-
-export async function runCommand(
-  commandKey: string,
-  params: unknown,
-  opts: { dryRun?: boolean } = {},
-): Promise<{
-  ok: true;
-  command: string;
-  params: unknown;
-  dry_run: boolean;
-  settings_resolution_id: string;
-  workflow_run_id: string;
-}> {
-  const dryRun = !!opts.dryRun;
-  const liveParams = commandParamsRecord(params, dryRun);
-  const selectedIds = commandSelectionIds(liveParams);
-  const resourceKey =
-    asNonEmptyString(liveParams.resource_key ?? liveParams.resourceKey ?? liveParams.resource) ??
-    asNonEmptyString(commandKey.split('.')[0]) ??
-    '';
-  const selectionCount =
-    typeof liveParams.selection_count === 'number' && Number.isFinite(liveParams.selection_count)
-      ? liveParams.selection_count
-      : selectedIds.length;
-  const selectionId =
-    asNonEmptyString(liveParams.selection_id ?? liveParams.selected_id) ??
-    (selectedIds.length === 1 ? selectedIds[0]! : null);
-  const live = await liveRpc<Record<string, unknown>>('ui_execute_command_v1', {
-    p_action_key: commandKey,
-    p_resource_key: resourceKey,
-    p_selection_ids: selectedIds,
-    p_selection_id: selectionId,
-    p_selection_count: selectionCount,
-    p_params: liveParams,
-  });
-  if (live) {
-    const rec = requireLiveRpcRecord(
-      live.data,
-      `Command ${commandKey} returned no backend outcome`,
-    );
-    const outcomeError = backendOutcomeError(rec, `Command ${commandKey} failed`);
-    if (outcomeError) throw outcomeError;
-    const evidenceId =
-      asNonEmptyString(rec.workflow_run_id) ??
-      asNonEmptyString(rec.settings_resolution_id) ??
-      asNonEmptyString(rec.correlation_id) ??
-      asNonEmptyString(rec.label_job_id) ??
-      asNonEmptyString(rec.job_id) ??
-      asNonEmptyString(rec.task_id) ??
-      asNonEmptyString(rec.event_id);
-    if (!evidenceId) {
-      throw new Error(`Command ${commandKey} did not return backend execution evidence`);
-    }
-    await requireCommandReadback(commandKey, rec, dryRun);
-    return {
-      ...rec,
-      ok: true,
-      command: String(rec.command ?? rec.action_key ?? commandKey),
-      params,
-      dry_run: Boolean(rec.dry_run ?? dryRun),
-      settings_resolution_id: String(rec.settings_resolution_id ?? ''),
-      workflow_run_id: String(rec.workflow_run_id ?? ''),
-    };
-  }
-
-  await sleep(120);
-  return {
-    ok: true,
-    command: commandKey,
-    params,
-    dry_run: dryRun,
-    settings_resolution_id: 'srlv_' + Math.floor(Math.random() * 9000),
-    workflow_run_id: 'wfr_' + Date.now(),
-  };
-}
-
-async function requireCommandReadback(
-  commandKey: string,
-  rec: Record<string, unknown>,
-  dryRun: boolean,
-): Promise<void> {
-  if (dryRun) return;
-  if (commandKey !== 'shipments.print_labels') return;
-
-  const labelJobId = asNonEmptyString(rec.label_job_id) ?? asNonEmptyString(rec.job_id);
-  if (labelJobId) {
-    const job = await ui_get_resource_v1<Record<string, unknown>>('label_jobs', labelJobId);
-    if (!job) throw new Error('Command shipments.print_labels backend readback missing label_jobs');
-    const jobError = backendReadbackFailureError(job, 'Command shipments.print_labels label job failed');
-    if (jobError) throw jobError;
-    return;
-  }
-
-  const workflowRunId = asNonEmptyString(rec.workflow_run_id);
-  if (!workflowRunId) {
-    throw new Error('Command shipments.print_labels did not return workflow_run_id or label_job_id');
-  }
-
-  const jobs = await ui_list_resource_complete<Record<string, unknown>>('label_jobs', {
-    filter: { workflow_run_id: workflowRunId },
-    sort: { key: 'created_at', dir: 'desc' },
-    page_size: 25,
-  });
-  const failedJob = jobs.rows.find((job) => backendReadbackFailureError(job, 'Command shipments.print_labels label job failed'));
-  if (failedJob) {
-    throw backendReadbackFailureError(failedJob, 'Command shipments.print_labels label job failed');
-  }
-
-  const run = await ui_get_resource_v1<Record<string, unknown>>('workflow_runs', workflowRunId);
-  if (!run) {
-    throw new Error('Command shipments.print_labels backend readback missing workflow_runs or label_jobs');
-  }
-  const runError = backendReadbackFailureError(run, 'Command shipments.print_labels workflow failed');
-  if (runError) throw runError;
-  if (jobs.rows.length > 0) return;
-}
+export const runCommand = /* @__PURE__ */ lazyAdapter(loadCommandsAdapter, adapter => adapter.runCommand);
 
 // ----------- Helpers -----------
 export function sleep(ms: number): Promise<void> {

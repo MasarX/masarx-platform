@@ -4,7 +4,13 @@ import {
   buildEnvelope,
   buildTenantSignupReviewSeedResult,
   compactRecord,
+  type DataSourceForcePasswordResetArgs,
+  type DataSourceGrantUserRoleArgs,
   type DataSourceOrganizationProfileUpdateArgs,
+  type DataSourceReactivateUserArgs,
+  type DataSourceRevokeSessionArgs,
+  type DataSourceRevokeUserRoleArgs,
+  type DataSourceSuspendUserArgs,
   type DataSourceTenantSignupConsoleRequestArgs,
   type DataSourceTenantUserInviteArgs,
   getLookups,
@@ -17,7 +23,9 @@ import {
   nextResourceId,
   normalizeLiveListResult,
   objectRecord,
+  phaseC6Rpc,
   type RbacRoleMutationResult,
+  type RbacTemplateProvisionMutationResult,
   type RbacTemplateProvisionRoleResult,
   type RbacUserRoleAssignmentMutationResult,
   readFunctionErrorMessage,
@@ -29,7 +37,6 @@ import {
   requireLiveResourceListReadback,
   requireLiveResourceReadback,
   requireLiveStringField,
-  requireLiveUserLifecycleReadback,
   RESOURCE_DATA,
   seed,
   sleep,
@@ -44,10 +51,8 @@ import {
 import { hostedInviteRedirect } from '../hosted-redirect';
 import { SEED_MODE_ENABLED } from '../seed-loader';
 import { getSupabaseClient } from '../supabase';
-import {
-  asNonEmptyString,
-  type ResourceRow,
-} from './shared';
+import { asNonEmptyString, type ResourceRow } from './shared';
+import { type UiOnboardingReadiness } from '.../types/domain';
 
 export async function rbac_create_role_v1(
   args: Record<string, unknown>,
@@ -1640,4 +1645,455 @@ export async function requireLiveCapabilityGrantReviewReadback(
   if (asNonEmptyString(row.status) !== decision) {
     throw new Error('ui_review_capability_grant_request_v1 backend resource readback status mismatch');
   }
+}
+
+function normalizeReadinessScopeType(scopeType?: string | null): UiOnboardingReadiness['scope_type'] {
+  if (scopeType === 'global' || scopeType === 'tenant' || scopeType === 'client' || scopeType === 'sender') {
+    return scopeType;
+  }
+  return 'tenant';
+}
+
+function buildSeedOnboardingReadiness(
+  scopeType?: string | null,
+  scopeId?: string | null,
+): UiOnboardingReadiness {
+  const normalizedScopeType = normalizeReadinessScopeType(scopeType);
+  const settingsRows = ((seed.settings_category_registry ?? []) as unknown[]).filter(Boolean);
+  const workflowRows = ((seed.workflow_bindings ?? []) as unknown[]).filter(Boolean);
+  const pluginRows = ((seed.integration_plugins ?? []) as Array<Record<string, unknown>>).filter(Boolean);
+  const pluginItems = pluginRows.map((plugin) => ({
+    plugin_key: String(plugin.plugin_key ?? plugin.key ?? plugin.id ?? 'plugin'),
+    plugin_name: String(plugin.name ?? plugin.plugin_name ?? plugin.plugin_key ?? plugin.id ?? 'Plugin'),
+    status: String(plugin.status ?? 'healthy'),
+    activation_mode: String(plugin.activation_mode ?? plugin.mode ?? 'auto_activate'),
+    enabled: typeof plugin.enabled === 'boolean' ? plugin.enabled : true,
+    credentials_status: String(plugin.credentials_status ?? 'healthy'),
+    blocking: false,
+  }));
+
+  return {
+    scope_type: normalizedScopeType,
+    scope_id: scopeId ?? (normalizedScopeType === 'tenant' ? state.user.organization_id : null),
+    organization_id: state.user.organization_id || null,
+    generated_at: new Date().toISOString(),
+    overall_status: 'healthy',
+    healthy: true,
+    settings_defaults: {
+      status: 'healthy',
+      healthy: true,
+      required_count: settingsRows.length,
+      present_count: settingsRows.length,
+      missing_categories: [],
+    },
+    workflow_bindings: {
+      status: 'healthy',
+      healthy: true,
+      baseline_profile: 'default',
+      required_count: workflowRows.length,
+      present_count: workflowRows.length,
+      missing_stages: [],
+    },
+    integration_plugins: {
+      status: 'healthy',
+      healthy: true,
+      baseline_profile: 'default',
+      required_count: pluginItems.length,
+      healthy_count: pluginItems.length,
+      pending_credentials_count: 0,
+      blocking_count: 0,
+      items: pluginItems,
+    },
+    blocking_findings: [],
+  };
+}
+
+export async function ui_get_onboarding_readiness_v1(
+  argsOrScopeType?: { scope_type?: string | null; scope_id?: string | null } | string | null,
+  scopeIdArg?: string | null,
+): Promise<UiOnboardingReadiness> {
+  const scopeType =
+    typeof argsOrScopeType === 'object' && argsOrScopeType !== null
+      ? argsOrScopeType.scope_type
+      : argsOrScopeType;
+  const scopeId =
+    typeof argsOrScopeType === 'object' && argsOrScopeType !== null
+      ? argsOrScopeType.scope_id
+      : scopeIdArg;
+  const live = await liveRpc<UiOnboardingReadiness>('ui_get_onboarding_readiness_v1', {
+    p_scope_type: normalizeReadinessScopeType(scopeType),
+    p_scope_id: scopeId ?? null,
+  });
+  if (live) {
+    if (!live.data) throw new Error('ui_get_onboarding_readiness_v1 returned no readiness snapshot');
+    return live.data;
+  }
+
+  await sleep(30);
+  return buildSeedOnboardingReadiness(scopeType, scopeId);
+}
+
+export async function ui_execute_onboarding_bootstrap_v1(args: {
+  scope_type?: string | null;
+  scope_id?: string | null;
+}): Promise<Record<string, unknown>> {
+  const scopeType = normalizeReadinessScopeType(args.scope_type);
+  const scopeId = asNonEmptyString(args.scope_id);
+  const live = await liveRpc<Record<string, unknown>>('ui_execute_onboarding_bootstrap_v1', {
+    p_scope_type: scopeType,
+    p_scope_id: scopeId,
+  });
+  if (live) {
+    const rec = requireLiveMutationResult(live.data, 'ui_execute_onboarding_bootstrap_v1', [
+      'readiness',
+      'bootstrap_run_id',
+      'workflow_run_id',
+    ]);
+    return {
+      ...rec,
+      ok: true,
+      scope_type: String(rec.scope_type ?? scopeType),
+      scope_id: String(rec.scope_id ?? scopeId),
+    };
+  }
+
+  await sleep(30);
+  return {
+    ok: true,
+    scope_type: scopeType,
+    scope_id: scopeId,
+    readiness: buildSeedOnboardingReadiness(scopeType, scopeId),
+  };
+}
+
+export async function requireLiveUserLifecycleReadback(
+  rpcName: string,
+  targetUserId: string,
+): Promise<{
+  user: Record<string, unknown> | null;
+  directory: Record<string, unknown> | null;
+}> {
+  if (!liveRpcTarget()) return { user: null, directory: null };
+  const user = await requireLiveResourceReadback('users', targetUserId, rpcName);
+  const directory = await requireLiveResourceReadback('user_directory', targetUserId, rpcName);
+  return { user, directory };
+}
+
+async function requireLiveUserSessionRevocationReadback(
+  rpcName: string,
+  targetUserId: string,
+  sessionId: string | null | undefined,
+  result: Record<string, unknown>,
+  revokedReason: string | null | undefined,
+): Promise<Record<string, unknown>> {
+  const normalizedSessionId = asNonEmptyString(sessionId);
+  const live = await liveRpc<Record<string, unknown>>('ui_list_user_sessions_v1', {
+    p_target_user_id: targetUserId,
+    p_limit: 50,
+  });
+  if (!live) throw new Error(`${rpcName} session readback requires a live backend`);
+  const rows = normalizeLiveListResult<Record<string, unknown>>(live.data, 0, 50).rows;
+  const revocationAuditId = asNonEmptyString(result.revocation_audit_id);
+  const candidates = rows.filter((row) => {
+    const userMatches = asNonEmptyString(row.user_id) === targetUserId;
+    const sessionMatches = !normalizedSessionId || asNonEmptyString(row.id) === normalizedSessionId;
+    return userMatches && sessionMatches;
+  });
+  const revoked = candidates.find((row) => {
+    const status = asNonEmptyString(row.revocation_status);
+    const auditMatches = !revocationAuditId || asNonEmptyString(row.revocation_audit_id) === revocationAuditId;
+    return Boolean(status) && auditMatches;
+  });
+  if (!revoked) {
+    throw new Error(`${rpcName} backend readback missing revoked session evidence`);
+  }
+  const status = asNonEmptyString(revoked.revocation_status)?.toLowerCase();
+  if (status === 'failed') {
+    throw new Error(`${rpcName} backend readback session revocation failed`);
+  }
+  const expectedReason = asNonEmptyString(revokedReason);
+  if (expectedReason) {
+    const metadata = objectRecord(revoked.metadata);
+    const readbackReason =
+      asNonEmptyString(revoked.revocation_reason) ??
+      asNonEmptyString(revoked.reason) ??
+      asNonEmptyString(metadata.reason);
+    if (readbackReason !== expectedReason) {
+      throw new Error(`${rpcName} backend readback missing persisted revocation reason`);
+    }
+  }
+  return revoked;
+}
+
+// ----------- Phase C6 PLATFORM mutations (alerts, feature flags, access, organizations) -----------
+
+// PLATFORM/alerts
+export const create_alert_rule_v1 = (args: Record<string, unknown>) =>
+  phaseC6Rpc('create_alert_rule_v1', args, 'alert_rule');
+
+export const update_alert_rule_v1 = (args: Record<string, unknown>) =>
+  phaseC6Rpc('update_alert_rule_v1', args, 'alert_rule');
+
+export const pause_alert_rule_v1 = (args: Record<string, unknown>) =>
+  phaseC6Rpc('pause_alert_rule_v1', args, 'alert_rule');
+
+export const resume_alert_rule_v1 = (args: Record<string, unknown>) =>
+  phaseC6Rpc('resume_alert_rule_v1', args, 'alert_rule');
+
+export const delete_alert_rule_v1 = (args: Record<string, unknown>) =>
+  phaseC6Rpc('delete_alert_rule_v1', args, 'alert_rule');
+
+export const test_alert_rule_v1 = (args: Record<string, unknown>) =>
+  phaseC6Rpc('test_alert_rule_v1', args, 'alert_rule');
+
+export async function acknowledge_ops_alert_v1(args: Record<string, unknown>) {
+  const result = await phaseC6Rpc('acknowledge_ops_alert_v1', args, 'ops_alert');
+  await requireLiveOpsAlertReadback('acknowledge_ops_alert_v1', args, result, 'acknowledged_at');
+  return result;
+}
+
+export async function resolve_ops_alert_v1(args: Record<string, unknown>) {
+  const result = await phaseC6Rpc('resolve_ops_alert_v1', args, 'ops_alert');
+  await requireLiveOpsAlertReadback('resolve_ops_alert_v1', args, result, 'resolved_at');
+  return result;
+}
+
+// PLATFORM/access — replaces PREVIEW chip
+export async function request_capability_grant_v1(
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('request_capability_grant_v1', args, 'capability_grant_request');
+  requireLiveCapabilityGrantReadback(args, result);
+  return result;
+}
+
+export async function ui_review_capability_grant_request_v1(
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc(
+    'ui_review_capability_grant_request_v1',
+    args,
+    'capability_grant_request',
+  );
+  await requireLiveCapabilityGrantReviewReadback(args, result);
+  return result;
+}
+
+export async function provision_rbac_roles_from_templates_v1(
+  args: Record<string, unknown>,
+): Promise<RbacTemplateProvisionMutationResult> {
+  const result = await phaseC6Rpc('provision_rbac_roles_from_templates_v1', args, 'rbac_role');
+  if (liveRpcTarget()) {
+    await requireLiveRbacTemplateProvisionReadback(
+      'provision_rbac_roles_from_templates_v1',
+      result,
+      args,
+    );
+  }
+  return result as RbacTemplateProvisionMutationResult;
+}
+
+export async function revoke_session_v1(
+  args: DataSourceRevokeSessionArgs,
+): Promise<Record<string, unknown>> {
+  const reason = asNonEmptyString(args.reason);
+  if (!reason) throw new Error('revoke_session_v1 requires reason');
+  const rpcArgs = { ...args, reason };
+  const result = await phaseC6Rpc('revoke_session_v1', rpcArgs, 'revocation_audit');
+  if (liveRpcTarget()) {
+    await requireLiveUserSessionRevocationReadback(
+      'revoke_session_v1',
+      rpcArgs.target_user_id,
+      rpcArgs.session_id,
+      result,
+      reason,
+    );
+    await requireLiveUserSecurityActionReadback(
+      'revoke_session_v1',
+      rpcArgs.target_user_id,
+      'revoke_session_v1',
+      result,
+      reason,
+    );
+  }
+  // Live mode owns mutation server-side. In-memory mode marks the local seed
+  // with the same pending revocation evidence returned by the backend-backed
+  // session readback RPC; auth session termination is out-of-band.
+  const client = getSupabaseClient();
+  if (!client) {
+    const targetUserId = rpcArgs.target_user_id;
+    const sessionId = rpcArgs.session_id;
+    const sessions = (seed as { user_sessions?: Array<Record<string, unknown>> })
+      .user_sessions;
+    if (Array.isArray(sessions)) {
+      const now = new Date().toISOString();
+      sessions.forEach((row) => {
+        if (row.user_id !== targetUserId) return;
+        if (sessionId != null && row.id !== sessionId) return;
+        row.revocation_status = 'pending';
+        row.revocation_reason = reason;
+        row.revocation_requested_at = now;
+      });
+    }
+  }
+  return {
+    ok: true,
+    target_user_id: rpcArgs.target_user_id,
+    status: 'pending',
+    ...result,
+  };
+}
+
+export async function grant_user_role_v1(
+  args: DataSourceGrantUserRoleArgs,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('grant_user_role_v1', args, 'user_role_assignment');
+  const { directory } = await requireLiveUserLifecycleReadback('grant_user_role_v1', args.target_user_id);
+  const assignmentId =
+    asNonEmptyString(result.rbac_user_role_assignment_id) ??
+    asNonEmptyString(result.user_role_assignment_id) ??
+    asNonEmptyString(result.assignment_id);
+  await requireLiveUserRoleAssignmentReadback(
+    'grant_user_role_v1',
+    args.target_user_id,
+    args.role_key,
+    assignmentId,
+    directory,
+    'active',
+  );
+  if (liveRpcTarget()) {
+    await requireLiveUserSecurityActionReadback(
+      'grant_user_role_v1',
+      args.target_user_id,
+      'grant_user_role_v1',
+      result,
+      args.reason,
+      { roleKey: args.role_key, assignmentId },
+    );
+  }
+  return { ok: true, target_user_id: args.target_user_id, role_key: args.role_key, ...result };
+}
+
+export async function revoke_user_role_v1(
+  args: DataSourceRevokeUserRoleArgs,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('revoke_user_role_v1', args, 'user_role_assignment');
+  const { directory } = await requireLiveUserLifecycleReadback('revoke_user_role_v1', args.target_user_id);
+  const assignmentId =
+    asNonEmptyString(result.rbac_user_role_assignment_id) ??
+    asNonEmptyString(result.user_role_assignment_id) ??
+    asNonEmptyString(result.assignment_id);
+  await requireLiveUserRoleAssignmentReadback(
+    'revoke_user_role_v1',
+    args.target_user_id,
+    args.role_key,
+    assignmentId,
+    directory,
+    'revoked',
+  );
+  if (liveRpcTarget()) {
+    await requireLiveUserSecurityActionReadback(
+      'revoke_user_role_v1',
+      args.target_user_id,
+      'revoke_user_role_v1',
+      result,
+      args.reason,
+      { roleKey: args.role_key, assignmentId },
+    );
+  }
+  return { ok: true, target_user_id: args.target_user_id, role_key: args.role_key, ...result };
+}
+
+export async function suspend_user_v1(
+  args: DataSourceSuspendUserArgs,
+): Promise<Record<string, unknown>> {
+  const targetUserId = asNonEmptyString(args.target_user_id) ?? asNonEmptyString(args.user_id);
+  if (!targetUserId) throw new Error('suspend_user_v1 requires target_user_id');
+  const rpcArgs = { ...args, target_user_id: targetUserId };
+  const result = await phaseC6Rpc('suspend_user_v1', rpcArgs, 'user');
+  const readback = await requireLiveUserLifecycleReadback('suspend_user_v1', targetUserId);
+  if (liveRpcTarget()) {
+    await requireLiveUserSecurityActionReadback(
+      'suspend_user_v1',
+      targetUserId,
+      'suspend_user_v1',
+      result,
+      rpcArgs.reason,
+    );
+  }
+  // In-memory mode: mirror canonical `users.status='suspended'` so the optimistic
+  // refresh + AppGuard suspended-branch check stays consistent without round-trip.
+  const client = getSupabaseClient();
+  if (!client) {
+    const users = (seed as { users?: Array<Record<string, unknown>> }).users;
+    if (Array.isArray(users)) {
+      const target = users.find((u) => u.id === targetUserId);
+      if (target) target.status = 'suspended';
+    }
+  }
+  if (readback.user) {
+    return {
+      ok: true,
+      target_user_id: targetUserId,
+      ...result,
+      status: readback.user.status ?? result.status,
+    };
+  }
+  return { ok: true, target_user_id: targetUserId, status: 'suspended', ...result };
+}
+
+export async function reactivate_user_v1(
+  args: DataSourceReactivateUserArgs,
+): Promise<Record<string, unknown>> {
+  const targetUserId = asNonEmptyString(args.target_user_id) ?? asNonEmptyString(args.user_id);
+  if (!targetUserId) throw new Error('reactivate_user_v1 requires target_user_id');
+  const rpcArgs = { ...args, target_user_id: targetUserId };
+  const result = await phaseC6Rpc('reactivate_user_v1', rpcArgs, 'user');
+  const readback = await requireLiveUserLifecycleReadback('reactivate_user_v1', targetUserId);
+  if (liveRpcTarget()) {
+    await requireLiveUserSecurityActionReadback(
+      'reactivate_user_v1',
+      targetUserId,
+      'reactivate_user_v1',
+      result,
+      rpcArgs.reason,
+    );
+  }
+  const client = getSupabaseClient();
+  if (!client) {
+    const users = (seed as { users?: Array<Record<string, unknown>> }).users;
+    if (Array.isArray(users)) {
+      const target = users.find((u) => u.id === targetUserId);
+      if (target) target.status = 'active';
+    }
+  }
+  if (readback.user) {
+    return {
+      ok: true,
+      target_user_id: targetUserId,
+      ...result,
+      status: readback.user.status ?? result.status,
+    };
+  }
+  return { ok: true, target_user_id: targetUserId, status: 'active', ...result };
+}
+
+export async function force_password_reset_v1(
+  args: DataSourceForcePasswordResetArgs,
+): Promise<Record<string, unknown>> {
+  const reason = asNonEmptyString(args.reason);
+  if (!reason) throw new Error('force_password_reset_v1 requires reason');
+  const rpcArgs = { ...args, reason };
+  const result = await phaseC6Rpc('force_password_reset_v1', rpcArgs, 'user');
+  await requireLiveUserLifecycleReadback('force_password_reset_v1', rpcArgs.target_user_id);
+  if (liveRpcTarget()) {
+    await requireLiveUserSecurityActionReadback(
+      'force_password_reset_v1',
+      rpcArgs.target_user_id,
+      'force_password_reset_v1',
+      result,
+      reason,
+    );
+  }
+  return { ok: true, target_user_id: rpcArgs.target_user_id, ...result };
 }

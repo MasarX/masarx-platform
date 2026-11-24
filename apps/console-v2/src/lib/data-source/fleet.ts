@@ -2,9 +2,11 @@ import {
   type DriverHoursOfServiceRecord,
   liveBackendUnavailableError,
   liveMetadataCache,
-  loadLiveDriverHoursOfService,
   liveRpc,
+  liveRpcTarget,
+  loadLiveDriverHoursOfService,
   normalizeDriverHoursOfServiceRecord,
+  phaseC6Rpc,
   requireLiveResourceListReadback,
   requireLiveResourceReadback,
   seed,
@@ -373,4 +375,137 @@ export async function confirmDriverHoursOfServiceSegment(
     'record_hours_of_service_segment_v1',
     asNonEmptyString(result.driver_hours_of_service_id ?? result.hours_of_service_id ?? result.id),
   );
+}
+
+export async function assign_driver_to_vehicle_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('assign_driver_to_vehicle_v1', args, 'vehicle_assignment');
+  if (liveRpcTarget()) {
+    await confirmVehicleAssignment(args, result);
+  }
+  return result;
+}
+
+export async function unassign_driver_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('unassign_driver_v1', args, 'vehicle_assignment');
+  if (liveRpcTarget()) {
+    await confirmVehicleUnassignment(args, result);
+  }
+  return result;
+}
+
+export async function mark_vehicle_oos_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('mark_vehicle_oos_v1', args, 'vehicle');
+  if (liveRpcTarget()) {
+    await confirmVehicleOutOfService(args, result);
+  }
+  return result;
+}
+
+export async function restore_vehicle_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('restore_vehicle_v1', args, 'vehicle');
+  if (liveRpcTarget()) {
+    await confirmVehicleRestoration(args, result);
+  }
+  return result;
+}
+
+async function vehicleMaintenanceMutation(
+  rpcName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc(rpcName, args, 'maintenance_window');
+  if (liveRpcTarget()) {
+    await confirmVehicleMaintenance(rpcName, args, result);
+  }
+  return result;
+}
+
+export const schedule_maintenance_v1 = (args: Record<string, unknown>) =>
+  vehicleMaintenanceMutation('schedule_maintenance_v1', args);
+
+export const complete_maintenance_v1 = (args: Record<string, unknown>) =>
+  vehicleMaintenanceMutation('complete_maintenance_v1', args);
+
+export const cancel_maintenance_v1 = (args: Record<string, unknown>) =>
+  vehicleMaintenanceMutation('cancel_maintenance_v1', args);
+
+export async function record_vehicle_event_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('record_vehicle_event_v1', args, 'vehicle_event');
+  if (liveRpcTarget()) {
+    await confirmVehicleEvent(args, result);
+  }
+  return result;
+}
+
+// FLEET/drivers
+export async function create_driver_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('create_driver_v1', args, 'driver_profile');
+  if (liveRpcTarget()) {
+    await confirmDriverCreation(result);
+  }
+  return result;
+}
+
+export async function upload_driver_document_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('upload_driver_document_v1', args, 'driver_document');
+  if (liveRpcTarget()) {
+    await confirmDriverDocumentUpload(result);
+  }
+  return result;
+}
+
+async function driverProfileStatusMutation(
+  rpcName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc(rpcName, args, 'driver');
+  if (liveRpcTarget()) {
+    await confirmDriverStatus(rpcName, args, result);
+  }
+  return result;
+}
+
+export const suspend_driver_v1 = (args: Record<string, unknown>) =>
+  driverProfileStatusMutation('suspend_driver_v1', args);
+
+export const restore_driver_v1 = (args: Record<string, unknown>) =>
+  driverProfileStatusMutation('restore_driver_v1', args);
+
+async function driverDocumentMutation(
+  rpcName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc(rpcName, args, 'driver_document');
+  if (liveRpcTarget()) {
+    await confirmDriverDocumentStatus(rpcName, args, result);
+  }
+  return result;
+}
+
+export const verify_driver_document_v1 = (args: Record<string, unknown>) =>
+  driverDocumentMutation('verify_driver_document_v1', args);
+
+export const reject_driver_document_v1 = (args: Record<string, unknown>) =>
+  driverDocumentMutation('reject_driver_document_v1', args);
+
+export async function create_driver_compliance_event_v1(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc('create_driver_compliance_event_v1', args, 'driver_compliance_event');
+  if (liveRpcTarget()) {
+    await confirmDriverComplianceEvent(args, result);
+  }
+  return result;
+}
+
+export async function record_hours_of_service_segment_v1(
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const result = await phaseC6Rpc(
+    'record_hours_of_service_segment_v1',
+    args,
+    'driver_hours_of_service',
+  );
+  if (liveRpcTarget()) {
+    await confirmDriverHoursOfServiceSegment(args, result);
+  }
+  return result;
 }

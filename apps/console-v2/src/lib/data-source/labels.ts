@@ -2,6 +2,7 @@ import { translateAdapterMessage } from '../i18n';
 import {
   assertLabelDesignScope,
   backendOutcomeError,
+  type CompleteLabelJobResult,
   type LabelDesignDraft,
   type LabelDesignerAsset,
   type LabelDesignerAssetListResult,
@@ -11,6 +12,7 @@ import {
   type LabelDesignerDraftMutationResult,
   type LabelDesignerDraftPublishResult,
   type LabelDesignerDraftValidationResult,
+  type LabelDesignerEffectiveConfigResult,
   type LabelDesignerFieldCatalogField,
   type LabelDesignerFieldCatalogResult,
   type LabelDesignerPreviewArgs,
@@ -20,13 +22,14 @@ import {
   type LabelPrinterCertificationArgs,
   type LabelPrinterCertificationResult,
   type LabelRendererReadinessResult,
+  liveBackendUnavailableError,
   liveRpc,
   localLabelDesignDrafts,
   localLabelDesignerAssets,
   nextResourceId,
   objectRecord,
+  phaseC6Rpc,
   readFunctionErrorMessage,
-  requireLiveLabelDraftMutationReadback,
   requireLiveLabelDraftResult,
   requireLiveLabelPublishResult,
   requireLiveLabelValidationResult,
@@ -35,10 +38,13 @@ import {
   requireLiveRpcRecord,
   sleep,
   state,
+  type TargetLabelRequestArgs,
+  type TargetLabelRequestResult,
   ui_get_resource_v1,
 } from '../data-source';
 import { getSupabaseClient } from '../supabase';
 import { asNonEmptyString } from './shared';
+import { SEED_MODE_ENABLED } from '../seed-loader';
 
 function localValidateLabelDesign(value: unknown): Array<Record<string, unknown>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -801,4 +807,153 @@ export async function requireLiveCompleteLabelJobReadback(
   if (targetType) {
     await requireLiveResourceReadback('label_artifacts', labelId, 'complete_label_job');
   }
+}
+
+export async function requireLiveLabelDraftMutationReadback(
+  result: LabelDesignerDraftMutationResult,
+  rpcName: string,
+): Promise<LabelDesignerDraftMutationResult> {
+  if (result.ok === false) return result;
+  const draft = result.draft;
+  const draftId = asNonEmptyString(draft?.id) ?? asNonEmptyString(result.draft_id);
+  const scopeType = draft?.scope_type;
+  const scopeId = asNonEmptyString(draft?.scope_id);
+  if (!draftId || !scopeType || !scopeId) {
+    throw new Error(`${rpcName} did not return draft scope for backend readback`);
+  }
+  const readback = await label_designer_list_drafts(scopeType, scopeId);
+  const readbackDraft = readback.drafts.find((row) => row.id === draftId);
+  if (!readbackDraft) {
+    throw new Error(`${rpcName} backend draft list readback missing draft`);
+  }
+  return { ...result, draft: readbackDraft };
+}
+
+async function labelDesignerEffectiveConfigRpc(
+  rpcName: string,
+  scopeType: LabelDesignScopeType,
+  scopeId: string,
+): Promise<LabelDesignerEffectiveConfigResult> {
+  assertLabelDesignScope(scopeType, scopeId);
+  const live = await liveRpc<LabelDesignerEffectiveConfigResult>(rpcName, {
+    p_scope_type: scopeType,
+    p_scope_id: scopeId,
+  });
+  if (live) {
+    const rec = requireLiveRpcRecord(
+      live.data,
+      `${rpcName} returned no backend effective config`,
+    );
+    const value = rec.value && typeof rec.value === 'object' && !Array.isArray(rec.value)
+      ? rec.value as Record<string, unknown>
+      : {};
+    return { ...rec, ok: rec.ok !== false, value };
+  }
+
+  await sleep(30);
+  return { ok: true, value: {} };
+}
+
+export const label_designer_get_effective_label_design = (
+  scopeType: LabelDesignScopeType,
+  scopeId: string,
+): Promise<LabelDesignerEffectiveConfigResult> =>
+  labelDesignerEffectiveConfigRpc('label_designer_get_effective_label_design', scopeType, scopeId);
+
+export const label_designer_get_effective_label_render_policy = (
+  scopeType: LabelDesignScopeType,
+  scopeId: string,
+): Promise<LabelDesignerEffectiveConfigResult> =>
+  labelDesignerEffectiveConfigRpc('label_designer_get_effective_label_render_policy', scopeType, scopeId);
+
+export const label_designer_get_effective_label_print_profile = (
+  scopeType: LabelDesignScopeType,
+  scopeId: string,
+): Promise<LabelDesignerEffectiveConfigResult> =>
+  labelDesignerEffectiveConfigRpc('label_designer_get_effective_label_print_profile', scopeType, scopeId);
+
+export const label_designer_get_label_media_catalog = (
+  scopeType: LabelDesignScopeType,
+  scopeId: string,
+): Promise<LabelDesignerEffectiveConfigResult> =>
+  labelDesignerEffectiveConfigRpc('label_designer_get_label_media_catalog', scopeType, scopeId);
+
+export async function ui_request_label_generation_target_v1(
+  args: TargetLabelRequestArgs,
+): Promise<TargetLabelRequestResult> {
+  const targetId = asNonEmptyString(args.target_id);
+  const targetType = asNonEmptyString(args.target_type);
+  if (!targetType) throw new Error('Target label type is required');
+  if (!targetId) throw new Error('Target label id is required');
+
+  const client = getSupabaseClient();
+  if (client) {
+    const result = await phaseC6Rpc('ui_request_label_generation_target_v1', {
+      ...args,
+      target_type: targetType,
+      target_id: targetId,
+      requested_source: asNonEmptyString(args.requested_source) ?? 'console-v2',
+    }, 'label_job');
+    const labelJobId =
+      asNonEmptyString(result.label_job_id) ??
+      asNonEmptyString(result.id) ??
+      asNonEmptyString((result.job as Record<string, unknown> | undefined)?.id);
+    if (!labelJobId) throw new Error('Target label request did not return a label job id');
+
+    const job = await requireLiveResourceReadback('label_jobs', labelJobId, 'ui_request_label_generation_target_v1');
+    const readbackTargetId = asNonEmptyString(job.target_id);
+    const readbackTargetType = asNonEmptyString(job.target_type);
+    if (readbackTargetId !== targetId) {
+      throw new Error(`Target label job readback belongs to ${readbackTargetId ?? 'unknown'}, expected ${targetId}`);
+    }
+    if (!readbackTargetType) {
+      throw new Error('Target label job readback missing target_type');
+    }
+
+    return {
+      ok: true,
+      label_job_id: labelJobId,
+      target_type: readbackTargetType,
+      target_id: readbackTargetId,
+      target_box_id: asNonEmptyString(job.target_box_id),
+      label_type: asNonEmptyString(job.label_type),
+      status: asNonEmptyString(job.status),
+      job,
+      ...result,
+    } as TargetLabelRequestResult;
+  }
+
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('ui_request_label_generation_target_v1');
+  await sleep(80);
+  return {
+    ok: true,
+    label_job_id: 'ljob_target_' + Date.now(),
+    target_type: targetType,
+    target_id: targetId,
+    target_box_id: asNonEmptyString(args.target_box_id),
+    label_type: asNonEmptyString(args.label_type) ?? null,
+    status: 'pending',
+    job: null,
+  };
+}
+
+export async function complete_label_job(
+  jobId: string,
+  payload: unknown,
+): Promise<CompleteLabelJobResult> {
+  const args = { label_job_id: jobId, ...(payload as Record<string, unknown> | undefined) };
+  const client = getSupabaseClient();
+  if (client) {
+    const result = await phaseC6Rpc('complete_label_job', args, 'label_jobs');
+    await requireLiveCompleteLabelJobReadback(jobId, result);
+    return result as CompleteLabelJobResult;
+  }
+  if (!SEED_MODE_ENABLED) throw liveBackendUnavailableError('complete_label_job');
+  await sleep(80);
+  return {
+    ok: true,
+    label_job_id: jobId,
+    status: 'completed',
+    correlation_id: 'corr_' + Date.now(),
+  };
 }
