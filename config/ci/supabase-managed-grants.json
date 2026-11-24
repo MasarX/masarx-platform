@@ -286,7 +286,7 @@
     },
     {
       "file": "supabase/migrations/20261124150146_console_live_broadcast_v1.sql",
-      "sha256": "f85f50db049eb64357339a61529675e71e7898082c04c7e7cc5393632e3c3cdc",
+      "sha256": "8627558dafb7bd3aa71d5ff391b685fd7a14482be37e3827908181145f5ea270",
       "reason": "Adds four tenant-bound Broadcast policies on realtime.messages for Console live invalidations. Preserves the managed schema, relation and role grants."
     }
   ]

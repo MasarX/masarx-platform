@@ -23,7 +23,7 @@ REVOKE ALL ON FUNCTION public.console_live_topic_allowed_v1(text) FROM PUBLIC, a
 GRANT EXECUTE ON FUNCTION public.console_live_topic_allowed_v1(text) TO authenticated;
 
 CREATE POLICY console_live_read ON realtime.messages
-  FOR SELECT TO authenticated
+  FOR SELECT TO authenticated, ui_rpc_executor
   USING (
     extension = 'broadcast' AND topic = (SELECT realtime.topic())
     AND public.console_live_topic_allowed_v1((SELECT realtime.topic()))
@@ -31,7 +31,7 @@ CREATE POLICY console_live_read ON realtime.messages
 
 -- Keep the namespace private even when another feature has a wider permissive policy.
 CREATE POLICY console_live_read_boundary ON realtime.messages
-  AS RESTRICTIVE FOR SELECT TO authenticated
+  AS RESTRICTIVE FOR SELECT TO authenticated, ui_rpc_executor
   USING (
     (topic NOT LIKE 'console-live:%' AND COALESCE((SELECT realtime.topic()), '') NOT LIKE 'console-live:%')
     OR (extension = 'broadcast' AND topic = (SELECT realtime.topic())
@@ -43,7 +43,7 @@ CREATE POLICY console_live_anon_boundary ON realtime.messages
   USING (topic NOT LIKE 'console-live:%' AND COALESCE((SELECT realtime.topic()), '') NOT LIKE 'console-live:%');
 
 CREATE POLICY console_live_client_write_boundary ON realtime.messages
-  AS RESTRICTIVE FOR INSERT TO anon, authenticated
+  AS RESTRICTIVE FOR INSERT TO anon, authenticated, ui_rpc_executor
   WITH CHECK (topic NOT LIKE 'console-live:%' AND COALESCE((SELECT realtime.topic()), '') NOT LIKE 'console-live:%');
 
 CREATE FUNCTION public.console_live_publish_v1()
