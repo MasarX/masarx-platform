@@ -9080,7 +9080,7 @@ export interface RbacUserRoleAssignmentMutationResult extends Record<string, unk
   settings_resolution_id?: string;
 }
 
-interface RbacTemplateProvisionRoleResult extends Record<string, unknown> {
+export interface RbacTemplateProvisionRoleResult extends Record<string, unknown> {
   template_key?: string | null;
   role_id?: string | null;
   rbac_role_id?: string | null;
