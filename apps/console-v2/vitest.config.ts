@@ -1,8 +1,7 @@
-import { configDefaults, defineConfig } from 'vitest/config';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import fs from 'node:fs';
 import path from 'node:path';
-import suiteQuarantine from '../../config/ci/test-suite-quarantine.json';
 
 const toVitePath = (value: string) => value.replace(/\\/g, '/');
 const isConsoleV2Root = (candidate: string) => {
@@ -28,19 +27,6 @@ const repoRoot = toVitePath(path.resolve(appRoot, '../..'));
 const realRepoRoot = toVitePath(fs.realpathSync.native(repoRoot));
 const appTestCache = toVitePath(path.resolve(appRoot, '.vitest'));
 const appTestSetup = toVitePath(path.resolve(appRoot, './src/test/setup.ts'));
-
-const capabilityLint = 'scripts/lint-capabilities.test.mjs';
-const capabilityLintExclusion = suiteQuarantine.find(({ match }) =>
-  match.includes(`apps/console-v2/${capabilityLint}`));
-
-export function consoleV2TestExclusions(deferCapabilityLint: boolean, now: Date) {
-  if (!deferCapabilityLint || !capabilityLintExclusion) return configDefaults.exclude;
-  const { reason, expires } = capabilityLintExclusion;
-  if (now.toISOString().slice(0, 10) > expires) {
-    throw new Error(`The CI exclusion for ${capabilityLint} expired after ${expires} UTC (MasarX lead). ${reason}`);
-  }
-  return [...configDefaults.exclude, capabilityLint];
-}
 
 export default defineConfig({
   root: appRoot,
@@ -78,7 +64,6 @@ export default defineConfig({
     globals: true,
     setupFiles: [appTestSetup],
     include: ['src/**/*.test.{ts,tsx}', 'scripts/**/*.test.mjs'],
-    exclude: consoleV2TestExclusions(process.env.CONSOLE_V2_CI_DEFER_CAPABILITY_LINT === '1', new Date()),
     coverage: {
       reporter: ['text', 'lcov'],
       include: ['src/**/*.{ts,tsx}'],

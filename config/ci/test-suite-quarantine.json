@@ -93,13 +93,5 @@
     "owner": "MasarX Delivery",
     "reason": "Rollback tests need a disposable database replayed to the exact migration boundary, followed by an inverse and refusal check.",
     "expires": "2026-12-15"
-  },
-  {
-    "match": [
-      "apps/console-v2/scripts/lint-capabilities.test.mjs"
-    ],
-    "owner": "MasarX QA",
-    "reason": "Existing CI exclusion while the capability extractor reports command IDs and tracking labels as capabilities (#112).",
-    "expires": "2026-12-04"
   }
 ]

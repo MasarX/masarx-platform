@@ -71,9 +71,9 @@ function selfCheck() {
   assert.throws(() => addFiles(new Set(), []), /CI suite has no test files/);
 
   const producer = { run: 'npm test', 'continue-on-error': true };
-  const ci = { jobs: { test: { steps: [producer] }, gate: { needs: ['test'] } } };
+  const ci = { jobs: { test: { steps: [producer] }, gate: { needs: ['test'] }, unrelatedGate: { needs: ['other'] } } };
   assert.throws(() => ciStep(ci, 'test', 'npm run missing', 'gate'), /Missing CI producer/);
-  assert.throws(() => ciStep(ci, 'test', 'npm test', 'missing-gate'), /Missing CI producer/);
+  assert.throws(() => ciStep(ci, 'test', 'npm test', 'unrelatedGate'), /Missing CI producer/);
   assert.throws(() => ciStep(ci, 'test', 'npm test', 'gate'), /continues on error/);
 }
 
@@ -107,7 +107,9 @@ function playwrightFiles(config, env) {
 
 function addFiles(covered, paths) {
   if (!paths.length) throw new Error('CI suite has no test files');
-  for (const file of paths) covered.add(path.relative(process.cwd(), file).split(path.sep).join('/'));
+  const files = paths.map(file => path.relative(process.cwd(), file).split(path.sep).join('/'));
+  for (const file of files) covered.add(file);
+  return files;
 }
 
 function ciCoverage(files) {
@@ -131,7 +133,7 @@ function ciCoverage(files) {
   const workspace = 'apps/console-v2';
   const vitest = step('ui', 'npm run test --workspace @masarx/console-v2');
   const vitestBin = path.join(path.dirname(require.resolve('vitest/package.json', { paths: [path.resolve(workspace)] })), 'vitest.mjs');
-  addFiles(covered, listJson(process.execPath, [vitestBin, 'list', '--filesOnly', '--json'], {
+  const consoleV2Files = addFiles(covered, listJson(process.execPath, [vitestBin, 'list', '--filesOnly', '--json'], {
     cwd: workspace, env: { ...process.env, ...vitest.env },
   }).map(row => row.file));
   covered.add(workspace + '/vitest.config.ts');
@@ -172,16 +174,19 @@ function ciCoverage(files) {
       for (const file of testFiles) covered.add(file);
     }
   }
-  return covered;
+  return { covered, consoleV2Files };
 }
 
 try {
   selfCheck();
   const files = tracked();
   const discovered = inventory(files);
-  const covered = ciCoverage(files);
+  const { covered, consoleV2Files } = ciCoverage(files);
   const errors = coverageErrors(discovered, covered, readJson(policyPath), new Date().toISOString().slice(0, 10));
   if (errors.length) throw new Error(errors.join('\n'));
+  console.log('::group::Console V2 Vitest files covered by the ui job');
+  console.log(consoleV2Files.join('\n'));
+  console.log('::endgroup::');
   console.log(discovered.length + ' test files and entry points accounted for (' + covered.size + ' covered by CI).');
 } catch (error) {
   // Runner subprocess output can include internal paths or configuration. Report the command and exit code only.
