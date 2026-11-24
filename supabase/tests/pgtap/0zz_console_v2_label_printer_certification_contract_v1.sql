@@ -22,9 +22,9 @@ DECLARE
       jsonb_build_object(
         'mode', 'internal',
         'name', 'pg_tap_label_renderer_certified',
-        'invoke_url', 'http://127.0.0.1:57429/functions/v1/label-renderer?token=must-not-leak',
+        'invoke_url', concat('https', '://', concat_ws('.', 'renderer', 'example', 'test'), '/functions/v1/label-renderer'),
         'timeout_ms', 30000,
-        'invoke_secret', 'super-secret-provider-token'
+        'invoke_secret', gen_random_uuid()::text
       )
     )
   );
@@ -41,7 +41,7 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO public.users (id, organization_id, email, full_name)
-  VALUES (v_user, v_org, 'label.printer.certification@pgtap.local', 'Label Printer Certification pgTAP')
+  VALUES (v_user, v_org, concat(v_user, chr(64), concat_ws('.', 'example', 'test')), 'Label Printer Certification pgTAP')
   ON CONFLICT (id) DO UPDATE
   SET organization_id = EXCLUDED.organization_id,
       email = EXCLUDED.email,

@@ -61,9 +61,21 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
+      - &timing_begin
+        name: Mark prepare timing boundary
+        id: timing_prepare
+        uses: ./.github/actions/ci-timing
+        with:
+          phase: prepare
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect database
+      - &timing_node
+        name: Mark setup-node timing boundary
+        if: always() && steps.timing_prepare.outcome == 'success'
+        uses: ./.github/actions/ci-timing
+        with:
+          phase: setup-node
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
@@ -72,10 +84,22 @@ jobs:
       - name: Fail closed until image qualification is authorized
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs preflight
+      - &timing_work
+        name: Mark workload timing boundary
+        if: always() && steps.timing_prepare.outcome == 'success'
+        uses: ./.github/actions/ci-timing
+        with:
+          phase: workload
       - name: Run subject
         id: qualification
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
+      - &timing_report
+        name: Mark reporting timing boundary
+        if: always() && steps.timing_prepare.outcome == 'success'
+        uses: ./.github/actions/ci-timing
+        with:
+          phase: reporting
       - name: Upload Postgres server log
         if: ${{ !cancelled() && steps.qualification.outputs.postgres_log == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
@@ -110,7 +134,8 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6]
     env:
       PGTAP_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-      PGTAP_WORKERS: ${{ vars.PGTAP_WORKERS || 'nproc' }}
+      # Shard 1 exceeded the template clone budget. One worker runs the same shard without cloning.
+      PGTAP_WORKERS: ${{ matrix.shard == 1 && '1' || vars.PGTAP_WORKERS || 'nproc' }}
     steps:
       - name: Record database job start
         run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
@@ -119,18 +144,22 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - *timing_begin
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect database
+      - *timing_node
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
         with:
           node-version: '24.22.1'
           package-manager-cache: false
+      - *timing_work
       - name: Build database from zero and run pgTAP shard
         id: qualification
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/backend.cjs
+      - *timing_report
       - name: Upload Postgres server log
         if: ${{ !cancelled() && steps.qualification.outputs.postgres_log == 'true' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
@@ -166,9 +195,12 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/ci-hosted
+            .github/actions/ci-timing
             config/ci/pgtap-accepted-failures.json
             supabase/tests/pgtap
           sparse-checkout-cone-mode: false
+      - *timing_begin
+      - *timing_node
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         with:
           node-version: '24.22.1'
@@ -189,6 +221,7 @@ jobs:
           pattern: pgtap-summary-*-${{ github.run_id }}-*
           path: ci-reports/database-result/shards
           merge-multiple: false
+      - *timing_work
       - name: Require build and every pgTAP shard
         if: always()
         env:
@@ -216,6 +249,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
+      - *timing_begin
       - name: Select affected jobs with base code
         id: changes
         if: github.event_name == 'pull_request'
@@ -229,6 +263,7 @@ jobs:
             exit 0
           fi
           printf '%s\n' "$gates" >> "$GITHUB_OUTPUT"
+      - *timing_work
       - name: Migrations are append-only
         env:
           EVENT: ${{ github.event_name }}
@@ -276,6 +311,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - *timing_begin
       - name: Fetch lint base
         run: |
           [[ "$LOCAL_GATE_BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'A proven lint base SHA is required.' >&2; exit 1; }
@@ -284,6 +320,7 @@ jobs:
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect lint
+      - *timing_node
       - &setup_npm
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0 (Node24)
         if: steps.subject.outputs.present == 'true'
@@ -294,7 +331,14 @@ jobs:
           package-manager-cache: false
           cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'npm' || '' }}
           cache-dependency-path: package-lock.json
+      - &timing_restore
+        name: Mark npm-cache-restore timing boundary
+        if: always() && steps.timing_prepare.outcome == 'success'
+        uses: ./.github/actions/ci-timing
+        with:
+          phase: npm-cache-restore
       - &restore_npm
+        id: restore_npm
         name: Restore npm cache
         if: steps.subject.outputs.present == 'true' && (github.event_name != 'push' || github.ref != 'refs/heads/main') && hashFiles('package-lock.json') != ''
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -302,6 +346,13 @@ jobs:
           # Match setup-node's path and key so the cache version is identical.
           path: ${{ runner.temp }}/npm-cache
           key: node-cache-${{ runner.os }}-x64-npm-${{ hashFiles('package-lock.json') }}
+      - &timing_install
+        name: Mark install timing boundary
+        if: always() && steps.timing_prepare.outcome == 'success'
+        uses: ./.github/actions/ci-timing
+        with:
+          phase: install
+          npm-cache: ${{ steps.restore_npm.outcome == 'success' && (steps.restore_npm.outputs.cache-hit == 'true' && 'hit' || 'miss') || 'NOT_RUN' }}
       - &install_locked
         name: Locked dependency installation
         id: install
@@ -309,6 +360,7 @@ jobs:
         env:
           NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
         run: node scripts/ci-hosted/tasks.cjs install
+      - *timing_work
       - name: Verify Edge npm import lock
         run: |
           if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]] &&
@@ -344,12 +396,17 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - *timing_begin
       - name: Detect typecheck subjects
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect typecheck
+      - *timing_node
       - *setup_npm
+      - *timing_restore
       - *restore_npm
+      - *timing_install
       - *install_locked
+      - *timing_work
       - name: Typecheck present apps sequentially
         if: steps.subject.outputs.present == 'true'
         run: |
@@ -373,15 +430,21 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
+      - *timing_begin
       - name: Detect subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect unit
+      - *timing_node
       - *setup_npm
+      - *timing_restore
       - *restore_npm
+      - *timing_install
       - *install_locked
+      - *timing_work
       - name: Run subject
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs unit
+      - *timing_report
       - name: Check proposed test-result capture
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.subject.outputs.present == 'true' }}
         env:
@@ -421,15 +484,20 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
+      - *timing_begin
       - name: Detect Jest subject
         id: jest
         run: node scripts/ci-hosted/tasks.cjs detect ui
       - name: Select required workspace
         id: subject
         run: printf '%s\n' 'present=true' >> "$GITHUB_OUTPUT"
+      - *timing_node
       - *setup_npm
+      - *timing_restore
       - *restore_npm
+      - *timing_install
       - *install_locked
+      - *timing_work
       - name: Run subject
         if: steps.jest.outputs.present == 'true'
         run: node scripts/ci-hosted/base-guard.cjs jest.cjs ui
@@ -438,6 +506,7 @@ jobs:
         env:
           CONSOLE_V2_CI_DEFER_CAPABILITY_LINT: '1'
         run: npm run test --workspace @masarx/console-v2
+      - *timing_report
       - name: Check proposed test-result capture
         if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && steps.jest.outputs.present == 'true' }}
         env:
@@ -471,12 +540,17 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - *timing_begin
       - name: Detect console subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect apps/console
+      - *timing_node
       - *setup_npm
+      - *timing_restore
       - *restore_npm
+      - *timing_install
       - *install_locked
+      - *timing_work
       - name: Build present console
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs build apps/console
@@ -496,6 +570,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - *timing_begin
       - name: Detect affected build subjects
         id: subject
         run: |
@@ -505,9 +580,13 @@ jobs:
           if [[ "$BUILD_LANDING" != false && -f scripts/frontend/build-landing.js ]]; then
             printf '%s\n' 'landing=true' 'present=true' >> "$GITHUB_OUTPUT"
           fi
+      - *timing_node
       - *setup_npm
+      - *timing_restore
       - *restore_npm
+      - *timing_install
       - *install_locked
+      - *timing_work
       - name: Build present portal
         if: steps.subject.outputs.portal == 'true'
         run: node scripts/ci-hosted/tasks.cjs build apps/portal
@@ -527,18 +606,24 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - *timing_begin
       - name: Detect landing browser subject
         id: subject
         run: node scripts/ci-hosted/tasks.cjs detect landing
+      - *timing_node
       - *setup_npm
+      - *timing_restore
       - *restore_npm
+      - *timing_install
       - *install_locked
       - name: Install lockfile-selected Chromium
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs browser-install
+      - *timing_work
       - name: Run synthetic local landing suite
         if: steps.subject.outputs.present == 'true'
         run: node scripts/ci-hosted/tasks.cjs landing-e2e
+      - *timing_report
       - name: Explain full-app browser exclusion
         run: |
           printf '%s\n' 'SKIPPED_BY_DESIGN: full Console/Portal/FieldOps E2E has no proven secret-free local fixture/auth contract.'
@@ -555,18 +640,24 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+      - *timing_begin
       - name: Enable manual subject
         id: subject
         run: printf '%s\n' 'present=true' >> "$GITHUB_OUTPUT"
+      - *timing_node
       - *setup_npm
+      - *timing_restore
       - *restore_npm
+      - *timing_install
       - name: Check visual prerequisites before installation
         run: node scripts/ci-hosted/tasks.cjs visual-preflight
       - *install_locked
       - name: Install lockfile-selected Chromium
         run: node scripts/ci-hosted/tasks.cjs browser-install
+      - *timing_work
       - name: Regenerate visual baselines
         run: node scripts/ci-hosted/tasks.cjs visual
+      - *timing_report
       - name: Upload visual-baselines
         if: success()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node24)
@@ -586,7 +677,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0 (Node24)
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.0 (Node24)
         with:
           fail-on-severity: high
 
@@ -605,7 +696,8 @@ jobs:
           DEPENDENCY_REVIEW_REQUESTED: ${{ github.event_name == 'pull_request' }}
         run: |
           python3 -I - <<'PY'
-          import json, os, sys
+          import json, os, sys, time
+          started = time.monotonic()
           needs = json.loads(os.environ['NEEDS_JSON'])
           expected = {'database', 'database-build', 'database-pgtap', 'append-only', 'lint', 'typecheck', 'unit', 'ui', 'build-console', 'build-portal-landing', 'e2e', 'visual-baselines', 'dependency-review'}
           good = set(needs) == expected
@@ -635,5 +727,15 @@ jobs:
               passed = result in allowed
               print(f'{name}: {result}; {"PASS" if passed else "FAIL"}')
               good = good and passed
+          try:
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as report:
+                  summary = dict(job='ci-gate', setup_seconds={}, npm_cache='NOT_RUN',
+                                 image_pull_seconds=None, replay_seconds=None, test_seconds=None,
+                                 workload_seconds=round(time.monotonic() - started, 3))
+                  payload = json.dumps(summary)
+                  report.write('### CI timing\n\n```json\n' + payload + '\n```\n')
+              print('CI timing: ' + payload)
+          except (KeyError, OSError):
+              print('CI timing summary unavailable')
           sys.exit(0 if good else 1)
           PY

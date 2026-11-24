@@ -81,6 +81,9 @@ const textEncoder = new TextEncoder();
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
 const RENDERER_ENDPOINT = readEnv("LABEL_RENDERER_INVOKE_URL") ||
   `${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/label-renderer`;
+const LOCAL_RENDERER_ENDPOINT = readEnv("EDGE_ENVIRONMENT") === "local" && RENDERER_ENDPOINT.startsWith("http://")
+  ? RENDERER_ENDPOINT
+  : undefined;
 const SUPABASE_ANON_KEY = readEnv("EDGE_SUPABASE_ANON_KEY", ["SUPABASE_ANON_KEY"]);
 const RAW_EDGE_DB_JWT = readEnv("API_CALLER_DB_JWT", []);
 const EDGE_DB_JWT = RAW_EDGE_DB_JWT && RAW_EDGE_DB_JWT.split(".").length === 3
@@ -300,6 +303,7 @@ const guardedProxyFetch = createGuardedProxyFetch({
 const runFetch = async (
   payload: CallRequest,
   egressEnvelope?: EgressPolicyEnvelope | null,
+  localRendererEndpoint?: string,
 ): Promise<CallResponse> => {
   if (!payload.url) throw new Error("Missing url");
   const method = (payload.method ?? "POST").toUpperCase() as HttpMethod;
@@ -325,6 +329,7 @@ const runFetch = async (
     timeoutMs,
     policy: egressPolicy,
     httpAllowedHost: payload.http_allowed_host,
+    localRendererEndpoint,
     resolveDns: resolveDnsForEgress,
     allowDevDirectEgress: ALLOW_DEV_DIRECT_EGRESS,
     guardedFetch: GUARDED_EGRESS_PROXY_URL || GUARDED_EGRESS_PROXY_USERNAME || GUARDED_EGRESS_PROXY_PASSWORD
@@ -429,9 +434,10 @@ const executeClaimedJob = async (
         RENDERER_ENDPOINT,
         readEnv("LABEL_RENDERER_SIGNING_KEY"),
         readEnv("LABEL_RENDERER_GATEWAY_JWT"),
+        LOCAL_RENDERER_ENDPOINT !== undefined,
       )
       : mergedDispatch;
-    callResult = await runFetch(sendDispatch, egressEnvelope);
+    callResult = await runFetch(sendDispatch, egressEnvelope, isRenderer ? LOCAL_RENDERER_ENDPOINT : undefined);
   } catch (err) {
     dispatchError = err instanceof Error ? err.message : "Unknown error";
     callResult = {

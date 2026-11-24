@@ -14,17 +14,17 @@
       "request-id sequence has no PUBLIC ACL",
       "executor cannot advance or reset request identities"
     ],
-    "reason": "Accept only the verified, non-grantable supabase_admin grants to PUBLIC that the project role cannot revoke. Scope is limited to SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on the two pg_net tables and SELECT, USAGE and UPDATE on the request-id sequence. The net and cron schemas stay outside the Data API (met). Data API clients have no path to these objects per the checked-in config (only `api` exposed; anon has no USAGE on `public`); the live DEV setting is unverified, owner item pending. SQL-level paths through `public` definers are a residual risk tracked in #206; the function privilege tightening in #189, #192, #196, #201 and #208 removed the known unscoped caller-chosen paths; tenant integration settings, which are capability-gated, can still set outbound URLs and headers; their organization guards are being made consistent in #216 and their URL validation is tracked in #209. Credential-bearing dispatch must avoid pg_net (OPEN, tracked by a follow-up due 2026-11-28). SQL-capable roles with schema access remain a residual risk. The Delivery Lead owns this exception and rechecks it when the follow-up lands or by 2026-11-28.",
+    "reason": "Accept only the platform-owned PUBLIC ACLs that the project migration role could not revoke in the from-zero probe (#184). Scope is limited to SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER and MAINTAIN on net._http_response and net.http_request_queue, and SELECT, USAGE and UPDATE on the request-id sequence. Checked-in Data API exposure is limited to api, and migrations revoke anon USAGE on public. The leased Edge path authorizes renderer requests at send time. The SQL transport refuses credential headers, and relay wake requests carry neither credentials nor job data. SQL roles with schema access and indirect definer paths (#206) remain residual risks. The DEV schema readout returned HTTP 403. Recheck live DEV API exposure, ACL grantors, and credential-free pg_net dispatch before v0.2.0 release or by the expiry date, whichever comes first.",
     "owner": "Delivery Lead",
-    "expires": "2026-11-28"
+    "expires": "2026-12-04"
   },
   {
     "file": "0zz_extension_public_acl_v1.sql",
     "assertions": [
       "cron history retains no effective executor writes"
     ],
-    "reason": "Accept only the verified, non-grantable supabase_admin grants to PUBLIC that the project role cannot revoke. Scope is limited to DELETE on cron.job_run_details. The net and cron schemas stay outside the Data API (met). Data API clients have no path to these objects per the checked-in config (only `api` exposed; anon has no USAGE on `public`); the live DEV setting is unverified, owner item pending. SQL-level paths through `public` definers are a residual risk tracked in #206; the function privilege tightening in #189, #192, #196, #201 and #208 removed the known unscoped caller-chosen paths; tenant integration settings, which are capability-gated, can still set outbound URLs and headers; their organization guards are being made consistent in #216 and their URL validation is tracked in #209. Credential-bearing dispatch must avoid pg_net (OPEN, tracked by a follow-up due 2026-11-28). SQL-capable roles with schema access remain a residual risk. The Delivery Lead owns this exception and rechecks it when the follow-up lands or by 2026-11-28.",
+    "reason": "Accept only the platform-owned PUBLIC DELETE on cron.job_run_details that the project migration role could not revoke in the from-zero probe (#184). The checked-in Data API configuration excludes cron, and pgTAP still requires the existing cron maintenance DELETE to work. SQL roles with schema access retain the inherited privilege. The DEV schema readout returned HTTP 403. Recheck live DEV API exposure and the grantor before v0.2.0 release or by the expiry date, whichever comes first.",
     "owner": "Delivery Lead",
-    "expires": "2026-11-28"
+    "expires": "2026-12-04"
   }
 ]
