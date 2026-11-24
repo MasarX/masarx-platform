@@ -29,17 +29,15 @@ AS $$ SELECT 300 $$;
 REVOKE ALL ON FUNCTION api.courier_location_stale_after_seconds_v1() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION api.courier_location_stale_after_seconds_v1() TO authenticated, service_role;
 
-CREATE FUNCTION api.public_tracking_live_session_v1(p_input jsonb)
+CREATE FUNCTION public.public_tracking_live_payload_v1(p_session_id uuid, p_policy jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO public, extensions, pg_temp
 AS $function$
 DECLARE
-  v_body jsonb := public.public_tracking_session_v1(p_input);
   v_session record;
   v_stop record;
-  v_policy jsonb;
   v_ping record;
   v_cell jsonb;
   v_stops_ahead integer;
@@ -55,40 +53,21 @@ DECLARE
   v_now timestamptz := workflow_now();
   v_stale_before timestamptz := v_now - make_interval(secs => api.courier_location_stale_after_seconds_v1());
 BEGIN
-  IF v_body->'ok' IS DISTINCT FROM 'true'::jsonb THEN
-    RETURN v_body;
+  IF NOT public.public_tracking_bool_v1(p_policy, '{live_delivery,eta_enabled}', true) THEN
+    RETURN NULL;
   END IF;
 
-  v_body := jsonb_set(v_body, '{tracking,live_delivery}', 'null'::jsonb);
-  IF v_body #>> '{tracking,shipment,status}' IS DISTINCT FROM 'out_for_delivery' THEN
-    RETURN v_body;
-  END IF;
-
-  -- Reuse session validation and throttle before resolving any route data.
-  SELECT ts.*
+  SELECT ts.*, s.promised_window_start_at, s.promised_window_end_at
   INTO v_session
   FROM public.tracking_sessions ts
   JOIN public.shipments s ON (s.id, s.client_id, s.organization_id) =
     (ts.shipment_id, ts.client_id, ts.organization_id)
-  WHERE ts.status = 'active'
+  WHERE ts.id = p_session_id AND ts.status = 'active'
     AND (ts.expires_at IS NULL OR ts.expires_at > v_now)
-    AND s.status = 'out_for_delivery'
-    AND s.tracking_number = v_body #>> '{tracking,shipment,tracking_number}'
-    AND ts.token_hash = crypt(btrim(p_input->>'session_token'), ts.token_hash)
-  ORDER BY ts.created_at DESC
-  LIMIT 1;
+    AND s.status = 'out_for_delivery';
 
   IF NOT FOUND THEN
-    RETURN v_body;
-  END IF;
-
-  v_policy := public.public_tracking_policy_v1(jsonb_build_object(
-    'organization_id', v_session.organization_id,
-    'client_id', v_session.client_id,
-    'sender_id', v_session.sender_id
-  ));
-  IF NOT public.public_tracking_bool_v1(v_policy, '{live_delivery,eta_enabled}', true) THEN
-    RETURN v_body;
+    RETURN NULL;
   END IF;
 
   SELECT rs.*, rr.driver_user_id, rr.started_at,
@@ -113,7 +92,7 @@ BEGIN
   LIMIT 1;
 
   IF NOT FOUND THEN
-    RETURN v_body;
+    RETURN NULL;
   END IF;
 
   WITH open_stops AS (
@@ -141,7 +120,7 @@ BEGIN
   HAVING bool_or(sequence_order = v_stop.sequence_order);
 
   IF NOT FOUND THEN
-    RETURN v_body;
+    RETURN NULL;
   END IF;
 
   SELECT p.actor_user_id, p.captured_at,
@@ -158,29 +137,29 @@ BEGIN
 
   IF v_ping.captured_at IS NULL THEN
     v_eta_start := COALESCE(v_stop.planned_window_start_at,
-      (v_body #>> '{tracking,shipment,promised_window_start_at}')::timestamptz);
+      v_session.promised_window_start_at);
     v_eta_end := COALESCE(v_stop.planned_window_end_at,
-      (v_body #>> '{tracking,shipment,promised_window_end_at}')::timestamptz);
+      v_session.promised_window_end_at);
     IF v_eta_start IS NULL OR v_eta_end IS NULL OR v_eta_end < v_eta_start THEN
-      RETURN v_body;
+      RETURN NULL;
     END IF;
     v_status := 'paused';
   ELSE
     v_eta_start := date_trunc('minute', v_ping.captured_at) + make_interval(mins =>
-      v_stops_ahead * public.public_tracking_int_v1(v_policy, '{live_delivery,minutes_per_stop}', 8, 1, 60)
+      v_stops_ahead * public.public_tracking_int_v1(p_policy, '{live_delivery,minutes_per_stop}', 8, 1, 60)
     );
     v_eta_end := v_eta_start + interval '15 minutes';
     v_status := 'hidden';
 
-    IF public.public_tracking_bool_v1(v_policy, '{live_delivery,area_enabled}', false)
+    IF public.public_tracking_bool_v1(p_policy, '{live_delivery,area_enabled}', false)
        AND (NOT v_stop.partner_run
-         OR public.public_tracking_bool_v1(v_policy, '{live_delivery,partner_area_enabled}', false))
+         OR public.public_tracking_bool_v1(p_policy, '{live_delivery,partner_area_enabled}', false))
        AND NOT v_at_previous THEN
-      IF v_stops_ahead > public.public_tracking_int_v1(v_policy, '{live_delivery,max_stops_ahead}', 3, 0, 20) THEN
+      IF v_stops_ahead > public.public_tracking_int_v1(p_policy, '{live_delivery,max_stops_ahead}', 3, 0, 20) THEN
         v_status := 'too_far';
-      ELSIF public.public_tracking_int_v1(v_policy, '{live_delivery,max_stops_ahead}', 3, 0, 20) > 0
+      ELSIF public.public_tracking_int_v1(p_policy, '{live_delivery,max_stops_ahead}', 3, 0, 20) > 0
             AND abs(v_ping.latitude) < 85 THEN
-        v_grid_m := public.public_tracking_int_v1(v_policy, '{live_delivery,grid_m}', 500, 300, 2000);
+        v_grid_m := public.public_tracking_int_v1(p_policy, '{live_delivery,grid_m}', 500, 300, 2000);
         -- Use fixed latitude bands and integral thousandths of a degree.
         v_lat_step := ceil(v_grid_m / 110.0) / 1000;
         v_south := floor(v_ping.latitude / v_lat_step) * v_lat_step;
@@ -214,14 +193,41 @@ BEGIN
     END IF;
   END IF;
 
-  RETURN jsonb_set(v_body, '{tracking,live_delivery}', jsonb_build_object(
+  RETURN jsonb_build_object(
     'area', v_cell, 'status', v_status,
     'eta_window_start_at', v_eta_start, 'eta_window_end_at', v_eta_end,
     'stops_ahead', v_stops_ahead,
     'updated_at', date_trunc('minute', COALESCE(v_ping.captured_at, v_stop.updated_at))
-  ));
+  );
 END;
 $function$;
+
+REVOKE ALL ON FUNCTION public.public_tracking_live_payload_v1(uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.public_tracking_live_payload_v1(uuid, jsonb) TO service_role;
+
+DO $migration$
+DECLARE
+  v_definition text := pg_get_functiondef('public.public_tracking_session_v1(jsonb)'::regprocedure);
+  v_return constant text := $anchor$  RETURN jsonb_build_object('ok', TRUE, 'tracking', v_payload);$anchor$;
+BEGIN
+  IF array_length(string_to_array(v_definition, v_return), 1) <> 2 THEN
+    RAISE EXCEPTION 'public tracking session return contract changed';
+  END IF;
+  EXECUTE replace(v_definition, v_return, $replacement$
+  v_payload := jsonb_set(v_payload, '{live_delivery}', COALESCE(
+    public.public_tracking_live_payload_v1(v_session.id, v_policy), 'null'::jsonb
+  ));
+  RETURN jsonb_build_object('ok', TRUE, 'tracking', v_payload);
+$replacement$);
+END;
+$migration$;
+
+CREATE FUNCTION api.public_tracking_live_session_v1(p_input jsonb)
+RETURNS jsonb
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path TO public, extensions, pg_temp
+AS $ SELECT public.public_tracking_session_v1(p_input) $;
 
 REVOKE ALL ON FUNCTION api.public_tracking_live_session_v1(jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION api.public_tracking_live_session_v1(jsonb) TO service_role;

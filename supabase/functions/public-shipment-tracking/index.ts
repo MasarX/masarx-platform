@@ -186,7 +186,7 @@ const routeRequiresTurnstile = (action: string) => action === "lookup" || action
 const TRACKING_RPC_BY_ACTION: Record<string, string> = {
   lookup: "public_tracking_lookup_v1",
   verify: "public_tracking_verify_v1",
-  session: "public_tracking_live_session_v1",
+  session: "public_tracking_session_v1",
   request: "public_tracking_submit_request_v2",
 };
 
