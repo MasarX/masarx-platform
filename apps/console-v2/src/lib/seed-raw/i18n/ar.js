@@ -49,7 +49,10 @@ export const ar = {
     amendCancel: { eyebrow: 'التشغيل', accent: 'التعديل', plain: 'والإلغاء' },
     exceptions: { eyebrow: 'التشغيل', accent: 'الاستثناءات', plain: '(NDR)' },
     returnedToBranch: { eyebrow: 'التشغيل', accent: 'الإرجاع', plain: 'إلى الفرع' },
-    pickups: { eyebrow: 'التشغيل', accent: 'الالتقاط', plain: '— الميل الأول' },
+    pickups: {
+      eyebrow: 'التشغيل', accent: 'الالتقاط', plain: '— الميل الأول',
+      invalidWindowTime: 'أدخل وقت بداية ووقت نهاية صالحين بالتوقيت المحلي.',
+    },
     trackingMap: { eyebrow: 'التشغيل', accent: 'خريطة', plain: 'التتبّع' },
     hubs: { eyebrow: 'الشبكة', accent: 'المراكز', plain: 'والمناطق' },
     partners: { eyebrow: 'الشبكة', accent: 'الشركاء', plain: '— شركاء السوق' },
