@@ -40,6 +40,13 @@ export const en = {
       policyReference: 'policy reference',
       policySummary: 'policy summary',
     },
+    summary: {
+      sourceFile: 'Source file: {value}',
+      environment: 'Environment: {value}',
+      auditStatus: 'Audit status: {value}',
+      callbackUrls: 'Callback URLs: {count}',
+      redirectUrls: 'Redirect URLs: {count}',
+    },
   },
 };
 
@@ -81,6 +88,13 @@ export const ar: CatalogShape<typeof en> = {
       rawPolicyJson: 'JSON الخام للسياسة',
       policyReference: 'مرجع السياسة',
       policySummary: 'ملخص السياسة',
+    },
+    summary: {
+      sourceFile: 'الملف المصدر: {value}',
+      environment: 'البيئة: {value}',
+      auditStatus: 'حالة التدقيق: {value}',
+      callbackUrls: 'عناوين رد الاستدعاء: {count}',
+      redirectUrls: 'عناوين إعادة التوجيه: {count}',
     },
   },
 };

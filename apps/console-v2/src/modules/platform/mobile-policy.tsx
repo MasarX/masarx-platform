@@ -39,11 +39,11 @@ function resolveScopeId(scopeType: string, scope: Scope): string {
   return target?.id ?? '';
 }
 
-function formatResolutionReference(value: string | null | undefined): string {
+function formatResolutionReference(value: string | null | undefined, t: Translate): string {
   const id = value?.trim();
-  if (!id) return 'Resolution pending';
+  if (!id) return t('platformMobilePolicy.helpers.resolutionPending');
   if (id.length <= 12) return id;
-  return `Resolution ${id.slice(0, 4)}...${id.slice(-4)}`;
+  return fill(t('platformMobilePolicy.helpers.resolutionShort'), { head: id.slice(0, 4), tail: id.slice(-4) });
 }
 
 // 10 canonical policy categories. Attestation is included so the
@@ -144,7 +144,7 @@ function isDeviceRevoked(row: DeviceRow): boolean {
   return row.is_revoked === true || Boolean(row.revoked_at);
 }
 
-function deviceAccessStateOf(row: DeviceRow): string {
+function deviceAccessStateOf(row: DeviceRow): 'revoked' | 'active' {
   return isDeviceRevoked(row) ? 'revoked' : 'active';
 }
 
@@ -194,7 +194,7 @@ function deviceColumns(t: Translate): DataTableColumn<DeviceRow>[] {
       label: t('platformMobilePolicy.mobilePolicyModule.colAccess'),
       sortable: true,
       filterable: true,
-      render: (_raw, row) => deviceAccessStateOf(row),
+      render: (_raw, row) => t(`platformMobilePolicy.helpers.accessState.${deviceAccessStateOf(row)}`),
     },
     {
       key: 'revoked_reason',
@@ -287,7 +287,7 @@ function ChangeRequestForm({
       );
       if (!dryRun) onClose();
     } catch (err) {
-      pushToast(fill(t('platformMobilePolicy.changeRequestForm.proposeFailed'), { value: String((err as Error)?.message || 'invalid JSON') }), 'danger');
+      pushToast(fill(t('platformMobilePolicy.changeRequestForm.proposeFailed'), { value: String((err as Error)?.message || t('platformMobilePolicy.helpers.invalidJson')) }), 'danger');
     }
   };
 
@@ -435,7 +435,7 @@ function PolicyEditorCard({
 
   const resolvedFrom = resolved?.resolved_from || 'global';
   const overrides = resolved?.overrides ?? resolved?.override_of ?? null;
-  const resolutionRef = formatResolutionReference(resolved?.settings_resolution_id ?? resolved?.srlv);
+  const resolutionRef = formatResolutionReference(resolved?.settings_resolution_id ?? resolved?.srlv, t);
 
   // W-Cycle-E2 (P2 #11) — resolved scope ID derives from the canonical
   // identity scope chain via `resolveScopeId(resolvedFrom, scope)`. Replaces
@@ -813,7 +813,7 @@ export function MobilePolicyModule() {
                   kind: 'danger',
                   capability: CAP.USER_DEVICES_WRITE,
                   disabled: (r) => isDeviceRevoked(r),
-                  disabledReason: 'Device is already revoked',
+                  disabledReason: t('platformMobilePolicy.helpers.deviceAlreadyRevoked'),
                   onClick: (r) => onRevoke(r),
                 },
               ]}

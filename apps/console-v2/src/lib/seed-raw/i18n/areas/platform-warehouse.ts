@@ -140,6 +140,9 @@ export const en = {
       transferManifestCreated: 'Transfer manifest {transfer_code} created',
       createManifestFailed2: 'Create manifest failed - {message}',
     },
+    helpers: {
+      unknownError: 'unknown error',
+    },
   },
 };
 
@@ -281,6 +284,9 @@ export const ar: CatalogShape<typeof en> = {
       createManifest: 'إنشاء البيان',
       transferManifestCreated: 'تم إنشاء بيان التحويل {transfer_code}',
       createManifestFailed2: 'فشل إنشاء البيان - {message}',
+    },
+    helpers: {
+      unknownError: 'خطأ غير معروف',
     },
   },
 };

@@ -36,4 +36,28 @@ describe('OnboardingReadinessModule in Arabic', () => {
     expect(englishT('platformOnboardingReadiness.onboardingReadinessModule.runBootstrap')).toBe('Run bootstrap');
     expect(lookup(ar, 'platformOnboardingReadiness.onboardingReadinessModule.titleAccent')).toMatch(/[\u0600-\u06FF]/);
   });
+
+  it.each([
+    ['platformOnboardingReadiness.helpers.readinessItem', 'Readiness item'],
+    ['platformOnboardingReadiness.helpers.noReadinessMessage', 'No readiness message provided.'],
+    ['platformOnboardingReadiness.helpers.scopeOf', '{scope} scope'],
+    ['platformOnboardingReadiness.helpers.selectedScope', 'selected scope'],
+    ['platformOnboardingReadiness.helpers.inlineScope.tenant', 'tenant scope'],
+    ['platformOnboardingReadiness.helpers.inlineScope.client', 'client scope'],
+    ['platformOnboardingReadiness.helpers.inlineScope.sender', 'sender scope'],
+    ['platformOnboardingReadiness.helpers.skippedWithoutReason', 'Skipped without reason'],
+    ['platformOnboardingReadiness.helpers.currentTenant', 'Current tenant'],
+    ['platformOnboardingReadiness.helpers.selectScopeBeforeBootstrap', 'Select a tenant, client, or sender before running bootstrap'],
+    ['platformOnboardingReadiness.helpers.bootstrapCompleted', 'Onboarding bootstrap completed - {scopeLabel}'],
+    ['platformOnboardingReadiness.helpers.bootstrapSkipped', 'Onboarding bootstrap skipped by policy - {scopeLabel}'],
+    ['platformOnboardingReadiness.helpers.bootstrapFailed', 'Onboarding bootstrap failed - {scopeLabel}'],
+    ['platformOnboardingReadiness.helpers.unknown', 'Unknown'],
+    ['platformOnboardingReadiness.helpers.notRequired', 'Not required'],
+    ['platformOnboardingReadiness.helpers.unknownReadiness', 'Unknown readiness'],
+    ['platformOnboardingReadiness.helpers.scopeRegistryLoadFailed', 'Scope type registry could not be loaded'],
+    ['platformOnboardingReadiness.helpers.tenantReferenceLoadFailed', 'Tenant scope reference could not be loaded'],
+  ])('keeps the English helper copy for %s and has Arabic', (key, english) => {
+    expect(englishT(key)).toBe(english);
+    expect(lookup(ar, key)).toMatch(/[\u0600-\u06FF]/);
+  });
 });

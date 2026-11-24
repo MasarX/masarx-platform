@@ -282,22 +282,6 @@ function summarizeFlat(c: Record<string, unknown> | null | undefined): string {
   return summarizeNode(fromLegacyFlat(c));
 }
 
-function relativeFromNow(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '—';
-  const ms = Date.now() - t;
-  if (ms < 0) return 'in the future';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
-}
-
 // W-Cycle-E2 (P2 #8) — `ageChip` accepts canonical thresholds resolved from
 // `alerts_age_thresholds` settings policy (`policies.js#sv_391`). Previous
 // implementation hardcoded the 60-min/24-hour bins inline. When thresholds
@@ -751,7 +735,7 @@ interface TestRuleBodyProps {
 }
 
 function TestRuleBody({ rule, triggers }: TestRuleBodyProps) {
-  const { t } = useI18n();
+  const { t, fmtRelative } = useI18n();
   const ruleTriggers = triggers.filter((entry) => entry.rule_id === rule.id);
   // W-Cycle-E2 (P2 #7) — sample payload resolves strictly through canonical
   // `alert_rule_test_payload_template` policy. When the policy is missing
@@ -802,7 +786,7 @@ function TestRuleBody({ rule, triggers }: TestRuleBodyProps) {
             onClick={() => setPayloadText(JSON.stringify(entry.payload, null, 2))}
           >
             <span className="mono">{entry.id}</span>
-            <span style={{ opacity: 0.6 }}>{relativeFromNow(entry.fired_at)}</span>
+            <span style={{ opacity: 0.6 }}>{fmtRelative(entry.fired_at)}</span>
           </button>
         ))}
         {ruleTriggers.length === 0 ? (
@@ -852,7 +836,7 @@ function TestRuleBody({ rule, triggers }: TestRuleBodyProps) {
 // ---------- Module ----------
 
 export function AlertsModule() {
-  const { t } = useI18n();
+  const { t, fmtRelative } = useI18n();
   const drawer = useDrawer();
   const modal = useModal();
   const [focusedRuleId, setFocusedRuleId] = useState<string | null>(null);
@@ -947,12 +931,12 @@ export function AlertsModule() {
         ...merged,
         condition_summary: summarizeFlat(merged.condition),
         last_triggered_at,
-        last_triggered_relative: relativeFromNow(last_triggered_at),
+        last_triggered_relative: last_triggered_at ? fmtRelative(last_triggered_at) : '—',
         triggered_today,
         open_alerts,
       };
     });
-  }, [rawRules, triggers, opsAlerts]);
+  }, [rawRules, triggers, opsAlerts, fmtRelative]);
 
   // ---- KPIs ----
   // W-Cycle-E (P2 #6) — KPI tone thresholds resolve through the canonical
@@ -1214,7 +1198,7 @@ export function AlertsModule() {
                     </span>
                     <Chip label={entry.status} kind={chipTone} size="xs" />
                     <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 6 }}>
-                      {relativeFromNow(entry.fired_at)}
+                      {fmtRelative(entry.fired_at)}
                     </span>
                   </div>
                 );
@@ -1256,7 +1240,7 @@ export function AlertsModule() {
                               await ackOpsMutation.mutateAsync({ ops_alert_id: a.id });
                               pushToast(fill(t('platformAlerts.alertsModule.opsAlertAcknowledged'), { id: String(a.id) }), 'good');
                             } catch (err) {
-                              const message = err instanceof Error ? err.message : 'Unable to acknowledge ops alert';
+                              const message = err instanceof Error ? err.message : t('platformAlerts.helpers.acknowledgeFailed');
                               pushToast(message, 'danger');
                             }
                           })();
@@ -1344,7 +1328,7 @@ export function AlertsModule() {
   }, [decoratedRules, triggers, opsAlerts, focusedRuleId, drawer.isOpen]);
 
   function openNewRule() {
-    let name = 'New alert rule';
+    let name = t('platformAlerts.alertsModule.newAlertRule');
     let severity: AlertRule['severity'] = 'warn';
     let channel: AlertRule['channel'] = 'slack';
     modal.open({
@@ -1761,7 +1745,7 @@ export function AlertsModule() {
                     size="xs"
                   />
                   <span className="mono" style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                    {relativeFromNow(alert.opened_at ?? alert.created_at)}
+                    {fmtRelative(alert.opened_at ?? alert.created_at)}
                   </span>
                   {!resolvedAt && !acknowledged ? (
                     <Button
@@ -1775,7 +1759,7 @@ export function AlertsModule() {
                             await ackOpsMutation.mutateAsync({ ops_alert_id: alert.id });
                             pushToast(fill(t('platformAlerts.alertsModule.opsAlertAcknowledged'), { id: String(alert.id) }), 'good');
                           } catch (err) {
-                            const message = err instanceof Error ? err.message : 'Unable to acknowledge ops alert';
+                            const message = err instanceof Error ? err.message : t('platformAlerts.helpers.acknowledgeFailed');
                             pushToast(message, 'danger');
                           }
                         })();

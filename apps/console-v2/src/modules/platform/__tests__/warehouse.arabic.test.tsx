@@ -35,4 +35,11 @@ describe('WarehouseModule in Arabic', () => {
     expect(englishT('platformWarehouse.warehouseModule.transferBoard')).toBe('Transfer board');
     expect(lookup(ar, 'platformWarehouse.warehouseModule.titleAccent')).toMatch(/[\u0600-\u06FF]/);
   });
+
+  it.each([
+    ['platformWarehouse.helpers.unknownError', 'unknown error'],
+  ])('keeps the English helper copy for %s and has Arabic', (key, english) => {
+    expect(englishT(key)).toBe(english);
+    expect(lookup(ar, key)).toMatch(/[\u0600-\u06FF]/);
+  });
 });

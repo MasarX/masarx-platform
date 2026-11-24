@@ -53,4 +53,16 @@ describe('MobilePolicyModule in Arabic', () => {
     expect(englishT('platformMobilePolicy.mobilePolicyModule.youDoNotHave2')).toBe('You do not have permission to view registered device activity.');
     expect(lookup(ar, 'platformMobilePolicy.mobilePolicyModule.titleAccent')).toMatch(/[\u0600-\u06FF]/);
   });
+
+  it.each([
+    ['platformMobilePolicy.helpers.resolutionPending', 'Resolution pending'],
+    ['platformMobilePolicy.helpers.resolutionShort', 'Resolution {head}...{tail}'],
+    ['platformMobilePolicy.helpers.accessState.active', 'active'],
+    ['platformMobilePolicy.helpers.accessState.revoked', 'revoked'],
+    ['platformMobilePolicy.helpers.invalidJson', 'invalid JSON'],
+    ['platformMobilePolicy.helpers.deviceAlreadyRevoked', 'Device is already revoked'],
+  ])('keeps the English helper copy for %s and has Arabic', (key, english) => {
+    expect(englishT(key)).toBe(english);
+    expect(lookup(ar, key)).toMatch(/[\u0600-\u06FF]/);
+  });
 });

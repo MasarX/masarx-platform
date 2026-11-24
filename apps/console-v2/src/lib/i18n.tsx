@@ -25,6 +25,8 @@ interface I18nCtx {
   fmtTime: (iso: string | number | Date) => string;
   fmtCurrency: (amount: number, currency?: string) => string;
   fmtNumber: (n: number, opts?: Intl.NumberFormatOptions) => string;
+  /** Time from now in the app locale, such as "5m ago" or "in 2h", in the largest whole unit up to days. */
+  fmtRelative: (iso: string | number | Date | null | undefined, now?: number) => string;
 }
 
 /** The Arabic half of an area catalog must have exactly the English keys. */
@@ -168,6 +170,19 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     (n: number, opts?: Intl.NumberFormatOptions) => new Intl.NumberFormat(intlLocale, opts).format(n),
     [intlLocale]
   );
+  const fmtRelative = useCallback(
+    (iso: string | number | Date | null | undefined, now = Date.now()) => {
+      if (iso == null || iso === '') return '—';
+      const ms = new Date(iso).getTime();
+      if (Number.isNaN(ms)) return '—';
+      const s = Math.trunc((ms - now) / 1000);
+      const abs = Math.abs(s);
+      const [value, unit]: [number, Intl.RelativeTimeFormatUnit] =
+        abs < 60 ? [s, 'second'] : abs < 3600 ? [Math.trunc(s / 60), 'minute'] : abs < 86400 ? [Math.trunc(s / 3600), 'hour'] : [Math.trunc(s / 86400), 'day'];
+      return new Intl.RelativeTimeFormat(intlLocale, { style: 'narrow' }).format(value, unit);
+    },
+    [intlLocale]
+  );
 
   const value = useMemo<I18nCtx>(
     () => ({
@@ -181,8 +196,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       fmtTime,
       fmtCurrency,
       fmtNumber,
+      fmtRelative,
     }),
-    [locale, dir, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber]
+    [locale, dir, t, timeZone, fmtDateTime, fmtTime, fmtCurrency, fmtNumber, fmtRelative]
   );
 
   return (

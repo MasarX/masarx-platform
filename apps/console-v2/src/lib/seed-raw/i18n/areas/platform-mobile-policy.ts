@@ -80,6 +80,13 @@ export const en = {
       titleAccent: 'Mobile',
       titlePlain: 'policies',
     },
+    helpers: {
+      resolutionPending: 'Resolution pending',
+      resolutionShort: 'Resolution {head}...{tail}',
+      accessState: { active: 'active', revoked: 'revoked' },
+      invalidJson: 'invalid JSON',
+      deviceAlreadyRevoked: 'Device is already revoked',
+    },
   },
 };
 
@@ -161,6 +168,13 @@ export const ar: CatalogShape<typeof en> = {
       revokedByBackend: 'ألغاه الخادم',
       titleAccent: 'سياسات',
       titlePlain: 'الجوّال',
+    },
+    helpers: {
+      resolutionPending: 'تحديد الإعدادات قيد الانتظار',
+      resolutionShort: 'تحديد الإعدادات {head}...{tail}',
+      accessState: { active: 'نشط', revoked: 'ملغى' },
+      invalidJson: 'JSON غير صالح',
+      deviceAlreadyRevoked: 'الجهاز ملغى بالفعل',
     },
   },
 };

@@ -18,7 +18,7 @@ import type {
   OnboardingReadinessPluginItem,
   UiOnboardingReadiness,
 } from '@/types/domain';
-import { fill, useI18n } from '@/lib/i18n';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 type ReadinessScopeType = UiOnboardingReadiness['scope_type'];
 
@@ -43,8 +43,12 @@ function scopeTypeLabel(scopeType: string): string {
     .join(' ');
 }
 
-function fallbackScopeReferenceLabel(scopeType: string): string {
-  return `${scopeTypeLabel(scopeType)} scope`;
+function scopeName(scopeType: string, t: Translate): string {
+  return t(`scope.${scopeType}`, scopeTypeLabel(scopeType));
+}
+
+function fallbackScopeReferenceLabel(scopeType: string, t: Translate): string {
+  return fill(t('platformOnboardingReadiness.helpers.scopeOf'), { scope: scopeName(scopeType, t) });
 }
 
 function urlScopeOverride(): { type: ReadinessScopeType; id: string | null } | null {
@@ -60,7 +64,7 @@ function urlScopeOverride(): { type: ReadinessScopeType; id: string | null } | n
   };
 }
 
-function readinessLabel(value: unknown, fallback = 'Readiness item'): string {
+function readinessLabel(value: unknown, fallback: string): string {
   if (typeof value !== 'string' || !value.trim()) return fallback;
   return value
     .trim()
@@ -70,13 +74,13 @@ function readinessLabel(value: unknown, fallback = 'Readiness item'): string {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function readinessMessage(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) return 'No readiness message provided.';
+function readinessMessage(value: unknown, t: Translate): string {
+  if (typeof value !== 'string' || !value.trim()) return t('platformOnboardingReadiness.helpers.noReadinessMessage');
   return value
     .trim()
-    .replace(/\b(tenant|client|sender)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, (_match, scope) => `${scope} scope`)
-    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, 'selected scope')
-    .replace(/\b[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+\b/gi, (token) => readinessLabel(token));
+    .replace(/\b(tenant|client|sender)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, (_match, scope: string) => t(`platformOnboardingReadiness.helpers.inlineScope.${scope.toLowerCase()}`))
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, t('platformOnboardingReadiness.helpers.selectedScope'))
+    .replace(/\b[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+\b/gi, (token) => readinessLabel(token, token));
 }
 
 function queryErrorHint(error: unknown, fallback: string): string {
@@ -117,7 +121,7 @@ function asSkippedRows(value: unknown): Array<{ category: string; reason: string
       const category = typeof rec.category === 'string' ? rec.category.trim() : '';
       const reason = typeof rec.reason === 'string' ? rec.reason.trim() : '';
       if (!category) return null;
-      return { category, reason: reason || 'Skipped without reason' };
+      return { category, reason };
     })
     .filter((entry): entry is { category: string; reason: string } => entry !== null);
 }
@@ -216,7 +220,7 @@ function BootstrapEvidencePanel({
         {readiness ? (
           <div className="kvgrid__row">
             <span className="kvgrid__key">{t('platformOnboardingReadiness.bootstrapEvidencePanel.readinessAfterBootstrap')}</span>
-            <span className="kvgrid__val">{readinessLabel(readiness.overall_status, 'Unknown')}</span>
+            <span className="kvgrid__val">{readinessLabel(readiness.overall_status, t('platformOnboardingReadiness.helpers.unknown'))}</span>
           </div>
         ) : null}
         {evidence.reason ? (
@@ -256,7 +260,7 @@ function BootstrapEvidencePanel({
           <ul style={{ margin: 0, paddingLeft: 18, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>
             {evidence.globalDefaults.skipped.map((entry) => (
               <li key={entry.category}>
-                {entry.category}: {entry.reason}
+                {entry.category}: {entry.reason || t('platformOnboardingReadiness.helpers.skippedWithoutReason')}
               </li>
             ))}
           </ul>
@@ -284,7 +288,7 @@ function ReadinessCard({
     <div className="card" style={{ padding: 14, minHeight: 118 }}>
       <div className="section-eyebrow" style={{ padding: 0, marginBottom: 8 }}>{title}</div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <Chip label={readinessLabel(component.status, 'Unknown')} kind={chipKindForStatus(component.status)} />
+        <Chip label={readinessLabel(component.status, t('platformOnboardingReadiness.helpers.unknown'))} kind={chipKindForStatus(component.status)} />
         <span className="mono" style={{ fontSize: 18, fontWeight: 600 }}>{countLabel(component)}</span>
       </div>
       <div className="kvgrid" style={{ marginTop: 12 }}>
@@ -340,9 +344,9 @@ export function OnboardingReadinessModule() {
       .sort((a, b) => a.ladder_rank - b.ladder_rank)
       .map((row) => ({
         value: row.scope_type,
-        label: scopeTypeLabel(row.scope_type),
+        label: scopeName(row.scope_type, t),
       }));
-  }, [scopeRegistryQuery.data]);
+  }, [scopeRegistryQuery.data, t]);
   const tenantReferenceLabelById = useMemo(() => {
     const map = new Map<string, string>();
     for (const row of tenantReferenceQuery.data?.rows ?? []) {
@@ -367,13 +371,13 @@ export function OnboardingReadinessModule() {
       const cleanLabel = typeof label === 'string' ? label.trim() : '';
       rows.push({
         value: cleanValue,
-        label: cleanLabel || fallbackScopeReferenceLabel(scopeType),
+        label: cleanLabel || fallbackScopeReferenceLabel(scopeType, t),
       });
     };
 
     add(scopedId, scopedLabel);
     if (scopeType === 'tenant') {
-      add(identity.user.organization_id, scopedLabel || 'Current tenant');
+      add(identity.user.organization_id, scopedLabel || t('platformOnboardingReadiness.helpers.currentTenant'));
     } else {
       add(identity.user.access_scope_type === scopeType ? identity.user.access_scope_id : null, scopedLabel);
     }
@@ -381,13 +385,13 @@ export function OnboardingReadinessModule() {
       add(
         scopeId,
         scopeType === 'tenant'
-          ? tenantReferenceLabelById.get(scopeId.trim()) ?? fallbackScopeReferenceLabel(scopeType)
-          : fallbackScopeReferenceLabel(scopeType),
+          ? tenantReferenceLabelById.get(scopeId.trim()) ?? fallbackScopeReferenceLabel(scopeType, t)
+          : fallbackScopeReferenceLabel(scopeType, t),
       );
     }
 
     return rows;
-  }, [identity.scope, identity.user.access_scope_id, identity.user.access_scope_type, identity.user.organization_id, scopeId, scopeType, tenantReferenceLabelById]);
+  }, [identity.scope, identity.user.access_scope_id, identity.user.access_scope_type, identity.user.organization_id, scopeId, scopeType, t, tenantReferenceLabelById]);
   const effectiveScopeId = scopeType === 'global' ? null : scopeId.trim();
   const hasScope = scopeType === 'global' || Boolean(effectiveScopeId);
   const scopeRegistryReady = scopeRegistryQuery.isSuccess;
@@ -407,13 +411,13 @@ export function OnboardingReadinessModule() {
     return map;
   }, [scopeReferenceOptions, tenantReferenceLabelById]);
   const resolvedScopeLabel = useMemo(() => {
-    if (scopeType === 'global') return 'Global readiness';
+    if (scopeType === 'global') return t('platformOnboardingReadiness.onboardingReadinessModule.globalReadiness');
     const id = effectiveScopeId ?? '';
-    return scopeReferenceLabelById.get(id) || fallbackScopeReferenceLabel(scopeType);
-  }, [effectiveScopeId, scopeReferenceLabelById, scopeType]);
+    return scopeReferenceLabelById.get(id) || fallbackScopeReferenceLabel(scopeType, t);
+  }, [effectiveScopeId, scopeReferenceLabelById, scopeType, t]);
   const bootstrapMutation = useMutation({
     mutationFn: async () => {
-      if (!effectiveScopeId) throw new Error('Select a tenant, client, or sender before running bootstrap');
+      if (!effectiveScopeId) throw new Error(t('platformOnboardingReadiness.helpers.selectScopeBeforeBootstrap'));
       return api.ui_execute_onboarding_bootstrap_v1({
         scope_type: scopeType,
         scope_id: effectiveScopeId,
@@ -429,9 +433,9 @@ export function OnboardingReadinessModule() {
       const tone = evidence.ok ? (evidence.enabled ? 'good' : 'info') : 'danger';
       const message = evidence.ok
         ? evidence.enabled
-          ? `Onboarding bootstrap completed - ${scopeLabel}`
-          : `Onboarding bootstrap skipped by policy - ${scopeLabel}`
-        : `Onboarding bootstrap failed - ${scopeLabel}`;
+          ? fill(t('platformOnboardingReadiness.helpers.bootstrapCompleted'), { scopeLabel })
+          : fill(t('platformOnboardingReadiness.helpers.bootstrapSkipped'), { scopeLabel })
+        : fill(t('platformOnboardingReadiness.helpers.bootstrapFailed'), { scopeLabel });
       pushToast(message, tone);
       void readiness.refetch();
       modal.open({
@@ -451,17 +455,17 @@ export function OnboardingReadinessModule() {
   const canRunBootstrap = (canWriteSettings || canWriteSystem) && scopeType !== 'global' && Boolean(effectiveScopeId);
 
   const findingColumns = useMemo<Array<DataTableColumn<OnboardingReadinessFinding>>>(() => [
-    { key: 'severity', label: t('platformOnboardingReadiness.onboardingReadinessModule.severity'), type: 'text', render: (raw) => readinessLabel(raw, 'Severity') },
-    { key: 'component', label: t('platformOnboardingReadiness.onboardingReadinessModule.area'), type: 'text', render: (raw) => readinessLabel(raw) },
-    { key: 'code', label: t('platformOnboardingReadiness.onboardingReadinessModule.finding'), type: 'text', render: (raw) => readinessLabel(raw) },
-    { key: 'message', label: t('platformOnboardingReadiness.onboardingReadinessModule.message'), type: 'text', render: (raw) => readinessMessage(raw) },
-    { key: 'action', label: t('platformOnboardingReadiness.onboardingReadinessModule.action'), type: 'text', render: (raw) => readinessMessage(raw) },
+    { key: 'severity', label: t('platformOnboardingReadiness.onboardingReadinessModule.severity'), type: 'text', render: (raw) => readinessLabel(raw, t('platformOnboardingReadiness.onboardingReadinessModule.severity')) },
+    { key: 'component', label: t('platformOnboardingReadiness.onboardingReadinessModule.area'), type: 'text', render: (raw) => readinessLabel(raw, t('platformOnboardingReadiness.helpers.readinessItem')) },
+    { key: 'code', label: t('platformOnboardingReadiness.onboardingReadinessModule.finding'), type: 'text', render: (raw) => readinessLabel(raw, t('platformOnboardingReadiness.helpers.readinessItem')) },
+    { key: 'message', label: t('platformOnboardingReadiness.onboardingReadinessModule.message'), type: 'text', render: (raw) => readinessMessage(raw, t) },
+    { key: 'action', label: t('platformOnboardingReadiness.onboardingReadinessModule.action'), type: 'text', render: (raw) => readinessMessage(raw, t) },
   ], [t]);
 
   const pluginColumns = useMemo<Array<DataTableColumn<OnboardingReadinessPluginItem>>>(() => [
-    { key: 'plugin_key', label: t('platformOnboardingReadiness.onboardingReadinessModule.integration'), type: 'text', render: (raw) => readinessLabel(raw) },
-    { key: 'status', label: t('platformOnboardingReadiness.onboardingReadinessModule.status'), type: 'text', render: (raw) => readinessLabel(raw, 'Unknown') },
-    { key: 'credentials_status', label: t('platformOnboardingReadiness.onboardingReadinessModule.credentials'), type: 'text', render: (raw) => readinessLabel(raw, 'Not required') },
+    { key: 'plugin_key', label: t('platformOnboardingReadiness.onboardingReadinessModule.integration'), type: 'text', render: (raw) => readinessLabel(raw, t('platformOnboardingReadiness.helpers.readinessItem')) },
+    { key: 'status', label: t('platformOnboardingReadiness.onboardingReadinessModule.status'), type: 'text', render: (raw) => readinessLabel(raw, t('platformOnboardingReadiness.helpers.unknown')) },
+    { key: 'credentials_status', label: t('platformOnboardingReadiness.onboardingReadinessModule.credentials'), type: 'text', render: (raw) => readinessLabel(raw, t('platformOnboardingReadiness.helpers.notRequired')) },
     { key: 'enabled', label: t('platformOnboardingReadiness.onboardingReadinessModule.enabled'), type: 'boolean' },
     { key: 'blocking', label: t('platformOnboardingReadiness.onboardingReadinessModule.blocking'), type: 'boolean' },
   ], [t]);
@@ -549,7 +553,7 @@ export function OnboardingReadinessModule() {
         </label>
         {data ? (
           <Chip
-            label={readinessLabel(data.overall_status, 'Unknown readiness')}
+            label={readinessLabel(data.overall_status, t('platformOnboardingReadiness.helpers.unknownReadiness'))}
             kind={chipKindForStatus(data.overall_status)}
             data-testid="onboarding-readiness-status"
           />
@@ -562,7 +566,7 @@ export function OnboardingReadinessModule() {
         <StateView
           kind="error"
           title={t('platformOnboardingReadiness.onboardingReadinessModule.readinessScopeRegistryFailed')}
-          hint={queryErrorHint(scopeRegistryQuery.error, 'Scope type registry could not be loaded')}
+          hint={queryErrorHint(scopeRegistryQuery.error, t('platformOnboardingReadiness.helpers.scopeRegistryLoadFailed'))}
         />
       ) : scopeOptions.length === 0 ? (
         <StateView
@@ -576,7 +580,7 @@ export function OnboardingReadinessModule() {
         <StateView
           kind="error"
           title={t('platformOnboardingReadiness.onboardingReadinessModule.tenantScopeReferenceFailed')}
-          hint={queryErrorHint(tenantReferenceQuery.error, 'Tenant scope reference could not be loaded')}
+          hint={queryErrorHint(tenantReferenceQuery.error, t('platformOnboardingReadiness.helpers.tenantReferenceLoadFailed'))}
         />
       ) : !hasScope ? (
         <StateView

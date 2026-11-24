@@ -132,6 +132,9 @@ export const en = {
       manageTitleAccent: 'Alerts',
       manageTitlePlain: 'management',
     },
+    helpers: {
+      acknowledgeFailed: 'Unable to acknowledge ops alert',
+    },
   },
 };
 
@@ -265,6 +268,9 @@ export const ar: CatalogShape<typeof en> = {
       titleAccent: 'التنبيهات',
       manageTitleAccent: 'إدارة',
       manageTitlePlain: 'التنبيهات',
+    },
+    helpers: {
+      acknowledgeFailed: 'تعذّر الإقرار بتنبيه العمليات',
     },
   },
 };

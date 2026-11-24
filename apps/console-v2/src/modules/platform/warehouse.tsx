@@ -195,8 +195,9 @@ function taskActionNextStatus(kind: string): string {
   return row?.next_status ?? row?.metadata?.next_status ?? '';
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err || 'unknown error');
+function errorMessage(err: unknown, t: Translate): string {
+  if (err instanceof Error) return err.message;
+  return err ? String(err) : t('platformWarehouse.helpers.unknownError');
 }
 
 function branchLabel(row: BranchOptionRow): string {
@@ -270,7 +271,7 @@ function CheckpointScanForm({ label, onCancel, onSubmit }: CheckpointScanFormPro
         notes: notes.trim() || null,
       });
     } catch (err) {
-      const message = errorMessage(err);
+      const message = errorMessage(err, t);
       setFormError(message);
       pushToast(fill(t('platformWarehouse.checkpointScanForm.checkpointScanFailed'), { message: String(message) }), 'danger');
     } finally {
@@ -382,7 +383,7 @@ function ScanCorrectionForm({
     try {
       await onSubmit({ corrected_barcode: correctedBarcode, correction_reason: correctionReason });
     } catch (err) {
-      const message = errorMessage(err);
+      const message = errorMessage(err, t);
       setFormError(message);
       pushToast(fill(t('platformWarehouse.scanCorrectionForm.scanCorrectionFailed'), { message: String(message) }), 'danger');
     } finally {
@@ -857,7 +858,7 @@ export function WarehouseModule() {
       }));
       pushToast(`${warehouseTaskLabel(task)} completed`, 'good');
     } catch (err) {
-      pushToast(fill(t('platformWarehouse.warehouseModule.taskCompletionFailed'), { value: String(errorMessage(err)) }), 'danger');
+      pushToast(fill(t('platformWarehouse.warehouseModule.taskCompletionFailed'), { value: String(errorMessage(err, t)) }), 'danger');
     }
   };
 
@@ -876,7 +877,7 @@ export function WarehouseModule() {
       }));
       pushToast(fill(t('platformWarehouse.warehouseModule.dispatchStartedFor'), { value: String(entry.transfer_code ?? entry.id) }), 'good');
     } catch (err) {
-      pushToast(fill(t('platformWarehouse.warehouseModule.dispatchWorkflowFailed'), { value: String(errorMessage(err)) }), 'danger');
+      pushToast(fill(t('platformWarehouse.warehouseModule.dispatchWorkflowFailed'), { value: String(errorMessage(err, t)) }), 'danger');
     }
   };
 
@@ -1097,7 +1098,7 @@ export function WarehouseModule() {
                   pushToast(fill(t('platformWarehouse.manifestCreateForm.transferManifestCreated'), { transfer_code: String(result.transfer_code) }), 'good');
                   modal.close();
                 } catch (err) {
-                  const message = errorMessage(err);
+                  const message = errorMessage(err, t);
                   setFormError(message);
                   pushToast(fill(t('platformWarehouse.manifestCreateForm.createManifestFailed2'), { message: String(message) }), 'danger');
                 }
@@ -1379,7 +1380,7 @@ export function WarehouseModule() {
                 pushToast(t('platformWarehouse.warehouseModule.transferReconciliationRecorded'), 'good');
                 modal.close();
               } catch (err) {
-                pushToast(fill(t('platformWarehouse.warehouseModule.reconcileWorkflowFailed'), { value: String(errorMessage(err)) }), 'danger');
+                pushToast(fill(t('platformWarehouse.warehouseModule.reconcileWorkflowFailed'), { value: String(errorMessage(err, t)) }), 'danger');
               }
             }}
           />
@@ -1468,7 +1469,7 @@ export function WarehouseModule() {
               const okCount = results.length - failures.length;
               if (failures.length > 0) {
                 pushToast(
-                  fill(t('platformWarehouse.warehouseModule.reconciledTransfersFailed'), { okCount: String(okCount), length: String(rows.length), length2: String(failures.length), value: String(errorMessage(failures[0]?.reason)) }),
+                  fill(t('platformWarehouse.warehouseModule.reconciledTransfersFailed'), { okCount: String(okCount), length: String(rows.length), length2: String(failures.length), value: String(errorMessage(failures[0]?.reason, t)) }),
                   okCount > 0 ? 'warn' : 'danger',
                 );
                 return;
@@ -1575,7 +1576,7 @@ export function WarehouseModule() {
       }));
       pushToast(t('platformWarehouse.warehouseModule.varianceApprovalRecorded'), 'good');
     } catch (err) {
-      pushToast(fill(t('platformWarehouse.warehouseModule.varianceApprovalFailed'), { value: String(errorMessage(err)) }), 'danger');
+      pushToast(fill(t('platformWarehouse.warehouseModule.varianceApprovalFailed'), { value: String(errorMessage(err, t)) }), 'danger');
     }
   };
 

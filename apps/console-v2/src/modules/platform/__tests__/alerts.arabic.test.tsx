@@ -19,7 +19,7 @@ vi.mock('@/lib/seed-loader', async () => {
 import { renderWithProviders } from '@/test/render';
 import { findUntranslated } from '@/test/helpers/untranslated';
 import { AlertsModule } from '@/modules/platform/alerts';
-import { englishT } from '@/lib/i18n';
+import { englishT, resolveIntlLocale, useI18n } from '@/lib/i18n';
 import { ar } from '@/lib/seed-raw/i18n/areas/platform-alerts';
 import * as dataSource from '@/lib/data-source';
 
@@ -55,5 +55,25 @@ describe('AlertsModule in Arabic', () => {
     expect(englishT('platformAlerts.alertsModule.titleAccent')).toBe('Alerts');
     expect(englishT('platformAlerts.alertsModule.operationsAlerts')).toBe('Operations alerts');
     expect(lookup(ar, 'platformAlerts.alertsModule.titleAccent')).toMatch(/[\u0600-\u06FF]/);
+  });
+
+  it.each([
+    ['platformAlerts.helpers.acknowledgeFailed', 'Unable to acknowledge ops alert'],
+    ['platformAlerts.alertsModule.newAlertRule', 'New alert rule'],
+  ])('keeps the English helper copy for %s and has Arabic', (key, english) => {
+    expect(englishT(key)).toBe(english);
+    expect(lookup(ar, key)).toMatch(/[\u0600-\u06FF]/);
+  });
+
+  it('formats relative times in Arabic', () => {
+    const now = Date.parse('2026-01-01T12:00:00Z');
+    function Probe() {
+      const { fmtRelative } = useI18n();
+      return <span data-testid="relative">{`${fmtRelative(now - 5 * 60_000, now)}|${fmtRelative(null, now)}`}</span>;
+    }
+    renderWithProviders(<Probe />, { locale: 'ar' });
+    const expected = new Intl.RelativeTimeFormat(resolveIntlLocale('ar'), { style: 'narrow' }).format(-5, 'minute');
+    expect(expected).toMatch(/[\u0600-\u06FF]/);
+    expect(screen.getByTestId('relative').textContent).toBe(`${expected}|—`);
   });
 });

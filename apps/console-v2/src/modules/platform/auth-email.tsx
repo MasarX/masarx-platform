@@ -34,14 +34,15 @@ function copy(t: Translate, value: string, label: string) {
   }
 }
 
-function policySummary(policy: AuthEmailPolicy): string {
+function policySummary(policy: AuthEmailPolicy, t: Translate): string {
+  const s = 'platformAuthEmail.summary';
   return [
-    `Source file: ${policy.source_file}`,
-    `Environment: ${policy.env}`,
-    `Audit status: ${policy.audit_status}`,
-    `Last reviewed: ${policy.last_audit_at}`,
-    `Callback URLs: ${policy.callback_urls.length}`,
-    `Redirect URLs: ${policy.redirect_urls.length}`,
+    fill(t(`${s}.sourceFile`), { value: policy.source_file }),
+    fill(t(`${s}.environment`), { value: policy.env }),
+    fill(t(`${s}.auditStatus`), { value: policy.audit_status }),
+    fill(t('platformAuthEmail.authEmailModule.lastReviewed'), { last_audit_at: policy.last_audit_at }),
+    fill(t(`${s}.callbackUrls`), { count: String(policy.callback_urls.length) }),
+    fill(t(`${s}.redirectUrls`), { count: String(policy.redirect_urls.length) }),
   ].join('\n');
 }
 
@@ -231,7 +232,7 @@ export function AuthEmailModule() {
                 iconName="copy"
                 kind="ghost"
                 size="sm"
-                onClick={() => copy(t, policySummary(policy), t('platformAuthEmail.copy.policySummary'))}
+                onClick={() => copy(t, policySummary(policy, t), t('platformAuthEmail.copy.policySummary'))}
               />
             </div>
             <div

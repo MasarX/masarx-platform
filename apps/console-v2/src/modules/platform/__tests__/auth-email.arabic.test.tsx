@@ -35,4 +35,16 @@ describe('AuthEmailModule in Arabic', () => {
     expect(englishT('platformAuthEmail.authEmailModule.hostedCallbackUrlsAre')).toBe('Hosted callback URLs are governed by platform release controls. This page is read-only; changes are reviewed outside the console before promotion.');
     expect(lookup(ar, 'platformAuthEmail.authEmailModule.titleAccent')).toMatch(/[\u0600-\u06FF]/);
   });
+
+  it.each([
+    ['platformAuthEmail.summary.sourceFile', 'Source file: {value}'],
+    ['platformAuthEmail.summary.environment', 'Environment: {value}'],
+    ['platformAuthEmail.summary.auditStatus', 'Audit status: {value}'],
+    ['platformAuthEmail.authEmailModule.lastReviewed', 'Last reviewed: {last_audit_at}'],
+    ['platformAuthEmail.summary.callbackUrls', 'Callback URLs: {count}'],
+    ['platformAuthEmail.summary.redirectUrls', 'Redirect URLs: {count}'],
+  ])('keeps the English helper copy for %s and has Arabic', (key, english) => {
+    expect(englishT(key)).toBe(english);
+    expect(lookup(ar, key)).toMatch(/[\u0600-\u06FF]/);
+  });
 });
