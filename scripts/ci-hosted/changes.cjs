@@ -7,6 +7,7 @@ const cdPaths = new Set([
   '.github/workflows/deploy.yml',
   '.github/workflows/release-on-tag.yml',
   'tests/unit/ops/dev-db-dry-run-workflow.test.js',
+  'tests/unit/ops/release-tag-types.test.js',
   'tests/unit/ops/release-workflow.test.js',
 ]);
 const sharedInputs = [
