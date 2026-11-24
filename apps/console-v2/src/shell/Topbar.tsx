@@ -113,7 +113,10 @@ export function Topbar({
         id="cmd-trigger"
         className="cmd-trigger"
         type="button"
-        aria-label={t('shell.topbar.openPalette')}
+        // WCAG 2.5.3: the name holds all visible text (placeholder and ⌘K), then the action.
+        aria-label={`${t('app.search')} ⌘K, ${t('app.openPalette')}`}
+        aria-haspopup="dialog"
+        aria-keyshortcuts="Meta+K Control+K"
         onClick={onOpenPalette}
       >
         <span className="cmd-trigger__icon" aria-hidden="true">
@@ -127,7 +130,9 @@ export function Topbar({
         className="topbar__scope"
         tabIndex={0}
         role="button"
-        aria-label={t('shell.topbar.activeScope')}
+        // WCAG 2.5.3: the name comes from the visible scope; the hint is a description.
+        aria-haspopup="dialog"
+        title={t('app.switchScope')}
         onClick={onOpenScopePalette}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -136,9 +141,9 @@ export function Topbar({
           }
         }}
       >
-        <span className="scope-pill__rank">{t('shell.topbar.tenantRank')}</span>
+        <span className="scope-pill__rank" aria-hidden="true">{t('shell.topbar.tenantRank')}</span>
         <span className="scope-pill__name">{tenantLabel}</span>
-        <span className="scope-sep">·</span>
+        <span className="scope-sep" aria-hidden="true">·</span>
         <span className="scope-pill__sub mono">{subLabel}</span>
       </div>
 
@@ -158,7 +163,8 @@ export function Topbar({
         <button
           className="icon-btn"
           type="button"
-          aria-label={t('shell.topbar.toggleLanguage')}
+          // WCAG 2.5.3: the name starts with the visible AR/EN label.
+          aria-label={t('app.switchLanguage')}
           onClick={toggleLocale}
         >
           <span lang={locale === 'en' ? 'ar' : 'en'}>{t('shell.topbar.otherLocale')}</span>
@@ -183,7 +189,8 @@ export function Topbar({
           <Icon name="bell" size={14} />
           {hasUnreadNotifs ? <span className="bell-dot" aria-hidden="true" /> : null}
         </button>
-        <button className="user-btn" type="button" aria-label={t('shell.topbar.userMenu')} onClick={onOpenUserMenu}>
+        {/* WCAG 2.5.3: the name starts with the visible initials. */}
+        <button className="user-btn" type="button" aria-label={`${initials || 'U'}, ${t('app.userMenu')}`} onClick={onOpenUserMenu}>
           <span className="avatar" aria-hidden="true">{initials || 'U'}</span>
           <span className="caret" aria-hidden="true">▾</span>
         </button>

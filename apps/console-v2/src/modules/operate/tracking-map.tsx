@@ -743,7 +743,12 @@ export function TrackingMapModule() {
         {/* Sidebar — clickable shipment cards open the decision-trail drawer */}
         <div style={{ borderLeft: '1px solid var(--line)', overflow: 'auto', background: 'var(--paper)' }}>
           <div className="section-eyebrow">{t('trackingMap.shipmentsInView')}</div>
-          {shipments.slice(0, 18).map((s) => (
+          {shipments.slice(0, 18).map((s) => {
+            // W38 closure - prefer canonical v_shipment_directory join,
+            // fall back to base row destination_city for legacy seed
+            // rows that have not yet emitted the directory projection.
+            const detail = `${shipmentDirectoryById.get(s.id)?.destination_city ?? s.destination_city ?? '-'} - ${operatorLabel(s.service_type, t('trackingMap.serviceNotSet'), t)}`;
+            return (
             <button
               key={s.id}
               type="button"
@@ -758,17 +763,18 @@ export function TrackingMapModule() {
                 border: '1px solid var(--line)',
               }}
               onClick={() => openShipmentDrawer(s)}
-              aria-label={fill(t('trackingMap.openShipment'), { tracking: s.tracking_number })}
+              // WCAG 2.5.3: the name carries all visible card text after the action.
+              aria-label={fill(t('trackingMap.openShipment'), { tracking: s.tracking_number, detail })}
             >
               <div className="mono" style={{ fontWeight: 600 }}><bdi>{s.tracking_number}</bdi></div>
+              {/* The space keeps the two lines separate words in the visible text axe compares. */}
+              {' '}
               <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-3)' }}>
-                {/* W38 closure - prefer canonical v_shipment_directory join,
-                    fall back to base row destination_city for legacy seed
-                    rows that have not yet emitted the directory projection. */}
-                <bdi>{`${shipmentDirectoryById.get(s.id)?.destination_city ?? s.destination_city ?? '-'} - ${operatorLabel(s.service_type, t('trackingMap.serviceNotSet'), t)}`}</bdi>
+                <bdi>{detail}</bdi>
               </div>
             </button>
-          ))}
+            );
+          })}
         </div>
       </div>
 
