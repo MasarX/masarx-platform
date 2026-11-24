@@ -10,15 +10,18 @@ function renderCountCell(locale: string): string {
   try {
     let text = "";
     jest.isolateModules(() => {
-      // Load React Testing Library and the component in one registry so they share React.
-      const { render } = require("@testing-library/react");
+      // One fresh registry, so the formatter reads this locale at module load; server
+      // rendering registers no test hooks, unlike React Testing Library.
+      const React = require("react");
+      const { renderToStaticMarkup } = require("react-dom/server");
       const { IntegrationHealth } = require("../../packages/ui/src/integrations/integration-health");
-      const { container } = render(
-        <IntegrationHealth
-          integrations={[{ id: "int-1", name: "Synthetic Carrier", type: "api", status: "healthy", totalCalls: COUNT }]}
-        />,
+      const host = document.createElement("div");
+      host.innerHTML = renderToStaticMarkup(
+        React.createElement(IntegrationHealth, {
+          integrations: [{ id: "int-1", name: "Synthetic Carrier", type: "api", status: "healthy", totalCalls: COUNT }],
+        }),
       );
-      text = container.querySelectorAll("tbody td")[4]?.textContent ?? "";
+      text = host.querySelectorAll("tbody td")[4]?.textContent ?? "";
     });
     return text;
   } finally {
