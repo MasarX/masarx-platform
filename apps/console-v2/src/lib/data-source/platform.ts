@@ -1444,3 +1444,200 @@ export async function requireLiveRbacTemplateProvisionReadback(
     }
   }
 }
+
+function resolveOpsAlertReadbackId(
+  result: Record<string, unknown>,
+  args: Record<string, unknown>,
+  rpcName: string,
+): string {
+  const alertId =
+    asNonEmptyString(result.ops_alert_id) ??
+    asNonEmptyString(result.id) ??
+    asNonEmptyString(args.ops_alert_id);
+  if (!alertId) {
+    throw new Error(`${rpcName} did not expose ops_alert_id for backend readback`);
+  }
+  return alertId;
+}
+
+function requireOpsAlertReadbackTimestamp(
+  row: Record<string, unknown>,
+  field: 'acknowledged_at' | 'resolved_at',
+  alertId: string,
+  rpcName: string,
+): void {
+  if (!asNonEmptyString(row[field])) {
+    throw new Error(`${rpcName} backend readback missing ${field} for ops_alerts:${alertId}`);
+  }
+}
+
+export async function requireLiveOpsAlertReadback(
+  rpcName: string,
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+  field: 'acknowledged_at' | 'resolved_at',
+): Promise<void> {
+  if (!liveRpcTarget()) return;
+  const alertId = resolveOpsAlertReadbackId(result, args, rpcName);
+  const row = await requireLiveResourceReadback('ops_alerts', alertId, rpcName);
+  requireOpsAlertReadbackTimestamp(row, field, alertId, rpcName);
+  if (field === 'resolved_at') {
+    const expectedNotes = asNonEmptyString(args.resolution_notes);
+    if (expectedNotes && asNonEmptyString(row.resolution_notes) !== expectedNotes) {
+      throw new Error(`${rpcName} backend readback resolution_notes mismatch for ops_alerts:${alertId}`);
+    }
+  }
+}
+
+function readCapabilityGrantReadback(
+  result: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const readback = result.request_readback;
+  return readback && typeof readback === 'object' && !Array.isArray(readback)
+    ? readback as Record<string, unknown>
+    : null;
+}
+
+function requireCapabilityGrantReadbackMatch(
+  readback: Record<string, unknown>,
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+): void {
+  const requestId =
+    asNonEmptyString(readback.id)
+      ?? asNonEmptyString(readback.capability_grant_request_id);
+  if (!requestId) {
+    throw new Error('request_capability_grant_v1 backend readback missing capability_grant_requests.id');
+  }
+  const returnedRequestId = asNonEmptyString(result.capability_grant_request_id);
+  if (returnedRequestId && returnedRequestId !== requestId) {
+    throw new Error('request_capability_grant_v1 backend readback request id mismatch');
+  }
+
+  const expectedCapability = asNonEmptyString(args.capability_key);
+  if (expectedCapability && asNonEmptyString(readback.capability_key) !== expectedCapability) {
+    throw new Error('request_capability_grant_v1 backend readback mismatch for capability_key');
+  }
+
+  const expectedScopeType = asNonEmptyString(args.scope_type) ?? 'tenant';
+  if (asNonEmptyString(readback.scope_type) !== expectedScopeType) {
+    throw new Error('request_capability_grant_v1 backend readback mismatch for scope_type');
+  }
+
+  const expectedScopeId = asNonEmptyString(args.scope_id);
+  if (expectedScopeId && asNonEmptyString(readback.scope_id) !== expectedScopeId) {
+    throw new Error('request_capability_grant_v1 backend readback mismatch for scope_id');
+  }
+
+  const expectedReason = asNonEmptyString(args.reason);
+  if (expectedReason && asNonEmptyString(readback.reason) !== expectedReason) {
+    throw new Error('request_capability_grant_v1 backend readback mismatch for reason');
+  }
+
+  const expectedDuration = args.duration_hours;
+  if (expectedDuration !== undefined && expectedDuration !== null && String(expectedDuration).trim() !== '') {
+    const readbackDuration = readback.duration_hours;
+    if (Number(readbackDuration) !== Number(expectedDuration)) {
+      throw new Error('request_capability_grant_v1 backend readback mismatch for duration_hours');
+    }
+  }
+
+  if (asNonEmptyString(readback.status) !== 'pending') {
+    throw new Error('request_capability_grant_v1 backend readback status is not pending');
+  }
+}
+
+export function requireLiveCapabilityGrantReadback(
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+): void {
+  if (!liveRpcTarget()) return;
+  const readback = readCapabilityGrantReadback(result);
+  if (!readback) {
+    throw new Error('request_capability_grant_v1 did not return capability_grant_requests readback');
+  }
+  requireCapabilityGrantReadbackMatch(readback, args, result);
+}
+
+function requireCapabilityGrantReviewReadbackMatch(
+  readback: Record<string, unknown>,
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+): { requestId: string; decision: string } {
+  const rpcName = 'ui_review_capability_grant_request_v1';
+  const requestId =
+    asNonEmptyString(readback.id)
+      ?? asNonEmptyString(readback.capability_grant_request_id)
+      ?? asNonEmptyString(result.capability_grant_request_id);
+  if (!requestId) {
+    throw new Error(`${rpcName} backend readback missing capability_grant_requests.id`);
+  }
+  const expectedRequestId =
+    asNonEmptyString(args.request_id)
+      ?? asNonEmptyString(args.capability_grant_request_id)
+      ?? asNonEmptyString(result.capability_grant_request_id);
+  if (expectedRequestId && expectedRequestId !== requestId) {
+    throw new Error(`${rpcName} backend readback request id mismatch`);
+  }
+
+  const rawDecision = asNonEmptyString(args.decision) ?? asNonEmptyString(args.status);
+  const normalizedDecision =
+    rawDecision && ['approve', 'approved'].includes(rawDecision.toLowerCase())
+      ? 'approved'
+      : rawDecision && ['deny', 'denied', 'reject', 'rejected'].includes(rawDecision.toLowerCase())
+        ? 'denied'
+        : asNonEmptyString(result.status);
+  if (!normalizedDecision || !['approved', 'denied'].includes(normalizedDecision)) {
+    throw new Error(`${rpcName} backend readback invalid expected decision`);
+  }
+
+  if (asNonEmptyString(readback.status) !== normalizedDecision) {
+    throw new Error(`${rpcName} backend readback status mismatch`);
+  }
+
+  const expectedNotes = asNonEmptyString(args.decision_notes) ?? asNonEmptyString(args.notes);
+  if (expectedNotes && asNonEmptyString(readback.decision_notes) !== expectedNotes) {
+    throw new Error(`${rpcName} backend readback decision_notes mismatch`);
+  }
+
+  const readbackCorrelation = asNonEmptyString(readback.correlation_id);
+  const resultCorrelation = asNonEmptyString(result.correlation_id);
+  if (resultCorrelation && readbackCorrelation !== resultCorrelation) {
+    throw new Error(`${rpcName} backend readback correlation_id mismatch`);
+  }
+
+  if (normalizedDecision === 'approved') {
+    const roleId = asNonEmptyString(result.rbac_role_id) ?? asNonEmptyString(readback.approved_role_id);
+    const assignmentId =
+      asNonEmptyString(result.rbac_user_role_assignment_id)
+      ?? asNonEmptyString(readback.approved_assignment_id);
+    if (!roleId) {
+      throw new Error(`${rpcName} approved readback missing rbac_role_id`);
+    }
+    if (!assignmentId) {
+      throw new Error(`${rpcName} approved readback missing rbac_user_role_assignment_id`);
+    }
+  }
+
+  return { requestId, decision: normalizedDecision };
+}
+
+export async function requireLiveCapabilityGrantReviewReadback(
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+): Promise<void> {
+  if (!liveRpcTarget()) return;
+  const readback = readCapabilityGrantReadback(result);
+  if (!readback) {
+    throw new Error('ui_review_capability_grant_request_v1 did not return capability_grant_requests readback');
+  }
+  const { requestId, decision } = requireCapabilityGrantReviewReadbackMatch(readback, args, result);
+  const row = await requireLiveResourceReadback(
+    'capability_grant_requests',
+    requestId,
+    'ui_review_capability_grant_request_v1',
+  );
+  if (asNonEmptyString(row.status) !== decision) {
+    throw new Error('ui_review_capability_grant_request_v1 backend resource readback status mismatch');
+  }
+}

@@ -11,11 +11,12 @@ function consoleRuntimeChunk(id: string): string | undefined {
   if (id.includes('/node_modules/@tanstack/')) return 'tanstack';
   if (id.includes('/node_modules/react/')) return 'react';
 
-  // The SDK publishes independent clients. Keep each client's runtime together
-  // and keep the auth client separate from its protocol and storage helpers.
   const supabasePackage = id.match(/\/node_modules\/@supabase\/([^/]+)\//)?.[1];
   if (supabasePackage) {
-    if (id.endsWith('/auth-js/src/GoTrueClient.ts')) return 'supabase-auth-client';
+    // Keep the Auth entry and its eager class alias with the class they load.
+    if (supabasePackage === 'auth-js' && /\/src\/(?:index|AuthClient|GoTrueClient)\.ts$/.test(id)) {
+      return 'supabase-auth-client';
+    }
     return `supabase-${supabasePackage}`;
   }
 
