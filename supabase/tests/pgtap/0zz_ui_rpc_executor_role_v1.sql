@@ -315,13 +315,27 @@ SELECT is((SELECT count(*) FROM scoped s WHERE NOT EXISTS(SELECT 1 FROM canonica
   'no current scoped-only resource is lost by canonical registry routing');
 
 -- Independent applicability contracts catch later DROP/CREATE and ALTER POLICY drift.
+SELECT ok(EXISTS (
+  SELECT 1 FROM pg_policy browser
+  JOIN pg_policy executor ON executor.polrelid=browser.polrelid
+  WHERE browser.polrelid='public.feedback_events'::regclass
+    AND browser.polname='feedback_events_select' AND browser.polcmd='r'
+    AND browser.polroles=ARRAY['authenticated'::regrole::oid]
+    AND executor.polname='feedback_events_executor_select' AND executor.polcmd='r'
+    AND executor.polroles=ARRAY['ui_rpc_executor'::regrole::oid]
+    AND executor.polwithcheck IS NULL AND executor.polpermissive=browser.polpermissive
+    AND pg_get_expr(executor.polqual,executor.polrelid)=pg_get_expr(browser.polqual,browser.polrelid)
+    AND NOT has_table_privilege('ui_rpc_executor',browser.polrelid,'INSERT,UPDATE,DELETE')
+), 'driver feedback adds only an executor read policy with the existing authenticated scope');
 WITH planned AS (SELECT DISTINCT object_id FROM pg_temp.executor_initial_privilege_plan WHERE object_kind='relation')
 SELECT is((SELECT count(*) FROM pg_policy p JOIN planned r ON r.object_id=p.polrelid
-  WHERE 'authenticated'::regrole::oid=ANY(p.polroles) AND NOT 'ui_rpc_executor'::regrole::oid=ANY(p.polroles)),
+  WHERE 'authenticated'::regrole::oid=ANY(p.polroles) AND NOT 'ui_rpc_executor'::regrole::oid=ANY(p.polroles)
+    AND NOT (p.polrelid='public.feedback_events'::regclass AND p.polname='feedback_events_select')),
   0::bigint,'every authenticated policy on a planned relation includes ui_rpc_executor');
 WITH planned AS (SELECT DISTINCT c.oid FROM pg_temp.executor_initial_privilege_plan p JOIN pg_class c ON c.oid=p.object_id
   WHERE p.object_kind='relation' AND c.relkind IN ('r','p'))
-SELECT is((SELECT count(*) FROM planned r WHERE NOT EXISTS(SELECT 1 FROM pg_policy p
+SELECT is((SELECT count(*) FROM planned r WHERE r.oid<>'public.feedback_events'::regclass
+  AND NOT EXISTS(SELECT 1 FROM pg_policy p
   WHERE p.polrelid=r.oid AND p.polname='ui_rpc_executor_trusted' AND p.polcmd='*'
     AND p.polroles=ARRAY['ui_rpc_executor'::regrole::oid])),0::bigint,
   'every planned table retains the executor-only trusted policy');
