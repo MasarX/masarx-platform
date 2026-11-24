@@ -2305,11 +2305,6 @@
         if (state.trackingRequestInFlight.location_change) return;
         const key = pickerEl === trackMapDialogPicker ? 'expanded' : 'inline';
         setMapPinAtCenter(mapControllers[key]);
-        return;
-      }
-      if (e.key === 'Escape' && trackMapOverlay && !trackMapOverlay.hidden) {
-        e.preventDefault();
-        closeMapOverlay();
       }
     });
   }
@@ -2370,6 +2365,31 @@
       if (state.mapPin) focusMapOnPin(controller, controller?.map?.getZoom() || mapRuntime.defaultZoom);
       if (trackMapDialogPicker) trackMapDialogPicker.focus();
     });
+  }
+
+  const DIALOG_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // Modal dialog keyboard contract: Escape closes from any control, Tab and Shift+Tab wrap inside.
+  function handleMapOverlayKeydown(e) {
+    if (trackMapOverlay.hidden) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMapOverlay();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const focusable = [...trackMapOverlay.querySelectorAll(DIALOG_FOCUSABLE)]
+      .filter((el) => el.getClientRects().length > 0);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 
   function closeMapOverlay() {
@@ -3036,6 +3056,7 @@
       trackMapOverlay.addEventListener('click', (e) => {
         if (e.target === trackMapOverlay) closeMapOverlay();
       });
+      trackMapOverlay.addEventListener('keydown', handleMapOverlayKeydown);
     }
 
     window.addEventListener('pagehide', () => invalidateTrackingRequests());
