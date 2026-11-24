@@ -47,7 +47,7 @@ Covers (examples):
 - Required RLS enablement and policies (user-facing tables)
 - Resolver/ladder expectations where applicable
 
-Hosted CI replays migrations from zero and [checks that application functions in `public` and `api` have no `PUBLIC EXECUTE` grant](../../supabase/tests/pgtap/045b_public_function_execute.sql). Revoke `EXECUTE` from `PUBLIC` and any unintended roles by exact signature when creating a function, then grant it only to intended callers.
+Hosted CI replays migrations from zero and checks `PUBLIC EXECUTE` in the Data API schema (`api`) and its application support schema (`public`). Internal schemas such as `workflow_handlers` have separate caller contracts and require their own catalog review before this guard can cover them. Revoke `EXECUTE` from `PUBLIC` and any unintended roles by exact signature when creating a function, then grant it only to intended callers. [Hosted function privilege guard](../../supabase/tests/pgtap/045b_public_function_execute.sql)
 
 ---
 

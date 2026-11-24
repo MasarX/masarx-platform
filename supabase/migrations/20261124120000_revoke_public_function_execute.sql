@@ -2,6 +2,56 @@ BEGIN;
 
 SET LOCAL search_path TO pg_catalog;
 
+-- Preserve the functions required by the UI executor privilege plan after closing PUBLIC EXECUTE.
+GRANT EXECUTE ON FUNCTION
+  public.address_versioning_trg_v1(),
+  public.api_gateway_sanitize_outbound_headers_v1(jsonb),
+  public.api_gateway_strip_body_field_auth_v1(jsonb, jsonb),
+  public.api_gateway_workflow_secret_guard_v1(),
+  public.apply_shipment_planning_projection_v1(),
+  public.audit_capture_row_change(),
+  public.current_user_org_id(),
+  public.domain_event_from_address_update(),
+  public.enforce_scope_projection_contracts(),
+  public.enforce_workflow_guardrails(),
+  public.enqueue_webhook_shipment_created_domain_event_from_shipment_v1(),
+  public.enqueue_webhook_shipment_created_domain_event_v1(),
+  public.finalize_domain_event_from_run(),
+  public.integration_plugin_enforce_api_route_pack_v1(),
+  public.manual_review_tasks_resume_workflow_v1(),
+  public.mapping_studio_try_uuid_v1(text),
+  public.marketplace_can_read_contract_v1(uuid, uuid),
+  public.marketplace_can_read_request_v1(uuid, text),
+  public.marketplace_current_org_has_approved_participant_v1(),
+  public.marketplace_org_match_v1(uuid),
+  public.marketplace_profile_network_visible_v1(text, text),
+  public.normalize_phone_number(text),
+  public.operation_handlers_restrict_identity_updates_v1(),
+  public.preserve_terminal_webhook_shipment_failure_v1(),
+  public.recipients_set_phone_normalized_trg(),
+  public.redact_sensitive_json(jsonb),
+  public.redact_sensitive_text_v1(text),
+  public.resolve_address_province_from_city_v1(),
+  public.resolve_branch_id_for_zone_at(uuid, timestamp with time zone),
+  public.sanitize_ingress_persisted_projection_v1(),
+  public.set_updated_at(),
+  public.shipments_apply_service_offering_context_v1(),
+  public.sync_webhook_inbox_from_missing_shipment_followup_v1(),
+  public.sync_webhook_inbox_from_shipment_create_failure_v1(),
+  public.trg_shipments_sync_mis_sort_exceptions_v1(),
+  public.ui_filter_flat_sql_v1(jsonb, jsonb, text[]),
+  public.validate_operation_handler_signature(),
+  public.validate_user_access_scope(),
+  public.webhook_inbox_ack_failed_status_guard_v1(),
+  public.workflow_now(),
+  public.workflow_schedule_timezone(jsonb),
+  public.workflow_schedule_trigger_next_run_at(jsonb, timestamp with time zone),
+  public.workflow_schedule_triggers_before_write_v1(),
+  public.workflow_template_scope_allowed(text, uuid),
+  public.workflow_template_step_trigger_metadata_sync_v1(),
+  public.zone_override_requests_sync_manual_review_resolution_v1()
+TO ui_rpc_executor;
+
 -- These exact application signatures had PUBLIC EXECUTE in the from-zero catalog replay.
 REVOKE EXECUTE ON FUNCTION
   public.__label_render_if_mutually_exclusive(jsonb, jsonb),
