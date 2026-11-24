@@ -112,8 +112,8 @@ export function Topbar({
         id="cmd-trigger"
         className="cmd-trigger"
         type="button"
-        // WCAG 2.5.3: the accessible name starts with the visible placeholder text.
-        aria-label="Search shipments, plans, drivers, settings…"
+        // WCAG 2.5.3: the name holds all visible text (placeholder and ⌘K), then the action.
+        aria-label="Search shipments, plans, drivers, settings… ⌘K, open command palette"
         aria-haspopup="dialog"
         aria-keyshortcuts="Meta+K Control+K"
         onClick={onOpenPalette}
@@ -122,9 +122,7 @@ export function Topbar({
           <Icon name="search" size={12} />
         </span>
         <span className="cmd-trigger__placeholder">Search shipments, plans, drivers, settings…</span>
-        <span aria-hidden="true">
-          <Kbd>⌘K</Kbd>
-        </span>
+        <Kbd>⌘K</Kbd>
       </button>
 
       <div
@@ -190,7 +188,8 @@ export function Topbar({
           <Icon name="bell" size={14} />
           {hasUnreadNotifs ? <span className="bell-dot" aria-hidden="true" /> : null}
         </button>
-        <button className="user-btn" type="button" aria-label="User menu" onClick={onOpenUserMenu}>
+        {/* WCAG 2.5.3: the name starts with the visible initials. */}
+        <button className="user-btn" type="button" aria-label={`${initials || 'U'}, user menu`} onClick={onOpenUserMenu}>
           <span className="avatar" aria-hidden="true">{initials || 'U'}</span>
           <span className="caret" aria-hidden="true">▾</span>
         </button>
