@@ -141,6 +141,8 @@ Uses `next-intl` with bilingual support (English and Arabic).
 
 All values have sensible defaults and can be overridden per-deployment via environment variables.
 
+The decision log, settings resolution log and webhook inbox return exact totals up to the configured maximum page size. Above that, they show an estimate using the same scope and filters as the list.
+
 ## Shared Packages
 
 ### `@masarx/ui`
