@@ -60,7 +60,8 @@ function extractMarkdownLinks(content) {
 
 function resolveLocalLink(rootDir, sourceFile, rawTarget) {
   const target = normalizeLinkTarget(rawTarget);
-  if (!target || target.startsWith('#') || isExternalLink(target)) return null;
+  if (!target || isExternalLink(target)) return null;
+  if (target.startsWith('#')) return sourceFile;
   const [pathPart] = target.split('#', 1);
   if (!pathPart) return null;
 
@@ -83,6 +84,48 @@ function linkExists(resolvedPath) {
     return true;
   }
   return false;
+}
+
+function markdownAnchors(content) {
+  const anchors = new Set();
+  const headings = new Set();
+  let fence = '';
+  // shortcut: top-level ATX headings and named anchors, use a GFM parser for nested or Setext headings.
+  for (const line of content.replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/)) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (delimiter?.[1][0] === fence[0] && delimiter[1].length >= fence.length && !delimiter[2].trim()) {
+        fence = '';
+      }
+      continue;
+    }
+    if (delimiter) {
+      fence = delimiter[1];
+      continue;
+    }
+
+    for (const match of line.matchAll(/<a\s+[^>]*?\bname=(["'])([^"']+)\1[^>]*>/gi)) {
+      anchors.add(match[2]);
+    }
+    const heading = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line)?.[1];
+    if (!heading) continue;
+
+    const slug = heading
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/<[^>]*>/g, '')
+      .replace(/(^|\W)(_+)([^_]+)\2(?=\W|$)/g, '$1$3')
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{M}\p{N}_ -]/gu, '')
+      .replaceAll(' ', '-');
+    let anchor = slug;
+    for (let occurrence = 1; headings.has(anchor); occurrence++) {
+      anchor = `${slug}-${occurrence}`;
+    }
+    headings.add(anchor);
+    anchors.add(anchor);
+  }
+  return anchors;
 }
 
 function lintDocEntry(rootDir, docEntry, options = {}) {
@@ -131,6 +174,16 @@ function lintDocEntry(rootDir, docEntry, options = {}) {
     const links = extractMarkdownLinks(content);
     for (const rawTarget of links) {
       const resolved = resolveLocalLink(rootDir, fullPath, rawTarget);
+      const fragment = normalizeLinkTarget(rawTarget).split('#', 2)[1];
+      if (resolved && fragment && !/^L\d/.test(fragment)) {
+        const target = !path.extname(resolved) && !fs.existsSync(resolved) ? `${resolved}.md` : resolved;
+        if (/\.md$/i.test(target) && fs.statSync(target, { throwIfNoEntry: false })?.isFile()) {
+          const markdown = target === fullPath ? content : fs.readFileSync(target, 'utf8');
+          if (!markdownAnchors(markdown).has(decodeURIComponent(fragment))) {
+            issues.push(`${relPath}: broken_section_link "${rawTarget}"`);
+          }
+        }
+      }
       if (!linkExists(resolved)) {
         issues.push(`${relPath}: broken_local_link "${rawTarget}"`);
       }
