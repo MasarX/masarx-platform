@@ -4,7 +4,9 @@ SET LOCAL search_path TO pg_catalog, public, workflow_handlers, extensions, pg_t
 DO $migration$
 DECLARE
   session_path CONSTANT text := $pattern$(\mPERFORM\s+(?:pg_catalog\.)?set_config\s*\(\s*'search_path'\s*,\s*'(public(?:, workflow_handlers)?(?:, extensions)?, pg_temp)'\s*,\s*)false(\s*\))$pattern$;
+  body_header CONSTANT text := $pattern$(\n[ ]*AS \$[[:alnum:]_]*\$)$pattern$;
   handler record;
+  definition text;
 BEGIN
   FOR handler IN
     SELECT p.oid, p.oid::regprocedure AS signature, (path_match.parts)[2] AS body_path,
@@ -20,10 +22,14 @@ BEGIN
     ORDER BY p.oid::regprocedure::text
   LOOP
     -- A transaction-local change restores the caller's setting only inside a function SET scope.
-    EXECUTE regexp_replace(pg_get_functiondef(handler.oid), session_path, E'\\1true\\3', 'gi');
+    definition := regexp_replace(pg_get_functiondef(handler.oid), session_path, E'\\1true\\3', 'gi');
     IF NOT handler.has_function_path THEN
-      EXECUTE format('ALTER FUNCTION %s SET search_path TO %s', handler.signature, handler.body_path);
+      IF definition !~ body_header THEN
+        RAISE EXCEPTION 'No function body header found for %', handler.signature;
+      END IF;
+      definition := regexp_replace(definition, body_header, E'\n SET search_path TO ' || handler.body_path || E'\\1');
     END IF;
+    EXECUTE definition;
   END LOOP;
 END;
 $migration$;

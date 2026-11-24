@@ -1,7 +1,19 @@
 BEGIN;
 SET LOCAL search_path TO public, pgtap, extensions, workflow_handlers, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(4);
+SELECT plan(5);
+
+SELECT is((
+  SELECT count(*)
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'workflow_handlers'
+    AND p.prokind = 'f'
+    AND p.prosrc ~* $path$\mPERFORM\s+(?:pg_catalog\.)?set_config\s*\(\s*'search_path'\s*,\s*'public(?:, workflow_handlers)?(?:, extensions)?, pg_temp'\s*,\s*(?:false|true)\s*\)$path$
+    AND NOT EXISTS (
+      SELECT 1 FROM unnest(p.proconfig) AS settings(setting) WHERE setting LIKE 'search_path=%'
+    )
+), 0::bigint, 'workflow handlers that change search path all restore it at the function boundary');
 
 CREATE FUNCTION pg_temp.check_dispatch_search_path()
 RETURNS SETOF text
