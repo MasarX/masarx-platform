@@ -1,0 +1,64 @@
+{
+  "paths": {
+    "production": [
+      "scripts/deploy/**",
+      "supabase/config.toml",
+      "config/edge/functions.json",
+      "config/certs/supabase-prod-ca-2021.crt",
+      "scripts/utils/production-mutation-guard.js"
+    ],
+    "secrets": [
+      "scripts/utils/load-env.js",
+      "scripts/utils/env-file.js",
+      "scripts/qa/qa-log.js",
+      "apps/console-v2/src/modules/integrations/secret-redaction.ts"
+    ],
+    "realData": [
+      "supabase/migrations/**",
+      "supabase/functions/**",
+      "scripts/ops/workspace/destroy.js",
+      "scripts/ops/workspace/delete-branch.js",
+      "scripts/utils/pg-candidates.js",
+      "scripts/utils/pg-hostaddr.js",
+      "apps/console/app/auth/**",
+      "apps/console/app/access-policy/**",
+      "apps/console/app/api/**",
+      "apps/portal/app/auth/**",
+      "apps/portal/app/access-policy/**",
+      "apps/portal/app/api/**",
+      "apps/console-v2/src/routes/auth/**",
+      "apps/shared/security-middleware.ts"
+    ],
+    "publicAccess": [
+      "supabase/functions/public-shipment-tracking/**",
+      "tooling/apps/api-ingress-worker/**"
+    ],
+    "hostNetworkFirewall": [
+      "tooling/apps/api-ingress-worker/**",
+      "scripts/ops/verify-api-caller-guarded-egress-proxy.js",
+      "scripts/ops/shared/api-ingress-public-host.js"
+    ],
+    "releaseGates": [
+      "CODEOWNERS",
+      ".github/**",
+      "scripts/ci-hosted/**",
+      "scripts/ci/**",
+      "config/ci/**",
+      "scripts/ops/ci/**",
+      "scripts/tests/run-pgtap-cloud.js",
+      "scripts/edge/verify-frozen-lock.cjs",
+      "scripts/edge/verify-npm-import-lock.js",
+      "scripts/ops/vercel/validate-build.js"
+    ]
+  },
+  "packageScriptFiles": [
+    "package.json",
+    "apps/console/package.json",
+    "apps/console-v2/package.json",
+    "apps/fieldops/package.json",
+    "apps/portal/package.json"
+  ],
+  "verdictAccountIds": [
+    357558349
+  ]
+}

@@ -294,6 +294,7 @@ jobs:
           node scripts/ci-hosted/selfcheck.cjs
           node scripts/ci-hosted/shard-selfcheck.cjs
           node scripts/ci-hosted/database-selfcheck.cjs
+          node scripts/ci-hosted/review-verdict.cjs --self-check
           node --test scripts/ci-hosted/images.test.cjs
       - name: Check deploy branch references
         timeout-minutes: 1
