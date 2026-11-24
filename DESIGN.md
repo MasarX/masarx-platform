@@ -158,10 +158,20 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 - Cover light and dark themes, and desktop and phone widths.
 - Cover loading, empty, error and permission-denied states, with text and a recovery action where one is available.
 
+### Numerals, dates and direction
+
+- Arabic UI follows each product's `Intl` locale. Console V2 uses `ar-SA`, which gives Arabic-Indic digits. Public tracking and landing use the document language `ar`, which gives Latin digits.
+- Use a 12-hour clock and the Gregorian calendar. Format time ranges with `Intl.DateTimeFormat#formatRange`.
+- Format every date, time and number with the app's i18n formatter. Never use `toLocale*([])` or the browser default.
+- Keep identifiers in Latin characters.
+- In RTL text, wrap every Latin, masked or mixed-direction value, such as IDs, masked names, times and amounts, in a plain `<bdi>`. Never force `direction: ltr`.
+
 ### Accessibility
 
 - Keep keyboard focus visible and provide a skip link to main content.
+- Give custom radios, checkboxes and choice tiles a visible focus outline, on the label or the tile, with at least 3:1 contrast against its background.
 - Label fields and icon-only controls, associate errors with fields, and announce asynchronous status through an appropriate live region.
+- Announce each state change through exactly one `role="status"` or `role="alert"` region, so it is never announced twice.
 - Pair semantic foreground and background tokens and use text for status alongside visual cues.
 - Honor reduced motion and keep status and completion understandable with motion disabled.
 - Support keyboard interaction, Escape dismissal, focus containment and focus restoration in modal overlays.
@@ -205,7 +215,8 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 2. Shared UI, Console V2 and landing use different palettes, type stacks, radii and theme storage keys. Only the shared provider follows live OS theme changes in system mode. `packages/ui/src/styles.css`, `packages/ui/src/theme.tsx`, `apps/console-v2/src/styles/tokens.css`, `apps/console-v2/src/lib/theme.tsx`, `docs/marketing/landing-v2/app.css`, `docs/marketing/landing-v2/app.js`.
 3. Next.js Arabic pages set root direction in the normal shell, while the missing-configuration and global-error documents set only `lang`. Console V2 also supplies English literals in route and auth fallbacks despite having EN/AR catalogs. `apps/shared/app-layout.tsx`, `apps/shared/missing-env.tsx`, `apps/shared/app-error.tsx`, `apps/console-v2/src/App.tsx`, `apps/console-v2/src/shell/AppGuard.tsx`. See also `docs/product/ux/i18n-rtl-a11y-requirements.md`.
 5. Console V2 keeps its two-column rail shell at phone widths. Its page and module breakpoints reflow content, while the shared Next.js shell switches to a mobile drawer. `apps/console-v2/src/styles/shell.css`, `apps/console-v2/src/styles/components.css`, `apps/console-v2/src/styles/modules.css`, `packages/ui/src/app-shell.tsx`.
-6. Landing tracking styles reference `--c-ink`, `--c-muted` and `--line` without definitions in the loaded stylesheet. Other tracking rules contain local color literals. `docs/marketing/landing-v2/track.html`, `docs/marketing/landing-v2/app.css`.
+6. Landing tracking styles reference `--c-ink`, `--c-muted` and `--line` without definitions in the loaded stylesheet. Other tracking rules contain local color literals. `docs/marketing/landing-v2/track.html`, `docs/marketing/landing-v2/app.css`. [#166](https://github.com/MasarX/masarx-platform/issues/166)
 7. Shared reduced-motion handling is selective. The table shimmer and motion-safe overlays respect it, while the shared button's loading spinner uses an unconditional spin utility. `packages/ui/src/styles.css`, `packages/ui/src/modal.tsx`, `packages/ui/src/button.tsx`. See also `docs/product/ux/i18n-rtl-a11y-requirements.md`.
+8. Console V2 disabled buttons use `var(--muted)`, which Console V2 never defines, so they keep the normal text colour instead of `--ink-3`. `apps/console-v2/src/styles/components.css`. [#508](https://github.com/MasarX/masarx-platform/issues/508)
 
 See also `docs/product/ux/console-portal-ia-ux-spec.md`, `docs/product/ux/console-portal-page-matrix.md` and `docs/frontend/ARCHITECTURE.md`.
