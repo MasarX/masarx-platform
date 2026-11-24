@@ -814,7 +814,7 @@ jobs:
       - name: Verify Edge frozen lock
         run: *verify-edge-lock
       - name: Self-check Edge frozen lock drift
-        run: node node_modules/jest/bin/jest.js --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js --reporters=default
+        run: env -u EDGE_FROZEN_WORKDIR node node_modules/jest/bin/jest.js --config config/tooling/jest.config.unit.js --runInBand --runTestsByPath tests/unit/ops/edge-frozen-lock.test.js --reporters=default
       - name: Install pinned Supabase CLI
         run: |
           mkdir -p "$RUNNER_TEMP/deploy-tools"

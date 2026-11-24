@@ -12,6 +12,7 @@ function checkBundle(file) {
     }
   };
 
+  // shortcut: require()/createRequire specifiers are not checked; add them if a bundle starts using them.
   function visit(node) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
       checkSpecifier(node.moduleSpecifier);

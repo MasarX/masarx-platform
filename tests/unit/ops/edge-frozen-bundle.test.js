@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
+const { spawnSync: spawnActual } = jest.requireActual('node:child_process');
 const yaml = require('yaml');
 const { verify } = require('../../../scripts/edge/verify-frozen-lock.cjs');
 
@@ -62,7 +63,7 @@ test('a rejected frozen build leaves no deployable Edge checksum manifest', () =
   expect(fs.existsSync(path.join(workdir, 'supabase/config.toml'))).toBe(false);
 });
 
-test('an unresolved dynamic import leaves no frozen Edge checksum manifest', () => {
+test('a failed offline resolution leaves no manifest', () => {
   spawnSync.mockImplementationOnce((_command, args) => {
     fs.writeFileSync(args[args.indexOf('--output') + 1], 'void import("npm:fixture-package");\n');
     return { status: 0 };
@@ -70,6 +71,24 @@ test('an unresolved dynamic import leaves no frozen Edge checksum manifest', () 
 
   expect(verify(workdir)).toBe(1);
   expect(fs.existsSync(path.join(workdir, 'SHA256SUMS'))).toBe(false);
+});
+
+test.each([
+  ['accepts node specifiers', 'import "node:fs"; void import("node:path"); export * from "node:os";', 0],
+  ['rejects npm specifiers', 'void import("npm:fixture-package");', 1],
+  ['rejects jsr specifiers', 'void import("jsr:@fixture/package");', 1],
+  ['rejects relative import declarations', 'import "./fixture.ts";', 1],
+  ['rejects relative dynamic imports', 'void import("./fixture.ts");', 1],
+  ['rejects non-literal dynamic imports', 'const specifier = "node:fs"; void import(specifier);', 1],
+  ['rejects external re-exports', 'export * from "./fixture.ts";', 1],
+])('the frozen Edge bundle import check %s', (_description, source, status) => {
+  const checker = path.resolve(__dirname, '../../../scripts/edge/check-frozen-bundle-imports.cjs');
+  const fixture = path.join(temp, 'bundle.ts');
+  fs.writeFileSync(fixture, source);
+
+  const result = spawnActual(process.execPath, [checker, fixture], { encoding: 'utf8' });
+  expect(result.status).toBe(status);
+  expect(result.stderr.trimEnd()).toBe(status === 0 ? '' : `Unbundled Edge import in ${fixture}:1`);
 });
 
 test('DEV checks the bundle manifest before writes and limits the upload to that workdir', () => {
@@ -88,4 +107,7 @@ test('DEV checks the bundle manifest before writes and limits the upload to that
   expect(recheck).toBeGreaterThan(deploy.run.indexOf(' db push '));
   expect(recheck).toBeLessThan(deploy.run.indexOf(' functions deploy '));
   expect(deploy.run).toMatch(/functions deploy[^\n]*--workdir "\$EDGE_FROZEN_WORKDIR"/);
+
+  const dryRunSelfCheck = workflow.jobs['database-dry-run'].steps.find(step => step.name === 'Self-check Edge frozen lock drift');
+  expect(dryRunSelfCheck.run).toMatch(/^env -u EDGE_FROZEN_WORKDIR node /);
 });
