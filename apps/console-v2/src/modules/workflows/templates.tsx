@@ -49,6 +49,7 @@ import {
 import { useCapability, useIdentity } from '@/lib/identity';
 import * as api from '@/lib/api';
 import { lookupRow } from '@/lib/api';
+import { fill, useI18n } from '@/lib/i18n';
 import {
   discoverFields,
   inferType,
@@ -655,6 +656,7 @@ function TriggerComposerPreview({
     conditionJsonLogic: Record<string, unknown> | null;
   }) => Promise<boolean>;
 }) {
+  const { t } = useI18n();
   const fieldOptions = useMemo(() => discoverFields(events), [events]);
   const [triggerEvent, setTriggerEvent] = useState(template.trigger);
   const [conditions, setConditions] = useState<TriggerConditionDraft[]>(() => [
@@ -696,7 +698,7 @@ function TriggerComposerPreview({
     });
     if (ok) {
       setSaveState('saved');
-      pushToast('Trigger rule saved', 'good');
+      pushToast(t('workflowTemplates.trigger.saved'), 'good');
     } else {
       setSaveState('failed');
     }
@@ -705,14 +707,14 @@ function TriggerComposerPreview({
   return (
     <div>
       <p className="state__hint">
-        Build trigger conditions visually from the configured intake policy.
+        {t('workflowTemplates.trigger.intro')}
       </p>
       <div className="wf-trigger-rule">
         <select
           className="dt-inline-input"
           value={triggerEvent}
           onChange={(e) => setTriggerEvent(e.target.value)}
-          aria-label="Trigger event"
+          aria-label={t('workflowTemplates.trigger.eventAria')}
         >
           {api.getLookups('workflow_binding_event').map((row) => (
             <option key={String(row.value)} value={String(row.value)}>
@@ -722,13 +724,13 @@ function TriggerComposerPreview({
         </select>
       </div>
       <div className="wf-insp__section-eyebrow" style={{ marginTop: '12px' }}>
-        Conditions (AND)
+        {t('workflowTemplates.trigger.conditionsHeading')}
       </div>
       {conditions.length === 0 ? (
         <StateView
           kind="empty"
-          title="No conditions"
-          hint="Add a condition from discovered payload fields."
+          title={t('workflowTemplates.trigger.noConditionsTitle')}
+          hint={t('workflowTemplates.trigger.noConditionsHint')}
         />
       ) : (
         conditions.map((condition, index) => {
@@ -739,10 +741,10 @@ function TriggerComposerPreview({
                 className="dt-inline-input"
                 value={condition.field}
                 onChange={(e) => updateCondition(index, { field: e.target.value })}
-                aria-label="Condition field"
+                aria-label={t('workflowTemplates.trigger.fieldAria')}
               >
                 {fieldOptions.length === 0 ? (
-                  <option value="">— no payload fields —</option>
+                  <option value="">{t('workflowTemplates.trigger.noFields')}</option>
                 ) : (
                   fieldOptions.map((f) => <option key={f}>{f}</option>)
                 )}
@@ -751,7 +753,7 @@ function TriggerComposerPreview({
                 className="dt-inline-input"
                 value={condition.operator}
                 onChange={(e) => updateCondition(index, { operator: e.target.value as Operator | '' })}
-                aria-label="Condition operator"
+                aria-label={t('workflowTemplates.trigger.operatorAria')}
               >
                 {operatorOptions.map((o) => (
                   <option key={o} value={o}>
@@ -762,16 +764,16 @@ function TriggerComposerPreview({
               <input
                 className="dt-inline-input"
                 type="text"
-                placeholder="Value"
+                placeholder={t('workflowTemplates.trigger.valuePlaceholder')}
                 value={condition.value}
                 onChange={(e) => updateCondition(index, { value: e.target.value })}
-                aria-label="Condition value"
+                aria-label={t('workflowTemplates.trigger.valueAria')}
               />
               <button
                 type="button"
                 className="icon-btn"
-                title="Remove"
-                aria-label="Remove condition"
+                title={t('workflowTemplates.trigger.removeTitle')}
+                aria-label={t('workflowTemplates.trigger.removeAria')}
                 onClick={() => removeCondition(index)}
               >
                 ×
@@ -787,11 +789,11 @@ function TriggerComposerPreview({
         onClick={addCondition}
         disabled={fieldOptions.length === 0}
       >
-        + Add condition
+        {t('workflowTemplates.trigger.addCondition')}
       </button>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
         <Button
-          label="Apply trigger"
+          label={t('workflowTemplates.trigger.apply')}
           iconName="save"
           kind="primary"
           capability={CAP.WORKFLOWS_WRITE}
@@ -801,15 +803,15 @@ function TriggerComposerPreview({
         {saveState !== 'idle' ? (
           <span className="state__hint" role="status">
             {saveState === 'saving'
-              ? 'Saving trigger rule...'
+              ? t('workflowTemplates.trigger.saving')
               : saveState === 'saved'
-                ? 'Trigger rule saved'
-                : 'Trigger rule was not saved'}
+                ? t('workflowTemplates.trigger.saved')
+                : t('workflowTemplates.trigger.notSaved')}
           </span>
         ) : null}
       </div>
       <div className="wf-insp__section-eyebrow" style={{ marginTop: '14px' }}>
-        Test against recent events
+        {t('workflowTemplates.trigger.testHeading')}
       </div>
       <div className="wf-recent-events">
         {events.slice(0, 4).map((e) => (
@@ -828,7 +830,7 @@ function TriggerComposerPreview({
               {fmtTimeAgo(e.received_at, durationFormatPolicy)}
             </span>
             <Chip
-              label={e.matched_template === template.id ? 'matches' : 'no match'}
+              label={e.matched_template === template.id ? t('workflowTemplates.trigger.matches') : t('workflowTemplates.trigger.noMatch')}
               kind={e.matched_template === template.id ? 'good' : 'neutral'}
               size="xs"
             />
@@ -875,6 +877,7 @@ interface TemplateCardProps {
 }
 
 function TemplateCard({ template, isActive, matchedRunsCount, lastRunStatus, directoryRow, onClick }: TemplateCardProps) {
+  const { t } = useI18n();
   // W22 — when the canonical projection row is present, prefer its
   // counters (active_run_count + total_run_count + last_run_status)
   // over the legacy FE-side join. Falls back to FE-side counters on
@@ -916,7 +919,7 @@ function TemplateCard({ template, isActive, matchedRunsCount, lastRunStatus, dir
           if (!row) {
             return (
               <Chip
-                label={missingSetupLabel('Template status setup missing', template.status)}
+                label={missingSetupLabel(t('workflowTemplates.card.statusMissing'), template.status)}
                 kind="danger"
                 size="xs"
               />
@@ -938,11 +941,11 @@ function TemplateCard({ template, isActive, matchedRunsCount, lastRunStatus, dir
       </div>
       <div className="wf-tpl-card__row3">
         <Chip label={displayWorkflowEventLabel(template.trigger)} kind="info" size="xs" />
-        <span className="wf-tpl-card__runs mono">{totalRuns} runs</span>
+        <span className="wf-tpl-card__runs mono">{fill(t('workflowTemplates.card.runs'), { count: totalRuns })}</span>
         {activeRuns !== null && activeRuns > 0 ? (
-          <Chip label={`${activeRuns} active`} kind="info" size="xs" />
+          <Chip label={fill(t('workflowTemplates.card.active'), { count: activeRuns })} kind="info" size="xs" />
         ) : null}
-        {lastStatus ? <Dot kind={lastDot} title={`Last: ${lastStatus}`} /> : null}
+        {lastStatus ? <Dot kind={lastDot} title={fill(t('workflowTemplates.card.last'), { status: lastStatus })} /> : null}
       </div>
     </button>
   );
@@ -1011,6 +1014,7 @@ function readCanvasLayout(value: unknown): WorkflowCanvasLayout | null {
 }
 
 function CanvasNode({ step, x, y, isActive, runStatus, onClick }: CanvasNodeProps) {
+  const { t } = useI18n();
   const classes = [
     'wf-node',
     `wf-node--${step.kind}`,
@@ -1020,7 +1024,9 @@ function CanvasNode({ step, x, y, isActive, runStatus, onClick }: CanvasNodeProp
     .filter(Boolean)
     .join(' ');
   const style: CSSProperties = { left: `${x}px`, top: `${y}px` };
-  const aria = `${step.kind} step · ${step.label}${runStatus ? ` · last run ${runStatus}` : ''}`;
+  const aria = runStatus
+    ? fill(t('workflowTemplates.node.ariaLastRun'), { kind: step.kind, label: step.label, status: runStatus })
+    : fill(t('workflowTemplates.node.aria'), { kind: step.kind, label: step.label });
   return (
     <button
       type="button"
@@ -1039,7 +1045,7 @@ function CanvasNode({ step, x, y, isActive, runStatus, onClick }: CanvasNodeProp
         {runStatus ? (
           <span
             className={`wf-node__pulse wf-node__pulse--${runStatus}`}
-            title={`Last run · ${runStatus}`}
+            title={fill(t('workflowTemplates.node.lastRun'), { status: runStatus })}
           />
         ) : null}
       </span>
@@ -1072,6 +1078,7 @@ function Canvas({
   isCreatingStep,
   layout,
 }: CanvasProps) {
+  const { t } = useI18n();
   const steps = template.steps ?? [];
 
   // Cycle E2 (Workflows P1 #1) — `branchLanes` is row-driven from the
@@ -1133,8 +1140,8 @@ function Canvas({
         <div style={{ padding: '24px' }}>
           <StateView
             kind="error"
-            title="Workflow lanes are not configured"
-            hint="Ask platform operations to finish the workflow lane setup before using the canvas."
+            title={t('workflowTemplates.canvas.lanesTitle')}
+            hint={t('workflowTemplates.canvas.lanesHint')}
           />
         </div>
       </div>
@@ -1151,8 +1158,8 @@ function Canvas({
         <div style={{ padding: '24px' }}>
           <StateView
             kind="error"
-            title="Workflow canvas layout is not configured"
-            hint="Ask platform operations to finish the canvas layout setup before using this template."
+            title={t('workflowTemplates.canvas.layoutTitle')}
+            hint={t('workflowTemplates.canvas.layoutHint')}
           />
         </div>
       </div>
@@ -1340,18 +1347,18 @@ function Canvas({
           <div className="wf-canvas-empty__icon">
             <Icon name="package" size={32} />
           </div>
-          <h3>No steps in this template</h3>
+          <h3>{t('workflowTemplates.canvas.emptyTitle')}</h3>
           <p>
-            Add a trigger step to begin building this workflow.
+            {t('workflowTemplates.canvas.emptyHint')}
           </p>
           <Button
-            label="Add trigger"
+            label={t('workflowTemplates.canvas.addTrigger')}
             iconName="plus"
             kind="ghost"
             capability={CAP.WORKFLOWS_WRITE}
             disabled={isCreatingStep}
             onClick={onAddFirstStep}
-            title="Choose a configured trigger operation for the first step"
+            title={t('workflowTemplates.canvas.addTriggerTitle')}
           />
         </div>
       </div>
@@ -1387,12 +1394,12 @@ function Canvas({
           return (
             <div className="wf-canvas-pulse">
               <Chip
-                label={missingSetupLabel('Run status setup missing', lastRun.status)}
+                label={missingSetupLabel(t('workflowTemplates.canvas.runStatusMissing'), lastRun.status)}
                 kind="danger"
                 size="xs"
               />
               <span className="mono">
-                {`Last run · ${compactReferenceText(lastRun.run_id)}`}
+                {fill(t('workflowTemplates.canvas.lastRunRef'), { ref: compactReferenceText(lastRun.run_id) })}
               </span>
             </div>
           );
@@ -1404,7 +1411,7 @@ function Canvas({
           <div className="wf-canvas-pulse">
             <Dot kind={dotKind} />
             <span className="mono">
-              {`Last run · ${lastRun.run_id} · ${row.label ?? lastRun.status}`}
+              {fill(t('workflowTemplates.canvas.lastRunStatus'), { ref: lastRun.run_id, status: String(row.label ?? lastRun.status) })}
             </span>
           </div>
         );
@@ -1455,24 +1462,25 @@ function Inspector({
   onPromptErrorPath,
   onOpenRun,
 }: InspectorProps) {
+  const { t } = useI18n();
   if (!step) {
     return (
       <aside className="wf-inspector">
         <StateView
           kind="empty"
-          title="No step selected"
-          hint="Click a step on the canvas to inspect."
+          title={t('workflowTemplates.inspector.noStepTitle')}
+          hint={t('workflowTemplates.inspector.noStepHint')}
         />
       </aside>
     );
   }
 
   const tabs: Array<[InspectorTab, string]> = [
-    ['config', 'Config'],
-    ['inputs', 'Inputs'],
-    ['outputs', 'Outputs'],
-    ['test', 'Test'],
-    ['history', 'History'],
+    ['config', t('workflowTemplates.inspector.tabs.config')],
+    ['inputs', t('workflowTemplates.inspector.tabs.inputs')],
+    ['outputs', t('workflowTemplates.inspector.tabs.outputs')],
+    ['test', t('workflowTemplates.inspector.tabs.test')],
+    ['history', t('workflowTemplates.inspector.tabs.history')],
   ];
 
   return (
@@ -1489,7 +1497,7 @@ function Inspector({
         <button
           type="button"
           className="wf-insp__more"
-          title="Step actions"
+          title={t('workflowTemplates.inspector.stepActions')}
           onClick={onOpenStepActions}
         >
           ⋯
@@ -1609,6 +1617,7 @@ function ConfigTab({
   onPatch: (p: Partial<WorkflowTemplateStep>) => void;
   onPromptErrorPath: () => void;
 }) {
+  const { t } = useI18n();
   // W27 Cycle D closure: resolve canonical operation_templates row by op
   // name. The ConfigTab Timeout + Retry rows now project canonical fields
   // (operation_templates.timeout_seconds + workflow_template_steps.metadata
@@ -1651,40 +1660,40 @@ function ConfigTab({
   const branchRow = branchValue ? lookupRow('workflow_branch_kind', branchValue) : null;
   return (
     <>
-      <FieldRow label="Step ID">
+      <FieldRow label={t('workflowTemplates.config.stepId')}>
         {compactReference(step.id)}
       </FieldRow>
-      <FieldRow label="Operation" editable>
+      <FieldRow label={t('workflowTemplates.config.operation')} editable>
         <span className="mono">{step.op || '—'}</span>
       </FieldRow>
-      <FieldRow label="Kind">
+      <FieldRow label={t('workflowTemplates.config.kind')}>
         {(() => {
           const r = kindTone(step.kind);
           return r.tone && r.label
             ? <Chip label={r.label} kind={r.tone} size="xs" />
-            : <Chip label={missingSetupLabel('Step type setup missing', step.kind)} kind="danger" size="xs" />;
+            : <Chip label={missingSetupLabel(t('workflowTemplates.config.stepTypeMissing'), step.kind)} kind="danger" size="xs" />;
         })()}
       </FieldRow>
-      <FieldRow label="Branch">
+      <FieldRow label={t('workflowTemplates.config.branch')}>
         {branchRow ? (
           <span className="mono">{(branchRow.metadata as { label?: string } | undefined)?.label ?? branchRow.label}</span>
         ) : (
-          <Chip label={missingSetupLabel('Branch setup missing', branchValue || '(unset)')} kind="danger" size="xs" />
+          <Chip label={missingSetupLabel(t('workflowTemplates.config.branchMissing'), branchValue || t('workflowTemplates.config.unset'))} kind="danger" size="xs" />
         )}
       </FieldRow>
-      <FieldRow label="Display label">
+      <FieldRow label={t('workflowTemplates.config.displayLabel')}>
         <EditableText initial={step.label} onCommit={(v) => onPatch({ label: v })} />
       </FieldRow>
-      <FieldRow label="Subtitle">
+      <FieldRow label={t('workflowTemplates.config.subtitle')}>
         <EditableText initial={step.sub || ''} onCommit={(v) => onPatch({ sub: v })} />
       </FieldRow>
-      <FieldRow label="On error → step" editable onClick={onPromptErrorPath}>
+      <FieldRow label={t('workflowTemplates.config.onError')} editable onClick={onPromptErrorPath}>
         {compactReference(step.error_path)}
       </FieldRow>
-      <FieldRow label="Timeout (ms)">
+      <FieldRow label={t('workflowTemplates.config.timeout')}>
         {step.op && !opRow ? (
           <Chip
-            label={missingSetupLabel('Operation setup missing', step.op)}
+            label={missingSetupLabel(t('workflowTemplates.config.operationMissing'), step.op)}
             kind="danger"
             size="xs"
           />
@@ -1694,16 +1703,16 @@ function ConfigTab({
           <span className="mono">—</span>
         )}
       </FieldRow>
-      <FieldRow label="Retry policy">
+      <FieldRow label={t('workflowTemplates.config.retry')}>
         {retryPolicy || maxRetries !== null ? (
           <span className="mono">
-            {maxRetries !== null ? `${maxRetries} attempts` : ''}
+            {maxRetries !== null ? fill(t('workflowTemplates.config.attempts'), { count: maxRetries }) : ''}
             {maxRetries !== null && retryPolicy ? ' · ' : ''}
             {retryPolicy ?? ''}
           </span>
         ) : step.op && !opRow ? (
           <Chip
-            label={missingSetupLabel('Operation setup missing', step.op)}
+            label={missingSetupLabel(t('workflowTemplates.config.operationMissing'), step.op)}
             kind="danger"
             size="xs"
           />
@@ -1712,7 +1721,7 @@ function ConfigTab({
         )}
       </FieldRow>
       <div className="wf-insp__hint">
-        Step settings are saved through the workflow configuration policy.
+        {t('workflowTemplates.config.hint')}
       </div>
     </>
   );
@@ -1729,6 +1738,7 @@ function InputsTab({
   events: RecentEvent[];
   opsCatalog: api.OperationTemplate[];
 }) {
+  const { t } = useI18n();
   // Cycle E (Workflows P1 #2) — scope variable matrix is row-driven via the
   // canonical `workflow_expression_scope` lookup. Each row's
   // `metadata.variables` enumerates the variable identifiers exposed at
@@ -1760,8 +1770,8 @@ function InputsTab({
       <div style={{ padding: '0 14px 12px' }}>
         <StateView
           kind="error"
-          title="Workflow input scopes are not configured"
-          hint="Ask platform operations to finish the input-scope setup before binding step inputs."
+          title={t('workflowTemplates.inputs.scopesTitle')}
+          hint={t('workflowTemplates.inputs.scopesHint')}
         />
       </div>
     );
@@ -1794,7 +1804,7 @@ function InputsTab({
 
   return (
     <>
-      <div className="wf-insp__section-eyebrow">Available variables at this step</div>
+      <div className="wf-insp__section-eyebrow">{t('workflowTemplates.inputs.available')}</div>
       <div className="wf-scope-tree">
         {scope.map(({ key: k, items }) => (
           <div key={k} className="wf-scope-tree__group">
@@ -1802,7 +1812,7 @@ function InputsTab({
             <div className="wf-scope-tree__items">
               {items.length === 0 ? (
                 <span className="mono" style={{ opacity: 0.5, fontSize: '11px' }}>
-                  — none —
+                  {t('workflowTemplates.inputs.none')}
                 </span>
               ) : (
                 items.map((it) => (
@@ -1810,7 +1820,7 @@ function InputsTab({
                     key={it}
                     type="button"
                     className="wf-var-pill mono"
-                    title="Drag to an input field · click to copy expression"
+                    title={t('workflowTemplates.inputs.pillTitle')}
                     draggable
                     onDragStart={(e) =>
                       e.dataTransfer.setData('text/plain', `{{ ${k}.${it} }}`)
@@ -1819,7 +1829,7 @@ function InputsTab({
                       navigator.clipboard
                         ?.writeText(`{{ ${k}.${it} }}`)
                         .catch(() => undefined);
-                      pushToast(`Copied · {{ ${k}.${it} }}`, 'good');
+                      pushToast(fill(t('workflowTemplates.inputs.copied'), { expression: `{{ ${k}.${it} }}` }), 'good');
                     }}
                   >
                     {it}
@@ -1831,7 +1841,7 @@ function InputsTab({
         ))}
       </div>
       <div className="wf-insp__section-eyebrow" style={{ marginTop: '12px' }}>
-        Bind input field
+        {t('workflowTemplates.inputs.bindHeading')}
       </div>
       <div
         style={{
@@ -1844,14 +1854,14 @@ function InputsTab({
         <input
           type="text"
           className="dt-inline-input"
-          placeholder="Input field name (e.g. recipient_phone)"
+          placeholder={t('workflowTemplates.inputs.namePlaceholder')}
           value={fieldName}
           onChange={(e) => setFieldName(e.target.value)}
         />
         <input
           type="text"
           className="dt-inline-input"
-          placeholder="Drop variable here or type {{ expression }}"
+          placeholder={t('workflowTemplates.inputs.exprPlaceholder')}
           value={fieldExpr}
           onChange={(e) => setFieldExpr(e.target.value)}
           onDragOver={(e) => e.preventDefault()}
@@ -1863,10 +1873,10 @@ function InputsTab({
       </div>
       <div style={{ padding: '0 14px' }}>
         <Button
-          label="Bind input"
+          label={t('workflowTemplates.inputs.bindButton')}
           kind="ghost"
           onClick={() =>
-            pushToast(`Bound ${fieldName || '?'} ← ${fieldExpr || '?'}`, 'good')
+            pushToast(fill(t('workflowTemplates.inputs.bound'), { field: fieldName || '?', expression: fieldExpr || '?' }), 'good')
           }
         />
       </div>
@@ -1881,6 +1891,7 @@ function OutputsTab({
   step: WorkflowTemplateStep;
   opsCatalog: api.OperationTemplate[];
 }) {
+  const { t } = useI18n();
   // Cycle E (Workflows P1 #1) — read canonical `operation_templates
   // .output_schema` + `output_sample` strictly. Missing canonical row /
   // unprojected columns render `<StateView kind="empty" hint="..."/>`
@@ -1890,36 +1901,36 @@ function OutputsTab({
   const { schema, sample } = resolveOpOutput(step.op, opsCatalog);
   return (
     <>
-      <div className="wf-insp__section-eyebrow">Output schema</div>
+      <div className="wf-insp__section-eyebrow">{t('workflowTemplates.outputs.schema')}</div>
       {schema ? (
         <pre className="wf-code-block">{JSON.stringify(schema, null, 2)}</pre>
       ) : (
         <div style={{ padding: '0 14px 12px' }}>
           <StateView
             kind="empty"
-            title="No output schema"
-            hint="No output structure is available for this operation yet."
+            title={t('workflowTemplates.outputs.noSchemaTitle')}
+            hint={t('workflowTemplates.outputs.noSchemaHint')}
           />
         </div>
       )}
-      <div className="wf-insp__section-eyebrow">Last sample</div>
+      <div className="wf-insp__section-eyebrow">{t('workflowTemplates.outputs.lastSample')}</div>
       {sample ? (
         <pre className="wf-code-block">{JSON.stringify(sample, null, 2)}</pre>
       ) : (
         <div style={{ padding: '0 14px 12px' }}>
           <StateView
             kind="empty"
-            title="No sample payload"
-            hint="No sample payload is available for this operation yet."
+            title={t('workflowTemplates.outputs.noSampleTitle')}
+            hint={t('workflowTemplates.outputs.noSampleHint')}
           />
         </div>
       )}
       <div style={{ padding: '0 14px 14px' }}>
         <Button
-          label="Pin sample as test data"
+          label={t('workflowTemplates.outputs.pin')}
           iconName="plus"
           kind="ghost"
-          onClick={() => pushToast('Pinned · sample available in Test tab', 'good')}
+          onClick={() => pushToast(t('workflowTemplates.outputs.pinned'), 'good')}
         />
       </div>
     </>
@@ -1944,6 +1955,7 @@ function TestTab({
   // zero width (no FE-fabricated `Math.min(160, ...) / 2` literal).
   layout: WorkflowCanvasLayout | null;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const startWorkflowRun = useStartWorkflowRun();
   const matchedEvent = events.find((e) => e.matched_template === template.id);
@@ -1965,7 +1977,7 @@ function TestTab({
     try {
       parsedPayload = JSON.parse(payload);
     } catch (err) {
-      pushToast('Sample data must be valid JSON before it can be saved.', 'danger');
+      pushToast(t('workflowTemplates.test.invalidJson'), 'danger');
       setRunning(false);
       return;
     }
@@ -2019,11 +2031,11 @@ function TestTab({
           ? finalToneRaw
           : 'info';
       pushToast(
-        `Test run ${compactReferenceText(start.workflow_run_id)} · ${progress.workflow_status} · ${progress.duration_ms}ms`,
+        fill(t('workflowTemplates.test.runToast'), { ref: compactReferenceText(start.workflow_run_id), status: progress.workflow_status, ms: progress.duration_ms }),
         finalTone,
       );
     } catch (err) {
-      pushToast('Template test could not be started. Review the template and try again.', 'danger');
+      pushToast(t('workflowTemplates.test.startFailed'), 'danger');
     } finally {
       setRunning(false);
     }
@@ -2031,7 +2043,7 @@ function TestTab({
 
   return (
     <>
-      <div className="wf-insp__section-eyebrow">Run with sample payload</div>
+      <div className="wf-insp__section-eyebrow">{t('workflowTemplates.test.heading')}</div>
       <textarea
         className="wf-code-block wf-code-block--editable"
         rows={8}
@@ -2044,7 +2056,7 @@ function TestTab({
             key={evt.id}
             type="button"
             className="wf-recent-bar__btn"
-            title={`Use ${evt.id} as input`}
+            title={fill(t('workflowTemplates.test.useAsInput'), { id: evt.id })}
             onClick={() => setPayload(JSON.stringify(evt.payload, null, 2))}
           >
             <span className="mono">{evt.id}</span>
@@ -2061,7 +2073,7 @@ function TestTab({
             against the focused template; the capability gate fail-closes
             the FE Button to mirror server behavior. */}
         <Button
-          label={running ? 'Running…' : 'Run'}
+          label={running ? t('workflowTemplates.test.running') : t('workflowTemplates.test.run')}
           iconName="play"
           kind="primary"
           capability={CAP.WORKFLOWS_WRITE}
@@ -2073,7 +2085,7 @@ function TestTab({
         {running ? (
           <div className="wf-test-running">
             <span className="wf-spinner" />
-            <span>Starting workflow test…</span>
+            <span>{t('workflowTemplates.test.starting')}</span>
           </div>
         ) : null}
         {result ? (
@@ -2087,24 +2099,24 @@ function TestTab({
               <span>
                 {(lookupRow('workflow_run_status', result.finalStatus)?.metadata?.glyph as string | undefined) ?? '?'}{' '}
               </span>
-              <span>{result.trace.length} steps</span>
+              <span>{fill(t('workflowTemplates.test.steps'), { count: result.trace.length })}</span>
               <span style={{ opacity: 0.5, margin: '0 6px' }}>·</span>
-              <span>{result.duration_ms}ms</span>
+              <span>{fill(t('workflowTemplates.test.ms'), { ms: result.duration_ms })}</span>
               <span style={{ opacity: 0.5, margin: '0 6px' }}>·</span>
-              Test run recorded
+              {t('workflowTemplates.test.recorded')}
               <span style={{ opacity: 0.5, margin: '0 6px' }}>·</span>
-              <span>Reference recorded</span>
+              <span>{t('workflowTemplates.test.reference')}</span>
             </div>
             <ol className="wf-test-trace">
-              {result.trace.map((t, i) => {
-                const stepRow = lookupRow('workflow_step_status', t.status);
+              {result.trace.map((entry, i) => {
+                const stepRow = lookupRow('workflow_step_status', entry.status);
                 // Cycle E (Workflows P2 #8) — strict null-render. Bar
                 // width derives from canonical layout budget; when the
                 // step has no canonical duration projection (or the
                 // policy is missing), the bar is omitted instead of
                 // padded to a synthetic `1ms / 2` minimum.
-                const dur = typeof t.duration_ms === 'number' && t.duration_ms > 0
-                  ? t.duration_ms
+                const dur = typeof entry.duration_ms === 'number' && entry.duration_ms > 0
+                  ? entry.duration_ms
                   : null;
                 const barWidthPx =
                   layout && dur !== null
@@ -2114,26 +2126,26 @@ function TestTab({
                   <li key={i}>
                     {barWidthPx !== null ? (
                       <span
-                        className={`wf-test-trace__bar wf-test-trace__bar--${t.status}`}
+                        className={`wf-test-trace__bar wf-test-trace__bar--${entry.status}`}
                         style={{ width: `${barWidthPx}px` }}
                       />
                     ) : null}
-                    <span className="wf-test-trace__step">{t.step.label}</span>
+                    <span className="wf-test-trace__step">{entry.step.label}</span>
                     {stepRow ? (
                       <Chip
-                        label={stepRow.label ?? t.status}
+                        label={stepRow.label ?? entry.status}
                         kind={(stepRow.tone as ChipKind) ?? 'neutral'}
                         size="xs"
                       />
                     ) : (
                       <Chip
-                        label={missingSetupLabel('Step status setup missing', t.status)}
+                        label={missingSetupLabel(t('workflowTemplates.test.stepStatusMissing'), entry.status)}
                         kind="danger"
                         size="xs"
                       />
                     )}
                     <span className="wf-test-trace__dur mono">
-                      {dur !== null ? `${dur}ms` : '—'}
+                      {dur !== null ? fill(t('workflowTemplates.test.ms'), { ms: dur }) : '—'}
                     </span>
                   </li>
                 );
@@ -2160,13 +2172,14 @@ function HistoryTab({
   durationFormatPolicy: DurationFormatPolicy | null;
   onOpenRun: (runId: string) => void;
 }) {
+  const { t } = useI18n();
   const matched = runs.filter((r) => workflowRunTemplateId(r) === template.id);
   if (!matched.length) {
-    return <div className="state__hint">No runs yet for this template.</div>;
+    return <div className="state__hint">{t('workflowTemplates.history.empty')}</div>;
   }
   return (
     <>
-      <div className="wf-insp__section-eyebrow">{`Recent runs · ${matched.length}`}</div>
+      <div className="wf-insp__section-eyebrow">{fill(t('workflowTemplates.history.recent'), { count: matched.length })}</div>
       <div className="wf-history-list">
         {matched.map((r) => {
           const status = workflowRunStatus(r);
@@ -2180,13 +2193,13 @@ function HistoryTab({
             type="button"
             className="wf-history-row"
             onClick={() => onOpenRun(r.id)}
-            title="Open in Run History"
+            title={t('workflowTemplates.history.open')}
           >
             {row ? (
               <Dot kind={dotKind} />
             ) : (
               <Chip
-                label={missingSetupLabel('Run status setup missing', status)}
+                label={missingSetupLabel(t('workflowTemplates.canvas.runStatusMissing'), status)}
                 kind="danger"
                 size="xs"
               />
@@ -2201,7 +2214,7 @@ function HistoryTab({
               className="mono"
               style={{ fontSize: '11px', color: 'var(--ink-3)' }}
             >
-              {r.duration_ms ? `${r.duration_ms}ms` : '—'}
+              {r.duration_ms ? fill(t('workflowTemplates.test.ms'), { ms: r.duration_ms }) : '—'}
             </span>
           </button>
           );
@@ -2214,6 +2227,7 @@ function HistoryTab({
 type PaletteTab = 'templates' | 'operations' | 'snippets';
 
 export function TemplatesModule() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const drawer = useDrawer();
   const modal = useModal();
@@ -2418,7 +2432,7 @@ export function TemplatesModule() {
     const issues: ValidationIssue[] = [];
     const steps = activeTemplate.steps ?? [];
     if (!steps.length) {
-      issues.push({ stepId: null, msg: 'Template has no steps.' });
+      issues.push({ stepId: null, msg: t('workflowTemplates.validation.noSteps') });
     }
     const idsInBranch = new Set(steps.map((s) => s.id));
     const validOps = new Set(opsCatalog.map((o) => o.operation_name));
@@ -2440,10 +2454,10 @@ export function TemplatesModule() {
       return row?.metadata?.is_trigger === true;
     };
     if (main.length && !isTriggerKind(main[0]?.kind)) {
-      issues.push({ stepId: main[0]?.id ?? null, msg: 'First main step should be a trigger.' });
+      issues.push({ stepId: main[0]?.id ?? null, msg: t('workflowTemplates.validation.firstTrigger') });
     }
     if (steps.filter((s) => isTriggerKind(s.kind)).length > 1) {
-      issues.push({ stepId: null, msg: 'Template has more than one trigger step.' });
+      issues.push({ stepId: null, msg: t('workflowTemplates.validation.multipleTriggers') });
     }
     steps.forEach((s) => {
       // W62-Workflows (Cycle F-R-2 P1-4) — "requires error_path"
@@ -2453,25 +2467,25 @@ export function TemplatesModule() {
       // seed update.
       const stepKindMeta = (lookupRow('workflow_step_kind', s.kind) as { metadata?: { requires_error_path?: boolean } } | null)?.metadata;
       if (stepKindMeta?.requires_error_path === true && !s.error_path) {
-        issues.push({ stepId: s.id, msg: `Guard "${s.label}" needs an error path` });
+        issues.push({ stepId: s.id, msg: fill(t('workflowTemplates.validation.guardErrorPath'), { label: s.label }) });
       }
       if (!s.op) {
-        issues.push({ stepId: s.id, msg: `Step "${s.label}" missing operation` });
+        issues.push({ stepId: s.id, msg: fill(t('workflowTemplates.validation.missingOperation'), { label: s.label }) });
       } else if (validOps.size && !validOps.has(s.op)) {
         issues.push({
           stepId: s.id,
-          msg: `Step "${s.label}" uses an operation that is not available (${s.op})`,
+          msg: fill(t('workflowTemplates.validation.unknownOperation'), { label: s.label, operation: s.op }),
         });
       }
       if (s.error_path && !idsInBranch.has(s.error_path)) {
-        issues.push({ stepId: s.id, msg: `Error path "${compactReferenceText(s.error_path)}" does not match any step` });
+        issues.push({ stepId: s.id, msg: fill(t('workflowTemplates.validation.errorPath'), { ref: compactReferenceText(s.error_path) }) });
       }
       if (s.manual_path && !idsInBranch.has(s.manual_path)) {
-        issues.push({ stepId: s.id, msg: `Manual path "${compactReferenceText(s.manual_path)}" does not match any step` });
+        issues.push({ stepId: s.id, msg: fill(t('workflowTemplates.validation.manualPath'), { ref: compactReferenceText(s.manual_path) }) });
       }
     });
     return issues;
-  }, [activeTemplate, opsCatalog]);
+  }, [activeTemplate, opsCatalog, t]);
 
   const filteredTemplates = useMemo(() => {
     if (!search) return scopedTemplates;
@@ -2499,7 +2513,7 @@ export function TemplatesModule() {
   ): Promise<boolean> {
     if (!activeTemplate) return false;
     if (!canWrite) {
-      pushToast('Workflow update permission required to update workflow steps', 'danger');
+      pushToast(t('workflowTemplates.toast.updatePermission'), 'danger');
       return false;
     }
     try {
@@ -2512,10 +2526,10 @@ export function TemplatesModule() {
         ...prev,
         [stepId]: { ...(prev[stepId] || {}), ...patch },
       }));
-      pushToast('Step updated', 'good');
+      pushToast(t('workflowTemplates.toast.stepUpdated'), 'good');
       return true;
     } catch (err) {
-      pushToast('Step update could not be saved. Review the step and try again.', 'danger');
+      pushToast(t('workflowTemplates.toast.stepUpdateFailed'), 'danger');
       return false;
     }
   }
@@ -2594,30 +2608,29 @@ export function TemplatesModule() {
     if (!activeTemplate) return;
     const versions = activeTemplate.versions || [activeTemplate.version];
     palette.open({
-      placeholder: 'Switch version…',
+      placeholder: t('workflowTemplates.version.placeholder'),
       items: versions.map((v, i) => ({
         label: `${v === activeVersion ? '✓ ' : '  '}${v}`,
         key: v,
-        section: i === 0 ? 'Current' : 'History',
-        meta: i === 0 ? 'active' : 'archived',
+        section: i === 0 ? t('workflowTemplates.version.current') : t('workflowTemplates.version.history'),
+        meta: i === 0 ? t('workflowTemplates.version.active') : t('workflowTemplates.version.archived'),
       })),
       onPick: (it) => {
         const picked = String(it.key);
         setActiveVersion(picked);
-        pushToast(`Viewing ${picked}`, 'info');
+        pushToast(fill(t('workflowTemplates.version.viewing'), { version: picked }), 'info');
       },
     });
   }
 
   function openValidationDrawer() {
     drawer.open({
-      title: 'Validation issues',
+      title: t('workflowTemplates.validation.drawerTitle'),
       size: 'md',
       body: (
         <div>
           <p className="state__hint">
-            Issues are non-blocking. Save will succeed but trigger composer warns
-            operators.
+            {t('workflowTemplates.validation.drawerHint')}
           </p>
           <ul className="wf-issues">
             {validationIssues.map((iss, i) => (
@@ -2647,7 +2660,7 @@ export function TemplatesModule() {
     if (!activeTemplate) return;
     const source = workflowTemplateSourceCandidate(activeTemplate, scopedTemplates);
     if (!source) {
-      pushToast('No source version lineage available for this template', 'info');
+      pushToast(t('workflowTemplates.diff.noLineage'), 'info');
       return;
     }
     const sourceVersion = source.version ?? 'source';
@@ -2659,7 +2672,7 @@ export function TemplatesModule() {
         source_workflow_template_id: source.id,
       });
     } catch (err) {
-      pushToast('Version comparison could not be loaded. Review the template and try again.', 'danger');
+      pushToast(t('workflowTemplates.diff.loadFailed'), 'danger');
       return;
     }
     const added = recordArray(diff.added_steps);
@@ -2672,12 +2685,12 @@ export function TemplatesModule() {
         className="wf-diff-row"
       >
         <span className="mono">{compactReferenceText(step.sequence_order ?? step.id)}</span>
-        <span>{stringValue(step.label) ?? stringValue(step.operation_name) ?? 'Workflow step'}</span>
-        {tone ? <Chip label={tone} kind={tone === 'modified' ? 'warn' : tone === 'added' ? 'good' : 'neutral'} size="xs" /> : null}
+        <span>{stringValue(step.label) ?? stringValue(step.operation_name) ?? t('workflowTemplates.diff.workflowStep')}</span>
+        {tone ? <Chip label={t(`workflowTemplates.diff.tone.${tone}`)} kind={tone === 'modified' ? 'warn' : tone === 'added' ? 'good' : 'neutral'} size="xs" /> : null}
       </div>
     );
     modal.open({
-      title: `Version diff · ${activeTemplate.name}`,
+      title: fill(t('workflowTemplates.diff.title'), { name: activeTemplate.name }),
       body: (
         <div>
           <div className="wf-diff-bar">
@@ -2687,19 +2700,19 @@ export function TemplatesModule() {
             </span>
             <span className="mono">{currentVersion}</span>
             <Chip
-              label={`${Number(diff.source_step_count ?? removed.length + modified.length + unchanged.length)} source steps`}
+              label={fill(t('workflowTemplates.diff.sourceSteps'), { count: Number(diff.source_step_count ?? removed.length + modified.length + unchanged.length) })}
               kind="neutral"
               size="xs"
             />
             <Chip
-              label={`${Number(diff.current_step_count ?? added.length + modified.length + unchanged.length)} current steps`}
+              label={fill(t('workflowTemplates.diff.currentSteps'), { count: Number(diff.current_step_count ?? added.length + modified.length + unchanged.length) })}
               kind="neutral"
               size="xs"
             />
           </div>
           <div className="wf-diff-grid">
             <div className="wf-diff-pane">
-              <div className="wf-insp__section-eyebrow">Source {sourceVersion}</div>
+              <div className="wf-insp__section-eyebrow">{fill(t('workflowTemplates.diff.source'), { version: sourceVersion })}</div>
               {removed.length || modified.length || unchanged.length ? (
                 <>
                   {removed.map((step, index) => renderStepRow(step, 'removed', index))}
@@ -2707,11 +2720,11 @@ export function TemplatesModule() {
                   {unchanged.map((step, index) => renderStepRow(step, undefined, index))}
                 </>
               ) : (
-                <StateView kind="empty" title="No source steps" hint="The source version has no active steps." />
+                <StateView kind="empty" title={t('workflowTemplates.diff.noSourceTitle')} hint={t('workflowTemplates.diff.noSourceHint')} />
               )}
             </div>
             <div className="wf-diff-pane">
-              <div className="wf-insp__section-eyebrow">Current {currentVersion}</div>
+              <div className="wf-insp__section-eyebrow">{fill(t('workflowTemplates.diff.current'), { version: currentVersion })}</div>
               {added.length || modified.length || unchanged.length ? (
                 <>
                   {added.map((step, index) => renderStepRow(step, 'added', index))}
@@ -2719,7 +2732,7 @@ export function TemplatesModule() {
                   {unchanged.map((step, index) => renderStepRow(step, undefined, index))}
                 </>
               ) : (
-                <StateView kind="empty" title="No current steps" hint="The current template has no active steps." />
+                <StateView kind="empty" title={t('workflowTemplates.diff.noCurrentTitle')} hint={t('workflowTemplates.diff.noCurrentHint')} />
               )}
             </div>
           </div>
@@ -2728,7 +2741,7 @@ export function TemplatesModule() {
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button
-            label={`Restore to ${sourceVersion}`}
+            label={fill(t('workflowTemplates.diff.restore'), { version: sourceVersion })}
             kind="ghost"
             capability={CAP.WORKFLOWS_WRITE}
             disabled={restoreTemplateVersion.isPending}
@@ -2761,13 +2774,13 @@ export function TemplatesModule() {
                   requestedAt: new Date().toISOString(),
                 });
                 modal.close();
-                pushToast(`Restored ${activeTemplate.name} to ${sourceVersion}`, 'good');
+                pushToast(fill(t('workflowTemplates.diff.restored'), { name: activeTemplate.name, version: sourceVersion }), 'good');
               } catch (err) {
-                pushToast('Template restore could not be completed. Review the version and try again.', 'danger');
+                pushToast(t('workflowTemplates.diff.restoreFailed'), 'danger');
               }
             }}
           />
-          <Button label="Close" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowTemplates.common.close')} kind="ghost" onClick={() => modal.close()} />
         </div>
       ),
     });
@@ -2781,7 +2794,7 @@ export function TemplatesModule() {
       ?? activeStep
       ?? null;
     modal.open({
-      title: 'Trigger composer',
+      title: t('workflowTemplates.trigger.title'),
       body: (
         <TriggerComposerPreview
           template={activeTemplate}
@@ -2789,7 +2802,7 @@ export function TemplatesModule() {
           durationFormatPolicy={durationFormatPolicy}
           onSave={async ({ triggerEvent, conditions, conditionJsonLogic }) => {
             if (!triggerStep) {
-              pushToast('No workflow trigger step found', 'danger');
+              pushToast(t('workflowTemplates.trigger.noStep'), 'danger');
               return false;
             }
             return patchStep(triggerStep.id, {
@@ -2803,7 +2816,7 @@ export function TemplatesModule() {
           }}
         />
       ),
-      footer: <Button label="Close" kind="ghost" onClick={() => modal.close()} />,
+      footer: <Button label={t('workflowTemplates.common.close')} kind="ghost" onClick={() => modal.close()} />,
     });
   }
 
@@ -2819,12 +2832,12 @@ export function TemplatesModule() {
     }>;
     if (eventLookup.length === 0) {
       modal.open({
-        title: 'New template',
+        title: t('workflowTemplates.create.title'),
         body: (
           <StateView
             kind="error"
-            title="Template triggers are not configured"
-            hint="Ask platform operations to finish the trigger setup before creating new templates."
+            title={t('workflowTemplates.create.noTriggersTitle')}
+            hint={t('workflowTemplates.create.noTriggersHint')}
           />
         ),
         actions: [],
@@ -2834,12 +2847,11 @@ export function TemplatesModule() {
     let name = '';
     let trigger = String(eventLookup[0]!.value);
     modal.open({
-      title: 'New template',
+      title: t('workflowTemplates.create.title'),
       body: (
         <div>
           <p className="state__hint">
-            A new template starts with a single trigger step. You can add
-            transform/guard/action/error steps after.
+            {t('workflowTemplates.create.intro')}
           </p>
           <div
             style={{
@@ -2849,15 +2861,15 @@ export function TemplatesModule() {
               alignItems: 'center',
             }}
           >
-            <label className="mono">Name</label>
+            <label className="mono">{t('workflowTemplates.create.name')}</label>
             <input
               className="dt-inline-input"
-              placeholder="e.g. Pickup wave assigner"
+              placeholder={t('workflowTemplates.create.namePlaceholder')}
               onChange={(e) => {
                 name = e.target.value;
               }}
             />
-            <label className="mono">Trigger event</label>
+            <label className="mono">{t('workflowTemplates.create.triggerEvent')}</label>
             {/*
               W27 Cycle D closure: trigger event picker reads strictly from
               the canonical `workflow_binding_event` lookup. Replaces the
@@ -2882,9 +2894,9 @@ export function TemplatesModule() {
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowTemplates.common.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Create"
+            label={t('workflowTemplates.create.create')}
             kind="primary"
             capability={CAP.WORKFLOWS_WRITE}
             onClick={async () => {
@@ -2914,11 +2926,11 @@ export function TemplatesModule() {
                 }
                 modal.close();
                 pushToast(
-                  `Template draft created · ${name || 'untitled'} (${displayLookupLabel('workflow_binding_event', trigger)})`,
+                  fill(t('workflowTemplates.create.created'), { name: name || 'untitled', event: displayLookupLabel('workflow_binding_event', trigger) }),
                   'good',
                 );
               } catch (err) {
-                pushToast('Template could not be created. Review the template details and try again.', 'danger');
+                pushToast(t('workflowTemplates.create.failed'), 'danger');
               }
             }}
           />
@@ -2962,7 +2974,7 @@ export function TemplatesModule() {
     setPendingStepFocusId(result.workflow_template_step_id);
     setActiveStepId(result.workflow_template_step_id);
     pushToast(
-      `${opts.firstStep ? 'Trigger step' : 'Step'} created · ${op.operation_name}`,
+      fill(opts.firstStep ? t('workflowTemplates.steps.triggerCreated') : t('workflowTemplates.steps.created'), { operation: op.operation_name }),
       'good',
     );
   }
@@ -2970,21 +2982,21 @@ export function TemplatesModule() {
   function openAddStepPalette(opts: { firstStep?: boolean } = {}) {
     if (!activeTemplate) return;
     if (!canWrite) {
-      pushToast('Workflow update permission required to create workflow steps', 'danger');
+      pushToast(t('workflowTemplates.toast.createPermission'), 'danger');
       return;
     }
     const operations = opts.firstStep ? opsCatalog.filter(isTriggerOperation) : opsCatalog;
     if (!operations.length) {
       pushToast(
         opts.firstStep
-          ? 'Configured trigger operations are empty · cannot create first workflow step'
-          : 'Operations catalog is empty · cannot create workflow step',
+          ? t('workflowTemplates.steps.noTriggerOperations')
+          : t('workflowTemplates.steps.noOperations'),
         'danger',
       );
       return;
     }
     palette.open({
-      placeholder: opts.firstStep ? 'Add trigger operation as first step…' : 'Add operation as step…',
+      placeholder: opts.firstStep ? t('workflowTemplates.steps.addFirstPlaceholder') : t('workflowTemplates.steps.addPlaceholder'),
       items: operations.map((op) => ({
         label: op.operation_name,
         key: op.id,
@@ -2998,7 +3010,7 @@ export function TemplatesModule() {
         try {
           await createWorkflowStepFromOperation(op, { firstStep: opts.firstStep });
         } catch (err) {
-          pushToast('Step could not be created. Review the step details and try again.', 'danger');
+          pushToast(t('workflowTemplates.steps.createFailed'), 'danger');
         }
       },
     });
@@ -3007,7 +3019,7 @@ export function TemplatesModule() {
   async function duplicateActiveStep() {
     if (!activeTemplate || !activeStep) return;
     if (!canWrite) {
-      pushToast('Workflow update permission required to duplicate workflow steps', 'danger');
+      pushToast(t('workflowTemplates.toast.duplicatePermission'), 'danger');
       return;
     }
     try {
@@ -3018,26 +3030,26 @@ export function TemplatesModule() {
       setStepEdits({});
       setPendingStepFocusId(result.workflow_template_step_id);
       setActiveStepId(result.workflow_template_step_id);
-      pushToast(`Step duplicated · ${activeStep.label}`, 'good');
+      pushToast(fill(t('workflowTemplates.steps.duplicated'), { label: activeStep.label }), 'good');
     } catch (err) {
-      pushToast('Step could not be duplicated. Review the step and try again.', 'danger');
+      pushToast(t('workflowTemplates.steps.duplicateFailed'), 'danger');
     }
   }
 
   function confirmDeleteActiveStep() {
     if (!activeTemplate || !activeStep) return;
     modal.open({
-      title: `Delete step · ${activeStep.label}`,
+      title: fill(t('workflowTemplates.steps.deleteTitle'), { label: activeStep.label }),
       body: (
         <p className="state__hint">
-          Runtime-referenced steps are disabled instead of removed so workflow history remains intact.
+          {t('workflowTemplates.steps.deleteHint')}
         </p>
       ),
       footer: (
         <div style={{ display: 'flex', gap: '8px' }}>
-          <Button label="Cancel" kind="ghost" onClick={() => modal.close()} />
+          <Button label={t('workflowTemplates.common.cancel')} kind="ghost" onClick={() => modal.close()} />
           <Button
-            label="Delete"
+            label={t('workflowTemplates.steps.delete')}
             kind="danger"
             capability={CAP.WORKFLOWS_WRITE}
             onClick={async () => {
@@ -3057,9 +3069,9 @@ export function TemplatesModule() {
                 });
                 setActiveStepId(nextStep?.id ?? null);
                 modal.close();
-                pushToast(`Step deleted · ${activeStep.label}`, 'good');
+                pushToast(fill(t('workflowTemplates.steps.deleted'), { label: activeStep.label }), 'good');
               } catch (err) {
-                pushToast('Step could not be deleted. Review the step and try again.', 'danger');
+                pushToast(t('workflowTemplates.steps.deleteFailed'), 'danger');
               }
             }}
           />
@@ -3087,7 +3099,7 @@ export function TemplatesModule() {
     setPromotionReadback(null);
     setRestoreReadback(null);
     setStepActionReadback({
-      actionLabel: 'Pin sample data',
+      actionLabel: t('workflowTemplates.steps.pinSample'),
       templateId: activeTemplate.id,
       templateLabel: activeTemplate.name,
       stepId: activeStep.id,
@@ -3131,7 +3143,7 @@ export function TemplatesModule() {
     const stepActionRows = api.getLookups('workflow_step_action') as StepActionRow[];
     if (!stepActionRows.length) {
       pushToast(
-        'Step actions are not configured · cannot open the actions palette',
+        t('workflowTemplates.steps.actionsMissing'),
         'danger',
       );
       return;
@@ -3144,7 +3156,7 @@ export function TemplatesModule() {
       convert_error: () => {
         const errorBranch = resolveErrorWorkflowBranchKind();
         if (!errorBranch) {
-          pushToast('Error branch is not configured', 'danger');
+          pushToast(t('workflowTemplates.steps.errorBranchMissing'), 'danger');
           return;
         }
         void patchStep(activeStep.id, { branch: errorBranch });
@@ -3161,11 +3173,11 @@ export function TemplatesModule() {
       decision_trail: () => openActiveStepDecisionTrail(),
     };
     palette.open({
-      placeholder: 'Step actions…',
+      placeholder: t('workflowTemplates.steps.actionsPlaceholder'),
       items: stepActionRows.map((row) => ({
         label: row.label,
         key: row.metadata?.handler_kind ?? row.value,
-        section: row.metadata?.section ?? 'Action',
+        section: row.metadata?.section ?? t('workflowTemplates.steps.actionSection'),
       })),
       onPick: (it) => {
         const handler = handlers[String(it.key)];
@@ -3185,13 +3197,13 @@ export function TemplatesModule() {
       (s) => (lookupRow('workflow_branch_kind', s.branch ?? '') as { metadata?: { is_error_branch?: boolean } } | null)?.metadata?.is_error_branch === true
     );
     palette.open({
-      placeholder: 'On error → step',
+      placeholder: t('workflowTemplates.config.onError'),
       items: [
-        { label: '— clear —', key: '__clear__', section: 'Action' },
+        { label: t('workflowTemplates.steps.clear'), key: '__clear__', section: t('workflowTemplates.steps.actionSection') },
         ...candidates.map((s) => ({
           label: `${compactReferenceText(s.id)} · ${s.label}`,
           key: s.id,
-          section: 'Error branch',
+          section: t('workflowTemplates.steps.errorBranch'),
         })),
       ],
       onPick: (it) => {
@@ -3215,7 +3227,7 @@ export function TemplatesModule() {
     // what to do next.
     if (!activeStep) {
       pushToast(
-        'Click a step on the canvas to open the Test panel for it.',
+        t('workflowTemplates.steps.selectForTest'),
         'info',
       );
     }
@@ -3226,14 +3238,14 @@ export function TemplatesModule() {
       <div className="page wf-studio">
         <PageHeader
           moduleKey="wf-templates"
-          eyebrow="Workflows"
-          titleAccent="Template studio"
-          titlePlain="— design row-driven flows"
+          eyebrow={t('workflowTemplates.header.eyebrow')}
+          titleAccent={t('workflowTemplates.header.accent')}
+          titlePlain={t('workflowTemplates.header.plain')}
         />
         <StateView
           kind="denied"
           capability={CAP.WORKFLOWS_READ}
-          hint="You do not have permission to view workflow templates."
+          hint={t('workflowTemplates.header.denied')}
         />
       </div>
     );
@@ -3244,9 +3256,9 @@ export function TemplatesModule() {
       <div className="page wf-studio">
         <PageHeader
           moduleKey="wf-templates"
-          eyebrow="Workflows"
-          titleAccent="Template studio"
-          titlePlain="— design row-driven flows"
+          eyebrow={t('workflowTemplates.header.eyebrow')}
+          titleAccent={t('workflowTemplates.header.accent')}
+          titlePlain={t('workflowTemplates.header.plain')}
           pills={[]}
         />
         <StateView kind="loading" />
@@ -3259,9 +3271,9 @@ export function TemplatesModule() {
       <div className="page wf-studio">
         <PageHeader
           moduleKey="wf-templates"
-          eyebrow="Workflows"
-          titleAccent="Template studio"
-          titlePlain="— design row-driven flows"
+          eyebrow={t('workflowTemplates.header.eyebrow')}
+          titleAccent={t('workflowTemplates.header.accent')}
+          titlePlain={t('workflowTemplates.header.plain')}
           pills={[]}
         />
         <StateView kind="error" hint={String(templatesQuery.error)} />
@@ -3274,14 +3286,14 @@ export function TemplatesModule() {
       <div className="page wf-studio">
         <PageHeader
           moduleKey="wf-templates"
-          eyebrow="Workflows"
-          titleAccent="Template studio"
-          titlePlain="— design row-driven flows"
+          eyebrow={t('workflowTemplates.header.eyebrow')}
+          titleAccent={t('workflowTemplates.header.accent')}
+          titlePlain={t('workflowTemplates.header.plain')}
           pills={[]}
           actions={[
             <Button
               key="new"
-              label="New template"
+              label={t('workflowTemplates.create.title')}
               iconName="plus"
               kind="primary"
               onClick={openNewTemplate}
@@ -3290,8 +3302,8 @@ export function TemplatesModule() {
         />
         <StateView
           kind="empty"
-          title="No templates yet"
-          hint="Create your first workflow template to get started."
+          title={t('workflowTemplates.header.emptyTitle')}
+          hint={t('workflowTemplates.header.emptyHint')}
         />
         {modal.node}
         {drawer.node}
@@ -3365,8 +3377,8 @@ export function TemplatesModule() {
     <div className="page wf-studio">
       <header className="wf-topbar">
         <div className="wf-topbar__brand">
-          <span className="wf-topbar__eyebrow mono">WORKFLOWS</span>
-          <span className="wf-topbar__title">Template Studio</span>
+          <span className="wf-topbar__eyebrow mono">{t('workflowTemplates.topbar.eyebrow')}</span>
+          <span className="wf-topbar__title">{t('workflowTemplates.topbar.title')}</span>
         </div>
         <div className="wf-topbar__crumb mono">
           {compactReference(activeTemplate.template_id)}
@@ -3375,7 +3387,7 @@ export function TemplatesModule() {
             type="button"
             className="wf-topbar__version"
             onClick={openVersionMenu}
-            title="Switch version · view history"
+            title={t('workflowTemplates.topbar.versionTitle')}
           >
             <span>{activeVersion}</span>
             <span style={{ fontSize: '8px', opacity: 0.6, marginLeft: '4px' }}>
@@ -3389,21 +3401,21 @@ export function TemplatesModule() {
             type="button"
             className="wf-topbar__issues"
             onClick={openValidationDrawer}
-            title="Click to view issues"
+            title={t('workflowTemplates.topbar.issuesTitle')}
           >
             <Icon name="warn" size={12} />
-            <span>{`${validationIssues.length} issue${validationIssues.length === 1 ? '' : 's'}`}</span>
+            <span>{fill(validationIssues.length === 1 ? t('workflowTemplates.topbar.issueOne') : t('workflowTemplates.topbar.issueOther'), { count: validationIssues.length })}</span>
           </button>
         ) : (
           <span className="wf-topbar__valid">
             <Icon name="check" size={11} />
-            <span>Valid</span>
+            <span>{t('workflowTemplates.topbar.valid')}</span>
           </span>
         )}
-        <Button label="Diff" iconName="list" kind="ghost" onClick={openDiffModal} />
-        <Button label="View runs" iconName="right" kind="ghost" onClick={viewRunsForTemplate} />
+        <Button label={t('workflowTemplates.topbar.diff')} iconName="list" kind="ghost" onClick={openDiffModal} />
+        <Button label={t('workflowTemplates.topbar.viewRuns')} iconName="right" kind="ghost" onClick={viewRunsForTemplate} />
         <Button
-          label="Add step"
+          label={t('workflowTemplates.topbar.addStep')}
           iconName="plus"
           kind="ghost"
           onClick={() => openAddStepPalette()}
@@ -3432,7 +3444,7 @@ export function TemplatesModule() {
           if (!toggleTo || !toggleLabel || !toggleIcon || !toggleKind) {
             return (
               <Button
-                label={missingSetupLabel('Status action setup missing', activeTemplate.status)}
+                label={missingSetupLabel(t('workflowTemplates.topbar.statusActionMissing'), activeTemplate.status)}
                 iconName="warn"
                 kind="ghost"
                 disabled
@@ -3465,7 +3477,7 @@ export function TemplatesModule() {
                   pushToast(`${verb} - ${activeTemplate.name}`, 'good');
                 } catch (err) {
                   pushToast(
-                    'Status change could not be saved. Review the template and try again.',
+                    t('workflowTemplates.topbar.statusFailed'),
                     'danger',
                   );
                 }
@@ -3474,14 +3486,14 @@ export function TemplatesModule() {
           );
         })()}
         <Button
-          label="Test run"
+          label={t('workflowTemplates.topbar.testRun')}
           iconName="play"
           kind="ghost"
           onClick={openTestPanelInline}
           capability={CAP.WORKFLOWS_WRITE}
         />
         <Button
-          label="Publish"
+          label={t('workflowTemplates.topbar.publish')}
           iconName="check"
           kind="ghost"
           onClick={async () => {
@@ -3512,17 +3524,17 @@ export function TemplatesModule() {
                 });
               }
               pushToast(
-                `Clone created - ${cloneName} (source ${compactReferenceText(activeTemplate.id)})`,
+                fill(t('workflowTemplates.topbar.cloneCreated'), { name: cloneName, ref: compactReferenceText(activeTemplate.id) }),
                 'good',
               );
             } catch (err) {
-              pushToast('Template could not be published. Review the template and try again.', 'danger');
+              pushToast(t('workflowTemplates.topbar.publishFailed'), 'danger');
             }
           }}
           capability={CAP.WORKFLOWS_WRITE}
         />
         <Button
-          label="New template"
+          label={t('workflowTemplates.create.title')}
           iconName="plus"
           kind="primary"
           onClick={openNewTemplate}
@@ -3533,36 +3545,36 @@ export function TemplatesModule() {
         <section
           className="wf-promotion-readback"
           data-testid="workflow-template-promotion-readback"
-          aria-label="Workflow template promotion result"
+          aria-label={t('workflowTemplates.readback.promotionAria')}
         >
           <div className="wf-promotion-readback__head">
             <div>
-              <div className="wf-promotion-readback__label">Template publish result</div>
+              <div className="wf-promotion-readback__label">{t('workflowTemplates.readback.promotionTitle')}</div>
               <strong>{promotionReadback.templateLabel}</strong>
             </div>
             <Chip
-              label={promotionConfirmed ? 'Confirmed from saved data' : 'Waiting for saved data'}
+              label={promotionConfirmed ? t('workflowTemplates.readback.confirmed') : t('workflowTemplates.readback.waiting')}
               kind={promotionConfirmed ? 'good' : 'info'}
               size="xs"
             />
           </div>
           <div className="wf-promotion-readback__grid">
             <div>
-              <span>Action</span>
+              <span>{t('workflowTemplates.readback.action')}</span>
               <div>
                 {promotionReadback.kind === 'publish'
-                  ? 'Clone draft'
+                  ? t('workflowTemplates.readback.cloneDraft')
                   : promotionReadback.kind === 'create'
-                    ? 'Create draft'
-                    : 'Status change'}
+                    ? t('workflowTemplates.readback.createDraft')
+                    : t('workflowTemplates.readback.statusChange')}
               </div>
             </div>
             <div>
-              <span>Template</span>
-              <div className="wf-promotion-readback__wrap">Template recorded</div>
+              <span>{t('workflowTemplates.readback.template')}</span>
+              <div className="wf-promotion-readback__wrap">{t('workflowTemplates.readback.templateRecorded')}</div>
             </div>
             <div>
-              <span>Status</span>
+              <span>{t('workflowTemplates.readback.status')}</span>
               <div>
                 {promotionStatus ? (
                   <Chip
@@ -3571,28 +3583,28 @@ export function TemplatesModule() {
                     size="xs"
                   />
                 ) : (
-                  <span>Awaiting row</span>
+                  <span>{t('workflowTemplates.readback.awaiting')}</span>
                 )}
               </div>
             </div>
             <div>
-              <span>Published</span>
-              <div>{promotionDirectory?.is_published ? 'Yes' : 'No'}</div>
+              <span>{t('workflowTemplates.readback.published')}</span>
+              <div>{promotionDirectory?.is_published ? t('workflowTemplates.readback.yes') : t('workflowTemplates.readback.no')}</div>
             </div>
             <div>
-              <span>Steps / bindings</span>
+              <span>{t('workflowTemplates.readback.stepsBindings')}</span>
               <div>
                 {promotionDirectory
                   ? `${promotionDirectory.step_count} / ${promotionDirectory.binding_count}${
                     promotionReadback.expectedStepCount != null
-                      ? ` (expected steps ${promotionReadback.expectedStepCount})`
+                      ? ` ${fill(t('workflowTemplates.readback.expectedSteps'), { count: promotionReadback.expectedStepCount })}`
                       : ''
                   }`
-                  : 'Awaiting row'}
+                  : t('workflowTemplates.readback.awaiting')}
               </div>
             </div>
             <div>
-              <span>Requested</span>
+              <span>{t('workflowTemplates.readback.requested')}</span>
               <div>{promotionReadback.requestedAt}</div>
             </div>
           </div>
@@ -3600,20 +3612,20 @@ export function TemplatesModule() {
             <div className="wf-promotion-readback__meta">
               {promotionReadback.kind === 'publish' ? (
                 <>
-                  Source template recorded
+                  {t('workflowTemplates.readback.sourceRecorded')}
                   {promotionSourceLineage ? (
                     <>
-                      {' '}-- source confirmed
+                      {' '}{t('workflowTemplates.readback.sourceConfirmed')}
                     </>
                   ) : null}
                 </>
               ) : null}
-              {promotionReadback.correlationId ? <> -- reference recorded</> : null}
+              {promotionReadback.correlationId ? <> {t('workflowTemplates.readback.referenceRecorded')}</> : null}
             </div>
           ) : null}
           {activeTemplateDirectory && activeTemplate.id === promotionReadback.templateId ? (
             <div className="wf-promotion-readback__status" role="status">
-              Saved template list is focused on the selected template.
+              {t('workflowTemplates.readback.focusedSelected')}
             </div>
           ) : null}
         </section>
@@ -3622,64 +3634,64 @@ export function TemplatesModule() {
         <section
           className="wf-promotion-readback"
           data-testid="workflow-template-restore-readback"
-          aria-label="Workflow template restore result"
+          aria-label={t('workflowTemplates.readback.restoreAria')}
         >
           <div className="wf-promotion-readback__head">
             <div>
-              <div className="wf-promotion-readback__label">Template recovery result</div>
+              <div className="wf-promotion-readback__label">{t('workflowTemplates.readback.restoreTitle')}</div>
               <strong>{restoreReadback.templateLabel}</strong>
             </div>
             <Chip
-              label={restoreConfirmed ? 'Confirmed from saved data' : 'Waiting for saved data'}
+              label={restoreConfirmed ? t('workflowTemplates.readback.confirmed') : t('workflowTemplates.readback.waiting')}
               kind={restoreConfirmed ? 'good' : 'info'}
               size="xs"
             />
           </div>
           <div className="wf-promotion-readback__grid">
             <div>
-              <span>Action</span>
-              <div>Restore version</div>
+              <span>{t('workflowTemplates.readback.action')}</span>
+              <div>{t('workflowTemplates.readback.restoreVersion')}</div>
             </div>
             <div>
-              <span>Template</span>
-              <div className="wf-promotion-readback__wrap">Template recorded</div>
+              <span>{t('workflowTemplates.readback.template')}</span>
+              <div className="wf-promotion-readback__wrap">{t('workflowTemplates.readback.templateRecorded')}</div>
             </div>
             <div>
-              <span>Version</span>
+              <span>{t('workflowTemplates.readback.version')}</span>
               <div>
-                {restoredVersion ?? 'Awaiting row'}
-                {restoreReadback.restoredVersion ? ` (expected ${restoreReadback.restoredVersion})` : ''}
+                {restoredVersion ?? t('workflowTemplates.readback.awaiting')}
+                {restoreReadback.restoredVersion ? ` ${fill(t('workflowTemplates.readback.expected'), { value: restoreReadback.restoredVersion })}` : ''}
               </div>
             </div>
             <div>
-              <span>Steps</span>
+              <span>{t('workflowTemplates.readback.steps')}</span>
               <div>
                 {restoredStepCount != null
-                  ? `${restoredStepCount}${restoreReadback.restoredStepCount != null ? ` (expected ${restoreReadback.restoredStepCount})` : ''}`
-                  : 'Awaiting row'}
+                  ? `${restoredStepCount}${restoreReadback.restoredStepCount != null ? ` ${fill(t('workflowTemplates.readback.expected'), { value: restoreReadback.restoredStepCount })}` : ''}`
+                  : t('workflowTemplates.readback.awaiting')}
               </div>
             </div>
             <div>
-              <span>Source</span>
-              <div className="wf-promotion-readback__wrap">Source template recorded</div>
+              <span>{t('workflowTemplates.readback.source')}</span>
+              <div className="wf-promotion-readback__wrap">{t('workflowTemplates.readback.sourceRecorded')}</div>
             </div>
             <div>
-              <span>Requested</span>
+              <span>{t('workflowTemplates.readback.requested')}</span>
               <div>{restoreReadback.requestedAt}</div>
             </div>
           </div>
           <div className="wf-promotion-readback__meta">
-            Source version {restoreReadback.sourceVersion ?? 'unknown'}
+            {fill(t('workflowTemplates.readback.sourceVersion'), { version: restoreReadback.sourceVersion ?? t('workflowTemplates.readback.unknown') })}
             {restoredSourceLineage ? (
               <>
-                {' '}-- source confirmed
+                {' '}{t('workflowTemplates.readback.sourceConfirmed')}
               </>
             ) : null}
-            {restoreReadback.correlationId ? <> -- reference recorded</> : null}
+            {restoreReadback.correlationId ? <> {t('workflowTemplates.readback.referenceRecorded')}</> : null}
           </div>
           {activeTemplateDirectory && activeTemplate.id === restoreReadback.templateId ? (
             <div className="wf-promotion-readback__status" role="status">
-              Saved template list is focused on the restored template.
+              {t('workflowTemplates.readback.focusedRestored')}
             </div>
           ) : null}
         </section>
@@ -3688,35 +3700,35 @@ export function TemplatesModule() {
         <section
           className="wf-promotion-readback"
           data-testid="workflow-template-step-action-readback"
-          aria-label="Workflow template step action result"
+          aria-label={t('workflowTemplates.readback.stepAria')}
         >
           <div className="wf-promotion-readback__head">
             <div>
-              <div className="wf-promotion-readback__label">Step update result</div>
+              <div className="wf-promotion-readback__label">{t('workflowTemplates.readback.stepTitle')}</div>
               <strong>{stepActionReadback.stepLabel}</strong>
             </div>
-            <Chip label="Confirmed from saved data" kind="good" size="xs" />
+            <Chip label={t('workflowTemplates.readback.confirmed')} kind="good" size="xs" />
           </div>
           <div className="wf-promotion-readback__grid">
             <div>
-              <span>Action</span>
+              <span>{t('workflowTemplates.readback.action')}</span>
               <div>{stepActionReadback.actionLabel}</div>
             </div>
             <div>
-              <span>Template</span>
-              <div className="wf-promotion-readback__wrap">Template recorded</div>
+              <span>{t('workflowTemplates.readback.template')}</span>
+              <div className="wf-promotion-readback__wrap">{t('workflowTemplates.readback.templateRecorded')}</div>
             </div>
             <div>
-              <span>Step</span>
-              <div className="wf-promotion-readback__wrap">Step recorded</div>
+              <span>{t('workflowTemplates.readback.step')}</span>
+              <div className="wf-promotion-readback__wrap">{t('workflowTemplates.readback.stepRecorded')}</div>
             </div>
             <div>
-              <span>Requested</span>
+              <span>{t('workflowTemplates.readback.requested')}</span>
               <div>{stepActionReadback.requestedAt}</div>
             </div>
           </div>
           <div className="wf-promotion-readback__meta">
-            Saved step settings recorded
+            {t('workflowTemplates.readback.stepSettingsRecorded')}
           </div>
         </section>
       ) : null}
@@ -3728,18 +3740,18 @@ export function TemplatesModule() {
               type="text"
               placeholder={
                 paletteTab === 'templates'
-                  ? 'Search templates…'
+                  ? t('workflowTemplates.palette.searchTemplates')
                   : paletteTab === 'operations'
-                    ? 'Search operations…'
-                    : 'Snippets coming soon'
+                    ? t('workflowTemplates.palette.searchOperations')
+                    : t('workflowTemplates.palette.snippetsTitle')
               }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              aria-label="Palette search"
+              aria-label={t('workflowTemplates.palette.searchAria')}
             />
           </div>
           <div className="wf-palette__tabs">
-            <div role="tablist" aria-label="Palette sections" style={{ display: 'contents' }}>
+            <div role="tablist" aria-label={t('workflowTemplates.palette.sectionsAria')} style={{ display: 'contents' }}>
               <button
                 type="button"
                 role="tab"
@@ -3750,7 +3762,7 @@ export function TemplatesModule() {
                 className={`wf-palette__tab ${paletteTab === 'templates' ? 'is-active' : ''}`}
                 onClick={() => setPaletteTab('templates')}
               >
-                Templates
+                {t('workflowTemplates.palette.templates')}
               </button>
               <button
                 type="button"
@@ -3761,9 +3773,9 @@ export function TemplatesModule() {
                 tabIndex={paletteTab === 'operations' ? 0 : -1}
                 className={`wf-palette__tab ${paletteTab === 'operations' ? 'is-active' : ''}`}
                 onClick={() => setPaletteTab('operations')}
-                title="Operations catalog"
+                title={t('workflowTemplates.palette.operationsTitle')}
               >
-                Operations
+                {t('workflowTemplates.palette.operations')}
               </button>
               <button
                 type="button"
@@ -3775,18 +3787,18 @@ export function TemplatesModule() {
                 className={`wf-palette__tab ${paletteTab === 'snippets' ? 'is-active' : ''}`}
                 onClick={() => setPaletteTab('snippets')}
                 disabled
-                title="Workflow snippets are not available yet"
+                title={t('workflowTemplates.palette.snippetsUnavailable')}
               >
-                Snippets
+                {t('workflowTemplates.palette.snippets')}
               </button>
             </div>
             <button
               type="button"
               className="wf-palette__tab"
               onClick={openTriggerComposer}
-              title="Template triggers"
+              title={t('workflowTemplates.palette.triggersTitle')}
             >
-              Triggers
+              {t('workflowTemplates.palette.triggers')}
             </button>
           </div>
           <div
@@ -3834,8 +3846,8 @@ export function TemplatesModule() {
                       return (
                         <StateView
                           kind="empty"
-                          title="No operations match"
-                          hint="No configured operation matches this search."
+                          title={t('workflowTemplates.palette.noOperationsTitle')}
+                          hint={t('workflowTemplates.palette.noOperationsHint')}
                         />
                       );
                     }
@@ -3846,11 +3858,11 @@ export function TemplatesModule() {
                         className="wf-tpl-card"
                         onClick={async () => {
                           if (!canWrite) {
-                            pushToast(`Workflow update permission required to bind ${op.operation_name}`, 'danger');
+                            pushToast(fill(t('workflowTemplates.palette.bindPermission'), { operation: op.operation_name }), 'danger');
                             return;
                           }
                           if (!activeStep) {
-                            pushToast(`Select a step before binding ${op.operation_name}`, 'info');
+                            pushToast(fill(t('workflowTemplates.palette.selectStep'), { operation: op.operation_name }), 'info');
                             return;
                           }
                           await patchStep(activeStep.id, { op: op.operation_name });
@@ -3863,12 +3875,12 @@ export function TemplatesModule() {
                             const r = kindTone(op.kind);
                             return r.tone && r.label
                               ? <Chip label={r.label} kind={r.tone} size="xs" />
-                              : <Chip label={missingSetupLabel('Step type setup missing', op.kind)} kind="danger" size="xs" />;
+                              : <Chip label={missingSetupLabel(t('workflowTemplates.config.stepTypeMissing'), op.kind)} kind="danger" size="xs" />;
                           })()}
                         </div>
                         <div className="wf-tpl-card__row2 mono">{op.category}</div>
                         <div className="wf-tpl-card__row3">
-                          <span className="wf-tpl-card__runs mono">{op.timeout_seconds}s timeout</span>
+                          <span className="wf-tpl-card__runs mono">{fill(t('workflowTemplates.palette.timeout'), { seconds: op.timeout_seconds })}</span>
                         </div>
                       </button>
                     ));
@@ -3876,8 +3888,8 @@ export function TemplatesModule() {
                 : (
                     <StateView
                       kind="empty"
-                      title="Snippets coming soon"
-                      hint="Reusable workflow snippets are not available yet."
+                      title={t('workflowTemplates.palette.snippetsTitle')}
+                      hint={t('workflowTemplates.palette.snippetsHint')}
                     />
                   )}
           </div>
@@ -3886,7 +3898,7 @@ export function TemplatesModule() {
           className="wf-canvas-wrap"
           tabIndex={0}
           role="region"
-          aria-label="Workflow template canvas"
+          aria-label={t('workflowTemplates.palette.canvasAria')}
           onKeyDown={onCanvasKeyDown}
         >
           <Canvas

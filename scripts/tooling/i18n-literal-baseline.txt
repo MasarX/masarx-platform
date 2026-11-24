@@ -102,7 +102,6 @@ apps/console-v2/src/modules/workflows/_bindings/condition-model.ts 7
 apps/console-v2/src/modules/workflows/bindings.tsx 183
 apps/console-v2/src/modules/workflows/review-queue.tsx 193
 apps/console-v2/src/modules/workflows/runs.tsx 269
-apps/console-v2/src/modules/workflows/templates.tsx 240
 apps/console-v2/src/modules/workflows/workflow-run-context.tsx 17
 apps/console-v2/src/shell/AppGuard.tsx 40
 apps/console/app/_components/webhook-tester-page.tsx 1
