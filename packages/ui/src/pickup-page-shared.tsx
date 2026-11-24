@@ -10,6 +10,7 @@ import { buildLookupFriendlyLabel } from "./lookup-friendly-label";
 import { createUiTranslator } from "./i18n";
 import { formatUiError } from "./utils";
 import { normalizeObject, stringValue } from "./pickup-operations-utils";
+import { pickupErrorText, pickupKindLabel } from "./pickup-text";
 
 export type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -56,14 +57,6 @@ export async function loadPickupRelationshipOptions(resource: "clients" | "sende
     return { options: [] as PickupLookupOption[],
       error: formatUiError(error, pickupErrorText("relationship", { resource })) };
   }
-}
-
-export function pickupKindLabel(kind: "client" | "sender" | "branch" | "driver" | "vehicle" | "shipment" | "reference") {
-  return createUiTranslator("ui.pickupOperations.kinds")(kind);
-}
-
-export function pickupErrorText(key: string, values?: Record<string, string>) {
-  return createUiTranslator("ui.pickupOperations.errors")(key, values);
 }
 
 export function pickupRelationshipLabel(options: PickupLookupOption[], value: unknown) {

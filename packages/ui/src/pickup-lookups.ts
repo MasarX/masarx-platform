@@ -1,8 +1,9 @@
 import "server-only";
 
 import { createUiServerClient } from "@masarx/api/server";
-import { loadPickupRequestRows, pickupErrorText, pickupKindLabel } from "./pickup-page-shared";
+import { loadPickupRequestRows } from "./pickup-page-shared";
 import { normalizeObject, stringValue } from "./pickup-operations-utils";
+import { pickupErrorText, pickupKindLabel } from "./pickup-text";
 import { formatReferenceValue } from "./resource-utils";
 import { formatUiError } from "./utils";
 
