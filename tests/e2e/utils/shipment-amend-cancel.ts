@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
-import { getConsoleBasePath, getPortalBasePath } from "./base-paths";
-import { createE2EDatabasePool } from "./db";
+import { Pool } from "pg";
+import { getConsoleBasePath, getConsoleOrigin, getPortalBasePath, getPortalOrigin } from "./base-paths";
 import { loadDemoContext, pickConsoleUser } from "./demo-accounts";
-import { getDatabaseUrl } from "./env";
+import { getDatabaseUrl, getSupabaseUrl } from "./env";
 import { assertE2EMutationsAllowed } from "./mutations";
 import { ensureSignedIn } from "./session";
 
@@ -20,8 +20,11 @@ type Fixtures = {
 export async function exerciseShipmentChange(page: Page, surface: Surface, operation: Operation) {
   assertE2EMutationsAllowed({ label: "shipment-amend-cancel" });
   const databaseUrl = getDatabaseUrl();
-  if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(databaseUrl).hostname)) {
-    throw new Error("Shipment browser fixtures require a disposable loopback database.");
+  const appOrigin = surface === "portal" ? getPortalOrigin() : getConsoleOrigin();
+  for (const url of [databaseUrl, getSupabaseUrl(), appOrigin]) {
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname)) {
+      throw new Error("Shipment browser fixtures require loopback app, Auth, and database targets.");
+    }
   }
   const demo = loadDemoContext();
   const account = surface === "portal"
@@ -75,7 +78,7 @@ export async function exerciseShipmentChange(page: Page, surface: Surface, opera
     operation === "modify" ? "Shipment modify completed." : "Shipment soft-cancel completed.",
   );
 
-  const { pool } = await createE2EDatabasePool("shipment-amend-cancel");
+  const pool = new Pool({ connectionString: databaseUrl, application_name: "e2e:shipment-amend-cancel" });
   try {
     const shipment = await pool.query(
       "SELECT status, special_instructions FROM public.shipments WHERE id = $1::uuid",
