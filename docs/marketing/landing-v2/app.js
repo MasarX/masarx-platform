@@ -265,6 +265,26 @@
   const trackCourierStatusText = document.querySelector('[data-track-courier-status-text]');
   const trackCourierPrivacy = document.querySelector('[data-track-courier-privacy]');
   const trackCourierFormStatus = document.querySelector('[data-track-courier-form-status]');
+  const trackProofCard = document.querySelector('[data-track-proof]');
+  const trackProofLock = document.querySelector('[data-track-proof-lock]');
+  const trackProofGrid = document.querySelector('[data-track-proof-grid]');
+  const trackProofNotice = document.querySelector('[data-track-proof-notice]');
+  const trackProofNoticeTitle = document.querySelector('[data-track-proof-notice-title]');
+  const trackProofNoticeText = document.querySelector('[data-track-proof-notice-text]');
+  const trackProofMeta = document.querySelector('[data-track-proof-meta]');
+  const trackProofPartial = document.querySelector('[data-track-proof-partial]');
+  const trackProofStatus = document.querySelector('[data-track-proof-status]');
+  const trackProofReload = document.querySelector('[data-track-proof-reload]');
+  const trackProofReverify = document.querySelector('[data-track-proof-reverify]');
+  const trackProofPlain = document.querySelector('[data-track-proof-plain]');
+  const trackProofOverlay = document.querySelector('[data-track-proof-overlay]');
+  const trackProofClose = document.querySelector('[data-track-proof-close]');
+  const trackProofNext = document.querySelector('[data-track-proof-next]');
+  const trackProofDialogTitle = document.querySelector('[data-track-proof-dialog-title]');
+  const trackProofDialogCopy = document.querySelector('[data-track-proof-dialog-copy]');
+  const trackProofDialogTile = document.querySelector('[data-track-proof-dialog-tile]');
+  const trackProofDialogImage = document.querySelector('[data-track-proof-dialog-image]');
+  const trackProofDialogMeta = document.querySelector('[data-track-proof-dialog-meta]');
   const trackMapPicker = document.querySelector('[data-track-map-picker]');
   const trackMapDialogPicker = document.querySelector('[data-track-map-picker-expanded]');
   const trackMapValue = document.querySelector('[data-track-map-value]');
@@ -337,6 +357,7 @@
       reschedule_date: null,
       location_change: null,
       live: null,
+      proof: null,
     },
     mapPin: null,
     mapPinConfirmed: false,
@@ -344,6 +365,7 @@
     mapLocateInFlight: false,
     mapLocateSeq: 0,
     liveDelivery: { view: 'none', data: null, timer: null, lastFetchAt: 0, map: null, rect: null },
+    proof: { view: 'none', data: null, items: [], dialogIndex: -1 },
   };
 
   function getIntakeConfig(formKey) {
@@ -1679,6 +1701,7 @@
     if (hasTrackingMutationInFlight()) return false;
     invalidateTrackingRequests();
     stopLiveDelivery();
+    resetProof();
     saveTrackingSession('');
     state.trackingReference = '';
     state.trackingPayload = null;
@@ -2303,6 +2326,331 @@
     scheduleLiveDeliveryPoll(LIVE_DELIVERY_POLL_MS - (Date.now() - state.liveDelivery.lastFetchAt));
   }
 
+  // --- Proof of delivery (#407): short-lived signed file links, fetched only for a verified session ---
+
+  const POD_KINDS = new Set(['photo', 'signature']);
+
+  function readProofCompletion(payload) {
+    const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
+    const completion = tracking?.shipment?.delivery_completion;
+    return completion && typeof completion === 'object' ? completion : null;
+  }
+
+  function isProofPartial(payload) {
+    const completion = readProofCompletion(payload);
+    return completion?.completion_kind === 'partial' && Number(completion.delivered_box_count) > 0;
+  }
+
+  function shouldLoadProof(payload) {
+    const tracking = payload && typeof payload === 'object' ? payload.tracking || payload : null;
+    const status = String(tracking?.shipment?.status || '').trim().toLowerCase();
+    return status === 'delivered' || isProofPartial(payload);
+  }
+
+  function formatProofTime(value, options = { hour: 'numeric', minute: '2-digit' }) {
+    const at = new Date(value);
+    if (!value || Number.isNaN(at.getTime())) return '';
+    try {
+      return new Intl.DateTimeFormat(root.lang || 'en', options).format(at);
+    } catch {
+      return '';
+    }
+  }
+
+  function proofFileUrl(url) {
+    try {
+      const base = new URL(resolveTrackingEndpoint(), window.location.href);
+      const target = new URL(String(url || ''), base);
+      // The session token is sent only to the tracking API's own origin.
+      return target.origin === base.origin && /^https?:$/.test(target.protocol) ? target.href : '';
+    } catch {
+      return '';
+    }
+  }
+
+  async function fetchProofFile(artifact, token, controller) {
+    const href = proofFileUrl(artifact.url);
+    if (!href) return '';
+    try {
+      const response = await fetch(href, {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        cache: 'no-store',
+        referrerPolicy: 'no-referrer',
+        headers: withPublicEdgeHeaders({ 'content-type': 'application/json' }),
+        body: JSON.stringify({ session_token: token }),
+        signal: controller.signal,
+      });
+      if (!response.ok) return '';
+      const blob = await response.blob();
+      return /^image\//.test(blob.type) ? URL.createObjectURL(blob) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function revokeProofItems(items) {
+    items.forEach((item) => {
+      if (item.src) URL.revokeObjectURL(item.src);
+    });
+  }
+
+  function setProofView(view, { proof = null, items = [] } = {}) {
+    revokeProofItems(state.proof.items);
+    state.proof.view = view;
+    state.proof.data = proof;
+    state.proof.items = items;
+    renderProofCard();
+  }
+
+  function resetProof() {
+    invalidateTrackingRequests(['proof']);
+    closeProofDialog({ restoreFocus: false });
+    setProofView('none');
+  }
+
+  async function loadProof(payload = state.trackingPayload) {
+    closeProofDialog({ restoreFocus: false });
+    const token = state.trackingSessionToken;
+    if (!token || state.trackingStage !== 'results' || !shouldLoadProof(payload)) {
+      invalidateTrackingRequests(['proof']);
+      setProofView('none');
+      return;
+    }
+    const request = beginTrackingRequest('proof');
+    setProofView('loading');
+    try {
+      const timeoutId = window.setTimeout(() => request.controller.abort(), PUBLIC_REQUEST_TIMEOUT_MS);
+      try {
+        const { response, data } = await postTracking('proof', { session_token: token }, request.controller);
+        if (!isCurrentTrackingRequest(request)) return;
+        if (!response.ok || !data || data.ok === false) {
+          const code = data?.error?.code;
+          if (code === 'invalid_session') {
+            saveTrackingSession('');
+            setProofView('session');
+          } else {
+            setProofView(code === 'proof_unavailable' ? 'unavailable' : 'error');
+          }
+          return;
+        }
+        const proof = data.proof && typeof data.proof === 'object' ? data.proof : {};
+        const artifacts = (Array.isArray(proof.artifacts) ? proof.artifacts : [])
+          .filter((artifact) => artifact && POD_KINDS.has(artifact.kind));
+        if (proof.state === 'expired') {
+          setProofView('expired');
+          return;
+        }
+        // One tile per artifact the policy left in; with none, the proof section is not rendered.
+        if (proof.state !== 'available' || !artifacts.length) {
+          setProofView('unavailable');
+          return;
+        }
+        const items = await Promise.all(artifacts.map(async (artifact) => ({
+          kind: artifact.kind,
+          captured_at: artifact.captured_at,
+          src: await fetchProofFile(artifact, token, request.controller),
+        })));
+        if (!isCurrentTrackingRequest(request)) {
+          revokeProofItems(items);
+          return;
+        }
+        setProofView(items.every((item) => item.src) ? 'ready' : 'error', { proof, items });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    } catch {
+      if (isCurrentTrackingRequest(request)) setProofView('error');
+    } finally {
+      finishTrackingRequest(request);
+    }
+  }
+
+  function renderProofTile(item, index) {
+    const lang = root.lang || 'en';
+    const isPhoto = item.kind === 'photo';
+    const time = formatProofTime(item.captured_at);
+    const thumb = document.createElement(item.src ? 'button' : 'div');
+    thumb.className = 'pod-thumb';
+    const tile = document.createElement('span');
+    tile.className = isPhoto ? 'pod-tile' : 'pod-tile is-signature';
+    if (item.src) {
+      thumb.type = 'button';
+      thumb.dataset.trackProofIndex = String(index);
+      thumb.setAttribute('aria-haspopup', 'dialog');
+      thumb.setAttribute('aria-label', isPhoto
+        ? (time ? getText('track_pod_open_photo', lang).replace('{time}', time) : getText('track_pod_open_photo_plain', lang))
+        : getText('track_pod_open_signature', lang));
+      const img = document.createElement('img');
+      img.src = item.src;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      tile.append(img);
+    } else {
+      const missing = document.createElement('span');
+      missing.className = 'pod-missing';
+      const title = document.createElement('strong');
+      title.textContent = getText(isPhoto ? 'track_pod_photo_missing' : 'track_pod_signature_missing', lang);
+      missing.append(title, getText('track_pod_missing_hint', lang));
+      tile.append(missing);
+    }
+    const name = document.createElement('strong');
+    name.textContent = getText(isPhoto ? 'track_pod_photo' : 'track_pod_signature', lang);
+    const caption = document.createElement('span');
+    const recipient = String(state.proof.data?.recipient_name || '').trim();
+    if (isPhoto && time) fillTextWithBdi(caption, getText('track_pod_photo_caption', lang), 'time', time);
+    else if (isPhoto) caption.textContent = getText('track_pod_photo_caption_plain', lang);
+    else if (recipient) fillTextWithBdi(caption, getText('track_pod_signature_caption', lang), 'name', recipient);
+    else caption.textContent = getText('track_pod_signature_caption_plain', lang);
+    thumb.append(tile, name, caption);
+    return thumb;
+  }
+
+  function renderProofCard() {
+    if (!trackProofCard) return;
+    const lang = root.lang || 'en';
+    const { view, items } = state.proof;
+    const notices = {
+      expired: ['track_pod_expired_title', 'track_pod_expired_text'],
+      session: ['track_pod_session_title', 'track_pod_session_text'],
+    };
+    trackProofCard.hidden = !['loading', 'ready', 'error', 'expired', 'session'].includes(view);
+    if (trackProofPlain) trackProofPlain.hidden = view !== 'unavailable';
+
+    const completion = readProofCompletion(state.trackingPayload);
+    const partial = isProofPartial(state.trackingPayload) && Number(completion.box_count) > 0;
+    if (trackProofLock) {
+      if (partial) {
+        const number = new Intl.NumberFormat(lang);
+        trackProofLock.textContent = getText('track_pod_boxes', lang)
+          .replace('{delivered}', number.format(Number(completion.delivered_box_count)))
+          .replace('{total}', number.format(Number(completion.box_count)));
+      } else {
+        trackProofLock.textContent = getText('track_masked_pill', lang);
+      }
+    }
+
+    if (trackProofGrid) {
+      if (view === 'loading') {
+        const skeletons = [0, 1].map(() => {
+          const skel = document.createElement('span');
+          skel.className = 'track-courier-skel pod-skel';
+          skel.setAttribute('aria-hidden', 'true');
+          return skel;
+        });
+        trackProofGrid.replaceChildren(...skeletons);
+      } else {
+        trackProofGrid.replaceChildren(...items.map(renderProofTile));
+      }
+    }
+
+    const notice = notices[view];
+    if (trackProofNotice) trackProofNotice.hidden = !notice;
+    if (notice && trackProofNoticeTitle) trackProofNoticeTitle.textContent = getText(notice[0], lang);
+    if (notice && trackProofNoticeText) trackProofNoticeText.textContent = getText(notice[1], lang);
+
+    const until = items.length ? formatProofTime(state.proof.data?.available_until, {
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    }) : '';
+    if (trackProofMeta) trackProofMeta.hidden = !until;
+    if (until) fillTextWithBdi(trackProofMeta, getText('track_pod_available_until', lang), 'time', until);
+    if (trackProofPartial) trackProofPartial.hidden = !(partial && items.length);
+
+    if (trackProofStatus) {
+      const key = view === 'loading' ? 'track_pod_loading' : view === 'error' ? 'track_pod_error_status' : '';
+      trackProofStatus.textContent = key ? getText(key, lang) : '';
+      trackProofStatus.classList.toggle('is-error', view === 'error');
+    }
+    if (trackProofReload) trackProofReload.hidden = view !== 'error';
+    if (trackProofReverify) trackProofReverify.hidden = view !== 'session';
+    if (trackProofOverlay && !trackProofOverlay.hidden) renderProofDialog();
+  }
+
+  function viewableProofItems() {
+    return state.proof.items.map((item, index) => ({ ...item, index })).filter((item) => item.src);
+  }
+
+  function renderProofDialog() {
+    const lang = root.lang || 'en';
+    const viewable = viewableProofItems();
+    const position = viewable.findIndex((item) => item.index === state.proof.dialogIndex);
+    const item = viewable[position];
+    if (!item) {
+      closeProofDialog({ restoreFocus: false });
+      return;
+    }
+    const isPhoto = item.kind === 'photo';
+    const time = formatProofTime(item.captured_at);
+    if (trackProofDialogTitle) trackProofDialogTitle.textContent = getText(isPhoto ? 'track_pod_photo' : 'track_pod_signature', lang);
+    if (trackProofDialogCopy) {
+      trackProofDialogCopy.textContent = getText(isPhoto ? 'track_pod_photo_dialog_copy' : 'track_pod_signature_dialog_copy', lang);
+    }
+    if (trackProofDialogTile) trackProofDialogTile.classList.toggle('is-signature', !isPhoto);
+    if (trackProofDialogImage) {
+      trackProofDialogImage.src = item.src;
+      trackProofDialogImage.alt = isPhoto
+        ? (time ? getText('track_pod_photo_alt', lang).replace('{time}', time) : getText('track_pod_photo_alt_plain', lang))
+        : getText('track_pod_signature_alt', lang);
+    }
+    if (trackProofDialogMeta) {
+      const number = new Intl.NumberFormat(lang);
+      const count = getText('track_pod_position', lang)
+        .replace('{index}', number.format(position + 1))
+        .replace('{total}', number.format(viewable.length));
+      const bdi = document.createElement('bdi');
+      bdi.textContent = formatProofTime(item.captured_at, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      trackProofDialogMeta.replaceChildren(...(bdi.textContent ? [bdi, ' · '] : []), count);
+    }
+    if (trackProofNext) trackProofNext.hidden = viewable.length < 2;
+  }
+
+  function openProofDialog(index) {
+    if (!trackProofOverlay || !state.proof.items[index]?.src) return;
+    state.proof.dialogIndex = index;
+    trackProofOverlay.hidden = false;
+    document.body.classList.add('track-map-overlay-open');
+    renderProofDialog();
+    if (trackProofClose) trackProofClose.focus();
+  }
+
+  function closeProofDialog({ restoreFocus = true } = {}) {
+    if (!trackProofOverlay || trackProofOverlay.hidden) return;
+    trackProofOverlay.hidden = true;
+    if (trackProofDialogImage) trackProofDialogImage.removeAttribute('src');
+    if (!trackMapOverlay || trackMapOverlay.hidden) document.body.classList.remove('track-map-overlay-open');
+    // Tiles are re-rendered on a language change, so focus returns to the tile by index.
+    const tile = trackProofGrid?.querySelector(`[data-track-proof-index="${state.proof.dialogIndex}"]`);
+    if (restoreFocus && tile) tile.focus();
+  }
+
+  function showNextProof() {
+    const viewable = viewableProofItems();
+    const position = viewable.findIndex((item) => item.index === state.proof.dialogIndex);
+    const next = viewable[(position + 1) % viewable.length];
+    if (!next) return;
+    state.proof.dialogIndex = next.index;
+    renderProofDialog();
+  }
+
+  function handleProofDialogKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeProofDialog();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = [trackProofClose, trackProofNext].filter((el) => el && !el.hidden);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (!focusable.includes(active) || (event.shiftKey ? active === first : active === last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  }
+
   async function postTracking(action, body, controller = new AbortController()) {
     const url = resolveTrackingUrl(action);
     if (!url) throw new Error('missing_tracking_endpoint');
@@ -2694,6 +3042,7 @@
     }
     if (state.trackingPayload) renderTrackingPayload(state.trackingPayload);
     renderLiveDeliveryCard();
+    renderProofCard();
     syncMapPinUi();
   }
 
@@ -2736,6 +3085,7 @@
       renderTrackingPayload(data);
       setTrackingStage('results');
       applyLiveDelivery(data);
+      loadProof(data);
     } catch {
       if (!isCurrentTrackingRequest(request)) return;
       saveTrackingSession('');
@@ -2849,6 +3199,7 @@
       setTrackingStage('results');
       setOwnedTrackingRequestStatus(request, '');
       startLiveDelivery(data);
+      loadProof(data);
     } catch (error) {
       if (!isCurrentTrackingRequest(request)) return;
       setOwnedTrackingRequestStatus(
@@ -3338,6 +3689,24 @@
       });
     }
 
+    if (trackProofGrid) {
+      trackProofGrid.addEventListener('click', (e) => {
+        const thumb = e.target instanceof Element ? e.target.closest('[data-track-proof-index]') : null;
+        if (thumb) openProofDialog(Number(thumb.dataset.trackProofIndex));
+      });
+    }
+    if (trackProofReload) trackProofReload.addEventListener('click', () => loadProof());
+    if (trackProofReverify) {
+      trackProofReverify.addEventListener('click', () => resetTrackingFlow({ clearReference: false, scroll: true }));
+    }
+    if (trackProofClose) trackProofClose.addEventListener('click', () => closeProofDialog());
+    if (trackProofNext) trackProofNext.addEventListener('click', showNextProof);
+    if (trackProofOverlay) {
+      trackProofOverlay.addEventListener('keydown', handleProofDialogKeydown);
+      trackProofOverlay.addEventListener('click', (e) => {
+        if (e.target === trackProofOverlay) closeProofDialog();
+      });
+    }
     document.addEventListener('visibilitychange', handleLiveDeliveryVisibility);
     if (trackCourierRetry) trackCourierRetry.addEventListener('click', () => fetchLiveDelivery());
     if (trackCourierReverify) {

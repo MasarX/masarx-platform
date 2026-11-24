@@ -230,6 +230,25 @@
                 <p class="form-status" data-track-courier-form-status></p>
               </article>
 
+              <article class="card card-pad track-pod" data-track-proof aria-labelledby="track-pod-title" hidden>
+                <div class="track-panel-head">
+                  <h3 id="track-pod-title" data-i18n="track_pod_title">Proof of delivery</h3>
+                  <span class="track-lock" data-track-proof-lock>Protected</span>
+                </div>
+                <div class="pod-grid" data-track-proof-grid></div>
+                <div class="track-courier-notice" data-track-proof-notice hidden>
+                  <strong data-track-proof-notice-title></strong>
+                  <p data-track-proof-notice-text></p>
+                </div>
+                <p class="pod-meta" data-track-proof-meta hidden></p>
+                <p class="pod-meta" data-track-proof-partial data-i18n="track_pod_partial_note" hidden>Proof for the remaining boxes appears after they are delivered.</p>
+                <div class="track-form-actions">
+                  <button class="btn btn-secondary" type="button" data-track-proof-reload data-i18n="track_pod_reload" hidden>Reload proof</button>
+                  <button class="btn btn-primary" type="button" data-track-proof-reverify data-i18n="track_courier_reverify" hidden>Verify again</button>
+                </div>
+                <p class="form-status" data-track-proof-status></p>
+              </article>
+              <p class="track-pod-plain" data-track-proof-plain data-i18n="track_pod_unavailable" hidden>Proof is not available for this delivery. Contact the sender if you need help.</p>
               <div class="track-request-banner" data-track-request-banner hidden>
                 <span class="track-request-banner-badge" data-track-request-banner-badge></span>
                 <p class="track-request-banner-text" data-track-request-banner-text></p>
@@ -429,6 +448,22 @@
       </div>
     </div>
 
+    <div class="track-map-overlay" data-track-proof-overlay hidden>
+      <div class="track-map-modal track-pod-modal card card-pad" role="dialog" aria-modal="true" aria-labelledby="track-pod-dialog-title" aria-describedby="track-pod-dialog-copy">
+        <div class="track-map-modal-head">
+          <div>
+            <h3 id="track-pod-dialog-title" data-track-proof-dialog-title></h3>
+            <p class="lead track-map-modal-copy" id="track-pod-dialog-copy" data-track-proof-dialog-copy></p>
+          </div>
+          <button class="btn btn-ghost" type="button" data-track-proof-close data-i18n="track_pod_close">Close</button>
+        </div>
+        <span class="pod-tile" data-track-proof-dialog-tile><img data-track-proof-dialog-image alt=""></span>
+        <div class="pod-meta">
+          <span data-track-proof-dialog-meta></span>
+          <button class="btn btn-ghost" type="button" data-track-proof-next data-i18n="track_pod_next" hidden>Next</button>
+        </div>
+      </div>
+    </div>
     <footer class="footer">
       <div class="container">
         <div class="footer-grid">

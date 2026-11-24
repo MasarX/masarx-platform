@@ -2218,3 +2218,134 @@ html[data-motion="off"] .track-courier-skel {
     min-height: 220px;
   }
 }
+
+/* --- Proof of delivery (#407): the tile reuses the map picker frame's radius and border --- */
+.track-pod {
+  display: grid;
+  gap: 1rem;
+  color: var(--muted);
+}
+
+.pod-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pod-grid:empty {
+  display: none;
+}
+
+.pod-thumb {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+button.pod-thumb {
+  cursor: zoom-in;
+}
+
+.pod-thumb strong {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.pod-thumb > span:last-child {
+  font-size: 0.82rem;
+}
+
+.pod-thumb:focus-visible {
+  outline: none;
+}
+
+.pod-thumb:focus-visible .pod-tile {
+  outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  outline-offset: 3px;
+}
+
+.pod-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  max-inline-size: 100%;
+  border-radius: 1.2rem;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--map-land);
+}
+
+.pod-tile.is-signature {
+  background: var(--surface-strong);
+}
+
+.pod-tile img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.pod-tile.is-signature img,
+.track-pod-modal .pod-tile img {
+  object-fit: contain;
+}
+
+.track-pod-modal .pod-tile {
+  aspect-ratio: auto;
+  min-block-size: 12rem;
+  max-block-size: 70vh;
+}
+
+.pod-missing {
+  display: grid;
+  gap: 0.35rem;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.pod-missing strong {
+  color: var(--text);
+}
+
+.pod-skel.track-courier-skel {
+  block-size: auto;
+  aspect-ratio: 4 / 3;
+  margin-block-start: 0;
+  border-radius: 1.2rem;
+}
+
+.pod-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.track-pod-plain {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.track-pod .track-form-actions:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .pod-grid {
+    gap: 0.75rem;
+  }
+}
