@@ -168,6 +168,8 @@ describe('DispatchModule', () => {
       const runsHeader = container.querySelector('#dispatch-pane-runs-title')!.closest<HTMLElement>('.pane__header')!;
       const refresh = within(runsHeader).getByRole('button', { name: /^Refresh$/i });
       await waitFor(() => {
+        // Rendering the active stops starts dependent reads that can disable Refresh.
+        expect(container.querySelector('.dnd-stop')).not.toBeNull();
         expect(refresh).not.toBeDisabled();
       });
 
