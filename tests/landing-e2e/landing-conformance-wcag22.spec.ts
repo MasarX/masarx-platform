@@ -60,6 +60,10 @@ function expectRecorded(screenId: ScreenId, criterion: string, failures: string[
 }
 
 async function mockTracking(page: Page) {
+  // Each navigation exercises a fresh lookup, including after a successful verification.
+  await page.addInitScript(() => {
+    if (window === window.top) sessionStorage.removeItem("masarx_tracking_session_v1");
+  });
   await patchRuntimeConfig(page, { trackingEndpoint: LANDING_TRACKING_ENDPOINT_MOCK, turnstileSiteKey: TURNSTILE_TEST_SITE_KEY });
   await mockTurnstile(page);
   await mockTrackingEndpoint(page, async (route) => {
@@ -77,11 +81,15 @@ async function mockTracking(page: Page) {
   });
 }
 
+const lookupForm = (page: Page) => page.getByRole("main").locator("[data-track-lookup-form]").filter({ visible: true });
+
 async function open(page: Page, target: Target, stage: Stage, query = "?motion=off") {
   await page.goto(`${target.path}${query}`);
+  if (stage !== "page") await expect(lookupForm(page)).toBeVisible();
   if (stage === "results") {
-    await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
-    await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+    const form = lookupForm(page);
+    await form.locator('input[name="reference"]').filter({ visible: true }).fill("TRK-2026-0001");
+    await form.locator('button[type="submit"]').click();
     await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
     await page.locator('[data-track-verify-form] input[name="phone_last3"]').fill("123");
     await page.locator('[data-track-verify-form] button[type="submit"]').click();
@@ -147,9 +155,13 @@ async function tabWalk(page: Page, limit = 300): Promise<Stop[]> {
       // 2.4.11: the focused control must not be entirely hidden by author content.
       const r = el.getBoundingClientRect();
       const label = (el as HTMLInputElement).labels?.[0] ?? el.closest("label");
-      const visible = r.width > 0 && r.height > 0 && [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]
-        .map(([fx, fy]) => [r.left + r.width * fx, r.top + r.height * fy])
-        .filter(([x, y]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight)
+      // A narrow strip at the viewport edge can be visible even when every sample of the full box is offscreen.
+      const left = Math.max(r.left, 0);
+      const top = Math.max(r.top, 0);
+      const width = Math.min(r.right, innerWidth) - left;
+      const height = Math.min(r.bottom, innerHeight) - top;
+      const visible = width > 0 && height > 0 && [[0.5, 0.5], [0.15, 0.15], [0.85, 0.15], [0.15, 0.85], [0.85, 0.85]]
+        .map(([fx, fy]) => [left + width * fx, top + height * fy])
         .some(([x, y]) => {
           const hit = document.elementFromPoint(x, y);
           return !!hit && (hit === el || el.contains(hit) || hit.contains(el) || (!!label && label.contains(hit)));
@@ -445,11 +457,13 @@ for (const screenId of Object.keys(PAGES) as ScreenId[]) {
           continue;
         }
         await open(page, target, "lookup");
-        await page.locator('[data-track-lookup-form] input[name="reference"]').fill("TRK-2026-0001");
-        await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+        const form = lookupForm(page);
+        const reference = form.locator('input[name="reference"]').filter({ visible: true });
+        await reference.fill("TRK-2026-0001");
+        await form.locator('button[type="submit"]').click();
         await expect(page.locator('[data-track-stage="verify"]')).toBeVisible();
         await page.locator("[data-track-back]").click();
-        const kept = await page.locator('[data-track-lookup-form] input[name="reference"]').inputValue();
+        const kept = await reference.inputValue();
         if (kept !== "TRK-2026-0001") failures.push(`${target.id}: Back from verify clears the entered reference`);
         await open(page, target, "results");
         const repeated = await page.locator("[data-track-reschedule-form], [data-track-location-form]").evaluateAll((forms) =>
@@ -473,8 +487,9 @@ for (const screenId of Object.keys(PAGES) as ScreenId[]) {
         }
         if (screenId === "public-tracking") {
           await open(page, target, "lookup");
-          await page.locator('[data-track-lookup-form] input[name="reference"]').fill(MISSING_REFERENCE);
-          await page.locator('[data-track-lookup-form] button[type="submit"]').click();
+          const form = lookupForm(page);
+          await form.locator('input[name="reference"]').filter({ visible: true }).fill(MISSING_REFERENCE);
+          await form.locator('button[type="submit"]').click();
           await expect.poll(() => page.locator("[data-track-lookup-status]").innerText(), { message: "failed lookup status" })
             .not.toBe("")
             .catch(() => failures.push(`${target.id}: a failed lookup announces nothing in its live region`));
