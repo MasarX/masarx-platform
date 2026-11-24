@@ -1699,7 +1699,7 @@ function SignInScreen({
           : {})}
       >
         <TextInput
-          accessibilityLabel={strings.auth.emailPlaceholder}
+          accessibilityLabel="Email"
           testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInEmail}
           style={styles.input}
           value={email}
@@ -1717,7 +1717,7 @@ function SignInScreen({
 
         {method === "password" ? (
           <TextInput
-            accessibilityLabel={strings.auth.passwordPlaceholder}
+            accessibilityLabel="Password"
             testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInPassword}
             style={styles.input}
             value={password}
@@ -1736,7 +1736,7 @@ function SignInScreen({
 
         {method === "magic_link" && otpSent ? (
           <TextInput
-            accessibilityLabel={strings.auth.codePlaceholder}
+            accessibilityLabel="Verification code"
             testID={FIELDOPS_NATIVE_E2E_TEST_IDS.signInOtp}
             style={styles.input}
             value={otpCode}
@@ -8661,7 +8661,7 @@ function LocationScreen({
           ]}
         >
           <Text style={styles.primaryButtonText}>
-            {isQueueingPing ? strings.scan.queueing : strings.actionFeedback.saveLocationUpdate}
+            {isQueueingPing ? strings.scan.queueing : "Queue ping"}
           </Text>
         </Pressable>
       </View>

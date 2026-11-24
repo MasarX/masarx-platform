@@ -91,7 +91,7 @@ BEGIN
 
   v_created := FALSE;
   UPDATE public.user_devices d
-     SET push_token = [REDACTED](v_push, d.push_token),
+     SET push_token = COALESCE(v_push, d.push_token),
          device_label = COALESCE(v_label, d.device_label),
          app_version = COALESCE(v_app, d.app_version),
          os_version = COALESCE(v_os, d.os_version),
@@ -186,7 +186,7 @@ BEGIN
 
   v_client_source := lower(NULLIF(btrim(COALESCE(v_metadata->>'source', '')), ''));
   IF v_rpc_name = 'record_location_ping_v1'
-     AND (v_session_role = [REDACTED] OR v_claim_role = 'service_role')
+     AND (v_session_role = 'service_role' OR v_claim_role = 'service_role')
      AND v_client_source = 'mobile_background'
   THEN
     -- Trusted background classification is allowed only for service_role writes

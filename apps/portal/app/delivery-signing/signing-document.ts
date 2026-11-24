@@ -1,46 +1,7 @@
-const copy = {
-  en: {
-    title: "Sign for your delivery",
-    description: "Submit your signature to confirm you received the delivery.",
-    legend: "Signature",
-    instructions: "Draw in the box. With a keyboard, use the arrow keys to move and Space to start or stop drawing.",
-    pad: "Signature pad",
-    clear: "Clear signature",
-    submit: "Submit signature",
-    open: "Open the signing link shared for your delivery.",
-    unavailable: "The signature pad is unavailable on this device.",
-    drawing: "Drawing. Use the arrow keys.",
-    paused: "Drawing paused.",
-    cleared: "Signature cleared.",
-    sending: "Submitting signature…",
-    received: "Signature received.",
-    expired: "This link has expired or was used. Ask the driver to check the signing status.",
-    failed: "The signature could not be confirmed. Try again.",
-    ready: "The signature pad is ready.",
-  },
-  ar: {
-    title: "وقّع لاستلام شحنتك",
-    description: "أرسل توقيعك لتأكيد استلام الشحنة.",
-    legend: "التوقيع",
-    instructions: "وقّع داخل المربع. باستخدام لوحة المفاتيح، حرّك المؤشر بمفاتيح الأسهم واضغط على مفتاح المسافة لبدء الرسم أو إيقافه.",
-    pad: "لوحة التوقيع",
-    clear: "مسح التوقيع",
-    submit: "إرسال التوقيع",
-    open: "افتح رابط التوقيع الذي تمت مشاركته لتسليم شحنتك.",
-    unavailable: "لوحة التوقيع غير متاحة على هذا الجهاز.",
-    drawing: "جارٍ الرسم. استخدم مفاتيح الأسهم.",
-    paused: "توقف الرسم مؤقتًا.",
-    cleared: "تم مسح التوقيع.",
-    sending: "جارٍ إرسال التوقيع…",
-    received: "تم استلام التوقيع.",
-    expired: "انتهت صلاحية الرابط أو سبق استخدامه. اطلب من السائق التحقق من حالة التوقيع.",
-    failed: "تعذر تأكيد التوقيع. حاول مرة أخرى.",
-    ready: "لوحة التوقيع جاهزة.",
-  },
-};
+import { signingCopy } from "./i18n/strings";
 
-export function signingDocument(nonce: string, language: keyof typeof copy = "en"): string {
-  const text = copy[language];
+export function signingDocument(nonce: string, language: keyof typeof signingCopy = "en"): string {
+  const text = signingCopy[language];
   return `<!doctype html>
 <html lang="${language}" dir="${language === "ar" ? "rtl" : "ltr"}">
 <meta charset="utf-8">
