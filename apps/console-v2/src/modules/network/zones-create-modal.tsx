@@ -14,6 +14,7 @@ import { useCreateZone, useResolveSettings } from '@/lib/queries';
 import { CAP } from '@/lib/capabilities';
 import { getLookups } from '@/lib/api';
 import { pushToast } from '@/components/toastStore';
+import { fill, useT } from '@/lib/i18n';
 
 // Phase G1 (Wave 6) — schema-drift alignment per
 // `__audit__/SCHEMA-DRIFT/NETWORK.md` §11. Canonical
@@ -97,6 +98,7 @@ export function ZonesCreateModal({
   canonicalDistricts,
   branchChoices = [],
 }: ZonesCreateModalProps) {
+  const t = useT();
   const colorTokens = getLookups('zone_color_token') ?? [];
   const [name, setName] = useState('');
   const [color, setColor] = useState<string>(colorTokens[0]?.value ?? '');
@@ -131,7 +133,7 @@ export function ZonesCreateModal({
   function submit() {
     const trimmed = name.trim();
     if (!trimmed) {
-      setNotice('Zone name is required.');
+      setNotice(t('zones.create.nameRequired'));
       return;
     }
     createZoneMut
@@ -143,12 +145,12 @@ export function ZonesCreateModal({
       })
       .then(async (res) => {
         const zoneId = (res as { zone_id?: string }).zone_id ?? '';
-        pushToast(`Created zone "${trimmed}" with ${districts.size} districts.`, 'good');
+        pushToast(fill(t('zones.create.createdToast'), { name: trimmed, n: districts.size }), 'good');
         if (zoneId && onCreated) {
           await onCreated(zoneId, branchId ? { branchId } : undefined);
           return;
         }
-        setNotice(zoneId ? `Created zone ${zoneId}.` : 'Created.');
+        setNotice(zoneId ? fill(t('zones.create.createdId'), { id: zoneId }) : t('zones.create.created'));
         // W73-Network Cycle F-R-13 closure (P2-4): close-after-success
         // cadence resolves through canonical
         // `ux_safety_policy.modal_close_after_success_ms`. AGENTS.md §2
@@ -160,31 +162,31 @@ export function ZonesCreateModal({
         }
       })
       .catch(() => {
-        pushToast('Create zone failed — see audit log.', 'danger');
-        setNotice('Create zone failed.');
+        pushToast(t('zones.create.failedToast'), 'danger');
+        setNotice(t('zones.create.failed'));
       });
   }
 
   const footer: ReactNode = (
     <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-      <Button label="Cancel" kind="ghost" onClick={handleClose} />
-      <Button label="Submit" kind="primary" capability={CAP.ZONES_WRITE} onClick={submit} />
+      <Button label={t('common.cancel')} kind="ghost" onClick={handleClose} />
+      <Button label={t('zones.create.submit')} kind="primary" capability={CAP.ZONES_WRITE} onClick={submit} />
     </div>
   );
 
   return (
-    <Modal open={open} title="Create zone" onClose={handleClose} footer={footer}>
+    <Modal open={open} title={t('zones.create.title')} onClose={handleClose} footer={footer}>
       <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <label style={{ display: 'block' }}>
           <div className="state__hint" style={{ fontSize: '11px', marginBottom: '4px' }}>
-            Zone name
+            {t('zones.create.name')}
           </div>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Riyadh East"
-            aria-label="New zone name"
+            placeholder={t('zones.create.namePlaceholder')}
+            aria-label={t('zones.create.nameAria')}
             style={{
               width: '100%',
               padding: '6px 8px',
@@ -200,13 +202,13 @@ export function ZonesCreateModal({
 
         <div>
           <div className="state__hint" style={{ fontSize: '11px', marginBottom: '4px' }}>
-            Color token
+            {t('zones.create.colorToken')}
           </div>
           {colorTokens.length === 0 ? (
             <StateView
               kind="error"
-              title="Zone color options are not available"
-              hint="Color options must be configured before a zone can be created."
+              title={t('zones.create.colorsMissingTitle')}
+              hint={t('zones.create.colorsMissingHint')}
             />
           ) : (
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -219,7 +221,7 @@ export function ZonesCreateModal({
                 const hasTone = typeof c.tone === 'string' && c.tone.length > 0;
                 const tone = hasTone ? c.tone : null;
                 const swatchVar = tone == null || tone === 'neutral' ? 'ink-3' : tone;
-                const labelText = hasTone ? c.label : `${c.label} (no tone)`;
+                const labelText = hasTone ? c.label : <><bdi>{c.label}</bdi> {t('zones.create.noTone')}</>;
                 return (
                   <button
                     key={c.value}
@@ -228,7 +230,7 @@ export function ZonesCreateModal({
                     className={'btn btn--ghost btn--sm' + (color === c.value ? ' is-active' : '')}
                     onClick={() => setColor(c.value)}
                     style={{ borderColor: color === c.value ? 'var(--ink-1)' : 'transparent' }}
-                    title={hasTone ? undefined : 'Canonical row has no tone — operator-visible gap.'}
+                    title={hasTone ? undefined : t('zones.create.noToneTitle')}
                   >
                     <span
                       style={{
@@ -250,12 +252,12 @@ export function ZonesCreateModal({
 
         <label style={{ display: 'block' }}>
           <div className="state__hint" style={{ fontSize: '11px', marginBottom: '4px' }}>
-            Initial branch coverage
+            {t('zones.create.branchCoverage')}
           </div>
           <select
             value={branchId}
             onChange={(e) => setBranchId(e.target.value)}
-            aria-label="Initial branch coverage"
+            aria-label={t('zones.create.branchCoverage')}
             style={{
               width: '100%',
               padding: '6px 8px',
@@ -267,7 +269,7 @@ export function ZonesCreateModal({
               color: 'inherit',
             }}
           >
-            <option value="">No branch coverage yet</option>
+            <option value="">{t('zones.create.noBranchCoverage')}</option>
             {branchChoices.map((branch) => (
               <option key={branch.id} value={branch.id}>
                 {branchCoverageChoiceLabel(branch)}
@@ -278,7 +280,7 @@ export function ZonesCreateModal({
 
         <div>
           <div className="state__hint" style={{ fontSize: '11px', marginBottom: '4px' }}>
-            Initial districts ({districts.size} selected)
+            {fill(t('zones.create.districts'), { n: districts.size })}
           </div>
           <div
             style={{
@@ -295,8 +297,8 @@ export function ZonesCreateModal({
               const displayName = zoneDistrictDisplayName(d);
               const cityLabel = zoneDistrictCityLabel(d);
               const districtActionLabel = cityLabel
-                ? `Toggle district ${displayName} (${cityLabel})`
-                : `Toggle district ${displayName}`;
+                ? fill(t('zones.create.toggleDistrictCity'), { name: displayName, city: cityLabel })
+                : fill(t('zones.create.toggleDistrict'), { name: displayName });
               return (
                 <button
                   key={d.id}

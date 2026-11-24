@@ -24,10 +24,6 @@ apps/console-v2/src/modules/auth/LoginModule.tsx 14
 apps/console-v2/src/modules/catalog/lookups.tsx 72
 apps/console-v2/src/modules/catalog/product-context-setup.tsx 42
 apps/console-v2/src/modules/catalog/service-offerings.tsx 154
-apps/console-v2/src/modules/customers/clients.tsx 70
-apps/console-v2/src/modules/customers/recipients.tsx 98
-apps/console-v2/src/modules/customers/related-shipments.tsx 9
-apps/console-v2/src/modules/customers/senders.tsx 60
 apps/console-v2/src/modules/finance/bank-recon.tsx 126
 apps/console-v2/src/modules/finance/billing.tsx 153
 apps/console-v2/src/modules/finance/cod.tsx 97
@@ -59,15 +55,9 @@ apps/console-v2/src/modules/integrations/mapping.tsx 193
 apps/console-v2/src/modules/integrations/plugin-studio.tsx 90
 apps/console-v2/src/modules/integrations/sources.tsx 129
 apps/console-v2/src/modules/integrations/webhook-tester.tsx 219
-apps/console-v2/src/modules/network/branches.tsx 186
 apps/console-v2/src/modules/network/geocoding.tsx 187
-apps/console-v2/src/modules/network/hubs.tsx 11
 apps/console-v2/src/modules/network/marketplace.tsx 213
 apps/console-v2/src/modules/network/participant-applications.tsx 103
-apps/console-v2/src/modules/network/partners.tsx 50
-apps/console-v2/src/modules/network/zones-create-modal.tsx 17
-apps/console-v2/src/modules/network/zones-drawer.tsx 51
-apps/console-v2/src/modules/network/zones.tsx 28
 apps/console-v2/src/modules/operate/fleet/driver-applications.tsx 115
 apps/console-v2/src/modules/operate/fleet/drivers.tsx 197
 apps/console-v2/src/modules/operate/fleet/vehicles.tsx 221
