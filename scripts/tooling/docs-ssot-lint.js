@@ -5,6 +5,7 @@ const path = require('path');
 
 const DEFAULT_CONFIG_PATH = 'config/docs/ssot-critical-docs.json';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MARKDOWN_INLINE_PARTS = /(?<comment><!--.*?(?:-->|$))|(?<tag><[^<>]*>)|(?<text>[^<]+|<)/g;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -90,8 +91,15 @@ function markdownAnchors(content) {
   const anchors = new Set();
   const headings = new Set();
   let fence = '';
+  let inComment = false;
   // shortcut: top-level ATX headings and named anchors, use a GFM parser for nested or Setext headings.
-  for (const line of content.replace(/<!--[\s\S]*?-->/g, '').split(/\r?\n/)) {
+  for (let line of content.split(/\r?\n/)) {
+    if (inComment) {
+      const commentEnd = line.indexOf('-->');
+      if (commentEnd === -1) continue;
+      inComment = false;
+      line = line.slice(commentEnd + 3);
+    }
     const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
       if (delimiter?.[1][0] === fence[0] && delimiter[1].length >= fence.length && !delimiter[2].trim()) {
@@ -104,15 +112,17 @@ function markdownAnchors(content) {
       continue;
     }
 
-    for (const match of line.matchAll(/<a\s+[^>]*?\bname=(["'])([^"']+)\1[^>]*>/gi)) {
-      anchors.add(match[2]);
+    for (const { groups: { comment, tag } } of line.matchAll(MARKDOWN_INLINE_PARTS)) {
+      if (comment) inComment = !comment.endsWith('-->');
+      const name = tag && /^<a\s+[^>]*?\bname=(["'])([^"']+)\1/i.exec(tag)?.[2];
+      if (name) anchors.add(name);
     }
     const heading = /^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line)?.[1];
     if (!heading) continue;
 
-    const slug = heading
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      .replace(/<[^>]*>/g, '')
+    const headingParts = heading.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').matchAll(MARKDOWN_INLINE_PARTS);
+    const slug = Array.from(headingParts, ({ groups: { text } }) => text || '')
+      .join('')
       .replace(/(^|\W)(_+)([^_]+)\2(?=\W|$)/g, '$1$3')
       .trim()
       .toLowerCase()

@@ -12,15 +12,22 @@ test('checks same-file and cross-file Markdown section links', () => {
       '[Cross-file](guide.md#hello-world)',
       '[Repeat](guide#hello-world-1)',
       '[Named](guide.md#manual-anchor)',
+      '[Inline heading](guide.md#inline-formatting)',
       '[Missing local](#missing)',
       '[Missing in guide](guide.md#inside-a-fence)',
+      '[Commented heading](guide.md#inside-a-comment)',
+      '[Commented name](guide.md#commented-anchor)',
       '[Line](guide.md?plain=1#L1-L2)',
       '[External](https://example.invalid/guide#missing)',
     ].join('\n'));
     fs.writeFileSync(path.join(root, 'guide.md'), [
       '# Hello, World!',
       '# Hello, World!',
-      '<a name="manual-anchor"></a>',
+      '# Inline <em>formatting</em><!-- internal note -->',
+      '<!--',
+      '# Inside a comment',
+      '<a name="commented-anchor"></a>',
+      '--> <a name="manual-anchor"></a>',
       '~~~markdown',
       '# Inside a fence',
       '~~~',
@@ -28,6 +35,8 @@ test('checks same-file and cross-file Markdown section links', () => {
     expect(lintDocEntry(root, { path: 'source.md', checkLinks: true })).toEqual([
       'source.md: broken_section_link "#missing"',
       'source.md: broken_section_link "guide.md#inside-a-fence"',
+      'source.md: broken_section_link "guide.md#inside-a-comment"',
+      'source.md: broken_section_link "guide.md#commented-anchor"',
     ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
