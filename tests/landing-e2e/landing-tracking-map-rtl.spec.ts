@@ -66,6 +66,7 @@ function focusedVisibility(page: Page) {
       focused: name(el),
       box: [r.left, r.top, r.width, r.height].map(Math.round),
       viewport: [innerWidth, innerHeight],
+      scroll: [scrollX, scrollY].map(Math.round),
       hits: hits.map(name),
     };
   });
@@ -83,7 +84,10 @@ for (const path of ["/track/", "/ar/track/"]) {
       await openResults(page, path);
       const picker = page.locator("[data-track-map-picker]");
       for (const control of [".leaflet-control-zoom-in", ".leaflet-control-zoom-out"]) {
+        // Focus without preventScroll, as keyboard focus does; the root scroller scrolls smoothly, so wait until
+        // the control is fully on screen before the hit test checks that nothing (map toggle, header) covers it.
         await picker.locator(control).focus();
+        await expect(picker.locator(control), `${control} is not scrolled into view on focus`).toBeInViewport({ ratio: 1 });
         const result = await focusedVisibility(page);
         expect(result.visible, `${control} is hidden when focused: ${JSON.stringify(result)}`).toBe(true);
       }
