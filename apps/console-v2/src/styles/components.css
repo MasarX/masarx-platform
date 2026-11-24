@@ -67,7 +67,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-left: 8px;
+  margin-inline-start: 8px;
   margin-bottom: 2px;
   min-width: 0;
 }
@@ -88,7 +88,7 @@
   .page-header__pills,
   .page-header__actions {
     flex: 1 1 100%;
-    margin-left: 0;
+    margin-inline-start: 0;
   }
   .page-header__title {
     font-size: var(--text-lg);
@@ -146,7 +146,7 @@
 }
 .kpi__sparkline {
   position: absolute;
-  right: 8px;
+  inset-inline-end: 8px;
   top: 8px;
   width: 64px;
   height: 22px;
@@ -359,7 +359,7 @@
 .dt-tb-count {
   font-size: 10.5px;
   color: var(--ink-3);
-  margin-left: 6px;
+  margin-inline-start: 6px;
   white-space: nowrap;
 }
 
@@ -450,7 +450,7 @@
 .dt-tb-icon__badge {
   position: absolute;
   top: -3px;
-  right: -3px;
+  inset-inline-end: -3px;
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
@@ -545,7 +545,7 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--ink-3);
-  text-align: left;
+  text-align: start;
   padding: 8px var(--cell-px);
   border-bottom: 1px solid var(--line-2);
   white-space: nowrap;
@@ -554,7 +554,7 @@
 .dt__table thead th:hover { color: var(--ink); }
 .dt__table thead th .sort-mark {
   color: var(--accent);
-  margin-left: 4px;
+  margin-inline-start: 4px;
   font-size: 8px;
 }
 .dt__table tbody td {
@@ -582,7 +582,7 @@
   font-size: 11px;
   color: var(--ink-2);
 }
-.dt__table .cell-num { text-align: right; font-variant-numeric: tabular-nums; }
+.dt__table .cell-num { text-align: end; font-variant-numeric: tabular-nums; }
 
 /* Notion-table extras */
 .dt__table .dt-checkbox {
@@ -597,7 +597,7 @@
 .dt__table .dt-th-actions {
   width: 32px;
   position: sticky;
-  right: 0;
+  inset-inline-end: 0;
   z-index: 4;
   background: var(--paper);
   box-shadow: -1px 0 0 var(--line);
@@ -676,14 +676,14 @@
 .dt-th-mark {
   font-size: 9px;
   color: var(--ink-3);
-  margin-left: 3px;
+  margin-inline-start: 3px;
   opacity: 0.6;
 }
 .dt__table .dt-row-actions {
   text-align: center;
   width: 32px;
   position: sticky;
-  right: 0;
+  inset-inline-end: 0;
   z-index: 1;
   background: var(--paper);
   box-shadow: -1px 0 0 var(--line);
@@ -947,7 +947,7 @@
 .modal {
   position: absolute;
   top: 50%;
-  left: 50%;
+  left: 50%; /* physical: centered with translate(-50%) */
   transform: translate(-50%, -50%) scale(0.96);
   background: var(--paper);
   border: 1px solid var(--line);
@@ -1000,7 +1000,7 @@
 .palette {
   position: absolute;
   top: 18%;
-  left: 50%;
+  left: 50%; /* physical: centered with translateX(-50%) */
   transform: translateX(-50%) translateY(-8px) scale(0.98);
   width: 640px;
   max-width: 92vw;

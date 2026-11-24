@@ -60,20 +60,20 @@
 .label-designer-studio .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem; }
 .label-designer-studio .mt-3 { margin-top: 0.75rem; }
 .label-designer-studio .mt-4 { margin-top: 1rem; }
-.label-designer-studio .mx-0\.5 { margin-left: 0.125rem; margin-right: 0.125rem; }
+.label-designer-studio .mx-0\.5 { margin-inline-start: 0.125rem; margin-inline-end: 0.125rem; }
 .label-designer-studio .p-1 { padding: 0.25rem; }
 .label-designer-studio .p-2 { padding: 0.5rem; }
 .label-designer-studio .p-3 { padding: 0.75rem; }
 .label-designer-studio .p-4 { padding: 1rem; }
 .label-designer-studio .p-5 { padding: 1.25rem; }
 .label-designer-studio .p-8 { padding: 2rem; }
-.label-designer-studio .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
-.label-designer-studio .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
-.label-designer-studio .px-4 { padding-left: 1rem; padding-right: 1rem; }
+.label-designer-studio .px-2 { padding-inline-start: 0.5rem; padding-inline-end: 0.5rem; }
+.label-designer-studio .px-3 { padding-inline-start: 0.75rem; padding-inline-end: 0.75rem; }
+.label-designer-studio .px-4 { padding-inline-start: 1rem; padding-inline-end: 1rem; }
 .label-designer-studio .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
 .label-designer-studio .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
 .label-designer-studio .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
-.label-designer-studio .text-left { text-align: left; }
+.label-designer-studio .text-left { text-align: left; } /* physical: shim for the physical Tailwind text-left utility */
 .label-designer-studio .text-center { text-align: center; }
 .label-designer-studio .text-xs { font-size: 0.75rem; line-height: 1rem; }
 .label-designer-studio .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
@@ -91,7 +91,7 @@
 .label-designer-studio .border-dashed { border-style: dashed; }
 .label-designer-studio .border-transparent { border-color: transparent; }
 .label-designer-studio .border-current { border-color: currentColor; }
-.label-designer-studio .border-r-transparent { border-right-color: transparent; }
+.label-designer-studio .border-r-transparent { border-right-color: transparent; } /* physical: shim for the physical Tailwind border-r utility */
 .label-designer-studio .bg-white { background: #fff; }
 .label-designer-studio .bg-transparent { background: transparent; }
 .label-designer-studio .bg-ui-surface { background: rgb(var(--ui-surface)); }
