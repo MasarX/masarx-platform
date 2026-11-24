@@ -4,6 +4,7 @@ import * as React from "react";
 import { AppShell, ErrorState, PageContainer } from "@masarx/ui/client";
 import { getPublicConfig, getUiDefaults } from "@masarx/config";
 import { reportClientError } from "@masarx/ui/client";
+import { resolveLocaleDir } from "./i18n/direction";
 
 type ErrorPageProps = {
   error: Error & { digest?: string };
@@ -13,6 +14,7 @@ type ErrorPageProps = {
 type AppErrorContext = {
   appName: string;
   locale: string;
+  dir: "rtl" | "ltr";
   layoutMode: "full" | "contained";
   layoutMaxWidth: string;
 };
@@ -24,6 +26,7 @@ function resolveAppErrorContext(): AppErrorContext {
     return {
       appName: config.appName,
       locale: config.locale,
+      dir: resolveLocaleDir(config.locale, uiDefaults.rtlLocales),
       layoutMode: uiDefaults.layout.mode,
       layoutMaxWidth: uiDefaults.layout.maxWidth,
     };
@@ -32,6 +35,7 @@ function resolveAppErrorContext(): AppErrorContext {
     return {
       appName: "App",
       locale: "en",
+      dir: "ltr",
       layoutMode: uiDefaults.layout.mode,
       layoutMaxWidth: uiDefaults.layout.maxWidth,
     };
@@ -70,9 +74,9 @@ export function AppErrorPage(props: ErrorPageProps) {
 }
 
 export function AppGlobalErrorPage(props: ErrorPageProps) {
-  const { locale, appName, layoutMode, layoutMaxWidth } = resolveAppErrorContext();
+  const { locale, dir, appName, layoutMode, layoutMaxWidth } = resolveAppErrorContext();
   return (
-    <html lang={locale}>
+    <html lang={locale} dir={dir}>
       <body>
         <AppShell
           appName={appName}
