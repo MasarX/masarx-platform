@@ -189,7 +189,6 @@ The Next.js apps use repository-owned Tailwind components with Radix primitives 
 
 ## 10. Known gaps
 
-1. The root `dev:console` script starts the Next.js console. The frontend testing guide describes it as the canonical Console V2 alias. `package.json`. See also `docs/frontend/TESTING.md`.
 2. Shared UI, Console V2 and landing use different palettes, type stacks, radii and theme storage keys. Only the shared provider follows live OS theme changes in system mode. `packages/ui/src/styles.css`, `packages/ui/src/theme.tsx`, `apps/console-v2/src/styles/tokens.css`, `apps/console-v2/src/lib/theme.tsx`, `docs/marketing/landing-v2/app.css`, `docs/marketing/landing-v2/app.js`.
 3. Next.js Arabic pages set root direction in the normal shell, while the missing-configuration and global-error documents set only `lang`. Console V2 also supplies English literals in route and auth fallbacks despite having EN/AR catalogs. `apps/shared/app-layout.tsx`, `apps/shared/missing-env.tsx`, `apps/shared/app-error.tsx`, `apps/console-v2/src/App.tsx`, `apps/console-v2/src/shell/AppGuard.tsx`. See also `docs/product/ux/i18n-rtl-a11y-requirements.md`.
 4. Console V2 date/time formatting picks a fixed locale mapping and uses the runtime timezone. Separate RTL overrides mirror physical edges, and landing tracking still uses a physical left edge for its timeline. `apps/console-v2/src/lib/i18n.tsx`, `apps/console-v2/src/styles/rtl.css`, `docs/marketing/landing-v2/app.css`. See also `docs/product/ux/i18n-rtl-a11y-requirements.md`.
