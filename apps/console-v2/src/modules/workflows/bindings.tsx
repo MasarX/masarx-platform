@@ -2015,7 +2015,7 @@ export function BindingsModule() {
         className="state__hint"
         style={{ padding: '0 14px 8px', fontSize: '11px' }}
       >
-        Drag an event to bind. Recent inbound events shown live.
+        Select an event to open its binding. Recent inbound events shown live.
       </div>
       {Object.entries(eventGroups).map(([root, group]) => (
         <div key={root} className="wf-evt-group">
@@ -2033,8 +2033,6 @@ export function BindingsModule() {
                 key={b.id}
                 type="button"
                 className="wf-evt-card"
-                draggable
-                onDragStart={(e) => e.dataTransfer.setData('text/plain', b.event)}
                 onClick={() => decorated && openBindingDrawer(decorated)}
                 aria-label={`Open binding ${b.event}`}
               >

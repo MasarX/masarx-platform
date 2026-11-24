@@ -59,6 +59,16 @@ describe('BindingsModule', () => {
     }
   });
 
+  it('opens a binding from the event catalog with the keyboard (WCAG 2.5.7, #301)', async () => {
+    const user = userEvent.setup();
+    await mountAndWait();
+    const card = screen.getAllByLabelText(/Open binding/i)[0]!;
+    expect(card).not.toHaveAttribute('draggable');
+    card.focus();
+    await user.keyboard('{Enter}');
+    expect(await screen.findByRole('button', { name: /Edit condition visually/i })).toBeInTheDocument();
+  });
+
   it('opens condition builder modal on row action and shows a rule preview', async () => {
     const user = userEvent.setup();
     await mountAndWait();
