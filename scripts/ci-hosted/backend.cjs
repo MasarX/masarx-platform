@@ -592,6 +592,25 @@ async function qualify(diagnostic) {
         throw new Error('pg_cron launch isolation failed during migration replay');
       }
       console.log(`Migration cron isolation: ${JSON.stringify(summary.cron)}`);
+      await db.query('BEGIN READ ONLY');
+      await db.query('SET LOCAL search_path = pg_catalog');
+      const { rows } = await db.query(`
+        SELECT format('%I.%I(%s)', n.nspname, p.proname, oidvectortypes(p.proargtypes)) AS signature,
+               coalesce(p.proacl, acldefault('f', p.proowner))::text AS acl
+        FROM pg_proc AS p
+        JOIN pg_namespace AS n ON n.oid = p.pronamespace
+        WHERE n.nspname IN ('public', 'api') AND p.prokind <> 'p'
+          AND NOT EXISTS (
+            SELECT FROM pg_depend AS d
+            WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.objsubid = 0
+              AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
+          )
+        ORDER BY signature
+      `);
+      await db.query('ROLLBACK');
+      if (!rows.length) throw new Error('Empty replayed function ACL catalog');
+      fs.writeFileSync('ci-reports/function-acls.json', JSON.stringify(rows, null, 2));
+      console.log('Captured ACLs for %d application functions.', rows.length);
     } finally { await db.end(); }
     if (shard) {
       if (selected.includes('0zz_label_renderer_url_policy_v1.sql')) {
