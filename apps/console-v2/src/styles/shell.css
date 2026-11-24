@@ -801,7 +801,7 @@
       "main"
       "rail";
   }
-  .app-shell[data-notifs-pinned="true"] .main { padding-right: 0; }
+  .app-shell[data-notifs-pinned="true"] .main { padding-right: 0; } /* physical: resets the right-side notifications panel offset on phones */
   .topbar .topbar__nav-toggle { display: inline-flex; }
   .app-shell .sidenav { display: none; }
   .app-shell[data-nav-pinned="true"] .sidenav {
