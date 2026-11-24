@@ -87,9 +87,6 @@ apps/console-v2/src/modules/platform/auth-email.tsx 27
 apps/console-v2/src/modules/platform/commands.tsx 17
 apps/console-v2/src/modules/platform/config.tsx 36
 apps/console-v2/src/modules/platform/feature-flags.tsx 95
-apps/console-v2/src/modules/platform/imports-cancel.tsx 8
-apps/console-v2/src/modules/platform/imports.tsx 243
-apps/console-v2/src/modules/platform/labels.tsx 292
 apps/console-v2/src/modules/platform/mobile-policy.tsx 63
 apps/console-v2/src/modules/platform/onboarding-readiness.tsx 66
 apps/console-v2/src/modules/platform/organizations.tsx 162
