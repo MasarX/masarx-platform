@@ -32,7 +32,13 @@ BEGIN
   SELECT settings_version_id INTO STRICT v_settings_version
     FROM public.request_settings_change_v1(
       'ui_presentation_policy', 'tenant', v_org,
-      public.resolve_settings('ui_presentation_policy', 'global', NULL::uuid), 'Synthetic approval request'
+      jsonb_build_object(
+        'version', 1, 'enabled', true,
+        'review_queue', jsonb_build_object(
+          'settings_approval_label', 'Synthetic approval ' || v_org::text,
+          'show_governance_badge', true
+        )
+      ), 'Synthetic approval request'
     );
   EXECUTE 'RESET ROLE';
 
