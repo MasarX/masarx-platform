@@ -51,6 +51,7 @@ import { useCapability, useIdentity } from '@/lib/identity';
 import * as api from '@/lib/api';
 import { lookupRow } from '@/lib/api';
 import { CAP } from '@/lib/capabilities';
+import { localDateTimeInputToUtc, toDateTimeInputValue } from '@/lib/date-input';
 import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 import { useConsoleNavigator } from '@/lib/useConsoleNavigator';
 import { openShipmentContextDrawer } from '@/modules/operate/shipments';
@@ -471,13 +472,7 @@ function pushPickupRequestFailure(error: unknown, t: Translate = englishT) {
 }
 
 function datetimeLocalOffset(minutesFromNow: number): string {
-  return new Date(Date.now() + minutesFromNow * 60_000).toISOString().slice(0, 16);
-}
-
-function datetimeLocalToTimestamptz(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.endsWith('Z') ? trimmed : `${trimmed}:00Z`;
+  return toDateTimeInputValue(new Date(Date.now() + minutesFromNow * 60_000));
 }
 
 function lookupLabel(row: { id: string; name?: string | null; display_name?: string | null }): string {
@@ -502,8 +497,8 @@ function CreatePickupRequestBody({
   const defaultSenderId = senders[0]?.id ?? existingRequests[0]?.sender_id ?? '';
   const [clientId, setClientId] = useState(defaultClientId);
   const [senderId, setSenderId] = useState(defaultSenderId);
-  const [windowStart, setWindowStart] = useState(datetimeLocalOffset(60));
-  const [windowEnd, setWindowEnd] = useState(datetimeLocalOffset(180));
+  const [windowStart, setWindowStart] = useState(() => datetimeLocalOffset(60));
+  const [windowEnd, setWindowEnd] = useState(() => datetimeLocalOffset(180));
   const [boxCount, setBoxCount] = useState('1');
   const [clientReferenceNumber, setClientReferenceNumber] = useState(`PICKUP-CONSOLE-${Date.now()}`);
   const [trackingNumber, setTrackingNumber] = useState('');
@@ -535,10 +530,14 @@ function CreatePickupRequestBody({
       setError(t('pickups.form.originInvalid'));
       return;
     }
-    const start = datetimeLocalToTimestamptz(windowStart);
-    const end = datetimeLocalToTimestamptz(windowEnd);
-    if (!clientId || !start || !end) {
+    if (!clientId || !windowStart || !windowEnd) {
       setError(t('pickups.form.required'));
+      return;
+    }
+    const start = localDateTimeInputToUtc(windowStart);
+    const end = localDateTimeInputToUtc(windowEnd);
+    if (!start || !end) {
+      setError(t('modules.pickups.invalidWindowTime'));
       return;
     }
     setSubmitting(true);
