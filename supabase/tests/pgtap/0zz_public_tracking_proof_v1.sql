@@ -1,7 +1,7 @@
 BEGIN;
 SET LOCAL search_path TO public, extensions, pgtap, pg_temp;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(12);
+SELECT plan(13);
 
 SELECT ok(NOT has_function_privilege('anon', 'api.public_tracking_proof_v1(jsonb)', 'EXECUTE'),
   'anon cannot access storage references through the service RPC');
@@ -44,7 +44,10 @@ BEGIN
   INSERT INTO public.shipment_actions
     (id, organization_id, client_id, shipment_id, action_type, action_category, canonical_status, timestamp, action_data)
   VALUES (v_action, v_org, v_client, v_shipment, 'status_change', 'operational', 'delivered',
-    v_now, jsonb_build_object('pod', jsonb_build_object('recipient_name', 'Fixture Name', 'signature_artifact_id', v_signature)));
+    v_now, jsonb_build_object(
+      'pod', jsonb_build_object('recipient_name', 'Fixture Name', 'signature_artifact_id', v_signature),
+      'delivery_completion', jsonb_build_object('captured_at', (v_now - interval '1 minute')::text)
+    ));
 
   INSERT INTO public.artifacts (id, organization_id, storage_bucket, storage_key, mime_type, metadata)
   VALUES
@@ -64,6 +67,7 @@ BEGIN
   v_proof := api.public_tracking_proof_v1(v_input)->'proof';
   RETURN NEXT is(v_proof->>'state', 'available', 'verified delivered shipment has proof');
   RETURN NEXT is(jsonb_array_length(v_proof->'artifacts'), 2, 'one artifact per enabled kind');
+  RETURN NEXT is((v_proof #>> '{artifacts,0,captured_at}')::timestamptz, v_now - interval '1 minute', 'capture time is parsed from the catalog text projection');
   RETURN NEXT is(v_proof->>'recipient_name', 'F' || repeat('*', length('Fixture Name') - 1), 'typed recipient name is masked');
   RETURN NEXT is(api.public_tracking_proof_v1(v_input || jsonb_build_object('session_token', gen_random_uuid()))
     #>> '{error,code}', 'invalid_session', 'wrong token cannot list proof');

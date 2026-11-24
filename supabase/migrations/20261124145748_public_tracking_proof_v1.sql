@@ -99,7 +99,7 @@ BEGIN
         ORDER BY kind, created_at DESC, id DESC
       )
       SELECT COALESCE(jsonb_agg(jsonb_build_object(
-        'id', id, 'kind', kind, 'captured_at', COALESCE(v_delivery.pod_captured_at, v_delivery.timestamp),
+        'id', id, 'kind', kind, 'captured_at', COALESCE(public.parse_external_timestamp_v1(v_delivery.pod_captured_at), v_delivery.timestamp),
         'storage_bucket', storage_bucket, 'storage_key', storage_key, 'mime_type', mime_type
       ) ORDER BY kind), '[]'::jsonb)
       INTO v_artifacts
