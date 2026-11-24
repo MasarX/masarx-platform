@@ -3,6 +3,8 @@ import { resolveBrowserCorsPolicy } from "./_shared/cors.mjs";
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
 import { logStructured, parseRequestBody, readEnv } from "./_shared/mod.mjs";
 
+import { serveTrackingProof } from "./proof.ts";
+
 type JsonRecord = Record<string, unknown>;
 
 const SUPABASE_URL = readEnv("EDGE_SUPABASE_URL", ["SUPABASE_URL", "API_URL"]);
@@ -204,8 +206,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(405, { ok: false, error: { code: "method_not_allowed" } }, cors.headers);
   }
 
-  const action = pathAction(new URL(req.url).pathname);
-  if (!action) {
+  const requestUrl = new URL(req.url);
+  const action = pathAction(requestUrl.pathname);
+  const isProof = /\/proof(?:\/file)?\/*$/.test(requestUrl.pathname);
+  if (!action && !isProof) {
     return json(404, { ok: false, error: { code: "not_found" } }, cors.headers);
   }
 
@@ -287,6 +291,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const ipHash = await sha256Hex(`${effectiveIpHashSalt}:${clientIp}`);
+  if (isProof) {
+    return serveTrackingProof(serviceClient, { ...payload, ip_hash: ipHash }, requestUrl, cors.headers, effectiveIpHashSalt);
+  }
+
   let turnstileVerified = false;
 
   if (routeRequiresTurnstile(action)) {
