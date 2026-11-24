@@ -94,6 +94,7 @@ The v0.2.0 production deploy plan uses the same renderer signing key derivation 
 - Review each release gate once and record its GO. The Portfolio Lead gives the GO for non-production gates. Once approved, the gate releases each passing change automatically and writes an audit row. A new kind of change needs a new GO.
 - The routine DEV deploy audit row is the workflow run summary. It includes the G1–G3 guard decisions, the G4 apply summary and the final job's per-surface results table.
 - Each production deploy requires the owner's explicit approval. Production deployments are paused until the production deploy gate is ready. Verify a production backup before every production deploy. Keep the previous version ready, check health after deploy and roll back immediately on failure.
+- Use the [production release runbook](docs/ops/production-release.md) for the managed database setup, backup check, approval preflight and artifact promotion.
 - Gap: No production rollback command or staging/production deploy audit row is defined.
 
 ## Security
