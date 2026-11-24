@@ -14,7 +14,7 @@ SELECT ok((
         OR COALESCE((to_jsonb(pg_auth_members)->>'set_option')::boolean, true))
   ), 'the bounded count retains its executor owner without replacement authority');
 
-SELECT like(pg_get_functiondef('public.ui_list_resource_v1(text,jsonb,integer,integer,jsonb)'::regprocedure),
+SELECT alike(pg_get_functiondef('public.ui_list_resource_v1(text,jsonb,integer,integer,jsonb)'::regprocedure),
   '%SELECT COUNT(*) FROM (SELECT 1 FROM %I.%I WHERE %s LIMIT $1) visible_rows%INTO v_total USING v_max_page_size + 1%',
   'the log count consumes at most cap plus one scoped rows before aggregation');
 
