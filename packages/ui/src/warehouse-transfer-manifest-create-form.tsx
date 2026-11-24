@@ -26,7 +26,8 @@ const INVALID_RECEIVE_TIME = "Enter the planned receive time as an ISO 8601 date
 const RECEIVE_BEFORE_DISPATCH = "Planned receive time must be at or after planned dispatch time.";
 const plannedTimestamp = z.iso.datetime({ offset: true });
 
-type ManifestError = { message: string; input?: React.RefObject<HTMLInputElement | null> };
+// input is the field the error belongs to: an input, a textarea, or a lookup group holding a combobox.
+type ManifestError = { message: string; input?: React.RefObject<HTMLElement | null> };
 
 type WarehouseTransferManifestCreateFormProps = {
   appBasePath: string;
@@ -141,17 +142,25 @@ export function WarehouseTransferManifestCreateForm({
   const receiveInputRef = React.useRef<HTMLInputElement>(null);
   const rawDispatchInputRef = React.useRef<HTMLInputElement>(null);
   const rawReceiveInputRef = React.useRef<HTMLInputElement>(null);
+  const transferCodeInputRef = React.useRef<HTMLInputElement>(null);
+  const fromBranchLookupRef = React.useRef<HTMLDivElement>(null);
+  const toBranchLookupRef = React.useRef<HTMLDivElement>(null);
+  const shipmentsLookupRef = React.useRef<HTMLDivElement>(null);
+  const rawFromBranchInputRef = React.useRef<HTMLInputElement>(null);
+  const rawToBranchInputRef = React.useRef<HTMLInputElement>(null);
+  const rawShipmentsInputRef = React.useRef<HTMLTextAreaElement>(null);
   const errorId = React.useId();
   const [shipmentIdsText, setShipmentIdsText] = React.useState("");
   const [error, setError] = React.useState<ManifestError | null>(null);
   const [pending, setPending] = React.useState(false);
+  const isErrorField = (ref: React.RefObject<HTMLElement | null>) => error?.input === ref;
 
   React.useLayoutEffect(() => {
     const input = error?.input?.current;
     if (!input) return;
     const details = input.closest("details");
     if (details) details.open = true;
-    input.focus();
+    (input.querySelector<HTMLElement>('[role="combobox"]') ?? input).focus();
   }, [error]);
 
   const shipmentIds = React.useMemo(() => parseShipmentIds(shipmentIdsText), [shipmentIdsText]);
@@ -212,15 +221,19 @@ export function WarehouseTransferManifestCreateForm({
       return;
     }
     if (!transferCode.trim()) {
-      setError({ message: "Transfer code is required." });
+      setError({ message: "Transfer code is required.", input: transferCodeInputRef });
       return;
     }
     if (!fromBranchId.trim() || !toBranchId.trim()) {
-      setError({ message: "From branch ID and to branch ID are required." });
+      // Point at the first missing branch: the lookup when it is usable, otherwise the raw ID field.
+      const input = !fromBranchId.trim()
+        ? lookupEnabled ? fromBranchLookupRef : rawFromBranchInputRef
+        : lookupEnabled ? toBranchLookupRef : rawToBranchInputRef;
+      setError({ message: "From branch ID and to branch ID are required.", input });
       return;
     }
     if (shipmentIds.length < 1) {
-      setError({ message: "At least one shipment ID is required." });
+      setError({ message: "At least one shipment ID is required.", input: lookupEnabled ? shipmentsLookupRef : rawShipmentsInputRef });
       return;
     }
     if (!canCreate) {
@@ -313,6 +326,7 @@ export function WarehouseTransferManifestCreateForm({
     canResolvePermissions,
     delay,
     fromBranchId,
+    lookupEnabled,
     normalizedReturnTo,
     organizationId,
     pending,
@@ -364,6 +378,9 @@ export function WarehouseTransferManifestCreateForm({
         <label className="space-y-2 text-sm text-ui-ink">
           <span className="text-xs uppercase tracking-wide text-ui-muted">Transfer code</span>
           <Input
+            ref={transferCodeInputRef}
+            invalid={isErrorField(transferCodeInputRef)}
+            aria-describedby={isErrorField(transferCodeInputRef) ? errorId : undefined}
             value={transferCode}
             onChange={(event) => setTransferCode(event.target.value)}
             placeholder="XFER-20260404-001"
@@ -381,15 +398,19 @@ export function WarehouseTransferManifestCreateForm({
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-from-branch-label`}>
+        <div ref={fromBranchLookupRef} className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-from-branch-label`}>
           <span id={`${resolvedTestIdPrefix}-from-branch-label`} className="text-sm text-ui-ink">From branch</span>
           <RelationField value={fromBranchId} onChange={(value) => setFromBranchId(String(value))}
+            aria-invalid={isErrorField(fromBranchLookupRef)}
+            aria-describedby={isErrorField(fromBranchLookupRef) ? errorId : undefined}
             options={branchOptions.filter((item) => item.value === fromBranchId)} fetcher={lookupEnabled ? fetchBranches : undefined}
             placeholder="Search origin branches" disabled={pending || !lookupEnabled} />
         </div>
-        <div className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-to-branch-label`}>
+        <div ref={toBranchLookupRef} className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-to-branch-label`}>
           <span id={`${resolvedTestIdPrefix}-to-branch-label`} className="text-sm text-ui-ink">To branch</span>
           <RelationField value={toBranchId} onChange={(value) => setToBranchId(String(value))}
+            aria-invalid={isErrorField(toBranchLookupRef)}
+            aria-describedby={isErrorField(toBranchLookupRef) ? errorId : undefined}
             options={branchOptions.filter((item) => item.value === toBranchId)} fetcher={lookupEnabled ? fetchBranches : undefined}
             placeholder="Search destination branches" disabled={pending || !lookupEnabled} />
         </div>
@@ -412,9 +433,11 @@ export function WarehouseTransferManifestCreateForm({
         </label>
       </div>
 
-      <div className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-shipments-label`}>
+      <div ref={shipmentsLookupRef} className="space-y-2" role="group" aria-labelledby={`${resolvedTestIdPrefix}-shipments-label`}>
         <span id={`${resolvedTestIdPrefix}-shipments-label`} className="text-sm text-ui-ink">Shipments</span>
         <RelationField mode="multi" value={shipmentIds}
+          aria-invalid={isErrorField(shipmentsLookupRef)}
+          aria-describedby={isErrorField(shipmentsLookupRef) ? errorId : undefined}
           onChange={(value) => setShipmentIdsText(Array.isArray(value) ? value.join("\n") : value)}
           options={shipmentOptions.filter((item) => shipmentIds.includes(item.value))}
           fetcher={lookupEnabled ? fetchShipments : undefined}
@@ -427,6 +450,9 @@ export function WarehouseTransferManifestCreateForm({
           <label className="space-y-2 text-sm text-ui-ink">
             <span className="text-xs uppercase tracking-wide text-ui-muted">From branch ID</span>
             <Input
+              ref={rawFromBranchInputRef}
+              invalid={isErrorField(rawFromBranchInputRef)}
+              aria-describedby={isErrorField(rawFromBranchInputRef) ? errorId : undefined}
               value={fromBranchId}
               onChange={(event) => setFromBranchId(event.target.value)}
               placeholder="branch UUID"
@@ -438,6 +464,9 @@ export function WarehouseTransferManifestCreateForm({
           <label className="space-y-2 text-sm text-ui-ink">
             <span className="text-xs uppercase tracking-wide text-ui-muted">To branch ID</span>
             <Input
+              ref={rawToBranchInputRef}
+              invalid={isErrorField(rawToBranchInputRef)}
+              aria-describedby={isErrorField(rawToBranchInputRef) ? errorId : undefined}
               value={toBranchId}
               onChange={(event) => setToBranchId(event.target.value)}
               placeholder="branch UUID"
@@ -486,6 +515,9 @@ export function WarehouseTransferManifestCreateForm({
             Shipment IDs
           </span>
           <Textarea
+            ref={rawShipmentsInputRef}
+            aria-invalid={isErrorField(rawShipmentsInputRef) || undefined}
+            aria-describedby={isErrorField(rawShipmentsInputRef) ? errorId : undefined}
             value={shipmentIdsText}
             onChange={(event) => setShipmentIdsText(event.target.value)}
             placeholder={"One shipment UUID per line or comma-separated values."}
