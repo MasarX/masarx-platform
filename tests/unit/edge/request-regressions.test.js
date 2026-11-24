@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const ts = require('typescript');
-const { createHmac, webcrypto } = require('crypto');
+const { webcrypto } = require('crypto');
 
 const functionsRoot = path.resolve(__dirname, '../../../supabase/functions');
 const compiledModules = new Map();
