@@ -730,7 +730,7 @@ function RolesTab({
       ) : null}
       <ul
         style={{ listStyle: 'none', padding: '0 14px', margin: 0 }}
-        aria-label={t('platformUsers.rolesTab.roleCatalog')}
+        aria-label={t('platformUsers.rolesTab.roleList')}
         data-testid="users-roles-list"
       >
         {roleOptions.map((role) => {
