@@ -166,8 +166,9 @@ describe("FieldOps preview screen scan and proof routing (#602)", () => {
     expect(source).not.toContain("Parcel status toggled");
   });
 
-  test("routes the stop scan to the canonical scan screen and proof taps to proof capture", () => {
-    expect(source).toContain('onScanParcel={() => setActiveTabId("mobile-scan")}');
-    expect(source).toMatch(/onProofPress=\{\(\) => \{\s*setPodFailSheetOpen\(false\);\s*setActiveTabId\("mobile-pod"\);/);
+  test.each(["onScanParcel", "onProofPress"])("routes the stop %s tap to proof capture", (handler) => {
+    expect(source).toMatch(
+      new RegExp(`${handler}=\\{\\(\\) => \\{\\s*setPodFailSheetOpen\\(false\\);\\s*setActiveTabId\\("mobile-pod"\\);\\s*\\}\\}`),
+    );
   });
 });

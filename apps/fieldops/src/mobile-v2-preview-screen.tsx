@@ -6251,7 +6251,12 @@ function PreviewBody(props: PreviewBodyProps = {}): React.ReactElement {
                 { success: "Share sheet opened", missing: "No address on this stop" },
               )
             }
-            onScanParcel={() => setActiveTabId("mobile-scan")}
+            // Parcel scans and proof items are recorded by the proof capture
+            // flow (submit_fieldops_proof_v1); the stop shows them from its read-back.
+            onScanParcel={() => {
+              setPodFailSheetOpen(false);
+              setActiveTabId("mobile-pod");
+            }}
             onDamageHold={openDamageHoldForActiveStop}
             onReschedule={openRescheduleForActiveStop}
             onProofPress={() => {
