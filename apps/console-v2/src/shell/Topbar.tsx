@@ -1,7 +1,7 @@
 // Topbar.tsx — 44px dark chrome bar with brand, breadcrumbs, command trigger,
 // scope pill, density/lang/theme/bell/user buttons. Pure presentation; behaviour
 // is delegated through props/context (theme, i18n, identity).
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Icon } from '@/components/Icon';
 import { Kbd } from '@/components/Kbd';
 import { fill, useI18n } from '@/lib/i18n';
@@ -63,7 +63,11 @@ export function Topbar({
   const breadcrumbs: RouteBreadcrumb[] =
     crumbs && crumbs.length > 0
       ? crumbs.map((label) => ({ label }))
-      : buildRouteBreadcrumbs(location.pathname);
+      : buildRouteBreadcrumbs(location.pathname, t);
+  const page = breadcrumbs[breadcrumbs.length - 1]?.label ?? '';
+  useEffect(() => {
+    document.title = fill(t('routes.documentTitle'), { page });
+  }, [page, t]);
 
   return (
     <header className="topbar" role="banner">
