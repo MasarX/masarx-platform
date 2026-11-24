@@ -58,6 +58,8 @@ async function main() {
   if (command === 'typecheck') {
     if (!subject) throw new Error('Typecheck app is required');
     if (subject === 'apps/fieldops') return npmScript('typecheck:fieldops');
+    // Console V2 is a Vite app, so it has its own tsc script rather than the Next typegen path.
+    if (subject === 'apps/console-v2') return npmScript('typecheck', subject);
     if (!nextApps().some(app => `apps/${app}` === subject)) throw new Error('Typecheck subject must be a Next app');
     for (const app of nextApps().filter(app => `apps/${app}` === subject)) {
       const dir = `apps/${app}`;

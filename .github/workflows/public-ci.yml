@@ -416,6 +416,10 @@ jobs:
               node scripts/ci-hosted/tasks.cjs typecheck "$subject" || result=$?
             fi
           done
+          # Console V2 is a Vite app with its own tsc script (#429).
+          if [[ -f apps/console-v2/package.json ]]; then
+            node scripts/ci-hosted/tasks.cjs typecheck apps/console-v2 || result=$?
+          fi
           exit "$result"
 
   unit:
