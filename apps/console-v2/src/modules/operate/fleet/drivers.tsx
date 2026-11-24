@@ -68,6 +68,7 @@ import {
 import { pushToast } from '@/components/toastStore';
 import { useCapability, useIdentity } from '@/lib/identity';
 import { humanizeToken } from '@/lib/display-text';
+import { englishT, fill, useT, type Translate } from '@/lib/i18n';
 import { readUrlParam } from '@/lib/url-params';
 // Strict canonical tone/label SSOT. AGENTS.md §2 (ZERO HARDCODING) + §4 (SSOT):
 // every chip tone derives from `lookup_values.metadata.tone` via this resolver.
@@ -325,10 +326,10 @@ function driverLookupKeys(driver: DriverProfileRow): string[] {
   return resourceKeys(driver.id, driver.user_id);
 }
 
-function driverDocumentLabel(document: DriverDocumentRow): string {
+function driverDocumentLabel(document: DriverDocumentRow, t: Translate = englishT): string {
   const type = String(document.doc_type ?? document.kind ?? '');
   const lookup = lookupRow('driver_document_kind', type) ?? lookupRow('driver_document_type', type);
-  return [lookup?.label ?? humanizeToken(type) ?? 'Driver document', document.issuer]
+  return [lookup?.label ?? humanizeToken(type) ?? t('fleetDrivers.documents.documentFallback'), document.issuer]
     .map((part) => String(part ?? '').trim())
     .filter(Boolean)
     .join(' - ');
@@ -364,23 +365,23 @@ function daysBetween(iso: string | null | undefined, now: Date): number | null {
   return Math.ceil((t - now.getTime()) / 86_400_000);
 }
 
-function durationDaysLabel(start: string, end: string | null): string {
+function durationDaysLabel(start: string, end: string | null, t: Translate = englishT): string {
   const startMs = new Date(start).getTime();
   const endMs = end ? new Date(end).getTime() : Date.now();
   if (Number.isNaN(startMs) || Number.isNaN(endMs)) return '—';
   const days = Math.max(1, Math.round((endMs - startMs) / 86_400_000));
-  if (days < 30) return `${days}d`;
-  if (days < 365) return `${Math.round(days / 30)}mo`;
-  return `${Math.floor(days / 365)}y ${Math.round((days % 365) / 30)}mo`;
+  if (days < 30) return fill(t('fleetDrivers.duration.days'), { n: days });
+  if (days < 365) return fill(t('fleetDrivers.duration.months'), { n: Math.round(days / 30) });
+  return fill(t('fleetDrivers.duration.yearsMonths'), { y: Math.floor(days / 365), m: Math.round((days % 365) / 30) });
 }
 
 // AGENTS.md §2/§3: Driver KPI thresholds (docs expiring count window, OOS
 // score threshold, rating + on-time tone bands) resolve strictly from
 // canonical `driver_kpi_thresholds` (W48 policy seed). No inline magic
 // numbers anywhere in this surface.
-function dutyStatusLabel(status: string | null | undefined): string {
-  if (!status) return 'No active duty segment';
-  return lookupRow('hours_of_service_duty_status', status)?.label ?? humanizeToken(status, 'Duty status');
+function dutyStatusLabel(status: string | null | undefined, t: Translate = englishT): string {
+  if (!status) return t('fleetDrivers.hos.noActiveSegment');
+  return lookupRow('hours_of_service_duty_status', status)?.label ?? humanizeToken(status, t('fleetDrivers.hos.dutyStatus'));
 }
 
 type DriverKpiThresholds = {
@@ -399,6 +400,7 @@ type DriverKpiThresholds = {
 
 // ─── Page-level module ────────────────────────────────────────────────────
 export function DriversModule() {
+  const t = useT();
   const { scope, currentTenantId } = useIdentity();
   const canRead = useCapability(CAP.FLEET_READ);
   const canCreateDriver = useCapability(CAP.FLEET_WRITE);
@@ -694,14 +696,14 @@ export function DriversModule() {
         // Column "current_vehicle" — show plate label (still a valid FK in
         // the underlying record so ReferencePicker round-trips correctly).
         current_vehicle_label: d.current_vehicle_id
-          ? (vehicleLabelById.get(d.current_vehicle_id) ?? 'Assigned vehicle')
+          ? (vehicleLabelById.get(d.current_vehicle_id) ?? t('fleetDrivers.assignedVehicle'))
           : '—',
         current_branch_label: d.current_branch_id
-          ? (branchLabelById.get(d.current_branch_id) ?? 'Selected branch')
+          ? (branchLabelById.get(d.current_branch_id) ?? t('fleet.selectedBranch'))
           : '—',
         worst_expiry_at: worstExpiryByDriver.get(d.id) ?? null,
       })),
-    [drivers, vehicleLabelById, branchLabelById, worstExpiryByDriver],
+    [drivers, vehicleLabelById, branchLabelById, worstExpiryByDriver, t],
   );
 
   // ── Columns ──
@@ -709,7 +711,7 @@ export function DriversModule() {
     () => [
       {
         key: 'name',
-        label: 'Driver',
+        label: t('fleet.driver'),
         sortable: true,
         filterable: true,
         render: (raw, row) => (
@@ -734,17 +736,17 @@ export function DriversModule() {
             </span>
             <span
               style={{ color: 'inherit' }}
-              title="Open driver profile"
+              title={t('fleetDrivers.columns.openDriverProfile')}
             >
               {String(raw)}
             </span>
           </span>
         ),
       },
-      { key: 'license_number', label: 'License #', mono: true, sortable: true, filterable: true },
+      { key: 'license_number', label: t('fleetDrivers.columns.licenseNumber'), mono: true, sortable: true, filterable: true },
       {
         key: 'license_expires_at',
-        label: 'License expiry',
+        label: t('fleetDrivers.columns.licenseExpiry'),
         sortable: true,
         render: (raw) => (
           <ExpiryChip expiresAt={typeof raw === 'string' ? raw : null} size="xs" />
@@ -752,28 +754,28 @@ export function DriversModule() {
       },
       {
         key: 'current_vehicle_label',
-        label: 'Vehicle',
+        label: t('fleetDrivers.columns.vehicle'),
         mono: true,
         sortable: true,
         filterable: true,
       },
       {
         key: 'current_branch_label',
-        label: 'Branch',
+        label: t('fleet.branch'),
         mono: true,
         sortable: true,
         filterable: true,
       },
       {
         key: 'status',
-        label: 'Status',
+        label: t('fleet.status'),
         sortable: true,
         filterable: true,
         lookup: 'driver_status',
       },
       {
         key: 'hours_of_service_state',
-        label: 'HOS',
+        label: t('fleetDrivers.columns.hos'),
         align: 'center',
         sortable: true,
         render: (_raw, row) => (
@@ -785,7 +787,7 @@ export function DriversModule() {
       },
       {
         key: 'compliance_score',
-        label: 'Compliance',
+        label: t('fleetDrivers.columns.compliance'),
         align: 'right',
         sortable: true,
         type: 'number',
@@ -793,7 +795,7 @@ export function DriversModule() {
           if (typeof raw !== 'number') {
             return (
               <Chip
-                label="Not scored"
+                label={t('fleetDrivers.score.notScored')}
                 kind="neutral"
                 size="xs"
                 className="mono"
@@ -808,7 +810,7 @@ export function DriversModule() {
           const tone = complianceTone(v, complianceScoreBands);
           return (
             <Chip
-              label={tone ? `${v}` : `${v} (missing)`}
+              label={tone ? `${v}` : fill(t('fleetDrivers.score.missing'), { value: v })}
               kind={tone ?? 'danger'}
               size="xs"
               className="mono"
@@ -818,14 +820,14 @@ export function DriversModule() {
       },
       {
         key: 'worst_expiry_at',
-        label: 'Doc expiry',
+        label: t('fleetDrivers.columns.docExpiry'),
         sortable: true,
         render: (raw) => (
           <ExpiryChip expiresAt={typeof raw === 'string' ? raw : null} size="xs" />
         ),
       },
     ],
-    [complianceScoreBands],
+    [complianceScoreBands, t],
   );
 
   function openDriverDrawer(d: DriverProfileRow, tab: TabId = 'profile') {
@@ -913,7 +915,7 @@ export function DriversModule() {
 
   function openSuspendModal(rows: DriverProfileRow[]) {
     modal.open({
-      title: `Suspend ${rows.length} driver${rows.length === 1 ? '' : 's'}`,
+      title: fill(rows.length === 1 ? t('fleetDrivers.modal.suspendOne') : t('fleetDrivers.modal.suspendOther'), { n: rows.length }),
       body: (
         <BulkSuspendBody
           drivers={rows}
@@ -932,7 +934,7 @@ export function DriversModule() {
   // useRestoreDriver orphan-hook gap.
   function openReinstateModal(driver: DriverProfileRow) {
     modal.open({
-      title: `Reinstate driver · ${driver.name}`,
+      title: fill(t('fleetDrivers.modal.reinstate'), { name: driver.name }),
       body: (
         <ReinstateDriverBody
           driver={driver}
@@ -990,7 +992,7 @@ export function DriversModule() {
 
   function openCreateDriverModal() {
     modal.open({
-      title: 'New driver',
+      title: t('fleetDrivers.actions.newDriver'),
       body: (
         <CreateDriverBody
           users={availableDriverUsers}
@@ -1011,14 +1013,14 @@ export function DriversModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Operate · Fleet"
-          titleAccent="Drivers"
-          titlePlain="— roster, compliance, hours of service"
+          eyebrow={t('fleet.eyebrow')}
+          titleAccent={t('fleet.drivers')}
+          titlePlain={t('fleetDrivers.header.plain')}
         />
         <StateView
           kind="denied"
           capability={CAP.FLEET_READ}
-          hint="You do not have permission to view fleet drivers."
+          hint={t('fleetDrivers.denied')}
         />
       </div>
     );
@@ -1030,12 +1032,12 @@ export function DriversModule() {
     eventsQ.isLoading ||
     assignmentsQ.isLoading
   ) {
-    return <StateView kind="loading" hint="Loading drivers…" />;
+    return <StateView kind="loading" hint={t('fleetDrivers.loading')} />;
   }
   if (driversQ.isError)
-    return <StateView kind="error" hint="Could not load drivers." />;
+    return <StateView kind="error" hint={t('fleetDrivers.loadError')} />;
   if (documentsQ.isError || eventsQ.isError || assignmentsQ.isError)
-    return <StateView kind="error" hint="Could not load driver documents, compliance events, or vehicle history." />;
+    return <StateView kind="error" hint={t('fleetDrivers.relatedLoadError')} />;
 
   if (
     docsExpiringDays == null ||
@@ -1053,14 +1055,14 @@ export function DriversModule() {
     return (
       <div className="page">
         <PageHeader
-          eyebrow="Operate · Fleet"
-          titleAccent="Drivers"
-          titlePlain="— roster"
+          eyebrow={t('fleet.eyebrow')}
+          titleAccent={t('fleet.drivers')}
+          titlePlain={t('fleetDrivers.header.plainShort')}
         />
         <StateView
           kind="error"
-          title="Driver KPI thresholds are not configured"
-          hint="Document, score, on-time, rating, and compliance-band thresholds are missing. Finish driver policy setup before using this surface."
+          title={t('fleetDrivers.thresholds.title')}
+          hint={t('fleetDrivers.thresholds.hint')}
         />
       </div>
     );
@@ -1069,9 +1071,9 @@ export function DriversModule() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Operate · Fleet"
-        titleAccent="Drivers"
-        titlePlain="— roster, compliance, hours of service"
+        eyebrow={t('fleet.eyebrow')}
+        titleAccent={t('fleet.drivers')}
+        titlePlain={t('fleetDrivers.header.plain')}
         pills={[
           // W56-C closure — `scopeType="tenant"` is the canonical resource-tier
           // literal (driver_profiles scope via current_user_org_id()).
@@ -1081,13 +1083,13 @@ export function DriversModule() {
             key="src"
             size="xs"
             label={
-              <span>Driver directory</span>
+              <span>{t('fleetDrivers.pills.directory')}</span>
             }
           />,
           <Chip
             key="policy"
             size="xs"
-            label={<span>Compliance policy configured</span>}
+            label={<span>{t('fleetDrivers.pills.policy')}</span>}
             kind="info"
           />,
         ]}
@@ -1097,21 +1099,21 @@ export function DriversModule() {
         actions={[
           <Button
             key="new-driver"
-            label="New driver"
+            label={t('fleetDrivers.actions.newDriver')}
             iconName="plus"
             kind="primary"
             capability={CAP.FLEET_WRITE}
             disabled={createDriverMutation.isPending || usersQ.isLoading}
-            title={usersQ.isLoading ? 'Loading tenant users before driver creation.' : undefined}
+            title={usersQ.isLoading ? t('fleetDrivers.actions.usersLoading') : undefined}
             onClick={openCreateDriverModal}
           />,
           <a
             key="driver-applications"
             className="btn btn--ghost"
             href="/operate/fleet/driver-applications"
-            aria-label="Review driver applications"
+            aria-label={t('fleetDrivers.actions.reviewApplicationsLabel')}
           >
-            Review applications
+            {t('fleetDrivers.actions.reviewApplications')}
           </a>,
         ]}
       />
@@ -1126,23 +1128,23 @@ export function DriversModule() {
           padding: '8px 0 12px',
         }}
       >
-        <KPICard label="Total drivers" value={kpis.total} tone="neutral" />
-        <KPICard label="Active" value={kpis.active} tone="good" />
-        <KPICard label="On shift" value={kpis.onShift} tone="good" />
-        <KPICard label="On break" value={kpis.onBreak} tone="info" />
-        <KPICard label="Inactive" value={kpis.inactive} tone="neutral" />
-        <KPICard label="Suspended" value={kpis.suspended} tone="danger" />
+        <KPICard label={t('fleetDrivers.kpi.total')} value={kpis.total} tone="neutral" />
+        <KPICard label={t('fleet.active')} value={kpis.active} tone="good" />
+        <KPICard label={t('fleet.onShift')} value={kpis.onShift} tone="good" />
+        <KPICard label={t('fleetDrivers.kpi.onBreak')} value={kpis.onBreak} tone="info" />
+        <KPICard label={t('fleetDrivers.kpi.inactive')} value={kpis.inactive} tone="neutral" />
+        <KPICard label={t('fleetDrivers.kpi.suspended')} value={kpis.suspended} tone="danger" />
         <KPICard
-          label="Docs expiring"
+          label={t('fleetDrivers.kpi.docsExpiring')}
           value={kpis.docExpiringCount}
           tone={kpis.docExpiringCount === 0 ? 'good' : kpis.docExpiringCount <= docsExpiringWarnCount ? 'warn' : 'danger'}
-          delta={`< ${docsExpiringDays} days`}
+          delta={fill(t('fleetDrivers.kpi.docsExpiringDelta'), { n: docsExpiringDays })}
         />
         <KPICard
-          label="Out of service"
+          label={t('fleet.outOfService')}
           value={kpis.outOfService}
           tone={kpis.outOfService === 0 ? 'good' : 'danger'}
-          delta={`suspended or score < ${scoreOosThreshold}`}
+          delta={fill(t('fleetDrivers.kpi.outOfServiceDelta'), { n: scoreOosThreshold })}
         />
       </div>
 
@@ -1156,12 +1158,12 @@ export function DriversModule() {
           rowDeepLink={(r) => `/operate/fleet/drivers?focus=${encodeURIComponent(r.id)}`}
           rowActions={[
             {
-              label: 'Open profile',
+              label: t('fleet.openProfile'),
               icon: 'eye',
               onClick: (r) => openDriverDrawer(r as unknown as DriverProfileRow),
             },
             {
-              label: 'Suspend driver',
+              label: t('fleetDrivers.actions.suspendDriver'),
               icon: 'alert',
               kind: 'danger',
               capability: CAP.FLEET_WRITE,
@@ -1171,7 +1173,7 @@ export function DriversModule() {
             // not support per-row action gating so we no-op with a friendly
             // toast on non-suspended drivers.
             {
-              label: 'Reinstate driver',
+              label: t('fleetDrivers.actions.reinstateDriver'),
               icon: 'check',
               kind: 'primary',
               capability: CAP.FLEET_WRITE,
@@ -1186,7 +1188,7 @@ export function DriversModule() {
                   lookupRow('driver_status', driver.status ?? '')?.metadata?.is_suspended === true;
                 if (!isSuspended) {
                   pushToast(
-                    `Driver ${driver.name} is not suspended. Current status: ${driver.status ?? 'unknown'}. Nothing to reinstate.`,
+                    fill(t('fleetDrivers.toast.notSuspended'), { name: driver.name, status: driver.status ?? t('shell.unknown') }),
                     'info',
                   );
                   return;
@@ -1197,7 +1199,7 @@ export function DriversModule() {
           ]}
           bulkActions={[
             {
-              label: 'Suspend',
+              label: t('fleetDrivers.actions.suspend'),
               icon: 'alert',
               kind: 'danger',
               capability: CAP.FLEET_WRITE,
@@ -1216,6 +1218,7 @@ export function DriversModule() {
 
 // ─── Compact HOS cell (in-table, today only) ─────────────────────────────
 function CompactHosCell({ driverId, fallback }: { driverId: string; fallback: string }) {
+  const t = useT();
   const hosQ = useDriverHoursOfService(driverId);
   const data = hosQ.data ?? null;
   // AGENTS.md §2/§3: HOS limits + warn-threshold resolve strictly from
@@ -1231,10 +1234,10 @@ function CompactHosCell({ driverId, fallback }: { driverId: string; fallback: st
     return <span className="mono" style={{ color: 'var(--ink-3)' }}>{fallback}</span>;
   }
   if (!dailyLimits) {
-    return <span className="mono" style={{ color: 'var(--danger)' }}>Daily duty limits are not configured</span>;
+    return <span className="mono" style={{ color: 'var(--danger)' }}>{t('fleetDrivers.hos.dailyLimitsMissing')}</span>;
   }
   if (typeof warnPct !== 'number') {
-    return <span className="mono" style={{ color: 'var(--danger)' }}>Duty warning threshold is not configured</span>;
+    return <span className="mono" style={{ color: 'var(--danger)' }}>{t('fleetDrivers.hos.warnMissing')}</span>;
   }
   return (
     <HoursOfServiceMeter
@@ -1249,13 +1252,13 @@ function CompactHosCell({ driverId, fallback }: { driverId: string; fallback: st
 
 // ─── Drawer body (6 tabs) ────────────────────────────────────────────────
 type TabId = 'profile' | 'documents' | 'compliance' | 'hos' | 'vehicle_history' | 'performance';
-const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
-  { id: 'profile', label: 'Profile' },
-  { id: 'documents', label: 'Documents' },
-  { id: 'compliance', label: 'Compliance events' },
-  { id: 'hos', label: 'Hours of Service' },
-  { id: 'vehicle_history', label: 'Vehicle history' },
-  { id: 'performance', label: 'Performance' },
+const TABS: ReadonlyArray<{ id: TabId; labelKey: string }> = [
+  { id: 'profile', labelKey: 'fleet.profile' },
+  { id: 'documents', labelKey: 'fleet.documents' },
+  { id: 'compliance', labelKey: 'fleetDrivers.tabs.compliance' },
+  { id: 'hos', labelKey: 'fleetDrivers.tabs.hos' },
+  { id: 'vehicle_history', labelKey: 'fleetDrivers.tabs.vehicleHistory' },
+  { id: 'performance', labelKey: 'fleetDrivers.tabs.performance' },
 ];
 
 function DriverDrawerBody({
@@ -1285,6 +1288,7 @@ function DriverDrawerBody({
   modal: ReturnType<typeof useModal>;
   kpiThresholds: DriverKpiThresholds;
 }) {
+  const t = useT();
   const driverQ = useResource<DriverProfileRow>('driver_directory', driver.id);
   const currentDriver = useMemo<DriverProfileRow>(() => {
     const backend: Partial<DriverProfileRow> = driverQ.data ?? {};
@@ -1314,18 +1318,18 @@ function DriverDrawerBody({
 
   return (
     <div>
-      <div className="tabs" role="tablist" aria-label="Driver drawer tabs">
-        {TABS.map((t) => (
+      <div className="tabs" role="tablist" aria-label={t('fleetDrivers.tabs.ariaLabel')}>
+        {TABS.map((tabDef) => (
           <button
-            key={t.id}
+            key={tabDef.id}
             role="tab"
-            aria-selected={tab === t.id}
+            aria-selected={tab === tabDef.id}
             type="button"
-            className={`tabs__tab ${tab === t.id ? 'is-active' : ''}`}
-            onClick={() => onTabChange(t.id)}
-            data-key={t.id}
+            className={`tabs__tab ${tab === tabDef.id ? 'is-active' : ''}`}
+            onClick={() => onTabChange(tabDef.id)}
+            data-key={tabDef.id}
           >
-            {t.label}
+            {t(tabDef.labelKey)}
           </button>
         ))}
       </div>
@@ -1381,54 +1385,55 @@ function ProfileTab({
   branchLabelById: Map<string, string>;
   kpiThresholds: DriverKpiThresholds;
 }) {
+  const t = useT();
   const rows: KvRow[] = [
-    { key: 'name', label: 'Name', value: driver.name },
+    { key: 'name', label: t('fleet.name'), value: driver.name },
     {
       key: 'operator_identity',
-      label: 'Operator identity',
+      label: t('fleetDrivers.profile.operatorIdentity'),
       value: driver.user_email ?? driver.driver_code ?? driver.name,
       mono: true,
     },
-    { key: 'license_number', label: 'License #', value: driver.license_number, mono: true },
-    { key: 'license_class', label: 'License class', value: driver.license_class },
+    { key: 'license_number', label: t('fleetDrivers.columns.licenseNumber'), value: driver.license_number, mono: true },
+    { key: 'license_class', label: t('fleetDrivers.profile.licenseClass'), value: driver.license_class },
     {
       key: 'license_expires_at',
-      label: 'License expiry',
+      label: t('fleetDrivers.columns.licenseExpiry'),
       value: driver.license_expires_at,
       mono: true,
     },
-    { key: 'phone', label: 'Phone', value: driver.phone, mono: true },
+    { key: 'phone', label: t('fleet.phone'), value: driver.phone, mono: true },
     {
       key: 'current_vehicle',
-      label: 'Current vehicle',
+      label: t('fleetDrivers.profile.currentVehicle'),
       value:
         driver.current_vehicle_id != null
-          ? (vehicleLabelById.get(driver.current_vehicle_id) ?? 'Assigned vehicle')
+          ? (vehicleLabelById.get(driver.current_vehicle_id) ?? t('fleetDrivers.assignedVehicle'))
           : '—',
       mono: true,
     },
     {
       key: 'current_branch',
-      label: 'Current branch',
+      label: t('fleetDrivers.profile.currentBranch'),
       value:
         driver.current_branch_id != null
-          ? (branchLabelById.get(driver.current_branch_id) ?? 'Selected branch')
+          ? (branchLabelById.get(driver.current_branch_id) ?? t('fleet.selectedBranch'))
           : '—',
       mono: true,
     },
-    { key: 'status', label: 'Status', value: driver.status, lookup: 'driver_status' },
-    { key: 'hired_at', label: 'Hired', value: driver.hired_at, mono: true },
+    { key: 'status', label: t('fleet.status'), value: driver.status, lookup: 'driver_status' },
+    { key: 'hired_at', label: t('fleetDrivers.profile.hired'), value: driver.hired_at, mono: true },
     {
       key: 'compliance_score',
-      label: 'Compliance score',
+      label: t('fleetDrivers.profile.complianceScore'),
       value:
         typeof driver.compliance_score === 'number'
-          ? `${driver.compliance_score} / 100`
-          : 'Not scored',
+          ? fill(t('fleetDrivers.score.outOf100'), { score: driver.compliance_score })
+          : t('fleetDrivers.score.notScored'),
       mono: true,
     },
-    { key: 'emergency_name', label: 'Emergency contact', value: driver.emergency_contact_name },
-    { key: 'emergency_phone', label: 'Emergency phone', value: driver.emergency_contact_phone, mono: true },
+    { key: 'emergency_name', label: t('fleetDrivers.profile.emergencyContact'), value: driver.emergency_contact_name },
+    { key: 'emergency_phone', label: t('fleetDrivers.profile.emergencyPhone'), value: driver.emergency_contact_phone, mono: true },
   ];
 
   return (
@@ -1475,7 +1480,7 @@ function ProfileTab({
           if (typeof driver.compliance_score !== 'number') {
             return (
               <Chip
-                label="Not scored"
+                label={t('fleetDrivers.score.notScored')}
                 kind="neutral"
                 size="xs"
                 className="mono"
@@ -1490,8 +1495,8 @@ function ProfileTab({
             <Chip
               label={
                 tone
-                  ? `Score ${driver.compliance_score}`
-                  : `Score ${driver.compliance_score} (missing)`
+                  ? fill(t('fleetDrivers.score.label'), { score: driver.compliance_score })
+                  : fill(t('fleetDrivers.score.labelMissing'), { score: driver.compliance_score })
               }
               kind={tone ?? 'danger'}
               size="xs"
@@ -1521,6 +1526,7 @@ function CreateDriverBody({
   createDriverMutation: ReturnType<typeof useCreateDriver>;
   onDone: () => void;
 }) {
+  const t = useT();
   const statusRows = getLookups('driver_status');
   const defaultStatus =
     statusRows.find((row) => (row as { is_default?: boolean }).is_default === true)?.value ??
@@ -1534,7 +1540,7 @@ function CreateDriverBody({
 
   async function submit() {
     if (!userId) {
-      pushToast('Select a tenant user before creating a driver profile.', 'danger');
+      pushToast(t('fleetDrivers.create.needUser'), 'danger');
       return;
     }
     setBusy(true);
@@ -1547,10 +1553,10 @@ function CreateDriverBody({
         hired_at: hiredAt || null,
       });
       const selected = users.find((user) => user.id === userId);
-      pushToast(`Driver profile created - ${selected?.full_name || selected?.email || 'selected user'}`, 'good');
+      pushToast(fill(t('fleetDrivers.create.created'), { name: selected?.full_name || selected?.email || t('fleetDrivers.create.selectedUser') }), 'good');
       onDone();
     } catch {
-      pushToast('Driver profile could not be created. Try again.', 'danger');
+      pushToast(t('fleetDrivers.create.failed'), 'danger');
     } finally {
       setBusy(false);
     }
@@ -1559,56 +1565,56 @@ function CreateDriverBody({
   return (
     <div>
       <p className="state__hint">
-        Creates a driver profile for an existing tenant user.
+        {t('fleetDrivers.create.hint')}
       </p>
       {usersLoading ? (
         <StateView
           kind="loading"
-          title="Tenant users loading"
-          hint="Loading active tenant users who do not already have driver profiles."
+          title={t('fleetDrivers.create.usersLoadingTitle')}
+          hint={t('fleetDrivers.create.usersLoadingHint')}
         />
       ) : usersError ? (
         <StateView
           kind="error"
-          title="Tenant users unavailable"
-          hint={(usersError as Error).message || 'Could not load active tenant users.'}
+          title={t('fleetDrivers.create.usersErrorTitle')}
+          hint={(usersError as Error).message || t('fleetDrivers.create.usersErrorHint')}
         />
       ) : users.length === 0 ? (
         <StateView
           kind="empty"
-          hint="No tenant users without driver profiles are available. Invite or reactivate a user first."
+          hint={t('fleetDrivers.create.empty')}
         />
       ) : (
         <>
           <div className="field" style={{ marginTop: 12 }}>
-            <label className="field__label">Tenant user</label>
+            <label className="field__label">{t('fleetDrivers.create.tenantUser')}</label>
             <select
-              aria-label="Tenant user"
+              aria-label={t('fleetDrivers.create.tenantUser')}
               value={userId}
               onChange={(event) => setUserId(event.target.value)}
             >
               {users.map((user) => (
                 <option key={user.id} value={user.id}>
-                  {user.full_name || user.email || 'Incomplete user profile'}
+                  {user.full_name || user.email || t('fleetDrivers.create.incompleteUser')}
                 </option>
               ))}
             </select>
           </div>
           <div className="field" style={{ marginTop: 12 }}>
-            <label className="field__label">Driver code</label>
+            <label className="field__label">{t('fleetDrivers.create.driverCode')}</label>
             <input
-              aria-label="Driver code"
+              aria-label={t('fleetDrivers.create.driverCode')}
               type="text"
               value={driverCode}
               onChange={(event) => setDriverCode(event.target.value)}
-              placeholder="Optional code"
+              placeholder={t('fleetDrivers.create.optionalCode')}
               style={{ width: '100%' }}
             />
           </div>
           <div className="field" style={{ marginTop: 12 }}>
-            <label className="field__label">Status</label>
+            <label className="field__label">{t('fleet.status')}</label>
             <select
-              aria-label="Driver status"
+              aria-label={t('fleetDrivers.create.driverStatus')}
               value={status}
               onChange={(event) => setStatus(event.target.value)}
             >
@@ -1620,9 +1626,9 @@ function CreateDriverBody({
             </select>
           </div>
           <div className="field" style={{ marginTop: 12 }}>
-            <label className="field__label">Hired date</label>
+            <label className="field__label">{t('fleetDrivers.create.hiredDate')}</label>
             <input
-              aria-label="Hired date"
+              aria-label={t('fleetDrivers.create.hiredDate')}
               type="date"
               value={hiredAt}
               onChange={(event) => setHiredAt(event.target.value)}
@@ -1632,9 +1638,9 @@ function CreateDriverBody({
         </>
       )}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Create driver"
+          label={t('fleetDrivers.create.submit')}
           iconName="plus"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -1646,12 +1652,12 @@ function CreateDriverBody({
   );
 }
 
-function complianceEventLabel(eventType: string): string {
-  return lookupRow('driver_compliance_event_type', eventType)?.label ?? humanizeToken(eventType, 'Compliance event');
+function complianceEventLabel(eventType: string, t: Translate = englishT): string {
+  return lookupRow('driver_compliance_event_type', eventType)?.label ?? humanizeToken(eventType, t('fleetDrivers.events.fallback'));
 }
 
-function complianceSeverityLabel(severity: string): string {
-  return lookupRow('driver_compliance_severity', severity)?.label ?? humanizeToken(severity, 'Severity');
+function complianceSeverityLabel(severity: string, t: Translate = englishT): string {
+  return lookupRow('driver_compliance_severity', severity)?.label ?? humanizeToken(severity, t('fleetDrivers.events.severity'));
 }
 
 function complianceEventSeverity(event: DriverComplianceEventRow): string {
@@ -1665,30 +1671,30 @@ function complianceEventOccurredAt(event: DriverComplianceEventRow): string {
   return event.created_at ?? event.occurred_at ?? '';
 }
 
-function complianceEventActor(event: DriverComplianceEventRow): string {
-  return event.actor ?? event.actor_system ?? event.actor_user_id ?? 'System';
+function complianceEventActor(event: DriverComplianceEventRow, t: Translate = englishT): string {
+  return event.actor ?? event.actor_system ?? event.actor_user_id ?? t('fleetDrivers.events.system');
 }
 
-function complianceDetailRows(payload: Record<string, unknown> | undefined): KvRow[] {
+function complianceDetailRows(payload: Record<string, unknown> | undefined, t: Translate = englishT): KvRow[] {
   if (!payload) return [];
   return Object.entries(payload)
     .slice(0, 8)
     .map(([key, value]) => ({
       key,
-      label: humanizeToken(key, 'Detail'),
-      value: complianceDetailValue(value),
+      label: humanizeToken(key, t('fleet.timeline.detail')),
+      value: complianceDetailValue(value, t),
     }));
 }
 
-function complianceDetailValue(value: unknown): string {
-  if (value == null || value === '') return 'Not set';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+function complianceDetailValue(value: unknown, t: Translate = englishT): string {
+  if (value == null || value === '') return t('fleetDrivers.events.notSet');
+  if (typeof value === 'boolean') return value ? t('common.yes') : t('common.no');
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') return value.replace(/[_-]+/g, ' ');
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (Array.isArray(value)) return fill(value.length === 1 ? t('fleetDrivers.events.itemOne') : t('fleetDrivers.events.itemOther'), { n: value.length });
   if (typeof value === 'object') {
     const count = Object.keys(value as Record<string, unknown>).length;
-    return `${count} detail${count === 1 ? '' : 's'}`;
+    return fill(count === 1 ? t('fleetDrivers.events.detailOne') : t('fleetDrivers.events.detailOther'), { n: count });
   }
   return String(value);
 }
@@ -1709,6 +1715,7 @@ function DocumentsTab({
   // CLAIM-FLEET-DRIVERS / Phase C6 — canonical document mutations
   // (upload_driver_document_v1 / verify_driver_document_v1 /
   // reject_driver_document_v1 in B2).
+  const t = useT();
   const uploadDocMutation = useUploadDriverDocument();
   const verifyDocMutation = useVerifyDriverDocument();
   const decoratedDocuments = useMemo(
@@ -1716,13 +1723,13 @@ function DocumentsTab({
       documents.map((doc) => ({
         ...doc,
         kind: (doc.kind ?? doc.doc_type ?? '') as DriverDocumentRow['kind'],
-        file_ref: doc.artifact_id ? 'Registered document' : 'Pending document file',
+        file_ref: doc.artifact_id ? t('fleet.doc.registered') : t('fleet.doc.pendingFile'),
       })),
-    [documents],
+    [documents, t],
   );
   function openAttachDocument() {
     modal.open({
-      title: `Attach document · ${driver.name}`,
+      title: fill(t('fleetDrivers.modal.attach'), { name: driver.name }),
       body: (
         <AttachDriverDocumentBody
           driver={driver}
@@ -1739,7 +1746,7 @@ function DocumentsTab({
     () => [
       {
         key: 'kind',
-        label: 'Type',
+        label: t('fleet.type'),
         sortable: true,
         filterable: true,
         render: (_raw, row) => {
@@ -1754,26 +1761,26 @@ function DocumentsTab({
           );
         },
       },
-      { key: 'issuer', label: 'Issuer', sortable: true, filterable: true },
-      { key: 'issued_at', label: 'Issued', format: 'date', sortable: true },
+      { key: 'issuer', label: t('fleet.doc.issuer'), sortable: true, filterable: true },
+      { key: 'issued_at', label: t('fleet.doc.issued'), format: 'date', sortable: true },
       {
         key: 'expires_at',
-        label: 'Expires',
+        label: t('fleet.doc.expires'),
         sortable: true,
         render: (raw) => (
           <ExpiryChip expiresAt={typeof raw === 'string' ? raw : null} size="xs" />
         ),
       },
-      { key: 'verified_at', label: 'Verified', format: 'datetime', sortable: true },
+      { key: 'verified_at', label: t('fleetDrivers.documents.verified'), format: 'datetime', sortable: true },
       {
         key: 'status',
-        label: 'Status',
+        label: t('fleet.status'),
         sortable: true,
         filterable: true,
         lookup: 'driver_document_status',
       },
     ],
-    [],
+    [t],
   );
 
   if (documents.length === 0) {
@@ -1781,7 +1788,7 @@ function DocumentsTab({
       <div style={{ padding: '0 14px' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
           <Button
-            label="Attach document"
+            label={t('fleet.doc.attach')}
             iconName="upload"
             kind="primary"
             capability={CAP.FLEET_WRITE}
@@ -1791,7 +1798,7 @@ function DocumentsTab({
         </div>
         <StateView
           kind="empty"
-          hint="No documents on file. Attach a registered document file, then approve or reject it through the review actions."
+          hint={t('fleetDrivers.documents.empty')}
         />
       </div>
     );
@@ -1801,7 +1808,7 @@ function DocumentsTab({
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '0 14px 10px' }}>
         <Button
-          label="Attach document"
+          label={t('fleet.doc.attach')}
           iconName="upload"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -1816,7 +1823,7 @@ function DocumentsTab({
         entityKind="driver_document"
         rowActions={[
           {
-            label: 'Approve',
+            label: t('common.approve'),
             icon: 'check',
             kind: 'primary',
             // Phase C6: align to canonical fleet.write per FLEET crosswalk
@@ -1829,21 +1836,21 @@ function DocumentsTab({
                   driver_id: driver.id,
                   document_id: r.id,
                 });
-                pushToast(`Driver document approved - ${driverDocumentLabel(r)}`, 'good');
+                pushToast(fill(t('fleetDrivers.documents.approved'), { label: driverDocumentLabel(r, t) }), 'good');
                 onChanged();
               } catch {
-                pushToast('Driver document could not be approved. Try again.', 'danger');
+                pushToast(t('fleetDrivers.documents.approveFailed'), 'danger');
               }
             },
           },
           {
-            label: 'Reject',
+            label: t('common.reject'),
             icon: 'alert',
             kind: 'danger',
             capability: CAP.FLEET_WRITE,
             onClick: (r) =>
               modal.open({
-                title: `Reject document - ${driverDocumentLabel(r)}`,
+                title: fill(t('fleetDrivers.modal.rejectDoc'), { label: driverDocumentLabel(r, t) }),
                 body: (
                   <RejectDocumentBody
                     document={r}
@@ -1872,6 +1879,7 @@ function AttachDriverDocumentBody({
   uploadDocMutation: ReturnType<typeof useUploadDriverDocument>;
   onDone: () => void;
 }) {
+  const t = useT();
   const docTypeRows = getLookups('driver_document_kind');
   const defaultDocType =
     docTypeRows.find((row) => (row as { is_default?: boolean }).is_default === true)?.value ??
@@ -1886,15 +1894,15 @@ function AttachDriverDocumentBody({
 
   async function submit() {
     if (!docType) {
-      pushToast('Select a driver document type before attaching the document.', 'danger');
+      pushToast(t('fleetDrivers.attach.needType'), 'danger');
       return;
     }
     if (!artifactId.trim()) {
-      pushToast('Provide a registered document reference before attaching the document.', 'danger');
+      pushToast(t('fleet.doc.referenceRequired'), 'danger');
       return;
     }
     if (issuedAt && expiresAt && expiresAt < issuedAt) {
-      pushToast('Document expiry date must be on or after the issued date.', 'danger');
+      pushToast(t('fleet.doc.expiryBeforeIssued'), 'danger');
       return;
     }
 
@@ -1915,10 +1923,10 @@ function AttachDriverDocumentBody({
           submitted_from: 'console_v2_driver_documents',
         },
       });
-      pushToast(`Driver document attached - ${driver.name}`, 'good');
+      pushToast(fill(t('fleetDrivers.attach.attached'), { name: driver.name }), 'good');
       onDone();
     } catch {
-      pushToast('Driver document could not be uploaded. Try again.', 'danger');
+      pushToast(t('fleetDrivers.attach.failed'), 'danger');
     } finally {
       setBusy(false);
     }
@@ -1927,10 +1935,10 @@ function AttachDriverDocumentBody({
   return (
     <div>
       <p className="state__hint">
-        Attach a registered document file to this driver profile.
+        {t('fleetDrivers.attach.hint')}
       </p>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Document type</label>
+        <label className="field__label">{t('fleet.doc.type')}</label>
         <select value={docType} onChange={(event) => setDocType(event.target.value)}>
           {docTypeRows.map((row) => (
             <option key={row.value} value={row.value}>
@@ -1940,7 +1948,7 @@ function AttachDriverDocumentBody({
         </select>
       </div>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Issuer</label>
+        <label className="field__label">{t('fleet.doc.issuer')}</label>
         <input
           type="text"
           value={issuer}
@@ -1949,7 +1957,7 @@ function AttachDriverDocumentBody({
         />
       </div>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Document reference</label>
+        <label className="field__label">{t('fleet.doc.reference')}</label>
         <input
           type="text"
           value={artifactId}
@@ -1959,7 +1967,7 @@ function AttachDriverDocumentBody({
       </div>
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', marginTop: 12 }}>
         <div className="field">
-          <label className="field__label">Issued date</label>
+          <label className="field__label">{t('fleet.doc.issuedDate')}</label>
           <input
             type="date"
             value={issuedAt}
@@ -1968,7 +1976,7 @@ function AttachDriverDocumentBody({
           />
         </div>
         <div className="field">
-          <label className="field__label">Expires date</label>
+          <label className="field__label">{t('fleet.doc.expiresDate')}</label>
           <input
             type="date"
             value={expiresAt}
@@ -1978,9 +1986,9 @@ function AttachDriverDocumentBody({
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Attach document"
+          label={t('fleet.doc.attach')}
           iconName="upload"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -2006,6 +2014,7 @@ function RejectDocumentBody({
   // W54-C — rejection reason options resolved strictly from canonical
   // `driver_document_rejection_reason` lookup_values. Default = first row
   // by rank (`is_default: true`). Replaces inline `<option>` literal array.
+  const t = useT();
   const rejectionReasons = getLookups('driver_document_rejection_reason');
   const defaultRejectionReason = rejectionReasons[0]?.value ?? '';
   const [reason, setReason] = useState<string>(defaultRejectionReason);
@@ -2014,11 +2023,10 @@ function RejectDocumentBody({
   return (
     <div>
       <p className="state__hint">
-        Rejection records a warning-level compliance history entry, sets the
-        document status to rejected, and notifies the driver.
+        {t('fleetDrivers.reject.hint')}
       </p>
       <div className="field" style={{ marginTop: 12 }}>
-        <label className="field__label">Rejection reason</label>
+        <label className="field__label">{t('fleet.rejectionReason')}</label>
         <select value={reason} onChange={(e) => setReason(e.target.value)}>
           {rejectionReasons.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -2026,9 +2034,9 @@ function RejectDocumentBody({
         </select>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Reject document"
+          label={t('fleetDrivers.reject.submit')}
           kind="danger"
           capability={CAP.FLEET_WRITE}
           onClick={async () => {
@@ -2040,12 +2048,12 @@ function RejectDocumentBody({
                 reason,
               });
               pushToast(
-                `Driver document rejected - ${driverDocumentLabel(document)} - ${humanizeToken(reason)}`,
+                fill(t('fleetDrivers.reject.rejected'), { label: driverDocumentLabel(document, t), reason: humanizeToken(reason) }),
                 'good',
               );
               onDone();
             } catch {
-              pushToast('Driver document could not be rejected. Try again.', 'danger');
+              pushToast(t('fleetDrivers.reject.failed'), 'danger');
             }
           }}
         />
@@ -2069,6 +2077,7 @@ function ComplianceTab({
   // W54-C — severity filter values resolved strictly from canonical
   // `driver_compliance_severity` lookup_values. Replaces inline literal
   // `['all', 'info', 'warn', 'critical']` tuple.
+  const t = useT();
   const severityRows = getLookups('driver_compliance_severity');
   const severityValues = severityRows.map((r) => r.value);
   const [filter, setFilter] = useState<string>('all');
@@ -2084,7 +2093,7 @@ function ComplianceTab({
 
   function openCreateEvent() {
     modal.open({
-      title: `Note compliance event · ${driver.name}`,
+      title: fill(t('fleetDrivers.modal.noteEvent'), { name: driver.name }),
       body: (
         <CreateComplianceEventBody
           driver={driver}
@@ -2105,10 +2114,10 @@ function ComplianceTab({
     // so operators see the gap rather than a silent neutral default.
     const severity = complianceEventSeverity(e);
     const tone = severityToTimelineTone(severity);
-    const baseSummary = describeEvent(e);
-    const eventLabel = complianceEventLabel(e.event_type);
-    const severityLabel = complianceSeverityLabel(severity);
-    const actor = complianceEventActor(e);
+    const baseSummary = describeEvent(e, t);
+    const eventLabel = complianceEventLabel(e.event_type, t);
+    const severityLabel = complianceSeverityLabel(severity, t);
+    const actor = complianceEventActor(e, t);
     return {
       id: e.id,
       at: complianceEventOccurredAt(e),
@@ -2116,20 +2125,20 @@ function ComplianceTab({
       actor,
       summary: tone
         ? baseSummary
-        : `Unconfigured severity: ${severityLabel} - ${baseSummary}`,
+        : fill(t('fleetDrivers.complianceTab.unconfigured'), { severity: severityLabel, summary: baseSummary }),
       tone: tone ?? 'danger',
       detail: (
         <div>
           <KvGrid
             rows={[
-              { key: 'event_type', label: 'Event', value: eventLabel },
-              { key: 'severity', label: 'Severity', value: severityLabel },
-              { key: 'actor', label: 'Actor', value: actor, mono: true },
-              { key: 'occurred_at', label: 'When', value: complianceEventOccurredAt(e), mono: true },
+              { key: 'event_type', label: t('fleetDrivers.complianceTab.event'), value: eventLabel },
+              { key: 'severity', label: t('fleetDrivers.events.severity'), value: severityLabel },
+              { key: 'actor', label: t('fleet.timeline.actor'), value: actor, mono: true },
+              { key: 'occurred_at', label: t('fleet.timeline.when'), value: complianceEventOccurredAt(e), mono: true },
             ]}
           />
           {e.payload && Object.keys(e.payload).length > 0 ? (
-            <KvGrid rows={complianceDetailRows(e.payload)} />
+            <KvGrid rows={complianceDetailRows(e.payload, t)} />
           ) : null}
         </div>
       ),
@@ -2142,7 +2151,7 @@ function ComplianceTab({
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
           {/* FLEET REAUDIT D2 (W9-4) — Note compliance event button. */}
           <Button
-            label="Note compliance event"
+            label={t('fleetDrivers.complianceTab.note')}
             iconName="plus"
             kind="primary"
             size="sm"
@@ -2152,7 +2161,7 @@ function ComplianceTab({
         </div>
         <StateView
           kind="empty"
-          hint="No compliance events recorded for this driver."
+          hint={t('fleetDrivers.complianceTab.empty')}
         />
       </div>
     );
@@ -2169,7 +2178,7 @@ function ComplianceTab({
           alignItems: 'center',
         }}
         role="group"
-        aria-label="Severity filter"
+        aria-label={t('fleetDrivers.complianceTab.filterLabel')}
       >
         {(['all', ...severityValues]).map((s) => {
           // Tone resolution via canonical `driver_compliance_severity` lookup
@@ -2181,8 +2190,8 @@ function ComplianceTab({
             ? 'neutral'
             : ((row?.tone as ChipKind | undefined) ?? 'danger');
           const label = s === 'all'
-            ? 'All'
-            : (row?.label ?? `Unconfigured severity: ${humanizeToken(s, 'Severity')}`);
+            ? t('common.all')
+            : (row?.label ?? fill(t('fleetDrivers.complianceTab.unconfiguredChip'), { severity: humanizeToken(s, t('fleetDrivers.events.severity')) }));
           return (
             <button
               key={s}
@@ -2208,7 +2217,7 @@ function ComplianceTab({
         <div style={{ flex: 1 }} />
         {/* FLEET REAUDIT D2 (W9-4) — Note compliance event button. */}
         <Button
-          label="Note compliance event"
+          label={t('fleetDrivers.complianceTab.note')}
           iconName="plus"
           kind="primary"
           size="sm"
@@ -2232,6 +2241,7 @@ function ReinstateDriverBody({
   driver: DriverProfileRow;
   onDone: () => void;
 }) {
+  const t = useT();
   const restoreMutation = useRestoreDriver();
   const [notes, setNotes] = useState<string>('');
   const [busy, setBusy] = useState<boolean>(false);
@@ -2244,11 +2254,11 @@ function ReinstateDriverBody({
         driver_user_id: driver.user_id,
         notes: notes.trim() || null,
       });
-      pushToast(`Driver restored - ${driver.name}`, 'good');
+      pushToast(fill(t('fleetDrivers.reinstate.restored'), { name: driver.name }), 'good');
       onDone();
     } catch (e) {
       pushToast(
-        `Driver restore failed - ${e instanceof Error ? e.message : String(e)}`,
+        fill(t('fleetDrivers.reinstate.failed'), { message: e instanceof Error ? e.message : String(e) }),
         'warn',
       );
     } finally {
@@ -2259,25 +2269,26 @@ function ReinstateDriverBody({
   return (
     <div>
       <p className="state__hint">
-        Reinstating
+        {t('fleetDrivers.reinstate.lead')}
         {' '}
-        <span className="mono">{driver.name}</span>
-        {' '}reactivates the driver profile and records a compliance history entry.
+        <bdi className="mono">{driver.name}</bdi>
+        {' '}
+        {t('fleetDrivers.reinstate.tail')}
       </p>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">Notes (optional)</label>
+        <label className="field__label">{t('fleet.notesOptional')}</label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Reason for reinstatement"
+          placeholder={t('fleetDrivers.reinstate.placeholder')}
           rows={3}
           style={{ width: '100%' }}
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Reinstate"
+          label={t('fleetDrivers.reinstate.submit')}
           iconName="check"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -2300,6 +2311,7 @@ function CreateComplianceEventBody({
 }) {
   // W54-C — defaults resolved strictly from canonical lookups. First row
   // (rank-ordered, `is_default: true`) is the FE default.
+  const t = useT();
   const eventTypeRows = getLookups('driver_compliance_event_type');
   const severityRowsForEvent = getLookups('driver_compliance_severity');
   const [eventType, setEventType] = useState<string>(eventTypeRows[0]?.value ?? '');
@@ -2318,11 +2330,11 @@ function CreateComplianceEventBody({
           ...(notes.trim() ? { notes: notes.trim() } : {}),
         },
       });
-      pushToast(`Driver compliance event recorded - ${driver.name} - ${complianceSeverityLabel(severity)}`, 'good');
+      pushToast(fill(t('fleetDrivers.createEvent.recorded'), { name: driver.name, severity: complianceSeverityLabel(severity, t) }), 'good');
       onDone();
     } catch (e) {
       pushToast(
-        `Driver compliance event failed - ${e instanceof Error ? e.message : String(e)}`,
+        fill(t('fleetDrivers.createEvent.failed'), { message: e instanceof Error ? e.message : String(e) }),
         'warn',
       );
     } finally {
@@ -2333,23 +2345,24 @@ function CreateComplianceEventBody({
   return (
     <div>
       <p className="state__hint">
-        Notes a compliance event for
+        {t('fleetDrivers.createEvent.lead')}
         {' '}
-        <span className="mono">{driver.name}</span>
-        {' '}with the selected severity and notes.
+        <bdi className="mono">{driver.name}</bdi>
+        {' '}
+        {t('fleetDrivers.createEvent.tail')}
       </p>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">Event type</label>
+        <label className="field__label">{t('fleet.timeline.eventType')}</label>
         <input
           type="text"
           value={eventType}
           onChange={(e) => setEventType(e.target.value)}
-          placeholder="Manual note"
+          placeholder={t('fleetDrivers.createEvent.eventPlaceholder')}
           style={{ width: '100%' }}
         />
       </div>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">Severity</label>
+        <label className="field__label">{t('fleetDrivers.events.severity')}</label>
         <select value={severity} onChange={(e) => setSeverity(e.target.value)}>
           {severityRowsForEvent.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -2357,19 +2370,19 @@ function CreateComplianceEventBody({
         </select>
       </div>
       <div className="field" style={{ marginTop: '12px' }}>
-        <label className="field__label">Notes</label>
+        <label className="field__label">{t('fleet.notes')}</label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Detail captured into payload.notes"
+          placeholder={t('fleetDrivers.createEvent.notesPlaceholder')}
           rows={3}
           style={{ width: '100%' }}
         />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label="Note event"
+          label={t('fleetDrivers.createEvent.submit')}
           iconName="plus"
           kind="primary"
           capability={CAP.FLEET_WRITE}
@@ -2388,13 +2401,13 @@ function CreateComplianceEventBody({
 // so operators see the backend ledger event without a raw technical token.
 // The template engine performs a simple `{key}` substitution against
 // the event payload (canonical SSOT for variable values).
-function describeEvent(e: DriverComplianceEventRow): string {
+function describeEvent(e: DriverComplianceEventRow, t: Translate = englishT): string {
   const p = (e.payload ?? {}) as Record<string, unknown>;
   const row = lookupRow('driver_compliance_event_type', e.event_type) as
     | { metadata?: { label_template?: string } }
     | null;
   const template = row?.metadata?.label_template;
-  if (!template) return complianceEventLabel(e.event_type);
+  if (!template) return complianceEventLabel(e.event_type, t);
   return template.replace(/\{(\w+)\}/g, (_match, key: string) => {
     const v = p[key];
     if (v == null || v === '') return '—';
@@ -2405,6 +2418,7 @@ function describeEvent(e: DriverComplianceEventRow): string {
 // ─── Hours of Service tab ───────────────────────────────────────────────
 function HoursOfServiceTab({ driver, onChanged }: { driver: DriverProfileRow; onChanged: () => Promise<unknown> | void }) {
   // CLAIM-FLEET-DRIVERS / Phase C6 — canonical record_hours_of_service_segment_v1.
+  const t = useT();
   const recordHosMutation = useRecordHoursOfServiceSegment();
   // AGENTS.md §2/§3: HOS limits + warn-threshold resolve strictly from
   // canonical `driver_safety_policy.{hos_limits.{daily,weekly}, hos_warn_pct}`
@@ -2440,24 +2454,24 @@ function HoursOfServiceTab({ driver, onChanged }: { driver: DriverProfileRow; on
     () => [
       {
         key: 'active_duty_status',
-        label: 'Active duty status',
-        value: activeDutyStatus ? dutyStatusLabel(activeDutyStatus) : 'No active duty segment',
+        label: t('fleetDrivers.hos.activeDutyStatus'),
+        value: activeDutyStatus ? dutyStatusLabel(activeDutyStatus, t) : t('fleetDrivers.hos.noActiveSegment'),
         mono: !activeDutyStatus,
       },
       {
         key: 'today_segment_count',
-        label: "Today's segments",
+        label: t('fleetDrivers.hos.todaySegments'),
         value: todaySegmentCount,
         mono: true,
       },
       {
         key: 'active_segment_started_at',
-        label: 'Active segment started',
-        value: driver.hos_active_segment_started_at ?? 'No active segment start',
+        label: t('fleetDrivers.hos.activeSegmentStarted'),
+        value: driver.hos_active_segment_started_at ?? t('fleetDrivers.hos.noActiveStart'),
         mono: true,
       },
     ],
-    [activeDutyStatus, driver.hos_active_segment_started_at, todaySegmentCount],
+    [activeDutyStatus, driver.hos_active_segment_started_at, todaySegmentCount, t],
   );
 
   // Build a 7-day rollup chart by extrapolating from week totals as 7 evenly
@@ -2497,11 +2511,11 @@ function HoursOfServiceTab({ driver, onChanged }: { driver: DriverProfileRow; on
             letterSpacing: '0.04em',
           }}
         >
-          Today
+          {t('fleetDrivers.hos.today')}
         </h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <select
-            aria-label="Duty status"
+            aria-label={t('fleetDrivers.hos.dutyStatus')}
             value={dutyStatus}
             onChange={(event) => setDutyStatus(event.target.value)}
             disabled={dutyRows.length === 0 || recordHosMutation.isPending}
@@ -2513,7 +2527,7 @@ function HoursOfServiceTab({ driver, onChanged }: { driver: DriverProfileRow; on
             ))}
           </select>
           <Button
-            label="Log duty change"
+            label={t('fleetDrivers.hos.logChange')}
             iconName="edit"
             kind="ghost"
             capability={CAP.FLEET_WRITE}
@@ -2521,7 +2535,7 @@ function HoursOfServiceTab({ driver, onChanged }: { driver: DriverProfileRow; on
             onClick={async () => {
               if (!dutyStatus) {
                 pushToast(
-                  'Duty status options are unavailable. Refresh after configuration sync completes before logging a segment.',
+                  t('fleetDrivers.hos.noOptions'),
                   'danger',
                 );
                 return;
@@ -2536,11 +2550,11 @@ function HoursOfServiceTab({ driver, onChanged }: { driver: DriverProfileRow; on
                 });
                 await onChanged();
                 pushToast(
-                  `Driver duty status updated - ${driver.name}`,
+                  fill(t('fleetDrivers.hos.updated'), { name: driver.name }),
                   'good',
                 );
               } catch {
-                pushToast('Driver duty status could not be updated. Try again.', 'danger');
+                pushToast(t('fleetDrivers.hos.updateFailed'), 'danger');
               }
             }}
           />
@@ -2550,15 +2564,15 @@ function HoursOfServiceTab({ driver, onChanged }: { driver: DriverProfileRow; on
       <KvGrid rows={hosReadbackRows} className="driver-hos-readback" />
 
       {hosQ.isLoading ? (
-        <StateView kind="loading" hint="Loading hours of service…" />
+        <StateView kind="loading" hint={t('fleetDrivers.hos.loading')} />
       ) : hosQ.isError ? (
-        <StateView kind="error" hint="Could not load hours of service." />
+        <StateView kind="error" hint={t('fleetDrivers.hos.loadError')} />
       ) : today.length === 0 ? (
-        <StateView kind="empty" hint="No duty segments recorded for today." />
+        <StateView kind="empty" hint={t('fleetDrivers.hos.emptyToday')} />
       ) : !hosLimits?.daily ? (
-        <StateView kind="error" title="Daily duty limit is not configured" hint="Seed the daily hours-of-service limit before viewing the daily meter." />
+        <StateView kind="error" title={t('fleetDrivers.hos.dailyMissing')} hint={t('fleetDrivers.hos.dailyMissingHint')} />
       ) : typeof hosWarnPct !== 'number' ? (
-        <StateView kind="error" title="Duty warning threshold is not configured" hint="Seed the hours-of-service warning threshold before viewing the daily meter." />
+        <StateView kind="error" title={t('fleetDrivers.hos.warnMissing')} hint={t('fleetDrivers.hos.warnMissingDailyHint')} />
       ) : (
         <HoursOfServiceMeter segments={today} limits={hosLimits.daily} warnPct={hosWarnPct} />
       )}
@@ -2573,14 +2587,14 @@ function HoursOfServiceTab({ driver, onChanged }: { driver: DriverProfileRow; on
           letterSpacing: '0.04em',
         }}
       >
-        7-day rollup
+        {t('fleetDrivers.hos.rollup')}
       </div>
       {weekSegments.length === 0 ? (
-        <StateView kind="empty" hint="No 7-day rollup available." />
+        <StateView kind="empty" hint={t('fleetDrivers.hos.rollupEmpty')} />
       ) : !hosLimits?.weekly ? (
-        <StateView kind="error" title="Weekly duty limit is not configured" hint="Seed the weekly hours-of-service limit before viewing the 7-day rollup." />
+        <StateView kind="error" title={t('fleetDrivers.hos.weeklyMissing')} hint={t('fleetDrivers.hos.weeklyMissingHint')} />
       ) : typeof hosWarnPct !== 'number' ? (
-        <StateView kind="error" title="Duty warning threshold is not configured" hint="Seed the hours-of-service warning threshold before viewing the 7-day rollup." />
+        <StateView kind="error" title={t('fleetDrivers.hos.warnMissing')} hint={t('fleetDrivers.hos.warnMissingWeeklyHint')} />
       ) : (
         <HoursOfServiceMeter segments={weekSegments} limits={hosLimits.weekly} warnPct={hosWarnPct} />
       )}
@@ -2596,36 +2610,37 @@ function VehicleHistoryTab({
   assignments: VehicleAssignmentRow[];
   vehicleLabelById: Map<string, string>;
 }) {
+  const t = useT();
   const decorated = useMemo(
     () =>
       assignments.map((a) => ({
         ...a,
         vehicle_label: vehicleLabelById.get(a.vehicle_id) ?? a.vehicle_id,
-        duration_label: durationDaysLabel(a.started_at, a.ended_at),
+        duration_label: durationDaysLabel(a.started_at, a.ended_at, t),
         is_active: a.ended_at == null,
       })),
-    [assignments, vehicleLabelById],
+    [assignments, vehicleLabelById, t],
   );
 
   const columns: Array<DataTableColumn<typeof decorated[number]>> = useMemo(
     () => [
-      { key: 'vehicle_label', label: 'Vehicle', mono: true, sortable: true, filterable: true },
-      { key: 'started_at', label: 'Started', format: 'datetime', sortable: true },
-      { key: 'ended_at', label: 'Ended', format: 'datetime', sortable: true },
-      { key: 'duration_label', label: 'Duration', mono: true, align: 'right' },
+      { key: 'vehicle_label', label: t('fleetDrivers.columns.vehicle'), mono: true, sortable: true, filterable: true },
+      { key: 'started_at', label: t('fleet.timeline.started'), format: 'datetime', sortable: true },
+      { key: 'ended_at', label: t('fleet.timeline.ended'), format: 'datetime', sortable: true },
+      { key: 'duration_label', label: t('fleet.timeline.duration'), mono: true, align: 'right' },
       {
         key: 'is_active',
-        label: 'Status',
+        label: t('fleet.status'),
         render: (raw) => (
           <Chip
-            label={raw ? 'Active' : 'Past'}
+            label={raw ? t('fleet.active') : t('fleetDrivers.vehicleHistory.past')}
             kind={raw ? 'good' : 'neutral'}
             size="xs"
           />
         ),
       },
     ],
-    [],
+    [t],
   );
 
   if (assignments.length === 0) {
@@ -2633,7 +2648,7 @@ function VehicleHistoryTab({
       <div style={{ padding: '0 14px' }}>
         <StateView
           kind="empty"
-          hint="No vehicle assignments recorded for this driver."
+          hint={t('fleetDrivers.vehicleHistory.empty')}
         />
       </div>
     );
@@ -2664,6 +2679,7 @@ function PerformanceTab({
   // placeholder zero-line so the layout stays stable WITHOUT fabricating
   // wobble data. Production swap: kpi_rollups_daily filtered by driver
   // scope returns the canonical per-day series.
+  const t = useT();
   const sparkSeed = useMemo(() => Array.from({ length: 7 }, () => 0), []);
   const onTimeSpark = useMemo(() => Array.from({ length: 7 }, () => 0), []);
 
@@ -2678,20 +2694,20 @@ function PerformanceTab({
         }}
       >
         <KPICard
-          label="Deliveries today"
+          label={t('fleetDrivers.performance.today')}
           value={driver.deliveries_today}
           tone="info"
           spark={sparkSeed}
         />
         <KPICard
-          label="Deliveries (7d)"
+          label={t('fleetDrivers.performance.week')}
           value={driver.deliveries_week}
           tone="neutral"
-          delta={`avg ${(driver.deliveries_week / 7).toFixed(1)}/day`}
+          delta={fill(t('fleetDrivers.performance.avgPerDay'), { n: (driver.deliveries_week / 7).toFixed(1) })}
           spark={sparkSeed}
         />
         <KPICard
-          label="On-time %"
+          label={t('fleetDrivers.performance.onTime')}
           value={`${Math.round(driver.on_time_pct * 100)}%`}
           tone={
             driver.on_time_pct >= kpiThresholds.on_time_pct_good
@@ -2703,7 +2719,7 @@ function PerformanceTab({
           spark={onTimeSpark.map((v) => v * 100)}
         />
         <KPICard
-          label="Customer rating"
+          label={t('fleetDrivers.performance.rating')}
           value={driver.customer_rating.toFixed(1)}
           tone={
             driver.customer_rating >= kpiThresholds.rating_good
@@ -2712,7 +2728,7 @@ function PerformanceTab({
                 ? 'warn'
                 : 'danger'
           }
-          delta="out of 5.0"
+          delta={t('fleetDrivers.performance.outOfFive')}
         />
       </div>
 
@@ -2734,8 +2750,8 @@ function PerformanceTab({
             marginBottom: 6,
           }}
         >
-          <span className="mono">7-day deliveries</span>
-          <span className="mono">total {driver.deliveries_week}</span>
+          <span className="mono">{t('fleetDrivers.performance.weekDeliveries')}</span>
+          <span className="mono">{fill(t('fleetDrivers.performance.total'), { n: driver.deliveries_week })}</span>
         </div>
         <Sparkline values={sparkSeed} width={320} height={48} />
       </div>
@@ -2744,8 +2760,7 @@ function PerformanceTab({
         className="state__hint"
         style={{ marginTop: 12, fontSize: 11, color: 'var(--ink-3)' }}
       >
-        Series uses the driver delivery summary and can be replaced by scoped KPI
-        rollups when those projections are enabled.
+        {t('fleetDrivers.performance.hint')}
       </p>
     </div>
   );
@@ -2764,6 +2779,7 @@ function BulkSuspendBody({
   // W54-C — suspension reasons resolved strictly from canonical
   // `driver_suspend_reason` lookup_values. First row (rank-ordered,
   // `is_default: true`) is the FE default. Replaces inline option array.
+  const t = useT();
   const suspendReasons = getLookups('driver_suspend_reason');
   const [reason, setReason] = useState<string>(suspendReasons[0]?.value ?? '');
   const trimmedReason = reason.trim();
@@ -2775,8 +2791,7 @@ function BulkSuspendBody({
   return (
     <div>
       <p className="state__hint">
-        Suspending drivers records a critical compliance history entry and moves
-        each selected profile to suspended status.
+        {t('fleetDrivers.suspend.hint')}
       </p>
       <ul
         style={{
@@ -2793,7 +2808,7 @@ function BulkSuspendBody({
         ))}
       </ul>
       <div className="field">
-        <label className="field__label">Reason</label>
+        <label className="field__label">{t('fleet.reason')}</label>
         {suspendReasons.length > 0 ? (
           <select value={reason} onChange={(e) => setReason(e.target.value)}>
             {suspendReasons.map((opt) => (
@@ -2805,14 +2820,14 @@ function BulkSuspendBody({
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Enter suspension reason"
+            placeholder={t('fleetDrivers.suspend.placeholder')}
           />
         )}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onDone} />
+        <Button label={t('common.cancel')} kind="ghost" onClick={onDone} />
         <Button
-          label={`Suspend ${drivers.length}`}
+          label={fill(t('fleetDrivers.suspend.confirm'), { n: drivers.length })}
           kind="danger"
           capability={CAP.FLEET_WRITE}
           disabled={!trimmedReason}
@@ -2828,11 +2843,11 @@ function BulkSuspendBody({
                 });
                 okCount++;
               } catch {
-                pushToast(`Driver suspension could not be completed - ${d.name}`, 'danger');
+                pushToast(fill(t('fleetDrivers.suspend.failed'), { name: d.name }), 'danger');
               }
             }
             pushToast(
-              `Drivers suspended - ${okCount}/${drivers.length} - ${trimmedReason}`,
+              fill(t('fleetDrivers.suspend.done'), { ok: okCount, total: drivers.length, reason: trimmedReason }),
               okCount === drivers.length ? 'good' : 'warn',
             );
             onDone();

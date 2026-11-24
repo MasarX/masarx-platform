@@ -68,9 +68,6 @@ apps/console-v2/src/modules/network/partners.tsx 50
 apps/console-v2/src/modules/network/zones-create-modal.tsx 17
 apps/console-v2/src/modules/network/zones-drawer.tsx 51
 apps/console-v2/src/modules/network/zones.tsx 28
-apps/console-v2/src/modules/operate/fleet/driver-applications.tsx 115
-apps/console-v2/src/modules/operate/fleet/drivers.tsx 197
-apps/console-v2/src/modules/operate/fleet/vehicles.tsx 221
 apps/console-v2/src/modules/platform/access.tsx 217
 apps/console-v2/src/modules/platform/alerts.tsx 143
 apps/console-v2/src/modules/platform/auth-email.tsx 27
