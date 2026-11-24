@@ -65,6 +65,7 @@ import { CAP } from '@/lib/capabilities';
 import { getLookups } from '@/lib/api';
 import type { ChipKind } from '@/components/Chip';
 import { openShipmentContextDrawer, type Shipment } from '@/modules/operate/shipments';
+import { fill, useI18n, type Translate } from '@/lib/i18n';
 
 // ─── Strict canonical lookup resolvers (NO fallback constants) ────────────
 //
@@ -93,8 +94,9 @@ function lookupRow(category: string, value: unknown): SupportLookupRow | null {
  *  missing from `lookups[category]`, render a danger-toned "missing" chip
  *  so the gap is loud (no `?? 'neutral'` silent default). */
 function MissingChip({ category, value }: { category: string; value: string }): JSX.Element {
+  const { t } = useI18n();
   const label = `${category.replace(/[_-]+/g, ' ')} ${value}`.replace(/\b\w/g, (m) => m.toUpperCase());
-  return <Chip label={`${label} option missing`} kind="danger" size="xs" />;
+  return <Chip label={fill(t('supportCases.missingChip.labelOptionMissing'), { label: String(label) })} kind="danger" size="xs" />;
 }
 
 // ─── Domain shapes ────────────────────────────────────────────────────────
@@ -301,30 +303,31 @@ function shortReference(value: unknown): string {
   return `${raw.slice(0, 4)}...${raw.slice(-6)}`;
 }
 
-function operatorReference(kind: string, value: unknown): string {
-  return `${kind} ref ${shortReference(value)}`;
+/** `kind` is already translated by the caller. */
+function operatorReference(t: Translate, kind: string, value: unknown): string {
+  return fill(t('supportCases.operatorReference.kindRef'), { kind, ref: shortReference(value) });
 }
 
-function supportMutationLabel(kind: SupportMutationKind): string {
+function supportMutationLabel(kind: SupportMutationKind, t: Translate): string {
   switch (kind) {
     case 'created':
-      return 'Created';
+      return t('supportCases.supportMutationLabel.created');
     case 'updated':
-      return 'Updated';
+      return t('supportCases.supportMutationLabel.updated');
     case 'assigned':
-      return 'Assigned';
+      return t('supportCases.supportMutationLabel.assigned');
     case 'escalated':
-      return 'Escalated';
+      return t('supportCases.supportMutationLabel.escalated');
     case 'message_sent':
-      return 'Reply sent';
+      return t('supportCases.supportMutationLabel.replySent');
     case 'resolved':
-      return 'Resolved';
+      return t('supportCases.supportMutationLabel.resolved');
     case 'reopened':
-      return 'Reopened';
+      return t('supportCases.supportMutationLabel.reopened');
     case 'review_approved':
-      return 'Review approved';
+      return t('supportCases.supportMutationLabel.reviewApproved');
     case 'review_rejected':
-      return 'Review rejected';
+      return t('supportCases.supportMutationLabel.reviewRejected');
     default:
       return humanizeKey(kind);
   }
@@ -336,14 +339,14 @@ function mutationResponseValue(res: unknown, key: string): string | null {
   return value == null ? null : String(value);
 }
 
-function clientDisplay(row: DecoratedSupportCase): string {
-  return row.client_label ?? operatorReference('Client', row.client_id);
+function clientDisplay(row: DecoratedSupportCase, t: Translate): string {
+  return row.client_label ?? operatorReference(t, t('supportCases.operatorReference.client'), row.client_id);
 }
 
-function shipmentDisplay(row: DecoratedSupportCase): string {
+function shipmentDisplay(row: DecoratedSupportCase, t: Translate): string {
   return row.shipment_tracking_number
-    ? `Tracking ${row.shipment_tracking_number}`
-    : operatorReference('Shipment', row.related_shipment_id);
+    ? fill(t('supportCases.shipmentDisplay.trackingShipmentTrackingNumber'), { shipment_tracking_number: String(row.shipment_tracking_number) })
+    : operatorReference(t, t('supportCases.operatorReference.shipment'), row.related_shipment_id);
 }
 
 function consoleFocusHref(route: string, id: string): string {
@@ -395,18 +398,20 @@ function supportShipmentFallback(row: ShipmentRow | null): Partial<Shipment> | n
   };
 }
 
-function formatScopeLabel(value: string | null | undefined): string {
-  if (!value) return 'Tenant policy';
-  return `${humanizeKey(value)} policy`;
+function formatScopeLabel(value: string | null | undefined, t: Translate): string {
+  if (!value) return t('supportCases.formatScopeLabel.tenantPolicy');
+  return fill(t('supportCases.formatScopeLabel.scopePolicy'), { scope: humanizeKey(value) });
 }
 
-function formatPayloadValue(key: string, value: unknown): string {
-  if (value == null || value === '') return 'Not set';
+function formatPayloadValue(key: string, value: unknown, t: Translate): string {
+  if (value == null || value === '') return t('supportCases.formatPayloadValue.notSet');
   void key;
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  if (Array.isArray(value)) {
+    return fill(t(value.length === 1 ? 'supportCases.formatPayloadValue.oneItem' : 'supportCases.formatPayloadValue.items'), { count: String(value.length) });
+  }
   if (typeof value === 'object') {
     const count = Object.keys(value as Record<string, unknown>).length;
-    return `${count} detail${count === 1 ? '' : 's'}`;
+    return fill(t(count === 1 ? 'supportCases.formatPayloadValue.oneDetail' : 'supportCases.formatPayloadValue.details'), { count: String(count) });
   }
   return String(value);
 }
@@ -767,20 +772,6 @@ function isSlaBreached(row: SupportCaseRow, now: Date): boolean {
   return now.getTime() > dueMs;
 }
 
-/** "12m ago" / "2h ago" / "3d ago" relative timestamp for queue rows. */
-function relativeAge(iso: string | null, now: Date): string {
-  if (!iso) return '';
-  const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return '';
-  const diffMin = Math.max(0, Math.round((now.getTime() - ms) / 60000));
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin}m`;
-  const diffH = Math.round(diffMin / 60);
-  if (diffH < 24) return `${diffH}h`;
-  const diffD = Math.round(diffH / 24);
-  return `${diffD}d`;
-}
-
 // ─── Queue filter chips (canonical labels) ───────────────────────────────
 
 type QueueFilter =
@@ -792,25 +783,28 @@ type QueueFilter =
   | 'resolved'
   | 'sla_breached';
 
-const QUEUE_FILTERS: ReadonlyArray<{ id: QueueFilter; label: string }> = [
-  { id: 'mine', label: 'Assigned to me' },
-  { id: 'unassigned', label: 'Unassigned' },
-  { id: 'all', label: 'All' },
-  { id: 'open', label: 'Open' },
-  { id: 'pending', label: 'Pending reply' },
-  { id: 'resolved', label: 'Resolved' },
-  { id: 'sla_breached', label: 'SLA breached' },
-];
+function queueFilters(t: Translate): ReadonlyArray<{ id: QueueFilter; label: string }> {
+  return [
+    { id: 'mine', label: t('supportCases.queueFilters.assignedToMe') },
+    { id: 'unassigned', label: t('supportCases.queueFilters.unassigned') },
+    { id: 'all', label: t('supportCases.queueFilters.all') },
+    { id: 'open', label: t('supportCases.queueFilters.open') },
+    { id: 'pending', label: t('supportCases.queueFilters.pendingReply') },
+    { id: 'resolved', label: t('supportCases.queueFilters.resolved') },
+    { id: 'sla_breached', label: t('supportCases.queueFilters.slaBreached') },
+  ];
+}
 
 // ─── Module ────────────────────────────────────────────────────────────────
 
 export function SupportCasesModule() {
+  const { t } = useI18n();
   const { scope, user } = useIdentity();
   const drawer = useDrawer();
   const modal = useModal();
   // AGENTS.md §2 / §3 — single canonical clock source for the module: real
   // wall time captured once at mount and threaded down to every SLA
-  // derivation (`isSlaBreached`, `relativeAge`, queue / KPI / timeline). No
+  // derivation (`isSlaBreached`, `fmtRelative`, queue / KPI / timeline). No
   // frozen demo literals; tests inject time via `vi.setSystemTime(...)`.
   const now = useMemo(() => new Date(), []);
   // AGENTS.md §6 (RLS / capability-gated reads) + §7 (CAPABILITY-GATED UI):
@@ -1177,13 +1171,13 @@ export function SupportCasesModule() {
       statusReason: row.status_reason ?? null,
       messageCount: row.message_count,
       eventCount,
-      assigneeLabel: row.assignee_label ?? fallbackAssignee ?? 'Unassigned',
+      assigneeLabel: row.assignee_label ?? fallbackAssignee ?? t('supportCases.supportCasesModule.unassigned'),
       requestOutcome: metadataString(row, 'request_outcome'),
       correlationId: pendingReadback.correlationId ?? null,
       settingsResolutionId: pendingReadback.settingsResolutionId ?? null,
     });
     setPendingReadback(null);
-  }, [pendingReadback, decoratedCases, allMessages, allEvents, supportUsers]);
+  }, [pendingReadback, decoratedCases, allMessages, allEvents, supportUsers, t]);
 
   // ─── Active customer profile ─────────────────────────────────────────────
   const activeClient = useMemo(
@@ -1264,7 +1258,7 @@ export function SupportCasesModule() {
     if (kind === 'client') {
       const client = clients.find((row) => row.id === id) ?? null;
       drawer.open({
-        title: 'Client context',
+        title: t('supportCases.supportCasesModule.clientContext'),
         size: 'lg',
         deepLink: consoleFocusHref('/customers/clients', id),
         body: (
@@ -1283,7 +1277,7 @@ export function SupportCasesModule() {
         ? clients.find((row) => row.id === sender.client_id) ?? null
         : null;
       drawer.open({
-        title: 'Sender context',
+        title: t('supportCases.supportCasesModule.senderContext'),
         size: 'lg',
         deepLink: consoleFocusHref('/customers/senders', id),
         body: (
@@ -1302,7 +1296,7 @@ export function SupportCasesModule() {
       ? clients.find((row) => row.id === recipient.client_id) ?? null
       : null;
     drawer.open({
-      title: 'Recipient context',
+      title: t('supportCases.supportCasesModule.recipientContext'),
       size: 'lg',
       deepLink: consoleFocusHref('/customers/recipients', id),
       body: (
@@ -1342,10 +1336,10 @@ export function SupportCasesModule() {
         correlationId: mutationResponseValue(res, 'correlation_id'),
         settingsResolutionId: mutationResponseValue(res, 'settings_resolution_id'),
       });
-      pushToast('Support case updated', 'good');
+      pushToast(t('supportCases.supportCasesModule.supportCaseUpdated'), 'good');
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to update support case';
+      const message = err instanceof Error ? err.message : t('supportCases.supportCasesModule.unableToUpdateSupport');
       pushToast(message, 'danger');
       return false;
     }
@@ -1354,7 +1348,7 @@ export function SupportCasesModule() {
   function openEditCaseModal() {
     if (!activeCase) return;
     modal.open({
-      title: `Edit case · ${shortReference(activeCase.id)}`,
+      title: fill(t('supportCases.supportCasesModule.editCaseValue'), { value: String(shortReference(activeCase.id)) }),
       body: (
         <EditCaseForm
           caseRow={activeCase}
@@ -1375,8 +1369,8 @@ export function SupportCasesModule() {
       },
       {
         onSuccess: () => {
-          const assignee = supportUsers.find((u) => u.id === assigneeUserId)?.name ?? 'selected operator';
-          pushToast(`Assigned ${selected.length} support cases to ${assignee}`, 'good');
+          const assignee = supportUsers.find((u) => u.id === assigneeUserId)?.name ?? t('supportCases.supportCasesModule.selectedOperator');
+          pushToast(fill(t('supportCases.supportCasesModule.assignedLengthSupportCases'), { length: String(selected.length), assignee: String(assignee) }), 'good');
         },
         onError: (err: Error) => pushToast(err.message, 'danger'),
       },
@@ -1391,7 +1385,7 @@ export function SupportCasesModule() {
         resolution: statusReason,
       },
       {
-        onSuccess: () => pushToast(`Resolved ${selected.length} support cases - ${statusReason}`, 'good'),
+        onSuccess: () => pushToast(fill(t('supportCases.supportCasesModule.resolvedLengthSupportCases'), { length: String(selected.length), statusReason: String(statusReason) }), 'good'),
         onError: (err: Error) => pushToast(err.message, 'danger'),
       },
     );
@@ -1402,7 +1396,7 @@ export function SupportCasesModule() {
     // (LookupRow `support_message_channel`). When empty, fail loud rather than
     // silently coercing to 'email' — operators must see the canonical gap.
     if (!activeCase.channel) {
-      pushToast('Cannot send reply - this case is missing a message channel.', 'danger');
+      pushToast(t('supportCases.supportCasesModule.cannotSendReplyThis'), 'danger');
       return;
     }
     try {
@@ -1420,9 +1414,9 @@ export function SupportCasesModule() {
         correlationId: mutationResponseValue(res, 'correlation_id'),
         settingsResolutionId: mutationResponseValue(res, 'settings_resolution_id'),
       });
-      pushToast(`Support reply sent - ${body.length} characters`, 'good');
+      pushToast(fill(t('supportCases.supportCasesModule.supportReplySentLength'), { length: String(body.length) }), 'good');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to send support reply';
+      const message = err instanceof Error ? err.message : t('supportCases.supportCasesModule.unableToSendSupport');
       pushToast(message, 'danger');
       throw err;
     }
@@ -1444,10 +1438,10 @@ export function SupportCasesModule() {
         correlationId: mutationResponseValue(res, 'correlation_id'),
         settingsResolutionId: mutationResponseValue(res, 'settings_resolution_id'),
       });
-      const assignee = supportUsers.find((u) => u.id === nextUserId)?.name ?? 'selected operator';
-      pushToast(`Support case assigned to ${assignee}`, 'good');
+      const assignee = supportUsers.find((u) => u.id === nextUserId)?.name ?? t('supportCases.supportCasesModule.selectedOperator');
+      pushToast(fill(t('supportCases.supportCasesModule.supportCaseAssignedTo'), { assignee: String(assignee) }), 'good');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to assign support case';
+      const message = err instanceof Error ? err.message : t('supportCases.supportCasesModule.unableToAssignSupport');
       pushToast(message, 'danger');
     }
   }
@@ -1455,7 +1449,7 @@ export function SupportCasesModule() {
     if (!activeCase) return;
     const resolvedReason = reason ?? supportEscalationPolicy?.default_reason;
     if (!resolvedReason) {
-      pushToast('Support escalation policy is missing a default reason.', 'danger');
+      pushToast(t('supportCases.supportCasesModule.supportEscalationPolicyIs'), 'danger');
       return;
     }
     try {
@@ -1471,9 +1465,9 @@ export function SupportCasesModule() {
         correlationId: mutationResponseValue(res, 'correlation_id'),
         settingsResolutionId: mutationResponseValue(res, 'settings_resolution_id'),
       });
-      pushToast('Support case escalated', 'good');
+      pushToast(t('supportCases.supportCasesModule.supportCaseEscalated'), 'good');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to escalate support case';
+      const message = err instanceof Error ? err.message : t('supportCases.supportCasesModule.unableToEscalateSupport');
       pushToast(message, 'danger');
     }
   }
@@ -1494,9 +1488,9 @@ export function SupportCasesModule() {
         correlationId: mutationResponseValue(res, 'correlation_id'),
         settingsResolutionId: mutationResponseValue(res, 'settings_resolution_id'),
       });
-      pushToast('Support case resolved', 'good');
+      pushToast(t('supportCases.supportCasesModule.supportCaseResolved'), 'good');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to resolve support case';
+      const message = err instanceof Error ? err.message : t('supportCases.supportCasesModule.unableToResolveSupport');
       pushToast(message, 'danger');
     }
   }
@@ -1514,9 +1508,9 @@ export function SupportCasesModule() {
         correlationId: mutationResponseValue(res, 'correlation_id'),
         settingsResolutionId: mutationResponseValue(res, 'settings_resolution_id'),
       });
-      pushToast('Support case reopened', 'good');
+      pushToast(t('supportCases.supportCasesModule.supportCaseReopened'), 'good');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to reopen support case';
+      const message = err instanceof Error ? err.message : t('supportCases.supportCasesModule.unableToReopenSupport');
       pushToast(message, 'danger');
     }
   }
@@ -1542,11 +1536,11 @@ export function SupportCasesModule() {
         correlationId: mutationResponseValue(res, 'correlation_id'),
         settingsResolutionId: mutationResponseValue(res, 'settings_resolution_id'),
       });
-      pushToast(`Public tracking request ${outcome}`, 'good');
+      pushToast(fill(t('supportCases.supportCasesModule.publicTrackingRequestOutcome'), { outcome: String(outcome) }), 'good');
       return true;
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Unable to review public tracking request';
+        err instanceof Error ? err.message : t('supportCases.supportCasesModule.unableToReviewPublic');
       pushToast(message, 'danger');
       return false;
     }
@@ -1556,14 +1550,14 @@ export function SupportCasesModule() {
   const pills: ReactNode[] = [
     <ScopePill key="scope" scopeType="tenant" scopeId={scope.tenant?.id} />,
     <span key="seam" className="chip chip--xs">
-      Case workflow active
+      {t('supportCases.supportCasesModule.caseWorkflowActive')}
     </span>,
     <Chip
       key="sla"
-      label={`SLA breached · ${breachedCount}`}
+      label={fill(t('supportCases.supportCasesModule.slaBreachedBreachedcount'), { breachedCount: String(breachedCount) })}
       kind={breachedCount > 0 ? 'danger' : 'good'}
       size="xs"
-      title={`${breachedCount} active cases past the SLA due time`}
+      title={fill(t('supportCases.supportCasesModule.breachedcountActiveCasesPast'), { breachedCount: String(breachedCount) })}
     />,
   ];
 
@@ -1571,7 +1565,7 @@ export function SupportCasesModule() {
   function openDetailDrawer() {
     if (!activeCase) return;
     drawer.open({
-      title: `Case · ${activeCase.subject}`,
+      title: fill(t('supportCases.supportCasesModule.caseSubject'), { subject: String(activeCase.subject) }),
       size: 'xl',
       body: (
         <DetailDrawerBody
@@ -1590,14 +1584,14 @@ export function SupportCasesModule() {
     return (
       <div className="page" data-testid="support-cases-page">
         <PageHeader
-          eyebrow="Support"
-          titleAccent="Cases"
-          titlePlain="— triage queue"
+          eyebrow={t('supportCases.supportCasesModule.support')}
+          titleAccent={t('supportCases.supportCasesModule.cases')}
+          titlePlain={t('supportCases.supportCasesModule.triageQueue')}
         />
         <StateView
           kind="denied"
           capability={CAP.SUPPORT_READ}
-          hint="You do not have permission to view support cases."
+          hint={t('supportCases.supportCasesModule.youDoNotHave')}
         />
       </div>
     );
@@ -1606,9 +1600,9 @@ export function SupportCasesModule() {
     return (
       <div className="page" data-testid="support-cases-page">
         <PageHeader
-          eyebrow="Support"
-          titleAccent="Cases"
-          titlePlain="— triage queue"
+          eyebrow={t('supportCases.supportCasesModule.support')}
+          titleAccent={t('supportCases.supportCasesModule.cases')}
+          titlePlain={t('supportCases.supportCasesModule.triageQueue')}
           pills={pills}
         />
         <StateView kind="loading" />
@@ -1619,20 +1613,20 @@ export function SupportCasesModule() {
   return (
     <div className="page" data-testid="support-cases-page">
       <PageHeader
-        eyebrow="Support"
-        titleAccent="Cases"
-        titlePlain="— triage queue"
+        eyebrow={t('supportCases.supportCasesModule.support')}
+        titleAccent={t('supportCases.supportCasesModule.cases')}
+        titlePlain={t('supportCases.supportCasesModule.triageQueue')}
         pills={pills}
         actions={[
           <Button
             key="new"
-            label="New case"
+            label={t('supportCases.supportCasesModule.newCase')}
             iconName="plus"
             kind="primary"
             capability={CAP.SUPPORT_WRITE}
             onClick={() => {
               modal.open({
-                title: 'New support case',
+                title: t('supportCases.supportCasesModule.newSupportCase'),
                 body: (
                   <NewCaseForm
                     // W58-Finance+Support REDO closure: NewCaseForm.submit()
@@ -1661,7 +1655,7 @@ export function SupportCasesModule() {
           />,
           <Button
             key="bulk-assign"
-            label="Bulk assign"
+            label={t('supportCases.supportCasesModule.bulkAssign')}
             iconName="user_in"
             kind="ghost"
             capability={CAP.SUPPORT_WRITE}
@@ -1678,7 +1672,7 @@ export function SupportCasesModule() {
               // (button is disabled above).
               const operatorId = (user as { id?: string })?.id;
               if (!operatorId) {
-                pushToast('Cannot bulk-assign without a resolved operator identity', 'warn');
+                pushToast(t('supportCases.supportCasesModule.cannotBulkAssignWithout'), 'warn');
                 return;
               }
               // W27 Cycle D — canonical lifecycle-driven filter. Production
@@ -1690,7 +1684,7 @@ export function SupportCasesModule() {
           />,
           <Button
             key="bulk-resolve"
-            label="Bulk resolve"
+            label={t('supportCases.supportCasesModule.bulkResolve')}
             iconName="check"
             kind="ghost"
             capability={CAP.SUPPORT_WRITE}
@@ -1710,28 +1704,28 @@ export function SupportCasesModule() {
 
       <div className="kpi-strip" data-testid="support-kpi-strip">
         <KPICard
-          label="Open"
+          label={t('supportCases.supportCasesModule.open')}
           value={String(openCount)}
           tone={openCount > 0 ? 'info' : 'neutral'}
           delta={`${decoratedCases.length} total · ${decoratedCases.filter((c) => !c.assigned_to).length} unassigned`}
         />
         <KPICard
-          label="Pending response"
+          label={t('supportCases.supportCasesModule.pendingResponse')}
           value={String(pendingCount)}
           tone={pendingCount > 0 ? 'warn' : 'good'}
-          delta="awaiting customer reply"
+          delta={t('supportCases.supportCasesModule.awaitingCustomerReply')}
         />
         <KPICard
-          label="SLA breached"
+          label={t('supportCases.supportCasesModule.slaBreached')}
           value={String(breachedCount)}
           tone={breachedCount > 0 ? 'danger' : 'good'}
-          delta={breachedCount > 0 ? 'past due time' : 'all within SLA'}
+          delta={breachedCount > 0 ? t('supportCases.supportCasesModule.pastDueTime') : t('supportCases.supportCasesModule.allWithinSla')}
         />
         <KPICard
-          label="Resolved today"
+          label={t('supportCases.supportCasesModule.resolvedToday')}
           value={String(resolvedTodayCount)}
           tone="good"
-          delta="UTC reference"
+          delta={t('supportCases.supportCasesModule.utcReference')}
         />
       </div>
 
@@ -1791,6 +1785,7 @@ export function SupportCasesModule() {
 // ─── Pane: Queue (left) ──────────────────────────────────────────────────
 
 function SupportMutationReadbackCard({ readback }: { readback: SupportMutationReadback }) {
+  const { t } = useI18n();
   return (
     <div
       className="insight-card"
@@ -1803,8 +1798,8 @@ function SupportMutationReadbackCard({ readback }: { readback: SupportMutationRe
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span className="insight-card__label">Support update confirmed</span>
-        <Chip label={supportMutationLabel(readback.kind)} kind="good" size="xs" />
+        <span className="insight-card__label">{t('supportCases.supportMutationReadbackCard.supportUpdateConfirmed')}</span>
+        <Chip label={supportMutationLabel(readback.kind, t)} kind="good" size="xs" />
         <Chip label={readback.status} kind="info" size="xs" />
         {(() => {
           const r = lookupRow('support_case_priority', readback.priority);
@@ -1835,7 +1830,7 @@ function SupportMutationReadbackCard({ readback }: { readback: SupportMutationRe
         }}
       >
         <div>
-          <div className="eyebrow">Case</div>
+          <div className="eyebrow">{t('supportCases.supportMutationReadbackCard.case')}</div>
           <div className="mono" title={readback.caseId}>{shortReference(readback.caseId)}</div>
           <div style={{ color: 'var(--ink-3)' }}>{readback.subject}</div>
           {readback.statusReason ? (
@@ -1845,20 +1840,20 @@ function SupportMutationReadbackCard({ readback }: { readback: SupportMutationRe
           ) : null}
         </div>
         <div>
-          <div className="eyebrow">Assignee</div>
+          <div className="eyebrow">{t('supportCases.supportMutationReadbackCard.assignee')}</div>
           <div>{readback.assigneeLabel}</div>
         </div>
         <div>
-          <div className="eyebrow">Messages</div>
+          <div className="eyebrow">{t('supportCases.supportMutationReadbackCard.messages')}</div>
           <div>{readback.messageCount}</div>
         </div>
         <div>
-          <div className="eyebrow">Events</div>
+          <div className="eyebrow">{t('supportCases.supportMutationReadbackCard.events')}</div>
           <div>{readback.eventCount}</div>
         </div>
         <div>
-          <div className="eyebrow">Confirmation</div>
-          <div>Saved</div>
+          <div className="eyebrow">{t('supportCases.supportMutationReadbackCard.confirmation')}</div>
+          <div>{t('supportCases.supportMutationReadbackCard.saved')}</div>
         </div>
       </div>
     </div>
@@ -1876,6 +1871,7 @@ interface QueuePaneProps {
 }
 
 function QueuePane({
+  const { t } = useI18n();
   filter,
   onFilterChange,
   rows,
@@ -1888,7 +1884,7 @@ function QueuePane({
     <aside
       className="card support-queue"
       data-testid="support-queue"
-      aria-label="Support queue"
+      aria-label={t('supportCases.queuePane.supportQueue')}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -1908,7 +1904,7 @@ function QueuePane({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Icon name="filter" size={12} />
-          <span className="eyebrow">Queue</span>
+          <span className="eyebrow">{t('supportCases.queuePane.queue')}</span>
           <span style={{ flex: 1 }} />
           <span className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>
             {rows.length} case{rows.length === 1 ? '' : 's'}
@@ -1916,11 +1912,11 @@ function QueuePane({
         </div>
         <div
           role="group"
-          aria-label="Queue filters"
+          aria-label={t('supportCases.queuePane.queueFilters')}
           data-testid="support-queue-filters"
           style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}
         >
-          {QUEUE_FILTERS.map((f) => (
+          {queueFilters(t).map((f) => (
             <button
               key={f.id}
               type="button"
@@ -1939,7 +1935,7 @@ function QueuePane({
 
       <div
         role="listbox"
-        aria-label="Cases"
+        aria-label={t('supportCases.queuePane.cases')}
         data-testid="support-queue-list"
         style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}
       >
@@ -1947,7 +1943,7 @@ function QueuePane({
           <div style={{ padding: 14 }}>
             <StateView
               kind="empty"
-              hint={`No cases in this view. Try switching the filter to "All".`}
+              hint={t('supportCases.queuePane.noCasesInThis')}
             />
           </div>
         ) : (
@@ -1976,6 +1972,7 @@ interface QueueRowProps {
 }
 
 function QueueRow({ row, isActive, onPick, users, now }: QueueRowProps) {
+  const { t, fmtRelative } = useI18n();
   // W26 — prefer the canonical projection's assignee_label over re-resolving
   // through the supportUsers seam; fall back to the local seed roster for
   // initials avatar generation when the projection still hasn't loaded.
@@ -2019,18 +2016,18 @@ function QueueRow({ row, isActive, onPick, users, now }: QueueRowProps) {
           );
         })()}
         {row.effective_sla_breached ? (
-          <Chip label="SLA" kind="danger" size="xs" title="SLA breached" />
+          <Chip label={t('supportCases.queueRow.sla')} kind="danger" size="xs" title={t('supportCases.queueRow.slaBreached')} />
         ) : null}
         {publicTrackingReview ? (
           <Chip
-            label={publicTrackingReview.outcome === 'pending_review' ? 'Public review' : humanizeKey(publicTrackingReview.outcome ?? 'Public tracking')}
+            label={publicTrackingReview.outcome === 'pending_review' ? t('supportCases.queueRow.publicReview') : humanizeKey(publicTrackingReview.outcome ?? t('supportCases.queueRow.publicTracking'))}
             kind={publicTrackingReview.outcome === 'pending_review' ? 'warn' : 'good'}
             size="xs"
           />
         ) : null}
         <span style={{ flex: 1 }} />
         <span className="mono" style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>
-          {relativeAge(row.opened_at, now)}
+          {fmtRelative(row.opened_at, now.getTime())}
         </span>
       </div>
       <div
@@ -2055,17 +2052,17 @@ function QueueRow({ row, isActive, onPick, users, now }: QueueRowProps) {
           color: 'var(--ink-3)',
         }}
       >
-        <span title={clientDisplay(row)}>
-          {clientDisplay(row)}
+        <span title={clientDisplay(row, t)}>
+          {clientDisplay(row, t)}
         </span>
         <span>·</span>
-        <span>{row.message_count} msg</span>
+        <span>{fill(t('supportCases.queueRow.messageCountMsg'), { message_count: String(row.message_count) })}</span>
         <span style={{ flex: 1 }} />
         {assigneeLabel ? (
           <span
             className="primitive-msg__avatar"
             title={assigneeLabel}
-            aria-label={`Assigned to ${assigneeLabel}`}
+            aria-label={fill(t('supportCases.queueRow.assignedToAssigneelabel'), { assigneeLabel: String(assigneeLabel) })}
             style={{ width: 18, height: 18, fontSize: 9 }}
           >
             {initialsOf(assigneeLabel)}
@@ -2073,8 +2070,8 @@ function QueueRow({ row, isActive, onPick, users, now }: QueueRowProps) {
         ) : (
           <span
             className="chip chip--xs chip--warn"
-            title="Unassigned"
-            aria-label="Unassigned"
+            title={t('supportCases.queueRow.unassigned')}
+            aria-label={t('supportCases.queueRow.unassigned')}
           >
             unassigned
           </span>
@@ -2096,6 +2093,7 @@ interface PublicTrackingReviewPanelProps {
 }
 
 function PublicTrackingReviewPanel({
+  const { t } = useI18n();
   review,
   compact = false,
   canAct,
@@ -2104,17 +2102,17 @@ function PublicTrackingReviewPanel({
   onReview,
 }: PublicTrackingReviewPanelProps) {
   const rows: KvRow[] = [
-    { key: 'tracking', label: 'Tracking', value: review.trackingNumber, mono: true },
-    { key: 'type', label: 'Request', value: review.requestType ? humanizeKey(review.requestType) : null },
-    { key: 'channel', label: 'Channel', value: review.channel ? humanizeKey(review.channel) : null },
-    { key: 'outcome', label: 'Outcome', value: review.outcome ? humanizeKey(review.outcome) : null },
-    { key: 'shipment_status', label: 'Shipment', value: review.shipmentStatus ? humanizeKey(review.shipmentStatus) : null },
-    { key: 'changed', label: 'Changed', value: review.changedFields.length ? review.changedFields.map(humanizeKey).join(', ') : null },
+    { key: 'tracking', label: t('supportCases.publicTrackingReviewPanel.tracking'), value: review.trackingNumber, mono: true },
+    { key: 'type', label: t('supportCases.publicTrackingReviewPanel.request'), value: review.requestType ? humanizeKey(review.requestType) : null },
+    { key: 'channel', label: t('supportCases.publicTrackingReviewPanel.channel'), value: review.channel ? humanizeKey(review.channel) : null },
+    { key: 'outcome', label: t('supportCases.publicTrackingReviewPanel.outcome'), value: review.outcome ? humanizeKey(review.outcome) : null },
+    { key: 'shipment_status', label: t('supportCases.publicTrackingReviewPanel.shipment'), value: review.shipmentStatus ? humanizeKey(review.shipmentStatus) : null },
+    { key: 'changed', label: t('supportCases.publicTrackingReviewPanel.changed'), value: review.changedFields.length ? review.changedFields.map(humanizeKey).join(', ') : null },
   ];
   const snapshotRows = [
-    { label: 'Before', value: review.beforeSnapshot },
-    { label: 'Requested', value: review.requestedSnapshot },
-    { label: 'Current', value: review.currentSnapshot },
+    { label: t('supportCases.publicTrackingReviewPanel.before'), value: review.beforeSnapshot },
+    { label: t('supportCases.publicTrackingReviewPanel.requested'), value: review.requestedSnapshot },
+    { label: t('supportCases.publicTrackingReviewPanel.current'), value: review.currentSnapshot },
   ].filter((row) => row.value);
   return (
     <div
@@ -2128,14 +2126,14 @@ function PublicTrackingReviewPanel({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span className="insight-card__label">Public tracking review</span>
+        <span className="insight-card__label">{t('supportCases.publicTrackingReviewPanel.publicTrackingReview')}</span>
         <Chip
-          label={review.outcome ? humanizeKey(review.outcome) : 'Public tracking'}
+          label={review.outcome ? humanizeKey(review.outcome) : t('supportCases.publicTrackingReviewPanel.publicTracking')}
           kind={review.outcome === 'pending_review' ? 'warn' : 'good'}
           size="xs"
         />
         {review.reviewTaskId ? (
-          <Chip label={`Task ${shortReference(review.reviewTaskId)}`} kind="info" size="xs" />
+          <Chip label={fill(t('supportCases.publicTrackingReviewPanel.taskValue'), { value: String(shortReference(review.reviewTaskId)) })} kind="info" size="xs" />
         ) : null}
       </div>
       {review.changeSummary ? (
@@ -2153,7 +2151,7 @@ function PublicTrackingReviewPanel({
             <div key={row.label}>
               <div className="eyebrow">{row.label}</div>
               <div className="mono" style={{ whiteSpace: 'pre-wrap' }}>
-                {formatPayloadValue(row.label, row.value)}
+                {formatPayloadValue(row.label, row.value, t)}
               </div>
             </div>
           ))}
@@ -2162,11 +2160,11 @@ function PublicTrackingReviewPanel({
       {canAct ? (
         <div style={{ display: 'grid', gap: 8 }} data-testid="public-tracking-review-actions">
           <label style={{ display: 'grid', gap: 4, fontSize: 11 }}>
-            <span className="eyebrow">Review reason</span>
+            <span className="eyebrow">{t('supportCases.publicTrackingReviewPanel.reviewReason')}</span>
             <textarea
               value={reason}
               onChange={(event) => onReasonChange?.(event.target.value)}
-              placeholder="Optional reviewer note"
+              placeholder={t('supportCases.publicTrackingReviewPanel.optionalReviewerNote')}
               rows={compact ? 2 : 3}
               style={{
                 resize: 'vertical',
@@ -2181,7 +2179,7 @@ function PublicTrackingReviewPanel({
           </label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button
-              label="Approve change"
+              label={t('supportCases.publicTrackingReviewPanel.approveChange')}
               iconName="check"
               kind="primary"
               size="sm"
@@ -2191,7 +2189,7 @@ function PublicTrackingReviewPanel({
               }}
             />
             <Button
-              label="Reject change"
+              label={t('supportCases.publicTrackingReviewPanel.rejectChange')}
               iconName="x"
               kind="danger"
               size="sm"
@@ -2249,13 +2247,14 @@ function ThreadPane({
   onEditCase,
   onOpenDetail,
 }: ThreadPaneProps) {
+  const { t } = useI18n();
   const [reviewReason, setReviewReason] = useState('');
 
   if (!caseRow) {
     return (
       <section
         className="card"
-        aria-label="Active case thread"
+        aria-label={t('supportCases.threadPane.activeCaseThread')}
         data-testid="support-thread"
         style={{
           display: 'flex',
@@ -2267,7 +2266,7 @@ function ThreadPane({
       >
         <StateView
           kind="empty"
-          hint="Pick a case from the queue to see the conversation thread."
+          hint={t('supportCases.threadPane.pickACaseFrom')}
         />
       </section>
     );
@@ -2284,7 +2283,7 @@ function ThreadPane({
     const name =
       proj?.author_label ??
       m.author_name ??
-      operatorReference(m.author_user_id ? 'User' : 'Actor', m.author_user_id ?? role);
+      operatorReference(t, m.author_user_id ? t('supportCases.threadPane.user') : t('supportCases.threadPane.actor'), m.author_user_id ?? role);
     return {
       id: m.id,
       at: String(proj?.sent_at ?? m.sent_at ?? m.created_at ?? new Date().toISOString()),
@@ -2309,7 +2308,7 @@ function ThreadPane({
   return (
     <section
       className="card support-thread"
-      aria-label="Active case thread"
+      aria-label={t('supportCases.threadPane.activeCaseThread')}
       data-testid="support-thread"
       style={{
         display: 'flex',
@@ -2353,25 +2352,25 @@ function ThreadPane({
             );
           })()}
           {caseRow.effective_sla_breached ? (
-            <Chip label="SLA breached" kind="danger" size="xs" />
+            <Chip label={t('supportCases.threadPane.slaBreached')} kind="danger" size="xs" />
           ) : null}
           {caseRow.resolution_label && caseRow.effective_is_terminal ? (
             <Chip
               label={caseRow.resolution_label}
               kind="good"
               size="xs"
-              title={`Resolution: ${caseRow.resolution_label}`}
+              title={fill(t('supportCases.threadPane.resolutionResolutionLabel'), { resolution_label: String(caseRow.resolution_label) })}
             />
           ) : null}
           {reviewInfo ? (
             <Chip
-              label={reviewInfo.outcome === 'pending_review' ? 'Public tracking review' : humanizeKey(reviewInfo.outcome ?? 'Public tracking')}
+              label={reviewInfo.outcome === 'pending_review' ? t('supportCases.threadPane.publicTrackingReview') : humanizeKey(reviewInfo.outcome ?? t('supportCases.threadPane.publicTracking'))}
               kind={reviewInfo.outcome === 'pending_review' ? 'warn' : 'good'}
               size="xs"
             />
           ) : null}
           <Button
-            label="Edit case"
+            label={t('supportCases.threadPane.editCase')}
             iconName="edit"
             kind="ghost"
             size="sm"
@@ -2379,7 +2378,7 @@ function ThreadPane({
             onClick={onEditCase}
           />
           <Button
-            label="Open detail"
+            label={t('supportCases.threadPane.openDetail')}
             iconName="external"
             kind="ghost"
             size="sm"
@@ -2387,7 +2386,7 @@ function ThreadPane({
           />
           {canEscalateCase ? (
             <Button
-              label="Escalate case"
+              label={t('supportCases.threadPane.escalateCase')}
               iconName="warn"
               kind="ghost"
               size="sm"
@@ -2397,7 +2396,7 @@ function ThreadPane({
           ) : null}
           {canResolveCase ? (
             <Button
-              label="Resolve case"
+              label={t('supportCases.threadPane.resolveCase')}
               iconName="check"
               kind="ghost"
               size="sm"
@@ -2407,7 +2406,7 @@ function ThreadPane({
           ) : null}
           {canReopenCase ? (
             <Button
-              label="Reopen case"
+              label={t('supportCases.threadPane.reopenCase')}
               iconName="refresh"
               kind="ghost"
               size="sm"
@@ -2426,7 +2425,7 @@ function ThreadPane({
             flexWrap: 'wrap',
           }}
         >
-          <span>{clientDisplay(caseRow)}</span>
+          <span>{clientDisplay(caseRow, t)}</span>
           <span>·</span>
           {(() => {
             const r = lookupRow('support_message_channel', caseRow.channel);
@@ -2441,9 +2440,9 @@ function ThreadPane({
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             data-testid="support-thread-assignee"
           >
-            Assignee
+            {t('supportCases.threadPane.assignee')}
             <select
-              aria-label="Assign case"
+              aria-label={t('supportCases.threadPane.assignCase')}
               value={caseRow.assigned_to ?? ''}
               disabled={!canWrite}
               onChange={(e) => onChangeAssignee(e.target.value)}
@@ -2456,7 +2455,7 @@ function ThreadPane({
                 color: 'var(--ink-1)',
               }}
             >
-              <option value="">— Unassigned —</option>
+              <option value="">{t('supportCases.threadPane.unassigned')}</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
@@ -2466,9 +2465,9 @@ function ThreadPane({
           </label>
           {caseRow.tags.length > 0 ? (
             <span style={{ display: 'inline-flex', gap: 4 }}>
-              {caseRow.tags.map((t) => (
-                <span key={t} className="chip chip--xs chip--neutral">
-                  #{t}
+              {caseRow.tags.map((tag) => (
+                <span key={tag} className="chip chip--xs chip--neutral">
+                  #{tag}
                 </span>
               ))}
             </span>
@@ -2499,7 +2498,7 @@ function ThreadPane({
         {threadMessages.length === 0 ? (
           <StateView
             kind="empty"
-            hint="No messages on this case yet. Send a reply below."
+            hint={t('supportCases.threadPane.noMessagesOnThis')}
           />
         ) : null}
         <MessageThread
@@ -2508,9 +2507,9 @@ function ThreadPane({
             onSubmit: (body) => onSendMessage(body),
             capability: CAP.SUPPORT_WRITE,
             placeholder: canWrite
-              ? 'Reply to the customer · ⌘⏎ to send'
-              : 'Support update permission is required to send messages',
-            hint: '⌘⏎ to send · support update permission',
+              ? t('supportCases.threadPane.replyToTheCustomer')
+              : t('supportCases.threadPane.supportUpdatePermissionIs'),
+            hint: t('supportCases.threadPane.toSendSupportUpdate'),
           }}
         />
       </div>
@@ -2523,25 +2522,28 @@ function ThreadPane({
 /** Shipment-table columns hoisted to module scope so the right-pane render
  *  remains pure and the `useMemo`-after-early-return Hook ordering hazard is
  *  eliminated. The columns never depend on any per-render value. */
-const PROFILE_SHIPMENT_COLUMNS: Array<DataTableColumn<ShipmentRow>> = [
-  { key: 'tracking_number', label: 'Tracking', mono: true, sortable: true },
-  { key: 'service_type', label: 'Service', sortable: true, lookup: 'service_type' },
-  { key: 'status', label: 'Status', sortable: true, lookup: 'shipment_status' },
-];
+function profileShipmentColumns(t: Translate): Array<DataTableColumn<ShipmentRow>> {
+  return [
+    { key: 'tracking_number', label: t('supportCases.profileShipmentColumns.tracking'), mono: true, sortable: true },
+    { key: 'service_type', label: t('supportCases.profileShipmentColumns.service'), sortable: true, lookup: 'service_type' },
+    { key: 'status', label: t('supportCases.profileShipmentColumns.status'), sortable: true, lookup: 'shipment_status' },
+  ];
+}
 
 function SupportContextShipments({ rows }: { rows: ShipmentRow[] }) {
+  const { t } = useI18n();
   return (
     <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
       <h4 className="eyebrow" style={{ margin: 0 }}>
-        Linked shipments
+        {t('supportCases.supportContextShipments.linkedShipments')}
       </h4>
       {rows.length === 0 ? (
         <p className="state__hint" style={{ fontSize: 12, margin: 0 }}>
-          No linked shipments are visible for this support context.
+          {t('supportCases.supportContextShipments.noLinkedShipmentsAre')}
         </p>
       ) : (
         <DataTable<ShipmentRow>
-          columns={PROFILE_SHIPMENT_COLUMNS}
+          columns={profileShipmentColumns(t)}
           rows={rows}
           viewKey="support_context_shipments"
           entityKind="shipment"
@@ -2553,6 +2555,7 @@ function SupportContextShipments({ rows }: { rows: ShipmentRow[] }) {
 }
 
 function SupportClientContextBody({
+  const { t } = useI18n();
   client,
   shipments,
 }: {
@@ -2560,20 +2563,20 @@ function SupportClientContextBody({
   shipments: ShipmentRow[];
 }) {
   if (!client) {
-    return <StateView kind="empty" title="Client not found" hint="The linked client is not visible in this scope." />;
+    return <StateView kind="empty" title={t('supportCases.supportClientContextBody.clientNotFound')} hint={t('supportCases.supportClientContextBody.theLinkedClientIs')} />;
   }
   return (
     <div data-testid="support-linked-context-drawer" style={{ padding: '0 14px 14px' }}>
       <KvGrid
         rows={[
-          { key: 'name', label: 'Name', value: client.name },
-          { key: 'slug', label: 'Slug', value: client.slug, mono: true },
-          { key: 'status', label: 'Status', value: client.status },
-          { key: 'sla_tier', label: 'SLA tier', value: client.sla_tier, lookup: 'sla_tier' },
+          { key: 'name', label: t('supportCases.supportClientContextBody.name'), value: client.name },
+          { key: 'slug', label: t('supportCases.supportClientContextBody.slug'), value: client.slug, mono: true },
+          { key: 'status', label: t('supportCases.supportClientContextBody.status'), value: client.status },
+          { key: 'sla_tier', label: t('supportCases.supportClientContextBody.slaTier'), value: client.sla_tier, lookup: 'sla_tier' },
           {
             key: 'account_manager',
-            label: 'Account manager',
-            value: client.account_manager_id ?? 'Unassigned',
+            label: t('supportCases.supportClientContextBody.accountManager'),
+            value: client.account_manager_id ?? t('supportCases.supportClientContextBody.unassigned'),
             mono: true,
           },
         ]}
@@ -2584,6 +2587,7 @@ function SupportClientContextBody({
 }
 
 function SupportSenderContextBody({
+  const { t } = useI18n();
   sender,
   client,
   shipments,
@@ -2593,16 +2597,16 @@ function SupportSenderContextBody({
   shipments: ShipmentRow[];
 }) {
   if (!sender) {
-    return <StateView kind="empty" title="Sender not found" hint="The linked sender is not visible in this scope." />;
+    return <StateView kind="empty" title={t('supportCases.supportSenderContextBody.senderNotFound')} hint={t('supportCases.supportSenderContextBody.theLinkedSenderIs')} />;
   }
   return (
     <div data-testid="support-linked-context-drawer" style={{ padding: '0 14px 14px' }}>
       <KvGrid
         rows={[
-          { key: 'name', label: 'Name', value: sender.name },
-          { key: 'brand', label: 'Brand', value: sender.brand_name },
-          { key: 'status', label: 'Status', value: sender.status },
-          { key: 'client', label: 'Client', value: client?.name ?? sender.client_id, mono: !client },
+          { key: 'name', label: t('supportCases.supportSenderContextBody.name'), value: sender.name },
+          { key: 'brand', label: t('supportCases.supportSenderContextBody.brand'), value: sender.brand_name },
+          { key: 'status', label: t('supportCases.supportSenderContextBody.status'), value: sender.status },
+          { key: 'client', label: t('supportCases.supportSenderContextBody.client'), value: client?.name ?? sender.client_id, mono: !client },
         ]}
       />
       <SupportContextShipments rows={shipments} />
@@ -2611,6 +2615,7 @@ function SupportSenderContextBody({
 }
 
 function SupportRecipientContextBody({
+  const { t } = useI18n();
   recipient,
   client,
   shipments,
@@ -2620,15 +2625,15 @@ function SupportRecipientContextBody({
   shipments: ShipmentRow[];
 }) {
   if (!recipient) {
-    return <StateView kind="empty" title="Recipient not found" hint="The linked recipient is not visible in this scope." />;
+    return <StateView kind="empty" title={t('supportCases.supportRecipientContextBody.recipientNotFound')} hint={t('supportCases.supportRecipientContextBody.theLinkedRecipientIs')} />;
   }
   return (
     <div data-testid="support-linked-context-drawer" style={{ padding: '0 14px 14px' }}>
       <KvGrid
         rows={[
-          { key: 'name', label: 'Name', value: recipient.name },
-          { key: 'phone', label: 'Phone', value: recipient.phone_number, mono: true },
-          { key: 'client', label: 'Client', value: client?.name ?? recipient.client_id, mono: !client },
+          { key: 'name', label: t('supportCases.supportRecipientContextBody.name'), value: recipient.name },
+          { key: 'phone', label: t('supportCases.supportRecipientContextBody.phone'), value: recipient.phone_number, mono: true },
+          { key: 'client', label: t('supportCases.supportRecipientContextBody.client'), value: client?.name ?? recipient.client_id, mono: !client },
         ]}
       />
       <SupportContextShipments rows={shipments} />
@@ -2647,6 +2652,7 @@ interface ProfilePaneProps {
 }
 
 function ProfilePane({
+  const { t } = useI18n();
   caseRow,
   client,
   sender,
@@ -2659,11 +2665,11 @@ function ProfilePane({
     return (
       <aside
         className="card"
-        aria-label="Customer profile"
+        aria-label={t('supportCases.profilePane.customerProfile')}
         data-testid="support-profile"
         style={{ padding: 14 }}
       >
-        <StateView kind="empty" hint="Pick a case to view the customer profile." />
+        <StateView kind="empty" hint={t('supportCases.profilePane.pickACaseTo')} />
       </aside>
     );
   }
@@ -2678,7 +2684,7 @@ function ProfilePane({
     profileRows.push(
       {
         key: 'client',
-        label: 'Client',
+        label: t('supportCases.profilePane.client'),
         value: supportProfileLink(
           client.name,
           'client',
@@ -2691,9 +2697,9 @@ function ProfilePane({
       },
       {
         key: 'client_reference',
-        label: 'Client reference',
+        label: t('supportCases.profilePane.clientReference'),
         value: supportProfileLink(
-          operatorReference('Client', client.id),
+          operatorReference(t, t('supportCases.operatorReference.client'), client.id),
           'client',
           '/customers/clients',
           client.id,
@@ -2703,14 +2709,14 @@ function ProfilePane({
         ),
         mono: false,
       },
-      { key: 'sla_tier', label: 'SLA tier', value: client.sla_tier, lookup: 'sla_tier' },
-      { key: 'status', label: 'Status', value: client.status },
+      { key: 'sla_tier', label: t('supportCases.profilePane.slaTier'), value: client.sla_tier, lookup: 'sla_tier' },
+      { key: 'status', label: t('supportCases.profilePane.status'), value: client.status },
     );
   } else if (clientName) {
     profileRows.push(
       {
         key: 'client',
-        label: 'Client',
+        label: t('supportCases.profilePane.client'),
         value: supportProfileLink(
           clientName,
           'client',
@@ -2723,9 +2729,9 @@ function ProfilePane({
       },
       {
         key: 'client_reference',
-        label: 'Client reference',
+        label: t('supportCases.profilePane.clientReference'),
         value: supportProfileLink(
-          operatorReference('Client', caseRow.client_id),
+          operatorReference(t, t('supportCases.operatorReference.client'), caseRow.client_id),
           'client',
           '/customers/clients',
           caseRow.client_id,
@@ -2741,7 +2747,7 @@ function ProfilePane({
     profileRows.push(
       {
         key: 'sender',
-        label: 'Sender',
+        label: t('supportCases.profilePane.sender'),
         value: supportProfileLink(
           senderName,
           'sender',
@@ -2754,14 +2760,14 @@ function ProfilePane({
       },
     );
     if (senderBrand) {
-      profileRows.push({ key: 'sender_brand', label: 'Brand', value: senderBrand, mono: false });
+      profileRows.push({ key: 'sender_brand', label: t('supportCases.profilePane.brand'), value: senderBrand, mono: false });
     }
   }
   if (caseRow.recipient_id && recipientName) {
     profileRows.push(
       {
         key: 'recipient',
-        label: 'Recipient',
+        label: t('supportCases.profilePane.recipient'),
         value: supportProfileLink(
           recipientName,
           'recipient',
@@ -2774,15 +2780,15 @@ function ProfilePane({
       },
     );
     if (recipientPhone) {
-      profileRows.push({ key: 'recipient_phone', label: 'Phone', value: recipientPhone, mono: true });
+      profileRows.push({ key: 'recipient_phone', label: t('supportCases.profilePane.phone'), value: recipientPhone, mono: true });
     }
   }
   if (caseRow.related_shipment_id) {
     profileRows.push({
       key: 'related_shipment',
-      label: 'Shipment reference',
+      label: t('supportCases.profilePane.shipmentReference'),
       value: supportProfileLink(
-        shipmentDisplay(caseRow),
+        shipmentDisplay(caseRow, t),
         'shipment',
         '/operate/shipments',
         caseRow.related_shipment_id,
@@ -2795,12 +2801,12 @@ function ProfilePane({
   }
 
   const shipmentColumns: Array<DataTableColumn<ShipmentRow>> =
-    PROFILE_SHIPMENT_COLUMNS;
+    profileShipmentColumns(t);
 
   return (
     <aside
       className="card support-profile"
-      aria-label="Customer profile"
+      aria-label={t('supportCases.profilePane.customerProfile')}
       data-testid="support-profile"
       style={{
         display: 'flex',
@@ -2820,17 +2826,17 @@ function ProfilePane({
         }}
       >
         <Icon name="user" size={12} />
-        <span className="eyebrow">Customer profile</span>
+        <span className="eyebrow">{t('supportCases.profilePane.customerProfile')}</span>
       </header>
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 14 }}>
         <KvGrid rows={profileRows} />
 
         <h4 className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>
-          Recent shipments
+          {t('supportCases.profilePane.recentShipments')}
         </h4>
         {shipments.length === 0 ? (
           <p className="state__hint" style={{ fontSize: 11 }}>
-            No recent shipments for this client.
+            {t('supportCases.profilePane.noRecentShipmentsFor')}
           </p>
         ) : (
           <div data-testid="support-profile-shipments">
@@ -2846,11 +2852,11 @@ function ProfilePane({
         )}
 
         <h4 className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>
-          Recent decisions
+          {t('supportCases.profilePane.recentDecisions')}
         </h4>
         {decisions.length === 0 ? (
           <p className="state__hint" style={{ fontSize: 11 }}>
-            No decision log entries.
+            {t('supportCases.profilePane.noDecisionLogEntries')}
           </p>
         ) : (
           <ul
@@ -2865,7 +2871,7 @@ function ProfilePane({
                 >
                   <span>{humanizeKey(d.decision_category)}</span>{' '}
                   <span style={{ color: 'var(--ink-3)' }}>
-                    ({operatorReference('Decision', d.id)} · {formatScopeLabel(d.resolved_from)})
+                    ({operatorReference(t, t('supportCases.operatorReference.decision'), d.id)} · {formatScopeLabel(d.resolved_from, t)})
                   </span>
                 </a>
               </li>
@@ -2893,6 +2899,7 @@ interface DetailDrawerBodyProps {
 }
 
 function DetailDrawerBody({
+  const { t } = useI18n();
   caseRow,
   messages,
   messageDirectoryById,
@@ -2942,7 +2949,7 @@ function DetailDrawerBody({
           const summaryFormat = (eventRow as { metadata?: { summary_format?: string } } | null)?.metadata?.summary_format;
           const summary =
             summaryFormat === 'transition' && e.from_status && e.to_status
-              ? `${humanizeKey(e.from_status)} to ${humanizeKey(e.to_status)}`
+              ? fill(t('supportCases.detailDrawerBody.valueToValue2'), { value: String(humanizeKey(e.from_status)), value2: String(humanizeKey(e.to_status)) })
               : eventRow?.label ?? humanizeKey(e.event_type);
           const detailRows = [
             ...(e.actor_user_id ? [{ key: 'actor_user_id', value: e.actor_user_id }] : []),
@@ -2954,7 +2961,7 @@ function DetailDrawerBody({
           return {
             id: e.id,
             at: e.created_at,
-            type: eventRow?.label ?? 'Case event',
+            type: eventRow?.label ?? t('supportCases.detailDrawerBody.caseEvent'),
             ...(e.actor_user_id ? { actor: `actor_user_id: ${e.actor_user_id}` } : {}),
             summary,
             tone,
@@ -2966,7 +2973,7 @@ function DetailDrawerBody({
                         <div key={key}>
                           <span style={{ color: 'var(--ink-3)' }}>{humanizeKey(key)}: </span>
                           <span>
-                            {formatPayloadValue(key, value)}
+                            {formatPayloadValue(key, value, t)}
                           </span>
                         </div>
                       ))}
@@ -2976,7 +2983,7 @@ function DetailDrawerBody({
               : {}),
           };
         }),
-    [events],
+    [events, t],
   );
 
   // W26 — same projection-aware mapping as ThreadPane so MessageThread bubble
@@ -2988,7 +2995,7 @@ function DetailDrawerBody({
     const name =
       proj?.author_label ??
       m.author_name ??
-      operatorReference(m.author_user_id ? 'User' : 'Actor', m.author_user_id ?? role);
+      operatorReference(t, m.author_user_id ? t('supportCases.detailDrawerBody.user') : t('supportCases.detailDrawerBody.actor'), m.author_user_id ?? role);
     return {
       id: m.id,
       at: String(proj?.sent_at ?? m.sent_at ?? m.created_at ?? new Date().toISOString()),
@@ -3020,24 +3027,24 @@ function DetailDrawerBody({
             />
           ) : null}
           <h4 className="eyebrow" style={{ marginBottom: 6 }}>
-            Conversation
+            {t('supportCases.detailDrawerBody.conversation')}
           </h4>
           <MessageThread messages={threadMessages} />
         </div>
         <div>
           <h4 className="eyebrow" style={{ marginBottom: 6 }}>
-            Event timeline
+            {t('supportCases.detailDrawerBody.eventTimeline')}
           </h4>
           <div data-testid="support-detail-timeline">
             <TimelineLog events={timelineEvents} now={now.toISOString()} />
           </div>
 
           <h4 className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>
-            Attachments
+            {t('supportCases.detailDrawerBody.attachments')}
           </h4>
           {allAttachments.length === 0 ? (
             <p className="state__hint" style={{ fontSize: 11 }}>
-              No attachments on this case.
+              {t('supportCases.detailDrawerBody.noAttachmentsOnThis')}
             </p>
           ) : (
             <ul
@@ -3062,7 +3069,7 @@ function DetailDrawerBody({
           )}
 
           <h4 className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>
-            Tags
+            {t('supportCases.detailDrawerBody.tags')}
           </h4>
           <TagEditor caseId={caseRow.id} tags={caseRow.tags} />
         </div>
@@ -3072,6 +3079,7 @@ function DetailDrawerBody({
 }
 
 function TagEditor({ caseId, tags }: { caseId: string; tags: string[] }) {
+  const { t } = useI18n();
   const canWrite = useCapability(CAP.SUPPORT_WRITE);
   const [draft, setDraft] = useState('');
   const [pendingTagReadback, setPendingTagReadback] = useState<{
@@ -3143,7 +3151,7 @@ function TagEditor({ caseId, tags }: { caseId: string; tags: string[] }) {
             alreadyProcessed: mutationResponseValue(res, 'already_processed') === 'true',
           });
           if (action !== 'remove') setDraft('');
-          pushToast(`Tag ${action === 'remove' ? 'removed' : 'added'} - #${tag}`, 'good');
+          pushToast(fill(t('supportCases.tagEditor.tagValueTag'), { value: String(action === 'remove' ? 'removed' : 'added'), tag: String(tag) }), 'good');
         },
         onError: (err: Error) => pushToast(err.message, 'danger'),
       },
@@ -3159,29 +3167,29 @@ function TagEditor({ caseId, tags }: { caseId: string; tags: string[] }) {
           style={{ display: 'grid', gap: 6, marginBottom: 8 }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span className="insight-card__label">Tag update confirmed</span>
+            <span className="insight-card__label">{t('supportCases.tagEditor.tagUpdateConfirmed')}</span>
             <Chip
-              label={tagReadback.action === 'removed' ? 'Removed' : 'Added'}
+              label={tagReadback.action === 'removed' ? t('supportCases.tagEditor.removed') : t('supportCases.tagEditor.added')}
               kind="good"
               size="xs"
             />
             <Chip label={`#${tagReadback.tag}`} kind="neutral" size="xs" />
             {tagReadback.alreadyProcessed ? (
-              <Chip label="Already current" kind="info" size="xs" />
+              <Chip label={t('supportCases.tagEditor.alreadyCurrent')} kind="info" size="xs" />
             ) : null}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, fontSize: 11 }}>
             <div>
-              <div className="eyebrow">Case</div>
+              <div className="eyebrow">{t('supportCases.tagEditor.case')}</div>
               <div className="mono" title={tagReadback.caseId}>{shortReference(tagReadback.caseId)}</div>
             </div>
             <div>
-              <div className="eyebrow">Tags</div>
+              <div className="eyebrow">{t('supportCases.tagEditor.tags')}</div>
               <div>{tagReadback.tagCount}</div>
             </div>
             <div>
-              <div className="eyebrow">Confirmation</div>
-              <div>{tagReadback.alreadyProcessed ? 'Already updated' : 'Saved'}</div>
+              <div className="eyebrow">{t('supportCases.tagEditor.confirmation')}</div>
+              <div>{tagReadback.alreadyProcessed ? t('supportCases.tagEditor.alreadyUpdated') : t('supportCases.tagEditor.saved')}</div>
             </div>
           </div>
         </div>
@@ -3192,18 +3200,18 @@ function TagEditor({ caseId, tags }: { caseId: string; tags: string[] }) {
       >
         {liveTags.length === 0 ? (
           <span className="state__hint" style={{ fontSize: 11 }}>
-            No tags yet.
+            {t('supportCases.tagEditor.noTagsYet')}
           </span>
         ) : (
-          liveTags.map((t) => (
+          liveTags.map((tag) => (
             <span
-              key={t}
+              key={tag}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
             >
-              <Chip label={`#${t}`} kind="neutral" size="xs" />
+              <Chip label={`#${tag}`} kind="neutral" size="xs" />
               {canWrite ? (
                 <Button
-                  label={`Remove #${t}`}
+                  label={fill(t('supportCases.tagEditor.removeTag'), { tag })}
                   iconName="x"
                   kind="ghost"
                   size="sm"
@@ -3212,7 +3220,7 @@ function TagEditor({ caseId, tags }: { caseId: string; tags: string[] }) {
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    submitTagMutation('remove', t);
+                    submitTagMutation('remove', tag);
                   }}
                 />
               ) : null}
@@ -3225,8 +3233,8 @@ function TagEditor({ caseId, tags }: { caseId: string; tags: string[] }) {
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="add tag…"
-          aria-label="Add tag"
+          placeholder={t('supportCases.tagEditor.addTag')}
+          aria-label={t('supportCases.tagEditor.addTag2')}
           disabled={!canWrite}
           style={{
             flex: 1,
@@ -3239,7 +3247,7 @@ function TagEditor({ caseId, tags }: { caseId: string; tags: string[] }) {
           }}
         />
         <Button
-          label="Add"
+          label={t('supportCases.tagEditor.add')}
           kind="ghost"
           size="sm"
           capability={CAP.SUPPORT_WRITE}
@@ -3265,6 +3273,7 @@ interface SupportCaseEditPatch {
 }
 
 function EditCaseForm({
+  const { t } = useI18n();
   caseRow,
   onCancel,
   onSave,
@@ -3329,11 +3338,11 @@ function EditCaseForm({
       }}
     >
       <label style={{ display: 'grid', gap: 4 }}>
-        <span className="eyebrow">Subject</span>
+        <span className="eyebrow">{t('supportCases.editCaseForm.subject')}</span>
         <input
           value={subject}
           onChange={(event) => setSubject(event.target.value)}
-          aria-label="Case subject"
+          aria-label={t('supportCases.editCaseForm.caseSubject')}
           data-testid="support-edit-subject"
           style={{
             background: 'var(--bg-2)',
@@ -3346,11 +3355,11 @@ function EditCaseForm({
       </label>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <label style={{ display: 'grid', gap: 4 }}>
-          <span className="eyebrow">Priority</span>
+          <span className="eyebrow">{t('supportCases.editCaseForm.priority')}</span>
           <select
             value={priority}
             onChange={(event) => setPriority(event.target.value as CasePriority)}
-            aria-label="Case priority"
+            aria-label={t('supportCases.editCaseForm.casePriority')}
             data-testid="support-edit-priority"
           >
             {priorityOptions.map((option) => (
@@ -3361,11 +3370,11 @@ function EditCaseForm({
           </select>
         </label>
         <label style={{ display: 'grid', gap: 4 }}>
-          <span className="eyebrow">Channel</span>
+          <span className="eyebrow">{t('supportCases.editCaseForm.channel')}</span>
           <select
             value={channel}
             onChange={(event) => setChannel(event.target.value)}
-            aria-label="Case channel"
+            aria-label={t('supportCases.editCaseForm.caseChannel')}
             data-testid="support-edit-channel"
           >
             {channelOptions.map((option) => (
@@ -3377,11 +3386,11 @@ function EditCaseForm({
         </label>
       </div>
       <label style={{ display: 'grid', gap: 4 }}>
-        <span className="eyebrow">Status reason</span>
+        <span className="eyebrow">{t('supportCases.editCaseForm.statusReason')}</span>
         <input
           value={statusReason}
           onChange={(event) => setStatusReason(event.target.value)}
-          aria-label="Status reason"
+          aria-label={t('supportCases.editCaseForm.statusReason')}
           data-testid="support-edit-status-reason"
           style={{
             background: 'var(--bg-2)',
@@ -3393,9 +3402,9 @@ function EditCaseForm({
         />
       </label>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
+        <Button label={t('supportCases.editCaseForm.cancel')} kind="ghost" onClick={onCancel} />
         <Button
-          label={saving ? 'Saving' : 'Save case'}
+          label={saving ? t('supportCases.editCaseForm.saving') : t('supportCases.editCaseForm.saveCase')}
           iconName="save"
           kind="primary"
           type="submit"
@@ -3408,6 +3417,7 @@ function EditCaseForm({
 }
 
 function NewCaseForm({
+  const { t } = useI18n();
   onConfirm,
   onCancel,
   onCreated,
@@ -3447,21 +3457,21 @@ function NewCaseForm({
   const submit = () => {
     if (!priority || !channel) {
       pushToast(
-        'Cannot create case - priority or channel options are missing.',
+        t('%s.newCaseForm.cannotCreateCaseOptionsMissing'),
         'danger',
       );
       return;
     }
     createMutation.mutate(
       {
-        subject: subject || 'New support case',
+        subject: subject || t('supportCases.newCaseForm.newSupportCase'),
         priority,
         channel,
       },
       {
         onSuccess: (res) => {
           const id = (res as { support_case_id?: string }).support_case_id;
-          pushToast(`Support case created - ${id ? operatorReference('Case', id) : 'created'}`, 'good');
+          pushToast(fill(t('supportCases.newCaseForm.supportCaseCreatedValue'), { value: id ? operatorReference(t, t('supportCases.operatorReference.case'), id) : t('supportCases.newCaseForm.created') }), 'good');
           onCreated?.(res);
           onConfirm();
         },
@@ -3473,28 +3483,27 @@ function NewCaseForm({
   return (
     <div>
       <p className="state__hint">
-        Opens a new support case, applies the SLA window, and routes the first
-        available operator when policy allows.
+        {t('supportCases.newCaseForm.opensANewSupport')}
       </p>
       <div className="field">
-        <label className="field__label">Subject</label>
+        <label className="field__label">{t('supportCases.newCaseForm.subject')}</label>
         <input
           type="text"
           value={subject}
-          placeholder="Customer reported pickup delay"
+          placeholder={t('supportCases.newCaseForm.customerReportedPickupDelay')}
           onChange={(e) => setSubject(e.target.value)}
           data-testid="support-new-subject"
         />
       </div>
       <div className="field">
-        <label className="field__label">Priority</label>
+        <label className="field__label">{t('supportCases.newCaseForm.priority')}</label>
         <select
           value={priority}
           onChange={(e) => setPriority(e.target.value)}
           data-testid="support-new-priority"
         >
           {priorityOptions.length === 0 ? (
-            <option value="">Priority options missing</option>
+            <option value="">{t('supportCases.newCaseForm.priorityOptionsMissing')}</option>
           ) : (
             priorityOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -3505,14 +3514,14 @@ function NewCaseForm({
         </select>
       </div>
       <div className="field">
-        <label className="field__label">Channel</label>
+        <label className="field__label">{t('supportCases.newCaseForm.channel')}</label>
         <select
           value={channel}
           onChange={(e) => setChannel(e.target.value)}
           data-testid="support-new-channel"
         >
           {channelOptions.length === 0 ? (
-            <option value="">Channel options missing</option>
+            <option value="">{t('supportCases.newCaseForm.channelOptionsMissing')}</option>
           ) : (
             channelOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -3523,9 +3532,9 @@ function NewCaseForm({
         </select>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-        <Button label="Cancel" kind="ghost" onClick={onCancel} />
+        <Button label={t('supportCases.newCaseForm.cancel')} kind="ghost" onClick={onCancel} />
         <Button
-          label="Create case"
+          label={t('supportCases.newCaseForm.createCase')}
           kind="primary"
           capability={CAP.SUPPORT_WRITE}
           onClick={submit}
