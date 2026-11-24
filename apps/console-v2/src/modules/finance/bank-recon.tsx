@@ -1744,7 +1744,7 @@ export function BankReconModule() {
           label: t('bankRecon.context.firstStep'),
           value: firstStep ? (
             <span className="mono">
-              <bdi>{firstStep.label ?? firstStep.step_key ?? firstStep.id}</bdi> - {firstStep.status ?? firstStep.step_status ?? t('bankRecon.context.pending')}
+              <bdi>{`${firstStep.label ?? firstStep.step_key ?? firstStep.id} - ${firstStep.status ?? firstStep.step_status ?? t('bankRecon.context.pending')}`}</bdi>
             </span>
           ) : (
             <span className="mono">{t('bankRecon.context.pendingConfirmation')}</span>
