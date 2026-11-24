@@ -1,3 +1,7 @@
+/* Tokens. The landing build prepends the shared --ui-* tokens from
+   packages/ui/src/styles.css. Landing names whose values equal a shared token
+   alias it; every other value below is the landing override listed in
+   DESIGN.md section 2 (#162). */
 :root {
   --container: clamp(960px, 92vw, 1440px);
   --gutter: clamp(18px, 3vw, 28px);
@@ -27,8 +31,13 @@
 
 html[lang="ar"] { --font-sans: var(--font-sans-ar); }
 
+html {
+  --bg: rgb(var(--ui-paper));
+  --text: rgb(var(--ui-ink));
+}
+
 html[data-variant="ai"] {
-  --brand: #4F46E5;
+  --brand: rgb(var(--ui-accent));
   --accent: #818CF8;
   --accent-2: #10B981;
   --btn-primary-text: #ffffff;
@@ -39,10 +48,8 @@ html[data-variant="ai"] {
 }
 
 html[data-theme="light"] {
-  --bg: #FAFBFE;
   --surface: rgba(255, 255, 255, 0.92);
-  --surface-strong: #ffffff;
-  --text: #0F172A;
+  --surface-strong: rgb(var(--ui-surface));
   --muted: #546275;
   --border: rgba(79, 70, 229, 0.10);
   --tint-1: rgba(79, 70, 229, 0.03);
@@ -58,10 +65,9 @@ html[data-theme="light"] {
 }
 
 html[data-theme="dark"] {
-  --bg: #0B1121;
+  --brand: #4F46E5;
   --surface: rgba(15, 23, 42, 0.80);
   --surface-strong: #111827;
-  --text: #F1F5F9;
   --muted: rgba(241, 245, 249, 0.65);
   --border: rgba(79, 70, 229, 0.18);
   --tint-1: rgba(79, 70, 229, 0.06);
@@ -118,20 +124,19 @@ body::before {
   background-size: 28px 28px;
 }
 
-/* Aurora ambient */
+/* Aurora ambient: wide soft gradients, no filter, so a repaint stays cheap (#438) */
 body::after {
   content: "";
   position: fixed;
-  inset: -22%;
+  inset: 0;
   pointer-events: none;
   z-index: -1;
   opacity: 0;
-  filter: blur(80px) saturate(110%);
   transform: translate3d(0, 0, 0);
   background:
-    radial-gradient(520px 360px at 20% 30%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 60%),
-    radial-gradient(520px 360px at 80% 20%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 62%),
-    radial-gradient(460px 320px at 55% 80%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 62%);
+    radial-gradient(680px 520px at 7% 21%, color-mix(in srgb, var(--brand) 22%, transparent), transparent 75%),
+    radial-gradient(680px 520px at 93% 7%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 75%),
+    radial-gradient(620px 480px at 57% 93%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 75%);
 }
 
 html[data-variant="ai"] body::after { opacity: 0.45; }
@@ -168,18 +173,16 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-pill);
   padding: 10px 14px;
   transform: translateY(-200%);
-  transition: transform var(--dur-fast) var(--ease);
   z-index: 999;
 }
 .skip-link:focus { transform: translateY(0); }
 
-/* --- Header (glassmorphism) --- */
+/* --- Header: opaque, no backdrop blur, so focus and scroll repaints stay cheap (#438) --- */
 .header {
   position: sticky;
   top: 0;
   z-index: 50;
-  backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1278,8 +1281,7 @@ html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="
     position: absolute;
     top: 100%;
     inset-inline: 0;
-    background: color-mix(in srgb, var(--bg) 96%, transparent);
-    backdrop-filter: blur(14px);
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
     padding: 12px var(--gutter);
     flex-direction: column;
