@@ -32,6 +32,7 @@ async function request(url, headers, reason, method = 'GET', body) {
       signal: AbortSignal.timeout(25_000),
     });
     if (response.ok) return method === 'DELETE' ? null : await response.json();
+    if (reason === 'auth_config') console.error(`auth_config_http_status=${response.status}`);
   } catch {
     // Provider errors can contain configuration, identities or request data.
   }
