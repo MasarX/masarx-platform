@@ -1,0 +1,61 @@
+name: Production preflight
+
+'on':
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full commit SHA of the annotated release tag
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require a version tag and expected commit
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" =~ ^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node24)
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout: .github/workflows
+      - name: Verify the annotated tag resolves to the expected commit on main
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          git rev-parse --verify "${GITHUB_REF}^{tag}" > /dev/null
+          [[ "$(git rev-parse "${GITHUB_REF}^{commit}")" == "$EXPECTED_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]]
+          git rev-list --first-parent refs/remotes/origin/main | grep -Fx "$EXPECTED_SHA" > /dev/null
+
+  preflight:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: prod
+      deployment: false
+    concurrency:
+      group: production-preflight
+      cancel-in-progress: false
+    steps:
+      - name: Record production environment admission
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          printf 'Production preflight admitted `%s` at `%s`. Operator-side apply remains separate.\n' \
+            "$GITHUB_REF_NAME" "$EXPECTED_SHA" >> "$GITHUB_STEP_SUMMARY"
