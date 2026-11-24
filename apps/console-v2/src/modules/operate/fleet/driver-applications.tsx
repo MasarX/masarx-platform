@@ -976,7 +976,7 @@ function ProfileTab({ application }: { application: DriverApplicationRow }) {
     },
     {
       key: 'reviewed_by',
-      label: t('fleetApplications.assignedStaff'),
+      label: t('fleetApplications.decidedBy'),
       value: application.reviewed_by ? reviewerDisplay(application, t) : '—',
     },
     {
@@ -1276,7 +1276,7 @@ function DecisionsTab({
           rows={[
             {
               key: 'reviewer',
-              label: t('fleetApplications.assignedStaff'),
+              label: t('fleetApplications.decidedBy'),
               value: application.reviewed_by ? reviewerDisplay(application, t) : '—',
             },
             {

@@ -532,6 +532,7 @@ export const en = {
     missingSuffix: '{value} (missing)',
     missingSummaryTemplate: '(missing summary template)',
     assignedStaff: 'Assigned staff',
+    decidedBy: 'Decided by',
     fallback: {
       applicant: 'Driver applicant',
       landingIntake: 'Landing intake',
@@ -842,12 +843,12 @@ export const ar: CatalogShape<typeof en> = {
       today: 'توصيلات اليوم',
       week: 'التوصيلات (7 أيام)',
       avgPerDay: 'متوسط {n}/يوم',
-      onTime: 'نسبة الالتزام بالموعد %',
+      onTime: 'الالتزام بالموعد %',
       rating: 'تقييم العملاء',
       outOfFive: 'من 5.0',
       weekDeliveries: 'توصيلات 7 أيام',
       total: 'الإجمالي {n}',
-      hint: 'تستخدم السلسلة ملخص توصيلات السائق، ويمكن استبدالها بملخصات مؤشرات الأداء حسب النطاق عند تفعيل تلك الإسقاطات.',
+      hint: 'تستخدم السلسلة ملخص توصيلات السائق، ويمكن استبدالها بملخصات مؤشرات الأداء حسب النطاق عند تفعيل تلك الملخصات المجمّعة.',
     },
     suspend: {
       hint: 'يسجّل إيقاف السائقين قيدًا حرجًا في سجل الامتثال وينقل كل ملف محدد إلى حالة الإيقاف.',
@@ -882,7 +883,7 @@ export const ar: CatalogShape<typeof en> = {
     utilisation: {
       aria: 'استخدام الأسطول',
       label: 'الاستخدام',
-      ready: 'المركبات الجاهزة للإرسال',
+      ready: 'المركبات الجاهزة للتوزيع',
       activeOfTotal: '{active} نشطة من أصل {total}',
     },
     field: {
@@ -1136,9 +1137,10 @@ export const ar: CatalogShape<typeof en> = {
     missingSuffix: '{value} (مفقود)',
     missingSummaryTemplate: '(قالب الملخص مفقود)',
     assignedStaff: 'الموظف المكلَّف',
+    decidedBy: 'صاحب القرار',
     fallback: {
       applicant: 'متقدّم سائق',
-      landingIntake: 'طلب من صفحة الهبوط',
+      landingIntake: 'طلب من الصفحة التعريفية',
       tenantRecordCreated: 'أُنشئ سجل المستأجر',
     },
     tabs: {
@@ -1162,7 +1164,7 @@ export const ar: CatalogShape<typeof en> = {
       intro: 'تسجّل الإقرارات مؤشرات السلامة الملتقطة وقت التقديم (التحقق البشري، والبيانات المستمدة من عنوان IP، ومصدر الطلب). تُملَّح بصمة عنوان IP على الخادم ولا تظهر أبدًا في واجهة المشغّل.',
       turnstile: 'التحقق البشري (Cloudflare)',
       capabilities: 'القدرات المطلوبة',
-      landingPage: 'صفحة الهبوط',
+      landingPage: 'الصفحة التعريفية',
       referrer: 'المُحيل',
       origin: 'المصدر',
       utmSource: 'مصدر UTM',
@@ -1175,7 +1177,7 @@ export const ar: CatalogShape<typeof en> = {
       empty: 'لم تُقدَّم مستندات تحقق.',
     },
     decisions: {
-      submitted: 'قُدّم الطلب عبر صفحة الهبوط',
+      submitted: 'قُدّم الطلب عبر الصفحة التعريفية',
       missingDecision: 'marketplace_participant_request_status/{decision} (مفقود) · {summary}',
       approvedOrg: 'المؤسسة المعتمدة',
       inviteRedirect: 'رابط إعادة توجيه الدعوة',

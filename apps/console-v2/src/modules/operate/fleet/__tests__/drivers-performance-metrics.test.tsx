@@ -5,6 +5,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { renderWithProviders } from '@/test/render';
+import { ar } from '@/lib/seed-raw/i18n/areas/fleet';
 import { PerformanceTab } from '../drivers';
 
 type Props = ComponentProps<typeof PerformanceTab>;
@@ -112,8 +113,12 @@ describe('PerformanceTab driver metrics (#409)', () => {
       { deliveries_today: undefined, deliveries_week: null, on_time_pct: Number.NaN, customer_rating: null },
       'ar',
     );
-    // Labels are Arabic too (#302 slice 12), so read every card's delta instead of finding cards by English label.
-    const deltas = [...document.querySelectorAll('.kpi .kpi__delta')].map((el) => el.textContent);
-    expect(deltas).toEqual(METRICS.map(() => 'غير متوفر'));
+    // Labels are Arabic too (#302 slice 12): find each card by its Arabic catalog label.
+    for (const key of ['today', 'week', 'onTime', 'rating'] as const) {
+      const c = card(ar.fleetDrivers.performance[key]);
+      expect(c.value).toBe('—');
+      expect(c.delta).toBe('غير متوفر');
+    }
+    expect([...document.querySelectorAll('.kpi .kpi__delta')]).toHaveLength(METRICS.length);
   });
 });
