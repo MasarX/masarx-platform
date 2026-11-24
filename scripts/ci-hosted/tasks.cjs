@@ -45,7 +45,7 @@ async function main() {
   if (command === 'detect') return detect(subject);
   if (command === 'install') return install(checked);
   if (command === 'lint') {
-    for (const name of ['lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
+    for (const name of ['lint:docs:ssot', 'lint:frontend', 'lint:commands', 'lint:structure', 'lint:ingress-worker']) {
       npmScript(name);
     }
     if (exists('supabase/migrations')) {
