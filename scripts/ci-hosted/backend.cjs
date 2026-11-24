@@ -385,7 +385,7 @@ async function imageGuard(pins, file, env, initContainer) {
 }
 async function verifyHostedDatabaseInit(checked, env, container) {
   const pid1 = (await checked('docker', ['exec', container, 'cat', '/proc/1/comm'], env, 10000, { quiet: true })).trim();
-  if (pid1 !== 'docker-init') throw new Error('Hosted pgTAP database requires docker-init as PID 1');
+  if (pid1 !== 'docker-init') throw new Error('Hosted database requires docker-init as PID 1');
   return pid1;
 }
 async function backendLint(summary, commands, execute, file = 'ci-reports/db-lint.json') {
