@@ -176,7 +176,7 @@ export function BlockCatalogSidebar({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t("searchFields")}
-          className="w-full rounded border border-ui-border/50 bg-ui-paper/50 px-2 py-1 text-xs text-ui-ink placeholder:text-ui-muted focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-full rounded border border-ui-border/50 bg-ui-paper/50 px-2 py-1 text-xs text-ui-ink placeholder:text-ui-muted focus:outline-none focus:ring-1 focus:ring-ui-accent"
           data-testid={`${prefix}-search`}
         />
         <div className="max-h-48 space-y-0.5 overflow-y-auto">
@@ -195,7 +195,7 @@ export function BlockCatalogSidebar({
               <button
                 key={field.path}
                 type="button"
-                className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs text-ui-ink hover:bg-blue-50 cursor-grab active:cursor-grabbing"
+                className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs text-ui-ink hover:bg-ui-highlight cursor-grab active:cursor-grabbing"
                 draggable={!readOnly}
                 disabled={readOnly}
                 onDragStart={(e) => handleDragStart(e, fieldBlock)}
@@ -237,7 +237,7 @@ export function BlockCatalogSidebar({
                 <button
                   key={asset.path}
                   type="button"
-                  className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs text-ui-ink hover:bg-blue-50 cursor-grab active:cursor-grabbing"
+                  className="group flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs text-ui-ink hover:bg-ui-highlight cursor-grab active:cursor-grabbing"
                   draggable={!readOnly}
                   disabled={readOnly}
                   onDragStart={(e) => handleDragStart(e, assetBlock)}
