@@ -124,7 +124,7 @@ export function CanvasContextMenu({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 min-w-[160px] rounded-lg bg-white py-1 shadow-lg border border-ui-border/30"
+      className="fixed z-50 min-w-[160px] rounded-lg bg-ui-surface py-1 shadow-lg border border-ui-border/30"
       style={{ left: x, top: y }}
       data-testid="canvas-context-menu"
     >
@@ -135,7 +135,7 @@ export function CanvasContextMenu({
           <button
             key={i}
             type="button"
-            className="flex w-full items-center px-3 py-1.5 text-xs text-ui-ink hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex w-full items-center px-3 py-1.5 text-xs text-ui-ink hover:bg-ui-highlight disabled:opacity-40 disabled:cursor-not-allowed"
             onClick={() => { item.action(); if (!item.separator) onClose(); }}
             disabled={item.disabled}
           >

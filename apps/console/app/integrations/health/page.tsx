@@ -7,11 +7,22 @@ import {
   resolveProviderSurfaceMap,
 } from "../../../../../packages/ui/src/lookup-metadata";
 import { DETAIL_PAGE_SIZE } from "../../../../../packages/ui/src/pagination-defaults";
-import { IntegrationHealthPage } from "../../_components/integration-health-page";
+import {
+  IntegrationHealthPage,
+  type IntegrationHealthLoadState,
+} from "../../_components/integration-health-page";
 import { withConsoleConfig } from "../../app-context";
+
+// PostgREST reports a denied read as SQLSTATE 42501 (HTTP 403).
+function isDeniedReadError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const { code, status } = error as { code?: unknown; status?: unknown };
+  return String(code ?? "").trim() === "42501" || status === 403;
+}
 
 export default withConsoleConfig(async () => {
   let integrations: IntegrationHealthEntry[] = [];
+  let loadState: IntegrationHealthLoadState = "ready";
   try {
     const ui = createUiServerClient();
     const [surfaces, result] = await Promise.all([
@@ -33,8 +44,9 @@ export default withConsoleConfig(async () => {
         lastCheckedAt: typeof row.updated_at === "string" ? row.updated_at : null,
       }];
     });
-  } catch {
-    // Keep provider read failures out of the rendered response.
+  } catch (error) {
+    // Show the failure kind only; error details stay out of the rendered response.
+    loadState = isDeniedReadError(error) ? "denied" : "error";
   }
-  return <IntegrationHealthPage integrations={integrations} />;
+  return <IntegrationHealthPage integrations={integrations} loadState={loadState} />;
 });
