@@ -292,7 +292,8 @@
     },
     "common": {
       "workflowFirst": "‏Workflow-first",
-      "remove": "‏Remove"
+      "remove": "‏Remove",
+      "invalidJson": "‏أدخل JSON صالحًا في هذا الحقل، ثم أرسل مرة أخرى."
     },
     "operationReport": {
       "title": "تقرير العملية",
@@ -3543,8 +3544,7 @@
         "createFailed": "‏فشل إنشاء دفعة الاستلام.",
         "assignmentUpdated": "‏تم تحديث إسناد دفعة الاستلام.",
         "partnerAssignmentUpdated": "‏تم تحديث إسناد شريك الاستلام.",
-        "assignmentFailed": "‏فشل إسناد دفعة الاستلام.",
-        "invalidJson": "‏صيغة JSON غير صالحة."
+        "assignmentFailed": "‏فشل إسناد دفعة الاستلام."
       }
     },
     "transferManifestCreate": {

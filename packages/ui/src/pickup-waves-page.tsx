@@ -107,7 +107,7 @@ export async function PickupWavesPage({
 
     const metadataResult = parseJsonValue(String(formData.get("metadata_json") ?? "{}"), {});
     if (!metadataResult.ok) {
-      return { status: "error", message: t("messages.invalidJson") };
+      return { status: "error", message: metadataResult.message };
     }
 
     const payload = {
@@ -152,7 +152,7 @@ export async function PickupWavesPage({
     const ui = createUiServerClient();
     const metadataResult = parseJsonValue(String(formData.get("metadata_json") ?? "{}"), {});
     if (!metadataResult.ok) {
-      return { status: "error", message: t("messages.invalidJson") };
+      return { status: "error", message: metadataResult.message };
     }
 
     const payload = {
@@ -190,11 +190,11 @@ export async function PickupWavesPage({
     const ui = createUiServerClient();
     const partnerResult = parseJsonValue(String(formData.get("partner_json") ?? "{}"), {});
     if (!partnerResult.ok) {
-      return { status: "error", message: t("messages.invalidJson") };
+      return { status: "error", message: partnerResult.message };
     }
     const metadataResult = parseJsonValue(String(formData.get("metadata_json") ?? "{}"), {});
     if (!metadataResult.ok) {
-      return { status: "error", message: t("messages.invalidJson") };
+      return { status: "error", message: metadataResult.message };
     }
 
     const selectedPartnerId = String(formData.get("partner_id") ?? "").trim();

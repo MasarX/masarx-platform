@@ -292,7 +292,8 @@
     },
     "common": {
       "workflowFirst": "Workflow-first",
-      "remove": "Remove"
+      "remove": "Remove",
+      "invalidJson": "Enter valid JSON in this field, then submit again."
     },
     "operationReport": {
       "title": "Operation report",
@@ -3543,8 +3544,7 @@
         "createFailed": "Pickup wave creation failed.",
         "assignmentUpdated": "Pickup wave assignment updated.",
         "partnerAssignmentUpdated": "Pickup partner assignment updated.",
-        "assignmentFailed": "Pickup wave assignment failed.",
-        "invalidJson": "Invalid JSON payload."
+        "assignmentFailed": "Pickup wave assignment failed."
       }
     },
     "transferManifestCreate": {
